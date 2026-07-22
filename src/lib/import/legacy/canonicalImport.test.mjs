@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 import { parseLegacyImportText } from "./parse.ts";
-import { selectLegacyParsedFileRange, suggestLegacyImportRowRanges } from "./range.ts";
+import { selectLegacyParsedFileRange, suggestLegacyImportRowRanges, findLegacyImportRangeIndex, nextLegacyImportRowRange, legacyImportRangeChunkKey } from "./range.ts";
 import {
   legacyImportCpuBudgetErrors,
   MAX_LEGACY_IMPORT_SELECTED_ROWS,
@@ -809,6 +809,46 @@ test("suggestLegacyImportRowRangesは1始まりの非重複範囲へtotalRowsを
     { startRow: 401, endRow: 500 },
     { startRow: 501, endRow: 501 },
   ]);
+});
+
+test("findLegacyImportRangeIndexは完全一致のみを返し、不正入力は-1", () => {
+  const ranges = suggestLegacyImportRowRanges(500);
+  assert.equal(findLegacyImportRangeIndex(ranges, 1, 250), 0);
+  assert.equal(findLegacyImportRangeIndex(ranges, 251, 500), 1);
+  assert.equal(findLegacyImportRangeIndex(ranges, 1, 500), -1);
+  assert.equal(findLegacyImportRangeIndex(ranges, 2, 250), -1);
+  assert.equal(findLegacyImportRangeIndex([], 1, 1), -1);
+  assert.equal(findLegacyImportRangeIndex(ranges, 0, 250), -1);
+  assert.equal(findLegacyImportRangeIndex(ranges, 1, 0), -1);
+});
+
+test("nextLegacyImportRowRangeは現在範囲の次、未一致時はstartRowより後を返す", () => {
+  const ranges = suggestLegacyImportRowRanges(500);
+  assert.deepEqual(nextLegacyImportRowRange(ranges, 1, 250), { startRow: 251, endRow: 500 });
+  assert.equal(nextLegacyImportRowRange(ranges, 251, 500), null);
+  assert.deepEqual(nextLegacyImportRowRange(ranges, 99, 120), { startRow: 251, endRow: 500 });
+  assert.equal(nextLegacyImportRowRange([], 1, 250), null);
+  assert.equal(nextLegacyImportRowRange(ranges, 0, 250), null);
+  assert.equal(legacyImportRangeChunkKey(1, 250), "1-250");
+});
+
+test("legacy import UIは順次チャンク入力と完了追跡を持つ", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
+  assert.match(client, /次のチャンクを入力/);
+  assert.match(client, /completedChunkKeysByFile/);
+  assert.match(client, /markChunkApplyComplete/);
+  assert.match(client, /chunkCompleteBanner/);
+  assert.match(client, /チャンク完了。次は/);
+  assert.match(client, /次の範囲を入力して再プレビュー/);
+  assert.match(client, /各チャンクの apply 完了を確認してから次の範囲を preview/);
+  assert.match(client, /findNextIncompleteLegacyImportRange/);
+  assert.match(client, /legacyImportRangeChunkKey/);
+  const submitStart = client.indexOf("async function submit");
+  const submitEnd = client.indexOf("  const expiresLabel", submitStart);
+  const submitBody = client.slice(submitStart, submitEnd);
+  assert.doesNotMatch(submitBody, /applyNextIncompleteChunk/);
+  assert.doesNotMatch(submitBody, /markChunkApplyComplete[\s\S]*void submit\(/);
 });
 
 test("1原子stepの関連件数をCloudflare CPU予算内へ固定する", () => {

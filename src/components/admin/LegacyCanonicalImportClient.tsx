@@ -2,7 +2,12 @@
 
 import * as React from "react";
 import { MAX_LEGACY_IMPORT_SELECTED_ROWS } from "@/lib/import/legacy/cpuBudget";
-import { suggestLegacyImportRowRanges } from "@/lib/import/legacy/range";
+import {
+  findLegacyImportRangeIndex,
+  legacyImportRangeChunkKey,
+  nextLegacyImportRowRange,
+  suggestLegacyImportRowRanges,
+} from "@/lib/import/legacy/range";
 import styles from "./LegacyCanonicalImportClient.module.css";
 
 type ApiResponse = {
@@ -103,6 +108,56 @@ type FileRangeInput = {
   start: string;
   end: string;
 };
+
+type ParsedFileRange = {
+  startRow: number;
+  endRow: number;
+};
+
+type ChunkCompleteBanner = {
+  fileKey: string;
+  fileName: string;
+  nextRange: ParsedFileRange;
+};
+
+function parseControlledFileRange(
+  input: FileRangeInput,
+  sourceRows: number | null | undefined,
+): ParsedFileRange | null {
+  if (typeof sourceRows !== "number" || sourceRows < 1) return null;
+  const startRaw = input.start.trim();
+  const endRaw = input.end.trim();
+  if (!startRaw && !endRaw) return null;
+  const startRow = startRaw ? Number(startRaw) : 1;
+  const endRow = endRaw ? Number(endRaw) : sourceRows;
+  if (!Number.isSafeInteger(startRow) || !Number.isSafeInteger(endRow) || startRow < 1 || endRow < 1) {
+    return null;
+  }
+  return { startRow, endRow };
+}
+
+function findNextIncompleteLegacyImportRange(
+  suggestedRanges: ReadonlyArray<ParsedFileRange>,
+  completedChunkKeys: ReadonlySet<string>,
+  currentRange: ParsedFileRange | null,
+): ParsedFileRange | null {
+  if (suggestedRanges.length === 0) return null;
+  if (currentRange) {
+    let candidate: ParsedFileRange | null = currentRange;
+    for (let guard = 0; guard < suggestedRanges.length + 1; guard += 1) {
+      const next = nextLegacyImportRowRange(suggestedRanges, candidate.startRow, candidate.endRow);
+      if (!next) return null;
+      if (!completedChunkKeys.has(legacyImportRangeChunkKey(next.startRow, next.endRow))) return next;
+      candidate = next;
+    }
+    return null;
+  }
+  return (
+    suggestedRanges.find(
+      (range) => !completedChunkKeys.has(legacyImportRangeChunkKey(range.startRow, range.endRow)),
+    ) ?? null
+  );
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -224,6 +279,10 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const [fileSourceRows, setFileSourceRows] = React.useState<Map<string, number | null>>(() => new Map());
   const [fileRangeInputs, setFileRangeInputs] = React.useState<Map<string, FileRangeInput>>(() => new Map());
+  const [completedChunkKeysByFile, setCompletedChunkKeysByFile] = React.useState<Map<string, Set<string>>>(
+    () => new Map(),
+  );
+  const [chunkCompleteBanner, setChunkCompleteBanner] = React.useState<ChunkCompleteBanner | null>(null);
   const [result, setResult] = React.useState<ApiResponse | null>(null);
   const [pending, setPending] = React.useState<"preview" | "apply" | null>(null);
   const [credential, setCredentialState] = React.useState<PreviewCredential | null>(null);
@@ -262,6 +321,15 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
       for (const key of keys) next.set(key, current.get(key) ?? { start: "", end: "" });
       return next;
     });
+    setCompletedChunkKeysByFile((current) => {
+      const next = new Map<string, Set<string>>();
+      for (const key of keys) {
+        const existing = current.get(key);
+        if (existing) next.set(key, existing);
+      }
+      return next;
+    });
+    setChunkCompleteBanner((current) => (current && keys.includes(current.fileKey) ? current : null));
 
     void (async () => {
       for (const file of selectedFiles) {
@@ -300,7 +368,62 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
   function invalidatePreview(): void {
     formRevisionRef.current += 1;
     setCredential(null);
+    setChunkCompleteBanner(null);
   }
+
+  const markChunkApplyComplete = React.useCallback((json: ApiResponse): void => {
+    const resultComplete =
+      typeof json.result === "object" &&
+      json.result !== null &&
+      "complete" in json.result &&
+      (json.result as { complete?: unknown }).complete === true;
+    if (!json.ok || !resultComplete || json.continuation_required === true) return;
+
+    const appliedRanges: Array<{ fileName: string; startRow: number; endRow: number }> = [];
+    if (Array.isArray(json.file_ranges) && json.file_ranges.length > 0) {
+      for (const range of json.file_ranges) {
+        appliedRanges.push({
+          fileName: range.fileName,
+          startRow: range.startRow,
+          endRow: range.endRow,
+        });
+      }
+    } else {
+      for (const file of selectedFiles) {
+        const key = selectedFileKey(file);
+        const sourceRows = fileSourceRows.get(key);
+        const rangeInput = fileRangeInputs.get(key);
+        if (!rangeInput) continue;
+        const parsed = parseControlledFileRange(rangeInput, sourceRows);
+        if (!parsed) continue;
+        appliedRanges.push({ fileName: file.name, startRow: parsed.startRow, endRow: parsed.endRow });
+      }
+    }
+
+    let nextBanner: ChunkCompleteBanner | null = null;
+    setCompletedChunkKeysByFile((current) => {
+      const next = new Map(current);
+      for (const applied of appliedRanges) {
+        const file = selectedFiles.find((candidate) => candidate.name === applied.fileName);
+        if (!file) continue;
+        const fileKey = selectedFileKey(file);
+        const sourceRows = fileSourceRows.get(fileKey);
+        if (typeof sourceRows !== "number" || sourceRows <= MAX_LEGACY_IMPORT_SELECTED_ROWS) continue;
+        const suggestedRanges = suggestLegacyImportRowRanges(sourceRows);
+        if (suggestedRanges.length <= 1) continue;
+        const chunkKey = legacyImportRangeChunkKey(applied.startRow, applied.endRow);
+        const completed = new Set(next.get(fileKey) ?? []);
+        completed.add(chunkKey);
+        next.set(fileKey, completed);
+        const nextRange = findNextIncompleteLegacyImportRange(suggestedRanges, completed, applied);
+        if (nextRange) {
+          nextBanner = { fileKey, fileName: file.name, nextRange };
+        }
+      }
+      return next;
+    });
+    setChunkCompleteBanner(nextBanner);
+  }, [fileRangeInputs, fileSourceRows, selectedFiles]);
 
   function setFileRangeInput(key: string, field: "start" | "end", value: string): void {
     setFileRangeInputs((current) => {
@@ -321,7 +444,19 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
       next.set(key, { start: String(startRow), end: String(endRow) });
       return next;
     });
+    setChunkCompleteBanner((current) => (current?.fileKey === key ? null : current));
     invalidatePreview();
+  }
+
+  function applyNextIncompleteChunk(
+    key: string,
+    suggestedRanges: ReadonlyArray<ParsedFileRange>,
+    currentRange: ParsedFileRange | null,
+  ): void {
+    const completed = completedChunkKeysByFile.get(key) ?? new Set<string>();
+    const nextRange = findNextIncompleteLegacyImportRange(suggestedRanges, completed, currentRange);
+    if (!nextRange) return;
+    applySuggestedRange(key, nextRange.startRow, nextRange.endRow);
   }
 
   function handleFormChange(): void {
@@ -370,6 +505,12 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
 
   function removeSelectedFile(key: string): void {
     setSelectedFiles((current) => current.filter((file) => selectedFileKey(file) !== key));
+    setCompletedChunkKeysByFile((current) => {
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+    setChunkCompleteBanner((current) => (current?.fileKey === key ? null : current));
     invalidatePreview();
     setFieldCandidates([]);
     setFieldDecisionDrafts(new Map());
@@ -557,6 +698,9 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               "complete" in json.result &&
               (json.result as { complete?: unknown }).complete === true;
             if (json.continuation_required !== true || resultComplete) {
+              if (json.ok && resultComplete && json.continuation_required !== true) {
+                markChunkApplyComplete(json);
+              }
               setCredential(null);
               stopped = true;
               break;
@@ -637,6 +781,20 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                   typeof sourceRows === "number" && sourceRows > MAX_LEGACY_IMPORT_SELECTED_ROWS
                     ? suggestLegacyImportRowRanges(sourceRows)
                     : [];
+                const multiChunkFile = suggestedRanges.length > 1;
+                const completedChunkKeys = completedChunkKeysByFile.get(key) ?? new Set<string>();
+                const currentRange = parseControlledFileRange(rangeInput, sourceRows);
+                const currentRangeIndex =
+                  currentRange !== null
+                    ? findLegacyImportRangeIndex(
+                        suggestedRanges,
+                        currentRange.startRow,
+                        currentRange.endRow,
+                      )
+                    : -1;
+                const nextIncompleteChunk = multiChunkFile
+                  ? findNextIncompleteLegacyImportRange(suggestedRanges, completedChunkKeys, currentRange)
+                  : null;
                 return (
                   <li key={key} className={styles.fileListItem}>
                     <code>{file.name}</code>
@@ -682,6 +840,9 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                       <div className={styles.rangeSuggestions}>
                         <span className="fn-muted fn-text-sm">
                           {MAX_LEGACY_IMPORT_SELECTED_ROWS} 行以下の範囲に分けてください。
+                          {multiChunkFile
+                            ? " skip_existing では各チャンクの apply 完了を確認してから次の範囲を preview してください（自動連鎖はしません）。"
+                            : null}
                         </span>
                         <button
                           type="button"
@@ -696,21 +857,48 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
                         >
                           先頭{MAX_LEGACY_IMPORT_SELECTED_ROWS}行を入力
                         </button>
+                        {multiChunkFile ? (
+                          <button
+                            type="button"
+                            className="fn-btn fn-btn-sm"
+                            disabled={!nextIncompleteChunk}
+                            onClick={() => applyNextIncompleteChunk(key, suggestedRanges, currentRange)}
+                          >
+                            次のチャンクを入力
+                          </button>
+                        ) : null}
                         <ul className={styles.suggestedRanges}>
-                          {suggestedRanges.map((range) => (
-                            <li key={`${range.startRow}-${range.endRow}`} className={styles.suggestedRangeItem}>
-                              <span>
-                                {range.startRow.toLocaleString()}〜{range.endRow.toLocaleString()}行
-                              </span>
-                              <button
-                                type="button"
-                                className="fn-btn fn-btn-sm"
-                                onClick={() => applySuggestedRange(key, range.startRow, range.endRow)}
+                          {suggestedRanges.map((range, rangeIndex) => {
+                            const chunkKey = legacyImportRangeChunkKey(range.startRow, range.endRow);
+                            const isCompleted = completedChunkKeys.has(chunkKey);
+                            const isCurrent = rangeIndex === currentRangeIndex;
+                            return (
+                              <li
+                                key={chunkKey}
+                                className={[
+                                  styles.suggestedRangeItem,
+                                  isCurrent ? styles.suggestedRangeItemCurrent : "",
+                                  isCompleted ? styles.suggestedRangeItemCompleted : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
                               >
-                                この範囲を入力
-                              </button>
-                            </li>
-                          ))}
+                                <span>
+                                  {range.startRow.toLocaleString()}〜{range.endRow.toLocaleString()}行
+                                  {isCompleted ? (
+                                    <span className={styles.chunkCompleteBadge}>完了</span>
+                                  ) : null}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="fn-btn fn-btn-sm"
+                                  onClick={() => applySuggestedRange(key, range.startRow, range.endRow)}
+                                >
+                                  この範囲を入力
+                                </button>
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     ) : null}
@@ -838,6 +1026,32 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
           ) : null}
         </div>
       </form>
+
+      {chunkCompleteBanner ? (
+        <div className={styles.chunkCompleteBanner} role="status">
+          <p>
+            チャンク完了。次は{" "}
+            <strong>
+              {chunkCompleteBanner.nextRange.startRow.toLocaleString()}〜
+              {chunkCompleteBanner.nextRange.endRow.toLocaleString()} 行
+            </strong>
+            です（<code>{chunkCompleteBanner.fileName}</code>）。
+          </p>
+          <button
+            type="button"
+            className="fn-btn fn-btn-sm"
+            onClick={() =>
+              applySuggestedRange(
+                chunkCompleteBanner.fileKey,
+                chunkCompleteBanner.nextRange.startRow,
+                chunkCompleteBanner.nextRange.endRow,
+              )
+            }
+          >
+            次の範囲を入力して再プレビュー
+          </button>
+        </div>
+      ) : null}
 
       {result ? <ImportResult result={result} /> : null}
     </div>

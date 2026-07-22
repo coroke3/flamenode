@@ -30,6 +30,51 @@ export function suggestLegacyImportRowRanges(
   return ranges;
 }
 
+export function legacyImportRangeChunkKey(startRow: number, endRow: number): string {
+  return `${startRow}-${endRow}`;
+}
+
+/** 提案範囲リスト内で startRow/endRow が完全一致する index。見つからなければ -1。 */
+export function findLegacyImportRangeIndex(
+  ranges: ReadonlyArray<{ startRow: number; endRow: number }>,
+  startRow: number,
+  endRow: number,
+): number {
+  if (
+    !Array.isArray(ranges) ||
+    ranges.length === 0 ||
+    !Number.isSafeInteger(startRow) ||
+    !Number.isSafeInteger(endRow) ||
+    startRow < 1 ||
+    endRow < 1
+  ) {
+    return -1;
+  }
+  return ranges.findIndex((range) => range.startRow === startRow && range.endRow === endRow);
+}
+
+/**
+ * 現在範囲の次の提案チャンクを返す。
+ * 現在がリストに無い場合は startRow より後ろはじまりの最初の範囲（無ければ null）。
+ */
+export function nextLegacyImportRowRange(
+  ranges: ReadonlyArray<{ startRow: number; endRow: number }>,
+  startRow: number,
+  endRow: number,
+): { startRow: number; endRow: number } | null {
+  if (!Array.isArray(ranges) || ranges.length === 0 || !Number.isSafeInteger(startRow) || startRow < 1) {
+    return null;
+  }
+  const currentIndex = findLegacyImportRangeIndex(ranges, startRow, endRow);
+  if (currentIndex >= 0) {
+    return ranges[currentIndex + 1] ?? null;
+  }
+  if (!Number.isSafeInteger(endRow) || endRow < 1) {
+    return null;
+  }
+  return ranges.find((range) => range.startRow > startRow) ?? null;
+}
+
 function positiveRowNumber(raw: string, label: string, fileName: string): number | null {
   const value = raw.trim();
   if (!value) return null;
