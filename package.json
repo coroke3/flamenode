@@ -24,7 +24,7 @@
   },
   "scripts": {
     "dev": "node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
-    "build": "next build",
+    "build": "node scripts/workers-ci-build.mjs",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",

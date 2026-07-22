@@ -80,6 +80,10 @@ function writeValidTemplate(root) {
     "wrangler.toml",
     [
       'name = "flamenode-web"',
+      "",
+      "[build]",
+      'command = "node scripts/workers-ci-wrangler-guard.mjs"',
+      "",
       'main = ".open-next/worker.js"',
       'compatibility_date = "2026-07-21"',
       'compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]',

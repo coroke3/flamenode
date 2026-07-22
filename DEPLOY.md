@@ -45,7 +45,7 @@ Static Assetsは`run_worker_first = false`とし、静的ファイルを通常�
 5. Pull Request buildsを無効にする。
 6. Root directoryはリポジトリルート（Dashboardでは空欄）にする。
 7. Build Variable `NODE_VERSION=22`を設定する。
-8. Build commandを`npm ci --no-audit --no-fund && npm run cf:cloud-build`にする。
+8. Build commandを`npm ci --no-audit --no-fund && npm run cf:cloud-build`にする。Dashboardが誤って`npm run build`のままでも`WORKERS_CI`時は`npm ci`と`cf:cloud-build`へフォールバックする。Deploy commandは必ず正本に設定すること。
 9. Deploy commandを`npm run cf:deploy-production && npm run cf:smoke-production`にする。
 10. Build Variablesは「3. Build環境」記載の名前だけを登録する。
 11. Runtime Variablesは「4. Runtime設定」とwrangler群へ一致させる。

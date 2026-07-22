@@ -126,6 +126,22 @@ function value(env, name) {
   return typeof env[name] === "string" ? env[name].trim() : "";
 }
 
+export function isWorkersCi(env = process.env) {
+  const raw = value(env, "WORKERS_CI");
+  return raw === "1" || raw.toLowerCase() === "true";
+}
+
+export function rejectBareWorkersCiWranglerDeploy(env = process.env) {
+  if (!isWorkersCi(env)) return;
+  throw new Error(
+    "Bare wrangler deploy of the tracked wrangler.toml template is forbidden in Workers CI; use npm run cf:deploy-production.",
+  );
+}
+
+function stripTrackedBuildSection(content) {
+  return content.replace(/^\[build\]\s*\r?\n(?:[^\r\n\[]+\r?\n)*/m, "");
+}
+
 export function normalizedUrl(raw, name) {
   let parsed;
   try {
@@ -415,7 +431,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
 }
 
 function buildProductionConfig(template, target, env, commit, sourcePath) {
-  let output = template;
+  let output = stripTrackedBuildSection(template);
   output = replaceRequired(
     output,
     /^(\s*database_id\s*=\s*)"[^"]*"\s*$/gm,

@@ -127,6 +127,13 @@ export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   requirePattern(errors, rootToml, "wrangler.toml", /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"BUCKET"/m, "R2 binding BUCKET is required");
   requirePattern(errors, rootToml, "wrangler.toml", /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"NEXT_INC_CACHE_R2_BUCKET"/m, "OpenNext R2 incremental-cache binding is required");
   requirePattern(errors, rootToml, "wrangler.toml", /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
+  requirePattern(
+    errors,
+    rootToml,
+    "wrangler.toml",
+    /\[build\][\s\S]*?command\s*=\s*"node scripts\/workers-ci-wrangler-guard\.mjs"/m,
+    "Workers CI bare wrangler deploy guard is required",
+  );
   rejectPattern(errors, rootToml, "wrangler.toml", /pages_build_output_dir|\.vercel\/output|wrangler\s+pages/i, "legacy Pages configuration is forbidden");
   rejectPattern(errors, rootToml, "wrangler.toml", /^\s*crons\s*=/m, "the web Worker must not define a cron trigger");
   rejectPattern(errors, rootToml, "wrangler.toml", /\[durable_objects\]|\[\[migrations\]\]/i, "unapproved Durable Object bindings are forbidden");

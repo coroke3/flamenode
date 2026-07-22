@@ -38,6 +38,11 @@ import {
   writeBuildManifest,
 } from "./check-open-next-output.mjs";
 import { runSmoke, smokeEnvironment } from "./smoke-cloudflare.mjs";
+import { runWorkersCiBuild } from "./workers-ci-build.mjs";
+import {
+  isWorkersCi,
+  rejectBareWorkersCiWranglerDeploy,
+} from "./cloudflare-production.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const COMMIT = "1234567890abcdef1234567890abcdef12345678";
@@ -106,6 +111,67 @@ function writeFixtureTemplates(repoRoot) {
     fs.writeFileSync(filePath, content, "utf8");
   }
 }
+
+test("package.json build routes through workers-ci-build", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  assert.match(pkg.scripts.build, /workers-ci-build\.mjs/);
+});
+
+test("workers-ci-build uses cf:cloud-build when WORKERS_CI is set", () => {
+  const calls = [];
+  const mode = runWorkersCiBuild({
+    env: productionEnv(),
+    repoRoot: root,
+    run: (request) => calls.push(request),
+    npmInvocation: { executable: process.execPath, argsPrefix: ["npm-cli.js"] },
+  });
+  assert.equal(mode, "workers-ci");
+  assert.deepEqual(calls.map((call) => call.args), [
+    ["npm-cli.js", "ci", "--no-audit", "--no-fund"],
+    ["npm-cli.js", "run", "cf:cloud-build"],
+  ]);
+});
+
+test("workers-ci-build uses next build when WORKERS_CI is unset", () => {
+  const calls = [];
+  const mode = runWorkersCiBuild({
+    env: {},
+    repoRoot: root,
+    run: (request) => calls.push(request),
+    exists: () => true,
+  });
+  assert.equal(mode, "next");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].executable, process.execPath);
+  assert.match(calls[0].args.join(" "), /next.*build/);
+});
+
+test("bare wrangler deploy of tracked template is blocked in Workers CI", () => {
+  assert.ok(isWorkersCi({ WORKERS_CI: "1" }));
+  assert.throws(
+    () => rejectBareWorkersCiWranglerDeploy({ WORKERS_CI: "1" }),
+    /cf:deploy-production/,
+  );
+  assert.doesNotThrow(() => rejectBareWorkersCiWranglerDeploy({}));
+});
+
+test("generated production configs omit tracked wrangler build guard", () =>
+  withTempDirectory("flamenode-production-config-build-guard-", (repoRoot) => {
+    writeFixtureTemplates(repoRoot);
+    const webTemplate = fs.readFileSync(path.join(repoRoot, "wrangler.toml"), "utf8");
+    fs.writeFileSync(
+      path.join(repoRoot, "wrangler.toml"),
+      `${webTemplate.trimEnd()}\n\n[build]\ncommand = "node scripts/workers-ci-wrangler-guard.mjs"\n`,
+      "utf8",
+    );
+    const configs = materializeProductionConfigs({
+      env: productionEnv(),
+      repoRoot,
+      commit: COMMIT,
+    });
+    const web = fs.readFileSync(configs.web, "utf8");
+    assert.doesNotMatch(web, /\[build\]/);
+  }));
 
 test("GitHub Actions has no automatic trigger or production deployment workflow", () => {
   const workflowRoot = path.join(root, ".github", "workflows");
