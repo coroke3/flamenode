@@ -27,6 +27,8 @@ const [
   announcementsPage,
   rulesPage,
   xLinkRequestsPage,
+  manageXLinkRequestsPage,
+  enrichXLinkPendingRows,
 ] = await Promise.all([
   readFile(new URL("./securityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("./spreadsheet/discovery.ts", import.meta.url), "utf8"),
@@ -58,6 +60,8 @@ const [
   readFile(new URL("../../../app/(admin)/admin/announcements/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(admin)/admin/rules/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(admin)/admin/x-link-requests/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(manage)/manage/x-link-requests/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./enrichXLinkPendingRows.ts", import.meta.url), "utf8"),
 ]);
 
 test("セキュリティ検査はLIMIT後の配列長ではなく全件数を返す", () => {
@@ -196,10 +200,14 @@ test("第10巡の独立管理読取を並列化する", () => {
 });
 
 test("X ID申請一覧は相関サブクエリを使わずpendingを上限付きで取得する", () => {
-  assert.doesNotMatch(xLinkRequestsPage, /SELECT \$\{xUsers\.x_name\} FROM \$\{xUsers\}/);
-  assert.doesNotMatch(xLinkRequestsPage, /SELECT \$\{xUsers\.icon_url\} FROM \$\{xUsers\}/);
-  assert.doesNotMatch(xLinkRequestsPage, /SELECT \$\{videos\.creator_icon_url\} FROM \$\{videos\}/);
-  assert.match(xLinkRequestsPage, /const PENDING_LIMIT = 100/);
-  assert.match(xLinkRequestsPage, /\.limit\(PENDING_LIMIT\)/);
-  assert.match(xLinkRequestsPage, /inArray\(xUsers\.id, Array\.from\(xIds\)\)/);
+  for (const source of [xLinkRequestsPage, manageXLinkRequestsPage]) {
+    assert.doesNotMatch(source, /SELECT \$\{xUsers\.x_name\} FROM \$\{xUsers\}/);
+    assert.doesNotMatch(source, /SELECT \$\{xUsers\.icon_url\} FROM \$\{xUsers\}/);
+    assert.doesNotMatch(source, /SELECT \$\{videos\.creator_icon_url\} FROM \$\{videos\}/);
+    assert.match(source, /const PENDING_LIMIT = 100/);
+    assert.match(source, /\.limit\(PENDING_LIMIT\)/);
+    assert.match(source, /enrichXLinkPendingRows/);
+  }
+  assert.match(enrichXLinkPendingRows, /D1_MAX_BIND_PARAMETERS/);
+  assert.match(enrichXLinkPendingRows, /inArray\(xUsers\.id, chunk\)/);
 });

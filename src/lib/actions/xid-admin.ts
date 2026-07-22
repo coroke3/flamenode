@@ -48,12 +48,21 @@ function revalidateIdentityAdminPaths(): void {
   revalidatePath("/admin/users");
 }
 
+function mutationError(error: unknown): XIdAdminResult {
+  console.error("[xid-admin] mutation failed", error);
+  return {
+    ok: false,
+    message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。",
+  };
+}
+
 export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
   const operator = await getXIdLinkOperator();
   if (!operator) return { ok: false, message: "X ID 申請を処理する権限がありません。" };
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
 
+  try {
   const { db, authUserId: operatorAuthUserId } = operator;
   const request = (
     await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
@@ -327,6 +336,9 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
   });
   revalidateIdentityAdminPaths();
   return { ok: true, message: request.request_type === "alias" ? "別名を承認しました。" : "連携を承認しました。" };
+  } catch (error) {
+    return mutationError(error);
+  }
 }
 
 export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdminResult> {
@@ -336,6 +348,7 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
   const reason = String(formData.get("reason") ?? "").trim().slice(0, 500);
 
+  try {
   const { db, authUserId: operatorAuthUserId } = operator;
   const request = (
     await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
@@ -407,4 +420,7 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
   });
   revalidateIdentityAdminPaths();
   return { ok: true, message: "却下しました。" };
+  } catch (error) {
+    return mutationError(error);
+  }
 }

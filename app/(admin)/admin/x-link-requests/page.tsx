@@ -3,14 +3,14 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { auditLogs, users, xIdentityRequests, xUsers } from "@/lib/db/schema";
-import { XLinkRequestTable, type XLinkRequestRow } from "@/components/admin/XLinkRequestTable";
+import { auditLogs, users, xIdentityRequests } from "@/lib/db/schema";
+import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
+import { enrichXLinkPendingRows } from "@/lib/admin/enrichXLinkPendingRows";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { parseAuditDiff } from "@/lib/audit/diff";
 import { FnTable } from "@/components/ui/FnTable";
-import { normalizeXId } from "@/lib/utils/xid";
 
 export const metadata: Metadata = { title: "X ID 申請" };
 export const dynamic = "force-dynamic";
@@ -22,65 +22,6 @@ function requestTypeLabel(type: string): string {
   if (type === "new_link" || type === "existing_link") return "X ID連携";
   if (type === "alias") return "旧別名申請";
   return type;
-}
-
-type PendingBaseRow = {
-  id: string;
-  requested_x_id: string | null;
-  requested_by_auth_user_id: string;
-  discord_name: string | null;
-  discord_image: string | null;
-  requested_at: number;
-  request_type: string;
-  target_x_user_id: string | null;
-};
-
-async function enrichPendingRows(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
-  pendingBase: PendingBaseRow[],
-): Promise<XLinkRequestRow[]> {
-  const xIds = new Set<string>();
-  for (const row of pendingBase) {
-    const requested = normalizeXId(row.requested_x_id);
-    const target = normalizeXId(row.target_x_user_id);
-    if (requested) xIds.add(requested);
-    if (target) xIds.add(target);
-  }
-
-  const xUserById = new Map<string, { x_name: string; icon_url: string | null }>();
-  if (xIds.size > 0) {
-    const xUserRows = await db
-      .select({
-        id: xUsers.id,
-        x_name: xUsers.x_name,
-        icon_url: xUsers.icon_url,
-      })
-      .from(xUsers)
-      .where(inArray(xUsers.id, Array.from(xIds)));
-    for (const row of xUserRows) {
-      xUserById.set(row.id, { x_name: row.x_name, icon_url: row.icon_url });
-    }
-  }
-
-  return pendingBase.map((row) => {
-    const requestedXId = normalizeXId(row.requested_x_id);
-    const targetXId = normalizeXId(row.target_x_user_id);
-    const requestedXUser = requestedXId ? xUserById.get(requestedXId) : undefined;
-    const targetXUser = targetXId ? xUserById.get(targetXId) : undefined;
-    return {
-      id: row.id,
-      requested_x_id: requestedXId || "",
-      requested_by_auth_user_id: row.requested_by_auth_user_id,
-      discord_name: row.discord_name,
-      discord_image: row.discord_image,
-      requested_at: row.requested_at,
-      request_type: row.request_type as XLinkRequestRow["request_type"],
-      target_x_user_id: row.target_x_user_id,
-      requested_x_name: requestedXUser?.x_name ?? null,
-      requested_icon_url: requestedXUser?.icon_url ?? null,
-      target_icon_url: targetXUser?.icon_url ?? null,
-    };
-  });
 }
 
 export default async function AdminXLinkRequestsPage(): Promise<React.ReactElement> {
@@ -126,7 +67,15 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
           .orderBy(desc(xIdentityRequests.requested_at))
           .limit(10),
         db
-          .select()
+          .select({
+            id: auditLogs.id,
+            table_name: auditLogs.table_name,
+            operation: auditLogs.operation,
+            target_id: auditLogs.target_id,
+            before_json: auditLogs.before_json,
+            after_json: auditLogs.after_json,
+            created_at: auditLogs.created_at,
+          })
           .from(auditLogs)
           .where(
             and(
@@ -143,7 +92,7 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
       ])
     : [[], [], []];
 
-  const pending = db ? await enrichPendingRows(db, pendingBase) : [];
+  const pending = db ? await enrichXLinkPendingRows(db, pendingBase) : [];
 
   return (
     <div>

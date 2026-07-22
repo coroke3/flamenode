@@ -32,3 +32,22 @@ test("既存X名義へのnew_link承認は再申請を要求せず既存連携�
     /同一X IDの重複pending申請を取り消す/,
   );
 });
+
+test("X ID申請の承認・却下はmutation失敗をerror boundaryへ投げず返す", () => {
+  const admin = read("../actions/xid-admin.ts");
+  const table = read("../../components/admin/XLinkRequestTable.tsx");
+
+  assert.match(admin, /function mutationError\(error: unknown\): XIdAdminResult/);
+  assert.match(
+    admin,
+    /export async function approveXIdLinkRequest[\s\S]*try \{[\s\S]*\} catch \(error\) \{[\s\S]*return mutationError\(error\);/,
+  );
+  assert.match(
+    admin,
+    /export async function rejectXIdLinkRequest[\s\S]*try \{[\s\S]*\} catch \(error\) \{[\s\S]*return mutationError\(error\);/,
+  );
+  assert.match(
+    table,
+    /try \{[\s\S]*const r = await fn\(fd\);[\s\S]*\} catch \{[\s\S]*通信または処理中に問題が発生しました/,
+  );
+});

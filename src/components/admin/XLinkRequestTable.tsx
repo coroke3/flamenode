@@ -137,12 +137,16 @@ export function XLinkRequestTable({
     fd.set("request_id", requestId);
     if (reason) fd.set("reason", reason);
     startTransition(async () => {
-      const r = await fn(fd);
-      setMsg(r.message ?? (r.ok ? "処理しました。" : "処理に失敗しました。"));
-      if (r.ok) {
-        setRejectingId(null);
-        setRejectReason("");
-        router.refresh();
+      try {
+        const r = await fn(fd);
+        setMsg(r.message ?? (r.ok ? "処理しました。" : "処理に失敗しました。"));
+        if (r.ok) {
+          setRejectingId(null);
+          setRejectReason("");
+          router.refresh();
+        }
+      } catch {
+        setMsg("通信または処理中に問題が発生しました。再読み込みしてお試しください。");
       }
     });
   };
