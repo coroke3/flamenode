@@ -613,6 +613,7 @@ test("ランタイム側に旧テーブル・dual-writeを導入しない", () =
 test("applyクライアントはretryableと423/503で同じpreviewを自動再試行する", () => {
   const root = path.resolve(import.meta.dirname, "../../../..");
   const client = fs.readFileSync(path.join(root, "src/components/admin/LegacyCanonicalImportClient.tsx"), "utf8");
+  assert.match(client, /readApiResponse/);
   assert.match(client, /isApplyTransientFailure/);
   assert.match(client, /json\.retryable === true/);
   assert.match(client, /response\.status === 423/);
@@ -620,6 +621,8 @@ test("applyクライアントはretryableと423/503で同じpreviewを自動再�
   assert.match(client, /APPLY_TRANSIENT_MAX_RETRIES/);
   assert.match(client, /applyTransientBackoffMs/);
   assert.match(client, /自動再試行中/);
+  assert.match(client, /サーバーが一時的に応答できませんでした/);
+  assert.match(client, /mode === "preview"[\s\S]*?isApplyTransientFailure/);
   assert.match(client, /json\.requires_repreview[\s\S]*?setCredential\(null\)/);
   assert.match(client, /transientFailures = 0/);
 });

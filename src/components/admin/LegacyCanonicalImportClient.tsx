@@ -60,7 +60,51 @@ function applyTransientBackoffMs(attempt: number): number {
 }
 
 function isApplyTransientFailure(response: Response, json: ApiResponse): boolean {
-  return json.retryable === true || response.status === 423 || response.status === 503;
+  return (
+    json.retryable === true ||
+    response.status === 423 ||
+    response.status === 502 ||
+    response.status === 503 ||
+    response.status === 504
+  );
+}
+
+function httpUnavailableMessage(status: number): string {
+  if (status === 423) {
+    return "別の適用リクエストが処理中です。少し待ってから同じpreviewで再試行してください。";
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return `サーバーが一時的に応答できませんでした (HTTP ${status})。R2/Workerの過負荷・メンテナンス・デプロイ中の可能性があります。少し待ってから同じpreviewで再試行してください。`;
+  }
+  return `通信結果を確認できませんでした (HTTP ${status || "不明"})。少し待ってから同じpreviewで再試行してください。`;
+}
+
+async function readApiResponse(response: Response): Promise<ApiResponse> {
+  const text = await response.text();
+  if (!text.trim()) {
+    return {
+      ok: false,
+      message: httpUnavailableMessage(response.status),
+      retryable: isApplyTransientFailure(response, { ok: false }),
+    };
+  }
+  try {
+    const parsed = JSON.parse(text) as ApiResponse;
+    if (!parsed || typeof parsed !== "object") {
+      return {
+        ok: false,
+        message: httpUnavailableMessage(response.status),
+        retryable: isApplyTransientFailure(response, { ok: false }),
+      };
+    }
+    return parsed;
+  } catch {
+    return {
+      ok: false,
+      message: httpUnavailableMessage(response.status),
+      retryable: isApplyTransientFailure(response, { ok: false }),
+    };
+  }
 }
 
 export function LegacyCanonicalImportClient(): React.ReactElement {
@@ -221,13 +265,27 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
     const submittedFormRevision = formRevisionRef.current;
     try {
       if (mode === "preview") {
-        const body = new FormData(form);
-        body.set("mode", mode);
-        body.set("video_custom_field_decisions", JSON.stringify(fieldDecisions));
-        body.delete("files");
-        for (const file of selectedFiles) body.append("files", file);
-        const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
-        const json = (await response.json()) as ApiResponse;
+        let previewJson: ApiResponse | null = null;
+        for (let attempt = 0; attempt <= APPLY_TRANSIENT_MAX_RETRIES; attempt += 1) {
+          const body = new FormData(form);
+          body.set("mode", mode);
+          body.set("video_custom_field_decisions", JSON.stringify(fieldDecisions));
+          body.delete("files");
+          for (const file of selectedFiles) body.append("files", file);
+          const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
+          const json = await readApiResponse(response);
+          previewJson = json;
+          if (response.ok && json.ok) break;
+          if (json.requires_repreview) break;
+          if (!isApplyTransientFailure(response, json) || attempt >= APPLY_TRANSIENT_MAX_RETRIES) break;
+          setResult({
+            ...json,
+            ok: false,
+            message: `${json.message ?? "一時的なエラー"}（自動再試行中 ${attempt + 1}/${APPLY_TRANSIENT_MAX_RETRIES}）`,
+          });
+          await sleep(applyTransientBackoffMs(attempt + 1));
+        }
+        const json = previewJson ?? { ok: false, message: "プレビュー結果を取得できませんでした。" };
         setResult(json);
         const formUnchanged = formRevisionRef.current === submittedFormRevision;
         if (formUnchanged) {
@@ -258,7 +316,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             body.set("preview_token", credential.token);
             body.set("plan_hash", credential.planHash);
             const response = await fetch("/api/admin/import/legacy", { method: "POST", body });
-            const json = (await response.json()) as ApiResponse;
+            const json = await readApiResponse(response);
             if (json.expires_at) {
               setCredential((current) => current && current.token === credential.token
                 ? { ...current, expiresAt: json.expires_at! }
@@ -305,6 +363,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
               setResult({
                 ok: false,
                 message: `通信結果を確認できませんでした。（自動再試行中 ${transientFailures}/${APPLY_TRANSIENT_MAX_RETRIES}）`,
+                retryable: true,
               });
               await sleep(applyTransientBackoffMs(transientFailures));
               continue;
@@ -312,6 +371,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
             setResult({
               ok: false,
               message: "通信結果を確認できませんでした。二重送信を避けるため、少し待ってから同じpreviewで再試行してください。",
+              retryable: true,
             });
             stopped = true;
             break;
@@ -325,6 +385,7 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
       setResult({
         ok: false,
         message: "通信結果を確認できませんでした。二重送信を避けるため、少し待ってから同じpreviewで再試行してください。",
+        retryable: true,
       });
     } finally {
       setPending(null);
