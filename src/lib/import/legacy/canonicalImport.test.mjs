@@ -156,6 +156,92 @@ test("JSON/CSVを同じcanonical planへ変換する", () => {
   assert.equal(plan.videoChapters[0].chapter_time, 0);
 });
 
+test("video_new.jsonのみでも参照eventidからイベントを自動作成する", () => {
+  const videoOnlyJson = JSON.stringify([
+    {
+      title: "作品のみ",
+      creator: "Creator",
+      tlink: "creator_x",
+      ylink: "https://youtu.be/abcdefghijk",
+      eventid: "orphan-event",
+    },
+    {
+      title: "メンバーからowner",
+      creator: "NoX",
+      ylink: "https://youtu.be/abcdefghij2",
+      eventid: "member-owner-event",
+      member: "Member",
+      memberid: "member_x",
+    },
+    {
+      title: "placeholder owner",
+      creator: "NoX",
+      ylink: "https://youtu.be/abcdefghij3",
+      eventid: "placeholder-owner-event",
+    },
+  ]);
+  const plan = normalizeLegacyFiles(
+    [parseLegacyImportText("video_new.json", videoOnlyJson)],
+    {
+      eventVisibility: "public",
+      videoVisibility: "private",
+      now: 1_700_000_000,
+    },
+  );
+
+  assert.deepEqual(plan.errors, []);
+  assert.equal(plan.events.length, 3);
+  assert.equal(plan.eventStaff.filter((row) => row.permission_preset === "owner").length, 3);
+  assert.equal(plan.videos.length, 3);
+
+  const creatorEvent = plan.events.find((event) => event.id === "orphan-event");
+  assert.ok(creatorEvent);
+  assert.equal(creatorEvent.title, "orphan-event");
+  assert.equal(creatorEvent.event_type, "event");
+  assert.match(creatorEvent.explanation, /自動作成/);
+  assert.equal(creatorEvent.visibility_status, "public");
+  assert.equal(
+    plan.eventStaff.find(
+      (staff) => staff.event_id === "orphan-event" && staff.permission_preset === "owner",
+    )?.x_user_id,
+    "creator_x",
+  );
+
+  assert.equal(
+    plan.eventStaff.find(
+      (staff) =>
+        staff.event_id === "member-owner-event" && staff.permission_preset === "owner",
+    )?.x_user_id,
+    "member_x",
+  );
+
+  const placeholderOwner = plan.eventStaff.find(
+    (staff) =>
+      staff.event_id === "placeholder-owner-event" && staff.permission_preset === "owner",
+  );
+  assert.ok(placeholderOwner);
+  assert.match(placeholderOwner.x_user_id, /^[a-z0-9_]{1,20}$/);
+  assert.ok(plan.xUsers.some((user) => user.id === placeholderOwner.x_user_id));
+
+  assert.match(plan.warnings.join("\n"), /イベント orphan-event は動画参照のため自動作成します/);
+  assert.match(plan.warnings.join("\n"), /イベント member-owner-event は動画参照のため自動作成します/);
+});
+
+test("eventinfoで定義済みイベントは自動作成で上書きしない", () => {
+  const plan = compatibilityPlan();
+  const eventA = plan.events.find((event) => event.id === "legacy-event-a");
+  assert.ok(eventA);
+  assert.equal(eventA.title, "Legacy Event A");
+  assert.equal(eventA.explanation, "fixture");
+  assert.equal(
+    plan.eventStaff.find(
+      (staff) => staff.event_id === "legacy-event-a" && staff.permission_preset === "owner",
+    )?.x_user_id,
+    "owner_a",
+  );
+  assert.doesNotMatch(plan.warnings.join("\n"), /イベント legacy-event-a は動画参照のため自動作成します/);
+});
+
 test("eventinfo.jsonとvideo_new.jsonの実形式を欠落なくplan化する", () => {
   const unresolved = compatibilityPlan();
   assert.deepEqual(unresolved.errors, []);

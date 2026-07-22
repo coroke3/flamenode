@@ -283,6 +283,12 @@ function stableId(prefix: string, seed: string): string {
   return `${prefix}_${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+function placeholderOwnerXId(eventId: string): string {
+  const seed = stableId("evt_own", eventId).toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  const trimmed = seed.slice(0, 20);
+  return normalizeXId(trimmed) ?? `imp_${trimmed.slice(0, 15)}`;
+}
+
 /** 旧形式インポート由来の Discord 未連携 X 名義へ割り当てる認証ユーザー ID。 */
 export function legacyImportAuthUserId(xUserId: string): string {
   return stableId("usr_imp", xUserId);
@@ -713,6 +719,84 @@ export function normalizeLegacyFiles(
         `作品 ${videoId} のカスタム質問回答はイベント別の複製を含めて最大${MAX_LEGACY_CUSTOM_ANSWERS_PER_VIDEO}件です。`,
       );
     }
+  }
+
+  const referencedEventIds = new Set<string>();
+  for (const video of videos.values()) {
+    if (video.primary_event_id) referencedEventIds.add(video.primary_event_id);
+  }
+  for (const link of videoEvents.values()) {
+    referencedEventIds.add(link.event_id);
+  }
+  for (const question of eventCustomQuestions.values()) {
+    referencedEventIds.add(question.event_id);
+  }
+
+  for (const eventId of [...referencedEventIds].sort()) {
+    if (events.has(eventId)) continue;
+
+    const referencingVideoIds = new Set<string>();
+    for (const link of videoEvents.values()) {
+      if (link.event_id === eventId) referencingVideoIds.add(link.video_id);
+    }
+    for (const video of videos.values()) {
+      if (video.primary_event_id === eventId) referencingVideoIds.add(video.id);
+    }
+
+    events.set(eventId, {
+      id: eventId,
+      title: eventId,
+      event_type: "event",
+      explanation: "動画ファイルの参照により自動作成されました。",
+      icon_url: null,
+      img_url: null,
+      visibility_status: options.eventVisibility,
+      start_time: null,
+      end_time: null,
+    });
+    warnings.push(`イベント ${eventId} は動画参照のため自動作成します`);
+
+    let ownerXId: string | null = null;
+    let ownerDisplayName = "";
+    for (const videoId of referencingVideoIds) {
+      const video = videos.get(videoId);
+      if (video?.creator_x_user_id) {
+        ownerXId = video.creator_x_user_id;
+        ownerDisplayName = video.creator_display_name;
+        break;
+      }
+    }
+    if (!ownerXId) {
+      const orderedMembers = [...members.values()]
+        .filter((member) => referencingVideoIds.has(member.video_id) && member.x_user_id)
+        .sort(
+          (left, right) =>
+            left.video_id.localeCompare(right.video_id) || left.order_index - right.order_index,
+        );
+      const member = orderedMembers[0];
+      if (member?.x_user_id) {
+        ownerXId = member.x_user_id;
+        ownerDisplayName = member.name;
+      }
+    }
+    if (!ownerXId) {
+      ownerXId = placeholderOwnerXId(eventId);
+      ownerDisplayName = `@${ownerXId}`;
+      putXUser(ownerXId, ownerDisplayName);
+    } else {
+      putXUser(ownerXId, ownerDisplayName || `@${ownerXId}`);
+    }
+
+    const staffKey = `${eventId}:${ownerXId}`;
+    staff.set(staffKey, {
+      id: stableId("staff_imp", staffKey),
+      event_id: eventId,
+      x_user_id: ownerXId,
+      display_name: ownerDisplayName || `@${ownerXId}`,
+      permission_preset: "owner",
+      is_public: 0,
+      public_role_label: null,
+    });
   }
 
   const unmappedVideoFields = [...autoIgnoredFieldCounts]

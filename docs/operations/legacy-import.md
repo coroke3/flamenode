@@ -11,7 +11,7 @@
 
 1. 管理者が `/admin/import` でファイルと競合方針を選択する。
 2. `parse` が入力形式と行位置を保持して解析する。
-3. `normalize` がイベント、X名義、owner、作品、メンバー、チャプター、YouTube情報、使用ソフトを新正本DTOへ変換する。`eventinfo.json` の `menberpost` と、`video_new.json` の `memberchapter` もこの境界で解釈する。
+3. `normalize` がイベント、X名義、owner、作品、メンバー、チャプター、YouTube情報、使用ソフトを新正本DTOへ変換する。`eventinfo.json` の `menberpost` と、`video_new.json` の `memberchapter` もこの境界で解釈する。動画ファイルのみでも、参照 `eventid` からイベントを自動作成する（owner付き）。
 4. 動画行に正規カラムへ対応しない非空項目があれば、既定では警告付きで無視してプレビューを続行する。カスタム質問へ保存したい列だけ、任意で質問文Qを指定して再プレビューする。
 5. `preflight` が件数上限、参照整合性、owner、重複YouTube ID、質問・回答のevent整合、手動作成データの保護をread-onlyで検査する。
 6. preview内容と項目判断をR2へ署名付きで固定し、同じ計画だけをapplyする。apply時にファイルや項目判断を再解釈しない。
