@@ -37,8 +37,11 @@ export function rejectUnauthorizedWorkerRequest(
   const configuredToken = env.WORKER_ADMIN_TOKEN?.trim();
   if (!configuredToken) return new Response("Not Found", { status: 404 });
 
+  // Only reject a declared non-empty payload. Node/undici and some edge proxies
+  // attach an empty body stream to POST even when Content-Length is 0/absent;
+  // treating `body !== null` as non-empty falsely turns unauthenticated probes into 413.
   const contentLength = request.headers.get("content-length");
-  if (request.body !== null || (contentLength !== null && !/^0*$/.test(contentLength.trim()))) {
+  if (contentLength !== null && !/^0*$/.test(contentLength.trim())) {
     return new Response("Payload Too Large", { status: 413 });
   }
 

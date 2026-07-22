@@ -240,7 +240,15 @@ export async function runSmoke({
 
   const contentUrl = settings.workers.find(([service]) => service === "flamenode-content-jobs")[1];
   for (const endpoint of ["/rebuild", "/process-queue"]) {
-    const response = await get(contentUrl + endpoint, { method: "POST" }, `content-jobs ${endpoint}`);
+    const response = await get(
+      contentUrl + endpoint,
+      {
+        method: "POST",
+        // Explicit empty body so edge proxies do not invent a non-zero payload.
+        headers: { "Content-Length": "0" },
+      },
+      `content-jobs ${endpoint}`,
+    );
     assertStatus(response, [401, 403], `content-jobs ${endpoint} unauthenticated rejection`);
   }
 
