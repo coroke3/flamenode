@@ -30,14 +30,18 @@ export function XIdLinkForm({
     setOkMsg(null);
     setErrMsg(null);
     startTransition(async () => {
-      const result = await requestXIdLink(fd);
-      if (result.ok) {
-        setOkMsg(result.message ?? "X ID申請を受け付けました。");
-        form.reset();
-        if (onSuccessRedirect) router.push(onSuccessRedirect);
-        else router.refresh();
-      } else {
-        setErrMsg(result.message ?? "申請に失敗しました。");
+      try {
+        const result = await requestXIdLink(fd);
+        if (result.ok) {
+          setOkMsg(result.message ?? "X ID申請を受け付けました。");
+          form.reset();
+          if (onSuccessRedirect) router.push(onSuccessRedirect);
+          else router.refresh();
+        } else {
+          setErrMsg(result.message ?? "申請に失敗しました。");
+        }
+      } catch {
+        setErrMsg("申請の保存に失敗しました。時間をおいて再試行してください。");
       }
     });
   };
@@ -105,12 +109,16 @@ export function XIdMergeForm({
     setOkMsg(null);
     setErrMsg(null);
     startTransition(async () => {
-      const result = await requestXIdLink(fd);
-      if (result.ok) {
-        setOkMsg(result.message ?? "X ID統合申請を受け付けました。");
-        router.refresh();
-      } else {
-        setErrMsg(result.message ?? "統合申請に失敗しました。");
+      try {
+        const result = await requestXIdLink(fd);
+        if (result.ok) {
+          setOkMsg(result.message ?? "X ID統合申請を受け付けました。");
+          router.refresh();
+        } else {
+          setErrMsg(result.message ?? "統合申請に失敗しました。");
+        }
+      } catch {
+        setErrMsg("申請の保存に失敗しました。時間をおいて再試行してください。");
       }
     });
   };

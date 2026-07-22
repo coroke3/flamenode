@@ -105,6 +105,12 @@ function revalidateXIdentityPaths(xUserId?: string): void {
   if (xUserId) revalidatePath(`/user/${xUserId}`);
 }
 
+function revalidateXIdRequestPaths(): void {
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/settings");
+  revalidatePath("/onboarding");
+}
+
 export async function setActiveXId(formData: FormData): Promise<XIdActionResult> {
   const context = await getXIdWriteContext();
   if (!context.ok) return context.result;
@@ -235,15 +241,20 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     updated_at: now,
   };
   const xIdLabel = requestedXId ?? sourceXUserId ?? "不明";
-  const webhookNotification = await buildNotificationOutboxStatement(db, {
-    recipientUserId: authUserId,
-    type: "discord_webhook",
-    payload: {
-      content: `X ID申請: @${xIdLabel} / type=${requestType} / by=${authUserId} / request=${id}`,
-    },
-    dedupeKey: `xid_request_webhook:${id}`,
-    force: true,
-  });
+  let webhookNotification: BatchItem<"sqlite"> | null = null;
+  try {
+    webhookNotification = await buildNotificationOutboxStatement(db, {
+      recipientUserId: authUserId,
+      type: "discord_webhook",
+      payload: {
+        content: `X ID申請: @${xIdLabel} / type=${requestType} / by=${authUserId} / request=${id}`,
+      },
+      dedupeKey: `xid_request_webhook:${id}`,
+      force: true,
+    });
+  } catch (error) {
+    console.error("[requestXIdLink] webhook enqueue failed", error);
+  }
   const mutationStatements: BatchItem<"sqlite">[] = [];
   const expectedMutationChanges: Array<number | null> = [];
   const audits: WriteAuditLogInput[] = [];
@@ -269,9 +280,14 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
         db
           .update(xIdentityRequests)
           .set({ status: "cancelled", updated_at: now })
-          .where(expectedRowCondition({ expectedCurrent: sibling })),
+          .where(
+            and(
+              eq(xIdentityRequests.id, sibling.id),
+              eq(xIdentityRequests.status, "pending"),
+            )!,
+          ),
       );
-      expectedMutationChanges.push(1);
+      expectedMutationChanges.push(null);
       audits.push({
         table_name: "x_identity_requests",
         target_id: sibling.id,
@@ -309,52 +325,57 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
       audits,
     });
   } catch (error) {
-    // 条件付きINSERTの0行はmutateWithAuditのassertionでrollbackされる。
-    // assertion以外の監査・DB障害は競合扱いにせず、そのまま再送出する。
-    if (!isConditionalInsertAssertionError(error)) throw error;
-    const duplicate = (
-      await db
-        .select({ id: xIdentityRequests.id })
+    const saveFailed = {
+      ok: false as const,
+      message: "申請の保存に失敗しました。時間をおいて再試行してください。",
+    };
+    if (isConditionalInsertAssertionError(error)) {
+      const duplicate = (
+        await db
+          .select({ id: xIdentityRequests.id })
+          .from(xIdentityRequests)
+          .where(
+            and(
+              eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+              eq(xIdentityRequests.request_type, requestType),
+              eq(xIdentityRequests.status, "pending"),
+              requestedXId === null
+                ? sql`${xIdentityRequests.requested_x_id} IS NULL`
+                : eq(xIdentityRequests.requested_x_id, requestedXId),
+              sourceXUserId === null
+                ? sql`${xIdentityRequests.source_x_user_id} IS NULL`
+                : eq(xIdentityRequests.source_x_user_id, sourceXUserId),
+              targetXUserId === null
+                ? sql`${xIdentityRequests.target_x_user_id} IS NULL`
+                : eq(xIdentityRequests.target_x_user_id, targetXUserId),
+            )!,
+          )
+          .limit(1)
+      )[0];
+      if (duplicate) return { ok: true, message: "同じ内容の申請がすでに承認待ちです。" };
+
+      const pendingCountRows = await db
+        .select({ count: sql<number>`COUNT(*)` })
         .from(xIdentityRequests)
         .where(
           and(
             eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-            eq(xIdentityRequests.request_type, requestType),
             eq(xIdentityRequests.status, "pending"),
-            requestedXId === null
-              ? sql`${xIdentityRequests.requested_x_id} IS NULL`
-              : eq(xIdentityRequests.requested_x_id, requestedXId),
-            sourceXUserId === null
-              ? sql`${xIdentityRequests.source_x_user_id} IS NULL`
-              : eq(xIdentityRequests.source_x_user_id, sourceXUserId),
-            targetXUserId === null
-              ? sql`${xIdentityRequests.target_x_user_id} IS NULL`
-              : eq(xIdentityRequests.target_x_user_id, targetXUserId),
           )!,
-        )
-        .limit(1)
-    )[0];
-    if (duplicate) return { ok: true, message: "同じ内容の申請がすでに承認待ちです。" };
-
-    const pendingCountRows = await db
-      .select({ count: sql<number>`COUNT(*)` })
-      .from(xIdentityRequests)
-      .where(
-        and(
-          eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-          eq(xIdentityRequests.status, "pending"),
-        )!,
-      );
-    if (Number(pendingCountRows[0]?.count ?? 0) >= 5) {
-      return {
-        ok: false,
-        message: "未処理の X ID 申請が多すぎます。処理を待ってから再申請してください。",
-      };
+        );
+      if (Number(pendingCountRows[0]?.count ?? 0) >= 5) {
+        return {
+          ok: false,
+          message: "未処理の X ID 申請が多すぎます。処理を待ってから再申請してください。",
+        };
+      }
+      return saveFailed;
     }
-    throw error;
+    console.error("[requestXIdLink] mutation failed", error);
+    return saveFailed;
   }
 
-  revalidateXIdentityPaths(requestedXUserId);
+  revalidateXIdRequestPaths();
   return { ok: true, message: "X ID 申請を受け付けました。" };
 }
 

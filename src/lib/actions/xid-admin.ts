@@ -275,9 +275,14 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
         db
           .update(xIdentityRequests)
           .set({ status: "cancelled", updated_at: now })
-          .where(expectedRowCondition({ expectedCurrent: sibling })),
+          .where(
+            and(
+              eq(xIdentityRequests.id, sibling.id),
+              eq(xIdentityRequests.status, "pending"),
+            )!,
+          ),
       );
-      expected.push(1);
+      expected.push(null);
       audits.push({
         table_name: "x_identity_requests",
         target_id: sibling.id,
@@ -297,7 +302,12 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
     db
       .update(xIdentityRequests)
       .set({ status: "approved", updated_at: now })
-      .where(expectedRowCondition({ expectedCurrent: request })),
+      .where(
+        and(
+          eq(xIdentityRequests.id, request.id),
+          eq(xIdentityRequests.status, "pending"),
+        )!,
+      ),
   );
   expected.push(1);
   audits.push({
@@ -390,7 +400,12 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
     db
       .update(xIdentityRequests)
       .set({ status: "rejected", updated_at: now })
-      .where(expectedRowCondition({ expectedCurrent: request })),
+      .where(
+        and(
+          eq(xIdentityRequests.id, request.id),
+          eq(xIdentityRequests.status, "pending"),
+        )!,
+      ),
   ];
   const expected: Array<number | null> = [1];
   if (notification) {

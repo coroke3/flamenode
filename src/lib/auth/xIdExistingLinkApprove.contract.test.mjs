@@ -51,3 +51,44 @@ test("X ID申請の承認・却下はmutation失敗をerror boundaryへ投げず
     /try \{[\s\S]*const r = await fn\(fd\);[\s\S]*\} catch \{[\s\S]*通信または処理中に問題が発生しました/,
   );
 });
+
+test("X ID申請はsibling cancelを冪等化しmutation失敗を返す", () => {
+  const action = read("../actions/xid.ts");
+  const admin = read("../actions/xid-admin.ts");
+  const settings = read("../../components/settings/XIdSettingsClient.tsx");
+
+  assert.match(
+    action,
+    /eq\(xIdentityRequests\.id, sibling\.id\)[\s\S]*eq\(xIdentityRequests\.status, "pending"\)[\s\S]*expectedMutationChanges\.push\(null\)/,
+  );
+  assert.match(
+    admin,
+    /eq\(xIdentityRequests\.id, sibling\.id\)[\s\S]*eq\(xIdentityRequests\.status, "pending"\)[\s\S]*expected\.push\(null\)/,
+  );
+  assert.match(
+    admin,
+    /eq\(xIdentityRequests\.id, request\.id\)[\s\S]*eq\(xIdentityRequests\.status, "pending"\)[\s\S]*expected\.push\(1\)/,
+  );
+  assert.match(action, /function revalidateXIdRequestPaths\(\)/);
+  assert.match(action, /revalidateXIdRequestPaths\(\)/);
+  assert.doesNotMatch(
+    action,
+    /export async function requestXIdLink[\s\S]*revalidateXIdentityPaths\(requestedXUserId\)/,
+  );
+  assert.match(
+    action,
+    /export async function requestXIdLink[\s\S]*申請の保存に失敗しました。時間をおいて再試行してください。/,
+  );
+  assert.doesNotMatch(
+    action,
+    /export async function requestXIdLink[\s\S]*if \(!isConditionalInsertAssertionError\(error\)\) throw error/,
+  );
+  assert.match(
+    settings,
+    /export function XIdLinkForm[\s\S]*try \{[\s\S]*await requestXIdLink\(fd\)[\s\S]*\} catch/,
+  );
+  assert.match(
+    settings,
+    /export function XIdMergeForm[\s\S]*try \{[\s\S]*await requestXIdLink\(fd\)[\s\S]*\} catch/,
+  );
+});
