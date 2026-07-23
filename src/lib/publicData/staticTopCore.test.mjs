@@ -54,7 +54,7 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
     ],
     slot_stats: [{ event_id: "event-1", available: 3, total: 5 }],
     event_video_counts: [{ event_id: "event-2", count: 9 }],
-    stats: { public_videos: 12, active_events: 1, creators: 4 },
+    stats: { public_videos: 12, active_events: 1, creators: 4, public_events: 7 },
   });
 
   assert.ok(top);
@@ -71,6 +71,7 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
     publicVideos: 12,
     activeEvents: 1,
     creators: 4,
+    publicEvents: 7,
   });
 });
 

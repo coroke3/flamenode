@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   getPublicDataStrategy,
   getStaticRebuildPolicy,
+  STATIC_REBUILD_ITEMS_PER_RUN,
   isLiveApiEnabled,
   isStaticRebuildEnabled,
   isWriteBlocked,
@@ -41,29 +42,30 @@ test("isStaticRebuildEnabled: maintenance is the only static rebuild stop", () =
 });
 
 test("getStaticRebuildPolicy: mirrors worker queue mode behavior", () => {
+  assert.equal(STATIC_REBUILD_ITEMS_PER_RUN, 1);
   assert.deepEqual(getStaticRebuildPolicy("normal"), {
-    maxItemsPerRun: 20,
+    maxItemsPerRun: 1,
     highPriorityOnly: false,
     allowedTargetTypes: null,
     skipTargetTypesUnlessHighPriority: [],
     reconcileStaleQueue: true,
   });
   assert.deepEqual(getStaticRebuildPolicy("economy"), {
-    maxItemsPerRun: 5,
+    maxItemsPerRun: 1,
     highPriorityOnly: false,
     allowedTargetTypes: null,
     skipTargetTypesUnlessHighPriority: ["search_index", "list_popular"],
     reconcileStaleQueue: true,
   });
   assert.deepEqual(getStaticRebuildPolicy("read_only"), {
-    maxItemsPerRun: 20,
+    maxItemsPerRun: 1,
     highPriorityOnly: false,
     allowedTargetTypes: ["event", "video", "user"],
     skipTargetTypesUnlessHighPriority: [],
     reconcileStaleQueue: false,
   });
   assert.deepEqual(getStaticRebuildPolicy("static_only"), {
-    maxItemsPerRun: 20,
+    maxItemsPerRun: 1,
     highPriorityOnly: true,
     allowedTargetTypes: null,
     skipTargetTypesUnlessHighPriority: [],
@@ -84,7 +86,7 @@ test("normal mode keeps full write/live/rebuild behavior enabled", () => {
   assert.equal(isLiveApiEnabled("normal"), true);
   assert.equal(isStaticRebuildEnabled("normal"), true);
   assert.deepEqual(getStaticRebuildPolicy("normal"), {
-    maxItemsPerRun: 20,
+    maxItemsPerRun: 1,
     highPriorityOnly: false,
     allowedTargetTypes: null,
     skipTargetTypesUnlessHighPriority: [],

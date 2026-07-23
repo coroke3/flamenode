@@ -103,9 +103,11 @@ export default async function EventDetailPage({
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
   const staticLoaded = await loadStaticEventDetail(id);
-  if (!canFallbackToDatabase(staticLoaded.strategy)) {
-    if (!staticLoaded.data) notFound();
+  if (staticLoaded.data) {
     return <StaticEventDetailView detail={staticLoaded.data} />;
+  }
+  if (!canFallbackToDatabase(staticLoaded.strategy)) {
+    notFound();
   }
 
   const bundle = await withDatabase(async (db) => {

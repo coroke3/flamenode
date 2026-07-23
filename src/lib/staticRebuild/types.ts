@@ -4,9 +4,12 @@ export const STATIC_REBUILD_TARGET_TYPES = [
   "event",
   "video",
   "user",
+  "users_index",
   "list_recent",
   "list_popular",
   "search_index",
+  "recommend",
+  "rules",
 ] as const;
 
 export type StaticRebuildTargetType = (typeof STATIC_REBUILD_TARGET_TYPES)[number];

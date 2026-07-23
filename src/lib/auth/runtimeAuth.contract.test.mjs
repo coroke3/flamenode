@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, ...routeLayouts] = await Promise.all([
+const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session, layoutHeaderUser, publicLayout, ...authLayouts] = await Promise.all([
   readFile(new URL("../cloudflare.ts", import.meta.url), "utf8"),
   readFile(new URL("./index.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
   readFile(new URL("./authRouteError.ts", import.meta.url), "utf8"),
   readFile(new URL("./origin.ts", import.meta.url), "utf8"),
   readFile(new URL("./currentUser.ts", import.meta.url), "utf8"),
+  readFile(new URL("./session.ts", import.meta.url), "utf8"),
+  readFile(new URL("./layoutHeaderUser.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(public)/layout.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(auth)/layout.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(manage)/layout.tsx", import.meta.url), "utf8"),
@@ -54,6 +56,9 @@ test("Auth origin・Host・Discord scopeは固定設定をfail-closedで使う",
 });
 
 test("DBから消失したsession userをsession内roleへfallbackしない", () => {
+  assert.match(currentUser, /getAuthSession/);
+  assert.match(session, /export const getAuthSession = cache\(loadAuthSession\)/);
+  assert.match(layoutHeaderUser, /export const getLayoutHeaderUser = cache/);
   assert.match(currentUser, /if \(loaded\.kind === "missing"\) return null/);
   assert.match(
     currentUser,
@@ -65,11 +70,28 @@ test("DBから消失したsession userをsession内roleへfallbackしない", ()
   );
 });
 
+test("公開layoutはserver authを呼ばず静的シェルとして描画する", () => {
+  assert.doesNotMatch(publicLayout, /export const dynamic = "force-dynamic"/);
+  assert.doesNotMatch(publicLayout, /getCurrentUser/);
+  assert.doesNotMatch(publicLayout, /await auth\(/);
+  assert.doesNotMatch(publicLayout, /buildHeaderUser/);
+  assert.doesNotMatch(publicLayout, /userNeedsXIdOnboarding/);
+  assert.doesNotMatch(publicLayout, /CostGuardBanner/);
+  assert.match(publicLayout, /<PublicHeader\s*\/>/);
+});
+
 test("認証layoutは動的renderを明示しNext.js制御フロー例外を握り潰さない", () => {
   assert.match(currentUser, /unstable_rethrow\(error\)/);
-  for (const layout of routeLayouts) {
+  const [authLayout, manageLayout, adminLayout] = authLayouts;
+  assert.match(authLayout, /await buildHeaderUser/);
+  assert.match(manageLayout, /await getLayoutHeaderUser/);
+  assert.doesNotMatch(manageLayout, /await auth\(/);
+  assert.match(manageLayout, /await getCurrentUser/);
+  assert.match(adminLayout, /await getLayoutHeaderUser\(false\)/);
+  assert.doesNotMatch(adminLayout, /await auth\(/);
+  assert.doesNotMatch(adminLayout, /await getCurrentUser/);
+  for (const layout of authLayouts) {
     assert.match(layout, /export const dynamic = "force-dynamic"/);
     assert.doesNotMatch(layout, /catch \(error\)/);
-    assert.match(layout, /await buildHeaderUser/);
   }
 });

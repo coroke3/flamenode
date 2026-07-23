@@ -1,22 +1,15 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, eq, lt, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  events as eventsTable,
-  notificationOutbox as notificationOutboxTable,
-  slots as slotsTable,
-  systemSettings,
-  videoModerationCases as videoModerationCasesTable,
-  videoYoutubeMetadata as videoYoutubeMetadataTable,
-  videos as videosTable,
-  xIdentityRequests as xIdentityRequestsTable,
-} from "@/lib/db/schema";
+  EMPTY_ADMIN_PENDING_COUNTS,
+  fetchAdminTopSnapshot,
+  type AdminPendingCounts,
+} from "@/lib/admin/adminPendingCounts";
 import { Icon } from "@/components/ui/Icon";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";
 
 export const metadata: Metadata = { title: "管理ダッシュボード" };
@@ -24,136 +17,18 @@ export const dynamic = "force-dynamic";
 
 type Tone = "neutral" | "warn" | "danger";
 
-interface PendingCounts {
-  pendingVideos: number;
-  xLinkRequests: number;
-  xMergeRequests: number;
-  xMergeReverts: number;
-  notificationFailed: number;
-  notificationStuck: number;
-  youtubeFailed: number;
-  moderationOpen: number;
-  moderationOverdue: number;
-  reservedOpenSlots: number;
-}
-
-const EMPTY_COUNTS: PendingCounts = {
-  pendingVideos: 0,
-  xLinkRequests: 0,
-  xMergeRequests: 0,
-  xMergeReverts: 0,
-  notificationFailed: 0,
-  notificationStuck: 0,
-  youtubeFailed: 0,
-  moderationOpen: 0,
-  moderationOverdue: 0,
-  reservedOpenSlots: 0,
-};
-
 export default async function AdminTopPage(): Promise<React.ReactElement> {
   const db = getDatabase();
-  let counts = { ...EMPTY_COUNTS };
+  let counts: AdminPendingCounts = { ...EMPTY_ADMIN_PENDING_COUNTS };
   let mode: OperationMode = "normal";
   let isMaintenance = 0;
 
   if (db) {
     try {
-      const now = Math.floor(Date.now() / 1000);
-      const processingCutoff = now - 15 * 60;
-
-      const [
-        pendingVideos,
-        xLinkRequests,
-        xMergeRequests,
-        xMergeReverts,
-        notificationFailed,
-        notificationStuck,
-        youtubeFailed,
-        moderationOpen,
-        moderationOverdue,
-        reservedOpenSlots,
-        sys,
-      ] = await Promise.all([
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(videosTable)
-          .where(eq(videosTable.visibility_status, "pending")),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(xIdentityRequestsTable)
-          .where(and(eq(xIdentityRequestsTable.status, "pending"), sql`${xIdentityRequestsTable.request_type} IN ('new_link','existing_link','alias')`)),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(xIdentityRequestsTable)
-          .where(and(eq(xIdentityRequestsTable.status, "pending"), eq(xIdentityRequestsTable.request_type, "merge"))),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(xIdentityRequestsTable)
-          .where(and(eq(xIdentityRequestsTable.status, "pending"), eq(xIdentityRequestsTable.request_type, "revert_merge"))),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(notificationOutboxTable)
-          .where(eq(notificationOutboxTable.status, "failed")),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(notificationOutboxTable)
-          .where(
-            and(
-              eq(notificationOutboxTable.status, "processing"),
-              lt(notificationOutboxTable.processing_started_at, processingCutoff),
-            ),
-          ),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(videoYoutubeMetadataTable)
-          .where(eq(videoYoutubeMetadataTable.sync_status, "failed")),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(videoModerationCasesTable)
-          .where(eq(videoModerationCasesTable.status, "open")),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(videoModerationCasesTable)
-          .where(
-            and(
-              eq(videoModerationCasesTable.status, "open"),
-              lt(videoModerationCasesTable.due_at, now),
-            ),
-          ),
-        db
-          .select({ c: sql<number>`COUNT(*)` })
-          .from(slotsTable)
-          .leftJoin(eventsTable, eq(eventsTable.id, slotsTable.event_id))
-          .where(
-            and(
-              eq(slotsTable.status, "reserved"),
-              eq(eventsTable.visibility_status, "public"),
-              sql`(${eventsTable.entry_start_time} IS NOT NULL OR ${eventsTable.entry_end_time} IS NOT NULL)`,
-              sql`(${eventsTable.entry_start_time} IS NULL OR ${eventsTable.entry_start_time} <= ${now})`,
-              sql`(${eventsTable.entry_end_time} IS NULL OR ${eventsTable.entry_end_time} >= ${now})`,
-              sql`(
-                COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) IS NULL
-                OR COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) > ${now}
-              )`,
-            ),
-          ),
-        db.select().from(systemSettings).where(eq(systemSettings.id, "default")).limit(1),
-      ]);
-
-      counts = {
-        pendingVideos: Number(pendingVideos[0]?.c ?? 0),
-        xLinkRequests: Number(xLinkRequests[0]?.c ?? 0),
-        xMergeRequests: Number(xMergeRequests[0]?.c ?? 0),
-        xMergeReverts: Number(xMergeReverts[0]?.c ?? 0),
-        notificationFailed: Number(notificationFailed[0]?.c ?? 0),
-        notificationStuck: Number(notificationStuck[0]?.c ?? 0),
-        youtubeFailed: Number(youtubeFailed[0]?.c ?? 0),
-        moderationOpen: Number(moderationOpen[0]?.c ?? 0),
-        moderationOverdue: Number(moderationOverdue[0]?.c ?? 0),
-        reservedOpenSlots: Number(reservedOpenSlots[0]?.c ?? 0),
-      };
-      mode = resolveOperationMode(sys[0]);
-      isMaintenance = mode === "maintenance" ? 1 : 0;
+      const snapshot = await fetchAdminTopSnapshot(db);
+      counts = snapshot.counts;
+      mode = snapshot.mode;
+      isMaintenance = snapshot.isMaintenance;
     } catch (err) {
       console.error("[AdminTopPage] fetch failed", err);
     }

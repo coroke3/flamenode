@@ -1,15 +1,9 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
-import type { DB } from "@/lib/db/client";
-import { systemSettings } from "@/lib/db/schema";
 import { getPublicDataStrategy } from "@/lib/operationMode/policy";
-import { resolveOperationMode } from "@/lib/operationMode/resolve";
-import type {
-  OperationMode,
-  PublicDataStrategy,
-} from "@/lib/operationMode/types";
+import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
+import type { PublicDataStrategy } from "@/lib/operationMode/types";
 import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
 import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
 import { publicStaticTargetExists } from "./staticMissPolicy";
@@ -24,15 +18,39 @@ import {
   type StaticEventsIndexPayload,
 } from "./staticEventsIndexCore";
 import {
+  normalizeStaticPopularVideoPage,
+  type StaticPopularVideosPayload,
+} from "./staticPopularVideoCore";
+import {
   normalizeStaticRecentVideoPage,
   type StaticRecentVideoPage,
   type StaticRecentVideosPayload,
 } from "./staticRecentVideoCore";
 import {
+  normalizeStaticRules,
+  type StaticRulesData,
+  type StaticRulesPayload,
+} from "./staticRulesCore";
+import {
+  normalizeStaticSearchIndexPayload,
+  searchStaticIndexVideos,
+  type StaticSearchIndexPayload,
+} from "./staticSearchIndexCore";
+import {
+  normalizeStaticRecommend,
+  type StaticRecommendPayload,
+  type StaticRecommendPools,
+} from "./staticRecommendCore";
+import {
   normalizeStaticTop,
   type StaticTopData,
   type StaticTopPayload,
 } from "./staticTopCore";
+import {
+  normalizeStaticUsersIndex,
+  type StaticUsersIndex,
+  type StaticUsersIndexPayload,
+} from "./staticUsersIndexCore";
 import {
   normalizeStaticUserProfile,
   type StaticUserProfile,
@@ -48,19 +66,6 @@ import {
   isMaintenanceStrategy,
   shouldUseStaticCollection,
 } from "./loaderPolicy";
-
-async function getOperationMode(db: DB): Promise<OperationMode> {
-  try {
-    const row = await db
-      .select({ operation_mode: systemSettings.operation_mode })
-      .from(systemSettings)
-      .where(eq(systemSettings.id, "default"))
-      .limit(1);
-    return resolveOperationMode(row[0]);
-  } catch {
-    return "normal";
-  }
-}
 
 export { canFallbackToDatabase, isMaintenanceStrategy };
 
@@ -163,17 +168,19 @@ export function createPublicJsonLoader<TPayload, TResult>({
 export async function loadPublicJson<T>(
   options: PublicJsonLoadOptions,
 ): Promise<PublicJsonLoadResult<T>> {
+  const payload = await readStaticJson<T>(options.r2Key);
+  if (payload !== null) {
+    const mode = await resolvePublicOperationMode({ allowD1: false });
+    const strategy = getPublicDataStrategy(mode);
+    return { data: payload, source: "static", strategy, enqueued: false };
+  }
+
   const db = getDatabase();
-  const mode = db ? await getOperationMode(db) : "normal";
+  const mode = await resolvePublicOperationMode({ allowD1: true, db });
   const strategy = getPublicDataStrategy(mode);
 
   if (strategy === "maintenance") {
     return { data: null, source: "miss", strategy, enqueued: false };
-  }
-
-  const payload = await readStaticJson<T>(options.r2Key);
-  if (payload !== null) {
-    return { data: payload, source: "static", strategy, enqueued: false };
   }
 
   let enqueued = false;
@@ -186,8 +193,6 @@ export async function loadPublicJson<T>(
         options.targetId,
       );
     } catch (error) {
-      // Do not turn a public cache miss into a write when the read-only
-      // existence probe is unavailable. The normal-mode DB fallback remains.
       warnPublicStaticJson(options.targetType, "target_probe_failed", error);
     }
 
@@ -263,6 +268,78 @@ export async function loadStaticRecentVideosPage(params: {
   return { ...result, data: page, page };
 }
 
+export async function loadStaticPopularVideosPage(params: {
+  page: number;
+  pageSize: number;
+}): Promise<
+  PublicJsonLoadResult<StaticRecentVideoPage> & {
+    page: StaticRecentVideoPage | null;
+  }
+> {
+  const result = await loadPublicJson<StaticPopularVideosPayload>({
+    r2Key: "list/popular.json",
+    targetType: "list_popular",
+    targetId: "global",
+    reason: "public_list_popular_miss",
+  });
+  const normalizedPage = result.data
+    ? normalizeStaticPopularVideoPage(result.data, params.page, params.pageSize)
+    : null;
+  const page =
+    normalizedPage &&
+    shouldUseStaticCollection(result.strategy, normalizedPage.videos.length)
+      ? normalizedPage
+      : null;
+  return { ...result, data: page, page };
+}
+
+export async function loadStaticSearchVideosPage(params: {
+  q: string;
+  sort: "new" | "old" | "score";
+  page: number;
+  pageSize: number;
+}): Promise<
+  PublicJsonLoadResult<StaticRecentVideoPage> & {
+    page: StaticRecentVideoPage | null;
+  }
+> {
+  const result = await loadPublicJson<StaticSearchIndexPayload>({
+    r2Key: "search-index-lite.json",
+    targetType: "search_index",
+    targetId: "global",
+    reason: "public_list_search_miss",
+  });
+  const payload = result.data ? normalizeStaticSearchIndexPayload(result.data) : null;
+  const normalizedPage = payload
+    ? searchStaticIndexVideos({
+        payload,
+        q: params.q,
+        sort: params.sort,
+        page: params.page,
+        pageSize: params.pageSize,
+      })
+    : null;
+  const page =
+    normalizedPage &&
+    shouldUseStaticCollection(result.strategy, normalizedPage.videos.length)
+      ? normalizedPage
+      : null;
+  return { ...result, data: page, page };
+}
+
+export async function loadStaticRulesPage(): Promise<
+  PublicJsonLoadResult<StaticRulesData> & { rules: StaticRulesData | null }
+> {
+  const result = await loadPublicJson<StaticRulesPayload>({
+    r2Key: "rules/current.json",
+    targetType: "rules",
+    targetId: "global",
+    reason: "public_rules_miss",
+  });
+  const rules = result.data ? normalizeStaticRules(result.data) : null;
+  return { ...result, data: rules, rules };
+}
+
 export async function loadStaticTopPage(): Promise<
   PublicJsonLoadResult<StaticTopData> & { top: StaticTopData | null }
 > {
@@ -274,6 +351,50 @@ export async function loadStaticTopPage(): Promise<
   });
   const top = result.data ? normalizeStaticTop(result.data) : null;
   return { ...result, data: top, top };
+}
+
+export async function loadStaticUsersIndex(): Promise<
+  PublicJsonLoadResult<StaticUsersIndex> & { index: StaticUsersIndex | null }
+> {
+  const result = await loadPublicJson<StaticUsersIndexPayload>({
+    r2Key: "users/index.json",
+    targetType: "users_index",
+    targetId: "global",
+    reason: "public_users_index_miss",
+  });
+  const normalized = result.data ? normalizeStaticUsersIndex(result.data) : null;
+  const index =
+    normalized &&
+    shouldUseStaticCollection(result.strategy, normalized.items.length)
+      ? normalized
+      : null;
+  return { ...result, data: index, index };
+}
+
+export async function loadStaticRecommendPage(): Promise<
+  PublicJsonLoadResult<StaticRecommendPools> & {
+    recommend: StaticRecommendPools | null;
+  }
+> {
+  const result = await loadPublicJson<StaticRecommendPayload>({
+    r2Key: "recommend.json",
+    targetType: "recommend",
+    targetId: "global",
+    reason: "public_recommend_miss",
+  });
+  const normalized = result.data ? normalizeStaticRecommend(result.data) : null;
+  const recommend =
+    normalized &&
+    shouldUseStaticCollection(
+      result.strategy,
+      normalized.recommended.length +
+        normalized.latest.length +
+        normalized.underrated.length +
+        normalized.creators.length,
+    )
+      ? normalized
+      : null;
+  return { ...result, data: recommend, recommend };
 }
 
 export const loadStaticUserProfile = createPublicJsonLoader<
@@ -306,6 +427,8 @@ export type {
   StaticEventsIndex,
 } from "./staticEventsIndexCore";
 export type { StaticRecentVideoPage } from "./staticRecentVideoCore";
+export type { StaticRecommendPools } from "./staticRecommendCore";
 export type { StaticTopData } from "./staticTopCore";
+export type { StaticUsersIndex, StaticUsersIndexEntry } from "./staticUsersIndexCore";
 export type { StaticUserProfile } from "./staticUserProfileCore";
 export type { StaticVideoDetail } from "./staticVideoDetailCore";

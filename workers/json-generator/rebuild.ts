@@ -5,6 +5,18 @@ import {
 } from "./freshness.ts";
 import { staticArtifactContentHash } from "./r2Dedup.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
+import {
+  DEFAULT_TERMS_MARKDOWN,
+  DEFAULT_TERMS_VERSION_LABEL,
+} from "../../src/lib/terms/defaultTerms.ts";
+import {
+  clampRelatedLimit,
+  enforceDiversity,
+  interleaveBuckets,
+  perMemberLimit,
+  RELATED_DEFAULT_LIMIT,
+  uniqueByVideoId,
+} from "../../src/lib/db/recommendation.ts";
 
 type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 type RebuildSignal = AbortSignal | undefined;
@@ -28,6 +40,33 @@ const EVENT_INDEX_COLUMNS = `
 `;
 
 const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
+
+const COUNTABLE_PUBLIC_VIDEO_SQL = `
+  v.visibility_status = 'public'
+  AND COALESCE(v.primary_event_id, '') <> '${PVSF_SUMMARY_EVENT_ID}'
+  AND NOT EXISTS (
+    SELECT 1 FROM video_events AS pvsf_summary_video_events
+    WHERE pvsf_summary_video_events.video_id = v.id
+      AND pvsf_summary_video_events.event_id = '${PVSF_SUMMARY_EVENT_ID}'
+  )
+`;
+
+const STATIC_RECOMMEND_VIDEO_SELECT = `
+  v.id, v.title, v.youtube_video_id,
+  v.creator_display_name AS display_name,
+  v.creator_display_name,
+  v.creator_x_user_id,
+  v.creator_icon_url AS icon_url,
+  v.creator_icon_url,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM events AS primary_event
+    WHERE primary_event.id = v.primary_event_id
+      AND primary_event.visibility_status = 'public'
+  ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
+  v.scheduled_time,
+  v.visibility_status AS status,
+  v.part
+`;
 
 /** 点イベント（片方だけ期間設定）を除外する WHERE 句。 */
 const NON_POINT_EVENT_PERIOD_SQL = `(
@@ -70,20 +109,32 @@ export async function rebuildTarget(
     case "user":
       await rebuildUser(env, targetId, signal);
       break;
+    case "users_index":
+      await rebuildUsersIndex(env, signal);
+      break;
     case "list_popular":
       await rebuildListPopular(env, signal);
+      break;
+    case "recommend":
+      await rebuildRecommend(env, signal);
+      break;
+    case "rules":
+      await rebuildRules(env, signal);
       break;
     default:
       throw new Error(`Unknown target_type: ${targetType}`);
   }
   throwIfAborted(signal);
-  if (["top", "list_recent", "list_popular", "events_index", "search_index"].includes(targetType)) {
+  if (["top", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules"].includes(targetType)) {
     const keys: Record<string, string> = {
       top: "top.json",
       list_recent: "list/recent.json",
       list_popular: "list/popular.json",
       events_index: "events/index.json",
       search_index: "search-index-lite.json",
+      users_index: "users/index.json",
+      recommend: "recommend.json",
+      rules: "rules/current.json",
     };
     await reconcileTrackedArtifacts(
       env,
@@ -375,6 +426,11 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        FROM x_users
        WHERE approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})`,
     ).first<{ c?: number }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM events
+       WHERE visibility_status = 'public'`,
+    ).first<{ c?: number }>(),
   ]);
 
   const activeEventItems = activeEvents.results ?? [];
@@ -392,6 +448,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     stats: {
       public_videos: Number(publicVideoCount?.c ?? latest.results?.length ?? 0),
       active_events: activeEventItems.length,
+      public_events: Number(publicEventCount?.c ?? latestEventItems.length ?? 0),
       creators: Number(creatorCount?.c ?? creators.results?.length ?? 0),
     },
   };
@@ -797,12 +854,315 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
   await reconcileTrackedArtifacts(env, { targetType: "event", targetId: eventId }, [`events/${eventId}.json`], 20, signal);
 }
 
+type StaticRelatedVideoRow = {
+  id: string;
+  title: string;
+  youtube_video_id: string | null;
+  display_name: string;
+  icon_url: string | null;
+  creator_x_user_id: string | null;
+  primary_event_id: string | null;
+  scheduled_time: number | null;
+  video_score: number | null;
+};
+
+const STATIC_RELATED_VIDEO_SELECT = `
+  v.id, v.title, v.youtube_video_id,
+  v.creator_display_name AS display_name,
+  v.creator_icon_url AS icon_url,
+  v.creator_x_user_id,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM events AS primary_event
+    WHERE primary_event.id = v.primary_event_id
+      AND primary_event.visibility_status = 'public'
+  ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
+  v.scheduled_time,
+  COALESCE(v.score, 0) AS video_score
+`;
+
+function normalizeStaticRelatedRow(
+  row: Record<string, unknown>,
+): StaticRelatedVideoRow | null {
+  const id = String(row.id ?? "").trim();
+  const title = String(row.title ?? "").trim();
+  const displayName = String(row.display_name ?? "").trim();
+  if (!id || !title || !displayName) return null;
+  return {
+    id,
+    title,
+    youtube_video_id:
+      row.youtube_video_id == null ? null : String(row.youtube_video_id),
+    display_name: displayName,
+    icon_url: row.icon_url == null ? null : String(row.icon_url),
+    creator_x_user_id:
+      row.creator_x_user_id == null ? null : String(row.creator_x_user_id),
+    primary_event_id:
+      row.primary_event_id == null ? null : String(row.primary_event_id),
+    scheduled_time:
+      row.scheduled_time == null ? null : Number(row.scheduled_time),
+    video_score: row.video_score == null ? null : Number(row.video_score),
+  };
+}
+
+function toPublicRelatedVideoCard(row: StaticRelatedVideoRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    title: row.title,
+    youtube_video_id: row.youtube_video_id,
+    display_name: row.display_name,
+    icon_url: row.icon_url,
+    primary_event_id: row.primary_event_id,
+    scheduled_time: row.scheduled_time,
+  };
+}
+
+async function fetchStaticRelatedVideos(
+  env: Env,
+  current: {
+    id: string;
+    creator_x_user_id: string | null;
+    primary_event_id: string | null;
+    scheduled_time: number | null;
+    eventIds: string[];
+  },
+  signal?: RebuildSignal,
+): Promise<Record<string, unknown>[]> {
+  throwIfAborted(signal);
+  const relatedLimit = clampRelatedLimit(RELATED_DEFAULT_LIMIT);
+  const minTarget = Math.min(15, relatedLimit);
+  const sameEventLimit = 5;
+  const sameCreatorLimit = 4;
+  const nearDateLimit = 4;
+  const sharedLimit = 8;
+
+  const baseWhere = `v.visibility_status = 'public' AND v.id <> ?`;
+  const bindCurrent = (sql: string, ...extra: unknown[]) =>
+    env.DB.prepare(sql).bind(current.id, ...extra);
+
+  const mapRows = (rows: readonly Record<string, unknown>[]) =>
+    rows
+      .map(normalizeStaticRelatedRow)
+      .filter((row): row is StaticRelatedVideoRow => row !== null);
+
+  const scheduledTime = current.scheduled_time;
+  const temporalPrevious =
+    scheduledTime != null
+      ? mapRows(
+          (
+            await bindCurrent(
+              `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+               FROM videos AS v
+               WHERE ${baseWhere}
+                 AND v.scheduled_time IS NOT NULL
+                 AND v.scheduled_time < ?
+               ORDER BY v.scheduled_time DESC, COALESCE(v.score, 0) DESC
+               LIMIT 3`,
+              scheduledTime,
+            ).all()
+          ).results ?? [],
+        )
+      : [];
+  throwIfAborted(signal);
+
+  const temporalNext =
+    scheduledTime != null
+      ? mapRows(
+          (
+            await bindCurrent(
+              `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+               FROM videos AS v
+               WHERE ${baseWhere}
+                 AND v.scheduled_time IS NOT NULL
+                 AND v.scheduled_time > ?
+               ORDER BY v.scheduled_time ASC, COALESCE(v.score, 0) DESC
+               LIMIT 3`,
+              scheduledTime,
+            ).all()
+          ).results ?? [],
+        )
+      : [];
+  throwIfAborted(signal);
+
+  const eventIds = Array.from(
+    new Set(
+      [...current.eventIds, current.primary_event_id].filter(
+        (id): id is string => Boolean(id),
+      ),
+    ),
+  );
+  const sameEvent =
+    eventIds.length > 0
+      ? uniqueByVideoId(
+          mapRows(
+            (
+              await env.DB.prepare(
+                `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+                 FROM videos AS v
+                 INNER JOIN video_events AS ve ON ve.video_id = v.id
+                 WHERE ${baseWhere}
+                   AND ve.event_id IN (${eventIds.map(() => "?").join(",")})
+                 ORDER BY v.scheduled_time DESC, COALESCE(v.score, 0) DESC
+                 LIMIT ?`,
+              )
+                .bind(current.id, ...eventIds, Math.min(24, sameEventLimit * 4))
+                .all()
+            ).results ?? [],
+          ),
+        )
+      : [];
+  throwIfAborted(signal);
+
+  const sameCreator = current.creator_x_user_id
+    ? mapRows(
+        (
+          await bindCurrent(
+            `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+             FROM videos AS v
+             WHERE ${baseWhere}
+               AND v.creator_x_user_id = ?
+             ORDER BY v.scheduled_time DESC, COALESCE(v.score, 0) DESC
+             LIMIT ?`,
+            current.creator_x_user_id,
+            sameCreatorLimit,
+          ).all()
+        ).results ?? [],
+      )
+    : [];
+  throwIfAborted(signal);
+
+  const memberRows =
+    (
+      await env.DB.prepare(
+        `SELECT LOWER(vm.x_user_id) AS member_x_user_id
+         FROM video_members AS vm
+         WHERE vm.video_id = ?
+           AND vm.is_public_member = 1
+           AND vm.x_user_id IS NOT NULL`,
+      )
+        .bind(current.id)
+        .all<{ member_x_user_id?: string }>()
+    ).results ?? [];
+  const uniqueMemberXIds = Array.from(
+    new Set(
+      memberRows
+        .map((row) => String(row.member_x_user_id ?? "").trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+  const memberLimit = perMemberLimit(uniqueMemberXIds.length);
+  let sharedMembers: StaticRelatedVideoRow[] = [];
+  if (uniqueMemberXIds.length > 0) {
+    const sharedRows = mapRows(
+      (
+        await env.DB.prepare(
+          `SELECT ${STATIC_RELATED_VIDEO_SELECT},
+                  LOWER(vm.x_user_id) AS member_x_user_id
+           FROM video_members AS vm
+           INNER JOIN videos AS v ON v.id = vm.video_id
+           WHERE ${baseWhere}
+             AND vm.x_user_id IS NOT NULL
+             AND LOWER(vm.x_user_id) IN (${uniqueMemberXIds.map(() => "?").join(",")})
+           ORDER BY v.scheduled_time DESC, COALESCE(v.score, 0) DESC
+           LIMIT 30`,
+        )
+          .bind(current.id, ...uniqueMemberXIds)
+          .all()
+      ).results ?? [],
+    );
+    const byMember = new Map<string, StaticRelatedVideoRow[]>();
+    for (const row of sharedRows) {
+      const memberId = String(
+        (row as StaticRelatedVideoRow & { member_x_user_id?: string })
+          .member_x_user_id ?? "",
+      ).trim();
+      if (!memberId) continue;
+      const bucket = byMember.get(memberId) ?? [];
+      if (!bucket.some((item) => item.id === row.id)) bucket.push(row);
+      byMember.set(memberId, bucket);
+    }
+    const mixed: StaticRelatedVideoRow[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < memberLimit; i++) {
+      for (const memberId of uniqueMemberXIds) {
+        const candidate = byMember.get(memberId)?.[i];
+        if (!candidate || seen.has(candidate.id)) continue;
+        seen.add(candidate.id);
+        mixed.push(candidate);
+        if (mixed.length >= 30) break;
+      }
+      if (mixed.length >= 30) break;
+    }
+    sharedMembers = mixed;
+  }
+  throwIfAborted(signal);
+
+  const nearDate =
+    scheduledTime != null
+      ? mapRows(
+          (
+            await bindCurrent(
+              `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+               FROM videos AS v
+               WHERE ${baseWhere}
+                 AND v.scheduled_time IS NOT NULL
+               ORDER BY ABS(v.scheduled_time - ?), COALESCE(v.score, 0) DESC
+               LIMIT ?`,
+              scheduledTime,
+              Math.min(16, nearDateLimit * 3),
+            ).all()
+          ).results ?? [],
+        )
+      : [];
+  throwIfAborted(signal);
+
+  let initialCandidates = interleaveBuckets<StaticRelatedVideoRow>([
+    { reason: "previous_date", rows: temporalPrevious },
+    { reason: "next_date", rows: temporalNext },
+    { reason: "shared_member", rows: sharedMembers.slice(0, sharedLimit) },
+    { reason: "same_event", rows: sameEvent.slice(0, sameEventLimit) },
+    { reason: "same_creator", rows: sameCreator.slice(0, sameCreatorLimit) },
+    { reason: "near_date", rows: nearDate.slice(0, nearDateLimit) },
+  ]);
+
+  if (initialCandidates.length < minTarget) {
+    const existingIds = initialCandidates.map((candidate) => candidate.row.id);
+    existingIds.push(current.id);
+    const fallbackRows = mapRows(
+      (
+        await env.DB.prepare(
+          `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+           FROM videos AS v
+           WHERE ${baseWhere}
+             AND v.id NOT IN (${existingIds.map(() => "?").join(",")})
+           ORDER BY v.scheduled_time DESC, COALESCE(v.score, 0) DESC
+           LIMIT ?`,
+        )
+          .bind(current.id, ...existingIds, minTarget - initialCandidates.length + 5)
+          .all()
+      ).results ?? [],
+    );
+    for (const row of fallbackRows) {
+      if (!initialCandidates.some((candidate) => candidate.row.id === row.id)) {
+        initialCandidates.push({ row, reason: "near_date" });
+      }
+    }
+  }
+
+  const selected = enforceDiversity(initialCandidates, {
+    limit: relatedLimit,
+    minTarget,
+  });
+
+  return selected.map((candidate) => toPublicRelatedVideoCard(candidate.row));
+}
+
 async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const row = await env.DB.prepare(
     `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name, v.creator_x_user_id,
-            creator_icon_url, music, credit, intro_comment, highlights,
+            creator_icon_url, music, credit, music_reference_url, intro_comment, highlights,
             production_story, closing_comment, visibility_status, scheduled_time,
+            COALESCE(v.app_like_count, 0) AS app_like_count,
             CASE WHEN EXISTS (
               SELECT 1 FROM events AS primary_event
               WHERE primary_event.id = v.primary_event_id
@@ -834,29 +1194,123 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
     return;
   }
 
-  const events = await env.DB.prepare(
-    `SELECT ve.event_id
-     FROM video_events AS ve
-     INNER JOIN events AS e
-       ON e.id = ve.event_id AND e.visibility_status = 'public'
-     WHERE ve.video_id = ?`,
-  )
-    .bind(internalVideoId)
-    .all();
+  const [
+    events,
+    publicEvents,
+    members,
+    softwareLabels,
+    publicChapters,
+    memberChapters,
+  ] = await Promise.all([
+    env.DB.prepare(
+      `SELECT ve.event_id
+       FROM video_events AS ve
+       INNER JOIN events AS e
+         ON e.id = ve.event_id AND e.visibility_status = 'public'
+       WHERE ve.video_id = ?`,
+    )
+      .bind(internalVideoId)
+      .all(),
+    env.DB.prepare(
+      `SELECT e.id, e.title, e.icon_url, e.accent_color,
+              e.start_time, e.end_time, e.entry_start_time, e.entry_end_time,
+              e.visibility_status
+       FROM video_events AS ve
+       INNER JOIN events AS e
+         ON e.id = ve.event_id AND e.visibility_status = 'public'
+       WHERE ve.video_id = ?
+       ORDER BY e.start_time DESC, e.id ASC`,
+    )
+      .bind(internalVideoId)
+      .all(),
+    env.DB.prepare(
+      `SELECT id, name AS display_name, x_user_id, role AS role_label, order_index
+       FROM video_members
+       WHERE video_id = ? AND is_public_member = 1
+       ORDER BY order_index ASC`,
+    )
+      .bind(internalVideoId)
+      .all(),
+    env.DB.prepare(
+      `SELECT vs.raw_label
+       FROM video_softwares AS vs
+       INNER JOIN software_catalog AS sc ON sc.id = vs.software_id
+       WHERE vs.video_id = ?
+       ORDER BY sc.name ASC, vs.raw_label ASC`,
+    )
+      .bind(internalVideoId)
+      .all<{ raw_label?: string }>(),
+    env.DB.prepare(
+      `SELECT vc.id, vc.chapter_time, vc.chapter_label, vc.note,
+              xu.x_name AS author_name, xu.icon_url AS author_icon
+       FROM video_chapters AS vc
+       LEFT JOIN x_users AS xu ON xu.id = vc.x_user_id
+       WHERE vc.video_id = ?
+         AND vc.visibility = 'public'
+         AND vc.id NOT LIKE '%:member:%'
+         AND vc.id NOT LIKE '%:legacy:%'
+       ORDER BY vc.chapter_time ASC, vc.id ASC`,
+    )
+      .bind(internalVideoId)
+      .all(),
+    env.DB.prepare(
+      `SELECT vc.id, vc.chapter_time, vc.chapter_label, vc.note,
+              CASE
+                WHEN instr(vc.id, ':member:') > 0
+                  THEN substr(vc.id, 1, instr(vc.id, ':member:') - 1)
+                WHEN instr(vc.id, ':legacy:') > 0
+                  THEN substr(vc.id, 1, instr(vc.id, ':legacy:') - 1)
+              END AS video_member_id
+       FROM video_chapters AS vc
+       INNER JOIN video_members AS vm
+         ON vm.id = CASE
+           WHEN instr(vc.id, ':member:') > 0
+             THEN substr(vc.id, 1, instr(vc.id, ':member:') - 1)
+           WHEN instr(vc.id, ':legacy:') > 0
+             THEN substr(vc.id, 1, instr(vc.id, ':legacy:') - 1)
+         END
+       WHERE vc.video_id = ?
+         AND vc.visibility = 'public'
+         AND vm.is_public_member = 1
+         AND (vc.id LIKE '%:member:%' OR vc.id LIKE '%:legacy:%')
+       ORDER BY vc.chapter_time ASC, vc.id ASC`,
+    )
+      .bind(internalVideoId)
+      .all(),
+  ]);
+  throwIfAborted(signal);
 
-  const members = await env.DB.prepare(
-    `SELECT name AS display_name, x_user_id, role AS role_label, order_index
-     FROM video_members WHERE video_id = ? AND is_public_member = 1
-     ORDER BY order_index ASC`,
-  )
-    .bind(internalVideoId)
-    .all();
+  const eventIds = (events.results ?? []).map(
+    (entry) => (entry as { event_id: string }).event_id,
+  );
+  const relatedVideos = await fetchStaticRelatedVideos(
+    env,
+    {
+      id: internalVideoId,
+      creator_x_user_id:
+        (row as { creator_x_user_id?: string | null }).creator_x_user_id ?? null,
+      primary_event_id:
+        (row as { primary_event_id?: string | null }).primary_event_id ?? null,
+      scheduled_time:
+        (row as { scheduled_time?: number | null }).scheduled_time ?? null,
+      eventIds,
+    },
+    signal,
+  );
 
   const payload = {
     generated_at: Math.floor(Date.now() / 1000),
     video: row,
-    event_ids: (events.results ?? []).map((r) => (r as { event_id: string }).event_id),
+    event_ids: eventIds,
     public_members: members.results ?? [],
+    software_labels: (softwareLabels.results ?? [])
+      .map((entry) => String(entry.raw_label ?? "").trim())
+      .filter(Boolean),
+    app_like_count: Number((row as { app_like_count?: unknown }).app_like_count ?? 0) || 0,
+    public_chapters: publicChapters.results ?? [],
+    member_chapters: memberChapters.results ?? [],
+    public_events: publicEvents.results ?? [],
+    related_videos: relatedVideos,
   };
 
   throwIfAborted(signal);
@@ -885,6 +1339,260 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
     `videos/${internalVideoId}.json`,
     ...(youtubeVideoId && youtubeVideoId !== internalVideoId ? [`videos/${youtubeVideoId}.json`] : []),
   ], 20, signal);
+}
+
+async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const [registeredRows, orphanRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT
+         xu.id AS x_id,
+         COALESCE(
+           xu.x_name,
+           (SELECT v.creator_display_name FROM videos AS v
+            WHERE v.creator_x_user_id = xu.id
+              AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+            ORDER BY v.scheduled_time DESC LIMIT 1),
+           xu.id
+         ) AS x_name,
+         COALESCE(
+           xu.icon_url,
+           (SELECT v.creator_icon_url FROM videos AS v
+            WHERE v.creator_x_user_id = xu.id
+              AND v.creator_icon_url IS NOT NULL
+              AND v.collaboration_type = 'individual'
+              AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+            ORDER BY v.scheduled_time DESC LIMIT 1),
+           (SELECT v.creator_icon_url FROM videos AS v
+            WHERE v.creator_x_user_id = xu.id
+              AND v.creator_icon_url IS NOT NULL
+              AND v.collaboration_type = 'collab'
+              AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+            ORDER BY v.scheduled_time DESC LIMIT 1)
+         ) AS icon_url,
+         xu.profile_text,
+         xu.youtube_channel_url,
+         (
+           SELECT COUNT(DISTINCT v.id)
+           FROM videos AS v
+           WHERE v.creator_x_user_id = xu.id
+             AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         ) AS personal_count,
+         (
+           SELECT COUNT(DISTINCT vm.video_id)
+           FROM video_members AS vm
+           INNER JOIN videos AS v ON v.id = vm.video_id
+           WHERE vm.x_user_id = xu.id
+             AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         ) AS collab_count,
+         (
+           SELECT COUNT(DISTINCT v.id)
+           FROM videos AS v
+           LEFT JOIN video_members AS vm ON vm.video_id = v.id
+           WHERE (v.creator_x_user_id = xu.id OR vm.x_user_id = xu.id)
+             AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         ) AS total_works,
+         COALESCE(xu.updated_at, xu.created_at, ?) AS updated_at
+       FROM x_users AS xu
+       WHERE xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})`,
+    ).bind(now).all<Record<string, unknown>>(),
+    env.DB.prepare(
+      `SELECT
+         v.creator_x_user_id AS x_id,
+         COALESCE(
+           (SELECT v2.creator_display_name FROM videos AS v2
+            WHERE v2.creator_x_user_id = v.creator_x_user_id
+              AND ${COUNTABLE_PUBLIC_VIDEO_SQL.replaceAll("v.", "v2.")}
+            ORDER BY v2.scheduled_time DESC, v2.created_at DESC LIMIT 1),
+           v.creator_x_user_id
+         ) AS x_name,
+         COALESCE(
+           (SELECT v2.creator_icon_url FROM videos AS v2
+            WHERE v2.creator_x_user_id = v.creator_x_user_id
+              AND v2.creator_icon_url IS NOT NULL
+              AND v2.collaboration_type = 'individual'
+              AND ${COUNTABLE_PUBLIC_VIDEO_SQL.replaceAll("v.", "v2.")}
+            ORDER BY v2.scheduled_time DESC, v2.created_at DESC LIMIT 1),
+           (SELECT v2.creator_icon_url FROM videos AS v2
+            WHERE v2.creator_x_user_id = v.creator_x_user_id
+              AND v2.creator_icon_url IS NOT NULL
+              AND v2.collaboration_type = 'collab'
+              AND ${COUNTABLE_PUBLIC_VIDEO_SQL.replaceAll("v.", "v2.")}
+            ORDER BY v2.scheduled_time DESC, v2.created_at DESC LIMIT 1)
+         ) AS icon_url,
+         NULL AS profile_text,
+         NULL AS youtube_channel_url,
+         COUNT(DISTINCT v.id) AS personal_count,
+         0 AS collab_count,
+         COUNT(DISTINCT v.id) AS total_works,
+         MAX(v.updated_at) AS updated_at
+       FROM videos AS v
+       LEFT JOIN x_users AS xu ON xu.id = v.creator_x_user_id
+       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         AND v.creator_x_user_id <> 'anonymous'
+         AND xu.id IS NULL
+       GROUP BY v.creator_x_user_id`,
+    ).all<Record<string, unknown>>(),
+  ]);
+
+  throwIfAborted(signal);
+  const items = [...(registeredRows.results ?? []), ...(orphanRows.results ?? [])]
+    .map((row) => {
+      const personalCount = Number(row.personal_count ?? 0) || 0;
+      const collabCount = Number(row.collab_count ?? 0) || 0;
+      const totalWorks = Number(row.total_works ?? 0) || 0;
+      const profileText =
+        row.profile_text == null ? null : String(row.profile_text).trim() || null;
+      const youtubeChannelUrl =
+        row.youtube_channel_url == null
+          ? null
+          : String(row.youtube_channel_url).trim() || null;
+      if (totalWorks <= 0 && !profileText && !youtubeChannelUrl) return null;
+      return {
+        x_id: String(row.x_id ?? "").trim(),
+        x_name: String(row.x_name ?? "").trim(),
+        icon_url: row.icon_url == null ? null : String(row.icon_url),
+        profile_text: profileText,
+        youtube_channel_url: youtubeChannelUrl,
+        personal_count: personalCount,
+        collab_count: collabCount,
+        total_works: totalWorks,
+        sort_score: totalWorks * 2 + personalCount,
+        updated_at: normalizeNumber(row.updated_at) ?? now,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => !!row?.x_id && !!row.x_name)
+    .sort(
+      (a, b) =>
+        b.sort_score - a.sort_score ||
+        a.x_name.localeCompare(b.x_name, "ja"),
+    );
+
+  await putJson(
+    env,
+    "users/index.json",
+    {
+      generated_at: now,
+      items,
+    },
+    "public, max-age=300, stale-while-revalidate=1800",
+    { targetType: "users_index", targetId: "global" },
+    signal,
+  );
+}
+
+async function rebuildRules(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const row = await env.DB.prepare(
+    `SELECT version_label, body_markdown, published_at, updated_at
+     FROM terms_versions
+     WHERE status = 'published'
+     ORDER BY published_at DESC, updated_at DESC
+     LIMIT 1`,
+  ).first<{
+    version_label?: string;
+    body_markdown?: string;
+    published_at?: number | null;
+    updated_at?: number | null;
+  }>();
+  throwIfAborted(signal);
+  const payload = row
+    ? {
+        generated_at: now,
+        version_label: row.version_label,
+        body_markdown: row.body_markdown,
+        published_at: row.published_at ?? null,
+        updated_at: row.updated_at ?? row.published_at ?? null,
+      }
+    : {
+        generated_at: now,
+        version_label: DEFAULT_TERMS_VERSION_LABEL,
+        body_markdown: DEFAULT_TERMS_MARKDOWN,
+        published_at: null,
+        updated_at: null,
+      };
+  await putJson(
+    env,
+    "rules/current.json",
+    payload,
+    "public, max-age=3600, stale-while-revalidate=86400",
+    { targetType: "rules", targetId: "global" },
+    signal,
+  );
+}
+
+async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const [recommended, latest, underrated, creators] = await Promise.all([
+    env.DB.prepare(
+      `SELECT ${STATIC_RECOMMEND_VIDEO_SELECT}
+       FROM videos AS v
+       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+       ORDER BY COALESCE(v.score, 0) DESC, v.scheduled_time DESC
+       LIMIT 180`,
+    ).all(),
+    env.DB.prepare(
+      `SELECT ${STATIC_RECOMMEND_VIDEO_SELECT}
+       FROM videos AS v
+       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+       ORDER BY v.scheduled_time DESC
+       LIMIT 120`,
+    ).all(),
+    env.DB.prepare(
+      `SELECT ${STATIC_RECOMMEND_VIDEO_SELECT}
+       FROM videos AS v
+       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+       ORDER BY COALESCE(v.score, 0) ASC, v.scheduled_time DESC
+       LIMIT 120`,
+    ).all(),
+    env.DB.prepare(
+      `WITH creator_counts AS (
+         SELECT
+           xu.id,
+           xu.x_name,
+           xu.icon_url,
+           (
+             SELECT COUNT(DISTINCT v.id)
+             FROM videos AS v
+             WHERE v.creator_x_user_id = xu.id
+               AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+           ) AS video_count,
+           (
+             SELECT COUNT(DISTINCT vm.video_id)
+             FROM video_members AS vm
+             INNER JOIN videos AS v ON v.id = vm.video_id
+             WHERE vm.x_user_id = xu.id
+               AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+           ) AS collab_count
+         FROM x_users AS xu
+         WHERE xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})
+       )
+       SELECT id, x_name, icon_url, video_count, collab_count
+       FROM creator_counts
+       WHERE video_count >= 1 OR collab_count >= 2
+       ORDER BY (video_count + collab_count) DESC, video_count DESC, x_name ASC
+       LIMIT 60`,
+    ).all(),
+  ]);
+
+  throwIfAborted(signal);
+  await putJson(
+    env,
+    "recommend.json",
+    {
+      generated_at: now,
+      recommended: recommended.results ?? [],
+      latest: latest.results ?? [],
+      underrated: underrated.results ?? [],
+      creators: creators.results ?? [],
+    },
+    "public, max-age=300, stale-while-revalidate=1800",
+    { targetType: "recommend", targetId: "global" },
+    signal,
+  );
 }
 
 async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promise<void> {

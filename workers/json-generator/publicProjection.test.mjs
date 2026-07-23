@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { rebuildTarget } from "./rebuild.ts";
+import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 
 const migrationsDir = fileURLToPath(new URL("../../migrations/", import.meta.url));
 
@@ -72,8 +73,8 @@ function fixture() {
       `INSERT INTO videos (
          id, title, youtube_video_id, creator_display_name, creator_x_user_id,
          submitted_by_user_id, visibility_status, scheduled_time,
-         primary_event_id, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         primary_event_id, music_reference_url, app_like_count, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       "video-1",
@@ -85,6 +86,8 @@ function fixture() {
       "public",
       100,
       "private-event",
+      "https://example.com/music",
+      4,
       123,
     );
   const insertVideoEvent = sqlite.prepare(
@@ -115,6 +118,18 @@ test("public static artifacts exclude private event identifiers and titles", asy
     const video = objects.get("videos/video-1.json");
     assert.equal(video.video.primary_event_id, null);
     assert.deepEqual(video.event_ids, ["public-event"]);
+    assert.equal(video.app_like_count, 4);
+    assert.equal(video.video.music_reference_url, "https://example.com/music");
+    assert.ok(Array.isArray(video.software_labels));
+    assert.ok(Array.isArray(video.public_chapters));
+    assert.ok(Array.isArray(video.member_chapters));
+    assert.equal(video.public_events.length, 1);
+    assert.equal(video.public_events[0].title, "Public Event");
+    assert.ok(Array.isArray(video.related_videos));
+    assert.doesNotMatch(JSON.stringify(video), /submitted_by_user_id/);
+    assert.doesNotMatch(JSON.stringify(video), /discord_id/);
+    assert.doesNotMatch(JSON.stringify(video.public_chapters), /x_user_id/);
+    assertNoForbiddenPublicKeys(video);
 
     await rebuildTarget(env, "list_recent", "global");
     const recent = objects.get("list/recent.json").items[0];

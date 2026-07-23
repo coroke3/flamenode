@@ -1,7 +1,9 @@
 import * as React from "react";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import { resolveCostGuardBannerSnapshot } from "@/lib/operationMode/publicMode";
 import type { OperationMode } from "@/lib/operationMode/types";
 import styles from "./CostGuardBanner.module.css";
 
@@ -39,24 +41,43 @@ const TONE: Record<
   },
 };
 
+type CostGuardBannerProps = {
+  /** 管理画面向けは D1 正本を読む。公開向けは KV / env のみ。 */
+  source?: "public" | "admin";
+};
+
 /**
  * operation_mode が normal 以外のとき、上部に簡易バナーを表示するサーバーコンポーネント。
- * DB アクセスに失敗した場合は何も出さない (静かに失敗)。
+ * 公開向けは D1 を毎回読まない。
  */
-export async function CostGuardBanner(): Promise<React.ReactElement | null> {
-  const db = getDatabase();
-  if (!db) return null;
+export async function CostGuardBanner({
+  source = "public",
+}: CostGuardBannerProps = {}): Promise<React.ReactElement | null> {
   let mode: OperationMode = "normal";
   let reason: string | null = null;
-  try {
-    const rows = await db.select().from(systemSettings).limit(1);
-    const r = rows[0];
-    if (r) {
-      mode = resolveOperationMode(r);
-      reason = r.cost_guard_reason ?? null;
+
+  if (source === "admin") {
+    const db = getDatabase();
+    if (!db) return null;
+    try {
+      const rows = await db
+        .select()
+        .from(systemSettings)
+        .where(eq(systemSettings.id, "default"))
+        .limit(1);
+      const row = rows[0];
+      if (row) {
+        mode = resolveOperationMode(row);
+        reason = row.cost_guard_reason ?? null;
+      }
+    } catch {
+      return null;
     }
-  } catch {
-    return null;
+  } else {
+    const snapshot = await resolveCostGuardBannerSnapshot();
+    if (!snapshot) return null;
+    mode = snapshot.mode;
+    reason = snapshot.reason;
   }
 
   if (mode === "normal") return null;

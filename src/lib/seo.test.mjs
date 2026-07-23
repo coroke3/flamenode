@@ -99,11 +99,12 @@ test("buildPageMetadata title falls back when env title looks like mojibake", ()
   assert.equal(meta.title, "作品一覧");
 });
 
-test("sitemap creator query filters listable X users only", async () => {
+test("sitemap builds from static R2 indexes without D1", async () => {
   const source = await readFile(
     new URL("../../app/sitemap.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /publicListableXApprovalWhere/);
+  assert.match(source, /buildStaticSitemapEntries/);
+  assert.doesNotMatch(source, /withDatabase/);
   assert.doesNotMatch(source, /portfolio/);
 });

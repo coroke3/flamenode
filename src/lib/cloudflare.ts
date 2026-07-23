@@ -33,6 +33,7 @@ export interface FlameNodeEnv {
   AUTH_URL?: string;
   NEXT_PUBLIC_SITE_URL?: string;
   FLAMENODE_LOCAL_PREVIEW?: string;
+  FORCE_STATIC_ONLY?: string;
 }
 
 type BindingName = "DB" | "BUCKET" | "KV" | "context";

@@ -156,6 +156,12 @@
   gap: 8px;
 }
 
+.accountPlaceholder {
+  min-width: 88px;
+  min-height: var(--header-action-h);
+  visibility: hidden;
+}
+
 .postBtn,
 .joinBtn,
 .ghostBtn,

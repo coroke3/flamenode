@@ -6,9 +6,12 @@ const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
   event: "イベント詳細",
   video: "作品詳細",
   user: "クリエイター",
+  users_index: "クリエイター一覧",
   list_recent: "作品一覧（新着）",
   list_popular: "作品一覧（人気）",
   search_index: "検索インデックス",
+  recommend: "おすすめページ",
+  rules: "利用規約",
 };
 
 const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
@@ -17,9 +20,12 @@ const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
   event: "イベント ID",
   video: "作品 ID（内部）",
   user: "X ID",
+  users_index: "global など固定ID",
   list_recent: "ページ番号など",
   list_popular: "ページ番号など",
   search_index: "global など固定ID",
+  recommend: "global など固定ID",
+  rules: "global など固定ID",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -54,11 +60,17 @@ export function staticRebuildAdminHref(
       return `/admin/users?q=${encodeURIComponent(targetId)}`;
     case "events_index":
       return "/admin/events";
+    case "users_index":
+      return "/user";
+    case "recommend":
+      return "/recommend";
     case "list_recent":
     case "list_popular":
       return "/admin/videos";
     case "top":
       return "/";
+    case "rules":
+      return "/rules";
     default:
       return null;
   }

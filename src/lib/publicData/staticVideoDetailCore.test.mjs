@@ -19,7 +19,12 @@ if (runTestWithTsx(import.meta.url)) {
       },
       event_ids: ["event1", ""],
       public_members: [
-        { display_name: "Member", x_user_id: "member", order_index: 1 },
+        {
+          id: "member1",
+          display_name: "Member",
+          x_user_id: "member",
+          order_index: 1,
+        },
       ],
     });
 
@@ -27,6 +32,70 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(detail.video.id, "video1");
     assert.deepEqual(detail.eventIds, ["event1"]);
     assert.equal(detail.publicMembers[0].display_name, "Member");
+    assert.equal(detail.appLikeCount, 0);
+    assert.deepEqual(detail.softwareLabels, []);
+    assert.deepEqual(detail.publicChapters, []);
+    assert.deepEqual(detail.memberChapters, []);
+    assert.deepEqual(detail.publicEvents, []);
+    assert.deepEqual(detail.relatedVideos, []);
+  });
+
+  test("normalizeStaticVideoDetail: normalizes extended public payload", () => {
+    const detail = normalizeStaticVideoDetail({
+      generated_at: 200,
+      app_like_count: 12,
+      software_labels: ["After Effects", "Premiere Pro"],
+      video: {
+        id: "video1",
+        title: "Video 1",
+        creator_x_user_id: "creator",
+        creator_display_name: "Creator",
+        music_reference_url: "https://example.com/music",
+        visibility_status: "public",
+      },
+      event_ids: ["event1"],
+      public_events: [
+        {
+          id: "event1",
+          title: "Event 1",
+          visibility_status: "public",
+          accent_color: "#ff0000",
+        },
+      ],
+      public_chapters: [
+        {
+          id: "ch1",
+          chapter_time: 30,
+          chapter_label: "Intro",
+          author_name: "Creator",
+        },
+      ],
+      member_chapters: [
+        {
+          id: "vm1:member:0",
+          video_member_id: "vm1",
+          chapter_time: 60,
+          chapter_label: "担当",
+        },
+      ],
+      related_videos: [
+        {
+          id: "video2",
+          title: "Related",
+          display_name: "Other",
+        },
+      ],
+    });
+
+    assert.ok(detail);
+    assert.equal(detail.appLikeCount, 12);
+    assert.deepEqual(detail.softwareLabels, ["After Effects", "Premiere Pro"]);
+    assert.equal(detail.video.creator_x_user_id, "creator");
+    assert.equal(detail.video.music_reference_url, "https://example.com/music");
+    assert.equal(detail.publicEvents[0].title, "Event 1");
+    assert.equal(detail.publicChapters[0].chapter_label, "Intro");
+    assert.equal(detail.memberChapters[0].video_member_id, "vm1");
+    assert.equal(detail.relatedVideos[0].display_name, "Other");
   });
 
   test("normalizeStaticVideoDetail: rejects payload without video title", () => {

@@ -97,6 +97,21 @@ forbidMatch(
   "公開ヘッダーにX ID選択ボタンが残っています。",
 );
 requireMatch(
+  "src/components/layout/PublicAccountIsland.tsx",
+  /\/api\/account\/summary/,
+  "公開アカウント島が account summary API を取得していません。",
+);
+requireMatch(
+  "app/api/account/summary/route.ts",
+  /private, no-store/,
+  "account summary API が private no-store を返していません。",
+);
+forbidMatch(
+  "app/(public)/layout.tsx",
+  /getCurrentUser|buildHeaderUser|CostGuardBanner/,
+  "公開layoutにserver authまたはCostGuard D1読取が残っています。",
+);
+requireMatch(
   "src/components/layout/PublicHeader.module.css",
   /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+max-content\s+minmax\(0,\s*1fr\)/,
   "Desktop public navigation must use equal outer grid tracks so it is centered in the viewport.",

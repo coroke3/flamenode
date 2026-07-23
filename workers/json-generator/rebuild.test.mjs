@@ -168,6 +168,11 @@ test("public static JSON queries exclude private event relations", () => {
     source,
     /SELECT ve\.event_id[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
   );
+  assert.match(source, /software_labels/);
+  assert.match(source, /public_chapters/);
+  assert.match(source, /member_chapters/);
+  assert.match(source, /related_videos/);
+  assert.match(source, /app_like_count/);
 });
 
 test("event groupとjunctionの取得件数を固定する", () => {

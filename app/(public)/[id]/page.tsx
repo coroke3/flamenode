@@ -45,6 +45,7 @@ import {
 import { loadStaticVideoDetail } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type { StaticVideoDetail } from "@/lib/publicData/loader";
+import { buildPublicVideoViewModelFromStatic } from "@/lib/publicData/publicVideoDetailViewModel";
 
 export const dynamic = "force-dynamic";
 
@@ -117,9 +118,27 @@ export default async function VideoDetailPage({
   const { playlist = "" } = (await searchParams) ?? {};
 
   const staticProbe = await loadStaticVideoDetail(rawId);
+  if (staticProbe.data) {
+    const overlay = await fetchVideoViewerOverlay({
+      rawId,
+      videoId: staticProbe.data.video.id,
+      playlist,
+      creatorXUserId: staticProbe.data.video.creator_x_user_id ?? null,
+      playlistEventTitle:
+        staticProbe.data.publicEvents.find((event) => event.id === playlist)
+          ?.title ?? null,
+    });
+    return (
+      <StaticVideoDetailView
+        detail={staticProbe.data}
+        rawId={rawId}
+        playlist={playlist}
+        overlay={overlay}
+      />
+    );
+  }
   if (!canFallbackToDatabase(staticProbe.strategy)) {
-    if (!staticProbe.data) notFound();
-    return <StaticVideoDetailView detail={staticProbe.data} rawId={rawId} />;
+    notFound();
   }
 
   const viewerUser = await getCurrentUser();
@@ -718,17 +737,226 @@ export default async function VideoDetailPage({
   );
 }
 
+type VideoViewerOverlay = {
+  viewerUser: Awaited<ReturnType<typeof getCurrentUser>>;
+  likeActive: boolean;
+  bookmarkActive: boolean;
+  viewerXApproved: boolean;
+  viewerCanEditChapters: boolean;
+  creatorYoutubeChannelUrl: string | null;
+  playlistLabel: string;
+  playlistItems: {
+    id: string;
+    title: string;
+    youtube_video_id: string | null;
+    display_name: string;
+  }[];
+};
+
+async function fetchVideoViewerOverlay({
+  rawId,
+  videoId,
+  playlist,
+  creatorXUserId,
+  playlistEventTitle,
+}: {
+  rawId: string;
+  videoId: string;
+  playlist: string;
+  creatorXUserId: string | null;
+  playlistEventTitle?: string | null;
+}): Promise<VideoViewerOverlay> {
+  const emptyOverlay: VideoViewerOverlay = {
+    viewerUser: null,
+    likeActive: false,
+    bookmarkActive: false,
+    viewerXApproved: false,
+    viewerCanEditChapters: false,
+    creatorYoutubeChannelUrl: null,
+    playlistLabel: "再生リスト",
+    playlistItems: [],
+  };
+
+  let viewerUser: Awaited<ReturnType<typeof getCurrentUser>> = null;
+  try {
+    viewerUser = await getCurrentUser();
+    if (!viewerUser) return emptyOverlay;
+
+    const viewerActiveX = viewerUser.active_x_user_id ?? null;
+    const overlay = await withDatabase(async (db) => {
+      let viewerCanEditChapters = false;
+      const probe = (
+        await db
+          .select()
+          .from(videosTable)
+          .where(
+            rawId.length === 11
+              ? eq(videosTable.youtube_video_id, rawId)
+              : eq(videosTable.id, rawId),
+          )
+          .limit(1)
+      )[0];
+      if (probe) {
+        viewerCanEditChapters = await canEditVideo({
+          db,
+          user: { id: viewerUser!.id, role: viewerUser!.role ?? null },
+          video: probe,
+          requiredKey: "video.chapter_admin",
+          privilegeMode: resolveAdminOrEventVideoPrivilegeMode(viewerUser!.role),
+        });
+      }
+
+      let likeActive = false;
+      let bookmarkActive = false;
+      let viewerXApproved = false;
+      if (viewerActiveX) {
+        const interactions = await db
+          .select()
+          .from(videoInteractions)
+          .where(
+            and(
+              eq(videoInteractions.x_user_id, viewerActiveX),
+              eq(videoInteractions.video_id, videoId),
+            )!,
+          );
+        likeActive = interactions.some((i) => i.interaction_type === "like");
+        bookmarkActive = interactions.some(
+          (i) => i.interaction_type === "bookmark",
+        );
+
+        const xRow = (
+          await db
+            .select({ approval_status: xUsers.approval_status })
+            .from(xUsers)
+            .where(eq(xUsers.id, viewerActiveX))
+            .limit(1)
+        )[0];
+        viewerXApproved = xRow?.approval_status === "approved";
+      }
+
+      let creatorYoutubeChannelUrl: string | null = null;
+      if (creatorXUserId) {
+        const creatorRow = (
+          await db
+            .select({ youtube_channel_url: xUsers.youtube_channel_url })
+            .from(xUsers)
+            .where(eq(xUsers.id, creatorXUserId))
+            .limit(1)
+        )[0];
+        creatorYoutubeChannelUrl = creatorRow?.youtube_channel_url ?? null;
+      }
+
+      let playlistLabel = "再生リスト";
+      let playlistItems: VideoViewerOverlay["playlistItems"] = [];
+
+      if (playlist) {
+        if (playlist === "lib-like" || playlist === "lib-bookmark") {
+          if (viewerActiveX) {
+            const kind = playlist === "lib-like" ? "like" : "bookmark";
+            const myInteractions = await db
+              .select({ video_id: videoInteractions.video_id })
+              .from(videoInteractions)
+              .where(
+                and(
+                  eq(videoInteractions.x_user_id, viewerActiveX),
+                  eq(videoInteractions.interaction_type, kind),
+                )!,
+              );
+            const ids = myInteractions.map((r) => r.video_id);
+            if (ids.length > 0) {
+              const rows = await db
+                .select({
+                  id: videosTable.id,
+                  title: videosTable.title,
+                  youtube_video_id: videosTable.youtube_video_id,
+                  display_name: videosTable.creator_display_name,
+                })
+                .from(videosTable)
+                .where(
+                  and(
+                    inArray(videosTable.id, ids),
+                    eq(videosTable.visibility_status, "public"),
+                  )!,
+                )
+                .orderBy(desc(videosTable.scheduled_time));
+              playlistLabel =
+                kind === "like" ? "いいねした作品" : "セーブした作品";
+              playlistItems = rows.map((v) => ({
+                id: v.id,
+                title: v.title,
+                youtube_video_id: v.youtube_video_id,
+                display_name: v.display_name,
+              }));
+            }
+          }
+        } else {
+          const evVideos = await fetchEventPlaylistVideos(db, playlist);
+          if (evVideos.length > 1) {
+            playlistLabel = `${playlistEventTitle ?? "イベント"} 上映順`;
+            playlistItems = evVideos.map((v) => ({
+              id: v.id,
+              title: v.title,
+              youtube_video_id: v.youtube_video_id,
+              display_name: v.display_name,
+            }));
+          }
+        }
+      }
+
+      return {
+        likeActive,
+        bookmarkActive,
+        viewerXApproved,
+        viewerCanEditChapters,
+        creatorYoutubeChannelUrl,
+        playlistLabel,
+        playlistItems,
+      };
+    });
+
+    if (!overlay) {
+      return { ...emptyOverlay, viewerUser };
+    }
+
+    return {
+      viewerUser,
+      likeActive: overlay.likeActive,
+      bookmarkActive: overlay.bookmarkActive,
+      viewerXApproved: overlay.viewerXApproved,
+      viewerCanEditChapters: overlay.viewerCanEditChapters,
+      creatorYoutubeChannelUrl: overlay.creatorYoutubeChannelUrl,
+      playlistLabel: overlay.playlistLabel,
+      playlistItems: overlay.playlistItems,
+    };
+  } catch {
+    return { ...emptyOverlay, viewerUser };
+  }
+}
+
 function StaticVideoDetailView({
   detail,
   rawId,
+  playlist = "",
+  overlay,
 }: {
   detail: StaticVideoDetail;
   rawId: string;
+  playlist?: string;
+  overlay?: VideoViewerOverlay | null;
 }): React.ReactElement {
-  const { video } = detail;
+  const vm = buildPublicVideoViewModelFromStatic(detail);
+  const { video } = vm;
   if (video.visibility_status !== "public") {
     notFound();
   }
+  const viewerUser = overlay?.viewerUser ?? null;
+  const viewerActiveX = viewerUser?.active_x_user_id ?? null;
+  const likeActive = overlay?.likeActive ?? false;
+  const bookmarkActive = overlay?.bookmarkActive ?? false;
+  const viewerXApproved = overlay?.viewerXApproved ?? false;
+  const creatorYoutubeChannelUrl = overlay?.creatorYoutubeChannelUrl ?? null;
+  const playlistLabel = overlay?.playlistLabel ?? "再生リスト";
+  const playlistItems = overlay?.playlistItems ?? [];
   const creatorIcon = video.creator_icon_url ?? null;
   const creatorId = video.creator_x_user_id ?? "anonymous";
   const creatorName =
@@ -738,6 +966,11 @@ function StaticVideoDetailView({
   const youtubeId = video.youtube_video_id
     ? extractYoutubeId(video.youtube_video_id)
     : null;
+  const primaryEvent = vm.primaryEvent;
+  const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
+  const accentVar = primaryEvent?.accent_color
+    ? buildAccentVars(primaryEvent.accent_color, "dark")
+    : undefined;
   const videoJsonLd = {
     "@context": "https://schema.org",
     "@type": "VideoObject",
@@ -787,8 +1020,64 @@ function StaticVideoDetailView({
     </span>
   );
 
+  const authorIconLinks: React.ReactNode[] = [];
+  if (creatorHref) {
+    authorIconLinks.push(
+      <Link
+        key="flamenode"
+        href={creatorHref}
+        className="fn-icon-btn"
+        aria-label="FlameNode のプロフィールを開く"
+        title="FlameNode のプロフィール"
+      >
+        <Icon name="user" size={13} aria-hidden />
+      </Link>,
+    );
+  }
+  if (creatorId && creatorId !== "anonymous") {
+    authorIconLinks.push(
+      <a
+        key="x"
+        href={`https://x.com/${creatorId}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fn-icon-btn"
+        aria-label={`X (@${creatorId}) を開く`}
+        title={`X (@${creatorId})`}
+      >
+        <Icon name="x" size={13} aria-hidden />
+      </a>,
+    );
+  }
+  if (creatorYoutubeChannelUrl) {
+    authorIconLinks.push(
+      <a
+        key="youtube"
+        href={creatorYoutubeChannelUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fn-icon-btn"
+        aria-label="YouTube チャンネルを開く"
+        title="YouTube チャンネル"
+      >
+        <Icon name="youtube" size={13} aria-hidden />
+      </a>,
+    );
+  }
+  const authorLinkGroup =
+    authorIconLinks.length > 0 ? (
+      <div className={styles.authorLinkGroup} aria-label="投稿者へのリンク">
+        {authorIconLinks}
+      </div>
+    ) : null;
+  const currentPath = `/${rawId}`;
+  const canInteract = !!(viewerUser?.id && viewerActiveX && viewerXApproved);
+
   return (
-    <div className={`fn-vd fn-public-container fn-page ${styles.page}`}>
+    <div
+      className={`fn-vd fn-public-container fn-page ${styles.page}`}
+      style={accentVar}
+    >
       <JsonLd data={videoJsonLd} />
       <div className={styles.layout}>
         <article className={styles.main}>
@@ -809,12 +1098,132 @@ function StaticVideoDetailView({
               <h1 className={styles.title}>{video.title}</h1>
               <div className={styles.author}>
                 {creatorHref ? <Link href={creatorHref}>{authorBlock}</Link> : authorBlock}
+                {authorLinkGroup}
+                <div className={styles.authorActions}>
+                  <InteractionButton
+                    videoId={video.id}
+                    kind="like"
+                    initialActive={likeActive}
+                    count={vm.appLikeCount}
+                    canInteract={canInteract}
+                  />
+                  <InteractionButton
+                    videoId={video.id}
+                    kind="bookmark"
+                    initialActive={bookmarkActive}
+                    canInteract={canInteract}
+                  />
+                  {!canInteract ? (
+                    <span className={styles.interactionHint}>
+                      {!viewerUser?.id ? (
+                        <>
+                          ログインするといいね、セーブができます。
+                          <Link
+                            href={`/entry?next=${encodeURIComponent(currentPath)}`}
+                            className={styles.interactionHintLink}
+                          >
+                            ログイン
+                          </Link>
+                        </>
+                      ) : !viewerActiveX ? (
+                        <>
+                          X IDを選択するといいね、セーブができます。
+                          <Link
+                            href={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`}
+                            className={styles.interactionHintLink}
+                          >
+                            X ID設定へ
+                          </Link>
+                        </>
+                      ) : (
+                        <>
+                          承認済みX IDが必要です。
+                          <Link
+                            href={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`}
+                            className={styles.interactionHintLink}
+                          >
+                            X ID設定へ
+                          </Link>
+                        </>
+                      )}
+                    </span>
+                  ) : null}
+                </div>
               </div>
+
+              {primaryEvent ? (
+                <div
+                  className={styles.eventBox}
+                  style={
+                    primaryEvent.accent_color
+                      ? buildAccentVars(primaryEvent.accent_color, "dark")
+                      : undefined
+                  }
+                >
+                  <span className={styles.eventBoxLabel}>イベント</span>
+                  {primaryEvent.icon_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={primaryEvent.icon_url}
+                      alt=""
+                      className={styles.eventBoxIcon}
+                    />
+                  ) : null}
+                  <Link href={`/event/${primaryEvent.id}`} className={styles.eventBoxTitle}>
+                    {primaryEvent.title}
+                  </Link>
+                  {primaryEventStatus ? (
+                    <span
+                      className={`fn-badge ${eventStatusBadgeClass(primaryEventStatus)}`}
+                    >
+                      {eventStatusLabel(primaryEventStatus)}
+                    </span>
+                  ) : null}
+                  {isAcceptingEntries(primaryEvent) ? (
+                    <span className="fn-badge fn-badge-soft">受付中</span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {vm.publicEvents.length > 1 ? (
+                <div className="fn-vd-event-tags" aria-label="その他の所属イベント">
+                  <span className="fn-vd-event-tags-label">他の所属</span>
+                  {vm.publicEvents
+                    .filter((event) => !primaryEvent || event.id !== primaryEvent.id)
+                    .map((event) => (
+                      <Link
+                        key={event.id}
+                        href={`/event/${event.id}`}
+                        className="fn-badge fn-badge-soft"
+                      >
+                        {event.title}
+                      </Link>
+                    ))}
+                </div>
+              ) : null}
+
               <div className={styles.metaSection}>
                 {video.music ? (
                   <InlineMetaItem title="楽曲">
-                    {video.music}
-                    {video.credit ? ` / ${video.credit}` : ""}
+                    {video.music_reference_url ? (
+                      <a
+                        href={video.music_reference_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="fn-vd-meta-link"
+                      >
+                        <span>
+                          {video.music}
+                          {video.credit ? ` / ${video.credit}` : ""}
+                        </span>
+                        <Icon name="external" size={12} aria-hidden />
+                      </a>
+                    ) : (
+                      <>
+                        {video.music}
+                        {video.credit ? ` / ${video.credit}` : ""}
+                      </>
+                    )}
                   </InlineMetaItem>
                 ) : null}
                 {video.intro_comment ? (
@@ -822,13 +1231,35 @@ function StaticVideoDetailView({
                     <IntroCommentBlock text={video.intro_comment} />
                   </InlineMetaItem>
                 ) : null}
+                {vm.softwareLabel ? (
+                  <InlineMetaItem title="使用ソフト">{vm.softwareLabel}</InlineMetaItem>
+                ) : null}
                 {video.highlights || video.production_story || video.closing_comment ? (
                   <details className={styles.detailComments}>
                     <summary>詳細コメント</summary>
                     <div className={styles.detailCommentsBody}>
-                      {video.highlights ? <p>{video.highlights}</p> : null}
-                      {video.production_story ? <p>{video.production_story}</p> : null}
-                      {video.closing_comment ? <p>{video.closing_comment}</p> : null}
+                      {video.highlights ? (
+                        <section>
+                          <h4 className={styles.inlineMetaTitle}>みどころ</h4>
+                          <p style={{ margin: "4px 0 0", lineHeight: 1.7 }}>
+                            {video.highlights}
+                          </p>
+                        </section>
+                      ) : null}
+                      {video.production_story ? (
+                        <section>
+                          <h4 className={styles.inlineMetaTitle}>制作エピソード</h4>
+                          <p className="fn-vd-meta-body">{video.production_story}</p>
+                        </section>
+                      ) : null}
+                      {video.closing_comment ? (
+                        <section>
+                          <h4 className={styles.inlineMetaTitle}>あとがき</h4>
+                          <p style={{ margin: "4px 0 0", lineHeight: 1.7 }}>
+                            {video.closing_comment}
+                          </p>
+                        </section>
+                      ) : null}
                     </div>
                   </details>
                 ) : null}
@@ -836,44 +1267,85 @@ function StaticVideoDetailView({
             </div>
           </div>
 
-          {detail.publicMembers.length > 0 ? (
+          {vm.publicMembers.length > 0 ? (
             <section className={`${styles.section} ${styles.membersBlock}`}>
               <h2 className={styles.sectionTitle}>
-                参加メンバー ({detail.publicMembers.length})
+                参加メンバー ({vm.publicMembers.length})
               </h2>
-              <ul className={styles.relatedList}>
-                {detail.publicMembers.map((member) => (
-                  <li key={`${member.x_user_id ?? member.display_name}-${member.order_index ?? ""}`}>
-                    {member.x_user_id ? (
-                      <Link href={`/user/${member.x_user_id}`}>
-                        {member.display_name}
-                      </Link>
-                    ) : (
-                      member.display_name
-                    )}
-                    {member.role_label ? ` / ${member.role_label}` : ""}
-                  </li>
-                ))}
-              </ul>
+              <MemberSection
+                members={vm.publicMembers.map((member) => ({
+                  id: member.id,
+                  x_user_id: member.x_user_id,
+                  name: member.display_name,
+                  role: member.role_label,
+                  comment: null,
+                  x_name: null,
+                  icon_url: null,
+                }))}
+                memberChapters={vm.memberChapters.map((chapter) => ({
+                  id: chapter.id,
+                  chapter_time: chapter.chapter_time,
+                  chapter_label: chapter.chapter_label,
+                  note: chapter.note,
+                  video_member_id: chapter.video_member_id,
+                }))}
+              />
             </section>
           ) : null}
         </article>
 
         <aside className={styles.chapterRail} aria-label="チャプター">
-          <section className="fn-vd-login-panel">
-            <span>
-              <Icon name="info" size={12} aria-hidden />
-              ログインするといいね、セーブ、チャプターコメントが使えます。
-            </span>
-            <Link
-              href={`/entry?next=${encodeURIComponent(`/${rawId}`)}`}
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-            >
-              ログイン
-            </Link>
-          </section>
+          {playlist && playlistItems.length > 0 ? (
+            <PlaylistRail
+              label={playlistLabel}
+              items={playlistItems}
+              currentId={rawId}
+              playlistId={playlist || undefined}
+            />
+          ) : null}
+
+          <div className={styles.chapterBody}>
+            <ChapterTabs
+              chapters={vm.publicChapters.map((chapter) => ({
+                id: chapter.id,
+                chapter_time: chapter.chapter_time,
+                chapter_label: chapter.chapter_label,
+                visibility: "public" as const,
+                marker_kind: "comment" as const,
+                note: chapter.note,
+                author_name: chapter.author_name,
+                author_icon: chapter.author_icon,
+              }))}
+            />
+          </div>
+
+          {viewerUser?.id ? (
+            <ChapterComposer
+              videoId={video.id}
+              canPost={viewerXApproved}
+              canBulk={false}
+              settingsHref={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`}
+            />
+          ) : (
+            <section className="fn-vd-login-panel">
+              <span>
+                <Icon name="info" size={12} aria-hidden />
+                ログインするといいね、セーブ、チャプターコメントが使えます。
+              </span>
+              <Link
+                href={`/entry?next=${encodeURIComponent(currentPath)}`}
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+              >
+                ログイン
+              </Link>
+            </section>
+          )}
         </aside>
 
+        <aside className={styles.relatedRail} aria-label="関連動画">
+          <h3 className={styles.relatedHeading}>関連動画</h3>
+          <RelatedList videos={vm.relatedVideos} firstCount={18} />
+        </aside>
       </div>
     </div>
   );

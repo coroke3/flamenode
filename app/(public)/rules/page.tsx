@@ -1,8 +1,5 @@
 import * as React from "react";
 import type { Metadata } from "next";
-import { desc, eq } from "drizzle-orm";
-import { withDatabase } from "@/lib/cloudflare";
-import { termsVersions } from "@/lib/db/schema";
 import { acceptLatestTerms } from "@/lib/actions/terms";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
@@ -13,12 +10,12 @@ import {
   DEFAULT_TERMS_VERSION_LABEL,
 } from "@/lib/terms/defaultTerms";
 import { buildPageMetadata } from "@/lib/seo";
+import { loadStaticRulesPage } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/rules",
   title: "利用規約",
 });
-export const dynamic = "force-dynamic";
 
 function renderMarkdown(markdown: string): React.ReactNode[] {
   return parseLegalMarkdown(markdown).map((block, blockIndex) => {
@@ -45,29 +42,11 @@ export default async function RulesPage({
 }): Promise<React.ReactElement> {
   const params = await searchParams;
   const next = sanitizeNextPath(params?.next);
-  const data = await withDatabase(async (db) => {
-    const rows = await db
-      .select()
-      .from(termsVersions)
-      .where(eq(termsVersions.status, "published"))
-      .orderBy(desc(termsVersions.published_at), desc(termsVersions.updated_at))
-      .limit(1);
-    if (rows[0]) {
-      return {
-        body: rows[0].body_markdown,
-        updatedAt: rows[0].published_at ?? rows[0].updated_at,
-        versionLabel: rows[0].version_label,
-      };
-    }
-    return null;
-  }).catch((error) => {
-    console.error("[RulesPage] failed to load published terms", error);
-    return null;
-  });
+  const staticRules = await loadStaticRulesPage();
 
-  const body = data?.body ?? DEFAULT_TERMS_MARKDOWN;
-  const updatedAt = data?.updatedAt ?? null;
-  const versionLabel = data?.versionLabel ?? DEFAULT_TERMS_VERSION_LABEL;
+  const body = staticRules.rules?.bodyMarkdown ?? DEFAULT_TERMS_MARKDOWN;
+  const updatedAt = staticRules.rules?.publishedAt ?? staticRules.rules?.updatedAt ?? null;
+  const versionLabel = staticRules.rules?.versionLabel ?? DEFAULT_TERMS_VERSION_LABEL;
 
   return (
     <div className="fn-public-container fn-page">

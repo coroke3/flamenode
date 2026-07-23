@@ -6,16 +6,19 @@ import {
   STATIC_REBUILD_TARGET_TYPES,
 } from "./types.ts";
 
-test("static rebuild targetはcanonical 8種だけを受理する", () => {
+test("static rebuild targetはcanonical 11種だけを受理する", () => {
   assert.deepEqual(STATIC_REBUILD_TARGET_TYPES, [
     "top",
     "events_index",
     "event",
     "video",
     "user",
+    "users_index",
     "list_recent",
     "list_popular",
     "search_index",
+    "recommend",
+    "rules",
   ]);
   for (const target of STATIC_REBUILD_TARGET_TYPES) {
     assert.equal(isStaticRebuildTargetType(target), true);

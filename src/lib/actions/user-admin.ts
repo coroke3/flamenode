@@ -315,6 +315,13 @@ export async function refreshXUserIcon(formData: FormData): Promise<UserAdminRes
       priority: "normal",
       requestedByUserId: guard.user.id,
     },
+    {
+      targetType: "users_index",
+      targetId: "global",
+      reason: "admin_x_icon_refresh",
+      priority: "normal",
+      requestedByUserId: guard.user.id,
+    },
   ]);
   try {
     await mutateWithAudit(db, {

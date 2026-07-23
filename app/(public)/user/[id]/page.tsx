@@ -144,14 +144,16 @@ export default async function UserPage({
     maxPageSize: COLLAB_PAGE_SIZE,
   });
   const staticLoaded = await loadStaticUserProfile(id);
-  if (!canFallbackToDatabase(staticLoaded.strategy)) {
-    if (!staticLoaded.data) notFound();
+  if (staticLoaded.data) {
     return (
       <StaticUserProfileView
         profile={staticLoaded.data}
         page={worksPaging.page}
       />
     );
+  }
+  if (!canFallbackToDatabase(staticLoaded.strategy)) {
+    notFound();
   }
 
   const bundle = await withDatabase(async (db) => {

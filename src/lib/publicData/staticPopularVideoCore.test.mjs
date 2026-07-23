@@ -1,0 +1,19 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { normalizeStaticPopularVideoPage } from "./staticPopularVideoCore.ts";
+
+test("normalizeStaticPopularVideoPage paginates score-sorted items", () => {
+  const payload = {
+    generated_at: 100,
+    total: 3,
+    items: [
+      { id: "v1", title: "One", creator_display_name: "A" },
+      { id: "v2", title: "Two", creator_display_name: "B" },
+      { id: "v3", title: "Three", creator_display_name: "C" },
+    ],
+  };
+  const page = normalizeStaticPopularVideoPage(payload, 2, 2);
+  assert.equal(page?.videos.length, 1);
+  assert.equal(page?.videos[0]?.id, "v3");
+  assert.equal(page?.total, 3);
+});
