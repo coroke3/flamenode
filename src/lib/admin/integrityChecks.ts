@@ -382,16 +382,16 @@ export async function runIntegrityChecks(
       area: "video_members",
       title: "編集権限メンバーの主体欠落",
       severity: "danger",
-      description: "can_edit=1 なのに x_user_id も user_id も空の行。",
+      description: "can_edit=1 なのに x_user_id が空の行。",
       from: sql`video_members`,
-      where: sql`can_edit = 1 AND (x_user_id IS NULL OR trim(x_user_id) = '') AND (user_id IS NULL OR trim(user_id) = '')`,
+      where: sql`can_edit = 1 AND (x_user_id IS NULL OR trim(x_user_id) = '')`,
       sampleSelect: {
         id: sql<string>`id`,
         video_id: sql<string>`video_id`,
         name: sql<string>`name`,
       },
       recommendation:
-        "編集権限の主体が不明です。can_edit を解除するか、正しい X ID / 内部ユーザー ID を設定してください。",
+        "編集権限の主体が不明です。can_edit を解除するか、正しい X ID を設定してください。",
       sqlPreview:
         "UPDATE video_members SET can_edit = 0 WHERE id = '<video_member_id>';",
       mapIssue: (r) => ({
@@ -573,7 +573,7 @@ export async function runIntegrityChecks(
       recommendation:
         "YouTube 同期キューに拾われません。video_youtube_metadata を pending で作成してください。",
       sqlPreview:
-        "INSERT INTO video_youtube_metadata (video_id, youtube_video_id, sync_status, updated_at) VALUES ('<video_id>', '<youtube_id>', 'pending', unixepoch());",
+        "INSERT INTO video_youtube_metadata (video_id, sync_status, updated_at) VALUES ('<video_id>', 'pending', unixepoch());",
       mapIssue: (r) => ({
         id: text(r.id),
         title: text(r.title),
@@ -592,7 +592,7 @@ export async function runIntegrityChecks(
       where: sql`NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = video_youtube_metadata.video_id)`,
       sampleSelect: {
         video_id: sql<string>`video_id`,
-        youtube_video_id: sql<string>`youtube_video_id`,
+        sync_status: sql<string>`sync_status`,
       },
       recommendation:
         "元動画が削除された可能性があります。不要なら metadata 行を削除してください。",
@@ -601,7 +601,7 @@ export async function runIntegrityChecks(
       mapIssue: (r) => ({
         id: text(r.video_id),
         title: `video:${text(r.video_id)}`,
-        description: `YouTube ID: ${text(r.youtube_video_id) || "なし"}`,
+        description: `sync_status: ${text(r.sync_status) || "なし"}`,
       }),
     }),
     makeCheck({

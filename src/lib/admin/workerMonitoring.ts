@@ -310,7 +310,6 @@ export async function loadWorkerMonitoring(
           AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
           AND v.visibility_status <> 'voided'
           AND ym.sync_status IN ('synced', 'failed')
-          AND ym.youtube_video_id IS v.youtube_video_id
           AND ym.synced_at IS NOT NULL AND ym.synced_at <= ?1 - 3600
        UNION
        SELECT v.id
@@ -318,7 +317,6 @@ export async function loadWorkerMonitoring(
          INNER JOIN videos v ON v.id = ym.video_id
         WHERE ym.sync_status IN ('synced', 'failed')
           AND ym.synced_at IS NOT NULL AND ym.synced_at <= ?1 - 86400
-          AND ym.youtube_video_id IS v.youtube_video_id
           AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
           AND v.visibility_status <> 'voided'
      )

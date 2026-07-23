@@ -26,6 +26,7 @@ test("YouTube監視は sync_status=pending 件数を返す", async () => {
     /SELECT COUNT\(\*\) FROM video_youtube_metadata WHERE sync_status = 'pending'\) AS pending/,
   );
   assert.match(text, /pending: numberValue\(youtubeRow\?\.pending\)/);
+  assert.doesNotMatch(text, /ym\.youtube_video_id/);
 });
 
 test("Queue wake 最終失敗は KV キーごとに上書き読取する", async () => {

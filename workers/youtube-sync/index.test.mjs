@@ -85,6 +85,83 @@ test("候補抽出はpending・開催中・通常期限のindex queryへ分離�
   assert.doesNotMatch(source, /FROM videos v\s+LEFT JOIN video_youtube_metadata/);
 });
 
+test("scheduled再同期はpermanent失敗を両queryから除外する", () => {
+  const fnBody = source.match(
+    /async function selectScheduledSyncRows[\s\S]*?^}/m,
+  )?.[0] ?? "";
+  const exclusions = fnBody.match(/sync_error LIKE 'permanent:%'/g) ?? [];
+  assert.equal(
+    exclusions.length,
+    2,
+    "both scheduled queries must exclude permanent failures",
+  );
+});
+
+test("scheduled_only はpermanent failed行を再同期しない", async () => {
+  const sqlCalls = [];
+  let fetchCalls = 0;
+  const env = {
+    YOUTUBE_API_KEY: "test-key",
+    KV: {
+      async get() {
+        return null;
+      },
+    },
+    DB: {
+      prepare(sql) {
+        const statement = {
+          bind(...bindings) {
+            sqlCalls.push({ sql, bindings });
+            return statement;
+          },
+          async all() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return {
+                results: [{ used_units: 0 }],
+                meta: { changes: 1 },
+              };
+            }
+            if (sql.includes("sync_status IN ('synced', 'failed')")) {
+              assert.match(sql, /sync_error LIKE 'permanent:%'/);
+              return { results: [] };
+            }
+            return { results: [] };
+          },
+          async first() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return { used_units: 0 };
+            }
+            return null;
+          },
+          async run() {
+            return { meta: { changes: 0 } };
+          },
+        };
+        return statement;
+      },
+      async batch() {
+        return [];
+      },
+    },
+  };
+
+  const result = await syncBatch(
+    env,
+    async () => {
+      fetchCalls += 1;
+      return new Response("{}", { status: 200 });
+    },
+    undefined,
+    { mode: "scheduled_only" },
+  );
+
+  assert.equal(result.processed, 0);
+  assert.equal(fetchCalls, 0);
+  assert.ok(
+    sqlCalls.some(({ sql }) => sql.includes("sync_error LIKE 'permanent:%'")),
+  );
+});
+
 test("YouTube durationを秒へ変換する", () => {
   assert.equal(parseDuration("PT1H2M3S"), 3723);
   assert.equal(parseDuration("PT45S"), 45);

@@ -355,6 +355,10 @@ async function selectScheduledSyncRows(
           AND v.youtube_video_id <> ''
           AND v.visibility_status <> 'voided'
           AND ym.sync_status IN ('synced', 'failed')
+          AND NOT (
+            ym.sync_status = 'failed'
+            AND ym.sync_error LIKE 'permanent:%'
+          )
           AND ym.synced_at IS NOT NULL
           AND ym.synced_at <= ?1 - ?2
         ORDER BY ym.synced_at ASC, v.id ASC
@@ -374,6 +378,10 @@ async function selectScheduledSyncRows(
            FROM video_youtube_metadata ym
            INNER JOIN videos v ON v.id = ym.video_id
           WHERE ym.sync_status IN ('synced', 'failed')
+            AND NOT (
+              ym.sync_status = 'failed'
+              AND ym.sync_error LIKE 'permanent:%'
+            )
             AND ym.synced_at IS NOT NULL
             AND ym.synced_at <= ?1 - ?2
             AND v.youtube_video_id IS NOT NULL

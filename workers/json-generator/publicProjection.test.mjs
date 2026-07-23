@@ -160,6 +160,21 @@ test("public static artifacts exclude private event identifiers and titles", asy
     assert.equal(userPayload.works.total, 1);
     assert.equal(userPayload.collabs.total, 0);
     assert.equal(userPayload.page_size, 24);
+
+    await rebuildTarget(env, "users_index", "global");
+    const usersIndex = objects.get("users/index.json");
+    assert.ok(usersIndex);
+    assert.ok(Array.isArray(usersIndex.items));
+    assert.equal(usersIndex.items.length, 1);
+    assert.equal(usersIndex.items[0].x_id, "creator");
+    assert.equal(usersIndex.items[0].updated_at, 123);
+    assertNoForbiddenPublicKeys(usersIndex);
+
+    await rebuildTarget(env, "top", "global");
+    const top = objects.get("top.json");
+    assert.ok(top);
+    assert.equal(typeof top.stats.public_events, "number");
+    assertNoForbiddenPublicKeys(top);
   } finally {
     sqlite.close();
   }

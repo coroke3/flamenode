@@ -30,6 +30,11 @@ const LEGACY_INPUT_RULE_IDS = new Set([
   "legacy-stage-permission",
   "deleted-tables",
   "legacy-event-visibility-sync",
+  "legacy-video-youtube-metadata-youtube-id",
+  "legacy-event-staff-role",
+  "legacy-event-staff-user-id",
+  "legacy-video-members-user-id",
+  "legacy-x-users-columns",
 ]);
 
 const RULES = [
@@ -118,7 +123,37 @@ const RULES = [
     id: "deleted-tables",
     label: "削除済みテーブル",
     pattern:
-      /\b(videoComments|video_comments|videoStats|video_stats|apiEndpoints|api_endpoints|eventStaffPermissions|event_staff_permissions)\b/g,
+      /\b(videoComments|video_comments|videoStats|video_stats|apiEndpoints|eventStaffPermissions|event_staff_permissions)\b|\bsql`[^`]*\b(?:video_comments|video_stats|api_endpoints|event_staff_permissions)\b[^`]*`/g,
+  },
+  {
+    id: "legacy-video-youtube-metadata-youtube-id",
+    label: "削除済みvideo_youtube_metadata.youtube_video_id",
+    pattern:
+      /\b(?:videoYoutubeMetadata|video_youtube_metadata)\.youtube_video_id\b|\bym\.youtube_video_id\b|\bsql`[^`]*\b(?:video_youtube_metadata|ym)\.youtube_video_id\b[^`]*`/g,
+  },
+  {
+    id: "legacy-event-staff-role",
+    label: "削除済みevent_staff.role",
+    pattern:
+      /\b(?:eventStaff|event_staff)\.role\b|\bsql`(?=[^`]*\bevent_staff\b)[^`]*\brole\s*=\s*'representative'\b[^`]*`/g,
+  },
+  {
+    id: "legacy-event-staff-user-id",
+    label: "削除済みevent_staff.user_id",
+    pattern:
+      /\b(?:eventStaff|event_staff)\.user_id\b|\bsql`(?=[^`]*\bevent_staff\b)[^`]*(?<![\w.])user_id\b[^`]*`/g,
+  },
+  {
+    id: "legacy-video-members-user-id",
+    label: "削除済みvideo_members.user_id",
+    pattern:
+      /\b(?:videoMembers|video_members)\.user_id\b|\bsql`(?=[^`]*\bvideo_members\b)[^`]*(?<![\w.])user_id\b[^`]*`/g,
+  },
+  {
+    id: "legacy-x-users-columns",
+    label: "削除済みx_users旧列",
+    pattern:
+      /\b(?:xUsers|x_users)\.(?:linked_user_id|updated_at|created_at)\b|\bxu\.(?:linked_user_id|updated_at|created_at)\b/g,
   },
   {
     id: "legacy-event-visibility-sync",

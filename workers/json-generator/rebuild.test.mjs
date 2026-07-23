@@ -149,6 +149,8 @@ test("static JSON queryはcanonical列だけを使う", () => {
   assert.doesNotMatch(source, /max_consecutive_slots_per_entry/);
   assert.doesNotMatch(source, /es\.role/);
   assert.doesNotMatch(source, /other_social_links, updated_at/);
+  assert.doesNotMatch(source, /xu\.(updated_at|created_at)/);
+  assert.doesNotMatch(source, /x_users\.(updated_at|created_at)/);
   assert.match(source, /staticArtifactContentHash\(body\)/);
 });
 
@@ -254,6 +256,59 @@ test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", 
   assert.doesNotMatch(slotsQuery, /reserved_by_user_id/);
   assert.match(source, /EVENT_DETAIL_COLUMNS[\s\S]*slot_part_gap_minutes/);
   assert.match(eventFn, /creator_x_user_id/);
+});
+
+test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
+  const topFn = source.match(
+    /async function rebuildTop[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(topFn);
+  const destructuring = topFn.match(
+    /const \[([\s\S]*?)\] = await Promise\.all\(\[/,
+  )?.[1];
+  assert.ok(destructuring);
+  assert.match(destructuring, /publicEventCount/);
+  assert.match(
+    topFn,
+    /public_events: Number\(publicEventCount\?\.c/,
+  );
+});
+
+test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async () => {
+  const state = {
+    binds: [],
+    runs: [],
+    first(sql) {
+      if (sql.includes("FROM events") && sql.includes("visibility_status = 'public'") && sql.includes("COUNT(*)")) {
+        return { c: 7 };
+      }
+      if (sql.includes("FROM videos") && sql.includes("COUNT(*)")) {
+        return { c: 3 };
+      }
+      if (sql.includes("FROM x_users") && sql.includes("COUNT(*)")) {
+        return { c: 2 };
+      }
+      return null;
+    },
+    all: () => ({ results: [] }),
+  };
+  const puts = [];
+  const env = {
+    DB: { prepare: (sql) => statement(sql, state) },
+    R2: {
+      async put(key, body) {
+        puts.push({ key, body: JSON.parse(String(body)) });
+      },
+      delete: async () => {},
+    },
+    KV: { put: async () => {} },
+  };
+
+  await rebuildTarget(env, "top", "global");
+
+  const top = puts.find((entry) => entry.key === "top.json");
+  assert.ok(top);
+  assert.equal(top.body.stats.public_events, 7);
 });
 
 test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {

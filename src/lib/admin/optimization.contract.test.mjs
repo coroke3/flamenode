@@ -101,11 +101,13 @@ test("X ID統合影響件数は単一DB読取で取得する", () => {
 test("権限整合性検査は独立読取を並列化し総件数を保持する", () => {
   assert.match(
     permissionIntegrityChecks,
-    /const \[sqlChecks, duplicateX, duplicateUser, staffRows\] = await Promise\.all/,
+    /const \[sqlChecks, duplicateX, staffRows\] = await Promise\.all/,
   );
-  assert.ok((permissionIntegrityChecks.match(/COUNT\(\*\) OVER\(\)/g) ?? []).length >= 2);
+  assert.ok((permissionIntegrityChecks.match(/COUNT\(\*\) OVER\(\)/g) ?? []).length >= 1);
   assert.match(permissionIntegrityChecks, /permission_preset IN \('owner', 'manager', 'custom'\)/);
   assert.match(permissionIntegrityChecks, /moreCount: Math\.max/);
+  assert.doesNotMatch(permissionIntegrityChecks, /role = 'representative'/);
+  assert.doesNotMatch(permissionIntegrityChecks, /event_staff.*\buser_id\b/);
 });
 
 test("ライブAPIはイベント存在確認を各データ読取へ統合する", () => {

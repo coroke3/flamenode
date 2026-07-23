@@ -327,6 +327,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     slotStats,
     publicVideoCount,
     creatorCount,
+    publicEventCount,
   ] = await Promise.all([
     env.DB.prepare(
       `SELECT id, title, youtube_video_id,
@@ -1496,7 +1497,16 @@ async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void
            WHERE (v.creator_x_user_id = xu.id OR vm.x_user_id = xu.id)
              AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
          ) AS total_works,
-         COALESCE(xu.updated_at, xu.created_at, ?) AS updated_at
+         COALESCE(
+           (
+             SELECT MAX(v.updated_at)
+             FROM videos AS v
+             LEFT JOIN video_members AS vm ON vm.video_id = v.id
+             WHERE (v.creator_x_user_id = xu.id OR vm.x_user_id = xu.id)
+               AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+           ),
+           ?
+         ) AS updated_at
        FROM x_users AS xu
        WHERE xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})`,
     ).bind(now).all<Record<string, unknown>>(),
