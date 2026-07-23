@@ -15,6 +15,10 @@ import {
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
 
 const source = await readFile(new URL("./rebuild.ts", import.meta.url), "utf8");
+const projectionSource = await readFile(
+  new URL("../../src/lib/publicData/publicCreatorProjection.ts", import.meta.url),
+  "utf8",
+);
 
 function statement(sql, state) {
   return {
@@ -132,8 +136,8 @@ test("R2 delete失敗時はdeleted_atを更新せず、再試行成功後にだ�
 test("public creator queries include imported legacy X IDs", () => {
   assert.ok(PUBLIC_LISTABLE_X_APPROVAL_SQL_IN.includes("'imported'"));
   assert.match(
-    source,
-    /WHERE xu\.approval_status IN \(\$\{PUBLIC_LISTABLE_X_APPROVAL_SQL_IN\}\)/,
+    projectionSource,
+    /WHERE approval_status IN \(\$\{PUBLIC_LISTABLE_X_APPROVAL_SQL_IN\}\)/,
   );
   assert.match(
     source,
@@ -256,6 +260,32 @@ test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", 
   assert.doesNotMatch(slotsQuery, /reserved_by_user_id/);
   assert.match(source, /EVENT_DETAIL_COLUMNS[\s\S]*slot_part_gap_minutes/);
   assert.match(eventFn, /creator_x_user_id/);
+});
+
+test("rebuildUsersIndexはCreator Projectionを使い相関サブクエリを持たない", () => {
+  const usersIndexFn = source.match(
+    /async function rebuildUsersIndex[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(usersIndexFn);
+  assert.match(usersIndexFn, /loadPublicCreatorProjectionSources/);
+  assert.match(usersIndexFn, /buildPublicUsersIndexItems/);
+  assert.match(usersIndexFn, /USERS_INDEX_MAX_OBJECT_BYTES/);
+  assert.doesNotMatch(usersIndexFn, /SELECT COUNT\(DISTINCT v\.id\)/);
+});
+
+test("rebuildTopとrebuildRecommendはCreator Projectionを再利用する", () => {
+  const topFn = source.match(/async function rebuildTop[\s\S]*?(?=async function )/)?.[0];
+  const recommendFn = source.match(
+    /async function rebuildRecommend[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(topFn);
+  assert.ok(recommendFn);
+  assert.match(topFn, /loadPublicCreatorProjectionSources/);
+  assert.match(recommendFn, /loadPublicCreatorProjectionSources/);
+  assert.match(topFn, /buildPickupCreatorsFromProjection/);
+  assert.match(recommendFn, /buildPickupCreatorsFromProjection/);
+  assert.doesNotMatch(topFn, /WITH creator_counts AS/);
+  assert.doesNotMatch(recommendFn, /WITH creator_counts AS/);
 });
 
 test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {

@@ -17,6 +17,17 @@ import {
   RELATED_DEFAULT_LIMIT,
   uniqueByVideoId,
 } from "../../src/lib/db/recommendation.ts";
+import {
+  COUNTABLE_PUBLIC_VIDEO_SQL,
+  PVSF_SUMMARY_EVENT_ID,
+} from "../../src/lib/publicData/countablePublicVideoSql.ts";
+import {
+  buildPickupCreatorsFromProjection,
+  buildPublicUsersIndexItems,
+  loadPublicCreatorProjectionSources,
+  USERS_INDEX_MAX_OBJECT_BYTES,
+  USERS_INDEX_OBJECT_KEY,
+} from "../../src/lib/publicData/publicCreatorProjection.ts";
 
 const STATIC_USER_WORKS_PAGE_SIZE = 24;
 const STATIC_USER_COLLABS_PAGE_SIZE = 24;
@@ -45,7 +56,6 @@ const EVENT_INDEX_COLUMNS = `
   visibility_status, created_at
 `;
 
-const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 export const POPULAR_LIST_LIMIT = 60;
 
 const STATIC_LIST_VIDEO_SELECT = `
@@ -94,16 +104,6 @@ function eventPublicVideoWhereSql(videoAlias = "v"): string {
     )
   `;
 }
-
-const COUNTABLE_PUBLIC_VIDEO_SQL = `
-  v.visibility_status = 'public'
-  AND COALESCE(v.primary_event_id, '') <> '${PVSF_SUMMARY_EVENT_ID}'
-  AND NOT EXISTS (
-    SELECT 1 FROM video_events AS pvsf_summary_video_events
-    WHERE pvsf_summary_video_events.video_id = v.id
-      AND pvsf_summary_video_events.event_id = '${PVSF_SUMMARY_EVENT_ID}'
-  )
-`;
 
 const STATIC_RECOMMEND_VIDEO_SELECT = `
   v.id, v.title, v.youtube_video_id,
@@ -322,7 +322,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     latest,
     activeEvents,
     latestEvents,
-    creators,
+    creatorProjection,
     announcements,
     slotStats,
     publicVideoCount,
@@ -397,53 +397,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        ORDER BY start_time DESC
        LIMIT 12`,
     ).all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `WITH creator_counts AS (
-         SELECT
-           xu.id,
-           xu.x_name,
-           xu.icon_url,
-           (
-             SELECT COUNT(DISTINCT v.id)
-             FROM videos AS v
-             WHERE v.creator_x_user_id = xu.id
-               AND v.visibility_status = 'public'
-               AND COALESCE(v.primary_event_id, '') <> ?
-               AND NOT EXISTS (
-                 SELECT 1 FROM video_events AS pvsf_summary_video_events
-                 WHERE pvsf_summary_video_events.video_id = v.id
-                   AND pvsf_summary_video_events.event_id = ?
-               )
-           ) AS video_count,
-           (
-             SELECT COUNT(DISTINCT vm.video_id)
-             FROM video_members AS vm
-             INNER JOIN videos AS v ON v.id = vm.video_id
-             WHERE vm.x_user_id = xu.id
-               AND v.visibility_status = 'public'
-               AND COALESCE(v.primary_event_id, '') <> ?
-               AND NOT EXISTS (
-                 SELECT 1 FROM video_events AS pvsf_summary_video_events
-                 WHERE pvsf_summary_video_events.video_id = v.id
-                   AND pvsf_summary_video_events.event_id = ?
-               )
-           ) AS collab_count
-         FROM x_users AS xu
-         WHERE xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})
-       )
-       SELECT id, x_name, icon_url, video_count, collab_count
-       FROM creator_counts
-       WHERE video_count >= 1 OR collab_count >= 2
-       ORDER BY (video_count + collab_count) DESC, video_count DESC, x_name ASC
-       LIMIT 30`,
-    )
-      .bind(
-        PVSF_SUMMARY_EVENT_ID,
-        PVSF_SUMMARY_EVENT_ID,
-        PVSF_SUMMARY_EVENT_ID,
-        PVSF_SUMMARY_EVENT_ID,
-      )
-      .all(),
+    loadPublicCreatorProjectionSources(env.DB, now),
     env.DB.prepare(
       `SELECT id, title, body, severity, publish_at, expire_at
        FROM announcements
@@ -490,6 +444,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
 
   const activeEventItems = activeEvents.results ?? [];
   const latestEventItems = latestEvents.results ?? [];
+  const creators = buildPickupCreatorsFromProjection(creatorProjection, 30);
   const payload = {
     generated_at: now,
     recommended: recommended.results ?? [],
@@ -497,14 +452,14 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     items: latest.results ?? [],
     active_events: activeEventItems,
     latest_events: latestEventItems,
-    creators: creators.results ?? [],
+    creators,
     announcements: announcements.results ?? [],
     slot_stats: slotStats.results ?? [],
     stats: {
       public_videos: Number(publicVideoCount?.c ?? latest.results?.length ?? 0),
       active_events: activeEventItems.length,
       public_events: Number(publicEventCount?.c ?? latestEventItems.length ?? 0),
-      creators: Number(creatorCount?.c ?? creators.results?.length ?? 0),
+      creators: Number(creatorCount?.c ?? creators.length ?? 0),
     },
   };
   throwIfAborted(signal);
@@ -1448,147 +1403,23 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
 async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
-  const [registeredRows, orphanRows] = await Promise.all([
-    env.DB.prepare(
-      `SELECT
-         xu.id AS x_id,
-         COALESCE(
-           xu.x_name,
-           (SELECT v.creator_display_name FROM videos AS v
-            WHERE v.creator_x_user_id = xu.id
-              AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-            ORDER BY v.scheduled_time DESC LIMIT 1),
-           xu.id
-         ) AS x_name,
-         COALESCE(
-           xu.icon_url,
-           (SELECT v.creator_icon_url FROM videos AS v
-            WHERE v.creator_x_user_id = xu.id
-              AND v.creator_icon_url IS NOT NULL
-              AND v.collaboration_type = 'individual'
-              AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-            ORDER BY v.scheduled_time DESC LIMIT 1),
-           (SELECT v.creator_icon_url FROM videos AS v
-            WHERE v.creator_x_user_id = xu.id
-              AND v.creator_icon_url IS NOT NULL
-              AND v.collaboration_type = 'collab'
-              AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-            ORDER BY v.scheduled_time DESC LIMIT 1)
-         ) AS icon_url,
-         xu.profile_text,
-         xu.youtube_channel_url,
-         (
-           SELECT COUNT(DISTINCT v.id)
-           FROM videos AS v
-           WHERE v.creator_x_user_id = xu.id
-             AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         ) AS personal_count,
-         (
-           SELECT COUNT(DISTINCT vm.video_id)
-           FROM video_members AS vm
-           INNER JOIN videos AS v ON v.id = vm.video_id
-           WHERE vm.x_user_id = xu.id
-             AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         ) AS collab_count,
-         (
-           SELECT COUNT(DISTINCT v.id)
-           FROM videos AS v
-           LEFT JOIN video_members AS vm ON vm.video_id = v.id
-           WHERE (v.creator_x_user_id = xu.id OR vm.x_user_id = xu.id)
-             AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         ) AS total_works,
-         COALESCE(
-           (
-             SELECT MAX(v.updated_at)
-             FROM videos AS v
-             LEFT JOIN video_members AS vm ON vm.video_id = v.id
-             WHERE (v.creator_x_user_id = xu.id OR vm.x_user_id = xu.id)
-               AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-           ),
-           ?
-         ) AS updated_at
-       FROM x_users AS xu
-       WHERE xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})`,
-    ).bind(now).all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `SELECT
-         v.creator_x_user_id AS x_id,
-         COALESCE(
-           (SELECT v2.creator_display_name FROM videos AS v2
-            WHERE v2.creator_x_user_id = v.creator_x_user_id
-              AND ${COUNTABLE_PUBLIC_VIDEO_SQL.replaceAll("v.", "v2.")}
-            ORDER BY v2.scheduled_time DESC, v2.created_at DESC LIMIT 1),
-           v.creator_x_user_id
-         ) AS x_name,
-         COALESCE(
-           (SELECT v2.creator_icon_url FROM videos AS v2
-            WHERE v2.creator_x_user_id = v.creator_x_user_id
-              AND v2.creator_icon_url IS NOT NULL
-              AND v2.collaboration_type = 'individual'
-              AND ${COUNTABLE_PUBLIC_VIDEO_SQL.replaceAll("v.", "v2.")}
-            ORDER BY v2.scheduled_time DESC, v2.created_at DESC LIMIT 1),
-           (SELECT v2.creator_icon_url FROM videos AS v2
-            WHERE v2.creator_x_user_id = v.creator_x_user_id
-              AND v2.creator_icon_url IS NOT NULL
-              AND v2.collaboration_type = 'collab'
-              AND ${COUNTABLE_PUBLIC_VIDEO_SQL.replaceAll("v.", "v2.")}
-            ORDER BY v2.scheduled_time DESC, v2.created_at DESC LIMIT 1)
-         ) AS icon_url,
-         NULL AS profile_text,
-         NULL AS youtube_channel_url,
-         COUNT(DISTINCT v.id) AS personal_count,
-         0 AS collab_count,
-         COUNT(DISTINCT v.id) AS total_works,
-         MAX(v.updated_at) AS updated_at
-       FROM videos AS v
-       LEFT JOIN x_users AS xu ON xu.id = v.creator_x_user_id
-       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         AND v.creator_x_user_id <> 'anonymous'
-         AND xu.id IS NULL
-       GROUP BY v.creator_x_user_id`,
-    ).all<Record<string, unknown>>(),
-  ]);
-
+  const sources = await loadPublicCreatorProjectionSources(env.DB, now);
   throwIfAborted(signal);
-  const items = [...(registeredRows.results ?? []), ...(orphanRows.results ?? [])]
-    .map((row) => {
-      const personalCount = Number(row.personal_count ?? 0) || 0;
-      const collabCount = Number(row.collab_count ?? 0) || 0;
-      const totalWorks = Number(row.total_works ?? 0) || 0;
-      const profileText =
-        row.profile_text == null ? null : String(row.profile_text).trim() || null;
-      const youtubeChannelUrl =
-        row.youtube_channel_url == null
-          ? null
-          : String(row.youtube_channel_url).trim() || null;
-      if (totalWorks <= 0 && !profileText && !youtubeChannelUrl) return null;
-      return {
-        x_id: String(row.x_id ?? "").trim(),
-        x_name: String(row.x_name ?? "").trim(),
-        icon_url: row.icon_url == null ? null : String(row.icon_url),
-        profile_text: profileText,
-        youtube_channel_url: youtubeChannelUrl,
-        personal_count: personalCount,
-        collab_count: collabCount,
-        total_works: totalWorks,
-        sort_score: totalWorks * 2 + personalCount,
-        updated_at: normalizeNumber(row.updated_at) ?? now,
-      };
-    })
-    .filter((row): row is NonNullable<typeof row> => !!row?.x_id && !!row.x_name)
-    .sort(
-      (a, b) =>
-        b.sort_score - a.sort_score ||
-        a.x_name.localeCompare(b.x_name, "ja"),
+  const items = buildPublicUsersIndexItems(sources, now);
+  const payload = { generated_at: now, items };
+  assertNoForbiddenPublicKeys(payload);
+  const serialized = JSON.stringify(payload);
+  const byteLength = new TextEncoder().encode(serialized).byteLength;
+  if (byteLength > USERS_INDEX_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `users/index.json exceeds size limit (${byteLength} > ${USERS_INDEX_MAX_OBJECT_BYTES} bytes)`,
     );
-
+  }
+  throwIfAborted(signal);
   await putJson(
     env,
-    "users/index.json",
-    {
-      generated_at: now,
-      items,
-    },
+    USERS_INDEX_OBJECT_KEY,
+    payload,
     "public, max-age=300, stale-while-revalidate=1800",
     { targetType: "users_index", targetId: "global" },
     signal,
@@ -1639,7 +1470,7 @@ async function rebuildRules(env: Env, signal?: RebuildSignal): Promise<void> {
 async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
-  const [recommended, latest, underrated, creators] = await Promise.all([
+  const [recommended, latest, underrated, creatorProjection] = await Promise.all([
     env.DB.prepare(
       `SELECT ${STATIC_RECOMMEND_VIDEO_SELECT}
        FROM videos AS v
@@ -1661,37 +1492,11 @@ async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void>
        ORDER BY COALESCE(v.score, 0) ASC, v.scheduled_time DESC
        LIMIT 120`,
     ).all(),
-    env.DB.prepare(
-      `WITH creator_counts AS (
-         SELECT
-           xu.id,
-           xu.x_name,
-           xu.icon_url,
-           (
-             SELECT COUNT(DISTINCT v.id)
-             FROM videos AS v
-             WHERE v.creator_x_user_id = xu.id
-               AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-           ) AS video_count,
-           (
-             SELECT COUNT(DISTINCT vm.video_id)
-             FROM video_members AS vm
-             INNER JOIN videos AS v ON v.id = vm.video_id
-             WHERE vm.x_user_id = xu.id
-               AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
-           ) AS collab_count
-         FROM x_users AS xu
-         WHERE xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})
-       )
-       SELECT id, x_name, icon_url, video_count, collab_count
-       FROM creator_counts
-       WHERE video_count >= 1 OR collab_count >= 2
-       ORDER BY (video_count + collab_count) DESC, video_count DESC, x_name ASC
-       LIMIT 60`,
-    ).all(),
+    loadPublicCreatorProjectionSources(env.DB, now),
   ]);
 
   throwIfAborted(signal);
+  const creators = buildPickupCreatorsFromProjection(creatorProjection, 60);
   await putJson(
     env,
     "recommend.json",
@@ -1700,7 +1505,7 @@ async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void>
       recommended: recommended.results ?? [],
       latest: latest.results ?? [],
       underrated: underrated.results ?? [],
-      creators: creators.results ?? [],
+      creators,
     },
     "public, max-age=300, stale-while-revalidate=1800",
     { targetType: "recommend", targetId: "global" },
