@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -11,9 +13,39 @@ import { videos, videoInteractions } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { compositeAuditTargetId } from "@/lib/video/atomicWritePlanCore";
 import type { VideoActionResult } from "@/lib/video/types";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 type InteractionKind = "like" | "bookmark";
 type RequestedState = boolean | "toggle";
+
+function isVideoInteractionUniqueConstraintError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!/UNIQUE constraint failed/i.test(message)) return false;
+  return /video_interactions/i.test(message);
+}
+
+async function revalidateVideoInteractionPaths(
+  youtubeVideoId: string | null,
+  videoId: string,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "video.interaction", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_video",
+        run: async () => {
+          revalidatePath(`/${youtubeVideoId ?? videoId}`);
+        },
+      },
+      {
+        name: "revalidate_list",
+        run: async () => {
+          revalidatePath("/list");
+        },
+      },
+    ],
+  );
+}
 
 async function mutateVideoInteraction(
   formData: FormData,
@@ -66,7 +98,7 @@ async function mutateVideoInteraction(
   const active = requestedState === "toggle" ? !existing : requestedState;
 
   if (active === Boolean(existing)) {
-    revalidatePath(`/${target.youtube_video_id ?? videoId}`);
+    await revalidateVideoInteractionPaths(target.youtube_video_id, videoId);
     return { ok: true, active, videoId };
   }
 
@@ -195,6 +227,11 @@ async function mutateVideoInteraction(
       staticRebuildWakeSource,
     });
   } catch (error) {
+    unstable_rethrow(error);
+    if (active && isVideoInteractionUniqueConstraintError(error)) {
+      await revalidateVideoInteractionPaths(target.youtube_video_id, videoId);
+      return { ok: true, active, videoId };
+    }
     console.warn("[video-interaction] atomic mutation rejected", error);
     return {
       ok: false,
@@ -202,8 +239,7 @@ async function mutateVideoInteraction(
     };
   }
 
-  revalidatePath(`/${target.youtube_video_id ?? videoId}`);
-  revalidatePath("/list");
+  await revalidateVideoInteractionPaths(target.youtube_video_id, videoId);
   return { ok: true, active, videoId };
 }
 

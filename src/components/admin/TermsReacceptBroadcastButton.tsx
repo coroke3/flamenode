@@ -21,6 +21,7 @@ export function TermsReacceptBroadcastButton({
   const [cursor, setCursor] = React.useState("");
   const [confirmText, setConfirmText] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
+  const [warning, setWarning] = React.useState<string | null>(null);
   const [enqueuedTotal, setEnqueuedTotal] = React.useState(0);
   const [content, setContent] = React.useState(
     `FlameNode の利用規約が更新されました。\n次回投稿前に /rules から内容を確認し、再同意してください。\nversion: ${versionLabel}`,
@@ -28,6 +29,7 @@ export function TermsReacceptBroadcastButton({
 
   const onSubmit = () => {
     setMessage(null);
+    setWarning(null);
     const fd = new FormData();
     fd.set("terms_id", termsId);
     fd.set("cursor", String(cursor));
@@ -35,12 +37,15 @@ export function TermsReacceptBroadcastButton({
     fd.set("content", content);
     startTransition(async () => {
       const result = await broadcastTermsReaccept(fd);
-      setMessage(result.message ?? (result.ok ? "OK" : "失敗しました。"));
       if (result.ok) {
+        setMessage(result.message ?? "OK");
+        setWarning(result.warning ?? null);
         setEnqueuedTotal((value) => value + (result.enqueued ?? 0));
         if (result.cursor != null) setCursor(result.cursor);
         router.refresh();
+        return;
       }
+      setMessage(result.message ?? "失敗しました。");
     });
   };
 
@@ -135,8 +140,28 @@ export function TermsReacceptBroadcastButton({
               />
             </label>
 
+            {warning ? (
+              <p
+                role="alert"
+                style={{
+                  margin: 0,
+                  padding: "8px 10px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--accent-warning)",
+                  background: "color-mix(in srgb, var(--accent-warning) 12%, var(--bg-elevated))",
+                  color: "var(--accent-warning)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {warning}
+              </p>
+            ) : null}
+
             {message ? (
               <p
+                role="status"
                 style={{
                   margin: 0,
                   padding: "8px 10px",

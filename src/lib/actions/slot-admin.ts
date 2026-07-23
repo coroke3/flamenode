@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -9,8 +10,10 @@ import { assertCanEditEvent } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { slots } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import {
   buildNotificationOutboxStatement,
   type NotificationOutboxStatement,
@@ -46,6 +49,20 @@ function revalidateEventSlotPaths(eventId: string): void {
   revalidatePath(`/admin/events/${eventId}`);
   revalidatePath(`/event/${eventId}`);
   revalidatePath(`/event/${eventId}/slots`);
+}
+
+async function revalidateEventSlotPathsBestEffort(eventId: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "slot_admin", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_event_slot_paths",
+        run: async () => {
+          revalidateEventSlotPaths(eventId);
+        },
+      },
+    ],
+  );
 }
 
 function snapshot(row: SlotRow): Record<string, unknown> {
@@ -111,6 +128,7 @@ async function ensureCanEditSlots(
       "event.slots",
     );
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       result: {
@@ -123,6 +141,7 @@ async function ensureCanEditSlots(
 }
 
 function mutationError(error: unknown): SlotActionResult {
+  unstable_rethrow(error);
   return {
     ok: false,
     message:
@@ -351,7 +370,7 @@ export async function generateSlotsBatch(
         priority: "high",
         requestedByUserId: guard.userId,
       });
-      revalidateEventSlotPaths(data.event_id);
+      await revalidateEventSlotPathsBestEffort(data.event_id);
       return {
         ok: false,
         message: `枠の作成中に失敗しました（${created}/${newRows.length} 件まで作成済み）。残りは再実行してください。`,
@@ -359,7 +378,7 @@ export async function generateSlotsBatch(
     }
     return mutationError(error);
   }
-  revalidateEventSlotPaths(data.event_id);
+  await revalidateEventSlotPathsBestEffort(data.event_id);
   return { ok: true, created: newRows.length };
 }
 
@@ -423,7 +442,7 @@ async function deleteRows(
   } catch (error) {
     return mutationError(error);
   }
-  revalidateEventSlotPaths(eventId);
+  await revalidateEventSlotPathsBestEffort(eventId);
   return { ok: true, created: rows.length };
 }
 
@@ -549,7 +568,7 @@ async function releaseRows(
   } catch (error) {
     return mutationError(error);
   }
-  revalidateEventSlotPaths(eventId);
+  await revalidateEventSlotPathsBestEffort(eventId);
   return { ok: true, message: `${rows.length}件の予約枠を解放しました。` };
 }
 
@@ -719,6 +738,6 @@ export async function batchUpdateSlotLabels(
   } catch (error) {
     return mutationError(error);
   }
-  revalidateEventSlotPaths(eventId);
+  await revalidateEventSlotPathsBestEffort(eventId);
   return { ok: true, message: `${rows.length}件のラベルを更新しました。` };
 }

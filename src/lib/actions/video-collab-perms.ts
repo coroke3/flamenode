@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -17,7 +18,9 @@ import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueu
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import {
   getAuthUserIdsForXUser,
   getLinkedXUserIdsForAuthUser,
@@ -27,6 +30,20 @@ import {
 export interface VideoCollabResult {
   ok: boolean;
   message?: string;
+}
+
+async function revalidateVideoCollabPathsBestEffort(videoId: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "video_collab_permissions", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_video_collab_paths",
+        run: async () => {
+          revalidatePath(`/dashboard/edit/${videoId}`);
+        },
+      },
+    ],
+  );
 }
 
 const upsertSchema = z.object({
@@ -263,10 +280,11 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
       notificationWakeSource,
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[video-collab-perms] atomic mutation failed", error);
     return { ok: false, message: "共同編集権限・通知・監査の更新に失敗しました。" };
   }
-  revalidatePath(`/dashboard/edit/${video.id}`);
+  await revalidateVideoCollabPathsBestEffort(video.id);
   return { ok: true, message: canEdit ? "作品編集への参加を付与しました。" : "作品編集への参加を無効化しました。" };
 }
 
@@ -326,9 +344,10 @@ export async function deleteVideoCollaborator(formData: FormData): Promise<Video
       ],
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[video-collab-perms] revoke failed", error);
     return { ok: false, message: "共同編集権限の解除に失敗しました。" };
   }
-  revalidatePath(`/dashboard/edit/${video.id}`);
+  await revalidateVideoCollabPathsBestEffort(video.id);
   return { ok: true, message: "作品編集への参加を解除しました。" };
 }

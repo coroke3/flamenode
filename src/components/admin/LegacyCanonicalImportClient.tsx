@@ -19,6 +19,8 @@ type ApiResponse = {
   expires_at?: number;
   requires_field_mapping?: boolean;
   continuation_required?: boolean;
+  committed?: boolean;
+  kind?: string;
   progress?: { stage: string; index: number; completed: number; total: number };
   video_custom_field_candidates?: VideoCustomFieldCandidate[];
   requires_repreview?: boolean;
@@ -237,8 +239,13 @@ function persistCredential(credential: PreviewCredential | null): void {
   }
 }
 
+function isCommittedProgressPending(json: ApiResponse): boolean {
+  return json.committed === true || json.kind === "committed_progress_pending";
+}
+
 function isApplyTransientFailure(response: Response, json: ApiResponse): boolean {
   return (
+    isCommittedProgressPending(json) ||
     json.retryable === true ||
     response.status === 423 ||
     response.status === 502 ||
@@ -730,6 +737,27 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
 
             if (!response.ok || !json.ok) {
               successStreak = 0;
+              if (isCommittedProgressPending(json)) {
+                setResult({
+                  ...json,
+                  ok: false,
+                  message: json.message ?? "このステップは保存済み。進捗復旧中",
+                  retryable: true,
+                });
+                if (transientFailures < APPLY_TRANSIENT_MAX_RETRIES) {
+                  transientFailures += 1;
+                  await sleep(applyTransientBackoffMs(transientFailures));
+                  continue;
+                }
+                setResult({
+                  ...json,
+                  ok: false,
+                  message: retryStoppedMessage(json.message ?? "このステップは保存済み。進捗復旧中"),
+                  retryable: true,
+                });
+                stopped = true;
+                break;
+              }
               if (json.requires_repreview) {
                 setCredential(null);
                 setResult(json);
@@ -1232,17 +1260,20 @@ export function LegacyCanonicalImportClient(): React.ReactElement {
 }
 
 function ImportResult({ result }: { result: ApiResponse }): React.ReactElement {
+  const committedPending = isCommittedProgressPending(result);
   const heading = result.ok
     ? result.mode === "apply"
       ? result.continuation_required
         ? "インポート処理中"
         : "インポート完了"
       : "プレビュー結果"
-    : "確認が必要です";
+    : committedPending
+      ? "ステップ保存済み（進捗復旧中）"
+      : "確認が必要です";
   return (
     <section
       aria-live="polite"
-      className={`${styles.result} ${result.ok ? "" : styles.resultError}`}
+      className={`${styles.result} ${result.ok || committedPending ? "" : styles.resultError}`}
     >
       <h2 className={styles.resultTitle}>{heading}</h2>
       {result.message ? <p>{result.message}</p> : null}

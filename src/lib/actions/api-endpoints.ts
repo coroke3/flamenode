@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
 
 export interface ApiEndpointResult {
@@ -70,12 +73,28 @@ async function setPublicApi(
       ],
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[api-endpoints] atomic mutation failed", error);
     return { ok: false, message: "更新が競合したか監査記録に失敗しました。" };
   }
 
-  await invalidateEventExportCache(eventId);
-  revalidatePath("/admin/api-endpoints");
+  await runPostCommitBestEffort(
+    { flow: "api_endpoints", traceId: createTraceId() },
+    [
+      {
+        name: "invalidate_export_cache",
+        run: async () => {
+          await invalidateEventExportCache(eventId);
+        },
+      },
+      {
+        name: "revalidate",
+        run: async () => {
+          revalidatePath("/admin/api-endpoints");
+        },
+      },
+    ],
+  );
   return {
     ok: true,
     id: eventId,

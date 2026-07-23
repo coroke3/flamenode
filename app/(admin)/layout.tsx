@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
-import { getLayoutHeaderUser } from "@/lib/auth/layoutHeaderUser";
+import { getLayoutAuthSurface } from "@/lib/auth/requestAuthContext";
 import { ConsoleShell } from "@/components/layout/ConsoleShell";
 import { ConsoleSidebar } from "@/components/layout/ConsoleSidebar";
 
@@ -18,15 +18,18 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  const user = await getLayoutHeaderUser(false);
+  const { headerUser, enrichmentFailed } = await getLayoutAuthSurface();
 
-  if (!user) redirect("/entry");
-  if (user.role !== "admin") redirect("/dashboard");
+  if (!headerUser) redirect("/entry");
+  if (enrichmentFailed) {
+    redirect("/entry?error=auth_temporarily_unavailable");
+  }
+  if (headerUser.role !== "admin") redirect("/dashboard");
 
   return (
     <div data-admin-shell data-fn-surface="admin">
       <CostGuardBanner source="admin" />
-      <PublicHeader user={user} />
+      <PublicHeader user={headerUser} hydrateAccount />
       <ConsoleShell
         consoleMode="admin"
         navigation={<ConsoleSidebar consoleMode="admin" />}

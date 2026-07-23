@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session, layoutHeaderUser, publicLayout, ...authLayouts] = await Promise.all([
+const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session, layoutHeaderUser, requestAuthContext, publicLayout, ...authLayouts] = await Promise.all([
   readFile(new URL("../cloudflare.ts", import.meta.url), "utf8"),
   readFile(new URL("./index.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
@@ -11,6 +11,7 @@ const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session
   readFile(new URL("./currentUser.ts", import.meta.url), "utf8"),
   readFile(new URL("./session.ts", import.meta.url), "utf8"),
   readFile(new URL("./layoutHeaderUser.ts", import.meta.url), "utf8"),
+  readFile(new URL("./requestAuthContext.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(public)/layout.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(auth)/layout.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(manage)/layout.tsx", import.meta.url), "utf8"),
@@ -81,17 +82,24 @@ test("公開layoutはserver authを呼ばず静的シェルとして描画する
   assert.match(publicLayout, /<PublicHeader\s*\/>/);
 });
 
-test("認証layoutは動的renderを明示しNext.js制御フロー例外を握り潰さない", () => {
+test("認証layoutは動的renderを明示しRequestAuthContextへ集約する", () => {
   assert.match(currentUser, /unstable_rethrow\(error\)/);
   const [authLayout, manageLayout, adminLayout] = authLayouts;
-  assert.match(authLayout, /await getLayoutHeaderUser/);
+  assert.match(authLayout, /getLayoutAuthSurface|getRequestAuthContext/);
   assert.doesNotMatch(authLayout, /await auth\(/);
   assert.doesNotMatch(authLayout, /await buildHeaderUser/);
-  assert.match(authLayout, /await getCurrentUser/);
-  assert.match(manageLayout, /await getLayoutHeaderUser/);
-  assert.doesNotMatch(manageLayout, /await auth\(/);
-  assert.match(manageLayout, /await getCurrentUser/);
-  assert.match(adminLayout, /await getLayoutHeaderUser\(false\)/);
+  assert.doesNotMatch(authLayout, /await getLayoutHeaderUser/);
+  assert.doesNotMatch(authLayout, /await getCurrentUser/);
+  assert.match(manageLayout, /getLayoutAuthSurface|getRequestAuthContext/);
+  assert.doesNotMatch(manageLayout, /await getLayoutHeaderUser/);
+  assert.doesNotMatch(manageLayout, /await getCurrentUser/);
+  assert.doesNotMatch(manageLayout, /await userNeedsXIdOnboarding/);
+  assert.match(manageLayout, /enrichmentFailed/);
+  assert.match(manageLayout, /auth_temporarily_unavailable/);
+  assert.match(adminLayout, /getLayoutAuthSurface|getRequestAuthContext/);
+  assert.doesNotMatch(adminLayout, /await getLayoutHeaderUser/);
+  assert.match(adminLayout, /enrichmentFailed/);
+  assert.match(adminLayout, /auth_temporarily_unavailable/);
   assert.match(adminLayout, /<CostGuardBanner source="admin" \/>/);
   assert.doesNotMatch(adminLayout, /await auth\(/);
   assert.doesNotMatch(adminLayout, /await getCurrentUser/);
@@ -99,4 +107,11 @@ test("認証layoutは動的renderを明示しNext.js制御フロー例外を握�
     assert.match(layout, /export const dynamic = "force-dynamic"/);
     assert.doesNotMatch(layout, /catch \(error\)/);
   }
+});
+
+test("RequestAuthContextはenrichment失敗を認可ゲートと分離する", () => {
+  assert.match(requestAuthContext, /enrichmentFailed:\s*boolean/);
+  assert.match(requestAuthContext, /let enrichmentFailed = false/);
+  assert.match(requestAuthContext, /enrichmentFailed = true/);
+  assert.match(requestAuthContext, /header_enrichment_failed/);
 });

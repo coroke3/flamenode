@@ -7,12 +7,10 @@ import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { ConsoleShell } from "@/components/layout/ConsoleShell";
 import { ConsoleSidebar } from "@/components/layout/ConsoleSidebar";
-import { getCurrentUser } from "@/lib/auth/currentUser";
-import { getLayoutHeaderUser } from "@/lib/auth/layoutHeaderUser";
+import { getLayoutAuthSurface } from "@/lib/auth/requestAuthContext";
 import {
   buildXIdOnboardingHref,
   isXIdOnboardingExemptPath,
-  userNeedsXIdOnboarding,
 } from "@/lib/auth/xidOnboarding";
 
 export const metadata: Metadata = {
@@ -30,34 +28,31 @@ export default async function ManageLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  const sessionUser = await getCurrentUser();
-  const user = await getLayoutHeaderUser();
+  const { currentUser, headerUser, needsXIdOnboarding, enrichmentFailed } =
+    await getLayoutAuthSurface();
 
-  if (!user) redirect("/entry");
-  if (!user.management.canAccessAdmin && !user.management.canAccessManage) {
+  if (!headerUser) redirect("/entry");
+  if (enrichmentFailed) {
+    redirect("/entry?error=auth_temporarily_unavailable");
+  }
+  if (!headerUser.management.canAccessAdmin && !headerUser.management.canAccessManage) {
     redirect("/dashboard");
   }
 
-  if (sessionUser && sessionUser.is_banned !== 1) {
+  if (currentUser && currentUser.is_banned !== 1 && needsXIdOnboarding) {
     const hdrs = await headers();
     const pathname = hdrs.get("x-pathname") ?? "";
     const search = hdrs.get("x-search") ?? "";
     if (pathname && !isXIdOnboardingExemptPath(pathname)) {
-      const needsOnboarding = await userNeedsXIdOnboarding(
-        sessionUser.id,
-        sessionUser.role,
-      );
-      if (needsOnboarding) {
-        const returnTo = search ? `${pathname}?${search}` : pathname;
-        redirect(buildXIdOnboardingHref(returnTo));
-      }
+      const returnTo = search ? `${pathname}?${search}` : pathname;
+      redirect(buildXIdOnboardingHref(returnTo));
     }
   }
 
   return (
     <div data-manage-shell data-fn-surface="manage">
       <CostGuardBanner />
-      <PublicHeader user={user} />
+      <PublicHeader user={headerUser} hydrateAccount />
       <ConsoleShell
         consoleMode="manage"
         navigation={<ConsoleSidebar consoleMode="manage" />}

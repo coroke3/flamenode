@@ -1,7 +1,7 @@
 "use server";
 
 import { eq, sql } from "drizzle-orm";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
@@ -10,6 +10,8 @@ import {
 } from "@/lib/db/schema";
 import { resolveEventEditPermissions } from "@/lib/event/eventEditPermissions";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import {
   extractYoutubePlaylistId,
   parsePlaylistSyncInterval,
@@ -26,6 +28,26 @@ function cleanEventId(raw: FormDataEntryValue | null): string {
 function settingsHref(eventId: string, params: Record<string, string>): string {
   const query = new URLSearchParams(params);
   return `/manage/events/${encodeURIComponent(eventId)}/youtube-playlist?${query}`;
+}
+
+function revalidateEventYoutubePlaylistPath(eventId: string): void {
+  revalidatePath(`/manage/events/${eventId}/youtube-playlist`);
+}
+
+async function revalidateEventYoutubePlaylistPathBestEffort(
+  eventId: string,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "event_youtube_playlist", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_event_youtube_playlist_path",
+        run: async () => {
+          revalidateEventYoutubePlaylistPath(eventId);
+        },
+      },
+    ],
+  );
 }
 
 export async function saveEventYoutubePlaylistSettings(
@@ -162,6 +184,7 @@ export async function saveEventYoutubePlaylistSettings(
       ],
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[event-youtube-playlist] settings update failed", error);
     redirect(
       settingsHref(eventId, {
@@ -171,7 +194,7 @@ export async function saveEventYoutubePlaylistSettings(
     );
   }
 
-  revalidatePath(`/manage/events/${eventId}/youtube-playlist`);
+  await revalidateEventYoutubePlaylistPathBestEffort(eventId);
   redirect(settingsHref(eventId, { saved: "1" }));
 }
 
@@ -214,35 +237,45 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
     last_error: null,
     updated_at: now,
   };
-  await mutateWithAudit(guard.db, {
-    mutationStatements: [
-      guard.db
-        .update(eventYoutubePlaylistSync)
-        .set({
-          sync_status: after.sync_status,
-          next_sync_at: after.next_sync_at,
-          last_error: after.last_error,
-          updated_at: after.updated_at,
-        })
-        .where(eq(eventYoutubePlaylistSync.event_id, eventId)),
-    ],
-    expectedMutationChanges: 1,
-    audits: [
-      {
-        table_name: "event_youtube_playlist_sync",
-        target_id: eventId,
-        operation: "UPDATE",
-        before,
-        after,
-        actor_user_id: guard.user.id,
-        reason: "event-youtube-playlist-queue",
-        context: `event:${eventId}`,
-        retention_class: "normal",
-        strict: true,
-      },
-    ],
-  });
+  try {
+    await mutateWithAudit(guard.db, {
+      mutationStatements: [
+        guard.db
+          .update(eventYoutubePlaylistSync)
+          .set({
+            sync_status: after.sync_status,
+            next_sync_at: after.next_sync_at,
+            last_error: after.last_error,
+            updated_at: after.updated_at,
+          })
+          .where(eq(eventYoutubePlaylistSync.event_id, eventId)),
+      ],
+      expectedMutationChanges: 1,
+      audits: [
+        {
+          table_name: "event_youtube_playlist_sync",
+          target_id: eventId,
+          operation: "UPDATE",
+          before,
+          after,
+          actor_user_id: guard.user.id,
+          reason: "event-youtube-playlist-queue",
+          context: `event:${eventId}`,
+          retention_class: "normal",
+          strict: true,
+        },
+      ],
+    });
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[event-youtube-playlist] queue sync failed", error);
+    redirect(
+      settingsHref(eventId, {
+        error: "同期予約に失敗しました。再読み込みしてお試しください。",
+      }),
+    );
+  }
 
-  revalidatePath(`/manage/events/${eventId}/youtube-playlist`);
+  await revalidateEventYoutubePlaylistPathBestEffort(eventId);
   redirect(settingsHref(eventId, { queued: "1" }));
 }

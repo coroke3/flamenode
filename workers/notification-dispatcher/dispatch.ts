@@ -22,7 +22,12 @@ export type Env = {
 
 const MAX_RETRIES = 4;
 const PROCESSING_LEASE_SEC = 5 * 60;
+const MARK_SENT_RETRY_ATTEMPTS = 3;
+const MARK_SENT_RETRY_DELAY_MS = 50;
 const RETRY_BACKOFF_SEC = [60, 300, 900] as const;
+/** Discord配送成功後に sent 更新だけ失敗した行。再配送せず lease 回復で sent へ進める。 */
+export const DELIVERY_SUCCEEDED_AWAITING_SENT_MARK =
+  "delivery_succeeded_awaiting_sent_mark";
 const DISCORD_FETCH_TIMEOUT_MS = 5_000;
 const DISCORD_MAX_RETRY_AFTER_MS = 15 * 60 * 1_000;
 const DISCORD_DM_CHANNEL_TTL_SEC = 30 * 24 * 60 * 60;
@@ -103,6 +108,19 @@ function boundedLimit(value: unknown): number {
   const requested = Number(value ?? MAX_NOTIFICATION_BATCH);
   if (!Number.isFinite(requested)) return MAX_NOTIFICATION_BATCH;
   return Math.min(MAX_NOTIFICATION_BATCH, Math.max(1, Math.floor(requested)));
+}
+
+async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal!, "notification queue aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  throwIfAborted(signal);
 }
 
 function pruneOldest<T>(map: Map<string, T>, maxSize: number): void {
@@ -440,12 +458,36 @@ async function discordFailure(
   };
 }
 
+async function recoverDeliveredAwaitingSentMark(
+  env: Env,
+  now: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  throwIfAborted(signal);
+  const result = await env.DB.prepare(
+    `UPDATE notification_outbox
+        SET status = 'sent', processing_started_at = NULL,
+            lease_token = NULL, lease_expires_at = NULL,
+            next_attempt_at = NULL, last_error = NULL, processed_at = ?1
+      WHERE status = 'processing'
+        AND lease_expires_at IS NOT NULL
+        AND lease_expires_at <= ?1
+        AND last_error = ?2
+      LIMIT ?3`,
+  ).bind(now, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK, limit).run();
+  throwIfAborted(signal);
+  return Math.max(0, Number(result.meta?.changes ?? 0));
+}
+
 async function recoverExpiredLeases(
   env: Env,
   now: number,
   limit: number,
   signal?: AbortSignal,
 ): Promise<number> {
+  throwIfAborted(signal);
+  const deliveredRecovery = await recoverDeliveredAwaitingSentMark(env, now, limit, signal);
   throwIfAborted(signal);
   const pendingResult = await env.DB.prepare(
     `UPDATE notification_outbox
@@ -475,6 +517,7 @@ async function recoverExpiredLeases(
   ).bind(now, MAX_RETRIES, limit).run();
   throwIfAborted(signal);
   return (
+    deliveredRecovery +
     Math.max(0, Number(pendingResult.meta?.changes ?? 0)) +
     Math.max(0, Number(deadLetterResult.meta?.changes ?? 0))
   );
@@ -515,6 +558,44 @@ async function markSent(
             next_attempt_at = NULL, last_error = NULL, processed_at = ?1
       WHERE id = ?2 AND status = 'processing' AND lease_token = ?3`,
   ).bind(now, rowId, token).run();
+  throwIfAborted(signal);
+  return (result.meta?.changes ?? 0) === 1;
+}
+
+async function markSentWithRetries(
+  env: Env,
+  rowId: string,
+  token: string,
+  now: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < MARK_SENT_RETRY_ATTEMPTS; attempt += 1) {
+    if (await markSent(env, rowId, token, now, signal)) return true;
+    if (attempt < MARK_SENT_RETRY_ATTEMPTS - 1) {
+      await sleepMs(MARK_SENT_RETRY_DELAY_MS, signal);
+    }
+  }
+  return false;
+}
+
+async function markSentOrSuppressRedelivery(
+  env: Env,
+  rowId: string,
+  token: string,
+  now: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  throwIfAborted(signal);
+  const result = await env.DB.prepare(
+    `UPDATE notification_outbox
+        SET last_error = ?1, lease_expires_at = ?2
+      WHERE id = ?3 AND status = 'processing' AND lease_token = ?4`,
+  ).bind(
+    DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
+    now + PROCESSING_LEASE_SEC,
+    rowId,
+    token,
+  ).run();
   throwIfAborted(signal);
   return (result.meta?.changes ?? 0) === 1;
 }
@@ -805,10 +886,15 @@ export async function processNotificationQueue(
     );
     throwIfAborted(signal);
     if (outcome.ok) {
-      if (await markSent(env, row.id, token, now, signal)) {
+      if (await markSentWithRetries(env, row.id, token, now, signal)) {
         d1Changes += 1;
         processed += 1;
-      } else skipped += 1;
+      } else if (await markSentOrSuppressRedelivery(env, row.id, token, now, signal)) {
+        d1Changes += 1;
+        processed += 1;
+      } else {
+        skipped += 1;
+      }
       continue;
     }
     throwIfAborted(signal);

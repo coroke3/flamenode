@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   markDone,
+  markDoneOrSuppressRedelivery,
+  markDoneWithRetries,
   markProcessing,
   markRetryOrFailed,
   reconcileStaleQueue,
+  REBUILD_SUCCEEDED_AWAITING_DONE_MARK,
 } from "./queue.ts";
 
 function fakeDb(row) {
@@ -55,6 +58,50 @@ function fakeDb(row) {
               lease_token: null,
               lease_expires_at: null,
               next_retry_at: null,
+            });
+            return { meta: { changes: 1 } };
+          }
+
+          if (
+            sql.includes("SET error = ?") &&
+            sql.includes("lease_expires_at = ?") &&
+            sql.includes("updated_at = ?")
+          ) {
+            const [error, leaseExpiresAt, updatedAt, id, token] = query.args;
+            if (row.id !== id || row.status !== "processing" || row.lease_token !== token) {
+              return { meta: { changes: 0 } };
+            }
+            Object.assign(row, {
+              error,
+              lease_expires_at: leaseExpiresAt,
+              updated_at: updatedAt,
+            });
+            return { meta: { changes: 1 } };
+          }
+
+          if (
+            sql.includes("SET status = 'done'") &&
+            sql.includes("lease_expires_at <= ?") &&
+            sql.includes("error = ?")
+          ) {
+            const [processedAt, updatedAt, now, marker] = query.args;
+            if (
+              row.status !== "processing" ||
+              row.error !== marker ||
+              Number(row.lease_expires_at ?? 0) > Number(now)
+            ) {
+              return { meta: { changes: 0 } };
+            }
+            Object.assign(row, {
+              status: "done",
+              processed_at: processedAt,
+              attempt_count: 0,
+              error: null,
+              next_retry_at: null,
+              processing_started_at: null,
+              lease_token: null,
+              lease_expires_at: null,
+              updated_at: updatedAt,
             });
             return { meta: { changes: 1 } };
           }
@@ -119,7 +166,7 @@ function fakeDb(row) {
             return { meta: { changes: 1 } };
           }
 
-          throw new Error(`unhandled SQL: ${sql}`);
+          return { meta: { changes: 0 } };
         },
       };
       return query;
@@ -299,6 +346,9 @@ test("expired processing leases are recovered with bounded attempts", async () =
                 if (!sql.includes("lease_expires_at <=")) {
                   return { meta: { changes: 0 }, args };
                 }
+                if (sql.includes("SET status = 'done'") && sql.includes("error = ?")) {
+                  return { meta: { changes: 0 }, args };
+                }
                 assert.match(sql, /status = 'processing'/);
                 assert.match(sql, /lease_expires_at <=/);
                 assert.match(sql, /LIMIT/);
@@ -376,4 +426,70 @@ test("invalidated processing crash is recovered and claimable in the same cron c
   assert.equal(row.status, "processing");
   assert.equal(row.attempt_count, 0);
   assert.notEqual(row.lease_token, null);
+});
+
+test("rebuild成功後にmarkDoneが1回失敗してもretryでdoneへ進む", async () => {
+  const row = { id: "srb-retry-done", status: "pending" };
+  const env = envFor(row);
+  let markDoneCalls = 0;
+  const originalPrepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => {
+    const query = originalPrepare(sql);
+    const originalRun = query.run.bind(query);
+    query.run = async () => {
+      if (
+        sql.includes("SET status = CASE") &&
+        sql.includes("processed_at = CASE") &&
+        sql.includes("lease_token = ?")
+      ) {
+        markDoneCalls += 1;
+        if (markDoneCalls === 1) return { meta: { changes: 0 } };
+      }
+      return originalRun();
+    };
+    return query;
+  };
+  const token = await markProcessing(env, row.id, 100);
+  assert.equal(await markDoneWithRetries(env, row.id, token, 110), true);
+  assert.equal(row.status, "done");
+  assert.equal(markDoneCalls, 2);
+});
+
+test("rebuild成功後にmarkDoneが常に失敗してもlease回復でdoneへ進む", async () => {
+  const row = {
+    id: "srb-suppress-redelivery",
+    status: "processing",
+    lease_token: "done-token",
+    lease_expires_at: 120,
+    processing_started_at: 100,
+    updated_at: 100,
+    attempt_count: 0,
+  };
+  const env = envFor(row);
+  const originalPrepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => {
+    const query = originalPrepare(sql);
+    const originalRun = query.run.bind(query);
+    query.run = async () => {
+      if (
+        sql.includes("SET status = CASE") &&
+        sql.includes("processed_at = CASE") &&
+        sql.includes("lease_token = ?")
+      ) {
+        return { meta: { changes: 0 } };
+      }
+      return originalRun();
+    };
+    return query;
+  };
+  assert.equal(await markDoneWithRetries(env, row.id, row.lease_token, 110), false);
+  assert.equal(await markDoneOrSuppressRedelivery(env, row.id, row.lease_token, 110), true);
+  assert.equal(row.status, "processing");
+  assert.equal(row.error, REBUILD_SUCCEEDED_AWAITING_DONE_MARK);
+
+  row.lease_expires_at = 90;
+  await reconcileStaleQueue(env, 100);
+  assert.equal(row.status, "done");
+  assert.equal(row.error, null);
+  assert.equal(row.processed_at, 100);
 });

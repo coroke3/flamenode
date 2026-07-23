@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
@@ -273,6 +274,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     });
     await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
   } catch (error) {
+    unstable_rethrow(error);
     if (isYoutubeIdUniqueConstraintError(error)) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };
     }

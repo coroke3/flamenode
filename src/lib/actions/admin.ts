@@ -1,19 +1,47 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videoEvents, videoModerationCases, videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { buildVideoStatusChangeNotificationBatch } from "@/lib/notifications/videoStatusNotify";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildAfterVideoStatusChangeQueueBatch, MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
 
 export interface AdminActionResult { ok: boolean; message?: string }
 const VALID_STATUS = new Set(["pending", "public", "private", "voided"]);
+
+function revalidateVideoStatusPaths(videoId: string, youtubeVideoId: string | null): void {
+  revalidatePath(`/admin/videos/${videoId}`);
+  revalidatePath("/admin/videos");
+  revalidatePath("/admin");
+  revalidatePath(`/${youtubeVideoId ?? videoId}`);
+  revalidatePath("/list");
+}
+
+async function revalidateVideoStatusPathsBestEffort(
+  videoId: string,
+  youtubeVideoId: string | null,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "admin_video_status", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_video_status_paths",
+        run: async () => {
+          revalidateVideoStatusPaths(videoId, youtubeVideoId);
+        },
+      },
+    ],
+  );
+}
 
 export async function setVideoStatus(formData: FormData): Promise<AdminActionResult> {
   const guard = await requireAdminWrite("admin_video_status");
@@ -56,8 +84,18 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   const queue = await buildAfterVideoStatusChangeQueueBatch(db, { videoId, eventIds: eventRows.map((row) => row.event_id), creatorXUserId: before.creator_x_user_id, primaryEventId: before.primary_event_id, requestedByUserId: guard.user.id });
   statements.push(...queue.statements, ...notification.statements);
   expected.push(...queue.expectedChanges, ...notification.expectedChanges);
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
-  catch (error) { console.error("[admin-video-status] atomic mutation failed", error); return { ok: false, message: "更新・通知・静的再生成の記録に失敗しました。" }; }
-  revalidatePath(`/admin/videos/${videoId}`); revalidatePath("/admin/videos"); revalidatePath("/admin"); revalidatePath(`/${before.youtube_video_id ?? videoId}`); revalidatePath("/list");
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: statements,
+      expectedMutationChanges: expected,
+      audits,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[admin-video-status] atomic mutation failed", error);
+    return { ok: false, message: "更新・通知・静的再生成の記録に失敗しました。" };
+  }
+  await revalidateVideoStatusPathsBestEffort(videoId, before.youtube_video_id);
   return { ok: true, message: "ステータスを更新しました。" };
 }

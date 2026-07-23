@@ -12,18 +12,13 @@ import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/Consol
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
 import { fetchVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
-import { createModerationCase } from "@/lib/actions/moderation-admin";
+import { CreateModerationCaseForm } from "@/components/admin/CreateModerationCaseForm";
 
 export const metadata: Metadata = { title: "作品詳細" };
 export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
-}
-
-async function createModerationCaseAction(formData: FormData): Promise<void> {
-  "use server";
-  await createModerationCase(formData);
 }
 
 export default async function AdminVideoDetailPage({
@@ -151,69 +146,7 @@ export default async function AdminVideoDetailPage({
           </p>
         )}
 
-        <form action={createModerationCaseAction} style={{ display: "grid", gap: 8 }}>
-          <input type="hidden" name="video_id" value={video.id} />
-          <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
-            種別
-            <select name="case_type" className="fn-select" defaultValue="rights">
-              <option value="rights">rights: 権利・楽曲・素材確認</option>
-              <option value="duplicate">duplicate: 重複投稿</option>
-              <option value="void">void: 一時停止・確認中</option>
-              <option value="x_reapply">x_reapply: X ID再申請</option>
-              <option value="operator">operator: 運営判断</option>
-            </select>
-          </label>
-          <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
-            公開理由
-            <textarea
-              name="public_reason"
-              className="fn-input"
-              rows={2}
-              maxLength={1000}
-              placeholder="ユーザーに見せてもよい理由"
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
-            内部メモ
-            <textarea
-              name="private_note"
-              className="fn-input"
-              rows={2}
-              maxLength={2000}
-              placeholder="運営内メモ"
-            />
-          </label>
-          <div className="admin-video-review-meta-grid" style={{ display: "grid", gap: 8 }}>
-            <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
-              期限
-              <input type="datetime-local" name="due_at" className="fn-input" />
-            </label>
-            <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
-              関連X ID
-              <input
-                name="related_x_user_id"
-                className="fn-input"
-                placeholder="@x_id"
-                maxLength={40}
-              />
-            </label>
-          </div>
-          <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
-            起票時の作品状態
-            <select name="video_status" className="fn-select" defaultValue="">
-              <option value="">変更しない</option>
-              <option value="voided">voided: 一時的に公開停止</option>
-              <option value="pending">pending: 再確認待ち</option>
-            </select>
-          </label>
-          <button
-            type="submit"
-            className="fn-btn fn-btn-primary"
-            aria-label="モデレーションケースを作成"
-          >
-            <Icon name="warning" size={12} aria-hidden /> ケースを作成
-          </button>
-        </form>
+        <CreateModerationCaseForm videoId={video.id} />
       </section>
     </div>
   );

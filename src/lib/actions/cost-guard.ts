@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
@@ -14,11 +15,13 @@ import {
 } from "@/lib/auth/writeGuardCore";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import { writeOperationModeKvMirror } from "@/lib/operationMode/kvMirror";
 import type { OperationMode } from "@/lib/operationMode/types";
 
-export interface CostGuardResult { ok: boolean; message?: string }
+export interface CostGuardResult { ok: boolean; message?: string; warning?: string }
 
 const OVERRIDE_DURATION_SEC = 15 * 60;
 const MAX_OVERRIDE_FEATURES = 8;
@@ -30,30 +33,42 @@ type SettingsRow = typeof systemSettings.$inferSelect;
 type SettingsPatch = Partial<typeof systemSettings.$inferInsert>;
 
 function fail(error: unknown): CostGuardResult {
+  unstable_rethrow(error);
   console.error("[cost-guard] atomic mutation failed", error);
   return { ok: false, message: "設定が競合したか、監査記録に失敗しました。再読み込みしてください。" };
 }
 
-async function syncOperationModeKvMirror(input: {
+async function syncOperationModeKvMirrorBestEffort(input: {
   mode: OperationMode;
   reason: string;
   updatedAt: number;
-}): Promise<CostGuardResult> {
-  try {
-    await writeOperationModeKvMirror({
-      mode: input.mode,
-      updated_at: input.updatedAt,
-      reason: input.reason,
-    });
-    return { ok: true };
-  } catch (error) {
-    console.error("[cost-guard] KV mirror update failed", error);
-    return {
-      ok: false,
-      message:
-        "D1は更新されましたが、KV複製の更新に失敗しました。再試行してください。",
-    };
+}): Promise<string | undefined> {
+  const warnings = await runPostCommitBestEffort(
+    { flow: "cost_guard", traceId: createTraceId() },
+    [
+      {
+        name: "kv_mirror",
+        run: async () => {
+          await writeOperationModeKvMirror({
+            mode: input.mode,
+            updated_at: input.updatedAt,
+            reason: input.reason,
+          });
+        },
+      },
+      {
+        name: "revalidate",
+        run: async () => {
+          revalidatePath("/admin/cost-guard");
+          revalidatePath("/admin");
+        },
+      },
+    ],
+  );
+  if (warnings.some((w) => w.name === "kv_mirror")) {
+    return "D1は更新済みです。KV複製の反映に時間がかかることがあります。";
   }
+  return undefined;
 }
 
 async function loadSettings(
@@ -109,11 +124,8 @@ export async function setCostGuardMode(formData: FormData): Promise<CostGuardRes
   const now = Math.floor(Date.now() / 1000);
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_mode", patch: { operation_mode: mode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
   if (!result.ok) return result;
-  const kvResult = await syncOperationModeKvMirror({ mode, reason, updatedAt: now });
-  if (!kvResult.ok) return kvResult;
-  revalidatePath("/admin/cost-guard");
-  revalidatePath("/admin");
-  return result;
+  const warning = await syncOperationModeKvMirrorBestEffort({ mode, reason, updatedAt: now });
+  return { ok: true, ...(warning ? { warning } : {}) };
 }
 
 export async function setMaintenanceMode(formData: FormData): Promise<CostGuardResult> {
@@ -132,11 +144,8 @@ export async function setMaintenanceMode(formData: FormData): Promise<CostGuardR
   const now = Math.floor(Date.now() / 1000);
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_maintenance", patch: { operation_mode: nextMode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
   if (!result.ok) return result;
-  const kvResult = await syncOperationModeKvMirror({ mode: nextMode, reason, updatedAt: now });
-  if (!kvResult.ok) return kvResult;
-  revalidatePath("/admin/cost-guard");
-  revalidatePath("/admin");
-  return result;
+  const warning = await syncOperationModeKvMirrorBestEffort({ mode: nextMode, reason, updatedAt: now });
+  return { ok: true, ...(warning ? { warning } : {}) };
 }
 
 export async function setCostGuardOverride(formData: FormData): Promise<CostGuardResult> {
@@ -156,8 +165,12 @@ export async function setCostGuardOverride(formData: FormData): Promise<CostGuar
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_override_enable", patch: { cost_guard_exception_until: now + OVERRIDE_DURATION_SEC, cost_guard_exception_features_json: JSON.stringify(features), cost_guard_reason: `[15m override] ${reason}`, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
-  if (result.ok) revalidatePath("/admin/cost-guard");
-  return result.ok ? { ...result, message: "15分間の例外を有効化しました。" } : result;
+  if (!result.ok) return result;
+  await runPostCommitBestEffort(
+    { flow: "cost_guard_override", traceId: createTraceId() },
+    [{ name: "revalidate", run: async () => { revalidatePath("/admin/cost-guard"); } }],
+  );
+  return { ok: true, message: "15分間の例外を有効化しました。" };
 }
 
 export async function clearCostGuardOverride(formData: FormData): Promise<CostGuardResult> {
@@ -173,6 +186,10 @@ export async function clearCostGuardOverride(formData: FormData): Promise<CostGu
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_override_clear", patch: { cost_guard_exception_until: null, cost_guard_exception_features_json: null, cost_guard_reason: `[override cleared] ${reason}`, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
-  if (result.ok) revalidatePath("/admin/cost-guard");
-  return result.ok ? { ...result, message: "例外を解除しました。" } : result;
+  if (!result.ok) return result;
+  await runPostCommitBestEffort(
+    { flow: "cost_guard_override_clear", traceId: createTraceId() },
+    [{ name: "revalidate", run: async () => { revalidatePath("/admin/cost-guard"); } }],
+  );
+  return { ok: true, message: "例外を解除しました。" };
 }

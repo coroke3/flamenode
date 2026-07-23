@@ -15,7 +15,6 @@ import {
 } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import {
-  combineJobCounters,
   runJob,
   throwIfJobFailed,
 } from "../shared/runJob.ts";
@@ -28,7 +27,7 @@ import {
   type QueueConsumerResult,
   type WorkerQueueSendBinding,
 } from "../shared/queueWake.ts";
-import { syncBatch, countPendingSyncRows } from "../youtube-sync/index.ts";
+import { syncBatch, countPendingSyncRows, type SyncBatchResult } from "../youtube-sync/index.ts";
 import { syncEventPlaylists } from "../youtube-playlist-sync/index.ts";
 
 export interface Env {
@@ -124,6 +123,66 @@ async function wakeStaticRebuildAfterScoreEnqueue(
   });
 }
 
+/** metadata commit 後の score 更新と静的 rebuild 予約。失敗しても metadata は巻き戻さない。 */
+export async function runYoutubeSyncPostCommit(
+  env: Env,
+  youtube: Pick<SyncBatchResult, "changed_video_ids">,
+  options: {
+    signal?: AbortSignal;
+    useScoreBatchFallback?: boolean;
+    commitSha?: string;
+  } = {},
+): Promise<void> {
+  const { signal, useScoreBatchFallback = false, commitSha } = options;
+  const score = await runJob(
+    "sync-jobs",
+    "score-recalc",
+    async () => {
+      signal?.throwIfAborted();
+      if (youtube.changed_video_ids.length > 0) {
+        const result = await recalcScoreForVideoIds(
+          env,
+          youtube.changed_video_ids,
+          signal,
+        );
+        signal?.throwIfAborted();
+        return result;
+      }
+      if (useScoreBatchFallback) {
+        const result = await recalcScoreBatch(env, signal);
+        signal?.throwIfAborted();
+        return result;
+      }
+      return {
+        processed: 0,
+        failed: 0,
+        skipped: 1,
+        external_api_calls: 0,
+        d1_changes: 0,
+        retry_count: 0,
+        quota_stopped: false,
+        quota_stop_reason: null,
+      };
+    },
+    { rethrow: false, commitSha },
+  );
+
+  if ((score.processed ?? 0) <= 0) return;
+
+  const rankingRebuild = await runJob(
+    "sync-jobs",
+    "ranking-rebuild-enqueue",
+    () => enqueueScoreDependentRebuilds(env, signal),
+    { rethrow: false, commitSha },
+  );
+  if ((rankingRebuild.processed ?? 0) > 0) {
+    await wakeStaticRebuildAfterScoreEnqueue(
+      env,
+      rankingRebuild.processed ?? 0,
+    );
+  }
+}
+
 async function maybeResendYoutubePendingWake(env: Env): Promise<void> {
   const flags = resolveQueueFeatureFlags(env);
   if (!flags.dispatchEnabled || !flags.youtubeSyncEnabled) return;
@@ -160,57 +219,44 @@ export async function handleYoutubeSyncWakeQueue(
 
   try {
     let continued = false;
-    const counters = await runJob(
+    let youtube!: SyncBatchResult;
+    const metadataJob = await runJob(
       "sync-jobs",
-      "youtube-sync-pending-queue",
+      "youtube-sync-metadata",
       async () => {
-        const youtube = await syncBatch(env, undefined, undefined, {
+        youtube = await syncBatch(env, undefined, undefined, {
           mode: "pending_only",
         });
-        const score = youtube.changed_video_ids.length > 0
-          ? await recalcScoreForVideoIds(env, youtube.changed_video_ids)
-          : {
-              processed: 0,
-              failed: 0,
-              skipped: 1,
-              external_api_calls: 0,
-              d1_changes: 0,
-              retry_count: 0,
-              quota_stopped: false,
-              quota_stop_reason: null,
-            };
-        const rankingRebuild =
-          score.processed > 0
-            ? await enqueueScoreDependentRebuilds(env)
-            : { skipped: 1 };
-        await wakeStaticRebuildAfterScoreEnqueue(
-          env,
-          rankingRebuild.processed ?? 0,
-        );
-
-        if (youtube.has_more_pending && !youtube.quota_stopped) {
-          continued = await sendWorkerQueueWakeBestEffort({
-            queue: env.YOUTUBE_SYNC_WAKE_QUEUE,
-            kind: "youtube_sync_pending",
-            source: "continuation",
-            envFlags: env,
-            requireYoutubeFlag: true,
-            kv: env.KV,
-          });
-        }
-
-        return combineJobCounters(youtube, score, rankingRebuild);
+        return youtube;
       },
       { commitSha: env.BUILD_COMMIT_SHA },
     );
+    if (!metadataJob.succeeded) {
+      throw new Error("youtube metadata commit failed");
+    }
+
+    await runYoutubeSyncPostCommit(env, youtube, {
+      commitSha: env.BUILD_COMMIT_SHA,
+    });
+
+    if (youtube.has_more_pending && !youtube.quota_stopped) {
+      continued = await sendWorkerQueueWakeBestEffort({
+        queue: env.YOUTUBE_SYNC_WAKE_QUEUE,
+        kind: "youtube_sync_pending",
+        source: "continuation",
+        envFlags: env,
+        requireYoutubeFlag: true,
+        kv: env.KV,
+      });
+    }
 
     ackAll(messages);
     return {
       retryBatch: false,
       continued,
-      processed: counters.processed,
-      skipped: counters.skipped,
-      failed: counters.failed,
+      processed: metadataJob.processed,
+      skipped: metadataJob.skipped,
+      failed: metadataJob.failed,
     };
   } catch {
     retryAll(messages);
@@ -263,62 +309,33 @@ export async function runSyncJobs(
 
           const queueFlags = resolveQueueFeatureFlags(env);
           const includePending = !queueFlags.youtubeSyncEnabled;
-          const youtube = await runJob(
+          let youtube!: SyncBatchResult;
+          const metadataJob = await runJob(
             "sync-jobs",
-            "youtube-sync",
+            "youtube-sync-metadata",
             async () => {
               signal?.throwIfAborted();
-              const result = await syncBatch(env, undefined, signal, {
+              youtube = await syncBatch(env, undefined, signal, {
                 mode: "scheduled_only",
                 includePending,
               });
               signal?.throwIfAborted();
-              return result;
+              return youtube;
             },
             { commitSha: env.BUILD_COMMIT_SHA },
           );
-          const score = await runJob(
-            "sync-jobs",
-            "score-recalc",
-            async () => {
-              signal?.throwIfAborted();
-              if (youtube.changed_video_ids.length > 0) {
-                const result = await recalcScoreForVideoIds(
-                  env,
-                  youtube.changed_video_ids,
-                  signal,
-                );
-                signal?.throwIfAborted();
-                return result;
-              }
-              const result = await recalcScoreBatch(env, signal);
-              signal?.throwIfAborted();
-              return result;
-            },
-            { commitSha: env.BUILD_COMMIT_SHA },
-          );
-          const rankingRebuild =
-            score.processed > 0
-              ? await runJob(
-                  "sync-jobs",
-                  "ranking-rebuild-enqueue",
-                  () => enqueueScoreDependentRebuilds(env, signal),
-                  { commitSha: env.BUILD_COMMIT_SHA },
-                )
-              : { skipped: 1 };
-          if ((rankingRebuild.processed ?? 0) > 0) {
-            await wakeStaticRebuildAfterScoreEnqueue(
-              env,
-              rankingRebuild.processed ?? 0,
-            );
-          }
+          await runYoutubeSyncPostCommit(env, youtube, {
+            signal,
+            useScoreBatchFallback: true,
+            commitSha: env.BUILD_COMMIT_SHA,
+          });
           if (queueFlags.youtubeSyncEnabled) {
             await maybeResendYoutubePendingWake(env);
           }
           return throwIfJobFailed(
             "sync-jobs",
             "cron",
-            combineJobCounters(youtube, score, rankingRebuild),
+            metadataJob,
           );
         },
       );

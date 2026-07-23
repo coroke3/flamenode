@@ -1,6 +1,6 @@
 import type { AdapterAccount } from "next-auth/adapters";
 import type { BatchItem } from "drizzle-orm/batch";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import {
   mutateWithAudit,
@@ -12,6 +12,10 @@ import type {
   EnqueueNotificationInput,
   NotificationOutboxStatement,
 } from "@/lib/notifications/enqueue";
+import {
+  createTraceId,
+  logFlowTrace,
+} from "@/lib/observability/flowTrace";
 
 type AtomicMutator = (
   db: DB,
@@ -62,7 +66,7 @@ export function accountRowWithoutTokens(
 
 /**
  * Auth.js adapterのlinkAccount境界でaccount作成・Discord ID更新・監査を
- * 同じD1 batchへ入れる。events.linkAccountではaccount INSERT後になり遅すぎる。
+ * 同じD1 batchへ入れる。再実行は冪等。welcomeはoutbox登録まで（wakeはmutate側best-effort）。
  */
 export async function linkDiscordAccountAtomically(
   db: DB,
@@ -70,6 +74,14 @@ export async function linkDiscordAccountAtomically(
   mutate: AtomicMutator = mutateWithAudit,
   buildWelcomeNotification: WelcomeNotificationBuilder = defaultBuildWelcomeNotification,
 ): Promise<void> {
+  const traceId = createTraceId();
+  logFlowTrace({
+    flow: "discord_auth",
+    phase: "account_link_started",
+    trace_id: traceId,
+    result: "started",
+  });
+
   if (account.provider !== "discord" || !account.providerAccountId) {
     throw new Error("AUTH_UNSUPPORTED_ACCOUNT_PROVIDER");
   }
@@ -83,23 +95,107 @@ export async function linkDiscordAccountAtomically(
   )[0];
   if (!beforeUser) throw new Error("AUTH_LINK_USER_NOT_FOUND");
 
+  const existingAccount = (
+    await db
+      .select()
+      .from(accounts)
+      .where(
+        and(
+          eq(accounts.provider, account.provider),
+          eq(accounts.providerAccountId, account.providerAccountId),
+        )!,
+      )
+      .limit(1)
+  )[0];
+
+  if (existingAccount && existingAccount.userId !== account.userId) {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "account_link_committed",
+      trace_id: traceId,
+      result: "failed",
+      error_code: "AUTH_DISCORD_ID_CONFLICT",
+      committed: false,
+    });
+    throw new Error("AUTH_DISCORD_ID_CONFLICT");
+  }
+
+  const discordOwner = (
+    await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.discord_id, account.providerAccountId))
+      .limit(1)
+  )[0];
+  if (discordOwner && discordOwner.id !== account.userId) {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "account_link_committed",
+      trace_id: traceId,
+      result: "failed",
+      error_code: "AUTH_DISCORD_ID_CONFLICT",
+      committed: false,
+    });
+    throw new Error("AUTH_DISCORD_ID_CONFLICT");
+  }
+
+  const needsAccountInsert = !existingAccount;
+  const needsDiscordId =
+    !beforeUser.discord_id?.trim() ||
+    beforeUser.discord_id !== account.providerAccountId;
+  const isFirstDiscordLink = !beforeUser.discord_id?.trim();
+
+  // 同じaccountが同じuserに既にあり、discord_idも整合 → 成功no-op
+  if (!needsAccountInsert && !needsDiscordId) {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "account_link_committed",
+      trace_id: traceId,
+      result: "succeeded",
+      committed: true,
+    });
+    return;
+  }
+
   const accountRow = accountRowWithoutTokens(account);
   const afterUser = {
     ...beforeUser,
     discord_id: account.providerAccountId,
   };
 
-  const mutationStatements: BatchItem<"sqlite">[] = [
-    db.insert(accounts).values(accountRow),
-    db
-      .update(users)
-      .set({ discord_id: account.providerAccountId })
-      .where(expectedRowCondition({ expectedCurrent: beforeUser })),
-  ];
-  const expectedMutationChanges: Array<number | null> = [1, 1];
-  let notificationWakeSource: "web" | undefined;
+  const mutationStatements: BatchItem<"sqlite">[] = [];
+  const expectedMutationChanges: Array<number | null> = [];
 
-  if (!beforeUser.discord_id?.trim()) {
+  if (needsAccountInsert) {
+    // 二重callbackに備え、変更件数固定は避けて null（idempotent insert）
+    mutationStatements.push(
+      db.insert(accounts).values(accountRow).onConflictDoNothing(),
+    );
+    expectedMutationChanges.push(null);
+  }
+
+  if (needsDiscordId) {
+    mutationStatements.push(
+      db
+        .update(users)
+        .set({ discord_id: account.providerAccountId })
+        .where(
+          and(
+            eq(users.id, account.userId),
+            expectedRowCondition({
+              expectedCurrent: {
+                id: beforeUser.id,
+                discord_id: beforeUser.discord_id,
+              },
+            }),
+          )!,
+        ),
+    );
+    expectedMutationChanges.push(1);
+  }
+
+  let notificationWakeSource: "web" | undefined;
+  if (isFirstDiscordLink) {
     const welcomeNotification = await buildWelcomeNotification(db, {
       recipientUserId: account.userId,
       type: "welcome_account",
@@ -117,22 +213,66 @@ export async function linkDiscordAccountAtomically(
     }
   }
 
+  if (mutationStatements.length === 0) {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "account_link_committed",
+      trace_id: traceId,
+      result: "succeeded",
+      committed: true,
+    });
+    return;
+  }
+
+  const audits: Array<{
+    table_name: string;
+    target_id: string;
+    operation: "CREATE" | "UPDATE";
+    before?: Record<string, unknown>;
+    after: Record<string, unknown>;
+    actor_user_id: string;
+    reason: string;
+    context: string;
+    retention_class: "long_audit";
+  }> = [];
+  if (needsAccountInsert) {
+    audits.push({
+      table_name: "account",
+      target_id: `${account.provider}:${account.providerAccountId}`,
+      operation: "CREATE",
+      after: { ...accountRow },
+      actor_user_id: account.userId,
+      reason: "auth_link_discord",
+      context: "auth",
+      retention_class: "long_audit",
+    });
+  }
+  if (needsDiscordId) {
+    audits.push({
+      table_name: "user",
+      target_id: account.userId,
+      operation: "UPDATE",
+      before: { ...beforeUser },
+      after: { ...afterUser },
+      actor_user_id: account.userId,
+      reason: "auth_link_discord",
+      context: "auth",
+      retention_class: "long_audit",
+    });
+  }
+
   await mutate(db, {
     mutationStatements,
     expectedMutationChanges,
-    audits: [
-      {
-        table_name: "user",
-        target_id: account.userId,
-        operation: "UPDATE",
-        before: { ...beforeUser },
-        after: { ...afterUser },
-        actor_user_id: account.userId,
-        reason: "auth_link_discord",
-        context: "auth",
-        retention_class: "long_audit",
-      },
-    ],
+    audits,
     notificationWakeSource,
+  });
+
+  logFlowTrace({
+    flow: "discord_auth",
+    phase: "account_link_committed",
+    trace_id: traceId,
+    result: "succeeded",
+    committed: true,
   });
 }

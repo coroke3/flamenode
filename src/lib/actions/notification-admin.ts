@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
@@ -8,7 +9,9 @@ import { notificationOutbox } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueue";
 import {
   isTerminalNotificationFailure,
@@ -31,6 +34,20 @@ function failure(error: unknown): NotificationAdminResult {
 function revalidateNotificationPages(): void {
   revalidatePath("/admin/notifications");
   revalidatePath("/manage/notifications");
+}
+
+async function revalidateNotificationPagesBestEffort(): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "notification_admin", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_notification_pages",
+        run: async () => {
+          revalidateNotificationPages();
+        },
+      },
+    ],
+  );
 }
 
 async function updateRows(
@@ -104,6 +121,7 @@ async function updateRows(
     });
     return { ok: true };
   } catch (error) {
+    unstable_rethrow(error);
     return failure(error);
   }
 }
@@ -127,7 +145,7 @@ export async function retryFailedNotification(
   }
 
   const result = await updateRows(db, [row], guard.user.id, "retry");
-  if (result.ok) revalidateNotificationPages();
+  if (result.ok) await revalidateNotificationPagesBestEffort();
   return result.ok ? { ok: true, message: "通知を配信待ちに戻しました。" } : result;
 }
 
@@ -149,11 +167,12 @@ export async function cancelNotification(
   )[0];
   if (!row) return { ok: false, message: "通知が見つかりません。" };
   if (row.status === "sent" || row.status === "cancelled") {
-    return { ok: false, message: `status=${row.status}はキャンセル対象外です。` };
+    // 再送安全: 既に終端なら成功扱い
+    return { ok: true, message: `既に${row.status}です。` };
   }
 
   const result = await updateRows(db, [row], guard.user.id, "cancel", reason);
-  if (result.ok) revalidateNotificationPages();
+  if (result.ok) await revalidateNotificationPagesBestEffort();
   return result.ok ? { ok: true, message: "通知をキャンセルしました。" } : result;
 }
 
@@ -212,10 +231,11 @@ export async function forceResendNotification(
       notificationWakeSource: "admin",
     });
   } catch (error) {
+    unstable_rethrow(error);
     return failure(error);
   }
 
-  revalidateNotificationPages();
+  await revalidateNotificationPagesBestEffort();
   return { ok: true, message: "通知を再送キューに追加しました。" };
 }
 
@@ -242,7 +262,7 @@ export async function retryAllFailedNotifications(
   }
 
   const result = await updateRows(db, targets, guard.user.id, "retry");
-  if (result.ok) revalidateNotificationPages();
+  if (result.ok) await revalidateNotificationPagesBestEffort();
   return result.ok
     ? { ok: true, message: `${targets.length}件を配信待ちに戻しました。`, retried: targets.length }
     : result;

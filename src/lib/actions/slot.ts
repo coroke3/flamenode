@@ -1,10 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import {
   writeGuard,
   type WriteGuardDenyReason,
@@ -20,6 +22,7 @@ import {
   areSlotsInSamePart,
   sortSlotsChronologically,
 } from "@/lib/utils/slotGroupingCore";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface SlotReserveResult {
   ok: boolean;
@@ -65,6 +68,7 @@ function snapshot(row: SlotRow): Record<string, unknown> {
 }
 
 function mutationError(error: unknown): SlotReserveResult {
+  unstable_rethrow(error);
   console.warn(
     "[user-slot] atomic mutation failed",
     error instanceof Error ? error.name : "UnknownError",
@@ -74,6 +78,28 @@ function mutationError(error: unknown): SlotReserveResult {
     message:
       "枠の状態が変更されたか、安全な保存を完了できませんでした。画面を更新してもう一度お試しください。",
   };
+}
+
+async function runSlotPostCommit(
+  flow: string,
+  eventId: string,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    [{ name: "revalidate", run: async () => { revalidateSlotViews(eventId); } }],
+  );
+}
+
+function isOwnReservedSlot(
+  row: SlotRow,
+  userId: string,
+  activeXId: string | null,
+): boolean {
+  return (
+    row.status === "reserved" &&
+    row.reserved_by_user_id === userId &&
+    row.x_user_id === activeXId
+  );
 }
 
 function revalidateSlotViews(eventId: string): void {
@@ -394,6 +420,9 @@ export async function reserveSlot(
     const anchor = await loadSlot(db, parsed.data.slot_id);
     if (!anchor) return { ok: false, message: "枠が見つかりません。" };
     if (anchor.status !== "available") {
+      if (isOwnReservedSlot(anchor, guard.user.id, guard.activeXId)) {
+        return { ok: true, slotId: anchor.id };
+      }
       return { ok: false, message: "この枠はすでに確保されています。" };
     }
     const event = await loadEvent(db, anchor.event_id);
@@ -447,7 +476,7 @@ export async function reserveSlot(
       actorUserId: guard.user.id,
       reason: "slot_user_reserve",
     });
-    revalidateSlotViews(anchor.event_id);
+    await runSlotPostCommit("slot.reserve", anchor.event_id);
     return { ok: true, slotId: anchor.id };
   } catch (error) {
     return mutationError(error);
@@ -515,7 +544,7 @@ export async function releaseOwnSlot(
       actorUserId: guard.user.id,
       reason: "slot_user_release",
     });
-    revalidateSlotViews(anchor.event_id);
+    await runSlotPostCommit("slot.release", anchor.event_id);
     return { ok: true, slotId: anchor.id };
   } catch (error) {
     return mutationError(error);
@@ -612,7 +641,7 @@ export async function extendOwnSlotGroup(
       actorUserId: guard.user.id,
       reason: "slot_user_extend",
     });
-    revalidateSlotViews(anchor.event_id);
+    await runSlotPostCommit("slot.extend", anchor.event_id);
     return { ok: true, slotId: candidate.id };
   } catch (error) {
     return mutationError(error);
@@ -729,7 +758,7 @@ export async function mergeOwnSlotGroups(
       actorUserId: guard.user.id,
       reason: "slot_user_merge",
     });
-    revalidateSlotViews(gap.event_id);
+    await runSlotPostCommit("slot.merge", gap.event_id);
     return { ok: true, slotId: gap.id };
   } catch (error) {
     return mutationError(error);

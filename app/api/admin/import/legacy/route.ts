@@ -279,21 +279,42 @@ export async function POST(request: Request): Promise<NextResponse> {
         planHash,
         progress: claimed.progress,
       });
-      const expiresAt = await claimed.advance(step.progress);
-
-      return NextResponse.json({
-        ok: true,
-        mode,
-        plan_hash: claimed.planHash,
-        attempt: claimed.attempt,
-        continuation_required: !step.complete,
-        expires_at: expiresAt,
-        progress: applyProgressSummary(claimed.plan, step.progress),
-        result: {
-          ...legacyApplyResultFromProgress(claimed.plan, step.progress),
-          complete: step.complete,
-        },
-      });
+      try {
+        const expiresAt = await claimed.advance(step.progress);
+        return NextResponse.json({
+          ok: true,
+          mode,
+          plan_hash: claimed.planHash,
+          attempt: claimed.attempt,
+          continuation_required: !step.complete,
+          expires_at: expiresAt,
+          progress: applyProgressSummary(claimed.plan, step.progress),
+          result: {
+            ...legacyApplyResultFromProgress(claimed.plan, step.progress),
+            complete: step.complete,
+          },
+        });
+      } catch (cause) {
+        await claimed.release().catch(() => undefined);
+        const retryable = isTransientApplyFailure(cause);
+        return error(
+          "このステップは保存済み。進捗復旧中",
+          retryable ? 503 : 409,
+          {
+            committed: true,
+            kind: "committed_progress_pending",
+            retryable: true,
+            requires_repreview: false,
+            plan_hash: claimed.planHash,
+            attempt: claimed.attempt,
+            progress: applyProgressSummary(claimed.plan, step.progress),
+            result: {
+              ...legacyApplyResultFromProgress(claimed.plan, step.progress),
+              complete: step.complete,
+            },
+          },
+        );
+      }
     } catch (cause) {
       await claimed.release().catch(() => undefined);
       const retryable = isTransientApplyFailure(cause);
