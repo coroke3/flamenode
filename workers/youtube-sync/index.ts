@@ -27,6 +27,16 @@ export interface Env extends YoutubeQuotaEnv {
   YOUTUBE_API_KEY?: string;
 }
 
+export type SyncBatchMode = "all" | "pending_only" | "scheduled_only";
+
+export type SyncBatchOptions = {
+  mode?: SyncBatchMode;
+  maxVideos?: number;
+  maxApiBatches?: number;
+  /** Recovery Cron: Queue 無効時に pending も scheduled 枠へ含める。 */
+  includePending?: boolean;
+};
+
 export interface SyncBatchResult {
   processed: number;
   failed: number;
@@ -36,6 +46,8 @@ export interface SyncBatchResult {
   retry_count: number;
   quota_stopped: boolean;
   quota_stop_reason: string | null;
+  changed_video_ids: string[];
+  has_more_pending: boolean;
 }
 
 type SyncRow = { id: string; youtube_video_id: string };
@@ -56,10 +68,21 @@ type MetadataWrite = {
   syncError: string | null;
 };
 
+type ExistingMetadataRow = {
+  video_id: string;
+  view_count: number | null;
+  duration_seconds: number | null;
+  youtube_privacy_status: string | null;
+  youtube_availability_status: string | null;
+  sync_status: string | null;
+};
+
 export const YOUTUBE_SYNC_BATCH_SIZE = 50;
 export const YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN = 4;
 export const YOUTUBE_SYNC_MAX_ROWS_PER_RUN =
   YOUTUBE_SYNC_BATCH_SIZE * YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN;
+export const YOUTUBE_PENDING_MAX_VIDEOS_PER_RUN = 50;
+export const YOUTUBE_PENDING_MAX_API_BATCHES_PER_RUN = 1;
 export const YOUTUBE_SYNC_FETCH_TIMEOUT_MS = 8_000;
 export const YOUTUBE_SYNC_MAX_ATTEMPTS = 2;
 export const YOUTUBE_SYNC_MAX_RETRY_DELAY_MS = 15_000;
@@ -283,10 +306,34 @@ async function querySyncRows(
   return result.results ?? [];
 }
 
-/** pending・開催中・通常期限をindex queryへ分け、合計200件まで取得する。 */
-async function selectSyncRows(
+/** pending 行だけを取得する（Queue consumer 専用）。 */
+export async function selectPendingSyncRows(
+  env: Env,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<SyncRow[]> {
+  signal?.throwIfAborted();
+  return querySyncRows(
+    env,
+    `SELECT v.id, v.youtube_video_id
+       FROM video_youtube_metadata ym
+       INNER JOIN videos v ON v.id = ym.video_id
+      WHERE ym.sync_status = 'pending'
+        AND v.youtube_video_id IS NOT NULL
+        AND v.youtube_video_id <> ''
+        AND v.visibility_status <> 'voided'
+      ORDER BY COALESCE(ym.synced_at, 0) ASC, v.id ASC
+      LIMIT ?1`,
+    [limit],
+    signal,
+  );
+}
+
+/** 開催中・通常期限のみ（pending は含めない）。 */
+async function selectScheduledSyncRows(
   env: Env,
   now: number,
+  limit: number,
   signal?: AbortSignal,
 ): Promise<SyncRow[]> {
   signal?.throwIfAborted();
@@ -297,48 +344,27 @@ async function selectSyncRows(
     await querySyncRows(
       env,
       `SELECT v.id, v.youtube_video_id
-         FROM video_youtube_metadata ym
-         INNER JOIN videos v ON v.id = ym.video_id
-        WHERE ym.sync_status = 'pending'
+         FROM events e
+         INNER JOIN videos v ON v.primary_event_id = e.id
+         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+        WHERE e.visibility_status = 'public'
+          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
+          AND (e.start_time IS NULL OR e.start_time <= ?1 + ?3)
+          AND (e.end_time IS NULL OR e.end_time >= ?1 - ?3)
           AND v.youtube_video_id IS NOT NULL
           AND v.youtube_video_id <> ''
           AND v.visibility_status <> 'voided'
-        ORDER BY COALESCE(ym.synced_at, 0) ASC, v.id ASC
-        LIMIT ?1`,
-      [YOUTUBE_SYNC_MAX_ROWS_PER_RUN],
+          AND ym.sync_status IN ('synced', 'failed')
+          AND ym.synced_at IS NOT NULL
+          AND ym.synced_at <= ?1 - ?2
+        ORDER BY ym.synced_at ASC, v.id ASC
+        LIMIT ?4`,
+      [now, ACTIVE_SYNC_INTERVAL_SEC, ACTIVE_EVENT_GRACE_SEC, limit],
       signal,
     ),
   );
 
-  let remaining = YOUTUBE_SYNC_MAX_ROWS_PER_RUN - selected.size;
-  if (remaining > 0) {
-    appendUniqueRows(
-      selected,
-      await querySyncRows(
-        env,
-        `SELECT v.id, v.youtube_video_id
-           FROM events e
-           INNER JOIN videos v ON v.primary_event_id = e.id
-           INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
-          WHERE e.visibility_status = 'public'
-            AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
-            AND (e.start_time IS NULL OR e.start_time <= ?1 + ?3)
-            AND (e.end_time IS NULL OR e.end_time >= ?1 - ?3)
-            AND v.youtube_video_id IS NOT NULL
-            AND v.youtube_video_id <> ''
-            AND v.visibility_status <> 'voided'
-            AND ym.sync_status IN ('synced', 'failed')
-            AND ym.synced_at IS NOT NULL
-            AND ym.synced_at <= ?1 - ?2
-          ORDER BY ym.synced_at ASC, v.id ASC
-          LIMIT ?4`,
-        [now, ACTIVE_SYNC_INTERVAL_SEC, ACTIVE_EVENT_GRACE_SEC, remaining],
-        signal,
-      ),
-    );
-  }
-
-  remaining = YOUTUBE_SYNC_MAX_ROWS_PER_RUN - selected.size;
+  const remaining = limit - selected.size;
   if (remaining > 0) {
     appendUniqueRows(
       selected,
@@ -362,6 +388,130 @@ async function selectSyncRows(
   }
 
   return [...selected.values()];
+}
+
+/** pending・開催中・通常期限をindex queryへ分け、合計200件まで取得する。 */
+async function selectSyncRows(
+  env: Env,
+  now: number,
+  signal: AbortSignal | undefined,
+  options: SyncBatchOptions,
+): Promise<SyncRow[]> {
+  signal?.throwIfAborted();
+  const mode = options.mode ?? "all";
+  const maxVideos = options.maxVideos ?? YOUTUBE_SYNC_MAX_ROWS_PER_RUN;
+
+  if (mode === "pending_only") {
+    return selectPendingSyncRows(env, maxVideos, signal);
+  }
+
+  if (mode === "scheduled_only") {
+    if (options.includePending) {
+      const selected = new Map<string, SyncRow>();
+      appendUniqueRows(
+        selected,
+        await selectPendingSyncRows(env, maxVideos, signal),
+      );
+      const remaining = maxVideos - selected.size;
+      if (remaining > 0) {
+        appendUniqueRows(
+          selected,
+          await selectScheduledSyncRows(env, now, remaining, signal),
+        );
+      }
+      return [...selected.values()];
+    }
+    return selectScheduledSyncRows(env, now, maxVideos, signal);
+  }
+
+  const selected = new Map<string, SyncRow>();
+
+  appendUniqueRows(
+    selected,
+    await selectPendingSyncRows(env, maxVideos, signal),
+  );
+
+  let remaining = maxVideos - selected.size;
+  if (remaining > 0) {
+    appendUniqueRows(
+      selected,
+      await selectScheduledSyncRows(env, now, remaining, signal),
+    );
+  }
+
+  return [...selected.values()];
+}
+
+export async function countPendingSyncRows(
+  env: Env,
+  signal?: AbortSignal,
+): Promise<number> {
+  signal?.throwIfAborted();
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS pending_count
+       FROM video_youtube_metadata ym
+       INNER JOIN videos v ON v.id = ym.video_id
+      WHERE ym.sync_status = 'pending'
+        AND v.youtube_video_id IS NOT NULL
+        AND v.youtube_video_id <> ''
+        AND v.visibility_status <> 'voided'`,
+  ).first<{ pending_count: number }>();
+  signal?.throwIfAborted();
+  return Math.max(0, Number(row?.pending_count ?? 0));
+}
+
+async function loadExistingMetadata(
+  env: Env,
+  videoIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<Map<string, ExistingMetadataRow>> {
+  signal?.throwIfAborted();
+  const map = new Map<string, ExistingMetadataRow>();
+  if (videoIds.length === 0) return map;
+  const placeholders = videoIds.map(() => "?").join(", ");
+  const result = await env.DB.prepare(
+    `SELECT video_id, view_count, duration_seconds,
+            youtube_privacy_status, youtube_availability_status, sync_status
+       FROM video_youtube_metadata
+      WHERE video_id IN (${placeholders})`,
+  )
+    .bind(...videoIds)
+    .all<ExistingMetadataRow>();
+  signal?.throwIfAborted();
+  for (const row of result.results ?? []) {
+    map.set(row.video_id, row);
+  }
+  return map;
+}
+
+function metadataValueChanged(
+  before: ExistingMetadataRow | undefined,
+  write: MetadataWrite,
+): boolean {
+  if (!before) return write.syncStatus === "synced";
+  if (before.sync_status === "pending" && write.syncStatus === "synced") {
+    return true;
+  }
+  if (write.syncStatus !== "synced") return false;
+  return (
+    Number(before.view_count ?? 0) !== write.viewCount
+    || Number(before.duration_seconds ?? 0) !== write.durationSeconds
+    || (before.youtube_privacy_status ?? null) !== write.privacyStatus
+    || (before.youtube_availability_status ?? null) !== write.availabilityStatus
+  );
+}
+
+function collectChangedVideoIds(
+  writes: MetadataWrite[],
+  existing: Map<string, ExistingMetadataRow>,
+): string[] {
+  const changed: string[] = [];
+  for (const write of writes) {
+    if (metadataValueChanged(existing.get(write.videoId), write)) {
+      changed.push(write.videoId);
+    }
+  }
+  return changed;
 }
 
 function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): MetadataWrite[] {
@@ -445,33 +595,96 @@ async function persistMetadataBatch(
   return 0;
 }
 
-function splitRows(rows: SyncRow[]): SyncRow[][] {
+function splitRows(
+  rows: SyncRow[],
+  maxApiBatches: number,
+): SyncRow[][] {
   const chunks: SyncRow[][] = [];
   for (let offset = 0; offset < rows.length; offset += YOUTUBE_SYNC_BATCH_SIZE) {
     chunks.push(rows.slice(offset, offset + YOUTUBE_SYNC_BATCH_SIZE));
   }
-  return chunks.slice(0, YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN);
+  return chunks.slice(0, maxApiBatches);
+}
+
+function resolveSyncBatchLimits(options: SyncBatchOptions = {}): {
+  mode: SyncBatchMode;
+  maxVideos: number;
+  maxApiBatches: number;
+  includePending: boolean;
+} {
+  const mode = options.mode ?? "all";
+  if (mode === "pending_only") {
+    return {
+      mode,
+      maxVideos: options.maxVideos ?? YOUTUBE_PENDING_MAX_VIDEOS_PER_RUN,
+      maxApiBatches: options.maxApiBatches ?? YOUTUBE_PENDING_MAX_API_BATCHES_PER_RUN,
+      includePending: false,
+    };
+  }
+  return {
+    mode,
+    maxVideos: options.maxVideos ?? YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
+    maxApiBatches: options.maxApiBatches ?? YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
+    includePending: options.includePending === true,
+  };
+}
+
+function emptySyncBatchResult(
+  result: Pick<SyncBatchResult, "processed" | "failed" | "skipped">,
+  extra: Partial<SyncBatchResult> = {},
+): SyncBatchResult {
+  return {
+    external_api_calls: 0,
+    d1_changes: 0,
+    retry_count: 0,
+    quota_stopped: false,
+    quota_stop_reason: null,
+    changed_video_ids: [],
+    has_more_pending: false,
+    ...result,
+    ...extra,
+  };
+}
+
+export async function syncPendingBatch(
+  env: Env,
+  fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
+): Promise<SyncBatchResult> {
+  return syncBatch(env, fetchImpl, signal, { mode: "pending_only" });
 }
 
 export async function syncBatch(
   env: Env,
   fetchImpl: FetchLike = fetch,
   signal?: AbortSignal,
+  options: SyncBatchOptions = {},
 ): Promise<SyncBatchResult> {
   signal?.throwIfAborted();
-  const empty = (result: Pick<SyncBatchResult, "processed" | "failed" | "skipped">, extra: Partial<SyncBatchResult> = {}): SyncBatchResult => ({ external_api_calls: 0, d1_changes: 0, retry_count: 0, quota_stopped: false, quota_stop_reason: null, ...result, ...extra });
+  const limits = resolveSyncBatchLimits(options);
+  const empty = (
+    result: Pick<SyncBatchResult, "processed" | "failed" | "skipped">,
+    extra: Partial<SyncBatchResult> = {},
+  ): SyncBatchResult => emptySyncBatchResult(result, extra);
   const apiKey = env.YOUTUBE_API_KEY?.trim();
   if (!apiKey) return empty({ processed: 0, failed: 0, skipped: 1 });
 
   const now = Math.floor(Date.now() / 1000);
   if (await quotaCooldownActive(env, now, signal)) {
-    return empty({ processed: 0, failed: 0, skipped: 1 }, { quota_stopped: true, quota_stop_reason: "youtube_quota_cooldown" });
+    return empty(
+      { processed: 0, failed: 0, skipped: 1 },
+      { quota_stopped: true, quota_stop_reason: "youtube_quota_cooldown" },
+    );
   }
 
-  const rows = await selectSyncRows(env, now, signal);
+  const rows = await selectSyncRows(env, now, signal, {
+    mode: limits.mode,
+    maxVideos: limits.maxVideos,
+    includePending: limits.includePending,
+  });
   if (rows.length === 0) return empty({ processed: 0, failed: 0, skipped: 1 });
 
-  const chunks = splitRows(rows);
+  const chunks = splitRows(rows, limits.maxApiBatches);
   const plannedQuotaUnits = chunks.length * YOUTUBE_SYNC_MAX_ATTEMPTS;
   const reservation = await reserveYoutubeQuota(
     env,
@@ -479,12 +692,24 @@ export async function syncBatch(
     now,
     signal,
   );
-  if (!reservation) return empty({ processed: 0, failed: 0, skipped: 1 }, { quota_stopped: true, quota_stop_reason: "youtube_quota_reservation_denied" });
+  if (!reservation) {
+    return empty(
+      { processed: 0, failed: 0, skipped: 1 },
+      { quota_stopped: true, quota_stop_reason: "youtube_quota_reservation_denied" },
+    );
+  }
 
-  const budget = new ExternalRequestBudget(YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN);
+  const maxExternalRequests =
+    limits.maxApiBatches * YOUTUBE_SYNC_MAX_ATTEMPTS;
+  const budget = new ExternalRequestBudget(maxExternalRequests);
   let reportedResult: SyncBatchResult | undefined;
   let reportedFailure: JobFailureWithCounters | undefined;
   let startedChunks = 0;
+  const existingMetadata = await loadExistingMetadata(
+    env,
+    rows.map((row) => row.id),
+    signal,
+  );
   try {
     const itemMap = new Map<string, YoutubeItem>();
     for (const chunk of chunks) {
@@ -513,13 +738,21 @@ export async function syncBatch(
 
     signal?.throwIfAborted();
     const writes = buildMetadataWrites(rows, itemMap);
+    const changedVideoIds = collectChangedVideoIds(writes, existingMetadata);
     const d1Changes = await persistMetadataBatch(env, writes, now, signal);
+    let hasMorePending = false;
+    if (limits.mode === "pending_only") {
+      const remainingPending = await countPendingSyncRows(env, signal);
+      hasMorePending = remainingPending > 0;
+    }
     reportedResult = empty(
       { processed: writes.length, failed: 0, skipped: 0 },
       {
-          external_api_calls: budget.used,
-          d1_changes: d1Changes,
-          retry_count: Math.max(0, budget.used - startedChunks),
+        external_api_calls: budget.used,
+        d1_changes: d1Changes,
+        retry_count: Math.max(0, budget.used - startedChunks),
+        changed_video_ids: changedVideoIds,
+        has_more_pending: hasMorePending,
       },
     );
     return reportedResult;

@@ -23,6 +23,9 @@ export const DEPLOY_TARGETS = Object.freeze([
       "ASSETS",
       "WORKER_SELF_REFERENCE",
       "NEXT_INC_CACHE_R2_BUCKET",
+      "NOTIFICATION_WAKE_QUEUE",
+      "STATIC_REBUILD_WAKE_QUEUE",
+      "YOUTUBE_SYNC_WAKE_QUEUE",
     ],
     requiresR2: true,
   },
@@ -32,7 +35,7 @@ export const DEPLOY_TARGETS = Object.freeze([
     source: "workers/fast-jobs/wrangler.toml",
     output: "fast-jobs.toml",
     configEnv: "CF_FAST_JOBS_CONFIG",
-    bindings: ["DB", "KV"],
+    bindings: ["DB", "KV", "NOTIFICATION_WAKE_QUEUE"],
     requiresR2: false,
   },
   {
@@ -41,7 +44,7 @@ export const DEPLOY_TARGETS = Object.freeze([
     source: "workers/content-jobs/wrangler.toml",
     output: "content-jobs.toml",
     configEnv: "CF_CONTENT_JOBS_CONFIG",
-    bindings: ["DB", "R2", "KV"],
+    bindings: ["DB", "R2", "KV", "STATIC_REBUILD_WAKE_QUEUE"],
     requiresR2: true,
   },
   {
@@ -50,7 +53,7 @@ export const DEPLOY_TARGETS = Object.freeze([
     source: "workers/sync-jobs/wrangler.toml",
     output: "sync-jobs.toml",
     configEnv: "CF_SYNC_JOBS_CONFIG",
-    bindings: ["DB", "KV"],
+    bindings: ["DB", "KV", "YOUTUBE_SYNC_WAKE_QUEUE"],
     requiresR2: false,
   },
 ]);
@@ -382,6 +385,59 @@ function injectStringVariable(content, name, rawValue) {
   return `${content.trimEnd()}\n\n[vars]\n${assignment}\n`;
 }
 
+function validateQueueFeatureFlags(content, errors) {
+  for (const name of [
+    "QUEUE_DISPATCH_ENABLED",
+    "QUEUE_CONTINUATION_ENABLED",
+    "QUEUE_YOUTUBE_SYNC_ENABLED",
+  ]) {
+    if (!new RegExp(`^\\s*${name}\\s*=\\s*"0"\\s*$`, "m").test(content)) {
+      errors.push(`${name} must default to "0"`);
+    }
+  }
+}
+
+function validateQueueConsumerBlock(content, errors, { queue, dlq, retryDelay }) {
+  const blockPattern = new RegExp(
+    `\\[\\[queues\\.consumers\\]\\][\\s\\S]*?queue\\s*=\\s*"${queue}"[\\s\\S]*?(?=\\n\\[\\[|$)`,
+  );
+  const block = content.match(blockPattern)?.[0];
+  if (!block) {
+    errors.push(`queue consumer ${queue} is missing`);
+    return;
+  }
+  const required = [
+    ["max_batch_size", "10"],
+    ["max_batch_timeout", "1"],
+    ["max_retries", "3"],
+    ["retry_delay", String(retryDelay)],
+    ["dead_letter_queue", dlq],
+    ["max_concurrency", "1"],
+  ];
+  for (const [key, expected] of required) {
+    if (!new RegExp(`^\\s*${key}\\s*=\\s*${expected === dlq ? `"${expected}"` : expected}\\s*$`, "m").test(block)) {
+      errors.push(`queue consumer ${queue}: ${key} must be ${expected}`);
+    }
+  }
+}
+
+function validateCronSchedule(content, errors, expectedCrons) {
+  const declarations = [...content.matchAll(/^\s*crons\s*=\s*\[([^\]]*)\]\s*$/gm)];
+  if (declarations.length !== 1) {
+    errors.push("exactly one cron declaration is required");
+    return;
+  }
+  const entries = [...declarations[0][1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  const residual = declarations[0][1].replace(/"[^"]+"/g, "").replace(/[\s,]/g, "");
+  if (residual || entries.length !== expectedCrons.length) {
+    errors.push(`cron schedule must be ${expectedCrons.join(", ")}`);
+    return;
+  }
+  for (const cron of expectedCrons) {
+    if (!entries.includes(cron)) errors.push(`cron expression ${cron} is missing`);
+  }
+}
+
 function validateProductionConfig(content, target, env, commit, relativePath) {
   const errors = [];
   if (/FLAMENODE_LOCAL_PREVIEW/.test(content)) {
@@ -426,6 +482,46 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
   if (target.key === "fast-jobs") {
     const assignment = `NEXT_PUBLIC_SITE_URL = ${JSON.stringify(value(env, "NEXT_PUBLIC_SITE_URL"))}`;
     if (!content.includes(assignment)) errors.push("NEXT_PUBLIC_SITE_URL runtime variable is missing");
+    validateQueueFeatureFlags(content, errors);
+    validateQueueConsumerBlock(content, errors, {
+      queue: "flamenode-notification-wake",
+      dlq: "flamenode-notification-dlq",
+      retryDelay: 60,
+    });
+    validateCronSchedule(content, errors, ["0 * * * *"]);
+  }
+  if (target.key === "content-jobs") {
+    validateQueueFeatureFlags(content, errors);
+    validateQueueConsumerBlock(content, errors, {
+      queue: "flamenode-static-rebuild-wake",
+      dlq: "flamenode-static-rebuild-dlq",
+      retryDelay: 60,
+    });
+    validateCronSchedule(content, errors, ["15 * * * *"]);
+  }
+  if (target.key === "sync-jobs") {
+    validateQueueFeatureFlags(content, errors);
+    validateQueueConsumerBlock(content, errors, {
+      queue: "flamenode-youtube-sync-wake",
+      dlq: "flamenode-youtube-sync-dlq",
+      retryDelay: 300,
+    });
+    validateCronSchedule(content, errors, ["7 * * * *", "52 * * * *"]);
+  }
+  if (target.key === "web") {
+    validateQueueFeatureFlags(content, errors);
+    for (const queueBinding of [
+      "NOTIFICATION_WAKE_QUEUE",
+      "STATIC_REBUILD_WAKE_QUEUE",
+      "YOUTUBE_SYNC_WAKE_QUEUE",
+    ]) {
+      if (!new RegExp(`^\\s*binding\\s*=\\s*"${queueBinding}"\\s*$`, "m").test(content)) {
+        errors.push(`required queue producer binding ${queueBinding} is missing`);
+      }
+    }
+    if (/\[\[queues\.consumers\]\]/m.test(content)) {
+      errors.push("web Worker must not define queue consumers");
+    }
   }
   if (errors.length > 0) throw new Error(`${relativePath}: ${errors.join("; ")}`);
 }

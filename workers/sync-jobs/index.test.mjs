@@ -41,5 +41,6 @@ test("UTC分が52の時だけを再生リスト同期の専用枠にする", () 
 
 test("Cron deadline signalをmetadata同期とplaylist同期へ渡す", () => {
   assert.match(source, /syncEventPlaylists\(env, signal\)/);
-  assert.match(source, /syncBatch\(env, undefined, signal\)/);
+  assert.match(source, /syncBatch\(env, undefined, signal,/);
+  assert.match(source, /mode:\s*"scheduled_only"/);
 });

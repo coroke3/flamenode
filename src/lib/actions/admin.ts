@@ -56,7 +56,7 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   const queue = await buildAfterVideoStatusChangeQueueBatch(db, { videoId, eventIds: eventRows.map((row) => row.event_id), creatorXUserId: before.creator_x_user_id, primaryEventId: before.primary_event_id, requestedByUserId: guard.user.id });
   statements.push(...queue.statements, ...notification.statements);
   expected.push(...queue.expectedChanges, ...notification.expectedChanges);
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits }); }
+  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { console.error("[admin-video-status] atomic mutation failed", error); return { ok: false, message: "更新・通知・静的再生成の記録に失敗しました。" }; }
   revalidatePath(`/admin/videos/${videoId}`); revalidatePath("/admin/videos"); revalidatePath("/admin"); revalidatePath(`/${before.youtube_video_id ?? videoId}`); revalidatePath("/list");
   return { ok: true, message: "ステータスを更新しました。" };

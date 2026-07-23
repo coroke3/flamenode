@@ -230,6 +230,7 @@ async function insertGeneratedSlotRows(
       retention_class: "normal",
       strict: true,
     })),
+    staticRebuildWakeSource: queue.statements.length > 0 ? "manage" : undefined,
   });
 }
 
@@ -417,6 +418,7 @@ async function deleteRows(
         retention_class: "normal",
         strict: true,
       })),
+      staticRebuildWakeSource: queue.statements.length > 0 ? "manage" : undefined,
     });
   } catch (error) {
     return mutationError(error);
@@ -541,6 +543,8 @@ async function releaseRows(
         strict: true,
       })),
       postAuditStatements: notifications,
+      notificationWakeSource: notifications.length > 0 ? "manage" : undefined,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "manage" : undefined,
     });
   } catch (error) {
     return mutationError(error);
@@ -710,6 +714,7 @@ export async function batchUpdateSlotLabels(
         retention_class: "normal",
         strict: true,
       })),
+      staticRebuildWakeSource: queue.statements.length > 0 ? "manage" : undefined,
     });
   } catch (error) {
     return mutationError(error);

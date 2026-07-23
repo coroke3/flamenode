@@ -366,6 +366,7 @@ export async function createEvent(
     mutationStatements,
     expectedMutationChanges,
     audits,
+    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
   });
 
   revalidateEventListPaths();
@@ -633,6 +634,7 @@ export async function updateEvent(
     mutationStatements,
     expectedMutationChanges: [...expected, ...queue.expectedChanges],
     audits,
+    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
   });
 
   if (after.visibility_status !== "public") {
@@ -714,6 +716,7 @@ export async function deleteEvent(
         strict: true,
       },
     ],
+    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
   });
 
   await invalidateEventExportCache(eventId);

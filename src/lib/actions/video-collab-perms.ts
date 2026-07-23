@@ -235,6 +235,7 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
     });
   }
 
+  let notificationWakeSource: "manage" | undefined;
   if (canEdit === 1 && !wasCanEdit && parsed.data.notify) {
     const recipientIds = (await getAuthUserIdsForXUser(db, xUserId)).filter((id) => id !== actor.id);
     if (recipientIds.length > 0) {
@@ -250,11 +251,17 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
       );
       statements.push(...notification.statements);
       expected.push(...notification.expectedChanges);
+      notificationWakeSource = "manage";
     }
   }
 
   try {
-    await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
+    await mutateWithAudit(db, {
+      mutationStatements: statements,
+      expectedMutationChanges: expected,
+      audits,
+      notificationWakeSource,
+    });
   } catch (error) {
     console.error("[video-collab-perms] atomic mutation failed", error);
     return { ok: false, message: "共同編集権限・通知・監査の更新に失敗しました。" };

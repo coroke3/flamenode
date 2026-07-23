@@ -101,6 +101,7 @@ export async function createChapter(
     )
   `)];
   const expectedMutationChanges = [1];
+  let notificationWakeSource: "web" | undefined;
 
   if (
     data.visibility === "public" &&
@@ -123,6 +124,7 @@ export async function createChapter(
     if (notification) {
       mutationStatements.push(notification.statement);
       expectedMutationChanges.push(1);
+      notificationWakeSource = "web";
     }
   }
   const queue = await buildStaticRebuildQueueBatch(db, [{
@@ -138,6 +140,8 @@ export async function createChapter(
     mutationStatements,
     expectedMutationChanges,
     audits: [{ table_name: "video_chapters", target_id: id, operation: "CREATE", before: null, after: { ...after }, actor_user_id: sUser.id, retention_class: "normal" }],
+    notificationWakeSource,
+    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   });
 
   revalidatePath(`/${target.youtube_video_id ?? data.video_id}`);
@@ -241,6 +245,7 @@ export async function updateChapter(
       actor_user_id: guard.user.id,
       retention_class: "normal",
     }],
+    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   });
 
   revalidatePath(`/${target.youtube_video_id ?? target.id}`);
@@ -305,6 +310,7 @@ export async function deleteChapter(
       actor_user_id: guard.user.id,
       retention_class: "normal",
     }],
+    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   });
 
   revalidatePath(`/${target.youtube_video_id ?? target.id}`);
@@ -483,6 +489,7 @@ export async function createChaptersBulk(
         actor_user_id: sUser.id,
         retention_class: "normal" as const,
       })),
+      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
     });
   }
 

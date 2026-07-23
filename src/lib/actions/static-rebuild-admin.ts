@@ -51,6 +51,7 @@ export async function enqueueStaticRebuildAdmin(formData: FormData): Promise<voi
     mutationStatements: queue.statements,
     expectedMutationChanges: queue.expectedChanges,
     audits: [{ table_name: "static_rebuild_queue", target_id: `manual:${targetType}:${targetId}`, operation: "CREATE", after: { target_type: targetType, target_id: targetId, reason, priority: "high", requested_by_user_id: guard.user.id }, actor_user_id: guard.user.id, context: "admin_static_rebuild_enqueue", reason: "静的再生成を手動登録", retention_class: "normal", strict: true }],
+    staticRebuildWakeSource: "admin",
   });
   revalidatePath("/admin/static-builds");
 }

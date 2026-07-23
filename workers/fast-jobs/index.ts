@@ -1,24 +1,28 @@
 /**
- * fast-jobs: 5分毎の軽量ジョブ。
- * - 通知ディスパッチ
- * - スロット締切リマインド enqueue
+ * fast-jobs: 通知 Recovery Cron + Queue Consumer。
+ * - scheduled: 期限切れ lease 回復、リマインダー enqueue、due pending の drain
+ * - queue: wake 受信時の bounded notification dispatch
  */
 import {
   createCronWorker,
   type CronRunContext,
 } from "../shared/createCronWorker.ts";
 import {
+  hasDuePendingNotifications,
   MAX_NOTIFICATION_BATCH,
   processNotificationQueue,
+  recoverNotificationOutboxExpiredLeases,
 } from "../notification-dispatcher/dispatch.ts";
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
+import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
 import {
   combineJobCounters,
   runJob,
   throwIfJobFailed,
 } from "../shared/runJob.ts";
+import { handleNotificationWakeQueue } from "./notificationQueueConsumer.ts";
 
 export interface Env {
   DB: D1Database;
@@ -27,6 +31,11 @@ export interface Env {
   NEXT_PUBLIC_SITE_URL?: string;
   KV: KVNamespace;
   BUILD_COMMIT_SHA?: string;
+  NOTIFICATION_WAKE_QUEUE?: {
+    send: (body: unknown) => Promise<void>;
+  };
+  QUEUE_DISPATCH_ENABLED?: string;
+  QUEUE_CONTINUATION_ENABLED?: string;
 }
 
 const REMINDER_INTERVAL_SEC = 3600;
@@ -38,7 +47,17 @@ function isAbortError(error: unknown): error is Error {
   return error instanceof Error && error.name === "AbortError";
 }
 
-export async function runFastJobs(
+async function maybeResendNotificationWake(env: Env): Promise<void> {
+  if (!(await hasDuePendingNotifications(env))) return;
+  await sendWorkerQueueWakeBestEffort({
+    queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
+    kind: "notification_available",
+    source: "recovery",
+    envFlags: env,
+  });
+}
+
+export async function runNotificationRecovery(
   env: Env,
   execution: CronRunContext,
 ): Promise<void> {
@@ -55,6 +74,11 @@ export async function runFastJobs(
         },
         async (signal) => {
           signal?.throwIfAborted();
+          await recoverNotificationOutboxExpiredLeases(env, {
+            limit: MAX_NOTIFICATION_BATCH,
+            signal,
+          });
+
           let reminders: unknown;
           try {
             const reminderLease = await withCronLease(
@@ -78,6 +102,14 @@ export async function runFastJobs(
                           undefined,
                           reminderSignal,
                         );
+                        if (processed > 0) {
+                          await sendWorkerQueueWakeBestEffort({
+                            queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
+                            kind: "notification_available",
+                            source: "sync",
+                            envFlags: env,
+                          });
+                        }
                         return {
                           processed,
                           d1_changes: processed,
@@ -99,15 +131,19 @@ export async function runFastJobs(
               : await runJob(
                   "fast-jobs",
                   "slot-deadline-reminders",
-                async () => ({ skipped: 1 }),
-                { commitSha: env.BUILD_COMMIT_SHA },
-              );
+                  async () => ({ skipped: 1 }),
+                  { commitSha: env.BUILD_COMMIT_SHA },
+                );
           } catch (error) {
             if (signal?.aborted) throw error;
             reminders = { failed: 1 };
           }
 
           signal?.throwIfAborted();
+          if (!(await hasDuePendingNotifications(env, signal))) {
+            return combineJobCounters(reminders, { skipped: 1 });
+          }
+
           let notificationAbortError: Error | undefined;
           const notifications = await runJob(
             "fast-jobs",
@@ -117,6 +153,7 @@ export async function runFastJobs(
                 return await processNotificationQueue(env, {
                   limit: MAX_NOTIFICATION_BATCH,
                   signal,
+                  skipLeaseRecovery: true,
                 });
               } catch (error) {
                 if (isAbortError(error)) notificationAbortError = error;
@@ -127,6 +164,7 @@ export async function runFastJobs(
           );
           if (notificationAbortError) throw notificationAbortError;
           signal?.throwIfAborted();
+          await maybeResendNotificationWake(env);
           return throwIfJobFailed(
             "fast-jobs",
             "cron",
@@ -140,8 +178,17 @@ export async function runFastJobs(
   );
 }
 
-export default createCronWorker<Env>({
+/** 既存テスト互換の別名。 */
+export const runFastJobs = runNotificationRecovery;
+
+const cronWorker = createCronWorker<Env>({
   service: "flamenode-fast-jobs",
-  run: runFastJobs,
+  run: runNotificationRecovery,
   wallClockDeadlineMs: FAST_JOBS_WALL_CLOCK_DEADLINE_MS,
 });
+
+export default {
+  scheduled: cronWorker.scheduled,
+  fetch: cronWorker.fetch,
+  queue: handleNotificationWakeQueue,
+};

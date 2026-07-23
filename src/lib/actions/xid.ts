@@ -420,6 +420,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
         mutationStatements,
         expectedMutationChanges,
         audits,
+        notificationWakeSource: webhookNotification ? "web" : undefined,
       });
       revalidateXIdRequestPaths();
       return { ok: true, message: "X ID 申請を受け付けました。" };

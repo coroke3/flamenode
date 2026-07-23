@@ -36,6 +36,96 @@ export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;
  * 変更された作品と24時間以上未更新の作品を優先し、1 SQLで最大150件更新する。
  * score更新ではvideos.updated_atを変更しない。自己更新で再びdirtyになる循環を防ぐ。
  */
+export async function recalcScoreForVideoIds(
+  env: Env,
+  videoIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<ScoreBatchResult> {
+  throwIfAborted(signal);
+  const uniqueIds = [...new Set(videoIds.filter(Boolean))].slice(
+    0,
+    SCORE_RECALC_BATCH_SIZE,
+  );
+  if (uniqueIds.length === 0) {
+    return {
+      processed: 0,
+      failed: 0,
+      skipped: 1,
+      external_api_calls: 0,
+      d1_changes: 0,
+      retry_count: 0,
+      quota_stopped: false,
+      quota_stop_reason: null,
+    };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const placeholders = uniqueIds.map(() => "?").join(", ");
+  try {
+    throwIfAborted(signal);
+    const result = await env.DB.prepare(
+      `UPDATE videos
+          SET score =
+                COALESCE((
+                  SELECT ym.view_count
+                    FROM video_youtube_metadata ym
+                   WHERE ym.video_id = videos.id
+                ), 0) * 1.0
+                + COALESCE(app_like_count, 0) * 5.0
+                - MAX(0, (?1 - COALESCE(scheduled_time, ?1))) / 86400.0 * 0.1,
+              score_updated_at = ?1
+        WHERE id IN (${placeholders})
+          AND visibility_status = 'public'`,
+    )
+      .bind(now, ...uniqueIds)
+      .run();
+    throwIfAborted(signal);
+
+    const processed = Math.max(0, Number(result.meta?.changes ?? 0));
+    return processed > 0
+      ? {
+          processed,
+          failed: 0,
+          skipped: 0,
+          external_api_calls: 0,
+          d1_changes: processed,
+          retry_count: 0,
+          quota_stopped: false,
+          quota_stop_reason: null,
+        }
+      : {
+          processed: 0,
+          failed: 0,
+          skipped: 1,
+          external_api_calls: 0,
+          d1_changes: 0,
+          retry_count: 0,
+          quota_stopped: false,
+          quota_stop_reason: null,
+        };
+  } catch (error) {
+    if (signal?.aborted) throwIfAborted(signal);
+    console.error(
+      JSON.stringify({
+        worker: "sync-jobs",
+        job: "score-recalc-targeted",
+        result: "failed",
+        error: safeErrorSummary(error),
+      }),
+    );
+    return {
+      processed: 0,
+      failed: 1,
+      skipped: 0,
+      external_api_calls: 0,
+      d1_changes: 0,
+      retry_count: 0,
+      quota_stopped: false,
+      quota_stop_reason: null,
+    };
+  }
+}
+
 export async function recalcScoreBatch(
   env: Env,
   signal?: AbortSignal,

@@ -100,6 +100,7 @@ async function updateRows(
       mutationStatements: statements,
       expectedMutationChanges: rows.map(() => 1),
       audits,
+      notificationWakeSource: kind === "retry" ? "admin" : undefined,
     });
     return { ok: true };
   } catch (error) {
@@ -208,6 +209,7 @@ export async function forceResendNotification(
           strict: true,
         },
       ],
+      notificationWakeSource: "admin",
     });
   } catch (error) {
     return failure(error);

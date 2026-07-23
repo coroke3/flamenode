@@ -83,7 +83,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   }
   statements.push(...queue.statements); expected.push(...queue.expectedChanges);
   if (notification) { statements.push(notification.statement); expected.push(null); }
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits }); }
+  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, notificationWakeSource: notification ? "admin" : undefined, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
   revalidateModeration(video, changed);
   return { ok: true, message: "case を作成しました。" };
@@ -126,7 +126,7 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   }
   statements.push(...queue.statements); expected.push(...queue.expectedChanges);
   if (notification) { statements.push(notification.statement); expected.push(null); }
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits }); }
+  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, notificationWakeSource: notification ? "admin" : undefined, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
   revalidateModeration(video, changed);
   return { ok: true, message: "case を更新しました。" };

@@ -705,9 +705,40 @@ async function deliverWithOutcome(
   );
 }
 
-export async function processNotificationQueue(
+export async function recoverNotificationOutboxExpiredLeases(
   env: Env,
   opts?: { limit?: number; signal?: AbortSignal },
+): Promise<number> {
+  const signal = opts?.signal;
+  throwIfAborted(signal);
+  const limit = boundedLimit(opts?.limit);
+  const now = Math.floor(Date.now() / 1000);
+  return recoverExpiredLeases(env, now, limit, signal);
+}
+
+export async function hasDuePendingNotifications(
+  env: Env,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const result = await env.DB.prepare(
+    `SELECT n.id
+       FROM notification_outbox n
+      WHERE n.status = 'pending'
+        AND COALESCE(n.attempt_count, 0) < ?1
+        AND (n.next_attempt_at IS NULL OR n.next_attempt_at <= ?2)
+      LIMIT 1`,
+  )
+    .bind(MAX_RETRIES, now)
+    .all<{ id: string }>();
+  throwIfAborted(signal);
+  return (result.results?.length ?? 0) > 0;
+}
+
+export async function processNotificationQueue(
+  env: Env,
+  opts?: { limit?: number; signal?: AbortSignal; skipLeaseRecovery?: boolean },
 ): Promise<{
   processed: number;
   failed: number;
@@ -721,8 +752,11 @@ export async function processNotificationQueue(
   throwIfAborted(signal);
   const limit = boundedLimit(opts?.limit);
   const now = Math.floor(Date.now() / 1000);
-  let d1Changes = await recoverExpiredLeases(env, now, limit, signal);
-  throwIfAborted(signal);
+  let d1Changes = 0;
+  if (!opts?.skipLeaseRecovery) {
+    d1Changes = await recoverExpiredLeases(env, now, limit, signal);
+    throwIfAborted(signal);
+  }
   const result = await env.DB.prepare(
     `SELECT n.id, n.recipient_user_id, u.discord_id, n.type, n.payload_json,
             COALESCE(n.attempt_count, 0) AS attempt_count

@@ -6,6 +6,7 @@ import { videos, videoYoutubeMetadata } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 
 export async function queueYoutubeMetadataResync(formData: FormData): Promise<void> {
   const guard = await requireAdminWrite("admin_youtube_sync");
@@ -28,6 +29,7 @@ export async function queueYoutubeMetadataResync(formData: FormData): Promise<vo
     expectedMutationChanges: 1,
     audits: [{ table_name: "video_youtube_metadata", target_id: videoId, operation: before ? "UPDATE" : "CREATE", before: before ? { ...before } : null, after: { ...after }, actor_user_id: guard.user.id, context: "admin_youtube_sync", reason: "YouTubeメタデータ再同期を予約", retention_class: "normal", strict: true }],
   });
+  await sendYoutubeSyncPendingWakeBestEffort("admin");
   revalidatePath("/admin/youtube-sync");
   revalidatePath(`/admin/videos/${videoId}`);
   revalidatePath(`/${video.youtube_video_id ?? videoId}`);

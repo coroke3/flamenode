@@ -97,6 +97,7 @@ export async function linkDiscordAccountAtomically(
       .where(expectedRowCondition({ expectedCurrent: beforeUser })),
   ];
   const expectedMutationChanges: Array<number | null> = [1, 1];
+  let notificationWakeSource: "web" | undefined;
 
   if (!beforeUser.discord_id?.trim()) {
     const welcomeNotification = await buildWelcomeNotification(db, {
@@ -112,6 +113,7 @@ export async function linkDiscordAccountAtomically(
     if (welcomeNotification) {
       mutationStatements.push(welcomeNotification.statement);
       expectedMutationChanges.push(null);
+      notificationWakeSource = "web";
     }
   }
 
@@ -131,5 +133,6 @@ export async function linkDiscordAccountAtomically(
         retention_class: "long_audit",
       },
     ],
+    notificationWakeSource,
   });
 }

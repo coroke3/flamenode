@@ -8,6 +8,7 @@ import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import { generateId } from "@/lib/utils/id";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { extractYoutubeId } from "@/lib/youtube/id";
@@ -228,9 +229,11 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       }),
       eventId,
     });
+    let notificationWakeSource: "web" | undefined;
     if (notification) {
       plan.statements.push(notification.statement);
       plan.expectedChanges.push(1);
+      notificationWakeSource = "web";
     }
 
     const queueTargets = [
@@ -261,7 +264,11 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
 
-    await executeVideoAtomicWritePlan(db, plan);
+    await executeVideoAtomicWritePlan(db, plan, {
+      notificationWakeSource,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+    });
+    await sendYoutubeSyncPendingWakeBestEffort("web");
   } catch (error) {
     if (isYoutubeIdUniqueConstraintError(error)) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };

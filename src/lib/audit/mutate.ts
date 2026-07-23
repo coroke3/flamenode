@@ -1,6 +1,7 @@
 import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
+import type { QueueWakeSource } from "@/lib/queues/wakeBudget";
 import type { WriteAuditLogInput } from "./types";
 import {
   prepareAuditLogEntries,
@@ -55,6 +56,10 @@ export type AtomicAuditMutationInput = {
    * 不可分でなければならない後処理にのみ使う。
    */
   postAuditStatements?: readonly BatchItem<"sqlite">[];
+  /** notification_outbox への pending 保存を含む batch 成功後に Queue wake を1回送る。 */
+  notificationWakeSource?: QueueWakeSource;
+  /** static_rebuild_queue への保存を含む batch 成功後に Queue wake を1回送る。 */
+  staticRebuildWakeSource?: QueueWakeSource;
 };
 
 /** 直前の DML が期待した行数を変更しなければ SQLite error にして batch を中断する。 */
@@ -287,5 +292,17 @@ export async function mutateWithAudit(
   }
 
   await db.batch(batchItems as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+  if (input.notificationWakeSource) {
+    const { wakeNotificationQueueAfterCommit } = await import(
+      "@/lib/queues/wakeNotificationQueueAfterCommit"
+    );
+    await wakeNotificationQueueAfterCommit(input.notificationWakeSource);
+  }
+  if (input.staticRebuildWakeSource) {
+    const { wakeStaticRebuildQueueAfterCommit } = await import(
+      "@/lib/queues/wakeStaticRebuildQueueAfterCommit"
+    );
+    await wakeStaticRebuildQueueAfterCommit(input.staticRebuildWakeSource);
+  }
   return entries.map((entry) => entry.id);
 }

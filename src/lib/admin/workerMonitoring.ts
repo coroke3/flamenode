@@ -293,16 +293,17 @@ export async function loadWorkerMonitoring(
     oldestUpdatedAt: nullableNumber(scoreRow?.oldest_updated_at),
   };
 
-  const notificationDrain = drainMinutes(notifications.pending, 6, 5);
-  const staticDrain = drainMinutes(staticRebuilds.pending, 1, 15);
-  const youtubeDrain = drainMinutes(youtube.stale, 50, 15);
-  const scoreDrain = drainMinutes(scores.stale, 150, 15);
+  // Queue wake 有効時は秒単位起動が本線。Recovery Cron は1時間なので下限の目安にも使う。
+  const notificationDrain = drainMinutes(notifications.pending, 6, 1);
+  const staticDrain = drainMinutes(staticRebuilds.pending, 1, 1);
+  const youtubeDrain = drainMinutes(youtube.stale, 50, 60);
+  const scoreDrain = drainMinutes(scores.stale, 150, 60);
   const youtubeFailureCritical = Math.max(10, Math.ceil(youtube.eligible * 0.1));
   const pipelines: PipelineSnapshot[] = [
-    { id: "notifications", label: "通知配信", level: pipelineLevel(notifications.pending, notificationDrain, 30, 120, notifications.failed, notifications.stuck), backlog: notifications.pending, capacityPerDay: 1728, estimatedDrainMinutes: notificationDrain, note: `処理中 ${notifications.processing}件 / 固着 ${notifications.stuck}件 / 失敗 ${notifications.failed}件`, detailHref: "/admin/notifications" },
-    { id: "static", label: "静的JSON再生成", level: pipelineLevel(staticRebuilds.pending, staticDrain, 360, 1440, staticRebuilds.failed, staticRebuilds.stuck), backlog: staticRebuilds.pending, capacityPerDay: 96, estimatedDrainMinutes: staticDrain, note: `処理中 ${staticRebuilds.processing}件 / 固着 ${staticRebuilds.stuck}件 / 失敗 ${staticRebuilds.failed}件`, detailHref: "/admin/static-builds" },
-    { id: "youtube", label: "YouTubeメタデータ同期", level: youtube.failed >= youtubeFailureCritical ? "critical" : youtube.failed > 0 || youtubeDrain > 720 ? "warn" : "ok", backlog: youtube.stale, capacityPerDay: 4800, estimatedDrainMinutes: youtubeDrain, note: `対象 ${youtube.eligible}件 / 同期失敗 ${youtube.failed}件`, detailHref: "/admin/youtube-sync" },
-    { id: "scores", label: "スコア差分更新", level: pipelineLevel(scores.stale, scoreDrain, 360, 1440), backlog: scores.stale, capacityPerDay: 14400, estimatedDrainMinutes: scoreDrain, note: `公開作品 ${scores.eligible}件。index書込みを含むD1枠へ余裕を確保した上限です。`, detailHref: "/admin/static-builds" },
+    { id: "notifications", label: "通知配信", level: pipelineLevel(notifications.pending, notificationDrain, 30, 120, notifications.failed, notifications.stuck), backlog: notifications.pending, capacityPerDay: 8_000, estimatedDrainMinutes: notificationDrain, note: `処理中 ${notifications.processing}件 / 固着 ${notifications.stuck}件 / 失敗 ${notifications.failed}件（Queue wake + 毎時Recovery）`, detailHref: "/admin/notifications" },
+    { id: "static", label: "静的JSON再生成", level: pipelineLevel(staticRebuilds.pending, staticDrain, 360, 1440, staticRebuilds.failed, staticRebuilds.stuck), backlog: staticRebuilds.pending, capacityPerDay: 1_500, estimatedDrainMinutes: staticDrain, note: `処理中 ${staticRebuilds.processing}件 / 固着 ${staticRebuilds.stuck}件 / 失敗 ${staticRebuilds.failed}件（1 target/wake + 毎時Recovery）`, detailHref: "/admin/static-builds" },
+    { id: "youtube", label: "YouTubeメタデータ同期", level: youtube.failed >= youtubeFailureCritical ? "critical" : youtube.failed > 0 || youtubeDrain > 720 ? "warn" : "ok", backlog: youtube.stale, capacityPerDay: 2_400, estimatedDrainMinutes: youtubeDrain, note: `対象 ${youtube.eligible}件 / 同期失敗 ${youtube.failed}件（pendingはQueue、定期は毎時7分）`, detailHref: "/admin/youtube-sync" },
+    { id: "scores", label: "スコア差分更新", level: pipelineLevel(scores.stale, scoreDrain, 360, 1440), backlog: scores.stale, capacityPerDay: 3_600, estimatedDrainMinutes: scoreDrain, note: `公開作品 ${scores.eligible}件。変更動画限定 + 毎時Cron dirty。`, detailHref: "/admin/static-builds" },
   ];
 
   const critical = jobs.some((job) => job.level === "critical") || pipelines.some((pipeline) => pipeline.level === "critical");

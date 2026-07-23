@@ -24,7 +24,56 @@ function write(root, relative, content) {
   fs.writeFileSync(target, content, "utf8");
 }
 
-function cronWorker(name, { r2 = false, cron = "*/5 * * * *" } = {}) {
+function queueWorkerSections({ producerQueue, producerBinding, consumerQueue, consumerDlq, retryDelay }) {
+  return [
+    "",
+    "[vars]",
+    'QUEUE_DISPATCH_ENABLED = "0"',
+    'QUEUE_CONTINUATION_ENABLED = "0"',
+    'QUEUE_YOUTUBE_SYNC_ENABLED = "0"',
+    "",
+    "[[queues.producers]]",
+    `queue = "${producerQueue}"`,
+    `binding = "${producerBinding}"`,
+    "",
+    "[[queues.consumers]]",
+    `queue = "${consumerQueue}"`,
+    "max_batch_size = 10",
+    "max_batch_timeout = 1",
+    "max_retries = 3",
+    `retry_delay = ${retryDelay}`,
+    `dead_letter_queue = "${consumerDlq}"`,
+    "max_concurrency = 1",
+  ];
+}
+
+function cronWorker(name, { r2 = false, cron = "0 * * * *", crons } = {}) {
+  const cronLine = Array.isArray(crons)
+    ? `crons = [${crons.map((entry) => `"${entry}"`).join(", ")}]`
+    : `crons = ["${cron}"]`;
+  const queueConfig = {
+    "fast-jobs": {
+      producerQueue: "flamenode-notification-wake",
+      producerBinding: "NOTIFICATION_WAKE_QUEUE",
+      consumerQueue: "flamenode-notification-wake",
+      consumerDlq: "flamenode-notification-dlq",
+      retryDelay: 60,
+    },
+    "content-jobs": {
+      producerQueue: "flamenode-static-rebuild-wake",
+      producerBinding: "STATIC_REBUILD_WAKE_QUEUE",
+      consumerQueue: "flamenode-static-rebuild-wake",
+      consumerDlq: "flamenode-static-rebuild-dlq",
+      retryDelay: 60,
+    },
+    "sync-jobs": {
+      producerQueue: "flamenode-youtube-sync-wake",
+      producerBinding: "YOUTUBE_SYNC_WAKE_QUEUE",
+      consumerQueue: "flamenode-youtube-sync-wake",
+      consumerDlq: "flamenode-youtube-sync-dlq",
+      retryDelay: 300,
+    },
+  }[name];
   return [
     `name = "flamenode-${name}"`,
     'main = "index.ts"',
@@ -32,7 +81,8 @@ function cronWorker(name, { r2 = false, cron = "*/5 * * * *" } = {}) {
     'compatibility_flags = ["nodejs_compat"]',
     "",
     "[triggers]",
-    `crons = ["${cron}"]`,
+    cronLine,
+    ...queueWorkerSections(queueConfig),
     "",
     "[[d1_databases]]",
     'binding = "DB"',
@@ -115,11 +165,32 @@ function writeValidTemplate(root) {
       'binding = "KV"',
       'id = "00000000000000000000000000000000"',
       "",
+      "[vars]",
+      'QUEUE_DISPATCH_ENABLED = "0"',
+      'QUEUE_CONTINUATION_ENABLED = "0"',
+      'QUEUE_YOUTUBE_SYNC_ENABLED = "0"',
+      "",
+      "[[queues.producers]]",
+      'queue = "flamenode-notification-wake"',
+      'binding = "NOTIFICATION_WAKE_QUEUE"',
+      "",
+      "[[queues.producers]]",
+      'queue = "flamenode-static-rebuild-wake"',
+      'binding = "STATIC_REBUILD_WAKE_QUEUE"',
+      "",
+      "[[queues.producers]]",
+      'queue = "flamenode-youtube-sync-wake"',
+      'binding = "YOUTUBE_SYNC_WAKE_QUEUE"',
+      "",
     ].join("\n"),
   );
   write(root, "workers/fast-jobs/wrangler.toml", cronWorker("fast-jobs"));
-  write(root, "workers/content-jobs/wrangler.toml", cronWorker("content-jobs", { r2: true, cron: "*/15 * * * *" }));
-  write(root, "workers/sync-jobs/wrangler.toml", cronWorker("sync-jobs", { cron: "7,22,37,52 * * * *" }));
+  write(root, "workers/content-jobs/wrangler.toml", cronWorker("content-jobs", { r2: true, cron: "15 * * * *" }));
+  write(
+    root,
+    "workers/sync-jobs/wrangler.toml",
+    cronWorker("sync-jobs", { crons: ["7 * * * *", "52 * * * *"] }),
+  );
 }
 
 test("OpenNext web Worker and exactly three Cron Worker templates pass", () =>
@@ -144,12 +215,12 @@ test("tracked production ID, Pages script, and multiple cron expressions fail cl
     write(
       root,
       "workers/fast-jobs/wrangler.toml",
-      cronWorker("fast-jobs").replace('crons = ["*/5 * * * *"]', 'crons = ["*/5 * * * *", "0 * * * *"]'),
+      cronWorker("fast-jobs").replace('crons = ["0 * * * *"]', 'crons = ["0 * * * *", "15 * * * *"]'),
     );
     const errors = checkCloudflareTemplate({ root }).join("\n");
     assert.match(errors, /tracked database_id must remain the zero placeholder/);
     assert.match(errors, /legacy pages:\* scripts|legacy Pages build or deploy/);
-    assert.match(errors, /exactly one valid cron expression/);
+    assert.match(errors, /cron schedule must be/);
   }));
 
 test("production IDs in nested reference TOML files fail closed", () =>

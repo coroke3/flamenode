@@ -365,6 +365,7 @@ async function approveXIdLinkRequestOnce(
     mutationStatements: statements,
     expectedMutationChanges: expected,
     audits,
+    notificationWakeSource: notification ? "admin" : undefined,
   });
   revalidateIdentityAdminPaths();
   return { ok: true, message: request.request_type === "alias" ? "別名を承認しました。" : "連携を承認しました。" };
@@ -485,6 +486,8 @@ async function rejectXIdLinkRequestOnce(
         retention_class: "long_audit",
       },
     ],
+    notificationWakeSource:
+      notification || webhookNotification ? "admin" : undefined,
   });
   revalidateIdentityAdminPaths();
   return { ok: true, message: "却下しました。" };

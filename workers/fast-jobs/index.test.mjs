@@ -52,6 +52,9 @@ test("reminder失敗後もnotification dispatchを実行し最後に集約失敗
               throw new Error("no such table: reminder_failure_fixture");
             }
             if (sql.includes("FROM notification_outbox n")) {
+              if (sql.includes("LIMIT 1") && !sql.includes("INNER JOIN")) {
+                return { results: [{ id: "pending-1" }] };
+              }
               notificationSelectionRan = true;
             }
             return { results: [] };
@@ -69,4 +72,48 @@ test("reminder失敗後もnotification dispatchを実行し最後に集約失敗
     /reported 1 failed operation/,
   );
   assert.equal(notificationSelectionRan, true);
+});
+
+test("recovery: Queue無しでも due pending を処理できる", async () => {
+  let dispatchRan = false;
+  const env = {
+    NEXT_PUBLIC_SITE_URL: "https://flamenode.example",
+    KV: {
+      async get() {
+        return null;
+      },
+      async put() {},
+      async delete() {},
+    },
+    DB: {
+      prepare(sql) {
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            return { meta: { changes: 1 } };
+          },
+          async all() {
+            if (sql.includes("FROM slots s")) {
+              return { results: [] };
+            }
+            if (sql.includes("FROM notification_outbox n")) {
+              if (sql.includes("LIMIT 1") && !sql.includes("INNER JOIN")) {
+                return { results: [{ id: "pending-1" }] };
+              }
+              dispatchRan = true;
+            }
+            return { results: [] };
+          },
+        };
+      },
+    },
+  };
+
+  await runFastJobs(env, {
+    scheduledTime: Date.now(),
+    signal: new AbortController().signal,
+  });
+  assert.equal(dispatchRan, true);
 });

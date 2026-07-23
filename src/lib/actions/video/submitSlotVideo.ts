@@ -18,6 +18,7 @@ import {
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { extractYoutubeId } from "@/lib/youtube/id";
@@ -299,6 +300,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       });
     }
 
+    let notificationWakeSource: "web" | undefined;
     if (!existingVideo) {
       const notification = await buildNotificationOutboxStatement(db, {
         recipientUserId: userId,
@@ -315,6 +317,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       if (notification) {
         plan.statements.push(notification.statement);
         plan.expectedChanges.push(1);
+        notificationWakeSource = "web";
       }
     }
     const queue = await buildStaticRebuildQueueBatch(db, [
@@ -333,7 +336,13 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     ]);
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
-    await executeVideoAtomicWritePlan(db, plan);
+    await executeVideoAtomicWritePlan(db, plan, {
+      notificationWakeSource,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+    });
+    if (youtubeId) {
+      await sendYoutubeSyncPendingWakeBestEffort("web");
+    }
   } catch (error) {
     if (isYoutubeIdUniqueConstraintError(error)) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };

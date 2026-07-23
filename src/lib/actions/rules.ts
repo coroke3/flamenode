@@ -171,6 +171,8 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
       mutationStatements,
       expectedMutationChanges: expected,
       audits: [{ table_name: "terms_versions", target_id: termsId, operation: "UPDATE", before: snapshot(target), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_broadcast", reason: `再同意通知 batch cursor=${cursor} enqueued=${notifications.statements.length}`, strict: true }],
+      notificationWakeSource:
+        notifications.statements.length > 0 ? "admin" : undefined,
     });
   } catch (error) { return mutationError(error); }
   const nextCursor = targets.at(-1)?.user_id ?? cursor;

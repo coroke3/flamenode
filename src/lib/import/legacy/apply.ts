@@ -36,6 +36,7 @@ import type {
   LegacyImportApplyStage,
 } from "./previewStore";
 import { legacyImportRebuildQueueId } from "./rebuildQueueCore";
+import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 
 const LEGACY_IMPORT_SYSTEM_USER_ID = "system_legacy_import";
 const MAX_IDS_PER_QUERY = 80;
@@ -1336,6 +1337,7 @@ async function applyEvent(
           )]
         : []),
     ],
+    staticRebuildWakeSource: "import",
   });
   return existing ? "replaced" : "created";
 }
@@ -2260,6 +2262,7 @@ async function applyVideo(
           )]
         : []),
     ],
+    staticRebuildWakeSource: "import",
   });
   return existing ? "replaced" : "created";
 }
@@ -2478,6 +2481,9 @@ export async function applyLegacyImportPlanStep(
         input.progress.skipExistingVideoIds.includes(video.id),
         options,
       );
+      if (video.youtube_video_id && action !== "skipped") {
+        await sendYoutubeSyncPendingWakeBestEffort("import");
+      }
       outcome = { kind: "video", action };
       break;
     }

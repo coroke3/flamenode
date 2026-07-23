@@ -6,7 +6,10 @@ import {
   parseDuration,
   parseRetryAfterMs,
   syncBatch,
+  syncPendingBatch,
   YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN,
+  YOUTUBE_PENDING_MAX_API_BATCHES_PER_RUN,
+  YOUTUBE_PENDING_MAX_VIDEOS_PER_RUN,
   YOUTUBE_SYNC_BATCH_SIZE,
   YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
   YOUTUBE_SYNC_MAX_ATTEMPTS,
@@ -34,11 +37,20 @@ test("YouTube同期は1 Cron最大200 ID・外部request最大8件に固定す�
   assert.equal(YOUTUBE_SYNC_BATCH_SIZE, 50);
   assert.equal(YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN, 4);
   assert.equal(YOUTUBE_SYNC_MAX_ROWS_PER_RUN, 200);
+  assert.equal(YOUTUBE_PENDING_MAX_VIDEOS_PER_RUN, 50);
+  assert.equal(YOUTUBE_PENDING_MAX_API_BATCHES_PER_RUN, 1);
   assert.equal(YOUTUBE_SYNC_MAX_ATTEMPTS, 2);
   assert.equal(YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN, 8);
   assert.ok(YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN < 50);
   assert.match(source, /for \(const chunk of chunks\)/);
   assert.doesNotMatch(source, /Promise\.all\([\s\S]*fetchYoutubeItems/);
+});
+
+test("pending only は最大50件・API batch 1件に固定する", () => {
+  assert.match(source, /mode === "pending_only"/);
+  assert.match(source, /selectPendingSyncRows/);
+  assert.match(source, /changed_video_ids/);
+  assert.match(source, /has_more_pending/);
 });
 
 test("YouTube quotaはD1の日次80%予算を予約し未使用分を返却する", () => {
@@ -66,11 +78,11 @@ test("YouTube応答は必要なfieldsだけ取得する", () => {
 });
 
 test("候補抽出はpending・開催中・通常期限のindex queryへ分離する", () => {
-  assert.match(source, /FROM video_youtube_metadata ym[\s\S]*ym\.sync_status = 'pending'/);
-  assert.match(source, /FROM events e[\s\S]*ACTIVE_SYNC_INTERVAL_SEC/);
-  assert.match(source, /ym\.synced_at <= \?1 - \?2[\s\S]*DEFAULT_SYNC_INTERVAL_SEC/);
+  assert.match(source, /selectPendingSyncRows/);
+  assert.match(source, /selectScheduledSyncRows/);
+  assert.match(source, /ACTIVE_SYNC_INTERVAL_SEC/);
+  assert.match(source, /DEFAULT_SYNC_INTERVAL_SEC/);
   assert.doesNotMatch(source, /FROM videos v\s+LEFT JOIN video_youtube_metadata/);
-  assert.match(source, /合計200件/);
 });
 
 test("YouTube durationを秒へ変換する", () => {
@@ -102,34 +114,50 @@ function metadataAbortEnv() {
     },
     DB: {
       prepare(sql) {
-        return {
+        const statement = {
           bind(...bindings) {
             sqlCalls.push({ sql, bindings });
+            return statement;
+          },
+          async all() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return {
+                results: [{ used_units: 2 }],
+                meta: { changes: 1 },
+              };
+            }
+            if (sql.includes("video_id IN")) {
+              return {
+                results: [{
+                  video_id: "video-row",
+                  view_count: 0,
+                  duration_seconds: 0,
+                  youtube_privacy_status: null,
+                  youtube_availability_status: null,
+                  sync_status: "pending",
+                }],
+              };
+            }
             return {
-              async all() {
-                if (sql.includes("INSERT INTO external_api_quota_usage")) {
-                  return {
-                    results: [{ used_units: 2 }],
-                    meta: { changes: 1 },
-                  };
-                }
-                return {
-                  results: sql.includes("ym.sync_status = 'pending'")
-                    ? [{ id: "video-row", youtube_video_id: "youtube-id" }]
-                    : [],
-                };
-              },
-              async first() {
-                return sql.includes("INSERT INTO external_api_quota_usage")
-                  ? { used_units: 2 }
-                  : null;
-              },
-              async run() {
-                return { meta: { changes: 1 } };
-              },
+              results: sql.includes("ym.sync_status = 'pending'")
+                ? [{ id: "video-row", youtube_video_id: "youtube-id" }]
+                : [],
             };
           },
+          async first() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return { used_units: 2 };
+            }
+            if (sql.includes("COUNT(*)")) {
+              return { pending_count: 0 };
+            }
+            return null;
+          },
+          async run() {
+            return { meta: { changes: 1 } };
+          },
         };
+        return statement;
       },
       async batch(statements) {
         batchCalls.push(statements);
@@ -188,4 +216,25 @@ test("非 quota 例外でも失敗までの API・D1 計数を保持する", asy
       return true;
     },
   );
+});
+
+test("pending only は view_count 変化分だけ changed_video_ids を返す", async () => {
+  const env = metadataAbortEnv();
+  const result = await syncPendingBatch(
+    env,
+    async () => new Response(JSON.stringify({
+      items: [{
+        id: "youtube-id",
+        statistics: { viewCount: "120" },
+        status: { privacyStatus: "public" },
+        contentDetails: { duration: "PT1M" },
+      }],
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  assert.equal(result.processed, 1);
+  assert.deepEqual(result.changed_video_ids, ["video-row"]);
+  assert.equal(result.has_more_pending, false);
 });
