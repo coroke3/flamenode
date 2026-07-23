@@ -1,8 +1,8 @@
 # FlameNode AI作業コンテキスト
 
 > Status: Active
-> Last verified: 2026-07-20
-> Verified against commit: `47e6cee`
+> Last verified: 2026-07-23
+> Verified against commit: `630244ce`
 > Source of truth: `AGENTS.md`, `src/lib/db/schema.ts`, `migrations/`, `package.json`, `wrangler.toml`
 
 軽量モデルを含むAIは、リポジトリ全体を先に読まない。`AGENTS.md`と、この文書の該当行だけを読み、次に対象コードを確認する。
@@ -39,6 +39,7 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 | 認証・権限・owner | `AGENTS.md`、関連Active運用文書 | `src/lib/auth/`、権限判定コード、関連integration test |
 | 公開API・DTO | `AGENTS.md` | Route Handler、`src/lib/api/publicDto.ts`、漏洩test |
 | Worker・Cron・外部API | `docs/operations/workers.md` | `workers/`、各`wrangler.toml`、worker test |
+| Worker・Queue | `docs/operations/workers.md` | `src/lib/queues/wakeBudget.ts`、`workers/*/wrangler.toml`、Queue関連test |
 | YouTube同期 | `docs/operations/youtube-playlist-sync.md` | 同期Worker、quota管理コード、関連migration |
 | UI・フォーム | `docs/operations/ui-acceptance.md` | 対象page/component、CSS、関連test |
 | 監査・復元 | `docs/operations/audit-and-restore.md` | mutation、audit helper、復元test |
@@ -56,7 +57,7 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 - `event_staff.permission_preset = 'owner'`をイベント代表者の正本とし、ownerを0人にしない。
 - 権限はUIだけでなくServer ActionまたはRoute Handlerで検証する。
 - 公開APIは明示したDTOだけを返し、内部情報を漏らさない。
-- Cloudflare Workers + OpenNext + Workers Static Assets、D1、R2、KV、Cron Worker 3本を維持する。
+- Cloudflare Workers + OpenNext + Workers Static Assets、D1、R2、KV、Queue 6本（wake 3 + DLQ 3）、Recovery Cron Worker 3本を維持する。
 - productionはCloudflare Workers Buildsの単一Git連携だけを正本とし、GitHub ActionsやWorker別Git連携を追加しない。
 - Remote D1 migrationは自動適用せず、read-only preflightと運用者の明示適用を分離する。
 - 実Cloudflare操作、Remote D1操作、production secret操作は明示依頼時だけ行う。

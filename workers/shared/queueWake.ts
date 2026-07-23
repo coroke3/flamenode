@@ -15,6 +15,7 @@ import {
   parseQueueWakeMessage,
 } from "../../src/lib/queues/wakeMessage.ts";
 import { resolveQueueFeatureFlags } from "../../src/lib/queues/featureFlags.ts";
+import { recordQueueWakeFailureBestEffort } from "./queueWakeFailure.ts";
 
 export {
   QUEUE_FEATURE_FLAG_NAMES,
@@ -70,6 +71,9 @@ export async function sendWorkerQueueWakeBestEffort(input: {
   source: QueueWakeSource;
   envFlags?: Record<string, string | undefined> | null;
   requireYoutubeFlag?: boolean;
+  /** 同一処理内の重複防止用。呼び出し側が Set を共有する。 */
+  sentKinds?: Set<QueueWakeKind>;
+  kv?: KVNamespace | null;
 }): Promise<boolean> {
   const flags = resolveQueueFeatureFlags(input.envFlags ?? null);
   if (!flags.dispatchEnabled) return false;
@@ -77,11 +81,17 @@ export async function sendWorkerQueueWakeBestEffort(input: {
     return false;
   }
   if (input.requireYoutubeFlag && !flags.youtubeSyncEnabled) return false;
+  if (input.sentKinds?.has(input.kind)) return false;
   if (!input.queue) {
     warnOnce(`worker_wake_missing:${input.kind}`, {
       service: "queue-wake-worker",
       result: "binding_missing",
       kind: input.kind,
+    });
+    void recordQueueWakeFailureBestEffort({
+      kind: input.kind,
+      reason: "binding_missing",
+      kv: input.kv,
     });
     return false;
   }
@@ -96,6 +106,8 @@ export async function sendWorkerQueueWakeBestEffort(input: {
     return false;
   }
 
+  input.sentKinds?.add(input.kind);
+
   try {
     await input.queue.send(message);
     return true;
@@ -105,6 +117,11 @@ export async function sendWorkerQueueWakeBestEffort(input: {
       result: "send_failed",
       kind: input.kind,
       error_name: error instanceof Error ? error.name : undefined,
+    });
+    void recordQueueWakeFailureBestEffort({
+      kind: input.kind,
+      reason: "send_failed",
+      kv: input.kv,
     });
     return false;
   }

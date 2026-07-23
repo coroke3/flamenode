@@ -54,6 +54,7 @@ async function maybeResendNotificationWake(env: Env): Promise<void> {
     kind: "notification_available",
     source: "recovery",
     envFlags: env,
+    kv: env.KV,
   });
 }
 
@@ -108,6 +109,7 @@ export async function runNotificationRecovery(
                             kind: "notification_available",
                             source: "sync",
                             envFlags: env,
+                            kv: env.KV,
                           });
                         }
                         return {

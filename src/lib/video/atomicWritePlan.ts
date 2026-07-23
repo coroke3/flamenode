@@ -1,6 +1,6 @@
 import type { DB } from "@/lib/db/client";
 import { mutateWithAudit } from "@/lib/audit/mutate";
-import type { QueueWakeSource } from "@/lib/queues/wakeBudget";
+import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
 import {
   planD1AuditMutationBudget,
   type D1AuditMutationBudget,
@@ -46,6 +46,7 @@ export async function executeVideoAtomicWritePlan(
   options?: {
     notificationWakeSource?: QueueWakeSource;
     staticRebuildWakeSource?: QueueWakeSource;
+    wakeSentKinds?: Set<QueueWakeKind>;
   },
 ): Promise<void> {
   if (plan.statements.length === 0 || plan.audits.length === 0) {
@@ -62,5 +63,6 @@ export async function executeVideoAtomicWritePlan(
     audits: plan.audits,
     notificationWakeSource: options?.notificationWakeSource,
     staticRebuildWakeSource: options?.staticRebuildWakeSource,
+    wakeSentKinds: options?.wakeSentKinds,
   });
 }

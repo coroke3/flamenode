@@ -52,6 +52,7 @@ export async function handleStaticRebuildWakeQueue(
         kind: "static_rebuild_available",
         source: "continuation",
         envFlags: env as Record<string, string | undefined>,
+        kv: env.KV,
       });
     }
 

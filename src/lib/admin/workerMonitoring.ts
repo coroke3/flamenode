@@ -1,5 +1,7 @@
 import "server-only";
 
+import { QUEUE_WAKE_KINDS, type QueueWakeKind } from "@/lib/queues/wakeBudget";
+
 export type MonitorLevel = "ok" | "warn" | "critical" | "unknown" | "running";
 
 type LeaseRow = {
@@ -18,12 +20,14 @@ type QueueRow = {
   pending?: CountValue;
   processing?: CountValue;
   failed?: CountValue;
+  dead_letter?: CountValue;
   stuck?: CountValue;
   oldest_pending_at?: CountValue;
 };
 
 type SyncRow = {
   eligible?: CountValue;
+  pending?: CountValue;
   stale?: CountValue;
   failed?: CountValue;
   oldest_synced_at?: CountValue;
@@ -63,6 +67,22 @@ export type PipelineSnapshot = {
   detailHref: string;
 };
 
+export type QueueWakeFailureRecord = {
+  at: number;
+  reason: string;
+};
+
+export type QueueWakeFailures = Record<QueueWakeKind, QueueWakeFailureRecord | null>;
+
+export type QueueSnapshot = {
+  pending: number;
+  processing: number;
+  failed: number;
+  deadLetter: number;
+  stuck: number;
+  oldestPendingAt: number | null;
+};
+
 export type WorkerMonitoringSnapshot = {
   generatedAt: number;
   operationMode: string;
@@ -71,18 +91,18 @@ export type WorkerMonitoringSnapshot = {
   jobs: WorkerJobStatus[];
   notifications: QueueSnapshot;
   staticRebuilds: QueueSnapshot;
-  youtube: { eligible: number; stale: number; failed: number; oldestSyncedAt: number | null };
+  youtube: {
+    eligible: number;
+    pending: number;
+    stale: number;
+    failed: number;
+    oldestSyncedAt: number | null;
+  };
   scores: { eligible: number; stale: number; oldestUpdatedAt: number | null };
   artifacts: { targetType: string; generatedAt: number | null }[];
   pipelines: PipelineSnapshot[];
-};
-
-type QueueSnapshot = {
-  pending: number;
-  processing: number;
-  failed: number;
-  stuck: number;
-  oldestPendingAt: number | null;
+  /** KV 未接続・読取失敗時は null */
+  queueWakeFailures: QueueWakeFailures | null;
 };
 
 type JobDefinition = {
@@ -101,6 +121,15 @@ const JOBS: readonly JobDefinition[] = [
   { jobName: "fast-jobs:slot-deadline-reminders", label: "締切リマインダー生成", cadenceSeconds: 3600, warnAfterSeconds: 7200, criticalAfterSeconds: 10800, detailHref: "/admin/notifications" },
   { jobName: "content-jobs:cleanup", label: "期限切れデータ整理", cadenceSeconds: 3600, warnAfterSeconds: 7200, criticalAfterSeconds: 10800, detailHref: "/admin/static-builds" },
 ] as const;
+
+const QUEUE_WAKE_LAST_FAILURE_KV_KEYS = Object.freeze(
+  Object.fromEntries(
+    QUEUE_WAKE_KINDS.map((kind) => [
+      kind,
+      `queue_wake:last_failure:${kind}`,
+    ]),
+  ) as Record<QueueWakeKind, string>,
+);
 
 export const PLATFORM_LIMITS = [
   { label: "Workers CPU", value: "10ms / invocation" },
@@ -128,9 +157,37 @@ function queueSnapshot(row: QueueRow | null): QueueSnapshot {
     pending: numberValue(row?.pending),
     processing: numberValue(row?.processing),
     failed: numberValue(row?.failed),
+    deadLetter: numberValue(row?.dead_letter),
     stuck: numberValue(row?.stuck),
     oldestPendingAt: nullableNumber(row?.oldest_pending_at),
   };
+}
+
+function parseQueueWakeFailureRecord(value: unknown): QueueWakeFailureRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as { at?: unknown; reason?: unknown };
+  const at = Number(record.at);
+  if (!Number.isFinite(at) || at <= 0) return null;
+  const reason = typeof record.reason === "string" ? record.reason.trim() : "";
+  if (!reason) return null;
+  return { at: Math.floor(at), reason };
+}
+
+export async function loadQueueWakeFailures(
+  kv: KVNamespace | null | undefined,
+): Promise<QueueWakeFailures | null> {
+  if (!kv) return null;
+  try {
+    const entries = await Promise.all(
+      QUEUE_WAKE_KINDS.map(async (kind) => {
+        const raw = await kv.get(QUEUE_WAKE_LAST_FAILURE_KV_KEYS[kind], "json");
+        return [kind, parseQueueWakeFailureRecord(raw)] as const;
+      }),
+    );
+    return Object.fromEntries(entries) as QueueWakeFailures;
+  } catch {
+    return null;
+  }
 }
 
 function drainMinutes(backlog: number, batch: number, cadence: number): number {
@@ -175,16 +232,28 @@ function jobStatus(definition: JobDefinition, row: LeaseRow | undefined, now: nu
   };
 }
 
-function pipelineLevel(backlog: number, drain: number, warn: number, critical: number, failed = 0, stuck = 0): MonitorLevel {
-  if (failed > 0 || stuck > 0 || drain > critical) return "critical";
+function pipelineLevel(
+  backlog: number,
+  drain: number,
+  warn: number,
+  critical: number,
+  failed = 0,
+  stuck = 0,
+  deadLetter = 0,
+): MonitorLevel {
+  if (failed > 0 || stuck > 0 || deadLetter > 0 || drain > critical) return "critical";
   if (backlog > 0 && drain > warn) return "warn";
   return "ok";
 }
 
 export async function loadWorkerMonitoring(
   db: D1Database,
-  now = Math.floor(Date.now() / 1000),
+  options?: {
+    now?: number;
+    kv?: KVNamespace | null;
+  },
 ): Promise<WorkerMonitoringSnapshot> {
+  const now = options?.now ?? Math.floor(Date.now() / 1000);
   const leaseRows = await db.prepare(
     `SELECT job_name, lease_token, lease_expires_at, last_started_at,
             last_succeeded_at, last_failed_at, last_error_code
@@ -201,10 +270,11 @@ export async function loadWorkerMonitoring(
        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
        SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+       SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END) AS dead_letter,
        SUM(CASE WHEN status = 'processing' AND (processing_started_at IS NULL OR processing_started_at <= ?1) THEN 1 ELSE 0 END) AS stuck,
        MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
      FROM notification_outbox
-     WHERE status IN ('pending', 'processing', 'failed')`,
+     WHERE status IN ('pending', 'processing', 'failed', 'dead_letter')`,
   ).bind(now - 900).first<QueueRow>();
 
   const staticRow = await db.prepare(
@@ -212,10 +282,11 @@ export async function loadWorkerMonitoring(
        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
        SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+       SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END) AS dead_letter,
        SUM(CASE WHEN status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at <= ?1) THEN 1 ELSE 0 END) AS stuck,
        MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
      FROM static_rebuild_queue
-     WHERE status IN ('pending', 'processing', 'failed')`,
+     WHERE status IN ('pending', 'processing', 'failed', 'dead_letter')`,
   ).bind(now).first<QueueRow>();
 
   const youtubeRow = await db.prepare(
@@ -252,6 +323,7 @@ export async function loadWorkerMonitoring(
      )
      SELECT
        (SELECT COUNT(*) FROM videos v WHERE v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> '' AND v.visibility_status <> 'voided') AS eligible,
+       (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'pending') AS pending,
        (SELECT COUNT(*) FROM stale_candidates) AS stale,
        (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'failed') AS failed,
        (SELECT MIN(synced_at) FROM video_youtube_metadata) AS oldest_synced_at`,
@@ -283,6 +355,7 @@ export async function loadWorkerMonitoring(
   const staticRebuilds = queueSnapshot(staticRow);
   const youtube = {
     eligible: numberValue(youtubeRow?.eligible),
+    pending: numberValue(youtubeRow?.pending),
     stale: numberValue(youtubeRow?.stale),
     failed: numberValue(youtubeRow?.failed),
     oldestSyncedAt: nullableNumber(youtubeRow?.oldest_synced_at),
@@ -299,11 +372,68 @@ export async function loadWorkerMonitoring(
   const youtubeDrain = drainMinutes(youtube.stale, 50, 60);
   const scoreDrain = drainMinutes(scores.stale, 150, 60);
   const youtubeFailureCritical = Math.max(10, Math.ceil(youtube.eligible * 0.1));
+  const queueWakeFailures = await loadQueueWakeFailures(options?.kv);
   const pipelines: PipelineSnapshot[] = [
-    { id: "notifications", label: "通知配信", level: pipelineLevel(notifications.pending, notificationDrain, 30, 120, notifications.failed, notifications.stuck), backlog: notifications.pending, capacityPerDay: 8_000, estimatedDrainMinutes: notificationDrain, note: `処理中 ${notifications.processing}件 / 固着 ${notifications.stuck}件 / 失敗 ${notifications.failed}件（Queue wake + 毎時Recovery）`, detailHref: "/admin/notifications" },
-    { id: "static", label: "静的JSON再生成", level: pipelineLevel(staticRebuilds.pending, staticDrain, 360, 1440, staticRebuilds.failed, staticRebuilds.stuck), backlog: staticRebuilds.pending, capacityPerDay: 1_500, estimatedDrainMinutes: staticDrain, note: `処理中 ${staticRebuilds.processing}件 / 固着 ${staticRebuilds.stuck}件 / 失敗 ${staticRebuilds.failed}件（1 target/wake + 毎時Recovery）`, detailHref: "/admin/static-builds" },
-    { id: "youtube", label: "YouTubeメタデータ同期", level: youtube.failed >= youtubeFailureCritical ? "critical" : youtube.failed > 0 || youtubeDrain > 720 ? "warn" : "ok", backlog: youtube.stale, capacityPerDay: 2_400, estimatedDrainMinutes: youtubeDrain, note: `対象 ${youtube.eligible}件 / 同期失敗 ${youtube.failed}件（pendingはQueue、定期は毎時7分）`, detailHref: "/admin/youtube-sync" },
-    { id: "scores", label: "スコア差分更新", level: pipelineLevel(scores.stale, scoreDrain, 360, 1440), backlog: scores.stale, capacityPerDay: 3_600, estimatedDrainMinutes: scoreDrain, note: `公開作品 ${scores.eligible}件。変更動画限定 + 毎時Cron dirty。`, detailHref: "/admin/static-builds" },
+    {
+      id: "notifications",
+      label: "通知配信",
+      level: pipelineLevel(
+        notifications.pending,
+        notificationDrain,
+        30,
+        120,
+        notifications.failed,
+        notifications.stuck,
+        notifications.deadLetter,
+      ),
+      backlog: notifications.pending,
+      capacityPerDay: 8_000,
+      estimatedDrainMinutes: notificationDrain,
+      note: `処理中 ${notifications.processing}件 / 固着 ${notifications.stuck}件 / 失敗 ${notifications.failed}件 / 最終失敗 ${notifications.deadLetter}件（Queue wake + 毎時Recovery）`,
+      detailHref: "/admin/notifications",
+    },
+    {
+      id: "static",
+      label: "静的JSON再生成",
+      level: pipelineLevel(
+        staticRebuilds.pending,
+        staticDrain,
+        360,
+        1440,
+        staticRebuilds.failed,
+        staticRebuilds.stuck,
+        staticRebuilds.deadLetter,
+      ),
+      backlog: staticRebuilds.pending,
+      capacityPerDay: 1_500,
+      estimatedDrainMinutes: staticDrain,
+      note: `処理中 ${staticRebuilds.processing}件 / 固着 ${staticRebuilds.stuck}件 / 失敗 ${staticRebuilds.failed}件 / 最終失敗 ${staticRebuilds.deadLetter}件（1 target/wake + 毎時Recovery）`,
+      detailHref: "/admin/static-builds",
+    },
+    {
+      id: "youtube",
+      label: "YouTubeメタデータ同期",
+      level: youtube.failed >= youtubeFailureCritical
+        ? "critical"
+        : youtube.failed > 0 || youtube.pending > 0 || youtubeDrain > 720
+          ? "warn"
+          : "ok",
+      backlog: youtube.stale,
+      capacityPerDay: 2_400,
+      estimatedDrainMinutes: youtubeDrain,
+      note: `対象 ${youtube.eligible}件 / pending ${youtube.pending}件 / 同期失敗 ${youtube.failed}件（Queue wake + 毎時7分Recovery）`,
+      detailHref: "/admin/youtube-sync",
+    },
+    {
+      id: "scores",
+      label: "スコア差分更新",
+      level: pipelineLevel(scores.stale, scoreDrain, 360, 1440),
+      backlog: scores.stale,
+      capacityPerDay: 3_600,
+      estimatedDrainMinutes: scoreDrain,
+      note: `公開作品 ${scores.eligible}件。変更動画限定 + 毎時Cron dirty。`,
+      detailHref: "/admin/static-builds",
+    },
   ];
 
   const critical = jobs.some((job) => job.level === "critical") || pipelines.some((pipeline) => pipeline.level === "critical");
@@ -325,5 +455,6 @@ export async function loadWorkerMonitoring(
     scores,
     artifacts: (artifactRows.results ?? []).map((row) => ({ targetType: row.target_type, generatedAt: nullableNumber(row.generated_at) })),
     pipelines,
+    queueWakeFailures,
   };
 }

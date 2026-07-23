@@ -161,6 +161,7 @@ export async function handleYoutubeSyncWakeQueue(
             source: "continuation",
             envFlags: env,
             requireYoutubeFlag: true,
+            kv: env.KV,
           });
         }
 

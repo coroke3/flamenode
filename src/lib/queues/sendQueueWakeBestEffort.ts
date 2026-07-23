@@ -12,6 +12,7 @@ import {
   assertQueueWakeMessageWithinBudget,
   createQueueWakeMessage,
 } from "./wakeMessage";
+import { recordQueueWakeFailureBestEffort } from "./wakeFailureRecord";
 
 export type QueueSendBinding = {
   send: (body: unknown) => Promise<void>;
@@ -28,6 +29,8 @@ type SendQueueWakeOptions = {
   envFlags?: Record<string, string | undefined> | null;
   /** youtube sync だけ別フラグで止められる */
   requireYoutubeFlag?: boolean;
+  /** last-failure 記録用。未指定時は getEnv().KV を使う。 */
+  kv?: KVNamespace | null;
 };
 
 const missingBindingWarned = new Set<string>();
@@ -130,6 +133,11 @@ export async function sendQueueWakeBestEffort(
       result: "binding_missing",
       kind: options.kind,
     });
+    void recordQueueWakeFailureBestEffort({
+      kind: options.kind,
+      reason: "binding_missing",
+      kv: options.kv,
+    });
     return { sent: false, reason: "binding_missing" };
   }
 
@@ -143,6 +151,11 @@ export async function sendQueueWakeBestEffort(
         result: "send_failed",
         kind: options.kind,
         error_name: error instanceof Error ? error.name : undefined,
+      });
+      void recordQueueWakeFailureBestEffort({
+        kind: options.kind,
+        reason: "send_failed",
+        kv: options.kv,
       });
     },
   );

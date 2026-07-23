@@ -1,7 +1,7 @@
 import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
-import type { QueueWakeSource } from "@/lib/queues/wakeBudget";
+import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
 import type { WriteAuditLogInput } from "./types";
 import {
   prepareAuditLogEntries,
@@ -60,6 +60,11 @@ export type AtomicAuditMutationInput = {
   notificationWakeSource?: QueueWakeSource;
   /** static_rebuild_queue への保存を含む batch 成功後に Queue wake を1回送る。 */
   staticRebuildWakeSource?: QueueWakeSource;
+  /**
+   * 同一リクエスト内の wake 重複防止用 Set。
+   * 未指定時は wake source がある場合だけ内部で生成する。
+   */
+  wakeSentKinds?: Set<QueueWakeKind>;
 };
 
 /** 直前の DML が期待した行数を変更しなければ SQLite error にして batch を中断する。 */
@@ -292,17 +297,26 @@ export async function mutateWithAudit(
   }
 
   await db.batch(batchItems as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+  const wakeSentKinds =
+    input.wakeSentKinds ??
+    (input.notificationWakeSource || input.staticRebuildWakeSource
+      ? new Set<QueueWakeKind>()
+      : undefined);
   if (input.notificationWakeSource) {
     const { wakeNotificationQueueAfterCommit } = await import(
       "@/lib/queues/wakeNotificationQueueAfterCommit"
     );
-    await wakeNotificationQueueAfterCommit(input.notificationWakeSource);
+    await wakeNotificationQueueAfterCommit(input.notificationWakeSource, {
+      sentKinds: wakeSentKinds,
+    });
   }
   if (input.staticRebuildWakeSource) {
     const { wakeStaticRebuildQueueAfterCommit } = await import(
       "@/lib/queues/wakeStaticRebuildQueueAfterCommit"
     );
-    await wakeStaticRebuildQueueAfterCommit(input.staticRebuildWakeSource);
+    await wakeStaticRebuildQueueAfterCommit(input.staticRebuildWakeSource, {
+      sentKinds: wakeSentKinds,
+    });
   }
   return entries.map((entry) => entry.id);
 }

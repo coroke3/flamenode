@@ -19,6 +19,7 @@ import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
+import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { extractYoutubeId } from "@/lib/youtube/id";
@@ -336,12 +337,14 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     ]);
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
+    const wakeSentKinds = new Set<QueueWakeKind>();
     await executeVideoAtomicWritePlan(db, plan, {
       notificationWakeSource,
       staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+      wakeSentKinds,
     });
     if (youtubeId) {
-      await sendYoutubeSyncPendingWakeBestEffort("web");
+      await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
     }
   } catch (error) {
     if (isYoutubeIdUniqueConstraintError(error)) {

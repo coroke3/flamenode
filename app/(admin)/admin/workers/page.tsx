@@ -12,6 +12,8 @@ import {
   PLATFORM_LIMITS,
   type MonitorLevel,
   type PipelineSnapshot,
+  type QueueSnapshot,
+  type QueueWakeFailures,
   type WorkerJobStatus,
   type WorkerMonitoringSnapshot,
 } from "@/lib/admin/workerMonitoring";
@@ -57,7 +59,7 @@ export default async function AdminWorkersPage(): Promise<React.ReactElement> {
   let error: string | null = null;
   try {
     if (!env.DB) throw new Error("DB bindingを取得できませんでした。");
-    snapshot = await loadWorkerMonitoring(env.DB);
+    snapshot = await loadWorkerMonitoring(env.DB, { kv: env.KV });
   } catch (cause) {
     error = String(cause);
   }
@@ -85,10 +87,32 @@ export default async function AdminWorkersPage(): Promise<React.ReactElement> {
   );
 }
 
+function queueWakeKindLabel(kind: string): string {
+  if (kind === "notification_available") return "通知";
+  if (kind === "static_rebuild_available") return "静的JSON";
+  if (kind === "youtube_sync_pending") return "YouTube同期";
+  return kind;
+}
+
+function activeQueueWakeFailures(
+  failures: QueueWakeFailures | null,
+): { kind: string; at: number; reason: string }[] {
+  if (!failures) return [];
+  return Object.entries(failures)
+    .filter((entry): entry is [string, { at: number; reason: string }] => entry[1] != null)
+    .map(([kind, record]) => ({ kind, ...record }));
+}
+
 function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot }): React.ReactElement {
   const criticalJobs = snapshot.jobs.filter((job) => job.level === "critical").length;
   const problemPipelines = snapshot.pipelines.filter((pipeline) => pipeline.level !== "ok").length;
-  const totalFailures = snapshot.notifications.failed + snapshot.staticRebuilds.failed + snapshot.youtube.failed;
+  const totalFailures =
+    snapshot.notifications.failed
+    + snapshot.notifications.deadLetter
+    + snapshot.staticRebuilds.failed
+    + snapshot.staticRebuilds.deadLetter
+    + snapshot.youtube.failed;
+  const queueWakeFailures = activeQueueWakeFailures(snapshot.queueWakeFailures);
 
   return (
     <>
@@ -109,12 +133,78 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
         <StatCard label="失敗データ" value={formatCount(totalFailures)} />
       </section>
 
+      {queueWakeFailures.length > 0 ? (
+        <div
+          role="alert"
+          style={{
+            marginTop: 16,
+            padding: "12px 16px",
+            border: "1px solid var(--accent-danger, #dc2626)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--accent-danger, #991b1b)",
+          }}
+        >
+          <strong>Queue wake 最終失敗</strong>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 13 }}>
+            {queueWakeFailures.map((failure) => (
+              <li key={failure.kind}>
+                {queueWakeKindLabel(failure.kind)}: {failure.reason}（{formatUnix(failure.at)}）
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <section style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>Cron実行状態</h2>
         <div style={{ overflowX: "auto" }}>
           <FnTable style={{ minWidth: 940 }}>
             <thead><tr><th>ジョブ</th><th>状態</th><th>最終開始</th><th>最終成功</th><th>最終失敗</th><th>次回目安</th><th>エラー</th><th></th></tr></thead>
             <tbody>{snapshot.jobs.map((job) => <WorkerRow key={job.jobName} job={job} />)}</tbody>
+          </FnTable>
+        </div>
+      </section>
+
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>キュー状態</h2>
+        <div style={{ overflowX: "auto" }}>
+          <FnTable style={{ minWidth: 980 }}>
+            <thead>
+              <tr>
+                <th>処理</th>
+                <th>pending</th>
+                <th>最古pending</th>
+                <th>failed</th>
+                <th>dead_letter</th>
+                <th>stuck</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <QueueMetricsRow
+                label="通知配信"
+                queue={snapshot.notifications}
+                detailHref="/admin/notifications"
+              />
+              <QueueMetricsRow
+                label="静的JSON再生成"
+                queue={snapshot.staticRebuilds}
+                detailHref="/admin/static-builds"
+              />
+              <tr>
+                <td style={{ fontWeight: 700 }}>YouTubeメタデータ同期</td>
+                <td>{formatCount(snapshot.youtube.pending)}</td>
+                <td>{formatUnix(snapshot.youtube.oldestSyncedAt)}</td>
+                <td>{formatCount(snapshot.youtube.failed)}</td>
+                <td>—</td>
+                <td>—</td>
+                <td>
+                  <Link href="/admin/youtube-sync" className="fn-btn fn-btn-ghost fn-btn-sm">
+                    管理
+                  </Link>
+                </td>
+              </tr>
+            </tbody>
           </FnTable>
         </div>
       </section>
@@ -170,6 +260,28 @@ function WorkerRow({ job }: { job: WorkerJobStatus }): React.ReactElement {
       <TimeCell value={job.lastStartedAt} /><TimeCell value={job.lastSucceededAt} /><TimeCell value={job.lastFailedAt} /><TimeCell value={job.nextExpectedAt} />
       <td style={{ maxWidth: 240, wordBreak: "break-word", fontSize: 12 }}>{job.lastErrorCode ?? "—"}</td>
       <td><Link href={job.detailHref} className="fn-btn fn-btn-ghost fn-btn-sm">詳細</Link></td>
+    </tr>
+  );
+}
+
+function QueueMetricsRow({
+  label,
+  queue,
+  detailHref,
+}: {
+  label: string;
+  queue: QueueSnapshot;
+  detailHref: string;
+}): React.ReactElement {
+  return (
+    <tr>
+      <td style={{ fontWeight: 700 }}>{label}</td>
+      <td>{formatCount(queue.pending)}</td>
+      <td title={formatUnix(queue.oldestPendingAt)}>{queue.oldestPendingAt == null ? "—" : formatRelative(queue.oldestPendingAt)}</td>
+      <td>{formatCount(queue.failed)}</td>
+      <td>{formatCount(queue.deadLetter)}</td>
+      <td>{formatCount(queue.stuck)}</td>
+      <td><Link href={detailHref} className="fn-btn fn-btn-ghost fn-btn-sm">管理</Link></td>
     </tr>
   );
 }

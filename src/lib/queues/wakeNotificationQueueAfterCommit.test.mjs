@@ -21,19 +21,21 @@ test("producer helper: notification wake を commit 後ヘルパへ集約する"
   assert.match(mutate, /wakeNotificationQueueAfterCommit/);
 });
 
-test("producer: dispatch 有効時は同一 kind を1回だけ送る", async () => {
+test("producer: sentKinds 共有時は同一 kind を1回だけ送る", async () => {
   let sendCalls = 0;
   const queue = {
     async send() {
       sendCalls += 1;
     },
   };
+  const sentKinds = new Set();
 
   const first = await sendWorkerQueueWakeBestEffort({
     queue,
     kind: "notification_available",
     source: "web",
     envFlags: { QUEUE_DISPATCH_ENABLED: "1" },
+    sentKinds,
   });
   assert.equal(first, true);
   assert.equal(sendCalls, 1);
@@ -43,9 +45,10 @@ test("producer: dispatch 有効時は同一 kind を1回だけ送る", async () 
     kind: "notification_available",
     source: "web",
     envFlags: { QUEUE_DISPATCH_ENABLED: "1" },
+    sentKinds,
   });
-  assert.equal(duplicate, true);
-  assert.equal(sendCalls, 2);
+  assert.equal(duplicate, false);
+  assert.equal(sendCalls, 1);
 });
 
 test("producer: Queue送信失敗でも例外を投げない", async () => {

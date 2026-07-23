@@ -34,6 +34,7 @@ import {
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
+import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 
 import {
   buildVideoAuditSnapshot,
@@ -388,12 +389,14 @@ export async function applyVideoUpdatePlan(
   const queue = await buildStaticRebuildQueueBatch(db, queueItems);
   atomic.statements.push(...queue.statements);
   atomic.expectedChanges.push(...queue.expectedChanges);
+  const wakeSentKinds = new Set<QueueWakeKind>();
   await executeVideoAtomicWritePlan(db, atomic, {
     staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+    wakeSentKinds,
   });
 
   if (sections.youtube && plan.youtubeId) {
-    await sendYoutubeSyncPendingWakeBestEffort("web");
+    await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
   }
 
   for (const path of plan.revalidatePaths) revalidatePath(path);

@@ -1,8 +1,8 @@
 # デプロイ準備チェックリスト
 
 > Status: Active
-> Last verified: 2026-07-22
-> Verified against commit: `182d9ab`
+> Last verified: 2026-07-23
+> Verified against commit: `630244ce`
 > Source of truth: [`DEPLOY.md`](../../DEPLOY.md)、[`workers.md`](workers.md)、[`LOCAL.md`](../../LOCAL.md)、[`migrations.md`](migrations.md)、[`.dev.vars.example`](../../.dev.vars.example)、`wrangler.toml`、`workers/*/wrangler.toml`、`package.json` の `cf:*`、`scripts/cloudflare-*.mjs`
 
 運用者が Cloudflare へデプロイする一歩手前までを追えるチェックリスト。詳細手順・障害対応・rollback は [`DEPLOY.md`](../../DEPLOY.md) を正本とし、本書は横断確認用にとどめる。secret の実値、production resource ID、token は本書・Issue・log へ書かない。
@@ -20,9 +20,9 @@
 | 領域 | 名前 / 役割 |
 | --- | --- |
 | Web Worker | `flamenode-web`（OpenNext + Workers Static Assets、`run_worker_first = false`） |
-| Cron Worker | `flamenode-fast-jobs`（通知・リマインダー、5分間隔） |
-| Cron Worker | `flamenode-content-jobs`（静的JSON再生成、15分間隔） |
-| Cron Worker | `flamenode-sync-jobs`（YouTube同期、15分間隔・7/22/37/52分） |
+| Cron Worker | `flamenode-fast-jobs`（通知・リマインダー、Recovery Cron 毎時0分） |
+| Cron Worker | `flamenode-content-jobs`（静的JSON再生成、Recovery Cron 毎時15分） |
+| Cron Worker | `flamenode-sync-jobs`（YouTube同期、Recovery Cron 毎時7分・52分） |
 | Database | Cloudflare D1 `flamenode_db` |
 | Object storage | Cloudflare R2 `flamenode-storage` |
 | Cache / 軽量状態 | Cloudflare KV（bootstrap 表示名 `FLAMENODE_KV`） |
@@ -98,19 +98,65 @@ npm run cf:bootstrap -- --confirm-create
 
 ### binding 論理名（全 Worker で一致させる）
 
-| Worker | D1 | R2 | KV | その他 |
-| --- | --- | --- | --- | --- |
-| `flamenode-web` | `DB` | `BUCKET`、`NEXT_INC_CACHE_R2_BUCKET` | `KV` | Assets `ASSETS`、service `WORKER_SELF_REFERENCE` |
-| `flamenode-fast-jobs` | `DB` | — | `KV` | — |
-| `flamenode-content-jobs` | `DB` | `R2` | `KV` | — |
-| `flamenode-sync-jobs` | `DB` | — | `KV` | — |
+| Worker | D1 | R2 | KV | Queue | その他 |
+| --- | --- | --- | --- | --- | --- |
+| `flamenode-web` | `DB` | `BUCKET`、`NEXT_INC_CACHE_R2_BUCKET` | `KV` | producer: `NOTIFICATION_WAKE_QUEUE`、`STATIC_REBUILD_WAKE_QUEUE`、`YOUTUBE_SYNC_WAKE_QUEUE` | Assets `ASSETS`、service `WORKER_SELF_REFERENCE` |
+| `flamenode-fast-jobs` | `DB` | — | `KV` | producer/consumer: `NOTIFICATION_WAKE_QUEUE` | — |
+| `flamenode-content-jobs` | `DB` | `R2` | `KV` | producer/consumer: `STATIC_REBUILD_WAKE_QUEUE` | — |
+| `flamenode-sync-jobs` | `DB` | — | `KV` | producer/consumer: `YOUTUBE_SYNC_WAKE_QUEUE` | — |
 
 **注意:** 追跡対象の `wrangler.toml` / `workers/*/wrangler.toml` は placeholder ID のまま維持する。production の実 ID は Build 時に `.cloudflare/generated/` へ注入され、Git 管理外とする。
 
 - [ ] Dashboard の各 Worker binding が上表の論理名と一致
+- [ ] Queue binding 欠落時は deploy 検査が fail-closed することを理解済み
 - [ ] repo の wrangler template に production 実 ID をコミットしていない
 
-詳細: [`DEPLOY.md` §4 Bindings](../../DEPLOY.md)、[`LOCAL.md` §9](../../LOCAL.md)
+詳細: [`DEPLOY.md` §4 Bindings](../../DEPLOY.md)、[`workers.md`](workers.md)、[`LOCAL.md` §9](../../LOCAL.md)
+
+---
+
+## 4a. Cloudflare Queues（wake 6本）
+
+通常運用は Queue 駆動を優先し、Cron は Recovery 用の安全網とする。業務データは載せない（D1 が処理正本）。詳細は [`workers.md`](workers.md)。
+
+### Queue リソース作成（初回のみ）
+
+```sh
+npx wrangler queues create flamenode-notification-wake
+npx wrangler queues create flamenode-notification-dlq
+npx wrangler queues create flamenode-static-rebuild-wake
+npx wrangler queues create flamenode-static-rebuild-dlq
+npx wrangler queues create flamenode-youtube-sync-wake
+npx wrangler queues create flamenode-youtube-sync-dlq
+```
+
+### producer / consumer / DLQ チェックリスト
+
+| Queue | binding | producer | consumer | DLQ |
+| --- | --- | --- | --- | --- |
+| `flamenode-notification-wake` | `NOTIFICATION_WAKE_QUEUE` | `flamenode-web`、`flamenode-fast-jobs` | `flamenode-fast-jobs` | `flamenode-notification-dlq` |
+| `flamenode-static-rebuild-wake` | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-web`、`flamenode-content-jobs` | `flamenode-content-jobs` | `flamenode-static-rebuild-dlq` |
+| `flamenode-youtube-sync-wake` | `YOUTUBE_SYNC_WAKE_QUEUE` | `flamenode-web`、`flamenode-sync-jobs` | `flamenode-sync-jobs` | `flamenode-youtube-sync-dlq` |
+
+- [ ] wake Queue 3本 + DLQ 3本を作成済み
+- [ ] `flamenode-web` は 3 Queue すべてへ **producer のみ**（consumer なし）
+- [ ] 各 Cron Worker は対応 Queue の **consumer** と継続 wake 用 **producer** を持つ
+- [ ] consumer の `dead_letter_queue` が上表 DLQ と一致
+- [ ] `npm run check:cloudflare-template` が Queue binding 欠落を検出する（fail-closed）
+
+### Queue feature flags（Phase 1 デフォルト無効）
+
+全 Worker（`flamenode-web` 含む）で wrangler template どおり **`"0"`** で開始し、段階的に有効化する。ロールバックは該当 flag を `"0"` へ戻すだけでよい。
+
+| 変数名 | 意味 |
+| --- | --- |
+| `QUEUE_DISPATCH_ENABLED` | Web 等からの wake 送信 |
+| `QUEUE_CONTINUATION_ENABLED` | Consumer invocation からの継続 wake |
+| `QUEUE_YOUTUBE_SYNC_ENABLED` | YouTube sync wake の有効化 |
+
+- [ ] 初回 deploy 時、上記 3 flag が全 Worker で `"0"` である
+- [ ] 有効化は `"1"` / `"true"` / `"yes"` を Dashboard または Runtime Variables で設定
+- [ ] 正本: `src/lib/queues/wakeBudget.ts` の `QUEUE_FEATURE_FLAG_NAMES`
 
 ---
 
@@ -147,19 +193,20 @@ Variables / Secrets の分離:
 
 ---
 
-## 5. Cron Trigger 3本
+## 5. Cron Trigger（Recovery 4式）
 
-確認箇所: 各 Worker の `workers/*/wrangler.toml` の `[triggers]`、および Cloudflare Dashboard の Cron 設定。
+確認箇所: 各 Worker の `workers/*/wrangler.toml` の `[triggers]`、および Cloudflare Dashboard の Cron 設定。通常運用は Queue 駆動を優先し、Cron は wake が届かなかった場合の安全網とする。
 
 | Worker | Cron 式 | 役割（概要） |
 | --- | --- | --- |
-| `flamenode-fast-jobs` | `*/5 * * * *` | 通知・締切リマインダー（Discord 等） |
-| `flamenode-content-jobs` | `*/15 * * * *` | 静的 JSON 再生成 queue |
-| `flamenode-sync-jobs` | `7,22,37,52 * * * *` | YouTube metadata / playlist 同期 |
+| `flamenode-fast-jobs` | `0 * * * *` | 通知・締切リマインダー（Recovery） |
+| `flamenode-content-jobs` | `15 * * * *` | 静的 JSON 再生成（Recovery） |
+| `flamenode-sync-jobs` | `7 * * * *`、`52 * * * *` | YouTube metadata / playlist 同期（Recovery） |
 
-- [ ] 上記 3 Trigger のみ存在（追加・変更なし）
+- [ ] 上記 4 式のみ存在（追加・変更なし）
 - [ ] Cron Worker へ Git 連携を付けていない
 - [ ] Dashboard の Cron 式が wrangler template と一致
+- [ ] Cloudflare アカウントの Cron Trigger 合計が上限 5 件以内（リポジトリ外の既存 Trigger は削除しない）
 
 詳細: [`workers.md`](workers.md)、[`DEPLOY.md` §4 Cron Triggers](../../DEPLOY.md)
 
@@ -208,10 +255,10 @@ Build Secrets（名前のみ）:
 
 | Worker | 変数名 |
 | --- | --- |
-| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開 site metadata、`BUILD_COMMIT_SHA` |
-| `flamenode-fast-jobs` | `BUILD_COMMIT_SHA`（`NEXT_PUBLIC_SITE_URL` は Build Variables から deploy 時に generated config へ注入） |
-| `flamenode-content-jobs` | `BUILD_COMMIT_SHA` |
-| `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA` |
+| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開 site metadata、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-fast-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED`（`NEXT_PUBLIC_SITE_URL` は Build Variables から deploy 時に generated config へ注入） |
+| `flamenode-content-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
 
 公開 site metadata と YouTube quota の既定値は wrangler template を正本とする。production origin / OAuth Client ID / commit は検証済み一時 config へ注入し、Dashboard で同名値を別正本として手動 drift させない。
 
@@ -282,7 +329,7 @@ npm run test:cloudflare-ci
 
 ## 9. 本番初回の順序
 
-1. [ ] §1–7 の Dashboard 準備完了（4 Worker 名、resource、binding、Runtime Secret、D1 schema）
+1. [ ] §1–7 の Dashboard 準備完了（4 Worker 名、resource、Queue、binding、Runtime Secret、D1 schema）
 2. [ ] Remote D1 へ active migration を**手動適用**済み（§10）。CI / deploy script は自動適用しない
 3. [ ] 4 Worker の `workers.dev` URL を Build Variables（`FLAMENODE_WEB_URL` 等）へ登録（§6 の URL 制約を満たす）
 4. [ ] `flamenode-web` だけ Git 連携し、§4 の Build / Deploy command を保存

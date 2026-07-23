@@ -1,8 +1,8 @@
 # FlameNode デプロイ手順書
 
 > Status: Active
-> Last verified: 2026-07-22
-> Verified against commit: `f9c6642`
+> Last verified: 2026-07-23
+> Verified against commit: `630244ce`
 > Source of truth: `package.json`, `scripts/cloudflare-*.mjs`, `wrangler.toml`, `workers/*/wrangler.toml`
 
 初回デプロイ準備の横断チェックリストは [`docs/operations/deploy-setup-report.md`](./docs/operations/deploy-setup-report.md) を参照する。
@@ -53,18 +53,20 @@ Static Assetsは`run_worker_first = false`とし、静的ファイルを通常�
 13. D1 bindingは全4 Workerで既存の論理名へ一致させる。
 14. R2 bindingはWebとcontent-jobsで既存の論理名へ一致させる。
 15. KV bindingは全4 Workerで既存の論理名へ一致させる。
-16. Cron Triggerはfast、content、syncの既存3件だけにする。
-17. 旧Pages Git Integrationを停止し、新しいBuildと二重起動させない。
-18. GitHub Actionsのpush、pull request、schedule、自動deployが存在しないことを確認する。
-19. 初回は4 Worker名、resource、Runtime Secret、D1 schemaを準備してから`main` Buildを実行する。
-20. 最初は各`workers.dev` URLで4 Workerとsmokeを確認する。
-21. 検証後に`flamenode-web`へカスタムドメインを追加し、Auth originとDiscord callbackを同時更新する。
-22. カスタムドメインの疎通後に旧Pagesからトラフィックを切り替える。
-23. Deploy commandのproduction smokeが全項目成功したことを確認する。
-24. 旧Pages projectは削除条件をすべて満たすまで移行時rollback先としてだけ保持する。
-25. rollback時は4 Workerを同じ既知の正常commitへ戻し、再度smokeする。
-26. D1 migrationはbackup・レビュー後に運用者が手動適用し、自動deployへ組み込まない。
-27. 障害時はBuild stage、4 Workerのhealth/commit、binding、remote secret名、D1 schema、Cloudflare Metricsを順に確認する。
+16. Cron Triggerはfast、content、syncのRecovery Cron 4式だけにする（アカウント合計がCloudflare上限5件以内であることを確認する。リポジトリ外の既存Triggerは削除しない）。
+17. Queue 6本（wake 3 + DLQ 3）を作成し、producer/consumer bindingをwrangler群どおり接続する。
+18. Queue feature flagは全Workerでデフォルト`"0"`とし、段階的に有効化する。
+19. 旧Pages Git Integrationを停止し、新しいBuildと二重起動させない。
+20. GitHub Actionsのpush、pull request、schedule、自動deployが存在しないことを確認する。
+21. 初回は4 Worker名、resource、Queue、Runtime Secret、D1 schemaを準備してから`main` Buildを実行する。
+22. 最初は各`workers.dev` URLで4 Workerとsmokeを確認する。
+23. 検証後に`flamenode-web`へカスタムドメインを追加し、Auth originとDiscord callbackを同時更新する。
+24. カスタムドメインの疎通後に旧Pagesからトラフィックを切り替える。
+25. Deploy commandのproduction smokeが全項目成功したことを確認する。
+26. 旧Pages projectは削除条件をすべて満たすまで移行時rollback先としてだけ保持する。
+27. rollback時は4 Workerを同じ既知の正常commitへ戻し、再度smokeする。
+28. D1 migrationはbackup・レビュー後に運用者が手動適用し、自動deployへ組み込まない。
+29. 障害時はBuild stage、4 Workerのhealth/commit、binding、Queue binding、remote secret名、D1 schema、Cloudflare Metricsを順に確認する。
 
 ## 3. Workers Builds設定
 
@@ -124,10 +126,12 @@ Workers Buildsのsystem変数、Build/Deploy分離、branch設定は次を正本
 
 | Worker | Variables |
 | --- | --- |
-| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開site metadata、`BUILD_COMMIT_SHA` |
-| `flamenode-fast-jobs` | `BUILD_COMMIT_SHA` |
-| `flamenode-content-jobs` | `BUILD_COMMIT_SHA` |
-| `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA` |
+| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開site metadata、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-fast-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-content-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+
+Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効）とする。段階的な有効化はDashboardまたはRuntime Variablesで`"1"` / `"true"` / `"yes"`を設定する。正本は`src/lib/queues/wakeBudget.ts`の`QUEUE_FEATURE_FLAG_NAMES`。ロールバックは該当flagを`"0"`へ戻すだけでよい（Queueリソースとbindingは維持し、送信・消費だけ止める）。
 
 公開site metadataとYouTube quota既定値はwrangler templateを正本とし、production origin、OAuth Client ID、commitは検証済み一時configへ注入します。Dashboardで同名値を別正本として手動driftさせません。
 
@@ -146,22 +150,24 @@ deploy preflightはremoteに登録されたsecretの**名前だけ**を検査し
 
 | Worker | binding |
 | --- | --- |
-| `flamenode-web` | D1 `DB`、R2 `BUCKET`、R2 incremental cache `NEXT_INC_CACHE_R2_BUCKET`、KV `KV`、Assets `ASSETS`、service `WORKER_SELF_REFERENCE` |
-| `flamenode-fast-jobs` | D1 `DB`、KV `KV` |
-| `flamenode-content-jobs` | D1 `DB`、R2 `R2`、KV `KV` |
-| `flamenode-sync-jobs` | D1 `DB`、KV `KV` |
+| `flamenode-web` | D1 `DB`、R2 `BUCKET`、R2 incremental cache `NEXT_INC_CACHE_R2_BUCKET`、KV `KV`、Assets `ASSETS`、service `WORKER_SELF_REFERENCE`、Queue producer `NOTIFICATION_WAKE_QUEUE`、`STATIC_REBUILD_WAKE_QUEUE`、`YOUTUBE_SYNC_WAKE_QUEUE` |
+| `flamenode-fast-jobs` | D1 `DB`、KV `KV`、Queue producer/consumer `NOTIFICATION_WAKE_QUEUE` |
+| `flamenode-content-jobs` | D1 `DB`、R2 `R2`、KV `KV`、Queue producer/consumer `STATIC_REBUILD_WAKE_QUEUE` |
+| `flamenode-sync-jobs` | D1 `DB`、KV `KV`、Queue producer/consumer `YOUTUBE_SYNC_WAKE_QUEUE` |
 
-論理binding名はコードとwrangler群の契約です。production IDやbucket名だけをBuild Variablesから一時configへ注入します。
+論理binding名はコードとwrangler群の契約です。production IDやbucket名だけをBuild Variablesから一時configへ注入します。Queue binding欠落は`npm run check:cloudflare-template`とproduction config検証で**fail-closed**とし、deployを停止します。consumer設定の正本は`workers/*/wrangler.toml`、詳細は[`docs/operations/workers.md`](./docs/operations/workers.md)を参照してください。
 
-### Cron Triggers
+### Cron Triggers（Recovery）
+
+通常運用はQueue駆動を優先し、Cronはwakeが届かなかった場合の安全網（Recovery）です。
 
 | Worker | Cron |
 | --- | --- |
-| `flamenode-fast-jobs` | `*/5 * * * *` |
-| `flamenode-content-jobs` | `*/15 * * * *` |
-| `flamenode-sync-jobs` | `7,22,37,52 * * * *` |
+| `flamenode-fast-jobs` | `0 * * * *` |
+| `flamenode-content-jobs` | `15 * * * *` |
+| `flamenode-sync-jobs` | `7 * * * *`、`52 * * * *` |
 
-Cron WorkerへGit連携を追加せず、この3 Triggerを増やしません。
+Cron WorkerへGit連携を追加せず、上記4式以外のTriggerを増やしません。CloudflareアカウントのCron Trigger合計が上限5件以内であることをDashboardで確認します（リポジトリ外の既存Triggerは削除しません）。
 
 ## 5. 初回resource / Worker準備
 
@@ -174,14 +180,28 @@ npm run cf:bootstrap -- --confirm-create
 
 `cf:bootstrap`はD1、R2、KVだけを作成し、IDを表示・保存せず、migration、Worker deploy、secret更新を行いません。Cloudflare Dashboardで実IDを確認し、Build Variablesへ直接登録します。
 
+Queue 6本（wake 3 + DLQ 3）は初回のみ手動作成します。binding名・consumer設定の正本はtracked wrangler群です。
+
+```sh
+npx wrangler queues create flamenode-notification-wake
+npx wrangler queues create flamenode-notification-dlq
+npx wrangler queues create flamenode-static-rebuild-wake
+npx wrangler queues create flamenode-static-rebuild-dlq
+npx wrangler queues create flamenode-youtube-sync-wake
+npx wrangler queues create flamenode-youtube-sync-dlq
+```
+
+詳細・free tier予算は[`docs/operations/workers.md`](./docs/operations/workers.md)を参照してください。
+
 初回Build前にDashboardで次を行います。
 
 1. exact nameの4 Workerを用意する。Cron WorkerへGitを接続しない。
-2. 各WorkerのRuntime Secretを上表どおり登録する。
-3. D1を手動初期化し、必要なactive migrationを適用する。
-4. 4 Workerの`workers.dev` URLをBuild Variablesへ登録する。
-5. `flamenode-web`だけをGitへ接続し、Build/Deploy commandを保存する。
-6. `main` Buildを実行し、固定順deployとsmokeを確認する。
+2. Queue 6本を作成し、wrangler群どおりproducer/consumer bindingを接続する。
+3. 各WorkerのRuntime Secretを上表どおり登録する。Queue feature flagは全Workerで`"0"`のまま開始する。
+4. D1を手動初期化し、必要なactive migrationを適用する。
+5. 4 Workerの`workers.dev` URLをBuild Variablesへ登録する。
+6. `flamenode-web`だけをGitへ接続し、Build/Deploy commandを保存する。
+7. `main` Buildを実行し、固定順deployとsmokeを確認する。
 
 secret preflightまたはD1 preflightが失敗した場合は不足を直し、同じBuild設定で再試行します。検査をskipする初回専用フラグは設けません。
 
@@ -269,6 +289,8 @@ Pages Git Integrationと自動deployはWorkers Builds接続前に停止します
 
 Cloudflare Dashboardのversion rollbackまたは正常commitを戻す明示的な`main`更新で、WebとCron 3本を**同じcommit**へ戻します。1本だけ異なる世代に固定しません。rollback後も同じproduction smokeを実行します。
 
+Queue関連の緊急停止は、全Workerの`QUEUE_DISPATCH_ENABLED`・`QUEUE_CONTINUATION_ENABLED`・`QUEUE_YOUTUBE_SYNC_ENABLED`を`"0"`へ戻すだけでよい（Queueリソースとbindingは維持）。flag無効時もRecovery Cron経路はコードに残るため、D1正本の処理は継続する。
+
 移行観測期間中にWorkers全体を利用できない場合だけ、残してある旧Pages deploymentへtrafficを一時的に戻せます。旧project削除後はこの経路を前提にしません。
 
 ### D1
@@ -289,7 +311,7 @@ code rollbackで旧schema fallback、二重書込み、runtime DDLを復活さ�
 
 ## 12. 無料枠と公式正本
 
-mainだけ、Preview/PR buildなし、1 push 1 Build、`npm ci` 1回、OpenNext build 1回、固定検査1回とし、Cron Worker別の再install・再test・artifact uploadを行いません。Static Assetsはasset-firstで配信します。Cronは固定LIMIT、cursor、lease、retry上限、差分R2書込みを維持します。
+mainだけ、Preview/PR buildなし、1 push 1 Build、`npm ci` 1回、OpenNext build 1回、固定検査1回とし、Cron Worker別の再install・再test・artifact uploadを行いません。Static Assetsはasset-firstで配信します。Queueはドアベルのみ（業務データ非搭載）とし、Recovery Cronは固定LIMIT、cursor、lease、retry上限、差分R2書込みを維持します。
 
 Workers FreeのHTTP/Cron CPUは各invocation 10msです。Cloudflare公式は認証、SSR、大きなpayload処理が10〜20msになり得ると説明しているため、FlameNodeのAuth/SSRがFreeで常に安定するとは保証しません。実測で`exceededCpu`が継続する場合は、最適化後も無理にFreeへ留めずPaidへ移行します。
 

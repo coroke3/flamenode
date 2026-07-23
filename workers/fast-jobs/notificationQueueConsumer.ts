@@ -54,6 +54,7 @@ export async function handleNotificationWakeQueue(
         kind: "notification_available",
         source: "continuation",
         envFlags: env,
+        kv: env.KV,
       });
     }
 
