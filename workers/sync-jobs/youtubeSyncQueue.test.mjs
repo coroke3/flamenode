@@ -110,6 +110,127 @@ test("quota cooldown 中は continuation を送らない", async () => {
   assert.equal(batch.acked.length, 1);
 });
 
+test("Queue consumer は metadata commit と post-commit を分離する", () => {
+  assert.match(source, /youtube-sync-metadata/);
+  assert.match(source, /runYoutubeSyncPostCommit/);
+  assert.match(source, /score-recalc/);
+  const consumerBlock = source.slice(
+    source.indexOf("export async function handleYoutubeSyncWakeQueue"),
+    source.indexOf("export async function runSyncJobs"),
+  );
+  assert.doesNotMatch(consumerBlock, /combineJobCounters\(youtube, score/);
+});
+
+test("Cron は metadata 失敗だけを throwIfJobFailed する", () => {
+  const cronBlock = source.slice(
+    source.indexOf("export async function runSyncJobs"),
+  );
+  assert.match(cronBlock, /youtube-sync-metadata/);
+  assert.match(cronBlock, /runYoutubeSyncPostCommit/);
+  assert.match(cronBlock, /throwIfJobFailed\([\s\S]*metadataJob/);
+  assert.doesNotMatch(cronBlock, /combineJobCounters\(youtube, score/);
+});
+
+test("metadata成功後のscore失敗でもQueueはackする", async () => {
+  const retried = [];
+  const env = {
+    BUILD_COMMIT_SHA: "a".repeat(40),
+    QUEUE_DISPATCH_ENABLED: "1",
+    QUEUE_CONTINUATION_ENABLED: "1",
+    QUEUE_YOUTUBE_SYNC_ENABLED: "1",
+    YOUTUBE_API_KEY: "test-key",
+    KV: { async get() { return null; } },
+    YOUTUBE_SYNC_WAKE_QUEUE: { async send() {} },
+    DB: {
+      prepare(sql) {
+        const statement = {
+          bind() {
+            return statement;
+          },
+          async all() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return {
+                results: [{ used_units: 1 }],
+                meta: { changes: 1 },
+              };
+            }
+            if (sql.includes("ym.sync_status = 'pending'")) {
+              return {
+                results: [{ id: "video-1", youtube_video_id: "yt-1" }],
+              };
+            }
+            if (sql.includes("video_id IN")) {
+              return {
+                results: [{
+                  video_id: "video-1",
+                  view_count: 0,
+                  duration_seconds: 0,
+                  youtube_privacy_status: null,
+                  youtube_availability_status: null,
+                  sync_status: "pending",
+                }],
+              };
+            }
+            return { results: [] };
+          },
+          async first() {
+            if (sql.includes("COUNT(*)")) {
+              return { pending_count: 0 };
+            }
+            return null;
+          },
+          async run() {
+            if (sql.includes("SET score =")) {
+              throw new Error("score update failed");
+            }
+            return { meta: { changes: 1 } };
+          },
+        };
+        return statement;
+      },
+      async batch() {
+        return [{ meta: { changes: 1 } }];
+      },
+    },
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    items: [{
+      id: "yt-1",
+      statistics: { viewCount: "42" },
+      status: { privacyStatus: "public" },
+      contentDetails: { duration: "PT45S" },
+    }],
+  }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+  const batch = {
+    messages: [{
+      body: createQueueWakeMessage({
+        kind: "youtube_sync_pending",
+        source: "web",
+      }),
+      ack() {},
+      retry() {
+        retried.push(1);
+      },
+    }],
+    acked: [],
+  };
+
+  try {
+    const result = await handleYoutubeSyncWakeQueue(batch, env);
+    assert.equal(result.retryBatch, false);
+    assert.equal(retried.length, 0);
+    assert.ok(result.processed >= 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("pending 残あり・quota 正常時だけ continuation を送る", async () => {
   const sent = [];
   let fetchCalls = 0;

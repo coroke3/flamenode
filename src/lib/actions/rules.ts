@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, eq, gt } from "drizzle-orm";
 import { termsVersions, users } from "@/lib/db/schema";
@@ -14,6 +15,8 @@ import {
   getLatestPublishedMajorTerms,
   termsReacceptRequiredCondition,
 } from "@/lib/terms/reaccept";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface RulesResult { ok: boolean; message?: string; id?: string }
 export interface RulesBroadcastResult extends RulesResult { enqueued?: number; cursor?: string }
@@ -31,8 +34,22 @@ const draftSchema = z.object({
 
 function snapshot(row: object): Record<string, unknown> { return { ...row }; }
 function mutationError(error: unknown): RulesResult {
+  unstable_rethrow(error);
   console.error("[rules] atomic mutation failed", error);
   return { ok: false, message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。" };
+}
+
+async function runRulesPostCommit(
+  flow: string,
+  tasks: Array<{ name: string; run: () => void | Promise<void> }>,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    tasks.map((task) => ({
+      name: task.name,
+      run: async () => { await task.run(); },
+    })),
+  );
 }
 
 export async function createTermsVersion(formData: FormData): Promise<RulesResult> {
@@ -56,7 +73,9 @@ export async function createTermsVersion(formData: FormData): Promise<RulesResul
       audits: [{ table_name: "terms_versions", target_id: id, operation: "CREATE", after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_create", strict: true }],
     });
   } catch (error) { return mutationError(error); }
-  revalidatePath("/admin/rules");
+  await runRulesPostCommit("rules.create", [
+    { name: "revalidate", run: () => { revalidatePath("/admin/rules"); } },
+  ]);
   return { ok: true, id };
 }
 
@@ -80,7 +99,16 @@ export async function updateTermsVersion(formData: FormData): Promise<RulesResul
       audits: [{ table_name: "terms_versions", target_id: d.id, operation: "UPDATE", before: snapshot(before), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_update", strict: true }],
     });
   } catch (error) { return mutationError(error); }
-  revalidatePath("/admin/rules"); revalidatePath(`/admin/rules/${d.id}/edit`); revalidatePath("/rules");
+  await runRulesPostCommit("rules.update", [
+    {
+      name: "revalidate",
+      run: () => {
+        revalidatePath("/admin/rules");
+        revalidatePath(`/admin/rules/${d.id}/edit`);
+        revalidatePath("/rules");
+      },
+    },
+  ]);
   return { ok: true, id: d.id };
 }
 
@@ -117,14 +145,27 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
   audits.push({ table_name: "terms_versions", target_id: target.id, operation: "UPDATE" as const, before: snapshot(target), after: snapshot(targetAfter), actor_user_id: guard.user.id, retention_class: "long_audit" as const, context: "admin_terms_publish", reason: "規約版の公開", strict: true });
   try {
     await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
-    await enqueueStaticRebuild(db, {
-      targetType: "rules",
-      targetId: "global",
-      reason: "admin_terms_publish",
-      priority: "high",
-    });
   } catch (error) { return mutationError(error); }
-  revalidatePath("/admin/rules"); revalidatePath("/rules");
+  await runRulesPostCommit("rules.publish", [
+    {
+      name: "static_rebuild",
+      run: async () => {
+        await enqueueStaticRebuild(db, {
+          targetType: "rules",
+          targetId: "global",
+          reason: "admin_terms_publish",
+          priority: "high",
+        });
+      },
+    },
+    {
+      name: "revalidate",
+      run: () => {
+        revalidatePath("/admin/rules");
+        revalidatePath("/rules");
+      },
+    },
+  ]);
   return { ok: true, id };
 }
 
@@ -159,24 +200,45 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
   })));
   const now = Math.floor(Date.now() / 1000);
   const after = { ...target, updated_at: now };
-  const mutationStatements = [
-    db.update(termsVersions).set({ updated_at: now }).where(and(eq(termsVersions.id, termsId), expectedRowCondition({ expectedCurrent: snapshot(target) }))!),
-    ...notifications.statements,
-  ];
-  const expected = [1, ...notifications.expectedChanges];
-  const budget = planD1AuditMutationBudget({ mutationStatementCount: mutationStatements.length, mutationAssertionCount: 1, auditEntryCount: 1, distinctActorCount: 1 });
-  if (!budget.withinLimit) return { ok: false, message: "通知件数がD1処理上限を超えます。" };
+  const fanOutBudget = planD1AuditMutationBudget({
+    mutationStatementCount: notifications.statements.length,
+    mutationAssertionCount: notifications.statements.length > 0 ? 1 : 0,
+    auditEntryCount: 0,
+    distinctActorCount: 1,
+  });
+  if (!fanOutBudget.withinLimit) return { ok: false, message: "通知件数がD1処理上限を超えます。" };
+  try {
+    if (notifications.statements.length > 0) {
+      await mutateWithAudit(db, {
+        mutationStatements: notifications.statements,
+        expectedMutationChanges: notifications.expectedChanges,
+        audits: [],
+        notificationWakeSource: "admin",
+      });
+    }
+  } catch (error) { return mutationError(error); }
   try {
     await mutateWithAudit(db, {
-      mutationStatements,
-      expectedMutationChanges: expected,
+      mutationStatements: [
+        db.update(termsVersions).set({ updated_at: now }).where(and(eq(termsVersions.id, termsId), expectedRowCondition({ expectedCurrent: snapshot(target) }))!),
+      ],
+      expectedMutationChanges: [1],
       audits: [{ table_name: "terms_versions", target_id: termsId, operation: "UPDATE", before: snapshot(target), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_broadcast", reason: `再同意通知 batch cursor=${cursor} enqueued=${notifications.statements.length}`, strict: true }],
-      notificationWakeSource:
-        notifications.statements.length > 0 ? "admin" : undefined,
     });
-  } catch (error) { return mutationError(error); }
+  } catch (error) {
+    unstable_rethrow(error);
+    console.warn("[rules] terms touch after broadcast fan-out failed", error);
+  }
   const nextCursor = targets.at(-1)?.user_id ?? cursor;
-  revalidatePath("/admin/rules"); revalidatePath("/admin/notifications");
+  await runRulesPostCommit("rules.broadcast", [
+    {
+      name: "revalidate",
+      run: () => {
+        revalidatePath("/admin/rules");
+        revalidatePath("/admin/notifications");
+      },
+    },
+  ]);
   return { ok: true, message: `${notifications.statements.length}件を登録しました。`, enqueued: notifications.statements.length, cursor: nextCursor };
 }
 
@@ -192,18 +254,32 @@ export async function archiveTermsVersion(formData: FormData): Promise<RulesResu
   try {
     await mutateWithAudit(db, {
       mutationStatements: [db.update(termsVersions).set({ status: after.status, updated_at: after.updated_at }).where(and(eq(termsVersions.id, id), expectedRowCondition({ expectedCurrent: snapshot(before) }))!)],
-      expectedMutationChanges: 1,
+      expectedMutationChanges: [1],
       audits: [{ table_name: "terms_versions", target_id: id, operation: "UPDATE", before: snapshot(before), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_archive", reason: "規約版のアーカイブ", strict: true }],
     });
-    if (before.status === "published") {
-      await enqueueStaticRebuild(db, {
-        targetType: "rules",
-        targetId: "global",
-        reason: "admin_terms_archive",
-        priority: "high",
-      });
-    }
   } catch (error) { return mutationError(error); }
-  revalidatePath("/admin/rules"); revalidatePath("/rules");
+  const wasPublished = before.status === "published";
+  await runRulesPostCommit("rules.archive", [
+    ...(wasPublished
+      ? [{
+          name: "static_rebuild",
+          run: async () => {
+            await enqueueStaticRebuild(db, {
+              targetType: "rules",
+              targetId: "global",
+              reason: "admin_terms_archive",
+              priority: "high",
+            });
+          },
+        }]
+      : []),
+    {
+      name: "revalidate",
+      run: () => {
+        revalidatePath("/admin/rules");
+        revalidatePath("/rules");
+      },
+    },
+  ]);
   return { ok: true };
 }

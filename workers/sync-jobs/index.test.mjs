@@ -22,7 +22,7 @@ test("sync-jobs health は共通Cron Workerからserviceとcommitを返す", () 
 test("score変更時はtopとlist_popularとrecommendを重複排除付きで再生成予約する", () => {
   assert.match(source, /INSERT OR IGNORE INTO static_rebuild_queue/);
   assert.match(source, /\["top",\s*"list_popular",\s*"recommend"\]/);
-  assert.match(source, /score\.processed\s*>\s*0/);
+  assert.match(source, /rankingRebuild\.processed/);
 });
 
 test("UTC分が52の時だけを再生リスト同期の専用枠にする", () => {

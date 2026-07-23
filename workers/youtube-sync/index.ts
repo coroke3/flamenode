@@ -540,6 +540,28 @@ function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): 
   });
 }
 
+function buildChunkFailureWrites(
+  rows: readonly SyncRow[],
+  error: unknown,
+): MetadataWrite[] {
+  const message = error instanceof Error
+    ? error.message
+    : "permanent:youtube_api_unknown";
+  return rows.map((row) => ({
+    videoId: row.id,
+    privacyStatus: null,
+    availabilityStatus: null,
+    durationSeconds: 0,
+    viewCount: 0,
+    syncStatus: "failed" as const,
+    syncError: message,
+  }));
+}
+
+function isYoutubeQuotaError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("quota:youtube_api_");
+}
+
 async function persistMetadataBatch(
   env: Env,
   writes: MetadataWrite[],
@@ -710,10 +732,19 @@ export async function syncBatch(
     rows.map((row) => row.id),
     signal,
   );
+  const itemMap = new Map<string, YoutubeItem>();
+  const persistedVideoIds = new Set<string>();
+  const committedWrites: MetadataWrite[] = [];
+  let metadataD1Changes = 0;
+  let quotaStopped = false;
+  let quotaStopReason: string | null = null;
+
   try {
-    const itemMap = new Map<string, YoutubeItem>();
     for (const chunk of chunks) {
       signal?.throwIfAborted();
+      const pendingChunk = chunk.filter((row) => !persistedVideoIds.has(row.id));
+      if (pendingChunk.length === 0) continue;
+
       startedChunks += 1;
       const url = new URL("https://www.googleapis.com/youtube/v3/videos");
       url.searchParams.set("key", apiKey);
@@ -723,46 +754,97 @@ export async function syncBatch(
         "items(id,statistics/viewCount,status/privacyStatus,contentDetails/duration)",
       );
       url.searchParams.set("prettyPrint", "false");
-      url.searchParams.set("id", chunk.map((row) => row.youtube_video_id).join(","));
-
-      const items = await fetchYoutubeItems(
-        url.toString(),
-        env,
-        budget,
-        fetchImpl,
-        signal,
+      url.searchParams.set(
+        "id",
+        pendingChunk.map((row) => row.youtube_video_id).join(","),
       );
-      signal?.throwIfAborted();
-      for (const item of items) itemMap.set(item.id, item);
+
+      let chunkWrites: MetadataWrite[];
+      try {
+        const items = await fetchYoutubeItems(
+          url.toString(),
+          env,
+          budget,
+          fetchImpl,
+          signal,
+        );
+        signal?.throwIfAborted();
+        for (const item of items) itemMap.set(item.id, item);
+        chunkWrites = buildMetadataWrites(pendingChunk, itemMap);
+      } catch (error) {
+        if (isYoutubeQuotaError(error)) {
+          quotaStopped = true;
+          quotaStopReason = "youtube_api_error";
+          break;
+        }
+        signal?.throwIfAborted();
+        chunkWrites = buildChunkFailureWrites(pendingChunk, error);
+      }
+
+      try {
+        metadataD1Changes += await persistMetadataBatch(
+          env,
+          chunkWrites,
+          now,
+          signal,
+        );
+        signal?.throwIfAborted();
+        for (const write of chunkWrites) persistedVideoIds.add(write.videoId);
+        committedWrites.push(...chunkWrites);
+      } catch (error) {
+        signal?.throwIfAborted();
+        reportedFailure = jobFailureWithCounters(error, {
+          failed: 1,
+          processed: committedWrites.length,
+          external_api_calls: budget.used,
+          d1_changes: metadataD1Changes + reservation.d1Changes,
+          retry_count: Math.max(0, budget.used - startedChunks),
+        });
+        throw reportedFailure;
+      }
+
+      if (quotaStopped) break;
     }
 
     signal?.throwIfAborted();
-    const writes = buildMetadataWrites(rows, itemMap);
-    const changedVideoIds = collectChangedVideoIds(writes, existingMetadata);
-    const d1Changes = await persistMetadataBatch(env, writes, now, signal);
+    const changedVideoIds = collectChangedVideoIds(committedWrites, existingMetadata);
     let hasMorePending = false;
     if (limits.mode === "pending_only") {
       const remainingPending = await countPendingSyncRows(env, signal);
       hasMorePending = remainingPending > 0;
     }
+    const skipped = rows.length - committedWrites.length;
     reportedResult = empty(
-      { processed: writes.length, failed: 0, skipped: 0 },
+      {
+        processed: committedWrites.length,
+        failed: 0,
+        skipped: skipped > 0 ? skipped : 0,
+      },
       {
         external_api_calls: budget.used,
-        d1_changes: d1Changes,
+        d1_changes: metadataD1Changes,
         retry_count: Math.max(0, budget.used - startedChunks),
         changed_video_ids: changedVideoIds,
         has_more_pending: hasMorePending,
+        quota_stopped: quotaStopped,
+        quota_stop_reason: quotaStopReason,
       },
     );
     return reportedResult;
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith("quota:youtube_api_")) {
+    if (isYoutubeQuotaError(error)) {
+      const changedVideoIds = collectChangedVideoIds(committedWrites, existingMetadata);
       reportedResult = empty(
-        { processed: 0, failed: 0, skipped: 1 },
+        {
+          processed: committedWrites.length,
+          failed: 0,
+          skipped: rows.length - committedWrites.length || 1,
+        },
         {
           external_api_calls: budget.used,
+          d1_changes: metadataD1Changes,
           retry_count: Math.max(0, budget.used - startedChunks),
+          changed_video_ids: changedVideoIds,
           quota_stopped: true,
           quota_stop_reason: "youtube_api_error",
         },
@@ -770,10 +852,15 @@ export async function syncBatch(
       return reportedResult;
     }
     signal?.throwIfAborted();
+    if (error instanceof JobFailureWithCounters) {
+      reportedFailure = error;
+      throw reportedFailure;
+    }
     reportedFailure = jobFailureWithCounters(error, {
       failed: 1,
+      processed: committedWrites.length,
       external_api_calls: budget.used,
-      d1_changes: reservation.d1Changes,
+      d1_changes: metadataD1Changes + reservation.d1Changes,
       retry_count: Math.max(0, budget.used - startedChunks),
     });
     throw reportedFailure;

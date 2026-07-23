@@ -30,6 +30,8 @@ import {
   type EventStaffBulkUpsert,
 } from "@/lib/event/eventOwnership";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -77,6 +79,20 @@ function revalidateEventStaffPaths(eventId: string): void {
   revalidatePath(`/admin/events/${eventId}/staff`);
   revalidatePath(`/admin/events/${eventId}`);
   revalidatePath(`/event/${eventId}`);
+}
+
+async function revalidateEventStaffPathsBestEffort(eventId: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "event_staff", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_event_staff_paths",
+        run: async () => {
+          revalidateEventStaffPaths(eventId);
+        },
+      },
+    ],
+  );
 }
 
 function parsePermissionKeys(raw: string | null | undefined): string[] {
@@ -237,6 +253,7 @@ export async function upsertEventStaffMember(
       guard.role === "admin",
     );
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message: error instanceof Error ? error.message : "入力エラー",
@@ -258,6 +275,7 @@ export async function upsertEventStaffMember(
         isSiteAdmin: guard.role === "admin",
       });
     } catch (error) {
+      unstable_rethrow(error);
       return {
         ok: false,
         message: error instanceof Error ? error.message : "owner を付与できません。",
@@ -315,7 +333,7 @@ export async function upsertEventStaffMember(
       message: error instanceof Error ? error.message : "スタッフを保存できません。",
     };
   }
-  revalidateEventStaffPaths(data.event_id);
+  await revalidateEventStaffPathsBestEffort(data.event_id);
   return { ok: true };
 }
 
@@ -379,6 +397,7 @@ export async function bulkUpsertEventStaffFromCsv(
       });
     }
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message: error instanceof Error ? error.message : "CSV入力エラーです。",
@@ -475,7 +494,7 @@ export async function bulkUpsertEventStaffFromCsv(
       message: error instanceof Error ? error.message : "CSV保存に失敗しました。",
     };
   }
-  revalidateEventStaffPaths(data.eventId);
+  await revalidateEventStaffPathsBestEffort(data.eventId);
   return { ok: true };
 }
 
@@ -517,7 +536,7 @@ export async function removeEventStaffMember(
       message: error instanceof Error ? error.message : "スタッフを削除できません。",
     };
   }
-  revalidateEventStaffPaths(data.event_id);
+  await revalidateEventStaffPathsBestEffort(data.event_id);
   return { ok: true };
 }
 
@@ -567,6 +586,6 @@ export async function transferEventOwnershipAction(
       message: error instanceof Error ? error.message : "代表者を移譲できません。",
     };
   }
-  revalidateEventStaffPaths(data.event_id);
+  await revalidateEventStaffPathsBestEffort(data.event_id);
   return { ok: true };
 }

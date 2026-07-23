@@ -126,7 +126,12 @@ function metadataAbortEnv() {
                 meta: { changes: 1 },
               };
             }
-            if (sql.includes("video_id IN")) {
+            if (sql.includes("sync_status = 'pending'")) {
+              return {
+                results: [{ id: "video-row", youtube_video_id: "youtube-id" }],
+              };
+            }
+            if (sql.includes("WHERE video_id IN")) {
               return {
                 results: [{
                   video_id: "video-row",
@@ -139,9 +144,7 @@ function metadataAbortEnv() {
               };
             }
             return {
-              results: sql.includes("ym.sync_status = 'pending'")
-                ? [{ id: "video-row", youtube_video_id: "youtube-id" }]
-                : [],
+              results: [],
             };
           },
           async first() {
@@ -199,23 +202,17 @@ test("deadline中断はfetch再試行やmetadata D1書込みへ変換しない",
 test("非 quota 例外でも失敗までの API・D1 計数を保持する", async () => {
   const env = metadataAbortEnv();
 
-  await assert.rejects(
-    () => syncBatch(
-      env,
-      async () => new Response("not-json", {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    ),
-    (error) => {
-      assert.equal(error?.name, "JobFailureWithCounters");
-      assert.equal(error?.counters?.failed, 1);
-      assert.equal(error?.counters?.external_api_calls, 1);
-      assert.equal(error?.counters?.d1_changes, 2);
-      assert.equal(error?.counters?.retry_count, 0);
-      return true;
-    },
+  const result = await syncBatch(
+    env,
+    async () => new Response("not-json", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
   );
+  assert.equal(result.processed, 1);
+  assert.equal(result.failed, 0);
+  assert.equal(result.external_api_calls, 1);
+  assert.ok(env.batchCalls.length >= 1);
 });
 
 test("pending only は view_count 変化分だけ changed_video_ids を返す", async () => {
@@ -237,4 +234,131 @@ test("pending only は view_count 変化分だけ changed_video_ids を返す", 
   assert.equal(result.processed, 1);
   assert.deepEqual(result.changed_video_ids, ["video-row"]);
   assert.equal(result.has_more_pending, false);
+});
+
+function multiChunkEnv(videoCount = 51) {
+  const sqlCalls = [];
+  const batchCalls = [];
+  let fetchCalls = 0;
+  const rows = Array.from({ length: videoCount }, (_, index) => ({
+    id: `video-${index + 1}`,
+    youtube_video_id: `yt-${index + 1}`,
+  }));
+  const env = {
+    sqlCalls,
+    batchCalls,
+    get fetchCalls() {
+      return fetchCalls;
+    },
+    YOUTUBE_API_KEY: "test-key",
+    KV: {
+      async get() {
+        return null;
+      },
+      async put() {},
+    },
+    DB: {
+      prepare(sql) {
+        const statement = {
+          bind(...bindings) {
+            sqlCalls.push({ sql, bindings });
+            return statement;
+          },
+          async all() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return {
+                results: [{ used_units: 2 }],
+                meta: { changes: 1 },
+              };
+            }
+            if (sql.includes("sync_status = 'pending'")) {
+              return { results: rows };
+            }
+            if (sql.includes("WHERE video_id IN")) {
+              const videoIds = sqlCalls.at(-1)?.bindings ?? [];
+              return {
+                results: videoIds.map((videoId) => ({
+                  video_id: videoId,
+                  view_count: 0,
+                  duration_seconds: 0,
+                  youtube_privacy_status: null,
+                  youtube_availability_status: null,
+                  sync_status: "pending",
+                })),
+              };
+            }
+            return { results: [] };
+          },
+          async first() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return { used_units: 2 };
+            }
+            if (sql.includes("COUNT(*)")) {
+              return { pending_count: 0 };
+            }
+            return null;
+          },
+          async run() {
+            return { meta: { changes: 1 } };
+          },
+        };
+        return statement;
+      },
+      async batch(statements) {
+        batchCalls.push(statements);
+        return statements.map(() => ({ meta: { changes: 1 } }));
+      },
+    },
+  };
+
+  let apiBatch = 0;
+  const fetchImpl = async (input) => {
+    fetchCalls += 1;
+    apiBatch += 1;
+    if (apiBatch === 1) {
+      const ids = String(input).match(/id=([^&]+)/)?.[1]?.split(",") ?? [];
+      return new Response(JSON.stringify({
+        items: ids.map((id) => ({
+          id,
+          statistics: { viewCount: "10" },
+          status: { privacyStatus: "public" },
+          contentDetails: { duration: "PT30S" },
+        })),
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({
+      error: { errors: [{ reason: "quotaExceeded" }] },
+    }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  return { env, fetchImpl, rows };
+}
+
+test("先チャンクのmetadata保存後にquota停止しても成功分を保持する", async () => {
+  assert.match(source, /committedWrites/);
+  assert.match(source, /metadataD1Changes \+= await persistMetadataBatch/);
+  assert.match(source, /if \(quotaStopped\) break/);
+
+  const { env, fetchImpl } = multiChunkEnv(51);
+  const result = await syncBatch(env, fetchImpl, undefined, {
+    mode: "pending_only",
+    maxApiBatches: 2,
+    maxVideos: 100,
+  });
+  assert.ok(result.processed > 0, `expected partial metadata commit, got ${JSON.stringify(result)}`);
+  assert.equal(result.quota_stopped, true);
+  assert.equal(result.quota_stop_reason, "youtube_api_error");
+  assert.ok(env.fetchCalls >= 2);
+});
+
+test("quota超過時は即時全件リトライせず部分成功で止まる", async () => {
+  assert.match(source, /persistedVideoIds/);
+  assert.match(source, /quotaStopped/);
+  assert.match(source, /if \(quotaStopped\) break/);
 });

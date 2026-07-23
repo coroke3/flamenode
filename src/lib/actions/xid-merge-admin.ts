@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import { xIdentityRequests, xUsers } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -43,6 +46,23 @@ function revalidateMergePaths(sourceXUserId?: string | null, targetXUserId?: str
   if (targetXUserId) revalidatePath(`/user/${targetXUserId}`);
 }
 
+async function runXIdMergePostCommit(
+  flow: string,
+  run: () => void | Promise<void>,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    [{ name: "revalidate", run: async () => { await run(); } }],
+  );
+}
+
+function mutationError(): XIdMergeAdminResult {
+  return {
+    ok: false,
+    message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。",
+  };
+}
+
 export async function createXIdMergeRequest(formData: FormData): Promise<XIdMergeAdminResult> {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.result;
@@ -78,24 +98,31 @@ export async function createXIdMergeRequest(formData: FormData): Promise<XIdMerg
     requested_at: now,
     updated_at: now,
   };
-  await mutateWithAudit(guard.db, {
-    mutationStatements: [guard.db.insert(xIdentityRequests).values(row)],
-    expectedMutationChanges: [1],
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: id,
-        operation: "CREATE",
-        before: null,
-        after: row,
-        actor_user_id: guard.authUserId,
-        reason: "管理者がX ID統合申請を作成",
-        context: "x-id-merge:request",
-        retention_class: "long_audit",
-      },
-    ],
+  try {
+    await mutateWithAudit(guard.db, {
+      mutationStatements: [guard.db.insert(xIdentityRequests).values(row)],
+      expectedMutationChanges: [1],
+      audits: [
+        {
+          table_name: "x_identity_requests",
+          target_id: id,
+          operation: "CREATE",
+          before: null,
+          after: row,
+          actor_user_id: guard.authUserId,
+          reason: "管理者がX ID統合申請を作成",
+          context: "x-id-merge:request",
+          retention_class: "long_audit",
+        },
+      ],
+    });
+  } catch (error) {
+    unstable_rethrow(error);
+    return mutationError();
+  }
+  await runXIdMergePostCommit("xid-merge-admin.createXIdMergeRequest", () => {
+    revalidateMergePaths(sourceXUserId, targetXUserId);
   });
-  revalidateMergePaths(sourceXUserId, targetXUserId);
   return { ok: true, id, message: "X ID 統合申請を作成しました。" };
 }
 
@@ -131,29 +158,36 @@ async function setRequestStatus(
   }
   const now = Math.floor(Date.now() / 1000);
   const after = { ...current, status, updated_at: now };
-  await mutateWithAudit(guard.db, {
-    mutationStatements: [
-      guard.db
-        .update(xIdentityRequests)
-        .set({ status, updated_at: now })
-        .where(expectedRowCondition({ expectedCurrent: current })),
-    ],
-    expectedMutationChanges: [1],
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: id,
-        operation: "UPDATE",
-        before: current,
-        after,
-        actor_user_id: guard.authUserId,
-        reason: status === "approved" ? "X ID申請を承認" : "X ID申請を却下",
-        context: "x-id-merge:request",
-        retention_class: "long_audit",
-      },
-    ],
+  try {
+    await mutateWithAudit(guard.db, {
+      mutationStatements: [
+        guard.db
+          .update(xIdentityRequests)
+          .set({ status, updated_at: now })
+          .where(expectedRowCondition({ expectedCurrent: current })),
+      ],
+      expectedMutationChanges: [1],
+      audits: [
+        {
+          table_name: "x_identity_requests",
+          target_id: id,
+          operation: "UPDATE",
+          before: current,
+          after,
+          actor_user_id: guard.authUserId,
+          reason: status === "approved" ? "X ID申請を承認" : "X ID申請を却下",
+          context: "x-id-merge:request",
+          retention_class: "long_audit",
+        },
+      ],
+    });
+  } catch (error) {
+    unstable_rethrow(error);
+    return mutationError();
+  }
+  await runXIdMergePostCommit("xid-merge-admin.setRequestStatus", () => {
+    revalidateMergePaths(current.source_x_user_id, current.target_x_user_id);
   });
-  revalidateMergePaths(current.source_x_user_id, current.target_x_user_id);
   return { ok: true, id, message: status === "approved" ? "承認しました。" : "却下しました。" };
 }
 
@@ -183,13 +217,16 @@ export async function executeXIdMergeRequest(formData: FormData): Promise<XIdMer
       request,
       actorAuthUserId: guard.authUserId,
     });
-    revalidateMergePaths(request.source_x_user_id, request.target_x_user_id);
+    await runXIdMergePostCommit("xid-merge-admin.executeXIdMergeRequest", () => {
+      revalidateMergePaths(request.source_x_user_id, request.target_x_user_id);
+    });
     return {
       ok: true,
       id,
       message: `@${request.source_x_user_id} → @${request.target_x_user_id} に統合しました（${Object.values(result.counts).reduce((sum, value) => sum + value, 0)}件更新）。`,
     };
   } catch (cause) {
+    unstable_rethrow(cause);
     return {
       ok: false,
       id,
@@ -238,13 +275,16 @@ export async function approveXIdMergeRevert(formData: FormData): Promise<XIdMerg
       parentRequest,
       actorAuthUserId: guard.authUserId,
     });
-    revalidateMergePaths(parentRequest.source_x_user_id, parentRequest.target_x_user_id);
+    await runXIdMergePostCommit("xid-merge-admin.approveXIdMergeRevert", () => {
+      revalidateMergePaths(parentRequest.source_x_user_id, parentRequest.target_x_user_id);
+    });
     return {
       ok: true,
       id,
       message: `X ID統合を差し戻しました（${Object.values(counts).reduce((sum, value) => sum + value, 0)}件復元）。`,
     };
   } catch (cause) {
+    unstable_rethrow(cause);
     return {
       ok: false,
       id,

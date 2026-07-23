@@ -32,6 +32,12 @@
 2. Remote D1 migration は本変更では追加していないため、DB rollback は不要
 3. Worker は notification / json-generator の sentinel `last_error` / `error` 文字列に依存する。旧 Worker へ戻す場合、残存 sentinel 行は lease 回復で `pending` に戻る可能性があるため、必要なら手動で `sent` / `done` へ更新する
 
-## Remote migration
+## 追補（周辺領域）
 
-今回の変更に Remote D1 migration は含まれない。
+- `xid-admin` / `xid-merge-admin`: revalidate を post-commit 化、`unstable_rethrow`
+- `rules` / `moderation` / `chapter`: 同上。削除済みチャプター・resolved moderation は noop
+- `broadcastTermsReaccept`: 通知 fan-out と terms touch を分離
+- `event-staff-admin` / `notification-admin`: post-commit revalidate
+- YouTube sync: metadata Commit と score/static Post-commit を分離
+- manage layout: `getLayoutAuthSurface` 1回化
+- `MutationResult` 共通型を段階導入用に追加（全面置換はしない）

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videoModerationCases, videos } from "@/lib/db/schema";
@@ -19,11 +20,14 @@ import {
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { generateId } from "@/lib/utils/id";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface ModerationAdminResult { ok: boolean; message?: string }
 
 function snapshot(row: object): Record<string, unknown> { return { ...row }; }
 function mutationError(error: unknown): ModerationAdminResult {
+  unstable_rethrow(error);
   console.error("[moderation-admin] atomic mutation failed", error);
   return { ok: false, message: "更新が競合したか、監査・通知記録に失敗しました。再読み込みしてお試しください。" };
 }
@@ -37,6 +41,16 @@ function revalidateModeration(video: typeof videos.$inferSelect, changed: boolea
     revalidatePath(`/${video.youtube_video_id ?? video.id}`);
     revalidatePath("/list");
   }
+}
+
+async function runModerationPostCommit(
+  video: typeof videos.$inferSelect,
+  changed: boolean,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "moderation.admin", traceId: createTraceId() },
+    [{ name: "revalidate", run: async () => { revalidateModeration(video, changed); } }],
+  );
 }
 
 export async function createModerationCase(formData: FormData): Promise<ModerationAdminResult> {
@@ -85,7 +99,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   if (notification) { statements.push(notification.statement); expected.push(null); }
   try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, notificationWakeSource: notification ? "admin" : undefined, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
-  revalidateModeration(video, changed);
+  await runModerationPostCommit(video, changed);
   return { ok: true, message: "case を作成しました。" };
 }
 
@@ -101,7 +115,12 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   const { db } = guard;
   const current = (await db.select().from(videoModerationCases).where(eq(videoModerationCases.id, id)).limit(1))[0];
   if (!current) return { ok: false, message: "case が見つかりません。" };
-  if (current.status !== "open") return { ok: false, message: `status=${current.status} は更新対象外です。` };
+  if (current.status !== "open") {
+    if (current.status === status) {
+      return { ok: true, message: "case は既にこの状態です。" };
+    }
+    return { ok: false, message: `status=${current.status} は更新対象外です。` };
+  }
   const video = (await db.select().from(videos).where(eq(videos.id, current.video_id)).limit(1))[0];
   if (!video) return { ok: false, message: "対象作品が見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
@@ -128,6 +147,6 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   if (notification) { statements.push(notification.statement); expected.push(null); }
   try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, notificationWakeSource: notification ? "admin" : undefined, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
-  revalidateModeration(video, changed);
+  await runModerationPostCommit(video, changed);
   return { ok: true, message: "case を更新しました。" };
 }

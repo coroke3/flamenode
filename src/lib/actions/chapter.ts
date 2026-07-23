@@ -3,6 +3,7 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -16,6 +17,8 @@ import { parseChapterTime } from "@/lib/utils/chapterTime";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { MAX_ATOMIC_CHAPTER_BULK_ROWS, parseChapterBulkCsv } from "./chapterLimits";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface ChapterActionResult {
   ok: boolean;
@@ -136,15 +139,19 @@ export async function createChapter(
   mutationStatements.push(...queue.statements);
   expectedMutationChanges.push(...queue.expectedChanges);
 
-  await mutateWithAudit(db, {
-    mutationStatements,
-    expectedMutationChanges,
-    audits: [{ table_name: "video_chapters", target_id: id, operation: "CREATE", before: null, after: { ...after }, actor_user_id: sUser.id, retention_class: "normal" }],
-    notificationWakeSource,
-    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
-  });
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements,
+      expectedMutationChanges,
+      audits: [{ table_name: "video_chapters", target_id: id, operation: "CREATE", before: null, after: { ...after }, actor_user_id: sUser.id, retention_class: "normal" }],
+      notificationWakeSource,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+    });
+  } catch (error) {
+    return chapterMutationError(error);
+  }
 
-  revalidatePath(`/${target.youtube_video_id ?? data.video_id}`);
+  await revalidateChapterPath(target.youtube_video_id, data.video_id);
   return { ok: true, chapterId: id };
 }
 const updateSchema = createSchema.extend({
@@ -154,6 +161,33 @@ const updateSchema = createSchema.extend({
 const deleteSchema = z.object({
   chapter_id: z.string().trim().min(1),
 });
+
+function chapterMutationError(error: unknown): ChapterActionResult {
+  unstable_rethrow(error);
+  console.warn(
+    "[chapter] atomic mutation failed",
+    error instanceof Error ? error.name : "UnknownError",
+  );
+  return {
+    ok: false,
+    message: "チャプターの保存に失敗しました。画面を更新してもう一度お試しください。",
+  };
+}
+
+async function revalidateChapterPath(
+  youtubeVideoId: string | null,
+  videoId: string,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "chapter.write", traceId: createTraceId() },
+    [{
+      name: "revalidate",
+      run: async () => {
+        revalidatePath(`/${youtubeVideoId ?? videoId}`);
+      },
+    }],
+  );
+}
 
 async function canManageChapter(
   db: NonNullable<ReturnType<typeof getDatabase>>,
@@ -224,31 +258,35 @@ export async function updateChapter(
     reason: "chapter_update",
     requestedByUserId: guard.user.id,
   }]);
-  await mutateWithAudit(db, {
-    mutationStatements: [
-      db.update(videoChapters).set({
-        chapter_time: after.chapter_time,
-        chapter_label: after.chapter_label,
-        note: after.note,
-        visibility: after.visibility,
-        updated_at: after.updated_at,
-      }).where(expectedRowCondition({ expectedCurrent: existing })),
-      ...queue.statements,
-    ],
-    expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [{
-      table_name: "video_chapters",
-      target_id: existing.id,
-      operation: "UPDATE",
-      before: { ...existing },
-      after: { ...after },
-      actor_user_id: guard.user.id,
-      retention_class: "normal",
-    }],
-    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
-  });
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.update(videoChapters).set({
+          chapter_time: after.chapter_time,
+          chapter_label: after.chapter_label,
+          note: after.note,
+          visibility: after.visibility,
+          updated_at: after.updated_at,
+        }).where(expectedRowCondition({ expectedCurrent: existing })),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
+      audits: [{
+        table_name: "video_chapters",
+        target_id: existing.id,
+        operation: "UPDATE",
+        before: { ...existing },
+        after: { ...after },
+        actor_user_id: guard.user.id,
+        retention_class: "normal",
+      }],
+      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+    });
+  } catch (error) {
+    return chapterMutationError(error);
+  }
 
-  revalidatePath(`/${target.youtube_video_id ?? target.id}`);
+  await revalidateChapterPath(target.youtube_video_id, target.id);
   return { ok: true, chapterId: existing.id, message: "チャプターを更新しました。" };
 }
 
@@ -274,7 +312,9 @@ export async function deleteChapter(
   const existing = (
     await db.select().from(videoChapters).where(eq(videoChapters.id, parsed.data.chapter_id)).limit(1)
   )[0];
-  if (!existing) return { ok: false, message: "チャプターが見つかりません。" };
+  if (!existing) {
+    return { ok: true, chapterId: parsed.data.chapter_id, message: "既に削除されています。" };
+  }
   const target = (
     await db.select().from(videos).where(eq(videos.id, existing.video_id)).limit(1)
   )[0];
@@ -295,25 +335,29 @@ export async function deleteChapter(
     reason: "chapter_delete",
     requestedByUserId: guard.user.id,
   }]);
-  await mutateWithAudit(db, {
-    mutationStatements: [
-      db.delete(videoChapters).where(expectedRowCondition({ expectedCurrent: existing })),
-      ...queue.statements,
-    ],
-    expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [{
-      table_name: "video_chapters",
-      target_id: existing.id,
-      operation: "DELETE",
-      before: { ...existing },
-      after: null,
-      actor_user_id: guard.user.id,
-      retention_class: "normal",
-    }],
-    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
-  });
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.delete(videoChapters).where(expectedRowCondition({ expectedCurrent: existing })),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
+      audits: [{
+        table_name: "video_chapters",
+        target_id: existing.id,
+        operation: "DELETE",
+        before: { ...existing },
+        after: null,
+        actor_user_id: guard.user.id,
+        retention_class: "normal",
+      }],
+      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+    });
+  } catch (error) {
+    return chapterMutationError(error);
+  }
 
-  revalidatePath(`/${target.youtube_video_id ?? target.id}`);
+  await revalidateChapterPath(target.youtube_video_id, target.id);
   return { ok: true, chapterId: existing.id, message: "チャプターを削除しました。" };
 }
 
@@ -472,28 +516,34 @@ export async function createChaptersBulk(
       reason: "chapter_bulk_create",
       requestedByUserId: sUser.id,
     }]);
-    await mutateWithAudit(db, {
-      mutationStatements: [db.run(sql`
+    try {
+      await mutateWithAudit(db, {
+        mutationStatements: [db.run(sql`
         INSERT INTO video_chapters (
           id, video_id, x_user_id, chapter_time, chapter_label, note,
           visibility, created_at, updated_at
         ) VALUES ${sql.join(pendingRows.map((row) => sql`(${row.id}, ${video_id}, ${activeX}, ${row.chapter_time}, ${row.chapter_label}, ${row.note}, ${row.visibility}, ${now}, ${now})`), sql`, `)}
       `), ...queue.statements],
-      expectedMutationChanges: [inserted, ...queue.expectedChanges],
-      audits: pendingRows.map((row) => ({
-        table_name: "video_chapters" as const,
-        target_id: row.id,
-        operation: "CREATE" as const,
-        before: null,
-        after: { id: row.id, video_id, x_user_id: activeX, chapter_time: row.chapter_time, chapter_label: row.chapter_label, note: row.note, visibility: row.visibility, created_at: now, updated_at: now },
-        actor_user_id: sUser.id,
-        retention_class: "normal" as const,
-      })),
-      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
-    });
+        expectedMutationChanges: [inserted, ...queue.expectedChanges],
+        audits: pendingRows.map((row) => ({
+          table_name: "video_chapters" as const,
+          target_id: row.id,
+          operation: "CREATE" as const,
+          before: null,
+          after: { id: row.id, video_id, x_user_id: activeX, chapter_time: row.chapter_time, chapter_label: row.chapter_label, note: row.note, visibility: row.visibility, created_at: now, updated_at: now },
+          actor_user_id: sUser.id,
+          retention_class: "normal" as const,
+        })),
+        staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
+      });
+    } catch (error) {
+      return chapterMutationError(error);
+    }
   }
 
-  revalidatePath(`/${target.youtube_video_id ?? video_id}`);
+  if (inserted > 0) {
+    await revalidateChapterPath(target.youtube_video_id, video_id);
+  }
   return {
     ok: inserted > 0,
     message:

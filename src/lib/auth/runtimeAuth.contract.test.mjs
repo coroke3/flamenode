@@ -89,9 +89,10 @@ test("認証layoutは動的renderを明示しRequestAuthContextへ集約する",
   assert.doesNotMatch(authLayout, /await buildHeaderUser/);
   assert.doesNotMatch(authLayout, /await getLayoutHeaderUser/);
   assert.doesNotMatch(authLayout, /await getCurrentUser/);
-  assert.match(manageLayout, /await getLayoutHeaderUser/);
-  assert.doesNotMatch(manageLayout, /await auth\(/);
-  assert.match(manageLayout, /await getCurrentUser/);
+  assert.match(manageLayout, /getLayoutAuthSurface|getRequestAuthContext/);
+  assert.doesNotMatch(manageLayout, /await getLayoutHeaderUser/);
+  assert.doesNotMatch(manageLayout, /await getCurrentUser/);
+  assert.doesNotMatch(manageLayout, /await userNeedsXIdOnboarding/);
   assert.match(adminLayout, /await getLayoutHeaderUser\(false\)/);
   assert.match(adminLayout, /<CostGuardBanner source="admin" \/>/);
   assert.doesNotMatch(adminLayout, /await auth\(/);

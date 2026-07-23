@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-07-23
-> Source of truth: `src/lib/actions/xid.ts`, `src/lib/actions/xid-admin.ts`, `src/lib/auth/xIdentity.ts`, `src/lib/notifications/enqueue.ts`, `src/lib/utils/xid.ts`
+> Source of truth: `src/lib/actions/xid.ts`, `src/lib/actions/xid-admin.ts`, `src/lib/actions/xid-merge-admin.ts`, `src/lib/auth/xIdentity.ts`, `src/lib/notifications/enqueue.ts`, `src/lib/utils/xid.ts`
 
 X ID申請は `x_identity_requests`、X名義とAuth.jsユーザーの関係は `x_user_account_links` を唯一の正本とする。
 

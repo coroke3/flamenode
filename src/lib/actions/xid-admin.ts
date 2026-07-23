@@ -16,6 +16,8 @@ import {
 import { normalizeXId } from "@/lib/utils/xid";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
@@ -68,6 +70,16 @@ function revalidateIdentityAdminPaths(): void {
   revalidatePath("/admin/x-link-requests");
   revalidatePath("/manage/x-link-requests");
   revalidatePath("/admin/users");
+}
+
+async function runXIdAdminPostCommit(
+  flow: string,
+  run: () => void | Promise<void>,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    [{ name: "revalidate", run: async () => { await run(); } }],
+  );
 }
 
 function mutationError(error: unknown): XIdAdminResult {
@@ -367,7 +379,9 @@ async function approveXIdLinkRequestOnce(
     audits,
     notificationWakeSource: notification ? "admin" : undefined,
   });
-  revalidateIdentityAdminPaths();
+  await runXIdAdminPostCommit("xid-admin.approveXIdLinkRequest", () => {
+    revalidateIdentityAdminPaths();
+  });
   return { ok: true, message: request.request_type === "alias" ? "別名を承認しました。" : "連携を承認しました。" };
 }
 
@@ -381,6 +395,7 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
     try {
       return await approveXIdLinkRequestOnce(operator, requestId);
     } catch (error) {
+      unstable_rethrow(error);
       try {
         const current = (
           await operator.db
@@ -392,7 +407,11 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
         if (!current) return { ok: false, message: "申請が見つかりません。" };
         if (current.status !== "pending") {
           const result = processedXIdRequestMessage(current.status, "approve");
-          if (result.ok) revalidateIdentityAdminPaths();
+          if (result.ok) {
+            await runXIdAdminPostCommit("xid-admin.approveXIdLinkRequest", () => {
+              revalidateIdentityAdminPaths();
+            });
+          }
           return result;
         }
       } catch (reconciliationError) {
@@ -489,7 +508,9 @@ async function rejectXIdLinkRequestOnce(
     notificationWakeSource:
       notification || webhookNotification ? "admin" : undefined,
   });
-  revalidateIdentityAdminPaths();
+  await runXIdAdminPostCommit("xid-admin.rejectXIdLinkRequest", () => {
+    revalidateIdentityAdminPaths();
+  });
   return { ok: true, message: "却下しました。" };
 }
 
@@ -504,6 +525,7 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
     try {
       return await rejectXIdLinkRequestOnce(operator, requestId, reason);
     } catch (error) {
+      unstable_rethrow(error);
       try {
         const current = (
           await operator.db
@@ -515,7 +537,11 @@ export async function rejectXIdLinkRequest(formData: FormData): Promise<XIdAdmin
         if (!current) return { ok: false, message: "申請が見つかりません。" };
         if (current.status !== "pending") {
           const result = processedXIdRequestMessage(current.status, "reject");
-          if (result.ok) revalidateIdentityAdminPaths();
+          if (result.ok) {
+            await runXIdAdminPostCommit("xid-admin.rejectXIdLinkRequest", () => {
+              revalidateIdentityAdminPaths();
+            });
+          }
           return result;
         }
       } catch (reconciliationError) {
