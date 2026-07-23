@@ -360,10 +360,10 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     }
     const queue = await buildStaticRebuildQueueBatch(db, [
       { targetType: "video", targetId: videoId, reason: existingVideo ? "video_update" : "video_create", priority: "high", requestedByUserId: userId },
-      { targetType: "top", targetId: "global", reason: "video_submit" },
       { targetType: "list_recent", targetId: "global", reason: "video_submit" },
       { targetType: "list_popular", targetId: "global", reason: "video_submit" },
       { targetType: "search_index", targetId: "global", reason: "video_submit" },
+      { targetType: "users_index", targetId: "global", reason: "video_submit" },
       { targetType: "user", targetId: activeX, reason: "video_submit" },
       ...syncedEventIds.map((eventId) => ({
         targetType: "event" as const,

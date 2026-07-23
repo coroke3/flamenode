@@ -2,9 +2,10 @@ import * as React from "react";
 import Link from "next/link";
 import styles from "./HomeIntroBand.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { computeEventStatus, isAcceptingEntries, isPointEvent } from "@/lib/utils/eventStatus";
-import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
+import { isHeroCandidate, pickHeroEvents } from "@/lib/utils/pickHeroEvents";
 import { EventRecruitCard, type RecruitEvent } from "./EventRecruitCard";
+
+export { isHeroCandidate, pickHeroEvents } from "@/lib/utils/pickHeroEvents";
 
 export interface HomeIntroSlotStat {
   available: number;
@@ -13,52 +14,7 @@ export interface HomeIntroSlotStat {
 
 const MAX_RECRUIT_CARDS = 3;
 
-export function isHeroCandidate(event: EventRow, now: number): boolean {
-  if (isPointEvent(event)) return false;
-  const status = computeEventStatus(event, now);
-  return status !== "private" && status !== "ended";
-}
-
 type EventRow = RecruitEvent;
-
-function eventHeroRank(event: EventRow, now: number): number {
-  const status = computeEventStatus(event, now);
-  if (status === "scheduled") {
-    const start = event.start_time ?? event.end_time ?? Number.POSITIVE_INFINITY;
-    return start - now;
-  }
-  const acceptingBonus = isAcceptingEntries(event) ? -10_000_000 : 0;
-  const start =
-    event.start_time ??
-    event.end_time ??
-    event.entry_start_time ??
-    event.created_at ??
-    now;
-  if (start >= now) return acceptingBonus + (start - now);
-  if (event.end_time != null && event.end_time >= now) {
-    return acceptingBonus - 5_000_000;
-  }
-  return acceptingBonus + 100_000_000 + Math.abs(start - now);
-}
-
-export function pickHeroEvents(
-  activeEvents: EventRow[],
-  limit = MAX_RECRUIT_CARDS,
-): EventRow[] {
-  const now = Math.floor(Date.now() / 1000);
-  return activeEvents
-    .filter((event) => isHeroCandidate(event, now))
-    .sort((a, b) => {
-      const priorityDiff = compareEventsByUpcomingPriority(a, b, now);
-      if (priorityDiff !== 0) return priorityDiff;
-      const rankDiff = eventHeroRank(a, now) - eventHeroRank(b, now);
-      if (rankDiff !== 0) return rankDiff;
-      const aStart = a.start_time ?? Number.POSITIVE_INFINITY;
-      const bStart = b.start_time ?? Number.POSITIVE_INFINITY;
-      return aStart - bStart;
-    })
-    .slice(0, limit);
-}
 
 interface HomeIntroBandProps {
   activeEvents: EventRow[];
@@ -72,7 +28,7 @@ export function HomeIntroBand({
   slotStats,
   excludeEventId,
 }: HomeIntroBandProps): React.ReactElement | null {
-  const heroEvents = pickHeroEvents(activeEvents).filter(
+  const heroEvents = pickHeroEvents(activeEvents, MAX_RECRUIT_CARDS).filter(
     (event) => event.id !== excludeEventId,
   );
 

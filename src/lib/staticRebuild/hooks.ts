@@ -20,16 +20,14 @@ function uniqueEventIds(primary: string | null | undefined, ids: readonly string
   return [...unique];
 }
 
-function globalVideoTargets(
+/** list_recent / list_popular / search_index。top・recommend・users_index は含めない。 */
+function globalListTargets(
   reason: string,
   searchPriority?: StaticRebuildPriority,
 ): EnqueueStaticRebuildInput[] {
   return [
-    { targetType: "top", targetId: "global", reason },
     { targetType: "list_recent", targetId: "global", reason },
     { targetType: "list_popular", targetId: "global", reason },
-    { targetType: "users_index", targetId: "global", reason },
-    { targetType: "recommend", targetId: "global", reason },
     {
       targetType: "search_index",
       targetId: "global",
@@ -39,8 +37,36 @@ function globalVideoTargets(
   ];
 }
 
+function topRecommendTargets(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput[] {
+  return [
+    {
+      targetType: "top",
+      targetId: "global",
+      reason,
+      ...(priority ? { priority } : {}),
+    },
+    {
+      targetType: "recommend",
+      targetId: "global",
+      reason,
+      ...(priority ? { priority } : {}),
+    },
+  ];
+}
+
 function usersIndexTarget(reason: string): EnqueueStaticRebuildInput {
   return { targetType: "users_index", targetId: "global", reason };
+}
+
+/** 枠変更で top.json の slot_stats を更新する。 */
+export function topGlobalTarget(
+  reason: string,
+  priority: StaticRebuildPriority = "normal",
+): EnqueueStaticRebuildInput {
+  return { targetType: "top", targetId: "global", reason, priority };
 }
 
 export async function enqueueAfterVideoCreate(
@@ -61,13 +87,15 @@ export async function enqueueAfterVideoCreate(
       priority: "high",
       requestedByUserId: opts.requestedByUserId,
     },
-    ...globalVideoTargets("video_create"),
+    ...globalListTargets("video_create"),
   ];
   if (opts.creatorXUserId) {
     items.push(
       { targetType: "user", targetId: opts.creatorXUserId, reason: "video_create" },
       usersIndexTarget("video_create"),
     );
+  } else {
+    items.push(...topRecommendTargets("video_create"));
   }
   for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
     items.push({
@@ -102,6 +130,7 @@ export async function enqueueAfterVideoUpdate(
       requestedByUserId: opts.requestedByUserId,
     },
   ];
+  let chainsTopRecommendViaUsersIndex = false;
   if (opts.creatorXUserId && opts.identityChanged) {
     items.push(
       {
@@ -117,11 +146,17 @@ export async function enqueueAfterVideoUpdate(
         priority: "low",
       },
     );
+    chainsTopRecommendViaUsersIndex = true;
   }
 
   const listAffecting =
     opts.visibilityChanged || opts.eventMembershipChanged || opts.identityChanged;
-  if (listAffecting) items.push(...globalVideoTargets("video_update", "low"));
+  if (listAffecting) {
+    items.push(...globalListTargets("video_update", "low"));
+    if (!chainsTopRecommendViaUsersIndex) {
+      items.push(...topRecommendTargets("video_update", "low"));
+    }
+  }
 
   if (opts.eventMembershipChanged || opts.visibilityChanged) {
     for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
@@ -173,7 +208,7 @@ export function buildAfterVideoStatusChangeQueueBatch(
       priority: "normal",
       requestedByUserId: opts.requestedByUserId,
     },
-    ...globalVideoTargets("video_update", "low"),
+    ...globalListTargets("video_update", "low"),
   ];
   if (opts.creatorXUserId) {
     items.push(
@@ -184,6 +219,8 @@ export function buildAfterVideoStatusChangeQueueBatch(
       },
       usersIndexTarget("video_update"),
     );
+  } else {
+    items.push(...topRecommendTargets("video_update", "low"));
   }
   for (const eventId of eventIds) {
     items.push({
@@ -208,5 +245,25 @@ export function buildEventGroupChangeQueueBatch(
       priority: "low",
       requestedByUserId: opts.requestedByUserId,
     },
+  ]);
+}
+
+export function buildSlotChangeQueueBatch(
+  db: DB,
+  opts: {
+    eventId: string;
+    reason: string;
+    requestedByUserId: string;
+  },
+): Promise<StaticRebuildQueueBatch> {
+  return buildStaticRebuildQueueBatch(db, [
+    {
+      targetType: "event",
+      targetId: opts.eventId,
+      reason: opts.reason,
+      priority: "high",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    topGlobalTarget(opts.reason, "normal"),
   ]);
 }

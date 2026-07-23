@@ -161,7 +161,11 @@ test("static JSON queryはcanonical列だけを使う", () => {
 test("public static JSON queries exclude private event relations", () => {
   assert.match(
     source,
-    /FROM slots AS s[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
+    /buildHeroEventSlotStatsSql\(heroEventIds\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /FROM slots AS s[\s\S]*GROUP BY s\.event_id[\s\S]*async function rebuildListRecent/,
   );
   assert.ok(
     (source.match(/THEN v\.primary_event_id ELSE NULL END AS primary_event_id/g) ?? [])
@@ -304,6 +308,82 @@ test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
   );
 });
 
+test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const heroIds = ["hero-1", "hero-2"];
+  const slotQueries = [];
+  const state = {
+    binds: [],
+    runs: [],
+    first() {
+      return null;
+    },
+    all(sql) {
+      if (sql.includes("FROM slots AS s") && sql.includes("GROUP BY s.event_id")) {
+        slotQueries.push({ sql, args: state.binds.at(-1)?.args ?? [] });
+        return {
+          results: heroIds.map((eventId) => ({
+            event_id: eventId,
+            available: 2,
+            total: 5,
+          })),
+        };
+      }
+      if (sql.includes("FROM events") && sql.includes("visibility_status = 'public'")) {
+        return {
+          results: [
+            ...heroIds.map((id, index) => ({
+              id,
+              title: `Event ${id}`,
+              visibility_status: "public",
+              start_time: now + 1000 + index * 1000,
+              end_time: now + 10_000 + index * 1000,
+              entry_start_time: null,
+              entry_end_time: null,
+              created_at: now - 86400,
+            })),
+            {
+              id: "other-event",
+              title: "Other",
+              visibility_status: "public",
+              start_time: now + 100_000,
+              end_time: null,
+              entry_start_time: null,
+              entry_end_time: null,
+              created_at: now - 86400,
+            },
+          ],
+        };
+      }
+      return { results: [] };
+    },
+  };
+  const puts = [];
+  const env = {
+    DB: {
+      prepare: (sql) => statement(sql, state),
+    },
+    R2: {
+      async put(key, body) {
+        puts.push({ key, body: JSON.parse(String(body)) });
+      },
+      delete: async () => {},
+    },
+    KV: { put: async () => {} },
+  };
+
+  await rebuildTarget(env, "top", "global");
+
+  assert.equal(slotQueries.length, 1);
+  assert.deepEqual(slotQueries[0].args, heroIds);
+  assert.match(slotQueries[0].sql, /WHERE s\.event_id IN/);
+  const top = puts.find((entry) => entry.key === "top.json");
+  assert.ok(top);
+  assert.equal(top.body.slot_stats.length, 2);
+  assert.ok(top.body.slot_stats.every((row) => heroIds.includes(row.event_id)));
+  assert.ok(top.body.slot_stats.every((row) => row.event_id !== "other-event"));
+});
+
 test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async () => {
   const state = {
     binds: [],
@@ -339,6 +419,10 @@ test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async
   const top = puts.find((entry) => entry.key === "top.json");
   assert.ok(top);
   assert.equal(top.body.stats.public_events, 7);
+});
+
+test("rebuildUsersIndex成功後にtop/recommend follow-upをenqueueする", () => {
+  assert.match(source, /case "users_index":[\s\S]*enqueueTopRecommendAfterUsersIndex/);
 });
 
 test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {

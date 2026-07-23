@@ -28,6 +28,12 @@ import {
   USERS_INDEX_MAX_OBJECT_BYTES,
   USERS_INDEX_OBJECT_KEY,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
+import { buildHeroEventSlotStatsSql } from "../../src/lib/publicData/heroEventSlotStatsSql.ts";
+import {
+  pickHeroEvents,
+  type HeroEventRow,
+} from "../../src/lib/utils/pickHeroEvents.ts";
+import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
 
 const STATIC_USER_WORKS_PAGE_SIZE = 24;
 const STATIC_USER_COLLABS_PAGE_SIZE = 24;
@@ -165,6 +171,7 @@ export async function rebuildTarget(
       break;
     case "users_index":
       await rebuildUsersIndex(env, signal);
+      await enqueueTopRecommendAfterUsersIndex(env);
       break;
     case "list_popular":
       await rebuildListPopular(env, signal);
@@ -324,7 +331,6 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     latestEvents,
     creatorProjection,
     announcements,
-    slotStats,
     publicVideoCount,
     creatorCount,
     publicEventCount,
@@ -409,15 +415,6 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        LIMIT 3`,
     ).bind(now, now).all(),
     env.DB.prepare(
-      `SELECT s.event_id,
-              SUM(CASE WHEN s.status = 'available' THEN 1 ELSE 0 END) AS available,
-              COUNT(*) AS total
-       FROM slots AS s
-       INNER JOIN events AS e
-         ON e.id = s.event_id AND e.visibility_status = 'public'
-       GROUP BY s.event_id`,
-    ).all(),
-    env.DB.prepare(
       `SELECT COUNT(*) AS c
        FROM videos AS v
        WHERE v.visibility_status = 'public'
@@ -444,6 +441,14 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
 
   const activeEventItems = activeEvents.results ?? [];
   const latestEventItems = latestEvents.results ?? [];
+  const heroEventIds = pickHeroEvents(activeEventItems as HeroEventRow[]).map((event) =>
+    String(event.id ?? "").trim(),
+  ).filter(Boolean);
+  const heroSlotStatsSql = buildHeroEventSlotStatsSql(heroEventIds);
+  const slotStats = heroSlotStatsSql
+    ? await env.DB.prepare(heroSlotStatsSql).bind(...heroEventIds).all()
+    : { results: [] as { event_id: string; available: number; total: number }[] };
+  throwIfAborted(signal);
   const creators = buildPickupCreatorsFromProjection(creatorProjection, 30);
   const payload = {
     generated_at: now,
