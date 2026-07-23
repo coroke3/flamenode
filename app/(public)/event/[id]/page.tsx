@@ -103,9 +103,11 @@ export default async function EventDetailPage({
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
   const staticLoaded = await loadStaticEventDetail(id);
-  if (!canFallbackToDatabase(staticLoaded.strategy)) {
-    if (!staticLoaded.data) notFound();
+  if (staticLoaded.data) {
     return <StaticEventDetailView detail={staticLoaded.data} />;
+  }
+  if (!canFallbackToDatabase(staticLoaded.strategy)) {
+    notFound();
   }
 
   const bundle = await withDatabase(async (db) => {
@@ -194,7 +196,7 @@ function EventDetailView({
   creatorTotal: number;
   slotRows: SlotRow[];
   staffRows: Array<{
-    x_user_id: string;
+    x_user_id: string | null;
     display_name: string;
     public_role_label: string | null;
     x_name: string | null;
@@ -311,7 +313,10 @@ function EventDetailView({
           <SectionHeader eyebrow="CREW" title="Crew" classes={eventSectionHeaderClasses} />
           <ul className={styles.crewList}>
             {staffRows.map((member) => (
-              <li key={member.x_user_id} className={styles.crewRow}>
+              <li
+                key={member.x_user_id ?? member.display_name}
+                className={styles.crewRow}
+              >
                 <UserAvatar
                   iconUrl={member.icon_url}
                   label={member.x_name ?? member.display_name}
@@ -319,20 +324,28 @@ function EventDetailView({
                   className={styles.crewAvatar}
                   fallbackClassName={styles.crewAvatarFallback}
                 />
-                <Link href={`/user/${member.x_user_id}`} className={styles.crewName}>
-                  {member.x_name ?? member.display_name}
-                </Link>
+                {member.x_user_id ? (
+                  <Link href={`/user/${member.x_user_id}`} className={styles.crewName}>
+                    {member.x_name ?? member.display_name}
+                  </Link>
+                ) : (
+                  <span className={styles.crewName}>
+                    {member.x_name ?? member.display_name}
+                  </span>
+                )}
                 <span className={styles.crewRole}>
                   {member.public_role_label ?? "運営"}
                 </span>
-                <a
-                  href={`https://x.com/${member.x_user_id}`}
-                  className={styles.crewXLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Icon name="x" size={12} aria-hidden /> @{member.x_user_id}
-                </a>
+                {member.x_user_id ? (
+                  <a
+                    href={`https://x.com/${member.x_user_id}`}
+                    className={styles.crewXLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Icon name="x" size={12} aria-hidden /> @{member.x_user_id}
+                  </a>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -357,33 +370,58 @@ function StaticEventDetailView({ detail }: { detail: StaticEventDetail }): React
     scheduled_time: video.scheduled_time,
     status: video.visibility_status,
   }));
-  const slotTotal = detail.slotSummary.reduce((sum, row) => sum + row.count, 0);
-  const available =
-    detail.slotSummary.find((row) => row.status === "available")?.count ?? 0;
-  const eventRow = event as EventRow;
-  return (
-    <EventDetailView
-      event={eventRow}
-      eventVideos={videosForCard as EventVideo[]}
-      eventVideoTotal={videosForCard.length}
-      creatorTotal={new Set(videosForCard.map((video) => video.creator_x_user_id).filter(Boolean)).size}
-      slotRows={Array.from({ length: slotTotal }, (_, index) => ({
-        id: `static-${index}`,
+  const slotRows: SlotRow[] = detail.slots.length > 0
+    ? detail.slots.map((slot, index) => ({
+        id: slot.id,
         event_id: event.id,
         reserved_by_user_id: null,
         x_user_id: null,
         display_name: null,
         slot_label: null,
-        start_time: null,
-        sort_order: index,
+        start_time: slot.start_time,
+        sort_order: slot.sort_order ?? index,
         reservation_group_id: null,
         video_id: null,
-        status: index < available ? "available" : "reserved",
+        status: slot.status,
         updated_at: 0,
         version: 1,
-      }))}
+      }))
+    : Array.from(
+        { length: detail.slotSummary.reduce((sum, row) => sum + row.count, 0) },
+        (_, index) => {
+          const available =
+            detail.slotSummary.find((row) => row.status === "available")?.count ?? 0;
+          return {
+            id: `static-${index}`,
+            event_id: event.id,
+            reserved_by_user_id: null,
+            x_user_id: null,
+            display_name: null,
+            slot_label: null,
+            start_time: null,
+            sort_order: index,
+            reservation_group_id: null,
+            video_id: null,
+            status: (index < available ? "available" : "reserved") as SlotRow["status"],
+            updated_at: 0,
+            version: 1,
+          };
+        },
+      );
+  const eventRow = {
+    ...event,
+    slot_part_gap_minutes: event.slot_part_gap_minutes ?? 15,
+    slot_visibility_mode: event.slot_visibility_mode ?? "public_name",
+  } as EventRow;
+  return (
+    <EventDetailView
+      event={eventRow}
+      eventVideos={videosForCard as EventVideo[]}
+      eventVideoTotal={detail.videoTotal}
+      creatorTotal={detail.creatorCount}
+      slotRows={slotRows}
       staffRows={detail.publicStaff.map((member) => ({
-        x_user_id: member.x_user_id ?? member.display_name,
+        x_user_id: member.x_user_id,
         display_name: member.display_name,
         public_role_label: member.public_role_label,
         x_name: member.x_name,

@@ -8,8 +8,8 @@ import { Logo } from "@/components/ui/Logo";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import type { XIdEntry } from "@/lib/xid/entries";
-import { AccountMenu } from "@/components/user/AccountMenu";
 import type { HeaderUser } from "@/lib/auth/headerUser";
+import { PublicAccountIsland, usePublicAccountSummary } from "@/components/layout/PublicAccountIsland";
 import { navigateGetForm } from "@/components/forms/AutoSubmitSelect";
 import { sanitizeNextPath } from "#utils/next";
 import { useDismissablePanel } from "./useDismissablePanel";
@@ -38,10 +38,11 @@ export type PublicHeaderUser = Pick<
 };
 
 interface PublicHeaderProps {
-  user: PublicHeaderUser | null;
+  /** 省略時はクライアントが /api/account/summary を取得する。 */
+  user?: PublicHeaderUser | null;
 }
 
-export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
+export function PublicHeader({ user: serverUser }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [accountOpen, setAccountOpen] =
@@ -55,6 +56,10 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
   const searchButtonRef =
     React.useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
+  const fetchAccount = serverUser === undefined;
+  const { user: fetchedUser, loading: accountLoading } =
+    usePublicAccountSummary(fetchAccount);
+  const accountUser = fetchAccount ? fetchedUser : (serverUser ?? null);
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
   const entryHref =
     entryNext === "/entry"
@@ -142,41 +147,22 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
             <Icon name="search" size={18} aria-hidden />
           </button>
 
-          {user ? (
-            <>
-              <Link
-                href="/entry"
-                className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn}`}
-                data-variant="accent"
-              >
-                <Icon name="edit" size={13} aria-hidden />
-                <span>投稿する</span>
-              </Link>
-              <div className={`${styles.actionNav}`}>
-                <AccountMenu
-                  user={user}
-                  open={accountOpen}
-                  onOpenChange={(open) => {
-                    setAccountOpen(open);
-
-                    if (open) {
-                      setMobileOpen(false);
-                      setSearchOpen(false);
-                    }
-                  }}
-                />
-              </div>
-            </>
-          ) : (
-            <Link
-              href={entryHref}
-              className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn}`}
-              data-variant="accent"
-            >
-              <Icon name="edit" size={13} aria-hidden />
-              <span>参加する</span>
-            </Link>
-          )}
+          <PublicAccountIsland
+            user={accountUser}
+            loading={fetchAccount && accountLoading}
+            entryHref={entryHref}
+            accountOpen={accountOpen}
+            onAccountOpenChange={(open) => {
+              setAccountOpen(open);
+              if (open) {
+                setMobileOpen(false);
+                setSearchOpen(false);
+              }
+            }}
+            onClosePanels={closeMobilePanels}
+            pathname={pathname}
+            variant="desktop"
+          />
 
           <button
             type="button"
@@ -278,175 +264,30 @@ export function PublicHeader({ user }: PublicHeaderProps): React.ReactElement {
                 autoComplete="off"
               />
             </form>
-            {user ? (
-              <Link
-                href="/entry"
-                className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
-                onClick={closeMobilePanels}
-              >
-                <Icon name="edit" size={16} aria-hidden /> 投稿する
-              </Link>
-            ) : (
-              <Link
-                href={entryHref}
-                className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
-                onClick={closeMobilePanels}
-              >
-                <Icon name="edit" size={16} aria-hidden /> 参加する
-              </Link>
-            )}
+            <PublicAccountIsland
+              user={accountUser}
+              loading={fetchAccount && accountLoading}
+              entryHref={entryHref}
+              accountOpen={accountOpen}
+              onAccountOpenChange={setAccountOpen}
+              onClosePanels={closeMobilePanels}
+              pathname={pathname}
+              variant="mobile-cta"
+            />
           </div>
 
           <div className={styles.mobileDivider} />
 
-          {!user ? (
-            <div className={styles.mobileSection}>
-              {PUBLIC_NAV_ITEMS.map((item) => {
-                const active = isPathActive(pathname, item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`${styles.mobileLink} ${
-                      active ? styles.mobileLinkActive : ""
-                    }`}
-                    onClick={closeMobilePanels}
-                    aria-current={active ? "page" : undefined}
-                  >
-                    <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
-                  </Link>
-                );
-              })}
-              <div className={styles.mobileThemeRow}>
-                <span>テーマ</span>
-                <ThemeToggle />
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className={styles.mobileUserHeader}>
-                {user.image ? (
-                  <img
-                    src={user.image}
-                    alt=""
-                    className={styles.mobileUserAvatar}
-                  />
-                ) : (
-                  <span
-                    className={
-                      styles.mobileUserAvatarFallback
-                    }
-                  >
-                    <Icon
-                      name="user"
-                      size={20}
-                      aria-hidden
-                    />
-                  </span>
-                )}
-
-                <div>
-                  <strong>{user.name}</strong>
-                  <span>
-                    {user.xIds.find(
-                      (entry) => entry.is_active,
-                    )
-                      ? `@${
-                          user.xIds.find(
-                            (entry) => entry.is_active,
-                          )!.x_user_id
-                        }`
-                      : "Active X ID未選択"}
-                  </span>
-                  <small>
-                    現在の投稿・いいね・コメント主体
-                  </small>
-                </div>
-              </div>
-
-              <div className={styles.mobileIdentityControls}>
-                <ThemeToggle variant="segmented" />
-              </div>
-
-              <div className={styles.mobileSection}>
-                {PUBLIC_NAV_ITEMS.map((item) => {
-                  const active = isPathActive(pathname, item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`${styles.mobileLink} ${
-                        active ? styles.mobileLinkActive : ""
-                      }`}
-                      onClick={closeMobilePanels}
-                      aria-current={active ? "page" : undefined}
-                    >
-                      <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
-                    </Link>
-                  );
-                })}
-                <Link
-                  href="/dashboard"
-                  className={styles.mobileLink}
-                  onClick={closeMobilePanels}
-                >
-                  <Icon name="grid" size={16} aria-hidden /> マイページ
-                </Link>
-                <Link
-                  href="/dashboard/library"
-                  className={styles.mobileLink}
-                  onClick={closeMobilePanels}
-                >
-                  <Icon name="bookmark" size={16} aria-hidden /> ライブラリ
-                </Link>
-                <Link
-                  href="/dashboard/settings"
-                  className={styles.mobileLink}
-                  onClick={closeMobilePanels}
-                >
-                  <Icon name="settings" size={16} aria-hidden /> 設定
-                </Link>
-              </div>
-
-              {user.management.canAccessAdmin ||
-              user.management.canAccessManage ? (
-                <>
-                  <div className={styles.mobileDivider} />
-                  <div className={styles.mobileSection}>
-                    {user.management.canAccessManage ? (
-                      <Link
-                        href="/manage"
-                        className={styles.mobileLink}
-                        onClick={closeMobilePanels}
-                      >
-                        <Icon name="users" size={16} aria-hidden /> 運営
-                      </Link>
-                    ) : null}
-                    {user.management.canAccessAdmin ? (
-                      <Link
-                        href="/admin"
-                        className={styles.mobileLink}
-                        onClick={closeMobilePanels}
-                      >
-                        <Icon name="settings" size={16} aria-hidden /> 管理
-                      </Link>
-                    ) : null}
-                  </div>
-                </>
-              ) : null}
-
-              <div className={styles.mobileDivider} />
-              <div className={styles.mobileSection}>
-                <Link
-                  href="/api/auth/signout"
-                  className={`${styles.mobileLink} ${styles.mobileLinkDanger}`}
-                  onClick={closeMobilePanels}
-                >
-                  <Icon name="logout" size={16} aria-hidden /> ログアウト
-                </Link>
-              </div>
-            </>
-          )}
+          <PublicAccountIsland
+            user={accountUser}
+            loading={fetchAccount && accountLoading}
+            entryHref={entryHref}
+            accountOpen={accountOpen}
+            onAccountOpenChange={setAccountOpen}
+            onClosePanels={closeMobilePanels}
+            pathname={pathname}
+            variant="mobile-nav"
+          />
         </nav>
       </div>
     </header>

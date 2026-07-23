@@ -4,7 +4,7 @@ import { cache } from "react";
 import type { Session } from "next-auth";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getAuthSession } from "@/lib/auth/session";
 import { withDatabaseRead } from "@/lib/cloudflare";
 import { users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -43,13 +43,10 @@ export class CurrentUserUnavailableError extends Error {
   }
 }
 
-// Auth.jsのauthはmiddleware用overloadも持つため、引数なしのServer Component呼出しを明示する。
-const loadAuthSession = auth as unknown as () => Promise<Session | null>;
-
 async function loadCurrentUser(): Promise<CurrentUser | null> {
   let session: Session | null;
   try {
-    session = await loadAuthSession();
+    session = await getAuthSession();
   } catch (error) {
     unstable_rethrow(error);
     throw new CurrentUserUnavailableError(

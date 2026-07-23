@@ -241,6 +241,8 @@ function normalizeStats(value: unknown, fallback: HomeStats): HomeStats {
     publicVideos: normalizeCount(row.publicVideos ?? row.public_videos) ?? fallback.publicVideos,
     activeEvents: normalizeCount(row.activeEvents ?? row.active_events) ?? fallback.activeEvents,
     creators: normalizeCount(row.creators) ?? fallback.creators,
+    publicEvents:
+      normalizeCount(row.publicEvents ?? row.public_events) ?? fallback.publicEvents,
   };
 }
 

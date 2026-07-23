@@ -8,6 +8,7 @@ import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit, planD1AuditMutationBudget } from "@/lib/audit/mutate";
 import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueue";
+import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
 import { generateId } from "@/lib/utils/id";
 import {
   getLatestPublishedMajorTerms,
@@ -116,6 +117,12 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
   audits.push({ table_name: "terms_versions", target_id: target.id, operation: "UPDATE" as const, before: snapshot(target), after: snapshot(targetAfter), actor_user_id: guard.user.id, retention_class: "long_audit" as const, context: "admin_terms_publish", reason: "規約版の公開", strict: true });
   try {
     await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
+    await enqueueStaticRebuild(db, {
+      targetType: "rules",
+      targetId: "global",
+      reason: "admin_terms_publish",
+      priority: "high",
+    });
   } catch (error) { return mutationError(error); }
   revalidatePath("/admin/rules"); revalidatePath("/rules");
   return { ok: true, id };
@@ -186,6 +193,14 @@ export async function archiveTermsVersion(formData: FormData): Promise<RulesResu
       expectedMutationChanges: 1,
       audits: [{ table_name: "terms_versions", target_id: id, operation: "UPDATE", before: snapshot(before), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_archive", reason: "規約版のアーカイブ", strict: true }],
     });
+    if (before.status === "published") {
+      await enqueueStaticRebuild(db, {
+        targetType: "rules",
+        targetId: "global",
+        reason: "admin_terms_archive",
+        priority: "high",
+      });
+    }
   } catch (error) { return mutationError(error); }
   revalidatePath("/admin/rules"); revalidatePath("/rules");
   return { ok: true };

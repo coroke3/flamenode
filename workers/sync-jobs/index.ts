@@ -56,7 +56,7 @@ async function enqueueScoreDependentRebuilds(
 }> {
   signal?.throwIfAborted();
   const now = Math.floor(Date.now() / 1000);
-  const targets = ["top", "list_popular"] as const;
+  const targets = ["top", "list_popular", "recommend"] as const;
   const statements = targets.map((targetType) =>
     env.DB.prepare(
       `INSERT OR IGNORE INTO static_rebuild_queue (

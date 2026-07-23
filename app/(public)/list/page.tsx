@@ -18,8 +18,7 @@ import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
-import { loadStaticRecentVideosPage } from "@/lib/publicData/loader";
-import { canFallbackToDatabase } from "@/lib/publicData/loader";
+import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage, canFallbackToDatabase } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -58,10 +57,24 @@ export default async function ListPage({
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const offset = (pageNum - 1) * PAGE_SIZE;
 
-  const staticLoad =
+  const staticRecentLoad =
     !q.trim() && parsedSort === "new" && !event
       ? await loadStaticRecentVideosPage({ page: pageNum, pageSize: PAGE_SIZE })
       : null;
+  const staticPopularLoad =
+    !q.trim() && parsedSort === "score" && !event
+      ? await loadStaticPopularVideosPage({ page: pageNum, pageSize: PAGE_SIZE })
+      : null;
+  const staticSearchLoad =
+    q.trim() && !event
+      ? await loadStaticSearchVideosPage({
+          q,
+          sort: parsedSort,
+          page: pageNum,
+          pageSize: PAGE_SIZE,
+        })
+      : null;
+  const staticLoad = staticPopularLoad ?? staticSearchLoad ?? staticRecentLoad;
 
   const data = staticLoad?.page
     ? { videos: staticLoad.page.videos, total: staticLoad.page.total, eventInfo: null }

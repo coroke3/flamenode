@@ -190,62 +190,64 @@ export default async function EventListPage({
       }
     : null;
 
-  const source: EventListSource = canFallbackToDatabase(staticLoaded.strategy)
-    ? ((await withDatabase(async (db): Promise<EventListSource> => {
-        const [eventRows, groups, publicStaffRows] =
-          await Promise.all([
-            db
-              .select()
-              .from(eventsTable)
-              .where(publicListableEventWhere())
-              .orderBy(desc(eventsTable.start_time)),
-            fetchEventListGroupSections(db),
-            db
-              .select({
-                event_id: eventStaff.event_id,
-                display_name: eventStaff.display_name,
-              })
-              .from(eventStaff)
-              .where(eq(eventStaff.is_public, 1)),
-          ]);
+  const source: EventListSource =
+    staticSource ??
+    (canFallbackToDatabase(staticLoaded.strategy)
+      ? (await withDatabase(async (db): Promise<EventListSource> => {
+          const [eventRows, groups, publicStaffRows] =
+            await Promise.all([
+              db
+                .select()
+                .from(eventsTable)
+                .where(publicListableEventWhere())
+                .orderBy(desc(eventsTable.start_time)),
+              fetchEventListGroupSections(db),
+              db
+                .select({
+                  event_id: eventStaff.event_id,
+                  display_name: eventStaff.display_name,
+                })
+                .from(eventStaff)
+                .where(eq(eventStaff.is_public, 1)),
+            ]);
 
-        const operatorNamesByEvent = new Map<
-          string,
-          string[]
-        >();
+          const operatorNamesByEvent = new Map<
+            string,
+            string[]
+          >();
 
-        for (const staff of publicStaffRows) {
-          const displayName = staff.display_name.trim();
-          if (!displayName) continue;
+          for (const staff of publicStaffRows) {
+            const displayName = staff.display_name.trim();
+            if (!displayName) continue;
 
-          const names =
-            operatorNamesByEvent.get(staff.event_id) ?? [];
-          if (!names.includes(displayName)) {
-            names.push(displayName);
+            const names =
+              operatorNamesByEvent.get(staff.event_id) ?? [];
+            if (!names.includes(displayName)) {
+              names.push(displayName);
+            }
+            operatorNamesByEvent.set(staff.event_id, names);
           }
-          operatorNamesByEvent.set(staff.event_id, names);
-        }
 
-        const attachOperatorNames = <
-          T extends EventListEvent,
-        >(
-          event: T,
-        ): T =>
-          ({
-            ...event,
-            public_operator_names:
-              operatorNamesByEvent.get(event.id) ?? [],
-          }) as T;
+          const attachOperatorNames = <
+            T extends EventListEvent,
+          >(
+            event: T,
+          ): T =>
+            ({
+              ...event,
+              public_operator_names:
+                operatorNamesByEvent.get(event.id) ?? [],
+            }) as T;
 
-        return {
-          events: eventRows.map(attachOperatorNames),
-          groupSections: groups.map((group) => ({
-            ...group,
-            events: group.events.map(attachOperatorNames),
-          })) as EventGroupSectionView[],
-        };
-      })) ?? staticSource ?? emptySource)
-    : (staticSource ?? emptySource);
+          return {
+            events: eventRows.map(attachOperatorNames),
+            groupSections: groups.map((group) => ({
+              ...group,
+              events: group.events.map(attachOperatorNames),
+            })) as EventGroupSectionView[],
+          };
+        })) ?? emptySource
+      : emptySource);
   const { events, groupSections } = source;
 
   const matchingGroupEventIds = new Set(

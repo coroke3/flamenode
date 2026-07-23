@@ -5,13 +5,51 @@ import {
   normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
-} from "./normalize";
+} from "./normalize.ts";
+
+export const STATIC_USER_WORKS_PAGE_SIZE = 24;
+export const STATIC_USER_COLLABS_PAGE_SIZE = 24;
+export const STATIC_USER_MAX_PAGES = 5;
+export const STATIC_USER_MAX_STATIC_ITEMS =
+  STATIC_USER_WORKS_PAGE_SIZE * STATIC_USER_MAX_PAGES;
+
+export interface StaticUserVideoSectionPayload {
+  total?: unknown;
+  items?: unknown;
+}
 
 export interface StaticUserProfilePayload {
   generated_at?: unknown;
   user?: Record<string, unknown>;
+  page_size?: unknown;
+  works?: StaticUserVideoSectionPayload;
+  collabs?: StaticUserVideoSectionPayload;
+  /** @deprecated legacy single-file shape */
   recent_videos?: unknown;
+  /** @deprecated legacy single-file shape */
   total_works?: unknown;
+}
+
+export interface StaticUserVideoPagePayload {
+  generated_at?: unknown;
+  page?: unknown;
+  page_size?: unknown;
+  total?: unknown;
+  items?: unknown;
+}
+
+export interface StaticUserVideoSection {
+  total: number;
+  items: VideoCardData[];
+  pageSize: number;
+}
+
+export interface StaticUserVideoPage {
+  page: number;
+  total: number;
+  items: VideoCardData[];
+  pageSize: number;
+  generatedAt: number | null;
 }
 
 export interface StaticUserProfile {
@@ -25,8 +63,8 @@ export interface StaticUserProfile {
     youtube_channel_url: string | null;
     other_social_links: string | null;
   };
-  recentVideos: VideoCardData[];
-  totalWorks: number;
+  works: StaticUserVideoSection;
+  collabs: StaticUserVideoSection;
 }
 
 export function normalizeStaticUserProfile(
@@ -37,11 +75,22 @@ export function normalizeStaticUserProfile(
   const id = normalizeString(userRow.id);
   const xName = normalizeString(userRow.x_name) ?? id;
   if (!id || !xName) return null;
-  const recentVideos = Array.isArray(payload.recent_videos)
-    ? payload.recent_videos
-        .map(normalizeVideo)
-        .filter((video): video is VideoCardData => video !== null)
-    : [];
+
+  const worksPageSize =
+    normalizeCount(payload.page_size) ?? STATIC_USER_WORKS_PAGE_SIZE;
+  const works = normalizeVideoSection(
+    payload.works,
+    payload.recent_videos,
+    payload.total_works,
+    worksPageSize,
+  );
+  const collabs = normalizeVideoSection(
+    payload.collabs,
+    [],
+    0,
+    STATIC_USER_COLLABS_PAGE_SIZE,
+  );
+
   return {
     generatedAt: normalizeUnix(payload.generated_at),
     user: {
@@ -53,9 +102,54 @@ export function normalizeStaticUserProfile(
       youtube_channel_url: normalizeNullableString(userRow.youtube_channel_url),
       other_social_links: normalizeNullableString(userRow.other_social_links),
     },
-    recentVideos,
-    totalWorks: normalizeCount(payload.total_works) ?? recentVideos.length,
+    works,
+    collabs,
   };
+}
+
+export function normalizeStaticUserVideoPage(
+  payload: StaticUserVideoPagePayload,
+  fallbackPage: number,
+  fallbackPageSize: number,
+): StaticUserVideoPage | null {
+  const items = normalizeVideoList(payload.items);
+  const pageSize = normalizeCount(payload.page_size) ?? fallbackPageSize;
+  const page = normalizeCount(payload.page) ?? fallbackPage;
+  const total = normalizeCount(payload.total) ?? items.length;
+  if (page < 1 || pageSize < 1) return null;
+  return {
+    page,
+    total,
+    items,
+    pageSize,
+    generatedAt: normalizeUnix(payload.generated_at),
+  };
+}
+
+function normalizeVideoSection(
+  section: StaticUserVideoSectionPayload | undefined,
+  legacyItems: unknown,
+  legacyTotal: unknown,
+  pageSize: number,
+): StaticUserVideoSection {
+  const itemsSource = section?.items ?? legacyItems;
+  const items = normalizeVideoList(itemsSource);
+  const total =
+    normalizeCount(section?.total) ??
+    normalizeCount(legacyTotal) ??
+    items.length;
+  return {
+    total,
+    items,
+    pageSize,
+  };
+}
+
+function normalizeVideoList(value: unknown): VideoCardData[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(normalizeVideo)
+    .filter((video): video is VideoCardData => video !== null);
 }
 
 function normalizeVideo(value: unknown): VideoCardData | null {

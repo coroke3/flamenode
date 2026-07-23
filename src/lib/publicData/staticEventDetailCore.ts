@@ -3,6 +3,7 @@ import {
   normalizePublicEventVisibility,
 } from "./visibility.ts";
 import {
+  normalizeCount,
   normalizeCoercedString as normalizeNullableString,
   normalizeNullableUnix as normalizeUnix,
   normalizeTrimmedString as normalizeString,
@@ -14,14 +15,16 @@ export interface StaticEventDetailPayload {
   event?: Record<string, unknown>;
   public_staff?: unknown;
   slots_summary?: unknown;
+  slots?: unknown;
   public_videos?: unknown;
+  video_total?: unknown;
+  creator_count?: unknown;
 }
 
 export interface StaticEventDetailVideo {
   id: string;
   title: string;
-  /** UI compatibility only; public payloads must not populate this internal key. */
-  creator_x_user_id?: string;
+  creator_x_user_id: string | null;
   youtube_video_id: string | null;
   creator_display_name: string;
   creator_icon_url: string | null;
@@ -36,6 +39,8 @@ export interface StaticEventDetailEvent {
   icon_url: string | null;
   img_url: string | null;
   accent_color: string | null;
+  slot_part_gap_minutes: number | null;
+  slot_visibility_mode: "public_name" | "anonymous" | "hidden" | null;
   start_time: number | null;
   end_time: number | null;
   entry_start_time: number | null;
@@ -57,12 +62,22 @@ export interface StaticEventSlotSummary {
   count: number;
 }
 
+export interface StaticEventSlot {
+  id: string;
+  status: "available" | "reserved" | "submitted";
+  start_time: number | null;
+  sort_order: number | null;
+}
+
 export interface StaticEventDetail {
   generatedAt: number | null;
   event: StaticEventDetailEvent;
   publicStaff: StaticEventDetailStaff[];
   slotSummary: StaticEventSlotSummary[];
+  slots: StaticEventSlot[];
   publicVideos: StaticEventDetailVideo[];
+  videoTotal: number;
+  creatorCount: number;
 }
 
 export function normalizeStaticEventDetail(
@@ -88,13 +103,21 @@ export function normalizeStaticEventDetail(
         .map(normalizeSlotSummary)
         .filter((row): row is StaticEventSlotSummary => row !== null)
     : [];
+  const slots = Array.isArray(payload.slots)
+    ? payload.slots
+        .map(normalizeEventSlot)
+        .filter((row): row is StaticEventSlot => row !== null)
+    : [];
 
   return {
     generatedAt: normalizeUnix(payload.generated_at),
     event,
     publicStaff,
     slotSummary,
+    slots,
     publicVideos: videos,
+    videoTotal: normalizeCount(payload.video_total) ?? videos.length,
+    creatorCount: normalizeCount(payload.creator_count) ?? 0,
   };
 }
 
@@ -112,12 +135,24 @@ function normalizeEvent(value: unknown): StaticEventDetailEvent | null {
     icon_url: normalizeNullableString(row.icon_url),
     img_url: normalizeNullableString(row.img_url),
     accent_color: normalizeNullableString(row.accent_color),
+    slot_part_gap_minutes: normalizeCount(row.slot_part_gap_minutes),
+    slot_visibility_mode: normalizeSlotVisibilityMode(row.slot_visibility_mode),
     start_time: normalizeUnix(row.start_time),
     end_time: normalizeUnix(row.end_time),
     entry_start_time: normalizeUnix(row.entry_start_time),
     entry_end_time: normalizeUnix(row.entry_end_time),
     visibility_status: visibility,
   };
+}
+
+function normalizeSlotVisibilityMode(
+  value: unknown,
+): StaticEventDetailEvent["slot_visibility_mode"] {
+  const mode = normalizeNullableString(value);
+  if (mode === "public_name" || mode === "anonymous" || mode === "hidden") {
+    return mode;
+  }
+  return null;
 }
 
 function normalizeEventVideo(value: unknown): StaticEventDetailVideo | null {
@@ -129,10 +164,15 @@ function normalizeEventVideo(value: unknown): StaticEventDetailVideo | null {
   return {
     id,
     title,
+    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     creator_display_name:
-      normalizeString(row.creator_display_name) ?? "unknown",
-    creator_icon_url: normalizeNullableString(row.creator_icon_url),
+      normalizeString(row.creator_display_name) ??
+      normalizeString(row.display_name) ??
+      "unknown",
+    creator_icon_url:
+      normalizeNullableString(row.creator_icon_url) ??
+      normalizeNullableString(row.icon_url),
     visibility_status: "public",
     scheduled_time: normalizeUnix(row.scheduled_time),
   };
@@ -163,4 +203,20 @@ function normalizeSlotSummary(value: unknown): StaticEventSlotSummary | null {
   const count = normalizeUnix(row.c);
   if (!status || count == null || count < 0) return null;
   return { status, count };
+}
+
+function normalizeEventSlot(value: unknown): StaticEventSlot | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = normalizeString(row.id);
+  const status = normalizeString(row.status);
+  if (!id || (status !== "available" && status !== "reserved" && status !== "submitted")) {
+    return null;
+  }
+  return {
+    id,
+    status,
+    start_time: normalizeUnix(row.start_time),
+    sort_order: normalizeCount(row.sort_order),
+  };
 }

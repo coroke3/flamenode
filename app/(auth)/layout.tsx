@@ -2,12 +2,11 @@ import * as React from "react";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
+import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
-import { buildHeaderUser } from "@/lib/auth/headerUser";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import { getLayoutHeaderUser } from "@/lib/auth/layoutHeaderUser";
 import {
   buildXIdOnboardingHref,
   isXIdOnboardingExemptPath,
@@ -31,9 +30,8 @@ export default async function AuthLayout({
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
   const sessionUser = await getCurrentUser();
+  const user = await getLayoutHeaderUser();
   let pathname = "";
-  const session = await auth();
-  const user: PublicHeaderUser | null = await buildHeaderUser(session?.user);
 
   if (sessionUser && sessionUser.is_banned !== 1) {
     const hdrs = await headers();

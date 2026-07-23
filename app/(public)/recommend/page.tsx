@@ -14,6 +14,14 @@ import { Shelf } from "@/components/layout/Shelf";
 import { Icon } from "@/components/ui/Icon";
 import styles from "./page.module.css";
 import { buildPageMetadata } from "@/lib/seo";
+import {
+  canFallbackToDatabase,
+  loadStaticRecommendPage,
+} from "@/lib/publicData/loader";
+import {
+  buildRecommendViewModel,
+  type StaticRecommendPools,
+} from "@/lib/publicData/staticRecommendCore";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/recommend",
@@ -22,88 +30,6 @@ export const metadata: Metadata = buildPageMetadata({
 export const dynamic = "force-dynamic";
 
 const LIST_HREF = "/list";
-
-function pickDiverseVideos<
-  T extends {
-    id: string;
-    creator_x_user_id?: string | null;
-    primary_event_id?: string | null;
-  },
->(
-  rows: readonly T[],
-  options: { target: number; maxPerCreator?: number; maxPerEvent?: number },
-): T[] {
-  const target = Math.max(0, options.target);
-  const maxPerCreator = options.maxPerCreator ?? 3;
-  const maxPerEvent = options.maxPerEvent ?? 5;
-  const creatorCounts = new Map<string, number>();
-  const eventCounts = new Map<string, number>();
-  const out: T[] = [];
-  const skipped: T[] = [];
-  const seen = new Set<string>();
-
-  for (const row of rows) {
-    if (seen.has(row.id)) continue;
-    const creatorId = row.creator_x_user_id;
-    const eventId = row.primary_event_id;
-    if (creatorId && (creatorCounts.get(creatorId) ?? 0) >= maxPerCreator) {
-      skipped.push(row);
-      continue;
-    }
-    if (eventId && (eventCounts.get(eventId) ?? 0) >= maxPerEvent) {
-      skipped.push(row);
-      continue;
-    }
-    seen.add(row.id);
-    if (creatorId) {
-      creatorCounts.set(creatorId, (creatorCounts.get(creatorId) ?? 0) + 1);
-    }
-    if (eventId) {
-      eventCounts.set(eventId, (eventCounts.get(eventId) ?? 0) + 1);
-    }
-    out.push(row);
-    if (out.length >= target) return out;
-  }
-
-  for (const row of skipped) {
-    if (out.length >= target) break;
-    if (seen.has(row.id)) continue;
-    seen.add(row.id);
-    out.push(row);
-  }
-
-  return out;
-}
-
-function uniqueVideos<T extends { id: string }>(rows: readonly T[]): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const row of rows) {
-    if (seen.has(row.id)) continue;
-    seen.add(row.id);
-    out.push(row);
-  }
-  return out;
-}
-
-function withoutVideo<T extends { id: string }>(
-  rows: readonly T[],
-  id?: string,
-): T[] {
-  return id ? rows.filter((row) => row.id !== id) : [...rows];
-}
-
-function buildRail(
-  primary: readonly VideoCardData[],
-  fallback: readonly VideoCardData[],
-  target: number,
-  options: { maxPerCreator?: number; maxPerEvent?: number } = {},
-): VideoCardData[] {
-  return pickDiverseVideos(uniqueVideos([...primary, ...fallback]), {
-    target,
-    ...options,
-  }) as VideoCardData[];
-}
 
 interface FilterChip {
   href: string;
@@ -144,90 +70,57 @@ const FILTER_CHIPS: FilterChip[] = [
   },
 ];
 
-export default async function RecommendPage(): Promise<React.ReactElement> {
-  const data = await withDatabase(async (db) => {
+async function fetchRecommendPoolsFromDatabase(): Promise<StaticRecommendPools | null> {
+  return withDatabase(async (db) => {
     const [recommended, latest, underrated, creators] = await Promise.all([
       fetchRecommendedVideos(db, 180),
       fetchLatestVideos(db, 120),
       fetchUnderratedVideos(db, 120),
       fetchPickupCreators(db, 60),
     ]);
-    return { recommended, latest, underrated, creators };
+    return {
+      generatedAt: null,
+      recommended: recommended as VideoCardData[],
+      latest: latest as VideoCardData[],
+      underrated: underrated as VideoCardData[],
+      creators: creators.map((creator) => ({
+        id: creator.id,
+        x_name: creator.x_name,
+        icon_url: creator.icon_url,
+        video_count: Number(creator.video_count) || 0,
+        collab_count: Number(creator.collab_count) || 0,
+      })),
+    };
   });
+}
+
+export default async function RecommendPage(): Promise<React.ReactElement> {
+  const staticLoaded = await loadStaticRecommendPage();
+  const pools =
+    staticLoaded.recommend ??
+    (canFallbackToDatabase(staticLoaded.strategy)
+      ? await fetchRecommendPoolsFromDatabase()
+      : null);
 
   const {
-    recommended = [],
-    latest = [],
-    underrated: underratedPool = [],
-    creators = [],
-  } = data ?? {};
-
-  const allCandidates = uniqueVideos([
-    ...(recommended as VideoCardData[]),
-    ...(latest as VideoCardData[]),
-    ...(underratedPool as VideoCardData[]),
-  ]);
-
-  const hero = recommended[0] ?? latest[0] ?? underratedPool[0];
-  const allNonHero = withoutVideo(allCandidates, hero?.id);
-  const nonHeroRecommended = withoutVideo(recommended, hero?.id) as VideoCardData[];
-  const nonHeroLatest = withoutVideo(latest, hero?.id) as VideoCardData[];
-  const nonHeroUnderrated = withoutVideo(
-    underratedPool,
-    hero?.id,
-  ) as VideoCardData[];
-
-  const hot = buildRail(nonHeroRecommended, allNonHero, 18, {
-    maxPerCreator: 3,
-    maxPerEvent: 5,
-  });
-
-  const fresh = buildRail(nonHeroLatest, allNonHero, 18, {
-    maxPerCreator: 3,
-    maxPerEvent: 5,
-  });
-
-  const underrated = buildRail(nonHeroUnderrated, allNonHero, 14, {
-    maxPerCreator: 2,
-    maxPerEvent: 4,
-  });
-
-  const eventsRail: VideoCardData[] = [];
-  const seenEvents = new Set<string>();
-  for (const video of allNonHero) {
-    if (!video.primary_event_id || seenEvents.has(video.primary_event_id)) {
-      continue;
-    }
-    seenEvents.add(video.primary_event_id);
-    eventsRail.push(video as VideoCardData);
-    if (eventsRail.length >= 16) break;
-  }
-  if (eventsRail.length < 12) {
-    eventsRail.push(
-      ...allNonHero
-        .filter((video) => !eventsRail.some((shown) => shown.id === video.id))
-        .slice(0, 16 - eventsRail.length),
-    );
-  }
-
-  const shown = new Set(
-    [
-      hero?.id,
-      ...hot.map((video) => video.id),
-      ...fresh.map((video) => video.id),
-      ...underrated.map((video) => video.id),
-      ...eventsRail.map((video) => video.id),
-    ].filter(Boolean),
-  );
-  const morePool = allCandidates.filter((video) => !shown.has(video.id));
-  const more = pickDiverseVideos(
-    morePool.length > 0 ? morePool : allNonHero,
-    {
-      target: 36,
-      maxPerCreator: 4,
-      maxPerEvent: 8,
-    },
-  ) as VideoCardData[];
+    hero,
+    hot,
+    fresh,
+    underrated,
+    eventsRail,
+    more,
+    creators,
+  } = pools
+    ? buildRecommendViewModel(pools)
+    : {
+        hero: undefined,
+        hot: [],
+        fresh: [],
+        underrated: [],
+        eventsRail: [],
+        more: [],
+        creators: [],
+      };
 
   return (
     <div className={`fn-public-container fn-page ${styles.page}`}>
@@ -320,9 +213,7 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
                   id: creator.id,
                   x_name: creator.x_name,
                   icon_url: creator.icon_url,
-                  video_count:
-                    (Number(creator.video_count) || 0) +
-                    (Number(creator.collab_count) || 0),
+                  video_count: creator.video_count + creator.collab_count,
                 }}
               />
             ))}

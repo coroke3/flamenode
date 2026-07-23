@@ -1,22 +1,11 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Logo } from "@/components/ui/Logo";
-import { withDatabase } from "@/lib/cloudflare";
-import { countablePublicVideoCondition } from "@/lib/db/queries";
-import {
-  events as eventsTable,
-  videos as videosTable,
-  xUsers as xUsersTable,
-} from "@/lib/db/schema";
-import { publicListableEventWhere } from "@/lib/utils/eventStatus";
-import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 import { buildPageMetadata } from "@/lib/seo";
-
-export const dynamic = "force-dynamic";
+import { loadStaticTopPage } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/about",
@@ -127,42 +116,19 @@ const ENTRY_POINTS: Array<{
   },
 ];
 
-async function loadAboutStats(): Promise<AboutStats | null> {
-  try {
-    return await withDatabase(async (db) => {
-      const [videoRows, creatorRows, eventRows] = await Promise.all([
-        db
-          .select({ count: sql<number>`COUNT(*)` })
-          .from(videosTable)
-          .where(countablePublicVideoCondition),
-        db
-          .select({ count: sql<number>`COUNT(*)` })
-          .from(xUsersTable)
-          .where(publicListableXApprovalWhere(xUsersTable.approval_status)),
-        db
-          .select({ count: sql<number>`COUNT(*)` })
-          .from(eventsTable)
-          .where(publicListableEventWhere()),
-      ]);
-
-      return {
-        publicVideos: Number(videoRows[0]?.count ?? 0),
-        creators: Number(creatorRows[0]?.count ?? 0),
-        events: Number(eventRows[0]?.count ?? 0),
-      };
-    });
-  } catch (error) {
-    console.error("[about] Failed to load stats", error);
-    return null;
-  }
-}
-
 function formatCount(value: number): string {
   return value.toLocaleString("ja-JP");
 }
 
 export default async function AboutPage(): Promise<React.ReactElement> {
-  const stats = await loadAboutStats();
+  const staticTop = await loadStaticTopPage();
+  const stats: AboutStats | null = staticTop.top
+    ? {
+        publicVideos: staticTop.top.stats.publicVideos,
+        creators: staticTop.top.stats.creators,
+        events: staticTop.top.stats.publicEvents ?? staticTop.top.stats.activeEvents,
+      }
+    : null;
   const statItems = stats
     ? [
         {

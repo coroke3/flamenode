@@ -27,6 +27,9 @@ NEXT_PUBLIC_SITE_DESCRIPTION="映像作品とクリエイター、イベント�
 # メンテナンス強制 (1 で全ページを /maintenance へ。本番は Worker Runtime Variables で設定)
 MAINTENANCE_MODE="0"
 
+# 公開 JSON を R2 のみで配信 (1/true/yes で D1 を読まず static_only 相当)
+FORCE_STATIC_ONLY="0"
+
 # 管理画面: D1 スプレッドシート (/admin/spreadsheet)。本番では原則 false
 ADMIN_SPREADSHEET_ENABLED="true"
 # 1ページあたりの取得行数（未設定時は 500、上限 5000）

@@ -1,10 +1,10 @@
 import * as React from "react";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { auth } from "@/lib/auth";
-import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
+import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
-import { buildHeaderUser } from "@/lib/auth/headerUser";
+import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
+import { getLayoutHeaderUser } from "@/lib/auth/layoutHeaderUser";
 import { ConsoleShell } from "@/components/layout/ConsoleShell";
 import { ConsoleSidebar } from "@/components/layout/ConsoleSidebar";
 
@@ -18,16 +18,14 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  const session = await auth();
-  const user: PublicHeaderUser | null = session?.user
-    ? await buildHeaderUser(session.user, { includeXIds: false })
-    : null;
+  const user = await getLayoutHeaderUser(false);
 
   if (!user) redirect("/entry");
   if (user.role !== "admin") redirect("/dashboard");
 
   return (
     <div data-admin-shell data-fn-surface="admin">
+      <CostGuardBanner source="admin" />
       <PublicHeader user={user} />
       <ConsoleShell
         consoleMode="admin"

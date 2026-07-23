@@ -15,6 +15,7 @@ import {
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import { writeOperationModeKvMirror } from "@/lib/operationMode/kvMirror";
 import type { OperationMode } from "@/lib/operationMode/types";
 
 export interface CostGuardResult { ok: boolean; message?: string }
@@ -31,6 +32,28 @@ type SettingsPatch = Partial<typeof systemSettings.$inferInsert>;
 function fail(error: unknown): CostGuardResult {
   console.error("[cost-guard] atomic mutation failed", error);
   return { ok: false, message: "設定が競合したか、監査記録に失敗しました。再読み込みしてください。" };
+}
+
+async function syncOperationModeKvMirror(input: {
+  mode: OperationMode;
+  reason: string;
+  updatedAt: number;
+}): Promise<CostGuardResult> {
+  try {
+    await writeOperationModeKvMirror({
+      mode: input.mode,
+      updated_at: input.updatedAt,
+      reason: input.reason,
+    });
+    return { ok: true };
+  } catch (error) {
+    console.error("[cost-guard] KV mirror update failed", error);
+    return {
+      ok: false,
+      message:
+        "D1は更新されましたが、KV複製の更新に失敗しました。再試行してください。",
+    };
+  }
 }
 
 async function loadSettings(
@@ -85,7 +108,11 @@ export async function setCostGuardMode(formData: FormData): Promise<CostGuardRes
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_mode", patch: { operation_mode: mode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
-  if (result.ok) { revalidatePath("/admin/cost-guard"); revalidatePath("/admin"); }
+  if (!result.ok) return result;
+  const kvResult = await syncOperationModeKvMirror({ mode, reason, updatedAt: now });
+  if (!kvResult.ok) return kvResult;
+  revalidatePath("/admin/cost-guard");
+  revalidatePath("/admin");
   return result;
 }
 
@@ -102,8 +129,13 @@ export async function setMaintenanceMode(formData: FormData): Promise<CostGuardR
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const currentMode = resolveOperationMode(before);
   const nextMode: OperationMode = next === 1 ? "maintenance" : currentMode === "maintenance" ? "normal" : currentMode;
-  const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_maintenance", patch: { operation_mode: nextMode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: Math.floor(Date.now() / 1000) } });
-  if (result.ok) { revalidatePath("/admin/cost-guard"); revalidatePath("/admin"); }
+  const now = Math.floor(Date.now() / 1000);
+  const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_maintenance", patch: { operation_mode: nextMode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
+  if (!result.ok) return result;
+  const kvResult = await syncOperationModeKvMirror({ mode: nextMode, reason, updatedAt: now });
+  if (!kvResult.ok) return kvResult;
+  revalidatePath("/admin/cost-guard");
+  revalidatePath("/admin");
   return result;
 }
 

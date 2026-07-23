@@ -1,0 +1,146 @@
+import "server-only";
+
+import { and, eq, lt, sql } from "drizzle-orm";
+import type { DB } from "@/lib/db/client";
+import {
+  events as eventsTable,
+  notificationOutbox as notificationOutboxTable,
+  slots as slotsTable,
+  systemSettings,
+  videoModerationCases as videoModerationCasesTable,
+  videoYoutubeMetadata as videoYoutubeMetadataTable,
+  videos as videosTable,
+  xIdentityRequests as xIdentityRequestsTable,
+} from "@/lib/db/schema";
+import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import type { OperationMode } from "@/lib/operationMode/types";
+
+export type AdminPendingCounts = {
+  pendingVideos: number;
+  xLinkRequests: number;
+  xMergeRequests: number;
+  xMergeReverts: number;
+  notificationFailed: number;
+  notificationStuck: number;
+  youtubeFailed: number;
+  moderationOpen: number;
+  moderationOverdue: number;
+  reservedOpenSlots: number;
+};
+
+export const EMPTY_ADMIN_PENDING_COUNTS: AdminPendingCounts = {
+  pendingVideos: 0,
+  xLinkRequests: 0,
+  xMergeRequests: 0,
+  xMergeReverts: 0,
+  notificationFailed: 0,
+  notificationStuck: 0,
+  youtubeFailed: 0,
+  moderationOpen: 0,
+  moderationOverdue: 0,
+  reservedOpenSlots: 0,
+};
+
+export type AdminTopSnapshot = {
+  counts: AdminPendingCounts;
+  mode: OperationMode;
+  isMaintenance: number;
+};
+
+export async function fetchAdminTopSnapshot(
+  db: DB,
+  now = Math.floor(Date.now() / 1000),
+): Promise<AdminTopSnapshot> {
+  const processingCutoff = now - 15 * 60;
+
+  const [
+    pendingVideos,
+    xIdentityCounts,
+    notificationCounts,
+    youtubeFailed,
+    moderationCounts,
+    reservedOpenSlots,
+    sys,
+  ] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .where(eq(videosTable.visibility_status, "pending")),
+    db
+      .select({
+        xLinkRequests: sql<number>`SUM(CASE
+          WHEN ${xIdentityRequestsTable.status} = 'pending'
+            AND ${xIdentityRequestsTable.request_type} IN ('new_link','existing_link','alias')
+          THEN 1 ELSE 0 END)`,
+        xMergeRequests: sql<number>`SUM(CASE
+          WHEN ${xIdentityRequestsTable.status} = 'pending'
+            AND ${xIdentityRequestsTable.request_type} = 'merge'
+          THEN 1 ELSE 0 END)`,
+        xMergeReverts: sql<number>`SUM(CASE
+          WHEN ${xIdentityRequestsTable.status} = 'pending'
+            AND ${xIdentityRequestsTable.request_type} = 'revert_merge'
+          THEN 1 ELSE 0 END)`,
+      })
+      .from(xIdentityRequestsTable),
+    db
+      .select({
+        notificationFailed: sql<number>`SUM(CASE
+          WHEN ${notificationOutboxTable.status} = 'failed' THEN 1 ELSE 0 END)`,
+        notificationStuck: sql<number>`SUM(CASE
+          WHEN ${notificationOutboxTable.status} = 'processing'
+            AND ${notificationOutboxTable.processing_started_at} < ${processingCutoff}
+          THEN 1 ELSE 0 END)`,
+      })
+      .from(notificationOutboxTable),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videoYoutubeMetadataTable)
+      .where(eq(videoYoutubeMetadataTable.sync_status, "failed")),
+    db
+      .select({
+        moderationOpen: sql<number>`SUM(CASE
+          WHEN ${videoModerationCasesTable.status} = 'open' THEN 1 ELSE 0 END)`,
+        moderationOverdue: sql<number>`SUM(CASE
+          WHEN ${videoModerationCasesTable.status} = 'open'
+            AND ${videoModerationCasesTable.due_at} < ${now}
+          THEN 1 ELSE 0 END)`,
+      })
+      .from(videoModerationCasesTable),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(slotsTable)
+      .leftJoin(eventsTable, eq(eventsTable.id, slotsTable.event_id))
+      .where(
+        and(
+          eq(slotsTable.status, "reserved"),
+          eq(eventsTable.visibility_status, "public"),
+          sql`(${eventsTable.entry_start_time} IS NOT NULL OR ${eventsTable.entry_end_time} IS NOT NULL)`,
+          sql`(${eventsTable.entry_start_time} IS NULL OR ${eventsTable.entry_start_time} <= ${now})`,
+          sql`(${eventsTable.entry_end_time} IS NULL OR ${eventsTable.entry_end_time} >= ${now})`,
+          sql`(
+            COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) IS NULL
+            OR COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) > ${now}
+          )`,
+        ),
+      ),
+    db.select().from(systemSettings).where(eq(systemSettings.id, "default")).limit(1),
+  ]);
+
+  const mode = resolveOperationMode(sys[0]);
+  return {
+    counts: {
+      pendingVideos: Number(pendingVideos[0]?.c ?? 0),
+      xLinkRequests: Number(xIdentityCounts[0]?.xLinkRequests ?? 0),
+      xMergeRequests: Number(xIdentityCounts[0]?.xMergeRequests ?? 0),
+      xMergeReverts: Number(xIdentityCounts[0]?.xMergeReverts ?? 0),
+      notificationFailed: Number(notificationCounts[0]?.notificationFailed ?? 0),
+      notificationStuck: Number(notificationCounts[0]?.notificationStuck ?? 0),
+      youtubeFailed: Number(youtubeFailed[0]?.c ?? 0),
+      moderationOpen: Number(moderationCounts[0]?.moderationOpen ?? 0),
+      moderationOverdue: Number(moderationCounts[0]?.moderationOverdue ?? 0),
+      reservedOpenSlots: Number(reservedOpenSlots[0]?.c ?? 0),
+    },
+    mode,
+    isMaintenance: mode === "maintenance" ? 1 : 0,
+  };
+}

@@ -8,7 +8,7 @@ import { requireSession } from "@/lib/auth/guard";
 import {
   canManageXIdLinkRequests,
   getEditableEventIds,
-  getManageStaffRoleForEvent,
+  getManageStaffRolesForEvents,
 } from "@/lib/auth/ownership";
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import {
@@ -144,18 +144,9 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
     role: user.role ?? null,
   });
 
-  const staffRoleByEvent = new Map<string, "representative" | "editor" | null>();
-  if (!isAdmin && eventIds.length > 0) {
-    const roles = await Promise.all(
-      eventIds.map(async (eventId) => ({
-        eventId,
-        role: await getManageStaffRoleForEvent(db, user.id, eventId),
-      })),
-    );
-    for (const { eventId, role } of roles) {
-      staffRoleByEvent.set(eventId, role);
-    }
-  }
+  const staffRoleByEvent = !isAdmin && eventIds.length > 0
+    ? await getManageStaffRolesForEvents(db, user.id, eventIds)
+    : new Map<string, "representative" | "editor">();
 
   if (eventIds.length === 0) {
     return (

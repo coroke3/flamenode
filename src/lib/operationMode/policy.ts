@@ -18,11 +18,14 @@ export function isStaticRebuildEnabled(mode: OperationMode): boolean {
   return mode !== "maintenance";
 }
 
+/** Workers Free CPU 10ms 制約のため、json-generator は常に 1 target/run。 */
+export const STATIC_REBUILD_ITEMS_PER_RUN = 1;
+
 export function getStaticRebuildPolicy(mode: OperationMode): StaticRebuildPolicy {
   switch (mode) {
     case "normal":
       return {
-        maxItemsPerRun: 20,
+        maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
         highPriorityOnly: false,
         allowedTargetTypes: null,
         skipTargetTypesUnlessHighPriority: [],
@@ -30,7 +33,7 @@ export function getStaticRebuildPolicy(mode: OperationMode): StaticRebuildPolicy
       };
     case "economy":
       return {
-        maxItemsPerRun: 5,
+        maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
         highPriorityOnly: false,
         allowedTargetTypes: null,
         skipTargetTypesUnlessHighPriority: ["search_index", "list_popular"],
@@ -38,7 +41,7 @@ export function getStaticRebuildPolicy(mode: OperationMode): StaticRebuildPolicy
       };
     case "read_only":
       return {
-        maxItemsPerRun: 20,
+        maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
         highPriorityOnly: false,
         allowedTargetTypes: ["event", "video", "user"],
         skipTargetTypesUnlessHighPriority: [],
@@ -46,7 +49,7 @@ export function getStaticRebuildPolicy(mode: OperationMode): StaticRebuildPolicy
       };
     case "static_only":
       return {
-        maxItemsPerRun: 20,
+        maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
         highPriorityOnly: true,
         allowedTargetTypes: null,
         skipTargetTypesUnlessHighPriority: [],

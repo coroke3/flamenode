@@ -8,6 +8,7 @@ import { enqueueStaticRebuildAdmin, retryAllFailedStaticRebuild } from "@/lib/ac
 import { StaticRebuildQueuePanel } from "@/components/admin/StaticRebuildQueuePanel";
 import { staticRebuildStatusLabel, staticRebuildTargetIdHint, staticRebuildTargetLabel } from "@/lib/admin/staticRebuildLabels";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import { getStaticRebuildPolicy } from "@/lib/operationMode/policy";
 import { OPERATION_MODE_DESCRIPTIONS, OPERATION_MODE_LABELS } from "@/lib/operationMode/types";
 import { STATIC_REBUILD_TARGET_TYPES } from "@/lib/staticRebuild/types";
 
@@ -56,6 +57,8 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
     operationMode = resolveOperationMode(settings ?? null);
   }
 
+  const rebuildPolicy = getStaticRebuildPolicy(operationMode);
+
   return (
     <div>
       <AdminPageHeader
@@ -77,7 +80,8 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
         <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
           {OPERATION_MODE_DESCRIPTIONS[operationMode]}
           {" "}
-          static_only / economy では json-generator の処理件数や対象種別が制限される場合があります。
+          content-jobs は 15 分ごとに最大 {rebuildPolicy.maxItemsPerRun} target を処理します。
+          economy では search_index / list_popular は high 優先度のみ処理されます。
         </p>
       </section>
 

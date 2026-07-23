@@ -15,6 +15,17 @@ import {
 } from "@/lib/db/queries";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 import { buildPageMetadata } from "@/lib/seo";
+import {
+  canFallbackToDatabase,
+  loadStaticUsersIndex,
+  type StaticUsersIndexEntry,
+} from "@/lib/publicData/loader";
+import {
+  filterUsersIndexItems,
+  paginateUsersIndexItems,
+  sortUsersIndexItems,
+  type UsersIndexSort,
+} from "@/lib/publicData/staticUsersIndexCore";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/user",
@@ -31,22 +42,34 @@ interface SearchParams {
 
 const PAGE_SIZE = 48;
 
-export default async function UserListPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}): Promise<React.ReactElement> {
-  const { q = "", sort = "score", page = "1" } = await searchParams;
-  const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
+type CreatorRow = {
+  id: string;
+  x_name: string;
+  icon_url: string | null;
+  own_count: number;
+  collab_count: number;
+  total_count: number;
+};
 
-  const creators =
+function parseUsersIndexSort(value: string | undefined): UsersIndexSort {
+  return value === "name" || value === "works" ? value : "score";
+}
+
+function mapIndexEntry(entry: StaticUsersIndexEntry): CreatorRow {
+  return {
+    id: entry.x_id,
+    x_name: entry.x_name,
+    icon_url: entry.icon_url,
+    own_count: entry.personal_count,
+    collab_count: entry.collab_count,
+    total_count: entry.total_works,
+  };
+}
+
+async function fetchCreatorsFromDatabase(): Promise<CreatorRow[]> {
+  return (
     (await withDatabase(async (db) => {
-      const keyword = q.trim();
       const filters = [publicListableXApprovalWhere()];
-      if (keyword) {
-        const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
-        filters.push(or(like(xUsers.x_name, term), like(xUsers.id, term))!);
-      }
       const countablePublicVideoAliasV = sql`
         v.visibility_status = 'public'
         AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
@@ -109,23 +132,6 @@ export default async function UserListPage({
         .from(xUsers)
         .where(and(...filters)!);
 
-      const orphanFilters = [
-        eq(videos.visibility_status, "public"),
-        excludePvsfSummaryVideos(),
-        ne(videos.creator_x_user_id, "anonymous"),
-        isNull(xUsers.id),
-      ];
-      if (keyword) {
-        const term = `%${keyword.replace(/[%_]/g, (m) => `\\${m}`)}%`;
-        orphanFilters.push(
-          or(
-            like(videos.creator_display_name, term),
-            like(videos.creator_x_user_id, term),
-            like(videos.title, term),
-          )!,
-        );
-      }
-
       const orphanRows = await db
         .select({
           id: videos.creator_x_user_id,
@@ -158,38 +164,87 @@ export default async function UserListPage({
         })
         .from(videos)
         .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-        .where(and(...orphanFilters)!)
+        .where(
+          and(
+            eq(videos.visibility_status, "public"),
+            excludePvsfSummaryVideos(),
+            ne(videos.creator_x_user_id, "anonymous"),
+            isNull(xUsers.id),
+          )!,
+        )
         .groupBy(videos.creator_x_user_id);
 
       return [...rows, ...orphanRows]
         .map((row) => ({
-          ...row,
+          id: String(row.id ?? ""),
+          x_name: row.x_name,
+          icon_url: row.icon_url,
           own_count: Number(row.own_count) || 0,
           collab_count: Number(row.collab_count) || 0,
           total_count: Number(row.total_count) || 0,
+          profile_text: row.profile_text,
+          youtube_channel_url: row.youtube_channel_url,
         }))
         .filter(
-          (row) => row.total_count > 0 || row.profile_text || row.youtube_channel_url,
+          (row) =>
+            row.id &&
+            (row.total_count > 0 || row.profile_text || row.youtube_channel_url),
         );
-    })) ?? [];
+    })) ?? []
+  );
+}
 
-  creators.sort((a, b) => {
-    if (sort === "name") return a.x_name.localeCompare(b.x_name, "ja");
-    if (sort === "works") {
-      return b.total_count - a.total_count || a.x_name.localeCompare(b.x_name, "ja");
+export default async function UserListPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}): Promise<React.ReactElement> {
+  const { q = "", sort = "score", page = "1" } = await searchParams;
+  const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
+  const sortKey = parseUsersIndexSort(sort);
+  const staticLoaded = await loadStaticUsersIndex();
+
+  let creators: CreatorRow[];
+  if (staticLoaded.index) {
+    const filtered = filterUsersIndexItems(staticLoaded.index.items, q);
+    const sorted = sortUsersIndexItems(filtered, sortKey);
+    creators = sorted.map(mapIndexEntry);
+  } else if (canFallbackToDatabase(staticLoaded.strategy)) {
+    creators = await fetchCreatorsFromDatabase();
+    if (q.trim()) {
+      const keyword = q.trim().toLocaleLowerCase();
+      creators = creators.filter(
+        (creator) =>
+          creator.x_name.toLocaleLowerCase().includes(keyword) ||
+          creator.id.toLocaleLowerCase().includes(keyword),
+      );
     }
-    return (
-      b.total_count * 2 +
-      b.own_count -
-      (a.total_count * 2 + a.own_count) ||
-      a.x_name.localeCompare(b.x_name, "ja")
-    );
-  });
+    creators.sort((a, b) => {
+      if (sortKey === "name") {
+        return a.x_name.localeCompare(b.x_name, "ja");
+      }
+      if (sortKey === "works") {
+        return (
+          b.total_count - a.total_count ||
+          a.x_name.localeCompare(b.x_name, "ja")
+        );
+      }
+      return (
+        b.total_count * 2 +
+        b.own_count -
+        (a.total_count * 2 + a.own_count) ||
+        a.x_name.localeCompare(b.x_name, "ja")
+      );
+    });
+  } else {
+    creators = [];
+  }
 
-  const total = creators.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const safePage = Math.min(pageNum, totalPages);
-  const current = creators.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const { total, totalPages, safePage, current } = paginateUsersIndexItems(
+    creators,
+    pageNum,
+    PAGE_SIZE,
+  );
 
   const params = (override: Partial<SearchParams> = {}) => {
     const p = new URLSearchParams();

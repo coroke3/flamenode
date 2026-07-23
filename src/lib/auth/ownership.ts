@@ -160,20 +160,40 @@ export async function getManageStaffRoleForEvent(
   userId: string,
   eventId: string,
 ): Promise<"representative" | "editor" | null> {
+  const roles = await getManageStaffRolesForEvents(db, userId, [eventId]);
+  return roles.get(eventId) ?? null;
+}
+
+/** 担当イベントごとの表示用ロールを単一読取で取得する。 */
+export async function getManageStaffRolesForEvents(
+  db: DB,
+  userId: string,
+  eventIds: string[],
+): Promise<Map<string, "representative" | "editor">> {
+  const roles = new Map<string, "representative" | "editor">();
+  if (eventIds.length === 0) return roles;
   const xIds = await getApprovedXIds(db, userId);
-  if (xIds.length === 0) return null;
-  const staff = (
-    await db
-      .select(staffPermissionSelect)
-      .from(eventStaff)
-      .where(
-        and(
-          eq(eventStaff.event_id, eventId),
-          inArray(eventStaff.x_user_id, xIds),
-        )!,
-      )
-  ).find(staffRowHasAnyPermissions);
-  return staff ? getManageStaffRole(staff) : null;
+  if (xIds.length === 0) return roles;
+  const rows = await db
+    .select({
+      event_id: eventStaff.event_id,
+      ...staffPermissionSelect,
+    })
+    .from(eventStaff)
+    .where(
+      and(
+        inArray(eventStaff.event_id, eventIds),
+        inArray(eventStaff.x_user_id, xIds),
+      )!,
+    );
+  for (const row of rows) {
+    if (!staffRowHasAnyPermissions(row)) continue;
+    if (roles.has(row.event_id)) continue;
+    const role = getManageStaffRole(row);
+    if (!role) continue;
+    roles.set(row.event_id, role);
+  }
+  return roles;
 }
 
 /** 担当イベントに紐づく運営用 X ID 一覧。 */

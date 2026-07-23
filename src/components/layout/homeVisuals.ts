@@ -16,6 +16,7 @@ export type HomeStats = {
   publicVideos: number;
   activeEvents: number;
   creators: number;
+  publicEvents?: number;
 };
 
 export function formatHomeNumber(value: number): string {

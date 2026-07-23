@@ -20,6 +20,8 @@ test("all manual CostGuard control writes use the dedicated control guard and at
   assert.doesNotMatch(action, /await db\.(?:insert|update|delete)/);
   assert.doesNotMatch(action, /setAutoCostGuard|setCostGuardAdvancedSettings/);
   assert.match(action, /z\.enum\(\["normal", "economy", "read_only", "static_only"\]\)/);
+  assert.match(action, /writeOperationModeKvMirror/);
+  assert.match(action, /KV複製の更新に失敗/);
   assert.doesNotMatch(normalUi, /\["maintenance", "メンテナンス"\]/);
 });
 

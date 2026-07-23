@@ -1,49 +1,18 @@
 import * as React from "react";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { PublicHeader, type PublicHeaderUser } from "@/components/layout/PublicHeader";
+import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
-import { buildHeaderUser } from "@/lib/auth/headerUser";
-import { getCurrentUser } from "@/lib/auth/currentUser";
-import {
-  buildXIdOnboardingHref,
-  isXIdOnboardingExemptPath,
-  userNeedsXIdOnboarding,
-} from "@/lib/auth/xidOnboarding";
 
-export const dynamic = "force-dynamic";
-
-export default async function PublicLayout({
+export default function PublicLayout({
   children,
 }: {
   children: React.ReactNode;
-}): Promise<React.ReactElement> {
-  const sessionUser = await getCurrentUser();
-  const session = await auth();
-  const headerUser: PublicHeaderUser | null = await buildHeaderUser(session?.user);
-
-  if (sessionUser && sessionUser.is_banned !== 1) {
-    const hdrs = await headers();
-    const pathname = hdrs.get("x-pathname") ?? "";
-    const search = hdrs.get("x-search") ?? "";
-    if (pathname && !isXIdOnboardingExemptPath(pathname)) {
-      const needsOnboarding = await userNeedsXIdOnboarding(
-        sessionUser.id,
-        sessionUser.role,
-      );
-      if (needsOnboarding) {
-        const returnTo = search ? `${pathname}?${search}` : pathname;
-        redirect(buildXIdOnboardingHref(returnTo));
-      }
-    }
-  }
-
+}): React.ReactElement {
   return (
     <div data-fn-surface="public" className="fn-public-shell fn-app">
+      {/* source省略 = KV/envのみ。D1のsystem_settingsは読まない。 */}
       <CostGuardBanner />
-      <PublicHeader user={headerUser} />
+      <PublicHeader />
       <main className="fn-main flex-1 w-full">{children}</main>
       <PublicFooter />
     </div>

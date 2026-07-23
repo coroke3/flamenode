@@ -29,6 +29,10 @@ const [
   xLinkRequestsPage,
   manageXLinkRequestsPage,
   enrichXLinkPendingRows,
+  adminTopPage,
+  adminPendingCounts,
+  manageTopPage,
+  ownership,
 ] = await Promise.all([
   readFile(new URL("./securityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("./spreadsheet/discovery.ts", import.meta.url), "utf8"),
@@ -62,6 +66,10 @@ const [
   readFile(new URL("../../../app/(admin)/admin/x-link-requests/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(manage)/manage/x-link-requests/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("./enrichXLinkPendingRows.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(admin)/admin/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("./adminPendingCounts.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(manage)/manage/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../auth/ownership.ts", import.meta.url), "utf8"),
 ]);
 
 test("セキュリティ検査はLIMIT後の配列長ではなく全件数を返す", () => {
@@ -113,10 +121,11 @@ test("ライブAPIはイベント存在確認を各データ読取へ統合す�
   assert.match(liveApi, /eq\(videos\.visibility_status, "public"\)/);
 });
 
-test("公開静的JSONは同時読取を集約しR2とenqueue障害を分離する", () => {
+test("公開静的JSONは同時読取を集約しR2を先に読む", () => {
   assert.match(publicDataLoader, /staticReadInFlight/);
   assert.match(publicDataLoader, /read_failed/);
   assert.match(publicDataLoader, /enqueue_failed/);
+  assert.match(publicDataLoader, /resolvePublicOperationMode\(\{ allowD1: false \}\)/);
   assert.match(publicDataLoader, /if \(payload !== null\)/);
 });
 
@@ -210,4 +219,22 @@ test("X ID申請一覧は相関サブクエリを使わずpendingを上限付き
   }
   assert.match(enrichXLinkPendingRows, /D1_MAX_BIND_PARAMETERS/);
   assert.match(enrichXLinkPendingRows, /inArray\(xUsers\.id, chunk\)/);
+});
+
+test("管理トップは同一テーブルのCOUNTを条件付き集計へ統合する", () => {
+  assert.match(adminTopPage, /fetchAdminTopSnapshot/);
+  assert.doesNotMatch(adminTopPage, /Promise\.all/);
+  assert.match(adminPendingCounts, /xLinkRequests: sql<number>`SUM\(CASE/);
+  assert.match(adminPendingCounts, /notificationFailed: sql<number>`SUM\(CASE/);
+  assert.match(adminPendingCounts, /moderationOpen: sql<number>`SUM\(CASE/);
+  assert.equal((adminPendingCounts.match(/\.from\(xIdentityRequestsTable\)/g) ?? []).length, 1);
+  assert.equal((adminPendingCounts.match(/\.from\(notificationOutboxTable\)/g) ?? []).length, 1);
+  assert.equal((adminPendingCounts.match(/\.from\(videoModerationCasesTable\)/g) ?? []).length, 1);
+});
+
+test("運営トップは担当イベントのスタッフロール取得をバッチ化する", () => {
+  assert.match(manageTopPage, /getManageStaffRolesForEvents/);
+  assert.doesNotMatch(manageTopPage, /getManageStaffRoleForEvent/);
+  assert.match(ownership, /export async function getManageStaffRolesForEvents/);
+  assert.match(ownership, /getManageStaffRoleForEvent[\s\S]*getManageStaffRolesForEvents/);
 });
