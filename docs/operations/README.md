@@ -38,6 +38,7 @@ WebはCloudflare Workers + OpenNext + Workers Static Assets、背景処理はCro
 | R2静的JSON、公開DTO | [static-delivery.md](static-delivery.md) |
 | 障害の一次対応 | [incident-response.md](incident-response.md) |
 | X ID統合 | [x-id-merge.md](x-id-merge.md) |
+| 認証・規約同意・post-commit 信頼性 | [auth-terms-postcommit-reliability.md](auth-terms-postcommit-reliability.md) |
 | UI受入基準 | [ui-acceptance.md](ui-acceptance.md) |
 | 外部API上限 | [external-api-limits.md](external-api-limits.md) |
 

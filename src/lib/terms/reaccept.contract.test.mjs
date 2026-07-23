@@ -27,12 +27,18 @@ test("current user, admin preview, and broadcast share the dynamic predicate", (
   assert.doesNotMatch(currentUser, /terms_reaccept_required: users\.terms_reaccept_required/);
 });
 
-test("terms acceptance uses one CAS audit batch with complete snapshots", () => {
+test("terms acceptance uses scoped CAS audit batch without revalidatePath", () => {
   assert.match(accept, /mutateWithAudit\(db/);
-  assert.match(accept, /expectedMutationChanges: \[1, 1\]/);
+  assert.match(accept, /expectedMutationChanges/);
   assert.match(accept, /table_name: "user_tos_consents"/);
   assert.match(accept, /table_name: "user"/);
   assert.match(accept, /expectedRowCondition/);
+  assert.match(accept, /accepted_terms_version_id: userBefore\.accepted_terms_version_id/);
+  assert.match(accept, /is_tos_accepted: userBefore\.is_tos_accepted/);
+  assert.match(accept, /terms_reaccept_required: userBefore\.terms_reaccept_required/);
+  assert.doesNotMatch(accept, /revalidatePath\(/);
+  assert.match(accept, /unstable_rethrow\(error\)/);
+  assert.match(accept, /kind: "already_accepted"/);
   assert.match(accept, /before: \{ \.\.\.userBefore \}/);
   assert.match(accept, /after: \{ \.\.\.userAfter \}/);
 });

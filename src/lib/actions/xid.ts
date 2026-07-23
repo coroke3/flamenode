@@ -46,6 +46,8 @@ import {
   reconcilePendingXIdRequest,
 } from "@/lib/actions/xidRequestReliabilityCore";
 import { enqueueAfterXUserPublicUpdate } from "@/lib/staticRebuild/hooks";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -201,6 +203,17 @@ function revalidateXIdRequestPaths(): void {
   revalidatePath("/onboarding");
 }
 
+async function runXIdPostCommit(
+  flow: string,
+  taskName: string,
+  run: () => void | Promise<void>,
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    [{ name: taskName, run: async () => { await run(); } }],
+  );
+}
+
 export async function setActiveXId(formData: FormData): Promise<XIdActionResult> {
   const context = await getXIdWriteContext();
   if (!context.ok) return context.result;
@@ -249,7 +262,9 @@ export async function setActiveXId(formData: FormData): Promise<XIdActionResult>
     ],
   });
 
-  revalidateXIdentityPaths(xUserId);
+  await runXIdPostCommit("xid.setActiveXId", "revalidate", () => {
+    revalidateXIdentityPaths(xUserId);
+  });
   return { ok: true, message: "アクティブ X ID を切り替えました。" };
 }
 
@@ -422,16 +437,21 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
         audits,
         notificationWakeSource: webhookNotification ? "web" : undefined,
       });
-      revalidateXIdRequestPaths();
+      await runXIdPostCommit("xid.requestXIdLink", "revalidate", () => {
+        revalidateXIdRequestPaths();
+      });
       return { ok: true, message: "X ID 申請を受け付けました。" };
     } catch (error) {
+      unstable_rethrow(error);
       try {
         const reconciliation = await reconcileRequestPersistence(
           db,
           requestIdentity,
         );
         if (reconciliation.outcome === "accepted") {
-          revalidateXIdRequestPaths();
+          await runXIdPostCommit("xid.requestXIdLink", "revalidate", () => {
+            revalidateXIdRequestPaths();
+          });
           return { ok: true, message: "X ID 申請を受け付けました。" };
         }
         if (reconciliation.outcome === "limit") {
@@ -526,9 +546,12 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await mutateWithAudit(db, mutationInput);
-      revalidateXIdRequestPaths();
+      await runXIdPostCommit("xid.cancelXIdLinkRequest", "revalidate", () => {
+        revalidateXIdRequestPaths();
+      });
       return { ok: true, message: "申請を取り下げました。" };
     } catch (error) {
+      unstable_rethrow(error);
       try {
         const current = (
           await db
@@ -545,7 +568,11 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
         }
         if (current.status !== "pending") {
           const result = processedXIdRequestMessage(current.status, "cancel");
-          if (result.ok) revalidateXIdRequestPaths();
+          if (result.ok) {
+            await runXIdPostCommit("xid.cancelXIdLinkRequest", "revalidate", () => {
+              revalidateXIdRequestPaths();
+            });
+          }
           return result;
         }
       } catch (reconciliationError) {

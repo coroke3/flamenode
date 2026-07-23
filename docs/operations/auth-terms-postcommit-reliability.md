@@ -1,0 +1,37 @@
+# Auth / Terms / Post-commit 信頼性修正 — 運用メモ
+
+> Status: Active
+> Last verified: 2026-07-23
+> Source of truth: `src/lib/auth/`, `src/lib/actions/terms.ts`, `src/lib/audit/postCommit.ts`, workers
+
+## 変更概要
+
+- Discord OAuth 後は `/auth/complete` を経由してから目的画面へ遷移する
+- Auth layout は `getRequestAuthContext` で認証取得を1回に集約する
+- 規約同意は scoped CAS + 冪等 Commit → redirect（`revalidatePath` なし）
+- Commit 成功後の revalidate / Queue 派生は `runPostCommitBestEffort`
+- Notification: Discord 送信成功後の `markSent` 失敗は再送せず lease 回復で `sent` 化
+- Static rebuild: R2 成功後の `markDone` 失敗は再生成せず回復
+- Legacy import: D1 成功・R2 progress 失敗は `committed_progress_pending`
+
+## Cloudflare 手動確認手順
+
+1. Cookie を削除してログアウト状態にする
+2. `/entry` から Discord ログイン
+3. callback 後の最初の URL が `/auth/complete?next=...` であること
+4. 直後の画面でヘッダーがログイン済みであること（汎用エラーなし）
+5. `/rules` で規約同意 → 正常 redirect、再読み込みなしで同意済み
+6. consent が同一規約で1件であること（重複 INSERT なし）
+7. 同意ボタン連打が安全であること
+8. Active X ID 切替が即時反映すること
+9. （可能なら）Queue/R2 障害時でも保存成功表示になること
+
+## ロールバック
+
+1. 作業ブランチの PR を merge 済みなら、直前の `main` tip へ revert PR を作成する
+2. Remote D1 migration は本変更では追加していないため、DB rollback は不要
+3. Worker は notification / json-generator の sentinel `last_error` / `error` 文字列に依存する。旧 Worker へ戻す場合、残存 sentinel 行は lease 回復で `pending` に戻る可能性があるため、必要なら手動で `sent` / `done` へ更新する
+
+## Remote migration
+
+今回の変更に Remote D1 migration は含まれない。

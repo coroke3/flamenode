@@ -81,13 +81,14 @@ test("公開layoutはserver authを呼ばず静的シェルとして描画する
   assert.match(publicLayout, /<PublicHeader\s*\/>/);
 });
 
-test("認証layoutは動的renderを明示しNext.js制御フロー例外を握り潰さない", () => {
+test("認証layoutは動的renderを明示しRequestAuthContextへ集約する", () => {
   assert.match(currentUser, /unstable_rethrow\(error\)/);
   const [authLayout, manageLayout, adminLayout] = authLayouts;
-  assert.match(authLayout, /await getLayoutHeaderUser/);
+  assert.match(authLayout, /getLayoutAuthSurface|getRequestAuthContext/);
   assert.doesNotMatch(authLayout, /await auth\(/);
   assert.doesNotMatch(authLayout, /await buildHeaderUser/);
-  assert.match(authLayout, /await getCurrentUser/);
+  assert.doesNotMatch(authLayout, /await getLayoutHeaderUser/);
+  assert.doesNotMatch(authLayout, /await getCurrentUser/);
   assert.match(manageLayout, /await getLayoutHeaderUser/);
   assert.doesNotMatch(manageLayout, /await auth\(/);
   assert.match(manageLayout, /await getCurrentUser/);

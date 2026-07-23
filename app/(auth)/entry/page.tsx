@@ -14,7 +14,7 @@ import {
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
-import { sanitizeNextPath } from "#utils/next";
+import { firstSearchParamValue, sanitizeNextPath } from "#utils/next";
 import {
   entryLoginRedirectTo,
   getOnboardingState,
@@ -24,6 +24,21 @@ import {
 
 export const metadata: Metadata = { title: "エントリー / 投稿" };
 export const dynamic = "force-dynamic";
+
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  AccessDenied: "Discord認証がキャンセルされました",
+  OAuthCallbackError: "Discord認証を完了できませんでした",
+  AccountNotLinked: "アカウントの紐付け状態を確認してください",
+  Configuration: "認証設定に問題があります",
+  auth_temporarily_unavailable: "認証基盤が一時的に利用できません",
+  Verification: "認証リンクの検証に失敗しました",
+  Default: "認証を完了できませんでした",
+};
+
+function authErrorMessage(code: string): string | null {
+  if (!code) return null;
+  return AUTH_ERROR_MESSAGES[code] ?? AUTH_ERROR_MESSAGES.Default;
+}
 
 type ReservedSlot = {
   id: string;
@@ -45,10 +60,11 @@ type ReservedSlot = {
 export default async function EntryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string }>;
+  searchParams?: Promise<{ next?: string; error?: string }>;
 }): Promise<React.ReactElement> {
   const params = await searchParams;
   const next = sanitizeNextPath(params?.next, "/entry");
+  const authError = authErrorMessage(firstSearchParamValue(params?.error));
   const sessionUser = await getCurrentUser();
   const isLoggedIn = Boolean(sessionUser?.id);
   const db = getDatabase();
@@ -163,6 +179,11 @@ export default async function EntryPage({
             <p className="fn-jp fn-entry-status-lead">
               参加・投稿にはログインと初期設定が必要です。
             </p>
+            {authError ? (
+              <p className="fn-jp fn-entry-status-lead" role="alert">
+                {authError}
+              </p>
+            ) : null}
             <form
               action={async () => {
                 "use server";

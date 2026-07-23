@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
@@ -57,6 +58,7 @@ async function ensureEventManager(eventId: string): Promise<
       "event.members",
     );
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       result: {
@@ -307,6 +309,7 @@ export async function upsertEventStaffMember(
       });
     }
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message: error instanceof Error ? error.message : "スタッフを保存できません。",
@@ -466,6 +469,7 @@ export async function bulkUpsertEventStaffFromCsv(
       },
     });
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message: error instanceof Error ? error.message : "CSV保存に失敗しました。",
@@ -507,6 +511,7 @@ export async function removeEventStaffMember(
       context: "event-staff-admin",
     });
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message: error instanceof Error ? error.message : "スタッフを削除できません。",
@@ -556,6 +561,7 @@ export async function transferEventOwnershipAction(
       selfConfirmText: data.self_confirm_text,
     });
   } catch (error) {
+    unstable_rethrow(error);
     return {
       ok: false,
       message: error instanceof Error ? error.message : "代表者を移譲できません。",

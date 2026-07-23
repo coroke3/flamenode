@@ -3,11 +3,13 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   deliver,
+  DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
   MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN,
   MAX_DISCORD_DM_KV_WRITES_PER_RUN,
   MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
   MAX_NOTIFICATION_BATCH,
   processNotificationQueue,
+  recoverNotificationOutboxExpiredLeases,
 } from "./dispatch.ts";
 
 function okJson(value = {}, headers = {}) {
@@ -375,7 +377,7 @@ test("D1 selection中のabortはitem claimとDiscord送信を開始しない", a
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal }),
+      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
       (error) => error === reason,
     );
     assert.equal(claimWrites, 0);
@@ -423,7 +425,7 @@ test("claim D1 write中のabortはDiscord送信とfailure更新へ進まない",
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal }),
+      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
       (error) => error === reason,
     );
     assert.equal(fetchCalls, 0);
@@ -475,7 +477,7 @@ test("Discord fetch中のAbortErrorを再送出しretry/dead-letterへ変換し�
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal }),
+      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
       (error) => error === reason,
     );
     assert.equal(fetchCalls, 1);
@@ -536,7 +538,7 @@ test("item完了D1境界でabortしたら次itemをclaimしない", async () => 
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal }),
+      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
       (error) => error === reason,
     );
     assert.equal(claimWrites, 1);
@@ -545,5 +547,152 @@ test("item完了D1境界でabortしたら次itemをclaimしない", async () => 
     assert.equal(failureWrites, 0);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+function notificationQueueEnv(row, handlers = {}) {
+  const state = {
+    status: "pending",
+    lease_token: null,
+    lease_expires_at: null,
+    last_error: null,
+    processed_at: null,
+    ...row,
+  };
+  let markSentAttempts = 0;
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  const env = {
+    DISCORD_WEBHOOK_URL: "https://example.test/webhook",
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            return {
+              async run() {
+                if (sql.includes("SET status = 'processing'")) {
+                  if (state.status !== "pending") return { meta: { changes: 0 } };
+                  state.status = "processing";
+                  state.lease_token = args[1];
+                  state.lease_expires_at = args[2];
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET status = 'sent'")) {
+                  if (sql.includes("AND last_error = ?2")) {
+                    if (args[1] !== DELIVERY_SUCCEEDED_AWAITING_SENT_MARK) {
+                      return { meta: { changes: 0 } };
+                    }
+                    state.status = "sent";
+                    state.lease_token = null;
+                    state.lease_expires_at = null;
+                    state.last_error = null;
+                    state.processed_at = args[0];
+                    return { meta: { changes: 1 } };
+                  }
+                  markSentAttempts += 1;
+                  if (handlers.markSentFailCount != null && markSentAttempts <= handlers.markSentFailCount) {
+                    return { meta: { changes: 0 } };
+                  }
+                  if (state.status !== "processing") return { meta: { changes: 0 } };
+                  state.status = "sent";
+                  state.lease_token = null;
+                  state.lease_expires_at = null;
+                  state.last_error = null;
+                  state.processed_at = args[0];
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET last_error = ?1, lease_expires_at = ?2")) {
+                  state.last_error = args[0];
+                  state.lease_expires_at = args[1];
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET status = 'pending'") && sql.includes("delivery lease expired")) {
+                  return { meta: { changes: 0 } };
+                }
+                return { meta: { changes: 0 } };
+              },
+              async all() {
+                if (sql.includes("FROM notification_outbox n")) {
+                  return state.status === "pending"
+                    ? {
+                        results: [
+                          {
+                            id: state.id ?? "row-1",
+                            recipient_user_id: "user-1",
+                            discord_id: "discord-1",
+                            type: "discord_webhook",
+                            payload_json: JSON.stringify({ content: "hello" }),
+                            attempt_count: state.attempt_count ?? 0,
+                          },
+                        ],
+                      }
+                    : { results: [] };
+                }
+                return { results: [] };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+  return {
+    env,
+    state,
+    get fetchCalls() {
+      return fetchCalls;
+    },
+    get markSentAttempts() {
+      return markSentAttempts;
+    },
+    restore() {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+test("配送成功後にmarkSentが1回失敗してもretryでsentへ進む", async () => {
+  const harness = notificationQueueEnv({ id: "retry-sent" }, { markSentFailCount: 1 });
+  try {
+    const result = await processNotificationQueue(harness.env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.processed, 1);
+    assert.equal(result.skipped, 0);
+    assert.equal(harness.fetchCalls, 1);
+    assert.equal(harness.markSentAttempts, 2);
+    assert.equal(harness.state.status, "sent");
+  } finally {
+    harness.restore();
+  }
+});
+
+test("配送成功後にmarkSentが常に失敗してもlease回復で再配送しない", async () => {
+  const harness = notificationQueueEnv(
+    { id: "suppress-redelivery", lease_expires_at: 50 },
+    { markSentFailCount: 99 },
+  );
+  try {
+    const first = await processNotificationQueue(harness.env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(first.processed, 1);
+    assert.equal(harness.fetchCalls, 1);
+    assert.equal(harness.state.status, "processing");
+    assert.equal(harness.state.last_error, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK);
+
+    harness.state.lease_expires_at = 40;
+    const recovered = await recoverNotificationOutboxExpiredLeases(harness.env, { limit: 1 });
+    assert.equal(recovered, 1);
+    assert.equal(harness.state.status, "sent");
+    assert.equal(harness.fetchCalls, 1);
+  } finally {
+    harness.restore();
   }
 });

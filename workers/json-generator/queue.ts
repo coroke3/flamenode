@@ -20,6 +20,11 @@ const STALE_QUEUE_RECONCILE_LIMIT = 20;
 const PROCESSING_LEASE_SEC = 5 * 60;
 const PROCESSING_CONCURRENCY = 2;
 const MAX_ATTEMPTS = 4;
+const MARK_DONE_RETRY_ATTEMPTS = 3;
+const MARK_DONE_RETRY_DELAY_MS = 50;
+/** R2 rebuild 成功後に done 更新だけ失敗した行。再生成せず lease 回復で done へ進める。 */
+export const REBUILD_SUCCEEDED_AWAITING_DONE_MARK =
+  "rebuild_succeeded_awaiting_done_mark";
 
 type QueueRow = {
   id: string;
@@ -39,6 +44,37 @@ function throwIfAborted(signal: AbortSignal | undefined, fallback: string): void
   if (!signal?.aborted) return;
   if (signal.reason instanceof Error) throw signal.reason;
   throw new Error(signal.reason === undefined ? fallback : String(signal.reason));
+}
+
+async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal, "static rebuild queue aborted");
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      if (signal?.reason instanceof Error) reject(signal.reason);
+      else reject(new Error(signal?.reason === undefined ? "static rebuild queue aborted" : String(signal.reason)));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  throwIfAborted(signal, "static rebuild queue aborted");
+}
+
+async function completeQueueRow(
+  env: Env,
+  row: QueueRow,
+  token: string,
+  now: number,
+  signal: AbortSignal | undefined,
+  metrics: QueueMetrics | undefined,
+): Promise<QueueOutcome> {
+  if (await markDoneWithRetries(env, row.id, token, now, metrics, signal)) {
+    return "processed";
+  }
+  if (await markDoneOrSuppressRedelivery(env, row.id, token, now, metrics, signal)) {
+    return "processed";
+  }
+  return "skipped";
 }
 
 export async function getOperationMode(env: Env): Promise<OperationMode> {
@@ -150,15 +186,11 @@ async function processQueueRow(
     throwIfAborted(signal, "static rebuild queue aborted");
     if (shouldSkipQueueTarget(mode, row)) {
       throwIfAborted(signal, "static rebuild queue aborted");
-      return (await markDone(env, row.id, token, now, metrics))
-        ? "processed"
-        : "skipped";
+      return completeQueueRow(env, row, token, now, signal, metrics);
     }
     await rebuildTarget(env, row.target_type, row.target_id, signal);
     throwIfAborted(signal, "static rebuild queue aborted");
-    return (await markDone(env, row.id, token, now, metrics))
-      ? "processed"
-      : "skipped";
+    return completeQueueRow(env, row, token, now, signal, metrics);
   } catch (error) {
     if (signal?.aborted) throwIfAborted(signal, "static rebuild queue aborted");
     await markRetryOrFailed(env, row, token, error, now, metrics);
@@ -196,6 +228,19 @@ export async function markDone(
   now: number,
   metrics?: QueueMetrics,
 ): Promise<boolean> {
+  const completed = await markDoneAttempt(env, id, token, now, metrics);
+  if (completed) return true;
+  await recoverLeaseInvalidatedProcessing(env, id, now, metrics);
+  return false;
+}
+
+async function markDoneAttempt(
+  env: Env,
+  id: string,
+  token: string,
+  now: number,
+  metrics?: QueueMetrics,
+): Promise<boolean> {
   const result = await env.DB.prepare(
     `UPDATE static_rebuild_queue
      SET status = CASE
@@ -224,10 +269,45 @@ export async function markDone(
     .bind(now, now, id, token)
     .run();
   recordD1Changes(metrics, result);
-  if ((result.meta?.changes ?? 0) === 1) return true;
+  return (result.meta?.changes ?? 0) === 1;
+}
 
-  await recoverLeaseInvalidatedProcessing(env, id, now, metrics);
+export async function markDoneWithRetries(
+  env: Env,
+  id: string,
+  token: string,
+  now: number,
+  metrics?: QueueMetrics,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < MARK_DONE_RETRY_ATTEMPTS; attempt += 1) {
+    if (await markDoneAttempt(env, id, token, now, metrics)) return true;
+    if (attempt < MARK_DONE_RETRY_ATTEMPTS - 1) {
+      await sleepMs(MARK_DONE_RETRY_DELAY_MS, signal);
+    }
+  }
   return false;
+}
+
+export async function markDoneOrSuppressRedelivery(
+  env: Env,
+  id: string,
+  token: string,
+  now: number,
+  metrics?: QueueMetrics,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  throwIfAborted(signal, "static rebuild queue aborted");
+  const result = await env.DB.prepare(
+    `UPDATE static_rebuild_queue
+     SET error = ?, lease_expires_at = ?, updated_at = ?
+     WHERE id = ? AND status = 'processing' AND lease_token = ?`,
+  )
+    .bind(REBUILD_SUCCEEDED_AWAITING_DONE_MARK, now + PROCESSING_LEASE_SEC, now, id, token)
+    .run();
+  recordD1Changes(metrics, result);
+  throwIfAborted(signal, "static rebuild queue aborted");
+  return (result.meta?.changes ?? 0) === 1;
 }
 
 export async function markRetryOrFailed(
@@ -348,6 +428,28 @@ export async function reconcileStaleQueue(
     )
     .run();
   recordD1Changes(metrics, missingResult);
+
+  throwIfAborted(signal, "static rebuild queue aborted");
+  const rebuiltRecoveryResult = await env.DB.prepare(
+    `UPDATE static_rebuild_queue
+     SET status = 'done',
+         processed_at = ?,
+         attempt_count = 0,
+         error = NULL,
+         next_retry_at = NULL,
+         processing_started_at = NULL,
+         lease_token = NULL,
+         lease_expires_at = NULL,
+         updated_at = ?
+     WHERE status = 'processing'
+       AND lease_expires_at IS NOT NULL
+       AND lease_expires_at <= ?
+       AND error = ?
+     LIMIT ?`,
+  )
+    .bind(now, now, now, REBUILD_SUCCEEDED_AWAITING_DONE_MARK, STALE_QUEUE_RECONCILE_LIMIT)
+    .run();
+  recordD1Changes(metrics, rebuiltRecoveryResult);
 
   throwIfAborted(signal, "static rebuild queue aborted");
   const expiredResult = await env.DB.prepare(

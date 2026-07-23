@@ -40,9 +40,17 @@ export type PublicHeaderUser = Pick<
 interface PublicHeaderProps {
   /** 省略時はクライアントが /api/account/summary を取得する。 */
   user?: PublicHeaderUser | null;
+  /**
+   * SSRで最小ヘッダーを渡したまま、X ID一覧等を /api/account/summary で補完する。
+   * 取得失敗でも serverUser のログイン表示は維持する。
+   */
+  hydrateAccount?: boolean;
 }
 
-export function PublicHeader({ user: serverUser }: PublicHeaderProps): React.ReactElement {
+export function PublicHeader({
+  user: serverUser,
+  hydrateAccount = false,
+}: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [accountOpen, setAccountOpen] =
@@ -56,10 +64,24 @@ export function PublicHeader({ user: serverUser }: PublicHeaderProps): React.Rea
   const searchButtonRef =
     React.useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
-  const fetchAccount = serverUser === undefined;
+  const fetchAccount = serverUser === undefined || hydrateAccount;
   const { user: fetchedUser, loading: accountLoading } =
     usePublicAccountSummary(fetchAccount);
-  const accountUser = fetchAccount ? fetchedUser : (serverUser ?? null);
+  const accountUser =
+    serverUser === undefined
+      ? fetchedUser
+      : fetchedUser && serverUser
+        ? {
+            ...serverUser,
+            ...fetchedUser,
+            id: serverUser.id || fetchedUser.id,
+            name: fetchedUser.name || serverUser.name,
+            image: fetchedUser.image ?? serverUser.image,
+            role: fetchedUser.role || serverUser.role,
+            xIds: fetchedUser.xIds.length > 0 ? fetchedUser.xIds : serverUser.xIds,
+            management: fetchedUser.management ?? serverUser.management,
+          }
+        : serverUser;
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
   const entryHref =
     entryNext === "/entry"

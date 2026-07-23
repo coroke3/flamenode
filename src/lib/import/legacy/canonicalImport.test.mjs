@@ -981,6 +981,8 @@ test("applyクライアントは423/503を短時間だけ再試行し、preview�
   assert.match(client, /サーバーが一時的に応答できませんでした/);
   assert.match(client, /mode === "preview"[\s\S]*?isApplyTransientFailure/);
   assert.match(client, /json\.requires_repreview[\s\S]*?setCredential\(null\)/);
+  assert.match(client, /committed_progress_pending/);
+  assert.match(client, /ステップ保存済み（進捗復旧中）/);
   assert.match(client, /transientFailures = 0/);
   assert.match(client, /await sleep\(applyStepPauseMs\(successStreak\)\)/);
   assert.match(client, /1ランの最大ステップ数/);
@@ -1096,6 +1098,10 @@ test("previewErrorResponseはalready_claimedとbucket_unavailableをretryableに
   assert.match(route, /const requiresRepreview = !retryable/);
   assert.match(route, /retryable \? 503 : 409/);
   assert.match(route, /retryable,\s*requires_repreview: requiresRepreview/);
+  assert.match(route, /kind: "committed_progress_pending"/);
+  assert.match(route, /committed: true/);
+  assert.match(route, /このステップは保存済み。進捗復旧中/);
+  assert.match(route, /requires_repreview: false/);
 });
 
 test("X ID統合は承認申請だけを入口にし、直接Actionを残さない", () => {

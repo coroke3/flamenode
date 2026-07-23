@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { acceptLatestTerms } from "@/lib/actions/terms";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
-import { sanitizeNextPath } from "#utils/next";
+import { firstSearchParamValue, sanitizeNextPath } from "#utils/next";
 import { parseLegalMarkdown } from "@/lib/terms/legalMarkdown";
 import {
   DEFAULT_TERMS_MARKDOWN,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/terms/defaultTerms";
 import { buildPageMetadata } from "@/lib/seo";
 import { loadStaticRulesPage } from "@/lib/publicData/loader";
+import { TermsAcceptSubmitButton } from "@/components/terms/TermsAcceptSubmitButton";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/rules",
@@ -38,15 +39,25 @@ function renderMarkdown(markdown: string): React.ReactNode[] {
 export default async function RulesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string }>;
+  searchParams?: Promise<{ next?: string; error?: string }>;
 }): Promise<React.ReactElement> {
   const params = await searchParams;
   const next = sanitizeNextPath(params?.next);
+  const errorCode = firstSearchParamValue(params?.error);
   const staticRules = await loadStaticRulesPage();
 
   const body = staticRules.rules?.bodyMarkdown ?? DEFAULT_TERMS_MARKDOWN;
   const updatedAt = staticRules.rules?.publishedAt ?? staticRules.rules?.updatedAt ?? null;
   const versionLabel = staticRules.rules?.versionLabel ?? DEFAULT_TERMS_VERSION_LABEL;
+
+  const errorMessage =
+    errorCode === "concurrent_update" || errorCode === "database_unavailable"
+      ? "保存を完了できませんでした。再読み込み後にもう一度お試しください。同意済みの可能性があります。"
+      : errorCode === "terms_commit_failed"
+        ? "同意処理で問題が発生しました。再読み込みして状態を確認してください。"
+        : errorCode
+          ? "利用規約への同意を完了できませんでした。"
+          : null;
 
   return (
     <div className="fn-public-container fn-page">
@@ -61,6 +72,15 @@ export default async function RulesPage({
         </p>
       </header>
       <div className="fn-page-stack">
+        {errorMessage ? (
+          <div className="fn-entry-status fn-entry-status--warn" role="alert">
+            <Icon name="alert" size={18} aria-hidden />
+            <div>
+              <h2 className="fn-jp fn-panel-title">同意処理の確認</h2>
+              <p className="fn-jp fn-entry-status-lead">{errorMessage}</p>
+            </div>
+          </div>
+        ) : null}
         <article className="fn-surface-panel fn-legal-body">
           {renderMarkdown(body)}
         </article>
@@ -72,9 +92,7 @@ export default async function RulesPage({
           </p>
           <form action={acceptLatestTerms} className="fn-panel-actions">
             <input type="hidden" name="next" value={next} />
-            <button type="submit" className="fn-btn fn-btn-primary">
-              利用規約に同意して戻る
-            </button>
+            <TermsAcceptSubmitButton />
           </form>
         </section>
         <section id="event-host" className="fn-surface-panel">

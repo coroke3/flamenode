@@ -20,7 +20,8 @@ test("Discord auth linkは内部user ID更新・token消去・監査を単一bat
   assert.doesNotMatch(source, /events:\s*\{[\s\S]*linkAccount/);
   assert.match(adapter, /await mutate\(db,/);
   assert.match(adapter, /db\.insert\(accounts\)\.values\(accountRow\)/);
-  assert.match(adapter, /expectedRowCondition\(\{ expectedCurrent: beforeUser \}\)/);
+  assert.match(adapter, /expectedRowCondition\(\{/);
+  assert.match(adapter, /discord_id: beforeUser\.discord_id/);
   assert.match(adapter, /buildNotificationOutboxStatement/);
   assert.match(adapter, /welcomeNotification\.statement/);
   assert.match(adapter, /welcome_account/);
@@ -28,6 +29,7 @@ test("Discord auth linkは内部user ID更新・token消去・監査を単一bat
   assert.match(adapter, /discord_id: account\.providerAccountId/);
   assert.match(adapter, /access_token: null/);
   assert.match(adapter, /refresh_token: null/);
+  assert.match(adapter, /onConflictDoNothing/);
 });
 
 test("一般X ID lifecycleは逐次audit writeを残さずCAS付きatomic batchを使う", () => {
