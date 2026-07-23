@@ -10,10 +10,8 @@ test("limited, private and archived visibility changes never enqueue Discord DM"
     /SILENT_VISIBILITY_STATUSES = new Set\(\["limited", "private", "archived"\]\)/,
   );
   assert.match(source, /SILENT_VISIBILITY_STATUSES\.has\(status\)/);
-
-  const silentGuard = source.indexOf("SILENT_VISIBILITY_STATUSES.has(status)");
-  const forceFallback = source.indexOf('force ? "video_status_changed" : null');
-  assert.ok(silentGuard >= 0 && forceFallback >= 0 && silentGuard < forceFallback);
+  assert.doesNotMatch(source, /force \? "video_status_changed"/);
+  assert.doesNotMatch(source, /video_status_changed/);
 
   assert.doesNotMatch(source, /limited:\s*"video_limited"/);
   assert.doesNotMatch(source, /private:\s*"video_private"/);

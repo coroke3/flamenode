@@ -696,3 +696,84 @@ test("配送成功後にmarkSentが常に失敗してもlease回復で再配送�
     harness.restore();
   }
 });
+
+test("deliver: missing discord_id does not call Discord API", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "announcement_broadcast",
+        payload_json: JSON.stringify({ content: "hello" }),
+        discord_id: "",
+      },
+      { DISCORD_BOT_TOKEN: "bot-token" },
+    );
+    assert.equal(ok, false);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deliver: Discord 401 on DM open does not retry inline", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async (url) => {
+    fetchCalls += 1;
+    if (String(url).endsWith("/users/@me/channels")) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "announcement_broadcast",
+        payload_json: JSON.stringify({ content: "hello" }),
+        discord_id: "423456789012345678",
+      },
+      { DISCORD_BOT_TOKEN: "bot-token" },
+    );
+    assert.equal(ok, false);
+    assert.equal(fetchCalls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deliver: payload の内部メタ(video_id等)をDiscordへ送らない", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/users/@me/channels")) {
+      return okJson({ id: "channel_strip_meta" });
+    }
+    bodies.push(String(init?.body ?? ""));
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "video_approved",
+        payload_json: JSON.stringify({
+          content: "hello",
+          video_id: "vid-1",
+          event_id: "evt-1",
+          url: "https://example.test/x",
+        }),
+        discord_id: "523456789012345678",
+      },
+      { DISCORD_BOT_TOKEN: "bot-token" },
+    );
+    assert.equal(ok, true);
+    assert.equal(bodies.length, 1);
+    assert.equal(bodies[0], JSON.stringify({ content: "hello" }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

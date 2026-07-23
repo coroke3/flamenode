@@ -355,17 +355,23 @@ async function approveXIdLinkRequestOnce(
     retention_class: "long_audit",
   });
 
+  const {
+    buildXIdApprovedNotification,
+    buildXIdAliasApprovedNotification,
+  } = await import("@/lib/notifications/templates/xid");
   const notification = await buildNotificationOutboxStatement(db, {
     recipientUserId: requestedAuthUserId,
     type: request.request_type === "alias" ? "x_id_alias_approved" : "x_id_approved",
-    payload: {
-      content:
-        request.request_type === "alias"
-          ? `X ID @${submittedXUserId} の別名追加が承認されました。`
-          : `X ID @${notificationXUserId} の連携申請が承認されました。`,
-      x_user_id: notificationXUserId,
-      request_id: request.id,
-    },
+    payload:
+      request.request_type === "alias"
+        ? buildXIdAliasApprovedNotification({
+            xUserId: submittedXUserId,
+            requestId: request.id,
+          })
+        : buildXIdApprovedNotification({
+            xUserId: notificationXUserId,
+            requestId: request.id,
+          }),
     dedupeKey: `xid_approved:${request.id}`,
   });
   if (notification) {
@@ -445,29 +451,18 @@ async function rejectXIdLinkRequestOnce(
   const afterRequest = { ...request, status: "rejected" as const, updated_at: now };
   const rejectedXIdLabel =
     request.requested_x_id ?? request.source_x_user_id ?? "不明";
+  const { buildXIdRejectedNotification } = await import(
+    "@/lib/notifications/templates/xid"
+  );
   const notification = await buildNotificationOutboxStatement(db, {
     recipientUserId: request.requested_by_auth_user_id,
     type: "x_id_rejected",
-    payload: {
-      content: reason
-        ? `X ID 申請が却下されました。理由: ${reason}`
-        : "X ID 申請が却下されました。",
-      requested_x_id: request.requested_x_id,
-      request_id: request.id,
+    payload: buildXIdRejectedNotification({
+      requestedXId: request.requested_x_id ?? rejectedXIdLabel,
+      requestId: request.id,
       reason: reason || null,
-    },
+    }),
     dedupeKey: `xid_rejected:${request.id}`,
-  });
-  const webhookNotification = await buildNotificationOutboxStatement(db, {
-    recipientUserId: request.requested_by_auth_user_id,
-    type: "discord_webhook",
-    payload: {
-      content: reason
-        ? `X ID拒否: @${rejectedXIdLabel} / request=${request.id} / 理由: ${reason}`
-        : `X ID拒否: @${rejectedXIdLabel} / request=${request.id}`,
-    },
-    dedupeKey: `xid_reject_webhook:${request.id}`,
-    force: true,
   });
   const statements: BatchItem<"sqlite">[] = [
     db
@@ -483,10 +478,6 @@ async function rejectXIdLinkRequestOnce(
   const expected: Array<number | null> = [1];
   if (notification) {
     statements.push(notification.statement);
-    expected.push(null);
-  }
-  if (webhookNotification) {
-    statements.push(webhookNotification.statement);
     expected.push(null);
   }
   await mutateWithAudit(db, {
@@ -505,8 +496,7 @@ async function rejectXIdLinkRequestOnce(
         retention_class: "long_audit",
       },
     ],
-    notificationWakeSource:
-      notification || webhookNotification ? "admin" : undefined,
+    notificationWakeSource: notification ? "admin" : undefined,
   });
   await runXIdAdminPostCommit("xid-admin.rejectXIdLinkRequest", () => {
     revalidateIdentityAdminPaths();

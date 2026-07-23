@@ -196,18 +196,38 @@ export async function linkDiscordAccountAtomically(
 
   let notificationWakeSource: "web" | undefined;
   if (isFirstDiscordLink) {
+    const { buildWelcomeAccountNotification } = await import(
+      "@/lib/notifications/templates/user"
+    );
+    const { buildChannelAccountCreatedNotification } = await import(
+      "@/lib/notifications/templates/channel"
+    );
+    const { buildOpsChannelWebhookStatement } = await import(
+      "@/lib/notifications/opsWebhook"
+    );
     const welcomeNotification = await buildWelcomeNotification(db, {
       recipientUserId: account.userId,
       type: "welcome_account",
-      payload: {
-        content:
-          "FlameNodeへようこそ。利用規約同意とX ID連携申請を /onboarding から進めてください。",
-      },
+      payload: buildWelcomeAccountNotification(),
       dedupeKey: `welcome_account:${account.userId}`,
       force: true,
     });
+    const channelNotification = await buildOpsChannelWebhookStatement(db, {
+      actorUserId: account.userId,
+      payload: buildChannelAccountCreatedNotification({
+        userId: account.userId,
+        discordId: account.providerAccountId,
+        userName: beforeUser.name,
+      }),
+      dedupeKey: `channel_account_created:${account.userId}`,
+    });
     if (welcomeNotification) {
       mutationStatements.push(welcomeNotification.statement);
+      expectedMutationChanges.push(null);
+      notificationWakeSource = "web";
+    }
+    if (channelNotification) {
+      mutationStatements.push(channelNotification.statement);
       expectedMutationChanges.push(null);
       notificationWakeSource = "web";
     }

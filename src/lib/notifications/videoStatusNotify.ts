@@ -40,11 +40,11 @@ export type VideoStatusNotificationBatch = {
 
 function notificationSpec(args: VideoStatusNotificationArgs): NotificationSpec | null {
   const status = args.nextStatus;
-  const force = args.forceNotify === true;
   if (args.prevStatus === status || SILENT_VISIBILITY_STATUSES.has(status)) {
     return null;
   }
-  if (!force && (status === "pending" || status === "draft")) {
+  // pending/draft への変更通知と、強制ステータス通知は送らない。
+  if (status === "pending" || status === "draft") {
     return null;
   }
 
@@ -66,11 +66,11 @@ function notificationSpec(args: VideoStatusNotificationArgs): NotificationSpec |
     };
   }
 
-  const type = VISIBILITY_NOTIFICATION_TYPES[status] ?? (force ? "video_status_changed" : null);
+  const type = VISIBILITY_NOTIFICATION_TYPES[status] ?? null;
   return type
     ? {
         type,
-        dedupeKey: `video_status_changed:${args.videoId}:${status}`,
+        dedupeKey: `video_voided:${args.videoId}`,
         payload: buildVideoVisibilityChangedNotification(base),
       }
     : null;

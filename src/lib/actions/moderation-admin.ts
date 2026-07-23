@@ -17,7 +17,6 @@ import {
   normalizeModerationXUserId,
   parseModerationDueAt,
 } from "@/lib/admin/moderationCaseInput";
-import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { generateId } from "@/lib/utils/id";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
@@ -80,13 +79,6 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   const changed = Boolean(nextVideoStatus && nextVideoStatus !== video.visibility_status);
   const videoAfter = changed ? { ...video, visibility_status: nextVideoStatus!, updated_at: now } : null;
   const queue = changed ? await buildStaticRebuildQueueBatch(db, [{ targetType: "video", targetId: video.id, reason: "moderation_case_created", priority: "high", requestedByUserId: guard.user.id }]) : { statements: [], expectedChanges: [] };
-  const notification = video.submitted_by_user_id ? await buildNotificationOutboxStatement(db, {
-    recipientUserId: video.submitted_by_user_id,
-    type: "moderation_created",
-    payload: { content: `作品「${video.title}」に運営確認ケースが作成されました。`, video_id: video.id, case_id: id, case_type: caseType, public_reason: publicReason || undefined, due_at: dueAt ?? undefined, video_status: changed ? nextVideoStatus : undefined },
-    eventId: video.primary_event_id,
-    dedupeKey: `moderation_created:${id}`,
-  }) : null;
   const statements: BatchItem<"sqlite">[] = [db.insert(videoModerationCases).values(caseAfter)];
   const expected: (number | null)[] = [1];
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "CREATE", after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_create", reason: publicReason || "運営確認ケースの作成", strict: true }];
@@ -96,8 +88,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     audits.push({ table_name: "videos", target_id: video.id, operation: "UPDATE", after: snapshot(videoAfter), actor_user_id: guard.user.id, retention_class: videoAfter.visibility_status === "voided" ? "long_audit" : "normal", context: "admin_moderation_create", reason: `ケース ${id} 作成に伴う公開状態変更`, strict: true, before: snapshot(video) });
   }
   statements.push(...queue.statements); expected.push(...queue.expectedChanges);
-  if (notification) { statements.push(notification.statement); expected.push(null); }
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, notificationWakeSource: notification ? "admin" : undefined, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
+  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
   await runModerationPostCommit(video, changed);
   return { ok: true, message: "case を作成しました。" };
@@ -128,13 +119,6 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   const changed = Boolean(nextVideoStatus && nextVideoStatus !== video.visibility_status);
   const videoAfter = changed ? { ...video, visibility_status: nextVideoStatus!, updated_at: now } : null;
   const queue = changed ? await buildStaticRebuildQueueBatch(db, [{ targetType: "video", targetId: video.id, reason: "moderation_case_resolved", priority: "high", requestedByUserId: guard.user.id }]) : { statements: [], expectedChanges: [] };
-  const notification = video.submitted_by_user_id ? await buildNotificationOutboxStatement(db, {
-    recipientUserId: video.submitted_by_user_id,
-    type: `moderation_${status}`,
-    payload: { content: `作品「${video.title}」の運営確認ケースが ${status} になりました。`, video_id: video.id, case_id: id, case_type: current.case_type, status, note: note || undefined, video_status: changed ? nextVideoStatus : undefined },
-    eventId: video.primary_event_id,
-    dedupeKey: `moderation_${status}:${id}`,
-  }) : null;
   const statements: BatchItem<"sqlite">[] = [db.update(videoModerationCases).set({ status, private_note: caseAfter.private_note, resolved_by_user_id: guard.user.id, resolved_at: now }).where(and(eq(videoModerationCases.id, id), expectedRowCondition({ expectedCurrent: snapshot(current) }))!)];
   const expected: (number | null)[] = [1];
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "UPDATE", before: snapshot(current), after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_update", reason: note || `ケース状態を ${status} に変更`, strict: true }];
@@ -144,8 +128,7 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
     audits.push({ table_name: "videos", target_id: video.id, operation: "UPDATE", before: snapshot(video), after: snapshot(videoAfter), actor_user_id: guard.user.id, retention_class: videoAfter.visibility_status === "voided" ? "long_audit" : "normal", context: "admin_moderation_update", reason: `ケース ${id} 更新に伴う公開状態変更`, strict: true });
   }
   statements.push(...queue.statements); expected.push(...queue.expectedChanges);
-  if (notification) { statements.push(notification.statement); expected.push(null); }
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, notificationWakeSource: notification ? "admin" : undefined, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
+  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
   await runModerationPostCommit(video, changed);
   return { ok: true, message: "case を更新しました。" };

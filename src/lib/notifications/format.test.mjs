@@ -99,9 +99,14 @@ test("payload.content が文字列以外なら NG", () => {
   assert.equal(r.ok, false);
 });
 
-test("payload.content が 1001 文字なら NG", () => {
-  const r = validateNotificationPayload("ok", { content: "a".repeat(1001) });
+test("payload.content が 2001 文字なら NG", () => {
+  const r = validateNotificationPayload("ok", { content: "a".repeat(2001) });
   assert.equal(r.ok, false);
+});
+
+test("payload.content が 2000 文字なら OK", () => {
+  const r = validateNotificationPayload("ok", { content: "a".repeat(2000) });
+  assert.equal(r.ok, true);
 });
 
 test("payload が 8KB を超えると NG", () => {

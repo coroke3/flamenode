@@ -14,7 +14,6 @@ import { writeGuard } from "@/lib/auth/writeGuard";
 import { videoChapters, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { parseChapterTime } from "@/lib/utils/chapterTime";
-import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { MAX_ATOMIC_CHAPTER_BULK_ROWS, parseChapterBulkCsv } from "./chapterLimits";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
@@ -104,32 +103,6 @@ export async function createChapter(
     )
   `)];
   const expectedMutationChanges = [1];
-  let notificationWakeSource: "web" | undefined;
-
-  if (
-    data.visibility === "public" &&
-    target.submitted_by_user_id &&
-    target.submitted_by_user_id !== sUser.id
-  ) {
-    const notification = await buildNotificationOutboxStatement(db, {
-      recipientUserId: target.submitted_by_user_id,
-      type: "chapter_comment_added",
-      payload: {
-        content: `作品「${target.title}」に新しいチャプターコメント「${data.chapter_label}」が追加されました。`,
-        video_id: data.video_id,
-        chapter_id: id,
-        chapter_time: data.chapter_time,
-        author_x_user_id: activeX,
-      },
-      eventId: target.primary_event_id ?? null,
-      dedupeKey: `chapter_comment_added:${id}`,
-    });
-    if (notification) {
-      mutationStatements.push(notification.statement);
-      expectedMutationChanges.push(1);
-      notificationWakeSource = "web";
-    }
-  }
   const queue = await buildStaticRebuildQueueBatch(db, [{
     targetType: "video",
     targetId: data.video_id,
@@ -144,7 +117,6 @@ export async function createChapter(
       mutationStatements,
       expectedMutationChanges,
       audits: [{ table_name: "video_chapters", target_id: id, operation: "CREATE", before: null, after: { ...after }, actor_user_id: sUser.id, retention_class: "normal" }],
-      notificationWakeSource,
       staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
     });
   } catch (error) {

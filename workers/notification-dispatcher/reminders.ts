@@ -60,17 +60,21 @@ function requireReminderOrigin(value: string | undefined): string {
 }
 
 function buildReminderContent(origin: string, group: ReminderGroup): string {
-  const submitPath = `/event/${group.event_id}/slots`;
-  const eventPath = `/event/${group.event_id}`;
-  const submitUrl = `${origin}${submitPath}`;
-  const eventUrl = `${origin}${eventPath}`;
-  const slots = group.slot_count > 1 ? `予約枠 ${group.slot_count} 件` : "予約枠";
+  const submitUrl = `${origin}/event/${group.event_id}/slots`;
+  const eventUrl = `${origin}/event/${group.event_id}`;
+  const slotsLabel =
+    group.slot_count > 1 ? `予約枠 ${group.slot_count} 件` : "予約枠 1 件";
   return [
-    "投稿締切が近づいています。",
-    `${group.event_title} の ${slots} が未投稿です。`,
-    `締切: ${formatDeadlineJa(group.entry_end_time)}`,
-    `投稿する: ${submitUrl}`,
-    `イベント: ${eventUrl}`,
+    "【FlameNode】作品投稿の締切が近づいています",
+    "",
+    `イベント「${group.event_title}」で確保している ${slotsLabel} が未投稿です。`,
+    `投稿締切（日本時間）: ${formatDeadlineJa(group.entry_end_time)}`,
+    "",
+    "締切を過ぎると枠が解放される場合があります。参加を予定している場合は、期限までに作品を登録してください。",
+    "",
+    `作品を投稿:\n${submitUrl}`,
+    "",
+    `イベントを確認:\n${eventUrl}`,
   ].join("\n");
 }
 

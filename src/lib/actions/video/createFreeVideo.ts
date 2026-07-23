@@ -2,8 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import { videos } from "@/lib/db/schema";
+import { videos, events, users } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
@@ -234,7 +235,49 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     let notificationWakeSource: "web" | undefined;
     if (notification) {
       plan.statements.push(notification.statement);
-      plan.expectedChanges.push(1);
+      plan.expectedChanges.push(null);
+      notificationWakeSource = "web";
+    }
+    const { buildChannelVideoRegisteredNotification } = await import(
+      "@/lib/notifications/templates/video"
+    );
+    const { buildOpsChannelWebhookStatement } = await import(
+      "@/lib/notifications/opsWebhook"
+    );
+    const eventTitle = eventId
+      ? (
+          await db
+            .select({ title: events.title })
+            .from(events)
+            .where(eq(events.id, eventId))
+            .limit(1)
+        )[0]?.title ?? null
+      : null;
+    const actor = (
+      await db
+        .select({ discord_id: users.discord_id })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1)
+    )[0];
+    const channelNotification = await buildOpsChannelWebhookStatement(db, {
+      actorUserId: userId,
+      payload: buildChannelVideoRegisteredNotification({
+        videoId,
+        videoTitle: parsed.data.title,
+        youtubeVideoId: youtubeId,
+        registrationKind: eventId ? "free" : "unaffiliated",
+        eventId,
+        eventTitle,
+        userId,
+        discordId: actor?.discord_id,
+      }),
+      dedupeKey: `channel_video_registered:${videoId}`,
+      eventId,
+    });
+    if (channelNotification) {
+      plan.statements.push(channelNotification.statement);
+      plan.expectedChanges.push(null);
       notificationWakeSource = "web";
     }
 

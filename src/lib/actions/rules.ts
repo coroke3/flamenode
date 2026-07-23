@@ -7,8 +7,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { termsVersions, users } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
-import { mutateWithAudit, planD1AuditMutationBudget } from "@/lib/audit/mutate";
-import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueue";
+import { mutateWithAudit } from "@/lib/audit/mutate";
 import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -191,63 +190,35 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
   )!).orderBy(users.id).limit(TERMS_REACCEPT_BATCH_SIZE + 1);
   const targets = rows.slice(0, TERMS_REACCEPT_BATCH_SIZE);
   if (targets.length === 0) return { ok: true, message: "対象がありません。", enqueued: 0, cursor };
-  const message = content || `FlameNode の利用規約が更新されました。\n/rules から確認し、再同意してください。\nversion: ${target.version_label}`;
-  const notifications = await buildKnownRecipientNotificationBatch(db, targets.map((row) => ({
-    recipientUserId: row.user_id,
-    type: "terms_reaccept_required",
-    payload: { content: message, terms_version_id: termsId, version_label: target.version_label, terms_url: "/rules" },
-    dedupeKey: `terms_reaccept_required:${termsId}:${row.user_id}`,
-  })));
+  // Discord DM の terms_reaccept_required は送らない。サイト上の再同意案内は維持する。
   const now = Math.floor(Date.now() / 1000);
   const after = { ...target, updated_at: now };
-  const fanOutBudget = planD1AuditMutationBudget({
-    mutationStatementCount: notifications.statements.length,
-    mutationAssertionCount: notifications.statements.length > 0 ? 1 : 0,
-    auditEntryCount: 0,
-    distinctActorCount: 1,
-  });
-  if (!fanOutBudget.withinLimit) return { ok: false, message: "通知件数がD1処理上限を超えます。" };
-  try {
-    if (notifications.statements.length > 0) {
-      await mutateWithAudit(db, {
-        mutationStatements: notifications.statements,
-        expectedMutationChanges: notifications.expectedChanges,
-        audits: [],
-        notificationWakeSource: "admin",
-      });
-    }
-  } catch (error) { return mutationError(error); }
-  let touchWarning: string | undefined;
+  const noteSuffix = content ? ` note=${content.slice(0, 80)}` : "";
   try {
     await mutateWithAudit(db, {
       mutationStatements: [
         db.update(termsVersions).set({ updated_at: now }).where(and(eq(termsVersions.id, termsId), expectedRowCondition({ expectedCurrent: snapshot(target) }))!),
       ],
       expectedMutationChanges: [1],
-      audits: [{ table_name: "terms_versions", target_id: termsId, operation: "UPDATE", before: snapshot(target), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_broadcast", reason: `再同意通知 batch cursor=${cursor} enqueued=${notifications.statements.length}`, strict: true }],
+      audits: [{ table_name: "terms_versions", target_id: termsId, operation: "UPDATE", before: snapshot(target), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_broadcast", reason: `再同意案内（DMなし） batch cursor=${cursor} targets=${targets.length}${noteSuffix}`, strict: true }],
     });
-  } catch (error) {
-    unstable_rethrow(error);
-    console.warn("[rules] terms touch after broadcast fan-out failed", error);
-    touchWarning =
-      "通知は登録されましたが、規約版の監査記録更新に失敗しました。同じ cursor で再実行しても同一ユーザーへの通知は重複しません。";
-  }
+  } catch (error) { return mutationError(error); }
   const nextCursor = targets.at(-1)?.user_id ?? cursor;
   await runRulesPostCommit("rules.broadcast", [
     {
       name: "revalidate",
       run: () => {
         revalidatePath("/admin/rules");
-        revalidatePath("/admin/notifications");
+        revalidatePath("/rules");
+        revalidatePath("/onboarding");
       },
     },
   ]);
   return {
     ok: true,
-    message: `${notifications.statements.length}件を登録しました。`,
-    enqueued: notifications.statements.length,
+    message: "Discord DM は送信しません。対象ユーザーにはサイト上の再同意案内が表示されます。",
+    enqueued: 0,
     cursor: nextCursor,
-    ...(touchWarning ? { warning: touchWarning } : {}),
   };
 }
 
