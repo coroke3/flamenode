@@ -12,7 +12,7 @@ import {
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
-import { events, slots, xUserAccountLinks } from "@/lib/db/schema";
+import { events, slots, users, xUserAccountLinks } from "@/lib/db/schema";
 import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
@@ -173,6 +173,8 @@ async function commitSlotUpdates(args: {
   eventId: string;
   actorUserId: string;
   reason: string;
+  extraStatements?: BatchItem<"sqlite">[];
+  notificationWakeSource?: "web";
 }): Promise<void> {
   if (
     args.updates.length === 0 ||
@@ -191,14 +193,19 @@ async function commitSlotUpdates(args: {
       requestedByUserId: args.actorUserId,
     },
   ]);
+  const extra = args.extraStatements ?? [];
+  const wakeNotification =
+    args.notificationWakeSource ?? (extra.length > 0 ? "web" : undefined);
   await mutateWithAudit(args.db, {
     mutationStatements: [
       ...args.updates.map((update) => update.statement),
       ...queue.statements,
+      ...extra,
     ],
     expectedMutationChanges: [
       ...args.updates.map(() => 1),
       ...queue.expectedChanges,
+      ...extra.map(() => null),
     ],
     audits: args.updates.map((update) => ({
       table_name: "slots",
@@ -213,6 +220,7 @@ async function commitSlotUpdates(args: {
       restore_strategy: "update_before",
       strict: true,
     })),
+    notificationWakeSource: wakeNotification,
     staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   });
 }
@@ -469,12 +477,47 @@ export async function reserveSlot(
         now,
       ),
     );
+    const { buildChannelSlotReservedNotification } = await import(
+      "@/lib/notifications/templates/slot"
+    );
+    const { buildOpsChannelWebhookStatement } = await import(
+      "@/lib/notifications/opsWebhook"
+    );
+    const actor = (
+      await db
+        .select({ discord_id: users.discord_id })
+        .from(users)
+        .where(eq(users.id, guard.user.id))
+        .limit(1)
+    )[0];
+    const channelNotification = await buildOpsChannelWebhookStatement(db, {
+      actorUserId: guard.user.id,
+      payload: buildChannelSlotReservedNotification({
+        eventId: anchor.event_id,
+        eventTitle: event.title ?? "イベント",
+        slotCount: targetRows.length,
+        displayName: parsed.data.display_name,
+        xUserId: guard.activeXId,
+        userId: guard.user.id,
+        discordId: actor?.discord_id,
+      }),
+      dedupeKey: `channel_slot_reserved:${anchor.event_id}:${guard.user.id}:${anchor.id}:${groupId ?? "solo"}`,
+      eventId: anchor.event_id,
+    });
+    const extraStatements: BatchItem<"sqlite">[] = [];
+    let notificationWakeSource: "web" | undefined;
+    if (channelNotification) {
+      extraStatements.push(channelNotification.statement);
+      notificationWakeSource = "web";
+    }
     await commitSlotUpdates({
       db,
       updates,
       eventId: anchor.event_id,
       actorUserId: guard.user.id,
       reason: "slot_user_reserve",
+      extraStatements,
+      notificationWakeSource,
     });
     await runSlotPostCommit("slot.reserve", anchor.event_id);
     return { ok: true, slotId: anchor.id };

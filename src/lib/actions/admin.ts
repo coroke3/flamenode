@@ -89,6 +89,8 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
       mutationStatements: statements,
       expectedMutationChanges: expected,
       audits,
+      notificationWakeSource:
+        notification.statements.length > 0 ? "admin" : undefined,
       staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
     });
   } catch (error) {

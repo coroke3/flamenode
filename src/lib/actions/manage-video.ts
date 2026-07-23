@@ -172,6 +172,8 @@ export async function setManageVideoStatus(
       context: `manage-video-status:${eventId}`,
       retention_class: "normal", strict: true,
     }],
+    notificationWakeSource:
+      notification.statements.length > 0 ? "manage" : undefined,
     staticRebuildWakeSource: queue.statements.length > 0 ? "manage" : undefined,
   });
 

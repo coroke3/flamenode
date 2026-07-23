@@ -35,10 +35,6 @@ import {
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { buildPendingXIdRequestInsert } from "@/lib/actions/xidPendingInsert";
 import {
-  buildNotificationOutboxStatement,
-  type NotificationOutboxStatement,
-} from "@/lib/notifications/enqueue";
-import {
   X_ID_LINK_REQUEST_TYPES,
   isRetryableXIdMutationError,
   isXIdLinkRequestType,
@@ -397,20 +393,6 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     updated_at: now,
   };
   const xIdLabel = requestedXId ?? sourceXUserId ?? "不明";
-  let webhookNotification: NotificationOutboxStatement | null = null;
-  try {
-    webhookNotification = await buildNotificationOutboxStatement(db, {
-      recipientUserId: authUserId,
-      type: "discord_webhook",
-      payload: {
-        content: `X ID申請: @${xIdLabel} / type=${requestType} / by=${authUserId} / request=${id}`,
-      },
-      dedupeKey: `xid_request_webhook:${id}`,
-      force: true,
-    });
-  } catch (error) {
-    console.error("[requestXIdLink] webhook enqueue failed", error);
-  }
   const mutationStatements: BatchItem<"sqlite">[] = [
     db.run(buildPendingXIdRequestInsert(afterRequest)),
   ];
@@ -424,10 +406,6 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     actor_user_id: authUserId,
     retention_class: "long_audit",
   }];
-  if (webhookNotification) {
-    mutationStatements.push(webhookNotification.statement);
-    expectedMutationChanges.push(null);
-  }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -435,7 +413,6 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
         mutationStatements,
         expectedMutationChanges,
         audits,
-        notificationWakeSource: webhookNotification ? "web" : undefined,
       });
       await runXIdPostCommit("xid.requestXIdLink", "revalidate", () => {
         revalidateXIdRequestPaths();

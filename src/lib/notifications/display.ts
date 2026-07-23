@@ -91,6 +91,16 @@ export function getNotificationFailureGuidance(input: {
     };
   }
 
+  if (err.includes("webhook_unconfigured")) {
+    return {
+      summary: "Discord Webhook URL が未設定です。",
+      nextSteps: [
+        "DISCORD_WEBHOOK_URL を確認する",
+        "設定修正後に失敗通知を再試行する",
+      ],
+    };
+  }
+
   if (
     err.includes("bot_token_unconfigured") ||
     err.includes("401") ||

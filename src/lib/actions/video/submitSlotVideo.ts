@@ -320,7 +320,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       });
       if (notification) {
         plan.statements.push(notification.statement);
-        plan.expectedChanges.push(1);
+        plan.expectedChanges.push(null);
         notificationWakeSource = "web";
       }
     }

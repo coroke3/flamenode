@@ -632,6 +632,30 @@ async function markDeliveryFailure(
   return Math.max(0, Number(result.meta?.changes ?? 0));
 }
 
+/** outbox payload から Discord API が受理するキーだけを残す。 */
+function discordApiBodyJson(payloadJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payloadJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const source = parsed as Record<string, unknown>;
+  const body: Record<string, unknown> = {};
+  if (typeof source.content === "string") body.content = source.content;
+  if (Array.isArray(source.embeds)) body.embeds = source.embeds;
+  if (source.allowed_mentions && typeof source.allowed_mentions === "object") {
+    body.allowed_mentions = source.allowed_mentions;
+  }
+  if (typeof source.tts === "boolean") body.tts = source.tts;
+  if (typeof source.flags === "number") body.flags = source.flags;
+  if (typeof source.username === "string") body.username = source.username;
+  if (typeof source.avatar_url === "string") body.avatar_url = source.avatar_url;
+  if (typeof body.content !== "string" && !Array.isArray(body.embeds)) return null;
+  return JSON.stringify(body);
+}
+
 async function deliverWithOutcome(
   row: { type: string; payload_json: string; discord_id: string },
   env: Pick<Env, "KV" | "DISCORD_WEBHOOK_URL" | "DISCORD_BOT_TOKEN">,
@@ -643,6 +667,10 @@ async function deliverWithOutcome(
   signal?: AbortSignal,
 ): Promise<DeliveryOutcome> {
   throwIfAborted(signal);
+  const apiBody = discordApiBodyJson(row.payload_json);
+  if (!apiBody) {
+    return { ok: false, errorCode: "discord_payload_invalid", permanent: true };
+  }
   if (row.type === "discord_webhook") {
     if (!env.DISCORD_WEBHOOK_URL) {
       return { ok: false, errorCode: "discord_webhook_unconfigured", retryAfterSeconds: 900 };
@@ -655,7 +683,7 @@ async function deliverWithOutcome(
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: row.payload_json,
+        body: apiBody,
       },
       budget,
       cooldownKvWriteBudget,
@@ -750,7 +778,7 @@ async function deliverWithOutcome(
         Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`,
         "Content-Type": "application/json",
       },
-      body: row.payload_json,
+      body: apiBody,
     },
     budget,
     cooldownKvWriteBudget,

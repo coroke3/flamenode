@@ -106,8 +106,9 @@ export function validateNotificationPayload(
   if (content !== undefined && typeof content !== "string") {
     return { ok: false, reason: "payload.content は文字列である必要があります" };
   }
-  if (typeof content === "string" && content.length > 1000) {
-    return { ok: false, reason: "payload.content は 1000 文字以内にしてください" };
+  // Discord message content 上限は 2000。長い運用文面を落とさない。
+  if (typeof content === "string" && content.length > 2000) {
+    return { ok: false, reason: "payload.content は 2000 文字以内にしてください" };
   }
   return { ok: true };
 }

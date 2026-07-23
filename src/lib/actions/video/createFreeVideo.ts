@@ -234,7 +234,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     let notificationWakeSource: "web" | undefined;
     if (notification) {
       plan.statements.push(notification.statement);
-      plan.expectedChanges.push(1);
+      plan.expectedChanges.push(null);
       notificationWakeSource = "web";
     }
 
