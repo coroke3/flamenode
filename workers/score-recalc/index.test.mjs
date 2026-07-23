@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   recalcScoreBatch,
+  recalcScoreForVideoIds,
   SCORE_FORCE_REFRESH_SEC,
   SCORE_RECALC_BATCH_SIZE,
 } from "./index.ts";
@@ -35,6 +36,23 @@ test("score result reports exact D1 changes and zero external metrics", async ()
     quota_stopped: false,
     quota_stop_reason: null,
   });
+});
+
+test("recalcScoreForVideoIds は指定IDだけ更新する", async () => {
+  let sql = "";
+  const result = await recalcScoreForVideoIds({
+    DB: {
+      prepare(query) {
+        sql = query;
+        return {
+          bind() { return this; },
+          async run() { return { meta: { changes: 2 } }; },
+        };
+      },
+    },
+  }, ["video-a", "video-b"]);
+  assert.match(sql, /WHERE id IN \(\?, \?\)/);
+  assert.equal(result.processed, 2);
 });
 
 test("score SQLはcanonical列だけを使う", () => {

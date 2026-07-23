@@ -6,6 +6,8 @@ import { videos, videoYoutubeMetadata } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
+import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 
 export async function queueYoutubeMetadataResync(formData: FormData): Promise<void> {
   const guard = await requireAdminWrite("admin_youtube_sync");
@@ -23,11 +25,14 @@ export async function queueYoutubeMetadataResync(formData: FormData): Promise<vo
   const statement = before
     ? db.update(videoYoutubeMetadata).set({ sync_status: "pending", sync_error: null, synced_at: null, updated_at: now }).where(and(eq(videoYoutubeMetadata.video_id, videoId), expectedRowCondition({ expectedCurrent: { ...before } }))!)
     : db.insert(videoYoutubeMetadata).values(after);
+  const wakeSentKinds = new Set<QueueWakeKind>();
   await mutateWithAudit(db, {
     mutationStatements: [statement],
     expectedMutationChanges: 1,
     audits: [{ table_name: "video_youtube_metadata", target_id: videoId, operation: before ? "UPDATE" : "CREATE", before: before ? { ...before } : null, after: { ...after }, actor_user_id: guard.user.id, context: "admin_youtube_sync", reason: "YouTubeメタデータ再同期を予約", retention_class: "normal", strict: true }],
+    wakeSentKinds,
   });
+  await sendYoutubeSyncPendingWakeBestEffort("admin", wakeSentKinds);
   revalidatePath("/admin/youtube-sync");
   revalidatePath(`/admin/videos/${videoId}`);
   revalidatePath(`/${video.youtube_video_id ?? videoId}`);

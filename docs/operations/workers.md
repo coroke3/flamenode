@@ -1,7 +1,7 @@
 # Worker 運用
 
 > Status: Active
-> Last verified: 2026-07-21
+> Last verified: 2026-07-23
 > Verified against commit: `47e6cee`
 > Source of truth: `wrangler.toml`、`workers/*/wrangler.toml`、`scripts/cloudflare-*.mjs`、`/admin/workers`、`/admin/youtube-quota`
 
@@ -11,11 +11,61 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 
 公式制限: https://developers.cloudflare.com/workers/platform/limits/
 
-| Worker | Cron | 上限 |
-| --- | --- | --- |
-| `fast-jobs` | 5分 | 通知最大6件、Discord外部request最大12件、DM cache KV書込最大2件。締切リマインダーはleaseで1時間間隔 |
-| `content-jobs` | 15分 | 静的queue 1 target。cleanupはleaseで1時間間隔 |
-| `sync-jobs` | 15分（7/22/37/52分） | metadata外部API最大8件、playlist専用実行最大12件（同一invocationでは両方を実行しない）、score最大150件 |
+| Worker | Recovery Cron | Queue | 上限 |
+| --- | --- | --- | --- |
+| `fast-jobs` | 毎時0分 | `flamenode-notification-wake`（consumer/producer） | 通知最大6件、Discord外部request最大12件、DM cache KV書込最大2件。締切リマインダーはleaseで1時間間隔 |
+| `content-jobs` | 毎時15分 | `flamenode-static-rebuild-wake` | Queue Consumer + Recovery。静的queue 1 target。cleanupはleaseで日次 |
+| `sync-jobs` | 毎時7分・52分 | `flamenode-youtube-sync-wake` | metadata外部API最大8件、playlist専用実行最大12件（同一invocationでは両方を実行しない）、score最大150件 |
+
+## Cloudflare Queues（wake ドアベル）
+
+業務データは載せない。D1 が処理正本、Queue は「処理可能」を知らせるドアベルのみとする。メッセージ schema・free tier 予算の正本は `src/lib/queues/wakeBudget.ts`、feature flag 名は同ファイルの `QUEUE_FEATURE_FLAG_NAMES` を参照する。
+
+| Queue | binding | DLQ | 用途 |
+| --- | --- | --- | --- |
+| `flamenode-notification-wake` | `NOTIFICATION_WAKE_QUEUE` | `flamenode-notification-dlq` | 通知 outbox の drain |
+| `flamenode-static-rebuild-wake` | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-static-rebuild-dlq` | 静的 JSON 再生成 |
+| `flamenode-youtube-sync-wake` | `YOUTUBE_SYNC_WAKE_QUEUE` | `flamenode-youtube-sync-dlq` | YouTube pending 同期 |
+
+- `flamenode-web` は3 Queue すべてへ **producer** のみ持つ（`wrangler.toml`）。
+- 各 Cron Worker は対応 Queue の **consumer**（`max_concurrency = 1`、`max_batch_timeout = 1`）と、継続 wake 用 **producer** を持つ。
+- Consumer 設定: `max_batch_size = 10`、`max_retries = 3`。通知・静的は `retry_delay = 60`、YouTube は `retry_delay = 300`。
+- Recovery Cron は Queue wake が届かなかった場合の安全網。通常運用では Queue 駆動を優先し、Cron は補助とする。
+
+### Feature flags（Phase 1 デフォルト無効）
+
+| 変数 | 意味 |
+| --- | --- |
+| `QUEUE_DISPATCH_ENABLED` | Web 等からの wake 送信 |
+| `QUEUE_CONTINUATION_ENABLED` | Consumer invocation からの継続 wake |
+| `QUEUE_YOUTUBE_SYNC_ENABLED` | YouTube sync wake の有効化 |
+
+いずれも `"0"` がデフォルト。有効化は Worker Runtime Variables または Dashboard で `"1"` / `"true"` / `"yes"` を設定する。ロールバックは該当 flag を `"0"` に戻すだけでよい（Queue 作成・binding は維持し、送信・消費だけ止める）。
+
+### Queue リソース作成（初回のみ）
+
+実 Cloudflare 上で Queue を作成する。本番 deploy 前に以下を手動実行する（ID は Dashboard で確認）。
+
+```sh
+npx wrangler queues create flamenode-notification-wake
+npx wrangler queues create flamenode-notification-dlq
+npx wrangler queues create flamenode-static-rebuild-wake
+npx wrangler queues create flamenode-static-rebuild-dlq
+npx wrangler queues create flamenode-youtube-sync-wake
+npx wrangler queues create flamenode-youtube-sync-dlq
+```
+
+binding 名・consumer 設定は tracked `wrangler.toml` / `workers/*/wrangler.toml` が正本。`npm run check:cloudflare-template` と production config 検証が欠落を fail-closed する。
+
+### Free tier 予算（内部運用上限）
+
+`QUEUE_FREE_TIER_BUDGET`（`wakeBudget.ts`）の要点:
+
+- 全 Queue 合計の通常メッセージ目標: 2,000/day
+- Queue operations（send+receive+ack）目標: 6,000/day、再試行・DLQ 用余裕: 4,000/day
+- メッセージ上限 1,024 bytes、consumer 同時実行 1、継続 wake は invocation あたり最大 1 回
+
+推計スクリプト: `npm run estimate:queue-budget`（`scripts/estimate-queue-budget.mjs`）。
 
 job lockはD1の`worker_leases`、queue/outboxの取得はlease tokenと期限を使う。各Cronは固定上限、最大retry、dead-letterを守る。副作用endpointはPOST・Bearer・`WORKER_ADMIN_TOKEN`が揃わない限り拒否し、`/health`は副作用を持たない。
 
@@ -80,7 +130,7 @@ YouTube metadata同期だけの理論最大は、15分ごとに通常4 unitsと�
 
 静的再生成queueのcanonical targetは`top`、`events_index`、`event`、`video`、`user`、`users_index`、`list_recent`、`list_popular`、`search_index`、`recommend`、`rules`だけである。旧別名・未知値のruntime正規化やno-op成功処理は行わず、有限retry後に`failed`として運用画面へ残す。
 
-`content-jobs`（json-generator）は15分ごとに**1 target/run**だけ処理する。`src/lib/operationMode/policy.ts`の`STATIC_REBUILD_ITEMS_PER_RUN`と`workers/json-generator/queuePolicy.ts`の`MAX_QUEUE_ITEMS_PER_RUN`は同じ値（1）を正本とする。
+`content-jobs`（json-generator）は Queue Consumer で wake 駆動し、Recovery Cron は1時間ごとに failed/expired 回復と pending 処理を行う。`src/lib/operationMode/policy.ts`の`STATIC_REBUILD_ITEMS_PER_RUN`と`workers/json-generator/queuePolicy.ts`の`MAX_QUEUE_ITEMS_PER_RUN`は同じ値（1）を正本とする。
 
 `/admin/workers`はWorkerとqueueを集約し、`/admin/youtube-quota`は日次設定値、80%上限、推定使用量、残り予算を表示する。APIキー本体は管理画面やD1へ保存・表示しない。
 

@@ -81,7 +81,9 @@ export async function updateVideoMembersAdmin(
   plan.statements.push(...queue.statements);
   plan.expectedChanges.push(...queue.expectedChanges);
   try {
-    await executeVideoAtomicWritePlan(db, plan);
+    await executeVideoAtomicWritePlan(db, plan, {
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
   } catch (error) {
     console.warn("[updateVideoMembersAdmin] atomic save rejected", error);
     return { ok: false, message: "保存が競合しました。再読み込みして再試行してください。" };

@@ -43,7 +43,13 @@ test("D1同時接続と日次書込みへ安全余裕を確保する", async () 
   assert.match(contentJobs, /withSerializedD1\(env\)/);
   assert.match(serializer, /class AsyncGate/);
   assert.match(score, /SCORE_RECALC_BATCH_SIZE\s*=\s*150/);
-  assert.match(monitor, /capacityPerDay:\s*14400/);
+  assert.match(monitor, /capacityPerDay:\s*8_000/);
+  assert.match(monitor, /capacityPerDay:\s*1_500/);
+  assert.match(monitor, /dead_letter/);
+  assert.match(monitor, /sync_status = 'pending'\) AS pending/);
+  assert.match(monitor, /`queue_wake:last_failure:\$\{kind\}`/);
+  assert.match(monitor, /queueWakeFailures/);
+  assert.match(monitor, /oldestPendingAt/);
 });
 
 test("YouTube APIは単一キーと日次80%予算だけを使う", async () => {

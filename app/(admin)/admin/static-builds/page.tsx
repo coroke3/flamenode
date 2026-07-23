@@ -20,7 +20,7 @@ const TARGET_TYPES = STATIC_REBUILD_TARGET_TYPES;
 export default async function AdminStaticBuildsPage(): Promise<React.ReactElement> {
   const db = getDatabase();
   let rows: (typeof staticRebuildQueue.$inferSelect)[] = [];
-  let counts = { pending: 0, processing: 0, failed: 0, done: 0 };
+  let counts = { pending: 0, processing: 0, failed: 0, dead_letter: 0, done: 0 };
   let operationMode = resolveOperationMode(null);
 
   if (db) {
@@ -43,6 +43,7 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
       if (r.status === "pending") counts.pending = n;
       if (r.status === "processing") counts.processing = n;
       if (r.status === "failed") counts.failed = n;
+      if (r.status === "dead_letter") counts.dead_letter = n;
       if (r.status === "done") counts.done = n;
     }
 
@@ -80,7 +81,7 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
         <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
           {OPERATION_MODE_DESCRIPTIONS[operationMode]}
           {" "}
-          content-jobs は 15 分ごとに最大 {rebuildPolicy.maxItemsPerRun} target を処理します。
+          content-jobs は Queue wake で即時起動し、毎時 Recovery Cron で最大 {rebuildPolicy.maxItemsPerRun} target を処理します。
           economy では search_index / list_popular は high 優先度のみ処理されます。
         </p>
       </section>
@@ -96,6 +97,7 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
         <StatCard label={staticRebuildStatusLabel("pending")} value={counts.pending} />
         <StatCard label={staticRebuildStatusLabel("processing")} value={counts.processing} />
         <StatCard label={staticRebuildStatusLabel("failed")} value={counts.failed} />
+        <StatCard label={staticRebuildStatusLabel("dead_letter")} value={counts.dead_letter} />
         <StatCard label={staticRebuildStatusLabel("done")} value={counts.done} />
       </section>
 
@@ -133,7 +135,7 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
         </form>
         <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
           target_id の例: {staticRebuildTargetIdHint("event")} / {staticRebuildTargetIdHint("top")}
-          。json-generator ワーカーが cron で pending を処理します。
+          。content-jobs が Queue wake で pending を処理し、毎時 Recovery Cron がバックアップします。
         </p>
       </section>
 

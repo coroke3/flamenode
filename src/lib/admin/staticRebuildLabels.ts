@@ -33,6 +33,7 @@ const STATUS_LABELS: Record<string, string> = {
   processing: "処理中",
   done: "完了",
   failed: "失敗",
+  dead_letter: "最終失敗",
 };
 
 export function staticRebuildTargetLabel(type: string): string {

@@ -61,6 +61,7 @@ export async function processStaticRebuildQueue(
   d1_changes: number;
   retry_count: number;
   quota_stopped: boolean;
+  hasMore: boolean;
 }> {
   return processStaticRebuildQueueImpl(env, signal);
 }
@@ -76,18 +77,20 @@ async function processStaticRebuildQueueImpl(
   d1_changes: number;
   retry_count: number;
   quota_stopped: boolean;
+  hasMore: boolean;
 }> {
   throwIfAborted(signal, "static rebuild queue aborted");
   const mode = await getOperationMode(env);
   throwIfAborted(signal, "static rebuild queue aborted");
   if (mode === "maintenance") {
-    return { processed: 0, failed: 0, skipped: 1, external_api_calls: 0, d1_changes: 0, retry_count: 0, quota_stopped: false };
+    return { processed: 0, failed: 0, skipped: 1, external_api_calls: 0, d1_changes: 0, retry_count: 0, quota_stopped: false, hasMore: false };
   }
 
   const metrics: QueueMetrics = { d1_changes: 0 };
 
   const now = Math.floor(Date.now() / 1000);
-  const limit = queueLimitForMode(mode);
+  const processLimit = queueLimitForMode(mode);
+  const fetchLimit = processLimit + 1;
 
   if (shouldReconcileStaleQueue(mode)) {
     await reconcileStaleQueue(env, now, signal, metrics);
@@ -108,9 +111,11 @@ async function processStaticRebuildQueueImpl(
     LIMIT ?
   `;
 
-  const result = await env.DB.prepare(query).bind(now, limit).all();
+  const result = await env.DB.prepare(query).bind(now, fetchLimit).all();
   throwIfAborted(signal, "static rebuild queue aborted");
-  const rows = (result.results ?? []) as QueueRow[];
+  const fetchedRows = (result.results ?? []) as QueueRow[];
+  const hasMore = fetchedRows.length > processLimit;
+  const rows = fetchedRows.slice(0, processLimit);
   const summary = { processed: 0, failed: 0, skipped: 0 };
 
   for (
@@ -126,7 +131,7 @@ async function processStaticRebuildQueueImpl(
     for (const outcome of outcomes) summary[outcome] += 1;
   }
 
-  return { ...summary, external_api_calls: 0, d1_changes: metrics.d1_changes, retry_count: 0, quota_stopped: false };
+  return { ...summary, external_api_calls: 0, d1_changes: metrics.d1_changes, retry_count: 0, quota_stopped: false, hasMore };
 }
 
 async function processQueueRow(

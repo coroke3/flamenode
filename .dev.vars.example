@@ -30,6 +30,11 @@ MAINTENANCE_MODE="0"
 # 公開 JSON を R2 のみで配信 (1/true/yes で D1 を読まず static_only 相当)
 FORCE_STATIC_ONLY="0"
 
+# Cloudflare Queues feature flags (Phase 1: disabled by default)
+QUEUE_DISPATCH_ENABLED="0"
+QUEUE_CONTINUATION_ENABLED="0"
+QUEUE_YOUTUBE_SYNC_ENABLED="0"
+
 # 管理画面: D1 スプレッドシート (/admin/spreadsheet)。本番では原則 false
 ADMIN_SPREADSHEET_ENABLED="true"
 # 1ページあたりの取得行数（未設定時は 500、上限 5000）

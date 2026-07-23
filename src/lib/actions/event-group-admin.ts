@@ -115,6 +115,7 @@ async function mutateEventGroupWithQueue(
       ...queue.expectedChanges,
     ],
     audits: input.audits,
+    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
   });
 }
 

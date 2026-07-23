@@ -1,7 +1,7 @@
 /**
- * content-jobs: 15分毎の低負荷コンテンツ更新ジョブ。
- * - static_rebuild_queueをoperation modeにかかわらず最大1件処理
- * - cleanupは1時間に1回だけ実行
+ * content-jobs: 静的 JSON 再生成 Queue Consumer と Recovery Cron。
+ * - Queue Consumer: wake 受信時に最大1 target を処理（Cron lease なし）
+ * - Recovery Cron: 1時間ごとに failed/expired 回復 + pending 処理、cleanup は日次
  */
 import {
   createCronWorker,
@@ -9,6 +9,7 @@ import {
 } from "../shared/createCronWorker.ts";
 import {
   processStaticRebuildQueue,
+  reconcileStaleQueue,
 } from "../json-generator/queue.ts";
 import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
@@ -20,27 +21,40 @@ import {
 } from "../shared/runJob.ts";
 import { withSerializedD1 } from "../shared/serializedD1.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
+import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
+import { handleStaticRebuildWakeQueue } from "./staticRebuildWakeQueue.ts";
 
 export interface Env {
   DB: D1Database;
   R2: R2Bucket;
   KV: KVNamespace;
+  STATIC_REBUILD_WAKE_QUEUE?: {
+    send: (body: unknown) => Promise<void>;
+  };
   WORKER_ADMIN_TOKEN?: string;
   BUILD_COMMIT_SHA?: string;
+  QUEUE_DISPATCH_ENABLED?: string;
+  QUEUE_CONTINUATION_ENABLED?: string;
+  QUEUE_YOUTUBE_SYNC_ENABLED?: string;
 }
 
-const CLEANUP_INTERVAL_SEC = 3600;
-const CONTENT_JOBS_LEASE_SEC = 14 * 60;
+const CLEANUP_INTERVAL_SEC = 24 * 3600;
+const CONTENT_JOBS_LEASE_SEC = 55 * 60;
 const CLEANUP_LEASE_SEC = 10 * 60;
 
-type QueueResult = { processed: number; failed: number; skipped?: number };
+type QueueResult = {
+  processed: number;
+  failed: number;
+  skipped?: number;
+  hasMore?: boolean;
+};
 type QueueRunner = (env: Env) => Promise<QueueResult>;
 
 function rebuildEnvironment(env: Env): Env {
   return withDeduplicatingR2(withSerializedD1(env));
 }
 
-export async function runContentJobs(
+export async function runContentJobsRecovery(
   env: Env,
   context: Pick<CronRunContext, "signal"> = { signal: new AbortController().signal },
 ): Promise<void> {
@@ -56,16 +70,29 @@ export async function runContentJobs(
           signal: context.signal,
         },
         async (signal) => {
+          const rebuildEnv = rebuildEnvironment(env);
+          const now = Math.floor(Date.now() / 1000);
+          await reconcileStaleQueue(rebuildEnv, now, signal);
+          let staticRebuildHasMore = false;
           const rebuild = await runJob(
             "content-jobs",
             "static-rebuild-queue",
-            () =>
-              processStaticRebuildQueue(
-                rebuildEnvironment(env),
-                signal,
-              ),
+            async () => {
+              const result = await processStaticRebuildQueue(rebuildEnv, signal);
+              staticRebuildHasMore = Boolean(result.hasMore);
+              return result;
+            },
             { commitSha: env.BUILD_COMMIT_SHA },
           );
+          if (staticRebuildHasMore) {
+            await sendWorkerQueueWakeBestEffort({
+              queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
+              kind: "static_rebuild_available",
+              source: "recovery",
+              envFlags: env,
+              kv: env.KV,
+            });
+          }
           const cleanupLease = await withCronLease(
             env,
             {
@@ -86,10 +113,10 @@ export async function runContentJobs(
             ? (cleanupLease.value ?? {})
             : await runJob(
                 "content-jobs",
-              "cleanup",
-              async () => ({ skipped: 1 }),
-              { commitSha: env.BUILD_COMMIT_SHA },
-            );
+                "cleanup",
+                async () => ({ skipped: 1 }),
+                { commitSha: env.BUILD_COMMIT_SHA },
+              );
           return throwIfJobFailed(
             "content-jobs",
             "cron",
@@ -104,6 +131,9 @@ export async function runContentJobs(
     { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
   );
 }
+
+/** @deprecated use runContentJobsRecovery */
+export const runContentJobs = runContentJobsRecovery;
 
 export async function handleContentJobsFetch(
   req: Request,
@@ -157,8 +187,18 @@ export async function handleContentJobsFetch(
   return Response.json({ ok: true, ...leaseResult.value });
 }
 
-export default createCronWorker<Env>({
+const cronWorker = createCronWorker<Env>({
   service: "flamenode-content-jobs",
-  run: runContentJobs,
+  run: runContentJobsRecovery,
   fetch: handleContentJobsFetch,
 });
+
+export default {
+  ...cronWorker,
+  async queue(
+    batch: MessageBatch<unknown>,
+    env: Env,
+  ): Promise<void> {
+    await handleStaticRebuildWakeQueue(batch, env);
+  },
+};

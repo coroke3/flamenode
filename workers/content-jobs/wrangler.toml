@@ -3,10 +3,27 @@ main = "index.ts"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 
-# 現行のCloudflare上限は運用文書の公式リンクを正本とする。
-# 1回1 targetに固定し、15分間隔で小分け処理する。
+# Recovery Cron: hourly fallback when Queue wake is missed.
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["15 * * * *"]
+
+[vars]
+QUEUE_DISPATCH_ENABLED = "0"
+QUEUE_CONTINUATION_ENABLED = "0"
+QUEUE_YOUTUBE_SYNC_ENABLED = "0"
+
+[[queues.producers]]
+queue = "flamenode-static-rebuild-wake"
+binding = "STATIC_REBUILD_WAKE_QUEUE"
+
+[[queues.consumers]]
+queue = "flamenode-static-rebuild-wake"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 3
+retry_delay = 60
+dead_letter_queue = "flamenode-static-rebuild-dlq"
+max_concurrency = 1
 
 [[d1_databases]]
 binding = "DB"

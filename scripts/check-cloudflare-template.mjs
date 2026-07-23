@@ -6,6 +6,16 @@ import { pathToFileURL } from "node:url";
 
 const ZERO_D1_ID = "00000000-0000-0000-0000-000000000000";
 const ZERO_KV_ID = "00000000000000000000000000000000";
+const QUEUE_FEATURE_FLAGS = [
+  "QUEUE_DISPATCH_ENABLED",
+  "QUEUE_CONTINUATION_ENABLED",
+  "QUEUE_YOUTUBE_SYNC_ENABLED",
+];
+const LEGACY_CRON_PATTERNS = [
+  /\*\/5\s+\*\s+\*\s+\*\s+\*/,
+  /\*\/15\s+\*\s+\*\s+\*\s+\*/,
+  /7,22,37,52\s+\*\s+\*\s+\*\s+\*/,
+];
 const TOML_SCAN_EXCLUDED_DIRECTORIES = new Set([
   ".cloudflare",
   ".git",
@@ -15,9 +25,61 @@ const TOML_SCAN_EXCLUDED_DIRECTORIES = new Set([
 ]);
 
 const expectedWorkers = new Map([
-  ["fast-jobs", { name: "flamenode-fast-jobs", d1: true, r2: false, kv: true }],
-  ["content-jobs", { name: "flamenode-content-jobs", d1: true, r2: true, kv: true }],
-  ["sync-jobs", { name: "flamenode-sync-jobs", d1: true, r2: false, kv: true }],
+  [
+    "fast-jobs",
+    {
+      name: "flamenode-fast-jobs",
+      d1: true,
+      r2: false,
+      kv: true,
+      crons: ["0 * * * *"],
+      queueProducers: [
+        { queue: "flamenode-notification-wake", binding: "NOTIFICATION_WAKE_QUEUE" },
+      ],
+      queueConsumer: {
+        queue: "flamenode-notification-wake",
+        dlq: "flamenode-notification-dlq",
+        retryDelay: 60,
+      },
+    },
+  ],
+  [
+    "content-jobs",
+    {
+      name: "flamenode-content-jobs",
+      d1: true,
+      r2: true,
+      kv: true,
+      crons: ["15 * * * *"],
+      queueProducers: [
+        { queue: "flamenode-static-rebuild-wake", binding: "STATIC_REBUILD_WAKE_QUEUE" },
+      ],
+      queueConsumer: {
+        queue: "flamenode-static-rebuild-wake",
+        dlq: "flamenode-static-rebuild-dlq",
+        retryDelay: 60,
+      },
+    },
+  ],
+  [
+    "sync-jobs",
+    {
+      name: "flamenode-sync-jobs",
+      d1: true,
+      r2: false,
+      kv: true,
+      crons: ["7 * * * *", "52 * * * *"],
+      queueProducers: [
+        { queue: "flamenode-youtube-sync-wake", binding: "YOUTUBE_SYNC_WAKE_QUEUE" },
+        { queue: "flamenode-static-rebuild-wake", binding: "STATIC_REBUILD_WAKE_QUEUE" },
+      ],
+      queueConsumer: {
+        queue: "flamenode-youtube-sync-wake",
+        dlq: "flamenode-youtube-sync-dlq",
+        retryDelay: 300,
+      },
+    },
+  ],
 ]);
 
 function requirePattern(errors, text, relative, pattern, description) {
@@ -72,7 +134,54 @@ function checkAllTrackedTomlIds(errors, root) {
   }
 }
 
-function checkExactlyOneCron(errors, text, relative) {
+function checkQueueFeatureFlags(errors, text, relative) {
+  for (const name of QUEUE_FEATURE_FLAGS) {
+    requirePattern(
+      errors,
+      text,
+      relative,
+      new RegExp(`^\\s*${name}\\s*=\\s*"0"\\s*$`, "m"),
+      `${name} must default to "0"`,
+    );
+  }
+}
+
+function checkQueueProducer(errors, text, relative, { queue, binding }) {
+  const blockPattern = new RegExp(
+    `\\[\\[queues\\.producers\\]\\][\\s\\S]*?queue\\s*=\\s*"${queue}"[\\s\\S]*?binding\\s*=\\s*"${binding}"`,
+    "m",
+  );
+  requirePattern(errors, text, relative, blockPattern, `queue producer ${binding} -> ${queue} is required`);
+}
+
+function checkQueueConsumer(errors, text, relative, { queue, dlq, retryDelay }) {
+  const blockPattern = new RegExp(
+    `\\[\\[queues\\.consumers\\]\\][\\s\\S]*?queue\\s*=\\s*"${queue}"[\\s\\S]*?(?=\\n\\[\\[|$)`,
+  );
+  const block = text.match(blockPattern)?.[0];
+  if (!block) {
+    errors.push(`${relative}: queue consumer ${queue} is required`);
+    return;
+  }
+  for (const [key, expected] of [
+    ["max_batch_size", "10"],
+    ["max_batch_timeout", "1"],
+    ["max_retries", "3"],
+    ["retry_delay", String(retryDelay)],
+    ["dead_letter_queue", dlq],
+    ["max_concurrency", "1"],
+  ]) {
+    const pattern =
+      key === "dead_letter_queue"
+        ? new RegExp(`^\\s*${key}\\s*=\\s*"${expected}"\\s*$`, "m")
+        : new RegExp(`^\\s*${key}\\s*=\\s*${expected}\\s*$`, "m");
+    if (!pattern.test(block)) {
+      errors.push(`${relative}: queue consumer ${queue} must set ${key} = ${expected}`);
+    }
+  }
+}
+
+function checkWorkerCronSchedule(errors, text, relative, expectedCrons) {
   const declarations = [...text.matchAll(/^\s*crons\s*=\s*\[([^\]]*)\]\s*$/gm)];
   if (declarations.length !== 1) {
     errors.push(`${relative}: exactly one cron declaration is required`);
@@ -80,8 +189,17 @@ function checkExactlyOneCron(errors, text, relative) {
   }
   const entries = [...declarations[0][1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
   const residual = declarations[0][1].replace(/"[^"]+"/g, "").replace(/[\s,]/g, "");
-  if (entries.length !== 1 || residual) {
-    errors.push(`${relative}: exactly one valid cron expression is required`);
+  if (residual || entries.length !== expectedCrons.length) {
+    errors.push(`${relative}: cron schedule must be ${expectedCrons.join(", ")}`);
+    return;
+  }
+  for (const cron of expectedCrons) {
+    if (!entries.includes(cron)) errors.push(`${relative}: cron expression ${cron} is required`);
+  }
+  for (const pattern of LEGACY_CRON_PATTERNS) {
+    if (entries.some((entry) => pattern.test(entry))) {
+      errors.push(`${relative}: legacy cron schedule is forbidden`);
+    }
   }
 }
 
@@ -95,7 +213,13 @@ function checkWorker(errors, root, directory, expected) {
   if (expected.d1) requirePattern(errors, text, relative, /\[\[d1_databases\]\][\s\S]*?binding\s*=\s*"DB"/m, "D1 binding DB is required");
   if (expected.r2) requirePattern(errors, text, relative, /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"R2"/m, "R2 binding R2 is required");
   if (expected.kv) requirePattern(errors, text, relative, /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
-  checkExactlyOneCron(errors, text, relative);
+  checkQueueFeatureFlags(errors, text, relative);
+  const producers = expected.queueProducers ?? (expected.queueProducer ? [expected.queueProducer] : []);
+  for (const producer of producers) {
+    checkQueueProducer(errors, text, relative, producer);
+  }
+  checkQueueConsumer(errors, text, relative, expected.queueConsumer);
+  checkWorkerCronSchedule(errors, text, relative, expected.crons);
   rejectPattern(errors, text, relative, /\b(?:token|secret|password|api_key)\s*=\s*"/i, "secret assignments must not be committed");
   rejectPattern(errors, text, relative, /pages_build_output_dir|\.vercel\/output|wrangler\s+pages/i, "legacy Pages configuration is forbidden");
 }
@@ -146,6 +270,20 @@ export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   rejectPattern(errors, rootToml, "wrangler.toml", /\[durable_objects\]|\[\[migrations\]\]/i, "unapproved Durable Object bindings are forbidden");
   rejectPattern(errors, rootToml, "wrangler.toml", /\b(?:token|secret|password|api_key)\s*=\s*"/i, "secret assignments must not be committed");
   rejectPattern(errors, rootToml, "wrangler.toml", /FLAMENODE_LOCAL_PREVIEW/, "local preview allowance must not be tracked in the Worker template");
+  checkQueueFeatureFlags(errors, rootToml, "wrangler.toml");
+  checkQueueProducer(errors, rootToml, "wrangler.toml", {
+    queue: "flamenode-notification-wake",
+    binding: "NOTIFICATION_WAKE_QUEUE",
+  });
+  checkQueueProducer(errors, rootToml, "wrangler.toml", {
+    queue: "flamenode-static-rebuild-wake",
+    binding: "STATIC_REBUILD_WAKE_QUEUE",
+  });
+  checkQueueProducer(errors, rootToml, "wrangler.toml", {
+    queue: "flamenode-youtube-sync-wake",
+    binding: "YOUTUBE_SYNC_WAKE_QUEUE",
+  });
+  rejectPattern(errors, rootToml, "wrangler.toml", /\[\[queues\.consumers\]\]/m, "the web Worker must not define queue consumers");
 
   const directories = workerTemplateDirectories(root);
   const expectedDirectories = [...expectedWorkers.keys()].sort();

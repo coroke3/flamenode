@@ -8,6 +8,9 @@ declare global {
     DB: D1Database;
     BUCKET: R2Bucket;
     KV: KVNamespace;
+    NOTIFICATION_WAKE_QUEUE?: Queue;
+    STATIC_REBUILD_WAKE_QUEUE?: Queue;
+    YOUTUBE_SYNC_WAKE_QUEUE?: Queue;
   }
 }
 
@@ -19,6 +22,9 @@ export interface FlameNodeEnv {
   DB: D1Database;
   BUCKET: R2Bucket;
   KV: KVNamespace;
+  NOTIFICATION_WAKE_QUEUE?: Queue;
+  STATIC_REBUILD_WAKE_QUEUE?: Queue;
+  YOUTUBE_SYNC_WAKE_QUEUE?: Queue;
   // 認証関連 (Auth.js)
   AUTH_SECRET?: string;
   AUTH_DISCORD_ID?: string;
@@ -34,6 +40,9 @@ export interface FlameNodeEnv {
   NEXT_PUBLIC_SITE_URL?: string;
   FLAMENODE_LOCAL_PREVIEW?: string;
   FORCE_STATIC_ONLY?: string;
+  QUEUE_DISPATCH_ENABLED?: string;
+  QUEUE_CONTINUATION_ENABLED?: string;
+  QUEUE_YOUTUBE_SYNC_ENABLED?: string;
 }
 
 type BindingName = "DB" | "BUCKET" | "KV" | "context";
@@ -140,6 +149,14 @@ function isKvNamespace(value: unknown): value is KVNamespace {
   );
 }
 
+function isQueueBinding(value: unknown): value is Queue {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { send?: unknown }).send === "function"
+  );
+}
+
 function isLocalOrBuildPhase(): boolean {
   return (
     process.env.NODE_ENV !== "production" ||
@@ -177,6 +194,9 @@ function normalizeBindings(candidate: unknown): FlameNodeEnv {
   const validDb = isD1Database(db) ? db : undefined;
   const validBucket = isR2Bucket(bucket) ? bucket : undefined;
   const validKv = isKvNamespace(kv) ? kv : undefined;
+  const notificationWakeQueue = recordValue(record, "NOTIFICATION_WAKE_QUEUE");
+  const staticRebuildWakeQueue = recordValue(record, "STATIC_REBUILD_WAKE_QUEUE");
+  const youtubeSyncWakeQueue = recordValue(record, "YOUTUBE_SYNC_WAKE_QUEUE");
   if (!validDb || !validBucket || !validKv) {
     throw new CloudflareBindingsUnavailableError([
       ...(!validDb ? (["DB"] as const) : []),
@@ -190,6 +210,15 @@ function normalizeBindings(candidate: unknown): FlameNodeEnv {
     DB: validDb,
     BUCKET: validBucket,
     KV: validKv,
+    NOTIFICATION_WAKE_QUEUE: isQueueBinding(notificationWakeQueue)
+      ? notificationWakeQueue
+      : undefined,
+    STATIC_REBUILD_WAKE_QUEUE: isQueueBinding(staticRebuildWakeQueue)
+      ? staticRebuildWakeQueue
+      : undefined,
+    YOUTUBE_SYNC_WAKE_QUEUE: isQueueBinding(youtubeSyncWakeQueue)
+      ? youtubeSyncWakeQueue
+      : undefined,
     AUTH_SECRET: stringValue(record, "AUTH_SECRET", allowProcessFallback),
     AUTH_DISCORD_ID: stringValue(
       record,
@@ -246,6 +275,26 @@ function normalizeBindings(candidate: unknown): FlameNodeEnv {
     FLAMENODE_LOCAL_PREVIEW: stringValue(
       record,
       "FLAMENODE_LOCAL_PREVIEW",
+      allowProcessFallback,
+    ),
+    FORCE_STATIC_ONLY: stringValue(
+      record,
+      "FORCE_STATIC_ONLY",
+      allowProcessFallback,
+    ),
+    QUEUE_DISPATCH_ENABLED: stringValue(
+      record,
+      "QUEUE_DISPATCH_ENABLED",
+      allowProcessFallback,
+    ),
+    QUEUE_CONTINUATION_ENABLED: stringValue(
+      record,
+      "QUEUE_CONTINUATION_ENABLED",
+      allowProcessFallback,
+    ),
+    QUEUE_YOUTUBE_SYNC_ENABLED: stringValue(
+      record,
+      "QUEUE_YOUTUBE_SYNC_ENABLED",
       allowProcessFallback,
     ),
   };

@@ -129,6 +129,7 @@ async function mutateVideoInteraction(
     },
   ];
 
+  let staticRebuildWakeSource: "web" | undefined;
   if (kind === "like") {
     const nextLikeCount = active
       ? target.app_like_count + 1
@@ -183,6 +184,7 @@ async function mutateVideoInteraction(
     ]);
     mutationStatements.push(...queue.statements);
     expectedChanges.push(...queue.expectedChanges);
+    staticRebuildWakeSource = "web";
   }
 
   try {
@@ -190,6 +192,7 @@ async function mutateVideoInteraction(
       mutationStatements,
       expectedMutationChanges: expectedChanges,
       audits,
+      staticRebuildWakeSource,
     });
   } catch (error) {
     console.warn("[video-interaction] atomic mutation rejected", error);

@@ -9,10 +9,20 @@ import {
   indexUniqueStaticRebuildTargetRows,
   staticRebuildTargetKey,
 } from "./queueBatchCore";
+import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
+import type { QueueSendBinding } from "@/lib/queues/sendQueueWakeBestEffort";
+import { wakeStaticRebuildQueueAfterCommit } from "@/lib/queues/wakeStaticRebuildQueueAfterCommit";
 import type {
   EnqueueStaticRebuildInput,
   StaticRebuildPriority,
 } from "./types";
+
+export type EnqueueStaticRebuildOptions = {
+  wakeSource?: QueueWakeSource;
+  sentKinds?: Set<QueueWakeKind>;
+  queue?: QueueSendBinding | null;
+  envFlags?: Record<string, string | undefined> | null;
+};
 
 const PRIORITY_ORDER: Record<StaticRebuildPriority, number> = {
   high: 0,
@@ -337,6 +347,7 @@ function shouldSkipRecentRow(
 export async function enqueueStaticRebuild(
   db: DB,
   input: EnqueueStaticRebuildInput,
+  options?: EnqueueStaticRebuildOptions,
 ): Promise<void> {
   const target = input;
   const now = Math.floor(Date.now() / 1000);
@@ -386,7 +397,10 @@ export async function enqueueStaticRebuild(
               : []),
           )!,
         );
-        if ((result.meta?.changes ?? 0) === 1) return;
+        if ((result.meta?.changes ?? 0) === 1) {
+          await wakeAfterSuccessfulEnqueue(options);
+          return;
+        }
         continue;
       }
 
@@ -406,7 +420,10 @@ export async function enqueueStaticRebuild(
           updated_at: now,
         })
         .onConflictDoNothing();
-      if ((insertResult.meta?.changes ?? 0) === 1) return;
+      if ((insertResult.meta?.changes ?? 0) === 1) {
+        await wakeAfterSuccessfulEnqueue(options);
+        return;
+      }
       // A concurrent request inserted the partial-unique active row. Loop once
       // more so priority/reason are merged through the same CAS update path.
     }
@@ -437,13 +454,27 @@ export async function enqueueStaticRebuild(
 export async function enqueueStaticRebuildMany(
   db: DB,
   items: EnqueueStaticRebuildInput[],
+  options?: EnqueueStaticRebuildOptions,
 ): Promise<void> {
+  const sentKinds = options?.sentKinds ?? new Set<QueueWakeKind>();
   const deduped = dedupeStaticRebuildInputs(items);
   for (let offset = 0; offset < deduped.length; offset += ENQUEUE_MANY_CONCURRENCY) {
     await Promise.all(
       deduped
         .slice(offset, offset + ENQUEUE_MANY_CONCURRENCY)
-        .map((item) => enqueueStaticRebuild(db, item)),
+        .map((item) =>
+          enqueueStaticRebuild(db, item, { ...options, sentKinds }),
+        ),
     );
   }
+}
+
+async function wakeAfterSuccessfulEnqueue(
+  options?: EnqueueStaticRebuildOptions,
+): Promise<void> {
+  await wakeStaticRebuildQueueAfterCommit(options?.wakeSource ?? "web", {
+    sentKinds: options?.sentKinds,
+    queue: options?.queue,
+    envFlags: options?.envFlags,
+  });
 }

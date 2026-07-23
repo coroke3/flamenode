@@ -352,6 +352,7 @@ export async function refreshXUserIcon(formData: FormData): Promise<UserAdminRes
           strict: true,
         },
       ],
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
     });
   } catch (error) {
     return mutationError(error);

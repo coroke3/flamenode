@@ -172,6 +172,7 @@ export async function setManageVideoStatus(
       context: `manage-video-status:${eventId}`,
       retention_class: "normal", strict: true,
     }],
+    staticRebuildWakeSource: queue.statements.length > 0 ? "manage" : undefined,
   });
 
   revalidatePath(`/manage/events/${eventId}/videos`);

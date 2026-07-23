@@ -36,6 +36,8 @@ import type {
   LegacyImportApplyStage,
 } from "./previewStore";
 import { legacyImportRebuildQueueId } from "./rebuildQueueCore";
+import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
+import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 
 const LEGACY_IMPORT_SYSTEM_USER_ID = "system_legacy_import";
 const MAX_IDS_PER_QUERY = 80;
@@ -1336,6 +1338,7 @@ async function applyEvent(
           )]
         : []),
     ],
+    staticRebuildWakeSource: "import",
   });
   return existing ? "replaced" : "created";
 }
@@ -1617,6 +1620,7 @@ async function applyVideo(
   plannedQuestions: readonly PlannedQuestion[],
   expectedExistingForSkip: boolean,
   options: ApplyOptions,
+  wakeSentKinds?: Set<QueueWakeKind>,
 ): Promise<"created" | "replaced" | "skipped"> {
   const support = await loadVideoSupportSnapshot(
     db,
@@ -2260,6 +2264,8 @@ async function applyVideo(
           )]
         : []),
     ],
+    staticRebuildWakeSource: "import",
+    wakeSentKinds,
   });
   return existing ? "replaced" : "created";
 }
@@ -2466,6 +2472,7 @@ export async function applyLegacyImportPlanStep(
       const video = plan.videos[input.progress.index];
       const answers = plan.videoCustomAnswers.filter((row) => row.video_id === video.id);
       const questionIds = new Set(answers.map((answer) => answer.question_id));
+      const wakeSentKinds = new Set<QueueWakeKind>();
       const action = await applyVideo(
         db,
         video,
@@ -2477,7 +2484,11 @@ export async function applyLegacyImportPlanStep(
         plan.eventCustomQuestions.filter((question) => questionIds.has(question.id)),
         input.progress.skipExistingVideoIds.includes(video.id),
         options,
+        wakeSentKinds,
       );
+      if (video.youtube_video_id && action !== "skipped") {
+        await sendYoutubeSyncPendingWakeBestEffort("import", wakeSentKinds);
+      }
       outcome = { kind: "video", action };
       break;
     }

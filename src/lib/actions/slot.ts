@@ -187,6 +187,7 @@ async function commitSlotUpdates(args: {
       restore_strategy: "update_before",
       strict: true,
     })),
+    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   });
 }
 

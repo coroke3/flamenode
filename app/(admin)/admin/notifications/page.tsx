@@ -125,6 +125,7 @@ export default async function AdminNotificationsPage({
     failed: 0,
     cancelled: 0,
   };
+  let deadLetterCount = 0;
   let expiredLeaseCount = 0;
   let error: string | null = null;
 
@@ -194,10 +195,10 @@ export default async function AdminNotificationsPage({
         pending: statusCounts.pending ?? 0,
         processing: statusCounts.processing ?? 0,
         sent: statusCounts.sent ?? 0,
-        failed:
-          (statusCounts.failed ?? 0) + (statusCounts.dead_letter ?? 0),
+        failed: statusCounts.failed ?? 0,
         cancelled: statusCounts.cancelled ?? 0,
       };
+      deadLetterCount = statusCounts.dead_letter ?? 0;
       expiredLeaseCount = Number(expiredLeases[0]?.count ?? 0);
     } catch (cause) {
       error = String(cause);
@@ -225,7 +226,7 @@ export default async function AdminNotificationsPage({
     <div>
       <AdminPageHeader
         title="通知配信状況"
-        description="notification_outbox の直近100件。Dispatcherは5分間隔・1回最大6件で処理し、失敗時は1/5/15分間隔で最大4回試行します。"
+        description="notification_outbox の直近100件。Queue wake で即時起動し、1回最大6件を処理。毎時 Recovery Cron がバックアップします。失敗時は1/5/15分間隔で最大4回試行します。"
       />
       <p style={{ marginTop: 6, fontSize: 11 }}>
         <Link href="/admin/audit?table=notification_outbox&record=bulk_retry">
@@ -236,19 +237,22 @@ export default async function AdminNotificationsPage({
       {expiredLeaseCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger" style={{ marginTop: 14 }}>
           <strong>配送リース期限超過 {expiredLeaseCount} 件</strong>
-          {" "}— 次のcronで自動回収されます。10分以上続く場合はWorkerとD1を確認してください。
+          {" "}— 毎時 Recovery Cron で自動回収されます。10分以上続く場合はWorkerとD1を確認してください。
         </div>
-      ) : counts.failed > 0 ? (
+      ) : counts.failed > 0 || deadLetterCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger" style={{ marginTop: 14 }}>
           <span>
-            <strong>最終失敗 {counts.failed} 件</strong>
+            <strong>
+              失敗 {counts.failed} 件
+              {deadLetterCount > 0 ? ` / dead_letter ${deadLetterCount} 件` : ""}
+            </strong>
             {" "}— 原因を確認し、必要な通知だけ再試行してください。
           </span>{" "}
           <NotificationActionButton kind="bulk-retry" />
         </div>
       ) : counts.pending > 0 ? (
         <div role="status" className="fn-alert fn-alert--warn" style={{ marginTop: 14 }}>
-          配信待ち <strong>{counts.pending} 件</strong>（次の5分cronで最大6件を処理）
+          配信待ち <strong>{counts.pending} 件</strong>（Queue wake で処理、毎時 Recovery がバックアップ）
         </div>
       ) : counts.sent > 0 ? (
         <div role="status" className="fn-alert fn-alert--success" style={{ marginTop: 14 }}>
@@ -275,7 +279,7 @@ export default async function AdminNotificationsPage({
             href={filterHref({ status: key, ...filterInput })}
             className={`fn-btn fn-btn-sm ${status === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
           >
-            {label} ({counts[key]})
+            {label} ({key === "failed" ? counts.failed + deadLetterCount : counts[key]})
           </Link>
         ))}
       </nav>
