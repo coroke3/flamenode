@@ -76,18 +76,23 @@ test("公開layoutはserver authを呼ばず静的シェルとして描画する
   assert.doesNotMatch(publicLayout, /await auth\(/);
   assert.doesNotMatch(publicLayout, /buildHeaderUser/);
   assert.doesNotMatch(publicLayout, /userNeedsXIdOnboarding/);
-  assert.doesNotMatch(publicLayout, /CostGuardBanner/);
+  assert.match(publicLayout, /CostGuardBanner/);
+  assert.doesNotMatch(publicLayout, /source=["']admin["']/);
   assert.match(publicLayout, /<PublicHeader\s*\/>/);
 });
 
 test("認証layoutは動的renderを明示しNext.js制御フロー例外を握り潰さない", () => {
   assert.match(currentUser, /unstable_rethrow\(error\)/);
   const [authLayout, manageLayout, adminLayout] = authLayouts;
-  assert.match(authLayout, /await buildHeaderUser/);
+  assert.match(authLayout, /await getLayoutHeaderUser/);
+  assert.doesNotMatch(authLayout, /await auth\(/);
+  assert.doesNotMatch(authLayout, /await buildHeaderUser/);
+  assert.match(authLayout, /await getCurrentUser/);
   assert.match(manageLayout, /await getLayoutHeaderUser/);
   assert.doesNotMatch(manageLayout, /await auth\(/);
   assert.match(manageLayout, /await getCurrentUser/);
   assert.match(adminLayout, /await getLayoutHeaderUser\(false\)/);
+  assert.match(adminLayout, /<CostGuardBanner source="admin" \/>/);
   assert.doesNotMatch(adminLayout, /await auth\(/);
   assert.doesNotMatch(adminLayout, /await getCurrentUser/);
   for (const layout of authLayouts) {

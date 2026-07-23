@@ -45,6 +45,7 @@ import {
   processedXIdRequestMessage,
   reconcilePendingXIdRequest,
 } from "@/lib/actions/xidRequestReliabilityCore";
+import { enqueueAfterXUserPublicUpdate } from "@/lib/staticRebuild/hooks";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -690,6 +691,11 @@ export async function updateXIdProfile(formData: FormData): Promise<XIdActionRes
       },
     ],
   });
+  await enqueueAfterXUserPublicUpdate(db, {
+    xUserId,
+    reason: "x_user_profile_update",
+    requestedByUserId: authUserId,
+  });
 
   revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "X ID のプロフィールを更新しました。" };
@@ -808,6 +814,11 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
       },
     ],
   });
+  await enqueueAfterXUserPublicUpdate(db, {
+    xUserId,
+    reason: "x_user_icon_update",
+    requestedByUserId: authUserId,
+  });
   revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "アイコンを更新しました。" };
 }
@@ -863,6 +874,11 @@ export async function uploadXIdIcon(
           retention_class: "long_audit",
         },
       ],
+    });
+    await enqueueAfterXUserPublicUpdate(db, {
+      xUserId,
+      reason: "x_user_icon_update",
+      requestedByUserId: authUserId,
     });
   } catch (error) {
     await Promise.allSettled([env.BUCKET.delete(stagingKey), env.BUCKET.delete(key)]);

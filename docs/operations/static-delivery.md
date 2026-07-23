@@ -15,6 +15,10 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 3. 解決不能時は `static_only` へ倒し、`normal` へは倒さない
 4. cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない
 
+公開 layout の `CostGuardBanner` は `source` 省略（= public）で、D1 の `system_settings` を読まず env / isolate / KV のみ参照する。admin layout は `source="admin"` で D1 正本を読む。
+
+公開主要ページは `runWithPublicRequestMetrics` で構造化ログ（`public_request_metrics`）を出し、D1 への永続化はしない。
+
 静的再生成は `content-jobs` が **1 target / 15分** で処理する。表示用ポリシー正本は `src/lib/operationMode/policy.ts` の `STATIC_REBUILD_ITEMS_PER_RUN`（= `workers/json-generator/queuePolicy.ts` の `MAX_QUEUE_ITEMS_PER_RUN`）と一致させる。
 
 主な公開 artifact:
@@ -26,6 +30,9 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 | 作品一覧（人気） | `list/popular.json` | `list_popular` |
 | 検索索引 | `search-index-lite.json` | `search_index` |
 | イベント一覧 | `events/index.json` | `events_index` |
+| イベント詳細 | `events/{id}.json` | `event` |
 | クリエイター一覧 | `users/index.json` | `users_index` |
+| クリエイター詳細 | `users/{id}.json` + `users/{id}/works|collabs/p{n}.json` | `user` |
+| おすすめ | `recommend.json` | `recommend` |
 | 利用規約 | `rules/current.json` | `rules` |
 | サイトマップ | 上記索引から動的生成 | — |

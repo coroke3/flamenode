@@ -1,6 +1,14 @@
 import "server-only";
 
 import { getDatabase, getEnv } from "@/lib/cloudflare";
+import {
+  logPublicRequestMetrics,
+  recordPublicD1Query,
+  recordPublicR2Get,
+  recordPublicStaticHit,
+  recordPublicStaticMiss,
+  runWithPublicRequestMetrics,
+} from "@/lib/observability/publicRequestMetrics";
 import { getPublicDataStrategy } from "@/lib/operationMode/policy";
 import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 import type { PublicDataStrategy } from "@/lib/operationMode/types";
@@ -53,8 +61,13 @@ import {
 } from "./staticUsersIndexCore";
 import {
   normalizeStaticUserProfile,
+  normalizeStaticUserVideoPage,
+  STATIC_USER_COLLABS_PAGE_SIZE,
+  STATIC_USER_WORKS_PAGE_SIZE,
   type StaticUserProfile,
   type StaticUserProfilePayload,
+  type StaticUserVideoPage,
+  type StaticUserVideoPagePayload,
 } from "./staticUserProfileCore";
 import {
   normalizeStaticVideoDetail,
@@ -68,6 +81,10 @@ import {
 } from "./loaderPolicy";
 
 export { canFallbackToDatabase, isMaintenanceStrategy };
+export {
+  logPublicRequestMetrics,
+  runWithPublicRequestMetrics,
+} from "@/lib/observability/publicRequestMetrics";
 
 export type PublicJsonLoadOptions = {
   r2Key: string;
@@ -120,6 +137,7 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
     try {
       const bucket = getEnv().BUCKET;
       if (!bucket) return null;
+      recordPublicR2Get();
       const object = await bucket.get(key);
       if (!object) return null;
       try {
@@ -170,11 +188,13 @@ export async function loadPublicJson<T>(
 ): Promise<PublicJsonLoadResult<T>> {
   const payload = await readStaticJson<T>(options.r2Key);
   if (payload !== null) {
+    recordPublicStaticHit();
     const mode = await resolvePublicOperationMode({ allowD1: false });
     const strategy = getPublicDataStrategy(mode);
     return { data: payload, source: "static", strategy, enqueued: false };
   }
 
+  recordPublicStaticMiss();
   const db = getDatabase();
   const mode = await resolvePublicOperationMode({ allowD1: true, db });
   const strategy = getPublicDataStrategy(mode);
@@ -192,6 +212,7 @@ export async function loadPublicJson<T>(
         options.targetType,
         options.targetId,
       );
+      recordPublicD1Query();
     } catch (error) {
       warnPublicStaticJson(options.targetType, "target_probe_failed", error);
     }
@@ -205,6 +226,7 @@ export async function loadPublicJson<T>(
           reason: options.reason,
           priority,
         });
+        recordPublicD1Query();
         enqueued = true;
       } catch (error) {
         warnPublicStaticJson(options.r2Key, "enqueue_failed", error);
@@ -407,6 +429,111 @@ export const loadStaticUserProfile = createPublicJsonLoader<
   normalize: normalizeStaticUserProfile,
 });
 
+function profileSectionToPage(
+  section: StaticUserProfile["works"],
+  generatedAt: number | null,
+): StaticUserVideoPage {
+  return {
+    page: 1,
+    total: section.total,
+    items: section.items,
+    pageSize: section.pageSize,
+    generatedAt,
+  };
+}
+
+export async function loadStaticUserWorksPage(params: {
+  userId: string;
+  page: number;
+  profile?: StaticUserProfile | null;
+  strategy?: PublicDataStrategy;
+}): Promise<
+  PublicJsonLoadResult<StaticUserVideoPage> & {
+    page: StaticUserVideoPage | null;
+  }
+> {
+  const pageNum = Math.max(1, Math.floor(params.page));
+  if (pageNum === 1 && params.profile) {
+    const normalized = profileSectionToPage(
+      params.profile.works,
+      params.profile.generatedAt,
+    );
+    return {
+      data: normalized,
+      page: normalized,
+      source: "static",
+      strategy: params.strategy ?? "static_json_only",
+      enqueued: false,
+    };
+  }
+
+  const result = await loadPublicJson<StaticUserVideoPagePayload>({
+    r2Key: `users/${params.userId}/works/${pageNum}.json`,
+    targetType: "user",
+    targetId: params.userId,
+    reason: "public_user_works_page_miss",
+  });
+  const normalizedPage = result.data
+    ? normalizeStaticUserVideoPage(
+        result.data,
+        pageNum,
+        STATIC_USER_WORKS_PAGE_SIZE,
+      )
+    : null;
+  const page =
+    normalizedPage &&
+    shouldUseStaticCollection(result.strategy, normalizedPage.items.length)
+      ? normalizedPage
+      : null;
+  return { ...result, data: page, page };
+}
+
+export async function loadStaticUserCollabsPage(params: {
+  userId: string;
+  page: number;
+  profile?: StaticUserProfile | null;
+  strategy?: PublicDataStrategy;
+}): Promise<
+  PublicJsonLoadResult<StaticUserVideoPage> & {
+    page: StaticUserVideoPage | null;
+  }
+> {
+  const pageNum = Math.max(1, Math.floor(params.page));
+  if (pageNum === 1 && params.profile) {
+    const normalized = profileSectionToPage(
+      params.profile.collabs,
+      params.profile.generatedAt,
+    );
+    return {
+      data: normalized,
+      page: normalized,
+      source: "static",
+      strategy: params.strategy ?? "static_json_only",
+      enqueued: false,
+    };
+  }
+
+  const result = await loadPublicJson<StaticUserVideoPagePayload>({
+    r2Key: `users/${params.userId}/collabs/${pageNum}.json`,
+    targetType: "user",
+    targetId: params.userId,
+    reason: "public_user_collabs_page_miss",
+  });
+  const normalizedPage = result.data
+    ? normalizeStaticUserVideoPage(
+        result.data,
+        pageNum,
+        STATIC_USER_COLLABS_PAGE_SIZE,
+      )
+    : null;
+  const page =
+    normalizedPage &&
+    shouldUseStaticCollection(result.strategy, normalizedPage.items.length)
+      ? normalizedPage
+      : null;
+  return { ...result, data: page, page };
+}
+
 export const loadStaticVideoDetail = createPublicJsonLoader<
   StaticVideoDetailPayload,
   StaticVideoDetail
@@ -430,5 +557,9 @@ export type { StaticRecentVideoPage } from "./staticRecentVideoCore";
 export type { StaticRecommendPools } from "./staticRecommendCore";
 export type { StaticTopData } from "./staticTopCore";
 export type { StaticUsersIndex, StaticUsersIndexEntry } from "./staticUsersIndexCore";
-export type { StaticUserProfile } from "./staticUserProfileCore";
+export type {
+  StaticUserProfile,
+  StaticUserVideoPage,
+  StaticUserVideoSection,
+} from "./staticUserProfileCore";
 export type { StaticVideoDetail } from "./staticVideoDetailCore";

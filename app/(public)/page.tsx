@@ -38,6 +38,10 @@ import { type HomeStats } from "@/components/layout/homeVisuals";
 import { loadStaticTopPage } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type { StaticTopData } from "@/lib/publicData/loader";
+import {
+  logPublicRequestMetrics,
+  runWithPublicRequestMetrics,
+} from "@/lib/publicData/loader";
 import { JsonLd } from "@/components/seo/JsonLd";
 import {
   SITE_DESCRIPTION,
@@ -140,6 +144,7 @@ async function fetchTopPageFromDatabase(): Promise<StaticTopData | null> {
 }
 
 export default async function TopPage(): Promise<React.ReactElement> {
+  return runWithPublicRequestMetrics("/", async () => {
   const staticLoaded = await loadStaticTopPage();
   const data =
     staticLoaded.top ??
@@ -186,6 +191,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
     },
   };
 
+  logPublicRequestMetrics();
   return (
     <div className={`fn-main ${styles.page}`}>
       <JsonLd data={websiteJsonLd} />
@@ -315,6 +321,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <HomeClosingCta />
     </div>
   );
+  });
 }
 
 function EmptyShelf({ message }: { message: string }): React.ReactElement {

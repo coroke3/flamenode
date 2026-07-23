@@ -25,9 +25,16 @@ import { normalizePortfolioContact } from "@/lib/profileContact";
 import { countablePublicVideoCondition } from "@/lib/db/queries";
 import { storedCreatorNameExpr } from "@/lib/db/displayExpr";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
-import { loadStaticUserProfile } from "@/lib/publicData/loader";
-import { canFallbackToDatabase } from "@/lib/publicData/loader";
-import type { StaticUserProfile } from "@/lib/publicData/loader";
+import {
+  canFallbackToDatabase,
+  loadStaticUserCollabsPage,
+  loadStaticUserWorksPage,
+  loadStaticUserProfile,
+  logPublicRequestMetrics,
+  runWithPublicRequestMetrics,
+} from "@/lib/publicData/loader";
+import type { StaticUserProfile, StaticUserVideoPage } from "@/lib/publicData/loader";
+import { recordPublicD1Fallback } from "@/lib/observability/publicRequestMetrics";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
 export const dynamic = "force-dynamic";
@@ -130,33 +137,74 @@ export default async function UserPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
-  const sp = (await searchParams) ?? {};
-  const worksPaging = clampPaging({
-    page: sp.worksPage,
-    pageSize: WORKS_PAGE_SIZE,
-    defaultPageSize: WORKS_PAGE_SIZE,
-    maxPageSize: WORKS_PAGE_SIZE,
-  });
-  const collabPaging = clampPaging({
-    page: sp.collabPage,
-    pageSize: COLLAB_PAGE_SIZE,
-    defaultPageSize: COLLAB_PAGE_SIZE,
-    maxPageSize: COLLAB_PAGE_SIZE,
-  });
-  const staticLoaded = await loadStaticUserProfile(id);
-  if (staticLoaded.data) {
-    return (
-      <StaticUserProfileView
-        profile={staticLoaded.data}
-        page={worksPaging.page}
-      />
-    );
-  }
-  if (!canFallbackToDatabase(staticLoaded.strategy)) {
-    notFound();
-  }
+  return runWithPublicRequestMetrics(`/user/${id}`, async () => {
+    const sp = (await searchParams) ?? {};
+    const worksPaging = clampPaging({
+      page: sp.worksPage,
+      pageSize: WORKS_PAGE_SIZE,
+      defaultPageSize: WORKS_PAGE_SIZE,
+      maxPageSize: WORKS_PAGE_SIZE,
+    });
+    const collabPaging = clampPaging({
+      page: sp.collabPage,
+      pageSize: COLLAB_PAGE_SIZE,
+      defaultPageSize: COLLAB_PAGE_SIZE,
+      maxPageSize: COLLAB_PAGE_SIZE,
+    });
+    const staticLoaded = await loadStaticUserProfile(id);
+    if (staticLoaded.data) {
+      const [worksLoaded, collabsLoaded] = await Promise.all([
+        worksPaging.page > 1
+          ? loadStaticUserWorksPage({
+              userId: id,
+              page: worksPaging.page,
+              profile: staticLoaded.data,
+              strategy: staticLoaded.strategy,
+            })
+          : Promise.resolve({
+              page: {
+                page: 1,
+                total: staticLoaded.data.works.total,
+                items: staticLoaded.data.works.items,
+                pageSize: staticLoaded.data.works.pageSize,
+                generatedAt: staticLoaded.data.generatedAt,
+              } satisfies StaticUserVideoPage,
+            }),
+        collabPaging.page > 1
+          ? loadStaticUserCollabsPage({
+              userId: id,
+              page: collabPaging.page,
+              profile: staticLoaded.data,
+              strategy: staticLoaded.strategy,
+            })
+          : Promise.resolve({
+              page: {
+                page: 1,
+                total: staticLoaded.data.collabs.total,
+                items: staticLoaded.data.collabs.items,
+                pageSize: staticLoaded.data.collabs.pageSize,
+                generatedAt: staticLoaded.data.generatedAt,
+              } satisfies StaticUserVideoPage,
+            }),
+      ]);
+      const view = (
+        <StaticUserProfileView
+          profile={staticLoaded.data}
+          worksPage={worksLoaded.page}
+          collabPage={collabsLoaded.page}
+          worksPageNum={worksPaging.page}
+          collabPageNum={collabPaging.page}
+        />
+      );
+      logPublicRequestMetrics();
+      return view;
+    }
+    if (!canFallbackToDatabase(staticLoaded.strategy)) {
+      notFound();
+    }
 
-  const bundle = await withDatabase(async (db) => {
+    recordPublicD1Fallback();
+    const bundle = await withDatabase(async (db) => {
     const userRow = await db
       .select()
       .from(xUsers)
@@ -331,7 +379,7 @@ export default async function UserPage({
     ].filter(Boolean),
   };
 
-  return (
+  const dbView = (
     <div className={`fn-public-container fn-page ${styles.page}`}>
       <JsonLd data={personJsonLd} />
       <section className={styles.profile}>
@@ -433,28 +481,48 @@ export default async function UserPage({
 
     </div>
   );
+    logPublicRequestMetrics();
+    return dbView;
+  });
 }
 
 function StaticUserProfileView({
   profile,
-  page,
+  worksPage,
+  collabPage,
+  worksPageNum,
+  collabPageNum,
 }: {
   profile: StaticUserProfile;
-  page: number;
+  worksPage: StaticUserVideoPage | null;
+  collabPage: StaticUserVideoPage | null;
+  worksPageNum: number;
+  collabPageNum: number;
 }): React.ReactElement {
   const { user } = profile;
-  const staticTotal = Math.min(profile.totalWorks, profile.recentVideos.length);
-  const ownTotalPages = totalPagesFor(staticTotal, WORKS_PAGE_SIZE);
+  const ownVideos = worksPage?.items ?? [];
+  const ownTotal = worksPage?.total ?? profile.works.total;
+  const collabVideos = collabPage?.items ?? [];
+  const collabTotal = collabPage?.total ?? profile.collabs.total;
+  const ownTotalPages = totalPagesFor(ownTotal, WORKS_PAGE_SIZE);
+  const collabTotalPages = totalPagesFor(collabTotal, COLLAB_PAGE_SIZE);
   const pageNum = Math.min(
-    Math.max(1, Math.floor(page)),
+    Math.max(1, Math.floor(worksPageNum)),
     Math.max(1, ownTotalPages),
   );
-  const offset = (pageNum - 1) * WORKS_PAGE_SIZE;
-  const ownVideos = profile.recentVideos.slice(offset, offset + WORKS_PAGE_SIZE);
+  const collabPageResolved = Math.min(
+    Math.max(1, Math.floor(collabPageNum)),
+    Math.max(1, collabTotalPages),
+  );
   const basePath = `/user/${encodeURIComponent(user.id)}`;
   const buildOwnHref = (p: number) => {
     const usp = new URLSearchParams();
     usp.set("worksPage", String(p));
+    return `${basePath}?${usp.toString()}`;
+  };
+  const buildCollabHref = (p: number) => {
+    const usp = new URLSearchParams();
+    usp.set("collabPage", String(p));
     return `${basePath}?${usp.toString()}`;
   };
   const profileIcon = cachedGoogleImageUrl(user.icon_url);
@@ -527,13 +595,34 @@ function StaticUserProfileView({
             <Pagination
               currentPage={pageNum}
               totalPages={ownTotalPages}
-              total={staticTotal}
+              total={ownTotal}
               pageSize={WORKS_PAGE_SIZE}
               buildHref={buildOwnHref}
               unitLabel="件"
             />
           </>
         )}
+
+        {collabTotal > 0 ? (
+          <section className={styles.subSection}>
+            <h2 className={styles.subTitle}>参加作品</h2>
+            <div className="fn-video-grid">
+              {collabVideos.map((v, index) => (
+                <div key={`${v.id}-static-collab-${index}`} className={styles.workCard}>
+                  <VideoCard video={v} />
+                </div>
+              ))}
+            </div>
+            <Pagination
+              currentPage={collabPageResolved}
+              totalPages={collabTotalPages}
+              total={collabTotal}
+              pageSize={COLLAB_PAGE_SIZE}
+              buildHref={buildCollabHref}
+              unitLabel="件"
+            />
+          </section>
+        ) : null}
       </section>
     </div>
   );

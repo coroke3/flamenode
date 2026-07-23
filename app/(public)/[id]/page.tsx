@@ -45,6 +45,10 @@ import {
 import { loadStaticVideoDetail } from "@/lib/publicData/loader";
 import { canFallbackToDatabase } from "@/lib/publicData/loader";
 import type { StaticVideoDetail } from "@/lib/publicData/loader";
+import {
+  logPublicRequestMetrics,
+  runWithPublicRequestMetrics,
+} from "@/lib/publicData/loader";
 import { buildPublicVideoViewModelFromStatic } from "@/lib/publicData/publicVideoDetailViewModel";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +121,7 @@ export default async function VideoDetailPage({
   const { id: rawId } = await params;
   const { playlist = "" } = (await searchParams) ?? {};
 
+  return runWithPublicRequestMetrics(`/${rawId}`, async () => {
   const staticProbe = await loadStaticVideoDetail(rawId);
   if (staticProbe.data) {
     const overlay = await fetchVideoViewerOverlay({
@@ -128,6 +133,7 @@ export default async function VideoDetailPage({
         staticProbe.data.publicEvents.find((event) => event.id === playlist)
           ?.title ?? null,
     });
+    logPublicRequestMetrics();
     return (
       <StaticVideoDetailView
         detail={staticProbe.data}
@@ -438,6 +444,7 @@ export default async function VideoDetailPage({
       </div>
     ) : null;
 
+  logPublicRequestMetrics();
   return (
     <div
       className={`fn-vd fn-public-container fn-page ${styles.page}`}
@@ -735,6 +742,7 @@ export default async function VideoDetailPage({
       </div>
     </div>
   );
+  });
 }
 
 type VideoViewerOverlay = {

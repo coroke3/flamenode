@@ -129,7 +129,28 @@ export async function enqueueAfterVideoUpdate(
     }
   }
   await enqueueStaticRebuildMany(db, items);
-}export function buildAfterVideoStatusChangeQueueBatch(
+}
+
+export async function enqueueAfterXUserPublicUpdate(
+  db: DB,
+  opts: {
+    xUserId: string;
+    reason: string;
+    requestedByUserId?: string | null;
+  },
+): Promise<void> {
+  await enqueueStaticRebuildMany(db, [
+    {
+      targetType: "user",
+      targetId: opts.xUserId,
+      reason: opts.reason,
+      requestedByUserId: opts.requestedByUserId,
+    },
+    usersIndexTarget(opts.reason),
+  ]);
+}
+
+export function buildAfterVideoStatusChangeQueueBatch(
   db: DB,
   opts: {
     videoId: string;
@@ -173,7 +194,9 @@ export async function enqueueAfterVideoUpdate(
     });
   }
   return buildStaticRebuildQueueBatch(db, items);
-}export function buildEventGroupChangeQueueBatch(
+}
+
+export function buildEventGroupChangeQueueBatch(
   db: DB,
   opts: Pick<HookBase, "reason" | "requestedByUserId">,
 ): Promise<StaticRebuildQueueBatch> {

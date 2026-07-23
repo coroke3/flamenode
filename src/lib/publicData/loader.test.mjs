@@ -39,6 +39,12 @@ test("overlay treats an empty static collection as a DB fallback miss", () => {
   assert.equal(shouldUseStaticCollection("maintenance", 0), true);
 });
 
+test("loader exposes paginated user profile loaders", () => {
+  assert.match(loaderSource, /loadStaticUserWorksPage/);
+  assert.match(loaderSource, /loadStaticUserCollabsPage/);
+  assert.match(loaderSource, /users\/\$\{params\.userId\}\/works\//);
+});
+
 test("loader は R2 を先に読み、ヒット時は allowD1:false で mode 解決する", () => {
   const r2Index = loaderSource.indexOf("readStaticJson");
   const hitIndex = loaderSource.indexOf("if (payload !== null)");

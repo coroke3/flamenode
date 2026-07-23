@@ -29,7 +29,8 @@ test("account summary APIはprivate no-storeで最小DTOだけを返す", () => 
 test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.doesNotMatch(publicLayout, /getCurrentUser/);
   assert.doesNotMatch(publicLayout, /buildHeaderUser/);
-  assert.doesNotMatch(publicLayout, /CostGuardBanner/);
+  assert.match(publicLayout, /CostGuardBanner/);
+  assert.doesNotMatch(publicLayout, /source=["']admin["']/);
   assert.match(island, /\/api\/account\/summary/);
   assert.match(island, /cache: "no-store"/);
 });

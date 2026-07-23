@@ -51,6 +51,23 @@ test("imported 等の非 approved X ID はプロフィール・アイコン更�
   assert.match(source, /uploadXIdIcon[\s\S]*requireApprovedForEdit\(row\)/);
 });
 
+test("本人X IDプロフィール・アイコン更新はmutation成功後に静的queueへenqueueする", () => {
+  const source = read("../actions/xid.ts");
+  assert.match(source, /enqueueAfterXUserPublicUpdate/);
+  assert.match(
+    source,
+    /updateXIdProfile[\s\S]*await mutateWithAudit\(db,[\s\S]*await enqueueAfterXUserPublicUpdate/,
+  );
+  assert.match(
+    source,
+    /setXIdIcon[\s\S]*await mutateWithAudit\(db,[\s\S]*await enqueueAfterXUserPublicUpdate/,
+  );
+  assert.match(
+    source,
+    /uploadXIdIcon[\s\S]*await mutateWithAudit\(db,[\s\S]*await enqueueAfterXUserPublicUpdate/,
+  );
+});
+
 test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付き監査を使う", () => {
   const admin = read("../actions/xid-admin.ts");
   const merge = read("../actions/xid-merge-admin.ts");

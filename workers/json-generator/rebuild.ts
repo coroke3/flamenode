@@ -18,6 +18,12 @@ import {
   uniqueByVideoId,
 } from "../../src/lib/db/recommendation.ts";
 
+const STATIC_USER_WORKS_PAGE_SIZE = 24;
+const STATIC_USER_COLLABS_PAGE_SIZE = 24;
+const STATIC_USER_MAX_PAGES = 5;
+const STATIC_USER_MAX_STATIC_ITEMS =
+  STATIC_USER_WORKS_PAGE_SIZE * STATIC_USER_MAX_PAGES;
+
 type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
 type RebuildSignal = AbortSignal | undefined;
 type ArtifactTarget = { targetType: string; targetId: string; sourceUpdatedAt?: number | null };
@@ -40,6 +46,54 @@ const EVENT_INDEX_COLUMNS = `
 `;
 
 const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
+export const POPULAR_LIST_LIMIT = 60;
+
+const STATIC_LIST_VIDEO_SELECT = `
+  v.id, v.title, v.youtube_video_id,
+  v.creator_display_name AS display_name,
+  v.creator_display_name,
+  v.creator_x_user_id,
+  v.creator_icon_url AS icon_url,
+  v.creator_icon_url,
+  e.id AS primary_event_id,
+  e.title AS primary_event_title,
+  v.scheduled_time,
+  v.visibility_status AS status
+`;
+
+const STATIC_LIST_VIDEO_FROM = `
+  FROM videos AS v
+  LEFT JOIN events AS e
+    ON e.id = v.primary_event_id AND e.visibility_status = 'public'
+`;
+
+const EVENT_DETAIL_COLUMNS = `
+  id, title, explanation, icon_url, img_url, accent_color,
+  event_type, slot_type, slot_visibility_mode,
+  max_slots_per_video, slot_part_gap_minutes,
+  start_time, end_time, entry_start_time, entry_end_time,
+  visibility_status, updated_at
+`;
+
+function eventPublicVideoWhereSql(videoAlias = "v"): string {
+  return `
+    ${videoAlias}.visibility_status = 'public'
+    AND (
+      EXISTS (
+        SELECT 1 FROM video_events AS event_video_links
+        WHERE event_video_links.video_id = ${videoAlias}.id
+          AND event_video_links.event_id = ?
+      )
+      OR ${videoAlias}.primary_event_id = ?
+    )
+    AND COALESCE(${videoAlias}.primary_event_id, '') <> '${PVSF_SUMMARY_EVENT_ID}'
+    AND NOT EXISTS (
+      SELECT 1 FROM video_events AS pvsf_summary_video_events
+      WHERE pvsf_summary_video_events.video_id = ${videoAlias}.id
+        AND pvsf_summary_video_events.event_id = '${PVSF_SUMMARY_EVENT_ID}'
+    )
+  `;
+}
 
 const COUNTABLE_PUBLIC_VIDEO_SQL = `
   v.visibility_status = 'public'
@@ -501,17 +555,24 @@ async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void
 
 async function rebuildListPopular(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
-  const rows = await env.DB.prepare(
-    `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name,
-            COALESCE(v.score, 0) AS score
-     FROM videos v
-     WHERE v.visibility_status = 'public'
-     ORDER BY score DESC, v.scheduled_time DESC
-     LIMIT 60`,
-  ).all();
+  const [rows, totalRow] = await Promise.all([
+    env.DB.prepare(
+      `SELECT ${STATIC_LIST_VIDEO_SELECT}
+       ${STATIC_LIST_VIDEO_FROM}
+       WHERE v.visibility_status = 'public'
+       ORDER BY COALESCE(v.score, 0) DESC, v.scheduled_time DESC
+       LIMIT ?`,
+    )
+      .bind(POPULAR_LIST_LIMIT)
+      .all(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c FROM videos WHERE visibility_status = 'public'`,
+    ).first<{ c?: number }>(),
+  ]);
   throwIfAborted(signal);
   await putJson(env, "list/popular.json", {
     generated_at: Math.floor(Date.now() / 1000),
+    total: Number(totalRow?.c ?? rows.results?.length ?? 0),
     items: rows.results ?? [],
   }, "public, max-age=300, stale-while-revalidate=1800", { targetType: "list_popular", targetId: "global" }, signal);
 }
@@ -774,9 +835,7 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
   throwIfAborted(signal);
   const ev = (
     await env.DB.prepare(
-      `SELECT id, title, explanation, icon_url, img_url, accent_color,
-              start_time, end_time, entry_start_time, entry_end_time,
-              visibility_status, updated_at
+      `SELECT ${EVENT_DETAIL_COLUMNS}
        FROM events WHERE id = ? LIMIT 1`,
     )
       .bind(eventId)
@@ -803,35 +862,76 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
     now,
   );
   const eventPayload = ev;
+  const eventVideoWhere = eventPublicVideoWhereSql("v");
 
-  const staff = await env.DB.prepare(
-    `SELECT es.display_name, es.public_role_label,
-            xu.id AS x_user_id, xu.x_name, xu.icon_url
-     FROM event_staff es
-     LEFT JOIN x_users xu ON xu.id = es.x_user_id
-     WHERE es.event_id = ? AND es.is_public = 1
-     ORDER BY es.created_at ASC`,
-  )
-    .bind(eventId)
-    .all();
-
-  const slotSummary = await env.DB.prepare(
-    `SELECT status, COUNT(*) AS c FROM slots WHERE event_id = ? GROUP BY status`,
-  )
-    .bind(eventId)
-    .all();
-
-  const publicVideos = await env.DB.prepare(
-    `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name,
-            v.creator_x_user_id, v.creator_icon_url, v.visibility_status, v.scheduled_time
-     FROM videos v
-     INNER JOIN video_events ve ON ve.video_id = v.id
-     WHERE ve.event_id = ? AND v.visibility_status = 'public'
-     ORDER BY v.scheduled_time DESC
-     LIMIT 500`,
-  )
-    .bind(eventId)
-    .all();
+  const [
+    staff,
+    slotSummary,
+    publicSlots,
+    publicVideos,
+    videoTotalRow,
+    creatorCountRow,
+  ] = await Promise.all([
+    env.DB.prepare(
+      `SELECT es.display_name, es.public_role_label,
+              xu.id AS x_user_id, xu.x_name, xu.icon_url
+       FROM event_staff AS es
+       LEFT JOIN x_users AS xu ON xu.id = es.x_user_id
+       WHERE es.event_id = ? AND es.is_public = 1
+       ORDER BY es.created_at ASC`,
+    )
+      .bind(eventId)
+      .all(),
+    env.DB.prepare(
+      `SELECT status, COUNT(*) AS c FROM slots WHERE event_id = ? GROUP BY status`,
+    )
+      .bind(eventId)
+      .all(),
+    env.DB.prepare(
+      `SELECT id, status, start_time, sort_order
+       FROM slots
+       WHERE event_id = ?
+       ORDER BY start_time ASC, sort_order ASC, id ASC`,
+    )
+      .bind(eventId)
+      .all(),
+    env.DB.prepare(
+      `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name,
+              v.creator_x_user_id, v.creator_icon_url, v.visibility_status,
+              v.scheduled_time, v.part
+       FROM videos AS v
+       WHERE ${eventVideoWhere}
+       ORDER BY v.scheduled_time ASC, v.id ASC
+       LIMIT 500`,
+    )
+      .bind(eventId, eventId)
+      .all(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM videos AS v
+       WHERE ${eventVideoWhere}`,
+    )
+      .bind(eventId, eventId)
+      .first<{ c?: number }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM (
+         SELECT LOWER(v.creator_x_user_id) AS x_id
+         FROM videos AS v
+         WHERE ${eventVideoWhere}
+           AND v.creator_x_user_id IS NOT NULL
+         UNION
+         SELECT LOWER(vm.x_user_id) AS x_id
+         FROM video_members AS vm
+         INNER JOIN videos AS v ON v.id = vm.video_id
+         WHERE ${eventVideoWhere}
+           AND vm.is_public_member = 1
+           AND vm.x_user_id IS NOT NULL
+       )`,
+    )
+      .bind(eventId, eventId, eventId, eventId)
+      .first<{ c?: number }>(),
+  ]);
 
   throwIfAborted(signal);
   const payload = {
@@ -840,7 +940,10 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
     event: eventPayload,
     public_staff: staff.results ?? [],
     slots_summary: slotSummary.results ?? [],
+    slots: publicSlots.results ?? [],
     public_videos: publicVideos.results ?? [],
+    video_total: Number(videoTotalRow?.c ?? publicVideos.results?.length ?? 0),
+    creator_count: Number(creatorCountRow?.c ?? 0),
   };
 
   await putJson(
@@ -1595,6 +1698,40 @@ async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void>
   );
 }
 
+const STATIC_USER_PROFILE_VIDEO_SELECT = `
+  v.id, v.title, v.youtube_video_id,
+  v.creator_display_name AS display_name,
+  v.creator_display_name,
+  v.creator_x_user_id,
+  v.creator_icon_url AS icon_url,
+  v.creator_icon_url,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM events AS primary_event
+    WHERE primary_event.id = v.primary_event_id
+      AND primary_event.visibility_status = 'public'
+  ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
+  v.scheduled_time,
+  v.visibility_status AS status,
+  v.part
+`;
+
+const STATIC_USER_COLLAB_VIDEO_SELECT = `
+  v.id, v.title, v.youtube_video_id,
+  COALESCE(v.creator_display_name, v.creator_x_user_id) AS display_name,
+  v.creator_display_name,
+  v.creator_x_user_id,
+  v.creator_icon_url AS icon_url,
+  v.creator_icon_url,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM events AS primary_event
+    WHERE primary_event.id = v.primary_event_id
+      AND primary_event.visibility_status = 'public'
+  ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
+  v.scheduled_time,
+  v.visibility_status AS status,
+  v.part
+`;
+
 async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const user = await env.DB.prepare(
@@ -1610,43 +1747,132 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
     return;
   }
 
-  const [recentVideos, totalRow] = await Promise.all([
+  const userTarget = { targetType: "user", targetId: xId };
+  const cacheControl = "public, max-age=600, stale-while-revalidate=3600";
+  const generatedAt = Math.floor(Date.now() / 1000);
+  const liveKeys: string[] = [`users/${xId}.json`];
+
+  const [ownVideos, ownTotalRow, collabVideos, collabTotalRow] = await Promise.all([
     env.DB.prepare(
-      `SELECT id, title, youtube_video_id,
-              creator_display_name AS display_name,
-              creator_display_name,
-              creator_x_user_id,
-              creator_icon_url AS icon_url,
-              creator_icon_url,
-              CASE WHEN EXISTS (
-                SELECT 1 FROM events AS primary_event
-                WHERE primary_event.id = v.primary_event_id
-                  AND primary_event.visibility_status = 'public'
-              ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
-              scheduled_time,
-              visibility_status AS status,
-              part
-     FROM videos AS v
-     WHERE creator_x_user_id = ? AND visibility_status = 'public'
-     ORDER BY scheduled_time DESC LIMIT 120`,
+      `SELECT ${STATIC_USER_PROFILE_VIDEO_SELECT}
+       FROM videos AS v
+       WHERE v.creator_x_user_id = ?
+         AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
+       ORDER BY v.scheduled_time DESC, v.created_at DESC
+       LIMIT ?`,
     )
-      .bind(xId)
+      .bind(xId, STATIC_USER_MAX_STATIC_ITEMS)
       .all(),
     env.DB.prepare(
       `SELECT COUNT(*) AS c
-       FROM videos
-       WHERE creator_x_user_id = ? AND visibility_status = 'public'`,
+       FROM videos AS v
+       WHERE v.creator_x_user_id = ?
+         AND ${COUNTABLE_PUBLIC_VIDEO_SQL}`,
     )
       .bind(xId)
+      .first<{ c?: number }>(),
+    env.DB.prepare(
+      `SELECT ${STATIC_USER_COLLAB_VIDEO_SELECT}
+       FROM videos AS v
+       INNER JOIN video_members AS vm ON vm.video_id = v.id
+       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         AND LOWER(vm.x_user_id) = LOWER(?)
+         AND LOWER(v.creator_x_user_id) <> LOWER(?)
+       ORDER BY v.scheduled_time DESC, v.created_at DESC
+       LIMIT ?`,
+    )
+      .bind(xId, xId, STATIC_USER_MAX_STATIC_ITEMS)
+      .all(),
+    env.DB.prepare(
+      `SELECT COUNT(DISTINCT v.id) AS c
+       FROM videos AS v
+       INNER JOIN video_members AS vm ON vm.video_id = v.id
+       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         AND LOWER(vm.x_user_id) = LOWER(?)
+         AND LOWER(v.creator_x_user_id) <> LOWER(?)`,
+    )
+      .bind(xId, xId)
       .first<{ c?: number }>(),
   ]);
 
   throwIfAborted(signal);
-  await putJson(env, `users/${xId}.json`, {
-    generated_at: Math.floor(Date.now() / 1000),
-    user,
-    total_works: Number(totalRow?.c ?? recentVideos.results?.length ?? 0),
-    recent_videos: recentVideos.results ?? [],
-  }, "public, max-age=600, stale-while-revalidate=3600", { targetType: "user", targetId: xId }, signal);
-  await reconcileTrackedArtifacts(env, { targetType: "user", targetId: xId }, [`users/${xId}.json`], 20, signal);
+  const ownItems = ownVideos.results ?? [];
+  const collabItems = collabVideos.results ?? [];
+  const ownTotal = Number(ownTotalRow?.c ?? ownItems.length);
+  const collabTotal = Number(collabTotalRow?.c ?? collabItems.length);
+
+  await putJson(
+    env,
+    `users/${xId}.json`,
+    {
+      generated_at: generatedAt,
+      user,
+      page_size: STATIC_USER_WORKS_PAGE_SIZE,
+      works: {
+        total: ownTotal,
+        items: ownItems.slice(0, STATIC_USER_WORKS_PAGE_SIZE),
+      },
+      collabs: {
+        total: collabTotal,
+        items: collabItems.slice(0, STATIC_USER_COLLABS_PAGE_SIZE),
+      },
+    },
+    cacheControl,
+    userTarget,
+    signal,
+  );
+
+  const ownPageCount = Math.min(
+    STATIC_USER_MAX_PAGES,
+    Math.max(1, Math.ceil(ownItems.length / STATIC_USER_WORKS_PAGE_SIZE)),
+  );
+  for (let page = 2; page <= ownPageCount; page += 1) {
+    const key = `users/${xId}/works/${page}.json`;
+    liveKeys.push(key);
+    await putJson(
+      env,
+      key,
+      {
+        generated_at: generatedAt,
+        page,
+        page_size: STATIC_USER_WORKS_PAGE_SIZE,
+        total: ownTotal,
+        items: ownItems.slice(
+          (page - 1) * STATIC_USER_WORKS_PAGE_SIZE,
+          page * STATIC_USER_WORKS_PAGE_SIZE,
+        ),
+      },
+      cacheControl,
+      userTarget,
+      signal,
+    );
+  }
+
+  const collabPageCount = Math.min(
+    STATIC_USER_MAX_PAGES,
+    Math.max(1, Math.ceil(collabItems.length / STATIC_USER_COLLABS_PAGE_SIZE)),
+  );
+  for (let page = 2; page <= collabPageCount; page += 1) {
+    const key = `users/${xId}/collabs/${page}.json`;
+    liveKeys.push(key);
+    await putJson(
+      env,
+      key,
+      {
+        generated_at: generatedAt,
+        page,
+        page_size: STATIC_USER_COLLABS_PAGE_SIZE,
+        total: collabTotal,
+        items: collabItems.slice(
+          (page - 1) * STATIC_USER_COLLABS_PAGE_SIZE,
+          page * STATIC_USER_COLLABS_PAGE_SIZE,
+        ),
+      },
+      cacheControl,
+      userTarget,
+      signal,
+    );
+  }
+
+  await reconcileTrackedArtifacts(env, userTarget, liveKeys, 20, signal);
 }

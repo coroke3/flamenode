@@ -6,6 +6,7 @@ import {
   EVENT_GROUP_EVENT_MAX_PER_GROUP,
   EVENT_GROUP_EVENT_MAX_ROWS,
   EVENT_GROUP_MAX_ROWS,
+  POPULAR_LIST_LIMIT,
   PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE,
   PUBLIC_STAFF_MAX_PER_EVENT,
   rebuildTarget,
@@ -203,6 +204,40 @@ test("events index と event group は点イベントを除外する", () => {
     eventGroupFn,
     /INNER JOIN events e[\s\S]*NON_POINT_EVENT_PERIOD_SQL/,
   );
+});
+
+test("list_popularはrecent相当の公開カード列とtotalを返す", () => {
+  const popularFn = source.match(
+    /async function rebuildListPopular[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(popularFn);
+  assert.equal(POPULAR_LIST_LIMIT, 60);
+  assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*creator_x_user_id/);
+  assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*primary_event_title/);
+  assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*visibility_status AS status/);
+  assert.match(popularFn, /SELECT COUNT\(\*\) AS c FROM videos WHERE visibility_status = 'public'/);
+  assert.match(popularFn, /total: Number\(totalRow/);
+});
+
+test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", () => {
+  const eventFn = source.match(
+    /async function rebuildEvent\(env[\s\S]*?(?=type StaticRelatedVideoRow)/,
+  )?.[0];
+  assert.ok(eventFn);
+  assert.match(source, /function eventPublicVideoWhereSql/);
+  assert.match(source, /eventPublicVideoWhereSql[\s\S]*primary_event_id = \?/);
+  assert.match(source, /eventPublicVideoWhereSql[\s\S]*PVSF_SUMMARY_EVENT_ID/);
+  assert.match(eventFn, /video_total:/);
+  assert.match(eventFn, /creator_count:/);
+  assert.match(eventFn, /slots: publicSlots/);
+  const slotsQuery = eventFn.match(
+    /`SELECT id, status, start_time, sort_order[\s\S]*?FROM slots[\s\S]*?`/,
+  )?.[0];
+  assert.ok(slotsQuery);
+  assert.doesNotMatch(slotsQuery, /display_name/);
+  assert.doesNotMatch(slotsQuery, /reserved_by_user_id/);
+  assert.match(source, /EVENT_DETAIL_COLUMNS[\s\S]*slot_part_gap_minutes/);
+  assert.match(eventFn, /creator_x_user_id/);
 });
 
 test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {

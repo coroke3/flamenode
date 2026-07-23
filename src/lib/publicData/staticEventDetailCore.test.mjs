@@ -16,6 +16,8 @@ if (runTestWithTsx(import.meta.url)) {
         explanation: "About",
         visibility_status: "public",
         start_time: 200,
+        slot_part_gap_minutes: 15,
+        slot_visibility_mode: "public_name",
       },
       public_staff: [
         {
@@ -29,23 +31,35 @@ if (runTestWithTsx(import.meta.url)) {
         { status: "available", c: 2 },
         { status: "submitted", c: 3 },
       ],
+      slots: [
+        { id: "slot-1", status: "available", start_time: 100, sort_order: 0 },
+        { id: "slot-2", status: "submitted", start_time: 200, sort_order: 1 },
+      ],
       public_videos: [
         {
           id: "video1",
           title: "Video 1",
           youtube_video_id: "abcdefghijk",
           creator_display_name: "Creator",
+          creator_x_user_id: "creator",
           visibility_status: "public",
         },
       ],
+      video_total: 12,
+      creator_count: 4,
     });
 
     assert.ok(detail);
     assert.equal(detail.generatedAt, 100);
     assert.equal(detail.event.id, "event1");
+    assert.equal(detail.event.slot_part_gap_minutes, 15);
     assert.equal(detail.publicStaff.length, 1);
     assert.equal(detail.slotSummary[1].count, 3);
+    assert.equal(detail.slots.length, 2);
     assert.equal(detail.publicVideos[0].creator_display_name, "Creator");
+    assert.equal(detail.publicVideos[0].creator_x_user_id, "creator");
+    assert.equal(detail.videoTotal, 12);
+    assert.equal(detail.creatorCount, 4);
   });
 
   test("normalizeStaticEventDetail: rejects payload without event id", () => {

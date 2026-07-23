@@ -136,9 +136,30 @@ test("public static artifacts exclude private event identifiers and titles", asy
     assert.equal(recent.primary_event_id, null);
     assert.equal(recent.primary_event_title, null);
 
+    await rebuildTarget(env, "list_popular", "global");
+    const popular = objects.get("list/popular.json");
+    assert.equal(popular.total, 1);
+    assert.equal(popular.items[0].creator_x_user_id, "creator");
+    assert.equal(popular.items[0].status, "public");
+    assert.equal(popular.items[0].primary_event_id, null);
+
+    await rebuildTarget(env, "event", "public-event");
+    const eventDetail = objects.get("events/public-event.json");
+    assert.equal(eventDetail.video_total, 1);
+    assert.equal(eventDetail.creator_count, 1);
+    assert.equal(eventDetail.public_videos[0].creator_x_user_id, "creator");
+    assert.ok(Array.isArray(eventDetail.slots));
+    assert.doesNotMatch(JSON.stringify(eventDetail.slots), /display_name/);
+    assert.doesNotMatch(JSON.stringify(eventDetail.slots), /reserved_by_user_id/);
+    assertNoForbiddenPublicKeys(eventDetail);
+
     await rebuildTarget(env, "user", "creator");
-    const userVideo = objects.get("users/creator.json").recent_videos[0];
+    const userPayload = objects.get("users/creator.json");
+    const userVideo = userPayload.works.items[0];
     assert.equal(userVideo.primary_event_id, null);
+    assert.equal(userPayload.works.total, 1);
+    assert.equal(userPayload.collabs.total, 0);
+    assert.equal(userPayload.page_size, 24);
   } finally {
     sqlite.close();
   }

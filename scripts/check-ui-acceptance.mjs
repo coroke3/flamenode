@@ -108,8 +108,18 @@ requireMatch(
 );
 forbidMatch(
   "app/(public)/layout.tsx",
-  /getCurrentUser|buildHeaderUser|CostGuardBanner/,
-  "公開layoutにserver authまたはCostGuard D1読取が残っています。",
+  /getCurrentUser|buildHeaderUser|await auth\(/,
+  "公開layoutにserver authが残っています。",
+);
+requireMatch(
+  "app/(public)/layout.tsx",
+  /CostGuardBanner/,
+  "公開layoutにKV/envベースのCostGuardBannerがありません。",
+);
+forbidMatch(
+  "app/(public)/layout.tsx",
+  /source=["']admin["']/,
+  "公開layoutのCostGuardBannerがadmin(D1正本)になっています。",
 );
 requireMatch(
   "src/components/layout/PublicHeader.module.css",

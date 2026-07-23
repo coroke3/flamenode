@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
+import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 import { getLayoutHeaderUser } from "@/lib/auth/layoutHeaderUser";
 import { ConsoleShell } from "@/components/layout/ConsoleShell";
 import { ConsoleSidebar } from "@/components/layout/ConsoleSidebar";
@@ -24,6 +25,7 @@ export default async function AdminLayout({
 
   return (
     <div data-admin-shell data-fn-surface="admin">
+      <CostGuardBanner source="admin" />
       <PublicHeader user={user} />
       <ConsoleShell
         consoleMode="admin"

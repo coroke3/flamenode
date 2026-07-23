@@ -1,6 +1,7 @@
 import * as React from "react";
 import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
+import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
 
 export default function PublicLayout({
   children,
@@ -9,6 +10,8 @@ export default function PublicLayout({
 }): React.ReactElement {
   return (
     <div data-fn-surface="public" className="fn-public-shell fn-app">
+      {/* source省略 = KV/envのみ。D1のsystem_settingsは読まない。 */}
+      <CostGuardBanner />
       <PublicHeader />
       <main className="fn-main flex-1 w-full">{children}</main>
       <PublicFooter />
