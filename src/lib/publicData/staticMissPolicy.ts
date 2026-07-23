@@ -1,4 +1,4 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { DB } from "../db/client";
 import { events, videos, xUsers } from "../db/schema";
 import type { StaticRebuildTargetType } from "../staticRebuild/types";
@@ -66,7 +66,7 @@ export async function publicStaticTargetExists(
     .from(xUsers)
     .where(
       and(
-        eq(xUsers.id, canonicalXId),
+        sql`lower(${xUsers.id}) = ${canonicalXId}`,
         publicListableXApprovalWhere(),
       )!,
     )

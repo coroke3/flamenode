@@ -15,6 +15,13 @@ test("user profile page records public request metrics on static path", () => {
   assert.match(page, /loadStaticUserCollabsPage/);
 });
 
+test("user profile falls back to D1 when paged static JSON is missing", () => {
+  assert.match(page, /needsDatabaseFallback/);
+  assert.match(page, /missingPagedSection/);
+  assert.match(page, /beyondStaticPages/);
+  assert.match(page, /STATIC_USER_MAX_PAGES/);
+});
+
 test("user profile DB fallback only loads listable X users", () => {
   assert.match(page, /publicListableXApprovalWhere/);
   assert.equal(

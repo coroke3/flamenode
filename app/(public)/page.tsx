@@ -42,6 +42,7 @@ import {
   logPublicRequestMetrics,
   runWithPublicRequestMetrics,
 } from "@/lib/publicData/loader";
+import { recordPublicD1Fallback } from "@/lib/observability/publicRequestMetrics";
 import { JsonLd } from "@/components/seo/JsonLd";
 import {
   SITE_DESCRIPTION,
@@ -146,11 +147,11 @@ async function fetchTopPageFromDatabase(): Promise<StaticTopData | null> {
 export default async function TopPage(): Promise<React.ReactElement> {
   return runWithPublicRequestMetrics("/", async () => {
   const staticLoaded = await loadStaticTopPage();
-  const data =
-    staticLoaded.top ??
-    (canFallbackToDatabase(staticLoaded.strategy)
-      ? await fetchTopPageFromDatabase()
-      : null);
+  let data: StaticTopData | null = staticLoaded.top;
+  if (!data && canFallbackToDatabase(staticLoaded.strategy)) {
+    recordPublicD1Fallback();
+    data = await fetchTopPageFromDatabase();
+  }
 
   const {
     activeEvents = [],

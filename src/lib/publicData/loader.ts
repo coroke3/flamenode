@@ -162,38 +162,9 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
   }
 }
 
-export function createPublicJsonLoader<TPayload, TResult>({
-  r2Key,
-  targetType,
-  targetId = (id) => id,
-  reason,
-  normalize,
-}: PublicJsonLoaderConfig<TPayload, TResult>) {
-  return async (id: string): Promise<PublicJsonLoadResult<TResult>> => {
-    const result = await loadPublicJson<TPayload>({
-      r2Key: r2Key(id),
-      targetType,
-      targetId: targetId(id),
-      reason,
-    });
-    return {
-      ...result,
-      data: result.data == null ? null : normalize(result.data),
-    };
-  };
-}
-
-export async function loadPublicJson<T>(
+async function resolvePublicJsonMiss<T = never>(
   options: PublicJsonLoadOptions,
 ): Promise<PublicJsonLoadResult<T>> {
-  const payload = await readStaticJson<T>(options.r2Key);
-  if (payload !== null) {
-    recordPublicStaticHit();
-    const mode = await resolvePublicOperationMode({ allowD1: false });
-    const strategy = getPublicDataStrategy(mode);
-    return { data: payload, source: "static", strategy, enqueued: false };
-  }
-
   recordPublicStaticMiss();
   const db = getDatabase();
   const mode = await resolvePublicOperationMode({ allowD1: true, db });
@@ -235,6 +206,47 @@ export async function loadPublicJson<T>(
   }
 
   return { data: null, source: "miss", strategy, enqueued };
+}
+
+export function createPublicJsonLoader<TPayload, TResult>({
+  r2Key,
+  targetType,
+  targetId = (id) => id,
+  reason,
+  normalize,
+}: PublicJsonLoaderConfig<TPayload, TResult>) {
+  return async (id: string): Promise<PublicJsonLoadResult<TResult>> => {
+    const options: PublicJsonLoadOptions = {
+      r2Key: r2Key(id),
+      targetType,
+      targetId: targetId(id),
+      reason,
+    };
+    const result = await loadPublicJson<TPayload>(options);
+    if (result.data == null) {
+      return { ...result, data: null };
+    }
+    const normalized = normalize(result.data);
+    if (normalized != null) {
+      return { ...result, data: normalized };
+    }
+    // R2 にあっても正規化不能なら semantic miss として再生成を試みる
+    return resolvePublicJsonMiss(options);
+  };
+}
+
+export async function loadPublicJson<T>(
+  options: PublicJsonLoadOptions,
+): Promise<PublicJsonLoadResult<T>> {
+  const payload = await readStaticJson<T>(options.r2Key);
+  if (payload !== null) {
+    recordPublicStaticHit();
+    const mode = await resolvePublicOperationMode({ allowD1: false });
+    const strategy = getPublicDataStrategy(mode);
+    return { data: payload, source: "static", strategy, enqueued: false };
+  }
+
+  return resolvePublicJsonMiss(options);
 }
 
 export const loadStaticEventDetail = createPublicJsonLoader<

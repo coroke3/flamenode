@@ -215,8 +215,24 @@ test("list_popularはrecent相当の公開カード列とtotalを返す", () => 
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*creator_x_user_id/);
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*primary_event_title/);
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*visibility_status AS status/);
-  assert.match(popularFn, /SELECT COUNT\(\*\) AS c FROM videos WHERE visibility_status = 'public'/);
+  assert.match(popularFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
+  assert.match(
+    popularFn,
+    /SELECT COUNT\(\*\) AS c FROM videos AS v WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/,
+  );
   assert.match(popularFn, /total: Number\(totalRow/);
+});
+
+test("list_recentもCOUNTABLE公開条件でPVSFサマリーを除外する", () => {
+  const recentFn = source.match(
+    /async function rebuildListRecent[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(recentFn);
+  assert.match(recentFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
+  assert.match(
+    recentFn,
+    /SELECT COUNT\(\*\) AS c FROM videos AS v WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/,
+  );
 });
 
 test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", () => {

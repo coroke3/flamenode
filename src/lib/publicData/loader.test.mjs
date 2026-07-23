@@ -46,30 +46,51 @@ test("loader exposes paginated user profile loaders", () => {
 });
 
 test("loader は R2 を先に読み、ヒット時は allowD1:false で mode 解決する", () => {
-  const r2Index = loaderSource.indexOf("readStaticJson");
-  const hitIndex = loaderSource.indexOf("if (payload !== null)");
-  const missModeIndex = loaderSource.indexOf(
-    "resolvePublicOperationMode({ allowD1: true",
+  const loadPublicJsonFn = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicJson"),
+  );
+  const r2Index = loadPublicJsonFn.indexOf("readStaticJson");
+  const hitIndex = loadPublicJsonFn.indexOf("if (payload !== null)");
+  const hitModeIndex = loadPublicJsonFn.indexOf(
+    "resolvePublicOperationMode({ allowD1: false",
   );
   assert.ok(r2Index >= 0 && hitIndex > r2Index, "R2 read precedes hit branch");
+  assert.ok(hitModeIndex > hitIndex, "hit path resolves mode without D1");
+  assert.match(loaderSource, /async function resolvePublicJsonMiss/);
   assert.match(
     loaderSource,
-    /resolvePublicOperationMode\(\{ allowD1: false \}\)/,
-  );
-  assert.ok(
-    missModeIndex > hitIndex,
-    "miss path resolves mode with D1 after R2 miss branch",
+    /resolvePublicOperationMode\(\{ allowD1: true/,
   );
   assert.doesNotMatch(loaderSource, /getOperationMode/);
   assert.doesNotMatch(loaderSource, /return "normal"/);
 });
 
 test("loader の R2 ヒット分岐は getDatabase を呼ばない", () => {
-  const hitBranch = loaderSource.slice(
-    loaderSource.indexOf("if (payload !== null)"),
-    loaderSource.indexOf("const db = getDatabase()"),
+  const hitIndex = loaderSource.indexOf("if (payload !== null)");
+  const loadPublicJsonFn = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicJson"),
   );
+  const hitBranch = loadPublicJsonFn.slice(
+    loadPublicJsonFn.indexOf("if (payload !== null)"),
+    loadPublicJsonFn.indexOf("return resolvePublicJsonMiss"),
+  );
+  assert.ok(hitIndex >= 0);
   assert.doesNotMatch(hitBranch, /getDatabase\(/);
   assert.doesNotMatch(hitBranch, /systemSettings/);
   assert.doesNotMatch(hitBranch, /enqueueStaticRebuild/);
+});
+
+test("loader records public request metrics hooks", () => {
+  assert.match(loaderSource, /recordPublicStaticHit/);
+  assert.match(loaderSource, /recordPublicStaticMiss/);
+  assert.match(loaderSource, /recordPublicR2Get/);
+  assert.match(loaderSource, /recordPublicD1Query/);
+});
+
+test("createPublicJsonLoader treats normalize failure as semantic miss", () => {
+  assert.match(loaderSource, /async function resolvePublicJsonMiss/);
+  assert.match(
+    loaderSource,
+    /const normalized = normalize\(result\.data\);[\s\S]*return resolvePublicJsonMiss\(options\)/,
+  );
 });

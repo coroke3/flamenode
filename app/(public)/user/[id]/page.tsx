@@ -34,6 +34,7 @@ import {
   runWithPublicRequestMetrics,
 } from "@/lib/publicData/loader";
 import type { StaticUserProfile, StaticUserVideoPage } from "@/lib/publicData/loader";
+import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
 import { recordPublicD1Fallback } from "@/lib/observability/publicRequestMetrics";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
@@ -187,19 +188,47 @@ export default async function UserPage({
               } satisfies StaticUserVideoPage,
             }),
       ]);
-      const view = (
-        <StaticUserProfileView
-          profile={staticLoaded.data}
-          worksPage={worksLoaded.page}
-          collabPage={collabsLoaded.page}
-          worksPageNum={worksPaging.page}
-          collabPageNum={collabPaging.page}
-        />
-      );
-      logPublicRequestMetrics();
-      return view;
-    }
-    if (!canFallbackToDatabase(staticLoaded.strategy)) {
+      const beyondStaticPages =
+        worksPaging.page > STATIC_USER_MAX_PAGES ||
+        collabPaging.page > STATIC_USER_MAX_PAGES;
+      const missingPagedSection =
+        (worksPaging.page > 1 && !worksLoaded.page) ||
+        (collabPaging.page > 1 && !collabsLoaded.page);
+      const needsDatabaseFallback =
+        (beyondStaticPages || missingPagedSection) &&
+        canFallbackToDatabase(staticLoaded.strategy);
+      if (!needsDatabaseFallback) {
+        const worksPage =
+          worksLoaded.page ??
+          ({
+            page: 1,
+            total: staticLoaded.data.works.total,
+            items: staticLoaded.data.works.items,
+            pageSize: staticLoaded.data.works.pageSize,
+            generatedAt: staticLoaded.data.generatedAt,
+          } satisfies StaticUserVideoPage);
+        const collabPage =
+          collabsLoaded.page ??
+          ({
+            page: 1,
+            total: staticLoaded.data.collabs.total,
+            items: staticLoaded.data.collabs.items,
+            pageSize: staticLoaded.data.collabs.pageSize,
+            generatedAt: staticLoaded.data.generatedAt,
+          } satisfies StaticUserVideoPage);
+        const view = (
+          <StaticUserProfileView
+            profile={staticLoaded.data}
+            worksPage={worksPage}
+            collabPage={collabPage}
+            worksPageNum={Math.min(worksPaging.page, STATIC_USER_MAX_PAGES)}
+            collabPageNum={Math.min(collabPaging.page, STATIC_USER_MAX_PAGES)}
+          />
+        );
+        logPublicRequestMetrics();
+        return view;
+      }
+    } else if (!canFallbackToDatabase(staticLoaded.strategy)) {
       notFound();
     }
 
@@ -504,8 +533,14 @@ function StaticUserProfileView({
   const ownTotal = worksPage?.total ?? profile.works.total;
   const collabVideos = collabPage?.items ?? [];
   const collabTotal = collabPage?.total ?? profile.collabs.total;
-  const ownTotalPages = totalPagesFor(ownTotal, WORKS_PAGE_SIZE);
-  const collabTotalPages = totalPagesFor(collabTotal, COLLAB_PAGE_SIZE);
+  const ownTotalPages = Math.min(
+    totalPagesFor(ownTotal, WORKS_PAGE_SIZE),
+    STATIC_USER_MAX_PAGES,
+  );
+  const collabTotalPages = Math.min(
+    totalPagesFor(collabTotal, COLLAB_PAGE_SIZE),
+    STATIC_USER_MAX_PAGES,
+  );
   const pageNum = Math.min(
     Math.max(1, Math.floor(worksPageNum)),
     Math.max(1, ownTotalPages),

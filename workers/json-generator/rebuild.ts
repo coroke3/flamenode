@@ -538,11 +538,11 @@ async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void
      FROM videos v
      LEFT JOIN events e
        ON e.id = v.primary_event_id AND e.visibility_status = 'public'
-     WHERE v.visibility_status = 'public'
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
      ORDER BY v.scheduled_time DESC LIMIT 120`,
     ).all(),
     env.DB.prepare(
-      `SELECT COUNT(*) AS c FROM videos WHERE visibility_status = 'public'`,
+      `SELECT COUNT(*) AS c FROM videos AS v WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}`,
     ).first<{ c?: number }>(),
   ]);
   throwIfAborted(signal);
@@ -559,14 +559,14 @@ async function rebuildListPopular(env: Env, signal?: RebuildSignal): Promise<voi
     env.DB.prepare(
       `SELECT ${STATIC_LIST_VIDEO_SELECT}
        ${STATIC_LIST_VIDEO_FROM}
-       WHERE v.visibility_status = 'public'
+       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
        ORDER BY COALESCE(v.score, 0) DESC, v.scheduled_time DESC
        LIMIT ?`,
     )
       .bind(POPULAR_LIST_LIMIT)
       .all(),
     env.DB.prepare(
-      `SELECT COUNT(*) AS c FROM videos WHERE visibility_status = 'public'`,
+      `SELECT COUNT(*) AS c FROM videos AS v WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}`,
     ).first<{ c?: number }>(),
   ]);
   throwIfAborted(signal);

@@ -105,10 +105,18 @@ if (runTestWithTsx(import.meta.url)) {
     harness.sqlite.close();
   });
 
-  test("X IDは小文字正本で公開一覧対象の承認状態だけを照合する", async () => {
+  test("X IDは大小混在でも lower 照合し公開一覧対象の承認状態だけを許可する", async () => {
     const harness = createHarness();
+    harness.sqlite.exec(`
+      INSERT INTO x_users (id, x_name, approval_status)
+      VALUES ('MixedCase', 'Mixed', 'approved');
+    `);
     assert.equal(
       await publicStaticTargetExists(harness.db, "user", "ALICE"),
+      true,
+    );
+    assert.equal(
+      await publicStaticTargetExists(harness.db, "user", "mixedcase"),
       true,
     );
     assert.equal(
