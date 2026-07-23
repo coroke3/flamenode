@@ -33,7 +33,9 @@ const expectedWorkers = new Map([
       r2: false,
       kv: true,
       crons: ["0 * * * *"],
-      queueProducer: { queue: "flamenode-notification-wake", binding: "NOTIFICATION_WAKE_QUEUE" },
+      queueProducers: [
+        { queue: "flamenode-notification-wake", binding: "NOTIFICATION_WAKE_QUEUE" },
+      ],
       queueConsumer: {
         queue: "flamenode-notification-wake",
         dlq: "flamenode-notification-dlq",
@@ -49,7 +51,9 @@ const expectedWorkers = new Map([
       r2: true,
       kv: true,
       crons: ["15 * * * *"],
-      queueProducer: { queue: "flamenode-static-rebuild-wake", binding: "STATIC_REBUILD_WAKE_QUEUE" },
+      queueProducers: [
+        { queue: "flamenode-static-rebuild-wake", binding: "STATIC_REBUILD_WAKE_QUEUE" },
+      ],
       queueConsumer: {
         queue: "flamenode-static-rebuild-wake",
         dlq: "flamenode-static-rebuild-dlq",
@@ -65,7 +69,10 @@ const expectedWorkers = new Map([
       r2: false,
       kv: true,
       crons: ["7 * * * *", "52 * * * *"],
-      queueProducer: { queue: "flamenode-youtube-sync-wake", binding: "YOUTUBE_SYNC_WAKE_QUEUE" },
+      queueProducers: [
+        { queue: "flamenode-youtube-sync-wake", binding: "YOUTUBE_SYNC_WAKE_QUEUE" },
+        { queue: "flamenode-static-rebuild-wake", binding: "STATIC_REBUILD_WAKE_QUEUE" },
+      ],
       queueConsumer: {
         queue: "flamenode-youtube-sync-wake",
         dlq: "flamenode-youtube-sync-dlq",
@@ -207,7 +214,10 @@ function checkWorker(errors, root, directory, expected) {
   if (expected.r2) requirePattern(errors, text, relative, /\[\[r2_buckets\]\][\s\S]*?binding\s*=\s*"R2"/m, "R2 binding R2 is required");
   if (expected.kv) requirePattern(errors, text, relative, /\[\[kv_namespaces\]\][\s\S]*?binding\s*=\s*"KV"/m, "KV binding KV is required");
   checkQueueFeatureFlags(errors, text, relative);
-  checkQueueProducer(errors, text, relative, expected.queueProducer);
+  const producers = expected.queueProducers ?? (expected.queueProducer ? [expected.queueProducer] : []);
+  for (const producer of producers) {
+    checkQueueProducer(errors, text, relative, producer);
+  }
   checkQueueConsumer(errors, text, relative, expected.queueConsumer);
   checkWorkerCronSchedule(errors, text, relative, expected.crons);
   rejectPattern(errors, text, relative, /\b(?:token|secret|password|api_key)\s*=\s*"/i, "secret assignments must not be committed");

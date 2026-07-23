@@ -1,4 +1,3 @@
-import { isTransientDbError } from "../../src/lib/db/transientDbErrorCore.ts";
 import {
   hasDuePendingNotifications,
   MAX_NOTIFICATION_BATCH,
@@ -60,10 +59,8 @@ export async function handleNotificationWakeQueue(
 
     ackAll(messages);
   } catch (error) {
-    if (isTransientDbError(error)) {
-      retryAll(messages);
-      return;
-    }
-    ackAll(messages);
+    // 判別不能な障害も retry し、Recovery Cron / DLQ に委ねる（ack で wake を捨てない）
+    retryAll(messages);
+    void error;
   }
 }

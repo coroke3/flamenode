@@ -123,7 +123,8 @@ if (runTestWithTsx(import.meta.url)) {
         },
       },
     });
-    assert.equal(result.sent, true);
+    assert.equal(result.sent, false);
+    assert.equal(result.reason, "send_failed");
     assert.equal(puts.length, 1);
     assert.equal(JSON.parse(puts[0].value).reason, "send_failed");
   });

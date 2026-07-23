@@ -53,7 +53,7 @@ export const DEPLOY_TARGETS = Object.freeze([
     source: "workers/sync-jobs/wrangler.toml",
     output: "sync-jobs.toml",
     configEnv: "CF_SYNC_JOBS_CONFIG",
-    bindings: ["DB", "KV", "YOUTUBE_SYNC_WAKE_QUEUE"],
+    bindings: ["DB", "KV", "YOUTUBE_SYNC_WAKE_QUEUE", "STATIC_REBUILD_WAKE_QUEUE"],
     requiresR2: false,
   },
 ]);
@@ -506,6 +506,15 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
       dlq: "flamenode-youtube-sync-dlq",
       retryDelay: 300,
     });
+    if (
+      !/\[\[queues\.producers\]\][\s\S]*?queue\s*=\s*"flamenode-static-rebuild-wake"[\s\S]*?binding\s*=\s*"STATIC_REBUILD_WAKE_QUEUE"/m.test(
+        content,
+      )
+    ) {
+      errors.push(
+        "sync-jobs must produce to flamenode-static-rebuild-wake for score-driven rebuilds",
+      );
+    }
     validateCronSchedule(content, errors, ["7 * * * *", "52 * * * *"]);
   }
   if (target.key === "web") {

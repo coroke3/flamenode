@@ -112,6 +112,7 @@ export async function sendWorkerQueueWakeBestEffort(input: {
     await input.queue.send(message);
     return true;
   } catch (error) {
+    input.sentKinds?.delete(input.kind);
     warnOnce(`worker_wake_send_failed:${input.kind}`, {
       service: "queue-wake-worker",
       result: "send_failed",

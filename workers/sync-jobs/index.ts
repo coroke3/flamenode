@@ -28,7 +28,7 @@ import {
   type QueueConsumerResult,
   type WorkerQueueSendBinding,
 } from "../shared/queueWake.ts";
-import { syncBatch } from "../youtube-sync/index.ts";
+import { syncBatch, countPendingSyncRows } from "../youtube-sync/index.ts";
 import { syncEventPlaylists } from "../youtube-playlist-sync/index.ts";
 
 export interface Env {
@@ -41,6 +41,7 @@ export interface Env {
   YOUTUBE_OAUTH_REFRESH_TOKEN?: string;
   BUILD_COMMIT_SHA?: string;
   YOUTUBE_SYNC_WAKE_QUEUE?: WorkerQueueSendBinding;
+  STATIC_REBUILD_WAKE_QUEUE?: WorkerQueueSendBinding;
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
   QUEUE_YOUTUBE_SYNC_ENABLED?: string;
@@ -109,6 +110,35 @@ async function enqueueScoreDependentRebuilds(
       };
 }
 
+async function wakeStaticRebuildAfterScoreEnqueue(
+  env: Env,
+  enqueued: number,
+): Promise<void> {
+  if (enqueued <= 0) return;
+  await sendWorkerQueueWakeBestEffort({
+    queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
+    kind: "static_rebuild_available",
+    source: "sync",
+    envFlags: env,
+    kv: env.KV,
+  });
+}
+
+async function maybeResendYoutubePendingWake(env: Env): Promise<void> {
+  const flags = resolveQueueFeatureFlags(env);
+  if (!flags.dispatchEnabled || !flags.youtubeSyncEnabled) return;
+  const pending = await countPendingSyncRows(env);
+  if (pending <= 0) return;
+  await sendWorkerQueueWakeBestEffort({
+    queue: env.YOUTUBE_SYNC_WAKE_QUEUE ?? null,
+    kind: "youtube_sync_pending",
+    source: "recovery",
+    envFlags: env,
+    requireYoutubeFlag: true,
+    kv: env.KV,
+  });
+}
+
 export async function handleYoutubeSyncWakeQueue(
   batch: MessageBatch<unknown>,
   env: Env,
@@ -153,6 +183,10 @@ export async function handleYoutubeSyncWakeQueue(
           score.processed > 0
             ? await enqueueScoreDependentRebuilds(env)
             : { skipped: 1 };
+        await wakeStaticRebuildAfterScoreEnqueue(
+          env,
+          rankingRebuild.processed ?? 0,
+        );
 
         if (youtube.has_more_pending && !youtube.quota_stopped) {
           continued = await sendWorkerQueueWakeBestEffort({
@@ -272,6 +306,15 @@ export async function runSyncJobs(
                   { commitSha: env.BUILD_COMMIT_SHA },
                 )
               : { skipped: 1 };
+          if ((rankingRebuild.processed ?? 0) > 0) {
+            await wakeStaticRebuildAfterScoreEnqueue(
+              env,
+              rankingRebuild.processed ?? 0,
+            );
+          }
+          if (queueFlags.youtubeSyncEnabled) {
+            await maybeResendYoutubePendingWake(env);
+          }
           return throwIfJobFailed(
             "sync-jobs",
             "cron",
@@ -299,8 +342,7 @@ export default {
   async queue(
     batch: MessageBatch<unknown>,
     env: Env,
-    context: ExecutionContext,
   ): Promise<void> {
-    context.waitUntil(handleYoutubeSyncWakeQueue(batch, env));
+    await handleYoutubeSyncWakeQueue(batch, env);
   },
 };

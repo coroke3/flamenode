@@ -24,17 +24,30 @@ function write(root, relative, content) {
   fs.writeFileSync(target, content, "utf8");
 }
 
-function queueWorkerSections({ producerQueue, producerBinding, consumerQueue, consumerDlq, retryDelay }) {
+function queueWorkerSections({
+  producerQueue,
+  producerBinding,
+  extraProducers = [],
+  consumerQueue,
+  consumerDlq,
+  retryDelay,
+}) {
+  const producers = [
+    ["", "[[queues.producers]]", `queue = "${producerQueue}"`, `binding = "${producerBinding}"`],
+    ...extraProducers.flatMap(({ queue, binding }) => [
+      "",
+      "[[queues.producers]]",
+      `queue = "${queue}"`,
+      `binding = "${binding}"`,
+    ]),
+  ].flat();
   return [
     "",
     "[vars]",
     'QUEUE_DISPATCH_ENABLED = "0"',
     'QUEUE_CONTINUATION_ENABLED = "0"',
     'QUEUE_YOUTUBE_SYNC_ENABLED = "0"',
-    "",
-    "[[queues.producers]]",
-    `queue = "${producerQueue}"`,
-    `binding = "${producerBinding}"`,
+    ...producers,
     "",
     "[[queues.consumers]]",
     `queue = "${consumerQueue}"`,
@@ -69,6 +82,12 @@ function cronWorker(name, { r2 = false, cron = "0 * * * *", crons } = {}) {
     "sync-jobs": {
       producerQueue: "flamenode-youtube-sync-wake",
       producerBinding: "YOUTUBE_SYNC_WAKE_QUEUE",
+      extraProducers: [
+        {
+          queue: "flamenode-static-rebuild-wake",
+          binding: "STATIC_REBUILD_WAKE_QUEUE",
+        },
+      ],
       consumerQueue: "flamenode-youtube-sync-wake",
       consumerDlq: "flamenode-youtube-sync-dlq",
       retryDelay: 300,

@@ -12,6 +12,9 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.match(source, /runContentJobsRecovery/);
   assert.match(source, /reconcileStaleQueue/);
   assert.match(source, /STATIC_REBUILD_WAKE_QUEUE/);
+  assert.match(source, /staticRebuildHasMore/);
+  assert.match(source, /source:\s*"recovery"/);
+  assert.doesNotMatch(source, /context\.waitUntil\(handleStaticRebuildWakeQueue/);
 });
 
 test("無認証 rebuild / process-queue を拒否する", () => {

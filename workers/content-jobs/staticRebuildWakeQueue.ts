@@ -1,4 +1,3 @@
-import { isTransientDbError } from "../../src/lib/db/transientDbErrorCore.ts";
 import {
   ackAll,
   extractValidatedWakeFromBatch,
@@ -58,13 +57,11 @@ export async function handleStaticRebuildWakeQueue(
 
     ackAll(messages);
     return result;
-  } catch (error) {
-    if (isTransientDbError(error)) {
-      retryAll(messages);
-      result.retryBatch = true;
-      return result;
-    }
-    ackAll(messages);
+  } catch {
+    // 判別不能な障害も retry（ack で wake を捨てない）
+    retryAll(messages);
+    result.retryBatch = true;
+    result.failed = messages.length;
     return result;
   }
 }

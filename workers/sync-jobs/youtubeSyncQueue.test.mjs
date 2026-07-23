@@ -37,6 +37,9 @@ test("Queue consumer は pending only で Cron lease を使わない", () => {
   assert.match(source, /mode:\s*"pending_only"/);
   assert.match(source, /async queue\(/);
   assert.match(source, /recalcScoreForVideoIds/);
+  assert.match(source, /wakeStaticRebuildAfterScoreEnqueue/);
+  assert.match(source, /STATIC_REBUILD_WAKE_QUEUE/);
+  assert.match(source, /maybeResendYoutubePendingWake/);
   const consumerBlock = source.slice(
     source.indexOf("export async function handleYoutubeSyncWakeQueue"),
     source.indexOf("export async function runSyncJobs"),

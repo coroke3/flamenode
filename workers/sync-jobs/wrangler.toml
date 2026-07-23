@@ -23,6 +23,10 @@ QUEUE_YOUTUBE_SYNC_ENABLED = "0"
 queue = "flamenode-youtube-sync-wake"
 binding = "YOUTUBE_SYNC_WAKE_QUEUE"
 
+[[queues.producers]]
+queue = "flamenode-static-rebuild-wake"
+binding = "STATIC_REBUILD_WAKE_QUEUE"
+
 [[queues.consumers]]
 queue = "flamenode-youtube-sync-wake"
 max_batch_size = 10

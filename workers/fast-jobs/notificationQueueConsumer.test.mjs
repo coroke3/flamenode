@@ -143,6 +143,38 @@ test("consumer: D1障害時は batch を retry する", async () => {
   assert.equal(message.ackCalls, 0);
 });
 
+test("consumer: 非一時的障害でも wake を ack せず retry する", async () => {
+  const env = {
+    DB: {
+      prepare() {
+        return {
+          bind() {
+            return this;
+          },
+          async all() {
+            throw new Error("no such table: notification_outbox");
+          },
+          async run() {
+            throw new Error("no such table: notification_outbox");
+          },
+        };
+      },
+    },
+    QUEUE_DISPATCH_ENABLED: "1",
+  };
+  const message = makeMessage({
+    version: 1,
+    kind: "notification_available",
+    source: "web",
+    requested_at: 1,
+    trace_id: "trace",
+  });
+
+  await handleNotificationWakeQueue(makeBatch([message]), env);
+  assert.equal(message.retryCalls, 1);
+  assert.equal(message.ackCalls, 0);
+});
+
 test("consumer: 不正 wake は ack して破棄する", async () => {
   let drainCalls = 0;
   const env = {

@@ -34,7 +34,7 @@ export async function recordQueueWakeFailureBestEffort(input: {
     }
   }
 
-  if (!kv) {
+  if (!kv || typeof kv.put !== "function") {
     console.warn(
       JSON.stringify({
         service: "queue-wake",

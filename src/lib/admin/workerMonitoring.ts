@@ -115,11 +115,12 @@ type JobDefinition = {
 };
 
 const JOBS: readonly JobDefinition[] = [
-  { jobName: "fast-jobs", label: "通知・リマインダー", cadenceSeconds: 300, warnAfterSeconds: 720, criticalAfterSeconds: 1500, detailHref: "/admin/notifications" },
-  { jobName: "content-jobs", label: "静的JSON・クリーンアップ", cadenceSeconds: 900, warnAfterSeconds: 2100, criticalAfterSeconds: 3900, detailHref: "/admin/static-builds" },
-  { jobName: "sync-jobs", label: "YouTube同期・スコア更新", cadenceSeconds: 900, warnAfterSeconds: 2100, criticalAfterSeconds: 3900, detailHref: "/admin/youtube-sync" },
+  // Recovery Cron は毎時。Queue 本線があるため warn/critical は緩める。
+  { jobName: "fast-jobs", label: "通知・リマインダー", cadenceSeconds: 3600, warnAfterSeconds: 7800, criticalAfterSeconds: 14400, detailHref: "/admin/notifications" },
+  { jobName: "content-jobs", label: "静的JSON・クリーンアップ", cadenceSeconds: 3600, warnAfterSeconds: 7800, criticalAfterSeconds: 14400, detailHref: "/admin/static-builds" },
+  { jobName: "sync-jobs", label: "YouTube同期・スコア更新", cadenceSeconds: 3600, warnAfterSeconds: 7800, criticalAfterSeconds: 14400, detailHref: "/admin/youtube-sync" },
   { jobName: "fast-jobs:slot-deadline-reminders", label: "締切リマインダー生成", cadenceSeconds: 3600, warnAfterSeconds: 7200, criticalAfterSeconds: 10800, detailHref: "/admin/notifications" },
-  { jobName: "content-jobs:cleanup", label: "期限切れデータ整理", cadenceSeconds: 3600, warnAfterSeconds: 7200, criticalAfterSeconds: 10800, detailHref: "/admin/static-builds" },
+  { jobName: "content-jobs:cleanup", label: "期限切れデータ整理", cadenceSeconds: 86400, warnAfterSeconds: 172800, criticalAfterSeconds: 259200, detailHref: "/admin/static-builds" },
 ] as const;
 
 const QUEUE_WAKE_LAST_FAILURE_KV_KEYS = Object.freeze(

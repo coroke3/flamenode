@@ -22,7 +22,7 @@ export async function recordQueueWakeFailureBestEffort(input: {
   const payload = serializeQueueWakeLastFailure(input.reason);
   const kv = input.kv ?? null;
 
-  if (!kv) {
+  if (!kv || typeof kv.put !== "function") {
     console.warn(
       JSON.stringify({
         service: "queue-wake-worker",

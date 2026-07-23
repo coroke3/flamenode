@@ -192,5 +192,10 @@ const cronWorker = createCronWorker<Env>({
 export default {
   scheduled: cronWorker.scheduled,
   fetch: cronWorker.fetch,
-  queue: handleNotificationWakeQueue,
+  async queue(
+    batch: MessageBatch<unknown>,
+    env: Env,
+  ): Promise<void> {
+    await handleNotificationWakeQueue(batch, env);
+  },
 };

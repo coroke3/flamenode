@@ -21,6 +21,7 @@ import {
 } from "../shared/runJob.ts";
 import { withSerializedD1 } from "../shared/serializedD1.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
+import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
 import { handleStaticRebuildWakeQueue } from "./staticRebuildWakeQueue.ts";
 
 export interface Env {
@@ -72,12 +73,26 @@ export async function runContentJobsRecovery(
           const rebuildEnv = rebuildEnvironment(env);
           const now = Math.floor(Date.now() / 1000);
           await reconcileStaleQueue(rebuildEnv, now, signal);
+          let staticRebuildHasMore = false;
           const rebuild = await runJob(
             "content-jobs",
             "static-rebuild-queue",
-            () => processStaticRebuildQueue(rebuildEnv, signal),
+            async () => {
+              const result = await processStaticRebuildQueue(rebuildEnv, signal);
+              staticRebuildHasMore = Boolean(result.hasMore);
+              return result;
+            },
             { commitSha: env.BUILD_COMMIT_SHA },
           );
+          if (staticRebuildHasMore) {
+            await sendWorkerQueueWakeBestEffort({
+              queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
+              kind: "static_rebuild_available",
+              source: "recovery",
+              envFlags: env,
+              kv: env.KV,
+            });
+          }
           const cleanupLease = await withCronLease(
             env,
             {
@@ -183,8 +198,7 @@ export default {
   async queue(
     batch: MessageBatch<unknown>,
     env: Env,
-    context: ExecutionContext,
   ): Promise<void> {
-    context.waitUntil(handleStaticRebuildWakeQueue(batch, env));
+    await handleStaticRebuildWakeQueue(batch, env);
   },
 };

@@ -141,11 +141,13 @@ export async function sendQueueWakeBestEffort(
     return { sent: false, reason: "binding_missing" };
   }
 
-  options.sentKinds?.add(options.kind);
-
+  let sendFailed = false;
   const sendPromise = queue.send(message).then(
-    () => undefined,
+    () => {
+      options.sentKinds?.add(options.kind);
+    },
     (error: unknown) => {
+      sendFailed = true;
       warnOnce(`wake_send_failed:${options.kind}`, {
         service: "queue-wake",
         result: "send_failed",
@@ -162,11 +164,20 @@ export async function sendQueueWakeBestEffort(
 
   const waitUntil = resolveWaitUntil(options.waitUntil);
   if (waitUntil) {
-    waitUntil(sendPromise);
-    return { sent: true };
+    // 非同期送信中の重複抑止のため先に予約し、失敗時は解除する
+    options.sentKinds?.add(options.kind);
+    waitUntil(
+      sendPromise.then(() => {
+        if (sendFailed) options.sentKinds?.delete(options.kind);
+      }),
+    );
+    return { sent: true, reason: "async_pending" };
   }
 
   await sendPromise;
+  if (sendFailed) {
+    return { sent: false, reason: "send_failed" };
+  }
   return { sent: true };
 }
 
