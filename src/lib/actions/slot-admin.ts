@@ -14,6 +14,7 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import { generateId } from "@/lib/utils/id";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { buildSlotForceReleasedNotification } from "@/lib/notifications/templates/slot";
 import {
   buildNotificationOutboxStatement,
   type NotificationOutboxStatement,
@@ -179,12 +180,11 @@ async function releaseNotification(
     recipientUserId: row.reserved_by_user_id,
     type: "slot_force_released",
     dedupeKey: `slot_force_released:${row.event_id}:${row.id}:${groupId ?? "solo"}:${row.version}`,
-    payload: {
-      content: `運営によりイベント枠 (${targetIds.length}件) が解放されました。`,
-      slot_ids: [...targetIds],
-      event_id: row.event_id,
-      reservation_group_id: groupId,
-    },
+    payload: buildSlotForceReleasedNotification({
+      eventId: row.event_id,
+      slotIds: [...targetIds],
+      reservationGroupId: groupId,
+    }),
     eventId: row.event_id,
   });
 }

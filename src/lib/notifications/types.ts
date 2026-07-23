@@ -45,7 +45,7 @@ const TYPE_LABELS: Record<string, string> = {
   announcement_broadcast: "お知らせ配信",
   terms_reaccept_required: "利用規約の再同意が必要です",
   welcome_account: "アカウント作成のお知らせ",
-  discord_webhook: "Webhook 配信",
+  discord_webhook: "運営チャンネル（Webhook）",
 };
 
 const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {

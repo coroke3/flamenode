@@ -11,6 +11,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots,
+  users,
   videos,
   xUsers,
 } from "@/lib/db/schema";
@@ -320,6 +321,39 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       });
       if (notification) {
         plan.statements.push(notification.statement);
+        plan.expectedChanges.push(null);
+        notificationWakeSource = "web";
+      }
+      const { buildChannelVideoRegisteredNotification } = await import(
+        "@/lib/notifications/templates/video"
+      );
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      const actor = (
+        await db
+          .select({ discord_id: users.discord_id })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1)
+      )[0];
+      const channelNotification = await buildOpsChannelWebhookStatement(db, {
+        actorUserId: userId,
+        payload: buildChannelVideoRegisteredNotification({
+          videoId,
+          videoTitle: parsed.data.title,
+          youtubeVideoId: youtubeId,
+          registrationKind: "slot",
+          eventId: slotRow.event_id,
+          eventTitle: eventConfig.title ?? "イベント",
+          userId,
+          discordId: actor?.discord_id,
+        }),
+        dedupeKey: `channel_video_registered:${videoId}`,
+        eventId: slotRow.event_id,
+      });
+      if (channelNotification) {
+        plan.statements.push(channelNotification.statement);
         plan.expectedChanges.push(null);
         notificationWakeSource = "web";
       }

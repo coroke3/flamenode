@@ -629,7 +629,72 @@ async function markDeliveryFailure(
     token,
   ).run();
   throwIfAborted(signal);
-  return Math.max(0, Number(result.meta?.changes ?? 0));
+  const changes = Math.max(0, Number(result.meta?.changes ?? 0));
+  if (deadLetter && changes > 0) {
+    await enqueueDeadLetterOpsAlert(
+      env,
+      row,
+      attempts,
+      (outcome.errorCode ?? "notification transport unavailable").slice(0, 240),
+      now,
+      signal,
+    );
+  }
+  return changes;
+}
+
+async function enqueueDeadLetterOpsAlert(
+  env: Env,
+  row: OutboxRow,
+  attemptCount: number,
+  lastError: string,
+  now: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  if (!env.DISCORD_WEBHOOK_URL || row.type === "discord_webhook") return;
+  const dedupeKey = `delivery_failed_alert:${row.id}`;
+  const existing = await env.DB.prepare(
+    `SELECT id FROM notification_outbox
+      WHERE dedupe_key = ?1
+        AND status IN ('pending', 'processing', 'sent')
+      LIMIT 1`,
+  )
+    .bind(dedupeKey)
+    .all<{ id: string }>();
+  throwIfAborted(signal);
+  if ((existing.results?.length ?? 0) > 0) return;
+
+  const { buildDeliveryFailureOpsNotification } = await import(
+    "../../src/lib/notifications/templates/errors.ts"
+  );
+  const payload = buildDeliveryFailureOpsNotification({
+    outboxId: row.id,
+    notificationType: row.type,
+    recipientUserId: row.recipient_user_id,
+    discordId: row.discord_id,
+    attemptCount,
+    lastError,
+  });
+  await env.DB.prepare(
+    `INSERT INTO notification_outbox (
+      id, recipient_user_id, type, payload_json, status, attempt_count,
+      processing_started_at, lease_token, lease_expires_at, next_attempt_at,
+      last_error, event_id, dedupe_key, created_at
+    ) VALUES (
+      ?1, ?2, 'discord_webhook', ?3, 'pending', 0,
+      NULL, NULL, NULL, NULL, NULL, NULL, ?4, ?5
+    )`,
+  )
+    .bind(
+      crypto.randomUUID(),
+      row.recipient_user_id,
+      JSON.stringify(payload),
+      dedupeKey,
+      now,
+    )
+    .run();
+  throwIfAborted(signal);
 }
 
 /** outbox payload から Discord API が受理するキーだけを残す。 */
@@ -673,7 +738,11 @@ async function deliverWithOutcome(
   }
   if (row.type === "discord_webhook") {
     if (!env.DISCORD_WEBHOOK_URL) {
-      return { ok: false, errorCode: "discord_webhook_unconfigured", retryAfterSeconds: 900 };
+      return {
+        ok: false,
+        errorCode: "discord_channel_webhook_unconfigured",
+        retryAfterSeconds: 900,
+      };
     }
     const routeKey = `webhook:${env.DISCORD_WEBHOOK_URL}`;
     const request = await discordRequest(
@@ -713,7 +782,11 @@ async function deliverWithOutcome(
     return { ok: false, errorCode: "discord_recipient_missing", permanent: true };
   }
   if (!env.DISCORD_BOT_TOKEN) {
-    return { ok: false, errorCode: "discord_bot_token_unconfigured", retryAfterSeconds: 900 };
+    return {
+      ok: false,
+      errorCode: "discord_dm_bot_token_unconfigured",
+      retryAfterSeconds: 900,
+    };
   }
 
   let channelId = await getCachedDmChannel(env, row.discord_id, signal);

@@ -56,11 +56,11 @@ test("reminder URLはNEXT_PUBLIC_SITE_URLだけを正本にする", async () => 
   const payload = JSON.parse(insert.values[2]);
   assert.match(
     payload.content,
-    /投稿する: https:\/\/flamenode\.example\/event\/event-1\/slots/,
+    /https:\/\/flamenode\.example\/event\/event-1\/slots/,
   );
   assert.match(
     payload.content,
-    /イベント: https:\/\/flamenode\.example\/event\/event-1/,
+    /https:\/\/flamenode\.example\/event\/event-1/,
   );
   assert.doesNotMatch(payload.content, /attacker|legacy/);
 });

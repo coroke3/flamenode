@@ -12,6 +12,12 @@ import {
   isTerminalNotificationFailure,
   type NotificationOutboxStatus,
 } from "./status";
+import {
+  notificationDeliveryRoute,
+  notificationDeliveryRouteLabel,
+} from "./opsWebhook";
+
+export { notificationDeliveryRoute, notificationDeliveryRouteLabel };
 
 export type OutboxStatus = NotificationOutboxStatus;
 
@@ -175,7 +181,12 @@ export function getNotificationFailureGuidance(input: {
 
 export function summarizeNotificationPayload(
   payloadJson: string,
-): { preview: string; videoId?: string; eventId?: string } {
+): {
+  preview: string;
+  fullContent: string;
+  videoId?: string;
+  eventId?: string;
+} {
   try {
     const obj = JSON.parse(payloadJson) as Record<string, unknown>;
     const content =
@@ -185,12 +196,35 @@ export function summarizeNotificationPayload(
       firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine || "—";
     return {
       preview,
+      fullContent: content || "—",
       videoId: typeof obj.video_id === "string" ? obj.video_id : undefined,
       eventId: typeof obj.event_id === "string" ? obj.event_id : undefined,
     };
   } catch {
-    return { preview: "—" };
+    return { preview: "—", fullContent: "—" };
   }
+}
+
+/** 運営画面向け: last_error を日本語要約へ変換する。 */
+export function translateNotificationError(
+  lastError: string | null | undefined,
+): string | null {
+  const err = (lastError ?? "").trim();
+  if (!err) return null;
+  const lower = err.toLowerCase();
+  if (lower.includes("discord_channel_webhook_unconfigured")) {
+    return "運営チャンネル用 Webhook URL (DISCORD_WEBHOOK_URL) が未設定です。";
+  }
+  if (lower.includes("discord_dm_bot_token_unconfigured")) {
+    return "利用者 DM 用 Bot Token (DISCORD_BOT_TOKEN) が未設定です。";
+  }
+  if (lower.includes("discord_recipient_missing")) {
+    return "宛先ユーザーの Discord ID が未連携のため、DM を配送できません。";
+  }
+  if (lower.includes("discord_payload_invalid")) {
+    return "通知 payload が Discord API 形式として不正です。";
+  }
+  return err;
 }
 
 export function severityBadgeClass(

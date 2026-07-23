@@ -4,9 +4,11 @@ import {
   formatNotificationRowTitle,
   getNotificationFailureGuidance,
   getNotificationStatusLabel,
+  notificationDeliveryRouteLabel,
   severityBadgeClass,
   statusBadgeClass,
   summarizeNotificationPayload,
+  translateNotificationError,
 } from "@/lib/notifications/display";
 import { isTerminalNotificationFailure } from "@/lib/notifications/status";
 import {
@@ -47,6 +49,11 @@ export function NotificationOutboxSummary({
         <span className={`fn-badge ${statusBadgeClass(row.status)}`}>
           {getNotificationStatusLabel(row.status)}
         </span>
+        {showTechnicalType ? (
+          <span className="fn-badge fn-badge-soft" title="配送経路">
+            {notificationDeliveryRouteLabel(row.type)}
+          </span>
+        ) : null}
         <span className={`fn-badge ${severityBadgeClass(meta.severity)}`}>
           {meta.categoryLabel}
         </span>
@@ -60,6 +67,15 @@ export function NotificationOutboxSummary({
 
       <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
         宛先: {formatRecipientDisplay(row.recipient_user_id, recipient)}
+        {recipient?.discordId ? (
+          <span style={{ marginLeft: 6, fontFamily: "monospace" }}>
+            discord_id: {recipient.discordId}
+          </span>
+        ) : showTechnicalType ? (
+          <span style={{ marginLeft: 6, color: "var(--accent-warning)" }}>
+            discord_id 未連携
+          </span>
+        ) : null}
         {recipient?.notificationsEnabled === false ? (
           <span style={{ marginLeft: 6, color: "var(--accent-warning)" }}>
             （通知OFF）
@@ -67,8 +83,17 @@ export function NotificationOutboxSummary({
         ) : null}
       </div>
 
-      {payload.preview !== "—" ? (
-        <div style={{ fontSize: 12, lineHeight: 1.45 }}>{payload.preview}</div>
+      {payload.fullContent !== "—" ? (
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.45,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {showTechnicalType ? payload.fullContent : payload.preview}
+        </div>
       ) : null}
 
       {row.dedupe_key ? (
@@ -105,7 +130,7 @@ export function NotificationOutboxSummary({
             wordBreak: "break-all",
           }}
         >
-          {row.last_error}
+          {translateNotificationError(row.last_error) ?? row.last_error}
         </div>
       ) : null}
     </div>
