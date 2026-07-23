@@ -1,4 +1,4 @@
-import { sanitizeNextPath } from "@/lib/utils/next";
+import { sanitizeNextPath } from "#utils/next";
 
 const AUTH_COMPLETE_PATH = "/auth/complete";
 const BLOCKED_PREFIXES = [

@@ -56,6 +56,7 @@ test("RequestAuthContextはlayout向けに1経路へ集約する", () => {
   assert.match(requestAuth, /getRequestAuthContext = cache/);
   assert.match(requestAuth, /getCurrentUser/);
   assert.match(requestAuth, /buildMinimalHeaderUser|MinimalHeaderUser/);
+  assert.match(requestAuth, /enrichmentFailed/);
   assert.match(requestAuth, /header_enrichment_failed|追加情報の失敗/);
 });
 

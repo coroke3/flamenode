@@ -1,8 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { expectedRowCondition } from "@/lib/audit/adapters";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -347,6 +350,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
     }
   } catch (error) {
+    unstable_rethrow(error);
     if (isYoutubeIdUniqueConstraintError(error)) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };
     }
@@ -354,9 +358,19 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     return { ok: false, message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。" };
   }
 
-  revalidatePath("/");
-  revalidatePath(`/event/${slotRow.event_id}`);
-  revalidatePath(`/event/${slotRow.event_id}/slots`);
-  revalidatePath("/dashboard");
+  await runPostCommitBestEffort(
+    { flow: "submit_slot_video", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate",
+        run: async () => {
+          revalidatePath("/");
+          revalidatePath(`/event/${slotRow.event_id}`);
+          revalidatePath(`/event/${slotRow.event_id}/slots`);
+          revalidatePath("/dashboard");
+        },
+      },
+    ],
+  );
   return { ok: true, videoId, youtubeVideoId: youtubeId ?? undefined, eventId: slotRow.event_id };
 }

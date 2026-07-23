@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
@@ -15,11 +16,47 @@ import {
   executeVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 function formDataBoolean(formData: FormData, name: string): boolean {
   return formData
     .getAll(name)
     .some((value) => value === "on" || value === "true");
+}
+
+function revalidateVideoMembersAdminPaths(input: {
+  videoId: string;
+  youtubeVideoId: string | null;
+  primaryEventId: string | null;
+}): void {
+  revalidatePath(`/admin/videos/${input.videoId}`);
+  revalidatePath(`/admin/videos/${input.videoId}/members`);
+  revalidatePath(`/dashboard/edit/${input.videoId}`);
+  revalidatePath(`/${input.youtubeVideoId ?? input.videoId}`);
+  revalidatePath("/list");
+  if (input.primaryEventId) {
+    revalidatePath(`/event/${input.primaryEventId}`);
+    revalidatePath(`/event/${input.primaryEventId}/slots`);
+  }
+}
+
+async function revalidateVideoMembersAdminPathsBestEffort(input: {
+  videoId: string;
+  youtubeVideoId: string | null;
+  primaryEventId: string | null;
+}): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "admin_video_members", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_video_members_admin_paths",
+        run: async () => {
+          revalidateVideoMembersAdminPaths(input);
+        },
+      },
+    ],
+  );
 }
 
 export async function updateVideoMembersAdmin(
@@ -85,19 +122,16 @@ export async function updateVideoMembersAdmin(
       staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.warn("[updateVideoMembersAdmin] atomic save rejected", error);
     return { ok: false, message: "保存が競合しました。再読み込みして再試行してください。" };
   }
 
-  revalidatePath(`/admin/videos/${videoId}`);
-  revalidatePath(`/admin/videos/${videoId}/members`);
-  revalidatePath(`/dashboard/edit/${videoId}`);
-  revalidatePath(`/${target.youtube_video_id ?? videoId}`);
-  revalidatePath("/list");
-  if (target.primary_event_id) {
-    revalidatePath(`/event/${target.primary_event_id}`);
-    revalidatePath(`/event/${target.primary_event_id}/slots`);
-  }
+  await revalidateVideoMembersAdminPathsBestEffort({
+    videoId,
+    youtubeVideoId: target.youtube_video_id,
+    primaryEventId: target.primary_event_id,
+  });
 
   return {
     ok: true,

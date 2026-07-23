@@ -9,6 +9,9 @@ const read = (relative) =>
 const rules = read("./rules.ts");
 const moderation = read("./moderation-admin.ts");
 const chapter = read("./chapter.ts");
+const videoDetailPage = read("../../../app/(admin)/admin/videos/[id]/page.tsx");
+const broadcastButton = read("../../components/admin/TermsReacceptBroadcastButton.tsx");
+const moderationForm = read("../../components/admin/CreateModerationCaseForm.tsx");
 
 test("rules, moderation, chapter import unstable_rethrow", () => {
   for (const [name, source] of [
@@ -66,6 +69,19 @@ test("rules broadcast separates fan-out commit from terms touch", () => {
     /mutationStatements:\s*\[[\s\S]*notifications\.statements[\s\S]*termsVersions/,
     "fan-out and terms touch must not share one mutationStatements array",
   );
+  assert.match(broadcast, /touchWarning/);
+  assert.match(broadcast, /warning: touchWarning/);
+  assert.match(broadcastButton, /result\.warning/);
+  assert.match(broadcastButton, /role="alert"/);
+});
+
+test("admin video detail surfaces moderation create failures in client form", () => {
+  assert.match(videoDetailPage, /CreateModerationCaseForm/);
+  assert.doesNotMatch(videoDetailPage, /createModerationCaseAction/);
+  assert.match(moderationForm, /createModerationCase\(/);
+  assert.match(moderationForm, /useTransition/);
+  assert.match(moderationForm, /!result\.ok/);
+  assert.match(moderationForm, /role="alert"/);
 });
 
 test("moderation uses post-commit revalidate and noop for resolved re-apply", () => {

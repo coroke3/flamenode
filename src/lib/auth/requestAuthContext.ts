@@ -35,6 +35,8 @@ export type RequestAuthContext = {
   currentUser: CurrentUser | null;
   headerUser: MinimalHeaderUser | null;
   onboarding: MinimalOnboardingState;
+  /** management/onboarding 付加情報の取得失敗。認可ゲートでは false-negative にしない。 */
+  enrichmentFailed: boolean;
 };
 
 async function loadManagementAccess(
@@ -204,6 +206,7 @@ async function loadRequestAuthContext(): Promise<RequestAuthContext> {
         hasLinkedXId: false,
         hasPendingXIdRequest: false,
       },
+      enrichmentFailed: false,
     };
   }
 
@@ -218,6 +221,7 @@ async function loadRequestAuthContext(): Promise<RequestAuthContext> {
     hasPendingXIdRequest: false,
   };
 
+  let enrichmentFailed = false;
   try {
     const [mgmt, onboardingFlags] = await Promise.all([
       loadManagementAccess(currentUser.id, currentUser.role),
@@ -227,6 +231,7 @@ async function loadRequestAuthContext(): Promise<RequestAuthContext> {
     onboarding = onboardingFlags;
   } catch (error) {
     unstable_rethrow(error);
+    enrichmentFailed = true;
     // 追加情報の失敗でログイン表示自体を消さない。
     logFlowTrace({
       flow: "request_auth",
@@ -251,6 +256,7 @@ async function loadRequestAuthContext(): Promise<RequestAuthContext> {
     currentUser,
     headerUser: buildMinimalHeaderUser(currentUser, management),
     onboarding,
+    enrichmentFailed,
   };
 }
 
@@ -262,11 +268,13 @@ export async function getLayoutAuthSurface(): Promise<{
   currentUser: CurrentUser | null;
   headerUser: MinimalHeaderUser | null;
   needsXIdOnboarding: boolean;
+  enrichmentFailed: boolean;
 }> {
   const ctx = await getRequestAuthContext();
   return {
     currentUser: ctx.currentUser,
     headerUser: ctx.headerUser,
     needsXIdOnboarding: ctx.onboarding.needsXIdOnboarding,
+    enrichmentFailed: ctx.enrichmentFailed,
   };
 }

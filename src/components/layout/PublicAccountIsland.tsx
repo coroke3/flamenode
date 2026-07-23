@@ -17,7 +17,7 @@ const MOBILE_NAV_ITEMS = [
 
 function mapSummaryToHeaderUser(
   summary: Extract<AccountSummaryResponse, { loggedIn: true }>,
-): PublicHeaderUser {
+): PublicHeaderUser & { degraded?: true } {
   return {
     id: "",
     name: summary.displayName,
@@ -29,11 +29,13 @@ function mapSummaryToHeaderUser(
       canAccessManage: summary.canAccessManage,
       manageableEventCount: 0,
     },
+    ...(summary.degraded ? { degraded: true as const } : {}),
   };
 }
 
 export function usePublicAccountSummary(
   enabled: boolean,
+  preserveLoggedInOnFailure = false,
 ): {
   user: PublicHeaderUser | null;
   loading: boolean;
@@ -57,17 +59,19 @@ export function usePublicAccountSummary(
           cache: "no-store",
         });
         if (!response.ok) {
-          if (!cancelled) setUser(null);
+          if (!cancelled && !preserveLoggedInOnFailure) setUser(null);
           return;
         }
         const summary = (await response.json()) as AccountSummaryResponse;
         if (!cancelled) {
-          setUser(
-            summary.loggedIn ? mapSummaryToHeaderUser(summary) : null,
-          );
+          if (summary.loggedIn) {
+            setUser(mapSummaryToHeaderUser(summary));
+          } else if (!preserveLoggedInOnFailure) {
+            setUser(null);
+          }
         }
       } catch {
-        if (!cancelled) setUser(null);
+        if (!cancelled && !preserveLoggedInOnFailure) setUser(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -76,7 +80,7 @@ export function usePublicAccountSummary(
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, preserveLoggedInOnFailure]);
 
   return { user, loading };
 }

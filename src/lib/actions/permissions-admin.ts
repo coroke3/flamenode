@@ -1,14 +1,31 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { systemSettings } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface PermissionAdminResult { ok: boolean; message?: string }
 const ALLOWED_VIDEO_FIELDS = new Set(["title", "display_name", "icon_url", "music", "credit", "intro_comment", "used_software", "highlights", "production_story", "closing_comment", "members", "chapters"]);
+
+async function revalidatePermissionsAdminPathsBestEffort(): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "admin_permissions", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_permissions_admin_paths",
+        run: async () => {
+          revalidatePath("/admin/users");
+        },
+      },
+    ],
+  );
+}
 function cleanFields(values: FormDataEntryValue[]): string {
   return Array.from(new Set(values.map(String).filter((value) => ALLOWED_VIDEO_FIELDS.has(value)))).join(",");
 }
@@ -31,9 +48,10 @@ export async function updateGlobalEditableFields(formData: FormData): Promise<Pe
       audits: [{ table_name: "system_settings", target_id: "default", operation: "UPDATE", before: { ...before }, after: { ...after }, actor_user_id: guard.user.id, context: "admin_permissions", reason: "一般作品権限を更新", retention_class: "long_audit", strict: true }],
     });
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[permissions-admin] atomic mutation failed", error);
     return { ok: false, message: "更新が競合したか監査記録に失敗しました。" };
   }
-  revalidatePath("/admin/users");
+  await revalidatePermissionsAdminPathsBestEffort();
   return { ok: true, message: "一般作品権限を保存しました。" };
 }

@@ -32,12 +32,12 @@
 2. Remote D1 migration は本変更では追加していないため、DB rollback は不要
 3. Worker は notification / json-generator の sentinel `last_error` / `error` 文字列に依存する。旧 Worker へ戻す場合、残存 sentinel 行は lease 回復で `pending` に戻る可能性があるため、必要なら手動で `sent` / `done` へ更新する
 
-## 追補（周辺領域）
+## 追補（穴つぶし）
 
-- `xid-admin` / `xid-merge-admin`: revalidate を post-commit 化、`unstable_rethrow`
-- `rules` / `moderation` / `chapter`: 同上。削除済みチャプター・resolved moderation は noop
-- `broadcastTermsReaccept`: 通知 fan-out と terms touch を分離
-- `event-staff-admin` / `notification-admin`: post-commit revalidate
-- YouTube sync: metadata Commit と score/static Post-commit を分離
-- manage layout: `getLayoutAuthSurface` 1回化
-- `MutationResult` 共通型を段階導入用に追加（全面置換はしない）
+- manage/admin: `enrichmentFailed` 時は誤 `/dashboard` ではなく一時障害扱い
+- admin layout: banned を `getLayoutAuthSurface` で弾く
+- account summary: 503/`unavailable`、degraded 時に SSR ログイン・権限を潰さない
+- moderation 作成フォーム: 失敗を UI 表示
+- rules broadcast: terms touch 失敗を `warning` で明示
+- admin/slot/user/youtube/permissions/collab/cost-guard/api-endpoints/submitSlotVideo: `unstable_rethrow` + post-commit
+- cost-guard: D1成功後の KV 失敗を保存失敗扱いしない

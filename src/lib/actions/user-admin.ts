@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -9,7 +10,9 @@ import { notificationOutbox, users, videos, xUsers } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { normalizeXId } from "@/lib/utils/xid";
 
 export interface UserAdminResult {
@@ -25,11 +28,76 @@ function snapshot(row: object): Record<string, unknown> {
 }
 
 function mutationError(error: unknown): UserAdminResult {
+  unstable_rethrow(error);
   console.error("[user-admin] atomic mutation failed", error);
   return {
     ok: false,
     message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。",
   };
+}
+
+function revalidateUserDetailPaths(userId: string): void {
+  revalidatePath(`/admin/users/${userId}`);
+  revalidatePath("/admin/users");
+}
+
+async function revalidateUserDetailPathsBestEffort(userId: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "user_admin", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_user_detail_paths",
+        run: async () => {
+          revalidateUserDetailPaths(userId);
+        },
+      },
+    ],
+  );
+}
+
+async function revalidateUserNotificationPathsBestEffort(userId: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "user_admin_notifications", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_user_notification_paths",
+        run: async () => {
+          revalidateUserDetailPaths(userId);
+          revalidatePath("/admin/notifications");
+          revalidatePath("/manage/notifications");
+        },
+      },
+    ],
+  );
+}
+
+async function revalidateUserEventCreatePathsBestEffort(userId: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "user_admin_event_create", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_user_event_create_paths",
+        run: async () => {
+          revalidateUserDetailPaths(userId);
+          revalidatePath(`/admin/users/${userId}/edit`);
+        },
+      },
+    ],
+  );
+}
+
+async function revalidateXUserIconPathsBestEffort(xUserId: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow: "admin_x_icon_refresh", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_x_user_icon_paths",
+        run: async () => {
+          revalidatePath(`/user/${xUserId}`);
+        },
+      },
+    ],
+  );
 }
 
 async function updateUserAtomic(input: {
@@ -119,8 +187,7 @@ export async function setUserRole(formData: FormData): Promise<UserAdminResult> 
     context: "admin_user_role",
   });
   if (result.ok) {
-    revalidatePath(`/admin/users/${user_id}`);
-    revalidatePath("/admin/users");
+    await revalidateUserDetailPathsBestEffort(user_id);
   }
   return result;
 }
@@ -158,8 +225,7 @@ export async function setUserBanned(formData: FormData): Promise<UserAdminResult
     reason: reason || (is_banned === 0 ? "BAN解除" : null),
   });
   if (result.ok) {
-    revalidatePath(`/admin/users/${user_id}`);
-    revalidatePath("/admin/users");
+    await revalidateUserDetailPathsBestEffort(user_id);
   }
   return result;
 }
@@ -235,9 +301,7 @@ export async function setUserNotifications(
   });
 
   if (result.ok) {
-    revalidatePath(`/admin/users/${parsed.data.user_id}`);
-    revalidatePath("/admin/notifications");
-    revalidatePath("/manage/notifications");
+    await revalidateUserNotificationPathsBestEffort(parsed.data.user_id);
   }
   return result;
 }
@@ -268,9 +332,7 @@ export async function setUserCanCreateEvents(
     context: "admin_user_event_create",
   });
   if (result.ok) {
-    revalidatePath(`/admin/users/${parsed.data.user_id}`);
-    revalidatePath(`/admin/users/${parsed.data.user_id}/edit`);
-    revalidatePath("/admin/users");
+    await revalidateUserEventCreatePathsBestEffort(parsed.data.user_id);
   }
   return result;
 }
@@ -357,6 +419,6 @@ export async function refreshXUserIcon(formData: FormData): Promise<UserAdminRes
   } catch (error) {
     return mutationError(error);
   }
-  revalidatePath(`/user/${xUserId}`);
+  await revalidateXUserIconPathsBestEffort(xUserId);
   return { ok: true };
 }

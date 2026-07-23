@@ -24,7 +24,7 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
   } catch (error) {
     if (error instanceof CurrentUserUnavailableError) {
       return NextResponse.json(
-        { loggedIn: false },
+        { loggedIn: false, unavailable: true },
         { status: 503, headers: PRIVATE_HEADERS },
       );
     }
@@ -45,6 +45,7 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
     return NextResponse.json(
       {
         loggedIn: true,
+        degraded: true,
         displayName: sessionUser.name,
         icon: sessionUser.image,
         role: sessionUser.role,
@@ -61,6 +62,7 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
             ]
           : [],
         canAccessAdmin: sessionUser.role === "admin",
+        // staff の manage 可否は不明。false で上書きしないよう degraded を付ける。
         canAccessManage: sessionUser.role === "admin",
       },
       { headers: PRIVATE_HEADERS },

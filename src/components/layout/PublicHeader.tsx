@@ -65,8 +65,10 @@ export function PublicHeader({
     React.useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const fetchAccount = serverUser === undefined || hydrateAccount;
+  const preserveLoggedInOnFailure = hydrateAccount && serverUser != null;
   const { user: fetchedUser, loading: accountLoading } =
-    usePublicAccountSummary(fetchAccount);
+    usePublicAccountSummary(fetchAccount, preserveLoggedInOnFailure);
+  const showAccountLoading = fetchAccount && accountLoading && !preserveLoggedInOnFailure;
   const accountUser =
     serverUser === undefined
       ? fetchedUser
@@ -79,7 +81,20 @@ export function PublicHeader({
             image: fetchedUser.image ?? serverUser.image,
             role: fetchedUser.role || serverUser.role,
             xIds: fetchedUser.xIds.length > 0 ? fetchedUser.xIds : serverUser.xIds,
-            management: fetchedUser.management ?? serverUser.management,
+            // degraded 応答の canAccessManage=false で SSR 権限を潰さない。
+            management:
+              "degraded" in fetchedUser && fetchedUser.degraded
+                ? {
+                    canAccessAdmin:
+                      fetchedUser.management.canAccessAdmin ||
+                      serverUser.management.canAccessAdmin,
+                    canAccessManage:
+                      fetchedUser.management.canAccessManage ||
+                      serverUser.management.canAccessManage,
+                    manageableEventCount:
+                      serverUser.management.manageableEventCount ?? 0,
+                  }
+                : fetchedUser.management ?? serverUser.management,
           }
         : serverUser;
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
@@ -171,7 +186,7 @@ export function PublicHeader({
 
           <PublicAccountIsland
             user={accountUser}
-            loading={fetchAccount && accountLoading}
+            loading={showAccountLoading}
             entryHref={entryHref}
             accountOpen={accountOpen}
             onAccountOpenChange={(open) => {
@@ -288,7 +303,7 @@ export function PublicHeader({
             </form>
             <PublicAccountIsland
               user={accountUser}
-              loading={fetchAccount && accountLoading}
+              loading={showAccountLoading}
               entryHref={entryHref}
               accountOpen={accountOpen}
               onAccountOpenChange={setAccountOpen}
@@ -302,7 +317,7 @@ export function PublicHeader({
 
           <PublicAccountIsland
             user={accountUser}
-            loading={fetchAccount && accountLoading}
+            loading={showAccountLoading}
             entryHref={entryHref}
             accountOpen={accountOpen}
             onAccountOpenChange={setAccountOpen}

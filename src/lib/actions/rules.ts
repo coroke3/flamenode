@@ -19,7 +19,7 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface RulesResult { ok: boolean; message?: string; id?: string }
-export interface RulesBroadcastResult extends RulesResult { enqueued?: number; cursor?: string }
+export interface RulesBroadcastResult extends RulesResult { enqueued?: number; cursor?: string; warning?: string }
 
 const TERMS_REACCEPT_BATCH_SIZE = 30;
 const TERMS_REACCEPT_MAX_CONTENT_LEN = 1000;
@@ -217,6 +217,7 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
       });
     }
   } catch (error) { return mutationError(error); }
+  let touchWarning: string | undefined;
   try {
     await mutateWithAudit(db, {
       mutationStatements: [
@@ -228,6 +229,8 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
   } catch (error) {
     unstable_rethrow(error);
     console.warn("[rules] terms touch after broadcast fan-out failed", error);
+    touchWarning =
+      "通知は登録されましたが、規約版の監査記録更新に失敗しました。同じ cursor で再実行しても同一ユーザーへの通知は重複しません。";
   }
   const nextCursor = targets.at(-1)?.user_id ?? cursor;
   await runRulesPostCommit("rules.broadcast", [
@@ -239,7 +242,13 @@ export async function broadcastTermsReaccept(formData: FormData): Promise<RulesB
       },
     },
   ]);
-  return { ok: true, message: `${notifications.statements.length}件を登録しました。`, enqueued: notifications.statements.length, cursor: nextCursor };
+  return {
+    ok: true,
+    message: `${notifications.statements.length}件を登録しました。`,
+    enqueued: notifications.statements.length,
+    cursor: nextCursor,
+    ...(touchWarning ? { warning: touchWarning } : {}),
+  };
 }
 
 export async function archiveTermsVersion(formData: FormData): Promise<RulesResult> {

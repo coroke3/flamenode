@@ -28,10 +28,13 @@ export default async function ManageLayout({
 }: {
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
-  const { currentUser, headerUser, needsXIdOnboarding } =
+  const { currentUser, headerUser, needsXIdOnboarding, enrichmentFailed } =
     await getLayoutAuthSurface();
 
   if (!headerUser) redirect("/entry");
+  if (enrichmentFailed) {
+    redirect("/entry?error=auth_temporarily_unavailable");
+  }
   if (!headerUser.management.canAccessAdmin && !headerUser.management.canAccessManage) {
     redirect("/dashboard");
   }

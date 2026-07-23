@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session, layoutHeaderUser, publicLayout, ...authLayouts] = await Promise.all([
+const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session, layoutHeaderUser, requestAuthContext, publicLayout, ...authLayouts] = await Promise.all([
   readFile(new URL("../cloudflare.ts", import.meta.url), "utf8"),
   readFile(new URL("./index.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/api/auth/[...nextauth]/route.ts", import.meta.url), "utf8"),
@@ -11,6 +11,7 @@ const [cloudflare, auth, authRoute, authRouteError, origin, currentUser, session
   readFile(new URL("./currentUser.ts", import.meta.url), "utf8"),
   readFile(new URL("./session.ts", import.meta.url), "utf8"),
   readFile(new URL("./layoutHeaderUser.ts", import.meta.url), "utf8"),
+  readFile(new URL("./requestAuthContext.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(public)/layout.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(auth)/layout.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(manage)/layout.tsx", import.meta.url), "utf8"),
@@ -93,7 +94,12 @@ test("認証layoutは動的renderを明示しRequestAuthContextへ集約する",
   assert.doesNotMatch(manageLayout, /await getLayoutHeaderUser/);
   assert.doesNotMatch(manageLayout, /await getCurrentUser/);
   assert.doesNotMatch(manageLayout, /await userNeedsXIdOnboarding/);
-  assert.match(adminLayout, /await getLayoutHeaderUser\(false\)/);
+  assert.match(manageLayout, /enrichmentFailed/);
+  assert.match(manageLayout, /auth_temporarily_unavailable/);
+  assert.match(adminLayout, /getLayoutAuthSurface|getRequestAuthContext/);
+  assert.doesNotMatch(adminLayout, /await getLayoutHeaderUser/);
+  assert.match(adminLayout, /enrichmentFailed/);
+  assert.match(adminLayout, /auth_temporarily_unavailable/);
   assert.match(adminLayout, /<CostGuardBanner source="admin" \/>/);
   assert.doesNotMatch(adminLayout, /await auth\(/);
   assert.doesNotMatch(adminLayout, /await getCurrentUser/);
@@ -101,4 +107,11 @@ test("認証layoutは動的renderを明示しRequestAuthContextへ集約する",
     assert.match(layout, /export const dynamic = "force-dynamic"/);
     assert.doesNotMatch(layout, /catch \(error\)/);
   }
+});
+
+test("RequestAuthContextはenrichment失敗を認可ゲートと分離する", () => {
+  assert.match(requestAuthContext, /enrichmentFailed:\s*boolean/);
+  assert.match(requestAuthContext, /let enrichmentFailed = false/);
+  assert.match(requestAuthContext, /enrichmentFailed = true/);
+  assert.match(requestAuthContext, /header_enrichment_failed/);
 });
