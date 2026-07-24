@@ -40,6 +40,7 @@ export interface FlameNodeEnv {
   NEXT_PUBLIC_SITE_URL?: string;
   FLAMENODE_LOCAL_PREVIEW?: string;
   FORCE_STATIC_ONLY?: string;
+  PUBLIC_DEGRADED_D1_ENABLED?: string;
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
   QUEUE_YOUTUBE_SYNC_ENABLED?: string;
@@ -280,6 +281,11 @@ function normalizeBindings(candidate: unknown): FlameNodeEnv {
     FORCE_STATIC_ONLY: stringValue(
       record,
       "FORCE_STATIC_ONLY",
+      allowProcessFallback,
+    ),
+    PUBLIC_DEGRADED_D1_ENABLED: stringValue(
+      record,
+      "PUBLIC_DEGRADED_D1_ENABLED",
       allowProcessFallback,
     ),
     QUEUE_DISPATCH_ENABLED: stringValue(

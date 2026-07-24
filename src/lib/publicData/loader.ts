@@ -3,6 +3,7 @@ import "server-only";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import {
   logPublicRequestMetrics,
+  notePublicDataMode,
   recordPublicD1Query,
   recordPublicR2Get,
   recordPublicStaticHit,
@@ -79,22 +80,49 @@ import {
   isMaintenanceStrategy,
   shouldUseStaticCollection,
 } from "./loaderPolicy";
+import { canAttemptDegradedD1 } from "./degradedPolicy";
+import {
+  fetchDegradedEventDetailPayload,
+  fetchDegradedEventsIndexPayload,
+  fetchDegradedRecentListPayload,
+  fetchDegradedRecommendPayload,
+  fetchDegradedRulesPayload,
+  fetchDegradedTopPayload,
+  fetchDegradedUserProfilePayload,
+  fetchDegradedUsersIndexPayload,
+  fetchDegradedVideoDetailPayload,
+} from "./degradedQueries";
+import {
+  readPublicJsonCache,
+  writePublicJsonCacheBestEffort,
+} from "./publicCache";
+import {
+  toPublicJsonLegacySource,
+  type PublicDataMode,
+} from "./publicDataMode";
 
 export { canFallbackToDatabase, isMaintenanceStrategy };
 export {
   logPublicRequestMetrics,
+  notePublicDataMode,
   runWithPublicRequestMetrics,
 } from "@/lib/observability/publicRequestMetrics";
+export type { PublicDataMode } from "./publicDataMode";
+export { isDegradedD1Mode, isPublicDataUnavailable } from "./publicDataMode";
 
-export type PublicJsonLoadOptions = {
+export type PublicJsonLoadOptions<TPayload = unknown> = {
   r2Key: string;
   targetType: StaticRebuildTargetType;
   targetId: string;
   reason: string;
+  cacheTtlSeconds?: number;
+  degradedFetcher?: () => Promise<TPayload | null>;
 };
 
 export type PublicJsonLoadResult<T> = {
   data: T | null;
+  mode: PublicDataMode;
+  /** @deprecated Use `mode`. */
   source: "static" | "miss";
   strategy: PublicDataStrategy;
   enqueued: boolean;
@@ -105,8 +133,25 @@ type PublicJsonLoaderConfig<TPayload, TResult> = {
   targetType: StaticRebuildTargetType;
   targetId?: (id: string) => string;
   reason: string;
+  cacheTtlSeconds?: number;
   normalize: (payload: TPayload) => TResult | null;
+  degradedFetcher?: (id: string) => Promise<TPayload | null>;
 };
+
+function buildStaticHitResult<T>(
+  payload: T,
+  mode: Extract<PublicDataMode, "static" | "cached_static">,
+  strategy: PublicDataStrategy,
+): PublicJsonLoadResult<T> {
+  notePublicDataMode(mode);
+  return {
+    data: payload,
+    mode,
+    source: toPublicJsonLegacySource(mode),
+    strategy,
+    enqueued: false,
+  };
+}
 
 const staticReadInFlight = new Map<string, Promise<unknown | null>>();
 
@@ -163,7 +208,7 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
 }
 
 async function resolvePublicJsonMiss<T = never>(
-  options: PublicJsonLoadOptions,
+  options: PublicJsonLoadOptions<T>,
 ): Promise<PublicJsonLoadResult<T>> {
   recordPublicStaticMiss();
   const db = getDatabase();
@@ -171,7 +216,13 @@ async function resolvePublicJsonMiss<T = never>(
   const strategy = getPublicDataStrategy(mode);
 
   if (strategy === "maintenance") {
-    return { data: null, source: "miss", strategy, enqueued: false };
+    return {
+      data: null,
+      mode: "unavailable",
+      source: "miss",
+      strategy,
+      enqueued: false,
+    };
   }
 
   let enqueued = false;
@@ -205,7 +256,31 @@ async function resolvePublicJsonMiss<T = never>(
     }
   }
 
-  return { data: null, source: "miss", strategy, enqueued };
+  if (options.degradedFetcher && canAttemptDegradedD1(strategy) && db) {
+    try {
+      const degraded = await options.degradedFetcher();
+      if (degraded != null) {
+        notePublicDataMode("degraded_d1");
+        return {
+          data: degraded,
+          mode: "degraded_d1",
+          source: "miss",
+          strategy,
+          enqueued,
+        };
+      }
+    } catch (error) {
+      warnPublicStaticJson(options.r2Key, "read_failed", error);
+    }
+  }
+
+  return {
+    data: null,
+    mode: "unavailable",
+    source: "miss",
+    strategy,
+    enqueued,
+  };
 }
 
 export function createPublicJsonLoader<TPayload, TResult>({
@@ -213,14 +288,20 @@ export function createPublicJsonLoader<TPayload, TResult>({
   targetType,
   targetId = (id) => id,
   reason,
+  cacheTtlSeconds,
   normalize,
+  degradedFetcher,
 }: PublicJsonLoaderConfig<TPayload, TResult>) {
   return async (id: string): Promise<PublicJsonLoadResult<TResult>> => {
-    const options: PublicJsonLoadOptions = {
+    const options: PublicJsonLoadOptions<TPayload> = {
       r2Key: r2Key(id),
       targetType,
       targetId: targetId(id),
       reason,
+      cacheTtlSeconds,
+      degradedFetcher: degradedFetcher
+        ? () => degradedFetcher(id)
+        : undefined,
     };
     const result = await loadPublicJson<TPayload>(options);
     if (result.data == null) {
@@ -230,20 +311,36 @@ export function createPublicJsonLoader<TPayload, TResult>({
     if (normalized != null) {
       return { ...result, data: normalized };
     }
-    // R2 にあっても正規化不能なら semantic miss として再生成を試みる
-    return resolvePublicJsonMiss(options);
+    return resolvePublicJsonMiss<TResult>(
+      options as unknown as PublicJsonLoadOptions<TResult>,
+    );
   };
 }
 
 export async function loadPublicJson<T>(
-  options: PublicJsonLoadOptions,
+  options: PublicJsonLoadOptions<T>,
 ): Promise<PublicJsonLoadResult<T>> {
+  const cached = await readPublicJsonCache<T>(options.r2Key);
+  if (cached !== null) {
+    recordPublicStaticHit();
+    const operationMode = await resolvePublicOperationMode({ allowD1: false });
+    const strategy = getPublicDataStrategy(operationMode);
+    return buildStaticHitResult(cached, "cached_static", strategy);
+  }
+
   const payload = await readStaticJson<T>(options.r2Key);
   if (payload !== null) {
     recordPublicStaticHit();
-    const mode = await resolvePublicOperationMode({ allowD1: false });
-    const strategy = getPublicDataStrategy(mode);
-    return { data: payload, source: "static", strategy, enqueued: false };
+    const operationMode = await resolvePublicOperationMode({ allowD1: false });
+    const strategy = getPublicDataStrategy(operationMode);
+    if (options.cacheTtlSeconds) {
+      writePublicJsonCacheBestEffort(
+        options.r2Key,
+        payload,
+        options.cacheTtlSeconds,
+      );
+    }
+    return buildStaticHitResult(payload, "static", strategy);
   }
 
   return resolvePublicJsonMiss(options);
@@ -256,12 +353,19 @@ export const loadStaticEventDetail = createPublicJsonLoader<
   r2Key: (eventId) => `events/${eventId}.json`,
   targetType: "event",
   reason: "public_event_detail_miss",
+  cacheTtlSeconds: 120,
   normalize: normalizeStaticEventDetail,
+  degradedFetcher: async (eventId) => {
+    const db = getDatabase();
+    if (!db) return null;
+    return fetchDegradedEventDetailPayload(db, eventId);
+  },
 });
 
 export async function loadStaticEventsIndex(): Promise<{
   index: StaticEventsIndex | null;
   strategy: PublicDataStrategy;
+  mode: PublicDataMode;
   enqueued: boolean;
 }> {
   const result = await loadPublicJson<StaticEventsIndexPayload>({
@@ -269,10 +373,17 @@ export async function loadStaticEventsIndex(): Promise<{
     targetType: "events_index",
     targetId: "global",
     reason: "public_events_index_miss",
+    cacheTtlSeconds: 120,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedEventsIndexPayload(db);
+    },
   });
   return {
     index: result.data ? normalizeStaticEventsIndex(result.data) : null,
     strategy: result.strategy,
+    mode: result.mode,
     enqueued: result.enqueued,
   };
 }
@@ -280,6 +391,7 @@ export async function loadStaticEventsIndex(): Promise<{
 export async function loadStaticRecentVideosPage(params: {
   page: number;
   pageSize: number;
+  q?: string;
 }): Promise<
   PublicJsonLoadResult<StaticRecentVideoPage> & {
     page: StaticRecentVideoPage | null;
@@ -290,13 +402,24 @@ export async function loadStaticRecentVideosPage(params: {
     targetType: "list_recent",
     targetId: "global",
     reason: "public_list_miss",
+    cacheTtlSeconds: 60,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedRecentListPayload(db, {
+        page: params.page,
+        pageSize: params.pageSize,
+        q: params.q,
+      });
+    },
   });
   const normalizedPage = result.data
     ? normalizeStaticRecentVideoPage(result.data, params.page, params.pageSize)
     : null;
   const page =
     normalizedPage &&
-    shouldUseStaticCollection(result.strategy, normalizedPage.videos.length)
+    (result.mode === "degraded_d1" ||
+      shouldUseStaticCollection(result.strategy, normalizedPage.videos.length))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -315,6 +438,7 @@ export async function loadStaticPopularVideosPage(params: {
     targetType: "list_popular",
     targetId: "global",
     reason: "public_list_popular_miss",
+    cacheTtlSeconds: 60,
   });
   const normalizedPage = result.data
     ? normalizeStaticPopularVideoPage(result.data, params.page, params.pageSize)
@@ -342,6 +466,16 @@ export async function loadStaticSearchVideosPage(params: {
     targetType: "search_index",
     targetId: "global",
     reason: "public_list_search_miss",
+    cacheTtlSeconds: 60,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedRecentListPayload(db, {
+        page: params.page,
+        pageSize: params.pageSize,
+        q: params.q,
+      });
+    },
   });
   const payload = result.data ? normalizeStaticSearchIndexPayload(result.data) : null;
   const normalizedPage = payload
@@ -355,7 +489,8 @@ export async function loadStaticSearchVideosPage(params: {
     : null;
   const page =
     normalizedPage &&
-    shouldUseStaticCollection(result.strategy, normalizedPage.videos.length)
+    (result.mode === "degraded_d1" ||
+      shouldUseStaticCollection(result.strategy, normalizedPage.videos.length))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -369,6 +504,12 @@ export async function loadStaticRulesPage(): Promise<
     targetType: "rules",
     targetId: "global",
     reason: "public_rules_miss",
+    cacheTtlSeconds: 300,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedRulesPayload(db);
+    },
   });
   const rules = result.data ? normalizeStaticRules(result.data) : null;
   return { ...result, data: rules, rules };
@@ -382,24 +523,47 @@ export async function loadStaticTopPage(): Promise<
     targetType: "top",
     targetId: "global",
     reason: "public_top_miss",
+    cacheTtlSeconds: 30,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedTopPayload(db);
+    },
   });
   const top = result.data ? normalizeStaticTop(result.data) : null;
   return { ...result, data: top, top };
 }
 
-export async function loadStaticUsersIndex(): Promise<
+export async function loadStaticUsersIndex(params?: {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+}): Promise<
   PublicJsonLoadResult<StaticUsersIndex> & { index: StaticUsersIndex | null }
 > {
+  const page = Math.max(1, Math.floor(params?.page ?? 1));
+  const pageSize = Math.max(1, Math.floor(params?.pageSize ?? 48));
   const result = await loadPublicJson<StaticUsersIndexPayload>({
     r2Key: "users/index.json",
     targetType: "users_index",
     targetId: "global",
     reason: "public_users_index_miss",
+    cacheTtlSeconds: 60,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedUsersIndexPayload(db, {
+        page,
+        pageSize,
+        q: params?.q,
+      });
+    },
   });
   const normalized = result.data ? normalizeStaticUsersIndex(result.data) : null;
   const index =
     normalized &&
-    shouldUseStaticCollection(result.strategy, normalized.items.length)
+    (result.mode === "degraded_d1" ||
+      shouldUseStaticCollection(result.strategy, normalized.items.length))
       ? normalized
       : null;
   return { ...result, data: index, index };
@@ -415,17 +579,24 @@ export async function loadStaticRecommendPage(): Promise<
     targetType: "recommend",
     targetId: "global",
     reason: "public_recommend_miss",
+    cacheTtlSeconds: 60,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedRecommendPayload(db);
+    },
   });
   const normalized = result.data ? normalizeStaticRecommend(result.data) : null;
   const recommend =
     normalized &&
-    shouldUseStaticCollection(
-      result.strategy,
-      normalized.recommended.length +
-        normalized.latest.length +
-        normalized.underrated.length +
-        normalized.creators.length,
-    )
+    (result.mode === "degraded_d1" ||
+      shouldUseStaticCollection(
+        result.strategy,
+        normalized.recommended.length +
+          normalized.latest.length +
+          normalized.underrated.length +
+          normalized.creators.length,
+      ))
       ? normalized
       : null;
   return { ...result, data: recommend, recommend };
@@ -438,7 +609,13 @@ export const loadStaticUserProfile = createPublicJsonLoader<
   r2Key: (xUserId) => `users/${xUserId}.json`,
   targetType: "user",
   reason: "public_user_profile_miss",
+  cacheTtlSeconds: 120,
   normalize: normalizeStaticUserProfile,
+  degradedFetcher: async (xUserId) => {
+    const db = getDatabase();
+    if (!db) return null;
+    return fetchDegradedUserProfilePayload(db, xUserId);
+  },
 });
 
 function profileSectionToPage(
@@ -473,6 +650,7 @@ export async function loadStaticUserWorksPage(params: {
     return {
       data: normalized,
       page: normalized,
+      mode: "static",
       source: "static",
       strategy: params.strategy ?? "static_json_only",
       enqueued: false,
@@ -519,6 +697,7 @@ export async function loadStaticUserCollabsPage(params: {
     return {
       data: normalized,
       page: normalized,
+      mode: "static",
       source: "static",
       strategy: params.strategy ?? "static_json_only",
       enqueued: false,
@@ -553,7 +732,13 @@ export const loadStaticVideoDetail = createPublicJsonLoader<
   r2Key: (videoId) => `videos/${videoId}.json`,
   targetType: "video",
   reason: "public_video_detail_miss",
+  cacheTtlSeconds: 120,
   normalize: normalizeStaticVideoDetail,
+  degradedFetcher: async (videoId) => {
+    const db = getDatabase();
+    if (!db) return null;
+    return fetchDegradedVideoDetailPayload(db, videoId);
+  },
 });
 
 export type {

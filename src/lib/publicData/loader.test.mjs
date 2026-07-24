@@ -45,36 +45,34 @@ test("loader exposes paginated user profile loaders", () => {
   assert.match(loaderSource, /users\/\$\{params\.userId\}\/works\//);
 });
 
-test("loader は R2 を先に読み、ヒット時は allowD1:false で mode 解決する", () => {
+test("loader は Cache → R2 → degraded の順で公開 JSON を解決する", () => {
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
   );
+  const cacheIndex = loadPublicJsonFn.indexOf("readPublicJsonCache");
   const r2Index = loadPublicJsonFn.indexOf("readStaticJson");
-  const hitIndex = loadPublicJsonFn.indexOf("if (payload !== null)");
-  const hitModeIndex = loadPublicJsonFn.indexOf(
-    "resolvePublicOperationMode({ allowD1: false",
-  );
-  assert.ok(r2Index >= 0 && hitIndex > r2Index, "R2 read precedes hit branch");
-  assert.ok(hitModeIndex > hitIndex, "hit path resolves mode without D1");
+  const missIndex = loadPublicJsonFn.indexOf("return resolvePublicJsonMiss");
+  assert.ok(cacheIndex >= 0 && r2Index > cacheIndex, "Cache precedes R2");
+  assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
   assert.match(
     loaderSource,
     /resolvePublicOperationMode\(\{ allowD1: true/,
   );
+  assert.match(loaderSource, /degradedFetcher/);
   assert.doesNotMatch(loaderSource, /getOperationMode/);
   assert.doesNotMatch(loaderSource, /return "normal"/);
 });
 
 test("loader の R2 ヒット分岐は getDatabase を呼ばない", () => {
-  const hitIndex = loaderSource.indexOf("if (payload !== null)");
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
+    loaderSource.indexOf("export const loadStaticEventDetail"),
   );
   const hitBranch = loadPublicJsonFn.slice(
     loadPublicJsonFn.indexOf("if (payload !== null)"),
     loadPublicJsonFn.indexOf("return resolvePublicJsonMiss"),
   );
-  assert.ok(hitIndex >= 0);
   assert.doesNotMatch(hitBranch, /getDatabase\(/);
   assert.doesNotMatch(hitBranch, /systemSettings/);
   assert.doesNotMatch(hitBranch, /enqueueStaticRebuild/);

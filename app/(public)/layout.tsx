@@ -2,6 +2,8 @@ import * as React from "react";
 import { PublicHeader } from "@/components/layout/PublicHeader";
 import { PublicFooter } from "@/components/layout/PublicFooter";
 import { CostGuardBanner } from "@/components/layout/CostGuardBanner";
+import { PublicDegradedBanner } from "@/components/layout/PublicDegradedBanner";
+import { PublicMetricsShell } from "@/components/layout/PublicMetricsShell";
 
 export default function PublicLayout({
   children,
@@ -13,7 +15,13 @@ export default function PublicLayout({
       {/* source省略 = KV/envのみ。D1のsystem_settingsは読まない。 */}
       <CostGuardBanner />
       <PublicHeader />
-      <main className="fn-main flex-1 w-full">{children}</main>
+      <main
+        className="fn-main flex-1 w-full"
+        style={{ display: "flex", flexDirection: "column" }}
+      >
+        <PublicMetricsShell>{children}</PublicMetricsShell>
+        <PublicDegradedBanner />
+      </main>
       <PublicFooter />
     </div>
   );

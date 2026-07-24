@@ -83,19 +83,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       noIndex: !isPublicEventVisible(event),
     });
   }
-  const event = await withDatabase(async (db) =>
-    (
-      await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-    )[0] ?? null,
-  );
-  if (!event) return { title: id };
-  return buildPageMetadata({
-    title: event.title,
-    description: event.explanation,
-    path: `/event/${event.id}`,
-    image: event.img_url ?? event.icon_url,
-    noIndex: !isPublicEventVisible(event),
-  });
+  return { title: id };
 }
 
 export default async function EventDetailPage({
@@ -106,80 +94,7 @@ export default async function EventDetailPage({
   if (staticLoaded.data) {
     return <StaticEventDetailView detail={staticLoaded.data} />;
   }
-  if (!canFallbackToDatabase(staticLoaded.strategy)) {
-    notFound();
-  }
-
-  const bundle = await withDatabase(async (db) => {
-    const event = (
-      await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-    )[0];
-    if (!event || !isPublicEventVisible(event)) return null;
-    const publicVideoWhere = and(
-      eq(videoEvents.event_id, id),
-      eq(videos.visibility_status, "public"),
-    )!;
-    const [eventVideos, eventVideoTotal, creatorCountRow, slotRows, staffRows] =
-      await Promise.all([
-        fetchAllPublicVideosForEvent(db, id),
-        countVideosForEvent(db, id),
-        db
-          .select({
-            c: sql<number>`(
-              SELECT COUNT(*) FROM (
-                SELECT LOWER(${videos.creator_x_user_id}) AS x_id
-                FROM ${videos}
-                INNER JOIN ${videoEvents} ON ${videos.id} = ${videoEvents.video_id}
-                WHERE ${videoEvents.event_id} = ${id}
-                  AND ${videos.visibility_status} = 'public'
-                  AND ${excludePvsfSummaryVideos()}
-                  AND ${videos.creator_x_user_id} IS NOT NULL
-                UNION
-                SELECT LOWER(${videoMembers.x_user_id}) AS x_id
-                FROM ${videoMembers}
-                INNER JOIN ${videos} ON ${videos.id} = ${videoMembers.video_id}
-                INNER JOIN ${videoEvents} ON ${videos.id} = ${videoEvents.video_id}
-                WHERE ${videoEvents.event_id} = ${id}
-                  AND ${videos.visibility_status} = 'public'
-                  AND ${videoMembers.is_public_member} = 1
-                  AND ${videoMembers.x_user_id} IS NOT NULL
-              )
-            )`,
-          })
-          .from(videos)
-          .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-          .where(publicVideoWhere)
-          .limit(1),
-        db
-          .select()
-          .from(slotsTable)
-          .where(eq(slotsTable.event_id, id))
-          .orderBy(asc(slotsTable.start_time), asc(slotsTable.sort_order)),
-        db
-          .select({
-            x_user_id: eventStaff.x_user_id,
-            display_name: eventStaff.display_name,
-            public_role_label: eventStaff.public_role_label,
-            x_name: xUsers.x_name,
-            icon_url: xUsers.icon_url,
-          })
-          .from(eventStaff)
-          .leftJoin(xUsers, eq(xUsers.id, eventStaff.x_user_id))
-          .where(and(eq(eventStaff.event_id, id), eq(eventStaff.is_public, 1))!)
-          .orderBy(asc(eventStaff.created_at), asc(eventStaff.display_name)),
-      ]);
-    return {
-      event,
-      eventVideos: eventVideos as EventVideo[],
-      eventVideoTotal: Number(eventVideoTotal ?? 0),
-      creatorTotal: Number(creatorCountRow[0]?.c ?? 0),
-      slotRows,
-      staffRows,
-    };
-  });
-  if (!bundle) notFound();
-
-  return <EventDetailView {...bundle} />;
+  notFound();
 }
 
 function EventDetailView({

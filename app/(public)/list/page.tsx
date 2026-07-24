@@ -1,16 +1,9 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
-import {
-  countPublicVideos,
-  fetchPublicVideos,
-  parsePublicVideoSort,
-} from "@/lib/db/listQueries";
-import { events as eventsTable } from "@/lib/db/schema";
 import { VideoCard } from "@/components/video/VideoCard";
+import type { VideoCardData } from "@/components/video/VideoCard";
 import { Icon } from "@/components/ui/Icon";
 import { Pagination } from "@/components/ui/Pagination";
 import { TableScroll } from "@/components/ui/TableScroll";
@@ -18,7 +11,8 @@ import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
-import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage, canFallbackToDatabase } from "@/lib/publicData/loader";
+import { parsePublicVideoSort } from "@/lib/db/listQueries";
+import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -55,11 +49,14 @@ export default async function ListPage({
     rawView === "index" ? "index" : rawView === "compact" ? "compact" : "grid";
   const parsedSort = parsePublicVideoSort(sort);
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
-  const offset = (pageNum - 1) * PAGE_SIZE;
 
   const staticRecentLoad =
     !q.trim() && parsedSort === "new" && !event
-      ? await loadStaticRecentVideosPage({ page: pageNum, pageSize: PAGE_SIZE })
+      ? await loadStaticRecentVideosPage({
+          page: pageNum,
+          pageSize: PAGE_SIZE,
+          q,
+        })
       : null;
   const staticPopularLoad =
     !q.trim() && parsedSort === "score" && !event
@@ -76,37 +73,17 @@ export default async function ListPage({
       : null;
   const staticLoad = staticPopularLoad ?? staticSearchLoad ?? staticRecentLoad;
 
-  const data = staticLoad?.page
-    ? { videos: staticLoad.page.videos, total: staticLoad.page.total, eventInfo: null }
-    : staticLoad && !canFallbackToDatabase(staticLoad.strategy)
-      ? { videos: [], total: 0, eventInfo: null }
-      : await withDatabase(async (db) => {
-        const [videos, total, eventInfo] = await Promise.all([
-          fetchPublicVideos(db, {
-            q,
-            sort: parsedSort,
-            eventId: event || undefined,
-            limit: PAGE_SIZE,
-            offset,
-          }),
-          countPublicVideos(db, {
-            q,
-            eventId: event || undefined,
-          }),
-          event
-            ? db
-                .select({
-                  id: eventsTable.id,
-                  title: eventsTable.title,
-                })
-                .from(eventsTable)
-                .where(eq(eventsTable.id, event))
-                .limit(1)
-                .then((rows) => rows[0] ?? null)
-            : Promise.resolve(null),
-        ]);
-        return { videos, total, eventInfo };
-      });
+  const data: {
+    videos: VideoCardData[];
+    total: number;
+    eventInfo: { id: string; title: string } | null;
+  } = staticLoad?.page
+    ? {
+        videos: staticLoad.page.videos,
+        total: staticLoad.page.total,
+        eventInfo: null,
+      }
+    : { videos: [] as VideoCardData[], total: 0, eventInfo: null };
 
   const { videos = [], total = 0, eventInfo = null } = data ?? {};
 
