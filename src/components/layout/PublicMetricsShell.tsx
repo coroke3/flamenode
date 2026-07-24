@@ -1,5 +1,6 @@
 import * as React from "react";
 import { runWithPublicRequestMetrics } from "@/lib/observability/publicRequestMetrics";
+import { PublicDegradedBanner } from "@/components/layout/PublicDegradedBanner";
 
 export async function PublicMetricsShell({
   children,
@@ -8,6 +9,11 @@ export async function PublicMetricsShell({
 }): Promise<React.ReactElement> {
   return (await runWithPublicRequestMetrics(
     "public",
-    async () => children,
+    async () => (
+      <>
+        {children}
+        <PublicDegradedBanner />
+      </>
+    ),
   )) as React.ReactElement;
 }

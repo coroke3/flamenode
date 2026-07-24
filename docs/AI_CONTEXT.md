@@ -42,6 +42,7 @@ Historical資料は経緯確認専用で、現行仕様の根拠にしない。
 | Worker・Queue | `docs/operations/workers.md` | `src/lib/queues/wakeBudget.ts`、`workers/*/wrangler.toml`、Queue関連test |
 | YouTube同期 | `docs/operations/youtube-playlist-sync.md` | 同期Worker、quota管理コード、関連migration |
 | UI・フォーム | `docs/operations/ui-acceptance.md` | 対象page/component、CSS、関連test |
+| 公開静的配信・degraded D1 | `docs/operations/static-delivery.md` | `src/lib/publicData/loader.ts`、`degradedPolicy.ts` |
 | 監査・復元 | `docs/operations/audit-and-restore.md` | mutation、audit helper、復元test |
 | ローカル起動 | `LOCAL.md` | `package.json`、`.dev.vars.example` |
 | デプロイ | `DEPLOY.md`、`docs/operations/deploy-setup-report.md` | `package.json`の`cf:*`、`scripts/cloudflare-*.mjs`、wrangler群 |

@@ -12,7 +12,7 @@ import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { parsePublicVideoSort } from "@/lib/db/listQueries";
-import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage } from "@/lib/publicData/loader";
+import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage, loadPublicEventVideosPage } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -71,19 +71,35 @@ export default async function ListPage({
           pageSize: PAGE_SIZE,
         })
       : null;
+  const eventListLoad =
+    event.trim()
+      ? await loadPublicEventVideosPage({
+          eventId: event.trim(),
+          sort: parsedSort,
+          page: pageNum,
+          pageSize: PAGE_SIZE,
+          q,
+        })
+      : null;
   const staticLoad = staticPopularLoad ?? staticSearchLoad ?? staticRecentLoad;
 
   const data: {
     videos: VideoCardData[];
     total: number;
     eventInfo: { id: string; title: string } | null;
-  } = staticLoad?.page
+  } = eventListLoad?.page
     ? {
-        videos: staticLoad.page.videos,
-        total: staticLoad.page.total,
-        eventInfo: null,
+        videos: eventListLoad.page.videos,
+        total: eventListLoad.page.total,
+        eventInfo: eventListLoad.eventInfo,
       }
-    : { videos: [] as VideoCardData[], total: 0, eventInfo: null };
+    : staticLoad?.page
+      ? {
+          videos: staticLoad.page.videos,
+          total: staticLoad.page.total,
+          eventInfo: null,
+        }
+      : { videos: [] as VideoCardData[], total: 0, eventInfo: null };
 
   const { videos = [], total = 0, eventInfo = null } = data ?? {};
 

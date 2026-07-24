@@ -86,32 +86,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         ogType: "video.other",
       });
   }
-  const detail = await withDatabase(async (db) => {
-    return fetchVideoDetail(db, id);
-  });
-  if (!detail) return { title: id };
-  const videoPath = `/${detail.video.youtube_video_id ?? detail.video.id}`;
-  const description = compactText(
-    detail.video.intro_comment ||
-      detail.video.highlights ||
-      [
-        detail.video.music ? `使用楽曲: ${detail.video.music}` : null,
-        detail.video.credit ? `クレジット: ${detail.video.credit}` : null,
-      ]
-        .filter(Boolean)
-        .join(" / "),
-  );
-  const metadataYoutubeId = extractYoutubeId(detail.video.youtube_video_id);
-  return buildPageMetadata({
-    title: `${detail.video.title} - ${detail.video.creator_display_name}`,
-    description,
-    path: videoPath,
-    image: metadataYoutubeId
-      ? youtubeThumbUrl(metadataYoutubeId, "maxresdefault")
-      : detail.video.creator_icon_url,
-    noIndex: detail.video.visibility_status !== "public",
-    ogType: "video.other",
-  });
+  return { title: id };
 }
 
 export default async function VideoDetailPage({

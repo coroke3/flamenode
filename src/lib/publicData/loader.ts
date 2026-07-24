@@ -83,6 +83,7 @@ import {
 import { canAttemptDegradedD1 } from "./degradedPolicy";
 import {
   fetchDegradedEventDetailPayload,
+  fetchDegradedEventListPage,
   fetchDegradedEventsIndexPayload,
   fetchDegradedRecentListPayload,
   fetchDegradedRecommendPayload,
@@ -494,6 +495,102 @@ export async function loadStaticSearchVideosPage(params: {
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
+}
+
+export async function loadPublicEventVideosPage(params: {
+  eventId: string;
+  sort: "new" | "old" | "score";
+  page: number;
+  pageSize: number;
+  q?: string;
+}): Promise<
+  PublicJsonLoadResult<StaticRecentVideoPage> & {
+    page: StaticRecentVideoPage | null;
+    eventInfo: { id: string; title: string } | null;
+  }
+> {
+  const db = getDatabase();
+  const mode = await resolvePublicOperationMode({ allowD1: true, db });
+  const strategy = getPublicDataStrategy(mode);
+
+  if (isMaintenanceStrategy(strategy)) {
+    return {
+      data: null,
+      page: null,
+      eventInfo: null,
+      mode: "unavailable",
+      source: "miss",
+      strategy,
+      enqueued: false,
+    };
+  }
+
+  if (!canAttemptDegradedD1(strategy) || !db) {
+    return {
+      data: null,
+      page: null,
+      eventInfo: null,
+      mode: "unavailable",
+      source: "miss",
+      strategy,
+      enqueued: false,
+    };
+  }
+
+  try {
+    const degraded = await fetchDegradedEventListPage(db, params);
+    if (!degraded) {
+      return {
+        data: null,
+        page: null,
+        eventInfo: null,
+        mode: "unavailable",
+        source: "miss",
+        strategy,
+        enqueued: false,
+      };
+    }
+    notePublicDataMode("degraded_d1");
+    const videos = degraded.items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      youtube_video_id: item.youtube_video_id,
+      display_name: item.display_name,
+      icon_url: item.icon_url ?? null,
+      primary_event_id: item.primary_event_id ?? null,
+      primary_event_title:
+        (item as { primary_event_title?: string | null }).primary_event_title ??
+        null,
+      scheduled_time: item.scheduled_time ?? null,
+      status: "public" as const,
+      part: null,
+    }));
+    const page: StaticRecentVideoPage = {
+      videos,
+      total: degraded.total,
+      generatedAt: null,
+    };
+    return {
+      data: page,
+      page,
+      eventInfo: degraded.eventInfo,
+      mode: "degraded_d1",
+      source: "miss",
+      strategy,
+      enqueued: false,
+    };
+  } catch (error) {
+    warnPublicStaticJson(`list/event/${params.eventId}`, "read_failed", error);
+    return {
+      data: null,
+      page: null,
+      eventInfo: null,
+      mode: "unavailable",
+      source: "miss",
+      strategy,
+      enqueued: false,
+    };
+  }
 }
 
 export async function loadStaticRulesPage(): Promise<

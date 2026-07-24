@@ -4,7 +4,7 @@ import styles from "./CostGuardBanner.module.css";
 
 /**
  * degraded_d1 表示時の簡易バナー。
- * 子ページの loader 完了後に評価するため layout の children 直後へ置く。
+ * 子ページの loader 完了後に評価するため PublicMetricsShell 内で children の直後に置く。
  */
 export function PublicDegradedBanner(): React.ReactElement | null {
   const snapshot = getPublicRequestMetricsSnapshot();

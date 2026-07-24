@@ -1,12 +1,13 @@
 import "server-only";
 
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import type { VideoCardData } from "@/components/video/VideoCard";
 import type { HomeIntroSlotStat } from "@/components/layout/HomeIntroBand";
 import type { DB } from "@/lib/db/client";
 import { fetchPublicAnnouncements } from "@/lib/db/announcementQueries";
 import {
   countablePublicVideoCondition,
+  eventPublicVideoLinkCondition,
   excludePvsfSummaryVideos,
 } from "@/lib/db/queries";
 import {
@@ -20,6 +21,8 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { creatorIconExpr, creatorNameExpr } from "@/lib/db/displayExpr";
+import { coalescedVideoScoreDesc } from "@/lib/db/videoScoreSql";
+import { parsePublicVideoSort } from "@/lib/db/listQueries";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { recordPublicD1Query } from "@/lib/observability/publicRequestMetrics";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
@@ -249,6 +252,110 @@ export async function fetchDegradedRecentListPayload(
     generated_at: null,
     items: rows,
     total: offset + rows.length,
+  };
+}
+
+export type DegradedEventListPageResult = {
+  eventInfo: { id: string; title: string };
+  items: VideoCardData[];
+  total: number;
+};
+
+export async function fetchDegradedEventListPage(
+  db: DB,
+  params: {
+    eventId: string;
+    sort?: string;
+    page: number;
+    pageSize?: number;
+    q?: string;
+  },
+): Promise<DegradedEventListPageResult | null> {
+  const eventId = params.eventId.trim();
+  if (!eventId) return null;
+
+  noteQuery();
+  const eventRow = (
+    await db
+      .select({ id: events.id, title: events.title })
+      .from(events)
+      .where(
+        and(eq(events.id, eventId), eq(events.visibility_status, "public"))!,
+      )
+      .limit(1)
+  )[0];
+  if (!eventRow) return null;
+
+  const pageSize = Math.min(
+    DEGRADED_LIST_PAGE_SIZE,
+    Math.max(1, Math.floor(params.pageSize ?? DEGRADED_LIST_PAGE_SIZE)),
+  );
+  const page = Math.max(1, Math.floor(params.page));
+  const offset = (page - 1) * pageSize;
+  const sort = parsePublicVideoSort(params.sort);
+  const q = params.q?.trim() ?? "";
+  const like = q ? `%${escapeLikeTerm(q)}%` : null;
+  const searchCondition = like
+    ? or(
+        sql`${videos.title} LIKE ${like} ESCAPE '\\'`,
+        sql`${videos.creator_x_user_id} LIKE ${like} ESCAPE '\\'`,
+        sql`${videos.creator_display_name} LIKE ${like} ESCAPE '\\'`,
+      )
+    : undefined;
+
+  noteQuery();
+  const fetchLimit = pageSize + 1;
+  const query = db
+    .select({
+      id: videos.id,
+      title: videos.title,
+      youtube_video_id: videos.youtube_video_id,
+      display_name: creatorNameExpr,
+      icon_url: creatorIconExpr,
+      creator_x_user_id: videos.creator_x_user_id,
+      primary_event_id: videos.primary_event_id,
+      primary_event_title: events.title,
+      scheduled_time: videos.scheduled_time,
+      part: videos.part,
+    })
+    .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .leftJoin(events, eq(events.id, videos.primary_event_id))
+    .where(
+      and(
+        countablePublicVideoCondition,
+        eventPublicVideoLinkCondition(eventId),
+        searchCondition,
+      )!,
+    );
+
+  const rows =
+    sort === "old"
+      ? await query
+          .orderBy(asc(videos.scheduled_time), asc(videos.created_at))
+          .limit(fetchLimit)
+          .offset(offset)
+      : sort === "score"
+        ? await query
+            .orderBy(coalescedVideoScoreDesc, desc(videos.scheduled_time))
+            .limit(fetchLimit)
+            .offset(offset)
+        : await query
+            .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+            .limit(fetchLimit)
+            .offset(offset);
+
+  const hasMore = rows.length > pageSize;
+  const items = (hasMore ? rows.slice(0, pageSize) : rows).map((row) => ({
+    ...row,
+    primary_event_title: row.primary_event_title ?? null,
+  }));
+  const total = hasMore ? offset + pageSize + 1 : offset + items.length;
+
+  return {
+    eventInfo: { id: eventRow.id, title: eventRow.title },
+    items,
+    total,
   };
 }
 
