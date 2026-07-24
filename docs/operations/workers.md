@@ -151,7 +151,12 @@ YouTube metadata同期だけの理論最大は、15分ごとに通常4 unitsと�
 
 ### Queue feature flags（本番有効化）
 
-`QUEUE_DISPATCH_ENABLED` 等はデフォルト `"0"`。本番で通知 wake を有効化する場合は `flamenode-web` と各 Cron Worker の Runtime Variables で `"1"` に設定する。ロールバックは `"0"` へ戻すだけでよい。
+`QUEUE_DISPATCH_ENABLED` 等はデフォルト `"0"`。本番で通知 wake を有効化する場合は次を両方行う。
+
+1. `flamenode-web` と各 Cron Worker の Runtime Variables を `"1"` にする（即時反映）
+2. Workers Builds の Build Variables にも同名 `"1"` を登録する（次回 deploy で `"0"` に戻さない）
+
+ロールバックは `"0"` へ戻すだけでよい。
 
 各jobは1行の構造化ログへ`worker`、`job`、`run_id`、成否、処理・skip・失敗件数、duration、外部API呼出数、job本体が把握したD1変更行数、inline retry回数、quota停止、40桁commit SHAを記録する。quota理由は固定内部コードだけを許可し、ユーザーID、動画ID、Secret、外部レスポンス本文は常時ログへ出さない。
 

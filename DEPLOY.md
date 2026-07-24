@@ -100,6 +100,9 @@ Cloudflare側の自動dependency installを止め、`npm ci`を1回に固定し�
 | `NEXT_PUBLIC_SITE_URL` | `FLAMENODE_WEB_URL`と同じorigin |
 | `AUTH_URL` | `FLAMENODE_WEB_URL`と同じorigin |
 | `AUTH_DISCORD_ID` | production Discord OAuth Client ID |
+| `QUEUE_DISPATCH_ENABLED` | Queue wake 有効時は `"1"`（未設定時は template `"0"`） |
+| `QUEUE_CONTINUATION_ENABLED` | 継続 wake 有効時は `"1"` |
+| `QUEUE_YOUTUBE_SYNC_ENABLED` | YouTube sync wake 有効時は `"1"` |
 
 `WORKERS_CI_COMMIT_SHA`はWorkers Buildsが自動提供する40桁SHAを使用し、Dashboardで上書きしません。Git HEADと一致しない、欠落する、形式が不正な場合はproduction deployを停止し、`unknown`で継続しません。
 
@@ -131,7 +134,12 @@ Workers Buildsのsystem変数、Build/Deploy分離、branch設定は次を正本
 | `flamenode-content-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
 | `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
 
-Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効）とする。段階的な有効化はDashboardまたはRuntime Variablesで`"1"` / `"true"` / `"yes"`を設定する。正本は`src/lib/queues/wakeBudget.ts`の`QUEUE_FEATURE_FLAG_NAMES`。ロールバックは該当flagを`"0"`へ戻すだけでよい（Queueリソースとbindingは維持し、送信・消費だけ止める）。
+Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効）とする。本番で有効化する正本は次の2段。
+
+1. **即時**: 各 Worker の Runtime Variables で `QUEUE_DISPATCH_ENABLED` / `QUEUE_CONTINUATION_ENABLED` / `QUEUE_YOUTUBE_SYNC_ENABLED` を `"1"` にする
+2. **永続**: Workers Builds の Build Variables にも同名で `"1"` を登録する。`cf:deploy-production` が生成 config へ注入し、次回 `main` deploy でも `"0"` に戻さない
+
+ロールバックは Runtime と Build Variables の双方を `"0"` へ戻す（Queue リソースと binding は維持し、送信・消費だけ止める）。正本名は `src/lib/queues/wakeBudget.ts` の `QUEUE_FEATURE_FLAG_NAMES`。
 
 公開site metadataとYouTube quota既定値はwrangler templateを正本とし、production origin、OAuth Client ID、commitは検証済み一時configへ注入します。Dashboardで同名値を別正本として手動driftさせません。
 

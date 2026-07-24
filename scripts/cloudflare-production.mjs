@@ -385,16 +385,30 @@ function injectStringVariable(content, name, rawValue) {
   return `${content.trimEnd()}\n\n[vars]\n${assignment}\n`;
 }
 
+const QUEUE_FEATURE_FLAG_NAMES = [
+  "QUEUE_DISPATCH_ENABLED",
+  "QUEUE_CONTINUATION_ENABLED",
+  "QUEUE_YOUTUBE_SYNC_ENABLED",
+];
+
+/** Generated production config may inject "1" from Build Variables. Template stays "0". */
 function validateQueueFeatureFlags(content, errors) {
-  for (const name of [
-    "QUEUE_DISPATCH_ENABLED",
-    "QUEUE_CONTINUATION_ENABLED",
-    "QUEUE_YOUTUBE_SYNC_ENABLED",
-  ]) {
-    if (!new RegExp(`^\\s*${name}\\s*=\\s*"0"\\s*$`, "m").test(content)) {
-      errors.push(`${name} must default to "0"`);
+  for (const name of QUEUE_FEATURE_FLAG_NAMES) {
+    if (!new RegExp(`^\\s*${name}\\s*=\\s*"(?:0|1)"\\s*$`, "m").test(content)) {
+      errors.push(`${name} must be "0" or "1"`);
     }
   }
+}
+
+function injectQueueFeatureFlags(content, env) {
+  let output = content;
+  for (const name of QUEUE_FEATURE_FLAG_NAMES) {
+    const raw = env[name];
+    if (raw === undefined || raw === null || String(raw).trim() === "") continue;
+    const normalized = /^(1|true|yes)$/i.test(String(raw).trim()) ? "1" : "0";
+    output = injectStringVariable(output, name, normalized);
+  }
+  return output;
 }
 
 function validateQueueConsumerBlock(content, errors, { queue, dlq, retryDelay }) {
@@ -620,6 +634,8 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
       sourcePath,
     );
   }
+  // Optional Build Variables: QUEUE_* = 1 keeps wake flags across Workers Builds deploys.
+  output = injectQueueFeatureFlags(output, env);
   return output;
 }
 
