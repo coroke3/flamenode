@@ -17,11 +17,7 @@ import {
   videos as videosTable,
   xUsers,
 } from "@/lib/db/schema";
-import {
-  fetchEventPlaylistVideos,
-  fetchRelatedVideos,
-  fetchVideoDetail,
-} from "@/lib/db/videoDetailQueries";
+import { fetchEventPlaylistVideos } from "@/lib/db/videoDetailQueries";
 import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
