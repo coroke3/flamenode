@@ -32,6 +32,8 @@ NEXT_PUBLIC_SITE_DESCRIPTION = "動画とイベントをつなぐ動画プラッ
 QUEUE_DISPATCH_ENABLED = "0"
 QUEUE_CONTINUATION_ENABLED = "0"
 QUEUE_YOUTUBE_SYNC_ENABLED = "0"
+# R2 miss 後の bounded D1 fallback。明示 0 で停止。
+PUBLIC_DEGRADED_D1_ENABLED = "1"
 
 [[queues.producers]]
 queue = "flamenode-notification-wake"

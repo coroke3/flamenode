@@ -15,6 +15,10 @@ import {
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
 
 const source = await readFile(new URL("./rebuild.ts", import.meta.url), "utf8");
+const projectionSource = await readFile(
+  new URL("../../src/lib/publicData/publicCreatorProjection.ts", import.meta.url),
+  "utf8",
+);
 
 function statement(sql, state) {
   return {
@@ -132,8 +136,8 @@ test("R2 delete失敗時はdeleted_atを更新せず、再試行成功後にだ�
 test("public creator queries include imported legacy X IDs", () => {
   assert.ok(PUBLIC_LISTABLE_X_APPROVAL_SQL_IN.includes("'imported'"));
   assert.match(
-    source,
-    /WHERE xu\.approval_status IN \(\$\{PUBLIC_LISTABLE_X_APPROVAL_SQL_IN\}\)/,
+    projectionSource,
+    /WHERE approval_status IN \(\$\{PUBLIC_LISTABLE_X_APPROVAL_SQL_IN\}\)/,
   );
   assert.match(
     source,
@@ -157,7 +161,11 @@ test("static JSON queryはcanonical列だけを使う", () => {
 test("public static JSON queries exclude private event relations", () => {
   assert.match(
     source,
-    /FROM slots AS s[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
+    /buildHeroEventSlotStatsSql\(heroEventIds\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /FROM slots AS s[\s\S]*GROUP BY s\.event_id[\s\S]*async function rebuildListRecent/,
   );
   assert.ok(
     (source.match(/THEN v\.primary_event_id ELSE NULL END AS primary_event_id/g) ?? [])
@@ -258,6 +266,32 @@ test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", 
   assert.match(eventFn, /creator_x_user_id/);
 });
 
+test("rebuildUsersIndexはCreator Projectionを使い相関サブクエリを持たない", () => {
+  const usersIndexFn = source.match(
+    /async function rebuildUsersIndex[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(usersIndexFn);
+  assert.match(usersIndexFn, /loadPublicCreatorProjectionSources/);
+  assert.match(usersIndexFn, /buildPublicUsersIndexItems/);
+  assert.match(usersIndexFn, /USERS_INDEX_MAX_OBJECT_BYTES/);
+  assert.doesNotMatch(usersIndexFn, /SELECT COUNT\(DISTINCT v\.id\)/);
+});
+
+test("rebuildTopとrebuildRecommendはCreator Projectionを再利用する", () => {
+  const topFn = source.match(/async function rebuildTop[\s\S]*?(?=async function )/)?.[0];
+  const recommendFn = source.match(
+    /async function rebuildRecommend[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(topFn);
+  assert.ok(recommendFn);
+  assert.match(topFn, /loadPublicCreatorProjectionSources/);
+  assert.match(recommendFn, /loadPublicCreatorProjectionSources/);
+  assert.match(topFn, /buildPickupCreatorsFromProjection/);
+  assert.match(recommendFn, /buildPickupCreatorsFromProjection/);
+  assert.doesNotMatch(topFn, /WITH creator_counts AS/);
+  assert.doesNotMatch(recommendFn, /WITH creator_counts AS/);
+});
+
 test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
   const topFn = source.match(
     /async function rebuildTop[\s\S]*?(?=async function )/,
@@ -272,6 +306,82 @@ test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
     topFn,
     /public_events: Number\(publicEventCount\?\.c/,
   );
+});
+
+test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const heroIds = ["hero-1", "hero-2"];
+  const slotQueries = [];
+  const state = {
+    binds: [],
+    runs: [],
+    first() {
+      return null;
+    },
+    all(sql) {
+      if (sql.includes("FROM slots AS s") && sql.includes("GROUP BY s.event_id")) {
+        slotQueries.push({ sql, args: state.binds.at(-1)?.args ?? [] });
+        return {
+          results: heroIds.map((eventId) => ({
+            event_id: eventId,
+            available: 2,
+            total: 5,
+          })),
+        };
+      }
+      if (sql.includes("FROM events") && sql.includes("visibility_status = 'public'")) {
+        return {
+          results: [
+            ...heroIds.map((id, index) => ({
+              id,
+              title: `Event ${id}`,
+              visibility_status: "public",
+              start_time: now + 1000 + index * 1000,
+              end_time: now + 10_000 + index * 1000,
+              entry_start_time: null,
+              entry_end_time: null,
+              created_at: now - 86400,
+            })),
+            {
+              id: "other-event",
+              title: "Other",
+              visibility_status: "public",
+              start_time: now + 100_000,
+              end_time: null,
+              entry_start_time: null,
+              entry_end_time: null,
+              created_at: now - 86400,
+            },
+          ],
+        };
+      }
+      return { results: [] };
+    },
+  };
+  const puts = [];
+  const env = {
+    DB: {
+      prepare: (sql) => statement(sql, state),
+    },
+    R2: {
+      async put(key, body) {
+        puts.push({ key, body: JSON.parse(String(body)) });
+      },
+      delete: async () => {},
+    },
+    KV: { put: async () => {} },
+  };
+
+  await rebuildTarget(env, "top", "global");
+
+  assert.equal(slotQueries.length, 1);
+  assert.deepEqual(slotQueries[0].args, heroIds);
+  assert.match(slotQueries[0].sql, /WHERE s\.event_id IN/);
+  const top = puts.find((entry) => entry.key === "top.json");
+  assert.ok(top);
+  assert.equal(top.body.slot_stats.length, 2);
+  assert.ok(top.body.slot_stats.every((row) => heroIds.includes(row.event_id)));
+  assert.ok(top.body.slot_stats.every((row) => row.event_id !== "other-event"));
 });
 
 test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async () => {
@@ -309,6 +419,10 @@ test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async
   const top = puts.find((entry) => entry.key === "top.json");
   assert.ok(top);
   assert.equal(top.body.stats.public_events, 7);
+});
+
+test("rebuildUsersIndex成功後にtop/recommend follow-upをenqueueする", () => {
+  assert.match(source, /case "users_index":[\s\S]*enqueueTopRecommendAfterUsersIndex/);
 });
 
 test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {

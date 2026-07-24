@@ -19,7 +19,8 @@ import {
   buildNotificationOutboxStatement,
   type NotificationOutboxStatement,
 } from "@/lib/notifications/enqueue";
-import { buildStaticRebuildQueueBatch, enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
+import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
+import { buildSlotChangeQueueBatch, topGlobalTarget } from "@/lib/staticRebuild/hooks";
 import { MAX_ATOMIC_SLOT_ROWS, MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
 
 export interface SlotActionResult {
@@ -158,15 +159,11 @@ async function eventQueue(
   reason: string,
   userId: string,
 ) {
-  return buildStaticRebuildQueueBatch(db, [
-    {
-      targetType: "event",
-      targetId: eventId,
-      reason,
-      priority: "high",
-      requestedByUserId: userId,
-    },
-  ]);
+  return buildSlotChangeQueueBatch(db, {
+    eventId,
+    reason,
+    requestedByUserId: userId,
+  });
 }
 
 async function releaseNotification(
@@ -363,13 +360,16 @@ export async function generateSlotsBatch(
     }
   } catch (error) {
     if (created > 0) {
-      await enqueueStaticRebuild(guard.db, {
-        targetType: "event",
-        targetId: data.event_id,
-        reason: "slot_admin_generate_partial",
-        priority: "high",
-        requestedByUserId: guard.userId,
-      });
+      await enqueueStaticRebuildMany(guard.db, [
+        {
+          targetType: "event",
+          targetId: data.event_id,
+          reason: "slot_admin_generate_partial",
+          priority: "high",
+          requestedByUserId: guard.userId,
+        },
+        topGlobalTarget("slot_admin_generate_partial", "high"),
+      ]);
       await revalidateEventSlotPathsBestEffort(data.event_id);
       return {
         ok: false,

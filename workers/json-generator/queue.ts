@@ -153,6 +153,7 @@ async function processStaticRebuildQueueImpl(
   const hasMore = fetchedRows.length > processLimit;
   const rows = fetchedRows.slice(0, processLimit);
   const summary = { processed: 0, failed: 0, skipped: 0 };
+  let followUpPending = false;
 
   for (
     let offset = 0;
@@ -164,10 +165,20 @@ async function processStaticRebuildQueueImpl(
     const outcomes = await Promise.all(
       chunk.map((row) => processQueueRow(env, mode, row, now, signal, metrics)),
     );
-    for (const outcome of outcomes) summary[outcome] += 1;
+    for (const outcome of outcomes) {
+      summary[outcome.outcome] += 1;
+      if (outcome.followUpPending) followUpPending = true;
+    }
   }
 
-  return { ...summary, external_api_calls: 0, d1_changes: metrics.d1_changes, retry_count: 0, quota_stopped: false, hasMore };
+  return {
+    ...summary,
+    external_api_calls: 0,
+    d1_changes: metrics.d1_changes,
+    retry_count: 0,
+    quota_stopped: false,
+    hasMore: hasMore || followUpPending,
+  };
 }
 
 async function processQueueRow(
@@ -177,24 +188,27 @@ async function processQueueRow(
   now: number,
   signal?: AbortSignal,
   metrics?: QueueMetrics,
-): Promise<QueueOutcome> {
+): Promise<{ outcome: QueueOutcome; followUpPending: boolean }> {
   throwIfAborted(signal, "static rebuild queue aborted");
   const token = await markProcessing(env, row.id, now, metrics);
-  if (!token) return "skipped";
+  if (!token) return { outcome: "skipped", followUpPending: false };
 
   try {
     throwIfAborted(signal, "static rebuild queue aborted");
     if (shouldSkipQueueTarget(mode, row)) {
       throwIfAborted(signal, "static rebuild queue aborted");
-      return completeQueueRow(env, row, token, now, signal, metrics);
+      const outcome = await completeQueueRow(env, row, token, now, signal, metrics);
+      return { outcome, followUpPending: false };
     }
     await rebuildTarget(env, row.target_type, row.target_id, signal);
     throwIfAborted(signal, "static rebuild queue aborted");
-    return completeQueueRow(env, row, token, now, signal, metrics);
+    const followUpPending = row.target_type === "users_index";
+    const outcome = await completeQueueRow(env, row, token, now, signal, metrics);
+    return { outcome, followUpPending };
   } catch (error) {
     if (signal?.aborted) throwIfAborted(signal, "static rebuild queue aborted");
     await markRetryOrFailed(env, row, token, error, now, metrics);
-    return "failed";
+    return { outcome: "failed", followUpPending: false };
   }
 }
 

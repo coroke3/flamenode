@@ -45,36 +45,34 @@ test("loader exposes paginated user profile loaders", () => {
   assert.match(loaderSource, /users\/\$\{params\.userId\}\/works\//);
 });
 
-test("loader は R2 を先に読み、ヒット時は allowD1:false で mode 解決する", () => {
+test("loader は Cache → R2 → degraded の順で公開 JSON を解決する", () => {
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
   );
+  const cacheIndex = loadPublicJsonFn.indexOf("readPublicJsonCache");
   const r2Index = loadPublicJsonFn.indexOf("readStaticJson");
-  const hitIndex = loadPublicJsonFn.indexOf("if (payload !== null)");
-  const hitModeIndex = loadPublicJsonFn.indexOf(
-    "resolvePublicOperationMode({ allowD1: false",
-  );
-  assert.ok(r2Index >= 0 && hitIndex > r2Index, "R2 read precedes hit branch");
-  assert.ok(hitModeIndex > hitIndex, "hit path resolves mode without D1");
+  const missIndex = loadPublicJsonFn.lastIndexOf("return resolvePublicJsonMiss");
+  assert.ok(cacheIndex >= 0 && r2Index > cacheIndex, "Cache precedes R2");
+  assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
   assert.match(
     loaderSource,
     /resolvePublicOperationMode\(\{ allowD1: true/,
   );
+  assert.match(loaderSource, /degradedFetcher/);
   assert.doesNotMatch(loaderSource, /getOperationMode/);
   assert.doesNotMatch(loaderSource, /return "normal"/);
 });
 
 test("loader の R2 ヒット分岐は getDatabase を呼ばない", () => {
-  const hitIndex = loaderSource.indexOf("if (payload !== null)");
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
+    loaderSource.indexOf("export const loadStaticEventDetail"),
   );
   const hitBranch = loadPublicJsonFn.slice(
     loadPublicJsonFn.indexOf("if (payload !== null)"),
     loadPublicJsonFn.indexOf("return resolvePublicJsonMiss"),
   );
-  assert.ok(hitIndex >= 0);
   assert.doesNotMatch(hitBranch, /getDatabase\(/);
   assert.doesNotMatch(hitBranch, /systemSettings/);
   assert.doesNotMatch(hitBranch, /enqueueStaticRebuild/);
@@ -87,10 +85,52 @@ test("loader records public request metrics hooks", () => {
   assert.match(loaderSource, /recordPublicD1Query/);
 });
 
-test("createPublicJsonLoader treats normalize failure as semantic miss", () => {
+test("createPublicJsonLoader treats normalize failure as semantic miss without double miss", () => {
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
   assert.match(
     loaderSource,
-    /const normalized = normalize\(result\.data\);[\s\S]*return resolvePublicJsonMiss\(options\)/,
+    /const normalized = normalize\(result\.data\);[\s\S]*skipStaticMissRecord: true/,
   );
+});
+
+test("loadPublicJson applies empty collection semantic miss on cache and R2 hits", () => {
+  assert.match(loaderSource, /isEmptyCollection/);
+  assert.match(
+    loaderSource,
+    /if \(options\.isEmptyCollection\?\.\(cached\)\)/,
+  );
+  assert.match(
+    loaderSource,
+    /if \(options\.isEmptyCollection\?\.\(payload\)\)/,
+  );
+});
+
+test("events index, top, and recommend loaders wire empty collection semantic miss", () => {
+  const eventsIndexBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticEventsIndex"),
+    loaderSource.indexOf("export async function loadStaticRecentVideosPage"),
+  );
+  assert.match(eventsIndexBlock, /isEmptyCollection: isEmptyItemsCollection/);
+
+  const topBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticTopPage"),
+    loaderSource.indexOf("export async function loadStaticUsersIndex"),
+  );
+  assert.match(topBlock, /isEmptyCollection: isEmptyTopCollection/);
+  assert.match(topBlock, /shouldUseStaticCollection/);
+
+  const recommendBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticRecommendPage"),
+    loaderSource.indexOf("export const loadStaticUserProfile"),
+  );
+  assert.match(recommendBlock, /isEmptyCollection: isEmptyRecommendCollection/);
+});
+
+test("popular list loader wires degraded fallback", () => {
+  assert.match(loaderSource, /fetchDegradedPopularListPayload/);
+});
+
+test("list loaders support old sort via recent payload ordering", () => {
+  assert.match(loaderSource, /sortRecentPayloadForList/);
+  assert.match(loaderSource, /sort\?: "new" \| "old" \| "score"/);
 });

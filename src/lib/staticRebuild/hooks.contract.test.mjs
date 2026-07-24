@@ -7,6 +7,20 @@ const [hooks, xid] = await Promise.all([
   readFile(new URL("../actions/xid.ts", import.meta.url), "utf8"),
 ]);
 
+test("動画作成はusers_index経由でtop/recommendを間接enqueueする", () => {
+  assert.match(hooks, /globalListTargets\("video_create"\)/);
+  assert.match(hooks, /usersIndexTarget\("video_create"\)/);
+  assert.doesNotMatch(
+    hooks,
+    /enqueueAfterVideoCreate[\s\S]*targetType: "top"/,
+  );
+});
+
+test("枠変更はeventとtopを同一batchでenqueueする", () => {
+  assert.match(hooks, /export function buildSlotChangeQueueBatch/);
+  assert.match(hooks, /topGlobalTarget\(opts\.reason/);
+});
+
 test("X ID公開プロフィール更新は user と users_index をenqueueする", () => {
   assert.match(hooks, /export async function enqueueAfterXUserPublicUpdate/);
   assert.match(

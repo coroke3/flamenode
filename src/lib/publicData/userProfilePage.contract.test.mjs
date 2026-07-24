@@ -8,24 +8,19 @@ const page = await readFile(
 );
 
 test("user profile page records public request metrics on static path", () => {
-  assert.match(page, /runWithPublicRequestMetrics/);
+  assert.doesNotMatch(page, /runWithPublicRequestMetrics/);
   assert.match(page, /logPublicRequestMetrics/);
-  assert.match(page, /recordPublicD1Fallback/);
   assert.match(page, /loadStaticUserWorksPage/);
   assert.match(page, /loadStaticUserCollabsPage/);
 });
 
-test("user profile falls back to D1 when paged static JSON is missing", () => {
-  assert.match(page, /needsDatabaseFallback/);
+test("user profile returns notFound when paged static JSON is missing", () => {
   assert.match(page, /missingPagedSection/);
   assert.match(page, /beyondStaticPages/);
   assert.match(page, /STATIC_USER_MAX_PAGES/);
 });
 
-test("user profile DB fallback only loads listable X users", () => {
-  assert.match(page, /publicListableXApprovalWhere/);
-  assert.equal(
-    (page.match(/publicListableXApprovalWhere\(\)/g) ?? []).length,
-    2,
-  );
+test("user profile metadata avoids full D1 when static is unavailable", () => {
+  assert.match(page, /loadStaticUserProfile/);
+  assert.doesNotMatch(page, /withDatabase/);
 });

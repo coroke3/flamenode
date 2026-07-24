@@ -1,4 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  mergePublicDataMode,
+  type PublicDataMode,
+} from "@/lib/publicData/publicDataMode";
 
 export const PUBLIC_REQUEST_METRICS_LOG_KEY = "public_request_metrics";
 
@@ -10,6 +14,7 @@ export type PublicRequestMetricsSnapshot = {
   static_hit: number;
   static_miss: number;
   d1_fallback: boolean;
+  public_data_mode: PublicDataMode | null;
 };
 
 type MutablePublicRequestMetrics = {
@@ -21,6 +26,7 @@ type MutablePublicRequestMetrics = {
   static_hit: number;
   static_miss: number;
   d1_fallback: boolean;
+  public_data_mode: PublicDataMode | null;
 };
 
 const storage = new AsyncLocalStorage<MutablePublicRequestMetrics>();
@@ -35,13 +41,25 @@ function createMetricsState(route: string): MutablePublicRequestMetrics {
     static_hit: 0,
     static_miss: 0,
     d1_fallback: false,
+    public_data_mode: null,
   };
+}
+
+export function setPublicRequestRoute(route: string): void {
+  const state = storage.getStore();
+  if (!state) return;
+  state.route = route.slice(0, 120);
 }
 
 export function runWithPublicRequestMetrics<T>(
   route: string,
   fn: () => T | Promise<T>,
 ): Promise<T> {
+  if (storage.getStore()) {
+    throw new Error(
+      "runWithPublicRequestMetrics must not be nested; use PublicMetricsShell ALS only",
+    );
+  }
   return Promise.resolve(storage.run(createMetricsState(route), fn));
 }
 
@@ -58,7 +76,17 @@ export function getPublicRequestMetricsSnapshot():
     static_hit: state.static_hit,
     static_miss: state.static_miss,
     d1_fallback: state.d1_fallback,
+    public_data_mode: state.public_data_mode,
   };
+}
+
+export function notePublicDataMode(mode: PublicDataMode): void {
+  const state = storage.getStore();
+  if (!state) return;
+  state.public_data_mode = mergePublicDataMode(state.public_data_mode, mode);
+  if (mode === "degraded_d1") {
+    state.d1_fallback = true;
+  }
 }
 
 export function recordPublicR2Get(): void {

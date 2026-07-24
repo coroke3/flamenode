@@ -9,6 +9,10 @@ import {
   indexUniqueStaticRebuildTargetRows,
   staticRebuildTargetKey,
 } from "./queueBatchCore";
+import {
+  staticRebuildActiveLookupSelect,
+  type StaticRebuildActiveLookupRow,
+} from "./activeLookupColumns";
 import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
 import type { QueueSendBinding } from "@/lib/queues/sendQueueWakeBestEffort";
 import { wakeStaticRebuildQueueAfterCommit } from "@/lib/queues/wakeStaticRebuildQueueAfterCommit";
@@ -137,7 +141,7 @@ export async function buildStaticRebuildQueueBatch(
 
   const [activeRows, latestRows] = await Promise.all([
     db
-      .select()
+      .select(staticRebuildActiveLookupSelect)
       .from(staticRebuildQueue)
       .where(
         and(
@@ -174,7 +178,7 @@ export async function buildStaticRebuildQueueBatch(
   );
 
   const activeUpdates: Array<{
-    row: typeof staticRebuildQueue.$inferSelect;
+    row: StaticRebuildActiveLookupRow;
     reason: string;
     priority: "high" | "normal" | "low";
     requestedByUserId: string | null;
@@ -360,7 +364,7 @@ export async function enqueueStaticRebuild(
       enqueueAttempt += 1
     ) {
       const existing = await db
-        .select()
+        .select(staticRebuildActiveLookupSelect)
         .from(staticRebuildQueue)
         .where(
           and(

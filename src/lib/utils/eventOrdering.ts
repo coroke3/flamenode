@@ -2,7 +2,7 @@ import {
   computeEventStatus,
   isAcceptingEntries,
   type EventStatusInput,
-} from "@/lib/utils/eventStatusCore";
+} from "./eventStatusCore.ts";
 
 const FAR_FUTURE = Number.POSITIVE_INFINITY;
 

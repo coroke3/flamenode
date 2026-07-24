@@ -30,6 +30,9 @@ MAINTENANCE_MODE="0"
 # 公開 JSON を R2 のみで配信 (1/true/yes で D1 を読まず static_only 相当)
 FORCE_STATIC_ONLY="0"
 
+# R2 取得失敗後の bounded D1 フォールバック (0 で停止。未設定時は有効)
+PUBLIC_DEGRADED_D1_ENABLED="1"
+
 # Cloudflare Queues feature flags (Phase 1: disabled by default)
 QUEUE_DISPATCH_ENABLED="0"
 QUEUE_CONTINUATION_ENABLED="0"

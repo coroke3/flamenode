@@ -12,6 +12,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { fetchVideoRowByIdOrYoutube } from "./videoIdLookup";
 import {
   events,
   videoChapters,
@@ -58,18 +59,8 @@ export async function fetchVideoDetail(
   idOrYoutube: string,
   viewer?: VideoDetailViewer,
 ) {
-  // 1) 作品本体 (UUID または YouTubeID)
-  const rows = await db
-    .select()
-    .from(videos)
-    .where(
-      or(
-        eq(videos.id, idOrYoutube),
-        eq(videos.youtube_video_id, idOrYoutube),
-      )!,
-    )
-    .limit(1);
-  const video = rows[0];
+  // 1) 作品本体 (内部 ID → miss 時のみ YouTube ID)
+  const video = await fetchVideoRowByIdOrYoutube(db, idOrYoutube);
   if (!video) return null;
 
   // 2) 作者

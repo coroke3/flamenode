@@ -15,7 +15,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { events, slots, users, xUserAccountLinks } from "@/lib/db/schema";
 import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
-import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { buildSlotChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -184,15 +184,11 @@ async function commitSlotUpdates(args: {
   ) {
     throw new Error("原子的に処理できる枠数を超えています。");
   }
-  const queue = await buildStaticRebuildQueueBatch(args.db, [
-    {
-      targetType: "event",
-      targetId: args.eventId,
-      reason: args.reason,
-      priority: "high",
-      requestedByUserId: args.actorUserId,
-    },
-  ]);
+  const queue = await buildSlotChangeQueueBatch(args.db, {
+    eventId: args.eventId,
+    reason: args.reason,
+    requestedByUserId: args.actorUserId,
+  });
   const extra = args.extraStatements ?? [];
   const wakeNotification =
     args.notificationWakeSource ?? (extra.length > 0 ? "web" : undefined);

@@ -1,6 +1,7 @@
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DB } from "../db/client";
 import { events, videos, xUsers } from "../db/schema";
+import { resolveVideoPrimaryKey } from "../db/videoIdLookup";
 import type { StaticRebuildTargetType } from "../staticRebuild/types";
 import { publicListableXApprovalWhere } from "../utils/publicXUserWhere";
 
@@ -44,20 +45,10 @@ export async function publicStaticTargetExists(
   }
 
   if (targetType === "video") {
-    const rows = await db
-      .select({ id: videos.id })
-      .from(videos)
-      .where(
-        and(
-          or(
-            eq(videos.id, normalized),
-            eq(videos.youtube_video_id, normalized),
-          ),
-          eq(videos.visibility_status, "public"),
-        )!,
-      )
-      .limit(1);
-    return rows.length === 1;
+    const resolvedId = await resolveVideoPrimaryKey(db, normalized, {
+      andWhere: eq(videos.visibility_status, "public"),
+    });
+    return resolvedId !== null;
   }
 
   const canonicalXId = normalized.toLowerCase();

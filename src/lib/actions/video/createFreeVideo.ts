@@ -289,10 +289,10 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
         priority: "high" as const,
         requestedByUserId: userId,
       },
-      { targetType: "top" as const, targetId: "global", reason: "video_create" },
       { targetType: "list_recent" as const, targetId: "global", reason: "video_create" },
       { targetType: "list_popular" as const, targetId: "global", reason: "video_create" },
       { targetType: "search_index" as const, targetId: "global", reason: "video_create" },
+      { targetType: "users_index" as const, targetId: "global", reason: "video_create" },
       { targetType: "user" as const, targetId: activeX, reason: "video_create" },
       ...(eventId
         ? [
