@@ -37,6 +37,16 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(Object.hasOwn(snapshot, "sql"), false);
   });
 
+  test("runWithPublicRequestMetrics rejects nested ALS", async () => {
+    await assert.rejects(
+      () =>
+        runWithPublicRequestMetrics("outer", async () =>
+          runWithPublicRequestMetrics("inner", async () => "nested"),
+        ),
+      /must not be nested/,
+    );
+  });
+
   test("logPublicRequestMetrics emits structured console log", async () => {
     const original = console.log;
     let line = "";

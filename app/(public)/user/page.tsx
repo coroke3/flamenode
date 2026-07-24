@@ -66,16 +66,11 @@ export default async function UserListPage({
   const { q = "", sort = "score", page = "1" } = await searchParams;
   const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
   const sortKey = parseUsersIndexSort(sort);
-  const degraded = sortKey !== "score" || Boolean(q.trim());
-  const staticLoaded = await loadStaticUsersIndex(
-    degraded
-      ? undefined
-      : {
-          page: pageNum,
-          pageSize: PAGE_SIZE,
-          q,
-        },
-  );
+  const staticLoaded = await loadStaticUsersIndex({
+    page: pageNum,
+    pageSize: PAGE_SIZE,
+    q: q.trim() || undefined,
+  });
   const isDegraded = isDegradedD1Mode(staticLoaded.mode);
 
   let creators: CreatorRow[];

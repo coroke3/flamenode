@@ -2,7 +2,6 @@ import "server-only";
 
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
 import type { VideoCardData } from "@/components/video/VideoCard";
-import type { HomeIntroSlotStat } from "@/components/layout/HomeIntroBand";
 import type { DB } from "@/lib/db/client";
 import { fetchPublicAnnouncements } from "@/lib/db/announcementQueries";
 import {
@@ -33,6 +32,7 @@ import { buildHeroEventSlotStatsSql } from "./heroEventSlotStatsSql";
 import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import type { StaticEventDetailPayload } from "./staticEventDetailCore";
 import type { StaticEventsIndexPayload } from "./staticEventsIndexCore";
+import type { StaticPopularVideosPayload } from "./staticPopularVideoCore";
 import type { StaticRecentVideosPayload } from "./staticRecentVideoCore";
 import type { StaticRulesPayload } from "./staticRulesCore";
 import type { StaticTopPayload } from "./staticTopCore";
@@ -108,7 +108,11 @@ export async function fetchDegradedTopPayload(db: DB): Promise<StaticTopPayload>
   const heroEvents = pickHeroEvents(activeEventRows, 3, now);
   const heroIds = heroEvents.map((event) => event.id);
 
-  const topSlotStats: Record<string, HomeIntroSlotStat> = {};
+  const slotStats: Array<{
+    event_id: string;
+    available: number;
+    total: number;
+  }> = [];
   const slotSql = buildHeroEventSlotStatsSql(heroIds);
   if (slotSql) {
     noteQuery();
@@ -117,10 +121,12 @@ export async function fetchDegradedTopPayload(db: DB): Promise<StaticTopPayload>
       .bind(...heroIds)
       .all<{ event_id: string; available: number; total: number }>();
     for (const row of slotRows.results ?? []) {
-      topSlotStats[row.event_id] = {
+      if (!row.event_id) continue;
+      slotStats.push({
+        event_id: row.event_id,
         available: Number(row.available ?? 0),
         total: Number(row.total ?? 0),
-      };
+      });
     }
   }
 
@@ -155,7 +161,7 @@ export async function fetchDegradedTopPayload(db: DB): Promise<StaticTopPayload>
     latest_events: [],
     announcements,
     event_video_counts: {},
-    slot_stats: topSlotStats,
+    slot_stats: slotStats,
     stats: {
       public_videos: latest.length,
       active_events: heroEvents.length,
@@ -197,7 +203,12 @@ export async function fetchDegradedRecommendPayload(
 
 export async function fetchDegradedRecentListPayload(
   db: DB,
-  params: { page: number; pageSize?: number; q?: string },
+  params: {
+    page: number;
+    pageSize?: number;
+    q?: string;
+    sort?: string;
+  },
 ): Promise<StaticRecentVideosPayload> {
   const pageSize = Math.min(
     DEGRADED_LIST_PAGE_SIZE,
@@ -205,6 +216,7 @@ export async function fetchDegradedRecentListPayload(
   );
   const page = Math.max(1, Math.floor(params.page));
   const offset = (page - 1) * pageSize;
+  const sort = parsePublicVideoSort(params.sort);
   const q = params.q?.trim() ?? "";
   const like = q ? `%${escapeLikeTerm(q)}%` : null;
 
@@ -225,7 +237,8 @@ export async function fetchDegradedRecentListPayload(
     : undefined;
 
   noteQuery();
-  const rows = await db
+  const fetchLimit = pageSize + 1;
+  const query = db
     .select({
       id: videos.id,
       title: videos.title,
@@ -243,15 +256,75 @@ export async function fetchDegradedRecentListPayload(
       searchCondition
         ? and(countablePublicVideoCondition, searchCondition)
         : countablePublicVideoCondition,
-    )
-    .orderBy(desc(videos.scheduled_time))
-    .limit(pageSize)
-    .offset(offset);
+    );
+
+  const rows =
+    sort === "old"
+      ? await query
+          .orderBy(asc(videos.scheduled_time), asc(videos.created_at))
+          .limit(fetchLimit)
+          .offset(offset)
+      : sort === "score"
+        ? await query
+            .orderBy(coalescedVideoScoreDesc, desc(videos.scheduled_time))
+            .limit(fetchLimit)
+            .offset(offset)
+        : await query
+            .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+            .limit(fetchLimit)
+            .offset(offset);
+
+  const hasMore = rows.length > pageSize;
+  const items = hasMore ? rows.slice(0, pageSize) : rows;
+  const total = hasMore ? offset + pageSize + 1 : offset + items.length;
 
   return {
     generated_at: null,
-    items: rows,
-    total: offset + rows.length,
+    items,
+    total,
+  };
+}
+
+export async function fetchDegradedPopularListPayload(
+  db: DB,
+  params: { page: number; pageSize?: number },
+): Promise<StaticPopularVideosPayload> {
+  const pageSize = Math.min(
+    DEGRADED_LIST_PAGE_SIZE,
+    Math.max(1, Math.floor(params.pageSize ?? DEGRADED_LIST_PAGE_SIZE)),
+  );
+  const page = Math.max(1, Math.floor(params.page));
+  const offset = (page - 1) * pageSize;
+  const fetchLimit = pageSize + 1;
+
+  noteQuery();
+  const rows = await db
+    .select({
+      id: videos.id,
+      title: videos.title,
+      youtube_video_id: videos.youtube_video_id,
+      display_name: creatorNameExpr,
+      icon_url: creatorIconExpr,
+      creator_x_user_id: videos.creator_x_user_id,
+      primary_event_id: videos.primary_event_id,
+      scheduled_time: videos.scheduled_time,
+      part: videos.part,
+    })
+    .from(videos)
+    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+    .where(countablePublicVideoCondition)
+    .orderBy(coalescedVideoScoreDesc, desc(videos.scheduled_time))
+    .limit(fetchLimit)
+    .offset(offset);
+
+  const hasMore = rows.length > pageSize;
+  const items = hasMore ? rows.slice(0, pageSize) : rows;
+  const total = hasMore ? offset + pageSize + 1 : offset + items.length;
+
+  return {
+    generated_at: null,
+    items,
+    total,
   };
 }
 

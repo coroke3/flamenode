@@ -2,41 +2,25 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
 import styles from "./page.module.css";
-import { withDatabase } from "@/lib/cloudflare";
-import {
-  videoMembers,
-  videos,
-  xUsers,
-} from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
-import { JsonLd } from "@/components/seo/JsonLd";
-import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
+import { VideoCard } from "@/components/video/VideoCard";
 import { normalizeXId } from "@/lib/utils/xid";
-import { resolveXUserIcon } from "@/lib/db/xIconResolution";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, totalPagesFor } from "@/lib/utils/sql";
-import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
-import { coalescedVideoScore } from "@/lib/db/videoScoreSql";
+import { buildPageMetadata } from "@/lib/seo";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
-import { countablePublicVideoCondition } from "@/lib/db/queries";
-import { storedCreatorNameExpr } from "@/lib/db/displayExpr";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
 import {
-  isDegradedD1Mode,
   loadStaticUserCollabsPage,
   loadStaticUserWorksPage,
   loadStaticUserProfile,
   logPublicRequestMetrics,
-  runWithPublicRequestMetrics,
 } from "@/lib/publicData/loader";
 import type { StaticUserProfile, StaticUserVideoPage } from "@/lib/publicData/loader";
 import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
-import { recordPublicD1Fallback } from "@/lib/observability/publicRequestMetrics";
-import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
 export const dynamic = "force-dynamic";
 
@@ -62,8 +46,6 @@ interface ProfileUser {
   creative_start_date: number | null;
 }
 
-type CreatorVideo = VideoCardData & { score: number };
-
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
   const staticLoaded = await loadStaticUserProfile(id);
@@ -79,58 +61,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ogType: "profile",
     });
   }
-  const data = await withDatabase(async (db) => {
-    const u = await db
-      .select()
-      .from(xUsers)
-      .where(
-        and(
-          sql`lower(${xUsers.id}) = ${id}`,
-          publicListableXApprovalWhere(),
-        )!,
-      )
-      .limit(1);
-    if (u[0]) {
-      return {
-        title: u[0].x_name,
-        description: u[0].profile_text,
-        image: cachedGoogleImageUrl(u[0].icon_url),
-      };
-    }
-
-    const fallback = await db
-      .select({
-        name: sql<string>`COALESCE(${videos.creator_display_name}, ${videos.creator_x_user_id})`,
-        icon_url: videos.creator_icon_url,
-      })
-      .from(videos)
-      .where(
-        and(
-          eq(videos.visibility_status, "public"),
-          sql`lower(${videos.creator_x_user_id}) = ${id}`,
-        )!,
-      )
-      .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
-      .limit(1);
-    return {
-      title: fallback[0]?.name ?? id,
-      description: null,
-      image: cachedGoogleImageUrl(fallback[0]?.icon_url),
-    };
-  });
-  return buildPageMetadata({
-    title: `${data?.title ?? id} - クリエイター`,
-    description:
-      data?.description ??
-      `FlameNodeで公開されている${data?.title ?? id}の作品。`,
-    path: `/user/${id}`,
-    image: data?.image,
-    ogType: "profile",
-  });
-}
-
-function formatScore(value: number): string {
-  return Math.round(value).toLocaleString("en-US");
+  return { title: id };
 }
 
 export default async function UserPage({
@@ -138,8 +69,7 @@ export default async function UserPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
-  return runWithPublicRequestMetrics(`/user/${id}`, async () => {
-    const sp = (await searchParams) ?? {};
+  const sp = (await searchParams) ?? {};
     const worksPaging = clampPaging({
       page: sp.worksPage,
       pageSize: WORKS_PAGE_SIZE,
@@ -189,18 +119,15 @@ export default async function UserPage({
             }),
       ]);
       const beyondStaticPages =
-        worksPaging.page > STATIC_USER_MAX_PAGES ||
-        collabPaging.page > STATIC_USER_MAX_PAGES;
-      const missingPagedSection =
-        (worksPaging.page > 1 && !worksLoaded.page) ||
-        (collabPaging.page > 1 && !collabsLoaded.page);
-      const isDegraded = isDegradedD1Mode(staticLoaded.mode);
-      const needsDatabaseFallback =
-        !isDegraded &&
-        (beyondStaticPages || missingPagedSection) &&
-        false;
-      if (!needsDatabaseFallback) {
-        const worksPage =
+      worksPaging.page > STATIC_USER_MAX_PAGES ||
+      collabPaging.page > STATIC_USER_MAX_PAGES;
+    const missingPagedSection =
+      (worksPaging.page > 1 && !worksLoaded.page) ||
+      (collabPaging.page > 1 && !collabsLoaded.page);
+    if (beyondStaticPages || missingPagedSection) {
+      notFound();
+    }
+    const worksPage =
           worksLoaded.page ??
           ({
             page: 1,
@@ -229,13 +156,8 @@ export default async function UserPage({
         );
         logPublicRequestMetrics();
         return view;
-      }
-    } else {
-      notFound();
-    }
-
-    notFound();
-  });
+  }
+  notFound();
 }
 
 function StaticUserProfileView({

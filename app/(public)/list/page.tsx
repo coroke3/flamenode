@@ -56,6 +56,15 @@ export default async function ListPage({
           page: pageNum,
           pageSize: PAGE_SIZE,
           q,
+          sort: "new",
+        })
+      : null;
+  const staticOldLoad =
+    !q.trim() && parsedSort === "old" && !event
+      ? await loadStaticRecentVideosPage({
+          page: pageNum,
+          pageSize: PAGE_SIZE,
+          sort: "old",
         })
       : null;
   const staticPopularLoad =
@@ -81,7 +90,8 @@ export default async function ListPage({
           q,
         })
       : null;
-  const staticLoad = staticPopularLoad ?? staticSearchLoad ?? staticRecentLoad;
+  const staticLoad =
+    staticPopularLoad ?? staticSearchLoad ?? staticOldLoad ?? staticRecentLoad;
 
   const data: {
     videos: VideoCardData[];

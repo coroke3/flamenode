@@ -51,7 +51,7 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
   );
   const cacheIndex = loadPublicJsonFn.indexOf("readPublicJsonCache");
   const r2Index = loadPublicJsonFn.indexOf("readStaticJson");
-  const missIndex = loadPublicJsonFn.indexOf("return resolvePublicJsonMiss");
+  const missIndex = loadPublicJsonFn.lastIndexOf("return resolvePublicJsonMiss");
   assert.ok(cacheIndex >= 0 && r2Index > cacheIndex, "Cache precedes R2");
   assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
@@ -85,10 +85,31 @@ test("loader records public request metrics hooks", () => {
   assert.match(loaderSource, /recordPublicD1Query/);
 });
 
-test("createPublicJsonLoader treats normalize failure as semantic miss", () => {
+test("createPublicJsonLoader treats normalize failure as semantic miss without double miss", () => {
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
   assert.match(
     loaderSource,
-    /const normalized = normalize\(result\.data\);[\s\S]*return resolvePublicJsonMiss\(options\)/,
+    /const normalized = normalize\(result\.data\);[\s\S]*skipStaticMissRecord: true/,
   );
+});
+
+test("loadPublicJson applies empty collection semantic miss on cache and R2 hits", () => {
+  assert.match(loaderSource, /isEmptyCollection/);
+  assert.match(
+    loaderSource,
+    /if \(options\.isEmptyCollection\?\.\(cached\)\)/,
+  );
+  assert.match(
+    loaderSource,
+    /if \(options\.isEmptyCollection\?\.\(payload\)\)/,
+  );
+});
+
+test("popular list loader wires degraded fallback", () => {
+  assert.match(loaderSource, /fetchDegradedPopularListPayload/);
+});
+
+test("list loaders support old sort via recent payload ordering", () => {
+  assert.match(loaderSource, /sortRecentPayloadForList/);
+  assert.match(loaderSource, /sort\?: "new" \| "old" \| "score"/);
 });

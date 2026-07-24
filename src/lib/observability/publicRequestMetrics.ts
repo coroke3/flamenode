@@ -49,6 +49,11 @@ export function runWithPublicRequestMetrics<T>(
   route: string,
   fn: () => T | Promise<T>,
 ): Promise<T> {
+  if (storage.getStore()) {
+    throw new Error(
+      "runWithPublicRequestMetrics must not be nested; use PublicMetricsShell ALS only",
+    );
+  }
   return Promise.resolve(storage.run(createMetricsState(route), fn));
 }
 

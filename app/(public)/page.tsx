@@ -20,7 +20,6 @@ import {
   isDegradedD1Mode,
   loadStaticTopPage,
   logPublicRequestMetrics,
-  runWithPublicRequestMetrics,
 } from "@/lib/publicData/loader";
 import type { StaticTopData } from "@/lib/publicData/loader";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -40,7 +39,6 @@ export const metadata: Metadata = buildPageMetadata({
 export const dynamic = "force-dynamic";
 
 export default async function TopPage(): Promise<React.ReactElement> {
-  return runWithPublicRequestMetrics("/", async () => {
   const staticLoaded = await loadStaticTopPage();
   const isDegraded = isDegradedD1Mode(staticLoaded.mode);
   const data: StaticTopData | null = staticLoaded.top;
@@ -188,7 +186,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
       <HomeClosingCta />
     </div>
   );
-  });
 }
 
 function EmptyShelf({ message }: { message: string }): React.ReactElement {

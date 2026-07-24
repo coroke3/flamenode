@@ -87,6 +87,7 @@ import {
   fetchDegradedEventsIndexPayload,
   fetchDegradedRecentListPayload,
   fetchDegradedRecommendPayload,
+  fetchDegradedPopularListPayload,
   fetchDegradedRulesPayload,
   fetchDegradedTopPayload,
   fetchDegradedUserProfilePayload,
@@ -118,6 +119,12 @@ export type PublicJsonLoadOptions<TPayload = unknown> = {
   reason: string;
   cacheTtlSeconds?: number;
   degradedFetcher?: () => Promise<TPayload | null>;
+  /** overlay 時に空コレクションを semantic miss として扱う */
+  isEmptyCollection?: (payload: TPayload) => boolean;
+};
+
+type ResolvePublicJsonMissOptions = {
+  skipStaticMissRecord?: boolean;
 };
 
 export type PublicJsonLoadResult<T> = {
@@ -210,8 +217,11 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
 
 async function resolvePublicJsonMiss<T = never>(
   options: PublicJsonLoadOptions<T>,
+  missOptions?: ResolvePublicJsonMissOptions,
 ): Promise<PublicJsonLoadResult<T>> {
-  recordPublicStaticMiss();
+  if (!missOptions?.skipStaticMissRecord) {
+    recordPublicStaticMiss();
+  }
   const db = getDatabase();
   const mode = await resolvePublicOperationMode({ allowD1: true, db });
   const strategy = getPublicDataStrategy(mode);
@@ -314,6 +324,7 @@ export function createPublicJsonLoader<TPayload, TResult>({
     }
     return resolvePublicJsonMiss<TResult>(
       options as unknown as PublicJsonLoadOptions<TResult>,
+      { skipStaticMissRecord: true },
     );
   };
 }
@@ -323,6 +334,9 @@ export async function loadPublicJson<T>(
 ): Promise<PublicJsonLoadResult<T>> {
   const cached = await readPublicJsonCache<T>(options.r2Key);
   if (cached !== null) {
+    if (options.isEmptyCollection?.(cached)) {
+      return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
+    }
     recordPublicStaticHit();
     const operationMode = await resolvePublicOperationMode({ allowD1: false });
     const strategy = getPublicDataStrategy(operationMode);
@@ -331,6 +345,9 @@ export async function loadPublicJson<T>(
 
   const payload = await readStaticJson<T>(options.r2Key);
   if (payload !== null) {
+    if (options.isEmptyCollection?.(payload)) {
+      return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
+    }
     recordPublicStaticHit();
     const operationMode = await resolvePublicOperationMode({ allowD1: false });
     const strategy = getPublicDataStrategy(operationMode);
@@ -346,6 +363,36 @@ export async function loadPublicJson<T>(
 
   return resolvePublicJsonMiss(options);
 }
+
+function isEmptyItemsCollection(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return true;
+  const items = (payload as { items?: unknown }).items;
+  return !Array.isArray(items) || items.length === 0;
+}
+
+function isEmptySearchIndexCollection(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return true;
+  const videos = (payload as { videos?: unknown }).videos;
+  return !Array.isArray(videos) || videos.length === 0;
+}
+
+function sortRecentPayloadForList(
+  payload: StaticRecentVideosPayload,
+  sort: "new" | "old" | "score",
+): StaticRecentVideosPayload {
+  if (sort !== "old" || !Array.isArray(payload.items)) {
+    return payload;
+  }
+  const items = [...payload.items].sort((left, right) => {
+    const leftRow = left as { scheduled_time?: unknown };
+    const rightRow = right as { scheduled_time?: unknown };
+    const leftTime = Number(leftRow.scheduled_time ?? 0);
+    const rightTime = Number(rightRow.scheduled_time ?? 0);
+    return leftTime - rightTime;
+  });
+  return { ...payload, items };
+}
+
 
 export const loadStaticEventDetail = createPublicJsonLoader<
   StaticEventDetailPayload,
@@ -393,17 +440,20 @@ export async function loadStaticRecentVideosPage(params: {
   page: number;
   pageSize: number;
   q?: string;
+  sort?: "new" | "old" | "score";
 }): Promise<
   PublicJsonLoadResult<StaticRecentVideoPage> & {
     page: StaticRecentVideoPage | null;
   }
 > {
-  const result = await loadPublicJson<StaticRecentVideosPayload>({
+  const sort = params.sort ?? "new";
+  const loadOptions: PublicJsonLoadOptions<StaticRecentVideosPayload> = {
     r2Key: "list/recent.json",
     targetType: "list_recent",
     targetId: "global",
     reason: "public_list_miss",
     cacheTtlSeconds: 60,
+    isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;
@@ -411,16 +461,47 @@ export async function loadStaticRecentVideosPage(params: {
         page: params.page,
         pageSize: params.pageSize,
         q: params.q,
+        sort,
       });
     },
-  });
-  const normalizedPage = result.data
-    ? normalizeStaticRecentVideoPage(result.data, params.page, params.pageSize)
+  };
+  let result = await loadPublicJson<StaticRecentVideosPayload>(loadOptions);
+  const payloadForNormalize =
+    result.data && sort === "old"
+      ? sortRecentPayloadForList(result.data, sort)
+      : result.data;
+  const normalizedPage = payloadForNormalize
+    ? normalizeStaticRecentVideoPage(
+        payloadForNormalize,
+        params.page,
+        params.pageSize,
+      )
     : null;
+  const itemCount = normalizedPage?.videos.length ?? 0;
+  if (
+    normalizedPage &&
+    result.mode !== "degraded_d1" &&
+    !shouldUseStaticCollection(result.strategy, itemCount)
+  ) {
+    result = await resolvePublicJsonMiss(loadOptions, {
+      skipStaticMissRecord: true,
+    });
+    const degradedPayload = result.data
+      ? sortRecentPayloadForList(result.data, sort)
+      : null;
+    const degradedPage = degradedPayload
+      ? normalizeStaticRecentVideoPage(
+          degradedPayload,
+          params.page,
+          params.pageSize,
+        )
+      : null;
+    return { ...result, data: degradedPage, page: degradedPage };
+  }
   const page =
     normalizedPage &&
     (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, normalizedPage.videos.length))
+      shouldUseStaticCollection(result.strategy, itemCount))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -434,19 +515,48 @@ export async function loadStaticPopularVideosPage(params: {
     page: StaticRecentVideoPage | null;
   }
 > {
-  const result = await loadPublicJson<StaticPopularVideosPayload>({
+  const loadOptions: PublicJsonLoadOptions<StaticPopularVideosPayload> = {
     r2Key: "list/popular.json",
     targetType: "list_popular",
     targetId: "global",
     reason: "public_list_popular_miss",
     cacheTtlSeconds: 60,
-  });
+    isEmptyCollection: isEmptyItemsCollection,
+    degradedFetcher: async () => {
+      const db = getDatabase();
+      if (!db) return null;
+      return fetchDegradedPopularListPayload(db, {
+        page: params.page,
+        pageSize: params.pageSize,
+      });
+    },
+  };
+  let result = await loadPublicJson<StaticPopularVideosPayload>(loadOptions);
   const normalizedPage = result.data
     ? normalizeStaticPopularVideoPage(result.data, params.page, params.pageSize)
     : null;
+  const itemCount = normalizedPage?.videos.length ?? 0;
+  if (
+    normalizedPage &&
+    result.mode !== "degraded_d1" &&
+    !shouldUseStaticCollection(result.strategy, itemCount)
+  ) {
+    result = await resolvePublicJsonMiss(loadOptions, {
+      skipStaticMissRecord: true,
+    });
+    const degradedPage = result.data
+      ? normalizeStaticPopularVideoPage(
+          result.data,
+          params.page,
+          params.pageSize,
+        )
+      : null;
+    return { ...result, data: degradedPage, page: degradedPage };
+  }
   const page =
     normalizedPage &&
-    shouldUseStaticCollection(result.strategy, normalizedPage.videos.length)
+    (result.mode === "degraded_d1" ||
+      shouldUseStaticCollection(result.strategy, itemCount))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -462,12 +572,13 @@ export async function loadStaticSearchVideosPage(params: {
     page: StaticRecentVideoPage | null;
   }
 > {
-  const result = await loadPublicJson<StaticSearchIndexPayload>({
+  const loadOptions: PublicJsonLoadOptions<StaticSearchIndexPayload> = {
     r2Key: "search-index-lite.json",
     targetType: "search_index",
     targetId: "global",
     reason: "public_list_search_miss",
     cacheTtlSeconds: 60,
+    isEmptyCollection: isEmptySearchIndexCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;
@@ -475,9 +586,23 @@ export async function loadStaticSearchVideosPage(params: {
         page: params.page,
         pageSize: params.pageSize,
         q: params.q,
+        sort: params.sort,
       });
     },
-  });
+  };
+  let result = await loadPublicJson<StaticSearchIndexPayload>(loadOptions);
+  if (result.mode === "degraded_d1" && result.data) {
+    const degradedPayload = sortRecentPayloadForList(
+      result.data as unknown as StaticRecentVideosPayload,
+      params.sort,
+    );
+    const degradedPage = normalizeStaticRecentVideoPage(
+      degradedPayload,
+      params.page,
+      params.pageSize,
+    );
+    return { ...result, data: degradedPage, page: degradedPage };
+  }
   const payload = result.data ? normalizeStaticSearchIndexPayload(result.data) : null;
   const normalizedPage = payload
     ? searchStaticIndexVideos({
@@ -488,10 +613,33 @@ export async function loadStaticSearchVideosPage(params: {
         pageSize: params.pageSize,
       })
     : null;
+  const itemCount = normalizedPage?.videos.length ?? 0;
+  if (
+    normalizedPage &&
+    result.mode !== "degraded_d1" &&
+    !shouldUseStaticCollection(result.strategy, itemCount)
+  ) {
+    result = await resolvePublicJsonMiss(loadOptions, {
+      skipStaticMissRecord: true,
+    });
+    if (result.mode === "degraded_d1" && result.data) {
+      const degradedPayload = sortRecentPayloadForList(
+        result.data as unknown as StaticRecentVideosPayload,
+        params.sort,
+      );
+      const degradedPage = normalizeStaticRecentVideoPage(
+        degradedPayload,
+        params.page,
+        params.pageSize,
+      );
+      return { ...result, data: degradedPage, page: degradedPage };
+    }
+    return { ...result, data: null, page: null };
+  }
   const page =
     normalizedPage &&
     (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, normalizedPage.videos.length))
+      shouldUseStaticCollection(result.strategy, itemCount))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -646,6 +794,7 @@ export async function loadStaticUsersIndex(params?: {
     targetId: "global",
     reason: "public_users_index_miss",
     cacheTtlSeconds: 60,
+    isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;
