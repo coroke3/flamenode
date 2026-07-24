@@ -27,6 +27,7 @@ import { activeEventWhere } from "@/lib/utils/eventStatus";
 import { pickHeroEvents } from "@/lib/utils/pickHeroEvents";
 import { buildDegradedUsersPageSql, DEGRADED_USERS_PAGE_SIZE } from "./degradedUsersPageSql";
 import { buildHeroEventSlotStatsSql } from "./heroEventSlotStatsSql";
+import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import type { StaticEventDetailPayload } from "./staticEventDetailCore";
 import type { StaticEventsIndexPayload } from "./staticEventsIndexCore";
 import type { StaticRecentVideosPayload } from "./staticRecentVideoCore";
@@ -348,16 +349,7 @@ export async function fetchDegradedEventDetailPayload(
 }
 
 async function resolveVideoByRawId(db: DB, rawId: string) {
-  const probe = await db
-    .select()
-    .from(videos)
-    .where(
-      rawId.length === 11
-        ? eq(videos.youtube_video_id, rawId)
-        : eq(videos.id, rawId),
-    )
-    .limit(1);
-  return probe[0] ?? null;
+  return fetchVideoRowByIdOrYoutube(db, rawId);
 }
 
 export async function fetchDegradedVideoDetailPayload(

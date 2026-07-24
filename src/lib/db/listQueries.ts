@@ -15,6 +15,7 @@ import {
 } from "./queries";
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
+import { resolveVideoPrimaryKey } from "./videoIdLookup";
 
 export interface ListVideoParams {
   q?: string;
@@ -211,6 +212,11 @@ export async function fetchPublicVideoByIdOrYoutube(
   db: DB,
   idOrYoutube: string,
 ) {
+  const resolvedId = await resolveVideoPrimaryKey(db, idOrYoutube, {
+    andWhere: eq(videos.visibility_status, "public"),
+  });
+  if (!resolvedId) return null;
+
   const rows = await db
     .select(publicVideoListSelect)
     .from(videos)
@@ -219,7 +225,7 @@ export async function fetchPublicVideoByIdOrYoutube(
     .where(
       and(
         eq(videos.visibility_status, "public"),
-        or(eq(videos.id, idOrYoutube), eq(videos.youtube_video_id, idOrYoutube)),
+        eq(videos.id, resolvedId),
       )!,
     )
     .limit(1);

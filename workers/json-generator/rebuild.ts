@@ -28,6 +28,7 @@ import {
   USERS_INDEX_MAX_OBJECT_BYTES,
   USERS_INDEX_OBJECT_KEY,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
+import { isConfirmedInternalVideoId } from "../../src/lib/video/internalId.ts";
 import { buildHeroEventSlotStatsSql } from "../../src/lib/publicData/heroEventSlotStatsSql.ts";
 import {
   pickHeroEvents,
@@ -1220,10 +1221,7 @@ async function fetchStaticRelatedVideos(
   return selected.map((candidate) => toPublicRelatedVideoCard(candidate.row));
 }
 
-async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): Promise<void> {
-  throwIfAborted(signal);
-  const row = await env.DB.prepare(
-    `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name, v.creator_x_user_id,
+const REBUILD_VIDEO_SELECT = `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name, v.creator_x_user_id,
             creator_icon_url, music, credit, music_reference_url, intro_comment, highlights,
             production_story, closing_comment, visibility_status, scheduled_time,
             COALESCE(v.app_like_count, 0) AS app_like_count,
@@ -1233,13 +1231,31 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
                 AND primary_event.visibility_status = 'public'
             ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
             collaboration_type, part, updated_at
-     FROM videos AS v
-     WHERE v.id = ? OR v.youtube_video_id = ?
-     ORDER BY CASE WHEN v.id = ? THEN 0 ELSE 1 END
-     LIMIT 1`,
-  )
-    .bind(videoId, videoId, videoId)
+     FROM videos AS v`;
+
+async function fetchVideoRowForRebuild(
+  env: Env,
+  videoId: string,
+  signal?: RebuildSignal,
+): Promise<Record<string, unknown> | null> {
+  throwIfAborted(signal);
+  const byPk = await env.DB.prepare(`${REBUILD_VIDEO_SELECT} WHERE v.id = ? LIMIT 1`)
+    .bind(videoId)
     .first();
+  if (byPk) return byPk as Record<string, unknown>;
+  if (isConfirmedInternalVideoId(videoId)) return null;
+  throwIfAborted(signal);
+  const byYoutube = await env.DB.prepare(
+    `${REBUILD_VIDEO_SELECT} WHERE v.youtube_video_id = ? LIMIT 1`,
+  )
+    .bind(videoId)
+    .first();
+  return (byYoutube as Record<string, unknown> | null) ?? null;
+}
+
+async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const row = await fetchVideoRowForRebuild(env, videoId, signal);
   throwIfAborted(signal);
   if (!row) {
     await removeTrackedArtifacts(env, "video", videoId, 20, signal);

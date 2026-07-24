@@ -22,6 +22,7 @@ import {
   fetchRelatedVideos,
   fetchVideoDetail,
 } from "@/lib/db/videoDetailQueries";
+import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
@@ -194,17 +195,7 @@ async function fetchVideoViewerOverlay({
     const viewerActiveX = viewerUser.active_x_user_id ?? null;
     const overlay = await withDatabase(async (db) => {
       let viewerCanEditChapters = false;
-      const probe = (
-        await db
-          .select()
-          .from(videosTable)
-          .where(
-            rawId.length === 11
-              ? eq(videosTable.youtube_video_id, rawId)
-              : eq(videosTable.id, rawId),
-          )
-          .limit(1)
-      )[0];
+      const probe = await fetchVideoRowByIdOrYoutube(db, rawId);
       if (probe) {
         viewerCanEditChapters = await canEditVideo({
           db,
