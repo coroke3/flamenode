@@ -43,6 +43,7 @@ import { loadStaticVideoDetail } from "@/lib/publicData/loader";
 import type { StaticVideoDetail } from "@/lib/publicData/loader";
 import {
   logPublicRequestMetrics,
+  setPublicRequestRoute,
 } from "@/lib/publicData/loader";
 import { buildPublicVideoViewModelFromStatic } from "@/lib/publicData/publicVideoDetailViewModel";
 
@@ -90,6 +91,8 @@ export default async function VideoDetailPage({
 }: Props): Promise<React.ReactElement> {
   const { id: rawId } = await params;
   const { playlist = "" } = (await searchParams) ?? {};
+
+  setPublicRequestRoute(`/${rawId}`);
 
   const staticProbe = await loadStaticVideoDetail(rawId);
   if (staticProbe.data) {

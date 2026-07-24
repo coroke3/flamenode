@@ -105,6 +105,27 @@ test("loadPublicJson applies empty collection semantic miss on cache and R2 hits
   );
 });
 
+test("events index, top, and recommend loaders wire empty collection semantic miss", () => {
+  const eventsIndexBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticEventsIndex"),
+    loaderSource.indexOf("export async function loadStaticRecentVideosPage"),
+  );
+  assert.match(eventsIndexBlock, /isEmptyCollection: isEmptyItemsCollection/);
+
+  const topBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticTopPage"),
+    loaderSource.indexOf("export async function loadStaticUsersIndex"),
+  );
+  assert.match(topBlock, /isEmptyCollection: isEmptyTopCollection/);
+  assert.match(topBlock, /shouldUseStaticCollection/);
+
+  const recommendBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticRecommendPage"),
+    loaderSource.indexOf("export const loadStaticUserProfile"),
+  );
+  assert.match(recommendBlock, /isEmptyCollection: isEmptyRecommendCollection/);
+});
+
 test("popular list loader wires degraded fallback", () => {
   assert.match(loaderSource, /fetchDegradedPopularListPayload/);
 });

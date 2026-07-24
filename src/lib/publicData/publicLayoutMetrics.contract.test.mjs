@@ -25,6 +25,7 @@ test("PublicDegradedBanner は PublicMetricsShell 内で ALS スコープを共�
   assert.doesNotMatch(layoutSource, /PublicDegradedBanner/);
   assert.match(shellSource, /runWithPublicRequestMetrics/);
   assert.match(shellSource, /PublicDegradedBanner/);
+  assert.doesNotMatch(shellSource, /runWithPublicRequestMetrics\(\s*["']public["']/);
   assert.match(bannerSource, /role="status"/);
   assert.match(bannerSource, /public_data_mode !== "degraded_d1"/);
 });

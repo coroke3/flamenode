@@ -18,6 +18,7 @@ import {
   loadStaticUserWorksPage,
   loadStaticUserProfile,
   logPublicRequestMetrics,
+  setPublicRequestRoute,
 } from "@/lib/publicData/loader";
 import type { StaticUserProfile, StaticUserVideoPage } from "@/lib/publicData/loader";
 import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
@@ -70,6 +71,7 @@ export default async function UserPage({
 }: Props): Promise<React.ReactElement> {
   const id = normalizeXId((await params).id);
   const sp = (await searchParams) ?? {};
+  setPublicRequestRoute(`/user/${id}`);
     const worksPaging = clampPaging({
       page: sp.worksPage,
       pageSize: WORKS_PAGE_SIZE,

@@ -12,7 +12,7 @@ import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { parsePublicVideoSort } from "@/lib/db/listQueries";
-import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage, loadPublicEventVideosPage } from "@/lib/publicData/loader";
+import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage, loadPublicEventVideosPage, setPublicRequestRoute } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -49,6 +49,8 @@ export default async function ListPage({
     rawView === "index" ? "index" : rawView === "compact" ? "compact" : "grid";
   const parsedSort = parsePublicVideoSort(sort);
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
+
+  setPublicRequestRoute("/list");
 
   const staticRecentLoad =
     !q.trim() && parsedSort === "new" && !event
@@ -112,6 +114,10 @@ export default async function ListPage({
       : { videos: [] as VideoCardData[], total: 0, eventInfo: null };
 
   const { videos = [], total = 0, eventInfo = null } = data ?? {};
+  const listUnavailable =
+    event.trim() &&
+    eventListLoad != null &&
+    eventListLoad.mode === "unavailable";
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const params = (override: Partial<SearchParams> = {}) => {
@@ -241,7 +247,9 @@ export default async function ListPage({
         <div className="fn-empty">
           <Icon name="info" size={24} aria-hidden />
           <p className="fn-empty-message">
-            条件に合う作品が見つかりませんでした。条件を変えてお試しください。
+            {listUnavailable
+              ? "このイベントの作品一覧を一時的に表示できません。"
+              : "条件に合う作品が見つかりませんでした。条件を変えてお試しください。"}
           </p>
         </div>
       ) : (

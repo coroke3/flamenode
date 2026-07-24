@@ -10,6 +10,7 @@ import { buildPageMetadata } from "@/lib/seo";
 import {
   isDegradedD1Mode,
   loadStaticUsersIndex,
+  setPublicRequestRoute,
   type StaticUsersIndexEntry,
 } from "@/lib/publicData/loader";
 import {
@@ -66,6 +67,7 @@ export default async function UserListPage({
   const { q = "", sort = "score", page = "1" } = await searchParams;
   const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
   const sortKey = parseUsersIndexSort(sort);
+  setPublicRequestRoute("/user");
   const staticLoaded = await loadStaticUsersIndex({
     page: pageNum,
     pageSize: PAGE_SIZE,

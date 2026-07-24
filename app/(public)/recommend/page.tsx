@@ -9,6 +9,7 @@ import { buildPageMetadata } from "@/lib/seo";
 import {
   isDegradedD1Mode,
   loadStaticRecommendPage,
+  setPublicRequestRoute,
 } from "@/lib/publicData/loader";
 import { buildRecommendViewModel } from "@/lib/publicData/staticRecommendCore";
 
@@ -55,6 +56,7 @@ const FILTER_CHIPS: FilterChip[] = [
 ];
 
 export default async function RecommendPage(): Promise<React.ReactElement> {
+  setPublicRequestRoute("/recommend");
   const staticLoaded = await loadStaticRecommendPage();
   const isDegraded = isDegradedD1Mode(staticLoaded.mode);
   const pools = staticLoaded.recommend;

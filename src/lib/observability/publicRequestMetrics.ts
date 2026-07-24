@@ -45,6 +45,12 @@ function createMetricsState(route: string): MutablePublicRequestMetrics {
   };
 }
 
+export function setPublicRequestRoute(route: string): void {
+  const state = storage.getStore();
+  if (!state) return;
+  state.route = route.slice(0, 120);
+}
+
 export function runWithPublicRequestMetrics<T>(
   route: string,
   fn: () => T | Promise<T>,

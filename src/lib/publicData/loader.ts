@@ -108,6 +108,7 @@ export {
   logPublicRequestMetrics,
   notePublicDataMode,
   runWithPublicRequestMetrics,
+  setPublicRequestRoute,
 } from "@/lib/observability/publicRequestMetrics";
 export type { PublicDataMode } from "./publicDataMode";
 export { isDegradedD1Mode, isPublicDataUnavailable } from "./publicDataMode";
@@ -376,6 +377,39 @@ function isEmptySearchIndexCollection(payload: unknown): boolean {
   return !Array.isArray(videos) || videos.length === 0;
 }
 
+function isEmptyTopCollection(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return true;
+  const row = payload as StaticTopPayload;
+  const hasItems = (value: unknown) => Array.isArray(value) && value.length > 0;
+  return !(
+    hasItems(row.recommended) ||
+    hasItems(row.latest) ||
+    hasItems(row.items) ||
+    hasItems(row.active_events) ||
+    hasItems(row.latest_events) ||
+    hasItems(row.creators) ||
+    hasItems(row.announcements)
+  );
+}
+
+function isEmptyRecommendCollection(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return true;
+  const row = payload as StaticRecommendPayload;
+  const hasItems = (value: unknown) => Array.isArray(value) && value.length > 0;
+  return !(
+    hasItems(row.recommended) ||
+    hasItems(row.latest) ||
+    hasItems(row.underrated) ||
+    hasItems(row.creators)
+  );
+}
+
+function countStaticTopItems(top: StaticTopData): number {
+  return (
+    top.activeEvents.length + top.recommended.length + top.latest.length
+  );
+}
+
 function sortRecentPayloadForList(
   payload: StaticRecentVideosPayload,
   sort: "new" | "old" | "score",
@@ -422,14 +456,22 @@ export async function loadStaticEventsIndex(): Promise<{
     targetId: "global",
     reason: "public_events_index_miss",
     cacheTtlSeconds: 120,
+    isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;
       return fetchDegradedEventsIndexPayload(db);
     },
   });
+  const normalized = result.data ? normalizeStaticEventsIndex(result.data) : null;
+  const index =
+    normalized &&
+    (result.mode === "degraded_d1" ||
+      shouldUseStaticCollection(result.strategy, normalized.events.length))
+      ? normalized
+      : null;
   return {
-    index: result.data ? normalizeStaticEventsIndex(result.data) : null,
+    index,
     strategy: result.strategy,
     mode: result.mode,
     enqueued: result.enqueued,
@@ -769,13 +811,20 @@ export async function loadStaticTopPage(): Promise<
     targetId: "global",
     reason: "public_top_miss",
     cacheTtlSeconds: 30,
+    isEmptyCollection: isEmptyTopCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;
       return fetchDegradedTopPayload(db);
     },
   });
-  const top = result.data ? normalizeStaticTop(result.data) : null;
+  const normalized = result.data ? normalizeStaticTop(result.data) : null;
+  const top =
+    normalized &&
+    (result.mode === "degraded_d1" ||
+      shouldUseStaticCollection(result.strategy, countStaticTopItems(normalized)))
+      ? normalized
+      : null;
   return { ...result, data: top, top };
 }
 
@@ -826,6 +875,7 @@ export async function loadStaticRecommendPage(): Promise<
     targetId: "global",
     reason: "public_recommend_miss",
     cacheTtlSeconds: 60,
+    isEmptyCollection: isEmptyRecommendCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;

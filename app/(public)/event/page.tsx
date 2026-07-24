@@ -22,7 +22,7 @@ import {
 import { EventGroupHashScroll } from "@/components/event/EventGroupHashScroll";
 import { eventGroupAnchorId } from "@/lib/eventGroupRoutes";
 import { buildAccentVars } from "@/lib/theme/accent";
-import { loadStaticEventsIndex } from "@/lib/publicData/loader";
+import { loadStaticEventsIndex, setPublicRequestRoute } from "@/lib/publicData/loader";
 import type {
   StaticEventGroupSection,
   StaticEventIndexEvent,
@@ -169,6 +169,7 @@ export default async function EventListPage({
   const status = parseEventFilterStatus(rawParams.status);
   const sort = parseEventFilterSort(rawParams.sort);
   const now = Math.floor(Date.now() / 1000);
+  setPublicRequestRoute("/event");
   const staticLoaded = await loadStaticEventsIndex();
   const emptySource: EventListSource = { events: [], groupSections: [] };
   const staticSource: EventListSource | null = staticLoaded.index
@@ -312,7 +313,11 @@ export default async function EventListPage({
         <div className="fn-empty fn-mt-lg">
           <Icon name="calendar" size={24} aria-hidden />
           <p className="fn-empty-message">
-            表示できるイベントがまだありません。
+            {staticLoaded.mode === "unavailable"
+              ? "公開イベント一覧を一時的に表示できません。"
+              : hasActiveFilter
+                ? "条件に合うイベントが見つかりませんでした。"
+                : "表示できるイベントがまだありません。"}
           </p>
         </div>
       ) : (

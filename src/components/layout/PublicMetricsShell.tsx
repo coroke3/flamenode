@@ -8,7 +8,7 @@ export async function PublicMetricsShell({
   children: React.ReactNode;
 }): Promise<React.ReactElement> {
   return (await runWithPublicRequestMetrics(
-    "public",
+    "/",
     async () => (
       <>
         {children}

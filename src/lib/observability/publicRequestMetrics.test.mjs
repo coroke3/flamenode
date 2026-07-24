@@ -14,6 +14,7 @@ if (runTestWithTsx(import.meta.url)) {
     recordPublicStaticHit,
     recordPublicStaticMiss,
     runWithPublicRequestMetrics,
+    setPublicRequestRoute,
   } = await import("./publicRequestMetrics.ts");
 
   test("runWithPublicRequestMetrics aggregates counters without PII fields", async () => {
@@ -45,6 +46,15 @@ if (runTestWithTsx(import.meta.url)) {
         ),
       /must not be nested/,
     );
+  });
+
+  test("setPublicRequestRoute updates snapshot route within ALS", async () => {
+    const snapshot = await runWithPublicRequestMetrics("/", async () => {
+      setPublicRequestRoute("/list");
+      return getPublicRequestMetricsSnapshot();
+    });
+    assert.ok(snapshot);
+    assert.equal(snapshot.route, "/list");
   });
 
   test("logPublicRequestMetrics emits structured console log", async () => {
