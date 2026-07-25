@@ -532,7 +532,6 @@
     z-index: 30;
 
     width: auto;
-    max-height: min(56.25vw, 42dvh);
 
     margin-inline:
       calc(-1 * var(--fn-page-gutter, 16px));
@@ -544,7 +543,7 @@
   }
 
   .playerPane > * {
-    max-height: inherit;
+    border-radius: 0;
   }
 
   .infoPane {
@@ -560,12 +559,33 @@
   }
 }
 
+@media
+  (max-width: 900px)
+  and (orientation: landscape) {
+  .playerPane {
+    width:
+      min(
+        100%,
+        calc(
+          (
+            100dvh
+            - var(--header-h, 56px)
+            - 16px
+          )
+          * 16 / 9
+        )
+      );
+
+    margin-inline: auto;
+  }
+}
+
 @media (max-width: 640px) {
   .title {
     font-size: clamp(20px, 5.5vw, 26px);
     line-height: 1.15;
     overflow-wrap: anywhere;
-    margin-top: 12px;
+    margin-top: 0;
   }
 
   .authorActions {

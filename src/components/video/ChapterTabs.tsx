@@ -25,6 +25,7 @@ interface ChapterTabsProps {
   duration?: number | null;
   onSeek?: (time: number) => void;
   presentation?: "rail" | "responsive";
+  isVisible?: boolean;
 }
 
 const FOLLOW_IDLE_MS = 8_000;
@@ -33,12 +34,10 @@ function findScrollParent(element: HTMLElement | null): HTMLElement | null {
   let node = element?.parentElement ?? null;
   while (node) {
     const { overflowY } = window.getComputedStyle(node);
-    if (
-      (overflowY === "auto" || overflowY === "scroll") &&
-      node.scrollHeight > node.clientHeight
-    ) {
+    if (overflowY === "auto" || overflowY === "scroll") {
       return node;
     }
+
     node = node.parentElement;
   }
   return null;
@@ -49,6 +48,7 @@ export function ChapterTabs({
   duration,
   onSeek = seekToTime,
   presentation = "rail",
+  isVisible = true,
 }: ChapterTabsProps): React.ReactElement {
   const rootRef = React.useRef<HTMLDivElement>(null);
   const currentTime = usePlayerTime();
@@ -108,7 +108,9 @@ export function ChapterTabs({
   }, [pauseFollow]);
 
   React.useEffect(() => {
-    if (!followPlayback || !activeChapterId) return;
+    if (!isVisible || !followPlayback || !activeChapterId) {
+      return;
+    }
     if (lastScrolledChapterIdRef.current === activeChapterId) return;
 
     const root = rootRef.current;
@@ -125,7 +127,7 @@ export function ChapterTabs({
     window.setTimeout(() => {
       isAutoScrollingRef.current = false;
     }, 600);
-  }, [activeChapterId, followPlayback]);
+  }, [activeChapterId, followPlayback, isVisible]);
 
   React.useEffect(() => {
     if (!followPlayback) {

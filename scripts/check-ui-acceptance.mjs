@@ -194,6 +194,29 @@ requireAll("src/components/video/ChapterTabs.tsx", [
   [/scrollIntoView/, "アクティブチャプターへの自動スクロールがありません。"],
   [/followPlayback|再生に追従/, "再生追従の切替がありません。"],
   [/findActiveChapterId/, "アクティブチャプター判定がありません。"],
+  [/isVisible/, "非表示パネル中の自動追従停止がありません。"],
+]);
+
+requireAll("src/components/video/ChapterComposer.tsx", [
+  [
+    /\)\s*:\s*bulkOnly\s*\?/,
+    "inline-sheetでCSV一括登録見出しを表示しない分岐がありません。",
+  ],
+  [
+    /isInlineSheet[\s\S]*?background:\s*"transparent"/,
+    "inline-sheetのカード枠解除がありません。",
+  ],
+]);
+
+requireAll("src/components/video/ChapterCommentPanel.tsx", [
+  [
+    /rootRef\.current\?\.querySelector/,
+    "投稿後スクロールがチャプターパネル内に限定されていません。",
+  ],
+  [
+    /Math\.floor\(\s*submittedChapter\.chapterTime/,
+    "投稿時刻とdata-chapter-timeの整数化が一致していません。",
+  ],
 ]);
 
 requireAll("src/components/layout/Shelf.tsx", [

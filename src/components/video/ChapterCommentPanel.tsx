@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import styles from "./ChapterCommentPanel.module.css";
 
 interface ChapterCommentPanelProps {
+  active: boolean;
   videoId: string;
   chapters: ChapterEntry[];
   isLoggedIn: boolean;
@@ -17,27 +18,8 @@ interface ChapterCommentPanelProps {
   settingsHref: string;
 }
 
-function scrollToSubmittedChapter(chapterTime: number, attemptsLeft: number): void {
-  const root = document.querySelector<HTMLElement>(
-    `[data-chapter-time="${chapterTime}"]`,
-  );
-
-  if (root) {
-    root.scrollIntoView({
-      block: "nearest",
-      behavior: "smooth",
-    });
-    return;
-  }
-
-  if (attemptsLeft <= 0) return;
-
-  window.setTimeout(() => {
-    scrollToSubmittedChapter(chapterTime, attemptsLeft - 1);
-  }, 200);
-}
-
 export function ChapterCommentPanel({
+  active,
   videoId,
   chapters,
   isLoggedIn,
@@ -45,6 +27,7 @@ export function ChapterCommentPanel({
   loginHref,
   settingsHref,
 }: ChapterCommentPanelProps): React.ReactElement {
+  const rootRef = React.useRef<HTMLElement>(null);
   const currentTime = usePlayerTime();
 
   const [composerOpen, setComposerOpen] = React.useState(false);
@@ -72,18 +55,54 @@ export function ChapterCommentPanel({
   );
 
   React.useEffect(() => {
-    if (!submittedChapter) return;
+    if (!submittedChapter || !active) return;
 
-    const timer = window.setTimeout(() => {
-      scrollToSubmittedChapter(submittedChapter.chapterTime, 10);
-      setSubmittedChapter(null);
-    }, 250);
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    let attempts = 0;
 
-    return () => window.clearTimeout(timer);
-  }, [submittedChapter, chapters]);
+    const targetTime = Math.floor(submittedChapter.chapterTime);
+
+    const findAndScroll = () => {
+      if (cancelled) return;
+
+      const item = rootRef.current?.querySelector<HTMLElement>(
+        `[data-chapter-time="${targetTime}"]`,
+      );
+
+      if (item) {
+        item.scrollIntoView({
+          block: "nearest",
+          behavior: "smooth",
+        });
+        setSubmittedChapter(null);
+        return;
+      }
+
+      attempts += 1;
+
+      if (attempts >= 10) {
+        setSubmittedChapter(null);
+        return;
+      }
+
+      timeoutId = window.setTimeout(findAndScroll, 200);
+    };
+
+    timeoutId = window.setTimeout(findAndScroll, 250);
+
+    return () => {
+      cancelled = true;
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [active, submittedChapter, chapters]);
 
   return (
     <section
+      ref={rootRef}
       className={styles.root}
       aria-labelledby="chapter-comment-panel-title"
     >
@@ -99,7 +118,11 @@ export function ChapterCommentPanel({
       </header>
 
       <div className={styles.list}>
-        <ChapterTabs chapters={chapters} presentation="responsive" />
+        <ChapterTabs
+          chapters={chapters}
+          presentation="responsive"
+          isVisible={active}
+        />
       </div>
 
       <div className={styles.composer}>

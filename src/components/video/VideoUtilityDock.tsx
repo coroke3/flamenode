@@ -44,6 +44,7 @@ export function VideoUtilityDock({
 }: VideoUtilityDockProps): React.ReactElement {
   const pathname = usePathname();
   const dockRef = React.useRef<HTMLElement>(null);
+  const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const previousTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const historyOwnedRef = React.useRef(false);
   const closingViaProgramRef = React.useRef(false);
@@ -57,7 +58,18 @@ export function VideoUtilityDock({
 
   const releaseHistoryEntry = React.useCallback(() => {
     if (!historyOwnedRef.current) return;
+
+    const currentState = window.history.state as
+      | Record<string, unknown>
+      | null;
+
     historyOwnedRef.current = false;
+
+    if (!currentState?.[HISTORY_STATE_KEY]) {
+      closingViaProgramRef.current = false;
+      return;
+    }
+
     closingViaProgramRef.current = true;
     window.history.back();
   }, []);
@@ -70,7 +82,7 @@ export function VideoUtilityDock({
 
       if (!media.matches) {
         setActivePanel(null);
-        historyOwnedRef.current = false;
+        releaseHistoryEntry();
       }
     };
 
@@ -80,7 +92,7 @@ export function VideoUtilityDock({
     return () => {
       media.removeEventListener("change", update);
     };
-  }, []);
+  }, [releaseHistoryEntry]);
 
   React.useLayoutEffect(() => {
     const dock = dockRef.current;
@@ -105,6 +117,16 @@ export function VideoUtilityDock({
         const viewportOffsetTop =
           visualViewport?.offsetTop ?? 0;
 
+        const rootStyles = window.getComputedStyle(
+          document.documentElement,
+        );
+        const configuredHeaderHeight = Number.parseFloat(
+          rootStyles.getPropertyValue("--header-h"),
+        );
+        const headerHeight = Number.isFinite(configuredHeaderHeight)
+          ? configuredHeaderHeight
+          : 56;
+
         const keyboardInset = visualViewport
           ? Math.max(
               0,
@@ -114,13 +136,15 @@ export function VideoUtilityDock({
             )
           : 0;
 
+        const minTop = viewportOffsetTop + headerHeight;
+
         const maxTop =
           viewportOffsetTop +
           viewportHeight -
           160;
 
         const playerBottom = Math.max(
-          viewportOffsetTop,
+          minTop,
           Math.min(playerRect.bottom, maxTop),
         );
 
@@ -240,6 +264,18 @@ export function VideoUtilityDock({
     };
   }, [isOpen]);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      closeButtonRef.current?.focus();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [isOpen]);
+
   const closePanel = React.useCallback(() => {
     setActivePanel(null);
     releaseHistoryEntry();
@@ -272,15 +308,14 @@ export function VideoUtilityDock({
     ) => {
       previousTriggerRef.current = trigger;
 
-      setActivePanel((current) => {
-        if (current === panel) {
-          releaseHistoryEntry();
-          return null;
-        }
-        return panel;
-      });
+      if (activePanel === panel) {
+        closePanel();
+        return;
+      }
+
+      setActivePanel(panel);
     },
-    [releaseHistoryEntry],
+    [activePanel, closePanel],
   );
 
   return (
@@ -301,6 +336,7 @@ export function VideoUtilityDock({
           </strong>
 
           <button
+            ref={closeButtonRef}
             type="button"
             className={styles.closeButton}
             onClick={closePanel}
@@ -347,6 +383,7 @@ export function VideoUtilityDock({
             }
           >
             <ChapterCommentPanel
+              active={!isMobile || activePanel === "chapters"}
               videoId={videoId}
               chapters={chapters}
               isLoggedIn={isLoggedIn}

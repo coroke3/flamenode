@@ -149,7 +149,11 @@ export function ChapterComposer({
       return;
     }
     if (!label.trim()) {
-      setError("ラベルを入力してください。");
+      setError(
+        isInlineSheet
+          ? "タイトルを入力してください。"
+          : "ラベルを入力してください。",
+      );
       return;
     }
     const seconds = parseTimeInput(timeStr);
@@ -222,12 +226,19 @@ export function ChapterComposer({
 
   return (
     <section
-      style={{
-        border: "1px solid var(--border-subtle)",
-        background: "var(--bg-card)",
-        borderRadius: "var(--radius-md)",
-        padding: 12,
-      }}
+      style={
+        isInlineSheet
+          ? {
+              padding: 0,
+              background: "transparent",
+            }
+          : {
+              border: "1px solid var(--border-subtle)",
+              background: "var(--bg-card)",
+              borderRadius: "var(--radius-md)",
+              padding: 12,
+            }
+      }
     >
       {!bulkOnly && !isInlineSheet ? (
         <header
@@ -249,13 +260,13 @@ export function ChapterComposer({
             {open ? "閉じる" : "開く"}
           </button>
         </header>
-      ) : (
+      ) : bulkOnly ? (
         <header style={{ marginBottom: 6 }}>
           <strong style={{ fontSize: 12, letterSpacing: "0.08em" }}>
             チャプターコメント CSV 一括登録
           </strong>
         </header>
-      )}
+      ) : null}
       {(isInlineSheet || open) && !bulkOnly ? (
         <form
           onSubmit={onSubmit}
