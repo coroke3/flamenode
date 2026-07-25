@@ -365,11 +365,7 @@ export function VideoUtilityDock({
                 playlistId={playlistId}
                 presentation="responsive"
               />
-            ) : (
-              <p className={styles.empty}>
-                再生リストはありません。
-              </p>
-            )}
+            ) : null}
           </section>
 
           <section

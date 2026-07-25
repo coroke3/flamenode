@@ -21,16 +21,6 @@
   min-width: 0;
 }
 
-.empty {
-  margin: 0;
-  padding: 18px;
-  border-radius: var(--radius-md);
-  background: var(--bg-elevated);
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: center;
-}
-
 @media (max-width: 900px) {
   .dock {
     --fn-video-dock-toolbar-height: 64px;
