@@ -230,3 +230,25 @@
     width: 54px;
   }
 }
+
+@media (max-width: 900px) {
+  .root[data-presentation="responsive"] {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .root[data-presentation="responsive"] .eyebrow,
+  .root[data-presentation="responsive"] .title {
+    display: none;
+  }
+
+  .root[data-presentation="responsive"] .header {
+    align-items: center;
+  }
+
+  .root[data-presentation="responsive"] .list {
+    max-height: none;
+    overflow: visible;
+  }
+}

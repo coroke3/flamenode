@@ -10,8 +10,7 @@
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
     "main"
-    "chapters"
-    "related";
+    "side";
   gap: var(--fn-space-block, 30px);
   align-items: start;
 }
@@ -21,37 +20,12 @@
   min-width: 0;
 }
 
-.chapterRail {
-  grid-area: chapters;
+.sideRail {
+  grid-area: side;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 28px;
   min-width: 0;
-}
-
-.chapterRail > :not(.chapterBody) {
-  flex-shrink: 0;
-}
-
-.chapterBody {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-  max-height: min(52vh, 520px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  padding-right: 2px;
-}
-
-.chapterBody::-webkit-scrollbar {
-  width: 6px;
-}
-
-.chapterBody::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 999px;
 }
 
 .section.membersBlock {
@@ -60,7 +34,6 @@
 }
 
 .relatedRail {
-  grid-area: related;
   min-width: 0;
 }
 
@@ -402,53 +375,192 @@
   margin-bottom: 6px;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 901px) {
   .layout {
     grid-template-columns:
       minmax(0, 1fr)
-      clamp(320px, 24vw, 360px);
+      clamp(340px, 23vw, 420px);
     grid-template-areas:
-      "main chapters"
-      "main related";
-    gap: 28px;
+      "main side";
+    gap: clamp(28px, 2.4vw, 40px);
   }
 
-  .chapterRail {
-    position: static;
+  .sideRail {
     align-self: start;
-    min-height: 0;
-    max-height: none;
-    overflow: visible;
-  }
-
-  .chapterBody {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: min(52vh, 520px);
-    overflow-y: auto;
   }
 }
 
 @media (min-width: 1280px) {
   .layout {
-    grid-template-columns: minmax(0, 1fr) clamp(350px, 22vw, 400px);
+    grid-template-columns:
+      minmax(0, 1fr)
+      clamp(360px, 22vw, 440px);
     gap: 36px;
   }
 }
 
-@media (min-width: 1600px) {
+@media
+  (min-width: 1600px)
+  and (min-aspect-ratio: 20 / 9) {
+  .page {
+    --fn-page-gutter: clamp(16px, 1.2vw, 28px);
+    --fn-page-max: min(3200px, 98vw);
+    --fn-video-detail-height:
+      calc(100svh - var(--header-h, 64px) - 32px);
+  }
+
   .layout {
-    grid-template-columns: minmax(0, 1fr) clamp(360px, 20vw, 430px);
-    gap: clamp(36px, 2.4vw, 48px);
+    grid-template-columns:
+      minmax(0, 1fr)
+      clamp(390px, 21vw, 540px);
+
+    height: var(--fn-video-detail-height);
+    min-height: 0;
+
+    gap: clamp(28px, 1.8vw, 48px);
+    overflow: hidden;
+  }
+
+  .main {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .heroLayout {
+    height: 100%;
+    min-height: 0;
+
+    grid-template-columns:
+      clamp(300px, 18vw, 420px)
+      minmax(0, 1fr);
+
+    gap: clamp(20px, 1.4vw, 36px);
+    align-items: stretch;
+  }
+
+  .infoPane {
+    grid-column: 1;
+    grid-row: 1;
+
+    min-height: 0;
+    max-height: none;
+
+    overflow-y: auto;
+    overscroll-behavior: contain;
+
+    padding-right: 10px;
+
+    scrollbar-width: thin;
+  }
+
+  .playerPane {
+    grid-column: 2;
+    grid-row: 1;
+
+    position: static;
+
+    align-self: center;
+    justify-self: center;
+
+    width:
+      min(
+        100%,
+        calc(var(--fn-video-detail-height) * 16 / 9)
+      );
+
+    max-width: none;
+  }
+
+  .title {
+    margin-top: 0;
+    font-size: clamp(20px, 1.4vw, 28px);
+  }
+
+  .author {
+    align-items: flex-start;
+  }
+
+  .authorActions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .sideRail {
+    height: 100%;
+    min-height: 0;
+
+    overflow-y: auto;
+    overscroll-behavior: contain;
+
+    padding-right: 4px;
+
+    scrollbar-width: thin;
+  }
+
+  .relatedRail .relatedList {
+    display: grid;
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+}
+
+@media (max-width: 900px) {
+  .page {
+    padding-top: 0;
+    padding-bottom:
+      calc(
+        64px
+        + env(safe-area-inset-bottom)
+        + 28px
+      );
+  }
+
+  .layout {
+    gap: 26px;
+  }
+
+  .heroLayout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .playerPane {
+    position: sticky;
+    top: var(--header-h, 56px);
+    z-index: 30;
+
+    width: auto;
+    max-height: min(56.25vw, 42dvh);
+
+    margin-inline:
+      calc(-1 * var(--fn-page-gutter, 16px));
+
+    overflow: hidden;
+    background: #000;
+
+    box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+  }
+
+  .playerPane > * {
+    max-height: inherit;
+  }
+
+  .infoPane {
+    padding-top: 12px;
+  }
+
+  .title {
+    margin-top: 0;
+  }
+
+  .sideRail {
+    gap: 30px;
   }
 }
 
 @media (max-width: 640px) {
-  .page {
-    padding-top: 16px;
-    padding-bottom: 56px;
-  }
-
   .title {
     font-size: clamp(20px, 5.5vw, 26px);
     line-height: 1.15;
@@ -478,71 +590,5 @@
   .authorActions .fn-btn-sm {
     width: 100%;
     justify-content: center;
-  }
-}
-
-@media (min-aspect-ratio: 20 / 9) {
-  .page {
-    --fn-page-gutter: clamp(16px, 1.2vw, 28px);
-    --fn-page-max: min(3200px, 98vw);
-  }
-
-  .layout {
-    grid-template-columns: minmax(0, 1fr) clamp(420px, 24vw, 560px);
-    gap: clamp(28px, 1.8vw, 48px);
-  }
-
-  .heroLayout {
-    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-    gap: clamp(20px, 1.4vw, 36px);
-    align-items: start;
-  }
-
-  .playerPane {
-    grid-column: 2;
-    grid-row: 1;
-    width: 100%;
-    max-width: 2000px;
-    justify-self: end;
-    position: sticky;
-    top: calc(var(--header-h, 64px) + 18px);
-  }
-
-  .infoPane {
-    grid-column: 1;
-    grid-row: 1;
-    max-height: calc(100svh - var(--header-h, 64px) - 48px);
-    overflow: auto;
-    padding-right: 8px;
-    scrollbar-width: thin;
-  }
-
-  .infoPane::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .infoPane::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-  }
-
-  .title {
-    margin-top: 0;
-    font-size: clamp(20px, 1.4vw, 28px);
-  }
-
-  .author {
-    align-items: flex-start;
-  }
-
-  .authorActions {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-start;
-  }
-
-  .relatedRail .relatedList {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 4px;
   }
 }

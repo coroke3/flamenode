@@ -22,10 +22,8 @@ import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
-import { ChapterTabs } from "@/components/video/ChapterTabs";
-import { ChapterComposer } from "@/components/video/ChapterComposer";
 import { IntroCommentBlock } from "@/components/video/IntroCommentBlock";
-import { PlaylistRail } from "@/components/video/PlaylistRail";
+import { VideoUtilityDock } from "@/components/video/VideoUtilityDock";
 import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { MemberSection } from "@/components/video/MemberSection";
@@ -444,6 +442,21 @@ function StaticVideoDetailView({
   const currentPath = `/${rawId}`;
   const canInteract = !!(viewerUser?.id && viewerActiveX && viewerXApproved);
 
+  const loginHref = `/entry?next=${encodeURIComponent(currentPath)}`;
+  const settingsHref =
+    `/dashboard/settings?next=${encodeURIComponent(currentPath)}`;
+
+  const chapterEntries = vm.publicChapters.map((chapter) => ({
+    id: chapter.id,
+    chapter_time: chapter.chapter_time,
+    chapter_label: chapter.chapter_label,
+    visibility: "public" as const,
+    marker_kind: "comment" as const,
+    note: chapter.note,
+    author_name: chapter.author_name,
+    author_icon: chapter.author_icon,
+  }));
+
   return (
     <div
       className={`fn-vd fn-public-container fn-page ${styles.page}`}
@@ -453,7 +466,11 @@ function StaticVideoDetailView({
       <div className={styles.layout}>
         <article className={styles.main}>
           <div className={styles.heroLayout}>
-            <div className={styles.playerPane}>
+            <div
+              id="video-player-boundary"
+              className={styles.playerPane}
+              data-video-player-boundary
+            >
               {youtubeId ? (
                 <YoutubePlayer youtubeId={youtubeId} title={video.title} />
               ) : (
@@ -635,87 +652,61 @@ function StaticVideoDetailView({
                   </details>
                 ) : null}
               </div>
+
+              {vm.publicMembers.length > 0 ? (
+                <section className={`${styles.section} ${styles.membersBlock}`}>
+                  <h2 className={styles.sectionTitle}>
+                    参加メンバー ({vm.publicMembers.length})
+                  </h2>
+
+                  <MemberSection
+                    members={vm.publicMembers.map((member) => ({
+                      id: member.id,
+                      x_user_id: member.x_user_id,
+                      name: member.display_name,
+                      role: member.role_label,
+                      comment: null,
+                      x_name: null,
+                      icon_url: null,
+                    }))}
+                    memberChapters={vm.memberChapters.map((chapter) => ({
+                      id: chapter.id,
+                      chapter_time: chapter.chapter_time,
+                      chapter_label: chapter.chapter_label,
+                      note: chapter.note,
+                      video_member_id: chapter.video_member_id,
+                    }))}
+                  />
+                </section>
+              ) : null}
             </div>
           </div>
-
-          {vm.publicMembers.length > 0 ? (
-            <section className={`${styles.section} ${styles.membersBlock}`}>
-              <h2 className={styles.sectionTitle}>
-                参加メンバー ({vm.publicMembers.length})
-              </h2>
-              <MemberSection
-                members={vm.publicMembers.map((member) => ({
-                  id: member.id,
-                  x_user_id: member.x_user_id,
-                  name: member.display_name,
-                  role: member.role_label,
-                  comment: null,
-                  x_name: null,
-                  icon_url: null,
-                }))}
-                memberChapters={vm.memberChapters.map((chapter) => ({
-                  id: chapter.id,
-                  chapter_time: chapter.chapter_time,
-                  chapter_label: chapter.chapter_label,
-                  note: chapter.note,
-                  video_member_id: chapter.video_member_id,
-                }))}
-              />
-            </section>
-          ) : null}
         </article>
 
-        <aside className={styles.chapterRail} aria-label="チャプター">
-          {playlist && playlistItems.length > 0 ? (
-            <PlaylistRail
-              label={playlistLabel}
-              items={playlistItems}
-              currentId={rawId}
-              playlistId={playlist || undefined}
-            />
-          ) : null}
+        <aside className={styles.sideRail} aria-label="動画補助情報">
+          <VideoUtilityDock
+            videoId={video.id}
+            currentId={rawId}
+            playlistId={playlist || undefined}
+            playlistLabel={playlistLabel}
+            playlistItems={playlistItems}
+            chapters={chapterEntries}
+            isLoggedIn={Boolean(viewerUser?.id)}
+            canPost={viewerXApproved}
+            loginHref={loginHref}
+            settingsHref={settingsHref}
+          />
 
-          <div className={styles.chapterBody}>
-            <ChapterTabs
-              chapters={vm.publicChapters.map((chapter) => ({
-                id: chapter.id,
-                chapter_time: chapter.chapter_time,
-                chapter_label: chapter.chapter_label,
-                visibility: "public" as const,
-                marker_kind: "comment" as const,
-                note: chapter.note,
-                author_name: chapter.author_name,
-                author_icon: chapter.author_icon,
-              }))}
-            />
-          </div>
+          <section
+            className={styles.relatedRail}
+            aria-labelledby="related-videos-title"
+          >
+            <h3 id="related-videos-title" className={styles.relatedHeading}>
+              関連動画
+            </h3>
 
-          {viewerUser?.id ? (
-            <ChapterComposer
-              videoId={video.id}
-              canPost={viewerXApproved}
-              canBulk={false}
-              settingsHref={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`}
-            />
-          ) : (
-            <section className="fn-vd-login-panel">
-              <span>
-                <Icon name="info" size={12} aria-hidden />
-                ログインするといいね、セーブ、チャプターコメントが使えます。
-              </span>
-              <Link
-                href={`/entry?next=${encodeURIComponent(currentPath)}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                ログイン
-              </Link>
-            </section>
-          )}
-        </aside>
-
-        <aside className={styles.relatedRail} aria-label="関連動画">
-          <h3 className={styles.relatedHeading}>関連動画</h3>
-          <RelatedList videos={vm.relatedVideos} firstCount={18} />
+            <RelatedList videos={vm.relatedVideos} firstCount={18} />
+          </section>
         </aside>
       </div>
     </div>
