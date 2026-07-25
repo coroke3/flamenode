@@ -10,6 +10,8 @@ export const STATIC_REBUILD_TARGET_TYPES = [
   "search_index",
   "recommend",
   "rules",
+  "youtube_related_blocklist",
+  "random_video_pool",
 ] as const;
 
 export type StaticRebuildTargetType = (typeof STATIC_REBUILD_TARGET_TYPES)[number];

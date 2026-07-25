@@ -49,6 +49,8 @@ export interface Env {
 const SYNC_JOBS_LEASE_SEC = 14 * 60;
 const SYNC_JOBS_HEARTBEAT_SEC = 4 * 60;
 const SYNC_JOBS_WALL_CLOCK_DEADLINE_MS = 13 * 60 * 1_000;
+/** UTC 03:00台で blocked 復旧確認と blocklist 日次整合を1回走らせる。 */
+const DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR = 3;
 
 /** Cronは7,52分。UTC分が52の時だけを再生リスト専用枠にする。 */
 export function isPlaylistSyncSlot(now = new Date()): boolean {
@@ -123,10 +125,62 @@ async function wakeStaticRebuildAfterScoreEnqueue(
   });
 }
 
+export function isDailyYoutubeRelatedSlot(now = new Date()): boolean {
+  if (Number.isNaN(now.getTime())) {
+    throw new Error("invalid youtube related schedule");
+  }
+  return now.getUTCHours() === DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR;
+}
+
+async function enqueueYoutubeRelatedBlocklistRebuild(
+  env: Env,
+  reason: string,
+  priority: "high" | "low",
+  signal?: AbortSignal,
+): Promise<number> {
+  signal?.throwIfAborted();
+  const now = Math.floor(Date.now() / 1000);
+  const activeUpdate = env.DB.prepare(
+    `UPDATE static_rebuild_queue
+        SET reason = ?,
+            priority = CASE
+              WHEN priority = 'high' OR ? = 'high' THEN 'high'
+              ELSE priority
+            END,
+            updated_at = MAX(updated_at + 1, ?)
+      WHERE target_type = 'youtube_related_blocklist'
+        AND target_id = 'global'
+        AND status IN ('pending', 'processing')`,
+  ).bind(reason, priority, now);
+  const insert = env.DB.prepare(
+    `INSERT OR IGNORE INTO static_rebuild_queue (
+       id, target_type, target_id, reason, priority, status,
+       attempt_count, created_at, updated_at
+     ) VALUES (?, 'youtube_related_blocklist', 'global',
+       ?, ?, 'pending', 0, ?, ?)`,
+  ).bind(
+    `srb:youtube_related_blocklist:${crypto.randomUUID()}`,
+    reason,
+    priority,
+    now,
+    now,
+  );
+  const results = await env.DB.batch([activeUpdate, insert]);
+  signal?.throwIfAborted();
+  return results.reduce(
+    (sum, result) =>
+      sum + Math.max(0, Number(result.meta?.changes ?? 0)),
+    0,
+  );
+}
+
 /** metadata commit 後の score 更新と静的 rebuild 予約。失敗しても metadata は巻き戻さない。 */
 export async function runYoutubeSyncPostCommit(
   env: Env,
-  youtube: Pick<SyncBatchResult, "changed_video_ids">,
+  youtube: Pick<
+    SyncBatchResult,
+    "changed_video_ids" | "related_eligibility_changed_video_ids"
+  >,
   options: {
     signal?: AbortSignal;
     useScoreBatchFallback?: boolean;
@@ -134,6 +188,17 @@ export async function runYoutubeSyncPostCommit(
   } = {},
 ): Promise<void> {
   const { signal, useScoreBatchFallback = false, commitSha } = options;
+
+  if (youtube.related_eligibility_changed_video_ids.length > 0) {
+    const enqueued = await enqueueYoutubeRelatedBlocklistRebuild(
+      env,
+      "youtube_related_eligibility_changed",
+      "high",
+      signal,
+    );
+    await wakeStaticRebuildAfterScoreEnqueue(env, enqueued);
+  }
+
   const score = await runJob(
     "sync-jobs",
     "score-recalc",
@@ -329,6 +394,39 @@ export async function runSyncJobs(
             useScoreBatchFallback: true,
             commitSha: env.BUILD_COMMIT_SHA,
           });
+
+          const now = new Date(execution.scheduledTime);
+          if (isDailyYoutubeRelatedSlot(now) && !youtube.quota_stopped) {
+            let blockedYoutube!: SyncBatchResult;
+            const blockedRecheck = await runJob(
+              "sync-jobs",
+              "youtube-blocked-recheck",
+              async () => {
+                signal?.throwIfAborted();
+                blockedYoutube = await syncBatch(env, undefined, signal, {
+                  mode: "blocked_recheck_only",
+                });
+                signal?.throwIfAborted();
+                return blockedYoutube;
+              },
+              { rethrow: false, commitSha: env.BUILD_COMMIT_SHA },
+            );
+            if (blockedRecheck.succeeded) {
+              await runYoutubeSyncPostCommit(env, blockedYoutube, {
+                signal,
+                commitSha: env.BUILD_COMMIT_SHA,
+              });
+            }
+
+            const reconciled = await enqueueYoutubeRelatedBlocklistRebuild(
+              env,
+              "youtube_related_blocklist_daily_reconcile",
+              "low",
+              signal,
+            );
+            await wakeStaticRebuildAfterScoreEnqueue(env, reconciled);
+          }
+
           if (queueFlags.youtubeSyncEnabled) {
             await maybeResendYoutubePendingWake(env);
           }

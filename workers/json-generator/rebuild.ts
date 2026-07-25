@@ -28,6 +28,24 @@ import {
   USERS_INDEX_MAX_OBJECT_BYTES,
   USERS_INDEX_OBJECT_KEY,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
+import {
+  buildPublicXIconMapPayloadFromProjection,
+  PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES,
+  PUBLIC_X_ICON_MAP_OBJECT_KEY,
+  publicXIconMapByteLength,
+} from "../../src/lib/publicData/publicIconProjection.ts";
+import {
+  buildYoutubeRelatedBlocklistPayload,
+  YOUTUBE_RELATED_BLOCKLIST_MAX_OBJECT_BYTES,
+  YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
+  type YoutubeRelatedBlockReason,
+} from "../../src/lib/publicData/staticYoutubeRelatedBlocklistCore.ts";
+import {
+  buildRandomPoolGenerationMaterial,
+  RANDOM_VIDEO_POOL_MAX_OBJECT_BYTES,
+  RANDOM_VIDEO_POOL_OBJECT_KEY,
+  RANDOM_VIDEO_POOL_SCHEMA_VERSION,
+} from "../../src/lib/publicData/randomVideoPoolCore.ts";
 import { isConfirmedInternalVideoId } from "../../src/lib/video/internalId.ts";
 import { buildHeroEventSlotStatsSql } from "../../src/lib/publicData/heroEventSlotStatsSql.ts";
 import {
@@ -183,25 +201,34 @@ export async function rebuildTarget(
     case "rules":
       await rebuildRules(env, signal);
       break;
+    case "youtube_related_blocklist":
+      await rebuildYoutubeRelatedBlocklist(env, signal);
+      break;
+    case "random_video_pool":
+      await rebuildRandomVideoPool(env, signal);
+      break;
     default:
       throw new Error(`Unknown target_type: ${targetType}`);
   }
   throwIfAborted(signal);
-  if (["top", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules"].includes(targetType)) {
-    const keys: Record<string, string> = {
+  if (["top", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
+    const keys: Record<string, string | string[]> = {
       top: "top.json",
       list_recent: "list/recent.json",
       list_popular: "list/popular.json",
       events_index: "events/index.json",
       search_index: "search-index-lite.json",
-      users_index: "users/index.json",
+      users_index: [USERS_INDEX_OBJECT_KEY, PUBLIC_X_ICON_MAP_OBJECT_KEY],
       recommend: "recommend.json",
       rules: "rules/current.json",
+      youtube_related_blocklist: YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
+      random_video_pool: RANDOM_VIDEO_POOL_OBJECT_KEY,
     };
+    const objectKeys = keys[targetType];
     await reconcileTrackedArtifacts(
       env,
       { targetType, targetId: "global" },
-      [keys[targetType]],
+      Array.isArray(objectKeys) ? objectKeys : [objectKeys],
       20,
       signal,
     );
@@ -1443,6 +1470,155 @@ async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void
     payload,
     "public, max-age=300, stale-while-revalidate=1800",
     { targetType: "users_index", targetId: "global" },
+    signal,
+  );
+
+  const iconMap = buildPublicXIconMapPayloadFromProjection(sources, now);
+  const iconBytes = publicXIconMapByteLength(iconMap);
+  if (iconBytes > PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `users/public-x-icon-map.v1.json exceeds size limit (${iconBytes} > ${PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+  await putJson(
+    env,
+    PUBLIC_X_ICON_MAP_OBJECT_KEY,
+    iconMap,
+    "public, max-age=300, stale-while-revalidate=1800",
+    { targetType: "users_index", targetId: "global" },
+    signal,
+  );
+}
+
+async function rebuildYoutubeRelatedBlocklist(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const result = await env.DB.prepare(
+    `SELECT v.id AS video_id,
+            ym.youtube_privacy_status,
+            ym.youtube_availability_status
+       FROM video_youtube_metadata AS ym
+       INNER JOIN videos AS v ON v.id = ym.video_id
+      WHERE v.visibility_status <> 'voided'
+        AND (
+          ym.youtube_privacy_status = 'private'
+          OR ym.youtube_availability_status IN ('private', 'missing_or_private')
+        )`,
+  ).all<{
+    video_id: string;
+    youtube_privacy_status: string | null;
+    youtube_availability_status: string | null;
+  }>();
+  throwIfAborted(signal);
+
+  const blocked = new Map<string, YoutubeRelatedBlockReason>();
+  for (const row of result.results ?? []) {
+    const id = String(row.video_id ?? "").trim();
+    if (!id) continue;
+    if (
+      row.youtube_privacy_status === "private" ||
+      row.youtube_availability_status === "private"
+    ) {
+      blocked.set(id, "private");
+      continue;
+    }
+    if (row.youtube_availability_status === "missing_or_private") {
+      blocked.set(id, "missing_or_private");
+    }
+  }
+
+  const payload = buildYoutubeRelatedBlocklistPayload(blocked, now);
+  const byteLength = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+  if (byteLength > YOUTUBE_RELATED_BLOCKLIST_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `youtube/related-blocklist.v1.json exceeds size limit (${byteLength} > ${YOUTUBE_RELATED_BLOCKLIST_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+  await putJson(
+    env,
+    YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
+    payload,
+    "public, max-age=300, stale-while-revalidate=1800",
+    { targetType: "youtube_related_blocklist", targetId: "global" },
+    signal,
+  );
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+async function rebuildRandomVideoPool(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const result = await env.DB.prepare(
+    `SELECT v.id, v.title, v.youtube_video_id,
+            v.creator_display_name AS display_name,
+            v.creator_icon_url AS icon_url,
+            v.primary_event_id,
+            v.scheduled_time
+       FROM videos AS v
+      WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+      ORDER BY v.id ASC
+      LIMIT 2000`,
+  ).all<Record<string, unknown>>();
+  throwIfAborted(signal);
+
+  const items = (result.results ?? [])
+    .map((row) => ({
+      id: String(row.id ?? "").trim(),
+      title: String(row.title ?? "").trim(),
+      youtube_video_id:
+        row.youtube_video_id == null
+          ? null
+          : String(row.youtube_video_id).trim() || null,
+      display_name: String(row.display_name ?? "").trim(),
+      icon_url:
+        row.icon_url == null ? null : String(row.icon_url).trim() || null,
+      primary_event_id:
+        row.primary_event_id == null
+          ? null
+          : String(row.primary_event_id).trim() || null,
+      scheduled_time:
+        Number.isFinite(Number(row.scheduled_time))
+          ? Number(row.scheduled_time)
+          : null,
+    }))
+    .filter((item) => item.id && item.title && item.display_name);
+
+  const generationKey = await sha256Hex(
+    buildRandomPoolGenerationMaterial(items),
+  );
+  const payload = {
+    schema_version: RANDOM_VIDEO_POOL_SCHEMA_VERSION,
+    generated_at: now,
+    generation_key: generationKey,
+    items,
+  };
+  const byteLength = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+  if (byteLength > RANDOM_VIDEO_POOL_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `videos/random-pool.v1.json exceeds size limit (${byteLength} > ${RANDOM_VIDEO_POOL_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+  await putJson(
+    env,
+    RANDOM_VIDEO_POOL_OBJECT_KEY,
+    payload,
+    "public, max-age=300, stale-while-revalidate=1800",
+    { targetType: "random_video_pool", targetId: "global" },
     signal,
   );
 }

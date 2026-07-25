@@ -123,6 +123,8 @@ Google Cloud Consoleの日次quotaが標準10,000以外の場合は、`workers/s
 - 401/403/404を同じ認証・宛先のまま繰り返さず、復旧不能なものはdead-letterへ移す。
 - 外部画像proxyは同一キーの同時missを1 fetchへまとめ、ETag/304、negative cache、stale返却を使用する。
 - metadata保存は10件単位のbulk upsertとする。
+- YouTube metadataの`synced_at`は最後にpublic/unlistedとして正常取得した時刻。`failed`時の再同期期限は`updated_at`を使う。
+- private / missing ではview_count・duration・公開時synced_atを上書きしない。適格性変更時と日次整合で`youtube_related_blocklist`を再生成する。
 - スコアは1 SQLで最大150件更新し、作品ごとのUPDATE loopを禁止する。
 - 静的生成は1 invocationで1 targetだけ処理する。
 - JSON生成対象は必ずSQL側の`LIMIT`を持ち、無制限全件取得を行わない。
@@ -130,7 +132,7 @@ Google Cloud Consoleの日次quotaが標準10,000以外の場合は、`workers/s
 
 YouTube metadata同期だけの理論最大は、15分ごとに通常4 unitsとして384 units/day、全batchで1回再試行した場合でも768 units/dayである。残り予算は他のYouTube API処理と共有し、合計8,000 units/dayを超えない。
 
-静的再生成queueのcanonical targetは`top`、`events_index`、`event`、`video`、`user`、`users_index`、`list_recent`、`list_popular`、`search_index`、`recommend`、`rules`だけである。旧別名・未知値のruntime正規化やno-op成功処理は行わず、有限retry後に`failed`として運用画面へ残す。
+静的再生成queueのcanonical targetは`top`、`events_index`、`event`、`video`、`user`、`users_index`、`list_recent`、`list_popular`、`search_index`、`recommend`、`rules`、`youtube_related_blocklist`、`random_video_pool`だけである。旧別名・未知値のruntime正規化やno-op成功処理は行わず、有限retry後に`failed`として運用画面へ残す。
 
 `content-jobs`（json-generator）は Queue Consumer で wake 駆動し、Recovery Cron は1時間ごとに failed/expired 回復と pending 処理を行う。`src/lib/operationMode/policy.ts`の`STATIC_REBUILD_ITEMS_PER_RUN`と`workers/json-generator/queuePolicy.ts`の`MAX_QUEUE_ITEMS_PER_RUN`は同じ値（1）を正本とする。
 

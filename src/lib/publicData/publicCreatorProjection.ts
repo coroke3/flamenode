@@ -221,7 +221,8 @@ export async function loadPublicCreatorProjectionSources(
                PARTITION BY v.creator_x_user_id
                ORDER BY CASE WHEN v.collaboration_type = 'individual' THEN 0 ELSE 1 END,
                         v.scheduled_time DESC,
-                        v.created_at DESC
+                        v.created_at DESC,
+                        v.id DESC
              ) AS row_num
            FROM videos AS v
            WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}

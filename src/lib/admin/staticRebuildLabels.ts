@@ -12,6 +12,8 @@ const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
   search_index: "検索インデックス",
   recommend: "おすすめページ",
   rules: "利用規約",
+  youtube_related_blocklist: "YouTube関連blocklist",
+  random_video_pool: "関連ランダムプール",
 };
 
 const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
@@ -26,6 +28,8 @@ const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
   search_index: "global など固定ID",
   recommend: "global など固定ID",
   rules: "global など固定ID",
+  youtube_related_blocklist: "global など固定ID",
+  random_video_pool: "global など固定ID",
 };
 
 const STATUS_LABELS: Record<string, string> = {

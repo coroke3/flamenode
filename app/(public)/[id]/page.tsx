@@ -44,6 +44,15 @@ import {
   setPublicRequestRoute,
 } from "@/lib/publicData/loader";
 import { buildPublicVideoViewModelFromStatic } from "@/lib/publicData/publicVideoDetailViewModel";
+import {
+  loadPublicXIconMapOptional,
+  loadYoutubeRelatedBlocklist,
+} from "@/lib/publicData/staticSharedInputsLoader";
+import {
+  publicXIconEntriesToMap,
+  resolveProjectedIcon,
+  type PublicXIconEntry,
+} from "@/lib/publicData/publicIconProjection";
 
 export const dynamic = "force-dynamic";
 
@@ -104,12 +113,19 @@ export default async function VideoDetailPage({
           ?.title ?? null,
     });
     logPublicRequestMetrics();
+    const [blocklist, iconMapPayload] = await Promise.all([
+      loadYoutubeRelatedBlocklist(),
+      loadPublicXIconMapOptional(),
+    ]);
     return (
       <StaticVideoDetailView
         detail={staticProbe.data}
         rawId={rawId}
         playlist={playlist}
         overlay={overlay}
+        relatedBlocklistStatus={blocklist.status}
+        relatedBlockedIds={blocklist.value.blockedIds}
+        iconMap={publicXIconEntriesToMap(iconMapPayload)}
       />
     );
   }
@@ -307,13 +323,22 @@ function StaticVideoDetailView({
   rawId,
   playlist = "",
   overlay,
+  relatedBlocklistStatus = "unavailable",
+  relatedBlockedIds,
+  iconMap,
 }: {
   detail: StaticVideoDetail;
   rawId: string;
   playlist?: string;
   overlay?: VideoViewerOverlay | null;
+  relatedBlocklistStatus?: "fresh" | "stale" | "unavailable";
+  relatedBlockedIds?: ReadonlySet<string>;
+  iconMap?: Map<string, PublicXIconEntry>;
 }): React.ReactElement {
-  const vm = buildPublicVideoViewModelFromStatic(detail);
+  const vm = buildPublicVideoViewModelFromStatic(detail, {
+    relatedUnavailable: relatedBlocklistStatus === "unavailable",
+    relatedBlockedIds,
+  });
   const { video } = vm;
   if (video.visibility_status !== "public") {
     notFound();
@@ -667,7 +692,11 @@ function StaticVideoDetailView({
                       role: member.role_label,
                       comment: null,
                       x_name: null,
-                      icon_url: null,
+                      icon_url: resolveProjectedIcon({
+                        xUserId: member.x_user_id,
+                        iconMap,
+                        legacyIconUrl: null,
+                      }),
                     }))}
                     memberChapters={vm.memberChapters.map((chapter) => ({
                       id: chapter.id,

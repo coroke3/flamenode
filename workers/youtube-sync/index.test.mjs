@@ -97,6 +97,31 @@ test("scheduled再同期はpermanent失敗を両queryから除外する", () => 
   );
 });
 
+test("通常同期はblockedを除外しfailed期限はupdated_atを使う", () => {
+  assert.match(source, /NOT_BLOCKED_FOR_RELATED_SQL/);
+  assert.match(source, /SYNC_ELIGIBILITY_TIMESTAMP_SQL/);
+  assert.match(source, /ym\.sync_status = 'failed' THEN ym\.updated_at/);
+  assert.match(source, /selectBlockedRecheckRows/);
+  assert.match(source, /blocked_recheck_only/);
+  assert.match(source, /related_eligibility_changed_video_ids/);
+  assert.match(
+    source,
+    /excluded\.youtube_privacy_status IN \('public', 'unlisted'\)/,
+  );
+});
+
+test("missing writeはavailabilityだけ変えmetricsを上書きしないSQLを持つ", () => {
+  assert.match(source, /availabilityStatus: "missing_or_private"/);
+  assert.match(
+    source,
+    /WHEN excluded\.youtube_availability_status IS NOT NULL/,
+  );
+  assert.match(
+    source,
+    /synced_at = CASE[\s\S]*IN \('public', 'unlisted'\)/,
+  );
+});
+
 test("scheduled_only はpermanent failed行を再同期しない", async () => {
   const sqlCalls = [];
   let fetchCalls = 0;

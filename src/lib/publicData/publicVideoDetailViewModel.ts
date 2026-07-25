@@ -26,11 +26,21 @@ export interface PublicVideoDetailViewModel {
 
 export function buildPublicVideoViewModelFromStatic(
   detail: StaticVideoDetail,
+  options?: {
+    relatedBlockedIds?: ReadonlySet<string> | null;
+    relatedUnavailable?: boolean;
+  },
 ): PublicVideoDetailViewModel {
   const primaryEvent =
     detail.publicEvents.find((event) => event.id === detail.video.primary_event_id) ??
     detail.publicEvents[0] ??
     null;
+
+  const relatedVideos = options?.relatedUnavailable
+    ? []
+    : detail.relatedVideos
+        .filter((video) => !options?.relatedBlockedIds?.has(video.id))
+        .map(toVideoCardData);
 
   return {
     generatedAt: detail.generatedAt,
@@ -48,7 +58,7 @@ export function buildPublicVideoViewModelFromStatic(
     publicMembers: detail.publicMembers,
     publicChapters: detail.publicChapters,
     memberChapters: detail.memberChapters,
-    relatedVideos: detail.relatedVideos.map(toVideoCardData),
+    relatedVideos,
   };
 }
 

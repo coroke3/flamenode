@@ -27,7 +27,11 @@ export interface Env extends YoutubeQuotaEnv {
   YOUTUBE_API_KEY?: string;
 }
 
-export type SyncBatchMode = "all" | "pending_only" | "scheduled_only";
+export type SyncBatchMode =
+  | "all"
+  | "pending_only"
+  | "scheduled_only"
+  | "blocked_recheck_only";
 
 export type SyncBatchOptions = {
   mode?: SyncBatchMode;
@@ -47,6 +51,8 @@ export interface SyncBatchResult {
   quota_stopped: boolean;
   quota_stop_reason: string | null;
   changed_video_ids: string[];
+  /** related表示適格性が変わった動画（blocklist再生成トリガ）。 */
+  related_eligibility_changed_video_ids: string[];
   has_more_pending: boolean;
 }
 
@@ -62,8 +68,9 @@ type MetadataWrite = {
   videoId: string;
   privacyStatus: string | null;
   availabilityStatus: string | null;
-  durationSeconds: number;
-  viewCount: number;
+  /** public/unlisted成功時のみ非null。private/missing/transientはnullで既存値を維持。 */
+  durationSeconds: number | null;
+  viewCount: number | null;
   syncStatus: "synced" | "failed";
   syncError: string | null;
 };
@@ -93,6 +100,20 @@ export const YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN =
 const ACTIVE_SYNC_INTERVAL_SEC = 60 * 60;
 const DEFAULT_SYNC_INTERVAL_SEC = 24 * 60 * 60;
 const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
+/** blocked(private/missing)の復旧確認間隔。通常同期とは別予算。 */
+const BLOCKED_RECHECK_INTERVAL_SEC = 7 * 24 * 60 * 60;
+export const BLOCKED_RECHECK_MAX_VIDEOS_PER_RUN = 10;
+/** synced_at: 最後にpublic/unlistedとして正常取得した時刻。failed時の期限はupdated_at。 */
+const SYNC_ELIGIBILITY_TIMESTAMP_SQL = `COALESCE(
+  CASE
+    WHEN ym.sync_status = 'failed' THEN ym.updated_at
+    ELSE ym.synced_at
+  END,
+  0
+)`;
+const NOT_BLOCKED_FOR_RELATED_SQL = `COALESCE(ym.youtube_privacy_status, '') <> 'private'
+          AND COALESCE(ym.youtube_availability_status, '')
+              NOT IN ('private', 'missing_or_private')`;
 /** D1の1 query最大100 bindings未満になるよう、9列 x 10行（90 bindings）で固定する。 */
 const BULK_UPSERT_ROWS = 10;
 const YOUTUBE_QUOTA_COOLDOWN_SEC = 60 * 60;
@@ -329,7 +350,7 @@ export async function selectPendingSyncRows(
   );
 }
 
-/** 開催中・通常期限のみ（pending は含めない）。 */
+/** 開催中・通常期限のみ（pending / blocked は含めない）。 */
 async function selectScheduledSyncRows(
   env: Env,
   now: number,
@@ -354,14 +375,14 @@ async function selectScheduledSyncRows(
           AND v.youtube_video_id IS NOT NULL
           AND v.youtube_video_id <> ''
           AND v.visibility_status <> 'voided'
+          AND ${NOT_BLOCKED_FOR_RELATED_SQL}
           AND ym.sync_status IN ('synced', 'failed')
           AND NOT (
             ym.sync_status = 'failed'
             AND ym.sync_error LIKE 'permanent:%'
           )
-          AND ym.synced_at IS NOT NULL
-          AND ym.synced_at <= ?1 - ?2
-        ORDER BY ym.synced_at ASC, v.id ASC
+          AND ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} <= ?1 - ?2
+        ORDER BY ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} ASC, v.id ASC
         LIMIT ?4`,
       [now, ACTIVE_SYNC_INTERVAL_SEC, ACTIVE_EVENT_GRACE_SEC, limit],
       signal,
@@ -382,12 +403,12 @@ async function selectScheduledSyncRows(
               ym.sync_status = 'failed'
               AND ym.sync_error LIKE 'permanent:%'
             )
-            AND ym.synced_at IS NOT NULL
-            AND ym.synced_at <= ?1 - ?2
+            AND ${NOT_BLOCKED_FOR_RELATED_SQL}
+            AND ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} <= ?1 - ?2
             AND v.youtube_video_id IS NOT NULL
             AND v.youtube_video_id <> ''
             AND v.visibility_status <> 'voided'
-          ORDER BY ym.synced_at ASC, v.id ASC
+          ORDER BY ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} ASC, v.id ASC
           LIMIT ?3`,
         [now, DEFAULT_SYNC_INTERVAL_SEC, remaining],
         signal,
@@ -396,6 +417,40 @@ async function selectScheduledSyncRows(
   }
 
   return [...selected.values()];
+}
+
+/**
+ * private / missing_or_private の週次復旧確認。
+ * 通常同期とは別予算。sync-jobs が1日1回呼び出す想定。
+ */
+export async function selectBlockedRecheckRows(
+  env: Env,
+  now: number,
+  limit: number = BLOCKED_RECHECK_MAX_VIDEOS_PER_RUN,
+  signal?: AbortSignal,
+): Promise<SyncRow[]> {
+  signal?.throwIfAborted();
+  return querySyncRows(
+    env,
+    `SELECT v.id, v.youtube_video_id
+       FROM video_youtube_metadata ym
+       INNER JOIN videos v ON v.id = ym.video_id
+      WHERE v.youtube_video_id IS NOT NULL
+        AND v.youtube_video_id <> ''
+        AND v.visibility_status <> 'voided'
+        AND (
+          ym.youtube_privacy_status = 'private'
+          OR ym.youtube_availability_status IN (
+            'private',
+            'missing_or_private'
+          )
+        )
+        AND ym.updated_at <= ?1 - ?2
+      ORDER BY ym.updated_at ASC, v.id ASC
+      LIMIT ?3`,
+    [now, BLOCKED_RECHECK_INTERVAL_SEC, limit],
+    signal,
+  );
 }
 
 /** pending・開催中・通常期限をindex queryへ分け、合計200件まで取得する。 */
@@ -411,6 +466,10 @@ async function selectSyncRows(
 
   if (mode === "pending_only") {
     return selectPendingSyncRows(env, maxVideos, signal);
+  }
+
+  if (mode === "blocked_recheck_only") {
+    return selectBlockedRecheckRows(env, now, maxVideos, signal);
   }
 
   if (mode === "scheduled_only") {
@@ -501,12 +560,67 @@ function metadataValueChanged(
     return true;
   }
   if (write.syncStatus !== "synced") return false;
+  if (
+    write.privacyStatus !== "public" &&
+    write.privacyStatus !== "unlisted"
+  ) {
+    return false;
+  }
   return (
-    Number(before.view_count ?? 0) !== write.viewCount
-    || Number(before.duration_seconds ?? 0) !== write.durationSeconds
+    (write.viewCount != null &&
+      Number(before.view_count ?? 0) !== write.viewCount)
+    || (write.durationSeconds != null &&
+      Number(before.duration_seconds ?? 0) !== write.durationSeconds)
     || (before.youtube_privacy_status ?? null) !== write.privacyStatus
     || (before.youtube_availability_status ?? null) !== write.availabilityStatus
   );
+}
+
+function isBlockedForRelated(args: {
+  privacyStatus: string | null | undefined;
+  availabilityStatus: string | null | undefined;
+}): boolean {
+  return (
+    args.privacyStatus === "private"
+    || args.availabilityStatus === "private"
+    || args.availabilityStatus === "missing_or_private"
+  );
+}
+
+/** raw writeではなく、永続化後の実効privacy/availabilityで適格性を比較する。 */
+function resolveEffectiveAvailability(
+  before: ExistingMetadataRow | undefined,
+  write: MetadataWrite,
+): {
+  privacyStatus: string | null;
+  availabilityStatus: string | null;
+} {
+  return {
+    privacyStatus:
+      write.privacyStatus ?? before?.youtube_privacy_status ?? null,
+    availabilityStatus:
+      write.availabilityStatus ??
+      before?.youtube_availability_status ??
+      null,
+  };
+}
+
+function collectRelatedEligibilityChangedVideoIds(
+  writes: MetadataWrite[],
+  existing: Map<string, ExistingMetadataRow>,
+): string[] {
+  const changed: string[] = [];
+  for (const write of writes) {
+    const before = existing.get(write.videoId);
+    const after = resolveEffectiveAvailability(before, write);
+    const blockedBefore = isBlockedForRelated({
+      privacyStatus: before?.youtube_privacy_status,
+      availabilityStatus: before?.youtube_availability_status,
+    });
+    const blockedAfter = isBlockedForRelated(after);
+    if (blockedBefore !== blockedAfter) changed.push(write.videoId);
+  }
+  return changed;
 }
 
 function collectChangedVideoIds(
@@ -529,17 +643,29 @@ function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): 
       return {
         videoId: row.id,
         privacyStatus: null,
-        availabilityStatus: null,
-        durationSeconds: 0,
-        viewCount: 0,
+        availabilityStatus: "missing_or_private",
+        durationSeconds: null,
+        viewCount: null,
         syncStatus: "failed" as const,
         syncError: "permanent:youtube_video_missing_or_private",
       };
     }
+    const privacyStatus = item.status?.privacyStatus ?? null;
+    if (privacyStatus === "private") {
+      return {
+        videoId: row.id,
+        privacyStatus: "private",
+        availabilityStatus: "private",
+        durationSeconds: null,
+        viewCount: null,
+        syncStatus: "synced" as const,
+        syncError: null,
+      };
+    }
     return {
       videoId: row.id,
-      privacyStatus: item.status?.privacyStatus ?? null,
-      availabilityStatus: item.status?.privacyStatus ?? null,
+      privacyStatus,
+      availabilityStatus: privacyStatus,
       durationSeconds: parseDuration(item.contentDetails?.duration ?? ""),
       viewCount: Number(item.statistics?.viewCount ?? 0),
       syncStatus: "synced" as const,
@@ -559,8 +685,8 @@ function buildChunkFailureWrites(
     videoId: row.id,
     privacyStatus: null,
     availabilityStatus: null,
-    durationSeconds: 0,
-    viewCount: 0,
+    durationSeconds: null,
+    viewCount: null,
     syncStatus: "failed" as const,
     syncError: message,
   }));
@@ -587,7 +713,8 @@ async function persistMetadataBatch(
       row.privacyStatus,
       row.availabilityStatus,
       row.durationSeconds,
-      row.viewCount,
+      // INSERT時だけNOT NULL制約を満たす。既存行はCASEで維持する。
+      row.viewCount ?? 0,
       now,
       row.syncStatus,
       row.syncError,
@@ -601,15 +728,35 @@ async function persistMetadataBatch(
            synced_at, sync_status, sync_error, updated_at
          ) VALUES ${placeholders}
          ON CONFLICT(video_id) DO UPDATE SET
-           youtube_privacy_status = CASE WHEN excluded.sync_status = 'synced'
-             THEN excluded.youtube_privacy_status ELSE video_youtube_metadata.youtube_privacy_status END,
-           youtube_availability_status = CASE WHEN excluded.sync_status = 'synced'
-             THEN excluded.youtube_availability_status ELSE video_youtube_metadata.youtube_availability_status END,
-           duration_seconds = CASE WHEN excluded.sync_status = 'synced'
-             THEN excluded.duration_seconds ELSE video_youtube_metadata.duration_seconds END,
-           view_count = CASE WHEN excluded.sync_status = 'synced'
-             THEN excluded.view_count ELSE video_youtube_metadata.view_count END,
-           synced_at = excluded.synced_at,
+           youtube_privacy_status = CASE
+             WHEN excluded.youtube_privacy_status IS NOT NULL
+               THEN excluded.youtube_privacy_status
+             ELSE video_youtube_metadata.youtube_privacy_status
+           END,
+           youtube_availability_status = CASE
+             WHEN excluded.youtube_availability_status IS NOT NULL
+               THEN excluded.youtube_availability_status
+             ELSE video_youtube_metadata.youtube_availability_status
+           END,
+           duration_seconds = CASE
+             WHEN excluded.sync_status = 'synced'
+              AND excluded.youtube_privacy_status IN ('public', 'unlisted')
+              AND excluded.duration_seconds IS NOT NULL
+               THEN excluded.duration_seconds
+             ELSE video_youtube_metadata.duration_seconds
+           END,
+           view_count = CASE
+             WHEN excluded.sync_status = 'synced'
+              AND excluded.youtube_privacy_status IN ('public', 'unlisted')
+               THEN excluded.view_count
+             ELSE video_youtube_metadata.view_count
+           END,
+           synced_at = CASE
+             WHEN excluded.sync_status = 'synced'
+              AND excluded.youtube_privacy_status IN ('public', 'unlisted')
+               THEN excluded.synced_at
+             ELSE video_youtube_metadata.synced_at
+           END,
            sync_status = excluded.sync_status,
            sync_error = excluded.sync_error,
            updated_at = excluded.updated_at`,
@@ -651,6 +798,14 @@ function resolveSyncBatchLimits(options: SyncBatchOptions = {}): {
       includePending: false,
     };
   }
+  if (mode === "blocked_recheck_only") {
+    return {
+      mode,
+      maxVideos: options.maxVideos ?? BLOCKED_RECHECK_MAX_VIDEOS_PER_RUN,
+      maxApiBatches: options.maxApiBatches ?? 1,
+      includePending: false,
+    };
+  }
   return {
     mode,
     maxVideos: options.maxVideos ?? YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
@@ -670,6 +825,7 @@ function emptySyncBatchResult(
     quota_stopped: false,
     quota_stop_reason: null,
     changed_video_ids: [],
+    related_eligibility_changed_video_ids: [],
     has_more_pending: false,
     ...result,
     ...extra,
@@ -816,6 +972,11 @@ export async function syncBatch(
 
     signal?.throwIfAborted();
     const changedVideoIds = collectChangedVideoIds(committedWrites, existingMetadata);
+    const relatedEligibilityChangedVideoIds =
+      collectRelatedEligibilityChangedVideoIds(
+        committedWrites,
+        existingMetadata,
+      );
     let hasMorePending = false;
     if (limits.mode === "pending_only") {
       const remainingPending = await countPendingSyncRows(env, signal);
@@ -833,6 +994,8 @@ export async function syncBatch(
         d1_changes: metadataD1Changes,
         retry_count: Math.max(0, budget.used - startedChunks),
         changed_video_ids: changedVideoIds,
+        related_eligibility_changed_video_ids:
+          relatedEligibilityChangedVideoIds,
         has_more_pending: hasMorePending,
         quota_stopped: quotaStopped,
         quota_stop_reason: quotaStopReason,
@@ -842,6 +1005,11 @@ export async function syncBatch(
   } catch (error) {
     if (isYoutubeQuotaError(error)) {
       const changedVideoIds = collectChangedVideoIds(committedWrites, existingMetadata);
+      const relatedEligibilityChangedVideoIds =
+        collectRelatedEligibilityChangedVideoIds(
+          committedWrites,
+          existingMetadata,
+        );
       reportedResult = empty(
         {
           processed: committedWrites.length,
@@ -853,6 +1021,8 @@ export async function syncBatch(
           d1_changes: metadataD1Changes,
           retry_count: Math.max(0, budget.used - startedChunks),
           changed_video_ids: changedVideoIds,
+          related_eligibility_changed_video_ids:
+            relatedEligibilityChangedVideoIds,
           quota_stopped: true,
           quota_stop_reason: "youtube_api_error",
         },

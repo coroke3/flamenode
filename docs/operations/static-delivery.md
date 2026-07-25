@@ -36,7 +36,9 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 
 静的再生成は `content-jobs` が **1 target / 15分** で処理する。表示用ポリシー正本は `src/lib/operationMode/policy.ts` の `STATIC_REBUILD_ITEMS_PER_RUN`（= `workers/json-generator/queuePolicy.ts` の `MAX_QUEUE_ITEMS_PER_RUN`）と一致させる。
 
-Creator Projection（`workers/json-generator`）は公開用カード・詳細 JSON を R2 に書き、一覧は `list/recent.json` / `list/popular.json`、検索は `search-index-lite.json`、クリエイター索引は `users/index.json` を正本とする。トップの hero 用 `slot_stats` は対象イベント最大 3 件に限定する。
+Creator Projection（`workers/json-generator`）は公開用カード・詳細 JSON を R2 に書き、一覧は `list/recent.json` / `list/popular.json`、検索は `search-index-lite.json`、クリエイター索引は `users/index.json` を正本とする。`users_index` 再生成時に `users/public-x-icon-map.v1.json`（entries形式）も同時出力する。トップの hero 用 `slot_stats` は対象イベント最大 3 件に限定する。
+
+関連動画の非公開除外は `youtube/related-blocklist.v1.json` を用いる。読み込みは fresh Cache → R2 → stale Cache（最大24h）→ unavailable。unavailable時は関連動画セクションを非表示にし、空blocklistへ倒さない。
 
 主な公開 artifact:
 
