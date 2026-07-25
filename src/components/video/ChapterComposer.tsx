@@ -27,6 +27,14 @@ interface ChapterComposerProps {
    * 編集ページ側のチャプター一括登録パネル用。動画詳細ページからは false (既定)。
    */
   bulkOnly?: boolean;
+  initialTime?: number;
+  active?: boolean;
+  presentation?: "card" | "inline-sheet";
+  onCancel?: () => void;
+  onSuccess?: (chapter: {
+    chapterTime: number;
+    label: string;
+  }) => void;
 }
 
 function parseTimeInput(raw: string): number {
@@ -48,6 +56,26 @@ function parseTimeInput(raw: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function formatTimeInput(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return [
+      String(hours),
+      String(minutes).padStart(2, "0"),
+      String(remainingSeconds).padStart(2, "0"),
+    ].join(":");
+  }
+
+  return [
+    String(minutes),
+    String(remainingSeconds).padStart(2, "0"),
+  ].join(":");
+}
+
 /**
  * チャプター投稿フォーム。動画詳細ページ右レール下に置く想定。
  */
@@ -57,10 +85,18 @@ export function ChapterComposer({
   settingsHref,
   canBulk = false,
   bulkOnly = false,
+  initialTime = 0,
+  active = true,
+  presentation = "card",
+  onCancel,
+  onSuccess,
 }: ChapterComposerProps): React.ReactElement {
+  const isInlineSheet = presentation === "inline-sheet";
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
-  const [timeStr, setTimeStr] = React.useState("0:00");
+  const [timeStr, setTimeStr] = React.useState(() =>
+    formatTimeInput(initialTime),
+  );
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
   const [isPublic, setIsPublic] = React.useState(true);
@@ -72,6 +108,12 @@ export function ChapterComposer({
   const [bulkBusy, startBulkTransition] = React.useTransition();
   const [bulkMessage, setBulkMessage] = React.useState<string | null>(null);
   const [bulkErrors, setBulkErrors] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    if (!isInlineSheet || !active) return;
+
+    setTimeStr(formatTimeInput(initialTime));
+  }, [active, initialTime, isInlineSheet]);
 
   const submitBulk = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -126,10 +168,18 @@ export function ChapterComposer({
         setError(r.message ?? "投稿に失敗しました。");
         return;
       }
+      const submittedLabel = label.trim();
+
       setLabel("");
       setNote("");
-      setTimeStr("0:00");
+      setTimeStr(formatTimeInput(seconds));
+
       router.refresh();
+
+      onSuccess?.({
+        chapterTime: seconds,
+        label: submittedLabel,
+      });
     });
   };
 
@@ -179,7 +229,7 @@ export function ChapterComposer({
         padding: 12,
       }}
     >
-      {!bulkOnly ? (
+      {!bulkOnly && !isInlineSheet ? (
         <header
           style={{
             display: "flex",
@@ -206,7 +256,7 @@ export function ChapterComposer({
           </strong>
         </header>
       )}
-      {open && !bulkOnly ? (
+      {(isInlineSheet || open) && !bulkOnly ? (
         <form
           onSubmit={onSubmit}
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
@@ -228,7 +278,11 @@ export function ChapterComposer({
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="ラベル (例: サビ前 / 振り返りメモ)"
+            placeholder={
+              isInlineSheet
+                ? "タイトル（例：サビの入り）"
+                : "ラベル (例: サビ前 / 振り返りメモ)"
+            }
             className="fn-input"
             maxLength={120}
             required
@@ -236,7 +290,11 @@ export function ChapterComposer({
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="補足メモ (任意, 1000文字以内)"
+            placeholder={
+              isInlineSheet
+                ? "コメント"
+                : "補足メモ (任意, 1000文字以内)"
+            }
             className="fn-input"
             rows={2}
             maxLength={1000}
@@ -274,14 +332,32 @@ export function ChapterComposer({
               <Icon name="warning" size={11} aria-hidden /> {error}
             </p>
           ) : null}
-          <button
-            type="submit"
-            className="fn-btn fn-btn-primary fn-btn-sm"
-            disabled={busy}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isInlineSheet ? "1fr 1fr" : "1fr",
+              gap: 8,
+            }}
           >
-            <Icon name="plus" size={11} aria-hidden />
-            {busy ? "送信中…" : "投稿"}
-          </button>
+            {isInlineSheet ? (
+              <button
+                type="button"
+                className="fn-btn fn-btn-ghost"
+                onClick={onCancel}
+                disabled={busy}
+              >
+                キャンセル
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              className="fn-btn fn-btn-primary"
+              disabled={busy}
+            >
+              <Icon name="plus" size={11} aria-hidden />
+              {busy ? "送信中…" : "投稿"}
+            </button>
+          </div>
         </form>
       ) : null}
 

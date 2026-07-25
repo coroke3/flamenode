@@ -6,7 +6,8 @@ import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import { ChapterCommentItem } from "./ChapterCommentItem";
 import { findActiveChapterId } from "./chapterPlayback";
-import { seekToTime, subscribePlayerTime } from "./playerBridge";
+import { seekToTime } from "./playerBridge";
+import { usePlayerTime } from "./usePlayerTime";
 
 export interface ChapterEntry {
   id: string;
@@ -23,6 +24,7 @@ interface ChapterTabsProps {
   chapters: ChapterEntry[];
   duration?: number | null;
   onSeek?: (time: number) => void;
+  presentation?: "rail" | "responsive";
 }
 
 const FOLLOW_IDLE_MS = 8_000;
@@ -46,9 +48,10 @@ export function ChapterTabs({
   chapters,
   duration,
   onSeek = seekToTime,
+  presentation = "rail",
 }: ChapterTabsProps): React.ReactElement {
   const rootRef = React.useRef<HTMLDivElement>(null);
-  const [currentTime, setCurrentTime] = React.useState(0);
+  const currentTime = usePlayerTime();
   const [followPlayback, setFollowPlayback] = React.useState(true);
   const idleTimerRef = React.useRef<number | null>(null);
   const lastScrolledChapterIdRef = React.useRef<string | null>(null);
@@ -87,8 +90,6 @@ export function ChapterTabs({
     },
     [onSeek, resumeFollow],
   );
-
-  React.useEffect(() => subscribePlayerTime(setCurrentTime), []);
 
   React.useEffect(() => {
     const root = rootRef.current;
@@ -135,13 +136,19 @@ export function ChapterTabs({
   React.useEffect(() => () => clearIdleTimer(), [clearIdleTimer]);
 
   return (
-    <div ref={rootRef} className={styles.root}>
+    <div
+      ref={rootRef}
+      className={styles.root}
+      data-presentation={presentation}
+    >
       <div className={styles.tabs}>
-        <TabButton
-          icon="chapter"
-          label="チャプターコメント"
-          count={chapters.length}
-        />
+        {presentation !== "responsive" ? (
+          <TabButton
+            icon="chapter"
+            label="チャプターコメント"
+            count={chapters.length}
+          />
+        ) : null}
         {!followPlayback ? (
           <button
             type="button"

@@ -64,6 +64,7 @@ export function ChapterCommentItem({
   return (
     <div
       data-chapter-id={chapter.id}
+      data-chapter-time={Math.floor(chapter.chapter_time)}
       className={cn(
         styles.item,
         outOfRange && styles.outOfRange,

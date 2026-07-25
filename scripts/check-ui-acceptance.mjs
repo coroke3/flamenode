@@ -190,7 +190,7 @@ requireAll("src/components/layout/ConsoleDrawer.tsx", [
 ]);
 
 requireAll("src/components/video/ChapterTabs.tsx", [
-  [/subscribePlayerTime/, "再生時刻の購読がありません。"],
+  [/usePlayerTime/, "再生時刻の購読がありません。"],
   [/scrollIntoView/, "アクティブチャプターへの自動スクロールがありません。"],
   [/followPlayback|再生に追従/, "再生追従の切替がありません。"],
   [/findActiveChapterId/, "アクティブチャプター判定がありません。"],
@@ -217,6 +217,57 @@ requireMatch(
   "admin/manage共通shellになっていません。",
 );
 
+const videoDetailPage = read("app/(public)/[id]/page.tsx");
+if (videoDetailPage) {
+  if (!/VideoUtilityDock/.test(videoDetailPage)) {
+    errors.push(
+      "app/(public)/[id]/page.tsx: VideoUtilityDock の import がありません。",
+    );
+  }
+  if (/from "@\/components\/video\/ChapterTabs"/.test(videoDetailPage)) {
+    errors.push(
+      "app/(public)/[id]/page.tsx: ChapterTabs を直接 import しています。",
+    );
+  }
+  if (/from "@\/components\/video\/ChapterComposer"/.test(videoDetailPage)) {
+    errors.push(
+      "app/(public)/[id]/page.tsx: ChapterComposer を直接 import しています。",
+    );
+  }
+  if (/from "@\/components\/video\/PlaylistRail"/.test(videoDetailPage)) {
+    errors.push(
+      "app/(public)/[id]/page.tsx: PlaylistRail を直接 import しています。",
+    );
+  }
+  if (!/data-video-player-boundary/.test(videoDetailPage)) {
+    errors.push(
+      "app/(public)/[id]/page.tsx: data-video-player-boundary がありません。",
+    );
+  }
+  if (/fn-vd-login-panel/.test(videoDetailPage)) {
+    errors.push(
+      "app/(public)/[id]/page.tsx: 旧ログインパネルが残っています。",
+    );
+  }
+}
+
+requireAll("src/components/video/VideoUtilityDock.tsx", [
+  [/video-utility-playlist/, "再生リストパネル ID がありません。"],
+  [/video-utility-chapters/, "チャプターパネル ID がありません。"],
+  [/ChapterCommentPanel/, "ChapterCommentPanel が集約されていません。"],
+  [/icon="list"/, "再生リストツールバーボタンがありません。"],
+  [/icon="chapter"/, "チャプターツールバーボタンがありません。"],
+  [/pushState/, "モバイルパネル用 history.pushState がありません。"],
+  [/popstate/, "popstate でパネルを閉じる処理がありません。"],
+  [/--fn-video-player-bottom/, "プレイヤー下端 CSS 変数の更新がありません。"],
+]);
+
+requireMatch(
+  "src/components/video/ChapterCommentItem.tsx",
+  /data-chapter-time=/,
+  "投稿後スクロール用 data-chapter-time がありません。",
+);
+
 const requiredWidths = [360, 390, 430, 640, 768, 1024, 1280, 1440, 1920];
 const acceptanceDoc = read("docs/operations/ui-acceptance.md");
 for (const width of requiredWidths) {
@@ -230,4 +281,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log("[check:ui-acceptance] OK: entry, posting, lists, theme, console drawer, ChapterTabs, Shelf, and breakpoint contracts are present.");
+console.log("[check:ui-acceptance] OK: entry, posting, lists, theme, console drawer, ChapterTabs, video detail dock, Shelf, and breakpoint contracts are present.");

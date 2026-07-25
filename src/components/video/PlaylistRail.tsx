@@ -21,6 +21,7 @@ interface PlaylistRailProps {
   items: PlaylistEntry[];
   currentId: string;
   playlistId?: string;
+  presentation?: "rail" | "responsive";
 }
 
 const AUTO_NEXT_KEY = "fn-playlist-autonext";
@@ -45,6 +46,7 @@ export function PlaylistRail({
   items,
   currentId,
   playlistId,
+  presentation = "rail",
 }: PlaylistRailProps): React.ReactElement | null {
   const router = useRouter();
   const [autoNext, setAutoNext] = React.useState(false);
@@ -142,7 +144,11 @@ export function PlaylistRail({
   if (items.length === 0) return null;
 
   return (
-    <section className={styles.root} aria-label={label}>
+    <section
+      className={styles.root}
+      data-presentation={presentation}
+      aria-label={label}
+    >
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>PLAYLIST</p>
