@@ -1,8 +1,8 @@
 # FlameNode
 
 > Status: Active
-> Last verified: 2026-07-21
-> Verified against commit: `47e6cee`
+> Last verified: 2026-07-25
+> Verified against commit: `dc46eefa`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `docs/README.md`, `package.json`
 
 YouTube埋め込みを使い、イベント参加、枠確保、投稿審査、上映、アーカイブを一体で扱うCloudflareネイティブな動画プラットフォーム。
@@ -25,7 +25,7 @@ YouTube埋め込みを使い、イベント参加、枠確保、投稿審査、�
 | Web | Next.js 15 App Router、React 19、TypeScript |
 | Hosting | Cloudflare Workers + Workers Static Assets + `@opennextjs/cloudflare` |
 | Data | D1 + Drizzle ORM、R2、KV |
-| Background | Cron Worker 3本: `fast-jobs` / `content-jobs` / `sync-jobs` |
+| Background | Queue 6本（wake 3 + DLQ 3）+ Recovery Cron 3本: `fast-jobs` / `content-jobs` / `sync-jobs` |
 | CI/CD | Cloudflare Workers Builds。`main`の単一BuildからWeb→Cron 3本を固定順deploy |
 | Auth | Auth.js v5 + Discord OAuth |
 | UI | CSS Modules + CSS custom properties。Tailwind不使用 |

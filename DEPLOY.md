@@ -1,11 +1,11 @@
 # FlameNode デプロイ手順書
 
 > Status: Active
-> Last verified: 2026-07-23
-> Verified against commit: `630244ce`
+> Last verified: 2026-07-25
+> Verified against commit: `dc46eefa`
 > Source of truth: `package.json`, `scripts/cloudflare-*.mjs`, `wrangler.toml`, `workers/*/wrangler.toml`
 
-初回デプロイ準備の横断チェックリストは [`docs/operations/deploy-setup-report.md`](./docs/operations/deploy-setup-report.md) を参照する。
+**AI:** 通常は §1 固定構成と §3–4（Build / Runtime Variables）だけ。初回準備チェックリストは [`docs/operations/deploy-setup-report.md`](./docs/operations/deploy-setup-report.md)。実 Cloudflare / Remote D1 / production secret は明示依頼時のみ。
 
 FlameNodeのproductionデプロイ正本はCloudflare Workers Buildsだけです。`main`への1回のpushから1回だけBuildし、同じOpenNext成果物とcommit SHAでWeb Worker、Cron Worker 3本、smoke testまで進めます。GitHub Actions、ローカル端末、Worker別Git連携を日常的なproduction deploy経路にしません。
 

@@ -1,9 +1,11 @@
 # Worker 運用
 
 > Status: Active
-> Last verified: 2026-07-24
-> Verified against commit: `47e6cee`
+> Last verified: 2026-07-25
+> Verified against commit: `dc46eefa`
 > Source of truth: `wrangler.toml`、`workers/*/wrangler.toml`、`scripts/cloudflare-*.mjs`、`/admin/workers`、`/admin/youtube-quota`
+
+**AI:** Worker / Queue / Recovery Cron の運用正本。予算・メッセージ形は `src/lib/queues/wakeBudget.ts`。軽量は調査のみ。Queue flag・binding・Cron・quota 変更は上位。実 Cloudflare 操作は明示依頼時のみ。
 
 Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`flamenode-fast-jobs`、`flamenode-content-jobs`、`flamenode-sync-jobs`の3本とする。Git連携は`flamenode-web`のWorkers Buildsだけに置き、1回のBuildからWeb→fast→content→sync→smokeの順でdeployする。Cron Workerを個別にGit連携しない。
 
@@ -32,7 +34,7 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 - Consumer 設定: `max_batch_size = 10`、`max_retries = 3`。通知・静的は `retry_delay = 60`、YouTube は `retry_delay = 300`。
 - Recovery Cron は Queue wake が届かなかった場合の安全網。通常運用では Queue 駆動を優先し、Cron は補助とする。
 
-### Feature flags（Phase 1 デフォルト無効）
+### Feature flags（デフォルト無効）
 
 | 変数 | 意味 |
 | --- | --- |
@@ -40,7 +42,7 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 | `QUEUE_CONTINUATION_ENABLED` | Consumer invocation からの継続 wake |
 | `QUEUE_YOUTUBE_SYNC_ENABLED` | YouTube sync wake の有効化 |
 
-いずれも `"0"` がデフォルト。有効化は Worker Runtime Variables または Dashboard で `"1"` / `"true"` / `"yes"` を設定する。ロールバックは該当 flag を `"0"` に戻すだけでよい（Queue 作成・binding は維持し、送信・消費だけ止める）。
+template は `"0"`。本番有効化手順は後述「Queue feature flags（本番有効化）」。
 
 ### Queue リソース作成（初回のみ）
 

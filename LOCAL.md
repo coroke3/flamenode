@@ -1,9 +1,11 @@
 # FlameNode ローカル動作手順書
 
 > Status: Active
-> Last verified: 2026-07-20
-> Verified against commit: `47e6cee`
+> Last verified: 2026-07-25
+> Verified against commit: `dc46eefa`
 > Source of truth: `package.json`, `.dev.vars.example`, `migrations/` active path, `wrangler.toml`, `docs/operations/migrations.md`
+
+**AI:** 起動再現は §1–6 まで。検査の選び方は `docs/AI_CONTEXT.md` §検査の選び方。§7 の全列を毎回回さない。
 
 この文書は個人PCの実施済み状態を前提にせず、空の作業環境からFlameNodeを再現する手順だけを扱います。本番操作は [`DEPLOY.md`](./DEPLOY.md) を参照してください。監査ログの正本テーブル名は `audit_logs` です。
 

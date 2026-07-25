@@ -1,8 +1,10 @@
 # Static Delivery
 
 > Status: Active
-> Last verified: 2026-07-24
+> Last verified: 2026-07-25
 > Verified against: `src/lib/publicData/`, `app/(public)/`, `workers/json-generator/`, `wrangler.toml`
+
+**AI:** 公開静的 JSON / degraded D1 / Cache の仕様。正本コードは `src/lib/publicData/loader.ts`。軽量モデルは調査・文書修正まで。loader・権限・公開 DTO 変更は中位以上。
 
 D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを一覧・検索・R2・公開APIへ出し、`limited`は直接詳細だけ、その他は権限者以外へ出さない。artifactのkey、hash、version、source更新時刻を追跡し、非公開化やYouTube ID変更時は旧keyを削除する。
 
