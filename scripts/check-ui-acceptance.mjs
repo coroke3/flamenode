@@ -64,7 +64,7 @@ requireAll("app/(public)/event/page.tsx", [
   [/name="status"/, "イベント状態filterがありません。"],
   [/name="sort"/, "イベント並び替えがありません。"],
   [/loadStaticEventsIndex/, "静的イベントindexの読込がありません。"],
-  [/canFallbackToDatabase/, "D1 fallback判定がありません。"],
+  [/staticLoaded\.mode === "unavailable"/, "unavailable 表示分岐がありません。"],
 ]);
 
 requireAll("app/(public)/list/page.tsx", [
