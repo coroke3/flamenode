@@ -4,6 +4,9 @@ import * as React from "react";
 
 const MOBILE_QUERY =
   "(max-width: 900px)";
+const VIDEO_ASPECT_RATIO = 16 / 9;
+const LANDSCAPE_MIN_CONTENT_HEIGHT_PX = 160;
+const LANDSCAPE_MIN_PLAYER_WIDTH_PX = 240;
 
 function px(value: number):
   string {
@@ -48,6 +51,7 @@ useMobileVideoGeometry(
     const clearVariables = () => {
       for (const name of [
         "--fn-header-bottom",
+        "--fn-mobile-player-width",
         "--fn-mobile-player-height",
         "--fn-mobile-player-bottom",
         "--fn-visual-viewport-height",
@@ -128,17 +132,15 @@ useMobileVideoGeometry(
           ?.getBoundingClientRect()
           .bottom ?? 0;
 
-      const playerHeight =
-        player
-          .getBoundingClientRect()
-          .height;
-
       const viewport =
         window.visualViewport;
 
       const viewportHeight =
         viewport?.height ??
         window.innerHeight;
+      const viewportWidth =
+        viewport?.width ??
+        window.innerWidth;
 
       const viewportTop =
         viewport?.offsetTop ??
@@ -152,9 +154,47 @@ useMobileVideoGeometry(
             viewportTop,
         );
 
+      const isLandscape =
+        viewportWidth > viewportHeight;
+      const availableHeight =
+        viewportHeight -
+        headerBottom -
+        keyboardInset;
+      const maxLandscapePlayerHeight =
+        Math.max(
+          0,
+          availableHeight -
+            LANDSCAPE_MIN_CONTENT_HEIGHT_PX,
+        );
+
+      const widthFromAvailableHeight =
+        maxLandscapePlayerHeight *
+        VIDEO_ASPECT_RATIO;
+
+      const playerWidth = isLandscape
+        ? Math.min(
+            viewportWidth,
+            Math.max(
+              Math.min(
+                viewportWidth,
+                LANDSCAPE_MIN_PLAYER_WIDTH_PX,
+              ),
+              widthFromAvailableHeight,
+            ),
+          )
+        : viewportWidth;
+
+      const playerHeight =
+        playerWidth /
+        VIDEO_ASPECT_RATIO;
+
       root.style.setProperty(
         "--fn-header-bottom",
         px(headerBottom),
+      );
+      root.style.setProperty(
+        "--fn-mobile-player-width",
+        px(playerWidth),
       );
       root.style.setProperty(
         "--fn-mobile-player-height",

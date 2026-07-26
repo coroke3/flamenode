@@ -158,6 +158,17 @@ export async function enqueueAfterVideoUpdate(
 
   const listAffecting =
     opts.visibilityChanged || opts.eventMembershipChanged || opts.identityChanged;
+
+  if (listAffecting) {
+    items.push({
+      targetType: "random_video_pool",
+      targetId: "global",
+      reason: "video_card_update",
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    });
+  }
+
   if (listAffecting) {
     items.push(...globalListTargets("video_update", "low"));
     if (!chainsTopRecommendViaUsersIndex) {
@@ -212,6 +223,13 @@ export function buildAfterVideoStatusChangeQueueBatch(
       targetType: "video",
       targetId: opts.videoId,
       reason: "video_update",
+      priority: "normal",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "random_video_pool",
+      targetId: "global",
+      reason: "video_visibility_changed",
       priority: "normal",
       requestedByUserId: opts.requestedByUserId,
     },

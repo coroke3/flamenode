@@ -9,6 +9,7 @@ if (runTestWithTsx(import.meta.url)) {
   } = await import("./publicVideoDetailViewModel.ts");
 
   const staticDetail = {
+    schemaVersion: 1,
     generatedAt: 100,
     video: {
       id: "video1",
@@ -82,20 +83,60 @@ if (runTestWithTsx(import.meta.url)) {
         youtube_video_id: "yt2",
         display_name: "Other",
         icon_url: null,
+        creator_x_user_id: "other",
         primary_event_id: null,
         scheduled_time: 900,
       },
     ],
+    relatedReserve: [],
+    relatedRandomIds: [],
+    relatedRandomReserve: [],
+    relatedRandomSeed: "video1",
   };
 
   test("buildPublicVideoViewModelFromStatic maps extended static detail", () => {
-    const vm = buildPublicVideoViewModelFromStatic(staticDetail);
+    const vm =
+      buildPublicVideoViewModelFromStatic(
+        staticDetail,
+        {
+          iconMap: new Map([
+            [
+              "creator",
+              {
+                icon_url:
+                  "https://example.com/creator.png",
+                source: "registered",
+              },
+            ],
+            [
+              "other",
+              {
+                icon_url:
+                  "https://example.com/other.png",
+                source: "registered",
+              },
+            ],
+          ]),
+        },
+      );
     assert.equal(vm.video.app_like_count, 5);
     assert.equal(vm.softwareLabel, "After Effects");
     assert.equal(vm.primaryEvent?.id, "event1");
     assert.equal(vm.publicChapters.length, 1);
     assert.equal(vm.memberChapters.length, 1);
     assert.equal(vm.relatedVideos[0].title, "Related");
+    assert.equal(
+      vm.video.creator_icon_url,
+      "https://example.com/creator.png",
+    );
+    assert.equal(
+      vm.relatedVideos[0].icon_url,
+      "https://example.com/other.png",
+    );
+    assert.equal(
+      vm.relatedVideos[0].creator_x_user_id,
+      "other",
+    );
   });
 
   test("buildPublicVideoViewModelFromDatabase maps D1 bundle shape", () => {

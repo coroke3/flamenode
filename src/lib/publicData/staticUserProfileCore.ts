@@ -147,9 +147,17 @@ function normalizeVideoSection(
 
 function normalizeVideoList(value: unknown): VideoCardData[] {
   if (!Array.isArray(value)) return [];
-  return value
+
+  const normalized = value
     .map(normalizeVideo)
     .filter((video): video is VideoCardData => video !== null);
+
+  const seen = new Set<string>();
+  return normalized.filter((video) => {
+    if (seen.has(video.id)) return false;
+    seen.add(video.id);
+    return true;
+  });
 }
 
 function normalizeVideo(value: unknown): VideoCardData | null {
@@ -171,6 +179,7 @@ function normalizeVideo(value: unknown): VideoCardData | null {
     icon_url:
       normalizeNullableString(row.icon_url) ??
       normalizeNullableString(row.creator_icon_url),
+    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     scheduled_time: normalizeUnix(row.scheduled_time),
     status: "public",

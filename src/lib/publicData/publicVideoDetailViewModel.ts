@@ -12,6 +12,10 @@ import {
   RELATED_MIN_LIMIT,
   resolveVisibleRelatedVideos,
 } from "./relatedVideoProjection";
+import {
+  resolveProjectedIcon,
+  type PublicXIconEntry,
+} from "./publicIconProjection";
 
 export interface PublicVideoDetailViewModel {
   generatedAt: number | null;
@@ -36,12 +40,22 @@ export function buildPublicVideoViewModelFromStatic(
     relatedBlockedIds?: ReadonlySet<string> | null;
     relatedUnavailable?: boolean;
     relatedFallbackPool?: readonly StaticRelatedVideo[];
+    iconMap?: ReadonlyMap<string, PublicXIconEntry> | null;
   },
 ): PublicVideoDetailViewModel {
   const primaryEvent =
     detail.publicEvents.find((event) => event.id === detail.video.primary_event_id) ??
     detail.publicEvents[0] ??
     null;
+
+  const projectedVideo = {
+    ...detail.video,
+    creator_icon_url: resolveProjectedIcon({
+      xUserId: detail.video.creator_x_user_id,
+      iconMap: options?.iconMap,
+      legacyIconUrl: detail.video.creator_icon_url,
+    }),
+  };
 
   const relatedVideos = options?.relatedUnavailable
     ? []
@@ -56,12 +70,12 @@ export function buildPublicVideoViewModelFromStatic(
         seed: detail.relatedRandomSeed || detail.video.id,
         minTarget: RELATED_MIN_LIMIT,
         maxTarget: RELATED_DEFAULT_LIMIT,
-      }).map(toVideoCardData);
+      }).map((video) => toVideoCardData(video, options?.iconMap));
 
   return {
     generatedAt: detail.generatedAt,
     video: {
-      ...detail.video,
+      ...projectedVideo,
       app_like_count: detail.appLikeCount,
     },
     softwareLabels: detail.softwareLabels,
@@ -225,13 +239,21 @@ export function buildPublicVideoViewModelFromDatabase(args: {
   };
 }
 
-function toVideoCardData(video: StaticRelatedVideo): VideoCardData {
+function toVideoCardData(
+  video: StaticRelatedVideo,
+  iconMap?: ReadonlyMap<string, PublicXIconEntry> | null,
+): VideoCardData {
   return {
     id: video.id,
     title: video.title,
     youtube_video_id: video.youtube_video_id,
     display_name: video.display_name,
-    icon_url: video.icon_url,
+    icon_url: resolveProjectedIcon({
+      xUserId: video.creator_x_user_id,
+      iconMap,
+      legacyIconUrl: video.icon_url,
+    }),
+    creator_x_user_id: video.creator_x_user_id,
     primary_event_id: video.primary_event_id,
     scheduled_time: video.scheduled_time,
   };

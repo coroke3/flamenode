@@ -55,6 +55,57 @@ function videoEnv({ visibility = "public", youtubeId = "new-youtube" } = {}) {
     deletes,
     DB: { prepare: (sql) => statement(sql, state) },
     R2: {
+      async get(key) {
+        if (
+          key ===
+          "youtube/related-blocklist.v1.json"
+        ) {
+          return {
+            async json() {
+              return {
+                schema_version: 1,
+                generated_at: 1,
+                blocked: {},
+              };
+            },
+          };
+        }
+
+        if (
+          key ===
+          "videos/random-pool.v1.json"
+        ) {
+          return {
+            async json() {
+              return {
+                schema_version: 1,
+                generated_at: 1,
+                generation_key:
+                  "generation-1",
+                items: [
+                  {
+                    id: "video-2",
+                    title: "Video 2",
+                    youtube_video_id:
+                      "youtube-2",
+                    display_name:
+                      "Creator 2",
+                    icon_url: null,
+                    creator_x_user_id:
+                      "creator-2",
+                    primary_event_id:
+                      null,
+                    scheduled_time:
+                      null,
+                  },
+                ],
+              };
+            },
+          };
+        }
+
+        return null;
+      },
       async put(key) { puts.push(key); },
       async delete(key) { deletes.push(key); },
     },
@@ -459,4 +510,113 @@ test("200イベントの公開運営取得はD1 bind上限未満にchunkする",
       args.length <= PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE + 1),
   );
   assert.ok(staffQueries.every(({ args }) => args.at(-1) === PUBLIC_STAFF_MAX_PER_EVENT));
+});
+
+test("video v2生成はblocklist欠損時に既存JSONを上書きしない", async () => {
+  const env = videoEnv();
+
+  env.R2.get = async (key) => {
+    if (
+      key ===
+      "videos/random-pool.v1.json"
+    ) {
+      return {
+        async json() {
+          return {
+            schema_version: 1,
+            generated_at: 1,
+            generation_key: "generation-1",
+            items: [
+              {
+                id: "video-2",
+                title: "Video 2",
+                youtube_video_id: "youtube-2",
+                display_name: "Creator 2",
+                icon_url: null,
+                creator_x_user_id: "creator-2",
+                primary_event_id: null,
+                scheduled_time: null,
+              },
+            ],
+          };
+        },
+      };
+    }
+
+    return null;
+  };
+
+  await assert.rejects(
+    () =>
+      rebuildTarget(
+        env,
+        "video",
+        "video-1",
+      ),
+    /youtube_related_blocklist_required_for_static_generation/,
+  );
+
+  assert.deepEqual(env.puts, []);
+});
+
+test("関連動画生成は共有メンバー識別子を正規化後も保持する", () => {
+  assert.match(
+    source,
+    /member_x_user_id:[\s\S]*trim\(\)\.toLowerCase\(\)/,
+  );
+  assert.match(
+    source,
+    /const memberId = row\.member_x_user_id/,
+  );
+  assert.doesNotMatch(
+    source,
+    /SELECT LOWER\(vm\.x_user_id\) AS member_x_user_id[\s\S]*WHERE vm\.video_id = \?/,
+  );
+});
+
+test("関連動画はprimaryとreserveを別々に生成する", () => {
+  assert.match(
+    source,
+    /type StaticRelatedVideoSelection/,
+  );
+  assert.match(
+    source,
+    /targetCount = relatedLimit \+ RELATED_RESERVE_LIMIT/,
+  );
+  assert.match(
+    source,
+    /reserveRows[\s\S]*slice\(0, RELATED_RESERVE_LIMIT\)/,
+  );
+});
+
+test("ユーザー合作取得はJOIN重複ではなくEXISTSを使う", () => {
+  const userFn = source.match(
+    /async function rebuildUser\([\s\S]*?(?=\nasync function |\nfunction |$)/,
+  )?.[0];
+
+  assert.ok(userFn);
+  assert.match(
+    userFn,
+    /EXISTS \([\s\S]*FROM video_members AS vm[\s\S]*vm\.video_id = v\.id/,
+  );
+  assert.doesNotMatch(
+    userFn,
+    /INNER JOIN video_members AS vm ON vm\.video_id = v\.id/,
+  );
+});
+
+test("YouTube関連blocklistは公開作品だけを対象にする", () => {
+  const blocklistFn = source.match(
+    /async function rebuildYoutubeRelatedBlocklist[\s\S]*?(?=\nasync function )/,
+  )?.[0];
+
+  assert.ok(blocklistFn);
+  assert.match(
+    blocklistFn,
+    /v\.visibility_status = 'public'/,
+  );
+  assert.doesNotMatch(
+    blocklistFn,
+    /v\.visibility_status <> 'voided'/,
+  );
 });

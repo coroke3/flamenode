@@ -51,6 +51,10 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(profile.works.total, 2);
     assert.equal(profile.works.pageSize, STATIC_USER_WORKS_PAGE_SIZE);
     assert.equal(profile.works.items[0].display_name, "Creator");
+    assert.equal(
+      profile.works.items[0].creator_x_user_id,
+      "creator",
+    );
     assert.equal(profile.collabs.total, 1);
     assert.equal(profile.collabs.pageSize, STATIC_USER_COLLABS_PAGE_SIZE);
   });
@@ -103,5 +107,47 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(page.page, 2);
     assert.equal(page.total, 40);
     assert.equal(page.items[0].id, "video2");
+  });
+
+  test("normalizeStaticUserProfile: collabの同一作品をIDで重複除去する", () => {
+    const profile =
+      normalizeStaticUserProfile({
+        user: {
+          id: "member",
+          x_name: "Member",
+        },
+        collabs: {
+          total: 1,
+          items: [
+            {
+              id: "collab-1",
+              title: "Collab",
+              display_name: "Creator",
+              creator_x_user_id:
+                "creator",
+              status: "public",
+            },
+            {
+              id: "collab-1",
+              title: "Collab",
+              display_name: "Creator",
+              creator_x_user_id:
+                "creator",
+              status: "public",
+            },
+          ],
+        },
+      });
+
+    assert.ok(profile);
+    assert.equal(
+      profile.collabs.items.length,
+      1,
+    );
+    assert.equal(
+      profile.collabs.items[0]
+        .creator_x_user_id,
+      "creator",
+    );
   });
 }

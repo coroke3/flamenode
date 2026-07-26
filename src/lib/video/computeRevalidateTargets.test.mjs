@@ -28,4 +28,5 @@ test("computeStaticRebuildFlags marks event membership changed only when field p
   });
   assert.equal(flags.eventMembershipChanged, true);
   assert.equal(flags.identityChanged, false);
+  assert.equal(flags.randomPoolCardChanged, true);
 });

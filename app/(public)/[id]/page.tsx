@@ -124,9 +124,20 @@ export default async function VideoDetailPage({
       staticProbe.data.relatedReserve.length > 0 ||
       staticProbe.data.relatedRandomReserve.length > 0;
 
-    const needsIconMap = staticProbe.data.publicMembers.some((member) =>
-      Boolean(member.x_user_id),
-    );
+    const relatedIconCandidates = [
+      ...staticProbe.data.relatedVideos,
+      ...staticProbe.data.relatedReserve,
+      ...staticProbe.data.relatedRandomReserve,
+    ];
+
+    const needsIconMap =
+      Boolean(staticProbe.data.video.creator_x_user_id) ||
+      staticProbe.data.publicMembers.some((member) =>
+        Boolean(member.x_user_id),
+      ) ||
+      relatedIconCandidates.some((video) =>
+        Boolean(video.creator_x_user_id),
+      );
 
     const [blocklist, iconMapPayload] = await Promise.all([
       needsBlocklist
@@ -392,6 +403,7 @@ function StaticVideoDetailView({
     relatedUnavailable: relatedBlocklistStatus === "unavailable",
     relatedBlockedIds,
     relatedFallbackPool,
+    iconMap,
   });
   const { video } = vm;
   if (video.visibility_status !== "public") {

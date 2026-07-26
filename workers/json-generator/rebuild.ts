@@ -35,7 +35,6 @@ import {
 } from "../../src/lib/publicData/publicIconProjection.ts";
 import {
   buildYoutubeRelatedBlocklistPayload,
-  EMPTY_YOUTUBE_RELATED_BLOCKLIST,
   normalizeYoutubeRelatedBlocklist,
   YOUTUBE_RELATED_BLOCKLIST_MAX_OBJECT_BYTES,
   YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
@@ -51,6 +50,9 @@ import {
   RANDOM_VIDEO_POOL_SCHEMA_VERSION,
   type RandomVideoPool,
 } from "../../src/lib/publicData/randomVideoPoolCore.ts";
+import type {
+  StaticRelatedVideo,
+} from "../../src/lib/publicData/staticVideoDetailCore.ts";
 import {
   RELATED_DEFAULT_LIMIT,
   RELATED_MAX_LIMIT,
@@ -63,7 +65,10 @@ import {
   relatedSectionByteLength,
   selectDeterministicRandom,
 } from "../../src/lib/publicData/relatedVideoProjection.ts";
-import { projectMemberChapters } from "../../src/lib/video/memberChapterProjection.ts";
+import {
+  extractVideoMemberIdFromChapterId,
+  projectMemberChapters,
+} from "../../src/lib/video/memberChapterProjection.ts";
 import { isConfirmedInternalVideoId } from "../../src/lib/video/internalId.ts";
 import { buildHeroEventSlotStatsSql } from "../../src/lib/publicData/heroEventSlotStatsSql.ts";
 import {
@@ -979,6 +984,12 @@ type StaticRelatedVideoRow = {
   primary_event_id: string | null;
   scheduled_time: number | null;
   video_score: number | null;
+  member_x_user_id: string | null;
+};
+
+type StaticRelatedVideoSelection = {
+  primary: StaticRelatedVideo[];
+  reserve: StaticRelatedVideo[];
 };
 
 const STATIC_RELATED_VIDEO_SELECT = `
@@ -1016,16 +1027,23 @@ function normalizeStaticRelatedRow(
     scheduled_time:
       row.scheduled_time == null ? null : Number(row.scheduled_time),
     video_score: row.video_score == null ? null : Number(row.video_score),
+    member_x_user_id:
+      row.member_x_user_id == null
+        ? null
+        : String(row.member_x_user_id).trim().toLowerCase() || null,
   };
 }
 
-function toPublicRelatedVideoCard(row: StaticRelatedVideoRow): Record<string, unknown> {
+function toPublicRelatedVideoCard(
+  row: StaticRelatedVideoRow,
+): StaticRelatedVideo {
   return {
     id: row.id,
     title: row.title,
     youtube_video_id: row.youtube_video_id,
     display_name: row.display_name,
     icon_url: row.icon_url,
+    creator_x_user_id: row.creator_x_user_id,
     primary_event_id: row.primary_event_id,
     scheduled_time: row.scheduled_time,
   };
@@ -1039,12 +1057,14 @@ async function fetchStaticRelatedVideos(
     primary_event_id: string | null;
     scheduled_time: number | null;
     eventIds: string[];
+    memberXUserIds: string[];
   },
   signal?: RebuildSignal,
-): Promise<Record<string, unknown>[]> {
+): Promise<StaticRelatedVideoSelection> {
   throwIfAborted(signal);
   const relatedLimit = clampRelatedLimit(RELATED_DEFAULT_LIMIT);
   const minTarget = Math.min(15, relatedLimit);
+  const targetCount = relatedLimit + RELATED_RESERVE_LIMIT;
   const sameEventLimit = 5;
   const sameCreatorLimit = 4;
   const nearDateLimit = 4;
@@ -1156,22 +1176,10 @@ async function fetchStaticRelatedVideos(
     : [];
   throwIfAborted(signal);
 
-  const memberRows =
-    (
-      await env.DB.prepare(
-        `SELECT LOWER(vm.x_user_id) AS member_x_user_id
-         FROM video_members AS vm
-         WHERE vm.video_id = ?
-           AND vm.is_public_member = 1
-           AND vm.x_user_id IS NOT NULL`,
-      )
-        .bind(current.id)
-        .all<{ member_x_user_id?: string }>()
-    ).results ?? [];
   const uniqueMemberXIds = Array.from(
     new Set(
-      memberRows
-        .map((row) => String(row.member_x_user_id ?? "").trim().toLowerCase())
+      current.memberXUserIds
+        .map((xId) => String(xId ?? "").trim().toLowerCase())
         .filter(Boolean),
     ),
   );
@@ -1201,10 +1209,7 @@ async function fetchStaticRelatedVideos(
     );
     const byMember = new Map<string, StaticRelatedVideoRow[]>();
     for (const row of sharedRows) {
-      const memberId = String(
-        (row as StaticRelatedVideoRow & { member_x_user_id?: string })
-          .member_x_user_id ?? "",
-      ).trim();
+      const memberId = row.member_x_user_id;
       if (!memberId) continue;
       const bucket = byMember.get(memberId) ?? [];
       if (!bucket.some((item) => item.id === row.id)) bucket.push(row);
@@ -1254,9 +1259,15 @@ async function fetchStaticRelatedVideos(
     { reason: "near_date", rows: nearDate.slice(0, nearDateLimit) },
   ]);
 
-  if (initialCandidates.length < minTarget) {
-    const existingIds = initialCandidates.map((candidate) => candidate.row.id);
-    existingIds.push(current.id);
+  const initialCandidateIds = new Set(
+    initialCandidates.map((candidate) => candidate.row.id),
+  );
+
+  if (initialCandidateIds.size < targetCount) {
+    const existingIds = [
+      current.id,
+      ...initialCandidateIds,
+    ];
     const fallbackRows = mapRows(
       (
         await env.DB.prepare(
@@ -1273,15 +1284,19 @@ async function fetchStaticRelatedVideos(
           .bind(
             current.id,
             JSON.stringify(existingIds),
-            minTarget - initialCandidates.length + 5,
+            targetCount - initialCandidateIds.size + 12,
           )
           .all()
       ).results ?? [],
     );
+
     for (const row of fallbackRows) {
-      if (!initialCandidates.some((candidate) => candidate.row.id === row.id)) {
-        initialCandidates.push({ row, reason: "near_date" });
-      }
+      if (initialCandidateIds.has(row.id)) continue;
+      initialCandidateIds.add(row.id);
+      initialCandidates.push({
+        row,
+        reason: "near_date",
+      });
     }
   }
 
@@ -1300,7 +1315,19 @@ async function fetchStaticRelatedVideos(
     }
   }
 
-  return selected.map((candidate) => toPublicRelatedVideoCard(candidate.row));
+  const primaryRows = selected.map((candidate) => candidate.row);
+  const primaryIds = new Set(primaryRows.map((row) => row.id));
+
+  const reserveRows = uniqueByVideoId(
+    initialCandidates.map((candidate) => candidate.row),
+  )
+    .filter((row) => !primaryIds.has(row.id))
+    .slice(0, RELATED_RESERVE_LIMIT);
+
+  return {
+    primary: primaryRows.map(toPublicRelatedVideoCard),
+    reserve: reserveRows.map(toPublicRelatedVideoCard),
+  };
 }
 
 const REBUILD_VIDEO_SELECT = `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name, v.creator_x_user_id,
@@ -1363,7 +1390,13 @@ async function loadWorkerRelatedBlocklist(
     YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
     signal,
   );
-  return normalizeYoutubeRelatedBlocklist(payload) ?? EMPTY_YOUTUBE_RELATED_BLOCKLIST;
+  const blocklist = normalizeYoutubeRelatedBlocklist(payload);
+  if (!blocklist) {
+    throw new Error(
+      "youtube_related_blocklist_required_for_static_generation",
+    );
+  }
+  return blocklist;
 }
 
 async function fetchVideoRowForRebuild(
@@ -1412,8 +1445,7 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
     publicEvents,
     members,
     softwareLabels,
-    publicChapters,
-    memberChapters,
+    allPublicChapters,
   ] = await Promise.all([
     env.DB.prepare(
       `SELECT ve.event_id
@@ -1462,24 +1494,13 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
       .bind(internalVideoId)
       .all<{ raw_label?: string }>(),
     env.DB.prepare(
-      `SELECT vc.id, vc.chapter_time, vc.chapter_label, vc.note,
+      `SELECT vc.id, vc.x_user_id,
+              vc.chapter_time, vc.chapter_label, vc.note,
               xu.x_name AS author_name, xu.icon_url AS author_icon
        FROM video_chapters AS vc
        LEFT JOIN x_users AS xu ON xu.id = vc.x_user_id
        WHERE vc.video_id = ?
          AND vc.visibility = 'public'
-         AND vc.id NOT LIKE '%:member:%'
-         AND vc.id NOT LIKE '%:legacy:%'
-       ORDER BY vc.chapter_time ASC, vc.id ASC`,
-    )
-      .bind(internalVideoId)
-      .all(),
-    env.DB.prepare(
-      `SELECT vc.id, vc.chapter_time, vc.chapter_label, vc.note
-       FROM video_chapters AS vc
-       WHERE vc.video_id = ?
-         AND vc.visibility = 'public'
-         AND (vc.id LIKE '%:member:%' OR vc.id LIKE '%:legacy:%')
        ORDER BY vc.chapter_time ASC, vc.id ASC`,
     )
       .bind(internalVideoId)
@@ -1487,29 +1508,99 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
   ]);
   throwIfAborted(signal);
 
-  const publicMemberIds = new Set(
-    (members.results ?? [])
-      .map((entry) => String((entry as { id?: unknown }).id ?? "").trim())
-      .filter(Boolean),
-  );
+  const publicMembersForProjection = (members.results ?? [])
+    .map((entry) => ({
+      id: String((entry as { id?: unknown }).id ?? "").trim(),
+      x_user_id:
+        (entry as { x_user_id?: unknown }).x_user_id == null
+          ? null
+          : String((entry as { x_user_id?: unknown }).x_user_id),
+    }))
+    .filter((entry) => Boolean(entry.id));
+
+  const chapterSources = (allPublicChapters.results ?? []).map((entry) => ({
+    id: String((entry as { id?: unknown }).id ?? ""),
+    x_user_id:
+      (entry as { x_user_id?: unknown }).x_user_id == null
+        ? null
+        : String((entry as { x_user_id?: unknown }).x_user_id),
+    chapter_time: Number(
+      (entry as { chapter_time?: unknown }).chapter_time ?? 0,
+    ),
+    chapter_label: String(
+      (entry as { chapter_label?: unknown }).chapter_label ?? "",
+    ),
+    note:
+      (entry as { note?: unknown }).note == null
+        ? null
+        : String((entry as { note?: unknown }).note),
+  }));
+
   const projectedMemberChapters = projectMemberChapters({
-    chapters: (memberChapters.results ?? []).map((entry) => ({
+    chapters: chapterSources,
+    publicMembers: publicMembersForProjection,
+  });
+
+  const projectedMemberChapterIds = new Set(
+    projectedMemberChapters.map((chapter) => chapter.id),
+  );
+  const memberMarkerChapterIds = new Set(
+    chapterSources
+      .filter((chapter) =>
+        Boolean(extractVideoMemberIdFromChapterId(chapter.id)),
+      )
+      .map((chapter) => chapter.id),
+  );
+
+  const projectedPublicChapters = (allPublicChapters.results ?? [])
+    .filter((entry) => {
+      const id = String((entry as { id?: unknown }).id ?? "");
+      return (
+        !projectedMemberChapterIds.has(id) &&
+        !memberMarkerChapterIds.has(id)
+      );
+    })
+    .map((entry) => ({
       id: String((entry as { id?: unknown }).id ?? ""),
-      chapter_time: Number((entry as { chapter_time?: unknown }).chapter_time ?? 0),
-      chapter_label: String((entry as { chapter_label?: unknown }).chapter_label ?? ""),
+      chapter_time: Number(
+        (entry as { chapter_time?: unknown }).chapter_time ?? 0,
+      ),
+      chapter_label: String(
+        (entry as { chapter_label?: unknown }).chapter_label ?? "",
+      ),
       note:
         (entry as { note?: unknown }).note == null
           ? null
           : String((entry as { note?: unknown }).note),
-    })),
-    publicMemberIds,
-  });
+      author_name:
+        (entry as { author_name?: unknown }).author_name == null
+          ? null
+          : String((entry as { author_name?: unknown }).author_name),
+      author_icon:
+        (entry as { author_icon?: unknown }).author_icon == null
+          ? null
+          : String((entry as { author_icon?: unknown }).author_icon),
+    }));
 
   const eventIds = (events.results ?? []).map(
     (entry) => (entry as { event_id: string }).event_id,
   );
 
-  const [semanticRelated, randomPool, blocklist] = await Promise.all([
+  const publicMemberXIds = Array.from(
+    new Set(
+      (members.results ?? [])
+        .map((entry) =>
+          String(
+            (entry as { x_user_id?: unknown }).x_user_id ?? "",
+          )
+            .trim()
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    ),
+  );
+
+  const [semanticSelection, randomPool, blocklist] = await Promise.all([
     fetchStaticRelatedVideos(
       env,
       {
@@ -1521,6 +1612,7 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
         scheduled_time:
           (row as { scheduled_time?: number | null }).scheduled_time ?? null,
         eventIds,
+        memberXUserIds: publicMemberXIds,
       },
       signal,
     ),
@@ -1534,9 +1626,14 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
   }
 
   const relatedLimit = clampRelatedLimit(RELATED_DEFAULT_LIMIT);
-  const semanticCards = semanticRelated.slice(0, RELATED_MAX_LIMIT + RELATED_RESERVE_LIMIT);
-  const primarySemantic = semanticCards.slice(0, relatedLimit);
-  const relatedReserve = semanticCards.slice(relatedLimit, relatedLimit + RELATED_RESERVE_LIMIT);
+  const primarySemantic = semanticSelection.primary.slice(
+    0,
+    relatedLimit,
+  );
+  const relatedReserve = semanticSelection.reserve.slice(
+    0,
+    RELATED_RESERVE_LIMIT,
+  );
   const semanticIds = new Set(primarySemantic.map((video) => String(video.id)));
   const blockedIds = blocklist.blockedIds;
 
@@ -1560,26 +1657,9 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
   );
 
   const relatedVideos = insertRandomRelatedVideos({
-    semantic: primarySemantic
-      .filter((video) => !blockedIds.has(String(video.id)))
-      .map((video) => ({
-        id: String(video.id),
-        title: String(video.title ?? ""),
-        youtube_video_id:
-          video.youtube_video_id == null
-            ? null
-            : String(video.youtube_video_id),
-        display_name: String(video.display_name ?? ""),
-        icon_url: video.icon_url == null ? null : String(video.icon_url),
-        primary_event_id:
-          video.primary_event_id == null
-            ? null
-            : String(video.primary_event_id),
-        scheduled_time:
-          Number.isFinite(Number(video.scheduled_time))
-            ? Number(video.scheduled_time)
-            : null,
-      })),
+    semantic: primarySemantic.filter(
+      (video) => !blockedIds.has(video.id),
+    ),
     random: selectedRandom,
     maxTarget: RELATED_DEFAULT_LIMIT,
   });
@@ -1587,25 +1667,7 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
   const relatedSection = {
     related_videos: relatedVideos,
     related_reserve: relatedReserve
-      .filter((video) => !blockedIds.has(String(video.id)))
-      .map((video) => ({
-        id: String(video.id),
-        title: String(video.title ?? ""),
-        youtube_video_id:
-          video.youtube_video_id == null
-            ? null
-            : String(video.youtube_video_id),
-        display_name: String(video.display_name ?? ""),
-        icon_url: video.icon_url == null ? null : String(video.icon_url),
-        primary_event_id:
-          video.primary_event_id == null
-            ? null
-            : String(video.primary_event_id),
-        scheduled_time:
-          Number.isFinite(Number(video.scheduled_time))
-            ? Number(video.scheduled_time)
-            : null,
-      })),
+      .filter((video) => !blockedIds.has(video.id)),
     related_random_ids: selectedRandom.map((video) => video.id),
     related_random_reserve: randomReserve,
     related_random_seed: randomSeed,
@@ -1625,7 +1687,7 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
       .map((entry) => String(entry.raw_label ?? "").trim())
       .filter(Boolean),
     app_like_count: Number((row as { app_like_count?: unknown }).app_like_count ?? 0) || 0,
-    public_chapters: publicChapters.results ?? [],
+    public_chapters: projectedPublicChapters,
     member_chapters: projectedMemberChapters,
     public_events: publicEvents.results ?? [],
     ...relatedSection,
@@ -1713,7 +1775,7 @@ async function rebuildYoutubeRelatedBlocklist(
             ym.youtube_availability_status
        FROM video_youtube_metadata AS ym
        INNER JOIN videos AS v ON v.id = ym.video_id
-      WHERE v.visibility_status <> 'voided'
+      WHERE v.visibility_status = 'public'
         AND (
           ym.youtube_privacy_status = 'private'
           OR ym.youtube_availability_status IN ('private', 'missing_or_private')
@@ -1774,10 +1836,14 @@ async function rebuildRandomVideoPool(
 ): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
+  const blocklist = await loadWorkerRelatedBlocklist(env, signal);
+  throwIfAborted(signal);
+
   const result = await env.DB.prepare(
     `SELECT v.id, v.title, v.youtube_video_id,
             v.creator_display_name AS display_name,
             v.creator_icon_url AS icon_url,
+            v.creator_x_user_id,
             v.primary_event_id,
             v.scheduled_time
        FROM videos AS v
@@ -1787,7 +1853,12 @@ async function rebuildRandomVideoPool(
   ).all<Record<string, unknown>>();
   throwIfAborted(signal);
 
-  const rows = result.results ?? [];
+  const rows = (result.results ?? []).filter(
+    (row) =>
+      !blocklist.blockedIds.has(
+        String(row.id ?? "").trim(),
+      ),
+  );
   if (rows.length > 5000) {
     throw new Error("random_video_pool_exceeds_5000_items");
   }
@@ -1803,6 +1874,10 @@ async function rebuildRandomVideoPool(
       display_name: String(row.display_name ?? "").trim(),
       icon_url:
         row.icon_url == null ? null : String(row.icon_url).trim() || null,
+      creator_x_user_id:
+        row.creator_x_user_id == null
+          ? null
+          : String(row.creator_x_user_id).trim() || null,
       primary_event_id:
         row.primary_event_id == null
           ? null
@@ -2002,22 +2077,32 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
     env.DB.prepare(
       `SELECT ${STATIC_USER_COLLAB_VIDEO_SELECT}
        FROM videos AS v
-       INNER JOIN video_members AS vm ON vm.video_id = v.id
        WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         AND LOWER(vm.x_user_id) = LOWER(?)
-         AND LOWER(v.creator_x_user_id) <> LOWER(?)
+         AND LOWER(COALESCE(v.creator_x_user_id, '')) <> LOWER(?)
+         AND EXISTS (
+           SELECT 1
+           FROM video_members AS vm
+           WHERE vm.video_id = v.id
+             AND vm.is_public_member = 1
+             AND LOWER(vm.x_user_id) = LOWER(?)
+         )
        ORDER BY v.scheduled_time DESC, v.created_at DESC
        LIMIT ?`,
     )
       .bind(xId, xId, STATIC_USER_MAX_STATIC_ITEMS)
       .all(),
     env.DB.prepare(
-      `SELECT COUNT(DISTINCT v.id) AS c
+      `SELECT COUNT(*) AS c
        FROM videos AS v
-       INNER JOIN video_members AS vm ON vm.video_id = v.id
        WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         AND LOWER(vm.x_user_id) = LOWER(?)
-         AND LOWER(v.creator_x_user_id) <> LOWER(?)`,
+         AND LOWER(COALESCE(v.creator_x_user_id, '')) <> LOWER(?)
+         AND EXISTS (
+           SELECT 1
+           FROM video_members AS vm
+           WHERE vm.video_id = v.id
+             AND vm.is_public_member = 1
+             AND LOWER(vm.x_user_id) = LOWER(?)
+         )`,
     )
       .bind(xId, xId)
       .first<{ c?: number }>(),

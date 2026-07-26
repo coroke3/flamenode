@@ -3,7 +3,7 @@ import {
   normalizeCoercedString as normalizeNullableString,
   normalizeNullableUnix,
   normalizeTrimmedString,
-} from "./normalize";
+} from "./normalize.ts";
 
 export const RANDOM_VIDEO_POOL_OBJECT_KEY = "videos/random-pool.v1.json";
 export const RANDOM_VIDEO_POOL_SCHEMA_VERSION = 1 as const;
@@ -41,6 +41,7 @@ function normalizeRelatedItem(value: unknown): StaticRelatedVideo | null {
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     display_name: displayName,
     icon_url: normalizeNullableString(row.icon_url),
+    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     scheduled_time: normalizeNullableUnix(row.scheduled_time),
   };

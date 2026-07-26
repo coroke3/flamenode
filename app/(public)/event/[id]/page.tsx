@@ -39,6 +39,14 @@ import {
   loadStaticEventDetail,
   type StaticEventDetail,
 } from "@/lib/publicData/loader";
+import {
+  loadPublicXIconMapOptional,
+} from "@/lib/publicData/staticSharedInputsLoader";
+import {
+  publicXIconEntriesToMap,
+  resolveProjectedIcon,
+  type PublicXIconEntry,
+} from "@/lib/publicData/publicIconProjection";
 
 export const dynamic = "force-dynamic";
 
@@ -92,7 +100,23 @@ export default async function EventDetailPage({
   const { id } = await params;
   const staticLoaded = await loadStaticEventDetail(id);
   if (staticLoaded.data) {
-    return <StaticEventDetailView detail={staticLoaded.data} />;
+    const needsIconMap =
+      staticLoaded.data.publicStaff.some((staff) =>
+        Boolean(staff.x_user_id),
+      ) ||
+      staticLoaded.data.publicVideos.some((video) =>
+        Boolean(video.creator_x_user_id),
+      );
+    const iconMapPayload = needsIconMap
+      ? await loadPublicXIconMapOptional()
+      : null;
+
+    return (
+      <StaticEventDetailView
+        detail={staticLoaded.data}
+        iconMap={publicXIconEntriesToMap(iconMapPayload)}
+      />
+    );
   }
   notFound();
 }
@@ -273,7 +297,13 @@ function EventDetailView({
   );
 }
 
-function StaticEventDetailView({ detail }: { detail: StaticEventDetail }): React.ReactElement {
+function StaticEventDetailView({
+  detail,
+  iconMap,
+}: {
+  detail: StaticEventDetail;
+  iconMap: ReadonlyMap<string, PublicXIconEntry>;
+}): React.ReactElement {
   const { event } = detail;
   if (!isPublicEventVisible(event)) notFound();
   const videosForCard = detail.publicVideos.map((video) => ({
@@ -281,7 +311,11 @@ function StaticEventDetailView({ detail }: { detail: StaticEventDetail }): React
     title: video.title,
     youtube_video_id: video.youtube_video_id,
     display_name: video.creator_display_name,
-    icon_url: video.creator_icon_url,
+    icon_url: resolveProjectedIcon({
+      xUserId: video.creator_x_user_id,
+      iconMap,
+      legacyIconUrl: video.creator_icon_url,
+    }),
     creator_x_user_id: video.creator_x_user_id,
     scheduled_time: video.scheduled_time,
     status: video.visibility_status,
@@ -341,7 +375,11 @@ function StaticEventDetailView({ detail }: { detail: StaticEventDetail }): React
         display_name: member.display_name,
         public_role_label: member.public_role_label,
         x_name: member.x_name,
-        icon_url: member.icon_url,
+        icon_url: resolveProjectedIcon({
+          xUserId: member.x_user_id,
+          iconMap,
+          legacyIconUrl: member.icon_url,
+        }),
         has_public_profile: member.has_public_profile,
       }))}
     />

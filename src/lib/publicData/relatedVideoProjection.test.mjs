@@ -13,6 +13,7 @@ function card(id) {
     youtube_video_id: id,
     display_name: id,
     icon_url: null,
+    creator_x_user_id: null,
     primary_event_id: null,
     scheduled_time: null,
   };

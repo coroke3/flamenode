@@ -66,7 +66,7 @@ function chapterCountMap(
 
 function chapterTimesMap(
   chapters: readonly MemberSectionChapter[],
-): Map<string, string[]> {
+): Map<string, number[]> {
   const map = new Map<string, number[]>();
   for (const chapter of chapters) {
     if (!chapter.video_member_id) continue;
@@ -77,7 +77,7 @@ function chapterTimesMap(
   return new Map(
     Array.from(map.entries()).map(([id, times]) => [
       id,
-      times.sort((a, b) => a - b).map((time) => formatDuration(time)),
+      times.sort((a, b) => a - b),
     ]),
   );
 }
@@ -156,7 +156,12 @@ export function MemberSection({
 
       {mode === "cards" ? <CardsView members={members} /> : null}
       {mode === "table" ? (
-        <TableView members={members} memberChapters={chapters} />
+        <TableView
+          members={members}
+          memberChapters={chapters}
+          duration={duration}
+          onSeek={onSeek}
+        />
       ) : null}
       {mode === "chapters" && hasMemberChapters ? (
         <ChaptersView
@@ -324,9 +329,13 @@ function SortHeader({
 function TableView({
   members,
   memberChapters,
+  duration,
+  onSeek,
 }: {
   members: readonly MemberSectionMember[];
   memberChapters: readonly MemberSectionChapter[];
+  duration?: number | null;
+  onSeek: (time: number) => void;
 }): React.ReactElement {
   const [sort, setSort] = React.useState<SortState | null>(null);
   const counts = React.useMemo(
@@ -488,7 +497,23 @@ function TableView({
                   <td className={styles.tColChapters} data-label="チャプター">
                     {times.length > 0 ? (
                       <span className={styles.chapterTimes}>
-                        {times.join(" / ")}
+                        {times.map((time) => {
+                          const playable =
+                            duration == null ||
+                            time <= duration;
+                          return (
+                            <button
+                              key={`${member.id}-${time}`}
+                              type="button"
+                              className={styles.chapterTimeButton}
+                              onClick={() => onSeek(time)}
+                              disabled={!playable}
+                              aria-label={`${displayName}のチャプター ${formatDuration(time)}へ移動`}
+                            >
+                              {formatDuration(time)}
+                            </button>
+                          );
+                        })}
                       </span>
                     ) : (
                       <span className={styles.tMuted}>—</span>
@@ -526,88 +551,94 @@ function ChaptersView({
   onSeek?: (time: number) => void;
 }): React.ReactElement {
   const grouped = React.useMemo(() => {
-    const map = new Map<string, MemberSectionChapter[]>();
+    const map = new Map<
+      string,
+      MemberSectionChapter[]
+    >();
+
     for (const chapter of chapters) {
-      const key = chapter.video_member_id || "__unassigned__";
-      const list = map.get(key) ?? [];
+      if (!chapter.video_member_id) continue;
+      const list =
+        map.get(chapter.video_member_id) ?? [];
       list.push(chapter);
-      map.set(key, list);
+      map.set(chapter.video_member_id, list);
     }
+
     for (const list of map.values()) {
-      list.sort((a, b) => a.chapter_time - b.chapter_time);
+      list.sort(
+        (a, b) =>
+          a.chapter_time - b.chapter_time,
+      );
     }
+
     return map;
   }, [chapters]);
 
-  const unassigned = grouped.get("__unassigned__") ?? [];
+  const visibleGroups = members
+    .map((member) => ({
+      member,
+      chapters: grouped.get(member.id) ?? [],
+    }))
+    .filter((group) => group.chapters.length > 0);
 
   return (
     <div className={styles.chaptersWrap}>
-      {members.map((member) => {
-        const list = grouped.get(member.id) ?? [];
-        const displayName = memberDisplayName(member);
-        const iconUrl = cachedGoogleImageUrl(member.icon_url);
-        const headerLabel = displayName;
+      {visibleGroups.map(({ member, chapters: list }) => {
+        const displayName =
+          memberDisplayName(member);
+        const iconUrl =
+          cachedGoogleImageUrl(member.icon_url);
 
         return (
-          <section key={member.id} className={styles.chapterGroup}>
-            <header className={styles.chapterGroupHead}>
-              <span className={styles.avatarSmall} aria-hidden>
+          <section
+            key={member.id}
+            className={styles.chapterGroup}
+          >
+            <header
+              className={styles.chapterGroupHead}
+            >
+              <span
+                className={styles.avatarSmall}
+                aria-hidden
+              >
                 {iconUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={iconUrl} alt="" width={24} height={24} />
+                  <img
+                    src={iconUrl}
+                    alt=""
+                    width={24}
+                    height={24}
+                  />
                 ) : (
-                  <Icon name="user" size={11} aria-hidden />
+                  <Icon
+                    name="user"
+                    size={11}
+                    aria-hidden
+                  />
                 )}
               </span>
-              <span className={styles.chapterGroupName}>{headerLabel}</span>
-              {member.role ? (
-                <span className={styles.chapterGroupRole}>{member.role}</span>
-              ) : null}
-              <span className={styles.chapterGroupCount}>{list.length}</span>
+              <span
+                className={styles.chapterGroupName}
+              >
+                {displayName}
+              </span>
             </header>
-            {list.length === 0 ? (
-              <div className={styles.chapterGroupEmpty}>
-                メンバーチャプターなし
-              </div>
-            ) : (
-              <div className={styles.chapterGroupList}>
-                {list.map((chapter, index) => (
-                  <MemberChapterItem
-                    key={`${chapter.id}-member-${index}`}
-                    chapter={chapter}
-                    duration={duration}
-                    onSeek={onSeek}
-                  />
-                ))}
-              </div>
-            )}
+
+            <div
+              className={styles.chapterGroupList}
+            >
+              {list.map((chapter, index) => (
+                <MemberChapterItem
+                  key={`${chapter.id}-member-${index}`}
+                  chapter={chapter}
+                  duration={duration}
+                  onSeek={onSeek}
+                />
+              ))}
+            </div>
           </section>
         );
       })}
-      {unassigned.length > 0 ? (
-        <section className={styles.chapterGroup}>
-          <header className={styles.chapterGroupHead}>
-            <span className={styles.avatarSmall} aria-hidden>
-              <Icon name="user" size={11} aria-hidden />
-            </span>
-            <span className={styles.chapterGroupName}>未割当</span>
-            <span className={styles.chapterGroupCount}>
-              {unassigned.length}
-            </span>
-          </header>
-          <div className={styles.chapterGroupList}>
-            {unassigned.map((chapter, index) => (
-              <MemberChapterItem
-                key={`${chapter.id}-unassigned-${index}`}
-                chapter={chapter}
-                duration={duration}
-                onSeek={onSeek}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }

@@ -38,13 +38,16 @@ export function computeStaticRebuildFlags(args: {
   const identityChanged =
     args.canEditIdentity &&
     (args.displayNameChanged || args.iconChanged || args.allowSubmitterChange);
+  const eventMembershipChanged =
+    args.canEditPrimaryEvent && args.hasEventIdsField;
 
   return {
     identityChanged,
-    eventMembershipChanged: args.canEditPrimaryEvent && args.hasEventIdsField,
+    eventMembershipChanged,
     randomPoolCardChanged:
       Boolean(args.titleChanged) ||
       Boolean(args.youtubeChanged) ||
-      identityChanged,
+      identityChanged ||
+      eventMembershipChanged,
   };
 }

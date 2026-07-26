@@ -95,6 +95,7 @@ export interface StaticRelatedVideo {
   youtube_video_id: string | null;
   display_name: string;
   icon_url: string | null;
+  creator_x_user_id: string | null;
   primary_event_id: string | null;
   scheduled_time: number | null;
 }
@@ -320,6 +321,7 @@ function normalizeRelatedVideo(value: unknown): StaticRelatedVideo | null {
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     display_name: displayName,
     icon_url: normalizeNullableString(row.icon_url),
+    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     scheduled_time: normalizeUnix(row.scheduled_time),
   };

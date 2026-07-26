@@ -15,15 +15,20 @@
   .root {
     position: fixed;
     top: var(--fn-header-bottom, var(--header-h, 56px));
-    left: 0;
-    right: 0;
+    left: 50%;
+    right: auto;
     z-index: 40;
-    width: 100%;
+    width: var(--fn-mobile-player-width, 100%);
+    max-width: 100%;
+    transform: translateX(-50%);
   }
 
   .root[data-fullscreen="true"] {
     inset: 0;
     top: 0;
+    width: auto;
+    max-width: none;
+    transform: none;
     z-index: 1000;
   }
 }

@@ -4,7 +4,10 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import styles from "./page.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { VideoCard } from "@/components/video/VideoCard";
+import {
+  VideoCard,
+  type VideoCardData,
+} from "@/components/video/VideoCard";
 import { normalizeXId } from "@/lib/utils/xid";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, totalPagesFor } from "@/lib/utils/sql";
@@ -22,6 +25,14 @@ import {
 } from "@/lib/publicData/loader";
 import type { StaticUserProfile, StaticUserVideoPage } from "@/lib/publicData/loader";
 import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
+import {
+  loadPublicXIconMapOptional,
+} from "@/lib/publicData/staticSharedInputsLoader";
+import {
+  publicXIconEntriesToMap,
+  resolveProjectedIcon,
+  type PublicXIconEntry,
+} from "@/lib/publicData/publicIconProjection";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +158,20 @@ export default async function UserPage({
             pageSize: staticLoaded.data.collabs.pageSize,
             generatedAt: staticLoaded.data.generatedAt,
           } satisfies StaticUserVideoPage);
+
+        const visibleVideoCards = [
+          ...worksPage.items,
+          ...collabPage.items,
+        ];
+        const needsIconMap = visibleVideoCards.some(
+          (video) => Boolean(video.creator_x_user_id),
+        );
+        const iconMapPayload = needsIconMap
+          ? await loadPublicXIconMapOptional()
+          : null;
+        const iconMap =
+          publicXIconEntriesToMap(iconMapPayload);
+
         const view = (
           <StaticUserProfileView
             profile={staticLoaded.data}
@@ -154,6 +179,7 @@ export default async function UserPage({
             collabPage={collabPage}
             worksPageNum={Math.min(worksPaging.page, STATIC_USER_MAX_PAGES)}
             collabPageNum={Math.min(collabPaging.page, STATIC_USER_MAX_PAGES)}
+            iconMap={iconMap}
           />
         );
         logPublicRequestMetrics();
@@ -168,17 +194,25 @@ function StaticUserProfileView({
   collabPage,
   worksPageNum,
   collabPageNum,
+  iconMap,
 }: {
   profile: StaticUserProfile;
   worksPage: StaticUserVideoPage | null;
   collabPage: StaticUserVideoPage | null;
   worksPageNum: number;
   collabPageNum: number;
+  iconMap: ReadonlyMap<string, PublicXIconEntry>;
 }): React.ReactElement {
   const { user } = profile;
-  const ownVideos = worksPage?.items ?? [];
+  const ownVideos = projectVideoCardIcons(
+    worksPage?.items ?? [],
+    iconMap,
+  );
   const ownTotal = worksPage?.total ?? profile.works.total;
-  const collabVideos = collabPage?.items ?? [];
+  const collabVideos = projectVideoCardIcons(
+    collabPage?.items ?? [],
+    iconMap,
+  );
   const collabTotal = collabPage?.total ?? profile.collabs.total;
   const ownTotalPages = Math.min(
     totalPagesFor(ownTotal, WORKS_PAGE_SIZE),
@@ -308,4 +342,18 @@ function StaticUserProfileView({
       </section>
     </div>
   );
+}
+
+function projectVideoCardIcons(
+  videos: readonly VideoCardData[],
+  iconMap: ReadonlyMap<string, PublicXIconEntry>,
+): VideoCardData[] {
+  return videos.map((video) => ({
+    ...video,
+    icon_url: resolveProjectedIcon({
+      xUserId: video.creator_x_user_id,
+      iconMap,
+      legacyIconUrl: video.icon_url,
+    }),
+  }));
 }
