@@ -26,16 +26,25 @@ export function computeStaticRebuildFlags(args: {
   allowSubmitterChange: boolean;
   displayNameChanged: boolean;
   iconChanged: boolean;
+  titleChanged?: boolean;
+  youtubeChanged?: boolean;
   canEditPrimaryEvent: boolean;
   hasEventIdsField: boolean;
 }): {
   identityChanged: boolean;
   eventMembershipChanged: boolean;
+  randomPoolCardChanged: boolean;
 } {
+  const identityChanged =
+    args.canEditIdentity &&
+    (args.displayNameChanged || args.iconChanged || args.allowSubmitterChange);
+
   return {
-    identityChanged:
-      args.canEditIdentity &&
-      (args.displayNameChanged || args.iconChanged || args.allowSubmitterChange),
+    identityChanged,
     eventMembershipChanged: args.canEditPrimaryEvent && args.hasEventIdsField,
+    randomPoolCardChanged:
+      Boolean(args.titleChanged) ||
+      Boolean(args.youtubeChanged) ||
+      identityChanged,
   };
 }

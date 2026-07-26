@@ -116,6 +116,7 @@ function EventDetailView({
     public_role_label: string | null;
     x_name: string | null;
     icon_url: string | null;
+    has_public_profile?: boolean;
   }>;
 }): React.ReactElement {
   const accentVar = {
@@ -239,13 +240,13 @@ function EventDetailView({
                   className={styles.crewAvatar}
                   fallbackClassName={styles.crewAvatarFallback}
                 />
-                {member.x_user_id ? (
+                {member.x_user_id && member.has_public_profile ? (
                   <Link href={`/user/${member.x_user_id}`} className={styles.crewName}>
-                    {member.x_name ?? member.display_name}
+                    {member.display_name}
                   </Link>
                 ) : (
                   <span className={styles.crewName}>
-                    {member.x_name ?? member.display_name}
+                    {member.display_name}
                   </span>
                 )}
                 <span className={styles.crewRole}>
@@ -341,6 +342,7 @@ function StaticEventDetailView({ detail }: { detail: StaticEventDetail }): React
         public_role_label: member.public_role_label,
         x_name: member.x_name,
         icon_url: member.icon_url,
+        has_public_profile: member.has_public_profile,
       }))}
     />
   );

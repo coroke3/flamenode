@@ -1,0 +1,29 @@
+﻿.fn-mobile-player-spacer {
+  display: none;
+}
+
+.root {
+  /* geometry vars are set by useMobileVideoGeometry */
+}
+
+@media (max-width: 900px) {
+  .fn-mobile-player-spacer {
+    display: block;
+    height: var(--fn-mobile-player-height, 56.25vw);
+  }
+
+  .root {
+    position: fixed;
+    top: var(--fn-header-bottom, var(--header-h, 56px));
+    left: 0;
+    right: 0;
+    z-index: 40;
+    width: 100%;
+  }
+
+  .root[data-fullscreen="true"] {
+    inset: 0;
+    top: 0;
+    z-index: 1000;
+  }
+}

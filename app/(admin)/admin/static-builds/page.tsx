@@ -4,20 +4,37 @@ import { desc, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { staticRebuildQueue, systemSettings } from "@/lib/db/schema";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
-import { enqueueStaticRebuildAdmin, retryAllFailedStaticRebuild } from "@/lib/actions/static-rebuild-admin";
+import { enqueueStaticRebuildAdmin, enqueueStaticBackfillBatch, retryAllFailedStaticRebuild } from "@/lib/actions/static-rebuild-admin";
 import { StaticRebuildQueuePanel } from "@/components/admin/StaticRebuildQueuePanel";
 import { staticRebuildStatusLabel, staticRebuildTargetIdHint, staticRebuildTargetLabel } from "@/lib/admin/staticRebuildLabels";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import { getStaticRebuildPolicy } from "@/lib/operationMode/policy";
 import { OPERATION_MODE_DESCRIPTIONS, OPERATION_MODE_LABELS } from "@/lib/operationMode/types";
 import { STATIC_REBUILD_TARGET_TYPES } from "@/lib/staticRebuild/types";
+import Link from "next/link";
 
 export const metadata: Metadata = { title: "静的JSON再生成" };
 export const dynamic = "force-dynamic";
 
 const TARGET_TYPES = STATIC_REBUILD_TARGET_TYPES;
+const BACKFILL_KINDS = [
+  { kind: "event_crew", label: "event_crew（公開イベント）" },
+  { kind: "video_v2", label: "video_v2（公開動画）" },
+  { kind: "user_profile", label: "user_profile（公開可能 X ID）" },
+] as const;
 
-export default async function AdminStaticBuildsPage(): Promise<React.ReactElement> {
+export default async function AdminStaticBuildsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<React.ReactElement> {
+  const params = (await searchParams) ?? {};
+  const backfillKind = String(params.backfill_kind ?? "");
+  const backfillCursor = String(params.backfill_cursor ?? "");
+  const backfillScanned = String(params.backfill_scanned ?? "");
+  const backfillEnqueued = String(params.backfill_enqueued ?? "");
+  const backfillDone = String(params.backfill_done ?? "") === "1";
+
   const db = getDatabase();
   let rows: (typeof staticRebuildQueue.$inferSelect)[] = [];
   let counts = { pending: 0, processing: 0, failed: 0, dead_letter: 0, done: 0 };
@@ -137,6 +154,62 @@ export default async function AdminStaticBuildsPage(): Promise<React.ReactElemen
           target_id の例: {staticRebuildTargetIdHint("event")} / {staticRebuildTargetIdHint("top")}
           。content-jobs が Queue wake で pending を処理し、毎時 Recovery Cron がバックアップします。
         </p>
+      </section>
+
+      <section style={{ marginBottom: 24 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
+          段階的バックフィル（12件ずつ）
+        </h2>
+        {backfillKind ? (
+          <p className="fn-muted fn-text-sm" style={{ marginBottom: 10 }}>
+            直近: {backfillKind} / scanned={backfillScanned} / enqueued={backfillEnqueued}
+            {backfillDone ? " / 完了" : backfillCursor ? ` / next=${backfillCursor}` : ""}
+          </p>
+        ) : null}
+        <div style={{ display: "grid", gap: 12 }}>
+          {BACKFILL_KINDS.map((entry) => {
+            const active = backfillKind === entry.kind;
+            const cursorValue = active ? backfillCursor : "";
+            const done = active && backfillDone;
+            return (
+              <form
+                key={entry.kind}
+                action={enqueueStaticBackfillBatch}
+                className="fn-form-grid"
+                style={{
+                  padding: 12,
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "var(--radius-md)",
+                }}
+              >
+                <input type="hidden" name="kind" value={entry.kind} />
+                <label className="fn-label">
+                  {entry.label}
+                  <input
+                    name="cursor"
+                    className="fn-input"
+                    defaultValue={cursorValue}
+                    placeholder="空欄で先頭から"
+                  />
+                </label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button
+                    type="submit"
+                    className="fn-btn fn-btn-primary"
+                    disabled={done}
+                  >
+                    {done ? "完了" : cursorValue ? "続きを投入" : "先頭から投入"}
+                  </button>
+                  {done ? (
+                    <Link href="/admin/static-builds" className="fn-btn fn-btn-ghost">
+                      先頭から再開
+                    </Link>
+                  ) : null}
+                </div>
+              </form>
+            );
+          })}
+        </div>
       </section>
 
       <StaticRebuildQueuePanel

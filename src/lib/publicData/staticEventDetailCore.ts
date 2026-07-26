@@ -55,6 +55,7 @@ export interface StaticEventDetailStaff {
   x_user_id: string | null;
   x_name: string | null;
   icon_url: string | null;
+  has_public_profile: boolean;
 }
 
 export interface StaticEventSlotSummary {
@@ -193,6 +194,8 @@ function normalizePublicStaff(value: unknown): StaticEventDetailStaff | null {
     x_user_id: normalizeNullableString(row.x_user_id),
     x_name: normalizeNullableString(row.x_name),
     icon_url: normalizeNullableString(row.icon_url),
+    has_public_profile:
+      row.has_public_profile === 1 || row.has_public_profile === true,
   };
 }
 

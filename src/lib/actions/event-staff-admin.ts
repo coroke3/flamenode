@@ -34,6 +34,7 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
+import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
 
 export interface StaffActionResult {
   ok: boolean;
@@ -81,14 +82,44 @@ function revalidateEventStaffPaths(eventId: string): void {
   revalidatePath(`/event/${eventId}`);
 }
 
-async function revalidateEventStaffPathsBestEffort(eventId: string): Promise<void> {
+async function revalidateEventStaffPathsBestEffort(args: {
+  db: DB;
+  eventId: string;
+  actorUserId: string;
+  reason: string;
+}): Promise<void> {
   await runPostCommitBestEffort(
     { flow: "event_staff", traceId: createTraceId() },
     [
       {
         name: "revalidate_event_staff_paths",
         run: async () => {
-          revalidateEventStaffPaths(eventId);
+          revalidateEventStaffPaths(args.eventId);
+        },
+      },
+      {
+        name: "enqueue_event_static_rebuild",
+        run: async () => {
+          await enqueueStaticRebuildMany(
+            args.db,
+            [
+              {
+                targetType: "event",
+                targetId: args.eventId,
+                reason: args.reason,
+                priority: "high",
+                requestedByUserId: args.actorUserId,
+              },
+              {
+                targetType: "events_index",
+                targetId: "global",
+                reason: args.reason,
+                priority: "low",
+                requestedByUserId: args.actorUserId,
+              },
+            ],
+            { wakeSource: "web" },
+          );
         },
       },
     ],
@@ -333,7 +364,12 @@ export async function upsertEventStaffMember(
       message: error instanceof Error ? error.message : "スタッフを保存できません。",
     };
   }
-  await revalidateEventStaffPathsBestEffort(data.event_id);
+  await revalidateEventStaffPathsBestEffort({
+    db: guard.db,
+    eventId: data.event_id,
+    actorUserId: guard.userId,
+    reason: data.reason,
+  });
   return { ok: true };
 }
 
@@ -494,7 +530,12 @@ export async function bulkUpsertEventStaffFromCsv(
       message: error instanceof Error ? error.message : "CSV保存に失敗しました。",
     };
   }
-  await revalidateEventStaffPathsBestEffort(data.eventId);
+  await revalidateEventStaffPathsBestEffort({
+    db: guard.db,
+    eventId: data.eventId,
+    actorUserId: guard.userId,
+    reason: data.reason,
+  });
   return { ok: true };
 }
 
@@ -536,7 +577,12 @@ export async function removeEventStaffMember(
       message: error instanceof Error ? error.message : "スタッフを削除できません。",
     };
   }
-  await revalidateEventStaffPathsBestEffort(data.event_id);
+  await revalidateEventStaffPathsBestEffort({
+    db: guard.db,
+    eventId: data.event_id,
+    actorUserId: guard.userId,
+    reason: data.reason,
+  });
   return { ok: true };
 }
 
@@ -586,6 +632,11 @@ export async function transferEventOwnershipAction(
       message: error instanceof Error ? error.message : "代表者を移譲できません。",
     };
   }
-  await revalidateEventStaffPathsBestEffort(data.event_id);
+  await revalidateEventStaffPathsBestEffort({
+    db: guard.db,
+    eventId: data.event_id,
+    actorUserId: guard.userId,
+    reason: data.reason,
+  });
   return { ok: true };
 }

@@ -226,6 +226,8 @@ export function buildVideoUpdatePlan(args: {
       displayNameChanged: args.parsed.display_name !== args.target.creator_display_name,
       iconChanged:
         (args.parsed.icon_url || null) !== (args.target.creator_icon_url || null),
+      titleChanged: args.parsed.title !== args.target.title,
+      youtubeChanged: args.youtubeChanged,
       canEditPrimaryEvent: args.sections.primary_event,
       hasEventIdsField: args.hasEventIdsField,
     }),
@@ -385,6 +387,15 @@ export async function applyVideoUpdatePlan(
         requestedByUserId: plan.operatorUserId,
       });
     }
+  }
+  if (plan.rebuildFlags.randomPoolCardChanged) {
+    queueItems.push({
+      targetType: "random_video_pool",
+      targetId: "global",
+      reason: "video_card_changed",
+      requestedByUserId: plan.operatorUserId,
+      priority: "low",
+    });
   }
   const queue = await buildStaticRebuildQueueBatch(db, queueItems);
   atomic.statements.push(...queue.statements);

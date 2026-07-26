@@ -284,7 +284,7 @@ export async function handleYoutubeSyncWakeQueue(
 
   try {
     let continued = false;
-    let youtube!: SyncBatchResult;
+    let youtube: SyncBatchResult | null = null;
     const metadataJob = await runJob(
       "sync-jobs",
       "youtube-sync-metadata",
@@ -297,7 +297,10 @@ export async function handleYoutubeSyncWakeQueue(
       { commitSha: env.BUILD_COMMIT_SHA },
     );
     if (!metadataJob.succeeded) {
-      throw new Error("youtube metadata commit failed");
+      throw new Error("youtube_metadata_commit_failed");
+    }
+    if (!youtube) {
+      throw new Error("youtube_sync_result_missing");
     }
 
     await runYoutubeSyncPostCommit(env, youtube, {
@@ -374,7 +377,7 @@ export async function runSyncJobs(
 
           const queueFlags = resolveQueueFeatureFlags(env);
           const includePending = !queueFlags.youtubeSyncEnabled;
-          let youtube!: SyncBatchResult;
+          let youtube: SyncBatchResult | null = null;
           const metadataJob = await runJob(
             "sync-jobs",
             "youtube-sync-metadata",
@@ -389,6 +392,16 @@ export async function runSyncJobs(
             },
             { commitSha: env.BUILD_COMMIT_SHA },
           );
+          if (!metadataJob.succeeded) {
+            return throwIfJobFailed(
+              "sync-jobs",
+              "youtube-sync-metadata",
+              metadataJob,
+            );
+          }
+          if (!youtube) {
+            throw new Error("youtube_sync_result_missing");
+          }
           await runYoutubeSyncPostCommit(env, youtube, {
             signal,
             useScoreBatchFallback: true,
@@ -397,7 +410,7 @@ export async function runSyncJobs(
 
           const now = new Date(execution.scheduledTime);
           if (isDailyYoutubeRelatedSlot(now) && !youtube.quota_stopped) {
-            let blockedYoutube!: SyncBatchResult;
+            let blockedYoutube: SyncBatchResult | null = null;
             const blockedRecheck = await runJob(
               "sync-jobs",
               "youtube-blocked-recheck",
@@ -411,7 +424,7 @@ export async function runSyncJobs(
               },
               { rethrow: false, commitSha: env.BUILD_COMMIT_SHA },
             );
-            if (blockedRecheck.succeeded) {
+            if (blockedRecheck.succeeded && blockedYoutube) {
               await runYoutubeSyncPostCommit(env, blockedYoutube, {
                 signal,
                 commitSha: env.BUILD_COMMIT_SHA,

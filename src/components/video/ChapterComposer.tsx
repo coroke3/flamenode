@@ -9,6 +9,7 @@ import {
   MAX_ATOMIC_CHAPTER_BULK_ROWS,
   parseChapterBulkCsv,
 } from "@/lib/actions/chapterLimits";
+import { usePlayerTimeSnapshot } from "./usePlayerTime";
 
 interface ChapterComposerProps {
   videoId: string;
@@ -93,6 +94,7 @@ export function ChapterComposer({
 }: ChapterComposerProps): React.ReactElement {
   const isInlineSheet = presentation === "inline-sheet";
   const router = useRouter();
+  const playerTime = usePlayerTimeSnapshot();
   const [open, setOpen] = React.useState(false);
   const [timeStr, setTimeStr] = React.useState(() =>
     formatTimeInput(initialTime),
@@ -114,6 +116,13 @@ export function ChapterComposer({
 
     setTimeStr(formatTimeInput(initialTime));
   }, [active, initialTime, isInlineSheet]);
+
+  const applyCurrentTime = React.useCallback(() => {
+    if (!playerTime.received) {
+      return;
+    }
+    setTimeStr(formatTimeInput(playerTime.currentTime));
+  }, [playerTime]);
 
   const submitBulk = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -283,6 +292,14 @@ export function ChapterComposer({
               maxLength={9}
               required
             />
+            <button
+              type="button"
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+              onClick={applyCurrentTime}
+              disabled={!playerTime.received || busy}
+            >
+              現在位置
+            </button>
             <span className="fn-badge fn-badge-neutral">チャプターコメント</span>
           </div>
           <input

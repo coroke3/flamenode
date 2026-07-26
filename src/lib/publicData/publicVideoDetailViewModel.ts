@@ -3,9 +3,15 @@ import type {
   StaticMemberChapter,
   StaticPublicChapter,
   StaticPublicEvent,
+  StaticRelatedVideo,
   StaticVideoDetail,
   StaticVideoMember,
 } from "./staticVideoDetailCore";
+import {
+  RELATED_DEFAULT_LIMIT,
+  RELATED_MIN_LIMIT,
+  resolveVisibleRelatedVideos,
+} from "./relatedVideoProjection";
 
 export interface PublicVideoDetailViewModel {
   generatedAt: number | null;
@@ -29,6 +35,7 @@ export function buildPublicVideoViewModelFromStatic(
   options?: {
     relatedBlockedIds?: ReadonlySet<string> | null;
     relatedUnavailable?: boolean;
+    relatedFallbackPool?: readonly StaticRelatedVideo[];
   },
 ): PublicVideoDetailViewModel {
   const primaryEvent =
@@ -38,9 +45,18 @@ export function buildPublicVideoViewModelFromStatic(
 
   const relatedVideos = options?.relatedUnavailable
     ? []
-    : detail.relatedVideos
-        .filter((video) => !options?.relatedBlockedIds?.has(video.id))
-        .map(toVideoCardData);
+    : resolveVisibleRelatedVideos({
+        primary: detail.relatedVideos,
+        reserve: detail.relatedReserve,
+        randomIds: detail.relatedRandomIds,
+        randomReserve: detail.relatedRandomReserve,
+        fallbackPool: options?.relatedFallbackPool,
+        blockedIds: options?.relatedBlockedIds,
+        currentVideoId: detail.video.id,
+        seed: detail.relatedRandomSeed || detail.video.id,
+        minTarget: RELATED_MIN_LIMIT,
+        maxTarget: RELATED_DEFAULT_LIMIT,
+      }).map(toVideoCardData);
 
   return {
     generatedAt: detail.generatedAt,
@@ -209,7 +225,7 @@ export function buildPublicVideoViewModelFromDatabase(args: {
   };
 }
 
-function toVideoCardData(video: StaticVideoDetail["relatedVideos"][number]): VideoCardData {
+function toVideoCardData(video: StaticRelatedVideo): VideoCardData {
   return {
     id: video.id,
     title: video.title,

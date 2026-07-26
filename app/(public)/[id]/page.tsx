@@ -22,6 +22,8 @@ import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
+import { FixedVideoPlayerFrame } from "@/components/video/FixedVideoPlayerFrame";
+import fixedPlayerStyles from "@/components/video/FixedVideoPlayerFrame.module.css";
 import { IntroCommentBlock } from "@/components/video/IntroCommentBlock";
 import { VideoUtilityDock } from "@/components/video/VideoUtilityDock";
 import { InteractionButton } from "@/components/video/InteractionButton";
@@ -46,8 +48,12 @@ import {
 import { buildPublicVideoViewModelFromStatic } from "@/lib/publicData/publicVideoDetailViewModel";
 import {
   loadPublicXIconMapOptional,
+  loadRandomVideoPoolOptional,
   loadYoutubeRelatedBlocklist,
 } from "@/lib/publicData/staticSharedInputsLoader";
+import { EMPTY_YOUTUBE_RELATED_BLOCKLIST } from "@/lib/publicData/staticYoutubeRelatedBlocklistCore";
+import { RELATED_MIN_LIMIT } from "@/lib/publicData/relatedVideoProjection";
+import type { StaticRelatedVideo } from "@/lib/publicData/staticVideoDetailCore";
 import {
   publicXIconEntriesToMap,
   resolveProjectedIcon,
@@ -113,10 +119,54 @@ export default async function VideoDetailPage({
           ?.title ?? null,
     });
     logPublicRequestMetrics();
+    const needsBlocklist =
+      staticProbe.data.relatedVideos.length > 0 ||
+      staticProbe.data.relatedReserve.length > 0 ||
+      staticProbe.data.relatedRandomReserve.length > 0;
+
+    const needsIconMap = staticProbe.data.publicMembers.some((member) =>
+      Boolean(member.x_user_id),
+    );
+
     const [blocklist, iconMapPayload] = await Promise.all([
-      loadYoutubeRelatedBlocklist(),
-      loadPublicXIconMapOptional(),
+      needsBlocklist
+        ? loadYoutubeRelatedBlocklist()
+        : Promise.resolve({
+            status: "fresh" as const,
+            value: EMPTY_YOUTUBE_RELATED_BLOCKLIST,
+          }),
+      needsIconMap
+        ? loadPublicXIconMapOptional()
+        : Promise.resolve(null),
     ]);
+
+    let relatedFallbackPool: StaticRelatedVideo[] = [];
+
+    if (blocklist.status !== "unavailable") {
+      const embeddedIds = new Set<string>();
+
+      for (const candidate of [
+        ...staticProbe.data.relatedVideos,
+        ...staticProbe.data.relatedReserve,
+        ...staticProbe.data.relatedRandomReserve,
+      ]) {
+        if (
+          candidate.id === staticProbe.data.video.id ||
+          blocklist.value.blockedIds.has(candidate.id)
+        ) {
+          continue;
+        }
+        embeddedIds.add(candidate.id);
+      }
+
+      if (
+        staticProbe.data.schemaVersion === 1 ||
+        embeddedIds.size < RELATED_MIN_LIMIT
+      ) {
+        relatedFallbackPool = (await loadRandomVideoPoolOptional()).items;
+      }
+    }
+
     return (
       <StaticVideoDetailView
         detail={staticProbe.data}
@@ -125,6 +175,7 @@ export default async function VideoDetailPage({
         overlay={overlay}
         relatedBlocklistStatus={blocklist.status}
         relatedBlockedIds={blocklist.value.blockedIds}
+        relatedFallbackPool={relatedFallbackPool}
         iconMap={publicXIconEntriesToMap(iconMapPayload)}
       />
     );
@@ -325,6 +376,7 @@ function StaticVideoDetailView({
   overlay,
   relatedBlocklistStatus = "unavailable",
   relatedBlockedIds,
+  relatedFallbackPool,
   iconMap,
 }: {
   detail: StaticVideoDetail;
@@ -333,11 +385,13 @@ function StaticVideoDetailView({
   overlay?: VideoViewerOverlay | null;
   relatedBlocklistStatus?: "fresh" | "stale" | "unavailable";
   relatedBlockedIds?: ReadonlySet<string>;
+  relatedFallbackPool?: readonly StaticRelatedVideo[];
   iconMap?: Map<string, PublicXIconEntry>;
 }): React.ReactElement {
   const vm = buildPublicVideoViewModelFromStatic(detail, {
     relatedUnavailable: relatedBlocklistStatus === "unavailable",
     relatedBlockedIds,
+    relatedFallbackPool,
   });
   const { video } = vm;
   if (video.visibility_status !== "public") {
@@ -356,7 +410,10 @@ function StaticVideoDetailView({
   const creatorName =
     video.creator_display_name?.trim() ||
     (creatorId !== "anonymous" ? creatorId : "作者未設定");
-  const creatorHref = creatorId !== "anonymous" ? `/user/${creatorId}` : null;
+  const creatorHref =
+    video.creator_has_public_profile && creatorId !== "anonymous"
+      ? `/user/${creatorId}`
+      : null;
   const youtubeId = video.youtube_video_id
     ? extractYoutubeId(video.youtube_video_id)
     : null;
@@ -491,10 +548,8 @@ function StaticVideoDetailView({
       <div className={styles.layout}>
         <article className={styles.main}>
           <div className={styles.heroLayout}>
-            <div
-              id="video-player-boundary"
-              className={styles.playerPane}
-              data-video-player-boundary
+            <FixedVideoPlayerFrame
+              className={`${styles.playerPane} ${fixedPlayerStyles.root ?? ""}`.trim()}
             >
               {youtubeId ? (
                 <YoutubePlayer youtubeId={youtubeId} title={video.title} />
@@ -506,7 +561,7 @@ function StaticVideoDetailView({
                   <p>YouTube 動画 ID が登録されていません。</p>
                 </div>
               )}
-            </div>
+            </FixedVideoPlayerFrame>
             <div className={styles.infoPane}>
               <h1 className={styles.title}>{video.title}</h1>
               <div className={styles.author}>
@@ -690,13 +745,14 @@ function StaticVideoDetailView({
                       x_user_id: member.x_user_id,
                       name: member.display_name,
                       role: member.role_label,
-                      comment: null,
-                      x_name: null,
+                      comment: member.comment ?? null,
+                      x_name: member.x_name ?? null,
                       icon_url: resolveProjectedIcon({
                         xUserId: member.x_user_id,
                         iconMap,
-                        legacyIconUrl: null,
+                        legacyIconUrl: member.icon_url ?? null,
                       }),
+                      has_public_profile: member.has_public_profile ?? false,
                     }))}
                     memberChapters={vm.memberChapters.map((chapter) => ({
                       id: chapter.id,

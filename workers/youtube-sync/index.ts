@@ -551,21 +551,32 @@ async function loadExistingMetadata(
   return map;
 }
 
+function isPublicAvailableWrite(
+  write: MetadataWrite,
+): boolean {
+  return (
+    write.syncStatus === "synced" &&
+    (
+      write.privacyStatus === "public" ||
+      write.privacyStatus === "unlisted"
+    )
+  );
+}
+
 function metadataValueChanged(
   before: ExistingMetadataRow | undefined,
   write: MetadataWrite,
 ): boolean {
-  if (!before) return write.syncStatus === "synced";
-  if (before.sync_status === "pending" && write.syncStatus === "synced") {
-    return true;
-  }
-  if (write.syncStatus !== "synced") return false;
-  if (
-    write.privacyStatus !== "public" &&
-    write.privacyStatus !== "unlisted"
-  ) {
+  if (!isPublicAvailableWrite(write)) {
     return false;
   }
+
+  if (!before) return true;
+
+  if (before.sync_status === "pending") {
+    return true;
+  }
+
   return (
     (write.viewCount != null &&
       Number(before.view_count ?? 0) !== write.viewCount)
@@ -636,6 +647,16 @@ function collectChangedVideoIds(
   return changed;
 }
 
+function parseYoutubeViewCount(
+  value: string | undefined,
+): number | null {
+  if (value == null || !/^\d+$/.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): MetadataWrite[] {
   return rows.map((row) => {
     const item = items.get(row.youtube_video_id);
@@ -651,23 +672,41 @@ function buildMetadataWrites(rows: SyncRow[], items: Map<string, YoutubeItem>): 
       };
     }
     const privacyStatus = item.status?.privacyStatus ?? null;
-    if (privacyStatus === "private") {
+    if (privacyStatus !== "public" && privacyStatus !== "unlisted") {
       return {
         videoId: row.id,
-        privacyStatus: "private",
-        availabilityStatus: "private",
+        privacyStatus,
+        availabilityStatus: privacyStatus,
         durationSeconds: null,
         viewCount: null,
-        syncStatus: "synced" as const,
-        syncError: null,
+        syncStatus: "failed" as const,
+        syncError: "permanent:youtube_video_unavailable",
       };
     }
+
+    const viewCount = parseYoutubeViewCount(item.statistics?.viewCount);
+    const durationSeconds = parseDuration(
+      item.contentDetails?.duration ?? "",
+    );
+
+    if (viewCount == null || !Number.isFinite(durationSeconds)) {
+      return {
+        videoId: row.id,
+        privacyStatus,
+        availabilityStatus: privacyStatus,
+        durationSeconds: null,
+        viewCount: null,
+        syncStatus: "failed" as const,
+        syncError: "permanent:youtube_metadata_invalid",
+      };
+    }
+
     return {
       videoId: row.id,
       privacyStatus,
       availabilityStatus: privacyStatus,
-      durationSeconds: parseDuration(item.contentDetails?.duration ?? ""),
-      viewCount: Number(item.statistics?.viewCount ?? 0),
+      durationSeconds,
+      viewCount,
       syncStatus: "synced" as const,
       syncError: null,
     };
@@ -708,18 +747,21 @@ async function persistMetadataBatch(
     signal?.throwIfAborted();
     const chunk = writes.slice(offset, offset + BULK_UPSERT_ROWS);
     const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = chunk.flatMap((row) => [
-      row.videoId,
-      row.privacyStatus,
-      row.availabilityStatus,
-      row.durationSeconds,
-      // INSERT時だけNOT NULL制約を満たす。既存行はCASEで維持する。
-      row.viewCount ?? 0,
-      now,
-      row.syncStatus,
-      row.syncError,
-      now,
-    ]);
+    const values = chunk.flatMap((row) => {
+      const publicAvailable = isPublicAvailableWrite(row);
+      return [
+        row.videoId,
+        row.privacyStatus,
+        row.availabilityStatus,
+        row.durationSeconds,
+        // INSERT時だけNOT NULL制約を満たす。既存行はCASEで維持する。
+        row.viewCount ?? 0,
+        publicAvailable ? now : null,
+        row.syncStatus,
+        row.syncError,
+        now,
+      ];
+    });
     statements.push(
       env.DB.prepare(
         `INSERT INTO video_youtube_metadata (
@@ -748,6 +790,7 @@ async function persistMetadataBatch(
            view_count = CASE
              WHEN excluded.sync_status = 'synced'
               AND excluded.youtube_privacy_status IN ('public', 'unlisted')
+              AND excluded.view_count IS NOT NULL
                THEN excluded.view_count
              ELSE video_youtube_metadata.view_count
            END,

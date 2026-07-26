@@ -19,6 +19,7 @@ export interface MemberSectionMember {
   comment: string | null;
   x_name: string | null;
   icon_url: string | null;
+  has_public_profile: boolean;
 }
 
 export interface MemberSectionChapter extends MemberChapterItemEntry {
@@ -122,7 +123,7 @@ export function MemberSection({
   duration,
   onSeek = seekToTime,
 }: MemberSectionProps): React.ReactElement | null {
-  const [mode, setMode] = React.useState<ViewMode>("cards");
+  const [mode, setMode] = React.useState<ViewMode>("table");
   const chapters = memberChapters ?? [];
   const hasMemberChapters = chapters.length > 0;
 
@@ -132,16 +133,16 @@ export function MemberSection({
     <div className={styles.root}>
       <div className={styles.tabs} role="tablist" aria-label="メンバー表示切替">
         <TabButton
-          icon="users"
-          label="カード"
-          active={mode === "cards"}
-          onClick={() => setMode("cards")}
-        />
-        <TabButton
           icon="list"
           label="テーブル"
           active={mode === "table"}
           onClick={() => setMode("table")}
+        />
+        <TabButton
+          icon="users"
+          label="カード"
+          active={mode === "cards"}
+          onClick={() => setMode("cards")}
         />
         {hasMemberChapters ? (
           <TabButton
@@ -215,9 +216,12 @@ function MemberCard({
 }: {
   member: MemberSectionMember;
 }): React.ReactElement {
-  // カードは登録済みのX表示名を正本にし、内部用の補完名を表示しない。
-  const displayName = member.x_name?.trim() || member.name?.trim() || "anonymous";
-  const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
+  const displayName =
+    member.name?.trim() || member.x_name?.trim() || "anonymous";
+  const internalHref =
+    member.has_public_profile && member.x_user_id
+      ? `/user/${member.x_user_id}`
+      : null;
   const xExternal = member.x_user_id
     ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
     : null;
@@ -302,7 +306,7 @@ function SortHeader({
     : "none";
 
   return (
-    <span role="columnheader" aria-sort={ariaSort} className={className}>
+    <th aria-sort={ariaSort} className={className} scope="col">
       <button
         type="button"
         className={styles.sortButton}
@@ -313,7 +317,7 @@ function SortHeader({
           {active ? (activeSort.direction === "asc" ? "↑" : "↓") : "↕"}
         </span>
       </button>
-    </span>
+    </th>
   );
 }
 
@@ -354,125 +358,158 @@ function TableView({
     });
   }, []);
 
-  return (
-    <div
-      className={`fn-table-scroll ${styles.tableWrap}`}
-      role="table"
-      aria-label="参加メンバー"
-    >
-      <div className={styles.tableHeader} role="row">
-        <SortHeader
-          label="No."
-          sortKey="order"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColNo}
-        />
-        <SortHeader
-          label="活動名"
-          sortKey="name"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColName}
-        />
-        <SortHeader
-          label="ID"
-          sortKey="handle"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColHandle}
-        />
-        <SortHeader
-          label="チャプター"
-          sortKey="chapters"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColChapters}
-        />
-        <SortHeader
-          label="役割"
-          sortKey="role"
-          activeSort={sort}
-          onSort={handleSort}
-          className={styles.tColRole}
-        />
-        <span role="columnheader" className={styles.tColComment}>
-          コメント
-        </span>
-      </div>
-      {sortedMembers.map((member, sortIndex) => {
-        const displayName = memberDisplayName(member);
-        const iconUrl = cachedGoogleImageUrl(member.icon_url);
-        const internalHref = member.x_user_id ? `/user/${member.x_user_id}` : null;
-        const externalHref = member.x_user_id
-          ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
-          : null;
-        const times = chapterTimes.get(member.id) ?? [];
-        const rowNum = defaultIndexMap.get(member.id) ?? sortIndex + 1;
+  const showProfileColumn = members.some((member) => member.has_public_profile);
+  const showXColumn = members.some((member) => Boolean(member.x_user_id));
+  const showChapterColumn = memberChapters.length > 0;
+  const showRoleColumn = members.some((member) => Boolean(member.role?.trim()));
+  const showCommentColumn = members.some((member) =>
+    Boolean(member.comment?.trim()),
+  );
 
-        return (
-          <div role="row" key={member.id} className={styles.tableRow}>
-            <span role="cell" className={styles.tColNo} data-label="No.">
-              {sort ? sortIndex + 1 : rowNum}
-            </span>
-            <span role="cell" className={styles.tColName} data-label="活動名">
-              <span className={styles.tNameCell}>
-                <span className={styles.tAvatar} aria-hidden>
-                  {iconUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={iconUrl} alt="" width={24} height={24} />
-                  ) : (
-                    <Icon name="user" size={11} aria-hidden />
-                  )}
-                </span>
-                {internalHref ? (
-                  <Link href={internalHref} className={styles.tNameLink}>
+  return (
+    <div className={`fn-table-scroll ${styles.tableWrap}`}>
+      <table className={styles.table} aria-label="参加メンバー">
+        <thead>
+          <tr className={styles.tableHeader}>
+            <SortHeader
+              label="No."
+              sortKey="order"
+              activeSort={sort}
+              onSort={handleSort}
+              className={styles.tColNo}
+            />
+            <SortHeader
+              label="活動名"
+              sortKey="name"
+              activeSort={sort}
+              onSort={handleSort}
+              className={styles.tColName}
+            />
+            {showProfileColumn ? (
+              <SortHeader
+                label="FlameNode"
+                sortKey="handle"
+                activeSort={sort}
+                onSort={handleSort}
+                className={styles.tColHandle}
+              />
+            ) : null}
+            {showXColumn ? (
+              <th scope="col" className={styles.tColHandle}>
+                X
+              </th>
+            ) : null}
+            {showChapterColumn ? (
+              <SortHeader
+                label="チャプター"
+                sortKey="chapters"
+                activeSort={sort}
+                onSort={handleSort}
+                className={styles.tColChapters}
+              />
+            ) : null}
+            {showRoleColumn ? (
+              <SortHeader
+                label="役割"
+                sortKey="role"
+                activeSort={sort}
+                onSort={handleSort}
+                className={styles.tColRole}
+              />
+            ) : null}
+            {showCommentColumn ? (
+              <th scope="col" className={styles.tColComment}>
+                コメント
+              </th>
+            ) : null}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedMembers.map((member, sortIndex) => {
+            const displayName = memberDisplayName(member);
+            const iconUrl = cachedGoogleImageUrl(member.icon_url);
+            const internalHref =
+              member.has_public_profile && member.x_user_id
+                ? `/user/${member.x_user_id}`
+                : null;
+            const externalHref = member.x_user_id
+              ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
+              : null;
+            const times = chapterTimes.get(member.id) ?? [];
+            const rowNum = defaultIndexMap.get(member.id) ?? sortIndex + 1;
+
+            return (
+              <tr key={member.id} className={styles.tableRow}>
+                <td className={styles.tColNo} data-label="No.">
+                  {sort ? sortIndex + 1 : rowNum}
+                </td>
+                <td className={styles.tColName} data-label="活動名">
+                  <span className={styles.tNameCell}>
+                    <span className={styles.tAvatar} aria-hidden>
+                      {iconUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={iconUrl} alt="" width={24} height={24} />
+                      ) : (
+                        <Icon name="user" size={11} aria-hidden />
+                      )}
+                    </span>
                     <span className={styles.tName}>{displayName}</span>
-                  </Link>
-                ) : (
-                  <span className={styles.tName}>{displayName}</span>
-                )}
-              </span>
-            </span>
-            <span role="cell" className={styles.tColHandle} data-label="ID">
-              {externalHref ? (
-                <a
-                  href={externalHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={styles.tHandleLink}
-                >
-                  @{member.x_user_id}
-                  <Icon name="external" size={10} aria-hidden />
-                </a>
-              ) : (
-                <span className={styles.tMuted}>—</span>
-              )}
-            </span>
-            <span
-              role="cell"
-              className={styles.tColChapters}
-              data-label="チャプター"
-            >
-              {times.length > 0 ? (
-                <span className={styles.chapterTimes}>{times.join(" / ")}</span>
-              ) : (
-                <span className={styles.tMuted}>—</span>
-              )}
-            </span>
-            <span role="cell" className={styles.tColRole} data-label="役割">
-              {member.role ?? <span className={styles.tMuted}>—</span>}
-            </span>
-            <span
-              role="cell"
-              className={styles.tColComment}
-              data-label="コメント"
-            >
-              {member.comment ?? <span className={styles.tMuted}>—</span>}
-            </span>
-          </div>
-        );
-      })}
+                  </span>
+                </td>
+                {showProfileColumn ? (
+                  <td className={styles.tColHandle} data-label="FlameNode">
+                    {internalHref ? (
+                      <Link href={internalHref} className={styles.tNameLink}>
+                        プロフィール
+                      </Link>
+                    ) : (
+                      <span className={styles.tMuted}>—</span>
+                    )}
+                  </td>
+                ) : null}
+                {showXColumn ? (
+                  <td className={styles.tColHandle} data-label="X">
+                    {externalHref ? (
+                      <a
+                        href={externalHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.tHandleLink}
+                      >
+                        @{member.x_user_id}
+                        <Icon name="external" size={10} aria-hidden />
+                      </a>
+                    ) : (
+                      <span className={styles.tMuted}>—</span>
+                    )}
+                  </td>
+                ) : null}
+                {showChapterColumn ? (
+                  <td className={styles.tColChapters} data-label="チャプター">
+                    {times.length > 0 ? (
+                      <span className={styles.chapterTimes}>
+                        {times.join(" / ")}
+                      </span>
+                    ) : (
+                      <span className={styles.tMuted}>—</span>
+                    )}
+                  </td>
+                ) : null}
+                {showRoleColumn ? (
+                  <td className={styles.tColRole} data-label="役割">
+                    {member.role ?? <span className={styles.tMuted}>—</span>}
+                  </td>
+                ) : null}
+                {showCommentColumn ? (
+                  <td className={styles.tColComment} data-label="コメント">
+                    {member.comment ?? <span className={styles.tMuted}>—</span>}
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

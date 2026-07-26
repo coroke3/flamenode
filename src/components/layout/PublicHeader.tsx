@@ -113,6 +113,7 @@ export function PublicHeader({
     triggerRef: menuButtonRef,
     routeKey: pathname ?? "",
     lockBody: true,
+    initialFocusMode: "panel",
   });
 
   useDismissablePanel({
@@ -124,6 +125,7 @@ export function PublicHeader({
     panelRef: searchPanelRef,
     triggerRef: searchButtonRef,
     routeKey: pathname ?? "",
+    initialFocusMode: "first",
   });
 
   const closeMobilePanels = () => {

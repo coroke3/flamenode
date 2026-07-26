@@ -87,6 +87,13 @@ export async function enqueueAfterVideoCreate(
       priority: "high",
       requestedByUserId: opts.requestedByUserId,
     },
+    {
+      targetType: "random_video_pool",
+      targetId: "global",
+      reason: "video_create",
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    },
     ...globalListTargets("video_create"),
   ];
   if (opts.creatorXUserId) {

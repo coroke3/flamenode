@@ -3,12 +3,29 @@
 import * as React from "react";
 import { subscribePlayerTime } from "./playerBridge";
 
-export function usePlayerTime(): number {
-  const [currentTime, setCurrentTime] = React.useState(0);
+export interface PlayerTimeSnapshot {
+  currentTime: number;
+  received: boolean;
+}
+
+export function usePlayerTimeSnapshot(): PlayerTimeSnapshot {
+  const [snapshot, setSnapshot] = React.useState<PlayerTimeSnapshot>({
+    currentTime: 0,
+    received: false,
+  });
 
   React.useEffect(() => {
-    return subscribePlayerTime(setCurrentTime);
+    return subscribePlayerTime((currentTime) => {
+      setSnapshot({
+        currentTime,
+        received: true,
+      });
+    });
   }, []);
 
-  return currentTime;
+  return snapshot;
+}
+
+export function usePlayerTime(): number {
+  return usePlayerTimeSnapshot().currentTime;
 }

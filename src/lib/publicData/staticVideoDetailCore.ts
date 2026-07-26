@@ -7,6 +7,7 @@ import {
 } from "./normalize";
 
 export interface StaticVideoDetailPayload {
+  schema_version?: unknown;
   generated_at?: unknown;
   video?: Record<string, unknown>;
   event_ids?: unknown;
@@ -17,6 +18,10 @@ export interface StaticVideoDetailPayload {
   member_chapters?: unknown;
   public_events?: unknown;
   related_videos?: unknown;
+  related_reserve?: unknown;
+  related_random_ids?: unknown;
+  related_random_reserve?: unknown;
+  related_random_seed?: unknown;
 }
 
 export interface StaticVideoDetailVideo {
@@ -27,6 +32,7 @@ export interface StaticVideoDetailVideo {
   youtube_video_id: string | null;
   creator_display_name: string | null;
   creator_icon_url: string | null;
+  creator_has_public_profile?: boolean;
   music: string | null;
   credit: string | null;
   music_reference_url: string | null;
@@ -47,6 +53,10 @@ export interface StaticVideoMember {
   x_user_id: string | null;
   role_label: string | null;
   order_index: number | null;
+  comment?: string | null;
+  x_name?: string | null;
+  icon_url?: string | null;
+  has_public_profile?: boolean;
 }
 
 export interface StaticPublicChapter {
@@ -90,6 +100,7 @@ export interface StaticRelatedVideo {
 }
 
 export interface StaticVideoDetail {
+  schemaVersion: 1 | 2;
   generatedAt: number | null;
   video: StaticVideoDetailVideo;
   eventIds: string[];
@@ -100,6 +111,10 @@ export interface StaticVideoDetail {
   memberChapters: StaticMemberChapter[];
   publicEvents: StaticPublicEvent[];
   relatedVideos: StaticRelatedVideo[];
+  relatedReserve: StaticRelatedVideo[];
+  relatedRandomIds: string[];
+  relatedRandomReserve: StaticRelatedVideo[];
+  relatedRandomSeed: string;
 }
 
 export function normalizeStaticVideoDetail(
@@ -144,8 +159,29 @@ export function normalizeStaticVideoDetail(
         .map(normalizeRelatedVideo)
         .filter((video): video is StaticRelatedVideo => video !== null)
     : [];
+  const relatedReserve = Array.isArray(payload.related_reserve)
+    ? payload.related_reserve
+        .map(normalizeRelatedVideo)
+        .filter((video): video is StaticRelatedVideo => video !== null)
+    : [];
+  const relatedRandomReserve = Array.isArray(payload.related_random_reserve)
+    ? payload.related_random_reserve
+        .map(normalizeRelatedVideo)
+        .filter((video): video is StaticRelatedVideo => video !== null)
+    : [];
+  const relatedRandomIds = Array.isArray(payload.related_random_ids)
+    ? payload.related_random_ids
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter(Boolean)
+    : [];
+  const relatedRandomSeed =
+    typeof payload.related_random_seed === "string"
+      ? payload.related_random_seed.trim()
+      : "";
+  const schemaVersion = Number(payload.schema_version) === 2 ? 2 : 1;
 
   return {
+    schemaVersion,
     generatedAt: normalizeUnix(payload.generated_at),
     video,
     eventIds,
@@ -156,6 +192,10 @@ export function normalizeStaticVideoDetail(
     memberChapters,
     publicEvents,
     relatedVideos,
+    relatedReserve,
+    relatedRandomIds,
+    relatedRandomReserve,
+    relatedRandomSeed,
   };
 }
 
@@ -174,6 +214,9 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
     youtube_video_id: normalizeNullableString(row.youtube_video_id),
     creator_display_name: normalizeNullableString(row.creator_display_name),
     creator_icon_url: normalizeNullableString(row.creator_icon_url),
+    creator_has_public_profile:
+      row.creator_has_public_profile === 1 ||
+      row.creator_has_public_profile === true,
     music: normalizeNullableString(row.music),
     credit: normalizeNullableString(row.credit),
     music_reference_url: normalizeNullableString(row.music_reference_url),
@@ -201,6 +244,11 @@ function normalizeMember(value: unknown): StaticVideoMember | null {
     x_user_id: normalizeNullableString(row.x_user_id),
     role_label: normalizeNullableString(row.role_label),
     order_index: normalizeUnix(row.order_index),
+    comment: normalizeNullableString(row.comment),
+    x_name: normalizeNullableString(row.x_name),
+    icon_url: normalizeNullableString(row.icon_url),
+    has_public_profile:
+      row.has_public_profile === 1 || row.has_public_profile === true,
   };
 }
 

@@ -364,6 +364,13 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       { targetType: "list_popular", targetId: "global", reason: "video_submit" },
       { targetType: "search_index", targetId: "global", reason: "video_submit" },
       { targetType: "users_index", targetId: "global", reason: "video_submit" },
+      {
+        targetType: "random_video_pool",
+        targetId: "global",
+        reason: existingVideo ? "video_card_update" : "video_create",
+        priority: "low",
+        requestedByUserId: userId,
+      },
       { targetType: "user", targetId: activeX, reason: "video_submit" },
       ...syncedEventIds.map((eventId) => ({
         targetType: "event" as const,
