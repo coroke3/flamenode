@@ -14,7 +14,6 @@ import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   isStaticRebuildTargetType,
-  type EnqueueStaticRebuildInput,
 } from "@/lib/staticRebuild/types";
 import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "@/lib/utils/publicXUser";
 import {
@@ -27,6 +26,10 @@ import {
   type StaticBackfillKind,
   type StaticBackfillRunState,
 } from "@/lib/staticRebuild/backfillStateCore";
+import {
+  loadRandomVideoPoolOptional,
+  loadYoutubeRelatedBlocklist,
+} from "@/lib/publicData/staticSharedInputsLoader";
 
 const BULK_RETRY_MAX = 8;
 const BACKFILL_BATCH_SIZE = 12;
@@ -78,6 +81,74 @@ async function countBackfillTargets(
   return Math.max(0, Number(row?.count ?? 0));
 }
 
+async function ensureVideoBackfillSharedInputs(args: {
+  actorUserId: string;
+  db: DB;
+}): Promise<boolean> {
+  const [blocklist, randomPool] = await Promise.all([
+    loadYoutubeRelatedBlocklist(),
+    loadRandomVideoPoolOptional(),
+  ]);
+
+  const ready =
+    blocklist.status !== "unavailable" &&
+    blocklist.value.generatedAt != null &&
+    randomPool.generatedAt != null &&
+    Boolean(randomPool.generationKey);
+
+  if (ready) {
+    return true;
+  }
+
+  const queue = await buildStaticRebuildQueueBatch(
+    args.db,
+    [
+      {
+        targetType: "youtube_related_blocklist",
+        targetId: "global",
+        reason: "backfill_video_v2_shared_inputs",
+        priority: "high",
+        requestedByUserId: args.actorUserId,
+      },
+      {
+        targetType: "random_video_pool",
+        targetId: "global",
+        reason: "backfill_video_v2_shared_inputs",
+        priority: "high",
+        requestedByUserId: args.actorUserId,
+      },
+    ],
+  );
+
+  if (queue.statements.length > 0) {
+    await mutateWithAudit(args.db, {
+      mutationStatements: queue.statements,
+      expectedMutationChanges: queue.expectedChanges,
+      audits: [
+        {
+          table_name: "static_rebuild_queue",
+          target_id: "backfill:video_v2:shared-inputs",
+          operation: "CREATE",
+          after: {
+            targets: [
+              "youtube_related_blocklist",
+              "random_video_pool",
+            ],
+          },
+          actor_user_id: args.actorUserId,
+          context: "admin_static_backfill",
+          reason: "動画バックフィル用共有JSON準備",
+          retention_class: "normal",
+          strict: true,
+        },
+      ],
+      staticRebuildWakeSource: "admin",
+    });
+  }
+
+  return false;
+}
+
 async function enqueueBackfillRows(args: {
   kind: StaticBackfillKind;
   cursor: string;
@@ -90,7 +161,46 @@ async function enqueueBackfillRows(args: {
   scannedThisBatch: number;
   enqueuedThisBatch: number;
 }> {
-  const total = await countBackfillTargets(args.db, args.kind);
+  const total = await countBackfillTargets(
+    args.db,
+    args.kind,
+  );
+  const now = Math.floor(Date.now() / 1000);
+  const baseScanned = args.restart
+    ? 0
+    : args.previous.scanned;
+  const baseEnqueued = args.restart
+    ? 0
+    : args.previous.enqueued;
+
+  if (args.kind === "video_v2") {
+    const sharedInputsReady =
+      await ensureVideoBackfillSharedInputs({
+        actorUserId: args.actorUserId,
+        db: args.db,
+      });
+
+    if (!sharedInputsReady) {
+      return {
+        scannedThisBatch: 0,
+        enqueuedThisBatch: 0,
+        run: {
+          cursor: args.restart
+            ? null
+            : args.cursor ||
+              args.previous.cursor,
+          phase: "shared_inputs",
+          status: "running",
+          total,
+          scanned: baseScanned,
+          enqueued: baseEnqueued,
+          last_error: null,
+          last_run_at: now,
+        },
+      };
+    }
+  }
+
   const limit = BACKFILL_BATCH_SIZE + 1;
   let selected: { id: string }[] = [];
 
@@ -142,11 +252,12 @@ async function enqueueBackfillRows(args: {
       .limit(limit);
   }
 
-  const hasMore = selected.length > BACKFILL_BATCH_SIZE;
-  const batch = selected.slice(0, BACKFILL_BATCH_SIZE);
-  const now = Math.floor(Date.now() / 1000);
-  const baseScanned = args.restart ? 0 : args.previous.scanned;
-  const baseEnqueued = args.restart ? 0 : args.previous.enqueued;
+  const hasMore =
+    selected.length > BACKFILL_BATCH_SIZE;
+  const batch = selected.slice(
+    0,
+    BACKFILL_BATCH_SIZE,
+  );
 
   if (batch.length === 0) {
     return {
@@ -154,6 +265,7 @@ async function enqueueBackfillRows(args: {
       enqueuedThisBatch: 0,
       run: {
         cursor: null,
+        phase: "items",
         status: "completed",
         total,
         scanned: Math.max(baseScanned, total),
@@ -172,38 +284,16 @@ async function enqueueBackfillRows(args: {
         : ("event" as const);
   const reason = `backfill_${args.kind}`;
 
-  const prerequisiteTargets: EnqueueStaticRebuildInput[] =
-    args.kind === "video_v2" && !args.cursor
-      ? [
-          {
-            targetType: "youtube_related_blocklist",
-            targetId: "global",
-            reason: "backfill_video_v2_prerequisite",
-            priority: "high",
-            requestedByUserId: args.actorUserId,
-          },
-          {
-            targetType: "random_video_pool",
-            targetId: "global",
-            reason: "backfill_video_v2_prerequisite",
-            priority: "normal",
-            requestedByUserId: args.actorUserId,
-          },
-        ]
-      : [];
-
-  const itemTargets: EnqueueStaticRebuildInput[] = batch.map((row) => ({
-    targetType,
-    targetId: row.id,
-    reason,
-    priority: "low",
-    requestedByUserId: args.actorUserId,
-  }));
-
-  const queue = await buildStaticRebuildQueueBatch(args.db, [
-    ...prerequisiteTargets,
-    ...itemTargets,
-  ]);
+  const queue = await buildStaticRebuildQueueBatch(
+    args.db,
+    batch.map((row) => ({
+      targetType,
+      targetId: row.id,
+      reason,
+      priority: "low" as const,
+      requestedByUserId: args.actorUserId,
+    })),
+  );
 
   if (queue.statements.length > 0) {
     await mutateWithAudit(args.db, {
@@ -212,13 +302,18 @@ async function enqueueBackfillRows(args: {
       audits: [
         {
           table_name: "static_rebuild_queue",
-          target_id: `backfill:${args.kind}:${batch[0]?.id ?? "empty"}`,
+          target_id:
+            `backfill:${args.kind}:${batch[0]?.id ?? "empty"}`,
           operation: "CREATE",
           after: {
             kind: args.kind,
             scanned: batch.length,
+            accepted_targets:
+              queue.acceptedTargetCount,
             cursor: args.cursor || null,
-            next_cursor: hasMore ? (batch.at(-1)?.id ?? null) : null,
+            next_cursor: hasMore
+              ? batch.at(-1)?.id ?? null
+              : null,
           },
           actor_user_id: args.actorUserId,
           context: "admin_static_backfill",
@@ -231,23 +326,25 @@ async function enqueueBackfillRows(args: {
     });
   }
 
-  const itemExpectedChanges = queue.expectedChanges.slice(
-    prerequisiteTargets.length,
-  );
-  const enqueuedThisBatch = itemExpectedChanges.reduce(
-    (sum, value) => sum + Math.max(0, Number(value ?? 0)),
-    0,
-  );
-
   return {
     scannedThisBatch: batch.length,
-    enqueuedThisBatch,
+    enqueuedThisBatch:
+      queue.acceptedTargetCount,
     run: {
-      cursor: hasMore ? (batch.at(-1)?.id ?? null) : null,
-      status: hasMore ? "running" : "completed",
+      cursor: hasMore
+        ? batch.at(-1)?.id ?? null
+        : null,
+      phase: "items",
+      status: hasMore
+        ? "running"
+        : "completed",
       total,
-      scanned: baseScanned + batch.length,
-      enqueued: baseEnqueued + enqueuedThisBatch,
+      scanned:
+        baseScanned +
+        batch.length,
+      enqueued:
+        baseEnqueued +
+        queue.acceptedTargetCount,
       last_error: null,
       last_run_at: now,
     },
@@ -257,23 +354,34 @@ async function enqueueBackfillRows(args: {
 export async function enqueueStaticBackfillBatch(
   formData: FormData,
 ): Promise<void> {
-  const guard = await requireAdminWrite("admin_static_rebuild");
+  const guard = await requireAdminWrite(
+    "admin_static_rebuild",
+  );
   if (!guard.ok) return;
 
-  const kind = String(formData.get("kind") ?? "") as StaticBackfillKind;
+  const kind = String(
+    formData.get("kind") ?? "",
+  ) as StaticBackfillKind;
   if (!STATIC_BACKFILL_KINDS.includes(kind)) {
     return;
   }
 
-  const mode = String(formData.get("mode") ?? "continue");
+  const mode = String(
+    formData.get("mode") ?? "continue",
+  );
   const restart = mode === "restart";
-  const requestedCursor = parseCursor(formData.get("cursor"));
+  const requestedCursor =
+    parseCursor(formData.get("cursor"));
 
   const state = await readStaticBackfillState();
   const previous = state.runs[kind];
   const cursor = restart
     ? ""
-    : requestedCursor || previous.cursor || "";
+    : requestedCursor ||
+      previous.cursor ||
+      "";
+
+  let redirectTarget: string;
 
   try {
     const result = await enqueueBackfillRows({
@@ -286,24 +394,38 @@ export async function enqueueStaticBackfillBatch(
     });
 
     const now = Math.floor(Date.now() / 1000);
-    const nextState = withStaticBackfillRun(state, kind, result.run, now);
-    const statePersisted = await writeStaticBackfillState(nextState);
-
-    revalidatePath("/admin/static-builds");
+    const nextState = withStaticBackfillRun(
+      state,
+      kind,
+      result.run,
+      now,
+    );
+    const statePersisted =
+      await writeStaticBackfillState(nextState);
 
     const params = new URLSearchParams({
       backfill_kind: kind,
-      backfill_scanned: String(result.scannedThisBatch),
-      backfill_enqueued: String(result.enqueuedThisBatch),
-      backfill_done: result.run.status === "completed" ? "1" : "0",
-      backfill_state_persisted: statePersisted ? "1" : "0",
+      backfill_scanned:
+        String(result.scannedThisBatch),
+      backfill_enqueued:
+        String(result.enqueuedThisBatch),
+      backfill_done:
+        result.run.status === "completed"
+          ? "1"
+          : "0",
+      backfill_state_persisted:
+        statePersisted ? "1" : "0",
     });
 
     if (result.run.cursor) {
-      params.set("backfill_cursor", result.run.cursor);
+      params.set(
+        "backfill_cursor",
+        result.run.cursor,
+      );
     }
 
-    redirect(`/admin/static-builds?${params.toString()}`);
+    redirectTarget =
+      `/admin/static-builds?${params.toString()}`;
   } catch (error) {
     const now = Math.floor(Date.now() / 1000);
     const message =
@@ -317,22 +439,32 @@ export async function enqueueStaticBackfillBatch(
       {
         ...previous,
         status: "failed",
-        last_error: message.slice(0, 1000),
+        last_error:
+          message.slice(0, 1000),
         last_run_at: now,
       },
       now,
     );
 
-    const statePersisted = await writeStaticBackfillState(failedState);
+    const statePersisted =
+      await writeStaticBackfillState(
+        failedState,
+      );
 
     const params = new URLSearchParams({
       backfill_kind: kind,
-      backfill_error: message.slice(0, 240),
-      backfill_state_persisted: statePersisted ? "1" : "0",
+      backfill_error:
+        message.slice(0, 240),
+      backfill_state_persisted:
+        statePersisted ? "1" : "0",
     });
 
-    redirect(`/admin/static-builds?${params.toString()}`);
+    redirectTarget =
+      `/admin/static-builds?${params.toString()}`;
   }
+
+  revalidatePath("/admin/static-builds");
+  redirect(redirectTarget);
 }
 
 async function retryRows(

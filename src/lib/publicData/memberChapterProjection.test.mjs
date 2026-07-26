@@ -51,11 +51,11 @@ test("非公開メンバーの明示chapterを除外する", () => {
   );
 });
 
-test("明示member IDがない場合は一意なX ID一致を使う", () => {
+test("古いmarker member IDは一意なX ID一致で補完する", () => {
   const projected = projectMemberChapters({
     chapters: [
       {
-        id: "plain-id",
+        id: "vm_old:member:0",
         x_user_id: "Member_A",
         chapter_time: 3,
         chapter_label: "plain",
@@ -76,11 +76,33 @@ test("明示member IDがない場合は一意なX ID一致を使う", () => {
   );
 });
 
+test("markerのない通常チャプターをメンバーチャプター化しない", () => {
+  const projected = projectMemberChapters({
+    chapters: [
+      {
+        id: "ch_regular",
+        x_user_id: "member_a",
+        chapter_time: 3,
+        chapter_label: "通常コメント",
+        note: null,
+      },
+    ],
+    publicMembers: [
+      {
+        id: "vm_a",
+        x_user_id: "member_a",
+      },
+    ],
+  });
+
+  assert.deepEqual(projected, []);
+});
+
 test("同じX IDの公開メンバーが複数ある場合は推測しない", () => {
   const projected = projectMemberChapters({
     chapters: [
       {
-        id: "plain-id",
+        id: "vm_old:legacy:0",
         x_user_id: "member_a",
         chapter_time: 3,
         chapter_label: "plain",

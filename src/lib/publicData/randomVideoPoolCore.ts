@@ -87,9 +87,19 @@ export function normalizeRandomVideoPool(
 export function buildRandomPoolGenerationMaterial(
   items: readonly StaticRelatedVideo[],
 ): string {
-  return items
-    .map((item) => item.id)
-    .filter(Boolean)
-    .sort()
+  return [...items]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((item) =>
+      JSON.stringify([
+        item.id,
+        item.title,
+        item.youtube_video_id ?? null,
+        item.display_name,
+        item.icon_url ?? null,
+        item.creator_x_user_id ?? null,
+        item.primary_event_id ?? null,
+        item.scheduled_time ?? null,
+      ]),
+    )
     .join("\n");
 }

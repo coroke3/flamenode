@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import styles from "./ChapterCommentItem.module.css";
-import { Icon } from "@/components/ui/Icon";
 import { formatDuration } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 
@@ -26,9 +25,9 @@ export interface MemberChapterItemEntry {
 
 interface MemberChapterItemProps {
   chapter: MemberChapterItemEntry;
-  /** 動画の長さ (秒)。chapter_time がこれを超えていれば「範囲外」表示。 */
+  /** 動画の長さ（秒）。超過時はシーク操作だけを無効化する。 */
   duration?: number | null;
-  /** クリックで動画をシークするコールバック。範囲外のときは発火しない。 */
+  /** クリックで動画をシークするコールバック。時間超過時は発火しない。 */
   onSeek?: (time: number) => void;
   className?: string;
 }
@@ -39,7 +38,16 @@ export function MemberChapterItem({
   onSeek,
   className,
 }: MemberChapterItemProps): React.ReactElement {
-  const outOfRange = duration ? chapter.chapter_time > duration : false;
+  const hasDuration =
+    duration != null &&
+    Number.isFinite(duration);
+  const outOfRange =
+    hasDuration &&
+    chapter.chapter_time > duration;
+  const interactive =
+    Boolean(onSeek) &&
+    !outOfRange;
+
   const handleClick = React.useCallback(() => {
     if (outOfRange) return;
     onSeek?.(chapter.chapter_time);
@@ -50,14 +58,15 @@ export function MemberChapterItem({
       className={cn(
         styles.item,
         outOfRange && styles.outOfRange,
-        onSeek && !outOfRange && styles.clickable,
+        interactive && styles.clickable,
         className,
       )}
       role={onSeek ? "button" : undefined}
-      tabIndex={onSeek ? 0 : undefined}
-      onClick={onSeek ? handleClick : undefined}
+      tabIndex={onSeek ? (interactive ? 0 : -1) : undefined}
+      aria-disabled={onSeek ? outOfRange : undefined}
+      onClick={interactive ? handleClick : undefined}
       onKeyDown={
-        onSeek
+        interactive
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -72,16 +81,7 @@ export function MemberChapterItem({
       </span>
       <div className={styles.body}>
         <div className={styles.titleRow}>
-          <Icon
-            name="chapter"
-            size={11}
-            className={styles.icon}
-            aria-hidden
-          />
           <span className={styles.title}>{chapter.chapter_label}</span>
-          {outOfRange ? (
-            <span className="fn-badge fn-badge-neutral">範囲外</span>
-          ) : null}
         </div>
         {chapter.note ? <p className={styles.note}>{chapter.note}</p> : null}
       </div>

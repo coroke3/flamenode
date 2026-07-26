@@ -12,8 +12,13 @@ export type StaticBackfillRunStatus =
   | "completed"
   | "failed";
 
+export type StaticBackfillRunPhase =
+  | "shared_inputs"
+  | "items";
+
 export interface StaticBackfillRunState {
   cursor: string | null;
+  phase: StaticBackfillRunPhase;
   status: StaticBackfillRunStatus;
   total: number;
   scanned: number;
@@ -33,6 +38,7 @@ export const STATIC_BACKFILL_KV_KEY = "static-backfill:state:v1";
 function emptyRun(): StaticBackfillRunState {
   return {
     cursor: null,
+    phase: "items",
     status: "idle",
     total: 0,
     scanned: 0,
@@ -68,6 +74,10 @@ function normalizeRun(value: unknown): StaticBackfillRunState {
 
   const row = value as Record<string, unknown>;
   const rawStatus = String(row.status ?? "");
+  const phase: StaticBackfillRunPhase =
+    row.phase === "shared_inputs"
+      ? "shared_inputs"
+      : "items";
 
   const status: StaticBackfillRunStatus =
     rawStatus === "running" ||
@@ -90,6 +100,7 @@ function normalizeRun(value: unknown): StaticBackfillRunState {
 
   return {
     cursor,
+    phase,
     status,
     total: normalizeCount(row.total),
     scanned: normalizeCount(row.scanned),

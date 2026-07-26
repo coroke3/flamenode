@@ -1,6 +1,12 @@
 import * as React from "react";
 import type { Metadata } from "next";
-import { desc, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  inArray,
+  like,
+  sql,
+} from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { staticRebuildQueue, systemSettings } from "@/lib/db/schema";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
@@ -56,6 +62,15 @@ export default async function AdminStaticBuildsPage({
 
   const db = getDatabase();
   let rows: (typeof staticRebuildQueue.$inferSelect)[] = [];
+  let backfillCountRows: Array<{
+    reason: string | null;
+    status: string;
+    c: number;
+  }> = [];
+  let backfillFailureRows: Array<{
+    reason: string | null;
+    error: string | null;
+  }> = [];
   let counts = { pending: 0, processing: 0, failed: 0, dead_letter: 0, done: 0 };
   let operationMode = resolveOperationMode(null);
 
@@ -65,6 +80,47 @@ export default async function AdminStaticBuildsPage({
       .from(staticRebuildQueue)
       .orderBy(desc(staticRebuildQueue.updated_at))
       .limit(80);
+
+    backfillCountRows = await db
+      .select({
+        reason: staticRebuildQueue.reason,
+        status: staticRebuildQueue.status,
+        c: sql<number>`COUNT(*)`,
+      })
+      .from(staticRebuildQueue)
+      .where(
+        like(
+          staticRebuildQueue.reason,
+          "backfill_%",
+        ),
+      )
+      .groupBy(
+        staticRebuildQueue.reason,
+        staticRebuildQueue.status,
+      );
+
+    backfillFailureRows = await db
+      .select({
+        reason: staticRebuildQueue.reason,
+        error: staticRebuildQueue.error,
+      })
+      .from(staticRebuildQueue)
+      .where(
+        and(
+          like(
+            staticRebuildQueue.reason,
+            "backfill_%",
+          ),
+          inArray(
+            staticRebuildQueue.status,
+            ["failed", "dead_letter"],
+          ),
+        )!,
+      )
+      .orderBy(
+        desc(staticRebuildQueue.updated_at),
+      )
+      .limit(20);
 
     const countRows = await db
       .select({
@@ -116,27 +172,46 @@ export default async function AdminStaticBuildsPage({
     }
   >;
 
-  for (const row of rows) {
-    const reason = String(row.reason ?? "");
-    const kind = STATIC_BACKFILL_KINDS.find(
-      (candidate) => reason === `backfill_${candidate}`,
+  for (const row of backfillCountRows) {
+    const kind = backfillKindFromReason(
+      String(row.reason ?? ""),
     );
     if (!kind) continue;
 
     const summary = backfillQueueSummary[kind];
+    const count = Math.max(
+      0,
+      Number(row.c ?? 0),
+    );
 
     if (row.status === "pending") {
-      summary.pending += 1;
+      summary.pending += count;
     }
     if (row.status === "processing") {
-      summary.processing += 1;
+      summary.processing += count;
     }
-    if (row.status === "failed" || row.status === "dead_letter") {
-      summary.failed += 1;
-      if (!summary.lastError && row.error) {
-        summary.lastError = row.error;
-      }
+    if (
+      row.status === "failed" ||
+      row.status === "dead_letter"
+    ) {
+      summary.failed += count;
     }
+  }
+
+  for (const row of backfillFailureRows) {
+    const kind = backfillKindFromReason(
+      String(row.reason ?? ""),
+    );
+    if (
+      !kind ||
+      backfillQueueSummary[kind].lastError ||
+      !row.error
+    ) {
+      continue;
+    }
+
+    backfillQueueSummary[kind].lastError =
+      row.error;
   }
 
   return (
@@ -294,7 +369,10 @@ export default async function AdminStaticBuildsPage({
                     className="fn-muted fn-text-sm"
                     style={{ margin: "6px 0 0" }}
                   >
-                    状態: {backfillStatusLabel(run.status)}
+                    状態:{" "}
+                    {run.phase === "shared_inputs"
+                      ? "共有JSON準備中"
+                      : backfillStatusLabel(run.status)}
                     {" / "}
                     対象: {run.total}
                     {" / "}
@@ -353,7 +431,9 @@ export default async function AdminStaticBuildsPage({
                     className="fn-btn fn-btn-primary"
                     disabled={completed}
                   >
-                    {run.cursor
+                    {run.phase === "shared_inputs"
+                      ? "共有JSONを確認して続行"
+                      : run.cursor
                       ? "続きを投入"
                       : completed
                         ? "完了"
@@ -424,4 +504,18 @@ function formatBackfillTime(unix: number): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(unix * 1000));
+}
+
+function backfillKindFromReason(
+  reason: string,
+): StaticBackfillKind | null {
+  return (
+    STATIC_BACKFILL_KINDS.find(
+      (kind) =>
+        reason === `backfill_${kind}` ||
+        reason.startsWith(
+          `backfill_${kind}_`,
+        ),
+    ) ?? null
+  );
 }

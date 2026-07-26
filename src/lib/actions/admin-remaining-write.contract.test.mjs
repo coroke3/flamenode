@@ -41,3 +41,27 @@ test("bulk admin retries are bounded below D1 free limits", () => {
   assert.match(sources["notification-admin.ts"], /\.limit\(BULK_RETRY_MAX \+ 1\)/);
   assert.match(sources["static-rebuild-admin.ts"], /\.limit\(BULK_RETRY_MAX \+ 1\)/);
 });
+
+test("バックフィル成功redirectをcatchしない", () => {
+  const source =
+    sources["static-rebuild-admin.ts"];
+
+  assert.match(
+    source,
+    /let redirectTarget: string/,
+  );
+  assert.match(
+    source,
+    /revalidatePath\("\/admin\/static-builds"\);\s*redirect\(redirectTarget\);/,
+  );
+
+  const tryBlock =
+    source.match(
+      /try \{[\s\S]*?\} catch \(error\)/,
+    )?.[0] ?? "";
+
+  assert.doesNotMatch(
+    tryBlock,
+    /\bredirect\(/,
+  );
+});

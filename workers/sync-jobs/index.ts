@@ -132,41 +132,63 @@ export function isDailyYoutubeRelatedSlot(now = new Date()): boolean {
   return now.getUTCHours() === DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR;
 }
 
-async function enqueueYoutubeRelatedBlocklistRebuild(
+const YOUTUBE_RELATED_PROJECTION_TARGETS = [
+  "youtube_related_blocklist",
+  "random_video_pool",
+] as const;
+
+async function enqueueYoutubeRelatedProjectionRebuilds(
   env: Env,
   reason: string,
   priority: "high" | "low",
   signal?: AbortSignal,
 ): Promise<number> {
   signal?.throwIfAborted();
+
   const now = Math.floor(Date.now() / 1000);
-  const activeUpdate = env.DB.prepare(
-    `UPDATE static_rebuild_queue
-        SET reason = ?,
-            priority = CASE
-              WHEN priority = 'high' OR ? = 'high' THEN 'high'
-              ELSE priority
-            END,
-            updated_at = MAX(updated_at + 1, ?)
-      WHERE target_type = 'youtube_related_blocklist'
-        AND target_id = 'global'
-        AND status IN ('pending', 'processing')`,
-  ).bind(reason, priority, now);
-  const insert = env.DB.prepare(
-    `INSERT OR IGNORE INTO static_rebuild_queue (
-       id, target_type, target_id, reason, priority, status,
-       attempt_count, created_at, updated_at
-     ) VALUES (?, 'youtube_related_blocklist', 'global',
-       ?, ?, 'pending', 0, ?, ?)`,
-  ).bind(
-    `srb:youtube_related_blocklist:${crypto.randomUUID()}`,
-    reason,
-    priority,
-    now,
-    now,
+  const statements = YOUTUBE_RELATED_PROJECTION_TARGETS.flatMap(
+    (targetType) => {
+      const activeUpdate = env.DB.prepare(
+        `UPDATE static_rebuild_queue
+            SET reason = ?,
+                priority = CASE
+                  WHEN priority = 'high' OR ? = 'high' THEN 'high'
+                  ELSE priority
+                END,
+                updated_at = MAX(updated_at + 1, ?)
+          WHERE target_type = ?
+            AND target_id = 'global'
+            AND status IN ('pending', 'processing')`,
+      ).bind(
+        reason,
+        priority,
+        now,
+        targetType,
+      );
+
+      const insert = env.DB.prepare(
+        `INSERT OR IGNORE INTO static_rebuild_queue (
+           id, target_type, target_id, reason, priority, status,
+           attempt_count, created_at, updated_at
+         ) VALUES (
+           ?, ?, 'global', ?, ?, 'pending', 0, ?, ?
+         )`,
+      ).bind(
+        `srb:${targetType}:${crypto.randomUUID()}`,
+        targetType,
+        reason,
+        priority,
+        now,
+        now,
+      );
+
+      return [activeUpdate, insert];
+    },
   );
-  const results = await env.DB.batch([activeUpdate, insert]);
+
+  const results = await env.DB.batch(statements);
   signal?.throwIfAborted();
+
   return results.reduce(
     (sum, result) =>
       sum + Math.max(0, Number(result.meta?.changes ?? 0)),
@@ -190,7 +212,7 @@ export async function runYoutubeSyncPostCommit(
   const { signal, useScoreBatchFallback = false, commitSha } = options;
 
   if (youtube.related_eligibility_changed_video_ids.length > 0) {
-    const enqueued = await enqueueYoutubeRelatedBlocklistRebuild(
+    const enqueued = await enqueueYoutubeRelatedProjectionRebuilds(
       env,
       "youtube_related_eligibility_changed",
       "high",
@@ -431,7 +453,7 @@ export async function runSyncJobs(
               });
             }
 
-            const reconciled = await enqueueYoutubeRelatedBlocklistRebuild(
+            const reconciled = await enqueueYoutubeRelatedProjectionRebuilds(
               env,
               "youtube_related_blocklist_daily_reconcile",
               "low",

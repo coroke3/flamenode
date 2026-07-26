@@ -121,6 +121,25 @@ test("Queue consumer は metadata commit と post-commit を分離する", () =>
   assert.doesNotMatch(consumerBlock, /combineJobCounters\(youtube, score/);
 });
 
+test("YouTube公開可否変更はblocklistとrandom poolを同時更新する", () => {
+  assert.match(
+    source,
+    /YOUTUBE_RELATED_PROJECTION_TARGETS/,
+  );
+  assert.match(
+    source,
+    /"youtube_related_blocklist"/,
+  );
+  assert.match(
+    source,
+    /"random_video_pool"/,
+  );
+  assert.match(
+    source,
+    /enqueueYoutubeRelatedProjectionRebuilds/,
+  );
+});
+
 test("Cron は metadata 失敗だけを throwIfJobFailed する", () => {
   const cronBlock = source.slice(
     source.indexOf("export async function runSyncJobs"),

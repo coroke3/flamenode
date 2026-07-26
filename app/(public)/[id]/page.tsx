@@ -139,17 +139,18 @@ export default async function VideoDetailPage({
         Boolean(video.creator_x_user_id),
       );
 
-    const [blocklist, iconMapPayload] = await Promise.all([
+    const iconMapPromise = needsIconMap
+      ? loadPublicXIconMapOptional()
+      : null;
+
+    const blocklist = await (
       needsBlocklist
         ? loadYoutubeRelatedBlocklist()
         : Promise.resolve({
             status: "fresh" as const,
             value: EMPTY_YOUTUBE_RELATED_BLOCKLIST,
-          }),
-      needsIconMap
-        ? loadPublicXIconMapOptional()
-        : Promise.resolve(null),
-    ]);
+          })
+    );
 
     let relatedFallbackPool: StaticRelatedVideo[] = [];
 
@@ -177,6 +178,16 @@ export default async function VideoDetailPage({
         relatedFallbackPool = (await loadRandomVideoPoolOptional()).items;
       }
     }
+
+    const fallbackNeedsIconMap =
+      relatedFallbackPool.some((video) =>
+        Boolean(video.creator_x_user_id),
+      );
+    const iconMapPayload = iconMapPromise
+      ? await iconMapPromise
+      : fallbackNeedsIconMap
+        ? await loadPublicXIconMapOptional()
+        : null;
 
     return (
       <StaticVideoDetailView

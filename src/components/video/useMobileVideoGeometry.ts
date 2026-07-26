@@ -6,7 +6,6 @@ const MOBILE_QUERY =
   "(max-width: 900px)";
 const VIDEO_ASPECT_RATIO = 16 / 9;
 const LANDSCAPE_MIN_CONTENT_HEIGHT_PX = 160;
-const LANDSCAPE_MIN_PLAYER_WIDTH_PX = 240;
 
 function px(value: number):
   string {
@@ -156,11 +155,22 @@ useMobileVideoGeometry(
 
       const isLandscape =
         viewportWidth > viewportHeight;
+
+      const viewportBottom =
+        viewportTop +
+        viewportHeight;
+      const effectiveHeaderBottom =
+        Math.max(
+          viewportTop,
+          headerBottom,
+        );
       const availableHeight =
-        viewportHeight -
-        headerBottom -
-        keyboardInset;
-      const maxLandscapePlayerHeight =
+        Math.max(
+          0,
+          viewportBottom -
+            effectiveHeaderBottom,
+        );
+      const maxConstrainedPlayerHeight =
         Math.max(
           0,
           availableHeight -
@@ -168,19 +178,16 @@ useMobileVideoGeometry(
         );
 
       const widthFromAvailableHeight =
-        maxLandscapePlayerHeight *
+        maxConstrainedPlayerHeight *
         VIDEO_ASPECT_RATIO;
 
-      const playerWidth = isLandscape
+      const constrainByHeight =
+        isLandscape ||
+        keyboardInset > 0;
+      const playerWidth = constrainByHeight
         ? Math.min(
             viewportWidth,
-            Math.max(
-              Math.min(
-                viewportWidth,
-                LANDSCAPE_MIN_PLAYER_WIDTH_PX,
-              ),
-              widthFromAvailableHeight,
-            ),
+            Math.max(1, widthFromAvailableHeight),
           )
         : viewportWidth;
 
@@ -190,7 +197,7 @@ useMobileVideoGeometry(
 
       root.style.setProperty(
         "--fn-header-bottom",
-        px(headerBottom),
+        px(effectiveHeaderBottom),
       );
       root.style.setProperty(
         "--fn-mobile-player-width",
@@ -203,7 +210,7 @@ useMobileVideoGeometry(
       root.style.setProperty(
         "--fn-mobile-player-bottom",
         px(
-          headerBottom +
+          effectiveHeaderBottom +
           playerHeight,
         ),
       );
@@ -225,7 +232,6 @@ useMobileVideoGeometry(
         );
     }
 
-    observer.observe(player);
     resolveHeader();
     schedule();
 
@@ -241,6 +247,11 @@ useMobileVideoGeometry(
       schedule,
     );
     window.addEventListener(
+      "scroll",
+      schedule,
+      { passive: true },
+    );
+    window.addEventListener(
       "orientationchange",
       schedule,
     );
@@ -250,6 +261,10 @@ useMobileVideoGeometry(
     );
     viewport?.addEventListener(
       "resize",
+      schedule,
+    );
+    viewport?.addEventListener(
+      "scroll",
       schedule,
     );
 
@@ -265,6 +280,10 @@ useMobileVideoGeometry(
         schedule,
       );
       window.removeEventListener(
+        "scroll",
+        schedule,
+      );
+      window.removeEventListener(
         "orientationchange",
         schedule,
       );
@@ -274,6 +293,10 @@ useMobileVideoGeometry(
       );
       viewport?.removeEventListener(
         "resize",
+        schedule,
+      );
+      viewport?.removeEventListener(
+        "scroll",
         schedule,
       );
       clearVariables();

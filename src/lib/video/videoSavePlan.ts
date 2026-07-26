@@ -363,13 +363,32 @@ export async function applyVideoUpdatePlan(
     reason: "video_update",
     requestedByUserId: plan.operatorUserId,
   }];
-  if (plan.rebuildFlags.identityChanged && payload.creator_x_user_id) {
-    queueItems.push({
-      targetType: "user",
-      targetId: payload.creator_x_user_id,
-      reason: "video_identity_update",
-      requestedByUserId: plan.operatorUserId,
-    });
+  if (plan.rebuildFlags.identityChanged) {
+    const affectedCreatorIds = new Set(
+      [
+        plan.target.creator_x_user_id,
+        payload.creator_x_user_id,
+      ].filter((id): id is string => Boolean(id)),
+    );
+
+    for (const creatorXUserId of affectedCreatorIds) {
+      queueItems.push({
+        targetType: "user",
+        targetId: creatorXUserId,
+        reason: "video_identity_update",
+        requestedByUserId: plan.operatorUserId,
+      });
+    }
+
+    if (affectedCreatorIds.size > 0) {
+      queueItems.push({
+        targetType: "users_index",
+        targetId: "global",
+        reason: "video_identity_update",
+        requestedByUserId: plan.operatorUserId,
+      });
+    }
+
     queueItems.push({
       targetType: "search_index",
       targetId: "global",

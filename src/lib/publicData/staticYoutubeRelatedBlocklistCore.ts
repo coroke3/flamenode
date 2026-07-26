@@ -51,8 +51,12 @@ export function normalizeYoutubeRelatedBlocklist(
   }
 
   const generated = Number(payload.generated_at);
+  if (!Number.isFinite(generated) || generated <= 0) {
+    return null;
+  }
+
   return {
-    generatedAt: Number.isFinite(generated) ? Math.floor(generated) : null,
+    generatedAt: Math.floor(generated),
     blockedIds: new Set(reasons.keys()),
     reasons,
   };

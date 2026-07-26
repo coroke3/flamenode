@@ -46,7 +46,11 @@ function resolveProjectedMemberId(args: {
 }): string | null {
   const explicitMemberId = extractVideoMemberIdFromChapterId(args.chapter.id);
 
-  if (explicitMemberId && args.publicMemberIds.has(explicitMemberId)) {
+  if (!explicitMemberId) {
+    return null;
+  }
+
+  if (args.publicMemberIds.has(explicitMemberId)) {
     return explicitMemberId;
   }
 

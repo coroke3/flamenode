@@ -163,9 +163,11 @@ export default async function UserPage({
           ...worksPage.items,
           ...collabPage.items,
         ];
-        const needsIconMap = visibleVideoCards.some(
-          (video) => Boolean(video.creator_x_user_id),
-        );
+        const needsIconMap =
+          Boolean(staticLoaded.data.user.id) ||
+          visibleVideoCards.some(
+            (video) => Boolean(video.creator_x_user_id),
+          );
         const iconMapPayload = needsIconMap
           ? await loadPublicXIconMapOptional()
           : null;
@@ -241,7 +243,13 @@ function StaticUserProfileView({
     usp.set("collabPage", String(p));
     return `${basePath}?${usp.toString()}`;
   };
-  const profileIcon = cachedGoogleImageUrl(user.icon_url);
+  const profileIcon = cachedGoogleImageUrl(
+    resolveProjectedIcon({
+      xUserId: user.id,
+      iconMap,
+      legacyIconUrl: user.icon_url,
+    }),
+  );
   const profileName = user.x_name || user.id;
   const socialLinks = parseSocialLinks(user.other_social_links);
   const portfolioContact = normalizePortfolioContact(user.portfolio_contact);

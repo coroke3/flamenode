@@ -605,7 +605,7 @@ test("ユーザー合作取得はJOIN重複ではなくEXISTSを使う", () => {
   );
 });
 
-test("YouTube関連blocklistは公開作品だけを対象にする", () => {
+test("関連blocklistはFlameNode非公開とYouTube非公開を遮断する", () => {
   const blocklistFn = source.match(
     /async function rebuildYoutubeRelatedBlocklist[\s\S]*?(?=\nasync function )/,
   )?.[0];
@@ -613,10 +613,58 @@ test("YouTube関連blocklistは公開作品だけを対象にする", () => {
   assert.ok(blocklistFn);
   assert.match(
     blocklistFn,
-    /v\.visibility_status = 'public'/,
+    /LEFT JOIN video_youtube_metadata/,
+  );
+  assert.match(
+    blocklistFn,
+    /v\.visibility_status <> 'public'/,
+  );
+  assert.match(
+    blocklistFn,
+    /youtube_privacy_status = 'private'/,
+  );
+  assert.match(
+    blocklistFn,
+    /missing_or_private/,
+  );
+});
+
+test("random poolはR2 blocklistへ依存せずD1で対象を除外する", () => {
+  const randomPoolFn = source.match(
+    /async function rebuildRandomVideoPool[\s\S]*?(?=\nasync function )/,
+  )?.[0];
+
+  assert.ok(randomPoolFn);
+  assert.doesNotMatch(
+    randomPoolFn,
+    /loadWorkerRelatedBlocklist/,
+  );
+  assert.match(
+    randomPoolFn,
+    /NOT EXISTS \([\s\S]*video_youtube_metadata/,
+  );
+});
+
+test("通常チャプターとメンバーチャプターは別queryで取得する", () => {
+  const videoFn = source.match(
+    /async function rebuildVideo[\s\S]*?(?=\nasync function rebuildUsersIndex)/,
+  )?.[0];
+
+  assert.ok(videoFn);
+  assert.match(
+    videoFn,
+    /vc\.id NOT LIKE '%:member:%'/,
+  );
+  assert.match(
+    videoFn,
+    /vc\.id LIKE '%:member:%'/,
+  );
+  assert.match(
+    videoFn,
+    /chapters: \(memberChapters\.results/,
   );
   assert.doesNotMatch(
-    blocklistFn,
-    /v\.visibility_status <> 'voided'/,
+    videoFn,
+    /allPublicChapters/,
   );
 });

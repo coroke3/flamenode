@@ -159,6 +159,16 @@ export async function enqueueAfterVideoUpdate(
   const listAffecting =
     opts.visibilityChanged || opts.eventMembershipChanged || opts.identityChanged;
 
+  if (opts.visibilityChanged) {
+    items.push({
+      targetType: "youtube_related_blocklist",
+      targetId: "global",
+      reason: "video_visibility_changed",
+      priority: "normal",
+      requestedByUserId: opts.requestedByUserId,
+    });
+  }
+
   if (listAffecting) {
     items.push({
       targetType: "random_video_pool",
@@ -223,6 +233,13 @@ export function buildAfterVideoStatusChangeQueueBatch(
       targetType: "video",
       targetId: opts.videoId,
       reason: "video_update",
+      priority: "normal",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "youtube_related_blocklist",
+      targetId: "global",
+      reason: "video_visibility_changed",
       priority: "normal",
       requestedByUserId: opts.requestedByUserId,
     },

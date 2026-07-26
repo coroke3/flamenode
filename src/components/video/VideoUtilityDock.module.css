@@ -24,22 +24,23 @@
 @media (max-width: 900px) {
   .dock {
     --fn-video-dock-toolbar-height: 64px;
-    --fn-video-player-bottom:
-      calc(var(--header-h, 56px) + 56.25vw);
-    --fn-keyboard-inset: 0px;
   }
 
   .sheet {
     position: fixed;
     z-index: 79;
 
-    top: var(--fn-video-player-bottom);
+    top:
+      var(
+        --fn-mobile-player-bottom,
+        calc(var(--header-h, 56px) + 56.25vw)
+      );
     right: 0;
     bottom:
       calc(
         var(--fn-video-dock-toolbar-height)
         + env(safe-area-inset-bottom)
-        + var(--fn-keyboard-inset)
+        + var(--fn-keyboard-inset, 0px)
       );
     left: 0;
 
@@ -148,7 +149,7 @@
     z-index: 80;
 
     right: 0;
-    bottom: var(--fn-keyboard-inset);
+    bottom: var(--fn-keyboard-inset, 0px);
     left: 0;
 
     min-height:

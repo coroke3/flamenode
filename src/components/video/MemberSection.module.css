@@ -342,27 +342,15 @@
     overflow-x: auto;
   }
 
-  .tableHeader,
-  .tableRow {
-    display: grid;
-    grid-template-columns:
-      minmax(170px, 1.2fr)
-      minmax(112px, 0.9fr)
-      minmax(104px, 0.8fr)
-      minmax(78px, 0.7fr)
-      minmax(146px, 1.35fr);
-    min-width: 620px;
+  .table {
+    min-width: 680px;
   }
 
-  .tableRow > span {
-    display: flex;
+  .tableHeader > th,
+  .tableRow > td {
     padding: 7px 8px;
     font-size: 11.5px;
     line-height: 1.55;
-  }
-
-  .tableRow > span::before {
-    content: none;
   }
 
   .tColComment {

@@ -66,7 +66,6 @@ import {
   selectDeterministicRandom,
 } from "../../src/lib/publicData/relatedVideoProjection.ts";
 import {
-  extractVideoMemberIdFromChapterId,
   projectMemberChapters,
 } from "../../src/lib/video/memberChapterProjection.ts";
 import { isConfirmedInternalVideoId } from "../../src/lib/video/internalId.ts";
@@ -1391,7 +1390,7 @@ async function loadWorkerRelatedBlocklist(
     signal,
   );
   const blocklist = normalizeYoutubeRelatedBlocklist(payload);
-  if (!blocklist) {
+  if (!blocklist || blocklist.generatedAt == null) {
     throw new Error(
       "youtube_related_blocklist_required_for_static_generation",
     );
@@ -1445,7 +1444,8 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
     publicEvents,
     members,
     softwareLabels,
-    allPublicChapters,
+    publicChapters,
+    memberChapters,
   ] = await Promise.all([
     env.DB.prepare(
       `SELECT ve.event_id
@@ -1494,13 +1494,28 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
       .bind(internalVideoId)
       .all<{ raw_label?: string }>(),
     env.DB.prepare(
-      `SELECT vc.id, vc.x_user_id,
-              vc.chapter_time, vc.chapter_label, vc.note,
+      `SELECT vc.id, vc.chapter_time, vc.chapter_label, vc.note,
               xu.x_name AS author_name, xu.icon_url AS author_icon
        FROM video_chapters AS vc
        LEFT JOIN x_users AS xu ON xu.id = vc.x_user_id
        WHERE vc.video_id = ?
          AND vc.visibility = 'public'
+         AND vc.id NOT LIKE '%:member:%'
+         AND vc.id NOT LIKE '%:legacy:%'
+       ORDER BY vc.chapter_time ASC, vc.id ASC`,
+    )
+      .bind(internalVideoId)
+      .all(),
+    env.DB.prepare(
+      `SELECT vc.id, vc.x_user_id,
+              vc.chapter_time, vc.chapter_label, vc.note
+       FROM video_chapters AS vc
+       WHERE vc.video_id = ?
+         AND vc.visibility = 'public'
+         AND (
+           vc.id LIKE '%:member:%'
+           OR vc.id LIKE '%:legacy:%'
+         )
        ORDER BY vc.chapter_time ASC, vc.id ASC`,
     )
       .bind(internalVideoId)
@@ -1518,50 +1533,13 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
     }))
     .filter((entry) => Boolean(entry.id));
 
-  const chapterSources = (allPublicChapters.results ?? []).map((entry) => ({
-    id: String((entry as { id?: unknown }).id ?? ""),
-    x_user_id:
-      (entry as { x_user_id?: unknown }).x_user_id == null
-        ? null
-        : String((entry as { x_user_id?: unknown }).x_user_id),
-    chapter_time: Number(
-      (entry as { chapter_time?: unknown }).chapter_time ?? 0,
-    ),
-    chapter_label: String(
-      (entry as { chapter_label?: unknown }).chapter_label ?? "",
-    ),
-    note:
-      (entry as { note?: unknown }).note == null
-        ? null
-        : String((entry as { note?: unknown }).note),
-  }));
-
   const projectedMemberChapters = projectMemberChapters({
-    chapters: chapterSources,
-    publicMembers: publicMembersForProjection,
-  });
-
-  const projectedMemberChapterIds = new Set(
-    projectedMemberChapters.map((chapter) => chapter.id),
-  );
-  const memberMarkerChapterIds = new Set(
-    chapterSources
-      .filter((chapter) =>
-        Boolean(extractVideoMemberIdFromChapterId(chapter.id)),
-      )
-      .map((chapter) => chapter.id),
-  );
-
-  const projectedPublicChapters = (allPublicChapters.results ?? [])
-    .filter((entry) => {
-      const id = String((entry as { id?: unknown }).id ?? "");
-      return (
-        !projectedMemberChapterIds.has(id) &&
-        !memberMarkerChapterIds.has(id)
-      );
-    })
-    .map((entry) => ({
+    chapters: (memberChapters.results ?? []).map((entry) => ({
       id: String((entry as { id?: unknown }).id ?? ""),
+      x_user_id:
+        (entry as { x_user_id?: unknown }).x_user_id == null
+          ? null
+          : String((entry as { x_user_id?: unknown }).x_user_id),
       chapter_time: Number(
         (entry as { chapter_time?: unknown }).chapter_time ?? 0,
       ),
@@ -1572,15 +1550,9 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
         (entry as { note?: unknown }).note == null
           ? null
           : String((entry as { note?: unknown }).note),
-      author_name:
-        (entry as { author_name?: unknown }).author_name == null
-          ? null
-          : String((entry as { author_name?: unknown }).author_name),
-      author_icon:
-        (entry as { author_icon?: unknown }).author_icon == null
-          ? null
-          : String((entry as { author_icon?: unknown }).author_icon),
-    }));
+    })),
+    publicMembers: publicMembersForProjection,
+  });
 
   const eventIds = (events.results ?? []).map(
     (entry) => (entry as { event_id: string }).event_id,
@@ -1637,7 +1609,11 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
   const semanticIds = new Set(primarySemantic.map((video) => String(video.id)));
   const blockedIds = blocklist.blockedIds;
 
-  const randomSeed = [internalVideoId, randomPool.generationKey].join(":");
+  const randomSeed = [
+    internalVideoId,
+    randomPool.generationKey,
+    blocklist.generatedAt,
+  ].join(":");
   const randomCandidates = randomPool.items.filter(
     (candidate) =>
       candidate.id !== internalVideoId &&
@@ -1687,7 +1663,7 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
       .map((entry) => String(entry.raw_label ?? "").trim())
       .filter(Boolean),
     app_like_count: Number((row as { app_like_count?: unknown }).app_like_count ?? 0) || 0,
-    public_chapters: projectedPublicChapters,
+    public_chapters: publicChapters.results ?? [],
     member_chapters: projectedMemberChapters,
     public_events: publicEvents.results ?? [],
     ...relatedSection,
@@ -1771,17 +1747,20 @@ async function rebuildYoutubeRelatedBlocklist(
   const now = Math.floor(Date.now() / 1000);
   const result = await env.DB.prepare(
     `SELECT v.id AS video_id,
+            v.visibility_status,
             ym.youtube_privacy_status,
             ym.youtube_availability_status
-       FROM video_youtube_metadata AS ym
-       INNER JOIN videos AS v ON v.id = ym.video_id
-      WHERE v.visibility_status = 'public'
-        AND (
+       FROM videos AS v
+       LEFT JOIN video_youtube_metadata AS ym
+         ON ym.video_id = v.id
+      WHERE v.visibility_status <> 'public'
+         OR (
           ym.youtube_privacy_status = 'private'
           OR ym.youtube_availability_status IN ('private', 'missing_or_private')
-        )`,
+         )`,
   ).all<{
     video_id: string;
+    visibility_status: string;
     youtube_privacy_status: string | null;
     youtube_availability_status: string | null;
   }>();
@@ -1791,6 +1770,12 @@ async function rebuildYoutubeRelatedBlocklist(
   for (const row of result.results ?? []) {
     const id = String(row.video_id ?? "").trim();
     if (!id) continue;
+
+    if (row.visibility_status !== "public") {
+      blocked.set(id, "private");
+      continue;
+    }
+
     if (
       row.youtube_privacy_status === "private" ||
       row.youtube_availability_status === "private"
@@ -1836,8 +1821,6 @@ async function rebuildRandomVideoPool(
 ): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
-  const blocklist = await loadWorkerRelatedBlocklist(env, signal);
-  throwIfAborted(signal);
 
   const result = await env.DB.prepare(
     `SELECT v.id, v.title, v.youtube_video_id,
@@ -1848,17 +1831,22 @@ async function rebuildRandomVideoPool(
             v.scheduled_time
        FROM videos AS v
       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM video_youtube_metadata AS related_ym
+          WHERE related_ym.video_id = v.id
+            AND (
+              related_ym.youtube_privacy_status = 'private'
+              OR related_ym.youtube_availability_status
+                IN ('private', 'missing_or_private')
+            )
+        )
       ORDER BY v.id ASC
       LIMIT 5001`,
   ).all<Record<string, unknown>>();
   throwIfAborted(signal);
 
-  const rows = (result.results ?? []).filter(
-    (row) =>
-      !blocklist.blockedIds.has(
-        String(row.id ?? "").trim(),
-      ),
-  );
+  const rows = result.results ?? [];
   if (rows.length > 5000) {
     throw new Error("random_video_pool_exceeds_5000_items");
   }

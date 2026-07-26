@@ -92,6 +92,7 @@ export const STATIC_REBUILD_BULK_INSERT_ROWS = 10;
 export type StaticRebuildQueueBatch = {
   statements: BatchItem<"sqlite">[];
   expectedChanges: number[];
+  acceptedTargetCount: number;
 };
 
 /**
@@ -110,7 +111,11 @@ export async function buildStaticRebuildQueueBatch(
     throw new Error("static_rebuild_batch_target_limit_exceeded");
   }
   if (normalizedItems.length === 0) {
-    return { statements: [], expectedChanges: [] };
+    return {
+      statements: [],
+      expectedChanges: [],
+      acceptedTargetCount: 0,
+    };
   }
 
   const statements: BatchItem<"sqlite">[] = [];
@@ -295,7 +300,13 @@ export async function buildStaticRebuildQueueBatch(
     expectedChanges.push(chunk.length);
   }
 
-  return { statements, expectedChanges };
+  return {
+    statements,
+    expectedChanges,
+    acceptedTargetCount:
+      activeUpdates.length +
+      inserts.length,
+  };
 }
 
 async function shouldSkipRecentEnqueue(

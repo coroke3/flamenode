@@ -19,7 +19,10 @@
     right: auto;
     z-index: 40;
     width: var(--fn-mobile-player-width, 100%);
+    height: var(--fn-mobile-player-height, 56.25vw);
     max-width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
     transform: translateX(-50%);
   }
 
@@ -27,7 +30,10 @@
     inset: 0;
     top: 0;
     width: auto;
+    height: auto;
     max-width: none;
+    aspect-ratio: auto;
+    overflow: visible;
     transform: none;
     z-index: 1000;
   }
