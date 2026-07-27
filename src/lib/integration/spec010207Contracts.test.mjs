@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { checkCloudflareTemplate } from "../../../scripts/check-cloudflare-template.mjs";
 
 const root = path.resolve(import.meta.dirname, "../../..");
 
@@ -57,13 +58,22 @@ test("旧形式インポートは専用管理境界から新正本へ変換す�
 });
 
 test("Workerは3本のcanonical bindingだけを公開し、副作用endpointは共通認証を使う", () => {
-  const checker = read("scripts/check-cloudflare-template.mjs");
   const auth = read("workers/shared/workerAdminAuth.ts");
+  const workerDirectories = fs
+    .readdirSync(path.join(root, "workers"), { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        fs.existsSync(path.join(root, "workers", entry.name, "wrangler.toml")),
+    )
+    .map((entry) => entry.name)
+    .sort();
+
   assert.deepEqual(
-    [...checker.matchAll(/\["([a-z-]+)", \{ name:/g)].map((match) => match[1]),
-    ["fast-jobs", "content-jobs", "sync-jobs"],
+    workerDirectories,
+    ["content-jobs", "fast-jobs", "sync-jobs"],
   );
-  assert.match(checker, /binding\\s\*=/);
+  assert.deepEqual(checkCloudflareTemplate({ root }), []);
   for (const worker of ["fast-jobs", "content-jobs", "sync-jobs"]) {
     const toml = read(`workers/${worker}/wrangler.toml`);
     assert.match(toml, /binding\s*=\s*"DB"/);

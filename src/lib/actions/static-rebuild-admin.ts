@@ -27,7 +27,7 @@ import {
   type StaticBackfillRunState,
 } from "@/lib/staticRebuild/backfillStateCore";
 import {
-  loadRandomVideoPoolOptional,
+  loadRandomVideoPool,
   loadYoutubeRelatedBlocklist,
 } from "@/lib/publicData/staticSharedInputsLoader";
 
@@ -87,14 +87,15 @@ async function ensureVideoBackfillSharedInputs(args: {
 }): Promise<boolean> {
   const [blocklist, randomPool] = await Promise.all([
     loadYoutubeRelatedBlocklist(),
-    loadRandomVideoPoolOptional(),
+    loadRandomVideoPool(),
   ]);
 
   const ready =
     blocklist.status !== "unavailable" &&
     blocklist.value.generatedAt != null &&
-    randomPool.generatedAt != null &&
-    Boolean(randomPool.generationKey);
+    randomPool.status !== "unavailable" &&
+    randomPool.value.generatedAt != null &&
+    Boolean(randomPool.value.generationKey);
 
   if (ready) {
     return true;

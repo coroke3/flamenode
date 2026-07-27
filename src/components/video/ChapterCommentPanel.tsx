@@ -13,6 +13,7 @@ interface ChapterCommentPanelProps {
   videoId: string;
   chapters: ChapterEntry[];
   isLoggedIn: boolean;
+  authUnavailable: boolean;
   canPost: boolean;
   loginHref: string;
   settingsHref: string;
@@ -23,6 +24,7 @@ export function ChapterCommentPanel({
   videoId,
   chapters,
   isLoggedIn,
+  authUnavailable,
   canPost,
   loginHref,
   settingsHref,
@@ -135,6 +137,20 @@ export function ChapterCommentPanel({
             <Icon name="plus" size={17} aria-hidden />
             現在位置にコメントする
           </button>
+        ) : authUnavailable ? (
+          <section className={styles.notice}>
+            <p>
+              ログイン状態を一時的に確認できません。時間をおいて再読み込みしてください。
+            </p>
+
+            <button
+              type="button"
+              className="fn-btn fn-btn-ghost"
+              onClick={closeComposer}
+            >
+              閉じる
+            </button>
+          </section>
         ) : !isLoggedIn ? (
           <section className={styles.notice}>
             <p>コメントを投稿するにはログインしてください。</p>

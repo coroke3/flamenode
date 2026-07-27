@@ -6,6 +6,13 @@ const page = await readFile(
   new URL("../../../app/(public)/user/[id]/page.tsx", import.meta.url),
   "utf8",
 );
+const portfolioPage = await readFile(
+  new URL(
+    "../../../app/(public)/user/[id]/portfolio/page.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("user profile page records public request metrics on static path", () => {
   assert.doesNotMatch(page, /runWithPublicRequestMetrics/);
@@ -23,4 +30,16 @@ test("user profile returns notFound when paged static JSON is missing", () => {
 test("user profile metadata avoids full D1 when static is unavailable", () => {
   assert.match(page, /loadStaticUserProfile/);
   assert.doesNotMatch(page, /withDatabase/);
+});
+
+test("portfolio projects shared X icons into metadata, profile, and work cards", () => {
+  assert.match(portfolioPage, /loadPublicXIconMapOptional/);
+  assert.match(portfolioPage, /publicXIconEntriesToMap/);
+  assert.match(portfolioPage, /const metadataIcon = resolveProjectedIcon/);
+  assert.match(portfolioPage, /image: cachedGoogleImageUrl\(metadataIcon\)/);
+  assert.match(portfolioPage, /const userIcon = cachedGoogleImageUrl\([\s\S]*?xUserId: user\.id/);
+  assert.match(portfolioPage, /const works = projectVideoCardIcons/);
+  assert.match(portfolioPage, /xUserId: video\.creator_x_user_id/);
+  assert.match(portfolioPage, /legacyIconUrl: video\.icon_url/);
+  assert.doesNotMatch(portfolioPage, /withDatabase|fetch\(/);
 });

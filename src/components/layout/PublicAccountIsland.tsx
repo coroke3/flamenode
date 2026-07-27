@@ -39,13 +39,16 @@ export function usePublicAccountSummary(
 ): {
   user: PublicHeaderUser | null;
   loading: boolean;
+  unavailable: boolean;
 } {
   const [user, setUser] = React.useState<PublicHeaderUser | null>(null);
   const [loading, setLoading] = React.useState(enabled);
+  const [unavailable, setUnavailable] = React.useState(false);
 
   React.useEffect(() => {
     if (!enabled) {
       setLoading(false);
+      setUnavailable(false);
       return;
     }
 
@@ -58,20 +61,24 @@ export function usePublicAccountSummary(
           credentials: "same-origin",
           cache: "no-store",
         });
-        if (!response.ok) {
-          if (!cancelled && !preserveLoggedInOnFailure) setUser(null);
+        if (response.status === 503 || !response.ok) {
+          if (!cancelled) setUnavailable(true);
           return;
         }
         const summary = (await response.json()) as AccountSummaryResponse;
         if (!cancelled) {
           if (summary.loggedIn) {
             setUser(mapSummaryToHeaderUser(summary));
-          } else if (!preserveLoggedInOnFailure) {
-            setUser(null);
+            setUnavailable(false);
+          } else if (summary.unavailable) {
+            setUnavailable(true);
+          } else {
+            if (!preserveLoggedInOnFailure) setUser(null);
+            setUnavailable(false);
           }
         }
       } catch {
-        if (!cancelled && !preserveLoggedInOnFailure) setUser(null);
+        if (!cancelled) setUnavailable(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -82,12 +89,13 @@ export function usePublicAccountSummary(
     };
   }, [enabled, preserveLoggedInOnFailure]);
 
-  return { user, loading };
+  return { user, loading, unavailable };
 }
 
 type PublicAccountIslandProps = {
   user: PublicHeaderUser | null;
   loading: boolean;
+  unavailable: boolean;
   entryHref: string;
   accountOpen: boolean;
   onAccountOpenChange: (open: boolean) => void;
@@ -99,6 +107,7 @@ type PublicAccountIslandProps = {
 export function PublicAccountIsland({
   user,
   loading,
+  unavailable,
   entryHref,
   accountOpen,
   onAccountOpenChange,
@@ -113,6 +122,14 @@ export function PublicAccountIsland({
           className={`${styles.actionNav} ${styles.accountPlaceholder}`}
           aria-hidden
         />
+      );
+    }
+
+    if (unavailable) {
+      return (
+        <span className={styles.accountUnavailable} role="status">
+          ログイン状態を一時的に確認できません
+        </span>
       );
     }
 
@@ -160,6 +177,17 @@ export function PublicAccountIsland({
       );
     }
 
+    if (unavailable) {
+      return (
+        <span
+          className={`${styles.mobileLink} ${styles.mobileAccountUnavailable}`}
+          role="status"
+        >
+          ログイン状態を一時的に確認できません
+        </span>
+      );
+    }
+
     if (user) {
       return (
         <Link
@@ -187,7 +215,7 @@ export function PublicAccountIsland({
     return null;
   }
 
-  if (!user) {
+  if (unavailable || !user) {
     return (
       <div className={styles.mobileSection}>
         {MOBILE_NAV_ITEMS.map((item) => {

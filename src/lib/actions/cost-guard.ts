@@ -66,7 +66,7 @@ async function syncOperationModeKvMirrorBestEffort(input: {
     ],
   );
   if (warnings.some((w) => w.name === "kv_mirror")) {
-    return "D1は更新済みです。KV複製の反映に時間がかかることがあります。";
+    return "D1は更新済みですが、KV複製の更新に失敗しました。時間をおいて再度更新してください。";
   }
   return undefined;
 }
@@ -125,7 +125,7 @@ export async function setCostGuardMode(formData: FormData): Promise<CostGuardRes
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_mode", patch: { operation_mode: mode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
   if (!result.ok) return result;
   const warning = await syncOperationModeKvMirrorBestEffort({ mode, reason, updatedAt: now });
-  return { ok: true, ...(warning ? { warning } : {}) };
+  return { ok: true, ...(warning ? { warning, message: warning } : {}) };
 }
 
 export async function setMaintenanceMode(formData: FormData): Promise<CostGuardResult> {
@@ -145,7 +145,7 @@ export async function setMaintenanceMode(formData: FormData): Promise<CostGuardR
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_maintenance", patch: { operation_mode: nextMode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
   if (!result.ok) return result;
   const warning = await syncOperationModeKvMirrorBestEffort({ mode: nextMode, reason, updatedAt: now });
-  return { ok: true, ...(warning ? { warning } : {}) };
+  return { ok: true, ...(warning ? { warning, message: warning } : {}) };
 }
 
 export async function setCostGuardOverride(formData: FormData): Promise<CostGuardResult> {

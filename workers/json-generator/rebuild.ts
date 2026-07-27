@@ -1469,14 +1469,15 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
       .bind(internalVideoId)
       .all(),
     env.DB.prepare(
-      `SELECT id, name AS display_name, x_user_id, role AS role_label, comment,
+      `SELECT vm.id, vm.name AS display_name, vm.x_user_id,
+              vm.role AS role_label, vm.comment,
               xu.x_name, xu.icon_url,
               CASE
                 WHEN xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})
                 THEN 1
                 ELSE 0
               END AS has_public_profile,
-              order_index
+               vm.order_index
        FROM video_members AS vm
        LEFT JOIN x_users AS xu ON xu.id = vm.x_user_id
        WHERE vm.video_id = ? AND vm.is_public_member = 1

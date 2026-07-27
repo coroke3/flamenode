@@ -176,12 +176,16 @@ const RULES = [
     label: "通常ランタイム内のschema DDL",
     pattern: /\b(?:ALTER\s+TABLE|CREATE\s+TABLE|CREATE\s+INDEX|DROP\s+TABLE|DROP\s+INDEX)\b/gi,
     allowPrefixes: ["src/lib/integration/"],
+    allowFiles: new Set([
+      "src/lib/admin/spreadsheet/staticRebuildAtomicity.execution.test.mjs",
+    ]),
   },
   {
     id: "runtime-backfill",
     label: "通常ランタイム内のbackfill",
     pattern: /\bbackfill(?:ing)?\b/gi,
-    allowPrefixes: ["src/lib/integration/"],
+    allowPrefixes: ["src/lib/integration/", "src/lib/staticRebuild/"],
+    allowFiles: new Set(["src/lib/actions/static-rebuild-admin.ts"]),
   },
   {
     id: "history-logs",

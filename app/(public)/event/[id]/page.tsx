@@ -405,7 +405,16 @@ function VideoSection({ eventId, videos: rows, total }: { eventId: string; video
         <p className={styles.emptyText}>このイベントの公開済み作品はまだありません。</p>
       ) : (
         <div className="fn-video-grid">
-          {rows.map((video) => <VideoCard key={video.id} video={video} />)}
+          {rows.map((video) => {
+            const target = video.youtube_video_id ?? video.id;
+            return (
+              <VideoCard
+                key={video.id}
+                video={video}
+                href={`/${target}?playlist=${encodeURIComponent(eventId)}`}
+              />
+            );
+          })}
         </div>
       )}
     </section>

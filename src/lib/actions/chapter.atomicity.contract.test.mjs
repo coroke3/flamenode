@@ -33,10 +33,12 @@ const deleteAction = actionSection(
 test("全チャプターwriteは各1回のmutateWithAuditでqueueまで保存する", () => {
   assert.equal((action.match(/await mutateWithAudit\(db,/g) ?? []).length, 4);
   assert.equal((action.match(/await buildStaticRebuildQueueBatch\(db,/g) ?? []).length, 4);
+  assert.equal((action.match(/\.\.\.queue\.statements/g) ?? []).length, 4);
+  assert.equal((action.match(/\.\.\.queue\.expectedChanges/g) ?? []).length, 4);
+  assert.equal((action.match(/staticRebuildWakeSource:/g) ?? []).length, 4);
   assert.doesNotMatch(action, /enqueueNotification\(/);
-  assert.match(action, /buildNotificationOutboxStatement/);
-  assert.match(action, /mutationStatements\.push\(notification\.statement\)/);
-  assert.match(action, /mutationStatements\.push\(\.\.\.queue\.statements\)/);
+  assert.doesNotMatch(action, /buildNotificationOutboxStatement/);
+  assert.doesNotMatch(action, /notificationOutbox/);
 });
 
 test("更新と削除は全scalar snapshot CASと完全な監査snapshotを使う", () => {
@@ -84,8 +86,8 @@ test("D1 bind/query予算はbulk上限8でも制約内に収まる", () => {
   // chapter INSERT は全11列を明示するため、8行で88 bind。
   assert.ok(8 * 11 < 100);
   const createBudget = planD1AuditMutationBudget({
-    mutationStatementCount: 3,
-    mutationAssertionCount: 3,
+    mutationStatementCount: 2,
+    mutationAssertionCount: 2,
     auditEntryCount: 1,
     distinctActorCount: 1,
   });
@@ -97,7 +99,7 @@ test("D1 bind/query予算はbulk上限8でも制約内に収まる", () => {
   });
   assert.deepEqual(
     { total: createBudget.totalQueryCount, withinLimit: createBudget.withinLimit },
-    { total: 20, withinLimit: true },
+    { total: 18, withinLimit: true },
   );
   assert.deepEqual(
     { total: bulkBudget.totalQueryCount, withinLimit: bulkBudget.withinLimit },

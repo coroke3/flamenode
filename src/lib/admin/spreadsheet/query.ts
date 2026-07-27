@@ -4,6 +4,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { spreadsheetImportRuns } from "@/lib/db/schema";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { SpreadsheetImportPreviewClaims } from "./importPreviewToken";
 import type { SpreadsheetTableDef } from "./registry";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./registry";
 import {
   isSpreadsheetImportBatchSizeAllowed,
+  SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS,
   SPREADSHEET_IMPORT_MAX_ROWS,
 } from "./constants";
 import {
@@ -39,6 +41,10 @@ import {
   primaryKeyFromRowValues,
   resolveSpreadsheetDefaultValue,
 } from "./validation";
+import {
+  planSpreadsheetStaticRebuildTargets,
+  SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED,
+} from "./staticRebuildPlan";
 
 export type { SpreadsheetColumnMeta } from "./tableContext";
 export const SPREADSHEET_EXPORT_MAX_ROWS = 5000;
@@ -462,10 +468,33 @@ async function executeSpreadsheetMutations(
     : mutations;
   if (allMutations.length === 0) return;
   const db = spreadsheetDb();
+  const staticRebuildTargets = planSpreadsheetStaticRebuildTargets(
+    mutations.map((mutation) => ({
+      table: mutation.audit.table_name,
+      operation: mutation.audit.operation,
+      before: mutation.audit.before,
+      after: mutation.audit.after,
+      actorUserId: mutation.audit.actor_user_id,
+    })),
+  );
+  const queue = await buildStaticRebuildQueueBatch(db, staticRebuildTargets);
+  if (
+    queue.statements.length >
+    SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS
+  ) {
+    throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+  }
   await mutateWithAudit(db, {
-    mutationStatements: allMutations.map((mutation) => mutation.statement),
-    expectedMutationChanges: allMutations.map(() => 1),
+    mutationStatements: [
+      ...allMutations.map((mutation) => mutation.statement),
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [
+      ...allMutations.map(() => 1),
+      ...queue.expectedChanges,
+    ],
     audits: allMutations.map((mutation) => mutation.audit),
+    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
   });
 }
 

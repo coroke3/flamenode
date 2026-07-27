@@ -468,10 +468,12 @@ export async function fetchEventPlaylistVideos(
     })
     .from(videos)
     .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
+    .innerJoin(events, eq(videoEvents.event_id, events.id))
     .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(
       and(
         eq(videoEvents.event_id, eventId),
+        eq(events.visibility_status, "public"),
         eq(videos.visibility_status, "public"),
       )!,
     )

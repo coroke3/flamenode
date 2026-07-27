@@ -464,6 +464,35 @@ async function rejectXIdLinkRequestOnce(
     }),
     dedupeKey: `xid_rejected:${request.id}`,
   });
+  const { buildChannelXIdRejectedNotification } = await import(
+    "@/lib/notifications/templates/xidChannel"
+  );
+  const { buildOpsChannelWebhookStatement } = await import(
+    "@/lib/notifications/opsWebhook"
+  );
+  const requester = (
+    await db
+      .select({ discord_id: users.discord_id })
+      .from(users)
+      .where(eq(users.id, request.requested_by_auth_user_id))
+      .limit(1)
+  )[0];
+  const channelNotification = await buildOpsChannelWebhookStatement(db, {
+    actorUserId: operatorAuthUserId,
+    payload: buildChannelXIdRejectedNotification({
+      requestId: request.id,
+      requestType: request.request_type,
+      requestedXId: request.requested_x_id,
+      sourceXUserId: request.source_x_user_id,
+      targetXUserId: request.target_x_user_id,
+      requesterUserId: request.requested_by_auth_user_id,
+      requesterDiscordId: requester?.discord_id ?? null,
+      operatorUserId: operatorAuthUserId,
+      reason: reason || null,
+      rejectedAt: now,
+    }),
+    dedupeKey: `xid_reject_webhook:${request.id}`,
+  });
   const statements: BatchItem<"sqlite">[] = [
     db
       .update(xIdentityRequests)
@@ -478,6 +507,10 @@ async function rejectXIdLinkRequestOnce(
   const expected: Array<number | null> = [1];
   if (notification) {
     statements.push(notification.statement);
+    expected.push(null);
+  }
+  if (channelNotification) {
+    statements.push(channelNotification.statement);
     expected.push(null);
   }
   await mutateWithAudit(db, {
@@ -496,7 +529,8 @@ async function rejectXIdLinkRequestOnce(
         retention_class: "long_audit",
       },
     ],
-    notificationWakeSource: notification ? "admin" : undefined,
+    notificationWakeSource:
+      notification || channelNotification ? "admin" : undefined,
   });
   await runXIdAdminPostCommit("xid-admin.rejectXIdLinkRequest", () => {
     revalidateIdentityAdminPaths();

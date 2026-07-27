@@ -23,6 +23,7 @@ import { validateSocialLinksJson } from "@/lib/socialLinks";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
 import type { BatchItem } from "drizzle-orm/batch";
+import type { NotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import {
   getLinkedXUserForAuthUser,
   isAuthUserLinkedToXUser,
@@ -392,7 +393,6 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     requested_at: now,
     updated_at: now,
   };
-  const xIdLabel = requestedXId ?? sourceXUserId ?? "不明";
   const mutationStatements: BatchItem<"sqlite">[] = [
     db.run(buildPendingXIdRequestInsert(afterRequest)),
   ];
@@ -406,6 +406,49 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     actor_user_id: authUserId,
     retention_class: "long_audit",
   }];
+  let webhookNotification: NotificationOutboxStatement | null = null;
+  if (isXIdLinkRequestType(requestType)) {
+    try {
+      const { buildChannelXIdRequestNotification } = await import(
+        "@/lib/notifications/templates/xidChannel"
+      );
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      const requester = (
+        await db
+          .select({ discord_id: users.discord_id })
+          .from(users)
+          .where(eq(users.id, authUserId))
+          .limit(1)
+      )[0];
+      webhookNotification = await buildOpsChannelWebhookStatement(db, {
+        actorUserId: authUserId,
+        payload: buildChannelXIdRequestNotification({
+          requestId: id,
+          requestType,
+          requestedXId,
+          sourceXUserId,
+          targetXUserId: targetXUserId || null,
+          requesterUserId: authUserId,
+          requesterDiscordId: requester?.discord_id ?? null,
+          requestedAt: now,
+        }),
+        dedupeKey: `xid_request_webhook:${id}`,
+      });
+    } catch (error) {
+      unstable_rethrow(error);
+      console.error("[requestXIdLink] ops notification preparation failed", error);
+      return {
+        ok: false,
+        message: "運営通知を準備できませんでした。時間をおいて再試行してください。",
+      };
+    }
+  }
+  if (webhookNotification) {
+    mutationStatements.push(webhookNotification.statement);
+    expectedMutationChanges.push(null);
+  }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -413,6 +456,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
         mutationStatements,
         expectedMutationChanges,
         audits,
+        notificationWakeSource: webhookNotification ? "web" : undefined,
       });
       await runXIdPostCommit("xid.requestXIdLink", "revalidate", () => {
         revalidateXIdRequestPaths();
@@ -492,20 +536,68 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
 
   const now = nowUnix();
   const afterRequest = { ...request, status: "cancelled" as const, updated_at: now };
+  const mutationStatements: BatchItem<"sqlite">[] = [
+    db
+      .update(xIdentityRequests)
+      .set({ status: "cancelled" as const, updated_at: now })
+      .where(
+        and(
+          eq(xIdentityRequests.id, request.id),
+          eq(xIdentityRequests.status, "pending"),
+          eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
+        )!,
+      ),
+  ];
+  const expectedMutationChanges: Array<number | null> = [1];
+  let cancelWebhookNotification: NotificationOutboxStatement | null = null;
+  if (
+    isXIdLinkRequestType(request.request_type) ||
+    request.request_type === "alias"
+  ) {
+    try {
+      const { buildChannelXIdCancelledNotification } = await import(
+        "@/lib/notifications/templates/xidChannel"
+      );
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      const requester = (
+        await db
+          .select({ discord_id: users.discord_id })
+          .from(users)
+          .where(eq(users.id, authUserId))
+          .limit(1)
+      )[0];
+      cancelWebhookNotification = await buildOpsChannelWebhookStatement(db, {
+        actorUserId: authUserId,
+        payload: buildChannelXIdCancelledNotification({
+          requestId: request.id,
+          requestType: request.request_type,
+          requestedXId: request.requested_x_id,
+          sourceXUserId: request.source_x_user_id,
+          targetXUserId: request.target_x_user_id,
+          requesterUserId: authUserId,
+          requesterDiscordId: requester?.discord_id ?? null,
+          cancelledAt: now,
+        }),
+        dedupeKey: `xid_cancel_webhook:${request.id}`,
+      });
+    } catch (error) {
+      unstable_rethrow(error);
+      console.error("[cancelXIdLinkRequest] ops notification preparation failed", error);
+      return {
+        ok: false,
+        message: "取消通知を準備できませんでした。時間をおいて再試行してください。",
+      };
+    }
+  }
+  if (cancelWebhookNotification) {
+    mutationStatements.push(cancelWebhookNotification.statement);
+    expectedMutationChanges.push(null);
+  }
   const mutationInput = {
-    mutationStatements: [
-      db
-        .update(xIdentityRequests)
-        .set({ status: "cancelled" as const, updated_at: now })
-        .where(
-          and(
-            eq(xIdentityRequests.id, request.id),
-            eq(xIdentityRequests.status, "pending"),
-            eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-          )!,
-        ),
-    ],
-    expectedMutationChanges: [1],
+    mutationStatements,
+    expectedMutationChanges,
     audits: [
       {
         table_name: "x_identity_requests",
@@ -519,6 +611,9 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
         retention_class: "long_audit" as const,
       },
     ],
+    notificationWakeSource: cancelWebhookNotification
+      ? ("web" as const)
+      : undefined,
   };
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {

@@ -22,7 +22,7 @@ test("all admin mutation entry points use required feature guards", () => {
   assert.equal((all.match(/requireAdminWrite\(/g) ?? []).length, features.length);
 });
 
-test("admin writes have CAS, full audit batches, and non-swallowing builders", () => {
+test("admin writes have CAS, full audit batches, and current notification policy", () => {
   for (const source of Object.values(sources)) {
     assert.match(source, /mutateWithAudit\(/);
     assert.match(source, /expectedRowCondition\(/);
@@ -31,16 +31,23 @@ test("admin writes have CAS, full audit batches, and non-swallowing builders", (
     assert.match(source, /before: snapshot\(/);
     assert.match(source, /after: snapshot\(/);
   }
-  assert.match(sources["rules.ts"], /buildKnownRecipientNotificationBatch/);
-  assert.match(sources["moderation-admin.ts"], /buildNotificationOutboxStatement/);
+  assert.doesNotMatch(sources["rules.ts"], /buildKnownRecipientNotificationBatch/);
+  assert.doesNotMatch(sources["rules.ts"], /type:\s*"terms_reaccept_required"/);
+  assert.doesNotMatch(sources["moderation-admin.ts"], /buildNotificationOutboxStatement/);
+  assert.doesNotMatch(sources["moderation-admin.ts"], /type:\s*"moderation_/);
   assert.match(sources["moderation-admin.ts"], /buildStaticRebuildQueueBatch/);
   assert.match(sources["user-admin.ts"], /buildStaticRebuildQueueBatch/);
 });
 
-test("broadcast is bounded and shares the canonical D1 budget planner", () => {
+test("broadcast is bounded and records its no-DM terms touch atomically", () => {
   assert.match(sources["rules.ts"], /TERMS_REACCEPT_BATCH_SIZE = 30/);
+  assert.match(sources["rules.ts"], /termsReacceptRequiredCondition\(requiredMajor\)/);
   assert.match(sources["rules.ts"], /gt\(users\.id, cursor\)/);
   assert.match(sources["rules.ts"], /\.limit\(TERMS_REACCEPT_BATCH_SIZE \+ 1\)/);
-  assert.match(sources["rules.ts"], /planD1AuditMutationBudget/);
+  assert.match(
+    sources["rules.ts"],
+    /mutationStatements:\s*\[\s*db\.update\(termsVersions\)[\s\S]*expectedMutationChanges:\s*\[1\][\s\S]*context:\s*"admin_terms_broadcast"/,
+  );
+  assert.match(sources["rules.ts"], /Discord DM は送信しません/);
   assert.doesNotMatch(sources["rules.ts"], /\.offset\(/);
 });

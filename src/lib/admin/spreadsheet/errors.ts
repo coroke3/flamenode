@@ -1,4 +1,6 @@
 /** API が返す spreadsheet 系エラーコード */
+import { SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED } from "./staticRebuildPlan.ts";
+
 export const SPREADSHEET_ERROR = {
   DB_UNAVAILABLE: "db_unavailable",
   UNKNOWN_TABLE: "unknown_table",
@@ -28,6 +30,7 @@ export function spreadsheetHttpStatus(message: string): number {
     return 400;
   }
   switch (message) {
+    case SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED:
     case SPREADSHEET_ERROR.UNKNOWN_TABLE:
     case SPREADSHEET_ERROR.TABLE_READONLY:
     case "column_not_editable":

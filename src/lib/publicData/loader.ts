@@ -162,8 +162,6 @@ function buildStaticHitResult<T>(
   };
 }
 
-const staticReadInFlight = new Map<string, Promise<unknown | null>>();
-
 function warnPublicStaticJson(
   key: string,
   result:
@@ -184,35 +182,21 @@ function warnPublicStaticJson(
 }
 
 async function readStaticJson<T>(key: string): Promise<T | null> {
-  const existing = staticReadInFlight.get(key);
-  if (existing) return existing as Promise<T | null>;
-
-  const pending = (async (): Promise<T | null> => {
+  try {
+    const bucket = getEnv().BUCKET;
+    if (!bucket) return null;
+    recordPublicR2Get();
+    const object = await bucket.get(key);
+    if (!object) return null;
     try {
-      const bucket = getEnv().BUCKET;
-      if (!bucket) return null;
-      recordPublicR2Get();
-      const object = await bucket.get(key);
-      if (!object) return null;
-      try {
-        return (await object.json()) as T;
-      } catch (error) {
-        warnPublicStaticJson(key, "invalid_json", error);
-        return null;
-      }
+      return (await object.json()) as T;
     } catch (error) {
-      warnPublicStaticJson(key, "read_failed", error);
+      warnPublicStaticJson(key, "invalid_json", error);
       return null;
     }
-  })();
-
-  staticReadInFlight.set(key, pending);
-  try {
-    return await pending;
-  } finally {
-    if (staticReadInFlight.get(key) === pending) {
-      staticReadInFlight.delete(key);
-    }
+  } catch (error) {
+    warnPublicStaticJson(key, "read_failed", error);
+    return null;
   }
 }
 

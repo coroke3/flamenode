@@ -12,6 +12,12 @@ import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
 import { loadStaticUserProfile } from "@/lib/publicData/loader";
+import { loadPublicXIconMapOptional } from "@/lib/publicData/staticSharedInputsLoader";
+import {
+  publicXIconEntriesToMap,
+  resolveProjectedIcon,
+  type PublicXIconEntry,
+} from "@/lib/publicData/publicIconProjection";
 
 export const dynamic = "force-dynamic";
 
@@ -23,16 +29,24 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
-  const staticLoaded = await loadStaticUserProfile(id);
+  const [staticLoaded, iconMapPayload] = await Promise.all([
+    loadStaticUserProfile(id),
+    loadPublicXIconMapOptional(),
+  ]);
   const user = staticLoaded.data?.user;
   const name = user?.x_name || id;
+  const metadataIcon = resolveProjectedIcon({
+    xUserId: user?.id ?? id,
+    iconMap: publicXIconEntriesToMap(iconMapPayload),
+    legacyIconUrl: user?.icon_url,
+  });
   return buildPageMetadata({
     title: `${name} - Portfolio`,
     description:
       compactText(user?.profile_text) ??
       `FlameNodeで公開されている${name}のポートフォリオ。`,
     path: `/user/${id}/portfolio`,
-    image: cachedGoogleImageUrl(user?.icon_url),
+    image: cachedGoogleImageUrl(metadataIcon),
     noIndex: true,
   });
 }
@@ -43,15 +57,28 @@ export default async function PortfolioPage({
   const id = normalizeXId((await params).id);
   if (!id) notFound();
 
-  const staticLoaded = await loadStaticUserProfile(id);
+  const [staticLoaded, iconMapPayload] = await Promise.all([
+    loadStaticUserProfile(id),
+    loadPublicXIconMapOptional(),
+  ]);
   if (!staticLoaded.data) notFound();
 
   const user = staticLoaded.data.user;
-  const works = staticLoaded.data.works.items.slice(0, WORK_LIMIT) as VideoCardData[];
+  const iconMap = publicXIconEntriesToMap(iconMapPayload);
+  const works = projectVideoCardIcons(
+    staticLoaded.data.works.items.slice(0, WORK_LIMIT),
+    iconMap,
+  );
   const totalWorks = staticLoaded.data.works.total;
   const name = user.x_name || user.id;
   const initial = name.trim().charAt(0).toUpperCase() || "F";
-  const userIcon = cachedGoogleImageUrl(user.icon_url);
+  const userIcon = cachedGoogleImageUrl(
+    resolveProjectedIcon({
+      xUserId: user.id,
+      iconMap,
+      legacyIconUrl: user.icon_url,
+    }),
+  );
   const socialLinks = parseSocialLinks(user.other_social_links);
   const portfolioContact = normalizePortfolioContact(user.portfolio_contact);
   const hasProfile = user.profile_text || portfolioContact;
@@ -145,4 +172,18 @@ export default async function PortfolioPage({
       </section>
     </div>
   );
+}
+
+function projectVideoCardIcons(
+  videos: readonly VideoCardData[],
+  iconMap: ReadonlyMap<string, PublicXIconEntry>,
+): VideoCardData[] {
+  return videos.map((video) => ({
+    ...video,
+    icon_url: resolveProjectedIcon({
+      xUserId: video.creator_x_user_id,
+      iconMap,
+      legacyIconUrl: video.icon_url,
+    }),
+  }));
 }

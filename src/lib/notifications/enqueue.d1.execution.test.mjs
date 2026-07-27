@@ -27,6 +27,7 @@ if (runTestWithTsx(import.meta.url)) {
     "../actions/xidPendingInsert.ts"
   );
   const { buildNotificationOutboxStatement } = await import("./enqueue.ts");
+  const { buildOpsChannelWebhookStatement } = await import("./opsWebhook.ts");
 
   function resultMeta(changes = 0, lastRowId = 0) {
     return {
@@ -301,6 +302,127 @@ if (runTestWithTsx(import.meta.url)) {
         .get(request.id).count,
       0,
     );
+  });
+
+  test("X ID本人取消はoutbox後段失敗をrollbackし再試行とdedupeで収束する", async (t) => {
+    const { sqlite, db, state } = makeContext(t);
+    const request = {
+      id: "xreq-d1-cancel",
+      request_type: "existing_link",
+      requested_by_auth_user_id: "auth-user-1",
+      requested_x_id: "cancel_x",
+      source_x_user_id: null,
+      target_x_user_id: null,
+      parent_request_id: null,
+      restore_snapshot_json: null,
+      revert_deadline_at: null,
+      status: "pending",
+      requested_at: 100,
+      updated_at: 100,
+    };
+    sqlite
+      .prepare(
+        `INSERT INTO x_identity_requests (
+          id, request_type, requested_by_auth_user_id, requested_x_id,
+          source_x_user_id, target_x_user_id, parent_request_id,
+          restore_snapshot_json, revert_deadline_at, status,
+          requested_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(...Object.values(request));
+    const after = { ...request, status: "cancelled", updated_at: 200 };
+
+    async function buildCancelNotification() {
+      const notification = await buildOpsChannelWebhookStatement(db, {
+        actorUserId: "auth-user-1",
+        payload: { content: "X ID cancel" },
+        dedupeKey: `xid_cancel_webhook:${request.id}`,
+      });
+      assert.ok(notification);
+      return notification;
+    }
+
+    async function cancel(notification, failAfterAudit) {
+      await mutateWithAudit(db, {
+        mutationStatements: [
+          db
+            .update(xIdentityRequests)
+            .set({ status: "cancelled", updated_at: 200 })
+            .where(
+              and(
+                eq(xIdentityRequests.id, request.id),
+                eq(xIdentityRequests.status, "pending"),
+              ),
+            ),
+          notification.statement,
+        ],
+        expectedMutationChanges: [1, null],
+        audits: [
+          {
+            table_name: "x_identity_requests",
+            target_id: request.id,
+            operation: "UPDATE",
+            before: { ...request },
+            after,
+            actor_user_id: "auth-user-1",
+            reason: "X ID cancel",
+            context: "x-identity-request",
+            retention_class: "long_audit",
+          },
+        ],
+        postAuditStatements: failAfterAudit
+          ? [
+              db.run(
+                sql`SELECT json_extract('not-valid-json', '$')`.inlineParams(),
+              ),
+            ]
+          : [],
+      });
+    }
+
+    const failedNotification = await buildCancelNotification();
+    await assert.rejects(
+      cancel(failedNotification, true),
+      /malformed JSON/i,
+    );
+    assert.equal(
+      sqlite
+        .prepare("SELECT status FROM x_identity_requests WHERE id = ?")
+        .get(request.id).status,
+      "pending",
+    );
+    assert.equal(notificationCount(sqlite), 0);
+    assert.equal(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE table_name = 'x_identity_requests' AND target_id = ?",
+        )
+        .get(request.id).count,
+      0,
+    );
+
+    const retryNotification = await buildCancelNotification();
+    await cancel(retryNotification, false);
+    assert.equal(state.batchCalls, 2);
+    assert.equal(
+      sqlite
+        .prepare("SELECT status FROM x_identity_requests WHERE id = ?")
+        .get(request.id).status,
+      "cancelled",
+    );
+    assert.equal(notificationCount(sqlite), 1);
+    assert.equal(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM audit_logs WHERE table_name = 'x_identity_requests' AND target_id = ?",
+        )
+        .get(request.id).count,
+      1,
+    );
+
+    const duplicateNotification = await buildCancelNotification();
+    await db.batch([duplicateNotification.statement]);
+    assert.equal(notificationCount(sqlite), 1);
   });
 
   for (const status of ["approved", "rejected"]) {

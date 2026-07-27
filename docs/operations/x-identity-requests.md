@@ -1,8 +1,8 @@
 # X ID申請とアカウントリンク
 
 > Status: Active
-> Last verified: 2026-07-23
-> Source of truth: `src/lib/actions/xid.ts`, `src/lib/actions/xid-admin.ts`, `src/lib/actions/xid-merge-admin.ts`, `src/lib/auth/xIdentity.ts`, `src/lib/notifications/enqueue.ts`, `src/lib/utils/xid.ts`
+> Last verified: 2026-07-27
+> Source of truth: `src/lib/actions/xid.ts`, `src/lib/actions/xid-admin.ts`, `src/lib/actions/xid-merge-admin.ts`, `src/lib/auth/xIdentity.ts`, `src/lib/notifications/enqueue.ts`, `src/lib/notifications/opsWebhook.ts`, `src/lib/notifications/templates/xidChannel.ts`, `src/lib/utils/xid.ts`
 
 X ID申請は `x_identity_requests`、X名義とAuth.jsユーザーの関係は `x_user_account_links` を唯一の正本とする。
 
@@ -24,7 +24,9 @@ X ID申請は `x_identity_requests`、X名義とAuth.jsユーザーの関係は 
 
 申請者本人は設定画面の「申請履歴」と、申請済みの場合の初回連携画面から、自分が申請した連携・統合申請の対象、種別、全状態、申請日時、処理後の最終更新日時を直近50件まで確認できる。取得条件はログイン中の`requested_by_auth_user_id`に限定し、認証ユーザーID、親申請ID、復元JSON、差し戻し期限は画面へ渡さない。pending の連携・統合・別名申請は本人が「取り下げる」で`cancelled`にできる。
 
-一般ユーザーと運営のServer Actionは、認証・D1 binding・権限取得の通常障害を画面表示用の失敗結果へ変換する。`redirect`、`notFound`などNext.jsの制御例外だけは`unstable_rethrow`で維持し、遷移を通常エラーとして握りつぶさない。D1 batch成功後の`revalidatePath`などpost-commit処理は`runPostCommitBestEffort`でbest-effort実行し、失敗してもmutation成功結果を失敗へ戻さない。申請・承認・拒否・取り下げのDB変更、監査ログ、通知outboxはD1 batchで不可分にし、対象行の状態を`pending`に限定したCASで競合時にfail closedとする。通知builderはasync関数からDrizzleのthenableを直接返さず、未実行statementをenvelopeに入れて返す。競合・一時障害時は正本状態を読み直し、未反映の場合だけ1回再試行する。
+一般ユーザーと運営のServer Actionは、認証・D1 binding・権限取得の通常障害を画面表示用の失敗結果へ変換する。`redirect`、`notFound`などNext.jsの制御例外だけは`unstable_rethrow`で維持し、遷移を通常エラーとして握りつぶさない。D1 batch成功後の`revalidatePath`などpost-commit処理は`runPostCommitBestEffort`でbest-effort実行し、失敗してもmutation成功結果を失敗へ戻さない。各操作で生成する通知outboxは、対象のDB変更・監査ログと同じD1 batchへ含め、対象行の状態を`pending`に限定したCASで競合時にfail closedとする。通知builderはasync関数からDrizzleのthenableを直接返さず、未実行statementをenvelopeに入れて返す。競合・一時障害時は正本状態を読み直し、未反映の場合だけ1回再試行する。
+
+`new_link`・`existing_link`の申請受付と、一般リンク系申請（`new_link`、`existing_link`、互換管理上の`alias`）の却下・本人取消は、`buildOpsChannelWebhookStatement`とX ID専用の構造化channel templateで運営Discordチャンネルへ通知する。申請は`xid_request_webhook:<request_id>`、却下は`xid_reject_webhook:<request_id>`、本人取消は`xid_cancel_webhook:<request_id>`をdedupe keyとし、対象mutation・監査ログと同じD1 batchへ未実行statementを含める。template・outbox builderの通常障害は画面用の失敗結果へ変換するが、mutation前に停止して運営通知を欠いた一般リンク系の状態変更だけが確定しないようfail closedとする。通知statementがある場合だけwake sourceを有効にする。承認・却下結果の申請者向け通知はDiscord DM経路を維持し、運営チャンネル通知とは分離する。本人取消は申請者自身の操作結果を画面へ返すため申請者向けDMを重ねない。`merge`と`revert_merge`はこの運営channel通知の対象に含めず、既存のX ID統合管理フローへ委ねる。
 
 X IDは入力時の大文字・小文字を区別せず、`@`と前後空白を除去したうえで常に小文字へ正規化して保存・比較する。
 

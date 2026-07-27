@@ -22,6 +22,7 @@ interface VideoUtilityDockProps {
   chapters: ChapterEntry[];
 
   isLoggedIn: boolean;
+  authUnavailable: boolean;
   canPost: boolean;
 
   loginHref: string;
@@ -39,6 +40,7 @@ export function VideoUtilityDock({
   playlistItems,
   chapters,
   isLoggedIn,
+  authUnavailable,
   canPost,
   loginHref,
   settingsHref,
@@ -244,6 +246,7 @@ export function VideoUtilityDock({
               videoId={videoId}
               chapters={chapters}
               isLoggedIn={isLoggedIn}
+              authUnavailable={authUnavailable}
               canPost={canPost}
               loginHref={loginHref}
               settingsHref={settingsHref}

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
 
 const read = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
+const xidChannelSource = read("../notifications/templates/xidChannel.ts");
 
 test("header X ID read pathは未連携active行を自動claimしない", () => {
   const source = read("./headerUser.ts");
@@ -39,9 +40,21 @@ test("一般X ID lifecycleは逐次audit writeを残さずCAS付きatomic batch�
   assert.match(source, /expectedRowCondition\(\{ expectedCurrent: row \}\)/);
   assert.match(source, /xicons\/staging/);
   assert.match(source, /Promise\.allSettled\(\[env\.BUCKET\.delete\(stagingKey\), env\.BUCKET\.delete\(key\)\]\)/);
-  assert.match(source, /type: "discord_webhook"/);
+  assert.match(source, /buildOpsChannelWebhookStatement/);
+  assert.match(source, /buildChannelXIdRequestNotification/);
+  assert.match(source, /if \(isXIdLinkRequestType\(requestType\)\)/);
+  assert.doesNotMatch(source, /type: "discord_webhook"/);
   assert.match(source, /xid_request_webhook:/);
   assert.match(source, /webhookNotification\.statement/);
+  assert.match(source, /expectedMutationChanges\.push\(null\)/);
+  assert.match(source, /notificationWakeSource: webhookNotification \? "web" : undefined/);
+  assert.match(source, /\[requestXIdLink\] ops notification preparation failed/);
+  assert.match(source, /unstable_rethrow\(error\)/);
+  assert.match(source, /buildChannelXIdCancelledNotification/);
+  assert.match(source, /request\.request_type === "alias"/);
+  assert.match(source, /xid_cancel_webhook:/);
+  assert.match(source, /cancelWebhookNotification\.statement/);
+  assert.match(source, /\[cancelXIdLinkRequest\] ops notification preparation failed/);
 });
 
 test("imported 等の非 approved X ID はプロフィール・アイコン更新を拒否する", () => {
@@ -78,7 +91,14 @@ test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付�
   assert.match(admin, /canManageXIdLinkRequests/);
   assert.match(admin, /buildNotificationOutboxStatement/);
   assert.match(admin, /notification\.statement/);
+  assert.match(admin, /xid_approved:/);
+  assert.match(admin, /xid_rejected:/);
+  assert.match(admin, /buildOpsChannelWebhookStatement/);
+  assert.match(admin, /buildChannelXIdRejectedNotification/);
+  assert.doesNotMatch(admin, /type: "discord_webhook"/);
   assert.match(admin, /xid_reject_webhook:/);
+  assert.match(admin, /channelNotification\.statement/);
+  assert.match(admin, /notification \|\| channelNotification \? "admin" : undefined/);
   assert.match(admin, /where\(eq\(xUsers\.id, effectiveXUserId\)\)/);
   assert.match(admin, /if \(!duplicateLink\)/);
   assert.match(admin, /processedXIdRequestMessage\(request\.status, "approve"\)/);
@@ -92,6 +112,16 @@ test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付�
       (mergeCore.match(/await mutateWithAudit\(/g) ?? []).length) >= 4,
   );
   assert.match(merge, /expectedRowCondition\(\{ expectedCurrent: current \}\)/);
+});
+
+test("X ID運営通知は構造化channel templateとメンション抑止を使う", () => {
+  assert.match(xidChannelSource, /buildChannelXIdRequestNotification/);
+  assert.match(xidChannelSource, /buildChannelXIdRejectedNotification/);
+  assert.match(xidChannelSource, /buildChannelXIdCancelledNotification/);
+  assert.match(xidChannelSource, /buildNotificationBlocks/);
+  assert.match(xidChannelSource, /buildAllowedMentions\(\)/);
+  assert.match(xidChannelSource, /\/admin\/x-link-requests/);
+  assert.doesNotMatch(xidChannelSource, /merge|revert_merge|\/admin\/x-id-merges/);
 });
 
 test("X ID lifecycleの最大atomic planはD1 50 query以内に収まる", () => {

@@ -10,7 +10,6 @@ const rules = read("./rules.ts");
 const moderation = read("./moderation-admin.ts");
 const chapter = read("./chapter.ts");
 const videoDetailPage = read("../../../app/(admin)/admin/videos/[id]/page.tsx");
-const broadcastButton = read("../../components/admin/TermsReacceptBroadcastButton.tsx");
 const moderationForm = read("../../components/admin/CreateModerationCaseForm.tsx");
 
 test("rules, moderation, chapter import unstable_rethrow", () => {
@@ -53,26 +52,24 @@ test("rules publish keeps D1 commit separate from post-commit cache work", () =>
   assert.match(publish, /name: "revalidate"/);
 });
 
-test("rules broadcast separates fan-out commit from terms touch", () => {
+test("rules broadcast keeps the no-DM terms touch atomic", () => {
   const broadcast = rules.slice(
     rules.indexOf("export async function broadcastTermsReaccept"),
     rules.indexOf("export async function archiveTermsVersion"),
   );
-  assert.match(
-    broadcast,
-    /mutationStatements: notifications\.statements/,
-    "notification fan-out must commit on its own",
-  );
+  assert.doesNotMatch(broadcast, /buildKnownRecipientNotificationBatch/);
+  assert.doesNotMatch(broadcast, /type:\s*"terms_reaccept_required"/);
+  assert.match(broadcast, /Discord DM は送信しません/);
+  assert.match(broadcast, /await mutateWithAudit\(db,/);
+  assert.match(broadcast, /db\.update\(termsVersions\)/);
+  assert.match(broadcast, /expectedRowCondition\(\{ expectedCurrent: snapshot\(target\) \}\)/);
+  assert.match(broadcast, /expectedMutationChanges:\s*\[1\]/);
+  assert.match(broadcast, /context:\s*"admin_terms_broadcast"/);
+  assert.match(broadcast, /catch \(error\) \{ return mutationError\(error\); \}/);
   assert.match(broadcast, /runRulesPostCommit\("rules\.broadcast"/);
-  assert.doesNotMatch(
-    broadcast,
-    /mutationStatements:\s*\[[\s\S]*notifications\.statements[\s\S]*termsVersions/,
-    "fan-out and terms touch must not share one mutationStatements array",
-  );
-  assert.match(broadcast, /touchWarning/);
-  assert.match(broadcast, /warning: touchWarning/);
-  assert.match(broadcastButton, /result\.warning/);
-  assert.match(broadcastButton, /role="alert"/);
+  assert.match(broadcast, /revalidatePath\("\/rules"\)/);
+  assert.match(broadcast, /revalidatePath\("\/onboarding"\)/);
+  assert.doesNotMatch(broadcast, /touchWarning/);
 });
 
 test("admin video detail surfaces moderation create failures in client form", () => {

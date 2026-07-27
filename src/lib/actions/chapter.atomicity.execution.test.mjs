@@ -53,7 +53,6 @@ if (!runningWithTsx) {
       initial: "",
       statements: [
         mutation("chapter", (db) => db.prepare("INSERT INTO video_chapters VALUES ('ch-1', '新規', 100)").run()),
-        mutation("notification", (db) => db.prepare("INSERT INTO notification_outbox VALUES ('notice-1')").run()),
         mutation("queue", (db) => db.prepare("INSERT INTO static_rebuild_queue VALUES ('queue-1')").run()),
       ],
       auditCount: 1,
@@ -190,7 +189,7 @@ if (!runningWithTsx) {
 
   for (const [name, scenario] of Object.entries(scenarios)) {
     for (const failAt of [...scenario.statements.map((item) => item.label), "audit"]) {
-      test(`${name}の${failAt}失敗時は本体・通知・queue・監査をrollbackする`, async () => {
+      test(`${name}の${failAt}失敗時は本体・queue・監査をrollbackする`, async () => {
         const sqlite = await execute(scenario, failAt);
         const chapterRows = sqlite.prepare("SELECT id, label, updated_at FROM video_chapters ORDER BY id").all();
         if (name === "update") {

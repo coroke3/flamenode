@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -13,12 +14,26 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
         ...process.env,
         NODE_TEST_CONTEXT: undefined,
         FLAMENODE_AUTH_ADAPTER_EXECUTION: "1",
+        NEXT_PUBLIC_SITE_URL:
+          process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
       },
     },
   );
   if (result.error) throw result.error;
   if (result.status !== 0) process.exitCode = result.status ?? 1;
 } else {
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier === "server-only") {
+        return {
+          url: "data:text/javascript,export%20{}",
+          shortCircuit: true,
+        };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+
   const {
     accountRowWithoutTokens,
     linkDiscordAccountAtomically,
@@ -47,7 +62,8 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
           where: () => ({
             limit: async () => {
               selectIndex += 1;
-              // 1: user by id, 2: account by provider, 3: discord owner
+              // 1: user by id, 2: account by provider, 3: discord owner,
+              // 4: forced ops-channel notification recipient
               if (selectIndex === 1) return userRow ? [userRow] : [];
               if (selectIndex === 2) return existingAccount ? [existingAccount] : [];
               if (selectIndex === 3) {
@@ -57,6 +73,7 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
                 }
                 return [];
               }
+              if (selectIndex === 4) return userRow ? [userRow] : [];
               return [];
             },
           }),
@@ -143,8 +160,8 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
       mockWelcomeNotificationBuilder(),
     );
 
-    assert.equal(captured.mutationStatements.length, 3);
-    assert.deepEqual(captured.expectedMutationChanges, [null, 1, null]);
+    assert.equal(captured.mutationStatements.length, 4);
+    assert.deepEqual(captured.expectedMutationChanges, [null, 1, null, null]);
     assert.equal(captured.mutationStatements[0].values.access_token, null);
     assert.equal(captured.mutationStatements[0].values.refresh_token, null);
     assert.deepEqual(captured.mutationStatements[1].values, {
@@ -158,6 +175,11 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     assert.match(
       JSON.parse(captured.mutationStatements[2].values.payload_json).content,
       /\/onboarding/,
+    );
+    assert.equal(captured.mutationStatements[3].values.type, "discord_webhook");
+    assert.equal(
+      captured.mutationStatements[3].values.dedupe_key,
+      "channel_account_created:user-1",
     );
     assert.equal(captured.audits.length, 2);
     assert.equal(captured.audits[0].table_name, "account");

@@ -3,10 +3,10 @@ import r2IncrementalCache from "@opennextjs/cloudflare/overrides/incremental-cac
 
 const cloudflareConfig = defineCloudflareConfig({
   incrementalCache: r2IncrementalCache,
-  // Prime Next.js route modules after the first response so deployment smoke
-  // traffic warms shared chunks before later CPU-heavy admin requests. Keep
-  // this non-blocking: `onStart` would add every route to cold-start latency.
-  routePreloadingBehavior: "withWaitUntil",
+  // Load route modules only when requested. Background all-route preloading can
+  // race later cold-start requests after OpenNext marks routes as loaded, while
+  // also spending Cloudflare free-tier CPU on routes that may never be used.
+  routePreloadingBehavior: "none",
 });
 
 // OpenNext defaults to `npm run build`. In Workers Builds that must never be

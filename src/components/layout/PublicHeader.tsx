@@ -66,9 +66,16 @@ export function PublicHeader({
   const pathname = usePathname();
   const fetchAccount = serverUser === undefined || hydrateAccount;
   const preserveLoggedInOnFailure = hydrateAccount && serverUser != null;
-  const { user: fetchedUser, loading: accountLoading } =
+  const {
+    user: fetchedUser,
+    loading: accountLoading,
+    unavailable: accountUnavailable,
+  } =
     usePublicAccountSummary(fetchAccount, preserveLoggedInOnFailure);
-  const showAccountLoading = fetchAccount && accountLoading && !preserveLoggedInOnFailure;
+  const showAccountLoading =
+    fetchAccount && accountLoading && !preserveLoggedInOnFailure;
+  const showAccountUnavailable =
+    fetchAccount && accountUnavailable && !preserveLoggedInOnFailure;
   const accountUser =
     serverUser === undefined
       ? fetchedUser
@@ -189,6 +196,7 @@ export function PublicHeader({
           <PublicAccountIsland
             user={accountUser}
             loading={showAccountLoading}
+            unavailable={showAccountUnavailable}
             entryHref={entryHref}
             accountOpen={accountOpen}
             onAccountOpenChange={(open) => {
@@ -207,7 +215,7 @@ export function PublicHeader({
             type="button"
             ref={menuButtonRef}
             className={styles.menuToggle}
-            aria-label="メニューを開く"
+            aria-label={mobileOpen ? "メニューを閉じる" : "メニューを開く"}
             aria-expanded={mobileOpen}
             aria-controls="mobile-navigation-panel"
             onClick={() => {
@@ -306,6 +314,7 @@ export function PublicHeader({
             <PublicAccountIsland
               user={accountUser}
               loading={showAccountLoading}
+              unavailable={showAccountUnavailable}
               entryHref={entryHref}
               accountOpen={accountOpen}
               onAccountOpenChange={setAccountOpen}
@@ -320,6 +329,7 @@ export function PublicHeader({
           <PublicAccountIsland
             user={accountUser}
             loading={showAccountLoading}
+            unavailable={showAccountUnavailable}
             entryHref={entryHref}
             accountOpen={accountOpen}
             onAccountOpenChange={setAccountOpen}

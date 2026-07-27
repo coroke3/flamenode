@@ -8,6 +8,7 @@ import {
   SPREADSHEET_D1_BATCH_STATEMENT_LIMIT,
   SPREADSHEET_D1_BATCH_STATEMENT_RESERVE,
   SPREADSHEET_IMPORT_MAX_BATCH_ROWS,
+  SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS,
 } from "./constants.ts";
 
 const querySource = await readFile(
@@ -25,7 +26,11 @@ const importRouteSource = await readFile(
 
 test("spreadsheet writes use one strict audit batch", () => {
   assert.match(querySource, /mutateWithAudit\(db/);
-  assert.match(querySource, /expectedMutationChanges: allMutations\.map\(\(\) => 1\)/);
+  assert.match(querySource, /buildStaticRebuildQueueBatch\(db, staticRebuildTargets\)/);
+  assert.match(querySource, /\.\.\.queue\.statements/);
+  assert.match(querySource, /\.\.\.queue\.expectedChanges/);
+  assert.match(querySource, /staticRebuildWakeSource:/);
+  assert.match(querySource, /queue\.statements\.length > 0 \? "admin" : undefined/);
   assert.match(querySource, /strict: true/);
   assert.match(querySource, /after: row/);
   assert.match(querySource, /buildPreviewRunConsumptionMutation/);
@@ -44,16 +49,19 @@ test("spreadsheet import rejects invalid rows before mutation and caps D1 batch 
   assert.match(querySource, /if \(errors\.length > 0\) return \{ inserted: 0/);
   assert.match(querySource, /if \(!isSpreadsheetImportBatchSizeAllowed\(opts\.rows\.length\)\)/);
   assert.match(constantsSource, /SPREADSHEET_IMPORT_MAX_ROWS = 500/);
-  assert.equal(SPREADSHEET_IMPORT_MAX_BATCH_ROWS, 14);
+  assert.equal(SPREADSHEET_IMPORT_MAX_BATCH_ROWS, 11);
 });
 
-test("spreadsheet D1 budget accepts 14 guarded rows and rejects 15 without weakening reserve", () => {
+test("spreadsheet D1 budget keeps 11 guarded rows plus the worst four queue statements at 50", () => {
   assert.equal(SPREADSHEET_D1_BATCH_STATEMENT_LIMIT, 50);
   assert.equal(SPREADSHEET_D1_BATCH_STATEMENT_RESERVE, 10);
+  assert.equal(SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS, 4);
   assert.equal(estimateSpreadsheetImportD1Statements(14), 50);
-  assert.equal(estimateSpreadsheetImportD1Statements(15), 52);
-  assert.equal(isSpreadsheetImportBatchSizeAllowed(14), true);
-  assert.equal(isSpreadsheetImportBatchSizeAllowed(15), false);
+  assert.equal(estimateSpreadsheetImportD1Statements(11, 4), 50);
+  assert.equal(estimateSpreadsheetImportD1Statements(12, 4), 54);
+  assert.equal(isSpreadsheetImportBatchSizeAllowed(11), true);
+  assert.equal(isSpreadsheetImportBatchSizeAllowed(12), false);
+  assert.match(importRouteSource, /applyMaxRows: SPREADSHEET_IMPORT_MAX_BATCH_ROWS/);
 });
 
 test("spreadsheet import does not silently omit readonly or unknown columns", () => {

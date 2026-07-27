@@ -20,9 +20,27 @@ test("利用者slot操作は共通atomic plannerだけで書き込む", () => {
     assert.match(source, new RegExp(`export async function ${name}`));
   }
   assert.equal((source.match(/mutateWithAudit\(/g) ?? []).length, 1);
-  assert.match(source, /buildStaticRebuildQueueBatch/);
-  assert.match(source, /\.\.\.queue\.statements/);
-  assert.match(source, /\.\.\.queue\.expectedChanges/);
+  const commit =
+    source.match(/async function commitSlotUpdates[\s\S]*?async function loadSlot/)?.[0] ??
+    "";
+  assert.match(commit, /const queue = await buildSlotChangeQueueBatch/);
+  assert.match(
+    commit,
+    /mutationStatements:\s*\[[\s\S]*?\.\.\.args\.updates\.map\([\s\S]*?\.\.\.queue\.statements,[\s\S]*?\.\.\.extra,/,
+  );
+  assert.match(
+    commit,
+    /expectedMutationChanges:\s*\[[\s\S]*?\.\.\.args\.updates\.map\(\(\) => 1\),[\s\S]*?\.\.\.queue\.expectedChanges,[\s\S]*?\.\.\.extra\.map\(\(\) => null\),/,
+  );
+  assert.match(commit, /audits:\s*args\.updates\.map/);
+  assert.match(commit, /notificationWakeSource:\s*wakeNotification/);
+  assert.match(
+    commit,
+    /staticRebuildWakeSource:\s*queue\.statements\.length > 0 \? "web" : undefined/,
+  );
+  assert.match(source, /buildOpsChannelWebhookStatement/);
+  assert.match(source, /extraStatements\.push\(channelNotification\.statement\)/);
+  assert.match(source, /extraStatements,[\s\S]*?notificationWakeSource,/);
   assert.doesNotMatch(source, /auditAction\(/);
   assert.doesNotMatch(source, /rollbackReservedSlots/);
 });
@@ -74,9 +92,9 @@ test("複数枠機能を維持し、業務上限はmax_slots_per_videoを正本�
   assert.match(uiSource, /\{ length: atomicMaxConsecutiveSlots \}/);
 });
 
-test("3行更新+queue+完全auditはD1 Free query/bind上限内", () => {
+test("3行更新+queue+通知+完全auditはD1 Free query/bind上限内", () => {
   const budget = planD1AuditMutationBudget({
-    mutationStatementCount: MAX_ATOMIC_SLOT_ROWS + 1,
+    mutationStatementCount: MAX_ATOMIC_SLOT_ROWS + 2,
     mutationAssertionCount: MAX_ATOMIC_SLOT_ROWS + 1,
     auditEntryCount: MAX_ATOMIC_SLOT_ROWS,
     distinctActorCount: 1,
@@ -84,7 +102,7 @@ test("3行更新+queue+完全auditはD1 Free query/bind上限内", () => {
   const maxCasUpdateBinds = 8 + 13;
   const maxAuditChunkBinds = 21 * MAX_ATOMIC_SLOT_ROWS;
 
-  assert.equal(budget.totalQueryCount, 22);
+  assert.equal(budget.totalQueryCount, 23);
   assert.equal(budget.withinLimit, true);
   assert.ok(maxCasUpdateBinds <= 100);
   assert.ok(maxAuditChunkBinds <= 100);

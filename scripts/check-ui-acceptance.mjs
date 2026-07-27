@@ -97,6 +97,11 @@ forbidMatch(
   "公開ヘッダーにX ID選択ボタンが残っています。",
 );
 requireMatch(
+  "src/components/layout/PublicHeader.tsx",
+  /aria-label=\{mobileOpen \? "メニューを閉じる" : "メニューを開く"\}/,
+  "モバイルメニューボタンが開閉状態を読み上げません。",
+);
+requireMatch(
   "src/components/layout/PublicAccountIsland.tsx",
   /\/api\/account\/summary/,
   "公開アカウント島が account summary API を取得していません。",
@@ -262,11 +267,6 @@ if (videoDetailPage) {
       "app/(public)/[id]/page.tsx: PlaylistRail を直接 import しています。",
     );
   }
-  if (!/data-video-player-boundary/.test(videoDetailPage)) {
-    errors.push(
-      "app/(public)/[id]/page.tsx: data-video-player-boundary がありません。",
-    );
-  }
   if (/fn-vd-login-panel/.test(videoDetailPage)) {
     errors.push(
       "app/(public)/[id]/page.tsx: 旧ログインパネルが残っています。",
@@ -282,7 +282,53 @@ requireAll("src/components/video/VideoUtilityDock.tsx", [
   [/icon="chapter"/, "チャプターツールバーボタンがありません。"],
   [/pushState/, "モバイルパネル用 history.pushState がありません。"],
   [/popstate/, "popstate でパネルを閉じる処理がありません。"],
-  [/--fn-video-player-bottom/, "プレイヤー下端 CSS 変数の更新がありません。"],
+]);
+
+requireMatch(
+  "src/components/video/FixedVideoPlayerFrame.tsx",
+  /data-video-player-boundary/,
+  "プレイヤー境界を所有するフレームに data-video-player-boundary がありません。",
+);
+
+requireMatch(
+  "src/components/video/useMobileVideoGeometry.ts",
+  /--fn-mobile-player-bottom/,
+  "モバイルプレイヤー幾何フックにプレイヤー下端 CSS 変数の更新がありません。",
+);
+
+requireAll("app/(public)/[id]/page.module.css", [
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*position:\s*sticky/s,
+    "通常PCの sideRail が sticky になっていません。",
+  ],
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*top:\s*calc\(var\(--header-h,\s*64px\)\s*\+\s*16px\)/s,
+    "通常PCの sideRail がヘッダー下へ配置されていません。",
+  ],
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*max-height:\s*calc\(100svh\s*-\s*var\(--header-h,\s*64px\)\s*-\s*32px\)/s,
+    "通常PCの sideRail にviewport内の高さ制限がありません。",
+  ],
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*min-height:\s*0/s,
+    "通常PCの sideRail に min-height: 0 がありません。",
+  ],
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*overflow-y:\s*auto/s,
+    "通常PCの sideRail に独立した縦スクロールがありません。",
+  ],
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*overscroll-behavior:\s*contain/s,
+    "通常PCの sideRail がページへのoverscroll連鎖を抑止していません。",
+  ],
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*scrollbar-width:\s*thin/s,
+    "通常PCの sideRail に細いスクロールバー指定がありません。",
+  ],
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*scrollbar-gutter:\s*stable/s,
+    "通常PCの sideRail がスクロールバー領域を安定確保していません。",
+  ],
 ]);
 
 requireMatch(

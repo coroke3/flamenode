@@ -17,8 +17,9 @@ test("VideoUtilityDock keeps both panels mounted and wires history", () => {
   assert.match(body, /aria-hidden=\{/);
   assert.match(body, /pushState/);
   assert.match(body, /popstate/);
-  assert.match(body, /ResizeObserver/);
+  assert.match(body, /matchMedia/);
   assert.match(body, /playlistItems\.length === 0/);
+  assert.match(body, /authUnavailable=\{authUnavailable\}/);
   assert.match(body, /Escape/);
 });
 
@@ -29,6 +30,8 @@ test("ChapterCommentPanel preserves composer flow", () => {
   assert.match(body, /setDraftTime\(currentTime\)/);
   assert.match(body, /presentation="inline-sheet"/);
   assert.match(body, /data-chapter-time/);
+  assert.match(body, /authUnavailable \? \(/);
+  assert.match(body, /ログイン状態を一時的に確認できません/);
 });
 
 test("usePlayerTime delegates to subscribePlayerTime cleanup", () => {

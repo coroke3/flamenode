@@ -22,6 +22,11 @@ test("all manual CostGuard control writes use the dedicated control guard and at
   assert.match(action, /z\.enum\(\["normal", "economy", "read_only", "static_only"\]\)/);
   assert.match(action, /writeOperationModeKvMirror/);
   assert.match(action, /KV複製の更新に失敗/);
+  assert.equal(
+    (action.match(/warning \? \{ warning, message: warning \} : \{\}/g) ?? []).length,
+    2,
+    "mode と maintenance の両方でKV複製失敗を現行フォームのmessageへ表示する",
+  );
   assert.doesNotMatch(normalUi, /\["maintenance", "メンテナンス"\]/);
 });
 

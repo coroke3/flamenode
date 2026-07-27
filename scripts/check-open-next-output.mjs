@@ -107,12 +107,17 @@ export function checkOpenNextOutput({
   if (!nonEmptyDirectory(assetsPath)) errors.push("assets directory is missing or empty");
   if (!fs.existsSync(serverConfigPath) || !fs.statSync(serverConfigPath).isFile()) {
     errors.push("default server OpenNext config is missing");
-  } else if (
-    !/routePreloadingBehavior\s*:\s*["']withWaitUntil["']/.test(
-      fs.readFileSync(serverConfigPath, "utf8"),
-    )
-  ) {
-    errors.push("default server must use non-blocking withWaitUntil route preloading");
+  } else {
+    const serverConfig = fs.readFileSync(serverConfigPath, "utf8");
+    const usesOnDemandRouteLoading =
+      /routePreloadingBehavior\s*:\s*["']none["']/.test(serverConfig);
+    const usesAllRoutePreloading =
+      /routePreloadingBehavior\s*:\s*["'](?:withWaitUntil|onStart|onWarmerEvent)["']/.test(
+        serverConfig,
+      );
+    if (!usesOnDemandRouteLoading || usesAllRoutePreloading) {
+      errors.push("default server must use on-demand route loading (routePreloadingBehavior: none)");
+    }
   }
   if (!fs.existsSync(manifestPath) || !fs.statSync(manifestPath).isFile()) {
     errors.push(`${MANIFEST_NAME} is missing`);

@@ -99,6 +99,15 @@ function fixture() {
   const env = {
     DB: d1FromSqlite(sqlite),
     R2: {
+      async get(key) {
+        const payload = objects.get(key);
+        if (payload === undefined) return null;
+        return {
+          async json() {
+            return structuredClone(payload);
+          },
+        };
+      },
       async put(key, body) {
         objects.set(key, JSON.parse(String(body)));
       },
@@ -114,6 +123,8 @@ function fixture() {
 test("public static artifacts exclude private event identifiers and titles", async () => {
   const { sqlite, objects, env } = fixture();
   try {
+    await rebuildTarget(env, "youtube_related_blocklist", "global");
+    await rebuildTarget(env, "random_video_pool", "global");
     await rebuildTarget(env, "video", "video-1");
     const video = objects.get("videos/video-1.json");
     assert.equal(video.video.primary_event_id, null);

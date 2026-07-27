@@ -33,6 +33,10 @@ import {
   STATIC_BACKFILL_KINDS,
   type StaticBackfillKind,
 } from "@/lib/staticRebuild/backfillStateCore";
+import {
+  loadStaticSharedInputDiagnostics,
+  type StaticSharedInputObjectState,
+} from "@/lib/admin/staticSharedInputDiagnostics";
 
 export const metadata: Metadata = { title: "静的JSON再生成" };
 export const dynamic = "force-dynamic";
@@ -58,7 +62,10 @@ export default async function AdminStaticBuildsPage({
   const backfillError = String(params.backfill_error ?? "");
   const backfillStatePersisted =
     String(params.backfill_state_persisted ?? "") !== "0";
-  const backfillState = await readStaticBackfillState();
+  const [backfillState, sharedInputDiagnostics] = await Promise.all([
+    readStaticBackfillState(),
+    loadStaticSharedInputDiagnostics(),
+  ]);
 
   const db = getDatabase();
   let rows: (typeof staticRebuildQueue.$inferSelect)[] = [];
@@ -240,6 +247,90 @@ export default async function AdminStaticBuildsPage({
           target を処理します。 economy では search_index / list_popular は high
           優先度のみ処理されます。
         </p>
+      </section>
+
+      <section style={{ marginBottom: 24 }} aria-labelledby="shared-json-heading">
+        <h2
+          id="shared-json-heading"
+          style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}
+        >
+          関連動画の共有JSON診断
+        </h2>
+        <p className="fn-muted fn-text-sm" style={{ margin: "0 0 10px" }}>
+          R2上の実体と、公開ローダーが現在利用できる内容を分けて表示します。
+          stale は期限内のCacheを利用中、unavailable は安全のため関連動画へ利用しない状態です。
+        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {sharedInputDiagnostics.map((diagnostic) => (
+            <article
+              key={diagnostic.kind}
+              className="fn-card"
+              style={{ padding: 14, minWidth: 0 }}
+            >
+              <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 8px" }}>
+                {diagnostic.label}
+              </h3>
+              <p
+                className="fn-muted fn-text-sm"
+                style={{ margin: "0 0 10px", overflowWrap: "anywhere" }}
+              >
+                <code>{diagnostic.objectKey}</code>
+              </p>
+              <dl
+                className="fn-text-sm"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "max-content minmax(0, 1fr)",
+                  gap: "6px 12px",
+                  margin: "0 0 12px",
+                }}
+              >
+                <dt className="fn-muted">R2 object</dt>
+                <dd style={{ margin: 0 }}>
+                  {sharedInputObjectStateLabel(diagnostic.objectState)}
+                </dd>
+                <dt className="fn-muted">load status</dt>
+                <dd style={{ margin: 0 }}>
+                  <code>{diagnostic.loadStatus}</code>
+                </dd>
+                <dt className="fn-muted">generated_at</dt>
+                <dd style={{ margin: 0 }}>
+                  {diagnostic.generatedAt
+                    ? formatBackfillTime(diagnostic.generatedAt)
+                    : "確認不可"}
+                </dd>
+                <dt className="fn-muted">件数</dt>
+                <dd style={{ margin: 0 }}>
+                  {diagnostic.itemCount == null
+                    ? "確認不可"
+                    : `${diagnostic.itemCount}${diagnostic.itemUnit}`}
+                </dd>
+              </dl>
+              <form action={enqueueStaticRebuildAdmin}>
+                <input
+                  type="hidden"
+                  name="target_type"
+                  value={diagnostic.targetType}
+                />
+                <input type="hidden" name="target_id" value="global" />
+                <input
+                  type="hidden"
+                  name="reason"
+                  value={`admin_shared_input_rebuild_${diagnostic.kind}`}
+                />
+                <button type="submit" className="fn-btn fn-btn-primary">
+                  再生成をキュー投入
+                </button>
+              </form>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section
@@ -492,6 +583,14 @@ function backfillStatusLabel(
   if (status === "completed") return "完了";
   if (status === "failed") return "失敗";
   return "未実行";
+}
+
+function sharedInputObjectStateLabel(
+  state: StaticSharedInputObjectState,
+): string {
+  if (state === "present") return "存在";
+  if (state === "missing") return "未生成";
+  return "確認不可";
 }
 
 function formatBackfillTime(unix: number): string {

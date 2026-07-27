@@ -162,6 +162,18 @@
   visibility: hidden;
 }
 
+.accountUnavailable {
+  display: inline-flex;
+  align-items: center;
+  max-width: 184px;
+  min-height: var(--header-action-h);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-align: right;
+}
+
 .postBtn,
 .joinBtn,
 .ghostBtn,
@@ -380,6 +392,13 @@
   background: var(--accent-primary-strong);
 }
 
+.mobileAccountUnavailable {
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  line-height: 1.5;
+}
+
 .mobileLinkDanger {
   color: var(--accent-danger);
 }
@@ -520,7 +539,8 @@
 @media (max-width: 640px) {
   .searchToggle,
   .headerCta,
-  .actionNav {
+  .actionNav,
+  .accountUnavailable {
     display: none;
   }
 

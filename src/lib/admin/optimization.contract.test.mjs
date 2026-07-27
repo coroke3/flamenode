@@ -123,8 +123,11 @@ test("ライブAPIはイベント存在確認を各データ読取へ統合す�
   assert.match(liveApi, /eq\(videos\.visibility_status, "public"\)/);
 });
 
-test("公開静的JSONは同時読取を集約しR2を先に読む", () => {
-  assert.match(publicDataLoader, /staticReadInFlight/);
+test("公開静的JSONはrequest外へR2 Promiseを保持せずR2を先に読む", () => {
+  assert.doesNotMatch(publicDataLoader, /staticReadInFlight/);
+  assert.doesNotMatch(publicDataLoader, /new Map<string, Promise<unknown \| null>>/);
+  assert.match(publicDataLoader, /async function readStaticJson<T>/);
+  assert.match(publicDataLoader, /await bucket\.get\(key\)/);
   assert.match(publicDataLoader, /read_failed/);
   assert.match(publicDataLoader, /enqueue_failed/);
   assert.match(publicDataLoader, /resolvePublicOperationMode\(\{ allowD1: false \}\)/);

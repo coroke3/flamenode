@@ -149,7 +149,10 @@ insertRandomRelatedVideos(args: {
   semantic:
     readonly StaticRelatedVideo[];
   random:
-    readonly StaticRelatedVideo[];
+    readonly (
+      | StaticRelatedVideo
+      | null
+    )[];
   maxTarget?: number;
 }): StaticRelatedVideo[] {
   const maxTarget = clampInteger(
@@ -165,6 +168,8 @@ insertRandomRelatedVideos(args: {
 
   args.random.forEach(
     (video, randomIndex) => {
+      if (!video) return;
+
       const duplicate =
         result.findIndex(
           (candidate) =>
@@ -243,30 +248,39 @@ resolveVisibleRelatedVideos(args: {
       blockedIds: args.blockedIds,
     });
 
-  const survivingRandom =
-    primaryEligible.filter(
-      (video) =>
-        randomIdSet.has(video.id),
+  const randomIds = [
+    ...randomIdSet,
+  ];
+
+  const survivingRandomById =
+    new Map<
+      string,
+      StaticRelatedVideo
+    >(
+      primaryEligible
+        .filter((video) =>
+          randomIdSet.has(video.id),
+        )
+        .map((video) => [
+          video.id,
+          video,
+        ]),
+    );
+
+  const randomSlots =
+    randomIds.map(
+      (id) =>
+        survivingRandomById.get(id) ??
+        null,
     );
 
   const randomUsed = new Set<string>([
     args.currentVideoId,
-    ...survivingRandom.map(
-      (video) => video.id,
+    ...randomSlots.flatMap(
+      (video) =>
+        video ? [video.id] : [],
     ),
   ]);
-
-  const desiredRandomCount =
-    Math.min(
-      RELATED_RANDOM_LIMIT,
-      randomIdSet.size,
-    );
-
-  const randomVideos =
-    survivingRandom.slice(
-      0,
-      desiredRandomCount,
-    );
 
   const randomReserve =
     uniqueEligible(
@@ -279,20 +293,39 @@ resolveVisibleRelatedVideos(args: {
       },
     );
 
-  for (const video of randomReserve) {
-    if (
-      randomVideos.length >=
-      desiredRandomCount
-    ) {
-      break;
+  let randomReserveIndex = 0;
+
+  for (
+    let slotIndex = 0;
+    slotIndex < randomSlots.length;
+    slotIndex += 1
+  ) {
+    if (randomSlots[slotIndex]) {
+      continue;
     }
 
-    randomVideos.push(video);
+    const replacement =
+      randomReserve[
+        randomReserveIndex
+      ] ?? null;
+    randomReserveIndex += 1;
+    randomSlots[slotIndex] =
+      replacement;
+
+    if (replacement) {
+      randomUsed.add(
+        replacement.id,
+      );
+    }
   }
 
+  const missingRandomCount =
+    randomSlots.filter(
+      (video) => !video,
+    ).length;
+
   if (
-    randomVideos.length <
-    desiredRandomCount
+    missingRandomCount > 0
   ) {
     const fallbackForRandom =
       uniqueEligible(
@@ -306,15 +339,36 @@ resolveVisibleRelatedVideos(args: {
         },
       );
 
-    randomVideos.push(
-      ...selectDeterministicRandom(
+    const fallbackRandom =
+      selectDeterministicRandom(
         fallbackForRandom,
-        desiredRandomCount -
-          randomVideos.length,
+        missingRandomCount,
         `${args.seed}:random-repair`,
-      ),
-    );
+      );
+    let fallbackIndex = 0;
+
+    for (
+      let slotIndex = 0;
+      slotIndex < randomSlots.length;
+      slotIndex += 1
+    ) {
+      if (randomSlots[slotIndex]) {
+        continue;
+      }
+
+      randomSlots[slotIndex] =
+        fallbackRandom[
+          fallbackIndex
+        ] ?? null;
+      fallbackIndex += 1;
+    }
   }
+
+  const randomVideos =
+    randomSlots.flatMap(
+      (video) =>
+        video ? [video] : [],
+    );
 
   const used = new Set<string>([
     args.currentVideoId,
@@ -411,7 +465,7 @@ resolveVisibleRelatedVideos(args: {
 
   return insertRandomRelatedVideos({
     semantic,
-    random: randomVideos,
+    random: randomSlots,
     maxTarget,
   });
 }

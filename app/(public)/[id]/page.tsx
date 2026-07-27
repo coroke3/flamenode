@@ -1,11 +1,14 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, unstable_rethrow } from "next/navigation";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
-import { getCurrentUser } from "@/lib/auth/currentUser";
+import {
+  CurrentUserUnavailableError,
+  getCurrentUser,
+} from "@/lib/auth/currentUser";
 import {
   getApprovedXIds,
   canEditVideo,
@@ -48,10 +51,9 @@ import {
 import { buildPublicVideoViewModelFromStatic } from "@/lib/publicData/publicVideoDetailViewModel";
 import {
   loadPublicXIconMapOptional,
-  loadRandomVideoPoolOptional,
+  loadRandomVideoPool,
   loadYoutubeRelatedBlocklist,
 } from "@/lib/publicData/staticSharedInputsLoader";
-import { EMPTY_YOUTUBE_RELATED_BLOCKLIST } from "@/lib/publicData/staticYoutubeRelatedBlocklistCore";
 import { RELATED_MIN_LIMIT } from "@/lib/publicData/relatedVideoProjection";
 import type { StaticRelatedVideo } from "@/lib/publicData/staticVideoDetailCore";
 import {
@@ -118,12 +120,6 @@ export default async function VideoDetailPage({
         staticProbe.data.publicEvents.find((event) => event.id === playlist)
           ?.title ?? null,
     });
-    logPublicRequestMetrics();
-    const needsBlocklist =
-      staticProbe.data.relatedVideos.length > 0 ||
-      staticProbe.data.relatedReserve.length > 0 ||
-      staticProbe.data.relatedRandomReserve.length > 0;
-
     const relatedIconCandidates = [
       ...staticProbe.data.relatedVideos,
       ...staticProbe.data.relatedReserve,
@@ -143,16 +139,10 @@ export default async function VideoDetailPage({
       ? loadPublicXIconMapOptional()
       : null;
 
-    const blocklist = await (
-      needsBlocklist
-        ? loadYoutubeRelatedBlocklist()
-        : Promise.resolve({
-            status: "fresh" as const,
-            value: EMPTY_YOUTUBE_RELATED_BLOCKLIST,
-          })
-    );
+    const blocklist = await loadYoutubeRelatedBlocklist();
 
     let relatedFallbackPool: StaticRelatedVideo[] = [];
+    let relatedSharedStatus = blocklist.status;
 
     if (blocklist.status !== "unavailable") {
       const embeddedIds = new Set<string>();
@@ -175,7 +165,15 @@ export default async function VideoDetailPage({
         staticProbe.data.schemaVersion === 1 ||
         embeddedIds.size < RELATED_MIN_LIMIT
       ) {
-        relatedFallbackPool = (await loadRandomVideoPoolOptional()).items;
+        const randomPool = await loadRandomVideoPool();
+        if (randomPool.status === "unavailable") {
+          relatedSharedStatus = "unavailable";
+        } else {
+          if (randomPool.status === "stale") {
+            relatedSharedStatus = "stale";
+          }
+          relatedFallbackPool = randomPool.value.items;
+        }
       }
     }
 
@@ -189,13 +187,15 @@ export default async function VideoDetailPage({
         ? await loadPublicXIconMapOptional()
         : null;
 
+    logPublicRequestMetrics();
+
     return (
       <StaticVideoDetailView
         detail={staticProbe.data}
         rawId={rawId}
         playlist={playlist}
         overlay={overlay}
-        relatedBlocklistStatus={blocklist.status}
+        relatedSharedStatus={relatedSharedStatus}
         relatedBlockedIds={blocklist.value.blockedIds}
         relatedFallbackPool={relatedFallbackPool}
         iconMap={publicXIconEntriesToMap(iconMapPayload)}
@@ -207,6 +207,7 @@ export default async function VideoDetailPage({
 
 type VideoViewerOverlay = {
   viewerUser: Awaited<ReturnType<typeof getCurrentUser>>;
+  authUnavailable: boolean;
   likeActive: boolean;
   bookmarkActive: boolean;
   viewerXApproved: boolean;
@@ -236,6 +237,7 @@ async function fetchVideoViewerOverlay({
 }): Promise<VideoViewerOverlay> {
   const emptyOverlay: VideoViewerOverlay = {
     viewerUser: null,
+    authUnavailable: false,
     likeActive: false,
     bookmarkActive: false,
     viewerXApproved: false,
@@ -246,22 +248,49 @@ async function fetchVideoViewerOverlay({
   };
 
   let viewerUser: Awaited<ReturnType<typeof getCurrentUser>> = null;
+  let authUnavailable = false;
   try {
     viewerUser = await getCurrentUser();
-    if (!viewerUser) return emptyOverlay;
+  } catch (error) {
+    unstable_rethrow(error);
+    if (error instanceof CurrentUserUnavailableError) {
+      authUnavailable = true;
+    } else {
+      throw error;
+    }
+  }
 
-    const viewerActiveX = viewerUser.active_x_user_id ?? null;
+  const authenticatedViewer = viewerUser;
+  const viewerActiveX = authenticatedViewer?.active_x_user_id ?? null;
+  const eventPlaylistRequested =
+    Boolean(playlist) && playlist !== "lib-like" && playlist !== "lib-bookmark";
+  const needsDatabaseOverlay = Boolean(
+    authenticatedViewer || creatorXUserId || eventPlaylistRequested,
+  );
+
+  if (!needsDatabaseOverlay) {
+    return { ...emptyOverlay, viewerUser, authUnavailable };
+  }
+
+  try {
     const overlay = await withDatabase(async (db) => {
       let viewerCanEditChapters = false;
-      const probe = await fetchVideoRowByIdOrYoutube(db, rawId);
-      if (probe) {
-        viewerCanEditChapters = await canEditVideo({
-          db,
-          user: { id: viewerUser!.id, role: viewerUser!.role ?? null },
-          video: probe,
-          requiredKey: "video.chapter_admin",
-          privilegeMode: resolveAdminOrEventVideoPrivilegeMode(viewerUser!.role),
-        });
+      if (authenticatedViewer) {
+        const probe = await fetchVideoRowByIdOrYoutube(db, rawId);
+        if (probe) {
+          viewerCanEditChapters = await canEditVideo({
+            db,
+            user: {
+              id: authenticatedViewer.id,
+              role: authenticatedViewer.role ?? null,
+            },
+            video: probe,
+            requiredKey: "video.chapter_admin",
+            privilegeMode: resolveAdminOrEventVideoPrivilegeMode(
+              authenticatedViewer.role,
+            ),
+          });
+        }
       }
 
       let likeActive = false;
@@ -373,11 +402,12 @@ async function fetchVideoViewerOverlay({
     });
 
     if (!overlay) {
-      return { ...emptyOverlay, viewerUser };
+      return { ...emptyOverlay, viewerUser, authUnavailable };
     }
 
     return {
       viewerUser,
+      authUnavailable,
       likeActive: overlay.likeActive,
       bookmarkActive: overlay.bookmarkActive,
       viewerXApproved: overlay.viewerXApproved,
@@ -386,8 +416,9 @@ async function fetchVideoViewerOverlay({
       playlistLabel: overlay.playlistLabel,
       playlistItems: overlay.playlistItems,
     };
-  } catch {
-    return { ...emptyOverlay, viewerUser };
+  } catch (error) {
+    unstable_rethrow(error);
+    return { ...emptyOverlay, viewerUser, authUnavailable };
   }
 }
 
@@ -396,7 +427,7 @@ function StaticVideoDetailView({
   rawId,
   playlist = "",
   overlay,
-  relatedBlocklistStatus = "unavailable",
+  relatedSharedStatus = "unavailable",
   relatedBlockedIds,
   relatedFallbackPool,
   iconMap,
@@ -405,13 +436,13 @@ function StaticVideoDetailView({
   rawId: string;
   playlist?: string;
   overlay?: VideoViewerOverlay | null;
-  relatedBlocklistStatus?: "fresh" | "stale" | "unavailable";
+  relatedSharedStatus?: "fresh" | "stale" | "unavailable";
   relatedBlockedIds?: ReadonlySet<string>;
   relatedFallbackPool?: readonly StaticRelatedVideo[];
   iconMap?: Map<string, PublicXIconEntry>;
 }): React.ReactElement {
   const vm = buildPublicVideoViewModelFromStatic(detail, {
-    relatedUnavailable: relatedBlocklistStatus === "unavailable",
+    relatedUnavailable: relatedSharedStatus === "unavailable",
     relatedBlockedIds,
     relatedFallbackPool,
     iconMap,
@@ -421,6 +452,7 @@ function StaticVideoDetailView({
     notFound();
   }
   const viewerUser = overlay?.viewerUser ?? null;
+  const authUnavailable = overlay?.authUnavailable ?? false;
   const viewerActiveX = viewerUser?.active_x_user_id ?? null;
   const likeActive = overlay?.likeActive ?? false;
   const bookmarkActive = overlay?.bookmarkActive ?? false;
@@ -606,7 +638,11 @@ function StaticVideoDetailView({
                   />
                   {!canInteract ? (
                     <span className={styles.interactionHint}>
-                      {!viewerUser?.id ? (
+                      {authUnavailable ? (
+                        <>
+                          ログイン状態を一時的に確認できません。時間をおいて再読み込みしてください。
+                        </>
+                      ) : !viewerUser?.id ? (
                         <>
                           ログインするといいね、セーブができます。
                           <Link
@@ -800,6 +836,7 @@ function StaticVideoDetailView({
             playlistItems={playlistItems}
             chapters={chapterEntries}
             isLoggedIn={Boolean(viewerUser?.id)}
+            authUnavailable={authUnavailable}
             canPost={viewerXApproved}
             loginHref={loginHref}
             settingsHref={settingsHref}
@@ -813,7 +850,11 @@ function StaticVideoDetailView({
               関連動画
             </h3>
 
-            <RelatedList videos={vm.relatedVideos} firstCount={18} />
+            <RelatedList
+              videos={vm.relatedVideos}
+              firstCount={18}
+              unavailable={relatedSharedStatus === "unavailable"}
+            />
           </section>
         </aside>
       </div>
@@ -824,13 +865,19 @@ function StaticVideoDetailView({
 function RelatedList({
   videos,
   firstCount,
+  unavailable,
 }: {
   videos: VideoCardData[];
   firstCount: number;
+  unavailable: boolean;
 }): React.ReactElement {
   return (
     <div className={styles.relatedList}>
-      {videos.length === 0 ? (
+      {unavailable ? (
+        <p className="fn-empty-message" role="status">
+          関連動画用の共有データを一時的に利用できません。時間をおいて再読み込みしてください。
+        </p>
+      ) : videos.length === 0 ? (
         <p className="fn-empty-message">
           関連動画はまだありません。
         </p>

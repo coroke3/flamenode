@@ -36,4 +36,13 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /\/api\/account\/summary/);
   assert.match(island, /cache: "no-store"/);
   assert.match(island, /preserveLoggedInOnFailure/);
+  assert.match(island, /response\.status === 503 \|\| !response\.ok/);
+  assert.match(island, /setUnavailable\(true\)/);
+  assert.match(island, /summary\.unavailable/);
+  assert.match(island, /ログイン状態を一時的に確認できません/);
+  assert.match(island, /if \(unavailable \|\| !user\) \{/);
+  assert.doesNotMatch(
+    island,
+    /response\.status === 503[\s\S]{0,180}setUser\(null\)/,
+  );
 });

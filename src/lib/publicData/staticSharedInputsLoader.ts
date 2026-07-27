@@ -32,34 +32,20 @@ export type StaticJsonLoadResult<T> = {
   value: T;
 };
 
-const inFlight = new Map<string, Promise<unknown | null>>();
-
 async function readR2Json(key: string): Promise<unknown | null> {
-  const current = inFlight.get(key);
-  if (current) return current;
-
-  const pending = (async () => {
+  try {
+    const bucket = getEnv().BUCKET;
+    if (!bucket) return null;
+    recordPublicR2Get();
+    const object = await bucket.get(key);
+    if (!object) return null;
     try {
-      const bucket = getEnv().BUCKET;
-      if (!bucket) return null;
-      recordPublicR2Get();
-      const object = await bucket.get(key);
-      if (!object) return null;
-      try {
-        return await object.json();
-      } catch {
-        return null;
-      }
+      return await object.json();
     } catch {
       return null;
     }
-  })();
-
-  inFlight.set(key, pending);
-  try {
-    return await pending;
-  } finally {
-    if (inFlight.get(key) === pending) inFlight.delete(key);
+  } catch {
+    return null;
   }
 }
 
@@ -146,11 +132,23 @@ export async function loadPublicXIconMapOptional(): Promise<PublicXIconMapPayloa
 }
 
 export async function loadRandomVideoPoolOptional(): Promise<RandomVideoPool> {
+  return (await loadRandomVideoPool()).value;
+}
+
+export async function loadRandomVideoPool(): Promise<
+  StaticJsonLoadResult<RandomVideoPool>
+> {
   const result = await loadStaticJsonFreshStaleUnavailable({
     key: RANDOM_VIDEO_POOL_OBJECT_KEY,
     normalize: normalizeRandomVideoPool,
     maxStaleAgeSec: 24 * 60 * 60,
     cacheTtlSeconds: 300,
   });
-  return result.value ?? EMPTY_RANDOM_VIDEO_POOL;
+  if (result.status === "unavailable" || !result.value) {
+    return {
+      status: "unavailable",
+      value: EMPTY_RANDOM_VIDEO_POOL,
+    };
+  }
+  return { status: result.status, value: result.value };
 }

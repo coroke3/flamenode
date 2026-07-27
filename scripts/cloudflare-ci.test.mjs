@@ -121,12 +121,14 @@ test("package.json build invokes Next.js directly and cannot re-enter the Cloudf
   assert.doesNotMatch(pkg.scripts.build, /cf:|cloudflare|workers-ci/i);
 });
 
-test("OpenNext invokes Next.js directly and preloads routes outside the response", () => {
+test("OpenNext invokes Next.js directly and loads routes on demand", () => {
   const config = fs.readFileSync(path.join(root, "open-next.config.ts"), "utf8");
   assert.match(config, /buildCommand:\s*["']node node_modules\/next\/dist\/bin\/next build["']/);
   assert.doesNotMatch(config, /buildCommand:\s*["'](?:npm|pnpm|yarn).*build/);
-  assert.match(config, /routePreloadingBehavior:\s*["']withWaitUntil["']/);
+  assert.match(config, /routePreloadingBehavior:\s*["']none["']/);
+  assert.doesNotMatch(config, /routePreloadingBehavior:\s*["']withWaitUntil["']/);
   assert.doesNotMatch(config, /routePreloadingBehavior:\s*["']onStart["']/);
+  assert.doesNotMatch(config, /routePreloadingBehavior:\s*["']onWarmerEvent["']/);
 });
 
 test("bare wrangler deploy of tracked template is blocked in Workers CI", () => {
@@ -478,7 +480,7 @@ test("child processes use argv with shell disabled and redact IDs/secrets", () =
   assert.match(redactOutput(`${env.AUTH_SECRET}`, env), /\[REDACTED\]/);
 });
 
-test("OpenNext output requires route preloading, worker, assets, matching manifest, no Pages output, and no secret value", () =>
+test("OpenNext output requires on-demand routes, worker, assets, matching manifest, no Pages output, and no secret value", () =>
   withTempDirectory("flamenode-open-next-output-", (repoRoot) => {
     const outputRoot = path.join(repoRoot, ".open-next");
     fs.mkdirSync(path.join(outputRoot, "assets"), { recursive: true });
@@ -493,7 +495,7 @@ test("OpenNext output requires route preloading, worker, assets, matching manife
     fs.writeFileSync(path.join(outputRoot, "assets", "app.js"), "console.log('asset');\n", "utf8");
     fs.writeFileSync(
       serverConfigPath,
-      'export default { default: { routePreloadingBehavior: "withWaitUntil" } };\n',
+      'export default { default: { routePreloadingBehavior: "none" } };\n',
       "utf8",
     );
     writeBuildManifest({ outputRoot, commit: COMMIT });
@@ -502,16 +504,34 @@ test("OpenNext output requires route preloading, worker, assets, matching manife
 
     fs.writeFileSync(
       serverConfigPath,
-      'export default { default: { routePreloadingBehavior: "none" } };\n',
+      'export default { default: { routePreloadingBehavior: "withWaitUntil" } };\n',
       "utf8",
     );
     assert.throws(
       () => checkOpenNextOutput({ env, repoRoot, outputRoot, commit: COMMIT }),
-      /withWaitUntil route preloading/,
+      /on-demand route loading/,
     );
     fs.writeFileSync(
       serverConfigPath,
-      'export default { default: { routePreloadingBehavior: "withWaitUntil" } };\n',
+      'export default { default: { routePreloadingBehavior: "onStart" } };\n',
+      "utf8",
+    );
+    assert.throws(
+      () => checkOpenNextOutput({ env, repoRoot, outputRoot, commit: COMMIT }),
+      /on-demand route loading/,
+    );
+    fs.writeFileSync(
+      serverConfigPath,
+      'export default { default: { routePreloadingBehavior: "onWarmerEvent" } };\n',
+      "utf8",
+    );
+    assert.throws(
+      () => checkOpenNextOutput({ env, repoRoot, outputRoot, commit: COMMIT }),
+      /on-demand route loading/,
+    );
+    fs.writeFileSync(
+      serverConfigPath,
+      'export default { default: { routePreloadingBehavior: "none" } };\n',
       "utf8",
     );
 
