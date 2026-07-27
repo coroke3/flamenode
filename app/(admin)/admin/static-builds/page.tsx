@@ -12,6 +12,7 @@ import { staticRebuildQueue, systemSettings } from "@/lib/db/schema";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import {
   enqueueStaticRebuildAdmin,
+  enqueueSharedRelatedInputsRebuildAdmin,
   enqueueStaticBackfillBatch,
   retryAllFailedStaticRebuild,
 } from "@/lib/actions/static-rebuild-admin";
@@ -260,6 +261,14 @@ export default async function AdminStaticBuildsPage({
           R2上の実体と、公開ローダーが現在利用できる内容を分けて表示します。
           stale は期限内のCacheを利用中、unavailable は安全のため関連動画へ利用しない状態です。
         </p>
+        <form
+          action={enqueueSharedRelatedInputsRebuildAdmin}
+          style={{ marginBottom: 12 }}
+        >
+          <button type="submit" className="fn-btn fn-btn-primary">
+            関連動画の共有JSONを両方まとめて再生成キュー投入
+          </button>
+        </form>
         <div
           style={{
             display: "grid",

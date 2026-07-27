@@ -44,7 +44,7 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 
 関連動画の非公開除外は `youtube/related-blocklist.v1.json`、補完候補は `videos/random-pool.v1.json` を用いる。どちらも読み込みは fresh Cache → R2 → stale Cache（最大24h）→ unavailable とし、状態を捨てない。必要な共有JSONがunavailableのときは関連動画セクションを障害表示へ分離し、空blocklist・正常な0件へ倒さない。
 
-`/admin/static-builds` は両objectについて、R2 `head` による実体の有無、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、blocklist件数またはrandom pool件数を表示する。binding欠損・`head`失敗は「確認不可」とし、既存の管理者write guardを通る個別再生成キューだけを提供する。
+`/admin/static-builds` は両objectについて、R2 `head` による実体の有無、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、blocklist件数またはrandom pool件数を表示する。binding欠損・`head`失敗は「確認不可」とし、管理者write guardを通る個別再生成キューに加え、両方まとめて投入する操作を提供する。R2 object が欠けている場合は `content-jobs` Recovery Cron が high 優先度で両 target を自動 enqueue する。
 
 主な公開 artifact:
 

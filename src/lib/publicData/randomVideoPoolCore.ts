@@ -76,8 +76,12 @@ export function normalizeRandomVideoPool(
       ? payload.generation_key.trim()
       : null;
 
+  if (!Number.isFinite(generated) || generated <= 0 || !generationKey) {
+    return null;
+  }
+
   return {
-    generatedAt: Number.isFinite(generated) ? Math.floor(generated) : null,
+    generatedAt: Math.floor(generated),
     generationKey,
     items,
   };

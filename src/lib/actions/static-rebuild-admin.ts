@@ -589,6 +589,57 @@ export async function enqueueStaticRebuildAdmin(
   revalidatePath("/admin/static-builds");
 }
 
+export async function enqueueSharedRelatedInputsRebuildAdmin(): Promise<void> {
+  const guard = await requireAdminWrite("admin_static_rebuild");
+  if (!guard.ok) return;
+  const { db } = guard;
+  const reason = "admin_shared_related_inputs_rebuild";
+  const queue = await buildStaticRebuildQueueBatch(db, [
+    {
+      targetType: "youtube_related_blocklist",
+      targetId: "global",
+      reason,
+      priority: "high",
+      requestedByUserId: guard.user.id,
+    },
+    {
+      targetType: "random_video_pool",
+      targetId: "global",
+      reason,
+      priority: "high",
+      requestedByUserId: guard.user.id,
+    },
+  ]);
+  if (queue.statements.length === 0) return;
+  await mutateWithAudit(db, {
+    mutationStatements: queue.statements,
+    expectedMutationChanges: queue.expectedChanges,
+    audits: [
+      {
+        table_name: "static_rebuild_queue",
+        target_id: "manual:shared_related_inputs:global",
+        operation: "CREATE",
+        after: {
+          targets: [
+            "youtube_related_blocklist",
+            "random_video_pool",
+          ],
+          reason,
+          priority: "high",
+          requested_by_user_id: guard.user.id,
+        },
+        actor_user_id: guard.user.id,
+        context: "admin_static_rebuild_enqueue",
+        reason: "関連動画共有JSONをまとめて再生成登録",
+        retention_class: "normal",
+        strict: true,
+      },
+    ],
+    staticRebuildWakeSource: "admin",
+  });
+  revalidatePath("/admin/static-builds");
+}
+
 export async function retryAllFailedStaticRebuild(): Promise<void> {
   const guard = await requireAdminWrite("admin_static_rebuild");
   if (!guard.ok) return;

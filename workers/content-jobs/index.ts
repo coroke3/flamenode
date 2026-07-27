@@ -11,6 +11,7 @@ import {
   processStaticRebuildQueue,
   reconcileStaleQueue,
 } from "../json-generator/queue.ts";
+import { ensureYoutubeRelatedSharedInputsOnR2 } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
@@ -72,6 +73,23 @@ export async function runContentJobsRecovery(
         async (signal) => {
           const rebuildEnv = rebuildEnvironment(env);
           const now = Math.floor(Date.now() / 1000);
+          const missingSharedInputs = await ensureYoutubeRelatedSharedInputsOnR2(
+            rebuildEnv,
+            {
+              reason: "shared_related_inputs_missing_on_r2",
+              priority: "high",
+              signal,
+            },
+          );
+          if (missingSharedInputs > 0) {
+            await sendWorkerQueueWakeBestEffort({
+              queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
+              kind: "static_rebuild_available",
+              source: "recovery",
+              envFlags: env,
+              kv: env.KV,
+            });
+          }
           await reconcileStaleQueue(rebuildEnv, now, signal);
           let staticRebuildHasMore = false;
           const rebuild = await runJob(
