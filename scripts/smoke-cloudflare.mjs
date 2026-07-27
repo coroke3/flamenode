@@ -5,8 +5,24 @@ import { pathToFileURL } from "node:url";
 import { assertCommitSha, normalizedUrl } from "./cloudflare-production.mjs";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
-const DEFAULT_PROPAGATION_ATTEMPTS = 30;
-const DEFAULT_PROPAGATION_RETRY_DELAY_MS = 1_000;
+/** Workers deploy can lag behind wrangler success; allow ~2 min before failing smoke. */
+const DEFAULT_PROPAGATION_ATTEMPTS = 60;
+const DEFAULT_PROPAGATION_RETRY_DELAY_MS = 2_000;
+
+function propagationRequestOptions(env = process.env, requestOptions = {}) {
+  const attemptsRaw = env.SMOKE_PROPAGATION_ATTEMPTS?.trim();
+  const delayRaw = env.SMOKE_PROPAGATION_DELAY_MS?.trim();
+  const attempts = attemptsRaw ? Number.parseInt(attemptsRaw, 10) : DEFAULT_PROPAGATION_ATTEMPTS;
+  const retryDelayMs = delayRaw ? Number.parseInt(delayRaw, 10) : DEFAULT_PROPAGATION_RETRY_DELAY_MS;
+  return {
+    attempts: Number.isFinite(attempts) && attempts > 0 ? attempts : DEFAULT_PROPAGATION_ATTEMPTS,
+    retryDelayMs:
+      Number.isFinite(retryDelayMs) && retryDelayMs >= 0
+        ? retryDelayMs
+        : DEFAULT_PROPAGATION_RETRY_DELAY_MS,
+    ...requestOptions,
+  };
+}
 const PUBLIC_FORBIDDEN_KEYS = new Set([
   "access_token",
   "active_x_user_id",
@@ -162,6 +178,69 @@ export function smokeEnvironment({
   };
 }
 
+function validateWebHealthBody(settings, healthBody) {
+  assertKeys(healthBody, ["ok", "service", "commit", "runtime"], "web health");
+  if (
+    healthBody.ok !== true ||
+    healthBody.service !== "flamenode-web" ||
+    healthBody.runtime !== "cloudflare-worker" ||
+    healthBody.commit !== settings.commit
+  ) {
+    throw new Error("web health: invalid payload or commit mismatch.");
+  }
+}
+
+function validateCronHealthBody(settings, service, body) {
+  assertKeys(body, ["ok", "service", "commit"], `${service} health`);
+  if (body.ok !== true || body.service !== service || body.commit !== settings.commit) {
+    throw new Error(`${service} health: invalid payload or commit mismatch.`);
+  }
+}
+
+function validateDeepHealthBody(settings, body) {
+  assertKeys(body, ["ok", "service", "commit", "checks"], "deep health");
+  assertKeys(body.checks, ["d1", "kv", "r2", "schema"], "deep health checks");
+  if (
+    body.ok !== true ||
+    body.service !== "flamenode-web" ||
+    body.commit !== settings.commit ||
+    ["d1", "kv", "r2", "schema"].some((name) => body.checks[name] !== "ok")
+  ) {
+    throw new Error("deep health: D1/KV/R2/schema read-only check failed or commit mismatched.");
+  }
+}
+
+async function waitForProductionHealthConvergence(fetchImpl, settings, propagationOptions) {
+  await Promise.all([
+    requestJsonUntilValid(
+      fetchImpl,
+      `${settings.web}/api/health`,
+      {},
+      "web health",
+      (body) => validateWebHealthBody(settings, body),
+      propagationOptions,
+    ),
+    ...settings.workers.map(([service, baseUrl]) =>
+      requestJsonUntilValid(
+        fetchImpl,
+        `${baseUrl}/health`,
+        {},
+        `${service} health`,
+        (body) => validateCronHealthBody(settings, service, body),
+        propagationOptions,
+      ),
+    ),
+    requestJsonUntilValid(
+      fetchImpl,
+      `${settings.web}/api/health/deep`,
+      { headers: { Authorization: `Bearer ${settings.token}` } },
+      "deep health",
+      (body) => validateDeepHealthBody(settings, body),
+      propagationOptions,
+    ),
+  ]);
+}
+
 export async function runSmoke({
   env = process.env,
   repoRoot = process.cwd(),
@@ -170,8 +249,11 @@ export async function runSmoke({
   requestOptions,
 } = {}) {
   const settings = smokeEnvironment({ env, repoRoot, expectedCommit });
+  const propagationOptions = propagationRequestOptions(env, requestOptions);
   const get = (url, options, label) =>
     requestWithRetry(fetchImpl, url, options, label, requestOptions);
+
+  await waitForProductionHealthConvergence(fetchImpl, settings, propagationOptions);
 
   const top = await get(settings.web, {}, "top page");
   assertStatus(top, [200], "top page");
@@ -198,44 +280,9 @@ export async function runSmoke({
   );
   assertStatus(legacyImport, [401, 403], "legacy import unauthenticated rejection");
 
-  await requestJsonUntilValid(
-    fetchImpl,
-    `${settings.web}/api/health`,
-    {},
-    "web health",
-    (healthBody) => {
-      assertKeys(healthBody, ["ok", "service", "commit", "runtime"], "web health");
-      if (
-        healthBody.ok !== true ||
-        healthBody.service !== "flamenode-web" ||
-        healthBody.runtime !== "cloudflare-worker" ||
-        healthBody.commit !== settings.commit
-      ) {
-        throw new Error("web health: invalid payload or commit mismatch.");
-      }
-    },
-    requestOptions,
-  );
-
   const auth = await get(`${settings.web}/api/auth/callback/discord`, {}, "auth callback");
   if (auth.status >= 500 || auth.status === 404) {
     throw new Error(`auth callback: unexpected status ${auth.status}.`);
-  }
-
-  for (const [service, baseUrl] of settings.workers) {
-    await requestJsonUntilValid(
-      fetchImpl,
-      `${baseUrl}/health`,
-      {},
-      `${service} health`,
-      (body) => {
-        assertKeys(body, ["ok", "service", "commit"], `${service} health`);
-        if (body.ok !== true || body.service !== service || body.commit !== settings.commit) {
-          throw new Error(`${service} health: invalid payload or commit mismatch.`);
-        }
-      },
-      requestOptions,
-    );
   }
 
   const contentUrl = settings.workers.find(([service]) => service === "flamenode-content-jobs")[1];
@@ -259,26 +306,6 @@ export async function runSmoke({
   );
   assertStatus(deepUnauthenticated, [401], "deep health unauthenticated rejection");
 
-  await requestJsonUntilValid(
-    fetchImpl,
-    `${settings.web}/api/health/deep`,
-    { headers: { Authorization: `Bearer ${settings.token}` } },
-    "deep health",
-    (body) => {
-      assertKeys(body, ["ok", "service", "commit", "checks"], "deep health");
-      assertKeys(body.checks, ["d1", "kv", "r2", "schema"], "deep health checks");
-      if (
-        body.ok !== true ||
-        body.service !== "flamenode-web" ||
-        body.commit !== settings.commit ||
-        ["d1", "kv", "r2", "schema"].some((name) => body.checks[name] !== "ok")
-      ) {
-        throw new Error("deep health: D1/KV/R2/schema read-only check failed or commit mismatched.");
-      }
-    },
-    requestOptions,
-  );
-
   const publicApi = await get(`${settings.web}/api/videos?limit=1`, {}, "public videos DTO");
   assertStatus(publicApi, [200], "public videos DTO");
   const publicBody = await parseJson(publicApi, "public videos DTO");
@@ -298,7 +325,7 @@ export async function runSmoke({
   assertStatus(invalidMethod, [405], "invalid method probe");
 
   console.log(
-    "[smoke-cloudflare] OK (web, assets, list, legacy import guard, auth, 3 cron, deep health, DTO, 404, method)",
+    "[smoke-cloudflare] OK (health convergence, web, assets, list, legacy import guard, auth, cron admin guard, deep health auth, DTO, 404, method)",
   );
   return { commit: settings.commit };
 }
