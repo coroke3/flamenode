@@ -6,6 +6,7 @@ import {
   Manrope,
   Noto_Sans_JP,
 } from "next/font/google";
+import localFont from "next/font/local";
 import "@/styles/globals.css";
 import "@/styles/mobile-hardening.css";
 import {
@@ -43,11 +44,19 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+const flameNodeSans = localFont({
+  src: "./fonts/FlameNodeSans.otf",
+  variable: "--font-flamenode",
+  weight: "400",
+  display: "swap",
+});
+
 const redesignFontClassName = [
   hankenGrotesk.variable,
   manrope.variable,
   notoSansJp.variable,
   jetbrainsMono.variable,
+  flameNodeSans.variable,
 ].join(" ");
 
 const themeBootstrapCode = `(()=>{var d=document.documentElement;var q=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)');var read=function(){try{var v=localStorage.getItem('fn-theme');return v==='light'||v==='dark'||v==='system'?v:'system'}catch(_){return'system'}};var apply=function(mode){var resolved=mode==='system'?(q&&q.matches?'dark':'light'):mode;d.setAttribute('data-theme',resolved);d.setAttribute('data-theme-preference',mode)};var mode=read();apply(mode);if(q&&mode==='system'){var onChange=function(){if((d.getAttribute('data-theme-preference')||'system')==='system')apply('system')};if(q.addEventListener)q.addEventListener('change',onChange);else if(q.addListener)q.addListener(onChange)}})();`;
@@ -85,8 +94,8 @@ export const metadata: Metadata = {
     images: [absoluteUrl("/logo.png")],
   },
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: "/brand/flamenode-mark.png",
+    apple: "/brand/flamenode-mark.png",
   },
 };
 

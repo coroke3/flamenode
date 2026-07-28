@@ -79,6 +79,7 @@
     sans-serif;
   --font-mono: var(--font-jetbrains), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
     Consolas, monospace;
+  --font-brand: var(--font-flamenode), "FlameNode Sans", var(--font-display);
 
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -325,8 +326,9 @@ select {
   font-family: var(--font-jp);
 }
 
+.fn-brand-label,
 .fn-eyebrow {
-  font-family: var(--font-mono);
+  font-family: var(--font-brand);
   font-size: 10.5px;
   letter-spacing: 0.16em;
   text-transform: uppercase;

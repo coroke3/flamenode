@@ -8,6 +8,13 @@ import {
 import { createQueueWakeMessage } from "../../src/lib/queues/wakeMessage.ts";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
+const projectionSource = await readFile(
+  new URL(
+    "../json-generator/youtubeRelatedSharedInputsEnqueue.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 function makeBatch(body) {
   const acked = [];
@@ -123,15 +130,15 @@ test("Queue consumer は metadata commit と post-commit を分離する", () =>
 
 test("YouTube公開可否変更はblocklistとrandom poolを同時更新する", () => {
   assert.match(
-    source,
+    projectionSource,
     /YOUTUBE_RELATED_PROJECTION_TARGETS/,
   );
   assert.match(
-    source,
+    projectionSource,
     /"youtube_related_blocklist"/,
   );
   assert.match(
-    source,
+    projectionSource,
     /"random_video_pool"/,
   );
   assert.match(

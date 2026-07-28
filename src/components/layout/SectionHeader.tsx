@@ -1,5 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
+import { cn } from "@/lib/utils/cn";
 
 export interface SectionHeaderClasses {
   root?: string;
@@ -55,7 +56,9 @@ export function SectionHeader({
       <div className={classes.left ?? "fn-section-head-left"}>
         <div className={classes.titles ?? "fn-section-titles"}>
           {eyebrow ? (
-            <p className={classes.eyebrow ?? "fn-eyebrow"}>{eyebrow}</p>
+            <p className={cn("fn-brand-label", classes.eyebrow ?? "fn-eyebrow")}>
+              {eyebrow}
+            </p>
           ) : null}
           {classes.titleLine ? (
             <div className={classes.titleLine}>{titleContent}</div>

@@ -609,6 +609,7 @@
   align-items: center;
   gap: 8px;
   margin: 0 0 8px;
+  font-family: var(--font-brand);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -685,6 +686,7 @@
 }
 
 [data-fn-surface="personal"] .fn-eyebrow {
+  font-family: var(--font-brand);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -984,6 +986,7 @@
   align-items: center;
   padding: 3px 8px;
   border-radius: var(--r-pill, 8px);
+  font-family: var(--font-brand);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.14em;
@@ -1126,6 +1129,7 @@
   align-items: center;
   padding: 3px 9px;
   border-radius: var(--r-pill, 8px);
+  font-family: var(--font-brand);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -1233,6 +1237,7 @@
 [data-admin-shell] .fn-console-eyebrow,
 [data-manage-shell] .fn-console-eyebrow {
   margin: 0 0 10px;
+  font-family: var(--font-brand);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.18em;
