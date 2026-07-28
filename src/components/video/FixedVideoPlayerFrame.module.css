@@ -15,15 +15,16 @@
   .root {
     position: fixed;
     top: var(--fn-header-bottom, var(--header-h, 56px));
-    left: 50%;
+    left: var(--fn-mobile-player-left, 0px);
     right: auto;
     z-index: 40;
     width: var(--fn-mobile-player-width, 100%);
     height: var(--fn-mobile-player-height, 56.25vw);
     max-width: 100%;
+    margin: 0;
     aspect-ratio: 16 / 9;
     overflow: hidden;
-    transform: translateX(-50%);
+    transform: none;
   }
 
   .root[data-fullscreen="true"] {
