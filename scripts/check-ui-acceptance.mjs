@@ -296,38 +296,58 @@ requireMatch(
   "モバイルプレイヤー幾何フックにプレイヤー下端 CSS 変数の更新がありません。",
 );
 
+requireMatch(
+  "src/components/video/useMobileVideoGeometry.ts",
+  /--fn-mobile-player-left/,
+  "モバイルプレイヤー幾何フックにプレイヤー左端 CSS 変数の更新がありません。",
+);
+
+requireAll("src/components/video/FixedVideoPlayerFrame.module.css", [
+  [/left:\s*var\(--fn-mobile-player-left,\s*0px\)/, "モバイルプレイヤーが実測左端へ配置されていません。"],
+  [/margin:\s*0/, "モバイルプレイヤーの外側余白が打ち消されていません。"],
+]);
+
+forbidMatch(
+  "app/(public)/[id]/page.module.css",
+  /\.playerPane\s*\{[^}]*margin-inline:\s*calc\(\s*-1/s,
+  "固定プレイヤーへページ余白の相殺を重ねています。",
+);
+
 requireAll("app/(public)/[id]/page.module.css", [
   [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*position:\s*sticky/s,
-    "通常PCの sideRail が sticky になっていません。",
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*position:\s*static/s,
+    "通常PCの sideRail がページ本体の流れへ戻っていません。",
   ],
   [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*top:\s*calc\(var\(--header-h,\s*64px\)\s*\+\s*16px\)/s,
-    "通常PCの sideRail がヘッダー下へ配置されていません。",
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*max-height:\s*none/s,
+    "通常PCの sideRail に高さ制限が残っています。",
   ],
   [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*max-height:\s*calc\(100svh\s*-\s*var\(--header-h,\s*64px\)\s*-\s*32px\)/s,
-    "通常PCの sideRail にviewport内の高さ制限がありません。",
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*overflow:\s*visible/s,
+    "通常PCの関連動画がページ本体でスクロールできません。",
+  ],
+]);
+
+requireAll("src/components/video/ChapterCommentPanel.module.css", [
+  [
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.list\s*\{[^}]*max-height:\s*clamp\(180px,\s*28svh,\s*220px\)/s,
+    "通常PCのチャプターコメント一覧に約200pxの可変上限がありません。",
   ],
   [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*min-height:\s*0/s,
-    "通常PCの sideRail に min-height: 0 がありません。",
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.list\s*\{[^}]*overflow-y:\s*auto/s,
+    "通常PCのチャプターコメント一覧に独立スクロールがありません。",
   ],
   [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*overflow-y:\s*auto/s,
-    "通常PCの sideRail に独立した縦スクロールがありません。",
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.list\s*\{[^}]*overscroll-behavior:\s*contain/s,
+    "通常PCのチャプターコメント一覧がoverscroll連鎖を抑止していません。",
   ],
   [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*overscroll-behavior:\s*contain/s,
-    "通常PCの sideRail がページへのoverscroll連鎖を抑止していません。",
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.list\s*\{[^}]*scrollbar-width:\s*thin/s,
+    "通常PCのチャプターコメント一覧に細いスクロールバー指定がありません。",
   ],
   [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*scrollbar-width:\s*thin/s,
-    "通常PCの sideRail に細いスクロールバー指定がありません。",
-  ],
-  [
-    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.sideRail\s*\{[^}]*scrollbar-gutter:\s*stable/s,
-    "通常PCの sideRail がスクロールバー領域を安定確保していません。",
+    /@media\s*\(min-width:\s*901px\)\s*\{[\s\S]*?\.list\s*\{[^}]*scrollbar-gutter:\s*stable/s,
+    "通常PCのチャプターコメント一覧がスクロールバー領域を安定確保していません。",
   ],
 ]);
 

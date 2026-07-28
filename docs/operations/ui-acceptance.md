@@ -31,7 +31,7 @@
 - モバイル管理drawerはEscape、背景クリック、閉じるボタンで閉じ、開いている間はフォーカスが内部に留まる。
 - Shelfはhover、focus、pointer、touch、wheel操作中に停止し、reduced motion、viewport外、非表示tabでは自動送りしない。
 - `/admin`と`/manage`のナビ項目が混在しない。
-- 動画詳細はモバイルだけ表示順を変更し、PC構成と固定playerを維持する。
+- 動画詳細は、モバイルの固定playerをヘッダー直下へ水平ずれなく配置する。PCではチャプターコメント一覧だけを約200px上限の可変スクロールとし、関連動画はページ本体でスクロールできる。
 - hydration errorと主要操作時のconsole errorがない。
 
 ## 自動検査

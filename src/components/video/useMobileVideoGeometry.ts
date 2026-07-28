@@ -9,12 +9,12 @@ const LANDSCAPE_MIN_CONTENT_HEIGHT_PX = 160;
 
 function px(value: number):
   string {
-  return `${
-    Math.max(
-      0,
-      Math.round(value),
-    )
-  }px`;
+  const normalized =
+    Math.round(
+      Math.max(0, value) * 100,
+    ) / 100;
+
+  return `${normalized}px`;
 }
 
 export function
@@ -50,6 +50,7 @@ useMobileVideoGeometry(
     const clearVariables = () => {
       for (const name of [
         "--fn-header-bottom",
+        "--fn-mobile-player-left",
         "--fn-mobile-player-width",
         "--fn-mobile-player-height",
         "--fn-mobile-player-bottom",
@@ -144,6 +145,9 @@ useMobileVideoGeometry(
       const viewportTop =
         viewport?.offsetTop ??
         0;
+      const viewportLeft =
+        viewport?.offsetLeft ??
+        0;
 
       const keyboardInset =
         Math.max(
@@ -194,10 +198,21 @@ useMobileVideoGeometry(
       const playerHeight =
         playerWidth /
         VIDEO_ASPECT_RATIO;
+      const playerLeft =
+        viewportLeft +
+        Math.max(
+          0,
+          (viewportWidth - playerWidth) /
+            2,
+        );
 
       root.style.setProperty(
         "--fn-header-bottom",
         px(effectiveHeaderBottom),
+      );
+      root.style.setProperty(
+        "--fn-mobile-player-left",
+        px(playerLeft),
       );
       root.style.setProperty(
         "--fn-mobile-player-width",

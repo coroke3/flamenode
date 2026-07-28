@@ -387,16 +387,12 @@
 
   .sideRail {
     align-self: start;
-    position: sticky;
-    top: calc(var(--header-h, 64px) + 16px);
-    max-height:
-      calc(100svh - var(--header-h, 64px) - 32px);
+    position: static;
+    top: auto;
+    max-height: none;
     min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-gutter: stable;
-    padding-right: 4px;
+    overflow: visible;
+    padding-right: 0;
   }
 }
 
@@ -424,15 +420,15 @@
       minmax(0, 1fr)
       clamp(390px, 21vw, 540px);
 
-    height: var(--fn-video-detail-height);
-    min-height: 0;
+    min-height: var(--fn-video-detail-height);
+    height: auto;
 
     gap: clamp(28px, 1.8vw, 48px);
-    overflow: hidden;
+    overflow: visible;
   }
 
   .main {
-    height: 100%;
+    height: var(--fn-video-detail-height);
     min-height: 0;
   }
 
@@ -499,8 +495,9 @@
   .sideRail {
     position: static;
     top: auto;
-    height: 100%;
+    height: auto;
     max-height: none;
+    overflow: visible;
   }
 
   .relatedRail .relatedList {
@@ -532,15 +529,6 @@
   }
 
   .playerPane {
-    position: sticky;
-    top: var(--header-h, 56px);
-    z-index: 30;
-
-    width: auto;
-
-    margin-inline:
-      calc(-1 * var(--fn-page-gutter, 16px));
-
     overflow: hidden;
     background: #000;
 
@@ -561,27 +549,6 @@
 
   .sideRail {
     gap: 30px;
-  }
-}
-
-@media
-  (max-width: 900px)
-  and (orientation: landscape) {
-  .playerPane {
-    width:
-      min(
-        100%,
-        calc(
-          (
-            100dvh
-            - var(--header-h, 56px)
-            - 16px
-          )
-          * 16 / 9
-        )
-      );
-
-    margin-inline: auto;
   }
 }
 
