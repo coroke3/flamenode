@@ -33,6 +33,7 @@ import { InteractionButton } from "@/components/video/InteractionButton";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { MemberSection } from "@/components/video/MemberSection";
 import { Icon } from "@/components/ui/Icon";
+import { UserAvatar } from "@/components/user/UserAvatar";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { formatUnix } from "@/lib/utils/format";
@@ -57,6 +58,7 @@ import {
 import { RELATED_MIN_LIMIT } from "@/lib/publicData/relatedVideoProjection";
 import type { StaticRelatedVideo } from "@/lib/publicData/staticVideoDetailCore";
 import {
+  hasProjectedPublicProfile,
   publicXIconEntriesToMap,
   resolveProjectedIcon,
   type PublicXIconEntry,
@@ -126,17 +128,15 @@ export default async function VideoDetailPage({
       ...staticProbe.data.relatedRandomReserve,
     ];
 
-    const needsIconMap =
-      Boolean(staticProbe.data.video.creator_x_user_id) ||
-      staticProbe.data.publicMembers.some((member) =>
-        Boolean(member.x_user_id),
-      ) ||
-      relatedIconCandidates.some((video) =>
-        Boolean(video.creator_x_user_id),
-      );
+    const staticIconXIds = [
+      staticProbe.data.video.creator_x_user_id,
+      ...staticProbe.data.publicMembers.map((member) => member.x_user_id),
+      ...relatedIconCandidates.map((video) => video.creator_x_user_id),
+    ].filter((xId): xId is string => Boolean(xId));
+    const needsIconMap = staticIconXIds.length > 0;
 
     const iconMapPromise = needsIconMap
-      ? loadPublicXIconMapOptional()
+      ? loadPublicXIconMapOptional(staticIconXIds)
       : null;
 
     const blocklist = await loadYoutubeRelatedBlocklist();
@@ -177,15 +177,23 @@ export default async function VideoDetailPage({
       }
     }
 
-    const fallbackNeedsIconMap =
-      relatedFallbackPool.some((video) =>
-        Boolean(video.creator_x_user_id),
-      );
-    const iconMapPayload = iconMapPromise
-      ? await iconMapPromise
-      : fallbackNeedsIconMap
-        ? await loadPublicXIconMapOptional()
-        : null;
+    const staticIconIdSet = new Set(staticIconXIds);
+    const fallbackIconXIds = relatedFallbackPool
+      .map((video) => video.creator_x_user_id)
+      .filter((xId): xId is string => Boolean(xId));
+    const extraFallbackIconXIds = fallbackIconXIds.filter(
+      (xId) => !staticIconIdSet.has(xId),
+    );
+    // 先読み結果を使い、fallback で新規 X ID が増えたときだけ再読込する。
+    let iconMapPayload = iconMapPromise ? await iconMapPromise : null;
+    if (extraFallbackIconXIds.length > 0) {
+      iconMapPayload = await loadPublicXIconMapOptional([
+        ...staticIconXIds,
+        ...extraFallbackIconXIds,
+      ]);
+    } else if (!iconMapPayload && fallbackIconXIds.length > 0) {
+      iconMapPayload = await loadPublicXIconMapOptional(fallbackIconXIds);
+    }
 
     logPublicRequestMetrics();
 
@@ -460,13 +468,19 @@ function StaticVideoDetailView({
   const creatorYoutubeChannelUrl = overlay?.creatorYoutubeChannelUrl ?? null;
   const playlistLabel = overlay?.playlistLabel ?? "再生リスト";
   const playlistItems = overlay?.playlistItems ?? [];
-  const creatorIcon = video.creator_icon_url ?? null;
   const creatorId = video.creator_x_user_id ?? "anonymous";
+  const creatorIcon = resolveProjectedIcon({
+    xUserId: creatorId !== "anonymous" ? creatorId : null,
+    iconMap,
+    legacyIconUrl: video.creator_icon_url ?? null,
+  });
   const creatorName =
     video.creator_display_name?.trim() ||
     (creatorId !== "anonymous" ? creatorId : "作者未設定");
   const creatorHref =
-    video.creator_has_public_profile && creatorId !== "anonymous"
+    creatorId !== "anonymous" &&
+    ((video.creator_has_public_profile ?? false) ||
+      hasProjectedPublicProfile({ xUserId: creatorId, iconMap }))
       ? `/user/${creatorId}`
       : null;
   const youtubeId = video.youtube_video_id
@@ -506,14 +520,15 @@ function StaticVideoDetailView({
 
   const authorBlock = (
     <span className="fn-vd-author">
-      {creatorIcon ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img src={creatorIcon} alt="" className={styles.authorIcon} />
-      ) : (
-        <span className={styles.authorIconFb}>
-          <Icon name="user" size={18} aria-hidden />
-        </span>
-      )}
+      <UserAvatar
+        iconUrl={creatorIcon}
+        label={creatorName}
+        size={40}
+        useIconFallback
+        className={styles.authorIcon}
+        imageClassName={styles.authorIcon}
+        fallbackClassName={styles.authorIconFb}
+      />
       <span>
         <span className={styles.authorName}>{creatorName}</span>
         <span className={styles.authorMeta}>
@@ -811,7 +826,12 @@ function StaticVideoDetailView({
                         iconMap,
                         legacyIconUrl: member.icon_url ?? null,
                       }),
-                      has_public_profile: member.has_public_profile ?? false,
+                      has_public_profile:
+                        (member.has_public_profile ?? false) ||
+                        hasProjectedPublicProfile({
+                          xUserId: member.x_user_id,
+                          iconMap,
+                        }),
                     }))}
                     memberChapters={vm.memberChapters.map((chapter) => ({
                       id: chapter.id,

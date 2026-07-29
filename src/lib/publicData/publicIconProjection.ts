@@ -44,6 +44,20 @@ export function resolveProjectedIcon(args: {
   return normalizePublicIconUrl(args.legacyIconUrl);
 }
 
+/**
+ * 共有アイコン正本だけから、公開プロフィールとして掲載可能かを判定する。
+ * `none` は登録済みユーザーに利用可能なアイコンがない状態を表す。
+ */
+export function hasProjectedPublicProfile(args: {
+  xUserId: string | null | undefined;
+  iconMap: ReadonlyMap<string, PublicXIconEntry> | null | undefined;
+}): boolean {
+  const xId = normalizeXId(args.xUserId ?? "");
+  if (!xId) return false;
+  const source = args.iconMap?.get(xId)?.source;
+  return source === "registered" || source === "none";
+}
+
 export function buildPublicXIconMapPayloadFromProjection(
   sources: {
     registeredUsers: ReadonlyArray<{
@@ -66,9 +80,7 @@ export function buildPublicXIconMapPayloadFromProjection(
       normalizePublicIconUrl(sources.iconUrls.get(xId));
     entries[xId] = registered
       ? { icon_url: registered, source: "registered" }
-      : historical
-        ? { icon_url: historical, source: "video" }
-        : { icon_url: null, source: "none" };
+      : { icon_url: historical ?? null, source: "none" };
   }
 
   for (const orphan of sources.orphans ?? []) {

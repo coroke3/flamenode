@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 import { Icon } from "@/components/ui/Icon";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
@@ -26,6 +28,8 @@ export function UserAvatar({
   useIconFallback = false,
 }: UserAvatarProps): React.ReactElement {
   const src = cachedGoogleImageUrl(iconUrl);
+  const [imageFailed, setImageFailed] = React.useState(false);
+  React.useEffect(() => setImageFailed(false), [src]);
   const dimensionStyle =
     size != null
       ? ({
@@ -35,7 +39,7 @@ export function UserAvatar({
       : undefined;
   const iconSize = Math.max(14, Math.round((size ?? 42) * 0.62));
 
-  if (src) {
+  if (src && !imageFailed) {
     return (
       /* eslint-disable-next-line @next/next/no-img-element */
       <img
@@ -48,6 +52,7 @@ export function UserAvatar({
           borderRadius: "50%",
           objectFit: "cover",
         }}
+        onError={() => setImageFailed(true)}
       />
     );
   }
@@ -82,7 +87,7 @@ export function UserAvatar({
       }}
       aria-hidden
     >
-      {label.trim().replace(/^@/, "").slice(0, 1).toLowerCase() || "?"}
+      {label.trim().replace(/^@/, "").slice(0, 1).toUpperCase() || "?"}
     </span>
   );
 }

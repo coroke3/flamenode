@@ -375,6 +375,38 @@ select {
   scroll-snap-align: start;
 }
 
+.fn-shelf[data-loop="true"] {
+  display: block;
+  scroll-snap-type: none;
+  overscroll-behavior-inline: contain;
+}
+
+.fn-shelf[data-loop="true"] > .fn-shelf-loop-track {
+  display: flex;
+  align-items: stretch;
+  width: max-content;
+  scroll-snap-align: none;
+}
+
+.fn-shelf-loop-group {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: clamp(220px, 22vw, 280px);
+  gap: var(--d-gap);
+  padding-inline-end: var(--d-gap);
+}
+
+.fn-shelf-loop-group > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.fn-shelf[data-density="compact"] .fn-shelf-loop-group {
+  grid-auto-columns: clamp(112px, 10.5vw, 152px);
+  gap: clamp(8px, 1.1vw, 16px);
+  padding-inline-end: clamp(8px, 1.1vw, 16px);
+}
+
 .fn-shelf-fade-left,
 .fn-shelf-fade-right {
   position: absolute;
@@ -496,6 +528,23 @@ select {
 
   .fn-shelf[data-density="compact"][data-mobile-rows="2"] {
     grid-auto-columns: clamp(150px, 46vw, 190px);
+  }
+
+  .fn-shelf[data-loop="true"][data-mobile-rows] {
+    display: block;
+    padding-inline-end: 0;
+  }
+
+  .fn-shelf-loop-group {
+    grid-auto-columns: clamp(210px, 72vw, 260px);
+    gap: 12px;
+    padding-inline-end: 12px;
+  }
+
+  .fn-shelf[data-density="compact"] .fn-shelf-loop-group {
+    grid-auto-columns: minmax(104px, 32vw);
+    gap: 8px;
+    padding-inline-end: 8px;
   }
 }
 

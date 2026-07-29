@@ -353,10 +353,24 @@ test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
   )?.[1];
   assert.ok(destructuring);
   assert.match(destructuring, /publicEventCount/);
+  assert.match(destructuring, /nostalgic/);
   assert.match(
     topFn,
     /public_events: Number\(publicEventCount\?\.c/,
   );
+});
+
+test("rebuildTopは新着100件と3年以上前のランダム20件をtop JSONへ保存する", () => {
+  const topFn = source.match(
+    /async function rebuildTop[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(topFn);
+  assert.match(source, /TOP_LATEST_LIMIT = 100/);
+  assert.match(source, /TOP_NOSTALGIA_LIMIT = 20/);
+  assert.match(topFn, /const nostalgiaCutoff = unixYearsAgo\(now, 3\)/);
+  assert.match(topFn, /v\.scheduled_time <= \?/);
+  assert.match(topFn, /ORDER BY RANDOM\(\)/);
+  assert.match(topFn, /nostalgic: nostalgic\.results \?\? \[\]/);
 });
 
 test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {

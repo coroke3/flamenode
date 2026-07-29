@@ -147,6 +147,23 @@ requireAll("app/(public)/page.tsx", [
     /randomizedRecommended\.map/,
     "今週のピックアップがランダム順の配列を描画していません。",
   ],
+  [
+    /shuffledCopy\(latest\.slice\(0, 100\)\)/,
+    "新着100件を表示直前にランダム順へ変換していません。",
+  ],
+  [
+    /title="懐かしの映像"[\s\S]*?randomizedNostalgic\.map/,
+    "3年以上前の作品を表示する懐かしの映像棚がありません。",
+  ],
+  [
+    /autoScrollDirection="left"[\s\S]*?autoScrollDirection="right"[\s\S]*?autoScrollDirection="left"/,
+    "トップの連続棚が左右交互のスクロール方向になっていません。",
+  ],
+]);
+requireAll("src/components/layout/Shelf.tsx", [
+  [/loopCycleWidthRef/, "棚の連続ループ周期幅がありません。"],
+  [/while \(next >= cycleWidth \* 2\)/, "棚の右端ループ補正がありません。"],
+  [/while \(next < cycleWidth\)/, "棚の左端ループ補正がありません。"],
 ]);
 requireMatch(
   "src/components/layout/PublicAccountIsland.tsx",

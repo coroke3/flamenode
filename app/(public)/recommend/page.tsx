@@ -15,7 +15,9 @@ import { buildRecommendViewModel } from "@/lib/publicData/staticRecommendCore";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/recommend",
-  title: "おすすめ",
+  title: "おすすめ作品",
+  description:
+    "FlameNodeの注目作品、新着作品、見つけてほしい映像をまとめて紹介します。",
 });
 export const dynamic = "force-dynamic";
 

@@ -61,6 +61,7 @@ test("buildPageMetadata defaults openGraph type to website", () => {
     path: "/",
   });
   assert.equal(meta.openGraph?.type, "website");
+  assert.deepEqual(meta.title, { absolute: "ホーム" });
 });
 
 test("buildPageMetadata uses the branded 1200x630 card by default", () => {

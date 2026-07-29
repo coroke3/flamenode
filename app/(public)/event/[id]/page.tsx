@@ -43,6 +43,7 @@ import {
   loadPublicXIconMapOptional,
 } from "@/lib/publicData/staticSharedInputsLoader";
 import {
+  hasProjectedPublicProfile,
   publicXIconEntriesToMap,
   resolveProjectedIcon,
   type PublicXIconEntry,
@@ -100,15 +101,15 @@ export default async function EventDetailPage({
   const { id } = await params;
   const staticLoaded = await loadStaticEventDetail(id);
   if (staticLoaded.data) {
-    const needsIconMap =
-      staticLoaded.data.publicStaff.some((staff) =>
-        Boolean(staff.x_user_id),
-      ) ||
-      staticLoaded.data.publicVideos.some((video) =>
-        Boolean(video.creator_x_user_id),
-      );
+    const iconXIds = [
+      ...staticLoaded.data.publicStaff.map((staff) => staff.x_user_id),
+      ...staticLoaded.data.publicVideos.map(
+        (video) => video.creator_x_user_id,
+      ),
+    ].filter((xId): xId is string => Boolean(xId));
+    const needsIconMap = iconXIds.length > 0;
     const iconMapPayload = needsIconMap
-      ? await loadPublicXIconMapOptional()
+      ? await loadPublicXIconMapOptional(iconXIds)
       : null;
 
     return (
@@ -163,13 +164,14 @@ function EventDetailView({
     event.start_time != null &&
     now < event.start_time;
   const dayMetric = getDayMetric(event, now);
+  const eventImage = event.img_url ?? event.icon_url;
   const eventJsonLd = {
     "@context": "https://schema.org",
     "@type": "Event",
     name: event.title,
     description: compactText(event.explanation),
     url: absoluteUrl(`/event/${event.id}`),
-    image: event.img_url ? [absoluteUrl(event.img_url)] : undefined,
+    image: eventImage ? [absoluteUrl(eventImage)] : undefined,
     startDate: event.start_time
       ? new Date(event.start_time * 1000).toISOString()
       : undefined,
@@ -261,6 +263,7 @@ function EventDetailView({
                   iconUrl={member.icon_url}
                   label={member.x_name ?? member.display_name}
                   size={36}
+                  useIconFallback
                   className={styles.crewAvatar}
                   fallbackClassName={styles.crewAvatarFallback}
                 />
@@ -380,7 +383,12 @@ function StaticEventDetailView({
           iconMap,
           legacyIconUrl: member.icon_url,
         }),
-        has_public_profile: member.has_public_profile,
+        has_public_profile:
+          (member.has_public_profile ?? false) ||
+          hasProjectedPublicProfile({
+            xUserId: member.x_user_id,
+            iconMap,
+          }),
       }))}
     />
   );

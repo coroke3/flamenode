@@ -1,5 +1,10 @@
 /* レイアウト・枠線は redesign-public.css の .fn-closing に委譲 */
 
+.brandMessage {
+  font-family: var(--font-brand);
+  font-weight: 400;
+}
+
 .closingActions {
   display: flex;
   flex-wrap: wrap;

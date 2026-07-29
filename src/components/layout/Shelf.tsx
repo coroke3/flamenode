@@ -18,6 +18,10 @@ interface ShelfProps {
   pauseAfterInteractionMs?: number;
   /** ホイール操作で自動送りを一時停止する。 */
   pauseOnWheel?: boolean;
+  /** 同じ内容を複製し、端で折り返さない連続ループにする。 */
+  loop?: boolean;
+  /** カードが画面上で流れる向き。 */
+  autoScrollDirection?: "left" | "right";
 }
 
 /**
@@ -33,12 +37,18 @@ export function Shelf({
   mobileRows = 2,
   pauseAfterInteractionMs = 1400,
   pauseOnWheel = true,
+  loop = false,
+  autoScrollDirection = "left",
 }: ShelfProps): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null);
+  const loopGroupRef = React.useRef<HTMLDivElement>(null);
+  const loopCycleWidthRef = React.useRef(0);
   const frameRef = React.useRef<number | null>(null);
   const resumeTimerRef = React.useRef<number | null>(null);
   const pausedRef = React.useRef(false);
-  const directionRef = React.useRef<1 | -1>(1);
+  const directionRef = React.useRef<1 | -1>(
+    autoScrollDirection === "left" ? 1 : -1,
+  );
   const pointerActiveRef = React.useRef(false);
   const pauseReasonsRef = React.useRef({
     hover: false,
@@ -51,6 +61,7 @@ export function Shelf({
   const [documentVisible, setDocumentVisible] = React.useState(true);
   const [canPrev, setCanPrev] = React.useState(false);
   const [canNext, setCanNext] = React.useState(true);
+  const childItems = React.Children.toArray(children);
 
   const setPauseReason = React.useCallback((
     reason: keyof typeof pauseReasonsRef.current,
@@ -72,9 +83,52 @@ export function Shelf({
   const update = React.useCallback(() => {
     const el = ref.current;
     if (!el) return;
+    if (loop) {
+      const canLoop = el.scrollWidth > el.clientWidth + 4;
+      setCanPrev(canLoop);
+      setCanNext(canLoop);
+      return;
+    }
     setCanPrev(el.scrollLeft > 4);
     setCanNext(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-  }, []);
+  }, [loop]);
+
+  React.useEffect(() => {
+    directionRef.current = autoScrollDirection === "left" ? 1 : -1;
+  }, [autoScrollDirection]);
+
+  React.useEffect(() => {
+    if (!loop) {
+      loopCycleWidthRef.current = 0;
+      return;
+    }
+    const el = ref.current;
+    const group = loopGroupRef.current;
+    if (!el || !group) return;
+
+    const syncLoopGeometry = () => {
+      const nextWidth = group.getBoundingClientRect().width;
+      if (!Number.isFinite(nextWidth) || nextWidth <= 0) return;
+      const previousWidth = loopCycleWidthRef.current;
+      const previousOffset =
+        previousWidth > 0
+          ? ((el.scrollLeft - previousWidth) % previousWidth + previousWidth) %
+            previousWidth
+          : 0;
+      loopCycleWidthRef.current = nextWidth;
+      el.scrollLeft = nextWidth + Math.min(previousOffset, nextWidth);
+      update();
+    };
+
+    syncLoopGeometry();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(syncLoopGeometry);
+    observer?.observe(group);
+    observer?.observe(el);
+    return () => observer?.disconnect();
+  }, [childItems.length, density, loop, mobileRows, update]);
 
   React.useEffect(() => {
     const el = ref.current;
@@ -140,15 +194,25 @@ export function Shelf({
       const elapsed = now - last;
       last = now;
       if (!pausedRef.current && el.scrollWidth > el.clientWidth + 4) {
-        const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
         const delta = Math.min(elapsed, 80) * (Math.min(autoScrollSpeed, 120) / 1000);
         let next = el.scrollLeft + delta * directionRef.current;
-        if (next >= maxScroll) {
-          next = maxScroll;
-          directionRef.current = -1;
-        } else if (next <= 0) {
-          next = 0;
-          directionRef.current = 1;
+        if (loop) {
+          const cycleWidth = loopCycleWidthRef.current;
+          if (cycleWidth <= 0) {
+            frameRef.current = window.requestAnimationFrame(tick);
+            return;
+          }
+          while (next >= cycleWidth * 2) next -= cycleWidth;
+          while (next < cycleWidth) next += cycleWidth;
+        } else {
+          const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+          if (next >= maxScroll) {
+            next = maxScroll;
+            directionRef.current = -1;
+          } else if (next <= 0) {
+            next = 0;
+            directionRef.current = 1;
+          }
         }
         el.scrollLeft = next;
         update();
@@ -160,7 +224,7 @@ export function Shelf({
       if (frameRef.current != null) window.cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     };
-  }, [autoScroll, autoScrollSpeed, documentVisible, inViewport, reducedMotion, update]);
+  }, [autoScroll, autoScrollSpeed, documentVisible, inViewport, loop, reducedMotion, update]);
 
   React.useEffect(() => () => {
     if (resumeTimerRef.current != null) window.clearTimeout(resumeTimerRef.current);
@@ -169,18 +233,24 @@ export function Shelf({
   const scrollBy = (dir: -1 | 1) => {
     const el = ref.current;
     if (!el) return;
-    directionRef.current = dir;
+    if (!loop) directionRef.current = dir;
     el.scrollBy({ left: el.clientWidth * 0.85 * dir, behavior: "smooth" });
     pauseAfterInteraction();
   };
 
   return (
-    <div className="fn-shelf-wrapper" data-density={density}>
+    <div
+      className="fn-shelf-wrapper"
+      data-density={density}
+      data-loop={loop ? "true" : undefined}
+    >
       <div
         ref={ref}
         className="fn-shelf"
         data-density={density}
         data-mobile-rows={mobileRows}
+        data-loop={loop ? "true" : undefined}
+        data-auto-direction={loop ? autoScrollDirection : undefined}
         role="region"
         aria-label={ariaLabel}
         onMouseEnter={() => setPauseReason("hover", true)}
@@ -229,7 +299,21 @@ export function Shelf({
           }
         }}
       >
-        {children}
+        {loop ? (
+          <div className="fn-shelf-loop-track">
+            <div className="fn-shelf-loop-group" aria-hidden inert>
+              {childItems}
+            </div>
+            <div ref={loopGroupRef} className="fn-shelf-loop-group">
+              {childItems}
+            </div>
+            <div className="fn-shelf-loop-group" aria-hidden inert>
+              {childItems}
+            </div>
+          </div>
+        ) : (
+          children
+        )}
       </div>
       <div aria-hidden className={cn("fn-shelf-fade-left", canPrev && "is-visible")} />
       <div aria-hidden className={cn("fn-shelf-fade-right", canNext && "is-visible")} />

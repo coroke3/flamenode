@@ -136,14 +136,16 @@
 }
 
 .tableWrap {
+  width: fit-content;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
 }
 
 .table {
-  width: 100%;
-  min-width: 720px;
+  width: max-content;
+  max-width: none;
   border-collapse: collapse;
   background: var(--bg-surface);
 }
@@ -205,7 +207,9 @@
 .tNameLink {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
   min-width: 0;
+  max-width: min(34vw, 260px);
   color: inherit;
   text-decoration: none;
 }
@@ -215,6 +219,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  max-width: min(34vw, 260px);
 }
 
 .tNameLink:hover,
@@ -223,19 +228,38 @@
 }
 
 .tColNo {
-  width: 40px;
-  min-width: 40px;
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
   text-align: center;
   font-size: 12px;
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
-.tColName,
+.tColName {
+  min-width: 160px;
+  max-width: 260px;
+  white-space: nowrap;
+}
+
 .tColHandle,
-.tColRole,
-.tColComment,
-.tColChapters {
+.tColChapters,
+.tColRole {
   min-width: 0;
+  white-space: nowrap;
+}
+
+.tColHandle {
+  max-width: 180px;
+}
+
+.tColChapters {
+  max-width: 220px;
+}
+
+.tColRole {
+  max-width: 20ch;
 }
 
 .tHandleLink {
@@ -252,6 +276,8 @@
 }
 
 .tColComment {
+  min-width: 14ch;
+  max-width: 34ch;
   overflow-wrap: anywhere;
   color: var(--text-muted);
   font-size: 12px;
@@ -324,6 +350,19 @@
   font-size: 12.5px;
 }
 
+.chapterGroupIdentity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.chapterGroupIdentity:hover .chapterGroupName {
+  color: var(--event-accent, var(--accent-primary));
+}
+
 .chapterGroupName {
   overflow: hidden;
   color: var(--text-primary);
@@ -342,10 +381,6 @@
     overflow-x: auto;
   }
 
-  .table {
-    min-width: 680px;
-  }
-
   .tableHeader > th,
   .tableRow > td {
     padding: 7px 8px;
@@ -354,6 +389,12 @@
   }
 
   .tColComment {
+    min-width: 150px;
     font-size: 11.5px;
+  }
+
+  .tNameLink,
+  .tNameCell {
+    max-width: min(48vw, 210px);
   }
 }

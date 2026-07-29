@@ -11,11 +11,17 @@ import {
 import { normalizeXId } from "@/lib/utils/xid";
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, totalPagesFor } from "@/lib/utils/sql";
-import { buildPageMetadata } from "@/lib/seo";
+import {
+  absoluteUrl,
+  buildPageMetadata,
+  compactText,
+} from "@/lib/seo";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
+import { UserAvatar } from "@/components/user/UserAvatar";
+import { JsonLd } from "@/components/seo/JsonLd";
 import {
   loadStaticUserCollabsPage,
   loadStaticUserWorksPage,
@@ -60,16 +66,24 @@ interface ProfileUser {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
-  const staticLoaded = await loadStaticUserProfile(id);
+  const [staticLoaded, iconMapPayload] = await Promise.all([
+    loadStaticUserProfile(id),
+    loadPublicXIconMapOptional([id]),
+  ]);
   if (staticLoaded.data) {
     const { user } = staticLoaded.data;
+    const metadataIcon = resolveProjectedIcon({
+      xUserId: user.id,
+      iconMap: publicXIconEntriesToMap(iconMapPayload),
+      legacyIconUrl: user.icon_url,
+    });
     return buildPageMetadata({
       title: `${user.x_name} - クリエイター`,
       description:
         user.profile_text ??
         `FlameNodeで公開されている${user.x_name}の作品。`,
       path: `/user/${id}`,
-      image: cachedGoogleImageUrl(user.icon_url),
+      image: cachedGoogleImageUrl(metadataIcon),
       ogType: "profile",
     });
   }
@@ -163,13 +177,13 @@ export default async function UserPage({
           ...worksPage.items,
           ...collabPage.items,
         ];
-        const needsIconMap =
-          Boolean(staticLoaded.data.user.id) ||
-          visibleVideoCards.some(
-            (video) => Boolean(video.creator_x_user_id),
-          );
+        const iconXIds = [
+          staticLoaded.data.user.id,
+          ...visibleVideoCards.map((video) => video.creator_x_user_id),
+        ].filter((xId): xId is string => Boolean(xId));
+        const needsIconMap = iconXIds.length > 0;
         const iconMapPayload = needsIconMap
-          ? await loadPublicXIconMapOptional()
+          ? await loadPublicXIconMapOptional(iconXIds)
           : null;
         const iconMap =
           publicXIconEntriesToMap(iconMapPayload);
@@ -253,21 +267,40 @@ function StaticUserProfileView({
   const profileName = user.x_name || user.id;
   const socialLinks = parseSocialLinks(user.other_social_links);
   const portfolioContact = normalizePortfolioContact(user.portfolio_contact);
+  const profileDescription = compactText(
+    user.profile_text ??
+      `FlameNodeで公開されている${profileName}の作品とプロフィール。`,
+  );
+  const profileJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    name: profileName,
+    alternateName: `@${user.id}`,
+    url: absoluteUrl(basePath),
+    image: profileIcon ? absoluteUrl(profileIcon) : undefined,
+    description: profileDescription,
+    sameAs: [
+      `https://x.com/${encodeURIComponent(user.id)}`,
+      user.youtube_channel_url,
+      ...socialLinks.map((link) => link.url),
+    ].filter((url): url is string => Boolean(url?.startsWith("http"))),
+  };
 
   return (
     <div className={`fn-public-container fn-page ${styles.page}`}>
+      <JsonLd data={profileJsonLd} />
       <section className={styles.profile}>
         <p className={`fn-page-back ${styles.profileBack}`}>
           <Link href="/user">← クリエイター一覧</Link>
         </p>
-        {profileIcon ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={profileIcon} alt="" className={styles.avatar} />
-        ) : (
-          <span className={styles.avatarFb}>
-            {profileName.slice(0, 1).toUpperCase()}
-          </span>
-        )}
+        <UserAvatar
+          iconUrl={profileIcon}
+          label={profileName}
+          className={styles.avatar}
+          imageClassName={styles.avatar}
+          fallbackClassName={styles.avatarFb}
+          useIconFallback
+        />
         <div className={styles.profileBody}>
           <h1 className={`fn-profile-name ${styles.name}`}>{profileName}</h1>
           <ProfileSocialLinks

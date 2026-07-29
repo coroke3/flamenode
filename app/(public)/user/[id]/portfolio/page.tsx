@@ -11,6 +11,7 @@ import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
+import { UserAvatar } from "@/components/user/UserAvatar";
 import { loadStaticUserProfile } from "@/lib/publicData/loader";
 import { loadPublicXIconMapOptional } from "@/lib/publicData/staticSharedInputsLoader";
 import {
@@ -31,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
   const [staticLoaded, iconMapPayload] = await Promise.all([
     loadStaticUserProfile(id),
-    loadPublicXIconMapOptional(),
+    loadPublicXIconMapOptional([id]),
   ]);
   const user = staticLoaded.data?.user;
   const name = user?.x_name || id;
@@ -59,7 +60,7 @@ export default async function PortfolioPage({
 
   const [staticLoaded, iconMapPayload] = await Promise.all([
     loadStaticUserProfile(id),
-    loadPublicXIconMapOptional(),
+    loadPublicXIconMapOptional([id]),
   ]);
   if (!staticLoaded.data) notFound();
 
@@ -71,7 +72,6 @@ export default async function PortfolioPage({
   );
   const totalWorks = staticLoaded.data.works.total;
   const name = user.x_name || user.id;
-  const initial = name.trim().charAt(0).toUpperCase() || "F";
   const userIcon = cachedGoogleImageUrl(
     resolveProjectedIcon({
       xUserId: user.id,
@@ -96,12 +96,14 @@ export default async function PortfolioPage({
         </div>
 
         <div className={styles.identity}>
-          {userIcon ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={userIcon} alt="" className={styles.avatar} />
-          ) : (
-            <span className={styles.avatarFallback}>{initial}</span>
-          )}
+          <UserAvatar
+            iconUrl={userIcon}
+            label={name}
+            className={styles.avatar}
+            imageClassName={styles.avatar}
+            fallbackClassName={styles.avatarFallback}
+            useIconFallback
+          />
           <div className={styles.identityBody}>
             <span className="fn-eyebrow">Portfolio</span>
             <h1 className={styles.name}>{name}</h1>

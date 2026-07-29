@@ -139,7 +139,7 @@ export function buildPageMetadata({
       }
     : { url: imageUrl, alt: cleanTitle };
   const metadata: Metadata = {
-    title: cleanTitle,
+    title: path === "/" ? { absolute: cleanTitle } : cleanTitle,
     description: cleanDescription,
     alternates: { canonical },
     openGraph: {

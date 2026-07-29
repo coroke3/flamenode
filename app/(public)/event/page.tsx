@@ -32,6 +32,8 @@ import { buildPageMetadata } from "@/lib/seo";
 export const metadata: Metadata = buildPageMetadata({
   path: "/event",
   title: "イベント",
+  description:
+    "FlameNodeで開催中・開催予定・アーカイブ済みの映像イベントを探せます。",
 });
 export const dynamic = "force-dynamic";
 

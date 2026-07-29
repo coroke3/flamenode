@@ -42,7 +42,7 @@ test("動画詳細は共有R2読込後にrequest metricsを記録する", () => 
   const randomPoolIndex = videoPage.indexOf(
     "const randomPool = await loadRandomVideoPool();",
   );
-  const iconMapIndex = videoPage.indexOf("const iconMapPayload =");
+  const iconMapIndex = videoPage.indexOf("let iconMapPayload =");
 
   assert.ok(blocklistIndex >= 0);
   assert.ok(randomPoolIndex >= 0);
@@ -50,6 +50,42 @@ test("動画詳細は共有R2読込後にrequest metricsを記録する", () => 
   assert.ok(logIndex > blocklistIndex);
   assert.ok(logIndex > randomPoolIndex);
   assert.ok(logIndex > iconMapIndex);
+});
+
+test("公開アイコン補完は共有mapからR2 users indexへ降りD1を使わない", () => {
+  const iconLoader = source.match(
+    /export async function loadPublicXIconMapOptional[\s\S]*?(?=export async function loadRandomVideoPoolOptional)/,
+  )?.[0] ?? "";
+
+  assert.match(iconLoader, /PUBLIC_X_ICON_MAP_OBJECT_KEY/);
+  assert.match(iconLoader, /key: "users\/index\.json"/);
+  assert.match(iconLoader, /requiredXUserIds/);
+  assert.match(iconLoader, /entry\.source === "video"/);
+  assert.match(iconLoader, /existing\?\.source === "registered"/);
+  assert.match(iconLoader, /existing\?\.source === "none"/);
+  assert.match(
+    iconLoader,
+    /icon_url: user\.icon_url \?\? existing\?\.icon_url \?\? null/,
+  );
+  assert.match(iconLoader, /source: user\.icon_url \? "registered" : "none"/);
+  assert.doesNotMatch(iconLoader, /getDatabase|withDatabase|degradedFetcher|\.prepare\(/);
+});
+
+test("動画詳細の作者リンクは投影プロフィールでも有効になる", () => {
+  assert.match(videoPage, /const creatorHref =/);
+  assert.match(
+    videoPage,
+    /creator_has_public_profile[\s\S]*hasProjectedPublicProfile/,
+  );
+  assert.match(videoPage, /resolveProjectedIcon\([\s\S]*?creatorId/);
+  assert.match(videoPage, /<UserAvatar[\s\S]*?useIconFallback/);
+});
+
+test("動画詳細はメンバーを含む必要なX IDをR2アイコンローダーへ渡す", () => {
+  assert.match(videoPage, /staticProbe\.data\.publicMembers\.map/);
+  assert.match(videoPage, /loadPublicXIconMapOptional\(staticIconXIds\)/);
+  assert.match(videoPage, /extraFallbackIconXIds/);
+  assert.match(videoPage, /hasProjectedPublicProfile/);
 });
 
 test("動画詳細は候補0件でも共有JSON障害を正常な空表示へ変換しない", () => {

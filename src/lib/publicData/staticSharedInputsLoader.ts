@@ -24,6 +24,11 @@ import {
   PUBLIC_X_ICON_MAP_OBJECT_KEY,
   type PublicXIconMapPayload,
 } from "./publicIconProjection";
+import {
+  normalizeStaticUsersIndex,
+  type StaticUsersIndexPayload,
+} from "./staticUsersIndexCore";
+import { normalizeXId } from "../utils/xid";
 
 export type StaticJsonLoadStatus = "fresh" | "stale" | "unavailable";
 
@@ -121,14 +126,64 @@ export async function loadYoutubeRelatedBlocklist(): Promise<
   return { status: result.status, value: result.value };
 }
 
-export async function loadPublicXIconMapOptional(): Promise<PublicXIconMapPayload | null> {
+/**
+ * 公開アイコンは共有mapを正本とし、必要なIDが欠ける場合だけ
+ * R2上の users/index.json で補完する。どちらも利用できない場合もD1へは降りない。
+ */
+export async function loadPublicXIconMapOptional(
+  requiredXUserIds: readonly (string | null | undefined)[] = [],
+): Promise<PublicXIconMapPayload | null> {
   const result = await loadStaticJsonFreshStaleUnavailable({
     key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
     normalize: normalizePublicXIconMap,
     maxStaleAgeSec: 24 * 60 * 60,
     cacheTtlSeconds: 300,
   });
-  return result.value;
+  const requiredIds = new Set(
+    requiredXUserIds.map(normalizeXId).filter(Boolean),
+  );
+  const primary = result.value;
+  const needsIndexFallback =
+    !primary ||
+    Array.from(requiredIds).some((xId) => {
+      const entry = primary.entries[xId];
+      // registered / none は正本済み。欠損と video（未昇格）だけ index へ降りる。
+      if (!entry) return true;
+      return entry.source === "video";
+    });
+
+  if (!needsIndexFallback) return primary;
+
+  const indexResult = await loadStaticJsonFreshStaleUnavailable({
+    key: "users/index.json",
+    normalize: (value) =>
+      normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: 300,
+  });
+  if (!indexResult.value) return primary;
+
+  const entries = { ...(primary?.entries ?? {}) };
+  for (const user of indexResult.value.items) {
+    const xId = normalizeXId(user.x_id);
+    if (!xId) continue;
+    if (requiredIds.size > 0 && !requiredIds.has(xId)) continue;
+    const existing = entries[xId];
+    if (existing?.source === "registered" || existing?.source === "none") {
+      continue;
+    }
+    entries[xId] = {
+      icon_url: user.icon_url ?? existing?.icon_url ?? null,
+      source: user.icon_url ? "registered" : "none",
+    };
+  }
+
+  return {
+    schema_version: 1,
+    generated_at:
+      primary?.generated_at ?? indexResult.value.generatedAt ?? 0,
+    entries,
+  };
 }
 
 export async function loadRandomVideoPoolOptional(): Promise<RandomVideoPool> {

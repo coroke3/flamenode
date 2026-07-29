@@ -50,6 +50,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
     activeEvents = [],
     recommended = [],
     latest = [],
+    nostalgic = [],
     creators = [],
     latestEvents = [],
     announcements = [],
@@ -63,6 +64,8 @@ export default async function TopPage(): Promise<React.ReactElement> {
   } = data ?? {};
   // top.json 自体の内容・順序は変えず、このrequestの表示順だけを入れ替える。
   const randomizedRecommended = shuffledCopy(recommended);
+  const randomizedLatest = shuffledCopy(latest.slice(0, 100));
+  const randomizedNostalgic = shuffledCopy(nostalgic);
 
   const heroEvents = pickHeroEvents(activeEvents);
   const primaryHeroEvent = heroEvents[0] ?? null;
@@ -133,7 +136,12 @@ export default async function TopPage(): Promise<React.ReactElement> {
           {randomizedRecommended.length === 0 ? (
             <EmptyShelf message="おすすめできる作品がまだありません。" />
           ) : (
-            <Shelf ariaLabel="今週のピックアップ">
+            <Shelf
+              ariaLabel="今週のピックアップ"
+              loop
+              mobileRows={1}
+              autoScrollDirection="left"
+            >
               {randomizedRecommended.map((video, index) => (
                 <VideoCard key={`${video.id}-recommended-${index}`} video={video} />
               ))}
@@ -151,17 +159,53 @@ export default async function TopPage(): Promise<React.ReactElement> {
           moreLabel="すべて見る"
         />
         <div className={styles.shelfBox}>
-          {latest.length === 0 ? (
+          {randomizedLatest.length === 0 ? (
             <EmptyShelf message="公開作品がまだありません。" />
           ) : (
-            <Shelf ariaLabel="新着アップロード">
-              {latest.map((video, index) => (
+            <Shelf
+              ariaLabel="新着アップロード"
+              loop
+              mobileRows={1}
+              autoScrollDirection="right"
+            >
+              {randomizedLatest.map((video, index) => (
                 <VideoCard key={`${video.id}-latest-${index}`} video={video} />
               ))}
             </Shelf>
           )}
         </div>
       </section>
+
+      {!isDegraded ? (
+        <section
+          className={`fn-public-container fn-section ${styles.section}`}
+          aria-label="懐かしの映像"
+        >
+          <SectionHeader
+            eyebrow="ARCHIVE"
+            title="懐かしの映像"
+            description="公開から3年以上たった作品を、アーカイブから再発見。"
+            moreHref="/list?sort=old"
+            moreLabel="過去の作品を見る"
+          />
+          <div className={styles.shelfBox}>
+            {randomizedNostalgic.length === 0 ? (
+              <EmptyShelf message="対象になる作品がまだありません。" />
+            ) : (
+              <Shelf
+                ariaLabel="懐かしの映像"
+                loop
+                mobileRows={1}
+                autoScrollDirection="left"
+              >
+                {randomizedNostalgic.map((video, index) => (
+                  <VideoCard key={`${video.id}-nostalgic-${index}`} video={video} />
+                ))}
+              </Shelf>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       {!isDegraded ? (
         <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-events">

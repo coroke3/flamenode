@@ -4,9 +4,9 @@ import * as React from "react";
 import Link from "next/link";
 import styles from "./MemberSection.module.css";
 import { Icon } from "@/components/ui/Icon";
+import { UserAvatar } from "@/components/user/UserAvatar";
 import { cn } from "@/lib/utils/cn";
 import { formatDuration } from "@/lib/utils/format";
-import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { MemberChapterItem } from "./MemberChapterItem";
 import type { MemberChapterItemEntry } from "./MemberChapterItem";
 import { seekToTime } from "./playerBridge";
@@ -48,6 +48,12 @@ function memberDisplayName(member: MemberSectionMember): string {
 
 function memberHandle(member: MemberSectionMember): string {
   return member.x_user_id ?? "";
+}
+
+function memberProfileHref(member: MemberSectionMember): string | null {
+  return member.has_public_profile && member.x_user_id
+    ? `/user/${encodeURIComponent(member.x_user_id)}`
+    : null;
 }
 
 function chapterCountMap(
@@ -223,24 +229,19 @@ function MemberCard({
 }): React.ReactElement {
   const displayName =
     member.name?.trim() || member.x_name?.trim() || "anonymous";
-  const internalHref =
-    member.has_public_profile && member.x_user_id
-      ? `/user/${member.x_user_id}`
-      : null;
+  const internalHref = memberProfileHref(member);
   const xExternal = member.x_user_id
     ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
     : null;
-  const iconUrl = cachedGoogleImageUrl(member.icon_url);
-
   const avatar = (
-    <span className={styles.avatar} aria-hidden>
-      {iconUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={iconUrl} alt="" width={36} height={36} />
-      ) : (
-        <Icon name="user" size={16} aria-hidden />
-      )}
-    </span>
+    <UserAvatar
+      iconUrl={member.icon_url}
+      label={displayName}
+      size={36}
+      useIconFallback
+      className={styles.avatar}
+      fallbackClassName={styles.avatar}
+    />
   );
 
   const nameBlock = (
@@ -367,7 +368,6 @@ function TableView({
     });
   }, []);
 
-  const showProfileColumn = members.some((member) => member.has_public_profile);
   const showXColumn = members.some((member) => Boolean(member.x_user_id));
   const showChapterColumn = memberChapters.length > 0;
   const showRoleColumn = members.some((member) => Boolean(member.role?.trim()));
@@ -394,19 +394,14 @@ function TableView({
               onSort={handleSort}
               className={styles.tColName}
             />
-            {showProfileColumn ? (
+            {showXColumn ? (
               <SortHeader
-                label="FlameNode"
+                label="X"
                 sortKey="handle"
                 activeSort={sort}
                 onSort={handleSort}
                 className={styles.tColHandle}
               />
-            ) : null}
-            {showXColumn ? (
-              <th scope="col" className={styles.tColHandle}>
-                X
-              </th>
             ) : null}
             {showChapterColumn ? (
               <SortHeader
@@ -436,11 +431,7 @@ function TableView({
         <tbody>
           {sortedMembers.map((member, sortIndex) => {
             const displayName = memberDisplayName(member);
-            const iconUrl = cachedGoogleImageUrl(member.icon_url);
-            const internalHref =
-              member.has_public_profile && member.x_user_id
-                ? `/user/${member.x_user_id}`
-                : null;
+            const internalHref = memberProfileHref(member);
             const externalHref = member.x_user_id
               ? `https://x.com/${encodeURIComponent(member.x_user_id)}`
               : null;
@@ -453,29 +444,32 @@ function TableView({
                   {sort ? sortIndex + 1 : rowNum}
                 </td>
                 <td className={styles.tColName} data-label="活動名">
-                  <span className={styles.tNameCell}>
-                    <span className={styles.tAvatar} aria-hidden>
-                      {iconUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={iconUrl} alt="" width={24} height={24} />
-                      ) : (
-                        <Icon name="user" size={11} aria-hidden />
-                      )}
+                  {internalHref ? (
+                    <Link href={internalHref} className={styles.tNameLink}>
+                      <UserAvatar
+                        iconUrl={member.icon_url}
+                        label={displayName}
+                        size={24}
+                        useIconFallback
+                        className={styles.tAvatar}
+                        fallbackClassName={styles.tAvatar}
+                      />
+                      <span className={styles.tName}>{displayName}</span>
+                    </Link>
+                  ) : (
+                    <span className={styles.tNameCell}>
+                      <UserAvatar
+                        iconUrl={member.icon_url}
+                        label={displayName}
+                        size={24}
+                        useIconFallback
+                        className={styles.tAvatar}
+                        fallbackClassName={styles.tAvatar}
+                      />
+                      <span className={styles.tName}>{displayName}</span>
                     </span>
-                    <span className={styles.tName}>{displayName}</span>
-                  </span>
+                  )}
                 </td>
-                {showProfileColumn ? (
-                  <td className={styles.tColHandle} data-label="FlameNode">
-                    {internalHref ? (
-                      <Link href={internalHref} className={styles.tNameLink}>
-                        プロフィール
-                      </Link>
-                    ) : (
-                      <span className={styles.tMuted}>—</span>
-                    )}
-                  </td>
-                ) : null}
                 {showXColumn ? (
                   <td className={styles.tColHandle} data-label="X">
                     {externalHref ? (
@@ -586,8 +580,25 @@ function ChaptersView({
       {visibleGroups.map(({ member, chapters: list }) => {
         const displayName =
           memberDisplayName(member);
-        const iconUrl =
-          cachedGoogleImageUrl(member.icon_url);
+        const internalHref = memberProfileHref(member);
+
+        const identity = (
+          <>
+            <UserAvatar
+              iconUrl={member.icon_url}
+              label={displayName}
+              size={24}
+              useIconFallback
+              className={styles.avatarSmall}
+              fallbackClassName={styles.avatarSmall}
+            />
+            <span
+              className={styles.chapterGroupName}
+            >
+              {displayName}
+            </span>
+          </>
+        );
 
         return (
           <section
@@ -597,31 +608,18 @@ function ChaptersView({
             <header
               className={styles.chapterGroupHead}
             >
-              <span
-                className={styles.avatarSmall}
-                aria-hidden
-              >
-                {iconUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={iconUrl}
-                    alt=""
-                    width={24}
-                    height={24}
-                  />
-                ) : (
-                  <Icon
-                    name="user"
-                    size={11}
-                    aria-hidden
-                  />
-                )}
-              </span>
-              <span
-                className={styles.chapterGroupName}
-              >
-                {displayName}
-              </span>
+              {internalHref ? (
+                <Link
+                  href={internalHref}
+                  className={styles.chapterGroupIdentity}
+                >
+                  {identity}
+                </Link>
+              ) : (
+                <span className={styles.chapterGroupIdentity}>
+                  {identity}
+                </span>
+              )}
             </header>
 
             <div

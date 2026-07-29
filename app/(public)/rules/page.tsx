@@ -16,6 +16,7 @@ import { TermsAcceptSubmitButton } from "@/components/terms/TermsAcceptSubmitBut
 export const metadata: Metadata = buildPageMetadata({
   path: "/rules",
   title: "利用規約",
+  description: "FlameNodeの投稿・閲覧・イベント参加に関する利用規約です。",
 });
 
 function renderMarkdown(markdown: string): React.ReactNode[] {

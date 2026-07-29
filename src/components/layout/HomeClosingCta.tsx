@@ -9,7 +9,7 @@ export function HomeClosingCta(): React.ReactElement {
       aria-label="FlameNode のイベント"
     >
       <div className="fn-closing-line">
-        <span className="fn-display fn-closing-text">
+        <span className={`fn-closing-text ${styles.brandMessage}`}>
           Upload your frame.
         </span>
         <span className="fn-jp fn-closing-jp">

@@ -6,6 +6,7 @@ const [
   dockSource,
   dockCss,
   geometrySource,
+  memberSource,
   memberCss,
   memberItemSource,
 ] = await Promise.all([
@@ -26,6 +27,13 @@ const [
   readFile(
     new URL(
       "./useMobileVideoGeometry.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFile(
+    new URL(
+      "./MemberSection.tsx",
       import.meta.url,
     ),
     "utf8",
@@ -76,15 +84,20 @@ test("モバイルgeometryはviewport scrollも追従する", () => {
   );
 });
 
-test("モバイルメンバーテーブルはtrをgrid化しない", () => {
+test("メンバーテーブルは必要以上の固定幅を持たずtrをgrid化しない", () => {
   const mobileBlock =
     memberCss.match(
       /@media \(max-width: 640px\) \{[\s\S]*$/,
     )?.[0] ?? "";
 
+  assert.doesNotMatch(memberCss, /min-width:\s*(?:680|720)px/);
   assert.match(
-    mobileBlock,
-    /\.table\s*\{\s*min-width:\s*680px/,
+    memberCss,
+    /\.tableWrap\s*\{[\s\S]*?width:\s*fit-content;[\s\S]*?max-width:\s*100%/,
+  );
+  assert.match(
+    memberCss,
+    /\.tColNo\s*\{[\s\S]*?width:\s*52px;[\s\S]*?max-width:\s*52px/,
   );
   assert.doesNotMatch(
     mobileBlock,
@@ -94,6 +107,17 @@ test("モバイルメンバーテーブルはtrをgrid化しない", () => {
     memberCss,
     /\.tableRow\s*>\s*span/,
   );
+});
+
+test("メンバーのアイコンと活動名は公開プロフィールへ直接リンクする", () => {
+  assert.match(memberSource, /function memberProfileHref/);
+  assert.match(
+    memberSource,
+    /<Link href=\{internalHref\} className=\{styles\.tNameLink\}>[\s\S]*?<UserAvatar[\s\S]*?label=\{displayName\}/,
+  );
+  assert.match(memberSource, /useIconFallback/);
+  assert.match(memberSource, /className=\{styles\.chapterGroupIdentity\}/);
+  assert.doesNotMatch(memberSource, /label="FlameNode"/);
 });
 
 test("メンバーチャプターに補助ラベルを追加しない", () => {

@@ -20,6 +20,14 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
         display_name: "Latest Creator",
       },
     ],
+    nostalgic: [
+      {
+        id: "v-old",
+        title: "Archive",
+        display_name: "Archive Creator",
+        creator_x_user_id: "archive_creator",
+      },
+    ],
     active_events: [
       {
         id: "event-1",
@@ -61,6 +69,8 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
   assert.equal(top.generatedAt, 123);
   assert.equal(top.recommended[0].display_name, "Creator");
   assert.equal(top.latest[0].title, "Latest");
+  assert.equal(top.nostalgic[0].title, "Archive");
+  assert.equal(top.nostalgic[0].creator_x_user_id, "archive_creator");
   assert.equal(top.activeEvents[0].id, "event-1");
   assert.equal(top.latestEvents[0].visibility_status, "public");
   assert.equal(top.creators[0].video_count, 2);
@@ -73,6 +83,25 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
     creators: 4,
     publicEvents: 7,
   });
+});
+
+test("normalizeStaticTop: 新着100件と懐かしの映像20件を上限にする", () => {
+  const top = normalizeStaticTop({
+    latest: Array.from({ length: 120 }, (_, index) => ({
+      id: `latest-${index}`,
+      title: `Latest ${index}`,
+      display_name: "Creator",
+    })),
+    nostalgic: Array.from({ length: 30 }, (_, index) => ({
+      id: `old-${index}`,
+      title: `Old ${index}`,
+      display_name: "Creator",
+    })),
+  });
+
+  assert.ok(top);
+  assert.equal(top.latest.length, 100);
+  assert.equal(top.nostalgic.length, 20);
 });
 
 test("normalizeStaticTop: legacy items だけでも表示可能にする", () => {

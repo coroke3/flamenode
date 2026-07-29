@@ -94,6 +94,14 @@ export const EVENT_GROUP_EVENT_MAX_ROWS =
   EVENT_GROUP_MAX_ROWS * EVENT_GROUP_EVENT_MAX_PER_GROUP;
 export const PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE = 90;
 export const PUBLIC_STAFF_MAX_PER_EVENT = 20;
+export const TOP_LATEST_LIMIT = 100;
+export const TOP_NOSTALGIA_LIMIT = 20;
+
+function unixYearsAgo(nowSec: number, years: number): number {
+  const date = new Date(nowSec * 1000);
+  date.setUTCFullYear(date.getUTCFullYear() - years);
+  return Math.floor(date.getTime() / 1000);
+}
 
 const EVENT_INDEX_COLUMNS = `
   id, title, explanation, icon_url, img_url, accent_color,
@@ -374,9 +382,11 @@ async function reconcileTrackedArtifacts(
 async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
+  const nostalgiaCutoff = unixYearsAgo(now, 3);
   const [
     recommended,
     latest,
+    nostalgic,
     activeEvents,
     latestEvents,
     creatorProjection,
@@ -423,8 +433,30 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        FROM videos AS v
        WHERE v.visibility_status = 'public'
        ORDER BY scheduled_time DESC
-       LIMIT 30`,
+       LIMIT ${TOP_LATEST_LIMIT}`,
     ).all(),
+    env.DB.prepare(
+      `SELECT id, title, youtube_video_id,
+              creator_display_name AS display_name,
+              creator_display_name,
+              creator_x_user_id,
+              creator_icon_url AS icon_url,
+              creator_icon_url,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM events AS primary_event
+                WHERE primary_event.id = v.primary_event_id
+                  AND primary_event.visibility_status = 'public'
+              ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
+              scheduled_time,
+              visibility_status AS status,
+              part
+       FROM videos AS v
+       WHERE v.visibility_status = 'public'
+         AND v.scheduled_time IS NOT NULL
+         AND v.scheduled_time <= ?
+       ORDER BY RANDOM()
+       LIMIT ${TOP_NOSTALGIA_LIMIT}`,
+    ).bind(nostalgiaCutoff).all(),
     env.DB.prepare(
       `SELECT ${EVENT_INDEX_COLUMNS}
        FROM events
@@ -504,6 +536,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     generated_at: now,
     recommended: recommended.results ?? [],
     latest: latest.results ?? [],
+    nostalgic: nostalgic.results ?? [],
     items: latest.results ?? [],
     active_events: activeEventItems,
     latest_events: latestEventItems,

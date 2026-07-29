@@ -368,6 +368,7 @@ function isEmptyTopCollection(payload: unknown): boolean {
   return !(
     hasItems(row.recommended) ||
     hasItems(row.latest) ||
+    hasItems(row.nostalgic) ||
     hasItems(row.items) ||
     hasItems(row.active_events) ||
     hasItems(row.latest_events) ||
@@ -390,7 +391,10 @@ function isEmptyRecommendCollection(payload: unknown): boolean {
 
 function countStaticTopItems(top: StaticTopData): number {
   return (
-    top.activeEvents.length + top.recommended.length + top.latest.length
+    top.activeEvents.length +
+    top.recommended.length +
+    top.latest.length +
+    top.nostalgic.length
   );
 }
 

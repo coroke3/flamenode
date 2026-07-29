@@ -17,6 +17,7 @@ export interface StaticTopPayload {
   generated_at?: unknown;
   recommended?: unknown;
   latest?: unknown;
+  nostalgic?: unknown;
   items?: unknown;
   creators?: unknown;
   active_events?: unknown;
@@ -42,6 +43,7 @@ export interface StaticTopData {
   activeEvents: StaticTopEvent[];
   recommended: VideoCardData[];
   latest: VideoCardData[];
+  nostalgic: VideoCardData[];
   creators: StaticTopCreator[];
   latestEvents: StaticTopEvent[];
   announcements: PublicAnnouncement[];
@@ -57,7 +59,8 @@ export function normalizeStaticTop(payload: StaticTopPayload): StaticTopData | n
   const latestSource = Array.isArray(payload.latest) ? payload.latest : payload.items;
 
   const recommended = normalizeVideoList(recommendedSource).slice(0, 30);
-  const latest = normalizeVideoList(latestSource).slice(0, 30);
+  const latest = normalizeVideoList(latestSource).slice(0, 100);
+  const nostalgic = normalizeVideoList(payload.nostalgic).slice(0, 20);
   const activeEvents = normalizeEventList(payload.active_events);
   const latestEvents = normalizeEventList(payload.latest_events).slice(0, 4);
   const creators = normalizeCreatorList(payload.creators).slice(0, 30);
@@ -73,6 +76,7 @@ export function normalizeStaticTop(payload: StaticTopPayload): StaticTopData | n
   if (
     recommended.length === 0 &&
     latest.length === 0 &&
+    nostalgic.length === 0 &&
     activeEvents.length === 0 &&
     latestEvents.length === 0 &&
     creators.length === 0 &&
@@ -86,6 +90,7 @@ export function normalizeStaticTop(payload: StaticTopPayload): StaticTopData | n
     activeEvents,
     recommended,
     latest,
+    nostalgic,
     creators,
     latestEvents,
     announcements,
@@ -118,6 +123,7 @@ function normalizeVideo(value: unknown): VideoCardData | null {
     icon_url:
       normalizeNullableString(row.icon_url) ??
       normalizeNullableString(row.creator_icon_url),
+    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
     primary_event_id: normalizeNullableString(row.primary_event_id),
     scheduled_time: normalizeUnix(row.scheduled_time),
     status: normalizeNullableString(row.status) ?? "public",
