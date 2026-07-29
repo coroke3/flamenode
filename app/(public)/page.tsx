@@ -32,6 +32,9 @@ import {
 } from "@/lib/seo";
 import { shuffledCopy } from "@/lib/utils/shuffle";
 
+/** 新着 loop 棚に載せる最大枚数。シャッフル元プールは100件のまま。 */
+const TOP_LATEST_LOOP_DISPLAY_LIMIT = 40;
+
 export const metadata: Metadata = buildPageMetadata({
   path: "/",
   title: SITE_NAME,
@@ -65,6 +68,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
   // top.json 自体の内容・順序は変えず、このrequestの表示順だけを入れ替える。
   const randomizedRecommended = shuffledCopy(recommended);
   const randomizedLatest = shuffledCopy(latest.slice(0, 100));
+  const latestLoopItems = randomizedLatest.slice(0, TOP_LATEST_LOOP_DISPLAY_LIMIT);
   const randomizedNostalgic = shuffledCopy(nostalgic);
 
   const heroEvents = pickHeroEvents(activeEvents);
@@ -159,7 +163,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
           moreLabel="すべて見る"
         />
         <div className={styles.shelfBox}>
-          {randomizedLatest.length === 0 ? (
+          {latestLoopItems.length === 0 ? (
             <EmptyShelf message="公開作品がまだありません。" />
           ) : (
             <Shelf
@@ -168,7 +172,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
               mobileRows={1}
               autoScrollDirection="right"
             >
-              {randomizedLatest.map((video, index) => (
+              {latestLoopItems.map((video, index) => (
                 <VideoCard key={`${video.id}-latest-${index}`} video={video} />
               ))}
             </Shelf>

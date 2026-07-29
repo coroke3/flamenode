@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { getEnv } from "@/lib/cloudflare";
 import { recordPublicR2Get } from "@/lib/observability/publicRequestMetrics";
 import {
@@ -126,64 +127,82 @@ export async function loadYoutubeRelatedBlocklist(): Promise<
   return { status: result.status, value: result.value };
 }
 
+function buildRequiredXIdsCacheKey(
+  requiredXUserIds: readonly (string | null | undefined)[],
+): string {
+  const ids = requiredXUserIds
+    .map(normalizeXId)
+    .filter((id): id is string => Boolean(id));
+  ids.sort();
+  return ids.join(",");
+}
+
 /**
  * 公開アイコンは共有mapを正本とし、必要なIDが欠ける場合だけ
  * R2上の users/index.json で補完する。どちらも利用できない場合もD1へは降りない。
  */
+const loadPublicXIconMapOptionalImpl = cache(
+  async (requiredIdsKey: string): Promise<PublicXIconMapPayload | null> => {
+    const requiredXUserIds =
+      requiredIdsKey.length === 0 ? [] : requiredIdsKey.split(",");
+    const result = await loadStaticJsonFreshStaleUnavailable({
+      key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
+      normalize: normalizePublicXIconMap,
+      maxStaleAgeSec: 24 * 60 * 60,
+      cacheTtlSeconds: 300,
+    });
+    const requiredIds = new Set(requiredXUserIds);
+    const primary = result.value;
+    const needsIndexFallback =
+      !primary ||
+      Array.from(requiredIds).some((xId) => {
+        const entry = primary.entries[xId];
+        // registered / none は正本済み。欠損と video（未昇格）だけ index へ降りる。
+        if (!entry) return true;
+        return entry.source === "video";
+      });
+
+    if (!needsIndexFallback) return primary;
+
+    const indexResult = await loadStaticJsonFreshStaleUnavailable({
+      key: "users/index.json",
+      normalize: (value) =>
+        normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
+      maxStaleAgeSec: 24 * 60 * 60,
+      cacheTtlSeconds: 300,
+    });
+    if (!indexResult.value) return primary;
+
+    const entries = { ...(primary?.entries ?? {}) };
+    for (const user of indexResult.value.items) {
+      const xId = normalizeXId(user.x_id);
+      if (!xId) continue;
+      if (requiredIds.size > 0 && !requiredIds.has(xId)) continue;
+      const existing = entries[xId];
+      if (existing?.source === "registered" || existing?.source === "none") {
+        continue;
+      }
+      entries[xId] = {
+        icon_url: user.icon_url ?? existing?.icon_url ?? null,
+        source: user.icon_url ? "registered" : "none",
+      };
+    }
+
+    return {
+      schema_version: 1,
+      generated_at:
+        primary?.generated_at ?? indexResult.value.generatedAt ?? 0,
+      entries,
+    };
+  },
+);
+
 export async function loadPublicXIconMapOptional(
   requiredXUserIds: readonly (string | null | undefined)[] = [],
 ): Promise<PublicXIconMapPayload | null> {
-  const result = await loadStaticJsonFreshStaleUnavailable({
-    key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
-    normalize: normalizePublicXIconMap,
-    maxStaleAgeSec: 24 * 60 * 60,
-    cacheTtlSeconds: 300,
-  });
-  const requiredIds = new Set(
-    requiredXUserIds.map(normalizeXId).filter(Boolean),
+  return loadPublicXIconMapOptionalImpl(
+    buildRequiredXIdsCacheKey(requiredXUserIds),
   );
-  const primary = result.value;
-  const needsIndexFallback =
-    !primary ||
-    Array.from(requiredIds).some((xId) => {
-      const entry = primary.entries[xId];
-      // registered / none は正本済み。欠損と video（未昇格）だけ index へ降りる。
-      if (!entry) return true;
-      return entry.source === "video";
-    });
-
-  if (!needsIndexFallback) return primary;
-
-  const indexResult = await loadStaticJsonFreshStaleUnavailable({
-    key: "users/index.json",
-    normalize: (value) =>
-      normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
-    maxStaleAgeSec: 24 * 60 * 60,
-    cacheTtlSeconds: 300,
-  });
-  if (!indexResult.value) return primary;
-
-  const entries = { ...(primary?.entries ?? {}) };
-  for (const user of indexResult.value.items) {
-    const xId = normalizeXId(user.x_id);
-    if (!xId) continue;
-    if (requiredIds.size > 0 && !requiredIds.has(xId)) continue;
-    const existing = entries[xId];
-    if (existing?.source === "registered" || existing?.source === "none") {
-      continue;
-    }
-    entries[xId] = {
-      icon_url: user.icon_url ?? existing?.icon_url ?? null,
-      source: user.icon_url ? "registered" : "none",
-    };
-  }
-
-  return {
-    schema_version: 1,
-    generated_at:
-      primary?.generated_at ?? indexResult.value.generatedAt ?? 0,
-    entries,
-  };
 }
 
 export async function loadRandomVideoPoolOptional(): Promise<RandomVideoPool> {

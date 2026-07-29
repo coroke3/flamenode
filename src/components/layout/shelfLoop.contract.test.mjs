@@ -13,6 +13,7 @@ const [shelf, globals, home] = await Promise.all([
 
 test("loop shelfは複製列と周期幅で継ぎ目なく折り返す", () => {
   assert.match(shelf, /loopCycleWidthRef/);
+  assert.match(shelf, /React\.useLayoutEffect\(\(\) => \{[\s\S]*syncLoopGeometry/);
   assert.match(shelf, /while \(next >= cycleWidth \* 2\) next -= cycleWidth/);
   assert.match(shelf, /while \(next < cycleWidth\) next \+= cycleWidth/);
   assert.equal((shelf.match(/className="fn-shelf-loop-group"/g) ?? []).length, 3);
@@ -22,12 +23,18 @@ test("loop shelfは複製列と周期幅で継ぎ目なく折り返す", () => {
 });
 
 test("トップ3棚は新着をランダム化し左右交互のloopを使う", () => {
+  assert.match(home, /const TOP_LATEST_LOOP_DISPLAY_LIMIT = 40/);
   assert.match(home, /const randomizedLatest = shuffledCopy\(latest\.slice\(0, 100\)\)/);
+  assert.match(
+    home,
+    /const latestLoopItems = randomizedLatest\.slice\(0, TOP_LATEST_LOOP_DISPLAY_LIMIT\)/,
+  );
+  assert.match(home, /latestLoopItems\.map\(/);
   assert.match(home, /const randomizedNostalgic = shuffledCopy\(nostalgic\)/);
   assert.match(home, /title="懐かしの映像"/);
   const directions = [
     ...home.matchAll(/autoScrollDirection="(left|right)"/g),
   ].map((match) => match[1]);
   assert.deepEqual(directions, ["left", "right", "left"]);
-  assert.equal((home.match(/\n\s+loop\n/g) ?? []).length, 3);
+  assert.equal((home.match(/^\s+loop\s*$/gm) ?? []).length, 3);
 });

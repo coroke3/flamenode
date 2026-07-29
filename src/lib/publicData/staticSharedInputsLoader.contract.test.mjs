@@ -52,9 +52,21 @@ test("動画詳細は共有R2読込後にrequest metricsを記録する", () => 
   assert.ok(logIndex > iconMapIndex);
 });
 
+test("公開アイコン補完はrequest内で正規化キーをcacheする", () => {
+  assert.match(source, /import \{ cache \} from "react"/);
+  assert.match(source, /function buildRequiredXIdsCacheKey/);
+  assert.match(source, /ids\.sort\(\)/);
+  assert.match(source, /return ids\.join\(","\)/);
+  assert.match(source, /const loadPublicXIconMapOptionalImpl = cache\(/);
+  assert.match(
+    source,
+    /export async function loadPublicXIconMapOptional[\s\S]*?buildRequiredXIdsCacheKey\(requiredXUserIds\)/,
+  );
+});
+
 test("公開アイコン補完は共有mapからR2 users indexへ降りD1を使わない", () => {
   const iconLoader = source.match(
-    /export async function loadPublicXIconMapOptional[\s\S]*?(?=export async function loadRandomVideoPoolOptional)/,
+    /const loadPublicXIconMapOptionalImpl = cache\([\s\S]*?\n\);/,
   )?.[0] ?? "";
 
   assert.match(iconLoader, /PUBLIC_X_ICON_MAP_OBJECT_KEY/);

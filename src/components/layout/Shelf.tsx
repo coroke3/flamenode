@@ -97,7 +97,7 @@ export function Shelf({
     directionRef.current = autoScrollDirection === "left" ? 1 : -1;
   }, [autoScrollDirection]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!loop) {
       loopCycleWidthRef.current = 0;
       return;
