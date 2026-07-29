@@ -17,6 +17,14 @@ export const SITE_DESCRIPTION =
   readableEnvText(process.env.NEXT_PUBLIC_SITE_DESCRIPTION) ||
   DEFAULT_SITE_DESCRIPTION;
 
+export const BRAND_ICON_PATH = "/brand/flamenode-icon-512.png";
+export const BRAND_SOCIAL_IMAGE = {
+  path: "/brand/flamenode-social-card.png",
+  width: 1200,
+  height: 630,
+  type: "image/png",
+} as const;
+
 const FALLBACK_SITE_URL = "http://localhost:3000";
 
 const TITLE_FALLBACKS: Record<string, string> = {
@@ -58,6 +66,49 @@ export function compactText(value: string | null | undefined, max = 160): string
   return `${compacted.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
 }
 
+export function buildSiteJsonLd(): Record<string, unknown> {
+  const rootUrl = absoluteUrl("/");
+  const organizationId = absoluteUrl("/#organization");
+  const websiteId = absoluteUrl("/#website");
+  const logoId = absoluteUrl("/#logo");
+  const logoUrl = absoluteUrl(BRAND_ICON_PATH);
+
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": organizationId,
+        name: SITE_NAME,
+        url: rootUrl,
+        logo: {
+          "@type": "ImageObject",
+          "@id": logoId,
+          url: logoUrl,
+          contentUrl: logoUrl,
+          width: 512,
+          height: 512,
+          caption: SITE_NAME,
+        },
+        image: { "@id": logoId },
+      },
+      {
+        "@type": "WebSite",
+        "@id": websiteId,
+        url: rootUrl,
+        name: SITE_NAME,
+        description: SITE_DESCRIPTION,
+        publisher: { "@id": organizationId },
+        inLanguage: "ja-JP",
+      },
+    ],
+  };
+}
+
+export function serializeJsonLd(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
 export function buildPageMetadata({
   title,
   description,
@@ -76,7 +127,17 @@ export function buildPageMetadata({
   const cleanTitle = readableTitle(title, path);
   const cleanDescription = compactText(description);
   const canonical = absoluteUrl(path);
-  const imageUrl = absoluteUrl(image || "/logo.png");
+  const usesBrandSocialImage = !image;
+  const imageUrl = absoluteUrl(image || BRAND_SOCIAL_IMAGE.path);
+  const imageMetadata = usesBrandSocialImage
+    ? {
+        url: imageUrl,
+        width: BRAND_SOCIAL_IMAGE.width,
+        height: BRAND_SOCIAL_IMAGE.height,
+        type: BRAND_SOCIAL_IMAGE.type,
+        alt: `${SITE_NAME} ロゴ`,
+      }
+    : { url: imageUrl, alt: cleanTitle };
   const metadata: Metadata = {
     title: cleanTitle,
     description: cleanDescription,
@@ -87,13 +148,13 @@ export function buildPageMetadata({
       description: cleanDescription,
       url: canonical,
       type: ogType,
-      images: [{ url: imageUrl, alt: cleanTitle }],
+      images: [imageMetadata],
     },
     twitter: {
       card: "summary_large_image",
       title: cleanTitle,
       description: cleanDescription,
-      images: [imageUrl],
+      images: [{ url: imageUrl, alt: imageMetadata.alt }],
     },
   };
 

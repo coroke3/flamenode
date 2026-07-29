@@ -1,12 +1,13 @@
 # Auth / Terms / Post-commit 信頼性修正 — 運用メモ
 
 > Status: Active
-> Last verified: 2026-07-23
+> Last verified: 2026-07-29
 > Source of truth: `src/lib/auth/`, `src/lib/actions/terms.ts`, `src/lib/audit/postCommit.ts`, workers
 
 ## 変更概要
 
 - Discord OAuth 後は `/auth/complete` を経由してから目的画面へ遷移する
+- `/auth/complete` はcallback直後にsession読取が一時的にnull/失敗となる場合だけ短時間自動再試行し、取得済みsession userを使って重複D1照会を行わない
 - Auth layout は `getRequestAuthContext` で認証取得を1回に集約する
 - 規約同意は scoped CAS + 冪等 Commit → redirect（`revalidatePath` なし）
 - Commit 成功後の revalidate / Queue 派生は `runPostCommitBestEffort`

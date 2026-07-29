@@ -8,9 +8,13 @@ register("../../scripts/ts-path-alias-loader.mjs", import.meta.url);
 const { MOJIBAKE_TOKENS } = await import("./utils/mojibake.ts");
 const {
   absoluteUrl,
+  BRAND_ICON_PATH,
+  BRAND_SOCIAL_IMAGE,
   buildPageMetadata,
+  buildSiteJsonLd,
   compactText,
   getSiteUrl,
+  serializeJsonLd,
   SITE_DESCRIPTION,
 } = await import("./seo.ts");
 
@@ -57,6 +61,36 @@ test("buildPageMetadata defaults openGraph type to website", () => {
     path: "/",
   });
   assert.equal(meta.openGraph?.type, "website");
+});
+
+test("buildPageMetadata uses the branded 1200x630 card by default", () => {
+  process.env.NEXT_PUBLIC_SITE_URL = "https://flamenode.example.com";
+  const meta = buildPageMetadata({ title: "FlameNode", path: "/" });
+  const image = meta.openGraph?.images?.[0];
+
+  assert.equal(image?.url, `https://flamenode.example.com${BRAND_SOCIAL_IMAGE.path}`);
+  assert.equal(image?.width, 1200);
+  assert.equal(image?.height, 630);
+  assert.equal(image?.type, "image/png");
+  assert.equal(meta.twitter?.images?.[0]?.url, image?.url);
+});
+
+test("site JSON-LD connects the website and crawlable square brand logo", () => {
+  process.env.NEXT_PUBLIC_SITE_URL = "https://flamenode.example.com";
+  const data = buildSiteJsonLd();
+  const graph = data["@graph"];
+
+  assert.ok(Array.isArray(graph));
+  const organization = graph.find((item) => item["@type"] === "Organization");
+  const website = graph.find((item) => item["@type"] === "WebSite");
+  assert.equal(organization.logo.url, `https://flamenode.example.com${BRAND_ICON_PATH}`);
+  assert.equal(organization.logo.width, 512);
+  assert.equal(organization.logo.height, 512);
+  assert.equal(website.publisher["@id"], organization["@id"]);
+});
+
+test("serializeJsonLd escapes markup-significant less-than characters", () => {
+  assert.equal(serializeJsonLd({ value: "</script>" }), '{"value":"\\u003c/script>"}');
 });
 
 test("buildPageMetadata accepts custom openGraph type", () => {

@@ -10,10 +10,14 @@ import localFont from "next/font/local";
 import "@/styles/globals.css";
 import "@/styles/mobile-hardening.css";
 import {
+  BRAND_ICON_PATH,
+  BRAND_SOCIAL_IMAGE,
   SITE_DESCRIPTION,
   SITE_NAME,
   absoluteUrl,
+  buildSiteJsonLd,
   getSiteUrl,
+  serializeJsonLd,
 } from "@/lib/seo";
 
 const hankenGrotesk = Hanken_Grotesk({
@@ -67,6 +71,10 @@ export const metadata: Metadata = {
   title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  authors: [{ name: SITE_NAME, url: absoluteUrl("/") }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+  category: "entertainment",
   alternates: { canonical: absoluteUrl("/") },
   robots: {
     index: true,
@@ -85,18 +93,57 @@ export const metadata: Metadata = {
     description: SITE_DESCRIPTION,
     url: absoluteUrl("/"),
     type: "website",
-    images: [{ url: absoluteUrl("/logo.png"), alt: SITE_NAME }],
+    locale: "ja_JP",
+    images: [
+      {
+        url: absoluteUrl(BRAND_SOCIAL_IMAGE.path),
+        width: BRAND_SOCIAL_IMAGE.width,
+        height: BRAND_SOCIAL_IMAGE.height,
+        type: BRAND_SOCIAL_IMAGE.type,
+        alt: `${SITE_NAME} ロゴ`,
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
-    images: [absoluteUrl("/logo.png")],
+    images: [
+      {
+        url: absoluteUrl(BRAND_SOCIAL_IMAGE.path),
+        alt: `${SITE_NAME} ロゴ`,
+      },
+    ],
   },
   icons: {
-    icon: "/brand/flamenode-mark.png",
-    apple: "/brand/flamenode-mark.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
+      {
+        url: "/brand/flamenode-icon-32.png",
+        sizes: "32x32",
+        type: "image/png",
+      },
+      {
+        url: BRAND_ICON_PATH,
+        sizes: "512x512",
+        type: "image/png",
+      },
+    ],
+    shortcut: "/favicon.ico",
+    apple: [
+      {
+        url: "/brand/flamenode-apple-touch-icon.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
   },
+  appleWebApp: {
+    capable: true,
+    title: SITE_NAME,
+    statusBarStyle: "black-translucent",
+  },
+  other: { "msapplication-TileColor": "#c8f21f" },
 };
 
 export const viewport = {
@@ -114,6 +161,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
+  const siteJsonLd = buildSiteJsonLd();
+
   return (
     <html
       lang="ja"
@@ -122,6 +171,11 @@ export default function RootLayout({
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootstrapCode }} />
+        <script
+          id="flamenode-site-structured-data"
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(siteJsonLd) }}
+        />
       </head>
       <body className="min-h-screen flex flex-col">{children}</body>
     </html>

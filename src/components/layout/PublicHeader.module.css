@@ -10,6 +10,16 @@
     border-color 0.2s ease;
 }
 
+.header.headerMenuOpen {
+  position: fixed;
+  inset: 0 0 auto;
+  width: 100%;
+}
+
+.headerMenuSpacer {
+  height: var(--header-h, 64px);
+}
+
 .bar {
   display: grid;
   grid-template-columns: max-content 1fr max-content;
@@ -290,7 +300,7 @@
 }
 
 .mobile {
-  border-top: 1px solid var(--hairline);
+  border-top: 0;
   background-color: var(--bg-surface);
   max-height: 0;
   overflow: hidden;
@@ -299,8 +309,10 @@
 }
 
 .mobileOpen {
-  max-height: calc(100vh - 64px);
+  border-top: 1px solid var(--hairline);
+  max-height: calc(100dvh - var(--header-h, 64px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   opacity: 1;
 }
 
@@ -525,9 +537,14 @@
 }
 
 @media (max-width: 900px) {
-  .bar {
-    min-height: var(--header-h, 56px);
-    height: auto;
+  .header {
+    --header-h: 50px;
+  }
+
+  .header .bar {
+    min-height: calc(var(--header-h, 50px) - 1px);
+    height: calc(var(--header-h, 50px) - 1px);
+    padding-block: 2px;
     gap: 12px;
   }
 
@@ -537,6 +554,18 @@
 }
 
 @media (max-width: 640px) {
+  .mobileSearch input {
+    font-size: 16px;
+  }
+
+  .mobileLink {
+    font-size: 13px;
+  }
+
+  .mobileThemeRow {
+    font-size: 12px;
+  }
+
   .searchToggle,
   .headerCta,
   .actionNav,
@@ -554,7 +583,7 @@
   }
 
   .mobileOpen {
-    max-height: calc(100dvh - var(--header-h, 56px));
+    max-height: calc(100dvh - var(--header-h, 50px));
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
   }
 

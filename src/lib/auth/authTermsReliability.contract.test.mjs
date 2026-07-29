@@ -27,9 +27,66 @@ test("Discord signInは /auth/complete を経由する", () => {
   assert.match(authComplete, /buildAuthCompleteHref/);
   assert.match(authComplete, /sanitizeAuthCompleteNext/);
   assert.match(authComplete, /\/auth\/complete/);
-  assert.match(completePage, /getAuthSession/);
+  assert.match(completePage, /loadAuthSessionUncached/);
+  assert.match(completePage, /resolveAuthCompleteSession/);
   assert.match(completePage, /redirect\(next\)/);
-  assert.doesNotMatch(completePage, /getLinkedXUsersForAuthUser|buildHeaderUser|revalidatePath/);
+  assert.doesNotMatch(
+    completePage,
+    /getDatabaseAsync|users\.id|getLinkedXUsersForAuthUser|buildHeaderUser|revalidatePath/,
+  );
+  assert.match(completePage, /auth_session_retry_recovered/);
+  assert.match(completePage, /sessionUser\.is_banned === 1/);
+});
+
+test("auth completeはcallback直後のsession未反映を自動再試行する", async () => {
+  const {
+    AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS,
+    resolveAuthCompleteSession,
+  } = await import("./authComplete.ts");
+  const waits = [];
+  let reads = 0;
+  const resolution = await resolveAuthCompleteSession(
+    async () => {
+      reads += 1;
+      if (reads === 1) return null;
+      if (reads === 2) throw new Error("transient session read");
+      return { user: { id: "user-1", is_banned: 0 } };
+    },
+    async (ms) => {
+      waits.push(ms);
+    },
+  );
+
+  assert.equal(resolution.kind, "authenticated");
+  assert.equal(resolution.attempts, 3);
+  assert.equal(reads, 3);
+  assert.deepEqual(
+    waits,
+    AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS.slice(0, 2),
+  );
+});
+
+test("auth completeは再試行後も読めないsessionを成功扱いしない", async () => {
+  const {
+    AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS,
+    resolveAuthCompleteSession,
+  } = await import("./authComplete.ts");
+  let reads = 0;
+  const resolution = await resolveAuthCompleteSession(
+    async () => {
+      reads += 1;
+      return null;
+    },
+    async () => {},
+  );
+
+  assert.deepEqual(resolution, {
+    kind: "missing",
+    attempts: AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS.length + 1,
+  });
+  assert.equal(reads, AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS.length + 1);
+  assert.match(completePage, /session_not_visible_after_retry/);
+  assert.match(completePage, /auth_temporarily_unavailable/);
 });
 
 test("auth completeはopen redirectと循環を拒否する", async () => {

@@ -57,8 +57,14 @@ export function PublicHeader({
     React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const searchPanelRef = React.useRef<HTMLDivElement>(null);
+  const mobileHeaderRef =
+    React.useRef<HTMLElement>(null);
+  const mobileHeaderHeightRef =
+    React.useRef<number | null>(null);
   const menuButtonRef =
     React.useRef<HTMLButtonElement>(null);
+  const mobileScrollRef =
+    React.useRef<HTMLDivElement>(null);
   const mobilePanelRef =
     React.useRef<HTMLElement>(null);
   const searchButtonRef =
@@ -110,6 +116,16 @@ export function PublicHeader({
       ? "/entry"
       : `/entry?next=${encodeURIComponent(entryNext)}`;
 
+  React.useLayoutEffect(() => {
+    if (!mobileOpen) return;
+
+    const mobileScroll = mobileScrollRef.current;
+    if (!mobileScroll) return;
+
+    mobileScroll.scrollTop = 0;
+    mobileScroll.scrollLeft = 0;
+  }, [mobileOpen]);
+
   useDismissablePanel({
     open: mobileOpen,
     onClose: React.useCallback(
@@ -141,7 +157,24 @@ export function PublicHeader({
   };
 
   return (
-    <header className={`fn-header ${styles.header}`}>
+    <>
+      {mobileOpen ? (
+        <div
+          className={styles.headerMenuSpacer}
+          style={
+            mobileHeaderHeightRef.current == null
+              ? undefined
+              : { height: mobileHeaderHeightRef.current }
+          }
+          aria-hidden="true"
+        />
+      ) : null}
+      <header
+        ref={mobileHeaderRef}
+        className={`fn-header ${styles.header} ${
+          mobileOpen ? styles.headerMenuOpen : ""
+        }`}
+      >
       <div className={`fn-public-container fn-header-inner ${styles.bar}`}>
         <Link
           href="/"
@@ -219,6 +252,10 @@ export function PublicHeader({
             aria-expanded={mobileOpen}
             aria-controls="mobile-navigation-panel"
             onClick={() => {
+              if (!mobileOpen) {
+                mobileHeaderHeightRef.current =
+                  mobileHeaderRef.current?.getBoundingClientRect().height ?? null;
+              }
               setMobileOpen((open) => !open);
               setSearchOpen(false);
               setAccountOpen(false);
@@ -274,7 +311,10 @@ export function PublicHeader({
         </form>
       </div>
 
-      <div className={`${styles.mobile} ${mobileOpen ? styles.mobileOpen : ""}`}>
+      <div
+        ref={mobileScrollRef}
+        className={`${styles.mobile} ${mobileOpen ? styles.mobileOpen : ""}`}
+      >
         <nav
           id="mobile-navigation-panel"
           ref={mobilePanelRef}
@@ -339,6 +379,7 @@ export function PublicHeader({
           />
         </nav>
       </div>
-    </header>
+      </header>
+    </>
   );
 }

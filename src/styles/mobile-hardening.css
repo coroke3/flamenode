@@ -11,6 +11,97 @@
   }
 
   [data-fn-surface="public"],
+  [data-fn-surface="personal"],
+  [data-admin-shell],
+  [data-manage-shell] {
+    font-size: 15px;
+  }
+
+  [data-fn-surface="public"] .fn-btn:not(.fn-btn-sm):not(.fn-btn-icon):not(.fn-btn-lg),
+  [data-fn-surface="personal"] .fn-btn:not(.fn-btn-sm):not(.fn-btn-icon):not(.fn-btn-lg),
+  [data-admin-shell] .fn-btn:not(.fn-btn-sm):not(.fn-btn-icon):not(.fn-btn-lg),
+  [data-manage-shell] .fn-btn:not(.fn-btn-sm):not(.fn-btn-icon):not(.fn-btn-lg) {
+    font-size: 13px;
+  }
+
+  [data-fn-surface="public"] .fn-btn-lg,
+  [data-fn-surface="personal"] .fn-btn-lg {
+    font-size: 14px;
+  }
+
+  [data-fn-surface="public"] .fn-intro-copy {
+    font-size: clamp(30px, 8.2vw, 40px);
+  }
+
+  [data-fn-surface="public"] .fn-intro-lead {
+    font-size: 13px;
+  }
+
+  [data-fn-surface="public"] .fn-evlist-title,
+  [data-fn-surface="public"] .fn-cr-title,
+  [data-fn-surface="public"] .fn-list-head-title,
+  [data-fn-surface="public"] .fn-page-title {
+    font-size: clamp(30px, 8.7vw, 42px);
+  }
+
+  [data-fn-surface="public"] .fn-page-title--compact,
+  [data-fn-surface="public"] .fn-library-head h1 {
+    font-size: clamp(21px, 6vw, 26px);
+  }
+
+  [data-fn-surface="public"] .fn-entry-title,
+  [data-fn-surface="public"] .fn-pc-title,
+  [data-fn-surface="public"] .fn-event-hero-title {
+    font-size: clamp(30px, 8.2vw, 42px);
+  }
+
+  [data-fn-surface="public"] .fn-closing-text,
+  [data-fn-surface="public"] .fn-reserve-title {
+    font-size: clamp(27px, 7.5vw, 38px);
+  }
+
+  [data-fn-surface="public"] .fn-section-title {
+    font-size: 20px;
+  }
+
+  [data-fn-surface="public"] .fn-section-more {
+    font-size: 12px;
+  }
+
+  [data-fn-surface="public"] .fn-vcard-title,
+  [data-fn-surface="personal"] .fn-vcard-title {
+    font-size: 13.5px;
+  }
+
+  [data-fn-surface="public"] .fn-list-head-lead,
+  [data-fn-surface="public"] .fn-page-lead,
+  [data-fn-surface="personal"] .fn-entry-lead {
+    font-size: 13px;
+  }
+
+  [data-fn-surface="personal"] .fn-page-title,
+  [data-fn-surface="personal"] .fn-entry-title {
+    font-size: clamp(23px, 6vw, 26px);
+  }
+
+  [data-admin-shell] .fn-console-title,
+  [data-manage-shell] .fn-console-title {
+    font-size: clamp(19px, 5.4vw, 22px);
+  }
+
+  [data-admin-shell] .fn-console-lead,
+  [data-manage-shell] .fn-console-lead,
+  [data-admin-shell] .fn-console-eyebrow,
+  [data-manage-shell] .fn-console-eyebrow {
+    font-size: 12px;
+  }
+
+  [data-admin-shell] .fn-console-stat-value,
+  [data-manage-shell] .fn-console-stat-value {
+    font-size: 17px;
+  }
+
+  [data-fn-surface="public"],
   [data-fn-surface="public"] .fn-main,
   [data-fn-surface="public"] .fn-public-container,
   [data-fn-surface="personal"],

@@ -290,7 +290,7 @@
 @media (max-width: 640px) {
   .cardTitle {
     align-items: flex-start;
-    font-size: 22px;
+    font-size: 20px;
   }
 
   .eventCard {

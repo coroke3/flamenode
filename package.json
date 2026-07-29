@@ -30,6 +30,7 @@
     "typecheck": "tsc --noEmit",
     "dev:local": "node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
     "clean:next": "node scripts/clean-next-cache.cjs",
+    "generate:brand-assets": "node scripts/generate-brand-seo-assets.mjs",
     "dev:clean": "node scripts/stop-dev-ports.cjs && node scripts/clean-next-cache.cjs && node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
     "db:studio": "drizzle-kit studio",
     "db:local-apply": "wrangler d1 migrations apply flamenode_db --local",
@@ -91,6 +92,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.18.0",
     "eslint-config-next": "15.5.20",
+    "sharp": "0.34.5",
     "typescript": "^5.7.3",
     "wrangler": "4.112.0"
   }

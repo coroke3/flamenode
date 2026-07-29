@@ -3,14 +3,16 @@
  * - 横スクロール抑制、タップ領域、見出し縮小、1カラム化
  * ============================================================ */
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   [data-fn-surface="public"],
   [data-fn-surface="personal"],
   [data-admin-shell],
   [data-manage-shell] {
-    --header-h: 56px;
+    --header-h: 50px;
   }
+}
 
+@media (max-width: 640px) {
   [data-fn-surface="public"].fn-public-shell,
   [data-fn-surface="public"].fn-app,
   [data-fn-surface="personal"].fn-personal-shell,

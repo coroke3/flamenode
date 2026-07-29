@@ -30,6 +30,7 @@ import {
   absoluteUrl,
   buildPageMetadata,
 } from "@/lib/seo";
+import { shuffledCopy } from "@/lib/utils/shuffle";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/",
@@ -60,6 +61,8 @@ export default async function TopPage(): Promise<React.ReactElement> {
       creators: creators.length,
     },
   } = data ?? {};
+  // top.json 自体の内容・順序は変えず、このrequestの表示順だけを入れ替える。
+  const randomizedRecommended = shuffledCopy(recommended);
 
   const heroEvents = pickHeroEvents(activeEvents);
   const primaryHeroEvent = heroEvents[0] ?? null;
@@ -127,11 +130,11 @@ export default async function TopPage(): Promise<React.ReactElement> {
           moreLabel="一覧を見る"
         />
         <div className={styles.shelfBox}>
-          {recommended.length === 0 ? (
+          {randomizedRecommended.length === 0 ? (
             <EmptyShelf message="おすすめできる作品がまだありません。" />
           ) : (
             <Shelf ariaLabel="今週のピックアップ">
-              {recommended.map((video, index) => (
+              {randomizedRecommended.map((video, index) => (
                 <VideoCard key={`${video.id}-recommended-${index}`} video={video} />
               ))}
             </Shelf>

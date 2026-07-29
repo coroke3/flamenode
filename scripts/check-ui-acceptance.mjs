@@ -101,6 +101,53 @@ requireMatch(
   /aria-label=\{mobileOpen \? "メニューを閉じる" : "メニューを開く"\}/,
   "モバイルメニューボタンが開閉状態を読み上げません。",
 );
+requireAll("src/components/layout/PublicHeader.tsx", [
+  [
+    /mobileOpen\s*\?\s*styles\.headerMenuOpen/,
+    "モバイルメニュー表示中に公開ヘッダーを画面へ固定していません。",
+  ],
+  [
+    /className=\{styles\.headerMenuSpacer\}/,
+    "モバイルメニュー表示中に公開ヘッダー分のレイアウト高を維持していません。",
+  ],
+  [
+    /mobileHeaderRef\.current\?\.getBoundingClientRect\(\)\.height/,
+    "モバイルメニュー固定前の実ヘッダー高を保存していません。",
+  ],
+  [
+    /mobileScroll\.scrollTop\s*=\s*0/,
+    "モバイルメニューを開く際に内部スクロール位置を先頭へ戻していません。",
+  ],
+]);
+requireMatch(
+  "src/styles/mobile-public.css",
+  /@media\s*\(max-width:\s*900px\)[\s\S]*?--header-h:\s*50px/,
+  "スマートフォンの固定ヘッダー高が50pxではありません。",
+);
+requireMatch(
+  "src/components/layout/PublicHeader.module.css",
+  /@media\s*\(max-width:\s*900px\)[\s\S]*?\.header\s+\.bar\s*\{[^}]*height:\s*calc\(var\(--header-h,\s*50px\)\s*-\s*1px\)/,
+  "モバイルヘッダーの実寸が境界線込み50pxに固定されていません。",
+);
+requireMatch(
+  "src/components/layout/PublicHeader.module.css",
+  /\.mobile\s*\{[^}]*border-top:\s*0[\s\S]*?\.mobileOpen\s*\{[^}]*border-top:\s*1px/,
+  "閉じたモバイルメニューの境界線がヘッダー高へ加算されます。",
+);
+requireAll("app/(public)/page.tsx", [
+  [
+    /loadStaticTopPage\(\)/,
+    "トップページが静的top JSONの読込を維持していません。",
+  ],
+  [
+    /shuffledCopy\(recommended\)/,
+    "今週のピックアップを表示直前にランダム順へ変換していません。",
+  ],
+  [
+    /randomizedRecommended\.map/,
+    "今週のピックアップがランダム順の配列を描画していません。",
+  ],
+]);
 requireMatch(
   "src/components/layout/PublicAccountIsland.tsx",
   /\/api\/account\/summary/,
@@ -140,6 +187,11 @@ requireMatch(
   "src/components/layout/PublicHeader.module.css",
   /\.bar\s*\{[^}]*margin-inline:\s*auto/s,
   "The shared header rail must stay centered on admin and manage surfaces.",
+);
+requireMatch(
+  "src/components/layout/PublicHeader.module.css",
+  /\.headerMenuOpen\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0\s+0\s+auto/s,
+  "The open mobile menu header must stay fixed to the viewport while body scroll is locked.",
 );
 requireMatch(
   "src/styles/redesign-public.css",
@@ -355,6 +407,42 @@ requireMatch(
   "src/components/video/ChapterCommentItem.tsx",
   /data-chapter-time=/,
   "投稿後スクロール用 data-chapter-time がありません。",
+);
+
+requireAll("src/styles/mobile-hardening.css", [
+  [
+    /@media\s*\(max-width:\s*640px\)[\s\S]*?\[data-fn-surface="public"\],[\s\S]*?font-size:\s*15px/s,
+    "モバイル本文のコンパクトな15px基準がありません。",
+  ],
+  [
+    /\.fn-btn:not\(\.fn-btn-sm\):not\(\.fn-btn-icon\):not\(\.fn-btn-lg\)[\s\S]*?font-size:\s*13px/s,
+    "モバイル通常ボタンの13px基準がありません。",
+  ],
+  [
+    /\.fn-intro-copy\s*\{[^}]*font-size:\s*clamp\(30px,\s*8\.2vw,\s*40px\)/s,
+    "モバイルトップ見出しのコンパクトな文字スケールがありません。",
+  ],
+  [
+    /\.fn-console-title[\s\S]*?font-size:\s*clamp\(19px,\s*5\.4vw,\s*22px\)/s,
+    "モバイル管理画面見出しのコンパクトな文字スケールがありません。",
+  ],
+]);
+
+requireAll("src/components/layout/PublicHeader.module.css", [
+  [
+    /@media\s*\(max-width:\s*640px\)[\s\S]*?\.mobileSearch input\s*\{[^}]*font-size:\s*16px/s,
+    "モバイル検索欄のiOS自動ズーム防止サイズがありません。",
+  ],
+  [
+    /@media\s*\(max-width:\s*640px\)[\s\S]*?\.mobileLink\s*\{[^}]*font-size:\s*13px/s,
+    "モバイルメニューのコンパクトな文字サイズがありません。",
+  ],
+]);
+
+requireMatch(
+  "app/(auth)/entry/page.module.css",
+  /@media\s*\(max-width:\s*640px\)[\s\S]*?\.cardTitle\s*\{[^}]*font-size:\s*20px/s,
+  "モバイル投稿入口カードのコンパクトな見出しサイズがありません。",
 );
 
 const requiredWidths = [360, 390, 430, 640, 768, 1024, 1280, 1440, 1920];
