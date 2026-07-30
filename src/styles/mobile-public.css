@@ -505,20 +505,15 @@
 /* ─── 第5弾: 棚・作品詳細・ライブラリ・ヘッダー ───────────── */
 
 @media (max-width: 640px) {
-  [data-fn-surface="public"] .fn-shelf {
+  [data-fn-surface="public"] .fn-shelf:not([data-mobile-rows="2"]) {
     grid-auto-columns: min(82vw, 280px);
     gap: 12px;
     scroll-padding-inline: var(--fn-page-gutter);
   }
 
-  [data-fn-surface="public"] .fn-shelf[data-density="compact"] {
+  [data-fn-surface="public"] .fn-shelf[data-density="compact"]:not([data-mobile-rows="2"]) {
     grid-auto-columns: minmax(104px, 32vw);
     gap: 8px;
-  }
-
-  [data-fn-surface="public"] .fn-shelf[data-loop="true"] {
-    display: block;
-    padding-inline-end: 0;
   }
 
   [data-fn-surface="public"] .fn-shelf-fade-left,

@@ -192,9 +192,9 @@ Legacy standalone worker directories are kept as importable modules only.
 
 | Worker | cron | 用途 | 必須環境変数 |
 |---|---|---|---|
-| `flamenode-fast-jobs` | `*/5 * * * *` | `notification_outbox` 配信・スロット締切リマインド（`notification-dispatcher` 統合） | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`（任意） |
-| `flamenode-content-jobs` | `*/15 * * * *` | コストガード自動昇格・静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
-| `flamenode-sync-jobs` | `0 */12 * * *` | YouTube 同期・スコア再計算（`youtube-sync` / `score-recalc` 統合） | `YOUTUBE_API_KEY` |
+| `flamenode-fast-jobs` | `0 * * * *` | `notification_outbox` 配信・スロット締切リマインド（`notification-dispatcher` 統合） | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`（任意） |
+| `flamenode-content-jobs` | `15 * * * *` | コストガード自動昇格・静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
+| `flamenode-sync-jobs` | `7 * * * *`, `52 * * * *` | YouTube 同期・スコア再計算（`youtube-sync` / `score-recalc` 統合） | `YOUTUBE_API_KEY` |
 
 ### 3-1. デプロイ
 
@@ -397,7 +397,7 @@ FROM users
 ORDER BY created_at DESC
 LIMIT 50 OFFSET 0;  -- OFFSET を増やしながら 50 件ずつ
 
--- 3. 各バッチ投入後、Worker (5分 cron) が処理し終わるのを待つ
+-- 3. 各バッチ投入後、fast-jobs Recovery Cron（毎時0分）が処理し終わるのを待つ
 --    notification_outbox.status='pending' が 0 になったら次バッチ
 SELECT status, COUNT(*) FROM notification_outbox
   WHERE created_at >= unixepoch() - 600 GROUP BY status;

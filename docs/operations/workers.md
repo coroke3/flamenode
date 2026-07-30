@@ -114,23 +114,23 @@ Google Cloud Consoleの日次quotaが標準10,000以外の場合は、`workers/s
 
 - 静的JSON生成中のD1 queryは`withSerializedD1`で直列化する。多数のqueryを`Promise.all`で同時開始しない。
 - YouTube quota系403を受けた場合はKVへ1時間cooldownを保存し、後続Cronの無駄な呼出しを止める。
-- YouTube候補は`pending`、開催中期限、通常期限の最大3 queryへ分離し、`videos`全体を15分ごとに走査しない。
+- YouTube候補は`pending`、開催中期限、通常期限の最大3 queryへ分離し、`videos`全体を毎時 Cron で走査しない。
 - YouTube APIのレスポンスは`fields`で必要なID・視聴数・公開状態・長さだけ取得する。
 - Discordは固定rate値を仮定せず、`Retry-After`、`X-RateLimit-Remaining`、`X-RateLimit-Reset-After`、global/scope headersを解釈する。
 - Discord 429は同一invocationで再試行せず、outboxの`next_attempt_at`へ反映する。global 429は別routeへの後続呼出しにも適用する。
 - Discordのglobal/route cooldownは匿名化キーでKVへ最大2件/runだけ保存し、別isolateにも共有する。読取は1 invocation内でキーごとに1回へ集約する。
-- Discord DM channel IDはisolateへ全件、KVへ最大2件/run・576件/dayの範囲で30日cacheし、通常配送を2 requestから1 requestへ削減する。
+- Discord DM channel IDはisolateへ全件、KVへ最大2件/run・48件/dayの範囲で30日cacheし、通常配送を2 requestから1 requestへ削減する。
 - 401/403/404を同じ認証・宛先のまま繰り返さず、復旧不能なものはdead-letterへ移す。
 - 外部画像proxyは同一キーの同時missを1 fetchへまとめ、ETag/304、negative cache、stale返却を使用する。
 - metadata保存は10件単位のbulk upsertとする。
 - YouTube metadataの`synced_at`は最後にpublic/unlistedとして正常取得した時刻。`failed`時の再同期期限は`updated_at`を使う。
 - private / missing ではview_count・duration・公開時synced_atを上書きしない。適格性変更時と日次整合で`youtube_related_blocklist`を再生成する。
 - スコアは1 SQLで最大150件更新し、作品ごとのUPDATE loopを禁止する。
-- 静的生成は1 invocationで1 targetだけ処理する。
+- 静的生成は1 invocationで1 targetだけ処理する。deploy 後の `BUILD_COMMIT_SHA` 変化時は Recovery Cron が共有 global target を high enqueue する（`static:last_generator_commit` で重複抑制）。
 - JSON生成対象は必ずSQL側の`LIMIT`を持ち、無制限全件取得を行わない。
 - 初回backlog処理中も通知を独立Workerで維持する。
 
-YouTube metadata同期だけの理論最大は、15分ごとに通常4 unitsとして384 units/day、全batchで1回再試行した場合でも768 units/dayである。残り予算は他のYouTube API処理と共有し、合計8,000 units/dayを超えない。
+YouTube metadata同期だけの理論最大は、sync-jobs 1回あたり通常4 units（全batchで1回再試行した場合は最大8 units）。残り予算は他のYouTube API処理と共有し、合計8,000 units/dayを超えない。
 
 静的再生成queueのcanonical targetは`top`、`events_index`、`event`、`video`、`user`、`users_index`、`list_recent`、`list_popular`、`search_index`、`recommend`、`rules`、`youtube_related_blocklist`、`random_video_pool`だけである。旧別名・未知値のruntime正規化やno-op成功処理は行わず、有限retry後に`failed`として運用画面へ残す。
 

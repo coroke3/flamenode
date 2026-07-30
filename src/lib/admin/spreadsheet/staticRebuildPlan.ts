@@ -121,6 +121,20 @@ export function planSpreadsheetStaticRebuildTargets(
             targetType: "youtube_related_blocklist",
             targetId: "global",
           });
+          // hooks.globalListTargets と同じ: list は通常、search だけ low
+          add(mutation, {
+            targetType: "list_recent",
+            targetId: "global",
+          });
+          add(mutation, {
+            targetType: "list_popular",
+            targetId: "global",
+          });
+          add(mutation, {
+            targetType: "search_index",
+            targetId: "global",
+            priority: "low",
+          });
         }
         break;
       }

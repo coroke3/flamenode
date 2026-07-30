@@ -6,9 +6,9 @@ Workers FreeのCPU上限はHTTP/Cronともに10msである。ネットワーク�
 
 | Worker | Cron | 主な責務 | 1実行上限 |
 |---|---:|---|---:|
-| `fast-jobs` | `*/5 * * * *` | 締切リマインダー、通知配送 | 通知6件、Discord外部request最大12、DM cache KV書込最大2 |
-| `content-jobs` | `*/15 * * * *` | 静的JSON再生成、retention cleanup | target 1件 |
-| `sync-jobs` | `7,22,37,52 * * * *` | YouTube同期、スコア差分再計算 | YouTube最大200件・外部request最大8、score 150件 |
+| `fast-jobs` | `0 * * * *` | 締切リマインダー、通知配送 | 通知6件、Discord外部request最大12、DM cache KV書込最大2 |
+| `content-jobs` | `15 * * * *` | 静的JSON再生成、retention cleanup | target 1件 |
+| `sync-jobs` | `7 * * * *`, `52 * * * *` | YouTube同期、スコア差分再計算 | YouTube最大200件・外部request最大8、score 150件 |
 
 旧standalone Worker entrypointは共有モジュールとして残すが、直接deployしない。
 
@@ -18,9 +18,9 @@ Workers FreeのCPU上限はHTTP/Cronともに10msである。ネットワーク�
 - `content-jobs`: 1 targetだけ生成する。cleanupはleaseにより1時間に1回だけ実行する。静的生成中のD1 queryは`withSerializedD1`で直列化し、同時接続枠を浪費しない。
 - `sync-jobs`: YouTube `videos.list`は50 IDずつ最大4 requestを逐次実行する。各requestの再試行は最大1回で、外部request budgetは最大8に固定する。
 - YouTube metadata保存は10件単位のbulk upsertとし、1 SQLの100 bindings上限に収める。最大200件でも20 write statementsに固定する。
-- `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから合計200件だけ取得する。15分ごとの全作品走査を行わない。
+- `youtube-sync`: `pending`、開催中期限、通常期限を最大3 queryへ分け、既存indexから合計200件だけ取得する。毎時 Cron による全作品走査を行わない。
 - `score-recalc`: 変更済みまたは24時間以上未更新の公開作品を1 SQLで最大150件更新する。KV cursorと1作品1 queryを使わない。
-- D1のrows writtenには更新table rowに加えてindex entryも含まれるため、scoreの理論最大を14,400作品/日に抑え、他jobの書込み余地を確保する。
+- D1のrows writtenには更新table rowに加えてindex entryも含まれるため、scoreの理論最大を3,600作品/日に抑え、他jobの書込み余地を確保する。
 - Cron重複排除はD1 `worker_leases`を正本とし、無制限loop、全件読込、処理全体の即時retryは禁止する。
 
 ## YouTube単一キーと日次quota予算
@@ -49,10 +49,10 @@ Providerの429/503を受けた場合、同一invocationで無制限に再試行�
 
 | 処理 | 最大処理量 | 1万件の初回処理目安 |
 |---|---:|---:|
-| YouTube同期 | 200件/15分 = 19,200件/日 | 約12時間30分 |
-| スコア差分更新 | 150件/15分 = 14,400件/日 | 約16時間40分 |
-| 静的JSON target | 1件/15分 = 96件/日 | 優先度順。global targetは重複排除 |
-| 通知 | 6件/5分 = 1,728件/日 | 通常は5分以内 |
+| YouTube同期 | 200件/回（sync-jobs 毎時2回） | バックログ次第 |
+| スコア差分更新 | 150件/回 | バックログ次第 |
+| 静的JSON target | 1件/回（content-jobs 毎時 + Queue） | 優先度順。global targetは重複排除 |
+| 通知 | 6件/回（fast-jobs 毎時） | 通常は次回 Cron まで |
 
 上記はqueue滞留、外部API障害、Cloudflare側throttleがない場合の理論上限であり、保証値ではない。静的JSONが未生成または古い間もD1正本とlive APIを利用できる構成を維持する。
 
@@ -60,13 +60,13 @@ Providerの429/503を受けた場合、同一invocationで無制限に再試行�
 
 | データ | 反映目標 |
 |---|---:|
-| 通知 | 5分以内。Provider cooldown中は`Retry-After`後のCronへ繰り越し |
+| 通知 | 1時間以内。Provider cooldown中は`Retry-After`後のCronへ繰り越し |
 | 投稿・管理画面の確定結果 | 即時（D1正本） |
 | live API | CDN cache 5秒、stale 30秒 |
-| 静的JSON | queue先頭から15分ごとに1 target |
+| 静的JSON | queue先頭から毎時1 target（Queue 優先、Recovery Cron 補助） |
 | 開催中イベントのYouTube情報 | 1時間以上古い対象を優先 |
 | 通常作品のYouTube情報 | 24時間以上古い対象を順次 |
-| スコア | 変更済み対象を15分ごとに最大150件 |
+| スコア | 変更済み対象を毎時最大150件 |
 
 Queue targetはcanonical値だけを受理する。旧別名や未知値は成功扱いにせず、有限retry後に`failed`として可視化する。
 

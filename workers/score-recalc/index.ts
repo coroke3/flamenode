@@ -26,8 +26,8 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /**
  * D1 Freeの100,000 rows written/dayにはtable rowだけでなくindex entryも含まれる。
- * scoreとscore_updated_atは2本のindexを更新するため、15分ごと最大150件に固定する。
- * 最大14,400動画更新/dayとして、YouTube同期・通知・静的queueの書込み余地を残す。
+ * scoreとscore_updated_atは2本のindexを更新するため、毎時7分の sync-jobs Cron で最大150件に固定する。
+ * 最大3,600動画更新/dayとして、YouTube同期・通知・静的queueの書込み余地を残す。
  */
 export const SCORE_RECALC_BATCH_SIZE = 150;
 export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;

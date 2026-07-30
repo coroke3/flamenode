@@ -117,6 +117,96 @@ function assertStatus(response, expected, label) {
   }
 }
 
+/** Degraded D1 banner may clear shortly after deploy; retry before failing smoke. */
+const DEFAULT_DEGRADED_ATTEMPTS = 3;
+const DEFAULT_DEGRADED_RETRY_DELAY_MS = 3_000;
+
+function degradedRetryOptions(env = process.env, requestOptions = {}) {
+  const attemptsRaw = env.SMOKE_DEGRADED_ATTEMPTS?.trim();
+  const delayRaw = env.SMOKE_DEGRADED_DELAY_MS?.trim();
+  const attempts = attemptsRaw
+    ? Number.parseInt(attemptsRaw, 10)
+    : DEFAULT_DEGRADED_ATTEMPTS;
+  const retryDelayMs = delayRaw
+    ? Number.parseInt(delayRaw, 10)
+    : DEFAULT_DEGRADED_RETRY_DELAY_MS;
+  return {
+    attempts:
+      Number.isFinite(attempts) && attempts > 0
+        ? attempts
+        : DEFAULT_DEGRADED_ATTEMPTS,
+    retryDelayMs:
+      Number.isFinite(retryDelayMs) && retryDelayMs >= 0
+        ? retryDelayMs
+        : DEFAULT_DEGRADED_RETRY_DELAY_MS,
+    ...requestOptions,
+  };
+}
+
+function isDegradedD1Banner(html) {
+  return html.includes("簡易表示:");
+}
+
+async function fetchHtmlWithDegradedRetry(
+  get,
+  url,
+  label,
+  { attempts = DEFAULT_DEGRADED_ATTEMPTS, retryDelayMs = DEFAULT_DEGRADED_RETRY_DELAY_MS } = {},
+) {
+  let lastHtml = "";
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const response = await get(url, {}, label);
+    assertStatus(response, [200], label);
+    lastHtml = await response.text();
+    if (!isDegradedD1Banner(lastHtml)) {
+      return lastHtml;
+    }
+    if (attempt < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+  throw new Error(`${label}: degraded D1 banner detected.`);
+}
+
+/** R2 直読が無い smoke 向け。空一覧でも骨格が壊れていない・degraded だけでないことを弱く確認する。 */
+function assertWeakPublicListShell(html, label) {
+  if (!html.includes("作品一覧")) {
+    throw new Error(`${label}: missing list page title marker.`);
+  }
+  if (!/\d[\d,]* works/.test(html)) {
+    throw new Error(`${label}: missing works count marker.`);
+  }
+  if (html.includes("簡易表示:")) {
+    throw new Error(`${label}: degraded D1 banner detected.`);
+  }
+  if (html.includes("このイベントの作品一覧を一時的に表示できません")) {
+    throw new Error(`${label}: unavailable event list message detected.`);
+  }
+  const hasStructure =
+    html.includes("fn-list-toolbar") ||
+    html.includes("fn-list-grid") ||
+    html.includes("fn-empty") ||
+    html.includes("fn-list-compact");
+  if (!hasStructure) {
+    throw new Error(`${label}: list page structure markers missing.`);
+  }
+}
+
+/** トップの棚・カード骨格。一覧が空でも新着セクションが壊れていないことを弱く確認する。 */
+function assertWeakTopPublicShell(html, label) {
+  if (html.includes("簡易表示:")) {
+    throw new Error(`${label}: degraded D1 banner detected.`);
+  }
+  const hasShelfOrCard =
+    html.includes("fn-vcard") ||
+    html.includes("fn-shelf") ||
+    html.includes("sec-latest") ||
+    html.includes("新着アップロード");
+  if (!hasShelfOrCard) {
+    throw new Error(`${label}: missing shelf/video card structure markers.`);
+  }
+}
+
 async function requestJsonUntilValid(
   fetchImpl,
   url,
@@ -250,15 +340,20 @@ export async function runSmoke({
 } = {}) {
   const settings = smokeEnvironment({ env, repoRoot, expectedCommit });
   const propagationOptions = propagationRequestOptions(env, requestOptions);
+  const degradedOptions = degradedRetryOptions(env, requestOptions);
   const get = (url, options, label) =>
     requestWithRetry(fetchImpl, url, options, label, requestOptions);
 
   await waitForProductionHealthConvergence(fetchImpl, settings, propagationOptions);
 
-  const top = await get(settings.web, {}, "top page");
-  assertStatus(top, [200], "top page");
-  const html = await top.text();
-  const assetPath = html.match(/(?:src|href)=["']([^"']*\/_next\/static\/[^"']+)["']/i)?.[1];
+  const topHtml = await fetchHtmlWithDegradedRetry(
+    get,
+    settings.web,
+    "top page",
+    degradedOptions,
+  );
+  assertWeakTopPublicShell(topHtml, "top page");
+  const assetPath = topHtml.match(/(?:src|href)=["']([^"']*\/_next\/static\/[^"']+)["']/i)?.[1];
   if (!assetPath) throw new Error("top page: no Next.js static asset was found.");
   const assetUrl = new URL(assetPath, `${settings.web}/`);
   if (assetUrl.origin !== new URL(settings.web).origin) {
@@ -267,8 +362,13 @@ export async function runSmoke({
   const asset = await get(assetUrl.href, {}, "static asset");
   assertStatus(asset, [200], "static asset");
 
-  const list = await get(`${settings.web}/list`, {}, "list page");
-  assertStatus(list, [200], "list page");
+  const listHtml = await fetchHtmlWithDegradedRetry(
+    get,
+    `${settings.web}/list`,
+    "list page",
+    degradedOptions,
+  );
+  assertWeakPublicListShell(listHtml, "list page");
 
   const legacyImport = await get(
     `${settings.web}/api/admin/import/legacy`,
@@ -325,7 +425,7 @@ export async function runSmoke({
   assertStatus(invalidMethod, [405], "invalid method probe");
 
   console.log(
-    "[smoke-cloudflare] OK (health convergence, web, assets, list, legacy import guard, auth, cron admin guard, deep health auth, DTO, 404, method)",
+    "[smoke-cloudflare] OK (health convergence, web, assets, list shell, top shell, legacy import guard, auth, cron admin guard, deep health auth, DTO, 404, method)",
   );
   return { commit: settings.commit };
 }

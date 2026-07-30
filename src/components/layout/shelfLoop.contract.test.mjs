@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [shelf, globals, home] = await Promise.all([
+const [shelf, globals, mobilePublic, home] = await Promise.all([
   readFile(new URL("./Shelf.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../styles/globals.css", import.meta.url), "utf8"),
+  readFile(new URL("../../styles/mobile-public.css", import.meta.url), "utf8"),
   readFile(
     new URL("../../../app/(public)/page.tsx", import.meta.url),
     "utf8",
@@ -61,6 +62,21 @@ test("loop + mobile 2行はscroll-snapを無効化する", () => {
   assert.match(
     globals,
     /\.fn-shelf\[data-loop="true"\]\[data-mobile-rows="2"\][\s\S]*?scroll-snap-type:\s*none/,
+  );
+});
+
+test("mobile-publicはloop棚の2行グリッドを壊さない", () => {
+  assert.doesNotMatch(
+    mobilePublic,
+    /\.fn-shelf\[data-loop="true"\][\s\S]*?display:\s*block/,
+  );
+  assert.match(
+    mobilePublic,
+    /\.fn-shelf:not\(\[data-mobile-rows="2"\]\)[\s\S]*?grid-auto-columns:\s*min\(82vw,\s*280px\)/,
+  );
+  assert.doesNotMatch(
+    mobilePublic,
+    /\.fn-shelf\[data-density="compact"\]\s*\{[\s\S]*?grid-auto-columns:\s*minmax\(104px,\s*32vw\)/,
   );
 });
 

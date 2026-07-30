@@ -798,10 +798,16 @@ function smokeFetch(commit, { mismatchService, staleCommitResponses = {} } = {})
     const url = new URL(input);
     const method = init.method ?? "GET";
     if (url.hostname === "flamenode.example.com" && url.pathname === "/" && method === "GET") {
-      return new Response('<script src="/_next/static/app.js"></script>', { status: 200 });
+      return new Response(
+        '<script src="/_next/static/app.js"></script><section aria-labelledby="sec-latest"><h2 id="sec-latest">新着アップロード</h2><div class="fn-shelf"></div></section>',
+        { status: 200 },
+      );
     }
     if (url.hostname === "flamenode.example.com" && url.pathname === "/list" && method === "GET") {
-      return new Response("list", { status: 200 });
+      return new Response(
+        '<h1 class="fn-page-title">作品一覧</h1><p>0 works</p><form class="fn-list-toolbar"></form><div class="fn-empty"></div>',
+        { status: 200 },
+      );
     }
     if (url.pathname === "/_next/static/app.js") return new Response("asset", { status: 200 });
     if (url.pathname === "/api/admin/import/legacy" && method === "POST") {

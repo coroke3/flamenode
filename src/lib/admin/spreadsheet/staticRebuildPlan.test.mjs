@@ -30,6 +30,9 @@ test("videosは詳細を常に再生成し、カード・visibilityの意味あ�
       "video:video-1",
       "random_video_pool:global",
       "youtube_related_blocklist:global",
+      "list_recent:global",
+      "list_popular:global",
+      "search_index:global",
     ],
   );
 
@@ -62,6 +65,9 @@ test("videosは詳細を常に再生成し、カード・visibilityの意味あ�
       "video:video-1",
       "random_video_pool:global",
       "youtube_related_blocklist:global",
+      "list_recent:global",
+      "list_popular:global",
+      "search_index:global",
     ],
   );
 });

@@ -124,6 +124,16 @@ requireMatch(
   /@media\s*\(max-width:\s*900px\)[\s\S]*?--header-h:\s*50px/,
   "スマートフォンの固定ヘッダー高が50pxではありません。",
 );
+forbidMatch(
+  "src/styles/mobile-public.css",
+  /\.fn-shelf\[data-loop="true"\][\s\S]*?display:\s*block/,
+  "mobile-publicがloop棚をdisplay:blockへ落として2行グリッドを壊しています。",
+);
+requireMatch(
+  "src/styles/mobile-public.css",
+  /\.fn-shelf:not\(\[data-mobile-rows="2"\]\)[\s\S]*?grid-auto-columns:\s*min\(82vw,\s*280px\)/,
+  "mobile-publicの82vw列幅が2行Shelfへ上書きされています。",
+);
 requireMatch(
   "src/components/layout/PublicHeader.module.css",
   /@media\s*\(max-width:\s*900px\)[\s\S]*?\.header\s+\.bar\s*\{[^}]*height:\s*calc\(var\(--header-h,\s*50px\)\s*-\s*1px\)/,
@@ -362,15 +372,15 @@ requireMatch(
 );
 
 requireMatch(
-  "src/components/video/useMobileVideoGeometry.ts",
+  "src/components/video/mobileVideoGeometry.ts",
   /--fn-mobile-player-bottom/,
-  "モバイルプレイヤー幾何フックにプレイヤー下端 CSS 変数の更新がありません。",
+  "モバイルプレイヤー幾何にプレイヤー下端 CSS 変数の更新がありません。",
 );
 
 requireMatch(
-  "src/components/video/useMobileVideoGeometry.ts",
+  "src/components/video/mobileVideoGeometry.ts",
   /--fn-mobile-player-left/,
-  "モバイルプレイヤー幾何フックにプレイヤー左端 CSS 変数の更新がありません。",
+  "モバイルプレイヤー幾何にプレイヤー左端 CSS 変数の更新がありません。",
 );
 
 requireAll("src/components/video/FixedVideoPlayerFrame.module.css", [

@@ -36,7 +36,7 @@ const DISCORD_GLOBAL_COOLDOWN_KEY = "discord:global";
 const DISCORD_COOLDOWN_KV_PREFIX = "external-api:discord:cooldown:";
 /** 6件 × 未cache時最大2 request。inline retryは行わない。 */
 export const MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN = 12;
-/** 2 writes/run × 288 runs/day = 最大576 writes/day。KV Freeの余裕を残す。 */
+/** 2 writes/run。Queue wake 駆動 + 毎時0分 Recovery。KV Free の余裕を残す。 */
 export const MAX_DISCORD_DM_KV_WRITES_PER_RUN = 2;
 /** 429発生時だけ共有cooldownを保存する。通常runでは0 write。 */
 export const MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN = 2;

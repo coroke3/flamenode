@@ -56,7 +56,7 @@ export function getNotificationFailureGuidance(input: {
     return {
       summary: "次の dispatcher 実行を待っています。",
       nextSteps: [
-        "通常は5分以内に processing / sent へ進むか確認する",
+        "Queue wake で即時起動する。未処理なら毎時0分の fast-jobs Recovery Cron を待つ",
         "長時間 pending の場合は Worker cron と D1 接続を確認する",
       ],
     };
@@ -66,8 +66,8 @@ export function getNotificationFailureGuidance(input: {
     return {
       summary: "送信処理中です。配送リースは5分で失効します。",
       nextSteps: [
-        "リース期限超過後は次の5分cronで自動回収される",
-        "10分以上 processing のままなら Worker と D1 を確認する",
+        "配送リース（5分）超過後は毎時0分の fast-jobs Recovery Cron で自動回収される",
+        "1時間以上 processing のままなら Worker と D1 を確認する",
       ],
     };
   }

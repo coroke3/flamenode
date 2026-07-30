@@ -11,8 +11,10 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.match(source, /handleStaticRebuildWakeQueue/);
   assert.match(source, /runContentJobsRecovery/);
   assert.match(source, /reconcileStaleQueue/);
+  assert.match(source, /ensureDeployGlobalRebuilds/);
   assert.match(source, /ensureYoutubeRelatedSharedInputsOnR2/);
   assert.match(source, /ensureUsersSharedInputsOnR2/);
+  assert.match(source, /deployGlobalRebuilds > 0/);
   assert.match(source, /shared_related_inputs_missing_on_r2/);
   assert.match(source, /shared_users_inputs_missing_on_r2/);
   assert.match(source, /CONTENT_JOBS_RECOVERY_MAX_TARGETS/);

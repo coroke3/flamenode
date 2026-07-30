@@ -1,7 +1,7 @@
 # External API Limits
 
 > Status: Active
-> Last verified: 2026-07-21
+> Last verified: 2026-07-31
 > Source of truth: `workers/shared/externalApi.ts`、`workers/youtube-sync/index.ts`、`workers/youtube-playlist-sync/index.ts`、`workers/notification-dispatcher/dispatch.ts`、`src/lib/media/externalImageProxy.ts`
 
 外部サービスのrate limit値をアプリ側で固定推測せず、Providerが返すquota・rate limit・Retry-Afterを優先する。全処理は1回のWorker invocation内で固定予算を持ち、無制限retry、無制限並列、全件再取得を禁止する。
@@ -10,7 +10,7 @@
 | --- | ---: | --- | --- |
 | YouTube Data API `videos.list` | 50 ID、通常1 request、最大2 quota units | 429/5xxは最大1回retry。quota系403はKVへ1時間cooldown | `fields`で必要列だけ取得。期限到来50件だけ選択 |
 | YouTube playlist / OAuth | 1実行最大12 external requests、mutation最大4 | quota予約後に実行。401時はtoken cacheを破棄し次回Cronで再取得 | OAuth tokenをisolate内で期限付き再利用。playlist responseは`fields`で縮小 |
-| Discord DM / Webhook | 通知6件、最大12 external requests、DM cache KV書込最大2 | rate headersとRetry-Afterを`next_attempt_at`へ反映。global 429は全routeへ適用 | DM channel IDをisolateへ全件、KVへ最大576件/dayの範囲で30日cacheし、通常配送を1 request化 |
+| Discord DM / Webhook | 通知6件、最大12 external requests、DM cache KV書込最大2 | rate headersとRetry-Afterを`next_attempt_at`へ反映。global 429は全routeへ適用 | DM channel IDをisolateへ全件、KVへ最大48件/dayの範囲で30日cacheし、通常配送を1 request化 |
 | Google Drive public image | requestごと最大1 upstream fetch | 失敗・Retry-Afterをnegative cacheへ保存しstaleを返す | 同一キーの同時missを1本へ集約。ETag/304再検証 |
 | YouTube thumbnail | requestごと最大1 upstream fetch | 失敗・Retry-Afterをnegative cacheへ保存しstaleを返す | 同一キーの同時missを1本へ集約。ETag/304再検証 |
 
@@ -20,7 +20,7 @@
 
 - `videos.list`は1 requestへ最大50 IDをまとめる。
 - 1 Cronで通常1 quota unit、retryが発生しても最大2 quota unitsとする。
-- 15分間隔のため通常96 units/day、全回で1回retryしても最大192 units/dayとなる。
+- 毎時7分の `sync-jobs` Cron（`7 * * * *`）1回あたり最大4 batch（通常4 quota units、retry含め最大8 units）。通常96 units/day、全回で1回retryしても最大192 units/dayとなる。
 - quota系403を受けた場合、同じCronや直後のCronで呼び続けない。
 - APIキー、quota error本文、URL queryをログへ出さない。
 - 再生リスト同期はOAuth access tokenをisolate内で期限付き再利用し、Cronごとのtoken endpoint呼出しを避ける。
@@ -34,7 +34,7 @@
 - `X-RateLimit-Global`、`X-RateLimit-Scope: global`、JSONの`global`を検出した場合、全Discord routeを停止する。
 - 429をその場でretryせず、通知outboxの次回実行時刻へ反映する。
 - global/route cooldownはWebhook URL等を含まない匿名化キーでKVへ最大2件/runだけ保存し、別isolateにも共有する。KV読取は1 invocation内でキーごとに1回へ集約する。
-- DM channel IDはisolate cacheへ必ず保存する。KVへのput/deleteは1実行最大2件とし、5分Cronで最大576 writes/dayへ抑える。
+- DM channel IDはisolate cacheへ必ず保存する。KVへのput/deleteは1実行最大2件とし、dispatch run あたりの上限で KV Free の余裕を残す（Recovery Cron は毎時0分の `fast-jobs` `0 * * * *`）。
 - KV予算を使い切った場合も通知配送は継続し、そのisolate内ではchannel IDを再利用する。
 - 401/403/404は同じ認証・宛先のまま繰り返さずdead-letterへ送る。ただしcache済みDM channelの404だけはcacheを削除して次回再作成する。
 - `welcome_account` DM と X ID 申請/拒否の `discord_webhook` も同一の通知6件・外部fetch予算を共有する。
