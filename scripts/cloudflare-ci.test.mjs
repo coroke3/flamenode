@@ -805,7 +805,7 @@ function smokeFetch(commit, { mismatchService, staleCommitResponses = {} } = {})
     }
     if (url.hostname === "flamenode.example.com" && url.pathname === "/list" && method === "GET") {
       return new Response(
-        '<h1 class="fn-page-title">作品一覧</h1><p>0 works</p><form class="fn-list-toolbar"></form><div class="fn-empty"></div>',
+        '<h1 class="fn-page-title">作品一覧</h1><p>0<!-- --> works</p><form class="fn-list-toolbar"></form><div class="fn-empty"></div>',
         { status: 200 },
       );
     }

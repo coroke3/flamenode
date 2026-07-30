@@ -138,7 +138,7 @@ export default async function ListPage({
           <div className="fn-page-head-main">
             <span className="fn-eyebrow">ARCHIVE</span>
             <h1 className="fn-display fn-page-title">作品一覧</h1>
-            <p className="fn-page-lead">{total.toLocaleString()} works</p>
+            <p className="fn-page-lead">{`${total.toLocaleString()} works`}</p>
           </div>
           <div className="fn-cr-controls" aria-label="表示形式">
             <div className="fn-cr-segment fn-cr-segment--icon-only">

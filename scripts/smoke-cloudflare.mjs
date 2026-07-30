@@ -173,7 +173,9 @@ function assertWeakPublicListShell(html, label) {
   if (!html.includes("作品一覧")) {
     throw new Error(`${label}: missing list page title marker.`);
   }
-  if (!/\d[\d,]* works/.test(html)) {
+  // Next.js は隣接テキストに `<!-- -->` を挟むことがあるため、コメントを除いて照合する。
+  const listText = html.replace(/<!--[\s\S]*?-->/g, "");
+  if (!/\d[\d,]*\s*works/.test(listText)) {
     throw new Error(`${label}: missing works count marker.`);
   }
   if (html.includes("簡易表示:")) {
