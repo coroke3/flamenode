@@ -9,6 +9,11 @@ const SEEK = "flamenode:seek";
 export const PLAYER_TIME = "flamenode:player-time";
 
 export const YOUTUBE_PLAYER_ORIGIN = "https://www.youtube.com";
+export const YOUTUBE_PLAYER_IFRAME_ID = "flamenode-youtube-player";
+
+export function getYoutubePlayerListeningId(iframe: HTMLIFrameElement): string {
+  return iframe.id || YOUTUBE_PLAYER_IFRAME_ID;
+}
 
 export function buildYoutubePlayerCommand(
   func: string,
@@ -83,7 +88,11 @@ export function startYoutubePlayerListening(
   targetOrigin = YOUTUBE_PLAYER_ORIGIN,
 ): void {
   iframe.contentWindow?.postMessage(
-    JSON.stringify({ event: "listening", id: 1, channel: "widget" }),
+    JSON.stringify({
+      event: "listening",
+      id: getYoutubePlayerListeningId(iframe),
+      channel: "widget",
+    }),
     targetOrigin,
   );
 }

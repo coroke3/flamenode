@@ -12,7 +12,21 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.match(source, /runContentJobsRecovery/);
   assert.match(source, /reconcileStaleQueue/);
   assert.match(source, /ensureYoutubeRelatedSharedInputsOnR2/);
+  assert.match(source, /ensureUsersSharedInputsOnR2/);
   assert.match(source, /shared_related_inputs_missing_on_r2/);
+  assert.match(source, /shared_users_inputs_missing_on_r2/);
+  assert.match(source, /CONTENT_JOBS_RECOVERY_MAX_TARGETS/);
+  assert.match(source, /processStaticRebuildQueue\(rebuildEnv, signal\)/);
+  assert.match(
+    source,
+    /CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED/,
+  );
+  assert.match(source, /staticRebuildHasMore \|\|= Boolean\(result\.hasMore\)/);
+  assert.match(source, /result\.skipped \?\? 0\) === 0/);
+  assert.doesNotMatch(
+    source,
+    /if \(!result\.hasMore \|\| result\.processed === 0\)/,
+  );
   assert.match(source, /STATIC_REBUILD_WAKE_QUEUE/);
   assert.match(source, /staticRebuildHasMore/);
   assert.match(source, /source:\s*"recovery"/);

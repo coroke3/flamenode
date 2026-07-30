@@ -61,7 +61,7 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
   );
   assert.match(loaderSource, /degradedFetcher/);
   assert.doesNotMatch(loaderSource, /getOperationMode/);
-  assert.doesNotMatch(loaderSource, /return "normal"/);
+  assert.match(loaderSource, /resolvePublicMissEnqueuePriority/);
 });
 
 test("loader の R2 ヒット分岐は getDatabase を呼ばない", () => {
@@ -133,4 +133,62 @@ test("popular list loader wires degraded fallback", () => {
 test("list loaders support old sort via recent payload ordering", () => {
   assert.match(loaderSource, /sortRecentPayloadForList/);
   assert.match(loaderSource, /sort\?: "new" \| "old" \| "score"/);
+});
+
+test("resolvePublicJsonMiss は公開 miss を high 優先度で enqueue する", () => {
+  assert.match(loaderSource, /PUBLIC_MISS_HIGH_PRIORITY_TARGET_TYPES/);
+  assert.match(loaderSource, /resolvePublicMissEnqueuePriority/);
+  assert.match(loaderSource, /"user"/);
+  assert.match(loaderSource, /"users_index"/);
+  assert.match(loaderSource, /"list_recent"/);
+  assert.match(loaderSource, /"list_popular"/);
+  assert.match(loaderSource, /"search_index"/);
+  assert.match(
+    loaderSource,
+    /const priority = resolvePublicMissEnqueuePriority\(\s*strategy,\s*options\.targetType,/,
+  );
+});
+
+test("degraded user profile は works/collabs の total を COUNT で返す", async () => {
+  const degradedSource = await readFile(
+    new URL("./degradedQueries.ts", import.meta.url),
+    "utf8",
+  );
+  const profileFn = degradedSource.slice(
+    degradedSource.indexOf("export async function fetchDegradedUserProfilePayload"),
+    degradedSource.indexOf("export async function fetchDegradedRulesPayload"),
+  );
+  assert.match(profileFn, /count\(\*\)/);
+  assert.match(profileFn, /DEGRADED_USER_COLLABS_LIMIT/);
+  assert.match(profileFn, /collabMemberExists/);
+  assert.doesNotMatch(profileFn, /total: 0,\s*\n\s*items: \[\]/);
+});
+
+test("list loaders use static pool size for shouldUseStaticCollection", () => {
+  const recentBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticRecentVideosPage"),
+    loaderSource.indexOf("export async function loadStaticPopularVideosPage"),
+  );
+  assert.match(recentBlock, /const poolSize = Array\.isArray\(result\.data\?\.items\)/);
+  assert.match(recentBlock, /shouldUseStaticCollection\(result\.strategy, poolSize\)/);
+  assert.doesNotMatch(
+    recentBlock,
+    /shouldUseStaticCollection\(result\.strategy, normalizedPage\?\.videos\.length/,
+  );
+  assert.doesNotMatch(recentBlock, /const itemCount = normalizedPage\?\.videos\.length/);
+
+  const popularBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticPopularVideosPage"),
+    loaderSource.indexOf("export async function loadStaticSearchVideosPage"),
+  );
+  assert.match(popularBlock, /const poolSize = Array\.isArray\(result\.data\?\.items\)/);
+  assert.match(popularBlock, /shouldUseStaticCollection\(result\.strategy, poolSize\)/);
+
+  const searchBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticSearchVideosPage"),
+    loaderSource.indexOf("export async function loadPublicEventVideosPage"),
+  );
+  assert.match(searchBlock, /const poolSize = Array\.isArray\(payload\?\.videos\)/);
+  assert.match(searchBlock, /shouldUseStaticCollection\(result\.strategy, poolSize\)/);
+  assert.doesNotMatch(searchBlock, /const itemCount = normalizedPage\?\.videos\.length/);
 });

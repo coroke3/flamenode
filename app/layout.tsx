@@ -1,8 +1,8 @@
 import * as React from "react";
 import type { Metadata } from "next";
 import {
-  Hanken_Grotesk,
   JetBrains_Mono,
+  Jost,
   Manrope,
   Noto_Sans_JP,
 } from "next/font/google";
@@ -20,10 +20,10 @@ import {
   serializeJsonLd,
 } from "@/lib/seo";
 
-const hankenGrotesk = Hanken_Grotesk({
+const jost = Jost({
   subsets: ["latin", "latin-ext"],
   weight: ["400", "500", "600", "700", "800", "900"],
-  variable: "--font-hanken",
+  variable: "--font-jost",
   display: "swap",
 });
 
@@ -56,7 +56,7 @@ const flameNodeSans = localFont({
 });
 
 const redesignFontClassName = [
-  hankenGrotesk.variable,
+  jost.variable,
   manrope.variable,
   notoSansJp.variable,
   jetbrainsMono.variable,

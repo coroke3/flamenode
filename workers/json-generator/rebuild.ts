@@ -75,6 +75,7 @@ import {
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
 import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
+import { shuffledCopy } from "../../src/lib/utils/shuffle.ts";
 
 const STATIC_USER_WORKS_PAGE_SIZE = 24;
 const STATIC_USER_COLLABS_PAGE_SIZE = 24;
@@ -96,6 +97,7 @@ export const PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE = 90;
 export const PUBLIC_STAFF_MAX_PER_EVENT = 20;
 export const TOP_LATEST_LIMIT = 100;
 export const TOP_NOSTALGIA_LIMIT = 20;
+export const TOP_NOSTALGIA_POOL = 200;
 
 function unixYearsAgo(nowSec: number, years: number): number {
   const date = new Date(nowSec * 1000);
@@ -111,7 +113,27 @@ const EVENT_INDEX_COLUMNS = `
   visibility_status, created_at
 `;
 
-export const POPULAR_LIST_LIMIT = 60;
+/** COUNTABLE 公開作品を list / search-index の items に載せる上限。 */
+export const STATIC_LIST_MAX_ITEMS = 5000;
+export const RECENT_LIST_LIMIT = STATIC_LIST_MAX_ITEMS;
+export const POPULAR_LIST_LIMIT = STATIC_LIST_MAX_ITEMS;
+export const SEARCH_INDEX_VIDEO_LIMIT = STATIC_LIST_MAX_ITEMS;
+export const STATIC_LIST_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
+
+export function capStaticListTotal(counted: number, items: readonly unknown[]): number {
+  const safeCounted =
+    Number.isFinite(counted) && counted >= 0 ? counted : items.length;
+  return Math.min(safeCounted, items.length);
+}
+
+function assertStaticListObjectSize(key: string, body: unknown): void {
+  const byteLength = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+  if (byteLength > STATIC_LIST_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `${key} exceeds size limit (${byteLength} > ${STATIC_LIST_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+}
 
 const STATIC_LIST_VIDEO_SELECT = `
   v.id, v.title, v.youtube_video_id,
@@ -454,8 +476,8 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        WHERE v.visibility_status = 'public'
          AND v.scheduled_time IS NOT NULL
          AND v.scheduled_time <= ?
-       ORDER BY RANDOM()
-       LIMIT ${TOP_NOSTALGIA_LIMIT}`,
+       ORDER BY scheduled_time ASC, id ASC
+       LIMIT ${TOP_NOSTALGIA_POOL}`,
     ).bind(nostalgiaCutoff).all(),
     env.DB.prepare(
       `SELECT ${EVENT_INDEX_COLUMNS}
@@ -536,7 +558,9 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     generated_at: now,
     recommended: recommended.results ?? [],
     latest: latest.results ?? [],
-    nostalgic: nostalgic.results ?? [],
+    nostalgic: shuffledCopy(
+      Array.isArray(nostalgic.results) ? nostalgic.results : [],
+    ).slice(0, TOP_NOSTALGIA_LIMIT),
     items: latest.results ?? [],
     active_events: activeEventItems,
     latest_events: latestEventItems,
@@ -583,18 +607,25 @@ async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void
      LEFT JOIN events e
        ON e.id = v.primary_event_id AND e.visibility_status = 'public'
      WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-     ORDER BY v.scheduled_time DESC LIMIT 120`,
-    ).all(),
+     ORDER BY v.scheduled_time DESC
+     LIMIT ?`,
+    )
+      .bind(RECENT_LIST_LIMIT)
+      .all(),
     env.DB.prepare(
       `SELECT COUNT(*) AS c FROM videos AS v WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}`,
     ).first<{ c?: number }>(),
   ]);
   throwIfAborted(signal);
-  await putJson(env, "list/recent.json", {
+  const items = rows.results ?? [];
+  const counted = Number(totalRow?.c ?? items.length);
+  const payload = {
     generated_at: Math.floor(Date.now() / 1000),
-    total: Number(totalRow?.c ?? rows.results?.length ?? 0),
-    items: rows.results ?? [],
-  }, "public, max-age=120, stale-while-revalidate=600", { targetType: "list_recent", targetId: "global" }, signal);
+    total: capStaticListTotal(counted, items),
+    items,
+  };
+  assertStaticListObjectSize("list/recent.json", payload);
+  await putJson(env, "list/recent.json", payload, "public, max-age=120, stale-while-revalidate=600", { targetType: "list_recent", targetId: "global" }, signal);
 }
 
 async function rebuildListPopular(env: Env, signal?: RebuildSignal): Promise<void> {
@@ -614,11 +645,15 @@ async function rebuildListPopular(env: Env, signal?: RebuildSignal): Promise<voi
     ).first<{ c?: number }>(),
   ]);
   throwIfAborted(signal);
-  await putJson(env, "list/popular.json", {
+  const items = rows.results ?? [];
+  const counted = Number(totalRow?.c ?? items.length);
+  const payload = {
     generated_at: Math.floor(Date.now() / 1000),
-    total: Number(totalRow?.c ?? rows.results?.length ?? 0),
-    items: rows.results ?? [],
-  }, "public, max-age=300, stale-while-revalidate=1800", { targetType: "list_popular", targetId: "global" }, signal);
+    total: capStaticListTotal(counted, items),
+    items,
+  };
+  assertStaticListObjectSize("list/popular.json", payload);
+  await putJson(env, "list/popular.json", payload, "public, max-age=300, stale-while-revalidate=1800", { targetType: "list_popular", targetId: "global" }, signal);
 }
 
 async function rebuildEventsIndex(env: Env, signal?: RebuildSignal): Promise<void> {
@@ -859,20 +894,26 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
   throwIfAborted(signal);
   const videos = await env.DB.prepare(
     `SELECT id, title, creator_display_name, creator_x_user_id, youtube_video_id
-     FROM videos WHERE visibility_status = 'public'
-     ORDER BY updated_at DESC LIMIT 500`,
-  ).all();
+     FROM videos AS v
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+     ORDER BY v.updated_at DESC
+     LIMIT ?`,
+  )
+    .bind(SEARCH_INDEX_VIDEO_LIMIT)
+    .all();
   const users = await env.DB.prepare(
     `SELECT id, x_name FROM x_users
      WHERE approval_status = 'approved'
      ORDER BY id ASC LIMIT 500`,
   ).all();
   throwIfAborted(signal);
-  await putJson(env, "search-index-lite.json", {
+  const payload = {
     generated_at: Math.floor(Date.now() / 1000),
     videos: videos.results ?? [],
     users: users.results ?? [],
-  }, "public, max-age=600, stale-while-revalidate=3600", { targetType: "search_index", targetId: "global" }, signal);
+  };
+  assertStaticListObjectSize("search-index-lite.json", payload);
+  await putJson(env, "search-index-lite.json", payload, "public, max-age=600, stale-while-revalidate=3600", { targetType: "search_index", targetId: "global" }, signal);
 }
 
 async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): Promise<void> {

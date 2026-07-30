@@ -53,13 +53,11 @@ export function normalizeStaticRecentVideoPage(
   const normalized = payload.items
     .map(normalizeStaticRecentVideoRow)
     .filter((row): row is StaticRecentVideo => row !== null);
-  const total = normalizeCount(payload.total) ?? normalized.length;
+  const rawTotal = normalizeCount(payload.total) ?? normalized.length;
+  const total = Math.min(rawTotal, normalized.length);
   const pageNum = Math.max(1, Math.floor(page));
   const size = Math.max(1, Math.floor(pageSize));
   const offset = (pageNum - 1) * size;
-  if (offset >= normalized.length && total > normalized.length) {
-    return null;
-  }
   return {
     videos: normalized.slice(offset, offset + size),
     total,

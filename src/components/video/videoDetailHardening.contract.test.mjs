@@ -84,6 +84,32 @@ test("モバイルgeometryはviewport scrollも追従する", () => {
   );
 });
 
+test("モバイルgeometryは未変化時にCSS変数を書き換えない", () => {
+  assert.match(
+    geometrySource,
+    /applyMobileVideoGeometryCssVars/,
+  );
+  assert.match(
+    geometrySource,
+    /lastCssVars/,
+  );
+});
+
+test("モバイルgeometryはキーボード表示中にプレイヤー寸法を凍結する", () => {
+  assert.match(
+    geometrySource,
+    /lastNonKeyboardPlayerSize/,
+  );
+  assert.match(
+    geometrySource,
+    /scheduleFromScroll/,
+  );
+  assert.doesNotMatch(
+    geometrySource,
+    /keyboardInset\s*>\s*0[\s\S]*constrainByHeight/,
+  );
+});
+
 test("メンバーテーブルは必要以上の固定幅を持たずtrをgrid化しない", () => {
   const mobileBlock =
     memberCss.match(

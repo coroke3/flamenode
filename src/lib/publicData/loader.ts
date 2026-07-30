@@ -200,6 +200,23 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
   }
 }
 
+const PUBLIC_MISS_HIGH_PRIORITY_TARGET_TYPES = new Set<StaticRebuildTargetType>([
+  "user",
+  "users_index",
+  "list_recent",
+  "list_popular",
+  "search_index",
+]);
+
+function resolvePublicMissEnqueuePriority(
+  strategy: PublicDataStrategy,
+  targetType: StaticRebuildTargetType,
+): "high" | "normal" {
+  if (strategy === "static_json_only") return "high";
+  if (PUBLIC_MISS_HIGH_PRIORITY_TARGET_TYPES.has(targetType)) return "high";
+  return "normal";
+}
+
 async function resolvePublicJsonMiss<T = never>(
   options: PublicJsonLoadOptions<T>,
   missOptions?: ResolvePublicJsonMissOptions,
@@ -236,7 +253,10 @@ async function resolvePublicJsonMiss<T = never>(
     }
 
     if (targetExists) {
-      const priority = strategy === "static_json_only" ? "high" : "normal";
+      const priority = resolvePublicMissEnqueuePriority(
+        strategy,
+        options.targetType,
+      );
       try {
         await enqueueStaticRebuild(db, {
           targetType: options.targetType,
@@ -496,6 +516,7 @@ export async function loadStaticRecentVideosPage(params: {
     },
   };
   let result = await loadPublicJson<StaticRecentVideosPayload>(loadOptions);
+  const poolSize = Array.isArray(result.data?.items) ? result.data.items.length : 0;
   const payloadForNormalize =
     result.data && sort === "old"
       ? sortRecentPayloadForList(result.data, sort)
@@ -507,11 +528,10 @@ export async function loadStaticRecentVideosPage(params: {
         params.pageSize,
       )
     : null;
-  const itemCount = normalizedPage?.videos.length ?? 0;
   if (
     normalizedPage &&
     result.mode !== "degraded_d1" &&
-    !shouldUseStaticCollection(result.strategy, itemCount)
+    !shouldUseStaticCollection(result.strategy, poolSize)
   ) {
     result = await resolvePublicJsonMiss(loadOptions, {
       skipStaticMissRecord: true,
@@ -531,7 +551,7 @@ export async function loadStaticRecentVideosPage(params: {
   const page =
     normalizedPage &&
     (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, itemCount))
+      shouldUseStaticCollection(result.strategy, poolSize))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -562,14 +582,14 @@ export async function loadStaticPopularVideosPage(params: {
     },
   };
   let result = await loadPublicJson<StaticPopularVideosPayload>(loadOptions);
+  const poolSize = Array.isArray(result.data?.items) ? result.data.items.length : 0;
   const normalizedPage = result.data
     ? normalizeStaticPopularVideoPage(result.data, params.page, params.pageSize)
     : null;
-  const itemCount = normalizedPage?.videos.length ?? 0;
   if (
     normalizedPage &&
     result.mode !== "degraded_d1" &&
-    !shouldUseStaticCollection(result.strategy, itemCount)
+    !shouldUseStaticCollection(result.strategy, poolSize)
   ) {
     result = await resolvePublicJsonMiss(loadOptions, {
       skipStaticMissRecord: true,
@@ -586,7 +606,7 @@ export async function loadStaticPopularVideosPage(params: {
   const page =
     normalizedPage &&
     (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, itemCount))
+      shouldUseStaticCollection(result.strategy, poolSize))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -634,6 +654,7 @@ export async function loadStaticSearchVideosPage(params: {
     return { ...result, data: degradedPage, page: degradedPage };
   }
   const payload = result.data ? normalizeStaticSearchIndexPayload(result.data) : null;
+  const poolSize = Array.isArray(payload?.videos) ? payload.videos.length : 0;
   const normalizedPage = payload
     ? searchStaticIndexVideos({
         payload,
@@ -643,11 +664,10 @@ export async function loadStaticSearchVideosPage(params: {
         pageSize: params.pageSize,
       })
     : null;
-  const itemCount = normalizedPage?.videos.length ?? 0;
   if (
     normalizedPage &&
     result.mode !== "degraded_d1" &&
-    !shouldUseStaticCollection(result.strategy, itemCount)
+    !shouldUseStaticCollection(result.strategy, poolSize)
   ) {
     result = await resolvePublicJsonMiss(loadOptions, {
       skipStaticMissRecord: true,
@@ -669,7 +689,7 @@ export async function loadStaticSearchVideosPage(params: {
   const page =
     normalizedPage &&
     (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, itemCount))
+      shouldUseStaticCollection(result.strategy, poolSize))
       ? normalizedPage
       : null;
   return { ...result, data: page, page };

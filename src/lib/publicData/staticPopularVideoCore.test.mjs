@@ -25,3 +25,22 @@ test("normalizeStaticPopularVideoPage paginates score-sorted items", () => {
   assert.equal(page?.videos[0]?.primary_event_title, null);
   assert.equal(page?.total, 3);
 });
+
+test("total は items 件数を超えない", () => {
+  const page = normalizeStaticPopularVideoPage(
+    {
+      generated_at: 100,
+      total: 613,
+      items: Array.from({ length: 120 }, (_, index) => ({
+        id: `v${index}`,
+        title: `作品${index}`,
+        creator_display_name: "A",
+      })),
+    },
+    6,
+    24,
+  );
+  assert.ok(page);
+  assert.equal(page.total, 120);
+  assert.equal(page.videos.length, 0);
+});

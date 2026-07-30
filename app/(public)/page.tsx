@@ -143,7 +143,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
             <Shelf
               ariaLabel="今週のピックアップ"
               loop
-              mobileRows={1}
               autoScrollDirection="left"
             >
               {randomizedRecommended.map((video, index) => (
@@ -169,7 +168,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
             <Shelf
               ariaLabel="新着アップロード"
               loop
-              mobileRows={1}
               autoScrollDirection="right"
             >
               {latestLoopItems.map((video, index) => (
@@ -199,7 +197,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
               <Shelf
                 ariaLabel="懐かしの映像"
                 loop
-                mobileRows={1}
                 autoScrollDirection="left"
               >
                 {randomizedNostalgic.map((video, index) => (

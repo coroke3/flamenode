@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   PLAYER_TIME,
+  YOUTUBE_PLAYER_IFRAME_ID,
   buildYoutubePlayerCommand,
+  getYoutubePlayerListeningId,
   parseYoutubePlayerMessage,
   publishPlayerTime,
   requestYoutubeCurrentTime,
@@ -58,7 +60,40 @@ test("requestYoutubeCurrentTime: iframe へ getCurrentTime を postMessage す�
   });
 });
 
-test("startYoutubePlayerListening: listening イベントを送る", () => {
+test("getYoutubePlayerListeningId: iframe.id を優先し、なければ既定 id を返す", () => {
+  assert.equal(
+    getYoutubePlayerListeningId({ id: "custom-player" }),
+    "custom-player",
+  );
+  assert.equal(getYoutubePlayerListeningId({ id: "" }), YOUTUBE_PLAYER_IFRAME_ID);
+  assert.equal(
+    getYoutubePlayerListeningId({ id: undefined }),
+    YOUTUBE_PLAYER_IFRAME_ID,
+  );
+});
+
+test("startYoutubePlayerListening: listening イベントを iframe.id で送る", () => {
+  const messages = [];
+  const iframe = {
+    id: "custom-player",
+    contentWindow: {
+      postMessage(data, targetOrigin) {
+        messages.push({ data, targetOrigin });
+      },
+    },
+  };
+
+  startYoutubePlayerListening(iframe);
+
+  assert.equal(messages.length, 1);
+  assert.deepEqual(JSON.parse(messages[0].data), {
+    event: "listening",
+    id: "custom-player",
+    channel: "widget",
+  });
+});
+
+test("startYoutubePlayerListening: iframe.id がなければ既定 id を使う", () => {
   const messages = [];
   const iframe = {
     contentWindow: {
@@ -73,7 +108,7 @@ test("startYoutubePlayerListening: listening イベントを送る", () => {
   assert.equal(messages.length, 1);
   assert.deepEqual(JSON.parse(messages[0].data), {
     event: "listening",
-    id: 1,
+    id: YOUTUBE_PLAYER_IFRAME_ID,
     channel: "widget",
   });
 });

@@ -9,6 +9,11 @@ import {
   POPULAR_LIST_LIMIT,
   PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE,
   PUBLIC_STAFF_MAX_PER_EVENT,
+  RECENT_LIST_LIMIT,
+  SEARCH_INDEX_VIDEO_LIMIT,
+  STATIC_LIST_MAX_ITEMS,
+  STATIC_LIST_MAX_OBJECT_BYTES,
+  capStaticListTotal,
   rebuildTarget,
   removeTrackedArtifacts,
 } from "./rebuild.ts";
@@ -272,7 +277,10 @@ test("list_popularはrecent相当の公開カード列とtotalを返す", () => 
     /async function rebuildListPopular[\s\S]*?(?=async function )/,
   )?.[0];
   assert.ok(popularFn);
-  assert.equal(POPULAR_LIST_LIMIT, 60);
+  assert.equal(STATIC_LIST_MAX_ITEMS, 5000);
+  assert.equal(RECENT_LIST_LIMIT, STATIC_LIST_MAX_ITEMS);
+  assert.equal(POPULAR_LIST_LIMIT, STATIC_LIST_MAX_ITEMS);
+  assert.equal(SEARCH_INDEX_VIDEO_LIMIT, STATIC_LIST_MAX_ITEMS);
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*creator_x_user_id/);
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*primary_event_title/);
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*visibility_status AS status/);
@@ -281,7 +289,7 @@ test("list_popularはrecent相当の公開カード列とtotalを返す", () => 
     popularFn,
     /SELECT COUNT\(\*\) AS c FROM videos AS v WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/,
   );
-  assert.match(popularFn, /total: Number\(totalRow/);
+  assert.match(popularFn, /total: capStaticListTotal\(counted, items\)/);
 });
 
 test("list_recentもCOUNTABLE公開条件でPVSFサマリーを除外する", () => {
@@ -294,6 +302,36 @@ test("list_recentもCOUNTABLE公開条件でPVSFサマリーを除外する", ()
     recentFn,
     /SELECT COUNT\(\*\) AS c FROM videos AS v WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/,
   );
+  assert.match(recentFn, /LIMIT \?/);
+  assert.match(recentFn, /\.bind\(RECENT_LIST_LIMIT\)/);
+  assert.match(recentFn, /total: capStaticListTotal\(counted, items\)/);
+  assert.match(recentFn, /assertStaticListObjectSize\("list\/recent\.json"/);
+});
+
+test("capStaticListTotal rejects non-finite and negative totals", () => {
+  assert.equal(capStaticListTotal(100, [{ id: "v1" }, { id: "v2" }]), 2);
+  assert.equal(capStaticListTotal(Number.NaN, [{ id: "v1" }]), 1);
+  assert.equal(capStaticListTotal(Number.POSITIVE_INFINITY, [{ id: "v1" }]), 1);
+  assert.equal(capStaticListTotal(-5, [{ id: "v1" }, { id: "v2" }]), 2);
+});
+
+test("list artifacts enforce STATIC_LIST_MAX_OBJECT_BYTES before put", () => {
+  assert.equal(STATIC_LIST_MAX_OBJECT_BYTES, 8 * 1024 * 1024);
+  assert.match(source, /assertStaticListObjectSize\("list\/recent\.json"/);
+  assert.match(source, /assertStaticListObjectSize\("list\/popular\.json"/);
+  assert.match(source, /assertStaticListObjectSize\("search-index-lite\.json"/);
+});
+
+test("search-index-liteのvideosはCOUNTABLE条件でSTATIC_LIST_MAX_ITEMS件まで取得する", () => {
+  const searchFn = source.match(
+    /async function rebuildSearchIndexLite[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(searchFn);
+  assert.match(searchFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
+  assert.match(searchFn, /ORDER BY v\.updated_at DESC/);
+  assert.match(searchFn, /LIMIT \?/);
+  assert.match(searchFn, /\.bind\(SEARCH_INDEX_VIDEO_LIMIT\)/);
+  assert.match(searchFn, /ORDER BY id ASC LIMIT 500/);
 });
 
 test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", () => {
@@ -360,17 +398,25 @@ test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
   );
 });
 
-test("rebuildTopは新着100件と3年以上前のランダム20件をtop JSONへ保存する", () => {
+test("rebuildTopは新着100件と3年以上前の古い順プールからシャッフル抽出した20件をtop JSONへ保存する", () => {
   const topFn = source.match(
     /async function rebuildTop[\s\S]*?(?=async function )/,
   )?.[0];
   assert.ok(topFn);
   assert.match(source, /TOP_LATEST_LIMIT = 100/);
   assert.match(source, /TOP_NOSTALGIA_LIMIT = 20/);
+  assert.match(source, /TOP_NOSTALGIA_POOL = 200/);
   assert.match(topFn, /const nostalgiaCutoff = unixYearsAgo\(now, 3\)/);
   assert.match(topFn, /v\.scheduled_time <= \?/);
-  assert.match(topFn, /ORDER BY RANDOM\(\)/);
-  assert.match(topFn, /nostalgic: nostalgic\.results \?\? \[\]/);
+  assert.match(topFn, /ORDER BY scheduled_time ASC, id ASC/);
+  assert.match(topFn, /LIMIT \$\{TOP_NOSTALGIA_POOL\}/);
+  assert.doesNotMatch(topFn, /ORDER BY RANDOM\(\)/);
+  assert.match(source, /from "\.\.\/\.\.\/src\/lib\/utils\/shuffle\.ts"/);
+  assert.match(source, /shuffledCopy/);
+  assert.match(
+    topFn,
+    /nostalgic: shuffledCopy\([\s\S]*?\)\.slice\(0, TOP_NOSTALGIA_LIMIT\)/,
+  );
 });
 
 test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, or, sql } from "drizzle-orm";
 import type { VideoCardData } from "@/components/video/VideoCard";
 import type { DB } from "@/lib/db/client";
 import { fetchPublicAnnouncements } from "@/lib/db/announcementQueries";
@@ -48,6 +48,7 @@ function asD1Queryable(db: DB): D1Queryable {
 
 export const DEGRADED_LIST_PAGE_SIZE = 24;
 export const DEGRADED_USER_WORKS_LIMIT = 12;
+export const DEGRADED_USER_COLLABS_LIMIT = 12;
 
 function escapeLikeTerm(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
@@ -639,41 +640,89 @@ export async function fetchDegradedUserProfilePayload(
 
   if (!userRow) return null;
 
+  const worksWhere = and(
+    countablePublicVideoCondition,
+    sql`lower(${videos.creator_x_user_id}) = ${normalizedId}`,
+  )!;
+  const collabMemberExists = exists(
+    db
+      .select({ one: sql`1` })
+      .from(videoMembers)
+      .where(
+        and(
+          eq(videoMembers.video_id, videos.id),
+          eq(videoMembers.is_public_member, 1),
+          sql`lower(${videoMembers.x_user_id}) = ${normalizedId}`,
+        )!,
+      ),
+  );
+  const collabsWhere = and(
+    countablePublicVideoCondition,
+    sql`lower(coalesce(${videos.creator_x_user_id}, '')) <> ${normalizedId}`,
+    collabMemberExists,
+  )!;
+
   noteQuery();
-  const works = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: creatorNameExpr,
-      icon_url: creatorIconExpr,
-      creator_x_user_id: videos.creator_x_user_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      status: videos.visibility_status,
-      part: videos.part,
-    })
-    .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
-    .where(
-      and(
-        countablePublicVideoCondition,
-        sql`lower(${videos.creator_x_user_id}) = ${normalizedId}`,
-      )!,
-    )
-    .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
-    .limit(DEGRADED_USER_WORKS_LIMIT);
+  const [worksTotalRow, collabsTotalRow, works, collabs] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(videos)
+      .where(worksWhere),
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(videos)
+      .where(collabsWhere),
+    db
+      .select({
+        id: videos.id,
+        title: videos.title,
+        youtube_video_id: videos.youtube_video_id,
+        display_name: creatorNameExpr,
+        icon_url: creatorIconExpr,
+        creator_x_user_id: videos.creator_x_user_id,
+        primary_event_id: videos.primary_event_id,
+        scheduled_time: videos.scheduled_time,
+        status: videos.visibility_status,
+        part: videos.part,
+      })
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+      .where(worksWhere)
+      .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+      .limit(DEGRADED_USER_WORKS_LIMIT),
+    db
+      .select({
+        id: videos.id,
+        title: videos.title,
+        youtube_video_id: videos.youtube_video_id,
+        display_name: creatorNameExpr,
+        icon_url: creatorIconExpr,
+        creator_x_user_id: videos.creator_x_user_id,
+        primary_event_id: videos.primary_event_id,
+        scheduled_time: videos.scheduled_time,
+        status: videos.visibility_status,
+        part: videos.part,
+      })
+      .from(videos)
+      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
+      .where(collabsWhere)
+      .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
+      .limit(DEGRADED_USER_COLLABS_LIMIT),
+  ]);
+
+  const worksTotal = Number(worksTotalRow[0]?.count ?? works.length);
+  const collabsTotal = Number(collabsTotalRow[0]?.count ?? collabs.length);
 
   return {
     generated_at: null,
     user: userRow,
     works: {
-      total: works.length,
+      total: worksTotal,
       items: works,
     },
     collabs: {
-      total: 0,
-      items: [],
+      total: collabsTotal,
+      items: collabs,
     },
   };
 }

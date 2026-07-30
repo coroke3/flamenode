@@ -10,6 +10,7 @@ import {
   requestYoutubeCurrentTime,
   seekYoutubeIframe,
   startYoutubePlayerListening,
+  YOUTUBE_PLAYER_IFRAME_ID,
 } from "./playerBridge";
 
 interface YoutubePlayerProps {
@@ -26,11 +27,16 @@ export function YoutubePlayer({
   title,
 }: YoutubePlayerProps): React.ReactElement {
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
-  const [embedOrigin, setEmbedOrigin] = React.useState<string | null>(null);
+  const readyRef = React.useRef(false);
+  const pendingSeekRef = React.useRef<number | null>(null);
+  const [embedOrigin] = React.useState<string | null>(() =>
+    typeof window !== "undefined" ? window.location.origin : null,
+  );
 
   React.useEffect(() => {
-    setEmbedOrigin(window.location.origin);
-  }, []);
+    readyRef.current = false;
+    pendingSeekRef.current = null;
+  }, [embedOrigin, youtubeId]);
 
   React.useEffect(() => {
     if (!embedOrigin) return;
@@ -39,7 +45,11 @@ export function YoutubePlayer({
       if (!iframe) return;
       const time =
         (event as CustomEvent<{ time?: number }>).detail?.time ?? 0;
-      seekYoutubeIframe(iframe, time);
+      if (readyRef.current) {
+        seekYoutubeIframe(iframe, time);
+      } else {
+        pendingSeekRef.current = time;
+      }
     };
     window.addEventListener("flamenode:seek", onSeek as EventListener);
     return () =>
@@ -52,6 +62,20 @@ export function YoutubePlayer({
     const iframe = iframeRef.current;
     if (!iframe) return;
 
+    let pollId: number | undefined;
+
+    const flushPendingSeek = () => {
+      if (pendingSeekRef.current === null) return;
+      seekYoutubeIframe(iframe, pendingSeekRef.current);
+      pendingSeekRef.current = null;
+    };
+
+    const poll = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!readyRef.current) return;
+      requestYoutubeCurrentTime(iframe);
+    };
+
     const onMessage = (event: MessageEvent) => {
       if (!isYoutubePlayerMessageOrigin(event.origin)) return;
       if (event.source !== iframe.contentWindow) return;
@@ -60,8 +84,13 @@ export function YoutubePlayer({
       if (!parsed) return;
 
       if (parsed.kind === "ready") {
+        readyRef.current = true;
         startYoutubePlayerListening(iframe);
         requestYoutubeCurrentTime(iframe);
+        flushPendingSeek();
+        if (pollId === undefined) {
+          pollId = window.setInterval(poll, 500);
+        }
         return;
       }
 
@@ -70,22 +99,26 @@ export function YoutubePlayer({
 
     const onLoad = () => {
       startYoutubePlayerListening(iframe);
-      requestYoutubeCurrentTime(iframe);
     };
 
-    const poll = () => {
+    const onVisibilityChange = () => {
       if (document.visibilityState !== "visible") return;
+      if (!readyRef.current) return;
+      startYoutubePlayerListening(iframe);
       requestYoutubeCurrentTime(iframe);
     };
 
     window.addEventListener("message", onMessage);
     iframe.addEventListener("load", onLoad);
-    const pollId = window.setInterval(poll, 500);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       window.removeEventListener("message", onMessage);
       iframe.removeEventListener("load", onLoad);
-      window.clearInterval(pollId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (pollId !== undefined) {
+        window.clearInterval(pollId);
+      }
     };
   }, [embedOrigin, youtubeId]);
 
@@ -122,11 +155,12 @@ export function YoutubePlayer({
     <div className={styles.wrap}>
       <iframe
         ref={iframeRef}
+        id={YOUTUBE_PLAYER_IFRAME_ID}
         key={youtubeId}
         className={styles.iframe}
         src={src}
         title={title}
-        loading="lazy"
+        loading="eager"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
         allowFullScreen
       />

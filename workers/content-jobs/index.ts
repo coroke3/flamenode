@@ -11,6 +11,7 @@ import {
   processStaticRebuildQueue,
   reconcileStaleQueue,
 } from "../json-generator/queue.ts";
+import { ensureUsersSharedInputsOnR2 } from "../json-generator/usersSharedInputsEnqueue.ts";
 import { ensureYoutubeRelatedSharedInputsOnR2 } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
@@ -42,6 +43,10 @@ export interface Env {
 const CLEANUP_INTERVAL_SEC = 24 * 3600;
 const CONTENT_JOBS_LEASE_SEC = 55 * 60;
 const CLEANUP_LEASE_SEC = 10 * 60;
+/** Recovery Cron が1回で排水できる static rebuild 上限（MAX_QUEUE_ITEMS_PER_RUN=1 のまま複数回呼ぶ）。 */
+export const CONTENT_JOBS_RECOVERY_MAX_TARGETS = 30;
+/** lease 競合で processed=0 が続くときの無限ループ防止。 */
+export const CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED = 3;
 
 type QueueResult = {
   processed: number;
@@ -73,15 +78,21 @@ export async function runContentJobsRecovery(
         async (signal) => {
           const rebuildEnv = rebuildEnvironment(env);
           const now = Math.floor(Date.now() / 1000);
-          const missingSharedInputs = await ensureYoutubeRelatedSharedInputsOnR2(
+          const missingYoutubeSharedInputs =
+            await ensureYoutubeRelatedSharedInputsOnR2(rebuildEnv, {
+              reason: "shared_related_inputs_missing_on_r2",
+              priority: "high",
+              signal,
+            });
+          const missingUsersSharedInputs = await ensureUsersSharedInputsOnR2(
             rebuildEnv,
             {
-              reason: "shared_related_inputs_missing_on_r2",
+              reason: "shared_users_inputs_missing_on_r2",
               priority: "high",
               signal,
             },
           );
-          if (missingSharedInputs > 0) {
+          if (missingYoutubeSharedInputs > 0 || missingUsersSharedInputs > 0) {
             await sendWorkerQueueWakeBestEffort({
               queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
               kind: "static_rebuild_available",
@@ -96,9 +107,32 @@ export async function runContentJobsRecovery(
             "content-jobs",
             "static-rebuild-queue",
             async () => {
-              const result = await processStaticRebuildQueue(rebuildEnv, signal);
-              staticRebuildHasMore = Boolean(result.hasMore);
-              return result;
+              let aggregated = combineJobCounters();
+              let consecutiveEmptyProcessed = 0;
+              for (let i = 0; i < CONTENT_JOBS_RECOVERY_MAX_TARGETS; i += 1) {
+                signal.throwIfAborted();
+                const result = await processStaticRebuildQueue(rebuildEnv, signal);
+                aggregated = combineJobCounters(aggregated, result);
+                staticRebuildHasMore ||= Boolean(result.hasMore);
+                if (!result.hasMore) {
+                  break;
+                }
+                if (result.processed === 0) {
+                  if ((result.skipped ?? 0) === 0) {
+                    break;
+                  }
+                  consecutiveEmptyProcessed += 1;
+                  if (
+                    consecutiveEmptyProcessed >=
+                    CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED
+                  ) {
+                    break;
+                  }
+                  continue;
+                }
+                consecutiveEmptyProcessed = 0;
+              }
+              return { ...aggregated, hasMore: staticRebuildHasMore };
             },
             { commitSha: env.BUILD_COMMIT_SHA },
           );

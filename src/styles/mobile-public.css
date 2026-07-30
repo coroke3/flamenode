@@ -521,12 +521,6 @@
     padding-inline-end: 0;
   }
 
-  [data-fn-surface="public"] .fn-shelf-loop-group {
-    grid-auto-columns: min(82vw, 280px);
-    gap: 12px;
-    padding-inline-end: 12px;
-  }
-
   [data-fn-surface="public"] .fn-shelf-fade-left,
   [data-fn-surface="public"] .fn-shelf-fade-right {
     width: 40px;

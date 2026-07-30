@@ -1,93 +1,61 @@
 "use client";
 
 import * as React from "react";
+import {
+  MOBILE_QUERY,
+  SCROLL_THROTTLE_MS,
+  applyMobileVideoGeometryCssVars,
+  clearMobileVideoGeometryCssVars,
+  computeMobileVideoGeometry,
+  metricsToCssVars,
+  type MobileVideoGeometryCssVars,
+} from "./mobileVideoGeometry";
 
-const MOBILE_QUERY =
-  "(max-width: 900px)";
-const VIDEO_ASPECT_RATIO = 16 / 9;
-const LANDSCAPE_MIN_CONTENT_HEIGHT_PX = 160;
-
-function px(value: number):
-  string {
-  const normalized =
-    Math.round(
-      Math.max(0, value) * 100,
-    ) / 100;
-
-  return `${normalized}px`;
-}
-
-export function
-useMobileVideoGeometry(
-  playerRef:
-    React.RefObject<
-      HTMLElement | null
-    >,
+export function useMobileVideoGeometry(
+  playerRef: React.RefObject<HTMLElement | null>,
 ): void {
   React.useLayoutEffect(() => {
-    const player =
-      playerRef.current;
-
+    const player = playerRef.current;
     if (!player) return;
 
-    const root =
-      document.documentElement;
-    const media =
-      window.matchMedia(
-        MOBILE_QUERY,
-      );
+    const root = document.documentElement;
+    const media = window.matchMedia(MOBILE_QUERY);
 
     let frame = 0;
-    let observedHeader:
-      | HTMLElement
-      | null = null;
+    let scrollThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+    let scrollThrottlePending = false;
+    let observedHeader: HTMLElement | null = null;
+    let lastCssVars: MobileVideoGeometryCssVars | null = null;
+    let lastNonKeyboardPlayerSize: {
+      playerWidth: number;
+      playerHeight: number;
+    } | null = null;
 
-    const observer =
-      new ResizeObserver(() => {
-        schedule();
-      });
+    const observer = new ResizeObserver(() => {
+      schedule();
+    });
 
     const clearVariables = () => {
-      for (const name of [
-        "--fn-header-bottom",
-        "--fn-mobile-player-left",
-        "--fn-mobile-player-width",
-        "--fn-mobile-player-height",
-        "--fn-mobile-player-bottom",
-        "--fn-visual-viewport-height",
-        "--fn-keyboard-inset",
-      ]) {
-        root.style.removeProperty(
-          name,
-        );
-      }
+      clearMobileVideoGeometryCssVars(root);
+      lastCssVars = null;
+      lastNonKeyboardPlayerSize = null;
     };
 
     const resolveHeader = () => {
-      const header =
-        document.querySelector<
-          HTMLElement
-        >(".fn-header");
+      const header = document.querySelector<HTMLElement>(".fn-header");
 
-      if (
-        header ===
-        observedHeader
-      ) {
+      if (header === observedHeader) {
         return header;
       }
 
       if (observedHeader) {
-        observer.unobserve(
-          observedHeader,
-        );
+        observer.unobserve(observedHeader);
       }
 
       observedHeader = header;
 
       if (observedHeader) {
-        observer.observe(
-          observedHeader,
-        );
+        observer.observe(observedHeader);
       }
 
       return header;
@@ -95,225 +63,103 @@ useMobileVideoGeometry(
 
     const update = () => {
       if (!media.matches) {
-        player.dataset.fullscreen =
-          "false";
+        player.dataset.fullscreen = "false";
         clearVariables();
         return;
       }
 
-      const fullscreen =
-        document.fullscreenElement;
+      const fullscreen = document.fullscreenElement;
+      const fullscreenInside = Boolean(
+        fullscreen &&
+          (fullscreen === player || player.contains(fullscreen)),
+      );
 
-      const fullscreenInside =
-        Boolean(
-          fullscreen &&
-          (
-            fullscreen === player ||
-            player.contains(
-              fullscreen,
-            )
-          ),
-        );
-
-      player.dataset.fullscreen =
-        fullscreenInside
-          ? "true"
-          : "false";
+      player.dataset.fullscreen = fullscreenInside ? "true" : "false";
 
       if (fullscreenInside) {
         return;
       }
 
-      const header =
-        resolveHeader();
+      const header = resolveHeader();
+      const headerBottom = header?.getBoundingClientRect().bottom ?? 0;
+      const viewport = window.visualViewport;
+      const viewportHeight = viewport?.height ?? window.innerHeight;
+      const viewportWidth = viewport?.width ?? window.innerWidth;
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportLeft = viewport?.offsetLeft ?? 0;
 
-      const headerBottom =
-        header
-          ?.getBoundingClientRect()
-          .bottom ?? 0;
-
-      const viewport =
-        window.visualViewport;
-
-      const viewportHeight =
-        viewport?.height ??
-        window.innerHeight;
-      const viewportWidth =
-        viewport?.width ??
-        window.innerWidth;
-
-      const viewportTop =
-        viewport?.offsetTop ??
-        0;
-      const viewportLeft =
-        viewport?.offsetLeft ??
-        0;
-
-      const keyboardInset =
-        Math.max(
-          0,
-          window.innerHeight -
-            viewportHeight -
-            viewportTop,
-        );
-
-      const isLandscape =
-        viewportWidth > viewportHeight;
-
-      const viewportBottom =
-        viewportTop +
-        viewportHeight;
-      const effectiveHeaderBottom =
-        Math.max(
-          viewportTop,
+      const metrics = computeMobileVideoGeometry(
+        {
           headerBottom,
-        );
-      const availableHeight =
-        Math.max(
-          0,
-          viewportBottom -
-            effectiveHeaderBottom,
-        );
-      const maxConstrainedPlayerHeight =
-        Math.max(
-          0,
-          availableHeight -
-            LANDSCAPE_MIN_CONTENT_HEIGHT_PX,
-        );
+          viewportHeight,
+          viewportWidth,
+          viewportTop,
+          viewportLeft,
+          windowInnerHeight: window.innerHeight,
+        },
+        lastNonKeyboardPlayerSize,
+      );
 
-      const widthFromAvailableHeight =
-        maxConstrainedPlayerHeight *
-        VIDEO_ASPECT_RATIO;
+      if (metrics.keyboardInset === 0) {
+        lastNonKeyboardPlayerSize = {
+          playerWidth: metrics.playerWidth,
+          playerHeight: metrics.playerHeight,
+        };
+      }
 
-      const constrainByHeight =
-        isLandscape ||
-        keyboardInset > 0;
-      const playerWidth = constrainByHeight
-        ? Math.min(
-            viewportWidth,
-            Math.max(1, widthFromAvailableHeight),
-          )
-        : viewportWidth;
-
-      const playerHeight =
-        playerWidth /
-        VIDEO_ASPECT_RATIO;
-      const playerLeft =
-        viewportLeft +
-        Math.max(
-          0,
-          (viewportWidth - playerWidth) /
-            2,
-        );
-
-      root.style.setProperty(
-        "--fn-header-bottom",
-        px(effectiveHeaderBottom),
-      );
-      root.style.setProperty(
-        "--fn-mobile-player-left",
-        px(playerLeft),
-      );
-      root.style.setProperty(
-        "--fn-mobile-player-width",
-        px(playerWidth),
-      );
-      root.style.setProperty(
-        "--fn-mobile-player-height",
-        px(playerHeight),
-      );
-      root.style.setProperty(
-        "--fn-mobile-player-bottom",
-        px(
-          effectiveHeaderBottom +
-          playerHeight,
-        ),
-      );
-      root.style.setProperty(
-        "--fn-visual-viewport-height",
-        px(viewportHeight),
-      );
-      root.style.setProperty(
-        "--fn-keyboard-inset",
-        px(keyboardInset),
-      );
+      const cssVars = metricsToCssVars(metrics);
+      applyMobileVideoGeometryCssVars(root, cssVars, lastCssVars);
+      lastCssVars = cssVars;
     };
 
     function schedule(): void {
       cancelAnimationFrame(frame);
-      frame =
-        requestAnimationFrame(
-          update,
-        );
+      frame = requestAnimationFrame(update);
+    }
+
+    function scheduleFromScroll(): void {
+      if (scrollThrottleTimer !== null) {
+        scrollThrottlePending = true;
+        return;
+      }
+
+      schedule();
+
+      scrollThrottleTimer = setTimeout(() => {
+        scrollThrottleTimer = null;
+        if (scrollThrottlePending) {
+          scrollThrottlePending = false;
+          schedule();
+        }
+      }, SCROLL_THROTTLE_MS);
     }
 
     resolveHeader();
     schedule();
 
-    const viewport =
-      window.visualViewport;
+    const viewport = window.visualViewport;
 
-    media.addEventListener(
-      "change",
-      schedule,
-    );
-    window.addEventListener(
-      "resize",
-      schedule,
-    );
-    window.addEventListener(
-      "scroll",
-      schedule,
-      { passive: true },
-    );
-    window.addEventListener(
-      "orientationchange",
-      schedule,
-    );
-    document.addEventListener(
-      "fullscreenchange",
-      schedule,
-    );
-    viewport?.addEventListener(
-      "resize",
-      schedule,
-    );
-    viewport?.addEventListener(
-      "scroll",
-      schedule,
-    );
+    media.addEventListener("change", schedule);
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", scheduleFromScroll, { passive: true });
+    window.addEventListener("orientationchange", schedule);
+    document.addEventListener("fullscreenchange", schedule);
+    viewport?.addEventListener("resize", schedule);
+    viewport?.addEventListener("scroll", scheduleFromScroll);
 
     return () => {
       cancelAnimationFrame(frame);
+      if (scrollThrottleTimer !== null) {
+        clearTimeout(scrollThrottleTimer);
+      }
       observer.disconnect();
-      media.removeEventListener(
-        "change",
-        schedule,
-      );
-      window.removeEventListener(
-        "resize",
-        schedule,
-      );
-      window.removeEventListener(
-        "scroll",
-        schedule,
-      );
-      window.removeEventListener(
-        "orientationchange",
-        schedule,
-      );
-      document.removeEventListener(
-        "fullscreenchange",
-        schedule,
-      );
-      viewport?.removeEventListener(
-        "resize",
-        schedule,
-      );
-      viewport?.removeEventListener(
-        "scroll",
-        schedule,
-      );
+      media.removeEventListener("change", schedule);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", scheduleFromScroll);
+      window.removeEventListener("orientationchange", schedule);
+      document.removeEventListener("fullscreenchange", schedule);
+      viewport?.removeEventListener("resize", schedule);
+      viewport?.removeEventListener("scroll", scheduleFromScroll);
       clearVariables();
     };
   }, [playerRef]);

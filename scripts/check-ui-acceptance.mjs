@@ -161,9 +161,11 @@ requireAll("app/(public)/page.tsx", [
   ],
 ]);
 requireAll("src/components/layout/Shelf.tsx", [
-  [/loopCycleWidthRef/, "棚の連続ループ周期幅がありません。"],
-  [/while \(next >= cycleWidth \* 2\)/, "棚の右端ループ補正がありません。"],
-  [/while \(next < cycleWidth\)/, "棚の左端ループ補正がありません。"],
+  [/normalizeLoopScroll/, "棚の連続ループ正規化がありません。"],
+  [/getLoopRotateCount/, "棚のループ回転数判定がありません。"],
+  [/rotateForward/, "棚の前方ループ回転がありません。"],
+  [/ensureColumnAligned/, "棚の列境界揃えがありません。"],
+  [/normalizingRef/, "棚のスクロール正規化再入防止がありません。"],
 ]);
 requireMatch(
   "src/components/layout/PublicAccountIsland.tsx",

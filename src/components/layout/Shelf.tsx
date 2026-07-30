@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { flushSync } from "react-dom";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 
@@ -18,10 +19,108 @@ interface ShelfProps {
   pauseAfterInteractionMs?: number;
   /** ホイール操作で自動送りを一時停止する。 */
   pauseOnWheel?: boolean;
-  /** 同じ内容を複製し、端で折り返さない連続ループにする。 */
+  /** 端でカードを1件ずつローテートし、継ぎ目なしの連続スクロールにする。 */
   loop?: boolean;
   /** カードが画面上で流れる向き。 */
   autoScrollDirection?: "left" | "right";
+}
+
+type SourceItem = {
+  sourceKey: string;
+  node: React.ReactNode;
+};
+
+type LoopItem = SourceItem & {
+  displayKey: string;
+};
+
+function toSourceItems(children: React.ReactNode): SourceItem[] {
+  return React.Children.toArray(children).map((node, index) => ({
+    sourceKey:
+      React.isValidElement(node) && node.key != null
+        ? String(node.key)
+        : `shelf-${index}`,
+    node,
+  }));
+}
+
+function getShelfGap(el: HTMLElement): number {
+  const style = window.getComputedStyle(el);
+  const raw = style.columnGap || style.gap || "0";
+  const gap = Number.parseFloat(raw);
+  return Number.isFinite(gap) ? gap : 0;
+}
+
+function getItemStride(el: HTMLElement, itemEl: HTMLElement): number {
+  return itemEl.offsetWidth + getShelfGap(el);
+}
+
+function getLoopRotateCount(mobileRows: 1 | 2): number {
+  if (
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function"
+  ) {
+    return 1;
+  }
+  if (
+    window.matchMedia("(max-width: 700px)").matches &&
+    mobileRows === 2
+  ) {
+    return 2;
+  }
+  return 1;
+}
+
+function ensureColumnAligned(items: LoopItem[], rotateCount: number): LoopItem[] {
+  if (rotateCount <= 1 || items.length % rotateCount === 0) return items;
+  const padCount = rotateCount - (items.length % rotateCount);
+  const padded = [...items];
+  for (let i = 0; i < padCount; i++) {
+    const source = items[i % rotateCount];
+    padded.push({
+      ...source,
+      displayKey: `${source.sourceKey}@pad-${padded.length}`,
+    });
+  }
+  return padded;
+}
+
+type LoopNormalizeMode = "forward" | "backward" | "both";
+
+function normalizeLoopScroll(
+  el: HTMLDivElement,
+  rotateForward: (el: HTMLDivElement, count: number) => boolean,
+  rotateBackward: (el: HTMLDivElement, count: number) => boolean,
+  count: number,
+  mode: LoopNormalizeMode = "both",
+): void {
+  if (mode === "forward" || mode === "both") {
+    let guard = 0;
+    while (guard < 8) {
+      const first = el.children[0] as HTMLElement | undefined;
+      if (!first) break;
+      const stride = getItemStride(el, first);
+      if (!(stride > 0) || el.scrollLeft < stride) break;
+      if (!rotateForward(el, count)) break;
+      guard += 1;
+    }
+  }
+  if (mode === "backward" || mode === "both") {
+    let guard = 0;
+    while (guard < 8) {
+      // 左端付近でのみ末尾→先頭へ移し、回転直後の stride 位置では再回転しない。
+      if (el.scrollLeft > 1) break;
+      if (!rotateBackward(el, count)) break;
+      guard += 1;
+    }
+  }
+}
+
+function toLoopItems(sourceItems: SourceItem[], keyPrefix: string): LoopItem[] {
+  return sourceItems.map((item, index) => ({
+    ...item,
+    displayKey: `${item.sourceKey}@${keyPrefix}-${index}`,
+  }));
 }
 
 /**
@@ -41,8 +140,6 @@ export function Shelf({
   autoScrollDirection = "left",
 }: ShelfProps): React.ReactElement {
   const ref = React.useRef<HTMLDivElement>(null);
-  const loopGroupRef = React.useRef<HTMLDivElement>(null);
-  const loopCycleWidthRef = React.useRef(0);
   const frameRef = React.useRef<number | null>(null);
   const resumeTimerRef = React.useRef<number | null>(null);
   const pausedRef = React.useRef(false);
@@ -56,12 +153,20 @@ export function Shelf({
     pointer: false,
     recent: false,
   });
+  const ensureScrollableAttemptsRef = React.useRef(0);
+  const normalizingRef = React.useRef(false);
+  const rightSeedAppliedRef = React.useRef(false);
   const [reducedMotion, setReducedMotion] = React.useState(false);
   const [inViewport, setInViewport] = React.useState(true);
   const [documentVisible, setDocumentVisible] = React.useState(true);
   const [canPrev, setCanPrev] = React.useState(false);
   const [canNext, setCanNext] = React.useState(true);
-  const childItems = React.Children.toArray(children);
+  const sourceItems = React.useMemo(() => toSourceItems(children), [children]);
+  const sourceSignature = React.useMemo(
+    () => sourceItems.map((item) => item.sourceKey).join("|"),
+    [sourceItems],
+  );
+  const [loopItems, setLoopItems] = React.useState<LoopItem[]>([]);
 
   const setPauseReason = React.useCallback((
     reason: keyof typeof pauseReasonsRef.current,
@@ -93,54 +198,137 @@ export function Shelf({
     setCanNext(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
   }, [loop]);
 
+  const sourceItemsRef = React.useRef(sourceItems);
+  sourceItemsRef.current = sourceItems;
+
+  const rotateForward = React.useCallback((el: HTMLDivElement, count?: number): boolean => {
+    const rotateCount = count ?? getLoopRotateCount(mobileRows);
+    const first = el.children[0] as HTMLElement | undefined;
+    if (!first || el.children.length < rotateCount + 1) return false;
+    const movedWidth = getItemStride(el, first);
+    if (!(movedWidth > 0)) return false;
+
+    flushSync(() => {
+      setLoopItems((prev) => {
+        if (prev.length < rotateCount + 1) return prev;
+        const head = prev.slice(0, rotateCount);
+        const rest = prev.slice(rotateCount);
+        const next = [...rest, ...head];
+        return next.map((item, index) => ({
+          ...item,
+          displayKey: `${item.sourceKey}@f${index}`,
+        }));
+      });
+    });
+    el.scrollLeft = Math.max(0, el.scrollLeft - movedWidth);
+    return true;
+  }, [mobileRows]);
+
+  const rotateBackward = React.useCallback((el: HTMLDivElement, count?: number): boolean => {
+    const rotateCount = count ?? getLoopRotateCount(mobileRows);
+    const first = el.children[0] as HTMLElement | undefined;
+    if (!first || el.children.length < rotateCount + 1) return false;
+    const movedWidth = getItemStride(el, first);
+    if (!(movedWidth > 0)) return false;
+
+    flushSync(() => {
+      setLoopItems((prev) => {
+        if (prev.length < rotateCount + 1) return prev;
+        const tail = prev.slice(-rotateCount);
+        const rest = prev.slice(0, -rotateCount);
+        const next = [...tail, ...rest];
+        return next.map((item, index) => ({
+          ...item,
+          displayKey: `${item.sourceKey}@b${index}`,
+        }));
+      });
+    });
+    el.scrollLeft += movedWidth;
+    return true;
+  }, [mobileRows]);
+
   React.useEffect(() => {
     directionRef.current = autoScrollDirection === "left" ? 1 : -1;
   }, [autoScrollDirection]);
 
+  // children 参照は毎レンダー変わるので、キー署名が変わったときだけ再同期する。
   React.useLayoutEffect(() => {
     if (!loop) {
-      loopCycleWidthRef.current = 0;
+      ensureScrollableAttemptsRef.current = 0;
+      rightSeedAppliedRef.current = false;
+      setLoopItems([]);
       return;
     }
+    ensureScrollableAttemptsRef.current = 0;
+    rightSeedAppliedRef.current = false;
+    const rotateCount = getLoopRotateCount(mobileRows);
+    setLoopItems(
+      ensureColumnAligned(
+        toLoopItems(sourceItemsRef.current, "init"),
+        rotateCount,
+      ),
+    );
+  }, [loop, sourceSignature, density, mobileRows]);
+
+  React.useLayoutEffect(() => {
+    if (!loop) return;
     const el = ref.current;
-    const group = loopGroupRef.current;
-    if (!el || !group) return;
-
-    const syncLoopGeometry = () => {
-      const nextWidth = group.getBoundingClientRect().width;
-      if (!Number.isFinite(nextWidth) || nextWidth <= 0) return;
-      const previousWidth = loopCycleWidthRef.current;
-      const previousOffset =
-        previousWidth > 0
-          ? ((el.scrollLeft - previousWidth) % previousWidth + previousWidth) %
-            previousWidth
-          : 0;
-      loopCycleWidthRef.current = nextWidth;
-      el.scrollLeft = nextWidth + Math.min(previousOffset, nextWidth);
+    const sources = sourceItemsRef.current;
+    if (!el || loopItems.length === 0 || sources.length === 0) return;
+    if (el.scrollWidth > el.clientWidth + 4) {
+      ensureScrollableAttemptsRef.current = 0;
+      if (
+        autoScrollDirection === "right" &&
+        !rightSeedAppliedRef.current
+      ) {
+        rightSeedAppliedRef.current = true;
+        rotateBackward(el, getLoopRotateCount(mobileRows));
+      }
       update();
-    };
+      return;
+    }
+    if (ensureScrollableAttemptsRef.current >= 8) {
+      update();
+      return;
+    }
 
-    syncLoopGeometry();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(syncLoopGeometry);
-    observer?.observe(group);
-    observer?.observe(el);
-    return () => observer?.disconnect();
-  }, [childItems.length, density, loop, mobileRows, update]);
+    const round = Math.floor(loopItems.length / sources.length);
+    ensureScrollableAttemptsRef.current += 1;
+    const rotateCount = getLoopRotateCount(mobileRows);
+    setLoopItems((prev) =>
+      ensureColumnAligned(
+        [...prev, ...toLoopItems(sources, `fill-${round}`)],
+        rotateCount,
+      ),
+    );
+  }, [autoScrollDirection, loop, loopItems.length, mobileRows, rotateBackward, sourceSignature, update]);
+
+  const handleScroll = React.useCallback(() => {
+    update();
+    if (!loop) return;
+    const el = ref.current;
+    if (!el || normalizingRef.current) return;
+    if (el.scrollWidth <= el.clientWidth + 4) return;
+    normalizingRef.current = true;
+    try {
+      const count = getLoopRotateCount(mobileRows);
+      normalizeLoopScroll(el, rotateForward, rotateBackward, count, "both");
+    } finally {
+      normalizingRef.current = false;
+    }
+  }, [loop, mobileRows, rotateBackward, rotateForward, update]);
 
   React.useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    update();
-    el.addEventListener("scroll", update, { passive: true });
+    handleScroll();
+    el.addEventListener("scroll", handleScroll, { passive: true });
     window.addEventListener("resize", update);
     return () => {
-      el.removeEventListener("scroll", update);
+      el.removeEventListener("scroll", handleScroll);
       window.removeEventListener("resize", update);
     };
-  }, [update]);
+  }, [handleScroll, loopItems.length, update]);
 
   React.useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -197,13 +385,21 @@ export function Shelf({
         const delta = Math.min(elapsed, 80) * (Math.min(autoScrollSpeed, 120) / 1000);
         let next = el.scrollLeft + delta * directionRef.current;
         if (loop) {
-          const cycleWidth = loopCycleWidthRef.current;
-          if (cycleWidth <= 0) {
-            frameRef.current = window.requestAnimationFrame(tick);
-            return;
+          normalizingRef.current = true;
+          try {
+            el.scrollLeft = next;
+            const count = getLoopRotateCount(mobileRows);
+            normalizeLoopScroll(
+              el,
+              rotateForward,
+              rotateBackward,
+              count,
+              directionRef.current === 1 ? "forward" : "backward",
+            );
+            next = el.scrollLeft;
+          } finally {
+            normalizingRef.current = false;
           }
-          while (next >= cycleWidth * 2) next -= cycleWidth;
-          while (next < cycleWidth) next += cycleWidth;
         } else {
           const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
           if (next >= maxScroll) {
@@ -213,8 +409,8 @@ export function Shelf({
             next = 0;
             directionRef.current = 1;
           }
+          el.scrollLeft = next;
         }
-        el.scrollLeft = next;
         update();
       }
       frameRef.current = window.requestAnimationFrame(tick);
@@ -224,7 +420,18 @@ export function Shelf({
       if (frameRef.current != null) window.cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     };
-  }, [autoScroll, autoScrollSpeed, documentVisible, inViewport, loop, reducedMotion, update]);
+  }, [
+    autoScroll,
+    autoScrollSpeed,
+    documentVisible,
+    inViewport,
+    loop,
+    mobileRows,
+    reducedMotion,
+    rotateBackward,
+    rotateForward,
+    update,
+  ]);
 
   React.useEffect(() => () => {
     if (resumeTimerRef.current != null) window.clearTimeout(resumeTimerRef.current);
@@ -236,6 +443,13 @@ export function Shelf({
     if (!loop) directionRef.current = dir;
     el.scrollBy({ left: el.clientWidth * 0.85 * dir, behavior: "smooth" });
     pauseAfterInteraction();
+  };
+
+  const renderLoopItem = (item: LoopItem) => {
+    if (React.isValidElement(item.node)) {
+      return React.cloneElement(item.node, { key: item.displayKey });
+    }
+    return <React.Fragment key={item.displayKey}>{item.node}</React.Fragment>;
   };
 
   return (
@@ -299,21 +513,7 @@ export function Shelf({
           }
         }}
       >
-        {loop ? (
-          <div className="fn-shelf-loop-track">
-            <div className="fn-shelf-loop-group" aria-hidden inert>
-              {childItems}
-            </div>
-            <div ref={loopGroupRef} className="fn-shelf-loop-group">
-              {childItems}
-            </div>
-            <div className="fn-shelf-loop-group" aria-hidden inert>
-              {childItems}
-            </div>
-          </div>
-        ) : (
-          children
-        )}
+        {loop ? loopItems.map(renderLoopItem) : children}
       </div>
       <div aria-hidden className={cn("fn-shelf-fade-left", canPrev && "is-visible")} />
       <div aria-hidden className={cn("fn-shelf-fade-right", canNext && "is-visible")} />
