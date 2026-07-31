@@ -398,7 +398,7 @@ test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
   );
 });
 
-test("rebuildTopは新着100件と3年以上前の古い順プールからシャッフル抽出した20件をtop JSONへ保存する", () => {
+test("rebuildTopは新着100件と3年以上前のYouTube確認済みプールから日次シャッフル用に保存する", () => {
   const topFn = source.match(
     /async function rebuildTop[\s\S]*?(?=async function )/,
   )?.[0];
@@ -408,15 +408,23 @@ test("rebuildTopは新着100件と3年以上前の古い順プールからシャ
   assert.match(source, /TOP_NOSTALGIA_POOL = 200/);
   assert.match(topFn, /const nostalgiaCutoff = unixYearsAgo\(now, 3\)/);
   assert.match(topFn, /v\.scheduled_time <= \?/);
+  assert.match(topFn, /YOUTUBE_SYNCED_PLAYABLE_SQL/);
   assert.match(topFn, /ORDER BY scheduled_time ASC, id ASC/);
   assert.match(topFn, /LIMIT \$\{TOP_NOSTALGIA_POOL\}/);
   assert.doesNotMatch(topFn, /ORDER BY RANDOM\(\)/);
-  assert.match(source, /from "\.\.\/\.\.\/src\/lib\/utils\/shuffle\.ts"/);
-  assert.match(source, /shuffledCopy/);
+  assert.match(source, /pickNostalgicDisplay/);
+  assert.match(topFn, /nostalgic_pool: nostalgicPool/);
   assert.match(
     topFn,
-    /nostalgic: shuffledCopy\([\s\S]*?\)\.slice\(0, TOP_NOSTALGIA_LIMIT\)/,
+    /nostalgic: pickNostalgicDisplay\(nostalgicPool, TOP_NOSTALGIA_LIMIT\)/,
   );
+  assert.match(topFn, /nostalgic_shuffled_at: now/);
+});
+
+test("ensureDailyTopNostalgicShuffleはtop.jsonの懐かし棚だけをUTC日次でR2更新する", () => {
+  assert.match(source, /export async function ensureDailyTopNostalgicShuffle/);
+  assert.match(source, /TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY/);
+  assert.match(source, /needsNostalgicDailyReshuffle/);
 });
 
 test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {

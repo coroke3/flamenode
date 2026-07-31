@@ -13,6 +13,7 @@ import {
 } from "../json-generator/queue.ts";
 import { ensureUsersSharedInputsOnR2 } from "../json-generator/usersSharedInputsEnqueue.ts";
 import { ensureDeployGlobalRebuilds } from "../json-generator/deployGlobalRebuildEnqueue.ts";
+import { ensureDailyTopNostalgicShuffle } from "../json-generator/rebuild.ts";
 import { ensureYoutubeRelatedSharedInputsOnR2 } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
@@ -100,10 +101,15 @@ export async function runContentJobsRecovery(
               signal,
             },
           );
+          const nostalgicDailyShuffle = await ensureDailyTopNostalgicShuffle(
+            rebuildEnv,
+            signal,
+          );
           if (
             deployGlobalRebuilds > 0 ||
             missingYoutubeSharedInputs > 0 ||
-            missingUsersSharedInputs > 0
+            missingUsersSharedInputs > 0 ||
+            nostalgicDailyShuffle > 0
           ) {
             await sendWorkerQueueWakeBestEffort({
               queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,

@@ -119,7 +119,8 @@ test("トップ3棚は新着をランダム化し左右交互のloopを使う", 
     /const latestLoopItems = randomizedLatest\.slice\(0, TOP_LATEST_LOOP_DISPLAY_LIMIT\)/,
   );
   assert.match(home, /latestLoopItems\.map\(/);
-  assert.match(home, /const randomizedNostalgic = shuffledCopy\(nostalgic\)/);
+  assert.match(home, /nostalgic\.map\(/);
+  assert.doesNotMatch(home, /shuffledCopy\(nostalgic\)/);
   assert.match(home, /title="懐かしの映像"/);
   const directions = [
     ...home.matchAll(/autoScrollDirection="(left|right)"/g),

@@ -12,6 +12,8 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.match(source, /runContentJobsRecovery/);
   assert.match(source, /reconcileStaleQueue/);
   assert.match(source, /ensureDeployGlobalRebuilds/);
+  assert.match(source, /ensureDailyTopNostalgicShuffle/);
+  assert.match(source, /nostalgicDailyShuffle > 0/);
   assert.match(source, /ensureYoutubeRelatedSharedInputsOnR2/);
   assert.match(source, /ensureUsersSharedInputsOnR2/);
   assert.match(source, /deployGlobalRebuilds > 0/);

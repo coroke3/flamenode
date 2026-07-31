@@ -69,7 +69,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
   const randomizedRecommended = shuffledCopy(recommended);
   const randomizedLatest = shuffledCopy(latest.slice(0, 100));
   const latestLoopItems = randomizedLatest.slice(0, TOP_LATEST_LOOP_DISPLAY_LIMIT);
-  const randomizedNostalgic = shuffledCopy(nostalgic);
 
   const heroEvents = pickHeroEvents(activeEvents);
   const primaryHeroEvent = heroEvents[0] ?? null;
@@ -191,7 +190,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
             moreLabel="過去の作品を見る"
           />
           <div className={styles.shelfBox}>
-            {randomizedNostalgic.length === 0 ? (
+            {nostalgic.length === 0 ? (
               <EmptyShelf message="対象になる作品がまだありません。" />
             ) : (
               <Shelf
@@ -199,7 +198,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
                 loop
                 autoScrollDirection="left"
               >
-                {randomizedNostalgic.map((video, index) => (
+                {nostalgic.map((video, index) => (
                   <VideoCard key={`${video.id}-nostalgic-${index}`} video={video} />
                 ))}
               </Shelf>

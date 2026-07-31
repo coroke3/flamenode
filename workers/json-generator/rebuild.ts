@@ -21,6 +21,12 @@ import {
   PVSF_SUMMARY_EVENT_ID,
 } from "../../src/lib/publicData/countablePublicVideoSql.ts";
 import {
+  pickNostalgicDisplay,
+  needsNostalgicDailyReshuffle,
+  utcDayKey,
+} from "../../src/lib/publicData/topNostalgicShuffle.ts";
+import { YOUTUBE_SYNCED_PLAYABLE_SQL } from "../../src/lib/publicData/youtubeSyncedPlayableSql.ts";
+import {
   buildPickupCreatorsFromProjection,
   buildPublicUsersIndexItems,
   loadPublicCreatorProjectionSources,
@@ -75,7 +81,8 @@ import {
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
 import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
-import { shuffledCopy } from "../../src/lib/utils/shuffle.ts";
+
+export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
 const STATIC_USER_WORKS_PAGE_SIZE = 24;
 const STATIC_USER_COLLABS_PAGE_SIZE = 24;
@@ -476,6 +483,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        WHERE v.visibility_status = 'public'
          AND v.scheduled_time IS NOT NULL
          AND v.scheduled_time <= ?
+         AND ${YOUTUBE_SYNCED_PLAYABLE_SQL}
        ORDER BY scheduled_time ASC, id ASC
        LIMIT ${TOP_NOSTALGIA_POOL}`,
     ).bind(nostalgiaCutoff).all(),
@@ -554,13 +562,14 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     : { results: [] as { event_id: string; available: number; total: number }[] };
   throwIfAborted(signal);
   const creators = buildPickupCreatorsFromProjection(creatorProjection, 30);
+  const nostalgicPool = Array.isArray(nostalgic.results) ? nostalgic.results : [];
   const payload = {
     generated_at: now,
     recommended: recommended.results ?? [],
     latest: latest.results ?? [],
-    nostalgic: shuffledCopy(
-      Array.isArray(nostalgic.results) ? nostalgic.results : [],
-    ).slice(0, TOP_NOSTALGIA_LIMIT),
+    nostalgic_pool: nostalgicPool,
+    nostalgic: pickNostalgicDisplay(nostalgicPool, TOP_NOSTALGIA_LIMIT),
+    nostalgic_shuffled_at: now,
     items: latest.results ?? [],
     active_events: activeEventItems,
     latest_events: latestEventItems,
@@ -576,6 +585,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   };
   throwIfAborted(signal);
   await putJson(env, "top.json", payload, "public, max-age=60, stale-while-revalidate=300", { targetType: "top", targetId: "global" }, signal);
+  await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, utcDayKey(now));
   throwIfAborted(signal);
   await env.KV.put(
     "static:top",
@@ -587,6 +597,52 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     { expirationTtl: 600 },
   );
   throwIfAborted(signal);
+}
+
+/** top.json の懐かし棚だけを UTC 日次で R2 上シャッフルする。 */
+export async function ensureDailyTopNostalgicShuffle(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<number> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const dayKey = utcDayKey(now);
+  const lastDay = await env.KV.get(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY);
+  if (lastDay === dayKey) {
+    return 0;
+  }
+
+  const object = await env.R2.get("top.json");
+  if (!object) {
+    return 0;
+  }
+
+  const payload = JSON.parse(await object.text()) as {
+    nostalgic_pool?: unknown;
+    nostalgic_shuffled_at?: unknown;
+    [key: string]: unknown;
+  };
+  const pool = Array.isArray(payload.nostalgic_pool) ? payload.nostalgic_pool : null;
+  if (!pool || pool.length === 0) {
+    return 0;
+  }
+  if (!needsNostalgicDailyReshuffle(Number(payload.nostalgic_shuffled_at), now)) {
+    await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, dayKey);
+    return 0;
+  }
+
+  payload.nostalgic = pickNostalgicDisplay(pool, TOP_NOSTALGIA_LIMIT);
+  payload.nostalgic_shuffled_at = now;
+  await putJson(
+    env,
+    "top.json",
+    payload,
+    "public, max-age=60, stale-while-revalidate=300",
+    { targetType: "top", targetId: "global" },
+    signal,
+  );
+  await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, dayKey);
+  return 1;
 }
 
 async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void> {

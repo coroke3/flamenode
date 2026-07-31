@@ -142,6 +142,10 @@ test("YouTube公開可否変更はblocklistとrandom poolを同時更新する",
     /"random_video_pool"/,
   );
   assert.match(
+    projectionSource,
+    /"top"/,
+  );
+  assert.match(
     source,
     /enqueueYoutubeRelatedProjectionRebuilds/,
   );

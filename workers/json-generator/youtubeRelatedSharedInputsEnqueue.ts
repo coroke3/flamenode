@@ -6,6 +6,7 @@ type EnqueueEnv = { DB: D1Database; R2: R2Bucket };
 export const YOUTUBE_RELATED_PROJECTION_TARGETS = [
   "youtube_related_blocklist",
   "random_video_pool",
+  "top",
 ] as const;
 
 export async function enqueueYoutubeRelatedProjectionRebuilds(
