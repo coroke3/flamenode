@@ -15,7 +15,6 @@ import { ensureUsersSharedInputsOnR2 } from "../json-generator/usersSharedInputs
 import { ensureDeployGlobalRebuilds } from "../json-generator/deployGlobalRebuildEnqueue.ts";
 import { ensureDailyTopNostalgicShuffle } from "../json-generator/rebuild.ts";
 import { ensureYoutubeRelatedSharedInputsOnR2 } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
-import { withDeduplicatingR2 } from "../json-generator/r2Dedup.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import {
@@ -23,7 +22,8 @@ import {
   runJob,
   throwIfJobFailed,
 } from "../shared/runJob.ts";
-import { withSerializedD1 } from "../shared/serializedD1.ts";
+import { isD1BudgetExhausted } from "../shared/d1Budget.ts";
+import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
 import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
 import { handleStaticRebuildWakeQueue } from "./staticRebuildWakeQueue.ts";
@@ -46,7 +46,7 @@ const CLEANUP_INTERVAL_SEC = 24 * 3600;
 const CONTENT_JOBS_LEASE_SEC = 55 * 60;
 const CLEANUP_LEASE_SEC = 10 * 60;
 /** Recovery Cron が1回で排水できる static rebuild 上限（MAX_QUEUE_ITEMS_PER_RUN=1 のまま複数回呼ぶ）。 */
-export const CONTENT_JOBS_RECOVERY_MAX_TARGETS = 30;
+export const CONTENT_JOBS_RECOVERY_MAX_TARGETS = 3;
 /** lease 競合で processed=0 が続くときの無限ループ防止。 */
 export const CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED = 3;
 
@@ -56,11 +56,7 @@ type QueueResult = {
   skipped?: number;
   hasMore?: boolean;
 };
-type QueueRunner = (env: Env) => Promise<QueueResult>;
-
-function rebuildEnvironment(env: Env): Env {
-  return withDeduplicatingR2(withSerializedD1(env));
-}
+type QueueRunner = (env: ReturnType<typeof rebuildEnvironment>, signal?: AbortSignal) => Promise<QueueResult>;
 
 export async function runContentJobsRecovery(
   env: Env,
@@ -101,10 +97,17 @@ export async function runContentJobsRecovery(
               signal,
             },
           );
-          const nostalgicDailyShuffle = await ensureDailyTopNostalgicShuffle(
-            rebuildEnv,
-            signal,
-          );
+          let nostalgicDailyShuffle = 0;
+          try {
+            nostalgicDailyShuffle = await ensureDailyTopNostalgicShuffle(
+              rebuildEnv,
+              signal,
+            );
+          } catch (error) {
+            console.error("[content-jobs] daily top nostalgic enqueue failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
           if (
             deployGlobalRebuilds > 0 ||
             missingYoutubeSharedInputs > 0 ||
@@ -129,6 +132,10 @@ export async function runContentJobsRecovery(
               let consecutiveEmptyProcessed = 0;
               for (let i = 0; i < CONTENT_JOBS_RECOVERY_MAX_TARGETS; i += 1) {
                 signal.throwIfAborted();
+                if (isD1BudgetExhausted(rebuildEnv.d1Budget)) {
+                  staticRebuildHasMore = true;
+                  break;
+                }
                 const result = await processStaticRebuildQueue(rebuildEnv, signal);
                 aggregated = combineJobCounters(aggregated, result);
                 staticRebuildHasMore ||= Boolean(result.hasMore);
@@ -150,7 +157,13 @@ export async function runContentJobsRecovery(
                 }
                 consecutiveEmptyProcessed = 0;
               }
-              return { ...aggregated, hasMore: staticRebuildHasMore };
+              return {
+                ...aggregated,
+                hasMore: staticRebuildHasMore,
+                d1_statements: rebuildEnv.d1Budget.statements,
+                d1_rows_read: rebuildEnv.d1Budget.rowsRead,
+                d1_rows_written: rebuildEnv.d1Budget.rowsWritten,
+              };
             },
             { commitSha: env.BUILD_COMMIT_SHA },
           );

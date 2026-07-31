@@ -9,6 +9,7 @@ import {
   retryAll,
   sendWorkerQueueWakeBestEffort,
 } from "../shared/queueWake.ts";
+import { logQueueConsumerFailure } from "../shared/safeLog.ts";
 
 export type NotificationQueueConsumerEnv = {
   DB: D1Database;
@@ -59,8 +60,12 @@ export async function handleNotificationWakeQueue(
 
     ackAll(messages);
   } catch (error) {
-    // 判別不能な障害も retry し、Recovery Cron / DLQ に委ねる（ack で wake を捨てない）
+    logQueueConsumerFailure({
+      service: "flamenode-fast-jobs",
+      queueKind: "notification_available",
+      messageCount: messages.length,
+      error,
+    });
     retryAll(messages);
-    void error;
   }
 }

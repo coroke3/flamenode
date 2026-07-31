@@ -75,6 +75,64 @@ export async function resolveEventSyncTargetForNewVideo(
   });
 }
 
+export async function buildVideoMetadataClearPlan(
+  db: DB,
+  args: {
+    videoId: string;
+    now: number;
+    actorUserId: string;
+  },
+): Promise<VideoAtomicWritePlan> {
+  const existing = (
+    await db
+      .select()
+      .from(videoYoutubeMetadata)
+      .where(eq(videoYoutubeMetadata.video_id, args.videoId))
+      .limit(1)
+  )[0];
+  if (!existing) {
+    return emptyVideoAtomicWritePlan();
+  }
+  const after: typeof videoYoutubeMetadata.$inferSelect = {
+    video_id: args.videoId,
+    youtube_privacy_status: null,
+    youtube_availability_status: null,
+    duration_seconds: null,
+    view_count: 0,
+    synced_at: null,
+    sync_status: "pending",
+    sync_error: null,
+    updated_at: args.now,
+  };
+  return {
+    statements: [db.update(videoYoutubeMetadata).set({
+      youtube_privacy_status: null,
+      youtube_availability_status: null,
+      duration_seconds: null,
+      view_count: 0,
+      synced_at: null,
+      sync_status: "pending",
+      sync_error: null,
+      updated_at: args.now,
+    }).where(and(
+      eq(videoYoutubeMetadata.video_id, args.videoId),
+      expectedRowCondition({ expectedCurrent: existing }),
+    )!)],
+    expectedChanges: [1],
+    audits: [{
+      table_name: "video_youtube_metadata",
+      target_id: args.videoId,
+      operation: "UPDATE",
+      before: { ...existing },
+      after: { ...after },
+      actor_user_id: args.actorUserId,
+      context: "video-save:youtube-metadata-clear",
+      retention_class: "normal",
+      strict: true,
+    }],
+  };
+}
+
 export async function buildVideoDerivedRowsPlan(
   db: DB,
   args: {

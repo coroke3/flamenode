@@ -28,6 +28,10 @@ const EDITABLE_FIELD_OPTIONS = [
 
 type EditableFieldKey = (typeof EDITABLE_FIELD_OPTIONS)[number][0];
 
+function fieldsSetFromCsv(csv: string | null): Set<string> {
+  return new Set((csv ?? "").split(",").filter(Boolean));
+}
+
 const EDITABLE_FIELD_HELP: Record<EditableFieldKey, string> = {
   title: "作品タイトルを直せます",
   display_name: "作品ごとの作者名を直せます",
@@ -89,12 +93,18 @@ export function GlobalEditableFieldsPanel({
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
-  const defaultSet = new Set(
-    (settings.default_editable_fields ?? "").split(",").filter(Boolean),
+  const [defaultSelected, setDefaultSelected] = React.useState(() =>
+    fieldsSetFromCsv(settings.default_editable_fields),
   );
-  const upcomingSet = new Set(
-    (settings.upcoming_editable_fields ?? "").split(",").filter(Boolean),
+  const [upcomingSelected, setUpcomingSelected] = React.useState(() =>
+    fieldsSetFromCsv(settings.upcoming_editable_fields),
   );
+
+  React.useEffect(() => {
+    setDefaultSelected(fieldsSetFromCsv(settings.default_editable_fields));
+    setUpcomingSelected(fieldsSetFromCsv(settings.upcoming_editable_fields));
+  }, [settings.default_editable_fields, settings.upcoming_editable_fields]);
+
   const totalFields = EDITABLE_FIELD_OPTIONS.length;
   const scopes = [
     {
@@ -102,7 +112,8 @@ export function GlobalEditableFieldsPanel({
       name: "default_editable_fields",
       label: "通常作品",
       badge: "通常",
-      selected: defaultSet,
+      selected: defaultSelected,
+      setSelected: setDefaultSelected,
       tone: "primary" as const,
       description: "公開済み・通常状態の作品に適用します。",
     },
@@ -111,7 +122,8 @@ export function GlobalEditableFieldsPanel({
       name: "upcoming_editable_fields",
       label: "公開前作品",
       badge: "公開前",
-      selected: upcomingSet,
+      selected: upcomingSelected,
+      setSelected: setUpcomingSelected,
       tone: "warning" as const,
       description: "公開前・予約中の作品に適用します。",
     },
@@ -284,6 +296,14 @@ export function GlobalEditableFieldsPanel({
                           name={scope.name}
                           value={value}
                           checked={scope.selected.has(value)}
+                          onChange={(next) => {
+                            scope.setSelected((previous) => {
+                              const copy = new Set(previous);
+                              if (next) copy.add(value);
+                              else copy.delete(value);
+                              return copy;
+                            });
+                          }}
                           label={`${scope.label}で${label}を許可`}
                           scopeLabel={scope.badge}
                           tone={scope.tone}
@@ -424,6 +444,7 @@ function PermissionCheckbox({
   name,
   value,
   checked,
+  onChange,
   label,
   scopeLabel,
   tone,
@@ -431,6 +452,7 @@ function PermissionCheckbox({
   name: string;
   value: string;
   checked: boolean;
+  onChange: (checked: boolean) => void;
   label: string;
   scopeLabel: string;
   tone: "primary" | "warning";
@@ -463,7 +485,8 @@ function PermissionCheckbox({
         type="checkbox"
         name={name}
         value={value}
-        defaultChecked={checked}
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
         style={{ width: 14, height: 14, accentColor }}
       />
       {scopeLabel}

@@ -32,8 +32,15 @@ test("deep health rejects missing and invalid bearer tokens", async () => {
 
 test("deep health performs read-only D1, KV and R2 probes", async () => {
   const calls = [];
+  const now = Math.floor(Date.now() / 1000);
   const env = {
     BUILD_COMMIT_SHA: commit,
+    QUEUE_DISPATCH_ENABLED: "1",
+    QUEUE_CONTINUATION_ENABLED: "1",
+    QUEUE_YOUTUBE_SYNC_ENABLED: "1",
+    NOTIFICATION_WAKE_QUEUE: { send: () => {} },
+    STATIC_REBUILD_WAKE_QUEUE: { send: () => {} },
+    YOUTUBE_SYNC_WAKE_QUEUE: { send: () => {} },
     DB: {
       prepare(query) {
         calls.push(["d1", query]);
@@ -46,23 +53,63 @@ test("deep health performs read-only D1, KV and R2 probes", async () => {
       },
     },
     KV: { get: async (key) => calls.push(["kv", key]) },
-    BUCKET: { head: async (key) => calls.push(["r2", key]) },
+    BUCKET: {
+      head: async (key) => calls.push(["r2", key]),
+      get: async (key) => {
+        calls.push(["r2-get", key]);
+        const generatedAt = now - 60;
+        if (key === "top.json") {
+          return {
+            text: async () =>
+              JSON.stringify({
+                generated_at: generatedAt,
+                latest: [],
+                stats: { public_videos: 0 },
+              }),
+          };
+        }
+        return {
+          text: async () =>
+            JSON.stringify({
+              generated_at: generatedAt,
+              total: 0,
+              items: [],
+            }),
+        };
+      },
+    },
   };
   assert.deepEqual(await runDeepHealthChecks(env), {
     ok: true,
     service: "flamenode-web",
     commit,
-    checks: { d1: "ok", kv: "ok", r2: "ok", schema: "ok" },
+    checks: {
+      d1: "ok",
+      kv: "ok",
+      r2: "ok",
+      schema: "ok",
+      queues: "ok",
+      static_artifacts: "ok",
+    },
   });
-  assert.deepEqual(calls.map(([kind]) => kind).sort(), ["d1", "kv", "r2"]);
+  assert.deepEqual(calls.map(([kind]) => kind).sort(), ["d1", "kv", "r2", "r2-get", "r2-get"]);
 });
 
 test("deep health fails closed on schema mismatch", async () => {
   const env = {
     BUILD_COMMIT_SHA: commit,
+    QUEUE_DISPATCH_ENABLED: "1",
+    QUEUE_CONTINUATION_ENABLED: "1",
+    QUEUE_YOUTUBE_SYNC_ENABLED: "1",
+    NOTIFICATION_WAKE_QUEUE: { send: () => {} },
+    STATIC_REBUILD_WAKE_QUEUE: { send: () => {} },
+    YOUTUBE_SYNC_WAKE_QUEUE: { send: () => {} },
     DB: { prepare: () => ({ first: async () => ({ version: "old" }) }) },
     KV: { get: async () => null },
-    BUCKET: { head: async () => null },
+    BUCKET: {
+      head: async () => null,
+      get: async () => null,
+    },
   };
   await assert.rejects(() => runDeepHealthChecks(env), /schema version mismatch/);
 });
@@ -70,6 +117,12 @@ test("deep health fails closed on schema mismatch", async () => {
 test("deep health fails closed when any runtime table is missing", async () => {
   const env = {
     BUILD_COMMIT_SHA: commit,
+    QUEUE_DISPATCH_ENABLED: "1",
+    QUEUE_CONTINUATION_ENABLED: "1",
+    QUEUE_YOUTUBE_SYNC_ENABLED: "1",
+    NOTIFICATION_WAKE_QUEUE: { send: () => {} },
+    STATIC_REBUILD_WAKE_QUEUE: { send: () => {} },
+    YOUTUBE_SYNC_WAKE_QUEUE: { send: () => {} },
     DB: {
       prepare: () => ({
         first: async () => ({
@@ -79,7 +132,10 @@ test("deep health fails closed when any runtime table is missing", async () => {
       }),
     },
     KV: { get: async () => null },
-    BUCKET: { head: async () => null },
+    BUCKET: {
+      head: async () => null,
+      get: async () => null,
+    },
   };
   await assert.rejects(
     () => runDeepHealthChecks(env),

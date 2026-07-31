@@ -710,7 +710,10 @@ export function runProcess({
   }
   if (result.error || result.status !== 0) {
     const detail = result.error?.message ? ` (${result.error.message})` : "";
-    throw new Error(`${label} FAILED after ${elapsed}s${detail}`);
+    const stderr = redactOutput(result.stderr, env).trim();
+    const stdout = redactOutput(result.stdout, env).trim();
+    const outputHint = stderr || stdout ? `\n${stderr || stdout}` : "";
+    throw new Error(`${label} FAILED after ${elapsed}s${detail}${outputHint}`);
   }
   console.log(`[${label}] OK ${elapsed}s`);
   return result;
@@ -883,5 +886,68 @@ export function runRemoteSecretPreflight({
         `${target.service}: required remote Worker secret names are missing: DISCORD_BOT_TOKEN or DISCORD_WEBHOOK_URL. Configure one before retrying.`,
       );
     }
+  }
+}
+
+export const WORKER_UPLOAD_SIZE_WARN_BYTES = Math.floor(2.7 * 1024 * 1024);
+export const WORKER_UPLOAD_SIZE_FAIL_BYTES = Math.floor(2.9 * 1024 * 1024);
+
+const UPLOAD_UNIT_BYTES = {
+  b: 1,
+  kib: 1024,
+  mib: 1024 * 1024,
+  gib: 1024 * 1024 * 1024,
+};
+
+export function parseWranglerTotalUploadBytes(output) {
+  const match = String(output ?? "").match(
+    /Total Upload:\s+([\d.]+)\s+(B|KiB|MiB|GiB)\b/i,
+  );
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  if (!Number.isFinite(amount)) return null;
+  const multiplier = UPLOAD_UNIT_BYTES[unit];
+  if (!multiplier) return null;
+  return Math.round(amount * multiplier);
+}
+
+export function assertWorkerUploadSizeWithinLimit(bytes, service) {
+  if (bytes == null) {
+    throw new Error(`${service}: wrangler dry-run did not report Total Upload size.`);
+  }
+  if (bytes >= WORKER_UPLOAD_SIZE_FAIL_BYTES) {
+    throw new Error(
+      `${service}: Worker upload ${(bytes / (1024 * 1024)).toFixed(2)} MiB exceeds fail limit ${(WORKER_UPLOAD_SIZE_FAIL_BYTES / (1024 * 1024)).toFixed(1)} MiB.`,
+    );
+  }
+  if (bytes >= WORKER_UPLOAD_SIZE_WARN_BYTES) {
+    console.warn(
+      `[cloudflare-deploy] ${service}: Worker upload ${(bytes / (1024 * 1024)).toFixed(2)} MiB exceeds warn limit ${(WORKER_UPLOAD_SIZE_WARN_BYTES / (1024 * 1024)).toFixed(1)} MiB.`,
+    );
+  }
+}
+
+export function runWorkerUploadSizePreflight({
+  env = process.env,
+  repoRoot = process.cwd(),
+  configs,
+  wranglerBin,
+  run = runProcess,
+} = {}) {
+  for (const target of DEPLOY_TARGETS) {
+    if (target.key === "web") continue;
+    const result = run({
+      executable: process.execPath,
+      args: [wranglerBin, "deploy", "--dry-run", "--config", configs[target.key]],
+      cwd: repoRoot,
+      env,
+      label: `cloudflare-deploy:${target.service}:upload-size-preflight`,
+      allowOutput: false,
+    });
+    assertWorkerUploadSizeWithinLimit(
+      parseWranglerTotalUploadBytes(result.stdout),
+      target.service,
+    );
   }
 }

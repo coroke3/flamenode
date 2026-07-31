@@ -1,10 +1,56 @@
 type DedupEnv = {
   DB: D1Database;
   R2: R2Bucket;
+  artifactHashCache?: ArtifactHashCache;
 };
 
 type R2PutArgs = Parameters<R2Bucket["put"]>;
 type R2PutResult = Awaited<ReturnType<R2Bucket["put"]>>;
+
+const MAX_PRELOAD_ARTIFACT_HASHES = 100;
+
+export class ArtifactHashCache {
+  private readonly hashes = new Map<string, string | null>();
+  private readonly loadedTargets = new Set<string>();
+
+  async preload(
+    db: D1Database,
+    targetType: string,
+    targetId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const targetKey = `${targetType}:${targetId}`;
+    if (this.loadedTargets.has(targetKey)) return;
+    signal?.throwIfAborted();
+
+    const result = await db
+      .prepare(
+        `SELECT object_key, content_hash
+         FROM static_artifacts
+         WHERE target_type = ?
+           AND target_id = ?
+           AND deleted_at IS NULL
+         LIMIT ?`,
+      )
+      .bind(targetType, targetId, MAX_PRELOAD_ARTIFACT_HASHES)
+      .all<{ object_key: string; content_hash?: string | null }>();
+
+    signal?.throwIfAborted();
+    for (const row of result.results ?? []) {
+      this.hashes.set(row.object_key, row.content_hash ?? null);
+    }
+    this.loadedTargets.add(targetKey);
+  }
+
+  get(objectKey: string): string | null | undefined {
+    if (!this.hashes.has(objectKey)) return undefined;
+    return this.hashes.get(objectKey) ?? null;
+  }
+
+  set(objectKey: string, hash: string | null): void {
+    this.hashes.set(objectKey, hash);
+  }
+}
 
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -40,7 +86,11 @@ export async function staticArtifactContentHash(value: string): Promise<string> 
 async function currentArtifactHash(
   db: D1Database,
   objectKey: string,
+  cache?: ArtifactHashCache,
 ): Promise<string | null> {
+  const cached = cache?.get(objectKey);
+  if (cached !== undefined) return cached;
+
   const row = await db
     .prepare(
       `SELECT content_hash
@@ -51,7 +101,9 @@ async function currentArtifactHash(
     )
     .bind(objectKey)
     .first<{ content_hash?: string }>();
-  return row?.content_hash ?? null;
+  const hash = row?.content_hash ?? null;
+  cache?.set(objectKey, hash);
+  return hash;
 }
 
 /**
@@ -67,7 +119,11 @@ export function withDeduplicatingR2<Env extends DedupEnv>(env: Env): Env {
           const [key, value] = args;
           if (typeof value === "string") {
             const nextHash = await staticArtifactContentHash(value);
-            const storedHash = await currentArtifactHash(env.DB, key);
+            const storedHash = await currentArtifactHash(
+              env.DB,
+              key,
+              env.artifactHashCache,
+            );
             if (storedHash === nextHash) {
               const existing = await bucket.head(key);
               if (existing) return existing;

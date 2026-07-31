@@ -3,6 +3,10 @@ import {
   REQUIRED_SCHEMA_VERSION,
   RUNTIME_CRITICAL_TABLES,
 } from "./schemaContract.ts";
+import {
+  assertDeepHealthQueueConfiguration,
+  assertStaticArtifactsFresh,
+} from "./deepHealthQueues.ts";
 
 export { REQUIRED_SCHEMA_VERSION } from "./schemaContract.ts";
 
@@ -20,9 +24,16 @@ export interface DeepHealthEnv {
   };
   BUCKET: {
     head(key: string): Promise<unknown>;
+    get(key: string): Promise<{ text: () => Promise<string> } | null>;
   };
   BUILD_COMMIT_SHA?: string;
   WORKER_ADMIN_TOKEN?: string;
+  QUEUE_DISPATCH_ENABLED?: string;
+  QUEUE_CONTINUATION_ENABLED?: string;
+  QUEUE_YOUTUBE_SYNC_ENABLED?: string;
+  NOTIFICATION_WAKE_QUEUE?: { send?: unknown };
+  STATIC_REBUILD_WAKE_QUEUE?: { send?: unknown };
+  YOUTUBE_SYNC_WAKE_QUEUE?: { send?: unknown };
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -61,7 +72,14 @@ export async function runDeepHealthChecks(env: DeepHealthEnv): Promise<{
   ok: true;
   service: "flamenode-web";
   commit: string;
-  checks: { d1: "ok"; kv: "ok"; r2: "ok"; schema: "ok" };
+  checks: {
+    d1: "ok";
+    kv: "ok";
+    r2: "ok";
+    schema: "ok";
+    queues: "ok";
+    static_artifacts: "ok";
+  };
 }> {
   const commit = env.BUILD_COMMIT_SHA?.trim() ?? "";
   if (!COMMIT_PATTERN.test(commit)) throw new Error("invalid deployment commit");
@@ -70,6 +88,7 @@ export async function runDeepHealthChecks(env: DeepHealthEnv): Promise<{
     (table) => `'${table}'`,
   ).join(",");
 
+  const nowSec = Math.floor(Date.now() / 1000);
   const [schema] = await Promise.all([
     env.DB.prepare(
       `SELECT
@@ -87,10 +106,20 @@ export async function runDeepHealthChecks(env: DeepHealthEnv): Promise<{
     throw new Error("required runtime table mismatch");
   }
 
+  assertDeepHealthQueueConfiguration(env);
+  await assertStaticArtifactsFresh(env.BUCKET, nowSec);
+
   return {
     ok: true,
     service: "flamenode-web",
     commit: commit.toLowerCase(),
-    checks: { d1: "ok", kv: "ok", r2: "ok", schema: "ok" },
+    checks: {
+      d1: "ok",
+      kv: "ok",
+      r2: "ok",
+      schema: "ok",
+      queues: "ok",
+      static_artifacts: "ok",
+    },
   };
 }

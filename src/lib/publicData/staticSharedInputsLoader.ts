@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 import { getEnv } from "@/lib/cloudflare";
 import { recordPublicR2Get } from "@/lib/observability/publicRequestMetrics";
+import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import {
   coercePublicJsonCacheEnvelope,
   readPublicJsonCache,
@@ -117,7 +118,7 @@ export async function loadYoutubeRelatedBlocklist(): Promise<
     key: YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
     normalize: normalizeYoutubeRelatedBlocklist,
     maxStaleAgeSec: YOUTUBE_RELATED_BLOCKLIST_STALE_MAX_AGE_SEC,
-    cacheTtlSeconds: 300,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
   });
   if (result.status === "unavailable" || !result.value) {
     return {
@@ -150,7 +151,7 @@ const loadPublicXIconMapOptionalImpl = cache(
       key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
       normalize: normalizePublicXIconMap,
       maxStaleAgeSec: 24 * 60 * 60,
-      cacheTtlSeconds: 300,
+      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
     });
     const requiredIds = new Set(requiredXUserIds);
     const primary = result.value;
@@ -170,7 +171,7 @@ const loadPublicXIconMapOptionalImpl = cache(
       normalize: (value) =>
         normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
       maxStaleAgeSec: 24 * 60 * 60,
-      cacheTtlSeconds: 300,
+      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
     });
     if (!indexResult.value) return primary;
 
@@ -217,7 +218,7 @@ export async function loadRandomVideoPool(): Promise<
     key: RANDOM_VIDEO_POOL_OBJECT_KEY,
     normalize: normalizeRandomVideoPool,
     maxStaleAgeSec: 24 * 60 * 60,
-    cacheTtlSeconds: 300,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
   });
   if (result.status === "unavailable" || !result.value) {
     return {

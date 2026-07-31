@@ -28,6 +28,7 @@ const RETRY_BACKOFF_SEC = [60, 300, 900] as const;
 /** Discord配送成功後に sent 更新だけ失敗した行。再配送せず lease 回復で sent へ進める。 */
 export const DELIVERY_SUCCEEDED_AWAITING_SENT_MARK =
   "delivery_succeeded_awaiting_sent_mark";
+export const ORPHAN_RECIPIENT_ERROR = "recipient_user_not_found";
 const DISCORD_FETCH_TIMEOUT_MS = 5_000;
 const DISCORD_MAX_RETRY_AFTER_MS = 15 * 60 * 1_000;
 const DISCORD_DM_CHANNEL_TTL_SEC = 30 * 24 * 60 * 60;
@@ -898,6 +899,37 @@ export async function recoverNotificationOutboxExpiredLeases(
   return recoverExpiredLeases(env, now, limit, signal);
 }
 
+export async function deadLetterOrphanPendingNotifications(
+  env: Env,
+  now: number,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  throwIfAborted(signal);
+  const result = await env.DB.prepare(
+    `UPDATE notification_outbox
+        SET status = 'dead_letter',
+            processing_started_at = NULL,
+            lease_token = NULL,
+            lease_expires_at = NULL,
+            next_attempt_at = NULL,
+            last_error = ?1,
+            processed_at = ?2
+      WHERE id IN (
+        SELECT n.id
+          FROM notification_outbox n
+          LEFT JOIN "user" u ON u.id = n.recipient_user_id
+         WHERE n.status = 'pending'
+           AND u.id IS NULL
+         LIMIT ?3
+      )`,
+  )
+    .bind(ORPHAN_RECIPIENT_ERROR, now, limit)
+    .run();
+  throwIfAborted(signal);
+  return Math.max(0, Number(result.meta?.changes ?? 0));
+}
+
 export async function hasDuePendingNotifications(
   env: Env,
   signal?: AbortSignal,
@@ -907,6 +939,7 @@ export async function hasDuePendingNotifications(
   const result = await env.DB.prepare(
     `SELECT n.id
        FROM notification_outbox n
+       INNER JOIN "user" u ON u.id = n.recipient_user_id
       WHERE n.status = 'pending'
         AND COALESCE(n.attempt_count, 0) < ?1
         AND (n.next_attempt_at IS NULL OR n.next_attempt_at <= ?2)
@@ -939,6 +972,8 @@ export async function processNotificationQueue(
     d1Changes = await recoverExpiredLeases(env, now, limit, signal);
     throwIfAborted(signal);
   }
+  d1Changes += await deadLetterOrphanPendingNotifications(env, now, limit, signal);
+  throwIfAborted(signal);
   const result = await env.DB.prepare(
     `SELECT n.id, n.recipient_user_id, u.discord_id, n.type, n.payload_json,
             COALESCE(n.attempt_count, 0) AS attempt_count

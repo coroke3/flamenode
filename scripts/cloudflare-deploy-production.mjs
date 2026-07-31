@@ -9,6 +9,7 @@ import {
   runProcess,
   runReadOnlySchemaPreflight,
   runRemoteSecretPreflight,
+  runWorkerUploadSizePreflight,
   verifyProductionEnvironment,
 } from "./cloudflare-production.mjs";
 
@@ -39,6 +40,7 @@ export function deployProduction({
   checkOutput = checkOpenNextOutput,
   schemaPreflight = runReadOnlySchemaPreflight,
   secretPreflight = runRemoteSecretPreflight,
+  uploadSizePreflight = runWorkerUploadSizePreflight,
   run = runProcess,
 } = {}) {
   const verified = verify({ env, cwd: repoRoot });
@@ -59,6 +61,8 @@ export function deployProduction({
   );
 
   secretPreflight({ env, repoRoot, configs, wranglerBin, run });
+
+  uploadSizePreflight({ env, repoRoot, configs, wranglerBin, run });
 
   schemaPreflight({
     env,

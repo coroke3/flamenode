@@ -29,7 +29,9 @@ import {
   assertCommitSha,
   assertRemoteSecretPayload,
   assertSchemaPreflightPayload,
+  assertWorkerUploadSizeWithinLimit,
   materializeProductionConfigs,
+  parseWranglerTotalUploadBytes,
   redactOutput,
   runProcess,
   runReadOnlySchemaPreflight,
@@ -697,6 +699,20 @@ test("remote Worker secret preflight checks names only and never accepts a missi
   );
 });
 
+test("wrangler dry-run upload size parser enforces warn and fail thresholds", () => {
+  assert.equal(
+    parseWranglerTotalUploadBytes("Total Upload: 76.81 KiB / gzip: 18.92 KiB"),
+    Math.round(76.81 * 1024),
+  );
+  assert.throws(
+    () => assertWorkerUploadSizeWithinLimit(3 * 1024 * 1024, "flamenode-fast-jobs"),
+    /exceeds fail limit/,
+  );
+  assert.doesNotThrow(() =>
+    assertWorkerUploadSizeWithinLimit(100 * 1024, "flamenode-fast-jobs"),
+  );
+});
+
 test("production deploy order is web, fast, content, sync and failure stops every later target", () =>
   withTempDirectory("flamenode-deploy-order-", (repoRoot) => {
     const fakeOpenNext = path.join(repoRoot, "opennext.mjs");
@@ -721,11 +737,13 @@ test("production deploy order is web, fast, content, sync and failure stops ever
       prepareConfigs: () => configs,
       checkOutput: () => undefined,
       secretPreflight: () => labels.push("secrets"),
+      uploadSizePreflight: () => labels.push("upload-sizes"),
       schemaPreflight: () => labels.push("schema"),
     };
     deployProduction({ ...common, run: ({ label }) => labels.push(label) });
     assert.deepEqual(labels, [
       "secrets",
+      "upload-sizes",
       "schema",
       "cloudflare-deploy:flamenode-web",
       "cloudflare-deploy:flamenode-fast-jobs",
@@ -840,11 +858,18 @@ function smokeFetch(commit, { mismatchService, staleCommitResponses = {} } = {})
         ok: true,
         service: "flamenode-web",
         commit: responseCommit("flamenode-web-deep"),
-        checks: { d1: "ok", kv: "ok", r2: "ok", schema: "ok" },
+        checks: {
+          d1: "ok",
+          kv: "ok",
+          r2: "ok",
+          schema: "ok",
+          queues: "ok",
+          static_artifacts: "ok",
+        },
       });
     }
     if (url.pathname === "/api/videos") {
-      return jsonResponse({ items: [], total: 0, page: 1, limit: 1 });
+      return jsonResponse({ items: [], total: 0, page: 1, limit: 5 });
     }
     if (url.pathname.startsWith("/__flamenode-smoke-missing-")) return new Response(null, { status: 404 });
     throw new Error(`unexpected fixture request ${method} ${url.pathname}`);

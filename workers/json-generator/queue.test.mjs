@@ -168,6 +168,16 @@ function fakeDb(row) {
 
           return { meta: { changes: 0 } };
         },
+        async all() {
+          const result = await query.run();
+          if (
+            sql.includes("RETURNING status") &&
+            (result.meta?.changes ?? 0) === 1
+          ) {
+            return { ...result, results: [{ status: row.status }] };
+          }
+          return { ...result, results: [] };
+        },
       };
       return query;
     },
@@ -201,7 +211,7 @@ test("processing中の再enqueueは完了時にpendingへ戻す", async () => {
   const env = envFor(row);
   const token = await markProcessing(env, row.id, 100);
   row.updated_at = 101;
-  assert.equal(await markDone(env, row.id, token, 110), true);
+  assert.equal(await markDoneWithRetries(env, row.id, token, 110), "requeued");
   assert.equal(row.status, "pending");
   assert.equal(row.processed_at, null);
   assert.equal(row.attempt_count, 0);
@@ -435,22 +445,24 @@ test("rebuild成功後にmarkDoneが1回失敗してもretryでdoneへ進む", a
   const originalPrepare = env.DB.prepare.bind(env.DB);
   env.DB.prepare = (sql) => {
     const query = originalPrepare(sql);
-    const originalRun = query.run.bind(query);
-    query.run = async () => {
+    const originalAll = query.all.bind(query);
+    query.all = async () => {
       if (
         sql.includes("SET status = CASE") &&
         sql.includes("processed_at = CASE") &&
         sql.includes("lease_token = ?")
       ) {
         markDoneCalls += 1;
-        if (markDoneCalls === 1) return { meta: { changes: 0 } };
+        if (markDoneCalls === 1) {
+          return { meta: { changes: 0 }, results: [] };
+        }
       }
-      return originalRun();
+      return originalAll();
     };
     return query;
   };
   const token = await markProcessing(env, row.id, 100);
-  assert.equal(await markDoneWithRetries(env, row.id, token, 110), true);
+  assert.equal(await markDoneWithRetries(env, row.id, token, 110), "done");
   assert.equal(row.status, "done");
   assert.equal(markDoneCalls, 2);
 });
@@ -469,20 +481,20 @@ test("rebuild成功後にmarkDoneが常に失敗してもlease回復でdoneへ�
   const originalPrepare = env.DB.prepare.bind(env.DB);
   env.DB.prepare = (sql) => {
     const query = originalPrepare(sql);
-    const originalRun = query.run.bind(query);
-    query.run = async () => {
+    const originalAll = query.all.bind(query);
+    query.all = async () => {
       if (
         sql.includes("SET status = CASE") &&
         sql.includes("processed_at = CASE") &&
         sql.includes("lease_token = ?")
       ) {
-        return { meta: { changes: 0 } };
+        return { meta: { changes: 0 }, results: [] };
       }
-      return originalRun();
+      return originalAll();
     };
     return query;
   };
-  assert.equal(await markDoneWithRetries(env, row.id, row.lease_token, 110), false);
+  assert.equal(await markDoneWithRetries(env, row.id, row.lease_token, 110), null);
   assert.equal(await markDoneOrSuppressRedelivery(env, row.id, row.lease_token, 110), true);
   assert.equal(row.status, "processing");
   assert.equal(row.error, REBUILD_SUCCEEDED_AWAITING_DONE_MARK);

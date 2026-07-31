@@ -75,6 +75,43 @@ function targetKey(target: EnqueueStaticRebuildInput): string {
   return `${target.targetType}:${target.targetId}`;
 }
 
+function addVideoCardGlobalTargets(
+  mutation: SpreadsheetStaticRebuildMutation,
+  add: (
+    mutation: SpreadsheetStaticRebuildMutation,
+    target: Omit<EnqueueStaticRebuildInput, "reason" | "requestedByUserId">,
+  ) => void,
+): void {
+  add(mutation, {
+    targetType: "random_video_pool",
+    targetId: "global",
+    priority: "low",
+  });
+  add(mutation, {
+    targetType: "list_recent",
+    targetId: "global",
+  });
+  add(mutation, {
+    targetType: "list_popular",
+    targetId: "global",
+  });
+  add(mutation, {
+    targetType: "search_index",
+    targetId: "global",
+    priority: "low",
+  });
+  add(mutation, {
+    targetType: "top",
+    targetId: "global",
+    priority: "low",
+  });
+  add(mutation, {
+    targetType: "recommend",
+    targetId: "global",
+    priority: "low",
+  });
+}
+
 /**
  * Spreadsheetのbefore/after snapshotだけから、同じatomic batchへ含める静的再生成targetを導出する。
  * DB参照や副作用を持たないため、apply前の上限判定にも使用できる。
@@ -110,11 +147,7 @@ export function planSpreadsheetStaticRebuildTargets(
           priority: "high",
         });
         if (changed(mutation, VIDEO_RANDOM_POOL_FIELDS)) {
-          add(mutation, {
-            targetType: "random_video_pool",
-            targetId: "global",
-            priority: "low",
-          });
+          addVideoCardGlobalTargets(mutation, add);
         }
         if (changed(mutation, ["visibility_status"])) {
           add(mutation, {

@@ -29,10 +29,34 @@ test("videosは詳細を常に再生成し、カード・visibilityの意味あ�
     [
       "video:video-1",
       "random_video_pool:global",
-      "youtube_related_blocklist:global",
       "list_recent:global",
       "list_popular:global",
       "search_index:global",
+      "top:global",
+      "recommend:global",
+      "youtube_related_blocklist:global",
+    ],
+  );
+
+  assert.deepEqual(
+    keys(
+      planSpreadsheetStaticRebuildTargets([
+        mutation(
+          "videos",
+          "UPDATE",
+          { id: "video-1", title: "旧", intro_comment: "変更前" },
+          { id: "video-1", title: "新", intro_comment: "変更前" },
+        ),
+      ]),
+    ),
+    [
+      "video:video-1",
+      "random_video_pool:global",
+      "list_recent:global",
+      "list_popular:global",
+      "search_index:global",
+      "top:global",
+      "recommend:global",
     ],
   );
 
@@ -64,10 +88,12 @@ test("videosは詳細を常に再生成し、カード・visibilityの意味あ�
     [
       "video:video-1",
       "random_video_pool:global",
-      "youtube_related_blocklist:global",
       "list_recent:global",
       "list_popular:global",
       "search_index:global",
+      "top:global",
+      "recommend:global",
+      "youtube_related_blocklist:global",
     ],
   );
 });

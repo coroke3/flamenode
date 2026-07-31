@@ -168,8 +168,7 @@ export const events = sqliteTable(
       enum: ["private", "public"],
     })
       .notNull()
-      // 0043の物理defaultはdraft。0044がINSERT直後にprivateへ正規化する。
-      .default("draft" as "private"),
+      .default("private"),
     allow_user_video_event_links: integer("allow_user_video_event_links")
       .notNull()
       .default(0),
@@ -303,8 +302,7 @@ export const videos = sqliteTable(
       enum: ["pending", "public", "private", "voided"],
     })
       .notNull()
-      // 0043の物理defaultはdraft。0044がINSERT直後にpendingへ正規化する。
-      .default("draft" as "pending"),
+      .default("pending"),
     scheduling_type: text("scheduling_type", {
       enum: ["slotted", "manual"],
     }).default("slotted"),

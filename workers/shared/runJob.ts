@@ -6,6 +6,9 @@ export interface JobCounters {
   failed?: number;
   external_api_calls?: number;
   d1_changes?: number;
+  d1_statements?: number;
+  d1_rows_read?: number;
+  d1_rows_written?: number;
   retry_count?: number;
   quota_stopped?: boolean;
   quota_stop_reason?: string;
@@ -18,6 +21,9 @@ export interface JobRunResult {
   failed: number;
   external_api_calls?: number;
   d1_changes?: number;
+  d1_statements?: number;
+  d1_rows_read?: number;
+  d1_rows_written?: number;
   retry_count?: number;
   quota_stopped?: boolean;
   quota_stop_reason?: string;
@@ -78,7 +84,14 @@ export function normalizeJobCounters(value: unknown): NormalizedJobCounters {
       skipped: normalizeCounter(row.skipped),
       failed: normalizeCounter(row.failed),
     };
-    for (const key of ["external_api_calls", "d1_changes", "retry_count"] as const) {
+    for (const key of [
+      "external_api_calls",
+      "d1_changes",
+      "d1_statements",
+      "d1_rows_read",
+      "d1_rows_written",
+      "retry_count",
+    ] as const) {
       const metric = normalizeMetric((row as JobCounters)[key]);
       if (metric !== undefined) result[key] = metric;
     }
@@ -128,7 +141,14 @@ export function combineJobCounters(...values: unknown[]): NormalizedJobCounters 
     total.processed += counters.processed;
     total.skipped += counters.skipped;
     total.failed += counters.failed;
-    for (const key of ["external_api_calls", "d1_changes", "retry_count"] as const) {
+    for (const key of [
+      "external_api_calls",
+      "d1_changes",
+      "d1_statements",
+      "d1_rows_read",
+      "d1_rows_written",
+      "retry_count",
+    ] as const) {
       if (typeof counters[key] === "number") total[key] = (total[key] ?? 0) + counters[key];
     }
     if (typeof counters.quota_stopped === "boolean") total.quota_stopped = (total.quota_stopped ?? false) || counters.quota_stopped;
@@ -177,6 +197,9 @@ export async function runJob(
   const logMetrics = (value: NormalizedJobCounters) => ({
     external_api_calls: value.external_api_calls ?? 0,
     d1_changes: value.d1_changes ?? 0,
+    d1_statements: value.d1_statements ?? 0,
+    d1_rows_read: value.d1_rows_read ?? 0,
+    d1_rows_written: value.d1_rows_written ?? 0,
     retry_count: value.retry_count ?? 0,
     quota_stopped: value.quota_stopped ?? false,
     ...(value.quota_stop_reason ? { quota_stop_reason: value.quota_stop_reason } : {}),

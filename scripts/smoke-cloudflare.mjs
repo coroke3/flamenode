@@ -291,15 +291,59 @@ function validateCronHealthBody(settings, service, body) {
 
 function validateDeepHealthBody(settings, body) {
   assertKeys(body, ["ok", "service", "commit", "checks"], "deep health");
-  assertKeys(body.checks, ["d1", "kv", "r2", "schema"], "deep health checks");
+  assertKeys(
+    body.checks,
+    ["d1", "kv", "r2", "schema", "queues", "static_artifacts"],
+    "deep health checks",
+  );
   if (
     body.ok !== true ||
     body.service !== "flamenode-web" ||
     body.commit !== settings.commit ||
-    ["d1", "kv", "r2", "schema"].some((name) => body.checks[name] !== "ok")
+    ["d1", "kv", "r2", "schema", "queues", "static_artifacts"].some(
+      (name) => body.checks[name] !== "ok",
+    )
   ) {
-    throw new Error("deep health: D1/KV/R2/schema read-only check failed or commit mismatched.");
+    throw new Error("deep health: D1/KV/R2/schema/queues/static checks failed or commit mismatched.");
   }
+}
+
+const PUBLIC_VIDEO_ITEM_KEYS = [
+  "id",
+  "title",
+  "youtube_video_id",
+  "display_name",
+  "icon_url",
+  "primary_event_id",
+  "scheduled_time",
+  "status",
+];
+
+function assertPublicVideosPayload(body, label) {
+  assertKeys(body, ["items", "total", "page", "limit"], label);
+  if (!Array.isArray(body.items) || body.page !== 1) {
+    throw new Error(`${label}: invalid pagination payload.`);
+  }
+  if (!Number.isFinite(body.total) || body.total < 0) {
+    throw new Error(`${label}: invalid total.`);
+  }
+  if (body.items.length > body.limit) {
+    throw new Error(`${label}: items length exceeds limit.`);
+  }
+  for (const [index, item] of body.items.entries()) {
+    assertKeys(item, PUBLIC_VIDEO_ITEM_KEYS, `${label}.items[${index}]`);
+    if (item.status !== "public") {
+      throw new Error(`${label}.items[${index}]: status must be public.`);
+    }
+  }
+  assertNoForbiddenKeys(body, label);
+}
+
+function parseWorksCountFromListHtml(html) {
+  const listText = html.replace(/<!--[\s\S]*?-->/g, "");
+  const match = listText.match(/(\d[\d,]*)\s*works/);
+  if (!match) return null;
+  return Number.parseInt(match[1].replaceAll(",", ""), 10);
 }
 
 async function waitForProductionHealthConvergence(fetchImpl, settings, propagationOptions) {
@@ -408,14 +452,23 @@ export async function runSmoke({
   );
   assertStatus(deepUnauthenticated, [401], "deep health unauthenticated rejection");
 
-  const publicApi = await get(`${settings.web}/api/videos?limit=1`, {}, "public videos DTO");
+  const publicApi = await get(`${settings.web}/api/videos?limit=5`, {}, "public videos DTO");
   assertStatus(publicApi, [200], "public videos DTO");
   const publicBody = await parseJson(publicApi, "public videos DTO");
-  assertKeys(publicBody, ["items", "total", "page", "limit"], "public videos DTO");
-  if (!Array.isArray(publicBody.items) || publicBody.page !== 1 || publicBody.limit !== 1) {
-    throw new Error("public videos DTO: invalid pagination payload.");
+  assertPublicVideosPayload(publicBody, "public videos DTO");
+  if (publicBody.limit !== 5) {
+    throw new Error("public videos DTO: unexpected limit.");
   }
-  assertNoForbiddenKeys(publicBody, "public videos DTO");
+  const listWorksCount = parseWorksCountFromListHtml(listHtml);
+  if (
+    listWorksCount !== null &&
+    Number.isFinite(publicBody.total) &&
+    publicBody.total < listWorksCount
+  ) {
+    throw new Error(
+      "public videos DTO: total is lower than list page works count marker.",
+    );
+  }
 
   const missing = await get(
     `${settings.web}/__flamenode-smoke-missing-${settings.commit.slice(0, 12)}`,
@@ -427,7 +480,7 @@ export async function runSmoke({
   assertStatus(invalidMethod, [405], "invalid method probe");
 
   console.log(
-    "[smoke-cloudflare] OK (health convergence, web, assets, list shell, top shell, legacy import guard, auth, cron admin guard, deep health auth, DTO, 404, method)",
+    "[smoke-cloudflare] OK (health convergence, web, assets, list shell, top shell, legacy import guard, auth, cron admin guard, deep health auth, DTO, count consistency, 404, method)",
   );
   return { commit: settings.commit };
 }

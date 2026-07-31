@@ -152,7 +152,7 @@ Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効
 | `flamenode-content-jobs` | `WORKER_ADMIN_TOKEN` |
 | `flamenode-sync-jobs` | `YOUTUBE_API_KEY`、`YOUTUBE_OAUTH_CLIENT_ID`、`YOUTUBE_OAUTH_CLIENT_SECRET`、`YOUTUBE_OAUTH_REFRESH_TOKEN` |
 
-deploy preflightはremoteに登録されたsecretの**名前だけ**を検査します。Build環境からRuntime Secret値を再投入・比較しません。不足時は対象Worker名と不足名だけを表示して停止します。secret値、token、Webhook URL、cookie、ユーザーデータをlogへ出しません。
+deploy preflightはremoteに登録されたsecretの**名前だけ**を検査します。Build環境からRuntime Secret値を再投入・比較しません。不足時は対象Worker名と不足名だけを表示して停止します。secret値、token、Webhook URL、cookie、ユーザーデータをlogへ出しません。続けて Cron Worker 3本（`fast-jobs` / `content-jobs` / `sync-jobs`）へ `wrangler deploy --dry-run` を実行し、アップロードサイズが 2.9MiB 以上ならデプロイを停止、2.7MiB 以上なら警告します。
 
 ### Bindings
 

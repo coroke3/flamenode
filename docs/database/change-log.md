@@ -5,6 +5,21 @@
 > Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-07-31 — `0045_align_visibility_defaults.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | cleanup |
+| Summary | events/videos の物理 default を `private` / `pending` に揃え、INSERT 正規化 trigger を削除 |
+| Reason | Drizzle 正本と物理 DB default の不一致、および `INSERT RETURNING` 時の値ずれリスクを解消するため |
+| Tables | `events`、`videos` |
+| Data migration | なし（既存行の visibility_status は変更しない） |
+| Compatibility | `0044` 完了後の canonical 状態のみ適用。reject/update trigger は維持 |
+| Data loss | none |
+| Rollback | migration 適用前の D1 バックアップから復元 |
+| Validation | `check:db-schema`、integration test、typecheck、unit、workers |
+| PR | （本変更） |
+
 ## 2026-07-20 — `0044_simplify_visibility_statuses.sql`
 
 | 項目 | 内容 |

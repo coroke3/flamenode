@@ -7,7 +7,6 @@ import {
   desc,
   eq,
   inArray,
-  like,
   or,
   sql,
 } from "drizzle-orm";
@@ -20,6 +19,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
+import { escapeLike } from "@/lib/utils/sql";
 import {
   normalizeMemberSearchText,
   rankMemberSuggestionCandidates,
@@ -32,6 +32,19 @@ const MAX_OFFSET = 5000;
 const MAX_QUERY_LENGTH = 64;
 const SOURCE_LIMIT = 200;
 const IN_CLAUSE_SIZE = 80;
+const MIN_SEARCH_CHARS = 2;
+
+function likeColumn(column: unknown, term: string) {
+  return sql`${column} LIKE ${term} ESCAPE '\\'`;
+}
+
+function buildLikePattern(normalized: string): string {
+  return `%${escapeLike(normalized)}%`;
+}
+
+function compactSearchChars(value: string): string {
+  return value.replace(/[^\p{L}\p{N}_]/gu, "");
+}
 
 function chunked<T>(
   values: readonly T[],
@@ -124,6 +137,11 @@ export async function GET(
           xUsers.approval_status,
       })
       .from(xUsers)
+      .where(
+        onlyApproved
+          ? eq(xUsers.approval_status, "approved")
+          : undefined,
+      )
       .orderBy(asc(xUsers.x_name))
       .limit(limit + 1)
       .offset(offset);
@@ -152,34 +170,42 @@ export async function GET(
 
   const normalizedQuery =
     normalizeMemberSearchText(rawQuery);
-  const directPattern =
-    `%${normalizedQuery}%`;
+  if (compactSearchChars(normalizedQuery).length < MIN_SEARCH_CHARS) {
+    return NextResponse.json({
+      items: [],
+      query: rawQuery,
+      limit,
+      offset,
+      nextOffset: null,
+      hasMore: false,
+      hint: "search_too_short",
+    });
+  }
+
+  const directPattern = buildLikePattern(normalizedQuery);
 
   // 誤字検索用。1文字目が一致する候補も候補集合へ含め、
   // 最終順位はLevenshtein距離で決定する。
   const broadSeed =
-    normalizedQuery
-      .replace(/[^\p{L}\p{N}_]/gu, "")
-      .slice(0, 1) ||
+    compactSearchChars(normalizedQuery).slice(0, 1) ||
     normalizeXId(rawQuery).slice(0, 1);
 
-  const broadPattern =
-    `%${broadSeed}%`;
+  const broadPattern = buildLikePattern(broadSeed);
 
   const directMatch = or(
-    like(
+    likeColumn(
       sql<string>`lower(${xUsers.id})`,
       directPattern,
     ),
-    like(
+    likeColumn(
       sql<string>`lower(${xUsers.x_name})`,
       directPattern,
     ),
-    like(
+    likeColumn(
       sql<string>`lower(${xUsers.id})`,
       broadPattern,
     ),
-    like(
+    likeColumn(
       sql<string>`lower(${xUsers.x_name})`,
       broadPattern,
     ),
@@ -225,11 +251,11 @@ export async function GET(
     .from(xUserAliases)
     .where(
       or(
-        like(
+        likeColumn(
           sql<string>`lower(${xUserAliases.alias_x_id})`,
           directPattern,
         ),
-        like(
+        likeColumn(
           sql<string>`lower(${xUserAliases.alias_x_id})`,
           broadPattern,
         ),
@@ -250,19 +276,19 @@ export async function GET(
       and(
         sql`${videos.creator_x_user_id} IS NOT NULL`,
         or(
-          like(
+          likeColumn(
             sql<string>`lower(${videos.creator_display_name})`,
             directPattern,
           ),
-          like(
+          likeColumn(
             sql<string>`lower(${videos.creator_x_user_id})`,
             directPattern,
           ),
-          like(
+          likeColumn(
             sql<string>`lower(${videos.creator_display_name})`,
             broadPattern,
           ),
-          like(
+          likeColumn(
             sql<string>`lower(${videos.creator_x_user_id})`,
             broadPattern,
           ),
@@ -291,19 +317,19 @@ export async function GET(
       and(
         sql`${videoMembers.x_user_id} IS NOT NULL`,
         or(
-          like(
+          likeColumn(
             sql<string>`lower(${videoMembers.name})`,
             directPattern,
           ),
-          like(
+          likeColumn(
             sql<string>`lower(${videoMembers.x_user_id})`,
             directPattern,
           ),
-          like(
+          likeColumn(
             sql<string>`lower(${videoMembers.name})`,
             broadPattern,
           ),
-          like(
+          likeColumn(
             sql<string>`lower(${videoMembers.x_user_id})`,
             broadPattern,
           ),

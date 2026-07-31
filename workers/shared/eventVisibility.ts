@@ -1,5 +1,10 @@
 /** Workers 向け: イベント公開設定と日時由来の鮮度を解釈する。 */
 
+import {
+  staticR2CacheControl,
+  STATIC_R2_MAX_AGE_SEC,
+} from "./staticR2CacheControl.ts";
+
 export type EventVisibilityStatus = "private" | "public";
 
 export function normalizeEventVisibility(
@@ -28,7 +33,7 @@ export function resolveEventFreshness(
 
 export function cacheControlForFreshness(freshness: EventFreshness): string {
   if (freshness === "active") {
-    return "public, max-age=60, stale-while-revalidate=300";
+    return staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.eventDetail);
   }
-  return "public, max-age=3600, stale-while-revalidate=86400";
+  return staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.rules);
 }

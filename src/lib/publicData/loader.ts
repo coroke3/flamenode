@@ -82,6 +82,11 @@ import {
 } from "./loaderPolicy";
 import { canAttemptDegradedD1 } from "./degradedPolicy";
 import {
+  isDegradedD1CircuitOpen,
+  recordDegradedCircuitR2Hit,
+  recordDegradedCircuitR2Miss,
+} from "./degradedCircuitBreaker";
+import {
   fetchDegradedEventDetailPayload,
   fetchDegradedEventListPage,
   fetchDegradedEventsIndexPayload,
@@ -99,6 +104,7 @@ import {
   unwrapPublicJsonCachePayload,
   writePublicJsonCacheBestEffort,
 } from "./publicCache";
+import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import {
   toPublicJsonLegacySource,
   type PublicDataMode,
@@ -274,20 +280,22 @@ async function resolvePublicJsonMiss<T = never>(
   }
 
   if (options.degradedFetcher && canAttemptDegradedD1(strategy) && db) {
-    try {
-      const degraded = await options.degradedFetcher();
-      if (degraded != null) {
-        notePublicDataMode("degraded_d1");
-        return {
-          data: degraded,
-          mode: "degraded_d1",
-          source: "miss",
-          strategy,
-          enqueued,
-        };
+    if (!(await isDegradedD1CircuitOpen())) {
+      try {
+        const degraded = await options.degradedFetcher();
+        if (degraded != null) {
+          notePublicDataMode("degraded_d1");
+          return {
+            data: degraded,
+            mode: "degraded_d1",
+            source: "miss",
+            strategy,
+            enqueued,
+          };
+        }
+      } catch (error) {
+        warnPublicStaticJson(options.r2Key, "read_failed", error);
       }
-    } catch (error) {
-      warnPublicStaticJson(options.r2Key, "read_failed", error);
     }
   }
 
@@ -338,6 +346,18 @@ export function createPublicJsonLoader<TPayload, TResult>({
 export async function loadPublicJson<T>(
   options: PublicJsonLoadOptions<T>,
 ): Promise<PublicJsonLoadResult<T>> {
+  const operationMode = await resolvePublicOperationMode({ allowD1: true });
+  const maintenanceStrategy = getPublicDataStrategy(operationMode);
+  if (maintenanceStrategy === "maintenance") {
+    return {
+      data: null,
+      mode: "unavailable",
+      source: "miss",
+      strategy: maintenanceStrategy,
+      enqueued: false,
+    };
+  }
+
   const cached = unwrapPublicJsonCachePayload<T>(
     await readPublicJsonCache<unknown>(options.r2Key),
   );
@@ -353,6 +373,7 @@ export async function loadPublicJson<T>(
 
   const payload = await readStaticJson<T>(options.r2Key);
   if (payload !== null) {
+    void recordDegradedCircuitR2Hit();
     if (options.isEmptyCollection?.(payload)) {
       return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
     }
@@ -369,6 +390,7 @@ export async function loadPublicJson<T>(
     return buildStaticHitResult(payload, "static", strategy);
   }
 
+  void recordDegradedCircuitR2Miss();
   return resolvePublicJsonMiss(options);
 }
 
@@ -446,7 +468,7 @@ export const loadStaticEventDetail = createPublicJsonLoader<
   r2Key: (eventId) => `events/${eventId}.json`,
   targetType: "event",
   reason: "public_event_detail_miss",
-  cacheTtlSeconds: 120,
+  cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
   normalize: normalizeStaticEventDetail,
   degradedFetcher: async (eventId) => {
     const db = getDatabase();
@@ -466,7 +488,7 @@ export async function loadStaticEventsIndex(): Promise<{
     targetType: "events_index",
     targetId: "global",
     reason: "public_events_index_miss",
-    cacheTtlSeconds: 120,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -505,7 +527,7 @@ export async function loadStaticRecentVideosPage(params: {
     targetType: "list_recent",
     targetId: "global",
     reason: "public_list_miss",
-    cacheTtlSeconds: 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.listRecent,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -573,7 +595,7 @@ export async function loadStaticPopularVideosPage(params: {
     targetType: "list_popular",
     targetId: "global",
     reason: "public_list_popular_miss",
-    cacheTtlSeconds: 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.listPopular,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -630,7 +652,7 @@ export async function loadStaticSearchVideosPage(params: {
     targetType: "search_index",
     targetId: "global",
     reason: "public_list_search_miss",
-    cacheTtlSeconds: 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.searchIndex,
     isEmptyCollection: isEmptySearchIndexCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -802,7 +824,7 @@ export async function loadStaticRulesPage(): Promise<
     targetType: "rules",
     targetId: "global",
     reason: "public_rules_miss",
-    cacheTtlSeconds: 300,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.rules,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;
@@ -821,7 +843,7 @@ export async function loadStaticTopPage(): Promise<
     targetType: "top",
     targetId: "global",
     reason: "public_top_miss",
-    cacheTtlSeconds: 30,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.top,
     isEmptyCollection: isEmptyTopCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -853,7 +875,7 @@ export async function loadStaticUsersIndex(params?: {
     targetType: "users_index",
     targetId: "global",
     reason: "public_users_index_miss",
-    cacheTtlSeconds: 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -885,7 +907,7 @@ export async function loadStaticRecommendPage(): Promise<
     targetType: "recommend",
     targetId: "global",
     reason: "public_recommend_miss",
-    cacheTtlSeconds: 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.recommend,
     isEmptyCollection: isEmptyRecommendCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -916,7 +938,7 @@ export const loadStaticUserProfile = createPublicJsonLoader<
   r2Key: (xUserId) => `users/${xUserId}.json`,
   targetType: "user",
   reason: "public_user_profile_miss",
-  cacheTtlSeconds: 120,
+  cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.userDetail,
   normalize: normalizeStaticUserProfile,
   degradedFetcher: async (xUserId) => {
     const db = getDatabase();
@@ -1039,7 +1061,7 @@ export const loadStaticVideoDetail = createPublicJsonLoader<
   r2Key: (videoId) => `videos/${videoId}.json`,
   targetType: "video",
   reason: "public_video_detail_miss",
-  cacheTtlSeconds: 120,
+  cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.videoDetail,
   normalize: normalizeStaticVideoDetail,
   degradedFetcher: async (videoId) => {
     const db = getDatabase();

@@ -82,6 +82,7 @@ test("候補抽出はpending・開催中・通常期限のindex queryへ分離�
   assert.match(source, /selectScheduledSyncRows/);
   assert.match(source, /ACTIVE_SYNC_INTERVAL_SEC/);
   assert.match(source, /DEFAULT_SYNC_INTERVAL_SEC/);
+  assert.match(source, /video_events ve/);
   assert.doesNotMatch(source, /FROM videos v\s+LEFT JOIN video_youtube_metadata/);
 });
 

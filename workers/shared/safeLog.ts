@@ -52,6 +52,9 @@ export interface WorkerJobLog {
   error?: string;
   external_api_calls?: number;
   d1_changes?: number;
+  d1_statements?: number;
+  d1_rows_read?: number;
+  d1_rows_written?: number;
   retry_count?: number;
   quota_stopped?: boolean;
   quota_stop_reason?: string;
@@ -85,4 +88,25 @@ export function normalizeQuotaStopReason(value: unknown): string | undefined {
 /** 1 job あたり1行だけの構造化ログを出す。 */
 export function logWorkerJob(event: WorkerJobLog): void {
   console.log(JSON.stringify(event));
+}
+
+/** Queue consumer の catch 専用。秘密情報は safeErrorSummary で除去する。 */
+export function logQueueConsumerFailure(input: {
+  service: string;
+  queueKind: string;
+  messageCount: number;
+  error: unknown;
+  traceId?: string;
+}): void {
+  console.warn(
+    JSON.stringify({
+      service: input.service,
+      job: "queue-consumer",
+      queue_kind: input.queueKind,
+      message_count: input.messageCount,
+      trace_id: input.traceId ?? null,
+      result: "failed",
+      error: safeErrorSummary(input.error),
+    }),
+  );
 }

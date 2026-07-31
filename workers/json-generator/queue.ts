@@ -8,17 +8,20 @@ import {
   type OperationMode,
 } from "./queuePolicy.ts";
 import { nextAttemptNumber } from "../shared/queue.ts";
+import { isD1BudgetExhausted, type D1Budget } from "../shared/d1Budget.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env {
   DB: D1Database;
   R2: R2Bucket;
   KV: KVNamespace;
+  d1Budget?: D1Budget;
 }
 
 const STALE_QUEUE_RECONCILE_LIMIT = 20;
 const PROCESSING_LEASE_SEC = 5 * 60;
-const PROCESSING_CONCURRENCY = 2;
+/** global target は重いため常に1件ずつ。個別 target も MAX_QUEUE_ITEMS_PER_RUN=1 で直列。 */
+const PROCESSING_CONCURRENCY = 1;
 const MAX_ATTEMPTS = 4;
 const MARK_DONE_RETRY_ATTEMPTS = 3;
 const MARK_DONE_RETRY_DELAY_MS = 50;
@@ -38,6 +41,22 @@ type QueueOutcome = "processed" | "failed" | "skipped";
 type QueueMetrics = { d1_changes: number };
 function recordD1Changes(metrics: QueueMetrics | undefined, result: { meta?: { changes?: number } }): void {
   if (metrics) metrics.d1_changes += result.meta?.changes ?? 0;
+}
+
+function isEnvD1BudgetExhausted(env: Env): boolean {
+  return env.d1Budget ? isD1BudgetExhausted(env.d1Budget) : false;
+}
+
+function d1BudgetMetrics(env: Env): {
+  d1_statements: number;
+  d1_rows_read: number;
+  d1_rows_written: number;
+} {
+  return {
+    d1_statements: env.d1Budget?.statements ?? 0,
+    d1_rows_read: env.d1Budget?.rowsRead ?? 0,
+    d1_rows_written: env.d1Budget?.rowsWritten ?? 0,
+  };
 }
 
 function throwIfAborted(signal: AbortSignal | undefined, fallback: string): void {
@@ -67,14 +86,18 @@ async function completeQueueRow(
   now: number,
   signal: AbortSignal | undefined,
   metrics: QueueMetrics | undefined,
-): Promise<QueueOutcome> {
-  if (await markDoneWithRetries(env, row.id, token, now, metrics, signal)) {
-    return "processed";
+): Promise<{ outcome: QueueOutcome; followUpPending: boolean }> {
+  const markResult = await markDoneWithRetries(env, row.id, token, now, metrics, signal);
+  if (markResult === "done") {
+    return { outcome: "processed", followUpPending: false };
+  }
+  if (markResult === "requeued") {
+    return { outcome: "processed", followUpPending: true };
   }
   if (await markDoneOrSuppressRedelivery(env, row.id, token, now, metrics, signal)) {
-    return "processed";
+    return { outcome: "processed", followUpPending: false };
   }
-  return "skipped";
+  return { outcome: "skipped", followUpPending: false };
 }
 
 export async function getOperationMode(env: Env): Promise<OperationMode> {
@@ -95,6 +118,9 @@ export async function processStaticRebuildQueue(
   skipped: number;
   external_api_calls: number;
   d1_changes: number;
+  d1_statements: number;
+  d1_rows_read: number;
+  d1_rows_written: number;
   retry_count: number;
   quota_stopped: boolean;
   hasMore: boolean;
@@ -111,6 +137,9 @@ async function processStaticRebuildQueueImpl(
   skipped: number;
   external_api_calls: number;
   d1_changes: number;
+  d1_statements: number;
+  d1_rows_read: number;
+  d1_rows_written: number;
   retry_count: number;
   quota_stopped: boolean;
   hasMore: boolean;
@@ -119,16 +148,40 @@ async function processStaticRebuildQueueImpl(
   const mode = await getOperationMode(env);
   throwIfAborted(signal, "static rebuild queue aborted");
   if (mode === "maintenance") {
-    return { processed: 0, failed: 0, skipped: 1, external_api_calls: 0, d1_changes: 0, retry_count: 0, quota_stopped: false, hasMore: false };
+    return {
+      processed: 0,
+      failed: 0,
+      skipped: 1,
+      external_api_calls: 0,
+      d1_changes: 0,
+      ...d1BudgetMetrics(env),
+      retry_count: 0,
+      quota_stopped: false,
+      hasMore: false,
+    };
   }
 
   const metrics: QueueMetrics = { d1_changes: 0 };
+
+  if (isEnvD1BudgetExhausted(env)) {
+    return {
+      processed: 0,
+      failed: 0,
+      skipped: 0,
+      external_api_calls: 0,
+      d1_changes: 0,
+      ...d1BudgetMetrics(env),
+      retry_count: 0,
+      quota_stopped: false,
+      hasMore: true,
+    };
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const processLimit = queueLimitForMode(mode);
   const fetchLimit = processLimit + 1;
 
-  if (shouldReconcileStaleQueue(mode)) {
+  if (shouldReconcileStaleQueue(mode) && !isEnvD1BudgetExhausted(env)) {
     await reconcileStaleQueue(env, now, signal, metrics);
   }
   throwIfAborted(signal, "static rebuild queue aborted");
@@ -161,6 +214,10 @@ async function processStaticRebuildQueueImpl(
     offset += PROCESSING_CONCURRENCY
   ) {
     throwIfAborted(signal, "static rebuild queue aborted");
+    if (isEnvD1BudgetExhausted(env)) {
+      followUpPending = true;
+      break;
+    }
     const chunk = rows.slice(offset, offset + PROCESSING_CONCURRENCY);
     const outcomes = await Promise.all(
       chunk.map((row) => processQueueRow(env, mode, row, now, signal, metrics)),
@@ -175,9 +232,10 @@ async function processStaticRebuildQueueImpl(
     ...summary,
     external_api_calls: 0,
     d1_changes: metrics.d1_changes,
+    ...d1BudgetMetrics(env),
     retry_count: 0,
     quota_stopped: false,
-    hasMore: hasMore || followUpPending,
+    hasMore: hasMore || followUpPending || isEnvD1BudgetExhausted(env),
   };
 }
 
@@ -197,14 +255,17 @@ async function processQueueRow(
     throwIfAborted(signal, "static rebuild queue aborted");
     if (shouldSkipQueueTarget(mode, row)) {
       throwIfAborted(signal, "static rebuild queue aborted");
-      const outcome = await completeQueueRow(env, row, token, now, signal, metrics);
-      return { outcome, followUpPending: false };
+      const completion = await completeQueueRow(env, row, token, now, signal, metrics);
+      return { outcome: completion.outcome, followUpPending: completion.followUpPending };
     }
     await rebuildTarget(env, row.target_type, row.target_id, signal);
     throwIfAborted(signal, "static rebuild queue aborted");
-    const followUpPending = row.target_type === "users_index";
-    const outcome = await completeQueueRow(env, row, token, now, signal, metrics);
-    return { outcome, followUpPending };
+    const usersIndexFollowUp = row.target_type === "users_index";
+    const completion = await completeQueueRow(env, row, token, now, signal, metrics);
+    return {
+      outcome: completion.outcome,
+      followUpPending: usersIndexFollowUp || completion.followUpPending,
+    };
   } catch (error) {
     if (signal?.aborted) throwIfAborted(signal, "static rebuild queue aborted");
     await markRetryOrFailed(env, row, token, error, now, metrics);
@@ -235,6 +296,8 @@ export async function markProcessing(
  * processing 中に enqueue が入ると updated_at が processing_started_at より新しくなる。
  * その場合は完了行にせず、同じ行を pending へ戻して次の世代を再生成する。
  */
+export type MarkDoneAttemptResult = "done" | "requeued" | null;
+
 export async function markDone(
   env: Env,
   id: string,
@@ -243,7 +306,7 @@ export async function markDone(
   metrics?: QueueMetrics,
 ): Promise<boolean> {
   const completed = await markDoneAttempt(env, id, token, now, metrics);
-  if (completed) return true;
+  if (completed !== null) return true;
   await recoverLeaseInvalidatedProcessing(env, id, now, metrics);
   return false;
 }
@@ -254,7 +317,7 @@ async function markDoneAttempt(
   token: string,
   now: number,
   metrics?: QueueMetrics,
-): Promise<boolean> {
+): Promise<MarkDoneAttemptResult> {
   const result = await env.DB.prepare(
     `UPDATE static_rebuild_queue
      SET status = CASE
@@ -278,12 +341,15 @@ async function markDoneAttempt(
          lease_token = NULL,
          lease_expires_at = NULL,
          next_retry_at = NULL
-     WHERE id = ? AND status = 'processing' AND lease_token = ?`,
+     WHERE id = ? AND status = 'processing' AND lease_token = ?
+     RETURNING status`,
   )
     .bind(now, now, id, token)
-    .run();
+    .all<{ status: string }>();
   recordD1Changes(metrics, result);
-  return (result.meta?.changes ?? 0) === 1;
+  const row = result.results?.[0];
+  if (!row) return null;
+  return row.status === "pending" ? "requeued" : "done";
 }
 
 export async function markDoneWithRetries(
@@ -293,14 +359,15 @@ export async function markDoneWithRetries(
   now: number,
   metrics?: QueueMetrics,
   signal?: AbortSignal,
-): Promise<boolean> {
+): Promise<MarkDoneAttemptResult> {
   for (let attempt = 0; attempt < MARK_DONE_RETRY_ATTEMPTS; attempt += 1) {
-    if (await markDoneAttempt(env, id, token, now, metrics)) return true;
+    const result = await markDoneAttempt(env, id, token, now, metrics);
+    if (result !== null) return result;
     if (attempt < MARK_DONE_RETRY_ATTEMPTS - 1) {
       await sleepMs(MARK_DONE_RETRY_DELAY_MS, signal);
     }
   }
-  return false;
+  return null;
 }
 
 export async function markDoneOrSuppressRedelivery(

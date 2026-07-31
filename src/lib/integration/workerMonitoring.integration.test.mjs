@@ -40,7 +40,7 @@ test("D1同時接続と日次書込みへ安全余裕を確保する", async () 
   const score = await source("workers/score-recalc/index.ts");
   const monitor = await source("src/lib/admin/workerMonitoring.ts");
 
-  assert.match(contentJobs, /withSerializedD1\(env\)/);
+  assert.match(contentJobs, /rebuildEnvironment\(env\)/);
   assert.match(serializer, /class AsyncGate/);
   assert.match(score, /SCORE_RECALC_BATCH_SIZE\s*=\s*150/);
   assert.match(monitor, /capacityPerDay:\s*8_000/);

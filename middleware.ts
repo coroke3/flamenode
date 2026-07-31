@@ -1,18 +1,18 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { resolveMiddlewareMaintenance } from "@/lib/operationMode/middlewareMaintenance";
 
 /**
  * Edge middleware: コストガード / メンテナンスモードの粗い制御。
  *
- * - `cost_guard_mode = maintenance` または `is_maintenance_mode = 1` のとき、
- *   一般ユーザーは `/maintenance` に戻す。`/admin` と `/api/auth` 系は通す。
- * - 厳密な権限判定はページ側 (`requireSession` / RSC) で行う。Edge では DB を引かない。
+ * - `operation_mode = maintenance`（KV ミラー）または `MAINTENANCE_MODE=1` のとき、
+ *   一般ユーザーは `/maintenance` に戻す。`/admin`・`/api/auth`・`/api/health` は通す。
+ * - 厳密な権限判定はページ側 (`requireSession` / RSC) で行う。
  *
- * 実際のフラグは Cloudflare KV (`KV.system_settings:cost_guard_mode`) で参照する想定。
- * 開発環境では KV が無いので環境変数 `MAINTENANCE_MODE=1` でフォールバックする。
+ * 公開 JSON の停止は `loadPublicJson` が operation_mode を先に判定する。
  */
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|maintenance|api/auth|admin).*)",
+    "/((?!_next/static|_next/image|favicon.ico|maintenance|api/auth|api/health|admin).*)",
   ],
 };
 
@@ -25,15 +25,15 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   const passThrough = () =>
     NextResponse.next({ request: { headers: requestHeaders } });
 
-  const isMaintenance = process.env.MAINTENANCE_MODE === "1";
+  const isMaintenance = await resolveMiddlewareMaintenance();
   if (!isMaintenance) return passThrough();
 
-  // 既にメンテナンスページや認証 API ならそのまま
   const url = req.nextUrl;
   if (
     url.pathname.startsWith("/maintenance") ||
     url.pathname.startsWith("/admin") ||
-    url.pathname.startsWith("/api/auth")
+    url.pathname.startsWith("/api/auth") ||
+    url.pathname.startsWith("/api/health")
   ) {
     return passThrough();
   }

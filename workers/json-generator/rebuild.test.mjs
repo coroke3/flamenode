@@ -421,10 +421,16 @@ test("rebuildTopは新着100件と3年以上前のYouTube確認済みプール�
   assert.match(topFn, /nostalgic_shuffled_at: now/);
 });
 
-test("ensureDailyTopNostalgicShuffleはtop.jsonの懐かし棚だけをUTC日次でR2更新する", () => {
-  assert.match(source, /export async function ensureDailyTopNostalgicShuffle/);
-  assert.match(source, /TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY/);
-  assert.match(source, /needsNostalgicDailyReshuffle/);
+test("ensureDailyTopNostalgicShuffleはUTC日次でtop再生成をキュー登録する", () => {
+  const fn = source.match(
+    /export async function ensureDailyTopNostalgicShuffle[\s\S]*?(?=\/\*\*|export async function |async function )/,
+  )?.[0];
+  assert.ok(fn);
+  assert.match(fn, /TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY/);
+  assert.match(fn, /enqueueTopRebuild/);
+  assert.match(fn, /nostalgic_daily_shuffle/);
+  assert.doesNotMatch(fn, /JSON\.parse/);
+  assert.doesNotMatch(fn, /env\.R2\.get\("top\.json"\)/);
 });
 
 test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {

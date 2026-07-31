@@ -109,15 +109,6 @@ export async function updateVideo(
   const parsed = parseVideoForm(raw, { youtubeRequired: false });
   if (!parsed.ok) return parsed;
 
-  const rawYoutubeUrl = parsed.data.youtube_url.trim();
-  let youtubeId: string | null;
-  if (rawYoutubeUrl) {
-    youtubeId = extractYoutubeId(rawYoutubeUrl);
-    if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
-  } else {
-    youtubeId = target.youtube_video_id ?? null;
-  }
-
   const nextStagePermissionResult = buildStagePermissionSubmission(
     formData,
     editStageFields,
@@ -143,6 +134,17 @@ export async function updateVideo(
   });
   if (!hasAnyVideoEditSection(sections)) {
     return { ok: false, message: "編集権限がありません。" };
+  }
+
+  const rawYoutubeUrl = parsed.data.youtube_url.trim();
+  let youtubeId: string | null;
+  if (rawYoutubeUrl) {
+    youtubeId = extractYoutubeId(rawYoutubeUrl);
+    if (!youtubeId) return { ok: false, message: "YouTube URL が解析できません。" };
+  } else if (sections.youtube) {
+    youtubeId = null;
+  } else {
+    youtubeId = target.youtube_video_id ?? null;
   }
 
   const existingX = normalizeXId(target.creator_x_user_id);

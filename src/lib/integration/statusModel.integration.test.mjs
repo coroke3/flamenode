@@ -254,3 +254,71 @@ test("0044 converts legacy states after canonical migration and preserves canoni
     2,
   );
 });
+
+test("0045 aligns physical defaults without insert-normalization triggers", () => {
+  const migration0045Sql = readFileSync(
+    new URL("../../../migrations/0045_align_visibility_defaults.sql", import.meta.url),
+    "utf8",
+  );
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+
+    CREATE TABLE x_users (id text PRIMARY KEY);
+    CREATE TABLE "user" (id text PRIMARY KEY);
+
+    CREATE TABLE events (
+      id text PRIMARY KEY,
+      title text NOT NULL DEFAULT 'Event',
+      visibility_status text NOT NULL DEFAULT 'draft',
+      updated_at integer NOT NULL DEFAULT 0,
+      created_at integer NOT NULL DEFAULT 0,
+      allow_user_video_event_links integer NOT NULL DEFAULT 0,
+      allow_unslotted_posts integer NOT NULL DEFAULT 0,
+      allow_user_video_edits integer NOT NULL DEFAULT 0,
+      max_slots_per_video integer NOT NULL DEFAULT 1,
+      public_api_enabled integer NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE videos (
+      id text PRIMARY KEY,
+      submitted_by_user_id text NOT NULL,
+      creator_display_name text NOT NULL DEFAULT 'creator',
+      title text NOT NULL DEFAULT 'title',
+      visibility_status text NOT NULL DEFAULT 'draft',
+      created_at integer NOT NULL DEFAULT 0,
+      updated_at integer NOT NULL DEFAULT 0,
+      collaboration_type text NOT NULL DEFAULT 'individual',
+      source_type text NOT NULL DEFAULT 'youtube',
+      app_like_count integer NOT NULL DEFAULT 0,
+      score real NOT NULL DEFAULT 0,
+      FOREIGN KEY (submitted_by_user_id) REFERENCES "user"(id)
+    );
+
+    INSERT INTO "user"(id) VALUES ('user-1');
+  `);
+
+  db.exec(migrationSql);
+  db.exec(migration0045Sql);
+
+  db.exec("INSERT INTO videos(id, submitted_by_user_id) VALUES ('video-default', 'user-1')");
+  assert.equal(
+    db.prepare("SELECT visibility_status FROM videos WHERE id = 'video-default'").get()
+      .visibility_status,
+    "pending",
+  );
+  db.exec("INSERT INTO events(id, title) VALUES ('event-default', 'Event')");
+  assert.equal(
+    db.prepare("SELECT visibility_status FROM events WHERE id = 'event-default'").get()
+      .visibility_status,
+    "private",
+  );
+  assert.equal(
+    db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name LIKE '%canonical_insert'",
+      )
+      .get().count,
+    0,
+  );
+});

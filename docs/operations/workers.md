@@ -32,7 +32,7 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 - `flamenode-web` は3 Queue すべてへ **producer** のみ持つ（`wrangler.toml`）。
 - 各 Cron Worker は対応 Queue の **consumer**（`max_concurrency = 1`、`max_batch_timeout = 1`）と、継続 wake 用 **producer** を持つ。
 - Consumer 設定: `max_batch_size = 10`、`max_retries = 3`。通知・静的は `retry_delay = 60`、YouTube は `retry_delay = 300`。
-- Recovery Cron は Queue wake が届かなかった場合の安全網。通常運用では Queue 駆動を優先し、Cron は補助とする。`QUEUE_DISPATCH_ENABLED` / `QUEUE_CONTINUATION_ENABLED` が `"0"` のときも、Recovery は `processStaticRebuildQueue` を最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS`（30）回までループし、1 Cron あたり最大30 target まで排水する（`MAX_QUEUE_ITEMS_PER_RUN` は1のまま）。
+- Recovery Cron は Queue wake が届かなかった場合の安全網。通常運用では Queue 駆動を優先し、Cron は補助とする。`QUEUE_DISPATCH_ENABLED` / `QUEUE_CONTINUATION_ENABLED` が `"0"` のときも、Recovery は `processStaticRebuildQueue` を最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS`（3）回までループし、1 Cron あたり最大3 target まで排水する（`MAX_QUEUE_ITEMS_PER_RUN` は1のまま）。D1 statement は invocation 内で `D1_QUERY_SOFT_LIMIT`（40）に達したら早期停止し continuation wake を送る。
 
 ### Feature flags（デフォルト無効）
 

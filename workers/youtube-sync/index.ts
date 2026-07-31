@@ -366,7 +366,13 @@ async function selectScheduledSyncRows(
       env,
       `SELECT v.id, v.youtube_video_id
          FROM events e
-         INNER JOIN videos v ON v.primary_event_id = e.id
+         INNER JOIN videos v ON (
+           v.primary_event_id = e.id
+           OR EXISTS (
+             SELECT 1 FROM video_events ve
+             WHERE ve.video_id = v.id AND ve.event_id = e.id
+           )
+         )
          INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
         WHERE e.visibility_status = 'public'
           AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)

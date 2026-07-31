@@ -37,6 +37,30 @@ function globalListTargets(
   ];
 }
 
+/** 公開カード変更時に list / search / top / recommend へ波及するターゲット。 */
+export function buildVideoCardChangeFanOutTargets(opts: {
+  reason: string;
+  requestedByUserId?: string | null;
+  priority?: StaticRebuildPriority;
+  skipTopRecommend?: boolean;
+}): EnqueueStaticRebuildInput[] {
+  const priority = opts.priority ?? "low";
+  const withMeta = (
+    items: EnqueueStaticRebuildInput[],
+  ): EnqueueStaticRebuildInput[] =>
+    items.map((item) => ({
+      ...item,
+      requestedByUserId: opts.requestedByUserId,
+      priority: item.priority ?? priority,
+    }));
+
+  const targets = withMeta(globalListTargets(opts.reason, priority));
+  if (!opts.skipTopRecommend) {
+    targets.push(...withMeta(topRecommendTargets(opts.reason, priority)));
+  }
+  return targets;
+}
+
 function topRecommendTargets(
   reason: string,
   priority?: StaticRebuildPriority,

@@ -4,6 +4,11 @@ import {
   resolveEventFreshness,
 } from "./freshness.ts";
 import { staticArtifactContentHash } from "./r2Dedup.ts";
+import { staticRebuildArtifactTargetId } from "./staticGlobalRebuildTargets.ts";
+import {
+  staticR2CacheControl,
+  STATIC_R2_MAX_AGE_SEC,
+} from "../shared/staticR2CacheControl.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
 import {
   DEFAULT_TERMS_MARKDOWN,
@@ -22,7 +27,6 @@ import {
 } from "../../src/lib/publicData/countablePublicVideoSql.ts";
 import {
   pickNostalgicDisplay,
-  needsNostalgicDailyReshuffle,
   utcDayKey,
 } from "../../src/lib/publicData/topNostalgicShuffle.ts";
 import { YOUTUBE_SYNCED_PLAYABLE_SQL } from "../../src/lib/publicData/youtubeSyncedPlayableSql.ts";
@@ -81,6 +85,7 @@ import {
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
 import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
+import { enqueueTopRebuild } from "./topRebuildEnqueue.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
@@ -90,7 +95,14 @@ const STATIC_USER_MAX_PAGES = 5;
 const STATIC_USER_MAX_STATIC_ITEMS =
   STATIC_USER_WORKS_PAGE_SIZE * STATIC_USER_MAX_PAGES;
 
-type Env = { DB: D1Database; R2: R2Bucket; KV: KVNamespace };
+import type { ArtifactHashCache } from "./r2Dedup.ts";
+
+type Env = {
+  DB: D1Database;
+  R2: R2Bucket;
+  KV: KVNamespace;
+  artifactHashCache?: ArtifactHashCache;
+};
 type RebuildSignal = AbortSignal | undefined;
 type ArtifactTarget = { targetType: string; targetId: string; sourceUpdatedAt?: number | null };
 type ArtifactRow = { object_key: string };
@@ -225,6 +237,14 @@ export async function rebuildTarget(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
+  if (env.artifactHashCache) {
+    await env.artifactHashCache.preload(
+      env.DB,
+      targetType,
+      staticRebuildArtifactTargetId(targetType, targetId),
+      signal,
+    );
+  }
   switch (targetType) {
     case "top":
       await rebuildTop(env, signal);
@@ -584,7 +604,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     },
   };
   throwIfAborted(signal);
-  await putJson(env, "top.json", payload, "public, max-age=60, stale-while-revalidate=300", { targetType: "top", targetId: "global" }, signal);
+  await putJson(env, "top.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.top), { targetType: "top", targetId: "global" }, signal);
   await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, utcDayKey(now));
   throwIfAborted(signal);
   await env.KV.put(
@@ -599,50 +619,37 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
 }
 
-/** top.json の懐かし棚だけを UTC 日次で R2 上シャッフルする。 */
+/** UTC 日次で top 再生成をキュー登録し、懐かし棚を安全に更新する。 */
 export async function ensureDailyTopNostalgicShuffle(
   env: Env,
   signal?: RebuildSignal,
 ): Promise<number> {
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  const dayKey = utcDayKey(now);
-  const lastDay = await env.KV.get(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY);
-  if (lastDay === dayKey) {
-    return 0;
-  }
+  try {
+    throwIfAborted(signal);
+    const now = Math.floor(Date.now() / 1000);
+    const dayKey = utcDayKey(now);
+    const lastDay = await env.KV.get(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY);
+    if (lastDay === dayKey) {
+      return 0;
+    }
 
-  const object = await env.R2.get("top.json");
-  if (!object) {
+    const enqueued = await enqueueTopRebuild(
+      env,
+      "nostalgic_daily_shuffle",
+      "normal",
+      signal,
+    );
+    if (enqueued > 0) {
+      await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, dayKey);
+      return 1;
+    }
+    return 0;
+  } catch (error) {
+    console.error("[ensureDailyTopNostalgicShuffle] failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return 0;
   }
-
-  const payload = JSON.parse(await object.text()) as {
-    nostalgic_pool?: unknown;
-    nostalgic_shuffled_at?: unknown;
-    [key: string]: unknown;
-  };
-  const pool = Array.isArray(payload.nostalgic_pool) ? payload.nostalgic_pool : null;
-  if (!pool || pool.length === 0) {
-    return 0;
-  }
-  if (!needsNostalgicDailyReshuffle(Number(payload.nostalgic_shuffled_at), now)) {
-    await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, dayKey);
-    return 0;
-  }
-
-  payload.nostalgic = pickNostalgicDisplay(pool, TOP_NOSTALGIA_LIMIT);
-  payload.nostalgic_shuffled_at = now;
-  await putJson(
-    env,
-    "top.json",
-    payload,
-    "public, max-age=60, stale-while-revalidate=300",
-    { targetType: "top", targetId: "global" },
-    signal,
-  );
-  await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, dayKey);
-  return 1;
 }
 
 async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void> {
@@ -681,7 +688,7 @@ async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void
     items,
   };
   assertStaticListObjectSize("list/recent.json", payload);
-  await putJson(env, "list/recent.json", payload, "public, max-age=120, stale-while-revalidate=600", { targetType: "list_recent", targetId: "global" }, signal);
+  await putJson(env, "list/recent.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.listRecent), { targetType: "list_recent", targetId: "global" }, signal);
 }
 
 async function rebuildListPopular(env: Env, signal?: RebuildSignal): Promise<void> {
@@ -709,7 +716,7 @@ async function rebuildListPopular(env: Env, signal?: RebuildSignal): Promise<voi
     items,
   };
   assertStaticListObjectSize("list/popular.json", payload);
-  await putJson(env, "list/popular.json", payload, "public, max-age=300, stale-while-revalidate=1800", { targetType: "list_popular", targetId: "global" }, signal);
+  await putJson(env, "list/popular.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.listPopular), { targetType: "list_popular", targetId: "global" }, signal);
 }
 
 async function rebuildEventsIndex(env: Env, signal?: RebuildSignal): Promise<void> {
@@ -969,7 +976,7 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     users: users.results ?? [],
   };
   assertStaticListObjectSize("search-index-lite.json", payload);
-  await putJson(env, "search-index-lite.json", payload, "public, max-age=600, stale-while-revalidate=3600", { targetType: "search_index", targetId: "global" }, signal);
+  await putJson(env, "search-index-lite.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex), { targetType: "search_index", targetId: "global" }, signal);
 }
 
 async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): Promise<void> {

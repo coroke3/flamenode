@@ -51,6 +51,9 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
   });
   const sql = statements.join("\n");
   assert.match(sql, /recipient_user_id/);
+  assert.match(sql, /LEFT JOIN "user"/);
+  assert.match(sql, /u\.id IS NULL/);
+  assert.match(sql, /INNER JOIN "user"/);
   assert.match(sql, /lease_expires_at/);
   assert.match(sql, /dead_letter/);
   assert.match(sql, /COALESCE\(attempt_count, 0\)/);

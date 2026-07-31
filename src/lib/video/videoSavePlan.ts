@@ -8,6 +8,7 @@ import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
 import {
   buildSyncVideoEventsPlan,
   buildVideoDerivedRowsPlan,
+  buildVideoMetadataClearPlan,
   MAX_ATOMIC_VIDEO_EVENTS,
 } from "@/lib/video/syncVideoEvents";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
@@ -32,6 +33,7 @@ import {
   executeVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { buildVideoCardChangeFanOutTargets } from "@/lib/staticRebuild/hooks";
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
@@ -305,13 +307,21 @@ export async function applyVideoUpdatePlan(
     strict: true,
   });
 
-  if (sections.youtube && plan.youtubeId) {
-    appendVideoAtomicWritePlan(atomic, await buildVideoDerivedRowsPlan(db, {
-      videoId: plan.videoId,
-      youtubeVideoId: plan.youtubeId,
-      now: payload.updated_at,
-      actorUserId: plan.operatorUserId,
-    }));
+  if (sections.youtube && plan.youtubeChanged) {
+    if (plan.youtubeId) {
+      appendVideoAtomicWritePlan(atomic, await buildVideoDerivedRowsPlan(db, {
+        videoId: plan.videoId,
+        youtubeVideoId: plan.youtubeId,
+        now: payload.updated_at,
+        actorUserId: plan.operatorUserId,
+      }));
+    } else {
+      appendVideoAtomicWritePlan(atomic, await buildVideoMetadataClearPlan(db, {
+        videoId: plan.videoId,
+        now: payload.updated_at,
+        actorUserId: plan.operatorUserId,
+      }));
+    }
   }
   if (sections.descriptions) {
     appendVideoAtomicWritePlan(atomic, await buildReplaceVideoSoftwarePlan(db, {
@@ -415,6 +425,17 @@ export async function applyVideoUpdatePlan(
       requestedByUserId: plan.operatorUserId,
       priority: "low",
     });
+    const chainsTopRecommendViaUsersIndex =
+      plan.rebuildFlags.identityChanged &&
+      Boolean(plan.target.creator_x_user_id || payload.creator_x_user_id);
+    queueItems.push(
+      ...buildVideoCardChangeFanOutTargets({
+        reason: "video_card_changed",
+        requestedByUserId: plan.operatorUserId,
+        priority: "low",
+        skipTopRecommend: chainsTopRecommendViaUsersIndex,
+      }),
+    );
   }
   const queue = await buildStaticRebuildQueueBatch(db, queueItems);
   atomic.statements.push(...queue.statements);
@@ -425,7 +446,7 @@ export async function applyVideoUpdatePlan(
     wakeSentKinds,
   });
 
-  if (sections.youtube && plan.youtubeId) {
+  if (sections.youtube && plan.youtubeChanged && plan.youtubeId) {
     await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
   }
 

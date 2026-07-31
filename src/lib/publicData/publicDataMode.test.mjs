@@ -50,6 +50,12 @@ test("kill switch: PUBLIC_DEGRADED_D1_ENABLED=0 disables degraded D1", () => {
   assert.match(degradedPolicySource, /canAttemptDegradedD1/);
 });
 
+test("degraded D1 circuit breaker blocks fallback when KV reports open", () => {
+  assert.match(loaderSource, /isDegradedD1CircuitOpen/);
+  assert.match(loaderSource, /recordDegradedCircuitR2Miss/);
+  assert.match(loaderSource, /recordDegradedCircuitR2Hit/);
+});
+
 test("degraded users SQL has no correlated subquery and LIMIT 48", () => {
   const sql = buildDegradedUsersPageSql();
   assert.match(sql, /LIMIT \? OFFSET \?/);

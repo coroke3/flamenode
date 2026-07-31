@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   staticArtifactContentHash,
   withDeduplicatingR2,
+  ArtifactHashCache,
 } from "./r2Dedup.ts";
 
 async function hash(value) {
@@ -94,4 +95,45 @@ test("意味内容が変わったJSONはR2 PUTする", async () => {
   await wrapped.R2.put("top.json", next);
   assert.equal(fixture.calls.head, 0);
   assert.equal(fixture.calls.put, 1);
+});
+
+test("artifactHashCache を preload すると PUT 前の個別 SELECT を省略する", async () => {
+  const body = JSON.stringify({ ok: true });
+  const storedHash = await hash(body);
+  let selectCount = 0;
+  const cache = new ArtifactHashCache();
+  const DB = {
+    prepare(query) {
+      return {
+        bind() {
+          return {
+            async all() {
+              if (query.includes("target_type")) {
+                return {
+                  results: [{ object_key: "top.json", content_hash: storedHash }],
+                };
+              }
+              return { results: [] };
+            },
+            async first() {
+              selectCount += 1;
+              return { content_hash: storedHash };
+            },
+          };
+        },
+      };
+    },
+  };
+  const R2 = {
+    async head() {
+      return { key: "top.json" };
+    },
+    async put() {
+      throw new Error("unexpected put");
+    },
+  };
+  await cache.preload(DB, "top", "global");
+  const wrapped = withDeduplicatingR2({ DB, R2, artifactHashCache: cache });
+  await wrapped.R2.put("top.json", body);
+  assert.equal(selectCount, 0);
 });

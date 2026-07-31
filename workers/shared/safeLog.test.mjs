@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { logWorkerJob, normalizeQuotaStopReason, safeErrorSummary } from "./safeLog.ts";
+import { logWorkerJob, logQueueConsumerFailure, normalizeQuotaStopReason, safeErrorSummary } from "./safeLog.ts";
 
 test("safeErrorSummary redacts credentials from worker logs", () => {
   const summary = safeErrorSummary(
@@ -15,6 +15,29 @@ test("normalizes quota reasons to the internal vocabulary", () => {
   assert.equal(normalizeQuotaStopReason("DAILY_LIMIT"), "daily_limit");
   assert.equal(normalizeQuotaStopReason("https://secret.example/id"), "unknown");
   assert.equal(normalizeQuotaStopReason(undefined), undefined);
+});
+
+test("logQueueConsumerFailure emits structured queue consumer errors", () => {
+  const original = console.warn;
+  let line = "";
+  console.warn = (value) => {
+    line = String(value);
+  };
+  try {
+    logQueueConsumerFailure({
+      service: "flamenode-fast-jobs",
+      queueKind: "notification_available",
+      messageCount: 2,
+      error: new Error("Bearer secret-token failed"),
+    });
+  } finally {
+    console.warn = original;
+  }
+  const parsed = JSON.parse(line);
+  assert.equal(parsed.service, "flamenode-fast-jobs");
+  assert.equal(parsed.queue_kind, "notification_available");
+  assert.equal(parsed.message_count, 2);
+  assert.doesNotMatch(parsed.error, /secret-token/);
 });
 
 test("logWorkerJob emits structured observability fields", () => {

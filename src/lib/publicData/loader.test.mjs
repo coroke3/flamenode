@@ -49,6 +49,8 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
   );
+  assert.match(loadPublicJsonFn, /resolvePublicOperationMode\(\{ allowD1: true \}\)/);
+  assert.match(loadPublicJsonFn, /maintenanceStrategy === "maintenance"/);
   assert.match(loadPublicJsonFn, /unwrapPublicJsonCachePayload/);
   assert.match(loadPublicJsonFn, /readPublicJsonCache/);
   const r2Index = loadPublicJsonFn.indexOf("readStaticJson");

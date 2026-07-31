@@ -21,10 +21,27 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 
 `static_json_with_live_overlay` では、R2の一覧JSONが空でもD1へ公開作品が追加済みの可能性があるため、空のcollectionをsemantic missとして扱い degraded D1 へ進める。`static_json_only` と `maintenance` では、空の静的JSONをそのまま利用するか、D1 fallback しない。
 
-### Kill switch / static-only
+### Kill switch / static-only / circuit breaker
 
 - `PUBLIC_DEGRADED_D1_ENABLED`（`wrangler.toml` / `.dev.vars`）: 明示 `0` / `false` / `no` / `off` で R2 ミス後の degraded D1 を無効化する。未設定時は有効。
 - `FORCE_STATIC_ONLY` または運用モードが `static_json_only` のときは degraded D1 に進まず、Unavailable または静的 JSON のみ。
+- R2 miss が 1 分あたり 20 件以上（`degradedCircuitBreakerCore.ts`）のとき、KV サーキットが open になり degraded D1 を一時停止する。Cache API の stale エントリは引き続き返す。R2 ヒットが 3 回連続すると自動解除する。
+
+### Cache TTL（Cache API / R2 max-age）
+
+| データ | Cache API TTL（秒） | 反映目標 |
+| --- | ---: | --- |
+| 動画詳細 | 180 | 30秒以内（再生成側） |
+| イベント詳細 | 120 | 1分以内 |
+| ユーザー詳細 | 60 | 1分以内 |
+| 新着一覧 | 180 | 3分以内 |
+| 検索インデックス | 300 | 5分以内 |
+| ランキング / top | 600 | 10分以内 |
+| users/index | 600 | — |
+| 利用規約 | 3600 | — |
+| blocklist / random pool | 600 | — |
+
+正本定数: `src/lib/publicData/publicJsonCacheTtl.ts`（web）、`workers/shared/staticR2CacheControl.ts`（R2 PUT）。
 
 ミス時のみ `operation_mode` を解決（`FORCE_STATIC_ONLY` > isolate 短時間キャッシュ > KV 複製 > D1）。解決不能時は `static_only` へ倒し、`normal` へは倒さない。cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない。
 
@@ -36,7 +53,7 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 
 ## 静的再生成と Projection
 
-静的再生成は Queue Consumer / Recovery Cron の各 invocation で **1 target** だけ処理する（`workers/json-generator/queuePolicy.ts` の `MAX_QUEUE_ITEMS_PER_RUN` = 1）。Recovery Cron は毎時最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS` 件まで排水する。表示用ポリシー正本は `src/lib/operationMode/policy.ts` の `STATIC_REBUILD_ITEMS_PER_RUN` と一致させる。
+静的再生成は Queue Consumer / Recovery Cron の各 invocation で **1 target** だけ処理する（`workers/json-generator/queuePolicy.ts` の `MAX_QUEUE_ITEMS_PER_RUN` = 1）。Recovery Cron は毎時最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS`（3）件まで排水する。D1 statement は `workers/shared/d1Budget.ts` の soft limit（40）で停止する。表示用ポリシー正本は `src/lib/operationMode/policy.ts` の `STATIC_REBUILD_ITEMS_PER_RUN` と一致させる。
 
 コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top`、`recommend`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
 
