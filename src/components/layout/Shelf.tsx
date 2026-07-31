@@ -123,6 +123,10 @@ function toLoopItems(sourceItems: SourceItem[], keyPrefix: string): LoopItem[] {
   }));
 }
 
+function isShelfScrollable(el: HTMLElement): boolean {
+  return el.scrollWidth > el.clientWidth + 4;
+}
+
 /**
  * 横スクロール棚。デスクトップでは左右の半透明矢印を出す。
  * `prefers-reduced-motion` を尊重し、自動スクロールはしない (UX とコスト両面で安全)。
@@ -156,6 +160,9 @@ export function Shelf({
   const ensureScrollableAttemptsRef = React.useRef(0);
   const normalizingRef = React.useRef(false);
   const rightSeedAppliedRef = React.useRef(false);
+  const normalizeRafRef = React.useRef<number | null>(null);
+  const pendingNormalizeModeRef = React.useRef<LoopNormalizeMode | null>(null);
+  const canScrollRef = React.useRef({ prev: false, next: false });
   const [reducedMotion, setReducedMotion] = React.useState(false);
   const [inViewport, setInViewport] = React.useState(true);
   const [documentVisible, setDocumentVisible] = React.useState(true);
@@ -185,17 +192,31 @@ export function Shelf({
     }, Math.max(0, Math.min(pauseAfterInteractionMs, 10_000)));
   }, [pauseAfterInteractionMs, setPauseReason]);
 
-  const update = React.useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
+  const syncArrowState = React.useCallback((el: HTMLDivElement) => {
     if (loop) {
-      const canLoop = el.scrollWidth > el.clientWidth + 4;
+      const canLoop = isShelfScrollable(el);
+      if (
+        canScrollRef.current.prev === canLoop &&
+        canScrollRef.current.next === canLoop
+      ) {
+        return;
+      }
+      canScrollRef.current = { prev: canLoop, next: canLoop };
       setCanPrev(canLoop);
       setCanNext(canLoop);
       return;
     }
-    setCanPrev(el.scrollLeft > 4);
-    setCanNext(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    const nextPrev = el.scrollLeft > 4;
+    const nextNext = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+    if (
+      canScrollRef.current.prev === nextPrev &&
+      canScrollRef.current.next === nextNext
+    ) {
+      return;
+    }
+    canScrollRef.current = { prev: nextPrev, next: nextNext };
+    setCanPrev(nextPrev);
+    setCanNext(nextNext);
   }, [loop]);
 
   const sourceItemsRef = React.useRef(sourceItems);
@@ -213,11 +234,7 @@ export function Shelf({
         if (prev.length < rotateCount + 1) return prev;
         const head = prev.slice(0, rotateCount);
         const rest = prev.slice(rotateCount);
-        const next = [...rest, ...head];
-        return next.map((item, index) => ({
-          ...item,
-          displayKey: `${item.sourceKey}@f${index}`,
-        }));
+        return [...rest, ...head];
       });
     });
     el.scrollLeft = Math.max(0, el.scrollLeft - movedWidth);
@@ -236,16 +253,43 @@ export function Shelf({
         if (prev.length < rotateCount + 1) return prev;
         const tail = prev.slice(-rotateCount);
         const rest = prev.slice(0, -rotateCount);
-        const next = [...tail, ...rest];
-        return next.map((item, index) => ({
-          ...item,
-          displayKey: `${item.sourceKey}@b${index}`,
-        }));
+        return [...tail, ...rest];
       });
     });
     el.scrollLeft += movedWidth;
     return true;
   }, [mobileRows]);
+
+  const runNormalizeLoopScroll = React.useCallback((
+    mode: LoopNormalizeMode = "both",
+  ) => {
+    const el = ref.current;
+    if (!el || !loop || normalizingRef.current) return;
+    if (!isShelfScrollable(el)) return;
+    normalizingRef.current = true;
+    try {
+      const count = getLoopRotateCount(mobileRows);
+      normalizeLoopScroll(el, rotateForward, rotateBackward, count, mode);
+    } finally {
+      normalizingRef.current = false;
+    }
+  }, [loop, mobileRows, rotateBackward, rotateForward]);
+
+  const scheduleNormalizeLoopScroll = React.useCallback((
+    mode: LoopNormalizeMode,
+  ) => {
+    pendingNormalizeModeRef.current =
+      pendingNormalizeModeRef.current === "both" || mode === "both"
+        ? "both"
+        : mode;
+    if (normalizeRafRef.current != null) return;
+    normalizeRafRef.current = window.requestAnimationFrame(() => {
+      normalizeRafRef.current = null;
+      const pending = pendingNormalizeModeRef.current ?? "both";
+      pendingNormalizeModeRef.current = null;
+      runNormalizeLoopScroll(pending);
+    });
+  }, [runNormalizeLoopScroll]);
 
   React.useEffect(() => {
     directionRef.current = autoScrollDirection === "left" ? 1 : -1;
@@ -275,7 +319,7 @@ export function Shelf({
     const el = ref.current;
     const sources = sourceItemsRef.current;
     if (!el || loopItems.length === 0 || sources.length === 0) return;
-    if (el.scrollWidth > el.clientWidth + 4) {
+    if (isShelfScrollable(el)) {
       ensureScrollableAttemptsRef.current = 0;
       if (
         autoScrollDirection === "right" &&
@@ -284,11 +328,11 @@ export function Shelf({
         rightSeedAppliedRef.current = true;
         rotateBackward(el, getLoopRotateCount(mobileRows));
       }
-      update();
+      syncArrowState(el);
       return;
     }
     if (ensureScrollableAttemptsRef.current >= 8) {
-      update();
+      syncArrowState(el);
       return;
     }
 
@@ -301,34 +345,38 @@ export function Shelf({
         rotateCount,
       ),
     );
-  }, [autoScrollDirection, loop, loopItems.length, mobileRows, rotateBackward, sourceSignature, update]);
+  }, [autoScrollDirection, loop, loopItems.length, mobileRows, rotateBackward, sourceSignature, syncArrowState]);
 
   const handleScroll = React.useCallback(() => {
-    update();
-    if (!loop) return;
     const el = ref.current;
-    if (!el || normalizingRef.current) return;
-    if (el.scrollWidth <= el.clientWidth + 4) return;
-    normalizingRef.current = true;
-    try {
-      const count = getLoopRotateCount(mobileRows);
-      normalizeLoopScroll(el, rotateForward, rotateBackward, count, "both");
-    } finally {
-      normalizingRef.current = false;
-    }
-  }, [loop, mobileRows, rotateBackward, rotateForward, update]);
+    if (!el) return;
+    syncArrowState(el);
+    if (!loop || normalizingRef.current) return;
+    scheduleNormalizeLoopScroll("both");
+  }, [loop, scheduleNormalizeLoopScroll, syncArrowState]);
 
   React.useEffect(() => {
     const el = ref.current;
     if (!el) return;
     handleScroll();
     el.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", update);
+    const onScrollEnd = () => {
+      syncArrowState(el);
+      if (loop) runNormalizeLoopScroll("both");
+    };
+    el.addEventListener("scrollend", onScrollEnd);
+    const onResize = () => syncArrowState(el);
+    window.addEventListener("resize", onResize);
     return () => {
       el.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", update);
+      el.removeEventListener("scrollend", onScrollEnd);
+      window.removeEventListener("resize", onResize);
+      if (normalizeRafRef.current != null) {
+        window.cancelAnimationFrame(normalizeRafRef.current);
+        normalizeRafRef.current = null;
+      }
     };
-  }, [handleScroll, loopItems.length, update]);
+  }, [handleScroll, loopItems.length, runNormalizeLoopScroll, syncArrowState]);
 
   React.useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -381,7 +429,7 @@ export function Shelf({
     const tick = (now: number) => {
       const elapsed = now - last;
       last = now;
-      if (!pausedRef.current && el.scrollWidth > el.clientWidth + 4) {
+      if (!pausedRef.current && isShelfScrollable(el)) {
         const delta = Math.min(elapsed, 80) * (Math.min(autoScrollSpeed, 120) / 1000);
         let next = el.scrollLeft + delta * directionRef.current;
         if (loop) {
@@ -410,8 +458,8 @@ export function Shelf({
             directionRef.current = 1;
           }
           el.scrollLeft = next;
+          syncArrowState(el);
         }
-        update();
       }
       frameRef.current = window.requestAnimationFrame(tick);
     };
@@ -430,18 +478,25 @@ export function Shelf({
     reducedMotion,
     rotateBackward,
     rotateForward,
-    update,
+    syncArrowState,
   ]);
 
   React.useEffect(() => () => {
     if (resumeTimerRef.current != null) window.clearTimeout(resumeTimerRef.current);
+    if (normalizeRafRef.current != null) window.cancelAnimationFrame(normalizeRafRef.current);
   }, []);
 
   const scrollBy = (dir: -1 | 1) => {
     const el = ref.current;
     if (!el) return;
     if (!loop) directionRef.current = dir;
-    el.scrollBy({ left: el.clientWidth * 0.85 * dir, behavior: "smooth" });
+    const distance = el.clientWidth * 0.85 * dir;
+    if (loop) {
+      el.scrollBy({ left: distance, behavior: "auto" });
+      scheduleNormalizeLoopScroll(dir === -1 ? "backward" : "forward");
+    } else {
+      el.scrollBy({ left: distance, behavior: "smooth" });
+    }
     pauseAfterInteraction();
   };
 

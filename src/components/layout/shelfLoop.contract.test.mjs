@@ -99,10 +99,9 @@ test("loop shelfは手動スクロールでもnormalizeLoopScrollをscrollイベ
     shelf,
     /addEventListener\("scroll", handleScroll, \{ passive: true \}\)/,
   );
-  assert.match(
-    shelf,
-    /normalizeLoopScroll\(el, rotateForward, rotateBackward, count, "both"\)/,
-  );
+  assert.match(shelf, /scheduleNormalizeLoopScroll\("both"\)/);
+  assert.match(shelf, /runNormalizeLoopScroll/);
+  assert.match(shelf, /addEventListener\("scrollend", onScrollEnd\)/);
 });
 
 test("右方向loopはfill完了時にrotateBackwardで初期位置をシードする", () => {

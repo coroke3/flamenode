@@ -378,6 +378,13 @@ select {
 .fn-shelf[data-loop="true"] {
   scroll-snap-type: none;
   overscroll-behavior-inline: contain;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+}
+
+.fn-shelf[data-loop="true"] > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 280px;
 }
 
 .fn-shelf-fade-left,
