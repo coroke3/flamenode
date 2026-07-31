@@ -373,6 +373,14 @@ function injectCommitVariable(content, commit) {
   return `${content.trimEnd()}\n\n[vars]\n${commitLine}\n`;
 }
 
+function injectAccountId(content, accountId) {
+  const assignment = `account_id = "${accountId}"`;
+  if (/^\s*account_id\s*=/m.test(content)) {
+    return content.replace(/^\s*account_id\s*=.*$/m, assignment);
+  }
+  return content.replace(/^(name\s*=.*)$/m, `$1\n${assignment}`);
+}
+
 function injectStringVariable(content, name, rawValue) {
   const assignment = `${name} = ${JSON.stringify(rawValue)}`;
   const pattern = new RegExp(`^\\s*${name}\\s*=.*$`, "m");
@@ -464,6 +472,9 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
     if (!new RegExp(`^\\s*binding\\s*=\\s*"${binding}"\\s*$`, "m").test(content)) {
       errors.push(`required binding ${binding} is missing`);
     }
+  }
+  if (!content.includes(`account_id = "${value(env, "CLOUDFLARE_ACCOUNT_ID")}"`)) {
+    errors.push("Cloudflare account_id is not injected");
   }
   if (!content.includes(value(env, "CF_D1_DATABASE_ID"))) errors.push("D1 production ID is not injected");
   if (!content.includes(value(env, "CF_KV_NAMESPACE_ID"))) errors.push("KV production ID is not injected");
@@ -576,6 +587,7 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
     );
   }
   output = injectCommitVariable(output, commit);
+  output = injectAccountId(output, value(env, "CLOUDFLARE_ACCOUNT_ID"));
   if (target.key === "web") {
     output = replaceRequired(
       output,
@@ -847,7 +859,7 @@ export function assertRemoteSecretPayload(payload, requiredNames, service) {
   const missing = requiredNames.filter((name) => !available.has(name));
   if (missing.length > 0) {
     throw new Error(
-      `${service}: required remote Worker secret names are missing: ${missing.join(", ")}. Configure them with "wrangler secret put <NAME> --config <generated-config>" before retrying.`,
+      `${service}: required remote Worker secret names are missing: ${missing.join(", ")}. Register them as Runtime Secrets on ${service} (Dashboard → Workers → Settings → Secrets), not only Build Secrets.`,
     );
   }
   return available;
@@ -864,7 +876,7 @@ export function runRemoteSecretPreflight({
     const required = [...REMOTE_SECRET_REQUIREMENTS[target.key]];
     const result = run({
       executable: process.execPath,
-      args: [wranglerBin, "secret", "list", "--config", configs[target.key], "--format", "json"],
+      args: [wranglerBin, "secret", "list", "--name", target.service, "--format", "json"],
       cwd: repoRoot,
       env,
       label: `cloudflare-deploy:${target.service}:secret-name-preflight`,
@@ -874,7 +886,9 @@ export function runRemoteSecretPreflight({
     try {
       payload = JSON.parse(String(result.stdout ?? "").trim());
     } catch {
-      throw new Error(`${target.service}: remote secret list returned malformed JSON.`);
+      throw new Error(
+        `${target.service}: remote secret list returned malformed JSON. Verify CLOUDFLARE_API_TOKEN can list Worker secrets and CLOUDFLARE_ACCOUNT_ID matches the Worker account.`,
+      );
     }
     const available = assertRemoteSecretPayload(payload, required, target.service);
     if (

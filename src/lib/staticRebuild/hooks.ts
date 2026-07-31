@@ -149,6 +149,7 @@ export async function enqueueAfterVideoUpdate(
     visibilityChanged: boolean;
     identityChanged: boolean;
     eventMembershipChanged: boolean;
+    randomPoolCardChanged?: boolean;
     requestedByUserId?: string | null;
   },
 ): Promise<void> {
@@ -182,6 +183,8 @@ export async function enqueueAfterVideoUpdate(
 
   const listAffecting =
     opts.visibilityChanged || opts.eventMembershipChanged || opts.identityChanged;
+  const cardChanged =
+    opts.randomPoolCardChanged ?? listAffecting;
 
   if (opts.visibilityChanged) {
     items.push({
@@ -193,7 +196,7 @@ export async function enqueueAfterVideoUpdate(
     });
   }
 
-  if (listAffecting) {
+  if (cardChanged) {
     items.push({
       targetType: "random_video_pool",
       targetId: "global",
@@ -201,13 +204,14 @@ export async function enqueueAfterVideoUpdate(
       priority: "low",
       requestedByUserId: opts.requestedByUserId,
     });
-  }
-
-  if (listAffecting) {
-    items.push(...globalListTargets("video_update", "low"));
-    if (!chainsTopRecommendViaUsersIndex) {
-      items.push(...topRecommendTargets("video_update", "low"));
-    }
+    items.push(
+      ...buildVideoCardChangeFanOutTargets({
+        reason: "video_card_update",
+        requestedByUserId: opts.requestedByUserId,
+        priority: "low",
+        skipTopRecommend: chainsTopRecommendViaUsersIndex,
+      }),
+    );
   }
 
   if (opts.eventMembershipChanged || opts.visibilityChanged) {

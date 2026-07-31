@@ -400,6 +400,7 @@ test("tracked placeholder configs produce four private production configs withou
       assert.match(configPath.replaceAll("\\", "/"), /\.cloudflare\/generated\//);
       const source = fs.readFileSync(configPath, "utf8");
       assert.match(source, new RegExp(COMMIT));
+      assert.match(source, new RegExp(`account_id = "${env.CLOUDFLARE_ACCOUNT_ID}"`));
       assert.match(source, new RegExp(env.CF_D1_DATABASE_ID));
       assert.match(source, new RegExp(env.CF_KV_NAMESPACE_ID));
       assert.doesNotMatch(source, /preview_id|00000000-0000-0000-0000-000000000000/);
@@ -657,11 +658,11 @@ test("remote Worker secret preflight checks names only and never accepts a missi
     "sync-jobs": "sync.toml",
   };
   const env = productionEnv();
-  const byConfig = {
-    "web.toml": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
-    "fast.toml": ["DISCORD_BOT_TOKEN"],
-    "content.toml": ["WORKER_ADMIN_TOKEN"],
-    "sync.toml": ["YOUTUBE_API_KEY", "YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET", "YOUTUBE_OAUTH_REFRESH_TOKEN"],
+  const byService = {
+    "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
+    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
+    "flamenode-sync-jobs": ["YOUTUBE_API_KEY", "YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET", "YOUTUBE_OAUTH_REFRESH_TOKEN"],
   };
   const requests = [];
   runRemoteSecretPreflight({
@@ -671,13 +672,14 @@ test("remote Worker secret preflight checks names only and never accepts a missi
     wranglerBin: "wrangler.mjs",
     run: (request) => {
       requests.push(request);
-      const config = request.args[request.args.indexOf("--config") + 1];
-      return { stdout: JSON.stringify(byConfig[config].map((name) => ({ name, type: "secret_text" }))) };
+      const service = request.args[request.args.indexOf("--name") + 1];
+      return { stdout: JSON.stringify(byService[service].map((name) => ({ name, type: "secret_text" }))) };
     },
   });
   assert.equal(requests.length, 4);
   assert.ok(requests.every((request) => request.allowOutput === false));
   assert.ok(requests.every((request) => request.args.includes("list") && !request.args.includes("put")));
+  assert.ok(requests.every((request) => request.args.includes("--name")));
   assert.throws(
     () => assertRemoteSecretPayload([{ name: "AUTH_SECRET" }], ["AUTH_SECRET", "WORKER_ADMIN_TOKEN"], "flamenode-web"),
     /WORKER_ADMIN_TOKEN/,
@@ -690,8 +692,8 @@ test("remote Worker secret preflight checks names only and never accepts a missi
         configs,
         wranglerBin: "wrangler.mjs",
         run: (request) => {
-          const config = request.args[request.args.indexOf("--config") + 1];
-          const names = config === "fast.toml" ? [] : byConfig[config];
+          const service = request.args[request.args.indexOf("--name") + 1];
+          const names = service === "flamenode-fast-jobs" ? [] : byService[service];
           return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
         },
       }),
