@@ -96,6 +96,7 @@ import {
 } from "./degradedQueries";
 import {
   readPublicJsonCache,
+  unwrapPublicJsonCachePayload,
   writePublicJsonCacheBestEffort,
 } from "./publicCache";
 import {
@@ -337,7 +338,9 @@ export function createPublicJsonLoader<TPayload, TResult>({
 export async function loadPublicJson<T>(
   options: PublicJsonLoadOptions<T>,
 ): Promise<PublicJsonLoadResult<T>> {
-  const cached = await readPublicJsonCache<T>(options.r2Key);
+  const cached = unwrapPublicJsonCachePayload<T>(
+    await readPublicJsonCache<unknown>(options.r2Key),
+  );
   if (cached !== null) {
     if (options.isEmptyCollection?.(cached)) {
       return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });

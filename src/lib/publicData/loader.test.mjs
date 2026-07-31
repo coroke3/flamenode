@@ -49,10 +49,11 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
   );
-  const cacheIndex = loadPublicJsonFn.indexOf("readPublicJsonCache");
+  assert.match(loadPublicJsonFn, /unwrapPublicJsonCachePayload/);
+  assert.match(loadPublicJsonFn, /readPublicJsonCache/);
   const r2Index = loadPublicJsonFn.indexOf("readStaticJson");
   const missIndex = loadPublicJsonFn.lastIndexOf("return resolvePublicJsonMiss");
-  assert.ok(cacheIndex >= 0 && r2Index > cacheIndex, "Cache precedes R2");
+  assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
   assert.match(

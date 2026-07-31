@@ -18,6 +18,7 @@ test("共有JSONローダーはrequest外へR2 Promiseを保持しない", () =>
   assert.doesNotMatch(source, /inFlight\.(?:get|set|delete)/);
   assert.match(source, /const object = await bucket\.get\(key\)/);
   assert.match(source, /readPublicJsonCache/);
+  assert.match(source, /coercePublicJsonCacheEnvelope/);
   assert.match(source, /writePublicJsonCacheBestEffort/);
 });
 

@@ -4,6 +4,7 @@ import { cache } from "react";
 import { getEnv } from "@/lib/cloudflare";
 import { recordPublicR2Get } from "@/lib/observability/publicRequestMetrics";
 import {
+  coercePublicJsonCacheEnvelope,
   readPublicJsonCache,
   writePublicJsonCacheBestEffort,
 } from "./publicCache";
@@ -69,11 +70,11 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const cacheTtl = args.cacheTtlSeconds ?? 300;
 
-  const freshCached = await readPublicJsonCache<{
-    payload: unknown;
-    stored_at: number;
-  }>(args.key);
-  if (freshCached && typeof freshCached.stored_at === "number") {
+  const freshCached = coercePublicJsonCacheEnvelope(
+    await readPublicJsonCache<unknown>(args.key),
+    now,
+  );
+  if (freshCached) {
     const age = now - freshCached.stored_at;
     if (age >= 0 && age <= cacheTtl) {
       const normalized = args.normalize(freshCached.payload);
@@ -96,7 +97,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
     }
   }
 
-  if (freshCached && typeof freshCached.stored_at === "number") {
+  if (freshCached) {
     const age = now - freshCached.stored_at;
     if (age >= 0 && age <= args.maxStaleAgeSec) {
       const normalized = args.normalize(freshCached.payload);

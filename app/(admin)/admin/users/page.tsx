@@ -400,7 +400,7 @@ export default async function AdminUsersPage({
               upcoming_editable_fields: systemSettings.upcoming_editable_fields,
             })
             .from(systemSettings)
-            .where(eq(systemSettings.id, "global"))
+            .where(eq(systemSettings.id, "default"))
             .limit(1)
         )[0] ?? permissionSettings;
     } catch (e) {
