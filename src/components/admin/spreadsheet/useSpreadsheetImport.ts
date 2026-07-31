@@ -16,6 +16,7 @@ import {
   runSpreadsheetImport,
   spreadsheetUserMessage,
 } from "./spreadsheetApi";
+import { spreadsheetSaveStatusMessage } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { SpreadsheetImportPreview } from "./spreadsheetTypes";
 
 export function useSpreadsheetImport({
@@ -202,7 +203,8 @@ export function useSpreadsheetImport({
       setOpen(false);
       reset();
       await onImported();
-      const msg = `反映完了: 追加 ${j.inserted} / 更新 ${j.updated} / スキップ ${j.skipped}${errCount > 0 ? ` / エラー ${errCount}` : ""}`;
+      const base = `反映完了: 追加 ${j.inserted} / 更新 ${j.updated} / スキップ ${j.skipped}${errCount > 0 ? ` / エラー ${errCount}` : ""}`;
+      const msg = spreadsheetSaveStatusMessage(base, j.pendingPublicReflection);
       setBarStatus?.(msg);
       return msg;
     } catch (e) {

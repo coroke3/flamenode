@@ -26,6 +26,7 @@ import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { normalizeXId } from "@/lib/utils/xid";
 import { ErrorCallout } from "@/components/ui/ErrorCallout";
+import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
 import {
   getStagePermissionAnswerValue,
   resolveStagePermissionFieldsFromJson,
@@ -1503,6 +1504,7 @@ export function VideoForm({
               ? "保存しました。"
               : "提出が完了しました。続けて以下から進めてください。"}
           </div>
+          {result.pendingPublicReflection ? <PublicReflectionDelayNotice /> : null}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {result.youtubeVideoId || result.videoId ? (
               <Link

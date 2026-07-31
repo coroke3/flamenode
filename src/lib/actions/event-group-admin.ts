@@ -9,8 +9,12 @@ import { eventGroupEvents, eventGroups, events } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { buildEventGroupChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
+import {
+  markPendingPublicReflection,
+  type PendingPublicReflection,
+} from "@/lib/staticRebuild/publicReflectionNotice";
 
-export interface EventGroupActionResult {
+export interface EventGroupActionResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
   id?: string;
@@ -106,7 +110,7 @@ async function mutateEventGroupWithQueue(
     reason: string;
     requestedByUserId: string;
   },
-): Promise<void> {
+): Promise<boolean> {
   const queue = await buildEventGroupChangeQueueBatch(db, input);
   await mutateWithAudit(db, {
     mutationStatements: [...input.mutationStatements, ...queue.statements],
@@ -117,6 +121,7 @@ async function mutateEventGroupWithQueue(
     audits: input.audits,
     staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
   });
+  return queue.statements.length > 0;
 }
 
 export async function createEventGroup(
@@ -157,7 +162,7 @@ export async function createEventGroup(
     updated_at: now,
   } satisfies typeof eventGroups.$inferInsert;
 
-  await mutateEventGroupWithQueue(db, {
+  const staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
     mutationStatements: [db.insert(eventGroups).values(createdRow)],
     expectedMutationChanges: [1],
     audits: [
@@ -176,7 +181,7 @@ export async function createEventGroup(
 
   revalidatePath("/admin/event-groups");
   revalidatePath("/event");
-  return { ok: true, id };
+  return markPendingPublicReflection({ ok: true, id }, staticRebuildEnqueued);
 }
 
 export async function updateEventGroup(
@@ -223,7 +228,7 @@ export async function updateEventGroup(
   } satisfies Partial<typeof eventGroups.$inferInsert>;
   const updatedRow = { ...existing, ...updatedValues };
 
-  await mutateEventGroupWithQueue(db, {
+  const staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
     mutationStatements: [
       db
         .update(eventGroups)
@@ -251,7 +256,7 @@ export async function updateEventGroup(
   revalidatePath("/admin/event-groups");
   revalidatePath(`/admin/event-groups/${id}/edit`);
   revalidatePath("/event");
-  return { ok: true, id };
+  return markPendingPublicReflection({ ok: true, id }, staticRebuildEnqueued);
 }
 
 export async function deleteEventGroup(

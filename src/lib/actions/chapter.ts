@@ -15,11 +15,13 @@ import { videoChapters, videos } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { parseChapterTime } from "@/lib/utils/chapterTime";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
+import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { MAX_ATOMIC_CHAPTER_BULK_ROWS, parseChapterBulkCsv } from "./chapterLimits";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 
-export interface ChapterActionResult {
+export interface ChapterActionResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
   chapterId?: string;
@@ -124,7 +126,7 @@ export async function createChapter(
   }
 
   await revalidateChapterPath(target.youtube_video_id, data.video_id);
-  return { ok: true, chapterId: id };
+  return markPendingPublicReflection({ ok: true, chapterId: id }, queue.statements.length > 0);
 }
 const updateSchema = createSchema.extend({
   chapter_id: z.string().trim().min(1),
@@ -259,7 +261,10 @@ export async function updateChapter(
   }
 
   await revalidateChapterPath(target.youtube_video_id, target.id);
-  return { ok: true, chapterId: existing.id, message: "チャプターを更新しました。" };
+  return markPendingPublicReflection(
+    { ok: true, chapterId: existing.id, message: "チャプターを更新しました。" },
+    queue.statements.length > 0,
+  );
 }
 
 /** 自分のチャプター、または動画管理権限があるチャプターを完全削除する。 */
@@ -330,7 +335,10 @@ export async function deleteChapter(
   }
 
   await revalidateChapterPath(target.youtube_video_id, target.id);
-  return { ok: true, chapterId: existing.id, message: "チャプターを削除しました。" };
+  return markPendingPublicReflection(
+    { ok: true, chapterId: existing.id, message: "チャプターを削除しました。" },
+    queue.statements.length > 0,
+  );
 }
 
 /**
@@ -433,6 +441,7 @@ export async function createChaptersBulk(
   const errors: string[] = [];
   let inserted = 0;
   let skipped = 0;
+  let enqueuedPublicReflection = false;
   const pendingRows: Array<{
     id: string;
     chapter_time: number;
@@ -488,6 +497,7 @@ export async function createChaptersBulk(
       reason: "chapter_bulk_create",
       requestedByUserId: sUser.id,
     }]);
+    enqueuedPublicReflection = queue.statements.length > 0;
     try {
       await mutateWithAudit(db, {
         mutationStatements: [db.run(sql`
@@ -516,16 +526,19 @@ export async function createChaptersBulk(
   if (inserted > 0) {
     await revalidateChapterPath(target.youtube_video_id, video_id);
   }
-  return {
-    ok: inserted > 0,
-    message:
-      inserted > 0
-        ? `${inserted} 件追加 / ${skipped} 件スキップ`
-        : "登録できる行がありませんでした。",
-    inserted,
-    skipped,
-    errors,
-  };
+  return markPendingPublicReflection(
+    {
+      ok: inserted > 0,
+      message:
+        inserted > 0
+          ? `${inserted} 件追加 / ${skipped} 件スキップ`
+          : "登録できる行がありませんでした。",
+      inserted,
+      skipped,
+      errors,
+    },
+    inserted > 0 && enqueuedPublicReflection,
+  );
 }
 
 /**

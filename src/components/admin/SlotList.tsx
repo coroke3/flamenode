@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { TableScroll } from "@/components/ui/TableScroll";
 import {
@@ -58,6 +59,10 @@ export function SlotList({
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [batchLabel, setBatchLabel] = React.useState("");
   const [confirm, setConfirm] = React.useState<ConfirmState>(null);
@@ -72,14 +77,29 @@ export function SlotList({
   }, [slots, slotPartGapSec]);
 
   const run = async (
-    action: (formData: FormData) => Promise<{ ok: boolean; message?: string }>,
+    action: (formData: FormData) => Promise<{
+      ok: boolean;
+      message?: string;
+      pendingPublicReflection?: boolean;
+    }>,
     formData: FormData,
+    okMessage?: string,
   ): Promise<void> => {
     setBusy(true);
     setError(null);
+    setSuccess(null);
     const result = await action(formData);
-    if (!result.ok) setError(result.message ?? "操作に失敗しました。");
-    else setSelected(new Set());
+    if (!result.ok) {
+      setError(result.message ?? "操作に失敗しました。");
+    } else {
+      setSelected(new Set());
+      if (okMessage || result.message) {
+        setSuccess({
+          message: result.message ?? okMessage ?? "操作が完了しました。",
+          pendingPublicReflection: result.pendingPublicReflection,
+        });
+      }
+    }
     router.refresh();
     setBusy(false);
   };
@@ -102,6 +122,17 @@ export function SlotList({
         <p role="alert" className="fn-alert fn-alert--danger">
           <Icon name="warning" size={12} aria-hidden /> {error}
         </p>
+      ) : null}
+      {success ? (
+        <SaveSuccessNotice
+          message={
+            <>
+              <Icon name="check" size={12} aria-hidden /> {success.message}
+            </>
+          }
+          pendingPublicReflection={success.pendingPublicReflection}
+          style={{ marginBottom: 12, fontSize: 12 }}
+        />
       ) : null}
 
       {selectedIds.length > 0 ? (

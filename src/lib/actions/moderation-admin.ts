@@ -18,11 +18,18 @@ import {
   parseModerationDueAt,
 } from "@/lib/admin/moderationCaseInput";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import {
+  markPendingPublicReflection,
+  type PendingPublicReflection,
+} from "@/lib/staticRebuild/publicReflectionNotice";
 import { generateId } from "@/lib/utils/id";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 
-export interface ModerationAdminResult { ok: boolean; message?: string }
+export interface ModerationAdminResult extends PendingPublicReflection {
+  ok: boolean;
+  message?: string;
+}
 
 function snapshot(row: object): Record<string, unknown> { return { ...row }; }
 function mutationError(error: unknown): ModerationAdminResult {
@@ -91,7 +98,10 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
   await runModerationPostCommit(video, changed);
-  return { ok: true, message: "case を作成しました。" };
+  return markPendingPublicReflection(
+    { ok: true, message: "case を作成しました。" },
+    queue.statements.length > 0,
+  );
 }
 
 export async function updateModerationCaseStatus(formData: FormData): Promise<ModerationAdminResult> {
@@ -131,5 +141,8 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
   catch (error) { return mutationError(error); }
   await runModerationPostCommit(video, changed);
-  return { ok: true, message: "case を更新しました。" };
+  return markPendingPublicReflection(
+    { ok: true, message: "case を更新しました。" },
+    queue.statements.length > 0,
+  );
 }

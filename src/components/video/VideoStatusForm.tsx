@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
 import { setVideoStatus } from "@/lib/actions/admin";
 import { setManageVideoStatus } from "@/lib/actions/manage-video";
 import {
@@ -14,6 +15,7 @@ import {
 type ActionResult = {
   ok: boolean;
   message?: string;
+  pendingPublicReflection?: boolean;
 };
 
 type VideoStatusAction = (formData: FormData) => Promise<ActionResult>;
@@ -116,6 +118,8 @@ export function VideoStatusForm({
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
+  const [pendingPublicReflection, setPendingPublicReflection] =
+    React.useState(false);
 
   const requiresReason = allowVoidReason && status === "voided";
   const statusFieldId = `${formIdPrefix}-status`;
@@ -132,6 +136,10 @@ export function VideoStatusForm({
     return options;
   }, [currentStatus, statuses]);
 
+  React.useEffect(() => {
+    setStatus(currentStatus);
+  }, [currentStatus]);
+
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (status === currentStatus) {
@@ -145,6 +153,7 @@ export function VideoStatusForm({
 
     setError(null);
     setSuccess(false);
+    setPendingPublicReflection(false);
     const fd = new FormData();
     for (const [key, value] of Object.entries(hiddenFields ?? {})) {
       fd.set(key, value);
@@ -164,6 +173,7 @@ export function VideoStatusForm({
         setError(result.message ?? "更新に失敗しました。");
       } else {
         setSuccess(true);
+        setPendingPublicReflection(result.pendingPublicReflection === true);
         if (allowVoidReason) {
           setReason("");
         }
@@ -245,14 +255,19 @@ export function VideoStatusForm({
         </p>
       ) : null}
       {success ? (
-        <p role="status" style={{ color: "var(--accent-primary)", fontSize: 12 }}>
+        <div role="status" style={{ color: "var(--accent-primary)", fontSize: 12 }}>
           {showMessageIcons ? (
             <>
               <Icon name="check" size={12} aria-hidden />{" "}
             </>
           ) : null}
           ステータスを更新しました。
-        </p>
+          {pendingPublicReflection ? (
+            <div style={{ marginTop: 8 }}>
+              <PublicReflectionDelayNotice />
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </form>
   );

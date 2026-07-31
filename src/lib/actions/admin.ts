@@ -14,8 +14,13 @@ import { buildVideoStatusChangeNotificationBatch } from "@/lib/notifications/vid
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildAfterVideoStatusChangeQueueBatch, MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
+import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 
-export interface AdminActionResult { ok: boolean; message?: string }
+export interface AdminActionResult extends PendingPublicReflection {
+  ok: boolean;
+  message?: string;
+}
 const VALID_STATUS = new Set(["pending", "public", "private", "voided"]);
 
 function revalidateVideoStatusPaths(videoId: string, youtubeVideoId: string | null): void {
@@ -99,5 +104,8 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
     return { ok: false, message: "更新・通知・静的再生成の記録に失敗しました。" };
   }
   await revalidateVideoStatusPathsBestEffort(videoId, before.youtube_video_id);
-  return { ok: true, message: "ステータスを更新しました。" };
+  return markPendingPublicReflection(
+    { ok: true, message: "ステータスを更新しました。" },
+    queue.statements.length > 0,
+  );
 }

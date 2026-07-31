@@ -12,10 +12,14 @@ import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import {
+  markPendingPublicReflection,
+  type PendingPublicReflection,
+} from "@/lib/staticRebuild/publicReflectionNotice";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { normalizeXId } from "@/lib/utils/xid";
 
-export interface UserAdminResult {
+export interface UserAdminResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
 }
@@ -420,5 +424,5 @@ export async function refreshXUserIcon(formData: FormData): Promise<UserAdminRes
     return mutationError(error);
   }
   await revalidateXUserIconPathsBestEffort(xUserId);
-  return { ok: true };
+  return markPendingPublicReflection({ ok: true }, queue.statements.length > 0);
 }

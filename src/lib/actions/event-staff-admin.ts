@@ -35,8 +35,12 @@ import { createTraceId } from "@/lib/observability/flowTrace";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
+import {
+  markPendingPublicReflection,
+  type PendingPublicReflection,
+} from "@/lib/staticRebuild/publicReflectionNotice";
 
-export interface StaffActionResult {
+export interface StaffActionResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
 }
@@ -370,7 +374,7 @@ export async function upsertEventStaffMember(
     actorUserId: guard.userId,
     reason: data.reason,
   });
-  return { ok: true };
+  return markPendingPublicReflection({ ok: true }, true);
 }
 
 const csvImportRowSchema = z.object({
@@ -536,7 +540,7 @@ export async function bulkUpsertEventStaffFromCsv(
     actorUserId: guard.userId,
     reason: data.reason,
   });
-  return { ok: true };
+  return markPendingPublicReflection({ ok: true }, true);
 }
 
 const removeSchema = z.object({
@@ -583,7 +587,7 @@ export async function removeEventStaffMember(
     actorUserId: guard.userId,
     reason: data.reason,
   });
-  return { ok: true };
+  return markPendingPublicReflection({ ok: true }, true);
 }
 
 const transferSchema = z.object({
@@ -638,5 +642,5 @@ export async function transferEventOwnershipAction(
     actorUserId: guard.userId,
     reason: data.reason,
   });
-  return { ok: true };
+  return markPendingPublicReflection({ ok: true }, true);
 }

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import {
   bulkUpsertEventStaffFromCsv,
   removeEventStaffMember,
@@ -77,28 +78,53 @@ export function EventStaffManager({
 }: EventStaffManagerProps): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
-  const [message, setMessage] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
 
   const run = (
-    action: () => Promise<{ ok: boolean; message?: string }>,
+    action: () => Promise<{
+      ok: boolean;
+      message?: string;
+      pendingPublicReflection?: boolean;
+    }>,
+    okMessage = "保存しました。",
   ): void => {
-    setMessage(null);
+    setError(null);
+    setSuccess(null);
     startTransition(async () => {
       const result = await action();
       if (!result.ok) {
-        setMessage(result.message ?? "操作に失敗しました。");
+        setError(result.message ?? "操作に失敗しました。");
         return;
       }
+      setSuccess({
+        message: result.message ?? okMessage,
+        pendingPublicReflection: result.pendingPublicReflection,
+      });
       router.refresh();
     });
   };
 
   return (
     <div className="manage-permission-panel" style={{ display: "grid", gap: 22 }}>
-      {message ? (
+      {error ? (
         <p role="alert" className="fn-alert fn-alert--danger" style={{ margin: 0 }}>
-          <Icon name="warning" size={13} aria-hidden /> {message}
+          <Icon name="warning" size={13} aria-hidden /> {error}
         </p>
+      ) : null}
+      {success ? (
+        <SaveSuccessNotice
+          message={
+            <>
+              <Icon name="check" size={13} aria-hidden /> {success.message}
+            </>
+          }
+          pendingPublicReflection={success.pendingPublicReflection}
+          style={{ margin: 0, fontSize: 12 }}
+        />
       ) : null}
 
       <section className="manage-permission-members" style={{ display: "grid", gap: 10 }}>

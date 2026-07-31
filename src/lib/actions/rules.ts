@@ -9,6 +9,10 @@ import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
+import {
+  markPendingPublicReflection,
+  type PendingPublicReflection,
+} from "@/lib/staticRebuild/publicReflectionNotice";
 import { generateId } from "@/lib/utils/id";
 import {
   getLatestPublishedMajorTerms,
@@ -17,7 +21,11 @@ import {
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 
-export interface RulesResult { ok: boolean; message?: string; id?: string }
+export interface RulesResult extends PendingPublicReflection {
+  ok: boolean;
+  message?: string;
+  id?: string;
+}
 export interface RulesBroadcastResult extends RulesResult { enqueued?: number; cursor?: string; warning?: string }
 
 const TERMS_REACCEPT_BATCH_SIZE = 30;
@@ -165,7 +173,7 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
       },
     },
   ]);
-  return { ok: true, id };
+  return markPendingPublicReflection({ ok: true, id }, true);
 }
 
 export async function broadcastTermsReaccept(formData: FormData): Promise<RulesBroadcastResult> {
@@ -261,5 +269,5 @@ export async function archiveTermsVersion(formData: FormData): Promise<RulesResu
       },
     },
   ]);
-  return { ok: true };
+  return markPendingPublicReflection({ ok: true, id }, wasPublished);
 }

@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import styles from "./EventForm.module.css";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import { createEvent, updateEvent } from "@/lib/actions/event-admin";
 import { PermissionKeysField } from "@/components/admin/PermissionKeysField";
 import {
@@ -278,7 +279,10 @@ export function EventForm({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
   const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
     initialPreview(initial),
   );
@@ -315,7 +319,10 @@ export function EventForm({
         setError(result.message ?? "保存に失敗しました。");
         return;
       }
-      setSuccess("保存しました。");
+      setSuccess({
+        message: "保存しました。",
+        pendingPublicReflection: result.pendingPublicReflection,
+      });
       if (mode === "create" && result.eventId) {
         router.push(`/manage/events/${result.eventId}/edit`);
       } else {
@@ -741,7 +748,12 @@ export function EventForm({
       </FormSection>
 
       {error ? <p className="fn-error">{error}</p> : null}
-      {success ? <p className="fn-success">{success}</p> : null}
+      {success ? (
+        <SaveSuccessNotice
+          message={success.message}
+          pendingPublicReflection={success.pendingPublicReflection}
+        />
+      ) : null}
       <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
         {busy ? "保存中…" : mode === "create" ? "イベントを作成" : "変更を保存"}
       </button>

@@ -6,6 +6,7 @@ import { ChapterTabs, type ChapterEntry } from "./ChapterTabs";
 import { ChapterComposer } from "./ChapterComposer";
 import { usePlayerTime } from "./usePlayerTime";
 import { Icon } from "@/components/ui/Icon";
+import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
 import styles from "./ChapterCommentPanel.module.css";
 
 interface ChapterCommentPanelProps {
@@ -37,11 +38,14 @@ export function ChapterCommentPanel({
   const [submittedChapter, setSubmittedChapter] = React.useState<{
     chapterTime: number;
     label: string;
+    pendingPublicReflection?: boolean;
   } | null>(null);
+  const [reflectionNotice, setReflectionNotice] = React.useState(false);
 
   const openComposer = React.useCallback(() => {
     setDraftTime(currentTime);
     setComposerOpen(true);
+    setReflectionNotice(false);
   }, [currentTime]);
 
   const closeComposer = React.useCallback(() => {
@@ -49,8 +53,13 @@ export function ChapterCommentPanel({
   }, []);
 
   const handleSuccess = React.useCallback(
-    (chapter: { chapterTime: number; label: string }) => {
+    (chapter: {
+      chapterTime: number;
+      label: string;
+      pendingPublicReflection?: boolean;
+    }) => {
       setSubmittedChapter(chapter);
+      setReflectionNotice(chapter.pendingPublicReflection === true);
       setComposerOpen(false);
     },
     [],
@@ -120,6 +129,11 @@ export function ChapterCommentPanel({
       </header>
 
       <div className={styles.list}>
+        {reflectionNotice ? (
+          <div style={{ marginBottom: 8 }}>
+            <PublicReflectionDelayNotice />
+          </div>
+        ) : null}
         <ChapterTabs
           chapters={chapters}
           presentation="responsive"

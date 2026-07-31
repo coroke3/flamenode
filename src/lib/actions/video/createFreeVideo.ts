@@ -10,6 +10,7 @@ import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { generateId } from "@/lib/utils/id";
@@ -146,6 +147,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     updated_at: now,
   };
 
+  let staticRebuildEnqueued = false;
   try {
     const plan = emptyVideoAtomicWritePlan();
     appendVideoAtomicWritePlan(
@@ -313,6 +315,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
         : []),
     ];
     const queue = await buildStaticRebuildQueueBatch(db, queueTargets);
+    staticRebuildEnqueued = queue.statements.length > 0;
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
 
@@ -339,10 +342,13 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   revalidatePath("/");
   revalidatePath("/list");
   revalidatePath("/dashboard");
-  return {
-    ok: true,
-    videoId,
-    youtubeVideoId: youtubeId,
-    eventId: eventId ?? undefined,
-  };
+  return markPendingPublicReflection(
+    {
+      ok: true,
+      videoId,
+      youtubeVideoId: youtubeId,
+      eventId: eventId ?? undefined,
+    },
+    staticRebuildEnqueued,
+  );
 }

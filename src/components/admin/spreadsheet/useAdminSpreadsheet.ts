@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { formatSpreadsheetCellValue } from "@/lib/admin/spreadsheet/cellFormat";
 import {
   buildPrimaryKeyFromDisplayRow,
   buildSpreadsheetInsertPayload,
@@ -27,9 +28,11 @@ import {
   type SpreadsheetHistoryEntry,
   type SpreadsheetHistoryStacks,
 } from "./spreadsheetHistory";
-import { formatSpreadsheetCellValue } from "@/lib/admin/spreadsheet/cellFormat";
+import { spreadsheetSaveStatusMessage } from "@/lib/staticRebuild/publicReflectionNotice";
 import { findRowIndexByPrimaryKey } from "@/lib/admin/spreadsheet/validation";
-import type { SpreadsheetPageData, SpreadsheetTableDef } from "./spreadsheetTypes";
+import type { SpreadsheetPageData, SpreadsheetSaveOutcome, SpreadsheetTableDef } from "./spreadsheetTypes";
+
+export type { SpreadsheetSaveOutcome };
 
 export function useAdminSpreadsheet(initialTable?: string) {
   const [tables, setTables] = React.useState<SpreadsheetTableDef[]>([]);
@@ -226,23 +229,25 @@ export function useAdminSpreadsheet(initialTable?: string) {
       column: string,
       value: string | null,
       rowIndexHint: number,
-    ): Promise<boolean> => {
-      if (!data) return false;
+    ): Promise<SpreadsheetSaveOutcome> => {
+      if (!data) return { ok: false };
       const issue = getPrimaryKeyIssue(data.primaryKeys, primaryKey);
       if (issue) {
         setError(formatPrimaryKeyIssue(issue));
-        return false;
+        return { ok: false };
       }
+      let pendingPublicReflection = false;
       try {
-        await patchSpreadsheetCell({
+        const patchResult = await patchSpreadsheetCell({
           table: data.def.table,
           primaryKey,
           column,
           value,
         });
+        pendingPublicReflection = patchResult.pendingPublicReflection === true;
       } catch (e) {
         setError(spreadsheetUserMessage(e, "save_failed"));
-        return false;
+        return { ok: false };
       }
       setData((prev) => {
         if (!prev) return prev;
@@ -258,7 +263,7 @@ export function useAdminSpreadsheet(initialTable?: string) {
         );
         return { ...prev, rows };
       });
-      return true;
+      return { ok: true, pendingPublicReflection };
     },
     [data],
   );
@@ -283,10 +288,10 @@ export function useAdminSpreadsheet(initialTable?: string) {
       column: string,
       value: string | null,
       options?: { skipHistory?: boolean; before?: string | null },
-    ): Promise<boolean> => {
-      if (!data) return false;
+    ): Promise<SpreadsheetSaveOutcome> => {
+      if (!data) return { ok: false };
       const row = data.rows[rowIndex];
-      if (!row) return false;
+      if (!row) return { ok: false };
 
       const beforeRaw =
         options?.before !== undefined
@@ -295,15 +300,15 @@ export function useAdminSpreadsheet(initialTable?: string) {
       const before =
         beforeRaw === "" || beforeRaw == null ? null : beforeRaw;
 
-      if (valuesEqual(before, value)) return true;
+      if (valuesEqual(before, value)) return { ok: true };
 
       const pk = requirePrimaryKeyFromRow(row);
-      if (!pk) return false;
+      if (!pk) return { ok: false };
 
-      const ok = await patchCellByPk(pk, column, value, rowIndex);
-      if (!ok) {
+      const patchResult = await patchCellByPk(pk, column, value, rowIndex);
+      if (!patchResult.ok) {
         await loadPage();
-        return false;
+        return { ok: false };
       }
 
       if (!options?.skipHistory) {
@@ -317,7 +322,10 @@ export function useAdminSpreadsheet(initialTable?: string) {
           },
         ]);
       }
-      return true;
+      return {
+        ok: true,
+        pendingPublicReflection: patchResult.pendingPublicReflection,
+      };
     },
     [data, loadPage, patchCellByPk, recordHistory, requirePrimaryKeyFromRow],
   );
@@ -330,8 +338,8 @@ export function useAdminSpreadsheet(initialTable?: string) {
         value: string | null;
       }>,
       label: string,
-    ): Promise<boolean> => {
-      if (!data || patches.length === 0) return true;
+    ): Promise<SpreadsheetSaveOutcome> => {
+      if (!data || patches.length === 0) return { ok: true };
 
       const changes: SpreadsheetCellChange[] = [];
       for (const p of patches) {
@@ -342,7 +350,7 @@ export function useAdminSpreadsheet(initialTable?: string) {
           beforeRaw === "" || beforeRaw == null ? null : beforeRaw;
         if (valuesEqual(before, p.value)) continue;
         const pk = requirePrimaryKeyFromRow(row);
-        if (!pk) return false;
+        if (!pk) return { ok: false };
         changes.push({
           rowIndex: p.rowIndex,
           primaryKey: pk,
@@ -351,23 +359,25 @@ export function useAdminSpreadsheet(initialTable?: string) {
           after: p.value,
         });
       }
-      if (changes.length === 0) return true;
+      if (changes.length === 0) return { ok: true };
 
+      let pendingPublicReflection = false;
       for (const ch of changes) {
-        const ok = await patchCellByPk(
+        const patchResult = await patchCellByPk(
           ch.primaryKey,
           ch.column,
           ch.after,
           ch.rowIndex,
         );
-        if (!ok) {
+        if (!patchResult.ok) {
           await loadPage();
-          return false;
+          return { ok: false };
         }
+        pendingPublicReflection ||= patchResult.pendingPublicReflection === true;
       }
 
       recordHistory(label, changes);
-      return true;
+      return { ok: true, pendingPublicReflection };
     },
     [data, loadPage, patchCellByPk, recordHistory, requirePrimaryKeyFromRow],
   );
@@ -387,13 +397,13 @@ export function useAdminSpreadsheet(initialTable?: string) {
       try {
         for (const ch of entry.changes) {
           const value = direction === "undo" ? ch.before : ch.after;
-          const ok = await patchCellByPk(
+          const patchResult = await patchCellByPk(
             ch.primaryKey,
             ch.column,
             value,
             ch.rowIndex,
           );
-          if (!ok) {
+          if (!patchResult.ok) {
             setError("元に戻す / やり直しに失敗しました");
             await loadPage();
             return false;

@@ -5,5 +5,6 @@ export type {
   SpreadsheetImportPreview,
   SpreadsheetImportResult,
   SpreadsheetPageData,
+  SpreadsheetSaveOutcome,
   SpreadsheetTableDef,
 } from "@/lib/admin/spreadsheet/apiTypes";

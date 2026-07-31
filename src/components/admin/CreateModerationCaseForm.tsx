@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import { createModerationCase } from "@/lib/actions/moderation-admin";
 
 interface Props {
@@ -14,10 +15,15 @@ export function CreateModerationCaseForm({ videoId }: Props): React.ReactElement
   const formRef = React.useRef<HTMLFormElement>(null);
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setSuccess(null);
     const formData = new FormData(event.currentTarget);
     startTransition(async () => {
       const result = await createModerationCase(formData);
@@ -25,6 +31,10 @@ export function CreateModerationCaseForm({ videoId }: Props): React.ReactElement
         setError(result.message ?? "ケースの作成に失敗しました。");
         return;
       }
+      setSuccess({
+        message: result.message ?? "case を作成しました。",
+        pendingPublicReflection: result.pendingPublicReflection,
+      });
       formRef.current?.reset();
       router.refresh();
     });
@@ -97,6 +107,13 @@ export function CreateModerationCaseForm({ videoId }: Props): React.ReactElement
         >
           {error}
         </p>
+      ) : null}
+      {success ? (
+        <SaveSuccessNotice
+          message={success.message}
+          pendingPublicReflection={success.pendingPublicReflection}
+          style={{ fontSize: 12 }}
+        />
       ) : null}
       <button
         type="submit"

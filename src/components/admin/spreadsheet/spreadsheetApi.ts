@@ -75,12 +75,16 @@ export async function patchSpreadsheetCell(opts: {
   primaryKey: Record<string, string>;
   column: string;
   value: string | null;
-}): Promise<void> {
-  await request("/api/admin/spreadsheet/data", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(opts),
-  });
+}): Promise<{ pendingPublicReflection?: boolean }> {
+  const body = await request<{ pendingPublicReflection?: boolean }>(
+    "/api/admin/spreadsheet/data",
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    },
+  );
+  return { pendingPublicReflection: body.pendingPublicReflection };
 }
 
 export async function insertSpreadsheetRow(opts: {

@@ -462,11 +462,11 @@ function buildDeleteMutation(
 async function executeSpreadsheetMutations(
   mutations: SpreadsheetMutation[],
   previewRun?: SpreadsheetImportPreviewClaims,
-): Promise<void> {
+): Promise<boolean> {
   const allMutations = previewRun
     ? [buildPreviewRunConsumptionMutation(previewRun), ...mutations]
     : mutations;
-  if (allMutations.length === 0) return;
+  if (allMutations.length === 0) return false;
   const db = spreadsheetDb();
   const staticRebuildTargets = planSpreadsheetStaticRebuildTargets(
     mutations.map((mutation) => ({
@@ -496,6 +496,7 @@ async function executeSpreadsheetMutations(
     audits: allMutations.map((mutation) => mutation.audit),
     staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
   });
+  return queue.statements.length > 0;
 }
 
 function buildPreviewRunConsumptionMutation(
@@ -582,13 +583,17 @@ export async function fetchSpreadsheetPage(opts: {
   };
 }
 
+export type SpreadsheetMutationOutcome = {
+  pendingPublicReflection: boolean;
+};
+
 export async function updateSpreadsheetCell(opts: {
   table: string;
   primaryKey: Record<string, string>;
   column: string;
   value: string | null;
   operatorId: string;
-}): Promise<void> {
+}): Promise<SpreadsheetMutationOutcome> {
   const ctx = await resolveSpreadsheetTableContext(opts.table);
   assertTableEditable(ctx);
   assertColumnEditable(ctx, opts.column);
@@ -602,7 +607,7 @@ export async function updateSpreadsheetCell(opts: {
   if (!beforeRaw) throw new Error("row_not_found");
   await validateSpreadsheetForeignKeys(ctx, [{ [opts.column]: opts.value }]);
 
-  await executeSpreadsheetMutations([
+  const pendingPublicReflection = await executeSpreadsheetMutations([
     buildUpdateMutation(
       ctx,
       primaryKey,
@@ -611,6 +616,7 @@ export async function updateSpreadsheetCell(opts: {
       opts.operatorId,
     ),
   ]);
+  return { pendingPublicReflection };
 }
 
 async function insertSpreadsheetRowWithContext(
@@ -619,21 +625,22 @@ async function insertSpreadsheetRowWithContext(
     row: Record<string, string | null>;
     operatorId: string;
   },
-): Promise<void> {
+): Promise<SpreadsheetMutationOutcome> {
   assertTableEditable(ctx);
   await validateSpreadsheetForeignKeys(ctx, [opts.row]);
-  await executeSpreadsheetMutations([
+  const pendingPublicReflection = await executeSpreadsheetMutations([
     buildInsertMutation(ctx, opts.row, opts.operatorId),
   ]);
+  return { pendingPublicReflection };
 }
 
 export async function insertSpreadsheetRow(opts: {
   table: string;
   row: Record<string, string | null>;
   operatorId: string;
-}): Promise<void> {
+}): Promise<SpreadsheetMutationOutcome> {
   const ctx = await resolveSpreadsheetTableContext(opts.table);
-  await insertSpreadsheetRowWithContext(ctx, {
+  return insertSpreadsheetRowWithContext(ctx, {
     row: opts.row,
     operatorId: opts.operatorId,
   });
@@ -643,7 +650,7 @@ export async function deleteSpreadsheetRow(opts: {
   table: string;
   primaryKey: Record<string, string>;
   operatorId: string;
-}): Promise<void> {
+}): Promise<SpreadsheetMutationOutcome> {
   const ctx = await resolveSpreadsheetTableContext(opts.table);
   assertTableEditable(ctx);
   const primaryKey = normalizePrimaryKeyRecord(
@@ -655,9 +662,10 @@ export async function deleteSpreadsheetRow(opts: {
   const beforeRaw = await fetchRowByPkRaw(ctx, primaryKey);
   if (!beforeRaw) throw new Error("row_not_found");
 
-  await executeSpreadsheetMutations([
+  const pendingPublicReflection = await executeSpreadsheetMutations([
     buildDeleteMutation(ctx, primaryKey, beforeRaw, opts.operatorId),
   ]);
+  return { pendingPublicReflection };
 }
 
 export interface SpreadsheetExportResult {
@@ -694,6 +702,7 @@ export interface SpreadsheetImportResult {
   updated: number;
   skipped: number;
   errors: Array<{ index: number; message: string }>;
+  pendingPublicReflection?: boolean;
 }
 
 async function planUpsertSpreadsheetRow(
@@ -815,6 +824,6 @@ export async function applySpreadsheetImport(
     else if (planned.kind === "updated") updated += 1;
     else skipped += 1;
   }
-  await executeSpreadsheetMutations(mutations, opts.previewRun);
-  return { inserted, updated, skipped, errors: [] };
+  const pendingPublicReflection = await executeSpreadsheetMutations(mutations, opts.previewRun);
+  return { inserted, updated, skipped, errors: [], pendingPublicReflection };
 }

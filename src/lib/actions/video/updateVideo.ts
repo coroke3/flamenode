@@ -37,6 +37,7 @@ import {
   computeStagePermissionDeleteIds,
 } from "@/lib/video/videoSavePlan";
 import type { VideoActionResult } from "@/lib/video/types";
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 
 export async function updateVideo(
   formData: FormData,
@@ -311,10 +312,21 @@ export async function updateVideo(
   });
 
   try {
-    await applyVideoUpdatePlan(db, plan, {
+    const staticRebuildEnqueued = await applyVideoUpdatePlan(db, plan, {
       approvedXIds,
       sessionRole: sessionUser.role,
     });
+    return markPendingPublicReflection(
+      {
+        ok: true,
+        videoId,
+        youtubeVideoId: sections.youtube
+          ? (youtubeId ?? undefined)
+          : (target.youtube_video_id ?? undefined),
+        eventId: target.primary_event_id ?? undefined,
+      },
+      staticRebuildEnqueued,
+    );
   } catch (err) {
     if (isYoutubeIdUniqueConstraintError(err)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
@@ -325,11 +337,4 @@ export async function updateVideo(
       message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。",
     };
   }
-
-  return {
-    ok: true,
-    videoId,
-    youtubeVideoId: sections.youtube ? (youtubeId ?? undefined) : (target.youtube_video_id ?? undefined),
-    eventId: target.primary_event_id ?? undefined,
-  };
 }

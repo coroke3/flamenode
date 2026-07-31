@@ -1,5 +1,7 @@
 "use server";
 
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
+
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { canEditEvent } from "@/lib/auth/ownership";
@@ -184,5 +186,8 @@ export async function setManageVideoStatus(
   revalidatePath(`/${target.youtube_video_id ?? videoId}`);
   revalidatePath("/list");
 
-  return { ok: true, message: "ステータスを更新しました。" };
+  return markPendingPublicReflection(
+    { ok: true, message: "ステータスを更新しました。" },
+    queue.statements.length > 0,
+  );
 }

@@ -16,6 +16,10 @@ import { events, slots, users, xUserAccountLinks } from "@/lib/db/schema";
 import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
 import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
 import { buildSlotChangeQueueBatch } from "@/lib/staticRebuild/hooks";
+import {
+  markPendingPublicReflection,
+  type PendingPublicReflection,
+} from "@/lib/staticRebuild/publicReflectionNotice";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { generateId } from "@/lib/utils/id";
 import {
@@ -24,11 +28,15 @@ import {
 } from "@/lib/utils/slotGroupingCore";
 import { createTraceId } from "@/lib/observability/flowTrace";
 
-export interface SlotReserveResult {
+export interface SlotReserveResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
   slotId?: string;
   reason?: WriteGuardDenyReason;
+}
+
+function slotMutationOk(slotId: string): SlotReserveResult {
+  return markPendingPublicReflection({ ok: true, slotId }, true);
 }
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
@@ -516,7 +524,7 @@ export async function reserveSlot(
       notificationWakeSource,
     });
     await runSlotPostCommit("slot.reserve", anchor.event_id);
-    return { ok: true, slotId: anchor.id };
+    return slotMutationOk(anchor.id);
   } catch (error) {
     return mutationError(error);
   }
@@ -584,7 +592,7 @@ export async function releaseOwnSlot(
       reason: "slot_user_release",
     });
     await runSlotPostCommit("slot.release", anchor.event_id);
-    return { ok: true, slotId: anchor.id };
+    return slotMutationOk(anchor.id);
   } catch (error) {
     return mutationError(error);
   }
@@ -681,7 +689,7 @@ export async function extendOwnSlotGroup(
       reason: "slot_user_extend",
     });
     await runSlotPostCommit("slot.extend", anchor.event_id);
-    return { ok: true, slotId: candidate.id };
+    return slotMutationOk(candidate.id);
   } catch (error) {
     return mutationError(error);
   }
@@ -798,7 +806,7 @@ export async function mergeOwnSlotGroups(
       reason: "slot_user_merge",
     });
     await runSlotPostCommit("slot.merge", gap.event_id);
-    return { ok: true, slotId: gap.id };
+    return slotMutationOk(gap.id);
   } catch (error) {
     return mutationError(error);
   }

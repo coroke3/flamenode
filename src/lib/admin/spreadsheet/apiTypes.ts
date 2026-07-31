@@ -46,10 +46,16 @@ export type SpreadsheetImportPreview = {
   applyMaxRows?: number;
 };
 
+export type SpreadsheetSaveOutcome = {
+  ok: boolean;
+  pendingPublicReflection?: boolean;
+};
+
 export type SpreadsheetImportResult = {
   inserted: number;
   updated: number;
   skipped: number;
   errors?: Array<{ index: number; message: string }>;
   warnings?: string[];
+  pendingPublicReflection?: boolean;
 };

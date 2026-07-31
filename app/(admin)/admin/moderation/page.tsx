@@ -13,16 +13,12 @@ import {
 } from "@/lib/db/schema";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AutoSubmitCheckbox, AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
-import { updateModerationCaseStatus } from "@/lib/actions/moderation-admin";
+import { ModerationCaseStatusForm } from "@/components/admin/ModerationCaseStatusForm";
+import { ModerationFlashNotice } from "@/components/admin/ModerationFlashNotice";
 import { formatUnix } from "@/lib/utils/format";
 
 export const metadata: Metadata = { title: "モデレーション" };
 export const dynamic = "force-dynamic";
-
-async function updateModerationCaseStatusAction(formData: FormData): Promise<void> {
-  "use server";
-  await updateModerationCaseStatus(formData);
-}
 
 const CASE_TYPES = ["x_reapply", "void", "duplicate", "rights", "operator"] as const;
 const CASE_STATUSES = ["open", "resolved", "rejected", "expired", "cancelled"] as const;
@@ -107,6 +103,8 @@ export default async function AdminModerationPage({
         description="重複、権利、void、X ID再申請などの未解決ケースを最大100件表示します。closed case は必要時だけフィルタで開きます。"
       />
 
+      <ModerationFlashNotice />
+
       <form method="get" style={{ marginTop: 14, display: "flex", gap: 6, flexWrap: "wrap" }}>
         <AutoSubmitSelect name="type" className="fn-select" defaultValue={typeFilter}>
           <option value="all">type すべて</option>
@@ -190,32 +188,7 @@ export default async function AdminModerationPage({
                   </td>
                   <td>
                     {row.status === "open" ? (
-                      <form action={updateModerationCaseStatusAction} style={{ display: "grid", gap: 4, minWidth: 190 }}>
-                        <input type="hidden" name="id" value={row.id} />
-                        <select name="status" className="fn-select fn-input-sm" defaultValue="resolved">
-                          <option value="resolved">解決</option>
-                          <option value="rejected">却下</option>
-                          <option value="cancelled">キャンセル</option>
-                          <option value="expired">期限切れ</option>
-                        </select>
-                        <select name="video_status" className="fn-select fn-input-sm" defaultValue="">
-                          <option value="">作品状態は変更しない</option>
-                          <option value="pending">承認待ち</option>
-                          <option value="public">公開</option>
-                          <option value="private">非公開</option>
-                          <option value="voided">無効</option>
-                        </select>
-                        <textarea
-                          name="private_note"
-                          className="fn-input"
-                          rows={2}
-                          placeholder="対応メモ"
-                          maxLength={2000}
-                        />
-                        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-                          更新
-                        </button>
-                      </form>
+                      <ModerationCaseStatusForm caseId={row.id} />
                     ) : (
                       <Link
                         href={`/admin/audit?table=video_moderation_cases&record=${encodeURIComponent(row.id)}`}

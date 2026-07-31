@@ -22,6 +22,7 @@ import {
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { generateId } from "@/lib/utils/id";
@@ -218,6 +219,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         updated_at: now,
       };
 
+  let staticRebuildEnqueued = false;
   try {
     const plan = emptyVideoAtomicWritePlan();
     appendVideoAtomicWritePlan(plan, await buildSubmissionXUserPlan(db, {
@@ -379,6 +381,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         priority: "high" as const,
       })),
     ]);
+    staticRebuildEnqueued = queue.statements.length > 0;
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
     const wakeSentKinds = new Set<QueueWakeKind>();
@@ -413,5 +416,13 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       },
     ],
   );
-  return { ok: true, videoId, youtubeVideoId: youtubeId ?? undefined, eventId: slotRow.event_id };
+  return markPendingPublicReflection(
+    {
+      ok: true,
+      videoId,
+      youtubeVideoId: youtubeId ?? undefined,
+      eventId: slotRow.event_id,
+    },
+    staticRebuildEnqueued,
+  );
 }

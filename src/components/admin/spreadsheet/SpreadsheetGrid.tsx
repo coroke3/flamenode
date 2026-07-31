@@ -16,6 +16,7 @@ import {
   buildClearCells,
   buildFillDownCells,
   buildGridPasteCellsFromGrid,
+  cellMatchesFind,
   clampCellPos,
   canEditCell,
   columnIndexToLetter,
@@ -36,7 +37,8 @@ import {
 import { SpreadsheetGridFindBar } from "./SpreadsheetGridFindBar";
 import { SpreadsheetGridFormulaBar } from "./SpreadsheetGridFormulaBar";
 import { SpreadsheetGridStatusBar } from "./SpreadsheetGridStatusBar";
-import { cellMatchesFind } from "@/lib/admin/spreadsheet/cellFormat";
+import { spreadsheetSaveStatusMessage } from "@/lib/staticRebuild/publicReflectionNotice";
+import type { SpreadsheetSaveOutcome } from "./spreadsheetTypes";
 
 const SPREADSHEET_GRID_DEFAULT_COL_WIDTH = 110;
 const SPREADSHEET_GRID_MIN_COL_WIDTH = 56;
@@ -85,7 +87,7 @@ export function SpreadsheetGrid({
     column: string,
     value: string | null,
     options?: { skipHistory?: boolean; before?: string | null },
-  ) => Promise<boolean>;
+  ) => Promise<SpreadsheetSaveOutcome>;
   onSaveCellsBatch?: (
     patches: Array<{
       rowIndex: number;
@@ -93,7 +95,7 @@ export function SpreadsheetGrid({
       value: string | null;
     }>,
     label: string,
-  ) => Promise<boolean>;
+  ) => Promise<SpreadsheetSaveOutcome>;
   onDeleteRow: (rowIndex: number) => Promise<void>;
   onAddRowFromTemplate?: (
     template: Record<string, string>,
@@ -294,19 +296,24 @@ export function SpreadsheetGrid({
 
     commitInFlightRef.current = true;
     setSaving(true);
-    let ok = false;
+    let saveResult: SpreadsheetSaveOutcome = { ok: false };
     try {
-      ok = await onSaveCell(editing.rowIndex, col.name, normalized, {
+      saveResult = await onSaveCell(editing.rowIndex, col.name, normalized, {
         before: editing.original === "" ? null : editing.original,
       });
     } finally {
       commitInFlightRef.current = false;
       setSaving(false);
     }
-    if (!ok) {
+    if (!saveResult.ok) {
       selectCell({ rowIndex: editing.rowIndex, colIndex: editing.colIndex });
     } else {
-      hint("保存しました");
+      hint(
+        spreadsheetSaveStatusMessage(
+          "保存しました",
+          saveResult.pendingPublicReflection,
+        ),
+      );
     }
   };
 
@@ -322,24 +329,37 @@ export function SpreadsheetGrid({
     if (cells.length === 0) return;
     setSaving(true);
     if (onSaveCellsBatch) {
-      const ok = await onSaveCellsBatch(cells, label);
+      const result = await onSaveCellsBatch(cells, label);
       setSaving(false);
-      hint(ok ? `${label}しました` : `${label}に失敗`);
+      hint(
+        result.ok
+          ? spreadsheetSaveStatusMessage(`${label}しました`, result.pendingPublicReflection)
+          : `${label}に失敗`,
+      );
       return;
     }
     let ok = 0;
     let fail = 0;
+    let pendingPublicReflection = false;
     for (const cell of cells) {
-      const success = await onSaveCell(
+      const result = await onSaveCell(
         cell.rowIndex,
         cell.column,
         cell.value,
       );
-      if (success) ok += 1;
-      else fail += 1;
+      if (result.ok) {
+        ok += 1;
+        pendingPublicReflection ||= result.pendingPublicReflection === true;
+      } else {
+        fail += 1;
+      }
     }
     setSaving(false);
-    hint(fail > 0 ? `${label}: ${ok} 成功 / ${fail} 失敗` : `${label}: ${ok} 件`);
+    hint(
+      fail > 0
+        ? `${label}: ${ok} 成功 / ${fail} 失敗`
+        : spreadsheetSaveStatusMessage(`${label}: ${ok} 件`, pendingPublicReflection),
+    );
   };
 
   const applyClipboardPaste = React.useCallback(

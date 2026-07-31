@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
 import { updateVideoMembersAdmin } from "@/lib/actions/video";
 import type { VideoActionResult } from "@/lib/video/types";
 import {
@@ -104,13 +105,19 @@ export function AdminVideoMembersForm({
       )}
 
       {result ? (
-        <p
-          role="status"
-          className={result.ok ? "fn-badge fn-badge-accent" : "fn-badge fn-badge-danger"}
-          style={{ justifySelf: "start" }}
-        >
-          {result.message ?? (result.ok ? "保存しました。" : "保存に失敗しました。")}
-        </p>
+        <div role="status" style={{ justifySelf: "start" }}>
+          <p
+            className={result.ok ? "fn-badge fn-badge-accent" : "fn-badge fn-badge-danger"}
+            style={{ justifySelf: "start" }}
+          >
+            {result.message ?? (result.ok ? "保存しました。" : "保存に失敗しました。")}
+          </p>
+          {result.ok && result.pendingPublicReflection ? (
+            <div style={{ marginTop: 8 }}>
+              <PublicReflectionDelayNotice />
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       <footer style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

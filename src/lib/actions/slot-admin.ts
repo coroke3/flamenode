@@ -21,9 +21,13 @@ import {
 } from "@/lib/notifications/enqueue";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
 import { buildSlotChangeQueueBatch, topGlobalTarget } from "@/lib/staticRebuild/hooks";
+import {
+  markPendingPublicReflection,
+  type PendingPublicReflection,
+} from "@/lib/staticRebuild/publicReflectionNotice";
 import { MAX_ATOMIC_SLOT_ROWS, MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
 
-export interface SlotActionResult {
+export interface SlotActionResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
   created?: number;
@@ -379,7 +383,7 @@ export async function generateSlotsBatch(
     return mutationError(error);
   }
   await revalidateEventSlotPathsBestEffort(data.event_id);
-  return { ok: true, created: newRows.length };
+  return markPendingPublicReflection({ ok: true, created: newRows.length }, true);
 }
 
 export async function deleteAvailableSlots(
@@ -410,7 +414,7 @@ export async function deleteAvailableSlots(
     totalDeleted += rows.length;
   }
 
-  return { ok: true, created: totalDeleted };
+  return markPendingPublicReflection({ ok: true, created: totalDeleted }, totalDeleted > 0);
 }
 
 async function deleteRows(
@@ -443,7 +447,10 @@ async function deleteRows(
     return mutationError(error);
   }
   await revalidateEventSlotPathsBestEffort(eventId);
-  return { ok: true, created: rows.length };
+  return markPendingPublicReflection(
+    { ok: true, created: rows.length, message: `${rows.length}件の枠を削除しました。` },
+    queue.statements.length > 0,
+  );
 }
 
 export async function releaseSlot(
@@ -569,7 +576,10 @@ async function releaseRows(
     return mutationError(error);
   }
   await revalidateEventSlotPathsBestEffort(eventId);
-  return { ok: true, message: `${rows.length}件の予約枠を解放しました。` };
+  return markPendingPublicReflection(
+    { ok: true, message: `${rows.length}件の予約枠を解放しました。` },
+    queue.statements.length > 0,
+  );
 }
 
 export async function deleteSlot(
@@ -739,5 +749,8 @@ export async function batchUpdateSlotLabels(
     return mutationError(error);
   }
   await revalidateEventSlotPathsBestEffort(eventId);
-  return { ok: true, message: `${rows.length}件のラベルを更新しました。` };
+  return markPendingPublicReflection(
+    { ok: true, message: `${rows.length}件のラベルを更新しました。` },
+    queue.statements.length > 0,
+  );
 }

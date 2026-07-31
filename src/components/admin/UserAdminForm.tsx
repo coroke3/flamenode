@@ -11,6 +11,7 @@ import {
   setUserRole,
 } from "@/lib/actions/user-admin";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 
 interface UserAdminFormProps {
   user: {
@@ -30,11 +31,22 @@ export function UserAdminForm({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
   const [banReason, setBanReason] = React.useState("");
   const [banConfirmOpen, setBanConfirmOpen] = React.useState(false);
 
-  const run = (fd: FormData, action: (fd: FormData) => Promise<{ ok: boolean; message?: string }>, okMsg: string) => {
+  const run = (
+    fd: FormData,
+    action: (fd: FormData) => Promise<{
+      ok: boolean;
+      message?: string;
+      pendingPublicReflection?: boolean;
+    }>,
+    okMsg: string,
+  ) => {
     setError(null);
     setSuccess(null);
     startTransition(async () => {
@@ -43,7 +55,10 @@ export function UserAdminForm({
         setError(r.message ?? "操作に失敗しました。");
         return;
       }
-      setSuccess(okMsg);
+      setSuccess({
+        message: okMsg,
+        pendingPublicReflection: r.pendingPublicReflection,
+      });
       router.refresh();
     });
   };
@@ -56,9 +71,15 @@ export function UserAdminForm({
         </p>
       ) : null}
       {success ? (
-        <p role="status" style={{ color: "var(--accent-primary)", fontSize: 12 }}>
-          <Icon name="check" size={12} aria-hidden /> {success}
-        </p>
+        <SaveSuccessNotice
+          message={
+            <>
+              <Icon name="check" size={12} aria-hidden /> {success.message}
+            </>
+          }
+          pendingPublicReflection={success.pendingPublicReflection}
+          style={{ color: "var(--accent-primary)", fontSize: 12 }}
+        />
       ) : null}
 
       <section>

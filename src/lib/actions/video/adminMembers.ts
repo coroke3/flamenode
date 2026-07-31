@@ -16,6 +16,7 @@ import {
   executeVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 
@@ -133,11 +134,14 @@ export async function updateVideoMembersAdmin(
     primaryEventId: target.primary_event_id,
   });
 
-  return {
-    ok: true,
-    message: "参加者設定を保存しました。",
-    videoId,
-    youtubeVideoId: target.youtube_video_id ?? undefined,
-    eventId: target.primary_event_id ?? undefined,
-  };
+  return markPendingPublicReflection(
+    {
+      ok: true,
+      message: "参加者設定を保存しました。",
+      videoId,
+      youtubeVideoId: target.youtube_video_id ?? undefined,
+      eventId: target.primary_event_id ?? undefined,
+    },
+    queue.statements.length > 0,
+  );
 }

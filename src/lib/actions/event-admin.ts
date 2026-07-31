@@ -36,6 +36,8 @@ import {
   hasAnyEventEditPermission,
   resolveEventEditPermissions,
 } from "@/lib/event/eventEditPermissions";
+import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
+import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 
 function revalidateEventPaths(eventId: string): void {
   revalidatePath("/admin/events");
@@ -130,7 +132,7 @@ function stageQuestionRows(
   );
 }
 
-export interface EventActionResult {
+export interface EventActionResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
   eventId?: string;
@@ -371,7 +373,7 @@ export async function createEvent(
 
   revalidateEventListPaths();
   revalidateEventPaths(id);
-  return { ok: true, eventId: id };
+  return markPendingPublicReflection({ ok: true, eventId: id }, queue.statements.length > 0);
 }
 
 export async function updateEvent(
@@ -641,7 +643,10 @@ export async function updateEvent(
     await invalidateEventExportCache(data.id);
   }
   revalidateEventPaths(data.id);
-  return { ok: true, eventId: data.id };
+  return markPendingPublicReflection(
+    { ok: true, eventId: data.id },
+    queue.statements.length > 0,
+  );
 }
 
 export async function deleteEvent(
@@ -721,5 +726,5 @@ export async function deleteEvent(
 
   await invalidateEventExportCache(eventId);
   revalidateEventPaths(eventId);
-  return { ok: true };
+  return markPendingPublicReflection({ ok: true }, queue.statements.length > 0);
 }

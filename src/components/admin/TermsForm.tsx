@@ -10,6 +10,7 @@ import {
   updateTermsVersion,
 } from "@/lib/actions/rules";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import styles from "./TermsForm.module.css";
 
 export interface TermsInitial {
@@ -29,7 +30,10 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
   const [confirmKind, setConfirmKind] = React.useState<"publish" | "archive" | null>(null);
   const readOnly = mode === "edit" && initial.status !== "draft";
 
@@ -42,7 +46,10 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
         setError(r.message ?? "失敗しました。");
         return;
       }
-      setSuccess(ok);
+      setSuccess({
+        message: ok,
+        pendingPublicReflection: r.pendingPublicReflection,
+      });
       if (mode === "create" && r.id) {
         router.push(`/admin/rules/${r.id}/edit`);
       } else {
@@ -144,9 +151,15 @@ export function TermsForm({ mode, initial = {} }: Props): React.ReactElement {
         </p>
       ) : null}
       {success ? (
-        <p role="status" style={{ color: "var(--accent-primary)", fontSize: 12 }}>
-          <Icon name="check" size={12} aria-hidden /> {success}
-        </p>
+        <SaveSuccessNotice
+          message={
+            <>
+              <Icon name="check" size={12} aria-hidden /> {success.message}
+            </>
+          }
+          pendingPublicReflection={success.pendingPublicReflection}
+          style={{ color: "var(--accent-primary)", fontSize: 12 }}
+        />
       ) : null}
 
       <div className={styles.actions}>

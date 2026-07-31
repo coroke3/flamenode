@@ -72,14 +72,17 @@ export async function PATCH(req: Request): Promise<Response> {
   }
 
   try {
-    await updateSpreadsheetCell({
+    const result = await updateSpreadsheetCell({
       table,
       column,
       primaryKey: body.primaryKey as Record<string, string>,
       value: body.value ?? null,
       operatorId: guard.session.userId,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      pendingPublicReflection: result.pendingPublicReflection,
+    });
   } catch (e) {
     return spreadsheetErrorResponse(e);
   }
@@ -105,12 +108,15 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    await insertSpreadsheetRow({
+    const result = await insertSpreadsheetRow({
       table,
       row: body.row as Record<string, string | null>,
       operatorId: guard.session.userId,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      pendingPublicReflection: result.pendingPublicReflection,
+    });
   } catch (e) {
     return spreadsheetErrorResponse(e);
   }
@@ -136,12 +142,15 @@ export async function DELETE(req: Request): Promise<Response> {
   }
 
   try {
-    await deleteSpreadsheetRow({
+    const result = await deleteSpreadsheetRow({
       table,
       primaryKey: body.primaryKey as Record<string, string>,
       operatorId: guard.session.userId,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      pendingPublicReflection: result.pendingPublicReflection,
+    });
   } catch (e) {
     return spreadsheetErrorResponse(e);
   }

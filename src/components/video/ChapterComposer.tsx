@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { createChapter, createChaptersBulk } from "@/lib/actions/chapter";
+import { appendPublicReflectionDelayNotice } from "@/lib/staticRebuild/publicReflectionNotice";
 import {
   MAX_ATOMIC_CHAPTER_BULK_ROWS,
   parseChapterBulkCsv,
@@ -35,6 +36,7 @@ interface ChapterComposerProps {
   onSuccess?: (chapter: {
     chapterTime: number;
     label: string;
+    pendingPublicReflection?: boolean;
   }) => void;
 }
 
@@ -142,7 +144,12 @@ export function ChapterComposer({
     fd.set("csv", bulkCsv);
     startBulkTransition(async () => {
       const r = await createChaptersBulk(fd);
-      setBulkMessage(r.message ?? null);
+      const baseMessage = r.message ?? null;
+      setBulkMessage(
+        baseMessage && r.pendingPublicReflection
+          ? appendPublicReflectionDelayNotice(baseMessage)
+          : baseMessage,
+      );
       setBulkErrors(r.errors ?? []);
       if (r.ok && (r.inserted ?? 0) > 0) {
         setBulkCsv("");
@@ -192,6 +199,7 @@ export function ChapterComposer({
       onSuccess?.({
         chapterTime: seconds,
         label: submittedLabel,
+        pendingPublicReflection: r.pendingPublicReflection,
       });
     });
   };

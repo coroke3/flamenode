@@ -6,6 +6,7 @@ import {
   createEventGroup,
   updateEventGroup,
 } from "@/lib/actions/event-group-admin";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
 
 export interface EventGroupInitial {
@@ -41,7 +42,10 @@ export function EventGroupForm({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -57,7 +61,10 @@ export function EventGroupForm({
         setError(r.message ?? "失敗しました。");
         return;
       }
-      setSuccess("保存しました。");
+      setSuccess({
+        message: "保存しました。",
+        pendingPublicReflection: r.pendingPublicReflection,
+      });
       if (mode === "create" && r.id) {
         router.push(`/admin/event-groups/${r.id}/edit`);
       } else {
@@ -189,7 +196,11 @@ export function EventGroupForm({
         <p style={{ color: "var(--accent-danger)", fontSize: 13 }}>{error}</p>
       ) : null}
       {success ? (
-        <p style={{ color: "var(--accent-success)", fontSize: 13 }}>{success}</p>
+        <SaveSuccessNotice
+          message={success.message}
+          pendingPublicReflection={success.pendingPublicReflection}
+          style={{ color: "var(--accent-success)", fontSize: 13 }}
+        />
       ) : null}
       <div>
         <button

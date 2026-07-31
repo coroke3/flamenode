@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import {
   deleteAvailableSlots,
   generateSlotsBatch,
@@ -22,7 +23,10 @@ export function SlotBatchForm({
   const [mode, setMode] = React.useState<"time" | "count">("time");
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [intervalMinutes, setIntervalMinutes] = React.useState("5");
   const intervalOptions = [5, 6, 10, 15, 30];
@@ -40,7 +44,10 @@ export function SlotBatchForm({
         setError(r.message ?? "生成に失敗しました。");
         return;
       }
-      setSuccess(`${r.created ?? 0} 件の枠を生成しました。`);
+      setSuccess({
+        message: `${r.created ?? 0} 件の枠を生成しました。`,
+        pendingPublicReflection: r.pendingPublicReflection,
+      });
       router.refresh();
     });
   };
@@ -56,7 +63,10 @@ export function SlotBatchForm({
         setError(r.message ?? "削除に失敗しました。");
         return;
       }
-      setSuccess(`${r.created ?? 0} 件の空き枠を削除しました。`);
+      setSuccess({
+        message: `${r.created ?? 0} 件の空き枠を削除しました。`,
+        pendingPublicReflection: r.pendingPublicReflection,
+      });
       router.refresh();
     });
   };
@@ -191,9 +201,15 @@ export function SlotBatchForm({
           </p>
         ) : null}
         {success ? (
-          <p role="status" style={{ color: "var(--accent-primary)", fontSize: 12 }}>
-            <Icon name="check" size={12} aria-hidden /> {success}
-          </p>
+          <SaveSuccessNotice
+            message={
+              <>
+                <Icon name="check" size={12} aria-hidden /> {success.message}
+              </>
+            }
+            pendingPublicReflection={success.pendingPublicReflection}
+            style={{ color: "var(--accent-primary)", fontSize: 12 }}
+          />
         ) : null}
 
         <div className={styles.actions}>

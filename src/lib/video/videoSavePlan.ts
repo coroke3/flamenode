@@ -257,7 +257,7 @@ export async function applyVideoUpdatePlan(
     approvedXIds: string[];
     sessionRole: string | null | undefined;
   },
-): Promise<void> {
+): Promise<boolean> {
   const { payload, sections } = plan;
   const existingEventRows = await db
     .select({ event_id: videoEvents.event_id })
@@ -430,4 +430,5 @@ export async function applyVideoUpdatePlan(
   }
 
   for (const path of plan.revalidatePaths) revalidatePath(path);
+  return queue.statements.length > 0;
 }

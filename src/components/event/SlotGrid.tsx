@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
 import {
   extendOwnSlotGroup,
   mergeOwnSlotGroups,
@@ -88,7 +89,10 @@ export function SlotGrid({
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{
+    message: string;
+    pendingPublicReflection?: boolean;
+  } | null>(null);
   const [reservedSlotId, setReservedSlotId] = React.useState<string | null>(null);
   const [confirmReleaseId, setConfirmReleaseId] = React.useState<string | null>(null);
   const [confirmExtend, setConfirmExtend] = React.useState<ConfirmExtend | null>(null);
@@ -225,7 +229,10 @@ export function SlotGrid({
         setError(result.message ?? "枠の確保に失敗しました。");
         return;
       }
-      setSuccess("枠を確保しました。続けて作品情報を登録できます。");
+      setSuccess({
+        message: "枠を確保しました。続けて作品情報を登録できます。",
+        pendingPublicReflection: result.pendingPublicReflection,
+      });
       setReservedSlotId(result.slotId ?? slotId);
       setReserveTarget(null);
       router.refresh();
@@ -244,7 +251,10 @@ export function SlotGrid({
         setError(result.message ?? "枠の解放に失敗しました。");
         return;
       }
-      setSuccess("枠を解放しました。");
+      setSuccess({
+        message: "枠を解放しました。",
+        pendingPublicReflection: result.pendingPublicReflection,
+      });
       setReservedSlotId(null);
       router.refresh();
     });
@@ -263,7 +273,10 @@ export function SlotGrid({
         setError(result.message ?? "枠の拡張に失敗しました。");
         return;
       }
-      setSuccess("枠を拡張しました。");
+      setSuccess({
+        message: "枠を拡張しました。",
+        pendingPublicReflection: result.pendingPublicReflection,
+      });
       router.refresh();
     });
   };
@@ -281,7 +294,10 @@ export function SlotGrid({
         setError(result.message ?? "枠の結合に失敗しました。");
         return;
       }
-      setSuccess("枠を結合しました。");
+      setSuccess({
+        message: "枠を結合しました。",
+        pendingPublicReflection: result.pendingPublicReflection,
+      });
       router.refresh();
     });
   };
@@ -356,8 +372,13 @@ export function SlotGrid({
         <div role="status" className={styles.successCard}>
           <div className={styles.successCardBody}>
             <p className={styles.successCardMessage}>
-              <Icon name="check" size={14} aria-hidden /> {success}
+              <Icon name="check" size={14} aria-hidden /> {success.message}
             </p>
+            {success.pendingPublicReflection ? (
+              <div style={{ marginTop: 8 }}>
+                <PublicReflectionDelayNotice />
+              </div>
+            ) : null}
             {reservedSlotId ? (
               <>
                 <Link
