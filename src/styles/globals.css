@@ -382,11 +382,6 @@ select {
   -webkit-overflow-scrolling: touch;
 }
 
-.fn-shelf[data-loop="true"] > * {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 280px;
-}
-
 .fn-shelf-fade-left,
 .fn-shelf-fade-right {
   position: absolute;

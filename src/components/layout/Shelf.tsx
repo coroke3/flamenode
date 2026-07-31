@@ -124,7 +124,18 @@ function toLoopItems(sourceItems: SourceItem[], keyPrefix: string): LoopItem[] {
 }
 
 function isShelfScrollable(el: HTMLElement): boolean {
-  return el.scrollWidth > el.clientWidth + 4;
+  if (el.scrollWidth > el.clientWidth + 4) return true;
+  if (el.getAttribute("data-loop") !== "true" || el.children.length === 0) {
+    return false;
+  }
+  const gap = getShelfGap(el);
+  let totalWidth = 0;
+  for (const child of el.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    totalWidth += child.offsetWidth;
+  }
+  const gapWidth = gap * Math.max(0, el.children.length - 1);
+  return totalWidth + gapWidth > el.clientWidth + 4;
 }
 
 /**

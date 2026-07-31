@@ -34,6 +34,8 @@ test("loop shelfは端でrotateしscrollLeftを1列分補正する", () => {
   assert.doesNotMatch(shelf, /while \(next >= cycleWidth \* 2\)/);
   assert.doesNotMatch(shelf, /fn-shelf-loop-group/);
   assert.match(globals, /\.fn-shelf\[data-loop="true"\]/);
+  assert.doesNotMatch(globals, /content-visibility:\s*auto/);
+  assert.match(shelf, /getAttribute\("data-loop"\)/);
   assert.match(
     globals,
     /\.fn-shelf\[data-loop="true"\]\[data-mobile-rows="2"\]/,
