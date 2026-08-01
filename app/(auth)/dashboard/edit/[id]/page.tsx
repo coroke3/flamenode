@@ -22,7 +22,12 @@ import {
 } from "@/lib/video/collabPerms";
 import { requireSession } from "@/lib/auth/guard";
 import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
-import { canEditVideo } from "@/lib/auth/ownership";
+import {
+  disabledFieldKeysFromGeneralFields,
+  loadGeneralEditableFieldSet,
+  normalModeAlwaysDisabledFieldKeys,
+} from "@/lib/video/generalEditPermissions";
+import { computeAllowedVideoEditSections } from "@/lib/video/computeEditSections";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { Icon } from "@/components/ui/Icon";
@@ -295,28 +300,34 @@ export default async function EditVideoPage({
     .sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
 
   const editUser = { id: user.id, role: user.role ?? null };
-  const [
-    canEditIdentity,
-    canEditBasics,
-    canEditYoutube,
-    canEditCredits,
-    canEditDescriptions,
-    canEditMembers,
-  ] = await Promise.all([
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode }),
-  ]);
+  const generalFields =
+    privilegeMode === "normal"
+      ? await loadGeneralEditableFieldSet(db, video)
+      : undefined;
+  const allowedSections = await computeAllowedVideoEditSections({
+    db,
+    user: editUser,
+    video,
+    privilegeMode,
+    generalFields,
+  });
+  const {
+    identity: canEditIdentity,
+    basics: canEditBasics,
+    youtube: canEditYoutube,
+    credits: canEditCredits,
+    descriptions: canEditDescriptions,
+    members: canEditMembers,
+    member_chapters: canEditMemberChapters,
+  } = allowedSections;
   const canEditAnySection =
     canEditIdentity ||
     canEditBasics ||
     canEditYoutube ||
     canEditCredits ||
     canEditDescriptions ||
-    canEditMembers;
+    canEditMembers ||
+    canEditMemberChapters;
 
   // モード切替バナーで「管理者権限で編集」「イベント運営権限で編集」を出すかの判定。
   //
@@ -332,15 +343,20 @@ export default async function EditVideoPage({
 
   let canOfferEventMode = false;
   if (privilegeMode === "normal" && !canEditAnySection) {
-    const eventProbe = await Promise.all([
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode: "event" }),
-      canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode: "event" }),
-    ]);
-    canOfferEventMode = eventProbe.some((v) => v === true);
+    const eventSections = await computeAllowedVideoEditSections({
+      db,
+      user: editUser,
+      video,
+      privilegeMode: "event",
+    });
+    canOfferEventMode =
+      eventSections.identity ||
+      eventSections.basics ||
+      eventSections.youtube ||
+      eventSections.credits ||
+      eventSections.descriptions ||
+      eventSections.members ||
+      eventSections.member_chapters;
   }
 
   const canShowPrivilegeSwitchOnly =
@@ -386,8 +402,22 @@ export default async function EditVideoPage({
     !canEditIdentity ? "submitter" : null,
     !canEditBasics && !canEditYoutube && !canEditCredits ? "video" : null,
     !canEditDescriptions ? "descriptions" : null,
-    !canEditMembers ? "members" : null,
+    !canEditMembers && !canEditMemberChapters ? "members" : null,
   ].filter((v): v is string => Boolean(v));
+
+  const generalDisabledFields =
+    generalFields !== undefined
+      ? disabledFieldKeysFromGeneralFields(generalFields)
+      : [];
+  const normalModeIdentityExtras =
+    privilegeMode === "normal"
+      ? [
+          "submitter.profile_text",
+          "submitter.youtube_channel_url",
+          "submitter.other_social_links",
+        ]
+      : [];
+
   const disabledFields = [
     !canEditIdentity ? "submitter.display_name" : null,
     !canEditIdentity ? "submitter.icon_url" : null,
@@ -398,6 +428,11 @@ export default async function EditVideoPage({
     !canEditYoutube ? "video.youtube_url" : null,
     !canEditCredits ? "video.music" : null,
     !canEditCredits ? "video.credit" : null,
+    !canEditMemberChapters ? "chapters" : null,
+    !canEditMembers ? "members.list" : null,
+    ...normalModeIdentityExtras,
+    ...(privilegeMode === "normal" ? normalModeAlwaysDisabledFieldKeys() : []),
+    ...generalDisabledFields,
   ].filter((v): v is string => Boolean(v));
 
   const defaultProfile = xRow

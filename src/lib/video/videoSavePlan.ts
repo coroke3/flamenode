@@ -97,6 +97,7 @@ export function buildVideoUpdatePayload(args: {
   nextCreatorX: string;
   allowSubmitterChange: boolean;
   sections: AllowedVideoEditSections;
+  privilegeMode: CanEditVideoPrivilegeMode;
   now: number;
   creatorYoutubeChannelUrl: string | null;
 }): VideoUpdatePayload {
@@ -107,6 +108,7 @@ export function buildVideoUpdatePayload(args: {
     nextCreatorX,
     allowSubmitterChange,
     sections,
+    privilegeMode,
     now,
     creatorYoutubeChannelUrl,
   } = args;
@@ -123,13 +125,16 @@ export function buildVideoUpdatePayload(args: {
         : target.creator_display_name_yomi
       : target.creator_display_name_yomi,
     creator_icon_url: sections.identity ? parsed.icon_url || null : target.creator_icon_url,
-    creator_youtube_channel_url: sections.identity
+    creator_youtube_channel_url:
+      sections.identity && privilegeMode !== "normal"
       ? creatorYoutubeChannelUrl
       : target.creator_youtube_channel_url,
-    creator_profile_text: sections.identity
+    creator_profile_text:
+      sections.identity && privilegeMode !== "normal"
       ? parsed.profile_text ?? null
       : target.creator_profile_text,
-    creator_other_social_links: sections.identity
+    creator_other_social_links:
+      sections.identity && privilegeMode !== "normal"
       ? normalizeSocialLinksForStorage(parsed.other_social_links)
       : target.creator_other_social_links,
     music: sections.credits ? parsed.music ?? null : target.music,
@@ -185,6 +190,7 @@ export function buildVideoUpdatePlan(args: {
     nextCreatorX: args.nextCreatorX,
     allowSubmitterChange: args.allowSubmitterChange,
     sections: args.sections,
+    privilegeMode: args.privilegeMode,
     now: args.now,
     creatorYoutubeChannelUrl: args.creatorYoutubeChannelUrl,
   });
@@ -323,7 +329,7 @@ export async function applyVideoUpdatePlan(
       actorUserId: plan.operatorUserId,
     }));
   }
-  if (sections.members && plan.memberSubmission) {
+  if ((sections.members || sections.member_chapters) && plan.memberSubmission) {
     appendVideoAtomicWritePlan(atomic, await buildReplaceVideoMembersPlan(db, {
       videoId: plan.videoId,
       members: plan.memberSubmission.members,

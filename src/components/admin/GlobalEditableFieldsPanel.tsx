@@ -5,84 +5,23 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import { updateGlobalEditableFields } from "@/lib/actions/permissions-admin";
+import {
+  GENERAL_EDITABLE_FIELD_GROUPS,
+  GENERAL_EDITABLE_FIELD_HELP,
+  GENERAL_EDITABLE_FIELD_KEYS,
+  GENERAL_EDITABLE_FIELD_LABELS,
+  type GeneralEditableFieldKey,
+  parseGeneralEditableFields,
+} from "@/lib/video/generalEditPermissions";
 
 export type GlobalEditableFieldsSettings = {
   default_editable_fields: string | null;
   upcoming_editable_fields: string | null;
 };
 
-const EDITABLE_FIELD_OPTIONS = [
-  ["title", "タイトル"],
-  ["display_name", "表示名"],
-  ["icon_url", "アイコン"],
-  ["music", "楽曲"],
-  ["credit", "クレジット"],
-  ["intro_comment", "紹介コメント"],
-  ["used_software", "使用ソフト"],
-  ["highlights", "見どころ"],
-  ["production_story", "制作エピソード"],
-  ["closing_comment", "締めコメント"],
-  ["members", "メンバー"],
-  ["chapters", "チャプター"],
-] as const;
-
-type EditableFieldKey = (typeof EDITABLE_FIELD_OPTIONS)[number][0];
-
-function fieldsSetFromCsv(csv: string | null): Set<string> {
-  return new Set((csv ?? "").split(",").filter(Boolean));
+function fieldsSetFromCsv(csv: string | null): Set<GeneralEditableFieldKey> {
+  return parseGeneralEditableFields(csv);
 }
-
-const EDITABLE_FIELD_HELP: Record<EditableFieldKey, string> = {
-  title: "作品タイトルを直せます",
-  display_name: "作品ごとの作者名を直せます",
-  icon_url: "作品ごとのアイコンを直せます",
-  music: "使用楽曲名を直せます",
-  credit: "クレジット表記を直せます",
-  intro_comment: "冒頭の紹介文を直せます",
-  used_software: "使用ソフト名を直せます",
-  highlights: "見どころ欄を直せます",
-  production_story: "制作エピソードを直せます",
-  closing_comment: "あとがきを直せます",
-  members: "合作メンバー一覧を直せます",
-  chapters: "通常チャプターを直せます",
-};
-
-const EDITABLE_FIELD_GROUPS: Array<{
-  label: string;
-  description: string;
-  fields: ReadonlyArray<readonly [EditableFieldKey, string]>;
-}> = [
-  {
-    label: "基本情報",
-    description: "作品の見出しや表示に関わる項目",
-    fields: [
-      ["title", "タイトル"],
-      ["display_name", "表示名"],
-      ["icon_url", "アイコン"],
-    ],
-  },
-  {
-    label: "本文・コメント",
-    description: "作品の説明文・コメント類",
-    fields: [
-      ["music", "楽曲"],
-      ["credit", "クレジット"],
-      ["intro_comment", "紹介コメント"],
-      ["used_software", "使用ソフト"],
-      ["highlights", "見どころ"],
-      ["production_story", "制作エピソード"],
-      ["closing_comment", "締めコメント"],
-    ],
-  },
-  {
-    label: "構成情報",
-    description: "メンバー・チャプターなど構造的な項目",
-    fields: [
-      ["members", "メンバー"],
-      ["chapters", "チャプター"],
-    ],
-  },
-];
 
 export function GlobalEditableFieldsPanel({
   settings,
@@ -99,13 +38,20 @@ export function GlobalEditableFieldsPanel({
   const [upcomingSelected, setUpcomingSelected] = React.useState(() =>
     fieldsSetFromCsv(settings.upcoming_editable_fields),
   );
+  /** 保存成功直後は result.settings を正本とし、refresh 前の古い props で上書きしない。 */
+  const skipPropsSyncRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (busy) return;
+    if (skipPropsSyncRef.current) {
+      skipPropsSyncRef.current = false;
+      return;
+    }
     setDefaultSelected(fieldsSetFromCsv(settings.default_editable_fields));
     setUpcomingSelected(fieldsSetFromCsv(settings.upcoming_editable_fields));
-  }, [settings.default_editable_fields, settings.upcoming_editable_fields]);
+  }, [busy, settings.default_editable_fields, settings.upcoming_editable_fields]);
 
-  const totalFields = EDITABLE_FIELD_OPTIONS.length;
+  const totalFields = GENERAL_EDITABLE_FIELD_KEYS.length;
   const scopes = [
     {
       key: "default",
@@ -115,7 +61,7 @@ export function GlobalEditableFieldsPanel({
       selected: defaultSelected,
       setSelected: setDefaultSelected,
       tone: "primary" as const,
-      description: "公開済み・通常状態の作品に適用します。",
+      description: "公開済み作品のオーナーが通常モードで編集できる項目です。",
     },
     {
       key: "upcoming",
@@ -125,7 +71,7 @@ export function GlobalEditableFieldsPanel({
       selected: upcomingSelected,
       setSelected: setUpcomingSelected,
       tone: "warning" as const,
-      description: "公開前・予約中の作品に適用します。",
+      description: "公開前・非公開作品のオーナーが通常モードで編集できる項目です。",
     },
   ];
 
@@ -137,8 +83,16 @@ export function GlobalEditableFieldsPanel({
     startTransition(async () => {
       const result = await updateGlobalEditableFields(formData);
       if (!result.ok) {
-        setError(result.message ?? "一般作品権限の保存に失敗しました。");
+        setError(
+          result.message ??
+            "一般作品権限の保存に失敗しました。時間をおいて再度お試しください。",
+        );
         return;
+      }
+      if (result.settings) {
+        skipPropsSyncRef.current = true;
+        setDefaultSelected(fieldsSetFromCsv(result.settings.default_editable_fields));
+        setUpcomingSelected(fieldsSetFromCsv(result.settings.upcoming_editable_fields));
       }
       setSuccess(result.message ?? "一般作品権限を保存しました。");
       router.refresh();
@@ -191,9 +145,20 @@ export function GlobalEditableFieldsPanel({
           </p>
           <h2 style={{ margin: 0, fontSize: 20 }}>一般作品権限</h2>
           <p className="fn-muted" style={{ marginTop: 8, marginBottom: 0, lineHeight: 1.7 }}>
-            一般ユーザーに開放する作品編集範囲の既定値です。通常作品と公開前作品で分けて設定します。
-            イベント側で個別設定した場合は、そのイベントの設定が優先されます。
+            作品所有者が通常モードで編集できる項目を設定します。
+            この設定によって、作品所有者ではない一般ユーザーへ編集権限が付与されることはありません。
           </p>
+          <ul
+            className="fn-muted"
+            style={{ margin: "8px 0 0", paddingLeft: 20, lineHeight: 1.7, fontSize: "inherit" }}
+          >
+            <li>
+              作品所有者: 作品の creator_x_user_id に紐付くユーザー、または編集権限を付与された合作メンバー
+            </li>
+            <li>
+              作品所有者以外: 管理者、または対象操作に必要な権限を持つイベント運営メンバーのみ、明示的な権限モードで編集できます
+            </li>
+          </ul>
         </div>
       </header>
 
@@ -238,7 +203,7 @@ export function GlobalEditableFieldsPanel({
 
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 16 }}>
         <div style={{ display: "grid", gap: 12 }}>
-          {EDITABLE_FIELD_GROUPS.map((group) => (
+          {GENERAL_EDITABLE_FIELD_GROUPS.map((group) => (
             <section
               key={group.label}
               style={{
@@ -286,7 +251,7 @@ export function GlobalEditableFieldsPanel({
                         {label}
                       </span>
                       <span className="fn-muted" style={{ display: "block", fontSize: 11 }}>
-                        {EDITABLE_FIELD_HELP[value]}
+                        {GENERAL_EDITABLE_FIELD_HELP[value]}
                       </span>
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -304,7 +269,7 @@ export function GlobalEditableFieldsPanel({
                               return copy;
                             });
                           }}
-                          label={`${scope.label}で${label}を許可`}
+                          label={`${scope.label}のオーナーが${label}を編集可`}
                           scopeLabel={scope.badge}
                           tone={scope.tone}
                         />
@@ -327,7 +292,8 @@ export function GlobalEditableFieldsPanel({
           }}
         >
           <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
-            チェックを外した項目は、作者または管理者だけが編集できます。
+            チェックを外した項目は、作品所有者の通常権限では編集できません。
+            管理者または必要なイベント運営権限を持つメンバーのみ編集できます。
           </p>
           <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
             <Icon name="check" size={12} aria-hidden />
@@ -348,16 +314,16 @@ function StatusSummary({
 }: {
   label: string;
   tone: "primary" | "warning";
-  selected: Set<string>;
+  selected: Set<GeneralEditableFieldKey>;
   total: number;
   description: string;
 }): React.ReactElement {
   const accentColor =
     tone === "warning" ? "var(--accent-warning, #d97706)" : "var(--accent-primary)";
   const ratio = total > 0 ? Math.round((selected.size / total) * 100) : 0;
-  const enabledLabels = EDITABLE_FIELD_OPTIONS.filter(([value]) => selected.has(value)).map(
-    ([, itemLabel]) => itemLabel,
-  );
+  const enabledLabels = GENERAL_EDITABLE_FIELD_KEYS.filter((value) =>
+    selected.has(value),
+  ).map((value) => GENERAL_EDITABLE_FIELD_LABELS[value]);
   return (
     <div
       style={{
@@ -412,11 +378,11 @@ function StatusSummary({
         />
       </div>
       <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>
-        現在の許可項目
+        オーナーが通常モードで編集できる項目
       </div>
       {enabledLabels.length === 0 ? (
         <span className="fn-muted" style={{ fontSize: 11 }}>
-          オーナー以外は編集不可
+          オーナーも通常モードでは編集不可
         </span>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
