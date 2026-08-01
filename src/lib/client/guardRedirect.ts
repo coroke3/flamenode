@@ -16,11 +16,10 @@ export function getGuardRedirectPath(
       return `/entry?next=${safeNext}`;
     case "tos_required":
     case "tos_reaccept_required":
-      return `/rules?next=${safeNext}`;
     case "active_x_required":
     case "active_x_rejected":
     case "active_x_not_approved":
-      return `/dashboard/settings?next=${safeNext}`;
+      return `/onboarding?next=${safeNext}`;
     default:
       return null;
   }

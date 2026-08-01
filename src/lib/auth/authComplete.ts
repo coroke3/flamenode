@@ -4,6 +4,8 @@ const AUTH_COMPLETE_PATH = "/auth/complete";
 const BLOCKED_PREFIXES = [
   "/api/auth",
   "/auth/complete",
+  "/onboarding",
+  "/rules",
 ] as const;
 
 /** callback直後にsession読取が一時的にnull/失敗となる場合だけを吸収する。 */
@@ -82,7 +84,7 @@ export function buildAuthCompleteHref(next?: string | null): string {
 
 export function sanitizeAuthCompleteNext(
   next?: string | null,
-  fallback = "/onboarding",
+  fallback = "/dashboard",
 ): string {
   const candidate = sanitizeNextPath(next, fallback);
   const pathOnly = candidate.split(/[?#]/, 1)[0] || "/";

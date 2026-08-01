@@ -15,13 +15,14 @@ export function SettingsNoXIdOnboarding({
       <div className={pageStyles.onboardingBody}>
         <h2 className={pageStyles.onboardingTitle}>X ID を連携しましょう</h2>
         <p className={pageStyles.onboardingLead}>
-          FlameNode では Discord でログインし、活動名義となる X ID を連携してから投稿・いいね・セーブを行います。
-          連携申請後、運営が目視確認して承認します。
+          FlameNode では Discord でログインし、利用規約に同意したうえで活動名義となる X ID
+          を連携します。申請後は運営が目視確認して承認します。
         </p>
         <ul className={pageStyles.onboardingList}>
-          <li>投稿・枠確保の名義は承認済みの X ID になります</li>
+          <li>作品の閲覧はログインなしでも可能です</li>
+          <li>枠確保は X ID 申請後（承認待ち）から利用できます</li>
+          <li>いいね・セーブ・投稿には承認済みの活動名義（Active X ID）が必要です</li>
           <li>複数の X ID を連携し、アクティブを切り替えられます</li>
-          <li>Discord だけでは投稿できません。X ID の連携が必要です</li>
         </ul>
         {pendingCount > 0 ? (
           <p className={pageStyles.onboardingPending}>
@@ -44,7 +45,7 @@ export function SettingsPageLead({
   if (!hasLinkedXIds) {
     return (
       <p className="fn-page-lead">
-        まず X ID を連携してください。承認後にプロフィール編集や投稿ができます。
+        まず X ID を連携してください。承認後にいいね・セーブ・投稿ができます（枠確保は申請後から可能）。
         {pendingCount > 0 ? " 申請中の連携は「申請履歴」タブで確認できます。" : ""}
       </p>
     );

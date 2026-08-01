@@ -295,3 +295,50 @@ export async function acceptLatestTerms(formData: FormData): Promise<void> {
     `/rules?next=${encodeURIComponent(next)}&error=${encodeURIComponent(result.kind)}`,
   );
 }
+
+export type AcceptOnboardingTermsResult =
+  | { ok: true; alreadyAccepted?: boolean }
+  | { ok: false; message: string; retryable?: boolean };
+
+/**
+ * オンボーディング内の規約同意。redirect せず結果を返す。
+ * 保存本体は commitAcceptLatestTerms を再利用する。
+ */
+export async function acceptOnboardingTerms(): Promise<AcceptOnboardingTermsResult> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, message: "ログインが必要です。" };
+  }
+
+  let result: AcceptTermsResult;
+  try {
+    result = await commitAcceptLatestTerms(user.id);
+  } catch (error) {
+    unstable_rethrow(error);
+    return {
+      ok: false,
+      message: "同意の保存に失敗しました。時間をおいて再試行してください。",
+      retryable: true,
+    };
+  }
+
+  if (result.kind === "accepted" || result.kind === "already_accepted") {
+    return {
+      ok: true,
+      alreadyAccepted: result.kind === "already_accepted",
+    };
+  }
+  if (result.kind === "database_unavailable" || result.kind === "concurrent_update") {
+    return {
+      ok: false,
+      message:
+        "保存を完了できませんでした。再読み込み後にもう一度お試しください。同意済みの可能性があります。",
+      retryable: true,
+    };
+  }
+  if (result.kind === "terms_unavailable") {
+    return { ok: false, message: "利用規約を取得できませんでした。" };
+  }
+  return { ok: false, message: "利用規約への同意を完了できませんでした。" };
+}
+

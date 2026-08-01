@@ -37,22 +37,13 @@ export default async function DashboardLibraryPage({
   let videos: VideoCardData[] = [];
   let hasOtherTabHits = false;
   let linkedXCount = 0;
-  let activeXApproved = false;
+  const activeX = user.active_x_user_id;
 
   if (db) {
-    const linkedRows = (await getLinkedXUsersForAuthUser(db, user.id)).map((row) => ({
-      id: row.x_user_id,
-      approval_status: row.approval_status,
-    }));
+    const linkedRows = await getLinkedXUsersForAuthUser(db, user.id);
     linkedXCount = linkedRows.length;
 
-    const activeX = user.active_x_user_id;
-    const activeRow = activeX
-      ? linkedRows.find((row) => row.id === activeX)
-      : null;
-    activeXApproved = activeRow?.approval_status === "approved";
-
-    if (activeX && activeXApproved) {
+    if (activeX) {
       const myInteractions = await db
         .select({
           video_id: videoInteractions.video_id,
@@ -99,7 +90,7 @@ export default async function DashboardLibraryPage({
   }
 
   const needsXIdLink = linkedXCount === 0;
-  const needsActiveX = linkedXCount > 0 && !activeXApproved;
+  const needsActiveX = linkedXCount > 0 && !activeX;
 
   const playlistId = tab === "like" ? "lib-like" : "lib-bookmark";
   const playlistLabel = tab === "like" ? "いいねした作品" : "セーブした作品";
@@ -148,8 +139,8 @@ export default async function DashboardLibraryPage({
           <Icon name="user" size={20} aria-hidden />
           <p className="fn-empty-message">
             {needsXIdLink
-              ? "いいね・セーブには X ID の連携が必要です。"
-              : "承認済みのアクティブ X ID を設定すると、いいね・セーブした作品を表示できます。"}
+              ? "いいね・セーブには X ID の連携・利用規約への同意・承認済みの活動名義が必要です。"
+              : "承認済みの活動名義（Active X ID）を選択すると、いいね・セーブした作品を表示できます。"}
           </p>
           <Link href="/dashboard/settings" className="fn-btn fn-btn-primary fn-mt-md">
             {needsXIdLink ? "X ID を連携する" : "X ID 設定を開く"}

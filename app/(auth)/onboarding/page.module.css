@@ -1,16 +1,3 @@
-.onboardingSteps {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
-  margin: 24px 0 28px;
-}
-
-@media (min-width: 720px) {
-  .onboardingSteps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 .stepCard {
   display: flex;
   flex-direction: column;
@@ -21,72 +8,6 @@
   border-radius: var(--r-block, 10px);
 }
 
-.stepCard--done {
-  border-color: color-mix(in srgb, var(--accent-ok, #15803d) 35%, transparent);
-}
-
-.stepCard--action {
-  border-color: color-mix(in srgb, var(--accent-primary, #2563eb) 40%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary, #2563eb) 12%, transparent);
-}
-
-.stepCard--pending {
-  border-color: color-mix(in srgb, var(--accent-warning, #b45309) 35%, transparent);
-}
-
-.stepHead {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.stepIndex {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  background: var(--bg-muted, rgba(0, 0, 0, 0.04));
-  color: var(--text-secondary);
-}
-
-.stepCard--done .stepIndex {
-  background: color-mix(in srgb, var(--accent-ok, #15803d) 14%, transparent);
-  color: var(--accent-ok, #15803d);
-}
-
-.stepCard--action .stepIndex {
-  background: color-mix(in srgb, var(--accent-primary, #2563eb) 14%, transparent);
-  color: var(--accent-primary, #2563eb);
-}
-
-.stepCard--pending .stepIndex {
-  background: color-mix(in srgb, var(--accent-warning, #b45309) 14%, transparent);
-  color: var(--accent-warning, #b45309);
-}
-
-.stepTitle {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.3;
-  color: var(--text-primary);
-}
-
-.stepStatus {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
 .stepBody {
   margin: 0;
   font-size: 13px;
@@ -95,7 +16,7 @@
 }
 
 .stepActions {
-  margin-top: auto;
+  margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -114,6 +35,41 @@
   }
 }
 
+.statusCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  border-radius: var(--r-block, 10px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+}
+
+.statusCard--pending {
+  border-color: color-mix(in srgb, var(--accent-warning, #b45309) 35%, transparent);
+  background: color-mix(in srgb, var(--accent-warning, #b45309) 5%, var(--bg-surface));
+}
+
+.statusCard--rejected {
+  border-color: color-mix(in srgb, var(--accent-danger, #dc2626) 35%, transparent);
+  background: color-mix(in srgb, var(--accent-danger, #dc2626) 5%, var(--bg-surface));
+}
+
+.statusHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.statusBody {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
 .completeBanner {
   display: flex;
   flex-wrap: wrap;
@@ -126,24 +82,160 @@
   border: 1px solid color-mix(in srgb, var(--accent-ok, #15803d) 30%, transparent);
 }
 
-.xIdFormWrap {
-  margin-top: 4px;
-}
-
-.pendingNote {
-  margin: 0;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.5;
-  border-radius: var(--r-sm, 6px);
-  background: color-mix(in srgb, var(--accent-warning, #b45309) 10%, transparent);
-  color: var(--text-secondary);
-}
-
 .pendingList {
   margin: 0;
   padding-left: 1.1rem;
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--text-secondary);
+}
+
+.pendingMuted {
+  color: var(--text-muted, #6b7280);
+}
+
+.summaryList,
+.prepareList {
+  margin: 0 0 16px;
+  padding-left: 1.2rem;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.prepareNote {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-muted, #6b7280);
+}
+
+.termsToggle {
+  align-self: flex-start;
+}
+
+.termsBody {
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.1));
+  border-radius: var(--r-sm, 6px);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-muted, rgba(0, 0, 0, 0.02));
+}
+
+.termsBody :global(h2),
+.termsBody :global(h3) {
+  margin: 0.8em 0 0.35em;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.termsVersion {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+
+.termsForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.termsCheckRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.termsCheckbox {
+  flex-shrink: 0;
+  margin-top: 2px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.termsLabel {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.xIdForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compactLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.xIdInputRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.xIdAt {
+  flex: 0 0 auto;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.xIdInput {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 16px;
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.15));
+  border-radius: var(--r-sm, 6px);
+  background: var(--bg-input, var(--bg-surface));
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.xIdInput:focus {
+  outline: 2px solid var(--accent-primary, #2563eb);
+  outline-offset: 1px;
+}
+
+.inputHint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+
+.xIdPreview {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent-ok, #15803d);
+}
+
+.xIdPreviewWarn {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+}
+
+.formError {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent-danger, #dc2626);
+}
+
+.formStatus {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent-ok, #15803d);
 }

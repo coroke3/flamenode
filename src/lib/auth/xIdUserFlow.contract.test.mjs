@@ -6,15 +6,16 @@ import { fileURLToPath } from "node:url";
 const read = (relative) =>
   readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 
-test("X ID連携は初回・追加で同じ小文字化フローを使い、統合だけを設定に分離する", () => {
+test("X ID連携は初回・追加で同じ解析フローを使い、統合だけを設定に分離する", () => {
   const action = read("../actions/xid.ts");
   const component = read("../../components/settings/XIdSettingsClient.tsx");
   const settings = read("../../../app/(auth)/dashboard/settings/page.tsx");
 
   assert.match(action, /z\.enum\(\["link", "merge"\]\)/);
-  assert.match(action, /normalizeXId\(String\(formData\.get\("x_id"\)/);
+  assert.match(action, /parseXIdentityInput\(String\(formData\.get\("x_id"\)/);
   assert.doesNotMatch(action, /parsedKind\.data === "alias"/);
   assert.match(component, /X IDを連携/);
+  assert.match(component, /parseXIdentityInput/);
   assert.doesNotMatch(component, /新規・既存を自動判定|別名を追加/);
   assert.match(component, /export function XIdMergeForm/);
   assert.match(settings, /<XIdMergeForm linkedXIds=\{mergeCandidates\}/);

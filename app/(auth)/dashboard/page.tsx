@@ -242,19 +242,71 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
       </header>
 
-      {!onboarding.isComplete ? (
+      {onboarding.needsTermsAcceptance || onboarding.xIdentityStatus === "none" ? (
         <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
           <Icon name="alert" size={18} aria-hidden />
           <div>
             <h3 className="fn-jp">初期設定が未完了です</h3>
             <p className="fn-jp fn-pc-banner-lead">
-              利用規約への同意とX ID連携を済ませると、投稿・枠確保が使えます。
+              作品投稿やイベント参加には、利用規約への同意と活動名義の登録が必要です。
             </p>
             <Link
               href={onboardingHref("/dashboard")}
               className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
             >
-              初期設定を続ける
+              初期設定を進める
+            </Link>
+          </div>
+        </div>
+      ) : onboarding.xIdentityStatus === "rejected" ? (
+        <div className="fn-pc-status-banner fn-pc-status-banner--warn" role="status" style={{ marginBottom: 20 }}>
+          <Icon name="alert" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">X ID 申請を確認できませんでした</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              申請が却下されました。設定から再申請できます。
+            </p>
+            <Link
+              href={onboardingHref("/dashboard")}
+              className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
+            >
+              再申請する
+            </Link>
+          </div>
+        </div>
+      ) : onboarding.xIdentityStatus === "pending" ? (
+        <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
+          <Icon name="clock" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">申請完了・承認待ち</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              {onboarding.requestedXId
+                ? `@${onboarding.requestedXId} の連携を運営が確認しています。`
+                : "X ID 連携の申請を運営が確認しています。"}
+              {" "}
+              イベント枠の確保は利用できます。作品投稿は承認後に利用可能です。
+            </p>
+            <Link
+              href={onboardingHref("/dashboard")}
+              className="fn-btn fn-btn-ghost fn-btn-sm fn-mt-12"
+            >
+              申請状況を見る
+            </Link>
+          </div>
+        </div>
+      ) : onboarding.xIdentityStatus === "approved" && !onboarding.activeApprovedXId ? (
+        <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
+          <Icon name="alert" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">活動名義（Active X ID）の設定が必要です</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              承認済みの X ID があります。投稿に使う Active X ID を設定してください。
+            </p>
+            <Link
+              href="/dashboard/settings?next=/dashboard"
+              className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
+            >
+              設定で Active X ID を選ぶ
             </Link>
           </div>
         </div>
@@ -268,7 +320,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
       ) : null}
 
-      <HeroCard slot={mySlot} event={mySlotEvent} />
+      <HeroCard slot={mySlot} event={mySlotEvent} canPost={onboarding.canPost} />
 
       <section className={`fn-dash-kpis ${styles.statsGrid}`} aria-label="アカウント統計">
         <Stat label="累計いいね" value={stats.likes.toLocaleString()} />
@@ -284,10 +336,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             <Icon name="user" size={20} aria-hidden />
             <p className="fn-empty-message">X ID がまだ連携されていません。</p>
             <Link
-              href={onboarding.isComplete ? "/dashboard/settings" : onboardingHref("/dashboard")}
+              href={onboarding.canReserveSlot ? "/dashboard/settings" : onboardingHref("/dashboard")}
               className="fn-btn fn-btn-primary fn-mt-md"
             >
-              {onboarding.isComplete ? "X ID を連携する" : "初期設定を続ける"}
+              {onboarding.canReserveSlot ? "X ID を連携する" : "初期設定を続ける"}
             </Link>
           </div>
         ) : (
@@ -402,9 +454,11 @@ function Stat({ label, value }: { label: string; value: string }): React.ReactEl
 function HeroCard({
   slot,
   event,
+  canPost,
 }: {
   slot: typeof slotsTable.$inferSelect | null;
   event: typeof eventsTable.$inferSelect | null;
+  canPost: boolean;
 }): React.ReactElement {
   if (!slot || !event) {
     return (
@@ -467,7 +521,11 @@ function HeroCard({
               </>
             ) : slot.status === "reserved" ? (
               <Link
-                href={`/entry/slotted?slot=${slot.id}`}
+                href={
+                  canPost
+                    ? `/entry/slotted?slot=${slot.id}`
+                    : onboardingHref(`/entry/slotted?slot=${slot.id}`)
+                }
                 className="fn-btn fn-btn-primary"
               >
                 <Icon name="upload" size={14} aria-hidden /> 動画を提出する

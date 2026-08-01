@@ -93,11 +93,20 @@ test("auth completeはopen redirectと循環を拒否する", async () => {
   const { sanitizeAuthCompleteNext, buildAuthCompleteHref } = await import(
     "./authComplete.ts"
   );
-  assert.equal(sanitizeAuthCompleteNext("https://evil.example"), "/onboarding");
-  assert.equal(sanitizeAuthCompleteNext("//evil.example"), "/onboarding");
-  assert.equal(sanitizeAuthCompleteNext("/auth/complete?next=/dashboard"), "/onboarding");
-  assert.equal(sanitizeAuthCompleteNext("/api/auth/callback/discord"), "/onboarding");
+  assert.equal(sanitizeAuthCompleteNext("https://evil.example"), "/dashboard");
+  assert.equal(sanitizeAuthCompleteNext("//evil.example"), "/dashboard");
+  assert.equal(sanitizeAuthCompleteNext("/auth/complete?next=/dashboard"), "/dashboard");
+  assert.equal(sanitizeAuthCompleteNext("/api/auth/callback/discord"), "/dashboard");
+  assert.equal(sanitizeAuthCompleteNext("/onboarding?next=/dashboard"), "/dashboard");
+  assert.equal(sanitizeAuthCompleteNext("/rules"), "/dashboard");
   assert.match(buildAuthCompleteHref("/dashboard"), /^\/auth\/complete\?next=/);
+});
+
+test("auth complete page の next フォールバックは /dashboard", () => {
+  assert.match(
+    completePage,
+    /sanitizeAuthCompleteNext\(\s*firstSearchParamValue\(params\?\.next\),\s*"\/dashboard",\s*\)/,
+  );
 });
 
 test("entryはAuth.js error codeを安全に表示する", () => {

@@ -52,7 +52,10 @@ async function mutateVideoInteraction(
   requestedState: RequestedState,
 ): Promise<VideoActionResult & { active?: boolean }> {
   const guard = await writeGuard({
-    requireApprovedActiveXId: true,
+    // requireApprovedActiveXId は false だが、getCurrentUser が resolveActiveXUserId 経由で
+    // 承認済みリンクだけを active_x_user_id に解決するため、実質 approved active X が必要。
+    requireActiveXId: true,
+    requireApprovedActiveXId: false,
     feature: "like_or_bookmark",
   });
   if (!guard.ok) return { ok: false, message: guard.message };

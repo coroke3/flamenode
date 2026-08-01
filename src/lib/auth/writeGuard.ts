@@ -1,9 +1,9 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { getCurrentUser, type CurrentUser } from "./currentUser";
 import { getDatabase } from "@/lib/cloudflare";
-import { systemSettings, xUsers } from "@/lib/db/schema";
+import { systemSettings, xIdentityRequests, xUsers } from "@/lib/db/schema";
 import { getApprovedXIds } from "./ownership";
 import {
   evaluateActiveXWriteAccess,
@@ -71,6 +71,13 @@ export type WriteGuardOptions = {
   requireActiveXId?: boolean;
   /** active_x_user_id が approved であることを要求する (requireActiveXId も真として扱う)。 */
   requireApprovedActiveXId?: boolean;
+  /**
+   * 明示的な X 身元要件。指定時は requireActiveXId / requireApprovedActiveXId より優先する。
+   * "none": X 不問。
+   * "requested_x": pending 申請または active X を持つことを要求（枠確保に使用）。
+   * "approved_active_x": approved な active X を要求（作品投稿に使用）。
+   */
+  identityRequirement?: "none" | "requested_x" | "approved_active_x";
   /** 必須のCostGuard機能キー。mode と disabled_features_json を確認する。 */
   feature: CostGuardFeatureKey;
   requiredRole?: "admin";
@@ -93,10 +100,12 @@ export type WriteGuardSuccess = {
   ok: true;
   db: DB;
   user: CurrentUser;
-  /** requireActiveXId / requireApprovedActiveXId 指定時は必ず非 null。 */
+  /** requireActiveXId / requireApprovedActiveXId / identityRequirement 指定時は必ず非 null（"requested_x" でpending申請のみの場合は null）。 */
   activeXId: string | null;
   /** 自分が linked かつ approved な X ID 一覧。 */
   approvedXIds: string[];
+  /** identityRequirement: "requested_x" かつ activeXId=null のときに pending 申請があれば true。 */
+  hasPendingXRequest: boolean;
 };
 
 export type WriteGuardFailure = {
@@ -152,16 +161,35 @@ export async function writeGuard(
     return deny("cost_guard_blocked");
   }
 
-  const requireActiveXId = options.requireActiveXId === true;
-  const requireApprovedActiveXId =
-    options.requireApprovedActiveXId === true;
-  const needActive = requireActiveXId || requireApprovedActiveXId;
+  // identityRequirement が指定された場合はそちらを優先する
+  const idReq = options.identityRequirement;
+
+  if (idReq === "none") {
+    let approvedXIds: string[];
+    try {
+      approvedXIds = await getApprovedXIds(db, user.id);
+    } catch {
+      return deny("db_unavailable");
+    }
+    return { ok: true, db, user, activeXId: user.active_x_user_id, approvedXIds, hasPendingXRequest: false };
+  }
+
   const activeXId = user.active_x_user_id;
   let approvedXIds: string[];
   let activeXApprovalStatus: string | null = null;
+  let hasPendingXRequest = false;
+
+  // "requested_x" + activeXId なし → pending 申請の有無を確認する
+  const isRequestedXReq = idReq === "requested_x";
+  const requireApprovedActiveXId =
+    idReq === "approved_active_x" || options.requireApprovedActiveXId === true;
+  const requireActiveXId =
+    idReq === "approved_active_x" || options.requireActiveXId === true;
+  const needActive = requireActiveXId || requireApprovedActiveXId || isRequestedXReq;
+
   try {
     approvedXIds = await getApprovedXIds(db, user.id);
-    if (needActive && activeXId) {
+    if (activeXId && needActive) {
       const xRow = (
         await db
           .select({ approval_status: xUsers.approval_status })
@@ -171,8 +199,52 @@ export async function writeGuard(
       )[0];
       activeXApprovalStatus = xRow?.approval_status ?? null;
     }
+    if (isRequestedXReq && (!activeXId || activeXApprovalStatus === "rejected")) {
+      const pendingRow = (
+        await db
+          .select({ id: xIdentityRequests.id })
+          .from(xIdentityRequests)
+          .where(
+            and(
+              eq(xIdentityRequests.requested_by_auth_user_id, user.id),
+              eq(xIdentityRequests.status, "pending"),
+            )!,
+          )
+          .limit(1)
+      )[0];
+      hasPendingXRequest = Boolean(pendingRow);
+    }
   } catch {
     return deny("db_unavailable");
+  }
+
+  // "requested_x": 申請済み(pending)または active X（rejected以外）が必要。
+  if (isRequestedXReq) {
+    if (activeXId && activeXApprovalStatus === "rejected") {
+      if (!hasPendingXRequest) return deny("active_x_rejected");
+      return {
+        ok: true,
+        db,
+        user,
+        activeXId: null,
+        approvedXIds,
+        hasPendingXRequest: true,
+      };
+    }
+    if (activeXId && activeXApprovalStatus != null) {
+      return { ok: true, db, user, activeXId, approvedXIds, hasPendingXRequest };
+    }
+    if (hasPendingXRequest) {
+      return {
+        ok: true,
+        db,
+        user,
+        activeXId: null,
+        approvedXIds,
+        hasPendingXRequest: true,
+      };
+    }
+    return deny("active_x_required");
   }
 
   const activeXDeny = evaluateActiveXWriteAccess({
@@ -184,7 +256,7 @@ export async function writeGuard(
   });
   if (activeXDeny) return deny(activeXDeny);
 
-  return { ok: true, db, user, activeXId, approvedXIds };
+  return { ok: true, db, user, activeXId, approvedXIds, hasPendingXRequest: false };
 }
 
 export async function requireAdminWrite(
@@ -210,5 +282,6 @@ export async function requireCostGuardControlAdmin(): Promise<WriteGuardResult> 
     user,
     activeXId: null,
     approvedXIds: [],
+    hasPendingXRequest: false,
   };
 }

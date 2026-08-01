@@ -182,7 +182,8 @@ export function AccountMenu({
                 >
                   <strong>X ID未連携</strong>
                   <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-                    投稿・いいね・セーブにはX IDの連携が必要です。
+                    いいね・セーブ・投稿には、利用規約への同意と承認済みの活動名義（Active X
+                    ID）が必要です。枠確保は X ID 申請後（承認待ち）から利用できます。
                   </p>
                   <div style={{ marginTop: 8 }}>
                     <Link
@@ -298,9 +299,9 @@ export function AccountMenu({
               >
                 <strong>承認待ち</strong>
                 <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
-                  できること: 枠確保
+                  できること: 作品の閲覧、枠確保
                   <br />
-                  できないこと: 投稿, コメント, いいね, セーブ
+                  できないこと: いいね、セーブ、投稿、コメント（承認後に利用可能）
                 </p>
               </div>
             ) : activeEntry.approval_status === "rejected" ? (

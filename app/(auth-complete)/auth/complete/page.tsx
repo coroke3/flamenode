@@ -34,7 +34,7 @@ export default async function AuthCompletePage({
   const params = await searchParams;
   const next = sanitizeAuthCompleteNext(
     firstSearchParamValue(params?.next),
-    "/onboarding",
+    "/dashboard",
   );
 
   const resolution = await resolveAuthCompleteSession(

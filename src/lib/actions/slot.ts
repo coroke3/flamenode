@@ -98,16 +98,17 @@ async function runSlotPostCommit(
   );
 }
 
-function isOwnReservedSlot(
-  row: SlotRow,
-  userId: string,
-  activeXId: string | null,
-): boolean {
-  return (
-    row.status === "reserved" &&
-    row.reserved_by_user_id === userId &&
-    row.x_user_id === activeXId
-  );
+function isOwnReservedSlot(row: SlotRow, userId: string): boolean {
+  return row.status === "reserved" && row.reserved_by_user_id === userId;
+}
+
+function resolveSlotXUserId(guard: {
+  activeXId: string | null;
+  approvedXIds: string[];
+}): string | null {
+  return guard.activeXId && guard.approvedXIds.includes(guard.activeXId)
+    ? guard.activeXId
+    : null;
 }
 
 function revalidateSlotViews(eventId: string): void {
@@ -408,16 +409,13 @@ export async function reserveSlot(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({
-    requireActiveXId: true,
-    requireApprovedActiveXId: false,
+    identityRequirement: "requested_x",
     feature: "reserve_slot",
   });
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  if (!guard.activeXId) {
-    return { ok: false, message: "X ID を選択してから枠を確保してください。" };
-  }
+  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = reserveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -432,7 +430,7 @@ export async function reserveSlot(
     const anchor = await loadSlot(db, parsed.data.slot_id);
     if (!anchor) return { ok: false, message: "枠が見つかりません。" };
     if (anchor.status !== "available") {
-      if (isOwnReservedSlot(anchor, guard.user.id, guard.activeXId)) {
+      if (isOwnReservedSlot(anchor, guard.user.id)) {
         return { ok: true, slotId: anchor.id };
       }
       return { ok: false, message: "この枠はすでに確保されています。" };
@@ -473,7 +471,7 @@ export async function reserveSlot(
         row,
         {
           reserved_by_user_id: guard.user.id,
-          x_user_id: guard.activeXId,
+          x_user_id: slotXUserId,
           display_name: parsed.data.display_name,
           reservation_group_id: groupId,
           status: "reserved",
@@ -501,7 +499,7 @@ export async function reserveSlot(
         eventTitle: event.title ?? "イベント",
         slotCount: targetRows.length,
         displayName: parsed.data.display_name,
-        xUserId: guard.activeXId,
+        xUserId: slotXUserId,
         userId: guard.user.id,
         discordId: actor?.discord_id,
       }),
@@ -602,16 +600,13 @@ export async function extendOwnSlotGroup(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({
-    requireActiveXId: true,
-    requireApprovedActiveXId: false,
+    identityRequirement: "requested_x",
     feature: "extend_slot_group",
   });
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  if (!guard.activeXId) {
-    return { ok: false, message: "X ID を選択してから操作してください。" };
-  }
+  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = extendSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -627,8 +622,7 @@ export async function extendOwnSlotGroup(
     if (!anchor) return { ok: false, message: "枠が見つかりません。" };
     if (
       anchor.status !== "reserved" ||
-      anchor.x_user_id !== guard.activeXId ||
-      anchor.reserved_by_user_id !== guard.user.id
+      !(await ownsSlot(db, anchor, guard.user.id, guard.activeXId))
     ) {
       return { ok: false, message: "自分の予約中の枠のみ拡張できます。" };
     }
@@ -673,7 +667,7 @@ export async function extendOwnSlotGroup(
         candidate,
         {
           reserved_by_user_id: guard.user.id,
-          x_user_id: guard.activeXId,
+          x_user_id: slotXUserId,
           display_name: groupRows[0].display_name,
           reservation_group_id: groupId,
           status: "reserved",
@@ -699,16 +693,13 @@ export async function mergeOwnSlotGroups(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({
-    requireActiveXId: true,
-    requireApprovedActiveXId: false,
+    identityRequirement: "requested_x",
     feature: "merge_slot_groups",
   });
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  if (!guard.activeXId) {
-    return { ok: false, message: "X ID を選択してから操作してください。" };
-  }
+  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = mergeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -740,10 +731,8 @@ export async function mergeOwnSlotGroups(
     if (
       left.status !== "reserved" ||
       right.status !== "reserved" ||
-      left.x_user_id !== guard.activeXId ||
-      right.x_user_id !== guard.activeXId ||
-      left.reserved_by_user_id !== guard.user.id ||
-      right.reserved_by_user_id !== guard.user.id
+      !(await ownsSlot(db, left, guard.user.id, guard.activeXId)) ||
+      !(await ownsSlot(db, right, guard.user.id, guard.activeXId))
     ) {
       return { ok: false, message: "自分の予約中の隣接枠どうしのみ結合できます。" };
     }
@@ -753,15 +742,13 @@ export async function mergeOwnSlotGroups(
     const byId = new Map<string, SlotRow>();
     for (const row of [...leftGroup, ...rightGroup]) byId.set(row.id, row);
     const reservedRows = sortSlotsChronologically([...byId.values()]);
-    if (
-      reservedRows.some(
-        (row) =>
-          row.status !== "reserved" ||
-          row.x_user_id !== guard.activeXId ||
-          row.reserved_by_user_id !== guard.user.id,
-      )
-    ) {
-      return { ok: false, message: "連続枠に別の利用者または状態が混在しています。" };
+    for (const row of reservedRows) {
+      if (
+        row.status !== "reserved" ||
+        !(await ownsSlot(db, row, guard.user.id, guard.activeXId))
+      ) {
+        return { ok: false, message: "連続枠に別の利用者または状態が混在しています。" };
+      }
     }
     if (reservedRows.length + 1 > eventAtomicLimit(event)) {
       return { ok: false, message: "連続枠の上限を超えるため結合できません。" };
@@ -790,7 +777,7 @@ export async function mergeOwnSlotGroups(
         gap,
         {
           reserved_by_user_id: guard.user.id,
-          x_user_id: guard.activeXId,
+          x_user_id: slotXUserId,
           display_name: parsed.data.display_name,
           reservation_group_id: groupId,
           status: "reserved",
