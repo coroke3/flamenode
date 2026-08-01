@@ -22,8 +22,8 @@ type SourceItem = {
 };
 
 const LOOP_GROUPS = [0, 1, 2] as const;
-const LEFT_RESET_THRESHOLD = 0.05;
-const RIGHT_RESET_THRESHOLD = 2.95;
+const LEFT_RESET_THRESHOLD = 0.5;
+const RIGHT_RESET_THRESHOLD = 1.5;
 
 function toSourceItems(children: React.ReactNode): SourceItem[] {
   return React.Children.toArray(children).map((node, index) => ({
@@ -115,13 +115,9 @@ export function TopLoopShelf({
     }, Math.max(0, Math.min(pauseAfterInteractionMs, 10_000)));
   }, [pauseAfterInteractionMs, setPauseReason]);
 
-  const syncFiniteArrowState = React.useCallback((scroller: HTMLDivElement) => {
-    if (loop) {
-      setCanScroll(scroller.scrollWidth > scroller.clientWidth + 4);
-      return;
-    }
+  const syncScrollableState = React.useCallback((scroller: HTMLDivElement) => {
     setCanScroll(scroller.scrollWidth > scroller.clientWidth + 4);
-  }, [loop]);
+  }, []);
 
   const normalizeLoopPosition = React.useCallback(() => {
     const scroller = scrollerRef.current;
@@ -130,10 +126,10 @@ export function TopLoopShelf({
 
     const current = scroller.scrollLeft;
     let next = current;
-    if (current <= cycleWidth * LEFT_RESET_THRESHOLD) {
-      next = cycleWidth + (current % cycleWidth);
-    } else if (current >= cycleWidth * RIGHT_RESET_THRESHOLD) {
-      next = cycleWidth + (current % cycleWidth);
+    if (current < cycleWidth * LEFT_RESET_THRESHOLD) {
+      next = current + cycleWidth;
+    } else if (current > cycleWidth * RIGHT_RESET_THRESHOLD) {
+      next = current - cycleWidth;
     }
 
     if (Math.abs(next - current) < 0.5) return;
@@ -160,7 +156,7 @@ export function TopLoopShelf({
     if (!(nextCycle > 0)) return;
 
     cycleWidthRef.current = nextCycle;
-    syncFiniteArrowState(scroller);
+    syncScrollableState(scroller);
 
     if (!loop) return;
     if (!seededRef.current) {
@@ -174,7 +170,7 @@ export function TopLoopShelf({
       scroller.scrollLeft = nextCycle + relativeOffset * nextCycle;
       normalizeLoopPosition();
     }
-  }, [loop, normalizeLoopPosition, syncFiniteArrowState]);
+  }, [loop, normalizeLoopPosition, syncScrollableState]);
 
   React.useLayoutEffect(() => {
     seededRef.current = false;
@@ -304,7 +300,7 @@ export function TopLoopShelf({
         tabIndex={0}
         onScroll={() => {
           const scroller = scrollerRef.current;
-          if (scroller) syncFiniteArrowState(scroller);
+          if (scroller) syncScrollableState(scroller);
           scheduleNormalize();
         }}
         onMouseEnter={() => setPauseReason("hover", true)}
