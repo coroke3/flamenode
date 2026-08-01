@@ -206,6 +206,7 @@ export async function getXIconCandidates(
       and(
         eq(videos.creator_x_user_id, xId),
         isNotNull(videos.creator_icon_url),
+        eq(videos.visibility_status, "public"),
       )!,
     )
     .orderBy(desc(videos.created_at))

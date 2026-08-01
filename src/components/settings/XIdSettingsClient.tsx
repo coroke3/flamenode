@@ -416,6 +416,7 @@ function XIdIconPicker({
   const selectedIconUrl = savedIconUrl ?? currentIconUrl ?? candidates[0] ?? null;
 
   const onSelect = (iconUrl: string) => {
+    if (pending) return;
     setError(null);
     setMessage(null);
     const fd = new FormData();

@@ -76,7 +76,7 @@ export async function resolveVideoCreatorIcon(args: {
     return { ok: false, message: validated.message };
   }
 
-  const key = `video-icons/${args.activeXId}/${args.videoId}.${validated.image.ext}`;
+  const key = `video-icons/${args.activeXId}/${args.videoId}`;
   const iconUrl = `/api/media/${key}`;
   await env.BUCKET.put(key, buffer, {
     httpMetadata: { contentType: validated.image.contentType },

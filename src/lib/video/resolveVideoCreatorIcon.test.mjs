@@ -297,7 +297,7 @@ if (process.env.FLAMENODE_RESOLVE_VIDEO_ICON_EXECUTION !== "1") {
       }),
     });
 
-    const expectedKey = "video-icons/x-user-1/video-1.png";
+    const expectedKey = "video-icons/x-user-1/video-1";
     assert.deepEqual(result, {
       ok: true,
       value: {
@@ -314,7 +314,7 @@ if (process.env.FLAMENODE_RESOLVE_VIDEO_ICON_EXECUTION !== "1") {
 
   test("rollbackUploadedVideoIcon は BUCKET.delete を呼ぶ", async () => {
     currentHarness = createHarness();
-    const key = "video-icons/x-user-1/video-1.png";
+    const key = "video-icons/x-user-1/video-1";
 
     await rollbackUploadedVideoIcon(key);
 

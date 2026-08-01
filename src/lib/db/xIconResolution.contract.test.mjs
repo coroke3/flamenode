@@ -46,6 +46,14 @@ test("voidedを補完元から除外する", () => {
   );
 });
 
+test("getXIconCandidates は public な作品アイコンのみ候補にする", () => {
+  const functionBody = source.slice(
+    source.indexOf("export async function getXIconCandidates"),
+    source.indexOf("export async function resolveMemberNames"),
+  );
+  assert.match(functionBody, /eq\(videos\.visibility_status, ["']public["']\)/);
+});
+
 test("メンバー配列はmapで同じ順序のまま返す", () => {
   const functionBody = source.slice(
     source.indexOf("export async function resolveMemberIcons"),

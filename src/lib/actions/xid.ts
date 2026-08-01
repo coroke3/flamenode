@@ -907,6 +907,7 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
   const candidates = await getXIconCandidates(db, xUserId, 40);
   if (!candidates.includes(iconUrl)) return { ok: false, message: "選択できないアイコンです。" };
 
+  const oldIconUrl = row.icon_url;
   const after = { ...row, icon_url: iconUrl };
   await mutateWithAudit(db, {
     mutationStatements: [
@@ -926,11 +927,19 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
       },
     ],
   });
-  await enqueueAfterXUserPublicUpdate(db, {
-    xUserId,
-    reason: "x_user_icon_update",
-    requestedByUserId: authUserId,
+  const env = getEnv();
+  await runXIdPostCommit("xid.setXIdIcon", "static_rebuild_enqueue", async () => {
+    await enqueueAfterXUserPublicUpdate(db, {
+      xUserId,
+      reason: "x_user_icon_update",
+      requestedByUserId: authUserId,
+    });
   });
+  if (env.BUCKET) {
+    await runXIdPostCommit("xid.setXIdIcon", "orphan_icon_cleanup", async () => {
+      await tryDeleteUnreferencedIcon(db.$client, env.BUCKET, oldIconUrl, iconUrl);
+    });
+  }
   revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "アイコンを更新しました。" };
 }
@@ -970,6 +979,7 @@ export async function uploadXIdIcon(
   const key = `xicons/${xUserId}/${objectId}.${image.ext}`;
   const iconUrl = `/api/media/${key}`;
   const after = { ...row, icon_url: iconUrl };
+  let dbCommitted = false;
   try {
     await env.BUCKET.put(stagingKey, buffer, { httpMetadata: { contentType: image.contentType } });
     await env.BUCKET.put(key, buffer, { httpMetadata: { contentType: image.contentType } });
@@ -991,17 +1001,23 @@ export async function uploadXIdIcon(
         },
       ],
     });
+    dbCommitted = true;
+  } catch (error) {
+    // DB 反映前の失敗だけ新規 R2 を削除する。DB 成功後に正式キーを消すと死リンクになる。
+    if (!dbCommitted) {
+      await Promise.allSettled([env.BUCKET.delete(stagingKey), env.BUCKET.delete(key)]);
+    }
+    throw error;
+  }
+  await env.BUCKET.delete(stagingKey).catch((error) => {
+    console.warn("[uploadXIdIcon] staging cleanup failed", error);
+  });
+  await runXIdPostCommit("xid.uploadXIdIcon", "static_rebuild_enqueue", async () => {
     await enqueueAfterXUserPublicUpdate(db, {
       xUserId,
       reason: "x_user_icon_update",
       requestedByUserId: authUserId,
     });
-  } catch (error) {
-    await Promise.allSettled([env.BUCKET.delete(stagingKey), env.BUCKET.delete(key)]);
-    throw error;
-  }
-  await env.BUCKET.delete(stagingKey).catch((error) => {
-    console.warn("[uploadXIdIcon] staging cleanup failed", error);
   });
   await runXIdPostCommit("xid.uploadXIdIcon", "orphan_icon_cleanup", async () => {
     await tryDeleteUnreferencedIcon(db.$client, env.BUCKET, oldIconUrl, iconUrl);

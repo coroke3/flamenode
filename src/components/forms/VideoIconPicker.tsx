@@ -49,6 +49,15 @@ export function VideoIconPicker({
     };
   }, [uploadPreview]);
 
+  React.useEffect(() => {
+    clearUploadPreview();
+    const url = initialIconUrl ?? "";
+    setSelectedUrl(url);
+    setIconMode(isEdit ? "keep" : url ? "existing" : "none");
+    setTab("select");
+    setError(null);
+  }, [initialIconUrl, isEdit, clearUploadPreview]);
+
   const resolveModeForUrl = React.useCallback(
     (url: string): VideoIconMode => {
       if (isEdit && url === initialUrl) return "keep";
@@ -78,19 +87,7 @@ export function VideoIconPicker({
     input.files = dt.files;
   }, []);
 
-  const onUseUploadedImage = React.useCallback(
-    async (file: File) => {
-      clearUploadPreview();
-      setUploadPreview(window.URL.createObjectURL(file));
-      setIconMode("upload");
-      setSelectedUrl("");
-      setError(null);
-      syncFileToNamedInput(file);
-    },
-    [clearUploadPreview, syncFileToNamedInput],
-  );
-
-  const cancelUpload = () => {
+  const discardUploadState = React.useCallback(() => {
     clearUploadPreview();
     setError(null);
     if (isEdit) {
@@ -100,6 +97,40 @@ export function VideoIconPicker({
       setSelectedUrl(initialUrl);
       setIconMode(initialUrl ? "existing" : "none");
     }
+  }, [clearUploadPreview, initialUrl, isEdit]);
+
+  const onUseUploadedImage = React.useCallback(
+    async (file: File) => {
+      clearUploadPreview();
+      const previewUrl = window.URL.createObjectURL(file);
+      setUploadPreview(previewUrl);
+      syncFileToNamedInput(file);
+
+      if (!fileInputRef.current?.files?.length) {
+        window.URL.revokeObjectURL(previewUrl);
+        setUploadPreview(null);
+        setError("画像ファイルの設定に失敗しました。再度お試しください。");
+        return;
+      }
+
+      setIconMode("upload");
+      setSelectedUrl("");
+      setError(null);
+    },
+    [clearUploadPreview, syncFileToNamedInput],
+  );
+
+  const switchToSelectTab = React.useCallback(() => {
+    setTab("select");
+    if (iconMode === "upload") {
+      discardUploadState();
+    } else {
+      clearUploadPreview();
+    }
+  }, [iconMode, discardUploadState, clearUploadPreview]);
+
+  const cancelUpload = () => {
+    discardUploadState();
     setTab("select");
   };
 
@@ -193,7 +224,7 @@ export function VideoIconPicker({
           role="tab"
           aria-selected={tab === "select"}
           disabled={disabled}
-          onClick={() => setTab("select")}
+          onClick={switchToSelectTab}
           style={modeBtnStyle(tab === "select")}
         >
           候補から選ぶ
