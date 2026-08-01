@@ -44,3 +44,17 @@ test("Cron deadline signalをmetadata同期とplaylist同期へ渡す", () => {
   assert.match(source, /syncBatch\(env, undefined, signal,/);
   assert.match(source, /mode:\s*"scheduled_only"/);
 });
+
+test("GA4 trending sync runs before youtube metadata in 07 slot", () => {
+  assert.match(source, /ga4-trending-sync/);
+  assert.match(source, /syncGa4Trending\(env, signal\)/);
+  const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
+  const ga4Index = cronBlock.indexOf("ga4-trending-sync");
+  const youtubeIndex = cronBlock.indexOf("youtube-sync-metadata");
+  assert.ok(ga4Index > 0 && youtubeIndex > 0);
+  assert.ok(ga4Index < youtubeIndex);
+  assert.doesNotMatch(
+    source,
+    /isPlaylistSyncSlot[\s\S]{0,500}ga4-trending-sync/,
+  );
+});

@@ -66,7 +66,7 @@ const expectedWorkers = new Map([
     {
       name: "flamenode-sync-jobs",
       d1: true,
-      r2: false,
+      r2: true,
       kv: true,
       crons: ["7 * * * *", "52 * * * *"],
       queueProducers: [

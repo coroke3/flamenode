@@ -31,6 +31,7 @@ function queueWorkerSections({
   consumerQueue,
   consumerDlq,
   retryDelay,
+  extraVars = [],
 }) {
   const producers = [
     ["", "[[queues.producers]]", `queue = "${producerQueue}"`, `binding = "${producerBinding}"`],
@@ -47,6 +48,7 @@ function queueWorkerSections({
     'QUEUE_DISPATCH_ENABLED = "0"',
     'QUEUE_CONTINUATION_ENABLED = "0"',
     'QUEUE_YOUTUBE_SYNC_ENABLED = "0"',
+    ...extraVars,
     ...producers,
     "",
     "[[queues.consumers]]",
@@ -91,6 +93,7 @@ function cronWorker(name, { r2 = false, cron = "0 * * * *", crons } = {}) {
       consumerQueue: "flamenode-youtube-sync-wake",
       consumerDlq: "flamenode-youtube-sync-dlq",
       retryDelay: 300,
+      extraVars: ['GA4_SYNC_ENABLED = "0"'],
     },
   }[name];
   return [
@@ -208,7 +211,7 @@ function writeValidTemplate(root) {
   write(
     root,
     "workers/sync-jobs/wrangler.toml",
-    cronWorker("sync-jobs", { crons: ["7 * * * *", "52 * * * *"] }),
+    cronWorker("sync-jobs", { r2: true, crons: ["7 * * * *", "52 * * * *"] }),
   );
 }
 

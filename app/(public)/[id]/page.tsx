@@ -25,6 +25,7 @@ import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
+import { VideoViewTracker } from "@/components/video/VideoViewTracker";
 import { FixedVideoPlayerFrame } from "@/components/video/FixedVideoPlayerFrame";
 import fixedPlayerStyles from "@/components/video/FixedVideoPlayerFrame.module.css";
 import { IntroCommentBlock } from "@/components/video/IntroCommentBlock";
@@ -608,7 +609,14 @@ function StaticVideoDetailView({
               className={`${styles.playerPane} ${fixedPlayerStyles.root ?? ""}`.trim()}
             >
               {youtubeId ? (
-                <YoutubePlayer youtubeId={youtubeId} title={video.title} />
+                <>
+                  <YoutubePlayer youtubeId={youtubeId} title={video.title} />
+                  <VideoViewTracker
+                    videoId={video.id}
+                    youtubeVideoId={youtubeId}
+                    primaryEventId={primaryEvent?.id ?? null}
+                  />
+                </>
               ) : (
                 <div
                   className="fn-empty"

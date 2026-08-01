@@ -53,8 +53,8 @@ export const DEPLOY_TARGETS = Object.freeze([
     source: "workers/sync-jobs/wrangler.toml",
     output: "sync-jobs.toml",
     configEnv: "CF_SYNC_JOBS_CONFIG",
-    bindings: ["DB", "KV", "YOUTUBE_SYNC_WAKE_QUEUE", "STATIC_REBUILD_WAKE_QUEUE"],
-    requiresR2: false,
+    bindings: ["DB", "R2", "KV", "YOUTUBE_SYNC_WAKE_QUEUE", "STATIC_REBUILD_WAKE_QUEUE"],
+    requiresR2: true,
   },
 ]);
 
@@ -74,6 +74,12 @@ export const REMOTE_SECRET_REQUIREMENTS = Object.freeze({
     "YOUTUBE_OAUTH_REFRESH_TOKEN",
   ],
 });
+
+const GA4_REMOTE_SECRETS = Object.freeze([
+  "GA4_PROPERTY_ID",
+  "GA4_SERVICE_ACCOUNT_EMAIL",
+  "GA4_SERVICE_ACCOUNT_PRIVATE_KEY",
+]);
 
 const REQUIRED_ENV_NAMES = Object.freeze([
   "CI",
@@ -112,6 +118,9 @@ export const SENSITIVE_ENV_NAMES = Object.freeze([
   "YOUTUBE_OAUTH_CLIENT_ID",
   "YOUTUBE_OAUTH_CLIENT_SECRET",
   "YOUTUBE_OAUTH_REFRESH_TOKEN",
+  "GA4_PROPERTY_ID",
+  "GA4_SERVICE_ACCOUNT_EMAIL",
+  "GA4_SERVICE_ACCOUNT_PRIVATE_KEY",
   "DISCORD_BOT_TOKEN",
   "DISCORD_WEBHOOK_URL",
 ]);
@@ -399,6 +408,8 @@ const QUEUE_FEATURE_FLAG_NAMES = [
   "QUEUE_YOUTUBE_SYNC_ENABLED",
 ];
 
+const SYNC_JOBS_FEATURE_FLAG_NAMES = ["GA4_SYNC_ENABLED"];
+
 /** Generated production config may inject "1" from Build Variables. Template stays "0". */
 function validateQueueFeatureFlags(content, errors) {
   for (const name of QUEUE_FEATURE_FLAG_NAMES) {
@@ -408,9 +419,28 @@ function validateQueueFeatureFlags(content, errors) {
   }
 }
 
+function validateSyncJobsFeatureFlags(content, errors) {
+  for (const name of SYNC_JOBS_FEATURE_FLAG_NAMES) {
+    if (!new RegExp(`^\\s*${name}\\s*=\\s*"(?:0|1)"\\s*$`, "m").test(content)) {
+      errors.push(`${name} must be "0" or "1"`);
+    }
+  }
+}
+
 function injectQueueFeatureFlags(content, env) {
   let output = content;
   for (const name of QUEUE_FEATURE_FLAG_NAMES) {
+    const raw = env[name];
+    if (raw === undefined || raw === null || String(raw).trim() === "") continue;
+    const normalized = /^(1|true|yes)$/i.test(String(raw).trim()) ? "1" : "0";
+    output = injectStringVariable(output, name, normalized);
+  }
+  return output;
+}
+
+function injectSyncJobsFeatureFlags(content, env) {
+  let output = content;
+  for (const name of SYNC_JOBS_FEATURE_FLAG_NAMES) {
     const raw = env[name];
     if (raw === undefined || raw === null || String(raw).trim() === "") continue;
     const normalized = /^(1|true|yes)$/i.test(String(raw).trim()) ? "1" : "0";
@@ -526,6 +556,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
   }
   if (target.key === "sync-jobs") {
     validateQueueFeatureFlags(content, errors);
+    validateSyncJobsFeatureFlags(content, errors);
     validateQueueConsumerBlock(content, errors, {
       queue: "flamenode-youtube-sync-wake",
       dlq: "flamenode-youtube-sync-dlq",
@@ -645,6 +676,7 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
       "sync-jobs main",
       sourcePath,
     );
+    output = injectSyncJobsFeatureFlags(output, env);
   }
   // Optional Build Variables: QUEUE_* = 1 keeps wake flags across Workers Builds deploys.
   output = injectQueueFeatureFlags(output, env);
@@ -874,6 +906,9 @@ export function runRemoteSecretPreflight({
 } = {}) {
   for (const target of DEPLOY_TARGETS) {
     const required = [...REMOTE_SECRET_REQUIREMENTS[target.key]];
+    if (target.key === "sync-jobs" && value(env, "GA4_SYNC_ENABLED") === "1") {
+      required.push(...GA4_REMOTE_SECRETS);
+    }
     const result = run({
       executable: process.execPath,
       args: [wranglerBin, "secret", "list", "--name", target.service, "--format", "json"],

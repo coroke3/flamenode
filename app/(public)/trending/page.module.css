@@ -1,0 +1,110 @@
+.page {
+  width: 100%;
+  margin: 0;
+  padding-bottom: 48px;
+}
+
+.updatedAt {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.notice {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r-card);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.empty {
+  margin-top: 32px;
+  padding: 24px 0;
+}
+
+.list {
+  list-style: none;
+  margin: clamp(24px, 4vw, 40px) 0 0;
+  padding: 0;
+  display: grid;
+  gap: clamp(16px, 2.5vw, 24px);
+}
+
+.row {
+  margin: 0;
+  padding: 0;
+}
+
+.rowInner {
+  display: grid;
+  gap: 12px;
+  padding: clamp(12px, 2vw, 16px);
+  border-radius: var(--r-card);
+  background: var(--bg-surface);
+}
+
+.card {
+  max-width: min(100%, 360px);
+}
+
+.periods {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.periods > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: center;
+  padding: 8px 6px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-elevated);
+}
+
+.periods dt {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.periods dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 768px) {
+  .rowInner {
+    grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+    align-items: center;
+  }
+}
+
+@media (max-width: 360px) {
+  .periods {
+    gap: 4px;
+  }
+
+  .periods > div {
+    padding: 6px 4px;
+  }
+
+  .periods dt {
+    font-size: 9px;
+  }
+
+  .periods dd {
+    font-size: 12px;
+  }
+}

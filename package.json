@@ -76,6 +76,7 @@
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.7.4",
+    "@next/third-parties": "^15.5.20",
     "@opennextjs/cloudflare": "1.20.1",
     "drizzle-orm": "^0.45.2",
     "next": "15.5.20",
