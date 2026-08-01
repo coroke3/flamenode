@@ -73,16 +73,16 @@ export default async function EntryPage({
 
   const resolveWriteHref = (target: string): string => {
     if (!isLoggedIn) return `/entry?next=${encodeURIComponent(target)}`;
-    if (!onboarding.isComplete) return onboardingHref(target);
-    if (onboarding.needsTosAccept) {
+    if (!onboarding.canReserveSlot) return onboardingHref(target);
+    if (onboarding.needsTermsAcceptance) {
       return onboardingRulesHref(onboardingHref(target));
     }
     return target;
   };
   const writeCtaLabel = (defaultLabel: string): string => {
     if (!isLoggedIn) return defaultLabel;
-    if (!onboarding.isComplete) return "初期設定を続ける";
-    if (onboarding.needsTosAccept) return "利用規約に同意して進む";
+    if (!onboarding.canReserveSlot) return "初期設定を続ける";
+    if (onboarding.needsTermsAcceptance) return "利用規約に同意して進む";
     return defaultLabel;
   };
 
@@ -197,13 +197,13 @@ export default async function EntryPage({
             </form>
           </div>
         </section>
-      ) : !onboarding.isComplete ? (
+      ) : !onboarding.canReserveSlot ? (
         <div className="fn-entry-status fn-entry-status--warn" role="status">
           <Icon name="alert" size={18} aria-hidden />
           <div>
             <h2 className="fn-jp fn-panel-title">初期設定が未完了です</h2>
             <p className="fn-jp fn-entry-status-lead">
-              利用規約への同意と X ID 連携を完了してください。
+              利用規約への同意と X ID 申請を完了してください。
             </p>
             <Link href={onboardingNext} className="fn-btn fn-btn-primary fn-mt-12">
               初期設定を続ける

@@ -408,16 +408,18 @@ export async function reserveSlot(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({
-    requireActiveXId: true,
-    requireApprovedActiveXId: false,
+    identityRequirement: "requested_x",
     feature: "reserve_slot",
   });
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  if (!guard.activeXId) {
-    return { ok: false, message: "X ID を選択してから枠を確保してください。" };
-  }
+  // reserved_by_user_id が正本。x_user_id は承認済み Active X があるときだけ設定する。
+  // pending / rejected の active を名義にしない。
+  const slotXUserId =
+    guard.activeXId && guard.approvedXIds.includes(guard.activeXId)
+      ? guard.activeXId
+      : null;
   const parsed = reserveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -432,7 +434,7 @@ export async function reserveSlot(
     const anchor = await loadSlot(db, parsed.data.slot_id);
     if (!anchor) return { ok: false, message: "枠が見つかりません。" };
     if (anchor.status !== "available") {
-      if (isOwnReservedSlot(anchor, guard.user.id, guard.activeXId)) {
+      if (isOwnReservedSlot(anchor, guard.user.id, slotXUserId)) {
         return { ok: true, slotId: anchor.id };
       }
       return { ok: false, message: "この枠はすでに確保されています。" };
@@ -473,7 +475,7 @@ export async function reserveSlot(
         row,
         {
           reserved_by_user_id: guard.user.id,
-          x_user_id: guard.activeXId,
+          x_user_id: slotXUserId,
           display_name: parsed.data.display_name,
           reservation_group_id: groupId,
           status: "reserved",
@@ -501,7 +503,7 @@ export async function reserveSlot(
         eventTitle: event.title ?? "イベント",
         slotCount: targetRows.length,
         displayName: parsed.data.display_name,
-        xUserId: guard.activeXId,
+        xUserId: slotXUserId,
         userId: guard.user.id,
         discordId: actor?.discord_id,
       }),

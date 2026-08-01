@@ -1,3 +1,4 @@
+import "server-only";
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -7,44 +8,49 @@ import {
   getOnboardingState,
   maybeMarkOnboardingComplete,
   onboardingHref,
-  onboardingRulesHref,
-  resolveOnboardingStepStatuses,
-  type OnboardingStepStatus,
 } from "@/lib/auth/onboarding";
+import { sanitizeOnboardingNext } from "@/lib/auth/onboardingUrls";
 import { Icon } from "@/components/ui/Icon";
-import { XIdLinkForm } from "@/components/settings/XIdSettingsClient";
-import { sanitizeNextPath } from "@/lib/utils/next";
+import { parseLegalMarkdown } from "@/lib/terms/legalMarkdown";
+import {
+  DEFAULT_TERMS_MARKDOWN,
+  DEFAULT_TERMS_VERSION_LABEL,
+} from "@/lib/terms/defaultTerms";
+import { loadStaticRulesPage } from "@/lib/publicData/loader";
 import styles from "./page.module.css";
+import { OnboardingTermsForm } from "./OnboardingTermsForm";
+import { OnboardingXIdForm } from "./OnboardingXIdForm";
 
 export const metadata: Metadata = { title: "初期設定" };
 export const dynamic = "force-dynamic";
 
-const STATUS_LABELS: Record<OnboardingStepStatus, string> = {
-  done: "完了",
-  action: "要対応",
-  pending: "承認待ち",
-  waiting: "未着手",
-};
-
-function stepCardClass(status: OnboardingStepStatus): string {
-  if (status === "done") return `${styles.stepCard} ${styles["stepCard--done"]}`;
-  if (status === "pending") return `${styles.stepCard} ${styles["stepCard--pending"]}`;
-  if (status === "action") return `${styles.stepCard} ${styles["stepCard--action"]}`;
-  return styles.stepCard;
-}
-
-function stepIndexClass(_status: OnboardingStepStatus): string {
-  return styles.stepIndex;
+function renderMarkdown(markdown: string): React.ReactNode[] {
+  return parseLegalMarkdown(markdown).map((block, blockIndex) => {
+    const key = `${block.type}-${blockIndex}`;
+    if (block.type === "heading2") return <h2 key={key}>{block.text}</h2>;
+    if (block.type === "heading3") return <h3 key={key}>{block.text}</h3>;
+    if (block.type === "list") {
+      return (
+        <ul key={key}>
+          {block.items.map((item, itemIndex) => (
+            <li key={`${key}-${itemIndex}`}>{item}</li>
+          ))}
+        </ul>
+      );
+    }
+    return <p key={key}>{block.text}</p>;
+  });
 }
 
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string }>;
+  searchParams?: Promise<{ next?: string; start?: string }>;
 }): Promise<React.ReactElement> {
   const params = await searchParams;
-  const next = sanitizeNextPath(params?.next, "/dashboard");
+  const next = sanitizeOnboardingNext(params?.next, "/dashboard");
   const selfHref = onboardingHref(next);
+  const started = params?.start === "1";
 
   const guard = await requireSession({ next: selfHref });
   if (!guard.ok) return guard.element;
@@ -55,33 +61,65 @@ export default async function OnboardingPage({
   if (db) {
     await maybeMarkOnboardingComplete(db, user.id, state);
   }
-  const steps = resolveOnboardingStepStatuses(state);
-  const rulesHref = onboardingRulesHref(selfHref);
-  const settingsHref = `/dashboard/settings?next=${encodeURIComponent(selfHref)}`;
 
-  if (state.isComplete && state.canPost) {
+  const settingsHref = `/dashboard/settings?next=${encodeURIComponent(selfHref)}`;
+  const startHref = `${selfHref}&start=1`;
+
+  // 優先: 規約再同意 → X未申請 → 却下 → 承認待ち → 承認済み(active未設定含む) → 投稿可能
+  if (state.needsTermsAcceptance) {
+    const staticRules = await loadStaticRulesPage();
+    const body = staticRules.rules?.bodyMarkdown ?? DEFAULT_TERMS_MARKDOWN;
+    const versionLabel =
+      staticRules.rules?.versionLabel ?? DEFAULT_TERMS_VERSION_LABEL;
+
+    return (
+      <div className="fn-public-container fn-page">
+        <header className="fn-page-head">
+          <span className="fn-eyebrow">初期設定 1 / 2</span>
+          <h1 className="fn-display fn-page-title">利用規約の確認</h1>
+          <p className="fn-jp fn-page-lead">
+            投稿やイベント参加を始める前に、利用規約を確認してください。
+          </p>
+        </header>
+
+        <ul className={styles.summaryList}>
+          <li>投稿作品の取り扱い</li>
+          <li>禁止事項</li>
+          <li>アカウントおよび投稿の削除</li>
+          <li>イベント参加時のルール</li>
+        </ul>
+
+        <section className={styles.stepCard} aria-labelledby="ob-step-terms">
+          <h2 id="ob-step-terms" className="fn-sr-only">
+            利用規約への同意
+          </h2>
+          <OnboardingTermsForm
+            versionLabel={versionLabel}
+            termsBody={renderMarkdown(body)}
+          />
+        </section>
+      </div>
+    );
+  }
+
+  if (state.canPost) {
     return (
       <div className="fn-public-container fn-page">
         <header className="fn-page-head">
           <span className="fn-eyebrow">onboarding</span>
-          <h1 className="fn-display fn-page-title">初期設定</h1>
+          <h1 className="fn-display fn-page-title">設定が完了しました</h1>
           <p className="fn-jp fn-page-lead">
-            初期設定は完了しています。投稿・イベント参加を始められます。
+            @{state.activeApprovedXId} で作品投稿やイベント参加ができます。
           </p>
         </header>
         <div className={styles.completeBanner} role="status">
           <Icon name="check" size={18} aria-hidden />
           <div>
-            <strong>投稿できます</strong>
-            {state.activeXId ? (
-              <p className="fn-text-muted-sm fn-mt-4">
-                活動名義: @{state.activeXId}
-              </p>
-            ) : null}
+            <strong>設定完了・投稿可能</strong>
           </div>
           <div className={styles.stepActions}>
             <Link href={next} className="fn-btn fn-btn-primary">
-              続ける
+              元の操作を続ける
             </Link>
             <Link href="/entry" className="fn-btn fn-btn-ghost">
               参加・投稿へ
@@ -92,43 +130,128 @@ export default async function OnboardingPage({
     );
   }
 
-  if (state.isComplete && !state.canPost) {
+  if (state.xIdentityStatus === "approved" && !state.activeApprovedXId) {
     return (
       <div className="fn-public-container fn-page">
         <header className="fn-page-head">
           <span className="fn-eyebrow">onboarding</span>
-          <h1 className="fn-display fn-page-title">初期設定</h1>
+          <h1 className="fn-display fn-page-title">活動名義の選択</h1>
           <p className="fn-jp fn-page-lead">
-            利用規約への同意と X ID 連携申請は完了しています。承認をお待ちください。
+            承認済みの X ID があります。投稿に使う Active X ID を設定してください。
           </p>
         </header>
-        <div className={`${styles.stepCard} ${styles["stepCard--pending"]}`}>
-          <div className={styles.stepHead}>
-            <span className={stepIndexClass("pending")} aria-hidden>3</span>
-            <div>
-              <h2 className={styles.stepTitle}>X ID 承認待ち</h2>
-              <span className={styles.stepStatus}>
-                <Icon name="clock" size={12} aria-hidden />
-                承認待ち
-              </span>
-            </div>
-          </div>
-          <p className={styles.stepBody}>
-            運営が X ID 連携を確認しています。承認後に通知されます。
+        <div className={styles.stepActions}>
+          <Link href={settingsHref} className="fn-btn fn-btn-primary">
+            設定で Active X ID を選ぶ
+          </Link>
+          <Link href={next} className="fn-btn fn-btn-ghost">
+            元の操作へ戻る
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.xIdentityStatus === "pending") {
+    return (
+      <div className="fn-public-container fn-page">
+        <header className="fn-page-head">
+          <span className="fn-eyebrow">onboarding</span>
+          <h1 className="fn-display fn-page-title">X ID 連携を申請しました</h1>
+          <p className="fn-jp fn-page-lead">
+            {state.requestedXId ? `@${state.requestedXId}` : "申請中の X ID"}{" "}
+            の連携を運営が確認しています。
           </p>
+        </header>
+        <div
+          className={`${styles.statusCard} ${styles["statusCard--pending"]}`}
+          role="status"
+        >
+          <div className={styles.statusHead}>
+            <Icon name="clock" size={16} aria-hidden />
+            <strong>申請完了・承認待ち</strong>
+          </div>
+          <p className={styles.statusBody}>現在利用できる機能</p>
           <ul className={styles.pendingList}>
-            <li>イベント枠の確保は可能です</li>
-            <li>投稿は承認後に利用できます</li>
-            <li>詳細設定はアカウント設定から変更できます</li>
+            <li>作品の閲覧</li>
+            <li>イベント枠の確保</li>
+            <li className={styles.pendingMuted}>
+              作品投稿は承認後に利用可能
+            </li>
           </ul>
           <div className={styles.stepActions}>
-            <Link href="/entry" className="fn-btn fn-btn-primary">
-              枠確保・参加へ
+            <Link href={next} className="fn-btn fn-btn-primary">
+              元の操作へ戻る
             </Link>
-            <Link href={settingsHref} className="fn-btn fn-btn-ghost">
-              アカウント設定
+            <Link href="/entry" className="fn-btn fn-btn-ghost">
+              参加・投稿ページへ
+            </Link>
+            <Link href="/dashboard" className="fn-btn fn-btn-ghost">
+              ダッシュボードへ
             </Link>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.xIdentityStatus === "rejected") {
+    return (
+      <div className="fn-public-container fn-page">
+        <header className="fn-page-head">
+          <span className="fn-eyebrow">初期設定 2 / 2</span>
+          <h1 className="fn-display fn-page-title">
+            X ID 連携を確認できませんでした
+          </h1>
+        </header>
+        <div
+          className={`${styles.statusCard} ${styles["statusCard--rejected"]}`}
+          role="alert"
+        >
+          <div className={styles.statusHead}>
+            <Icon name="alert" size={16} aria-hidden />
+            <strong>申請を確認できませんでした</strong>
+          </div>
+          {state.requestedXId ? (
+            <p className={styles.statusBody}>
+              申請した X ID: @{state.requestedXId}
+            </p>
+          ) : null}
+          <p className={styles.statusBody}>
+            指定されたアカウントを確認できませんでした。同じ X ID
+            で再申請するか、別の X ID を入力してください。
+          </p>
+          <OnboardingXIdForm initialValue={state.requestedXId ?? ""} />
+        </div>
+      </div>
+    );
+  }
+
+  // xIdentityStatus === "none"
+  if (!started) {
+    return (
+      <div className="fn-public-container fn-page">
+        <header className="fn-page-head">
+          <span className="fn-eyebrow">onboarding</span>
+          <h1 className="fn-display fn-page-title">
+            FlameNode を利用する準備
+          </h1>
+          <p className="fn-jp fn-page-lead">
+            投稿やイベント参加のために、次の 2 つを設定します。
+          </p>
+        </header>
+        <ol className={styles.prepareList}>
+          <li>利用規約への同意（完了済み）</li>
+          <li>活動名義となる X ID の登録</li>
+        </ol>
+        <p className={styles.prepareNote}>所要時間：約1分</p>
+        <div className={styles.stepActions}>
+          <Link href={startHref} className="fn-btn fn-btn-primary">
+            設定を始める
+          </Link>
+          <Link href={next} className="fn-btn fn-btn-ghost">
+            あとで
+          </Link>
         </div>
       </div>
     );
@@ -137,167 +260,22 @@ export default async function OnboardingPage({
   return (
     <div className="fn-public-container fn-page">
       <header className="fn-page-head">
-        <span className="fn-eyebrow">onboarding</span>
-        <h1 className="fn-display fn-page-title">初期設定</h1>
+        <span className="fn-eyebrow">初期設定 2 / 2</span>
+        <h1 className="fn-display fn-page-title">活動名義を登録</h1>
         <p className="fn-jp fn-page-lead">
-          ログイン後に必要な設定を順番に進めます。完了すると投稿・枠確保が使えます。
+          作品投稿やイベント参加時に使用する X アカウントを登録してください。
         </p>
       </header>
 
-      <div className={styles.onboardingSteps} aria-label="初期設定の進捗">
-        <section className={stepCardClass(steps.login)} aria-labelledby="ob-step-login">
-          <div className={styles.stepHead}>
-            <span className={stepIndexClass(steps.login)} aria-hidden>1</span>
-            <div>
-              <h2 id="ob-step-login" className={styles.stepTitle}>
-                Discord ログイン
-              </h2>
-              <span className={styles.stepStatus}>
-                <Icon name={steps.login === "done" ? "check" : "discord"} size={12} aria-hidden />
-                {STATUS_LABELS[steps.login]}
-              </span>
-            </div>
-          </div>
-          <p className={styles.stepBody}>
-            FlameNode では Discord アカウントでログインします。
-          </p>
-        </section>
-
-        <section className={stepCardClass(steps.terms)} aria-labelledby="ob-step-terms">
-          <div className={styles.stepHead}>
-            <span className={stepIndexClass(steps.terms)} aria-hidden>2</span>
-            <div>
-              <h2 id="ob-step-terms" className={styles.stepTitle}>
-                利用規約への同意
-              </h2>
-              <span className={styles.stepStatus}>
-                <Icon
-                  name={
-                    steps.terms === "done"
-                      ? "check"
-                      : steps.terms === "action"
-                        ? "edit"
-                        : "clock"
-                  }
-                  size={12}
-                  aria-hidden
-                />
-                {STATUS_LABELS[steps.terms]}
-              </span>
-            </div>
-          </div>
-          <p className={styles.stepBody}>
-            枠確保・投稿・いいねなどの書き込みには最新の利用規約への同意が必要です。
-          </p>
-          {steps.terms === "action" ? (
-            <div className={styles.stepActions}>
-              <Link href={rulesHref} className="fn-btn fn-btn-primary">
-                利用規約を確認する
-              </Link>
-            </div>
-          ) : null}
-        </section>
-
-        <section className={stepCardClass(steps.xId)} aria-labelledby="ob-step-xid">
-          <div className={styles.stepHead}>
-            <span className={stepIndexClass(steps.xId)} aria-hidden>3</span>
-            <div>
-              <h2 id="ob-step-xid" className={styles.stepTitle}>
-                X ID 連携申請
-              </h2>
-              <span className={styles.stepStatus}>
-                <Icon
-                  name={
-                    steps.xId === "done"
-                      ? "check"
-                      : steps.xId === "pending"
-                        ? "clock"
-                        : steps.xId === "action"
-                          ? "edit"
-                          : "clock"
-                  }
-                  size={12}
-                  aria-hidden
-                />
-                {STATUS_LABELS[steps.xId]}
-              </span>
-            </div>
-          </div>
-          {steps.xId === "waiting" ? (
-            <p className={styles.stepBody}>
-              利用規約への同意後、活動名義となる X ID を申請します。
-            </p>
-          ) : steps.xId === "pending" ? (
-            <>
-              <p className={styles.stepBody}>
-                連携申請を受け付けました。運営の承認をお待ちください。
-              </p>
-              <p className={styles.pendingNote}>
-                枠確保は可能です。投稿は承認後に利用できます。承認後は通知されます。
-              </p>
-              <div className={styles.stepActions}>
-                <Link href="/entry" className="fn-btn fn-btn-primary">
-                  枠確保・参加へ
-                </Link>
-                <Link href={settingsHref} className="fn-btn fn-btn-ghost fn-btn-sm">
-                  詳細設定
-                </Link>
-              </div>
-            </>
-          ) : steps.xId === "done" ? (
-            <p className={styles.stepBody}>
-              承認済みの X ID で投稿できます。
-              {state.activeXId ? ` (@${state.activeXId})` : ""}
-            </p>
-          ) : (
-            <>
-              <p className={styles.stepBody}>
-                投稿・枠確保の名義となる X ID を申請します。@ を除いたユーザー名を入力してください。
-              </p>
-              <div className={styles.xIdFormWrap}>
-                <XIdLinkForm compact onSuccessRedirect={selfHref} />
-              </div>
-              <div className={styles.stepActions}>
-                <Link href={settingsHref} className="fn-btn fn-btn-ghost fn-btn-sm">
-                  詳細設定・アイコン編集
-                </Link>
-              </div>
-            </>
-          )}
-        </section>
-
-        <section className={stepCardClass(steps.ready)} aria-labelledby="ob-step-ready">
-          <div className={styles.stepHead}>
-            <span className={stepIndexClass(steps.ready)} aria-hidden>4</span>
-            <div>
-              <h2 id="ob-step-ready" className={styles.stepTitle}>
-                投稿・イベント参加へ
-              </h2>
-              <span className={styles.stepStatus}>
-                <Icon
-                  name={steps.ready === "done" ? "check" : "calendar"}
-                  size={12}
-                  aria-hidden
-                />
-                {STATUS_LABELS[steps.ready]}
-              </span>
-            </div>
-          </div>
-          <p className={styles.stepBody}>
-            初期設定が完了すると、イベント参加や作品投稿を始められます。
-          </p>
-          {state.canPost ? (
-            <div className={styles.stepActions}>
-              <Link href={next} className="fn-btn fn-btn-primary">
-                続ける
-              </Link>
-              <Link href="/entry" className="fn-btn fn-btn-ghost">
-                参加・投稿へ
-              </Link>
-            </div>
-          ) : null}
-        </section>
-      </div>
+      <section className={styles.stepCard} aria-labelledby="ob-step-xid">
+        <h2 id="ob-step-xid" className="fn-sr-only">
+          X ID 申請
+        </h2>
+        <p className={styles.stepBody}>
+          運営による確認後、作品投稿が可能になります。枠の確保は申請完了後すぐに利用できます。
+        </p>
+        <OnboardingXIdForm />
+      </section>
     </div>
   );
 }

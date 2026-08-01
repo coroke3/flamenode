@@ -33,7 +33,7 @@ test("承認必須の共通ガードは Auth user 自身の承認済み X ID 集
   );
 });
 
-test("チャプターコメントと like/bookmark は承認済み Active X ID を必須にする", async () => {
+test("チャプターコメントは承認済み Active X ID を必須にする。like/bookmark は active X だけ必須", async () => {
   const [chapterSource, interactionSource] = await Promise.all([
     readSource("../actions/chapter.ts"),
     readSource("../actions/video/interaction.ts"),
@@ -43,9 +43,14 @@ test("チャプターコメントと like/bookmark は承認済み Active X ID �
     chapterSource.match(/requireApprovedActiveXId:\s*true/g)?.length,
     4,
   );
+  // like/bookmark は DB制約上 active X は必要だが approved は不要 (新仕様)
   assert.match(
     interactionSource,
-    /async function mutateVideoInteraction[\s\S]*?writeGuard\(\{[\s\S]*?requireApprovedActiveXId:\s*true,[\s\S]*?feature:\s*"like_or_bookmark"/,
+    /async function mutateVideoInteraction[\s\S]*?writeGuard\(\{[\s\S]*?requireActiveXId:\s*true,[\s\S]*?requireApprovedActiveXId:\s*false,[\s\S]*?feature:\s*"like_or_bookmark"/,
+  );
+  assert.doesNotMatch(
+    interactionSource,
+    /async function mutateVideoInteraction[\s\S]*?requireApprovedActiveXId:\s*true/,
   );
   assert.match(interactionSource, /type InteractionKind = "like" \| "bookmark"/);
 });

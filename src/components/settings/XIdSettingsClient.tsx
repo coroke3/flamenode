@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import styles from "./XIdSettingsClient.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { deleteLinkedXId, requestXIdLink, setXIdIcon, setActiveXId, uploadXIdIcon, updateXIdProfile } from "@/lib/actions/xid";
+import { parseXIdentityInput } from "@/lib/utils/xid";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
@@ -21,12 +22,20 @@ export function XIdLinkForm({
   const [pending, startTransition] = React.useTransition();
   const [okMsg, setOkMsg] = React.useState<string | null>(null);
   const [errMsg, setErrMsg] = React.useState<string | null>(null);
+  const [rawInput, setRawInput] = React.useState("");
+  const preview = parseXIdentityInput(rawInput);
 
   const onSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
-    const form = ev.currentTarget;
-    const fd = new FormData(form);
+    if (!preview) {
+      setErrMsg(
+        "@username、username、または x.com / twitter.com のプロフィール URL を入力してください。",
+      );
+      return;
+    }
+    const fd = new FormData();
     fd.set("request_type", "link");
+    fd.set("x_id", rawInput);
     setOkMsg(null);
     setErrMsg(null);
     startTransition(async () => {
@@ -34,7 +43,7 @@ export function XIdLinkForm({
         const result = await requestXIdLink(fd);
         if (result.ok) {
           setOkMsg(result.message ?? "X ID申請を受け付けました。");
-          form.reset();
+          setRawInput("");
           if (onSuccessRedirect) router.push(onSuccessRedirect);
           else router.refresh();
         } else {
@@ -65,19 +74,26 @@ export function XIdLinkForm({
           name="x_id"
           type="text"
           autoComplete="username"
-          placeholder="your_x_id"
+          placeholder="username または https://x.com/username"
           required
-          maxLength={20}
-          pattern="[A-Za-z0-9_]{1,20}"
-          title="英数字とアンダースコアのみ、1〜20文字"
           className={styles.input}
           disabled={pending}
+          value={rawInput}
+          onChange={(e) => {
+            setRawInput(e.target.value);
+            setErrMsg(null);
+          }}
         />
       </div>
+      {rawInput && preview ? (
+        <p className={styles.msgOk} role="status">
+          申請名義: @{preview}
+        </p>
+      ) : null}
       <button
         type="submit"
         className="fn-btn fn-btn-primary fn-btn-sm"
-        disabled={pending}
+        disabled={pending || !preview}
         aria-busy={pending}
       >
         <Icon name="plus" size={12} aria-hidden />

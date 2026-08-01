@@ -52,7 +52,8 @@ async function mutateVideoInteraction(
   requestedState: RequestedState,
 ): Promise<VideoActionResult & { active?: boolean }> {
   const guard = await writeGuard({
-    requireApprovedActiveXId: true,
+    requireActiveXId: true,
+    requireApprovedActiveXId: false,
     feature: "like_or_bookmark",
   });
   if (!guard.ok) return { ok: false, message: guard.message };

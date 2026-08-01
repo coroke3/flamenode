@@ -18,7 +18,7 @@ import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { normalizePortfolioContact } from "@/lib/profileContact";
-import { normalizeXId } from "@/lib/utils/xid";
+import { normalizeXId, parseXIdentityInput } from "@/lib/utils/xid";
 import { validateSocialLinksJson } from "@/lib/socialLinks";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
@@ -272,11 +272,12 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   if (!context.ok) return context.result;
   const { authUserId } = context;
 
-  const requestedXUserId = normalizeXId(String(formData.get("x_id") ?? ""));
-  if (!requestedXUserId || !/^[a-z0-9_]{1,20}$/.test(requestedXUserId)) {
+  const requestedXUserId = parseXIdentityInput(String(formData.get("x_id") ?? ""));
+  if (!requestedXUserId) {
     return {
       ok: false,
-      message: "X ID は英数字とアンダースコア 1 から 20 文字で入力してください。",
+      message:
+        "X ID は @username、username、または x.com / twitter.com のプロフィール URL で入力してください（1〜20 文字）。",
     };
   }
 

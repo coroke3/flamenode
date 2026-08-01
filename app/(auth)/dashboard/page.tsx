@@ -242,19 +242,35 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
       </header>
 
-      {!onboarding.isComplete ? (
+      {onboarding.needsTermsAcceptance || onboarding.xIdentityStatus === "none" ? (
         <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
           <Icon name="alert" size={18} aria-hidden />
           <div>
             <h3 className="fn-jp">初期設定が未完了です</h3>
             <p className="fn-jp fn-pc-banner-lead">
-              利用規約への同意とX ID連携を済ませると、投稿・枠確保が使えます。
+              作品投稿やイベント参加には、利用規約への同意と活動名義の登録が必要です。
             </p>
             <Link
               href={onboardingHref("/dashboard")}
               className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
             >
-              初期設定を続ける
+              初期設定を進める
+            </Link>
+          </div>
+        </div>
+      ) : onboarding.xIdentityStatus === "rejected" ? (
+        <div className="fn-pc-status-banner fn-pc-status-banner--warn" role="status" style={{ marginBottom: 20 }}>
+          <Icon name="alert" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">X ID 申請を確認できませんでした</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              申請が却下されました。設定から再申請できます。
+            </p>
+            <Link
+              href={onboardingHref("/dashboard")}
+              className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
+            >
+              再申請する
             </Link>
           </div>
         </div>
@@ -284,10 +300,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             <Icon name="user" size={20} aria-hidden />
             <p className="fn-empty-message">X ID がまだ連携されていません。</p>
             <Link
-              href={onboarding.isComplete ? "/dashboard/settings" : onboardingHref("/dashboard")}
+              href={onboarding.canReserveSlot ? "/dashboard/settings" : onboardingHref("/dashboard")}
               className="fn-btn fn-btn-primary fn-mt-md"
             >
-              {onboarding.isComplete ? "X ID を連携する" : "初期設定を続ける"}
+              {onboarding.canReserveSlot ? "X ID を連携する" : "初期設定を続ける"}
             </Link>
           </div>
         ) : (
