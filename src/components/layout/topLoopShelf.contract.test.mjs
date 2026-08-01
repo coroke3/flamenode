@@ -59,12 +59,67 @@ test("TopLoopShelfはautoScrollDirection left/rightに対応する", () => {
 
 test("TopLoopShelfはfullBleed CSSを持つ", () => {
   assert.match(topLoopCss, /\.fullBleed/);
-  assert.match(topLoopCss, /100dvw/);
-  assert.match(topLoopCss, /margin-inline:\s*calc\(50% - 50dvw\)/);
+  assert.match(topLoopCss, /100vw/);
+  assert.match(topLoopCss, /margin-left:\s*calc\(50% - 50vw\)/);
+  assert.match(topLoopCss, /overflow-x:\s*clip/);
   assert.match(topLoopCss, /--fn-page-max/);
+});
+
+test("TopLoopShelfはモバイル2行グリッドとdata-mobile-rowsを持つ", () => {
+  assert.match(topLoopCss, /data-mobile-rows="2"/);
+  assert.match(topLoopCss, /grid-template-rows:\s*repeat\(2,/);
+  assert.match(topLoopShelf, /data-mobile-rows=\{mobileRows\}/);
+  assert.match(topLoopShelf, /mobileRows === 2/);
+});
+
+test("TopLoopShelfはpause・pointer・wheel・reduced motionを持つ", () => {
+  assert.match(topLoopShelf, /pointerActiveRef/);
+  assert.match(topLoopShelf, /pauseAfterInteraction/);
+  assert.match(topLoopShelf, /pauseOnWheel/);
+  assert.match(topLoopShelf, /prefers-reduced-motion: reduce/);
+  assert.match(topLoopShelf, /reducedMotion/);
+});
+
+test("TopLoopShelfはIntersectionObserverとvisibilitychangeを持つ", () => {
+  assert.match(topLoopShelf, /IntersectionObserver/);
+  assert.match(topLoopShelf, /visibilitychange/);
+  assert.match(topLoopShelf, /inViewport/);
+  assert.match(topLoopShelf, /documentVisible/);
+});
+
+test("TopLoopShelfはneedsLoop分岐と短い配列を扱う", () => {
+  assert.match(topLoopShelf, /needsLoop/);
+  assert.match(topLoopShelf, /sourceItems\.length < 2/);
+  assert.match(topLoopShelf, /data-loop-group="1"[\s\S]*?groupItems/);
+  assert.match(
+    topLoopShelf,
+    /if \(needsLoop\) return;[\s\S]*?scroller\.scrollLeft = 0/,
+  );
+});
+
+test("TopLoopShelfはモバイル2行loopで奇数件を列境界にパディングする", () => {
+  assert.match(topLoopShelf, /ensureColumnAligned/);
+  assert.match(topLoopShelf, /items\.length % rotateCount === 0/);
+  assert.match(topLoopShelf, /@pad-/);
+  assert.match(topLoopShelf, /loopSourceItems/);
+  assert.match(topLoopShelf, /aria-hidden="true"/);
+});
+
+test("TopLoopShelfの矢印aria-labelはShelfと一致する", () => {
+  assert.match(topLoopShelf, /aria-label="前へスクロール"/);
+  assert.match(topLoopShelf, /aria-label="次へスクロール"/);
+});
+
+test("TopLoopShelfの矢印にfocus-visible outlineがある", () => {
+  assert.match(topLoopCss, /\.arrow:focus-visible/);
+  assert.match(topLoopCss, /outline:\s*2px solid var\(--accent-primary\)/);
 });
 
 test("トップページは3箇所でTopLoopShelfを使う", () => {
   assert.equal((home.match(/<TopLoopShelf/g) ?? []).length, 3);
   assert.doesNotMatch(home, /from "@\/components\/layout\/Shelf"/);
+  const directions = [
+    ...home.matchAll(/autoScrollDirection="(left|right)"/g),
+  ].map((match) => match[1]);
+  assert.deepEqual(directions, ["left", "right", "left"]);
 });

@@ -1,3 +1,8 @@
+.fullBleed {
+  width: 100%;
+  margin-inline: 0;
+}
+
 .wrapper {
   position: relative;
 }
@@ -97,6 +102,11 @@
   pointer-events: none;
 }
 
+.arrow:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
 .arrowPrev {
   left: 8px;
 }
@@ -107,23 +117,28 @@
 
 @media (min-width: 701px) {
   .fullBleed {
-    width: 100dvw;
-    margin-inline: calc(50% - 50dvw);
-    max-width: 100dvw;
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    max-width: none;
+  }
+
+  .wrapper {
+    overflow-x: clip;
   }
 
   .scroller {
     padding-left: max(
       var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 20px)),
       calc(
-        (100dvw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
+        (100vw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
           var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 20px))
       )
     );
     padding-right: max(
       var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 20px)),
       calc(
-        (100dvw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
+        (100vw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
           var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 20px))
       )
     );

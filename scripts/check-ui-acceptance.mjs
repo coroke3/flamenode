@@ -162,12 +162,16 @@ requireAll("app/(public)/page.tsx", [
     "新着100件を表示直前にランダム順へ変換していません。",
   ],
   [
-    /title="懐かしの映像"[\s\S]*?randomizedNostalgic\.map/,
+    /title="懐かしの映像"[\s\S]*?nostalgic\.map/,
     "3年以上前の作品を表示する懐かしの映像棚がありません。",
   ],
   [
     /autoScrollDirection="left"[\s\S]*?autoScrollDirection="right"[\s\S]*?autoScrollDirection="left"/,
     "トップの連続棚が左右交互のスクロール方向になっていません。",
+  ],
+  [
+    /(<TopLoopShelf[\s\S]*?){3}/,
+    "トップページでTopLoopShelfが3箇所使われていません。",
   ],
 ]);
 requireAll("src/components/layout/Shelf.tsx", [
@@ -176,6 +180,23 @@ requireAll("src/components/layout/Shelf.tsx", [
   [/rotateForward/, "棚の前方ループ回転がありません。"],
   [/ensureColumnAligned/, "棚の列境界揃えがありません。"],
   [/normalizingRef/, "棚のスクロール正規化再入防止がありません。"],
+]);
+forbidMatch(
+  "src/components/layout/TopLoopShelf.tsx",
+  /flushSync/,
+  "TopLoopShelfにflushSyncが残っています。",
+);
+requireAll("src/components/layout/TopLoopShelf.tsx", [
+  [/data-loop-group/, "TopLoopShelfにループグループ属性がありません。"],
+  [/inert/, "TopLoopShelfにcloneグループのinertがありません。"],
+  [/IntersectionObserver/, "TopLoopShelfにviewport外停止がありません。"],
+  [/visibilitychange/, "TopLoopShelfに非表示tab停止がありません。"],
+  [/pauseAfterInteraction/, "TopLoopShelfに操作後一時停止がありません。"],
+  [/prefers-reduced-motion/, "TopLoopShelfにreduced motion対応がありません。"],
+  [/pointerActiveRef/, "TopLoopShelfにpointer追跡がありません。"],
+  [/ensureColumnAligned/, "TopLoopShelfに列境界揃えがありません。"],
+  [/前へスクロール/, "TopLoopShelfの前矢印ラベルがShelfと一致していません。"],
+  [/次へスクロール/, "TopLoopShelfの次矢印ラベルがShelfと一致していません。"],
 ]);
 requireMatch(
   "src/components/layout/PublicAccountIsland.tsx",

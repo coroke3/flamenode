@@ -17,7 +17,7 @@ interface TopLoopShelfProps {
 
 type SourceItem = {
   sourceKey: string;
-  node: React.ReactNode;
+  node: React.ReactNode | null;
 };
 
 function toSourceItems(children: React.ReactNode): SourceItem[] {
@@ -75,9 +75,26 @@ function getScrollStride(
   return cardStride * 1.5;
 }
 
+function ensureColumnAligned(items: SourceItem[], rotateCount: number): SourceItem[] {
+  if (rotateCount <= 1 || items.length % rotateCount === 0) return items;
+  const padCount = rotateCount - (items.length % rotateCount);
+  const padded = [...items];
+  for (let i = 0; i < padCount; i++) {
+    const source = items[i % rotateCount];
+    padded.push({
+      sourceKey: `${source.sourceKey}@pad-${padded.length}`,
+      node: null,
+    });
+  }
+  return padded;
+}
+
 function renderGroupItems(items: SourceItem[], groupIndex: number): React.ReactNode {
   return items.map((item, index) => {
     const key = `${item.sourceKey}@${groupIndex}-${index}`;
+    if (item.node == null) {
+      return <div key={key} aria-hidden="true" />;
+    }
     if (React.isValidElement(item.node)) {
       return React.cloneElement(item.node, { key });
     }
@@ -128,6 +145,11 @@ export function TopLoopShelf({
   const [needsLoop, setNeedsLoop] = React.useState(false);
 
   const sourceItems = React.useMemo(() => toSourceItems(children), [children]);
+  const loopSourceItems = React.useMemo(
+    () =>
+      mobileRows === 2 ? ensureColumnAligned(sourceItems, 2) : sourceItems,
+    [mobileRows, sourceItems],
+  );
   const sourceSignature = React.useMemo(
     () => sourceItems.map((item) => item.sourceKey).join("|"),
     [sourceItems],
@@ -285,6 +307,15 @@ export function TopLoopShelf({
     if (!needsLoop) return;
     seedCenterScroll();
   }, [needsLoop, sourceSignature, mobileRows, seedCenterScroll]);
+
+  React.useLayoutEffect(() => {
+    if (needsLoop) return;
+    const scroller = scrollerRef.current;
+    if (!scroller || scroller.scrollLeft === 0) return;
+    correctingRef.current = true;
+    scroller.scrollLeft = 0;
+    correctingRef.current = false;
+  }, [needsLoop]);
 
   const handleScroll = React.useCallback(() => {
     const scroller = scrollerRef.current;
@@ -565,7 +596,8 @@ export function TopLoopShelf({
     },
   };
 
-  const groupItems = renderGroupItems(sourceItems, needsLoop ? 1 : 0);
+  const displayItems = needsLoop ? loopSourceItems : sourceItems;
+  const groupItems = renderGroupItems(displayItems, needsLoop ? 1 : 0);
 
   return (
     <div className={styles.fullBleed}>
@@ -588,14 +620,14 @@ export function TopLoopShelf({
                 aria-hidden="true"
                 inert
               >
-                {renderGroupItems(sourceItems, 0)}
+                {renderGroupItems(loopSourceItems, 0)}
               </div>
               <div
                 ref={group1Ref}
                 className={styles.group}
                 data-loop-group="1"
               >
-                {renderGroupItems(sourceItems, 1)}
+                {renderGroupItems(loopSourceItems, 1)}
               </div>
               <div
                 className={styles.group}
@@ -603,7 +635,7 @@ export function TopLoopShelf({
                 aria-hidden="true"
                 inert
               >
-                {renderGroupItems(sourceItems, 2)}
+                {renderGroupItems(loopSourceItems, 2)}
               </div>
             </>
           ) : (
@@ -624,7 +656,7 @@ export function TopLoopShelf({
             />
             <button
               type="button"
-              aria-label="前へ"
+              aria-label="前へスクロール"
               onClick={() => scrollBy(-1)}
               disabled={!canPrev}
               className={cn(styles.arrow, styles.arrowPrev)}
@@ -633,7 +665,7 @@ export function TopLoopShelf({
             </button>
             <button
               type="button"
-              aria-label="次へ"
+              aria-label="次へスクロール"
               onClick={() => scrollBy(1)}
               disabled={!canNext}
               className={cn(styles.arrow, styles.arrowNext)}
