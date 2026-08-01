@@ -39,15 +39,23 @@ test("TopLoopShelfはcycleWidth計測とscrollLeftテレポート閾値を持つ
   assert.match(topLoopShelf, /relativeOffset \* nextCycleWidth/);
 });
 
-test("TopLoopShelfはcloneグループにinertとaria-hiddenを付与する", () => {
+test("TopLoopShelfはcloneグループにaria-hiddenとフォーカス無効化を付与する", () => {
   assert.match(
     topLoopShelf,
-    /data-loop-group="0"[\s\S]*?aria-hidden="true"[\s\S]*?inert/,
+    /data-loop-group="0"[\s\S]*?aria-hidden="true"/,
   );
   assert.match(
     topLoopShelf,
-    /data-loop-group="2"[\s\S]*?aria-hidden="true"[\s\S]*?inert/,
+    /data-loop-group="2"[\s\S]*?aria-hidden="true"/,
   );
+  assert.match(topLoopShelf, /neutralizeCloneFocusables/);
+  assert.match(topLoopShelf, /data-loop-tabindex/);
+  assert.doesNotMatch(topLoopShelf, /\binert\b/);
+});
+
+test("TopLoopShelfはscrollendでテレポートする", () => {
+  assert.match(topLoopShelf, /scrollend/);
+  assert.match(topLoopShelf, /runScrollTeleport/);
 });
 
 test("TopLoopShelfはautoScrollDirection left/rightに対応する", () => {
@@ -109,6 +117,8 @@ test("TopLoopShelfはモバイル2行loopで奇数件を列境界にパディン
   assert.match(topLoopShelf, /MOBILE_MEDIA_QUERY/);
   assert.match(topLoopShelf, /item\.node == null/);
   assert.match(topLoopShelf, /aria-hidden="true"/);
+  assert.match(topLoopShelf, /styles\.padCell/);
+  assert.match(topLoopCss, /\.padCell/);
 });
 
 test("TopLoopShelfはgetShelfGapとuseMobileStride付きgetScrollStrideを持つ", () => {

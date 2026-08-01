@@ -169,11 +169,16 @@ requireAll("app/(public)/page.tsx", [
     /autoScrollDirection="left"[\s\S]*?autoScrollDirection="right"[\s\S]*?autoScrollDirection="left"/,
     "トップの連続棚が左右交互のスクロール方向になっていません。",
   ],
-  [
-    /(<TopLoopShelf[\s\S]*?){3}/,
-    "トップページでTopLoopShelfが3箇所使われていません。",
-  ],
 ]);
+{
+  const homePage = read("app/(public)/page.tsx");
+  const topLoopShelfCount = (homePage.match(/<TopLoopShelf/g) ?? []).length;
+  if (topLoopShelfCount !== 3) {
+    errors.push(
+      `app/(public)/page.tsx: トップページでTopLoopShelfが3箇所使われていません（${topLoopShelfCount}箇所）。`,
+    );
+  }
+}
 requireAll("src/components/layout/Shelf.tsx", [
   [/normalizeLoopScroll/, "棚の連続ループ正規化がありません。"],
   [/getLoopRotateCount/, "棚のループ回転数判定がありません。"],
@@ -188,7 +193,8 @@ forbidMatch(
 );
 requireAll("src/components/layout/TopLoopShelf.tsx", [
   [/data-loop-group/, "TopLoopShelfにループグループ属性がありません。"],
-  [/inert/, "TopLoopShelfにcloneグループのinertがありません。"],
+  [/neutralizeCloneFocusables/, "TopLoopShelfにcloneフォーカス無効化がありません。"],
+  [/scrollend/, "TopLoopShelfにscrollendテレポートがありません。"],
   [/IntersectionObserver/, "TopLoopShelfにviewport外停止がありません。"],
   [/visibilitychange/, "TopLoopShelfに非表示tab停止がありません。"],
   [/pauseAfterInteraction/, "TopLoopShelfに操作後一時停止がありません。"],

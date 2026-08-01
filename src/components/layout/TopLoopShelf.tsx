@@ -47,6 +47,20 @@ function getShelfGap(el: HTMLElement): number {
   return Number.isFinite(gap) ? gap : 0;
 }
 
+function neutralizeCloneFocusables(root: HTMLElement | null): void {
+  if (!root) return;
+  root
+    .querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    )
+    .forEach((el) => {
+      if (el.getAttribute("tabindex") !== "-1") {
+        el.setAttribute("data-loop-tabindex", el.getAttribute("tabindex") ?? "");
+        el.setAttribute("tabindex", "-1");
+      }
+    });
+}
+
 function measureCycleWidth(
   scroller: HTMLElement,
   groupEl: HTMLElement,
@@ -110,7 +124,7 @@ function renderGroupItems(items: SourceItem[], groupIndex: number): React.ReactN
   return items.map((item, index) => {
     const key = `${item.sourceKey}@${groupIndex}-${index}`;
     if (item.node == null) {
-      return <div key={key} aria-hidden="true" />;
+      return <div key={key} aria-hidden="true" className={styles.padCell} />;
     }
     if (React.isValidElement(item.node)) {
       return React.cloneElement(item.node, { key });
@@ -135,6 +149,7 @@ export function TopLoopShelf({
   const scrollerRef = React.useRef<HTMLDivElement>(null);
   const group0Ref = React.useRef<HTMLDivElement>(null);
   const group1Ref = React.useRef<HTMLDivElement>(null);
+  const group2Ref = React.useRef<HTMLDivElement>(null);
   const cycleWidthRef = React.useRef(0);
   const seededRef = React.useRef(false);
   const correctingRef = React.useRef(false);
@@ -356,6 +371,12 @@ export function TopLoopShelf({
   ]);
 
   React.useLayoutEffect(() => {
+    if (!needsLoop) return;
+    neutralizeCloneFocusables(group0Ref.current);
+    neutralizeCloneFocusables(group2Ref.current);
+  }, [needsLoop, sourceSignature, loopSourceItems.length]);
+
+  React.useLayoutEffect(() => {
     if (needsLoop) return;
     const scroller = scrollerRef.current;
     if (!scroller || scroller.scrollLeft === 0) return;
@@ -378,6 +399,11 @@ export function TopLoopShelf({
 
     handleScroll();
     scroller.addEventListener("scroll", handleScroll, { passive: true });
+    const onScrollEnd = () => {
+      syncArrowState(scroller);
+      if (needsLoopRef.current) runScrollTeleport();
+    };
+    scroller.addEventListener("scrollend", onScrollEnd, { passive: true });
     const onResize = () => {
       reevaluateLoopNeed();
       if (needsLoopRef.current) updateCycleWidth(true);
@@ -386,6 +412,7 @@ export function TopLoopShelf({
 
     return () => {
       scroller.removeEventListener("scroll", handleScroll);
+      scroller.removeEventListener("scrollend", onScrollEnd);
       window.removeEventListener("resize", onResize);
       if (scrollRafRef.current != null) {
         window.cancelAnimationFrame(scrollRafRef.current);
@@ -397,6 +424,8 @@ export function TopLoopShelf({
     reevaluateLoopNeed,
     sourceSignature,
     updateCycleWidth,
+    runScrollTeleport,
+    syncArrowState,
   ]);
 
   React.useEffect(() => {
@@ -548,7 +577,6 @@ export function TopLoopShelf({
       window.cancelAnimationFrame(animationRafRef.current);
       animationRafRef.current = null;
     }
-    animatingRef.current = false;
 
     const start = scroller.scrollLeft;
     const target = start + distance;
@@ -590,11 +618,14 @@ export function TopLoopShelf({
     };
 
     if (reducedMotion) {
+      animatingRef.current = true;
       correctingRef.current = true;
       scroller.scrollLeft += distance;
       correctingRef.current = false;
+      animatingRef.current = false;
       finish();
     } else if (needsLoopRef.current) {
+      animatingRef.current = true;
       animateScrollBy(scroller, distance, finish);
     } else {
       scroller.scrollBy({ left: distance, behavior: "smooth" });
@@ -682,7 +713,6 @@ export function TopLoopShelf({
                 className={styles.group}
                 data-loop-group="0"
                 aria-hidden="true"
-                inert
               >
                 {renderGroupItems(loopSourceItems, 0)}
               </div>
@@ -694,10 +724,10 @@ export function TopLoopShelf({
                 {renderGroupItems(loopSourceItems, 1)}
               </div>
               <div
+                ref={group2Ref}
                 className={styles.group}
                 data-loop-group="2"
                 aria-hidden="true"
-                inert
               >
                 {renderGroupItems(loopSourceItems, 2)}
               </div>

@@ -38,6 +38,12 @@
   min-width: 0;
 }
 
+.padCell {
+  visibility: hidden;
+  pointer-events: none;
+  min-height: 1px;
+}
+
 .fadeLeft,
 .fadeRight {
   position: absolute;
