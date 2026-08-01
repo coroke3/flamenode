@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   videoInteractions,
@@ -44,48 +44,45 @@ export default async function DashboardLibraryPage({
     linkedXCount = linkedRows.length;
 
     if (activeX) {
-      const myInteractions = await db
+      const otherTab: Tab = tab === "like" ? "bookmark" : "like";
+      const otherTabHit = await db
+        .select({ video_id: videoInteractions.video_id })
+        .from(videoInteractions)
+        .where(
+          and(
+            eq(videoInteractions.x_user_id, activeX),
+            eq(videoInteractions.interaction_type, otherTab),
+          )!,
+        )
+        .limit(1);
+      hasOtherTabHits = otherTabHit.length > 0;
+
+      // interaction IDを一度配列化してINへ渡すと、件数次第でD1の100 bind上限を超える。
+      // relationを起点に直接JOINし、従来どおり動画の公開状態と上映時刻順を適用する。
+      const rows = await db
         .select({
-          video_id: videoInteractions.video_id,
-          interaction_type: videoInteractions.interaction_type,
-          created_at: videoInteractions.created_at,
+          id: videosTable.id,
+          title: videosTable.title,
+          youtube_video_id: videosTable.youtube_video_id,
+          display_name: creatorNameExpr,
+          icon_url: creatorIconExpr,
+          creator_x_user_id: videosTable.creator_x_user_id,
+          primary_event_id: videosTable.primary_event_id,
+          scheduled_time: videosTable.scheduled_time,
+          status: videosTable.visibility_status,
         })
         .from(videoInteractions)
-        .where(eq(videoInteractions.x_user_id, activeX));
-
-      const likeIds = myInteractions
-        .filter((r) => r.interaction_type === "like")
-        .map((r) => r.video_id);
-      const bookmarkIds = myInteractions
-        .filter((r) => r.interaction_type === "bookmark")
-        .map((r) => r.video_id);
-      hasOtherTabHits =
-        tab === "like" ? bookmarkIds.length > 0 : likeIds.length > 0;
-      const targetIds = tab === "like" ? likeIds : bookmarkIds;
-      if (targetIds.length > 0) {
-        const rows = await db
-          .select({
-            id: videosTable.id,
-            title: videosTable.title,
-            youtube_video_id: videosTable.youtube_video_id,
-            display_name: creatorNameExpr,
-            icon_url: creatorIconExpr,
-            creator_x_user_id: videosTable.creator_x_user_id,
-            primary_event_id: videosTable.primary_event_id,
-            scheduled_time: videosTable.scheduled_time,
-            status: videosTable.visibility_status,
-          })
-          .from(videosTable)
-          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
-          .where(
-            and(
-              inArray(videosTable.id, targetIds),
-              ne(videosTable.visibility_status, "voided"),
-            )!,
-          )
-          .orderBy(desc(videosTable.scheduled_time));
-        videos = (await resolveMissingIcons(db, rows)) as VideoCardData[];
-      }
+        .innerJoin(videosTable, eq(videosTable.id, videoInteractions.video_id))
+        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
+        .where(
+          and(
+            eq(videoInteractions.x_user_id, activeX),
+            eq(videoInteractions.interaction_type, tab),
+            ne(videosTable.visibility_status, "voided"),
+          )!,
+        )
+        .orderBy(desc(videosTable.scheduled_time));
+      videos = (await resolveMissingIcons(db, rows)) as VideoCardData[];
     }
   }
 

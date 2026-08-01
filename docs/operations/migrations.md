@@ -26,6 +26,11 @@ baselineには旧`events.event_group_id`が存在しない。Remote D1を自動r
 npm run db:local-apply
 ```
 
+このコマンドはactive migrationを一時作業領域へ複製し、D1のtransaction内では
+`PRAGMA foreign_keys=OFF`が効かない`0045_align_visibility_defaults.sql`に限って、
+従属行の退避・復元を一時コピーへ追加してからWranglerを実行する。適用済みmigration
+本文は変更しない。`npx wrangler d1 migrations apply`を直接実行しない。
+
 開発サーバーやWorkerはmigration、ALTER、backfillを自動実行しない。変更後は少なくとも次を実行する。
 
 ```sh
@@ -38,6 +43,15 @@ npm run check:db-history
 ## Remote D1
 
 Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflareの手順に従い、対象D1とmigrationを確認して明示的に行う。CIとCodexはRemote D1を変更しない。
+
+Remoteへ明示適用する場合は、生成済みWeb設定を指定して安全適用コマンドを使う。
+
+```sh
+npm run db:remote-apply -- --config .cloudflare/generated/web.toml
+```
+
+このコマンドも`0045`本文自体は変更せず、Wranglerへ渡す一時コピーだけでD1互換処理を行う。
+`0045`未適用の実データ入りD1へ生の`wrangler d1 migrations apply`を実行してはならない。
 
 適用対象や差分は、`migrations/` と `src/lib/db/schema.ts` を照合したうえで検査scriptの結果を正本とする。個別migrationの目的と履歴は [`docs/db-history/README.md`](../db-history/README.md) と [`docs/database/change-log.md`](../database/change-log.md) から確認し、この文書へ一覧を重複記載しない。
 

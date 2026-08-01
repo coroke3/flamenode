@@ -410,9 +410,11 @@ test("rebuildTopは新着100件と3年以上前のYouTube確認済みプール�
   assert.match(topFn, /const nostalgiaCutoff = unixYearsAgo\(now, 3\)/);
   assert.match(topFn, /v\.scheduled_time <= \?/);
   assert.match(topFn, /YOUTUBE_SYNCED_PLAYABLE_SQL/);
-  assert.match(topFn, /ORDER BY scheduled_time ASC, id ASC/);
+  // An oldest-first LIMIT 200 permanently excludes the remaining eligible
+  // works. The pool must sample the complete eligible set instead.
+  assert.match(topFn, /ORDER BY RANDOM\(\)/);
+  assert.doesNotMatch(topFn, /ORDER BY scheduled_time ASC, id ASC/);
   assert.match(topFn, /LIMIT \$\{TOP_NOSTALGIA_POOL\}/);
-  assert.doesNotMatch(topFn, /ORDER BY RANDOM\(\)/);
   assert.match(source, /pickNostalgicDisplay/);
   assert.match(topFn, /nostalgic_pool: nostalgicPool/);
   assert.match(

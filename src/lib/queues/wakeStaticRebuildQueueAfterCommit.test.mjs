@@ -44,6 +44,7 @@ test("producer: dispatch 有効時は static rebuild wake を送れる", async (
 });
 
 test("producer: Queue送信失敗でも例外を投げない", async () => {
+  let failureRecorded = false;
   const sent = await sendWorkerQueueWakeBestEffort({
     queue: {
       async send() {
@@ -53,8 +54,15 @@ test("producer: Queue送信失敗でも例外を投げない", async () => {
     kind: "static_rebuild_available",
     source: "web",
     envFlags: { QUEUE_DISPATCH_ENABLED: "1" },
+    kv: {
+      async put() {
+        await Promise.resolve();
+        failureRecorded = true;
+      },
+    },
   });
   assert.equal(sent, false);
+  assert.equal(failureRecorded, true, "Worker終了前に失敗telemetryを永続化する");
 });
 
 test("producer: wake message は業務データを含まない", () => {

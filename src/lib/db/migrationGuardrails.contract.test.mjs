@@ -19,10 +19,25 @@ async function readWorkersSources() {
   return Promise.all(files.map((file) => readFile(file, "utf8")));
 }
 
-test("package.json に drizzle push 経路がない", async () => {
-  const pkg = await readFile(path.join(root, "package.json"), "utf8");
-  assert.doesNotMatch(pkg, /drizzle-kit push|drizzle push/);
-  assert.match(pkg, /wrangler d1 migrations apply/);
+test("package.json は互換ラッパー経由で D1 migration を適用する", async () => {
+  const pkgSource = await readFile(path.join(root, "package.json"), "utf8");
+  const pkg = JSON.parse(pkgSource);
+  const wrapper = await readFile(
+    path.join(root, "scripts/apply-d1-migrations.mjs"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(pkgSource, /drizzle-kit push|drizzle push/);
+  assert.equal(
+    pkg.scripts["db:local-apply"],
+    "node scripts/apply-d1-migrations.mjs local",
+  );
+  assert.equal(
+    pkg.scripts["db:remote-apply"],
+    "node scripts/apply-d1-migrations.mjs remote",
+  );
+  assert.match(wrapper, /materializeD1CompatibleMigrations/);
+  assert.match(wrapper, /"d1",\s*\n\s*"migrations",\s*\n\s*"apply"/);
 });
 
 test("instrumentation は schema version を読むだけで migration しない", async () => {

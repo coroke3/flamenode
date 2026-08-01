@@ -28,4 +28,14 @@
 
 - `npm run check:db-schema`
 - `npm run check:db-history`
+- `npm run check:db-d1-empty`
+- `npm run check:db-d1-legacy`
 - `src/lib/integration/statusModel.integration.test.mjs`
+
+## D1適用互換性
+
+D1 migrationsは各migrationをtransaction内で実行するため、この履歴SQLに含まれる
+`PRAGMA foreign_keys=OFF`だけでは、実データ入りDBの親テーブル再作成時に従属行を
+保持できない。適用済み本文は不変とし、`npm run db:local-apply` /
+`npm run db:remote-apply`がWranglerへ渡す一時コピーへ従属行の退避・復元を追加する。
+生の`wrangler d1 migrations apply`は使用しない。

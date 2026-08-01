@@ -56,6 +56,12 @@ test("degraded event list SQL は作品スナップショットのみを返す",
 
 test("submitSlotVideo は既存作品更新で profile/SNS/YouTube を existingVideo から復活させない", () => {
   const source = read("src/lib/actions/video/submitSlotVideo.ts");
+  assert.match(source, /formData\.has\("youtube_url"\)/);
+  assert.match(source, /formData\.has\("profile_text"\)/);
+  assert.match(source, /formData\.has\("other_social_links"\)/);
+  assert.match(source, /youtubeFieldPresent\s*\?\s*submittedYoutubeId\s*:\s*existingVideo\.youtube_video_id/);
+  assert.match(source, /buildVideoMetadataClearPlan/);
+  assert.match(source, /else if \(existingVideo && youtubeFieldPresent\)/);
   assert.doesNotMatch(
     source,
     /creator_profile_text:\s*parsed\.data\.profile_text\s*\?\?\s*existingVideo/,
@@ -64,9 +70,9 @@ test("submitSlotVideo は既存作品更新で profile/SNS/YouTube を existingV
     source,
     /creator_other_social_links:[\s\S]{0,200}existingVideo\?\.creator_other_social_links/,
   );
-  assert.doesNotMatch(
+  assert.match(
     source,
-    /creator_youtube_channel_url:[\s\S]{0,120}existingVideo\.creator_youtube_channel_url/,
+    /creator_youtube_channel_url:\s*youtubeChannelFieldPresent\s*\?[\s\S]{0,180}existingVideo\.creator_youtube_channel_url/,
   );
   assert.doesNotMatch(source, /identitySnapshot/);
   assert.match(source, /creator_profile_text:\s*parsed\.data\.profile_text\s*\?\?\s*null/);

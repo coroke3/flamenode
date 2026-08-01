@@ -27,6 +27,7 @@ import {
   computeVideoRevalidatePaths,
 } from "@/lib/video/computeRevalidateTargets";
 import { expectedRowCondition } from "@/lib/audit/adapters";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import {
   appendVideoAtomicWritePlan,
   emptyVideoAtomicWritePlan,
@@ -445,10 +446,26 @@ export async function applyVideoUpdatePlan(
     wakeSentKinds,
   });
 
-  if (sections.youtube && plan.youtubeChanged && plan.youtubeId) {
-    await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
-  }
-
-  for (const path of plan.revalidatePaths) revalidatePath(path);
+  await runPostCommitBestEffort(
+    { flow: "video.update" },
+    [
+      ...(sections.youtube && plan.youtubeChanged && plan.youtubeId
+        ? [
+            {
+              name: "youtube_sync_wake",
+              run: async () => {
+                await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
+              },
+            },
+          ]
+        : []),
+      {
+        name: "revalidate",
+        run: async () => {
+          for (const path of plan.revalidatePaths) revalidatePath(path);
+        },
+      },
+    ],
+  );
   return queue.statements.length > 0;
 }

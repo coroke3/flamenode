@@ -818,7 +818,7 @@ export function assertSchemaPreflightPayload(payload, expectedMigrations) {
   const missing = expectedMigrations.filter((name) => !applied.has(normalizeMigrationName(name)));
   if (missing.length > 0) {
     throw new Error(
-      `Remote D1 has unapplied migrations: ${missing.join(", ")}. Run "npx wrangler d1 migrations apply flamenode_db --remote --config <generated-web-config>" manually, then retry.`,
+      `Remote D1 has unapplied migrations: ${missing.join(", ")}. Run "npm run db:remote-apply -- --config <generated-web-config>" manually, then retry.`,
     );
   }
   return row;

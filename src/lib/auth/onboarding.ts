@@ -137,11 +137,23 @@ export async function maybeMarkOnboardingComplete(
     state.xIdentityStatus === "pending" || state.xIdentityStatus === "approved";
   if (!hasReachedOnboarding) return;
 
+  // 認可には使わない補助マーカーなので、申請保存後やページ表示を失敗扱いにしない。
   // 既に記録済みなら更新不要。行読取を避けるため条件付き UPDATE を使う。
-  await db
-    .update(users)
-    .set({ onboarding_completed_at: Math.floor(Date.now() / 1000) })
-    .where(and(eq(users.id, authUserId), isNull(users.onboarding_completed_at))!);
+  try {
+    await db
+      .update(users)
+      .set({ onboarding_completed_at: Math.floor(Date.now() / 1000) })
+      .where(and(eq(users.id, authUserId), isNull(users.onboarding_completed_at))!);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "onboarding_marker",
+        result: "failed",
+        auth_user_id: authUserId,
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+  }
 }
 
 export { onboardingHref, onboardingRulesHref, entryLoginRedirectTo } from "./onboardingUrls";

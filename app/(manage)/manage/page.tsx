@@ -33,6 +33,17 @@ import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/Conso
 export const metadata: Metadata = { title: "イベント運営" };
 export const dynamic = "force-dynamic";
 
+// D1は1 statement最大100 bindings。status等の固定条件にもbindを使うため余裕を持たせる。
+const D1_SAFE_EVENT_ID_CHUNK_SIZE = 80;
+
+function chunkEventIds(ids: readonly string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += D1_SAFE_EVENT_ID_CHUNK_SIZE) {
+    chunks.push(ids.slice(index, index + D1_SAFE_EVENT_ID_CHUNK_SIZE));
+  }
+  return chunks;
+}
+
 export default async function ManageTopPage(): Promise<React.ReactElement> {
   const guard = await requireSession({ next: "/manage" });
   if (!guard.ok) return guard.element;
@@ -55,33 +66,38 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   /** ManageSidebar / canAccessManageEvent と同じ一覧（Active X 非依存） */
   const editableEventIds = isAdmin ? [] : await getEditableEventIds(db, user.id);
 
-  const eventRows = isAdmin
-    ? await db
+  let eventRows: (typeof eventsTable.$inferSelect)[];
+  if (isAdmin) {
+    eventRows = await db
+      .select()
+      .from(eventsTable)
+      .orderBy(
+        desc(eventsTable.start_time),
+        desc(eventsTable.created_at),
+        desc(eventsTable.id),
+      );
+  } else {
+    eventRows = [];
+    // 担当イベント数をそのままINへ展開せず、全chunk成功後に同じ表示順へ戻す。
+    for (const eventIdChunk of chunkEventIds(editableEventIds)) {
+      const rows = await db
         .select()
         .from(eventsTable)
+        .where(inArray(eventsTable.id, eventIdChunk))
         .orderBy(
           desc(eventsTable.start_time),
           desc(eventsTable.created_at),
           desc(eventsTable.id),
-        )
-        .then((rows) => rows.sort(compareEventsByUpcomingPriority))
-    : editableEventIds.length > 0
-      ? await db
-          .select()
-          .from(eventsTable)
-          .where(inArray(eventsTable.id, editableEventIds))
-          .orderBy(
-            desc(eventsTable.start_time),
-            desc(eventsTable.created_at),
-            desc(eventsTable.id),
-          )
-          .then((rows) => rows.sort(compareEventsByUpcomingPriority))
-      : [];
+        );
+      eventRows.push(...rows);
+    }
+  }
+  eventRows.sort(compareEventsByUpcomingPriority);
   const eventIds = eventRows.map((event) => event.id);
 
   // 各イベントごとの審査待ち件数
   const pendingByEvent = new Map<string, number>();
-  if (eventIds.length > 0) {
+  for (const eventIdChunk of chunkEventIds(eventIds)) {
     const rows = await db
       .select({
         event_id: videoEventsTable.event_id,
@@ -94,7 +110,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
       )
       .where(
         and(
-          inArray(videoEventsTable.event_id, eventIds),
+          inArray(videoEventsTable.event_id, eventIdChunk),
           eq(videosTable.visibility_status, "pending"),
         )!,
       )
@@ -105,19 +121,24 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   }
 
   // 担当イベント関連の audit_logs を直近で取得 (event_id を target_id として参照する記録)
-  const recentInbox = eventIds.length > 0
-    ? await db
-        .select()
-        .from(auditLogsTable)
-        .where(
-          and(
-            eq(auditLogsTable.table_name, "events"),
-            inArray(auditLogsTable.target_id, eventIds),
-          )!,
-        )
-        .orderBy(desc(auditLogsTable.created_at))
-        .limit(20)
-    : [];
+  const recentInboxCandidates: (typeof auditLogsTable.$inferSelect)[] = [];
+  for (const eventIdChunk of chunkEventIds(eventIds)) {
+    const rows = await db
+      .select()
+      .from(auditLogsTable)
+      .where(
+        and(
+          eq(auditLogsTable.table_name, "events"),
+          inArray(auditLogsTable.target_id, eventIdChunk),
+        )!,
+      )
+      .orderBy(desc(auditLogsTable.created_at))
+      .limit(20);
+    recentInboxCandidates.push(...rows);
+  }
+  const recentInbox = recentInboxCandidates
+    .sort((left, right) => right.created_at - left.created_at)
+    .slice(0, 20);
 
   // event-scoped 通知 (notification_outbox.event_id が担当イベントに該当するもの)
   // 古いローカル D1 では event_id migration 未適用のことがあるため、ページ全体は落とさない。
@@ -125,12 +146,19 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   let eventNotificationSchemaMissing = false;
   if (eventIds.length > 0) {
     try {
-      eventNotifications = await db
-        .select()
-        .from(notificationOutboxTable)
-        .where(inArray(notificationOutboxTable.event_id, eventIds))
-        .orderBy(desc(notificationOutboxTable.created_at))
-        .limit(20);
+      const candidates: (typeof notificationOutboxTable.$inferSelect)[] = [];
+      for (const eventIdChunk of chunkEventIds(eventIds)) {
+        const rows = await db
+          .select()
+          .from(notificationOutboxTable)
+          .where(inArray(notificationOutboxTable.event_id, eventIdChunk))
+          .orderBy(desc(notificationOutboxTable.created_at))
+          .limit(20);
+        candidates.push(...rows);
+      }
+      eventNotifications = candidates
+        .sort((left, right) => right.created_at - left.created_at)
+        .slice(0, 20);
     } catch (e) {
       eventNotificationSchemaMissing = true;
       console.warn("[ManageTopPage] notification_outbox.event_id unavailable", e);
@@ -144,9 +172,13 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
     role: user.role ?? null,
   });
 
-  const staffRoleByEvent = !isAdmin && eventIds.length > 0
-    ? await getManageStaffRolesForEvents(db, user.id, eventIds)
-    : new Map<string, "representative" | "editor">();
+  const staffRoleByEvent = new Map<string, "representative" | "editor">();
+  if (!isAdmin) {
+    for (const eventIdChunk of chunkEventIds(eventIds)) {
+      const roles = await getManageStaffRolesForEvents(db, user.id, eventIdChunk);
+      for (const [eventId, role] of roles) staffRoleByEvent.set(eventId, role);
+    }
+  }
 
   if (eventIds.length === 0) {
     return (

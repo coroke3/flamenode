@@ -16,7 +16,11 @@
     "#spreadsheet/paste": "./src/lib/admin/spreadsheet/paste.ts"
   },
   "overrides": {
-    "workerd": "1.20260721.1"
+    "workerd": "1.20260730.1",
+    "sharp": "0.35.3",
+    "next": {
+      "postcss": "8.5.25"
+    }
   },
   "description": "FlameNode - 個人制作映像とイベントをつなぐ動画プラットフォーム。",
   "engines": {
@@ -33,7 +37,8 @@
     "generate:brand-assets": "node scripts/generate-brand-seo-assets.mjs",
     "dev:clean": "node scripts/stop-dev-ports.cjs && node scripts/clean-next-cache.cjs && node -r ./scripts/load-dev-vars.cjs node_modules/next/dist/bin/next dev",
     "db:studio": "drizzle-kit studio",
-    "db:local-apply": "wrangler d1 migrations apply flamenode_db --local",
+    "db:local-apply": "node scripts/apply-d1-migrations.mjs local",
+    "db:remote-apply": "node scripts/apply-d1-migrations.mjs remote",
     "grant-admin": "node scripts/grant-admin.cjs",
     "check:db-legacy": "node scripts/check-db-legacy.mjs",
     "repair:video-event-links": "node scripts/repair-video-event-links.mjs",
@@ -52,7 +57,7 @@
     "check:ui-acceptance": "node scripts/check-ui-acceptance.mjs",
     "verify:fast": "node scripts/cloudflare-verify-fast.mjs",
     "verify:cloud": "node scripts/cloudflare-verify-fast.mjs --cloud",
-    "verify:full": "npm run verify:fast && npm run test:unit && npm run test:integration && npm run check:db-schema && npm run check:db-migration && npm run check:db-legacy && npm run check:event-owners && npm run check:ui-acceptance && npm run check:public-api-contract && npm run check:docs && npm run check:db-history && npm run check:project-docs",
+    "verify:full": "npm run verify:fast && npm run test:unit && npm run test:integration && npm run check:db-schema && npm run check:db-migration && npm run check:db-d1-empty && npm run check:db-d1-legacy && npm run check:db-legacy && npm run check:event-owners && npm run check:ui-acceptance && npm run check:public-api-contract && npm run check:docs && npm run check:db-history && npm run check:project-docs",
     "cf:build": "node scripts/cloudflare-build.mjs",
     "cf:deploy-production": "node scripts/cloudflare-deploy-production.mjs",
     "cf:smoke-production": "node scripts/smoke-cloudflare.mjs",
@@ -66,7 +71,7 @@
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types src/**/*.test.mjs",
     "test:integration": "node --test --experimental-strip-types src/**/*.integration.test.mjs",
-    "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs",
+    "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs scripts/d1-migration-compat.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs",
     "cf:bootstrap": "node scripts/cloudflare-bootstrap.mjs",
     "preview": "node scripts/cloudflare-preview.mjs",
@@ -75,26 +80,26 @@
     "check:db-d1-legacy": "node scripts/check-db-d1-migration.mjs legacy"
   },
   "dependencies": {
-    "@auth/drizzle-adapter": "^1.7.4",
-    "@next/third-parties": "^15.5.20",
-    "@opennextjs/cloudflare": "1.20.1",
+    "@auth/drizzle-adapter": "1.11.3",
+    "@next/third-parties": "15.5.22",
+    "@opennextjs/cloudflare": "1.20.2",
     "drizzle-orm": "^0.45.2",
-    "next": "15.5.20",
-    "next-auth": "^5.0.0-beta.31",
+    "next": "15.5.22",
+    "next-auth": "5.0.0-beta.32",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250109.0",
+    "@cloudflare/workers-types": "5.20260801.1",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.4",
     "@types/react-dom": "^19.0.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.18.0",
-    "eslint-config-next": "15.5.20",
-    "sharp": "0.34.5",
+    "eslint-config-next": "15.5.22",
+    "sharp": "0.35.3",
     "typescript": "^5.7.3",
-    "wrangler": "4.112.0"
+    "wrangler": "4.118.0"
   }
 }

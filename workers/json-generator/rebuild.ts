@@ -504,7 +504,11 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
          AND v.scheduled_time IS NOT NULL
          AND v.scheduled_time <= ?
          AND ${YOUTUBE_SYNCED_PLAYABLE_SQL}
-       ORDER BY scheduled_time ASC, id ASC
+       -- RANDOM() is intentional here: limiting an oldest-first result would
+       -- permanently exclude eligible videos after the first 200. SQLite
+       -- samples the complete eligible set before applying the pool limit,
+       -- allowing every eligible work to enter the daily display over time.
+       ORDER BY RANDOM()
        LIMIT ${TOP_NOSTALGIA_POOL}`,
     ).bind(nostalgiaCutoff).all(),
     env.DB.prepare(
