@@ -15,7 +15,7 @@ export function buildDegradedEventListPageSql(
       v.id,
       v.title,
       v.youtube_video_id,
-      NULLIF(TRIM(v.creator_display_name), '') AS display_name,
+      COALESCE(NULLIF(TRIM(v.creator_display_name), ''), v.creator_x_user_id) AS display_name,
       v.creator_icon_url AS icon_url,
       v.creator_x_user_id,
       v.primary_event_id,

@@ -108,7 +108,7 @@ export function YoutubeChannelPicker({
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => setValue("")}
+            onClick={() => applyUrl("")}
             disabled={disabled}
           >
             解除

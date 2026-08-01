@@ -167,12 +167,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
   )[0];
   const displayName = parsed.data.display_name || slotRow.display_name || xProfile?.x_name || sessionUser.name || "anonymous";
-  const identitySnapshot = {
-    creator_profile_text: parsed.data.profile_text ?? existingVideo?.creator_profile_text ?? null,
-    creator_other_social_links: parsed.data.other_social_links != null
-      ? normalizeSocialLinksForStorage(parsed.data.other_social_links)
-      : existingVideo?.creator_other_social_links ?? null,
-  };
   const videoAfter: typeof videos.$inferSelect = existingVideo
     ? {
         ...existingVideo,
@@ -186,10 +180,11 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
             ? null
             : existingVideo.creator_display_name_yomi,
         creator_icon_url: parsed.data.icon_url || null,
-        creator_youtube_channel_url: snapshotYoutubeChannelUrl(
-          parsed.data.youtube_channel_url ?? existingVideo.creator_youtube_channel_url,
+        creator_youtube_channel_url: snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url),
+        creator_profile_text: parsed.data.profile_text ?? null,
+        creator_other_social_links: normalizeSocialLinksForStorage(
+          parsed.data.other_social_links,
         ),
-        ...identitySnapshot,
         music: parsed.data.music ?? null,
         music_reference_url: parsed.data.music_reference_url ?? null,
         credit: parsed.data.credit ?? null,

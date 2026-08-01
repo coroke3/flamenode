@@ -25,6 +25,7 @@ test("作品表示の displayExpr は x_users フォールバックしない", (
   const source = read("src/lib/db/displayExpr.ts");
   assert.match(source, /creator_display_name/);
   assert.match(source, /creator_icon_url/);
+  assert.match(source, /creator_x_user_id/);
   assert.doesNotMatch(source, /x_users\.icon_url|xUsers\.icon_url/);
   assert.doesNotMatch(source, /LEFT JOIN.*x_users|from\(xUsers\)/i);
 });
@@ -49,7 +50,30 @@ test("degraded event list SQL は作品スナップショットのみを返す",
   const source = read("src/lib/publicData/degradedEventListPageSql.ts");
   assert.match(source, /creator_display_name/);
   assert.match(source, /creator_icon_url/);
+  assert.match(source, /creator_x_user_id/);
   assert.doesNotMatch(source, /x_users|xu\.x_name|xu\.icon_url/i);
+});
+
+test("submitSlotVideo は既存作品更新で profile/SNS/YouTube を existingVideo から復活させない", () => {
+  const source = read("src/lib/actions/video/submitSlotVideo.ts");
+  assert.doesNotMatch(
+    source,
+    /creator_profile_text:\s*parsed\.data\.profile_text\s*\?\?\s*existingVideo/,
+  );
+  assert.doesNotMatch(
+    source,
+    /creator_other_social_links:[\s\S]{0,200}existingVideo\?\.creator_other_social_links/,
+  );
+  assert.doesNotMatch(
+    source,
+    /creator_youtube_channel_url:[\s\S]{0,120}existingVideo\.creator_youtube_channel_url/,
+  );
+  assert.doesNotMatch(source, /identitySnapshot/);
+  assert.match(source, /creator_profile_text:\s*parsed\.data\.profile_text\s*\?\?\s*null/);
+  assert.match(
+    source,
+    /creator_youtube_channel_url:\s*snapshotYoutubeChannelUrl\(parsed\.data\.youtube_channel_url\)/,
+  );
 });
 
 test("updateVideo は identity 権限で profile / SNS / YouTube を検証する", () => {
