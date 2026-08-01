@@ -373,11 +373,21 @@ export function XIdCompactProfileForm({
           {pending ? "保存中…" : "保存"}
         </button>
       </div>
-      {message ? <p className={styles.msgOk}>{message}</p> : null}
-      {error ? <p className={styles.msgErr}>{error}</p> : null}
+      {message ? (
+        <p className={styles.msgOk} role="status">
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className={styles.msgErr} role="alert">
+          {error}
+        </p>
+      ) : null}
     </form>
   );
-}function XIdIconPicker({
+}
+
+function XIdIconPicker({
   xUserId,
   currentIconUrl,
   candidates,

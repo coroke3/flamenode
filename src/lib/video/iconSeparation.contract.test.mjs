@@ -33,3 +33,23 @@ test("SquareIconEditor は確定操作まで Server Action を呼ばない", () 
   assert.match(editor, /この画像を使用/);
   assert.match(editor, /role=\"status\"|aria-live/);
 });
+
+test("XIdSettingsClient は SquareIconEditor 経由で uploadXIdIcon を呼ぶ", () => {
+  const settings = read("../../components/settings/XIdSettingsClient.tsx");
+  assert.match(settings, /SquareIconEditor/);
+  assert.match(settings, /uploadXIdIcon/);
+  assert.match(settings, /onUseImage=\{onUploadProcessedFile\}/);
+  assert.doesNotMatch(
+    settings,
+    /type=\"file\"[\s\S]*onChange[\s\S]*uploadXIdIcon/,
+  );
+  assert.match(settings, /onUploadProcessedFile/);
+  assert.match(settings, /if \(pending\) return/);
+  assert.match(settings, /disabled=\{pending\}/);
+  assert.match(settings, /role=\"status\"/);
+  assert.match(settings, /role=\"alert\"/);
+  assert.match(settings, /savedIconUrl/);
+  assert.match(settings, /保存済み画像を表示/);
+  assert.match(settings, /msgOk[\s\S]*role=\"status\"/);
+  assert.match(settings, /msgErr[\s\S]*role=\"alert\"/);
+});
