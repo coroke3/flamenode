@@ -47,6 +47,7 @@ import {
 } from "@/lib/video/submissionValidation";
 import {
   buildSyncVideoEventsPlan,
+  buildVideoMetadataClearPlan,
   buildVideoDerivedRowsPlan,
   resolveVideoEventSyncTargetIds,
 } from "@/lib/video/syncVideoEvents";
@@ -76,7 +77,13 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   if (!slotId) return { ok: false, message: "枠IDがありません。" };
   const parsed = parseVideoForm(Object.fromEntries(formData), { youtubeRequired: false });
   if (!parsed.ok) return parsed;
-  const youtubeId = extractYoutubeId(parsed.data.youtube_url) ?? null;
+  // FormData presence is significant for re-submission: an omitted field keeps
+  // the existing snapshot, while an explicitly empty field clears it.
+  const youtubeFieldPresent = formData.has("youtube_url");
+  const profileFieldPresent = formData.has("profile_text");
+  const socialLinksFieldPresent = formData.has("other_social_links");
+  const youtubeChannelFieldPresent = formData.has("youtube_channel_url");
+  const submittedYoutubeId = extractYoutubeId(parsed.data.youtube_url) ?? null;
   const db = getDatabase();
   if (!db) return { ok: false, message: "DBに接続できません。" };
 
@@ -112,7 +119,10 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   const stageResult = buildStagePermissionSubmission(formData, stageFields);
   if (!stageResult.ok) return stageResult;
   const slotPart = await resolvePartFromSlot(db, slotRow);
-  if (youtubeId && await checkYoutubeVideoDuplicate(db, youtubeId, existingVideo?.id)) {
+  if (
+    submittedYoutubeId &&
+    await checkYoutubeVideoDuplicate(db, submittedYoutubeId, existingVideo?.id)
+  ) {
     return { ok: false, message: "このYouTube動画は既に登録されています。" };
   }
   const memberValidation = validateVideoMemberSubmission(
@@ -188,8 +198,10 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     ? {
         ...existingVideo,
         title: parsed.data.title,
-        // 空送信では既存 ID を維持（updateVideo と同じ）。新規追加・変更時のみ上書き。
-        youtube_video_id: youtubeId ?? existingVideo.youtube_video_id,
+        // フィールド未送信時だけ既存IDを維持し、明示的な空送信では解除する。
+        youtube_video_id: youtubeFieldPresent
+          ? submittedYoutubeId
+          : existingVideo.youtube_video_id,
         creator_x_user_id: activeX,
         creator_display_name: parsed.data.display_name,
         creator_display_name_yomi:
@@ -197,11 +209,15 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
             ? null
             : existingVideo.creator_display_name_yomi,
         creator_icon_url: iconResolved.value.iconUrl,
-        creator_youtube_channel_url: snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url),
-        creator_profile_text: parsed.data.profile_text ?? null,
-        creator_other_social_links: normalizeSocialLinksForStorage(
-          parsed.data.other_social_links,
-        ),
+        creator_youtube_channel_url: youtubeChannelFieldPresent
+          ? snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url)
+          : existingVideo.creator_youtube_channel_url,
+        creator_profile_text: profileFieldPresent
+          ? parsed.data.profile_text ?? null
+          : existingVideo.creator_profile_text,
+        creator_other_social_links: socialLinksFieldPresent
+          ? normalizeSocialLinksForStorage(parsed.data.other_social_links)
+          : existingVideo.creator_other_social_links,
         music: parsed.data.music ?? null,
         music_reference_url: parsed.data.music_reference_url ?? null,
         credit: parsed.data.credit ?? null,
@@ -234,7 +250,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         credit: parsed.data.credit ?? null,
         music_reference_url: parsed.data.music_reference_url ?? null,
         closing_comment: parsed.data.closing_comment ?? null,
-        youtube_video_id: youtubeId,
+        youtube_video_id: submittedYoutubeId,
         intro_comment: parsed.data.intro_comment ?? null,
         highlights: parsed.data.highlights ?? null,
         production_story: parsed.data.production_story ?? null,
@@ -271,9 +287,13 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       retention_class: "normal",
       strict: true,
     });
-    if (youtubeId) {
+    if (youtubeFieldPresent && submittedYoutubeId) {
       appendVideoAtomicWritePlan(plan, await buildVideoDerivedRowsPlan(db, {
-        videoId, youtubeVideoId: youtubeId, now, actorUserId: userId,
+        videoId, youtubeVideoId: submittedYoutubeId, now, actorUserId: userId,
+      }));
+    } else if (existingVideo && youtubeFieldPresent) {
+      appendVideoAtomicWritePlan(plan, await buildVideoMetadataClearPlan(db, {
+        videoId, now, actorUserId: userId,
       }));
     }
     appendVideoAtomicWritePlan(plan, await buildReplaceVideoSoftwarePlan(db, {
@@ -364,7 +384,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         payload: buildChannelVideoRegisteredNotification({
           videoId,
           videoTitle: parsed.data.title,
-          youtubeVideoId: youtubeId,
+          youtubeVideoId: submittedYoutubeId,
           registrationKind: "slot",
           eventId: slotRow.event_id,
           eventTitle: eventConfig.title ?? "イベント",
@@ -410,7 +430,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
       wakeSentKinds,
     });
-    if (youtubeId) {
+    if (youtubeFieldPresent && submittedYoutubeId) {
       await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
     }
   } catch (error) {
@@ -451,7 +471,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     {
       ok: true,
       videoId,
-      youtubeVideoId: youtubeId ?? undefined,
+      youtubeVideoId: submittedYoutubeId ?? undefined,
       eventId: slotRow.event_id,
     },
     staticRebuildEnqueued,

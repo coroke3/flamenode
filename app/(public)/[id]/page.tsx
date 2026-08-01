@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound, unstable_rethrow } from "next/navigation";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
 import {
@@ -332,32 +332,29 @@ async function fetchVideoViewerOverlay({
         if (playlist === "lib-like" || playlist === "lib-bookmark") {
           if (viewerActiveX) {
             const kind = playlist === "lib-like" ? "like" : "bookmark";
-            const myInteractions = await db
-              .select({ video_id: videoInteractions.video_id })
+            // interaction IDを無制限のINへ展開せず、relationから直接JOINする。
+            // これによりライブラリ件数に関係なくD1の100 bind上限内に収まる。
+            const rows = await db
+              .select({
+                id: videosTable.id,
+                title: videosTable.title,
+                youtube_video_id: videosTable.youtube_video_id,
+                display_name: videosTable.creator_display_name,
+              })
               .from(videoInteractions)
+              .innerJoin(
+                videosTable,
+                eq(videosTable.id, videoInteractions.video_id),
+              )
               .where(
                 and(
                   eq(videoInteractions.x_user_id, viewerActiveX),
                   eq(videoInteractions.interaction_type, kind),
+                  eq(videosTable.visibility_status, "public"),
                 )!,
-              );
-            const ids = myInteractions.map((r) => r.video_id);
-            if (ids.length > 0) {
-              const rows = await db
-                .select({
-                  id: videosTable.id,
-                  title: videosTable.title,
-                  youtube_video_id: videosTable.youtube_video_id,
-                  display_name: videosTable.creator_display_name,
-                })
-                .from(videosTable)
-                .where(
-                  and(
-                    inArray(videosTable.id, ids),
-                    eq(videosTable.visibility_status, "public"),
-                  )!,
-                )
-                .orderBy(desc(videosTable.scheduled_time));
+              )
+              .orderBy(desc(videosTable.scheduled_time));
+            if (rows.length > 0) {
               playlistLabel =
                 kind === "like" ? "いいねした作品" : "セーブした作品";
               playlistItems = rows.map((v) => ({
@@ -408,7 +405,13 @@ async function fetchVideoViewerOverlay({
     };
   } catch (error) {
     unstable_rethrow(error);
-    return { ...emptyOverlay, viewerUser, authUnavailable };
+    // 認証済み利用者のoverlay DB障害を「未ログイン」や「未承認X ID」へ変換しない。
+    // 匿名のイベント再生リスト取得失敗は認証障害ではないため従来表示を維持する。
+    return {
+      ...emptyOverlay,
+      viewerUser,
+      authUnavailable: authUnavailable || Boolean(authenticatedViewer),
+    };
   }
 }
 

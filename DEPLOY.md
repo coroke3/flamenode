@@ -229,7 +229,7 @@ production deployはRemote D1へSELECTだけを実行し、次を確認します
 ```sh
 export WORKERS_CI_COMMIT_SHA="$(git rev-parse HEAD)"
 node scripts/cloudflare-verify-environment.mjs
-npx wrangler d1 migrations apply flamenode_db --remote --config .cloudflare/generated/web.toml
+npm run db:remote-apply -- --config .cloudflare/generated/web.toml
 ```
 
 PowerShellでは`$env:WORKERS_CI_COMMIT_SHA = (git rev-parse HEAD).Trim()`を使用します。実IDやtokenをコマンド行、shell history、Issueへ貼りません。適用後は停止したWorkers Buildを再試行し、read-only preflightからやり直します。詳細は[`docs/operations/migrations.md`](./docs/operations/migrations.md)を参照してください。

@@ -27,7 +27,6 @@ import {
 } from "@/lib/api/publicApi";
 
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
-const inFlightExports = new Map<string, Promise<string | null>>();
 
 function parseUpdateMode(value: string | null): EventExportUpdateMode | null {
   if (value === "realtime") return "realtime";
@@ -115,22 +114,6 @@ async function readCachedPayload(
       // D1からの再生成を優先する。
     }
     return null;
-  }
-}
-
-async function buildPayloadOnce(
-  key: string,
-  factory: () => Promise<string | null>,
-): Promise<string | null> {
-  const current = inFlightExports.get(key);
-  if (current) return current;
-
-  const promise = factory();
-  inFlightExports.set(key, promise);
-  try {
-    return await promise;
-  } finally {
-    if (inFlightExports.get(key) === promise) inFlightExports.delete(key);
   }
 }
 
@@ -258,21 +241,16 @@ export async function GET(
   }
 
   const generatedAt = Math.floor(Date.now() / 1000);
-  const body = await buildPayloadOnce(
-    [eventId, updateMode].join(":"),
-    async () => {
-      const snapshot = await loadEventExportSnapshot(
-        db,
-        eventId,
-        prefetchedEvent,
-      );
-      return snapshot
-        ? JSON.stringify(
-            buildEventExportPayload(snapshot, generatedAt, updateMode),
-          )
-        : null;
-    },
+  const snapshot = await loadEventExportSnapshot(
+    db,
+    eventId,
+    prefetchedEvent,
   );
+  const body = snapshot
+    ? JSON.stringify(
+        buildEventExportPayload(snapshot, generatedAt, updateMode),
+      )
+    : null;
 
   if (body === null) {
     if (kv) {

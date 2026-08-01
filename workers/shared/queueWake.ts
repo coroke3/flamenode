@@ -88,7 +88,7 @@ export async function sendWorkerQueueWakeBestEffort(input: {
       result: "binding_missing",
       kind: input.kind,
     });
-    void recordQueueWakeFailureBestEffort({
+    await recordQueueWakeFailureBestEffort({
       kind: input.kind,
       reason: "binding_missing",
       kv: input.kv,
@@ -119,7 +119,7 @@ export async function sendWorkerQueueWakeBestEffort(input: {
       kind: input.kind,
       error_name: error instanceof Error ? error.name : undefined,
     });
-    void recordQueueWakeFailureBestEffort({
+    await recordQueueWakeFailureBestEffort({
       kind: input.kind,
       reason: "send_failed",
       kv: input.kv,

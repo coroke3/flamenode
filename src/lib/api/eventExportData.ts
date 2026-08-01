@@ -25,6 +25,8 @@ import type {
 } from "./eventExportPayload";
 
 const EVENT_EXPORT_VIDEO_LIMIT = 500;
+/** 最多3個の固定条件bindを加えても、D1の1 statement上限100未満に収める。 */
+export const EVENT_EXPORT_VIDEO_ID_CHUNK_SIZE = 90;
 
 export interface EventExportEventRow {
   id: string;
@@ -51,6 +53,25 @@ function appendGrouped<T>(
   const rows = target.get(key);
   if (rows) rows.push(value);
   else target.set(key, [value]);
+}
+
+async function loadRowsByVideoIdChunks<T>(
+  videoIds: readonly string[],
+  loadChunk: (chunk: string[]) => Promise<T[]>,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (
+    let offset = 0;
+    offset < videoIds.length;
+    offset += EVENT_EXPORT_VIDEO_ID_CHUNK_SIZE
+  ) {
+    const chunk = videoIds.slice(
+      offset,
+      offset + EVENT_EXPORT_VIDEO_ID_CHUNK_SIZE,
+    );
+    rows.push(...(await loadChunk(chunk)));
+  }
+  return rows;
 }
 
 export async function loadEventExportEvent(
@@ -171,103 +192,113 @@ export async function loadEventExportSnapshot(
   if (videoIds.length > 0) {
     const [memberRows, softwareRows, answerRows, chapterRows, relationRows] =
       await Promise.all([
-        db
-          .select({
-            video_id: videoMembers.video_id,
-            x_user_id: videoMembers.x_user_id,
-            name: videoMembers.name,
-            role_label: videoMembers.role,
-            order_index: videoMembers.order_index,
-          })
-          .from(videoMembers)
-          .where(
-            and(
-              inArray(videoMembers.video_id, videoIds),
-              eq(videoMembers.is_public_member, 1),
+        loadRowsByVideoIdChunks(videoIds, async (chunk) =>
+          db
+            .select({
+              video_id: videoMembers.video_id,
+              x_user_id: videoMembers.x_user_id,
+              name: videoMembers.name,
+              role_label: videoMembers.role,
+              order_index: videoMembers.order_index,
+            })
+            .from(videoMembers)
+            .where(
+              and(
+                inArray(videoMembers.video_id, chunk),
+                eq(videoMembers.is_public_member, 1),
+              ),
+            )
+            .orderBy(asc(videoMembers.video_id), asc(videoMembers.order_index)),
+        ),
+        loadRowsByVideoIdChunks(videoIds, async (chunk) =>
+          db
+            .select({
+              video_id: videoSoftwares.video_id,
+              name: softwareCatalog.name,
+              raw_label: videoSoftwares.raw_label,
+            })
+            .from(videoSoftwares)
+            .innerJoin(
+              softwareCatalog,
+              eq(softwareCatalog.id, videoSoftwares.software_id),
+            )
+            .where(inArray(videoSoftwares.video_id, chunk))
+            .orderBy(
+              asc(videoSoftwares.video_id),
+              asc(softwareCatalog.name),
+              asc(videoSoftwares.raw_label),
             ),
-          )
-          .orderBy(asc(videoMembers.video_id), asc(videoMembers.order_index)),
-        db
-          .select({
-            video_id: videoSoftwares.video_id,
-            name: softwareCatalog.name,
-            raw_label: videoSoftwares.raw_label,
-          })
-          .from(videoSoftwares)
-          .innerJoin(
-            softwareCatalog,
-            eq(softwareCatalog.id, videoSoftwares.software_id),
-          )
-          .where(inArray(videoSoftwares.video_id, videoIds))
-          .orderBy(
-            asc(videoSoftwares.video_id),
-            asc(softwareCatalog.name),
-            asc(videoSoftwares.raw_label),
-          ),
-        db
-          .select({
-            video_id: videoCustomAnswers.video_id,
-            key: eventCustomQuestions.question_key,
-            label: eventCustomQuestions.label,
-            answer_text: videoCustomAnswers.answer_text,
-            answer_json: videoCustomAnswers.answer_json,
-            sort_order: eventCustomQuestions.sort_order,
-          })
-          .from(videoCustomAnswers)
-          .innerJoin(
-            eventCustomQuestions,
-            and(
-              eq(eventCustomQuestions.id, videoCustomAnswers.question_id),
-              eq(eventCustomQuestions.event_id, videoCustomAnswers.event_id),
+        ),
+        loadRowsByVideoIdChunks(videoIds, async (chunk) =>
+          db
+            .select({
+              video_id: videoCustomAnswers.video_id,
+              key: eventCustomQuestions.question_key,
+              label: eventCustomQuestions.label,
+              answer_text: videoCustomAnswers.answer_text,
+              answer_json: videoCustomAnswers.answer_json,
+              sort_order: eventCustomQuestions.sort_order,
+            })
+            .from(videoCustomAnswers)
+            .innerJoin(
+              eventCustomQuestions,
+              and(
+                eq(eventCustomQuestions.id, videoCustomAnswers.question_id),
+                eq(eventCustomQuestions.event_id, videoCustomAnswers.event_id),
+              ),
+            )
+            .where(
+              and(
+                eq(videoCustomAnswers.event_id, eventId),
+                inArray(videoCustomAnswers.video_id, chunk),
+                eq(eventCustomQuestions.is_active, 1),
+                eq(eventCustomQuestions.visibility, "public"),
+              ),
+            )
+            .orderBy(
+              asc(videoCustomAnswers.video_id),
+              asc(eventCustomQuestions.sort_order),
             ),
-          )
-          .where(
-            and(
-              eq(videoCustomAnswers.event_id, eventId),
-              inArray(videoCustomAnswers.video_id, videoIds),
-              eq(eventCustomQuestions.is_active, 1),
-              eq(eventCustomQuestions.visibility, "public"),
+        ),
+        loadRowsByVideoIdChunks(videoIds, async (chunk) =>
+          db
+            .select({
+              id: videoChapters.id,
+              video_id: videoChapters.video_id,
+              x_user_id: videoChapters.x_user_id,
+              chapter_time: videoChapters.chapter_time,
+              chapter_label: videoChapters.chapter_label,
+              note: videoChapters.note,
+            })
+            .from(videoChapters)
+            .where(
+              and(
+                inArray(videoChapters.video_id, chunk),
+                eq(videoChapters.visibility, "public"),
+              ),
+            )
+            .orderBy(
+              asc(videoChapters.video_id),
+              asc(videoChapters.chapter_time),
+              asc(videoChapters.id),
             ),
-          )
-          .orderBy(
-            asc(videoCustomAnswers.video_id),
-            asc(eventCustomQuestions.sort_order),
-          ),
-        db
-          .select({
-            id: videoChapters.id,
-            video_id: videoChapters.video_id,
-            x_user_id: videoChapters.x_user_id,
-            chapter_time: videoChapters.chapter_time,
-            chapter_label: videoChapters.chapter_label,
-            note: videoChapters.note,
-          })
-          .from(videoChapters)
-          .where(
-            and(
-              inArray(videoChapters.video_id, videoIds),
-              eq(videoChapters.visibility, "public"),
-            ),
-          )
-          .orderBy(
-            asc(videoChapters.video_id),
-            asc(videoChapters.chapter_time),
-            asc(videoChapters.id),
-          ),
-        db
-          .select({
-            video_id: videoEvents.video_id,
-            event_id: videoEvents.event_id,
-          })
-          .from(videoEvents)
-          .innerJoin(events, eq(events.id, videoEvents.event_id))
-          .where(
-            and(
-              inArray(videoEvents.video_id, videoIds),
-              eq(events.visibility_status, "public"),
-            ),
-          )
-          .orderBy(asc(videoEvents.video_id), asc(videoEvents.event_id)),
+        ),
+        loadRowsByVideoIdChunks(videoIds, async (chunk) =>
+          db
+            .select({
+              video_id: videoEvents.video_id,
+              event_id: videoEvents.event_id,
+            })
+            .from(videoEvents)
+            .innerJoin(events, eq(events.id, videoEvents.event_id))
+            .where(
+              and(
+                inArray(videoEvents.video_id, chunk),
+                eq(events.visibility_status, "public"),
+              ),
+            )
+            .orderBy(asc(videoEvents.video_id), asc(videoEvents.event_id)),
+        ),
       ]);
 
     for (const row of memberRows) {

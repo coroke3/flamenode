@@ -6,13 +6,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { buildD1CompatibleMigration } from "./d1-migration-compat.mjs";
 
 const root = process.cwd();
 const migrationName = "0043_db_canonical_migration.sql";
 const canonicalVersion = "2026-07-20-canonical-1";
 const migrationsDir = path.join(root, "migrations");
 const fixturePath = path.join(root, "scripts/fixtures/db-canonical-legacy.sql");
-const wranglerBin = path.join(root, "node_modules", ".bin", "wrangler");
+const wranglerBin = path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
 const activeMigrations = fs
   .readdirSync(migrationsDir, { withFileTypes: true })
   .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
@@ -20,7 +21,7 @@ const activeMigrations = fs
   .sort();
 
 function runWrangler(args, cwd) {
-  const result = spawnSync(wranglerBin, args, {
+  const result = spawnSync(process.execPath, [wranglerBin, ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, CI: "1", NO_COLOR: "1" },
@@ -48,7 +49,12 @@ function createWorkspace({ withLegacyFixture }) {
     `name = "flamenode-db-migration-check"\ncompatibility_date = "2026-07-20"\n\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "${databaseName}"\ndatabase_id = "${databaseId}"\nmigrations_dir = "migrations"\n`,
   );
   for (const name of activeMigrations) {
-    fs.copyFileSync(path.join(migrationsDir, name), path.join(workspaceMigrations, name));
+    const source = fs.readFileSync(path.join(migrationsDir, name), "utf8");
+    fs.writeFileSync(
+      path.join(workspaceMigrations, name),
+      buildD1CompatibleMigration(name, source),
+      "utf8",
+    );
   }
   if (withLegacyFixture) {
     fs.writeFileSync(

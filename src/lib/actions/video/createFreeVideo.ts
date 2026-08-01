@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { videos, events, users } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
@@ -167,6 +168,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   };
 
   let staticRebuildEnqueued = false;
+  const wakeSentKinds = new Set<QueueWakeKind>();
   try {
     const plan = emptyVideoAtomicWritePlan();
     appendVideoAtomicWritePlan(
@@ -326,13 +328,11 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
 
-    const wakeSentKinds = new Set<QueueWakeKind>();
     await executeVideoAtomicWritePlan(db, plan, {
       notificationWakeSource,
       staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
       wakeSentKinds,
     });
-    await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
   } catch (error) {
     unstable_rethrow(error);
     await rollbackUploadedVideoIcon(iconResolved.value.uploadedKey);
@@ -347,11 +347,31 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     };
   }
 
-  await cleanupReplacedVideoCreatorIcon(db, null, iconResolved.value.iconUrl);
-
-  revalidatePath("/");
-  revalidatePath("/list");
-  revalidatePath("/dashboard");
+  await runPostCommitBestEffort(
+    { flow: "video.create_free" },
+    [
+      {
+        name: "youtube_sync_wake",
+        run: async () => {
+          await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
+        },
+      },
+      {
+        name: "icon_orphan_cleanup",
+        run: async () => {
+          await cleanupReplacedVideoCreatorIcon(db, null, iconResolved.value.iconUrl);
+        },
+      },
+      {
+        name: "revalidate",
+        run: async () => {
+          revalidatePath("/");
+          revalidatePath("/list");
+          revalidatePath("/dashboard");
+        },
+      },
+    ],
+  );
   return markPendingPublicReflection(
     {
       ok: true,

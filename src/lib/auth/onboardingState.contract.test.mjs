@@ -62,6 +62,15 @@ test("requestXIdLink 成功時に onboarding_completed_at を記録する", () =
   assert.match(onboarding, /settings 等からの X 連携申請成功時に呼ぶ/);
 });
 
+test("onboarding_completed_at は認可非依存のbest-effort補助マーカーである", () => {
+  assert.match(onboarding, /認可には使わない補助マーカー/);
+  assert.match(
+    onboarding,
+    /export async function maybeMarkOnboardingComplete[\s\S]*try \{[\s\S]*\.update\(users\)[\s\S]*catch \(error\)/,
+  );
+  assert.match(onboarding, /service: "onboarding_marker"/);
+});
+
 test("onboardingUrls は sanitizeOnboardingNext で循環を拒否する", () => {
   const urls = read("./onboardingUrls.ts");
   assert.match(urls, /sanitizeOnboardingNext/);
