@@ -9,6 +9,7 @@ import { parseXIdentityInput } from "@/lib/utils/xid";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
+import { SquareIconEditor } from "@/components/media/SquareIconEditor";
 
 /** 初回・追加を問わず同じ入力で送るX ID連携申請フォーム。 */
 export function XIdLinkForm({
@@ -394,16 +395,15 @@ export function XIdCompactProfileForm({
   const [mode, setMode] = React.useState<"select" | "upload">(
     candidates.length > 0 ? "select" : "upload",
   );
-  const [uploadPreview, setUploadPreview] = React.useState<string | null>(null);
-  const [uploadFileName, setUploadFileName] = React.useState<string | null>(null);
+  const [showCompactUploader, setShowCompactUploader] = React.useState(false);
+  const [savedIconUrl, setSavedIconUrl] = React.useState<string | null>(null);
+  const [editorKey, setEditorKey] = React.useState(0);
 
   React.useEffect(() => {
-    return () => {
-      if (uploadPreview) window.URL.revokeObjectURL(uploadPreview);
-    };
-  }, [uploadPreview]);
+    if (currentIconUrl) setSavedIconUrl(null);
+  }, [currentIconUrl]);
 
-  const selectedIconUrl = currentIconUrl ?? candidates[0] ?? null;
+  const selectedIconUrl = savedIconUrl ?? currentIconUrl ?? candidates[0] ?? null;
 
   const onSelect = (iconUrl: string) => {
     setError(null);
@@ -422,49 +422,52 @@ export function XIdCompactProfileForm({
     });
   };
 
-  const onUpload = (file: File | null) => {
-    if (!file) return;
+  const onUploadProcessedFile = async (file: File) => {
+    if (pending) return;
     setError(null);
     setMessage(null);
     const fd = new FormData();
     fd.set("x_user_id", xUserId);
     fd.set("icon_file", file);
-    startTransition(async () => {
-      const r = await uploadXIdIcon(fd);
-      if (!r.ok) {
-        setError(r.message ?? "アップロードに失敗しました。");
-        return;
-      }
-      setMessage(r.message ?? "アイコンをアップロードしました。");
-      router.refresh();
+    return new Promise<void>((resolve) => {
+      startTransition(async () => {
+        try {
+          const r = await uploadXIdIcon(fd);
+          if (!r.ok) {
+            setError(r.message ?? "アップロードに失敗しました。");
+            resolve();
+            return;
+          }
+          setMessage(r.message ?? "アイコンをアップロードしました。");
+          if (r.iconUrl) setSavedIconUrl(r.iconUrl);
+          setShowCompactUploader(false);
+          setEditorKey((k) => k + 1);
+          router.refresh();
+        } catch {
+          setError("アップロードに失敗しました。時間をおいて再試行してください。");
+        } finally {
+          resolve();
+        }
+      });
     });
   };
 
-  const onPickUploadFile = (file: File | null) => {
-    if (uploadPreview) window.URL.revokeObjectURL(uploadPreview);
-    setUploadPreview(file ? window.URL.createObjectURL(file) : null);
-    setUploadFileName(file?.name ?? null);
-    onUpload(file);
-  };
-
-  const iconUploadInput = (
-    <label
+  const iconUploadButton = (
+    <button
+      type="button"
       className={`${styles.iconButton} ${styles.iconAddButton} ${pending ? styles.iconAddButtonDisabled : ""}`}
       title="画像をアップロード"
+      disabled={pending}
+      aria-label="画像をアップロード"
+      aria-expanded={showCompactUploader}
+      onClick={() => {
+        setError(null);
+        setMessage(null);
+        setShowCompactUploader((open) => !open);
+      }}
     >
-      <input
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        onChange={(ev) => {
-          onPickUploadFile(ev.currentTarget.files?.[0] ?? null);
-          ev.currentTarget.value = "";
-        }}
-        className={styles.fileInputHidden}
-        disabled={pending}
-        aria-label="画像をアップロード"
-      />
       <Icon name="plus" size={18} aria-hidden />
-    </label>
+    </button>
   );
 
   const iconChoices = (
@@ -489,8 +492,16 @@ export function XIdCompactProfileForm({
             ) : null}
           </button>
         ))}
-        {iconUploadInput}
+        {iconUploadButton}
       </div>
+      {showCompactUploader ? (
+        <SquareIconEditor
+          key={editorKey}
+          pending={pending}
+          onUseImage={onUploadProcessedFile}
+          onCancel={() => setShowCompactUploader(false)}
+        />
+      ) : null}
       {candidates.length === 0 ? (
         <p className="fn-muted fn-text-sm">
           まだ候補がありません。＋からアップロードするか、作品に設定したアイコンが候補になります。
@@ -526,41 +537,42 @@ export function XIdCompactProfileForm({
         </div>
       ) : null}
       {mode === "select" || compact ? iconChoices : !compact ? (
-        <div className={styles.uploadPanel}>
-          <div className={styles.uploadPreview}>
-            {uploadPreview ?? selectedIconUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={uploadPreview ?? selectedIconUrl ?? ""}
-                alt=""
-                className={styles.uploadPreviewImage}
-              />
-            ) : (
-              <Icon name="upload" size={22} aria-hidden />
-            )}
-          </div>
+        <div
+          className={`${styles.uploadPanel} ${selectedIconUrl ? styles.uploadPanelWithPreview : ""}`}
+        >
+          {selectedIconUrl ? (
+            <div className={styles.uploadPreview}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={selectedIconUrl} alt="" className={styles.uploadPreviewImage} />
+            </div>
+          ) : null}
           <div className={styles.uploadBody}>
-            <label className="fn-btn fn-btn-ghost fn-btn-sm">
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                onChange={(ev) => onPickUploadFile(ev.currentTarget.files?.[0] ?? null)}
-                className={styles.fileInputHidden}
-                disabled={pending}
-              />
-              <Icon name="upload" size={12} aria-hidden /> 画像を選ぶ
-            </label>
-            <span className={styles.iconHint}>
-              250x250 程度の正方形推奨 / PNG・JPEG・WEBP / 2MB まで
-            </span>
-            {uploadFileName ? (
-              <span className={styles.iconHint}>選択中: {uploadFileName}</span>
-            ) : null}
+            <SquareIconEditor
+              key={editorKey}
+              pending={pending}
+              onUseImage={onUploadProcessedFile}
+            />
           </div>
         </div>
       ) : null}
-      {message ? <p className={styles.msgOk}>{message}</p> : null}
-      {error ? <p className={styles.msgErr}>{error}</p> : null}
+      {message ? (
+        <p className={styles.msgOk} role="status">
+          <Icon name="check" size={12} aria-hidden /> {message}
+          {savedIconUrl ? (
+            <>
+              {" "}
+              <a href={savedIconUrl} className={styles.iconHint}>
+                保存済み画像を表示
+              </a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      {error ? (
+        <p className={styles.msgErr} role="alert">
+          <Icon name="warning" size={12} aria-hidden /> {error}
+        </p>
+      ) : null}
     </div>
   );
 }

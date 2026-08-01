@@ -737,6 +737,7 @@ export function VideoForm({
             candidates={iconCandidates}
             initialIconUrl={initial.icon_url}
             disabled={fieldDisabled("submitter.icon_url")}
+            isEdit={mode === "edit"}
           />
         </div>
         <div className={cx(styles.field, styles.editableField)}>

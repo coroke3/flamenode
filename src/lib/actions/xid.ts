@@ -14,7 +14,8 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
-import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
+import { validateIconImageUpload } from "@/lib/utils/imageUpload";
+import { tryDeleteUnreferencedIcon } from "@/lib/media/iconOrphanCleanup";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { normalizePortfolioContact } from "@/lib/profileContact";
@@ -943,7 +944,6 @@ export async function uploadXIdIcon(
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const file = formData.get("icon_file");
   if (!xUserId || !(file instanceof File)) return { ok: false, message: "画像ファイルが必要です。" };
-  if (file.size > 2 * 1024 * 1024) return { ok: false, message: "2MB 以内の画像を選んでください。" };
 
   const db = context.db;
   if (!(await getLinkedXUser(db, xUserId, authUserId))) {
@@ -957,9 +957,14 @@ export async function uploadXIdIcon(
   const env = getEnv();
   if (!env.BUCKET) return { ok: false, message: "ストレージが利用できません。" };
   const buffer = await file.arrayBuffer();
-  const image = detectSupportedImageUpload(buffer);
-  if (!image) return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
+  const validated = validateIconImageUpload({
+    buffer,
+    declaredType: file.type,
+  });
+  if (!validated.ok) return { ok: false, message: validated.message };
+  const { image } = validated;
 
+  const oldIconUrl = row.icon_url;
   const objectId = generateId("xicon");
   const stagingKey = `xicons/staging/${authUserId}/${objectId}.${image.ext}`;
   const key = `xicons/${xUserId}/${objectId}.${image.ext}`;
@@ -997,6 +1002,9 @@ export async function uploadXIdIcon(
   }
   await env.BUCKET.delete(stagingKey).catch((error) => {
     console.warn("[uploadXIdIcon] staging cleanup failed", error);
+  });
+  await runXIdPostCommit("xid.uploadXIdIcon", "orphan_icon_cleanup", async () => {
+    await tryDeleteUnreferencedIcon(db.$client, env.BUCKET, oldIconUrl, iconUrl);
   });
   revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "アイコンをアップロードしました。", iconUrl };

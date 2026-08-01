@@ -1,67 +1,108 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
-import { uploadVideoIconCandidate } from "@/lib/actions/video";
+import { SquareIconEditor } from "@/components/media/SquareIconEditor";
+import type { VideoIconMode } from "@/lib/video/videoFormSchema";
 
 /**
  * 作品ごとアイコンの選択コンポーネント。
  *
- * ユーザー既定アイコン (`x_users.icon_url`) を変更しない点が `XIdIconPicker` と異なる。
- * 出力は `<input type="hidden" name="icon_url">` のみで、作品保存時に
- * `videos.creator_icon_url` へそのまま入る。空文字なら null として保存される。
- *
- * 候補は server 側で `getXIconCandidates(db, xId)` から取得する。
- * 「アイコンなし」を明示的に選べるよう、最後に空選択ボタンを置く。
- * アップロード成功時は active X ID の候補に追加され、router.refresh() で再取得される。
+ * ファイル選択時はローカルプレビューのみ。R2/DB への書き込みは作品保存時に行う。
+ * 出力: `icon_mode`, `icon_url`, `icon_file`（upload 時のみ）。
  */
 export interface VideoIconPickerProps {
   candidates: string[];
   initialIconUrl?: string | null;
   disabled?: boolean;
+  /** 編集フォームでは未変更時 `keep` を送る。 */
+  isEdit?: boolean;
 }
 
 export function VideoIconPicker({
   candidates,
   initialIconUrl,
   disabled,
+  isEdit = false,
 }: VideoIconPickerProps): React.ReactElement {
-  const router = useRouter();
-  const [selected, setSelected] = React.useState<string>(initialIconUrl ?? "");
-  const [mode, setMode] = React.useState<"select" | "upload">("select");
-  const [pending, startTransition] = React.useTransition();
+  const initialUrl = initialIconUrl ?? "";
+  const [iconMode, setIconMode] = React.useState<VideoIconMode>(
+    isEdit ? "keep" : initialUrl ? "existing" : "none",
+  );
+  const [selectedUrl, setSelectedUrl] = React.useState(initialUrl);
+  const [tab, setTab] = React.useState<"select" | "upload">("select");
+  const [uploadPreview, setUploadPreview] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [message, setMessage] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const clearUploadPreview = React.useCallback(() => {
+    setUploadPreview((current) => {
+      if (current) window.URL.revokeObjectURL(current);
+      return null;
+    });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (uploadPreview) window.URL.revokeObjectURL(uploadPreview);
+    };
+  }, [uploadPreview]);
+
+  const resolveModeForUrl = React.useCallback(
+    (url: string): VideoIconMode => {
+      if (isEdit && url === initialUrl) return "keep";
+      if (!url.trim()) return "none";
+      return "existing";
+    },
+    [initialUrl, isEdit],
+  );
+
   const choose = React.useCallback(
     (url: string) => {
       if (disabled) return;
-      setSelected(url);
+      clearUploadPreview();
+      setSelectedUrl(url);
+      setIconMode(resolveModeForUrl(url));
+      setError(null);
+      setTab("select");
     },
-    [disabled],
+    [clearUploadPreview, disabled, resolveModeForUrl],
   );
 
-  const onUpload = (file: File | null) => {
-    if (!file || disabled) return;
+  const syncFileToNamedInput = React.useCallback((file: File) => {
+    const input = fileInputRef.current;
+    if (!input) return;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+  }, []);
+
+  const onUseUploadedImage = React.useCallback(
+    async (file: File) => {
+      clearUploadPreview();
+      setUploadPreview(window.URL.createObjectURL(file));
+      setIconMode("upload");
+      setSelectedUrl("");
+      setError(null);
+      syncFileToNamedInput(file);
+    },
+    [clearUploadPreview, syncFileToNamedInput],
+  );
+
+  const cancelUpload = () => {
+    clearUploadPreview();
     setError(null);
-    setMessage(null);
-    const fd = new FormData();
-    fd.set("icon_file", file);
-    startTransition(async () => {
-      const r = await uploadVideoIconCandidate(fd);
-      if (!r.ok || !r.iconUrl) {
-        setError(r.message ?? "アップロードに失敗しました。");
-        return;
-      }
-      setMessage(r.message ?? "アップロードしました。");
-      setSelected(r.iconUrl);
-      // 新規候補をサーバー側 getXIconCandidates から再取得する。
-      router.refresh();
-    });
+    if (isEdit) {
+      setSelectedUrl(initialUrl);
+      setIconMode("keep");
+    } else {
+      setSelectedUrl(initialUrl);
+      setIconMode(initialUrl ? "existing" : "none");
+    }
+    setTab("select");
   };
 
-  // React は同じ要素の inline style で shorthand (border) と longhand (borderColor) を
-  // 混在させた状態で再 render すると警告を出すため、border 系は longhand 3 つに統一する。
   const buttonStyle: React.CSSProperties = {
     position: "relative",
     aspectRatio: "1 / 1",
@@ -113,9 +154,26 @@ export function VideoIconPicker({
     boxShadow: active ? "0 1px 2px rgba(0,0,0,0.08)" : undefined,
   });
 
+  const selectedCandidate =
+    iconMode === "keep" || iconMode === "existing" ? selectedUrl : "";
+  const showNoneSelected = iconMode === "none";
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      <input type="hidden" name="icon_url" value={selected} />
+      <input type="hidden" name="icon_mode" value={iconMode} />
+      <input
+        type="hidden"
+        name="icon_url"
+        value={iconMode === "existing" ? selectedUrl : ""}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        name={iconMode === "upload" ? "icon_file" : undefined}
+        accept="image/png,image/jpeg,image/webp"
+        style={{ display: "none" }}
+        disabled={disabled || iconMode !== "upload"}
+      />
       <div
         role="tablist"
         aria-label="作品アイコンの設定方法"
@@ -133,57 +191,60 @@ export function VideoIconPicker({
         <button
           type="button"
           role="tab"
-          aria-selected={mode === "select"}
+          aria-selected={tab === "select"}
           disabled={disabled}
-          onClick={() => setMode("select")}
-          style={modeBtnStyle(mode === "select")}
+          onClick={() => setTab("select")}
+          style={modeBtnStyle(tab === "select")}
         >
           候補から選ぶ
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={mode === "upload"}
-          disabled={disabled || pending}
-          onClick={() => setMode("upload")}
-          style={modeBtnStyle(mode === "upload")}
+          aria-selected={tab === "upload"}
+          disabled={disabled}
+          onClick={() => setTab("upload")}
+          style={modeBtnStyle(tab === "upload")}
         >
           新規アップロード
         </button>
       </div>
-      {mode === "upload" ? (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-            alignItems: "center",
-          }}
-        >
-          <label
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-            style={{ cursor: disabled || pending ? "not-allowed" : "pointer" }}
-          >
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={(ev) =>
-                onUpload(ev.currentTarget.files?.[0] ?? null)
-              }
-              style={{ display: "none" }}
-              disabled={disabled || pending}
-            />
-            <Icon name="upload" size={12} aria-hidden /> 画像を選ぶ
-          </label>
-          <span className="fn-muted fn-text-sm">
-            PNG/JPEG/WEBP / 2MB まで / 正方形推奨
-          </span>
-          {pending ? (
-            <span className="fn-muted fn-text-sm">アップロード中…</span>
+      {tab === "upload" ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          <SquareIconEditor
+            disabled={disabled}
+            onUseImage={onUseUploadedImage}
+            onCancel={cancelUpload}
+          />
+          {uploadPreview ? (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 12,
+                alignItems: "center",
+              }}
+            >
+              <div
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: "var(--radius-sm)",
+                  overflow: "hidden",
+                  border: "1px solid var(--border-subtle)",
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={uploadPreview} alt="" style={thumbStyle} />
+              </div>
+              <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
+                フォーム送信時にアップロードされます。
+              </p>
+            </div>
           ) : null}
         </div>
       ) : null}
-      {mode === "select" && candidates.length > 0 ? (
+      {tab === "select" && candidates.length > 0 ? (
         <div
           role="radiogroup"
           aria-label="アイコン候補"
@@ -195,7 +256,7 @@ export function VideoIconPicker({
           }}
         >
           {candidates.map((url) => {
-            const active = url === selected;
+            const active = url === selectedCandidate;
             return (
               <button
                 key={url}
@@ -220,13 +281,13 @@ export function VideoIconPicker({
             key="__none__"
             type="button"
             onClick={() => choose("")}
-            aria-pressed={selected === ""}
+            aria-pressed={showNoneSelected}
             aria-label="アイコンを指定しない"
             disabled={disabled}
             title="アイコンを指定しない"
             style={{
               ...buttonStyle,
-              ...(selected === "" ? activeStyle : {}),
+              ...(showNoneSelected ? activeStyle : {}),
               color: "var(--text-muted)",
               display: "grid",
               placeItems: "center",
@@ -235,25 +296,29 @@ export function VideoIconPicker({
             <Icon name="close" size={16} aria-hidden />
           </button>
         </div>
-      ) : mode === "select" ? (
+      ) : tab === "select" ? (
         <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
           まだ候補がありません。「新規アップロード」か下の URL 欄から指定できます。
         </p>
       ) : null}
-      <input
-        type="text"
-        value={selected}
-        onChange={(e) => !disabled && setSelected(e.target.value)}
-        placeholder="アイコン URL を直接入力 (任意)"
-        className="fn-input"
-        maxLength={500}
-        disabled={disabled}
-        aria-label="アイコン URL"
-      />
-      {message ? (
-        <p className="fn-muted fn-text-sm" role="status" style={{ margin: 0 }}>
-          <Icon name="check" size={11} aria-hidden /> {message}
-        </p>
+      {tab === "select" ? (
+        <input
+          type="text"
+          value={selectedUrl}
+          onChange={(e) => {
+            if (disabled) return;
+            const next = e.target.value;
+            setSelectedUrl(next);
+            setIconMode(resolveModeForUrl(next));
+            clearUploadPreview();
+            setError(null);
+          }}
+          placeholder="アイコン URL を直接入力 (任意)"
+          className="fn-input"
+          maxLength={500}
+          disabled={disabled}
+          aria-label="アイコン URL"
+        />
       ) : null}
       {error ? (
         <p

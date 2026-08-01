@@ -12,6 +12,11 @@ import { normalizeXId } from "@/lib/utils/xid";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
+import {
+  resolveVideoCreatorIcon,
+  rollbackUploadedVideoIcon,
+} from "@/lib/video/resolveVideoCreatorIcon";
+import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import {
   buildStagePermissionSubmission,
@@ -93,6 +98,7 @@ export async function updateVideo(
     raw.youtube_url = `https://youtu.be/${target.youtube_video_id}`;
   }
   setDefault("creator_x_user_id", target.creator_x_user_id);
+  setDefault("icon_mode", "keep");
   setDefault("icon_url", target.creator_icon_url);
   setDefault("music", target.music);
   setDefault("music_reference_url", target.music_reference_url);
@@ -108,6 +114,9 @@ export async function updateVideo(
 
   const parsed = parseVideoForm(raw, { youtubeRequired: false });
   if (!parsed.ok) return parsed;
+
+  const rawIconMode = String(formData.get("icon_mode") ?? raw.icon_mode ?? "keep").trim();
+  const iconChangeRequested = rawIconMode !== "keep";
 
   const nextStagePermissionResult = buildStagePermissionSubmission(
     formData,
@@ -173,7 +182,7 @@ export async function updateVideo(
   if (
     !sections.identity &&
     (changed(parsed.data.display_name, target.creator_display_name) ||
-      changed(parsed.data.icon_url, target.creator_icon_url))
+      iconChangeRequested)
   ) {
     return { ok: false, message: "提出者情報を編集する権限がありません。" };
   }
@@ -288,6 +297,25 @@ export async function updateVideo(
     customAnswerDrafts = customValidation.drafts;
   }
 
+  let parsedFormData = parsed.data;
+  let uploadedIconKey: string | null = null;
+  if (sections.identity) {
+    const iconResolved = await resolveVideoCreatorIcon({
+      formData,
+      parsed: parsed.data,
+      activeXId: nextCreatorX,
+      videoId,
+      existingIconUrl: target.creator_icon_url,
+      db,
+    });
+    if (!iconResolved.ok) return iconResolved;
+    uploadedIconKey = iconResolved.value.uploadedKey;
+    parsedFormData = {
+      ...parsed.data,
+      icon_url: iconResolved.value.iconUrl,
+    };
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const plan = buildVideoUpdatePlan({
     videoId,
@@ -297,7 +325,7 @@ export async function updateVideo(
     sections,
     target,
     targetSoftwareLabel,
-    parsed: parsed.data,
+    parsed: parsedFormData,
     youtubeId,
     youtubeChanged,
     nextCreatorX,
@@ -318,6 +346,11 @@ export async function updateVideo(
       approvedXIds,
       sessionRole: sessionUser.role,
     });
+    await cleanupReplacedVideoCreatorIcon(
+      db,
+      target.creator_icon_url,
+      parsedFormData.icon_url,
+    );
     return markPendingPublicReflection(
       {
         ok: true,
@@ -330,6 +363,7 @@ export async function updateVideo(
       staticRebuildEnqueued,
     );
   } catch (err) {
+    await rollbackUploadedVideoIcon(uploadedIconKey);
     if (isYoutubeIdUniqueConstraintError(err)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
     }

@@ -38,9 +38,14 @@ const youtubeUrlOptionalField = z.preprocess(
   z.union([z.literal(""), z.string().trim().url()]),
 );
 
+export const videoIconModeSchema = z.enum(["existing", "upload", "none", "keep"]);
+
+export type VideoIconMode = z.infer<typeof videoIconModeSchema>;
+
 const videoFormBaseSchema = z.object({
   display_name: z.string().trim().min(1).max(80),
   creator_x_user_id: z.string().trim().max(32).optional().nullable(),
+  icon_mode: videoIconModeSchema.optional().default("existing"),
   icon_url: z.preprocess(
     (val) => normalizeIconUrl(val),
     z.string().trim().max(500).optional().nullable(),
