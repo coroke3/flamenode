@@ -27,6 +27,11 @@ import {
   validateCustomAnswersForEvents,
   validateVideoMemberSubmission,
 } from "@/lib/video/submissionValidation";
+import {
+  loadMemberSubmissionBaseline,
+  memberChaptersPayloadChanged,
+  memberSubmissionPayloadChanged,
+} from "@/lib/video/memberSubmissionBaseline";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
 import {
   MAX_ATOMIC_VIDEO_EVENTS,
@@ -205,8 +210,13 @@ export async function updateVideo(
       changed(parsed.data.highlights, target.highlights) ||
       changed(parsed.data.production_story, target.production_story) ||
       changed(parsed.data.used_software, targetSoftwareLabel) ||
-      changed(nextStagePermission, currentStagePermission) ||
       changed(parsed.data.closing_comment, target.closing_comment))
+  ) {
+    return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
+  }
+  if (
+    !sections.descriptions &&
+    changed(nextStagePermission, currentStagePermission)
   ) {
     return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
   }
@@ -215,6 +225,50 @@ export async function updateVideo(
     parsed.data.is_collab !== (target.collaboration_type === "collab")
   ) {
     return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+  }
+
+  let memberSubmission = null;
+  let existingMemberBaseline: Awaited<ReturnType<typeof loadMemberSubmissionBaseline>> | null =
+    null;
+  let submittedMemberBaseline: Awaited<ReturnType<typeof loadMemberSubmissionBaseline>> | null =
+    null;
+  const isCollabSubmission = parsed.data.is_collab ?? false;
+  if (formData.has("members_json") || sections.members) {
+    const memberValidation = validateVideoMemberSubmission(
+      formData,
+      isCollabSubmission,
+    );
+    if (!memberValidation.ok) return memberValidation;
+    submittedMemberBaseline = {
+      members: memberValidation.value.members,
+      chaptersByIndex: memberValidation.value.chaptersByIndex,
+    };
+    existingMemberBaseline = await loadMemberSubmissionBaseline(db, videoId);
+
+    if (
+      !sections.members &&
+      memberSubmissionPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
+    ) {
+      return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+    }
+
+    if (
+      sections.members &&
+      !sections.member_chapters &&
+      memberChaptersPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
+    ) {
+      return { ok: false, message: "メンバーチャプターを編集する権限がありません。" };
+    }
+
+    if (sections.members) {
+      memberSubmission = memberValidation.value;
+      if (!sections.member_chapters) {
+        memberSubmission = {
+          ...memberSubmission,
+          chaptersByIndex: existingMemberBaseline.chaptersByIndex,
+        };
+      }
+    }
   }
 
   if (privilegeMode === "normal") {
@@ -236,6 +290,12 @@ export async function updateVideo(
     }
     if (changed(parsed.data.music, target.music) && !generalFields.has("music")) {
       return { ok: false, message: "楽曲名を編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.music_reference_url, target.music_reference_url) &&
+      !generalFields.has("music")
+    ) {
+      return { ok: false, message: "楽曲参照URLを編集する権限がありません。" };
     }
     if (changed(parsed.data.credit, target.credit) && !generalFields.has("credit")) {
       return { ok: false, message: "クレジットを編集する権限がありません。" };
@@ -276,22 +336,24 @@ export async function updateVideo(
     ) {
       return { ok: false, message: "合作メンバーを編集する権限がありません。" };
     }
+    if (
+      sections.members &&
+      submittedMemberBaseline &&
+      existingMemberBaseline &&
+      memberChaptersPayloadChanged(existingMemberBaseline, submittedMemberBaseline) &&
+      !generalFields.has("chapters")
+    ) {
+      return { ok: false, message: "メンバーチャプターを編集する権限がありません。" };
+    }
+    if (changed(nextStagePermission, currentStagePermission)) {
+      return { ok: false, message: "ステージ利用許可を編集する権限がありません。" };
+    }
   }
 
   if (sections.youtube && youtubeChanged && youtubeId) {
     if (await checkYoutubeVideoDuplicate(db, youtubeId, videoId)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
     }
-  }
-
-  let memberSubmission = null;
-  if (sections.members) {
-    const memberValidation = validateVideoMemberSubmission(
-      formData,
-      parsed.data.is_collab ?? false,
-    );
-    if (!memberValidation.ok) return memberValidation;
-    memberSubmission = memberValidation.value;
   }
 
   const hasEventIdsField = formData.has("event_ids");

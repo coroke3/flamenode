@@ -338,6 +338,8 @@ export function VideoForm({
   const videoSectionDisabled = isSectionDisabled(disabledSections, "video");
   const descriptionsDisabled = isSectionDisabled(disabledSections, "descriptions");
   const membersDisabled = isSectionDisabled(disabledSections, "members");
+  const chaptersFieldDisabled =
+    membersDisabled || isFieldDisabled(disabledFields, "chapters");
   const fieldDisabled = (key: string) =>
     isFieldDisabled(disabledFields, key) ||
     (key.startsWith("submitter.") && submitterDisabled) ||
@@ -1221,15 +1223,33 @@ export function VideoForm({
             fontSize: 13,
           }}
         >
-          <input type="hidden" name="is_collab" value="false" />
-          <input
-            type="checkbox"
-            name="is_collab"
-            value="true"
-            checked={isCollab}
-            onChange={(e) => setIsCollab(e.target.checked)}
-            disabled={membersDisabled}
-          />
+          {membersDisabled ? (
+            <>
+              <input
+                type="hidden"
+                name="is_collab"
+                value={initial.is_collab ? "true" : "false"}
+              />
+              <input
+                type="checkbox"
+                checked={isCollab}
+                readOnly
+                disabled
+                aria-readonly
+              />
+            </>
+          ) : (
+            <>
+              <input type="hidden" name="is_collab" value="false" />
+              <input
+                type="checkbox"
+                name="is_collab"
+                value="true"
+                checked={isCollab}
+                onChange={(e) => setIsCollab(e.target.checked)}
+              />
+            </>
+          )}
           合作作品として登録する
         </label>
         {isCollab ? (
@@ -1238,6 +1258,7 @@ export function VideoForm({
               initialMembers={initial.members}
               suggestions={memberSuggestions}
               disabled={membersDisabled}
+              chaptersDisabled={chaptersFieldDisabled}
               onChange={handleMembersChange}
               collabPermsHref="#video-collab-perms"
             />

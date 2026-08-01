@@ -409,6 +409,13 @@ export async function createChaptersBulk(
       video: target,
       requiredKey: "video.chapter_admin",
       privilegeMode: "event",
+    })) ||
+    (await canEditVideo({
+      db,
+      user: { id: sUser.id, role: sUser.role ?? null },
+      video: target,
+      requiredKey: "video.member_chapters",
+      privilegeMode: "normal",
     }));
   if (!canMod) {
     return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   GENERAL_EDITABLE_FIELD_KEYS,
   disabledFieldKeysFromGeneralFields,
+  normalModeAlwaysDisabledFieldKeys,
   normalizeGeneralEditableFields,
   parseGeneralEditableFields,
   resolveGeneralEditableScope,
@@ -79,4 +80,27 @@ test("disabledFieldKeysFromGeneralFields: maps missing keys to UI paths", () => 
   assert.ok(disabled.includes("descriptions.intro_comment"));
   assert.ok(!disabled.includes("video.title"));
   assert.equal(disabled.length, GENERAL_EDITABLE_FIELD_KEYS.length - 1);
+});
+
+test("disabledFieldKeysFromGeneralFields: music key maps to video.music (covers music_reference_url UI)", () => {
+  const disabled = disabledFieldKeysFromGeneralFields(new Set(["title"]));
+  assert.ok(disabled.includes("video.music"));
+});
+
+test("normalModeAlwaysDisabledFieldKeys: stage_permission is always disabled", () => {
+  const keys = normalModeAlwaysDisabledFieldKeys();
+  assert.ok(keys.includes("descriptions.stage_permission"));
+});
+
+test("sectionAllowedByGeneralFields: members without chapters", () => {
+  const membersOnly = new Set(["members"]);
+  assert.equal(sectionAllowedByGeneralFields("video.members", membersOnly), true);
+  assert.equal(sectionAllowedByGeneralFields("video.member_chapters", membersOnly), false);
+});
+
+test("sectionAllowedByGeneralFields: empty fields deny all sections", () => {
+  const empty = new Set();
+  assert.equal(sectionAllowedByGeneralFields("video.basics", empty), false);
+  assert.equal(sectionAllowedByGeneralFields("video.members", empty), false);
+  assert.equal(sectionAllowedByGeneralFields("video.member_chapters", empty), false);
 });

@@ -18,6 +18,8 @@ export {
   resolveGeneralEditableScope,
   sectionAllowedByGeneralFields,
   disabledFieldKeysFromGeneralFields,
+  normalModeAlwaysDisabledFieldKeys,
+  NORMAL_MODE_ALWAYS_DISABLED_FIELD_KEYS,
   type GeneralEditableFieldKey,
 } from "./generalEditPermissionsCore";
 

@@ -183,6 +183,15 @@ export function sectionAllowedByGeneralFields(
   }
 }
 
+export const NORMAL_MODE_ALWAYS_DISABLED_FIELD_KEYS = [
+  "descriptions.stage_permission",
+] as const;
+
+/** 一般編集モードでは常に UI 無効化するフィールド (一般作品権限の対象外)。 */
+export function normalModeAlwaysDisabledFieldKeys(): string[] {
+  return [...NORMAL_MODE_ALWAYS_DISABLED_FIELD_KEYS];
+}
+
 export function disabledFieldKeysFromGeneralFields(
   fields: Set<GeneralEditableFieldKey>,
 ): string[] {

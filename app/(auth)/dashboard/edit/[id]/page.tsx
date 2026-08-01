@@ -25,6 +25,7 @@ import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import {
   disabledFieldKeysFromGeneralFields,
   loadGeneralEditableFieldSet,
+  normalModeAlwaysDisabledFieldKeys,
 } from "@/lib/video/generalEditPermissions";
 import { computeAllowedVideoEditSections } from "@/lib/video/computeEditSections";
 import { VideoForm } from "@/components/forms/VideoForm";
@@ -317,6 +318,7 @@ export default async function EditVideoPage({
     credits: canEditCredits,
     descriptions: canEditDescriptions,
     members: canEditMembers,
+    member_chapters: canEditMemberChapters,
   } = allowedSections;
   const canEditAnySection =
     canEditIdentity ||
@@ -424,7 +426,9 @@ export default async function EditVideoPage({
     !canEditYoutube ? "video.youtube_url" : null,
     !canEditCredits ? "video.music" : null,
     !canEditCredits ? "video.credit" : null,
+    !canEditMemberChapters ? "chapters" : null,
     ...normalModeIdentityExtras,
+    ...(privilegeMode === "normal" ? normalModeAlwaysDisabledFieldKeys() : []),
     ...generalDisabledFields,
   ].filter((v): v is string => Boolean(v));
 

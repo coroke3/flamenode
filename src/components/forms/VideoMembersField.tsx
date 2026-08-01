@@ -29,6 +29,7 @@ interface VideoMembersFieldProps {
   suggestions?: VideoMemberSuggestion[];
   hiddenName?: string;
   disabled?: boolean;
+  chaptersDisabled?: boolean;
   /** 正規化後の有効メンバー一覧。入力・追加・削除・並び替え・CSV反映のすべてで通知する。 */
   onChange?: (members: VideoMemberInput[]) => void;
   /** 設定時は「編集できる人」セクションへ誘導するリンクを表示 */
@@ -82,6 +83,7 @@ export function VideoMembersField({
   suggestions = [],
   hiddenName = "members_json",
   disabled = false,
+  chaptersDisabled = false,
   onChange,
   collabPermsHref,
 }: VideoMembersFieldProps): React.ReactElement {
@@ -473,7 +475,7 @@ export function VideoMembersField({
 
   // メンバー行ごとのチャプター行を編集するヘルパー
   const updateChapterTimes = (i: number, raw: string) => {
-    if (disabled) return;
+    if (disabled || chaptersDisabled) return;
     const chapters = splitChapterTimes(raw).map((time) => ({
       time,
       label: "",
@@ -637,7 +639,7 @@ export function VideoMembersField({
                   title="mm:ss 形式。複数ある場合は ; 区切り"
                   className="fn-input"
                   maxLength={80}
-                  disabled={disabled}
+                  disabled={disabled || chaptersDisabled}
                 />
                 <input
                   type="text"
@@ -789,7 +791,7 @@ export function VideoMembersField({
                     title="mm:ss 形式。複数ある場合は ; 区切り"
                     className="fn-input"
                     maxLength={80}
-                    disabled={disabled}
+                    disabled={disabled || chaptersDisabled}
                   />
                 </label>
                 <label>
