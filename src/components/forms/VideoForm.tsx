@@ -826,6 +826,7 @@ export function VideoForm({
             key={`video-icon-${submitterFieldsKey}`}
             candidates={iconCandidates}
             initialIconUrl={submitterIconUrl}
+            persistedIconUrl={initial.icon_url}
             defaultIconUrl={defaultProfile?.icon_url}
             value={submitterIconUrl}
             onChange={(url) => {
@@ -833,6 +834,7 @@ export function VideoForm({
               setDirty(true);
             }}
             disabled={fieldDisabled("submitter.icon_url")}
+            isEdit={mode === "edit"}
           />
         </div>
         <div className={cx(styles.field, styles.editableField)}>

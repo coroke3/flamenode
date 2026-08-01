@@ -13,7 +13,6 @@ import {
   slots,
   users,
   videos,
-  xUsers,
 } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import {
@@ -57,6 +56,11 @@ import {
 } from "@/lib/video/slotPart";
 import type { VideoActionResult } from "@/lib/video/types";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
+import {
+  resolveVideoCreatorIcon,
+  rollbackUploadedVideoIcon,
+} from "@/lib/video/resolveVideoCreatorIcon";
+import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 import { MAX_ATOMIC_SUBMITTED_SLOTS } from "@/lib/video/atomicLimits";
 
@@ -163,10 +167,23 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     return { ok: false, message: "同時に更新する枠数が上限を超えています。" };
   }
   const now = Math.floor(Date.now() / 1000);
-  const xProfile = (
-    await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
-  )[0];
-  const displayName = parsed.data.display_name || slotRow.display_name || xProfile?.x_name || sessionUser.name || "anonymous";
+  const previousIconUrl = existingVideo?.creator_icon_url ?? null;
+  const iconResolved = await resolveVideoCreatorIcon({
+    formData,
+    parsed: parsed.data,
+    activeXId: activeX,
+    videoId,
+    existingIconUrl: previousIconUrl,
+    db,
+  });
+  if (!iconResolved.ok) return iconResolved;
+
+  const displayName =
+    parsed.data.display_name ||
+    slotRow.display_name ||
+    activeX ||
+    sessionUser.name ||
+    "anonymous";
   const videoAfter: typeof videos.$inferSelect = existingVideo
     ? {
         ...existingVideo,
@@ -179,7 +196,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
           parsed.data.display_name !== existingVideo.creator_display_name
             ? null
             : existingVideo.creator_display_name_yomi,
-        creator_icon_url: parsed.data.icon_url || null,
+        creator_icon_url: iconResolved.value.iconUrl,
         creator_youtube_channel_url: snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url),
         creator_profile_text: parsed.data.profile_text ?? null,
         creator_other_social_links: normalizeSocialLinksForStorage(
@@ -206,7 +223,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         source_type: "youtube",
         creator_display_name: displayName,
         creator_display_name_yomi: null,
-        creator_icon_url: parsed.data.icon_url || null,
+        creator_icon_url: iconResolved.value.iconUrl,
         creator_youtube_channel_url: snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url),
         creator_profile_text: parsed.data.profile_text ?? null,
         creator_other_social_links: normalizeSocialLinksForStorage(
@@ -398,6 +415,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     }
   } catch (error) {
     unstable_rethrow(error);
+    await rollbackUploadedVideoIcon(iconResolved.value.uploadedKey);
     if (isYoutubeIdUniqueConstraintError(error)) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };
     }
@@ -415,6 +433,16 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
           revalidatePath(`/event/${slotRow.event_id}`);
           revalidatePath(`/event/${slotRow.event_id}/slots`);
           revalidatePath("/dashboard");
+        },
+      },
+      {
+        name: "icon_orphan_cleanup",
+        run: async () => {
+          await cleanupReplacedVideoCreatorIcon(
+            db,
+            previousIconUrl,
+            iconResolved.value.iconUrl,
+          );
         },
       },
     ],

@@ -14,7 +14,8 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
-import { detectSupportedImageUpload } from "@/lib/utils/imageUpload";
+import { validateIconImageUpload } from "@/lib/utils/imageUpload";
+import { tryDeleteUnreferencedIcon } from "@/lib/media/iconOrphanCleanup";
 import { generateId } from "@/lib/utils/id";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { normalizePortfolioContact } from "@/lib/profileContact";
@@ -906,6 +907,7 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
   const candidates = await getXIconCandidates(db, xUserId, 40);
   if (!candidates.includes(iconUrl)) return { ok: false, message: "選択できないアイコンです。" };
 
+  const oldIconUrl = row.icon_url;
   const after = { ...row, icon_url: iconUrl };
   await mutateWithAudit(db, {
     mutationStatements: [
@@ -925,11 +927,19 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
       },
     ],
   });
-  await enqueueAfterXUserPublicUpdate(db, {
-    xUserId,
-    reason: "x_user_icon_update",
-    requestedByUserId: authUserId,
+  const env = getEnv();
+  await runXIdPostCommit("xid.setXIdIcon", "static_rebuild_enqueue", async () => {
+    await enqueueAfterXUserPublicUpdate(db, {
+      xUserId,
+      reason: "x_user_icon_update",
+      requestedByUserId: authUserId,
+    });
   });
+  if (env.BUCKET) {
+    await runXIdPostCommit("xid.setXIdIcon", "orphan_icon_cleanup", async () => {
+      await tryDeleteUnreferencedIcon(db.$client, env.BUCKET, oldIconUrl, iconUrl);
+    });
+  }
   revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "アイコンを更新しました。" };
 }
@@ -943,7 +953,6 @@ export async function uploadXIdIcon(
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   const file = formData.get("icon_file");
   if (!xUserId || !(file instanceof File)) return { ok: false, message: "画像ファイルが必要です。" };
-  if (file.size > 2 * 1024 * 1024) return { ok: false, message: "2MB 以内の画像を選んでください。" };
 
   const db = context.db;
   if (!(await getLinkedXUser(db, xUserId, authUserId))) {
@@ -957,14 +966,20 @@ export async function uploadXIdIcon(
   const env = getEnv();
   if (!env.BUCKET) return { ok: false, message: "ストレージが利用できません。" };
   const buffer = await file.arrayBuffer();
-  const image = detectSupportedImageUpload(buffer);
-  if (!image) return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
+  const validated = validateIconImageUpload({
+    buffer,
+    declaredType: file.type,
+  });
+  if (!validated.ok) return { ok: false, message: validated.message };
+  const { image } = validated;
 
+  const oldIconUrl = row.icon_url;
   const objectId = generateId("xicon");
   const stagingKey = `xicons/staging/${authUserId}/${objectId}.${image.ext}`;
   const key = `xicons/${xUserId}/${objectId}.${image.ext}`;
   const iconUrl = `/api/media/${key}`;
   const after = { ...row, icon_url: iconUrl };
+  let dbCommitted = false;
   try {
     await env.BUCKET.put(stagingKey, buffer, { httpMetadata: { contentType: image.contentType } });
     await env.BUCKET.put(key, buffer, { httpMetadata: { contentType: image.contentType } });
@@ -986,17 +1001,26 @@ export async function uploadXIdIcon(
         },
       ],
     });
+    dbCommitted = true;
+  } catch (error) {
+    // DB 反映前の失敗だけ新規 R2 を削除する。DB 成功後に正式キーを消すと死リンクになる。
+    if (!dbCommitted) {
+      await Promise.allSettled([env.BUCKET.delete(stagingKey), env.BUCKET.delete(key)]);
+    }
+    throw error;
+  }
+  await env.BUCKET.delete(stagingKey).catch((error) => {
+    console.warn("[uploadXIdIcon] staging cleanup failed", error);
+  });
+  await runXIdPostCommit("xid.uploadXIdIcon", "static_rebuild_enqueue", async () => {
     await enqueueAfterXUserPublicUpdate(db, {
       xUserId,
       reason: "x_user_icon_update",
       requestedByUserId: authUserId,
     });
-  } catch (error) {
-    await Promise.allSettled([env.BUCKET.delete(stagingKey), env.BUCKET.delete(key)]);
-    throw error;
-  }
-  await env.BUCKET.delete(stagingKey).catch((error) => {
-    console.warn("[uploadXIdIcon] staging cleanup failed", error);
+  });
+  await runXIdPostCommit("xid.uploadXIdIcon", "orphan_icon_cleanup", async () => {
+    await tryDeleteUnreferencedIcon(db.$client, env.BUCKET, oldIconUrl, iconUrl);
   });
   revalidateXIdentityPaths(xUserId);
   return { ok: true, message: "アイコンをアップロードしました。", iconUrl };

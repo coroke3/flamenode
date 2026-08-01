@@ -124,6 +124,9 @@ export default async function OnboardingPage({
             <Link href="/entry" className="fn-btn fn-btn-ghost">
               参加・投稿へ
             </Link>
+            <Link href={settingsHref} className="fn-btn fn-btn-ghost">
+              プロフィールを設定する
+            </Link>
           </div>
         </div>
       </div>
