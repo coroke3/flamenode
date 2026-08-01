@@ -185,7 +185,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
           parsed.data.display_name !== existingVideo.creator_display_name
             ? null
             : existingVideo.creator_display_name_yomi,
-        creator_icon_url: parsed.data.icon_url ?? existingVideo.creator_icon_url ?? null,
+        creator_icon_url: parsed.data.icon_url || null,
         creator_youtube_channel_url: snapshotYoutubeChannelUrl(
           parsed.data.youtube_channel_url ?? existingVideo.creator_youtube_channel_url,
         ),

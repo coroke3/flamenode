@@ -60,6 +60,13 @@ test("updateVideo は identity 権限で profile / SNS / YouTube を検証する
   assert.match(source, /submitter_profile_action/);
   assert.doesNotMatch(source, /buildSubmissionXUserPlan|ensureSubmissionXUser/);
 });
+test("VideoForm は作成モードと編集モードで提出者情報ヘルプを分岐する", () => {
+  const source = read("src/components/forms/VideoForm.tsx");
+  assert.match(source, /X IDに設定された既定プロフィールを入力しています/);
+  assert.match(source, /この作品に保存されている提出者情報を編集しています/);
+  assert.match(source, /mode === "edit"/);
+});
+
 test("編集ページ初期値は video.creator_* を使い x_users フォールバックしない", () => {
   const source = read("app/(auth)/dashboard/edit/[id]/page.tsx");
   assert.match(source, /creator_profile_text|creator_other_social_links/);

@@ -13,6 +13,13 @@ export function normalizeIconUrl(raw: unknown): string | null {
   return normalizeHttpUrl(s, { maxLength: 500 });
 }
 
+function normalizeOptionalNullableText(val: unknown): unknown {
+  if (val === null || val === undefined) return null;
+  if (typeof val !== "string") return val;
+  const trimmed = val.trim();
+  return trimmed || null;
+}
+
 function preprocessYoutubeUrl(val: unknown): unknown {
   if (typeof val === "string") {
     return normalizeHttpUrl(val, { maxLength: 500 }) ?? val;
@@ -45,7 +52,10 @@ const videoFormBaseSchema = z.object({
     (val) => normalizeIconUrl(val),
     z.string().trim().max(500).optional().nullable(),
   ),
-  profile_text: z.string().trim().max(1000).optional().nullable(),
+  profile_text: z.preprocess(
+    normalizeOptionalNullableText,
+    z.string().max(1000).nullable().optional(),
+  ),
   youtube_channel_url: z.preprocess(
     (val) => (typeof val === "string" ? normalizeHttpUrl(val, { maxLength: 500 }) : val),
     z.string().trim().max(500).optional().nullable(),
@@ -65,7 +75,8 @@ const videoFormBaseSchema = z.object({
           result.message ??
           "SNSリンクには、Email はメールアドレス、それ以外は http/https の有効なURLを入力してください。",
       });
-    }),
+    })
+    .transform((value) => validateSocialLinksJson(value ?? "").value),
   title: z.string().trim().min(1).max(120),
   music: z.string().trim().max(200).optional().nullable(),
   music_reference_url: z.preprocess(
@@ -132,5 +143,9 @@ export function parseVideoForm(
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
-  return { ok: true, data: parsed.data };
+  const data =
+    raw.icon_mode === "none"
+      ? { ...parsed.data, icon_url: null }
+      : parsed.data;
+  return { ok: true, data };
 }
