@@ -143,12 +143,16 @@ export function TopLoopShelf({
   const [canPrev, setCanPrev] = React.useState(false);
   const [canNext, setCanNext] = React.useState(false);
   const [needsLoop, setNeedsLoop] = React.useState(false);
+  const [isMobileViewport, setIsMobileViewport] = React.useState(false);
 
   const sourceItems = React.useMemo(() => toSourceItems(children), [children]);
+  // 2行グリッドは ≤700px のみ。PCで空の pad セルを出さない。
   const loopSourceItems = React.useMemo(
     () =>
-      mobileRows === 2 ? ensureColumnAligned(sourceItems, 2) : sourceItems,
-    [mobileRows, sourceItems],
+      mobileRows === 2 && isMobileViewport
+        ? ensureColumnAligned(sourceItems, 2)
+        : sourceItems,
+    [isMobileViewport, mobileRows, sourceItems],
   );
   const sourceSignature = React.useMemo(
     () => sourceItems.map((item) => item.sourceKey).join("|"),
@@ -301,12 +305,25 @@ export function TopLoopShelf({
     cycleWidthRef.current = 0;
     autoScrollCarryRef.current = 0;
     reevaluateLoopNeed();
-  }, [sourceSignature, mobileRows, reevaluateLoopNeed]);
+  }, [
+    sourceSignature,
+    mobileRows,
+    isMobileViewport,
+    loopSourceItems.length,
+    reevaluateLoopNeed,
+  ]);
 
   React.useLayoutEffect(() => {
     if (!needsLoop) return;
     seedCenterScroll();
-  }, [needsLoop, sourceSignature, mobileRows, seedCenterScroll]);
+  }, [
+    needsLoop,
+    sourceSignature,
+    mobileRows,
+    isMobileViewport,
+    loopSourceItems.length,
+    seedCenterScroll,
+  ]);
 
   React.useLayoutEffect(() => {
     if (needsLoop) return;
@@ -380,6 +397,14 @@ export function TopLoopShelf({
   React.useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     const sync = () => setReducedMotion(query.matches);
+    sync();
+    query.addEventListener?.("change", sync);
+    return () => query.removeEventListener?.("change", sync);
+  }, []);
+
+  React.useEffect(() => {
+    const query = window.matchMedia("(max-width: 700px)");
+    const sync = () => setIsMobileViewport(query.matches);
     sync();
     query.addEventListener?.("change", sync);
     return () => query.removeEventListener?.("change", sync);

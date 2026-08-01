@@ -102,6 +102,9 @@ test("TopLoopShelfはモバイル2行loopで奇数件を列境界にパディン
   assert.match(topLoopShelf, /items\.length % rotateCount === 0/);
   assert.match(topLoopShelf, /@pad-/);
   assert.match(topLoopShelf, /loopSourceItems/);
+  assert.match(topLoopShelf, /isMobileViewport/);
+  assert.match(topLoopShelf, /max-width: 700px/);
+  assert.match(topLoopShelf, /item\.node == null/);
   assert.match(topLoopShelf, /aria-hidden="true"/);
 });
 
