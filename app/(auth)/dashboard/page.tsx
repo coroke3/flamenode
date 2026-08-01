@@ -274,6 +274,42 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             </Link>
           </div>
         </div>
+      ) : onboarding.xIdentityStatus === "pending" ? (
+        <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
+          <Icon name="clock" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">申請完了・承認待ち</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              {onboarding.requestedXId
+                ? `@${onboarding.requestedXId} の連携を運営が確認しています。`
+                : "X ID 連携の申請を運営が確認しています。"}
+              {" "}
+              イベント枠の確保は利用できます。作品投稿は承認後に利用可能です。
+            </p>
+            <Link
+              href={onboardingHref("/dashboard")}
+              className="fn-btn fn-btn-ghost fn-btn-sm fn-mt-12"
+            >
+              申請状況を見る
+            </Link>
+          </div>
+        </div>
+      ) : onboarding.xIdentityStatus === "approved" && !onboarding.activeApprovedXId ? (
+        <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
+          <Icon name="alert" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">活動名義（Active X ID）の設定が必要です</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              承認済みの X ID があります。投稿に使う Active X ID を設定してください。
+            </p>
+            <Link
+              href="/dashboard/settings"
+              className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
+            >
+              設定で Active X ID を選ぶ
+            </Link>
+          </div>
+        </div>
       ) : null}
 
       {!db ? (

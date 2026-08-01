@@ -25,6 +25,7 @@ import { logFlowTrace } from "@/lib/observability/flowTrace";
 export type MinimalHeaderUser = HeaderUser;
 
 export type MinimalOnboardingState = {
+  /** 連携 X も pending 申請もないとき true。layout 強制リダイレクトには使わない（表示・将来用）。 */
   needsXIdOnboarding: boolean;
   hasLinkedXId: boolean;
   hasPendingXIdRequest: boolean;
@@ -267,14 +268,12 @@ export const getRequestAuthContext = cache(loadRequestAuthContext);
 export async function getLayoutAuthSurface(): Promise<{
   currentUser: CurrentUser | null;
   headerUser: MinimalHeaderUser | null;
-  needsXIdOnboarding: boolean;
   enrichmentFailed: boolean;
 }> {
   const ctx = await getRequestAuthContext();
   return {
     currentUser: ctx.currentUser,
     headerUser: ctx.headerUser,
-    needsXIdOnboarding: ctx.onboarding.needsXIdOnboarding,
     enrichmentFailed: ctx.enrichmentFailed,
   };
 }

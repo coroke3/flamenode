@@ -34,6 +34,15 @@ test("auth layout は X ID 未設定による強制リダイレクトをしな�
   assert.match(layout, /getLayoutAuthSurface/);
 });
 
+test("manage layout は X ID 未設定による強制リダイレクトをしない", () => {
+  const layout = read("../../../app/(manage)/layout.tsx");
+  assert.doesNotMatch(layout, /needsXIdOnboarding/);
+  assert.doesNotMatch(layout, /buildXIdOnboardingHref/);
+  assert.doesNotMatch(layout, /isXIdOnboardingExemptPath/);
+  assert.doesNotMatch(layout, /redirect\(buildXId/);
+  assert.match(layout, /getLayoutAuthSurface/);
+});
+
 test("settings onboarding=1 redirects to rules when TOS is not accepted", () => {
   const settings = read("../../../app/(auth)/dashboard/settings/page.tsx");
   assert.match(settings, /isOnboarding &&/);

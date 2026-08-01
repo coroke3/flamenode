@@ -592,9 +592,18 @@ function StaticVideoDetailView({
       </div>
     ) : null;
   const currentPath = `/${rawId}`;
-  const canInteract = !!(viewerUser?.id && viewerActiveX && viewerXApproved);
+  const viewerNeedsTermsAcceptance = viewerUser
+    ? viewerUser.is_tos_accepted !== 1 || viewerUser.terms_reaccept_required === 1
+    : false;
+  const canInteract = !!(
+    viewerUser?.id &&
+    !viewerNeedsTermsAcceptance &&
+    viewerActiveX
+  );
 
   const loginHref = `/entry?next=${encodeURIComponent(currentPath)}`;
+  const rulesHref = `/rules?next=${encodeURIComponent(currentPath)}`;
+  const onboardingHref = `/onboarding?next=${encodeURIComponent(currentPath)}`;
   const settingsHref =
     `/dashboard/settings?next=${encodeURIComponent(currentPath)}`;
 
@@ -661,33 +670,39 @@ function StaticVideoDetailView({
                         <>
                           ログインするといいね、セーブができます。
                           <Link
-                            href={`/entry?next=${encodeURIComponent(currentPath)}`}
+                            href={loginHref}
                             className={styles.interactionHintLink}
                           >
                             ログイン
                           </Link>
                         </>
+                      ) : viewerNeedsTermsAcceptance ? (
+                        <>
+                          利用規約に同意するといいね、セーブができます。
+                          <Link
+                            href={rulesHref}
+                            className={styles.interactionHintLink}
+                          >
+                            利用規約へ
+                          </Link>
+                        </>
                       ) : !viewerActiveX ? (
                         <>
-                          X IDを選択するといいね、セーブができます。
+                          活動名義（Active X ID）を選ぶといいね、セーブができます。
                           <Link
-                            href={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`}
+                            href={onboardingHref}
+                            className={styles.interactionHintLink}
+                          >
+                            初期設定へ
+                          </Link>
+                          <Link
+                            href={settingsHref}
                             className={styles.interactionHintLink}
                           >
                             X ID設定へ
                           </Link>
                         </>
-                      ) : (
-                        <>
-                          承認済みX IDが必要です。
-                          <Link
-                            href={`/dashboard/settings?next=${encodeURIComponent(currentPath)}`}
-                            className={styles.interactionHintLink}
-                          >
-                            X ID設定へ
-                          </Link>
-                        </>
-                      )}
+                      ) : null}
                     </span>
                   ) : null}
                 </div>

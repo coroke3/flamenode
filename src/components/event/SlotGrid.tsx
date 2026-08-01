@@ -22,6 +22,7 @@ import {
   type SlotBase,
   type SlotGroupRow,
 } from "@/lib/utils/slotGrouping";
+import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import styles from "./SlotGrid.module.css";
 
 export interface SlotRow {
@@ -40,6 +41,8 @@ export interface SlotGridProps {
   viewerXId: string | null;
   isAuthenticated?: boolean;
   canReserve: boolean;
+  /** ログイン + TOS + X申請済み(pending可)。サーバー writeGuard requested_x と同条件。 */
+  canTakeSlot: boolean;
   slotType: "time" | "count";
   maxSlotsPerVideo?: number;
   /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 15 分。 */
@@ -82,6 +85,7 @@ export function SlotGrid({
   viewerXId,
   isAuthenticated = false,
   canReserve,
+  canTakeSlot,
   slotType,
   maxSlotsPerVideo = 1,
   slotPartGapSec,
@@ -112,15 +116,7 @@ export function SlotGrid({
     (reason?: string): boolean => {
       if (typeof window === "undefined") return false;
       const next = `${window.location.pathname}${window.location.search}`;
-      if (reason === "tos_required" || reason === "tos_reaccept_required") {
-        router.push(`/rules?next=${encodeURIComponent(next)}`);
-        return true;
-      }
-      if (reason === "unauthenticated") {
-        router.push(`/entry?next=${encodeURIComponent(next)}`);
-        return true;
-      }
-      return false;
+      return redirectForGuard(router, reason, next);
     },
     [router],
   );
@@ -178,8 +174,6 @@ export function SlotGrid({
 
     return nextGroups;
   }, [displayRows, slotType, slotPartGapSec]);
-
-  const canTakeSlot = canReserve && !!viewerXId;
 
   const formatSlotLabel = (slot: SlotGroupRow): string => {
     if (slot.start_time) {
@@ -308,7 +302,6 @@ export function SlotGrid({
    */
   const isMergeTarget = React.useCallback(
     (gapSlot: SlotGroupRow): boolean => {
-      if (!viewerXId) return false;
       if (gapSlot.status !== "available") return false;
       const sorted = [...slots].sort((a, b) => {
         const aKey = a.sort_order ?? a.start_time ?? 0;
@@ -327,7 +320,7 @@ export function SlotGrid({
         right.is_owned_by_viewer
       );
     },
-    [slots, viewerXId],
+    [slots],
   );
 
   /**
@@ -357,9 +350,9 @@ export function SlotGrid({
     );
   }
 
-  const hasMineSlot =
-    !!viewerXId &&
-    slots.some((s) => s.status === "reserved" && s.is_owned_by_viewer);
+  const hasMineSlot = slots.some(
+    (s) => s.status === "reserved" && s.is_owned_by_viewer,
+  );
 
   return (
     <div className={styles.wrap}>
@@ -519,38 +512,34 @@ export function SlotGrid({
                                     >
                                       <Icon name="trash" size={12} aria-hidden /> 解放
                                     </button>
-                                    {viewerXId ? (
-                                      <>
-                                        <button
-                                          type="button"
-                                          className={styles.slotActionMenuItem}
-                                          disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
-                                          onClick={() => {
-                                            setActionMenuSlotId(null);
-                                            setConfirmExtend({
-                                              slotId: slot.slot_ids[0] ?? slot.id,
-                                              direction: "backward",
-                                            });
-                                          }}
-                                        >
-                                          前を追加
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className={styles.slotActionMenuItem}
-                                          disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
-                                          onClick={() => {
-                                            setActionMenuSlotId(null);
-                                            setConfirmExtend({
-                                              slotId: slot.slot_ids[slot.slot_ids.length - 1] ?? slot.id,
-                                              direction: "forward",
-                                            });
-                                          }}
-                                        >
-                                          後を追加
-                                        </button>
-                                      </>
-                                    ) : null}
+                                    <button
+                                      type="button"
+                                      className={styles.slotActionMenuItem}
+                                      disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
+                                      onClick={() => {
+                                        setActionMenuSlotId(null);
+                                        setConfirmExtend({
+                                          slotId: slot.slot_ids[0] ?? slot.id,
+                                          direction: "backward",
+                                        });
+                                      }}
+                                    >
+                                      前を追加
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={styles.slotActionMenuItem}
+                                      disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
+                                      onClick={() => {
+                                        setActionMenuSlotId(null);
+                                        setConfirmExtend({
+                                          slotId: slot.slot_ids[slot.slot_ids.length - 1] ?? slot.id,
+                                          direction: "forward",
+                                        });
+                                      }}
+                                    >
+                                      後を追加
+                                    </button>
                                   </div>
                                 ) : null}
                               </div>
@@ -585,8 +574,16 @@ export function SlotGrid({
                         ) : canReserve ? (
                           <span
                             className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
-                            aria-label={isAuthenticated ? "空き。X ID 未選択" : "空き。ログインが必要です"}
-                            title={isAuthenticated ? "X ID 未選択" : "ログインが必要です"}
+                            aria-label={
+                              isAuthenticated
+                                ? "空き。初期設定が未完了です"
+                                : "空き。ログインが必要です"
+                            }
+                            title={
+                              isAuthenticated
+                                ? "利用規約同意または X ID 申請が必要です"
+                                : "ログインが必要です"
+                            }
                           >
                             <span className={styles.emptyCircle} aria-hidden />
                           </span>

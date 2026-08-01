@@ -126,11 +126,12 @@ export async function getOnboardingState(
  * 初回設定申請まで到達した日時を記録する。
  * `onboarding_completed_at` は認可判定に使わない。
  * 申請または承認済み X を持つ状態を「到達」とみなす。
+ * `/onboarding` 到達時と、settings 等からの X 連携申請成功時に呼ぶ。
  */
 export async function maybeMarkOnboardingComplete(
   db: DrizzleDb,
   authUserId: string,
-  state: OnboardingState,
+  state: Pick<OnboardingState, "xIdentityStatus">,
 ): Promise<void> {
   const hasReachedOnboarding =
     state.xIdentityStatus === "pending" || state.xIdentityStatus === "approved";

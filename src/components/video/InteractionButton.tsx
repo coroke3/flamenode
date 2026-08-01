@@ -13,9 +13,9 @@ interface InteractionButtonProps {
   initialActive: boolean;
   count?: number;
   /**
-   * いいね・セーブが実行可能か。サーバー側 writeGuard は承認済み Active X ID を要求するため、
-   * `viewerXApproved` を渡すのが正しい。`!!viewerActiveX` で渡すと未承認 X ID の状態で
-   * 「押せるけど失敗する」になるので注意。
+   * いいね・セーブが実行可能か。サーバー側 writeGuard はログイン・TOS 同意・Active X ID
+   * (`requireActiveXId: true`, `requireApprovedActiveXId: false`) を要求する。
+   * 未ログイン / 規約未同意 / Active X 未選択のときは false にする。
    */
   canInteract?: boolean;
   /**
@@ -23,8 +23,8 @@ interface InteractionButtonProps {
    */
   disabledReason?: string;
   /**
-   * 押せないときの CTA リンク先。未ログインなら `/entry?next=...`、未承認なら
-   * `/dashboard/settings?next=...` を渡す想定。
+   * 押せないときの CTA リンク先。未ログインなら `/entry?next=...`、規約未同意なら
+   * `/rules?next=...`、Active X 未選択なら `/onboarding?next=...` 等を渡す想定。
    */
   actionHref?: string;
   /** CTA リンクのラベル (省略時は actionHref から自動推定)。 */
@@ -45,6 +45,8 @@ const LABELS: Record<InteractionButtonProps["kind"], { on: string; off: string; 
 function inferActionLabel(href: string | undefined): string {
   if (!href) return "";
   if (href.startsWith("/entry")) return "ログイン";
+  if (href.startsWith("/rules")) return "利用規約へ";
+  if (href.startsWith("/onboarding")) return "初期設定へ";
   if (href.startsWith("/dashboard/settings")) return "X ID設定へ";
   return "詳細";
 }

@@ -18,6 +18,9 @@ const entrySrc = read("../../../app/(auth)/entry/page.tsx");
 const slotAction = read("../actions/slot.ts");
 const interactionAction = read("../actions/video/interaction.ts");
 const writeGuard = read("./writeGuard.ts");
+const videoDetailPage = read("../../../app/(public)/[id]/page.tsx");
+const libraryPage = read("../../../app/(auth)/dashboard/library/page.tsx");
+const interactionButton = read("../../components/video/InteractionButton.tsx");
 
 test("OnboardingState は新仕様フィールドを持つ", () => {
   assert.match(onboarding, /XIdentityOnboardingStatus/);
@@ -52,8 +55,11 @@ test("OnboardingState: pending は申請済み申請またはリンク済み pen
   assert.match(onboarding, /hasPendingLinked \|\| pendingRequests\.length > 0/);
 });
 
-test("canPost は activeApprovedXId があるときだけ true", () => {
-  assert.match(onboarding, /canPost = !tosPending && activeApprovedXId != null/);
+test("requestXIdLink 成功時に onboarding_completed_at を記録する", () => {
+  const xid = read("../actions/xid.ts");
+  assert.match(xid, /maybeMarkOnboardingComplete/);
+  assert.match(xid, /afterXIdLinkRequestAccepted/);
+  assert.match(onboarding, /settings 等からの X 連携申請成功時に呼ぶ/);
 });
 
 test("onboardingUrls は sanitizeOnboardingNext で循環を拒否する", () => {
@@ -87,6 +93,10 @@ test("auth layout は X ID 未設定リダイレクトをしない", () => {
 test("ダッシュボードは needsTermsAcceptance / xIdentityStatus で案内を出す", () => {
   assert.match(dashboardSrc, /needsTermsAcceptance/);
   assert.match(dashboardSrc, /xIdentityStatus/);
+  assert.match(dashboardSrc, /xIdentityStatus === "pending"/);
+  assert.match(dashboardSrc, /activeApprovedXId/);
+  assert.match(dashboardSrc, /申請完了・承認待ち/);
+  assert.match(dashboardSrc, /作品投稿は承認後に利用可能/);
   assert.doesNotMatch(dashboardSrc, /isComplete/);
 });
 
@@ -105,10 +115,18 @@ test("writeGuard は identityRequirement: 'requested_x' オプションを持つ
 });
 
 test("枠確保は identityRequirement: 'requested_x' を使う", () => {
-  assert.match(slotAction, /identityRequirement: "requested_x"/);
+  for (const fn of ["reserveSlot", "extendOwnSlotGroup", "mergeOwnSlotGroups"]) {
+    const start = slotAction.indexOf(`export async function ${fn}`);
+    assert.ok(start >= 0, fn);
+    const next = slotAction.indexOf("\nexport async function ", start + 1);
+    const block = next < 0 ? slotAction.slice(start) : slotAction.slice(start, next);
+    assert.match(block, /identityRequirement: "requested_x"/, fn);
+    assert.doesNotMatch(block, /requireActiveXId: true/, fn);
+    assert.doesNotMatch(block, /requireApprovedActiveXId: true/, fn);
+  }
   // x_user_id は承認済み active X があるときだけ設定する
+  assert.match(slotAction, /resolveSlotXUserId/);
   assert.match(slotAction, /slotXUserId/);
-  assert.doesNotMatch(slotAction, /requireApprovedActiveXId: true/);
 });
 
 test("枠確保は reserved_by_user_id を正本として設定する", () => {
@@ -116,12 +134,45 @@ test("枠確保は reserved_by_user_id を正本として設定する", () => {
   assert.match(slotAction, /reserved_by_user_id: guard\.user\.id/);
   assert.match(slotAction, /x_user_id: slotXUserId/);
   // reserveSlot 関数内に guard.activeXId をスロット x_user_id に直書きしていない
-  const reserveBlock = slotAction.match(/export async function reserveSlot[\s\S]*?^export/m)?.[0] ?? "";
+  const sliceFn = (fn) => {
+    const start = slotAction.indexOf(`export async function ${fn}`);
+    const next = slotAction.indexOf("\nexport async function ", start + 1);
+    return next < 0 ? slotAction.slice(start) : slotAction.slice(start, next);
+  };
+  const reserveBlock = sliceFn("reserveSlot");
   assert.doesNotMatch(reserveBlock, /x_user_id: guard\.activeXId/);
+  const extendBlock = sliceFn("extendOwnSlotGroup");
+  assert.doesNotMatch(extendBlock, /x_user_id: guard\.activeXId/);
+  const mergeBlock = sliceFn("mergeOwnSlotGroups");
+  assert.doesNotMatch(mergeBlock, /x_user_id: guard\.activeXId/);
+  assert.match(slotAction, /function isOwnReservedSlot/);
+  assert.match(slotAction, /row\.reserved_by_user_id === userId/);
 });
 
 test("いいね/セーブ は approved active X を必須としない", () => {
   assert.doesNotMatch(interactionAction, /requireApprovedActiveXId: true/);
   // active X は引き続き必要 (DB 制約)
   assert.match(interactionAction, /requireActiveXId: true/);
+});
+
+test("作品詳細の canInteract は規約同意と Active X を見る (承認は不要)", () => {
+  assert.match(videoDetailPage, /viewerNeedsTermsAcceptance/);
+  assert.match(videoDetailPage, /!viewerNeedsTermsAcceptance/);
+  assert.match(videoDetailPage, /viewerActiveX/);
+  assert.doesNotMatch(
+    videoDetailPage,
+    /canInteract = !!\(\s*viewerUser\?\.id && viewerActiveX && viewerXApproved\s*\)/,
+  );
+  assert.doesNotMatch(videoDetailPage, /承認済みX IDが必要です/);
+});
+
+test("ライブラリは Active X があれば表示する (承認は不要)", () => {
+  assert.doesNotMatch(libraryPage, /activeXApproved/);
+  assert.match(libraryPage, /if \(activeX\)/);
+  assert.doesNotMatch(libraryPage, /承認済みのアクティブ X ID/);
+});
+
+test("InteractionButton の JSDoc は承認必須を主張しない", () => {
+  assert.match(interactionButton, /requireApprovedActiveXId: false/);
+  assert.doesNotMatch(interactionButton, /承認済み Active X ID を要求するため/);
 });

@@ -45,6 +45,7 @@ import {
 import { enqueueAfterXUserPublicUpdate } from "@/lib/staticRebuild/hooks";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { maybeMarkOnboardingComplete } from "@/lib/auth/onboarding";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -209,6 +210,19 @@ async function runXIdPostCommit(
     { flow, traceId: createTraceId() },
     [{ name: taskName, run: async () => { await run(); } }],
   );
+}
+
+async function afterXIdLinkRequestAccepted(
+  db: DB,
+  authUserId: string,
+  requestType: XIdentityRequestType,
+): Promise<void> {
+  await runXIdPostCommit("xid.requestXIdLink", "revalidate", () => {
+    revalidateXIdRequestPaths();
+  });
+  if (isXIdLinkRequestType(requestType)) {
+    await maybeMarkOnboardingComplete(db, authUserId, { xIdentityStatus: "pending" });
+  }
 }
 
 export async function setActiveXId(formData: FormData): Promise<XIdActionResult> {
@@ -459,9 +473,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
         audits,
         notificationWakeSource: webhookNotification ? "web" : undefined,
       });
-      await runXIdPostCommit("xid.requestXIdLink", "revalidate", () => {
-        revalidateXIdRequestPaths();
-      });
+      await afterXIdLinkRequestAccepted(db, authUserId, requestType);
       return { ok: true, message: "X ID 申請を受け付けました。" };
     } catch (error) {
       unstable_rethrow(error);
@@ -471,9 +483,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
           requestIdentity,
         );
         if (reconciliation.outcome === "accepted") {
-          await runXIdPostCommit("xid.requestXIdLink", "revalidate", () => {
-            revalidateXIdRequestPaths();
-          });
+          await afterXIdLinkRequestAccepted(db, authUserId, requestType);
           return { ok: true, message: "X ID 申請を受け付けました。" };
         }
         if (reconciliation.outcome === "limit") {

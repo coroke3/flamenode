@@ -11,6 +11,11 @@ import {
 } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import {
+  getOnboardingState,
+  onboardingHref,
+  onboardingRulesHref,
+} from "@/lib/auth/onboarding";
+import {
   computeEventStatus,
   eventStatusBadgeClass,
   eventStatusLabel,
@@ -106,6 +111,9 @@ export default async function EventSlotsPage({
   if (slotRows.length === 0) redirect(`/event/${event.id}`);
 
   const viewer = await getCurrentUser();
+  const onboarding =
+    (await withDatabase((db) => getOnboardingState(db, viewer))) ??
+    (await getOnboardingState(null, viewer));
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);
   const now = Math.floor(Date.now() / 1000);
@@ -216,17 +224,21 @@ export default async function EventSlotsPage({
           <Link href={`/entry?next=${encodeURIComponent(`/event/${event.id}/slots`)}`}>
             ログイン
           </Link>
-          とアクティブ X ID が必要です。
+          と初期設定（利用規約同意・X ID 申請）が必要です。
         </p>
-      ) : !viewer.active_x_user_id ? (
+      ) : onboarding.needsTermsAcceptance ? (
         <p className={styles.notice}>
-          <Icon name="info" size={13} aria-hidden /> アクティブ X ID を選択してください（
-          <Link
-            href={`/dashboard/settings?next=${encodeURIComponent(
-              `/event/${event.id}/slots`,
-            )}`}
-          >
-            設定
+          <Icon name="info" size={13} aria-hidden /> 確保には
+          <Link href={onboardingRulesHref(`/event/${event.id}/slots`)}>
+            利用規約への同意
+          </Link>
+          が必要です。
+        </p>
+      ) : !onboarding.canReserveSlot ? (
+        <p className={styles.notice}>
+          <Icon name="info" size={13} aria-hidden /> 確保には X ID の申請が必要です（
+          <Link href={onboardingHref(`/event/${event.id}/slots`)}>
+            初期設定
           </Link>
           ）。
         </p>
@@ -239,6 +251,7 @@ export default async function EventSlotsPage({
             viewerXId={viewer?.active_x_user_id ?? null}
             isAuthenticated={Boolean(viewer?.id)}
             canReserve={accepting}
+            canTakeSlot={accepting && onboarding.canReserveSlot}
             slotType={(event.slot_type ?? "time") as "time" | "count"}
             maxSlotsPerVideo={event.max_slots_per_video ?? 1}
             slotPartGapSec={slotPartGapSec}
