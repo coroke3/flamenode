@@ -14,6 +14,7 @@ import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard } from "@/components/video/VideoCard";
+import { RankedVideoCard } from "@/components/video/RankedVideoCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { type HomeStats } from "@/components/layout/homeVisuals";
 import {
@@ -31,9 +32,11 @@ import {
   buildPageMetadata,
 } from "@/lib/seo";
 import { shuffledCopy } from "@/lib/utils/shuffle";
+import { loadStaticTrending } from "@/lib/publicData/trendingLoader";
 
 /** 新着 loop 棚に載せる最大枚数。シャッフル元プールは100件のまま。 */
 const TOP_LATEST_LOOP_DISPLAY_LIMIT = 40;
+const TOP_TRENDING_DISPLAY_LIMIT = 12;
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/",
@@ -45,8 +48,15 @@ export const dynamic = "force-dynamic";
 
 export default async function TopPage(): Promise<React.ReactElement> {
   setPublicRequestRoute("/");
-  const staticLoaded = await loadStaticTopPage();
+  const [staticLoaded, trendingLoaded] = await Promise.all([
+    loadStaticTopPage(),
+    loadStaticTrending(),
+  ]);
   const isDegraded = isDegradedD1Mode(staticLoaded.mode);
+  const trendingItems =
+    trendingLoaded.data && !trendingLoaded.tooOldForHome
+      ? trendingLoaded.data.items.slice(0, TOP_TRENDING_DISPLAY_LIMIT)
+      : [];
   const data: StaticTopData | null = staticLoaded.top;
 
   const {
@@ -126,6 +136,32 @@ export default async function TopPage(): Promise<React.ReactElement> {
         slotStats={topSlotStats}
         excludeEventId={primaryHeroEvent?.id}
       />
+
+      {trendingItems.length > 0 ? (
+        <section
+          className={`fn-public-container fn-section ${styles.section}`}
+          aria-labelledby="sec-trending"
+        >
+          <SectionHeader
+            eyebrow="TRENDING"
+            title="FlameNodeで注目"
+            description="FlameNode内で最近よく視聴されている作品"
+            moreHref="/trending"
+            moreLabel="ランキングを見る"
+          />
+          <div className={styles.shelfBox}>
+            <Shelf ariaLabel="FlameNodeで注目" loop={false}>
+              {trendingItems.map((item, index) => (
+                <RankedVideoCard
+                  key={`${item.id}-trending-${index}`}
+                  item={item}
+                  rank={item.rank ?? index + 1}
+                />
+              ))}
+            </Shelf>
+          </div>
+        </section>
+      ) : null}
 
       {!isDegraded ? (
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-recommend">

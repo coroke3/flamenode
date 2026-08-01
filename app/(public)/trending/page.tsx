@@ -1,0 +1,101 @@
+import * as React from "react";
+import type { Metadata } from "next";
+import styles from "./page.module.css";
+import { RankedVideoCard } from "@/components/video/RankedVideoCard";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { formatUnix } from "@/lib/utils/format";
+import { buildPageMetadata } from "@/lib/seo";
+import { setPublicRequestRoute } from "@/lib/publicData/loader";
+import { loadStaticTrending } from "@/lib/publicData/trendingLoader";
+import type { TrendingItem } from "@/lib/publicData/staticTrendingCore";
+
+export const metadata: Metadata = buildPageMetadata({
+  path: "/trending",
+  title: "急上昇ランキング",
+  description:
+    "FlameNode内で最近よく視聴されている作品を、直近2日・5日・7日・30日の視聴数とともに紹介します。",
+});
+
+export const dynamic = "force-dynamic";
+
+const TRENDING_PAGE_LIMIT = 50;
+
+export default async function TrendingPage(): Promise<React.ReactElement> {
+  setPublicRequestRoute("/trending");
+  const trending = await loadStaticTrending();
+  const items = trending.data?.items.slice(0, TRENDING_PAGE_LIMIT) ?? [];
+  const generatedAt = trending.data?.generatedAt ?? null;
+
+  return (
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+      <header className="fn-page-head">
+        <span className="fn-eyebrow">trending</span>
+        <h1 className="fn-display fn-page-title">急上昇ランキング</h1>
+        <p className="fn-muted fn-text-sm fn-section-subtitle">
+          FlameNode内の視聴イベント（10秒以上）を集計したランキングです。
+        </p>
+      </header>
+
+      {generatedAt != null ? (
+        <p className={styles.updatedAt} role="status">
+          最終更新（JST）: {formatUnix(generatedAt)}
+        </p>
+      ) : null}
+
+      {trending.stale ? (
+        <p className={styles.notice} role="status">
+          ランキングデータが古い可能性があります。しばらくしてから再度ご確認ください。
+        </p>
+      ) : null}
+
+      {items.length === 0 ? (
+        <div className={styles.empty}>
+          <EmptyState
+            title="ランキングを準備中です"
+            description="視聴データの集計が完了すると、ここに急上昇作品が表示されます。"
+          />
+        </div>
+      ) : (
+        <ol className={styles.list} aria-label="急上昇ランキング">
+          {items.map((item, index) => (
+            <li key={item.id} className={styles.row}>
+              <TrendingRow item={item} rank={item.rank ?? index + 1} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function TrendingRow({
+  item,
+  rank,
+}: {
+  item: TrendingItem;
+  rank: number;
+}): React.ReactElement {
+  return (
+    <div className={styles.rowInner}>
+      <RankedVideoCard item={item} rank={rank} className={styles.card} />
+      <dl className={styles.periods} aria-label={`${rank}位の期間別視聴数`}>
+        <div>
+          <dt>2日</dt>
+          <dd>{item.views_2d.toLocaleString("ja-JP")}</dd>
+        </div>
+        <div>
+          <dt>5日</dt>
+          <dd>{item.views_5d.toLocaleString("ja-JP")}</dd>
+        </div>
+        <div>
+          <dt>7日</dt>
+          <dd>{item.views_7d.toLocaleString("ja-JP")}</dd>
+        </div>
+        <div>
+          <dt>30日</dt>
+          <dd>{item.views_30d.toLocaleString("ja-JP")}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}

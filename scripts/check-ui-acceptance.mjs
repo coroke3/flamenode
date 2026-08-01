@@ -146,8 +146,20 @@ requireMatch(
 );
 requireAll("app/(public)/page.tsx", [
   [
+    /Promise\.all\(\[[\s\S]*?loadStaticTopPage\(\)[\s\S]*?loadStaticTrending\(\)/,
+    "トップページが top と trending を並列読込していません。",
+  ],
+  [
     /loadStaticTopPage\(\)/,
     "トップページが静的top JSONの読込を維持していません。",
+  ],
+  [
+    /title="FlameNodeで注目"/,
+    "トップに FlameNodeで注目 セクションがありません。",
+  ],
+  [
+    /RankedVideoCard/,
+    "トップの急上昇棚が RankedVideoCard を使っていません。",
   ],
   [
     /shuffledCopy\(recommended\)/,
@@ -162,7 +174,7 @@ requireAll("app/(public)/page.tsx", [
     "新着100件を表示直前にランダム順へ変換していません。",
   ],
   [
-    /title="懐かしの映像"[\s\S]*?randomizedNostalgic\.map/,
+    /title="懐かしの映像"[\s\S]*?nostalgic\.map/,
     "3年以上前の作品を表示する懐かしの映像棚がありません。",
   ],
   [
@@ -303,6 +315,21 @@ requireAll("src/components/video/ChapterCommentPanel.tsx", [
     /Math\.floor\(\s*submittedChapter\.chapterTime/,
     "投稿時刻とdata-chapter-timeの整数化が一致していません。",
   ],
+]);
+
+requireAll("app/(public)/trending/page.tsx", [
+  [/急上昇ランキング/, "trending ページのタイトルがありません。"],
+  [/loadStaticTrending/, "trending ページが静的 trending JSON を読み込んでいません。"],
+  [/formatUnix/, "trending ページが JST 最終更新を表示していません。"],
+  [/views_2d/, "trending ページが期間別視聴数を表示していません。"],
+  [/views_30d/, "trending ページが30日視聴数を表示していません。"],
+  [/ランキングを準備中/, "trending ページの空状態メッセージがありません。"],
+]);
+
+requireAll("app/(public)/recommend/page.tsx", [
+  [/label: "人気作品"/, "recommend のチップが人気作品に改名されていません。"],
+  [/title="人気作品"/, "recommend の人気作品レール見出しがありません。"],
+  [/ariaLabel="人気作品"/, "recommend の人気作品 ARIA ラベルがありません。"],
 ]);
 
 requireAll("src/components/layout/Shelf.tsx", [
