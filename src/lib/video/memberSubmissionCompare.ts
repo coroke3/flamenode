@@ -6,6 +6,18 @@ export interface MemberSubmissionBaseline {
   chaptersByIndex: Map<number, ParsedMemberChapter[]>;
 }
 
+/** メンバー本体のみ（チャプター除外）。chapters-only 編集を members 変更と誤認しない。 */
+function memberListComparableSnapshot(members: MemberInput[]): string {
+  return JSON.stringify(
+    members.map((member) => ({
+      name: member.name.trim(),
+      x_user_id: normalizeXId(member.x_user_id),
+      role: member.role.trim(),
+      comment: member.comment.trim(),
+    })),
+  );
+}
+
 function memberComparableSnapshot(members: MemberInput[]): string {
   return JSON.stringify(
     members.map((member) => ({
@@ -38,6 +50,16 @@ function chaptersByIndexSnapshot(chaptersByIndex: Map<number, ParsedMemberChapte
         order_index: chapter.order_index,
       })),
     })),
+  );
+}
+
+export function memberListPayloadChanged(
+  baseline: MemberSubmissionBaseline,
+  submitted: MemberSubmissionBaseline,
+): boolean {
+  return (
+    memberListComparableSnapshot(baseline.members) !==
+    memberListComparableSnapshot(submitted.members)
   );
 }
 

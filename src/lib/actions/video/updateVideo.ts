@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
-import { videos, videoEvents } from "@/lib/db/schema";
+import { videos, videoEvents, xUsers } from "@/lib/db/schema";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { extractYoutubeId } from "@/lib/youtube/id";
@@ -30,7 +30,7 @@ import {
 import {
   loadMemberSubmissionBaseline,
   memberChaptersPayloadChanged,
-  memberSubmissionPayloadChanged,
+  memberListPayloadChanged,
 } from "@/lib/video/memberSubmissionBaseline";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
 import {
@@ -233,7 +233,7 @@ export async function updateVideo(
   let submittedMemberBaseline: Awaited<ReturnType<typeof loadMemberSubmissionBaseline>> | null =
     null;
   const isCollabSubmission = parsed.data.is_collab ?? false;
-  if (formData.has("members_json") || sections.members) {
+  if (formData.has("members_json") || sections.members || sections.member_chapters) {
     const memberValidation = validateVideoMemberSubmission(
       formData,
       isCollabSubmission,
@@ -247,13 +247,12 @@ export async function updateVideo(
 
     if (
       !sections.members &&
-      memberSubmissionPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
+      memberListPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
     ) {
       return { ok: false, message: "合作メンバーを編集する権限がありません。" };
     }
 
     if (
-      sections.members &&
       !sections.member_chapters &&
       memberChaptersPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
     ) {
@@ -268,11 +267,46 @@ export async function updateVideo(
           chaptersByIndex: existingMemberBaseline.chaptersByIndex,
         };
       }
+    } else if (sections.member_chapters) {
+      memberSubmission = {
+        members: existingMemberBaseline.members,
+        chaptersByIndex: submittedMemberBaseline.chaptersByIndex,
+      };
     }
   }
 
   if (privilegeMode === "normal") {
     const generalFields = await loadGeneralEditableFieldSet(db, target);
+    const creatorXRow = nextCreatorX
+      ? (
+          await db
+            .select({
+              profile_text: xUsers.profile_text,
+              youtube_channel_url: xUsers.youtube_channel_url,
+              other_social_links: xUsers.other_social_links,
+            })
+            .from(xUsers)
+            .where(eq(xUsers.id, nextCreatorX))
+            .limit(1)
+        )[0]
+      : null;
+    if (creatorXRow) {
+      if (changed(parsed.data.profile_text, creatorXRow.profile_text)) {
+        return { ok: false, message: "紹介文を編集する権限がありません。" };
+      }
+      if (changed(parsed.data.youtube_channel_url, creatorXRow.youtube_channel_url)) {
+        return { ok: false, message: "YouTubeチャンネルURLを編集する権限がありません。" };
+      }
+      if (changed(parsed.data.other_social_links, creatorXRow.other_social_links)) {
+        return { ok: false, message: "SNSリンクを編集する権限がありません。" };
+      }
+    }
+    const nextCreatorYoutube = snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url);
+    if (
+      changed(nextCreatorYoutube, target.creator_youtube_channel_url)
+    ) {
+      return { ok: false, message: "提出者YouTubeチャンネルを編集する権限がありません。" };
+    }
     if (
       changed(parsed.data.display_name, target.creator_display_name) &&
       !generalFields.has("display_name")

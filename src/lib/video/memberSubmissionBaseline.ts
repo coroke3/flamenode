@@ -10,6 +10,7 @@ import type { MemberSubmissionBaseline } from "@/lib/video/memberSubmissionCompa
 export type { MemberSubmissionBaseline } from "@/lib/video/memberSubmissionCompare";
 export {
   memberChaptersPayloadChanged,
+  memberListPayloadChanged,
   memberSubmissionPayloadChanged,
 } from "@/lib/video/memberSubmissionCompare";
 

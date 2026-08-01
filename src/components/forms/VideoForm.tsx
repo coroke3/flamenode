@@ -337,15 +337,16 @@ export function VideoForm({
   const submitterDisabled = isSectionDisabled(disabledSections, "submitter");
   const videoSectionDisabled = isSectionDisabled(disabledSections, "video");
   const descriptionsDisabled = isSectionDisabled(disabledSections, "descriptions");
-  const membersDisabled = isSectionDisabled(disabledSections, "members");
-  const chaptersFieldDisabled =
-    membersDisabled || isFieldDisabled(disabledFields, "chapters");
+  const membersSectionDisabled = isSectionDisabled(disabledSections, "members");
+  const membersListDisabled =
+    membersSectionDisabled || isFieldDisabled(disabledFields, "members.list");
+  const chaptersFieldDisabled = isFieldDisabled(disabledFields, "chapters");
   const fieldDisabled = (key: string) =>
     isFieldDisabled(disabledFields, key) ||
     (key.startsWith("submitter.") && submitterDisabled) ||
     (key.startsWith("video.") && videoSectionDisabled) ||
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
-    (key.startsWith("members.") && membersDisabled);
+    (key.startsWith("members.") && membersListDisabled);
   const hasInitialYoutube = Boolean(initial.youtube_url?.trim());
   const isYoutubeUrlRequired =
     mode === "free" || (mode === "edit" && hasInitialYoutube);
@@ -1202,13 +1203,13 @@ export function VideoForm({
       <section
         className={cx(
           styles.section,
-          membersDisabled && styles.sectionDisabled,
+          membersSectionDisabled && styles.sectionDisabled,
         )}
-        data-disabled={membersDisabled || undefined}
+        data-disabled={membersSectionDisabled || undefined}
       >
         <h2 className={styles.sectionTitle}>
           <Icon name="users" size={14} aria-hidden /> 合作メンバー
-          {membersDisabled ? (
+          {membersSectionDisabled ? (
             <span className={styles.sectionDisabledBadge} aria-label="編集不可">
               <Icon name="alert" size={11} aria-hidden /> 編集権限なし
             </span>
@@ -1219,16 +1220,16 @@ export function VideoForm({
             display: "inline-flex",
             alignItems: "center",
             gap: 8,
-            cursor: membersDisabled ? "default" : "pointer",
+            cursor: membersListDisabled ? "default" : "pointer",
             fontSize: 13,
           }}
         >
-          {membersDisabled ? (
+          {membersListDisabled ? (
             <>
               <input
                 type="hidden"
                 name="is_collab"
-                value={initial.is_collab ? "true" : "false"}
+                value={isCollab ? "true" : "false"}
               />
               <input
                 type="checkbox"
@@ -1257,7 +1258,7 @@ export function VideoForm({
             <VideoMembersField
               initialMembers={initial.members}
               suggestions={memberSuggestions}
-              disabled={membersDisabled}
+              disabled={membersListDisabled}
               chaptersDisabled={chaptersFieldDisabled}
               onChange={handleMembersChange}
               collabPermsHref="#video-collab-perms"

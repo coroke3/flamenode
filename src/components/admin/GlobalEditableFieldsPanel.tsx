@@ -38,9 +38,15 @@ export function GlobalEditableFieldsPanel({
   const [upcomingSelected, setUpcomingSelected] = React.useState(() =>
     fieldsSetFromCsv(settings.upcoming_editable_fields),
   );
+  /** 保存成功直後は result.settings を正本とし、refresh 前の古い props で上書きしない。 */
+  const skipPropsSyncRef = React.useRef(false);
 
   React.useEffect(() => {
     if (busy) return;
+    if (skipPropsSyncRef.current) {
+      skipPropsSyncRef.current = false;
+      return;
+    }
     setDefaultSelected(fieldsSetFromCsv(settings.default_editable_fields));
     setUpcomingSelected(fieldsSetFromCsv(settings.upcoming_editable_fields));
   }, [busy, settings.default_editable_fields, settings.upcoming_editable_fields]);
@@ -84,6 +90,7 @@ export function GlobalEditableFieldsPanel({
         return;
       }
       if (result.settings) {
+        skipPropsSyncRef.current = true;
         setDefaultSelected(fieldsSetFromCsv(result.settings.default_editable_fields));
         setUpcomingSelected(fieldsSetFromCsv(result.settings.upcoming_editable_fields));
       }

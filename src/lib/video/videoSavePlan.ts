@@ -97,6 +97,7 @@ export function buildVideoUpdatePayload(args: {
   nextCreatorX: string;
   allowSubmitterChange: boolean;
   sections: AllowedVideoEditSections;
+  privilegeMode: CanEditVideoPrivilegeMode;
   now: number;
   creatorYoutubeChannelUrl: string | null;
 }): VideoUpdatePayload {
@@ -107,6 +108,7 @@ export function buildVideoUpdatePayload(args: {
     nextCreatorX,
     allowSubmitterChange,
     sections,
+    privilegeMode,
     now,
     creatorYoutubeChannelUrl,
   } = args;
@@ -116,9 +118,10 @@ export function buildVideoUpdatePayload(args: {
     creator_x_user_id: allowSubmitterChange ? nextCreatorX || null : target.creator_x_user_id,
     creator_display_name: sections.identity ? parsed.display_name : target.creator_display_name,
     creator_icon_url: sections.identity ? parsed.icon_url || null : target.creator_icon_url,
-    creator_youtube_channel_url: sections.identity
-      ? creatorYoutubeChannelUrl
-      : target.creator_youtube_channel_url,
+    creator_youtube_channel_url:
+      sections.identity && privilegeMode !== "normal"
+        ? creatorYoutubeChannelUrl
+        : target.creator_youtube_channel_url,
     music: sections.credits ? parsed.music ?? null : target.music,
     music_reference_url: sections.credits
       ? parsed.music_reference_url ?? null
@@ -172,6 +175,7 @@ export function buildVideoUpdatePlan(args: {
     nextCreatorX: args.nextCreatorX,
     allowSubmitterChange: args.allowSubmitterChange,
     sections: args.sections,
+    privilegeMode: args.privilegeMode,
     now: args.now,
     creatorYoutubeChannelUrl: args.creatorYoutubeChannelUrl,
   });
@@ -274,14 +278,16 @@ export async function applyVideoUpdatePlan(
   const atomic = emptyVideoAtomicWritePlan();
 
   if (sections.identity) {
+    const allowProfileFields =
+      plan.privilegeMode !== "normal" &&
+      (args.sessionRole === "admin" || args.approvedXIds.includes(plan.nextCreatorX));
     appendVideoAtomicWritePlan(atomic, await buildSubmissionXUserPlan(db, {
       xId: plan.nextCreatorX,
       displayName: payload.creator_display_name ?? "",
-      profileText: plan.profileText,
-      youtubeChannelUrl: plan.youtubeChannelUrl,
-      socialLinks: plan.socialLinks,
-      allowProfileUpdate:
-        args.sessionRole === "admin" || args.approvedXIds.includes(plan.nextCreatorX),
+      profileText: allowProfileFields ? plan.profileText : undefined,
+      youtubeChannelUrl: allowProfileFields ? plan.youtubeChannelUrl : undefined,
+      socialLinks: allowProfileFields ? plan.socialLinks : undefined,
+      allowProfileUpdate: allowProfileFields,
       actorUserId: plan.operatorUserId,
     }));
   }
@@ -330,7 +336,7 @@ export async function applyVideoUpdatePlan(
       actorUserId: plan.operatorUserId,
     }));
   }
-  if (sections.members && plan.memberSubmission) {
+  if ((sections.members || sections.member_chapters) && plan.memberSubmission) {
     appendVideoAtomicWritePlan(atomic, await buildReplaceVideoMembersPlan(db, {
       videoId: plan.videoId,
       members: plan.memberSubmission.members,

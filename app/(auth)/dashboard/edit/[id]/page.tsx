@@ -326,7 +326,8 @@ export default async function EditVideoPage({
     canEditYoutube ||
     canEditCredits ||
     canEditDescriptions ||
-    canEditMembers;
+    canEditMembers ||
+    canEditMemberChapters;
 
   // モード切替バナーで「管理者権限で編集」「イベント運営権限で編集」を出すかの判定。
   //
@@ -354,7 +355,8 @@ export default async function EditVideoPage({
       eventSections.youtube ||
       eventSections.credits ||
       eventSections.descriptions ||
-      eventSections.members;
+      eventSections.members ||
+      eventSections.member_chapters;
   }
 
   const canShowPrivilegeSwitchOnly =
@@ -400,7 +402,7 @@ export default async function EditVideoPage({
     !canEditIdentity ? "submitter" : null,
     !canEditBasics && !canEditYoutube && !canEditCredits ? "video" : null,
     !canEditDescriptions ? "descriptions" : null,
-    !canEditMembers ? "members" : null,
+    !canEditMembers && !canEditMemberChapters ? "members" : null,
   ].filter((v): v is string => Boolean(v));
 
   const generalDisabledFields =
@@ -427,6 +429,7 @@ export default async function EditVideoPage({
     !canEditCredits ? "video.music" : null,
     !canEditCredits ? "video.credit" : null,
     !canEditMemberChapters ? "chapters" : null,
+    !canEditMembers ? "members.list" : null,
     ...normalModeIdentityExtras,
     ...(privilegeMode === "normal" ? normalModeAlwaysDisabledFieldKeys() : []),
     ...generalDisabledFields,

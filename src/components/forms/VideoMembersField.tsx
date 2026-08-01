@@ -475,7 +475,7 @@ export function VideoMembersField({
 
   // メンバー行ごとのチャプター行を編集するヘルパー
   const updateChapterTimes = (i: number, raw: string) => {
-    if (disabled || chaptersDisabled) return;
+    if (chaptersDisabled) return;
     const chapters = splitChapterTimes(raw).map((time) => ({
       time,
       label: "",
@@ -639,7 +639,7 @@ export function VideoMembersField({
                   title="mm:ss 形式。複数ある場合は ; 区切り"
                   className="fn-input"
                   maxLength={80}
-                  disabled={disabled || chaptersDisabled}
+                  disabled={chaptersDisabled}
                 />
                 <input
                   type="text"
@@ -791,7 +791,7 @@ export function VideoMembersField({
                     title="mm:ss 形式。複数ある場合は ; 区切り"
                     className="fn-input"
                     maxLength={80}
-                    disabled={disabled || chaptersDisabled}
+                    disabled={chaptersDisabled}
                   />
                 </label>
                 <label>
