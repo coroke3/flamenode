@@ -8,6 +8,7 @@ import {
   syncBatch,
   syncPendingBatch,
   YOUTUBE_MAX_EXTERNAL_REQUESTS_PER_RUN,
+  YOUTUBE_METADATA_LOOKUP_CHUNK_SIZE,
   YOUTUBE_PENDING_MAX_API_BATCHES_PER_RUN,
   YOUTUBE_PENDING_MAX_VIDEOS_PER_RUN,
   YOUTUBE_SYNC_BATCH_SIZE,
@@ -51,6 +52,28 @@ test("pending only は最大50件・API batch 1件に固定する", () => {
   assert.match(source, /selectPendingSyncRows/);
   assert.match(source, /changed_video_ids/);
   assert.match(source, /has_more_pending/);
+});
+
+test("Recovery Cronの既存metadata読取はD1の100 bind未満へ分割する", async () => {
+  assert.equal(YOUTUBE_METADATA_LOOKUP_CHUNK_SIZE, 90);
+  const { env, fetchImpl } = multiChunkEnv(200);
+
+  await syncBatch(env, fetchImpl, undefined, {
+    mode: "scheduled_only",
+    includePending: true,
+    maxVideos: 200,
+    maxApiBatches: 1,
+  });
+
+  const lookupCalls = env.sqlCalls.filter(({ sql }) =>
+    sql.includes("WHERE video_id IN")
+  );
+  assert.equal(lookupCalls.length, 3);
+  assert.ok(
+    lookupCalls.every(({ bindings }) =>
+      bindings.length > 0 && bindings.length < 100
+    ),
+  );
 });
 
 test("YouTube quotaはD1の日次80%予算を予約し未使用分を返却する", () => {

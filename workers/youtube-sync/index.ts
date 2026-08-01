@@ -114,6 +114,8 @@ const SYNC_ELIGIBILITY_TIMESTAMP_SQL = `COALESCE(
 const NOT_BLOCKED_FOR_RELATED_SQL = `COALESCE(ym.youtube_privacy_status, '') <> 'private'
           AND COALESCE(ym.youtube_availability_status, '')
               NOT IN ('private', 'missing_or_private')`;
+/** Recovery Cron は最大200件を選ぶため、既存metadata読取をD1の100 bind未満へ分割する。 */
+export const YOUTUBE_METADATA_LOOKUP_CHUNK_SIZE = 90;
 /** D1の1 query最大100 bindings未満になるよう、9列 x 10行（90 bindings）で固定する。 */
 const BULK_UPSERT_ROWS = 10;
 const YOUTUBE_QUOTA_COOLDOWN_SEC = 60 * 60;
@@ -541,18 +543,29 @@ async function loadExistingMetadata(
   signal?.throwIfAborted();
   const map = new Map<string, ExistingMetadataRow>();
   if (videoIds.length === 0) return map;
-  const placeholders = videoIds.map(() => "?").join(", ");
-  const result = await env.DB.prepare(
-    `SELECT video_id, view_count, duration_seconds,
-            youtube_privacy_status, youtube_availability_status, sync_status
-       FROM video_youtube_metadata
-      WHERE video_id IN (${placeholders})`,
-  )
-    .bind(...videoIds)
-    .all<ExistingMetadataRow>();
-  signal?.throwIfAborted();
-  for (const row of result.results ?? []) {
-    map.set(row.video_id, row);
+  for (
+    let offset = 0;
+    offset < videoIds.length;
+    offset += YOUTUBE_METADATA_LOOKUP_CHUNK_SIZE
+  ) {
+    signal?.throwIfAborted();
+    const chunk = videoIds.slice(
+      offset,
+      offset + YOUTUBE_METADATA_LOOKUP_CHUNK_SIZE,
+    );
+    const placeholders = chunk.map(() => "?").join(", ");
+    const result = await env.DB.prepare(
+      `SELECT video_id, view_count, duration_seconds,
+              youtube_privacy_status, youtube_availability_status, sync_status
+         FROM video_youtube_metadata
+        WHERE video_id IN (${placeholders})`,
+    )
+      .bind(...chunk)
+      .all<ExistingMetadataRow>();
+    signal?.throwIfAborted();
+    for (const row of result.results ?? []) {
+      map.set(row.video_id, row);
+    }
   }
   return map;
 }
