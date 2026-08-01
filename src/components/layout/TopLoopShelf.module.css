@@ -1,0 +1,204 @@
+.fullBleed {
+  width: 100%;
+  margin-inline: 0;
+}
+
+.wrapper {
+  position: relative;
+}
+
+.scroller {
+  position: relative;
+  display: flex;
+  gap: var(--d-gap, 16px);
+  overflow-x: auto;
+  scroll-snap-type: none;
+  overscroll-behavior-inline: contain;
+  /* 縦ページスクロールを阻害しない（pan-x 単独は避ける） */
+  touch-action: manipulation;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 4px 0 16px;
+}
+
+.scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.group {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: clamp(220px, 22vw, 280px);
+  gap: var(--d-gap, 16px);
+  flex: 0 0 auto;
+}
+
+.group > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.padCell {
+  visibility: hidden;
+  pointer-events: none;
+  min-height: 1px;
+}
+
+.fadeLeft,
+.fadeRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 72px;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.fadeLeft {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--bg-base) 92%, transparent),
+    transparent
+  );
+}
+
+.fadeRight {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--bg-base) 92%, transparent),
+    transparent
+  );
+}
+
+.fadeLeft.isVisible,
+.fadeRight.isVisible {
+  opacity: 1;
+}
+
+.arrow {
+  display: none;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  height: 34px;
+  width: 34px;
+  border-radius: 50%;
+  background-color: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.arrow:hover:not(:disabled) {
+  background-color: var(--accent-primary);
+  color: var(--accent-ink);
+  transform: translateY(-50%);
+}
+
+.arrow:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.arrow:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+@media (min-width: 701px) {
+  .fullBleed {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    max-width: none;
+    --shelf-rail-inline-start: max(
+      var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 20px)),
+      calc(
+        (100vw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
+          var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 20px))
+      )
+    );
+    --shelf-rail-inline-end: max(
+      var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 20px)),
+      calc(
+        (100vw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
+          var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 20px))
+      )
+    );
+  }
+
+  .wrapper {
+    overflow-x: clip;
+  }
+
+  .scroller {
+    padding-left: var(--shelf-rail-inline-start);
+    padding-right: var(--shelf-rail-inline-end);
+  }
+
+  /* full-bleed と同じ 701px から矢印を表示（701–767 でも fade + arrow） */
+  .arrow {
+    display: inline-flex;
+  }
+
+  /* fade はビューポート端、矢印はコンテンツレール付近 */
+  .arrowPrev {
+    left: max(8px, calc(var(--shelf-rail-inline-start) - 42px));
+  }
+
+  .arrowNext {
+    right: max(8px, calc(var(--shelf-rail-inline-end) - 42px));
+  }
+}
+
+/* TopLoopShelf.tsx の MOBILE_SHELF_MAX_WIDTH_PX (700) と同期すること */
+@media (max-width: 700px) {
+  .fullBleed {
+    width: 100%;
+    margin-inline: 0;
+    max-width: 100%;
+  }
+
+  .scroller {
+    gap: 12px;
+    padding-left: var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 20px));
+    padding-right: var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 20px));
+  }
+
+  .group {
+    grid-auto-columns: clamp(210px, 72vw, 260px);
+    gap: 12px;
+  }
+
+  .scroller[data-mobile-rows="2"] .group {
+    grid-template-rows: repeat(2, minmax(0, auto));
+    grid-auto-columns: clamp(150px, 43vw, 190px);
+    gap: 12px;
+  }
+
+  .fadeLeft,
+  .fadeRight {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroller {
+    scroll-behavior: auto;
+  }
+
+  .fadeLeft,
+  .fadeRight,
+  .arrow,
+  .group > * {
+    transition: none;
+  }
+}

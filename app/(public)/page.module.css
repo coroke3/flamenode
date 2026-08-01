@@ -1,6 +1,8 @@
 .page {
   padding-bottom: 72px;
   background: var(--bg-base);
+  /* TopLoopShelf の full-bleed（100vw）がスクロールバー幅でページ横にはみ出さないようにする */
+  overflow-x: clip;
 }
 
 .section {
