@@ -146,6 +146,24 @@ async function loadRecentListPayload(
   }
 }
 
+async function loadExistingTrendingItemCount(
+  env: Ga4TrendingSyncEnv,
+  signal?: AbortSignal,
+): Promise<number> {
+  signal?.throwIfAborted();
+  const object = await env.R2.get(GA4_TRENDING_OUTPUT_KEY);
+  signal?.throwIfAborted();
+  if (!object) return 0;
+  const text = await object.text();
+  signal?.throwIfAborted();
+  try {
+    const payload = JSON.parse(text) as TrendingOutputPayload;
+    return Array.isArray(payload.items) ? payload.items.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function putTrendingPayload(
   env: Ga4TrendingSyncEnv,
   payload: TrendingOutputPayload,
@@ -190,7 +208,8 @@ export async function syncGa4Trending(
     return emptyResult({ processed: 0, failed: 1, skipped: 0 });
   }
 
-  const budget = new ExternalRequestBudget(4);
+  // OAuth token exchange と runReport ページングで共有する外部 API 予算
+  const budget = new ExternalRequestBudget(16);
   const startedAt = Date.now();
 
   try {
@@ -201,6 +220,16 @@ export async function syncGa4Trending(
       fetch,
       signal,
     );
+    if (
+      periods.length === 0 &&
+      Array.isArray(recent.items) &&
+      recent.items.length > 0
+    ) {
+      const existingItemCount = await loadExistingTrendingItemCount(env, signal);
+      if (existingItemCount > 0) {
+        throw new Error("ga4_empty_report_preserving_existing");
+      }
+    }
     const items = rankTrendingItems(recent, periods);
     const generatedAt = Math.floor(Date.now() / 1000);
     const outputPayload: TrendingOutputPayload = {

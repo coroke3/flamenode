@@ -94,6 +94,8 @@ R2 JSON 例:
 
 **fail-closed**: GA4 失敗・`list/recent.json` 欠損時は R2 を上書きしない。前回成功分が残る。
 
+**windows メタデータ**: JSON の `windows` 日付は同期時刻の UTC 日付を参考値として出力する。GA4 `runReport` の集計境界はプロパティのタイムゾーン設定に従う。
+
 ### R2 JSON の `schema_version`
 
 公開側 `normalizeStaticTrending` は **`schema_version` が number の `1` であること** を必須とする。欠落・文字列 `"1"`・他バージョンは不正扱いで `data=null`（表示は空または前回キャッシュ）。`items` が空でも `generated_at` と `schema_version: 1` があれば有効。

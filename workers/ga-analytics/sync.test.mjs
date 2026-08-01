@@ -197,12 +197,17 @@ test("syncGa4Trending puts empty items when GA returns no matching views", async
       "-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7VJTUt9Us8cKB\nwI/EUEP8zBksFHPNMyWUdXJLKf/PssAtb2xRHmpM2fo8pYE7L3R5Bo1w4Mkw0ujX\njbNkNN6Ts8WfMgW56DjmXOfVZ8GKZr6fkEXNAfqFKvXYnGWqPa5VbX5c25ll1G27\nh4wLswBP0A16aMpjG1CNdP/ZMEPuB5HzR/5N5Rtt0h9Nekxd4mjUy/2ABEj8M4O9\nX0m6vXh+2J0hmW6zupJRW5s87qXUoYONX3awfIy45C740C+V1pRyvyPtTCXbag9\nP4ZGd9xZng8PDvqcIGfudkGT2ioWEHTuH2N36KAQmQfi8tmTkEdOpaulgwsHovCN\nBZUs9ipQAgMBAAECggEBAKTmjaS6tkK8BlPXClTQ2vpz/N6uxDeS35mXpqasqskV\nlaAidgg/zKNuOmgW2gauvlKJVejU8JEK4RyFVE3wyGkcgtcRcJ/qMMNOIynlhFzS\nf1MZKSAzZTxaxHFrerY2Ra2FAo5A5PUDHYtKurOcmVHwVXwOV9D5K8AA5+4zxE7N\nzQLT2vnKojZlBA9VPeNSfR2wJi1B0TAZ4rIpuTe4OzlTdRovTbF5DZP0PBz+SSIG\nZ2ZhMj1oZFhkbSdXQVhVbTl2WVhNemtNVEV6TkMweE1UUXhMVEUzTURBdE9UUTFOQzA0\nTlRBMk1UWXhPVFk1T1RBZ0VBQW9HQkFOLWNwemJHTVhpNWhZbUpwYVdOa0lHOSs=\n-----END PRIVATE KEY-----",
     R2: {
       get(key) {
-        assert.equal(key, GA4_RECENT_LIST_KEY);
-        return {
-          async text() {
-            return recentPayload();
-          },
-        };
+        if (key === GA4_RECENT_LIST_KEY) {
+          return {
+            async text() {
+              return recentPayload();
+            },
+          };
+        }
+        if (key === GA4_TRENDING_OUTPUT_KEY) {
+          return null;
+        }
+        return null;
       },
       put(key, body, options) {
         assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
@@ -277,5 +282,89 @@ test("syncGa4Trending puts empty items when GA returns no matching views", async
   } finally {
     globalThis.fetch = originalFetch;
     console.log = originalLog;
+  }
+});
+
+test("syncGa4Trending preserves existing trending when GA returns empty periods", async () => {
+  let putCalls = 0;
+  const existingTrending = JSON.stringify({
+    schema_version: 1,
+    generated_at: 1_699_000_000,
+    source: "ga4",
+    ranking_rule: ["views_2d_desc"],
+    windows: {
+      views_2d: { start_date: "2026-07-30", end_date: "2026-07-31" },
+      views_5d: { start_date: "2026-07-27", end_date: "2026-07-31" },
+      views_7d: { start_date: "2026-07-25", end_date: "2026-07-31" },
+      views_30d: { start_date: "2026-07-02", end_date: "2026-07-31" },
+    },
+    items: [{ id: "video-a", rank: 1, views_2d: 10, views_5d: 20, views_7d: 30, views_30d: 40 }],
+  });
+  const env = {
+    GA4_SYNC_ENABLED: "1",
+    GA4_PROPERTY_ID: "123",
+    GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
+    GA4_SERVICE_ACCOUNT_PRIVATE_KEY:
+      "-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7VJTUt9Us8cKB\nwI/EUEP8zBksFHPNMyWUdXJLKf/PssAtb2xRHmpM2fo8pYE7L3R5Bo1w4Mkw0ujX\njbNkNN6Ts8WfMgW56DjmXOfVZ8GKZr6fkEXNAfqFKvXYnGWqPa5VbX5c25ll1G27\nh4wLswBP0A16aMpjG1CNdP/ZMEPuB5HzR/5N5Rtt0h9Nekxd4mjUy/2ABEj8M4O9\nX0m6vXh+2J0hmW6zupJRW5s87qXUoYONX3awfIy45C740C+V1pRyvyPtTCXbag9\nP4ZGd9xZng8PDvqcIGfudkGT2ioWEHTuH2N36KAQmQfi8tmTkEdOpaulgwsHovCN\nBZUs9ipQAgMBAAECggEBAKTmjaS6tkK8BlPXClTQ2vpz/N6uxDeS35mXpqasqskV\nlaAidgg/zKNuOmgW2gauvlKJVejU8JEK4RyFVE3wyGkcgtcRcJ/qMMNOIynlhFzS\nf1MZKSAzZTxaxHFrerY2Ra2FAo5A5PUDHYtKurOcmVHwVXwOV9D5K8AA5+4zxE7N\nzQLT2vnKojZlBA9VPeNSfR2wJi1B0TAZ4rIpuTe4OzlTdRovTbF5DZP0PBz+SSIG\nZ2ZhMj1oZFhkbSdXQVhVbTl2WVhNemtNVEV6TkMweE1UUXhMVEUzTURBdE9UUTFOQzA0\nTlRBMk1UWXhPVFk1T1RBZ0VBQW9HQkFOLWNwemJHTVhpNWhZbUpwYVdOa0lHOSs=\n-----END PRIVATE KEY-----",
+    R2: {
+      get(key) {
+        if (key === GA4_RECENT_LIST_KEY) {
+          return {
+            async text() {
+              return recentPayload();
+            },
+          };
+        }
+        if (key === GA4_TRENDING_OUTPUT_KEY) {
+          return {
+            async text() {
+              return existingTrending;
+            },
+          };
+        }
+        return null;
+      },
+      put() {
+        putCalls += 1;
+      },
+    },
+    KV: {
+      async get() {
+        return JSON.stringify({
+          access_token: "cached-token",
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        });
+      },
+    },
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("analyticsdata.googleapis.com")) {
+      return new Response(
+        JSON.stringify({
+          dimensionHeaders: [
+            { name: "dateRange" },
+            { name: "customEvent:video_id" },
+          ],
+          metricHeaders: [{ name: "eventCount" }],
+          rowCount: 0,
+          rows: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+
+  try {
+    await assert.rejects(
+      () => syncGa4Trending(env),
+      /ga4_empty_report_preserving_existing/,
+    );
+    assert.equal(putCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

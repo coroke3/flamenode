@@ -94,15 +94,19 @@ export function onPlayerTimeTick(
     return { state: nextState, shouldSend: false };
   }
 
-  const shouldSend = canSendByStorage(
+  const canSend = canSendByStorage(
     nextState.videoId,
     input.nowMs,
     input.storage,
   );
 
+  if (!canSend) {
+    return { state: nextState, shouldSend: false };
+  }
+
   return {
     state: { ...nextState, thresholdEvaluated: true },
-    shouldSend,
+    shouldSend: true,
   };
 }
 

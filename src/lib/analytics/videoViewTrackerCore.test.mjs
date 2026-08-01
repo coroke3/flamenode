@@ -194,7 +194,28 @@ test("cooldown 中は累積 10 秒到達しても shouldSend は false", () => {
   }
 
   assert.equal(shouldSend, false);
-  assert.equal(state.thresholdEvaluated, true);
+  assert.equal(state.thresholdEvaluated, false);
+});
+
+test("cooldown 中に 10 秒到達後、cooldown 解除で shouldSend になる", () => {
+  const nowMs = 1_700_000_000_000;
+  const cooldownEndMs = nowMs + VIEW_COOLDOWN_MS;
+  const { storage } = createMemoryStorage({
+    [getViewStorageKey("v1")]: String(cooldownEndMs),
+  });
+
+  let state = createVideoViewTrackerState("v1");
+
+  for (let seconds = 0; seconds <= 10; seconds += 1) {
+    const result = tick(state, seconds, { nowMs, storage });
+    state = result.state;
+    assert.equal(result.shouldSend, false);
+  }
+  assert.equal(state.thresholdEvaluated, false);
+
+  const afterCooldown = tick(state, 11, { nowMs: cooldownEndMs, storage });
+  assert.equal(afterCooldown.shouldSend, true);
+  assert.equal(afterCooldown.state.thresholdEvaluated, true);
 });
 
 test("markSent 後は追加 tick でも shouldSend にならない", () => {

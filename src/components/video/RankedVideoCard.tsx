@@ -28,7 +28,7 @@ export function RankedVideoCard({
   rank,
   className,
 }: RankedVideoCardProps): React.ReactElement {
-  const displayRank = item.rank ?? rank;
+  const displayRank = rank;
   const viewsLabel = `直近2日 ${item.views_2d.toLocaleString("ja-JP")}回視聴`;
 
   return (
