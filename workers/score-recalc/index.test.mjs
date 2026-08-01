@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   recalcScoreBatch,
   recalcScoreForVideoIds,
+  SCORE_RECALC_BIND_CHUNK_SIZE,
   SCORE_FORCE_REFRESH_SEC,
   SCORE_RECALC_BATCH_SIZE,
 } from "./index.ts";
@@ -53,6 +54,36 @@ test("recalcScoreForVideoIds は指定IDだけ更新する", async () => {
   }, ["video-a", "video-b"]);
   assert.match(sql, /WHERE id IN \(\?, \?\)/);
   assert.equal(result.processed, 2);
+});
+
+test("recalcScoreForVideoIds はD1の100 bind未満へ分割する", async () => {
+  assert.equal(SCORE_RECALC_BIND_CHUNK_SIZE, 90);
+  const calls = [];
+  const result = await recalcScoreForVideoIds(
+    {
+      DB: {
+        prepare(sql) {
+          const call = { sql, bindings: [] };
+          calls.push(call);
+          return {
+            bind(...bindings) {
+              call.bindings = bindings;
+              return this;
+            },
+            async run() {
+              return { meta: { changes: call.bindings.length - 1 } };
+            },
+          };
+        },
+      },
+    },
+    Array.from({ length: 150 }, (_, index) => `video-${index}`),
+  );
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map(({ bindings }) => bindings.length), [91, 61]);
+  assert.ok(calls.every(({ bindings }) => bindings.length < 100));
+  assert.equal(result.processed, 150);
 });
 
 test("score SQLはcanonical列だけを使う", () => {

@@ -30,6 +30,8 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * 最大3,600動画更新/dayとして、YouTube同期・通知・静的queueの書込み余地を残す。
  */
 export const SCORE_RECALC_BATCH_SIZE = 150;
+/** nowを含めてもD1の1 statement最大100 bindings未満に収める。 */
+export const SCORE_RECALC_BIND_CHUNK_SIZE = 90;
 export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;
 
 /**
@@ -60,28 +62,39 @@ export async function recalcScoreForVideoIds(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const placeholders = uniqueIds.map(() => "?").join(", ");
   try {
-    throwIfAborted(signal);
-    const result = await env.DB.prepare(
-      `UPDATE videos
-          SET score =
-                COALESCE((
-                  SELECT ym.view_count
-                    FROM video_youtube_metadata ym
-                   WHERE ym.video_id = videos.id
-                ), 0) * 1.0
-                + COALESCE(app_like_count, 0) * 5.0
-                - MAX(0, (?1 - COALESCE(scheduled_time, ?1))) / 86400.0 * 0.1,
-              score_updated_at = ?1
-        WHERE id IN (${placeholders})
-          AND visibility_status = 'public'`,
-    )
-      .bind(now, ...uniqueIds)
-      .run();
-    throwIfAborted(signal);
+    let processed = 0;
+    for (
+      let offset = 0;
+      offset < uniqueIds.length;
+      offset += SCORE_RECALC_BIND_CHUNK_SIZE
+    ) {
+      throwIfAborted(signal);
+      const chunk = uniqueIds.slice(
+        offset,
+        offset + SCORE_RECALC_BIND_CHUNK_SIZE,
+      );
+      const placeholders = chunk.map(() => "?").join(", ");
+      const result = await env.DB.prepare(
+        `UPDATE videos
+            SET score =
+                  COALESCE((
+                    SELECT ym.view_count
+                      FROM video_youtube_metadata ym
+                     WHERE ym.video_id = videos.id
+                  ), 0) * 1.0
+                  + COALESCE(app_like_count, 0) * 5.0
+                  - MAX(0, (?1 - COALESCE(scheduled_time, ?1))) / 86400.0 * 0.1,
+                score_updated_at = ?1
+          WHERE id IN (${placeholders})
+            AND visibility_status = 'public'`,
+      )
+        .bind(now, ...chunk)
+        .run();
+      throwIfAborted(signal);
+      processed += Math.max(0, Number(result.meta?.changes ?? 0));
+    }
 
-    const processed = Math.max(0, Number(result.meta?.changes ?? 0));
     return processed > 0
       ? {
           processed,
