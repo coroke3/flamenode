@@ -42,7 +42,7 @@
 - 900px以下の固定ヘッダーは境界線込み50pxとし、動画playerなどの固定要素も共通の`--header-h`へ追従する。
 - トップの「今週のピックアップ」は`top.json`を正本として維持し、JSONを変更せずrequestごとの表示順だけをランダム化する。
 - Shelfはhover、focus、pointer、touch、wheel操作中に停止し、reduced motion、viewport外、非表示tabでは自動送りしない。
-- トップの3連続棚（ピックアップ・新着・懐かし）は`TopLoopShelf`（3グループ複製 + scrollLeftテレポート）を使い、汎用`Shelf`のloop rotateとは分離する。
+- トップの3連続棚（ピックアップ・新着・懐かし）は`TopLoopShelf`（3グループ複製 + scrollLeftテレポート）を使い、汎用`Shelf`のloop rotateとは分離する。`TopLoopShelf`もhover、focus、pointer、wheel、操作後一時停止、reduced motion、viewport外、非表示tabで自動送りを止める。
 - `/admin`と`/manage`のナビ項目が混在しない。
 - 動画詳細は、モバイルの固定playerをヘッダー直下へ水平ずれなく配置する。PCではチャプターコメント一覧だけを約200px上限の可変スクロールとし、関連動画はページ本体でスクロールできる。
 - hydration errorと主要操作時のconsole errorがない。

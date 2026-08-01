@@ -5,13 +5,23 @@ import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import styles from "./TopLoopShelf.module.css";
 
+/** TopLoopShelf.module.css の @media (max-width: 700px) と同期すること。 */
+const MOBILE_SHELF_MAX_WIDTH_PX = 700;
+const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_SHELF_MAX_WIDTH_PX}px)`;
+
 interface TopLoopShelfProps {
   children: React.ReactNode;
+  /** スクロール領域の aria-label。 */
   ariaLabel?: string;
+  /** 自動送り速度（px/秒）。0 は自動送りなし。ループ可能時は常に自動送りする。 */
   autoScrollSpeed?: number;
+  /** 700px 以下での行数。デスクトップは常に1行。 */
   mobileRows?: 1 | 2;
+  /** ユーザー操作後に自動送りを再開するまでの待機時間。 */
   pauseAfterInteractionMs?: number;
+  /** ホイール操作で自動送りを一時停止する。 */
   pauseOnWheel?: boolean;
+  /** カードが画面上で流れる向き。 */
   autoScrollDirection?: "left" | "right";
 }
 
@@ -30,7 +40,7 @@ function toSourceItems(children: React.ReactNode): SourceItem[] {
   }));
 }
 
-function getElementGap(el: HTMLElement): number {
+function getShelfGap(el: HTMLElement): number {
   const style = window.getComputedStyle(el);
   const raw = style.columnGap || style.gap || "0";
   const gap = Number.parseFloat(raw);
@@ -44,28 +54,21 @@ function measureCycleWidth(
   const width = groupEl.getBoundingClientRect().width;
   if (!(width > 0)) return 0;
   // scrollLeft は整数のため、周期も整数に揃えて継ぎ目ズレを防ぐ。
-  return Math.max(1, Math.round(width + getElementGap(scroller)));
+  return Math.max(1, Math.round(width + getShelfGap(scroller)));
 }
 
 function isScrollerScrollable(scroller: HTMLElement): boolean {
   return scroller.scrollWidth > scroller.clientWidth + 4;
 }
 
-function isMobileTwoRows(mobileRows: 1 | 2): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return false;
-  }
-  return window.matchMedia("(max-width: 700px)").matches && mobileRows === 2;
-}
-
 function subscribeMaxWidth700(onStoreChange: () => void): () => void {
-  const mq = window.matchMedia("(max-width: 700px)");
+  const mq = window.matchMedia(MOBILE_MEDIA_QUERY);
   mq.addEventListener("change", onStoreChange);
   return () => mq.removeEventListener("change", onStoreChange);
 }
 
 function getMaxWidth700Snapshot(): boolean {
-  return window.matchMedia("(max-width: 700px)").matches;
+  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
 }
 
 function getMaxWidth700ServerSnapshot(): boolean {
@@ -75,15 +78,15 @@ function getMaxWidth700ServerSnapshot(): boolean {
 function getScrollStride(
   scroller: HTMLElement,
   groupEl: HTMLElement | null,
-  mobileRows: 1 | 2,
+  useMobileStride: boolean,
 ): number {
   if (!groupEl || groupEl.children.length === 0) {
     return scroller.clientWidth * 0.85;
   }
   const first = groupEl.children[0] as HTMLElement;
-  const gap = getElementGap(groupEl);
+  const gap = getShelfGap(groupEl);
   const cardStride = first.offsetWidth + gap;
-  if (isMobileTwoRows(mobileRows)) {
+  if (useMobileStride) {
     return cardStride;
   }
   return cardStride * 1.5;
@@ -419,6 +422,7 @@ export function TopLoopShelf({
     updateCycleWidth,
   ]);
 
+  // --- pause environment ---
   React.useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     const sync = () => setReducedMotion(query.matches);
@@ -574,7 +578,12 @@ export function TopLoopShelf({
     const group1 = group1Ref.current;
     if (!scroller) return;
 
-    const distance = getScrollStride(scroller, group1, mobileRows) * dir;
+    const distance =
+      getScrollStride(
+        scroller,
+        group1,
+        mobileRows === 2 && isMobileViewport,
+      ) * dir;
     const finish = () => {
       if (needsLoopRef.current) scheduleScrollTeleport();
       syncArrowState(scroller);
@@ -594,6 +603,7 @@ export function TopLoopShelf({
     pauseAfterInteraction();
   }, [
     animateScrollBy,
+    isMobileViewport,
     mobileRows,
     pauseAfterInteraction,
     reducedMotion,

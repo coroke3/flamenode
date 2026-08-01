@@ -107,35 +107,20 @@
   outline-offset: 2px;
 }
 
-.arrowPrev {
-  left: 8px;
-}
-
-.arrowNext {
-  right: 8px;
-}
-
 @media (min-width: 701px) {
   .fullBleed {
     width: 100vw;
     margin-left: calc(50% - 50vw);
     margin-right: calc(50% - 50vw);
     max-width: none;
-  }
-
-  .wrapper {
-    overflow-x: clip;
-  }
-
-  .scroller {
-    padding-left: max(
+    --shelf-rail-inline-start: max(
       var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 20px)),
       calc(
         (100vw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
           var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 20px))
       )
     );
-    padding-right: max(
+    --shelf-rail-inline-end: max(
       var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 20px)),
       calc(
         (100vw - var(--fn-page-max, var(--content-max, 1360px))) / 2 +
@@ -143,14 +128,32 @@
       )
     );
   }
-}
 
-@media (min-width: 768px) {
+  .wrapper {
+    overflow-x: clip;
+  }
+
+  .scroller {
+    padding-left: var(--shelf-rail-inline-start);
+    padding-right: var(--shelf-rail-inline-end);
+  }
+
+  /* full-bleed と同じ 701px から矢印を表示（701–767 でも fade + arrow） */
   .arrow {
     display: inline-flex;
   }
+
+  /* fade はビューポート端、矢印はコンテンツレール付近 */
+  .arrowPrev {
+    left: max(8px, calc(var(--shelf-rail-inline-start) - 42px));
+  }
+
+  .arrowNext {
+    right: max(8px, calc(var(--shelf-rail-inline-end) - 42px));
+  }
 }
 
+/* TopLoopShelf.tsx の MOBILE_SHELF_MAX_WIDTH_PX (700) と同期すること */
 @media (max-width: 700px) {
   .fullBleed {
     width: 100%;

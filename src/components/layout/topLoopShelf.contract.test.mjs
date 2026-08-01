@@ -105,9 +105,50 @@ test("TopLoopShelfはモバイル2行loopで奇数件を列境界にパディン
   assert.match(topLoopShelf, /isMobileViewport/);
   assert.match(topLoopShelf, /useSyncExternalStore/);
   assert.match(topLoopShelf, /subscribeMaxWidth700/);
-  assert.match(topLoopShelf, /max-width: 700px/);
+  assert.match(topLoopShelf, /MOBILE_SHELF_MAX_WIDTH_PX = 700/);
+  assert.match(topLoopShelf, /MOBILE_MEDIA_QUERY/);
   assert.match(topLoopShelf, /item\.node == null/);
   assert.match(topLoopShelf, /aria-hidden="true"/);
+});
+
+test("TopLoopShelfはgetShelfGapとuseMobileStride付きgetScrollStrideを持つ", () => {
+  assert.match(topLoopShelf, /function getShelfGap/);
+  assert.match(topLoopShelf, /getShelfGap\(scroller\)/);
+  assert.match(topLoopShelf, /getShelfGap\(groupEl\)/);
+  assert.match(topLoopShelf, /useMobileStride: boolean/);
+  assert.match(
+    topLoopShelf,
+    /mobileRows === 2 && isMobileViewport/,
+  );
+  assert.doesNotMatch(topLoopShelf, /function isMobileTwoRows/);
+  assert.doesNotMatch(topLoopShelf, /function getElementGap/);
+});
+
+test("TopLoopShelfはpropsにJSDocを持つ", () => {
+  assert.match(topLoopShelf, /\/\*\* 自動送り速度/);
+  assert.match(topLoopShelf, /\/\*\* 700px 以下での行数/);
+  assert.match(topLoopShelf, /\/\*\* ユーザー操作後に自動送りを再開するまでの待機時間/);
+  assert.match(topLoopShelf, /\/\*\* ホイール操作で自動送りを一時停止する/);
+  assert.match(topLoopShelf, /\/\*\* カードが画面上で流れる向き/);
+  assert.match(topLoopShelf, /\/\*\* スクロール領域の aria-label/);
+});
+
+test("TopLoopShelf CSSはshelf-rail変数と701px矢印を持つ", () => {
+  assert.match(topLoopCss, /--shelf-rail-inline-start/);
+  assert.match(topLoopCss, /--shelf-rail-inline-end/);
+  assert.match(topLoopCss, /padding-left:\s*var\(--shelf-rail-inline-start\)/);
+  assert.match(topLoopCss, /padding-right:\s*var\(--shelf-rail-inline-end\)/);
+  assert.match(
+    topLoopCss,
+    /\.arrowPrev[\s\S]*?var\(--shelf-rail-inline-start\)/,
+  );
+  assert.match(
+    topLoopCss,
+    /\.arrowNext[\s\S]*?var\(--shelf-rail-inline-end\)/,
+  );
+  assert.match(topLoopCss, /@media \(min-width: 701px\)[\s\S]*?\.arrow[\s\S]*?display:\s*inline-flex/);
+  assert.match(topLoopCss, /MOBILE_SHELF_MAX_WIDTH_PX \(700\)/);
+  assert.doesNotMatch(topLoopCss, /@media \(min-width: 768px\)/);
 });
 
 test("TopLoopShelfの矢印aria-labelはShelfと一致する", () => {
