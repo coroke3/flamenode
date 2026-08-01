@@ -19,9 +19,16 @@ test("一般作品権限の保存は対象2列だけをCAS比較する", () => {
   assert.match(source, /default_editable_fields: systemSettings\.default_editable_fields/);
   assert.match(source, /upcoming_editable_fields: systemSettings\.upcoming_editable_fields/);
   assert.match(source, /\.select\(permissionSettingsSelect\)/);
-  assert.match(source, /const beforeSnapshot = \{[\s\S]*?default_editable_fields:[\s\S]*?upcoming_editable_fields:/);
-  assert.match(source, /expectedCurrent: beforeSnapshot/);
+  assert.match(
+    source,
+    /const permissionCasSnapshot = \{[\s\S]*?default_editable_fields:[\s\S]*?upcoming_editable_fields:/,
+  );
+  assert.match(source, /expectedCurrent: permissionCasSnapshot/);
   assert.doesNotMatch(source, /expectedCurrent:\s*\{\s*\.\.\.before\s*\}/);
+  assert.doesNotMatch(
+    source,
+    /permissionCasSnapshot = \{[\s\S]*?operation_mode:/,
+  );
 });
 
 test("同じ値の再保存は監査付きUPDATEを発行せず成功する", () => {
