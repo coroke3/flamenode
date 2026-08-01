@@ -418,6 +418,108 @@ test("tracked placeholder configs produce four private production configs withou
     assert.match(fast, /main = "\.\.\/\.\.\/workers\/fast-jobs\/index\.ts"/);
   }));
 
+test("GA4_SYNC_ENABLED=1 injects sync-jobs feature flag from Build env", () =>
+  withTempDirectory("flamenode-production-ga4-flag-", (repoRoot) => {
+    writeFixtureTemplates(repoRoot);
+    const configs = materializeProductionConfigs({
+      env: productionEnv({ GA4_SYNC_ENABLED: "1" }),
+      repoRoot,
+      commit: COMMIT,
+    });
+    const sync = fs.readFileSync(configs["sync-jobs"], "utf8");
+    assert.match(sync, /GA4_SYNC_ENABLED = "1"/);
+  }));
+
+test("GA4_SYNC_ENABLED=1 requires GA4 remote secrets during secret preflight", () => {
+  const configs = {
+    web: "web.toml",
+    "fast-jobs": "fast.toml",
+    "content-jobs": "content.toml",
+    "sync-jobs": "sync.toml",
+  };
+  const byService = {
+    "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
+    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
+    "flamenode-sync-jobs": [
+      "YOUTUBE_API_KEY",
+      "YOUTUBE_OAUTH_CLIENT_ID",
+      "YOUTUBE_OAUTH_CLIENT_SECRET",
+      "YOUTUBE_OAUTH_REFRESH_TOKEN",
+    ],
+  };
+  assert.throws(
+    () =>
+      runRemoteSecretPreflight({
+        env: productionEnv({ GA4_SYNC_ENABLED: "1" }),
+        repoRoot: root,
+        configs,
+        wranglerBin: "wrangler.mjs",
+        run: (request) => {
+          const service = request.args[request.args.indexOf("--name") + 1];
+          return {
+            stdout: JSON.stringify(
+              byService[service].map((name) => ({ name, type: "secret_text" })),
+            ),
+          };
+        },
+      }),
+    /GA4_PROPERTY_ID/,
+  );
+});
+
+test("GA4_SYNC_ENABLED=0 passes secret preflight without GA4 remote secrets", () => {
+  const configs = {
+    web: "web.toml",
+    "fast-jobs": "fast.toml",
+    "content-jobs": "content.toml",
+    "sync-jobs": "sync.toml",
+  };
+  const byService = {
+    "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
+    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
+    "flamenode-sync-jobs": [
+      "YOUTUBE_API_KEY",
+      "YOUTUBE_OAUTH_CLIENT_ID",
+      "YOUTUBE_OAUTH_CLIENT_SECRET",
+      "YOUTUBE_OAUTH_REFRESH_TOKEN",
+    ],
+  };
+  assert.doesNotThrow(() =>
+    runRemoteSecretPreflight({
+      env: productionEnv({ GA4_SYNC_ENABLED: "0" }),
+      repoRoot: root,
+      configs,
+      wranglerBin: "wrangler.mjs",
+      run: (request) => {
+        const service = request.args[request.args.indexOf("--name") + 1];
+        return {
+          stdout: JSON.stringify(
+            byService[service].map((name) => ({ name, type: "secret_text" })),
+          ),
+        };
+      },
+    }),
+  );
+  assert.doesNotThrow(() =>
+    runRemoteSecretPreflight({
+      env: productionEnv(),
+      repoRoot: root,
+      configs,
+      wranglerBin: "wrangler.mjs",
+      run: (request) => {
+        const service = request.args[request.args.indexOf("--name") + 1];
+        return {
+          stdout: JSON.stringify(
+            byService[service].map((name) => ({ name, type: "secret_text" })),
+          ),
+        };
+      },
+    }),
+  );
+});
+
 test("fast verification runs the bounded npm script list in order and stops on the first failure", () => {
   const calls = [];
   const completed = runFastVerification({

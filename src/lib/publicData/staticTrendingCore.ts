@@ -28,8 +28,11 @@ export interface TrendingItem {
   video_id?: string;
 }
 
+export const STATIC_TRENDING_SCHEMA_VERSION = 1;
+
 export interface StaticTrendingPayload {
   generated_at?: unknown;
+  schema_version?: unknown;
   items?: unknown;
 }
 
@@ -122,6 +125,7 @@ function normalizeTrendingItem(value: unknown): TrendingItem | null {
 export function normalizeStaticTrending(
   payload: StaticTrendingPayload,
 ): StaticTrendingData | null {
+  if (payload.schema_version !== STATIC_TRENDING_SCHEMA_VERSION) return null;
   const generatedAt = normalizeUnix(payload.generated_at);
   if (generatedAt == null) return null;
   if (!Array.isArray(payload.items)) return null;

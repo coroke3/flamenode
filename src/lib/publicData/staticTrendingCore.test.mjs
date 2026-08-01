@@ -25,6 +25,7 @@ const sampleItem = {
 
 test("normalizeStaticTrending: valid payload を正規化する", () => {
   const data = normalizeStaticTrending({
+    schema_version: 1,
     generated_at: 1_700_000_000,
     items: [sampleItem],
   });
@@ -38,6 +39,7 @@ test("normalizeStaticTrending: valid payload を正規化する", () => {
 
 test("normalizeStaticTrending: creator_display_name を display_name へフォールバック", () => {
   const data = normalizeStaticTrending({
+    schema_version: 1,
     generated_at: 100,
     items: [
       {
@@ -54,20 +56,50 @@ test("normalizeStaticTrending: creator_display_name を display_name へフォ�
 
 test("normalizeStaticTrending: generated_at 欠損は null", () => {
   assert.equal(
-    normalizeStaticTrending({ items: [sampleItem] }),
+    normalizeStaticTrending({ schema_version: 1, items: [sampleItem] }),
+    null,
+  );
+});
+
+test("normalizeStaticTrending: schema_version 欠損は null", () => {
+  assert.equal(
+    normalizeStaticTrending({ generated_at: 100, items: [sampleItem] }),
+    null,
+  );
+});
+
+test("normalizeStaticTrending: schema_version 不一致は null", () => {
+  assert.equal(
+    normalizeStaticTrending({
+      schema_version: 2,
+      generated_at: 100,
+      items: [sampleItem],
+    }),
+    null,
+  );
+  assert.equal(
+    normalizeStaticTrending({
+      schema_version: "1",
+      generated_at: 100,
+      items: [sampleItem],
+    }),
     null,
   );
 });
 
 test("normalizeStaticTrending: items 非配列は null", () => {
   assert.equal(
-    normalizeStaticTrending({ generated_at: 100, items: "bad" }),
+    normalizeStaticTrending({ schema_version: 1, generated_at: 100, items: "bad" }),
     null,
   );
 });
 
-test("normalizeStaticTrending: 空 items は generated_at あれば有効", () => {
-  const data = normalizeStaticTrending({ generated_at: 100, items: [] });
+test("normalizeStaticTrending: 空 items は generated_at + schema_version あれば有効", () => {
+  const data = normalizeStaticTrending({
+    schema_version: 1,
+    generated_at: 100,
+    items: [],
+  });
   assert.ok(data);
   assert.equal(data.generatedAt, 100);
   assert.deepEqual(data.items, []);
@@ -75,6 +107,7 @@ test("normalizeStaticTrending: 空 items は generated_at あれば有効", () =
 
 test("normalizeStaticTrending: rank / video_id を正規化する", () => {
   const data = normalizeStaticTrending({
+    schema_version: 1,
     generated_at: 100,
     items: [{ ...sampleItem, rank: 3, video_id: "v1" }],
   });
@@ -85,6 +118,7 @@ test("normalizeStaticTrending: rank / video_id を正規化する", () => {
 
 test("normalizeStaticTrending: video_id が id と不一致なら除外", () => {
   const data = normalizeStaticTrending({
+    schema_version: 1,
     generated_at: 100,
     items: [{ ...sampleItem, video_id: "other" }],
   });
@@ -94,6 +128,7 @@ test("normalizeStaticTrending: video_id が id と不一致なら除外", () => 
 
 test("normalizeStaticTrending: 不正 item は除外し全滅なら空配列", () => {
   const data = normalizeStaticTrending({
+    schema_version: 1,
     generated_at: 100,
     items: [{ id: "only-id" }],
   });
@@ -103,6 +138,7 @@ test("normalizeStaticTrending: 不正 item は除外し全滅なら空配列", (
 
 test("normalizeStaticTrending: views 欠損 item は除外", () => {
   const data = normalizeStaticTrending({
+    schema_version: 1,
     generated_at: 100,
     items: [sampleItem, { ...sampleItem, id: "bad", views_2d: "x" }],
   });
@@ -114,6 +150,7 @@ test("normalizeStaticTrending: views 欠損 item は除外", () => {
 
 test("normalizeStaticTrending: public 以外の status は除外", () => {
   const data = normalizeStaticTrending({
+    schema_version: 1,
     generated_at: 100,
     items: [{ ...sampleItem, status: "private" }],
   });

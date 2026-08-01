@@ -34,7 +34,7 @@ export function RankedVideoCard({
   return (
     <article
       className={cn(styles.root, className)}
-      aria-label={`${displayRank}位 ${item.title}`}
+      aria-label={`${displayRank}位 ${item.title}、直近2日 ${item.views_2d.toLocaleString("ja-JP")}回視聴`}
     >
       <div className={styles.cardWrap}>
         <span className={styles.rankBadge} aria-hidden>

@@ -146,6 +146,14 @@ requireMatch(
 );
 requireAll("app/(public)/page.tsx", [
   [
+    /tooOldForHome/,
+    "トップページが trending の鮮度判定に tooOldForHome を参照していません。",
+  ],
+  [
+    /title="FlameNodeで注目"[\s\S]*?\{!isDegraded/,
+    "FlameNodeで注目 セクションが isDegraded ブロックの外にありません。",
+  ],
+  [
     /Promise\.all\(\[[\s\S]*?loadStaticTopPage\(\)[\s\S]*?loadStaticTrending\(\)/,
     "トップページが top と trending を並列読込していません。",
   ],

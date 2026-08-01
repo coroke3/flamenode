@@ -39,11 +39,31 @@ type Ga4ReportRow = {
   metricValues?: Array<{ value?: string }>;
 };
 
+type Ga4QuotaTokenBucket = {
+  consumed?: unknown;
+  remaining?: unknown;
+};
+
+export type Ga4PropertyQuota = {
+  tokensPerHour?: Ga4QuotaTokenBucket;
+  tokensPerDay?: Ga4QuotaTokenBucket;
+  concurrentRequests?: Ga4QuotaTokenBucket;
+  serverErrorsPerProjectPerHour?: Ga4QuotaTokenBucket;
+  potentiallyThresholdedRequestsPerHour?: Ga4QuotaTokenBucket;
+};
+
+export type Ga4PropertyQuotaLogFields = {
+  quota_tokens_per_hour_remaining?: number;
+  quota_tokens_per_day_remaining?: number;
+  quota_concurrent_requests_remaining?: number;
+};
+
 type Ga4RunReportResponse = {
   dimensionHeaders?: Array<{ name?: string }>;
   metricHeaders?: Array<{ name?: string }>;
   rows?: Ga4ReportRow[];
   rowCount?: number;
+  propertyQuota?: Ga4PropertyQuota;
 };
 
 const DATE_RANGE_FIELD_MAP: Record<
@@ -64,6 +84,91 @@ function parsePositiveInt(value: string | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function parseNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function parseQuotaTokenBucket(value: unknown): Ga4QuotaTokenBucket | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const consumed = parseNonNegativeInt(row.consumed);
+  const remaining = parseNonNegativeInt(row.remaining);
+  if (consumed === undefined && remaining === undefined) return undefined;
+  return {
+    ...(consumed !== undefined ? { consumed } : {}),
+    ...(remaining !== undefined ? { remaining } : {}),
+  };
+}
+
+export function extractGa4PropertyQuota(
+  response: unknown,
+): Ga4PropertyQuota | null {
+  if (!response || typeof response !== "object") return null;
+  const propertyQuota = (response as Ga4RunReportResponse).propertyQuota;
+  if (!propertyQuota || typeof propertyQuota !== "object") return null;
+
+  const tokensPerHour = parseQuotaTokenBucket(propertyQuota.tokensPerHour);
+  const tokensPerDay = parseQuotaTokenBucket(propertyQuota.tokensPerDay);
+  const concurrentRequests = parseQuotaTokenBucket(
+    propertyQuota.concurrentRequests,
+  );
+  const serverErrorsPerProjectPerHour = parseQuotaTokenBucket(
+    propertyQuota.serverErrorsPerProjectPerHour,
+  );
+  const potentiallyThresholdedRequestsPerHour = parseQuotaTokenBucket(
+    propertyQuota.potentiallyThresholdedRequestsPerHour,
+  );
+
+  if (
+    !tokensPerHour &&
+    !tokensPerDay &&
+    !concurrentRequests &&
+    !serverErrorsPerProjectPerHour &&
+    !potentiallyThresholdedRequestsPerHour
+  ) {
+    return null;
+  }
+
+  return {
+    ...(tokensPerHour ? { tokensPerHour } : {}),
+    ...(tokensPerDay ? { tokensPerDay } : {}),
+    ...(concurrentRequests ? { concurrentRequests } : {}),
+    ...(serverErrorsPerProjectPerHour
+      ? { serverErrorsPerProjectPerHour }
+      : {}),
+    ...(potentiallyThresholdedRequestsPerHour
+      ? { potentiallyThresholdedRequestsPerHour }
+      : {}),
+  };
+}
+
+export function formatGa4QuotaLogFields(
+  quota: Ga4PropertyQuota | null | undefined,
+): Ga4PropertyQuotaLogFields {
+  if (!quota) return {};
+  const fields: Ga4PropertyQuotaLogFields = {};
+  const hourRemaining = quota.tokensPerHour?.remaining;
+  if (hourRemaining !== undefined) {
+    fields.quota_tokens_per_hour_remaining = hourRemaining;
+  }
+  const dayRemaining = quota.tokensPerDay?.remaining;
+  if (dayRemaining !== undefined) {
+    fields.quota_tokens_per_day_remaining = dayRemaining;
+  }
+  const concurrentRemaining = quota.concurrentRequests?.remaining;
+  if (concurrentRemaining !== undefined) {
+    fields.quota_concurrent_requests_remaining = concurrentRemaining;
+  }
+  return fields;
 }
 
 function resolveDimensionIndices(
@@ -186,12 +291,17 @@ async function runGa4ReportPage(
   }
 }
 
+export interface FetchVideoViewPeriodsResult {
+  periods: VideoViewPeriods[];
+  quota: Ga4PropertyQuota | null;
+}
+
 export async function fetchVideoViewPeriods(
   env: Ga4DataApiEnv,
   budget: ExternalRequestBudget,
   fetchImpl: FetchLike = fetch,
   signal?: AbortSignal,
-): Promise<VideoViewPeriods[]> {
+): Promise<FetchVideoViewPeriodsResult> {
   signal?.throwIfAborted();
   const propertyId = env.GA4_PROPERTY_ID?.trim();
   if (!propertyId) throw new Error("ga4_property_id_missing");
@@ -200,6 +310,7 @@ export async function fetchVideoViewPeriods(
   const collectedRows: Ga4ReportRow[] = [];
   let dimensionIndices: { dateRange: number; videoId: number } | null = null;
   let expectedRowCount: number | null = null;
+  let latestQuota: Ga4PropertyQuota | null = null;
   let offset = 0;
 
   while (true) {
@@ -212,6 +323,8 @@ export async function fetchVideoViewPeriods(
       fetchImpl,
       signal,
     );
+    const pageQuota = extractGa4PropertyQuota(page);
+    if (pageQuota) latestQuota = pageQuota;
     if (!dimensionIndices) {
       dimensionIndices = resolveDimensionIndices(page.dimensionHeaders ?? []);
     }
@@ -225,7 +338,7 @@ export async function fetchVideoViewPeriods(
     collectedRows.push(...rows);
     if (rows.length === 0) break;
     if (expectedRowCount != null && collectedRows.length >= expectedRowCount) break;
-    if (rows.length < GA4_REPORT_PAGE_SIZE) break;
+    if (expectedRowCount == null && rows.length < GA4_REPORT_PAGE_SIZE) break;
     offset += rows.length;
   }
 
@@ -239,5 +352,8 @@ export async function fetchVideoViewPeriods(
     throw new Error("ga4_report_dimension_header_missing");
   }
 
-  return aggregateGa4ReportRows(collectedRows, dimensionIndices);
+  return {
+    periods: aggregateGa4ReportRows(collectedRows, dimensionIndices),
+    quota: latestQuota,
+  };
 }

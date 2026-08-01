@@ -4,7 +4,10 @@
  */
 import { ExternalRequestBudget } from "../shared/externalApi.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
-import { fetchVideoViewPeriods } from "./dataApi.ts";
+import {
+  fetchVideoViewPeriods,
+  formatGa4QuotaLogFields,
+} from "./dataApi.ts";
 import type { Ga4DataApiEnv } from "./dataApi.ts";
 import { rankTrendingItems } from "./ranking.ts";
 import type { RecentListPayload, TrendingItem } from "./ranking.ts";
@@ -165,9 +168,25 @@ export async function syncGa4Trending(
   signal?.throwIfAborted();
   const enabled = isGa4SyncEnabled(env);
   if (!enabled) {
+    logGa4TrendingEvent({
+      service: "flamenode-sync-jobs",
+      worker: "sync-jobs",
+      job: "ga4-trending-sync",
+      enabled: false,
+      result: "skipped",
+    });
     return emptyResult({ processed: 0, failed: 0, skipped: 1 });
   }
   if (!hasRequiredGa4Config(env)) {
+    logGa4TrendingEvent({
+      service: "flamenode-sync-jobs",
+      worker: "sync-jobs",
+      job: "ga4-trending-sync",
+      enabled: true,
+      result: "failed",
+      error_name: "config_missing",
+      r2_written: false,
+    });
     return emptyResult({ processed: 0, failed: 1, skipped: 0 });
   }
 
@@ -176,7 +195,12 @@ export async function syncGa4Trending(
 
   try {
     const recent = await loadRecentListPayload(env, signal);
-    const periods = await fetchVideoViewPeriods(env, budget, fetch, signal);
+    const { periods, quota } = await fetchVideoViewPeriods(
+      env,
+      budget,
+      fetch,
+      signal,
+    );
     const items = rankTrendingItems(recent, periods);
     const generatedAt = Math.floor(Date.now() / 1000);
     const outputPayload: TrendingOutputPayload = {
@@ -202,6 +226,7 @@ export async function syncGa4Trending(
       r2_written: true,
       external_api_calls: budget.used,
       duration_ms: Date.now() - startedAt,
+      ...formatGa4QuotaLogFields(quota),
     });
 
     return {

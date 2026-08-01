@@ -25,6 +25,11 @@ function recentPayload() {
 
 test("syncGa4Trending skips when GA4_SYNC_ENABLED is not 1", async () => {
   let putCalls = 0;
+  let logLine = "";
+  const originalLog = console.log;
+  console.log = (value) => {
+    logLine = String(value);
+  };
   const env = {
     GA4_SYNC_ENABLED: "0",
     R2: {
@@ -39,8 +44,106 @@ test("syncGa4Trending skips when GA4_SYNC_ENABLED is not 1", async () => {
     KV: { get() { throw new Error("unexpected KV get"); } },
   };
 
-  const result = await syncGa4Trending(env);
-  assert.equal(result.skipped, 1);
+  try {
+    const result = await syncGa4Trending(env);
+    assert.equal(result.skipped, 1);
+    assert.equal(putCalls, 0);
+    const event = JSON.parse(logLine);
+    assert.equal(event.job, "ga4-trending-sync");
+    assert.equal(event.result, "skipped");
+    assert.equal(event.enabled, false);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test("syncGa4Trending fails closed with config_missing when secrets are absent", async () => {
+  let putCalls = 0;
+  let logLine = "";
+  const originalLog = console.log;
+  console.log = (value) => {
+    logLine = String(value);
+  };
+  const env = {
+    GA4_SYNC_ENABLED: "1",
+    R2: {
+      get() {
+        throw new Error("unexpected R2 get");
+      },
+      put() {
+        putCalls += 1;
+        throw new Error("unexpected R2 put");
+      },
+    },
+  };
+
+  try {
+    const result = await syncGa4Trending(env);
+    assert.equal(result.failed, 1);
+    assert.equal(putCalls, 0);
+    const event = JSON.parse(logLine);
+    assert.equal(event.job, "ga4-trending-sync");
+    assert.equal(event.result, "failed");
+    assert.equal(event.error_name, "config_missing");
+    assert.equal(event.r2_written, false);
+    assert.equal(event.GA4_SERVICE_ACCOUNT_PRIVATE_KEY, undefined);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+function enabledGa4Env(overrides = {}) {
+  return {
+    GA4_SYNC_ENABLED: "1",
+    GA4_PROPERTY_ID: "123",
+    GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
+    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
+    KV: {
+      async get() {
+        return null;
+      },
+    },
+    ...overrides,
+  };
+}
+
+test("syncGa4Trending does not put when list/recent.json is missing", async () => {
+  let putCalls = 0;
+  const env = enabledGa4Env({
+    R2: {
+      async get(key) {
+        assert.equal(key, GA4_RECENT_LIST_KEY);
+        return null;
+      },
+      put() {
+        putCalls += 1;
+      },
+    },
+  });
+
+  await assert.rejects(() => syncGa4Trending(env), /ga4_recent_list_missing/);
+  assert.equal(putCalls, 0);
+});
+
+test("syncGa4Trending does not put when AbortSignal is already aborted", async () => {
+  let putCalls = 0;
+  const env = enabledGa4Env({
+    R2: {
+      get() {
+        throw new Error("R2 get should not run after abort");
+      },
+      put() {
+        putCalls += 1;
+      },
+    },
+  });
+  const controller = new AbortController();
+  controller.abort();
+
+  await assert.rejects(
+    () => syncGa4Trending(env, controller.signal),
+    (error) => error?.name === "AbortError" || /abort/i.test(String(error)),
+  );
   assert.equal(putCalls, 0);
 });
 
@@ -81,6 +184,11 @@ test("syncGa4Trending fail-closed: does not put trending.json on GA failure", as
 
 test("syncGa4Trending puts empty items when GA returns no matching views", async () => {
   let putBody = "";
+  let logLine = "";
+  const originalLog = console.log;
+  console.log = (value) => {
+    logLine = String(value);
+  };
   const env = {
     GA4_SYNC_ENABLED: "1",
     GA4_PROPERTY_ID: "123",
@@ -132,6 +240,10 @@ test("syncGa4Trending puts empty items when GA returns no matching views", async
           metricHeaders: [{ name: "eventCount" }],
           rowCount: 0,
           rows: [],
+          propertyQuota: {
+            tokensPerHour: { consumed: 1, remaining: 19999 },
+            tokensPerDay: { consumed: 2, remaining: 39998 },
+          },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
@@ -158,7 +270,12 @@ test("syncGa4Trending puts empty items when GA returns no matching views", async
     assert.ok(Number.isFinite(payload.generated_at));
     assert.ok(Array.isArray(payload.items));
     assert.equal(payload.items.length, 0);
+    const event = JSON.parse(logLine);
+    assert.equal(event.result, "ok");
+    assert.equal(event.quota_tokens_per_hour_remaining, 19999);
+    assert.equal(event.quota_tokens_per_day_remaining, 39998);
   } finally {
     globalThis.fetch = originalFetch;
+    console.log = originalLog;
   }
 });

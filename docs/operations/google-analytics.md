@@ -94,6 +94,10 @@ R2 JSON 例:
 
 **fail-closed**: GA4 失敗・`list/recent.json` 欠損時は R2 を上書きしない。前回成功分が残る。
 
+### R2 JSON の `schema_version`
+
+公開側 `normalizeStaticTrending` は **`schema_version` が number の `1` であること** を必須とする。欠落・文字列 `"1"`・他バージョンは不正扱いで `data=null`（表示は空または前回キャッシュ）。`items` が空でも `generated_at` と `schema_version: 1` があれば有効。
+
 ## 公開表示
 
 | 画面 | データ源 | 表示条件 |
@@ -128,4 +132,24 @@ R2 miss や JSON 不正時は `data=null`。トップ全体や他セクション
 - ローダー（D1 非参照）: `src/lib/publicData/trendingLoader.test.mjs`
 - UI 契約: `npm run check:ui-acceptance`
 
-同期失敗時は Cloudflare Workers ログの `ga4-trending-sync` 構造化イベントを確認（`service` / `job` / `enabled` / `result` / `generated_at` / `ga_rows` / `matched_videos` / `ranked_videos` / `r2_written` / `duration_ms` / `external_api_calls` など。secret は含まれない）。`GA4_SYNC_ENABLED` が `0` の場合は skipped となり、表示は前回 JSON または空状態になる。
+同期失敗時は Cloudflare Workers ログの `ga4-trending-sync` 構造化イベントを確認（`service` / `job` / `enabled` / `result` / `generated_at` / `ga_rows` / `matched_videos` / `ranked_videos` / `r2_written` / `duration_ms` / `external_api_calls` など。secret は含まれない）。`GA4_SYNC_ENABLED` が `0` の場合は `result: "skipped"` となり、表示は前回 JSON または空状態になる。`ENABLED=1` だが secrets / R2 / KV が欠落している場合は `result: "failed"`, `error_name: "config_missing"` で R2 は更新しない。
+
+### Data API Core クォータ
+
+GA4 Data API（Core）には時間・日次のトークンクォータがある。
+
+| 確認方法 | 内容 |
+| --- | --- |
+| [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Google Analytics Data API → **Quotas** | プロジェクト単位の上限・使用量 |
+| `runReport` レスポンスの `propertyQuota` | `returnPropertyQuota: true` 時。`tokensPerHour` / `tokensPerDay` / `concurrentRequests` 等の `consumed` / `remaining` |
+
+同期 Worker は最終ページの `propertyQuota` を構造化ログへ含める（例: `quota_tokens_per_hour_remaining`, `quota_tokens_per_day_remaining`）。秘密情報はログしない。
+
+### 403 / 429 時の対応
+
+| HTTP | 想定原因 | 対応 |
+| --- | --- | --- |
+| **403** | 権限不足・API 未有効化・プロパティ ID 誤り | サービスアカウントの GA4 閲覧権限と Data API 有効化を確認。修正まで `GA4_SYNC_ENABLED=0` で同期停止可 |
+| **429** | Core クォータ超過 | 同期頻度を下げるかクォータ増枠を検討。`GA4_SYNC_ENABLED=0` で一時停止し、既存 `analytics/trending.json` を維持（fail-closed） |
+
+いずれも同期失敗時は R2 を上書きしない。ログの `result: "failed"` と `error` サマリを確認する。
