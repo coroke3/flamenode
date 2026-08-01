@@ -11,7 +11,7 @@ import { HomeClosingCta } from "@/components/layout/HomeClosingCta";
 import { PublicEventCard } from "@/components/event/PublicEventCard";
 import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
-import { Shelf } from "@/components/layout/Shelf";
+import { TopLoopShelf } from "@/components/layout/TopLoopShelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard } from "@/components/video/VideoCard";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -139,15 +139,14 @@ export default async function TopPage(): Promise<React.ReactElement> {
           {randomizedRecommended.length === 0 ? (
             <EmptyShelf message="おすすめできる作品がまだありません。" />
           ) : (
-            <Shelf
+            <TopLoopShelf
               ariaLabel="今週のピックアップ"
-              loop
               autoScrollDirection="left"
             >
               {randomizedRecommended.map((video, index) => (
                 <VideoCard key={`${video.id}-recommended-${index}`} video={video} />
               ))}
-            </Shelf>
+            </TopLoopShelf>
           )}
         </div>
       </section>
@@ -164,15 +163,14 @@ export default async function TopPage(): Promise<React.ReactElement> {
           {latestLoopItems.length === 0 ? (
             <EmptyShelf message="公開作品がまだありません。" />
           ) : (
-            <Shelf
+            <TopLoopShelf
               ariaLabel="新着アップロード"
-              loop
               autoScrollDirection="right"
             >
               {latestLoopItems.map((video, index) => (
                 <VideoCard key={`${video.id}-latest-${index}`} video={video} />
               ))}
-            </Shelf>
+            </TopLoopShelf>
           )}
         </div>
       </section>
@@ -193,15 +191,14 @@ export default async function TopPage(): Promise<React.ReactElement> {
             {nostalgic.length === 0 ? (
               <EmptyShelf message="対象になる作品がまだありません。" />
             ) : (
-              <Shelf
+              <TopLoopShelf
                 ariaLabel="懐かしの映像"
-                loop
                 autoScrollDirection="left"
               >
                 {nostalgic.map((video, index) => (
                   <VideoCard key={`${video.id}-nostalgic-${index}`} video={video} />
                 ))}
-              </Shelf>
+              </TopLoopShelf>
             )}
           </div>
         </section>
