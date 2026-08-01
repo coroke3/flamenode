@@ -1,6 +1,10 @@
 import type { DB } from "@/lib/db/client";
 import type { videos } from "@/lib/db/schema";
 import { canEditVideo, type CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
+import {
+  loadGeneralEditableFieldSet,
+  type GeneralEditableFieldKey,
+} from "@/lib/video/generalEditPermissions";
 
 export type VideoEditSectionKey =
   | "identity"
@@ -36,7 +40,13 @@ export async function computeAllowedVideoEditSections(args: {
   user: { id: string; role?: string | null };
   video: typeof videos.$inferSelect;
   privilegeMode: CanEditVideoPrivilegeMode;
+  generalFields?: Set<GeneralEditableFieldKey>;
 }): Promise<AllowedVideoEditSections> {
+  const generalFields =
+    args.privilegeMode === "normal"
+      ? (args.generalFields ??
+        (await loadGeneralEditableFieldSet(args.db, args.video)))
+      : undefined;
   const results = await Promise.all(
     SECTION_KEYS.map(async ({ section, key }) => ({
       section,
@@ -46,6 +56,7 @@ export async function computeAllowedVideoEditSections(args: {
         video: args.video,
         requiredKey: key,
         privilegeMode: args.privilegeMode,
+        ...(generalFields !== undefined ? { generalFields } : {}),
       }),
     })),
   );

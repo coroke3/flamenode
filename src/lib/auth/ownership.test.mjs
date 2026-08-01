@@ -231,3 +231,28 @@ test("privilegeMode: any・省略可能引数・暗黙defaultを再導入しな�
   assert.doesNotMatch(source, /privilegeMode\?\s*:/);
   assert.doesNotMatch(source, /privilegeMode\s*\?\?\s*/);
 });
+
+test("canEditVideo: admin mode は admin ロールのみ許可", () => {
+  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /if \(privilegeMode === "admin"\) \{\s*return user\.role === "admin";\s*\}/,
+  );
+});
+
+test("canEditVideo: normal モードで event staff バイパスを使わない", () => {
+  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /getEditableEventIds\(db, user\.id\)/);
+  assert.doesNotMatch(source, /isEventDelegationGranted/);
+  assert.doesNotMatch(source, /COLLABORATOR_VIDEO_EDIT_KEYS\.has/);
+});
+
+test("canEditVideo: normal モードは general fields で section 判定", () => {
+  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  assert.match(source, /loadGeneralEditableFieldSet/);
+  assert.match(source, /sectionAllowedByGeneralFields/);
+  assert.doesNotMatch(
+    source,
+    /approved\.includes\(video\.creator_x_user_id\)[\s\S]*return true/,
+  );
+});

@@ -73,6 +73,7 @@ async function loadEditableVideo(
         primary_event_id: videos.primary_event_id,
         creator_x_user_id: videos.creator_x_user_id,
         submitted_by_user_id: videos.submitted_by_user_id,
+        visibility_status: videos.visibility_status,
       })
       .from(videos)
       .where(eq(videos.id, videoId))

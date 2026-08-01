@@ -22,6 +22,7 @@ import {
   computeAllowedVideoEditSections,
   hasAnyVideoEditSection,
 } from "@/lib/video/computeEditSections";
+import { loadGeneralEditableFieldSet } from "@/lib/video/generalEditPermissions";
 import {
   validateCustomAnswersForEvents,
   validateVideoMemberSubmission,
@@ -214,6 +215,67 @@ export async function updateVideo(
     parsed.data.is_collab !== (target.collaboration_type === "collab")
   ) {
     return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+  }
+
+  if (privilegeMode === "normal") {
+    const generalFields = await loadGeneralEditableFieldSet(db, target);
+    if (
+      changed(parsed.data.display_name, target.creator_display_name) &&
+      !generalFields.has("display_name")
+    ) {
+      return { ok: false, message: "表示名を編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.icon_url, target.creator_icon_url) &&
+      !generalFields.has("icon_url")
+    ) {
+      return { ok: false, message: "アイコンを編集する権限がありません。" };
+    }
+    if (parsed.data.title !== target.title && !generalFields.has("title")) {
+      return { ok: false, message: "作品タイトルを編集する権限がありません。" };
+    }
+    if (changed(parsed.data.music, target.music) && !generalFields.has("music")) {
+      return { ok: false, message: "楽曲名を編集する権限がありません。" };
+    }
+    if (changed(parsed.data.credit, target.credit) && !generalFields.has("credit")) {
+      return { ok: false, message: "クレジットを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.intro_comment, target.intro_comment) &&
+      !generalFields.has("intro_comment")
+    ) {
+      return { ok: false, message: "紹介コメントを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.highlights, target.highlights) &&
+      !generalFields.has("highlights")
+    ) {
+      return { ok: false, message: "見どころを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.production_story, target.production_story) &&
+      !generalFields.has("production_story")
+    ) {
+      return { ok: false, message: "制作エピソードを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.used_software, targetSoftwareLabel) &&
+      !generalFields.has("used_software")
+    ) {
+      return { ok: false, message: "使用ソフトを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.closing_comment, target.closing_comment) &&
+      !generalFields.has("closing_comment")
+    ) {
+      return { ok: false, message: "締めコメントを編集する権限がありません。" };
+    }
+    if (
+      parsed.data.is_collab !== (target.collaboration_type === "collab") &&
+      !generalFields.has("members")
+    ) {
+      return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+    }
   }
 
   if (sections.youtube && youtubeChanged && youtubeId) {
