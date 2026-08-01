@@ -58,6 +58,20 @@ function isMobileTwoRows(mobileRows: 1 | 2): boolean {
   return window.matchMedia("(max-width: 700px)").matches && mobileRows === 2;
 }
 
+function subscribeMaxWidth700(onStoreChange: () => void): () => void {
+  const mq = window.matchMedia("(max-width: 700px)");
+  mq.addEventListener("change", onStoreChange);
+  return () => mq.removeEventListener("change", onStoreChange);
+}
+
+function getMaxWidth700Snapshot(): boolean {
+  return window.matchMedia("(max-width: 700px)").matches;
+}
+
+function getMaxWidth700ServerSnapshot(): boolean {
+  return false;
+}
+
 function getScrollStride(
   scroller: HTMLElement,
   groupEl: HTMLElement | null,
@@ -122,6 +136,8 @@ export function TopLoopShelf({
   const seededRef = React.useRef(false);
   const correctingRef = React.useRef(false);
   const scrollRafRef = React.useRef<number | null>(null);
+  const animationRafRef = React.useRef<number | null>(null);
+  const animatingRef = React.useRef(false);
   const frameRef = React.useRef<number | null>(null);
   const resumeTimerRef = React.useRef<number | null>(null);
   const pausedRef = React.useRef(false);
@@ -138,12 +154,18 @@ export function TopLoopShelf({
   });
   const canScrollRef = React.useRef({ prev: false, next: false });
   const [reducedMotion, setReducedMotion] = React.useState(false);
-  const [inViewport, setInViewport] = React.useState(true);
+  const [inViewport, setInViewport] = React.useState(false);
   const [documentVisible, setDocumentVisible] = React.useState(true);
   const [canPrev, setCanPrev] = React.useState(false);
   const [canNext, setCanNext] = React.useState(false);
   const [needsLoop, setNeedsLoop] = React.useState(false);
-  const [isMobileViewport, setIsMobileViewport] = React.useState(false);
+  const needsLoopRef = React.useRef(false);
+  needsLoopRef.current = needsLoop;
+  const isMobileViewport = React.useSyncExternalStore(
+    subscribeMaxWidth700,
+    getMaxWidth700Snapshot,
+    getMaxWidth700ServerSnapshot,
+  );
 
   const sourceItems = React.useMemo(() => toSourceItems(children), [children]);
   // 2行グリッドは ≤700px のみ。PCで空の pad セルを出さない。
@@ -179,7 +201,7 @@ export function TopLoopShelf({
   }, [pauseAfterInteractionMs, setPauseReason]);
 
   const syncArrowState = React.useCallback((scroller: HTMLDivElement) => {
-    if (needsLoop) {
+    if (needsLoopRef.current) {
       const scrollable = isScrollerScrollable(scroller);
       if (
         canScrollRef.current.prev === scrollable &&
@@ -204,12 +226,12 @@ export function TopLoopShelf({
     canScrollRef.current = { prev: nextPrev, next: nextNext };
     setCanPrev(nextPrev);
     setCanNext(nextNext);
-  }, [needsLoop]);
+  }, []);
 
   const runScrollTeleport = React.useCallback(() => {
     const scroller = scrollerRef.current;
     const cycleWidth = cycleWidthRef.current;
-    if (!scroller || !(cycleWidth > 0) || correctingRef.current) return;
+    if (!scroller || !(cycleWidth > 0) || correctingRef.current || animatingRef.current) return;
 
     const leftThreshold = cycleWidth * 0.5;
     const rightThreshold = cycleWidth * 1.5;
@@ -255,6 +277,11 @@ export function TopLoopShelf({
       correctingRef.current = true;
       scroller.scrollLeft =
         nextCycleWidth + relativeOffset * nextCycleWidth;
+      const minBound = nextCycleWidth * 0.45;
+      const maxBound = nextCycleWidth * 1.55;
+      if (scroller.scrollLeft < minBound || scroller.scrollLeft > maxBound) {
+        scroller.scrollLeft = nextCycleWidth;
+      }
       correctingRef.current = false;
     }
 
@@ -338,9 +365,9 @@ export function TopLoopShelf({
     const scroller = scrollerRef.current;
     if (!scroller) return;
     syncArrowState(scroller);
-    if (!needsLoop || correctingRef.current) return;
+    if (!needsLoopRef.current || correctingRef.current || animatingRef.current) return;
     scheduleScrollTeleport();
-  }, [needsLoop, scheduleScrollTeleport, syncArrowState]);
+  }, [scheduleScrollTeleport, syncArrowState]);
 
   React.useEffect(() => {
     const scroller = scrollerRef.current;
@@ -350,7 +377,7 @@ export function TopLoopShelf({
     scroller.addEventListener("scroll", handleScroll, { passive: true });
     const onResize = () => {
       reevaluateLoopNeed();
-      if (needsLoop) updateCycleWidth(true);
+      if (needsLoopRef.current) updateCycleWidth(true);
     };
     window.addEventListener("resize", onResize);
 
@@ -364,7 +391,6 @@ export function TopLoopShelf({
     };
   }, [
     handleScroll,
-    needsLoop,
     reevaluateLoopNeed,
     sourceSignature,
     updateCycleWidth,
@@ -378,7 +404,7 @@ export function TopLoopShelf({
 
     const observer = new ResizeObserver(() => {
       reevaluateLoopNeed();
-      if (needsLoop) updateCycleWidth(true);
+      if (needsLoopRef.current) updateCycleWidth(true);
       syncArrowState(scroller);
     });
     observer.observe(scroller);
@@ -386,7 +412,6 @@ export function TopLoopShelf({
     if (group1) observer.observe(group1);
     return () => observer.disconnect();
   }, [
-    needsLoop,
     reevaluateLoopNeed,
     sourceSignature,
     mobileRows,
@@ -397,14 +422,6 @@ export function TopLoopShelf({
   React.useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     const sync = () => setReducedMotion(query.matches);
-    sync();
-    query.addEventListener?.("change", sync);
-    return () => query.removeEventListener?.("change", sync);
-  }, []);
-
-  React.useEffect(() => {
-    const query = window.matchMedia("(max-width: 700px)");
-    const sync = () => setIsMobileViewport(query.matches);
     sync();
     query.addEventListener?.("change", sync);
     return () => query.removeEventListener?.("change", sync);
@@ -505,6 +522,9 @@ export function TopLoopShelf({
     if (scrollRafRef.current != null) {
       window.cancelAnimationFrame(scrollRafRef.current);
     }
+    if (animationRafRef.current != null) {
+      window.cancelAnimationFrame(animationRafRef.current);
+    }
     if (frameRef.current != null) {
       window.cancelAnimationFrame(frameRef.current);
     }
@@ -515,10 +535,16 @@ export function TopLoopShelf({
     distance: number,
     onDone?: () => void,
   ) => {
+    if (animationRafRef.current != null) {
+      window.cancelAnimationFrame(animationRafRef.current);
+      animationRafRef.current = null;
+    }
+
     const start = scroller.scrollLeft;
     const target = start + distance;
     const duration = 280;
     const startTime = performance.now();
+    animatingRef.current = true;
 
     const step = (now: number) => {
       const t = Math.min(1, (now - startTime) / duration);
@@ -527,12 +553,14 @@ export function TopLoopShelf({
       scroller.scrollLeft = start + (target - start) * eased;
       correctingRef.current = false;
       if (t < 1) {
-        window.requestAnimationFrame(step);
+        animationRafRef.current = window.requestAnimationFrame(step);
       } else {
+        animationRafRef.current = null;
+        animatingRef.current = false;
         onDone?.();
       }
     };
-    window.requestAnimationFrame(step);
+    animationRafRef.current = window.requestAnimationFrame(step);
   }, []);
 
   const scrollBy = React.useCallback((dir: -1 | 1) => {
@@ -542,7 +570,7 @@ export function TopLoopShelf({
 
     const distance = getScrollStride(scroller, group1, mobileRows) * dir;
     const finish = () => {
-      if (needsLoop) scheduleScrollTeleport();
+      if (needsLoopRef.current) scheduleScrollTeleport();
       syncArrowState(scroller);
     };
 
@@ -551,12 +579,8 @@ export function TopLoopShelf({
       scroller.scrollLeft += distance;
       correctingRef.current = false;
       finish();
-    } else if (needsLoop) {
-      correctingRef.current = true;
-      animateScrollBy(scroller, distance, () => {
-        correctingRef.current = false;
-        finish();
-      });
+    } else if (needsLoopRef.current) {
+      animateScrollBy(scroller, distance, finish);
     } else {
       scroller.scrollBy({ left: distance, behavior: "smooth" });
       finish();
@@ -565,7 +589,6 @@ export function TopLoopShelf({
   }, [
     animateScrollBy,
     mobileRows,
-    needsLoop,
     pauseAfterInteraction,
     reducedMotion,
     scheduleScrollTeleport,
@@ -580,8 +603,8 @@ export function TopLoopShelf({
   const interactionHandlers = {
     onMouseEnter: () => setPauseReason("hover", true),
     onMouseLeave: () => setPauseReason("hover", false),
-    onFocus: () => setPauseReason("focus", true),
-    onBlur: (event: React.FocusEvent<HTMLDivElement>) => {
+    onFocusCapture: () => setPauseReason("focus", true),
+    onBlurCapture: (event: React.FocusEvent<HTMLDivElement>) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
         setPauseReason("focus", false);
       }
