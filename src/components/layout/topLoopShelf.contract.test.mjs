@@ -15,9 +15,10 @@ test("トップ棚はevent-archive系の3複製・中央開始方式を使う", 
   assert.match(component, /const LOOP_GROUPS = \[0, 1, 2\]/);
   assert.match(component, /cycleWidthRef/);
   assert.match(component, /scroller\.scrollLeft = nextCycle/);
-  assert.match(component, /LEFT_RESET_THRESHOLD = 0\.05/);
-  assert.match(component, /RIGHT_RESET_THRESHOLD = 2\.95/);
-  assert.match(component, /cycleWidth \+ \(current % cycleWidth\)/);
+  assert.match(component, /LEFT_RESET_THRESHOLD = 0\.5/);
+  assert.match(component, /RIGHT_RESET_THRESHOLD = 1\.5/);
+  assert.match(component, /next = current \+ cycleWidth/);
+  assert.match(component, /next = current - cycleWidth/);
   assert.doesNotMatch(component, /flushSync/);
   assert.doesNotMatch(component, /setLoopItems/);
   assert.doesNotMatch(component, /rotateForward/);
