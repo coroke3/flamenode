@@ -9,11 +9,11 @@ import {
   GA4_REPORT_PAGE_SIZE,
 } from "./dataApi.ts";
 
-const dimensionIndices = { dateRange: 0, videoId: 1 };
+const dimensionIndices = { dateRange: 1, videoId: 0 };
 
 function ga4Row(dateRange, videoId, count) {
   return {
-    dimensionValues: [{ value: dateRange }, { value: videoId }],
+    dimensionValues: [{ value: videoId }, { value: dateRange }],
     metricValues: [{ value: String(count) }],
   };
 }
@@ -21,8 +21,8 @@ function ga4Row(dateRange, videoId, count) {
 function ga4ReportBody(rows, { rowCount } = {}) {
   return {
     dimensionHeaders: [
-      { name: "dateRange" },
       { name: "customEvent:video_id" },
+      { name: "dateRange" },
     ],
     metricHeaders: [{ name: "eventCount" }],
     rowCount: rowCount ?? rows.length,
@@ -49,23 +49,23 @@ function ga4Env() {
 test("aggregateGa4ReportRows maps dateRange names to view periods", () => {
   const rows = [
     {
-      dimensionValues: [{ value: "last_2_days" }, { value: "video-a" }],
+      dimensionValues: [{ value: "video-a" }, { value: "last_2_days" }],
       metricValues: [{ value: "11" }],
     },
     {
-      dimensionValues: [{ value: "last_30" }, { value: "video-a" }],
+      dimensionValues: [{ value: "video-a" }, { value: "last_30" }],
       metricValues: [{ value: "30" }],
     },
     {
-      dimensionValues: [{ value: "last_5" }, { value: "video-b" }],
+      dimensionValues: [{ value: "video-b" }, { value: "last_5" }],
       metricValues: [{ value: "7" }],
     },
     {
-      dimensionValues: [{ value: "unknown_range" }, { value: "video-b" }],
+      dimensionValues: [{ value: "video-b" }, { value: "unknown_range" }],
       metricValues: [{ value: "999" }],
     },
     {
-      dimensionValues: [{ value: "last_7" }, { value: "" }],
+      dimensionValues: [{ value: "" }, { value: "last_7" }],
       metricValues: [{ value: "5" }],
     },
   ];
@@ -94,6 +94,11 @@ test("fetchVideoViewPeriods aggregates a successful single-page report", async (
     assert.match(url, /analyticsdata\.googleapis\.com/);
     const body = JSON.parse(String(init?.body ?? "{}"));
     assert.equal(body.offset, 0);
+    assert.deepEqual(body.dimensions, [{ name: "customEvent:video_id" }]);
+    assert.equal(
+      body.dimensions.some((dimension) => dimension.name === "dateRange"),
+      false,
+    );
     return new Response(JSON.stringify(ga4ReportBody(rows)), {
       status: 200,
       headers: { "content-type": "application/json" },
