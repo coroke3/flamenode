@@ -32,7 +32,7 @@ export function EventExportLinkBuilder({
   return (
     <div style={{ display: "grid", gap: 8, minWidth: 280 }}>
       <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
-        出力形式はFlameNodeイベントAPI v4に統一されています。
+        出力形式はFlameNodeイベントAPI v5に統一されています。
       </p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <label className="fn-field" style={{ minWidth: 150 }}>

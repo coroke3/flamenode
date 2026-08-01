@@ -145,7 +145,6 @@ export async function fetchDegradedTopPayload(db: DB): Promise<StaticTopPayload>
       part: videos.part,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(countablePublicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(12);
@@ -188,7 +187,6 @@ export async function fetchDegradedRecommendPayload(
       part: videos.part,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(countablePublicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(12);
@@ -252,7 +250,6 @@ export async function fetchDegradedRecentListPayload(
       part: videos.part,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(
       searchCondition
         ? and(countablePublicVideoCondition, searchCondition)
@@ -312,7 +309,6 @@ export async function fetchDegradedPopularListPayload(
       part: videos.part,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(countablePublicVideoCondition)
     .orderBy(coalescedVideoScoreDesc, desc(videos.scheduled_time))
     .limit(fetchLimit)
@@ -393,7 +389,6 @@ export async function fetchDegradedEventListPage(
       part: videos.part,
     })
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .leftJoin(events, eq(events.id, videos.primary_event_id))
     .where(
       and(
@@ -686,7 +681,6 @@ export async function fetchDegradedUserProfilePayload(
         part: videos.part,
       })
       .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(worksWhere)
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
       .limit(DEGRADED_USER_WORKS_LIMIT),
@@ -704,7 +698,6 @@ export async function fetchDegradedUserProfilePayload(
         part: videos.part,
       })
       .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(collabsWhere)
       .orderBy(desc(videos.scheduled_time), desc(videos.created_at))
       .limit(DEGRADED_USER_COLLABS_LIMIT),

@@ -1541,6 +1541,7 @@ function managedVideoSnapshot(
     "id" | "primary_event_id" | "creator_x_user_id" | "submitted_by_user_id" |
     "collaboration_type" | "part" | "source_type" | "creator_display_name" |
     "creator_display_name_yomi" | "creator_icon_url" | "creator_youtube_channel_url" |
+    "creator_profile_text" | "creator_other_social_links" |
     "title" | "music" | "credit" | "music_reference_url" | "closing_comment" |
     "youtube_video_id" | "intro_comment" | "highlights" | "production_story" |
     "visibility_status" | "scheduling_type" | "scheduled_time" | "created_at"
@@ -1558,6 +1559,8 @@ function managedVideoSnapshot(
     creator_display_name_yomi: video.creator_display_name_yomi,
     creator_icon_url: video.creator_icon_url,
     creator_youtube_channel_url: video.creator_youtube_channel_url,
+    creator_profile_text: video.creator_profile_text,
+    creator_other_social_links: video.creator_other_social_links,
     title: video.title,
     music: video.music,
     credit: video.credit,
@@ -1607,6 +1610,19 @@ async function videoMatchesAuditSnapshot(
     after.metadata_digest === metadataRows &&
     after.custom_answers_digest === answerRows
   );
+}
+
+function resolveLegacyCreatorSnapshot(
+  video: Pick<
+    CanonicalLegacyPlan["videos"][number],
+    "creator_profile_text" | "creator_other_social_links" | "creator_x_user_id"
+  >,
+  xUser: Pick<typeof xUsers.$inferSelect, "profile_text" | "other_social_links"> | null,
+): Pick<typeof videos.$inferSelect, "creator_profile_text" | "creator_other_social_links"> {
+  return {
+    creator_profile_text: video.creator_profile_text ?? xUser?.profile_text ?? null,
+    creator_other_social_links: video.creator_other_social_links ?? xUser?.other_social_links ?? null,
+  };
 }
 
 async function applyVideo(
@@ -1677,6 +1693,18 @@ async function applyVideo(
   if (!existing && beforeCustomAnswers.length > 0) {
     throw new Error(`作品 ${video.id} のカスタム質問回答が既に存在します。`);
   }
+
+  const [creatorXUser] = video.creator_x_user_id
+    ? await db
+        .select({
+          profile_text: xUsers.profile_text,
+          other_social_links: xUsers.other_social_links,
+        })
+        .from(xUsers)
+        .where(eq(xUsers.id, video.creator_x_user_id))
+        .limit(1)
+    : [];
+  const creatorSnapshot = resolveLegacyCreatorSnapshot(video, creatorXUser ?? null);
 
   const softwareRows = softwareLabels.map((row) => {
     const normalized = normalizeSoftwareName(row.label);
@@ -1858,6 +1886,7 @@ async function applyVideo(
   const snapshotTargetId = entitySnapshotTargetId("video", video.id);
   const nextManagedVideo = managedVideoSnapshot({
     ...video,
+    ...creatorSnapshot,
     submitted_by_user_id: LEGACY_IMPORT_SYSTEM_USER_ID,
     part: null,
     scheduling_type: "manual",
@@ -1993,6 +2022,8 @@ async function applyVideo(
             creator_display_name_yomi: video.creator_display_name_yomi,
             creator_icon_url: video.creator_icon_url,
             creator_youtube_channel_url: video.creator_youtube_channel_url,
+            creator_profile_text: creatorSnapshot.creator_profile_text,
+            creator_other_social_links: creatorSnapshot.creator_other_social_links,
             title: video.title,
             music: video.music,
             credit: video.credit,
@@ -2012,14 +2043,16 @@ async function applyVideo(
           INSERT INTO videos (
             id, primary_event_id, creator_x_user_id, submitted_by_user_id, collaboration_type,
             part, source_type, creator_display_name, creator_display_name_yomi, creator_icon_url,
-            creator_youtube_channel_url, title, music, credit, music_reference_url, closing_comment,
+            creator_youtube_channel_url, creator_profile_text, creator_other_social_links,
+            title, music, credit, music_reference_url, closing_comment,
             youtube_video_id, intro_comment, highlights, production_story, visibility_status,
             scheduling_type, scheduled_time, app_like_count, score, score_updated_at, created_at, updated_at
           ) VALUES (
             ${video.id}, ${video.primary_event_id}, ${video.creator_x_user_id},
             ${LEGACY_IMPORT_SYSTEM_USER_ID}, ${video.collaboration_type}, NULL, ${video.source_type},
             ${video.creator_display_name}, ${video.creator_display_name_yomi}, ${video.creator_icon_url},
-            ${video.creator_youtube_channel_url}, ${video.title}, ${video.music}, ${video.credit},
+            ${video.creator_youtube_channel_url}, ${creatorSnapshot.creator_profile_text},
+            ${creatorSnapshot.creator_other_social_links}, ${video.title}, ${video.music}, ${video.credit},
             ${video.music_reference_url}, ${video.closing_comment}, ${video.youtube_video_id},
             ${video.intro_comment}, ${video.highlights}, ${video.production_story},
             ${video.visibility_status}, 'manual', ${video.scheduled_time}, 0, 0, NULL,

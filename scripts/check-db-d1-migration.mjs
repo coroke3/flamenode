@@ -92,7 +92,7 @@ function assertCanonicalD1(context, expectedCounts = null) {
       return sum + db.prepare(`PRAGMA table_info("${escaped}")`).all().length;
     }, 0);
     assert.equal(tables.length, 41, "D1 canonical table count");
-    assert.equal(columnCount, 409, "D1 canonical column count");
+    assert.equal(columnCount, 411, "D1 canonical column count");
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(db.prepare("PRAGMA quick_check").get()?.quick_check, "ok");
     assert.equal(

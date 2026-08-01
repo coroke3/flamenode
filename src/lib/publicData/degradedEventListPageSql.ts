@@ -15,15 +15,14 @@ export function buildDegradedEventListPageSql(
       v.id,
       v.title,
       v.youtube_video_id,
-      COALESCE(NULLIF(TRIM(xu.x_name), ''), NULLIF(TRIM(v.creator_display_name), ''), v.creator_x_user_id) AS display_name,
-      COALESCE(NULLIF(TRIM(xu.icon_url), ''), v.creator_icon_url) AS icon_url,
+      NULLIF(TRIM(v.creator_display_name), '') AS display_name,
+      v.creator_icon_url AS icon_url,
       v.creator_x_user_id,
       v.primary_event_id,
       pe.title AS primary_event_title,
       v.scheduled_time,
       v.part
     FROM videos AS v
-    LEFT JOIN x_users AS xu ON xu.id = v.creator_x_user_id
     LEFT JOIN events AS pe ON pe.id = v.primary_event_id
     LEFT JOIN video_events AS ve ON ve.video_id = v.id AND ve.event_id = ?
     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}

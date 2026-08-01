@@ -40,6 +40,7 @@ const snapshot = {
       creator_display_name_yomi: "せいさくしゃ",
       creator_x_user_id: "creator_id",
       creator_icon_url: "https://example.com/icon.png",
+      creator_profile_text: "自己紹介テキスト",
       creator_youtube_channel_url: "https://youtube.com/@creator",
       creator_other_social_links: '{"portfolio":"https://example.com"}',
       music: "楽曲",
@@ -90,13 +91,13 @@ const snapshot = {
   truncated: false,
 };
 
-test("イベント公開API v4はDB正本の構造だけを返す", () => {
+test("イベント公開API v5はDB正本の構造だけを返す", () => {
   const payload = buildEventExportPayload(
     snapshot,
     1_700_000_200,
     "scheduled",
   );
-  assert.equal(payload.schema_version, 4);
+  assert.equal(payload.schema_version, 5);
   assert.equal(payload.format, "flamenode-event-export");
   assert.equal(payload.update_mode, "scheduled");
   assert.equal(payload.event.id, "event-1");
@@ -108,6 +109,7 @@ test("イベント公開API v4はDB正本の構造だけを返す", () => {
   assert.deepEqual(video.event_ids, ["event-1", "related-event"]);
   assert.equal(video.participant_scope, "group");
   assert.equal(video.creator.x_id, "creator_id");
+  assert.equal(video.creator.profile_text, "自己紹介テキスト");
   assert.equal(video.members[0].role_label, "映像");
   assert.deepEqual(Object.keys(video.members[0]).sort(), [
     "name",
@@ -154,15 +156,15 @@ test("イベント公開APIに旧形式フィールドと内部情報を含め�
   }
 });
 
-test("イベントAPIはformatパラメータを410で拒否しv4だけを返す", async () => {
+test("イベントAPIはformatパラメータを410で拒否しv5だけを返す", async () => {
   const route = await readFile(
     new URL("../../app/api/event-endpoints/[id]/route.ts", import.meta.url),
     "utf8",
   );
   assert.match(route, /format_parameter_removed/);
-  assert.match(route, /schema_version:\s*4/);
+  assert.match(route, /schema_version:\s*5/);
   assert.match(route, /"no-store",\s*410/);
-  assert.match(route, /X-FlameNode-Schema-Version\", \"4\"/);
+  assert.match(route, /X-FlameNode-Schema-Version\", \"5\"/);
   assert.match(route, /buildEventExportPayload/);
   assert.doesNotMatch(route, /buildEventExportPayloadForFormat/);
   assert.doesNotMatch(route, /value === "legacy"|value === "new"/);
@@ -178,7 +180,7 @@ test("管理画面は形式選択を持たず更新方式だけを選ぶ", async
   );
   assert.doesNotMatch(builder, /option value="new"|option value="legacy"/);
   assert.doesNotMatch(builder, /name="format"|\{ format,/);
-  assert.match(builder, /イベントAPI v4に統一/);
+  assert.match(builder, /イベントAPI v5に統一/);
   assert.match(builder, /update:\s*updateMode/);
 });
 

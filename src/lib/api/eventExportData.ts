@@ -111,7 +111,8 @@ export async function loadEventExportSnapshot(
         creator_x_user_id: videos.creator_x_user_id,
         creator_icon_url: videos.creator_icon_url,
         creator_youtube_channel_url: videos.creator_youtube_channel_url,
-        creator_other_social_links: xUsers.other_social_links,
+        creator_profile_text: videos.creator_profile_text,
+        creator_other_social_links: videos.creator_other_social_links,
         music: videos.music,
         credit: videos.credit,
         music_reference_url: videos.music_reference_url,
@@ -128,7 +129,6 @@ export async function loadEventExportSnapshot(
       })
       .from(videoEvents)
       .innerJoin(videos, eq(videos.id, videoEvents.video_id))
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(
         and(
           eq(videoEvents.event_id, eventId),
@@ -313,6 +313,7 @@ export async function loadEventExportSnapshot(
     ...video,
     collaboration_type: video.collaboration_type ?? "individual",
     source_type: video.source_type ?? "youtube",
+    creator_profile_text: video.creator_profile_text ?? null,
     creator_other_social_links: video.creator_other_social_links ?? null,
     event_ids: eventIdsByVideo.get(video.id) ?? [eventId],
     members: membersByVideo.get(video.id) ?? [],

@@ -5,6 +5,21 @@
 > Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-08-01 — `0046_video_creator_profile_snapshot.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | videos に提出者プロフィールスナップショット列 `creator_profile_text` / `creator_other_social_links` を追加し、既存行を x_users からバックフィル |
+| Reason | 作品提出時点のプロフィールを videos 側へ固定し、後から x_users が変わっても過去作品表示を安定させるため |
+| Tables | `videos` |
+| Data migration | `creator_profile_text` / `creator_other_social_links` を x_users からコピー。`creator_youtube_channel_url` / `creator_icon_url` が NULL の行も同様に補完 |
+| Compatibility | `0045` 完了後の canonical 状態のみ適用。過去提出時点の値は復元不可（実行時点の x_users を固定） |
+| Data loss | none |
+| Rollback | migration 適用前の D1 バックアップから復元 |
+| Validation | `check:db-schema`、integration test、typecheck |
+| PR | （本変更） |
+
 ## 2026-07-31 — `0045_align_visibility_defaults.sql`
 
 | 項目 | 内容 |

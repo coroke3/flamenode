@@ -22,7 +22,7 @@ import {
   executeVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
-import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
+import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
   UnslottedEventSyncError,
@@ -128,6 +128,10 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     creator_youtube_channel_url: snapshotYoutubeChannelUrl(
       parsed.data.youtube_channel_url,
     ),
+    creator_profile_text: parsed.data.profile_text ?? null,
+    creator_other_social_links: normalizeSocialLinksForStorage(
+      parsed.data.other_social_links,
+    ),
     title: parsed.data.title,
     music: parsed.data.music ?? null,
     credit: parsed.data.credit ?? null,
@@ -150,18 +154,6 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   let staticRebuildEnqueued = false;
   try {
     const plan = emptyVideoAtomicWritePlan();
-    appendVideoAtomicWritePlan(
-      plan,
-      await buildSubmissionXUserPlan(db, {
-        xId: activeX,
-        displayName: parsed.data.display_name,
-        profileText: parsed.data.profile_text ?? null,
-        youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-        socialLinks: parsed.data.other_social_links ?? null,
-        allowProfileUpdate: true,
-        actorUserId: userId,
-      }),
-    );
     appendVideoAtomicWritePlan(
       plan,
       buildUnslottedEventEligibilityAssertionPlan(db, eventId, now),

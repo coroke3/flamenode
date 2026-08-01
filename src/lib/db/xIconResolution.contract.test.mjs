@@ -7,43 +7,38 @@ const source = await readFile(
   "utf8",
 );
 
-test("アイコン補完はXユーザー既定値を最優先する", () => {
-  const xUserLookup = source.indexOf("if (xRow?.icon_url) return xRow.icon_url");
-  const fallbackLookup = source.indexOf("fetchLatestCreatorSnapshots(db, [xId])");
-  assert.ok(xUserLookup >= 0);
-  assert.ok(fallbackLookup > xUserLookup);
+test("resolveXUserIconはx_users.icon_urlのみを返す", () => {
+  const fnBody = source.slice(
+    source.indexOf("export async function resolveXUserIcon"),
+    source.indexOf("export async function resolveMemberIcons"),
+  );
+  assert.doesNotMatch(fnBody, /fetchLatestCreatorSnapshots/);
+  assert.match(fnBody, /return xRow\?\.icon_url/);
 });
 
-test("個人作を合作より優先する", () => {
-  assert.match(
-    source,
-    /maps\.individualIcons\.get\([^)]*\)\s*\?\?\s*maps\.collabIcons\.get/s,
+test("resolveMemberIconsは過去作品から補完しない", () => {
+  const fnBody = source.slice(
+    source.indexOf("export async function resolveMemberIcons"),
+    source.indexOf("export async function getXIconCandidates"),
   );
-  assert.match(
-    source,
-    /maps\.individualNames\.get\([^)]*\)\s*\?\?\s*maps\.collabNames\.get/s,
-  );
+  assert.match(fnBody, /return members/);
+  assert.doesNotMatch(fnBody, /fetchLatestCreatorSnapshots/);
 });
 
-test("最新の非NULLアイコンと表示名を独立して選ぶ", () => {
-  assert.match(source, /PARTITION BY[\s\S]*creator_x_user_id[\s\S]*collaboration_type/);
-  assert.match(
-    source,
-    /CASE WHEN[\s\S]*creator_icon_url[\s\S]*IS NULL THEN 1 ELSE 0 END[\s\S]*created_at[\s\S]*DESC/,
+test("getXIconCandidatesは公開作品のみを候補にする", () => {
+  const fnBody = source.slice(
+    source.indexOf("export async function getXIconCandidates"),
+    source.indexOf("export async function resolveMemberNames"),
   );
-  assert.match(
-    source,
-    /CASE WHEN[\s\S]*creator_display_name[\s\S]*IS NULL THEN 1 ELSE 0 END[\s\S]*created_at[\s\S]*DESC/,
-  );
-  assert.match(source, /icon_rank === 1/);
-  assert.match(source, /name_rank === 1/);
+  assert.match(fnBody, /eq\(videos\.visibility_status, ["']public["']\)/);
 });
 
-test("voidedを補完元から除外する", () => {
-  assert.match(
-    source,
-    /ne\(videos\.visibility_status, ["']voided["']\)/,
+test("resolveMemberNamesはx_usersとvideo_membersのみを使う", () => {
+  const fnBody = source.slice(
+    source.indexOf("export async function resolveMemberNames"),
   );
+  assert.doesNotMatch(fnBody, /fetchLatestCreatorSnapshots/);
+  assert.match(fnBody, /member\.name/);
 });
 
 test("メンバー配列はmapで同じ順序のまま返す", () => {
@@ -51,6 +46,6 @@ test("メンバー配列はmapで同じ順序のまま返す", () => {
     source.indexOf("export async function resolveMemberIcons"),
     source.indexOf("export async function getXIconCandidates"),
   );
-  assert.match(functionBody, /return members\.map\(/);
+  assert.match(functionBody, /return members/);
   assert.doesNotMatch(functionBody, /\.sort\(/);
 });

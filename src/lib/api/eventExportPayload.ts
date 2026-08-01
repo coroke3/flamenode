@@ -65,6 +65,7 @@ export interface EventExportVideoSnapshot {
   creator_x_user_id: string | null;
   creator_icon_url: string | null;
   creator_youtube_channel_url: string | null;
+  creator_profile_text: string | null;
   creator_other_social_links: string | null;
   music: string | null;
   credit: string | null;
@@ -141,7 +142,7 @@ export function buildEventExportPayload(
   updateMode: EventExportUpdateMode = "realtime",
 ) {
   return {
-    schema_version: 4,
+    schema_version: 5,
     format: "flamenode-event-export" as const,
     generated_at: isoFromUnix(generatedAt),
     generated_at_unix: generatedAt,
@@ -211,6 +212,7 @@ export function buildEventExportPayload(
           x_id: video.creator_x_user_id,
           x_url: xProfileUrl(video.creator_x_user_id),
           icon_url: video.creator_icon_url,
+          profile_text: video.creator_profile_text,
           youtube_channel_url: video.creator_youtube_channel_url,
           other_social_links: parseJson(video.creator_other_social_links),
         },

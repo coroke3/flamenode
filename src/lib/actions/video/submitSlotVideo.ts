@@ -34,7 +34,7 @@ import {
   executeVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
-import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
+import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
@@ -167,6 +167,12 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     await db.select().from(xUsers).where(eq(xUsers.id, activeX)).limit(1)
   )[0];
   const displayName = parsed.data.display_name || slotRow.display_name || xProfile?.x_name || sessionUser.name || "anonymous";
+  const identitySnapshot = {
+    creator_profile_text: parsed.data.profile_text ?? existingVideo?.creator_profile_text ?? null,
+    creator_other_social_links: parsed.data.other_social_links != null
+      ? normalizeSocialLinksForStorage(parsed.data.other_social_links)
+      : existingVideo?.creator_other_social_links ?? null,
+  };
   const videoAfter: typeof videos.$inferSelect = existingVideo
     ? {
         ...existingVideo,
@@ -175,8 +181,15 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         youtube_video_id: youtubeId ?? existingVideo.youtube_video_id,
         creator_x_user_id: activeX,
         creator_display_name: parsed.data.display_name,
-        creator_icon_url: parsed.data.icon_url || null,
-        creator_youtube_channel_url: snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url),
+        creator_display_name_yomi:
+          parsed.data.display_name !== existingVideo.creator_display_name
+            ? null
+            : existingVideo.creator_display_name_yomi,
+        creator_icon_url: parsed.data.icon_url ?? existingVideo.creator_icon_url ?? null,
+        creator_youtube_channel_url: snapshotYoutubeChannelUrl(
+          parsed.data.youtube_channel_url ?? existingVideo.creator_youtube_channel_url,
+        ),
+        ...identitySnapshot,
         music: parsed.data.music ?? null,
         music_reference_url: parsed.data.music_reference_url ?? null,
         credit: parsed.data.credit ?? null,
@@ -200,6 +213,10 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         creator_display_name_yomi: null,
         creator_icon_url: parsed.data.icon_url || null,
         creator_youtube_channel_url: snapshotYoutubeChannelUrl(parsed.data.youtube_channel_url),
+        creator_profile_text: parsed.data.profile_text ?? null,
+        creator_other_social_links: normalizeSocialLinksForStorage(
+          parsed.data.other_social_links,
+        ),
         title: parsed.data.title,
         music: parsed.data.music ?? null,
         credit: parsed.data.credit ?? null,
@@ -222,15 +239,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   let staticRebuildEnqueued = false;
   try {
     const plan = emptyVideoAtomicWritePlan();
-    appendVideoAtomicWritePlan(plan, await buildSubmissionXUserPlan(db, {
-      xId: activeX,
-      displayName: parsed.data.display_name,
-      profileText: parsed.data.profile_text ?? null,
-      youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-      socialLinks: parsed.data.other_social_links ?? null,
-      allowProfileUpdate: true,
-      actorUserId: userId,
-    }));
     plan.statements.push(
       existingVideo
         ? db.update(videos).set(videoAfter).where(and(

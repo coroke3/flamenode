@@ -14,11 +14,13 @@ export function YoutubeChannelPicker({
   defaultValue,
   candidates,
   disabled = false,
+  onValueChange,
 }: {
   name?: string;
   defaultValue: string | null;
   candidates: string[];
   disabled?: boolean;
+  onValueChange?: (url: string) => void;
 }): React.ReactElement {
   const [value, setValue] = React.useState(defaultValue ?? "");
   const [open, setOpen] = React.useState(false);
@@ -50,6 +52,7 @@ export function YoutubeChannelPicker({
 
   const applyUrl = (next: string) => {
     setValue(next);
+    onValueChange?.(next);
     setError(null);
     setOpen(false);
   };
