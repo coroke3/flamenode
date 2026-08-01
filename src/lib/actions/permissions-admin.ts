@@ -99,11 +99,11 @@ export async function updateGlobalEditableFields(
     return { ok: true, message: "一般作品権限に変更はありません。" };
   }
 
-  const beforeSnapshot = {
-    id: before.id,
+  const permissionCasSnapshot = {
     default_editable_fields: before.default_editable_fields,
     upcoming_editable_fields: before.upcoming_editable_fields,
   };
+  const beforeSnapshot = { id: before.id, ...permissionCasSnapshot };
   const afterSnapshot = { ...beforeSnapshot, ...patch };
 
   try {
@@ -119,7 +119,7 @@ export async function updateGlobalEditableFields(
                 // 一般作品権限が所有する2列だけをCAS対象にする。
                 // operation_mode・CostGuard・監査設定など、同じ行の無関係な更新で
                 // 保存が失敗しないようにする。
-                expectedCurrent: beforeSnapshot,
+                expectedCurrent: permissionCasSnapshot,
               }),
             )!,
           ),
