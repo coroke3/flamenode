@@ -70,7 +70,7 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID="G-XXXXXXXXXX"
 ### 同期フロー
 
 1. R2 から `list/recent.json` を読む（公開作品メタの正本）
-2. GA4 Data API `runReport` で 2 / 5 / 7 / 30 日の `flamenode_video_view` を `video_id` 別に集計
+2. GA4 Data API `runReport` で 2 / 5 / 7 / 30 日の `flamenode_video_view` を `video_id` 別に集計。リクエストの dimension は `customEvent:video_id` のみ指定し、複数の名前付き date range に対して Data API がレスポンスへ自動追加する `dateRange` 列を使用する（`dateRange` 自体を dimension 指定すると 400）
 3. `rankTrendingItems` で決定的にソート（`views_2d` → `views_5d` → `views_7d` → `views_30d` → `video_id`）し、`rank` / `video_id` を付与
 4. R2 `analytics/trending.json` へ PUT（スキーマ version 1、最大 200 件）
 

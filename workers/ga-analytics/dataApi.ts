@@ -227,7 +227,10 @@ function buildRunReportBody(offset: number): Record<string, unknown> {
       { name: "last_7", startDate: "6daysAgo", endDate: "today" },
       { name: "last_30", startDate: "29daysAgo", endDate: "today" },
     ],
-    dimensions: [{ name: "dateRange" }, { name: "customEvent:video_id" }],
+    // GA4 automatically appends the synthetic dateRange dimension when a
+    // request contains multiple named ranges. Listing it here is rejected by
+    // the Data API with INVALID_ARGUMENT.
+    dimensions: [{ name: "customEvent:video_id" }],
     metrics: [{ name: "eventCount" }],
     dimensionFilter: {
       filter: {
