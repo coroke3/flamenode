@@ -23,6 +23,7 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0044_simplify_visibility_statuses.sql",
     "0045_align_visibility_defaults.sql",
     "0046_video_creator_profile_snapshot.sql",
+    "0047_backfill_youtube_metadata_pending.sql",
   ]);
   assert.equal(result.tableCount, 41);
   assert.equal(result.columnCount, 411);

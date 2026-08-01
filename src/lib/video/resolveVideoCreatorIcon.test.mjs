@@ -297,19 +297,44 @@ if (process.env.FLAMENODE_RESOLVE_VIDEO_ICON_EXECUTION !== "1") {
       }),
     });
 
-    const expectedKey = "video-icons/x-user-1/video-1";
-    assert.deepEqual(result, {
-      ok: true,
-      value: {
-        iconUrl: `/api/media/${expectedKey}`,
-        uploadedKey: expectedKey,
-      },
-    });
+    assert.equal(result.ok, true);
+    const expectedKey = result.value.uploadedKey;
+    assert.match(
+      expectedKey,
+      /^video-icons\/x-user-1\/video-1\/[0-9a-f-]+\.png$/,
+    );
+    assert.equal(result.value.iconUrl, `/api/media/${expectedKey}`);
     assert.equal(currentHarness.puts.length, 1);
     assert.equal(currentHarness.puts[0].key, expectedKey);
     assert.equal(currentHarness.puts[0].opts.httpMetadata.contentType, "image/png");
     assert.deepEqual(currentHarness.getCandidatesCalls, []);
     assert.deepEqual(currentHarness.dbAccess, []);
+  });
+
+  test("連続 upload は既存参照を上書きしない一意 key を使う", async () => {
+    currentHarness = createHarness();
+    const png = buildPng({ width: 64, height: 64 });
+
+    const upload = async () => {
+      const formData = new FormData();
+      formData.set("icon_file", new File([png], "icon.png", { type: "image/png" }));
+      return resolveVideoCreatorIcon({
+        ...baseArgs(currentHarness, {
+          formData,
+          parsed: { icon_mode: "upload", icon_url: null },
+        }),
+      });
+    };
+
+    const first = await upload();
+    const second = await upload();
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.notEqual(first.value.uploadedKey, second.value.uploadedKey);
+
+    await rollbackUploadedVideoIcon(second.value.uploadedKey);
+    assert.deepEqual(currentHarness.deletes, [second.value.uploadedKey]);
+    assert.notEqual(first.value.iconUrl, second.value.iconUrl);
   });
 
   test("rollbackUploadedVideoIcon は BUCKET.delete を呼ぶ", async () => {

@@ -12,6 +12,7 @@ import { PublicEventCard } from "@/components/event/PublicEventCard";
 import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { TopLoopShelf } from "@/components/layout/TopLoopShelf";
+import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard } from "@/components/video/VideoCard";
 import { RankedVideoCard } from "@/components/video/RankedVideoCard";

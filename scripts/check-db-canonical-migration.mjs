@@ -91,6 +91,12 @@ function applyAllMigrations() {
   return db;
 }
 
+function applyPostCanonicalMigrations(db) {
+  for (const name of activeMigrations.filter((entry) => entry > migrationName)) {
+    executeMigration(db, name, fs.readFileSync(path.join(migrationsDir, name), "utf8"));
+  }
+}
+
 function schemaVersion(db) {
   return db.prepare("SELECT version FROM flamenode_schema_meta WHERE id = 'current'").get()?.version;
 }
@@ -165,6 +171,7 @@ function testLegacyFixture() {
   try {
     seedLegacyFixture(db);
     executeMigration(db, migrationName, migrationSql);
+    applyPostCanonicalMigrations(db);
     assertCanonicalShape(db);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM x_identity_requests").get().count, 4);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM x_user_account_links").get().count, 2);

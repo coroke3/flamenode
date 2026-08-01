@@ -387,7 +387,7 @@ export function Shelf({
         normalizeRafRef.current = null;
       }
     };
-  }, [handleScroll, loopItems.length, runNormalizeLoopScroll, syncArrowState]);
+  }, [handleScroll, loop, loopItems.length, runNormalizeLoopScroll, syncArrowState]);
 
   React.useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");

@@ -14,6 +14,7 @@ import {
   STATIC_LIST_MAX_ITEMS,
   STATIC_LIST_MAX_OBJECT_BYTES,
   capStaticListTotal,
+  ensureDailyTopNostalgicShuffle,
   rebuildTarget,
   removeTrackedArtifacts,
 } from "./rebuild.ts";
@@ -429,8 +430,41 @@ test("ensureDailyTopNostalgicShuffleはUTC日次でtop再生成をキュー登�
   assert.match(fn, /TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY/);
   assert.match(fn, /enqueueTopRebuild/);
   assert.match(fn, /nostalgic_daily_shuffle/);
+  assert.doesNotMatch(fn, /env\.KV\.put/);
   assert.doesNotMatch(fn, /JSON\.parse/);
   assert.doesNotMatch(fn, /env\.R2\.get\("top\.json"\)/);
+});
+
+test("日次シャッフルのenqueue成功だけでは完了マーカーを保存しない", async () => {
+  const kvPuts = [];
+  const batches = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            return { sql, args };
+          },
+        };
+      },
+      async batch(statements) {
+        batches.push(statements);
+        return [{ meta: { changes: 0 } }, { meta: { changes: 1 } }];
+      },
+    },
+    KV: {
+      async get() {
+        return null;
+      },
+      async put(...args) {
+        kvPuts.push(args);
+      },
+    },
+  };
+
+  assert.equal(await ensureDailyTopNostalgicShuffle(env), 1);
+  assert.equal(batches.length, 1);
+  assert.deepEqual(kvPuts, []);
 });
 
 test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {

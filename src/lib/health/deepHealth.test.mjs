@@ -6,6 +6,7 @@ import {
   authorizeDeepHealth,
   runDeepHealthChecks,
 } from "./deepHealth.ts";
+import { assertStaticArtifactsFresh } from "./deepHealthQueues.ts";
 import {
   REQUIRED_RUNTIME_TABLE_COUNT,
   RUNTIME_CRITICAL_TABLES,
@@ -64,6 +65,9 @@ test("deep health performs read-only D1, KV and R2 probes", async () => {
               JSON.stringify({
                 generated_at: generatedAt,
                 latest: [],
+                nostalgic_pool: [],
+                nostalgic: [],
+                nostalgic_shuffled_at: generatedAt,
                 stats: { public_videos: 0 },
               }),
           };
@@ -121,6 +125,9 @@ test("deep health allows all queue flags disabled (production default)", async (
               JSON.stringify({
                 generated_at: generatedAt,
                 latest: [],
+                nostalgic_pool: [],
+                nostalgic: [],
+                nostalgic_shuffled_at: generatedAt,
                 stats: { public_videos: 0 },
               }),
           };
@@ -138,6 +145,33 @@ test("deep health allows all queue flags disabled (production default)", async (
   };
   const result = await runDeepHealthChecks(env);
   assert.equal(result.checks.queues, "ok");
+});
+
+test("deep health rejects top.json without nostalgic shelf contract", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const bucket = {
+    async get(key) {
+      if (key === "top.json") {
+        return {
+          text: async () =>
+            JSON.stringify({
+              generated_at: now,
+              latest: [],
+              stats: { public_videos: 0 },
+            }),
+        };
+      }
+      return {
+        text: async () =>
+          JSON.stringify({ generated_at: now, total: 0, items: [] }),
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => assertStaticArtifactsFresh(bucket, now),
+    /missing required field nostalgic_pool/,
+  );
 });
 
 test("deep health fails closed when queue flags are partially enabled", async () => {

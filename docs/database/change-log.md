@@ -5,6 +5,21 @@
 > Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-08-01 — `0047_backfill_youtube_metadata_pending.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | data-migration |
+| Summary | YouTube ID を持つ既存作品のうち、欠損している `video_youtube_metadata` 行を `pending` で補完 |
+| Reason | YouTube 同期対象から漏れていた旧作品を安全に再検証し、R2 `top.json` の「懐かしの映像」候補へ反映できるようにするため |
+| Tables | `video_youtube_metadata`（参照: `videos`） |
+| Data migration | 非 `voided`・YouTube ID あり・metadata 欠損の作品だけ `INSERT OR IGNORE`。既存同期結果は更新しない |
+| Compatibility | `0046` 完了後に適用。同期Workerが `pending` を処理し、公開・限定公開と確認できた作品だけ静的JSONへ掲載 |
+| Data loss | none |
+| Rollback | migration 適用前バックアップとの差分にある `pending` 行だけを削除 |
+| Validation | `check:db-schema`、integration test、Worker test、typecheck |
+| PR | （本変更） |
+
 ## 2026-08-01 — `0046_video_creator_profile_snapshot.sql`
 
 | 項目 | 内容 |

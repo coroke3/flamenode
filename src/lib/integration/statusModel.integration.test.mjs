@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { getTableColumns } from "drizzle-orm";
@@ -256,52 +256,46 @@ test("0044 converts legacy states after canonical migration and preserves canoni
 });
 
 test("0045 aligns physical defaults without insert-normalization triggers", () => {
-  const migration0045Sql = readFileSync(
-    new URL("../../../migrations/0045_align_visibility_defaults.sql", import.meta.url),
-    "utf8",
-  );
+  const migrationsUrl = new URL("../../../migrations/", import.meta.url);
+  const migrationsThrough0045 = readdirSync(migrationsUrl)
+    .filter(
+      (name) =>
+        /^\d{4}_[a-z0-9_]+\.sql$/.test(name) &&
+        name <= "0045_align_visibility_defaults.sql",
+    )
+    .sort();
   const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  for (const migrationName of migrationsThrough0045) {
+    const sql = readFileSync(new URL(migrationName, migrationsUrl), "utf8");
+    if (migrationName !== "0043_db_canonical_migration.sql") {
+      db.exec(sql);
+      continue;
+    }
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(sql);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  db.exec("INSERT INTO user(id) VALUES ('user-1')");
   db.exec(`
-    PRAGMA foreign_keys = ON;
-
-    CREATE TABLE x_users (id text PRIMARY KEY);
-    CREATE TABLE "user" (id text PRIMARY KEY);
-
-    CREATE TABLE events (
-      id text PRIMARY KEY,
-      title text NOT NULL DEFAULT 'Event',
-      visibility_status text NOT NULL DEFAULT 'draft',
-      updated_at integer NOT NULL DEFAULT 0,
-      created_at integer NOT NULL DEFAULT 0,
-      allow_user_video_event_links integer NOT NULL DEFAULT 0,
-      allow_unslotted_posts integer NOT NULL DEFAULT 0,
-      allow_user_video_edits integer NOT NULL DEFAULT 0,
-      max_slots_per_video integer NOT NULL DEFAULT 1,
-      public_api_enabled integer NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE videos (
-      id text PRIMARY KEY,
-      submitted_by_user_id text NOT NULL,
-      creator_display_name text NOT NULL DEFAULT 'creator',
-      title text NOT NULL DEFAULT 'title',
-      visibility_status text NOT NULL DEFAULT 'draft',
-      created_at integer NOT NULL DEFAULT 0,
-      updated_at integer NOT NULL DEFAULT 0,
-      collaboration_type text NOT NULL DEFAULT 'individual',
-      source_type text NOT NULL DEFAULT 'youtube',
-      app_like_count integer NOT NULL DEFAULT 0,
-      score real NOT NULL DEFAULT 0,
-      FOREIGN KEY (submitted_by_user_id) REFERENCES "user"(id)
-    );
-
-    INSERT INTO "user"(id) VALUES ('user-1');
+    INSERT INTO videos(
+      id,
+      submitted_by_user_id,
+      creator_display_name,
+      title
+    ) VALUES (
+      'video-default',
+      'user-1',
+      'Creator',
+      'Video'
+    )
   `);
-
-  db.exec(migrationSql);
-  db.exec(migration0045Sql);
-
-  db.exec("INSERT INTO videos(id, submitted_by_user_id) VALUES ('video-default', 'user-1')");
   assert.equal(
     db.prepare("SELECT visibility_status FROM videos WHERE id = 'video-default'").get()
       .visibility_status,

@@ -2,7 +2,7 @@
 -- Date: 2026-08-01
 -- Type: additive
 -- Summary: 作品投稿時点の提出者プロフィールを videos へスナップショット列として追加し、既存行を x_users からバックフィル
--- Data loss: none（過去提出時点の値は復元不可。本 migration 実行時点の x_users を固定する）
+-- Data loss: none
 -- Rollback: migration 適用前の D1 バックアップから復元
 -- Change log: docs/database/change-log.md
 

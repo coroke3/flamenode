@@ -76,7 +76,17 @@ export async function resolveVideoCreatorIcon(args: {
     return { ok: false, message: validated.message };
   }
 
-  const key = `video-icons/${args.activeXId}/${args.videoId}`;
+  const extension =
+    validated.image.contentType === "image/webp"
+      ? "webp"
+      : validated.image.contentType === "image/jpeg"
+        ? "jpg"
+        : "png";
+  // 同じ作品の再アップロードでも既存参照先を上書きしない。
+  // DB 更新失敗時の rollback は、この保存で作った object だけを削除できる。
+  const key =
+    `video-icons/${args.activeXId}/${args.videoId}/` +
+    `${crypto.randomUUID()}.${extension}`;
   const iconUrl = `/api/media/${key}`;
   await env.BUCKET.put(key, buffer, {
     httpMetadata: { contentType: validated.image.contentType },

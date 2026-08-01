@@ -173,7 +173,8 @@ test("TopLoopShelfの矢印にfocus-visible outlineがある", () => {
 
 test("トップページは3箇所でTopLoopShelfを使う", () => {
   assert.equal((home.match(/<TopLoopShelf/g) ?? []).length, 3);
-  assert.doesNotMatch(home, /from "@\/components\/layout\/Shelf"/);
+  assert.equal((home.match(/<Shelf\b/g) ?? []).length, 1);
+  assert.match(home, /<Shelf ariaLabel="FlameNodeで注目" loop=\{false\}>/);
   const directions = [
     ...home.matchAll(/autoScrollDirection="(left|right)"/g),
   ].map((match) => match[1]);

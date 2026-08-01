@@ -619,7 +619,10 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
 }
 
-/** UTC 日次で top 再生成をキュー登録し、懐かし棚を安全に更新する。 */
+/**
+ * UTC 日次で top 再生成をキュー登録する。
+ * 日次マーカーは rebuildTop の R2 PUT 成功後だけ更新し、失敗時は次のCronで再試行する。
+ */
 export async function ensureDailyTopNostalgicShuffle(
   env: Env,
   signal?: RebuildSignal,
@@ -640,7 +643,6 @@ export async function ensureDailyTopNostalgicShuffle(
       signal,
     );
     if (enqueued > 0) {
-      await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, dayKey);
       return 1;
     }
     return 0;
