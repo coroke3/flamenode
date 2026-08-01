@@ -31,6 +31,15 @@ function assertQueueConfiguration(env: {
     QUEUE_CONTINUATION_ENABLED: env.QUEUE_CONTINUATION_ENABLED,
     QUEUE_YOUTUBE_SYNC_ENABLED: env.QUEUE_YOUTUBE_SYNC_ENABLED,
   });
+  // Template / Build 既定は "0"。全オフは意図的な停止として deep health を通す。
+  // 1つでも有効なら3旗とも "1" かつ wake binding を要求する（部分有効は fail-closed）。
+  const anyEnabled =
+    flags.dispatchEnabled ||
+    flags.continuationEnabled ||
+    flags.youtubeSyncEnabled;
+  if (!anyEnabled) {
+    return;
+  }
   if (!flags.dispatchEnabled) {
     throw new Error("queue dispatch disabled");
   }

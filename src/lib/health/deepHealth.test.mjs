@@ -95,6 +95,77 @@ test("deep health performs read-only D1, KV and R2 probes", async () => {
   assert.deepEqual(calls.map(([kind]) => kind).sort(), ["d1", "kv", "r2", "r2-get", "r2-get"]);
 });
 
+test("deep health allows all queue flags disabled (production default)", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const env = {
+    BUILD_COMMIT_SHA: commit,
+    QUEUE_DISPATCH_ENABLED: "0",
+    QUEUE_CONTINUATION_ENABLED: "0",
+    QUEUE_YOUTUBE_SYNC_ENABLED: "0",
+    DB: {
+      prepare: () => ({
+        first: async () => ({
+          version: "2026-07-20-canonical-1",
+          required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
+        }),
+      }),
+    },
+    KV: { get: async () => null },
+    BUCKET: {
+      head: async () => null,
+      get: async (key) => {
+        const generatedAt = now - 60;
+        if (key === "top.json") {
+          return {
+            text: async () =>
+              JSON.stringify({
+                generated_at: generatedAt,
+                latest: [],
+                stats: { public_videos: 0 },
+              }),
+          };
+        }
+        return {
+          text: async () =>
+            JSON.stringify({
+              generated_at: generatedAt,
+              total: 0,
+              items: [],
+            }),
+        };
+      },
+    },
+  };
+  const result = await runDeepHealthChecks(env);
+  assert.equal(result.checks.queues, "ok");
+});
+
+test("deep health fails closed when queue flags are partially enabled", async () => {
+  const env = {
+    BUILD_COMMIT_SHA: commit,
+    QUEUE_DISPATCH_ENABLED: "1",
+    QUEUE_CONTINUATION_ENABLED: "0",
+    QUEUE_YOUTUBE_SYNC_ENABLED: "1",
+    NOTIFICATION_WAKE_QUEUE: { send: () => {} },
+    STATIC_REBUILD_WAKE_QUEUE: { send: () => {} },
+    YOUTUBE_SYNC_WAKE_QUEUE: { send: () => {} },
+    DB: {
+      prepare: () => ({
+        first: async () => ({
+          version: "2026-07-20-canonical-1",
+          required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
+        }),
+      }),
+    },
+    KV: { get: async () => null },
+    BUCKET: {
+      head: async () => null,
+      get: async () => null,
+    },
+  };
+  await assert.rejects(() => runDeepHealthChecks(env), /queue continuation disabled/);
+});
+
 test("deep health fails closed on schema mismatch", async () => {
   const env = {
     BUILD_COMMIT_SHA: commit,
