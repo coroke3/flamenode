@@ -470,6 +470,7 @@ export function TopLoopShelf({
       const scrollable = isScrollerScrollable(scroller);
       if (
         !pausedRef.current &&
+        !animatingRef.current &&
         scrollable &&
         cycleWidth > 0 &&
         sourceItems.length >= 2
@@ -521,12 +522,16 @@ export function TopLoopShelf({
     }
     if (scrollRafRef.current != null) {
       window.cancelAnimationFrame(scrollRafRef.current);
+      scrollRafRef.current = null;
     }
     if (animationRafRef.current != null) {
       window.cancelAnimationFrame(animationRafRef.current);
+      animationRafRef.current = null;
     }
+    animatingRef.current = false;
     if (frameRef.current != null) {
       window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
     }
   }, []);
 
@@ -539,6 +544,7 @@ export function TopLoopShelf({
       window.cancelAnimationFrame(animationRafRef.current);
       animationRafRef.current = null;
     }
+    animatingRef.current = false;
 
     const start = scroller.scrollLeft;
     const target = start + distance;
