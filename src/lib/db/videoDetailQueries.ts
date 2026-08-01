@@ -90,8 +90,7 @@ export async function fetchVideoDetail(
     .innerJoin(events, eq(videoEvents.event_id, events.id))
     .where(eq(videoEvents.video_id, video.id));
 
-  // 4) 合作メンバー
-  // icon_url: xUsers.icon_url → 過去作品の creator_icon_url (個人作→合作) で補完
+  // 4) 合作メンバー（代表表示は x_users.icon_url / x_users.x_name のみ）
   const rawMembers = await db
     .select({
       id: videoMembers.id,

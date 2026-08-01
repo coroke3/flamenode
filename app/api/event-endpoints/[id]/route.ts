@@ -74,7 +74,7 @@ async function exportResponse(
       ? "no-store"
       : "public, max-age=60, s-maxage=60, stale-while-revalidate=60";
   const response = await publicJsonBodyResponse(req, body, cacheControl);
-  response.headers.set("X-FlameNode-Schema-Version", "4");
+  response.headers.set("X-FlameNode-Schema-Version", "5");
   response.headers.set("X-FlameNode-Format", "flamenode-event-export");
   response.headers.set("X-FlameNode-Update-Mode", updateMode);
   response.headers.set("X-FlameNode-Refresh-Minutes", String(refreshMinutes));
@@ -101,7 +101,7 @@ async function readCachedPayload(
   if (!cached) return null;
   try {
     const parsed = JSON.parse(cached) as { schema_version?: unknown };
-    if (parsed.schema_version !== 4) throw new Error("stale_schema");
+    if (parsed.schema_version !== 5) throw new Error("stale_schema");
     return cached;
   } catch (error) {
     console.warn("[event-export-api] invalid KV payload evicted", {
@@ -151,9 +151,9 @@ export async function GET(
       req,
       {
         error: "format_parameter_removed",
-        schema_version: 4,
+        schema_version: 5,
         message:
-          "旧形式は廃止されました。formatパラメータを削除し、v4形式を利用してください。",
+          "旧形式は廃止されました。formatパラメータを削除し、v5形式を利用してください。",
       },
       "no-store",
       410,

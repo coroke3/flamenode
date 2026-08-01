@@ -167,6 +167,14 @@ export default async function SlottedPostPage({
           : undefined;
   const canPost = !submitBlockedReason;
 
+  const initialProfile = {
+    display_name: slot.display_name ?? xRow?.x_name ?? user.name,
+    icon_url: xRow?.icon_url ?? user.image ?? undefined,
+    profile_text: xRow?.profile_text ?? undefined,
+    youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
+    other_social_links: xRow?.other_social_links ?? undefined,
+  };
+
   return (
     <AppShell size="default">
       <header className="fn-page-head fn-page-head--split entry-slot-page-head">
@@ -240,13 +248,10 @@ export default async function SlottedPostPage({
         activeXId={activeX ?? undefined}
         initial={{
           creator_x_user_id: activeX ?? undefined,
-          display_name: slot.display_name ?? xRow?.x_name ?? user.name,
-          icon_url: xRow?.icon_url ?? user.image ?? undefined,
-          profile_text: xRow?.profile_text ?? undefined,
-          youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
-          other_social_links: xRow?.other_social_links ?? undefined,
+          ...initialProfile,
           event_ids: initialEventIds,
         }}
+        defaultProfile={initialProfile}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}

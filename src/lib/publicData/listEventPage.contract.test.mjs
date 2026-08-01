@@ -31,6 +31,9 @@ test("degraded event list SQL は COUNTABLE 条件と LIMIT を含む", () => {
   assert.match(sql, /COUNTABLE|visibility_status = 'public'/);
   assert.match(sql, /LIMIT \? OFFSET \?/);
   assert.doesNotMatch(sql, /COUNT\(\*\) OVER/i);
+  assert.match(sql, /v\.creator_display_name/);
+  assert.match(sql, /v\.creator_icon_url/);
+  assert.doesNotMatch(sql, /x_users|xu\.x_name|xu\.icon_url/i);
   assert.match(degradedSource, /fetchDegradedEventListPage/);
   assert.match(degradedSource, /\.limit\(fetchLimit\)/);
 });

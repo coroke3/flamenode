@@ -134,6 +134,14 @@ export default async function UnslottedPostPage({
         : undefined;
   const canPost = !submitBlockedReason;
 
+  const initialProfile = {
+    display_name: xRow?.x_name ?? user.name,
+    icon_url: xRow?.icon_url ?? user.image ?? undefined,
+    profile_text: xRow?.profile_text ?? undefined,
+    youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
+    other_social_links: xRow?.other_social_links ?? undefined,
+  };
+
   return (
     <AppShell size="default">
       <header className="fn-page-head fn-page-head--split">
@@ -206,12 +214,9 @@ export default async function UnslottedPostPage({
         activeXId={activeX ?? undefined}
         initial={{
           creator_x_user_id: activeX ?? undefined,
-          display_name: xRow?.x_name ?? user.name,
-          icon_url: xRow?.icon_url ?? user.image ?? undefined,
-          profile_text: xRow?.profile_text ?? undefined,
-          youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
-          other_social_links: xRow?.other_social_links ?? undefined,
+          ...initialProfile,
         }}
+        defaultProfile={initialProfile}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}

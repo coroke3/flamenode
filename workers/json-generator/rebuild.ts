@@ -1467,7 +1467,8 @@ async function fetchStaticRelatedVideos(
 }
 
 const REBUILD_VIDEO_SELECT = `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name, v.creator_x_user_id,
-            creator_icon_url, music, credit, music_reference_url, intro_comment, highlights,
+            creator_icon_url, v.creator_youtube_channel_url, v.creator_profile_text,
+            v.creator_other_social_links, music, credit, music_reference_url, intro_comment, highlights,
             production_story, closing_comment, visibility_status, scheduled_time,
             COALESCE(v.app_like_count, 0) AS app_like_count,
             CASE WHEN EXISTS (

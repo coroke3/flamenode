@@ -125,14 +125,8 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(vm.publicChapters.length, 1);
     assert.equal(vm.memberChapters.length, 1);
     assert.equal(vm.relatedVideos[0].title, "Related");
-    assert.equal(
-      vm.video.creator_icon_url,
-      "https://example.com/creator.png",
-    );
-    assert.equal(
-      vm.relatedVideos[0].icon_url,
-      "https://example.com/other.png",
-    );
+    assert.equal(vm.video.creator_icon_url, null);
+    assert.equal(vm.relatedVideos[0].icon_url, null);
     assert.equal(
       vm.relatedVideos[0].creator_x_user_id,
       "other",
@@ -148,6 +142,9 @@ if (runTestWithTsx(import.meta.url)) {
         creator_display_name: "Creator",
         creator_icon_url: null,
         creator_x_user_id: "creator",
+        creator_youtube_channel_url: "https://youtube.com/@creator",
+        creator_profile_text: "Profile text",
+        creator_other_social_links: "[]",
         music: "Song",
         credit: "Artist",
         music_reference_url: "https://example.com/music",
@@ -224,5 +221,8 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(vm.publicMembers[0].display_name, "Member");
     assert.equal(vm.relatedVideos[0].display_name, "Other");
     assert.deepEqual(vm.softwareLabels, ["After Effects", "Premiere Pro"]);
+    assert.equal(vm.video.creator_youtube_channel_url, "https://youtube.com/@creator");
+    assert.equal(vm.video.creator_profile_text, "Profile text");
+    assert.equal(vm.video.creator_other_social_links, "[]");
   });
 }

@@ -61,6 +61,8 @@ export type CanonicalLegacyPlan = {
     creator_display_name_yomi: string | null;
     creator_icon_url: string | null;
     creator_youtube_channel_url: string | null;
+    creator_profile_text: string | null;
+    creator_other_social_links: string | null;
     title: string;
     music: string | null;
     credit: string | null;
@@ -203,6 +205,10 @@ function normalizeUrl(raw: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+function legacyVideoOtherSocialLinks(row: Record<string, unknown>): string | null {
+  return normalizeUrl(stringValue(row, "othersns")) ?? stringValue(row, "othersns");
 }
 
 function normalizeIconUrl(raw: string | null): string | null {
@@ -588,6 +594,8 @@ export function normalizeLegacyFiles(
         creator_display_name_yomi: stringValue(row, "yomi"),
         creator_icon_url: normalizeIconUrl(stringValue(row, "icon")),
         creator_youtube_channel_url: normalizeUrl(stringValue(row, "ychlink")),
+        creator_profile_text: null,
+        creator_other_social_links: legacyVideoOtherSocialLinks(row),
         title,
         music: stringValue(row, "music"),
         credit: stringValue(row, "credit"),

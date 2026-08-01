@@ -400,6 +400,16 @@ export default async function EditVideoPage({
     !canEditCredits ? "video.credit" : null,
   ].filter((v): v is string => Boolean(v));
 
+  const defaultProfile = xRow
+    ? {
+        display_name: xRow.x_name,
+        icon_url: xRow.icon_url,
+        profile_text: xRow.profile_text,
+        youtube_channel_url: xRow.youtube_channel_url,
+        other_social_links: xRow.other_social_links,
+      }
+    : undefined;
+
   return (
     <div className="fn-public-container fn-page">
       <header className="fn-page-head">
@@ -451,15 +461,12 @@ export default async function EditVideoPage({
         disabledSections={disabledSections}
         disabledFields={disabledFields}
         initial={{
-          // 表示名: 既存 video.creator_display_name を優先、空ならその X ID の x_name にフォールバック。
-          // 紹介文 / YouTube / SNS は videos には保存されておらず x_users 側 (xRow) のみが正本。
-          display_name:
-            video.creator_display_name ?? xRow?.x_name ?? user.name ?? undefined,
+          display_name: video.creator_display_name ?? undefined,
           creator_x_user_id: video.creator_x_user_id ?? undefined,
           icon_url: video.creator_icon_url ?? undefined,
-          profile_text: xRow?.profile_text ?? undefined,
-          youtube_channel_url: xRow?.youtube_channel_url ?? undefined,
-          other_social_links: xRow?.other_social_links ?? undefined,
+          profile_text: video.creator_profile_text ?? undefined,
+          youtube_channel_url: video.creator_youtube_channel_url ?? undefined,
+          other_social_links: video.creator_other_social_links ?? undefined,
           title: video.title,
           youtube_url: video.youtube_video_id
             ? youtubeWatchUrl(video.youtube_video_id)
@@ -478,6 +485,7 @@ export default async function EditVideoPage({
           event_ids: currentEventIds,
           part: video.part ?? undefined,
         }}
+        defaultProfile={defaultProfile}
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         eventOptions={eventOptions}

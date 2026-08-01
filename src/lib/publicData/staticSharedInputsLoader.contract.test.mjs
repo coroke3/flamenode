@@ -84,13 +84,14 @@ test("公開アイコン補完は共有mapからR2 users indexへ降りD1を使�
   assert.doesNotMatch(iconLoader, /getDatabase|withDatabase|degradedFetcher|\.prepare\(/);
 });
 
-test("動画詳細の作者リンクは投影プロフィールでも有効になる", () => {
+test("動画詳細の作者表示は作品スナップショットのアイコンを使う", () => {
   assert.match(videoPage, /const creatorHref =/);
   assert.match(
     videoPage,
     /creator_has_public_profile[\s\S]*hasProjectedPublicProfile/,
   );
-  assert.match(videoPage, /resolveProjectedIcon\([\s\S]*?creatorId/);
+  assert.match(videoPage, /const creatorIcon = video\.creator_icon_url/);
+  assert.match(videoPage, /resolveProjectedIcon\([\s\S]*?member\.x_user_id/);
   assert.match(videoPage, /<UserAvatar[\s\S]*?useIconFallback/);
 });
 

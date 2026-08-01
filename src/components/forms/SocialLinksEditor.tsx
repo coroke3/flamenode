@@ -27,16 +27,22 @@ export function SocialLinksEditor({
   initialValue,
   disabled = false,
   label = "SNS / 外部リンク",
+  onValueChange,
 }: {
   initialValue: string | null;
   disabled?: boolean;
   label?: string;
+  onValueChange?: (json: string) => void;
 }): React.ReactElement {
   const [links, setLinks] = React.useState<SocialLink[]>(() => {
     const parsed = parseSocialLinks(initialValue);
     return parsed.length > 0 ? parsed : [emptySocialLink()];
   });
   const hiddenValue = React.useMemo(() => draftSocialLinksJson(links), [links]);
+
+  React.useEffect(() => {
+    onValueChange?.(hiddenValue);
+  }, [hiddenValue, onValueChange]);
 
   const updateLink = (index: number, patch: Partial<SocialLink>) => {
     setLinks((current) =>
