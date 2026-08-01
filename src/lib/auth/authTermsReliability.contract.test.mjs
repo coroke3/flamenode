@@ -102,6 +102,13 @@ test("auth completeはopen redirectと循環を拒否する", async () => {
   assert.match(buildAuthCompleteHref("/dashboard"), /^\/auth\/complete\?next=/);
 });
 
+test("auth complete page の next フォールバックは /dashboard", () => {
+  assert.match(
+    completePage,
+    /sanitizeAuthCompleteNext\(\s*firstSearchParamValue\(params\?\.next\),\s*"\/dashboard",\s*\)/,
+  );
+});
+
 test("entryはAuth.js error codeを安全に表示する", () => {
   assert.match(entryPage, /AccessDenied/);
   assert.match(entryPage, /OAuthCallbackError/);

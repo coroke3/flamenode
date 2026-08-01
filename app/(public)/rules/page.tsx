@@ -88,8 +88,8 @@ export default async function RulesPage({
         <section className="fn-surface-panel">
           <h2 className="fn-panel-title">利用規約への同意</h2>
           <p className="fn-panel-lead">
-            いいね・セーブには利用規約への同意が必要です。イベント枠の確保には
-            X ID の申請が、作品投稿には承認済みの活動名義が必要です。
+            いいね・セーブには利用規約への同意と承認済みの活動名義が必要です。イベント枠の確保には
+            X ID の申請が、作品投稿にも承認済みの活動名義が必要です。
             {next !== "/dashboard" ? " 同意後、元のページへ戻ります。" : ""}
           </p>
           <form action={acceptLatestTerms} className="fn-panel-actions">

@@ -14,15 +14,18 @@ test("getGuardRedirectPath redirects unauthenticated to entry with next", () => 
   );
 });
 
-test("getGuardRedirectPath redirects TOS reasons to rules", () => {
-  assert.equal(getGuardRedirectPath("tos_required", "/post"), "/rules?next=%2Fpost");
+test("getGuardRedirectPath redirects TOS reasons to onboarding", () => {
+  assert.equal(
+    getGuardRedirectPath("tos_required", "/post"),
+    "/onboarding?next=%2Fpost",
+  );
   assert.equal(
     getGuardRedirectPath("tos_reaccept_required", "/post"),
-    "/rules?next=%2Fpost",
+    "/onboarding?next=%2Fpost",
   );
 });
 
-test("getGuardRedirectPath redirects Active X reasons to settings", () => {
+test("getGuardRedirectPath redirects Active X reasons to onboarding", () => {
   for (const reason of [
     "active_x_required",
     "active_x_rejected",
@@ -30,7 +33,7 @@ test("getGuardRedirectPath redirects Active X reasons to settings", () => {
   ]) {
     assert.equal(
       getGuardRedirectPath(reason, "/entry/slotted?slot=s1"),
-      "/dashboard/settings?next=%2Fentry%2Fslotted%3Fslot%3Ds1",
+      "/onboarding?next=%2Fentry%2Fslotted%3Fslot%3Ds1",
     );
   }
 });
@@ -66,5 +69,5 @@ test("redirectForGuardReason pushes when redirectable", () => {
     "/entry",
   );
   assert.equal(ok, true);
-  assert.deepEqual(pushed, ["/dashboard/settings?next=%2Fentry"]);
+  assert.deepEqual(pushed, ["/onboarding?next=%2Fentry"]);
 });

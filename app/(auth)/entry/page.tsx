@@ -19,7 +19,6 @@ import {
   entryLoginRedirectTo,
   getOnboardingState,
   onboardingHref,
-  onboardingRulesHref,
 } from "@/lib/auth/onboarding";
 
 export const metadata: Metadata = { title: "エントリー / 投稿" };
@@ -71,18 +70,21 @@ export default async function EntryPage({
   const onboarding = await getOnboardingState(db, sessionUser);
   const onboardingNext = onboardingHref(next);
 
-  const resolveWriteHref = (target: string): string => {
+  const resolveSlotHref = (target: string): string => {
     if (!isLoggedIn) return `/entry?next=${encodeURIComponent(target)}`;
     if (!onboarding.canReserveSlot) return onboardingHref(target);
-    if (onboarding.needsTermsAcceptance) {
-      return onboardingRulesHref(onboardingHref(target));
-    }
+    return target;
+  };
+  const resolvePostHref = (target: string): string => {
+    if (!isLoggedIn) return `/entry?next=${encodeURIComponent(target)}`;
+    if (!onboarding.canReserveSlot) return onboardingHref(target);
+    if (!onboarding.canPost) return onboardingHref(target);
     return target;
   };
   const writeCtaLabel = (defaultLabel: string): string => {
     if (!isLoggedIn) return defaultLabel;
     if (!onboarding.canReserveSlot) return "初期設定を続ける";
-    if (onboarding.needsTermsAcceptance) return "利用規約に同意して進む";
+    if (!onboarding.canPost) return "承認待ち";
     return defaultLabel;
   };
 
@@ -252,7 +254,7 @@ export default async function EntryPage({
                 {reservedSlots.map((slot) => {
                   const needsSubmission =
                     !slot.video_id && slot.status === "reserved";
-                  const href = resolveWriteHref(`/entry/slotted?slot=${slot.id}`);
+                  const href = resolvePostHref(`/entry/slotted?slot=${slot.id}`);
                   return (
                     <li key={slot.id}>
                       <div className={styles.slotRow}>
@@ -298,7 +300,7 @@ export default async function EntryPage({
               activeEvents.map((event) => (
                 <Link
                   key={event.id}
-                  href={resolveWriteHref(`/event/${event.id}/slots`)}
+                  href={resolveSlotHref(`/event/${event.id}/slots`)}
                   className={styles.eventCard}
                 >
                   <span className={styles.eventCardTitle}>{event.title}</span>
@@ -325,7 +327,7 @@ export default async function EntryPage({
           </p>
           <div className={styles.btnRow}>
             <Link
-              href={resolveWriteHref("/entry/unslotted")}
+              href={resolvePostHref("/entry/unslotted")}
               className="fn-btn fn-btn-primary"
             >
               <Icon name="edit" size={14} aria-hidden />

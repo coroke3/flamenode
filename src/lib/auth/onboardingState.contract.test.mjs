@@ -100,9 +100,11 @@ test("ダッシュボードは needsTermsAcceptance / xIdentityStatus で案内�
   assert.doesNotMatch(dashboardSrc, /isComplete/);
 });
 
-test("entry page は canReserveSlot / needsTermsAcceptance を使う", () => {
+test("entry page は canReserveSlot / canPost を使う", () => {
   assert.match(entrySrc, /canReserveSlot/);
-  assert.match(entrySrc, /needsTermsAcceptance/);
+  assert.match(entrySrc, /canPost/);
+  assert.match(entrySrc, /resolvePostHref/);
+  assert.match(entrySrc, /resolveSlotHref/);
   assert.doesNotMatch(entrySrc, /onboarding\.isComplete/);
   assert.doesNotMatch(entrySrc, /onboarding\.needsTosAccept/);
 });
@@ -149,30 +151,32 @@ test("枠確保は reserved_by_user_id を正本として設定する", () => {
   assert.match(slotAction, /row\.reserved_by_user_id === userId/);
 });
 
-test("いいね/セーブ は approved active X を必須としない", () => {
+test("いいね/セーブ は writeGuard で active X を要求し currentUser が承認済みに制限する", () => {
   assert.doesNotMatch(interactionAction, /requireApprovedActiveXId: true/);
-  // active X は引き続き必要 (DB 制約)
   assert.match(interactionAction, /requireActiveXId: true/);
+  assert.match(interactionAction, /resolveActiveXUserId/);
 });
 
-test("作品詳細の canInteract は規約同意と Active X を見る (承認は不要)", () => {
+test("作品詳細の canInteract は規約同意と承認済み Active X を見る", () => {
   assert.match(videoDetailPage, /viewerNeedsTermsAcceptance/);
   assert.match(videoDetailPage, /!viewerNeedsTermsAcceptance/);
   assert.match(videoDetailPage, /viewerActiveX/);
-  assert.doesNotMatch(
+  assert.match(videoDetailPage, /viewerXApproved/);
+  assert.match(
     videoDetailPage,
-    /canInteract = !!\(\s*viewerUser\?\.id && viewerActiveX && viewerXApproved\s*\)/,
+    /canInteract[\s\S]*viewerActiveX[\s\S]*viewerXApproved/,
   );
-  assert.doesNotMatch(videoDetailPage, /承認済みX IDが必要です/);
+  assert.match(videoDetailPage, /承認済みの活動名義/);
 });
 
-test("ライブラリは Active X があれば表示する (承認は不要)", () => {
+test("ライブラリは getCurrentUser 経由の承認済み Active X があれば表示する", () => {
   assert.doesNotMatch(libraryPage, /activeXApproved/);
   assert.match(libraryPage, /if \(activeX\)/);
-  assert.doesNotMatch(libraryPage, /承認済みのアクティブ X ID/);
+  assert.match(libraryPage, /承認済みの活動名義/);
 });
 
-test("InteractionButton の JSDoc は承認必須を主張しない", () => {
+test("InteractionButton の JSDoc は writeGuard と currentUser 経路の実効要件を説明する", () => {
   assert.match(interactionButton, /requireApprovedActiveXId: false/);
-  assert.doesNotMatch(interactionButton, /承認済み Active X ID を要求するため/);
+  assert.match(interactionButton, /resolveActiveXUserId/);
+  assert.match(interactionButton, /実質は承認済み Active X が必要/);
 });

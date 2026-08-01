@@ -14,8 +14,9 @@ interface InteractionButtonProps {
   count?: number;
   /**
    * いいね・セーブが実行可能か。サーバー側 writeGuard はログイン・TOS 同意・Active X ID
-   * (`requireActiveXId: true`, `requireApprovedActiveXId: false`) を要求する。
-   * 未ログイン / 規約未同意 / Active X 未選択のときは false にする。
+   * (`requireActiveXId: true`, `requireApprovedActiveXId: false`) を要求するが、
+   * `getCurrentUser` / `resolveActiveXUserId` が承認済みリンクだけを active に解決するため、
+   * 実質は承認済み Active X が必要。未ログイン / 規約未同意 / 承認済み Active X 未設定のときは false。
    */
   canInteract?: boolean;
   /**

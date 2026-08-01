@@ -598,7 +598,8 @@ function StaticVideoDetailView({
   const canInteract = !!(
     viewerUser?.id &&
     !viewerNeedsTermsAcceptance &&
-    viewerActiveX
+    viewerActiveX &&
+    viewerXApproved
   );
 
   const loginHref = `/entry?next=${encodeURIComponent(currentPath)}`;
@@ -686,9 +687,9 @@ function StaticVideoDetailView({
                             利用規約へ
                           </Link>
                         </>
-                      ) : !viewerActiveX ? (
+                      ) : !viewerActiveX || !viewerXApproved ? (
                         <>
-                          活動名義（Active X ID）を選ぶといいね、セーブができます。
+                          いいね・セーブには承認済みの活動名義（Active X ID）が必要です。
                           <Link
                             href={onboardingHref}
                             className={styles.interactionHintLink}

@@ -176,7 +176,7 @@ export default async function OnboardingPage({
             <li>作品の閲覧</li>
             <li>イベント枠の確保</li>
             <li className={styles.pendingMuted}>
-              作品投稿は承認後に利用可能
+              いいね・セーブ・作品投稿は承認後に利用可能
             </li>
           </ul>
           <div className={styles.stepActions}>
@@ -222,6 +222,14 @@ export default async function OnboardingPage({
             で再申請するか、別の X ID を入力してください。
           </p>
           <OnboardingXIdForm initialValue={state.requestedXId ?? ""} />
+          <div className={styles.stepActions}>
+            <Link href={next} className="fn-btn fn-btn-primary">
+              元の操作へ戻る
+            </Link>
+            <Link href="/dashboard" className="fn-btn fn-btn-ghost">
+              ダッシュボードへ
+            </Link>
+          </div>
         </div>
       </div>
     );

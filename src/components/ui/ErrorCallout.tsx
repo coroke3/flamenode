@@ -51,7 +51,7 @@ function ctaFor(reason: ErrorCalloutReason): CtaSpec | null {
     case "tos_required":
     case "tos_reaccept_required":
       return {
-        href: `/rules?next=${encodeURIComponent(`/onboarding?next=${encodeURIComponent(next)}`)}`,
+        href: `/onboarding?next=${encodeURIComponent(next)}`,
         label: "利用規約を確認",
       };
     case "active_x_required":

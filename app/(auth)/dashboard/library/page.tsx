@@ -139,8 +139,8 @@ export default async function DashboardLibraryPage({
           <Icon name="user" size={20} aria-hidden />
           <p className="fn-empty-message">
             {needsXIdLink
-              ? "いいね・セーブには X ID の連携と利用規約への同意が必要です。"
-              : "活動名義（Active X ID）を選択すると、いいね・セーブした作品を表示できます。"}
+              ? "いいね・セーブには X ID の連携・利用規約への同意・承認済みの活動名義が必要です。"
+              : "承認済みの活動名義（Active X ID）を選択すると、いいね・セーブした作品を表示できます。"}
           </p>
           <Link href="/dashboard/settings" className="fn-btn fn-btn-primary fn-mt-md">
             {needsXIdLink ? "X ID を連携する" : "X ID 設定を開く"}

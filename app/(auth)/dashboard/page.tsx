@@ -303,7 +303,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               承認済みの X ID があります。投稿に使う Active X ID を設定してください。
             </p>
             <Link
-              href="/dashboard/settings"
+              href="/dashboard/settings?next=/dashboard"
               className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
             >
               設定で Active X ID を選ぶ
@@ -320,7 +320,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
       ) : null}
 
-      <HeroCard slot={mySlot} event={mySlotEvent} />
+      <HeroCard slot={mySlot} event={mySlotEvent} canPost={onboarding.canPost} />
 
       <section className={`fn-dash-kpis ${styles.statsGrid}`} aria-label="アカウント統計">
         <Stat label="累計いいね" value={stats.likes.toLocaleString()} />
@@ -454,9 +454,11 @@ function Stat({ label, value }: { label: string; value: string }): React.ReactEl
 function HeroCard({
   slot,
   event,
+  canPost,
 }: {
   slot: typeof slotsTable.$inferSelect | null;
   event: typeof eventsTable.$inferSelect | null;
+  canPost: boolean;
 }): React.ReactElement {
   if (!slot || !event) {
     return (
@@ -519,7 +521,11 @@ function HeroCard({
               </>
             ) : slot.status === "reserved" ? (
               <Link
-                href={`/entry/slotted?slot=${slot.id}`}
+                href={
+                  canPost
+                    ? `/entry/slotted?slot=${slot.id}`
+                    : onboardingHref(`/entry/slotted?slot=${slot.id}`)
+                }
                 className="fn-btn fn-btn-primary"
               >
                 <Icon name="upload" size={14} aria-hidden /> 動画を提出する
