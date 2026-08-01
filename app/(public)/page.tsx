@@ -11,7 +11,7 @@ import { HomeClosingCta } from "@/components/layout/HomeClosingCta";
 import { PublicEventCard } from "@/components/event/PublicEventCard";
 import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
-import { Shelf } from "@/components/layout/Shelf";
+import { TopLoopShelf as Shelf } from "@/components/layout/TopLoopShelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard } from "@/components/video/VideoCard";
 import { EmptyState } from "@/components/ui/EmptyState";
