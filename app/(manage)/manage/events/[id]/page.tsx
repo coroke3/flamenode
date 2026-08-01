@@ -152,7 +152,7 @@ export default async function ManageEventPage({
     .select({
       id: videosTable.id,
       title: videosTable.title,
-      display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
+      display_name: videosTable.creator_display_name,
       created_at: videosTable.created_at,
     })
     .from(videosTable)

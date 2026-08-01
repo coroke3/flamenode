@@ -1,6 +1,7 @@
 /**
  * sync-jobs: 外部API・集計ジョブ。
  * - 7分: 開催中・期限到達の YouTube メタデータ同期 + score（pending 即時は Queue）
+ *        + GA4 trending 同期（YouTube と独立。失敗は相互に伝播しない）
  * - 52分: 設定済みイベントの YouTube 再生リスト差分同期
  *
  * YouTube pending は Queue consumer が処理し、Cron lease は Queue 経路では使わない。
@@ -30,9 +31,11 @@ import {
 import { syncBatch, countPendingSyncRows, type SyncBatchResult } from "../youtube-sync/index.ts";
 import { syncEventPlaylists } from "../youtube-playlist-sync/index.ts";
 import { enqueueYoutubeRelatedProjectionRebuilds } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
+import { syncGa4Trending } from "../ga-analytics/sync.ts";
 
 export interface Env {
   DB: D1Database;
+  R2: R2Bucket;
   KV: KVNamespace;
   YOUTUBE_API_KEY?: string;
   YOUTUBE_DAILY_QUOTA_LIMIT?: string;
@@ -45,6 +48,10 @@ export interface Env {
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
   QUEUE_YOUTUBE_SYNC_ENABLED?: string;
+  GA4_SYNC_ENABLED?: string;
+  GA4_PROPERTY_ID?: string;
+  GA4_SERVICE_ACCOUNT_EMAIL?: string;
+  GA4_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
 }
 
 const SYNC_JOBS_LEASE_SEC = 14 * 60;
@@ -334,6 +341,18 @@ export async function runSyncJobs(
             );
           }
 
+          await runJob(
+            "sync-jobs",
+            "ga4-trending-sync",
+            async () => {
+              signal?.throwIfAborted();
+              const result = await syncGa4Trending(env, signal);
+              signal?.throwIfAborted();
+              return result;
+            },
+            { rethrow: false, commitSha: env.BUILD_COMMIT_SHA },
+          );
+
           const queueFlags = resolveQueueFeatureFlags(env);
           const includePending = !queueFlags.youtubeSyncEnabled;
           let youtube: SyncBatchResult | null = null;
@@ -402,6 +421,7 @@ export async function runSyncJobs(
           if (queueFlags.youtubeSyncEnabled) {
             await maybeResendYoutubePendingWake(env);
           }
+
           return throwIfJobFailed(
             "sync-jobs",
             "cron",

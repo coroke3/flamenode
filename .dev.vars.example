@@ -23,6 +23,13 @@ YOUTUBE_DAILY_QUOTA_LIMIT="10000"
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 NEXT_PUBLIC_SITE_NAME="FlameNode"
 NEXT_PUBLIC_SITE_DESCRIPTION="映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。"
+NEXT_PUBLIC_GA_MEASUREMENT_ID=""
+
+# sync-jobs (runtime; set on Worker vars/secrets, not necessarily web)
+# GA4_SYNC_ENABLED=0
+# GA4_PROPERTY_ID=
+# GA4_SERVICE_ACCOUNT_EMAIL=
+# GA4_SERVICE_ACCOUNT_PRIVATE_KEY=
 
 # メンテナンス強制 (1 で全ページを /maintenance へ。本番は Worker Runtime Variables で設定)
 MAINTENANCE_MODE="0"

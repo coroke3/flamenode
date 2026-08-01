@@ -4,7 +4,7 @@ import { videos, videoEvents } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
-import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
+import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
 import {
   buildSyncVideoEventsPlan,
   buildVideoDerivedRowsPlan,
@@ -48,8 +48,11 @@ export interface VideoUpdatePayload {
   youtube_video_id: string | null;
   creator_x_user_id: string | null;
   creator_display_name: string | null;
+  creator_display_name_yomi: string | null;
   creator_icon_url: string | null;
   creator_youtube_channel_url: string | null;
+  creator_profile_text: string | null;
+  creator_other_social_links: string | null;
   music: string | null;
   music_reference_url: string | null;
   credit: string | null;
@@ -84,9 +87,6 @@ export interface VideoSavePlan {
   rebuildFlags: ReturnType<typeof computeStaticRebuildFlags>;
   primaryEventId: string | null;
   previousYoutubeVideoId: string | null;
-  profileText: string | null;
-  youtubeChannelUrl: string | null;
-  socialLinks: string | null;
   target: typeof videos.$inferSelect;
 }
 
@@ -97,6 +97,7 @@ export function buildVideoUpdatePayload(args: {
   nextCreatorX: string;
   allowSubmitterChange: boolean;
   sections: AllowedVideoEditSections;
+  privilegeMode: CanEditVideoPrivilegeMode;
   now: number;
   creatorYoutubeChannelUrl: string | null;
 }): VideoUpdatePayload {
@@ -107,18 +108,35 @@ export function buildVideoUpdatePayload(args: {
     nextCreatorX,
     allowSubmitterChange,
     sections,
+    privilegeMode,
     now,
     creatorYoutubeChannelUrl,
   } = args;
+  const displayNameChanged =
+    sections.identity && parsed.display_name !== target.creator_display_name;
   return {
     title: sections.basics ? parsed.title : target.title,
     youtube_video_id: sections.youtube ? youtubeId : target.youtube_video_id,
     creator_x_user_id: allowSubmitterChange ? nextCreatorX || null : target.creator_x_user_id,
     creator_display_name: sections.identity ? parsed.display_name : target.creator_display_name,
+    creator_display_name_yomi: sections.identity
+      ? displayNameChanged
+        ? null
+        : target.creator_display_name_yomi
+      : target.creator_display_name_yomi,
     creator_icon_url: sections.identity ? parsed.icon_url || null : target.creator_icon_url,
-    creator_youtube_channel_url: sections.identity
+    creator_youtube_channel_url:
+      sections.identity && privilegeMode !== "normal"
       ? creatorYoutubeChannelUrl
       : target.creator_youtube_channel_url,
+    creator_profile_text:
+      sections.identity && privilegeMode !== "normal"
+      ? parsed.profile_text ?? null
+      : target.creator_profile_text,
+    creator_other_social_links:
+      sections.identity && privilegeMode !== "normal"
+      ? normalizeSocialLinksForStorage(parsed.other_social_links)
+      : target.creator_other_social_links,
     music: sections.credits ? parsed.music ?? null : target.music,
     music_reference_url: sections.credits
       ? parsed.music_reference_url ?? null
@@ -172,6 +190,7 @@ export function buildVideoUpdatePlan(args: {
     nextCreatorX: args.nextCreatorX,
     allowSubmitterChange: args.allowSubmitterChange,
     sections: args.sections,
+    privilegeMode: args.privilegeMode,
     now: args.now,
     creatorYoutubeChannelUrl: args.creatorYoutubeChannelUrl,
   });
@@ -235,9 +254,6 @@ export function buildVideoUpdatePlan(args: {
     }),
     primaryEventId: args.target.primary_event_id,
     previousYoutubeVideoId: args.target.youtube_video_id,
-    profileText: args.parsed.profile_text ?? null,
-    youtubeChannelUrl: args.parsed.youtube_channel_url ?? null,
-    socialLinks: args.parsed.other_social_links ?? null,
     target: { ...args.target },
   };
 }
@@ -255,10 +271,6 @@ export function computeStagePermissionDeleteIds(args: {
 export async function applyVideoUpdatePlan(
   db: DB,
   plan: VideoSavePlan,
-  args: {
-    approvedXIds: string[];
-    sessionRole: string | null | undefined;
-  },
 ): Promise<boolean> {
   const { payload, sections } = plan;
   const existingEventRows = await db
@@ -272,19 +284,6 @@ export async function applyVideoUpdatePlan(
   const existingEventIds = existingEventRows.map((row) => row.event_id);
   const targetEventIds = plan.syncedEventIds ?? existingEventIds;
   const atomic = emptyVideoAtomicWritePlan();
-
-  if (sections.identity) {
-    appendVideoAtomicWritePlan(atomic, await buildSubmissionXUserPlan(db, {
-      xId: plan.nextCreatorX,
-      displayName: payload.creator_display_name ?? "",
-      profileText: plan.profileText,
-      youtubeChannelUrl: plan.youtubeChannelUrl,
-      socialLinks: plan.socialLinks,
-      allowProfileUpdate:
-        args.sessionRole === "admin" || args.approvedXIds.includes(plan.nextCreatorX),
-      actorUserId: plan.operatorUserId,
-    }));
-  }
 
   const after = { ...plan.target, ...payload };
   atomic.statements.push(db.update(videos)
@@ -330,7 +329,7 @@ export async function applyVideoUpdatePlan(
       actorUserId: plan.operatorUserId,
     }));
   }
-  if (sections.members && plan.memberSubmission) {
+  if ((sections.members || sections.member_chapters) && plan.memberSubmission) {
     appendVideoAtomicWritePlan(atomic, await buildReplaceVideoMembersPlan(db, {
       videoId: plan.videoId,
       members: plan.memberSubmission.members,

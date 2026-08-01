@@ -33,6 +33,9 @@ export interface StaticVideoDetailVideo {
   creator_display_name: string | null;
   creator_icon_url: string | null;
   creator_has_public_profile?: boolean;
+  creator_youtube_channel_url?: string | null;
+  creator_profile_text?: string | null;
+  creator_other_social_links?: string | null;
   music: string | null;
   credit: string | null;
   music_reference_url: string | null;
@@ -218,6 +221,13 @@ function normalizeVideo(value: unknown): StaticVideoDetailVideo | null {
     creator_has_public_profile:
       row.creator_has_public_profile === 1 ||
       row.creator_has_public_profile === true,
+    creator_youtube_channel_url: normalizeNullableString(
+      row.creator_youtube_channel_url,
+    ),
+    creator_profile_text: normalizeNullableString(row.creator_profile_text),
+    creator_other_social_links: normalizeNullableString(
+      row.creator_other_social_links,
+    ),
     music: normalizeNullableString(row.music),
     credit: normalizeNullableString(row.credit),
     music_reference_url: normalizeNullableString(row.music_reference_url),

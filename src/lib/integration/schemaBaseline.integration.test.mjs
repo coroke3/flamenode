@@ -21,9 +21,12 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0042_event_youtube_playlist_sync.sql",
     "0043_db_canonical_migration.sql",
     "0044_simplify_visibility_statuses.sql",
+    "0045_align_visibility_defaults.sql",
+    "0046_video_creator_profile_snapshot.sql",
+    "0047_backfill_youtube_metadata_pending.sql",
   ]);
   assert.equal(result.tableCount, 41);
-  assert.equal(result.columnCount, 409);
+  assert.equal(result.columnCount, 411);
   assert.ok(result.indexCount > 70);
   assert.ok(result.foreignKeyCount > 20);
   assert.ok(result.checkCount > 20);

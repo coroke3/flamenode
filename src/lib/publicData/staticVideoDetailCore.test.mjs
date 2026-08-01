@@ -50,6 +50,9 @@ if (runTestWithTsx(import.meta.url)) {
         title: "Video 1",
         creator_x_user_id: "creator",
         creator_display_name: "Creator",
+        creator_youtube_channel_url: "https://youtube.com/@creator",
+        creator_profile_text: "Profile",
+        creator_other_social_links: "[]",
         music_reference_url: "https://example.com/music",
         visibility_status: "public",
       },
@@ -92,6 +95,9 @@ if (runTestWithTsx(import.meta.url)) {
     assert.deepEqual(detail.softwareLabels, ["After Effects", "Premiere Pro"]);
     assert.equal(detail.video.creator_x_user_id, "creator");
     assert.equal(detail.video.music_reference_url, "https://example.com/music");
+    assert.equal(detail.video.creator_youtube_channel_url, "https://youtube.com/@creator");
+    assert.equal(detail.video.creator_profile_text, "Profile");
+    assert.equal(detail.video.creator_other_social_links, "[]");
     assert.equal(detail.publicEvents[0].title, "Event 1");
     assert.equal(detail.publicChapters[0].chapter_label, "Intro");
     assert.equal(detail.memberChapters[0].video_member_id, "vm1");

@@ -12,10 +12,7 @@ import {
   RELATED_MIN_LIMIT,
   resolveVisibleRelatedVideos,
 } from "./relatedVideoProjection";
-import {
-  resolveProjectedIcon,
-  type PublicXIconEntry,
-} from "./publicIconProjection";
+import type { PublicXIconEntry } from "./publicIconProjection";
 
 export interface PublicVideoDetailViewModel {
   generatedAt: number | null;
@@ -50,11 +47,6 @@ export function buildPublicVideoViewModelFromStatic(
 
   const projectedVideo = {
     ...detail.video,
-    creator_icon_url: resolveProjectedIcon({
-      xUserId: detail.video.creator_x_user_id,
-      iconMap: options?.iconMap,
-      legacyIconUrl: detail.video.creator_icon_url,
-    }),
   };
 
   const relatedVideos = options?.relatedUnavailable
@@ -70,7 +62,7 @@ export function buildPublicVideoViewModelFromStatic(
         seed: detail.relatedRandomSeed || detail.video.id,
         minTarget: RELATED_MIN_LIMIT,
         maxTarget: RELATED_DEFAULT_LIMIT,
-      }).map((video) => toVideoCardData(video, options?.iconMap));
+      }).map((video) => toVideoCardData(video));
 
   return {
     generatedAt: detail.generatedAt,
@@ -100,6 +92,9 @@ export function buildPublicVideoViewModelFromDatabase(args: {
     creator_display_name: string | null;
     creator_icon_url: string | null;
     creator_x_user_id: string | null;
+    creator_youtube_channel_url?: string | null;
+    creator_profile_text?: string | null;
+    creator_other_social_links?: string | null;
     music: string | null;
     credit: string | null;
     music_reference_url?: string | null;
@@ -189,6 +184,9 @@ export function buildPublicVideoViewModelFromDatabase(args: {
       youtube_video_id: args.video.youtube_video_id,
       creator_display_name: args.video.creator_display_name,
       creator_icon_url: args.video.creator_icon_url,
+      creator_youtube_channel_url: args.video.creator_youtube_channel_url ?? null,
+      creator_profile_text: args.video.creator_profile_text ?? null,
+      creator_other_social_links: args.video.creator_other_social_links ?? null,
       music: args.video.music,
       credit: args.video.credit,
       music_reference_url: args.video.music_reference_url ?? null,
@@ -239,20 +237,13 @@ export function buildPublicVideoViewModelFromDatabase(args: {
   };
 }
 
-function toVideoCardData(
-  video: StaticRelatedVideo,
-  iconMap?: ReadonlyMap<string, PublicXIconEntry> | null,
-): VideoCardData {
+function toVideoCardData(video: StaticRelatedVideo): VideoCardData {
   return {
     id: video.id,
     title: video.title,
     youtube_video_id: video.youtube_video_id,
     display_name: video.display_name,
-    icon_url: resolveProjectedIcon({
-      xUserId: video.creator_x_user_id,
-      iconMap,
-      legacyIconUrl: video.icon_url,
-    }),
+    icon_url: video.icon_url,
     creator_x_user_id: video.creator_x_user_id,
     primary_event_id: video.primary_event_id,
     scheduled_time: video.scheduled_time,

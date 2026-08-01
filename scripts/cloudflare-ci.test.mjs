@@ -108,7 +108,7 @@ function writeFixtureTemplates(repoRoot) {
     "wrangler.toml": `name = "flamenode-web"\nmain = ".open-next/worker.js"\n[assets]\nbinding = "ASSETS"\ndirectory = ".open-next/assets"\nrun_worker_first = false\n[[services]]\nbinding = "WORKER_SELF_REFERENCE"\nservice = "flamenode-web"\n${queueFlags}[[queues.producers]]\nqueue = "flamenode-notification-wake"\nbinding = "NOTIFICATION_WAKE_QUEUE"\n[[queues.producers]]\nqueue = "flamenode-static-rebuild-wake"\nbinding = "STATIC_REBUILD_WAKE_QUEUE"\n[[queues.producers]]\nqueue = "flamenode-youtube-sync-wake"\nbinding = "YOUTUBE_SYNC_WAKE_QUEUE"\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\nmigrations_dir = "migrations"\n[[r2_buckets]]\nbinding = "BUCKET"\nbucket_name = "placeholder"\n[[r2_buckets]]\nbinding = "NEXT_INC_CACHE_R2_BUCKET"\nbucket_name = "placeholder"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\npreview_id = "00000000000000000000000000000000"\n`,
     "workers/fast-jobs/wrangler.toml": `name = "flamenode-fast-jobs"\nmain = "index.ts"\n[triggers]\ncrons = ["0 * * * *"]\n${queueFlags}[[queues.producers]]\nqueue = "flamenode-notification-wake"\nbinding = "NOTIFICATION_WAKE_QUEUE"\n[[queues.consumers]]\nqueue = "flamenode-notification-wake"\nmax_batch_size = 10\nmax_batch_timeout = 1\nmax_retries = 3\nretry_delay = 60\ndead_letter_queue = "flamenode-notification-dlq"\nmax_concurrency = 1\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\n`,
     "workers/content-jobs/wrangler.toml": `name = "flamenode-content-jobs"\nmain = "index.ts"\n[triggers]\ncrons = ["15 * * * *"]\n${queueFlags}[[queues.producers]]\nqueue = "flamenode-static-rebuild-wake"\nbinding = "STATIC_REBUILD_WAKE_QUEUE"\n[[queues.consumers]]\nqueue = "flamenode-static-rebuild-wake"\nmax_batch_size = 10\nmax_batch_timeout = 1\nmax_retries = 3\nretry_delay = 60\ndead_letter_queue = "flamenode-static-rebuild-dlq"\nmax_concurrency = 1\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[r2_buckets]]\nbinding = "R2"\nbucket_name = "placeholder"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\n`,
-    "workers/sync-jobs/wrangler.toml": `name = "flamenode-sync-jobs"\nmain = "index.ts"\n[triggers]\ncrons = ["7 * * * *", "52 * * * *"]\n[vars]\nYOUTUBE_DAILY_QUOTA_LIMIT = "10000"\nQUEUE_DISPATCH_ENABLED = "0"\nQUEUE_CONTINUATION_ENABLED = "0"\nQUEUE_YOUTUBE_SYNC_ENABLED = "0"\n[[queues.producers]]\nqueue = "flamenode-youtube-sync-wake"\nbinding = "YOUTUBE_SYNC_WAKE_QUEUE"\n[[queues.producers]]\nqueue = "flamenode-static-rebuild-wake"\nbinding = "STATIC_REBUILD_WAKE_QUEUE"\n[[queues.consumers]]\nqueue = "flamenode-youtube-sync-wake"\nmax_batch_size = 10\nmax_batch_timeout = 1\nmax_retries = 3\nretry_delay = 300\ndead_letter_queue = "flamenode-youtube-sync-dlq"\nmax_concurrency = 1\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\n`,
+    "workers/sync-jobs/wrangler.toml": `name = "flamenode-sync-jobs"\nmain = "index.ts"\n[triggers]\ncrons = ["7 * * * *", "52 * * * *"]\n[vars]\nYOUTUBE_DAILY_QUOTA_LIMIT = "10000"\nQUEUE_DISPATCH_ENABLED = "0"\nQUEUE_CONTINUATION_ENABLED = "0"\nQUEUE_YOUTUBE_SYNC_ENABLED = "0"\nGA4_SYNC_ENABLED = "0"\n[[queues.producers]]\nqueue = "flamenode-youtube-sync-wake"\nbinding = "YOUTUBE_SYNC_WAKE_QUEUE"\n[[queues.producers]]\nqueue = "flamenode-static-rebuild-wake"\nbinding = "STATIC_REBUILD_WAKE_QUEUE"\n[[queues.consumers]]\nqueue = "flamenode-youtube-sync-wake"\nmax_batch_size = 10\nmax_batch_timeout = 1\nmax_retries = 3\nretry_delay = 300\ndead_letter_queue = "flamenode-youtube-sync-dlq"\nmax_concurrency = 1\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "flamenode_db"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\n[[r2_buckets]]\nbinding = "R2"\nbucket_name = "placeholder"\n[[kv_namespaces]]\nbinding = "KV"\nid = "00000000000000000000000000000000"\n`,
   };
   for (const [relative, content] of Object.entries(configs)) {
     const filePath = path.join(repoRoot, relative);
@@ -417,6 +417,108 @@ test("tracked placeholder configs produce four private production configs withou
     assert.match(fast, /NEXT_PUBLIC_SITE_URL = "https:\/\/flamenode\.example\.com"/);
     assert.match(fast, /main = "\.\.\/\.\.\/workers\/fast-jobs\/index\.ts"/);
   }));
+
+test("GA4_SYNC_ENABLED=1 injects sync-jobs feature flag from Build env", () =>
+  withTempDirectory("flamenode-production-ga4-flag-", (repoRoot) => {
+    writeFixtureTemplates(repoRoot);
+    const configs = materializeProductionConfigs({
+      env: productionEnv({ GA4_SYNC_ENABLED: "1" }),
+      repoRoot,
+      commit: COMMIT,
+    });
+    const sync = fs.readFileSync(configs["sync-jobs"], "utf8");
+    assert.match(sync, /GA4_SYNC_ENABLED = "1"/);
+  }));
+
+test("GA4_SYNC_ENABLED=1 requires GA4 remote secrets during secret preflight", () => {
+  const configs = {
+    web: "web.toml",
+    "fast-jobs": "fast.toml",
+    "content-jobs": "content.toml",
+    "sync-jobs": "sync.toml",
+  };
+  const byService = {
+    "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
+    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
+    "flamenode-sync-jobs": [
+      "YOUTUBE_API_KEY",
+      "YOUTUBE_OAUTH_CLIENT_ID",
+      "YOUTUBE_OAUTH_CLIENT_SECRET",
+      "YOUTUBE_OAUTH_REFRESH_TOKEN",
+    ],
+  };
+  assert.throws(
+    () =>
+      runRemoteSecretPreflight({
+        env: productionEnv({ GA4_SYNC_ENABLED: "1" }),
+        repoRoot: root,
+        configs,
+        wranglerBin: "wrangler.mjs",
+        run: (request) => {
+          const service = request.args[request.args.indexOf("--name") + 1];
+          return {
+            stdout: JSON.stringify(
+              byService[service].map((name) => ({ name, type: "secret_text" })),
+            ),
+          };
+        },
+      }),
+    /GA4_PROPERTY_ID/,
+  );
+});
+
+test("GA4_SYNC_ENABLED=0 passes secret preflight without GA4 remote secrets", () => {
+  const configs = {
+    web: "web.toml",
+    "fast-jobs": "fast.toml",
+    "content-jobs": "content.toml",
+    "sync-jobs": "sync.toml",
+  };
+  const byService = {
+    "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
+    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
+    "flamenode-sync-jobs": [
+      "YOUTUBE_API_KEY",
+      "YOUTUBE_OAUTH_CLIENT_ID",
+      "YOUTUBE_OAUTH_CLIENT_SECRET",
+      "YOUTUBE_OAUTH_REFRESH_TOKEN",
+    ],
+  };
+  assert.doesNotThrow(() =>
+    runRemoteSecretPreflight({
+      env: productionEnv({ GA4_SYNC_ENABLED: "0" }),
+      repoRoot: root,
+      configs,
+      wranglerBin: "wrangler.mjs",
+      run: (request) => {
+        const service = request.args[request.args.indexOf("--name") + 1];
+        return {
+          stdout: JSON.stringify(
+            byService[service].map((name) => ({ name, type: "secret_text" })),
+          ),
+        };
+      },
+    }),
+  );
+  assert.doesNotThrow(() =>
+    runRemoteSecretPreflight({
+      env: productionEnv(),
+      repoRoot: root,
+      configs,
+      wranglerBin: "wrangler.mjs",
+      run: (request) => {
+        const service = request.args[request.args.indexOf("--name") + 1];
+        return {
+          stdout: JSON.stringify(
+            byService[service].map((name) => ({ name, type: "secret_text" })),
+          ),
+        };
+      },
+    }),
+  );
+});
 
 test("fast verification runs the bounded npm script list in order and stops on the first failure", () => {
   const calls = [];

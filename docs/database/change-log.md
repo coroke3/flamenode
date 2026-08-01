@@ -5,6 +5,36 @@
 > Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-08-01 — `0047_backfill_youtube_metadata_pending.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | data-migration |
+| Summary | YouTube ID を持つ既存作品のうち、欠損している `video_youtube_metadata` 行を `pending` で補完 |
+| Reason | YouTube 同期対象から漏れていた旧作品を安全に再検証し、R2 `top.json` の「懐かしの映像」候補へ反映できるようにするため |
+| Tables | `video_youtube_metadata`（参照: `videos`） |
+| Data migration | 非 `voided`・YouTube ID あり・metadata 欠損の作品だけ `INSERT OR IGNORE`。既存同期結果は更新しない |
+| Compatibility | `0046` 完了後に適用。同期Workerが `pending` を処理し、公開・限定公開と確認できた作品だけ静的JSONへ掲載 |
+| Data loss | none |
+| Rollback | migration 適用前バックアップとの差分にある `pending` 行だけを削除 |
+| Validation | `check:db-schema`、integration test、Worker test、typecheck |
+| PR | （本変更） |
+
+## 2026-08-01 — `0046_video_creator_profile_snapshot.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | videos に提出者プロフィールスナップショット列 `creator_profile_text` / `creator_other_social_links` を追加し、既存行を x_users からバックフィル |
+| Reason | 作品提出時点のプロフィールを videos 側へ固定し、後から x_users が変わっても過去作品表示を安定させるため |
+| Tables | `videos` |
+| Data migration | `creator_profile_text` / `creator_other_social_links` を x_users からコピー。`creator_youtube_channel_url` / `creator_icon_url` が NULL の行も同様に補完 |
+| Compatibility | `0045` 完了後の canonical 状態のみ適用。過去提出時点の値は復元不可（実行時点の x_users を固定） |
+| Data loss | none |
+| Rollback | migration 適用前の D1 バックアップから復元 |
+| Validation | `check:db-schema`、integration test、typecheck |
+| PR | （本変更） |
+
 ## 2026-07-31 — `0045_align_visibility_defaults.sql`
 
 | 項目 | 内容 |

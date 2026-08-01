@@ -32,7 +32,7 @@ interface FilterChip {
 const FILTER_CHIPS: FilterChip[] = [
   {
     href: "#rail-hot",
-    label: "伸びている",
+    label: "人気作品",
     icon: <Icon name="alert" size={11} aria-hidden />,
   },
   {
@@ -124,9 +124,9 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
         <>
           <Rail
             id="rail-hot"
-            title="伸びている"
+            title="人気作品"
             items={hot}
-            ariaLabel="伸びている作品"
+            ariaLabel="人気作品"
           />
           <Rail
             id="rail-underrated"

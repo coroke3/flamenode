@@ -140,7 +140,7 @@ export default async function AdminYoutubeSyncPage({
       .select({
         video_id: videosTable.id,
         title: videosTable.title,
-        creator_name: sql<string | null>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
+        creator_name: videosTable.creator_display_name,
         youtube_video_id: videosTable.youtube_video_id,
         visibility_status: videosTable.visibility_status,
         youtube_privacy_status: videoYoutubeMetadata.youtube_privacy_status,

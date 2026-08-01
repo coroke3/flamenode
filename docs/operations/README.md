@@ -39,6 +39,7 @@ Webは Cloudflare Workers + OpenNext + Workers Static Assets。背景は Queue w
 | X ID統合 | [x-id-merge.md](x-id-merge.md) |
 | 認証・規約・post-commit | [auth-terms-postcommit-reliability.md](auth-terms-postcommit-reliability.md) |
 | UI受入 | [ui-acceptance.md](ui-acceptance.md) |
+| Google Analytics・急上昇 | [google-analytics.md](google-analytics.md) |
 | 外部API上限 | [external-api-limits.md](external-api-limits.md) |
 
 ## DB履歴リンク

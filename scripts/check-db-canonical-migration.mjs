@@ -91,6 +91,12 @@ function applyAllMigrations() {
   return db;
 }
 
+function applyPostCanonicalMigrations(db) {
+  for (const name of activeMigrations.filter((entry) => entry > migrationName)) {
+    executeMigration(db, name, fs.readFileSync(path.join(migrationsDir, name), "utf8"));
+  }
+}
+
 function schemaVersion(db) {
   return db.prepare("SELECT version FROM flamenode_schema_meta WHERE id = 'current'").get()?.version;
 }
@@ -117,7 +123,7 @@ function assertCanonicalShape(db) {
     .map((row) => String(row.name));
   const columnCount = tables.reduce((total, tableName) => total + columns(db, tableName).length, 0);
   assert.equal(tables.length, 41, "canonical table count");
-  assert.equal(columnCount, 409, "canonical column count");
+  assert.equal(columnCount, 411, "canonical column count");
   for (const tableName of removedTables) assert.equal(tableExists(db, tableName), false, tableName);
   for (const [tableName, columnName] of deletedColumns) {
     assert.equal(
@@ -165,6 +171,7 @@ function testLegacyFixture() {
   try {
     seedLegacyFixture(db);
     executeMigration(db, migrationName, migrationSql);
+    applyPostCanonicalMigrations(db);
     assertCanonicalShape(db);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM x_identity_requests").get().count, 4);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM x_user_account_links").get().count, 2);

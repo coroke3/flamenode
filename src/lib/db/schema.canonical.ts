@@ -289,6 +289,8 @@ export const videos = sqliteTable(
     creator_display_name_yomi: text("creator_display_name_yomi"),
     creator_icon_url: text("creator_icon_url"),
     creator_youtube_channel_url: text("creator_youtube_channel_url"),
+    creator_profile_text: text("creator_profile_text"),
+    creator_other_social_links: text("creator_other_social_links"),
     title: text("title").notNull(),
     music: text("music"),
     credit: text("credit"),

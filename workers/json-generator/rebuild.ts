@@ -619,7 +619,10 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
 }
 
-/** UTC 日次で top 再生成をキュー登録し、懐かし棚を安全に更新する。 */
+/**
+ * UTC 日次で top 再生成をキュー登録する。
+ * 日次マーカーは rebuildTop の R2 PUT 成功後だけ更新し、失敗時は次のCronで再試行する。
+ */
 export async function ensureDailyTopNostalgicShuffle(
   env: Env,
   signal?: RebuildSignal,
@@ -640,7 +643,6 @@ export async function ensureDailyTopNostalgicShuffle(
       signal,
     );
     if (enqueued > 0) {
-      await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, dayKey);
       return 1;
     }
     return 0;
@@ -1467,7 +1469,8 @@ async function fetchStaticRelatedVideos(
 }
 
 const REBUILD_VIDEO_SELECT = `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name, v.creator_x_user_id,
-            creator_icon_url, music, credit, music_reference_url, intro_comment, highlights,
+            creator_icon_url, v.creator_youtube_channel_url, v.creator_profile_text,
+            v.creator_other_social_links, music, credit, music_reference_url, intro_comment, highlights,
             production_story, closing_comment, visibility_status, scheduled_time,
             COALESCE(v.app_like_count, 0) AS app_like_count,
             CASE WHEN EXISTS (

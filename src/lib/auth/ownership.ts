@@ -3,7 +3,6 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   eventStaff,
-  events as eventsTable,
   videoMembers,
   videoEvents,
   xUserAccountLinks,
@@ -16,13 +15,14 @@ import type {
 } from "./videoEditSections";
 import {
   VIDEO_PERMISSION_ALIASES,
-  COLLABORATOR_VIDEO_EDIT_KEYS,
-  isSafeNormalVideoEditKey,
   isDangerousAdminVideoEditKey,
-  isUserDelegatableKey,
-  parseDelegatablePermissionKeys,
 } from "./ownershipCore";
 import type { SessionUserLike } from "./ownershipCore";
+import {
+  loadGeneralEditableFieldSet,
+  sectionAllowedByGeneralFields,
+  type GeneralEditableFieldKey,
+} from "@/lib/video/generalEditPermissions";
 import { expandPermissionAliases } from "./permissions/aliases";
 import {
   getManageStaffRole,
@@ -268,112 +268,75 @@ export async function canEditVideo(args: {
   user: SessionUserLike;
   video: Pick<
     VideoRow,
-    "creator_x_user_id" | "primary_event_id" | "id" | "submitted_by_user_id"
+    | "creator_x_user_id"
+    | "primary_event_id"
+    | "id"
+    | "submitted_by_user_id"
+    | "visibility_status"
   >;
   requiredKey: VideoEditSectionKey;
   privilegeMode: CanEditVideoPrivilegeMode;
+  generalFields?: Set<GeneralEditableFieldKey>;
 }): Promise<boolean> {
-  const { db, user, video, requiredKey, privilegeMode } = args;
+  const { db, user, video, requiredKey, privilegeMode, generalFields } = args;
 
-  if (privilegeMode === "admin" && user.role === "admin") return true;
-
-  const approved = await getApprovedXIds(db, user.id);
-  if (
-    video.creator_x_user_id &&
-    approved.includes(video.creator_x_user_id)
-  ) {
-    return true;
+  if (privilegeMode === "admin") {
+    return user.role === "admin";
   }
 
-  if (privilegeMode === "normal" && isSafeNormalVideoEditKey(requiredKey)) {
-    if (user.role === "admin") return true;
-    const editableEventIds = await getEditableEventIds(db, user.id);
-    if (editableEventIds.length > 0) {
-      const videoEventIds = new Set<string>();
-      if (video.primary_event_id) videoEventIds.add(video.primary_event_id);
-      const eventRows = await db
-        .select({ event_id: videoEvents.event_id })
-        .from(videoEvents)
-        .where(eq(videoEvents.video_id, video.id));
-      for (const row of eventRows) videoEventIds.add(row.event_id);
-      for (const eventId of editableEventIds) {
-        if (videoEventIds.has(eventId)) return true;
+  if (privilegeMode === "event") {
+    const eventIds = new Set<string>();
+    if (video.primary_event_id) eventIds.add(video.primary_event_id);
+    const eventRows = await db
+      .select({ event_id: videoEvents.event_id })
+      .from(videoEvents)
+      .where(eq(videoEvents.video_id, video.id));
+    for (const row of eventRows) eventIds.add(row.event_id);
+    if (eventIds.size === 0) return false;
+    const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
+    for (const eventId of eventIds) {
+      for (const key of aliases) {
+        if (
+          await canEditEvent(
+            db,
+            user,
+            eventId,
+            key as CollaboratorPermissionKey,
+          )
+        ) {
+          return true;
+        }
       }
-    }
-  }
-
-  const editableMemberRows = approved.length > 0
-    ? await db
-        .select({ can_edit: videoMembers.can_edit })
-        .from(videoMembers)
-        .where(
-          and(
-            eq(videoMembers.video_id, video.id),
-            eq(videoMembers.can_edit, 1),
-            inArray(videoMembers.x_user_id, approved),
-          )!,
-        )
-        .limit(1)
-    : [];
-  const isCollaborator = editableMemberRows.length > 0;
-
-  const eventIds = new Set<string>();
-  if (video.primary_event_id) eventIds.add(video.primary_event_id);
-  const eventRows = await db
-    .select({ event_id: videoEvents.event_id })
-    .from(videoEvents)
-    .where(eq(videoEvents.video_id, video.id));
-  eventRows.forEach((row) => eventIds.add(row.event_id));
-
-  if (isCollaborator) {
-    if (COLLABORATOR_VIDEO_EDIT_KEYS.has(requiredKey)) return true;
-    if (
-      eventIds.size > 0 &&
-      isUserDelegatableKey(requiredKey) &&
-      (await isEventDelegationGranted(db, eventIds, requiredKey))
-    ) {
-      return true;
     }
     return false;
   }
 
-  if (privilegeMode === "normal" || privilegeMode === "admin") return false;
-  if (eventIds.size === 0) return false;
-  const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
-  for (const eventId of eventIds) {
-    for (const key of aliases) {
-      if (
-        await canEditEvent(
-          db,
-          user,
-          eventId,
-          key as CollaboratorPermissionKey,
-        )
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
+  if (privilegeMode !== "normal") return false;
 
-async function isEventDelegationGranted(
-  db: DB,
-  eventIds: Set<string>,
-  requiredKey: VideoEditSectionKey,
-): Promise<boolean> {
-  const eventRows = await db
-    .select({
-      id: eventsTable.id,
-      allow: eventsTable.allow_user_video_edits,
-      json: eventsTable.user_video_edit_permission_keys_json,
-    })
-    .from(eventsTable)
-    .where(inArray(eventsTable.id, Array.from(eventIds)));
-  for (const eventRow of eventRows) {
-    if (eventRow.allow !== 1) continue;
-    const keys = parseDelegatablePermissionKeys(eventRow.json);
-    if (keys.has(requiredKey)) return true;
+  const approved = await getApprovedXIds(db, user.id);
+  const isCreatorOwner = Boolean(
+    video.creator_x_user_id && approved.includes(video.creator_x_user_id),
+  );
+
+  let isGrantedCollaborator = false;
+  if (!isCreatorOwner && approved.length > 0) {
+    const editableMemberRows = await db
+      .select({ can_edit: videoMembers.can_edit })
+      .from(videoMembers)
+      .where(
+        and(
+          eq(videoMembers.video_id, video.id),
+          eq(videoMembers.can_edit, 1),
+          inArray(videoMembers.x_user_id, approved),
+        )!,
+      )
+      .limit(1);
+    isGrantedCollaborator = editableMemberRows.length > 0;
   }
-  return false;
+
+  if (!isCreatorOwner && !isGrantedCollaborator) return false;
+
+  const fields =
+    generalFields ?? (await loadGeneralEditableFieldSet(db, video));
+  return sectionAllowedByGeneralFields(requiredKey, fields);
 }

@@ -4,14 +4,20 @@ import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
-import { videos, videoEvents } from "@/lib/db/schema";
+import { videos, videoEvents, xUsers } from "@/lib/db/schema";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
+import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
+import {
+  resolveVideoCreatorIcon,
+  rollbackUploadedVideoIcon,
+} from "@/lib/video/resolveVideoCreatorIcon";
+import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { parseEventIdsFromForm } from "@/lib/video/parseEventIds";
 import {
   buildStagePermissionSubmission,
@@ -22,10 +28,16 @@ import {
   computeAllowedVideoEditSections,
   hasAnyVideoEditSection,
 } from "@/lib/video/computeEditSections";
+import { loadGeneralEditableFieldSet } from "@/lib/video/generalEditPermissions";
 import {
   validateCustomAnswersForEvents,
   validateVideoMemberSubmission,
 } from "@/lib/video/submissionValidation";
+import {
+  loadMemberSubmissionBaseline,
+  memberChaptersPayloadChanged,
+  memberListPayloadChanged,
+} from "@/lib/video/memberSubmissionBaseline";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
 import {
   MAX_ATOMIC_VIDEO_EVENTS,
@@ -45,7 +57,6 @@ export async function updateVideo(
   const guard = await writeGuard({ feature: "edit_video" });
   if (!guard.ok) return { ok: false, reason: guard.reason, message: guard.message };
   const sessionUser = guard.user;
-  const approvedXIds = guard.approvedXIds;
 
   const videoId = String(formData.get("video_id") ?? "").trim();
   if (!videoId) return { ok: false, message: "video_id が空です。" };
@@ -93,7 +104,11 @@ export async function updateVideo(
     raw.youtube_url = `https://youtu.be/${target.youtube_video_id}`;
   }
   setDefault("creator_x_user_id", target.creator_x_user_id);
+  setDefault("icon_mode", "keep");
   setDefault("icon_url", target.creator_icon_url);
+  setDefault("profile_text", target.creator_profile_text);
+  setDefault("youtube_channel_url", target.creator_youtube_channel_url);
+  setDefault("other_social_links", target.creator_other_social_links);
   setDefault("music", target.music);
   setDefault("music_reference_url", target.music_reference_url);
   setDefault("credit", target.credit);
@@ -108,6 +123,9 @@ export async function updateVideo(
 
   const parsed = parseVideoForm(raw, { youtubeRequired: false });
   if (!parsed.ok) return parsed;
+
+  const rawIconMode = String(formData.get("icon_mode") ?? raw.icon_mode ?? "keep").trim();
+  const iconChangeRequested = rawIconMode !== "keep";
 
   const nextStagePermissionResult = buildStagePermissionSubmission(
     formData,
@@ -167,13 +185,70 @@ export async function updateVideo(
     return { ok: false, message: "提出主体 X ID が必要です。" };
   }
 
+  const submitterXChanged =
+    allowSubmitterChange && nextCreatorX !== existingX;
+  let parsedFormData = parsed.data;
+  if (submitterXChanged) {
+    const profileAction = String(
+      formData.get("submitter_profile_action") ?? "",
+    ).trim();
+    if (profileAction !== "keep" && profileAction !== "copy_default") {
+      return {
+        ok: false,
+        message:
+          "提出主体 X ID を変更する場合、提出者情報の扱いを選択してください。",
+      };
+    }
+    if (profileAction === "keep") {
+      parsedFormData = {
+        ...parsedFormData,
+        display_name:
+          target.creator_display_name ??
+          target.creator_x_user_id ??
+          "anonymous",
+        icon_url: target.creator_icon_url,
+        profile_text: target.creator_profile_text,
+        youtube_channel_url: target.creator_youtube_channel_url,
+        other_social_links: target.creator_other_social_links,
+      };
+    } else {
+      const nextXProfile = (
+        await db
+          .select()
+          .from(xUsers)
+          .where(eq(xUsers.id, nextCreatorX))
+          .limit(1)
+      )[0];
+      if (!nextXProfile) {
+        return { ok: false, message: "変更先の X ID が見つかりません。" };
+      }
+      parsedFormData = {
+        ...parsedFormData,
+        display_name: nextXProfile.x_name,
+        icon_url: nextXProfile.icon_url,
+        profile_text: nextXProfile.profile_text,
+        youtube_channel_url: nextXProfile.youtube_channel_url,
+        other_social_links: nextXProfile.other_social_links,
+      };
+    }
+  }
+
   const changed = (a: string | null | undefined, b: string | null | undefined) =>
     (a || null) !== (b || null);
 
+  const nextCreatorYoutubeChannelUrl = snapshotYoutubeChannelUrl(
+    parsedFormData.youtube_channel_url,
+  );
   if (
     !sections.identity &&
-    (changed(parsed.data.display_name, target.creator_display_name) ||
-      changed(parsed.data.icon_url, target.creator_icon_url))
+    (changed(parsedFormData.display_name, target.creator_display_name) ||
+      iconChangeRequested ||
+      changed(parsedFormData.profile_text, target.creator_profile_text) ||
+      changed(
+        normalizeSocialLinksForStorage(parsedFormData.other_social_links),
+        target.creator_other_social_links,
+      ) ||
+      changed(nextCreatorYoutubeChannelUrl, target.creator_youtube_channel_url))
   ) {
     return { ok: false, message: "提出者情報を編集する権限がありません。" };
   }
@@ -183,7 +258,7 @@ export async function updateVideo(
       message: "提出主体 X ID の変更には管理者権限が必要です。",
     };
   }
-  if (!sections.basics && parsed.data.title !== target.title) {
+  if (!sections.basics && parsedFormData.title !== target.title) {
     return { ok: false, message: "作品タイトルを編集する権限がありません。" };
   }
   const youtubeChanged = (youtubeId ?? "") !== (target.youtube_video_id ?? "");
@@ -192,44 +267,185 @@ export async function updateVideo(
   }
   if (
     !sections.credits &&
-    (changed(parsed.data.music, target.music) ||
-      changed(parsed.data.credit, target.credit) ||
-      changed(parsed.data.music_reference_url, target.music_reference_url))
+    (changed(parsedFormData.music, target.music) ||
+      changed(parsedFormData.credit, target.credit) ||
+      changed(parsedFormData.music_reference_url, target.music_reference_url))
   ) {
     return { ok: false, message: "楽曲・クレジットを編集する権限がありません。" };
   }
   if (
     !sections.descriptions &&
-    (changed(parsed.data.intro_comment, target.intro_comment) ||
-      changed(parsed.data.highlights, target.highlights) ||
-      changed(parsed.data.production_story, target.production_story) ||
-      changed(parsed.data.used_software, targetSoftwareLabel) ||
-      changed(nextStagePermission, currentStagePermission) ||
-      changed(parsed.data.closing_comment, target.closing_comment))
+    (changed(parsedFormData.intro_comment, target.intro_comment) ||
+      changed(parsedFormData.highlights, target.highlights) ||
+      changed(parsedFormData.production_story, target.production_story) ||
+      changed(parsedFormData.used_software, targetSoftwareLabel) ||
+      changed(parsedFormData.closing_comment, target.closing_comment))
+  ) {
+    return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
+  }
+  if (
+    !sections.descriptions &&
+    changed(nextStagePermission, currentStagePermission)
   ) {
     return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
   }
   if (
     !sections.members &&
-    parsed.data.is_collab !== (target.collaboration_type === "collab")
+    parsedFormData.is_collab !== (target.collaboration_type === "collab")
   ) {
     return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+  }
+
+  let memberSubmission = null;
+  let existingMemberBaseline: Awaited<ReturnType<typeof loadMemberSubmissionBaseline>> | null =
+    null;
+  let submittedMemberBaseline: Awaited<ReturnType<typeof loadMemberSubmissionBaseline>> | null =
+    null;
+  const isCollabSubmission = parsed.data.is_collab ?? false;
+  if (formData.has("members_json") || sections.members || sections.member_chapters) {
+    const memberValidation = validateVideoMemberSubmission(
+      formData,
+      isCollabSubmission,
+    );
+    if (!memberValidation.ok) return memberValidation;
+    submittedMemberBaseline = {
+      members: memberValidation.value.members,
+      chaptersByIndex: memberValidation.value.chaptersByIndex,
+    };
+    existingMemberBaseline = await loadMemberSubmissionBaseline(db, videoId);
+
+    if (
+      !sections.members &&
+      memberListPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
+    ) {
+      return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+    }
+
+    if (
+      !sections.member_chapters &&
+      memberChaptersPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
+    ) {
+      return { ok: false, message: "メンバーチャプターを編集する権限がありません。" };
+    }
+
+    if (sections.members) {
+      memberSubmission = memberValidation.value;
+      if (!sections.member_chapters) {
+        memberSubmission = {
+          ...memberSubmission,
+          chaptersByIndex: existingMemberBaseline.chaptersByIndex,
+        };
+      }
+    } else if (sections.member_chapters) {
+      memberSubmission = {
+        members: existingMemberBaseline.members,
+        chaptersByIndex: submittedMemberBaseline.chaptersByIndex,
+      };
+    }
+  }
+
+  if (privilegeMode === "normal") {
+    const generalFields = await loadGeneralEditableFieldSet(db, target);
+    if (changed(parsedFormData.profile_text, target.creator_profile_text)) {
+      return { ok: false, message: "紹介文を編集する権限がありません。" };
+    }
+    if (
+      changed(
+        normalizeSocialLinksForStorage(parsedFormData.other_social_links),
+        target.creator_other_social_links,
+      )
+    ) {
+      return { ok: false, message: "SNSリンクを編集する権限がありません。" };
+    }
+    const nextCreatorYoutube = snapshotYoutubeChannelUrl(
+      parsedFormData.youtube_channel_url,
+    );
+    if (
+      changed(nextCreatorYoutube, target.creator_youtube_channel_url)
+    ) {
+      return { ok: false, message: "提出者YouTubeチャンネルを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.display_name, target.creator_display_name) &&
+      !generalFields.has("display_name")
+    ) {
+      return { ok: false, message: "表示名を編集する権限がありません。" };
+    }
+    if (
+      iconChangeRequested &&
+      !generalFields.has("icon_url")
+    ) {
+      return { ok: false, message: "アイコンを編集する権限がありません。" };
+    }
+    if (parsed.data.title !== target.title && !generalFields.has("title")) {
+      return { ok: false, message: "作品タイトルを編集する権限がありません。" };
+    }
+    if (changed(parsed.data.music, target.music) && !generalFields.has("music")) {
+      return { ok: false, message: "楽曲名を編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.music_reference_url, target.music_reference_url) &&
+      !generalFields.has("music")
+    ) {
+      return { ok: false, message: "楽曲参照URLを編集する権限がありません。" };
+    }
+    if (changed(parsed.data.credit, target.credit) && !generalFields.has("credit")) {
+      return { ok: false, message: "クレジットを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.intro_comment, target.intro_comment) &&
+      !generalFields.has("intro_comment")
+    ) {
+      return { ok: false, message: "紹介コメントを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.highlights, target.highlights) &&
+      !generalFields.has("highlights")
+    ) {
+      return { ok: false, message: "見どころを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.production_story, target.production_story) &&
+      !generalFields.has("production_story")
+    ) {
+      return { ok: false, message: "制作エピソードを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.used_software, targetSoftwareLabel) &&
+      !generalFields.has("used_software")
+    ) {
+      return { ok: false, message: "使用ソフトを編集する権限がありません。" };
+    }
+    if (
+      changed(parsed.data.closing_comment, target.closing_comment) &&
+      !generalFields.has("closing_comment")
+    ) {
+      return { ok: false, message: "締めコメントを編集する権限がありません。" };
+    }
+    if (
+      parsed.data.is_collab !== (target.collaboration_type === "collab") &&
+      !generalFields.has("members")
+    ) {
+      return { ok: false, message: "合作メンバーを編集する権限がありません。" };
+    }
+    if (
+      sections.members &&
+      submittedMemberBaseline &&
+      existingMemberBaseline &&
+      memberChaptersPayloadChanged(existingMemberBaseline, submittedMemberBaseline) &&
+      !generalFields.has("chapters")
+    ) {
+      return { ok: false, message: "メンバーチャプターを編集する権限がありません。" };
+    }
+    if (changed(nextStagePermission, currentStagePermission)) {
+      return { ok: false, message: "ステージ利用許可を編集する権限がありません。" };
+    }
   }
 
   if (sections.youtube && youtubeChanged && youtubeId) {
     if (await checkYoutubeVideoDuplicate(db, youtubeId, videoId)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
     }
-  }
-
-  let memberSubmission = null;
-  if (sections.members) {
-    const memberValidation = validateVideoMemberSubmission(
-      formData,
-      parsed.data.is_collab ?? false,
-    );
-    if (!memberValidation.ok) return memberValidation;
-    memberSubmission = memberValidation.value;
   }
 
   const hasEventIdsField = formData.has("event_ids");
@@ -288,6 +504,24 @@ export async function updateVideo(
     customAnswerDrafts = customValidation.drafts;
   }
 
+  let uploadedIconKey: string | null = null;
+  if (sections.identity && !submitterXChanged) {
+    const iconResolved = await resolveVideoCreatorIcon({
+      formData,
+      parsed: parsedFormData,
+      activeXId: nextCreatorX,
+      videoId,
+      existingIconUrl: target.creator_icon_url,
+      db,
+    });
+    if (!iconResolved.ok) return iconResolved;
+    uploadedIconKey = iconResolved.value.uploadedKey;
+    parsedFormData = {
+      ...parsedFormData,
+      icon_url: iconResolved.value.iconUrl,
+    };
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const plan = buildVideoUpdatePlan({
     videoId,
@@ -297,14 +531,12 @@ export async function updateVideo(
     sections,
     target,
     targetSoftwareLabel,
-    parsed: parsed.data,
+    parsed: parsedFormData,
     youtubeId,
     youtubeChanged,
     nextCreatorX,
     nextStagePermission,
-    creatorYoutubeChannelUrl: snapshotYoutubeChannelUrl(
-      parsed.data.youtube_channel_url,
-    ),
+    creatorYoutubeChannelUrl: nextCreatorYoutubeChannelUrl,
     memberSubmission,
     customAnswerDrafts,
     syncedEventIds,
@@ -313,23 +545,11 @@ export async function updateVideo(
     now,
   });
 
+  let staticRebuildEnqueued: boolean;
   try {
-    const staticRebuildEnqueued = await applyVideoUpdatePlan(db, plan, {
-      approvedXIds,
-      sessionRole: sessionUser.role,
-    });
-    return markPendingPublicReflection(
-      {
-        ok: true,
-        videoId,
-        youtubeVideoId: sections.youtube
-          ? (youtubeId ?? undefined)
-          : (target.youtube_video_id ?? undefined),
-        eventId: target.primary_event_id ?? undefined,
-      },
-      staticRebuildEnqueued,
-    );
+    staticRebuildEnqueued = await applyVideoUpdatePlan(db, plan);
   } catch (err) {
+    await rollbackUploadedVideoIcon(uploadedIconKey);
     if (isYoutubeIdUniqueConstraintError(err)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };
     }
@@ -339,4 +559,26 @@ export async function updateVideo(
       message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。",
     };
   }
+
+  try {
+    await cleanupReplacedVideoCreatorIcon(
+      db,
+      target.creator_icon_url,
+      parsedFormData.icon_url,
+    );
+  } catch (error) {
+    console.warn("[updateVideo] icon orphan cleanup failed", error);
+  }
+
+  return markPendingPublicReflection(
+    {
+      ok: true,
+      videoId,
+      youtubeVideoId: sections.youtube
+        ? (youtubeId ?? undefined)
+        : (target.youtube_video_id ?? undefined),
+      eventId: target.primary_event_id ?? undefined,
+    },
+    staticRebuildEnqueued,
+  );
 }

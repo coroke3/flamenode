@@ -1,6 +1,7 @@
 import { resolveQueueFeatureFlags } from "../queues/featureFlags.ts";
 
 const STATIC_ARTIFACT_MAX_AGE_SEC = 90 * 24 * 3600;
+const TOP_NOSTALGIC_SHUFFLE_MAX_AGE_SEC = 2 * 24 * 3600;
 
 type StaticArtifactProbe = {
   key: string;
@@ -10,7 +11,14 @@ type StaticArtifactProbe = {
 const STATIC_ARTIFACT_PROBES: StaticArtifactProbe[] = [
   {
     key: "top.json",
-    requiredKeys: ["generated_at", "latest", "stats"],
+    requiredKeys: [
+      "generated_at",
+      "latest",
+      "nostalgic_pool",
+      "nostalgic",
+      "nostalgic_shuffled_at",
+      "stats",
+    ],
   },
   {
     key: "list/recent.json",
@@ -98,6 +106,22 @@ export async function assertStaticArtifactsFresh(
     if (probe.key === "top.json") {
       if (!Array.isArray(payload.latest)) {
         throw new Error("top.json: latest must be an array");
+      }
+      if (!Array.isArray(payload.nostalgic_pool)) {
+        throw new Error("top.json: nostalgic_pool must be an array");
+      }
+      if (!Array.isArray(payload.nostalgic)) {
+        throw new Error("top.json: nostalgic must be an array");
+      }
+      const shuffledAt = parseGeneratedAt(
+        payload.nostalgic_shuffled_at,
+        "top.json nostalgic_shuffled_at",
+      );
+      if (shuffledAt > nowSec + 60) {
+        throw new Error("top.json: nostalgic_shuffled_at is in the future");
+      }
+      if (nowSec - shuffledAt > TOP_NOSTALGIC_SHUFFLE_MAX_AGE_SEC) {
+        throw new Error("top.json: nostalgic_shuffled_at is stale");
       }
       if (!payload.stats || typeof payload.stats !== "object") {
         throw new Error("top.json: stats must be an object");

@@ -37,6 +37,15 @@ import {
   MAX_ATOMIC_VIDEO_SOFTWARES,
 } from "@/lib/video/atomicLimits";
 
+/** X ID 既定プロフィール。「再適用」ボタン用。作品スナップショットとは別。 */
+export interface VideoDefaultProfile {
+  display_name?: string;
+  icon_url?: string | null;
+  profile_text?: string | null;
+  youtube_channel_url?: string | null;
+  other_social_links?: string | null;
+}
+
 export interface VideoFormInitialValues {
   display_name?: string;
   creator_x_user_id?: string;
@@ -167,6 +176,11 @@ interface VideoFormProps {
    * `edit_privilege_mode` で送信される。サーバーは別途 URL/セッションから再検証する。
    */
   editPrivilegeMode?: "normal" | "admin" | "event";
+  /**
+   * 現在の X ID 既定プロフィール。提出者情報の「再適用」ボタン用。
+   * フォーム初期値とは別に渡す (編集時は video.creator_* が初期値)。
+   */
+  defaultProfile?: VideoDefaultProfile;
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -212,6 +226,7 @@ export function VideoForm({
   canEditEvents = true,
   canChangeSubmitter = false,
   editPrivilegeMode,
+  defaultProfile,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
@@ -222,9 +237,23 @@ export function VideoForm({
   const [stepError, setStepError] = React.useState<WizardValidationError | null>(null);
   const [youtubeUrl, setYoutubeUrl] = React.useState(initial.youtube_url ?? "");
   const [titlePreview, setTitlePreview] = React.useState(initial.title ?? "");
-  const [displayNamePreview, setDisplayNamePreview] = React.useState(
+  const [submitterDisplayName, setSubmitterDisplayName] = React.useState(
     initial.display_name ?? "",
   );
+  const [submitterProfileText, setSubmitterProfileText] = React.useState(
+    initial.profile_text ?? "",
+  );
+  const [submitterIconUrl, setSubmitterIconUrl] = React.useState(
+    initial.icon_url ?? "",
+  );
+  const [submitterYoutubeChannel, setSubmitterYoutubeChannel] = React.useState(
+    initial.youtube_channel_url ?? "",
+  );
+  const [submitterSocialLinks, setSubmitterSocialLinks] = React.useState(
+    initial.other_social_links ?? "",
+  );
+  const [submitterFieldsKey, setSubmitterFieldsKey] = React.useState(0);
+  const displayNamePreview = submitterDisplayName;
   const [isCollab, setIsCollab] = React.useState(
     Boolean(initial.is_collab || (initial.members?.length ?? 0) > 0),
   );
@@ -337,13 +366,16 @@ export function VideoForm({
   const submitterDisabled = isSectionDisabled(disabledSections, "submitter");
   const videoSectionDisabled = isSectionDisabled(disabledSections, "video");
   const descriptionsDisabled = isSectionDisabled(disabledSections, "descriptions");
-  const membersDisabled = isSectionDisabled(disabledSections, "members");
+  const membersSectionDisabled = isSectionDisabled(disabledSections, "members");
+  const membersListDisabled =
+    membersSectionDisabled || isFieldDisabled(disabledFields, "members.list");
+  const chaptersFieldDisabled = isFieldDisabled(disabledFields, "chapters");
   const fieldDisabled = (key: string) =>
     isFieldDisabled(disabledFields, key) ||
     (key.startsWith("submitter.") && submitterDisabled) ||
     (key.startsWith("video.") && videoSectionDisabled) ||
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
-    (key.startsWith("members.") && membersDisabled);
+    (key.startsWith("members.") && membersListDisabled);
   const hasInitialYoutube = Boolean(initial.youtube_url?.trim());
   const isYoutubeUrlRequired =
     mode === "free" || (mode === "edit" && hasInitialYoutube);
@@ -518,9 +550,46 @@ export function VideoForm({
     return () => window.cancelAnimationFrame(frame);
   }, [isWizard, stepError, wizardSteps]);
 
+  const handleReapplyDefaultProfile = () => {
+    if (!defaultProfile || submitterDisabled) return;
+    const nextDisplayName = defaultProfile.display_name ?? "";
+    setSubmitterDisplayName(nextDisplayName);
+    setSubmitterProfileText(defaultProfile.profile_text ?? "");
+    setSubmitterIconUrl(defaultProfile.icon_url ?? "");
+    setSubmitterYoutubeChannel(defaultProfile.youtube_channel_url ?? "");
+    setSubmitterSocialLinks(defaultProfile.other_social_links ?? "");
+    setSubmitterFieldsKey((current) => current + 1);
+    setDirty(true);
+  };
+
   const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
-    const formData = new FormData(ev.currentTarget);
+    const form = ev.currentTarget;
+    if (mode === "edit") {
+      const allowChange =
+        String(new FormData(form).get("allow_submitter_change") ?? "").trim() ===
+        "1";
+      if (allowChange) {
+        const creatorField = form.elements.namedItem("creator_x_user_id");
+        const nextX =
+          creatorField instanceof HTMLInputElement ||
+          creatorField instanceof HTMLSelectElement
+            ? normalizeXId(creatorField.value)
+            : "";
+        const profileAction = String(
+          new FormData(form).get("submitter_profile_action") ?? "",
+        ).trim();
+        if (nextX && nextX !== normalizedInitialXId && !profileAction) {
+          setResult({
+            ok: false,
+            message:
+              "提出主体 X ID を変更する場合、提出者情報の扱いを選択してください。",
+          });
+          return;
+        }
+      }
+    }
+    const formData = new FormData(form);
     setResult(null);
     startTransition(async () => {
       const action =
@@ -650,8 +719,31 @@ export function VideoForm({
           ) : null}
         </h2>
         <p className={styles.help}>
-          この作品で表示する X ID、活動名、団体名を確認してください。X ID 設定の既定値を使いつつ、作品ごとに上書きできます。
+          {mode === "edit" ? (
+            <>
+              この作品に保存されている提出者情報を編集しています。
+              変更はこの作品にだけ適用されます。
+              X IDの既定プロフィールや、ほかの作品には影響しません。
+            </>
+          ) : (
+            <>
+              X IDに設定された既定プロフィールを入力しています。
+              ここで変更した内容は、この作品にだけ適用されます。
+              X IDの既定プロフィールや、ほかの作品には影響しません。
+            </>
+          )}
         </p>
+        {defaultProfile && !submitterDisabled ? (
+          <p style={{ margin: "0 0 12px" }}>
+            <button
+              type="button"
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+              onClick={handleReapplyDefaultProfile}
+            >
+              現在の既定プロフィールを再適用
+            </button>
+          </p>
+        ) : null}
         <div className={`${styles.row} ${styles.cols2}`}>
           <div className={cx(styles.field, styles.editableField)}>
             <label className={`${styles.label} ${styles.required}`} htmlFor="creator_x_user_id">
@@ -708,12 +800,12 @@ export function VideoForm({
               id="display_name"
               name="display_name"
               type="text"
-              defaultValue={initial.display_name}
+              value={submitterDisplayName}
               className="fn-input"
               maxLength={80}
               required
               onChange={(e) => {
-                setDisplayNamePreview(e.target.value);
+                setSubmitterDisplayName(e.target.value);
                 setDirty(true);
               }}
               aria-invalid={stepError?.fieldId === "display_name" || undefined}
@@ -734,9 +826,18 @@ export function VideoForm({
             この作品で表示するアイコンを選択します。X ID 既定アイコンは変更されません。
           </p>
           <VideoIconPicker
+            key={`video-icon-${submitterFieldsKey}`}
             candidates={iconCandidates}
-            initialIconUrl={initial.icon_url}
+            initialIconUrl={submitterIconUrl}
+            persistedIconUrl={initial.icon_url}
+            defaultIconUrl={defaultProfile?.icon_url}
+            value={submitterIconUrl}
+            onChange={(url) => {
+              setSubmitterIconUrl(url);
+              setDirty(true);
+            }}
             disabled={fieldDisabled("submitter.icon_url")}
+            isEdit={mode === "edit"}
           />
         </div>
         <div className={cx(styles.field, styles.editableField)}>
@@ -746,7 +847,11 @@ export function VideoForm({
           <textarea
             id="profile_text"
             name="profile_text"
-            defaultValue={initial.profile_text}
+            value={submitterProfileText}
+            onChange={(e) => {
+              setSubmitterProfileText(e.target.value);
+              setDirty(true);
+            }}
             className="fn-input"
             rows={3}
             maxLength={1000}
@@ -756,15 +861,25 @@ export function VideoForm({
         <div className={cx(styles.field, styles.editableField)}>
           <span className={styles.label}>YouTube チャンネル</span>
           <YoutubeChannelPicker
-            defaultValue={initial.youtube_channel_url ?? null}
+            key={`youtube-channel-${submitterFieldsKey}`}
+            defaultValue={submitterYoutubeChannel || null}
             candidates={channelCandidates}
             disabled={fieldDisabled("submitter.youtube_channel_url")}
+            onValueChange={(url) => {
+              setSubmitterYoutubeChannel(url);
+              setDirty(true);
+            }}
           />
         </div>
         <div className={cx(styles.field, styles.editableField)}>
           <SocialLinksEditor
-            initialValue={initial.other_social_links ?? null}
+            key={`social-links-${submitterFieldsKey}`}
+            initialValue={submitterSocialLinks || null}
             disabled={fieldDisabled("submitter.other_social_links")}
+            onValueChange={(json) => {
+              setSubmitterSocialLinks(json);
+              setDirty(true);
+            }}
           />
         </div>
       </section>
@@ -1200,13 +1315,13 @@ export function VideoForm({
       <section
         className={cx(
           styles.section,
-          membersDisabled && styles.sectionDisabled,
+          membersSectionDisabled && styles.sectionDisabled,
         )}
-        data-disabled={membersDisabled || undefined}
+        data-disabled={membersSectionDisabled || undefined}
       >
         <h2 className={styles.sectionTitle}>
           <Icon name="users" size={14} aria-hidden /> 合作メンバー
-          {membersDisabled ? (
+          {membersSectionDisabled ? (
             <span className={styles.sectionDisabledBadge} aria-label="編集不可">
               <Icon name="alert" size={11} aria-hidden /> 編集権限なし
             </span>
@@ -1217,19 +1332,37 @@ export function VideoForm({
             display: "inline-flex",
             alignItems: "center",
             gap: 8,
-            cursor: membersDisabled ? "default" : "pointer",
+            cursor: membersListDisabled ? "default" : "pointer",
             fontSize: 13,
           }}
         >
-          <input type="hidden" name="is_collab" value="false" />
-          <input
-            type="checkbox"
-            name="is_collab"
-            value="true"
-            checked={isCollab}
-            onChange={(e) => setIsCollab(e.target.checked)}
-            disabled={membersDisabled}
-          />
+          {membersListDisabled ? (
+            <>
+              <input
+                type="hidden"
+                name="is_collab"
+                value={isCollab ? "true" : "false"}
+              />
+              <input
+                type="checkbox"
+                checked={isCollab}
+                readOnly
+                disabled
+                aria-readonly
+              />
+            </>
+          ) : (
+            <>
+              <input type="hidden" name="is_collab" value="false" />
+              <input
+                type="checkbox"
+                name="is_collab"
+                value="true"
+                checked={isCollab}
+                onChange={(e) => setIsCollab(e.target.checked)}
+              />
+            </>
+          )}
           合作作品として登録する
         </label>
         {isCollab ? (
@@ -1237,7 +1370,8 @@ export function VideoForm({
             <VideoMembersField
               initialMembers={initial.members}
               suggestions={memberSuggestions}
-              disabled={membersDisabled}
+              disabled={membersListDisabled}
+              chaptersDisabled={chaptersFieldDisabled}
               onChange={handleMembersChange}
               collabPermsHref="#video-collab-perms"
             />
@@ -1797,6 +1931,17 @@ function EditSubmitterField({
   canChangeSubmitter: boolean;
 }): React.ReactElement {
   const [unlocked, setUnlocked] = React.useState(false);
+  const [selectedXId, setSelectedXId] = React.useState(selectedDefault);
+  const [profileAction, setProfileAction] = React.useState<
+    "keep" | "copy_default" | ""
+  >("");
+
+  const xIdChanged =
+    unlocked && normalizeXId(selectedXId) !== normalizeXId(initialXId);
+
+  React.useEffect(() => {
+    if (!xIdChanged) setProfileAction("");
+  }, [xIdChanged]);
 
   if (!initialXId && !hasSelectableXIds) {
     return (
@@ -1856,7 +2001,8 @@ function EditSubmitterField({
         id="creator_x_user_id"
         name="creator_x_user_id"
         className="fn-select"
-        defaultValue={selectedDefault}
+        value={selectedXId}
+        onChange={(event) => setSelectedXId(event.currentTarget.value)}
         required
         disabled={disabled}
       >
@@ -1869,6 +2015,68 @@ function EditSubmitterField({
           </option>
         ))}
       </select>
+      {xIdChanged ? (
+        <fieldset
+          style={{
+            margin: "10px 0 0",
+            padding: 12,
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-sm)",
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <legend style={{ fontSize: 12, fontWeight: 700, padding: "0 6px" }}>
+            提出者情報の扱い
+          </legend>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="radio"
+              name="submitter_profile_action"
+              value="keep"
+              checked={profileAction === "keep"}
+              onChange={() => setProfileAction("keep")}
+              required
+            />
+            <span>
+              <strong>提出者情報を維持</strong>
+              <br />
+              表示名・アイコン・概要などはこの作品の現状のまま残し、提出主体 X ID だけ変更します。
+            </span>
+          </label>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="radio"
+              name="submitter_profile_action"
+              value="copy_default"
+              checked={profileAction === "copy_default"}
+              onChange={() => setProfileAction("copy_default")}
+              required
+            />
+            <span>
+              <strong>新 X ID の既定を作品へコピー</strong>
+              <br />
+              変更先 X ID の既定プロフィールで、この作品の提出者情報を上書きします。
+            </span>
+          </label>
+        </fieldset>
+      ) : null}
       <div
         style={{
           display: "flex",

@@ -10,7 +10,6 @@ const updateVideoAction = read("../actions/video/updateVideo.ts");
 const update = read("./videoSavePlan.ts");
 const adminMembers = read("../actions/video/adminMembers.ts");
 const helperSources = [
-  read("./ensureSubmissionXUser.ts"),
   read("./syncVideoEvents.ts"),
   read("./replaceVideoMembers.ts"),
   read("../db/software.ts"),
@@ -20,7 +19,7 @@ const helperSources = [
 
 test("YouTube IDがあるときだけderived rows planを追加する", () => {
   assert.match(submit, /if \(youtubeId\) \{[\s\S]*buildVideoDerivedRowsPlan/);
-  assert.match(update, /if \(sections\.youtube && plan\.youtubeId\) \{[\s\S]*buildVideoDerivedRowsPlan/);
+  assert.match(update, /if \(sections\.youtube && plan\.youtubeChanged\)[\s\S]*buildVideoDerivedRowsPlan/);
 });
 
 test("枠投稿と編集はYouTube任意パースを使う", () => {
@@ -129,6 +128,15 @@ test("静的queueはCASE更新とmulti-values INSERTへ集約する", () => {
   assert.match(queue, /STATIC_REBUILD_BULK_INSERT_ROWS = 10/);
   assert.match(queue, /CASE \$\{staticRebuildQueue\.id\}/);
   assert.match(queue, /db\.insert\(staticRebuildQueue\)\.values\(chunk\)/);
+});
+
+test("作品保存は x_users プロフィール更新 plan を呼ばない", () => {
+  for (const source of [create, submit, update]) {
+    assert.doesNotMatch(source, /buildSubmissionXUserPlan/);
+    assert.doesNotMatch(source, /ensureSubmissionXUser/);
+  }
+  assert.match(update, /creator_profile_text/);
+  assert.match(update, /creator_other_social_links/);
 });
 
 test("投稿候補はvideos snapshotから導出し候補履歴を二重書込みしない", () => {

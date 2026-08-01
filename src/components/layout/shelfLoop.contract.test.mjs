@@ -129,5 +129,6 @@ test("トップ3棚はTopLoopShelfで左右交互のloopを使う", () => {
   assert.deepEqual(directions, ["left", "right", "left"]);
   assert.equal((home.match(/<TopLoopShelf/g) ?? []).length, 3);
   assert.doesNotMatch(home, /^\s+loop\s*$/gm);
-  assert.doesNotMatch(home, /<Shelf[\s\S]*?loop/);
+  assert.doesNotMatch(home, /<Shelf[^>]*loop=\{true\}/);
+  assert.match(home, /<Shelf ariaLabel="FlameNodeで注目" loop=\{false\}>/);
 });

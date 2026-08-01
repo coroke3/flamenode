@@ -8,7 +8,6 @@ import {
   videoCustomAnswers,
   videoMembers,
   videos,
-  xUsers,
 } from "@/lib/db/schema";
 import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
@@ -75,16 +74,6 @@ export async function fetchVideoReviewDetail(
       .limit(1)
   )[0];
   if (!video) return null;
-
-  const xRow = video.creator_x_user_id
-    ? (
-        await db
-          .select({ x_name: xUsers.x_name })
-          .from(xUsers)
-          .where(eq(xUsers.id, video.creator_x_user_id))
-          .limit(1)
-      )[0]
-    : null;
 
   const linkedEventIds =
     eventIds && eventIds.length > 0
@@ -167,8 +156,7 @@ export async function fetchVideoReviewDetail(
   return {
     id: video.id,
     title: video.title,
-    creator_name:
-      xRow?.x_name ?? video.creator_name ?? video.creator_x_user_id ?? "—",
+    creator_name: video.creator_name ?? video.creator_x_user_id ?? "—",
     creator_x_user_id: video.creator_x_user_id,
     created_at: video.created_at,
     youtube_video_id: video.youtube_video_id,

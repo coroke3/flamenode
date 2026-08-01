@@ -9,7 +9,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canEditVideo,
-  resolveAdminOrEventVideoPrivilegeMode,
+  getApprovedXIds,
 } from "@/lib/auth/ownership";
 import { videoMembers, videos, xUsers } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
@@ -60,6 +60,42 @@ const upsertSchema = z.object({
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
+async function canManageVideoCollaborators(
+  db: DB,
+  user: { id: string; role?: string | null },
+  video: Pick<
+    typeof videos.$inferSelect,
+    | "id"
+    | "title"
+    | "primary_event_id"
+    | "creator_x_user_id"
+    | "submitted_by_user_id"
+    | "visibility_status"
+  >,
+): Promise<boolean> {
+  if (user.role === "admin") {
+    const allowed = await canEditVideo({
+      db,
+      user,
+      video,
+      requiredKey: "video.identity",
+      privilegeMode: "admin",
+    });
+    if (allowed) return true;
+  }
+  const approved = await getApprovedXIds(db, user.id);
+  if (video.creator_x_user_id && approved.includes(video.creator_x_user_id)) {
+    return true;
+  }
+  return canEditVideo({
+    db,
+    user,
+    video,
+    requiredKey: "video.members",
+    privilegeMode: "event",
+  });
+}
+
 async function loadEditableVideo(
   db: DB,
   user: { id: string; role?: string | null },
@@ -73,19 +109,14 @@ async function loadEditableVideo(
         primary_event_id: videos.primary_event_id,
         creator_x_user_id: videos.creator_x_user_id,
         submitted_by_user_id: videos.submitted_by_user_id,
+        visibility_status: videos.visibility_status,
       })
       .from(videos)
       .where(eq(videos.id, videoId))
       .limit(1)
   )[0];
   if (!row) return null;
-  const allowed = await canEditVideo({
-    db,
-    user,
-    video: row,
-    requiredKey: "video.identity",
-    privilegeMode: resolveAdminOrEventVideoPrivilegeMode(user.role),
-  });
+  const allowed = await canManageVideoCollaborators(db, user, row);
   return allowed ? row : null;
 }
 

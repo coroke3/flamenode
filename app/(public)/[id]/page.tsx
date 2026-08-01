@@ -25,6 +25,7 @@ import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
+import { VideoViewTracker } from "@/components/video/VideoViewTracker";
 import { FixedVideoPlayerFrame } from "@/components/video/FixedVideoPlayerFrame";
 import fixedPlayerStyles from "@/components/video/FixedVideoPlayerFrame.module.css";
 import { IntroCommentBlock } from "@/components/video/IntroCommentBlock";
@@ -117,7 +118,6 @@ export default async function VideoDetailPage({
       rawId,
       videoId: staticProbe.data.video.id,
       playlist,
-      creatorXUserId: staticProbe.data.video.creator_x_user_id ?? null,
       playlistEventTitle:
         staticProbe.data.publicEvents.find((event) => event.id === playlist)
           ?.title ?? null,
@@ -220,7 +220,6 @@ type VideoViewerOverlay = {
   bookmarkActive: boolean;
   viewerXApproved: boolean;
   viewerCanEditChapters: boolean;
-  creatorYoutubeChannelUrl: string | null;
   playlistLabel: string;
   playlistItems: {
     id: string;
@@ -234,13 +233,11 @@ async function fetchVideoViewerOverlay({
   rawId,
   videoId,
   playlist,
-  creatorXUserId,
   playlistEventTitle,
 }: {
   rawId: string;
   videoId: string;
   playlist: string;
-  creatorXUserId: string | null;
   playlistEventTitle?: string | null;
 }): Promise<VideoViewerOverlay> {
   const emptyOverlay: VideoViewerOverlay = {
@@ -250,7 +247,6 @@ async function fetchVideoViewerOverlay({
     bookmarkActive: false,
     viewerXApproved: false,
     viewerCanEditChapters: false,
-    creatorYoutubeChannelUrl: null,
     playlistLabel: "再生リスト",
     playlistItems: [],
   };
@@ -273,7 +269,7 @@ async function fetchVideoViewerOverlay({
   const eventPlaylistRequested =
     Boolean(playlist) && playlist !== "lib-like" && playlist !== "lib-bookmark";
   const needsDatabaseOverlay = Boolean(
-    authenticatedViewer || creatorXUserId || eventPlaylistRequested,
+    authenticatedViewer || eventPlaylistRequested,
   );
 
   if (!needsDatabaseOverlay) {
@@ -327,18 +323,6 @@ async function fetchVideoViewerOverlay({
             .limit(1)
         )[0];
         viewerXApproved = xRow?.approval_status === "approved";
-      }
-
-      let creatorYoutubeChannelUrl: string | null = null;
-      if (creatorXUserId) {
-        const creatorRow = (
-          await db
-            .select({ youtube_channel_url: xUsers.youtube_channel_url })
-            .from(xUsers)
-            .where(eq(xUsers.id, creatorXUserId))
-            .limit(1)
-        )[0];
-        creatorYoutubeChannelUrl = creatorRow?.youtube_channel_url ?? null;
       }
 
       let playlistLabel = "再生リスト";
@@ -403,7 +387,6 @@ async function fetchVideoViewerOverlay({
         bookmarkActive,
         viewerXApproved,
         viewerCanEditChapters,
-        creatorYoutubeChannelUrl,
         playlistLabel,
         playlistItems,
       };
@@ -420,7 +403,6 @@ async function fetchVideoViewerOverlay({
       bookmarkActive: overlay.bookmarkActive,
       viewerXApproved: overlay.viewerXApproved,
       viewerCanEditChapters: overlay.viewerCanEditChapters,
-      creatorYoutubeChannelUrl: overlay.creatorYoutubeChannelUrl,
       playlistLabel: overlay.playlistLabel,
       playlistItems: overlay.playlistItems,
     };
@@ -465,18 +447,13 @@ function StaticVideoDetailView({
   const likeActive = overlay?.likeActive ?? false;
   const bookmarkActive = overlay?.bookmarkActive ?? false;
   const viewerXApproved = overlay?.viewerXApproved ?? false;
-  const creatorYoutubeChannelUrl = overlay?.creatorYoutubeChannelUrl ?? null;
+  const creatorYoutubeChannelUrl = video.creator_youtube_channel_url ?? null;
   const playlistLabel = overlay?.playlistLabel ?? "再生リスト";
   const playlistItems = overlay?.playlistItems ?? [];
   const creatorId = video.creator_x_user_id ?? "anonymous";
-  const creatorIcon = resolveProjectedIcon({
-    xUserId: creatorId !== "anonymous" ? creatorId : null,
-    iconMap,
-    legacyIconUrl: video.creator_icon_url ?? null,
-  });
+  const creatorIcon = video.creator_icon_url ?? null;
   const creatorName =
-    video.creator_display_name?.trim() ||
-    (creatorId !== "anonymous" ? creatorId : "作者未設定");
+    video.creator_display_name?.trim() || "作者未設定";
   const creatorHref =
     creatorId !== "anonymous" &&
     ((video.creator_has_public_profile ?? false) ||
@@ -632,7 +609,14 @@ function StaticVideoDetailView({
               className={`${styles.playerPane} ${fixedPlayerStyles.root ?? ""}`.trim()}
             >
               {youtubeId ? (
-                <YoutubePlayer youtubeId={youtubeId} title={video.title} />
+                <>
+                  <YoutubePlayer youtubeId={youtubeId} title={video.title} />
+                  <VideoViewTracker
+                    videoId={video.id}
+                    youtubeVideoId={youtubeId}
+                    primaryEventId={primaryEvent?.id ?? null}
+                  />
+                </>
               ) : (
                 <div
                   className="fn-empty"

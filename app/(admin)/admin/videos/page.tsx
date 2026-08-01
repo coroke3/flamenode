@@ -111,7 +111,7 @@ export default async function AdminVideosPage({
           id: videosTable.id,
           title: videosTable.title,
           youtube_video_id: videosTable.youtube_video_id,
-          display_name: sql<string>`COALESCE(${xUsersTable.x_name}, ${videosTable.creator_display_name}, ${videosTable.creator_x_user_id})`,
+          display_name: videosTable.creator_display_name,
           status: videosTable.visibility_status,
           created_at: videosTable.created_at,
         })

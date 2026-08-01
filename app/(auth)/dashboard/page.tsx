@@ -83,15 +83,14 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             id: videosTable.id,
             title: videosTable.title,
             youtube_video_id: videosTable.youtube_video_id,
-            display_name: sql<string>`COALESCE(${videosTable.creator_display_name}, ${xUsersTable.x_name}, '@' || ${videosTable.creator_x_user_id})`,
-            icon_url: sql<string | null>`COALESCE(${videosTable.creator_icon_url}, ${xUsersTable.icon_url})`,
+            display_name: videosTable.creator_display_name,
+            icon_url: videosTable.creator_icon_url,
             creator_x_user_id: videosTable.creator_x_user_id,
             primary_event_id: videosTable.primary_event_id,
             scheduled_time: videosTable.scheduled_time,
             status: videosTable.visibility_status,
           })
           .from(videosTable)
-          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
           .where(
             and(
               activeGalleryXId

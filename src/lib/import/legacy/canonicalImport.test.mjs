@@ -88,6 +88,7 @@ const compatibilityVideoJson = JSON.stringify([
     soft: "Tool A,Tool B",
     toudan: "あり",
     hitokoto: "見どころ",
+    othersns: "X, TikTok",
     toudan_question: "登壇回答",
   },
 ]);
@@ -272,6 +273,8 @@ test("eventinfo.jsonとvideo_new.jsonの実形式を欠落なくplan化する", 
   assert.equal(plan.videos[0].music, "0");
   assert.equal(plan.videos[0].collaboration_type, "collab");
   assert.equal(plan.videos[0].intro_comment, "開始コメント");
+  assert.equal(plan.videos[0].creator_other_social_links, "X, TikTok");
+  assert.equal(plan.videos[0].creator_profile_text, null);
   assert.match(plan.videos[0].production_story, /コメント: 全体コメント/);
   assert.equal(plan.videoChapters.length, 3);
   assert.deepEqual(plan.videoChapters.map((row) => row.x_user_id), [
@@ -746,6 +749,16 @@ test("apply時にファイルを再解析せずR2保存planを使用する", () 
   const rowCountGuard = route.indexOf("rowCount > MAX_ROWS");
   const normalizeCall = route.indexOf("normalizeLegacyFiles(parsed");
   assert.ok(rowCountGuard > 0 && normalizeCall > 0 && rowCountGuard < normalizeCall);
+});
+
+test("旧形式applyは作品スナップショット列をvideosへ書き込む", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");
+  assert.match(apply, /resolveLegacyCreatorSnapshot/);
+  assert.match(apply, /creator_profile_text: creatorSnapshot\.creator_profile_text/);
+  assert.match(apply, /creator_other_social_links: creatorSnapshot\.creator_other_social_links/);
+  assert.match(apply, /INSERT INTO videos \([\s\S]*creator_profile_text, creator_other_social_links/);
+  assert.doesNotMatch(apply, /UPDATE x_users[\s\S]*creator_profile_text/);
 });
 
 test("カスタム質問・回答applyは手動回答保護とD1予算を維持する", () => {

@@ -22,7 +22,7 @@ import {
   executeVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
 import { buildReplaceGeneralCustomAnswersPlan } from "@/lib/video/customQuestionAnswers";
-import { buildSubmissionXUserPlan } from "@/lib/video/ensureSubmissionXUser";
+import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
   UnslottedEventSyncError,
@@ -39,6 +39,11 @@ import { buildVideoDerivedRowsPlan } from "@/lib/video/syncVideoEvents";
 import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
 import type { VideoActionResult } from "@/lib/video/types";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
+import {
+  resolveVideoCreatorIcon,
+  rollbackUploadedVideoIcon,
+} from "@/lib/video/resolveVideoCreatorIcon";
+import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 
 export async function createFreeVideo(formData: FormData): Promise<VideoActionResult> {
@@ -111,6 +116,16 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   if (!customValidation.ok) return customValidation;
 
   const videoId = generateId("v");
+  const iconResolved = await resolveVideoCreatorIcon({
+    formData,
+    parsed: parsed.data,
+    activeXId: activeX,
+    videoId,
+    existingIconUrl: null,
+    db,
+  });
+  if (!iconResolved.ok) return iconResolved;
+
   const now = Math.floor(Date.now() / 1000);
   const scheduledTime =
     parseJstDatetimeLocal(String(formData.get("scheduled_time") ?? "")) ?? now;
@@ -124,9 +139,13 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     source_type: "youtube",
     creator_display_name: parsed.data.display_name,
     creator_display_name_yomi: null,
-    creator_icon_url: parsed.data.icon_url || null,
+    creator_icon_url: iconResolved.value.iconUrl,
     creator_youtube_channel_url: snapshotYoutubeChannelUrl(
       parsed.data.youtube_channel_url,
+    ),
+    creator_profile_text: parsed.data.profile_text ?? null,
+    creator_other_social_links: normalizeSocialLinksForStorage(
+      parsed.data.other_social_links,
     ),
     title: parsed.data.title,
     music: parsed.data.music ?? null,
@@ -150,18 +169,6 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   let staticRebuildEnqueued = false;
   try {
     const plan = emptyVideoAtomicWritePlan();
-    appendVideoAtomicWritePlan(
-      plan,
-      await buildSubmissionXUserPlan(db, {
-        xId: activeX,
-        displayName: parsed.data.display_name,
-        profileText: parsed.data.profile_text ?? null,
-        youtubeChannelUrl: parsed.data.youtube_channel_url ?? null,
-        socialLinks: parsed.data.other_social_links ?? null,
-        allowProfileUpdate: true,
-        actorUserId: userId,
-      }),
-    );
     appendVideoAtomicWritePlan(
       plan,
       buildUnslottedEventEligibilityAssertionPlan(db, eventId, now),
@@ -328,6 +335,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     await sendYoutubeSyncPendingWakeBestEffort("web", wakeSentKinds);
   } catch (error) {
     unstable_rethrow(error);
+    await rollbackUploadedVideoIcon(iconResolved.value.uploadedKey);
     if (isYoutubeIdUniqueConstraintError(error)) {
       return { ok: false, message: "このYouTube動画は既に登録されています。" };
     }
@@ -338,6 +346,8 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
         "イベント設定が変更されたか、保存内容が競合しました。入力内容を確認して再試行してください。",
     };
   }
+
+  await cleanupReplacedVideoCreatorIcon(db, null, iconResolved.value.iconUrl);
 
   revalidatePath("/");
   revalidatePath("/list");
