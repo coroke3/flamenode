@@ -658,15 +658,7 @@ export async function fetchDegradedUserProfilePayload(
   )!;
 
   noteQuery();
-  const [worksTotalRow, collabsTotalRow, works, collabs] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(videos)
-      .where(worksWhere),
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(videos)
-      .where(collabsWhere),
+  const [worksRows, collabsRows] = await Promise.all([
     db
       .select({
         id: videos.id,
@@ -679,6 +671,7 @@ export async function fetchDegradedUserProfilePayload(
         scheduled_time: videos.scheduled_time,
         status: videos.visibility_status,
         part: videos.part,
+        total_count: sql<number>`count(*) over()`,
       })
       .from(videos)
       .where(worksWhere)
@@ -696,6 +689,7 @@ export async function fetchDegradedUserProfilePayload(
         scheduled_time: videos.scheduled_time,
         status: videos.visibility_status,
         part: videos.part,
+        total_count: sql<number>`count(*) over()`,
       })
       .from(videos)
       .where(collabsWhere)
@@ -703,8 +697,12 @@ export async function fetchDegradedUserProfilePayload(
       .limit(DEGRADED_USER_COLLABS_LIMIT),
   ]);
 
-  const worksTotal = Number(worksTotalRow[0]?.count ?? works.length);
-  const collabsTotal = Number(collabsTotalRow[0]?.count ?? collabs.length);
+  const worksTotal =
+    worksRows.length > 0 ? Number(worksRows[0]?.total_count ?? 0) : 0;
+  const collabsTotal =
+    collabsRows.length > 0 ? Number(collabsRows[0]?.total_count ?? 0) : 0;
+  const works = worksRows.map(({ total_count: _totalCount, ...row }) => row);
+  const collabs = collabsRows.map(({ total_count: _totalCount, ...row }) => row);
 
   return {
     generated_at: null,

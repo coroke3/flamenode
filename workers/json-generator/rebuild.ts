@@ -660,37 +660,31 @@ export async function ensureDailyTopNostalgicShuffle(
 
 async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
-  const [rows, totalRow] = await Promise.all([
-    env.DB.prepare(
-      `SELECT v.id, v.title, v.youtube_video_id,
-              v.creator_display_name AS display_name,
-              v.creator_display_name,
-              v.creator_x_user_id,
-              v.creator_icon_url AS icon_url,
-              v.creator_icon_url,
-              e.id AS primary_event_id,
-              e.title AS primary_event_title,
-              v.scheduled_time,
-              v.visibility_status AS status
-     FROM videos v
-     LEFT JOIN events e
-       ON e.id = v.primary_event_id AND e.visibility_status = 'public'
-     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-     ORDER BY v.scheduled_time DESC
-     LIMIT ?`,
-    )
-      .bind(RECENT_LIST_LIMIT)
-      .all(),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS c FROM videos AS v WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}`,
-    ).first<{ c?: number }>(),
-  ]);
+  const rows = await env.DB.prepare(
+    `SELECT v.id, v.title, v.youtube_video_id,
+            v.creator_display_name AS display_name,
+            v.creator_display_name,
+            v.creator_x_user_id,
+            v.creator_icon_url AS icon_url,
+            v.creator_icon_url,
+            e.id AS primary_event_id,
+            e.title AS primary_event_title,
+            v.scheduled_time,
+            v.visibility_status AS status
+   FROM videos v
+   LEFT JOIN events e
+     ON e.id = v.primary_event_id AND e.visibility_status = 'public'
+   WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+   ORDER BY v.scheduled_time DESC
+   LIMIT ?`,
+  )
+    .bind(RECENT_LIST_LIMIT)
+    .all();
   throwIfAborted(signal);
   const items = rows.results ?? [];
-  const counted = Number(totalRow?.c ?? items.length);
   const payload = {
     generated_at: Math.floor(Date.now() / 1000),
-    total: capStaticListTotal(counted, items),
+    total: capStaticListTotal(items.length, items),
     items,
   };
   assertStaticListObjectSize("list/recent.json", payload);
@@ -699,26 +693,20 @@ async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void
 
 async function rebuildListPopular(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
-  const [rows, totalRow] = await Promise.all([
-    env.DB.prepare(
-      `SELECT ${STATIC_LIST_VIDEO_SELECT}
-       ${STATIC_LIST_VIDEO_FROM}
-       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-       ORDER BY COALESCE(v.score, 0) DESC, v.scheduled_time DESC
-       LIMIT ?`,
-    )
-      .bind(POPULAR_LIST_LIMIT)
-      .all(),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS c FROM videos AS v WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}`,
-    ).first<{ c?: number }>(),
-  ]);
+  const rows = await env.DB.prepare(
+    `SELECT ${STATIC_LIST_VIDEO_SELECT}
+     ${STATIC_LIST_VIDEO_FROM}
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+     ORDER BY COALESCE(v.score, 0) DESC, v.scheduled_time DESC
+     LIMIT ?`,
+  )
+    .bind(POPULAR_LIST_LIMIT)
+    .all();
   throwIfAborted(signal);
   const items = rows.results ?? [];
-  const counted = Number(totalRow?.c ?? items.length);
   const payload = {
     generated_at: Math.floor(Date.now() / 1000),
-    total: capStaticListTotal(counted, items),
+    total: capStaticListTotal(items.length, items),
     items,
   };
   assertStaticListObjectSize("list/popular.json", payload);
@@ -2188,9 +2176,10 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
   const generatedAt = Math.floor(Date.now() / 1000);
   const liveKeys: string[] = [`users/${xId}.json`];
 
-  const [ownVideos, ownTotalRow, collabVideos, collabTotalRow] = await Promise.all([
+  const [ownVideos, collabVideos] = await Promise.all([
     env.DB.prepare(
-      `SELECT ${STATIC_USER_PROFILE_VIDEO_SELECT}
+      `SELECT ${STATIC_USER_PROFILE_VIDEO_SELECT},
+              COUNT(*) OVER() AS total_count
        FROM videos AS v
        WHERE v.creator_x_user_id = ?
          AND ${COUNTABLE_PUBLIC_VIDEO_SQL}
@@ -2198,17 +2187,10 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
        LIMIT ?`,
     )
       .bind(xId, STATIC_USER_MAX_STATIC_ITEMS)
-      .all(),
+      .all<{ total_count?: number }>(),
     env.DB.prepare(
-      `SELECT COUNT(*) AS c
-       FROM videos AS v
-       WHERE v.creator_x_user_id = ?
-         AND ${COUNTABLE_PUBLIC_VIDEO_SQL}`,
-    )
-      .bind(xId)
-      .first<{ c?: number }>(),
-    env.DB.prepare(
-      `SELECT ${STATIC_USER_COLLAB_VIDEO_SELECT}
+      `SELECT ${STATIC_USER_COLLAB_VIDEO_SELECT},
+              COUNT(*) OVER() AS total_count
        FROM videos AS v
        WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
          AND LOWER(COALESCE(v.creator_x_user_id, '')) <> LOWER(?)
@@ -2223,29 +2205,18 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
        LIMIT ?`,
     )
       .bind(xId, xId, STATIC_USER_MAX_STATIC_ITEMS)
-      .all(),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS c
-       FROM videos AS v
-       WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         AND LOWER(COALESCE(v.creator_x_user_id, '')) <> LOWER(?)
-         AND EXISTS (
-           SELECT 1
-           FROM video_members AS vm
-           WHERE vm.video_id = v.id
-             AND vm.is_public_member = 1
-             AND LOWER(vm.x_user_id) = LOWER(?)
-         )`,
-    )
-      .bind(xId, xId)
-      .first<{ c?: number }>(),
+      .all<{ total_count?: number }>(),
   ]);
 
   throwIfAborted(signal);
-  const ownItems = ownVideos.results ?? [];
-  const collabItems = collabVideos.results ?? [];
-  const ownTotal = Number(ownTotalRow?.c ?? ownItems.length);
-  const collabTotal = Number(collabTotalRow?.c ?? collabItems.length);
+  const ownRows = ownVideos.results ?? [];
+  const collabRows = collabVideos.results ?? [];
+  const ownTotal =
+    ownRows.length > 0 ? Number(ownRows[0]?.total_count ?? 0) : 0;
+  const collabTotal =
+    collabRows.length > 0 ? Number(collabRows[0]?.total_count ?? 0) : 0;
+  const ownItems = ownRows.map(({ total_count: _totalCount, ...row }) => row);
+  const collabItems = collabRows.map(({ total_count: _totalCount, ...row }) => row);
 
   await putJson(
     env,

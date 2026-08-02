@@ -286,11 +286,11 @@ test("list_popularはrecent相当の公開カード列とtotalを返す", () => 
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*primary_event_title/);
   assert.match(source, /STATIC_LIST_VIDEO_SELECT[\s\S]*visibility_status AS status/);
   assert.match(popularFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
-  assert.match(
+  assert.doesNotMatch(
     popularFn,
     /SELECT COUNT\(\*\) AS c FROM videos AS v WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/,
   );
-  assert.match(popularFn, /total: capStaticListTotal\(counted, items\)/);
+  assert.match(popularFn, /total: capStaticListTotal\(items\.length, items\)/);
 });
 
 test("list_recentもCOUNTABLE公開条件でPVSFサマリーを除外する", () => {
@@ -299,13 +299,13 @@ test("list_recentもCOUNTABLE公開条件でPVSFサマリーを除外する", ()
   )?.[0];
   assert.ok(recentFn);
   assert.match(recentFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
-  assert.match(
+  assert.doesNotMatch(
     recentFn,
     /SELECT COUNT\(\*\) AS c FROM videos AS v WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/,
   );
   assert.match(recentFn, /LIMIT \?/);
   assert.match(recentFn, /\.bind\(RECENT_LIST_LIMIT\)/);
-  assert.match(recentFn, /total: capStaticListTotal\(counted, items\)/);
+  assert.match(recentFn, /total: capStaticListTotal\(items\.length, items\)/);
   assert.match(recentFn, /assertStaticListObjectSize\("list\/recent\.json"/);
 });
 
@@ -712,6 +712,19 @@ test("ユーザー合作取得はJOIN重複ではなくEXISTSを使う", () => {
   assert.doesNotMatch(
     userFn,
     /INNER JOIN video_members AS vm ON vm\.video_id = v\.id/,
+  );
+});
+
+test("rebuildUserはown/collabをCOUNT(*) OVER()で1 queryずつ取得する", () => {
+  const userFn = source.match(
+    /async function rebuildUser\([\s\S]*?(?=\nasync function |\nfunction |$)/,
+  )?.[0];
+
+  assert.ok(userFn);
+  assert.match(userFn, /COUNT\(\*\) OVER\(\) AS total_count/g);
+  assert.doesNotMatch(
+    userFn,
+    /SELECT COUNT\(\*\) AS c[\s\S]*FROM videos AS v[\s\S]*creator_x_user_id = \?/,
   );
 });
 
