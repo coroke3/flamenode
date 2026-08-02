@@ -7,7 +7,10 @@ import { generateId } from "@/lib/utils/id";
 import { wakeStaticRebuildQueueAfterCommit } from "@/lib/queues/wakeStaticRebuildQueueAfterCommit";
 import type { QueueSendBinding } from "@/lib/queues/sendQueueWakeBestEffort";
 import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
-import { staticRebuildActiveLookupSelect } from "./activeLookupColumns";
+import {
+  staticRebuildActiveLookupSelect,
+  type StaticRebuildActiveLookupRow,
+} from "./activeLookupColumns";
 import {
   pickHigherPriority,
   shouldUseIncomingQueueMetadata,
@@ -16,6 +19,7 @@ import type {
   DirectEnqueueCause,
   DirectEnqueueResult,
   EnqueueStaticRebuildInput,
+  StaticRebuildPriority,
 } from "./types";
 
 const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
@@ -45,6 +49,44 @@ function isAllowedDirectEnqueueCause(
     reason.startsWith("manual_") ||
     reason.endsWith("_manual_repair") ||
     reason.includes("manual_repair")
+  );
+}
+
+function wouldActiveRowMetadataChange(
+  row: StaticRebuildActiveLookupRow,
+  input: EnqueueStaticRebuildInput,
+  useIncomingMetadata: boolean,
+): boolean {
+  const nextReason = useIncomingMetadata
+    ? input.reason
+    : row.reason ?? input.reason;
+  const nextRequestedByUserId =
+    input.requestedByUserId ?? row.requested_by_user_id ?? null;
+  const currentRequestedByUserId = row.requested_by_user_id ?? null;
+
+  return (
+    nextReason !== row.reason ||
+    nextRequestedByUserId !== currentRequestedByUserId
+  );
+}
+
+function shouldNoOpActiveRowUpdate(
+  row: StaticRebuildActiveLookupRow,
+  input: EnqueueStaticRebuildInput,
+  cause: DirectEnqueueCause,
+  existingPriority: StaticRebuildPriority,
+  mergedPriority: StaticRebuildPriority,
+  useIncomingMetadata: boolean,
+): boolean {
+  if (cause.kind === "public_miss" && row.status === "processing") {
+    return true;
+  }
+  if (row.status !== "pending") {
+    return false;
+  }
+  return (
+    mergedPriority === existingPriority &&
+    !wouldActiveRowMetadataChange(row, input, useIncomingMetadata)
   );
 }
 
@@ -162,6 +204,18 @@ export async function directEnqueueStaticRebuild(
           existingPriority,
           priority,
         );
+        if (
+          shouldNoOpActiveRowUpdate(
+            row,
+            input,
+            cause,
+            existingPriority,
+            mergedPriority,
+            useIncomingMetadata,
+          )
+        ) {
+          return rebuildStateForAction("active_updated");
+        }
         const result = await db
           .update(staticRebuildQueue)
           .set({
