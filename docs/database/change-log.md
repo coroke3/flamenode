@@ -1,9 +1,24 @@
 # DB Change Log
 
 > Status: Active
-> Last verified: 2026-07-20
-> Verified against commit: `4ff09c9`
+> Last verified: 2026-08-02
+> Verified against commit: `bdeb758a`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-08-02 — `0050_x_identity_request_decisions.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | `x_identity_requests` に判断メタデータ列（`decision_reason` / `decided_by_auth_user_id` / `decided_at`）を追加し、`audit_logs` に `actor_x_user_id` を追加 |
+| Reason | X ID申請の判断理由・判断者・判断日時を正本へ残し、監査で実際に認可へ使用した X 名義を追跡するため |
+| Tables | `x_identity_requests`, `audit_logs` |
+| Data migration | なし |
+| Compatibility | `0047` 完了後に適用。既存行は NULL のまま |
+| Data loss | none |
+| Rollback | 適用前 D1 バックアップから復元 |
+| Validation | `check:db-schema`, `check:audit-actor-x`, `check:event-owner-operability`, `check:x-link-dependencies`, typecheck, 関連 unit test |
+| PR | Agent C / v9 identity audit |
 
 ## 2026-08-01 — `0047_backfill_youtube_metadata_pending.sql`
 

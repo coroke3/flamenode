@@ -55,6 +55,12 @@ export const xIdentityRequests = sqliteTable(
     })
       .notNull()
       .default("pending"),
+    decision_reason: text("decision_reason"),
+    decided_by_auth_user_id: text("decided_by_auth_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    decided_at: integer("decided_at"),
     requested_at: integer("requested_at").notNull(),
     updated_at: integer("updated_at").notNull(),
   },

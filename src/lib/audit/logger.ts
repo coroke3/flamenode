@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
-import { auditLogs, users, xUsers } from "@/lib/db/schema";
+import { auditLogs, users, xUsers, xUserAccountLinks } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import type {
   AuditOperation,
@@ -68,6 +68,7 @@ export type PreparedAuditLogEntry = {
   changed_keys_json: string | null;
   inverse_patch_json: string | null;
   actor_user_id: string;
+  actor_x_user_id: string | null;
   actor_snapshot_json: string | null;
   reason: string | null;
   context: string | null;
@@ -89,10 +90,40 @@ const EMPTY_ACTOR_JSON = JSON.stringify({
   icon_url: null,
 });
 
+async function validateActorXUserId(
+  db: DB,
+  actorUserId: string,
+  actorXUserId: string | null | undefined,
+  strict: boolean,
+): Promise<string | null> {
+  const normalized = actorXUserId?.trim() || null;
+  if (!normalized) return null;
+  const row = (
+    await db
+      .select({ x_user_id: xUserAccountLinks.x_user_id })
+      .from(xUserAccountLinks)
+      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
+      .where(
+        and(
+          eq(xUserAccountLinks.auth_user_id, actorUserId),
+          eq(xUserAccountLinks.x_user_id, normalized),
+          eq(xUsers.approval_status, "approved"),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  const linked = Boolean(row);
+  if (!linked && strict) {
+    throw new Error("actor_x_user_id is not linked to actor_user_id");
+  }
+  return linked ? normalized : null;
+}
+
 function buildPreparedAuditLogEntry(
   input: WriteAuditLogInput,
   settings: typeof DEFAULT_AUDIT_LOG_SETTINGS,
   actorJson: string,
+  actorXUserId: string | null,
 ): PreparedAuditLogEntry | null {
   if (BLOCKED_TABLES.has(input.table_name)) return null;
 
@@ -137,6 +168,7 @@ function buildPreparedAuditLogEntry(
     changed_keys_json: changedKeysJson,
     inverse_patch_json: inversePatchJson,
     actor_user_id: input.actor_user_id,
+    actor_x_user_id: actorXUserId,
     actor_snapshot_json: actorJson,
     reason: input.reason ?? null,
     context: input.context ?? null,
@@ -171,6 +203,7 @@ export async function prepareAuditLogEntries(
   }
 
   const actorJsonById = new Map<string, string>();
+  const actorXUserIdByAuditKey = new Map<string, string | null>();
   const actorUserIds = [
     ...new Set(activeInputs.map((input) => input.actor_user_id)),
   ];
@@ -196,13 +229,33 @@ export async function prepareAuditLogEntries(
     );
   }
 
-  return inputs.map((input) =>
-    buildPreparedAuditLogEntry(
+  for (const input of activeInputs) {
+    const key = `${input.table_name}:${input.target_id}:${input.operation}`;
+    try {
+      actorXUserIdByAuditKey.set(
+        key,
+        await validateActorXUserId(
+          db,
+          input.actor_user_id,
+          input.actor_x_user_id,
+          Boolean(input.strict),
+        ),
+      );
+    } catch (error) {
+      if (input.strict) throw error;
+      actorXUserIdByAuditKey.set(key, null);
+    }
+  }
+
+  return inputs.map((input) => {
+    const key = `${input.table_name}:${input.target_id}:${input.operation}`;
+    return buildPreparedAuditLogEntry(
       input,
       settings,
       actorJsonById.get(input.actor_user_id) ?? EMPTY_ACTOR_JSON,
-    ),
-  );
+      actorXUserIdByAuditKey.get(key) ?? null,
+    );
+  });
 }
 
 export async function prepareAuditLogEntry(

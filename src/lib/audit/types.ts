@@ -71,6 +71,8 @@ export interface WriteAuditLogInput {
   after?: Record<string, unknown> | null;
   /** 操作者ユーザーID (users テーブルの id) */
   actor_user_id: string;
+  /** 認可に使用した X 名義 ID */
+  actor_x_user_id?: string | null;
   /** 変更理由などの任意メモ */
   reason?: string | null;
   /** 保持クラス */

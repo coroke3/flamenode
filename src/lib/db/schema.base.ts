@@ -1218,6 +1218,7 @@ export const auditLogs = sqliteTable("audit_logs", {
   changed_keys_json: text("changed_keys_json"),
   inverse_patch_json: text("inverse_patch_json"),
   actor_user_id: text("actor_user_id").notNull(),
+  actor_x_user_id: text("actor_x_user_id"),
   actor_snapshot_json: text("actor_snapshot_json"),
   reason: text("reason"),
   context: text("context"),
