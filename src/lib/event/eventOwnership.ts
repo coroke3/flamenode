@@ -3,7 +3,8 @@ import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
-import { eventStaff, xUserAccountLinks } from "@/lib/db/schema";
+import { eventStaff } from "@/lib/db/schema";
+import { getApprovedLinkedXUserIds } from "@/lib/auth/approvedX";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { generateId } from "@/lib/utils/id";
@@ -125,16 +126,12 @@ export async function getEventOwners(
     );
 }
 
-/** 認証ユーザーに紐づく全X名義を正本リンクから解決する。 */
+/** 認証ユーザーに紐づく承認済みX名義を正本リンクから解決する。 */
 export async function getApprovedXIdsForUser(
   db: DB,
   authUserId: string,
 ): Promise<string[]> {
-  const rows = await db
-    .select({ x_user_id: xUserAccountLinks.x_user_id })
-    .from(xUserAccountLinks)
-    .where(eq(xUserAccountLinks.auth_user_id, authUserId));
-  return Array.from(new Set(rows.map((row) => row.x_user_id)));
+  return getApprovedLinkedXUserIds(db, authUserId);
 }
 
 export async function assertEventWillRetainOwner(args: {

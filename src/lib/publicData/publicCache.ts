@@ -94,3 +94,19 @@ export function writePublicJsonCacheBestEffort(
     // Cache API failure must not take down the page.
   }
 }
+
+export async function deletePublicJsonCache(r2Key: string): Promise<void> {
+  try {
+    await (caches as unknown as { default: Cache }).default.delete(
+      publicJsonCacheKey(r2Key),
+    );
+  } catch {
+    // Cache API failure must not take down the mutation path.
+  }
+}
+
+export async function deletePublicJsonCaches(r2Keys: readonly string[]): Promise<void> {
+  for (const key of r2Keys) {
+    await deletePublicJsonCache(key);
+  }
+}

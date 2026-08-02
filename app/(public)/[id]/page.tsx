@@ -10,13 +10,12 @@ import {
   getCurrentUser,
 } from "@/lib/auth/currentUser";
 import {
-  getApprovedXIds,
   canEditVideo,
   resolveAdminOrEventVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
 import { withDatabase } from "@/lib/cloudflare";
 import {
-  videoInteractions,
+  videoInteractionsAuth,
   videos as videosTable,
   xUsers,
 } from "@/lib/db/schema";
@@ -44,8 +43,15 @@ import {
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
-import { loadStaticVideoDetail } from "@/lib/publicData/loader";
-import type { StaticVideoDetail } from "@/lib/publicData/loader";
+import {
+  loadStaticVideoDetail,
+  PublicDataUnavailableNotice,
+  PublicReflectionPendingNotice,
+  shouldPublicPageNotFound,
+  shouldPublicPageShowReflection,
+  shouldPublicPageShowUnavailable,
+  type StaticVideoDetail,
+} from "@/lib/publicData/loader";
 import {
   logPublicRequestMetrics,
   setPublicRequestRoute,
@@ -210,6 +216,15 @@ export default async function VideoDetailPage({
       />
     );
   }
+  if (shouldPublicPageShowReflection(staticProbe.state)) {
+    return <PublicReflectionPendingNotice />;
+  }
+  if (shouldPublicPageShowUnavailable(staticProbe.state)) {
+    return <PublicDataUnavailableNotice />;
+  }
+  if (shouldPublicPageNotFound(staticProbe.state)) {
+    notFound();
+  }
   notFound();
 }
 
@@ -300,21 +315,22 @@ async function fetchVideoViewerOverlay({
       let likeActive = false;
       let bookmarkActive = false;
       let viewerXApproved = false;
-      if (viewerActiveX) {
+      if (authenticatedViewer?.id) {
         const interactions = await db
           .select()
-          .from(videoInteractions)
+          .from(videoInteractionsAuth)
           .where(
             and(
-              eq(videoInteractions.x_user_id, viewerActiveX),
-              eq(videoInteractions.video_id, videoId),
+              eq(videoInteractionsAuth.auth_user_id, authenticatedViewer.id),
+              eq(videoInteractionsAuth.video_id, videoId),
             )!,
           );
         likeActive = interactions.some((i) => i.interaction_type === "like");
         bookmarkActive = interactions.some(
           (i) => i.interaction_type === "bookmark",
         );
-
+      }
+      if (viewerActiveX) {
         const xRow = (
           await db
             .select({ approval_status: xUsers.approval_status })
@@ -330,7 +346,7 @@ async function fetchVideoViewerOverlay({
 
       if (playlist) {
         if (playlist === "lib-like" || playlist === "lib-bookmark") {
-          if (viewerActiveX) {
+          if (authenticatedViewer?.id) {
             const kind = playlist === "lib-like" ? "like" : "bookmark";
             // interaction IDを無制限のINへ展開せず、relationから直接JOINする。
             // これによりライブラリ件数に関係なくD1の100 bind上限内に収まる。
@@ -341,15 +357,18 @@ async function fetchVideoViewerOverlay({
                 youtube_video_id: videosTable.youtube_video_id,
                 display_name: videosTable.creator_display_name,
               })
-              .from(videoInteractions)
+              .from(videoInteractionsAuth)
               .innerJoin(
                 videosTable,
-                eq(videosTable.id, videoInteractions.video_id),
+                eq(videosTable.id, videoInteractionsAuth.video_id),
               )
               .where(
                 and(
-                  eq(videoInteractions.x_user_id, viewerActiveX),
-                  eq(videoInteractions.interaction_type, kind),
+                  eq(
+                    videoInteractionsAuth.auth_user_id,
+                    authenticatedViewer.id,
+                  ),
+                  eq(videoInteractionsAuth.interaction_type, kind),
                   eq(videosTable.visibility_status, "public"),
                 )!,
               )
@@ -577,9 +596,7 @@ function StaticVideoDetailView({
     : false;
   const canInteract = !!(
     viewerUser?.id &&
-    !viewerNeedsTermsAcceptance &&
-    viewerActiveX &&
-    viewerXApproved
+    !viewerNeedsTermsAcceptance
   );
 
   const loginHref = `/entry?next=${encodeURIComponent(currentPath)}`;
@@ -672,22 +689,6 @@ function StaticVideoDetailView({
                             className={styles.interactionHintLink}
                           >
                             利用規約へ
-                          </Link>
-                        </>
-                      ) : !viewerActiveX || !viewerXApproved ? (
-                        <>
-                          いいね・セーブには承認済みの活動名義（Active X ID）が必要です。
-                          <Link
-                            href={onboardingHref}
-                            className={styles.interactionHintLink}
-                          >
-                            初期設定へ
-                          </Link>
-                          <Link
-                            href={settingsHref}
-                            className={styles.interactionHintLink}
-                          >
-                            X ID設定へ
                           </Link>
                         </>
                       ) : null}

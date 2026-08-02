@@ -33,3 +33,28 @@ export type EnqueueStaticRebuildInput = {
   priority?: StaticRebuildPriority;
   requestedByUserId?: string | null;
 };
+
+export type RebuildRequestState =
+  | "not_needed"
+  | "requested"
+  | "already_active"
+  | "cooldown_suppressed"
+  | "failed";
+
+export type DirectEnqueueCause =
+  | { kind: "public_miss"; cooldownSeconds: 300 }
+  | { kind: "periodic"; cooldownSeconds: number }
+  | { kind: "manual_repair"; cooldownSeconds: 0 };
+
+export type DirectEnqueueResult =
+  | {
+      ok: true;
+      action: "inserted" | "active_updated" | "cooldown_skipped";
+      rebuildState: RebuildRequestState;
+    }
+  | {
+      ok: false;
+      errorCode: string;
+      message: string;
+      rebuildState: "failed";
+    };

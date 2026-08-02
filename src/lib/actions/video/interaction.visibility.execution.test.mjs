@@ -43,7 +43,7 @@ if (!runningWithTsx) {
         return {
           ok: true,
           user: { id: "user-1", role: "user" },
-          activeXId: "x-user-1",
+          activeXId: null,
         };
       },
     },
@@ -84,8 +84,8 @@ if (!runningWithTsx) {
         app_like_count INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
-      ${["CREATE", "TABLE"].join(" ")} video_interactions (
-        x_user_id TEXT NOT NULL,
+      ${["CREATE", "TABLE"].join(" ")} video_interactions_auth (
+        auth_user_id TEXT NOT NULL,
         video_id TEXT NOT NULL,
         interaction_type TEXT NOT NULL,
         created_at INTEGER NOT NULL
@@ -152,7 +152,7 @@ if (!runningWithTsx) {
 
   function assertNoSideEffects(harness) {
     assert.equal(
-      harness.sqlite.prepare("SELECT COUNT(*) AS count FROM video_interactions").get().count,
+      harness.sqlite.prepare("SELECT COUNT(*) AS count FROM video_interactions_auth").get().count,
       0,
     );
     assert.equal(

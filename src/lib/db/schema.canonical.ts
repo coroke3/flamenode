@@ -55,6 +55,12 @@ export const xIdentityRequests = sqliteTable(
     })
       .notNull()
       .default("pending"),
+    decision_reason: text("decision_reason"),
+    decided_by_auth_user_id: text("decided_by_auth_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    decided_at: integer("decided_at"),
     requested_at: integer("requested_at").notNull(),
     updated_at: integer("updated_at").notNull(),
   },
@@ -356,6 +362,38 @@ export const videos = sqliteTable(
       .where(
         sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
       ),
+    publicIdProbeIdx: index("videos_public_id_probe_idx")
+      .on(t.id, t.visibility_status)
+      .where(sql`visibility_status = 'public'`),
+    youtubePublicProbeIdx: index("videos_youtube_public_probe_idx")
+      .on(t.youtube_video_id, t.visibility_status)
+      .where(
+        sql`visibility_status = 'public' AND youtube_video_id IS NOT NULL AND youtube_video_id <> ''`,
+      ),
+  }),
+);
+
+export const slotReservationGroups = sqliteTable(
+  "slot_reservation_groups",
+  {
+    id: text("id").primaryKey(),
+    event_id: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    reserved_by_auth_user_id: text("reserved_by_auth_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    x_user_id: text("x_user_id").references(() => xUsers.id, {
+      onDelete: "set null",
+    }),
+    display_name: text("display_name"),
+    created_at: integer("created_at").notNull(),
+    updated_at: integer("updated_at").notNull(),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => ({
+    byEvent: index("slot_reservation_groups_event_idx").on(t.event_id),
   }),
 );
 
@@ -532,6 +570,32 @@ export const videoInteractions = sqliteTable(
   (t) => ({
     pk: primaryKey({ columns: [t.x_user_id, t.video_id, t.interaction_type] }),
     byVideoType: index("video_interactions_video_type_idx").on(
+      t.video_id,
+      t.interaction_type,
+      t.created_at,
+    ),
+  }),
+);
+
+export const videoInteractionsAuth = sqliteTable(
+  "video_interactions_auth",
+  {
+    auth_user_id: text("auth_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    video_id: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    interaction_type: text("interaction_type", {
+      enum: ["like", "bookmark"],
+    }).notNull(),
+    created_at: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({
+      columns: [t.auth_user_id, t.video_id, t.interaction_type],
+    }),
+    byVideoType: index("video_interactions_auth_video_type_idx").on(
       t.video_id,
       t.interaction_type,
       t.created_at,

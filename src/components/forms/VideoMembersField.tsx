@@ -242,8 +242,8 @@ export function VideoMembersField({
 
   const visibleSuggestions =
     searchQuery.trim()
-      ? mergedSuggestions.slice(0, 12)
-      : mergedSuggestions.slice(0, 100);
+      ? mergedSuggestions.slice(0, 20)
+      : mergedSuggestions.slice(0, 10);
 
   const suggestionsById = React.useMemo(() => {
     const map = new Map<string, VideoMemberSuggestion>();

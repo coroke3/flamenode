@@ -1,15 +1,14 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
-  videoInteractions,
+  videoInteractionsAuth,
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
-import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import { creatorIconExpr, creatorNameExpr } from "@/lib/db/displayExpr";
 import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { Icon } from "@/components/ui/Icon";
@@ -36,58 +35,49 @@ export default async function DashboardLibraryPage({
   const db = getDatabase();
   let videos: VideoCardData[] = [];
   let hasOtherTabHits = false;
-  let linkedXCount = 0;
-  const activeX = user.active_x_user_id;
 
   if (db) {
-    const linkedRows = await getLinkedXUsersForAuthUser(db, user.id);
-    linkedXCount = linkedRows.length;
+    const otherTab: Tab = tab === "like" ? "bookmark" : "like";
+    const otherTabHit = await db
+      .select({ video_id: videoInteractionsAuth.video_id })
+      .from(videoInteractionsAuth)
+      .where(
+        and(
+          eq(videoInteractionsAuth.auth_user_id, user.id),
+          eq(videoInteractionsAuth.interaction_type, otherTab),
+        )!,
+      )
+      .limit(1);
+    hasOtherTabHits = otherTabHit.length > 0;
 
-    if (activeX) {
-      const otherTab: Tab = tab === "like" ? "bookmark" : "like";
-      const otherTabHit = await db
-        .select({ video_id: videoInteractions.video_id })
-        .from(videoInteractions)
-        .where(
-          and(
-            eq(videoInteractions.x_user_id, activeX),
-            eq(videoInteractions.interaction_type, otherTab),
-          )!,
-        )
-        .limit(1);
-      hasOtherTabHits = otherTabHit.length > 0;
-
-      // interaction IDを一度配列化してINへ渡すと、件数次第でD1の100 bind上限を超える。
-      // relationを起点に直接JOINし、従来どおり動画の公開状態と上映時刻順を適用する。
-      const rows = await db
-        .select({
-          id: videosTable.id,
-          title: videosTable.title,
-          youtube_video_id: videosTable.youtube_video_id,
-          display_name: creatorNameExpr,
-          icon_url: creatorIconExpr,
-          creator_x_user_id: videosTable.creator_x_user_id,
-          primary_event_id: videosTable.primary_event_id,
-          scheduled_time: videosTable.scheduled_time,
-          status: videosTable.visibility_status,
-        })
-        .from(videoInteractions)
-        .innerJoin(videosTable, eq(videosTable.id, videoInteractions.video_id))
-        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
-        .where(
-          and(
-            eq(videoInteractions.x_user_id, activeX),
-            eq(videoInteractions.interaction_type, tab),
-            ne(videosTable.visibility_status, "voided"),
-          )!,
-        )
-        .orderBy(desc(videosTable.scheduled_time));
-      videos = (await resolveMissingIcons(db, rows)) as VideoCardData[];
-    }
+    const rows = await db
+      .select({
+        id: videosTable.id,
+        title: videosTable.title,
+        youtube_video_id: videosTable.youtube_video_id,
+        display_name: creatorNameExpr,
+        icon_url: creatorIconExpr,
+        creator_x_user_id: videosTable.creator_x_user_id,
+        primary_event_id: videosTable.primary_event_id,
+        scheduled_time: videosTable.scheduled_time,
+        status: videosTable.visibility_status,
+      })
+      .from(videoInteractionsAuth)
+      .innerJoin(
+        videosTable,
+        eq(videosTable.id, videoInteractionsAuth.video_id),
+      )
+      .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
+      .where(
+        and(
+          eq(videoInteractionsAuth.auth_user_id, user.id),
+          eq(videoInteractionsAuth.interaction_type, tab),
+          eq(videosTable.visibility_status, "public"),
+        )!,
+      )
+      .orderBy(desc(videosTable.scheduled_time));
+    videos = (await resolveMissingIcons(db, rows)) as VideoCardData[];
   }
-
-  const needsXIdLink = linkedXCount === 0;
-  const needsActiveX = linkedXCount > 0 && !activeX;
 
   const playlistId = tab === "like" ? "lib-like" : "lib-bookmark";
   const playlistLabel = tab === "like" ? "いいねした作品" : "セーブした作品";
@@ -131,19 +121,7 @@ export default async function DashboardLibraryPage({
         </Link>
       </nav>
 
-      {needsXIdLink || needsActiveX ? (
-        <div className="fn-empty">
-          <Icon name="user" size={20} aria-hidden />
-          <p className="fn-empty-message">
-            {needsXIdLink
-              ? "いいね・セーブには X ID の連携・利用規約への同意・承認済みの活動名義が必要です。"
-              : "承認済みの活動名義（Active X ID）を選択すると、いいね・セーブした作品を表示できます。"}
-          </p>
-          <Link href="/dashboard/settings" className="fn-btn fn-btn-primary fn-mt-md">
-            {needsXIdLink ? "X ID を連携する" : "X ID 設定を開く"}
-          </Link>
-        </div>
-      ) : videos.length === 0 ? (
+      {videos.length === 0 ? (
         <div className="fn-empty">
           <Icon name="info" size={20} aria-hidden />
           <p className="fn-empty-message">

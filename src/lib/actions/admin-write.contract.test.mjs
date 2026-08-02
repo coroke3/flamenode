@@ -35,7 +35,7 @@ test("admin writes have CAS, full audit batches, and current notification policy
   assert.doesNotMatch(sources["rules.ts"], /type:\s*"terms_reaccept_required"/);
   assert.doesNotMatch(sources["moderation-admin.ts"], /buildNotificationOutboxStatement/);
   assert.doesNotMatch(sources["moderation-admin.ts"], /type:\s*"moderation_/);
-  assert.match(sources["moderation-admin.ts"], /buildStaticRebuildQueueBatch/);
+  assert.match(sources["moderation-admin.ts"], /planVideoVisibilityTransition/);
   assert.match(sources["user-admin.ts"], /buildStaticRebuildQueueBatch/);
 });
 

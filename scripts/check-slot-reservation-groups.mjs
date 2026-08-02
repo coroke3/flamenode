@@ -1,0 +1,113 @@
+#!/usr/bin/env node
+
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
+import { findLocalD1Database } from "./check-event-owners.mjs";
+import { collectSlotReservationAmbiguities } from "../src/lib/slot/reservationGroupsCore.ts";
+
+const root = process.cwd();
+
+const migration = fs.readFileSync(
+  path.join(root, "migrations/0051_slot_reservation_groups_expand.sql"),
+  "utf8",
+);
+assert.match(migration, /CREATE TABLE IF NOT EXISTS slot_reservation_groups/);
+assert.match(migration, /reserved_by_auth_user_id/);
+
+const schema = fs.readFileSync(
+  path.join(root, "src/lib/db/schema.canonical.ts"),
+  "utf8",
+);
+assert.match(schema, /slotReservationGroups/);
+assert.match(schema, /slot_reservation_groups/);
+
+const slotAdmin = fs.readFileSync(
+  path.join(root, "src/lib/actions/slot-admin.ts"),
+  "utf8",
+);
+assert.match(slotAdmin, /includeQueue: true/);
+assert.doesNotMatch(
+  slotAdmin,
+  /includeQueue: index === chunks\.length - 1/,
+);
+
+const pending = fs.readFileSync(
+  path.join(root, "docs/database/pending/slot-reservation-groups-contract.sql"),
+  "utf8",
+);
+assert.match(pending, /slot reservation groups/i);
+
+function argValue(name) {
+  const prefix = `${name}=`;
+  const value = process.argv.find((arg) => arg.startsWith(prefix));
+  return value?.slice(prefix.length) ?? null;
+}
+
+function listAmbiguities(databasePath) {
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const tableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'slot_reservation_groups' LIMIT 1",
+      )
+      .get();
+    if (!tableExists) {
+      return { skipped: true, issues: [] };
+    }
+    const rows = db
+      .prepare(
+        `SELECT id, event_id, reservation_group_id, reserved_by_user_id,
+                x_user_id, display_name, status, video_id
+         FROM slots
+         WHERE reservation_group_id IS NOT NULL
+            OR status IN ('reserved', 'submitted')`,
+      )
+      .all();
+    return {
+      skipped: false,
+      issues: collectSlotReservationAmbiguities(rows),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+function main() {
+  const explicit =
+    argValue("--database") ?? process.env.FLAMENODE_SLOT_GROUP_CHECK_DB ?? null;
+  const databasePath = explicit ?? findLocalD1Database();
+  if (!databasePath) {
+    console.log(
+      "check:slot-reservation-groups OK (static checks only; no local D1)",
+    );
+    process.exit(0);
+  }
+  const result = listAmbiguities(databasePath);
+  if (result.skipped) {
+    console.log(
+      "check:slot-reservation-groups OK (migration not applied in local D1)",
+    );
+    process.exit(0);
+  }
+  if (result.issues.length > 0) {
+    for (const issue of result.issues) {
+      console.error(JSON.stringify(issue));
+    }
+    console.error(
+      `[check:slot-reservation-groups] ${result.issues.length} ambiguous row group(s) found.`,
+    );
+    process.exit(1);
+  }
+  console.log("check:slot-reservation-groups OK");
+}
+
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
+) {
+  main();
+}

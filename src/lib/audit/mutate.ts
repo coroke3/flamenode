@@ -22,7 +22,7 @@ export {
 
 const AUDIT_COLUMNS = sql.raw(`
   id, table_name, target_id, operation, before_json, after_json,
-  changed_keys_json, inverse_patch_json, actor_user_id, actor_snapshot_json,
+  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,
   reason, context, retention_class, restore_strategy, restore_status,
   payload_size_bytes, expires_at, created_at,
   restore_unavailable_reason_code, restore_unavailable_message
@@ -85,7 +85,7 @@ function auditSelect(
     SELECT
       ${entry.id}, ${entry.table_name}, ${entry.target_id}, ${entry.operation},
       ${entry.before_json}, ${entry.after_json}, ${entry.changed_keys_json},
-      ${entry.inverse_patch_json}, ${entry.actor_user_id}, ${entry.actor_snapshot_json},
+      ${entry.inverse_patch_json}, ${entry.actor_user_id}, ${entry.actor_x_user_id}, ${entry.actor_snapshot_json},
       ${entry.reason}, ${entry.context}, ${entry.retention_class},
       ${entry.restore_strategy}, ${entry.restore_status}, ${entry.payload_size_bytes},
       ${entry.expires_at}, ${entry.created_at},

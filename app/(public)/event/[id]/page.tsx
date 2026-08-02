@@ -37,6 +37,11 @@ import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 import {
   canFallbackToDatabase,
   loadStaticEventDetail,
+  PublicDataUnavailableNotice,
+  PublicReflectionPendingNotice,
+  shouldPublicPageNotFound,
+  shouldPublicPageShowReflection,
+  shouldPublicPageShowUnavailable,
   type StaticEventDetail,
 } from "@/lib/publicData/loader";
 import {
@@ -118,6 +123,15 @@ export default async function EventDetailPage({
         iconMap={publicXIconEntriesToMap(iconMapPayload)}
       />
     );
+  }
+  if (shouldPublicPageShowReflection(staticLoaded.state)) {
+    return <PublicReflectionPendingNotice />;
+  }
+  if (shouldPublicPageShowUnavailable(staticLoaded.state)) {
+    return <PublicDataUnavailableNotice />;
+  }
+  if (shouldPublicPageNotFound(staticLoaded.state)) {
+    notFound();
   }
   notFound();
 }

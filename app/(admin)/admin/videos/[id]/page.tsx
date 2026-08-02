@@ -48,6 +48,10 @@ export default async function AdminVideoDetailPage({
     .orderBy(desc(videoModerationCases.created_at))
     .limit(20);
   const openCaseCount = moderationCases.filter((c) => c.status === "open").length;
+  const openVoidCaseId =
+    moderationCases.find((c) => c.status === "open" && c.case_type === "void")?.id ??
+    moderationCases.find((c) => c.status === "open")?.id ??
+    null;
 
   return (
     <div>
@@ -66,7 +70,13 @@ export default async function AdminVideoDetailPage({
 
       <VideoReviewDetailPanel
         video={video}
-        statusForm={<AdminVideoStatusForm videoId={video.id} currentStatus={video.visibility_status} />}
+        statusForm={
+          <AdminVideoStatusForm
+            videoId={video.id}
+            currentStatus={video.visibility_status}
+            openVoidCaseId={openVoidCaseId}
+          />
+        }
         footerLinks={
           <>
             <Link

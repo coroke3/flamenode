@@ -116,3 +116,15 @@ export function isRevertDeadlineOpen(
 ): boolean {
   return Number.isInteger(revertDeadlineAt) && Number(revertDeadlineAt) >= nowUnix;
 }
+
+export function buildXIdentityDecisionFields(input: {
+  decidedByAuthUserId: string;
+  decisionReason?: string | null;
+  decidedAt: number;
+}) {
+  return {
+    decision_reason: input.decisionReason ?? null,
+    decided_by_auth_user_id: input.decidedByAuthUserId,
+    decided_at: input.decidedAt,
+  };
+}

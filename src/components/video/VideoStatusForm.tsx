@@ -31,6 +31,8 @@ interface VideoStatusFormProps {
   optionDescription?: boolean;
   hiddenFields?: Record<string, string>;
   allowVoidReason?: boolean;
+  /** voided 解除時に必須。open moderation case id */
+  openVoidCaseId?: string | null;
   showMessageIcons?: boolean;
 }
 
@@ -46,9 +48,11 @@ const MANAGE_STATUS_VALUES = ["pending", "public", "private"] as const;
 export function AdminVideoStatusForm({
   videoId,
   currentStatus,
+  openVoidCaseId,
 }: {
   videoId: string;
   currentStatus: string;
+  openVoidCaseId?: string | null;
 }): React.ReactElement {
   return (
     <VideoStatusForm
@@ -61,6 +65,7 @@ export function AdminVideoStatusForm({
       submitLabel="適用"
       optionDescription
       allowVoidReason
+      openVoidCaseId={openVoidCaseId}
       showMessageIcons
     />
   );
@@ -108,6 +113,7 @@ export function VideoStatusForm({
   optionDescription = false,
   hiddenFields,
   allowVoidReason = false,
+  openVoidCaseId = null,
   showMessageIcons = false,
 }: VideoStatusFormProps): React.ReactElement {
   const router = useRouter();
@@ -122,9 +128,14 @@ export function VideoStatusForm({
     React.useState(false);
 
   const requiresReason = allowVoidReason && status === "voided";
+  const requiresCaseId =
+    allowVoidReason &&
+    currentStatus === "voided" &&
+    status !== "voided";
   const statusFieldId = `${formIdPrefix}-status`;
   const categoryFieldId = `${formIdPrefix}-void-category`;
   const reasonFieldId = `${formIdPrefix}-reason`;
+  const caseFieldId = `${formIdPrefix}-case-id`;
   const statusOptions = React.useMemo<VideoVisibilityStatus[]>(() => {
     const options = [...statuses];
     if (
@@ -150,6 +161,10 @@ export function VideoStatusForm({
       setError("このステータスへ変更するには理由が必要です。");
       return;
     }
+    if (requiresCaseId && !openVoidCaseId?.trim()) {
+      setError("voided解除には open な moderation case_id が必要です。");
+      return;
+    }
 
     setError(null);
     setSuccess(false);
@@ -165,6 +180,9 @@ export function VideoStatusForm({
       if (status === "voided") {
         fd.set("void_reason_category", reasonCategory);
       }
+    }
+    if (requiresCaseId && openVoidCaseId) {
+      fd.set("case_id", openVoidCaseId);
     }
 
     startTransition(async () => {
@@ -236,10 +254,21 @@ export function VideoStatusForm({
           />
         </>
       ) : null}
+      {requiresCaseId ? (
+        <p style={{ fontSize: 12, color: "var(--text-muted)" }} id={caseFieldId}>
+          {openVoidCaseId
+            ? `voided解除に case_id=${openVoidCaseId} を送信します。`
+            : "voided解除には open な moderation case が必要です。先にモデレーション画面で case を確認してください。"}
+        </p>
+      ) : null}
       <button
         type="submit"
         className="fn-btn fn-btn-primary"
-        disabled={pending || status === currentStatus}
+        disabled={
+          pending ||
+          status === currentStatus ||
+          (requiresCaseId && !openVoidCaseId?.trim())
+        }
         aria-busy={pending}
       >
         <Icon name="check" size={13} aria-hidden /> {submitLabel}

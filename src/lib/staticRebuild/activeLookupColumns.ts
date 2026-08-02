@@ -6,6 +6,7 @@ export const staticRebuildActiveLookupSelect = {
   target_type: staticRebuildQueue.target_type,
   target_id: staticRebuildQueue.target_id,
   status: staticRebuildQueue.status,
+  reason: staticRebuildQueue.reason,
   priority: staticRebuildQueue.priority,
   updated_at: staticRebuildQueue.updated_at,
   lease_token: staticRebuildQueue.lease_token,
@@ -17,6 +18,7 @@ export type StaticRebuildActiveLookupRow = {
   target_type: string;
   target_id: string;
   status: "pending" | "processing" | "done" | "failed" | "dead_letter";
+  reason: string | null;
   priority: "high" | "normal" | "low";
   updated_at: number;
   lease_token: string | null;

@@ -12,7 +12,14 @@ import { parseSocialLinks } from "@/lib/socialLinks";
 import { normalizePortfolioContact } from "@/lib/profileContact";
 import { ProfileSocialLinks } from "@/components/user/ProfileSocialLinks";
 import { UserAvatar } from "@/components/user/UserAvatar";
-import { loadStaticUserProfile } from "@/lib/publicData/loader";
+import {
+  loadStaticUserProfile,
+  PublicDataUnavailableNotice,
+  PublicReflectionPendingNotice,
+  shouldPublicPageNotFound,
+  shouldPublicPageShowReflection,
+  shouldPublicPageShowUnavailable,
+} from "@/lib/publicData/loader";
 import { loadPublicXIconMapOptional } from "@/lib/publicData/staticSharedInputsLoader";
 import {
   publicXIconEntriesToMap,
@@ -62,7 +69,18 @@ export default async function PortfolioPage({
     loadStaticUserProfile(id),
     loadPublicXIconMapOptional([id]),
   ]);
-  if (!staticLoaded.data) notFound();
+  if (!staticLoaded.data) {
+    if (shouldPublicPageShowReflection(staticLoaded.state)) {
+      return <PublicReflectionPendingNotice />;
+    }
+    if (shouldPublicPageShowUnavailable(staticLoaded.state)) {
+      return <PublicDataUnavailableNotice />;
+    }
+    if (shouldPublicPageNotFound(staticLoaded.state)) {
+      notFound();
+    }
+    notFound();
+  }
 
   const user = staticLoaded.data.user;
   const iconMap = publicXIconEntriesToMap(iconMapPayload);

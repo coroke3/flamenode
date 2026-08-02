@@ -78,7 +78,7 @@ test("loader の R2 ヒット分岐は getDatabase を呼ばない", () => {
   );
   assert.doesNotMatch(hitBranch, /getDatabase\(/);
   assert.doesNotMatch(hitBranch, /systemSettings/);
-  assert.doesNotMatch(hitBranch, /enqueueStaticRebuild/);
+  assert.doesNotMatch(hitBranch, /directEnqueueStaticRebuild/);
 });
 
 test("loader records public request metrics hooks", () => {
@@ -148,7 +148,7 @@ test("resolvePublicJsonMiss は公開 miss を high 優先度で enqueue する"
   assert.match(loaderSource, /"search_index"/);
   assert.match(
     loaderSource,
-    /const priority = resolvePublicMissEnqueuePriority\(\s*strategy,\s*options\.targetType,/,
+    /const enqueueResult = await directEnqueueStaticRebuild/,
   );
 });
 

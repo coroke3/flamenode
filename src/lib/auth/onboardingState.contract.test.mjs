@@ -160,10 +160,10 @@ test("枠確保は reserved_by_user_id を正本として設定する", () => {
   assert.match(slotAction, /row\.reserved_by_user_id === userId/);
 });
 
-test("いいね/セーブ は writeGuard で active X を要求し currentUser が承認済みに制限する", () => {
+test("いいね/セーブ は Auth user 単位で writeGuard を通し Active X を要求しない", () => {
+  assert.match(interactionAction, /requireActiveXId: false/);
+  assert.match(interactionAction, /videoInteractionsAuth/);
   assert.doesNotMatch(interactionAction, /requireApprovedActiveXId: true/);
-  assert.match(interactionAction, /requireActiveXId: true/);
-  assert.match(interactionAction, /resolveActiveXUserId/);
 });
 
 test("作品詳細の canInteract は規約同意と承認済み Active X を見る", () => {
@@ -178,14 +178,13 @@ test("作品詳細の canInteract は規約同意と承認済み Active X を見
   assert.match(videoDetailPage, /承認済みの活動名義/);
 });
 
-test("ライブラリは getCurrentUser 経由の承認済み Active X があれば表示する", () => {
-  assert.doesNotMatch(libraryPage, /activeXApproved/);
-  assert.match(libraryPage, /if \(activeX\)/);
-  assert.match(libraryPage, /承認済みの活動名義/);
+test("ライブラリは Auth user の interaction 正本を直接JOINする", () => {
+  assert.match(libraryPage, /videoInteractionsAuth/);
+  assert.match(libraryPage, /auth_user_id, user\.id/);
+  assert.doesNotMatch(libraryPage, /activeX/);
 });
 
-test("InteractionButton の JSDoc は writeGuard と currentUser 経路の実効要件を説明する", () => {
-  assert.match(interactionButton, /requireApprovedActiveXId: false/);
-  assert.match(interactionButton, /resolveActiveXUserId/);
-  assert.match(interactionButton, /実質は承認済み Active X が必要/);
+test("InteractionButton の JSDoc は Auth user 単位の実効要件を説明する", () => {
+  assert.match(interactionButton, /video_interactions_auth/);
+  assert.match(interactionButton, /Active X ID は不要/);
 });

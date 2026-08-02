@@ -5,6 +5,14 @@ import { resolveVideoPrimaryKey } from "../db/videoIdLookup";
 import type { StaticRebuildTargetType } from "../staticRebuild/types";
 import { publicListableXApprovalWhere } from "../utils/publicXUserWhere";
 
+export type {
+  PublicStaticTargetProbe,
+} from "./publicStaticTargetProbe";
+export {
+  probePublicStaticTarget,
+  publicStaticTargetExists,
+} from "./publicStaticTargetProbe";
+
 const MAX_PUBLIC_TARGET_ID_LENGTH = 128;
 
 function normalizeTargetId(targetId: string): string | null {
@@ -15,10 +23,9 @@ function normalizeTargetId(targetId: string): string | null {
 }
 
 /**
- * Public R2 misses may enqueue rebuilds only for an existing public entity.
- * Global artifacts have fixed, non-user-controlled target IDs and stay eligible.
+ * @deprecated probePublicStaticTarget を使用してください。
  */
-export async function publicStaticTargetExists(
+export async function legacyPublicStaticTargetExists(
   db: DB,
   targetType: StaticRebuildTargetType,
   targetId: string,

@@ -17,4 +17,4 @@ tsconfig.tsbuildinfo
 .vscode/
 coverage/
 .cache/
-.tmp/
+.deploy/backups/

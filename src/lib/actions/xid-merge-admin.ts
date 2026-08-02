@@ -10,6 +10,7 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
+import { buildXIdentityDecisionFields } from "@/lib/auth/xIdentityRequestCore";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { isRevertDeadlineOpen, validateXIdentityRequestShape } from "@/lib/auth/xIdentityRequestCore";
@@ -157,13 +158,23 @@ async function setRequestStatus(
     return { ok: false, message: `status=${current.status} は変更できません。` };
   }
   const now = Math.floor(Date.now() / 1000);
-  const after = { ...current, status, updated_at: now };
+  const decisionFields = buildXIdentityDecisionFields({
+    decidedByAuthUserId: guard.authUserId,
+    decisionReason:
+      status === "approved" ? "X ID統合申請を承認" : "X ID統合申請を却下",
+    decidedAt: now,
+  });
+  const after = { ...current, status, updated_at: now, ...decisionFields };
   try {
     await mutateWithAudit(guard.db, {
       mutationStatements: [
         guard.db
           .update(xIdentityRequests)
-          .set({ status, updated_at: now })
+          .set({
+            status,
+            updated_at: now,
+            ...decisionFields,
+          })
           .where(expectedRowCondition({ expectedCurrent: current })),
       ],
       expectedMutationChanges: [1],

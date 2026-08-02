@@ -25,7 +25,8 @@ import {
   isAuthUserLinkedToXUser,
   resolveCanonicalXUserId,
 } from "@/lib/auth/xIdentity";
-import { validateXIdentityRequestShape } from "@/lib/auth/xIdentityRequestCore";
+import { validateXIdentityRequestShape, buildXIdentityDecisionFields } from "@/lib/auth/xIdentityRequestCore";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   isRetryableXIdMutationError,
   processedXIdRequestMessage,
@@ -120,10 +121,16 @@ async function approveXIdLinkRequestOnce(
   const requestedAuthUserId = request.requested_by_auth_user_id;
   const submittedXUserId = normalizeXId(request.requested_x_id);
   const now = Math.floor(Date.now() / 1000);
+  const decisionFields = buildXIdentityDecisionFields({
+    decidedByAuthUserId: operatorAuthUserId,
+    decisionReason: "X ID申請を承認",
+    decidedAt: now,
+  });
   const statements: BatchItem<"sqlite">[] = [];
   const expected: Array<number | null> = [];
   const audits: WriteAuditLogInput[] = [];
   let notificationXUserId: string | null = null;
+  let publicVisibilityChanged = false;
 
   if (request.request_type === "alias") {
     const targetXUserId = await resolveCanonicalXUserId(db, request.target_x_user_id);
@@ -207,6 +214,7 @@ async function approveXIdLinkRequestOnce(
       };
       statements.push(db.insert(xUsers).values(newXUser));
       expected.push(1);
+      publicVisibilityChanged = true;
       audits.push({
         table_name: "x_users",
         target_id: effectiveXUserId,
@@ -227,6 +235,7 @@ async function approveXIdLinkRequestOnce(
           .where(expectedRowCondition({ expectedCurrent: xUser })),
       );
       expected.push(1);
+      publicVisibilityChanged = true;
       audits.push({
         table_name: "x_users",
         target_id: effectiveXUserId,
@@ -303,11 +312,28 @@ async function approveXIdLinkRequestOnce(
         )!,
       );
     for (const sibling of siblingPendings) {
-      const afterSibling = { ...sibling, status: "cancelled" as const, updated_at: now };
+      const afterSibling = {
+        ...sibling,
+        status: "cancelled" as const,
+        updated_at: now,
+        ...buildXIdentityDecisionFields({
+          decidedByAuthUserId: operatorAuthUserId,
+          decisionReason: "同一X IDの重複pending申請を取り消す",
+          decidedAt: now,
+        }),
+      };
       statements.push(
         db
           .update(xIdentityRequests)
-          .set({ status: "cancelled", updated_at: now })
+          .set({
+            status: "cancelled",
+            updated_at: now,
+            ...buildXIdentityDecisionFields({
+              decidedByAuthUserId: operatorAuthUserId,
+              decisionReason: "同一X IDの重複pending申請を取り消す",
+              decidedAt: now,
+            }),
+          })
           .where(
             and(
               eq(xIdentityRequests.id, sibling.id),
@@ -330,11 +356,20 @@ async function approveXIdLinkRequestOnce(
     }
   }
 
-  const afterRequest = { ...request, status: "approved" as const, updated_at: now };
+  const afterRequest = {
+    ...request,
+    status: "approved" as const,
+    updated_at: now,
+    ...decisionFields,
+  };
   statements.push(
     db
       .update(xIdentityRequests)
-      .set({ status: "approved", updated_at: now })
+      .set({
+        status: "approved",
+        updated_at: now,
+        ...decisionFields,
+      })
       .where(
         and(
           eq(xIdentityRequests.id, request.id),
@@ -379,11 +414,34 @@ async function approveXIdLinkRequestOnce(
     expected.push(null);
   }
 
+  if (publicVisibilityChanged && notificationXUserId) {
+    const queue = await buildStaticRebuildQueueBatch(db, [
+      {
+        targetType: "user",
+        targetId: notificationXUserId,
+        reason: "x_id_approved",
+        requestedByUserId: operatorAuthUserId,
+        priority: "normal",
+      },
+      {
+        targetType: "users_index",
+        targetId: "global",
+        reason: "x_id_approved",
+        requestedByUserId: operatorAuthUserId,
+        priority: "low",
+      },
+    ]);
+    statements.push(...queue.statements);
+    expected.push(...queue.expectedChanges);
+  }
+
   await mutateWithAudit(db, {
     mutationStatements: statements,
     expectedMutationChanges: expected,
     audits,
     notificationWakeSource: notification ? "admin" : undefined,
+    staticRebuildWakeSource:
+      publicVisibilityChanged && notificationXUserId ? "admin" : undefined,
   });
   await runXIdAdminPostCommit("xid-admin.approveXIdLinkRequest", () => {
     revalidateIdentityAdminPaths();
@@ -448,7 +506,17 @@ async function rejectXIdLinkRequestOnce(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const afterRequest = { ...request, status: "rejected" as const, updated_at: now };
+  const decisionFields = buildXIdentityDecisionFields({
+    decidedByAuthUserId: operatorAuthUserId,
+    decisionReason: reason || "X ID申請を却下",
+    decidedAt: now,
+  });
+  const afterRequest = {
+    ...request,
+    status: "rejected" as const,
+    updated_at: now,
+    ...decisionFields,
+  };
   const rejectedXIdLabel =
     request.requested_x_id ?? request.source_x_user_id ?? "不明";
   const { buildXIdRejectedNotification } = await import(
@@ -496,7 +564,11 @@ async function rejectXIdLinkRequestOnce(
   const statements: BatchItem<"sqlite">[] = [
     db
       .update(xIdentityRequests)
-      .set({ status: "rejected", updated_at: now })
+      .set({
+        status: "rejected",
+        updated_at: now,
+        ...decisionFields,
+      })
       .where(
         and(
           eq(xIdentityRequests.id, request.id),
