@@ -31,6 +31,13 @@
   pointer-events: none;
 }
 
+.weeklyViews {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 @media (max-width: 360px) {
   .rankBadge {
     min-width: 24px;

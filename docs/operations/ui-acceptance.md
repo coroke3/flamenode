@@ -42,7 +42,7 @@
 - 900px以下の固定ヘッダーは境界線込み50pxとし、動画playerなどの固定要素も共通の`--header-h`へ追従する。
 - トップの「今週のピックアップ」は`top.json`を正本として維持し、JSONを変更せずrequestごとの表示順だけをランダム化する。
 - トップの「FlameNodeで注目」は R2 `analytics/trending.json` を正本とし、上位12件を順位順で `TopLoopShelf` 表示する（他のトップ棚と同じ full-bleed 幅・自動スクロール。向きは注目→left / ピックアップ→right / 新着→left / 懐かし→right）。24時間超のデータは非表示。degraded D1 でも R2 が正常なら表示する。
-- `/trending` は急上昇ランキング（上位30件・順位のみ・JST最終更新）を表示し、データ欠損や stale でも404/500にしない。期間別視聴数は出さない。
+- `/trending` は急上昇ランキング（上位30件・直近2日間の視聴急増で順位・各作品に1週間の視聴回数（views_7d）のみ表示・JST最終更新）を表示し、データ欠損や stale でも404/500にしない。2日/5日/30日の期間別視聴数は出さない。
 - `/recommend` の「人気作品」レール（旧「伸びている」）は表示名のみ変更し、算出は `recommend.json` のまま維持する。
 - Shelfはhover、focus、pointer、touch、wheel操作中に停止し、reduced motion、viewport外、非表示tabでは自動送りしない。
 - トップの4棚（注目・ピックアップ・新着・懐かし）は`TopLoopShelf`（3グループ複製 + scrollLeftテレポート）を使い、汎用`Shelf`のloop rotateとは分離する。`TopLoopShelf`もhover、focus、pointer、wheel、操作後一時停止、reduced motion、viewport外、非表示tabで自動送りを止める。

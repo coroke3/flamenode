@@ -358,16 +358,26 @@ requireAll("app/(public)/trending/page.tsx", [
   [/formatUnix/, "trending ページが JST 最終更新を表示していません。"],
   [/TRENDING_PAGE_LIMIT = 30/, "trending ページが上位30件制限を持っていません。"],
   [/ランキングを準備中/, "trending ページの空状態メッセージがありません。"],
+  [/showWeeklyViews/, "trending ページが週間視聴数を表示していません。"],
+  [/from "@\/components\/layout\/Shelf"/, "trending ページのモバイルレールが Shelf を使っていません。"],
+  [/mobileRail/, "trending ページのモバイルレールクラスがありません。"],
+  [/fn-list-grid/, "trending ページのデスクトップグリッドがありません。"],
+  [/desktopGrid/, "trending ページのデスクトップグリッドクラスがありません。"],
 ]);
 forbidMatch(
   "app/(public)/trending/page.tsx",
-  /views_2d|views_5d|views_7d|views_30d/,
-  "trending ページが期間別視聴数を表示しています。",
+  /views_2d|views_5d|views_30d/,
+  "trending ページが許可されていない期間別視聴数を表示しています。",
 );
+requireAll("src/components/video/RankedVideoCard.tsx", [
+  [/showWeeklyViews/, "RankedVideoCard に showWeeklyViews がありません。"],
+  [/views_7d/, "RankedVideoCard が views_7d を表示していません。"],
+  [/1週間/, "RankedVideoCard の週間視聴数ラベルがありません。"],
+]);
 forbidMatch(
   "src/components/video/RankedVideoCard.tsx",
-  /views_2d|views_5d|views_7d|views_30d|viewCount|直近2日/,
-  "RankedVideoCard が期間別視聴数を表示しています。",
+  /views_2d|views_5d|views_30d|viewCount|直近2日/,
+  "RankedVideoCard が許可されていない期間別視聴数を表示しています。",
 );
 
 requireAll("app/(public)/recommend/page.tsx", [

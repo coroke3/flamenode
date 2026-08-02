@@ -8,6 +8,7 @@ export interface RankedVideoCardProps {
   item: TrendingItem;
   rank: number;
   className?: string;
+  showWeeklyViews?: boolean;
 }
 
 function toVideoCardData(item: TrendingItem): VideoCardData {
@@ -27,11 +28,20 @@ export function RankedVideoCard({
   item,
   rank,
   className,
+  showWeeklyViews = false,
 }: RankedVideoCardProps): React.ReactElement {
+  const weeklyViewsText = showWeeklyViews
+    ? `1週間 ${item.views_7d.toLocaleString("ja-JP")}回視聴`
+    : null;
+
   return (
     <article
       className={cn(styles.root, className)}
-      aria-label={`${rank}位 ${item.title}`}
+      aria-label={
+        weeklyViewsText != null
+          ? `${rank}位 ${item.title} ${weeklyViewsText}`
+          : `${rank}位 ${item.title}`
+      }
     >
       <div className={styles.cardWrap}>
         <span className={styles.rankBadge} aria-hidden>
@@ -39,6 +49,9 @@ export function RankedVideoCard({
         </span>
         <VideoCard video={toVideoCardData(item)} />
       </div>
+      {weeklyViewsText != null ? (
+        <p className={styles.weeklyViews}>{weeklyViewsText}</p>
+      ) : null}
     </article>
   );
 }

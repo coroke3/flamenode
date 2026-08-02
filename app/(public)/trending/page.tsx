@@ -2,6 +2,7 @@ import * as React from "react";
 import type { Metadata } from "next";
 import styles from "./page.module.css";
 import { RankedVideoCard } from "@/components/video/RankedVideoCard";
+import { Shelf } from "@/components/layout/Shelf";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
@@ -34,7 +35,7 @@ export default async function TrendingPage(): Promise<React.ReactElement> {
         <span className="fn-eyebrow">trending</span>
         <h1 className="fn-display fn-page-title">急上昇ランキング</h1>
         <p className="fn-muted fn-text-sm fn-section-subtitle">
-          FlameNode内の視聴イベント（10秒以上）を集計したランキングです。
+          FlameNode内の視聴イベント（10秒以上）を集計し、直近2日間の視聴急増で順位付けしています。各作品に1週間の視聴回数を表示しています。
         </p>
       </header>
 
@@ -60,17 +61,39 @@ export default async function TrendingPage(): Promise<React.ReactElement> {
           />
         </div>
       ) : (
-        <ol className={styles.list} aria-label="急上昇ランキング">
-          {items.map((item, index) => (
-            <li key={item.id} className={styles.row}>
-              <RankedVideoCard
-                item={item}
-                rank={item.rank ?? index + 1}
-                className={styles.card}
-              />
-            </li>
-          ))}
-        </ol>
+        <>
+          <div className={styles.mobileRail}>
+            <Shelf
+              autoScroll={false}
+              mobileRows={1}
+              ariaLabel="急上昇ランキング"
+            >
+              {items.map((item, index) => (
+                <RankedVideoCard
+                  key={item.id}
+                  item={item}
+                  rank={item.rank ?? index + 1}
+                  showWeeklyViews
+                  className={styles.shelfCard}
+                />
+              ))}
+            </Shelf>
+          </div>
+          <ol
+            className={`fn-list-grid ${styles.desktopGrid}`}
+            aria-label="急上昇ランキング"
+          >
+            {items.map((item, index) => (
+              <li key={item.id} className={styles.row}>
+                <RankedVideoCard
+                  item={item}
+                  rank={item.rank ?? index + 1}
+                  showWeeklyViews
+                />
+              </li>
+            ))}
+          </ol>
+        </>
       )}
     </div>
   );
