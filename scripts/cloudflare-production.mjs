@@ -187,6 +187,55 @@ export function isWorkersDevOrigin(origin) {
   }
 }
 
+/** Canonical public web origin after custom-domain cutover. */
+export const DEFAULT_PRODUCTION_PUBLIC_WEB_ORIGIN = "https://flamenode.net";
+
+const WEB_ORIGIN_ENV_NAMES = [
+  "FLAMENODE_WEB_URL",
+  "NEXT_PUBLIC_SITE_URL",
+  "AUTH_URL",
+];
+
+/**
+ * Build Variables may still list the bootstrap workers.dev web origin.
+ * After cutover, AUTH / HTML bake-in and smoke must use the public origin.
+ * Bootstrap escape hatch: FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1.
+ */
+export function rewriteWorkersDevWebOriginsForCutover(env, urls, errors) {
+  if (value(env, "FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN") === "1") return false;
+  const needsRewrite = WEB_ORIGIN_ENV_NAMES.some((name) => {
+    const origin = urls.get(name);
+    return origin && isWorkersDevOrigin(origin);
+  });
+  if (!needsRewrite) return false;
+
+  let publicOrigin;
+  try {
+    const raw = value(env, "FLAMENODE_PUBLIC_WEB_ORIGIN");
+    publicOrigin = raw
+      ? normalizedUrl(raw, "FLAMENODE_PUBLIC_WEB_ORIGIN")
+      : DEFAULT_PRODUCTION_PUBLIC_WEB_ORIGIN;
+  } catch (error) {
+    errors.push(error.message);
+    return false;
+  }
+  if (isWorkersDevOrigin(publicOrigin)) {
+    errors.push(
+      "FLAMENODE_PUBLIC_WEB_ORIGIN must be a custom HTTPS origin (not workers.dev)",
+    );
+    return false;
+  }
+
+  for (const name of WEB_ORIGIN_ENV_NAMES) {
+    urls.set(name, publicOrigin);
+    env[name] = publicOrigin;
+  }
+  console.log(
+    `[cloudflare-production] Rewrote workers.dev web origins to ${publicOrigin} for cutover bake-in/smoke`,
+  );
+  return true;
+}
+
 export function gitHead(cwd = process.cwd(), exec = execFileSync) {
   try {
     return exec("git", ["rev-parse", "HEAD"], {
@@ -318,6 +367,7 @@ export function verifyProductionEnvironment({
       errors.push(error.message);
     }
   }
+  rewriteWorkersDevWebOriginsForCutover(env, urls, errors);
   if (
     urls.has("FLAMENODE_WEB_URL") &&
     urls.has("NEXT_PUBLIC_SITE_URL") &&
@@ -331,18 +381,6 @@ export function verifyProductionEnvironment({
     urls.get("FLAMENODE_WEB_URL") !== urls.get("AUTH_URL")
   ) {
     errors.push("AUTH_URL must match FLAMENODE_WEB_URL");
-  }
-  // Custom-domain cutover: web origin must not stay on workers.dev (AUTH/HTML bake-in).
-  // Bootstrap-only escape hatch: FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1
-  if (value(env, "FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN") !== "1") {
-    for (const name of ["FLAMENODE_WEB_URL", "NEXT_PUBLIC_SITE_URL", "AUTH_URL"]) {
-      const origin = urls.get(name);
-      if (origin && isWorkersDevOrigin(origin)) {
-        errors.push(
-          `${name} must be the custom HTTPS origin after cutover (not workers.dev); set FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1 only for bootstrap smoke`,
-        );
-      }
-    }
   }
   const serviceUrls = [
     urls.get("FLAMENODE_WEB_URL"),

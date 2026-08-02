@@ -238,13 +238,14 @@ Dashboard の Build Variables に次の**名前**が揃っていること。値�
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | 任意。OpenNext bake-in + web inject 用の `G-...` |
 | `PUBLIC_VISIBILITY_GUARD_MODE` | 任意。`observe`（既定）/ `enforce` / `off` |
 | `FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN` | 初回 `workers.dev` smoke だけ `"1"`。custom domain 切替後は **未設定** |
+| `FLAMENODE_PUBLIC_WEB_ORIGIN` | 任意。Build Variables の web 系 URL がまだ `*.workers.dev` のとき、deploy が rewrite する公開 origin（未設定時は `https://flamenode.net`） |
 
 URL 制約（初回 `workers.dev` 登録時に失敗しやすい）:
 
 - 各 URL は `https://host` 形式のみ（末尾 `/` のみ可。path / query / hash / `localhost` 不可）。
 - `FLAMENODE_WEB_URL`・`FAST_JOBS_URL`・`CONTENT_JOBS_URL`・`SYNC_JOBS_URL` は**相互に重複不可**。
 - `NEXT_PUBLIC_SITE_URL` と `AUTH_URL` は `FLAMENODE_WEB_URL` と同一 origin。
-- custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` をカスタム HTTPS origin へ揃え、`workers.dev` のまま放置しない（[`DEPLOY.md` §3](../../DEPLOY.md) と同趣旨）。
+- custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` をカスタム HTTPS origin へ揃えるのが正本。未更新でも deploy は公開 origin（既定 `https://flamenode.net`）へ自動 rewrite する（[`DEPLOY.md` §3](../../DEPLOY.md)）。
 
 Build Secrets（名前のみ）:
 

@@ -108,7 +108,7 @@ Cloudflare側の自動dependency installを止め、`npm ci`を1回に固定し�
 | `PUBLIC_VISIBILITY_GUARD_MODE` | 任意。`observe`（既定）/ `enforce` / `off`。本番で fence を強制するなら `enforce` |
 | `FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN` | 初回 `workers.dev` smoke だけ `"1"`。custom domain 切替後は **未設定**のままにする |
 
-custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` を **カスタム origin**（例: `https://flamenode.net`）へ揃え、`workers.dev` のまま放置しない。不一致のまま deploy すると Runtime Variables と HTML の site URL が上書きされる。production 検証は、escape hatch 無しで web 系3 URL が `*.workers.dev` のとき **失敗**する。
+custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` を **カスタム origin**（例: `https://flamenode.net`）へ揃える。Build Variables がまだ `*.workers.dev` のままでも、deploy は cutover 先（既定 `https://flamenode.net`、上書きは `FLAMENODE_PUBLIC_WEB_ORIGIN`）へ自動 rewrite して bake-in / smoke する。bootstrap だけ `FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1` で workers.dev を維持できる。
 
 `WORKERS_CI_COMMIT_SHA`はWorkers Buildsが自動提供する40桁SHAを使用し、Dashboardで上書きしません。Git HEADと一致しない、欠落する、形式が不正な場合はproduction deployを停止し、`unknown`で継続しません。
 

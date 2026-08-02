@@ -454,29 +454,29 @@ test("QUEUE feature flag injection preserves CRLF line endings", () =>
     assert.doesNotMatch(fast, /QUEUE_DISPATCH_ENABLED = "1"\rQUEUE_/);
   }));
 
-test("production rejects workers.dev web origins after custom-domain cutover", () => {
-  assert.throws(
-    () =>
-      verifyProduction({
-        env: productionEnv({
-          FLAMENODE_WEB_URL: "https://flamenode-web.example.workers.dev",
-          NEXT_PUBLIC_SITE_URL: "https://flamenode-web.example.workers.dev",
-          AUTH_URL: "https://flamenode-web.example.workers.dev",
-        }),
-        requireGitHead: false,
-      }),
-    /not workers\.dev/,
-  );
-  assert.doesNotThrow(() =>
-    verifyProduction({
-      env: productionEnv({
-        FLAMENODE_WEB_URL: "https://flamenode-web.example.workers.dev",
-        NEXT_PUBLIC_SITE_URL: "https://flamenode-web.example.workers.dev",
-        AUTH_URL: "https://flamenode-web.example.workers.dev",
-        FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN: "1",
-      }),
-      requireGitHead: false,
-    }),
+test("production rewrites workers.dev web origins to the public cutover origin", () => {
+  const env = productionEnv({
+    FLAMENODE_WEB_URL: "https://flamenode-web.example.workers.dev",
+    NEXT_PUBLIC_SITE_URL: "https://flamenode-web.example.workers.dev",
+    AUTH_URL: "https://flamenode-web.example.workers.dev",
+  });
+  const verified = verifyProduction({ env, requireGitHead: false });
+  assert.equal(verified.urls.FLAMENODE_WEB_URL, "https://flamenode.net");
+  assert.equal(verified.urls.NEXT_PUBLIC_SITE_URL, "https://flamenode.net");
+  assert.equal(verified.urls.AUTH_URL, "https://flamenode.net");
+  assert.equal(env.FLAMENODE_WEB_URL, "https://flamenode.net");
+  assert.equal(env.AUTH_URL, "https://flamenode.net");
+
+  const bootstrap = productionEnv({
+    FLAMENODE_WEB_URL: "https://flamenode-web.example.workers.dev",
+    NEXT_PUBLIC_SITE_URL: "https://flamenode-web.example.workers.dev",
+    AUTH_URL: "https://flamenode-web.example.workers.dev",
+    FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN: "1",
+  });
+  const kept = verifyProduction({ env: bootstrap, requireGitHead: false });
+  assert.equal(
+    kept.urls.FLAMENODE_WEB_URL,
+    "https://flamenode-web.example.workers.dev",
   );
 });
 
