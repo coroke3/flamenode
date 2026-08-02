@@ -1000,6 +1000,7 @@ function smokeFetch(commit, { mismatchService, staleCommitResponses = {} } = {})
         status: "ok",
         service: "flamenode-web",
         commit: responseCommit("flamenode-web-deep"),
+        public_visibility_guard_mode: "observe",
         checks: {
           d1: "ok",
           kv: "ok",

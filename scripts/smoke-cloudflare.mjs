@@ -291,12 +291,25 @@ function validateCronHealthBody(settings, service, body) {
 }
 
 function validateDeepHealthBody(settings, body) {
-  assertKeys(body, ["ok", "service", "commit", "checks", "status"], "deep health");
+  assertKeys(
+    body,
+    ["ok", "service", "commit", "checks", "status", "public_visibility_guard_mode"],
+    "deep health",
+  );
   assertKeys(
     body.checks,
     ["d1", "kv", "r2", "schema", "queues", "static_artifacts", "public_visibility"],
     "deep health checks",
   );
+  const guardMode = body.public_visibility_guard_mode;
+  if (
+    guardMode !== undefined &&
+    guardMode !== "off" &&
+    guardMode !== "observe" &&
+    guardMode !== "enforce"
+  ) {
+    throw new Error("deep health: public_visibility_guard_mode must be off, observe, or enforce.");
+  }
   if (
     body.ok !== true ||
     body.status !== "ok" ||
