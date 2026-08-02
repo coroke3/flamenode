@@ -193,9 +193,9 @@ requireAll("app/(public)/page.tsx", [
 {
   const homePage = read("app/(public)/page.tsx");
   const topLoopShelfCount = (homePage.match(/<TopLoopShelf/g) ?? []).length;
-  if (topLoopShelfCount !== 3) {
+  if (topLoopShelfCount !== 4) {
     errors.push(
-      `app/(public)/page.tsx: トップページでTopLoopShelfが3箇所使われていません（${topLoopShelfCount}箇所）。`,
+      `app/(public)/page.tsx: トップページでTopLoopShelfが4箇所使われていません（${topLoopShelfCount}箇所）。`,
     );
   }
 }
@@ -356,10 +356,19 @@ requireAll("app/(public)/trending/page.tsx", [
   [/急上昇ランキング/, "trending ページのタイトルがありません。"],
   [/loadStaticTrending/, "trending ページが静的 trending JSON を読み込んでいません。"],
   [/formatUnix/, "trending ページが JST 最終更新を表示していません。"],
-  [/views_2d/, "trending ページが期間別視聴数を表示していません。"],
-  [/views_30d/, "trending ページが30日視聴数を表示していません。"],
+  [/TRENDING_PAGE_LIMIT = 30/, "trending ページが上位30件制限を持っていません。"],
   [/ランキングを準備中/, "trending ページの空状態メッセージがありません。"],
 ]);
+forbidMatch(
+  "app/(public)/trending/page.tsx",
+  /views_2d|views_5d|views_7d|views_30d/,
+  "trending ページが期間別視聴数を表示しています。",
+);
+forbidMatch(
+  "src/components/video/RankedVideoCard.tsx",
+  /views_2d|views_5d|views_7d|views_30d|viewCount|直近2日/,
+  "RankedVideoCard が期間別視聴数を表示しています。",
+);
 
 requireAll("app/(public)/recommend/page.tsx", [
   [/label: "人気作品"/, "recommend のチップが人気作品に改名されていません。"],

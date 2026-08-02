@@ -171,12 +171,12 @@ test("TopLoopShelfの矢印にfocus-visible outlineがある", () => {
   assert.match(topLoopCss, /outline:\s*2px solid var\(--accent-primary\)/);
 });
 
-test("トップページは3箇所でTopLoopShelfを使う", () => {
-  assert.equal((home.match(/<TopLoopShelf/g) ?? []).length, 3);
-  assert.equal((home.match(/<Shelf\b/g) ?? []).length, 1);
-  assert.match(home, /<Shelf ariaLabel="FlameNodeで注目" loop=\{false\}>/);
+test("トップページは4箇所でTopLoopShelfを使う", () => {
+  assert.equal((home.match(/<TopLoopShelf/g) ?? []).length, 4);
+  assert.doesNotMatch(home, /<Shelf\b/);
+  assert.match(home, /ariaLabel="FlameNodeで注目"/);
   const directions = [
     ...home.matchAll(/autoScrollDirection="(left|right)"/g),
   ].map((match) => match[1]);
-  assert.deepEqual(directions, ["left", "right", "left"]);
+  assert.deepEqual(directions, ["left", "right", "left", "right"]);
 });

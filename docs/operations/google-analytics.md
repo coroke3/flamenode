@@ -105,8 +105,8 @@ R2 JSON 例:
 
 | 画面 | データ源 | 表示条件 |
 | --- | --- | --- |
-| トップ「FlameNodeで注目」 | `loadStaticTrending()` | データありかつ `items.length > 0` かつ 24 時間以内。上位 12 件・順位順。`isDegraded` の外 |
-| `/trending` 急上昇ランキング | 同上 | 上位 50 件。4 期間の視聴数と JST 最終更新。空・stale でも 404/500 にしない |
+| トップ「FlameNodeで注目」 | `loadStaticTrending()` | データありかつ `items.length > 0` かつ 24 時間以内。上位 12 件・順位順。`TopLoopShelf`（他棚と同じ幅・交互スクロール）。`isDegraded` の外 |
+| `/trending` 急上昇ランキング | 同上 | 上位 30 件の単純順位表示。期間別視聴数は出さない。JST 最終更新。空・stale でも 404/500 にしない |
 | `/recommend`「人気作品」 | `recommend.json`（既存） | 表示名のみ変更。算出ロジックは従来どおり |
 
 ### stale 判定（`staticTrendingCore`）

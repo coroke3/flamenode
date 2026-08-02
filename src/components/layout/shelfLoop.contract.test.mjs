@@ -112,7 +112,7 @@ test("右方向loopはfill完了時にrotateBackwardで初期位置をシード�
   assert.match(shelf, /rotateBackward\(el, getLoopRotateCount\(mobileRows\)\)/);
 });
 
-test("トップ3棚はTopLoopShelfで左右交互のloopを使う", () => {
+test("トップ4棚はTopLoopShelfで左右交互のloopを使う", () => {
   assert.match(home, /const TOP_LATEST_LOOP_DISPLAY_LIMIT = 40/);
   assert.match(home, /const randomizedLatest = shuffledCopy\(latest\.slice\(0, 100\)\)/);
   assert.match(
@@ -126,9 +126,10 @@ test("トップ3棚はTopLoopShelfで左右交互のloopを使う", () => {
   const directions = [
     ...home.matchAll(/autoScrollDirection="(left|right)"/g),
   ].map((match) => match[1]);
-  assert.deepEqual(directions, ["left", "right", "left"]);
-  assert.equal((home.match(/<TopLoopShelf/g) ?? []).length, 3);
+  assert.deepEqual(directions, ["left", "right", "left", "right"]);
+  assert.equal((home.match(/<TopLoopShelf/g) ?? []).length, 4);
   assert.doesNotMatch(home, /^\s+loop\s*$/gm);
   assert.doesNotMatch(home, /<Shelf[^>]*loop=\{true\}/);
-  assert.match(home, /<Shelf ariaLabel="FlameNodeで注目" loop=\{false\}>/);
+  assert.doesNotMatch(home, /<Shelf\b/);
+  assert.match(home, /ariaLabel="FlameNodeで注目"/);
 });

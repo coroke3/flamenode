@@ -28,21 +28,17 @@ export function RankedVideoCard({
   rank,
   className,
 }: RankedVideoCardProps): React.ReactElement {
-  const displayRank = rank;
-  const viewsLabel = `直近2日 ${item.views_2d.toLocaleString("ja-JP")}回視聴`;
-
   return (
     <article
       className={cn(styles.root, className)}
-      aria-label={`${displayRank}位 ${item.title}、直近2日 ${item.views_2d.toLocaleString("ja-JP")}回視聴`}
+      aria-label={`${rank}位 ${item.title}`}
     >
       <div className={styles.cardWrap}>
         <span className={styles.rankBadge} aria-hidden>
-          {displayRank}
+          {rank}
         </span>
         <VideoCard video={toVideoCardData(item)} />
       </div>
-      <p className={styles.viewCount}>{viewsLabel}</p>
     </article>
   );
 }

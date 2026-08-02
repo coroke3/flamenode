@@ -31,24 +31,10 @@
   pointer-events: none;
 }
 
-.viewCount {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 360px) {
   .rankBadge {
     min-width: 24px;
     height: 24px;
     font-size: 11px;
-  }
-
-  .viewCount {
-    font-size: 10px;
   }
 }

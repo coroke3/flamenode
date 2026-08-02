@@ -147,7 +147,7 @@ export function Shelf({
   ariaLabel,
   density = "default",
   autoScroll = true,
-  autoScrollSpeed = 18,
+  autoScrollSpeed = 26,
   mobileRows = 2,
   pauseAfterInteractionMs = 1400,
   pauseOnWheel = true,

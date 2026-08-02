@@ -12,7 +12,6 @@ import { PublicEventCard } from "@/components/event/PublicEventCard";
 import { categorizePublicEvent } from "@/lib/utils/categorizePublicEvent";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
 import { TopLoopShelf } from "@/components/layout/TopLoopShelf";
-import { Shelf } from "@/components/layout/Shelf";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { VideoCard } from "@/components/video/VideoCard";
 import { RankedVideoCard } from "@/components/video/RankedVideoCard";
@@ -161,7 +160,10 @@ export default async function TopPage(): Promise<React.ReactElement> {
             moreLabel="ランキングを見る"
           />
           <div className={styles.shelfBox}>
-            <Shelf ariaLabel="FlameNodeで注目" loop={false}>
+            <TopLoopShelf
+              ariaLabel="FlameNodeで注目"
+              autoScrollDirection="left"
+            >
               {trendingItems.map((item, index) => (
                 <RankedVideoCard
                   key={`${item.id}-trending-${index}`}
@@ -169,7 +171,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
                   rank={item.rank ?? index + 1}
                 />
               ))}
-            </Shelf>
+            </TopLoopShelf>
           </div>
         </section>
       ) : null}
@@ -188,7 +190,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
           ) : (
             <TopLoopShelf
               ariaLabel="今週のピックアップ"
-              autoScrollDirection="left"
+              autoScrollDirection="right"
             >
               {randomizedRecommended.map((video, index) => (
                 <VideoCard key={`${video.id}-recommended-${index}`} video={video} />
@@ -212,7 +214,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
           ) : (
             <TopLoopShelf
               ariaLabel="新着アップロード"
-              autoScrollDirection="right"
+              autoScrollDirection="left"
             >
               {latestLoopItems.map((video, index) => (
                 <VideoCard key={`${video.id}-latest-${index}`} video={video} />
@@ -240,7 +242,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
             ) : (
               <TopLoopShelf
                 ariaLabel="懐かしの映像"
-                autoScrollDirection="left"
+                autoScrollDirection="right"
               >
                 {nostalgic.map((video, index) => (
                   <VideoCard key={`${video.id}-nostalgic-${index}`} video={video} />

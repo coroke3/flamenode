@@ -10,18 +10,17 @@ import {
   setPublicRequestRoute,
 } from "@/lib/publicData/loader";
 import { loadStaticTrending } from "@/lib/publicData/trendingLoader";
-import type { TrendingItem } from "@/lib/publicData/staticTrendingCore";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/trending",
   title: "急上昇ランキング",
   description:
-    "FlameNode内で最近よく視聴されている作品を、直近2日・5日・7日・30日の視聴数とともに紹介します。",
+    "FlameNode内で最近よく視聴されている作品のランキングです。",
 });
 
 export const dynamic = "force-dynamic";
 
-const TRENDING_PAGE_LIMIT = 50;
+const TRENDING_PAGE_LIMIT = 30;
 
 export default async function TrendingPage(): Promise<React.ReactElement> {
   setPublicRequestRoute("/trending");
@@ -64,43 +63,15 @@ export default async function TrendingPage(): Promise<React.ReactElement> {
         <ol className={styles.list} aria-label="急上昇ランキング">
           {items.map((item, index) => (
             <li key={item.id} className={styles.row}>
-              <TrendingRow item={item} rank={item.rank ?? index + 1} />
+              <RankedVideoCard
+                item={item}
+                rank={item.rank ?? index + 1}
+                className={styles.card}
+              />
             </li>
           ))}
         </ol>
       )}
-    </div>
-  );
-}
-
-function TrendingRow({
-  item,
-  rank,
-}: {
-  item: TrendingItem;
-  rank: number;
-}): React.ReactElement {
-  return (
-    <div className={styles.rowInner}>
-      <RankedVideoCard item={item} rank={rank} className={styles.card} />
-      <dl className={styles.periods} aria-label={`${rank}位の期間別視聴数`}>
-        <div>
-          <dt>2日</dt>
-          <dd>{item.views_2d.toLocaleString("ja-JP")}</dd>
-        </div>
-        <div>
-          <dt>5日</dt>
-          <dd>{item.views_5d.toLocaleString("ja-JP")}</dd>
-        </div>
-        <div>
-          <dt>7日</dt>
-          <dd>{item.views_7d.toLocaleString("ja-JP")}</dd>
-        </div>
-        <div>
-          <dt>30日</dt>
-          <dd>{item.views_30d.toLocaleString("ja-JP")}</dd>
-        </div>
-      </dl>
     </div>
   );
 }

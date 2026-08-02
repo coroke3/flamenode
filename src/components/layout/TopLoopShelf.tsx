@@ -140,7 +140,7 @@ function renderGroupItems(items: SourceItem[], groupIndex: number): React.ReactN
 export function TopLoopShelf({
   children,
   ariaLabel,
-  autoScrollSpeed = 18,
+  autoScrollSpeed = 26,
   mobileRows = 2,
   pauseAfterInteractionMs = 1400,
   pauseOnWheel = true,
