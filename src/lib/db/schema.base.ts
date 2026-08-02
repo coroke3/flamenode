@@ -1018,6 +1018,34 @@ export const softwareAliases = sqliteTable(
   }),
 );
 
+/** 公開拒否フェンス。R2 manifest と D1 で非公開化順序を追跡する。 */
+export const publicVisibilityFences = sqliteTable(
+  "public_visibility_fences",
+  {
+    entity_type: text("entity_type", {
+      enum: ["video", "event", "x_user", "event_group"],
+    }).notNull(),
+    entity_id: text("entity_id").notNull(),
+    fence_token: text("fence_token").notNull(),
+    state: text("state", {
+      enum: ["blocked", "release_pending", "released"],
+    }).notNull(),
+    reason: text("reason"),
+    requirements_json: text("requirements_json"),
+    blocked_at: integer("blocked_at"),
+    release_requested_at: integer("release_requested_at"),
+    requested_by_auth_user_id: text("requested_by_auth_user_id"),
+    updated_at: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.entity_type, t.entity_id] }),
+    stateUpdatedIdx: index("public_visibility_fences_state_updated_idx").on(
+      t.state,
+      t.updated_at,
+    ),
+  }),
+);
+
 /** R2 公開用静的 JSON の再生成キュー（Next.js ビルドとは無関係） */
 export const staticRebuildQueue = sqliteTable(
   "static_rebuild_queue",

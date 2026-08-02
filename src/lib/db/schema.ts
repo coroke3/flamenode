@@ -14,6 +14,7 @@ export {
   eventGroups,
   eventTemplates,
   notificationOutbox,
+  publicVisibilityFences,
   schemaVersion,
   sessions,
   softwareCatalog,

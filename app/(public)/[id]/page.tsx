@@ -44,8 +44,15 @@ import {
   eventStatusLabel,
   isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
-import { loadStaticVideoDetail } from "@/lib/publicData/loader";
-import type { StaticVideoDetail } from "@/lib/publicData/loader";
+import {
+  loadStaticVideoDetail,
+  PublicDataUnavailableNotice,
+  PublicReflectionPendingNotice,
+  shouldPublicPageNotFound,
+  shouldPublicPageShowReflection,
+  shouldPublicPageShowUnavailable,
+  type StaticVideoDetail,
+} from "@/lib/publicData/loader";
 import {
   logPublicRequestMetrics,
   setPublicRequestRoute,
@@ -209,6 +216,15 @@ export default async function VideoDetailPage({
         iconMap={publicXIconEntriesToMap(iconMapPayload)}
       />
     );
+  }
+  if (shouldPublicPageShowReflection(staticProbe.state)) {
+    return <PublicReflectionPendingNotice />;
+  }
+  if (shouldPublicPageShowUnavailable(staticProbe.state)) {
+    return <PublicDataUnavailableNotice />;
+  }
+  if (shouldPublicPageNotFound(staticProbe.state)) {
+    notFound();
   }
   notFound();
 }

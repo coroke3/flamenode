@@ -19,10 +19,16 @@ test("通常 enqueue は active row のCASと同時insert競合を有限回だ�
 test("bulk queue prefetchは正常な最大16 targetを一意にindex化する", () => {
   assert.equal(
     source.match(/\.limit\(MAX_STATIC_REBUILD_BATCH_TARGETS \+ 1\)/g)?.length,
-    2,
+    1,
   );
   assert.match(source, /label:\s*"active"/);
-  assert.match(source, /label:\s*"latest"/);
+  assert.doesNotMatch(
+    source.slice(
+      source.indexOf("export async function buildStaticRebuildQueueBatch"),
+      source.indexOf("async function shouldSkipRecentEnqueue"),
+    ),
+    /label:\s*"latest"/,
+  );
   const rows = Array.from({ length: 16 }, (_, index) => ({
     target_type: "event",
     target_id: `event-${index}`,

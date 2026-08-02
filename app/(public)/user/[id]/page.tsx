@@ -27,7 +27,12 @@ import {
   loadStaticUserWorksPage,
   loadStaticUserProfile,
   logPublicRequestMetrics,
+  PublicDataUnavailableNotice,
+  PublicReflectionPendingNotice,
   setPublicRequestRoute,
+  shouldPublicPageNotFound,
+  shouldPublicPageShowReflection,
+  shouldPublicPageShowUnavailable,
 } from "@/lib/publicData/loader";
 import type { StaticUserProfile, StaticUserVideoPage } from "@/lib/publicData/loader";
 import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
@@ -200,6 +205,15 @@ export default async function UserPage({
         );
         logPublicRequestMetrics();
         return view;
+  }
+  if (shouldPublicPageShowReflection(staticLoaded.state)) {
+    return <PublicReflectionPendingNotice />;
+  }
+  if (shouldPublicPageShowUnavailable(staticLoaded.state)) {
+    return <PublicDataUnavailableNotice />;
+  }
+  if (shouldPublicPageNotFound(staticLoaded.state)) {
+    notFound();
   }
   notFound();
 }

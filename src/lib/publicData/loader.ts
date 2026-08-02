@@ -13,9 +13,25 @@ import {
 import { getPublicDataStrategy } from "@/lib/operationMode/policy";
 import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 import type { PublicDataStrategy } from "@/lib/operationMode/types";
-import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
-import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
-import { publicStaticTargetExists } from "./staticMissPolicy";
+import { directEnqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
+import type {
+  RebuildRequestState,
+  StaticRebuildTargetType,
+} from "@/lib/staticRebuild/types";
+import {
+  probePublicStaticTarget,
+  type PublicStaticTargetProbe,
+} from "./publicStaticTargetProbe";
+import {
+  rebuildStateFromEnqueue,
+  resolvePublicDataState,
+  type PublicDataState,
+} from "./publicDataState";
+import {
+  isPublicEntityVisibilityBlocked,
+  resolvePublicVisibilityGuardModeFromEnv,
+} from "./publicVisibilityManifest";
+import type { PublicVisibilityFenceEntityType } from "./publicVisibilityManifestCore";
 import {
   normalizeStaticEventDetail,
   type StaticEventDetail,
@@ -118,6 +134,16 @@ export {
   setPublicRequestRoute,
 } from "@/lib/observability/publicRequestMetrics";
 export type { PublicDataMode } from "./publicDataMode";
+export type { PublicDataState } from "./publicDataState";
+export {
+  shouldPublicPageNotFound,
+  shouldPublicPageShowReflection,
+  shouldPublicPageShowUnavailable,
+} from "./publicDataState";
+export {
+  PublicDataUnavailableNotice,
+  PublicReflectionPendingNotice,
+} from "./publicPageNotices";
 export { isDegradedD1Mode, isPublicDataUnavailable } from "./publicDataMode";
 
 export type PublicJsonLoadOptions<TPayload = unknown> = {
@@ -138,10 +164,13 @@ type ResolvePublicJsonMissOptions = {
 export type PublicJsonLoadResult<T> = {
   data: T | null;
   mode: PublicDataMode;
+  state: PublicDataState;
+  rebuildState: RebuildRequestState;
   /** @deprecated Use `mode`. */
   source: "static" | "miss";
   strategy: PublicDataStrategy;
   enqueued: boolean;
+  probe?: PublicStaticTargetProbe | null;
 };
 
 type PublicJsonLoaderConfig<TPayload, TResult> = {
@@ -154,6 +183,28 @@ type PublicJsonLoaderConfig<TPayload, TResult> = {
   degradedFetcher?: (id: string) => Promise<TPayload | null>;
 };
 
+function mapTargetTypeToFenceEntity(
+  targetType: StaticRebuildTargetType,
+): PublicVisibilityFenceEntityType | null {
+  if (targetType === "video") return "video";
+  if (targetType === "event") return "event";
+  if (targetType === "user") return "x_user";
+  return null;
+}
+
+async function isLoaderTargetVisibilityBlocked(
+  targetType: StaticRebuildTargetType,
+  targetId: string,
+): Promise<boolean> {
+  const entityType = mapTargetTypeToFenceEntity(targetType);
+  if (!entityType) return false;
+  return isPublicEntityVisibilityBlocked({
+    entityType,
+    entityId: targetId,
+    guardMode: resolvePublicVisibilityGuardModeFromEnv(),
+  });
+}
+
 function buildStaticHitResult<T>(
   payload: T,
   mode: Extract<PublicDataMode, "static" | "cached_static">,
@@ -163,9 +214,48 @@ function buildStaticHitResult<T>(
   return {
     data: payload,
     mode,
+    state: "ready",
+    rebuildState: "not_needed",
     source: toPublicJsonLegacySource(mode),
     strategy,
     enqueued: false,
+  };
+}
+
+function buildMissResult<T>(args: {
+  data: T | null;
+  mode: PublicDataMode;
+  strategy: PublicDataStrategy;
+  enqueued: boolean;
+  probe?: PublicStaticTargetProbe | null;
+  rebuildState?: RebuildRequestState;
+  hasRenderableData?: boolean;
+  isEmptyCollection?: boolean;
+}): PublicJsonLoadResult<T> {
+  if (args.mode === "degraded_d1") {
+    notePublicDataMode("degraded_d1");
+  } else if (args.mode === "unavailable") {
+    notePublicDataMode("unavailable");
+  }
+  const state = resolvePublicDataState({
+    hasRenderableData: args.hasRenderableData ?? args.data != null,
+    isEmptyCollection: args.isEmptyCollection,
+    probe: args.probe,
+    enqueued: args.enqueued,
+    mode: args.mode,
+  });
+  return {
+    data: args.data,
+    mode: args.mode,
+    state,
+    rebuildState: rebuildStateFromEnqueue({
+      enqueued: args.enqueued,
+      rebuildState: args.rebuildState,
+    }),
+    source: toPublicJsonLegacySource(args.mode),
+    strategy: args.strategy,
+    enqueued: args.enqueued,
+    probe: args.probe,
   };
 }
 
@@ -236,20 +326,20 @@ async function resolvePublicJsonMiss<T = never>(
   const strategy = getPublicDataStrategy(mode);
 
   if (strategy === "maintenance") {
-    return {
+    return buildMissResult({
       data: null,
       mode: "unavailable",
-      source: "miss",
       strategy,
       enqueued: false,
-    };
+    });
   }
 
   let enqueued = false;
+  let rebuildState: RebuildRequestState = "not_needed";
+  let probe: PublicStaticTargetProbe | null = null;
   if (db) {
-    let targetExists = false;
     try {
-      targetExists = await publicStaticTargetExists(
+      probe = await probePublicStaticTarget(
         db,
         options.targetType,
         options.targetId,
@@ -257,24 +347,40 @@ async function resolvePublicJsonMiss<T = never>(
       recordPublicD1Query();
     } catch (error) {
       warnPublicStaticJson(options.targetType, "target_probe_failed", error);
+      probe = {
+        state: "unknown",
+        errorCode:
+          error instanceof Error ? error.name : "public_target_probe_failed",
+      };
     }
 
-    if (targetExists) {
+    if (probe.state === "public") {
       const priority = resolvePublicMissEnqueuePriority(
         strategy,
         options.targetType,
       );
-      try {
-        await enqueueStaticRebuild(db, {
+      const enqueueResult = await directEnqueueStaticRebuild(
+        db,
+        {
           targetType: options.targetType,
           targetId: options.targetId,
           reason: options.reason,
           priority,
-        });
-        recordPublicD1Query();
-        enqueued = true;
-      } catch (error) {
-        warnPublicStaticJson(options.r2Key, "enqueue_failed", error);
+        },
+        { kind: "public_miss", cooldownSeconds: 300 },
+      );
+      recordPublicD1Query();
+      rebuildState = enqueueResult.rebuildState;
+      if (enqueueResult.ok) {
+        enqueued =
+          enqueueResult.action === "inserted" ||
+          enqueueResult.action === "active_updated";
+      } else {
+        warnPublicStaticJson(
+          options.r2Key,
+          "enqueue_failed",
+          new Error(enqueueResult.message),
+        );
       }
     }
   }
@@ -284,14 +390,15 @@ async function resolvePublicJsonMiss<T = never>(
       try {
         const degraded = await options.degradedFetcher();
         if (degraded != null) {
-          notePublicDataMode("degraded_d1");
-          return {
+          return buildMissResult({
             data: degraded,
             mode: "degraded_d1",
-            source: "miss",
             strategy,
             enqueued,
-          };
+            probe,
+            rebuildState,
+            hasRenderableData: true,
+          });
         }
       } catch (error) {
         warnPublicStaticJson(options.r2Key, "read_failed", error);
@@ -299,13 +406,14 @@ async function resolvePublicJsonMiss<T = never>(
     }
   }
 
-  return {
+  return buildMissResult({
     data: null,
     mode: "unavailable",
-    source: "miss",
     strategy,
     enqueued,
-  };
+    probe,
+    rebuildState,
+  });
 }
 
 export function createPublicJsonLoader<TPayload, TResult>({
@@ -349,13 +457,22 @@ export async function loadPublicJson<T>(
   const operationMode = await resolvePublicOperationMode({ allowD1: true });
   const maintenanceStrategy = getPublicDataStrategy(operationMode);
   if (maintenanceStrategy === "maintenance") {
-    return {
+    return buildMissResult({
       data: null,
       mode: "unavailable",
-      source: "miss",
       strategy: maintenanceStrategy,
       enqueued: false,
-    };
+    });
+  }
+
+  if (await isLoaderTargetVisibilityBlocked(options.targetType, options.targetId)) {
+    return buildMissResult({
+      data: null,
+      mode: "unavailable",
+      strategy: maintenanceStrategy,
+      enqueued: false,
+      probe: { state: "not_public", canonicalTargetId: options.targetId },
+    });
   }
 
   const cached = unwrapPublicJsonCachePayload<T>(
@@ -738,25 +855,27 @@ export async function loadPublicEventVideosPage(params: {
 
   if (isMaintenanceStrategy(strategy)) {
     return {
-      data: null,
+      ...buildMissResult({
+        data: null,
+        mode: "unavailable",
+        strategy,
+        enqueued: false,
+      }),
       page: null,
       eventInfo: null,
-      mode: "unavailable",
-      source: "miss",
-      strategy,
-      enqueued: false,
     };
   }
 
   if (!canAttemptDegradedD1(strategy) || !db) {
     return {
-      data: null,
+      ...buildMissResult({
+        data: null,
+        mode: "unavailable",
+        strategy,
+        enqueued: false,
+      }),
       page: null,
       eventInfo: null,
-      mode: "unavailable",
-      source: "miss",
-      strategy,
-      enqueued: false,
     };
   }
 
@@ -764,13 +883,14 @@ export async function loadPublicEventVideosPage(params: {
     const degraded = await fetchDegradedEventListPage(db, params);
     if (!degraded) {
       return {
-        data: null,
+        ...buildMissResult({
+          data: null,
+          mode: "unavailable",
+          strategy,
+          enqueued: false,
+        }),
         page: null,
         eventInfo: null,
-        mode: "unavailable",
-        source: "miss",
-        strategy,
-        enqueued: false,
       };
     }
     notePublicDataMode("degraded_d1");
@@ -794,24 +914,27 @@ export async function loadPublicEventVideosPage(params: {
       generatedAt: null,
     };
     return {
-      data: page,
+      ...buildMissResult({
+        data: page,
+        mode: "degraded_d1",
+        strategy,
+        enqueued: false,
+        hasRenderableData: true,
+      }),
       page,
       eventInfo: degraded.eventInfo,
-      mode: "degraded_d1",
-      source: "miss",
-      strategy,
-      enqueued: false,
     };
   } catch (error) {
     warnPublicStaticJson(`list/event/${params.eventId}`, "read_failed", error);
     return {
-      data: null,
+      ...buildMissResult({
+        data: null,
+        mode: "unavailable",
+        strategy,
+        enqueued: false,
+      }),
       page: null,
       eventInfo: null,
-      mode: "unavailable",
-      source: "miss",
-      strategy,
-      enqueued: false,
     };
   }
 }
@@ -977,12 +1100,12 @@ export async function loadStaticUserWorksPage(params: {
       params.profile.generatedAt,
     );
     return {
-      data: normalized,
+      ...buildStaticHitResult(
+        normalized,
+        "static",
+        params.strategy ?? "static_json_only",
+      ),
       page: normalized,
-      mode: "static",
-      source: "static",
-      strategy: params.strategy ?? "static_json_only",
-      enqueued: false,
     };
   }
 
@@ -1024,12 +1147,12 @@ export async function loadStaticUserCollabsPage(params: {
       params.profile.generatedAt,
     );
     return {
-      data: normalized,
+      ...buildStaticHitResult(
+        normalized,
+        "static",
+        params.strategy ?? "static_json_only",
+      ),
       page: normalized,
-      mode: "static",
-      source: "static",
-      strategy: params.strategy ?? "static_json_only",
-      enqueued: false,
     };
   }
 

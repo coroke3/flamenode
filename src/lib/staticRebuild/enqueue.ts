@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull, max, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
@@ -16,6 +16,11 @@ import {
 import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
 import type { QueueSendBinding } from "@/lib/queues/sendQueueWakeBestEffort";
 import { wakeStaticRebuildQueueAfterCommit } from "@/lib/queues/wakeStaticRebuildQueueAfterCommit";
+import {
+  pickHigherPriority,
+  PRIORITY_RANK,
+  shouldUseIncomingQueueMetadata,
+} from "./priorityCore";
 import type {
   EnqueueStaticRebuildInput,
   StaticRebuildPriority,
@@ -26,25 +31,6 @@ export type EnqueueStaticRebuildOptions = {
   sentKinds?: Set<QueueWakeKind>;
   queue?: QueueSendBinding | null;
   envFlags?: Record<string, string | undefined> | null;
-};
-
-const PRIORITY_ORDER: Record<StaticRebuildPriority, number> = {
-  high: 0,
-  normal: 1,
-  low: 2,
-};
-
-function pickHigherPriority(
-  a: StaticRebuildPriority,
-  b: StaticRebuildPriority,
-): StaticRebuildPriority {
-  return PRIORITY_ORDER[a] <= PRIORITY_ORDER[b] ? a : b;
-}
-
-const PRIORITY_RANK: Record<"high" | "normal" | "low", number> = {
-  high: 3,
-  normal: 2,
-  low: 1,
 };
 
 function dedupeStaticRebuildInputs(
@@ -58,21 +44,18 @@ function dedupeStaticRebuildInputs(
       byKey.set(key, item);
       continue;
     }
-    const mergedPriority = pickHigherPriority(
-      (existing.priority ?? "normal") as "high" | "normal" | "low",
-      (item.priority ?? "normal") as "high" | "normal" | "low",
+    const existingPriority = (existing.priority ?? "normal") as StaticRebuildPriority;
+    const incomingPriority = (item.priority ?? "normal") as StaticRebuildPriority;
+    const mergedPriority = pickHigherPriority(existingPriority, incomingPriority);
+    const useIncomingMetadata = shouldUseIncomingQueueMetadata(
+      existingPriority,
+      incomingPriority,
     );
     byKey.set(key, {
       ...existing,
       ...item,
       priority: mergedPriority,
-      reason:
-        PRIORITY_RANK[mergedPriority] >=
-        PRIORITY_RANK[
-          (existing.priority ?? "normal") as "high" | "normal" | "low"
-        ]
-          ? item.reason
-          : existing.reason,
+      reason: useIncomingMetadata ? item.reason : existing.reason,
       requestedByUserId:
         item.requestedByUserId ?? existing.requestedByUserId,
     });
@@ -85,7 +68,7 @@ const DEFAULT_DONE_COOLDOWN_SEC = 60;
 const ENQUEUE_MANY_CONCURRENCY = 4;
 const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
 export const MAX_STATIC_REBUILD_BATCH_TARGETS = 16;
-export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 2;
+export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 1;
 export const STATIC_REBUILD_BULK_UPDATE_ROWS = 6;
 export const STATIC_REBUILD_BULK_INSERT_ROWS = 10;
 
@@ -97,10 +80,7 @@ export type StaticRebuildQueueBatch = {
 
 /**
  * Event Group mutation と同じ D1 batch に queue write を含めるための builder。
- * ここでは書き込みを実行せず、失敗は呼び出し元へ返して batch を rollback させる。
- *
- * processing 行へ再投入された場合は lease を無効化せず、updated_at を必ず
- * processing_started_at より新しくする。Worker は完了時にこの差を見て pending へ戻す。
+ * done/failed 履歴の cooldown では要求を捨てない。active 行があれば CAS UPDATE、なければ INSERT。
  */
 export async function buildStaticRebuildQueueBatch(
   db: DB,
@@ -130,57 +110,21 @@ export async function buildStaticRebuildQueueBatch(
     ),
   )!;
 
-  const latestUpdate = db
-    .select({
-      target_type: staticRebuildQueue.target_type,
-      target_id: staticRebuildQueue.target_id,
-      updated_at: max(staticRebuildQueue.updated_at).as("latest_updated_at"),
-    })
+  const activeRows = await db
+    .select(staticRebuildActiveLookupSelect)
     .from(staticRebuildQueue)
-    .where(targetCondition)
-    .groupBy(
-      staticRebuildQueue.target_type,
-      staticRebuildQueue.target_id,
+    .where(
+      and(
+        targetCondition,
+        inArray(staticRebuildQueue.status, ["pending", "processing"]),
+      ),
     )
-    .as("latest_static_rebuild_queue");
-
-  const [activeRows, latestRows] = await Promise.all([
-    db
-      .select(staticRebuildActiveLookupSelect)
-      .from(staticRebuildQueue)
-      .where(
-        and(
-          targetCondition,
-          inArray(staticRebuildQueue.status, ["pending", "processing"]),
-        ),
-      )
-      .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1),
-    db
-      .select({ queue: staticRebuildQueue })
-      .from(staticRebuildQueue)
-      .innerJoin(
-        latestUpdate,
-        and(
-          eq(staticRebuildQueue.target_type, latestUpdate.target_type),
-          eq(staticRebuildQueue.target_id, latestUpdate.target_id),
-          eq(staticRebuildQueue.updated_at, latestUpdate.updated_at),
-        ),
-      )
-      .where(targetCondition)
-      .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1),
-  ]);
+    .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1);
 
   const activeByTarget = indexUniqueStaticRebuildTargetRows(activeRows, {
     maxRows: MAX_STATIC_REBUILD_BATCH_TARGETS,
     label: "active",
   });
-  const latestByTarget = indexUniqueStaticRebuildTargetRows(
-    latestRows.map(({ queue }) => queue),
-    {
-      maxRows: MAX_STATIC_REBUILD_BATCH_TARGETS,
-      label: "latest",
-    },
-  );
 
   const activeUpdates: Array<{
     row: StaticRebuildActiveLookupRow;
@@ -194,22 +138,24 @@ export async function buildStaticRebuildQueueBatch(
       staticRebuildTargetKey(normalized.targetType, normalized.targetId),
     );
     if (row?.status === "pending" || row?.status === "processing") {
+      const incomingPriority = (normalized.priority ?? "normal") as StaticRebuildPriority;
+      const existingPriority = row.priority;
+      const mergedPriority = pickHigherPriority(existingPriority, incomingPriority);
+      const useIncomingMetadata = shouldUseIncomingQueueMetadata(
+        existingPriority,
+        incomingPriority,
+      );
       activeUpdates.push({
         row,
-        reason: normalized.reason,
-        priority: pickHigherPriority(
-          row.priority as "high" | "normal" | "low",
-          normalized.priority ?? "normal",
-        ),
+        reason: useIncomingMetadata
+          ? normalized.reason
+          : row.reason ?? normalized.reason,
+        priority: mergedPriority,
         requestedByUserId:
           normalized.requestedByUserId ?? row.requested_by_user_id,
       });
       continue;
     }
-    const latest = latestByTarget.get(
-      staticRebuildTargetKey(normalized.targetType, normalized.targetId),
-    );
-    if (shouldSkipRecentRow(normalized, latest, now)) continue;
 
     inserts.push({
       id: generateId("srb"),
@@ -260,7 +206,6 @@ export async function buildStaticRebuildQueueBatch(
             ),
             sql` `,
           )} ELSE ${staticRebuildQueue.requested_by_user_id} END`,
-          // 秒精度でも processing 開始後の再投入を確実に検出できるよう単調増加させる。
           updated_at: sql<number>`CASE ${staticRebuildQueue.id} ${sql.join(
             chunk.map(
               (item) =>
@@ -303,9 +248,7 @@ export async function buildStaticRebuildQueueBatch(
   return {
     statements,
     expectedChanges,
-    acceptedTargetCount:
-      activeUpdates.length +
-      inserts.length,
+    acceptedTargetCount: activeUpdates.length + inserts.length,
   };
 }
 
@@ -357,7 +300,7 @@ function shouldSkipRecentRow(
 
 /**
  * 静的 JSON 再生成キューへ投入。保存処理は成功させ、enqueue 失敗は warn のみ。
- * processing 行の lease は維持し、updated_at の単調増加で再実行要求を記録する。
+ * atomic mutation では buildStaticRebuildQueueBatch を使用すること。
  */
 export async function enqueueStaticRebuild(
   db: DB,
@@ -388,12 +331,15 @@ export async function enqueueStaticRebuild(
 
       const row = existing[0];
       if (row) {
+        const existingPriority = row.priority;
+        const mergedPriority = pickHigherPriority(existingPriority, priority);
+        const useIncomingMetadata = shouldUseIncomingQueueMetadata(
+          existingPriority,
+          priority,
+        );
         const update = db.update(staticRebuildQueue).set({
-          reason: target.reason,
-          priority: pickHigherPriority(
-            row.priority as "high" | "normal" | "low",
-            priority,
-          ),
+          reason: useIncomingMetadata ? target.reason : row.reason ?? target.reason,
+          priority: mergedPriority,
           requested_by_user_id:
             target.requestedByUserId ?? row.requested_by_user_id,
           updated_at: sql<number>`MAX(${staticRebuildQueue.updated_at} + 1, ${now})`,
@@ -439,8 +385,6 @@ export async function enqueueStaticRebuild(
         await wakeAfterSuccessfulEnqueue(options);
         return;
       }
-      // A concurrent request inserted the partial-unique active row. Loop once
-      // more so priority/reason are merged through the same CAS update path.
     }
     throw new Error("static rebuild queue changed during enqueue retries");
   } catch (error) {
@@ -493,3 +437,6 @@ async function wakeAfterSuccessfulEnqueue(
     envFlags: options?.envFlags,
   });
 }
+
+export { PRIORITY_RANK } from "./priorityCore";
+export { directEnqueueStaticRebuild } from "./directEnqueue";

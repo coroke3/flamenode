@@ -5,6 +5,36 @@
 > Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-08-02 — `0049_public_visibility_fences.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 非公開化フェンス追跡用 `public_visibility_fences` テーブルを追加 |
+| Reason | R2 manifest と D1 の token 一致解除、非公開化順序の監査を可能にするため |
+| Tables | `public_visibility_fences` |
+| Data migration | なし |
+| Compatibility | `0048` 完了後に適用。未適用時は fence 書き込みを fail-closed |
+| Data loss | none |
+| Rollback | migration 適用前バックアップから復元 |
+| Validation | `check:db-schema`、`check:public-visibility-fences`、typecheck |
+| PR | （本変更） |
+
+## 2026-08-02 — `0048_cleanup_video_visibility_indexes.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | cleanup |
+| Summary | 公開 static target probe 向けの video partial index を追加 |
+| Reason | public miss 時の D1 probe を index 付きで安定化するため |
+| Tables | `videos`（index のみ） |
+| Data migration | なし |
+| Compatibility | additive index のみ。既存 index は削除しない |
+| Data loss | none |
+| Rollback | 追加 index を DROP（本番ではバックアップ復元を推奨） |
+| Validation | `check:db-schema`、publicData unit test |
+| PR | （本変更） |
+
 ## 2026-08-01 — `0047_backfill_youtube_metadata_pending.sql`
 
 | 項目 | 内容 |
