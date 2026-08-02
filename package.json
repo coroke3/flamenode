@@ -78,6 +78,7 @@
     "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs scripts/d1-migration-compat.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs src/lib/staticRebuild/*.test.mjs",
     "check:static-rebuild-atomicity": "node scripts/check-static-rebuild-atomicity.mjs",
+    "check:artifact-slo": "node scripts/check-artifact-slo.mjs",
     "check:public-visibility-fences": "node scripts/check-public-visibility-fences.mjs",
     "check:moderation-open-cases": "node scripts/check-moderation-open-cases.mjs",
     "check:slot-reservation-groups": "node scripts/check-slot-reservation-groups.mjs",

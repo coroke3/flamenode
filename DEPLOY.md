@@ -27,10 +27,10 @@ main push
   -> npm ci（1回）
   -> verify:cloud（deploy契約検査のみ）
   -> OpenNext build（1回）
-  -> flamenode-web
-  -> flamenode-fast-jobs
   -> flamenode-content-jobs
+  -> flamenode-fast-jobs
   -> flamenode-sync-jobs
+  -> flamenode-web
   -> production smoke
 ```
 
@@ -244,7 +244,7 @@ Deploy commandは次を行います。
 2. production一時configを生成・検査する。
 3. remote secret名を検査する。
 4. Remote D1をread-only検査する。
-5. Web→fast→content→syncを順次deployする。
+5. content→fast→sync→webの順でdeployする（Cron Workerを先に、Webを最後）。
 6. 全deploy成功後だけproduction smokeを行う。
 
 途中失敗時は後続Workerとsmokeへ進みません。4 Workerを跨ぐ単一transactionではないため、すでにdeploy済みのWorkerがある場合は「10. rollback」に従い同じ正常commitへ戻します。
@@ -297,7 +297,7 @@ Pages Git Integrationと自動deployはWorkers Builds接続前に停止します
 
 Cloudflare Dashboardのversion rollbackまたは正常commitを戻す明示的な`main`更新で、WebとCron 3本を**同じcommit**へ戻します。1本だけ異なる世代に固定しません。rollback後も同じproduction smokeを実行します。
 
-Queue関連の緊急停止は、全Workerの`QUEUE_DISPATCH_ENABLED`・`QUEUE_CONTINUATION_ENABLED`・`QUEUE_YOUTUBE_SYNC_ENABLED`を`"0"`へ戻すだけでよい（Queueリソースとbindingは維持）。flag無効時もRecovery Cron経路はコードに残るため、D1正本の処理は継続する。
+Queue関連の緊急停止は、全Workerの`QUEUE_DISPATCH_ENABLED`・`QUEUE_CONTINUATION_ENABLED`・`QUEUE_YOUTUBE_SYNC_ENABLED`を`"0"`へ戻す。あわせて`QUEUE_EMERGENCY_DISABLED=1`、`QUEUE_EMERGENCY_REASON`（必須）、`QUEUE_EMERGENCY_EXPIRES_AT`（必須・Unix秒またはISO 8601）を全Workerへ設定する。deep healthは`degraded`を返し、全OFFのみをhealthy扱いしない。期限切れまたは理由欠落時はfail-closedとする。Queueリソースとbindingは維持する。
 
 移行観測期間中にWorkers全体を利用できない場合だけ、残してある旧Pages deploymentへtrafficを一時的に戻せます。旧project削除後はこの経路を前提にしません。
 
@@ -310,7 +310,7 @@ code rollbackで旧schema fallback、二重書込み、runtime DDLを復活さ�
 1. Workers Buildの`npm ci`、`verify:cloud`、OpenNext build、artifact検査のどこで失敗したか確認する。
 2. production環境検査が示す不足した**変数名、secret名、Worker名だけ**を確認する。
 3. Remote D1 preflightのschema version、必須table、migration名を確認する。
-4. Web→fast→content→syncのどこまで同じcommitでdeployされたか確認する。
+4. content→fast→sync→webのどこまで同じcommitでdeployされたか確認する。
 5. 公開health、保護deep health、3 Cron health、smokeの最初の失敗を確認する。
 6. Cloudflare DashboardのInvocation Status、`exceededCpu`、D1 rows read/written、R2/KV、Cron履歴を確認する。
 7. secret、token、実resource ID、cookie、Webhook URL、OAuth情報をlog、Issue、監査snapshotへ貼らない。
