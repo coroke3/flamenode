@@ -5,8 +5,6 @@ import {
   eventStaff,
   videoMembers,
   videoEvents,
-  xUserAccountLinks,
-  xUsers,
   type videos,
 } from "@/lib/db/schema";
 import type {
@@ -23,6 +21,7 @@ import {
   sectionAllowedByGeneralFields,
   type GeneralEditableFieldKey,
 } from "@/lib/video/generalEditPermissions";
+import { getApprovedLinkedXUserIds } from "./approvedX";
 import { expandPermissionAliases } from "./permissions/aliases";
 import {
   getManageStaffRole,
@@ -49,22 +48,12 @@ const staffPermissionSelect = {
 
 export type VideoRow = typeof videos.$inferSelect;
 
-/** 認証ユーザーに紐づく全X名義を正本リンクから解決する。 */
+/** 認証ユーザーに紐づく承認済みX名義を正本リンクから解決する。imported は含めない。 */
 export async function getApprovedXIds(
   db: DB,
   authUserId: string,
 ): Promise<string[]> {
-  const rows = await db
-    .select({ x_user_id: xUserAccountLinks.x_user_id })
-    .from(xUserAccountLinks)
-    .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-    .where(
-      and(
-        eq(xUserAccountLinks.auth_user_id, authUserId),
-        eq(xUsers.approval_status, "approved"),
-      ),
-    );
-  return Array.from(new Set(rows.map((row) => row.x_user_id)));
+  return getApprovedLinkedXUserIds(db, authUserId);
 }
 
 /** 自分が編集者として担当しているイベント ID 一覧。 */

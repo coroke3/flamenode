@@ -47,6 +47,11 @@ import { enqueueAfterXUserPublicUpdate } from "@/lib/staticRebuild/hooks";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { maybeMarkOnboardingComplete } from "@/lib/auth/onboarding";
+import { buildXIdentityDecisionFields } from "@/lib/auth/xIdentityRequestCore";
+import {
+  assessXLinkDeletion,
+  xLinkDeletionAllowedSql,
+} from "@/lib/auth/xLinkDependencies";
 
 export interface XIdActionResult {
   ok: boolean;
@@ -547,11 +552,25 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
   }
 
   const now = nowUnix();
-  const afterRequest = { ...request, status: "cancelled" as const, updated_at: now };
+  const decisionFields = buildXIdentityDecisionFields({
+    decidedByAuthUserId: authUserId,
+    decisionReason: "申請者による取り下げ",
+    decidedAt: now,
+  });
+  const afterRequest = {
+    ...request,
+    status: "cancelled" as const,
+    updated_at: now,
+    ...decisionFields,
+  };
   const mutationStatements: BatchItem<"sqlite">[] = [
     db
       .update(xIdentityRequests)
-      .set({ status: "cancelled" as const, updated_at: now })
+      .set({
+        status: "cancelled" as const,
+        updated_at: now,
+        ...decisionFields,
+      })
       .where(
         and(
           eq(xIdentityRequests.id, request.id),
@@ -838,19 +857,22 @@ export async function deleteLinkedXId(formData: FormData): Promise<XIdActionResu
   )[0];
   if (!link) return { ok: false, message: "この X ID の連携を削除できません。" };
 
+  const assessment = await assessXLinkDeletion(db, authUserId, xUserId, link.link_role);
+  if (!assessment.allowed) {
+    return { ok: false, message: assessment.message ?? "連携を削除できません。" };
+  }
+
   const beforeUser = (
     await db.select().from(users).where(eq(users.id, authUserId)).limit(1)
   )[0];
   if (!beforeUser) return { ok: false, message: "ユーザーが見つかりません。" };
   const mutationStatements: BatchItem<"sqlite">[] = [
-    db
-      .delete(xUserAccountLinks)
-      .where(
-        and(
-          eq(xUserAccountLinks.x_user_id, xUserId),
-          eq(xUserAccountLinks.auth_user_id, authUserId),
-        )!,
-      ),
+    db.run(sql`
+      DELETE FROM x_user_account_links
+      WHERE x_user_id = ${xUserId}
+        AND auth_user_id = ${authUserId}
+        AND (${xLinkDeletionAllowedSql(authUserId, xUserId)})
+    `),
   ];
   const expectedMutationChanges: Array<number | null> = [1];
   const audits: WriteAuditLogInput[] = [
