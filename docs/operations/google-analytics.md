@@ -136,6 +136,8 @@ R2 miss や JSON 不正時は `data=null`。トップ全体や他セクション
 
 同期失敗時は Cloudflare Workers ログの `ga4-trending-sync` 構造化イベントを確認（`service` / `job` / `enabled` / `result` / `generated_at` / `ga_rows` / `matched_videos` / `ranked_videos` / `r2_written` / `duration_ms` / `external_api_calls` など。secret は含まれない）。`GA4_SYNC_ENABLED` が `0` の場合は `result: "skipped"` となり、表示は前回 JSON または空状態になる。`ENABLED=1` だが secrets / R2 / KV が欠落している場合は `result: "failed"`, `error_name: "config_missing"` で R2 は更新しない。
 
+複数 named dateRange の `runReport` では、GA4 が返す `rowCount` が「主ディメンション件数」になり、`rows` が `video_id × dateRange` に展開されることがある。同期実装は `rowCount` と `rows.length` の一致を要求せず、ページが満杯のあいだだけ offset で継続する。
+
 ### Data API Core クォータ
 
 GA4 Data API（Core）には時間・日次のトークンクォータがある。
