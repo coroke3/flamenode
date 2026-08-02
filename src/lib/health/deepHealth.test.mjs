@@ -6,7 +6,12 @@ import {
   authorizeDeepHealth,
   runDeepHealthChecks,
 } from "./deepHealth.ts";
-import { assertArtifactSloFresh } from "./artifactSlo.ts";
+import {
+  ARTIFACT_SLO_MAX_AGE_SEC,
+  ARTIFACT_SLO_PROBES,
+  assertArtifactSloFresh,
+  assertTrackedDetailArtifactSloFresh,
+} from "./artifactSlo.ts";
 import {
   REQUIRED_RUNTIME_TABLE_COUNT,
   RUNTIME_CRITICAL_TABLES,
@@ -54,6 +59,21 @@ function artifactPayload(key, now) {
       body_markdown: "rules",
     };
   }
+  if (key === "youtube/related-blocklist.v1.json") {
+    return {
+      schema_version: 1,
+      generated_at: generatedAt,
+      blocked: {},
+    };
+  }
+  if (key === "videos/random-pool.v1.json") {
+    return {
+      schema_version: 1,
+      generated_at: generatedAt,
+      generation_key: "fixture-generation",
+      items: [],
+    };
+  }
   if (key === "visibility/blocked-entities.v1.json") {
     return {
       schema_version: 1,
@@ -88,6 +108,12 @@ function createBaseEnv(now, overrides = {}) {
         first: async () => ({
           version: "2026-07-20-canonical-1",
           required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
+          public_video_detail_count: 0,
+          tracked_video_detail_count: 0,
+          oldest_video_detail_generated_at: null,
+          public_event_detail_count: 0,
+          tracked_event_detail_count: 0,
+          oldest_event_detail_generated_at: null,
         }),
       }),
     },
@@ -125,6 +151,12 @@ test("deep health performs read-only D1, KV and R2 probes", async () => {
           first: async () => ({
             version: "2026-07-20-canonical-1",
             required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
+            public_video_detail_count: 0,
+            tracked_video_detail_count: 0,
+            oldest_video_detail_generated_at: null,
+            public_event_detail_count: 0,
+            tracked_event_detail_count: 0,
+            oldest_event_detail_generated_at: null,
           }),
         };
       },
@@ -204,6 +236,19 @@ test("deep health reports degraded when queue emergency stop is configured", asy
   assert.equal(result.checks.queues, "degraded");
 });
 
+test("deep health rejects queue emergency mode while any queue flag remains enabled", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const env = createBaseEnv(now, {
+    QUEUE_EMERGENCY_DISABLED: "1",
+    QUEUE_EMERGENCY_REASON: "incident mitigation",
+    QUEUE_EMERGENCY_EXPIRES_AT: String(now + 3600),
+  });
+  await assert.rejects(
+    () => runDeepHealthChecks(env),
+    /queue emergency requires all queue flags disabled/,
+  );
+});
+
 test("deep health rejects top.json without nostalgic shelf contract", async () => {
   const now = Math.floor(Date.now() / 1000);
   const bucket = {
@@ -270,4 +315,78 @@ test("deep health defaults public visibility guard mode to observe", async () =>
   const now = Math.floor(Date.now() / 1000);
   const result = await runDeepHealthChecks(createBaseEnv(now));
   assert.equal(result.public_visibility_guard_mode, "observe");
+});
+
+test("artifact SLO allows missing visibility blocked-entities manifest (bootstrap-ok)", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const bucket = {
+    async get(key) {
+      if (key === "visibility/blocked-entities.v1.json") return null;
+      return {
+        text: async () => JSON.stringify(artifactPayload(key, now)),
+      };
+    },
+  };
+  await assertArtifactSloFresh(bucket, now);
+});
+
+test("artifact SLO enforces every configured global freshness boundary", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  for (const staleProbe of ARTIFACT_SLO_PROBES.filter(
+    (probe) => !probe.allowMissing,
+  )) {
+    const bucket = {
+      async get(key) {
+        const probe = ARTIFACT_SLO_PROBES.find((entry) => entry.key === key);
+        const generatedAt =
+          key === staleProbe.key
+            ? now - (staleProbe.maxAgeSec ?? ARTIFACT_SLO_MAX_AGE_SEC.top) - 1
+            : now;
+        return {
+          text: async () =>
+            JSON.stringify(artifactPayload(probe?.key ?? key, generatedAt)),
+        };
+      },
+    };
+    await assert.rejects(
+      () => assertArtifactSloFresh(bucket, now),
+      new RegExp(`${staleProbe.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: generated_at is stale`),
+      staleProbe.key,
+    );
+  }
+});
+
+test("detail artifact SLO rejects incomplete and stale tracked inventories", () => {
+  const now = Math.floor(Date.now() / 1000);
+  assert.throws(
+    () =>
+      assertTrackedDetailArtifactSloFresh(
+        {
+          public_video_detail_count: 2,
+          tracked_video_detail_count: 1,
+          oldest_video_detail_generated_at: now,
+          public_event_detail_count: 0,
+          tracked_event_detail_count: 0,
+          oldest_event_detail_generated_at: null,
+        },
+        now,
+      ),
+    /video detail artifact inventory is incomplete/,
+  );
+  assert.throws(
+    () =>
+      assertTrackedDetailArtifactSloFresh(
+        {
+          public_video_detail_count: 1,
+          tracked_video_detail_count: 1,
+          oldest_video_detail_generated_at:
+            now - ARTIFACT_SLO_MAX_AGE_SEC.video_detail - 1,
+          public_event_detail_count: 1,
+          tracked_event_detail_count: 1,
+          oldest_event_detail_generated_at: now,
+        },
+        now,
+      ),
+    /video detail artifact is stale/,
+  );
 });

@@ -1,10 +1,13 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { eventStaff } from "@/lib/db/schema";
-import { getApprovedLinkedXUserIds } from "@/lib/auth/approvedX";
+import {
+  countOwnerRoleLinksForXUser,
+  getApprovedLinkedXUserIds,
+} from "@/lib/auth/approvedX";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { generateId } from "@/lib/utils/id";
@@ -28,6 +31,58 @@ export {
 } from "./eventOwnershipCore";
 
 export type EventStaffRow = typeof eventStaff.$inferSelect;
+
+const OPERABLE_OWNER_ERROR =
+  "イベント代表者には、承認済みX IDとowner roleのaccount linkが必要です。";
+
+/**
+ * 操作可能owner Xの正本条件。
+ * 引数は bind 用の文字列 ID、または event_staff.x_user_id など列参照。
+ * 列の `.name`（"x_user_id" という文字）を渡してはならない。
+ */
+function operableOwnerXSql(xUserId: string | typeof eventStaff.x_user_id): SQL {
+  return sql`
+    EXISTS (
+      SELECT 1
+      FROM x_users AS owner_xu
+      WHERE owner_xu.id = ${xUserId}
+        AND owner_xu.approval_status = 'approved'
+        AND EXISTS (
+          SELECT 1
+          FROM x_user_account_links AS owner_link
+          WHERE owner_link.x_user_id = owner_xu.id
+            AND owner_link.link_role = 'owner'
+        )
+    )
+  `;
+}
+
+function remainingOperableEventOwnerSql(eventId: string, excludedStaffId: string): SQL {
+  return sql`
+    EXISTS (
+      SELECT 1
+      FROM event_staff AS remaining_owner
+      INNER JOIN x_users AS remaining_xu
+        ON remaining_xu.id = remaining_owner.x_user_id
+      WHERE remaining_owner.event_id = ${eventId}
+        AND remaining_owner.id <> ${excludedStaffId}
+        AND remaining_owner.permission_preset = 'owner'
+        AND remaining_xu.approval_status = 'approved'
+        AND EXISTS (
+          SELECT 1
+          FROM x_user_account_links AS remaining_link
+          WHERE remaining_link.x_user_id = remaining_owner.x_user_id
+            AND remaining_link.link_role = 'owner'
+        )
+    )
+  `;
+}
+
+async function assertOperableOwnerX(db: DB, xUserId: string): Promise<void> {
+  if ((await countOwnerRoleLinksForXUser(db, xUserId)) < 1) {
+    throw new Error(OPERABLE_OWNER_ERROR);
+  }
+}
 
 export type EventStaffWriteValues = {
   x_user_id: string;
@@ -122,6 +177,7 @@ export async function getEventOwners(
       and(
         eq(eventStaff.event_id, eventId),
         eq(eventStaff.permission_preset, "owner"),
+        operableOwnerXSql(eventStaff.x_user_id),
       )!,
     );
 }
@@ -231,6 +287,9 @@ export async function createEventStaffWithProtection(args: {
     eventId: args.eventId,
     candidate: { id: args.id, x_user_id: args.values.x_user_id },
   });
+  if (args.values.permission_preset === "owner") {
+    await assertOperableOwnerX(args.db, args.values.x_user_id);
+  }
 
   const row: EventStaffRow = {
     id: args.id,
@@ -323,11 +382,14 @@ export async function updateEventStaffWithProtection(args: {
     updated_at: args.now,
   };
   const extras = normalizeEventStaffAtomicExtras(args.atomicExtras);
+  if (args.values.permission_preset === "owner") {
+    await assertOperableOwnerX(args.db, args.values.x_user_id);
+  }
   const demotesOwner =
     args.existing.permission_preset === "owner" &&
     args.values.permission_preset !== "owner";
   const ownerCondition = demotesOwner
-    ? sql`(SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.existing.event_id} AND permission_preset = 'owner') > 1`
+    ? remainingOperableEventOwnerSql(args.existing.event_id, args.existing.id)
     : sql`1 = 1`;
 
   await mutateWithAudit(args.db, {
@@ -392,7 +454,7 @@ export async function deleteEventStaffWithProtection(args: {
     reason: args.reason,
   });
   const ownerCondition = args.existing.permission_preset === "owner"
-    ? sql`(SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.existing.event_id} AND permission_preset = 'owner') > 1`
+    ? remainingOperableEventOwnerSql(args.existing.event_id, args.existing.id)
     : sql`1 = 1`;
 
   await mutateWithAudit(args.db, {
@@ -773,6 +835,8 @@ export async function transferEventOwnership(args: {
   };
   const context = args.context ?? `ownership-transfer:${transferRunId}`;
 
+  await assertOperableOwnerX(args.db, afterTo.x_user_id);
+
   await mutateWithAudit(args.db, {
     mutationStatements: [args.db.run(sql`
       UPDATE event_staff
@@ -792,6 +856,7 @@ export async function transferEventOwnership(args: {
         AND (SELECT updated_at FROM event_staff WHERE id = ${args.fromStaffId} AND event_id = ${args.eventId}) = ${from!.updated_at}
         AND (SELECT updated_at FROM event_staff WHERE id = ${args.toStaffId} AND event_id = ${args.eventId}) = ${to!.updated_at}
         AND (SELECT COUNT(*) FROM event_staff WHERE event_id = ${args.eventId} AND id IN (${args.fromStaffId}, ${args.toStaffId})) = 2
+        AND ${operableOwnerXSql(afterTo.x_user_id)}
     `)],
     expectedMutationChanges: 2,
     audits: [

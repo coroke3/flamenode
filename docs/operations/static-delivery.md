@@ -83,7 +83,7 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 | クリエイター詳細 | `users/{id}.json` + `users/{id}/works\|collabs/p{n}.json` | `user` |
 | おすすめ | `recommend.json` | `recommend` |
 | 利用規約 | `rules/current.json` | `rules` |
-| 公開非表示マニフェスト | `visibility/blocked-entities.v1.json` | — |
+| 公開非表示マニフェスト | `visibility/blocked-entities.v1.json` | 初回非公開化まで欠落可（deep health / artifact SLO は bootstrap-ok）。存在時は shape・鮮度を検査 |
 | サイトマップ | 上記索引から動的生成 | — |
 
 `list/recent.json` と `list/popular.json` は COUNTABLE 公開作品を最大 5000 件（`STATIC_LIST_MAX_ITEMS`）まで `items` に載せる。`total` は DB の全件数と `items.length` の小さい方とし、ページングが `items` を超えない。`search-index-lite.json` の `videos` も同上限。put 前に `STATIC_LIST_MAX_OBJECT_BYTES`（8MiB）でサイズガードする。users 側の 500 件上限は現状維持。

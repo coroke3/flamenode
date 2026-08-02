@@ -266,6 +266,7 @@ export function verifyProductionEnvironment({
   for (const name of REQUIRED_ENV_NAMES) {
     if (!value(env, name)) errors.push(`${name} is required`);
   }
+  errors.push(...productionQueueConfigurationErrors(env));
   const accountId = value(env, "CLOUDFLARE_ACCOUNT_ID");
   if (accountId && (!ACCOUNT_ID_PATTERN.test(accountId) || accountId === ZERO_HEX)) {
     errors.push("CLOUDFLARE_ACCOUNT_ID must be a non-zero 32-character hexadecimal ID");
@@ -372,7 +373,7 @@ function replaceRequired(content, pattern, replacement, label, sourcePath) {
 function injectCommitVariable(content, commit) {
   const commitLine = `BUILD_COMMIT_SHA = "${commit}"`;
   if (/^\s*BUILD_COMMIT_SHA\s*=/m.test(content)) {
-    return content.replace(/^\s*BUILD_COMMIT_SHA\s*=.*$/m, commitLine);
+    return content.replace(/^\s*BUILD_COMMIT_SHA\s*=[^\r\n]*/m, commitLine);
   }
   const vars = content.match(/^\[vars\]\s*$/m);
   if (vars?.index !== undefined) {
@@ -392,8 +393,9 @@ function injectAccountId(content, accountId) {
 
 function injectStringVariable(content, name, rawValue) {
   const assignment = `${name} = ${JSON.stringify(rawValue)}`;
-  const pattern = new RegExp(`^\\s*${name}\\s*=.*$`, "m");
-  if (pattern.test(content)) return content.replace(pattern, assignment);
+  // Match through the assignment only; do not consume CR/LF (Windows CRLF-safe).
+  const pattern = new RegExp(`^(\\s*)${name}\\s*=[^\\r\\n]*`, "m");
+  if (pattern.test(content)) return content.replace(pattern, `$1${assignment}`);
   const vars = content.match(/^\[vars\]\s*$/m);
   if (vars?.index !== undefined) {
     const insertAt = vars.index + vars[0].length;
@@ -408,13 +410,104 @@ const QUEUE_FEATURE_FLAG_NAMES = [
   "QUEUE_YOUTUBE_SYNC_ENABLED",
 ];
 
+const QUEUE_EMERGENCY_VARIABLE_NAMES = [
+  "QUEUE_EMERGENCY_DISABLED",
+  "QUEUE_EMERGENCY_REASON",
+  "QUEUE_EMERGENCY_EXPIRES_AT",
+];
+
 const SYNC_JOBS_FEATURE_FLAG_NAMES = ["GA4_SYNC_ENABLED"];
 
 /** Generated production config may inject "1" from Build Variables. Template stays "0". */
-function validateQueueFeatureFlags(content, errors) {
+function parseQueueEmergencyExpiresAtSec(rawValue) {
+  const raw = String(rawValue ?? "").trim();
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed / 1000)
+    : null;
+}
+
+export function productionQueueConfigurationErrors(
+  env,
+  nowSec = Math.floor(Date.now() / 1000),
+) {
+  const errors = [];
+  const emergencyDisabled = value(env, "QUEUE_EMERGENCY_DISABLED");
+  if (emergencyDisabled && emergencyDisabled !== "0" && emergencyDisabled !== "1") {
+    errors.push('QUEUE_EMERGENCY_DISABLED must be exactly "0" or "1"');
+  }
+  const emergencyActive = emergencyDisabled === "1";
+  const reason = value(env, "QUEUE_EMERGENCY_REASON");
+  const expiresAtRaw = value(env, "QUEUE_EMERGENCY_EXPIRES_AT");
+
+  if (emergencyActive) {
+    for (const name of QUEUE_FEATURE_FLAG_NAMES) {
+      const flag = value(env, name);
+      if (flag && flag !== "0") {
+        errors.push(`${name} must be exactly "0" during an emergency stop`);
+      }
+    }
+    if (!reason) errors.push("QUEUE_EMERGENCY_REASON is required during an emergency stop");
+    const expiresAtSec = parseQueueEmergencyExpiresAtSec(expiresAtRaw);
+    if (expiresAtSec === null) {
+      errors.push("QUEUE_EMERGENCY_EXPIRES_AT is required and must be valid");
+    } else if (expiresAtSec <= nowSec) {
+      errors.push("QUEUE_EMERGENCY_EXPIRES_AT must be in the future");
+    }
+  } else {
+    // Unset Build Variables keep tracked template "0"; when any QUEUE_* is set, require all = "1".
+    const presentFlags = QUEUE_FEATURE_FLAG_NAMES.filter((name) => value(env, name));
+    if (presentFlags.length > 0) {
+      for (const name of QUEUE_FEATURE_FLAG_NAMES) {
+        if (value(env, name) !== "1") {
+          errors.push(`${name} must be exactly "1" for normal production`);
+        }
+      }
+    }
+    if (reason || expiresAtRaw) {
+      errors.push(
+        "QUEUE_EMERGENCY_REASON and QUEUE_EMERGENCY_EXPIRES_AT require QUEUE_EMERGENCY_DISABLED=1",
+      );
+    }
+  }
+  return errors;
+}
+
+/** Generated production config: emergency forces "0"; otherwise template/Build may be "0" or "1". */
+function validateQueueFeatureFlags(content, errors, env) {
+  const emergencyActive = value(env, "QUEUE_EMERGENCY_DISABLED") === "1";
   for (const name of QUEUE_FEATURE_FLAG_NAMES) {
+    if (emergencyActive) {
+      if (!new RegExp(`^\\s*${name}\\s*=\\s*"0"\\s*$`, "m").test(content)) {
+        errors.push(`${name} must be "0" during an emergency stop`);
+      }
+      continue;
+    }
     if (!new RegExp(`^\\s*${name}\\s*=\\s*"(?:0|1)"\\s*$`, "m").test(content)) {
       errors.push(`${name} must be "0" or "1"`);
+    }
+  }
+}
+
+function validateQueueEmergencyVariables(content, errors, env) {
+  const active = value(env, "QUEUE_EMERGENCY_DISABLED") === "1";
+  if (!active) {
+    for (const name of QUEUE_EMERGENCY_VARIABLE_NAMES) {
+      if (new RegExp(`^\\s*${name}\\s*=`, "m").test(content)) {
+        errors.push(`${name} must be omitted outside an emergency stop`);
+      }
+    }
+    return;
+  }
+  for (const name of QUEUE_EMERGENCY_VARIABLE_NAMES) {
+    const assignment = `${name} = ${JSON.stringify(value(env, name))}`;
+    if (!content.includes(assignment)) {
+      errors.push(`${name} is missing from the emergency production config`);
     }
   }
 }
@@ -429,13 +522,37 @@ function validateSyncJobsFeatureFlags(content, errors) {
 
 function injectQueueFeatureFlags(content, env) {
   let output = content;
+  const emergencyActive = value(env, "QUEUE_EMERGENCY_DISABLED") === "1";
   for (const name of QUEUE_FEATURE_FLAG_NAMES) {
+    if (emergencyActive) {
+      output = injectStringVariable(output, name, "0");
+      continue;
+    }
     const raw = env[name];
     if (raw === undefined || raw === null || String(raw).trim() === "") continue;
     const normalized = /^(1|true|yes)$/i.test(String(raw).trim()) ? "1" : "0";
     output = injectStringVariable(output, name, normalized);
   }
   return output;
+}
+
+function injectQueueEmergencyVariables(content, env) {
+  if (value(env, "QUEUE_EMERGENCY_DISABLED") !== "1") return content;
+  let output = content;
+  for (const name of QUEUE_EMERGENCY_VARIABLE_NAMES) {
+    output = injectStringVariable(output, name, value(env, name));
+  }
+  return output;
+}
+
+function injectPublicVisibilityGuardMode(content, env) {
+  const raw = env.PUBLIC_VISIBILITY_GUARD_MODE;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return content;
+  const normalized = String(raw).trim().toLowerCase();
+  if (normalized !== "off" && normalized !== "observe" && normalized !== "enforce") {
+    throw new Error('PUBLIC_VISIBILITY_GUARD_MODE must be "off", "observe", or "enforce"');
+  }
+  return injectStringVariable(content, "PUBLIC_VISIBILITY_GUARD_MODE", normalized);
 }
 
 function injectSyncJobsFeatureFlags(content, env) {
@@ -537,7 +654,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
   if (target.key === "fast-jobs") {
     const assignment = `NEXT_PUBLIC_SITE_URL = ${JSON.stringify(value(env, "NEXT_PUBLIC_SITE_URL"))}`;
     if (!content.includes(assignment)) errors.push("NEXT_PUBLIC_SITE_URL runtime variable is missing");
-    validateQueueFeatureFlags(content, errors);
+    validateQueueFeatureFlags(content, errors, env);
     validateQueueConsumerBlock(content, errors, {
       queue: "flamenode-notification-wake",
       dlq: "flamenode-notification-dlq",
@@ -546,7 +663,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
     validateCronSchedule(content, errors, ["0 * * * *"]);
   }
   if (target.key === "content-jobs") {
-    validateQueueFeatureFlags(content, errors);
+    validateQueueFeatureFlags(content, errors, env);
     validateQueueConsumerBlock(content, errors, {
       queue: "flamenode-static-rebuild-wake",
       dlq: "flamenode-static-rebuild-dlq",
@@ -555,7 +672,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
     validateCronSchedule(content, errors, ["15 * * * *"]);
   }
   if (target.key === "sync-jobs") {
-    validateQueueFeatureFlags(content, errors);
+    validateQueueFeatureFlags(content, errors, env);
     validateSyncJobsFeatureFlags(content, errors);
     validateQueueConsumerBlock(content, errors, {
       queue: "flamenode-youtube-sync-wake",
@@ -574,7 +691,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
     validateCronSchedule(content, errors, ["7 * * * *", "52 * * * *"]);
   }
   if (target.key === "web") {
-    validateQueueFeatureFlags(content, errors);
+    validateQueueFeatureFlags(content, errors, env);
     for (const queueBinding of [
       "NOTIFICATION_WAKE_QUEUE",
       "STATIC_REBUILD_WAKE_QUEUE",
@@ -588,6 +705,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
       errors.push("web Worker must not define queue consumers");
     }
   }
+  validateQueueEmergencyVariables(content, errors, env);
   if (errors.length > 0) throw new Error(`${relativePath}: ${errors.join("; ")}`);
 }
 
@@ -644,6 +762,7 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
     for (const name of ["NEXT_PUBLIC_SITE_URL", "AUTH_URL", "AUTH_DISCORD_ID"]) {
       output = injectStringVariable(output, name, value(env, name));
     }
+    output = injectPublicVisibilityGuardMode(output, env);
   }
   if (target.key === "fast-jobs") {
     output = replaceRequired(
@@ -680,6 +799,7 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
   }
   // Optional Build Variables: QUEUE_* = 1 keeps wake flags across Workers Builds deploys.
   output = injectQueueFeatureFlags(output, env);
+  output = injectQueueEmergencyVariables(output, env);
   return output;
 }
 
@@ -690,6 +810,10 @@ export function materializeProductionConfigs({
   commit = value(env, "WORKERS_CI_COMMIT_SHA").toLowerCase(),
 } = {}) {
   if (!SHA_PATTERN.test(commit)) throw new Error("A verified production commit SHA is required.");
+  const queueErrors = productionQueueConfigurationErrors(env);
+  if (queueErrors.length > 0) {
+    throw new Error(`Invalid production Queue configuration: ${queueErrors.join("; ")}`);
+  }
   fs.mkdirSync(outputDir, { recursive: true });
   const configs = {};
   for (const target of DEPLOY_TARGETS) {

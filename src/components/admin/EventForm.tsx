@@ -23,6 +23,11 @@ import {
   normalizeEventVisibility,
   type EventVisibilityStatus,
 } from "@/lib/utils/eventStatus";
+import {
+  buildFormDraftStorageKey,
+  useFormDraft,
+} from "@/lib/interactions/useFormDraft";
+import { useUnsavedChangesGuard } from "@/lib/interactions/useUnsavedChangesGuard";
 
 export interface EventFormInitial {
   id?: string;
@@ -61,6 +66,35 @@ interface EventFormProps {
     questions: boolean;
     slots: boolean;
   };
+  /** Auth user id used to isolate local drafts between accounts. */
+  draftAuthUserId?: string;
+}
+
+type EventFormDraftValue = Record<string, string | string[]>;
+const EMPTY_EVENT_FORM_INITIAL: EventFormInitial = {};
+
+function formDataToDraftValue(formData: FormData): EventFormDraftValue {
+  const value: EventFormDraftValue = {};
+  for (const [key, raw] of formData.entries()) {
+    if (typeof raw !== "string") continue;
+    const current = value[key];
+    value[key] = current === undefined
+      ? raw
+      : Array.isArray(current)
+        ? [...current, raw]
+        : [current, raw];
+  }
+  return value;
+}
+
+function draftValueToFormData(value: EventFormDraftValue): FormData {
+  const formData = new FormData();
+  for (const [key, raw] of Object.entries(value)) {
+    for (const item of Array.isArray(raw) ? raw : [raw]) {
+      formData.append(key, item);
+    }
+  }
+  return formData;
 }
 
 function partsJsonToText(value: string | null | undefined): string {
@@ -273,12 +307,16 @@ function FormSection({
 
 export function EventForm({
   mode,
-  initial = {},
+  initial: initialProp,
   templateId,
   editableSections,
+  draftAuthUserId,
 }: EventFormProps): React.ReactElement {
+  const initial = initialProp ?? EMPTY_EVENT_FORM_INITIAL;
   const router = useRouter();
+  const formRef = React.useRef<HTMLFormElement>(null);
   const [busy, startTransition] = React.useTransition();
+  const [dirty, setDirty] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<{
     message: string;
@@ -301,6 +339,44 @@ export function EventForm({
   const canQuestions = mode === "create" || editableSections?.questions !== false;
   const canSlots = mode === "create" || editableSections?.slots !== false;
 
+  const draftStorageKey = draftAuthUserId?.trim()
+    ? buildFormDraftStorageKey({
+        authUserId: draftAuthUserId.trim(),
+        formId: `event-${mode}-${initial.id ?? templateId ?? "new"}`,
+        schemaVersion: "event-form-v1",
+      })
+    : "";
+  const restoreDraft = React.useCallback((draft: EventFormDraftValue) => {
+    const form = formRef.current;
+    if (!form) return;
+    const restored = draftValueToFormData(draft);
+    for (const element of Array.from(form.elements)) {
+      if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) continue;
+      const name = element.name;
+      if (!name) continue;
+      const values = restored.getAll(name).map(String);
+      if (element instanceof HTMLInputElement && element.type === "checkbox") {
+        element.checked = values.includes("1");
+      } else if (values.length > 0) {
+        element.value = values.shift() ?? "";
+      }
+    }
+    setQuestions(readQuestions(restored));
+    setPreview(formPreview(restored, initial));
+    setDirty(true);
+  }, [initial]);
+  const draftSnapshot = React.useMemo(
+    () => (formRef.current ? formDataToDraftValue(new FormData(formRef.current)) : {}),
+    [preview, questions],
+  );
+  const { clearDraft } = useFormDraft<EventFormDraftValue>({
+    storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
+    value: draftSnapshot,
+    enabled: Boolean(draftAuthUserId?.trim()),
+    onRestore: restoreDraft,
+  });
+  useUnsavedChangesGuard({ dirty: dirty && !busy });
+
   React.useEffect(() => {
     setPreview((current) => ({
       ...current,
@@ -320,6 +396,8 @@ export function EventForm({
         setError(result.message ?? "保存に失敗しました。");
         return;
       }
+      clearDraft();
+      setDirty(false);
       setSuccess({
         message: "保存しました。",
         pendingPublicReflection: result.pendingPublicReflection,
@@ -334,9 +412,13 @@ export function EventForm({
 
   return (
     <form
+      ref={formRef}
       onSubmit={submit}
       onChange={(event) =>
-        setPreview(formPreview(new FormData(event.currentTarget), initial))
+        (() => {
+          setDirty(true);
+          setPreview(formPreview(new FormData(event.currentTarget), initial));
+        })()
       }
       className={styles.eventForm}
     >
@@ -599,11 +681,12 @@ export function EventForm({
                     type="button"
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                     disabled={!canQuestions}
-                    onClick={() =>
+                    onClick={() => {
+                      setDirty(true);
                       setQuestions((current) =>
                         current.filter((item) => item.id !== question.id),
-                      )
-                    }
+                      );
+                    }}
                   >
                     <Icon name="trash" size={12} aria-hidden /> 削除
                   </button>
@@ -664,7 +747,8 @@ export function EventForm({
           type="button"
           className="fn-btn fn-btn-ghost"
           disabled={!canQuestions}
-          onClick={() =>
+          onClick={() => {
+            setDirty(true);
             setQuestions((current) => [
               ...current,
               {
@@ -676,8 +760,8 @@ export function EventForm({
                 description: "",
                 placeholder: "",
               },
-            ])
-          }
+            ]);
+          }}
         >
           <Icon name="plus" size={13} aria-hidden /> 質問を追加
         </button>

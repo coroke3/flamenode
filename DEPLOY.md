@@ -103,6 +103,9 @@ Cloudflare側の自動dependency installを止め、`npm ci`を1回に固定し�
 | `QUEUE_DISPATCH_ENABLED` | Queue wake 有効時は `"1"`（未設定時は template `"0"`） |
 | `QUEUE_CONTINUATION_ENABLED` | 継続 wake 有効時は `"1"` |
 | `QUEUE_YOUTUBE_SYNC_ENABLED` | YouTube sync wake 有効時は `"1"` |
+| `PUBLIC_VISIBILITY_GUARD_MODE` | 任意。`observe`（既定）/ `enforce` / `off`。本番で fence を強制するなら `enforce` |
+
+custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` を **カスタム origin**（例: `https://flamenode.net`）へ揃え、`workers.dev` のまま放置しない。不一致のまま deploy すると Runtime Variables と HTML の site URL が上書きされる。
 
 `WORKERS_CI_COMMIT_SHA`はWorkers Buildsが自動提供する40桁SHAを使用し、Dashboardで上書きしません。Git HEADと一致しない、欠落する、形式が不正な場合はproduction deployを停止し、`unknown`で継続しません。
 
@@ -129,7 +132,7 @@ Workers Buildsのsystem変数、Build/Deploy分離、branch設定は次を正本
 
 | Worker | Variables |
 | --- | --- |
-| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開site metadata、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開site metadata、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED`、`PUBLIC_VISIBILITY_GUARD_MODE`（任意・未設定時 template `observe`） |
 | `flamenode-fast-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
 | `flamenode-content-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
 | `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |

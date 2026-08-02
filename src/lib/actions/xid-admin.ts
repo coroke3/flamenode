@@ -38,7 +38,7 @@ export interface XIdAdminResult {
 }
 
 type XIdLinkOperatorResult =
-  | { ok: true; authUserId: string; db: DB }
+  | { ok: true; authUserId: string; db: DB; actorXUserId: string | null }
   | { ok: false; message: string };
 type XIdLinkOperator = Extract<XIdLinkOperatorResult, { ok: true }>;
 
@@ -52,7 +52,12 @@ async function getXIdLinkOperator(): Promise<XIdLinkOperatorResult> {
       role: user.role,
     });
     return allowed
-      ? { ok: true, authUserId: user.id, db }
+      ? {
+          ok: true,
+          authUserId: user.id,
+          db,
+          actorXUserId: normalizeXId(guard.activeXId ?? "") || null,
+        }
       : { ok: false, message: "X ID 申請を処理する権限がありません。" };
   } catch (error) {
     // redirect/notFound 等のNext.js制御例外はAction結果へ変換しない。
@@ -95,7 +100,7 @@ async function approveXIdLinkRequestOnce(
   operator: XIdLinkOperator,
   requestId: string,
 ): Promise<XIdAdminResult> {
-  const { db, authUserId: operatorAuthUserId } = operator;
+  const { db, authUserId: operatorAuthUserId, actorXUserId: operatorActorXUserId } = operator;
   const request = (
     await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
   )[0];
@@ -167,6 +172,7 @@ async function approveXIdLinkRequestOnce(
         before: null,
         after: alias,
         actor_user_id: operatorAuthUserId,
+        actor_x_user_id: operatorActorXUserId,
         reason: "X名義の別名申請を承認",
         context: "x-identity-request",
         retention_class: "long_audit",
@@ -222,6 +228,7 @@ async function approveXIdLinkRequestOnce(
         before: null,
         after: newXUser,
         actor_user_id: operatorAuthUserId,
+        actor_x_user_id: operatorActorXUserId,
         reason: "新規X名義申請を承認",
         context: "x-identity-request",
         retention_class: "long_audit",
@@ -243,6 +250,7 @@ async function approveXIdLinkRequestOnce(
         before: { ...xUser },
         after: afterXUser,
         actor_user_id: operatorAuthUserId,
+        actor_x_user_id: operatorActorXUserId,
         reason: "既存X名義の連携申請を承認",
         context: "x-identity-request",
         retention_class: "long_audit",
@@ -267,6 +275,7 @@ async function approveXIdLinkRequestOnce(
         before: null,
         after: link,
         actor_user_id: operatorAuthUserId,
+        actor_x_user_id: operatorActorXUserId,
         reason: "X名義と認証ユーザーを連携",
         context: "x-identity-request",
         retention_class: "long_audit",
@@ -292,6 +301,7 @@ async function approveXIdLinkRequestOnce(
         before: { ...authUser },
         after: afterUser,
         actor_user_id: operatorAuthUserId,
+        actor_x_user_id: operatorActorXUserId,
         reason: "初回連携X名義をアクティブに設定",
         context: "x-identity-request",
         retention_class: "normal",
@@ -349,6 +359,7 @@ async function approveXIdLinkRequestOnce(
         before: { ...sibling },
         after: afterSibling,
         actor_user_id: operatorAuthUserId,
+        actor_x_user_id: operatorActorXUserId,
         reason: "同一X IDの重複pending申請を取り消す",
         context: "x-identity-request",
         retention_class: "long_audit",
@@ -385,6 +396,7 @@ async function approveXIdLinkRequestOnce(
     before: { ...request },
     after: afterRequest,
     actor_user_id: operatorAuthUserId,
+    actor_x_user_id: operatorActorXUserId,
     reason: "X ID申請を承認",
     context: "x-identity-request",
     retention_class: "long_audit",
@@ -493,7 +505,7 @@ async function rejectXIdLinkRequestOnce(
   requestId: string,
   reason: string,
 ): Promise<XIdAdminResult> {
-  const { db, authUserId: operatorAuthUserId } = operator;
+  const { db, authUserId: operatorAuthUserId, actorXUserId: operatorActorXUserId } = operator;
   const request = (
     await db.select().from(xIdentityRequests).where(eq(xIdentityRequests.id, requestId)).limit(1)
   )[0];
@@ -596,6 +608,7 @@ async function rejectXIdLinkRequestOnce(
         before: { ...request },
         after: afterRequest,
         actor_user_id: operatorAuthUserId,
+        actor_x_user_id: operatorActorXUserId,
         reason: reason || "X ID申請を却下",
         context: "x-identity-request",
         retention_class: "long_audit",

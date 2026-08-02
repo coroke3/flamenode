@@ -34,6 +34,8 @@ QUEUE_CONTINUATION_ENABLED = "0"
 QUEUE_YOUTUBE_SYNC_ENABLED = "0"
 # R2 miss 後の bounded D1 fallback。明示 0 で停止。
 PUBLIC_DEGRADED_D1_ENABLED = "1"
+# Public visibility fence: observe = log-only, enforce = block. Build Variables で上書き可。
+PUBLIC_VISIBILITY_GUARD_MODE = "observe"
 
 [[queues.producers]]
 queue = "flamenode-notification-wake"

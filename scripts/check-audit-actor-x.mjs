@@ -24,6 +24,11 @@ const REQUIRED_PATTERNS = [
   },
   {
     file: "src/lib/actions/xid.ts",
+    pattern: /actor_x_user_id:/,
+    message: "xid actions must set actor_x_user_id on audits",
+  },
+  {
+    file: "src/lib/actions/xid.ts",
     pattern: /xLinkDeletionAllowedSql/,
     message: "deleteLinkedXId must re-check blockers in DELETE SQL",
   },

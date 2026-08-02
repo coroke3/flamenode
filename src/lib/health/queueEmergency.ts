@@ -34,8 +34,9 @@ export function resolveQueueEmergencyState(env: {
   }
   const reason = env.QUEUE_EMERGENCY_REASON?.trim() ?? "";
   const expiresAtSec = parseExpiresAtSec(env.QUEUE_EMERGENCY_EXPIRES_AT);
-  if (!reason || expiresAtSec === null) {
-    return { active: false, reason: null, expiresAtSec: null };
+  if (!reason) throw new Error("queue emergency reason missing");
+  if (expiresAtSec === null) {
+    throw new Error("queue emergency expiry missing or invalid");
   }
   return { active: true, reason, expiresAtSec };
 }
@@ -72,16 +73,12 @@ export function evaluateDeepHealthQueueConfiguration(env: {
     flags.dispatchEnabled ||
     flags.continuationEnabled ||
     flags.youtubeSyncEnabled;
-  const allEnabled =
-    flags.dispatchEnabled &&
-    flags.continuationEnabled &&
-    flags.youtubeSyncEnabled;
   const emergency = resolveQueueEmergencyState(env);
   const production = isProductionRuntime(env);
 
   if (emergency.active) {
-    if (anyEnabled && !allEnabled) {
-      throw new Error("queue emergency cannot coexist with partially enabled flags");
+    if (anyEnabled) {
+      throw new Error("queue emergency requires all queue flags disabled");
     }
     if (emergency.expiresAtSec !== null) {
       const nowSec = Math.floor(Date.now() / 1000);
@@ -89,9 +86,7 @@ export function evaluateDeepHealthQueueConfiguration(env: {
         throw new Error("queue emergency expired");
       }
     }
-    if (!anyEnabled) {
-      return { status: "degraded", emergency };
-    }
+    return { status: "degraded", emergency };
   }
 
   if (!anyEnabled) {

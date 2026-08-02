@@ -106,3 +106,19 @@ test("D1 bind/query予算はbulk上限8でも制約内に収まる", () => {
     { total: 20, withinLimit: true },
   );
 });
+
+test("単発・更新・CSVは生時刻を共通validatorと動画尺で検証する", () => {
+  assert.match(action, /videoYoutubeMetadata\.duration_seconds/);
+  assert.equal(
+    (action.match(/validateChapterTime\(/g) ?? []).length,
+    2,
+    "共通helperとCSV行検証の両方でvalidateChapterTimeを使う",
+  );
+  assert.match(action, /await loadVideoDurationSeconds\(db, data\.video_id\)/);
+  assert.match(action, /await loadVideoDurationSeconds\(db, target\.id\)/);
+  assert.match(action, /validateChapterTime\(rawTime, \{ videoDurationSeconds \}\)/);
+  assert.doesNotMatch(action, /chapter_time:\s*z\.coerce\.number/);
+  assert.match(composer, /validateChapterTime\(timeStr\)/);
+  assert.match(composer, /fd\.set\("chapter_time", timeStr\.trim\(\)\)/);
+  assert.doesNotMatch(composer, /Number\.isFinite\(n\) \? n : 0/);
+});

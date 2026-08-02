@@ -136,7 +136,7 @@ async function reconcileRequestPersistence(
 }
 
 async function getXIdWriteContext(): Promise<
-  | { ok: true; authUserId: string; db: DB }
+  | { ok: true; authUserId: string; db: DB; actorXUserId: string | null }
   | { ok: false; result: XIdActionResult }
 > {
   try {
@@ -144,7 +144,12 @@ async function getXIdWriteContext(): Promise<
     if (!guard.ok) {
       return { ok: false, result: { ok: false, message: guard.message } };
     }
-    return { ok: true, authUserId: guard.user.id, db: guard.db };
+    return {
+      ok: true,
+      authUserId: guard.user.id,
+      db: guard.db,
+      actorXUserId: normalizeXId(guard.activeXId ?? "") || null,
+    };
   } catch (error) {
     // redirect/notFound 等のNext.js制御例外はAction結果へ変換しない。
     unstable_rethrow(error);
@@ -274,6 +279,7 @@ export async function setActiveXId(formData: FormData): Promise<XIdActionResult>
         before: { ...beforeUser },
         after: { ...afterUser },
         actor_user_id: authUserId,
+        actor_x_user_id: xUserId,
         retention_class: "normal",
       },
     ],
@@ -290,7 +296,7 @@ const requestKindSchema = z.enum(["link", "merge"]);
 export async function requestXIdLink(formData: FormData): Promise<XIdActionResult> {
   const context = await getXIdWriteContext();
   if (!context.ok) return context.result;
-  const { authUserId } = context;
+  const { authUserId, actorXUserId } = context;
 
   const requestedXUserId = parseXIdentityInput(String(formData.get("x_id") ?? ""));
   if (!requestedXUserId) {
@@ -425,6 +431,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
     before: null,
     after: { ...afterRequest },
     actor_user_id: authUserId,
+    actor_x_user_id: actorXUserId,
     retention_class: "long_audit",
   }];
   let webhookNotification: NotificationOutboxStatement | null = null;
@@ -519,7 +526,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
 export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActionResult> {
   const context = await getXIdWriteContext();
   if (!context.ok) return context.result;
-  const { authUserId, db } = context;
+  const { authUserId, db, actorXUserId } = context;
 
   const requestId = String(formData.get("request_id") ?? "").trim();
   if (!requestId) return { ok: false, message: "申請 ID がありません。" };
@@ -637,6 +644,7 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
         before: { ...request },
         after: afterRequest,
         actor_user_id: authUserId,
+        actor_x_user_id: actorXUserId,
         reason: "申請者本人がX ID申請を取り下げ",
         context: "x-identity-request",
         retention_class: "long_audit" as const,
@@ -695,7 +703,7 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
 export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActionResult> {
   const context = await getXIdWriteContext();
   if (!context.ok) return context.result;
-  const { authUserId } = context;
+  const { authUserId, actorXUserId } = context;
   const parentRequestId = String(formData.get("parent_request_id") ?? "").trim();
   if (!parentRequestId) return { ok: false, message: "統合申請 ID が必要です。" };
 
@@ -754,6 +762,7 @@ export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActi
         before: null,
         after: { ...afterRequest },
         actor_user_id: authUserId,
+        actor_x_user_id: actorXUserId,
         retention_class: "long_audit",
       },
     ],
@@ -818,6 +827,7 @@ export async function updateXIdProfile(formData: FormData): Promise<XIdActionRes
         before: { ...row },
         after: { ...after },
         actor_user_id: authUserId,
+        actor_x_user_id: xUserId,
         retention_class: "long_audit",
       },
     ],
@@ -883,6 +893,7 @@ export async function deleteLinkedXId(formData: FormData): Promise<XIdActionResu
       before: { ...link },
       after: null,
       actor_user_id: authUserId,
+      actor_x_user_id: xUserId,
       retention_class: "long_audit",
     },
   ];
@@ -902,6 +913,7 @@ export async function deleteLinkedXId(formData: FormData): Promise<XIdActionResu
       before: { ...beforeUser },
       after: { ...afterUser },
       actor_user_id: authUserId,
+      actor_x_user_id: xUserId,
       retention_class: "long_audit",
     });
   }
@@ -944,6 +956,7 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
         before: { ...row },
         after: { ...after },
         actor_user_id: authUserId,
+        actor_x_user_id: xUserId,
         reason: "icon_select",
         retention_class: "long_audit",
       },
@@ -1018,6 +1031,7 @@ export async function uploadXIdIcon(
           before: { ...row },
           after: { ...after },
           actor_user_id: authUserId,
+          actor_x_user_id: xUserId,
           reason: "icon_upload",
           retention_class: "long_audit",
         },

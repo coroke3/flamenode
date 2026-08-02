@@ -89,6 +89,7 @@ export default async function ManageEventEditPage({
       <section className="fn-console-section">
         <EventForm
           mode="edit"
+          draftAuthUserId={user.id}
           editableSections={{
             basic: canManageBasic,
             publish: canManagePublish,

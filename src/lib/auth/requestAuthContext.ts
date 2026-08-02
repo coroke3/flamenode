@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import type { Session } from "next-auth";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { unstable_rethrow } from "next/navigation";
 import {
   CurrentUserUnavailableError,
@@ -53,28 +53,25 @@ async function loadManagementAccess(
   }
 
   const canAccessManage = await withDatabaseRead(async (db) => {
-    const approved = await db
-      .select({ x_user_id: xUserAccountLinks.x_user_id })
-      .from(xUserAccountLinks)
-      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-      .where(
-        and(
-          eq(xUserAccountLinks.auth_user_id, authUserId),
-          eq(xUsers.approval_status, "approved"),
-        ),
-      )
-      .limit(32);
-    const xIds = approved.map((row) => row.x_user_id);
-    if (xIds.length === 0) return false;
-
+    // 任意の件数の linked X / event_staff を対象に、bind 数を増やさず直接JOINする。
+    // 無順序 limit は権限行を範囲外にして管理導線を隠し得るため使用しない。
     const rows = await db
       .select({
         permission_preset: eventStaff.permission_preset,
         custom_permission_keys_json: eventStaff.custom_permission_keys_json,
       })
       .from(eventStaff)
-      .where(inArray(eventStaff.x_user_id, xIds))
-      .limit(24);
+      .innerJoin(
+        xUserAccountLinks,
+        eq(xUserAccountLinks.x_user_id, eventStaff.x_user_id),
+      )
+      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
+      .where(
+        and(
+          eq(xUserAccountLinks.auth_user_id, authUserId),
+          eq(xUsers.approval_status, "approved"),
+        )!,
+      );
 
     return rows.some((row) => resolveStaffPermissionKeys(row).size > 0);
   });

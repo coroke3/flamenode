@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videoEvents, videoModerationCases, videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -102,6 +102,22 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   const { db } = guard;
   const video = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!video) return { ok: false, message: "対象作品が見つかりません。" };
+  const existingOpenCase = (
+    await db
+      .select({ id: videoModerationCases.id })
+      .from(videoModerationCases)
+      .where(
+        and(
+          eq(videoModerationCases.video_id, videoId),
+          eq(videoModerationCases.case_type, caseType),
+          eq(videoModerationCases.status, "open"),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (existingOpenCase) {
+    return { ok: false, message: "同じ種類の open case が既に存在します。既存 case を更新してください。" };
+  }
   const now = Math.floor(Date.now() / 1000);
   const id = generateId("vmc");
   const caseAfter: typeof videoModerationCases.$inferSelect = {
@@ -111,7 +127,29 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     related_x_user_id: relatedXUserId, created_by_user_id: guard.user.id,
     resolved_by_user_id: null, created_at: now, resolved_at: null,
   };
-  const statements: BatchItem<"sqlite">[] = [db.insert(videoModerationCases).values(caseAfter)];
+  // pending partial unique index が未適用でも、同一D1 transaction内の
+  // NOT EXISTS + changes() assertionで同video/typeのopen重複を防ぐ。
+  const statements: BatchItem<"sqlite">[] = [db.run(sql`
+    INSERT INTO video_moderation_cases (
+      id, video_id, case_type, status, public_reason, private_note,
+      due_at, locked_until, attempt_count, related_x_user_id,
+      created_by_user_id, resolved_by_user_id, created_at, resolved_at
+    )
+    SELECT
+      ${caseAfter.id}, ${caseAfter.video_id}, ${caseAfter.case_type},
+      ${caseAfter.status}, ${caseAfter.public_reason}, ${caseAfter.private_note},
+      ${caseAfter.due_at}, ${caseAfter.locked_until}, ${caseAfter.attempt_count},
+      ${caseAfter.related_x_user_id}, ${caseAfter.created_by_user_id},
+      ${caseAfter.resolved_by_user_id}, ${caseAfter.created_at},
+      ${caseAfter.resolved_at}
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM video_moderation_cases
+      WHERE video_id = ${videoId}
+        AND case_type = ${caseType}
+        AND status = 'open'
+    )
+  `)];
   const expected: (number | null)[] = [1];
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "CREATE", after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_create", reason: publicReason || "運営確認ケースの作成", strict: true }];
 

@@ -26,14 +26,19 @@ export interface XIdMergeAdminResult {
 }
 
 async function requireAdmin(): Promise<
-  | { ok: true; authUserId: string; db: DB }
+  | { ok: true; authUserId: string; db: DB; actorXUserId: string | null }
   | { ok: false; result: XIdMergeAdminResult }
 > {
   const guard = await requireAdminWrite("xid_links");
   if (!guard.ok) {
     return { ok: false, result: { ok: false, message: guard.message } };
   }
-  return { ok: true, authUserId: guard.user.id, db: guard.db };
+  return {
+    ok: true,
+    authUserId: guard.user.id,
+    db: guard.db,
+    actorXUserId: normalizeXId(guard.activeXId ?? "") || null,
+  };
 }
 
 function revalidateMergePaths(sourceXUserId?: string | null, targetXUserId?: string | null): void {
@@ -111,6 +116,7 @@ export async function createXIdMergeRequest(formData: FormData): Promise<XIdMerg
           before: null,
           after: row,
           actor_user_id: guard.authUserId,
+          actor_x_user_id: guard.actorXUserId,
           reason: "管理者がX ID統合申請を作成",
           context: "x-id-merge:request",
           retention_class: "long_audit",
@@ -186,6 +192,7 @@ async function setRequestStatus(
           before: current,
           after,
           actor_user_id: guard.authUserId,
+          actor_x_user_id: guard.actorXUserId,
           reason: status === "approved" ? "X ID申請を承認" : "X ID申請を却下",
           context: "x-id-merge:request",
           retention_class: "long_audit",

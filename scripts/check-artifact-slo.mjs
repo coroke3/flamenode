@@ -24,6 +24,8 @@ const expectedKeys = [
   "users/index.json",
   "recommend.json",
   "rules/current.json",
+  "youtube/related-blocklist.v1.json",
+  "videos/random-pool.v1.json",
   "visibility/blocked-entities.v1.json",
 ];
 
@@ -37,6 +39,9 @@ for (const probe of ARTIFACT_SLO_PROBES) {
     probe.requiredKeys.includes("generated_at"),
     `${probe.key}: generated_at is required for SLO`,
   );
+  if (probe.key === "visibility/blocked-entities.v1.json") {
+    assert.equal(probe.allowMissing, true, "visibility manifest is bootstrap-ok");
+  }
   assert.match(
     staticDeliveryDoc,
     new RegExp(probe.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),

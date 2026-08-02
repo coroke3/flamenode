@@ -132,6 +132,7 @@ export default async function UserPage({
                 pageSize: staticLoaded.data.works.pageSize,
                 generatedAt: staticLoaded.data.generatedAt,
               } satisfies StaticUserVideoPage,
+              state: "ready" as const,
             }),
         collabPaging.page > 1
           ? loadStaticUserCollabsPage({
@@ -148,6 +149,7 @@ export default async function UserPage({
                 pageSize: staticLoaded.data.collabs.pageSize,
                 generatedAt: staticLoaded.data.generatedAt,
               } satisfies StaticUserVideoPage,
+              state: "ready" as const,
             }),
       ]);
       const beyondStaticPages =
@@ -156,6 +158,16 @@ export default async function UserPage({
     const missingPagedSection =
       (worksPaging.page > 1 && !worksLoaded.page) ||
       (collabPaging.page > 1 && !collabsLoaded.page);
+    const unavailablePagedSection =
+      (worksPaging.page > 1 &&
+        (worksLoaded.state === "unavailable" || worksLoaded.state === "reflecting")) ||
+      (collabPaging.page > 1 &&
+        (collabsLoaded.state === "unavailable" || collabsLoaded.state === "reflecting"));
+    if (unavailablePagedSection) {
+      return worksLoaded.state === "reflecting" || collabsLoaded.state === "reflecting"
+        ? <PublicReflectionPendingNotice />
+        : <PublicDataUnavailableNotice />;
+    }
     if (beyondStaticPages || missingPagedSection) {
       notFound();
     }
