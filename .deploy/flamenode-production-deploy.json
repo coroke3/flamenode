@@ -1,0 +1,36 @@
+{
+  "format_version": 1,
+  "merged_commit_sha": null,
+  "deployed_at": null,
+  "workers": {
+    "flamenode-content-jobs": {
+      "previous_version_id": null,
+      "new_version_id": null
+    },
+    "flamenode-fast-jobs": {
+      "previous_version_id": null,
+      "new_version_id": null
+    },
+    "flamenode-sync-jobs": {
+      "previous_version_id": null,
+      "new_version_id": null
+    },
+    "flamenode-web": {
+      "previous_version_id": null,
+      "new_version_id": null
+    }
+  },
+  "migration": {
+    "status": "not_started",
+    "readonly_preflight": null,
+    "pending": []
+  },
+  "smoke": {
+    "status": "pending",
+    "ran_at": null
+  },
+  "rollback": {
+    "target_commit_sha": null,
+    "notes": ""
+  }
+}

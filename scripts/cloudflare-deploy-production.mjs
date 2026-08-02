@@ -4,6 +4,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { checkOpenNextOutput } from "./check-open-next-output.mjs";
 import {
+  beginDeployManifest,
+  markDeployMigrationPreflightPassed,
+  parseWranglerDeployVersionId,
+  PRODUCTION_DEPLOY_ORDER,
+  recordDeployWorkerVersion,
+} from "./deploy-manifest.mjs";
+import {
   materializeProductionConfigs,
   resolveTool,
   runProcess,
@@ -44,6 +51,7 @@ export function deployProduction({
   run = runProcess,
 } = {}) {
   const verified = verify({ env, cwd: repoRoot });
+  beginDeployManifest(repoRoot, verified.commit);
   const configs = prepareConfigs({ env, repoRoot, commit: verified.commit });
   checkOutput({ env, repoRoot, commit: verified.commit });
 
@@ -71,14 +79,14 @@ export function deployProduction({
     wranglerBin,
     run,
   });
+  markDeployMigrationPreflightPassed(repoRoot);
 
   const deploys = [
     {
-      label: "cloudflare-deploy:flamenode-web",
-      service: "flamenode-web",
-      preserveWorkersBuildName: true,
+      label: "cloudflare-deploy:flamenode-content-jobs",
+      service: "flamenode-content-jobs",
       executable: process.execPath,
-      args: [openNextBin, "deploy", "--config", configs.web],
+      args: [wranglerBin, "deploy", "--config", configs["content-jobs"]],
     },
     {
       label: "cloudflare-deploy:flamenode-fast-jobs",
@@ -87,22 +95,37 @@ export function deployProduction({
       args: [wranglerBin, "deploy", "--config", configs["fast-jobs"]],
     },
     {
-      label: "cloudflare-deploy:flamenode-content-jobs",
-      service: "flamenode-content-jobs",
-      executable: process.execPath,
-      args: [wranglerBin, "deploy", "--config", configs["content-jobs"]],
-    },
-    {
       label: "cloudflare-deploy:flamenode-sync-jobs",
       service: "flamenode-sync-jobs",
       executable: process.execPath,
       args: [wranglerBin, "deploy", "--config", configs["sync-jobs"]],
     },
+    {
+      label: "cloudflare-deploy:flamenode-web",
+      service: "flamenode-web",
+      preserveWorkersBuildName: true,
+      executable: process.execPath,
+      args: [openNextBin, "deploy", "--config", configs.web],
+    },
   ];
+
+  const runWithManifest = (request) => {
+    const result = run(request);
+    const service = deploys.find((item) => item.label === request.label)?.service;
+    if (service) {
+      const versionId = parseWranglerDeployVersionId(
+        `${result?.stdout ?? ""}\n${result?.stderr ?? ""}`,
+      );
+      if (versionId) {
+        recordDeployWorkerVersion(repoRoot, service, versionId);
+      }
+    }
+    return result;
+  };
 
   for (const deployment of deploys) {
     const { service, preserveWorkersBuildName, ...request } = deployment;
-    run({
+    runWithManifest({
       ...request,
       cwd: repoRoot,
       env: deploymentEnvironment(env, {
@@ -111,7 +134,9 @@ export function deployProduction({
       }),
     });
   }
-  console.log("[cloudflare-deploy-production] OK (web -> fast -> content -> sync)");
+  console.log(
+    `[cloudflare-deploy-production] OK (${PRODUCTION_DEPLOY_ORDER.join(" -> ")})`,
+  );
   return { commit: verified.commit, configs, order: deploys.map((item) => item.label) };
 }
 

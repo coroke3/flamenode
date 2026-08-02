@@ -3,6 +3,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertCommitSha, normalizedUrl } from "./cloudflare-production.mjs";
+import { markDeploySmokeResult } from "./deploy-manifest.mjs";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 /** Workers deploy can lag behind wrangler success; allow ~2 min before failing smoke. */
@@ -290,21 +291,22 @@ function validateCronHealthBody(settings, service, body) {
 }
 
 function validateDeepHealthBody(settings, body) {
-  assertKeys(body, ["ok", "service", "commit", "checks"], "deep health");
+  assertKeys(body, ["ok", "service", "commit", "checks", "status"], "deep health");
   assertKeys(
     body.checks,
-    ["d1", "kv", "r2", "schema", "queues", "static_artifacts"],
+    ["d1", "kv", "r2", "schema", "queues", "static_artifacts", "public_visibility"],
     "deep health checks",
   );
   if (
     body.ok !== true ||
+    body.status !== "ok" ||
     body.service !== "flamenode-web" ||
     body.commit !== settings.commit ||
-    ["d1", "kv", "r2", "schema", "queues", "static_artifacts"].some(
+    ["d1", "kv", "r2", "schema", "queues", "static_artifacts", "public_visibility"].some(
       (name) => body.checks[name] !== "ok",
     )
   ) {
-    throw new Error("deep health: D1/KV/R2/schema/queues/static checks failed or commit mismatched.");
+    throw new Error("deep health: D1/KV/R2/schema/queues/static/visibility checks failed or commit mismatched.");
   }
 }
 
@@ -492,7 +494,9 @@ function isMain() {
 if (isMain()) {
   try {
     await runSmoke();
+    markDeploySmokeResult(process.cwd(), { ok: true });
   } catch (error) {
+    markDeploySmokeResult(process.cwd(), { ok: false });
     console.error(`[smoke-cloudflare] FAILED\n${error.message}`);
     process.exitCode = 1;
   }

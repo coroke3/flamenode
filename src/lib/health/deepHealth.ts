@@ -3,15 +3,21 @@ import {
   REQUIRED_SCHEMA_VERSION,
   RUNTIME_CRITICAL_TABLES,
 } from "./schemaContract.ts";
+import { assertArtifactSloFresh } from "./artifactSlo.ts";
+import { evaluateDeepHealthQueueConfiguration } from "./queueEmergency.ts";
 import {
-  assertDeepHealthQueueConfiguration,
-  assertStaticArtifactsFresh,
-} from "./deepHealthQueues.ts";
+  normalizePublicVisibilityBlockedEntitiesManifest,
+  PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
+  resolvePublicVisibilityGuardMode,
+  type PublicVisibilityGuardMode,
+} from "../publicData/publicVisibilityManifestCore.ts";
 
 export { REQUIRED_SCHEMA_VERSION } from "./schemaContract.ts";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
 const PROBE_KEY = "__flamenode_read_only_health_probe__";
+
+type DeepHealthCheckStatus = "ok" | "degraded";
 
 export interface DeepHealthEnv {
   DB: {
@@ -28,13 +34,37 @@ export interface DeepHealthEnv {
   };
   BUILD_COMMIT_SHA?: string;
   WORKER_ADMIN_TOKEN?: string;
+  FLAMENODE_LOCAL_PREVIEW?: string;
+  PUBLIC_VISIBILITY_GUARD_MODE?: string;
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
   QUEUE_YOUTUBE_SYNC_ENABLED?: string;
+  QUEUE_EMERGENCY_DISABLED?: string;
+  QUEUE_EMERGENCY_REASON?: string;
+  QUEUE_EMERGENCY_EXPIRES_AT?: string;
   NOTIFICATION_WAKE_QUEUE?: { send?: unknown };
   STATIC_REBUILD_WAKE_QUEUE?: { send?: unknown };
   YOUTUBE_SYNC_WAKE_QUEUE?: { send?: unknown };
 }
+
+export type DeepHealthChecks = {
+  d1: DeepHealthCheckStatus;
+  kv: DeepHealthCheckStatus;
+  r2: DeepHealthCheckStatus;
+  schema: DeepHealthCheckStatus;
+  queues: DeepHealthCheckStatus;
+  static_artifacts: DeepHealthCheckStatus;
+  public_visibility: DeepHealthCheckStatus;
+};
+
+export type DeepHealthResult = {
+  ok: boolean;
+  status: "ok" | "degraded";
+  service: "flamenode-web";
+  commit: string;
+  checks: DeepHealthChecks;
+  public_visibility_guard_mode?: PublicVisibilityGuardMode;
+};
 
 function constantTimeEqual(left: string, right: string): boolean {
   const length = Math.max(left.length, right.length);
@@ -68,19 +98,36 @@ export function authorizeDeepHealth(
   return null;
 }
 
-export async function runDeepHealthChecks(env: DeepHealthEnv): Promise<{
-  ok: true;
-  service: "flamenode-web";
-  commit: string;
-  checks: {
-    d1: "ok";
-    kv: "ok";
-    r2: "ok";
-    schema: "ok";
-    queues: "ok";
-    static_artifacts: "ok";
-  };
-}> {
+async function assertPublicVisibilityManifestFresh(
+  bucket: DeepHealthEnv["BUCKET"],
+  nowSec: number,
+): Promise<void> {
+  const object = await bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
+  if (!object) {
+    return;
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(await object.text());
+  } catch {
+    throw new Error("public visibility manifest malformed");
+  }
+  const normalized = normalizePublicVisibilityBlockedEntitiesManifest(payload);
+  if (!normalized) {
+    throw new Error("public visibility manifest malformed");
+  }
+  const generatedAt = Number(normalized.generated_at);
+  if (!Number.isFinite(generatedAt) || generatedAt <= 0) {
+    throw new Error("public visibility manifest: invalid generated_at");
+  }
+  if (generatedAt > nowSec + 60) {
+    throw new Error("public visibility manifest: generated_at is in the future");
+  }
+}
+
+export async function runDeepHealthChecks(
+  env: DeepHealthEnv,
+): Promise<DeepHealthResult> {
   const commit = env.BUILD_COMMIT_SHA?.trim() ?? "";
   if (!COMMIT_PATTERN.test(commit)) throw new Error("invalid deployment commit");
 
@@ -106,20 +153,30 @@ export async function runDeepHealthChecks(env: DeepHealthEnv): Promise<{
     throw new Error("required runtime table mismatch");
   }
 
-  assertDeepHealthQueueConfiguration(env);
-  await assertStaticArtifactsFresh(env.BUCKET, nowSec);
+  const queueEvaluation = evaluateDeepHealthQueueConfiguration(env);
+  await assertArtifactSloFresh(env.BUCKET, nowSec);
+  const guardMode = resolvePublicVisibilityGuardMode(
+    env.PUBLIC_VISIBILITY_GUARD_MODE,
+  );
+  await assertPublicVisibilityManifestFresh(env.BUCKET, nowSec);
+
+  const checks: DeepHealthChecks = {
+    d1: "ok",
+    kv: "ok",
+    r2: "ok",
+    schema: "ok",
+    queues: queueEvaluation.status,
+    static_artifacts: "ok",
+    public_visibility: "ok",
+  };
+  const degraded = queueEvaluation.status === "degraded";
 
   return {
-    ok: true,
+    ok: !degraded,
+    status: degraded ? "degraded" : "ok",
     service: "flamenode-web",
     commit: commit.toLowerCase(),
-    checks: {
-      d1: "ok",
-      kv: "ok",
-      r2: "ok",
-      schema: "ok",
-      queues: "ok",
-      static_artifacts: "ok",
-    },
+    checks,
+    public_visibility_guard_mode: guardMode,
   };
 }

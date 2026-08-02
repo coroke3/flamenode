@@ -21,7 +21,9 @@ export async function GET(request: Request): Promise<Response> {
   if (unauthorized) return unauthorized;
 
   try {
-    return Response.json(await runDeepHealthChecks(env), {
+    const result = await runDeepHealthChecks(env);
+    return Response.json(result, {
+      status: result.status === "degraded" ? 200 : result.ok ? 200 : 503,
       headers: { "Cache-Control": "no-store" },
     });
   } catch {
