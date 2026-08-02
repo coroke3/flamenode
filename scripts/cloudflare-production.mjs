@@ -177,6 +177,16 @@ export function normalizedUrl(raw, name) {
   return parsed.origin;
 }
 
+/** True when the HTTPS origin is a Cloudflare workers.dev hostname. */
+export function isWorkersDevOrigin(origin) {
+  try {
+    const hostname = new URL(origin).hostname.toLowerCase();
+    return hostname === "workers.dev" || hostname.endsWith(".workers.dev");
+  } catch {
+    return false;
+  }
+}
+
 export function gitHead(cwd = process.cwd(), exec = execFileSync) {
   try {
     return exec("git", ["rev-parse", "HEAD"], {
@@ -321,6 +331,18 @@ export function verifyProductionEnvironment({
     urls.get("FLAMENODE_WEB_URL") !== urls.get("AUTH_URL")
   ) {
     errors.push("AUTH_URL must match FLAMENODE_WEB_URL");
+  }
+  // Custom-domain cutover: web origin must not stay on workers.dev (AUTH/HTML bake-in).
+  // Bootstrap-only escape hatch: FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1
+  if (value(env, "FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN") !== "1") {
+    for (const name of ["FLAMENODE_WEB_URL", "NEXT_PUBLIC_SITE_URL", "AUTH_URL"]) {
+      const origin = urls.get(name);
+      if (origin && isWorkersDevOrigin(origin)) {
+        errors.push(
+          `${name} must be the custom HTTPS origin after cutover (not workers.dev); set FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1 only for bootstrap smoke`,
+        );
+      }
+    }
   }
   const serviceUrls = [
     urls.get("FLAMENODE_WEB_URL"),
@@ -555,6 +577,16 @@ function injectPublicVisibilityGuardMode(content, env) {
   return injectStringVariable(content, "PUBLIC_VISIBILITY_GUARD_MODE", normalized);
 }
 
+/** Optional Build Variable: bake/runtime GA measurement ID for web. */
+function injectNextPublicGaMeasurementId(content, env) {
+  const raw = value(env, "NEXT_PUBLIC_GA_MEASUREMENT_ID");
+  if (!raw) return content;
+  if (!/^G-[A-Z0-9]+$/i.test(raw)) {
+    throw new Error('NEXT_PUBLIC_GA_MEASUREMENT_ID must look like "G-XXXXXXXX"');
+  }
+  return injectStringVariable(content, "NEXT_PUBLIC_GA_MEASUREMENT_ID", raw);
+}
+
 function injectSyncJobsFeatureFlags(content, env) {
   let output = content;
   for (const name of SYNC_JOBS_FEATURE_FLAG_NAMES) {
@@ -763,6 +795,7 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
       output = injectStringVariable(output, name, value(env, name));
     }
     output = injectPublicVisibilityGuardMode(output, env);
+    output = injectNextPublicGaMeasurementId(output, env);
   }
   if (target.key === "fast-jobs") {
     output = replaceRequired(

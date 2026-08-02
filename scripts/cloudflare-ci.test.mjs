@@ -454,6 +454,32 @@ test("QUEUE feature flag injection preserves CRLF line endings", () =>
     assert.doesNotMatch(fast, /QUEUE_DISPATCH_ENABLED = "1"\rQUEUE_/);
   }));
 
+test("production rejects workers.dev web origins after custom-domain cutover", () => {
+  assert.throws(
+    () =>
+      verifyProduction({
+        env: productionEnv({
+          FLAMENODE_WEB_URL: "https://flamenode-web.example.workers.dev",
+          NEXT_PUBLIC_SITE_URL: "https://flamenode-web.example.workers.dev",
+          AUTH_URL: "https://flamenode-web.example.workers.dev",
+        }),
+        requireGitHead: false,
+      }),
+    /not workers\.dev/,
+  );
+  assert.doesNotThrow(() =>
+    verifyProduction({
+      env: productionEnv({
+        FLAMENODE_WEB_URL: "https://flamenode-web.example.workers.dev",
+        NEXT_PUBLIC_SITE_URL: "https://flamenode-web.example.workers.dev",
+        AUTH_URL: "https://flamenode-web.example.workers.dev",
+        FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN: "1",
+      }),
+      requireGitHead: false,
+    }),
+  );
+});
+
 test("PUBLIC_VISIBILITY_GUARD_MODE injects enforce for web from Build env", () =>
   withTempDirectory("flamenode-production-visibility-guard-", (repoRoot) => {
     writeFixtureTemplates(repoRoot);
@@ -464,6 +490,18 @@ test("PUBLIC_VISIBILITY_GUARD_MODE injects enforce for web from Build env", () =
     });
     const web = fs.readFileSync(configs.web, "utf8");
     assert.match(web, /PUBLIC_VISIBILITY_GUARD_MODE = "enforce"/);
+  }));
+
+test("NEXT_PUBLIC_GA_MEASUREMENT_ID injects for web from Build env", () =>
+  withTempDirectory("flamenode-production-ga-measurement-", (repoRoot) => {
+    writeFixtureTemplates(repoRoot);
+    const configs = materializeProductionConfigs({
+      env: productionEnv({ NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-TESTMEASURE1" }),
+      repoRoot,
+      commit: COMMIT,
+    });
+    const web = fs.readFileSync(configs.web, "utf8");
+    assert.match(web, /NEXT_PUBLIC_GA_MEASUREMENT_ID = "G-TESTMEASURE1"/);
   }));
 
 test("GA4_SYNC_ENABLED=1 requires GA4 remote secrets during secret preflight", () => {

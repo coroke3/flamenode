@@ -103,9 +103,12 @@ Cloudflare側の自動dependency installを止め、`npm ci`を1回に固定し�
 | `QUEUE_DISPATCH_ENABLED` | Queue wake 有効時は `"1"`（未設定時は template `"0"`） |
 | `QUEUE_CONTINUATION_ENABLED` | 継続 wake 有効時は `"1"` |
 | `QUEUE_YOUTUBE_SYNC_ENABLED` | YouTube sync wake 有効時は `"1"` |
+| `GA4_SYNC_ENABLED` | 急上昇同期を有効化するとき `"1"`（未設定時は template `"0"`。`1` なら sync-jobs の GA4 Runtime Secrets が必須） |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | 任意だが急上昇計測を使うなら Build Variable にも `G-...` を置く（OpenNext bake-in + web inject） |
 | `PUBLIC_VISIBILITY_GUARD_MODE` | 任意。`observe`（既定）/ `enforce` / `off`。本番で fence を強制するなら `enforce` |
+| `FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN` | 初回 `workers.dev` smoke だけ `"1"`。custom domain 切替後は **未設定**のままにする |
 
-custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` を **カスタム origin**（例: `https://flamenode.net`）へ揃え、`workers.dev` のまま放置しない。不一致のまま deploy すると Runtime Variables と HTML の site URL が上書きされる。
+custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` を **カスタム origin**（例: `https://flamenode.net`）へ揃え、`workers.dev` のまま放置しない。不一致のまま deploy すると Runtime Variables と HTML の site URL が上書きされる。production 検証は、escape hatch 無しで web 系3 URL が `*.workers.dev` のとき **失敗**する。
 
 `WORKERS_CI_COMMIT_SHA`はWorkers Buildsが自動提供する40桁SHAを使用し、Dashboardで上書きしません。Git HEADと一致しない、欠落する、形式が不正な場合はproduction deployを停止し、`unknown`で継続しません。
 

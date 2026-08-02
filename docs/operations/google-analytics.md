@@ -56,8 +56,9 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID="G-XXXXXXXXXX"
 1. Google Cloud 側の準備（下記）を完了する
 2. `workers/sync-jobs` の Runtime Secrets に `GA4_PROPERTY_ID` / `GA4_SERVICE_ACCOUNT_EMAIL` / `GA4_SERVICE_ACCOUNT_PRIVATE_KEY` を登録
 3. Cloudflare Workers Builds の Build Variables に `GA4_SYNC_ENABLED=1` を設定（`QUEUE_*` と同様、生成 wrangler へ inject）
-4. 次回 `sync-jobs` deploy 後、毎時 `:07` UTC で `ga4-trending-sync` が走る
-5. Workers ログの構造化イベント（`job: ga4-trending-sync`）と R2 `analytics/trending.json` を確認
+4. 同じ Build Variables に `NEXT_PUBLIC_GA_MEASUREMENT_ID=G-...` を設定（OpenNext bake-in と web 生成 config inject）
+5. 次回 `sync-jobs` deploy 後、毎時 `:07` UTC で `ga4-trending-sync` が走る
+6. Workers ログの構造化イベント（`job: ga4-trending-sync`）と R2 `analytics/trending.json` を確認
 
 `GA4_SYNC_ENABLED=0` のままでは同期は skipped。表示は前回 JSON または空状態。
 
