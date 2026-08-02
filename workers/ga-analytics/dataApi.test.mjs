@@ -116,30 +116,35 @@ test("fetchVideoViewPeriods aggregates a successful single-page report", async (
   assert.equal(videoA.views_30d, 30);
 });
 
-test("fetchVideoViewPeriods fail-closed on rowCount mismatch", async () => {
-  const fetchImpl = async (_input, init) => {
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    const rows =
-      (body.offset ?? 0) === 0
-        ? [ga4Row("last_2_days", "video-a", 1)]
-        : [];
-    return new Response(
-      JSON.stringify(ga4ReportBody(rows, { rowCount: 5 })),
-      {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      },
-    );
-  };
+test("fetchVideoViewPeriods tolerates multi-dateRange rowCount cardinality quirks", async () => {
+  // GA4 often reports rowCount as distinct video_id count while rows[] expands
+  // by dateRange (e.g. rowCount=1 with 4 range rows).
+  const rows = [
+    ga4Row("last_2_days", "video-a", 11),
+    ga4Row("last_5", "video-a", 12),
+    ga4Row("last_7", "video-a", 13),
+    ga4Row("last_30", "video-a", 30),
+  ];
+  const fetchImpl = async () =>
+    new Response(JSON.stringify(ga4ReportBody(rows, { rowCount: 1 })), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
 
-  await assert.rejects(
-    () =>
-      fetchVideoViewPeriods(ga4Env(), new ExternalRequestBudget(3), fetchImpl),
-    /ga4_report_row_count_mismatch/,
+  const result = await fetchVideoViewPeriods(
+    ga4Env(),
+    new ExternalRequestBudget(2),
+    fetchImpl,
   );
+  const videoA = result.periods.find((row) => row.video_id === "video-a");
+  assert.ok(videoA);
+  assert.equal(videoA.views_2d, 11);
+  assert.equal(videoA.views_5d, 12);
+  assert.equal(videoA.views_7d, 13);
+  assert.equal(videoA.views_30d, 30);
 });
 
-test("fetchVideoViewPeriods paginates until rowCount is satisfied", async () => {
+test("fetchVideoViewPeriods paginates while pages are full", async () => {
   const pageOne = Array.from({ length: GA4_REPORT_PAGE_SIZE }, (_, index) =>
     ga4Row("last_2_days", `video-page1-${index}`, 1),
   );
@@ -151,7 +156,7 @@ test("fetchVideoViewPeriods paginates until rowCount is satisfied", async () => 
     const rows = body.offset === 0 ? pageOne : pageTwo;
     return new Response(
       JSON.stringify(
-        ga4ReportBody(rows, { rowCount: GA4_REPORT_PAGE_SIZE + 1 }),
+        ga4ReportBody(rows, { rowCount: 1 }),
       ),
       {
         status: 200,

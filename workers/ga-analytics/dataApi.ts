@@ -312,10 +312,13 @@ export async function fetchVideoViewPeriods(
   const accessToken = await getGa4AccessToken(env, budget, fetchImpl, signal);
   const collectedRows: Ga4ReportRow[] = [];
   let dimensionIndices: { dateRange: number; videoId: number } | null = null;
-  let expectedRowCount: number | null = null;
   let latestQuota: Ga4PropertyQuota | null = null;
   let offset = 0;
 
+  // Multiple named dateRanges make GA4 append a synthetic `dateRange` dimension.
+  // In that shape, `rowCount` is often the unique primary-dimension cardinality
+  // (e.g. distinct video_id), while `rows` expands to video_id × dateRange.
+  // Paginate by page fullness only — never treat rowCount as rows.length.
   while (true) {
     const page = await runGa4ReportPage(
       env,
@@ -331,26 +334,12 @@ export async function fetchVideoViewPeriods(
     if (!dimensionIndices) {
       dimensionIndices = resolveDimensionIndices(page.dimensionHeaders ?? []);
     }
-    if (expectedRowCount == null && page.rowCount != null) {
-      const parsed = Number(page.rowCount);
-      if (Number.isFinite(parsed) && parsed >= 0) {
-        expectedRowCount = Math.floor(parsed);
-      }
-    }
     const rows = page.rows ?? [];
     collectedRows.push(...rows);
-    if (rows.length === 0) break;
-    if (expectedRowCount != null && collectedRows.length >= expectedRowCount) break;
-    if (expectedRowCount == null && rows.length < GA4_REPORT_PAGE_SIZE) break;
+    if (rows.length < GA4_REPORT_PAGE_SIZE) break;
     offset += rows.length;
   }
 
-  if (
-    expectedRowCount != null &&
-    collectedRows.length !== expectedRowCount
-  ) {
-    throw new Error("ga4_report_row_count_mismatch");
-  }
   if (!dimensionIndices) {
     throw new Error("ga4_report_dimension_header_missing");
   }
