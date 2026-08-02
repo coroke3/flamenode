@@ -362,6 +362,14 @@ export const videos = sqliteTable(
       .where(
         sql`youtube_video_id IS NOT NULL AND youtube_video_id <> '' AND visibility_status NOT IN ('archived', 'voided')`,
       ),
+    publicIdProbeIdx: index("videos_public_id_probe_idx")
+      .on(t.id, t.visibility_status)
+      .where(sql`visibility_status = 'public'`),
+    youtubePublicProbeIdx: index("videos_youtube_public_probe_idx")
+      .on(t.youtube_video_id, t.visibility_status)
+      .where(
+        sql`visibility_status = 'public' AND youtube_video_id IS NOT NULL AND youtube_video_id <> ''`,
+      ),
   }),
 );
 
