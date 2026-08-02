@@ -553,6 +553,32 @@ export const videoInteractions = sqliteTable(
   }),
 );
 
+export const videoInteractionsAuth = sqliteTable(
+  "video_interactions_auth",
+  {
+    auth_user_id: text("auth_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    video_id: text("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    interaction_type: text("interaction_type", {
+      enum: ["like", "bookmark"],
+    }).notNull(),
+    created_at: integer("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({
+      columns: [t.auth_user_id, t.video_id, t.interaction_type],
+    }),
+    byVideoType: index("video_interactions_auth_video_type_idx").on(
+      t.video_id,
+      t.interaction_type,
+      t.created_at,
+    ),
+  }),
+);
+
 export const systemSettings = sqliteTable(
   "system_settings",
   {

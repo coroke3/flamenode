@@ -20,11 +20,11 @@ const [libraryPage, videoDetailPage, managePage] = await Promise.all([
 test("ライブラリ一覧はinteraction IDをINへ展開せず動画へ直接JOINする", () => {
   assert.match(
     libraryPage,
-    /\.from\(videoInteractions\)[\s\S]*?\.innerJoin\(videosTable,\s*eq\(videosTable\.id, videoInteractions\.video_id\)\)/,
+    /\.from\(videoInteractionsAuth\)[\s\S]*?\.innerJoin\([\s\S]*?videosTable,[\s\S]*?eq\(videosTable\.id, videoInteractionsAuth\.video_id\)/,
   );
   assert.match(
     libraryPage,
-    /eq\(videoInteractions\.x_user_id, activeX\)[\s\S]*?eq\(videoInteractions\.interaction_type, tab\)[\s\S]*?ne\(videosTable\.visibility_status, "voided"\)/,
+    /eq\(videoInteractionsAuth\.auth_user_id, user\.id\)[\s\S]*?eq\(videoInteractionsAuth\.interaction_type, tab\)[\s\S]*?eq\(videosTable\.visibility_status, "public"\)/,
   );
   assert.doesNotMatch(libraryPage, /inArray\(videosTable\.id/);
 });

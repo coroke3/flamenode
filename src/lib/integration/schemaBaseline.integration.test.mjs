@@ -24,9 +24,13 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0045_align_visibility_defaults.sql",
     "0046_video_creator_profile_snapshot.sql",
     "0047_backfill_youtube_metadata_pending.sql",
+    "0048_cleanup_video_visibility_indexes.sql",
+    "0049_public_visibility_fences.sql",
+    "0050_x_identity_request_decisions.sql",
+    "0052_video_interactions_auth_expand.sql",
   ]);
-  assert.equal(result.tableCount, 42);
-  assert.equal(result.columnCount, 425);
+  assert.equal(result.tableCount, 43);
+  assert.equal(result.columnCount, 429);
   assert.ok(result.indexCount > 70);
   assert.ok(result.foreignKeyCount > 20);
   assert.ok(result.checkCount > 20);
@@ -66,18 +70,18 @@ test("column manifest detects type, nullability, PK and missing columns", () => 
       assertTableColumns("sample", expected, [
         { ...actual[0], type: "INTEGER" },
       ]),
-    /type不一致/,
+    /type荳堺ｸ閾ｴ/,
   );
   assert.throws(
     () =>
       assertTableColumns("sample", expected, [
         { ...actual[0], notnull: 0 },
       ]),
-    /notNull不一致/,
+    /notNull荳堺ｸ閾ｴ/,
   );
   assert.throws(
     () => assertTableColumns("sample", expected, [{ ...actual[0], pk: 0 }]),
-    /pk順不一致/,
+    /pk鬆・ｸ堺ｸ閾ｴ/,
   );
   assert.throws(
     () => assertTableColumns("sample", expected, []),
@@ -95,7 +99,7 @@ test("column manifest detects type, nullability, PK and missing columns", () => 
         ],
         actual,
       ),
-    /default不一致/,
+    /default荳堺ｸ閾ｴ/,
   );
 });
 
@@ -117,7 +121,7 @@ test("index manifest detects unique flag and column order", () => {
         unique: 0,
         columns: expected.columns,
       }),
-    /unique不一致/,
+    /unique荳堺ｸ閾ｴ/,
   );
   assert.throws(
     () =>
@@ -125,6 +129,6 @@ test("index manifest detects unique flag and column order", () => {
         unique: 1,
         columns: ["created_at", "event_id"],
       }),
-    /index列不一致/,
+    /index蛻嶺ｸ堺ｸ閾ｴ/,
   );
 });

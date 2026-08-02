@@ -12,13 +12,13 @@ test("interaction保存はinteraction・like集計・queue・監査を単一batc
   assert.equal((source.match(/mutateWithAudit\(db,/g) ?? []).length, 1);
   assert.match(source, /mutationStatements\.push\(\.\.\.queue\.statements\)/);
   assert.match(source, /expectedChanges\.push\(\.\.\.queue\.expectedChanges\)/);
-  assert.match(source, /table_name: "video_interactions"/);
+  assert.match(source, /table_name: "video_interactions_auth"/);
   assert.match(source, /table_name: "videos"/);
   assert.doesNotMatch(source, /adjustVideoAppLikeCount/);
 });
 
 test("interactionとvideos更新は読取snapshotをCAS条件に含める", () => {
-  assert.match(source, /eq\(videoInteractions\.created_at, existing!\.created_at\)/);
+  assert.match(source, /eq\(videoInteractionsAuth\.created_at, existing!\.created_at\)/);
   assert.match(source, /target\.visibility_status !== "public"/);
   assert.match(source, /interaction_target\.visibility_status = 'public'/);
   assert.match(source, /interaction_target\.updated_at = \$\{target\.updated_at\}/);

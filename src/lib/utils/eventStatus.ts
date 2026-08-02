@@ -8,6 +8,7 @@ import {
   isAcceptingEntries,
   isPointEvent,
   isPublicEventVisible,
+  normalizeEventVisibility,
   type EventDisplayStatus,
   type EventStatusInput,
   type EventVisibilityStatus,
@@ -21,6 +22,7 @@ export {
   isAcceptingEntries,
   isPointEvent,
   isPublicEventVisible,
+  normalizeEventVisibility,
 };
 export type { EventDisplayStatus, EventStatusInput, EventVisibilityStatus };
 

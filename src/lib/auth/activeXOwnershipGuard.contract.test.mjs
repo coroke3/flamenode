@@ -33,7 +33,7 @@ test("承認必須の共通ガードは Auth user 自身の承認済み X ID 集
   );
 });
 
-test("チャプターコメントは承認済み Active X ID を必須にする。like/bookmark は writeGuard で active X を要求し currentUser が承認済みに制限する", async () => {
+test("チャプターコメントは承認済み Active X ID を必須にする。like/bookmark は Auth user 単位で Active X を要求しない", async () => {
   const [chapterSource, interactionSource, currentUserSource] = await Promise.all([
     readSource("../actions/chapter.ts"),
     readSource("../actions/video/interaction.ts"),
@@ -46,9 +46,9 @@ test("チャプターコメントは承認済み Active X ID を必須にする�
   );
   assert.match(
     interactionSource,
-    /async function mutateVideoInteraction[\s\S]*?writeGuard\(\{[\s\S]*?requireActiveXId:\s*true,[\s\S]*?requireApprovedActiveXId:\s*false,[\s\S]*?feature:\s*"like_or_bookmark"/,
+    /async function mutateVideoInteraction[\s\S]*?writeGuard\(\{[\s\S]*?requireActiveXId:\s*false,[\s\S]*?requireApprovedActiveXId:\s*false,[\s\S]*?feature:\s*"like_or_bookmark"/,
   );
-  assert.match(interactionSource, /resolveActiveXUserId/);
+  assert.match(interactionSource, /videoInteractionsAuth/);
   assert.match(currentUserSource, /resolveActiveXUserId/);
   assert.doesNotMatch(
     interactionSource,

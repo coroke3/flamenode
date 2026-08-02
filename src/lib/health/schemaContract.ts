@@ -41,6 +41,7 @@ export const RUNTIME_CRITICAL_TABLES = Object.freeze([
   "video_custom_answers",
   "video_events",
   "video_interactions",
+  "video_interactions_auth",
   "video_members",
   "video_moderation_cases",
   "video_softwares",

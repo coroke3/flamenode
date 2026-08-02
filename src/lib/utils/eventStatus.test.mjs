@@ -10,9 +10,18 @@ import {
   isPublicEventVisible,
   getEffectiveEventEnd,
   getEffectiveEventStart,
+  normalizeEventVisibility,
 } from "./eventStatusCore.ts";
 
 const T0 = 1700000000;
+
+test("normalizeEventVisibility is fail-closed to private", () => {
+  assert.equal(normalizeEventVisibility("public"), "public");
+  assert.equal(normalizeEventVisibility("private"), "private");
+  assert.equal(normalizeEventVisibility("draft"), "private");
+  assert.equal(normalizeEventVisibility("archived"), "private");
+  assert.equal(normalizeEventVisibility(null), "private");
+});
 
 test("event visibility accepts only private/public", () => {
   assert.equal(getEventVisibility({ visibility_status: "private", start_time: null, end_time: null }), "private");
