@@ -359,6 +359,30 @@ export const videos = sqliteTable(
   }),
 );
 
+export const slotReservationGroups = sqliteTable(
+  "slot_reservation_groups",
+  {
+    id: text("id").primaryKey(),
+    event_id: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    reserved_by_auth_user_id: text("reserved_by_auth_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    x_user_id: text("x_user_id").references(() => xUsers.id, {
+      onDelete: "set null",
+    }),
+    display_name: text("display_name"),
+    created_at: integer("created_at").notNull(),
+    updated_at: integer("updated_at").notNull(),
+    version: integer("version").notNull().default(1),
+  },
+  (t) => ({
+    byEvent: index("slot_reservation_groups_event_idx").on(t.event_id),
+  }),
+);
+
 export const slots = sqliteTable(
   "slots",
   {

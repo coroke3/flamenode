@@ -38,6 +38,7 @@ export {
   eventYoutubePlaylistSync,
   events,
   externalApiQuotaUsage,
+  slotReservationGroups,
   slots,
   softwareAliases,
   systemSettings,

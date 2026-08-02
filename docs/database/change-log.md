@@ -5,6 +5,32 @@
 > Verified against commit: `4ff09c9`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
 
+## 2026-08-02 — `0051_slot_reservation_groups_expand.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 連続枠予約主体を正規化する `slot_reservation_groups` テーブルを追加 |
+| Reason | slots 各行への主体重複保存を段階的に解消し、expand 期間は旧列を維持するため |
+| Tables | `slot_reservation_groups` |
+| Data migration | なし（`backfill:slot-reservation-groups` で手動補完） |
+| Compatibility | expand 期間中は `slots.reserved_by_user_id` / `x_user_id` / `display_name` / `reservation_group_id` を維持 |
+| Data loss | none |
+| Rollback | migration 適用前バックアップから復元 |
+| Validation | `check:db-schema`、`check:slot-reservation-groups`、typecheck |
+| Pending | `docs/database/pending/slot-reservation-groups-contract.sql`（旧列削除は未解決0件まで適用しない） |
+| PR | （本変更） |
+
+## Pending — moderation open case partial unique
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | pending contract |
+| Summary | `(video_id, case_type)` の open case 重複を防ぐ partial unique index |
+| Reason | void 化・moderation 作成時の open case 再利用と整合させるため |
+| Location | `docs/database/pending/video-moderation-open-unique.sql` |
+| Validation | `check:moderation-open-cases` で重複0件を確認してから適用 |
+
 ## 2026-08-02 — `0049_public_visibility_fences.sql`
 
 | 項目 | 内容 |

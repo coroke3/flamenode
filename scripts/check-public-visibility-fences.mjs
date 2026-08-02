@@ -17,11 +17,10 @@ assert.match(migration, /fence_token/);
 assert.match(migration, /requirements_json/);
 
 const schema = readFileSync(
-  path.join(root, "src/lib/db/schema.base.ts"),
+  path.join(root, "src/lib/db/schema.ts"),
   "utf8",
 );
 assert.match(schema, /publicVisibilityFences/);
-assert.match(schema, /public_visibility_fences/);
 
 const manifestCore = readFileSync(
   path.join(root, "src/lib/publicData/publicVisibilityManifestCore.ts"),

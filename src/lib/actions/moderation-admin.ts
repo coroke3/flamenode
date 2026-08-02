@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { videoModerationCases, videos } from "@/lib/db/schema";
+import { videoEvents, videoModerationCases, videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -17,7 +17,6 @@ import {
   normalizeModerationXUserId,
   parseModerationDueAt,
 } from "@/lib/admin/moderationCaseInput";
-import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   markPendingPublicReflection,
   type PendingPublicReflection,
@@ -25,6 +24,12 @@ import {
 import { generateId } from "@/lib/utils/id";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
+import {
+  planVideoVisibilityTransition,
+  preCommitVideoVisibilityDepublicization,
+  runVideoVisibilityTransitionPostCommit,
+} from "@/lib/video/videoVisibilityTransition";
 
 export interface ModerationAdminResult extends PendingPublicReflection {
   ok: boolean;
@@ -52,11 +57,34 @@ function revalidateModeration(video: typeof videos.$inferSelect, changed: boolea
 async function runModerationPostCommit(
   video: typeof videos.$inferSelect,
   changed: boolean,
+  publicCacheKeys: readonly string[],
 ): Promise<void> {
   await runPostCommitBestEffort(
     { flow: "moderation.admin", traceId: createTraceId() },
-    [{ name: "revalidate", run: async () => { revalidateModeration(video, changed); } }],
+    [{
+      name: "moderation_visibility_post_commit",
+      run: async () => {
+        await runVideoVisibilityTransitionPostCommit({
+          publicCacheKeys,
+          revalidate: () => {
+            revalidateModeration(video, changed);
+          },
+        });
+      },
+    }],
   );
+}
+
+async function loadVideoEventIds(db: Parameters<typeof planVideoVisibilityTransition>[0], videoId: string): Promise<string[]> {
+  const eventRows = await db
+    .select({ event_id: videoEvents.event_id })
+    .from(videoEvents)
+    .where(eq(videoEvents.video_id, videoId))
+    .limit(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1);
+  if (eventRows.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+    throw new Error("video_status_rebuild_event_limit_exceeded");
+  }
+  return eventRows.map((row) => row.event_id);
 }
 
 export async function createModerationCase(formData: FormData): Promise<ModerationAdminResult> {
@@ -83,24 +111,57 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     related_x_user_id: relatedXUserId, created_by_user_id: guard.user.id,
     resolved_by_user_id: null, created_at: now, resolved_at: null,
   };
-  const changed = Boolean(nextVideoStatus && nextVideoStatus !== video.visibility_status);
-  const videoAfter = changed ? { ...video, visibility_status: nextVideoStatus!, updated_at: now } : null;
-  const queue = changed ? await buildStaticRebuildQueueBatch(db, [{ targetType: "video", targetId: video.id, reason: "moderation_case_created", priority: "high", requestedByUserId: guard.user.id }]) : { statements: [], expectedChanges: [] };
   const statements: BatchItem<"sqlite">[] = [db.insert(videoModerationCases).values(caseAfter)];
   const expected: (number | null)[] = [1];
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "CREATE", after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_create", reason: publicReason || "運営確認ケースの作成", strict: true }];
-  if (videoAfter) {
-    statements.push(db.update(videos).set({ visibility_status: videoAfter.visibility_status, updated_at: now }).where(and(eq(videos.id, video.id), expectedRowCondition({ expectedCurrent: snapshot(video) }))!));
-    expected.push(1);
-    audits.push({ table_name: "videos", target_id: video.id, operation: "UPDATE", after: snapshot(videoAfter), actor_user_id: guard.user.id, retention_class: videoAfter.visibility_status === "voided" ? "long_audit" : "normal", context: "admin_moderation_create", reason: `ケース ${id} 作成に伴う公開状態変更`, strict: true, before: snapshot(video) });
+
+  let transition = null as Awaited<ReturnType<typeof planVideoVisibilityTransition>> | null;
+  if (nextVideoStatus && nextVideoStatus !== video.visibility_status) {
+    const eventIds = await loadVideoEventIds(db, videoId);
+    transition = await planVideoVisibilityTransition(db, {
+      video,
+      nextStatus: nextVideoStatus,
+      actorUserId: guard.user.id,
+      context: "admin_moderation_create",
+      reason: publicReason || null,
+      eventIds,
+      now,
+    });
+    statements.unshift(...transition.mutationStatements);
+    expected.unshift(...transition.expectedMutationChanges);
+    audits.unshift(...transition.audits);
+    if (transition.depublicizedFromPublic && transition.fenceToken) {
+      try {
+        await preCommitVideoVisibilityDepublicization({
+          videoId,
+          fenceToken: transition.fenceToken,
+          reason: publicReason || null,
+        });
+      } catch (error) {
+        return mutationError(error);
+      }
+    }
   }
-  statements.push(...queue.statements); expected.push(...queue.expectedChanges);
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
-  catch (error) { return mutationError(error); }
-  await runModerationPostCommit(video, changed);
+
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: statements,
+      expectedMutationChanges: expected,
+      audits,
+      notificationWakeSource:
+        transition?.notificationBatch.statements.length ? "admin" : undefined,
+      staticRebuildWakeSource:
+        transition?.queueBatch.statements.length ? "admin" : undefined,
+    });
+  } catch (error) { return mutationError(error); }
+  await runModerationPostCommit(
+    video,
+    Boolean(transition?.visibilityChanged),
+    transition?.publicCacheKeys ?? [],
+  );
   return markPendingPublicReflection(
     { ok: true, message: "case を作成しました。" },
-    queue.statements.length > 0,
+    Boolean(transition?.queueBatch.statements.length),
   );
 }
 
@@ -126,23 +187,56 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   if (!video) return { ok: false, message: "対象作品が見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
   const caseAfter = { ...current, status, private_note: note || current.private_note, resolved_by_user_id: guard.user.id, resolved_at: now };
-  const changed = Boolean(nextVideoStatus && nextVideoStatus !== video.visibility_status);
-  const videoAfter = changed ? { ...video, visibility_status: nextVideoStatus!, updated_at: now } : null;
-  const queue = changed ? await buildStaticRebuildQueueBatch(db, [{ targetType: "video", targetId: video.id, reason: "moderation_case_resolved", priority: "high", requestedByUserId: guard.user.id }]) : { statements: [], expectedChanges: [] };
   const statements: BatchItem<"sqlite">[] = [db.update(videoModerationCases).set({ status, private_note: caseAfter.private_note, resolved_by_user_id: guard.user.id, resolved_at: now }).where(and(eq(videoModerationCases.id, id), expectedRowCondition({ expectedCurrent: snapshot(current) }))!)];
   const expected: (number | null)[] = [1];
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "UPDATE", before: snapshot(current), after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_update", reason: note || `ケース状態を ${status} に変更`, strict: true }];
-  if (videoAfter) {
-    statements.push(db.update(videos).set({ visibility_status: videoAfter.visibility_status, updated_at: now }).where(and(eq(videos.id, video.id), expectedRowCondition({ expectedCurrent: snapshot(video) }))!));
-    expected.push(1);
-    audits.push({ table_name: "videos", target_id: video.id, operation: "UPDATE", before: snapshot(video), after: snapshot(videoAfter), actor_user_id: guard.user.id, retention_class: videoAfter.visibility_status === "voided" ? "long_audit" : "normal", context: "admin_moderation_update", reason: `ケース ${id} 更新に伴う公開状態変更`, strict: true });
+
+  let transition = null as Awaited<ReturnType<typeof planVideoVisibilityTransition>> | null;
+  if (nextVideoStatus && nextVideoStatus !== video.visibility_status) {
+    const eventIds = await loadVideoEventIds(db, video.id);
+    transition = await planVideoVisibilityTransition(db, {
+      video,
+      nextStatus: nextVideoStatus,
+      actorUserId: guard.user.id,
+      context: "admin_moderation_update",
+      reason: note || null,
+      eventIds,
+      now,
+    });
+    statements.push(...transition.mutationStatements);
+    expected.push(...transition.expectedMutationChanges);
+    audits.push(...transition.audits);
+    if (transition.depublicizedFromPublic && transition.fenceToken) {
+      try {
+        await preCommitVideoVisibilityDepublicization({
+          videoId: video.id,
+          fenceToken: transition.fenceToken,
+          reason: note || null,
+        });
+      } catch (error) {
+        return mutationError(error);
+      }
+    }
   }
-  statements.push(...queue.statements); expected.push(...queue.expectedChanges);
-  try { await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits, staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined }); }
-  catch (error) { return mutationError(error); }
-  await runModerationPostCommit(video, changed);
+
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: statements,
+      expectedMutationChanges: expected,
+      audits,
+      notificationWakeSource:
+        transition?.notificationBatch.statements.length ? "admin" : undefined,
+      staticRebuildWakeSource:
+        transition?.queueBatch.statements.length ? "admin" : undefined,
+    });
+  } catch (error) { return mutationError(error); }
+  await runModerationPostCommit(
+    video,
+    Boolean(transition?.visibilityChanged),
+    transition?.publicCacheKeys ?? [],
+  );
   return markPendingPublicReflection(
     { ok: true, message: "case を更新しました。" },
-    queue.statements.length > 0,
+    Boolean(transition?.queueBatch.statements.length),
   );
 }

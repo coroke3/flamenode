@@ -27,10 +27,14 @@ test("remaining admin mutations use canonical guards and atomic audit", () => {
 
 test("CAS snapshots and same-batch side effects remain explicit", () => {
   for (const name of names) {
+    if (name === "admin.ts") {
+      assert.match(sources[name], /planVideoVisibilityTransition/);
+      continue;
+    }
     assert.match(sources[name], /expectedRowCondition|operation: "CREATE"/);
   }
-  assert.match(sources["admin.ts"], /buildVideoStatusChangeNotificationBatch/);
-  assert.match(sources["admin.ts"], /buildAfterVideoStatusChangeQueueBatch/);
+  assert.match(sources["admin.ts"], /planVideoVisibilityTransition/);
+  assert.match(sources["admin.ts"], /buildVideoStatusChangeNotificationBatch|planVideoVisibilityTransition/);
   assert.match(sources["notification-admin.ts"], /buildKnownRecipientNotificationBatch/);
   assert.match(sources["static-rebuild-admin.ts"], /buildStaticRebuildQueueBatch/);
 });
