@@ -358,7 +358,7 @@ export async function generateSlotsBatch(
         data.mode,
         chunk,
         guard.userId,
-        { includeQueue: index === chunks.length - 1 },
+        { includeQueue: true },
       );
       created += chunk.length;
     }

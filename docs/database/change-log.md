@@ -12,28 +12,54 @@
 | Type | additive |
 | Summary | Auth user 単位のいいね・セーブ正本 `video_interactions_auth` を追加し、owner が 1 人の既存行だけをバックフィル |
 | Reason | Active X 切替でライブラリが変わらないよう、FlameNode 内反応を Auth user 正本へ移行するため |
-| Tables | `video_interactions_auth`（参照: `users`, `videos`, `x_user_account_links`） |
-| Data migration | `video_interactions` から owner 1 人の x_user_id のみ `INSERT OR IGNORE`。owner 0 / 複数は一時 report 後破棄 |
-| Compatibility | 旧 `video_interactions` は維持。runtime の新規書き込みは `video_interactions_auth` のみ。`0051`（slots）と並行採番のため本番適用は `0050` 完了後 |
+| Tables | `video_interactions_auth` |
+| Data migration | `video_interactions` から owner 1 人のみバックフィル。曖昧行は一時 report 後破棄 |
+| Compatibility | 旧 `video_interactions` は維持。`0051` 完了後に適用 |
 | Data loss | none |
-| Rollback | migration 適用前の D1 バックアップから復元 |
+| Rollback | migration 適用前バックアップから復元 |
 | Validation | `check:db-schema`, `check:video-interactions-auth`, unit test, typecheck |
 | PR | Agent E v9 第1波 |
+
+## 2026-08-02 — `0051_slot_reservation_groups_expand.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 連続枠予約主体を正規化する `slot_reservation_groups` テーブルを追加 |
+| Reason | slots 各行への主体重複保存を段階的に解消し、expand 期間は旧列を維持するため |
+| Tables | `slot_reservation_groups` |
+| Data migration | なし（`backfill:slot-reservation-groups` で手動補完） |
+| Compatibility | expand 期間中は slots 旧列を維持。`0050` 完了後に適用 |
+| Data loss | none |
+| Rollback | migration 適用前バックアップから復元 |
+| Validation | `check:db-schema`、`check:slot-reservation-groups`、typecheck |
+| Pending | `docs/database/pending/slot-reservation-groups-contract.sql` |
+| PR | Agent D |
+
+## Pending — moderation open case partial unique
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | pending contract |
+| Summary | (video_id, case_type) の open case 重複を防ぐ partial unique index |
+| Reason | void 化・moderation 作成時の open case 再利用と整合させるため |
+| Location | `docs/database/pending/video-moderation-open-unique.sql` |
+| Validation | `check:moderation-open-cases` で重複0件を確認してから適用 |
 
 ## 2026-08-02 — `0050_x_identity_request_decisions.sql`
 
 | 項目 | 内容 |
 | --- | --- |
 | Type | additive |
-| Summary | `x_identity_requests` に判断メタデータ列（`decision_reason` / `decided_by_auth_user_id` / `decided_at`）を追加し、`audit_logs` に `actor_x_user_id` を追加 |
-| Reason | X ID申請の判断理由・判断者・判断日時を正本へ残し、監査で実際に認可へ使用した X 名義を追跡するため |
+| Summary | `x_identity_requests` に判断メタデータ列を追加し、`audit_logs` に `actor_x_user_id` を追加 |
+| Reason | X ID申請の判断理由・判断者・判断日時と監査 actor X を正本へ残すため |
 | Tables | `x_identity_requests`, `audit_logs` |
 | Data migration | なし |
-| Compatibility | `0049` 完了後に適用。既存行は NULL のまま |
+| Compatibility | `0049` 完了後に適用 |
 | Data loss | none |
 | Rollback | 適用前 D1 バックアップから復元 |
-| Validation | `check:db-schema`, `check:audit-actor-x`, `check:event-owner-operability`, `check:x-link-dependencies`, typecheck, 関連 unit test |
-| PR | Agent C / v9 identity audit |
+| Validation | `check:db-schema`, typecheck |
+| PR | Agent C |
 
 ## 2026-08-02 — `0049_public_visibility_fences.sql`
 

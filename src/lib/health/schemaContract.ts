@@ -27,6 +27,7 @@ export const RUNTIME_CRITICAL_TABLES = Object.freeze([
   "public_visibility_fences",
   "session",
   "slots",
+  "slot_reservation_groups",
   "software_aliases",
   "software_catalog",
   "spreadsheet_import_runs",

@@ -27,10 +27,11 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0048_cleanup_video_visibility_indexes.sql",
     "0049_public_visibility_fences.sql",
     "0050_x_identity_request_decisions.sql",
+    "0051_slot_reservation_groups_expand.sql",
     "0052_video_interactions_auth_expand.sql",
   ]);
-  assert.equal(result.tableCount, 43);
-  assert.equal(result.columnCount, 429);
+  assert.equal(result.tableCount, 44);
+  assert.equal(result.columnCount, 437);
   assert.ok(result.indexCount > 70);
   assert.ok(result.foreignKeyCount > 20);
   assert.ok(result.checkCount > 20);

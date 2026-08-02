@@ -21,10 +21,6 @@ const schema = readFileSync(
   "utf8",
 );
 assert.match(schema, /publicVisibilityFences/);
-assert.match(
-  readFileSync(path.join(root, "migrations/0049_public_visibility_fences.sql"), "utf8"),
-  /public_visibility_fences/,
-);
 
 const manifestCore = readFileSync(
   path.join(root, "src/lib/publicData/publicVisibilityManifestCore.ts"),
