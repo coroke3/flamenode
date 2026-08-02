@@ -1,0 +1,11 @@
+-- Pending contract: video_interactions (x_user_id 正本) の段階的廃止
+-- Status: NOT APPLIED — 0052 完了後の別 migration で適用する。
+--
+-- 前提:
+-- 1. アプリ runtime が video_interactions_auth のみを読み書きしていること
+-- 2. _migration_0052_backfill_report の未解決行が 0 件であること
+-- 3. health check の like_count_drift が許容範囲内であること
+--
+-- 適用順 (案):
+-- DROP TABLE video_interactions;
+-- DROP TABLE IF EXISTS _migration_0052_backfill_report;

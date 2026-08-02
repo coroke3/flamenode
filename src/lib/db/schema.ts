@@ -42,6 +42,7 @@ export {
   systemSettings,
   videoChapters,
   videoInteractions,
+  videoInteractionsAuth,
   videoMembers,
   videoSoftwares,
   videoYoutubeMetadata,

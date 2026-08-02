@@ -1,9 +1,24 @@
 # DB Change Log
 
 > Status: Active
-> Last verified: 2026-07-20
-> Verified against commit: `4ff09c9`
+> Last verified: 2026-08-02
+> Verified against commit: `bdeb758a`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-08-02 — `0052_video_interactions_auth_expand.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | Auth user 単位のいいね・セーブ正本 `video_interactions_auth` を追加し、owner が 1 人の既存行だけをバックフィル |
+| Reason | Active X 切替でライブラリが変わらないよう、FlameNode 内反応を Auth user 正本へ移行するため |
+| Tables | `video_interactions_auth`（参照: `users`, `videos`, `x_user_account_links`）、`_migration_0052_backfill_report` |
+| Data migration | `video_interactions` から owner 1 人の x_user_id のみ `INSERT OR IGNORE`。owner 0 / 複数は report へ記録 |
+| Compatibility | 旧 `video_interactions` は維持。runtime の新規書き込みは `video_interactions_auth` のみ |
+| Data loss | none |
+| Rollback | migration 適用前の D1 バックアップから復元 |
+| Validation | `check:db-schema`, `check:video-interactions-auth`, unit test, typecheck |
+| PR | Agent E v9 第1波 |
 
 ## 2026-08-01 — `0047_backfill_youtube_metadata_pending.sql`
 

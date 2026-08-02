@@ -143,9 +143,9 @@ const isMain =
 if (isMain) {
   try {
     const result = validateDbSchema(process.cwd());
-    if (result.tableCount !== 41 || result.columnCount !== 411) {
+    if (result.tableCount !== 42 || result.columnCount !== 415) {
       throw new Error(
-        `正本件数不一致: expected=41 tables/411 columns actual=${result.tableCount} tables/${result.columnCount} columns`,
+        `正本件数不一致: expected=42 tables/415 columns actual=${result.tableCount} tables/${result.columnCount} columns`,
       );
     }
     console.log(

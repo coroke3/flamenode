@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { DEFAULT_STAGE_PERMISSION_FIELD } from "@/lib/video/formSettings";
-import type { EventVisibilityStatus } from "@/lib/utils/eventStatus";
+import {
+  normalizeEventVisibility,
+  type EventVisibilityStatus,
+} from "@/lib/utils/eventStatus";
 
 export const eventSchema = z.object({
   id: z.string().trim().min(1).max(64).optional(),
@@ -75,7 +78,7 @@ export function buildPartsJson(raw: string | null | undefined): string | null {
 export function resolveSubmittedEventVisibility(
   data: Pick<EventFormData, "visibility_status">,
 ): EventVisibilityStatus {
-  return data.visibility_status ?? "private";
+  return normalizeEventVisibility(data.visibility_status);
 }
 
 function boolFormValue(value: FormDataEntryValue | undefined): boolean {

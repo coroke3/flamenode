@@ -19,6 +19,10 @@ import {
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
 import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
+import {
+  normalizeEventVisibility,
+  type EventVisibilityStatus,
+} from "@/lib/utils/eventStatus";
 
 export interface EventFormInitial {
   id?: string;
@@ -77,11 +81,8 @@ function partsJsonToText(value: string | null | undefined): string {
 
 function resolveInitialVisibility(
   initial: EventFormInitial,
-): "draft" | "private" | "public" | "archived" {
-  const value = initial.visibility_status;
-  return value === "private" || value === "public" || value === "archived"
-    ? value
-    : "draft";
+): EventVisibilityStatus {
+  return normalizeEventVisibility(initial.visibility_status);
 }
 
 function textValue(formData: FormData, name: string): string {
@@ -185,7 +186,7 @@ function formPreview(
     end_time: textValue(formData, "end_time"),
     entry_start_time: textValue(formData, "entry_start_time"),
     entry_end_time: textValue(formData, "entry_end_time"),
-    visibility_status: textValue(formData, "visibility_status") || "draft",
+    visibility_status: textValue(formData, "visibility_status") || "private",
     allow_user_video_event_links:
       textValue(formData, "allow_user_video_event_links") || "0",
     allow_unslotted_posts: textValue(formData, "allow_unslotted_posts") || "0",
@@ -482,10 +483,8 @@ export function EventForm({
               name="visibility_status"
               defaultValue={resolveInitialVisibility(initial)}
             >
-              <option value="draft">下書き</option>
               <option value="private">非公開</option>
               <option value="public">公開</option>
-              <option value="archived">アーカイブ</option>
             </GatedSelect>
           </div>
           <div>

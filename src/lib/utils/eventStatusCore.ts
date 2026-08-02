@@ -22,8 +22,15 @@ export interface EventStatusInput {
   entry_end_time?: number | null;
 }
 
+/** 未知値・legacy draft/archived は fail-closed で private。archived を public にしない。 */
+export function normalizeEventVisibility(
+  raw: string | null | undefined,
+): EventVisibilityStatus {
+  return raw === "public" ? "public" : "private";
+}
+
 export function getEventVisibility(ev: EventStatusInput): EventVisibilityStatus {
-  return ev.visibility_status === "public" ? "public" : "private";
+  return normalizeEventVisibility(ev.visibility_status);
 }
 
 export function isPubliclyListableEventVisibility(
