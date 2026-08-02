@@ -504,6 +504,20 @@ test("NEXT_PUBLIC_GA_MEASUREMENT_ID injects for web from Build env", () =>
     assert.match(web, /NEXT_PUBLIC_GA_MEASUREMENT_ID = "G-TESTMEASURE1"/);
   }));
 
+test("invalid NEXT_PUBLIC_GA_MEASUREMENT_ID rejects materializeProductionConfigs", () =>
+  withTempDirectory("flamenode-production-ga-measurement-invalid-", (repoRoot) => {
+    writeFixtureTemplates(repoRoot);
+    assert.throws(
+      () =>
+        materializeProductionConfigs({
+          env: productionEnv({ NEXT_PUBLIC_GA_MEASUREMENT_ID: "not-a-measurement-id" }),
+          repoRoot,
+          commit: COMMIT,
+        }),
+      /NEXT_PUBLIC_GA_MEASUREMENT_ID must look like/,
+    );
+  }));
+
 test("GA4_SYNC_ENABLED=1 requires GA4 remote secrets during secret preflight", () => {
   const configs = {
     web: "web.toml",

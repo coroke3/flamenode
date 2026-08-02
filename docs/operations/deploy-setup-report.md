@@ -1,8 +1,8 @@
 # デプロイ準備チェックリスト
 
 > Status: Active
-> Last verified: 2026-07-23
-> Verified against commit: `630244ce`
+> Last verified: 2026-08-02
+> Verified against commit: `901fa0aa`（[`DEPLOY.md`](../../DEPLOY.md) §3・§4、`scripts/cloudflare-production.mjs` と整合）
 > Source of truth: [`DEPLOY.md`](../../DEPLOY.md)、[`workers.md`](workers.md)、[`LOCAL.md`](../../LOCAL.md)、[`migrations.md`](migrations.md)、[`.dev.vars.example`](../../.dev.vars.example)、`wrangler.toml`、`workers/*/wrangler.toml`、`package.json` の `cf:*`、`scripts/cloudflare-*.mjs`
 
 運用者が Cloudflare へデプロイする一歩手前までを追えるチェックリスト。詳細手順・障害対応・rollback は [`DEPLOY.md`](../../DEPLOY.md) を正本とし、本書は横断確認用にとどめる。secret の実値、production resource ID、token は本書・Issue・log へ書かない。
@@ -35,10 +35,10 @@ main push
   -> npm ci（1回）
   -> verify:cloud（deploy契約検査のみ）
   -> OpenNext build（1回）
-  -> flamenode-web
-  -> flamenode-fast-jobs
   -> flamenode-content-jobs
+  -> flamenode-fast-jobs
   -> flamenode-sync-jobs
+  -> flamenode-web
   -> production smoke
 ```
 
@@ -103,7 +103,7 @@ npm run cf:bootstrap -- --confirm-create
 | `flamenode-web` | `DB` | `BUCKET`、`NEXT_INC_CACHE_R2_BUCKET` | `KV` | producer: `NOTIFICATION_WAKE_QUEUE`、`STATIC_REBUILD_WAKE_QUEUE`、`YOUTUBE_SYNC_WAKE_QUEUE` | Assets `ASSETS`、service `WORKER_SELF_REFERENCE` |
 | `flamenode-fast-jobs` | `DB` | — | `KV` | producer/consumer: `NOTIFICATION_WAKE_QUEUE` | — |
 | `flamenode-content-jobs` | `DB` | `R2` | `KV` | producer/consumer: `STATIC_REBUILD_WAKE_QUEUE` | — |
-| `flamenode-sync-jobs` | `DB` | — | `KV` | producer/consumer: `YOUTUBE_SYNC_WAKE_QUEUE` | — |
+| `flamenode-sync-jobs` | `DB` | `R2` | `KV` | producer/consumer: `YOUTUBE_SYNC_WAKE_QUEUE` | — |
 
 **注意:** 追跡対象の `wrangler.toml` / `workers/*/wrangler.toml` は placeholder ID のまま維持する。production の実 ID は Build 時に `.cloudflare/generated/` へ注入され、Git 管理外とする。
 
@@ -231,12 +231,20 @@ Dashboard の Build Variables に次の**名前**が揃っていること。値�
 | `NEXT_PUBLIC_SITE_URL` | `FLAMENODE_WEB_URL` と同じ origin |
 | `AUTH_URL` | `FLAMENODE_WEB_URL` と同じ origin |
 | `AUTH_DISCORD_ID` | production Discord OAuth Client ID（**必須**。未設定だと deploy preflight 失敗） |
+| `QUEUE_DISPATCH_ENABLED` | 任意。Queue wake 有効時は `"1"`（未設定時は template `"0"`） |
+| `QUEUE_CONTINUATION_ENABLED` | 任意。継続 wake 有効時は `"1"` |
+| `QUEUE_YOUTUBE_SYNC_ENABLED` | 任意。YouTube sync wake 有効時は `"1"` |
+| `GA4_SYNC_ENABLED` | 任意。急上昇同期を有効化するとき `"1"`（`1` なら sync-jobs の GA4 Runtime Secrets が必須） |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | 任意。OpenNext bake-in + web inject 用の `G-...` |
+| `PUBLIC_VISIBILITY_GUARD_MODE` | 任意。`observe`（既定）/ `enforce` / `off` |
+| `FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN` | 初回 `workers.dev` smoke だけ `"1"`。custom domain 切替後は **未設定** |
 
 URL 制約（初回 `workers.dev` 登録時に失敗しやすい）:
 
 - 各 URL は `https://host` 形式のみ（末尾 `/` のみ可。path / query / hash / `localhost` 不可）。
 - `FLAMENODE_WEB_URL`・`FAST_JOBS_URL`・`CONTENT_JOBS_URL`・`SYNC_JOBS_URL` は**相互に重複不可**。
 - `NEXT_PUBLIC_SITE_URL` と `AUTH_URL` は `FLAMENODE_WEB_URL` と同一 origin。
+- custom domain 切替後は `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` をカスタム HTTPS origin へ揃え、`workers.dev` のまま放置しない（[`DEPLOY.md` §3](../../DEPLOY.md) と同趣旨）。
 
 Build Secrets（名前のみ）:
 
@@ -255,10 +263,10 @@ Build Secrets（名前のみ）:
 
 | Worker | 変数名 |
 | --- | --- |
-| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開 site metadata、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開 site metadata、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED`、`PUBLIC_VISIBILITY_GUARD_MODE`（任意・未設定時 template `observe`） |
 | `flamenode-fast-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED`（`NEXT_PUBLIC_SITE_URL` は Build Variables から deploy 時に generated config へ注入） |
 | `flamenode-content-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
-| `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED`（`GA4_SYNC_ENABLED` は Build Variables から生成 config へ inject） |
 
 公開 site metadata と YouTube quota の既定値は wrangler template を正本とする。production origin / OAuth Client ID / commit は検証済み一時 config へ注入し、Dashboard で同名値を別正本として手動 drift させない。
 
@@ -272,6 +280,7 @@ Build Secrets（名前のみ）:
 | `flamenode-fast-jobs` | `DISCORD_BOT_TOKEN` または `DISCORD_WEBHOOK_URL` の少なくとも一方 |
 | `flamenode-content-jobs` | `WORKER_ADMIN_TOKEN` |
 | `flamenode-sync-jobs` | `YOUTUBE_API_KEY`、`YOUTUBE_OAUTH_CLIENT_ID`、`YOUTUBE_OAUTH_CLIENT_SECRET`、`YOUTUBE_OAUTH_REFRESH_TOKEN` |
+| `flamenode-sync-jobs`（条件付き） | `GA4_PROPERTY_ID`、`GA4_SERVICE_ACCOUNT_EMAIL`、`GA4_SERVICE_ACCOUNT_PRIVATE_KEY`（`GA4_SYNC_ENABLED=1` 時必須。詳細は [`google-analytics.md`](google-analytics.md)） |
 
 - [ ] 各 Worker に上記が Dashboard で登録済み（deploy preflight は**名前のみ**検査）
 - [ ] secret 値を Build Variables へ複製していない（`WORKER_ADMIN_TOKEN` の smoke 例外を除く）
@@ -332,9 +341,10 @@ npm run test:cloudflare-ci
 1. [ ] §1–7 の Dashboard 準備完了（4 Worker 名、resource、Queue、binding、Runtime Secret、D1 schema）
 2. [ ] Remote D1 へ active migration を**手動適用**済み（§10）。CI / deploy script は自動適用しない
 3. [ ] 4 Worker の `workers.dev` URL を Build Variables（`FLAMENODE_WEB_URL` 等）へ登録（§6 の URL 制約を満たす）
-4. [ ] `flamenode-web` だけ Git 連携し、§4 の Build / Deploy command を保存
-5. [ ] `main` へ push し、Workers Build を実行
-6. [ ] deploy 固定順（Web → fast → content → sync）が完了し、production smoke が次をすべて成功
+4. [ ] 初回 `workers.dev` smoke 用に Build Variables へ `FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1` を設定（custom domain 切替後は削除し未設定のままにする）
+5. [ ] `flamenode-web` だけ Git 連携し、§4 の Build / Deploy command を保存
+6. [ ] `main` へ push し、Workers Build を実行
+7. [ ] deploy 固定順（content → fast → sync → web）が完了し、production smoke が次をすべて成功
     - 正式トップと同一 origin の `_next/static` asset
     - 公開 `/api/health` の service / runtime / commit
     - Discord Auth callback が 404 / 5xx ではない
@@ -343,12 +353,12 @@ npm run test:cloudflare-ci
     - 保護 `/api/health/deep`（`WORKER_ADMIN_TOKEN`）の D1 / KV / R2 / schema read-only 結果
     - 主要公開 API（例: `/api/videos?limit=1`）の明示 DTO と内部 key 非露出
     - 404 と不正 method
-7. [ ] **workers.dev** で 4 Worker・Auth callback・health を確認
-8. [ ] `flamenode-web` にカスタムドメインを追加
-9. [ ] `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` をカスタム origin へ更新
-10. [ ] Discord callback を `https://<custom-domain>/api/auth/callback/discord` へ更新
-11. [ ] 更新後の Workers Build を再実行し、カスタムドメインで smoke 成功
-12. [ ] 旧 Pages からトラフィックを切り替え。**削除は [`DEPLOY.md` §9](../../DEPLOY.md) の全条件を満たすまで行わない**
+8. [ ] **workers.dev** で 4 Worker・Auth callback・health を確認
+9. [ ] `flamenode-web` にカスタムドメインを追加
+10. [ ] `FLAMENODE_WEB_URL`・`NEXT_PUBLIC_SITE_URL`・`AUTH_URL` をカスタム origin へ更新し、`FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN` を削除（未設定）
+11. [ ] Discord callback を `https://<custom-domain>/api/auth/callback/discord` へ更新
+12. [ ] 更新後の Workers Build を再実行し、カスタムドメインで smoke 成功
+13. [ ] 旧 Pages からトラフィックを切り替え。**削除は [`DEPLOY.md` §9](../../DEPLOY.md) の全条件を満たすまで行わない**
     - custom domain が `flamenode-web` を向く
     - Web / Auth / 3 Cron / deep health / 公開 DTO の production smoke 成功
     - 4 Worker の commit が一致

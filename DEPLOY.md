@@ -158,6 +158,14 @@ Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効
 | `flamenode-content-jobs` | `WORKER_ADMIN_TOKEN` |
 | `flamenode-sync-jobs` | `YOUTUBE_API_KEY`、`YOUTUBE_OAUTH_CLIENT_ID`、`YOUTUBE_OAUTH_CLIENT_SECRET`、`YOUTUBE_OAUTH_REFRESH_TOKEN` |
 
+`GA4_SYNC_ENABLED=1`（Build Variables）のとき、上表に加え `flamenode-sync-jobs` へ次の Runtime Secrets が必須です。
+
+- `GA4_PROPERTY_ID`
+- `GA4_SERVICE_ACCOUNT_EMAIL`
+- `GA4_SERVICE_ACCOUNT_PRIVATE_KEY`
+
+詳細は [`docs/operations/google-analytics.md`](./docs/operations/google-analytics.md) を参照してください。
+
 deploy preflightはremoteに登録されたsecretの**名前だけ**を検査します。Build環境からRuntime Secret値を再投入・比較しません。不足時は対象Worker名と不足名だけを表示して停止します。secret値、token、Webhook URL、cookie、ユーザーデータをlogへ出しません。続けて Cron Worker 3本（`fast-jobs` / `content-jobs` / `sync-jobs`）へ `wrangler deploy --dry-run` を実行し、アップロードサイズが 2.9MiB 以上ならデプロイを停止、2.7MiB 以上なら警告します。
 
 ### Bindings
@@ -167,7 +175,7 @@ deploy preflightはremoteに登録されたsecretの**名前だけ**を検査し
 | `flamenode-web` | D1 `DB`、R2 `BUCKET`、R2 incremental cache `NEXT_INC_CACHE_R2_BUCKET`、KV `KV`、Assets `ASSETS`、service `WORKER_SELF_REFERENCE`、Queue producer `NOTIFICATION_WAKE_QUEUE`、`STATIC_REBUILD_WAKE_QUEUE`、`YOUTUBE_SYNC_WAKE_QUEUE` |
 | `flamenode-fast-jobs` | D1 `DB`、KV `KV`、Queue producer/consumer `NOTIFICATION_WAKE_QUEUE` |
 | `flamenode-content-jobs` | D1 `DB`、R2 `R2`、KV `KV`、Queue producer/consumer `STATIC_REBUILD_WAKE_QUEUE` |
-| `flamenode-sync-jobs` | D1 `DB`、KV `KV`、Queue producer/consumer `YOUTUBE_SYNC_WAKE_QUEUE` |
+| `flamenode-sync-jobs` | D1 `DB`、R2 `R2`、KV `KV`、Queue producer/consumer `YOUTUBE_SYNC_WAKE_QUEUE` |
 
 論理binding名はコードとwrangler群の契約です。production IDやbucket名だけをBuild Variablesから一時configへ注入します。Queue binding欠落は`npm run check:cloudflare-template`とproduction config検証で**fail-closed**とし、deployを停止します。consumer設定の正本は`workers/*/wrangler.toml`、詳細は[`docs/operations/workers.md`](./docs/operations/workers.md)を参照してください。
 

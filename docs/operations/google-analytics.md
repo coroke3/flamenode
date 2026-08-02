@@ -1,7 +1,7 @@
 # Google Analytics（GA4）運用
 
 > Status: Active
-> Last verified: 2026-08-01
+> Last verified: 2026-08-02
 > Verified against: `workers/ga-analytics/`, `src/components/video/VideoViewTracker.tsx`, `src/lib/publicData/trendingLoader.ts`, `app/(public)/layout.tsx`
 
 FlameNode は GA4 で作品視聴イベントを計測し、Worker が R2 に急上昇ランキング JSON を書き込む。公開 Web は R2 のみを読み、D1 や `static_rebuild_queue` には依存しない。
@@ -17,7 +17,7 @@ FlameNode は GA4 で作品視聴イベントを計測し、Worker が R2 に急
 
 ## Web 側の設定
 
-`.dev.vars` / 本番 Runtime Variables:
+ローカルは `.dev.vars`、本番は Workers Builds の **Build Variables**（OpenNext bake-in 用。Runtime Secret だけではクライアント計測に入らない）:
 
 ```bash
 NEXT_PUBLIC_GA_MEASUREMENT_ID="G-XXXXXXXXXX"

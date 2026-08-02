@@ -18,3 +18,4 @@ tsconfig.tsbuildinfo
 coverage/
 .cache/
 .deploy/backups/
+.tmp/
