@@ -117,7 +117,11 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
       return { ok: false, message: "voided解除には case_id が必要です。" };
     }
     const openCase = await findOpenModerationCaseById(db, caseId);
-    if (!openCase || openCase.video_id !== videoId) {
+    if (
+      !openCase ||
+      openCase.video_id !== videoId ||
+      openCase.case_type !== "void"
+    ) {
       return { ok: false, message: "解決対象の open case が見つかりません。" };
     }
     const moderation = planVoidModerationCaseResolve(db, openCase, {

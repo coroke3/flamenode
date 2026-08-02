@@ -102,7 +102,8 @@ for (const migrationName of migrationFiles) {
   const date = assertMetadata(migrationName, body, "Date");
   const type = assertMetadata(migrationName, body, "Type").toLowerCase();
   const summary = assertMetadata(migrationName, body, "Summary");
-  const dataLoss = assertMetadata(migrationName, body, "Data loss").toLowerCase();
+  const dataLossRaw = assertMetadata(migrationName, body, "Data loss").toLowerCase();
+  const dataLoss = (dataLossRaw.match(/^(none|possible|intentional)\b/)?.[1] ?? dataLossRaw);
   const rollback = assertMetadata(migrationName, body, "Rollback");
   const changeLogReference = assertMetadata(migrationName, body, "Change log");
 

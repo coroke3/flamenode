@@ -22,6 +22,10 @@ import {
   isDegradedD1Mode,
   loadStaticTopPage,
   logPublicRequestMetrics,
+  PublicDataUnavailableNotice,
+  PublicReflectionPendingNotice,
+  shouldPublicPageShowReflection,
+  shouldPublicPageShowUnavailable,
   setPublicRequestRoute,
 } from "@/lib/publicData/loader";
 import type { StaticTopData } from "@/lib/publicData/loader";
@@ -53,6 +57,12 @@ export default async function TopPage(): Promise<React.ReactElement> {
     loadStaticTopPage(),
     loadStaticTrending(),
   ]);
+  if (shouldPublicPageShowReflection(staticLoaded.state)) {
+    return <PublicReflectionPendingNotice />;
+  }
+  if (shouldPublicPageShowUnavailable(staticLoaded.state)) {
+    return <PublicDataUnavailableNotice />;
+  }
   const isDegraded = isDegradedD1Mode(staticLoaded.mode);
   const trendingItems =
     trendingLoaded.data && !trendingLoaded.tooOldForHome

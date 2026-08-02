@@ -47,7 +47,8 @@ function main() {
         `SELECT id, event_id, reservation_group_id, reserved_by_user_id,
                 x_user_id, display_name, status, video_id
          FROM slots
-         WHERE reservation_group_id IS NOT NULL`,
+         WHERE reservation_group_id IS NOT NULL
+            OR status IN ('reserved', 'submitted')`,
       )
       .all();
     const { candidates, ambiguities } = buildSlotReservationGroupCandidates(rows);
@@ -69,7 +70,6 @@ function main() {
         (id, event_id, reserved_by_auth_user_id, x_user_id, display_name, created_at, updated_at, version)
        VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
     );
-
     if (!dryRun) {
       const tx = db.transaction((items) => {
         for (const candidate of items) {

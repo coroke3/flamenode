@@ -11,9 +11,9 @@ import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 
 import { writeGuard } from "@/lib/auth/writeGuard";
-import { videoChapters, videos } from "@/lib/db/schema";
+import { videoChapters, videos, videoYoutubeMetadata } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import { parseChapterTime } from "@/lib/utils/chapterTime";
+import { validateChapterTime } from "@/lib/utils/chapterTime";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
@@ -29,11 +29,39 @@ export interface ChapterActionResult extends PendingPublicReflection {
 
 const createSchema = z.object({
   video_id: z.string().trim().min(1),
-  chapter_time: z.coerce.number().min(0).max(60 * 60 * 24),
+  // FormData の生文字列を共通 validator へ渡し、無効入力を 0 秒へ丸めない。
+  chapter_time: z.string().trim().min(1).max(32),
   chapter_label: z.string().trim().min(1).max(120),
   note: z.string().trim().max(1000).optional().nullable(),
   visibility: z.enum(["public", "private"]).default("public"),
 });
+
+async function loadVideoDurationSeconds(
+  db: NonNullable<ReturnType<typeof getDatabase>>,
+  videoId: string,
+): Promise<number | null> {
+  const row = (
+    await db
+      .select({ duration_seconds: videoYoutubeMetadata.duration_seconds })
+      .from(videoYoutubeMetadata)
+      .where(eq(videoYoutubeMetadata.video_id, videoId))
+      .limit(1)
+  )[0];
+  const duration = row?.duration_seconds;
+  return typeof duration === "number" && Number.isFinite(duration) && duration > 0
+    ? duration
+    : null;
+}
+
+function invalidChapterTimeResult(
+  raw: string,
+  videoDurationSeconds: number | null,
+): { ok: true; seconds: number } | { ok: false; message: string } {
+  const result = validateChapterTime(raw, { videoDurationSeconds });
+  return result.ok
+    ? { ok: true, seconds: result.seconds }
+    : { ok: false, message: result.message };
+}
 
 /**
  * チャプター (動画マーカー) を作成する。
@@ -81,13 +109,19 @@ export async function createChapter(
     };
   }
 
+  const validatedTime = invalidChapterTimeResult(
+    data.chapter_time,
+    await loadVideoDurationSeconds(db, data.video_id),
+  );
+  if (!validatedTime.ok) return validatedTime;
+
   const id = generateId("ch");
   const now = Math.floor(Date.now() / 1000);
   const after = {
     id,
     video_id: data.video_id,
     x_user_id: activeX,
-    chapter_time: data.chapter_time,
+    chapter_time: validatedTime.seconds,
     chapter_label: data.chapter_label,
     note: data.note ?? null,
     visibility: data.visibility,
@@ -217,10 +251,16 @@ export async function updateChapter(
     return { ok: false, message: "このチャプターを更新する権限がありません。" };
   }
 
+  const validatedTime = invalidChapterTimeResult(
+    parsed.data.chapter_time,
+    await loadVideoDurationSeconds(db, target.id),
+  );
+  if (!validatedTime.ok) return validatedTime;
+
   const now = Math.floor(Date.now() / 1000);
   const after = {
     ...existing,
-    chapter_time: parsed.data.chapter_time,
+    chapter_time: validatedTime.seconds,
     chapter_label: parsed.data.chapter_label,
     note: parsed.data.note ?? null,
     visibility: parsed.data.visibility,
@@ -438,6 +478,7 @@ export async function createChaptersBulk(
   }
 
   const now = Math.floor(Date.now() / 1000);
+  const videoDurationSeconds = await loadVideoDurationSeconds(db, video_id);
   const errors: string[] = [];
   let inserted = 0;
   let skipped = 0;
@@ -462,12 +503,13 @@ export async function createChaptersBulk(
       skipped += 1;
       continue;
     }
-    const time = parseChapterTime(rawTime);
-    if (time === null) {
-      errors.push(`行 ${i + 1}: 時刻の形式が不正です ("${rawTime}")`);
+    const timeResult = validateChapterTime(rawTime, { videoDurationSeconds });
+    if (!timeResult.ok) {
+      errors.push(`行 ${i + 1}: ${timeResult.message} ("${rawTime}")`);
       skipped += 1;
       continue;
     }
+    const time = timeResult.seconds;
     if (rawLabel.length === 0 || rawLabel.length > 120) {
       errors.push(`行 ${i + 1}: ラベルが必須 (1〜120文字)`);
       skipped += 1;
@@ -545,4 +587,4 @@ export async function createChaptersBulk(
  * "1:30" / "0:01:30" / "90" などのチャプター時刻文字列を秒数に変換する。
  * 不正なら null。負数や 24h 超は拒否する。
  */
-// parseChapterTime は src/lib/utils/chapterTime.ts に共通化済み。
+// validateChapterTime は src/lib/utils/chapterTime.ts に共通化済み。

@@ -13,6 +13,7 @@ import {
 import { eventTemplates } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { listEventTemplatesForAdmin } from "@/lib/actions/event-template-admin";
+import { getCurrentUser } from "@/lib/auth/currentUser";
 
 export const metadata: Metadata = { title: "新規イベント作成" };
 export const dynamic = "force-dynamic";
@@ -25,6 +26,7 @@ export default async function AdminNewEventPage({
   searchParams,
 }: Props): Promise<React.ReactElement> {
   const sp = (await searchParams) ?? {};
+  const user = await getCurrentUser();
   const templateId =
     typeof sp.template === "string" && sp.template.trim().length > 0
       ? sp.template.trim()
@@ -111,6 +113,7 @@ export default async function AdminNewEventPage({
           mode="create"
           initial={formInitial}
           templateId={templateId || undefined}
+          draftAuthUserId={user?.id}
         />
       </ConsolePanel>
 

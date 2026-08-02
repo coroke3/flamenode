@@ -5,7 +5,10 @@ import { RankedVideoCard } from "@/components/video/RankedVideoCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
-import { setPublicRequestRoute } from "@/lib/publicData/loader";
+import {
+  PublicDataUnavailableNotice,
+  setPublicRequestRoute,
+} from "@/lib/publicData/loader";
 import { loadStaticTrending } from "@/lib/publicData/trendingLoader";
 import type { TrendingItem } from "@/lib/publicData/staticTrendingCore";
 
@@ -48,7 +51,9 @@ export default async function TrendingPage(): Promise<React.ReactElement> {
         </p>
       ) : null}
 
-      {items.length === 0 ? (
+      {trending.state === "unavailable" ? (
+        <PublicDataUnavailableNotice />
+      ) : items.length === 0 ? (
         <div className={styles.empty}>
           <EmptyState
             title="ランキングを準備中です"

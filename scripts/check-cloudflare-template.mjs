@@ -21,6 +21,7 @@ const TOML_SCAN_EXCLUDED_DIRECTORIES = new Set([
   ".git",
   ".next",
   ".open-next",
+  ".tmp",
   "node_modules",
 ]);
 
@@ -265,6 +266,7 @@ export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
     /\[build\][\s\S]*?command\s*=\s*"node scripts\/workers-ci-wrangler-guard\.mjs"/m,
     "Workers CI bare wrangler deploy guard is required",
   );
+  requirePattern(errors, rootToml, "wrangler.toml", /^\s*PUBLIC_VISIBILITY_GUARD_MODE\s*=\s*"observe"\s*$/m, "PUBLIC_VISIBILITY_GUARD_MODE must default to observe");
   rejectPattern(errors, rootToml, "wrangler.toml", /pages_build_output_dir|\.vercel\/output|wrangler\s+pages/i, "legacy Pages configuration is forbidden");
   rejectPattern(errors, rootToml, "wrangler.toml", /^\s*crons\s*=/m, "the web Worker must not define a cron trigger");
   rejectPattern(errors, rootToml, "wrangler.toml", /\[durable_objects\]|\[\[migrations\]\]/i, "unapproved Durable Object bindings are forbidden");

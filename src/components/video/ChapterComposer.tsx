@@ -10,6 +10,7 @@ import {
   MAX_ATOMIC_CHAPTER_BULK_ROWS,
   parseChapterBulkCsv,
 } from "@/lib/actions/chapterLimits";
+import { validateChapterTime } from "@/lib/utils/chapterTime";
 import { usePlayerTimeSnapshot } from "./usePlayerTime";
 
 interface ChapterComposerProps {
@@ -38,25 +39,6 @@ interface ChapterComposerProps {
     label: string;
     pendingPublicReflection?: boolean;
   }) => void;
-}
-
-function parseTimeInput(raw: string): number {
-  const s = raw.trim();
-  if (!s) return 0;
-  if (/^\d+$/.test(s)) return Number(s);
-  const m = s.match(/^(\d{1,2}):([0-5]\d)(?:[.:](\d{1,3}))?$/);
-  if (m) {
-    const min = Number(m[1]);
-    const sec = Number(m[2]);
-    const ms = m[3] ? Number(m[3].padEnd(3, "0")) : 0;
-    return min * 60 + sec + ms / 1000;
-  }
-  const mh = s.match(/^(\d{1,2}):([0-5]\d):([0-5]\d)$/);
-  if (mh) {
-    return Number(mh[1]) * 3600 + Number(mh[2]) * 60 + Number(mh[3]);
-  }
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
 }
 
 function formatTimeInput(seconds: number): string {
@@ -172,11 +154,17 @@ export function ChapterComposer({
       );
       return;
     }
-    const seconds = parseTimeInput(timeStr);
+    const parsedTime = validateChapterTime(timeStr);
+    if (!parsedTime.ok) {
+      setError(parsedTime.message);
+      return;
+    }
+    const seconds = parsedTime.seconds;
     setError(null);
     const fd = new FormData();
     fd.set("video_id", videoId);
-    fd.set("chapter_time", String(seconds));
+    // Server Action 側でも同じ validator と動画尺を使って再検証する。
+    fd.set("chapter_time", timeStr.trim());
     fd.set("chapter_label", label.trim());
     fd.set("note", note.trim());
     fd.set("visibility", isPublic ? "public" : "private");

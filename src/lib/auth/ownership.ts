@@ -121,16 +121,45 @@ export async function canManageXIdLinkRequests(
   db: DB,
   user: SessionUserLike,
 ): Promise<boolean> {
-  if (user.role === "admin") return true;
+  return (await resolveXIdLinkRequestAuthorization(db, user)).allowed;
+}
+
+export type XAuthorizationEvidence = {
+  allowed: boolean;
+  /** 実際に権限を成立させた X。Auth user role で成立した場合は null。 */
+  actorXUserId: string | null;
+};
+
+function pickAuthorizationXUserId(
+  rows: readonly { x_user_id: string }[],
+  preferredXUserId: string | null | undefined,
+): string | null {
+  const ids = Array.from(new Set(rows.map((row) => row.x_user_id.trim()).filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right));
+  const preferred = preferredXUserId?.trim() || null;
+  return preferred && ids.includes(preferred) ? preferred : ids[0] ?? null;
+}
+
+/** X ID 審査権限と、その認可に実際に使った X 名義を同時に返す。 */
+export async function resolveXIdLinkRequestAuthorization(
+  db: DB,
+  user: SessionUserLike,
+): Promise<XAuthorizationEvidence> {
+  if (user.role === "admin") return { allowed: true, actorXUserId: null };
   const xIds = await getApprovedXIds(db, user.id);
-  if (xIds.length === 0) return false;
+  if (xIds.length === 0) return { allowed: false, actorXUserId: null };
   const rows = await db
-    .select(staffPermissionSelect)
+    .select({ x_user_id: eventStaff.x_user_id, ...staffPermissionSelect })
     .from(eventStaff)
     .where(inArray(eventStaff.x_user_id, xIds));
-  return rows.some((row) =>
+  const authorizedRows = rows.filter((row) =>
     resolveStaffPermissionKeys(row).has("xid.link_requests"),
   );
+  const actorXUserId = pickAuthorizationXUserId(
+    authorizedRows,
+    user.active_x_user_id,
+  );
+  return { allowed: actorXUserId !== null, actorXUserId };
 }
 
 export async function canAccessManageEvent(
@@ -221,13 +250,25 @@ export async function canEditEvent(
   eventId: string,
   requiredKey: CollaboratorPermissionKey,
 ): Promise<boolean> {
-  if (user.role === "admin") return true;
+  return (await resolveEventEditAuthorization(db, user, eventId, requiredKey)).allowed;
+}
+
+/** イベント権限と、その認可に実際に使った X 名義を同時に返す。 */
+export async function resolveEventEditAuthorization(
+  db: DB,
+  user: SessionUserLike,
+  eventId: string,
+  requiredKey: CollaboratorPermissionKey,
+): Promise<XAuthorizationEvidence> {
+  if (user.role === "admin") return { allowed: true, actorXUserId: null };
   const candidateKeys = expandPermissionAliases(requiredKey);
-  if (candidateKeys.length === 0) return false;
+  if (candidateKeys.length === 0) {
+    return { allowed: false, actorXUserId: null };
+  }
   const xIds = await getApprovedXIds(db, user.id);
-  if (xIds.length === 0) return false;
+  if (xIds.length === 0) return { allowed: false, actorXUserId: null };
   const rows = await db
-    .select(staffPermissionSelect)
+    .select({ x_user_id: eventStaff.x_user_id, ...staffPermissionSelect })
     .from(eventStaff)
     .where(
       and(
@@ -235,9 +276,14 @@ export async function canEditEvent(
         inArray(eventStaff.x_user_id, xIds),
       )!,
     );
-  return rows.some((row) =>
+  const authorizedRows = rows.filter((row) =>
     candidateKeys.some((key) => staffRowHasPermissionKey(row, key)),
   );
+  const actorXUserId = pickAuthorizationXUserId(
+    authorizedRows,
+    user.active_x_user_id,
+  );
+  return { allowed: actorXUserId !== null, actorXUserId };
 }
 
 export async function assertCanEditEvent(
@@ -245,9 +291,15 @@ export async function assertCanEditEvent(
   user: SessionUserLike,
   eventId: string,
   requiredKey: CollaboratorPermissionKey,
-): Promise<void> {
-  const ok = await canEditEvent(db, user, eventId, requiredKey);
-  if (!ok) throw new Error(`権限が不足しています (${requiredKey})`);
+): Promise<string | null> {
+  const evidence = await resolveEventEditAuthorization(
+    db,
+    user,
+    eventId,
+    requiredKey,
+  );
+  if (!evidence.allowed) throw new Error(`権限が不足しています (${requiredKey})`);
+  return evidence.actorXUserId;
 }
 
 export type CanEditVideoPrivilegeMode = "normal" | "admin" | "event";

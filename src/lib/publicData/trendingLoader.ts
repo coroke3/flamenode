@@ -15,6 +15,7 @@ export interface StaticTrendingLoadResult {
   stale: boolean;
   ageSeconds: number | null;
   tooOldForHome: boolean;
+  state: "ready" | "empty" | "stale" | "unavailable";
 }
 
 async function readTrendingJsonFromR2(): Promise<StaticTrendingPayload | null> {
@@ -48,5 +49,12 @@ export async function loadStaticTrending(
   return {
     data,
     ...staleMeta,
+    state: !data
+      ? "unavailable"
+      : data.items.length === 0
+        ? "empty"
+        : staleMeta.stale
+          ? "stale"
+          : "ready",
   };
 }

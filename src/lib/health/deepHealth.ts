@@ -3,7 +3,11 @@ import {
   REQUIRED_SCHEMA_VERSION,
   RUNTIME_CRITICAL_TABLES,
 } from "./schemaContract.ts";
-import { assertArtifactSloFresh } from "./artifactSlo.ts";
+import {
+  assertArtifactSloFresh,
+  assertTrackedDetailArtifactSloFresh,
+  type TrackedDetailArtifactSloRow,
+} from "./artifactSlo.ts";
 import { evaluateDeepHealthQueueConfiguration } from "./queueEmergency.ts";
 import {
   normalizePublicVisibilityBlockedEntitiesManifest,
@@ -141,8 +145,25 @@ export async function runDeepHealthChecks(
       `SELECT
          (SELECT version FROM flamenode_schema_meta WHERE id = 'current') AS version,
          (SELECT COUNT(*) FROM sqlite_master
-          WHERE type = 'table' AND name IN (${quotedTables})) AS required_table_count`,
-    ).first<{ version?: string; required_table_count?: number }>(),
+          WHERE type = 'table' AND name IN (${quotedTables})) AS required_table_count,
+         (SELECT COUNT(*) FROM videos
+          WHERE visibility_status = 'public') AS public_video_detail_count,
+         (SELECT COUNT(DISTINCT target_id) FROM static_artifacts
+          WHERE target_type = 'video' AND deleted_at IS NULL) AS tracked_video_detail_count,
+         (SELECT MIN(generated_at) FROM static_artifacts
+          WHERE target_type = 'video' AND deleted_at IS NULL) AS oldest_video_detail_generated_at,
+         (SELECT COUNT(*) FROM events
+          WHERE visibility_status = 'public') AS public_event_detail_count,
+         (SELECT COUNT(DISTINCT target_id) FROM static_artifacts
+          WHERE target_type = 'event' AND deleted_at IS NULL) AS tracked_event_detail_count,
+         (SELECT MIN(generated_at) FROM static_artifacts
+          WHERE target_type = 'event' AND deleted_at IS NULL) AS oldest_event_detail_generated_at`,
+    ).first<
+      {
+        version?: string;
+        required_table_count?: number;
+      } & TrackedDetailArtifactSloRow
+    >(),
     env.KV.get(PROBE_KEY),
     env.BUCKET.head(PROBE_KEY),
   ]);
@@ -154,6 +175,7 @@ export async function runDeepHealthChecks(
   }
 
   const queueEvaluation = evaluateDeepHealthQueueConfiguration(env);
+  assertTrackedDetailArtifactSloFresh(schema, nowSec);
   await assertArtifactSloFresh(env.BUCKET, nowSec);
   const guardMode = resolvePublicVisibilityGuardMode(
     env.PUBLIC_VISIBILITY_GUARD_MODE,
