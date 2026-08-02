@@ -326,7 +326,7 @@ async function resolvePublicJsonMiss<T = never>(
   const strategy = getPublicDataStrategy(mode);
 
   if (strategy === "maintenance") {
-    return buildMissResult({
+    return buildMissResult<T>({
       data: null,
       mode: "unavailable",
       strategy,
@@ -406,7 +406,7 @@ async function resolvePublicJsonMiss<T = never>(
     }
   }
 
-  return buildMissResult({
+  return buildMissResult<T>({
     data: null,
     mode: "unavailable",
     strategy,
@@ -457,7 +457,7 @@ export async function loadPublicJson<T>(
   const operationMode = await resolvePublicOperationMode({ allowD1: true });
   const maintenanceStrategy = getPublicDataStrategy(operationMode);
   if (maintenanceStrategy === "maintenance") {
-    return buildMissResult({
+    return buildMissResult<T>({
       data: null,
       mode: "unavailable",
       strategy: maintenanceStrategy,
@@ -466,7 +466,7 @@ export async function loadPublicJson<T>(
   }
 
   if (await isLoaderTargetVisibilityBlocked(options.targetType, options.targetId)) {
-    return buildMissResult({
+    return buildMissResult<T>({
       data: null,
       mode: "unavailable",
       strategy: maintenanceStrategy,
