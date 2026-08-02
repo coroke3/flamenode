@@ -37,10 +37,17 @@ test("security-sensitive Server Actions use the common write guard", async () =>
 });
 
 test("permission ownership accepts only approved linked X IDs", async () => {
-  const source = await readFile(
+  const ownership = await readFile(
     path.resolve(import.meta.dirname, "ownership.ts"),
     "utf8",
   );
-  assert.match(source, /\.innerJoin\(xUsers, eq\(xUsers\.id, xUserAccountLinks\.x_user_id\)\)/);
-  assert.match(source, /eq\(xUsers\.approval_status, "approved"\)/);
+  const approvedX = await readFile(
+    path.resolve(import.meta.dirname, "approvedX.ts"),
+    "utf8",
+  );
+  assert.match(ownership, /from "\.\/approvedX"/);
+  assert.match(ownership, /getApprovedLinkedXUserIds|getApprovedXIds/);
+  assert.match(approvedX, /\.innerJoin\(xUsers, eq\(xUsers\.id, xUserAccountLinks\.x_user_id\)\)/);
+  assert.match(approvedX, /eq\(xUsers\.approval_status, "approved"\)/);
+  assert.doesNotMatch(approvedX, /approval_status,\s*"imported"/);
 });
