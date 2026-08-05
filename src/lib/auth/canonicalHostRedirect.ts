@@ -8,6 +8,13 @@ type CanonicalHostRedirectInput = {
   search: string;
 };
 
+function isWorkersDevHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === "workers.dev" || normalized.endsWith(".workers.dev")
+  );
+}
+
 function parseRequestHost(value: string | null | undefined): URL | null {
   const host = value?.split(",")[0]?.trim().toLowerCase();
   if (!host) return null;
@@ -25,6 +32,10 @@ function parseRequestHost(value: string | null | undefined): URL | null {
  * Returns the canonical URL when a non-loopback request arrived through a
  * different host. Invalid or absent configuration deliberately preserves the
  * incoming request.
+ *
+ * Never redirects toward a workers.dev origin: Next.js may bake a bootstrap
+ * NEXT_PUBLIC_SITE_URL while Cloudflare runtime vars already point at the
+ * custom domain.
  */
 export function resolveCanonicalHostRedirect(
   input: CanonicalHostRedirectInput,
@@ -37,6 +48,11 @@ export function resolveCanonicalHostRedirect(
       { allowLoopback: true },
     );
   } catch {
+    return null;
+  }
+
+  const canonicalHost = new URL(canonicalOrigin).hostname;
+  if (isWorkersDevHostname(canonicalHost)) {
     return null;
   }
 

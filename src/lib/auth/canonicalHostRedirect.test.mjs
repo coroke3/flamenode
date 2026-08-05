@@ -30,6 +30,19 @@ test("workers.dev hostを正規originへ解決する", () => {
   );
 });
 
+test("canonicalがworkers.devのときはリダイレクトしない", () => {
+  assert.equal(
+    resolveCanonicalHostRedirect({
+      configuredOrigin: "https://flamenode-web.example.workers.dev",
+      forwardedHost: null,
+      host: "flamenode.net",
+      pathname: "/entry",
+      search: "",
+    }),
+    null,
+  );
+});
+
 test("x-forwarded-hostの先頭値だけを使う", () => {
   assert.equal(
     resolveCanonicalHostRedirect({

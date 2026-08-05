@@ -7,6 +7,8 @@ import { resolveMiddlewareMaintenance } from "@/lib/operationMode/middlewareMain
  *
  * - 設定済みの正規 origin と異なる host は、全経路（`/api/auth`を含む）を
  *   同一path + queryの正規 origin へ戻し、Auth.js Cookieのhost不一致を防ぐ。
+ * - Cloudflare runtime の AUTH_URL / NEXT_PUBLIC_SITE_URL を優先する
+ *  （Build Variables の古い workers.dev bake-in で apex を壊さない）。
  * - `operation_mode = maintenance`（KV ミラー）または `MAINTENANCE_MODE=1` のとき、
  *   一般ユーザーは `/maintenance` に戻す。`/admin`・`/api/auth`・`/api/health` は通す。
  * - 厳密な権限判定はページ側 (`requireSession` / RSC) で行う。
@@ -18,20 +20,22 @@ export const config = {
 };
 
 async function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
-  const fromProcess =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() || process.env.AUTH_URL?.trim();
-  if (fromProcess) return fromProcess;
-
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const env = getCloudflareContext().env as {
       NEXT_PUBLIC_SITE_URL?: string;
       AUTH_URL?: string;
     };
-    return env.NEXT_PUBLIC_SITE_URL?.trim() || env.AUTH_URL?.trim();
+    const fromRuntime =
+      env.NEXT_PUBLIC_SITE_URL?.trim() || env.AUTH_URL?.trim();
+    if (fromRuntime) return fromRuntime;
   } catch {
-    return undefined;
+    // fall through to process.env (local / build)
   }
+
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() || process.env.AUTH_URL?.trim()
+  );
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
