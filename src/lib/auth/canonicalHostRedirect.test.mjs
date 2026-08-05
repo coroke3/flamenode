@@ -43,6 +43,29 @@ test("canonicalがworkers.devのときはリダイレクトしない", () => {
   );
 });
 
+test("health経路は非正規hostでもリダイレクトしない", () => {
+  assert.equal(
+    resolveCanonicalHostRedirect({
+      configuredOrigin,
+      forwardedHost: null,
+      host: "flamenode-web.workers.dev",
+      pathname: "/api/health",
+      search: "",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveCanonicalHostRedirect({
+      configuredOrigin,
+      forwardedHost: null,
+      host: "flamenode-web.workers.dev",
+      pathname: "/api/health/deep",
+      search: "",
+    }),
+    null,
+  );
+});
+
 test("x-forwarded-hostの先頭値だけを使う", () => {
   assert.equal(
     resolveCanonicalHostRedirect({

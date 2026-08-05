@@ -2,7 +2,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { assertCommitSha, normalizedUrl } from "./cloudflare-production.mjs";
+import { assertCommitSha, normalizedUrl, rewriteWorkersDevWebOriginsForCutover } from "./cloudflare-production.mjs";
 import { markDeploySmokeResult } from "./deploy-manifest.mjs";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
@@ -259,14 +259,30 @@ export function smokeEnvironment({
   if (!SHA_PATTERN.test(commit)) throw new Error("WORKERS_CI_COMMIT_SHA must be a 40-character hexadecimal SHA.");
   const token = env.WORKER_ADMIN_TOKEN?.trim();
   if (!token) throw new Error("WORKER_ADMIN_TOKEN is required for protected deep health.");
+
+  // Deploy rewrites Build Variables in-process; smoke is a separate npm script and
+  // must apply the same cutover rewrite so health/auth probes hit the public origin.
+  const smokeEnv = { ...env };
+  const urls = new Map();
+  for (const name of ["FLAMENODE_WEB_URL", "NEXT_PUBLIC_SITE_URL", "AUTH_URL"]) {
+    const raw = smokeEnv[name]?.trim();
+    if (!raw) continue;
+    try {
+      urls.set(name, normalizedUrl(raw, name));
+    } catch {
+      // requiredUrl below reports invalid values.
+    }
+  }
+  rewriteWorkersDevWebOriginsForCutover(smokeEnv, urls, []);
+
   return {
     commit: commit.toLowerCase(),
     token,
-    web: requiredUrl(env, "FLAMENODE_WEB_URL"),
+    web: requiredUrl(smokeEnv, "FLAMENODE_WEB_URL"),
     workers: [
-      ["flamenode-fast-jobs", requiredUrl(env, "FAST_JOBS_URL")],
-      ["flamenode-content-jobs", requiredUrl(env, "CONTENT_JOBS_URL")],
-      ["flamenode-sync-jobs", requiredUrl(env, "SYNC_JOBS_URL")],
+      ["flamenode-fast-jobs", requiredUrl(smokeEnv, "FAST_JOBS_URL")],
+      ["flamenode-content-jobs", requiredUrl(smokeEnv, "CONTENT_JOBS_URL")],
+      ["flamenode-sync-jobs", requiredUrl(smokeEnv, "SYNC_JOBS_URL")],
     ],
   };
 }

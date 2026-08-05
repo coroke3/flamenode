@@ -56,6 +56,14 @@ export function resolveCanonicalHostRedirect(
     return null;
   }
 
+  // Keep health probes reachable on workers.dev for smoke/monitoring.
+  if (
+    input.pathname === "/api/health" ||
+    input.pathname.startsWith("/api/health/")
+  ) {
+    return null;
+  }
+
   const requestUrl = parseRequestHost(input.forwardedHost || input.host);
   if (
     !requestUrl ||
