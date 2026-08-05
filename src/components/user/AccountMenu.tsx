@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import styles from "./AccountMenu.module.css";
 import { Icon } from "@/components/ui/Icon";
+import { authSignOut } from "@/lib/actions/authSignOut";
 import {
   sortXIdEntries,
   type XIdEntry,
@@ -410,13 +411,15 @@ export function AccountMenu({
 
           <div className={styles.divider} />
           <div className={styles.section}>
-            <Link
-              href="/api/auth/signout"
-              className={`${styles.menuItem} ${styles.menuItemDanger}`}
-              onClick={() => setOpen(false)}
-            >
-              <Icon name="logout" size={14} aria-hidden /> ログアウト
-            </Link>
+            <form action={authSignOut}>
+              <button
+                type="submit"
+                className={`${styles.menuItem} ${styles.menuItemDanger}`}
+                onClick={() => setOpen(false)}
+              >
+                <Icon name="logout" size={14} aria-hidden /> ログアウト
+              </button>
+            </form>
           </div>
         </div>
       ) : null}

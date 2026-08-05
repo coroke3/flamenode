@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [route, island, publicLayout] = await Promise.all([
+const [route, island, publicLayout, accountMenu] = await Promise.all([
   readFile(
     new URL("../../../app/api/account/summary/route.ts", import.meta.url),
     "utf8",
@@ -13,6 +13,10 @@ const [route, island, publicLayout] = await Promise.all([
   ),
   readFile(
     new URL("../../../app/(public)/layout.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../../components/user/AccountMenu.tsx", import.meta.url),
     "utf8",
   ),
 ]);
@@ -45,4 +49,13 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
     island,
     /response\.status === 503[\s\S]{0,180}setUser\(null\)/,
   );
+});
+
+test("ログアウトはserver action経由で固定の遷移先を使う", () => {
+  assert.match(island, /import \{ authSignOut \} from "@\/lib\/actions\/authSignOut"/);
+  assert.match(island, /<form action=\{authSignOut\}>/);
+  assert.match(accountMenu, /import \{ authSignOut \} from "@\/lib\/actions\/authSignOut"/);
+  assert.match(accountMenu, /<form action=\{authSignOut\}>/);
+  assert.doesNotMatch(island, /\/api\/auth\/signout/);
+  assert.doesNotMatch(accountMenu, /\/api\/auth\/signout/);
 });

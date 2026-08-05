@@ -40,20 +40,33 @@ export default async function AuthCompletePage({
   const resolution = await resolveAuthCompleteSession(
     loadAuthSessionUncached,
   );
-  if (resolution.kind !== "authenticated") {
+  if (resolution.kind === "unavailable") {
     logFlowTrace({
       flow: "discord_auth",
       phase: "auth_complete_rendered",
       trace_id: traceId,
       result: "failed",
-      error_code:
-        resolution.kind === "unavailable"
-          ? "session_read_failed_after_retry"
-          : "session_not_visible_after_retry",
+      error_code: "session_read_failed_after_retry",
       duration_ms: Date.now() - started,
       retryable: true,
     });
     redirect("/entry?error=auth_temporarily_unavailable");
+  }
+
+  if (resolution.kind === "missing") {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "auth_complete_rendered",
+      trace_id: traceId,
+      result: "skipped",
+      error_code: "session_missing_after_retry",
+      duration_ms: Date.now() - started,
+    });
+    redirect("/entry");
+  }
+
+  if (resolution.kind !== "authenticated") {
+    redirect("/entry");
   }
 
   if (resolution.attempts > 1) {

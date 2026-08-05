@@ -123,6 +123,6 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   return baseConfig;
 }
 
-export const { handlers, auth, signIn } = NextAuth(async () =>
+export const { handlers, auth, signIn, signOut } = NextAuth(async () =>
   await buildAuthConfig(),
 );

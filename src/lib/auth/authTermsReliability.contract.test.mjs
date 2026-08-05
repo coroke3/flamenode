@@ -9,6 +9,8 @@ const [
   completePage,
   requestAuth,
   terms,
+  authIndex,
+  authSignOut,
 ] = await Promise.all([
   readFile(new URL("./authComplete.ts", import.meta.url), "utf8"),
   readFile(new URL("./onboardingUrls.ts", import.meta.url), "utf8"),
@@ -19,6 +21,8 @@ const [
   ),
   readFile(new URL("./requestAuthContext.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/terms.ts", import.meta.url), "utf8"),
+  readFile(new URL("./index.ts", import.meta.url), "utf8"),
+  readFile(new URL("../actions/authSignOut.ts", import.meta.url), "utf8"),
 ]);
 
 test("Discord signInは /auth/complete を経由する", () => {
@@ -85,8 +89,16 @@ test("auth completeは再試行後も読めないsessionを成功扱いしない
     attempts: AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS.length + 1,
   });
   assert.equal(reads, AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS.length + 1);
-  assert.match(completePage, /session_not_visible_after_retry/);
+  assert.match(completePage, /session_missing_after_retry/);
+  assert.match(completePage, /result: "skipped"/);
+  assert.match(completePage, /redirect\("\/entry"\)/);
   assert.match(completePage, /auth_temporarily_unavailable/);
+});
+
+test("ログアウトはserver actionでentryへ遷移する", () => {
+  assert.match(authIndex, /handlers,\s*auth,\s*signIn,\s*signOut/);
+  assert.match(authSignOut, /"use server"/);
+  assert.match(authSignOut, /signOut\(\{ redirectTo: "\/entry" \}\)/);
 });
 
 test("auth completeはopen redirectと循環を拒否する", async () => {

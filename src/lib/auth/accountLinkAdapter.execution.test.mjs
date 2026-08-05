@@ -38,6 +38,7 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     accountRowWithoutTokens,
     linkDiscordAccountAtomically,
   } = await import("./accountLinkAdapter.ts");
+  const { mutateWithAudit } = await import("../audit/mutate.ts");
 
   const account = {
     userId: "user-1",
@@ -116,6 +117,57 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     });
   }
 
+  function runnable(kind, values = {}) {
+    return {
+      kind,
+      values,
+      _prepare: () => ({
+        getQuery: () => ({ sql: kind, params: [] }),
+        stmt: { bind: () => ({}) },
+      }),
+    };
+  }
+
+  function fakeDbForDefaultMutate({ userRow }) {
+    const state = { batches: [], committed: false };
+    let selectIndex = 0;
+    const db = {
+      select: () => {
+        const chain = {
+          from: () => chain,
+          leftJoin: () => chain,
+          where: () => ({
+            get: async () => undefined,
+            limit: async () => {
+              selectIndex += 1;
+              if (selectIndex === 1) return [userRow];
+              return [];
+            },
+          }),
+        };
+        return chain;
+      },
+      insert: () => ({
+        values: (values) => ({
+          ...runnable("insert", values),
+          onConflictDoNothing: () => runnable("insert", values),
+        }),
+      }),
+      update: () => ({
+        set: (values) => ({
+          where: () => runnable("update", values),
+        }),
+      }),
+      run: () => runnable("run"),
+      batch: async (items) => {
+        state.batches.push(items);
+        state.committed = true;
+        return [];
+      },
+    };
+    return { db, state };
+  }
+
   test("保存accountからaccess/refresh/id tokenを除外する", () => {
     const row = accountRowWithoutTokens(account);
     assert.equal(row.access_token, null);
@@ -181,10 +233,10 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
       captured.mutationStatements[3].values.dedupe_key,
       "channel_account_created:user-1",
     );
-    assert.equal(captured.audits.length, 2);
-    assert.equal(captured.audits[0].table_name, "account");
-    assert.equal(captured.audits[1].before.discord_id, null);
-    assert.equal(captured.audits[1].after.discord_id, "discord-1");
+    assert.equal(captured.audits.length, 1);
+    assert.equal(captured.audits[0].table_name, "user");
+    assert.equal(captured.audits[0].before.discord_id, null);
+    assert.equal(captured.audits[0].after.discord_id, "discord-1");
   });
 
   test("既に整合済みの再linkはno-op", async () => {
@@ -246,6 +298,24 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     );
   });
 
+  test("account insertのみでは監査 mutation を呼ばずに実行する", async () => {
+    const beforeUser = {
+      id: "user-1",
+      name: "User",
+      discord_id: "discord-1",
+      created_at: 1,
+    };
+    const { db } = fakeDb({ userRow: beforeUser });
+    let called = false;
+
+    await linkDiscordAccountAtomically(db, account, async () => {
+      called = true;
+      return [];
+    });
+
+    assert.equal(called, false);
+  });
+
   test("welcome 通知の組み立て失敗でも account・discord_id・audit を atomic plan へ渡す", async () => {
     const beforeUser = {
       id: "user-1",
@@ -274,9 +344,52 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     assert.deepEqual(captured.mutationStatements[1].values, {
       discord_id: "discord-1",
     });
-    assert.equal(captured.audits.length, 2);
-    assert.equal(captured.audits[0].table_name, "account");
-    assert.equal(captured.audits[1].table_name, "user");
+    assert.equal(captured.audits.length, 1);
+    assert.equal(captured.audits[0].table_name, "user");
+  });
+
+  test("account の strict audit は拒否され、初回 Discord link は既定 mutation で commit する", async () => {
+    const blocked = fakeDbForDefaultMutate({
+      userRow: { id: "user-1", discord_id: null },
+    });
+    await assert.rejects(
+      mutateWithAudit(blocked.db, {
+        mutationStatements: [runnable("mutation")],
+        expectedMutationChanges: 1,
+        audits: [
+          {
+            table_name: "account",
+            target_id: "discord:discord-1",
+            operation: "CREATE",
+            after: { provider: "discord" },
+            actor_user_id: "user-1",
+            strict: true,
+          },
+        ],
+      }),
+      /テーブル「account」の監査ログを作成できません/,
+    );
+    assert.equal(blocked.state.committed, false);
+
+    const beforeUser = {
+      id: "user-1",
+      name: "User",
+      discord_id: null,
+      created_at: 1,
+    };
+    const linked = fakeDbForDefaultMutate({ userRow: beforeUser });
+    await linkDiscordAccountAtomically(
+      linked.db,
+      account,
+      undefined,
+      async () => {
+        throw new Error("welcome notification unavailable");
+      },
+    );
+
+    assert.equal(linked.state.committed, true);
+    assert.equal(linked.state.batches.length, 1);
+    assert.ok(linked.state.batches[0].length >= 5);
   });
 
   test("atomic plan失敗を成功扱いせず、user欠落時はplanを作らない", async () => {

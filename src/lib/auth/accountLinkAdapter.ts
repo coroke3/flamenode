@@ -270,18 +270,6 @@ export async function linkDiscordAccountAtomically(
     context: string;
     retention_class: "long_audit";
   }> = [];
-  if (needsAccountInsert) {
-    audits.push({
-      table_name: "account",
-      target_id: `${account.provider}:${account.providerAccountId}`,
-      operation: "CREATE",
-      after: { ...accountRow },
-      actor_user_id: account.userId,
-      reason: "auth_link_discord",
-      context: "auth",
-      retention_class: "long_audit",
-    });
-  }
   if (needsDiscordId) {
     audits.push({
       table_name: "user",
@@ -296,12 +284,18 @@ export async function linkDiscordAccountAtomically(
     });
   }
 
-  await mutate(db, {
-    mutationStatements,
-    expectedMutationChanges,
-    audits,
-    notificationWakeSource,
-  });
+  if (audits.length > 0) {
+    await mutate(db, {
+      mutationStatements,
+      expectedMutationChanges,
+      audits,
+      notificationWakeSource,
+    });
+  } else {
+    for (const statement of mutationStatements) {
+      await statement;
+    }
+  }
 
   logFlowTrace({
     flow: "discord_auth",
