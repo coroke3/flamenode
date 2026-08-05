@@ -289,6 +289,8 @@ smokeは有限retryとtimeoutを持ち、URL未設定をskipしません。deplo
 4. 更新後のWorkers Buildを実行し、custom domainでproduction smokeを成功させる。
 5. 旧Pages側のcustom domain / trafficを停止する。
 
+custom domain運用時は、`www`および`workers.dev`で受けたWebリクエストを正規 originへ308リダイレクトし、Auth.js Cookieをcallback hostへ揃える。
+
 Host header fallbackや`trustHost`の無条件有効化でorigin不一致を回避しません。
 
 ## 9. 旧Pages停止・削除条件
