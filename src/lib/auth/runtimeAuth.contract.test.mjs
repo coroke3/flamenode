@@ -52,6 +52,7 @@ test("Auth origin・Host・Discord scopeは固定設定をfail-closedで使う",
   assert.match(auth, /trustHost: true/);
   assert.doesNotMatch(auth, /AUTH_TRUST_HOST/);
   assert.match(auth, /params: \{ scope: "identify email" \}/);
+  assert.match(auth, /allowDangerousEmailAccountLinking:\s*true/);
   assert.doesNotMatch(auth, /identify email guilds/);
   assert.doesNotMatch(auth, /redirect\(\{ url, baseUrl \}\)/);
 });

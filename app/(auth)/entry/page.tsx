@@ -26,8 +26,14 @@ export const dynamic = "force-dynamic";
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   AccessDenied: "Discord認証がキャンセルされました",
+  OAuthCallback: "Discord認証を完了できませんでした",
   OAuthCallbackError: "Discord認証を完了できませんでした",
-  AccountNotLinked: "アカウントの紐付け状態を確認してください",
+  OAuthSignin: "Discord認証を開始できませんでした",
+  OAuthCreateAccount: "アカウント作成に失敗しました",
+  Callback: "Discord認証を完了できませんでした",
+  AccountNotLinked: "このDiscordアカウントは別のユーザーに紐付いています",
+  OAuthAccountNotLinked:
+    "同じメールのアカウントが既にあります。もう一度ログインすると紐付けを完了できます",
   Configuration: "認証設定に問題があります",
   auth_temporarily_unavailable: "認証基盤が一時的に利用できません",
   Verification: "認証リンクの検証に失敗しました",

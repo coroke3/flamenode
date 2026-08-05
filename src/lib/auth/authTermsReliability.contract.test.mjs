@@ -111,8 +111,10 @@ test("auth complete page の next フォールバックは /dashboard", () => {
 
 test("entryはAuth.js error codeを安全に表示する", () => {
   assert.match(entryPage, /AccessDenied/);
+  assert.match(entryPage, /OAuthCallback/);
   assert.match(entryPage, /OAuthCallbackError/);
   assert.match(entryPage, /AccountNotLinked/);
+  assert.match(entryPage, /OAuthAccountNotLinked/);
   assert.match(entryPage, /Configuration/);
   assert.match(entryPage, /auth_temporarily_unavailable/);
   assert.doesNotMatch(entryPage, /access_token|refresh_token|AUTH_SECRET/);

@@ -62,6 +62,9 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
       Discord({
         clientId: discordClientId,
         clientSecret: discordClientSecret,
+        // Discord は verified email を返す前提。メールだけ先に存在する user
+        // （部分登録・移行残骸）へ、未ログイン状態でも Discord account を安全に紐付ける。
+        allowDangerousEmailAccountLinking: true,
         // `authorization` だけ `params` を渡すとデフォルトの `url` が消え、
         // Auth.js が OIDC discovery へ落ちて `new URL(undefined)` → Invalid URL になる。
         authorization: {
