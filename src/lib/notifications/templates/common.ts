@@ -1,4 +1,8 @@
-import { appUrl, type DiscordNotificationPayload } from "../format";
+import {
+  appUrl,
+  type DiscordNotificationPayload,
+  type NotificationUrlEnv,
+} from "../format";
 
 export type DiscordAllowedMentions = {
   parse?: Array<"roles" | "users" | "everyone">;
@@ -110,8 +114,12 @@ export function buildNotificationBlocks(blocks: DiscordBlock[]): string {
 }
 
 /** ラベル付きの完全URL行を返す。 */
-export function linkLine(label: string, path: string): string {
-  return `${label}\n${appUrl(path)}`;
+export function linkLine(
+  label: string,
+  path: string,
+  env?: NotificationUrlEnv,
+): string {
+  return `${label}\n${appUrl(path, env)}`;
 }
 
 /** テンプレート共通の payload 組み立て。 */

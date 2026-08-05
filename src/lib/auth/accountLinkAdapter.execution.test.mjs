@@ -246,6 +246,39 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     );
   });
 
+  test("welcome 通知の組み立て失敗でも account・discord_id・audit を atomic plan へ渡す", async () => {
+    const beforeUser = {
+      id: "user-1",
+      name: "User",
+      discord_id: null,
+      created_at: 1,
+    };
+    const { db } = fakeDb({ userRow: beforeUser });
+    let captured;
+
+    await linkDiscordAccountAtomically(
+      db,
+      account,
+      async (_receivedDb, input) => {
+        captured = input;
+        return ["audit-1"];
+      },
+      async () => {
+        throw new Error("notification URL unavailable");
+      },
+    );
+
+    assert.equal(captured.mutationStatements.length, 2);
+    assert.deepEqual(captured.expectedMutationChanges, [null, 1]);
+    assert.equal(captured.mutationStatements[0].kind, "insert");
+    assert.deepEqual(captured.mutationStatements[1].values, {
+      discord_id: "discord-1",
+    });
+    assert.equal(captured.audits.length, 2);
+    assert.equal(captured.audits[0].table_name, "account");
+    assert.equal(captured.audits[1].table_name, "user");
+  });
+
   test("atomic plan失敗を成功扱いせず、user欠落時はplanを作らない", async () => {
     const beforeUser = {
       id: "user-1",

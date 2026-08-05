@@ -115,7 +115,7 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     adapter: {
       ...drizzleAdapter,
       async linkAccount(account) {
-        await linkDiscordAccountAtomically(db, account);
+        await linkDiscordAccountAtomically(db, account, undefined, undefined, siteOrigin);
       },
     },
   };

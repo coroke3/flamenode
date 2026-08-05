@@ -1,13 +1,15 @@
-import { appUrl } from "../format";
+import { appUrl, type NotificationUrlEnv } from "../format";
 import { linkLine, buildDiscordPayload, buildNotificationBlocks } from "./common";
 
 /** 初回Discord連携時の利用者向け welcome DM。 */
-export function buildWelcomeAccountNotification(): ReturnType<
+export function buildWelcomeAccountNotification(
+  env?: NotificationUrlEnv,
+): ReturnType<
   typeof buildDiscordPayload
 > {
   const onboardingPath = "/onboarding";
-  const onboardingUrl = linkLine("はじめの設定を開く", onboardingPath);
-  const rulesUrl = linkLine("利用規約を確認する", "/rules");
+  const onboardingUrl = linkLine("はじめの設定を開く", onboardingPath, env);
+  const rulesUrl = linkLine("利用規約を確認する", "/rules", env);
   const content = buildNotificationBlocks([
     {
       heading: "【FlameNode】アカウント登録が完了しました",
@@ -33,5 +35,5 @@ export function buildWelcomeAccountNotification(): ReturnType<
       ],
     },
   ]);
-  return buildDiscordPayload({ content, url: appUrl(onboardingPath) });
+  return buildDiscordPayload({ content, url: appUrl(onboardingPath, env) });
 }

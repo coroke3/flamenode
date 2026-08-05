@@ -6,12 +6,14 @@ import {
   formatJstNow,
   linkLine,
 } from "./common";
+import type { NotificationUrlEnv } from "../format";
 
 /** 運営チャンネル向け: 初回アカウント作成通知。 */
 export function buildChannelAccountCreatedNotification(args: {
   userId: string;
   discordId: string;
   userName?: string | null;
+  env?: NotificationUrlEnv;
 }): ReturnType<typeof buildDiscordPayload> {
   const displayName = args.userName?.trim()
     ? escapeDiscordMention(args.userName)
@@ -30,7 +32,11 @@ export function buildChannelAccountCreatedNotification(args: {
     {
       heading: "■ 確認",
       lines: [
-        linkLine("ユーザー管理を開く", `/admin/users?q=${encodeURIComponent(args.userId)}`),
+        linkLine(
+          "ユーザー管理を開く",
+          `/admin/users?q=${encodeURIComponent(args.userId)}`,
+          args.env,
+        ),
       ],
     },
   ]);

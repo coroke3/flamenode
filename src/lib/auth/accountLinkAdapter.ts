@@ -66,13 +66,14 @@ export function accountRowWithoutTokens(
 
 /**
  * Auth.js adapterのlinkAccount境界でaccount作成・Discord ID更新・監査を
- * 同じD1 batchへ入れる。再実行は冪等。welcomeはoutbox登録まで（wakeはmutate側best-effort）。
+ * 同じD1 batchへ入れる。再実行は冪等。通知の組み立て・outbox登録はbest-effort。
  */
 export async function linkDiscordAccountAtomically(
   db: DB,
   account: AdapterAccount,
   mutate: AtomicMutator = mutateWithAudit,
   buildWelcomeNotification: WelcomeNotificationBuilder = defaultBuildWelcomeNotification,
+  siteOrigin?: string,
 ): Promise<void> {
   const traceId = createTraceId();
   logFlowTrace({
@@ -196,40 +197,54 @@ export async function linkDiscordAccountAtomically(
 
   let notificationWakeSource: "web" | undefined;
   if (isFirstDiscordLink) {
-    const { buildWelcomeAccountNotification } = await import(
-      "@/lib/notifications/templates/user"
-    );
-    const { buildChannelAccountCreatedNotification } = await import(
-      "@/lib/notifications/templates/channel"
-    );
-    const { buildOpsChannelWebhookStatement } = await import(
-      "@/lib/notifications/opsWebhook"
-    );
-    const welcomeNotification = await buildWelcomeNotification(db, {
-      recipientUserId: account.userId,
-      type: "welcome_account",
-      payload: buildWelcomeAccountNotification(),
-      dedupeKey: `welcome_account:${account.userId}`,
-      force: true,
-    });
-    const channelNotification = await buildOpsChannelWebhookStatement(db, {
-      actorUserId: account.userId,
-      payload: buildChannelAccountCreatedNotification({
-        userId: account.userId,
-        discordId: account.providerAccountId,
-        userName: beforeUser.name,
-      }),
-      dedupeKey: `channel_account_created:${account.userId}`,
-    });
-    if (welcomeNotification) {
-      mutationStatements.push(welcomeNotification.statement);
-      expectedMutationChanges.push(null);
-      notificationWakeSource = "web";
-    }
-    if (channelNotification) {
-      mutationStatements.push(channelNotification.statement);
-      expectedMutationChanges.push(null);
-      notificationWakeSource = "web";
+    try {
+      const { buildWelcomeAccountNotification } = await import(
+        "@/lib/notifications/templates/user"
+      );
+      const { buildChannelAccountCreatedNotification } = await import(
+        "@/lib/notifications/templates/channel"
+      );
+      const { buildOpsChannelWebhookStatement } = await import(
+        "@/lib/notifications/opsWebhook"
+      );
+      const notificationEnv = siteOrigin
+        ? { NEXT_PUBLIC_SITE_URL: siteOrigin }
+        : undefined;
+      const welcomeNotification = await buildWelcomeNotification(db, {
+        recipientUserId: account.userId,
+        type: "welcome_account",
+        payload: buildWelcomeAccountNotification(notificationEnv),
+        dedupeKey: `welcome_account:${account.userId}`,
+        force: true,
+      });
+      const channelNotification = await buildOpsChannelWebhookStatement(db, {
+        actorUserId: account.userId,
+        payload: buildChannelAccountCreatedNotification({
+          userId: account.userId,
+          discordId: account.providerAccountId,
+          userName: beforeUser.name,
+          env: notificationEnv,
+        }),
+        dedupeKey: `channel_account_created:${account.userId}`,
+      });
+      if (welcomeNotification) {
+        mutationStatements.push(welcomeNotification.statement);
+        expectedMutationChanges.push(null);
+        notificationWakeSource = "web";
+      }
+      if (channelNotification) {
+        mutationStatements.push(channelNotification.statement);
+        expectedMutationChanges.push(null);
+        notificationWakeSource = "web";
+      }
+    } catch {
+      logFlowTrace({
+        flow: "discord_auth",
+        phase: "welcome_notification_skipped",
+        trace_id: traceId,
+        result: "skipped",
+        error_code: "WELCOME_NOTIFICATION_BUILD_FAILED",
+      });
     }
   }
 
