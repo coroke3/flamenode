@@ -115,7 +115,8 @@ function parseJpeg(bytes: Uint8Array): { width: number; height: number; animated
 }
 
 function parseVp8Dimensions(data: Uint8Array): { width: number; height: number } | null {
-  if (data.length < 10 || data[0] !== 0x9d || data[1] !== 0x01 || data[2] !== 0x2a) {
+  if (data.length < 10) return null;
+  if (data[3] !== 0x9d || data[4] !== 0x01 || data[5] !== 0x2a) {
     return null;
   }
   const width = ((data[7] << 8) | data[6]) & 0x3fff;
@@ -136,6 +137,9 @@ function parseVp8lDimensions(data: Uint8Array): { width: number; height: number 
 function parseWebp(bytes: Uint8Array): { width: number; height: number; animated: boolean } | null {
   if (bytes.length < 12) return null;
   if (readFourCC(bytes, 0) !== "RIFF" || readFourCC(bytes, 8) !== "WEBP") return null;
+  const riffSize = readUint32LE(bytes, 4);
+  const expectedLength = 8 + riffSize;
+  if (expectedLength < 12 || bytes.length !== expectedLength) return null;
 
   let offset = 12;
   let animated = false;
@@ -184,7 +188,7 @@ function parseWebp(bytes: Uint8Array): { width: number; height: number; animated
   return { width, height, animated };
 }
 
-function detectImageFormat(bytes: Uint8Array): ValidatedImageUpload["contentType"] | null {
+export function detectImageFormat(bytes: Uint8Array): ValidatedImageUpload["contentType"] | null {
   if (
     bytes.length >= 8 &&
     bytes[0] === 0x89 &&
@@ -223,6 +227,17 @@ function extForContentType(
   return contentType === "image/jpeg" ? "jpg" : contentType === "image/png" ? "png" : "webp";
 }
 
+function parseImageContent(
+  bytes: Uint8Array,
+  contentType: ValidatedImageUpload["contentType"],
+): { width: number; height: number; animated: boolean } | null {
+  return contentType === "image/png"
+    ? parsePng(bytes)
+    : contentType === "image/jpeg"
+      ? parseJpeg(bytes)
+      : parseWebp(bytes);
+}
+
 export function inspectSupportedImageUpload(buffer: ArrayBuffer): ValidatedImageUpload | null {
   const bytes = new Uint8Array(buffer);
   if (bytes.length === 0) return null;
@@ -230,12 +245,7 @@ export function inspectSupportedImageUpload(buffer: ArrayBuffer): ValidatedImage
   const contentType = detectImageFormat(bytes);
   if (!contentType) return null;
 
-  const parsed =
-    contentType === "image/png"
-      ? parsePng(bytes)
-      : contentType === "image/jpeg"
-        ? parseJpeg(bytes)
-        : parseWebp(bytes);
+  const parsed = parseImageContent(bytes, contentType);
   if (!parsed) return null;
 
   return {
@@ -282,17 +292,31 @@ export function validateIconImageUpload(args: {
     return { ok: false, message: "空の画像ファイルです。" };
   }
   if (byteLength > maxBytes) {
-    return { ok: false, message: "2MB 以内の画像を選んでください。" };
+    return { ok: false, message: "変換後の画像サイズが2MBを超えています。" };
   }
 
-  const image = inspectSupportedImageUpload(args.buffer);
-  if (!image) {
-    return { ok: false, message: "PNG/JPEG/WEBP 画像ファイルのみアップロードできます。" };
+  const bytes = new Uint8Array(args.buffer);
+  const contentType = detectImageFormat(bytes);
+  if (!contentType) {
+    return { ok: false, message: "PNG・JPEG・WEBP画像を選んでください。" };
   }
+
+  const parsed = parseImageContent(bytes, contentType);
+  if (!parsed) {
+    return { ok: false, message: "画像を読み取れませんでした。別の画像を選んでください。" };
+  }
+
+  const image: ValidatedImageUpload = {
+    contentType,
+    ext: extForContentType(contentType),
+    width: parsed.width,
+    height: parsed.height,
+    animated: parsed.animated,
+  };
 
   const normalizedDeclared = normalizeDeclaredContentType(args.declaredType);
   if (normalizedDeclared && normalizedDeclared !== image.contentType) {
-    return { ok: false, message: "ファイル形式と内容が一致しません。" };
+    return { ok: false, message: "画像の変換に失敗しました。画像を選び直してください。" };
   }
 
   if (image.width < minDimension || image.height < minDimension) {

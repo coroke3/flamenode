@@ -96,14 +96,12 @@ export async function encodeSquareIconFile(
   });
 
   let blob = await canvasToBlob(canvas, "image/webp", WEBP_QUALITY);
-  let ext = "webp";
-  let mime = "image/webp";
-  if (!blob) {
+  if (!blob || blob.size === 0 || blob.type !== "image/webp") {
     blob = await canvasToBlob(canvas, "image/png");
-    ext = "png";
-    mime = "image/png";
   }
-  if (!blob) throw new Error("画像の変換に失敗しました。");
+  if (!blob || blob.size === 0) throw new Error("画像の変換に失敗しました。");
+  const mime = blob.type === "image/webp" ? "image/webp" : "image/png";
+  const ext = mime === "image/webp" ? "webp" : "png";
 
   const baseName = originalName.replace(/\.[^.]+$/, "") || "icon";
   return new File([blob], `${baseName}.${ext}`, { type: mime, lastModified: Date.now() });
