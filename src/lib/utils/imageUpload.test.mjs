@@ -220,12 +220,12 @@ test("inspectSupportedImageUpload rejects broken PNG without IHDR dimensions", (
 });
 
 test("inspectSupportedImageUpload accepts lossy VP8 WebP from canvas-like offsets", () => {
-  const lossy = buildWebpLossy({ width: 512, height: 512 });
+  const lossy = buildWebpLossy({ width: 256, height: 256 });
   assert.deepEqual(inspectSupportedImageUpload(lossy.buffer), {
     contentType: "image/webp",
     ext: "webp",
-    width: 512,
-    height: 512,
+    width: 256,
+    height: 256,
     animated: false,
   });
 });

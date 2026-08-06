@@ -19,13 +19,13 @@ test("getCoverBaseScale は cover 用の最大スケールを返す", () => {
   assert.equal(getCoverBaseScale(560, 280, 280), 1);
 });
 
-test("SQUARE_ICON_OUTPUT_SIZE は 512", () => {
-  assert.equal(SQUARE_ICON_OUTPUT_SIZE, 512);
+test("SQUARE_ICON_OUTPUT_SIZE は 256", () => {
+  assert.equal(SQUARE_ICON_OUTPUT_SIZE, 256);
 });
 
-test("ソース契約: WebP 優先・PNG フォールバック・clearRect・512 出力", () => {
+test("ソース契約: WebP 優先・PNG フォールバック・clearRect・256 出力", () => {
   const source = readSource();
-  assert.match(source, /SQUARE_ICON_OUTPUT_SIZE|OUTPUT_SIZE\s*=\s*512/);
+  assert.match(source, /SQUARE_ICON_OUTPUT_SIZE|OUTPUT_SIZE\s*=\s*256/);
   assert.match(source, /image\/webp/);
   assert.match(source, /0\.88/);
   assert.match(source, /image\/png/);
@@ -71,7 +71,7 @@ afterEach(() => {
   globalThis.document = originalDocument;
 });
 
-test("encodeSquareIconFile は WebP を優先し 512 キャンバスで変換する", async () => {
+test("encodeSquareIconFile は WebP を優先し 256 キャンバスで変換する", async () => {
   const toBlobCalls = [];
   globalThis.document = {
     createElement: () => {

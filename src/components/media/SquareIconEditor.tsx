@@ -32,7 +32,7 @@ export function SquareIconEditor({
   onUseImage,
   onCancel,
   accept = "image/png,image/jpeg,image/webp",
-  hint = "正方形に切り抜いて 512×512 に変換します / PNG・JPEG・WEBP / 2MB まで",
+  hint = "正方形に切り抜いて 256×256 に変換します / PNG・JPEG・WEBP / 2MB まで",
 }: SquareIconEditorProps): React.ReactElement {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
