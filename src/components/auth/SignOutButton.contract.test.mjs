@@ -1,0 +1,27 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const signOutButton = await readFile(
+  new URL("../../components/auth/SignOutButton.tsx", import.meta.url),
+  "utf8",
+);
+
+test("SignOutButtonはpending二重送信防止と成功時hard navigateする", () => {
+  assert.match(signOutButton, /"use client"/);
+  assert.match(signOutButton, /useTransition/);
+  assert.match(signOutButton, /if \(pending\) return/);
+  assert.match(signOutButton, /disabled=\{pending\}/);
+  assert.match(signOutButton, /aria-busy=\{pending\}/);
+  assert.match(signOutButton, /authSignOut/);
+  assert.match(signOutButton, /window\.location\.replace\("\/entry"\)/);
+  assert.doesNotMatch(signOutButton, /router\.push/);
+  assert.doesNotMatch(signOutButton, /useRouter/);
+});
+
+test("SignOutButtonは失敗時にrole=alertで再試行可能", () => {
+  assert.match(signOutButton, /role="alert"/);
+  assert.match(signOutButton, /setError\(result\.message\)/);
+  assert.match(signOutButton, /onBeforeSignOut\?\.\(\)/);
+  assert.match(signOutButton, /type="button"/);
+});

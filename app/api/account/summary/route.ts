@@ -10,7 +10,9 @@ import type { AccountSummaryResponse } from "@/lib/account/summary";
 export const dynamic = "force-dynamic";
 
 const PRIVATE_HEADERS = {
-  "Cache-Control": "private, no-store",
+  "Cache-Control": "private, no-store, no-cache, must-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
 } as const;
 
 function loggedOut(): NextResponse<AccountSummaryResponse> {

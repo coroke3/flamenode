@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [route, island, publicLayout, accountMenu] = await Promise.all([
+const [route, island, publicLayout, accountMenu, signOutButton] = await Promise.all([
   readFile(
     new URL("../../../app/api/account/summary/route.ts", import.meta.url),
     "utf8",
@@ -19,10 +19,16 @@ const [route, island, publicLayout, accountMenu] = await Promise.all([
     new URL("../../components/user/AccountMenu.tsx", import.meta.url),
     "utf8",
   ),
+  readFile(
+    new URL("../../components/auth/SignOutButton.tsx", import.meta.url),
+    "utf8",
+  ),
 ]);
 
 test("account summary APIはprivate no-storeで最小DTOだけを返す", () => {
-  assert.match(route, /"Cache-Control": "private, no-store"/);
+  assert.match(route, /"Cache-Control": "private, no-store, no-cache, must-revalidate"/);
+  assert.match(route, /Pragma: "no-cache"/);
+  assert.match(route, /Expires: "0"/);
   assert.match(route, /loggedIn: true/);
   assert.match(route, /loggedIn: false/);
   assert.match(route, /unavailable: true/);
@@ -51,11 +57,16 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   );
 });
 
-test("ログアウトはserver action経由で固定の遷移先を使う", () => {
-  assert.match(island, /import \{ authSignOut \} from "@\/lib\/actions\/authSignOut"/);
-  assert.match(island, /<form action=\{authSignOut\}>/);
-  assert.match(accountMenu, /import \{ authSignOut \} from "@\/lib\/actions\/authSignOut"/);
-  assert.match(accountMenu, /<form action=\{authSignOut\}>/);
+test("ログアウトはSignOutButton経由でhard navigateする", () => {
+  assert.match(island, /import \{ SignOutButton \} from "@\/components\/auth\/SignOutButton"/);
+  assert.match(island, /<SignOutButton/);
+  assert.match(island, /onBeforeSignOut=\{onClosePanels\}/);
+  assert.match(accountMenu, /import \{ SignOutButton \} from "@\/components\/auth\/SignOutButton"/);
+  assert.match(accountMenu, /<SignOutButton/);
+  assert.match(accountMenu, /onBeforeSignOut=\{\(\) => setOpen\(false\)\}/);
+  assert.doesNotMatch(island, /<form action=\{authSignOut\}>/);
+  assert.doesNotMatch(accountMenu, /<form action=\{authSignOut\}>/);
   assert.doesNotMatch(island, /\/api\/auth\/signout/);
   assert.doesNotMatch(accountMenu, /\/api\/auth\/signout/);
+  assert.match(signOutButton, /window\.location\.replace\("\/entry"\)/);
 });

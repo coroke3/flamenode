@@ -6,7 +6,7 @@ import styles from "./PublicHeader.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { AccountMenu } from "@/components/user/AccountMenu";
-import { authSignOut } from "@/lib/actions/authSignOut";
+import { SignOutButton } from "@/components/auth/SignOutButton";
 import type { AccountSummaryResponse } from "@/lib/account/summary";
 import type { PublicHeaderUser } from "@/components/layout/PublicHeader";
 
@@ -341,15 +341,12 @@ export function PublicAccountIsland({
 
       <div className={styles.mobileDivider} />
       <div className={styles.mobileSection}>
-        <form action={authSignOut}>
-          <button
-            type="submit"
-            className={`${styles.mobileLink} ${styles.mobileLinkDanger}`}
-            onClick={onClosePanels}
-          >
-            <Icon name="logout" size={16} aria-hidden /> ログアウト
-          </button>
-        </form>
+        <SignOutButton
+          className={`${styles.mobileLink} ${styles.mobileLinkDanger}`}
+          onBeforeSignOut={onClosePanels}
+        >
+          <Icon name="logout" size={16} aria-hidden /> ログアウト
+        </SignOutButton>
       </div>
     </>
   );
