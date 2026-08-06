@@ -359,15 +359,17 @@ requireAll("app/(public)/trending/page.tsx", [
   [/TRENDING_PAGE_LIMIT = 30/, "trending ページが上位30件制限を持っていません。"],
   [/ランキングを準備中/, "trending ページの空状態メッセージがありません。"],
   [/showWeeklyViews/, "trending ページが週間視聴数を表示していません。"],
-  [/from "@\/components\/layout\/Shelf"/, "trending ページのモバイルレールが Shelf を使っていません。"],
-  [/mobileRail/, "trending ページのモバイルレールクラスがありません。"],
-  [/fn-list-grid/, "trending ページのデスクトップグリッドがありません。"],
-  [/desktopGrid/, "trending ページのデスクトップグリッドクラスがありません。"],
+  [/fn-list-grid/, "trending ページのリストグリッドがありません。"],
 ]);
 forbidMatch(
   "app/(public)/trending/page.tsx",
   /views_2d|views_5d|views_30d/,
   "trending ページが許可されていない期間別視聴数を表示しています。",
+);
+forbidMatch(
+  "app/(public)/trending/page.tsx",
+  /from "@\/components\/layout\/Shelf"|mobileRail|fn-shelf/,
+  "trending ページにモバイル専用 Shelf が残っています。",
 );
 requireAll("src/components/video/RankedVideoCard.tsx", [
   [/showWeeklyViews/, "RankedVideoCard に showWeeklyViews がありません。"],

@@ -2,7 +2,6 @@ import * as React from "react";
 import type { Metadata } from "next";
 import styles from "./page.module.css";
 import { RankedVideoCard } from "@/components/video/RankedVideoCard";
-import { Shelf } from "@/components/layout/Shelf";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
@@ -61,39 +60,17 @@ export default async function TrendingPage(): Promise<React.ReactElement> {
           />
         </div>
       ) : (
-        <>
-          <div className={styles.mobileRail}>
-            <Shelf
-              autoScroll={false}
-              mobileRows={1}
-              ariaLabel="急上昇ランキング"
-            >
-              {items.map((item, index) => (
-                <RankedVideoCard
-                  key={item.id}
-                  item={item}
-                  rank={item.rank ?? index + 1}
-                  showWeeklyViews
-                  className={styles.shelfCard}
-                />
-              ))}
-            </Shelf>
-          </div>
-          <ol
-            className={`fn-list-grid ${styles.desktopGrid}`}
-            aria-label="急上昇ランキング"
-          >
-            {items.map((item, index) => (
-              <li key={item.id} className={styles.row}>
-                <RankedVideoCard
-                  item={item}
-                  rank={item.rank ?? index + 1}
-                  showWeeklyViews
-                />
-              </li>
-            ))}
-          </ol>
-        </>
+        <ol className={`fn-list-grid ${styles.list}`} aria-label="急上昇ランキング">
+          {items.map((item, index) => (
+            <li key={item.id} className={styles.row}>
+              <RankedVideoCard
+                item={item}
+                rank={item.rank ?? index + 1}
+                showWeeklyViews
+              />
+            </li>
+          ))}
+        </ol>
       )}
     </div>
   );
