@@ -15,7 +15,8 @@ test("SignOutButtonはuseState pendingと二重送信防止、成功時hard navi
   assert.match(signOutButton, /setPending\(true\)/);
   assert.match(signOutButton, /disabled=\{pending\}/);
   assert.match(signOutButton, /aria-busy=\{pending\}/);
-  assert.match(signOutButton, /authSignOut/);
+  assert.match(signOutButton, /signOutViaAuthRoute/);
+  assert.doesNotMatch(signOutButton, /@\/lib\/actions\/authSignOut/);
   assert.match(signOutButton, /window\.location\.replace\("\/entry"\)/);
   assert.doesNotMatch(signOutButton, /router\.push/);
   assert.doesNotMatch(signOutButton, /useRouter/);
@@ -31,4 +32,10 @@ test("SignOutButtonは失敗時にrole=alertで再試行可能", () => {
   assert.match(signOutButton, /setError\(result\.message\)/);
   assert.match(signOutButton, /setPending\(false\)/);
   assert.match(signOutButton, /type="button"/);
+});
+
+test("SignOutButtonはGETログアウトや直リンクを使わない", () => {
+  assert.doesNotMatch(signOutButton, /href=.*\/api\/auth\/signout/);
+  assert.doesNotMatch(signOutButton, /\/api\/auth\/signout/);
+  assert.doesNotMatch(signOutButton, /<form/);
 });

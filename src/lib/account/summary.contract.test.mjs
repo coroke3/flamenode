@@ -68,5 +68,7 @@ test("ログアウトはSignOutButton経由でhard navigateする", () => {
   assert.doesNotMatch(accountMenu, /<form action=\{authSignOut\}>/);
   assert.doesNotMatch(island, /\/api\/auth\/signout/);
   assert.doesNotMatch(accountMenu, /\/api\/auth\/signout/);
+  assert.match(signOutButton, /signOutViaAuthRoute/);
+  assert.doesNotMatch(signOutButton, /@\/lib\/actions\/authSignOut/);
   assert.match(signOutButton, /window\.location\.replace\("\/entry"\)/);
 });

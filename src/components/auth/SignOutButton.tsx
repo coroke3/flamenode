@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { authSignOut } from "@/lib/actions/authSignOut";
+import { signOutViaAuthRoute } from "@/lib/client/authSignOutClient";
 
 type SignOutButtonProps = {
   className?: string;
@@ -20,7 +20,7 @@ export function SignOutButton({
     setError(null);
     setPending(true);
     try {
-      const result = await authSignOut();
+      const result = await signOutViaAuthRoute();
       if (result.ok) {
         window.location.replace("/entry");
         return;
