@@ -23,6 +23,10 @@ test("uploadXIdIcon は連携確認・承認済みチェック・検証・失敗
   assert.match(uploadBlock, /runXIdPostCommit\([\s\S]*orphan_icon_cleanup/);
   assert.match(uploadBlock, /runXIdPostCommit\([\s\S]*static_rebuild_enqueue/);
   assert.match(uploadBlock, /xicons\/staging\//);
+  assert.match(uploadBlock, /unstable_rethrow\(error\)/);
+  assert.match(uploadBlock, /createTraceId\(\)/);
+  assert.doesNotMatch(uploadBlock, /throw error/);
+  assert.match(uploadBlock, /return \{ ok: false, message:/);
   // enqueue 失敗で正式キーを消さない（DB 成功後の catch で key 削除しない）
   assert.doesNotMatch(
     uploadBlock,

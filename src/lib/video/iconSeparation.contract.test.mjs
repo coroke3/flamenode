@@ -32,6 +32,8 @@ test("SquareIconEditor は確定操作まで Server Action を呼ばない", () 
   assert.doesNotMatch(editor, /uploadXIdIcon|uploadVideoIcon/);
   assert.match(editor, /この画像を使用/);
   assert.match(editor, /role=\"status\"|aria-live/);
+  assert.match(editor, /mountedRef/);
+  assert.match(editor, /if \(!result\.ok\)/);
 });
 
 test("VideoIconPicker は upload 確定後のタブ切替と DataTransfer 失敗を扱う", () => {
@@ -42,6 +44,7 @@ test("VideoIconPicker は upload 確定後のタブ切替と DataTransfer 失敗
   assert.match(picker, /fileInputRef\.current\?\.files\?\.length/);
   assert.match(picker, /persistedIconUrl/);
   assert.match(picker, /selectionBeforeUploadRef/);
+  assert.match(picker, /return \{ ok: true \}/);
 });
 
 test("XIdSettingsClient は SquareIconEditor 経由で uploadXIdIcon を呼ぶ", () => {
@@ -54,7 +57,9 @@ test("XIdSettingsClient は SquareIconEditor 経由で uploadXIdIcon を呼ぶ",
     /type=\"file\"[\s\S]*onChange[\s\S]*uploadXIdIcon/,
   );
   assert.match(settings, /onUploadProcessedFile/);
-  assert.match(settings, /if \(pending\) return/);
+  assert.match(settings, /resolve\(\{ ok: true \}\)/);
+  assert.match(settings, /resolve\(\{ ok: false, message \}\)/);
+  assert.match(settings, /if \(pending\) \{[\s\S]*return \{ ok: false, message:/);
   assert.match(settings, /disabled=\{pending\}/);
   assert.match(settings, /role=\"status\"/);
   assert.match(settings, /role=\"alert\"/);

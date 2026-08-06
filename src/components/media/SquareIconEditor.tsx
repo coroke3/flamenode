@@ -15,10 +15,12 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 3;
 const DEFAULT_SCALE = 1;
 
+export type SquareIconUseImageResult = { ok: true } | { ok: false; message: string };
+
 export type SquareIconEditorProps = {
   disabled?: boolean;
   pending?: boolean;
-  onUseImage: (file: File) => void | Promise<void>;
+  onUseImage: (file: File) => Promise<SquareIconUseImageResult>;
   onCancel?: () => void;
   accept?: string;
   hint?: string;
@@ -35,6 +37,7 @@ export function SquareIconEditor({
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const bitmapRef = React.useRef<ImageBitmap | null>(null);
+  const mountedRef = React.useRef(true);
   const dragRef = React.useRef<{ pointerId: number; startX: number; startY: number; baseX: number; baseY: number } | null>(null);
 
   const [sourceFile, setSourceFile] = React.useState<File | null>(null);
@@ -56,7 +59,9 @@ export function SquareIconEditor({
   }, []);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       releaseBitmap(bitmapRef.current);
       bitmapRef.current = null;
     };
@@ -166,11 +171,17 @@ export function SquareIconEditor({
     setEncoding(true);
     try {
       const encoded = await encodeSquareIconFile(bitmap, VIEWPORT_SIZE, transform, sourceFile.name);
-      await onUseImage(encoded);
+      const result = await onUseImage(encoded);
+      if (!mountedRef.current) return;
+      if (!result.ok) {
+        setError(result.message || "アップロードに失敗しました。");
+        return;
+      }
     } catch {
+      if (!mountedRef.current) return;
       setError("画像の変換に失敗しました。位置や拡大率を変えて再試行してください。");
     } finally {
-      setEncoding(false);
+      if (mountedRef.current) setEncoding(false);
     }
   };
 

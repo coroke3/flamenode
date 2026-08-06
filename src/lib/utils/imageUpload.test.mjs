@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  detectImageFormat,
   detectSupportedImageUpload,
   inspectSupportedImageUpload,
   validateIconImageUpload,
@@ -76,6 +77,31 @@ function buildWebp({ width = 64, height = 64, animated = false } = {}) {
   vp8l[4] = (bits >> 24) & 0xff;
   pushWebpChunk(body, "VP8L", vp8l);
 
+  return wrapWebpRiff(body);
+}
+
+function buildVp8ChunkData({ width = 64, height = 64, badSignature = false } = {}) {
+  const vp8 = new Uint8Array(10);
+  vp8[0] = 0x00;
+  vp8[1] = 0x00;
+  vp8[2] = 0x00;
+  if (badSignature) {
+    vp8[3] = 0xaa;
+    vp8[4] = 0xbb;
+    vp8[5] = 0xcc;
+  } else {
+    vp8[3] = 0x9d;
+    vp8[4] = 0x01;
+    vp8[5] = 0x2a;
+  }
+  vp8[6] = width & 0xff;
+  vp8[7] = (width >> 8) & 0xff;
+  vp8[8] = height & 0xff;
+  vp8[9] = (height >> 8) & 0xff;
+  return vp8;
+}
+
+function wrapWebpRiff(body) {
   const riff = [0x52, 0x49, 0x46, 0x46];
   const riffSize = 4 + body.length;
   riff.push(
@@ -90,6 +116,36 @@ function buildWebp({ width = 64, height = 64, animated = false } = {}) {
     ...body,
   );
   return new Uint8Array(riff);
+}
+
+function buildWebpLossy({ width = 64, height = 64, badSignature = false } = {}) {
+  const body = [];
+  pushWebpChunk(body, "VP8 ", buildVp8ChunkData({ width, height, badSignature }));
+  return wrapWebpRiff(body);
+}
+
+function buildWebpVp8xLossy({ width = 64, height = 64 } = {}) {
+  const body = [];
+  const vp8x = new Uint8Array(10);
+  const w = width - 1;
+  const h = height - 1;
+  vp8x[4] = w & 0xff;
+  vp8x[5] = (w >> 8) & 0xff;
+  vp8x[6] = (w >> 16) & 0xff;
+  vp8x[7] = h & 0xff;
+  vp8x[8] = (h >> 8) & 0xff;
+  vp8x[9] = (h >> 16) & 0xff;
+  pushWebpChunk(body, "VP8X", vp8x);
+  pushWebpChunk(body, "VP8 ", buildVp8ChunkData({ width, height }));
+  return wrapWebpRiff(body);
+}
+
+function buildWebpWithBrokenChunkSize() {
+  const body = [];
+  for (let i = 0; i < 4; i += 1) body.push("VP8L".charCodeAt(i));
+  body.push(0xff, 0xff, 0xff, 0x7f);
+  body.push(0x2f, 0x00, 0x00, 0x00, 0x00);
+  return wrapWebpRiff(body);
 }
 
 test("detectSupportedImageUpload detects PNG magic number", () => {
@@ -163,6 +219,68 @@ test("inspectSupportedImageUpload rejects broken PNG without IHDR dimensions", (
   assert.equal(inspectSupportedImageUpload(broken.buffer), null);
 });
 
+test("inspectSupportedImageUpload accepts lossy VP8 WebP from canvas-like offsets", () => {
+  const lossy = buildWebpLossy({ width: 512, height: 512 });
+  assert.deepEqual(inspectSupportedImageUpload(lossy.buffer), {
+    contentType: "image/webp",
+    ext: "webp",
+    width: 512,
+    height: 512,
+    animated: false,
+  });
+});
+
+test("inspectSupportedImageUpload accepts VP8L and VP8X lossy WebP", () => {
+  const vp8l = buildWebp({ width: 80, height: 80 });
+  assert.deepEqual(inspectSupportedImageUpload(vp8l.buffer), {
+    contentType: "image/webp",
+    ext: "webp",
+    width: 80,
+    height: 80,
+    animated: false,
+  });
+
+  const vp8x = buildWebpVp8xLossy({ width: 128, height: 96 });
+  assert.deepEqual(inspectSupportedImageUpload(vp8x.buffer), {
+    contentType: "image/webp",
+    ext: "webp",
+    width: 128,
+    height: 96,
+    animated: false,
+  });
+});
+
+test("inspectSupportedImageUpload rejects invalid VP8 signature and broken chunk sizes", () => {
+  const badSignature = buildWebpLossy({ width: 64, height: 64, badSignature: true });
+  assert.equal(inspectSupportedImageUpload(badSignature.buffer), null);
+
+  const brokenChunk = buildWebpWithBrokenChunkSize();
+  assert.equal(inspectSupportedImageUpload(brokenChunk.buffer), null);
+});
+
+test("validateIconImageUpload classifies unsupported, corrupted, and declared type mismatch", () => {
+  const text = new TextEncoder().encode("not-an-image");
+  assert.equal(
+    validateIconImageUpload({ buffer: text.buffer }).message,
+    "PNG・JPEG・WEBP画像を選んでください。",
+  );
+
+  const brokenWebp = buildWebpLossy({ width: 64, height: 64, badSignature: true });
+  assert.equal(
+    validateIconImageUpload({ buffer: brokenWebp.buffer }).message,
+    "画像を読み取れませんでした。別の画像を選んでください。",
+  );
+
+  const valid = buildPng({ width: 128, height: 128 });
+  assert.equal(
+    validateIconImageUpload({
+      buffer: valid.buffer,
+      declaredType: "image/jpeg",
+    }).message,
+    "画像の変換に失敗しました。画像を選び直してください。",
+  );
+});
+
 test("validateIconImageUpload enforces size, type, dimensions, and animation rules", () => {
   const valid = buildPng({ width: 128, height: 128 });
   assert.deepEqual(
@@ -184,8 +302,8 @@ test("validateIconImageUpload enforces size, type, dimensions, and animation rul
 
   assert.equal(validateIconImageUpload({ buffer: new ArrayBuffer(0) }).ok, false);
   assert.equal(
-    validateIconImageUpload({ buffer: new Uint8Array(2 * 1024 * 1024 + 1).buffer }).ok,
-    false,
+    validateIconImageUpload({ buffer: new Uint8Array(2 * 1024 * 1024 + 1).buffer }).message,
+    "変換後の画像サイズが2MBを超えています。",
   );
   assert.equal(
     validateIconImageUpload({

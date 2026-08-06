@@ -110,7 +110,7 @@ export function VideoIconPicker({
   }, [clearUploadPreview, setSelection]);
 
   const onUseUploadedImage = React.useCallback(
-    async (file: File) => {
+    async (file: File): Promise<{ ok: true } | { ok: false; message: string }> => {
       selectionBeforeUploadRef.current = {
         url: selectedUrl,
         mode: iconMode,
@@ -123,12 +123,14 @@ export function VideoIconPicker({
       if (!fileInputRef.current?.files?.length) {
         window.URL.revokeObjectURL(previewUrl);
         setUploadPreview(null);
-        setError("画像ファイルの設定に失敗しました。再度お試しください。");
-        return;
+        const message = "画像ファイルの設定に失敗しました。再度お試しください。";
+        setError(message);
+        return { ok: false as const, message };
       }
 
       setSelection("", "upload");
       setError(null);
+      return { ok: true as const };
     }, [clearUploadPreview, iconMode, selectedUrl, setSelection, syncFileToNamedInput],
   );
 

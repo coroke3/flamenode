@@ -433,20 +433,25 @@ function XIdIconPicker({
     });
   };
 
-  const onUploadProcessedFile = async (file: File) => {
-    if (pending) return;
+  const onUploadProcessedFile = async (
+    file: File,
+  ): Promise<{ ok: true } | { ok: false; message: string }> => {
+    if (pending) {
+      return { ok: false, message: "処理中です。少しお待ちください。" };
+    }
     setError(null);
     setMessage(null);
     const fd = new FormData();
     fd.set("x_user_id", xUserId);
     fd.set("icon_file", file);
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       startTransition(async () => {
         try {
           const r = await uploadXIdIcon(fd);
           if (!r.ok) {
-            setError(r.message ?? "アップロードに失敗しました。");
-            resolve();
+            const message = r.message ?? "アップロードに失敗しました。";
+            setError(message);
+            resolve({ ok: false, message });
             return;
           }
           setMessage(r.message ?? "アイコンをアップロードしました。");
@@ -454,10 +459,11 @@ function XIdIconPicker({
           setShowCompactUploader(false);
           setEditorKey((k) => k + 1);
           router.refresh();
+          resolve({ ok: true });
         } catch {
-          setError("アップロードに失敗しました。時間をおいて再試行してください。");
-        } finally {
-          resolve();
+          const message = "アップロードに失敗しました。時間をおいて再試行してください。";
+          setError(message);
+          resolve({ ok: false, message });
         }
       });
     });

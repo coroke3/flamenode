@@ -135,3 +135,57 @@ test("encodeSquareIconFile は WebP 失敗時 PNG にフォールバックする
   assert.equal(file.type, "image/png");
   assert.equal(file.name, "photo.png");
 });
+
+test("encodeSquareIconFile は blob.type 不一致時 PNG にフォールバックする", async () => {
+  globalThis.document = {
+    createElement: () => ({
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        clearRect: () => {},
+        drawImage: () => {},
+      }),
+      toBlob: (callback, type) => {
+        if (type === "image/webp") {
+          callback(new Blob(["mock"], { type: "image/png" }));
+          return;
+        }
+        callback(new Blob(["mock"], { type }));
+      },
+    }),
+  };
+
+  const bitmap = { width: 100, height: 100, close: () => {} };
+  const file = await encodeSquareIconFile(
+    bitmap,
+    280,
+    { offsetX: 0, offsetY: 0, scale: 1 },
+    "photo.jpg",
+  );
+
+  assert.equal(file.type, "image/png");
+  assert.equal(file.name, "photo.png");
+});
+
+test("encodeSquareIconFile は 0 バイト blob を拒否する", async () => {
+  globalThis.document = {
+    createElement: () => ({
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        clearRect: () => {},
+        drawImage: () => {},
+      }),
+      toBlob: (callback) => {
+        callback(new Blob([], { type: "image/webp" }));
+      },
+    }),
+  };
+
+  const bitmap = { width: 100, height: 100, close: () => {} };
+  await assert.rejects(
+    () =>
+      encodeSquareIconFile(bitmap, 280, { offsetX: 0, offsetY: 0, scale: 1 }, "photo.jpg"),
+    /画像の変換に失敗しました/,
+  );
+});

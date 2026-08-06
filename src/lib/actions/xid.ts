@@ -1000,7 +1000,15 @@ export async function uploadXIdIcon(
 
   const env = getEnv();
   if (!env.BUCKET) return { ok: false, message: "ストレージが利用できません。" };
-  const buffer = await file.arrayBuffer();
+  const traceId = createTraceId();
+  let buffer: ArrayBuffer;
+  try {
+    buffer = await file.arrayBuffer();
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[uploadXIdIcon] file read failed", { traceId, error });
+    return { ok: false, message: "画像の読み込みに失敗しました。再度お試しください。" };
+  }
   const validated = validateIconImageUpload({
     buffer,
     declaredType: file.type,
@@ -1039,14 +1047,16 @@ export async function uploadXIdIcon(
     });
     dbCommitted = true;
   } catch (error) {
+    unstable_rethrow(error);
     // DB 反映前の失敗だけ新規 R2 を削除する。DB 成功後に正式キーを消すと死リンクになる。
     if (!dbCommitted) {
       await Promise.allSettled([env.BUCKET.delete(stagingKey), env.BUCKET.delete(key)]);
     }
-    throw error;
+    console.error("[uploadXIdIcon] persist failed", { traceId, error });
+    return { ok: false, message: "アイコンのアップロードに失敗しました。時間をおいて再試行してください。" };
   }
   await env.BUCKET.delete(stagingKey).catch((error) => {
-    console.warn("[uploadXIdIcon] staging cleanup failed", error);
+    console.warn("[uploadXIdIcon] staging cleanup failed", { traceId, error });
   });
   await runXIdPostCommit("xid.uploadXIdIcon", "static_rebuild_enqueue", async () => {
     await enqueueAfterXUserPublicUpdate(db, {
