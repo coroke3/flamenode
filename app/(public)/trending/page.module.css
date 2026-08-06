@@ -25,38 +25,13 @@
   padding: 24px 0;
 }
 
-.mobileRail {
-  margin: clamp(24px, 4vw, 40px) 0 0;
-}
-
-.desktopGrid {
+.list {
   list-style: none;
   margin: clamp(24px, 4vw, 40px) 0 0;
   padding: 0;
-  display: none;
 }
 
 .row {
   margin: 0;
   padding: 0;
-}
-
-.shelfCard {
-  max-width: min(100%, 280px);
-}
-
-@media (min-width: 701px) {
-  .mobileRail {
-    display: none;
-  }
-
-  .desktopGrid {
-    display: grid;
-  }
-}
-
-@media (max-width: 700px) {
-  .mobileRail {
-    display: block;
-  }
 }
