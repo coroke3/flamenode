@@ -176,7 +176,7 @@
 
   [data-fn-surface="public"] .fn-header-right,
   [data-fn-surface="personal"] .fn-header-right {
-    min-width: max-content;
+    min-width: 0;
   }
 
   [data-fn-surface="admin"] .fn-header-right,

@@ -513,7 +513,7 @@
     padding-top: 0;
     padding-bottom:
       calc(
-        64px
+        var(--header-h, 50px)
         + env(safe-area-inset-bottom)
         + 28px
       );
