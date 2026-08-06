@@ -413,7 +413,6 @@ export function AccountMenu({
           <div className={styles.section}>
             <SignOutButton
               className={`${styles.menuItem} ${styles.menuItemDanger}`}
-              onBeforeSignOut={() => setOpen(false)}
             >
               <Icon name="logout" size={14} aria-hidden /> ログアウト
             </SignOutButton>

@@ -7,10 +7,12 @@ const signOutButton = await readFile(
   "utf8",
 );
 
-test("SignOutButtonはpending二重送信防止と成功時hard navigateする", () => {
+test("SignOutButtonはuseState pendingと二重送信防止、成功時hard navigateする", () => {
   assert.match(signOutButton, /"use client"/);
-  assert.match(signOutButton, /useTransition/);
+  assert.match(signOutButton, /useState\(false\)/);
+  assert.doesNotMatch(signOutButton, /useTransition/);
   assert.match(signOutButton, /if \(pending\) return/);
+  assert.match(signOutButton, /setPending\(true\)/);
   assert.match(signOutButton, /disabled=\{pending\}/);
   assert.match(signOutButton, /aria-busy=\{pending\}/);
   assert.match(signOutButton, /authSignOut/);
@@ -19,9 +21,14 @@ test("SignOutButtonはpending二重送信防止と成功時hard navigateする",
   assert.doesNotMatch(signOutButton, /useRouter/);
 });
 
+test("SignOutButtonはpending中にログアウト中文言を表示し、メニュー閉鎖コールバックを呼ばない", () => {
+  assert.match(signOutButton, /pending \? "ログアウト中…"/);
+  assert.doesNotMatch(signOutButton, /onBeforeSignOut/);
+});
+
 test("SignOutButtonは失敗時にrole=alertで再試行可能", () => {
   assert.match(signOutButton, /role="alert"/);
   assert.match(signOutButton, /setError\(result\.message\)/);
-  assert.match(signOutButton, /onBeforeSignOut\?\.\(\)/);
+  assert.match(signOutButton, /setPending\(false\)/);
   assert.match(signOutButton, /type="button"/);
 });

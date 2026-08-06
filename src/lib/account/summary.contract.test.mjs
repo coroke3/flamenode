@@ -60,10 +60,10 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
 test("ログアウトはSignOutButton経由でhard navigateする", () => {
   assert.match(island, /import \{ SignOutButton \} from "@\/components\/auth\/SignOutButton"/);
   assert.match(island, /<SignOutButton/);
-  assert.match(island, /onBeforeSignOut=\{onClosePanels\}/);
+  assert.doesNotMatch(island, /onBeforeSignOut/);
   assert.match(accountMenu, /import \{ SignOutButton \} from "@\/components\/auth\/SignOutButton"/);
   assert.match(accountMenu, /<SignOutButton/);
-  assert.match(accountMenu, /onBeforeSignOut=\{\(\) => setOpen\(false\)\}/);
+  assert.doesNotMatch(accountMenu, /onBeforeSignOut/);
   assert.doesNotMatch(island, /<form action=\{authSignOut\}>/);
   assert.doesNotMatch(accountMenu, /<form action=\{authSignOut\}>/);
   assert.doesNotMatch(island, /\/api\/auth\/signout/);
