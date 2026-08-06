@@ -22,12 +22,18 @@ export function SignOutButton({
     setError(null);
     onBeforeSignOut?.();
     startTransition(async () => {
-      const result = await authSignOut();
-      if (result.ok) {
-        window.location.replace("/entry");
-        return;
+      try {
+        const result = await authSignOut();
+        if (result.ok) {
+          window.location.replace("/entry");
+          return;
+        }
+        setError(result.message);
+      } catch {
+        setError(
+          "ログアウトに失敗しました。再読み込みしてもう一度お試しください。",
+        );
       }
-      setError(result.message);
     });
   }, [onBeforeSignOut, pending]);
 
