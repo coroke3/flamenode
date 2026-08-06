@@ -6,36 +6,34 @@ import { authSignOut } from "@/lib/actions/authSignOut";
 type SignOutButtonProps = {
   className?: string;
   children?: React.ReactNode;
-  onBeforeSignOut?: () => void;
 };
 
 export function SignOutButton({
   className,
   children,
-  onBeforeSignOut,
 }: SignOutButtonProps): React.ReactElement {
-  const [pending, startTransition] = React.useTransition();
+  const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const handleClick = React.useCallback(() => {
+  const handleClick = React.useCallback(async () => {
     if (pending) return;
     setError(null);
-    onBeforeSignOut?.();
-    startTransition(async () => {
-      try {
-        const result = await authSignOut();
-        if (result.ok) {
-          window.location.replace("/entry");
-          return;
-        }
-        setError(result.message);
-      } catch {
-        setError(
-          "ログアウトに失敗しました。再読み込みしてもう一度お試しください。",
-        );
+    setPending(true);
+    try {
+      const result = await authSignOut();
+      if (result.ok) {
+        window.location.replace("/entry");
+        return;
       }
-    });
-  }, [onBeforeSignOut, pending]);
+      setError(result.message);
+    } catch {
+      setError(
+        "ログアウトに失敗しました。再読み込みしてもう一度お試しください。",
+      );
+    } finally {
+      setPending(false);
+    }
+  }, [pending]);
 
   return (
     <>
@@ -46,7 +44,7 @@ export function SignOutButton({
         aria-busy={pending}
         onClick={handleClick}
       >
-        {children ?? (pending ? "ログアウト中…" : "ログアウト")}
+        {pending ? "ログアウト中…" : (children ?? "ログアウト")}
       </button>
       {error ? <p role="alert">{error}</p> : null}
     </>

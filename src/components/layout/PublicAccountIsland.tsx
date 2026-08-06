@@ -343,7 +343,6 @@ export function PublicAccountIsland({
       <div className={styles.mobileSection}>
         <SignOutButton
           className={`${styles.mobileLink} ${styles.mobileLinkDanger}`}
-          onBeforeSignOut={onClosePanels}
         >
           <Icon name="logout" size={16} aria-hidden /> ログアウト
         </SignOutButton>
