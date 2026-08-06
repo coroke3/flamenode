@@ -194,9 +194,15 @@
   letter-spacing: 0;
 }
 
-@media (max-width: 380px) {
+@media (max-width: 640px) {
   :global(.fn-list-compact).compactGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 360px) {
+  :global(.fn-list-compact).compactGrid {
+    grid-template-columns: 1fr;
   }
 }
 

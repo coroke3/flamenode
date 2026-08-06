@@ -161,8 +161,8 @@
   }
 
   [data-fn-surface="public"] .fn-list-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    grid-template-columns: 1fr;
+    gap: 16px;
     margin: 18px 0;
   }
 
@@ -295,10 +295,6 @@
 }
 
 @media (max-width: 380px) {
-  [data-fn-surface="public"] .fn-list-grid {
-    grid-template-columns: 1fr;
-  }
-
   [data-fn-surface="public"] .fn-footer-cols {
     grid-template-columns: 1fr;
   }

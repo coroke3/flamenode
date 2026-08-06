@@ -201,8 +201,8 @@
   }
 
   .name {
-    font-size: clamp(36px, 11vw, 52px);
-    line-height: 0.95;
+    font-size: clamp(30px, 8.7vw, 42px);
+    line-height: 0.92;
   }
 
   .socialLine {
