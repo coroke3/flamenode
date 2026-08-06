@@ -11,6 +11,7 @@ const [
   terms,
   authIndex,
   authSignOut,
+  signOutButton,
 ] = await Promise.all([
   readFile(new URL("./authComplete.ts", import.meta.url), "utf8"),
   readFile(new URL("./onboardingUrls.ts", import.meta.url), "utf8"),
@@ -23,6 +24,10 @@ const [
   readFile(new URL("../actions/terms.ts", import.meta.url), "utf8"),
   readFile(new URL("./index.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/authSignOut.ts", import.meta.url), "utf8"),
+  readFile(
+    new URL("../../components/auth/SignOutButton.tsx", import.meta.url),
+    "utf8",
+  ),
 ]);
 
 test("Discord signInは /auth/complete を経由する", () => {
@@ -95,10 +100,14 @@ test("auth completeは再試行後も読めないsessionを成功扱いしない
   assert.match(completePage, /auth_temporarily_unavailable/);
 });
 
-test("ログアウトはserver actionでentryへ遷移する", () => {
+test("ログアウトはredirect:falseでserver actionを返し、クライアントがhard navigateする", () => {
   assert.match(authIndex, /handlers,\s*auth,\s*signIn,\s*signOut/);
   assert.match(authSignOut, /"use server"/);
-  assert.match(authSignOut, /signOut\(\{ redirectTo: "\/entry" \}\)/);
+  assert.match(authSignOut, /signOut\(\{ redirect: false \}\)/);
+  assert.match(authSignOut, /AuthSignOutResult/);
+  assert.match(authSignOut, /unstable_rethrow/);
+  assert.match(signOutButton, /window\.location\.replace\("\/entry"\)/);
+  assert.doesNotMatch(signOutButton, /router\.push/);
 });
 
 test("auth completeはopen redirectと循環を拒否する", async () => {
