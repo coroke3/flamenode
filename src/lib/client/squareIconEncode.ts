@@ -1,4 +1,4 @@
-const OUTPUT_SIZE = 512;
+const OUTPUT_SIZE = 256;
 const WEBP_QUALITY = 0.88;
 
 export type SquareIconTransform = {
