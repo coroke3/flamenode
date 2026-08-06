@@ -44,7 +44,7 @@ test("VideoIconPicker は upload 確定後のタブ切替と DataTransfer 失敗
   assert.match(picker, /fileInputRef\.current\?\.files\?\.length/);
   assert.match(picker, /persistedIconUrl/);
   assert.match(picker, /selectionBeforeUploadRef/);
-  assert.match(picker, /return \{ ok: true \}/);
+  assert.match(picker, /return \{ ok: true(?: as const)? \}/);
 });
 
 test("XIdSettingsClient は SquareIconEditor 経由で uploadXIdIcon を呼ぶ", () => {
