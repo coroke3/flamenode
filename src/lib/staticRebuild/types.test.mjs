@@ -9,6 +9,7 @@ import {
 test("static rebuild targetはcanonical種だけを受理する", () => {
   assert.deepEqual(STATIC_REBUILD_TARGET_TYPES, [
     "top",
+    "top_slot_stats",
     "events_index",
     "event",
     "video",

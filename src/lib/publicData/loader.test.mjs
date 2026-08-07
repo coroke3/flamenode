@@ -120,6 +120,8 @@ test("events index, top, and recommend loaders wire empty collection semantic mi
     loaderSource.indexOf("export async function loadStaticUsersIndex"),
   );
   assert.match(topBlock, /isEmptyCollection: isEmptyTopCollection/);
+  assert.match(topBlock, /TOP_SLOT_STATS_OBJECT_KEY/);
+  assert.match(topBlock, /applyTopSlotStatsOverride/);
   assert.match(topBlock, /shouldUseStaticCollection/);
 
   const recommendBlock = loaderSource.slice(

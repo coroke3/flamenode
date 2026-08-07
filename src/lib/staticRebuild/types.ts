@@ -1,5 +1,6 @@
 export const STATIC_REBUILD_TARGET_TYPES = [
   "top",
+  "top_slot_stats",
   "events_index",
   "event",
   "video",

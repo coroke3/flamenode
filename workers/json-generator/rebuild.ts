@@ -84,6 +84,12 @@ import {
 import { isConfirmedInternalVideoId } from "../../src/lib/video/internalId.ts";
 import { buildHeroEventSlotStatsSql } from "../../src/lib/publicData/heroEventSlotStatsSql.ts";
 import {
+  TOP_SLOT_STATS_MAX_OBJECT_BYTES,
+  TOP_SLOT_STATS_OBJECT_KEY,
+  TOP_SLOT_STATS_SCHEMA_VERSION,
+  topSlotStatsArtifactByteLength,
+} from "../../src/lib/publicData/staticTopSlotStatsCore.ts";
+import {
   pickHeroEvents,
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
@@ -253,6 +259,9 @@ export async function rebuildTarget(
     case "top":
       await rebuildTop(env, signal);
       break;
+    case "top_slot_stats":
+      await rebuildTopSlotStats(env, signal);
+      break;
     case "list_recent":
       await rebuildListRecent(env, signal);
       break;
@@ -294,9 +303,10 @@ export async function rebuildTarget(
       throw new Error(`Unknown target_type: ${targetType}`);
   }
   throwIfAborted(signal);
-  if (["top", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
+  if (["top", "top_slot_stats", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
     const keys: Record<string, string | string[]> = {
       top: "top.json",
+      top_slot_stats: TOP_SLOT_STATS_OBJECT_KEY,
       list_recent: "list/recent.json",
       list_popular: "list/popular.json",
       events_index: "events/index.json",
@@ -432,6 +442,78 @@ async function reconcileTrackedArtifacts(
   }
 }
 
+async function loadActivePublicEventItemsForTopHero(
+  env: Env,
+  now: number,
+  signal?: RebuildSignal,
+): Promise<Record<string, unknown>[]> {
+  const activeEvents = await env.DB.prepare(
+    `SELECT ${EVENT_INDEX_COLUMNS}
+     FROM events
+     WHERE visibility_status = 'public'
+       AND ${NON_POINT_EVENT_PERIOD_SQL}
+       AND (
+         (CASE
+            WHEN end_time IS NOT NULL THEN end_time
+            WHEN start_time IS NOT NULL THEN start_time
+            ELSE NULL
+          END) IS NULL
+         OR (CASE
+            WHEN end_time IS NOT NULL THEN end_time
+            WHEN start_time IS NOT NULL THEN start_time
+            ELSE NULL
+          END) > ?
+       )
+     ORDER BY start_time DESC
+     LIMIT 30`,
+  ).bind(now).all<Record<string, unknown>>();
+  throwIfAborted(signal);
+  return activeEvents.results ?? [];
+}
+
+async function loadHeroEventSlotStats(
+  env: Env,
+  activeEventItems: readonly Record<string, unknown>[],
+  signal?: RebuildSignal,
+): Promise<{ event_id: string; available: number; total: number }[]> {
+  const heroEventIds = pickHeroEvents(activeEventItems as HeroEventRow[]).map((event) =>
+    String(event.id ?? "").trim(),
+  ).filter(Boolean);
+  const heroSlotStatsSql = buildHeroEventSlotStatsSql(heroEventIds);
+  const slotStats = heroSlotStatsSql
+    ? await env.DB.prepare(heroSlotStatsSql).bind(...heroEventIds).all()
+    : { results: [] as { event_id: string; available: number; total: number }[] };
+  throwIfAborted(signal);
+  return slotStats.results ?? [];
+}
+
+async function rebuildTopSlotStats(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
+  const items = await loadHeroEventSlotStats(env, activeEventItems, signal);
+  const payload = {
+    schema_version: TOP_SLOT_STATS_SCHEMA_VERSION,
+    generated_at: now,
+    items,
+  };
+  const byteLength = topSlotStatsArtifactByteLength(payload);
+  if (byteLength > TOP_SLOT_STATS_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `${TOP_SLOT_STATS_OBJECT_KEY} exceeds size limit (${byteLength} > ${TOP_SLOT_STATS_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+  throwIfAborted(signal);
+  await putJson(
+    env,
+    TOP_SLOT_STATS_OBJECT_KEY,
+    payload,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.topSlotStats),
+    { targetType: "top_slot_stats", targetId: "global" },
+    signal,
+  );
+}
+
 async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
@@ -440,7 +522,6 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     recommended,
     latest,
     nostalgic,
-    activeEvents,
     latestEvents,
     announcements,
     publicVideoCount,
@@ -519,26 +600,6 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        FROM events
        WHERE visibility_status = 'public'
          AND ${NON_POINT_EVENT_PERIOD_SQL}
-         AND (
-           (CASE
-              WHEN end_time IS NOT NULL THEN end_time
-              WHEN start_time IS NOT NULL THEN start_time
-              ELSE NULL
-            END) IS NULL
-           OR (CASE
-              WHEN end_time IS NOT NULL THEN end_time
-              WHEN start_time IS NOT NULL THEN start_time
-              ELSE NULL
-            END) > ?
-         )
-       ORDER BY start_time DESC
-       LIMIT 30`,
-    ).bind(now).all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `SELECT ${EVENT_INDEX_COLUMNS}
-       FROM events
-       WHERE visibility_status = 'public'
-         AND ${NON_POINT_EVENT_PERIOD_SQL}
        ORDER BY start_time DESC
        LIMIT 12`,
     ).all<Record<string, unknown>>(),
@@ -577,15 +638,9 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     ).first<{ c?: number }>(),
   ]);
 
-  const activeEventItems = activeEvents.results ?? [];
+  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
   const latestEventItems = latestEvents.results ?? [];
-  const heroEventIds = pickHeroEvents(activeEventItems as HeroEventRow[]).map((event) =>
-    String(event.id ?? "").trim(),
-  ).filter(Boolean);
-  const heroSlotStatsSql = buildHeroEventSlotStatsSql(heroEventIds);
-  const slotStats = heroSlotStatsSql
-    ? await env.DB.prepare(heroSlotStatsSql).bind(...heroEventIds).all()
-    : { results: [] as { event_id: string; available: number; total: number }[] };
+  const slotStatsItems = await loadHeroEventSlotStats(env, activeEventItems, signal);
   throwIfAborted(signal);
   const creators = await resolvePickupCreatorsWithFallback(env, 30, "rebuildTop", signal);
   const nostalgicPool = Array.isArray(nostalgic.results) ? nostalgic.results : [];
@@ -601,7 +656,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     latest_events: latestEventItems,
     creators,
     announcements: announcements.results ?? [],
-    slot_stats: slotStats.results ?? [],
+    slot_stats: slotStatsItems,
     stats: {
       public_videos: Number(publicVideoCount?.c ?? latest.results?.length ?? 0),
       active_events: activeEventItems.length,

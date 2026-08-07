@@ -72,6 +72,11 @@ import {
   type StaticTopPayload,
 } from "./staticTopCore";
 import {
+  applyTopSlotStatsOverride,
+  normalizeStaticTopSlotStats,
+  TOP_SLOT_STATS_OBJECT_KEY,
+} from "./staticTopSlotStatsCore";
+import {
   normalizeStaticUsersIndex,
   type StaticUsersIndex,
   type StaticUsersIndexPayload,
@@ -975,11 +980,15 @@ export async function loadStaticTopPage(): Promise<
     },
   });
   const normalized = result.data ? normalizeStaticTop(result.data) : null;
+  const slotStatsPayload = await readStaticJson<unknown>(TOP_SLOT_STATS_OBJECT_KEY);
+  const slotStatsArtifact = normalizeStaticTopSlotStats(slotStatsPayload);
+  const normalizedWithSlotStats =
+    normalized ? applyTopSlotStatsOverride(normalized, slotStatsArtifact) : null;
   const top =
-    normalized &&
+    normalizedWithSlotStats &&
     (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, countStaticTopItems(normalized)))
-      ? normalized
+      shouldUseStaticCollection(result.strategy, countStaticTopItems(normalizedWithSlotStats)))
+      ? normalizedWithSlotStats
       : null;
   return { ...result, data: top, top };
 }

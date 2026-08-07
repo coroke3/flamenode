@@ -9,6 +9,7 @@ export const PUBLIC_JSON_CACHE_TTL_SEC = {
   searchIndex: 300,
   usersIndex: 600,
   top: 600,
+  topSlotStats: 600,
   recommend: 600,
   rules: 3600,
   blocklistPool: 600,

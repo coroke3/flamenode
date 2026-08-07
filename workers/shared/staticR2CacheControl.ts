@@ -16,6 +16,7 @@ export const STATIC_R2_MAX_AGE_SEC = {
   eventsIndex: 180,
   searchIndex: 300,
   usersIndex: 600,
+  topSlotStats: 600,
   recommend: 600,
   rules: 3600,
   blocklistPool: 600,
