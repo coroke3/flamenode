@@ -92,7 +92,11 @@ export default async function EntryPage({
   const writeCtaLabel = (defaultLabel: string): string => {
     if (!isLoggedIn) return defaultLabel;
     if (!onboarding.canReserveSlot) return "初期設定を続ける";
-    if (!onboarding.canPost) return "承認待ち";
+    if (!onboarding.canPost) {
+      return onboarding.xIdentityStatus === "pending"
+        ? "承認待ち"
+        : "X ID 連携が必要";
+    }
     return defaultLabel;
   };
 

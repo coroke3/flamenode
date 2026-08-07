@@ -8,6 +8,7 @@ import {
   SLOT_RESERVATION_X_REQUEST_TYPES,
   type ReservationXIdentity,
 } from "./reservationIdentityCore";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export {
   SLOT_RESERVATION_X_REQUEST_TYPES,
@@ -36,18 +37,24 @@ export async function resolveReservationXIdentity(
   db: DB,
   guard: ReservationGuardInput,
 ): Promise<ReservationXIdentity | { error: string }> {
-  // writeGuard が identityRequirement:"none" のとき hasPendingXRequest=false でも、
-  // Active X が無い場合は pending を読んで snapshot を解決する（単一 pending / Discord-only）。
-  const pendingRows = !guard.activeXId
-    ? await db
+  const activeXId = guard.activeXId ? normalizeXId(guard.activeXId) : null;
+  const approvedSet = new Set(
+    guard.approvedXIds.map((id) => normalizeXId(id)).filter(Boolean),
+  );
+  const activeApproved = Boolean(activeXId && approvedSet.has(activeXId));
+
+  // 承認済み Active があるときだけ pending 読取を省略する。
+  // 却下/未承認 Active が残っていても pending を読み、誤 snapshot を防ぐ。
+  const pendingRows = activeApproved
+    ? []
+    : await db
         .select({ requested_x_id: xIdentityRequests.requested_x_id })
         .from(xIdentityRequests)
         .where(pendingSlotReservationXRequestWhere(guard.user.id))
         .orderBy(
           desc(xIdentityRequests.requested_at),
           desc(xIdentityRequests.id),
-        )
-    : [];
+        );
 
   return resolveReservationXIdentityFromPending({
     activeXId: guard.activeXId,

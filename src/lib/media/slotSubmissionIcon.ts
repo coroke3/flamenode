@@ -74,13 +74,18 @@ export function resolveSlotSubmissionIconAccess(
   }
 
   if (!viewer) return { allowed: false };
-  const relation = resolveSlotViewerRelation({
-    reservedByUserId: row.reserved_by_user_id,
-    slotXUserId: row.slot_x_user_id,
-    authUserId: viewer.id,
-    activeXId: viewer.active_x_user_id,
-  });
-  if (!canActAsSlotActor(relation)) return { allowed: false };
+
+  // Active X 切替で account_other になっても、確保した auth user 本人なら private 表示を許可
+  const isReservationOwner = row.reserved_by_user_id === viewer.id;
+  if (!isReservationOwner) {
+    const relation = resolveSlotViewerRelation({
+      reservedByUserId: row.reserved_by_user_id,
+      slotXUserId: row.slot_x_user_id,
+      authUserId: viewer.id,
+      activeXId: viewer.active_x_user_id,
+    });
+    if (!canActAsSlotActor(relation)) return { allowed: false };
+  }
 
   return {
     allowed: true,

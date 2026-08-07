@@ -33,14 +33,38 @@ test("resolveReservationXIdentity: approved active は canonical も設定", () 
   });
 });
 
-test("resolveReservationXIdentity: active は pending 一覧に無くても最優先", () => {
+test("resolveReservationXIdentity: 未承認 active は pending 1件を優先", () => {
   const result = resolveReservationXIdentityFromPending({
-    activeXId: "pending_a",
+    activeXId: "rejected_a",
     approvedXIds: [],
     pendingRequestedXIds: ["pending_b"],
   });
   assert.deepEqual(result, {
+    snapshotXId: "pending_b",
+    canonicalXUserId: null,
+  });
+});
+
+test("resolveReservationXIdentity: 未承認 active が pending 中ならその名義を使う", () => {
+  const result = resolveReservationXIdentityFromPending({
+    activeXId: "pending_a",
+    approvedXIds: [],
+    pendingRequestedXIds: ["pending_a"],
+  });
+  assert.deepEqual(result, {
     snapshotXId: "pending_a",
+    canonicalXUserId: null,
+  });
+});
+
+test("resolveReservationXIdentity: 却下のみの active は Discord-only", () => {
+  const result = resolveReservationXIdentityFromPending({
+    activeXId: "rejected_a",
+    approvedXIds: [],
+    pendingRequestedXIds: [],
+  });
+  assert.deepEqual(result, {
+    snapshotXId: null,
     canonicalXUserId: null,
   });
 });
@@ -81,7 +105,9 @@ test("resolveReservationXIdentity: X 身元なしは null を返す", () => {
   });
 });
 
-test("reservationIdentity は DB から pending を読む", () => {
+test("reservationIdentity は未承認 Active でも pending を読む", () => {
   assert.match(source, /pendingSlotReservationXRequestWhere/);
   assert.match(source, /resolveReservationXIdentityFromPending/);
+  assert.match(source, /activeApproved/);
+  assert.doesNotMatch(source, /const pendingRows = !guard\.activeXId/);
 });

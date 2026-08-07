@@ -51,6 +51,11 @@ export default async function OnboardingPage({
   const next = sanitizeOnboardingNext(params?.next, "/dashboard");
   const selfHref = onboardingHref(next);
   const started = params?.start === "1";
+  // 「枠だけ確保」は next が dashboard 既定のとき /entry へ誘導する
+  const reserveOnlyHref =
+    next === "/dashboard" || next.startsWith("/dashboard?")
+      ? "/entry"
+      : next;
 
   const guard = await requireSession({ next: selfHref });
   if (!guard.ok) return guard.element;
@@ -261,7 +266,7 @@ export default async function OnboardingPage({
             設定を始める
           </Link>
           {state.canReserveSlot ? (
-            <Link href={next} className="fn-btn fn-btn-ghost">
+            <Link href={reserveOnlyHref} className="fn-btn fn-btn-ghost">
               あとで枠だけ確保する
             </Link>
           ) : (
@@ -294,7 +299,7 @@ export default async function OnboardingPage({
         <OnboardingXIdForm />
         {state.canReserveSlot ? (
           <div className={styles.stepActions}>
-            <Link href={next} className="fn-btn fn-btn-ghost">
+            <Link href={reserveOnlyHref} className="fn-btn fn-btn-ghost">
               あとで枠だけ確保する
             </Link>
           </div>

@@ -75,6 +75,14 @@ test("anonymous modeは所有者のみ許可しno-store cache", () => {
   if (owner.allowed) {
     assert.match(owner.cacheControl, /no-store/);
   }
+  // Active 切替で account_other でも reserved_by_user_id 一致なら許可
+  assert.equal(
+    resolveSlotSubmissionIconAccess(row, {
+      id: "user-1",
+      active_x_user_id: "other-x",
+    }).allowed,
+    true,
+  );
 });
 
 test("slot submission icon lookup SQLはslots+events+videosを1 queryで結合する", () => {
