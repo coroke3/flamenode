@@ -35,16 +35,12 @@ test("onConflictDoNothing notification inserts use null expected changes when in
 });
 
 test("slot and submit notifications enqueue post-commit with queue wake", () => {
+  assert.match(submitSlotVideo, /enqueueSlotSubmitNotificationsPostCommit/);
   assert.match(submitSlotVideo, /runPostCommitBestEffort/);
-  assert.match(submitSlotVideo, /slot_submit_notifications/);
-  assert.match(submitSlotVideo, /buildNotificationOutboxStatement/);
-  assert.match(submitSlotVideo, /wakeNotificationQueueAfterCommit\("web"\)/);
   assert.doesNotMatch(submitSlotVideo, /notificationWakeSource:/);
 
+  assert.match(slot, /enqueueSlotReserveOpsWebhookPostCommit/);
   assert.match(slot, /runPostCommitBestEffort/);
-  assert.match(slot, /ops_webhook_notification/);
-  assert.match(slot, /buildOpsChannelWebhookStatement/);
-  assert.match(slot, /wakeNotificationQueueAfterCommit\("web"\)/);
   assert.doesNotMatch(slot, /notificationWakeSource:/);
   assert.doesNotMatch(slot, /extra\.map\(\(\) => null\)/);
 });

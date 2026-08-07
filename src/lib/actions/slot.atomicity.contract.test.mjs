@@ -114,7 +114,7 @@ test("20枠reserveは1 bulk mutation+queue+通知+完全auditがD1上限内", ()
   assert.ok(maxAuditChunkBinds <= 100);
 });
 
-test("3行更新+queue+通知+完全auditはD1 Free query/bind上限内", () => {
+test("3行更新+queue+完全auditはD1 Free query/bind上限内", () => {
   const budget = planD1AuditMutationBudget({
     mutationStatementCount: 3,
     mutationAssertionCount: 3,

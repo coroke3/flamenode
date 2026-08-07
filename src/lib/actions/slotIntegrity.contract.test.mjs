@@ -7,7 +7,7 @@ const read = async (relative) =>
 
 test("reserveSlot keeps ops webhook post-commit and out of atomic batch", async () => {
   const source = await read("./slot.ts");
-  assert.match(source, /name: "ops_webhook_notification"/);
+  assert.match(source, /enqueueSlotReserveOpsWebhookPostCommit/);
   assert.match(source, /runPostCommitBestEffort/);
   assert.doesNotMatch(source, /extraStatements/);
   assert.doesNotMatch(
@@ -18,16 +18,17 @@ test("reserveSlot keeps ops webhook post-commit and out of atomic batch", async 
 
 test("submitSlotVideo keeps submit notifications post-commit", async () => {
   const source = await read("./video/submitSlotVideo.ts");
-  assert.match(source, /name: "slot_submit_notifications"/);
+  assert.match(source, /enqueueSlotSubmitNotificationsPostCommit/);
   assert.match(source, /runPostCommitBestEffort/);
   assert.doesNotMatch(
     source,
     /executeVideoAtomicWritePlan\([\s\S]*notificationWakeSource/,
   );
-  assert.match(
-    source,
-    /catch \(error\) \{[\s\S]*rollbackUploadedVideoIcon/,
-  );
+  const catchBlock =
+    source.match(/} catch \(error\) \{[\s\S]*?return \{ ok: false, message: "保存対象が多すぎる/)?.[0] ??
+    "";
+  assert.match(catchBlock, /rollbackUploadedVideoIcon/);
+  assert.doesNotMatch(catchBlock, /enqueueSlotSubmitNotificationsPostCommit/);
 });
 
 test("setVideoStatus returns ok:false on D1 mutation failure", async () => {

@@ -12,15 +12,12 @@ import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots,
-  users,
   videos,
 } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import {
   snapshotYoutubeChannelUrl,
 } from "@/lib/db/youtubeChannelCandidates";
-import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
-import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
