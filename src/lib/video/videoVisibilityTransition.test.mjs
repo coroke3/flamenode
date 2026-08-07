@@ -13,8 +13,11 @@ test("video visibility transition uses full fan-out helpers", () => {
   assert.match(source, /buildVideoStatusChangeNotificationBatch/);
 });
 
-test("depublicization keeps R2 block before D1 and does not auto-unblock", () => {
+test("depublicization keeps R2 block before D1 and compensates only when safe", () => {
   assert.match(source, /preCommitVideoVisibilityDepublicization/);
   assert.match(source, /writePublicVisibilityBlockedEntitiesManifest/);
-  assert.doesNotMatch(source, /releaseBlockedEntityInManifest/);
+  assert.match(source, /compensateDepublicizationFenceOnD1Failure/);
+  assert.match(source, /releaseBlockedEntityInManifest/);
+  assert.match(source, /r2_token_mismatch/);
+  assert.match(source, /video_not_public/);
 });

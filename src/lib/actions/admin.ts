@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videos } from "@/lib/db/schema";
@@ -17,6 +16,7 @@ import { resolveVoidModerationCaseType } from "@/lib/moderation/voidCaseType";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { attachApproveAndNextHref } from "@/lib/admin/videoReviewQueueOrder";
 import {
+  handleVideoVisibilityMutationFailure,
   planVideoVisibilityTransition,
   runVideoVisibilityTransitionPostCommit,
 } from "@/lib/video/videoVisibilityTransition";
@@ -111,9 +111,11 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   if (!nextStatus) return { ok: false, message: "不正なステータスです。" };
 
   const traceId = createTraceId();
+  let transition: Awaited<ReturnType<typeof planVideoVisibilityTransition>> | null =
+    null;
 
   try {
-    const transition = await planVideoVisibilityTransition(db, {
+    transition = await planVideoVisibilityTransition(db, {
       video: before,
       nextStatus,
       actorUserId: guard.user.id,
@@ -197,14 +199,12 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
       adminEventFilter,
     });
   } catch (error) {
-    unstable_rethrow(error);
-    console.error("[admin-video-status] failed", { traceId, error });
-    return {
-      ok: false,
-      message: `承認処理に失敗しました。状態を再取得してもう一度お試しください。エラーID: ${traceId}`,
-      errorCode: "status_action_failed",
+    return handleVideoVisibilityMutationFailure(db, error, {
+      flow: "admin_video_status",
       traceId,
-      retryable: true,
-    };
+      videoId,
+      depublicizedFromPublic: Boolean(transition?.depublicizedFromPublic),
+      fenceToken: transition?.fenceToken ?? null,
+    });
   }
 }

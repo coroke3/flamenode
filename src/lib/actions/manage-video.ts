@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { canEditEvent } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -13,6 +12,7 @@ import {
 import { VIDEO_STATUS_NOTIFICATION_PREFETCH_QUERY_COUNT } from "@/lib/notifications/videoStatusNotify";
 import { STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT } from "@/lib/staticRebuild/enqueue";
 import {
+  handleVideoVisibilityMutationFailure,
   planVideoVisibilityTransition,
   runVideoVisibilityTransitionPostCommit,
 } from "@/lib/video/videoVisibilityTransition";
@@ -142,9 +142,11 @@ export async function setManageVideoStatus(
   }
 
   const traceId = createTraceId();
+  let transition: Awaited<ReturnType<typeof planVideoVisibilityTransition>> | null =
+    null;
 
   try {
-    const transition = await planVideoVisibilityTransition(db, {
+    transition = await planVideoVisibilityTransition(db, {
       video: target,
       nextStatus: status as typeof target.visibility_status,
       actorUserId: u.id,
@@ -205,14 +207,13 @@ export async function setManageVideoStatus(
       eventId,
     });
   } catch (error) {
-    unstable_rethrow(error);
-    console.error("[manage-video-status] failed", { traceId, error });
-    return {
-      ok: false,
-      message: `承認処理に失敗しました。状態を再取得してもう一度お試しください。エラーID: ${traceId}`,
-      errorCode: "status_action_failed",
+    return handleVideoVisibilityMutationFailure(db, error, {
+      flow: "manage_video_status",
       traceId,
-      retryable: true,
-    };
+      videoId,
+      eventId,
+      depublicizedFromPublic: Boolean(transition?.depublicizedFromPublic),
+      fenceToken: transition?.fenceToken ?? null,
+    });
   }
 }

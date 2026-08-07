@@ -23,9 +23,11 @@ import {
 } from "@/lib/staticRebuild/publicReflectionNotice";
 import { generateId } from "@/lib/utils/id";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
-import { createTraceId } from "@/lib/observability/flowTrace";
+import { createTraceId, logFlowTrace } from "@/lib/observability/flowTrace";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
 import {
+  enqueueVideoVisibilityNotificationsPostCommit,
+  handleVideoVisibilityMutationFailure,
   planVideoVisibilityTransition,
   preCommitVideoVisibilityDepublicization,
   runVideoVisibilityTransitionPostCommit,
@@ -37,9 +39,33 @@ export interface ModerationAdminResult extends PendingPublicReflection {
 }
 
 function snapshot(row: object): Record<string, unknown> { return { ...row }; }
-function mutationError(error: unknown): ModerationAdminResult {
+function mutationError(
+  error: unknown,
+  context?: { flow: string; traceId: string },
+): ModerationAdminResult {
   unstable_rethrow(error);
-  console.error("[moderation-admin] atomic mutation failed", error);
+  const error_code = error instanceof Error ? error.name : "UnknownError";
+  if (context) {
+    logFlowTrace({
+      flow: context.flow,
+      phase: "moderation_mutation_failed",
+      trace_id: context.traceId,
+      result: "failed",
+      error_code,
+      committed: false,
+    });
+    console.warn(
+      JSON.stringify({
+        service: "moderation_admin",
+        flow: context.flow,
+        trace_id: context.traceId,
+        phase: "moderation_mutation_failed",
+        error_code,
+      }),
+    );
+  } else {
+    console.error("[moderation-admin] atomic mutation failed", error);
+  }
   return { ok: false, message: "更新が競合したか、監査・通知記録に失敗しました。再読み込みしてお試しください。" };
 }
 
@@ -120,6 +146,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   }
   const now = Math.floor(Date.now() / 1000);
   const id = generateId("vmc");
+  const traceId = createTraceId();
   const caseAfter: typeof videoModerationCases.$inferSelect = {
     id, video_id: videoId, case_type: caseType, status: "open",
     public_reason: publicReason || null, private_note: privateNote || null,
@@ -176,7 +203,18 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
           reason: publicReason || null,
         });
       } catch (error) {
-        return mutationError(error);
+        unstable_rethrow(error);
+        const error_code =
+          error instanceof Error ? error.name : "UnknownError";
+        logFlowTrace({
+          flow: "admin_moderation_create",
+          phase: "visibility_precommit_failed",
+          trace_id: traceId,
+          result: "failed",
+          error_code,
+          committed: false,
+        });
+        return { ok: false, message: "公開ブロックの記録に失敗しました。" };
       }
     }
   }
@@ -186,12 +224,28 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
       mutationStatements: statements,
       expectedMutationChanges: expected,
       audits,
-      notificationWakeSource:
-        transition?.notificationBatch.statements.length ? "admin" : undefined,
       staticRebuildWakeSource:
         transition?.queueBatch.statements.length ? "admin" : undefined,
     });
-  } catch (error) { return mutationError(error); }
+  } catch (error) {
+    if (transition) {
+      return handleVideoVisibilityMutationFailure(db, error, {
+        flow: "admin_moderation_create",
+        traceId,
+        videoId,
+        depublicizedFromPublic: transition.depublicizedFromPublic,
+        fenceToken: transition.fenceToken,
+      });
+    }
+    return mutationError(error, { flow: "admin_moderation_create", traceId });
+  }
+  if (transition) {
+    await enqueueVideoVisibilityNotificationsPostCommit(
+      db,
+      transition.notificationBatch,
+      { flow: "admin_moderation_create", traceId, wakeSource: "admin" },
+    );
+  }
   await runModerationPostCommit(
     video,
     Boolean(transition?.visibilityChanged),
@@ -224,6 +278,7 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   const video = (await db.select().from(videos).where(eq(videos.id, current.video_id)).limit(1))[0];
   if (!video) return { ok: false, message: "対象作品が見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
+  const traceId = createTraceId();
   const caseAfter = { ...current, status, private_note: note || current.private_note, resolved_by_user_id: guard.user.id, resolved_at: now };
   const statements: BatchItem<"sqlite">[] = [db.update(videoModerationCases).set({ status, private_note: caseAfter.private_note, resolved_by_user_id: guard.user.id, resolved_at: now }).where(and(eq(videoModerationCases.id, id), expectedRowCondition({ expectedCurrent: snapshot(current) }))!)];
   const expected: (number | null)[] = [1];
@@ -252,7 +307,18 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
           reason: note || null,
         });
       } catch (error) {
-        return mutationError(error);
+        unstable_rethrow(error);
+        const error_code =
+          error instanceof Error ? error.name : "UnknownError";
+        logFlowTrace({
+          flow: "admin_moderation_update",
+          phase: "visibility_precommit_failed",
+          trace_id: traceId,
+          result: "failed",
+          error_code,
+          committed: false,
+        });
+        return { ok: false, message: "公開ブロックの記録に失敗しました。" };
       }
     }
   }
@@ -262,12 +328,28 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
       mutationStatements: statements,
       expectedMutationChanges: expected,
       audits,
-      notificationWakeSource:
-        transition?.notificationBatch.statements.length ? "admin" : undefined,
       staticRebuildWakeSource:
         transition?.queueBatch.statements.length ? "admin" : undefined,
     });
-  } catch (error) { return mutationError(error); }
+  } catch (error) {
+    if (transition) {
+      return handleVideoVisibilityMutationFailure(db, error, {
+        flow: "admin_moderation_update",
+        traceId,
+        videoId: video.id,
+        depublicizedFromPublic: transition.depublicizedFromPublic,
+        fenceToken: transition.fenceToken,
+      });
+    }
+    return mutationError(error, { flow: "admin_moderation_update", traceId });
+  }
+  if (transition) {
+    await enqueueVideoVisibilityNotificationsPostCommit(
+      db,
+      transition.notificationBatch,
+      { flow: "admin_moderation_update", traceId, wakeSource: "admin" },
+    );
+  }
   await runModerationPostCommit(
     video,
     Boolean(transition?.visibilityChanged),
