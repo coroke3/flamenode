@@ -138,7 +138,7 @@ export async function updateVideoMembersAdmin(
           })),
         ]
       : []),
-    ...(target.primary_event_id ? [{ targetType: "event" as const, targetId: target.primary_event_id, reason: "video_members_update" }] : []),
+    ...(target.primary_event_id ? [{ targetType: "event_base" as const, targetId: target.primary_event_id, reason: "video_members_update" }] : []),
   ]);
   plan.statements.push(...queue.statements);
   plan.expectedChanges.push(...queue.expectedChanges);

@@ -224,14 +224,6 @@ export async function fetchDegradedRecentListPayload(
         sql`${videos.title} LIKE ${like} ESCAPE '\\'`,
         sql`${videos.creator_x_user_id} LIKE ${like} ESCAPE '\\'`,
         sql`${videos.creator_display_name} LIKE ${like} ESCAPE '\\'`,
-        sql`EXISTS (
-          SELECT 1 FROM x_users AS xu
-          WHERE xu.id = ${videos.creator_x_user_id}
-            AND (
-              xu.x_name LIKE ${like} ESCAPE '\\'
-              OR xu.id LIKE ${like} ESCAPE '\\'
-            )
-        )`,
       )
     : undefined;
 

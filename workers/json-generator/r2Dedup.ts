@@ -83,6 +83,22 @@ export async function staticArtifactContentHash(value: string): Promise<string> 
   return sha256Hex(meaningfulJsonBody(value));
 }
 
+/** R2 dedup と putJson が共有する「同一内容なら PUT / UPSERT 省略」判定。head ありならそのオブジェクトを返す。 */
+export async function resolveIdenticalJsonArtifactPut(
+  env: DedupEnv,
+  objectKey: string,
+  serialized: string,
+): Promise<R2Object | null> {
+  const nextHash = await staticArtifactContentHash(serialized);
+  const storedHash = await currentArtifactHash(
+    env.DB,
+    objectKey,
+    env.artifactHashCache,
+  );
+  if (storedHash !== nextHash) return null;
+  return (await env.R2.head(objectKey)) ?? null;
+}
+
 async function currentArtifactHash(
   db: D1Database,
   objectKey: string,
@@ -118,16 +134,12 @@ export function withDeduplicatingR2<Env extends DedupEnv>(env: Env): Env {
         return async (...args: R2PutArgs): Promise<R2PutResult> => {
           const [key, value] = args;
           if (typeof value === "string") {
-            const nextHash = await staticArtifactContentHash(value);
-            const storedHash = await currentArtifactHash(
-              env.DB,
+            const existing = await resolveIdenticalJsonArtifactPut(
+              env,
               key,
-              env.artifactHashCache,
+              value,
             );
-            if (storedHash === nextHash) {
-              const existing = await bucket.head(key);
-              if (existing) return existing;
-            }
+            if (existing) return existing;
           }
           return bucket.put(...args);
         };

@@ -178,6 +178,36 @@ export function buildVideoCardChangeFanOutTargets(opts: {
   return withMeta(topVideoCardTargets(opts.reason, opts.priority), opts);
 }
 
+function eventBaseTarget(
+  eventId: string,
+  reason: string,
+  priority?: StaticRebuildPriority,
+  requestedByUserId?: string | null,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "event_base",
+    targetId: eventId,
+    reason,
+    ...(priority ? { priority } : {}),
+    ...(requestedByUserId !== undefined ? { requestedByUserId } : {}),
+  };
+}
+
+function eventSlotsTarget(
+  eventId: string,
+  reason: string,
+  priority?: StaticRebuildPriority,
+  requestedByUserId?: string | null,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "event_slots",
+    targetId: eventId,
+    reason,
+    ...(priority ? { priority } : {}),
+    ...(requestedByUserId !== undefined ? { requestedByUserId } : {}),
+  };
+}
+
 function usersIndexTarget(reason: string): EnqueueStaticRebuildInput {
   return { targetType: "users_index", targetId: "global", reason };
 }
@@ -234,12 +264,7 @@ export async function enqueueAfterVideoCreate(
     items.push(...topVideoVisibilityTargets("video_create"));
   }
   for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
-    items.push({
-      targetType: "event",
-      targetId: eventId,
-      reason: "video_create",
-      priority: "high",
-    });
+    items.push(eventBaseTarget(eventId, "video_create", "high", opts.requestedByUserId));
   }
   await enqueueStaticRebuildMany(db, items);
 }
@@ -317,7 +342,7 @@ export async function enqueueAfterVideoUpdate(
   }
   if (opts.eventMembershipChanged || opts.visibilityChanged) {
     for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
-      items.push({ targetType: "event", targetId: eventId, reason: "video_update" });
+      items.push(eventBaseTarget(eventId, "video_update"));
     }
   }
   await enqueueStaticRebuildMany(db, items);
@@ -396,12 +421,7 @@ export function buildAfterVideoStatusChangeQueueBatch(
     }));
   }
   for (const eventId of eventIds) {
-    items.push({
-      targetType: "event",
-      targetId: eventId,
-      reason: "video_update",
-      requestedByUserId: opts.requestedByUserId,
-    });
+    items.push(eventBaseTarget(eventId, "video_update", undefined, opts.requestedByUserId));
   }
   return buildStaticRebuildQueueBatch(db, items);
 }
@@ -430,13 +450,7 @@ export function buildSlotChangeQueueBatch(
   },
 ): Promise<StaticRebuildQueueBatch> {
   return buildStaticRebuildQueueBatch(db, [
-    {
-      targetType: "event",
-      targetId: opts.eventId,
-      reason: opts.reason,
-      priority: "high",
-      requestedByUserId: opts.requestedByUserId,
-    },
+    eventSlotsTarget(opts.eventId, opts.reason, "high", opts.requestedByUserId),
     topSlotStatsGlobalTarget(opts.reason, "normal"),
   ]);
 }
@@ -452,13 +466,7 @@ export function buildEventChangeQueueBatch(
 ): Promise<StaticRebuildQueueBatch> {
   const priority = opts.priority ?? "normal";
   return buildStaticRebuildQueueBatch(db, [
-    {
-      targetType: "event",
-      targetId: opts.eventId,
-      reason: opts.reason,
-      priority,
-      requestedByUserId: opts.requestedByUserId,
-    },
+    eventBaseTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
     {
       targetType: "events_index",
       targetId: "global",

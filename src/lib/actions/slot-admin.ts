@@ -350,7 +350,7 @@ export async function generateSlotsBatch(
     if (created > 0) {
       await enqueueStaticRebuildMany(guard.db, [
         {
-          targetType: "event",
+          targetType: "event_slots",
           targetId: data.event_id,
           reason: "slot_admin_generate_partial",
           priority: "high",

@@ -8,6 +8,8 @@ export const STATIC_REBUILD_TARGET_TYPES = [
   "top_stats",
   "top_slot_stats",
   "events_index",
+  "event_base",
+  "event_slots",
   "event",
   "video",
   "user",

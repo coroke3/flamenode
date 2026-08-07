@@ -17,6 +17,7 @@ export interface StaticRecentVideoRow {
   primary_event_title?: unknown;
   scheduled_time?: unknown;
   status?: unknown;
+  part?: unknown;
 }
 
 export interface StaticRecentVideosPayload {
@@ -35,7 +36,7 @@ export interface StaticRecentVideo {
   primary_event_title: string | null;
   scheduled_time: number | null;
   status: "public";
-  part: null;
+  part: string | null;
 }
 
 export interface StaticRecentVideoPage {
@@ -88,6 +89,9 @@ function normalizeStaticRecentVideoRow(
     primary_event_title: normalizeNullableString(row.primary_event_title),
     scheduled_time: normalizeUnix(row.scheduled_time),
     status: "public",
-    part: null,
+    part:
+      row.part == null || String(row.part).trim() === ""
+        ? null
+        : String(row.part).trim(),
   };
 }

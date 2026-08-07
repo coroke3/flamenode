@@ -3,7 +3,7 @@ import {
   cacheControlForFreshness,
   resolveEventFreshness,
 } from "./freshness.ts";
-import { staticArtifactContentHash } from "./r2Dedup.ts";
+import { staticArtifactContentHash, resolveIdenticalJsonArtifactPut } from "./r2Dedup.ts";
 import { staticRebuildArtifactTargetId } from "./staticGlobalRebuildTargets.ts";
 import {
   staticR2CacheControl,
@@ -111,7 +111,7 @@ import {
   pickHeroEvents,
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
-import { enqueueComposerFollowUps } from "./followUpEnqueue.ts";
+import { enqueueComposerFollowUps, enqueuePerTargetComposerFollowUp } from "./followUpEnqueue.ts";
 import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
 import { enqueueTopSectionRebuild } from "./topRebuildEnqueue.ts";
 
@@ -341,6 +341,22 @@ export async function rebuildTarget(
     case "search_index":
       await rebuildSearchIndexLite(env, signal);
       break;
+    case "event_base":
+      await rebuildEventBase(env, targetId, signal);
+      followUpPending = await enqueuePerTargetComposerFollowUp(
+        env,
+        "event_base",
+        targetId,
+      );
+      break;
+    case "event_slots":
+      await rebuildEventSlots(env, targetId, signal);
+      followUpPending = await enqueuePerTargetComposerFollowUp(
+        env,
+        "event_slots",
+        targetId,
+      );
+      break;
     case "event":
       await rebuildEvent(env, targetId, signal);
       break;
@@ -436,6 +452,9 @@ async function putJson(
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
   throwIfAborted(signal);
+  if (await resolveIdenticalJsonArtifactPut(env, key, serialized)) {
+    return;
+  }
   await env.R2.put(key, serialized, {
     httpMetadata: {
       contentType: "application/json; charset=utf-8",
@@ -1350,9 +1369,67 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
   await putJson(env, "search-index-lite.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex), { targetType: "search_index", targetId: "global" }, signal);
 }
 
-async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): Promise<void> {
+async function removeAllEventArtifacts(
+  env: Env,
+  eventId: string,
+  signal?: RebuildSignal,
+): Promise<void> {
+  await removeTrackedArtifacts(env, "event", eventId, 20, signal);
+  await removeTrackedArtifacts(env, "event_base", eventId, 20, signal);
+  await removeTrackedArtifacts(env, "event_slots", eventId, 20, signal);
+}
+
+function eventBaseObjectKey(eventId: string): string {
+  return `events/${eventId}/base.v1.json`;
+}
+
+function eventSlotsObjectKey(eventId: string): string {
+  return `events/${eventId}/slots.v1.json`;
+}
+
+function buildEventSlotsSummary(
+  slots: readonly Record<string, unknown>[],
+): Array<{ status: string; c: number }> {
+  const counts = new Map<string, number>();
+  for (const slot of slots) {
+    const status = String(slot.status ?? "");
+    if (!status) continue;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([status, c]) => ({ status, c }));
+}
+
+async function loadEventVisibilityRow(
+  env: Env,
+  eventId: string,
+  signal?: RebuildSignal,
+): Promise<Record<string, unknown> | null> {
   throwIfAborted(signal);
-  const ev = (
+  return (
+    (await env.DB.prepare(
+      `SELECT id, visibility_status, updated_at,
+              start_time, end_time
+       FROM events WHERE id = ? LIMIT 1`,
+    )
+      .bind(eventId)
+      .first()) ?? null
+  );
+}
+
+async function rebuildEventBase(
+  env: Env,
+  eventId: string,
+  signal?: RebuildSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  const ev = await loadEventVisibilityRow(env, eventId, signal);
+  throwIfAborted(signal);
+  if (!ev || String(ev.visibility_status ?? "") !== "public") {
+    await removeAllEventArtifacts(env, eventId, signal);
+    return;
+  }
+
+  const eventRow = (
     await env.DB.prepare(
       `SELECT ${EVENT_DETAIL_COLUMNS}
        FROM events WHERE id = ? LIMIT 1`,
@@ -1361,36 +1438,23 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
       .first()
   ) as Record<string, unknown> | null;
   throwIfAborted(signal);
-  if (!ev) {
-    await removeTrackedArtifacts(env, "event", eventId, 20, signal);
-    return;
-  }
-  const visibility = String(ev.visibility_status ?? "");
-  if (visibility !== "public") {
-    await removeTrackedArtifacts(env, "event", eventId, 20, signal);
+  if (!eventRow) {
+    await removeAllEventArtifacts(env, eventId, signal);
     return;
   }
 
   const now = Math.floor(Date.now() / 1000);
   const freshness = resolveEventFreshness(
     {
-      visibility_status: (ev.visibility_status as string | null) ?? null,
-      start_time: (ev.start_time as number | null) ?? null,
-      end_time: (ev.end_time as number | null) ?? null,
+      visibility_status: (eventRow.visibility_status as string | null) ?? null,
+      start_time: (eventRow.start_time as number | null) ?? null,
+      end_time: (eventRow.end_time as number | null) ?? null,
     },
     now,
   );
-  const eventPayload = ev;
   const eventVideoWhere = eventPublicVideoWhereSql("v");
 
-  const [
-    staff,
-    slotSummary,
-    publicSlots,
-    publicVideos,
-    videoTotalRow,
-    creatorCountRow,
-  ] = await Promise.all([
+  const [staff, publicVideos, creatorCountRow] = await Promise.all([
     env.DB.prepare(
       `SELECT es.display_name, es.public_role_label,
               xu.id AS x_user_id, xu.x_name, xu.icon_url,
@@ -1407,36 +1471,16 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
       .bind(eventId)
       .all(),
     env.DB.prepare(
-      `SELECT status, COUNT(*) AS c FROM slots WHERE event_id = ? GROUP BY status`,
-    )
-      .bind(eventId)
-      .all(),
-    env.DB.prepare(
-      `SELECT id, status, start_time, sort_order
-       FROM slots
-       WHERE event_id = ?
-       ORDER BY start_time ASC, sort_order ASC, id ASC`,
-    )
-      .bind(eventId)
-      .all(),
-    env.DB.prepare(
       `SELECT v.id, v.title, v.youtube_video_id, v.creator_display_name,
               v.creator_x_user_id, v.creator_icon_url, v.visibility_status,
-              v.scheduled_time, v.part
+              v.scheduled_time, v.part, COALESCE(v.score, 0) AS score
        FROM videos AS v
        WHERE ${eventVideoWhere}
        ORDER BY v.scheduled_time ASC, v.id ASC
-       LIMIT 500`,
+       LIMIT 501`,
     )
       .bind(eventId, eventId)
       .all(),
-    env.DB.prepare(
-      `SELECT COUNT(*) AS c
-       FROM videos AS v
-       WHERE ${eventVideoWhere}`,
-    )
-      .bind(eventId, eventId)
-      .first<{ c?: number }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS c
        FROM (
@@ -1458,16 +1502,168 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
   ]);
 
   throwIfAborted(signal);
+  const videoRows = publicVideos.results ?? [];
+  const hasOverflow = videoRows.length > 500;
+  const listedVideos = hasOverflow ? videoRows.slice(0, 500) : videoRows;
+  let videoTotal = listedVideos.length;
+  if (hasOverflow) {
+    const videoTotalRow = await env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM videos AS v
+       WHERE ${eventVideoWhere}`,
+    )
+      .bind(eventId, eventId)
+      .first<{ c?: number }>();
+    throwIfAborted(signal);
+    videoTotal = Number(videoTotalRow?.c ?? listedVideos.length);
+  }
+
+  const objectKey = eventBaseObjectKey(eventId);
   const payload = {
     generated_at: now,
     freshness,
-    event: eventPayload,
+    event: eventRow,
     public_staff: staff.results ?? [],
-    slots_summary: slotSummary.results ?? [],
-    slots: publicSlots.results ?? [],
-    public_videos: publicVideos.results ?? [],
-    video_total: Number(videoTotalRow?.c ?? publicVideos.results?.length ?? 0),
+    public_videos: listedVideos,
+    video_total: videoTotal,
     creator_count: Number(creatorCountRow?.c ?? 0),
+  };
+
+  await putJson(
+    env,
+    objectKey,
+    payload,
+    cacheControlForFreshness(freshness),
+    {
+      targetType: "event_base",
+      targetId: eventId,
+      sourceUpdatedAt: Number(eventRow.updated_at ?? 0) || null,
+    },
+    signal,
+  );
+  await reconcileTrackedArtifacts(
+    env,
+    { targetType: "event_base", targetId: eventId },
+    [objectKey],
+    20,
+    signal,
+  );
+}
+
+async function rebuildEventSlots(
+  env: Env,
+  eventId: string,
+  signal?: RebuildSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  const ev = await loadEventVisibilityRow(env, eventId, signal);
+  throwIfAborted(signal);
+  if (!ev || String(ev.visibility_status ?? "") !== "public") {
+    await removeAllEventArtifacts(env, eventId, signal);
+    return;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const publicSlots = await env.DB.prepare(
+    `SELECT id, status, start_time, sort_order
+     FROM slots
+     WHERE event_id = ?
+     ORDER BY start_time ASC, sort_order ASC, id ASC`,
+  )
+    .bind(eventId)
+    .all();
+  throwIfAborted(signal);
+  const slots = (publicSlots.results ?? []) as Record<string, unknown>[];
+  const objectKey = eventSlotsObjectKey(eventId);
+  const payload = {
+    generated_at: now,
+    slots,
+    slots_summary: buildEventSlotsSummary(slots),
+  };
+
+  await putJson(
+    env,
+    objectKey,
+    payload,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.eventDetail),
+    {
+      targetType: "event_slots",
+      targetId: eventId,
+      sourceUpdatedAt: Number(ev.updated_at ?? 0) || null,
+    },
+    signal,
+  );
+  await reconcileTrackedArtifacts(
+    env,
+    { targetType: "event_slots", targetId: eventId },
+    [objectKey],
+    20,
+    signal,
+  );
+}
+
+function stripEventPublicVideoScore(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!("score" in row)) return row;
+  const { score: _score, ...rest } = row;
+  return rest;
+}
+
+async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const ev = await loadEventVisibilityRow(env, eventId, signal);
+  throwIfAborted(signal);
+  if (!ev || String(ev.visibility_status ?? "") !== "public") {
+    await removeAllEventArtifacts(env, eventId, signal);
+    return;
+  }
+
+  const baseKey = eventBaseObjectKey(eventId);
+  const slotsKey = eventSlotsObjectKey(eventId);
+  const [basePayload, slotsPayload] = await Promise.all([
+    loadWorkerR2Json(env, baseKey, signal),
+    loadWorkerR2Json(env, slotsKey, signal),
+  ]);
+  throwIfAborted(signal);
+  if (!basePayload || typeof basePayload !== "object") {
+    throw new Error("event_composer_required_section_missing:base");
+  }
+  if (!slotsPayload || typeof slotsPayload !== "object") {
+    throw new Error("event_composer_required_section_missing:slots");
+  }
+  const base = basePayload as Record<string, unknown>;
+  const slots = slotsPayload as Record<string, unknown>;
+  if (!base.event || typeof base.event !== "object") {
+    throw new Error("event_composer_required_section_missing:base");
+  }
+  if (!Array.isArray(slots.slots) || !Array.isArray(slots.slots_summary)) {
+    throw new Error("event_composer_required_section_missing:slots");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const freshness = resolveEventFreshness(
+    {
+      visibility_status: (ev.visibility_status as string | null) ?? null,
+      start_time: (ev.start_time as number | null) ?? null,
+      end_time: (ev.end_time as number | null) ?? null,
+    },
+    now,
+  );
+  const payload = {
+    generated_at: now,
+    freshness,
+    event: base.event,
+    public_staff: Array.isArray(base.public_staff) ? base.public_staff : [],
+    slots_summary: slots.slots_summary,
+    slots: slots.slots,
+    public_videos: Array.isArray(base.public_videos)
+      ? base.public_videos.map((row) =>
+          stripEventPublicVideoScore(row as Record<string, unknown>),
+        )
+      : [],
+    video_total: Number(base.video_total ?? 0),
+    creator_count: Number(base.creator_count ?? 0),
   };
 
   await putJson(
@@ -1475,10 +1671,20 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
     `events/${eventId}.json`,
     payload,
     cacheControlForFreshness(freshness),
-    { targetType: "event", targetId: eventId, sourceUpdatedAt: Number(ev.updated_at ?? 0) || null },
+    {
+      targetType: "event",
+      targetId: eventId,
+      sourceUpdatedAt: Number(ev.updated_at ?? 0) || null,
+    },
     signal,
   );
-  await reconcileTrackedArtifacts(env, { targetType: "event", targetId: eventId }, [`events/${eventId}.json`], 20, signal);
+  await reconcileTrackedArtifacts(
+    env,
+    { targetType: "event", targetId: eventId },
+    [`events/${eventId}.json`],
+    20,
+    signal,
+  );
 }
 
 type StaticRelatedVideoRow = {

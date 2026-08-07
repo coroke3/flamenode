@@ -36,7 +36,9 @@ export function queueLimitForMode(mode: OperationMode): number {
 
 export function queueModeWhereClause(mode: OperationMode): string {
   if (mode === "static_only") return ` AND priority = 'high'`;
-  if (mode === "read_only") return ` AND target_type IN ('event', 'video', 'user')`;
+  if (mode === "read_only") {
+    return ` AND target_type IN ('event', 'event_base', 'event_slots', 'video', 'user')`;
+  }
   return "";
 }
 

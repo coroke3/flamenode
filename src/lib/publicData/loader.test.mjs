@@ -70,7 +70,7 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
 test("loader の R2 ヒット分岐は getDatabase を呼ばない", () => {
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
-    loaderSource.indexOf("export const loadStaticEventDetail"),
+    loaderSource.indexOf("export async function loadStaticEventDetail"),
   );
   const hitBranch = loadPublicJsonFn.slice(
     loadPublicJsonFn.indexOf("if (payload !== null)"),
@@ -199,4 +199,28 @@ test("list loaders use static pool size for shouldUseStaticCollection", () => {
   assert.match(searchBlock, /const poolSize = Array\.isArray\(payload\?\.videos\)/);
   assert.match(searchBlock, /shouldUseStaticCollection\(result\.strategy, poolSize\)/);
   assert.doesNotMatch(searchBlock, /const itemCount = normalizedPage\?\.videos\.length/);
+});
+
+test("loadPublicEventVideosPage は event_base R2 を優先しヒット時に getDatabase を呼ばない", () => {
+  const eventListBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicEventVideosPage"),
+    loaderSource.indexOf("export async function loadStaticRulesPage"),
+  );
+  assert.match(eventListBlock, /eventBaseObjectKey/);
+  assert.match(eventListBlock, /isCompleteEventBasePool/);
+  assert.match(eventListBlock, /pageEventBaseVideos/);
+  assert.match(eventListBlock, /isLoaderTargetVisibilityBlocked\("event_base"/);
+  assert.match(eventListBlock, /fetchDegradedEventListPage/);
+  const staticHitBranch = eventListBlock.slice(
+    eventListBlock.indexOf("const tryStaticEventList"),
+    eventListBlock.indexOf("const cached ="),
+  );
+  assert.doesNotMatch(staticHitBranch, /getDatabase\(/);
+});
+
+test("mapTargetTypeToFenceEntity は event_base を event フェンスにマップする", () => {
+  assert.match(
+    loaderSource,
+    /targetType === "event" \|\| targetType === "event_base"\) return "event"/,
+  );
 });

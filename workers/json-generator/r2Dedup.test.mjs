@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   staticArtifactContentHash,
+  resolveIdenticalJsonArtifactPut,
   withDeduplicatingR2,
   ArtifactHashCache,
 } from "./r2Dedup.ts";
@@ -136,4 +137,18 @@ test("artifactHashCache を preload すると PUT 前の個別 SELECT を省略�
   const wrapped = withDeduplicatingR2({ DB, R2, artifactHashCache: cache });
   await wrapped.R2.put("top.json", body);
   assert.equal(selectCount, 0);
+});
+
+test("resolveIdenticalJsonArtifactPut は hash 一致かつ R2 実体ありで head を返す", async () => {
+  const body = JSON.stringify({ generated_at: 100, items: [{ id: "v1" }] });
+  const storedHash = await staticArtifactContentHash(body);
+  const fixture = createEnv({ storedHash });
+  const head = await resolveIdenticalJsonArtifactPut(
+    fixture.env,
+    "top.json",
+    body,
+  );
+  assert.ok(head);
+  assert.equal(fixture.calls.head, 1);
+  assert.equal(fixture.calls.put, 0);
 });

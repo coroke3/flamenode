@@ -47,8 +47,9 @@ test("動画作成はusers_index経由でtop/recommendを間接enqueueする", (
     /enqueueAfterVideoCreate[\s\S]*targetType: "top"/,
   );
 });
-test("枠変更はeventとtop_slot_statsを同一batchでenqueueする", () => {
+test("枠変更はevent_slotsとtop_slot_statsを同一batchでenqueueする", () => {
   assert.match(hooks, /export function buildSlotChangeQueueBatch/);
+  assert.match(hooks, /targetType: "event_slots"/);
   assert.match(hooks, /topSlotStatsGlobalTarget\(opts\.reason/);
   assert.doesNotMatch(
     hooks,

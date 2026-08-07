@@ -10,7 +10,9 @@ const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
   top_stats: "トップ統計",
   top_slot_stats: "トップ hero slot_stats",
   events_index: "イベント一覧",
-  event: "イベント詳細",
+  event_base: "イベント詳細（base）",
+  event_slots: "イベント詳細（slots）",
+  event: "イベント詳細（composer）",
   video: "作品詳細",
   user: "クリエイター",
   users_index: "クリエイター一覧",
@@ -34,6 +36,8 @@ const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
   top_stats: "global など固定ID",
   top_slot_stats: "global など固定ID",
   events_index: "global など固定ID",
+  event_base: "イベント ID",
+  event_slots: "イベント ID",
   event: "イベント ID",
   video: "作品 ID（内部）",
   user: "X ID",
@@ -74,6 +78,8 @@ export function staticRebuildAdminHref(
 ): string | null {
   switch (targetType) {
     case "event":
+    case "event_base":
+    case "event_slots":
       return `/manage/events/${encodeURIComponent(targetId)}`;
     case "video":
       return `/admin/videos/${encodeURIComponent(targetId)}`;

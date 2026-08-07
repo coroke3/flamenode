@@ -81,6 +81,49 @@ export interface StaticEventDetail {
   creatorCount: number;
 }
 
+export const EVENT_BASE_SCHEMA_VERSION = 1 as const;
+export const EVENT_SLOTS_SCHEMA_VERSION = 1 as const;
+
+export function eventBaseObjectKey(eventId: string): string {
+  return `events/${eventId}/base.v1.json`;
+}
+
+export function eventSlotsObjectKey(eventId: string): string {
+  return `events/${eventId}/slots.v1.json`;
+}
+
+export interface StaticEventSlotsPayload {
+  generated_at?: unknown;
+  slots?: unknown;
+  slots_summary?: unknown;
+}
+
+/** slots artifact が有効かつ composed detail より新しいとき slots を置換する。 */
+export function applyEventSlotsOverride(
+  detail: StaticEventDetail,
+  artifact: StaticEventSlotsPayload | null,
+): StaticEventDetail {
+  if (!artifact) return detail;
+  const artifactGenerated = normalizeUnix(artifact.generated_at) ?? 0;
+  const detailGenerated = detail.generatedAt ?? 0;
+  if (artifactGenerated < detailGenerated) return detail;
+  const slotSummary = Array.isArray(artifact.slots_summary)
+    ? artifact.slots_summary
+        .map(normalizeSlotSummary)
+        .filter((row): row is StaticEventSlotSummary => row !== null)
+    : detail.slotSummary;
+  const slots = Array.isArray(artifact.slots)
+    ? artifact.slots
+        .map(normalizeEventSlot)
+        .filter((row): row is StaticEventSlot => row !== null)
+    : detail.slots;
+  return {
+    ...detail,
+    slotSummary,
+    slots,
+  };
+}
+
 export function normalizeStaticEventDetail(
   payload: StaticEventDetailPayload,
 ): StaticEventDetail | null {

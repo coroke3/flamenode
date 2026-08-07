@@ -108,7 +108,7 @@ async function revalidateEventStaffPathsBestEffort(args: {
             args.db,
             [
               {
-                targetType: "event",
+                targetType: "event_base",
                 targetId: args.eventId,
                 reason: args.reason,
                 priority: "high",

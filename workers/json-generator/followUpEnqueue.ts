@@ -51,6 +51,19 @@ const COMPOSER_FOLLOW_UP_BY_PRODUCER: Readonly<
   },
 };
 
+const PER_TARGET_COMPOSER_FOLLOW_UP_BY_PRODUCER: Readonly<
+  Record<string, { composerTargetType: string; reason: string }>
+> = {
+  event_base: {
+    composerTargetType: "event",
+    reason: "event_base_follow_up",
+  },
+  event_slots: {
+    composerTargetType: "event",
+    reason: "event_slots_follow_up",
+  },
+};
+
 async function enqueueComposerTargets(
   env: FollowUpEnv,
   targets: readonly ComposerFollowUpTarget[],
@@ -99,6 +112,21 @@ export async function enqueueComposerFollowUps(
   const spec = COMPOSER_FOLLOW_UP_BY_PRODUCER[producerTargetType];
   if (!spec) return false;
   return enqueueComposerTargets(env, spec.targets, spec.reason);
+}
+
+/** per-event producer 成功後に event composer を冪等 enqueue。 */
+export async function enqueuePerTargetComposerFollowUp(
+  env: FollowUpEnv,
+  producerTargetType: string,
+  targetId: string,
+): Promise<boolean> {
+  const spec = PER_TARGET_COMPOSER_FOLLOW_UP_BY_PRODUCER[producerTargetType];
+  if (!spec) return false;
+  return enqueueComposerTargets(
+    env,
+    [{ targetType: spec.composerTargetType, targetId }],
+    spec.reason,
+  );
 }
 /** @deprecated Use enqueueComposerFollowUps(env, "users_index") */
 

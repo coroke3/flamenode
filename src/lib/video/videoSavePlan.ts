@@ -446,7 +446,7 @@ export async function applyVideoUpdatePlan(
     for (const eventId of new Set([plan.primaryEventId, ...existingEventIds, ...targetEventIds])) {
       if (!eventId) continue;
       queueItems.push({
-        targetType: "event",
+        targetType: "event_base",
         targetId: eventId,
         reason: "video_update",
         requestedByUserId: plan.operatorUserId,

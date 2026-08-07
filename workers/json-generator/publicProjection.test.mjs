@@ -154,6 +154,8 @@ test("public static artifacts exclude private event identifiers and titles", asy
     assert.equal(popular.items[0].status, "public");
     assert.equal(popular.items[0].primary_event_id, null);
 
+    await rebuildTarget(env, "event_base", "public-event");
+    await rebuildTarget(env, "event_slots", "public-event");
     await rebuildTarget(env, "event", "public-event");
     const eventDetail = objects.get("events/public-event.json");
     assert.equal(eventDetail.video_total, 1);

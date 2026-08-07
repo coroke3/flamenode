@@ -155,7 +155,8 @@ test("旧archivedイベントは公開対象にせずartifactを削除する", a
   const env = eventEnv({ visibility: "archived" });
   await rebuildTarget(env, "event", "event-1");
   assert.deepEqual(env.puts, []);
-  assert.deepEqual(env.deletes, ["events/event-1.json"]);
+  assert.ok(env.deletes.includes("events/event-1.json"));
+  assert.equal(env.deletes.filter((key) => key === "events/event-1.json").length, 3);
 });
 
 test("旧limited作品は公開対象にせずartifactを削除する", async () => {
@@ -336,9 +337,9 @@ test("search-index-liteのvideosはCOUNTABLE条件でSTATIC_LIST_MAX_ITEMS件ま
   assert.match(searchFn, /ORDER BY id ASC LIMIT 500/);
 });
 
-test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", () => {
+test("rebuildEventBaseはD1公開詳細相当の作品紐付けと集計を使う", () => {
   const eventFn = source.match(
-    /async function rebuildEvent\(env[\s\S]*?(?=type StaticRelatedVideoRow)/,
+    /async function rebuildEventBase\([\s\S]*?(?=async function rebuildEventSlots)/,
   )?.[0];
   assert.ok(eventFn);
   assert.match(source, /function eventPublicVideoWhereSql/);
@@ -346,15 +347,50 @@ test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", 
   assert.match(source, /eventPublicVideoWhereSql[\s\S]*PVSF_SUMMARY_EVENT_ID/);
   assert.match(eventFn, /video_total:/);
   assert.match(eventFn, /creator_count:/);
-  assert.match(eventFn, /slots: publicSlots/);
-  const slotsQuery = eventFn.match(
+  assert.match(eventFn, /LIMIT 501/);
+  assert.doesNotMatch(eventFn, /FROM slots/);
+  assert.match(source, /EVENT_DETAIL_COLUMNS[\s\S]*slot_part_gap_minutes/);
+  assert.match(eventFn, /creator_x_user_id/);
+  assert.match(eventFn, /COALESCE\(v\.score, 0\) AS score/);
+});
+
+test("rebuildEventSlotsはslots 1 queryとJS summaryを使う", () => {
+  const slotsFn = source.match(
+    /async function rebuildEventSlots\([\s\S]*?(?=async function rebuildEvent\()/,
+  )?.[0];
+  assert.ok(slotsFn);
+  assert.match(slotsFn, /buildEventSlotsSummary/);
+  assert.match(slotsFn, /slots_summary:/);
+  const slotsQuery = slotsFn.match(
     /`SELECT id, status, start_time, sort_order[\s\S]*?FROM slots[\s\S]*?`/,
   )?.[0];
   assert.ok(slotsQuery);
   assert.doesNotMatch(slotsQuery, /display_name/);
   assert.doesNotMatch(slotsQuery, /reserved_by_user_id/);
-  assert.match(source, /EVENT_DETAIL_COLUMNS[\s\S]*slot_part_gap_minutes/);
-  assert.match(eventFn, /creator_x_user_id/);
+  assert.doesNotMatch(slotsFn, /GROUP BY status/);
+});
+
+test("rebuildEvent composerはR2 base/slotsのみでevents/{id}.jsonを書く", () => {
+  const eventFn = source.match(
+    /async function rebuildEvent\([\s\S]*?(?=type StaticRelatedVideoRow)/,
+  )?.[0];
+  assert.ok(eventFn);
+  assert.match(eventFn, /loadWorkerR2Json\(env, baseKey/);
+  assert.match(eventFn, /loadWorkerR2Json\(env, slotsKey/);
+  assert.match(eventFn, /event_composer_required_section_missing:base/);
+  assert.match(eventFn, /event_composer_required_section_missing:slots/);
+  assert.doesNotMatch(eventFn, /FROM videos AS v/);
+  assert.doesNotMatch(eventFn, /FROM slots/);
+  assert.match(eventFn, /stripEventPublicVideoScore/);
+});
+
+test("putJson は同一 hash のとき R2 PUT と static_artifacts UPSERT を省略する", () => {
+  const putJsonFn = source.match(
+    /async function putJson\([\s\S]*?(?=async function recordArtifact)/,
+  )?.[0];
+  assert.ok(putJsonFn);
+  assert.match(putJsonFn, /resolveIdenticalJsonArtifactPut/);
+  assert.match(putJsonFn, /if \(target\) await recordArtifact/);
 });
 
 test("rebuildUsersIndexはCreator Projectionを使い3 artifactを書く", () => {
@@ -682,6 +718,8 @@ test("rebuildTopStatsはpublicEventCount由来のstats.public_eventsを返す", 
 });
 
 test("rebuildUsersIndex成功後にtop/recommend follow-upをenqueueする", () => {
+  assert.match(source, /case "event_base":[\s\S]*enqueuePerTargetComposerFollowUp/);
+  assert.match(source, /case "event_slots":[\s\S]*enqueuePerTargetComposerFollowUp/);
   assert.match(source, /case "users_index":[\s\S]*enqueueComposerFollowUps/);
 });
 

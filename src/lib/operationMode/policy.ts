@@ -43,7 +43,7 @@ export function getStaticRebuildPolicy(mode: OperationMode): StaticRebuildPolicy
       return {
         maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
         highPriorityOnly: false,
-        allowedTargetTypes: ["event", "video", "user"],
+        allowedTargetTypes: ["event", "event_base", "event_slots", "video", "user"],
         skipTargetTypesUnlessHighPriority: [],
         reconcileStaleQueue: false,
       };

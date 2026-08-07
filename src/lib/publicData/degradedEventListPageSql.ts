@@ -8,7 +8,7 @@ export function buildDegradedEventListPageSql(
     sort === "old"
       ? "v.scheduled_time ASC, v.created_at ASC"
       : sort === "score"
-        ? "v.scheduled_time DESC, v.created_at DESC"
+        ? "COALESCE(v.score, 0) DESC, v.scheduled_time DESC, v.created_at DESC"
         : "v.scheduled_time DESC, v.created_at DESC";
   return `
     SELECT

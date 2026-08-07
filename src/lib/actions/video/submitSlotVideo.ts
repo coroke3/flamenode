@@ -566,12 +566,20 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         priority: "high",
         requestedByUserId: userId,
       },
-      ...syncedEventIds.map((eventId) => ({
-        targetType: "event" as const,
-        targetId: eventId,
-        reason: "video_submit",
-        priority: "high" as const,
-      })),
+      ...syncedEventIds.flatMap((eventId) => [
+        {
+          targetType: "event_base" as const,
+          targetId: eventId,
+          reason: "video_submit",
+          priority: "high" as const,
+        },
+        {
+          targetType: "event_slots" as const,
+          targetId: eventId,
+          reason: "video_submit",
+          priority: "high" as const,
+        },
+      ]),
       topSlotStatsGlobalTarget("video_submit", "normal"),
     ];
     if (isPublicResubmit) {

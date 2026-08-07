@@ -63,17 +63,6 @@ function buildPublicVideoSearchCondition(db: DB, q: string | undefined) {
     exists(
       db
         .select({ one: sql`1` })
-        .from(xUsers)
-        .where(
-          and(
-            eq(xUsers.id, videos.creator_x_user_id),
-            or(likeColumn(xUsers.x_name, term), likeColumn(xUsers.id, term)),
-          ),
-        ),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
         .from(videoChapters)
         .where(
           and(

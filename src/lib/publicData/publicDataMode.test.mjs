@@ -69,7 +69,7 @@ test("loader uses Cache API before R2 and degraded fetcher hook", () => {
   assert.match(loaderSource, /readStaticJson/);
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
-    loaderSource.indexOf("export const loadStaticEventDetail"),
+    loaderSource.indexOf("export async function loadStaticEventDetail"),
   );
   const cacheIndex = loadPublicJsonFn.indexOf("readPublicJsonCache");
   const r2Index = loadPublicJsonFn.indexOf("readStaticJson");

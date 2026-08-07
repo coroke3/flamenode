@@ -1183,7 +1183,7 @@ async function applyEvent(
   const rebuildQueue = legacyRebuildQueueMutation(
     db,
     [
-      { targetType: "event", targetId: event.id, priority: "high" },
+      { targetType: "event_base", targetId: event.id, priority: "high" },
       { targetType: "events_index", targetId: "global", priority: "low" },
       { targetType: "search_index", targetId: "global", priority: "low" },
     ],
@@ -1775,7 +1775,7 @@ async function applyVideo(
         ? [{ targetType: "user" as const, targetId: video.creator_x_user_id, priority: "normal" as const }]
         : []),
       ...rebuildEventIds.map((eventId) => ({
-        targetType: "event" as const,
+        targetType: "event_base" as const,
         targetId: eventId,
         priority: "high" as const,
       })),
