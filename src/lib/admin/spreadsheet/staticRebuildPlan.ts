@@ -101,7 +101,17 @@ function addVideoCardGlobalTargets(
     priority: "low",
   });
   add(mutation, {
-    targetType: "top",
+    targetType: "top_recommended",
+    targetId: "global",
+    priority: "low",
+  });
+  add(mutation, {
+    targetType: "top_latest",
+    targetId: "global",
+    priority: "low",
+  });
+  add(mutation, {
+    targetType: "top_nostalgic",
     targetId: "global",
     priority: "low",
   });

@@ -1,5 +1,11 @@
 export const STATIC_REBUILD_TARGET_TYPES = [
   "top",
+  "top_recommended",
+  "top_latest",
+  "top_nostalgic",
+  "top_events",
+  "top_announcements",
+  "top_stats",
   "top_slot_stats",
   "events_index",
   "event",

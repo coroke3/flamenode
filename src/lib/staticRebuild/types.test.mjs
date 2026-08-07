@@ -5,10 +5,15 @@ import {
   isStaticRebuildTargetType,
   STATIC_REBUILD_TARGET_TYPES,
 } from "./types.ts";
-
 test("static rebuild targetはcanonical種だけを受理する", () => {
   assert.deepEqual(STATIC_REBUILD_TARGET_TYPES, [
     "top",
+    "top_recommended",
+    "top_latest",
+    "top_nostalgic",
+    "top_events",
+    "top_announcements",
+    "top_stats",
     "top_slot_stats",
     "events_index",
     "event",
@@ -38,7 +43,6 @@ test("static rebuild targetはcanonical種だけを受理する", () => {
     assert.equal(isStaticRebuildTargetType(alias), false, alias);
   }
 });
-
 test("enqueueとWorkerは旧target aliasを正規化・no-op完了しない", () => {
   const enqueue = readFileSync(new URL("./enqueue.ts", import.meta.url), "utf8");
   const workerQueue = readFileSync(

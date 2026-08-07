@@ -25,10 +25,7 @@ import {
   COUNTABLE_PUBLIC_VIDEO_SQL,
   PVSF_SUMMARY_EVENT_ID,
 } from "../../src/lib/publicData/countablePublicVideoSql.ts";
-import {
-  pickNostalgicDisplay,
-  utcDayKey,
-} from "../../src/lib/publicData/topNostalgicShuffle.ts";
+import { jstDayKey, resolveNostalgicDisplaySelection } from "../../src/lib/publicData/topNostalgicDaily.ts";
 import { YOUTUBE_SYNCED_PLAYABLE_SQL } from "../../src/lib/publicData/youtubeSyncedPlayableSql.ts";
 import {
   buildPickupCreatorsArtifactFromProjection,
@@ -84,11 +81,27 @@ import {
 import { isConfirmedInternalVideoId } from "../../src/lib/video/internalId.ts";
 import { buildHeroEventSlotStatsSql } from "../../src/lib/publicData/heroEventSlotStatsSql.ts";
 import {
+  normalizeStaticTopSlotStats,
   TOP_SLOT_STATS_MAX_OBJECT_BYTES,
   TOP_SLOT_STATS_OBJECT_KEY,
   TOP_SLOT_STATS_SCHEMA_VERSION,
   topSlotStatsArtifactByteLength,
 } from "../../src/lib/publicData/staticTopSlotStatsCore.ts";
+import {
+  normalizeTopAnnouncementsSection,
+  normalizeTopEventsSection,
+  normalizeTopLatestSection,
+  normalizeTopNostalgicSection,
+  normalizeTopRecommendedSection,
+  normalizeTopStatsSection,
+  TOP_ANNOUNCEMENTS_OBJECT_KEY,
+  TOP_EVENTS_OBJECT_KEY,
+  TOP_LATEST_OBJECT_KEY,
+  TOP_NOSTALGIC_OBJECT_KEY,
+  TOP_RECOMMENDED_OBJECT_KEY,
+  TOP_SECTIONS_SCHEMA_VERSION,
+  TOP_STATS_OBJECT_KEY,
+} from "../../src/lib/publicData/staticTopSectionsCore.ts";
 import {
   normalizeRecommendCore,
   RECOMMEND_CORE_OBJECT_KEY,
@@ -100,7 +113,7 @@ import {
 } from "../../src/lib/utils/pickHeroEvents.ts";
 import { enqueueComposerFollowUps } from "./followUpEnqueue.ts";
 import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
-import { enqueueTopRebuild } from "./topRebuildEnqueue.ts";
+import { enqueueTopSectionRebuild } from "./topRebuildEnqueue.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
@@ -132,6 +145,32 @@ export const PUBLIC_STAFF_MAX_PER_EVENT = 20;
 export const TOP_LATEST_LIMIT = 100;
 export const TOP_NOSTALGIA_LIMIT = 20;
 export const TOP_NOSTALGIA_POOL = 200;
+
+const TOP_PUBLIC_VIDEO_SELECT = `
+  id, title, youtube_video_id,
+  creator_display_name AS display_name,
+  creator_display_name,
+  creator_x_user_id,
+  creator_icon_url AS icon_url,
+  creator_icon_url,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM events AS primary_event
+    WHERE primary_event.id = v.primary_event_id
+      AND primary_event.visibility_status = 'public'
+  ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
+  scheduled_time,
+  visibility_status AS status,
+  part
+`;
+
+const TOP_SECTION_PRODUCER_TARGET_TYPES = [
+  "top_recommended",
+  "top_latest",
+  "top_nostalgic",
+  "top_events",
+  "top_announcements",
+  "top_stats",
+] as const;
 
 function unixYearsAgo(nowSec: number, years: number): number {
   const date = new Date(nowSec * 1000);
@@ -265,8 +304,33 @@ export async function rebuildTarget(
     case "top":
       await rebuildTop(env, signal);
       break;
+    case "top_recommended":
+      await rebuildTopRecommended(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "top_recommended");
+      break;
+    case "top_latest":
+      await rebuildTopLatest(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "top_latest");
+      break;
+    case "top_nostalgic":
+      await rebuildTopNostalgic(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "top_nostalgic");
+      break;
+    case "top_events":
+      await rebuildTopEvents(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "top_events");
+      break;
+    case "top_announcements":
+      await rebuildTopAnnouncements(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "top_announcements");
+      break;
+    case "top_stats":
+      await rebuildTopStats(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "top_stats");
+      break;
     case "top_slot_stats":
       await rebuildTopSlotStats(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "top_slot_stats");
       break;
     case "list_recent":
       await rebuildListRecent(env, signal);
@@ -313,9 +377,29 @@ export async function rebuildTarget(
       throw new Error(`Unknown target_type: ${targetType}`);
   }
   throwIfAborted(signal);
-  if (["top", "top_slot_stats", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend_core", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
+  if ([
+    "top",
+    ...TOP_SECTION_PRODUCER_TARGET_TYPES,
+    "top_slot_stats",
+    "list_recent",
+    "list_popular",
+    "events_index",
+    "search_index",
+    "users_index",
+    "recommend_core",
+    "recommend",
+    "rules",
+    "youtube_related_blocklist",
+    "random_video_pool",
+  ].includes(targetType)) {
     const keys: Record<string, string | string[]> = {
       top: "top.json",
+      top_recommended: TOP_RECOMMENDED_OBJECT_KEY,
+      top_latest: TOP_LATEST_OBJECT_KEY,
+      top_nostalgic: TOP_NOSTALGIC_OBJECT_KEY,
+      top_events: TOP_EVENTS_OBJECT_KEY,
+      top_announcements: TOP_ANNOUNCEMENTS_OBJECT_KEY,
+      top_stats: TOP_STATS_OBJECT_KEY,
       top_slot_stats: TOP_SLOT_STATS_OBJECT_KEY,
       list_recent: "list/recent.json",
       list_popular: "list/popular.json",
@@ -537,87 +621,174 @@ async function rebuildTopSlotStats(env: Env, signal?: RebuildSignal): Promise<vo
   await putTopSlotStatsArtifact(env, items, now, signal);
 }
 
-async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
+async function putTopSectionArtifact(
+  env: Env,
+  targetType: string,
+  objectKey: string,
+  body: unknown,
+  signal?: RebuildSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  await putJson(
+    env,
+    objectKey,
+    body,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.top),
+    { targetType, targetId: "global" },
+    signal,
+  );
+}
+
+async function loadTopNostalgicPool(
+  env: Env,
+  nostalgiaCutoff: number,
+  signal?: RebuildSignal,
+): Promise<Record<string, unknown>[]> {
+  throwIfAborted(signal);
+  const nostalgic = await env.DB.prepare(
+    `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
+     FROM videos AS v
+     WHERE v.visibility_status = 'public'
+       AND v.scheduled_time IS NOT NULL
+       AND v.scheduled_time <= ?
+       AND ${YOUTUBE_SYNCED_PLAYABLE_SQL}
+     -- RANDOM() is intentional here: limiting an oldest-first result would
+     -- permanently exclude eligible videos after the first 200. SQLite
+     -- samples the complete eligible set before applying the pool limit,
+     -- allowing every eligible work to enter the daily display over time.
+     ORDER BY RANDOM()
+     LIMIT ${TOP_NOSTALGIA_POOL}`,
+  ).bind(nostalgiaCutoff).all();
+  throwIfAborted(signal);
+  return nostalgic.results ?? [];
+}
+
+async function rehydrateTopPublicVideosById(
+  env: Env,
+  ids: readonly string[],
+  signal?: RebuildSignal,
+): Promise<Record<string, unknown>[]> {
+  if (ids.length === 0) return [];
+  throwIfAborted(signal);
+  const rows = await env.DB.prepare(
+    `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
+     FROM videos AS v
+     WHERE v.visibility_status = 'public'
+       AND v.id IN (
+         SELECT CAST(value AS TEXT)
+         FROM json_each(?)
+       )`,
+  ).bind(JSON.stringify(ids)).all();
+  throwIfAborted(signal);
+  return rows.results ?? [];
+}
+
+async function rebuildTopRecommended(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const recommended = await env.DB.prepare(
+    `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
+     FROM videos AS v
+     WHERE v.visibility_status = 'public'
+     ORDER BY COALESCE(score, 0) DESC, scheduled_time DESC
+     LIMIT 40`,
+  ).all();
+  throwIfAborted(signal);
+  await putTopSectionArtifact(
+    env,
+    "top_recommended",
+    TOP_RECOMMENDED_OBJECT_KEY,
+    {
+      schema_version: TOP_SECTIONS_SCHEMA_VERSION,
+      generated_at: now,
+      items: recommended.results ?? [],
+    },
+    signal,
+  );
+}
+
+async function rebuildTopLatest(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const latest = await env.DB.prepare(
+    `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
+     FROM videos AS v
+     WHERE v.visibility_status = 'public'
+     ORDER BY scheduled_time DESC
+     LIMIT ${TOP_LATEST_LIMIT}`,
+  ).all();
+  throwIfAborted(signal);
+  await putTopSectionArtifact(
+    env,
+    "top_latest",
+    TOP_LATEST_OBJECT_KEY,
+    {
+      schema_version: TOP_SECTIONS_SCHEMA_VERSION,
+      generated_at: now,
+      items: latest.results ?? [],
+    },
+    signal,
+  );
+}
+
+async function rebuildTopNostalgic(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
   const nostalgiaCutoff = unixYearsAgo(now, 3);
-  const [
-    recommended,
-    latest,
-    nostalgic,
-    latestEvents,
-    announcements,
-    publicVideoCount,
-    creatorCount,
-    publicEventCount,
-  ] = await Promise.all([
-    env.DB.prepare(
-      `SELECT id, title, youtube_video_id,
-              creator_display_name AS display_name,
-              creator_display_name,
-              creator_x_user_id,
-              creator_icon_url AS icon_url,
-              creator_icon_url,
-              CASE WHEN EXISTS (
-                SELECT 1 FROM events AS primary_event
-                WHERE primary_event.id = v.primary_event_id
-                  AND primary_event.visibility_status = 'public'
-              ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
-              scheduled_time,
-              visibility_status AS status,
-              part
-       FROM videos AS v
-       WHERE v.visibility_status = 'public'
-       ORDER BY COALESCE(score, 0) DESC, scheduled_time DESC
-       LIMIT 40`,
-    ).all(),
-    env.DB.prepare(
-      `SELECT id, title, youtube_video_id,
-              creator_display_name AS display_name,
-              creator_display_name,
-              creator_x_user_id,
-              creator_icon_url AS icon_url,
-              creator_icon_url,
-              CASE WHEN EXISTS (
-                SELECT 1 FROM events AS primary_event
-                WHERE primary_event.id = v.primary_event_id
-                  AND primary_event.visibility_status = 'public'
-              ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
-              scheduled_time,
-              visibility_status AS status,
-              part
-       FROM videos AS v
-       WHERE v.visibility_status = 'public'
-       ORDER BY scheduled_time DESC
-       LIMIT ${TOP_LATEST_LIMIT}`,
-    ).all(),
-    env.DB.prepare(
-      `SELECT id, title, youtube_video_id,
-              creator_display_name AS display_name,
-              creator_display_name,
-              creator_x_user_id,
-              creator_icon_url AS icon_url,
-              creator_icon_url,
-              CASE WHEN EXISTS (
-                SELECT 1 FROM events AS primary_event
-                WHERE primary_event.id = v.primary_event_id
-                  AND primary_event.visibility_status = 'public'
-              ) THEN v.primary_event_id ELSE NULL END AS primary_event_id,
-              scheduled_time,
-              visibility_status AS status,
-              part
-       FROM videos AS v
-       WHERE v.visibility_status = 'public'
-         AND v.scheduled_time IS NOT NULL
-         AND v.scheduled_time <= ?
-         AND ${YOUTUBE_SYNCED_PLAYABLE_SQL}
-       -- RANDOM() is intentional here: limiting an oldest-first result would
-       -- permanently exclude eligible videos after the first 200. SQLite
-       -- samples the complete eligible set before applying the pool limit,
-       -- allowing every eligible work to enter the daily display over time.
-       ORDER BY RANDOM()
-       LIMIT ${TOP_NOSTALGIA_POOL}`,
-    ).bind(nostalgiaCutoff).all(),
+  const nostalgicPool = await loadTopNostalgicPool(env, nostalgiaCutoff, signal);
+  const previousPayload = await loadWorkerR2Json(env, TOP_NOSTALGIC_OBJECT_KEY, signal);
+  const previous = normalizeTopNostalgicSection(previousPayload);
+  const previousSelection = previous
+    ? {
+        displayIds: previous.display.map((item) => String(item.id)),
+        selectionDay: previous.selectionDay,
+        shuffledAt: previous.shuffledAt,
+      }
+    : null;
+  const rehydrated =
+    previousSelection && previousSelection.selectionDay === jstDayKey(now)
+      ? await rehydrateTopPublicVideosById(env, previousSelection.displayIds, signal)
+      : [];
+  const selection = resolveNostalgicDisplaySelection({
+    pool: nostalgicPool.map((row) => ({
+      ...row,
+      id: String(row.id ?? ""),
+    })),
+    previous: previousSelection,
+    now,
+    limit: TOP_NOSTALGIA_LIMIT,
+    rehydrateById: () =>
+      rehydrated.map((row) => ({
+        ...row,
+        id: String(row.id ?? ""),
+      })),
+  });
+  throwIfAborted(signal);
+  await putTopSectionArtifact(
+    env,
+    "top_nostalgic",
+    TOP_NOSTALGIC_OBJECT_KEY,
+    {
+      schema_version: TOP_SECTIONS_SCHEMA_VERSION,
+      generated_at: now,
+      pool: nostalgicPool,
+      display: selection.display,
+      shuffled_at: selection.shuffledAt,
+      selection_day: selection.selectionDay,
+    },
+    signal,
+  );
+  if (selection.isNewDaySelection) {
+    throwIfAborted(signal);
+    await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, selection.selectionDay);
+  }
+}
+
+async function rebuildTopEvents(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const [activeEventItems, latestEvents] = await Promise.all([
+    loadActivePublicEventItemsForTopHero(env, now, signal),
     env.DB.prepare(
       `SELECT ${EVENT_INDEX_COLUMNS}
        FROM events
@@ -626,16 +797,54 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        ORDER BY start_time DESC
        LIMIT 12`,
     ).all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `SELECT id, title, body, severity, publish_at, expire_at
-       FROM announcements
-       WHERE is_published = 1
-         AND target_audience = 'all'
-         AND (publish_at IS NULL OR publish_at <= ?)
-         AND (expire_at IS NULL OR expire_at > ?)
-       ORDER BY publish_at DESC, updated_at DESC
-       LIMIT 3`,
-    ).bind(now, now).all(),
+  ]);
+  throwIfAborted(signal);
+  await putTopSectionArtifact(
+    env,
+    "top_events",
+    TOP_EVENTS_OBJECT_KEY,
+    {
+      schema_version: TOP_SECTIONS_SCHEMA_VERSION,
+      generated_at: now,
+      active_events: activeEventItems,
+      latest_events: latestEvents.results ?? [],
+    },
+    signal,
+  );
+}
+
+async function rebuildTopAnnouncements(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const announcements = await env.DB.prepare(
+    `SELECT id, title, body, severity, publish_at, expire_at
+     FROM announcements
+     WHERE is_published = 1
+       AND target_audience = 'all'
+       AND (publish_at IS NULL OR publish_at <= ?)
+       AND (expire_at IS NULL OR expire_at > ?)
+     ORDER BY publish_at DESC, updated_at DESC
+     LIMIT 3`,
+  ).bind(now, now).all();
+  throwIfAborted(signal);
+  await putTopSectionArtifact(
+    env,
+    "top_announcements",
+    TOP_ANNOUNCEMENTS_OBJECT_KEY,
+    {
+      schema_version: TOP_SECTIONS_SCHEMA_VERSION,
+      generated_at: now,
+      items: announcements.results ?? [],
+    },
+    signal,
+  );
+}
+
+async function rebuildTopStats(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
+  const [publicVideoCount, creatorCount, publicEventCount] = await Promise.all([
     env.DB.prepare(
       `SELECT COUNT(*) AS c
        FROM videos AS v
@@ -660,53 +869,139 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        WHERE visibility_status = 'public'`,
     ).first<{ c?: number }>(),
   ]);
-
-  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
-  const latestEventItems = latestEvents.results ?? [];
-  const slotStatsItems = await loadHeroEventSlotStats(env, activeEventItems, signal);
   throwIfAborted(signal);
-  const creators = await resolvePickupCreatorsWithFallback(env, 30, "rebuildTop", signal);
-  const nostalgicPool = Array.isArray(nostalgic.results) ? nostalgic.results : [];
+  const creators = await resolvePickupCreatorsWithFallback(env, 30, "rebuildTopStats", signal);
+  await putTopSectionArtifact(
+    env,
+    "top_stats",
+    TOP_STATS_OBJECT_KEY,
+    {
+      schema_version: TOP_SECTIONS_SCHEMA_VERSION,
+      generated_at: now,
+      stats: {
+        public_videos: Number(publicVideoCount?.c ?? 0),
+        active_events: activeEventItems.length,
+        public_events: Number(publicEventCount?.c ?? 0),
+        creators: Number(creatorCount?.c ?? creators.length ?? 0),
+      },
+    },
+    signal,
+  );
+}
+
+async function loadRequiredTopSection<T>(
+  env: Env,
+  objectKey: string,
+  normalize: (value: unknown) => T | null,
+  label: string,
+  signal?: RebuildSignal,
+): Promise<T> {
+  const payload = await loadWorkerR2Json(env, objectKey, signal);
+  const normalized = normalize(payload);
+  if (!normalized) {
+    throw new Error(`top_composer_required_section_missing:${label}`);
+  }
+  return normalized;
+}
+
+async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const [
+    recommendedSection,
+    latestSection,
+    nostalgicSection,
+    eventsSection,
+    announcementsSection,
+    statsSection,
+    slotStatsPayload,
+    creators,
+  ] = await Promise.all([
+    loadRequiredTopSection(
+      env,
+      TOP_RECOMMENDED_OBJECT_KEY,
+      normalizeTopRecommendedSection,
+      "recommended",
+      signal,
+    ),
+    loadRequiredTopSection(
+      env,
+      TOP_LATEST_OBJECT_KEY,
+      normalizeTopLatestSection,
+      "latest",
+      signal,
+    ),
+    loadRequiredTopSection(
+      env,
+      TOP_NOSTALGIC_OBJECT_KEY,
+      normalizeTopNostalgicSection,
+      "nostalgic",
+      signal,
+    ),
+    loadRequiredTopSection(
+      env,
+      TOP_EVENTS_OBJECT_KEY,
+      normalizeTopEventsSection,
+      "events",
+      signal,
+    ),
+    loadRequiredTopSection(
+      env,
+      TOP_ANNOUNCEMENTS_OBJECT_KEY,
+      normalizeTopAnnouncementsSection,
+      "announcements",
+      signal,
+    ),
+    loadRequiredTopSection(
+      env,
+      TOP_STATS_OBJECT_KEY,
+      normalizeTopStatsSection,
+      "stats",
+      signal,
+    ),
+    loadWorkerR2Json(env, TOP_SLOT_STATS_OBJECT_KEY, signal),
+    resolvePickupCreatorsWithFallback(env, 30, "rebuildTop", signal),
+  ]);
+  const slotStats = normalizeStaticTopSlotStats(slotStatsPayload);
+  if (!slotStats) {
+    throw new Error("top_composer_required_section_missing:slot_stats");
+  }
+  const slotStatsItems = [...slotStats.items.entries()].map(([event_id, stats]) => ({
+    event_id,
+    available: stats.available,
+    total: stats.total,
+  }));
+  throwIfAborted(signal);
   const payload = {
     generated_at: now,
-    recommended: recommended.results ?? [],
-    latest: latest.results ?? [],
-    nostalgic_pool: nostalgicPool,
-    nostalgic: pickNostalgicDisplay(nostalgicPool, TOP_NOSTALGIA_LIMIT),
-    nostalgic_shuffled_at: now,
-    items: latest.results ?? [],
-    active_events: activeEventItems,
-    latest_events: latestEventItems,
+    recommended: recommendedSection.items,
+    latest: latestSection.items,
+    nostalgic_pool: nostalgicSection.pool,
+    nostalgic: nostalgicSection.display,
+    nostalgic_shuffled_at: nostalgicSection.shuffledAt,
+    items: latestSection.items,
+    active_events: eventsSection.activeEvents,
+    latest_events: eventsSection.latestEvents,
     creators,
-    announcements: announcements.results ?? [],
+    announcements: announcementsSection.items,
     slot_stats: slotStatsItems,
-    stats: {
-      public_videos: Number(publicVideoCount?.c ?? latest.results?.length ?? 0),
-      active_events: activeEventItems.length,
-      public_events: Number(publicEventCount?.c ?? latestEventItems.length ?? 0),
-      creators: Number(creatorCount?.c ?? creators.length ?? 0),
-    },
+    stats: statsSection.stats,
   };
   throwIfAborted(signal);
-  await putJson(env, "top.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.top), { targetType: "top", targetId: "global" }, signal);
-  await putTopSlotStatsArtifact(env, slotStatsItems, now, signal);
-  await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, utcDayKey(now));
-  throwIfAborted(signal);
-  await env.KV.put(
-    "static:top",
-    JSON.stringify({
-      generated_at: payload.generated_at,
-      count: payload.latest.length,
-      active_events: payload.active_events.length,
-    }),
-    { expirationTtl: 600 },
+  await putJson(
+    env,
+    "top.json",
+    payload,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.top),
+    { targetType: "top", targetId: "global" },
+    signal,
   );
   throwIfAborted(signal);
 }
 
 /**
- * UTC 日次で top 再生成をキュー登録する。
- * 日次マーカーは rebuildTop の R2 PUT 成功後だけ更新し、失敗時は次のCronで再試行する。
+ * JST 日次で top_nostalgic 再生成をキュー登録する。
+ * 日次マーカーは rebuildTopNostalgic の新日付抽選成功時だけ更新する。
  */
 export async function ensureDailyTopNostalgicShuffle(
   env: Env,
@@ -715,14 +1010,15 @@ export async function ensureDailyTopNostalgicShuffle(
   try {
     throwIfAborted(signal);
     const now = Math.floor(Date.now() / 1000);
-    const dayKey = utcDayKey(now);
+    const dayKey = jstDayKey(now);
     const lastDay = await env.KV.get(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY);
     if (lastDay === dayKey) {
       return 0;
     }
 
-    const enqueued = await enqueueTopRebuild(
+    const enqueued = await enqueueTopSectionRebuild(
       env,
+      "top_nostalgic",
       "nostalgic_daily_shuffle",
       "normal",
       signal,

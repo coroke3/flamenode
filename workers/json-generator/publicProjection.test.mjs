@@ -181,6 +181,13 @@ test("public static artifacts exclude private event identifiers and titles", asy
     assert.equal(usersIndex.items[0].updated_at, 123);
     assertNoForbiddenPublicKeys(usersIndex);
 
+    await rebuildTarget(env, "top_recommended", "global");
+    await rebuildTarget(env, "top_latest", "global");
+    await rebuildTarget(env, "top_nostalgic", "global");
+    await rebuildTarget(env, "top_events", "global");
+    await rebuildTarget(env, "top_announcements", "global");
+    await rebuildTarget(env, "top_stats", "global");
+    await rebuildTarget(env, "top_slot_stats", "global");
     await rebuildTarget(env, "top", "global");
     const top = objects.get("top.json");
     assert.ok(top);

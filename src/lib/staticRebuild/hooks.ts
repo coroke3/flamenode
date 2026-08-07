@@ -1,10 +1,7 @@
 import "server-only";
-
 import type { DB } from "@/lib/db/client";
-
 import { buildStaticRebuildQueueBatch, enqueueStaticRebuildMany, type StaticRebuildQueueBatch } from "./enqueue";
 import type { EnqueueStaticRebuildInput, StaticRebuildPriority } from "./types";
-
 type HookBase = {
   requestedByUserId?: string | null;
   priority?: StaticRebuildPriority;
@@ -19,8 +16,8 @@ function uniqueEventIds(primary: string | null | undefined, ids: readonly string
   for (const id of ids) unique.add(id);
   return [...unique];
 }
+/** list_recent / list_popular / search_index。top section・recommend_core・users_index は含めない。 */
 
-/** list_recent / list_popular / search_index。top・recommend_core・users_index は含めない。 */
 function globalListTargets(
   reason: string,
   searchPriority?: StaticRebuildPriority,
@@ -37,63 +34,163 @@ function globalListTargets(
   ];
 }
 
-/** 公開カード変更時に list / search / top / recommend_core へ波及するターゲット。 */
+function withMeta(
+  items: EnqueueStaticRebuildInput[],
+  opts: {
+    requestedByUserId?: string | null;
+    priority?: StaticRebuildPriority;
+  },
+): EnqueueStaticRebuildInput[] {
+  const priority = opts.priority ?? "low";
+  return items.map((item) => ({
+    ...item,
+    requestedByUserId: opts.requestedByUserId,
+    priority: item.priority ?? priority,
+  }));
+}
+
+function topRecommendedTarget(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "top_recommended",
+    targetId: "global",
+    reason,
+    ...(priority ? { priority } : {}),
+  };
+}
+
+function topLatestTarget(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "top_latest",
+    targetId: "global",
+    reason,
+    ...(priority ? { priority } : {}),
+  };
+}
+
+function topNostalgicTarget(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "top_nostalgic",
+    targetId: "global",
+    reason,
+    ...(priority ? { priority } : {}),
+  };
+}
+
+function topStatsTarget(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "top_stats",
+    targetId: "global",
+    reason,
+    ...(priority ? { priority } : {}),
+  };
+}
+
+function recommendCoreTarget(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "recommend_core",
+    targetId: "global",
+    reason,
+    ...(priority ? { priority } : {}),
+  };
+}
+/** score 再計算で top 注目棚と recommend_core を更新する。 */
+
+export function topScoreRebuildTargets(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput[] {
+  return [topRecommendedTarget(reason, priority), recommendCoreTarget(reason, priority)];
+}
+/** 公開状態変更で必要な top section と recommend_core を更新する。 */
+
+export function topVideoVisibilityTargets(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput[] {
+  return [
+    topRecommendedTarget(reason, priority),
+    topLatestTarget(reason, priority),
+    topNostalgicTarget(reason, priority),
+    topStatsTarget(reason, priority),
+    recommendCoreTarget(reason, priority),
+  ];
+}
+/** カード変更で list/search と top section rehydrate を更新する。 */
+
+export function topVideoCardTargets(
+  reason: string,
+  priority?: StaticRebuildPriority,
+): EnqueueStaticRebuildInput[] {
+  return [
+    topRecommendedTarget(reason, priority),
+    topLatestTarget(reason, priority),
+    topNostalgicTarget(reason, priority),
+    recommendCoreTarget(reason, priority),
+    ...globalListTargets(reason, priority),
+  ];
+}
+/** イベント変更で hero 用 top section を更新する。 */
+
+export function topEventChangeTargets(
+  reason: string,
+  priority: StaticRebuildPriority = "normal",
+): EnqueueStaticRebuildInput[] {
+  return [
+    { targetType: "top_events", targetId: "global", reason, priority },
+    topStatsTarget(reason, priority),
+    topSlotStatsGlobalTarget(reason, priority),
+  ];
+}
+/** お知らせ変更で top announcements section を更新する。 */
+
+export function topAnnouncementTarget(
+  reason: string,
+  priority: StaticRebuildPriority = "normal",
+): EnqueueStaticRebuildInput {
+  return { targetType: "top_announcements", targetId: "global", reason, priority };
+}
+/** 公開カード変更時に list / search / top section / recommend_core へ波及するターゲット。 */
+
 export function buildVideoCardChangeFanOutTargets(opts: {
   reason: string;
   requestedByUserId?: string | null;
   priority?: StaticRebuildPriority;
   skipTopRecommend?: boolean;
 }): EnqueueStaticRebuildInput[] {
-  const priority = opts.priority ?? "low";
-  const withMeta = (
-    items: EnqueueStaticRebuildInput[],
-  ): EnqueueStaticRebuildInput[] =>
-    items.map((item) => ({
-      ...item,
-      requestedByUserId: opts.requestedByUserId,
-      priority: item.priority ?? priority,
-    }));
-
-  const targets = withMeta(globalListTargets(opts.reason, priority));
-  if (!opts.skipTopRecommend) {
-    targets.push(...withMeta(topRecommendTargets(opts.reason, priority)));
+  if (opts.skipTopRecommend) {
+    return withMeta(globalListTargets(opts.reason, opts.priority ?? "low"), opts);
   }
-  return targets;
-}
-
-function topRecommendTargets(
-  reason: string,
-  priority?: StaticRebuildPriority,
-): EnqueueStaticRebuildInput[] {
-  return [
-    {
-      targetType: "top",
-      targetId: "global",
-      reason,
-      ...(priority ? { priority } : {}),
-    },
-    {
-      targetType: "recommend_core",
-      targetId: "global",
-      reason,
-      ...(priority ? { priority } : {}),
-    },
-  ];
+  return withMeta(topVideoCardTargets(opts.reason, opts.priority), opts);
 }
 
 function usersIndexTarget(reason: string): EnqueueStaticRebuildInput {
   return { targetType: "users_index", targetId: "global", reason };
 }
-
 /** 枠変更で top slot-stats artifact を更新する。 */
+
 export function topSlotStatsGlobalTarget(
   reason: string,
   priority: StaticRebuildPriority = "normal",
 ): EnqueueStaticRebuildInput {
   return { targetType: "top_slot_stats", targetId: "global", reason, priority };
 }
+/** top composer を直接 enqueue する（通常は section producer の follow-up 経由）。 */
 
-/** 枠変更で top.json の slot_stats を更新する（top 全体再生成用）。 */
 export function topGlobalTarget(
   reason: string,
   priority: StaticRebuildPriority = "normal",
@@ -134,7 +231,7 @@ export async function enqueueAfterVideoCreate(
       usersIndexTarget("video_create"),
     );
   } else {
-    items.push(...topRecommendTargets("video_create"));
+    items.push(...topVideoVisibilityTargets("video_create"));
   }
   for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
     items.push({
@@ -188,12 +285,10 @@ export async function enqueueAfterVideoUpdate(
     );
     chainsTopRecommendViaUsersIndex = true;
   }
-
   const listAffecting =
     opts.visibilityChanged || opts.eventMembershipChanged || opts.identityChanged;
   const cardChanged =
     opts.randomPoolCardChanged ?? listAffecting;
-
   if (opts.visibilityChanged) {
     items.push({
       targetType: "youtube_related_blocklist",
@@ -203,7 +298,6 @@ export async function enqueueAfterVideoUpdate(
       requestedByUserId: opts.requestedByUserId,
     });
   }
-
   if (cardChanged) {
     items.push({
       targetType: "random_video_pool",
@@ -221,7 +315,6 @@ export async function enqueueAfterVideoUpdate(
       }),
     );
   }
-
   if (opts.eventMembershipChanged || opts.visibilityChanged) {
     for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
       items.push({ targetType: "event", targetId: eventId, reason: "video_update" });
@@ -263,7 +356,6 @@ export function buildAfterVideoStatusChangeQueueBatch(
   if (eventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
     throw new Error("video_status_rebuild_event_limit_exceeded");
   }
-
   const items: EnqueueStaticRebuildInput[] = [
     {
       targetType: "video",
@@ -298,7 +390,10 @@ export function buildAfterVideoStatusChangeQueueBatch(
       usersIndexTarget("video_update"),
     );
   } else {
-    items.push(...topRecommendTargets("video_update", "low"));
+    items.push(...withMeta(topVideoVisibilityTargets("video_update", "low"), {
+      requestedByUserId: opts.requestedByUserId,
+      priority: "low",
+    }));
   }
   for (const eventId of eventIds) {
     items.push({
@@ -343,5 +438,53 @@ export function buildSlotChangeQueueBatch(
       requestedByUserId: opts.requestedByUserId,
     },
     topSlotStatsGlobalTarget(opts.reason, "normal"),
+  ]);
+}
+
+export function buildEventChangeQueueBatch(
+  db: DB,
+  opts: {
+    eventId: string;
+    reason: string;
+    requestedByUserId?: string | null;
+    priority?: StaticRebuildPriority;
+  },
+): Promise<StaticRebuildQueueBatch> {
+  const priority = opts.priority ?? "normal";
+  return buildStaticRebuildQueueBatch(db, [
+    {
+      targetType: "event",
+      targetId: opts.eventId,
+      reason: opts.reason,
+      priority,
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "events_index",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "search_index",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    ...topEventChangeTargets(opts.reason, priority).map((target) => ({
+      ...target,
+      requestedByUserId: opts.requestedByUserId,
+    })),
+  ]);
+}
+
+export function buildAnnouncementChangeQueueBatch(
+  db: DB,
+  opts: Pick<HookBase, "reason" | "requestedByUserId" | "priority">,
+): Promise<StaticRebuildQueueBatch> {
+  return buildStaticRebuildQueueBatch(db, [
+    topAnnouncementTarget(opts.reason, opts.priority ?? "normal"),
   ]);
 }

@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  needsNostalgicDailyReshuffle,
-  pickNostalgicDisplay,
-  utcDayKey,
-} from "./topNostalgicShuffle.ts";
+import { jstDayKey, needsNostalgicDailyReshuffle } from "./topNostalgicDaily.ts";
+import { pickNostalgicDisplay } from "./topNostalgicShuffle.ts";
 
 test("pickNostalgicDisplay はプールから上限件数だけ返す", () => {
   const pool = Array.from({ length: 30 }, (_, index) => index);
@@ -16,12 +13,14 @@ test("pickNostalgicDisplay はプールから上限件数だけ返す", () => {
   }
 });
 
-test("utcDayKey と needsNostalgicDailyReshuffle は UTC 日単位で判定する", () => {
-  const dayStart = Math.floor(Date.parse("2026-07-30T12:00:00.000Z") / 1000);
-  const sameDay = dayStart + 3600;
-  const nextDay = Math.floor(Date.parse("2026-07-31T00:00:01.000Z") / 1000);
+test("jstDayKey と needsNostalgicDailyReshuffle は JST 日単位で判定する", () => {
+  const dayStart = Math.floor(Date.parse("2026-07-30T01:00:00.000Z") / 1000);
+  const sameDay = Math.floor(Date.parse("2026-07-30T14:59:00.000Z") / 1000);
+  const nextDay = Math.floor(Date.parse("2026-07-30T15:00:00.000Z") / 1000);
 
-  assert.equal(utcDayKey(dayStart), "2026-07-30");
+  assert.equal(jstDayKey(dayStart), "2026-07-30");
+  assert.equal(jstDayKey(sameDay), "2026-07-30");
+  assert.equal(jstDayKey(nextDay), "2026-07-31");
   assert.equal(needsNostalgicDailyReshuffle(dayStart, sameDay), false);
   assert.equal(needsNostalgicDailyReshuffle(dayStart, nextDay), true);
   assert.equal(needsNostalgicDailyReshuffle(null, sameDay), true);

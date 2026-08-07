@@ -1,35 +1,55 @@
 type FollowUpEnv = { DB: D1Database };
-
 type ComposerFollowUpTarget = {
   targetType: string;
   targetId: string;
 };
-
 type ComposerFollowUpSpec = {
   targets: readonly ComposerFollowUpTarget[];
   reason: string;
 };
 
+const TOP_COMPOSER_TARGET = { targetType: "top", targetId: "global" } as const;
+
 const COMPOSER_FOLLOW_UP_BY_PRODUCER: Readonly<
   Record<string, ComposerFollowUpSpec>
 > = {
   users_index: {
-    targets: [
-      { targetType: "top", targetId: "global" },
-      { targetType: "recommend", targetId: "global" },
-    ],
+    targets: [TOP_COMPOSER_TARGET, { targetType: "recommend", targetId: "global" }],
     reason: "users_index_follow_up",
   },
   recommend_core: {
     targets: [{ targetType: "recommend", targetId: "global" }],
     reason: "recommend_core_follow_up",
   },
+  top_recommended: {
+    targets: [TOP_COMPOSER_TARGET],
+    reason: "top_recommended_follow_up",
+  },
+  top_latest: {
+    targets: [TOP_COMPOSER_TARGET],
+    reason: "top_latest_follow_up",
+  },
+  top_nostalgic: {
+    targets: [TOP_COMPOSER_TARGET],
+    reason: "top_nostalgic_follow_up",
+  },
+  top_events: {
+    targets: [TOP_COMPOSER_TARGET],
+    reason: "top_events_follow_up",
+  },
+  top_announcements: {
+    targets: [TOP_COMPOSER_TARGET],
+    reason: "top_announcements_follow_up",
+  },
+  top_stats: {
+    targets: [TOP_COMPOSER_TARGET],
+    reason: "top_stats_follow_up",
+  },
+  top_slot_stats: {
+    targets: [TOP_COMPOSER_TARGET],
+    reason: "top_slot_stats_follow_up",
+  },
 };
-
-// Future producer→composer continuations (not wired yet):
-// - top_recommended → top
-// - event_base / event_slots → event
-// - top_slot_stats → top
 
 async function enqueueComposerTargets(
   env: FollowUpEnv,
@@ -70,8 +90,8 @@ async function enqueueComposerTargets(
   }
   return changed;
 }
-
 /** producer 成功後に composer target を冪等 enqueue。挿入・更新があれば true。 */
+
 export async function enqueueComposerFollowUps(
   env: FollowUpEnv,
   producerTargetType: string,
@@ -80,8 +100,8 @@ export async function enqueueComposerFollowUps(
   if (!spec) return false;
   return enqueueComposerTargets(env, spec.targets, spec.reason);
 }
-
 /** @deprecated Use enqueueComposerFollowUps(env, "users_index") */
+
 export async function enqueueTopRecommendAfterUsersIndex(
   env: FollowUpEnv,
 ): Promise<boolean> {

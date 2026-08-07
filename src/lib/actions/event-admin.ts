@@ -23,7 +23,7 @@ import {
 import { generateId } from "@/lib/utils/id";
 import { resolveStagePermissionFieldsFromJson } from "@/lib/video/formSettings";
 import { stagePermissionQuestionKeyCondition } from "@/lib/video/stagePermissionAnswers";
-import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { buildEventChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
 import {
   buildPartsJson,
@@ -295,29 +295,12 @@ export async function createEvent(
   }
 
   const questionChunks = questionInsertChunks(questions);
-  const queue = await buildStaticRebuildQueueBatch(db, [
-    {
-      targetType: "event",
-      targetId: id,
-      reason: "event_create",
-      priority: "high",
-      requestedByUserId: actorUserId,
-    },
-    {
-      targetType: "events_index",
-      targetId: "global",
-      reason: "event_create",
-      priority: "low",
-      requestedByUserId: actorUserId,
-    },
-    {
-      targetType: "search_index",
-      targetId: "global",
-      reason: "event_create",
-      priority: "low",
-      requestedByUserId: actorUserId,
-    },
-  ]);
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: id,
+    reason: "event_create",
+    requestedByUserId: actorUserId,
+    priority: "high",
+  });
   const mutationStatements = [
     db.insert(events).values(createdRow),
     db.insert(eventStaff).values(ownerRow),
@@ -611,28 +594,11 @@ export async function updateEvent(
     }
   }
 
-  const queue = await buildStaticRebuildQueueBatch(db, [
-    {
-      targetType: "event",
-      targetId: data.id,
-      reason: "event_settings_update",
-      requestedByUserId: actorUserId,
-    },
-    {
-      targetType: "events_index",
-      targetId: "global",
-      reason: "event_settings_update",
-      priority: "low",
-      requestedByUserId: actorUserId,
-    },
-    {
-      targetType: "search_index",
-      targetId: "global",
-      reason: "event_settings_update",
-      priority: "low",
-      requestedByUserId: actorUserId,
-    },
-  ]);
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId: data.id,
+    reason: "event_settings_update",
+    requestedByUserId: actorUserId,
+  });
   const mutationStatements = [...mutations, ...queue.statements];
   if (!fitsD1AtomicBatchBudget(mutationStatements.length, audits.length)) {
     return { ok: false, message: "イベント更新の原子的処理がD1の上限を超えます。" };
@@ -682,29 +648,12 @@ export async function deleteEvent(
     visibility_status: "private" as const,
     updated_at: now,
   };
-  const queue = await buildStaticRebuildQueueBatch(db, [
-    {
-      targetType: "event",
-      targetId: eventId,
-      reason: "event_private",
-      priority: "high",
-      requestedByUserId: actorUserId,
-    },
-    {
-      targetType: "events_index",
-      targetId: "global",
-      reason: "event_private",
-      priority: "low",
-      requestedByUserId: actorUserId,
-    },
-    {
-      targetType: "search_index",
-      targetId: "global",
-      reason: "event_private",
-      priority: "low",
-      requestedByUserId: actorUserId,
-    },
-  ]);
+  const queue = await buildEventChangeQueueBatch(db, {
+    eventId,
+    reason: "event_private",
+    requestedByUserId: actorUserId,
+    priority: "high",
+  });
   await mutateWithAudit(db, {
     mutationStatements: [
       db

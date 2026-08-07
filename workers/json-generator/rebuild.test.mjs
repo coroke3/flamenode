@@ -19,6 +19,7 @@ import {
   removeTrackedArtifacts,
 } from "./rebuild.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
+import { PICKUP_CREATORS_OBJECT_KEY } from "../../src/lib/publicData/publicCreatorProjection.ts";
 
 const source = await readFile(new URL("./rebuild.ts", import.meta.url), "utf8");
 const projectionSource = await readFile(
@@ -370,12 +371,23 @@ test("rebuildUsersIndexはCreator Projectionを使い3 artifactを書く", () =>
   assert.doesNotMatch(usersIndexFn, /SELECT COUNT\(DISTINCT v\.id\)/);
 });
 
-test("rebuildTopは通常pathでR2 pickupを読む", () => {
-  const topFn = source.match(/async function rebuildTop\(env[\s\S]*?(?=async function )/)?.[0];
+test("rebuildTop composerはR2 sectionとpickup creatorsのみでtop.jsonを書く", () => {
+  const topFn = source.match(/async function rebuildTop\(env[\s\S]*?(?=\/\*\*|export async function |async function )/)?.[0];
   assert.ok(topFn);
-  assert.doesNotMatch(topFn, /loadPublicCreatorProjectionSources\(env\.DB/);
+  assert.match(topFn, /loadRequiredTopSection/);
   assert.match(topFn, /resolvePickupCreatorsWithFallback\(env, 30/);
-  assert.doesNotMatch(topFn, /WITH creator_counts AS/);
+  assert.match(topFn, /normalizeStaticTopSlotStats/);
+  assert.doesNotMatch(topFn, /env\.DB\.prepare\([\s\S]*FROM videos AS v[\s\S]*ORDER BY COALESCE\(score, 0\)/);
+  assert.doesNotMatch(topFn, /putTopSlotStatsArtifact/);
+  assert.doesNotMatch(topFn, /env\.KV\.put/);
+});
+
+test("rebuildTopStatsはpublicEventCount由来のstats.public_eventsを書く", () => {
+  const statsFn = source.match(
+    /async function rebuildTopStats\(env[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(statsFn);
+  assert.match(statsFn, /public_events: Number\(publicEventCount/);
 });
 
 test("rebuildRecommendCoreはD1 video queryのみでcore artifactを書く", () => {
@@ -402,55 +414,43 @@ test("rebuildRecommend composerはR2 coreとpickup creatorsのみでrecommend.js
   assert.doesNotMatch(recommendFn, /loadPublicCreatorProjectionSources\(env\.DB/);
 });
 
-test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
-  const topFn = source.match(
-    /async function rebuildTop\(env[\s\S]*?(?=async function )/,
+test("rebuildTopStatsのPromise.all分割代入はpublicEventCountを含む", () => {
+  const statsFn = source.match(
+    /async function rebuildTopStats\(env[\s\S]*?(?=async function )/,
   )?.[0];
-  assert.ok(topFn);
-  const destructuring = topFn.match(
+  assert.ok(statsFn);
+  const destructuring = statsFn.match(
     /const \[([\s\S]*?)\] = await Promise\.all\(\[/,
   )?.[1];
   assert.ok(destructuring);
   assert.match(destructuring, /publicEventCount/);
-  assert.match(destructuring, /nostalgic/);
-  assert.match(
-    topFn,
-    /public_events: Number\(publicEventCount\?\.c/,
-  );
 });
 
-test("rebuildTopは新着100件と3年以上前のYouTube確認済みプールから日次シャッフル用に保存する", () => {
-  const topFn = source.match(
-    /async function rebuildTop\(env[\s\S]*?(?=async function )/,
+test("rebuildTopNostalgicは新着100件と3年以上前のYouTube確認済みプールから日次シャッフル用に保存する", () => {
+  const nostalgicFn = source.match(
+    /async function rebuildTopNostalgic\(env[\s\S]*?(?=async function )/,
   )?.[0];
-  assert.ok(topFn);
+  assert.ok(nostalgicFn);
   assert.match(source, /TOP_LATEST_LIMIT = 100/);
   assert.match(source, /TOP_NOSTALGIA_LIMIT = 20/);
   assert.match(source, /TOP_NOSTALGIA_POOL = 200/);
-  assert.match(topFn, /const nostalgiaCutoff = unixYearsAgo\(now, 3\)/);
-  assert.match(topFn, /v\.scheduled_time <= \?/);
-  assert.match(topFn, /YOUTUBE_SYNCED_PLAYABLE_SQL/);
-  // An oldest-first LIMIT 200 permanently excludes the remaining eligible
-  // works. The pool must sample the complete eligible set instead.
-  assert.match(topFn, /ORDER BY RANDOM\(\)/);
-  assert.doesNotMatch(topFn, /ORDER BY scheduled_time ASC, id ASC/);
-  assert.match(topFn, /LIMIT \$\{TOP_NOSTALGIA_POOL\}/);
-  assert.match(source, /pickNostalgicDisplay/);
-  assert.match(topFn, /nostalgic_pool: nostalgicPool/);
-  assert.match(
-    topFn,
-    /nostalgic: pickNostalgicDisplay\(nostalgicPool, TOP_NOSTALGIA_LIMIT\)/,
-  );
-  assert.match(topFn, /nostalgic_shuffled_at: now/);
+  assert.match(nostalgicFn, /loadTopNostalgicPool/);
+  assert.match(nostalgicFn, /resolveNostalgicDisplaySelection/);
+  assert.match(nostalgicFn, /pool: nostalgicPool/);
+  assert.match(nostalgicFn, /display: selection\.display/);
+  assert.match(nostalgicFn, /shuffled_at: selection\.shuffledAt/);
+  assert.match(nostalgicFn, /selection_day: selection\.selectionDay/);
+  assert.match(nostalgicFn, /if \(selection\.isNewDaySelection\)/);
 });
 
-test("ensureDailyTopNostalgicShuffleはUTC日次でtop再生成をキュー登録する", () => {
+test("ensureDailyTopNostalgicShuffleはJST日次でtop_nostalgic再生成をキュー登録する", () => {
   const fn = source.match(
     /export async function ensureDailyTopNostalgicShuffle[\s\S]*?(?=\/\*\*|export async function |async function )/,
   )?.[0];
   assert.ok(fn);
   assert.match(fn, /TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY/);
-  assert.match(fn, /enqueueTopRebuild/);
+  assert.match(fn, /enqueueTopSectionRebuild/);
+  assert.match(fn, /"top_nostalgic"/);
   assert.match(fn, /nostalgic_daily_shuffle/);
   assert.doesNotMatch(fn, /env\.KV\.put/);
   assert.doesNotMatch(fn, /JSON\.parse/);
@@ -489,62 +489,61 @@ test("日次シャッフルのenqueue成功だけでは完了マーカーを保�
   assert.deepEqual(kvPuts, []);
 });
 
-test("rebuildTopはヒーローイベントのslot_statsだけを集計する", async () => {
+test("rebuildTop composerはslot-stats artifactをtop.jsonへ合成する", async () => {
   const now = Math.floor(Date.now() / 1000);
-  const heroIds = ["hero-1", "hero-2"];
-  const slotQueries = [];
-  const state = {
-    binds: [],
-    runs: [],
-    first() {
-      return null;
-    },
-    all(sql) {
-      if (sql.includes("FROM slots AS s") && sql.includes("GROUP BY s.event_id")) {
-        slotQueries.push({ sql, args: state.binds.at(-1)?.args ?? [] });
-        return {
-          results: heroIds.map((eventId) => ({
-            event_id: eventId,
-            available: 2,
-            total: 5,
-          })),
-        };
-      }
-      if (sql.includes("FROM events") && sql.includes("visibility_status = 'public'")) {
-        return {
-          results: [
-            ...heroIds.map((id, index) => ({
-              id,
-              title: `Event ${id}`,
-              visibility_status: "public",
-              start_time: now + 1000 + index * 1000,
-              end_time: now + 10_000 + index * 1000,
-              entry_start_time: null,
-              entry_end_time: null,
-              created_at: now - 86400,
-            })),
-            {
-              id: "other-event",
-              title: "Other",
-              visibility_status: "public",
-              start_time: now + 100_000,
-              end_time: null,
-              entry_start_time: null,
-              entry_end_time: null,
-              created_at: now - 86400,
-            },
-          ],
-        };
-      }
-      return { results: [] };
-    },
-  };
+  const sectionPayload = (items) => ({
+    schema_version: 1,
+    generated_at: now,
+    items,
+  });
   const puts = [];
   const env = {
-    DB: {
-      prepare: (sql) => statement(sql, state),
-    },
+    DB: { prepare: (sql) => statement(sql, { binds: [], runs: [], first: () => null, all: () => ({ results: [] }) }) },
     R2: {
+      async get(key) {
+        const sections = {
+          "top/sections/recommended.v1.json": sectionPayload([{ id: "r1", title: "R1", display_name: "A" }]),
+          "top/sections/latest.v1.json": sectionPayload([{ id: "l1", title: "L1", display_name: "A" }]),
+          "top/sections/nostalgic.v1.json": {
+            schema_version: 1,
+            generated_at: now,
+            pool: [{ id: "n1", title: "N1", display_name: "A" }],
+            display: [{ id: "n1", title: "N1", display_name: "A" }],
+            shuffled_at: now,
+            selection_day: "2026-08-08",
+          },
+          "top/sections/events.v1.json": {
+            schema_version: 1,
+            generated_at: now,
+            active_events: [],
+            latest_events: [],
+          },
+          "top/sections/announcements.v1.json": sectionPayload([]),
+          "top/sections/stats.v1.json": {
+            schema_version: 1,
+            generated_at: now,
+            stats: {
+              public_videos: 3,
+              active_events: 0,
+              public_events: 7,
+              creators: 2,
+            },
+          },
+          "top/slot-stats.v1.json": {
+            schema_version: 1,
+            generated_at: now,
+            items: [{ event_id: "hero-1", available: 1, total: 2 }],
+          },
+          [PICKUP_CREATORS_OBJECT_KEY]: {
+            schema_version: 1,
+            generated_at: now,
+            creators: [{ id: "u1", x_name: "User", icon_url: null, video_count: 1, collab_count: 0 }],
+          },
+        };
+        const payload = sections[key];
+        if (!payload) return null;
+        return { async json() { return payload; } };
+      },
       async put(key, body) {
         puts.push({ key, body: JSON.parse(String(body)) });
       },
@@ -555,19 +554,12 @@ test("rebuildTopはヒーローイベントのslot_statsだけを集計する", 
 
   await rebuildTarget(env, "top", "global");
 
-  assert.equal(slotQueries.length, 1);
-  assert.deepEqual(slotQueries[0].args, heroIds);
-  assert.match(slotQueries[0].sql, /WHERE s\.event_id IN/);
   const top = puts.find((entry) => entry.key === "top.json");
   assert.ok(top);
-  assert.equal(top.body.slot_stats.length, 2);
-  assert.ok(top.body.slot_stats.every((row) => heroIds.includes(row.event_id)));
-  assert.ok(top.body.slot_stats.every((row) => row.event_id !== "other-event"));
-  const artifact = puts.find((entry) => entry.key === "top/slot-stats.v1.json");
-  assert.ok(artifact);
-  assert.equal(artifact.body.schema_version, 1);
-  assert.equal(artifact.body.generated_at, top.body.generated_at);
-  assert.deepEqual(artifact.body.items, top.body.slot_stats);
+  assert.equal(top.body.stats.public_events, 7);
+  assert.equal(top.body.slot_stats.length, 1);
+  assert.equal(top.body.recommended[0].id, "r1");
+  assert.equal(top.body.nostalgic_pool[0].id, "n1");
 });
 
 test("rebuildTopSlotStatsはヒーローイベントのslot_statsだけをartifactへ書く", async () => {
@@ -652,7 +644,7 @@ test("rebuildTopSlotStatsはヒーローイベントのslot_statsだけをartifa
   assert.equal(puts.some((entry) => entry.key === "top.json"), false);
 });
 
-test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async () => {
+test("rebuildTopStatsはpublicEventCount由来のstats.public_eventsを返す", async () => {
   const state = {
     binds: [],
     runs: [],
@@ -682,11 +674,11 @@ test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async
     KV: { put: async () => {} },
   };
 
-  await rebuildTarget(env, "top", "global");
+  await rebuildTarget(env, "top_stats", "global");
 
-  const top = puts.find((entry) => entry.key === "top.json");
-  assert.ok(top);
-  assert.equal(top.body.stats.public_events, 7);
+  const stats = puts.find((entry) => entry.key === "top/sections/stats.v1.json");
+  assert.ok(stats);
+  assert.equal(stats.body.stats.public_events, 7);
 });
 
 test("rebuildUsersIndex成功後にtop/recommend follow-upをenqueueする", () => {

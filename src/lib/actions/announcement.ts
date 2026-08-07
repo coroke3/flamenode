@@ -7,6 +7,7 @@ import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import { announcements } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildAnnouncementChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
 import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 
@@ -58,12 +59,19 @@ export async function createAnnouncement(
   const db = guard.db;
   const now = Math.floor(Date.now() / 1000);
 
+  const queue = await buildAnnouncementChangeQueueBatch(db, {
+    reason: "announcement_create",
+    requestedByUserId: guard.userId,
+  });
   await mutateWithAudit(db, {
-    mutationStatements: [db.run(sql`
+    mutationStatements: [
+      db.run(sql`
       INSERT INTO announcements (id, title, body, severity, target_audience, is_published, publish_at, expire_at, created_by_user_id, created_at, updated_at)
       VALUES (${id}, ${d.title}, ${d.body}, ${d.severity}, ${d.target_audience}, ${d.is_published}, ${parseDate(d.publish_at)}, ${parseDate(d.expire_at)}, ${guard.userId}, ${now}, ${now})
-    `)],
-    expectedMutationChanges: 1,
+    `),
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
     audits: [{ table_name: "announcements", target_id: id, operation: "CREATE", before: null, after: { id, title: d.title, body: d.body, severity: d.severity, target_audience: d.target_audience, is_published: d.is_published, publish_at: parseDate(d.publish_at), expire_at: parseDate(d.expire_at), created_by_user_id: guard.userId, created_at: now, updated_at: now }, actor_user_id: guard.userId, retention_class: "normal" }],
   });
   revalidatePath("/admin/announcements");
@@ -87,9 +95,16 @@ export async function updateAnnouncement(
   const existing = (await db.select().from(announcements).where(eq(announcements.id, d.id)).limit(1))[0];
   if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
+  const queue = await buildAnnouncementChangeQueueBatch(db, {
+    reason: "announcement_update",
+    requestedByUserId: guard.userId,
+  });
   await mutateWithAudit(db, {
-    mutationStatements: [db.run(sql`UPDATE announcements SET title=${d.title}, body=${d.body}, severity=${d.severity}, target_audience=${d.target_audience}, is_published=${d.is_published}, publish_at=${parseDate(d.publish_at)}, expire_at=${parseDate(d.expire_at)}, updated_at=${now} WHERE id=${d.id} AND updated_at=${existing.updated_at}`)],
-    expectedMutationChanges: 1,
+    mutationStatements: [
+      db.run(sql`UPDATE announcements SET title=${d.title}, body=${d.body}, severity=${d.severity}, target_audience=${d.target_audience}, is_published=${d.is_published}, publish_at=${parseDate(d.publish_at)}, expire_at=${parseDate(d.expire_at)}, updated_at=${now} WHERE id=${d.id} AND updated_at=${existing.updated_at}`),
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
     audits: [{ table_name: "announcements", target_id: d.id, operation: "UPDATE", before: { ...existing }, after: { ...existing, title: d.title, body: d.body, severity: d.severity, target_audience: d.target_audience, is_published: d.is_published, publish_at: parseDate(d.publish_at), expire_at: parseDate(d.expire_at), updated_at: now }, actor_user_id: guard.userId, retention_class: "normal" }],
   });
   revalidatePath("/admin/announcements");
@@ -107,9 +122,16 @@ export async function deleteAnnouncement(
   const db = guard.db;
   const existing = (await db.select().from(announcements).where(eq(announcements.id, id)).limit(1))[0];
   if (!existing) return { ok: false, message: "対象のお知らせが見つかりません。" };
+  const queue = await buildAnnouncementChangeQueueBatch(db, {
+    reason: "announcement_delete",
+    requestedByUserId: guard.userId,
+  });
   await mutateWithAudit(db, {
-    mutationStatements: [db.run(sql`DELETE FROM announcements WHERE id=${id} AND updated_at=${existing.updated_at}`)],
-    expectedMutationChanges: 1,
+    mutationStatements: [
+      db.run(sql`DELETE FROM announcements WHERE id=${id} AND updated_at=${existing.updated_at}`),
+      ...queue.statements,
+    ],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
     audits: [{ table_name: "announcements", target_id: id, operation: "DELETE", before: { ...existing }, after: null, actor_user_id: guard.userId, retention_class: "long_audit" }],
   });
   revalidatePath("/admin/announcements");

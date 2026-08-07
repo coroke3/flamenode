@@ -56,7 +56,7 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 
 静的再生成は Queue Consumer / Recovery Cron の各 invocation で **1 target** だけ処理する（`workers/json-generator/queuePolicy.ts` の `MAX_QUEUE_ITEMS_PER_RUN` = 1）。Recovery Cron は毎時最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS`（3）件まで排水する。D1 statement は `workers/shared/d1Budget.ts` の soft limit（40）で停止する。表示用ポリシー正本は `src/lib/operationMode/policy.ts` の `STATIC_REBUILD_ITEMS_PER_RUN` と一致させる。
 
-コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top`、`top_slot_stats`、`recommend_core`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。`rebuildRecommendCore` 成功後は follow-up で `recommend` composer が enqueue される。`rebuildTop` も `top/slot-stats.v1.json` を同時更新するが、`top_slot_stats` を別途 enqueue して欠損時の保険とする（冪等）。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
+コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top_recommended`、`top_latest`、`top_nostalgic`、`top_events`、`top_announcements`、`top_stats`、`top_slot_stats`、`recommend_core`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。各 top section producer 成功後は follow-up で `top` composer が enqueue される。`recommend_core` 成功後も follow-up で `recommend` composer が enqueue される。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
 
 Admin Spreadsheetのうち `videos`、`video_youtube_metadata`、`video_events`、`video_members`、`video_chapters`、`x_users` の変更は、対象の動画詳細・関連動画共有JSON・クリエイター投影をplannerで導出し、data mutation・preview nonce消費・監査・`static_rebuild_queue`を同じD1 atomic batchへ入れる。1回のapplyは11行までとし、plannerは最大16 target（`SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT`）、queue helperは最大4 statementに収める。いずれかを超える場合はデータを書かず、行を分割して再実行する。
 
@@ -64,7 +64,7 @@ Spreadsheet planner（`src/lib/admin/spreadsheet/staticRebuildPlan.ts`）は mut
 
 Creator Projection（`workers/json-generator`）は公開用カード・詳細 JSON を R2 に書き、一覧は `list/recent.json` / `list/popular.json`、検索は `search-index-lite.json`、クリエイター索引は `users/index.json` を正本とする。`users_index` 再生成時に `users/public-x-icon-map.v1.json`（entries形式）と `users/pickup-creators.v1.json`（top/recommend の Creator 棚用、最大60件）も同時出力する。`top` / `recommend` の Creator 棚は通常時この pickup artifact を読み、欠損・破損時のみ D1 projection へ fallback する。登録ユーザーは icon 欠損時も `source: none` とし、historical icon は表示用に保持する。公開ページのXアイコン補完は fresh/stale Cacheを含む共有icon map → R2 `users/index.json` → 詳細JSON埋め込み値の順で解決し、entry 欠損や `source: video` のときだけ index で `registered` / `none` へ昇格を試みる。この補完経路からD1へは降りない。`users/index.json` 補完ではアイコンなしの公開プロフィールも `source: none` として保持し、古い動画詳細JSONでもプロフィールリンクを復元しつつ、画像欠損時は共通デフォルトアイコンへ切り替える。
 
-`top.json` は新着最大100件と、生成時点で公開から3年以上経過した作品を `scheduled_time` 昇順で最大200件プールする。懐かし棚は YouTube API 同期済みで `public` / `unlisted` と確認された作品だけを `nostalgic_pool` に入れ、生成時と Recovery Cron の UTC 日次処理で Fisher-Yates シャッフル後 `nostalgic` 最大20件を R2 へ書き込む（KV `static:top_nostalgic_shuffle_day` で同日の重複更新を抑止）。トップ表示時は `nostalgic` をそのまま使い、リクエストごとの再シャッフルはしない。新着 loop 棚はシャッフル元プール100件のうち最大40件だけをDOMへ載せ、注目・ピックアップ・新着・懐かしの4棚は1行の連続ループとし、流れる向きを左・右・左・右で交互にする。トップの hero 用 `slot_stats` は対象イベント最大3件に限定する。`rebuildTop` は `top.json` と補助 artifact `top/slot-stats.v1.json`（`top_slot_stats:global`）を同時更新する。枠の reserve/release 等では `top.json` 全体ではなく artifact だけを更新する。公開 loader は `generated_at` が新しい方の `slot_stats` を採用する（欠損・破損時は `top.json.slot_stats` へ fallback）。YouTube 公開可否の変化時は `top` も `youtube_related_blocklist` / `random_video_pool` と同時に再生成予約する。
+`top.json` は section producer が R2 に書いた `top/sections/*.v1.json` と `top/slot-stats.v1.json`、`users/pickup-creators.v1.json` を composer（`top:global`）が読み込んで合成する。新着最大100件と、公開から3年以上経過した作品を最大200件プールする懐かし棚は `top_nostalgic` producer が担当する。懐かし棚は YouTube API 同期済みで `public` / `unlisted` と確認された作品だけを `nostalgic_pool` に入れ、JST 日次境界で ID 抽選し `nostalgic` 最大20件を保持する（KV `static:top_nostalgic_shuffle_day` は新日付の抽選成功時のみ更新）。同日中は selected IDs を維持し title/icon/youtube/visibility を再評価する。トップ表示時は `nostalgic` をそのまま使い、リクエストごとの再シャッフルはしない。hero 用 `slot_stats` は `top_slot_stats` producer が `top/slot-stats.v1.json` に書き、composer が `top.json` へ合成する。枠の reserve/release 等では `top_slot_stats` のみを更新し follow-up で `top` composer を enqueue する。公開 loader は `generated_at` が新しい方の `slot_stats` を採用する（欠損・破損時は `top.json.slot_stats` へ fallback）。YouTube 公開可否の変化時は必要な top section と `youtube_related_blocklist` / `random_video_pool` を同時に再生成予約する。
 
 関連動画の非公開除外は `youtube/related-blocklist.v1.json`、補完候補は `videos/random-pool.v1.json` を用いる。どちらも読み込みは fresh Cache → R2 → stale Cache（最大24h）→ unavailable とし、状態を捨てない。必要な共有JSONがunavailableのときは関連動画セクションを障害表示へ分離し、空blocklist・正常な0件へ倒さない。
 
@@ -76,7 +76,13 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 
 | 用途 | R2 key | target_type |
 | --- | --- | --- |
-| トップ | `top.json` | `top` |
+| トップ（composer） | `top.json` | `top` |
+| トップ注目棚 | `top/sections/recommended.v1.json` | `top_recommended` |
+| トップ新着棚 | `top/sections/latest.v1.json` | `top_latest` |
+| トップ懐かし棚 | `top/sections/nostalgic.v1.json` | `top_nostalgic` |
+| トップイベント棚 | `top/sections/events.v1.json` | `top_events` |
+| トップお知らせ棚 | `top/sections/announcements.v1.json` | `top_announcements` |
+| トップ統計 | `top/sections/stats.v1.json` | `top_stats` |
 | トップ hero slot_stats | `top/slot-stats.v1.json` | `top_slot_stats` |
 | 作品一覧（新着） | `list/recent.json` | `list_recent` |
 | 作品一覧（人気） | `list/popular.json` | `list_popular` |
