@@ -265,4 +265,79 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(row.requested_by_user_id, "existing-user");
     sqlite.close();
   });
+
+  // Source of truth: workers/json-generator/queue.ts markDoneAttempt
+  const MARK_DONE_SQL = `UPDATE static_rebuild_queue
+     SET status = CASE
+           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+             THEN 'pending'
+           ELSE 'done'
+         END,
+         processed_at = CASE
+           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+             THEN NULL
+             ELSE ?
+         END,
+         updated_at = CASE
+           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+             THEN updated_at
+             ELSE ?
+         END,
+         attempt_count = 0,
+         error = NULL,
+         processing_started_at = NULL,
+         lease_token = NULL,
+         lease_expires_at = NULL,
+         next_retry_at = NULL
+     WHERE id = ? AND status = 'processing' AND lease_token = ?`;
+
+  function runMarkDone(sqlite, { id, token, now }) {
+    return sqlite.prepare(MARK_DONE_SQL).run(now, now, id, token);
+  }
+
+  test("Case F: UPSERT dirty during processing then markDone requeues to pending", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(baseline);
+    sqlite.exec(`
+      INSERT INTO static_rebuild_queue (
+        id, target_type, target_id, reason, priority, status,
+        attempt_count, lease_token, lease_expires_at,
+        processing_started_at, created_at, updated_at
+      ) VALUES (
+        'srb-dirty', 'video', 'video-dirty', 'worker_claim', 'normal', 'processing',
+        1, 'lease-dirty', 9999, 200, 150, 200
+      );
+    `);
+
+    const before = getRow(sqlite, "video", "video-dirty");
+    await runBatch(sqlite, [{
+      targetType: "video",
+      targetId: "video-dirty",
+      reason: "visibility_change",
+      priority: "high",
+    }]);
+    const afterUpsert = getRow(sqlite, "video", "video-dirty");
+
+    assert.equal(afterUpsert.status, "processing");
+    assert.equal(afterUpsert.lease_token, "lease-dirty");
+    assert.equal(afterUpsert.lease_expires_at, 9999);
+    assert.equal(afterUpsert.attempt_count, 1);
+    assert.equal(afterUpsert.processing_started_at, 200);
+    assert.ok(afterUpsert.updated_at > before.updated_at);
+    assert.ok(afterUpsert.updated_at > afterUpsert.processing_started_at);
+
+    const markDone = runMarkDone(sqlite, {
+      id: "srb-dirty",
+      token: "lease-dirty",
+      now: 500,
+    });
+    assert.equal(markDone.changes, 1);
+
+    const afterMarkDone = getRow(sqlite, "video", "video-dirty");
+    assert.equal(afterMarkDone.status, "pending");
+    assert.equal(afterMarkDone.processed_at, null);
+    assert.equal(afterMarkDone.lease_token, null);
+    assert.equal(afterMarkDone.attempt_count, 0);
+    sqlite.close();
+  });
 }

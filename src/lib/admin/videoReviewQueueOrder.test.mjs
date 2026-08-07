@@ -29,3 +29,8 @@ test("findNextPendingReviewVideoId queries pending items after current cursor", 
   assert.match(orderSource, /eq\(videos\.visibility_status, "pending"\)/);
   assert.match(orderSource, /lt\(videos\.created_at, current\.created_at\)/);
 });
+
+test("attachApproveAndNextHref is exported for same-status approve-and-next", () => {
+  assert.match(orderSource, /export async function attachApproveAndNextHref/);
+  assert.match(orderSource, /nextHref: resolveApproveAndNextHref/);
+});

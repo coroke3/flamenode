@@ -39,11 +39,11 @@ test("admin setVideoStatus uses shared mutation helper and merged event ids", as
   assert.match(source, /loadVideoRebuildEventIds/);
   assert.match(source, /executeVideoVisibilityStatusMutation/);
   assert.match(source, /SAME_VIDEO_STATUS_MESSAGE/);
-  assert.match(source, /findNextPendingReviewVideoId/);
+  assert.match(source, /attachApproveAndNextHref/);
   assert.match(source, /unstable_rethrow\(error\)/);
 });
 
-test("manage setManageVideoStatus wraps mutation in try/catch", async () => {
+test("manage setManageVideoStatus attaches nextHref on same-status approve-and-next", async () => {
   const source = await readFile(
     new URL("../actions/manage-video.ts", import.meta.url),
     "utf8",
@@ -51,6 +51,7 @@ test("manage setManageVideoStatus wraps mutation in try/catch", async () => {
   assert.match(source, /executeVideoVisibilityStatusMutation/);
   assert.match(source, /monotonicVideoUpdatedAt/);
   assert.match(source, /SAME_VIDEO_STATUS_MESSAGE/);
+  assert.match(source, /attachApproveAndNextHref/);
   assert.match(source, /catch \(error\) \{[\s\S]*unstable_rethrow\(error\)/);
   assert.doesNotMatch(source, /変更先のステータスを選択してください/);
 });

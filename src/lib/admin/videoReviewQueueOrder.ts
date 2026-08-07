@@ -1,6 +1,7 @@
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { videoEvents, videos } from "@/lib/db/schema";
+import type { VideoStatusActionResult } from "@/lib/video/videoVisibilityStatusAction";
 
 export const videoReviewQueueOrder = [
   desc(videos.created_at),
@@ -67,4 +68,26 @@ export function resolveApproveAndNextHref(
   return scope?.eventId
     ? manageReviewQueueFallbackHref(scope.eventId)
     : adminReviewQueueFallbackHref();
+}
+
+/** When approve-and-next is requested, attach nextHref even on idempotent same-status results. */
+export async function attachApproveAndNextHref(
+  db: DB,
+  result: VideoStatusActionResult,
+  input: {
+    andNext: boolean;
+    status: string;
+    current: { id: string; created_at: number };
+    eventId?: string;
+  },
+): Promise<VideoStatusActionResult> {
+  if (!input.andNext || input.status !== "public" || !result.ok) {
+    return result;
+  }
+  const scope = input.eventId ? { eventId: input.eventId } : undefined;
+  const nextVideoId = await findNextPendingReviewVideoId(db, input.current, scope);
+  return {
+    ...result,
+    nextHref: resolveApproveAndNextHref(nextVideoId, scope),
+  };
 }

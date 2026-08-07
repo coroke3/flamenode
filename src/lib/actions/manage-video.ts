@@ -18,10 +18,7 @@ import {
 } from "@/lib/video/videoVisibilityTransition";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
-import {
-  findNextPendingReviewVideoId,
-  resolveApproveAndNextHref,
-} from "@/lib/admin/videoReviewQueueOrder";
+import { attachApproveAndNextHref } from "@/lib/admin/videoReviewQueueOrder";
 import {
   executeVideoVisibilityStatusMutation,
   loadVideoRebuildEventIds,
@@ -124,7 +121,11 @@ export async function setManageVideoStatus(
 
   const prevStatus = target.visibility_status;
   if (prevStatus === status) {
-    return { ok: true, message: SAME_VIDEO_STATUS_MESSAGE };
+    return attachApproveAndNextHref(
+      db,
+      { ok: true, message: SAME_VIDEO_STATUS_MESSAGE },
+      { andNext, status, current: target, eventId },
+    );
   }
 
   const now = monotonicVideoUpdatedAt(target.updated_at);
@@ -197,19 +198,12 @@ export async function setManageVideoStatus(
       }],
     );
 
-    if (andNext && status === "public") {
-      const nextVideoId = await findNextPendingReviewVideoId(
-        db,
-        { id: target.id, created_at: target.created_at },
-        { eventId },
-      );
-      return {
-        ...result,
-        nextHref: resolveApproveAndNextHref(nextVideoId, { eventId }),
-      };
-    }
-
-    return result;
+    return attachApproveAndNextHref(db, result, {
+      andNext,
+      status,
+      current: target,
+      eventId,
+    });
   } catch (error) {
     unstable_rethrow(error);
     console.error("[manage-video-status] failed", { traceId, error });

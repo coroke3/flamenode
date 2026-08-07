@@ -15,10 +15,7 @@ import {
 } from "@/lib/moderation/openCases";
 import { resolveVoidModerationCaseType } from "@/lib/moderation/voidCaseType";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
-import {
-  findNextPendingReviewVideoId,
-  resolveApproveAndNextHref,
-} from "@/lib/admin/videoReviewQueueOrder";
+import { attachApproveAndNextHref } from "@/lib/admin/videoReviewQueueOrder";
 import {
   planVideoVisibilityTransition,
   runVideoVisibilityTransitionPostCommit,
@@ -96,7 +93,11 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   const before = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!before) return { ok: false, message: "対象作品が見つかりません。" };
   if (before.visibility_status === status) {
-    return { ok: true, message: SAME_VIDEO_STATUS_MESSAGE };
+    return attachApproveAndNextHref(
+      db,
+      { ok: true, message: SAME_VIDEO_STATUS_MESSAGE },
+      { andNext, status, current: before },
+    );
   }
 
   const rebuildEvents = await loadVideoRebuildEventIds(db, videoId, before.primary_event_id);
@@ -186,18 +187,11 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
       transition.publicCacheKeys,
     );
 
-    if (andNext && status === "public") {
-      const nextVideoId = await findNextPendingReviewVideoId(db, {
-        id: before.id,
-        created_at: before.created_at,
-      });
-      return {
-        ...result,
-        nextHref: resolveApproveAndNextHref(nextVideoId),
-      };
-    }
-
-    return result;
+    return attachApproveAndNextHref(db, result, {
+      andNext,
+      status,
+      current: before,
+    });
   } catch (error) {
     unstable_rethrow(error);
     console.error("[admin-video-status] failed", { traceId, error });

@@ -3,10 +3,12 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
 
 type QuickApproveResult = {
   ok: boolean;
   message?: string;
+  pendingPublicReflection?: boolean;
   retryable?: boolean;
 };
 
@@ -29,10 +31,13 @@ export function VideoReviewQuickApproveButton({
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const [pendingPublicReflection, setPendingPublicReflection] =
+    React.useState(false);
 
   const onApprove = () => {
     if (pending) return;
     setError(null);
+    setPendingPublicReflection(false);
     const fd = new FormData();
     for (const [key, value] of Object.entries(hiddenFields ?? {})) {
       fd.set(key, value);
@@ -49,6 +54,7 @@ export function VideoReviewQuickApproveButton({
           }
           return;
         }
+        setPendingPublicReflection(result.pendingPublicReflection === true);
         router.refresh();
       } catch {
         setError(COMMUNICATION_ERROR_MESSAGE);
@@ -71,6 +77,11 @@ export function VideoReviewQuickApproveButton({
       {error ? (
         <span role="alert" style={{ color: "var(--accent-danger)", fontSize: 10 }}>
           {error}
+        </span>
+      ) : null}
+      {pendingPublicReflection ? (
+        <span style={{ maxWidth: 220 }}>
+          <PublicReflectionDelayNotice />
         </span>
       ) : null}
     </span>
