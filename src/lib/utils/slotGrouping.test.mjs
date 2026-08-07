@@ -104,6 +104,8 @@ test("collapseReservationGroups: reservation_group_id単位で集約する", () 
       group_key: "g1",
       status: "reserved",
       display_name: "Team",
+      is_owned_by_viewer: true,
+      viewer_relation: "active",
     },
     {
       ...baseSlot,
@@ -113,6 +115,8 @@ test("collapseReservationGroups: reservation_group_id単位で集約する", () 
       group_key: "g1",
       status: "reserved",
       display_name: "Team",
+      is_owned_by_viewer: true,
+      viewer_relation: "active",
     },
     { ...baseSlot, id: "s3", start_time: 500, sort_order: 2 },
   ];
@@ -123,7 +127,126 @@ test("collapseReservationGroups: reservation_group_id単位で集約する", () 
   assert.equal(grouped.is_group, true);
   assert.equal(grouped.group_size, 2);
   assert.equal(grouped.status, "reserved");
+  assert.equal(grouped.is_owned_by_viewer, true);
+  assert.equal(grouped.integrity_error, null);
   assert.deepEqual(grouped.slot_ids, ["s1", "s2"]);
+});
+
+test("collapseReservationGroups: reserved と submitted 混在は integrity_error", () => {
+  const output = collapseReservationGroups([
+    {
+      ...baseSlot,
+      id: "s1",
+      start_time: 100,
+      sort_order: 0,
+      group_key: "g1",
+      status: "reserved",
+      is_owned_by_viewer: true,
+      viewer_relation: "active",
+    },
+    {
+      ...baseSlot,
+      id: "s2",
+      start_time: 200,
+      sort_order: 1,
+      group_key: "g1",
+      status: "submitted",
+      is_owned_by_viewer: true,
+      viewer_relation: "active",
+    },
+  ]);
+  const grouped = output.find((row) => row.group_id === "g1");
+  assert.ok(grouped);
+  assert.equal(grouped.integrity_error, "mixed_status");
+  assert.equal(grouped.is_owned_by_viewer, false);
+});
+
+test("collapseReservationGroups: viewer_relation 混在は integrity_error", () => {
+  const output = collapseReservationGroups([
+    {
+      ...baseSlot,
+      id: "s1",
+      start_time: 100,
+      sort_order: 0,
+      group_key: "g1",
+      status: "reserved",
+      is_owned_by_viewer: true,
+      viewer_relation: "active",
+    },
+    {
+      ...baseSlot,
+      id: "s2",
+      start_time: 200,
+      sort_order: 1,
+      group_key: "g1",
+      status: "reserved",
+      is_owned_by_viewer: false,
+      viewer_relation: "account_other",
+    },
+  ]);
+  const grouped = output.find((row) => row.group_id === "g1");
+  assert.ok(grouped);
+  assert.equal(grouped.integrity_error, "mixed_viewer_relation");
+  assert.equal(grouped.is_owned_by_viewer, false);
+});
+
+test("collapseReservationGroups: active+unassigned は integrity_error にしない", () => {
+  const output = collapseReservationGroups([
+    {
+      ...baseSlot,
+      id: "s1",
+      start_time: 100,
+      sort_order: 0,
+      group_key: "g1",
+      status: "reserved",
+      is_owned_by_viewer: true,
+      viewer_relation: "active",
+    },
+    {
+      ...baseSlot,
+      id: "s2",
+      start_time: 200,
+      sort_order: 1,
+      group_key: "g1",
+      status: "reserved",
+      is_owned_by_viewer: true,
+      viewer_relation: "unassigned",
+    },
+  ]);
+  const grouped = output.find((row) => row.group_id === "g1");
+  assert.ok(grouped);
+  assert.equal(grouped.integrity_error, null);
+  assert.equal(grouped.viewer_relation, "active");
+  assert.equal(grouped.is_owned_by_viewer, true);
+});
+
+test("collapseReservationGroups: is_owned_by_viewer は every で判定する", () => {
+  const output = collapseReservationGroups([
+    {
+      ...baseSlot,
+      id: "s1",
+      start_time: 100,
+      sort_order: 0,
+      group_key: "g1",
+      status: "reserved",
+      is_owned_by_viewer: true,
+      viewer_relation: "active",
+    },
+    {
+      ...baseSlot,
+      id: "s2",
+      start_time: 200,
+      sort_order: 1,
+      group_key: "g1",
+      status: "reserved",
+      is_owned_by_viewer: false,
+      viewer_relation: "active",
+    },
+  ]);
+  const grouped = output.find((row) => row.group_id === "g1");
+  assert.ok(grouped);
+  assert.equal(grouped.integrity_error, null);
+  assert.equal(grouped.is_owned_by_viewer, false);
 });
 
 test("空入力は空配列", () => {

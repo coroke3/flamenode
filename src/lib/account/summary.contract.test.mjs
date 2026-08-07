@@ -51,10 +51,21 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /summary\.unavailable/);
   assert.match(island, /ログイン状態を一時的に確認できません/);
   assert.match(island, /if \(unavailable \|\| !user\) \{/);
-  assert.doesNotMatch(
+  assert.match(
     island,
-    /response\.status === 503[\s\S]{0,180}setUser\(null\)/,
+    /response\.status === 503 \|\| !response\.ok[\s\S]{0,200}if \(!preserveLoggedInOnFailure\) setUser\(null\)/,
   );
+  assert.match(
+    island,
+    /catch \{[\s\S]{0,200}if \(!preserveLoggedInOnFailure\) setUser\(null\)/,
+  );
+});
+
+test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得する", () => {
+  assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
+  assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
+  assert.match(island, /setRefreshNonce/);
+  assert.match(island, /\[enabled, preserveLoggedInOnFailure, refreshNonce\]/);
 });
 
 test("ログアウトはSignOutButton経由でhard navigateする", () => {

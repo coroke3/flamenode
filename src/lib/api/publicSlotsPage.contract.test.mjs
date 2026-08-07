@@ -16,7 +16,9 @@ test("public slots page selects public events and serializes a reduced viewer DT
     (page.match(/eq\(eventsTable\.visibility_status, "public"\)/g) ?? [])
       .length >= 2,
   );
-  assert.match(page, /is_owned_by_viewer: isOwnedByViewer/);
+  assert.match(page, /resolveSlotViewerRelation/);
+  assert.match(page, /canActAsSlotActor\(viewerRelation\)/);
+  assert.match(page, /viewer_relation: viewerRelation/);
   assert.match(page, /groupKey = `group-\$\{groupKeys\.size \+ 1\}`/);
   assert.doesNotMatch(page, /viewerUserId=/);
   for (const key of [
@@ -33,9 +35,15 @@ test("public slots page selects public events and serializes a reduced viewer DT
   }
 });
 
-test("anonymous and hidden slots expose names only to their owner", () => {
+test("anonymous and hidden slots expose names to viewer relations without raw ownership ids", () => {
   assert.match(
     page,
-    /isOwnedByViewer \|\| event\.slot_visibility_mode === "public_name"[\s\S]*\? slot\.display_name[\s\S]*: null/,
+    /viewerRelation === "active"[\s\S]*viewerRelation === "unassigned"[\s\S]*viewerRelation === "account_other"/,
   );
+  assert.match(
+    page,
+    /event\.slot_visibility_mode === "public_name"/,
+  );
+  assert.match(page, /const isOwnedByViewer = canActAsSlotActor\(viewerRelation\)/);
+  assert.match(page, /is_owned_by_viewer: isOwnedByViewer/);
 });

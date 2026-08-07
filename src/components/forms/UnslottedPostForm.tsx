@@ -7,6 +7,10 @@ import {
   type VideoFormInitialValues,
 } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
+import {
+  ACTIVE_X_BEFORE_SWITCH_EVENT,
+} from "@/lib/client/activeXSwitchEvents";
+import { normalizeXId } from "@/lib/utils/xid";
 import type { CustomQuestion } from "@/lib/video/customQuestions";
 
 interface UnslottedEventOption extends EventOption {
@@ -36,15 +40,29 @@ export function UnslottedPostForm({
   const [formDirty, setFormDirty] = React.useState(false);
 
   const selectedEvent = eventOptions.find((event) => event.id === selectedEventId);
-  const formKey = selectedEvent
-    ? `unslotted-event-${selectedEvent.id}`
-    : "unslotted-none";
+  const activeXKey = normalizeXId(videoFormProps.activeXId ?? "") || "unassigned";
+  const formKey = `unslotted:${activeXKey}:${selectedEvent ? selectedEvent.id : "none"}`;
 
   const confirmReset = React.useCallback((): boolean => {
     if (!formDirty) return true;
     return window.confirm(
       "掲載方法または所属イベントを変更すると、入力中の作品情報がリセットされます。変更しますか？",
     );
+  }, [formDirty]);
+
+  React.useEffect(() => {
+    const handler = (event: Event) => {
+      if (!formDirty) return;
+      const confirmed = window.confirm(
+        "入力中の作品情報があります。Active X ID を切り替えると内容が失われます。切り替えますか？",
+      );
+      if (!confirmed) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
+    return () =>
+      window.removeEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
   }, [formDirty]);
 
   const selectAffiliation = (next: Exclude<AffiliationChoice, null>) => {
@@ -174,6 +192,7 @@ export function UnslottedPostForm({
           key={formKey}
           {...videoFormProps}
           mode="free"
+          activeXSnapshot={videoFormProps.activeXId}
           initial={{
             ...initial,
             event_ids: selectedEvent ? [selectedEvent.id] : [],

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
@@ -25,7 +25,9 @@ import {
   type SlotBase,
 } from "@/lib/utils/slotGrouping";
 import { areSlotsInSamePart } from "@/lib/utils/slotGroupingCore";
+import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
+import { normalizeXId } from "@/lib/utils/xid";
 import styles from "./SlotGrid.module.css";
 
 export interface SlotRow {
@@ -36,6 +38,7 @@ export interface SlotRow {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   is_owned_by_viewer: boolean;
+  viewer_relation?: SlotViewerRelation;
   group_key: string | null;
   /** 本人枠のみ。結合 UI の X 一致判定用。他人には渡さない。 */
   x_user_id?: string | null;
@@ -79,6 +82,27 @@ interface ReserveTarget {
 }
 
 const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
+const LEGACY_SLOT_DISPLAY_NAME_KEY = "fn:lastSlotDisplayName";
+
+function slotDisplayNameStorageKey(viewerXId: string | null): string {
+  const normalized = normalizeXId(viewerXId ?? "");
+  return normalized
+    ? `${LEGACY_SLOT_DISPLAY_NAME_KEY}:${normalized}`
+    : `${LEGACY_SLOT_DISPLAY_NAME_KEY}:unassigned`;
+}
+
+function readSavedSlotDisplayName(viewerXId: string | null): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const scopedKey = slotDisplayNameStorageKey(viewerXId);
+    const scoped = window.localStorage.getItem(scopedKey);
+    if (scoped) return scoped;
+    const legacy = window.localStorage.getItem(LEGACY_SLOT_DISPLAY_NAME_KEY);
+    return legacy ?? "";
+  } catch {
+    return "";
+  }
+}
 
 function formatBreakDetail(end: number | null, start: number | null): string | null {
   if (end == null || start == null || start <= end) return null;
@@ -96,6 +120,7 @@ export function SlotGrid({
   slotPartGapSec,
 }: SlotGridProps): React.ReactElement {
   const router = useRouter();
+  const pathname = usePathname();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<{
@@ -125,13 +150,19 @@ export function SlotGrid({
   );
 
   React.useEffect(() => {
-    try {
-      const v = window.localStorage.getItem("fn:lastSlotDisplayName");
-      if (v) setSavedName(v);
-    } catch {
-      // localStorage 利用不可な環境では何もしない
-    }
-  }, []);
+    setError(null);
+    setSuccess(null);
+    setReservedSlotId(null);
+    setConfirmReleaseId(null);
+    setConfirmExtend(null);
+    setConfirmMerge(null);
+    setReserveTarget(null);
+    setActionMenuSlotId(null);
+    setMergeDisplayName("");
+    setReserveDisplayName("");
+    setReserveCount("1");
+    setSavedName(readSavedSlotDisplayName(viewerXId));
+  }, [viewerXId]);
   const displayRows = React.useMemo(
     () => annotateReservationGroups(slots as SlotBase[]),
     [slots],
@@ -257,7 +288,7 @@ export function SlotGrid({
     const dn = displayName.trim();
     if (dn) {
       try {
-        window.localStorage.setItem("fn:lastSlotDisplayName", dn);
+        window.localStorage.setItem(slotDisplayNameStorageKey(viewerXId), dn);
         setSavedName(dn);
       } catch {
         // localStorage 利用不可な環境では何もしない
@@ -451,6 +482,13 @@ export function SlotGrid({
     (s) => s.status === "reserved" && s.is_owned_by_viewer,
   );
 
+  const settingsNext =
+    pathname && pathname.length > 0
+      ? pathname
+      : typeof window !== "undefined"
+        ? window.location.pathname
+        : "/entry";
+
   return (
     <div className={styles.wrap}>
       {error ? (
@@ -541,6 +579,13 @@ export function SlotGrid({
                   const nameVisible = Boolean(slot.display_name) || isMine;
                   const showGroupPosition =
                     slot.is_group && slot.group_position > 1 && nameVisible;
+                  const hasIntegrityError = slot.integrity_error != null;
+                  const isAccountOther = slot.viewer_relation === "account_other";
+                  const canOperateMine =
+                    isMine &&
+                    slot.status === "reserved" &&
+                    !hasIntegrityError &&
+                    !isAccountOther;
                   return (
                     <tr
                       key={slot.id}
@@ -573,7 +618,7 @@ export function SlotGrid({
                                 <span
                                   className={cn(
                                     styles.slotName,
-                                    isMine && slot.status === "reserved" && styles.slotNameMine,
+                                    canOperateMine && styles.slotNameMine,
                                   )}
                                 >
                                   {slotDisplayName}
@@ -588,7 +633,26 @@ export function SlotGrid({
                                 ) : null}
                               </div>
                             </div>
-                            {isMine && slot.status === "reserved" ? (
+                            {hasIntegrityError ? (
+                              <p className={styles.slotIntegrityNotice}>
+                                枠グループの状態を確認できませんでした。画面を更新してください。
+                              </p>
+                            ) : isAccountOther ? (
+                              <p className={styles.slotIntegrityNotice}>
+                                この枠は現在とは別の活動名義で確保されています。
+                              </p>
+                            ) : null}
+                            {isAccountOther && !hasIntegrityError ? (
+                              <div className={styles.slotActions}>
+                                <Link
+                                  href={`/dashboard/settings?next=${encodeURIComponent(settingsNext)}`}
+                                  className={styles.editSlotButton}
+                                >
+                                  Active X ID を切り替え
+                                </Link>
+                              </div>
+                            ) : null}
+                            {canOperateMine ? (
                               <div className={styles.slotActions}>
                                 <button
                                   type="button"
@@ -672,7 +736,7 @@ export function SlotGrid({
                           </div>
                         ) : (() => {
                           const mergeCandidate = getMergeCandidate(slot);
-                          if (mergeCandidate) {
+                          if (mergeCandidate && !hasIntegrityError) {
                             if (mergeCandidate.ok) {
                               return (
                                 <button

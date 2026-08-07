@@ -4,6 +4,10 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { setActiveXId } from "@/lib/actions/xid";
 import {
+  dispatchActiveXChanged,
+  dispatchBeforeActiveXSwitch,
+} from "@/lib/client/activeXSwitchEvents";
+import {
   normalizeXIdEntries,
   type XIdEntry,
 } from "@/lib/xid/entries";
@@ -70,31 +74,52 @@ export function useActiveXSwitcher({
         return;
       }
 
+      const fromXId = activeId;
+      const toXId = entry.x_user_id;
+
+      if (
+        !dispatchBeforeActiveXSwitch({
+          fromXId,
+          toXId,
+        })
+      ) {
+        return;
+      }
+
       const previousActiveId = activeId;
-      setActiveId(entry.x_user_id);
+      setActiveId(toXId);
 
       const formData = new FormData();
       formData.set(
         "x_user_id",
-        entry.x_user_id,
+        toXId,
       );
 
       startTransition(async () => {
-        const result =
-          await setActiveXId(formData);
+        try {
+          const result =
+            await setActiveXId(formData);
 
-        if (!result.ok) {
+          if (!result.ok) {
+            setActiveId(previousActiveId);
+            setError(
+              result.message ??
+                "X ID の切り替えに失敗しました。",
+            );
+            return;
+          }
+
+          dispatchActiveXChanged({
+            fromXId,
+            toXId,
+          });
+          onSwitch?.(toXId);
+          onSuccess?.();
+          router.refresh();
+        } catch {
           setActiveId(previousActiveId);
-          setError(
-            result.message ??
-              "X ID の切り替えに失敗しました。",
-          );
-          return;
+          setError("X ID の切り替えに失敗しました。");
         }
-
-        onSwitch?.(entry.x_user_id);
-        onSuccess?.();
-        router.refresh();
       });
     },
     [

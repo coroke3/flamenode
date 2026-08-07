@@ -27,6 +27,7 @@ interface VideoUtilityDockProps {
 
   loginHref: string;
   settingsHref: string;
+  activeXId?: string | null;
 }
 
 const MOBILE_QUERY = "(max-width: 900px)";
@@ -44,6 +45,7 @@ export function VideoUtilityDock({
   canPost,
   loginHref,
   settingsHref,
+  activeXId,
 }: VideoUtilityDockProps): React.ReactElement {
   const pathname = usePathname();
   const dockRef = React.useRef<HTMLElement>(null);
@@ -250,6 +252,7 @@ export function VideoUtilityDock({
               canPost={canPost}
               loginHref={loginHref}
               settingsHref={settingsHref}
+              activeXId={activeXId}
             />
           </section>
         </div>

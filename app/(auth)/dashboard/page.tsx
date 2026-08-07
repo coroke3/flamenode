@@ -127,7 +127,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               eq(slotsTable.reserved_by_user_id, user.id),
             )!,
           )
-        : eq(slotsTable.reserved_by_user_id, user.id);
+        : and(
+            isNull(slotsTable.x_user_id),
+            eq(slotsTable.reserved_by_user_id, user.id),
+          )!;
       const slotRows = await db
         .select()
         .from(slotsTable)
@@ -185,8 +188,9 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
     }
   }
 
-  const activeXRow =
-    xIds.find((x) => x.id === user.active_x_user_id) ?? xIds[0] ?? null;
+  const activeXRow = user.active_x_user_id
+    ? xIds.find((x) => x.id === user.active_x_user_id) ?? null
+    : null;
   const dashboardName = activeXRow?.x_name ?? user.name ?? "FlameNode User";
   const dashboardHandle = activeXRow
     ? `@${activeXRow.id}`
@@ -327,6 +331,11 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         <Stat label="投稿作品" value={`${stats.video_count} 本`} />
         <Stat label="参加イベント" value={`${stats.event_count} 本`} />
       </section>
+      {xIds.length > 1 ? (
+        <p className="fn-muted fn-text-sm" style={{ marginBottom: 20 }}>
+          統計は連携済み名義の合算です。マイ・ギャラリーは Active X ID の作品のみ表示します。
+        </p>
+      ) : null}
 
       <section className={`fn-dash-section ${styles.section}`}>
         <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>連携 X ID</h2>

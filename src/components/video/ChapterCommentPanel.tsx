@@ -18,6 +18,7 @@ interface ChapterCommentPanelProps {
   canPost: boolean;
   loginHref: string;
   settingsHref: string;
+  activeXId?: string | null;
 }
 
 export function ChapterCommentPanel({
@@ -29,6 +30,7 @@ export function ChapterCommentPanel({
   canPost,
   loginHref,
   settingsHref,
+  activeXId,
 }: ChapterCommentPanelProps): React.ReactElement {
   const rootRef = React.useRef<HTMLElement>(null);
   const currentTime = usePlayerTime();
@@ -199,6 +201,7 @@ export function ChapterCommentPanel({
           </section>
         ) : (
           <ChapterComposer
+            key={`chapter:${videoId}:${activeXId ?? "unassigned"}`}
             videoId={videoId}
             canPost
             canBulk={false}
@@ -206,6 +209,7 @@ export function ChapterCommentPanel({
             active={composerOpen}
             presentation="inline-sheet"
             settingsHref={settingsHref}
+            activeXId={activeXId}
             onCancel={closeComposer}
             onSuccess={handleSuccess}
           />

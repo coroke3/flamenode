@@ -1,5 +1,9 @@
 /** 投稿枠の表示順・区切り・予約グループ表示に使う純粋ロジック。 */
 
+import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
+
+export type SlotIntegrityError = "mixed_status" | "mixed_viewer_relation";
+
 /**
  * 枠UIが受け取る最小形。
  *
@@ -16,6 +20,7 @@ export type SlotBase = {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   is_owned_by_viewer: boolean;
+  viewer_relation?: SlotViewerRelation;
   group_key: string | null;
   event_title?: string | null;
   /** @deprecated 旧UI読取境界。DB正本には存在しない。 */
@@ -37,6 +42,7 @@ export type SlotGroupRow = SlotBase & {
   group_id: string | null;
   group_size: number;
   is_group: boolean;
+  integrity_error: SlotIntegrityError | null;
 };
 
 export type SlotAnnotatedRow = SlotBase &
@@ -156,6 +162,7 @@ export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] 
         group_first_slot_id: row.id,
         group_last_slot_id: row.id,
         is_group: false,
+        integrity_error: null,
       };
     }
     const groupRows = sortSlotsChronologically(grouped.get(groupId) ?? [row]);
@@ -172,6 +179,7 @@ export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] 
       group_first_slot_id: first.id,
       group_last_slot_id: last.id,
       is_group: groupRows.length > 1,
+      integrity_error: null,
     };
   });
 }
@@ -184,18 +192,58 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
   return sorted.flatMap((row): SlotGroupRow[] => {
     const groupId = row.group_key;
     if (!groupId) {
-      return [{ ...row, slot_ids: [row.id], group_id: null, group_size: 1, is_group: false }];
+      return [
+        {
+          ...row,
+          slot_ids: [row.id],
+          group_id: null,
+          group_size: 1,
+          is_group: false,
+          integrity_error: null,
+        },
+      ];
     }
     if (seen.has(groupId)) return [];
     seen.add(groupId);
     const groupRows = sortSlotsChronologically(grouped.get(groupId) ?? [row]);
     const first = groupRows[0] ?? row;
     const last = groupRows.at(-1) ?? first;
-    const status = groupRows.some((candidate) => candidate.status === "submitted")
+    const hasReserved = groupRows.some(
+      (candidate) => candidate.status === "reserved",
+    );
+    const hasSubmitted = groupRows.some(
+      (candidate) => candidate.status === "submitted",
+    );
+    const status = hasSubmitted
       ? "submitted"
-      : groupRows.some((candidate) => candidate.status === "reserved")
+      : hasReserved
         ? "reserved"
         : "available";
+    let integrity_error: SlotIntegrityError | null = null;
+    if (hasReserved && hasSubmitted) {
+      integrity_error = "mixed_status";
+    } else {
+      const relations = groupRows
+        .map((candidate) => candidate.viewer_relation)
+        .filter((relation): relation is SlotViewerRelation => relation != null);
+      const distinctRelations = new Set(relations);
+      // active+unassigned は Server の null adoption と両立するため integrity エラーにしない。
+      // account_other / none との混在のみ安全側に倒す。
+      const actorOnly = [...distinctRelations].every(
+        (relation) => relation === "active" || relation === "unassigned",
+      );
+      if (distinctRelations.size > 1 && !actorOnly) {
+        integrity_error = "mixed_viewer_relation";
+      }
+    }
+    const resolvedViewerRelation = (() => {
+      const relations = groupRows
+        .map((candidate) => candidate.viewer_relation)
+        .filter((relation): relation is SlotViewerRelation => relation != null);
+      if (relations.includes("active")) return "active" as const;
+      if (relations.includes("unassigned")) return "unassigned" as const;
+      return first.viewer_relation;
+    })();
     const firstLabel = first.slot_label;
     const lastLabel = last.slot_label;
     const label =
@@ -209,14 +257,16 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
         status,
         display_name:
           groupRows.find((candidate) => candidate.display_name)?.display_name ?? null,
-        is_owned_by_viewer: groupRows.some(
-          (candidate) => candidate.is_owned_by_viewer,
-        ),
+        viewer_relation: resolvedViewerRelation,
+        is_owned_by_viewer: integrity_error
+          ? false
+          : groupRows.every((candidate) => candidate.is_owned_by_viewer),
         group_key: groupId,
         slot_ids: groupRows.map((candidate) => candidate.id),
         group_id: groupId,
         group_size: groupRows.length,
         is_group: groupRows.length > 1,
+        integrity_error,
       },
     ];
   });
