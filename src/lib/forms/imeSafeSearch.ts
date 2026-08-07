@@ -2,6 +2,15 @@
  * 公開検索フォームの IME / Enter 判定（DOM 非依存）。
  */
 
+/** ImeSafeGetForm が composition 中に form へ付与する属性名 */
+export const IME_COMPOSING_FORM_ATTR = "data-fn-ime-composing";
+
+export function isImeComposingForm(form: {
+  hasAttribute(name: string): boolean;
+}): boolean {
+  return form.hasAttribute(IME_COMPOSING_FORM_ATTR);
+}
+
 export type SearchKeyGuardInput = {
   key: string;
   shiftKey?: boolean;

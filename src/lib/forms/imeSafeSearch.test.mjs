@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  IME_COMPOSING_FORM_ATTR,
+  isImeComposingForm,
   shouldBlockSearchFormSubmit,
   shouldBlockSearchKeySubmit,
 } from "./imeSafeSearch.ts";
@@ -64,6 +66,21 @@ test("button submit（form submit）は composition 中だけ抑止", () => {
     shouldBlockSearchFormSubmit({ isCompositionSession: false }),
     false,
   );
+});
+
+test("isImeComposingForm は composing 属性の有無を返す", () => {
+  const withAttr = {
+    hasAttribute(name) {
+      return name === IME_COMPOSING_FORM_ATTR;
+    },
+  };
+  const withoutAttr = {
+    hasAttribute() {
+      return false;
+    },
+  };
+  assert.equal(isImeComposingForm(withAttr), true);
+  assert.equal(isImeComposingForm(withoutAttr), false);
 });
 
 test("stale composition が終われば次回検索は有効", () => {

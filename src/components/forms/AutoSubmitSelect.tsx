@@ -1,8 +1,7 @@
 "use client";
 
-
-
 import * as React from "react";
+import { isImeComposingForm } from "@/lib/forms/imeSafeSearch";
 
 
 
@@ -82,6 +81,7 @@ function submitParentForm(
   const form = e.currentTarget.form;
 
   if (!form) return;
+  if (isImeComposingForm(form)) return;
 
   navigateGetForm(form);
 

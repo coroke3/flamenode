@@ -205,6 +205,24 @@ test("list loaders use static pool size for shouldUseStaticCollection", () => {
   assert.doesNotMatch(searchBlock, /const itemCount = normalizedPage\?\.videos\.length/);
 });
 
+test("loadPublicEventVideosPage は heal 待ちのとき composed fallback を使わない", () => {
+  const eventListBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicEventVideosPage"),
+    loaderSource.indexOf("export async function loadStaticRulesPage"),
+  );
+  assert.match(eventListBlock, /const needsHeal = shouldEnqueueEventBaseListHeal/);
+  assert.match(eventListBlock, /if \(needsHeal\)/);
+  const composedFallbackBlock = eventListBlock.slice(
+    eventListBlock.indexOf("if (!needsHeal)"),
+    eventListBlock.indexOf("const db = getDatabase()"),
+  );
+  assert.match(composedFallbackBlock, /tryCachedOrR2\(composedKey\)/);
+  assert.doesNotMatch(
+    eventListBlock.slice(0, eventListBlock.indexOf("if (!needsHeal)")),
+    /tryCachedOrR2\(composedKey\)/,
+  );
+});
+
 test("loadPublicEventVideosPage は event_base R2 を優先しヒット時に getDatabase を呼ばない", () => {
   const eventListBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicEventVideosPage"),

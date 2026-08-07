@@ -3,6 +3,7 @@
 import * as React from "react";
 import { navigateGetForm } from "@/components/forms/AutoSubmitSelect";
 import {
+  IME_COMPOSING_FORM_ATTR,
   shouldBlockSearchFormSubmit,
   shouldBlockSearchKeySubmit,
 } from "@/lib/forms/imeSafeSearch";
@@ -53,14 +54,17 @@ export function ImeSafeGetForm({
       onCompositionStart={(event) => {
         clearCompositionEndTimer();
         composingRef.current = true;
+        event.currentTarget.setAttribute(IME_COMPOSING_FORM_ATTR, "");
         onCompositionStart?.(event);
       }}
       onCompositionEnd={(event) => {
         onCompositionEnd?.(event);
         // 確定 Enter と同じ tick での form submit を避ける（IME 自体は壊さない）
         clearCompositionEndTimer();
+        const form = event.currentTarget;
         compositionEndTimerRef.current = window.setTimeout(() => {
           composingRef.current = false;
+          form.removeAttribute(IME_COMPOSING_FORM_ATTR);
           compositionEndTimerRef.current = null;
         }, 0);
       }}

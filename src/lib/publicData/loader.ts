@@ -1028,7 +1028,8 @@ export async function loadPublicEventVideosPage(params: {
     probe: undefined,
   };
 
-  if (shouldEnqueueEventBaseListHeal(baseResult.payload, params.sort)) {
+  const needsHeal = shouldEnqueueEventBaseListHeal(baseResult.payload, params.sort);
+  if (needsHeal) {
     if (baseResult.payload === null) {
       void recordDegradedCircuitR2Miss();
     }
@@ -1041,14 +1042,17 @@ export async function loadPublicEventVideosPage(params: {
   }
 
   // 移行中: composed events/{id}.json があれば D1 を避けて一覧する（score 欠落時は非対応）
-  const composedResult = await tryCachedOrR2(composedKey);
-  if (composedResult.hit) {
-    return {
-      ...composedResult.hit,
-      enqueued: missMeta.enqueued,
-      rebuildState: missMeta.rebuildState,
-      probe: missMeta.probe,
-    };
+  // heal 待ちの stale base は legacy composed へ逃がさない
+  if (!needsHeal) {
+    const composedResult = await tryCachedOrR2(composedKey);
+    if (composedResult.hit) {
+      return {
+        ...composedResult.hit,
+        enqueued: missMeta.enqueued,
+        rebuildState: missMeta.rebuildState,
+        probe: missMeta.probe,
+      };
+    }
   }
 
   const db = getDatabase();

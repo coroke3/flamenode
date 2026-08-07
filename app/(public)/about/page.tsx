@@ -260,7 +260,7 @@ export default async function AboutPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
-      <section className={`fn-public-container fn-page-section ${styles.credits}`}>
+      <section className="fn-public-container fn-page-section">
         <header className={styles.sectionHead}>
           <p className="fn-eyebrow">CREDITS</p>
           <h2 className="fn-page-title fn-page-title--compact">制作クレジット</h2>
