@@ -5,7 +5,10 @@ import { Icon } from "@/components/ui/Icon";
 import {
   drawSquareIconPreview,
   encodeSquareIconFile,
+  isValidBitmap,
   loadOrientedImageBitmap,
+  sanitizeTransform,
+  validateIconImageFile,
   type SquareIconTransform,
 } from "@/lib/client/squareIconEncode";
 import styles from "./SquareIconEditor.module.css";
@@ -38,7 +41,14 @@ export function SquareIconEditor({
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const bitmapRef = React.useRef<ImageBitmap | null>(null);
   const mountedRef = React.useRef(true);
-  const dragRef = React.useRef<{ pointerId: number; startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  const loadGenerationRef = React.useRef(0);
+  const dragRef = React.useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+  } | null>(null);
 
   const [sourceFile, setSourceFile] = React.useState<File | null>(null);
   const [bitmap, setBitmap] = React.useState<ImageBitmap | null>(null);
@@ -58,10 +68,22 @@ export function SquareIconEditor({
     target?.close();
   }, []);
 
+  const clearImageState = React.useCallback(() => {
+    releaseBitmap(bitmapRef.current);
+    bitmapRef.current = null;
+    setBitmap(null);
+    setSourceFile(null);
+    setTransform({ offsetX: 0, offsetY: 0, scale: DEFAULT_SCALE });
+    setDragging(false);
+    dragRef.current = null;
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [releaseBitmap]);
+
   React.useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      loadGenerationRef.current += 1;
       releaseBitmap(bitmapRef.current);
       bitmapRef.current = null;
     };
@@ -69,48 +91,76 @@ export function SquareIconEditor({
 
   const redraw = React.useCallback(
     (target: ImageBitmap, nextTransform: SquareIconTransform) => {
+      if (!isValidBitmap(target)) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      drawSquareIconPreview(ctx, target, VIEWPORT_SIZE, nextTransform);
+      try {
+        drawSquareIconPreview(ctx, target, VIEWPORT_SIZE, nextTransform);
+      } catch {
+        setError("画像のプレビューに失敗しました。画像を選択し直してください。");
+      }
     },
     [],
   );
 
   React.useEffect(() => {
-    if (!bitmap) return;
+    if (!bitmap || !isValidBitmap(bitmap)) return;
     redraw(bitmap, transform);
   }, [bitmap, transform, redraw]);
 
   const resetEditor = React.useCallback(() => {
-    releaseBitmap(bitmapRef.current);
-    bitmapRef.current = null;
-    setBitmap(null);
-    setSourceFile(null);
-    setTransform({ offsetX: 0, offsetY: 0, scale: DEFAULT_SCALE });
+    clearImageState();
     setError(null);
-    setDragging(false);
-    dragRef.current = null;
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [releaseBitmap]);
+  }, [clearImageState]);
 
   const onPickFile = async (file: File | null) => {
     if (!file || busy) return;
+
+    try {
+      validateIconImageFile(file);
+    } catch (validationError) {
+      setError(
+        validationError instanceof Error
+          ? validationError.message
+          : "画像ファイルが無効です。",
+      );
+      return;
+    }
+
+    const generation = ++loadGenerationRef.current;
     setError(null);
     setLoading(true);
     try {
       const nextBitmap = await loadOrientedImageBitmap(file);
-      releaseBitmap(bitmapRef.current);
+      if (generation !== loadGenerationRef.current) {
+        releaseBitmap(nextBitmap);
+        return;
+      }
+      if (!mountedRef.current) {
+        releaseBitmap(nextBitmap);
+        return;
+      }
+
+      const previous = bitmapRef.current;
       bitmapRef.current = nextBitmap;
       setBitmap(nextBitmap);
       setSourceFile(file);
       setTransform({ offsetX: 0, offsetY: 0, scale: DEFAULT_SCALE });
-    } catch {
-      setError("画像の読み込みに失敗しました。別のファイルをお試しください。");
-      resetEditor();
+      releaseBitmap(previous);
+    } catch (pickError) {
+      if (generation !== loadGenerationRef.current || !mountedRef.current) return;
+      setError(
+        pickError instanceof Error
+          ? pickError.message
+          : "画像の読み込みに失敗しました。別のファイルをお試しください。",
+      );
+      clearImageState();
     } finally {
-      setLoading(false);
+      if (mountedRef.current && generation === loadGenerationRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -130,11 +180,16 @@ export function SquareIconEditor({
   const onPointerMove = (ev: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== ev.pointerId) return;
-    setTransform((prev) => ({
-      ...prev,
-      offsetX: drag.baseX + (ev.clientX - drag.startX),
-      offsetY: drag.baseY + (ev.clientY - drag.startY),
-    }));
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (!(rect.width > 0) || !(rect.height > 0)) return;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY)) return;
+    const offsetX = drag.baseX + (ev.clientX - drag.startX) * scaleX;
+    const offsetY = drag.baseY + (ev.clientY - drag.startY) * scaleY;
+    setTransform((prev) => sanitizeTransform({ ...prev, offsetX, offsetY }, MIN_SCALE, MAX_SCALE));
   };
 
   const endDrag = (ev: React.PointerEvent<HTMLCanvasElement>) => {
@@ -165,8 +220,16 @@ export function SquareIconEditor({
     }
   };
 
+  const onScaleChange = (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = Number(ev.currentTarget.value);
+    const nextScale = Number.isFinite(raw)
+      ? Math.min(MAX_SCALE, Math.max(MIN_SCALE, raw))
+      : DEFAULT_SCALE;
+    setTransform((prev) => sanitizeTransform({ ...prev, scale: nextScale }, MIN_SCALE, MAX_SCALE));
+  };
+
   const onConfirm = async () => {
-    if (!bitmap || !sourceFile || busy) return;
+    if (!bitmap || !sourceFile || busy || encoding || pending || disabled) return;
     setError(null);
     setEncoding(true);
     try {
@@ -259,9 +322,7 @@ export function SquareIconEditor({
             value={transform.scale}
             disabled={busy}
             aria-label="拡大率"
-            onChange={(ev) =>
-              setTransform((prev) => ({ ...prev, scale: Number(ev.currentTarget.value) }))
-            }
+            onChange={onScaleChange}
           />
         </div>
         <div className={styles.actions}>

@@ -14,8 +14,8 @@ export default function AuthError({
   return (
     <div className="fn-public-container fn-page">
       <header className="fn-page-head">
-        <span className="fn-eyebrow">auth</span>
-        <h1 className="fn-display fn-page-title">認証画面で問題が発生しました</h1>
+        <span className="fn-eyebrow">error</span>
+        <h1 className="fn-display fn-page-title">画面の表示中に問題が発生しました</h1>
       </header>
       <section className="fn-entry-status fn-entry-status--warn" role="alert">
         <div>
