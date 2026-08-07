@@ -1,4 +1,5 @@
 import { normalizeStaticEventsIndex } from "../../src/lib/publicData/staticEventsIndexCore.ts";
+import { PUBLIC_JSON_CACHE_TTL_SEC } from "../../src/lib/publicData/publicJsonCacheTtl.ts";
 import {
   computeEventStatus,
   type EventStatusInput,
@@ -8,9 +9,12 @@ export const RANKING_LAST_SCORE_REBUILD_KV_KEY = "ranking:last-score-rebuild";
 export const SCORE_REBUILD_ACTIVE_INTERVAL_SEC = 3600;
 export const SCORE_REBUILD_INACTIVE_INTERVAL_SEC = 10800;
 export const EVENTS_INDEX_R2_KEY = "events/index.json";
+export const EVENTS_INDEX_STALE_MAX_AGE_SEC =
+  PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex * 2;
 const D1_ACTIVE_EVENT_FALLBACK_LIMIT = 50;
 
 const SCORE_REBUILD_TARGETS = ["top", "list_popular", "recommend"] as const;
+type ScoreRebuildTarget = (typeof SCORE_REBUILD_TARGETS)[number];
 
 export type ScoreRebuildEnqueueEnv = {
   DB: D1Database;
@@ -95,6 +99,22 @@ export async function writeLastScoreRebuildMarker(
   await kv.put(RANKING_LAST_SCORE_REBUILD_KV_KEY, String(nowUnix));
 }
 
+export function isEventsIndexPayloadStale(
+  generatedAt: number | null,
+  nowUnix: number,
+  maxAgeSec: number = EVENTS_INDEX_STALE_MAX_AGE_SEC,
+): boolean {
+  if (generatedAt == null) return true;
+  return nowUnix - generatedAt > maxAgeSec;
+}
+
+function parseEventsIndexGeneratedAt(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const parsed = Number((payload as { generated_at?: unknown }).generated_at);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
 function collectEventsFromIndex(
   payload: unknown,
 ): EventStatusInput[] | null {
@@ -123,6 +143,9 @@ async function resolveHasActiveOngoingEventFromR2(
     if (!object) return null;
     const payload = await object.json();
     signal?.throwIfAborted();
+    if (isEventsIndexPayloadStale(parseEventsIndexGeneratedAt(payload), nowUnix)) {
+      return null;
+    }
     const events = collectEventsFromIndex(payload);
     if (!events) return null;
     return {
@@ -192,6 +215,34 @@ export async function shouldThrottleScoreDependentRebuild(
   return shouldSkipScoreRebuildEnqueue(lastMarker, nowUnix, intervalSec);
 }
 
+async function isUsersIndexRebuildInFlight(
+  env: Pick<ScoreRebuildEnqueueEnv, "DB">,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted();
+  try {
+    const row = await env.DB.prepare(
+      `SELECT 1 AS active
+         FROM static_rebuild_queue
+        WHERE target_type = 'users_index'
+          AND target_id = 'global'
+          AND status IN ('pending', 'processing')
+        LIMIT 1`,
+    ).first<{ active?: number }>();
+    signal?.throwIfAborted();
+    return row?.active === 1;
+  } catch {
+    return false;
+  }
+}
+
+function resolveScoreRebuildTargets(
+  usersIndexInFlight: boolean,
+): readonly ScoreRebuildTarget[] {
+  if (!usersIndexInFlight) return SCORE_REBUILD_TARGETS;
+  return SCORE_REBUILD_TARGETS.filter((targetType) => targetType === "list_popular");
+}
+
 export async function enqueueScoreDependentRebuilds(
   env: ScoreRebuildEnqueueEnv,
   signal?: AbortSignal,
@@ -211,7 +262,22 @@ export async function enqueueScoreDependentRebuilds(
     };
   }
 
-  const statements = SCORE_REBUILD_TARGETS.map((targetType) =>
+  const targets = resolveScoreRebuildTargets(
+    await isUsersIndexRebuildInFlight(env, signal),
+  );
+  if (targets.length === 0) {
+    return {
+      processed: 0,
+      failed: 0,
+      skipped: 1,
+      external_api_calls: 0,
+      d1_changes: 0,
+      retry_count: 0,
+      quota_stopped: false,
+    };
+  }
+
+  const statements = targets.map((targetType) =>
     env.DB.prepare(
       `INSERT OR IGNORE INTO static_rebuild_queue (
          id, target_type, target_id, reason, priority, status,
