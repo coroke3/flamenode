@@ -52,14 +52,17 @@ const enqueueSource = readFileSync(
   path.join(root, "src/lib/staticRebuild/enqueue.ts"),
   "utf8",
 );
-assert.match(enqueueSource, /shouldUseIncomingQueueMetadata/);
-assert.doesNotMatch(
-  enqueueSource.slice(
-    enqueueSource.indexOf("export async function buildStaticRebuildQueueBatch"),
-    enqueueSource.indexOf("async function shouldSkipRecentEnqueue"),
-  ),
-  /shouldSkipRecentRow/,
+const batchBuilderSource = enqueueSource.slice(
+  enqueueSource.indexOf("export async function buildStaticRebuildQueueBatch"),
+  enqueueSource.indexOf("async function shouldSkipRecentEnqueue"),
 );
+assert.match(batchBuilderSource, /FROM json_each\(\$\{payload\}\)/);
+assert.match(
+  batchBuilderSource,
+  /ON CONFLICT\(target_type, target_id\) WHERE status IN \('pending', 'processing'\)/,
+);
+assert.doesNotMatch(batchBuilderSource, /shouldSkipRecentRow/);
+assert.doesNotMatch(batchBuilderSource, /\.select\(staticRebuildActiveLookupSelect\)/);
 
 const loaderSource = readFileSync(
   path.join(root, "src/lib/publicData/loader.ts"),

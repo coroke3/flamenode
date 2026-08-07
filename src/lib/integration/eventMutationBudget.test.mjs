@@ -96,6 +96,7 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
   assert.match(transition, /expectedRowCondition\(\{ expectedCurrent: \{ \.\.\.input\.video \} \}\)/);
   assert.match(transition, /before: \{ \.\.\.input\.video \}/);
   assert.match(transition, /after: \{ \.\.\.after \}/);
+  assert.match(action, /mutateWithAudit/);
   assert.match(action, /planD1AuditMutationBudget/);
   assert.match(
     action,
@@ -107,27 +108,28 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
   assert.doesNotMatch(hooks, /activeByEventId|lease_token:\s*null/);
 
   assert.match(enqueue, /MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*16/);
-  assert.match(enqueue, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT\s*=\s*1/);
-  assert.match(enqueue, /const activeRows = await db/);
-  assert.equal(
-    (enqueue.match(/\.limit\(MAX_STATIC_REBUILD_BATCH_TARGETS \+ 1\)/g) ?? [])
-      .length,
-    1,
-  );
+  assert.match(enqueue, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT\s*=\s*0/);
+  assert.match(enqueue, /FROM json_each\(\$\{payload\}\)/);
   assert.doesNotMatch(enqueue, /lease_token:\s*null/);
   assert.match(
     enqueue,
-    /eq\([\s\S]*?staticRebuildQueue\.lease_token,[\s\S]*?item\.row\.lease_token/,
+    /ON CONFLICT\(target_type, target_id\) WHERE status IN \('pending', 'processing'\)/,
   );
-  assert.match(enqueue, /isNull\(staticRebuildQueue\.lease_token\)/);
+  assert.doesNotMatch(
+    enqueue.slice(
+      enqueue.indexOf("export async function buildStaticRebuildQueueBatch"),
+      enqueue.indexOf("async function shouldSkipRecentEnqueue"),
+    ),
+    /\.select\(staticRebuildActiveLookupSelect\)/,
+  );
 
   const ownActionReads = 3;
   const permissionReads = 2;
   const notificationReads = 2;
-  const queueReads = 1;
+  const queueReads = 0;
   assert.equal(
     ownActionReads + permissionReads + notificationReads + queueReads,
-    8,
+    7,
   );
-  assert.ok(8 <= D1_RESERVED_CALLER_QUERIES);
+  assert.ok(7 <= D1_RESERVED_CALLER_QUERIES);
 });

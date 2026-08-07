@@ -6,12 +6,7 @@ import { staticRebuildQueue } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
 import {
-  indexUniqueStaticRebuildTargetRows,
-  staticRebuildTargetKey,
-} from "./queueBatchCore";
-import {
   staticRebuildActiveLookupSelect,
-  type StaticRebuildActiveLookupRow,
 } from "./activeLookupColumns";
 import type { QueueWakeKind, QueueWakeSource } from "@/lib/queues/wakeBudget";
 import type { QueueSendBinding } from "@/lib/queues/sendQueueWakeBestEffort";
@@ -68,9 +63,8 @@ const DEFAULT_DONE_COOLDOWN_SEC = 60;
 const ENQUEUE_MANY_CONCURRENCY = 4;
 const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
 export const MAX_STATIC_REBUILD_BATCH_TARGETS = 16;
-export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 1;
-export const STATIC_REBUILD_BULK_UPDATE_ROWS = 6;
-export const STATIC_REBUILD_BULK_INSERT_ROWS = 10;
+export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0;
+export const STATIC_REBUILD_BULK_UPSERT_ROWS = 10;
 
 export type StaticRebuildQueueBatch = {
   statements: BatchItem<"sqlite">[];
@@ -80,7 +74,7 @@ export type StaticRebuildQueueBatch = {
 
 /**
  * Event Group mutation と同じ D1 batch に queue write を含めるための builder。
- * done/failed 履歴の cooldown では要求を捨てない。active 行があれば CAS UPDATE、なければ INSERT。
+ * done/failed 履歴の cooldown では要求を捨てない。active 行は partial unique UPSERT、なければ INSERT。
  */
 export async function buildStaticRebuildQueueBatch(
   db: DB,
@@ -101,154 +95,66 @@ export async function buildStaticRebuildQueueBatch(
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: number[] = [];
   const now = Math.floor(Date.now() / 1000);
-  const targetCondition = or(
-    ...normalizedItems.map((input) =>
-      and(
-        eq(staticRebuildQueue.target_type, input.targetType),
-        eq(staticRebuildQueue.target_id, input.targetId),
-      ),
-    ),
-  )!;
-
-  const activeRows = await db
-    .select(staticRebuildActiveLookupSelect)
-    .from(staticRebuildQueue)
-    .where(
-      and(
-        targetCondition,
-        inArray(staticRebuildQueue.status, ["pending", "processing"]),
-      ),
-    )
-    .limit(MAX_STATIC_REBUILD_BATCH_TARGETS + 1);
-
-  const activeByTarget = indexUniqueStaticRebuildTargetRows(activeRows, {
-    maxRows: MAX_STATIC_REBUILD_BATCH_TARGETS,
-    label: "active",
-  });
-
-  const activeUpdates: Array<{
-    row: StaticRebuildActiveLookupRow;
-    reason: string;
-    priority: "high" | "normal" | "low";
-    requestedByUserId: string | null;
-  }> = [];
-  const inserts: (typeof staticRebuildQueue.$inferInsert)[] = [];
-  for (const normalized of normalizedItems) {
-    const row = activeByTarget.get(
-      staticRebuildTargetKey(normalized.targetType, normalized.targetId),
-    );
-    if (row?.status === "pending" || row?.status === "processing") {
-      const incomingPriority = (normalized.priority ?? "normal") as StaticRebuildPriority;
-      const existingPriority = row.priority;
-      const mergedPriority = pickHigherPriority(existingPriority, incomingPriority);
-      const useIncomingMetadata = shouldUseIncomingQueueMetadata(
-        existingPriority,
-        incomingPriority,
-      );
-      activeUpdates.push({
-        row,
-        reason: useIncomingMetadata
-          ? normalized.reason
-          : row.reason ?? normalized.reason,
-        priority: mergedPriority,
-        requestedByUserId:
-          normalized.requestedByUserId ?? row.requested_by_user_id,
-      });
-      continue;
-    }
-
-    inserts.push({
-      id: generateId("srb"),
-      target_type: normalized.targetType,
-      target_id: normalized.targetId,
-      reason: normalized.reason,
-      priority: normalized.priority ?? "normal",
-      status: "pending",
-      requested_by_user_id: normalized.requestedByUserId ?? null,
-      created_at: now,
-      updated_at: now,
-    });
-  }
+  const rows = normalizedItems.map((item) => ({
+    id: generateId("srb"),
+    target_type: item.targetType,
+    target_id: item.targetId,
+    reason: item.reason,
+    priority: item.priority ?? "normal",
+    requested_by_user_id: item.requestedByUserId ?? null,
+  }));
 
   for (
     let offset = 0;
-    offset < activeUpdates.length;
-    offset += STATIC_REBUILD_BULK_UPDATE_ROWS
+    offset < rows.length;
+    offset += STATIC_REBUILD_BULK_UPSERT_ROWS
   ) {
-    const chunk = activeUpdates.slice(
-      offset,
-      offset + STATIC_REBUILD_BULK_UPDATE_ROWS,
-    );
+    const chunk = rows.slice(offset, offset + STATIC_REBUILD_BULK_UPSERT_ROWS);
+    const payload = JSON.stringify(chunk);
     statements.push(
-      db
-        .update(staticRebuildQueue)
-        .set({
-          reason: sql<string>`CASE ${staticRebuildQueue.id} ${sql.join(
-            chunk.map(
-              (item) => sql`WHEN ${item.row.id} THEN ${item.reason}`,
-            ),
-            sql` `,
-          )} ELSE ${staticRebuildQueue.reason} END`,
-          priority: sql<"high" | "normal" | "low">`CASE ${
-            staticRebuildQueue.id
-          } ${sql.join(
-            chunk.map(
-              (item) => sql`WHEN ${item.row.id} THEN ${item.priority}`,
-            ),
-            sql` `,
-          )} ELSE ${staticRebuildQueue.priority} END`,
-          requested_by_user_id: sql<string | null>`CASE ${
-            staticRebuildQueue.id
-          } ${sql.join(
-            chunk.map(
-              (item) =>
-                sql`WHEN ${item.row.id} THEN ${item.requestedByUserId}`,
-            ),
-            sql` `,
-          )} ELSE ${staticRebuildQueue.requested_by_user_id} END`,
-          updated_at: sql<number>`CASE ${staticRebuildQueue.id} ${sql.join(
-            chunk.map(
-              (item) =>
-                sql`WHEN ${item.row.id} THEN MAX(${item.row.updated_at} + 1, ${now})`,
-            ),
-            sql` `,
-          )} ELSE ${staticRebuildQueue.updated_at} END`,
-        })
-        .where(
-          or(
-            ...chunk.map(
-              (item) =>
-                and(
-                  eq(staticRebuildQueue.id, item.row.id),
-                  eq(staticRebuildQueue.status, item.row.status),
-                  eq(staticRebuildQueue.updated_at, item.row.updated_at),
-                  item.row.lease_token
-                    ? eq(
-                        staticRebuildQueue.lease_token,
-                        item.row.lease_token,
-                      )
-                    : isNull(staticRebuildQueue.lease_token),
-                )!,
-            ),
-          )!,
-        ),
+      db.run(sql`
+        INSERT INTO static_rebuild_queue (
+          id, target_type, target_id, reason, priority, status,
+          attempt_count, requested_by_user_id, created_at, updated_at
+        )
+        SELECT
+          json_extract(incoming.value, '$.id'),
+          json_extract(incoming.value, '$.target_type'),
+          json_extract(incoming.value, '$.target_id'),
+          json_extract(incoming.value, '$.reason'),
+          json_extract(incoming.value, '$.priority'),
+          'pending', 0,
+          json_extract(incoming.value, '$.requested_by_user_id'),
+          ${now}, ${now}
+        FROM json_each(${payload}) AS incoming
+        WHERE 1 = 1
+        ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
+        DO UPDATE SET
+          reason = CASE
+            WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END)
+              >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END)
+            THEN excluded.reason
+            ELSE static_rebuild_queue.reason
+          END,
+          priority = CASE
+            WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high'
+            WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal'
+            ELSE 'low'
+          END,
+          requested_by_user_id = COALESCE(
+            excluded.requested_by_user_id,
+            static_rebuild_queue.requested_by_user_id
+          ),
+          updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)
+      `),
     );
-    expectedChanges.push(chunk.length);
-  }
-  for (
-    let offset = 0;
-    offset < inserts.length;
-    offset += STATIC_REBUILD_BULK_INSERT_ROWS
-  ) {
-    const chunk = inserts.slice(offset, offset + STATIC_REBUILD_BULK_INSERT_ROWS);
-    statements.push(db.insert(staticRebuildQueue).values(chunk));
     expectedChanges.push(chunk.length);
   }
 
   return {
     statements,
     expectedChanges,
-    acceptedTargetCount: activeUpdates.length + inserts.length,
+    acceptedTargetCount: normalizedItems.length,
   };
 }
 
