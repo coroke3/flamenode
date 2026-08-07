@@ -56,7 +56,6 @@ if (!runningWithTsx) {
         target_type TEXT NOT NULL,
         target_id TEXT NOT NULL
       );
-      ${["CREATE", "TABLE"].join(" ")} notification_outbox (id TEXT PRIMARY KEY);
       ${["CREATE", "TABLE"].join(" ")} audit_logs (id TEXT PRIMARY KEY);
       INSERT INTO slots VALUES
         ('slot-a', 'reserved', 'group-1', 1),
@@ -86,8 +85,7 @@ if (!runningWithTsx) {
               continue;
             }
             state.generatedItems += 1;
-            // slot UPDATE/changes() x3、queue/changes() の後が audit INSERT。
-            if (state.generatedItems === 5) {
+            if (state.generatedItems === 4) {
               sqlite.exec(
                 "INSERT INTO audit_logs VALUES ('audit-a'), ('audit-b'), ('audit-c')",
               );
@@ -133,16 +131,6 @@ if (!runningWithTsx) {
     },
   };
 
-  const notificationMutation = {
-    label: "notification",
-    _prepare: makePrepare,
-    apply(sqlite) {
-      sqlite
-        .prepare("INSERT INTO notification_outbox VALUES (?)")
-        .run("notification-1");
-    },
-  };
-
   async function execute(failAt) {
     const { db, sqlite } = createHarness(failAt);
     const promise = mutateWithAudit(db, {
@@ -151,9 +139,8 @@ if (!runningWithTsx) {
         slotMutation("slot-b", true),
         slotMutation("slot-c", false),
         queueMutation,
-        notificationMutation,
       ],
-      expectedMutationChanges: [1, 1, 1, 1, null],
+      expectedMutationChanges: [1, 1, 1, 1],
       audits: ["slot-a", "slot-b", "slot-c"].map((id) => ({
         table_name: "slots",
         target_id: id,
@@ -173,8 +160,8 @@ if (!runningWithTsx) {
     return sqlite;
   }
 
-  for (const failAt of ["conflict", "queue", "notification", "audit"]) {
-    test(`${failAt}失敗時にslot・queue・通知・auditを全てrollbackする`, async () => {
+  for (const failAt of ["conflict", "queue", "audit"]) {
+    test(`${failAt}失敗時にslot・queue・auditを全てrollbackする`, async () => {
       const sqlite = await execute(failAt);
       const expectedVersion = failAt === "conflict" ? 9 : 1;
       assert.deepEqual(
@@ -191,13 +178,12 @@ if (!runningWithTsx) {
         ],
       );
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS c FROM static_rebuild_queue").get().c, 0);
-      assert.equal(sqlite.prepare("SELECT COUNT(*) AS c FROM notification_outbox").get().c, 0);
       assert.equal(sqlite.prepare("SELECT COUNT(*) AS c FROM audit_logs").get().c, 0);
       sqlite.close();
     });
   }
 
-  test("slot・queue・通知・完全auditを同時commitする", async () => {
+  test("slot・queue・完全auditを同時commitする（通知はpost-commit）", async () => {
     const sqlite = await execute(null);
     assert.deepEqual(
       sqlite
@@ -213,8 +199,21 @@ if (!runningWithTsx) {
       ],
     );
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS c FROM static_rebuild_queue").get().c, 1);
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS c FROM notification_outbox").get().c, 1);
     assert.equal(sqlite.prepare("SELECT COUNT(*) AS c FROM audit_logs").get().c, 3);
+    sqlite.close();
+  });
+
+  test("CAS競合時に部分更新を残さない", async () => {
+    const sqlite = await execute("conflict");
+    const rows = sqlite
+      .prepare("SELECT id, version FROM slots ORDER BY id")
+      .all()
+      .map((row) => ({ ...row }));
+    assert.deepEqual(rows, [
+      { id: "slot-a", version: 1 },
+      { id: "slot-b", version: 9 },
+      { id: "slot-c", version: 1 },
+    ]);
     sqlite.close();
   });
 }

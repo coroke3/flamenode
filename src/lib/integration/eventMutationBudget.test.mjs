@@ -99,6 +99,7 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
   assert.match(action, /executeVideoVisibilityStatusMutation/);
   assert.match(action, /planD1AuditMutationBudget/);
   assert.match(action, /loadVideoRebuildEventIds/);
+  assert.match(action, /handleVideoVisibilityMutationFailure/);
 
   assert.match(hooks, /MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS\s*=\s*8/);
   assert.match(hooks, /return buildStaticRebuildQueueBatch\(db, items\)/);

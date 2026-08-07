@@ -35,6 +35,87 @@ export type SlotReservationAmbiguousReport = {
   eventId?: string | null;
 };
 
+export type SlotReservationSubject = {
+  reservedByUserId: string;
+  xUserId: string | null;
+  displayName: string | null;
+};
+
+const SUBJECT_AMBIGUITY_KINDS: ReadonlySet<SlotReservationAmbiguity> = new Set([
+  "mixed_auth_user",
+  "mixed_x_user",
+  "mixed_display_name",
+  "cross_event",
+]);
+
+function trimDisplayName(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function strictFieldEqual<T>(values: readonly T[]): boolean {
+  if (values.length === 0) return true;
+  const first = values[0];
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] !== first) return false;
+  }
+  return true;
+}
+
+export function subjectsEqual(
+  a: SlotReservationSubject,
+  b: SlotReservationSubject,
+): boolean {
+  if (a.reservedByUserId !== b.reservedByUserId) return false;
+  if (a.xUserId !== b.xUserId) return false;
+  return trimDisplayName(a.displayName) === trimDisplayName(b.displayName);
+}
+
+export function resolveSlotReservationSubject(
+  rows: readonly SlotReservationSubjectRow[],
+): { ok: true; subject: SlotReservationSubject } | { ok: false; reason: string } {
+  if (rows.length === 0) {
+    return { ok: false, reason: "empty_rows" };
+  }
+
+  const rowIds = new Set(rows.map((row) => row.id));
+  for (const report of collectSlotReservationAmbiguities(rows)) {
+    if (!SUBJECT_AMBIGUITY_KINDS.has(report.kind)) continue;
+    if (report.slotIds.some((slotId) => rowIds.has(slotId))) {
+      return { ok: false, reason: report.kind };
+    }
+  }
+
+  if (!strictFieldEqual(rows.map((row) => row.event_id))) {
+    return { ok: false, reason: "cross_event" };
+  }
+  if (!strictFieldEqual(rows.map((row) => row.reserved_by_user_id))) {
+    return { ok: false, reason: "mixed_auth_user" };
+  }
+  if (!strictFieldEqual(rows.map((row) => row.x_user_id))) {
+    return { ok: false, reason: "mixed_x_user" };
+  }
+  if (
+    !strictFieldEqual(rows.map((row) => trimDisplayName(row.display_name)))
+  ) {
+    return { ok: false, reason: "mixed_display_name" };
+  }
+
+  const reservedByUserId = rows[0]?.reserved_by_user_id?.trim() ?? "";
+  if (!reservedByUserId) {
+    return { ok: false, reason: "missing_auth_user" };
+  }
+
+  return {
+    ok: true,
+    subject: {
+      reservedByUserId,
+      xUserId: rows[0]?.x_user_id ?? null,
+      displayName: trimDisplayName(rows[0]?.display_name),
+    },
+  };
+}
+
 function uniqueNonEmpty(values: readonly (string | null | undefined)[]): string[] {
   return [
     ...new Set(

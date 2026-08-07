@@ -1,8 +1,11 @@
 import "server-only";
 
+import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { expectedRowCondition } from "@/lib/audit/adapters";
+import { AuditMutationError } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import type { DB } from "@/lib/db/client";
 import { publicVisibilityFences, videos } from "@/lib/db/schema";
@@ -10,6 +13,10 @@ import {
   buildVideoStatusChangeNotificationBatch,
   type VideoStatusNotificationBatch,
 } from "@/lib/notifications/videoStatusNotify";
+import {
+  createTraceId,
+  logFlowTrace,
+} from "@/lib/observability/flowTrace";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
 import {
   readPublicVisibilityBlockedEntitiesManifest,
@@ -17,12 +24,15 @@ import {
 } from "@/lib/publicData/publicVisibilityManifest";
 import {
   isEntityBlockedInManifest,
+  releaseBlockedEntityInManifest,
   upsertBlockedEntityInManifest,
 } from "@/lib/publicData/publicVisibilityManifestCore";
+import { getPublicVisibilityFence } from "@/lib/publicData/publicVisibilityFenceStore";
 import {
   buildAfterVideoStatusChangeQueueBatch,
 } from "@/lib/staticRebuild/hooks";
 import type { StaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import type { QueueWakeSource } from "@/lib/queues/wakeBudget";
 
 const EMPTY_QUEUE_BATCH: StaticRebuildQueueBatch = {
   statements: [],
@@ -224,14 +234,8 @@ export async function planVideoVisibilityTransition(
       })
     : EMPTY_QUEUE_BATCH;
 
-  mutationStatements.push(
-    ...notificationBatch.statements,
-    ...queueBatch.statements,
-  );
-  expectedMutationChanges.push(
-    ...notificationBatch.expectedChanges,
-    ...queueBatch.expectedChanges,
-  );
+  mutationStatements.push(...queueBatch.statements);
+  expectedMutationChanges.push(...queueBatch.expectedChanges);
 
   const publicCacheKeys =
     depublicizedFromPublic ? [videoPublicCacheKey(input.video)] : [];
@@ -294,4 +298,235 @@ export async function runVideoVisibilityTransitionPostCommit(input: {
     await deletePublicJsonCaches(input.publicCacheKeys);
   }
   input.revalidate();
+}
+
+const DEPUBLICIZATION_COMPENSATION_MAX_RETRIES = 3;
+
+function visibilityErrorCode(error: unknown): string {
+  if (error instanceof AuditMutationError) return error.name;
+  if (error instanceof Error && error.name) return error.name;
+  return "UnknownError";
+}
+
+/** D1 mutation 失敗後、安全な場合のみ R2 manifest の block を解除する。 */
+export async function compensateDepublicizationFenceOnD1Failure(
+  db: DB,
+  input: {
+    videoId: string;
+    fenceToken: string;
+    traceId: string;
+  },
+): Promise<void> {
+  const video = (
+    await db
+      .select({ visibility_status: videos.visibility_status })
+      .from(videos)
+      .where(eq(videos.id, input.videoId))
+      .limit(1)
+  )[0];
+  if (!video || video.visibility_status !== "public") {
+    logFlowTrace({
+      flow: "video_visibility_depublicize",
+      phase: "compensate_skipped",
+      trace_id: input.traceId,
+      result: "skipped",
+      error_code: "video_not_public",
+    });
+    return;
+  }
+
+  const fence = await getPublicVisibilityFence(db, "video", input.videoId);
+  if (
+    fence &&
+    fence.state === "blocked" &&
+    fence.fence_token === input.fenceToken
+  ) {
+    logFlowTrace({
+      flow: "video_visibility_depublicize",
+      phase: "compensate_skipped",
+      trace_id: input.traceId,
+      result: "skipped",
+      error_code: "d1_fence_confirmed",
+    });
+    return;
+  }
+
+  for (
+    let attempt = 0;
+    attempt < DEPUBLICIZATION_COMPENSATION_MAX_RETRIES;
+    attempt += 1
+  ) {
+    const { manifest, etag } =
+      await readPublicVisibilityBlockedEntitiesManifest();
+    const entry = manifest.entities.find(
+      (row) =>
+        row.entity_type === "video" && row.entity_id === input.videoId,
+    );
+    if (!entry || entry.fence_token !== input.fenceToken) {
+      logFlowTrace({
+        flow: "video_visibility_depublicize",
+        phase: "compensate_skipped",
+        trace_id: input.traceId,
+        result: "skipped",
+        error_code: entry ? "r2_token_mismatch" : "r2_entry_missing",
+      });
+      return;
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const released = releaseBlockedEntityInManifest(
+      manifest,
+      "video",
+      input.videoId,
+      input.fenceToken,
+      now,
+    );
+    if (!released) {
+      logFlowTrace({
+        flow: "video_visibility_depublicize",
+        phase: "compensate_skipped",
+        trace_id: input.traceId,
+        result: "skipped",
+        error_code: "release_manifest_rejected",
+      });
+      return;
+    }
+    try {
+      await writePublicVisibilityBlockedEntitiesManifest(released, {
+        ifMatchEtag: etag,
+      });
+      logFlowTrace({
+        flow: "video_visibility_depublicize",
+        phase: "compensate_succeeded",
+        trace_id: input.traceId,
+        result: "succeeded",
+        committed: true,
+      });
+      return;
+    } catch (error) {
+      if (attempt === DEPUBLICIZATION_COMPENSATION_MAX_RETRIES - 1) {
+        const error_code = visibilityErrorCode(error);
+        logFlowTrace({
+          flow: "video_visibility_depublicize",
+          phase: "compensate_failed",
+          trace_id: input.traceId,
+          result: "failed",
+          error_code,
+        });
+        console.warn(
+          JSON.stringify({
+            service: "visibility_fence",
+            flow: "video_visibility_depublicize",
+            trace_id: input.traceId,
+            video_id: input.videoId,
+            fence_token: input.fenceToken,
+            stuck_fence_candidate: true,
+            error_code,
+          }),
+        );
+      }
+    }
+  }
+}
+
+export async function enqueueVideoVisibilityNotificationsPostCommit(
+  db: DB,
+  notificationBatch: VideoStatusNotificationBatch,
+  context: { flow: string; traceId: string; wakeSource: QueueWakeSource },
+): Promise<void> {
+  if (notificationBatch.statements.length === 0) return;
+
+  const tasks = [
+    {
+      name: "visibility_status_notification",
+      run: async () => {
+        for (const statement of notificationBatch.statements) {
+          await statement;
+        }
+      },
+    },
+  ];
+  const warnings = await runPostCommitBestEffort(context, tasks);
+  if (tasks.length > warnings.length) {
+    await runPostCommitBestEffort(context, [
+      {
+        name: "notification_queue_wake",
+        run: async () => {
+          const { wakeNotificationQueueAfterCommit } = await import(
+            "@/lib/queues/wakeNotificationQueueAfterCommit"
+          );
+          await wakeNotificationQueueAfterCommit(context.wakeSource);
+        },
+      },
+    ]);
+  }
+}
+
+export function visibilityStatusMutationFailureMessage(): string {
+  return "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。";
+}
+
+export async function handleVideoVisibilityMutationFailure(
+  db: DB,
+  error: unknown,
+  input: {
+    flow: string;
+    traceId: string;
+    videoId: string;
+    eventId?: string | null;
+    depublicizedFromPublic: boolean;
+    fenceToken: string | null;
+  },
+): Promise<{ ok: false; message: string }> {
+  unstable_rethrow(error);
+  if (input.depublicizedFromPublic && input.fenceToken) {
+    try {
+      await compensateDepublicizationFenceOnD1Failure(db, {
+        videoId: input.videoId,
+        fenceToken: input.fenceToken,
+        traceId: input.traceId,
+      });
+    } catch (compensateError) {
+      const compensate_error_code = visibilityErrorCode(compensateError);
+      logFlowTrace({
+        flow: input.flow,
+        phase: "stuck_fence_candidate",
+        trace_id: input.traceId,
+        result: "failed",
+        error_code: compensate_error_code,
+        committed: false,
+      });
+      console.warn(
+        JSON.stringify({
+          service: "visibility_status",
+          flow: input.flow,
+          trace_id: input.traceId,
+          phase: "stuck_fence_candidate",
+          error_code: compensate_error_code,
+          video_id: input.videoId,
+          ...(input.eventId ? { event_id: input.eventId } : {}),
+        }),
+      );
+    }
+  }
+  const error_code = visibilityErrorCode(error);
+  logFlowTrace({
+    flow: input.flow,
+    phase: "visibility_mutation_failed",
+    trace_id: input.traceId,
+    result: "failed",
+    error_code,
+    committed: false,
+  });
+  console.warn(
+    JSON.stringify({
+      service: "visibility_status",
+      flow: input.flow,
+      trace_id: input.traceId,
+      phase: "visibility_mutation_failed",
+      error_code,
+      video_id: input.videoId,
+      ...(input.eventId ? { event_id: input.eventId } : {}),
+    }),
+  );
+  return { ok: false, message: visibilityStatusMutationFailureMessage() };
 }

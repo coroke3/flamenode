@@ -26,6 +26,10 @@ import {
 } from "@/lib/slots/slotIdentityCore";
 import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import {
+  resolveSlotReservationSubject,
+  subjectsEqual,
+} from "@/lib/slot/reservationGroupsCore";
 import { buildSlotChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import {
   markPendingPublicReflection,
@@ -38,6 +42,7 @@ import {
   sortSlotsChronologically,
 } from "@/lib/utils/slotGroupingCore";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { enqueueSlotReserveOpsWebhookPostCommit } from "@/lib/actions/slotNotificationsPostCommit";
 
 export interface SlotReserveResult extends PendingPublicReflection {
   ok: boolean;
@@ -588,8 +593,29 @@ export async function reserveSlot(
           return { ok: false, message: SLOT_ACCOUNT_OTHER_MESSAGE };
         }
         if (canActAsSlotActor(relation)) {
-          const group = await loadBoundedGroupStructure(db, anchor);
-          return slotMutationOk(anchor.id, group.length);
+          const event = await loadEvent(db, anchor.event_id);
+          let slotCount = 1;
+          try {
+            slotCount = (await loadBoundedGroupStructure(db, anchor)).length;
+          } catch {
+            // best-effort webhook requeue; dedupe key is anchor-scoped
+          }
+          const traceId = createTraceId();
+          await enqueueSlotReserveOpsWebhookPostCommit(
+            db,
+            {
+              actorUserId: guard.user.id,
+              eventId: anchor.event_id,
+              eventTitle: event?.title ?? "イベント",
+              slotCount,
+              displayName: anchor.display_name ?? parsed.data.display_name,
+              xUserId: anchor.x_user_id,
+              anchorSlotId: anchor.id,
+              groupId: anchor.reservation_group_id,
+            },
+            { flow: "slot.reserve", traceId },
+          );
+          return slotMutationOk(anchor.id, slotCount);
         }
       }
       return { ok: false, message: "この枠はすでに確保されています。" };
@@ -747,7 +773,6 @@ export async function extendOwnSlotGroup(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = extendSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -775,6 +800,7 @@ export async function extendOwnSlotGroup(
     if (!isAcceptingEntries(event)) {
       return { ok: false, message: "受付中ではないため枠を拡張できません。" };
     }
+    const slotXUserId = resolveSlotXUserId(guard);
     const { rows: groupRows, identity } = await loadBoundedGroup(
       db,
       anchor,
@@ -786,6 +812,17 @@ export async function extendOwnSlotGroup(
     }
     if (groupRows.some((row) => row.status !== "reserved")) {
       return { ok: false, message: "予約中でない枠を含む連続枠は拡張できません。" };
+    }
+    const subjectResult = resolveSlotReservationSubject(groupRows);
+    if (!subjectResult.ok) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    const subject = subjectResult.subject;
+    if (guard.user.id !== subject.reservedByUserId) {
+      return { ok: false, message: "自分の予約中の枠のみ拡張できます。" };
     }
 
     const edge =
@@ -865,7 +902,6 @@ export async function mergeOwnSlotGroups(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = mergeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -917,6 +953,23 @@ export async function mergeOwnSlotGroups(
 
     const leftGroup = await loadBoundedGroupStructure(db, left);
     const rightGroup = await loadBoundedGroupStructure(db, right);
+    if (left.event_id !== right.event_id) {
+      return { ok: false, message: "異なるイベントの枠は結合できません。" };
+    }
+    const leftSubjectResult = resolveSlotReservationSubject(leftGroup);
+    const rightSubjectResult = resolveSlotReservationSubject(rightGroup);
+    if (!leftSubjectResult.ok || !rightSubjectResult.ok) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    if (!subjectsEqual(leftSubjectResult.subject, rightSubjectResult.subject)) {
+      return {
+        ok: false,
+        message: "異なるX IDの連続枠は結合できません。",
+      };
+    }
     const byId = new Map<string, SlotRow>();
     for (const row of [...leftGroup, ...rightGroup]) byId.set(row.id, row);
     const reservedRows = sortSlotsChronologically([...byId.values()]);
@@ -944,6 +997,7 @@ export async function mergeOwnSlotGroups(
       slotPartGapSec(event),
     );
 
+    const slotXUserId = resolveSlotXUserId(guard);
     const groupId = generateId("sgrp");
     const targetXId = identity.targetXId ?? slotXUserId;
     const gapPatch = {

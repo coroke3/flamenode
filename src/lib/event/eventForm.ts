@@ -3,6 +3,7 @@ import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
 } from "@/lib/slots/limits";
+import { MAX_STAGE_PERMISSION_QUESTIONS } from "@/lib/event/eventLimits";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { DEFAULT_STAGE_PERMISSION_FIELD } from "@/lib/video/formSettings";
 import {
@@ -117,7 +118,7 @@ export function buildVideoFormSettingsJson(formData: FormData): string {
     String(formData.get("custom_questions_present") ?? "") === "1";
 
   if (sentQuestionArray || ids.length > 0) {
-    const stagePermissions = ids.slice(0, 20).map((id, index) => ({
+    const stagePermissions = ids.slice(0, MAX_STAGE_PERMISSION_QUESTIONS).map((id, index) => ({
       id: cleanQuestionId(id, index),
       enabled: boolFormValue(enabled[index]),
       required: boolFormValue(required[index]),

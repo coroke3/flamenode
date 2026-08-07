@@ -28,6 +28,10 @@ import {
 import { MAX_ATOMIC_SLOT_ROWS, MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
 import { MAX_SLOTS_PER_VIDEO } from "@/lib/slots/limits";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import {
+  computeCountModeSlotBatchCount,
+  computeTimeModeSlotBatchCount,
+} from "@/lib/slots/batchGenerateCount";
 
 export interface SlotActionResult extends PendingPublicReflection {
   ok: boolean;
@@ -252,11 +256,16 @@ export async function generateSlotsBatch(
   if (data.mode === "time") {
     const start = parseJstDatetimeLocal(data.start_at);
     const end = parseJstDatetimeLocal(data.end_at);
-    if (!start || !end || end <= start) {
-      return { ok: false, message: "開始・終了日時を正しく指定してください。" };
+    const countCheck = computeTimeModeSlotBatchCount(
+      start,
+      end,
+      data.interval_minutes,
+    );
+    if (!countCheck.ok) {
+      return { ok: false, message: countCheck.message };
     }
     const interval = data.interval_minutes * 60;
-    for (let cursor = start, order = 0; cursor + interval <= end; cursor += interval) {
+    for (let cursor = start!, order = 0; cursor + interval <= end!; cursor += interval) {
       newRows.push({
         id: generateId("slot"),
         event_id: data.event_id,
@@ -274,6 +283,10 @@ export async function generateSlotsBatch(
       });
     }
   } else {
+    const countCheck = computeCountModeSlotBatchCount(data.count);
+    if (!countCheck.ok) {
+      return { ok: false, message: countCheck.message };
+    }
     const prefix = data.label_prefix?.trim() || "No.";
     const startIndex = Math.max(1, data.start_index || 1);
     for (let index = 0; index < data.count; index += 1) {
@@ -297,12 +310,6 @@ export async function generateSlotsBatch(
   }
   if (newRows.length === 0) {
     return { ok: false, message: "作成対象の枠がありません。" };
-  }
-  if (newRows.length > MAX_SLOT_BATCH_GENERATE_COUNT) {
-    return {
-      ok: false,
-      message: `一度に作成できる枠は ${MAX_SLOT_BATCH_GENERATE_COUNT} 件までです。`,
-    };
   }
 
   const conflicts = await guard.db

@@ -80,7 +80,10 @@ test("3行の最悪経路が D1 Free 50 query / 100 bind 契約内に収まる",
   assert.ok(worstQueryCount <= 50);
 });
 
-test("slot生成のUIとserverは同じ上限を案内・検証する", () => {
+test("slot生成は件数を行配列作成前に検証し、UIとserverは同じ上限を案内する", () => {
+  assert.match(source, /from "@\/lib\/slots\/batchGenerateCount"/);
+  assert.match(source, /computeTimeModeSlotBatchCount/);
+  assert.match(source, /computeCountModeSlotBatchCount/);
   assert.match(limitSource, /MAX_SLOT_BATCH_GENERATE_COUNT = (\d+);/);
   const serverLimit = limitSource.match(
     /MAX_SLOT_BATCH_GENERATE_COUNT = (\d+);/,

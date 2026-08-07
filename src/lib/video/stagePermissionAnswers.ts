@@ -9,6 +9,7 @@ import {
   parseStagePermissionAnswers,
   serializeStagePermissionAnswers,
 } from "./formSettings.ts";
+import { MAX_STAGE_PERMISSION_QUESTIONS } from "./atomicLimits.ts";
 import { computeStagePermissionAnswerDeleteEventIds } from "./eventSync.ts";
 import {
   compositeAuditTargetId,
@@ -59,8 +60,8 @@ export async function readStagePermissionCustomAnswers(
         stagePermissionQuestionKeyCondition(),
       )!,
     )
-    .limit(5);
-  if (questions.length > 4) {
+    .limit(MAX_STAGE_PERMISSION_QUESTIONS + 1);
+  if (questions.length > MAX_STAGE_PERMISSION_QUESTIONS) {
     throw new Error("video_stage_answer_read_limit_exceeded");
   }
   if (questions.length === 0) return null;
@@ -243,9 +244,9 @@ export async function buildReplaceStagePermissionAnswersPlan(
         stagePermissionQuestionKeyCondition(),
       )!,
     )
-    .limit(5);
+    .limit(MAX_STAGE_PERMISSION_QUESTIONS + 1);
 
-  if (stageQuestions.length > 4) {
+  if (stageQuestions.length > MAX_STAGE_PERMISSION_QUESTIONS) {
     throw new Error("video_stage_answer_atomic_limit_exceeded");
   }
   const questionIds = stageQuestions.map((question) => question.id);
@@ -258,9 +259,9 @@ export async function buildReplaceStagePermissionAnswersPlan(
           inArray(videoCustomAnswers.event_id, syncEventIds),
           inArray(videoCustomAnswers.question_id, questionIds),
         )!)
-        .limit(5)
+        .limit(MAX_STAGE_PERMISSION_QUESTIONS + 1)
     : [];
-  if (existing.length > 4) {
+  if (existing.length > MAX_STAGE_PERMISSION_QUESTIONS) {
     throw new Error("video_stage_answer_existing_atomic_limit_exceeded");
   }
 

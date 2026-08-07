@@ -31,6 +31,7 @@ import {
   parseEventForm,
   resolveSubmittedEventVisibility,
 } from "@/lib/event/eventForm";
+import { MAX_STAGE_PERMISSION_QUESTIONS } from "@/lib/event/eventLimits";
 import { buildEventUpdatePayload, parseDateInput } from "@/lib/event/eventPayload";
 import {
   hasAnyEventEditPermission,
@@ -275,10 +276,14 @@ export async function createEvent(
       updated_at: now,
     }),
   );
-  const questions = [
-    ...templateQuestions,
-    ...stageQuestionRows(id, videoFormSettingsJson, now),
-  ];
+  const stageQuestions = stageQuestionRows(id, videoFormSettingsJson, now);
+  if (stageQuestions.length > MAX_STAGE_PERMISSION_QUESTIONS) {
+    return {
+      ok: false,
+      message: `ステージ・権利確認質問は最大${MAX_STAGE_PERMISSION_QUESTIONS}件です。`,
+    };
+  }
+  const questions = [...templateQuestions, ...stageQuestions];
   if (questions.length > MAX_EVENT_CUSTOM_QUESTIONS) {
     return {
       ok: false,
@@ -451,10 +456,10 @@ export async function updateEvent(
       };
     }
     const next = stageQuestionRows(data.id, built.videoFormSettingsJson, now);
-    if (next.length > MAX_EVENT_CUSTOM_QUESTIONS) {
+    if (next.length > MAX_STAGE_PERMISSION_QUESTIONS) {
       return {
         ok: false,
-        message: `カスタム質問は最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
+        message: `ステージ・権利確認質問は最大${MAX_STAGE_PERMISSION_QUESTIONS}件です。`,
       };
     }
     if (new Set(next.map((row) => row.question_key)).size !== next.length) {
