@@ -164,7 +164,8 @@ export function topAnnouncementTarget(
 ): EnqueueStaticRebuildInput {
   return { targetType: "top_announcements", targetId: "global", reason, priority };
 }
-/** 公開カード変更時に list / search / top section / recommend_core へ波及するターゲット。 */
+/** 公開カード変更時に list / search / top section / recommend_core へ波及するターゲット。
+ * skipTopRecommend は call-site 互換のため残す。section producer は常に enqueue する。 */
 
 export function buildVideoCardChangeFanOutTargets(opts: {
   reason: string;
@@ -172,9 +173,7 @@ export function buildVideoCardChangeFanOutTargets(opts: {
   priority?: StaticRebuildPriority;
   skipTopRecommend?: boolean;
 }): EnqueueStaticRebuildInput[] {
-  if (opts.skipTopRecommend) {
-    return withMeta(globalListTargets(opts.reason, opts.priority ?? "low"), opts);
-  }
+  void opts.skipTopRecommend;
   return withMeta(topVideoCardTargets(opts.reason, opts.priority), opts);
 }
 
@@ -255,13 +254,12 @@ export async function enqueueAfterVideoCreate(
     },
     ...globalListTargets("video_create"),
   ];
+  items.push(...topVideoVisibilityTargets("video_create"));
   if (opts.creatorXUserId) {
     items.push(
       { targetType: "user", targetId: opts.creatorXUserId, reason: "video_create" },
       usersIndexTarget("video_create"),
     );
-  } else {
-    items.push(...topVideoVisibilityTargets("video_create"));
   }
   for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
     items.push(eventBaseTarget(eventId, "video_create", "high", opts.requestedByUserId));

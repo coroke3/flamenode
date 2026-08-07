@@ -667,7 +667,7 @@ async function loadTopNostalgicPool(
   const nostalgic = await env.DB.prepare(
     `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
      FROM videos AS v
-     WHERE v.visibility_status = 'public'
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
        AND v.scheduled_time IS NOT NULL
        AND v.scheduled_time <= ?
        AND ${YOUTUBE_SYNCED_PLAYABLE_SQL}
@@ -708,7 +708,7 @@ async function rebuildTopRecommended(env: Env, signal?: RebuildSignal): Promise<
   const recommended = await env.DB.prepare(
     `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
      FROM videos AS v
-     WHERE v.visibility_status = 'public'
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
      ORDER BY COALESCE(score, 0) DESC, scheduled_time DESC
      LIMIT 40`,
   ).all();
@@ -732,7 +732,7 @@ async function rebuildTopLatest(env: Env, signal?: RebuildSignal): Promise<void>
   const latest = await env.DB.prepare(
     `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
      FROM videos AS v
-     WHERE v.visibility_status = 'public'
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
      ORDER BY scheduled_time DESC
      LIMIT ${TOP_LATEST_LIMIT}`,
   ).all();

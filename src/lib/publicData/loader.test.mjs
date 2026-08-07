@@ -213,6 +213,7 @@ test("loadPublicEventVideosPage は event_base R2 を優先しヒット時に ge
   assert.match(eventListBlock, /eventBaseObjectKey/);
   assert.match(eventListBlock, /eventComposedObjectKey/);
   assert.match(eventListBlock, /isCompleteEventBasePool/);
+  assert.match(eventListBlock, /shouldEnqueueEventBaseListHeal/);
   assert.match(eventListBlock, /eventListPayloadSupportsSort/);
   assert.match(eventListBlock, /pageEventBaseVideos/);
   assert.match(eventListBlock, /isLoaderTargetVisibilityBlocked\("event_base"/);

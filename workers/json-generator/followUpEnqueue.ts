@@ -74,11 +74,13 @@ async function enqueueComposerTargets(
   for (const target of targets) {
     const bumped = await env.DB.prepare(
       `UPDATE static_rebuild_queue
-       SET reason = ?, updated_at = MAX(updated_at + 1, ?)
+       SET reason = ?,
+           priority = CASE WHEN priority = 'high' OR ? = 'high' THEN 'high' ELSE priority END,
+           updated_at = MAX(updated_at + 1, ?)
        WHERE target_type = ? AND target_id = ?
          AND status IN ('pending', 'processing')`,
     )
-      .bind(reason, now, target.targetType, target.targetId)
+      .bind(reason, "high", now, target.targetType, target.targetId)
       .run();
     if ((bumped.meta?.changes ?? 0) > 0) {
       changed = true;
@@ -88,7 +90,7 @@ async function enqueueComposerTargets(
       `INSERT OR IGNORE INTO static_rebuild_queue (
          id, target_type, target_id, reason, priority, status,
          attempt_count, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, 'normal', 'pending', 0, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, 'high', 'pending', 0, ?, ?)`,
     )
       .bind(
         `srb:${target.targetType}:${crypto.randomUUID()}`,

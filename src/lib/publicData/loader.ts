@@ -107,6 +107,7 @@ import {
   eventListPayloadSupportsSort,
   isCompleteEventBasePool,
   pageEventBaseVideos,
+  shouldEnqueueEventBaseListHeal,
 } from "./staticEventListCore";
 import {
   canFallbackToDatabase,
@@ -1027,8 +1028,10 @@ export async function loadPublicEventVideosPage(params: {
     probe: undefined,
   };
 
-  if (baseResult.payload === null) {
-    void recordDegradedCircuitR2Miss();
+  if (shouldEnqueueEventBaseListHeal(baseResult.payload, params.sort)) {
+    if (baseResult.payload === null) {
+      void recordDegradedCircuitR2Miss();
+    }
     const miss = await resolvePublicJsonMiss(missOptions);
     missMeta = {
       enqueued: miss.enqueued,

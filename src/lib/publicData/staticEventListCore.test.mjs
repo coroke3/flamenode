@@ -5,6 +5,7 @@ import {
   eventListPayloadSupportsSort,
   isCompleteEventBasePool,
   pageEventBaseVideos,
+  shouldEnqueueEventBaseListHeal,
 } from "./staticEventListCore.ts";
 
 function basePayload(videos, videoTotal = videos.length) {
@@ -59,6 +60,48 @@ test("eventListPayloadSupportsSort: composed JSON の score 欠落を検知す�
   assert.equal(eventListPayloadSupportsSort(withoutScore, "score"), false);
   assert.equal(eventListPayloadSupportsSort(withoutScore, "new"), true);
   assert.equal(eventListPayloadSupportsSort(basePayload([]), "score"), true);
+});
+
+test("shouldEnqueueEventBaseListHeal: 500超は enqueue せず不完全 pool は heal", () => {
+  const incomplete = basePayload(
+    [
+      {
+        id: "v1",
+        title: "Alpha",
+        creator_display_name: "Alice",
+        scheduled_time: 1,
+        score: 1,
+      },
+    ],
+    3,
+  );
+  const oversized = basePayload(
+    Array.from({ length: 3 }, (_, index) => ({
+      id: `v${index}`,
+      title: `Video ${index}`,
+      creator_display_name: "Creator",
+      scheduled_time: index,
+      score: index,
+    })),
+    EVENT_LIST_POOL_MAX + 1,
+  );
+  assert.equal(shouldEnqueueEventBaseListHeal(null, "new"), true);
+  assert.equal(shouldEnqueueEventBaseListHeal(incomplete, "new"), true);
+  assert.equal(shouldEnqueueEventBaseListHeal(oversized, "new"), false);
+  assert.equal(
+    shouldEnqueueEventBaseListHeal(
+      basePayload([
+        {
+          id: "v1",
+          title: "Alpha",
+          creator_display_name: "Alice",
+          scheduled_time: 1,
+        },
+      ]),
+      "score",
+    ),
+    true,
+  );
 });
 
 test("pageEventBaseVideos: new / old / score と検索を R2 pool 上で処理する", () => {

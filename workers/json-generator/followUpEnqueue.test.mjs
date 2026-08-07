@@ -5,6 +5,10 @@ import { test } from "node:test";
 import { enqueueComposerFollowUps, enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
 
 const FOLLOW_UP_REASON = "users_index_follow_up";
+const FOLLOW_UP_SOURCE = readFileSync(
+  new URL("./followUpEnqueue.ts", import.meta.url),
+  "utf8",
+);
 const BASELINE = readFileSync(
   new URL("../../migrations/0000_flame_node_baseline.sql", import.meta.url),
   "utf8",
@@ -61,7 +65,7 @@ function createHarness(t) {
     readActiveRows() {
       return sqlite
         .prepare(
-          `SELECT id, target_type, target_id, reason, status, updated_at
+          `SELECT id, target_type, target_id, reason, priority, status, updated_at
            FROM static_rebuild_queue
            WHERE target_type IN ('top', 'recommend')
              AND target_id = 'global'
@@ -113,6 +117,7 @@ test("enqueueComposerFollowUps(users_index) は top/recommend 欠損時に INSER
   for (const row of rows) {
     assert.equal(row.target_id, "global");
     assert.equal(row.reason, FOLLOW_UP_REASON);
+    assert.equal(row.priority, "high");
     assert.equal(row.status, "pending");
     assert.match(row.id, /^srb:(top|recommend):/);
   }
@@ -130,6 +135,7 @@ test("enqueueComposerFollowUps(recommend_core) は recommend 欠損時に INSERT
   assert.equal(row.target_type, "recommend");
   assert.equal(row.target_id, "global");
   assert.equal(row.reason, "recommend_core_follow_up");
+  assert.equal(row.priority, "high");
   assert.equal(row.status, "pending");
   assert.match(row.id, /^srb:recommend:/);
 });
@@ -156,8 +162,49 @@ test("enqueueTopRecommendAfterUsersIndex は top/recommend 欠損時に INSERT �
   for (const row of rows) {
     assert.equal(row.target_id, "global");
     assert.equal(row.reason, FOLLOW_UP_REASON);
+    assert.equal(row.priority, "high");
     assert.equal(row.status, "pending");
     assert.match(row.id, /^srb:(top|recommend):/);
+  }
+});
+
+test("enqueueComposerTargets は composer follow-up を high priority で INSERT する", () => {
+  const enqueueFn = FOLLOW_UP_SOURCE.match(
+    /async function enqueueComposerTargets\([\s\S]*?(?=\/\*\*|export async function |async function )/,
+  )?.[0];
+  assert.ok(enqueueFn);
+  assert.match(enqueueFn, /VALUES \(.*'high', 'pending'/);
+  assert.match(
+    enqueueFn,
+    /priority = CASE WHEN priority = 'high' OR \? = 'high' THEN 'high' ELSE priority END/,
+  );
+});
+
+test("enqueueTopRecommendAfterUsersIndex は pending/processing 既存時に priority を high に昇格する", async (t) => {
+  const harness = createHarness(t);
+  harness.insertRow({
+    id: "srb:top:existing",
+    targetType: "top",
+    status: "pending",
+    priority: "normal",
+    reason: "deploy_generator_change",
+    updatedAt: 100,
+  });
+  harness.insertRow({
+    id: "srb:recommend:existing",
+    targetType: "recommend",
+    status: "processing",
+    priority: "normal",
+    reason: "deploy_generator_change",
+    updatedAt: 200,
+  });
+
+  const changed = await enqueueTopRecommendAfterUsersIndex(harness.env);
+
+  assert.equal(changed, true);
+  const rows = harness.readActiveRows();
+  for (const row of rows) {
+    assert.equal(row.priority, "high");
   }
 });
 

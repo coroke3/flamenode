@@ -41,12 +41,20 @@ test("動画ステータス変更batchの最悪ケースはMAX_STATIC_REBUILD_BA
   assert.ok(worstCase <= MAX_STATIC_REBUILD_BATCH_TARGETS);
   assert.ok(MAX_STATIC_REBUILD_BATCH_TARGETS > 16);
 });
-test("動画作成はusers_index経由でtop/recommendを間接enqueueする", () => {
-  assert.match(hooks, /globalListTargets\("video_create"\)/);
-  assert.match(hooks, /usersIndexTarget\("video_create"\)/);
+test("動画作成は常にtop section producerをenqueueし、creatorありならuser/users_indexも追加する", () => {
+  const createFn = hooks.match(/export async function enqueueAfterVideoCreate[\s\S]*?^}/m)?.[0];
+  assert.ok(createFn);
+  assert.match(createFn, /topVideoVisibilityTargets\("video_create"\)/);
+  assert.match(createFn, /usersIndexTarget\("video_create"\)/);
+  const topIdx = createFn.indexOf('topVideoVisibilityTargets("video_create")');
+  const creatorBranch = createFn.indexOf("if (opts.creatorXUserId)");
+  assert.ok(topIdx >= 0 && creatorBranch > topIdx, "top section は creator 分岐より前");
+});
+test("buildVideoCardChangeFanOutTargetsはskipTopRecommendでもsection producerをenqueueする", () => {
+  assert.match(hooks, /export function buildVideoCardChangeFanOutTargets[\s\S]*topVideoCardTargets\(opts\.reason/);
   assert.doesNotMatch(
     hooks,
-    /enqueueAfterVideoCreate[\s\S]*targetType: "top"/,
+    /buildVideoCardChangeFanOutTargets[\s\S]*if \(opts\.skipTopRecommend\)/,
   );
 });
 test("枠変更はevent_slotsとtop_slot_statsを同一batchでenqueueする", () => {

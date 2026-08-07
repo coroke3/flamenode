@@ -54,6 +54,23 @@ export function eventListPayloadSupportsSort(
   );
 }
 
+/**
+ * event_base 欠落・500件以内の不完全 pool・score 非対応のときだけ heal enqueue。
+ * 500超は設計上 incomplete なので毎回 enqueue しない。
+ */
+export function shouldEnqueueEventBaseListHeal(
+  payload: StaticEventDetailPayload | null,
+  sort: "new" | "old" | "score",
+): boolean {
+  if (payload === null) return true;
+  const videos = Array.isArray(payload.public_videos) ? payload.public_videos : null;
+  if (!videos) return true;
+  const videoTotal = normalizeCount(payload.video_total) ?? videos.length;
+  if (videoTotal > EVENT_LIST_POOL_MAX) return false;
+  if (!isCompleteEventBasePool(payload)) return true;
+  return !eventListPayloadSupportsSort(payload, sort);
+}
+
 export function extractEventListInfo(
   payload: StaticEventDetailPayload,
 ): { id: string; title: string } | null {

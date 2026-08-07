@@ -22,7 +22,7 @@ import {
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { topSlotStatsGlobalTarget } from "@/lib/staticRebuild/hooks";
+import { topSlotStatsGlobalTarget, topVideoVisibilityTargets } from "@/lib/staticRebuild/hooks";
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
@@ -596,6 +596,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
           requestedByUserId: userId,
         },
         { targetType: "user", targetId: activeX, reason: "video_submit" },
+        ...topVideoVisibilityTargets("video_submit"),
       );
     }
     const queue = await buildStaticRebuildQueueBatch(db, rebuildTargets);

@@ -39,6 +39,7 @@ test("submitSlotVideo は pending 提出で global list/search/users/user/random
   assert.match(source, /const isPublicResubmit = existingVideo\?\.visibility_status === "public"/);
   assert.match(source, /topSlotStatsGlobalTarget\("video_submit", "normal"\)/);
   assert.match(source, /if \(isPublicResubmit\) \{[\s\S]*list_recent/);
+  assert.match(source, /if \(isPublicResubmit\) \{[\s\S]*topVideoVisibilityTargets\("video_submit"\)/);
   assert.doesNotMatch(
     source,
     /rebuildTargets[\s\S]*list_recent[\s\S]*topSlotStatsGlobalTarget/,

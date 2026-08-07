@@ -462,6 +462,27 @@ test("rebuildTopStatsのPromise.all分割代入はpublicEventCountを含む", ()
   assert.match(destructuring, /publicEventCount/);
 });
 
+test("rebuildTopRecommended/rebuildTopLatest/loadTopNostalgicPoolはCOUNTABLE_PUBLIC_VIDEO_SQLで候補を絞る", () => {
+  const recommendedFn = source.match(
+    /async function rebuildTopRecommended\(env[\s\S]*?(?=async function )/,
+  )?.[0];
+  const latestFn = source.match(
+    /async function rebuildTopLatest\(env[\s\S]*?(?=async function )/,
+  )?.[0];
+  const poolFn = source.match(
+    /async function loadTopNostalgicPool[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(recommendedFn);
+  assert.ok(latestFn);
+  assert.ok(poolFn);
+  assert.match(recommendedFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
+  assert.match(latestFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
+  assert.match(poolFn, /WHERE \$\{COUNTABLE_PUBLIC_VIDEO_SQL\}/);
+  assert.doesNotMatch(recommendedFn, /WHERE v\.visibility_status = 'public'/);
+  assert.doesNotMatch(latestFn, /WHERE v\.visibility_status = 'public'/);
+  assert.doesNotMatch(poolFn, /WHERE v\.visibility_status = 'public'/);
+});
+
 test("rebuildTopNostalgicは新着100件と3年以上前のYouTube確認済みプールから日次シャッフル用に保存する", () => {
   const nostalgicFn = source.match(
     /async function rebuildTopNostalgic\(env[\s\S]*?(?=async function )/,
