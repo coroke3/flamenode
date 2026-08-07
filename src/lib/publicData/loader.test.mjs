@@ -132,6 +132,10 @@ test("events index, top, and recommend loaders wire empty collection semantic mi
     loaderSource.indexOf("export const loadStaticUserProfile"),
   );
   assert.match(recommendBlock, /isEmptyCollection: isEmptyRecommendCollection/);
+  assert.match(
+    recommendBlock,
+    /missRebuildTargetTypes:\s*\[\s*"recommend_core"\s*\]/,
+  );
 });
 
 test("popular list loader wires degraded fallback", () => {

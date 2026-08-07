@@ -1176,6 +1176,7 @@ export async function loadStaticRecommendPage(): Promise<
     targetType: "recommend",
     targetId: "global",
     reason: "public_recommend_miss",
+    missRebuildTargetTypes: ["recommend_core"],
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.recommend,
     isEmptyCollection: isEmptyRecommendCollection,
     degradedFetcher: async () => {
