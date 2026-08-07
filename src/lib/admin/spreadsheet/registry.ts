@@ -44,6 +44,16 @@ export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy
   "terms_versions.body_markdown": { maxLength: 200_000 },
 };
 
+/** system_settings の CostGuard 正本列。スプレッドシートからは編集不可（D1/KV 不整合防止）。 */
+export const SPREADSHEET_COST_GUARD_READONLY_COLUMNS = new Set([
+  "operation_mode",
+  "cost_guard_reason",
+  "cost_guard_updated_by_user_id",
+  "cost_guard_updated_at",
+  "cost_guard_exception_until",
+  "cost_guard_exception_features_json",
+]);
+
 export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
 
 export function getSpreadsheetColumnPolicy(
@@ -253,5 +263,11 @@ export function isSpreadsheetColumnEditable(
 ): boolean {
   if (def.mode === "readonly") return false;
   if (isSpreadsheetSecretColumn(column)) return false;
+  if (
+    def.table === "system_settings" &&
+    SPREADSHEET_COST_GUARD_READONLY_COLUMNS.has(column)
+  ) {
+    return false;
+  }
   return true;
 }

@@ -14,6 +14,8 @@ const WORKER_SCAN_ROOTS = [
   "workers/notification-dispatcher",
   "workers/ga-analytics",
   "workers/score-recalc",
+  "workers/cleanup",
+  "workers/youtube-playlist-sync",
 ];
 
 const FORBIDDEN_AUTO_COST_GUARD_PATTERNS = [
@@ -151,10 +153,33 @@ test("writeGuard reads operation_mode for gating but does not mutate it", async 
 });
 
 test("spreadsheet import is the intentional admin path for disabled_features_json", async () => {
+  const { resolveSpreadsheetTableDef, isSpreadsheetColumnEditable, SPREADSHEET_COST_GUARD_READONLY_COLUMNS } =
+    await import("../admin/spreadsheet/registry.ts");
   const registry = await readFile(
     path.join(repoRoot, "src/lib/admin/spreadsheet/registry.ts"),
     "utf8",
   );
   assert.match(registry, /system_settings\.disabled_features_json/);
-  assert.doesNotMatch(registry, /system_settings\.operation_mode/);
+  assert.match(registry, /SPREADSHEET_COST_GUARD_READONLY_COLUMNS/);
+  const def = resolveSpreadsheetTableDef("system_settings", true);
+  for (const column of SPREADSHEET_COST_GUARD_READONLY_COLUMNS) {
+    assert.equal(isSpreadsheetColumnEditable(def, column), false, column);
+  }
+  assert.equal(isSpreadsheetColumnEditable(def, "operation_mode"), false);
+  assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), true);
+});
+
+test("spreadsheet query does not mutate operation_mode outside cost-guard", async () => {
+  const query = await readFile(
+    path.join(repoRoot, "src/lib/admin/spreadsheet/query.ts"),
+    "utf8",
+  );
+  const forbiddenPatterns = [
+    /operation_mode\s*:/,
+    /SET\s+operation_mode/i,
+    /\.set\(\s*\{[^}]*operation_mode/,
+  ];
+  for (const pattern of forbiddenPatterns) {
+    assert.doesNotMatch(query, pattern, `query.ts must not write operation_mode: ${pattern}`);
+  }
 });

@@ -64,7 +64,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 - D1 budget / YouTube API quota / Discord 429 バックオフ / ExternalRequestBudget / Queue batch 上限は**ランタイム安全装置**であり、機能制限（CostGuard）ではない。これらは `operation_mode` を書き換えない。
 - `auto_cost_guard_enabled` / `cost_guard_thresholds_json` / `cost_usage_snapshots` は最終 schema に存在しない。新たな自動しきい値を発明しない。
 
-| モード | 手動選択の目安 | 停止・制限する機能 |
+| モード | 手動選択の運用目安 | 停止・制限する機能 |
 | :--- | :--- | :--- |
 | `normal` | 通常 | 全機能を通常運用する。 |
 | `economy` | 目安70%到達 | パーソナライズ推薦、詳細分析、即時スコア再計算、重い検索を抑制する。閲覧数計測は既定50%サンプリングにする。 |
@@ -133,7 +133,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 `/admin/cost-guard` に手動コストガードパネルを置く。
 
 - 現在の `operation_mode`
-- 現在の停止機能
+- 現在の停止機能（表示のみ。編集は admin spreadsheet import）
 - 前回の変更理由・変更者・変更時刻
 - 手動モード変更
 - 15分の機能別一時許可と明示解除
@@ -145,7 +145,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - `normal` へ戻す
 - `economy` / `read_only` / `static_only` へ手動変更する
 - 専用操作で `maintenance` へ移行・解除する
-- 特定機能だけ停止する
+- admin spreadsheet import で `disabled_features_json` を更新する（cost-guard UI では編集しない）
 - 許可リスト内の機能を1〜8件選び、15分だけ一時的に許可する
 
 モード変更、メンテナンス変更、一時許可、例外解除は理由入力と確認文字列を要求し、完全な before / after を監査ログへ残す。一時許可は設定時刻から厳密に15分で終了し、任意時間への変更や自動延長は行わない。

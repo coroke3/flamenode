@@ -2,7 +2,8 @@
 
 /**
  * 手動 CostGuard Server Actions。
- * `operation_mode` / `disabled_features_json` の D1 書き込み正本はここ（と spreadsheet import の admin 経路）のみ。
+ * `operation_mode` の D1 書き込み正本はここ（KV ミラー同期付き）。
+ * `disabled_features_json` は admin spreadsheet import のみ（cost-guard UI では編集しない）。
  * Cloudflare 使用量に基づく自動昇格・自動降格は行わない。
  */
 

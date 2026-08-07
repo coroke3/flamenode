@@ -241,7 +241,7 @@ cd workers/sync-jobs && wrangler deploy
 
 | 種別 | 目的 | 変更方法 | 例 |
 | --- | --- | --- | --- |
-| **機能制限（admin-only）** | 無料枠・運用判断に応じたユーザー向け機能の段階停止 | 管理者が `/admin/cost-guard` で手動変更（自動昇格なし） | `operation_mode`、`disabled_features_json`、15分一時許可 |
+| **機能制限（admin-only）** | 無料枠・運用判断に応じたユーザー向け機能の段階停止 | `/admin/cost-guard` で `operation_mode` と 15 分一時許可を手動変更。`disabled_features_json` は admin spreadsheet import | `operation_mode`、15 分一時許可、`disabled_features_json`（spreadsheet） |
 | **ランタイム安全装置** | invocation 内の暴走・枯渇防止（機能制限ではない） | コード内の固定上限。`operation_mode` は変更しない | D1 budget（40 statements/invocation）、YouTube quota budget、Discord 429 バックオフ、ExternalRequestBudget、Queue batch 上限 |
 
 `publicMode` が KV/D1 解決失敗時に `static_only` へ倒す挙動は、インフラ障害時の fail-closed であり、使用量ベースの自動 CostGuard ではない。

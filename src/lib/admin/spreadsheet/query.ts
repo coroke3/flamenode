@@ -8,6 +8,10 @@ import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { SpreadsheetImportPreviewClaims } from "./importPreviewToken";
 import type { SpreadsheetTableDef } from "./registry";
 import {
+  isWriteFeatureKey,
+  parseWriteFeatureList,
+} from "@/lib/auth/writeGuardCore";
+import {
   isSpreadsheetColumnEditable,
   isSpreadsheetSecretColumn,
   getSpreadsheetColumnPolicy,
@@ -48,6 +52,13 @@ import {
 
 export type { SpreadsheetColumnMeta } from "./tableContext";
 export const SPREADSHEET_EXPORT_MAX_ROWS = 5000;
+
+export function validateSpreadsheetDisabledFeaturesJson(value: string): void {
+  const parsed = parseWriteFeatureList(value);
+  if (!parsed.ok || parsed.features.some((item) => !isWriteFeatureKey(item))) {
+    throw new Error("invalid_feature_key");
+  }
+}
 const SPREADSHEET_IMPORT_EXISTING_LOOKUP_CHUNK_SIZE = 40;
 
 export interface SpreadsheetPageResult {
@@ -286,6 +297,13 @@ function validateSpreadsheetInputValues(
     }
     if (policy?.json && value != null) {
       try { JSON.parse(String(value)); } catch { throw new Error("invalid_json_value"); }
+    }
+    if (
+      ctx.def.table === "system_settings" &&
+      key === "disabled_features_json" &&
+      value != null
+    ) {
+      validateSpreadsheetDisabledFeaturesJson(String(value));
     }
     if (policy?.url && value != null) {
       try {
