@@ -336,6 +336,10 @@ async function approveXIdLinkRequestOnce(
   let notificationXUserId: string | null = null;
   let bindTargetXUserId: string | null = null;
   let publicVisibilityChanged = false;
+  let requesterPostApprovalActiveX: {
+    activeXId: string;
+    activeXName: string | null;
+  } | null = null;
 
   if (request.request_type === "alias") {
     const targetXUserId = await resolveCanonicalXUserId(db, request.target_x_user_id);
@@ -488,6 +492,10 @@ async function approveXIdLinkRequestOnce(
       await db.select().from(users).where(eq(users.id, requestedAuthUserId)).limit(1)
     )[0];
     if (authUser && !authUser.active_x_user_id) {
+      requesterPostApprovalActiveX = {
+        activeXId: effectiveXUserId,
+        activeXName: xUser?.x_name ?? `@${effectiveXUserId}`,
+      };
       const afterUser = { ...authUser, active_x_user_id: effectiveXUserId };
       statements.push(
         db
@@ -623,9 +631,10 @@ async function approveXIdLinkRequestOnce(
           }),
     dedupeKey: `xid_approved:${request.id}`,
   });
-  const { resolveNotificationActor } = await import(
-    "@/lib/notifications/actor"
-  );
+  const {
+    overlayNotificationActorActiveX,
+    resolveNotificationActor,
+  } = await import("@/lib/notifications/actor");
   const {
     buildChannelXIdApprovedNotification,
     buildXIdApproveThreadName,
@@ -633,7 +642,10 @@ async function approveXIdLinkRequestOnce(
   const { buildOpsChannelWebhookStatement } = await import(
     "@/lib/notifications/opsWebhook"
   );
-  const requester = await resolveNotificationActor(db, requestedAuthUserId);
+  const requester = overlayNotificationActorActiveX(
+    await resolveNotificationActor(db, requestedAuthUserId),
+    requesterPostApprovalActiveX,
+  );
   const operatorActor = await resolveNotificationActor(db, operatorAuthUserId);
   const approveXIdLabel =
     submittedXUserId ??

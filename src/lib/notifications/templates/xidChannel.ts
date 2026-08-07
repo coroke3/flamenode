@@ -29,12 +29,14 @@ function xIdLabel(xUserId: string | null | undefined): string {
 }
 
 function actorThreadLabel(actor: NotificationActor | null): string {
-  return (
-    actor?.activeXName?.trim() ||
-    actor?.discordName?.trim() ||
-    actor?.userId ||
-    "不明"
-  );
+  if (!actor) return "不明";
+  const xId = actor.activeXId?.trim();
+  if (xId) return `@${xId}`;
+  const xName = actor.activeXName?.trim();
+  if (xName) return xName;
+  const discordName = actor.discordName?.trim();
+  if (discordName) return discordName;
+  return actor.userId || "不明";
 }
 
 function primaryXId(

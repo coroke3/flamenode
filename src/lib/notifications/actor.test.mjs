@@ -16,9 +16,12 @@ if (runTestWithTsx(import.meta.url)) {
     },
   });
 
-  const { formatOpsActorSection, resolveNotificationActor } = await import(
-    "./actor.ts"
-  );
+  const {
+    formatActiveXLabel,
+    formatOpsActorSection,
+    overlayNotificationActorActiveX,
+    resolveNotificationActor,
+  } = await import("./actor.ts");
 
   function mockDb(row) {
     const chain = {
@@ -79,6 +82,68 @@ if (runTestWithTsx(import.meta.url)) {
     assert.match(section.lines.join("\n"), /Active X: 未設定/);
     assert.match(section.lines.join("\n"), /Discord: 未設定/);
     assert.match(section.lines.join("\n"), /user_id: user-1/);
+  });
+
+  test("formatActiveXLabel: id のみは X名義未取得", () => {
+    assert.match(
+      formatActiveXLabel({ activeXId: "creator_x", activeXName: null }),
+      /X名義未取得 \(@\u200b?creator_x\)/,
+    );
+  });
+
+  test("formatActiveXLabel: 名前と id", () => {
+    assert.equal(
+      formatActiveXLabel({ activeXId: "creator_x", activeXName: "Creator" }),
+      "Creator (@\u200bcreator_x)",
+    );
+  });
+
+  test("overlayNotificationActorActiveX: 既存 Active X は維持", () => {
+    const actor = {
+      userId: "user-1",
+      discordId: null,
+      discordName: null,
+      activeXId: "existing_x",
+      activeXName: "Existing",
+    };
+    const result = overlayNotificationActorActiveX(actor, {
+      activeXId: "new_x",
+      activeXName: "@new_x",
+    });
+    assert.equal(result, actor);
+  });
+
+  test("overlayNotificationActorActiveX: 未設定時のみ上書き", () => {
+    const actor = {
+      userId: "user-1",
+      discordId: "discord-1",
+      discordName: "Discord",
+      activeXId: null,
+      activeXName: null,
+    };
+    const result = overlayNotificationActorActiveX(actor, {
+      activeXId: "new_x",
+      activeXName: "@new_x",
+    });
+    assert.deepEqual(result, {
+      userId: "user-1",
+      discordId: "discord-1",
+      discordName: "Discord",
+      activeXId: "new_x",
+      activeXName: "@new_x",
+    });
+  });
+
+  test("formatOpsActorSection: id のみ Active X", () => {
+    const section = formatOpsActorSection({
+      userId: "user-1",
+      discordId: "discord-1",
+      discordName: "Discord",
+      activeXId: "creator_x",
+      activeXName: null,
+    });
+    assert.match(section.lines.join("\n"), /Active X: X名義未取得 \(@\u200b?creator_x\)/);
+    assert.match(section.lines.join("\n"), /Discord: Discord \(discord-1\)/);
   });
 
   test("formatOpsActorSection: actor null は取得失敗メッセージ", () => {

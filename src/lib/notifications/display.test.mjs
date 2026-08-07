@@ -13,7 +13,9 @@ test("getNotificationFailureGuidance: forum_webhook_unconfigured は Forum 用 s
   assert.match(forumBlock, /DISCORD_WEBHOOK_URL_FORUM_ACCOUNT/);
   assert.match(forumBlock, /DISCORD_WEBHOOK_URL_FORUM_EVENT/);
   assert.match(forumBlock, /DISCORD_WEBHOOK_URL_FORUM_SYSTEM/);
-  assert.match(forumBlock, /legacy.*DISCORD_WEBHOOK_URL/);
+  assert.match(forumBlock, /forum_webhook_unconfigured:\(account\|event\|system\)/);
+  assert.match(forumBlock, /webhook_target 無しの旧通知行のみ/);
+  assert.doesNotMatch(forumBlock, /移行中は legacy/);
 });
 
 test("getNotificationFailureGuidance: webhook_unconfigured は Forum trio と legacy を案内する", () => {

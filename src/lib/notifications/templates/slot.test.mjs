@@ -60,7 +60,7 @@ if (runTestWithTsx(import.meta.url)) {
     assert.match(payload.content, /イベント: 夏イベント/);
     assert.match(payload.content, /確保枠: 3 枠/);
     assert.match(payload.content, /■ 操作者/);
-    assert.match(payload.content, /Active X: Active X Name \(active_x\)/);
+    assert.match(payload.content, /Active X: Active X Name \(@\u200bactive_x\)/);
     assert.match(payload.content, /■ 予約上の表示名/);
     assert.match(payload.content, /枠表示名/);
     assert.doesNotMatch(payload.content, /枠表示名[\s\S]*■ 操作者/);

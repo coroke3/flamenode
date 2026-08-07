@@ -1126,7 +1126,6 @@ export function runRemoteSecretPreflight({
     const available = assertRemoteSecretPayload(payload, required, target.service);
     if (target.key === "fast-jobs") {
       const hasBotToken = available.has("DISCORD_BOT_TOKEN");
-      const hasLegacyWebhook = available.has("DISCORD_WEBHOOK_URL");
       const hasAllForumWebhooks =
         available.has("DISCORD_WEBHOOK_URL_FORUM_ACCOUNT") &&
         available.has("DISCORD_WEBHOOK_URL_FORUM_EVENT") &&
@@ -1135,9 +1134,9 @@ export function runRemoteSecretPreflight({
       if (!hasBotToken) {
         missing.push("DISCORD_BOT_TOKEN");
       }
-      if (!hasLegacyWebhook && !hasAllForumWebhooks) {
+      if (!hasAllForumWebhooks) {
         missing.push(
-          "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT + DISCORD_WEBHOOK_URL_FORUM_EVENT + DISCORD_WEBHOOK_URL_FORUM_SYSTEM (all three) or legacy DISCORD_WEBHOOK_URL",
+          "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT + DISCORD_WEBHOOK_URL_FORUM_EVENT + DISCORD_WEBHOOK_URL_FORUM_SYSTEM (all three required)",
         );
       }
       if (missing.length > 0) {

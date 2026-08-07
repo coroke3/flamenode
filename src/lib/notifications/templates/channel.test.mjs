@@ -29,6 +29,17 @@ if (runTestWithTsx(import.meta.url)) {
       activeXId: "creator_x",
       activeXName: "Creator Name",
     });
-    assert.match(payload.content, /Active X: Creator Name \(creator_x\)/);
+    assert.match(payload.content, /Active X: Creator Name \(@\u200bcreator_x\)/);
+  });
+
+  test("buildChannelAccountCreatedNotification は id のみでも表示する", () => {
+    const payload = buildChannelAccountCreatedNotification({
+      userId: "user-1",
+      discordId: "discord-1",
+      discordName: "Discord User",
+      activeXId: "creator_x",
+      activeXName: null,
+    });
+    assert.match(payload.content, /Active X: X名義未取得 \(@\u200b?creator_x\)/);
   });
 }

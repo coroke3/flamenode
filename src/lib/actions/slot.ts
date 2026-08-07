@@ -601,7 +601,7 @@ export async function reserveSlot(
         }
         if (canActAsSlotActor(relation)) {
           const event = await loadEvent(db, anchor.event_id);
-          let slotCount = 1;
+          let slotCount = Math.max(1, Number(parsed.data.consecutive_count) || 1);
           try {
             slotCount = (await loadBoundedGroupStructure(db, anchor)).length;
           } catch {

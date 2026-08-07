@@ -1,3 +1,4 @@
+import { formatActiveXLabel } from "../actor";
 import {
   buildDiscordPayload,
   buildNotificationBlocks,
@@ -19,9 +20,10 @@ export function buildChannelAccountCreatedNotification(args: {
   const discordLabel = args.discordName?.trim()
     ? escapeDiscordMention(args.discordName.trim())
     : "未設定";
-  const activeXLabel = args.activeXName?.trim()
-    ? `${escapeDiscordMention(args.activeXName.trim())} (${args.activeXId?.trim() || "未設定"})`
-    : "未設定";
+  const activeXLabel = formatActiveXLabel({
+    activeXId: args.activeXId,
+    activeXName: args.activeXName,
+  });
   const content = buildNotificationBlocks([
     {
       heading: "【運営通知】新規アカウントが作成されました",

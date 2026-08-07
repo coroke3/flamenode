@@ -30,6 +30,25 @@ test("sanitizeDiscordThreadName は改行・制御文字を除去し100文字に
   assert.equal(sanitizeDiscordThreadName(long, "fb").length, 100);
 });
 
+test("sanitizeDiscordThreadName は @everyone/@here と snowflake メンションを無害化する", () => {
+  assert.equal(
+    sanitizeDiscordThreadName("@everyone alert", "fb"),
+    "@\u200beveryone alert",
+  );
+  assert.equal(
+    sanitizeDiscordThreadName("@HERE ping", "fb"),
+    "@\u200bHERE ping",
+  );
+  assert.equal(
+    sanitizeDiscordThreadName("role <@&123456789> user <@987654321>", "fb"),
+    "role user",
+  );
+  assert.equal(
+    sanitizeDiscordThreadName("handle @myHandle stays", "fb"),
+    "handle @myHandle stays",
+  );
+});
+
 test("resolveForumWebhookUrl: target 指定時は対応 FORUM URL 必須（クロスフォールバックなし）", () => {
   const env = {
     DISCORD_WEBHOOK_URL: "https://example.test/legacy",

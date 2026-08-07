@@ -3,7 +3,7 @@ import type { LibSQLDatabase } from "drizzle-orm/libsql";
 
 import { users, xUsers } from "@/lib/db/schema";
 
-import type { DiscordBlock } from "./templates/common";
+import { escapeDiscordMention, type DiscordBlock } from "./templates/common";
 
 type AnyDb = LibSQLDatabase<any>;
 
@@ -43,6 +43,35 @@ export async function resolveNotificationActor(
   };
 }
 
+/** Active X の表示ラベル（運営通知・チャンネル通知共通）。 */
+export function formatActiveXLabel(actor: {
+  activeXId?: string | null;
+  activeXName?: string | null;
+}): string {
+  const id = actor.activeXId?.trim() || null;
+  const name = actor.activeXName?.trim() || null;
+  if (!id && !name) return "未設定";
+  if (id && name) {
+    return `${escapeDiscordMention(name)} (${escapeDiscordMention(`@${id}`)})`;
+  }
+  if (id) return `X名義未取得 (${escapeDiscordMention(`@${id}`)})`;
+  return escapeDiscordMention(name!);
+}
+
+/** 承認直後など DB 未反映の Active X を actor に上書きする（既存 Active X は維持）。 */
+export function overlayNotificationActorActiveX(
+  actor: NotificationActor | null,
+  next: { activeXId: string; activeXName: string | null } | null,
+): NotificationActor | null {
+  if (!actor || !next) return actor;
+  if (actor.activeXId?.trim()) return actor;
+  return {
+    ...actor,
+    activeXId: next.activeXId,
+    activeXName: next.activeXName,
+  };
+}
+
 /** 運営 Webhook 文面用の操作者ブロック。 */
 export function formatOpsActorSection(
   actor: NotificationActor | null,
@@ -54,11 +83,21 @@ export function formatOpsActorSection(
       lines: ["操作者情報を取得できませんでした。"],
     };
   }
+  const discordId = actor.discordId?.trim() || null;
+  const discordName = actor.discordName?.trim() || null;
+  const discordLabel =
+    discordName && discordId
+      ? `${discordName} (${discordId})`
+      : discordName
+        ? discordName
+        : discordId
+          ? `未取得 (${discordId})`
+          : "未設定";
   return {
     heading,
     lines: [
-      `Active X: ${actor.activeXName?.trim() || "未設定"} (${actor.activeXId?.trim() || "未設定"})`,
-      `Discord: ${actor.discordName?.trim() || "未設定"} (${actor.discordId?.trim() || "未設定"})`,
+      `Active X: ${formatActiveXLabel(actor)}`,
+      `Discord: ${discordLabel}`,
       `user_id: ${actor.userId}`,
     ],
   };

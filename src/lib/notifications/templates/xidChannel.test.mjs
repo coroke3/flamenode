@@ -51,6 +51,18 @@ if (runTestWithTsx(import.meta.url)) {
     );
   });
 
+  test("thread name builders は activeXId を優先する", () => {
+    const linkedRequester = {
+      ...requester,
+      activeXId: "linked_x",
+      activeXName: null,
+    };
+    assert.equal(
+      buildXIdApproveThreadName("creator_x", linkedRequester),
+      "[X ID承認] @creator_x / @linked_x",
+    );
+  });
+
   test("buildChannelXIdRequestNotification は申請者・申請内容セクションを含む", () => {
     const payload = buildChannelXIdRequestNotification({
       requestId: "xreq-1",
@@ -77,8 +89,8 @@ if (runTestWithTsx(import.meta.url)) {
       reason: "重複申請",
       rejectedAt: 1_700_000_100,
     });
-    assert.match(payload.content, /■ 申請者[\s\S]*Discord: Discord Name/);
-    assert.match(payload.content, /■ 処理者[\s\S]*Ops X/);
+    assert.match(payload.content, /■ 申請者[\s\S]*Discord: Discord Name \(discord-1\)/);
+    assert.match(payload.content, /■ 処理者[\s\S]*Active X: Ops X \(@\u200bops_x\)/);
     assert.match(payload.content, /■ 結果[\s\S]*却下/);
     assert.match(payload.content, /重複申請/);
   });

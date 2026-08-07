@@ -11,9 +11,17 @@ export function isOpsWebhookTarget(v: unknown): v is OpsWebhookTarget {
 
 const DISCORD_THREAD_NAME_MAX = 100;
 
+function neutralizeDiscordMentionsInThreadName(input: string): string {
+  return input
+    .replace(/@everyone/gi, (match) => `@\u200b${match.slice(1)}`)
+    .replace(/@here/gi, (match) => `@\u200b${match.slice(1)}`)
+    .replace(/<@&[0-9]+>/g, "")
+    .replace(/<@!?[0-9]+>/g, "");
+}
+
 /** Discord forum thread_name 向けに改行・制御文字を除去し長さを制限する。 */
 export function sanitizeDiscordThreadName(input: string, fallback: string): string {
-  const cleaned = input
+  const cleaned = neutralizeDiscordMentionsInThreadName(input)
     .replace(/[\r\n\x00-\x1f\x7f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();

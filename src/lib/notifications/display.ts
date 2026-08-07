@@ -98,11 +98,24 @@ export function getNotificationFailureGuidance(input: {
   }
 
   if (err.includes("forum_webhook_unconfigured")) {
+    const raw = input.lastError ?? "";
+    const targetMatch = raw.match(
+      /forum_webhook_unconfigured:(account|event|system)/i,
+    );
+    const forumSecretByTarget: Record<string, string> = {
+      account: "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+      event: "DISCORD_WEBHOOK_URL_FORUM_EVENT",
+      system: "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    };
+    const targetKey = targetMatch?.[1]?.toLowerCase();
+    const forumSecret = targetKey ? forumSecretByTarget[targetKey] : null;
     return {
       summary: "Forum 配信用 Discord Webhook URL が未設定です。",
       nextSteps: [
-        "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT / DISCORD_WEBHOOK_URL_FORUM_EVENT / DISCORD_WEBHOOK_URL_FORUM_SYSTEM を確認する",
-        "移行中は legacy の DISCORD_WEBHOOK_URL も利用可能",
+        forumSecret
+          ? `${forumSecret} を確認する`
+          : "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT / DISCORD_WEBHOOK_URL_FORUM_EVENT / DISCORD_WEBHOOK_URL_FORUM_SYSTEM を確認する",
+        "legacy の DISCORD_WEBHOOK_URL は webhook_target 無しの旧通知行のみに適用される",
         "設定修正後に失敗通知を再試行する",
       ],
     };

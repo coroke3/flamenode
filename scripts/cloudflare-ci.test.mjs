@@ -937,6 +937,24 @@ test("remote Worker secret preflight checks names only and never accepts a missi
       }),
     /DISCORD_WEBHOOK_URL_FORUM_ACCOUNT/,
   );
+  assert.throws(
+    () =>
+      runRemoteSecretPreflight({
+        env: productionEnv(),
+        repoRoot: root,
+        configs,
+        wranglerBin: "wrangler.mjs",
+        run: (request) => {
+          const service = request.args[request.args.indexOf("--name") + 1];
+          const names =
+            service === "flamenode-fast-jobs"
+              ? ["DISCORD_BOT_TOKEN", "DISCORD_WEBHOOK_URL"]
+              : byService[service];
+          return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
+        },
+      }),
+    /DISCORD_WEBHOOK_URL_FORUM_ACCOUNT/,
+  );
   assert.doesNotThrow(() =>
     runRemoteSecretPreflight({
       env: productionEnv(),
@@ -947,7 +965,12 @@ test("remote Worker secret preflight checks names only and never accepts a missi
         const service = request.args[request.args.indexOf("--name") + 1];
         const names =
           service === "flamenode-fast-jobs"
-            ? ["DISCORD_BOT_TOKEN", "DISCORD_WEBHOOK_URL"]
+            ? [
+                "DISCORD_BOT_TOKEN",
+                "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+                "DISCORD_WEBHOOK_URL_FORUM_EVENT",
+                "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+              ]
             : byService[service];
         return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
       },
