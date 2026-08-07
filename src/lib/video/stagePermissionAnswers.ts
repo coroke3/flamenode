@@ -89,6 +89,23 @@ export async function readStagePermissionCustomAnswers(
     answers.map((answer) => [answer.question_id, answer.answer_text ?? ""]),
   );
 
+  return serializeStagePermissionFromRows(args.eventIds, questions, answerByQuestionId);
+}
+
+type StagePermissionQuestionRow = {
+  id: string;
+  event_id: string;
+  question_key: string;
+  label: string;
+  sort_order: number;
+  is_active: number;
+};
+
+function serializeStagePermissionFromRows(
+  eventIds: readonly string[],
+  questions: readonly StagePermissionQuestionRow[],
+  answerByQuestionId: ReadonlyMap<string, string>,
+): string | null {
   const serialized = serializeStagePermissionAnswers(
     questions
       .filter((question) => question.is_active === 1)
@@ -103,11 +120,103 @@ export async function readStagePermissionCustomAnswers(
         value: answerByQuestionId.get(question.id)?.trim() ?? "",
       })),
   );
-
   return serialized;
 }
 
-/** Syncs stage-permission answers into normalized custom answer rows. */
+/** Batch-read stage permission answers for many videos (fixed query count). */
+export async function batchReadStagePermissionCustomAnswers(
+  db: DB,
+  items: ReadonlyArray<{ videoId: string; eventIds: readonly string[] }>,
+): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  if (items.length === 0) return out;
+
+  const eventIds = Array.from(
+    new Set(items.flatMap((item) => item.eventIds.filter(Boolean))),
+  );
+  if (eventIds.length === 0) {
+    for (const item of items) out.set(item.videoId, null);
+    return out;
+  }
+
+  const questions = await db
+    .select({
+      id: eventCustomQuestions.id,
+      event_id: eventCustomQuestions.event_id,
+      question_key: eventCustomQuestions.question_key,
+      label: eventCustomQuestions.label,
+      sort_order: eventCustomQuestions.sort_order,
+      is_active: eventCustomQuestions.is_active,
+    })
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        inArray(eventCustomQuestions.event_id, eventIds),
+        stagePermissionQuestionKeyCondition(),
+      )!,
+    );
+
+  const questionsByEvent = new Map<string, StagePermissionQuestionRow[]>();
+  for (const question of questions) {
+    const list = questionsByEvent.get(question.event_id) ?? [];
+    list.push(question);
+    questionsByEvent.set(question.event_id, list);
+  }
+
+  const videoIds = items.map((item) => item.videoId);
+  const questionIds = questions.map((question) => question.id);
+  const answers =
+    questionIds.length > 0
+      ? await db
+          .select({
+            video_id: videoCustomAnswers.video_id,
+            question_id: videoCustomAnswers.question_id,
+            answer_text: videoCustomAnswers.answer_text,
+          })
+          .from(videoCustomAnswers)
+          .where(
+            and(
+              inArray(videoCustomAnswers.video_id, [...videoIds]),
+              inArray(videoCustomAnswers.event_id, eventIds),
+              inArray(videoCustomAnswers.question_id, questionIds),
+            )!,
+          )
+      : [];
+
+  const answersByVideo = new Map<string, Map<string, string>>();
+  for (const answer of answers) {
+    const byQuestion =
+      answersByVideo.get(answer.video_id) ?? new Map<string, string>();
+    byQuestion.set(answer.question_id, answer.answer_text ?? "");
+    answersByVideo.set(answer.video_id, byQuestion);
+  }
+
+  for (const item of items) {
+    const scopedEventIds = Array.from(new Set(item.eventIds.filter(Boolean)));
+    const scopedQuestions = scopedEventIds.flatMap(
+      (eventId) => questionsByEvent.get(eventId) ?? [],
+    );
+    if (scopedQuestions.length === 0) {
+      out.set(item.videoId, null);
+      continue;
+    }
+    if (scopedQuestions.length > 4) {
+      throw new Error("video_stage_answer_read_limit_exceeded");
+    }
+    const answerByQuestionId = answersByVideo.get(item.videoId) ?? new Map();
+    out.set(
+      item.videoId,
+      serializeStagePermissionFromRows(
+        scopedEventIds,
+        scopedQuestions,
+        answerByQuestionId,
+      ),
+    );
+  }
+
+  return out;
+}
+
 export async function buildReplaceStagePermissionAnswersPlan(
   db: DB,
   args: ReplaceStagePermissionCustomAnswersArgs & { actorUserId: string },

@@ -7,7 +7,7 @@ import {
   videoCustomAnswers,
   videoEvents,
 } from "@/lib/db/schema";
-import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
+import { batchReadStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 
 export type VideoReviewSummary = {
   stage_permission_summary: string;
@@ -49,12 +49,16 @@ export async function fetchVideoReviewSummaries(
     eventIdsByVideo.set(row.video_id, list);
   }
 
-  for (const videoId of videoIds) {
-    const eventIds = eventIdsByVideo.get(videoId) ?? [];
-    const stagePermission = await readStagePermissionCustomAnswers(db, {
+  const stagePermissions = await batchReadStagePermissionCustomAnswers(
+    db,
+    videoIds.map((videoId) => ({
       videoId,
-      eventIds,
-    });
+      eventIds: eventIdsByVideo.get(videoId) ?? [],
+    })),
+  );
+
+  for (const videoId of videoIds) {
+    const stagePermission = stagePermissions.get(videoId) ?? null;
     out.set(videoId, {
       stage_permission_summary: summarizeStagePermission(stagePermission),
       required_unanswered_count: 0,
