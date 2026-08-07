@@ -23,10 +23,20 @@ import {
   type RandomVideoPool,
 } from "./randomVideoPoolCore";
 import {
+  normalizePickupCreatorsArtifact,
+  PICKUP_CREATORS_OBJECT_KEY,
+  type PickupCreatorsArtifact,
+} from "./publicCreatorProjection";
+import {
   normalizePublicXIconMap,
   PUBLIC_X_ICON_MAP_OBJECT_KEY,
   type PublicXIconMapPayload,
 } from "./publicIconProjection";
+import {
+  normalizeStaticTopSlotStats,
+  TOP_SLOT_STATS_OBJECT_KEY,
+  type StaticTopSlotStats,
+} from "./staticTopSlotStatsCore";
 import {
   normalizeStaticUsersIndex,
   type StaticUsersIndexPayload,
@@ -224,6 +234,53 @@ export async function loadRandomVideoPool(): Promise<
     return {
       status: "unavailable",
       value: EMPTY_RANDOM_VIDEO_POOL,
+    };
+  }
+  return { status: result.status, value: result.value };
+}
+
+const EMPTY_PICKUP_CREATORS_ARTIFACT: PickupCreatorsArtifact = {
+  schema_version: 1,
+  generated_at: 0,
+  creators: [],
+};
+
+const EMPTY_TOP_SLOT_STATS: StaticTopSlotStats = {
+  generatedAt: 0,
+  items: new Map(),
+};
+
+export async function loadPickupCreatorsArtifact(): Promise<
+  StaticJsonLoadResult<PickupCreatorsArtifact>
+> {
+  const result = await loadStaticJsonFreshStaleUnavailable({
+    key: PICKUP_CREATORS_OBJECT_KEY,
+    normalize: normalizePickupCreatorsArtifact,
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
+  });
+  if (result.status === "unavailable" || !result.value) {
+    return {
+      status: "unavailable",
+      value: EMPTY_PICKUP_CREATORS_ARTIFACT,
+    };
+  }
+  return { status: result.status, value: result.value };
+}
+
+export async function loadStaticTopSlotStats(): Promise<
+  StaticJsonLoadResult<StaticTopSlotStats>
+> {
+  const result = await loadStaticJsonFreshStaleUnavailable({
+    key: TOP_SLOT_STATS_OBJECT_KEY,
+    normalize: normalizeStaticTopSlotStats,
+    maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats * 2,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats,
+  });
+  if (result.status === "unavailable" || !result.value) {
+    return {
+      status: "unavailable",
+      value: EMPTY_TOP_SLOT_STATS,
     };
   }
   return { status: result.status, value: result.value };

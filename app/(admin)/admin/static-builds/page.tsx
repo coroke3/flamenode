@@ -36,6 +36,7 @@ import {
 } from "@/lib/staticRebuild/backfillStateCore";
 import {
   loadStaticSharedInputDiagnostics,
+  type StaticSharedInputDiagnostic,
   type StaticSharedInputObjectState,
 } from "@/lib/admin/staticSharedInputDiagnostics";
 
@@ -159,6 +160,16 @@ export default async function AdminStaticBuildsPage({
   }
 
   const rebuildPolicy = getStaticRebuildPolicy(operationMode);
+  const youtubeSharedInputDiagnostics = sharedInputDiagnostics.filter(
+    (diagnostic) =>
+      diagnostic.kind === "youtube_related_blocklist" ||
+      diagnostic.kind === "random_video_pool",
+  );
+  const usersTopSharedInputDiagnostics = sharedInputDiagnostics.filter(
+    (diagnostic) =>
+      diagnostic.kind === "pickup_creators" ||
+      diagnostic.kind === "top_slot_stats",
+  );
 
   const backfillQueueSummary = Object.fromEntries(
     STATIC_BACKFILL_KINDS.map((kind) => [
@@ -269,77 +280,30 @@ export default async function AdminStaticBuildsPage({
             関連動画の共有JSONを両方まとめて再生成キュー投入
           </button>
         </form>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: 12,
-          }}
+        <SharedInputDiagnosticCards
+          diagnostics={youtubeSharedInputDiagnostics}
+        />
+      </section>
+
+      <section
+        style={{ marginBottom: 24 }}
+        aria-labelledby="users-top-json-heading"
+      >
+        <h2
+          id="users-top-json-heading"
+          style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}
         >
-          {sharedInputDiagnostics.map((diagnostic) => (
-            <article
-              key={diagnostic.kind}
-              className="fn-card"
-              style={{ padding: 14, minWidth: 0 }}
-            >
-              <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 8px" }}>
-                {diagnostic.label}
-              </h3>
-              <p
-                className="fn-muted fn-text-sm"
-                style={{ margin: "0 0 10px", overflowWrap: "anywhere" }}
-              >
-                <code>{diagnostic.objectKey}</code>
-              </p>
-              <dl
-                className="fn-text-sm"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "max-content minmax(0, 1fr)",
-                  gap: "6px 12px",
-                  margin: "0 0 12px",
-                }}
-              >
-                <dt className="fn-muted">R2 object</dt>
-                <dd style={{ margin: 0 }}>
-                  {sharedInputObjectStateLabel(diagnostic.objectState)}
-                </dd>
-                <dt className="fn-muted">load status</dt>
-                <dd style={{ margin: 0 }}>
-                  <code>{diagnostic.loadStatus}</code>
-                </dd>
-                <dt className="fn-muted">generated_at</dt>
-                <dd style={{ margin: 0 }}>
-                  {diagnostic.generatedAt
-                    ? formatBackfillTime(diagnostic.generatedAt)
-                    : "確認不可"}
-                </dd>
-                <dt className="fn-muted">件数</dt>
-                <dd style={{ margin: 0 }}>
-                  {diagnostic.itemCount == null
-                    ? "確認不可"
-                    : `${diagnostic.itemCount}${diagnostic.itemUnit}`}
-                </dd>
-              </dl>
-              <form action={enqueueStaticRebuildAdmin}>
-                <input
-                  type="hidden"
-                  name="target_type"
-                  value={diagnostic.targetType}
-                />
-                <input type="hidden" name="target_id" value="global" />
-                <input
-                  type="hidden"
-                  name="reason"
-                  value={`admin_shared_input_rebuild_${diagnostic.kind}`}
-                />
-                <button type="submit" className="fn-btn fn-btn-primary">
-                  再生成をキュー投入
-                </button>
-              </form>
-            </article>
-          ))}
-        </div>
+          users / top 共有JSON診断
+        </h2>
+        <p className="fn-muted fn-text-sm" style={{ margin: "0 0 10px" }}>
+          Creator棚用 pickup artifact と top hero 用 slot-stats artifact
+          のR2実体と公開ローダー状態を表示します。pickup は{" "}
+          <code>users_index:global</code>、slot-stats は{" "}
+          <code>top_slot_stats:global</code> で再生成します。
+        </p>
+        <SharedInputDiagnosticCards
+          diagnostics={usersTopSharedInputDiagnostics}
+        />
       </section>
 
       <section
@@ -559,6 +523,86 @@ export default async function AdminStaticBuildsPage({
         rows={rows}
         retryAllAction={retryAllFailedStaticRebuild}
       />
+    </div>
+  );
+}
+
+function SharedInputDiagnosticCards({
+  diagnostics,
+}: {
+  diagnostics: StaticSharedInputDiagnostic[];
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: 12,
+      }}
+    >
+      {diagnostics.map((diagnostic) => (
+        <article
+          key={diagnostic.kind}
+          className="fn-card"
+          style={{ padding: 14, minWidth: 0 }}
+        >
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: "0 0 8px" }}>
+            {diagnostic.label}
+          </h3>
+          <p
+            className="fn-muted fn-text-sm"
+            style={{ margin: "0 0 10px", overflowWrap: "anywhere" }}
+          >
+            <code>{diagnostic.objectKey}</code>
+          </p>
+          <dl
+            className="fn-text-sm"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "max-content minmax(0, 1fr)",
+              gap: "6px 12px",
+              margin: "0 0 12px",
+            }}
+          >
+            <dt className="fn-muted">R2 object</dt>
+            <dd style={{ margin: 0 }}>
+              {sharedInputObjectStateLabel(diagnostic.objectState)}
+            </dd>
+            <dt className="fn-muted">load status</dt>
+            <dd style={{ margin: 0 }}>
+              <code>{diagnostic.loadStatus}</code>
+            </dd>
+            <dt className="fn-muted">generated_at</dt>
+            <dd style={{ margin: 0 }}>
+              {diagnostic.generatedAt
+                ? formatBackfillTime(diagnostic.generatedAt)
+                : "確認不可"}
+            </dd>
+            <dt className="fn-muted">件数</dt>
+            <dd style={{ margin: 0 }}>
+              {diagnostic.itemCount == null
+                ? "確認不可"
+                : `${diagnostic.itemCount}${diagnostic.itemUnit}`}
+            </dd>
+          </dl>
+          <form action={enqueueStaticRebuildAdmin}>
+            <input
+              type="hidden"
+              name="target_type"
+              value={diagnostic.targetType}
+            />
+            <input type="hidden" name="target_id" value="global" />
+            <input
+              type="hidden"
+              name="reason"
+              value={`admin_shared_input_rebuild_${diagnostic.kind}`}
+            />
+            <button type="submit" className="fn-btn fn-btn-primary">
+              再生成をキュー投入
+            </button>
+          </form>
+        </article>
+      ))}
     </div>
   );
 }

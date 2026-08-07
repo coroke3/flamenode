@@ -70,6 +70,8 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 
 `/admin/static-builds` は両objectについて、R2 `head` による実体の有無、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、blocklist件数またはrandom pool件数を表示する。binding欠損・`head`失敗は「確認不可」とし、管理者write guardを通る個別再生成キューに加え、両方まとめて投入する操作を提供する。R2 object が欠けている場合は `content-jobs` Recovery Cron が high 優先度で両 target を自動 enqueue する。YouTube 関連の `youtube_related_blocklist` / `random_video_pool` に加え、`users/index.json` / `users/public-x-icon-map.v1.json` / `users/pickup-creators.v1.json` のいずれかが欠けているときは `users_index:global` を high で enqueue する（`rebuildUsersIndex` が3つを再生成する）。`top/slot-stats.v1.json` が欠けているときは `top_slot_stats:global` を high で enqueue する（`rebuildTopSlotStats` が artifact を再生成する）。
 
+管理画面の users / top 診断セクションでは、`users/pickup-creators.v1.json` と `top/slot-stats.v1.json` についても同様に R2 `head`、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、件数（`creators.length` / `items.length`）を表示する。pickup artifact の再生成は `users_index:global`、slot-stats artifact は `top_slot_stats:global` を個別キュー投入する。
+
 主な公開 artifact:
 
 | 用途 | R2 key | target_type |
