@@ -934,7 +934,7 @@ export async function loadPublicEventVideosPage(params: {
     targetId: eventId,
     reason: "public_event_list_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
-    missRebuildTargetTypes: ["event_base"],
+    missRebuildTargetTypes: ["event_base", "event_slots"],
   };
 
   const tryStaticEventList = (
@@ -1018,7 +1018,7 @@ export async function loadPublicEventVideosPage(params: {
     return unavailable(strategy, missMeta);
   }
 
-  if (!(await isDegradedD1CircuitOpen())) {
+  if (await isDegradedD1CircuitOpen()) {
     return unavailable(strategy, missMeta);
   }
 
@@ -1096,6 +1096,13 @@ export async function loadStaticTopPage(): Promise<
     targetType: "top",
     targetId: "global",
     reason: "public_top_miss",
+    missRebuildTargetTypes: [
+      "top_recommended",
+      "top_latest",
+      "top_nostalgic",
+      "top_stats",
+      "recommend_core",
+    ],
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.top,
     isEmptyCollection: isEmptyTopCollection,
     degradedFetcher: async () => {

@@ -115,6 +115,13 @@ async function revalidateEventStaffPathsBestEffort(args: {
                 requestedByUserId: args.actorUserId,
               },
               {
+                targetType: "event_slots",
+                targetId: args.eventId,
+                reason: args.reason,
+                priority: "high",
+                requestedByUserId: args.actorUserId,
+              },
+              {
                 targetType: "events_index",
                 targetId: "global",
                 reason: args.reason,

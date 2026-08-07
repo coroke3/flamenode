@@ -935,10 +935,15 @@ test("旧形式applyは公開R2 JSONの全関連targetを原子的に再生成�
   const root = path.resolve(import.meta.dirname, "../../../..");
   const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");
   for (const targetType of [
-    "event",
+    "event_base",
+    "event_slots",
     "events_index",
     "video",
-    "top",
+    "top_recommended",
+    "top_latest",
+    "top_nostalgic",
+    "top_stats",
+    "recommend_core",
     "list_recent",
     "list_popular",
     "search_index",

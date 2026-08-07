@@ -384,7 +384,7 @@ test("inactive events throttle: skip under 3h and enqueue after 3h", async () =>
   assertKvMarkerRecent(store, beforeInactive, afterInactive);
 });
 
-test("users_index in flight enqueues only list_popular", async () => {
+test("users_index in flight still enqueues full score rebuild targets", async () => {
   const { kv, store } = createKvStore();
   const { db, batchCalls, lastBatchStatementCount } = createDb({
     batchChanges: 1,
@@ -399,10 +399,10 @@ test("users_index in flight enqueues only list_popular", async () => {
   };
 
   const result = await enqueueScoreDependentRebuilds(env);
-  assert.equal(result.processed, 1);
-  assert.equal(result.d1_changes, 1);
+  assert.equal(result.processed, 3);
+  assert.equal(result.d1_changes, 3);
   assert.equal(batchCalls(), 1);
-  assert.equal(lastBatchStatementCount(), 1);
+  assert.equal(lastBatchStatementCount(), 3);
   assert.equal(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY), undefined);
 });
 
@@ -476,7 +476,7 @@ test("users_index in flight with deduped list_popular does not update KV marker"
   const result = await enqueueScoreDependentRebuilds(env);
   assert.equal(result.processed, 0);
   assert.equal(result.skipped, 1);
-  assert.equal(lastBatchStatementCount(), 1);
+  assert.equal(lastBatchStatementCount(), 3);
   assert.equal(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY), String(T0 - 10_000));
 });
 

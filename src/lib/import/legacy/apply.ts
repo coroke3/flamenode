@@ -1184,6 +1184,7 @@ async function applyEvent(
     db,
     [
       { targetType: "event_base", targetId: event.id, priority: "high" },
+      { targetType: "event_slots", targetId: event.id, priority: "high" },
       { targetType: "events_index", targetId: "global", priority: "low" },
       { targetType: "search_index", targetId: "global", priority: "low" },
     ],
@@ -1767,18 +1768,29 @@ async function applyVideo(
     db,
     [
       { targetType: "video", targetId: video.id, priority: "high" },
-      { targetType: "top", targetId: "global", priority: "normal" },
+      { targetType: "top_recommended", targetId: "global", priority: "normal" },
+      { targetType: "top_latest", targetId: "global", priority: "normal" },
+      { targetType: "top_nostalgic", targetId: "global", priority: "normal" },
+      { targetType: "top_stats", targetId: "global", priority: "normal" },
+      { targetType: "recommend_core", targetId: "global", priority: "normal" },
       { targetType: "list_recent", targetId: "global", priority: "normal" },
       { targetType: "list_popular", targetId: "global", priority: "normal" },
       { targetType: "search_index", targetId: "global", priority: "normal" },
       ...(video.creator_x_user_id
         ? [{ targetType: "user" as const, targetId: video.creator_x_user_id, priority: "normal" as const }]
         : []),
-      ...rebuildEventIds.map((eventId) => ({
-        targetType: "event_base" as const,
-        targetId: eventId,
-        priority: "high" as const,
-      })),
+      ...rebuildEventIds.flatMap((eventId) => [
+        {
+          targetType: "event_base" as const,
+          targetId: eventId,
+          priority: "high" as const,
+        },
+        {
+          targetType: "event_slots" as const,
+          targetId: eventId,
+          priority: "high" as const,
+        },
+      ]),
     ],
     options,
     now,

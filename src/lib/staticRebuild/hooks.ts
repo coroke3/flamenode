@@ -414,12 +414,11 @@ export function buildAfterVideoStatusChangeQueueBatch(
       },
       usersIndexTarget("video_update"),
     );
-  } else {
-    items.push(...withMeta(topVideoVisibilityTargets("video_update", "low"), {
-      requestedByUserId: opts.requestedByUserId,
-      priority: "low",
-    }));
   }
+  items.push(...withMeta(topVideoVisibilityTargets("video_update", "low"), {
+    requestedByUserId: opts.requestedByUserId,
+    priority: "low",
+  }));
   for (const eventId of eventIds) {
     items.push(eventBaseTarget(eventId, "video_update", undefined, opts.requestedByUserId));
   }
@@ -467,6 +466,7 @@ export function buildEventChangeQueueBatch(
   const priority = opts.priority ?? "normal";
   return buildStaticRebuildQueueBatch(db, [
     eventBaseTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
+    eventSlotsTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
     {
       targetType: "events_index",
       targetId: "global",

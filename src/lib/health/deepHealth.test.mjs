@@ -52,6 +52,15 @@ function artifactPayload(key, now) {
       creators: [],
     };
   }
+  if (key === "recommend/core.v1.json") {
+    return {
+      schema_version: 1,
+      generated_at: generatedAt,
+      recommended: [],
+      latest: [],
+      underrated: [],
+    };
+  }
   if (key === "rules/current.json") {
     return {
       generated_at: generatedAt,

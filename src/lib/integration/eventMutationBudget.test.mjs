@@ -105,7 +105,7 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
   assert.match(hooks, /return buildStaticRebuildQueueBatch\(db, items\)/);
   assert.doesNotMatch(hooks, /activeByEventId|lease_token:\s*null/);
 
-  assert.match(enqueue, /MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*16/);
+  assert.match(enqueue, /MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*24/);
   assert.match(enqueue, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT\s*=\s*0/);
   assert.match(enqueue, /FROM json_each\(\$\{payload\}\)/);
   assert.doesNotMatch(enqueue, /lease_token:\s*null/);

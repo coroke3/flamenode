@@ -32,9 +32,11 @@ test("動画ステータス変更batchの最悪ケースはMAX_STATIC_REBUILD_BA
     3 + // list targets
     1 + // user
     1 + // users_index
+    4 + // top_recommended / top_latest / top_nostalgic / top_stats
+    1 + // recommend_core
     MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS;
   const worstCase = Math.max(withoutCreator, withCreator);
-  assert.equal(worstCase, 19);
+  assert.equal(worstCase, 21);
   assert.equal(MAX_STATIC_REBUILD_BATCH_TARGETS, 24);
   assert.ok(worstCase <= MAX_STATIC_REBUILD_BATCH_TARGETS);
   assert.ok(MAX_STATIC_REBUILD_BATCH_TARGETS > 16);

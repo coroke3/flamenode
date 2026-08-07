@@ -252,10 +252,9 @@ async function isUsersIndexRebuildInFlight(
 }
 
 function resolveScoreRebuildTargets(
-  usersIndexInFlight: boolean,
+  _usersIndexInFlight: boolean,
 ): readonly ScoreRebuildTarget[] {
-  if (!usersIndexInFlight) return SCORE_REBUILD_TARGETS;
-  return SCORE_REBUILD_TARGETS.filter((targetType) => targetType === "list_popular");
+  return SCORE_REBUILD_TARGETS;
 }
 
 export async function enqueueScoreDependentRebuilds(

@@ -451,6 +451,12 @@ export async function applyVideoUpdatePlan(
         reason: "video_update",
         requestedByUserId: plan.operatorUserId,
       });
+      queueItems.push({
+        targetType: "event_slots",
+        targetId: eventId,
+        reason: "video_update",
+        requestedByUserId: plan.operatorUserId,
+      });
     }
   }
   if (isPublicVideo && plan.rebuildFlags.randomPoolCardChanged) {

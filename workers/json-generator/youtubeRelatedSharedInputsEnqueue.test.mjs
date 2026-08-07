@@ -7,10 +7,14 @@ const source = await readFile(
   "utf8",
 );
 
-test("関連動画共有JSONは blocklist と random pool と top をセットで enqueue する", () => {
+test("関連動画共有JSONは blocklist と random pool と top section をセットで enqueue する", () => {
   assert.match(source, /youtube_related_blocklist/);
   assert.match(source, /random_video_pool/);
-  assert.match(source, /"top"/);
+  assert.match(source, /"top_recommended"/);
+  assert.match(source, /"top_latest"/);
+  assert.match(source, /"top_nostalgic"/);
+  assert.match(source, /"top_stats"/);
+  assert.match(source, /"recommend_core"/);
   assert.match(source, /YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY/);
   assert.match(source, /RANDOM_VIDEO_POOL_OBJECT_KEY/);
   assert.match(source, /ensureYoutubeRelatedSharedInputsOnR2/);
