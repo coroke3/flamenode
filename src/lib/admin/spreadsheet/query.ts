@@ -8,15 +8,13 @@ import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { SpreadsheetImportPreviewClaims } from "./importPreviewToken";
 import type { SpreadsheetTableDef } from "./registry";
 import {
-  isWriteFeatureKey,
-  parseWriteFeatureList,
-} from "@/lib/auth/writeGuardCore";
-import {
   isSpreadsheetColumnEditable,
   isSpreadsheetSecretColumn,
   getSpreadsheetColumnPolicy,
   SPREADSHEET_DEFAULT_MAX_CELL_CHARS,
 } from "./registry";
+import { validateSpreadsheetDisabledFeaturesJson } from "./disabledFeaturesCore";
+export { validateSpreadsheetDisabledFeaturesJson } from "./disabledFeaturesCore";
 import {
   isSpreadsheetImportBatchSizeAllowed,
   SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS,
@@ -53,12 +51,6 @@ import {
 export type { SpreadsheetColumnMeta } from "./tableContext";
 export const SPREADSHEET_EXPORT_MAX_ROWS = 5000;
 
-export function validateSpreadsheetDisabledFeaturesJson(value: string): void {
-  const parsed = parseWriteFeatureList(value);
-  if (!parsed.ok || parsed.features.some((item) => !isWriteFeatureKey(item))) {
-    throw new Error("invalid_feature_key");
-  }
-}
 const SPREADSHEET_IMPORT_EXISTING_LOOKUP_CHUNK_SIZE = 40;
 
 export interface SpreadsheetPageResult {

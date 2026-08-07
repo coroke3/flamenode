@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { validateSpreadsheetDisabledFeaturesJson } from "./query.ts";
+import { validateSpreadsheetDisabledFeaturesJson } from "./disabledFeaturesCore.ts";
 
 test("disabled_features_json accepts known WriteFeatureKeys", () => {
   assert.doesNotThrow(() =>
