@@ -107,9 +107,9 @@ export function ChapterComposer({
   const isComposerDirty = React.useCallback((): boolean => {
     if (bulkCsv.trim().length > 0) return true;
     if (label.trim().length > 0 || note.trim().length > 0) return true;
-    if (isInlineSheet && timeStr.trim() !== initialTimeFormatted) return true;
+    if (timeStr.trim() !== initialTimeFormatted) return true;
     return false;
-  }, [bulkCsv, initialTimeFormatted, isInlineSheet, label, note, timeStr]);
+  }, [bulkCsv, initialTimeFormatted, label, note, timeStr]);
 
   React.useEffect(() => {
     const handler = (event: Event) => {

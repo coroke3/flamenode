@@ -482,6 +482,13 @@ export function SlotGrid({
     (s) => s.status === "reserved" && s.is_owned_by_viewer,
   );
 
+  const settingsNext =
+    pathname && pathname.length > 0
+      ? pathname
+      : typeof window !== "undefined"
+        ? window.location.pathname
+        : "/entry";
+
   return (
     <div className={styles.wrap}>
       {error ? (
@@ -638,7 +645,7 @@ export function SlotGrid({
                             {isAccountOther && !hasIntegrityError ? (
                               <div className={styles.slotActions}>
                                 <Link
-                                  href={`/dashboard/settings?next=${encodeURIComponent(pathname)}`}
+                                  href={`/dashboard/settings?next=${encodeURIComponent(settingsNext)}`}
                                   className={styles.editSlotButton}
                                 >
                                   Active X ID を切り替え

@@ -73,7 +73,10 @@ export function usePublicAccountSummary(
           cache: "no-store",
         });
         if (response.status === 503 || !response.ok) {
-          if (!cancelled) setUnavailable(true);
+          if (!cancelled) {
+            setUnavailable(true);
+            if (!preserveLoggedInOnFailure) setUser(null);
+          }
           return;
         }
         const summary = (await response.json()) as AccountSummaryResponse;
@@ -89,7 +92,10 @@ export function usePublicAccountSummary(
           }
         }
       } catch {
-        if (!cancelled) setUnavailable(true);
+        if (!cancelled) {
+          setUnavailable(true);
+          if (!preserveLoggedInOnFailure) setUser(null);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

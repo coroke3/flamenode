@@ -96,25 +96,30 @@ export function useActiveXSwitcher({
       );
 
       startTransition(async () => {
-        const result =
-          await setActiveXId(formData);
+        try {
+          const result =
+            await setActiveXId(formData);
 
-        if (!result.ok) {
+          if (!result.ok) {
+            setActiveId(previousActiveId);
+            setError(
+              result.message ??
+                "X ID の切り替えに失敗しました。",
+            );
+            return;
+          }
+
+          dispatchActiveXChanged({
+            fromXId,
+            toXId,
+          });
+          onSwitch?.(toXId);
+          onSuccess?.();
+          router.refresh();
+        } catch {
           setActiveId(previousActiveId);
-          setError(
-            result.message ??
-              "X ID の切り替えに失敗しました。",
-          );
-          return;
+          setError("X ID の切り替えに失敗しました。");
         }
-
-        dispatchActiveXChanged({
-          fromXId,
-          toXId,
-        });
-        onSwitch?.(toXId);
-        onSuccess?.();
-        router.refresh();
       });
     },
     [
