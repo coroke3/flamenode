@@ -1,5 +1,4 @@
 import * as React from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { asc, eq } from "drizzle-orm";
@@ -7,13 +6,10 @@ import {
   EventStaffManager,
   type EventStaffMemberRow,
 } from "@/components/admin/EventStaffManager";
-import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
-import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
-import { Icon } from "@/components/ui/Icon";
+import { EventStaffReadOnlyList } from "@/components/admin/EventStaffReadOnlyList";
 import { requireSession } from "@/lib/auth/guard";
 import { getCollaboratorPermissions } from "@/lib/auth/ownership";
 import { getDatabase } from "@/lib/cloudflare";
-import { PRESET_DEFINITIONS } from "@/lib/auth/permissions/presets";
 import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
 import {
   eventStaff as eventStaffTable,
@@ -21,7 +17,8 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
-import { formatUnix } from "@/lib/utils/format";
+import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
+import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 
 export const dynamic = "force-dynamic";
 
@@ -96,96 +93,60 @@ export default async function ManageEventStaffPage({
   const approvedCount = rows.filter(
     (row) => row.approval_status === "approved",
   ).length;
+  const pendingCount = await getEventPendingReviewVideoCount(id);
 
   return (
-    <div style={manageEventAccentStyle(event.accent_color)}>
-      <ManagePageHeader
-        title={`${event.title} の運営メンバー`}
-        description="権限は担当プリセット、公開ページの肩書は公開肩書から解決します。"
-        backHref={`/manage/events/${id}`}
-        backLabel="イベント運営トップへ"
-        accent
-        actions={[
-          {
-            href: `/event/${encodeURIComponent(id)}`,
-            label: "公開ページを見る",
-            icon: <Icon name="external" size={12} aria-hidden />,
-            variant: "ghost",
-          },
-        ]}
-      />
-      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
-
-      <section className="fn-console-stat-grid fn-console-section--tight">
+    <ManageEventPageShell
+      eventId={id}
+      title={event.title}
+      description="権限は担当プリセット、公開ページの肩書は公開肩書から解決します。"
+      backHref={`/manage/events/${id}`}
+      backLabel="イベント概要へ"
+      isAdmin={isAdmin}
+      pendingCount={pendingCount}
+      accentStyle={manageEventAccentStyle(event.accent_color)}
+      actions={[
+        { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
+      ]}
+    >
+      <section
+        className="fn-console-stat-grid fn-console-section--tight"
+        aria-label="運営メンバー概要"
+      >
         <SummaryCard label="代表者" value={ownerCount} />
         <SummaryCard label="登録メンバー" value={rows.length} />
         <SummaryCard label="公開メンバー" value={publicCount} />
         <SummaryCard label="承認済みX名義" value={approvedCount} />
       </section>
 
-      <section className="fn-console-section">
-        <h2 className="fn-console-eyebrow">メンバー一覧</h2>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
-            gap: 10,
-            marginTop: 12,
-          }}
-        >
-          {rows.map((row) => {
-            const name = row.x_name ?? row.display_name;
-            const preset = row.permission_preset;
-            const presetLabel =
-              preset && preset in PRESET_DEFINITIONS
-                ? PRESET_DEFINITIONS[
-                    preset as keyof typeof PRESET_DEFINITIONS
-                  ].label
-                : "未設定";
-            return (
-              <article key={row.id} className="fn-card" style={{ padding: 12 }}>
-                <strong>
-                  <Link href={`/user/${row.x_user_id}`}>{name}</Link>
-                </strong>
-                <div className="fn-muted" style={{ fontSize: 11 }}>
-                  @{row.x_user_id}
-                </div>
-                <div className="fn-console-badge-row" style={{ marginTop: 8 }}>
-                  {preset === "owner" ? (
-                    <span className="fn-badge fn-badge-warning">代表者</span>
-                  ) : null}
-                  <span className="fn-badge fn-badge-soft">{presetLabel}</span>
-                  <span className="fn-badge fn-badge-neutral">
-                    {row.is_public === 1 ? "公開" : "非公開"}
-                  </span>
-                </div>
-                {row.public_role_label ? (
-                  <p className="fn-console-note">
-                    公開肩書: {row.public_role_label}
-                  </p>
-                ) : null}
-                <p className="fn-console-note">
-                  登録: {row.approved_at ? formatUnix(row.approved_at, { dateOnly: true }) : "未登録"}
-                </p>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
       {canManageMembers ? (
-        <section className="fn-card fn-console-card" style={{ padding: 20 }}>
+        <section className="manage-section">
           <EventStaffManager
             eventId={event.id}
             members={members}
             isSiteAdmin={isAdmin}
+            variant="manage"
           />
         </section>
       ) : (
-        <p className="fn-alert">この画面は閲覧のみです。</p>
+        <section className="manage-section">
+          <div className="manage-permission-panel">
+            <section className="manage-permission-members">
+              <div className="manage-staff-list-head">
+                <h3 className="fn-console-card-title">
+                  登録メンバー ({members.length})
+                </h3>
+                <span className="fn-badge fn-badge-neutral">閲覧のみ</span>
+              </div>
+              <EventStaffReadOnlyList members={members} />
+            </section>
+          </div>
+          <p className="fn-alert" style={{ marginTop: 12 }}>
+            この画面は閲覧のみです。メンバーの追加・編集には event.members 権限が必要です。
+          </p>
+        </section>
       )}
-    </div>
+    </ManageEventPageShell>
   );
 }
 

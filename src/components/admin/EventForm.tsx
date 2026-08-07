@@ -73,7 +73,15 @@ interface EventFormProps {
   };
   /** Auth user id used to isolate local drafts between accounts. */
   draftAuthUserId?: string;
+  variant?: "admin" | "manage";
 }
+
+const MANAGE_SECTION_NAV = [
+  { id: "section-basic", label: "基本情報" },
+  { id: "section-publish", label: "公開・受付" },
+  { id: "section-questions", label: "投稿・権限" },
+  { id: "section-slots", label: "枠" },
+] as const;
 
 type EventFormDraftValue = Record<string, string | string[]>;
 const EMPTY_EVENT_FORM_INITIAL: EventFormInitial = {};
@@ -294,17 +302,25 @@ function GatedSelect({
 function FormSection({
   title,
   allowed,
+  sectionId,
   children,
 }: {
   title: string;
   allowed: boolean;
+  sectionId?: string;
   children: React.ReactNode;
 }): React.ReactElement {
   return (
     <fieldset
+      id={sectionId}
       className={`${styles.formSection} ${allowed ? "" : styles.formSectionDisabled}`}
     >
       <legend className={styles.formSectionLegend}>{title}</legend>
+      {!allowed ? (
+        <p className={styles.formSectionDenied} role="status">
+          変更権限がありません
+        </p>
+      ) : null}
       {children}
     </fieldset>
   );
@@ -316,7 +332,9 @@ export function EventForm({
   templateId,
   editableSections,
   draftAuthUserId,
+  variant = "admin",
 }: EventFormProps): React.ReactElement {
+  const isManage = variant === "manage";
   const initial = initialProp ?? EMPTY_EVENT_FORM_INITIAL;
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
@@ -415,6 +433,9 @@ export function EventForm({
     });
   };
 
+  const submitLabel =
+    busy ? "保存中…" : mode === "create" ? "イベントを作成" : "変更を保存";
+
   return (
     <form
       ref={formRef}
@@ -425,8 +446,17 @@ export function EventForm({
           setPreview(formPreview(new FormData(event.currentTarget), initial));
         })()
       }
-      className={styles.eventForm}
+      className={`${styles.eventForm}${isManage ? ` ${styles.eventFormManage}` : ""}`}
     >
+      {isManage && mode === "edit" ? (
+        <nav className={styles.manageSectionNav} aria-label="設定セクション">
+          {MANAGE_SECTION_NAV.map((item) => (
+            <a key={item.id} href={`#${item.id}`}>
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      ) : null}
       {mode === "edit" && initial.id ? (
         <input type="hidden" name="id" value={initial.id} />
       ) : null}
@@ -434,7 +464,7 @@ export function EventForm({
         <input type="hidden" name="template_id" value={templateId} />
       ) : null}
 
-      <FormSection title="基本情報" allowed={canBasic}>
+      <FormSection title="基本情報" allowed={canBasic} sectionId="section-basic">
         <div className={styles.formGrid2}>
           <div>
             <label className="fn-label">ID</label>
@@ -541,7 +571,7 @@ export function EventForm({
         </div>
       </FormSection>
 
-      <FormSection title="公開・受付" allowed={canPublish}>
+      <FormSection title="公開・受付" allowed={canPublish} sectionId="section-publish">
         <div className={styles.formGrid2}>
           <div>
             <label className="fn-label">募集開始日時</label>
@@ -599,7 +629,7 @@ export function EventForm({
         </div>
       </FormSection>
 
-      <FormSection title="投稿フォーム・権限" allowed={canQuestions}>
+      <FormSection title="投稿・権限" allowed={canQuestions} sectionId="section-questions">
         <div className={styles.formGrid2}>
           <div>
             <label className="fn-label">一般ユーザー編集</label>
@@ -778,7 +808,7 @@ export function EventForm({
         ) : null}
       </FormSection>
 
-      <FormSection title="枠設定" allowed={canSlots}>
+      <FormSection title="枠" allowed={canSlots} sectionId="section-slots">
         <div className={styles.formGrid2}>
           <div>
             <label className="fn-label">枠タイプ</label>
@@ -851,11 +881,33 @@ export function EventForm({
           pendingPublicReflection={success.pendingPublicReflection}
         />
       ) : null}
-      <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
-        {busy ? "保存中…" : mode === "create" ? "イベントを作成" : "変更を保存"}
-      </button>
 
-      <EventSettingsPreview event={preview} />
+      {isManage ? (
+        <div
+          className={`${styles.manageSaveBar}${dirty ? ` ${styles.manageSaveBarDirty}` : ""}`}
+          role="status"
+        >
+          <span className={styles.manageSaveBarStatus}>
+            {dirty ? "未保存の変更があります" : "保存済み"}
+          </span>
+          <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
+            {submitLabel}
+          </button>
+        </div>
+      ) : (
+        <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
+          {submitLabel}
+        </button>
+      )}
+
+      {isManage ? (
+        <details className={styles.managePreviewCollapsible}>
+          <summary>設定プレビュー</summary>
+          <EventSettingsPreview event={preview} />
+        </details>
+      ) : (
+        <EventSettingsPreview event={preview} />
+      )}
     </form>
   );
 }

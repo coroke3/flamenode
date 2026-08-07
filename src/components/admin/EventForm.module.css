@@ -23,6 +23,20 @@
   opacity: 0.58;
 }
 
+.eventFormManage .formSectionDisabled {
+  opacity: 0.82;
+}
+
+.formSectionDenied {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
 .formSectionLegend {
   padding: 0 12px 0 0;
   color: var(--text-primary);
@@ -75,4 +89,99 @@
     gap: 14px;
     padding-top: 16px;
   }
+
+  .manageSectionNav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+}
+
+.eventFormManage {
+  scroll-margin-top: 72px;
+}
+
+.manageSectionNav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+}
+
+.manageSectionNav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.manageSectionNav a:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.manageSaveBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.manageSaveBarDirty {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border-subtle));
+  box-shadow: var(--shadow-sm);
+}
+
+.manageSaveBarStatus {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.manageSaveBarDirty .manageSaveBarStatus {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.manageSaveBar .fn-btn {
+  min-height: 44px;
+}
+
+.managePreviewCollapsible {
+  margin-top: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.managePreviewCollapsible > summary {
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.managePreviewCollapsible > summary::-webkit-details-marker {
+  display: none;
+}
+
+.managePreviewCollapsible > :not(summary) {
+  padding: 0 16px 16px;
 }

@@ -16,8 +16,9 @@ import {
 import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getCollaboratorPermissions } from "@/lib/auth/ownership";
-import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
+import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,18 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  return { title: `登録者プレビュー (${id})` };
+  const db = getDatabase();
+  if (!db) return { title: `登録者プレビュー (${id})` };
+  const ev = (
+    await db
+      .select({ title: eventsTable.title })
+      .from(eventsTable)
+      .where(eq(eventsTable.id, id))
+      .limit(1)
+  )[0];
+  return {
+    title: ev?.title ? `${ev.title} 登録者プレビュー` : "登録者プレビュー",
+  };
 }
 
 export default async function ManageEventAudiencePage({
@@ -54,7 +66,6 @@ export default async function ManageEventAudiencePage({
     : await getCollaboratorPermissions(db, user.id, id);
   if (!isAdmin && permissions.size === 0) notFound();
 
-  // slot を確保した X ID (distinct)
   const slotXIds = await db
     .select({
       x_user_id: slotsTable.x_user_id,
@@ -73,7 +84,6 @@ export default async function ManageEventAudiencePage({
     )
     .groupBy(slotsTable.x_user_id);
 
-  // 動画提出者 (slot 経由ではない creator も拾う)
   const submitters = await db
     .select({
       x_user_id: videosTable.creator_x_user_id,
@@ -92,7 +102,6 @@ export default async function ManageEventAudiencePage({
     )
     .groupBy(videosTable.creator_x_user_id);
 
-  // X ID 単位で merge して 1 行 / unique にする
   const audienceMap = new Map<
     string,
     {
@@ -135,27 +144,25 @@ export default async function ManageEventAudiencePage({
   }
 
   const audience = Array.from(audienceMap.values()).sort((a, b) => {
-    // submitted_count → video_count → slot_count の順で降順
     if (b.submitted_count !== a.submitted_count) {
       return b.submitted_count - a.submitted_count;
     }
     if (b.video_count !== a.video_count) return b.video_count - a.video_count;
     return b.slot_count - a.slot_count;
   });
+  const pendingCount = await getEventPendingReviewVideoCount(id);
 
   return (
-    <div style={manageEventAccentStyle(ev.accent_color)}>
-      <p style={{ marginBottom: 8, fontSize: 12 }}>
-        <Link href={`/manage/events/${id}`}>← イベント運営トップへ</Link>
-      </p>
-      <h1 style={{ fontSize: 22, fontWeight: 700 }}>
-        登録者プレビュー: {ev.title}
-      </h1>
-      <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 12 }}>
-        {audience.length} 名の参加者 (slot 確保 / 動画提出のいずれかを行った X ID を集約)。読み取り専用。
-      </p>
-      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
-
+    <ManageEventPageShell
+      eventId={id}
+      title={ev.title}
+      description={`登録者プレビュー — ${audience.length} 名（読み取り専用）`}
+      backHref={`/manage/events/${id}`}
+      backLabel="イベント概要へ"
+      isAdmin={isAdmin}
+      pendingCount={pendingCount}
+      accentStyle={manageEventAccentStyle(ev.accent_color)}
+    >
       {audience.length === 0 ? (
         <EmptyState
           tone="neutral"
@@ -165,16 +172,16 @@ export default async function ManageEventAudiencePage({
             { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
             {
               href: `/manage/events/${id}`,
-              label: "イベント運営トップへ",
+              label: "イベント概要へ",
               variant: "ghost",
             },
           ]}
         />
       ) : (
-        <FnTable style={{ marginTop: 16 }}>
+        <FnTable className="manage-audience-table" style={{ marginTop: 16 }}>
           <thead>
             <tr>
-              <th>X ID / 名前</th>
+              <th>参加者</th>
               <th>確保枠</th>
               <th>提出済</th>
               <th>動画</th>
@@ -184,58 +191,43 @@ export default async function ManageEventAudiencePage({
             {audience.map((a, index) => (
               <tr key={`${a.x_user_id}-audience-${index}`}>
                 <td>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div className="manage-audience-identity">
                     {a.icon_url ? (
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img
                         src={a.icon_url}
                         alt=""
-                        width={28}
-                        height={28}
-                        style={{ borderRadius: 999, objectFit: "cover" }}
+                        className="manage-audience-avatar"
+                        width={32}
+                        height={32}
                       />
                     ) : (
-                      <span
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 999,
-                          display: "grid",
-                          placeItems: "center",
-                          background: "var(--bg-elevated)",
-                          color: "var(--text-muted)",
-                        }}
-                      >
+                      <span className="manage-audience-avatar manage-audience-avatar-fallback">
                         <Icon name="user" size={13} aria-hidden />
                       </span>
                     )}
-                    <div>
-                      <Link
-                        href={`/user/${a.x_user_id}`}
-                        style={{ fontWeight: 600 }}
-                      >
+                    <div className="manage-audience-identity-text">
+                      <Link href={`/user/${a.x_user_id}`} className="manage-audience-name">
                         {a.x_name ?? a.x_user_id}
                       </Link>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace" }}>
-                        @{a.x_user_id}
-                      </div>
+                      <span className="manage-audience-xid">@{a.x_user_id}</span>
                     </div>
                   </div>
                 </td>
-                <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.slot_count}</td>
-                <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                <td className="fn-td-tabular">{a.slot_count}</td>
+                <td className="fn-td-tabular">
                   {a.submitted_count > 0 ? (
                     <strong>{a.submitted_count}</strong>
                   ) : (
                     a.submitted_count
                   )}
                 </td>
-                <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.video_count}</td>
+                <td className="fn-td-tabular">{a.video_count}</td>
               </tr>
             ))}
           </tbody>
         </FnTable>
       )}
-    </div>
+    </ManageEventPageShell>
   );
 }

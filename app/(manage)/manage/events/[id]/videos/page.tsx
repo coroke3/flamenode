@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import { canAccessManageEvent, canEditEvent } from "@/lib/auth/ownership";
@@ -13,12 +13,13 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
 import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
 import { videoReviewQueueOrder } from "@/lib/admin/videoReviewQueueOrder";
 import { approveManageVideoPublic } from "@/lib/actions/manage-video";
+import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 import {
   VIDEO_VISIBILITY_GROUPS,
   normalizeVideoVisibilityFilter,
@@ -51,7 +52,7 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
-  if (!db) return { title: `審査キュー (${id})` };
+  if (!db) return { title: `作品・審査 (${id})` };
   const ev = (
     await db
       .select({ title: eventsTable.title })
@@ -59,7 +60,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       .where(eq(eventsTable.id, id))
       .limit(1)
   )[0];
-  return { title: ev?.title ? `${ev.title} 審査キュー` : "審査キュー" };
+  return { title: ev?.title ? `${ev.title} 作品・審査` : "作品・審査" };
 }
 
 export default async function ManageEventVideosPage({
@@ -134,29 +135,25 @@ export default async function ManageEventVideosPage({
     };
   });
 
+  const filterLabel = statusFilter
+    ? videoVisibilityFilterLabel(statusFilter)
+    : "すべて";
+  const pendingCount = await getEventPendingReviewVideoCount(id);
+
   return (
-    <div style={manageEventAccentStyle(ev.accent_color)}>
-      <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>
-        <Link href={`/manage/events/${id}`}>← イベント運営トップへ</Link>
-      </p>
-
-      <header style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 6px" }}>
-          {ev.title} — 審査キュー
-        </h1>
-        <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
-          このイベントに紐づく作品 {rows.length} 件
-          {statusFilter ? `（${videoVisibilityFilterLabel(statusFilter)}）` : ""}
-        </p>
-      </header>
-      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
-
-      <div
-        className="fn-console-filter-nav"
-        style={{
-          marginBottom: 16,
-          alignItems: "center",
-        }}
+    <ManageEventPageShell
+      eventId={id}
+      title={ev.title}
+      description={`作品・審査 — ${rows.length} 件（${filterLabel}）`}
+      backHref={`/manage/events/${id}`}
+      backLabel="イベント概要へ"
+      isAdmin={isAdmin}
+      pendingCount={pendingCount}
+      accentStyle={manageEventAccentStyle(ev.accent_color)}
+    >
+      <nav
+        aria-label="公開状態フィルタ"
+        className="manage-filter-compact"
       >
         {STATUS_FILTERS.map((f) => {
           const active =
@@ -166,14 +163,13 @@ export default async function ManageEventVideosPage({
             <Link
               key={f.value}
               href={href}
-              className={`fn-btn fn-btn-sm ${active ? "fn-btn-primary" : "fn-btn-ghost"}`}
               aria-current={active ? "page" : undefined}
             >
               {f.label}
             </Link>
           );
         })}
-      </div>
+      </nav>
 
       {rows.length === 0 ? (
         <EmptyState
@@ -193,7 +189,7 @@ export default async function ManageEventVideosPage({
             { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
             {
               href: `/manage/events/${id}`,
-              label: "イベント運営トップへ",
+              label: "イベント概要へ",
               variant: "ghost",
             },
           ]}
@@ -201,6 +197,7 @@ export default async function ManageEventVideosPage({
       ) : (
         <VideoReviewQueueTable
           rows={rows}
+          variant="manage"
           reviewHref={(videoId) => `/manage/events/${id}/videos/${videoId}`}
           contentHref={(videoId) => `/dashboard/edit/${videoId}?privileged=event`}
           canApprove={canApproveVideoStatus}
@@ -208,6 +205,6 @@ export default async function ManageEventVideosPage({
           quickApproveHiddenFields={{ event_id: id }}
         />
       )}
-    </div>
+    </ManageEventPageShell>
   );
 }

@@ -39,6 +39,12 @@ const STATUS_LABELS: Record<SlotRowLite["status"], string> = {
   submitted: "提出済",
 };
 
+const STATUS_BADGE_CLASS: Record<SlotRowLite["status"], string> = {
+  available: "fn-badge-soft",
+  reserved: "fn-badge-warning",
+  submitted: "fn-badge-accent",
+};
+
 type ConfirmState =
   | { kind: "release"; id: string }
   | { kind: "delete"; id: string }
@@ -51,11 +57,14 @@ export function SlotList({
   eventId,
   slots,
   slotPartGapSec = 15 * 60,
+  variant = "admin",
 }: {
   eventId: string;
   slots: SlotRowLite[];
   slotPartGapSec?: number;
+  variant?: "admin" | "manage";
 }): React.ReactElement {
+  const isManage = variant === "manage";
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -112,12 +121,17 @@ export function SlotList({
     (id) => slots.find((row) => row.id === id)?.status === "reserved",
   ).length;
 
+  const videoHref = (videoId: string): string =>
+    isManage
+      ? `/manage/events/${eventId}/videos/${videoId}`
+      : `/admin/videos/${videoId}`;
+
   if (slots.length === 0) {
     return <p className="fn-muted fn-text-sm">枠はまだありません。</p>;
   }
 
   return (
-    <div>
+    <div className={isManage ? "manage-slot-list" : undefined}>
       {error ? (
         <p role="alert" className="fn-alert fn-alert--danger">
           <Icon name="warning" size={12} aria-hidden /> {error}
@@ -137,15 +151,24 @@ export function SlotList({
 
       {selectedIds.length > 0 ? (
         <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
+          className={
+            isManage ? "manage-slot-action-bar" : undefined
+          }
+          style={
+            isManage
+              ? undefined
+              : {
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }
+          }
         >
-          <span className="fn-text-sm">{selectedIds.length}件選択中</span>
+          <span className="fn-text-sm manage-slot-action-count">
+            {selectedIds.length}件選択中
+          </span>
           {selectedAvailable > 0 ? (
             <button
               className="fn-btn fn-btn-ghost fn-btn-sm"
@@ -165,11 +188,11 @@ export function SlotList({
             </button>
           ) : null}
           <input
-            className="fn-input"
+            className="fn-input manage-slot-batch-label"
             value={batchLabel}
             onChange={(event) => setBatchLabel(event.target.value)}
             placeholder="一括ラベル"
-            style={{ width: 150 }}
+            style={isManage ? undefined : { width: 150 }}
           />
           <button
             className="fn-btn fn-btn-primary fn-btn-sm"
@@ -184,91 +207,143 @@ export function SlotList({
       ) : null}
 
       <TableScroll label="枠一覧は横にスクロールして取得者・状態・操作まで確認できます">
-        <table className="fn-table">
+        <table
+          className={`fn-table${isManage ? " manage-slot-table" : ""}`}
+        >
           <thead>
-          <tr>
-            <th>
-              <input
-                type="checkbox"
-                aria-label="すべて選択"
-                checked={slots.every((row) => selected.has(row.id))}
-                onChange={(event) =>
-                  setSelected(
-                    event.target.checked
-                      ? new Set(slots.map((row) => row.id))
-                      : new Set(),
-                  )
-                }
-              />
-            </th>
-            <th>日時 / ラベル</th>
-            <th>部</th>
-            <th>取得者</th>
-            <th>状態</th>
-            <th>作品</th>
-            <th>操作</th>
-          </tr>
-          </thead>
-          <tbody>
-          {slots.map((slot) => (
-            <tr key={slot.id}>
-              <td>
+            <tr>
+              <th>
                 <input
                   type="checkbox"
-                  checked={selected.has(slot.id)}
+                  aria-label="すべて選択"
+                  checked={slots.every((row) => selected.has(row.id))}
                   onChange={(event) =>
-                    setSelected((current) => {
-                      const next = new Set(current);
-                      if (event.target.checked) next.add(slot.id);
-                      else next.delete(slot.id);
-                      return next;
-                    })
+                    setSelected(
+                      event.target.checked
+                        ? new Set(slots.map((row) => row.id))
+                        : new Set(),
+                    )
                   }
                 />
-              </td>
-              <td>
-                {slot.start_time
-                  ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(
-                      slot.start_time,
-                      { timeOnly: true },
-                    )}`
-                  : (slot.slot_label ?? "—")}
-              </td>
-              <td>{partLabels.get(slot.id) ?? "—"}</td>
-              <td>
-                {slot.display_name ??
-                  (slot.x_user_id ? `@${slot.x_user_id}` : "—")}
-              </td>
-              <td>
-                <span className="fn-badge fn-badge-soft">
-                  {STATUS_LABELS[slot.status]}
-                </span>
-              </td>
-              <td>
-                {slot.video_id ? (
-                  <Link href={`/admin/videos/${slot.video_id}`}>
-                    {slot.video_id.slice(0, 8)}…
-                  </Link>
-                ) : (
-                  "—"
-                )}
-              </td>
-              <td>
-                <button
-                  className="fn-btn fn-btn-ghost fn-btn-sm"
-                  disabled={busy || slot.status === "submitted"}
-                  onClick={() =>
-                    setConfirm({
-                      kind: slot.status === "available" ? "delete" : "release",
-                      id: slot.id,
-                    })
-                  }
-                >
-                  {slot.status === "available" ? "削除" : "解放"}
-                </button>
-              </td>
+              </th>
+              {isManage ? (
+                <>
+                  <th>日時 / 部</th>
+                  <th>取得者</th>
+                  <th>状態</th>
+                  <th>作品</th>
+                  <th>操作</th>
+                </>
+              ) : (
+                <>
+                  <th>日時 / ラベル</th>
+                  <th>部</th>
+                  <th>取得者</th>
+                  <th>状態</th>
+                  <th>作品</th>
+                  <th>操作</th>
+                </>
+              )}
             </tr>
-          ))}
+          </thead>
+          <tbody>
+            {slots.map((slot) => {
+              const partLabel = partLabels.get(slot.id) ?? "—";
+              const dateTimeLabel = slot.start_time
+                ? `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(
+                    slot.start_time,
+                    { timeOnly: true },
+                  )}`
+                : (slot.slot_label ?? "—");
+
+              return (
+                <tr key={slot.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(slot.id)}
+                      onChange={(event) =>
+                        setSelected((current) => {
+                          const next = new Set(current);
+                          if (event.target.checked) next.add(slot.id);
+                          else next.delete(slot.id);
+                          return next;
+                        })
+                      }
+                    />
+                  </td>
+                  {isManage ? (
+                    <td className="manage-slot-datetime">
+                      <span className="manage-slot-datetime-main">
+                        {dateTimeLabel}
+                      </span>
+                      <span className="manage-slot-datetime-part">
+                        {partLabel}
+                      </span>
+                    </td>
+                  ) : (
+                    <>
+                      <td>{dateTimeLabel}</td>
+                      <td>{partLabel}</td>
+                    </>
+                  )}
+                  <td className={isManage ? "manage-slot-holder" : undefined}>
+                    {isManage ? (
+                      slot.display_name || slot.x_user_id ? (
+                        <>
+                          <span className="manage-slot-holder-name">
+                            {slot.display_name ?? slot.x_user_id}
+                          </span>
+                          {slot.x_user_id ? (
+                            <span className="manage-slot-holder-xid">
+                              @{slot.x_user_id}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        "—"
+                      )
+                    ) : (
+                      slot.display_name ??
+                      (slot.x_user_id ? `@${slot.x_user_id}` : "—")
+                    )}
+                  </td>
+                  <td>
+                    <span
+                      className={`fn-badge ${STATUS_BADGE_CLASS[slot.status]}`}
+                    >
+                      {STATUS_LABELS[slot.status]}
+                    </span>
+                  </td>
+                  <td>
+                    {slot.video_id ? (
+                      <Link href={videoHref(slot.video_id)}>
+                        {isManage
+                          ? "作品を見る"
+                          : `${slot.video_id.slice(0, 8)}…`}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      className="fn-btn fn-btn-ghost fn-btn-sm"
+                      disabled={busy || slot.status === "submitted"}
+                      onClick={() =>
+                        setConfirm({
+                          kind:
+                            slot.status === "available" ? "delete" : "release",
+                          id: slot.id,
+                        })
+                      }
+                    >
+                      {slot.status === "available" ? "削除" : "解放"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </TableScroll>

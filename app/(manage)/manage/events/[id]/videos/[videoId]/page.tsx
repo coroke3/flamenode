@@ -21,10 +21,11 @@ import {
   approveManageVideoPublicAndNext,
 } from "@/lib/actions/manage-video";
 import { Icon } from "@/components/ui/Icon";
-import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
 import { fetchVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
+import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 
 export const dynamic = "force-dynamic";
 
@@ -78,22 +79,19 @@ export default async function ManageEventVideoDetailPage({
   const isAdmin = user.role === "admin";
   const canReview =
     isAdmin || (await canEditEvent(db, user, id, "video.status"));
+  const pendingCount = await getEventPendingReviewVideoCount(id);
 
   return (
-    <div style={manageEventAccentStyle(ev.accent_color)}>
-      <p className="fn-muted fn-text-sm" style={{ margin: "0 0 12px" }}>
-        <Link href={`/manage/events/${id}/videos?status=pending`}>
-          ← 審査キューへ
-        </Link>
-      </p>
-
-      <header style={{ marginBottom: 12 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 8px" }}>
-          {video.title}
-        </h1>
-      </header>
-      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
-
+    <ManageEventPageShell
+      eventId={id}
+      title={ev.title}
+      description={`作品審査 — ${video.title}`}
+      backHref={`/manage/events/${id}/videos?status=pending`}
+      backLabel="審査キューへ"
+      isAdmin={isAdmin}
+      pendingCount={pendingCount}
+      accentStyle={manageEventAccentStyle(ev.accent_color)}
+    >
       <VideoReviewDetailPanel
         video={video}
         statusForm={
@@ -145,6 +143,6 @@ export default async function ManageEventVideoDetailPage({
           </>
         }
       />
-    </div>
+    </ManageEventPageShell>
   );
 }
