@@ -76,6 +76,7 @@ import {
   normalizeStaticTopSlotStats,
   TOP_SLOT_STATS_OBJECT_KEY,
 } from "./staticTopSlotStatsCore";
+import { loadStaticJsonFreshStaleUnavailable } from "./staticSharedInputsLoader";
 import {
   normalizeStaticUsersIndex,
   type StaticUsersIndex,
@@ -980,8 +981,13 @@ export async function loadStaticTopPage(): Promise<
     },
   });
   const normalized = result.data ? normalizeStaticTop(result.data) : null;
-  const slotStatsPayload = await readStaticJson<unknown>(TOP_SLOT_STATS_OBJECT_KEY);
-  const slotStatsArtifact = normalizeStaticTopSlotStats(slotStatsPayload);
+  const slotStatsResult = await loadStaticJsonFreshStaleUnavailable({
+    key: TOP_SLOT_STATS_OBJECT_KEY,
+    normalize: normalizeStaticTopSlotStats,
+    maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats * 2,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats,
+  });
+  const slotStatsArtifact = slotStatsResult.value;
   const normalizedWithSlotStats =
     normalized ? applyTopSlotStatsOverride(normalized, slotStatsArtifact) : null;
   const top =

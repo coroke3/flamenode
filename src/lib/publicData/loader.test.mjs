@@ -120,9 +120,12 @@ test("events index, top, and recommend loaders wire empty collection semantic mi
     loaderSource.indexOf("export async function loadStaticUsersIndex"),
   );
   assert.match(topBlock, /isEmptyCollection: isEmptyTopCollection/);
+  assert.match(topBlock, /loadStaticJsonFreshStaleUnavailable/);
   assert.match(topBlock, /TOP_SLOT_STATS_OBJECT_KEY/);
+  assert.match(topBlock, /PUBLIC_JSON_CACHE_TTL_SEC\.topSlotStats/);
   assert.match(topBlock, /applyTopSlotStatsOverride/);
   assert.match(topBlock, /shouldUseStaticCollection/);
+  assert.doesNotMatch(topBlock, /readStaticJson<unknown>\(TOP_SLOT_STATS_OBJECT_KEY\)/);
 
   const recommendBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticRecommendPage"),
