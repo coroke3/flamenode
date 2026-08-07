@@ -36,9 +36,11 @@ test("slot-domain-limits SQL files exist and match domain constants", () => {
 test("slot-domain-limits script supports remote file-based inspection", () => {
   const source = fs.readFileSync(scriptPath, "utf8");
   assert.match(source, /--remote/);
+  assert.match(source, /--strict/);
   assert.match(source, /runRemoteD1File/);
   assert.match(source, /check-slot-domain-limits-events\.sql/);
   assert.match(source, /assertRemoteD1Configured/);
   assert.match(source, /formatCommandFailure/);
   assert.match(source, /informational only/);
+  assert.match(source, /informational: !strict/);
 });

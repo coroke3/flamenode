@@ -21,10 +21,12 @@ test("slot-reservation-groups SQL selects ambiguity columns", () => {
 test("slot-reservation-groups script supports remote inspection via wrangler", () => {
   const source = fs.readFileSync(scriptPath, "utf8");
   assert.match(source, /--remote/);
+  assert.match(source, /--strict/);
   assert.match(source, /runRemoteD1File/);
   assert.match(source, /assertRemoteD1Configured/);
   assert.match(source, /collectSlotReservationAmbiguities/);
-  assert.match(source, /process\.exit\(0\)/);
+  assert.match(source, /informational only/);
+  assert.match(source, /informational: !strict/);
 });
 
 test("slot-reservation-groups local mode still resolves D1 path", () => {

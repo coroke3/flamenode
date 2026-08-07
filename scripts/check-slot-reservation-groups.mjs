@@ -95,13 +95,15 @@ function printIssues(issues, { informational }) {
 
 function main() {
   try {
+    const strict = process.argv.includes("--strict");
+
     if (process.argv.includes("--remote")) {
       assertRemoteD1Configured("check:slot-reservation-groups");
       const rows = runRemoteD1File(sqlPath, {
         scriptName: "check:slot-reservation-groups",
       });
       const issues = collectSlotReservationAmbiguities(rows);
-      process.exit(printIssues(issues, { informational: true }));
+      process.exit(printIssues(issues, { informational: !strict }));
     }
 
     const explicit =
@@ -120,7 +122,7 @@ function main() {
       );
       process.exit(0);
     }
-    process.exit(printIssues(result.issues, { informational: false }));
+    process.exit(printIssues(result.issues, { informational: !strict }));
   } catch (error) {
     console.error(
       `[check:slot-reservation-groups] ${

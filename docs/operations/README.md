@@ -22,7 +22,7 @@ Webは Cloudflare Workers + OpenNext + Workers Static Assets。背景は Queue w
 - 重要 mutation と監査ログは同じ原子的処理で確定する。
 - deploy 順は Web→fast→content→sync→smoke。Remote D1 は read-only preflight、migration 自動適用なし。
 - **CostGuard と runtime safety**: Cloudflare 使用量では `operation_mode` を自動変更しない。`operation_mode` と 15 分一時許可は `/admin/cost-guard` の手動操作のみ。停止機能リスト（`disabled_features_json`）は admin spreadsheet import のみ。D1 statement 上限、YouTube 日次 quota、Discord 429 バックオフ、ExternalRequestBudget、Queue batch 上限は invocation 安全装置であり CostGuard ではない。詳細は [`../../設計/FlameNode-Cloudflare-Free-Tier-Guardrails.md`](../../設計/FlameNode-Cloudflare-Free-Tier-Guardrails.md) §4-0。
-- 整合性チェック（ローカル/static）: `npm run check:slot-reservation-groups`, `check:slot-domain-limits`, `check:public-visibility-fences`。本番 Remote D1/R2 照合は各スクリプトに `--remote`（read-only、問題検出時も exit 0、認証/設定失敗は exit 2）。
+- 整合性チェック（ローカル/static）: `npm run check:slot-reservation-groups`, `check:slot-domain-limits`, `check:public-visibility-fences`。本番 Remote D1/R2 照合は各スクリプトに `--remote`（read-only、問題検出時も exit 0、認証/設定失敗は exit 2）。`wrangler.toml` が placeholder のときは環境変数 `FLAMENODE_D1_DATABASE_ID=<uuid>` を設定（git にコミットしない）。
 
 ## タスク別入口
 

@@ -14,14 +14,38 @@ export function readWranglerD1DatabaseId(root = process.cwd()) {
   return match?.[1] ?? null;
 }
 
+export function readEnvD1DatabaseId() {
+  const raw =
+    process.env.FLAMENODE_D1_DATABASE_ID?.trim() ||
+    process.env.CLOUDFLARE_D1_DATABASE_ID?.trim() ||
+    null;
+  if (!raw || raw === ZERO_D1_DATABASE_ID) return null;
+  return raw;
+}
+
+export function readRemoteD1DatabaseId(root = process.cwd()) {
+  const envId = readEnvD1DatabaseId();
+  if (envId) return envId;
+  const wranglerId = readWranglerD1DatabaseId(root);
+  if (wranglerId && wranglerId !== ZERO_D1_DATABASE_ID) return wranglerId;
+  return null;
+}
+
 export function assertRemoteD1Configured(scriptName, root = process.cwd()) {
-  const databaseId = readWranglerD1DatabaseId(root);
-  if (!databaseId || databaseId === ZERO_D1_DATABASE_ID) {
-    console.error(
-      `[${scriptName}] wrangler.toml database_id is placeholder ${ZERO_D1_DATABASE_ID}; configure a real D1 database id before --remote.`,
-    );
-    process.exit(2);
-  }
+  if (readRemoteD1DatabaseId(root)) return;
+  console.error(
+    `[${scriptName}] wrangler.toml database_id is placeholder ${ZERO_D1_DATABASE_ID}; configure a real D1 database id before --remote.`,
+  );
+  console.error(
+    `[${scriptName}] Set FLAMENODE_D1_DATABASE_ID=<uuid> in your environment without committing to git.`,
+  );
+  process.exit(2);
+}
+
+export function resolveRemoteD1ExecuteTarget(root = process.cwd()) {
+  const envId = readEnvD1DatabaseId();
+  if (envId) return envId;
+  return "flamenode_db";
 }
 
 export function formatCommandFailure(error) {
@@ -49,10 +73,11 @@ export function parseWranglerD1Json(output) {
   return results;
 }
 
-export function runRemoteD1File(sqlPath, { scriptName }) {
+export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd() }) {
+  const databaseTarget = resolveRemoteD1ExecuteTarget(root);
   try {
     const output = execSync(
-      `npx wrangler d1 execute flamenode_db --remote --json --file=${sqlPath}`,
+      `npx wrangler d1 execute ${databaseTarget} --remote --json --file=${sqlPath}`,
       {
         encoding: "utf8",
         maxBuffer: 16 * 1024 * 1024,
