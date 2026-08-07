@@ -431,7 +431,7 @@ export default async function EditVideoPage({
       credits: canEditCredits,
       descriptions: canEditDescriptions,
       members: canEditMembers,
-      memberChapters: canEditMembers && canEditMemberChapters,
+      memberChapters: canEditMemberChapters,
       primaryEvent: canEditPrimaryEvent,
       visibility: canEditVisibility,
       permissions: canEditPermissions,
@@ -467,7 +467,9 @@ export default async function EditVideoPage({
   };
 
   const canShowPrivilegeSwitchOnly =
-    !canEditAnySection && (canOfferAdminMode || canOfferEventMode);
+    !canEditAnySection &&
+    !canEditPermissions &&
+    (canOfferAdminMode || canOfferEventMode);
 
   if (!hasAnyEditCapability) {
     return (

@@ -9,7 +9,10 @@ import { VideoCollabPermsManager } from "@/components/admin/VideoCollabPermsMana
 import { getDatabase } from "@/lib/cloudflare";
 import { videoMembers, videos as videosTable } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
-import { canEditVideo } from "@/lib/auth/ownership";
+import {
+  canEditVideo,
+  canUseEventPrivilegeModeForVideo,
+} from "@/lib/auth/ownership";
 import { loadVideoCollabSubjects } from "@/lib/video/collabPerms";
 import { Icon } from "@/components/ui/Icon";
 
@@ -44,13 +47,6 @@ export default async function EditVideoPermissionsPage({
   if (!guard.ok) return guard.element;
   const user = guard.user;
 
-  let privilegeMode: PrivilegeMode = "normal";
-  if (requestedMode === "admin" && user.role === "admin") {
-    privilegeMode = "admin";
-  } else if (requestedMode === "event") {
-    privilegeMode = "event";
-  }
-
   const db = getDatabase();
   if (!db) notFound();
 
@@ -60,6 +56,21 @@ export default async function EditVideoPermissionsPage({
   if (!video) notFound();
 
   const editUser = { id: user.id, role: user.role ?? null };
+  const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
+    db,
+    user: editUser,
+    video,
+  });
+
+  // 管理者以外が ?privileged=admin を付けても normal にフォールバック。
+  // event モードは canUseEventPrivilegeModeForVideo が true のときだけ。
+  let privilegeMode: PrivilegeMode = "normal";
+  if (requestedMode === "admin" && user.role === "admin") {
+    privilegeMode = "admin";
+  } else if (requestedMode === "event" && canOfferEventMode) {
+    privilegeMode = "event";
+  }
+
   const canEditPermissions = await canEditVideo({
     db,
     user: editUser,

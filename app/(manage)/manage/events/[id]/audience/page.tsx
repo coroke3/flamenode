@@ -3,7 +3,7 @@ import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
@@ -66,23 +66,29 @@ export default async function ManageEventAudiencePage({
     : await getCollaboratorPermissions(db, user.id, id);
   if (!isAdmin && permissions.size === 0) notFound();
 
+  const slotAudienceXId = sql<string>`COALESCE(${slotsTable.reserved_x_id_snapshot}, ${slotsTable.x_user_id})`;
+
   const slotXIds = await db
     .select({
-      x_user_id: slotsTable.x_user_id,
+      x_user_id: slotAudienceXId,
       x_name: xUsersTable.x_name,
       icon_url: xUsersTable.icon_url,
       slot_count: sql<number>`COUNT(*)`,
       submitted_count: sql<number>`SUM(CASE WHEN ${slotsTable.status} = 'submitted' THEN 1 ELSE 0 END)`,
     })
     .from(slotsTable)
-    .leftJoin(xUsersTable, eq(xUsersTable.id, slotsTable.x_user_id))
+    .leftJoin(xUsersTable, eq(xUsersTable.id, slotAudienceXId))
     .where(
       and(
         eq(slotsTable.event_id, id),
-        isNotNull(slotsTable.x_user_id),
+        or(
+          isNotNull(slotsTable.x_user_id),
+          isNotNull(slotsTable.reserved_x_id_snapshot),
+        ),
+        sql`TRIM(COALESCE(${slotsTable.reserved_x_id_snapshot}, ${slotsTable.x_user_id}, '')) != ''`,
       )!,
     )
-    .groupBy(slotsTable.x_user_id);
+    .groupBy(slotAudienceXId);
 
   const submitters = await db
     .select({

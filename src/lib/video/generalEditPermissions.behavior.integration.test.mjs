@@ -19,6 +19,13 @@ const editPageSource = await readFile(
   new URL("../../../app/(auth)/dashboard/edit/[id]/page.tsx", import.meta.url),
   "utf8",
 );
+const permissionsPageSource = await readFile(
+  new URL(
+    "../../../app/(auth)/dashboard/edit/[id]/permissions/page.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const videoSavePlanSource = await readFile(
   new URL("./videoSavePlan.ts", import.meta.url),
   "utf8",
@@ -39,8 +46,30 @@ test("computeEditSections wires member_chapters section key", () => {
 
 test("edit page canEditAnySection includes member_chapters", () => {
   assert.match(editPageSource, /hasAnyEditableVideoFormSection/);
-  assert.match(editPageSource, /memberChapters: canEditMembers && canEditMemberChapters/);
+  assert.match(editPageSource, /memberChapters: canEditMemberChapters/);
+  assert.doesNotMatch(
+    editPageSource,
+    /memberChapters: canEditMembers && canEditMemberChapters/,
+  );
   assert.match(editPageSource, /canEditMemberChapters/);
+});
+
+test("edit page switch-only early return excludes permissions management", () => {
+  assert.match(editPageSource, /!canEditAnySection/);
+  assert.match(editPageSource, /!canEditPermissions/);
+  assert.match(editPageSource, /canShowPrivilegeSwitchOnly/);
+});
+
+test("permissions page gates event privilege mode like edit page", () => {
+  assert.match(permissionsPageSource, /canUseEventPrivilegeModeForVideo/);
+  assert.match(
+    permissionsPageSource,
+    /requestedMode === "event" && canOfferEventMode/,
+  );
+  assert.doesNotMatch(
+    permissionsPageSource,
+    /else if \(requestedMode === "event"\) \{\s*privilegeMode = "event";/,
+  );
 });
 
 test("updateVideo rejects stage_permission changes in normal mode", () => {
