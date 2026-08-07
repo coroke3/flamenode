@@ -306,6 +306,24 @@ test("primary / video_events 分割 merge は legacy OR 選択と一致する", 
   assert.deepEqual(split, legacy);
 });
 
+test("mergeScheduledSyncCandidates dedupes duplicate ids across lanes", () => {
+  const merged = mergeScheduledSyncCandidates(
+    [
+      [
+        { id: "v-dup", youtube_video_id: "yt-dup", eligibility: 50 },
+        { id: "v-other", youtube_video_id: "yt-other", eligibility: 80 },
+      ],
+      [{ id: "v-dup", youtube_video_id: "yt-dup", eligibility: 20 }],
+    ],
+    2,
+  );
+
+  assert.deepEqual(merged, [
+    { id: "v-dup", youtube_video_id: "yt-dup" },
+    { id: "v-other", youtube_video_id: "yt-other" },
+  ]);
+});
+
 test("lane ごと limit 超過でも global top limit を維持する", () => {
   const now = 1000;
   const intervalSec = 0;

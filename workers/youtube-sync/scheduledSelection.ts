@@ -26,7 +26,14 @@ export function mergeScheduledSyncCandidates(
     merged.push(...lane);
   }
   merged.sort(compareScheduledSyncCandidates);
-  return merged.slice(0, limit).map((row) => ({
+  const seen = new Set<string>();
+  const deduped: ScheduledSyncCandidate[] = [];
+  for (const row of merged) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    deduped.push(row);
+  }
+  return deduped.slice(0, limit).map((row) => ({
     id: row.id,
     youtube_video_id: row.youtube_video_id,
   }));
