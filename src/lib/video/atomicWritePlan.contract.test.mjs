@@ -101,11 +101,11 @@ test("更新・削除planはscalar CASまたは集合CASを利用する", () => 
   );
   assert.match(
     submit,
-    /versionedSlotWhere\(slotRow\.event_id, submittedSlots, "reserved"\)/,
+    /versionedSlotWhere\(slotRow\.event_id, bulkSubmitRows, "reserved"\)/,
   );
-  assert.doesNotMatch(
+  assert.match(
     submit,
-    /expectedRowCondition\(\{ expectedCurrent: row \}\)/,
+    /for \(const row of rowsNeedingXAdoption\) \{[\s\S]*expectedRowCondition\(\{ expectedCurrent: row \}\)/,
   );
 });
 

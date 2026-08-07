@@ -15,7 +15,7 @@ test("active audit surfaces use the audit_logs canonical name", async () => {
   for (const file of NON_HISTORICAL_ACTIVE_AUDIT_SURFACES) {
     const source = await readFile(file, "utf8");
     assert.doesNotMatch(source, /\bhistory_logs\b/, file);
-    assert.match(source, /\baudit_logs\b|\.from\(auditLogs\)/, file);
+    assert.match(source, /\baudit_logs\b|\.from\(auditLogs\)|auditLogs as auditLogsTable|\.from\(auditLogsTable\)/, file);
   }
 });
 

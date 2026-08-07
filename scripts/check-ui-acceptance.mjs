@@ -89,6 +89,22 @@ forbidMatch(
   /window\.open|target=\{["_']blank["_']\}/,
   "公開検索で別ウィンドウ遷移を導入しています。",
 );
+requireAll("src/components/layout/PublicHeader.tsx", [
+  [/ImeSafeGetForm/, "公開ヘッダー検索は ImeSafeGetForm を使う必要があります。"],
+]);
+requireAll("app/(public)/list/page.tsx", [
+  [/ImeSafeGetForm/, "作品一覧は ImeSafeGetForm を使う必要があります。"],
+]);
+requireAll("app/(public)/event/page.tsx", [
+  [/ImeSafeGetForm/, "イベント一覧は ImeSafeGetForm を使う必要があります。"],
+]);
+requireAll("app/(public)/user/page.tsx", [
+  [/ImeSafeGetForm/, "ユーザー一覧は ImeSafeGetForm を使う必要があります。"],
+]);
+
+requireAll("src/components/video/PlaylistRail.tsx", [
+  [/flamenode:video-ended|PLAYER_ENDED/, "再生終了イベントの購読がありません。"],
+]);
 
 requireAll("src/components/forms/VideoForm.tsx", [
   [/"submitter"\s*\|\s*"work"\s*\|\s*"youtube"\s*\|\s*"confirm"/, "4段階投稿フローがありません。"],

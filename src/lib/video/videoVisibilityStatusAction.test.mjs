@@ -42,7 +42,12 @@ test("admin setVideoStatus uses shared mutation helper and merged event ids", as
   assert.match(source, /attachApproveAndNextHref/);
   assert.match(source, /review_event_id/);
   assert.match(source, /adminEventFilter/);
-  assert.match(source, /unstable_rethrow\(error\)/);
+  // NEXT redirect/navigation errors propagate via handleVideoVisibilityMutationFailure → unstable_rethrow.
+  assert.match(source, /handleVideoVisibilityMutationFailure/);
+  assert.match(
+    source,
+    /catch \(error\) \{[\s\S]*return handleVideoVisibilityMutationFailure/,
+  );
 });
 
 test("manage setManageVideoStatus attaches nextHref on same-status approve-and-next", async () => {
@@ -54,7 +59,12 @@ test("manage setManageVideoStatus attaches nextHref on same-status approve-and-n
   assert.match(source, /monotonicVideoUpdatedAt/);
   assert.match(source, /SAME_VIDEO_STATUS_MESSAGE/);
   assert.match(source, /attachApproveAndNextHref/);
-  assert.match(source, /catch \(error\) \{[\s\S]*unstable_rethrow\(error\)/);
+  // NEXT redirect/navigation errors propagate via handleVideoVisibilityMutationFailure → unstable_rethrow.
+  assert.match(source, /handleVideoVisibilityMutationFailure/);
+  assert.match(
+    source,
+    /catch \(error\) \{[\s\S]*return handleVideoVisibilityMutationFailure/,
+  );
   assert.doesNotMatch(source, /変更先のステータスを選択してください/);
 });
 

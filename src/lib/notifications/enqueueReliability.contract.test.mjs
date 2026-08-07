@@ -34,18 +34,19 @@ test("onConflictDoNothing notification inserts use null expected changes when in
   );
 });
 
-test("slot and submit notifications enqueue post-commit with queue wake", () => {
-  assert.match(submitSlotVideo, /enqueueSlotSubmitNotificationsPostCommit/);
-  assert.match(submitSlotVideo, /runPostCommitBestEffort/);
-  assert.doesNotMatch(submitSlotVideo, /notificationWakeSource:/);
+test("slot and submit notifications enqueue in atomic batch with queue wake", () => {
+  assert.match(submitSlotVideo, /buildNotificationOutboxStatement/);
+  assert.match(submitSlotVideo, /executeVideoAtomicWritePlan/);
+  assert.match(submitSlotVideo, /notificationWakeSource/);
+  assert.doesNotMatch(submitSlotVideo, /await enqueueSlotSubmitNotificationsPostCommit/);
 
   assert.match(slot, /enqueueSlotReserveOpsWebhookPostCommit/);
   assert.match(slot, /runPostCommitBestEffort/);
-  assert.doesNotMatch(slot, /notificationWakeSource:/);
-  assert.doesNotMatch(slot, /extra\.map\(\(\) => null\)/);
+  assert.match(slot, /notificationWakeSource/);
+  assert.match(slot, /\.\.\.extra\.map\(\(\) => null\)/);
 });
 
-test("video status mutations enqueue notifications post-commit", () => {
+test("video status mutations enqueue notifications in atomic batch", () => {
   assert.match(
     videoVisibilityTransition,
     /export async function enqueueVideoVisibilityNotificationsPostCommit/,
@@ -54,10 +55,24 @@ test("video status mutations enqueue notifications post-commit", () => {
     videoVisibilityTransition,
     /wakeNotificationQueueAfterCommit\(context\.wakeSource\)/,
   );
-  assert.match(adminVideo, /enqueueVideoVisibilityNotificationsPostCommit/);
-  assert.match(manageVideo, /enqueueVideoVisibilityNotificationsPostCommit/);
-  assert.doesNotMatch(adminVideo, /notificationWakeSource:/);
-  assert.doesNotMatch(manageVideo, /notificationWakeSource:/);
+  assert.doesNotMatch(
+    videoVisibilityTransition,
+    /mutationStatements\.push\(\s*\.\.\.notificationBatch\.statements/,
+  );
+
+  assert.match(adminVideo, /executeVideoVisibilityStatusMutation/);
+  assert.match(
+    adminVideo,
+    /notificationWakeSource:\s*[\s\S]*transition\.notificationBatch\.statements\.length > 0 \? "admin" : undefined/,
+  );
+  assert.doesNotMatch(adminVideo, /enqueueVideoVisibilityNotificationsPostCommit/);
+
+  assert.match(manageVideo, /executeVideoVisibilityStatusMutation/);
+  assert.match(
+    manageVideo,
+    /notificationWakeSource:\s*[\s\S]*transition\.notificationBatch\.statements\.length > 0 \? "manage" : undefined/,
+  );
+  assert.doesNotMatch(manageVideo, /enqueueVideoVisibilityNotificationsPostCommit/);
 });
 
 test("terms reaccept broadcast does not enqueue Discord DM", () => {

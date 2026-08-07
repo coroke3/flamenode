@@ -7,11 +7,6 @@ const read = async (relative) =>
 
 const reliabilityTargets = [
   {
-    file: "./admin.ts",
-    exportName: "setVideoStatus",
-    revalidateHelper: "revalidateVideoStatusPathsBestEffort",
-  },
-  {
     file: "./slot-admin.ts",
     exportName: "generateSlotsBatch",
     revalidateHelper: "revalidateEventSlotPathsBestEffort",
@@ -47,6 +42,33 @@ const reliabilityTargets = [
     revalidateHelper: "revalidateVideoMembersAdminPathsBestEffort",
   },
 ];
+
+test("./admin.ts uses post-commit revalidate and shared visibility failure helper", async () => {
+  const [adminSource, transitionSource] = await Promise.all([
+    read("./admin.ts"),
+    read("../video/videoVisibilityTransition.ts"),
+  ]);
+  assert.match(adminSource, /handleVideoVisibilityMutationFailure/);
+  assert.match(
+    adminSource,
+    /catch \(error\) \{[\s\S]*return handleVideoVisibilityMutationFailure/,
+  );
+  assert.match(adminSource, /runPostCommitBestEffort/);
+  assert.match(adminSource, /revalidateVideoStatusPathsBestEffort/);
+  assert.match(
+    adminSource,
+    /export async function setVideoStatus[\s\S]*revalidateVideoStatusPathsBestEffort/,
+  );
+  assert.doesNotMatch(
+    adminSource,
+    /catch \(error\) \{\s*return \{\s*ok: false/m,
+  );
+  assert.match(
+    transitionSource,
+    /export async function handleVideoVisibilityMutationFailure[\s\S]*unstable_rethrow\(error\)/,
+    "videoVisibilityTransition must rethrow NEXT navigation errors",
+  );
+});
 
 for (const target of reliabilityTargets) {
   test(`${target.file} uses post-commit revalidate and unstable_rethrow`, async () => {
