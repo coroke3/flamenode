@@ -106,25 +106,26 @@ test("候補抽出はpending・開催中・通常期限のindex queryへ分離�
   assert.match(source, /ACTIVE_SYNC_INTERVAL_SEC/);
   assert.match(source, /DEFAULT_SYNC_INTERVAL_SEC/);
   assert.match(source, /video_events ve/);
+  assert.match(source, /mergeScheduledSyncCandidates/);
   assert.doesNotMatch(source, /FROM videos v\s+LEFT JOIN video_youtube_metadata/);
 });
 
 test("scheduled再同期はpermanent失敗を両queryから除外する", () => {
-  const fnBody = source.match(
-    /async function selectScheduledSyncRows[\s\S]*?^}/m,
-  )?.[0] ?? "";
-  const exclusions = fnBody.match(/sync_error LIKE 'permanent:%'/g) ?? [];
+  const failedLanes = source.match(
+    /(?:DEFAULT_FAILED_SQL|ACTIVE_[A-Z_]+_FAILED_SQL)[\s\S]*?sync_error LIKE 'permanent:%'/g,
+  ) ?? [];
   assert.equal(
-    exclusions.length,
-    2,
-    "both scheduled queries must exclude permanent failures",
+    failedLanes.length,
+    3,
+    "all failed scheduled lanes must exclude permanent failures",
   );
 });
 
 test("通常同期はblockedを除外しfailed期限はupdated_atを使う", () => {
   assert.match(source, /NOT_BLOCKED_FOR_RELATED_SQL/);
-  assert.match(source, /SYNC_ELIGIBILITY_TIMESTAMP_SQL/);
-  assert.match(source, /ym\.sync_status = 'failed' THEN ym\.updated_at/);
+  assert.match(source, /SYNCED_ELIGIBILITY_SQL/);
+  assert.match(source, /FAILED_ELIGIBILITY_SQL/);
+  assert.doesNotMatch(source, /SYNC_ELIGIBILITY_TIMESTAMP_SQL/);
   assert.match(source, /selectBlockedRecheckRows/);
   assert.match(source, /blocked_recheck_only/);
   assert.match(source, /related_eligibility_changed_video_ids/);
@@ -170,8 +171,11 @@ test("scheduled_only はpermanent failed行を再同期しない", async () => {
                 meta: { changes: 1 },
               };
             }
-            if (sql.includes("sync_status IN ('synced', 'failed')")) {
+            if (sql.includes("sync_status = 'failed'")) {
               assert.match(sql, /sync_error LIKE 'permanent:%'/);
+              return { results: [] };
+            }
+            if (sql.includes("sync_status = 'synced'")) {
               return { results: [] };
             }
             return { results: [] };
