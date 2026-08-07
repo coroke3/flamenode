@@ -25,7 +25,7 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 
 - `PUBLIC_DEGRADED_D1_ENABLED`（`wrangler.toml` / `.dev.vars`）: 明示 `0` / `false` / `no` / `off` で R2 ミス後の degraded D1 を無効化する。未設定時は有効。
 - `FORCE_STATIC_ONLY` または運用モードが `static_json_only` のときは degraded D1 に進まず、Unavailable または静的 JSON のみ。
-- R2 miss が 1 分あたり 20 件以上（`degradedCircuitBreakerCore.ts`）のとき、KV サーキットが open になり degraded D1 を一時停止する。Cache API の stale エントリは引き続き返す。R2 ヒットが 3 回連続すると自動解除する。
+- R2 miss が 1 分あたり 20 件以上（`degradedCircuitBreakerCore.ts`）のとき、KV サーキットが open になり degraded D1 を一時停止する。Cache API の stale エントリは引き続き返す。R2 ヒットが 3 回連続すると自動解除する。これは静的配信の fail-closed 安全装置であり、Cloudflare 使用量に基づく CostGuard の自動 `operation_mode` 変更ではない。
 
 ### Cache TTL（Cache API / R2 max-age）
 
@@ -43,7 +43,7 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 
 正本定数: `src/lib/publicData/publicJsonCacheTtl.ts`（web）、`workers/shared/staticR2CacheControl.ts`（R2 PUT）。
 
-ミス時のみ `operation_mode` を解決（`FORCE_STATIC_ONLY` > isolate 短時間キャッシュ > KV 複製 > D1）。解決不能時は `static_only` へ倒し、`normal` へは倒さない。cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない。
+ミス時のみ `operation_mode` を解決（`FORCE_STATIC_ONLY` > isolate 短時間キャッシュ > KV 複製 > D1）。解決不能時は `static_only` へ倒し、`normal` へは倒さない。ここでの `static_only` フォールバックは配信経路の安全側倒しであり、使用量トリガーの自動 CostGuard ではない。cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない。
 
 ## 観測と UI
 

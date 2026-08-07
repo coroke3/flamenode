@@ -1,5 +1,8 @@
 # FlameNode Cloudflare 無料枠・課金抑制設計
 
+> Status: Active
+> Last verified: 2026-08-07
+
 ## 1. 目的
 
 FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発生しにくい構成にする。Webは `flamenode-web`（OpenNext）と Workers Static Assets、デプロイは Workers Builds を現行正本とする。使用量は運用者が Cloudflare Dashboard で確認し、必要な場合に管理画面からサイト機能を段階的に制限・解除・一時許可する。

@@ -75,6 +75,18 @@ test("runtime safety guards do not update operation_mode", async () => {
     path.join(repoRoot, "workers/youtube-sync/quotaBudget.ts"),
     "utf8",
   );
+  const dispatch = await readFile(
+    path.join(repoRoot, "workers/notification-dispatcher/dispatch.ts"),
+    "utf8",
+  );
+  const externalApi = await readFile(
+    path.join(repoRoot, "workers/shared/externalApi.ts"),
+    "utf8",
+  );
+  const queuePolicy = await readFile(
+    path.join(repoRoot, "workers/json-generator/queuePolicy.ts"),
+    "utf8",
+  );
   const mutationPatterns = [
     /UPDATE\s+system_settings/i,
     /disabled_features_json/,
@@ -82,8 +94,30 @@ test("runtime safety guards do not update operation_mode", async () => {
     /system_settings\.operation_mode/,
     /operation_mode\s*=/,
   ];
-  for (const source of [d1Budget, youtubeQuota]) {
+  for (const source of [d1Budget, youtubeQuota, dispatch, externalApi, queuePolicy]) {
     for (const pattern of mutationPatterns) {
+      assert.doesNotMatch(source, pattern);
+    }
+  }
+  assert.match(queuePolicy, /operation_mode/);
+});
+
+test("writeGuard does not import runtime budget modules", async () => {
+  const writeGuard = await readFile(
+    path.join(repoRoot, "src/lib/auth/writeGuard.ts"),
+    "utf8",
+  );
+  const writeGuardCore = await readFile(
+    path.join(repoRoot, "src/lib/auth/writeGuardCore.ts"),
+    "utf8",
+  );
+  const forbiddenImports = [
+    /d1Budget/,
+    /quotaBudget/,
+    /ExternalRequestBudget/,
+  ];
+  for (const source of [writeGuard, writeGuardCore]) {
+    for (const pattern of forbiddenImports) {
       assert.doesNotMatch(source, pattern);
     }
   }

@@ -21,6 +21,7 @@ Webは Cloudflare Workers + OpenNext + Workers Static Assets。背景は Queue w
 - 内部ユーザーIDは `user_id`、Discord Snowflake は `discord_id`。
 - 重要 mutation と監査ログは同じ原子的処理で確定する。
 - deploy 順は Web→fast→content→sync→smoke。Remote D1 は read-only preflight、migration 自動適用なし。
+- **CostGuard と runtime safety**: Cloudflare 使用量では `operation_mode` を自動変更しない。機能制限（`economy` / `read_only` / `static_only` / `maintenance`、停止機能リスト）は `/admin/cost-guard` の手動操作のみ。D1 statement 上限、YouTube 日次 quota、Discord 429 バックオフ、ExternalRequestBudget、Queue batch 上限は invocation 安全装置であり CostGuard ではない。詳細は [`../../設計/FlameNode-Cloudflare-Free-Tier-Guardrails.md`](../../設計/FlameNode-Cloudflare-Free-Tier-Guardrails.md) §4-0。
 
 ## タスク別入口
 

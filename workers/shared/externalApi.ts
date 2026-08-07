@@ -3,6 +3,7 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/** Per-invocation subrequest cap. Runtime safety only — does not change CostGuard / operation_mode. */
 export class ExternalRequestBudget {
   readonly limit: number;
   private consumed = 0;
