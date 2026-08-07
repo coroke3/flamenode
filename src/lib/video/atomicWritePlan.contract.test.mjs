@@ -94,6 +94,10 @@ test("更新・削除planはscalar CASまたは集合CASを利用する", () => 
   );
   assert.match(
     submit,
+    /versionedSlotWhere\(slotRow\.event_id, submittedSlots, "reserved"\)/,
+  );
+  assert.doesNotMatch(
+    submit,
     /expectedRowCondition\(\{ expectedCurrent: row \}\)/,
   );
 });

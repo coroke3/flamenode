@@ -135,7 +135,9 @@ export default async function EventSlotsPage({
           slot.reserved_by_user_id === viewer.id),
     );
     let groupKey: string | null = null;
-    if (slot.reservation_group_id) {
+    const exposeGroupKey =
+      isOwnedByViewer || event.slot_visibility_mode === "public_name";
+    if (exposeGroupKey && slot.reservation_group_id) {
       groupKey = groupKeys.get(slot.reservation_group_id) ?? null;
       if (!groupKey) {
         groupKey = `group-${groupKeys.size + 1}`;
@@ -154,6 +156,7 @@ export default async function EventSlotsPage({
           : null,
       is_owned_by_viewer: isOwnedByViewer,
       group_key: groupKey,
+      x_user_id: isOwnedByViewer ? slot.x_user_id : null,
     };
   });
   const slotTotal = slotRows.length;

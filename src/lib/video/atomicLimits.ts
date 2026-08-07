@@ -9,4 +9,5 @@ export const MAX_VIDEO_MEMBERS = 100;
 export const MAX_ATOMIC_VIDEO_SOFTWARES = 4;
 export const MAX_ATOMIC_VIDEO_EVENTS = 4;
 export const MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS = 4;
+/** @deprecated 業務上限ではない。提出のグループ上限は `MAX_SLOTS_PER_VIDEO`。残置は互換用。 */
 export const MAX_ATOMIC_SUBMITTED_SLOTS = 3;

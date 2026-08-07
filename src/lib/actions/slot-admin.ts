@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
@@ -26,6 +26,8 @@ import {
   type PendingPublicReflection,
 } from "@/lib/staticRebuild/publicReflectionNotice";
 import { MAX_ATOMIC_SLOT_ROWS, MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
+import { MAX_SLOTS_PER_VIDEO } from "@/lib/slots/limits";
+import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 
 export interface SlotActionResult extends PendingPublicReflection {
   ok: boolean;
@@ -73,26 +75,6 @@ async function revalidateEventSlotPathsBestEffort(eventId: string): Promise<void
 
 function snapshot(row: SlotRow): Record<string, unknown> {
   return { ...row };
-}
-
-function versionedWhere(
-  eventId: string,
-  rows: readonly SlotRow[],
-  status?: "available" | "reserved" | "submitted",
-) {
-  return and(
-    eq(slots.event_id, eventId),
-    status ? eq(slots.status, status) : undefined,
-    or(
-      ...rows.map((row) =>
-        and(
-          eq(slots.id, row.id),
-          eq(slots.version, row.version),
-          eq(slots.updated_at, row.updated_at),
-        ),
-      ),
-    ),
-  )!;
 }
 
 function parseSlotIds(formData: FormData): string[] {
@@ -428,7 +410,7 @@ async function deleteRows(
   try {
     await mutateWithAudit(db, {
       mutationStatements: [
-        db.delete(slots).where(versionedWhere(eventId, rows, "available")),
+        db.delete(slots).where(versionedSlotWhere(eventId, rows, "available")),
         ...queue.statements,
       ],
       expectedMutationChanges: [rows.length, ...queue.expectedChanges],
@@ -480,12 +462,12 @@ export async function releaseSlot(
             eq(slots.reservation_group_id, groupId),
           )!,
         )
-        .limit(MAX_ATOMIC_SLOT_ROWS + 1)
+        .limit(MAX_SLOTS_PER_VIDEO + 1)
     : [row];
-  if (rows.length === 0 || rows.length > MAX_ATOMIC_SLOT_ROWS) {
+  if (rows.length === 0 || rows.length > MAX_SLOTS_PER_VIDEO) {
     return {
       ok: false,
-      message: `一度に解放できる枠は ${MAX_ATOMIC_SLOT_ROWS} 件までです。`,
+      message: `一度に解放できる枠は ${MAX_SLOTS_PER_VIDEO} 件までです。`,
     };
   }
   if (
@@ -544,7 +526,7 @@ async function releaseRows(
             updated_at: now,
             version: sql`${slots.version} + 1`,
           })
-          .where(versionedWhere(eventId, rows, "reserved")),
+          .where(versionedSlotWhere(eventId, rows, "reserved")),
         ...queue.statements,
       ],
       expectedMutationChanges: [rows.length, ...queue.expectedChanges],
@@ -663,7 +645,7 @@ export async function batchReleaseReservedSlots(
   if (releaseTargets.length > MAX_ATOMIC_SLOT_ROWS) {
     return {
       ok: false,
-      message: `reservation_group を含む処理対象は ${MAX_ATOMIC_SLOT_ROWS} 件以内にしてください。`,
+      message: `一括解放で reservation_group を含む処理対象は ${MAX_ATOMIC_SLOT_ROWS} 件以内です。大きな連続枠は枠ごとの強制解放を使ってください。`,
     };
   }
   if (releaseTargets.some((row) => row.status !== "reserved")) {
@@ -724,7 +706,7 @@ export async function batchUpdateSlotLabels(
             updated_at: now,
             version: sql`${slots.version} + 1`,
           })
-          .where(versionedWhere(eventId, rows)),
+          .where(versionedSlotWhere(eventId, rows)),
         ...queue.statements,
       ],
       expectedMutationChanges: [rows.length, ...queue.expectedChanges],

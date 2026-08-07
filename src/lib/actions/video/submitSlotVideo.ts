@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
@@ -63,7 +63,12 @@ import {
 } from "@/lib/video/resolveVideoCreatorIcon";
 import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
-import { MAX_ATOMIC_SUBMITTED_SLOTS } from "@/lib/video/atomicLimits";
+import { MAX_SLOTS_PER_VIDEO } from "@/lib/slots/limits";
+import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import {
+  areSlotsInSamePart,
+  sortSlotsChronologically,
+} from "@/lib/utils/slotGroupingCore";
 
 export async function submitSlotVideo(formData: FormData): Promise<VideoActionResult> {
   const guard = await writeGuard({
@@ -149,17 +154,15 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     await db
       .select({
         title: eventsTable.title,
-        max_slots_per_video: eventsTable.max_slots_per_video,
+        slot_part_gap_minutes: eventsTable.slot_part_gap_minutes,
       })
       .from(eventsTable)
       .where(eq(eventsTable.id, slotRow.event_id))
       .limit(1)
   )[0];
   if (!eventConfig) return { ok: false, message: "イベントが見つかりません。" };
-  const eventSlotLimit = Math.min(
-    Math.max(1, Number(eventConfig.max_slots_per_video ?? 1)),
-    MAX_ATOMIC_SUBMITTED_SLOTS,
-  );
+  // 提出可否は現行 events.max_slots_per_video では制限しない（grandfather）。
+  // 絶対上限のみ MAX_SLOTS_PER_VIDEO で fail-closed。
   const slotGroupWhere = slotRow.reservation_group_id
     ? and(
         eq(slots.reservation_group_id, slotRow.reservation_group_id),
@@ -172,9 +175,25 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     .select()
     .from(slots)
     .where(slotGroupWhere)
-    .limit(MAX_ATOMIC_SUBMITTED_SLOTS + 1);
-  if (submittedSlots.length === 0 || submittedSlots.length > eventSlotLimit) {
+    .limit(MAX_SLOTS_PER_VIDEO + 1);
+  if (submittedSlots.length === 0 || submittedSlots.length > MAX_SLOTS_PER_VIDEO) {
     return { ok: false, message: "同時に更新する枠数が上限を超えています。" };
+  }
+  if (submittedSlots.some((row) => row.status !== "reserved")) {
+    return { ok: false, message: "予約中の枠だけ作品を提出できます。" };
+  }
+  const slotGapSec = (eventConfig.slot_part_gap_minutes ?? 15) * 60;
+  const orderedSubmittedSlots = sortSlotsChronologically(submittedSlots);
+  for (let index = 1; index < orderedSubmittedSlots.length; index += 1) {
+    if (
+      !areSlotsInSamePart(
+        orderedSubmittedSlots[index - 1],
+        orderedSubmittedSlots[index],
+        slotGapSec,
+      )
+    ) {
+      return { ok: false, message: "連続していない枠をまとめて提出できません。" };
+    }
   }
   const now = Math.floor(Date.now() / 1000);
   const previousIconUrl = existingVideo?.creator_icon_url ?? null;
@@ -324,16 +343,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         updated_at: now,
         version: row.version + 1,
       };
-      plan.statements.push(db.update(slots).set({
-        status: after.status,
-        video_id: after.video_id,
-        updated_at: after.updated_at,
-        version: after.version,
-      }).where(and(
-        eq(slots.id, row.id),
-        expectedRowCondition({ expectedCurrent: row }),
-      )!));
-      plan.expectedChanges.push(1);
       plan.audits.push({
         table_name: "slots",
         target_id: row.id,
@@ -346,6 +355,17 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         strict: true,
       });
     }
+    plan.statements.push(
+      db.update(slots).set({
+        status: "submitted",
+        video_id: videoId,
+        updated_at: now,
+        version: sql`${slots.version} + 1`,
+      }).where(
+        versionedSlotWhere(slotRow.event_id, submittedSlots, "reserved"),
+      ),
+    );
+    plan.expectedChanges.push(submittedSlots.length);
 
     let notificationWakeSource: "web" | undefined;
     if (!existingVideo) {

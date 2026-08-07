@@ -1,15 +1,22 @@
 import { formatUnix } from "@/lib/utils/format";
 import {
+  annotateReservationGroups,
   buildSlotParts,
   collapseReservationGroups,
   sortSlotsChronologically,
+  type SlotAnnotatedRow,
   type SlotBase,
   type SlotGroupRow,
   type SlotPart,
 } from "./slotGroupingCore";
 
-export type { SlotBase, SlotGroupRow, SlotPart };
-export { buildSlotParts, collapseReservationGroups, sortSlotsChronologically };
+export type { SlotAnnotatedRow, SlotBase, SlotGroupRow, SlotPart };
+export {
+  annotateReservationGroups,
+  buildSlotParts,
+  collapseReservationGroups,
+  sortSlotsChronologically,
+};
 
 export function formatSlotPartLabel(
   part: SlotPart<{ start_time: number | null }>,

@@ -45,6 +45,23 @@ forbidMatch(
   "廃止した連続枠の表示統合を再導入しています。",
 );
 
+requireAll("src/components/event/SlotGrid.tsx", [
+  [/annotateReservationGroups/, "枠確保表は annotateReservationGroups で1枠1行表示する必要があります。"],
+  [/枠目/, "連続枠の n枠目 表示がありません。"],
+  [/slotGroupPosition/, "連続枠位置の CSS class がありません。"],
+  [/normalizeMaxSlotsPerVideo|countContiguousAvailableForward/, "イベント最大枠数の共通判定がありません。"],
+]);
+forbidMatch(
+  "src/components/event/SlotGrid.tsx",
+  /collapseReservationGroups/,
+  "枠確保表で collapseReservationGroups を再導入しています（行が消えます）。",
+);
+forbidMatch(
+  "src/components/event/SlotGrid.tsx",
+  /Math\.min\([\s\S]*MAX_ATOMIC_SLOT_ROWS/,
+  "枠確保表で最大枠数を MAX_ATOMIC_SLOT_ROWS(3) へ clamp しています。",
+);
+
 requireAll("src/components/forms/VideoForm.tsx", [
   [/"submitter"\s*\|\s*"work"\s*\|\s*"youtube"\s*\|\s*"confirm"/, "4段階投稿フローがありません。"],
   [/aria-current=\{index === currentStep \? "step"/, "現在ステップのアクセシビリティ表現がありません。"],

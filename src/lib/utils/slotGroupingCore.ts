@@ -39,6 +39,13 @@ export type SlotGroupRow = SlotBase & {
   is_group: boolean;
 };
 
+export type SlotAnnotatedRow = SlotBase &
+  SlotGroupRow & {
+    group_position: number;
+    group_first_slot_id: string;
+    group_last_slot_id: string;
+  };
+
 const JST_OFFSET_SEC = 9 * 60 * 60;
 
 function jstDayBucket(unixSec: number | null): number | null {
@@ -120,7 +127,7 @@ export function buildSlotParts<
   return parts;
 }
 
-export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
+function buildReservationGroupIndex(rows: SlotBase[]): Map<string, SlotBase[]> {
   const sorted = sortSlotsChronologically(rows);
   const grouped = new Map<string, SlotBase[]>();
   for (const row of sorted) {
@@ -130,6 +137,48 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
       grouped.set(row.group_key, current);
     }
   }
+  return grouped;
+}
+
+export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] {
+  const sorted = sortSlotsChronologically(rows);
+  const grouped = buildReservationGroupIndex(rows);
+
+  return sorted.map((row): SlotAnnotatedRow => {
+    const groupId = row.group_key;
+    if (!groupId) {
+      return {
+        ...row,
+        group_id: null,
+        group_size: 1,
+        group_position: 1,
+        slot_ids: [row.id],
+        group_first_slot_id: row.id,
+        group_last_slot_id: row.id,
+        is_group: false,
+      };
+    }
+    const groupRows = sortSlotsChronologically(grouped.get(groupId) ?? [row]);
+    const first = groupRows[0] ?? row;
+    const last = groupRows.at(-1) ?? first;
+    const groupPosition =
+      groupRows.findIndex((candidate) => candidate.id === row.id) + 1;
+    return {
+      ...row,
+      group_id: groupId,
+      group_size: groupRows.length,
+      group_position: groupPosition,
+      slot_ids: groupRows.map((candidate) => candidate.id),
+      group_first_slot_id: first.id,
+      group_last_slot_id: last.id,
+      is_group: groupRows.length > 1,
+    };
+  });
+}
+
+export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
+  const sorted = sortSlotsChronologically(rows);
+  const grouped = buildReservationGroupIndex(rows);
 
   const seen = new Set<string>();
   return sorted.flatMap((row): SlotGroupRow[] => {
