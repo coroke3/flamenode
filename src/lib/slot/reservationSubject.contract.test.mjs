@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { MAX_SLOTS_PER_VIDEO } from "../event/eventLimits.ts";
+import { MAX_SLOTS_PER_VIDEO } from "../slots/limits.ts";
+import { MAX_STAGE_PERMISSION_QUESTIONS } from "../event/eventLimits.ts";
 import { MAX_ATOMIC_SLOT_ROWS } from "../slots/atomicLimits.ts";
 import { MAX_ATOMIC_SUBMITTED_SLOTS } from "../video/atomicLimits.ts";
 
@@ -22,25 +23,17 @@ const eventFormSchema = await readFile(
   "utf8",
 );
 
-test("atomic slot limitsはMAX_SLOTS_PER_VIDEOと一致", () => {
-  assert.equal(MAX_ATOMIC_SLOT_ROWS, MAX_SLOTS_PER_VIDEO);
-  assert.equal(MAX_ATOMIC_SUBMITTED_SLOTS, MAX_SLOTS_PER_VIDEO);
-  assert.equal(MAX_SLOTS_PER_VIDEO, 3);
+test("atomic slot limitsは内部chunkと業務上限を分離", () => {
+  assert.equal(MAX_ATOMIC_SLOT_ROWS, 3);
+  assert.equal(MAX_ATOMIC_SUBMITTED_SLOTS, 3);
+  assert.equal(MAX_SLOTS_PER_VIDEO, 20);
 });
 
-test("extend/mergeはgroup subjectを候補枠へ継承しactive Xへ置換しない", () => {
+test("extend/mergeはsubject検証とActive X identityで候補枠を更新する", () => {
   assert.match(slotSource, /resolveSlotReservationSubject\(groupRows\)/);
   assert.match(slotSource, /subjectsEqual\(leftSubjectResult\.subject, rightSubjectResult\.subject\)/);
-  assert.match(slotSource, /reserved_by_user_id: subject\.reservedByUserId/);
-  assert.match(slotSource, /x_user_id: subject\.xUserId/);
-  assert.doesNotMatch(
-    slotSource.match(/export async function extendOwnSlotGroup[\s\S]*?export async function mergeOwnSlotGroups/)?.[0] ?? "",
-    /x_user_id:\s*slotXUserId/,
-  );
-  assert.doesNotMatch(
-    slotSource.match(/export async function mergeOwnSlotGroups[\s\S]*$/)?.[0] ?? "",
-    /x_user_id:\s*slotXUserId/,
-  );
+  assert.match(slotSource, /identity\.targetXId/);
+  assert.match(slotSource, /adoptNullRowPatch/);
 });
 
 test("mergeOwnSlotGroupsはgap含む全枠へ同一display_nameを適用する", () => {
@@ -60,23 +53,26 @@ test("submitSlotVideoのgroup loadはx_user_idで絞らない", () => {
   assert.match(groupBlock, /eq\(slots\.reservation_group_id/);
   assert.match(groupBlock, /eq\(slots\.event_id/);
   assert.match(groupBlock, /sortSlotsChronologically/);
-  assert.match(groupBlock, /groupRows\.length > MAX_ATOMIC_SUBMITTED_SLOTS/);
+  assert.match(groupBlock, /groupRows\.length > MAX_SLOTS_PER_VIDEO/);
   assert.match(groupBlock, /groupRows\.some\(\(row\) => row\.id === slotRow\.id\)/);
   assert.doesNotMatch(groupBlock, /eq\(slots\.x_user_id/);
   assert.doesNotMatch(groupBlock, /isNull\(slots\.x_user_id\)/);
 });
 
-test("submitSlotVideoは毎回submit通知をpost-commit enqueueする", () => {
-  assert.match(submitSource, /await enqueueSlotSubmitNotificationsPostCommit/);
-  assert.doesNotMatch(submitSource, /if \(!existingVideo\) \{[\s\S]*enqueueSlotSubmitNotificationsPostCommit/);
+test("submitSlotVideoは新規提出時にatomic batchへ通知をenqueueする", () => {
+  assert.match(submitSource, /notificationWakeSource/);
+  assert.match(submitSource, /buildNotificationOutboxStatement/);
+  assert.doesNotMatch(submitSource, /await enqueueSlotSubmitNotificationsPostCommit/);
 });
 
-test("EventFormはmax_slots 3とstage質問4件上限を反映", () => {
+test("EventFormはmax_slots 1-20とstage質問4件上限を反映", () => {
+  assert.match(eventFormSource, /min=\{MIN_SLOTS_PER_VIDEO\}/);
   assert.match(eventFormSource, /max=\{MAX_SLOTS_PER_VIDEO\}/);
   assert.match(eventFormSource, /MAX_STAGE_PERMISSION_QUESTIONS/);
   assert.match(
     eventFormSource,
     /ステージ・権利確認質問は最大\{MAX_STAGE_PERMISSION_QUESTIONS\}件です/,
   );
+  assert.match(eventFormSchema, /min\(MIN_SLOTS_PER_VIDEO\)/);
   assert.match(eventFormSchema, /max\(MAX_SLOTS_PER_VIDEO\)/);
 });

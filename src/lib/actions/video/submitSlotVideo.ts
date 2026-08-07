@@ -12,12 +12,15 @@ import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots,
+  users,
   videos,
 } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import {
   snapshotYoutubeChannelUrl,
 } from "@/lib/db/youtubeChannelCandidates";
+import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
+import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
@@ -215,7 +218,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       if (!guard.approvedXIds.includes(subject.xUserId)) {
         return { ok: false, message: "承認済みのX IDを選択してください。" };
       }
-      if (requestedX && subject.xUserId !== requestedX) {
+      if (activeX && subject.xUserId !== activeX) {
         return {
           ok: false,
           message: "投稿主体のX IDは予約時のIDに固定されています。",

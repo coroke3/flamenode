@@ -18,10 +18,7 @@ import {
   parseVideoFormSettings,
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
-import {
-  MAX_SLOTS_PER_VIDEO,
-  MAX_STAGE_PERMISSION_QUESTIONS,
-} from "@/lib/event/eventLimits";
+import { MAX_STAGE_PERMISSION_QUESTIONS } from "@/lib/event/eventLimits";
 import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
 import {
   normalizeEventVisibility,

@@ -800,6 +800,7 @@ export async function extendOwnSlotGroup(
     if (!isAcceptingEntries(event)) {
       return { ok: false, message: "受付中ではないため枠を拡張できません。" };
     }
+    const slotXUserId = resolveSlotXUserId(guard);
     const { rows: groupRows, identity } = await loadBoundedGroup(
       db,
       anchor,
@@ -996,6 +997,7 @@ export async function mergeOwnSlotGroups(
       slotPartGapSec(event),
     );
 
+    const slotXUserId = resolveSlotXUserId(guard);
     const groupId = generateId("sgrp");
     const targetXId = identity.targetXId ?? slotXUserId;
     const gapPatch = {

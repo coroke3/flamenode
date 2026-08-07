@@ -5,26 +5,23 @@ import { test } from "node:test";
 const read = async (relative) =>
   readFile(new URL(relative, import.meta.url), "utf8");
 
-test("reserveSlot keeps ops webhook post-commit and out of atomic batch", async () => {
+test("reserveSlot enqueues ops webhook in atomic batch and requeues post-commit on idempotent reserve", async () => {
   const source = await read("./slot.ts");
+  assert.match(source, /extraStatements/);
+  assert.match(source, /notificationWakeSource/);
   assert.match(source, /enqueueSlotReserveOpsWebhookPostCommit/);
-  assert.match(source, /runPostCommitBestEffort/);
-  assert.match(source, /isOwnReservedSlot\(anchor, guard\.user\.id\)[\s\S]*enqueueSlotReserveOpsWebhookPostCommit/);
-  assert.doesNotMatch(source, /extraStatements/);
-  assert.doesNotMatch(
+  assert.match(
     source,
-    /commitSlotUpdates\([\s\S]*notificationWakeSource/,
+    /isOwnReservedSlot\(anchor, guard\.user\.id\)[\s\S]*enqueueSlotReserveOpsWebhookPostCommit/,
   );
 });
 
-test("submitSlotVideo keeps submit notifications post-commit", async () => {
+test("submitSlotVideo enqueues submit notifications in atomic write plan", async () => {
   const source = await read("./video/submitSlotVideo.ts");
-  assert.match(source, /enqueueSlotSubmitNotificationsPostCommit/);
-  assert.match(source, /runPostCommitBestEffort/);
-  assert.doesNotMatch(
-    source,
-    /executeVideoAtomicWritePlan\([\s\S]*notificationWakeSource/,
-  );
+  assert.match(source, /buildNotificationOutboxStatement/);
+  assert.match(source, /notificationWakeSource/);
+  assert.match(source, /executeVideoAtomicWritePlan/);
+  assert.doesNotMatch(source, /await enqueueSlotSubmitNotificationsPostCommit/);
   const catchBlock =
     source.match(/} catch \(error\) \{[\s\S]*?return \{ ok: false, message: "保存対象が多すぎる/)?.[0] ??
     "";
@@ -44,7 +41,10 @@ test("setVideoStatus returns ok:false on D1 mutation failure", async () => {
 test("setManageVideoStatus returns ok:false on D1 mutation failure", async () => {
   const source = await read("./manage-video.ts");
   assert.match(source, /handleVideoVisibilityMutationFailure/);
-  assert.match(source, /unstable_rethrow\(error\)/);
+  assert.match(
+    source,
+    /catch \(error\) \{[\s\S]*return handleVideoVisibilityMutationFailure/,
+  );
 });
 
 test("visibility transition separates DM notifications from canonical mutation", async () => {
