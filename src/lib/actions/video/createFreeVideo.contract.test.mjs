@@ -18,3 +18,10 @@ test("createFreeVideo は writeGuard 通過後・解析/R2前に active_x_snapsh
   assert.ok(iconResolve > snapshotCheck);
   assert.match(fnBody, /active_x_snapshot/);
 });
+
+test("createFreeVideo は video_create で top section visibility targets を enqueue する", () => {
+  assert.match(source, /topVideoVisibilityTargets\("video_create"\)/);
+  const queueBlock = source.match(/const queueTargets = \[[\s\S]*?\];/)?.[0];
+  assert.ok(queueBlock);
+  assert.match(queueBlock, /\.\.\.topVideoVisibilityTargets\("video_create"\)/);
+});

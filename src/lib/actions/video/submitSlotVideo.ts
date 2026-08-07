@@ -78,6 +78,8 @@ import {
   sortSlotsChronologically,
 } from "@/lib/utils/slotGroupingCore";
 
+export const MAX_SUBMIT_SLOT_REBUILD_EVENT_TARGETS = 5;
+
 const SLOT_SUBMIT_REJECT_MESSAGE = "枠が見つかりません。";
 const SLOT_GROUP_REJECT_MESSAGE =
   "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";
@@ -558,6 +560,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     }
     const isPublicResubmit = existingVideo?.visibility_status === "public";
     const rebuildReason = existingVideo ? "video_update" : "video_create";
+    const rebuildEventIds = syncedEventIds.slice(0, MAX_SUBMIT_SLOT_REBUILD_EVENT_TARGETS);
     const rebuildTargets: EnqueueStaticRebuildInput[] = [
       {
         targetType: "video",
@@ -566,7 +569,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         priority: "high",
         requestedByUserId: userId,
       },
-      ...syncedEventIds.flatMap((eventId) => [
+      ...rebuildEventIds.flatMap((eventId) => [
         {
           targetType: "event_base" as const,
           targetId: eventId,

@@ -13,6 +13,7 @@ import {
   startYoutubePlayerListening,
   YOUTUBE_PLAYER_IFRAME_ID,
   YOUTUBE_PLAYER_STATE_ENDED,
+  YOUTUBE_PLAYER_STATE_PLAYING,
 } from "./playerBridge";
 
 interface YoutubePlayerProps {
@@ -121,7 +122,8 @@ export function YoutubePlayer({
 
       if (parsed.playerState === YOUTUBE_PLAYER_STATE_ENDED) {
         maybePublishEnded();
-      } else {
+      } else if (parsed.playerState === YOUTUBE_PLAYER_STATE_PLAYING) {
+        // リプレイ/再開後の再終了を許可。BUFFERING 等ではリセットしない（二重 ended 防止）
         endedDispatchedRef.current = false;
       }
     };

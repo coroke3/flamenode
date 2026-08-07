@@ -12,6 +12,7 @@ import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { topVideoVisibilityTargets } from "@/lib/staticRebuild/hooks";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
@@ -311,6 +312,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       { targetType: "list_popular" as const, targetId: "global", reason: "video_create" },
       { targetType: "search_index" as const, targetId: "global", reason: "video_create" },
       { targetType: "users_index" as const, targetId: "global", reason: "video_create" },
+      ...topVideoVisibilityTargets("video_create"),
       {
         targetType: "random_video_pool" as const,
         targetId: "global",

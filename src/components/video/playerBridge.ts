@@ -12,6 +12,7 @@ export const PLAYER_ENDED = "flamenode:video-ended";
 
 /** YouTube IFrame API: YT.PlayerState.ENDED */
 export const YOUTUBE_PLAYER_STATE_ENDED = 0;
+export const YOUTUBE_PLAYER_STATE_PLAYING = 1;
 
 export const YOUTUBE_PLAYER_ORIGIN = "https://www.youtube.com";
 export const YOUTUBE_PLAYER_IFRAME_ID = "flamenode-youtube-player";

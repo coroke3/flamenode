@@ -295,7 +295,7 @@ export async function enqueueScoreDependentRebuilds(
       `INSERT OR IGNORE INTO static_rebuild_queue (
          id, target_type, target_id, reason, priority, status,
          attempt_count, created_at, updated_at
-       ) VALUES (?, ?, 'global', 'score_recalc', 'normal', 'pending', 0, ?, ?)`,
+       ) VALUES (?, ?, 'global', 'score_recalc', 'high', 'pending', 0, ?, ?)`,
     ).bind(`srb:${targetType}:${crypto.randomUUID()}`, targetType, now, now),
   );
   const results = await env.DB.batch(statements);

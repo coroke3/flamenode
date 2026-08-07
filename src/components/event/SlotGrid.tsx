@@ -178,6 +178,10 @@ export function SlotGrid({
     setReserveCount("1");
     setSavedName(readSavedSlotDisplayName(viewerXId));
   }, [viewerXId]);
+
+  React.useEffect(() => {
+    setActionMenu(null);
+  }, [slots]);
   const displayRows = React.useMemo(
     () => annotateReservationGroups(slots as SlotBase[]),
     [slots],
@@ -546,17 +550,18 @@ export function SlotGrid({
       anchor.focus();
     };
     const onDismiss = () => closeActionMenu();
+    const partsRow = partsRowRef.current;
     document.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("resize", onDismiss);
     window.addEventListener("scroll", onDismiss, true);
-    partsRowRef.current?.addEventListener("scroll", onDismiss);
+    partsRow?.addEventListener("scroll", onDismiss);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("resize", onDismiss);
       window.removeEventListener("scroll", onDismiss, true);
-      partsRowRef.current?.removeEventListener("scroll", onDismiss);
+      partsRow?.removeEventListener("scroll", onDismiss);
     };
   }, [actionMenu, closeActionMenu]);
 

@@ -571,3 +571,14 @@ test("user-driven static rebuild paths do not import score throttle", async () =
   assert.doesNotMatch(videoSavePlanSource, /shouldThrottleScoreDependentRebuild/);
   assert.doesNotMatch(videoSavePlanSource, /score_recalc/);
 });
+
+test("score_recalc enqueue uses high priority for static_only compatibility", async () => {
+  const source = await readFile(
+    new URL("./scoreRankingRebuildThrottle.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /VALUES \(\?, \?, 'global', 'score_recalc', 'high', 'pending', 0, \?, \?\)/,
+  );
+});

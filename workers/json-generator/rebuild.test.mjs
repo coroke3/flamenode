@@ -739,9 +739,32 @@ test("rebuildTopStatsはpublicEventCount由来のstats.public_eventsを返す", 
 });
 
 test("rebuildUsersIndex成功後にtop/recommend follow-upをenqueueする", () => {
-  assert.match(source, /case "event_base":[\s\S]*enqueuePerTargetComposerFollowUp/);
-  assert.match(source, /case "event_slots":[\s\S]*enqueuePerTargetComposerFollowUp/);
+  assert.match(
+    source,
+    /case "event_base":[\s\S]*if \(shouldCompose\)[\s\S]*enqueuePerTargetComposerFollowUp/,
+  );
+  assert.match(
+    source,
+    /case "event_slots":[\s\S]*if \(shouldCompose\)[\s\S]*enqueuePerTargetComposerFollowUp/,
+  );
   assert.match(source, /case "users_index":[\s\S]*enqueueComposerFollowUps/);
+});
+
+test("rebuildEventBase/rebuildEventSlotsは非公開時にcompose不要を返す", () => {
+  const eventBaseFn = source.match(
+    /async function rebuildEventBase\([\s\S]*?(?=async function rebuildEventSlots)/,
+  )?.[0];
+  const eventSlotsFn = source.match(
+    /async function rebuildEventSlots\([\s\S]*?(?=async function rebuildEvent\()/,
+  )?.[0];
+  assert.ok(eventBaseFn);
+  assert.ok(eventSlotsFn);
+  assert.match(eventBaseFn, /Promise<boolean>/);
+  assert.match(eventSlotsFn, /Promise<boolean>/);
+  assert.match(eventBaseFn, /removeAllEventArtifacts[\s\S]*return false/);
+  assert.match(eventSlotsFn, /removeAllEventArtifacts[\s\S]*return false/);
+  assert.match(eventBaseFn, /return true;/);
+  assert.match(eventSlotsFn, /return true;/);
 });
 
 test("rebuildRecommendCore成功後にrecommend composer follow-upをenqueueする", () => {

@@ -341,22 +341,28 @@ export async function rebuildTarget(
     case "search_index":
       await rebuildSearchIndexLite(env, signal);
       break;
-    case "event_base":
-      await rebuildEventBase(env, targetId, signal);
-      followUpPending = await enqueuePerTargetComposerFollowUp(
-        env,
-        "event_base",
-        targetId,
-      );
+    case "event_base": {
+      const shouldCompose = await rebuildEventBase(env, targetId, signal);
+      if (shouldCompose) {
+        followUpPending = await enqueuePerTargetComposerFollowUp(
+          env,
+          "event_base",
+          targetId,
+        );
+      }
       break;
-    case "event_slots":
-      await rebuildEventSlots(env, targetId, signal);
-      followUpPending = await enqueuePerTargetComposerFollowUp(
-        env,
-        "event_slots",
-        targetId,
-      );
+    }
+    case "event_slots": {
+      const shouldCompose = await rebuildEventSlots(env, targetId, signal);
+      if (shouldCompose) {
+        followUpPending = await enqueuePerTargetComposerFollowUp(
+          env,
+          "event_slots",
+          targetId,
+        );
+      }
       break;
+    }
     case "event":
       await rebuildEvent(env, targetId, signal);
       break;
@@ -1420,13 +1426,13 @@ async function rebuildEventBase(
   env: Env,
   eventId: string,
   signal?: RebuildSignal,
-): Promise<void> {
+): Promise<boolean> {
   throwIfAborted(signal);
   const ev = await loadEventVisibilityRow(env, eventId, signal);
   throwIfAborted(signal);
   if (!ev || String(ev.visibility_status ?? "") !== "public") {
     await removeAllEventArtifacts(env, eventId, signal);
-    return;
+    return false;
   }
 
   const eventRow = (
@@ -1440,7 +1446,7 @@ async function rebuildEventBase(
   throwIfAborted(signal);
   if (!eventRow) {
     await removeAllEventArtifacts(env, eventId, signal);
-    return;
+    return false;
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -1548,19 +1554,20 @@ async function rebuildEventBase(
     20,
     signal,
   );
+  return true;
 }
 
 async function rebuildEventSlots(
   env: Env,
   eventId: string,
   signal?: RebuildSignal,
-): Promise<void> {
+): Promise<boolean> {
   throwIfAborted(signal);
   const ev = await loadEventVisibilityRow(env, eventId, signal);
   throwIfAborted(signal);
   if (!ev || String(ev.visibility_status ?? "") !== "public") {
     await removeAllEventArtifacts(env, eventId, signal);
-    return;
+    return false;
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -1600,6 +1607,7 @@ async function rebuildEventSlots(
     20,
     signal,
   );
+  return true;
 }
 
 function stripEventPublicVideoScore(

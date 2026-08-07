@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import styles from "./PlaylistRail.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { youtubeThumbUrl } from "@/lib/youtube/id";
+import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { cn } from "@/lib/utils/cn";
 import { uniqueBy } from "@/lib/utils/unique";
 
@@ -26,6 +26,21 @@ interface PlaylistRailProps {
 
 const AUTO_NEXT_KEY = "fn-playlist-autonext";
 const orderStorageKey = (playlistId: string) => `fn-playlist-order:${playlistId}`;
+
+function playlistIdentityMatches(
+  entryYoutubeId: string | null,
+  entryId: string,
+  candidate: string,
+): boolean {
+  const trimmed = candidate.trim();
+  if (!trimmed) return false;
+  if (trimmed === entryId || trimmed === entryYoutubeId) return true;
+  const candidateId = extractYoutubeId(trimmed);
+  if (!candidateId) return false;
+  const entryVideoId = extractYoutubeId(entryYoutubeId) ?? entryYoutubeId;
+  const entryContentId = extractYoutubeId(entryId) ?? entryId;
+  return candidateId === entryVideoId || candidateId === entryContentId;
+}
 
 function applySavedOrder(
   items: PlaylistEntry[],
@@ -53,6 +68,13 @@ export function PlaylistRail({
   const [hydrated, setHydrated] = React.useState(false);
   const [order, setOrder] = React.useState<string[]>([]);
   const navigationInFlightRef = React.useRef(false);
+  const navigationSafetyTimeoutRef = React.useRef<number | null>(null);
+
+  const clearNavigationSafetyTimeout = React.useCallback(() => {
+    if (navigationSafetyTimeoutRef.current == null) return;
+    window.clearTimeout(navigationSafetyTimeoutRef.current);
+    navigationSafetyTimeoutRef.current = null;
+  }, []);
 
   const orderKey = playlistId ? orderStorageKey(playlistId) : null;
 
@@ -97,8 +119,8 @@ export function PlaylistRail({
 
   const currentIndex = React.useMemo(
     () =>
-      orderedItems.findIndex(
-        (v) => v.id === currentId || v.youtube_video_id === currentId,
+      orderedItems.findIndex((v) =>
+        playlistIdentityMatches(v.youtube_video_id, v.id, currentId),
       ),
     [orderedItems, currentId],
   );
@@ -134,8 +156,9 @@ export function PlaylistRail({
   }, []);
 
   React.useEffect(() => {
+    clearNavigationSafetyTimeout();
     navigationInFlightRef.current = false;
-  }, [currentId]);
+  }, [clearNavigationSafetyTimeout, currentId]);
 
   React.useEffect(() => {
     if (!autoNext || !nextItem) return;
@@ -146,27 +169,36 @@ export function PlaylistRail({
       const detailYoutubeId = (
         event as CustomEvent<{ youtubeId?: string }>
       ).detail?.youtubeId;
-      if (typeof detailYoutubeId === "string" && detailYoutubeId.trim() !== "") {
-        const matchesCurrent =
-          currentEntry?.youtube_video_id === detailYoutubeId ||
-          currentEntry?.id === detailYoutubeId ||
-          currentId === detailYoutubeId;
-        if (!matchesCurrent) return;
+      if (typeof detailYoutubeId !== "string" || detailYoutubeId.trim() === "") {
+        return;
       }
+      const matchesCurrent = currentEntry
+        ? playlistIdentityMatches(
+            currentEntry.youtube_video_id,
+            currentEntry.id,
+            detailYoutubeId,
+          )
+        : playlistIdentityMatches(null, currentId, detailYoutubeId);
+      if (!matchesCurrent) return;
       navigationInFlightRef.current = true;
-      router.push(makeHref(nextItem));
-      window.setTimeout(() => {
+      clearNavigationSafetyTimeout();
+      navigationSafetyTimeoutRef.current = window.setTimeout(() => {
         navigationInFlightRef.current = false;
-      }, 2500);
+        navigationSafetyTimeoutRef.current = null;
+      }, 15_000);
+      router.push(makeHref(nextItem));
     };
     window.addEventListener("flamenode:video-ended", handler as EventListener);
-    return () =>
+    return () => {
       window.removeEventListener(
         "flamenode:video-ended",
         handler as EventListener,
       );
+      clearNavigationSafetyTimeout();
+    };
   }, [
     autoNext,
+    clearNavigationSafetyTimeout,
     currentId,
     currentIndex,
     makeHref,

@@ -45,3 +45,13 @@ test("submitSlotVideo は pending 提出で global list/search/users/user/random
     /rebuildTargets[\s\S]*list_recent[\s\S]*topSlotStatsGlobalTarget/,
   );
 });
+
+test("submitSlotVideo は rebuild enqueue の event 対象を上限件数に cap する", () => {
+  assert.match(source, /MAX_SUBMIT_SLOT_REBUILD_EVENT_TARGETS = 5/);
+  assert.match(
+    source,
+    /const rebuildEventIds = syncedEventIds\.slice\(0, MAX_SUBMIT_SLOT_REBUILD_EVENT_TARGETS\)/,
+  );
+  assert.match(source, /\.\.\.rebuildEventIds\.flatMap\(\(eventId\) => \[/);
+  assert.match(source, /targetEventIds: syncedEventIds/);
+});
