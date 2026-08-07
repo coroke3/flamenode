@@ -145,7 +145,8 @@ export function GlobalEditableFieldsPanel({
           </p>
           <h2 style={{ margin: 0, fontSize: 20 }}>一般作品権限</h2>
           <p className="fn-muted" style={{ marginTop: 8, marginBottom: 0, lineHeight: 1.7 }}>
-            作品所有者が通常モードで編集できる項目を設定します。
+            作品所有者（作者・編集権限付き合作メンバー）が通常モードで編集できる項目を設定します。
+            通常作品と公開前作品で分けて設定します。イベント側で個別設定した場合は、そのイベントの設定が優先されます。
             この設定によって、作品所有者ではない一般ユーザーへ編集権限が付与されることはありません。
           </p>
           <ul

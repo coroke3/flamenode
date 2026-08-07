@@ -9,7 +9,8 @@ import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canEditVideo,
-  getApprovedXIds,
+  canUseEventPrivilegeModeForVideo,
+  type CanEditVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
 import { videoMembers, videos, xUsers } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
@@ -60,46 +61,37 @@ const upsertSchema = z.object({
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
-async function canManageVideoCollaborators(
+async function resolvePrivilegeModeFromForm(
   db: DB,
+  formData: FormData,
   user: { id: string; role?: string | null },
   video: Pick<
     typeof videos.$inferSelect,
     | "id"
-    | "title"
     | "primary_event_id"
     | "creator_x_user_id"
     | "submitted_by_user_id"
     | "visibility_status"
   >,
-): Promise<boolean> {
-  if (user.role === "admin") {
-    const allowed = await canEditVideo({
+): Promise<CanEditVideoPrivilegeMode> {
+  const raw = String(formData.get("edit_privilege_mode") ?? "").trim();
+  if (raw === "admin" && user.role === "admin") return "admin";
+  if (raw === "event") {
+    const canUseEvent = await canUseEventPrivilegeModeForVideo({
       db,
       user,
       video,
-      requiredKey: "video.identity",
-      privilegeMode: "admin",
     });
-    if (allowed) return true;
+    if (canUseEvent) return "event";
   }
-  const approved = await getApprovedXIds(db, user.id);
-  if (video.creator_x_user_id && approved.includes(video.creator_x_user_id)) {
-    return true;
-  }
-  return canEditVideo({
-    db,
-    user,
-    video,
-    requiredKey: "video.members",
-    privilegeMode: "event",
-  });
+  return "normal";
 }
 
 async function loadEditableVideo(
   db: DB,
   user: { id: string; role?: string | null },
   videoId: string,
+  formData: FormData,
 ) {
   const row = (
     await db
@@ -116,8 +108,19 @@ async function loadEditableVideo(
       .limit(1)
   )[0];
   if (!row) return null;
-  const allowed = await canManageVideoCollaborators(db, user, row);
-  return allowed ? row : null;
+  const video = {
+    ...row,
+    submitted_by_user_id: row.submitted_by_user_id ?? "",
+  };
+  const privilegeMode = await resolvePrivilegeModeFromForm(db, formData, user, video);
+  const allowed = await canEditVideo({
+    db,
+    user,
+    video,
+    requiredKey: "video.permissions",
+    privilegeMode,
+  });
+  return allowed ? { ...video, privilegeMode } : null;
 }
 
 async function resolveSubjectXUserId(
@@ -169,8 +172,9 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const video = await loadEditableVideo(db, actor, parsed.data.video_id);
+  const video = await loadEditableVideo(db, actor, parsed.data.video_id, formData);
   if (!video) return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
+  const privilegeMode = video.privilegeMode;
 
   const resolved = await resolveSubjectXUserId(
     db,
@@ -248,7 +252,7 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
       after: memberAfter,
       actor_user_id: actor.id,
       context: "video_collab_permissions",
-      reason: "共同編集権限を更新",
+      reason: `共同編集権限を更新 privilege:${privilegeMode}`,
       retention_class: "long_audit",
       strict: true,
     });
@@ -277,7 +281,7 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
       after: memberAfter,
       actor_user_id: actor.id,
       context: "video_collab_permissions",
-      reason: "共同編集権限を作成",
+      reason: `共同編集権限を作成 privilege:${privilegeMode}`,
       retention_class: "long_audit",
       strict: true,
     });
@@ -329,8 +333,9 @@ export async function deleteVideoCollaborator(formData: FormData): Promise<Video
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
-  const video = await loadEditableVideo(db, actor, videoId);
+  const video = await loadEditableVideo(db, actor, videoId, formData);
   if (!video) return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
+  const privilegeMode = video.privilegeMode;
   const existing = await findMemberRowForXUser(db, video.id, xUserId);
   if (!existing) return { ok: true, message: "該当する権限行はすでにありません。" };
 
@@ -368,7 +373,7 @@ export async function deleteVideoCollaborator(formData: FormData): Promise<Video
           after,
           actor_user_id: actor.id,
           context: "video_collab_permissions",
-          reason: "共同編集権限を解除",
+          reason: `共同編集権限を解除 privilege:${privilegeMode}`,
           retention_class: "long_audit",
           strict: true,
         },

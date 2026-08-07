@@ -1,0 +1,19 @@
+.note {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.reason {
+  margin: 0;
+}
+
+.hint {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}

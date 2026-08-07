@@ -37,6 +37,7 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
       "video.members",
       "video.member_chapters",
       "video.status",
+      "video.permissions",
     ],
   },
   manager: {
@@ -55,6 +56,7 @@ export const PRESET_DEFINITIONS: Record<EventStaffPreset, PresetDefinition> = {
       "video.members",
       "video.member_chapters",
       "video.status",
+      "video.permissions",
     ],
   },
   reviewer: {

@@ -27,9 +27,17 @@ import {
   loadGeneralEditableFieldSet,
   normalModeAlwaysDisabledFieldKeys,
 } from "@/lib/video/generalEditPermissions";
-import { computeAllowedVideoEditSections } from "@/lib/video/computeEditSections";
+import {
+  canEditVideo,
+  canUseEventPrivilegeModeForVideo,
+  getApprovedXIds,
+  getEditableEventIds,
+  resolveEventStaffVideoPermissionGrant,
+  resolveVideoOwnership,
+} from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
+import { VideoEditPermissionOverview } from "@/components/video/permission/VideoEditPermissionOverview";
 import { Icon } from "@/components/ui/Icon";
 import { youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
@@ -38,6 +46,10 @@ import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
+import { buildVideoEditPermissionViewModel } from "@/lib/video/videoEditPermissionView";
+import type { VideoViewSectionKey } from "@/lib/video/videoEditPermissionView";
+import { hasAnyEditableVideoFormSection } from "@/lib/video/permissionUnlockHint";
+import type { VideoEditSectionKey } from "@/lib/auth/videoEditSections";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -54,9 +66,7 @@ function normalizePrivilegeMode(raw: string | undefined): PrivilegeMode {
 }
 
 /**
- * 編集ページの上部に出す「現在の権限モード」バナー + 切替リンク。
- * 通常モードでは目立たないが、admin/event モード時には強めの色味で警告する。
- * モード切替は ?privileged= の URL 書き換えだけで完結する (サーバー側で再検証)。
+ * モード切替リンク専用。説明文は VideoEditPermissionOverview に集約する。
  */
 function PrivilegeModeBanner({
   mode,
@@ -66,59 +76,22 @@ function PrivilegeModeBanner({
 }: {
   mode: PrivilegeMode;
   isAdmin: boolean;
-  /** event モードで何らかの section が編集可能になる場合のみ true。 */
   canOfferEventMode: boolean;
   videoId: string;
-}): React.ReactElement {
+}): React.ReactElement | null {
   const base = `/dashboard/edit/${encodeURIComponent(videoId)}`;
-  if (mode === "admin") {
-    return (
-      <div role="status" className="fn-privilege-banner fn-privilege-banner--admin">
-        <Icon name="alert" size={12} aria-hidden />
-        管理者権限で編集中。提出主体や所属イベントの変更が可能です。
-        <span className="fn-privilege-banner-actions">
-          {canOfferEventMode ? (
-            <Link
-              href={`${base}?privileged=event`}
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-            >
-              イベント運営権限で編集
-            </Link>
-          ) : null}
-          <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm">
-            通常モードへ戻る
-          </Link>
-        </span>
-      </div>
-    );
-  }
-  if (mode === "event") {
-    return (
-      <div role="status" className="fn-privilege-banner fn-privilege-banner--event">
-        <Icon name="users" size={12} aria-hidden />
-        イベント運営権限で編集中。
-        <span className="fn-privilege-banner-actions">
-          {isAdmin ? (
-            <Link
-              href={`${base}?privileged=admin`}
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-            >
-              管理者権限で編集
-            </Link>
-          ) : null}
-          <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm">
-            通常モードへ戻る
-          </Link>
-        </span>
-      </div>
-    );
-  }
-  // normal: 切替ボタンを表示する (admin / event editor のみ)。
+  const showAdmin = isAdmin && mode !== "admin";
+  const showEvent = canOfferEventMode && mode !== "event";
+  const showNormal = mode !== "normal";
+  if (!showAdmin && !showEvent && !showNormal) return null;
+
   return (
-    <div role="status" className="fn-privilege-banner fn-privilege-banner--normal">
-      <Icon name="info" size={11} aria-hidden /> 通常編集モード (作品オーナー / 合作メンバー の権限のみ)
+    <div
+      className={`fn-privilege-banner fn-privilege-banner--${mode} fn-privilege-banner--switch`}
+      aria-label="編集権限モードの切替"
+    >
       <span className="fn-privilege-banner-actions">
-        {isAdmin ? (
+        {showAdmin ? (
           <Link
             href={`${base}?privileged=admin`}
             className="fn-btn fn-btn-ghost fn-btn-sm"
@@ -126,12 +99,17 @@ function PrivilegeModeBanner({
             管理者権限で編集
           </Link>
         ) : null}
-        {canOfferEventMode ? (
+        {showEvent ? (
           <Link
             href={`${base}?privileged=event`}
             className="fn-btn fn-btn-ghost fn-btn-sm"
           >
             イベント運営権限で編集
+          </Link>
+        ) : null}
+        {showNormal ? (
+          <Link href={base} className="fn-btn fn-btn-ghost fn-btn-sm">
+            通常モードへ戻る
           </Link>
         ) : null}
       </span>
@@ -151,15 +129,6 @@ export default async function EditVideoPage({
   });
   if (!guard.ok) return guard.element;
   const user = guard.user;
-  // 管理者/イベント編集者でないユーザーが ?privileged=admin を付けても normal にフォールバック。
-  // 「URL を弄れば全部編集できる」抜け穴を作らないため。canEditVideo 側でも再検証される。
-  let privilegeMode: PrivilegeMode = "normal";
-  if (requestedMode === "admin" && user.role === "admin") {
-    privilegeMode = "admin";
-  } else if (requestedMode === "event") {
-    // event モードの利用可否は canEditVideo に委ねるが、UI上は許可しておく。
-    privilegeMode = "event";
-  }
 
   const db = getDatabase();
   if (!db) notFound();
@@ -170,6 +139,22 @@ export default async function EditVideoPage({
     .limit(1);
   const video = rows[0];
   if (!video) notFound();
+
+  const editUser = { id: user.id, role: user.role ?? null };
+  const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
+    db,
+    user: editUser,
+    video,
+  });
+
+  // 管理者以外が ?privileged=admin を付けても normal にフォールバック。
+  // event モードは canUseEventPrivilegeModeForVideo が true のときだけ。
+  let privilegeMode: PrivilegeMode = "normal";
+  if (requestedMode === "admin" && user.role === "admin") {
+    privilegeMode = "admin";
+  } else if (requestedMode === "event" && canOfferEventMode) {
+    privilegeMode = "event";
+  }
 
   const memberRows = await db
     .select({
@@ -299,77 +284,197 @@ export default async function EditVideoPage({
     .map((row) => ({ id: row.x_user_id, x_name: row.x_name }))
     .sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
 
-  const editUser = { id: user.id, role: user.role ?? null };
   const generalFields =
     privilegeMode === "normal"
       ? await loadGeneralEditableFieldSet(db, video)
       : undefined;
-  const allowedSections = await computeAllowedVideoEditSections({
+
+  const ownership = await resolveVideoOwnership({
     db,
-    user: editUser,
+    userId: user.id,
     video,
-    privilegeMode,
-    generalFields,
   });
-  const {
-    identity: canEditIdentity,
-    basics: canEditBasics,
-    youtube: canEditYoutube,
-    credits: canEditCredits,
-    descriptions: canEditDescriptions,
-    members: canEditMembers,
-    member_chapters: canEditMemberChapters,
-  } = allowedSections;
-  const canEditAnySection =
-    canEditIdentity ||
-    canEditBasics ||
-    canEditYoutube ||
-    canEditCredits ||
-    canEditDescriptions ||
-    canEditMembers ||
-    canEditMemberChapters;
+  const approvedXIds = await getApprovedXIds(db, user.id);
+  const editableEventIds = await getEditableEventIds(db, user.id, currentEventIds);
+  const isEventStaffForVideo = editableEventIds.length > 0;
 
-  // モード切替バナーで「管理者権限で編集」「イベント運営権限で編集」を出すかの判定。
-  //
-  // - canOfferAdminMode: admin role を持っていて、まだ admin モードに入っていない場合。
-  //   admin モード時には別の切替先 (event / normal) を出すため除外。
-  // - canOfferEventMode: privilegeMode==="normal" で canEditAnySection===false の場合だけ、
-  //   event モード試算をして 1 つでも編集可能セクションがあれば true。
-  //   admin モード中 (canEditAnySection===true) は試算しないが、admin role でない
-  //   ユーザーが ?privileged=event を提示できるよう、一覧化された
-  //   event モードでの section 結果を保持する。
-  const canOfferAdminMode =
-    user.role === "admin" && privilegeMode !== "admin";
+  let membershipHint: "none" | "member_no_edit" | "outsider" = "outsider";
+  if (ownership.isOwner) {
+    membershipHint = "none";
+  } else if (approvedXIds.length > 0) {
+    const membershipRows = await db
+      .select({ can_edit: videoMembers.can_edit })
+      .from(videoMembers)
+      .where(
+        and(
+          eq(videoMembers.video_id, video.id),
+          inArray(videoMembers.x_user_id, approvedXIds),
+        )!,
+      )
+      .limit(8);
+    if (membershipRows.some((row) => row.can_edit === 0)) {
+      membershipHint = "member_no_edit";
+    } else if (membershipRows.length === 0) {
+      membershipHint = "outsider";
+    }
+  }
 
-  let canOfferEventMode = false;
-  if (privilegeMode === "normal" && !canEditAnySection) {
-    const eventSections = await computeAllowedVideoEditSections({
+  const [
+    canEditIdentity,
+    canEditBasics,
+    canEditYoutube,
+    canEditCredits,
+    canEditDescriptions,
+    canEditMembers,
+    canEditMemberChapters,
+    canEditPermissions,
+    canEditPrimaryEvent,
+    canEditVisibility,
+  ] = await Promise.all([
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode, generalFields }),
+    canEditVideo({
       db,
       user: editUser,
       video,
-      privilegeMode: "event",
-    });
-    canOfferEventMode =
-      eventSections.identity ||
-      eventSections.basics ||
-      eventSections.youtube ||
-      eventSections.credits ||
-      eventSections.descriptions ||
-      eventSections.members ||
-      eventSections.member_chapters;
+      requiredKey: "video.member_chapters",
+      privilegeMode,
+      generalFields,
+    }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.permissions", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.primary_event", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.status", privilegeMode, generalFields }),
+  ]);
+
+  const canOfferAdminMode = user.role === "admin" && privilegeMode !== "admin";
+  const eventTitleById = new Map(
+    eventOptions.map((event) => [event.id, event.title] as const),
+  );
+  // eventOptions に無い所属イベント名を補完
+  if (currentEventIds.length > 0) {
+    for (const eventId of currentEventIds) {
+      if (eventTitleById.has(eventId)) continue;
+      const missing = acceptingEventMap.get(eventId);
+      if (missing) eventTitleById.set(missing.id, missing.title);
+    }
   }
+
+  const sectionPermissionKeys: Array<{
+    section: VideoViewSectionKey;
+    key: VideoEditSectionKey;
+  }> = [
+    { section: "identity", key: "video.identity" },
+    { section: "basics", key: "video.basics" },
+    { section: "youtube", key: "video.youtube_id" },
+    { section: "credits", key: "video.credits" },
+    { section: "descriptions", key: "video.descriptions" },
+    { section: "members", key: "video.members" },
+    { section: "memberChapters", key: "video.member_chapters" },
+    { section: "primaryEvent", key: "video.primary_event" },
+    { section: "visibility", key: "video.status" },
+    { section: "permissions", key: "video.permissions" },
+  ];
+
+  let sectionEventSources:
+    | Partial<Record<VideoViewSectionKey, { eventId?: string; eventTitle?: string }>>
+    | undefined;
+  if (privilegeMode === "event") {
+    sectionEventSources = {};
+    await Promise.all(
+      sectionPermissionKeys.map(async ({ section, key }) => {
+        const grant = await resolveEventStaffVideoPermissionGrant({
+          db,
+          user: editUser,
+          video,
+          requiredKey: key,
+          approvedXUserIds: approvedXIds,
+        });
+        if (!grant.allowed || !grant.eventId) return;
+        sectionEventSources![section] = {
+          eventId: grant.eventId,
+          eventTitle: eventTitleById.get(grant.eventId),
+        };
+      }),
+    );
+  }
+
+  const eventTitleForMode =
+    privilegeMode === "event"
+      ? (video.primary_event_id && eventTitleById.get(video.primary_event_id)) ||
+        Object.values(sectionEventSources ?? {})
+          .map((meta) => meta?.eventTitle)
+          .find(Boolean) ||
+        editableEventIds.map((id) => eventTitleById.get(id)).find(Boolean) ||
+        null
+      : null;
+
+  const permissionView = buildVideoEditPermissionViewModel({
+    privilegeMode,
+    ownership,
+    canOfferAdminMode,
+    canOfferEventMode,
+    membershipHint,
+    eventId:
+      privilegeMode === "event"
+        ? video.primary_event_id ?? editableEventIds[0]
+        : undefined,
+    eventTitle: eventTitleForMode ?? undefined,
+    sectionEventSources,
+    sections: {
+      identity: canEditIdentity,
+      basics: canEditBasics,
+      youtube: canEditYoutube,
+      credits: canEditCredits,
+      descriptions: canEditDescriptions,
+      members: canEditMembers,
+      memberChapters: canEditMembers && canEditMemberChapters,
+      primaryEvent: canEditPrimaryEvent,
+      visibility: canEditVisibility,
+      permissions: canEditPermissions,
+    },
+  });
+
+  const canEditAnySection = hasAnyEditableVideoFormSection(permissionView);
+  const canEditAnyCapability = canEditAnySection || canEditPermissions;
+
+  const hasAnyEditCapability =
+    canEditAnyCapability ||
+    canOfferAdminMode ||
+    canOfferEventMode;
+
+  const resolveNoAccessMessage = (): string => {
+    if (!ownership.isOwner && isEventStaffForVideo && !canOfferEventMode) {
+      return "この作品に対する運営権限が不足しています。";
+    }
+    if (ownership.isOwner && privilegeMode === "normal" && !canEditAnyCapability) {
+      return "この項目は、現在の一般作品権限では編集できません。";
+    }
+    return "この作品を編集できません。作品の作者、編集権限を付与された合作メンバー、または権限を持つ運営のみ編集できます。";
+  };
+
+  const resolveSwitchOnlyMessage = (): string => {
+    if (canOfferAdminMode) {
+      return "通常編集モードでは編集できる項目がありません。上部の「管理者権限で編集」から明示的に権限を切り替えてください。";
+    }
+    if (canOfferEventMode) {
+      return "通常編集モードでは編集できる項目がありません。上部の「イベント運営権限で編集」から明示的に権限を切り替えてください。";
+    }
+    return resolveNoAccessMessage();
+  };
 
   const canShowPrivilegeSwitchOnly =
     !canEditAnySection && (canOfferAdminMode || canOfferEventMode);
 
-  if (!canEditAnySection && !canShowPrivilegeSwitchOnly) {
+  if (!hasAnyEditCapability) {
     return (
       <div className="fn-public-container fn-page fn-guard-shell">
         <div className="fn-status-panel fn-status-panel--center fn-status-panel--warn">
           <h1 className="fn-guard-title fn-guard-title--warn">編集権限がありません</h1>
-          <p className="fn-status-panel-lead">
-            この作品の作者本人、または担当イベントの運営のみが編集できます。
-          </p>
+          <p className="fn-status-panel-lead">{resolveNoAccessMessage()}</p>
           <div className="fn-panel-actions fn-panel-actions--row">
             <Link href="/dashboard" className="fn-btn fn-btn-ghost">
               ダッシュボードへ
@@ -386,18 +491,6 @@ export default async function EditVideoPage({
     );
   }
 
-  // canEditAnySection===false でも、モード切替で編集可能になる可能性があれば
-  // フォーム自体は表示し、保存ボタンを submitBlockedReason で塞ぐ。
-  // CLAUDE.md 方針:
-  //   - 自動的に admin モードに昇格しない (URL 明示が必要)
-  //   - 全 section が disabled になるだけで権限ロジックは canEditVideo 任せ
-  const submitBlockedReason = !canEditAnySection
-    ? canOfferAdminMode
-      ? "通常編集モードでは編集できる項目がありません。上部の「管理者権限で編集」から明示的に権限を切り替えてください。"
-      : canOfferEventMode
-        ? "通常編集モードでは編集できる項目がありません。上部の「イベント運営権限で編集」から明示的に権限を切り替えてください。"
-        : undefined
-    : undefined;
   const disabledSections = [
     !canEditIdentity ? "submitter" : null,
     !canEditBasics && !canEditYoutube && !canEditCredits ? "video" : null,
@@ -425,6 +518,7 @@ export default async function EditVideoPage({
     !canEditIdentity ? "submitter.youtube_channel_url" : null,
     !canEditIdentity ? "submitter.other_social_links" : null,
     !canEditBasics ? "video.title" : null,
+    !canEditBasics ? "video.part" : null,
     !canEditYoutube ? "video.youtube_url" : null,
     !canEditCredits ? "video.music" : null,
     !canEditCredits ? "video.credit" : null,
@@ -445,40 +539,64 @@ export default async function EditVideoPage({
       }
     : undefined;
 
-  return (
-    <div className="fn-public-container fn-page">
-      <header className="fn-page-head">
-        <p className="fn-eyebrow">EDIT</p>
-        <h1 className="fn-page-title fn-page-title--compact">{video.title}</h1>
-        <p className="fn-page-meta">
-          現在の状態:
-          <span className="fn-badge fn-badge-soft">{video.visibility_status}</span>
-          {video.youtube_video_id ? (
-            <a
-              href={youtubeWatchUrl(video.youtube_video_id)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-            >
-              <Icon name="external" size={12} aria-hidden />
-              YouTube で確認
-            </a>
-          ) : null}
-          <Link
-            href={`/${video.youtube_video_id ?? video.id}`}
+  const pageHeader = (
+    <header className="fn-page-head">
+      <p className="fn-eyebrow">EDIT</p>
+      <h1 className="fn-page-title fn-page-title--compact">{video.title}</h1>
+      <p className="fn-page-meta">
+        現在の状態:
+        <span className="fn-badge fn-badge-soft">{video.visibility_status}</span>
+        {video.youtube_video_id ? (
+          <a
+            href={youtubeWatchUrl(video.youtube_video_id)}
+            target="_blank"
+            rel="noopener noreferrer"
             className="fn-btn fn-btn-ghost fn-btn-sm"
           >
             <Icon name="external" size={12} aria-hidden />
-            FlameNode で見る
-          </Link>
-        </p>
-        <PrivilegeModeBanner
-          mode={privilegeMode}
-          isAdmin={user.role === "admin"}
-          canOfferEventMode={canOfferEventMode}
-          videoId={id}
+            YouTube で確認
+          </a>
+        ) : null}
+        <Link
+          href={`/${video.youtube_video_id ?? video.id}`}
+          className="fn-btn fn-btn-ghost fn-btn-sm"
+        >
+          <Icon name="external" size={12} aria-hidden />
+          FlameNode で見る
+        </Link>
+      </p>
+      <PrivilegeModeBanner
+        mode={privilegeMode}
+        isAdmin={user.role === "admin"}
+        canOfferEventMode={canOfferEventMode && privilegeMode !== "event"}
+        videoId={id}
+      />
+    </header>
+  );
+
+  if (canShowPrivilegeSwitchOnly) {
+    return (
+      <div className="fn-public-container fn-page fn-page--video-edit">
+        {pageHeader}
+        <VideoEditPermissionOverview
+          viewModel={permissionView}
+          eventTitleForMode={eventTitleForMode}
         />
-      </header>
+        <div className="fn-status-panel fn-status-panel--warn">
+          <p className="fn-status-panel-lead">{resolveSwitchOnlyMessage()}</p>
+        </div>
+        <div className="fn-page-footer-actions">
+          <Link href="/dashboard" className="fn-btn fn-btn-ghost">
+            ダッシュボードへ戻る
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fn-public-container fn-page fn-page--video-edit">
+      {pageHeader}
 
       {privilegeMode === "admin" && user.role === "admin" ? (
         <AdminVideoTabs
@@ -488,6 +606,11 @@ export default async function EditVideoPage({
         />
       ) : null}
 
+      <VideoEditPermissionOverview
+        viewModel={permissionView}
+        eventTitleForMode={eventTitleForMode}
+      />
+
       <VideoForm
         mode="edit"
         videoId={video.id}
@@ -495,6 +618,16 @@ export default async function EditVideoPage({
         activeXId={user.active_x_user_id ?? undefined}
         disabledSections={disabledSections}
         disabledFields={disabledFields}
+        permissionView={permissionView}
+        submitBlockedReason={
+          !canEditAnySection
+            ? permissionView.canOfferEventMode && privilegeMode === "normal"
+              ? "イベント運営権限で編集できる項目があります。上部の「イベント運営権限で編集」を選択してください。"
+              : permissionView.canOfferAdminMode && privilegeMode === "normal"
+                ? "管理者権限で編集できる項目があります。上部の「管理者権限で編集」を選択してください。"
+                : "現在の権限では編集できる項目がありません。"
+            : undefined
+        }
         initial={{
           display_name: video.creator_display_name ?? undefined,
           creator_x_user_id: video.creator_x_user_id ?? undefined,
@@ -524,27 +657,26 @@ export default async function EditVideoPage({
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         eventOptions={eventOptions}
-        canEditEvents={canEditIdentity}
+        canEditEvents={canEditPrimaryEvent}
         canChangeSubmitter={privilegeMode === "admin" && user.role === "admin"}
         iconCandidates={iconCandidates}
         channelCandidates={channelCandidates}
         editPrivilegeMode={privilegeMode}
-        submitBlockedReason={submitBlockedReason}
       />
 
       <p className="fn-page-footnote">
-        <Icon name="info" size={12} aria-hidden /> 編集権限はこの作品の作者と
-        管理者にのみ付与されます。イベント運営は許可された項目のみ編集可能です。
+        <Icon name="info" size={12} aria-hidden /> 編集権限は作品の作者、編集権限を付与された合作メンバー、
+        または許可されたイベント運営に限定されます。
       </p>
 
-      {canEditIdentity &&
+      {canEditPermissions &&
       (video.collaboration_type === "collab" ||
         videoCollabSubjects.length > 0 ||
         !videoCollabTableAvailable) ? (
         <VideoEditPermissionSummary
           videoId={video.id}
           summary={permissionSummary}
-          canManage={canEditIdentity}
+          canManage={canEditPermissions}
           tableAvailable={videoCollabTableAvailable}
           privilegedQuery={privilegedQs}
         />

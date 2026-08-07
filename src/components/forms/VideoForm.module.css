@@ -95,8 +95,55 @@
   box-sizing: border-box;
 }
 
-.mobileSubmitBar {
+.submitDock {
   display: none;
+}
+
+.submitDockInner {
+  max-width: var(--content-max, 1360px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 16px)) 10px
+    var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 16px));
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+.submitDockHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.submitDock .fn-btn {
+  min-height: var(--fn-control-h);
+  flex-shrink: 0;
+}
+
+.formEditMode {
+  --fn-submit-dock-h: 72px;
+  padding-bottom: calc(var(--fn-submit-dock-h) + env(safe-area-inset-bottom, 0px));
+}
+
+.formEditMode .actions {
+  display: none;
+}
+
+.formEditMode .submitDock {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  display: block;
+  background: color-mix(in srgb, var(--bg-base) 94%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .mobileWizardBar {
@@ -378,6 +425,11 @@
   vertical-align: middle;
 }
 
+.sectionPermissionBadge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .sectionDisabled .editableField input[readonly],
 .sectionDisabled .editableField textarea[readonly],
 .sectionDisabled .editableField input[disabled],
@@ -421,8 +473,22 @@
 }
 
 @media (max-width: 640px) {
-  .form {
-    padding-bottom: 70px;
+  .formMobileDock {
+    --fn-submit-dock-h: 72px;
+    padding-bottom: calc(var(--fn-submit-dock-h) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .formMobileDock .submitDock {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 80;
+    display: block;
+    background: color-mix(in srgb, var(--bg-base) 94%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border-subtle);
   }
 
   .section {
@@ -447,33 +513,8 @@
     display: none;
   }
 
-  .mobileSubmitBar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px var(--fn-page-gutter, 16px);
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-    background: var(--bg-base);
-    border-top: 1px solid var(--border-subtle);
-  }
-
-  .mobileSubmitHint {
-    font-size: 11px;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .mobileSubmitBar .fn-btn {
+  .submitDock .fn-btn {
     min-height: var(--fn-control-h-touch);
-    flex-shrink: 0;
   }
 
   .eventOptionGrid {
@@ -804,7 +845,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    z-index: 50;
+    z-index: 80;
     display: flex;
     align-items: stretch;
     gap: 8px;

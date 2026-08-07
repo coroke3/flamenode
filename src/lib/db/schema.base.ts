@@ -296,16 +296,16 @@ export const events = sqliteTable("events", {
     .notNull()
     .default(0),
   /**
-   * このイベントに紐付いた作品について、一般ユーザー (作品オーナーや合作メンバー
-   * 以外) にもイベント単位で編集権限を委譲するか。
-   *   0 = 委譲しない (既定)。動画オーナー / 合作メンバー / イベント運営のみ編集可。
-   *   1 = 委譲する。`user_video_edit_permission_keys_json` で許可キーを限定する。
+   * このイベントに紐付いた作品について、作品所有者（作者・編集権限付き合作メンバー）
+   * が通常モードで編集できる項目をイベント単位で上書きするか。
+   *   0 = 上書きしない (既定)。グローバル既定または fail-closed 既定を使う。
+   *   1 = 上書きする。`user_video_edit_permission_keys_json` で許可キーを限定する。
    */
   allow_user_video_edits: integer("allow_user_video_edits")
     .notNull()
     .default(0),
   /**
-   * `allow_user_video_edits = 1` の場合に、ユーザーへ委譲する section_key 一覧。
+   * `allow_user_video_edits = 1` の場合に、作品所有者へ許可する section_key 一覧。
    * JSON 配列を文字列で保持する (D1 に JSON 型がないため)。
    * 例: `["videos.title","videos.music_credit","videos.members","videos.review_data"]`
    * 危険キー (videos.youtube_id / videos.primary_event / video.identity) は
@@ -676,9 +676,10 @@ export const videoMembers = sqliteTable(
       onDelete: "set null",
     }),
     /**
-     * 1 = この video_member は作品単位の共同編集者として扱う (can_edit ON)。
-     * 範囲は `COLLABORATOR_VIDEO_EDIT_KEYS` で制限される (危険キーは触れない)。
-     * 0 = 表示・担当メンバーではあるが編集権限は無い。
+     * 1 = この video_member は作品所有者（合作所有者）として扱う (can_edit ON)。
+     * 編集可能範囲は primary_event の一般作品権限 (所有者向けポリシー) に従う。
+     * 危険キーは一般作品権限ホワイトリスト外のため通常モードでは触れない。
+     * 0 = 表示・担当メンバーではあるが所有者ではない。
      */
     can_edit: integer("can_edit").notNull().default(0),
     /**

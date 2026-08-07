@@ -316,8 +316,8 @@ export function EventSettingsPreview({
               value={toBool(event.allow_unslotted_posts) ? "許可" : "不許可"}
             />
             <Field
-              label="一般ユーザー編集"
-              value={toBool(event.allow_user_video_edits) ? "一部許可" : "通常権限"}
+              label="所有者の一般作品権限"
+              value={toBool(event.allow_user_video_edits) ? "個別指定" : "既定"}
             />
             <Field
               label="許可キー"

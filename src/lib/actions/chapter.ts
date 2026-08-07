@@ -8,7 +8,7 @@ import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
-import { canEditVideo } from "@/lib/auth/ownership";
+import { canEditVideo, resolveAdminOrEventVideoPrivilegeMode } from "@/lib/auth/ownership";
 
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
@@ -211,13 +211,16 @@ async function canManageChapter(
   chapter: typeof videoChapters.$inferSelect,
   video: typeof videos.$inferSelect,
 ): Promise<boolean> {
-  if (chapter.x_user_id === activeXId || user.role === "admin") return true;
+  // 自分のチャプターは本人が更新できる。
+  if (chapter.x_user_id === activeXId) return true;
+  // 運営用チャプター管理は event / admin モードのみ。通常モードの所有者権限では不可。
+  // admin は明示的な admin 権限源 (resolveAdminOrEvent…) でのみ許可する。
   return canEditVideo({
     db,
     user,
     video,
     requiredKey: "video.chapter_admin",
-    privilegeMode: "event",
+    privilegeMode: resolveAdminOrEventVideoPrivilegeMode(user.role),
   });
 }
 
@@ -401,7 +404,8 @@ export async function deleteChapter(
  *      "name" カラムが分離している場合に備え、name / x_user_id どちらでも一致探索する。
  *
  * 権限:
- *   - 動画オーナー (canEditVideo, requiredKey = video.chapter_admin) または admin のみ。
+ *   - video.chapter_admin を event / admin 権限源で持つ運営・管理者のみ。
+ *   - 通常モードの作品所有者権限では許可しない (危険キー)。
  *   - フロントだけの判定にはしない (CLAUDE.md 方針)。
  *   - 主体 X ID は active_x_user_id を使う (writeGuard で approved 必須)。
  */
@@ -453,16 +457,15 @@ export async function createChaptersBulk(
   )[0];
   if (!target) return { ok: false, message: "動画が見つかりません。" };
 
-  // 編集権限: 動画オーナー or admin。バルクは個別投稿よりも強い権限を要求。
-  const canMod =
-    sUser.role === "admin" ||
-    (await canEditVideo({
-      db,
-      user: { id: sUser.id, role: sUser.role ?? null },
-      video: target,
-      requiredKey: "video.chapter_admin",
-      privilegeMode: "event",
-    }));
+  // 運営用チャプター一括登録: event / admin 権限源のみ。通常モードの所有者権限では不可。
+  const privilegeMode = resolveAdminOrEventVideoPrivilegeMode(sUser.role);
+  const canMod = await canEditVideo({
+    db,
+    user: { id: sUser.id, role: sUser.role ?? null },
+    video: target,
+    requiredKey: "video.chapter_admin",
+    privilegeMode,
+  });
   if (!canMod) {
     return { ok: false, message: "この動画のチャプター一括登録権限がありません。" };
   }

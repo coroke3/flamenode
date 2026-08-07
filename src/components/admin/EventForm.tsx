@@ -632,17 +632,21 @@ export function EventForm({
       <FormSection title="投稿・権限" allowed={canQuestions} sectionId="section-questions">
         <div className={styles.formGrid2}>
           <div>
-            <label className="fn-label">一般ユーザー編集</label>
+            <label className="fn-label">所有者の一般作品権限</label>
             <GatedSelect
               allowed={canQuestions}
               name="allow_user_video_edits"
               defaultValue={String(initial.allow_user_video_edits ?? 0)}
             >
-              <option value="0">通常権限</option>
-              <option value="1">一部許可</option>
+              <option value="0">既定（イベント個別設定なし）</option>
+              <option value="1">個別指定</option>
             </GatedSelect>
           </div>
         </div>
+        <p className="fn-text-muted-sm" style={{ marginBottom: 12 }}>
+          作品の作者・編集権限付き合作メンバーが通常モードで編集できる項目を指定します。
+          非所有者への編集開放ではありません。
+        </p>
         <PermissionKeysField
           name="user_video_edit_permission_keys_json"
           defaultValue={initial.user_video_edit_permission_keys_json}

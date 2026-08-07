@@ -38,8 +38,9 @@ test("computeEditSections wires member_chapters section key", () => {
 });
 
 test("edit page canEditAnySection includes member_chapters", () => {
-  assert.match(editPageSource, /canEditMembers \|\|[\s\S]*canEditMemberChapters/);
-  assert.match(editPageSource, /eventSections\.members \|\|[\s\S]*eventSections\.member_chapters/);
+  assert.match(editPageSource, /hasAnyEditableVideoFormSection/);
+  assert.match(editPageSource, /memberChapters: canEditMembers && canEditMemberChapters/);
+  assert.match(editPageSource, /canEditMemberChapters/);
 });
 
 test("updateVideo rejects stage_permission changes in normal mode", () => {

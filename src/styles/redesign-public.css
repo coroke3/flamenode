@@ -2345,6 +2345,10 @@
   margin-top: 24px;
 }
 
+[data-fn-surface="public"] .fn-page--video-edit {
+  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+}
+
 [data-fn-surface="public"] .fn-tab-row {
   display: flex;
   flex-wrap: wrap;

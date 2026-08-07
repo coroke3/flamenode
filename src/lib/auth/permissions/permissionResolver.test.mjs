@@ -99,6 +99,14 @@ test("manage staff role uses permission_preset as the owner source of truth", ()
   assert.equal(getManageStaffRole({ permission_preset: "public_staff" }), null);
 });
 
+test("owner preset includes video.permissions for event staff", () => {
+  const keys = resolveStaffPermissionKeys({
+    permission_preset: "owner",
+    custom_permission_keys_json: null,
+  });
+  assert.equal(keys.has("video.permissions"), true);
+});
+
 test("permission key registry stays within project limit", () => {
   assert.ok(ALL_PERMISSION_KEYS.length > 0);
 });
