@@ -2,11 +2,15 @@ import "server-only";
 
 import { getEnv } from "@/lib/cloudflare";
 import {
+  loadPickupCreatorsArtifact,
   loadRandomVideoPool,
+  loadStaticTopSlotStats,
   loadYoutubeRelatedBlocklist,
   type StaticJsonLoadStatus,
 } from "@/lib/publicData/staticSharedInputsLoader";
 import { RANDOM_VIDEO_POOL_OBJECT_KEY } from "@/lib/publicData/randomVideoPoolCore";
+import { PICKUP_CREATORS_OBJECT_KEY } from "@/lib/publicData/publicCreatorProjection";
+import { TOP_SLOT_STATS_OBJECT_KEY } from "@/lib/publicData/staticTopSlotStatsCore";
 import { YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY } from "@/lib/publicData/staticYoutubeRelatedBlocklistCore";
 import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
 
@@ -15,8 +19,14 @@ export type StaticSharedInputObjectState =
   | "missing"
   | "unavailable";
 
+export type StaticSharedInputDiagnosticKind =
+  | "youtube_related_blocklist"
+  | "random_video_pool"
+  | "pickup_creators"
+  | "top_slot_stats";
+
 export type StaticSharedInputDiagnostic = {
-  kind: "youtube_related_blocklist" | "random_video_pool";
+  kind: StaticSharedInputDiagnosticKind;
   label: string;
   objectKey: string;
   objectState: StaticSharedInputObjectState;
@@ -42,13 +52,25 @@ async function inspectR2Object(
 export async function loadStaticSharedInputDiagnostics(): Promise<
   StaticSharedInputDiagnostic[]
 > {
-  const [blocklistObjectState, randomPoolObjectState, blocklist, randomPool] =
-    await Promise.all([
-      inspectR2Object(YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY),
-      inspectR2Object(RANDOM_VIDEO_POOL_OBJECT_KEY),
-      loadYoutubeRelatedBlocklist(),
-      loadRandomVideoPool(),
-    ]);
+  const [
+    blocklistObjectState,
+    randomPoolObjectState,
+    pickupCreatorsObjectState,
+    topSlotStatsObjectState,
+    blocklist,
+    randomPool,
+    pickupCreators,
+    topSlotStats,
+  ] = await Promise.all([
+    inspectR2Object(YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY),
+    inspectR2Object(RANDOM_VIDEO_POOL_OBJECT_KEY),
+    inspectR2Object(PICKUP_CREATORS_OBJECT_KEY),
+    inspectR2Object(TOP_SLOT_STATS_OBJECT_KEY),
+    loadYoutubeRelatedBlocklist(),
+    loadRandomVideoPool(),
+    loadPickupCreatorsArtifact(),
+    loadStaticTopSlotStats(),
+  ]);
 
   return [
     {
@@ -84,6 +106,40 @@ export async function loadStaticSharedInputDiagnostics(): Promise<
           : randomPool.value.items.length,
       itemUnit: "件",
       targetType: "random_video_pool",
+    },
+    {
+      kind: "pickup_creators",
+      label: "Creator棚 pickup artifact",
+      objectKey: PICKUP_CREATORS_OBJECT_KEY,
+      objectState: pickupCreatorsObjectState,
+      loadStatus: pickupCreators.status,
+      generatedAt:
+        pickupCreators.status === "unavailable"
+          ? null
+          : pickupCreators.value.generated_at,
+      itemCount:
+        pickupCreators.status === "unavailable"
+          ? null
+          : pickupCreators.value.creators.length,
+      itemUnit: "件",
+      targetType: "users_index",
+    },
+    {
+      kind: "top_slot_stats",
+      label: "トップ hero slot_stats artifact",
+      objectKey: TOP_SLOT_STATS_OBJECT_KEY,
+      objectState: topSlotStatsObjectState,
+      loadStatus: topSlotStats.status,
+      generatedAt:
+        topSlotStats.status === "unavailable"
+          ? null
+          : topSlotStats.value.generatedAt,
+      itemCount:
+        topSlotStats.status === "unavailable"
+          ? null
+          : topSlotStats.value.items.size,
+      itemUnit: "件",
+      targetType: "top_slot_stats",
     },
   ];
 }

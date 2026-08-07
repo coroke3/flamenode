@@ -2,6 +2,7 @@ import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
 
 const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
   top: "トップページ",
+  top_slot_stats: "トップ hero slot_stats",
   events_index: "イベント一覧",
   event: "イベント詳細",
   video: "作品詳細",
@@ -18,6 +19,7 @@ const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
 
 const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
   top: "global など固定ID",
+  top_slot_stats: "global など固定ID",
   events_index: "global など固定ID",
   event: "イベント ID",
   video: "作品 ID（内部）",
@@ -73,6 +75,7 @@ export function staticRebuildAdminHref(
     case "list_popular":
       return "/admin/videos";
     case "top":
+    case "top_slot_stats":
       return "/";
     case "rules":
       return "/rules";

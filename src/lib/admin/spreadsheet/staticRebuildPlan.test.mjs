@@ -149,6 +149,7 @@ test("YouTube status・event・member・chapterのmappingをdedupeする", () =>
     "video:video-1",
     "youtube_related_blocklist:global",
     "random_video_pool:global",
+    "users_index:global",
     "video:video-2",
   ]);
 });
@@ -189,6 +190,13 @@ test("video_eventsの付け替えは旧・新videoとrandom poolをすべて再�
     "video:video-new",
     "random_video_pool:global",
   ]);
+});
+
+test("video_membersはvideoとusers_indexを再生成する", () => {
+  const targets = planSpreadsheetStaticRebuildTargets([
+    mutation("video_members", "UPDATE", { video_id: "video-1" }, { video_id: "video-1" }),
+  ]);
+  assert.deepEqual(keys(targets), ["video:video-1", "users_index:global"]);
 });
 
 test("x_usersは個別userと共有icon mapを含むusers_indexを再生成する", () => {

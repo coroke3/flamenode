@@ -229,6 +229,13 @@ export function planSpreadsheetStaticRebuildTargets(
           targetId: videoId,
           priority: "high",
         });
+        if (mutation.table === "video_members") {
+          add(mutation, {
+            targetType: "users_index",
+            targetId: "global",
+            priority: "low",
+          });
+        }
         break;
       }
       case "x_users": {

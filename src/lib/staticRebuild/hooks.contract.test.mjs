@@ -16,9 +16,13 @@ test("動画作成はusers_index経由でtop/recommendを間接enqueueする", (
   );
 });
 
-test("枠変更はeventとtopを同一batchでenqueueする", () => {
+test("枠変更はeventとtop_slot_statsを同一batchでenqueueする", () => {
   assert.match(hooks, /export function buildSlotChangeQueueBatch/);
-  assert.match(hooks, /topGlobalTarget\(opts\.reason/);
+  assert.match(hooks, /topSlotStatsGlobalTarget\(opts\.reason/);
+  assert.doesNotMatch(
+    hooks,
+    /buildSlotChangeQueueBatch[\s\S]*topGlobalTarget/,
+  );
 });
 
 test("X ID公開プロフィール更新は user と users_index をenqueueする", () => {

@@ -110,10 +110,25 @@ export async function updateVideoMembersAdmin(
     chaptersByIndex: memberValidation.value.chaptersByIndex,
     actorUserId: user.id,
   }));
+  const memberXUserIds = [
+    ...new Set(
+      members
+        .map((member) => member.x_user_id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
   const queue = await buildStaticRebuildQueueBatch(db, [
     { targetType: "video", targetId: videoId, reason: "video_members_update", requestedByUserId: user.id },
     { targetType: "search_index", targetId: "global", reason: "video_members_update", priority: "low" },
+    { targetType: "users_index", targetId: "global", reason: "video_members_update" },
     ...(target.creator_x_user_id ? [{ targetType: "user" as const, targetId: target.creator_x_user_id, reason: "video_members_update" }] : []),
+    ...memberXUserIds
+      .filter((xUserId) => xUserId !== target.creator_x_user_id)
+      .map((xUserId) => ({
+        targetType: "user" as const,
+        targetId: xUserId,
+        reason: "video_members_update",
+      })),
     ...(target.primary_event_id ? [{ targetType: "event" as const, targetId: target.primary_event_id, reason: "video_members_update" }] : []),
   ]);
   plan.statements.push(...queue.statements);

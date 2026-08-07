@@ -85,7 +85,15 @@ function usersIndexTarget(reason: string): EnqueueStaticRebuildInput {
   return { targetType: "users_index", targetId: "global", reason };
 }
 
-/** 枠変更で top.json の slot_stats を更新する。 */
+/** 枠変更で top slot-stats artifact を更新する。 */
+export function topSlotStatsGlobalTarget(
+  reason: string,
+  priority: StaticRebuildPriority = "normal",
+): EnqueueStaticRebuildInput {
+  return { targetType: "top_slot_stats", targetId: "global", reason, priority };
+}
+
+/** 枠変更で top.json の slot_stats を更新する（top 全体再生成用）。 */
 export function topGlobalTarget(
   reason: string,
   priority: StaticRebuildPriority = "normal",
@@ -334,6 +342,6 @@ export function buildSlotChangeQueueBatch(
       priority: "high",
       requestedByUserId: opts.requestedByUserId,
     },
-    topGlobalTarget(opts.reason, "normal"),
+    topSlotStatsGlobalTarget(opts.reason, "normal"),
   ]);
 }

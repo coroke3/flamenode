@@ -4,6 +4,7 @@ export const DEPLOY_GLOBAL_REBUILD_TARGETS = [
   "search_index",
   "users_index",
   "top",
+  "top_slot_stats",
   "recommend",
   "events_index",
   "youtube_related_blocklist",

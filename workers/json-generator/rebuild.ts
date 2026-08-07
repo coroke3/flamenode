@@ -31,9 +31,12 @@ import {
 } from "../../src/lib/publicData/topNostalgicShuffle.ts";
 import { YOUTUBE_SYNCED_PLAYABLE_SQL } from "../../src/lib/publicData/youtubeSyncedPlayableSql.ts";
 import {
-  buildPickupCreatorsFromProjection,
+  buildPickupCreatorsArtifactFromProjection,
   buildPublicUsersIndexItems,
   loadPublicCreatorProjectionSources,
+  PICKUP_CREATORS_MAX_OBJECT_BYTES,
+  PICKUP_CREATORS_OBJECT_KEY,
+  pickupCreatorsArtifactByteLength,
   USERS_INDEX_MAX_OBJECT_BYTES,
   USERS_INDEX_OBJECT_KEY,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
@@ -81,10 +84,17 @@ import {
 import { isConfirmedInternalVideoId } from "../../src/lib/video/internalId.ts";
 import { buildHeroEventSlotStatsSql } from "../../src/lib/publicData/heroEventSlotStatsSql.ts";
 import {
+  TOP_SLOT_STATS_MAX_OBJECT_BYTES,
+  TOP_SLOT_STATS_OBJECT_KEY,
+  TOP_SLOT_STATS_SCHEMA_VERSION,
+  topSlotStatsArtifactByteLength,
+} from "../../src/lib/publicData/staticTopSlotStatsCore.ts";
+import {
   pickHeroEvents,
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
 import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
+import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
 import { enqueueTopRebuild } from "./topRebuildEnqueue.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
@@ -249,6 +259,9 @@ export async function rebuildTarget(
     case "top":
       await rebuildTop(env, signal);
       break;
+    case "top_slot_stats":
+      await rebuildTopSlotStats(env, signal);
+      break;
     case "list_recent":
       await rebuildListRecent(env, signal);
       break;
@@ -290,14 +303,15 @@ export async function rebuildTarget(
       throw new Error(`Unknown target_type: ${targetType}`);
   }
   throwIfAborted(signal);
-  if (["top", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
+  if (["top", "top_slot_stats", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
     const keys: Record<string, string | string[]> = {
       top: "top.json",
+      top_slot_stats: TOP_SLOT_STATS_OBJECT_KEY,
       list_recent: "list/recent.json",
       list_popular: "list/popular.json",
       events_index: "events/index.json",
       search_index: "search-index-lite.json",
-      users_index: [USERS_INDEX_OBJECT_KEY, PUBLIC_X_ICON_MAP_OBJECT_KEY],
+      users_index: [USERS_INDEX_OBJECT_KEY, PUBLIC_X_ICON_MAP_OBJECT_KEY, PICKUP_CREATORS_OBJECT_KEY],
       recommend: "recommend.json",
       rules: "rules/current.json",
       youtube_related_blocklist: YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
@@ -428,6 +442,89 @@ async function reconcileTrackedArtifacts(
   }
 }
 
+async function loadActivePublicEventItemsForTopHero(
+  env: Env,
+  now: number,
+  signal?: RebuildSignal,
+): Promise<Record<string, unknown>[]> {
+  const activeEvents = await env.DB.prepare(
+    `SELECT ${EVENT_INDEX_COLUMNS}
+     FROM events
+     WHERE visibility_status = 'public'
+       AND ${NON_POINT_EVENT_PERIOD_SQL}
+       AND (
+         (CASE
+            WHEN end_time IS NOT NULL THEN end_time
+            WHEN start_time IS NOT NULL THEN start_time
+            ELSE NULL
+          END) IS NULL
+         OR (CASE
+            WHEN end_time IS NOT NULL THEN end_time
+            WHEN start_time IS NOT NULL THEN start_time
+            ELSE NULL
+          END) > ?
+       )
+     ORDER BY start_time DESC
+     LIMIT 30`,
+  ).bind(now).all<Record<string, unknown>>();
+  throwIfAborted(signal);
+  return activeEvents.results ?? [];
+}
+
+async function loadHeroEventSlotStats(
+  env: Env,
+  activeEventItems: readonly Record<string, unknown>[],
+  signal?: RebuildSignal,
+): Promise<{ event_id: string; available: number; total: number }[]> {
+  const heroEventIds = pickHeroEvents(activeEventItems as HeroEventRow[]).map((event) =>
+    String(event.id ?? "").trim(),
+  ).filter(Boolean);
+  const heroSlotStatsSql = buildHeroEventSlotStatsSql(heroEventIds);
+  const slotStats = heroSlotStatsSql
+    ? await env.DB.prepare(heroSlotStatsSql).bind(...heroEventIds).all()
+    : { results: [] as { event_id: string; available: number; total: number }[] };
+  throwIfAborted(signal);
+  return slotStats.results ?? [];
+}
+
+type HeroEventSlotStatRow = { event_id: string; available: number; total: number };
+
+async function putTopSlotStatsArtifact(
+  env: Env,
+  items: readonly HeroEventSlotStatRow[],
+  generatedAt: number,
+  signal?: RebuildSignal,
+): Promise<void> {
+  const payload = {
+    schema_version: TOP_SLOT_STATS_SCHEMA_VERSION,
+    generated_at: generatedAt,
+    items,
+  };
+  const byteLength = topSlotStatsArtifactByteLength(payload);
+  if (byteLength > TOP_SLOT_STATS_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `${TOP_SLOT_STATS_OBJECT_KEY} exceeds size limit (${byteLength} > ${TOP_SLOT_STATS_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+  throwIfAborted(signal);
+  await putJson(
+    env,
+    TOP_SLOT_STATS_OBJECT_KEY,
+    payload,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.topSlotStats),
+    { targetType: "top_slot_stats", targetId: "global" },
+    signal,
+  );
+}
+
+async function rebuildTopSlotStats(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
+  const items = await loadHeroEventSlotStats(env, activeEventItems, signal);
+  await putTopSlotStatsArtifact(env, items, now, signal);
+}
+
 async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
@@ -436,9 +533,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     recommended,
     latest,
     nostalgic,
-    activeEvents,
     latestEvents,
-    creatorProjection,
     announcements,
     publicVideoCount,
     creatorCount,
@@ -516,30 +611,9 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        FROM events
        WHERE visibility_status = 'public'
          AND ${NON_POINT_EVENT_PERIOD_SQL}
-         AND (
-           (CASE
-              WHEN end_time IS NOT NULL THEN end_time
-              WHEN start_time IS NOT NULL THEN start_time
-              ELSE NULL
-            END) IS NULL
-           OR (CASE
-              WHEN end_time IS NOT NULL THEN end_time
-              WHEN start_time IS NOT NULL THEN start_time
-              ELSE NULL
-            END) > ?
-         )
-       ORDER BY start_time DESC
-       LIMIT 30`,
-    ).bind(now).all<Record<string, unknown>>(),
-    env.DB.prepare(
-      `SELECT ${EVENT_INDEX_COLUMNS}
-       FROM events
-       WHERE visibility_status = 'public'
-         AND ${NON_POINT_EVENT_PERIOD_SQL}
        ORDER BY start_time DESC
        LIMIT 12`,
     ).all<Record<string, unknown>>(),
-    loadPublicCreatorProjectionSources(env.DB, now),
     env.DB.prepare(
       `SELECT id, title, body, severity, publish_at, expire_at
        FROM announcements
@@ -575,17 +649,11 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     ).first<{ c?: number }>(),
   ]);
 
-  const activeEventItems = activeEvents.results ?? [];
+  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
   const latestEventItems = latestEvents.results ?? [];
-  const heroEventIds = pickHeroEvents(activeEventItems as HeroEventRow[]).map((event) =>
-    String(event.id ?? "").trim(),
-  ).filter(Boolean);
-  const heroSlotStatsSql = buildHeroEventSlotStatsSql(heroEventIds);
-  const slotStats = heroSlotStatsSql
-    ? await env.DB.prepare(heroSlotStatsSql).bind(...heroEventIds).all()
-    : { results: [] as { event_id: string; available: number; total: number }[] };
+  const slotStatsItems = await loadHeroEventSlotStats(env, activeEventItems, signal);
   throwIfAborted(signal);
-  const creators = buildPickupCreatorsFromProjection(creatorProjection, 30);
+  const creators = await resolvePickupCreatorsWithFallback(env, 30, "rebuildTop", signal);
   const nostalgicPool = Array.isArray(nostalgic.results) ? nostalgic.results : [];
   const payload = {
     generated_at: now,
@@ -599,7 +667,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     latest_events: latestEventItems,
     creators,
     announcements: announcements.results ?? [],
-    slot_stats: slotStats.results ?? [],
+    slot_stats: slotStatsItems,
     stats: {
       public_videos: Number(publicVideoCount?.c ?? latest.results?.length ?? 0),
       active_events: activeEventItems.length,
@@ -609,6 +677,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   };
   throwIfAborted(signal);
   await putJson(env, "top.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.top), { targetType: "top", targetId: "global" }, signal);
+  await putTopSlotStatsArtifact(env, slotStatsItems, now, signal);
   await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, utcDayKey(now));
   throwIfAborted(signal);
   await env.KV.put(
@@ -1870,6 +1939,22 @@ async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void
     { targetType: "users_index", targetId: "global" },
     signal,
   );
+
+  const pickupArtifact = buildPickupCreatorsArtifactFromProjection(sources, now);
+  const pickupBytes = pickupCreatorsArtifactByteLength(pickupArtifact);
+  if (pickupBytes > PICKUP_CREATORS_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `users/pickup-creators.v1.json exceeds size limit (${pickupBytes} > ${PICKUP_CREATORS_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+  await putJson(
+    env,
+    PICKUP_CREATORS_OBJECT_KEY,
+    pickupArtifact,
+    "public, max-age=300, stale-while-revalidate=1800",
+    { targetType: "users_index", targetId: "global" },
+    signal,
+  );
 }
 
 async function rebuildYoutubeRelatedBlocklist(
@@ -2079,7 +2164,7 @@ async function rebuildRules(env: Env, signal?: RebuildSignal): Promise<void> {
 async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
-  const [recommended, latest, underrated, creatorProjection] = await Promise.all([
+  const [recommended, latest, underrated] = await Promise.all([
     env.DB.prepare(
       `SELECT ${STATIC_RECOMMEND_VIDEO_SELECT}
        FROM videos AS v
@@ -2101,11 +2186,10 @@ async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void>
        ORDER BY COALESCE(v.score, 0) ASC, v.scheduled_time DESC
        LIMIT 120`,
     ).all(),
-    loadPublicCreatorProjectionSources(env.DB, now),
   ]);
 
   throwIfAborted(signal);
-  const creators = buildPickupCreatorsFromProjection(creatorProjection, 60);
+  const creators = await resolvePickupCreatorsWithFallback(env, 60, "rebuildRecommend", signal);
   await putJson(
     env,
     "recommend.json",

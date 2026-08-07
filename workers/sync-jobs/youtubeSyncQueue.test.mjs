@@ -16,6 +16,23 @@ const projectionSource = await readFile(
   "utf8",
 );
 
+function noopKv() {
+  return {
+    async get() {
+      return null;
+    },
+    async put() {},
+  };
+}
+
+function noopR2() {
+  return {
+    async get() {
+      return null;
+    },
+  };
+}
+
 function makeBatch(body) {
   const acked = [];
   return {
@@ -86,7 +103,9 @@ test("quota cooldown 中は continuation を送らない", async () => {
       async get() {
         return String(Math.floor(Date.now() / 1000) + 3600);
       },
+      async put() {},
     },
+    R2: noopR2(),
     YOUTUBE_SYNC_WAKE_QUEUE: {
       async send(body) {
         sent.push(body);
@@ -169,7 +188,8 @@ test("metadata成功後のscore失敗でもQueueはackする", async () => {
     QUEUE_CONTINUATION_ENABLED: "1",
     QUEUE_YOUTUBE_SYNC_ENABLED: "1",
     YOUTUBE_API_KEY: "test-key",
-    KV: { async get() { return null; } },
+    KV: noopKv(),
+    R2: noopR2(),
     YOUTUBE_SYNC_WAKE_QUEUE: { async send() {} },
     DB: {
       prepare(sql) {
@@ -270,7 +290,8 @@ test("pending 残あり・quota 正常時だけ continuation を送る", async (
     QUEUE_CONTINUATION_ENABLED: "1",
     QUEUE_YOUTUBE_SYNC_ENABLED: "1",
     YOUTUBE_API_KEY: "test-key",
-    KV: { async get() { return null; } },
+    KV: noopKv(),
+    R2: noopR2(),
     YOUTUBE_SYNC_WAKE_QUEUE: {
       async send(body) {
         sent.push(body);

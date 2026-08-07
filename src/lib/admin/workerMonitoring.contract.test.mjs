@@ -29,6 +29,14 @@ test("YouTube監視は sync_status=pending 件数を返す", async () => {
   assert.doesNotMatch(text, /ym\.youtube_video_id/);
 });
 
+test("スコア stale 閾値は score-recalc の 72h と揃える", async () => {
+  const text = await source("src/lib/admin/workerMonitoring.ts");
+
+  assert.match(text, /SCORE_STALE_THRESHOLD_SEC = 72 \* 60 \* 60/);
+  assert.match(text, /score_updated_at <= \?1 - \?2/);
+  assert.doesNotMatch(text, /score_updated_at <= \?1 - 86400/);
+});
+
 test("Queue wake 最終失敗は KV キーごとに上書き読取する", async () => {
   const text = await source("src/lib/admin/workerMonitoring.ts");
 

@@ -35,6 +35,24 @@ test("random poolもfresh stale unavailableを保持する", () => {
   assert.match(source, /return \(await loadRandomVideoPool\(\)\)\.value/);
 });
 
+test("pickup creators / top slot-stats もfresh stale unavailableを保持する", () => {
+  assert.match(
+    source,
+    /export async function loadPickupCreatorsArtifact\(\): Promise<[\s\S]*StaticJsonLoadResult<PickupCreatorsArtifact>/,
+  );
+  assert.match(source, /PICKUP_CREATORS_OBJECT_KEY/);
+  assert.match(source, /normalizePickupCreatorsArtifact/);
+  assert.match(source, /status: "unavailable",\s*value: EMPTY_PICKUP_CREATORS_ARTIFACT/);
+  assert.match(
+    source,
+    /export async function loadStaticTopSlotStats\(\): Promise<[\s\S]*StaticJsonLoadResult<StaticTopSlotStats>/,
+  );
+  assert.match(source, /TOP_SLOT_STATS_OBJECT_KEY/);
+  assert.match(source, /normalizeStaticTopSlotStats/);
+  assert.match(source, /status: "unavailable",\s*value: EMPTY_TOP_SLOT_STATS/);
+  assert.match(source, /getGeneratedAt: \(value\) => value\.generatedAt/);
+});
+
 test("動画詳細は共有R2読込後にrequest metricsを記録する", () => {
   const logIndex = videoPage.indexOf("logPublicRequestMetrics();");
   const blocklistIndex = videoPage.indexOf(

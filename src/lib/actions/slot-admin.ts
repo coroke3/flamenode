@@ -20,7 +20,7 @@ import {
   type NotificationOutboxStatement,
 } from "@/lib/notifications/enqueue";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
-import { buildSlotChangeQueueBatch, topGlobalTarget } from "@/lib/staticRebuild/hooks";
+import { buildSlotChangeQueueBatch, topSlotStatsGlobalTarget } from "@/lib/staticRebuild/hooks";
 import {
   markPendingPublicReflection,
   type PendingPublicReflection,
@@ -372,7 +372,7 @@ export async function generateSlotsBatch(
           priority: "high",
           requestedByUserId: guard.userId,
         },
-        topGlobalTarget("slot_admin_generate_partial", "high"),
+        topSlotStatsGlobalTarget("slot_admin_generate_partial", "high"),
       ]);
       await revalidateEventSlotPathsBestEffort(data.event_id);
       return {

@@ -1,6 +1,7 @@
 /** 1 invocation で必ず 1 件だけ処理すべき global static rebuild target。 */
 export const GLOBAL_STATIC_REBUILD_TARGET_TYPES = new Set([
   "top",
+  "top_slot_stats",
   "list_recent",
   "list_popular",
   "events_index",

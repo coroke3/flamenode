@@ -125,7 +125,8 @@ Google Cloud Consoleの日次quotaが標準10,000以外の場合は、`workers/s
 - metadata保存は10件単位のbulk upsertとする。
 - YouTube metadataの`synced_at`は最後にpublic/unlistedとして正常取得した時刻。`failed`時の再同期期限は`updated_at`を使う。
 - private / missing ではview_count・duration・公開時synced_atを上書きしない。適格性変更時と日次整合で`youtube_related_blocklist`を再生成する。
-- スコアは1 SQLで最大150件更新し、作品ごとのUPDATE loopを禁止する。
+- スコアは1 SQLで最大150件更新し、作品ごとのUPDATE loopを禁止する。72時間以上未更新の公開作品は age-only で強制 refresh する（`SCORE_FORCE_REFRESH_SEC`）。
+- score 更新後は `ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend` を throttle 付きで enqueue する（開催中イベントあり 1h / なし 3h。KV `ranking:last-score-rebuild`）。
 - 静的生成は1 invocationで1 targetだけ処理する。deploy 後の `BUILD_COMMIT_SHA` 変化時は Recovery Cron が共有 global target を high enqueue する（`static:last_generator_commit` で重複抑制）。
 - JSON生成対象は必ずSQL側の`LIMIT`を持ち、無制限全件取得を行わない。
 - 初回backlog処理中も通知を独立Workerで維持する。

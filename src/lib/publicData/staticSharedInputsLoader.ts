@@ -23,10 +23,20 @@ import {
   type RandomVideoPool,
 } from "./randomVideoPoolCore";
 import {
+  normalizePickupCreatorsArtifact,
+  PICKUP_CREATORS_OBJECT_KEY,
+  type PickupCreatorsArtifact,
+} from "./publicCreatorProjection";
+import {
   normalizePublicXIconMap,
   PUBLIC_X_ICON_MAP_OBJECT_KEY,
   type PublicXIconMapPayload,
 } from "./publicIconProjection";
+import {
+  normalizeStaticTopSlotStats,
+  TOP_SLOT_STATS_OBJECT_KEY,
+  type StaticTopSlotStats,
+} from "./staticTopSlotStatsCore";
 import {
   normalizeStaticUsersIndex,
   type StaticUsersIndexPayload,
@@ -67,6 +77,8 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   maxStaleAgeSec: number;
   cacheTtlSeconds?: number;
   nowSec?: number;
+  /** fresh Cache hit 時も R2 を読み、generated_at が新しければ R2 を採用する。 */
+  getGeneratedAt?: (value: T) => number;
 }): Promise<StaticJsonLoadResult<T | null>> {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const cacheTtl = args.cacheTtlSeconds ?? 300;
@@ -80,6 +92,24 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
     if (age >= 0 && age <= cacheTtl) {
       const normalized = args.normalize(freshCached.payload);
       if (normalized !== null) {
+        if (args.getGeneratedAt) {
+          const r2Payload = await readR2Json(args.key);
+          if (r2Payload !== null) {
+            const r2Normalized = args.normalize(r2Payload);
+            if (r2Normalized !== null) {
+              const cacheGeneratedAt = args.getGeneratedAt(normalized);
+              const r2GeneratedAt = args.getGeneratedAt(r2Normalized);
+              if (r2GeneratedAt > cacheGeneratedAt) {
+                writePublicJsonCacheBestEffort(
+                  args.key,
+                  { payload: r2Payload, stored_at: now },
+                  Math.max(cacheTtl, args.maxStaleAgeSec),
+                );
+                return { status: "fresh", value: r2Normalized };
+              }
+            }
+          }
+        }
         return { status: "fresh", value: normalized };
       }
     }
@@ -224,6 +254,54 @@ export async function loadRandomVideoPool(): Promise<
     return {
       status: "unavailable",
       value: EMPTY_RANDOM_VIDEO_POOL,
+    };
+  }
+  return { status: result.status, value: result.value };
+}
+
+const EMPTY_PICKUP_CREATORS_ARTIFACT: PickupCreatorsArtifact = {
+  schema_version: 1,
+  generated_at: 0,
+  creators: [],
+};
+
+const EMPTY_TOP_SLOT_STATS: StaticTopSlotStats = {
+  generatedAt: 0,
+  items: new Map(),
+};
+
+export async function loadPickupCreatorsArtifact(): Promise<
+  StaticJsonLoadResult<PickupCreatorsArtifact>
+> {
+  const result = await loadStaticJsonFreshStaleUnavailable({
+    key: PICKUP_CREATORS_OBJECT_KEY,
+    normalize: normalizePickupCreatorsArtifact,
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
+  });
+  if (result.status === "unavailable" || !result.value) {
+    return {
+      status: "unavailable",
+      value: EMPTY_PICKUP_CREATORS_ARTIFACT,
+    };
+  }
+  return { status: result.status, value: result.value };
+}
+
+export async function loadStaticTopSlotStats(): Promise<
+  StaticJsonLoadResult<StaticTopSlotStats>
+> {
+  const result = await loadStaticJsonFreshStaleUnavailable({
+    key: TOP_SLOT_STATS_OBJECT_KEY,
+    normalize: normalizeStaticTopSlotStats,
+    maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats * 2,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats,
+    getGeneratedAt: (value) => value.generatedAt,
+  });
+  if (result.status === "unavailable" || !result.value) {
+    return {
+      status: "unavailable",
+      value: EMPTY_TOP_SLOT_STATS,
     };
   }
   return { status: result.status, value: result.value };

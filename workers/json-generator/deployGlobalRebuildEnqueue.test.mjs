@@ -21,6 +21,7 @@ test("deploy 共有 global target 定数と enqueue 契約", () => {
     "search_index",
     "users_index",
     "top",
+    "top_slot_stats",
     "recommend",
     "events_index",
     "youtube_related_blocklist",
@@ -170,7 +171,7 @@ test("batch changes が 0 で全 target 未カバーなら KV を更新せず 0 
   assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), "b".repeat(40));
 });
 
-test("batch changes が 0 でも全9件 pending なら KV を更新し wake 用に >0 を返す", async () => {
+test("batch changes が 0 でも全10件 pending なら KV を更新し wake 用に >0 を返す", async () => {
   const { env, kvStore, getBatchCalls } = createFakeEnv({
     storedCommit: "b".repeat(40),
     batchChanges: 0,

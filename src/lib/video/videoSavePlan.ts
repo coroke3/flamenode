@@ -252,6 +252,9 @@ export function buildVideoUpdatePlan(args: {
       youtubeChanged: args.youtubeChanged,
       canEditPrimaryEvent: args.sections.primary_event,
       hasEventIdsField: args.hasEventIdsField,
+      membersSectionTouched:
+        (args.sections.members || args.sections.member_chapters) &&
+        Boolean(args.memberSubmission),
     }),
     primaryEventId: args.target.primary_event_id,
     previousYoutubeVideoId: args.target.youtube_video_id,
@@ -373,6 +376,32 @@ export async function applyVideoUpdatePlan(
     reason: "video_update",
     requestedByUserId: plan.operatorUserId,
   }];
+  if (plan.rebuildFlags.creatorAggregationChanged && plan.memberSubmission) {
+    const affectedCreatorIds = new Set(
+      [
+        plan.target.creator_x_user_id,
+        ...plan.memberSubmission.members
+          .map((member) => member.x_user_id?.trim())
+          .filter((id): id is string => Boolean(id)),
+      ].filter((id): id is string => Boolean(id)),
+    );
+
+    for (const creatorXUserId of affectedCreatorIds) {
+      queueItems.push({
+        targetType: "user",
+        targetId: creatorXUserId,
+        reason: "video_members_update",
+        requestedByUserId: plan.operatorUserId,
+      });
+    }
+
+    queueItems.push({
+      targetType: "users_index",
+      targetId: "global",
+      reason: "video_members_update",
+      requestedByUserId: plan.operatorUserId,
+    });
+  }
   if (plan.rebuildFlags.identityChanged) {
     const affectedCreatorIds = new Set(
       [
@@ -426,8 +455,9 @@ export async function applyVideoUpdatePlan(
       priority: "low",
     });
     const chainsTopRecommendViaUsersIndex =
-      plan.rebuildFlags.identityChanged &&
-      Boolean(plan.target.creator_x_user_id || payload.creator_x_user_id);
+      plan.rebuildFlags.creatorAggregationChanged ||
+      (plan.rebuildFlags.identityChanged &&
+        Boolean(plan.target.creator_x_user_id || payload.creator_x_user_id));
     queueItems.push(
       ...buildVideoCardChangeFanOutTargets({
         reason: "video_card_changed",

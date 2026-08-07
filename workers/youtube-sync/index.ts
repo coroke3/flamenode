@@ -21,6 +21,10 @@ import {
   reserveYoutubeQuota,
   type YoutubeQuotaEnv,
 } from "./quotaBudget.ts";
+import {
+  mergeScheduledSyncCandidates,
+  type ScheduledSyncCandidate,
+} from "./scheduledSelection.ts";
 
 export interface Env extends YoutubeQuotaEnv {
   KV: KVNamespace;
@@ -103,17 +107,21 @@ const ACTIVE_EVENT_GRACE_SEC = 24 * 60 * 60;
 /** blocked(private/missing)の復旧確認間隔。通常同期とは別予算。 */
 const BLOCKED_RECHECK_INTERVAL_SEC = 7 * 24 * 60 * 60;
 export const BLOCKED_RECHECK_MAX_VIDEOS_PER_RUN = 10;
-/** synced_at: 最後にpublic/unlistedとして正常取得した時刻。failed時の期限はupdated_at。 */
-const SYNC_ELIGIBILITY_TIMESTAMP_SQL = `COALESCE(
-  CASE
-    WHEN ym.sync_status = 'failed' THEN ym.updated_at
-    ELSE ym.synced_at
-  END,
-  0
-)`;
 const NOT_BLOCKED_FOR_RELATED_SQL = `COALESCE(ym.youtube_privacy_status, '') <> 'private'
           AND COALESCE(ym.youtube_availability_status, '')
               NOT IN ('private', 'missing_or_private')`;
+const SYNCED_ELIGIBILITY_SQL = `COALESCE(ym.synced_at, 0)`;
+const FAILED_ELIGIBILITY_SQL = `COALESCE(ym.updated_at, 0)`;
+const SCHEDULED_VIDEO_FILTERS_SQL = `
+          AND v.youtube_video_id IS NOT NULL
+          AND v.youtube_video_id <> ''
+          AND v.visibility_status <> 'voided'
+          AND ${NOT_BLOCKED_FOR_RELATED_SQL}`;
+const ACTIVE_EVENT_FILTERS_SQL = `
+          AND e.visibility_status = 'public'
+          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
+          AND (e.start_time IS NULL OR e.start_time <= ?1 + ?3)
+          AND (e.end_time IS NULL OR e.end_time >= ?1 - ?3)`;
 /** Recovery Cron は最大200件を選ぶため、既存metadata読取をD1の100 bind未満へ分割する。 */
 export const YOUTUBE_METADATA_LOOKUP_CHUNK_SIZE = 90;
 /** D1の1 query最大100 bindings未満になるよう、9列 x 10行（90 bindings）で固定する。 */
@@ -329,6 +337,38 @@ async function querySyncRows(
   return result.results ?? [];
 }
 
+async function queryScheduledCandidates(
+  env: Env,
+  sql: string,
+  bindings: readonly (string | number | null)[],
+  signal?: AbortSignal,
+): Promise<ScheduledSyncCandidate[]> {
+  signal?.throwIfAborted();
+  const result = await env.DB.prepare(sql)
+    .bind(...bindings)
+    .all<ScheduledSyncCandidate>();
+  signal?.throwIfAborted();
+  return (result.results ?? []).map((row) => ({
+    id: row.id,
+    youtube_video_id: row.youtube_video_id,
+    eligibility: Number(row.eligibility ?? 0),
+  }));
+}
+
+async function queryMergedScheduledRows(
+  env: Env,
+  laneSqls: readonly string[],
+  bindings: readonly (string | number | null)[],
+  limit: number,
+  signal?: AbortSignal,
+): Promise<SyncRow[]> {
+  const lanes: ScheduledSyncCandidate[][] = [];
+  for (const sql of laneSqls) {
+    lanes.push(await queryScheduledCandidates(env, sql, bindings, signal));
+  }
+  return mergeScheduledSyncCandidates(lanes, limit);
+}
+
 /** pending 行だけを取得する（Queue consumer 専用）。 */
 export async function selectPendingSyncRows(
   env: Env,
@@ -352,6 +392,85 @@ export async function selectPendingSyncRows(
   );
 }
 
+const ACTIVE_PRIMARY_SYNCED_SQL = `SELECT v.id, v.youtube_video_id, ${SYNCED_ELIGIBILITY_SQL} AS eligibility
+         FROM events e
+         INNER JOIN videos v ON v.primary_event_id = e.id
+         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+        WHERE 1 = 1
+          ${ACTIVE_EVENT_FILTERS_SQL}
+          ${SCHEDULED_VIDEO_FILTERS_SQL}
+          AND ym.sync_status = 'synced'
+          AND ${SYNCED_ELIGIBILITY_SQL} <= ?1 - ?2
+        ORDER BY ${SYNCED_ELIGIBILITY_SQL} ASC, v.id ASC
+        LIMIT ?4`;
+
+const ACTIVE_VIDEO_EVENTS_SYNCED_SQL = `SELECT v.id, v.youtube_video_id, ${SYNCED_ELIGIBILITY_SQL} AS eligibility
+         FROM events e
+         INNER JOIN video_events ve ON ve.event_id = e.id
+         INNER JOIN videos v ON v.id = ve.video_id
+         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+        WHERE 1 = 1
+          ${ACTIVE_EVENT_FILTERS_SQL}
+          AND (v.primary_event_id IS NULL OR v.primary_event_id <> e.id)
+          ${SCHEDULED_VIDEO_FILTERS_SQL}
+          AND ym.sync_status = 'synced'
+          AND ${SYNCED_ELIGIBILITY_SQL} <= ?1 - ?2
+        ORDER BY ${SYNCED_ELIGIBILITY_SQL} ASC, v.id ASC
+        LIMIT ?4`;
+
+const ACTIVE_PRIMARY_FAILED_SQL = `SELECT v.id, v.youtube_video_id, ${FAILED_ELIGIBILITY_SQL} AS eligibility
+         FROM events e
+         INNER JOIN videos v ON v.primary_event_id = e.id
+         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+        WHERE 1 = 1
+          ${ACTIVE_EVENT_FILTERS_SQL}
+          ${SCHEDULED_VIDEO_FILTERS_SQL}
+          AND ym.sync_status = 'failed'
+          AND NOT (ym.sync_error LIKE 'permanent:%')
+          AND ${FAILED_ELIGIBILITY_SQL} <= ?1 - ?2
+        ORDER BY ${FAILED_ELIGIBILITY_SQL} ASC, v.id ASC
+        LIMIT ?4`;
+
+const ACTIVE_VIDEO_EVENTS_FAILED_SQL = `SELECT v.id, v.youtube_video_id, ${FAILED_ELIGIBILITY_SQL} AS eligibility
+         FROM events e
+         INNER JOIN video_events ve ON ve.event_id = e.id
+         INNER JOIN videos v ON v.id = ve.video_id
+         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+        WHERE 1 = 1
+          ${ACTIVE_EVENT_FILTERS_SQL}
+          AND (v.primary_event_id IS NULL OR v.primary_event_id <> e.id)
+          ${SCHEDULED_VIDEO_FILTERS_SQL}
+          AND ym.sync_status = 'failed'
+          AND NOT (ym.sync_error LIKE 'permanent:%')
+          AND ${FAILED_ELIGIBILITY_SQL} <= ?1 - ?2
+        ORDER BY ${FAILED_ELIGIBILITY_SQL} ASC, v.id ASC
+        LIMIT ?4`;
+
+const DEFAULT_SYNCED_SQL = `SELECT v.id, v.youtube_video_id, ${SYNCED_ELIGIBILITY_SQL} AS eligibility
+           FROM video_youtube_metadata ym
+           INNER JOIN videos v ON v.id = ym.video_id
+          WHERE ym.sync_status = 'synced'
+            AND ${NOT_BLOCKED_FOR_RELATED_SQL}
+            AND ${SYNCED_ELIGIBILITY_SQL} <= ?1 - ?2
+            AND v.youtube_video_id IS NOT NULL
+            AND v.youtube_video_id <> ''
+            AND v.visibility_status <> 'voided'
+          ORDER BY ${SYNCED_ELIGIBILITY_SQL} ASC, v.id ASC
+          LIMIT ?3`;
+
+const DEFAULT_FAILED_SQL = `SELECT v.id, v.youtube_video_id, ${FAILED_ELIGIBILITY_SQL} AS eligibility
+           FROM video_youtube_metadata ym
+           INNER JOIN videos v ON v.id = ym.video_id
+          WHERE ym.sync_status = 'failed'
+            AND NOT (ym.sync_error LIKE 'permanent:%')
+            AND ${NOT_BLOCKED_FOR_RELATED_SQL}
+            AND ${FAILED_ELIGIBILITY_SQL} <= ?1 - ?2
+            AND v.youtube_video_id IS NOT NULL
+            AND v.youtube_video_id <> ''
+            AND v.visibility_status <> 'voided'
+          ORDER BY ${FAILED_ELIGIBILITY_SQL} ASC, v.id ASC
+          LIMIT ?3`;
+
 /** 開催中・通常期限のみ（pending / blocked は含めない）。 */
 async function selectScheduledSyncRows(
   env: Env,
@@ -364,35 +483,16 @@ async function selectScheduledSyncRows(
 
   appendUniqueRows(
     selected,
-    await querySyncRows(
+    await queryMergedScheduledRows(
       env,
-      `SELECT v.id, v.youtube_video_id
-         FROM events e
-         INNER JOIN videos v ON (
-           v.primary_event_id = e.id
-           OR EXISTS (
-             SELECT 1 FROM video_events ve
-             WHERE ve.video_id = v.id AND ve.event_id = e.id
-           )
-         )
-         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
-        WHERE e.visibility_status = 'public'
-          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
-          AND (e.start_time IS NULL OR e.start_time <= ?1 + ?3)
-          AND (e.end_time IS NULL OR e.end_time >= ?1 - ?3)
-          AND v.youtube_video_id IS NOT NULL
-          AND v.youtube_video_id <> ''
-          AND v.visibility_status <> 'voided'
-          AND ${NOT_BLOCKED_FOR_RELATED_SQL}
-          AND ym.sync_status IN ('synced', 'failed')
-          AND NOT (
-            ym.sync_status = 'failed'
-            AND ym.sync_error LIKE 'permanent:%'
-          )
-          AND ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} <= ?1 - ?2
-        ORDER BY ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} ASC, v.id ASC
-        LIMIT ?4`,
+      [
+        ACTIVE_PRIMARY_SYNCED_SQL,
+        ACTIVE_VIDEO_EVENTS_SYNCED_SQL,
+        ACTIVE_PRIMARY_FAILED_SQL,
+        ACTIVE_VIDEO_EVENTS_FAILED_SQL,
+      ],
       [now, ACTIVE_SYNC_INTERVAL_SEC, ACTIVE_EVENT_GRACE_SEC, limit],
+      limit,
       signal,
     ),
   );
@@ -401,24 +501,11 @@ async function selectScheduledSyncRows(
   if (remaining > 0) {
     appendUniqueRows(
       selected,
-      await querySyncRows(
+      await queryMergedScheduledRows(
         env,
-        `SELECT v.id, v.youtube_video_id
-           FROM video_youtube_metadata ym
-           INNER JOIN videos v ON v.id = ym.video_id
-          WHERE ym.sync_status IN ('synced', 'failed')
-            AND NOT (
-              ym.sync_status = 'failed'
-              AND ym.sync_error LIKE 'permanent:%'
-            )
-            AND ${NOT_BLOCKED_FOR_RELATED_SQL}
-            AND ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} <= ?1 - ?2
-            AND v.youtube_video_id IS NOT NULL
-            AND v.youtube_video_id <> ''
-            AND v.visibility_status <> 'voided'
-          ORDER BY ${SYNC_ELIGIBILITY_TIMESTAMP_SQL} ASC, v.id ASC
-          LIMIT ?3`,
+        [DEFAULT_SYNCED_SQL, DEFAULT_FAILED_SQL],
         [now, DEFAULT_SYNC_INTERVAL_SEC, remaining],
+        remaining,
         signal,
       ),
     );

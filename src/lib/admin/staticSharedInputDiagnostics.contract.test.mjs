@@ -17,14 +17,26 @@ test("共有JSON診断はR2実体とロード状態を独立してfail-closedで
   assert.match(diagnostics, /catch \{\s*return "unavailable"/);
   assert.match(diagnostics, /loadYoutubeRelatedBlocklist\(\)/);
   assert.match(diagnostics, /loadRandomVideoPool\(\)/);
+  assert.match(diagnostics, /loadPickupCreatorsArtifact\(\)/);
+  assert.match(diagnostics, /loadStaticTopSlotStats\(\)/);
   assert.match(diagnostics, /loadStatus: blocklist\.status/);
   assert.match(diagnostics, /loadStatus: randomPool\.status/);
+  assert.match(diagnostics, /loadStatus: pickupCreators\.status/);
+  assert.match(diagnostics, /loadStatus: topSlotStats\.status/);
   assert.match(diagnostics, /blocklist\.value\.blockedIds\.size/);
   assert.match(diagnostics, /randomPool\.value\.items\.length/);
+  assert.match(diagnostics, /pickupCreators\.value\.creators\.length/);
+  assert.match(diagnostics, /topSlotStats\.value\.items\.size/);
+  assert.match(diagnostics, /PICKUP_CREATORS_OBJECT_KEY/);
+  assert.match(diagnostics, /TOP_SLOT_STATS_OBJECT_KEY/);
+  assert.match(diagnostics, /targetType: "users_index"/);
+  assert.match(diagnostics, /targetType: "top_slot_stats"/);
 });
 
 test("管理画面は共有JSON状態と権限付き再生成キュー導線を表示する", () => {
   assert.match(page, /関連動画の共有JSON診断/);
+  assert.match(page, /users \/ top 共有JSON診断/);
+  assert.match(page, /SharedInputDiagnosticCards/);
   assert.match(page, /diagnostic\.objectState/);
   assert.match(page, /diagnostic\.loadStatus/);
   assert.match(page, /diagnostic\.generatedAt/);

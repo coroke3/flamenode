@@ -269,7 +269,6 @@ export async function fetchRelatedVideos(
       ? await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(
             and(
               baseWhere,
@@ -286,7 +285,6 @@ export async function fetchRelatedVideos(
       ? await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(
             and(
               baseWhere,
@@ -313,7 +311,6 @@ export async function fetchRelatedVideos(
             .select(baseSelect)
             .from(videos)
             .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-            .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
             .where(and(baseWhere, inArray(videoEvents.event_id, eventIds))!)
             .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
             .limit(Math.min(24, sameEventLimit * 4)),
@@ -324,7 +321,6 @@ export async function fetchRelatedVideos(
     ? await db
         .select(baseSelect)
         .from(videos)
-        .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
         .where(and(baseWhere, eq(videos.creator_x_user_id, current.creator_x_user_id))!)
         .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
         .limit(sameCreatorLimit)
@@ -356,7 +352,6 @@ export async function fetchRelatedVideos(
           })
           .from(videoMembers)
           .innerJoin(videos, eq(videos.id, videoMembers.video_id))
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(
             and(
               baseWhere,
@@ -399,7 +394,6 @@ export async function fetchRelatedVideos(
       ? await db
           .select(baseSelect)
           .from(videos)
-          .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
           .where(and(baseWhere, isNotNull(videos.scheduled_time))!)
           .orderBy(
             sql`ABS(${videos.scheduled_time} - ${current.scheduled_time})`,
@@ -424,7 +418,6 @@ export async function fetchRelatedVideos(
     const fallbackRows = await db
       .select(baseSelect)
       .from(videos)
-      .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
       .where(
         and(
           baseWhere,
@@ -468,7 +461,6 @@ export async function fetchEventPlaylistVideos(
     .from(videos)
     .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
     .innerJoin(events, eq(videoEvents.event_id, events.id))
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(
       and(
         eq(videoEvents.event_id, eventId),
