@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
@@ -69,6 +69,7 @@ import {
 import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 import { MAX_SLOTS_PER_VIDEO } from "@/lib/slots/limits";
+import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 import {
   areSlotsInSamePart,
   sortSlotsChronologically,
@@ -376,13 +377,18 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       chaptersByIndex: memberValidation.value.chaptersByIndex,
       actorUserId: userId,
     }));
-    for (const row of submittedSlots) {
-      const adoptedXUserId =
+    const rowsNeedingXAdoption = submittedSlots.filter(
+      (row) =>
         groupIdentity.adoptNullRows &&
         row.x_user_id === null &&
-        groupIdentity.targetXId !== null
-          ? groupIdentity.targetXId
-          : row.x_user_id;
+        groupIdentity.targetXId !== null,
+    );
+    const bulkSubmitRows = submittedSlots.filter(
+      (row) => !rowsNeedingXAdoption.some((candidate) => candidate.id === row.id),
+    );
+
+    for (const row of rowsNeedingXAdoption) {
+      const adoptedXUserId = groupIdentity.targetXId;
       const after = {
         ...row,
         status: "submitted" as const,
@@ -413,6 +419,40 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         retention_class: "normal",
         strict: true,
       });
+    }
+
+    if (bulkSubmitRows.length > 0) {
+      plan.statements.push(
+        db.update(slots).set({
+          status: "submitted",
+          video_id: videoId,
+          updated_at: now,
+          version: sql`${slots.version} + 1`,
+        }).where(
+          versionedSlotWhere(slotRow.event_id, bulkSubmitRows, "reserved"),
+        ),
+      );
+      plan.expectedChanges.push(bulkSubmitRows.length);
+      for (const row of bulkSubmitRows) {
+        const after = {
+          ...row,
+          status: "submitted" as const,
+          video_id: videoId,
+          updated_at: now,
+          version: row.version + 1,
+        };
+        plan.audits.push({
+          table_name: "slots",
+          target_id: row.id,
+          operation: "UPDATE",
+          before: { ...row },
+          after,
+          actor_user_id: userId,
+          context: "video-save:submit-slot",
+          retention_class: "normal",
+          strict: true,
+        });
+      }
     }
 
     let notificationWakeSource: "web" | undefined;

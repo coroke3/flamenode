@@ -12,7 +12,7 @@ import {
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
-import { events, slots, users, xUserAccountLinks } from "@/lib/db/schema";
+import { events, slots, users } from "@/lib/db/schema";
 import {
   MAX_SLOTS_PER_VIDEO,
   normalizeMaxSlotsPerVideo,

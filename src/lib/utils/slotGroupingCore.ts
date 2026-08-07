@@ -162,6 +162,7 @@ export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] 
         group_first_slot_id: row.id,
         group_last_slot_id: row.id,
         is_group: false,
+        integrity_error: null,
       };
     }
     const groupRows = sortSlotsChronologically(grouped.get(groupId) ?? [row]);
@@ -178,6 +179,7 @@ export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] 
       group_first_slot_id: first.id,
       group_last_slot_id: last.id,
       is_group: groupRows.length > 1,
+      integrity_error: null,
     };
   });
 }

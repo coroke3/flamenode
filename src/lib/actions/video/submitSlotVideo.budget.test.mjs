@@ -10,8 +10,11 @@ const source = await readFile(
 );
 
 test("submitSlotVideoは20枠を1本のslot UPDATEにまとめる", () => {
-  assert.match(source, /versionedSlotWhere\(slotRow\.event_id, submittedSlots, "reserved"\)/);
-  assert.match(source, /plan\.expectedChanges\.push\(submittedSlots\.length\)/);
+  assert.match(
+    source,
+    /versionedSlotWhere\(slotRow\.event_id, bulkSubmitRows, "reserved"\)/,
+  );
+  assert.match(source, /plan\.expectedChanges\.push\(bulkSubmitRows\.length\)/);
   assert.doesNotMatch(source, /MAX_ATOMIC_SUBMITTED_SLOTS/);
   assert.match(source, /MAX_SLOTS_PER_VIDEO \+ 1/);
 });
