@@ -5,6 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 import {
   drawSquareIconPreview,
   encodeSquareIconFile,
+  isIconPreviewError,
   isValidBitmap,
   loadOrientedImageBitmap,
   sanitizeTransform,
@@ -17,6 +18,8 @@ const VIEWPORT_SIZE = 280;
 const MIN_SCALE = 1;
 const MAX_SCALE = 3;
 const DEFAULT_SCALE = 1;
+const ICON_PREVIEW_USER_MESSAGE =
+  "画像のプレビューまたは変換に失敗しました。別の画像を選んでください。";
 
 export type SquareIconUseImageResult = { ok: true } | { ok: false; message: string };
 
@@ -152,9 +155,11 @@ export function SquareIconEditor({
     } catch (pickError) {
       if (generation !== loadGenerationRef.current || !mountedRef.current) return;
       setError(
-        pickError instanceof Error
-          ? pickError.message
-          : "画像の読み込みに失敗しました。別のファイルをお試しください。",
+        isIconPreviewError(pickError)
+          ? ICON_PREVIEW_USER_MESSAGE
+          : pickError instanceof Error
+            ? pickError.message
+            : "画像の読み込みに失敗しました。別のファイルをお試しください。",
       );
       clearImageState();
     } finally {
@@ -240,9 +245,13 @@ export function SquareIconEditor({
         setError(result.message || "アップロードに失敗しました。");
         return;
       }
-    } catch {
+    } catch (confirmError) {
       if (!mountedRef.current) return;
-      setError("画像の変換に失敗しました。位置や拡大率を変えて再試行してください。");
+      setError(
+        isIconPreviewError(confirmError)
+          ? ICON_PREVIEW_USER_MESSAGE
+          : "画像の変換に失敗しました。位置や拡大率を変えて再試行してください。",
+      );
     } finally {
       if (mountedRef.current) setEncoding(false);
     }
@@ -322,6 +331,9 @@ export function SquareIconEditor({
             value={transform.scale}
             disabled={busy}
             aria-label="拡大率"
+            aria-valuemin={MIN_SCALE}
+            aria-valuemax={MAX_SCALE}
+            aria-valuenow={transform.scale}
             onChange={onScaleChange}
           />
         </div>

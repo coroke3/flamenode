@@ -3,6 +3,7 @@
 import * as React from "react";
 import { flushSync } from "react-dom";
 import { SquareIconEditor } from "@/components/media/SquareIconEditor";
+import { SquareIconEditorBoundary } from "@/components/media/SquareIconEditorBoundary";
 import { Icon } from "@/components/ui/Icon";
 import type { VideoIconMode } from "@/lib/video/videoFormSchema";
 
@@ -240,8 +241,10 @@ export function VideoIconPicker({
       >
         <button
           type="button"
+          id="video-icon-tab-select"
           role="tab"
           aria-selected={tab === "select"}
+          aria-controls="video-icon-tabpanel-select"
           disabled={disabled}
           onClick={switchToSelectTab}
           style={modeBtnStyle(tab === "select")}
@@ -250,8 +253,10 @@ export function VideoIconPicker({
         </button>
         <button
           type="button"
+          id="video-icon-tab-upload"
           role="tab"
           aria-selected={tab === "upload"}
+          aria-controls="video-icon-tabpanel-upload"
           disabled={disabled}
           onClick={() => setTab("upload")}
           style={modeBtnStyle(tab === "upload")}
@@ -260,13 +265,20 @@ export function VideoIconPicker({
         </button>
       </div>
       {tab === "upload" ? (
-        <div style={{ display: "grid", gap: 10 }}>
-          <SquareIconEditor
-            key={editorKey}
-            disabled={disabled}
-            onUseImage={onUseUploadedImage}
-            onCancel={cancelUpload}
-          />
+        <div
+          id="video-icon-tabpanel-upload"
+          role="tabpanel"
+          aria-labelledby="video-icon-tab-upload"
+          style={{ display: "grid", gap: 10 }}
+        >
+          <SquareIconEditorBoundary>
+            <SquareIconEditor
+              key={editorKey}
+              disabled={disabled}
+              onUseImage={onUseUploadedImage}
+              onCancel={cancelUpload}
+            />
+          </SquareIconEditorBoundary>
           {uploadPreview ? (
             <div
               style={{
@@ -295,12 +307,19 @@ export function VideoIconPicker({
           ) : null}
         </div>
       ) : null}
-      {tab === "select" && iconMode === "upload" ? (
-        <p className="fn-muted fn-text-sm" style={{ margin: 0 }} role="status">
-          新規アップロードが選択中です。候補を選ぶとアップロードは破棄されます。
-        </p>
-      ) : null}
-      {tab === "select" && candidates.length > 0 ? (
+      {tab === "select" ? (
+        <div
+          id="video-icon-tabpanel-select"
+          role="tabpanel"
+          aria-labelledby="video-icon-tab-select"
+          style={{ display: "grid", gap: 10 }}
+        >
+          {iconMode === "upload" ? (
+            <p className="fn-muted fn-text-sm" style={{ margin: 0 }} role="status">
+              新規アップロードが選択中です。候補を選ぶとアップロードは破棄されます。
+            </p>
+          ) : null}
+          {candidates.length > 0 ? (
         <div
           role="radiogroup"
           aria-label="アイコン候補"
@@ -352,28 +371,28 @@ export function VideoIconPicker({
             <Icon name="close" size={16} aria-hidden />
           </button>
         </div>
-      ) : tab === "select" ? (
+      ) : (
         <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
           まだ候補がありません。「新規アップロード」か下の URL 欄から指定できます。
         </p>
-      ) : null}
-      {tab === "select" ? (
-        <input
-          type="text"
-          value={selectedUrl}
-          onChange={(event) => {
-            if (disabled) return;
-            const next = event.target.value;
-            setSelection(next, resolveModeForUrl(next));
-            clearUploadPreview();
-            setError(null);
-          }}
-          placeholder="アイコン URL を直接入力 (任意)"
-          className="fn-input"
-          maxLength={500}
-          disabled={disabled}
-          aria-label="アイコン URL"
-        />
+      )}
+          <input
+            type="text"
+            value={selectedUrl}
+            onChange={(event) => {
+              if (disabled) return;
+              const next = event.target.value;
+              setSelection(next, resolveModeForUrl(next));
+              clearUploadPreview();
+              setError(null);
+            }}
+            placeholder="アイコン URL を直接入力 (任意)"
+            className="fn-input"
+            maxLength={500}
+            disabled={disabled}
+            aria-label="アイコン URL"
+          />
+        </div>
       ) : null}
       {error ? (
         <p
