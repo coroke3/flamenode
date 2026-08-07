@@ -33,6 +33,8 @@ test("SquareIconEditor は確定操作まで Server Action を呼ばない", () 
   assert.match(editor, /この画像を使用/);
   assert.match(editor, /role=\"status\"|aria-live/);
   assert.match(editor, /mountedRef/);
+  assert.match(editor, /loadGenerationRef/);
+  assert.match(editor, /clearImageState/);
   assert.match(editor, /if \(!result\.ok\)/);
 });
 
