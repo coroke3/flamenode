@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import process from "node:process";
 
 export const ZERO_D1_DATABASE_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -64,21 +65,55 @@ export function formatCommandFailure(error) {
   return parts.join("; ") || "command failed";
 }
 
+export function isWranglerExecutionSummary(row) {
+  return (
+    row != null &&
+    typeof row === "object" &&
+    "Total queries executed" in row
+  );
+}
+
 export function parseWranglerD1Json(output) {
-  const parsed = JSON.parse(output);
+  const trimmed = String(output).trim();
+  const jsonStart = trimmed.indexOf("[");
+  if (jsonStart < 0) {
+    throw new Error("Unexpected wrangler d1 execute output.");
+  }
+  const parsed = JSON.parse(trimmed.slice(jsonStart));
   const results = parsed?.[0]?.results ?? parsed?.results ?? null;
   if (!Array.isArray(results)) {
     throw new Error("Unexpected wrangler d1 execute output.");
   }
-  return results;
+  return results.filter((row) => !isWranglerExecutionSummary(row));
+}
+
+export function normalizeRemoteD1Sql(sql) {
+  return String(sql).replace(/\s+/g, " ").trim();
+}
+
+export function resolveWranglerCli(root = process.cwd()) {
+  return path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
 }
 
 export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd() }) {
   const databaseTarget = resolveRemoteD1ExecuteTarget(root);
+  const sql = normalizeRemoteD1Sql(fs.readFileSync(sqlPath, "utf8"));
+  const wranglerCli = resolveWranglerCli(root);
   try {
-    const output = execSync(
-      `npx wrangler d1 execute ${databaseTarget} --remote --json --file=${sqlPath}`,
+    const output = execFileSync(
+      process.execPath,
+      [
+        wranglerCli,
+        "d1",
+        "execute",
+        databaseTarget,
+        "--remote",
+        "--json",
+        "--command",
+        sql,
+      ],
       {
+        cwd: root,
         encoding: "utf8",
         maxBuffer: 16 * 1024 * 1024,
       },

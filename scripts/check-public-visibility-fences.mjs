@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY } from "../src/lib/public
 import {
   assertRemoteD1Configured,
   formatCommandFailure,
+  resolveWranglerCli,
   runRemoteD1File,
 } from "./remote-d1-utils.mjs";
 
@@ -74,10 +75,24 @@ const publicVideosSqlPath = path.join(
 function fetchRemoteManifest() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-r2-"));
   const tempFile = path.join(tempDir, "manifest.json");
+  const objectPath = `${R2_BUCKET}/${PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY}`;
   try {
-    execSync(
-      `npx wrangler r2 object get ${R2_BUCKET} ${PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY} --remote --file=${tempFile}`,
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    execFileSync(
+      process.execPath,
+      [
+        resolveWranglerCli(root),
+        "r2",
+        "object",
+        "get",
+        objectPath,
+        "--remote",
+        `--file=${tempFile}`,
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
     const text = fs.readFileSync(tempFile, "utf8");
     const parsed = JSON.parse(text);

@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import {
   ZERO_D1_DATABASE_ID,
+  isWranglerExecutionSummary,
+  parseWranglerD1Json,
   readEnvD1DatabaseId,
   readRemoteD1DatabaseId,
   resolveRemoteD1ExecuteTarget,
@@ -70,4 +72,34 @@ test("readRemoteD1DatabaseId uses env override when wrangler has placeholder", (
     readRemoteD1DatabaseId(),
     "7ca561eb-5706-497d-8f7b-315255cdedfd",
   );
+});
+
+test("parseWranglerD1Json strips wrangler progress prefix", () => {
+  const output = `├ Checking if file needs uploading
+│
+[{"results":[{"id":"evt_1"}],"success":true}]`;
+  assert.deepEqual(parseWranglerD1Json(output), [{ id: "evt_1" }]);
+});
+
+test("parseWranglerD1Json drops wrangler execution summary rows", () => {
+  const output = JSON.stringify([
+    {
+      results: [
+        {
+          "Total queries executed": 1,
+          "Rows read": 22,
+        },
+      ],
+      success: true,
+    },
+  ]);
+  assert.deepEqual(parseWranglerD1Json(output), []);
+});
+
+test("isWranglerExecutionSummary detects metadata rows", () => {
+  assert.equal(
+    isWranglerExecutionSummary({ "Total queries executed": 1 }),
+    true,
+  );
+  assert.equal(isWranglerExecutionSummary({ id: "evt_1" }), false);
 });
