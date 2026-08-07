@@ -77,6 +77,8 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   maxStaleAgeSec: number;
   cacheTtlSeconds?: number;
   nowSec?: number;
+  /** fresh Cache hit 時も R2 を読み、generated_at が新しければ R2 を採用する。 */
+  getGeneratedAt?: (value: T) => number;
 }): Promise<StaticJsonLoadResult<T | null>> {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const cacheTtl = args.cacheTtlSeconds ?? 300;
@@ -90,6 +92,24 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
     if (age >= 0 && age <= cacheTtl) {
       const normalized = args.normalize(freshCached.payload);
       if (normalized !== null) {
+        if (args.getGeneratedAt) {
+          const r2Payload = await readR2Json(args.key);
+          if (r2Payload !== null) {
+            const r2Normalized = args.normalize(r2Payload);
+            if (r2Normalized !== null) {
+              const cacheGeneratedAt = args.getGeneratedAt(normalized);
+              const r2GeneratedAt = args.getGeneratedAt(r2Normalized);
+              if (r2GeneratedAt > cacheGeneratedAt) {
+                writePublicJsonCacheBestEffort(
+                  args.key,
+                  { payload: r2Payload, stored_at: now },
+                  Math.max(cacheTtl, args.maxStaleAgeSec),
+                );
+                return { status: "fresh", value: r2Normalized };
+              }
+            }
+          }
+        }
         return { status: "fresh", value: normalized };
       }
     }
@@ -276,6 +296,7 @@ export async function loadStaticTopSlotStats(): Promise<
     normalize: normalizeStaticTopSlotStats,
     maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats * 2,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats,
+    getGeneratedAt: (value) => value.generatedAt,
   });
   if (result.status === "unavailable" || !result.value) {
     return {
