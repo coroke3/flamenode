@@ -26,6 +26,10 @@ import {
 } from "@/lib/slots/slotIdentityCore";
 import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import {
+  resolveSlotReservationSubject,
+  subjectsEqual,
+} from "@/lib/slot/reservationGroupsCore";
 import { buildSlotChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import {
   markPendingPublicReflection,
@@ -747,7 +751,6 @@ export async function extendOwnSlotGroup(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = extendSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -786,6 +789,17 @@ export async function extendOwnSlotGroup(
     }
     if (groupRows.some((row) => row.status !== "reserved")) {
       return { ok: false, message: "予約中でない枠を含む連続枠は拡張できません。" };
+    }
+    const subjectResult = resolveSlotReservationSubject(groupRows);
+    if (!subjectResult.ok) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    const subject = subjectResult.subject;
+    if (guard.user.id !== subject.reservedByUserId) {
+      return { ok: false, message: "自分の予約中の枠のみ拡張できます。" };
     }
 
     const edge =
@@ -865,7 +879,6 @@ export async function mergeOwnSlotGroups(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = mergeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -917,6 +930,23 @@ export async function mergeOwnSlotGroups(
 
     const leftGroup = await loadBoundedGroupStructure(db, left);
     const rightGroup = await loadBoundedGroupStructure(db, right);
+    if (left.event_id !== right.event_id) {
+      return { ok: false, message: "異なるイベントの枠は結合できません。" };
+    }
+    const leftSubjectResult = resolveSlotReservationSubject(leftGroup);
+    const rightSubjectResult = resolveSlotReservationSubject(rightGroup);
+    if (!leftSubjectResult.ok || !rightSubjectResult.ok) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    if (!subjectsEqual(leftSubjectResult.subject, rightSubjectResult.subject)) {
+      return {
+        ok: false,
+        message: "異なるX IDの連続枠は結合できません。",
+      };
+    }
     const byId = new Map<string, SlotRow>();
     for (const row of [...leftGroup, ...rightGroup]) byId.set(row.id, row);
     const reservedRows = sortSlotsChronologically([...byId.values()]);

@@ -37,4 +37,18 @@ assert.match(manifest, /MANIFEST_PUT_MAX_RETRIES = 3/);
 assert.match(manifest, /cacheControl: "no-store"/);
 assert.match(manifest, /resolvePublicVisibilityGuardModeFromEnv/);
 
+const transition = readFileSync(
+  path.join(root, "src/lib/video/videoVisibilityTransition.ts"),
+  "utf8",
+);
+assert.match(transition, /preCommitVideoVisibilityDepublicization/);
+assert.match(transition, /compensateDepublicizationFenceOnD1Failure/);
+assert.match(transition, /enqueueVideoVisibilityNotificationsPostCommit/);
+assert.match(transition, /r2_token_mismatch/);
+assert.match(transition, /stuck_fence_candidate/);
+assert.doesNotMatch(
+  transition,
+  /mutationStatements\.push\(\s*\.\.\.notificationBatch\.statements/,
+);
+
 console.log("check:public-visibility-fences OK");

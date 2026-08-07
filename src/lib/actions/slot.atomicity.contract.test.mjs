@@ -25,6 +25,7 @@ test("利用者slot操作は共通atomic plannerだけで書き込む", () => {
     source.match(/async function commitSlotMutationPlan[\s\S]*?async function loadSlot/)?.[0] ??
     "";
   assert.match(commit, /const queue = await buildSlotChangeQueueBatch/);
+  assert.match(commit, /mutationStatements:\s*\[[\s\S]*?\.\.\.args\.updates\.map\([\s\S]*?\.\.\.queue\.statements,/);
   assert.match(
     commit,
     /mutationStatements:\s*\[[\s\S]*?\.\.\.mutationStatements,[\s\S]*?\.\.\.queue\.statements,[\s\S]*?\.\.\.extra,/,

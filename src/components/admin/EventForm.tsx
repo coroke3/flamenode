@@ -18,6 +18,10 @@ import {
   parseVideoFormSettings,
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
+import {
+  MAX_SLOTS_PER_VIDEO,
+  MAX_STAGE_PERMISSION_QUESTIONS,
+} from "@/lib/event/eventLimits";
 import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
 import {
   normalizeEventVisibility,
@@ -750,8 +754,9 @@ export function EventForm({
         <button
           type="button"
           className="fn-btn fn-btn-ghost"
-          disabled={!canQuestions}
+          disabled={!canQuestions || questions.length >= MAX_STAGE_PERMISSION_QUESTIONS}
           onClick={() => {
+            if (questions.length >= MAX_STAGE_PERMISSION_QUESTIONS) return;
             setDirty(true);
             setQuestions((current) => [
               ...current,
@@ -769,6 +774,11 @@ export function EventForm({
         >
           <Icon name="plus" size={13} aria-hidden /> 質問を追加
         </button>
+        {questions.length >= MAX_STAGE_PERMISSION_QUESTIONS ? (
+          <p className="fn-hint">
+            ステージ・権利確認質問は最大{MAX_STAGE_PERMISSION_QUESTIONS}件です
+          </p>
+        ) : null}
       </FormSection>
 
       <FormSection title="枠設定" allowed={canSlots}>

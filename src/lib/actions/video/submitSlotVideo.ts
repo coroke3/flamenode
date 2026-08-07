@@ -32,6 +32,7 @@ import {
   resolveSlotViewerRelation,
 } from "@/lib/slots/slotIdentityCore";
 import { extractYoutubeId } from "@/lib/youtube/id";
+import { resolveSlotReservationSubject } from "@/lib/slot/reservationGroupsCore";
 import {
   appendVideoAtomicWritePlan,
   emptyVideoAtomicWritePlan,
@@ -179,17 +180,51 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   if (!eventConfig) return { ok: false, message: "イベントが見つかりません。" };
   // 提出可否は現行 events.max_slots_per_video では制限しない（grandfather）。
   // 絶対上限のみ MAX_SLOTS_PER_VIDEO で fail-closed。
-  const slotGroupWhere = slotRow.reservation_group_id
-    ? and(
-        eq(slots.reservation_group_id, slotRow.reservation_group_id),
-        eq(slots.event_id, slotRow.event_id),
-      )!
-    : eq(slots.id, slotRow.id);
-  const submittedSlots = await db
-    .select()
-    .from(slots)
-    .where(slotGroupWhere)
-    .limit(MAX_SLOTS_PER_VIDEO + 1);
+  let submittedSlots: typeof slots.$inferSelect[];
+  if (slotRow.reservation_group_id) {
+    const groupRows = await db
+      .select()
+      .from(slots)
+      .where(
+        and(
+          eq(slots.reservation_group_id, slotRow.reservation_group_id),
+          eq(slots.event_id, slotRow.event_id),
+        )!,
+      )
+      .limit(MAX_SLOTS_PER_VIDEO + 1);
+    const subjectResult = resolveSlotReservationSubject(groupRows);
+    if (!subjectResult.ok) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    const subject = subjectResult.subject;
+    if (userId !== subject.reservedByUserId) {
+      return { ok: false, message: "枠が見つかりません。" };
+    }
+    if (subject.xUserId) {
+      if (!guard.approvedXIds.includes(subject.xUserId)) {
+        return { ok: false, message: "承認済みのX IDを選択してください。" };
+      }
+      if (requestedX && subject.xUserId !== requestedX) {
+        return {
+          ok: false,
+          message: "投稿主体のX IDは予約時のIDに固定されています。",
+        };
+      }
+    }
+    if (groupRows.some((row) => row.status !== "reserved")) {
+      return { ok: false, message: "予約中でない枠を含む連続枠は提出できません。" };
+    }
+    if (!groupRows.every((row) => row.id === slotRow.id || row.video_id === slotRow.video_id)) {
+      return { ok: false, message: "連続枠に別の作品が紐づいています。" };
+    }
+    submittedSlots = groupRows;
+  } else {
+    submittedSlots = [slotRow];
+  }
+
   if (submittedSlots.length === 0 || submittedSlots.length > MAX_SLOTS_PER_VIDEO) {
     return { ok: false, message: "同時に更新する枠数が上限を超えています。" };
   }
@@ -551,8 +586,9 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     return { ok: false, message: "保存対象が多すぎるか競合が発生しました。再読み込みして再試行してください。" };
   }
 
+  const traceId = createTraceId();
   await runPostCommitBestEffort(
-    { flow: "submit_slot_video", traceId: createTraceId() },
+    { flow: "submit_slot_video", traceId },
     [
       {
         name: "revalidate",
