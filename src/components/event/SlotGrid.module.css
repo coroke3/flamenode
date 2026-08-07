@@ -320,6 +320,12 @@
   min-width: 0;
 }
 
+.slotReservedX {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .slotName {
   font-size: 15px;
   font-weight: 800;

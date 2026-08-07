@@ -25,6 +25,7 @@ import {
   type SlotViewerRelation,
 } from "@/lib/slots/slotIdentityCore";
 import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
+import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 import {
   resolveSlotReservationSubject,
@@ -310,6 +311,7 @@ function buildReleaseMutations(
       patch: {
         reserved_by_user_id: null,
         x_user_id: null,
+        reserved_x_id_snapshot: null,
         display_name: null,
         reservation_group_id: null,
         status: "available" as const,
@@ -413,7 +415,8 @@ async function loadBoundedGroupStructure(
     rows.some(
       (row) =>
         row.event_id !== anchor.event_id ||
-        row.reserved_by_user_id !== anchor.reserved_by_user_id,
+        row.reserved_by_user_id !== anchor.reserved_by_user_id ||
+        row.reserved_x_id_snapshot !== anchor.reserved_x_id_snapshot,
     )
   ) {
     throw new Error("連続枠に別の利用者または状態が混在しています。");
@@ -572,7 +575,6 @@ export async function reserveSlot(
   if (!guard.ok) {
     return { ok: false, reason: guard.reason, message: guard.message };
   }
-  const slotXUserId = resolveSlotXUserId(guard);
   const parsed = reserveSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -582,6 +584,11 @@ export async function reserveSlot(
   }
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
+
+  const identity = await resolveReservationXIdentity(db, guard);
+  if ("error" in identity) {
+    return { ok: false, message: identity.error };
+  }
 
   try {
     const anchor = await loadSlot(db, parsed.data.slot_id);
@@ -654,7 +661,8 @@ export async function reserveSlot(
     const groupId = targetRows.length > 1 ? generateId("sgrp") : null;
     const reservePatch = {
       reserved_by_user_id: guard.user.id,
-      x_user_id: slotXUserId,
+      x_user_id: identity.canonicalXUserId,
+      reserved_x_id_snapshot: identity.snapshotXId,
       display_name: parsed.data.display_name,
       reservation_group_id: groupId,
       status: "reserved" as const,
@@ -679,7 +687,7 @@ export async function reserveSlot(
         eventTitle: event.title ?? "イベント",
         slotCount: targetRows.length,
         displayName: parsed.data.display_name,
-        xUserId: slotXUserId,
+        xUserId: identity.snapshotXId,
         userId: guard.user.id,
         discordId: actor?.discord_id,
       }),
@@ -843,6 +851,7 @@ export async function extendOwnSlotGroup(
     );
 
     const groupXUserId = groupRows[0]?.x_user_id ?? null;
+    const groupSnapshotXId = groupRows[0]?.reserved_x_id_snapshot ?? null;
     if (
       groupXUserId != null &&
       slotXUserId != null &&
@@ -860,6 +869,7 @@ export async function extendOwnSlotGroup(
     const candidatePatch = {
       reserved_by_user_id: guard.user.id,
       x_user_id: targetXId,
+      reserved_x_id_snapshot: groupSnapshotXId,
       display_name: displayName,
       reservation_group_id: groupId,
       status: "reserved" as const,
@@ -951,6 +961,10 @@ export async function mergeOwnSlotGroups(
       return { ok: false, message: "連続枠に別の X ID が混在しているため結合できません。" };
     }
 
+    if (left.reserved_x_id_snapshot !== right.reserved_x_id_snapshot) {
+      return { ok: false, message: "連続枠に別の X ID が混在しているため結合できません。" };
+    }
+
     const leftGroup = await loadBoundedGroupStructure(db, left);
     const rightGroup = await loadBoundedGroupStructure(db, right);
     if (left.event_id !== right.event_id) {
@@ -1000,9 +1014,12 @@ export async function mergeOwnSlotGroups(
     const slotXUserId = resolveSlotXUserId(guard);
     const groupId = generateId("sgrp");
     const targetXId = identity.targetXId ?? slotXUserId;
+    const inheritedSnapshot =
+      reservedRows[0]?.reserved_x_id_snapshot ?? left.reserved_x_id_snapshot;
     const gapPatch = {
       reserved_by_user_id: guard.user.id,
       x_user_id: targetXId,
+      reserved_x_id_snapshot: inheritedSnapshot,
       display_name: parsed.data.display_name,
       reservation_group_id: groupId,
       status: "reserved" as const,

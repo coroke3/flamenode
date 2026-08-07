@@ -122,8 +122,8 @@ function assertCanonicalShape(db) {
     .all()
     .map((row) => String(row.name));
   const columnCount = tables.reduce((total, tableName) => total + columns(db, tableName).length, 0);
-  assert.equal(tables.length, 41, "canonical table count");
-  assert.equal(columnCount, 437, "canonical column count");
+  assert.equal(tables.length, 44, "canonical table count");
+  assert.equal(columnCount, 438, "canonical column count");
   for (const tableName of removedTables) assert.equal(tableExists(db, tableName), false, tableName);
   for (const [tableName, columnName] of deletedColumns) {
     assert.equal(

@@ -26,7 +26,10 @@ export interface SlotRowLite {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   x_user_id: string | null;
+  reserved_x_id_snapshot: string | null;
   reserved_by_user_id: string | null;
+  discord_display_name: string | null;
+  discord_id: string | null;
   reservation_group_id: string | null;
   video_id: string | null;
   updated_at: number;
@@ -289,17 +292,32 @@ export function SlotList({
                   )}
                   <td className={isManage ? "manage-slot-holder" : undefined}>
                     {isManage ? (
-                      slot.display_name || slot.x_user_id ? (
-                        <>
-                          <span className="manage-slot-holder-name">
-                            {slot.display_name ?? slot.x_user_id}
-                          </span>
-                          {slot.x_user_id ? (
-                            <span className="manage-slot-holder-xid">
-                              @{slot.x_user_id}
-                            </span>
-                          ) : null}
-                        </>
+                      slot.display_name ||
+                      slot.reserved_x_id_snapshot ||
+                      slot.x_user_id ||
+                      slot.discord_display_name ? (
+                        <div className="manage-slot-holder-grid">
+                          <div>
+                            <span className="fn-muted">名義: </span>
+                            {slot.display_name ?? "記録なし"}
+                          </div>
+                          <div>
+                            <span className="fn-muted">X ID: </span>
+                            {slot.reserved_x_id_snapshot
+                              ? `@${slot.reserved_x_id_snapshot}`
+                              : slot.x_user_id
+                                ? `@${slot.x_user_id}`
+                                : "記録なし"}
+                          </div>
+                          <div>
+                            <span className="fn-muted">Discord: </span>
+                            {slot.discord_display_name ?? "記録なし"}
+                          </div>
+                          <div>
+                            <span className="fn-muted">Discord ID: </span>
+                            {slot.discord_id ?? "記録なし"}
+                          </div>
+                        </div>
                       ) : (
                         "—"
                       )

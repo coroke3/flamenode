@@ -125,6 +125,11 @@ test("writeGuard は identityRequirement: 'requested_x' オプションを持つ
   assert.match(writeGuard, /hasPendingXRequest/);
 });
 
+test("writeGuard は枠確保対象の pending 申請だけを hasPendingXRequest に使う", () => {
+  assert.match(writeGuard, /pendingSlotReservationXRequestWhere/);
+  assert.match(writeGuard, /orderBy\(desc\(xIdentityRequests\.requested_at\), desc\(xIdentityRequests\.id\)\)/);
+});
+
 test("枠確保は identityRequirement: 'requested_x' を使う", () => {
   for (const fn of ["reserveSlot", "extendOwnSlotGroup", "mergeOwnSlotGroups"]) {
     const start = slotAction.indexOf(`export async function ${fn}`);
@@ -135,15 +140,15 @@ test("枠確保は identityRequirement: 'requested_x' を使う", () => {
     assert.doesNotMatch(block, /requireActiveXId: true/, fn);
     assert.doesNotMatch(block, /requireApprovedActiveXId: true/, fn);
   }
-  // x_user_id は承認済み active X があるときだけ設定する
-  assert.match(slotAction, /resolveSlotXUserId/);
-  assert.match(slotAction, /slotXUserId/);
+  // x_user_id は承認済み active X があるときだけ canonical に設定する
+  assert.match(slotAction, /resolveReservationXIdentity/);
+  assert.match(slotAction, /reserved_x_id_snapshot: identity\.snapshotXId/);
 });
 
 test("枠確保は reserved_by_user_id を正本として設定する", () => {
-  // reserveSlot 内で x_user_id: guard.activeXId を直接使わない (slotXUserId を経由)
+  // reserveSlot 内で x_user_id: guard.activeXId を直接使わない (identity を経由)
   assert.match(slotAction, /reserved_by_user_id: guard\.user\.id/);
-  assert.match(slotAction, /x_user_id: slotXUserId/);
+  assert.match(slotAction, /x_user_id: identity\.canonicalXUserId/);
   // reserveSlot 関数内に guard.activeXId をスロット x_user_id に直書きしていない
   const sliceFn = (fn) => {
     const start = slotAction.indexOf(`export async function ${fn}`);
@@ -166,16 +171,17 @@ test("いいね/セーブ は Auth user 単位で writeGuard を通し Active X 
   assert.doesNotMatch(interactionAction, /requireApprovedActiveXId: true/);
 });
 
-test("作品詳細の canInteract は規約同意済み Auth user のみを見る", () => {
+test("作品詳細の canInteract はログインと規約同意を見る（Active X は不要）", () => {
   assert.match(videoDetailPage, /viewerNeedsTermsAcceptance/);
   assert.match(videoDetailPage, /!viewerNeedsTermsAcceptance/);
   assert.match(
     videoDetailPage,
-    /canInteract = !!\(\s*viewerUser\?\.id &&\s*!viewerNeedsTermsAcceptance/,
+    /canInteract[\s\S]*viewerUser\?\.id[\s\S]*!viewerNeedsTermsAcceptance/,
   );
-  assert.match(videoDetailPage, /videoInteractionsAuth/);
-  assert.match(videoDetailPage, /canPost=\{viewerXApproved\}/);
-  assert.match(videoDetailPage, /利用規約に同意するといいね、セーブができます/);
+  assert.doesNotMatch(
+    videoDetailPage,
+    /canInteract[\s\S]*viewerActiveX[\s\S]*viewerXApproved/,
+  );
 });
 
 test("ライブラリは Auth user の interaction 正本を直接JOINする", () => {

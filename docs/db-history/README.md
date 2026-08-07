@@ -1,8 +1,8 @@
 # DB履歴
 
 > Status: Active
-> Last verified: 2026-07-21
-> Verified against commit: `28bd38d74a991ac9a06070a330e038c5d03ffa03`
+> Last verified: 2026-08-07
+> Verified against commit: `313c5c90`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/` active path
 
 ## 区分
@@ -17,6 +17,7 @@
 | Active | `migrations/0039_search_relation_indexes.sql` | 公開検索・creator集計・chapter検索用index |
 | Active | `migrations/0040_worker_free_tier_scale.sql` | スコア差分更新の無料枠向けindex |
 | Active | `migrations/0042_event_youtube_playlist_sync.sql` | イベント別YouTube再生リスト差分同期 |
+| Active | `migrations/0053_slot_reserved_x_id_snapshot.sql` | 枠確保時 X ID スナップショット列 |
 | Active | [`database/change-log.md`](../database/change-log.md) | active migrationに対応する現行DB変更履歴 |
 | Active | `docs/implementation-backlog.md` | Open、Blocked、Recently completedの現在状態 |
 | Historical | `migrations/historical/` | 旧migration本文の保存。現行runtimeでは参照・適用しない |

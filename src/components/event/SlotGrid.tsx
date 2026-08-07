@@ -37,6 +37,7 @@ export interface SlotRow {
   sort_order: number | null;
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
+  reserved_x_id: string | null;
   is_owned_by_viewer: boolean;
   viewer_relation?: SlotViewerRelation;
   group_key: string | null;
@@ -413,6 +414,9 @@ export function SlotGrid({
       ) {
         return null;
       }
+      if ((left.reserved_x_id ?? null) !== (right.reserved_x_id ?? null)) {
+        return null;
+      }
       if ((left.x_user_id ?? null) !== (right.x_user_id ?? null)) {
         return null;
       }
@@ -632,6 +636,11 @@ export function SlotGrid({
                                   </span>
                                 ) : null}
                               </div>
+                              {nameVisible && slot.reserved_x_id ? (
+                                <span className={styles.slotReservedX}>
+                                  @{slot.reserved_x_id}
+                                </span>
+                              ) : null}
                             </div>
                             {hasIntegrityError ? (
                               <p className={styles.slotIntegrityNotice}>
@@ -1016,11 +1025,21 @@ export function SlotGrid({
                 ) : null}
               </div>
             ) : null}
-            {viewerXId ? (
+            <div className={styles.reserveDialogField}>
               <p className={styles.reserveDialogHint}>
-                提出主体: <strong>@{viewerXId}</strong>
+                取得名義:{" "}
+                <strong>{reserveDisplayName.trim() || "未入力"}</strong>
               </p>
-            ) : null}
+              {viewerXId ? (
+                <p className={styles.reserveDialogHint}>
+                  取得 X ID: <strong>@{viewerXId}</strong>
+                </p>
+              ) : (
+                <p className={styles.reserveDialogHint}>
+                  取得可能な X ID がありません
+                </p>
+              )}
+            </div>
             <div className={styles.reserveDialogFooter}>
               <button
                 type="button"
@@ -1033,7 +1052,9 @@ export function SlotGrid({
               <button
                 type="submit"
                 className="fn-btn fn-btn-primary"
-                disabled={busy || reserveDisplayName.trim().length === 0}
+                disabled={
+                  busy || !viewerXId || reserveDisplayName.trim().length === 0
+                }
                 aria-busy={busy}
               >
                 <Icon name="plus" size={12} aria-hidden />

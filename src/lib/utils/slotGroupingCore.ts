@@ -22,6 +22,7 @@ export type SlotBase = {
   is_owned_by_viewer: boolean;
   viewer_relation?: SlotViewerRelation;
   group_key: string | null;
+  reserved_x_id?: string | null;
   event_title?: string | null;
   /** @deprecated 旧UI読取境界。DB正本には存在しない。 */
   priority_reclaim_video_id?: string | null;

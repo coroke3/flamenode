@@ -1,8 +1,9 @@
 import "server-only";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { CurrentUser } from "./currentUser";
 import { xIdentityRequests, users } from "@/lib/db/schema";
+import { pendingSlotReservationXRequestWhere } from "@/lib/slots/reservationIdentity";
 import { getLinkedXUsersForAuthUser } from "./xIdentity";
 
 type DrizzleDb = NonNullable<ReturnType<typeof import("@/lib/cloudflare").getDatabase>>;
@@ -66,12 +67,8 @@ export async function getOnboardingState(
           requested_x_id: xIdentityRequests.requested_x_id,
         })
         .from(xIdentityRequests)
-        .where(
-          and(
-            eq(xIdentityRequests.requested_by_auth_user_id, user.id),
-            eq(xIdentityRequests.status, "pending"),
-          )!,
-        )
+        .where(pendingSlotReservationXRequestWhere(user.id))
+        .orderBy(desc(xIdentityRequests.requested_at), desc(xIdentityRequests.id))
         .limit(1),
     ]);
 
@@ -98,11 +95,7 @@ export async function getOnboardingState(
       xIdentityStatus = "rejected";
     }
 
-    requestedXId =
-      pendingRequests[0]?.requested_x_id ??
-      linkedRows.find((r) => r.approval_status === "pending")?.x_user_id ??
-      linkedRows.find((r) => r.approval_status === "rejected")?.x_user_id ??
-      null;
+    requestedXId = pendingRequests[0]?.requested_x_id ?? null;
   }
 
   // DB 障害時は fail-closed: canPost/canReserveSlot は false のまま
