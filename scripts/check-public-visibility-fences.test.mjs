@@ -27,7 +27,8 @@ test("public-visibility-fences script supports read-only remote inspection", () 
   const source = fs.readFileSync(scriptPath, "utf8");
   assert.match(source, /--remote/);
   assert.match(source, /assertRemoteD1Configured/);
-  assert.match(source, /wrangler r2 object get/);
+  assert.match(source, /"r2",\s*"object",\s*"get"/);
+  assert.match(source, /resolveWranglerCli/);
   assert.match(source, /PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY/);
   assert.match(source, /public_video_r2_blocked/);
   assert.match(source, /d1_r2_fence_token_mismatch/);
