@@ -14,11 +14,10 @@ import {
   queueEventYoutubePlaylistSync,
   saveEventYoutubePlaylistSettings,
 } from "@/lib/actions/event-youtube-playlist";
-import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
-import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
-import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { formatUnix } from "@/lib/utils/format";
+import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 
 export const metadata: Metadata = { title: "YouTube再生リスト同期" };
 export const dynamic = "force-dynamic";
@@ -80,22 +79,22 @@ export default async function EventYoutubePlaylistPage({
   const playlistId = config?.playlist_id ?? "";
   const mode = config?.sync_mode ?? "off";
   const interval = config?.sync_interval_minutes ?? 720;
+  const pendingCount = await getEventPendingReviewVideoCount(ev.id);
 
   return (
-    <div style={manageEventAccentStyle(ev.accent_color)}>
-      <ManageActiveXNotice
-        userId={guard.user.id}
-        activeXUserId={guard.user.active_x_user_id}
-      />
-      <ManagePageHeader
-        title={`${ev.title} YouTube再生リスト同期`}
-        description="イベントの公開作品を、指定したYouTube再生リストへ差分同期します。"
-        backHref={`/manage/events/${ev.id}`}
-        backLabel="イベント運営トップへ"
-        accent
-      />
-      <ManageEventTabs eventId={ev.id} isAdmin={isAdmin} />
-
+    <ManageEventPageShell
+      eventId={ev.id}
+      title={ev.title}
+      description="イベントの公開作品を、指定したYouTube再生リストへ差分同期します。"
+      backHref={`/manage/events/${ev.id}`}
+      backLabel="イベント概要へ"
+      isAdmin={isAdmin}
+      pendingCount={pendingCount}
+      accentStyle={manageEventAccentStyle(ev.accent_color)}
+      showActiveXNotice
+      userId={guard.user.id}
+      activeXUserId={guard.user.active_x_user_id}
+    >
       {sp.saved === "1" ? (
         <p className="fn-alert fn-alert-success">設定を保存し、次回同期を予約しました。</p>
       ) : null}
@@ -104,9 +103,9 @@ export default async function EventYoutubePlaylistPage({
       ) : null}
       {sp.error ? <p className="fn-alert fn-alert-danger">{sp.error}</p> : null}
 
-      <section className="fn-console-section">
-        <h2 style={{ fontSize: 15, fontWeight: 800 }}>同期設定</h2>
-        <p className="fn-muted fn-text-sm">
+      <section className="manage-section">
+        <h2 className="fn-console-eyebrow">同期設定</h2>
+        <p className="fn-console-note" style={{ marginBottom: 12 }}>
           OAuthで認証した1つのYouTubeチャンネルが所有する再生リストを対象にします。
           この画面で同期方式を有効にしたイベントだけが同期されます。
         </p>
@@ -180,20 +179,14 @@ export default async function EventYoutubePlaylistPage({
         </form>
       </section>
 
-      <section className="fn-console-section">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <h2 style={{ fontSize: 15, fontWeight: 800 }}>同期状態</h2>
+      <section className="manage-section">
+        <div className="manage-youtube-status-head">
+          <h2 className="fn-console-eyebrow">同期状態</h2>
           <span className={`fn-badge ${statusClass(config?.sync_status)}`}>
             {STATUS_LABELS[config?.sync_status ?? "disabled"] ?? config?.sync_status}
           </span>
         </div>
-        <dl className="manage-youtube-status-grid"
-          style={{
-            display: "grid",
-            gap: "8px 16px",
-            fontSize: 13,
-          }}
-        >
+        <dl className="manage-youtube-status-grid">
           <dt className="fn-muted">最終同期</dt>
           <dd>{config?.last_synced_at ? formatUnix(config.last_synced_at) : "未実行"}</dd>
           <dt className="fn-muted">最終全件確認</dt>
@@ -201,7 +194,7 @@ export default async function EventYoutubePlaylistPage({
           <dt className="fn-muted">次回予定</dt>
           <dd>{config?.next_sync_at ? formatUnix(config.next_sync_at) : "なし"}</dd>
           <dt className="fn-muted">エラー</dt>
-          <dd style={{ wordBreak: "break-word" }}>{config?.last_error ?? "なし"}</dd>
+          <dd>{config?.last_error ?? "なし"}</dd>
         </dl>
         {playlistId ? (
           <p>
@@ -225,15 +218,15 @@ export default async function EventYoutubePlaylistPage({
         ) : null}
       </section>
 
-      <section className="fn-console-section">
-        <h2 style={{ fontSize: 15, fontWeight: 800 }}>無料枠向けの制御</h2>
-        <ul className="fn-muted fn-text-sm" style={{ lineHeight: 1.8 }}>
+      <section className="manage-section">
+        <h2 className="fn-console-eyebrow">無料枠向けの制御</h2>
+        <ul className="fn-muted fn-text-sm" style={{ lineHeight: 1.8, margin: 0, paddingLeft: 18 }}>
           <li>既定は12時間間隔・追加のみです。</li>
           <li>再生リスト全件確認はページ分割し、差分だけを書き込みます。</li>
           <li>1回のWorker実行と1日あたりのYouTubeクォータに上限を設け、超過分は次回へ繰り越します。</li>
           <li>OAuthのクライアントID・シークレット・更新トークンはWorker secretだけに保存します。</li>
         </ul>
       </section>
-    </div>
+    </ManageEventPageShell>
   );
 }

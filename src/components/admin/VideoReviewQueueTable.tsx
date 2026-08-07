@@ -35,6 +35,22 @@ interface VideoReviewQueueTableProps {
   canApprove?: boolean;
   quickApproveAction?: QuickApproveAction;
   quickApproveHiddenFields?: Record<string, string>;
+  variant?: "admin" | "manage";
+}
+
+function visibilityCell(
+  status: string,
+  manage: boolean,
+): React.ReactElement {
+  const label = videoVisibilityLabel(status);
+  if (manage && status !== "pending") {
+    return <span className="manage-queue-muted">{label}</span>;
+  }
+  return (
+    <span className={`fn-badge ${videoVisibilityBadgeClass(status)}`}>
+      {label}
+    </span>
+  );
 }
 
 export function VideoReviewQueueTable({
@@ -45,12 +61,21 @@ export function VideoReviewQueueTable({
   canApprove = false,
   quickApproveAction,
   quickApproveHiddenFields,
+  variant = "admin",
 }: VideoReviewQueueTableProps): React.ReactElement {
+  const isManage = variant === "manage";
   const showQuickApprove =
     canApprove && quickApproveAction && rows.some((v) => v.visibility_status === "pending");
+  const tableClass = [
+    "approval-queue-table",
+    "approval-queue-table-video",
+    isManage ? "manage-video-queue" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <FnTable className="approval-queue-table approval-queue-table-video">
+    <FnTable className={tableClass}>
       <thead>
         <tr>
           <th>サムネイル</th>
@@ -67,7 +92,7 @@ export function VideoReviewQueueTable({
       <tbody>
         {rows.map((v) => (
           <tr key={v.id}>
-            <td>
+            <td className="manage-queue-col-thumb">
               <div
                 style={{
                   width: 88,
@@ -100,35 +125,48 @@ export function VideoReviewQueueTable({
             </td>
             <td style={{ fontWeight: 600, minWidth: 160 }}>{v.title}</td>
             <td>{v.display_name}</td>
-            <td>
-              <span
-                className={`fn-badge ${videoVisibilityBadgeClass(v.visibility_status)}`}
-              >
-                {videoVisibilityLabel(v.visibility_status)}
-              </span>
+            <td className="manage-queue-col-status">
+              {visibilityCell(v.visibility_status, isManage)}
             </td>
             <td className="fn-muted" title={formatUnix(v.created_at)}>
               {formatRelative(v.created_at)}
             </td>
-            <td>
+            <td className="manage-queue-col-youtube">
               {v.youtube_video_id ? (
-                <span className="fn-badge fn-badge-soft">あり</span>
+                isManage ? (
+                  <span className="manage-queue-muted">あり</span>
+                ) : (
+                  <span className="fn-badge fn-badge-soft">あり</span>
+                )
               ) : (
                 <span className="fn-badge fn-badge-warning">なし</span>
               )}
             </td>
             <td style={{ fontSize: 12, maxWidth: 140 }}>{v.stage_permission_summary}</td>
-            <td>
+            <td className="manage-queue-col-unanswered">
               {v.required_unanswered_count > 0 ? (
                 <span className="fn-badge fn-badge-warning">
                   {v.required_unanswered_count}
                 </span>
+              ) : isManage ? (
+                <span className="manage-queue-muted">0</span>
               ) : (
                 <span className="fn-muted">0</span>
               )}
             </td>
-            <td>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            <td className="manage-queue-col-actions">
+              <div
+                className={
+                  isManage
+                    ? "fn-console-row-actions manage-queue-actions"
+                    : undefined
+                }
+                style={
+                  isManage
+                    ? undefined
+                    : { display: "flex", gap: 4, flexWrap: "wrap" }
+                }
+              >
                 {canApprove ? (
                   <Link
                     href={reviewHref(v.id)}

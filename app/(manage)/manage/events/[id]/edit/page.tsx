@@ -10,11 +10,10 @@ import { events as eventsTable } from "@/lib/db/schema";
 import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { EventForm } from "@/components/admin/EventForm";
 import { DeleteEventForm } from "@/components/admin/DeleteEventForm";
-import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
-import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
+import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { Icon } from "@/components/ui/Icon";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
-import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 
 export const metadata: Metadata = { title: "イベント設定" };
 export const dynamic = "force-dynamic";
@@ -60,21 +59,21 @@ export default async function ManageEventEditPage({
   }
 
   const isAdmin = user.role === "admin";
+  const pendingCount = await getEventPendingReviewVideoCount(id);
   return (
-    <div style={manageEventAccentStyle(event.accent_color)}>
-      <ManageActiveXNotice
-        userId={user.id}
-        activeXUserId={user.active_x_user_id}
-      />
-      <ManagePageHeader
-        title={`${event.title} イベント設定`}
-        description={`ID: ${event.id}`}
-        backHref={`/manage/events/${event.id}`}
-        backLabel="イベント運営トップへ"
-        accent
-      />
-      <ManageEventTabs eventId={event.id} isAdmin={isAdmin} />
-
+    <ManageEventPageShell
+      eventId={event.id}
+      title={event.title}
+      description="イベントの基本設定・公開・投稿フォーム・枠ルールを編集します。"
+      backHref={`/manage/events/${event.id}`}
+      backLabel="イベント概要へ"
+      isAdmin={isAdmin}
+      pendingCount={pendingCount}
+      accentStyle={manageEventAccentStyle(event.accent_color)}
+      showActiveXNotice={!isAdmin}
+      userId={user.id}
+      activeXUserId={user.active_x_user_id}
+    >
       <section className="manage-slot-quicklink" aria-label="枠設定へのショートカット">
         <div>
           <strong>イベント枠を設定する</strong>
@@ -86,9 +85,10 @@ export default async function ManageEventEditPage({
         </Link>
       </section>
 
-      <section className="fn-console-section">
+      <section className="manage-section">
         <EventForm
           mode="edit"
+          variant="manage"
           draftAuthUserId={user.id}
           editableSections={{
             basic: canManageBasic,
@@ -132,17 +132,8 @@ export default async function ManageEventEditPage({
       </section>
 
       {isAdmin ? (
-        <section
-          className="fn-console-section"
-          style={{ borderColor: "var(--accent-danger)" }}
-        >
-          <h2
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: "var(--accent-danger)",
-            }}
-          >
+        <section className="manage-section fn-console-panel fn-console-panel--danger">
+          <h2 className="fn-console-panel-title" style={{ color: "var(--accent-danger)" }}>
             危険操作
           </h2>
           <p className="fn-muted fn-text-sm">
@@ -151,12 +142,6 @@ export default async function ManageEventEditPage({
           <DeleteEventForm eventId={event.id} redirectHref="/manage" />
         </section>
       ) : null}
-
-      <p style={{ marginTop: 16 }}>
-        <Link href={`/manage/events/${event.id}`} className="fn-btn fn-btn-ghost">
-          <Icon name="chevron-left" size={12} aria-hidden /> イベント運営トップへ
-        </Link>
-      </p>
-    </div>
+    </ManageEventPageShell>
   );
 }

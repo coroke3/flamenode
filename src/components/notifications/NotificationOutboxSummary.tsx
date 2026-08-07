@@ -96,7 +96,7 @@ export function NotificationOutboxSummary({
         </div>
       ) : null}
 
-      {row.dedupe_key ? (
+      {showTechnicalType && row.dedupe_key ? (
         <div style={{ fontSize: 10, color: "var(--text-muted)", wordBreak: "break-all" }}>
           重複防止キー: {row.dedupe_key}
         </div>

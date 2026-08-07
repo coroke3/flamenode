@@ -225,23 +225,17 @@ export default async function ManageNotificationsPage({
           actions={[{ href: "/manage", label: "運営トップへ", variant: "ghost" }]}
         />
       ) : (
-        <FnTable>
+        <FnTable className="manage-notifications-table">
           <thead>
             <tr>
-              <th style={{ width: 130 }}>日時</th>
               <th>通知</th>
-              <th style={{ width: 100 }}>イベント</th>
+              <th style={{ width: 130 }}>日時</th>
+              <th style={{ width: 120 }}>イベント</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((notification) => (
               <tr key={notification.id}>
-                <td style={{ verticalAlign: "top" }}>
-                  <div>{formatUnix(notification.created_at)}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                    {formatRelative(notification.created_at)}
-                  </div>
-                </td>
                 <td>
                   <NotificationOutboxSummary
                     row={notification}
@@ -250,10 +244,14 @@ export default async function ManageNotificationsPage({
                     }
                   />
                 </td>
+                <td style={{ verticalAlign: "top" }}>
+                  <div>{formatUnix(notification.created_at)}</div>
+                  <div className="fn-td-muted">{formatRelative(notification.created_at)}</div>
+                </td>
                 <td style={{ verticalAlign: "top", fontSize: 12 }}>
                   {notification.event_id ? (
                     <Link href={`/manage/events/${notification.event_id}`}>
-                      {eventTitleById.get(notification.event_id)?.slice(0, 20) ??
+                      {eventTitleById.get(notification.event_id)?.slice(0, 24) ??
                         `${notification.event_id.slice(0, 8)}…`}
                     </Link>
                   ) : (

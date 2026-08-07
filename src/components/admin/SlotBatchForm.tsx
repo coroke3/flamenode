@@ -14,11 +14,16 @@ import styles from "./SlotBatchForm.module.css";
 
 interface SlotBatchFormProps {
   eventId: string;
+  totalSlots?: number;
+  variant?: "admin" | "manage";
 }
 
 export function SlotBatchForm({
   eventId,
+  totalSlots = 0,
+  variant = "admin",
 }: SlotBatchFormProps): React.ReactElement {
+  const isManage = variant === "manage";
   const router = useRouter();
   const [mode, setMode] = React.useState<"time" | "count">("time");
   const [busy, startTransition] = React.useTransition();
@@ -71,11 +76,9 @@ export function SlotBatchForm({
     });
   };
 
-  return (
-    <div className={styles.formShell}>
-      <div
-        className={styles.modeSwitch}
-      >
+  const formBody = (
+  <>
+      <div className={styles.modeSwitch}>
         <button
           type="button"
           onClick={() => setMode("time")}
@@ -93,10 +96,7 @@ export function SlotBatchForm({
           時間なし
         </button>
       </div>
-      <form
-        onSubmit={onSubmit}
-        className={styles.batchForm}
-      >
+      <form onSubmit={onSubmit} className={styles.batchForm}>
         {mode === "time" ? (
           <>
             <div className={styles.fieldGrid}>
@@ -239,6 +239,33 @@ export function SlotBatchForm({
         }}
         onCancel={() => setConfirmClear(false)}
       />
+  </>
+  );
+
+  if (isManage && totalSlots > 0) {
+    return (
+      <details className="manage-collapsible manage-slot-batch-collapsible">
+        <summary>
+          <span>
+            <Icon name="plus" size={13} aria-hidden />
+            枠を追加・一括編集
+          </span>
+        </summary>
+        <div className="manage-collapsible-body">
+          <div className={styles.formShell}>{formBody}</div>
+        </div>
+      </details>
+    );
+  }
+
+  return (
+    <div className={styles.formShell}>
+      {isManage && totalSlots === 0 ? (
+        <p className="fn-console-note" style={{ margin: 0 }}>
+          枠がまだないため、一括生成フォームを表示しています。
+        </p>
+      ) : null}
+      {formBody}
     </div>
   );
 }

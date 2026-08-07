@@ -10,7 +10,6 @@ import {
   canAccessManageEvent,
   getManageStaffRoleForEvent,
 } from "@/lib/auth/ownership";
-import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import {
   events as eventsTable,
   auditLogs as auditLogsTable,
@@ -36,13 +35,13 @@ import {
   type ManageNotificationFilter,
 } from "@/lib/notifications/types";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
-import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
-import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
+import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { SaveEventTemplateForm } from "@/components/admin/SaveEventTemplateForm";
 import {
   lookupNotificationRecipients,
   type RecipientLookup,
 } from "@/lib/notifications/recipient";
+import { countPendingReviewVideos } from "@/lib/manage/pendingReviewVideos";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +64,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ? { title: `${ev[0].title} 運営` }
       : { title: "イベント運営" };
   } catch {
-    // Miniflare D1 が稀に transient エラーを返すため metadata で 500 を出さない
     return { title: id };
   }
 }
@@ -106,18 +104,8 @@ export default async function ManageEventPage({
     ? null
     : await getManageStaffRoleForEvent(db, user.id, id);
 
-  // 集計
-  const [pendingCount, publicCount, slotCounts] = await Promise.all([
-    db
-      .select({ c: sql<number>`COUNT(*)` })
-      .from(videosTable)
-      .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
-      .where(
-        and(
-          eq(videoEventsTable.event_id, id),
-          eq(videosTable.visibility_status, "pending"),
-        )!,
-      ),
+  const [pendingTotal, publicCount, slotCounts] = await Promise.all([
+    countPendingReviewVideos(db, id),
     db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videosTable)
@@ -146,8 +134,10 @@ export default async function ManageEventPage({
   const filledSlots = Math.max(0, totalSlots - (slotStatusMap.available ?? 0));
   const reservedSlots = slotStatusMap.reserved ?? 0;
   const submittedSlots = slotStatusMap.submitted ?? 0;
+  const publicTotal = Number(publicCount[0]?.c ?? 0);
+  const slotFillPct =
+    totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0;
 
-  // 直近の審査待ち作品
   const pendingVideos = await db
     .select({
       id: videosTable.id,
@@ -167,7 +157,6 @@ export default async function ManageEventPage({
     .orderBy(desc(videosTable.created_at))
     .limit(10);
 
-  // 当該イベントの直近 audit_logs を取得する。
   const eventAuditLogs = await db
     .select()
     .from(auditLogsTable)
@@ -180,8 +169,6 @@ export default async function ManageEventPage({
     .orderBy(desc(auditLogsTable.created_at))
     .limit(15);
 
-  // event-scoped 通知: カテゴリ別件数は DB の GROUP BY で集計し、
-  // 一覧は対象カテゴリだけ where 句で絞り込んで取得する (クライアントフィルタを廃止)。
   const categoryWhere = (cat: ManageNotificationFilter) => {
     if (cat === "all") return eq(notificationOutboxTable.event_id, id);
     return and(
@@ -201,7 +188,6 @@ export default async function ManageEventPage({
   let eventNotifications: (typeof notificationOutboxTable.$inferSelect)[] = [];
   let eventNotificationSchemaMissing = false;
   try {
-    // カテゴリ別件数集計 (GROUP BY で 1 クエリ)
     const typeCountRows = await db
       .select({
         type: notificationOutboxTable.type,
@@ -262,43 +248,100 @@ export default async function ManageEventPage({
   );
 
   return (
-    <div style={manageEventAccentStyle(ev.accent_color)}>
-      <ManageActiveXNotice
-        userId={user.id}
-        activeXUserId={user.active_x_user_id}
-      />
-      <ManagePageHeader
-        title={ev.title}
-        description={eventDateLead}
-        backHref="/manage"
-        backLabel="担当イベント一覧へ"
-        accent
+    <ManageEventPageShell
+      eventId={id}
+      title={ev.title}
+      description={eventDateLead}
+      backHref="/manage"
+      backLabel="担当イベント一覧へ"
+      isAdmin={isAdmin}
+      pendingCount={pendingTotal}
+      accentStyle={manageEventAccentStyle(ev.accent_color)}
+      showActiveXNotice
+      userId={user.id}
+      activeXUserId={user.active_x_user_id}
+      headerChildren={
+        <>
+          <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
+            {eventStatusLabel(status)}
+          </span>
+          {accepting ? (
+            <span className="fn-badge fn-badge-soft">受付中</span>
+          ) : null}
+          <span className="fn-badge fn-badge-soft">
+            {isAdmin
+              ? "管理者"
+              : editorRole === "representative"
+                ? "代表"
+                : "運営"}
+          </span>
+        </>
+      }
+    >
+      <section
+        className={`manage-section manage-attention ${
+          pendingTotal > 0 ? "manage-attention--warn" : "manage-attention--ok"
+        }`}
       >
-        <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
-          {eventStatusLabel(status)}
-        </span>
-        {accepting ? (
-          <span className="fn-badge fn-badge-soft">受付中</span>
+        <div>
+          <h2 className="manage-attention-title">
+            {pendingTotal > 0
+              ? "対応が必要です"
+              : "現在、対応が必要な作品はありません"}
+          </h2>
+          <p className="manage-attention-lead">
+            {pendingTotal > 0
+              ? `審査待ち ${pendingTotal.toLocaleString()} 件があります。`
+              : "審査待ちの作品はありません。進行状況を確認できます。"}
+          </p>
+        </div>
+        {pendingTotal > 0 ? (
+          <Link
+            href={`/manage/events/${id}/videos?status=pending`}
+            className="fn-btn fn-btn-primary fn-btn-sm"
+          >
+            審査を開始
+          </Link>
         ) : null}
-        <span className="fn-badge fn-badge-soft">
-          {isAdmin
-            ? "管理者"
-            : editorRole === "representative"
-              ? "代表"
-              : "運営"}
-        </span>
-      </ManagePageHeader>
-
-      <section className="fn-console-stat-grid">
-        <Stat label="審査待ち" value={Number(pendingCount[0]?.c ?? 0)} accent />
-        <Stat label="公開済み" value={Number(publicCount[0]?.c ?? 0)} />
-        <Stat label="枠合計" value={totalSlots} />
-        <Stat label="埋まり枠" value={filledSlots} />
-        <Stat label="確保済" value={reservedSlots} />
-        <Stat label="提出済" value={submittedSlots} />
       </section>
 
-      <ManageEventTabs eventId={id} isAdmin={isAdmin} />
+      <section className="manage-section manage-progress">
+        <div className="manage-progress-head">
+          <h2 className="manage-progress-label">進行状況</h2>
+          <span className="manage-progress-value">
+            公開作品 {publicTotal.toLocaleString()} 件
+          </span>
+        </div>
+        <div>
+          <div className="manage-progress-head" style={{ marginBottom: 6 }}>
+            <span className="manage-progress-label">枠の埋まり</span>
+            <span className="manage-progress-value">
+              {filledSlots.toLocaleString()} / {totalSlots.toLocaleString()}
+            </span>
+          </div>
+          <div
+            className="manage-progress-bar"
+            role="progressbar"
+            aria-valuenow={slotFillPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="枠の埋まり率"
+          >
+            <div
+              className="manage-progress-bar-fill"
+              style={{ width: `${slotFillPct}%` }}
+            />
+          </div>
+        </div>
+        <div className="manage-progress-stats">
+          <span>
+            確保済 <strong>{reservedSlots.toLocaleString()}</strong>
+          </span>
+          <span>
+            提出済 <strong>{submittedSlots.toLocaleString()}</strong>
+          </span>
+        </div>
+      </section>
 
       {isAdmin ? (
         <section className="fn-console-section">
@@ -316,8 +359,8 @@ export default async function ManageEventPage({
         </div>
       ) : null}
 
-      <section className="fn-console-section">
-        <h2 className="fn-console-eyebrow">直近の審査待ち作品</h2>
+      <section className="manage-section">
+        <h2 className="fn-console-eyebrow">直近の審査待ち</h2>
         {pendingVideos.length === 0 ? (
           <EmptyState
             tone="success"
@@ -329,11 +372,6 @@ export default async function ManageEventPage({
               {
                 href: `/manage/events/${id}/slots`,
                 label: "枠を見る",
-                variant: "ghost",
-              },
-              {
-                href: `/manage/events/${id}`,
-                label: "イベント運営トップへ",
                 variant: "ghost",
               },
             ]}
@@ -386,152 +424,140 @@ export default async function ManageEventPage({
       </section>
 
       {showEventNotificationsSection ? (
-        <section className="fn-console-section">
-          <h2 className="fn-console-eyebrow">イベント通知</h2>
-          <p className="fn-muted fn-text-sm fn-console-block-lead">
-            このイベントに紐づく Discord 通知の配信状況です。失敗時は内容と次の操作を確認してください。
-          </p>
-          <nav
-            aria-label="通知カテゴリフィルタ"
-            className="fn-console-filter-nav"
-          >
-            {MANAGE_NOTIFICATION_FILTER_OPTIONS.map(({ key, label }) => {
-              const href =
-                key === "all"
-                  ? `/manage/events/${id}`
-                  : `/manage/events/${id}?notif=${key}`;
-              return (
-                <Link
-                  key={key}
-                  href={href}
-                  className={`fn-btn fn-btn-sm ${notifCategory === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
-                >
-                  {label} ({notifCounts[key]})
-                </Link>
-              );
-            })}
-          </nav>
-          {eventNotifications.length === 0 ? (
+        <details className="manage-collapsible">
+          <summary>
+            イベント通知
+            <span className="fn-muted fn-text-sm">
+              {notifCounts.all.toLocaleString()} 件
+            </span>
+          </summary>
+          <div className="manage-collapsible-body">
+            <p className="fn-muted fn-text-sm fn-console-block-lead">
+              このイベントに紐づく Discord 通知の配信状況です。
+            </p>
+            <nav
+              aria-label="通知カテゴリフィルタ"
+              className="manage-filter-compact"
+            >
+              {MANAGE_NOTIFICATION_FILTER_OPTIONS.map(({ key, label }) => {
+                const href =
+                  key === "all"
+                    ? `/manage/events/${id}`
+                    : `/manage/events/${id}?notif=${key}`;
+                return (
+                  <Link
+                    key={key}
+                    href={href}
+                    aria-current={notifCategory === key ? "page" : undefined}
+                  >
+                    {label} ({notifCounts[key]})
+                  </Link>
+                );
+              })}
+            </nav>
+            {eventNotifications.length === 0 ? (
+              <EmptyState
+                tone="neutral"
+                title="該当する通知はありません"
+                description="選択中のカテゴリに一致する通知ログはありません。"
+                actions={[
+                  {
+                    href: `/manage/events/${id}`,
+                    label: "すべての通知を見る",
+                    variant: "ghost",
+                  },
+                ]}
+              />
+            ) : (
+              <FnTable>
+                <thead>
+                  <tr>
+                    <th className="fn-th-w140">日時</th>
+                    <th>通知</th>
+                    <th className="fn-th-w56">試行</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {eventNotifications.map((n) => (
+                    <tr key={n.id}>
+                      <td className="fn-td-nowrap fn-td-top">
+                        <div>{formatUnix(n.created_at)}</div>
+                        <div className="fn-td-muted">
+                          {formatRelative(n.created_at)}
+                        </div>
+                      </td>
+                      <td>
+                        <NotificationOutboxSummary
+                          row={n}
+                          recipient={
+                            recipientMap.get(n.recipient_user_id) ?? null
+                          }
+                        />
+                      </td>
+                      <td className="fn-td-tabular">{n.attempt_count ?? 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </FnTable>
+            )}
+          </div>
+        </details>
+      ) : null}
+
+      <details className="manage-collapsible">
+        <summary>
+          イベント更新履歴
+          <span className="fn-muted fn-text-sm">
+            {eventAuditLogs.length.toLocaleString()} 件
+          </span>
+        </summary>
+        <div className="manage-collapsible-body">
+          {eventAuditLogs.length === 0 ? (
             <EmptyState
-              tone="neutral"
-              title="該当する通知はありません"
-              description="選択中のカテゴリに一致する通知ログはありません。フィルタを変えるか、しばらくしてから再度確認してください。"
-              actions={[
-                {
-                  href: `/manage/events/${id}`,
-                  label: "すべての通知を見る",
-                  variant: "ghost",
-                },
-              ]}
+              tone="success"
+              title="直近の更新はありません"
+              description="このイベントに関する操作履歴は、ここに表示されます。"
+              iconName="check"
             />
           ) : (
             <FnTable>
               <thead>
                 <tr>
-                  <th className="fn-th-w140">日時</th>
-                  <th>通知</th>
-                  <th className="fn-th-w56">試行</th>
+                  <th>日時</th>
+                  <th>操作</th>
+                  <th>実行者</th>
                 </tr>
               </thead>
               <tbody>
-                {eventNotifications.map((n) => (
-                  <tr key={n.id}>
-                    <td className="fn-td-nowrap fn-td-top">
-                      <div>{formatUnix(n.created_at)}</div>
-                      <div className="fn-td-muted">
-                        {formatRelative(n.created_at)}
-                      </div>
+                {eventAuditLogs.map((h) => (
+                  <tr key={h.id}>
+                    <td className="fn-td-nowrap">
+                      <div>{formatUnix(h.created_at)}</div>
+                      <div className="fn-td-muted">{formatRelative(h.created_at)}</div>
                     </td>
                     <td>
-                      <NotificationOutboxSummary
-                        row={n}
-                        recipient={
-                          recipientMap.get(n.recipient_user_id) ?? null
-                        }
-                      />
+                      <span
+                        className={`fn-badge ${
+                          h.operation === "DELETE"
+                            ? "fn-badge-danger"
+                            : h.operation === "CREATE"
+                              ? "fn-badge-accent"
+                              : "fn-badge-soft"
+                        }`}
+                      >
+                        {h.operation}
+                      </span>
                     </td>
-                    <td className="fn-td-tabular">{n.attempt_count ?? 0}</td>
+                    <td className="fn-td-secondary">
+                      {h.actor_user_id ?? "-"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </FnTable>
           )}
-        </section>
-      ) : null}
-
-      <section className="fn-console-section">
-        <h2 className="fn-console-eyebrow">イベント更新履歴</h2>
-        {eventAuditLogs.length === 0 ? (
-          <EmptyState
-            tone="success"
-            title="直近の更新はありません"
-            description="このイベントに関する操作履歴は、ここに表示されます。"
-            iconName="check"
-            actions={[
-              {
-                href: `/manage/events/${id}`,
-                label: "イベント運営トップへ",
-                variant: "ghost",
-              },
-            ]}
-          />
-        ) : (
-          <FnTable>
-            <thead>
-              <tr>
-                <th>日時</th>
-                <th>操作</th>
-                <th>実行者</th>
-              </tr>
-            </thead>
-            <tbody>
-              {eventAuditLogs.map((h) => (
-                <tr key={h.id}>
-                  <td className="fn-td-nowrap">
-                    <div>{formatUnix(h.created_at)}</div>
-                    <div className="fn-td-muted">{formatRelative(h.created_at)}</div>
-                  </td>
-                  <td>
-                    <span
-                      className={`fn-badge ${
-                        h.operation === "DELETE"
-                          ? "fn-badge-danger"
-                          : h.operation === "CREATE"
-                            ? "fn-badge-accent"
-                            : "fn-badge-soft"
-                      }`}
-                    >
-                      {h.operation}
-                    </span>
-                  </td>
-                  <td className="fn-td-secondary">
-                    {h.actor_user_id ?? "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </FnTable>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: number;
-  accent?: boolean;
-}): React.ReactElement {
-  return (
-    <div
-      className={`fn-card fn-console-stat ${accent && value > 0 ? "fn-card-accent" : ""}`}
-    >
-      <div className="fn-console-stat-label">{label}</div>
-      <div className="fn-console-stat-value">{value.toLocaleString()}</div>
-    </div>
+        </div>
+      </details>
+    </ManageEventPageShell>
   );
 }

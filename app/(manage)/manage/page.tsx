@@ -20,6 +20,7 @@ import {
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import {
@@ -255,7 +256,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
       ) : null}
 
       <section className="fn-console-section fn-console-section--tight">
-        <h2 className="fn-console-eyebrow">担当イベント</h2>
+        <h2 className="fn-console-eyebrow">運営状況一覧</h2>
         <div className="fn-console-stack">
           {eventRows.map((ev) => {
             const status = computeEventStatus(ev);
@@ -266,7 +267,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
             return (
               <article
                 key={ev.id}
-                className="manage-event-card"
+                className="manage-event-card manage-event-status-card"
                 style={manageEventAccentStyle(ev.accent_color)}
               >
                 <div className="fn-console-event-body">
@@ -288,11 +289,20 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                       </span>
                     ) : null}
                   </div>
-                  <div className="fn-console-event-meta">
-                    {ev.start_time ? formatUnix(ev.start_time, { dateOnly: true }) : "—"}
-                    {ev.end_time
-                      ? ` 〜 ${formatUnix(ev.end_time, { dateOnly: true })}`
-                      : ""}
+                  <div className="fn-console-event-meta manage-event-status-meta">
+                    <span>
+                      {ev.start_time ? formatUnix(ev.start_time, { dateOnly: true }) : "—"}
+                      {ev.end_time
+                        ? ` 〜 ${formatUnix(ev.end_time, { dateOnly: true })}`
+                        : ""}
+                    </span>
+                    {pending > 0 ? (
+                      <span className="manage-event-status-pending">
+                        審査待ち作品 {pending} 件
+                      </span>
+                    ) : (
+                      <span className="manage-event-status-ok">審査待ちなし</span>
+                    )}
                   </div>
                 </div>
                 <div className="manage-actions">
@@ -304,9 +314,12 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                   </Link>
                   <Link
                     href={`/manage/events/${ev.id}/videos?status=pending`}
-                    className="fn-btn fn-btn-primary fn-btn-sm"
+                    className={`fn-btn fn-btn-sm ${
+                      pending > 0 ? "fn-btn-primary" : "fn-btn-ghost"
+                    }`}
                   >
-                    <Icon name="check" size={12} aria-hidden /> 審査
+                    <Icon name="check" size={12} aria-hidden />
+                    {pending > 0 ? `審査 (${pending})` : "審査"}
                   </Link>
                   <Link
                     href={`/manage/events/${ev.id}/slots`}
@@ -325,7 +338,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                       href={`/manage/events/${ev.id}/edit`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
-                      <Icon name="settings" size={12} aria-hidden /> 管理者編集
+                      <Icon name="settings" size={12} aria-hidden /> 設定
                     </Link>
                   ) : null}
                 </div>
@@ -337,14 +350,13 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
 
       {eventNotifications.length > 0 ? (
         <section className="fn-console-section">
-          <h2 className="fn-console-eyebrow">イベント通知</h2>
+          <h2 className="fn-console-eyebrow">イベント通知（直近）</h2>
           <FnTable>
             <thead>
               <tr>
-                <th>日時</th>
-                <th>イベント</th>
-                <th>type</th>
-                <th>状態</th>
+                <th>通知</th>
+                <th style={{ width: 130 }}>日時</th>
+                <th style={{ width: 120 }}>イベント</th>
               </tr>
             </thead>
             <tbody>
@@ -352,32 +364,21 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                 const ev = eventRows.find((e) => e.id === n.event_id);
                 return (
                   <tr key={n.id}>
+                    <td>
+                      <NotificationOutboxSummary row={n} />
+                    </td>
                     <td className="fn-td-nowrap">
                       <div>{formatUnix(n.created_at)}</div>
                       <div className="fn-td-muted">{formatRelative(n.created_at)}</div>
                     </td>
-                    <td>
+                    <td style={{ fontSize: 12 }}>
                       {ev ? (
                         <Link href={`/manage/events/${ev.id}`}>{ev.title}</Link>
+                      ) : n.event_id ? (
+                        <span className="fn-td-mono">{n.event_id.slice(0, 8)}…</span>
                       ) : (
-                        <span className="fn-td-mono">{n.event_id ?? "—"}</span>
+                        "—"
                       )}
-                    </td>
-                    <td className="fn-td-mono">
-                      {n.type}
-                    </td>
-                    <td>
-                      <span
-                        className={`fn-badge ${
-                          n.status === "sent"
-                            ? "fn-badge-accent"
-                            : n.status === "failed"
-                              ? "fn-badge-danger"
-                              : "fn-badge-soft"
-                        }`}
-                      >
-                        {n.status ?? "?"}
-                      </span>
                     </td>
                   </tr>
                 );

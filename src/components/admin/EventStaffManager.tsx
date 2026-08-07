@@ -42,6 +42,7 @@ interface EventStaffManagerProps {
   eventId: string;
   members: EventStaffMemberRow[];
   isSiteAdmin: boolean;
+  variant?: "admin" | "manage";
 }
 
 const BASE_PRESETS: readonly EventStaffPreset[] = [
@@ -71,11 +72,39 @@ function permissionKeysForPreset(
   return preset === "custom" ? [...customKeys] : [...getPresetPermissions(preset)];
 }
 
+function StaffAvatar({
+  iconUrl,
+  name,
+}: {
+  iconUrl: string | null;
+  name: string;
+}): React.ReactElement {
+  if (iconUrl) {
+    return (
+      /* eslint-disable-next-line @next/next/no-img-element */
+      <img
+        src={iconUrl}
+        alt=""
+        className="manage-staff-avatar"
+        width={36}
+        height={36}
+      />
+    );
+  }
+  return (
+    <span className="manage-staff-avatar manage-staff-avatar-fallback" aria-hidden>
+      {(name.trim()[0] ?? "?").toUpperCase()}
+    </span>
+  );
+}
+
 export function EventStaffManager({
   eventId,
   members,
   isSiteAdmin,
+  variant = "admin",
 }: EventStaffManagerProps): React.ReactElement {
+  const isManage = variant === "manage";
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
@@ -83,6 +112,10 @@ export function EventStaffManager({
     message: string;
     pendingPublicReflection?: boolean;
   } | null>(null);
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = React.useState(false);
+
+  const ownerCount = members.filter((row) => row.permission_preset === "owner").length;
 
   const run = (
     action: () => Promise<{
@@ -104,12 +137,13 @@ export function EventStaffManager({
         message: result.message ?? okMessage,
         pendingPublicReflection: result.pendingPublicReflection,
       });
+      setShowAddForm(false);
       router.refresh();
     });
   };
 
   return (
-    <div className="manage-permission-panel" style={{ display: "grid", gap: 22 }}>
+    <div className="manage-permission-panel">
       {error ? (
         <p role="alert" className="fn-alert fn-alert--danger" style={{ margin: 0 }}>
           <Icon name="warning" size={13} aria-hidden /> {error}
@@ -127,42 +161,138 @@ export function EventStaffManager({
         />
       ) : null}
 
-      <section className="manage-permission-members" style={{ display: "grid", gap: 10 }}>
-        <h3 className="fn-console-card-title">登録メンバー ({members.length})</h3>
-        {members.map((member) => (
-          <MemberEditor
-            key={member.id}
+      <section className="manage-permission-members">
+        <div className="manage-staff-list-head">
+          <h3 className="fn-console-card-title">登録メンバー ({members.length})</h3>
+          {isManage ? (
+            <button
+              type="button"
+              className="fn-btn fn-btn-primary fn-btn-sm"
+              disabled={busy}
+              onClick={() => {
+                setShowAddForm((current) => !current);
+                setExpandedId(null);
+              }}
+            >
+              <Icon name="plus" size={12} aria-hidden />
+              運営メンバーを追加
+            </button>
+          ) : null}
+        </div>
+
+        <ul className="manage-staff-list">
+          {members.map((member) => {
+            const preset = member.permission_preset;
+            const presetLabel =
+              preset && preset in PRESET_DEFINITIONS
+                ? PRESET_DEFINITIONS[preset as keyof typeof PRESET_DEFINITIONS].label
+                : "未設定";
+            const displayName = member.x_name ?? member.display_name;
+            const isExpanded = expandedId === member.id;
+
+            return (
+              <li key={member.id} className="manage-staff-list-item">
+                <button
+                  type="button"
+                  className="manage-staff-list-row"
+                  aria-expanded={isExpanded}
+                  onClick={() =>
+                    setExpandedId((current) =>
+                      current === member.id ? null : member.id,
+                    )
+                  }
+                >
+                  <StaffAvatar iconUrl={member.icon_url} name={displayName} />
+                  <span className="manage-staff-list-main">
+                    <strong>{displayName}</strong>
+                    <span className="manage-staff-list-xid">@{member.x_user_id}</span>
+                  </span>
+                  <span className="manage-staff-list-badges">
+                    {preset === "owner" ? (
+                      <span className="fn-badge fn-badge-warning">代表者</span>
+                    ) : null}
+                    <span className="fn-badge fn-badge-soft">{presetLabel}</span>
+                    <span className="fn-badge fn-badge-neutral">
+                      {member.is_public === 1 ? "公開" : "非公開"}
+                    </span>
+                  </span>
+                  <Icon
+                    name={isExpanded ? "chevron-up" : "chevron-down"}
+                    size={14}
+                    aria-hidden
+                    className="manage-staff-list-chevron"
+                  />
+                </button>
+                {isExpanded ? (
+                  <MemberEditor
+                    eventId={eventId}
+                    member={member}
+                    ownerCount={ownerCount}
+                    isSiteAdmin={isSiteAdmin}
+                    busy={busy}
+                    onRun={run}
+                    onClose={() => setExpandedId(null)}
+                  />
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      {isManage && showAddForm ? (
+        <AddMemberForm
+          eventId={eventId}
+          isSiteAdmin={isSiteAdmin}
+          busy={busy}
+          onRun={run}
+          onCancel={() => setShowAddForm(false)}
+        />
+      ) : !isManage ? (
+        <AddMemberForm
+          eventId={eventId}
+          isSiteAdmin={isSiteAdmin}
+          busy={busy}
+          onRun={run}
+        />
+      ) : null}
+
+      {isManage ? (
+        <details className="manage-collapsible manage-staff-advanced">
+          <summary>詳細な管理（代表権移譲・CSV）</summary>
+          <div className="manage-collapsible-body">
+            <OwnershipTransferForm
+              eventId={eventId}
+              members={members}
+              busy={busy}
+              onRun={run}
+            />
+            <StaffCsvImport
+              eventId={eventId}
+              members={members}
+              isSiteAdmin={isSiteAdmin}
+              busy={busy}
+              onRun={run}
+            />
+          </div>
+        </details>
+      ) : (
+        <>
+          <OwnershipTransferForm
             eventId={eventId}
-            member={member}
-            ownerCount={members.filter((row) => row.permission_preset === "owner").length}
+            members={members}
+            busy={busy}
+            onRun={run}
+          />
+          <StaffCsvImport
+            eventId={eventId}
+            members={members}
             isSiteAdmin={isSiteAdmin}
             busy={busy}
             onRun={run}
           />
-        ))}
-      </section>
-
-      <AddMemberForm
-        eventId={eventId}
-        isSiteAdmin={isSiteAdmin}
-        busy={busy}
-        onRun={run}
-      />
-
-      <OwnershipTransferForm
-        eventId={eventId}
-        members={members}
-        busy={busy}
-        onRun={run}
-      />
-
-      <StaffCsvImport
-        eventId={eventId}
-        members={members}
-        isSiteAdmin={isSiteAdmin}
-        busy={busy}
-        onRun={run}
-      />
+        </>
+      )}
     </div>
   );
 }
@@ -174,6 +304,7 @@ function MemberEditor({
   isSiteAdmin,
   busy,
   onRun,
+  onClose,
 }: {
   eventId: string;
   member: EventStaffMemberRow;
@@ -181,6 +312,7 @@ function MemberEditor({
   isSiteAdmin: boolean;
   busy: boolean;
   onRun: (action: () => Promise<{ ok: boolean; message?: string }>) => void;
+  onClose?: () => void;
 }): React.ReactElement {
   const [preset, setPreset] = React.useState<EventStaffPreset>(() =>
     normalizePreset(member.permission_preset),
@@ -188,12 +320,12 @@ function MemberEditor({
   const [customKeys, setCustomKeys] = React.useState<string[]>(
     member.permission_keys,
   );
+  const [showDelete, setShowDelete] = React.useState(false);
   const isLastOwner = member.permission_preset === "owner" && ownerCount === 1;
 
   return (
     <form
-      className="fn-card"
-      style={{ padding: 14, display: "grid", gap: 12 }}
+      className="manage-staff-editor"
       onSubmit={(event) => {
         event.preventDefault();
         const fd = new FormData(event.currentTarget);
@@ -207,44 +339,6 @@ function MemberEditor({
         onRun(() => upsertEventStaffMember(fd));
       }}
     >
-      <header className="manage-permission-member-head" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <strong>{member.x_name ?? member.display_name}</strong>
-          <div className="fn-muted" style={{ fontSize: 11 }}>
-            @{member.x_user_id}
-          </div>
-          {member.permission_preset === "owner" ? (
-            <span className="fn-badge fn-badge-warning">代表者</span>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          disabled={busy || isLastOwner}
-          title={
-            isLastOwner
-              ? "最後の代表者は削除できません。先に代表権限を移譲してください。"
-              : undefined
-          }
-          onClick={() => {
-            const form = document.createElement("form");
-            const fd = new FormData(form);
-            fd.set("event_id", eventId);
-            fd.set("staff_id", member.id);
-            fd.set("reason", `イベントスタッフ ${member.x_user_id} を削除`);
-            const confirmText = window.prompt(
-              `自己操作の場合は REMOVE SELF ${eventId} を入力してください。対象外なら空欄で続行します。`,
-              "",
-            );
-            if (confirmText === null) return;
-            fd.set("confirm_text", confirmText);
-            onRun(() => removeEventStaffMember(fd));
-          }}
-        >
-          <Icon name="trash" size={12} aria-hidden /> 削除
-        </button>
-      </header>
-
       <input type="hidden" name="x_user_id" value={member.x_user_id} />
       <div className="manage-permission-fields">
         <label className="fn-label">
@@ -321,13 +415,7 @@ function MemberEditor({
         </p>
       ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 8,
-        }}
-      >
+      <div className="manage-staff-editor-meta">
         <label className="fn-label">
           変更理由
           <input name="reason" className="fn-input" required maxLength={500} />
@@ -341,9 +429,62 @@ function MemberEditor({
           />
         </label>
       </div>
-      <button className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}>
-        変更を保存
-      </button>
+
+      <div className="manage-staff-editor-actions">
+        <button className="fn-btn fn-btn-primary fn-btn-sm" disabled={busy}>
+          変更を保存
+        </button>
+        {onClose ? (
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={onClose}
+          >
+            閉じる
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="fn-btn fn-btn-danger fn-btn-sm"
+          disabled={busy || isLastOwner}
+          title={
+            isLastOwner
+              ? "最後の代表者は削除できません。先に代表権限を移譲してください。"
+              : undefined
+          }
+          onClick={() => setShowDelete((current) => !current)}
+        >
+          <Icon name="trash" size={12} aria-hidden /> 削除
+        </button>
+      </div>
+
+      {showDelete && !isLastOwner ? (
+        <div className="manage-staff-delete-panel">
+          <p className="fn-console-note">
+            @{member.x_user_id} を運営メンバーから削除します。
+          </p>
+          <button
+            type="button"
+            className="fn-btn fn-btn-danger fn-btn-sm"
+            disabled={busy}
+            onClick={() => {
+              const fd = new FormData();
+              fd.set("event_id", eventId);
+              fd.set("staff_id", member.id);
+              fd.set("reason", `イベントスタッフ ${member.x_user_id} を削除`);
+              const confirmText = window.prompt(
+                `自己操作の場合は REMOVE SELF ${eventId} を入力してください。対象外なら空欄で続行します。`,
+                "",
+              );
+              if (confirmText === null) return;
+              fd.set("confirm_text", confirmText);
+              onRun(() => removeEventStaffMember(fd));
+            }}
+          >
+            削除を確定
+          </button>
+        </div>
+      ) : null}
     </form>
   );
 }
@@ -353,19 +494,32 @@ function AddMemberForm({
   isSiteAdmin,
   busy,
   onRun,
+  onCancel,
 }: {
   eventId: string;
   isSiteAdmin: boolean;
   busy: boolean;
   onRun: (action: () => Promise<{ ok: boolean; message?: string }>) => void;
+  onCancel?: () => void;
 }): React.ReactElement {
   const [preset, setPreset] = React.useState<EventStaffPreset>("manager");
   const [customKeys, setCustomKeys] = React.useState<string[]>([]);
   return (
-    <section className="fn-card" style={{ padding: 14 }}>
-      <h3 className="fn-console-card-title">メンバーを追加</h3>
+    <section className="manage-staff-add">
+      <div className="manage-staff-add-head">
+        <h3 className="fn-console-card-title">メンバーを追加</h3>
+        {onCancel ? (
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={onCancel}
+          >
+            閉じる
+          </button>
+        ) : null}
+      </div>
       <form
-        style={{ display: "grid", gap: 10 }}
+        className="manage-staff-add-form"
         onSubmit={(event) => {
           event.preventDefault();
           const fd = new FormData(event.currentTarget);
@@ -375,13 +529,7 @@ function AddMemberForm({
           onRun(() => upsertEventStaffMember(fd));
         }}
       >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 8,
-          }}
-        >
+        <div className="manage-staff-add-fields">
           <input
             name="display_name"
             placeholder="表示名"
@@ -455,10 +603,10 @@ function OwnershipTransferForm({
   const owners = members.filter((member) => member.permission_preset === "owner");
   if (owners.length === 0 || members.length < 2) return null;
   return (
-    <section className="fn-card" style={{ padding: 14, borderColor: "var(--accent-danger)" }}>
+    <section className="manage-staff-advanced-section">
       <h3 className="fn-console-card-title">代表権限の移譲</h3>
       <form
-        style={{ display: "grid", gap: 8 }}
+        className="manage-staff-advanced-form"
         onSubmit={(event) => {
           event.preventDefault();
           const fd = new FormData(event.currentTarget);
@@ -525,7 +673,7 @@ function StaffCsvImport({
     [text, members, isSiteAdmin],
   );
   return (
-    <section className="fn-card" style={{ padding: 14, display: "grid", gap: 10 }}>
+    <section className="manage-staff-advanced-section">
       <h3 className="fn-console-card-title">スタッフCSV</h3>
       <textarea
         className="fn-input"
@@ -584,13 +732,7 @@ function PermissionChecklist({
     (key) => isSiteAdmin || !isAdminOnlyKey(key),
   );
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-        gap: 6,
-      }}
-    >
+    <div className="manage-permission-checklist">
       {keys.map((key: PermissionKey) => (
         <label key={key} className="fn-label">
           <input

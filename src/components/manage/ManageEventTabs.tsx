@@ -16,6 +16,7 @@ import { ManageEventMoreMenu } from "./ManageEventMoreMenu";
 interface ManageEventTabsProps {
   eventId: string;
   isAdmin?: boolean;
+  pendingCount?: number;
 }
 
 const PRIMARY_ITEMS: Array<{
@@ -56,6 +57,7 @@ const PRIMARY_ITEMS: Array<{
 export function ManageEventTabs({
   eventId,
   isAdmin = false,
+  pendingCount,
 }: ManageEventTabsProps): React.ReactElement {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -95,11 +97,7 @@ export function ManageEventTabs({
             <Link
               key={item.key}
               href={href}
-              className={`fn-btn fn-btn-sm ${
-                selected
-                  ? "fn-btn-primary"
-                  : "fn-btn-ghost"
-              }`}
+              className={selected ? "is-active" : undefined}
               aria-current={
                 selected ? "page" : undefined
               }
@@ -110,6 +108,13 @@ export function ManageEventTabs({
                 aria-hidden
               />
               {item.label}
+              {item.key === "pending" &&
+              pendingCount != null &&
+              pendingCount > 0 ? (
+                <span className="fn-console-event-tab-count">
+                  {pendingCount}
+                </span>
+              ) : null}
             </Link>
           );
         })}
