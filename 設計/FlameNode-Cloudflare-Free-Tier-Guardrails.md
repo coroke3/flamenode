@@ -1,5 +1,8 @@
 # FlameNode Cloudflare 無料枠・課金抑制設計
 
+> Status: Active
+> Last verified: 2026-08-07
+
 ## 1. 目的
 
 FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発生しにくい構成にする。Webは `flamenode-web`（OpenNext）と Workers Static Assets、デプロイは Workers Builds を現行正本とする。使用量は運用者が Cloudflare Dashboard で確認し、必要な場合に管理画面からサイト機能を段階的に制限・解除・一時許可する。
@@ -33,6 +36,8 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 
 安全圏の目安は以下とする。アプリが使用量やしきい値を収集・判定するものではなく、運用者が Cloudflare Dashboard を確認するときの判断材料とする。
 
+**§3-1 表の economy / read_only 列は、管理者が `/admin/cost-guard` で手動設定した mode の効果を記述する。** 使用量 collector や自動しきい値判定は存在せず、Cloudflare 使用量を理由に `operation_mode` が自動遷移することはない。Durable Object による閲覧数サンプリング（economy 時 50%、read_only 時停止）は設計意図であり、使用量収集 Worker から自動起動されるものではない。
+
 | 指標 | 無料枠上の主なネック | 安全圏の運用目安 |
 | :--- | :--- | :--- |
 | 公開ページ閲覧 | Workers 100,000 requests/day | トップ、一覧、イベント詳細は静的アセットまたはR2 JSON配信に寄せ、Web Worker を呼ぶ閲覧を1日3万回未満に抑える。 |
@@ -52,7 +57,14 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 
 `system_settings.operation_mode` で現在の制限状態を管理する。使用量collectorや自動しきい値判定は持たず、管理者が理由を入力して手動変更する。
 
-| モード | 手動選択の目安 | 停止・制限する機能 |
+### 4-0. 自動 CostGuard 禁止（不変条件）
+
+- FlameNode は Cloudflare 使用量を理由として `operation_mode` を**自動変更しない**。
+- 無料枠使用量によるユーザー向け機能制限は、管理者の手動操作（`/admin/cost-guard`）のみ。
+- D1 budget / YouTube API quota / Discord 429 バックオフ / ExternalRequestBudget / Queue batch 上限は**ランタイム安全装置**であり、機能制限（CostGuard）ではない。これらは `operation_mode` を書き換えない。
+- `auto_cost_guard_enabled` / `cost_guard_thresholds_json` / `cost_usage_snapshots` は最終 schema に存在しない。新たな自動しきい値を発明しない。
+
+| モード | 手動選択の運用目安 | 停止・制限する機能 |
 | :--- | :--- | :--- |
 | `normal` | 通常 | 全機能を通常運用する。 |
 | `economy` | 目安70%到達 | パーソナライズ推薦、詳細分析、即時スコア再計算、重い検索を抑制する。閲覧数計測は既定50%サンプリングにする。 |
@@ -94,7 +106,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 - YouTube API / OGP 同期
 - 詳細な内部閲覧数計測
 
-Durable Object が危険水位に入った場合は即停止ではなく、閲覧数計測を10%サンプリングへ下げる。`read_only` 以上では新規計測を止め、止めた閲覧数イベントは後から補完しない。サンプリング中の公開表示値は、通常時の推定に近づけるため補正値として表示する。
+Durable Object が危険水位に入った場合は即停止ではなく、閲覧数計測を10%サンプリングへ下げる（**管理者が economy mode を手動設定している場合の設計意図**）。`read_only` 以上では新規計測を止め、止めた閲覧数イベントは後から補完しない。サンプリング中の公開表示値は、通常時の推定に近づけるため補正値として表示する。
 
 ## 6. データ設計
 
@@ -121,7 +133,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 `/admin/cost-guard` に手動コストガードパネルを置く。
 
 - 現在の `operation_mode`
-- 現在の停止機能
+- 現在の停止機能（表示のみ。編集は admin spreadsheet import）
 - 前回の変更理由・変更者・変更時刻
 - 手動モード変更
 - 15分の機能別一時許可と明示解除
@@ -133,7 +145,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - `normal` へ戻す
 - `economy` / `read_only` / `static_only` へ手動変更する
 - 専用操作で `maintenance` へ移行・解除する
-- 特定機能だけ停止する
+- admin spreadsheet import で `disabled_features_json` を更新する（cost-guard UI では編集しない）
 - 許可リスト内の機能を1〜8件選び、15分だけ一時的に許可する
 
 モード変更、メンテナンス変更、一時許可、例外解除は理由入力と確認文字列を要求し、完全な before / after を監査ログへ残す。一時許可は設定時刻から厳密に15分で終了し、任意時間への変更や自動延長は行わない。
@@ -180,7 +192,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - KV書き込みが危険水位に入った場合、D1へ退避して二重に枯渇させるのではなく、即時ログや軽量フラグ更新をオンメモリまたは破棄へ切り替える。
 - 内部閲覧数は `POST /api/videos/[id]/view` から D1 を直接更新しない。Durable Object を正の短期集約先として動画ID・時間帯単位でプールし、Cron Worker が1時間ごとに D1 へバルク反映する。KV 時間帯バケットは主経路にせず、緊急時のフォールバックに留める。どの方式でも1再生1書き込みは禁止する。未反映カウントは24時間保持し、反映できないまま期限を迎える場合は管理者通知と監査ログに残す。
 - 内部閲覧数や推薦シグナルは全件保存せず、6時間セッション単位の重複排除とサンプリングを行う。`economy` 以上では既定50%サンプリングにし、`read_only` 以上では新規計測を書き込まない。`read_only` 中に止めた閲覧数イベントは後から補完しない。
-- Cron は統合し、1回の処理で JSON 生成、古い一時ファイル削除、使用量チェックをまとめる。
+- Cron は統合し、1回の処理で JSON 生成、古い一時ファイル削除をまとめる（使用量チェックや自動 mode 変更は含めない）。
 - 月間の D1 読み書き、または Workers 要求が無料枠の80%を常に超える状態が2か月続いた場合、有料化または構成見直しの判断ラインにする。
 
 ## 10. 参照元

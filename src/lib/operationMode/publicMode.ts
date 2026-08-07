@@ -60,6 +60,9 @@ async function readOperationModeFromD1(db: DB): Promise<OperationMode | null> {
  * 4. allowD1 時のみ D1 system_settings
  * 5. すべて失敗 → static_only（normal へは倒さない）
  *
+ * 手順 5 の fail-closed はインフラ障害時の配信安全策であり、
+ * Cloudflare 使用量に基づく自動 CostGuard ではない。
+ *
  * KV と D1 が不一致のとき:
  * 強制 env > isolate TTL 内キャッシュ > KV > D1
  */

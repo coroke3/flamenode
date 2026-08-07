@@ -32,7 +32,7 @@ export async function isDegradedD1CircuitOpen(): Promise<boolean> {
   }
 }
 
-/** R2 静的 JSON miss を記録し、閾値超過時にサーキットを open にする。 */
+/** R2 静的 JSON miss を記録し、閾値超過時にサーキットを open にする（配信安全装置。無料枠 CostGuard ではない）。 */
 export async function recordDegradedCircuitR2Miss(
   nowMs: number = Date.now(),
 ): Promise<void> {

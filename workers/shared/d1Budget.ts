@@ -9,7 +9,7 @@ const ASYNC_STATEMENT_METHODS = new Set<PropertyKey>([
   "raw",
 ] satisfies AsyncStatementMethod[]);
 
-/** D1 Free の 50 statements/invocation 手前で安全停止する。 */
+/** D1 Free の 50 statements/invocation 手前で安全停止する。operation_mode は変更しない（ランタイム安全装置）。 */
 export const D1_QUERY_SOFT_LIMIT = 40;
 
 export type D1Budget = {

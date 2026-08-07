@@ -62,3 +62,61 @@ test("expired, malformed, and unknown overrides never bypass", () => {
   assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: "not-json" }), { blocked: true, reason: "feature" });
   assert.deepEqual(evaluateCostGuardCore({ ...base, exceptionUntil: 200, exceptionFeaturesJson: '["unknown"]' }), { blocked: true, reason: "feature" });
 });
+
+test("normal mode with no disabled features allows writes without budget input", () => {
+  const base = {
+    operationMode: "normal",
+    disabledFeaturesJson: null,
+    exceptionUntil: null,
+    exceptionFeaturesJson: null,
+    now: 100,
+  };
+  assert.deepEqual(
+    evaluateCostGuardCore({ ...base, feature: "edit_video" }),
+    { blocked: false },
+  );
+  assert.deepEqual(
+    evaluateCostGuardCore({ ...base, feature: "post_video_unslotted" }),
+    { blocked: false },
+  );
+});
+
+test("economy mode does not block writes when feature is not disabled", () => {
+  const base = {
+    operationMode: "economy",
+    disabledFeaturesJson: null,
+    exceptionUntil: null,
+    exceptionFeaturesJson: null,
+    now: 100,
+  };
+  assert.deepEqual(
+    evaluateCostGuardCore({ ...base, feature: "edit_video" }),
+    { blocked: false },
+  );
+  assert.deepEqual(
+    evaluateCostGuardCore({
+      ...base,
+      disabledFeaturesJson: '["post_video_unslotted"]',
+      feature: "edit_video",
+    }),
+    { blocked: false },
+  );
+  assert.deepEqual(
+    evaluateCostGuardCore({
+      ...base,
+      disabledFeaturesJson: '["edit_video"]',
+      feature: "edit_video",
+    }),
+    { blocked: true, reason: "feature" },
+  );
+});
+
+test("evaluateCostGuardCore inputs are mode, disabled features, and optional override only", async () => {
+  const coreSource = await readFile(new URL("./writeGuardCore.ts", import.meta.url), "utf8");
+  assert.match(coreSource, /operationMode:/);
+  assert.match(coreSource, /disabledFeaturesJson:/);
+  assert.doesNotMatch(coreSource, /d1Budget/);
+  assert.doesNotMatch(coreSource, /quotaBudget/);
+  assert.doesNotMatch(coreSource, /ExternalRequestBudget/);
+  assert.doesNotMatch(coreSource, /cost_usage_snapshot/);
+});

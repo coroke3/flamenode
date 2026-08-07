@@ -10,6 +10,7 @@ import {
   isSpreadsheetSecretColumn,
   isSpreadsheetTableBlocklisted,
   SPREADSHEET_COLUMN_POLICIES,
+  SPREADSHEET_COST_GUARD_READONLY_COLUMNS,
   primaryKeysFromColumns,
   resolveSpreadsheetTableDef,
 } from "./registry.ts";
@@ -80,4 +81,13 @@ test("secret columns and readonly tables remain protected", () => {
   assert.equal(isSpreadsheetSecretColumn("display_name"), false);
   assert.equal(isSpreadsheetColumnEditable(user, "display_name"), true);
   assert.equal(resolveSpreadsheetTableDef("account", true).mode, "readonly");
+});
+
+test("system_settings CostGuard canonical columns are spreadsheet-readonly", () => {
+  const def = resolveSpreadsheetTableDef("system_settings", true);
+  for (const column of SPREADSHEET_COST_GUARD_READONLY_COLUMNS) {
+    assert.equal(isSpreadsheetColumnEditable(def, column), false, column);
+  }
+  assert.equal(isSpreadsheetColumnEditable(def, "operation_mode"), false);
+  assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), true);
 });

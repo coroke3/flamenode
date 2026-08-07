@@ -406,6 +406,7 @@ async function discordFailure(
   cooldownKvWriteBudget: ExternalRequestBudget,
   signal?: AbortSignal,
 ): Promise<DeliveryOutcome> {
+  // Discord 429: runtime delivery safety (cooldown / next_attempt_at). Does not mutate operation_mode.
   throwIfAborted(signal);
   let retryAfterMs = parseRetryAfterMs(
     response.headers.get("retry-after"),
