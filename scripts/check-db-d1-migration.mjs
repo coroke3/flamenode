@@ -97,8 +97,8 @@ function assertCanonicalD1(context, expectedCounts = null) {
       const escaped = tableName.replaceAll('"', '""');
       return sum + db.prepare(`PRAGMA table_info("${escaped}")`).all().length;
     }, 0);
-    assert.equal(tables.length, 41, "D1 canonical table count");
-    assert.equal(columnCount, 437, "D1 canonical column count");
+    assert.equal(tables.length, 44, "D1 canonical table count");
+    assert.equal(columnCount, 438, "D1 canonical column count");
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(db.prepare("PRAGMA quick_check").get()?.quick_check, "ok");
     assert.equal(

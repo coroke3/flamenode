@@ -31,6 +31,7 @@ import {
   canActAsSlotActor,
   resolveSlotViewerRelation,
 } from "@/lib/slots/slotIdentityCore";
+import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,7 @@ export default async function EventSlotsPage({
         status: slotsTable.status,
         display_name: slotsTable.display_name,
         x_user_id: slotsTable.x_user_id,
+        reserved_x_id_snapshot: slotsTable.reserved_x_id_snapshot,
         reserved_by_user_id: slotsTable.reserved_by_user_id,
         reservation_group_id: slotsTable.reservation_group_id,
       })
@@ -139,7 +141,7 @@ export default async function EventSlotsPage({
       activeXId: viewer?.active_x_user_id ?? null,
     });
     const isOwnedByViewer = canActAsSlotActor(viewerRelation);
-    const showDisplayName =
+    const canReveal =
       viewerRelation === "active" ||
       viewerRelation === "unassigned" ||
       viewerRelation === "account_other" ||
@@ -160,7 +162,10 @@ export default async function EventSlotsPage({
       start_time: slot.start_time,
       sort_order: slot.sort_order,
       status: slot.status,
-      display_name: showDisplayName ? slot.display_name : null,
+      display_name: canReveal ? slot.display_name : null,
+      reserved_x_id: canReveal
+        ? (slot.reserved_x_id_snapshot ?? slot.x_user_id)
+        : null,
       is_owned_by_viewer: isOwnedByViewer,
       viewer_relation: viewerRelation,
       group_key: groupKey,
@@ -177,6 +182,29 @@ export default async function EventSlotsPage({
       ? Math.min(100, Math.round((filledSlots / slotTotal) * 100))
       : 0;
   const slotPartGapSec = (event.slot_part_gap_minutes ?? 15) * 60;
+
+  let viewerXId: string | null = null;
+  let viewerXIdNotice: string | null = null;
+  if (viewer?.id && onboarding.canReserveSlot) {
+    const identity = await withDatabase((db) =>
+      resolveReservationXIdentity(db, {
+        user: { id: viewer.id },
+        activeXId: viewer.active_x_user_id,
+        approvedXIds: onboarding.activeApprovedXId
+          ? [onboarding.activeApprovedXId]
+          : [],
+        hasPendingXRequest: onboarding.xIdentityStatus === "pending",
+      }),
+    );
+    if (!identity) {
+      viewerXId = null;
+    } else if ("error" in identity) {
+      viewerXId = null;
+      viewerXIdNotice = identity.error;
+    } else {
+      viewerXId = identity.snapshotXId;
+    }
+  }
 
   return (
     <div
@@ -255,14 +283,22 @@ export default async function EventSlotsPage({
         </p>
       ) : null}
 
+      {viewerXIdNotice ? (
+        <p className={styles.notice}>
+          <Icon name="info" size={13} aria-hidden /> {viewerXIdNotice}
+        </p>
+      ) : null}
+
       <div className={styles.layout}>
         <div className={styles.main}>
           <SlotGrid
             slots={slotsForUi}
-            viewerXId={viewer?.active_x_user_id ?? null}
+            viewerXId={viewerXId}
             isAuthenticated={Boolean(viewer?.id)}
             canReserve={accepting}
-            canTakeSlot={accepting && onboarding.canReserveSlot}
+            canTakeSlot={
+              accepting && onboarding.canReserveSlot && viewerXId != null
+            }
             slotType={(event.slot_type ?? "time") as "time" | "count"}
             maxSlotsPerVideo={event.max_slots_per_video ?? 1}
             slotPartGapSec={slotPartGapSec}

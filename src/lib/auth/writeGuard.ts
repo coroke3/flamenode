@@ -1,9 +1,10 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { getCurrentUser, type CurrentUser } from "./currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import { systemSettings, xIdentityRequests, xUsers } from "@/lib/db/schema";
+import { pendingSlotReservationXRequestWhere } from "@/lib/slots/reservationIdentity";
 import { getApprovedXIds } from "./ownership";
 import {
   evaluateActiveXWriteAccess,
@@ -204,12 +205,8 @@ export async function writeGuard(
         await db
           .select({ id: xIdentityRequests.id })
           .from(xIdentityRequests)
-          .where(
-            and(
-              eq(xIdentityRequests.requested_by_auth_user_id, user.id),
-              eq(xIdentityRequests.status, "pending"),
-            )!,
-          )
+          .where(pendingSlotReservationXRequestWhere(user.id))
+          .orderBy(desc(xIdentityRequests.requested_at), desc(xIdentityRequests.id))
           .limit(1)
       )[0];
       hasPendingXRequest = Boolean(pendingRow);

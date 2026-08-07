@@ -123,6 +123,9 @@ export function SlotStatusBoard({
   const selectedOwner = slotOwnerLabel(selected);
   const selectedTime = slotTimeLabel(selected);
   const selectedDate = slotDateLabel(selected);
+  const canShowIdentity =
+    Boolean(selected?.display_name?.trim()) ||
+    Boolean(selected?.is_owned_by_viewer);
 
   return (
     <section className={styles.board} aria-label="枠の状態">
@@ -148,11 +151,21 @@ export function SlotStatusBoard({
           <dt>時刻</dt>
           <dd>{selectedTime}</dd>
         </div>
-        {selectedOwner ? (
-          <div>
-            <dt>名義</dt>
-            <dd>{selectedOwner}</dd>
-          </div>
+        {canShowIdentity && (selectedOwner || selected?.reserved_x_id) ? (
+          <>
+            {selectedOwner ? (
+              <div>
+                <dt>名義</dt>
+                <dd>{selectedOwner}</dd>
+              </div>
+            ) : null}
+            {selected?.reserved_x_id ? (
+              <div>
+                <dt>X ID</dt>
+                <dd className={styles.reservedXId}>@{selected.reserved_x_id}</dd>
+              </div>
+            ) : null}
+          </>
         ) : null}
         {selectedGroupInfo ? (
           <div>

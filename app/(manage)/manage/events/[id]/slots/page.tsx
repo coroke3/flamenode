@@ -18,6 +18,8 @@ import {
 
   slots as slotsTable,
 
+  users as usersTable,
+
 } from "@/lib/db/schema";
 
 import { canEditEvent } from "@/lib/auth/ownership";
@@ -197,7 +199,13 @@ export default async function ManageEventSlotsPage({
 
       x_user_id: slotsTable.x_user_id,
 
+      reserved_x_id_snapshot: slotsTable.reserved_x_id_snapshot,
+
       reserved_by_user_id: slotsTable.reserved_by_user_id,
+
+      discord_display_name: usersTable.name,
+
+      discord_id: usersTable.discord_id,
 
       reservation_group_id: slotsTable.reservation_group_id,
 
@@ -210,6 +218,8 @@ export default async function ManageEventSlotsPage({
     })
 
     .from(slotsTable)
+
+    .leftJoin(usersTable, eq(slotsTable.reserved_by_user_id, usersTable.id))
 
     .where(where)
 

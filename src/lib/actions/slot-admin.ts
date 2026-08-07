@@ -20,7 +20,7 @@ import {
   type NotificationOutboxStatement,
 } from "@/lib/notifications/enqueue";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
-import { buildSlotChangeQueueBatch, topSlotStatsGlobalTarget } from "@/lib/staticRebuild/hooks";
+import { buildSlotChangeQueueBatch, topGlobalTarget } from "@/lib/staticRebuild/hooks";
 import {
   markPendingPublicReflection,
   type PendingPublicReflection,
@@ -28,10 +28,6 @@ import {
 import { MAX_ATOMIC_SLOT_ROWS, MAX_SLOT_BATCH_GENERATE_COUNT } from "@/lib/slots/atomicLimits";
 import { MAX_SLOTS_PER_VIDEO } from "@/lib/slots/limits";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
-import {
-  computeCountModeSlotBatchCount,
-  computeTimeModeSlotBatchCount,
-} from "@/lib/slots/batchGenerateCount";
 
 export interface SlotActionResult extends PendingPublicReflection {
   ok: boolean;
@@ -256,21 +252,17 @@ export async function generateSlotsBatch(
   if (data.mode === "time") {
     const start = parseJstDatetimeLocal(data.start_at);
     const end = parseJstDatetimeLocal(data.end_at);
-    const countCheck = computeTimeModeSlotBatchCount(
-      start,
-      end,
-      data.interval_minutes,
-    );
-    if (!countCheck.ok) {
-      return { ok: false, message: countCheck.message };
+    if (!start || !end || end <= start) {
+      return { ok: false, message: "開始・終了日時を正しく指定してください。" };
     }
     const interval = data.interval_minutes * 60;
-    for (let cursor = start!, order = 0; cursor + interval <= end!; cursor += interval) {
+    for (let cursor = start, order = 0; cursor + interval <= end; cursor += interval) {
       newRows.push({
         id: generateId("slot"),
         event_id: data.event_id,
         reserved_by_user_id: null,
         x_user_id: null,
+        reserved_x_id_snapshot: null,
         display_name: null,
         slot_label: null,
         start_time: cursor,
@@ -283,10 +275,6 @@ export async function generateSlotsBatch(
       });
     }
   } else {
-    const countCheck = computeCountModeSlotBatchCount(data.count);
-    if (!countCheck.ok) {
-      return { ok: false, message: countCheck.message };
-    }
     const prefix = data.label_prefix?.trim() || "No.";
     const startIndex = Math.max(1, data.start_index || 1);
     for (let index = 0; index < data.count; index += 1) {
@@ -296,6 +284,7 @@ export async function generateSlotsBatch(
         event_id: data.event_id,
         reserved_by_user_id: null,
         x_user_id: null,
+        reserved_x_id_snapshot: null,
         display_name: null,
         slot_label: `${prefix}${order}`,
         start_time: null,
@@ -310,6 +299,12 @@ export async function generateSlotsBatch(
   }
   if (newRows.length === 0) {
     return { ok: false, message: "作成対象の枠がありません。" };
+  }
+  if (newRows.length > MAX_SLOT_BATCH_GENERATE_COUNT) {
+    return {
+      ok: false,
+      message: `一度に作成できる枠は ${MAX_SLOT_BATCH_GENERATE_COUNT} 件までです。`,
+    };
   }
 
   const conflicts = await guard.db
@@ -361,7 +356,7 @@ export async function generateSlotsBatch(
           priority: "high",
           requestedByUserId: guard.userId,
         },
-        topSlotStatsGlobalTarget("slot_admin_generate_partial", "high"),
+        topGlobalTarget("slot_admin_generate_partial", "high"),
       ]);
       await revalidateEventSlotPathsBestEffort(data.event_id);
       return {
@@ -527,6 +522,7 @@ async function releaseRows(
             status: "available",
             reserved_by_user_id: null,
             x_user_id: null,
+            reserved_x_id_snapshot: null,
             display_name: null,
             reservation_group_id: null,
             video_id: null,
@@ -547,6 +543,7 @@ async function releaseRows(
           status: "available",
           reserved_by_user_id: null,
           x_user_id: null,
+          reserved_x_id_snapshot: null,
           display_name: null,
           reservation_group_id: null,
           video_id: null,

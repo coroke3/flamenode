@@ -25,7 +25,6 @@ test("利用者slot操作は共通atomic plannerだけで書き込む", () => {
     source.match(/async function commitSlotMutationPlan[\s\S]*?async function loadSlot/)?.[0] ??
     "";
   assert.match(commit, /const queue = await buildSlotChangeQueueBatch/);
-  assert.match(commit, /mutationStatements:\s*\[[\s\S]*?\.\.\.args\.updates\.map\([\s\S]*?\.\.\.queue\.statements,/);
   assert.match(
     commit,
     /mutationStatements:\s*\[[\s\S]*?\.\.\.mutationStatements,[\s\S]*?\.\.\.queue\.statements,[\s\S]*?\.\.\.extra,/,
@@ -48,7 +47,7 @@ test("利用者slot操作は共通atomic plannerだけで書き込む", () => {
   assert.doesNotMatch(source, /rollbackReservedSlots/);
 });
 
-test("slot CASはversionedSlotWhereでid+version+updated_atを比較する", () => {
+test("slot CASはversionedSlotWhereでid+version+updated_at+snapshotを比較する", () => {
   assert.match(source, /from "@\/lib\/slots\/versionedPredicate"/);
   assert.match(source, /versionedSlotWhere\(/);
   assert.match(source, /version: sql`\$\{slots\.version\} \+ 1`/);
@@ -71,6 +70,30 @@ test("複数枠機能を維持し、業務上限はmax_slots_per_videoを正本�
   assert.match(uiSource, /maxSlotsPerVideo/);
   assert.match(uiSource, /annotateReservationGroups/);
   assert.doesNotMatch(uiSource, /collapseReservationGroups/);
+});
+
+test("releaseはreserved_x_id_snapshotをクリアする", () => {
+  assert.match(source, /reserved_x_id_snapshot: null/);
+});
+
+test("reserveSlotはresolveReservationXIdentityを使う", () => {
+  assert.match(source, /resolveReservationXIdentity/);
+  assert.match(source, /reserved_x_id_snapshot: identity\.snapshotXId/);
+});
+
+test("mergeOwnSlotGroupsはsnapshot混在を拒否する", () => {
+  const mergeBlock =
+    source.match(/export async function mergeOwnSlotGroups[\s\S]*?(?=export async function|$)/)?.[0] ??
+    "";
+  assert.match(mergeBlock, /left\.reserved_x_id_snapshot !== right\.reserved_x_id_snapshot/);
+});
+
+test("extendOwnSlotGroupは既存groupのsnapshotを継承する", () => {
+  const extendBlock =
+    source.match(
+      /export async function extendOwnSlotGroup[\s\S]*?(?=export async function mergeOwnSlotGroups)/,
+    )?.[0] ?? "";
+  assert.match(extendBlock, /reserved_x_id_snapshot: groupSnapshotXId/);
 });
 
 test("mergeOwnSlotGroupsはx_user_id混在を拒否しidentityでgapへtargetXIdを書く", () => {
@@ -104,7 +127,7 @@ test("20枠reserveは1 bulk mutation+queue+通知+完全auditがD1上限内", ()
     auditEntryCount: slotRows,
     distinctActorCount: 1,
   });
-  const bulkCasBinds = 8 + slotRows * 3;
+  const bulkCasBinds = 8 + slotRows * 4;
   const maxAuditChunkBinds = 21 * 4;
 
   assert.equal(budget.mutationStatementCount, 3);

@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import type { Session } from "next-auth";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { unstable_rethrow } from "next/navigation";
 import {
   CurrentUserUnavailableError,
@@ -20,6 +20,7 @@ import {
 import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
 import type { HeaderUser } from "@/lib/auth/headerUser";
 import { normalizeXId } from "@/lib/utils/xid";
+import { pendingSlotReservationXRequestWhere } from "@/lib/slots/reservationIdentity";
 import { logFlowTrace } from "@/lib/observability/flowTrace";
 
 export type MinimalHeaderUser = HeaderUser;
@@ -105,12 +106,8 @@ async function loadOnboardingFlags(
       db
         .select({ id: xIdentityRequests.id })
         .from(xIdentityRequests)
-        .where(
-          and(
-            eq(xIdentityRequests.requested_by_auth_user_id, authUserId),
-            eq(xIdentityRequests.status, "pending"),
-          )!,
-        )
+        .where(pendingSlotReservationXRequestWhere(authUserId))
+        .orderBy(desc(xIdentityRequests.requested_at), desc(xIdentityRequests.id))
         .limit(1),
     ]);
     return {

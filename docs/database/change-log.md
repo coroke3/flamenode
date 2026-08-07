@@ -1,9 +1,24 @@
 # DB Change Log
 
 > Status: Active
-> Last verified: 2026-08-02
-> Verified against commit: `bdeb758a`
+> Last verified: 2026-08-07
+> Verified against commit: `313c5c90`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-08-07 — `0053_slot_reserved_x_id_snapshot.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | 枠取得時 X ID スナップショット列 `reserved_x_id_snapshot` を追加し、既存の `x_user_id` がある行だけ安全にバックフィル |
+| Reason | pending X 申請での枠確保や Active X 切替後も、確保時点の名義 X を公開・運営 UI で安定表示するため |
+| Tables | `slots` |
+| Data migration | `x_user_id IS NOT NULL` の行だけ `reserved_x_id_snapshot = x_user_id`。現在の active X / pending からの推測はしない |
+| Compatibility | 旧列維持。`0052` 完了後に適用 |
+| Data loss | none |
+| Rollback | migration 適用前バックアップから復元 |
+| Validation | `check:db-schema`, `check:db-history`, `check:slot-reservation-groups`, typecheck, slot contract test |
+| PR | #169 |
 
 ## 2026-08-02 — `0052_video_interactions_auth_expand.sql`
 

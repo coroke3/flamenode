@@ -410,6 +410,8 @@ export const slots = sqliteTable(
     x_user_id: text("x_user_id").references(() => xUsers.id, {
       onDelete: "set null",
     }),
+    /** 枠取得時点の予約主体 X ID 文字列。pending 申請時は x_users 未作成でも保持する。 */
+    reserved_x_id_snapshot: text("reserved_x_id_snapshot"),
     display_name: text("display_name"),
     slot_label: text("slot_label"),
     start_time: integer("start_time"),
