@@ -2,10 +2,10 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
-import { canAccessManageEvent } from "@/lib/auth/ownership";
+import { canAccessManageEvent, canEditEvent } from "@/lib/auth/ownership";
 import {
   events as eventsTable,
   videos as videosTable,
@@ -17,6 +17,8 @@ import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
 import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
+import { videoReviewQueueOrder } from "@/lib/admin/videoReviewQueueOrder";
+import { approveManageVideoPublic } from "@/lib/actions/manage-video";
 import {
   VIDEO_VISIBILITY_GROUPS,
   normalizeVideoVisibilityFilter,
@@ -88,6 +90,8 @@ export default async function ManageEventVideosPage({
 
   const isAdmin = user.role === "admin";
   if (!(await canAccessManageEvent(db, user, id))) notFound();
+  const canApproveVideoStatus =
+    isAdmin || (await canEditEvent(db, user, id, "video.status"));
 
   const statusValues = videoVisibilityStatusesForFilter(statusFilter);
   const statusCond =
@@ -112,7 +116,7 @@ export default async function ManageEventVideosPage({
     .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
     .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
     .where(where)
-    .orderBy(desc(videosTable.created_at))
+    .orderBy(...videoReviewQueueOrder)
     .limit(200);
 
   const summaries = await fetchVideoReviewSummaries(
@@ -199,6 +203,9 @@ export default async function ManageEventVideosPage({
           rows={rows}
           reviewHref={(videoId) => `/manage/events/${id}/videos/${videoId}`}
           contentHref={(videoId) => `/dashboard/edit/${videoId}?privileged=event`}
+          canApprove={canApproveVideoStatus}
+          quickApproveAction={approveManageVideoPublic}
+          quickApproveHiddenFields={{ event_id: id }}
         />
       )}
     </div>

@@ -18,6 +18,8 @@ import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/Consol
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable";
 import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
+import { videoReviewQueueOrder } from "@/lib/admin/videoReviewQueueOrder";
+import { approveAdminVideoPublic } from "@/lib/actions/admin";
 import {
   normalizeVideoVisibilityFilter,
   videoVisibilityBadgeClass,
@@ -122,7 +124,7 @@ export default async function AdminVideosPage({
         : base;
       const rowsQuery = withEventJoin
         .where(where)
-        .orderBy(desc(videosTable.created_at))
+        .orderBy(...videoReviewQueueOrder)
         .limit(pageSize)
         .offset(offset);
 
@@ -231,6 +233,8 @@ export default async function AdminVideosPage({
             rows={reviewRows}
             reviewHref={(videoId) => `/admin/videos/${videoId}`}
             contentHref={(videoId) => `/dashboard/edit/${videoId}`}
+            canApprove
+            quickApproveAction={approveAdminVideoPublic}
             extraActions={(videoId) => (
               <>
                 <Link

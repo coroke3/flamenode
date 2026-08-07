@@ -8,6 +8,11 @@ import { videoModerationCases } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import { AdminVideoStatusForm } from "@/components/video/VideoStatusForm";
+import { VideoApproveActions } from "@/components/video/VideoApproveActions";
+import {
+  approveAdminVideoPublic,
+  approveAdminVideoPublicAndNext,
+} from "@/lib/actions/admin";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
@@ -71,11 +76,19 @@ export default async function AdminVideoDetailPage({
       <VideoReviewDetailPanel
         video={video}
         statusForm={
-          <AdminVideoStatusForm
-            videoId={video.id}
-            currentStatus={video.visibility_status}
-            openVoidCaseId={openVoidCaseId}
-          />
+          <>
+            <VideoApproveActions
+              videoId={video.id}
+              currentStatus={video.visibility_status}
+              approveAction={approveAdminVideoPublic}
+              approveAndNextAction={approveAdminVideoPublicAndNext}
+            />
+            <AdminVideoStatusForm
+              videoId={video.id}
+              currentStatus={video.visibility_status}
+              openVoidCaseId={openVoidCaseId}
+            />
+          </>
         }
         footerLinks={
           <>
