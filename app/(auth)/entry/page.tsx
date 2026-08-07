@@ -34,7 +34,7 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   AccountNotLinked: "このDiscordアカウントは別のユーザーに紐付いています",
   OAuthAccountNotLinked:
     "同じメールのアカウントが既にあります。もう一度ログインすると紐付けを完了できます",
-  Configuration: "認証設定に問題があります",
+  Configuration: "ログイン処理中にエラーが発生しました。時間をおいて再度お試しください。",
   auth_temporarily_unavailable: "認証基盤が一時的に利用できません",
   Verification: "認証リンクの検証に失敗しました",
   Default: "認証を完了できませんでした",

@@ -23,7 +23,7 @@ export async function signOutViaAuthRoute(): Promise<AuthSignOutResult> {
 
     const body = new URLSearchParams({
       csrfToken,
-      callbackUrl: "/entry",
+      callbackUrl: "/",
     });
     const signOutResponse = await fetch("/api/auth/signout", {
       method: "POST",

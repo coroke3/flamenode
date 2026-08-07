@@ -22,7 +22,7 @@ export function SignOutButton({
     try {
       const result = await signOutViaAuthRoute();
       if (result.ok) {
-        window.location.replace("/entry");
+        window.location.replace("/");
         return;
       }
       setError(result.message);
