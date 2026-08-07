@@ -1,7 +1,5 @@
 "use server";
 
-import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
-
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
@@ -10,24 +8,26 @@ import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos, videoEvents } from "@/lib/db/schema";
 import {
   D1_RESERVED_CALLER_QUERIES,
-  mutateWithAudit,
   planD1AuditMutationBudget,
 } from "@/lib/audit/mutate";
 import { VIDEO_STATUS_NOTIFICATION_PREFETCH_QUERY_COUNT } from "@/lib/notifications/videoStatusNotify";
 import { STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT } from "@/lib/staticRebuild/enqueue";
-import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
 import {
   planVideoVisibilityTransition,
-  preCommitVideoVisibilityDepublicization,
   runVideoVisibilityTransitionPostCommit,
 } from "@/lib/video/videoVisibilityTransition";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { attachApproveAndNextHref } from "@/lib/admin/videoReviewQueueOrder";
+import {
+  executeVideoVisibilityStatusMutation,
+  loadVideoRebuildEventIds,
+  monotonicVideoUpdatedAt,
+  SAME_VIDEO_STATUS_MESSAGE,
+  type VideoStatusActionResult,
+} from "@/lib/video/videoVisibilityStatusAction";
 
-export interface ManageVideoActionResult {
-  ok: boolean;
-  message?: string;
-}
+export type ManageVideoActionResult = VideoStatusActionResult;
 
 /** イベント運営者が通常操作で変更できる公開状態。内部状態は管理者側に集約する。 */
 const MANAGE_ALLOWED_STATUS = new Set(["pending", "public", "private"]);
@@ -52,6 +52,21 @@ function revalidateManageVideoPaths(
   revalidatePath("/list");
 }
 
+export async function approveManageVideoPublic(
+  formData: FormData,
+): Promise<ManageVideoActionResult> {
+  formData.set("status", "public");
+  return setManageVideoStatus(formData);
+}
+
+export async function approveManageVideoPublicAndNext(
+  formData: FormData,
+): Promise<ManageVideoActionResult> {
+  formData.set("status", "public");
+  formData.set("and_next", "1");
+  return setManageVideoStatus(formData);
+}
+
 export async function setManageVideoStatus(
   formData: FormData,
 ): Promise<ManageVideoActionResult> {
@@ -63,6 +78,7 @@ export async function setManageVideoStatus(
   const videoId = String(formData.get("video_id") ?? "").trim();
   const status = String(formData.get("status") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
+  const andNext = formData.get("and_next") === "1";
 
   if (!eventId || !videoId) {
     return { ok: false, message: "event_id と video_id が必要です。" };
@@ -105,99 +121,98 @@ export async function setManageVideoStatus(
 
   const prevStatus = target.visibility_status;
   if (prevStatus === status) {
-    return { ok: false, message: "変更先のステータスを選択してください。" };
+    return attachApproveAndNextHref(
+      db,
+      { ok: true, message: SAME_VIDEO_STATUS_MESSAGE },
+      { andNext, status, current: target, eventId },
+    );
   }
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = monotonicVideoUpdatedAt(target.updated_at);
   if (MANAGE_VIDEO_STATUS_CALLER_QUERY_COUNT > D1_RESERVED_CALLER_QUERIES) {
     return {
       ok: false,
       message: "作品状態更新の事前確認queryがD1予約枠を超えています。",
     };
   }
-  const eventRows = await db
-    .select({ event_id: videoEvents.event_id })
-    .from(videoEvents)
-    .where(eq(videoEvents.video_id, videoId))
-    .limit(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1);
-  const rebuildEventIds = Array.from(
-    new Set(
-      [target.primary_event_id, ...eventRows.map((row) => row.event_id)].filter(
-        (id): id is string => Boolean(id),
-      ),
-    ),
-  );
-  if (rebuildEventIds.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
-    return {
-      ok: false,
-      message: "所属イベント数が上限を超えているため、状態を安全に更新できません。",
-    };
+
+  const rebuildEvents = await loadVideoRebuildEventIds(db, videoId, target.primary_event_id);
+  if (!rebuildEvents.ok) {
+    return { ok: false, message: rebuildEvents.message };
   }
 
-  const transition = await planVideoVisibilityTransition(db, {
-    video: target,
-    nextStatus: status as typeof target.visibility_status,
-    actorUserId: u.id,
-    context: "manage_video_status",
-    reason: reason || null,
-    eventIds: rebuildEventIds,
-    notificationEventId: eventId,
-    now,
-  });
+  const traceId = createTraceId();
 
-  const mutationStatements = [...transition.mutationStatements];
-  const budget = planD1AuditMutationBudget({
-    mutationStatementCount: mutationStatements.length,
-    mutationAssertionCount: mutationStatements.length,
-    auditEntryCount: 1,
-    distinctActorCount: 1,
-  });
-  if (!budget.withinLimit) {
-    return {
-      ok: false,
-      message: "作品状態更新の原子的処理がD1の上限を超えます。",
-    };
-  }
+  try {
+    const transition = await planVideoVisibilityTransition(db, {
+      video: target,
+      nextStatus: status as typeof target.visibility_status,
+      actorUserId: u.id,
+      context: "manage_video_status",
+      reason: reason || null,
+      eventIds: rebuildEvents.eventIds,
+      notificationEventId: eventId,
+      now,
+    });
 
-  if (transition.depublicizedFromPublic && transition.fenceToken) {
-    try {
-      await preCommitVideoVisibilityDepublicization({
-        videoId,
-        fenceToken: transition.fenceToken,
-        reason: reason || null,
-      });
-    } catch (error) {
-      unstable_rethrow(error);
-      return { ok: false, message: "公開ブロックの記録に失敗しました。" };
+    const mutationStatements = [...transition.mutationStatements];
+    const budget = planD1AuditMutationBudget({
+      mutationStatementCount: mutationStatements.length,
+      mutationAssertionCount: mutationStatements.length,
+      auditEntryCount: 1,
+      distinctActorCount: 1,
+    });
+    if (!budget.withinLimit) {
+      return {
+        ok: false,
+        message: "作品状態更新の原子的処理がD1の上限を超えます。",
+      };
     }
+
+    const result = await executeVideoVisibilityStatusMutation({
+      db,
+      videoId,
+      requestedStatus: status,
+      transition,
+      reason: reason || null,
+      logTag: "manage-video-status",
+      notificationWakeSource:
+        transition.notificationBatch.statements.length > 0 ? "manage" : undefined,
+      staticRebuildWakeSource:
+        transition.queueBatch.statements.length > 0 ? "manage" : undefined,
+    });
+    if (!result.ok) return result;
+
+    await runPostCommitBestEffort(
+      { flow: "manage_video_status", traceId: createTraceId() },
+      [{
+        name: "manage_video_visibility_post_commit",
+        run: async () => {
+          await runVideoVisibilityTransitionPostCommit({
+            publicCacheKeys: transition.publicCacheKeys,
+            revalidate: () => {
+              revalidateManageVideoPaths(eventId, videoId, target.youtube_video_id);
+            },
+          });
+        },
+      }],
+    );
+
+    return attachApproveAndNextHref(db, result, {
+      andNext,
+      status,
+      current: target,
+      eventId,
+    });
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[manage-video-status] failed", { traceId, error });
+    return {
+      ok: false,
+      message: `承認処理に失敗しました。状態を再取得してもう一度お試しください。エラーID: ${traceId}`,
+      errorCode: "status_action_failed",
+      traceId,
+      retryable: true,
+    };
   }
-
-  await mutateWithAudit(db, {
-    mutationStatements,
-    expectedMutationChanges: transition.expectedMutationChanges,
-    audits: transition.audits,
-    notificationWakeSource:
-      transition.notificationBatch.statements.length > 0 ? "manage" : undefined,
-    staticRebuildWakeSource: transition.queueBatch.statements.length > 0 ? "manage" : undefined,
-  });
-
-  await runPostCommitBestEffort(
-    { flow: "manage_video_status", traceId: createTraceId() },
-    [{
-      name: "manage_video_visibility_post_commit",
-      run: async () => {
-        await runVideoVisibilityTransitionPostCommit({
-          publicCacheKeys: transition.publicCacheKeys,
-          revalidate: () => {
-            revalidateManageVideoPaths(eventId, videoId, target.youtube_video_id);
-          },
-        });
-      },
-    }],
-  );
-
-  return markPendingPublicReflection(
-    { ok: true, message: "ステータスを更新しました。" },
-    transition.queueBatch.statements.length > 0,
-  );
 }

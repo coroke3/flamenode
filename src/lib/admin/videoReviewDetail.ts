@@ -6,6 +6,7 @@ import {
   eventCustomQuestions,
   videoChapters,
   videoCustomAnswers,
+  videoEvents,
   videoMembers,
   videos,
 } from "@/lib/db/schema";
@@ -67,7 +68,6 @@ export async function fetchVideoReviewDetail(
         highlights: videos.highlights,
         production_story: videos.production_story,
         visibility_status: videos.visibility_status,
-        primary_event_id: videos.primary_event_id,
       })
       .from(videos)
       .where(eq(videos.id, videoId))
@@ -78,9 +78,12 @@ export async function fetchVideoReviewDetail(
   const linkedEventIds =
     eventIds && eventIds.length > 0
       ? [...eventIds]
-      : video.primary_event_id
-        ? [video.primary_event_id]
-        : [];
+      : (
+          await db
+            .select({ event_id: videoEvents.event_id })
+            .from(videoEvents)
+            .where(eq(videoEvents.video_id, videoId))
+        ).map((row) => row.event_id);
 
   const stagePermission = await readStagePermissionCustomAnswers(db, {
     videoId,

@@ -4,9 +4,8 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { videoEvents, videos } from "@/lib/db/schema";
+import { videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
-import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import {
@@ -15,19 +14,22 @@ import {
   planVoidModerationCaseResolve,
 } from "@/lib/moderation/openCases";
 import { resolveVoidModerationCaseType } from "@/lib/moderation/voidCaseType";
-import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
-import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
+import { attachApproveAndNextHref } from "@/lib/admin/videoReviewQueueOrder";
 import {
   planVideoVisibilityTransition,
-  preCommitVideoVisibilityDepublicization,
   runVideoVisibilityTransitionPostCommit,
 } from "@/lib/video/videoVisibilityTransition";
+import {
+  executeVideoVisibilityStatusMutation,
+  loadVideoRebuildEventIds,
+  monotonicVideoUpdatedAt,
+  SAME_VIDEO_STATUS_MESSAGE,
+  type VideoStatusActionResult,
+} from "@/lib/video/videoVisibilityStatusAction";
 
-export interface AdminActionResult extends PendingPublicReflection {
-  ok: boolean;
-  message?: string;
-}
+export type AdminActionResult = VideoStatusActionResult & PendingPublicReflection;
+
 const VALID_STATUS = new Set(["pending", "public", "private", "voided"]);
 
 function revalidateVideoStatusPaths(videoId: string, youtubeVideoId: string | null): void {
@@ -61,6 +63,21 @@ async function revalidateVideoStatusPathsBestEffort(
   );
 }
 
+export async function approveAdminVideoPublic(
+  formData: FormData,
+): Promise<AdminActionResult> {
+  formData.set("status", "public");
+  return setVideoStatus(formData);
+}
+
+export async function approveAdminVideoPublicAndNext(
+  formData: FormData,
+): Promise<AdminActionResult> {
+  formData.set("status", "public");
+  formData.set("and_next", "1");
+  return setVideoStatus(formData);
+}
+
 export async function setVideoStatus(formData: FormData): Promise<AdminActionResult> {
   const guard = await requireAdminWrite("admin_video_status");
   if (!guard.ok) return { ok: false, message: guard.message };
@@ -68,110 +85,126 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   const status = String(formData.get("status") ?? "").trim();
   const reason = String(formData.get("reason") ?? "").trim();
   const caseId = String(formData.get("case_id") ?? "").trim();
+  const andNext = formData.get("and_next") === "1";
+  const reviewEventId = String(formData.get("review_event_id") ?? "").trim();
+  const adminEventFilter =
+    reviewEventId && reviewEventId.length <= 128 ? reviewEventId : undefined;
   if (!videoId || videoId.length > 128) return { ok: false, message: "video_idが不正です。" };
   if (!VALID_STATUS.has(status)) return { ok: false, message: "不正なステータスです。" };
   if (status === "voided" && !reason) return { ok: false, message: "voidedへの変更には理由が必要です。" };
   const { db } = guard;
   const before = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!before) return { ok: false, message: "対象作品が見つかりません。" };
-  if (before.visibility_status === status) return { ok: true, message: "ステータスは変更されていません。" };
-  const eventRows = await db.select({ event_id: videoEvents.event_id }).from(videoEvents).where(eq(videoEvents.video_id, videoId)).limit(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1);
-  if (eventRows.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) return { ok: false, message: "関連イベント数が処理上限を超えています。" };
+  if (before.visibility_status === status) {
+    return attachApproveAndNextHref(
+      db,
+      { ok: true, message: SAME_VIDEO_STATUS_MESSAGE },
+      { andNext, status, current: before, adminEventFilter },
+    );
+  }
 
-  const now = Math.max(Math.floor(Date.now() / 1000), before.updated_at + 1);
+  const rebuildEvents = await loadVideoRebuildEventIds(db, videoId, before.primary_event_id);
+  if (!rebuildEvents.ok) return { ok: false, message: rebuildEvents.message };
+
+  const now = monotonicVideoUpdatedAt(before.updated_at);
   const nextStatus = status as (typeof videos.$inferInsert)["visibility_status"];
   if (!nextStatus) return { ok: false, message: "不正なステータスです。" };
 
-  const transition = await planVideoVisibilityTransition(db, {
-    video: before,
-    nextStatus,
-    actorUserId: guard.user.id,
-    context: "admin_video_status",
-    reason: reason || null,
-    eventIds: eventRows.map((row) => row.event_id),
-    forceNotify: formData.get("force_notify") === "1",
-    now,
-  });
-
-  const statements: BatchItem<"sqlite">[] = [...transition.mutationStatements];
-  const expected: (number | null)[] = [...transition.expectedMutationChanges];
-  const audits = [...transition.audits];
-
-  if (status === "voided") {
-    const category = String(formData.get("void_reason_category") ?? "").trim();
-    const caseType = resolveVoidModerationCaseType(category);
-    const moderation = await planVoidModerationCaseOpen(db, {
-      videoId,
-      caseType,
-      publicReason: reason || null,
-      privateNote: category || null,
-      actorUserId: guard.user.id,
-      now,
-      auditContext: "admin_video_status",
-    });
-    statements.push(...moderation.statements);
-    expected.push(...moderation.expectedChanges);
-    audits.push(...moderation.audits);
-  } else if (before.visibility_status === "voided") {
-    if (!caseId) {
-      return { ok: false, message: "voided解除には case_id が必要です。" };
-    }
-    const openCase = await findOpenModerationCaseById(db, caseId);
-    if (
-      !openCase ||
-      openCase.video_id !== videoId ||
-      openCase.case_type !== "void"
-    ) {
-      return { ok: false, message: "解決対象の open case が見つかりません。" };
-    }
-    const moderation = planVoidModerationCaseResolve(db, openCase, {
-      actorUserId: guard.user.id,
-      now,
-      privateNote: "restored",
-      auditContext: "admin_video_status",
-      reason: reason || "void 解除",
-    });
-    statements.push(...moderation.statements);
-    expected.push(...moderation.expectedChanges);
-    audits.push(...moderation.audits);
-  }
-
-  if (transition.depublicizedFromPublic && transition.fenceToken) {
-    try {
-      await preCommitVideoVisibilityDepublicization({
-        videoId,
-        fenceToken: transition.fenceToken,
-        reason: reason || null,
-      });
-    } catch (error) {
-      unstable_rethrow(error);
-      console.error("[admin-video-status] R2 visibility block failed", error);
-      return { ok: false, message: "公開ブロックの記録に失敗しました。" };
-    }
-  }
+  const traceId = createTraceId();
 
   try {
-    await mutateWithAudit(db, {
-      mutationStatements: statements,
-      expectedMutationChanges: expected,
-      audits,
+    const transition = await planVideoVisibilityTransition(db, {
+      video: before,
+      nextStatus,
+      actorUserId: guard.user.id,
+      context: "admin_video_status",
+      reason: reason || null,
+      eventIds: rebuildEvents.eventIds,
+      forceNotify: formData.get("force_notify") === "1",
+      now,
+    });
+
+    const statements: BatchItem<"sqlite">[] = [...transition.mutationStatements];
+    const expected: (number | null)[] = [...transition.expectedMutationChanges];
+    const audits = [...transition.audits];
+
+    if (status === "voided") {
+      const category = String(formData.get("void_reason_category") ?? "").trim();
+      const caseType = resolveVoidModerationCaseType(category);
+      const moderation = await planVoidModerationCaseOpen(db, {
+        videoId,
+        caseType,
+        publicReason: reason || null,
+        privateNote: category || null,
+        actorUserId: guard.user.id,
+        now,
+        auditContext: "admin_video_status",
+      });
+      statements.push(...moderation.statements);
+      expected.push(...moderation.expectedChanges);
+      audits.push(...moderation.audits);
+    } else if (before.visibility_status === "voided") {
+      if (!caseId) {
+        return { ok: false, message: "voided解除には case_id が必要です。" };
+      }
+      const openCase = await findOpenModerationCaseById(db, caseId);
+      if (
+        !openCase ||
+        openCase.video_id !== videoId ||
+        openCase.case_type !== "void"
+      ) {
+        return { ok: false, message: "解決対象の open case が見つかりません。" };
+      }
+      const moderation = planVoidModerationCaseResolve(db, openCase, {
+        actorUserId: guard.user.id,
+        now,
+        privateNote: "restored",
+        auditContext: "admin_video_status",
+        reason: reason || "void 解除",
+      });
+      statements.push(...moderation.statements);
+      expected.push(...moderation.expectedChanges);
+      audits.push(...moderation.audits);
+    }
+
+    const result = await executeVideoVisibilityStatusMutation({
+      db,
+      videoId,
+      requestedStatus: status,
+      transition,
+      reason: reason || null,
+      logTag: "admin-video-status",
+      extraStatements: statements.slice(transition.mutationStatements.length),
+      extraExpected: expected.slice(transition.expectedMutationChanges.length),
+      extraAudits: audits.slice(transition.audits.length),
       notificationWakeSource:
         transition.notificationBatch.statements.length > 0 ? "admin" : undefined,
       staticRebuildWakeSource:
         transition.queueBatch.statements.length > 0 ? "admin" : undefined,
     });
+    if (!result.ok) return result;
+
+    await revalidateVideoStatusPathsBestEffort(
+      videoId,
+      before.youtube_video_id,
+      transition.publicCacheKeys,
+    );
+
+    return attachApproveAndNextHref(db, result, {
+      andNext,
+      status,
+      current: before,
+      adminEventFilter,
+    });
   } catch (error) {
     unstable_rethrow(error);
-    console.error("[admin-video-status] atomic mutation failed", error);
-    return { ok: false, message: "更新・通知・静的再生成の記録に失敗しました。" };
+    console.error("[admin-video-status] failed", { traceId, error });
+    return {
+      ok: false,
+      message: `承認処理に失敗しました。状態を再取得してもう一度お試しください。エラーID: ${traceId}`,
+      errorCode: "status_action_failed",
+      traceId,
+      retryable: true,
+    };
   }
-  await revalidateVideoStatusPathsBestEffort(
-    videoId,
-    before.youtube_video_id,
-    transition.publicCacheKeys,
-  );
-  return markPendingPublicReflection(
-    { ok: true, message: "ステータスを更新しました。" },
-    transition.queueBatch.statements.length > 0,
-  );
 }

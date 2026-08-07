@@ -27,8 +27,10 @@ test("atomic builder は latest done skip を持たない", async () => {
   assert.doesNotMatch(batchFn, /shouldSkipRecentRow/);
   assert.doesNotMatch(batchFn, /latestRows/);
   assert.doesNotMatch(batchFn, /latest_static_rebuild_queue/);
-  assert.match(source, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 1/);
-  assert.match(batchFn, /shouldUseIncomingQueueMetadata/);
+  assert.match(source, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0/);
+  assert.match(batchFn, /ON CONFLICT\(target_type, target_id\) WHERE status IN \('pending', 'processing'\)/);
+  assert.match(batchFn, /FROM json_each\(\$\{payload\}\)/);
+  assert.doesNotMatch(batchFn, /shouldUseIncomingQueueMetadata/);
 });
 
 test("direct enqueue は public_miss / periodic / manual_repair のみ", async () => {

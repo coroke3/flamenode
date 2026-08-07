@@ -8,6 +8,7 @@ import {
   videoVisibilityBadgeClass,
   videoVisibilityLabel,
 } from "@/lib/admin/videoVisibilityLabels";
+import { VideoReviewQuickApproveButton } from "@/components/admin/VideoReviewQuickApproveButton";
 
 export type VideoReviewQueueRow = {
   id: string;
@@ -20,11 +21,20 @@ export type VideoReviewQueueRow = {
   required_unanswered_count: number;
 };
 
+type QuickApproveAction = (formData: FormData) => Promise<{
+  ok: boolean;
+  message?: string;
+  retryable?: boolean;
+}>;
+
 interface VideoReviewQueueTableProps {
   rows: VideoReviewQueueRow[];
   reviewHref: (videoId: string) => string;
   contentHref: (videoId: string) => string;
   extraActions?: (videoId: string) => React.ReactNode;
+  canApprove?: boolean;
+  quickApproveAction?: QuickApproveAction;
+  quickApproveHiddenFields?: Record<string, string>;
 }
 
 export function VideoReviewQueueTable({
@@ -32,7 +42,13 @@ export function VideoReviewQueueTable({
   reviewHref,
   contentHref,
   extraActions,
+  canApprove = false,
+  quickApproveAction,
+  quickApproveHiddenFields,
 }: VideoReviewQueueTableProps): React.ReactElement {
+  const showQuickApprove =
+    canApprove && quickApproveAction && rows.some((v) => v.visibility_status === "pending");
+
   return (
     <FnTable className="approval-queue-table approval-queue-table-video">
       <thead>
@@ -113,12 +129,23 @@ export function VideoReviewQueueTable({
             </td>
             <td>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                <Link
-                  href={reviewHref(v.id)}
-                  className="fn-btn fn-btn-primary fn-btn-sm"
-                >
-                  審査
-                </Link>
+                {canApprove ? (
+                  <Link
+                    href={reviewHref(v.id)}
+                    className="fn-btn fn-btn-primary fn-btn-sm"
+                  >
+                    審査
+                  </Link>
+                ) : null}
+                {canApprove &&
+                v.visibility_status === "pending" &&
+                showQuickApprove ? (
+                  <VideoReviewQuickApproveButton
+                    videoId={v.id}
+                    action={quickApproveAction!}
+                    hiddenFields={quickApproveHiddenFields}
+                  />
+                ) : null}
                 <Link
                   href={contentHref(v.id)}
                   className="fn-btn fn-btn-ghost fn-btn-sm"

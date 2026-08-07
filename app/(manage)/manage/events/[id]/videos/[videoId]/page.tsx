@@ -15,6 +15,11 @@ import {
   videoEvents as videoEventsTable,
 } from "@/lib/db/schema";
 import { ManageVideoStatusForm } from "@/components/video/VideoStatusForm";
+import { VideoApproveActions } from "@/components/video/VideoApproveActions";
+import {
+  approveManageVideoPublic,
+  approveManageVideoPublicAndNext,
+} from "@/lib/actions/manage-video";
 import { Icon } from "@/components/ui/Icon";
 import { ManageEventTabs } from "@/components/manage/ManageEventTabs";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
@@ -93,11 +98,20 @@ export default async function ManageEventVideoDetailPage({
         video={video}
         statusForm={
           canReview ? (
-            <ManageVideoStatusForm
-              eventId={id}
-              videoId={video.id}
-              currentStatus={video.visibility_status}
-            />
+            <>
+              <VideoApproveActions
+                videoId={video.id}
+                currentStatus={video.visibility_status}
+                approveAction={approveManageVideoPublic}
+                approveAndNextAction={approveManageVideoPublicAndNext}
+                hiddenFields={{ event_id: id }}
+              />
+              <ManageVideoStatusForm
+                eventId={id}
+                videoId={video.id}
+                currentStatus={video.visibility_status}
+              />
+            </>
           ) : (
             <p className="fn-muted fn-text-sm">
               公開状態の変更権限がありません。内容確認のみ可能です。

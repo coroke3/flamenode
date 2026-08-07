@@ -127,12 +127,16 @@ test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
   );
 });
 
-test("静的queueはCASE更新とmulti-values INSERTへ集約する", () => {
+test("静的queueはjson_each UPSERTへ集約する", () => {
   const queue = read("../staticRebuild/enqueue.ts");
-  assert.match(queue, /STATIC_REBUILD_BULK_UPDATE_ROWS = 6/);
-  assert.match(queue, /STATIC_REBUILD_BULK_INSERT_ROWS = 10/);
-  assert.match(queue, /CASE \$\{staticRebuildQueue\.id\}/);
-  assert.match(queue, /db\.insert\(staticRebuildQueue\)\.values\(chunk\)/);
+  assert.match(queue, /STATIC_REBUILD_BULK_UPSERT_ROWS = 10/);
+  assert.match(queue, /FROM json_each\(\$\{payload\}\)/);
+  assert.match(
+    queue,
+    /ON CONFLICT\(target_type, target_id\) WHERE status IN \('pending', 'processing'\)/,
+  );
+  assert.doesNotMatch(queue, /STATIC_REBUILD_BULK_UPDATE_ROWS/);
+  assert.doesNotMatch(queue, /STATIC_REBUILD_BULK_INSERT_ROWS/);
 });
 
 test("作品保存は x_users プロフィール更新 plan を呼ばない", () => {
