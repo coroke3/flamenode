@@ -166,16 +166,16 @@ test("いいね/セーブ は Auth user 単位で writeGuard を通し Active X 
   assert.doesNotMatch(interactionAction, /requireApprovedActiveXId: true/);
 });
 
-test("作品詳細の canInteract は規約同意と承認済み Active X を見る", () => {
+test("作品詳細の canInteract は規約同意済み Auth user のみを見る", () => {
   assert.match(videoDetailPage, /viewerNeedsTermsAcceptance/);
   assert.match(videoDetailPage, /!viewerNeedsTermsAcceptance/);
-  assert.match(videoDetailPage, /viewerActiveX/);
-  assert.match(videoDetailPage, /viewerXApproved/);
   assert.match(
     videoDetailPage,
-    /canInteract[\s\S]*viewerActiveX[\s\S]*viewerXApproved/,
+    /canInteract = !!\(\s*viewerUser\?\.id &&\s*!viewerNeedsTermsAcceptance/,
   );
-  assert.match(videoDetailPage, /承認済みの活動名義/);
+  assert.match(videoDetailPage, /videoInteractionsAuth/);
+  assert.match(videoDetailPage, /canPost=\{viewerXApproved\}/);
+  assert.match(videoDetailPage, /利用規約に同意するといいね、セーブができます/);
 });
 
 test("ライブラリは Auth user の interaction 正本を直接JOINする", () => {

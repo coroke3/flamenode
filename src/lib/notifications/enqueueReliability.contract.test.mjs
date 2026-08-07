@@ -34,11 +34,11 @@ test("onConflictDoNothing notification inserts use null expected changes", () =>
 test("video status mutations wake notification queue when outbox rows are added", () => {
   assert.match(
     adminVideo,
-    /notificationWakeSource:\s*\n\s*notification\.statements\.length > 0 \? "admin" : undefined/,
+    /notificationWakeSource:\s*\n\s*transition\.notificationBatch\.statements\.length > 0 \? "admin" : undefined/,
   );
   assert.match(
     manageVideo,
-    /notificationWakeSource:\s*\n\s*notification\.statements\.length > 0 \? "manage" : undefined/,
+    /notificationWakeSource:\s*\n\s*transition\.notificationBatch\.statements\.length > 0 \? "manage" : undefined/,
   );
 });
 

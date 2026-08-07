@@ -88,11 +88,14 @@ test("event question同期はbounded read、完全per-row snapshot、CASを持�
 
 test("manage statusは共通queue lease semanticsとcaller予約内のbounded readを使う", () => {
   const action = read("src/lib/actions/manage-video.ts");
+  const transition = read("src/lib/video/videoVisibilityTransition.ts");
   const hooks = read("src/lib/staticRebuild/hooks.ts");
   const enqueue = read("src/lib/staticRebuild/enqueue.ts");
 
-  assert.match(action, /eq\(videos\.updated_at, target\.updated_at\)/);
-  assert.match(action, /before:\s*\{ \.\.\.target \}, after:\s*\{ \.\.\.after \}/);
+  assert.match(action, /planVideoVisibilityTransition/);
+  assert.match(transition, /expectedRowCondition\(\{ expectedCurrent: \{ \.\.\.input\.video \} \}\)/);
+  assert.match(transition, /before: \{ \.\.\.input\.video \}/);
+  assert.match(transition, /after: \{ \.\.\.after \}/);
   assert.match(action, /planD1AuditMutationBudget/);
   assert.match(
     action,
@@ -104,12 +107,12 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
   assert.doesNotMatch(hooks, /activeByEventId|lease_token:\s*null/);
 
   assert.match(enqueue, /MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*16/);
-  assert.match(enqueue, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT\s*=\s*2/);
-  assert.match(enqueue, /const \[activeRows, latestRows\] = await Promise\.all\(/);
+  assert.match(enqueue, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT\s*=\s*1/);
+  assert.match(enqueue, /const activeRows = await db/);
   assert.equal(
     (enqueue.match(/\.limit\(MAX_STATIC_REBUILD_BATCH_TARGETS \+ 1\)/g) ?? [])
       .length,
-    2,
+    1,
   );
   assert.doesNotMatch(enqueue, /lease_token:\s*null/);
   assert.match(
@@ -121,10 +124,10 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
   const ownActionReads = 3;
   const permissionReads = 2;
   const notificationReads = 2;
-  const queueReads = 2;
+  const queueReads = 1;
   assert.equal(
     ownActionReads + permissionReads + notificationReads + queueReads,
-    9,
+    8,
   );
-  assert.ok(9 <= D1_RESERVED_CALLER_QUERIES);
+  assert.ok(8 <= D1_RESERVED_CALLER_QUERIES);
 });

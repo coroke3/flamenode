@@ -71,18 +71,18 @@ test("column manifest detects type, nullability, PK and missing columns", () => 
       assertTableColumns("sample", expected, [
         { ...actual[0], type: "INTEGER" },
       ]),
-    /type荳堺ｸ閾ｴ/,
+    /type不一致/,
   );
   assert.throws(
     () =>
       assertTableColumns("sample", expected, [
         { ...actual[0], notnull: 0 },
       ]),
-    /notNull荳堺ｸ閾ｴ/,
+    /notNull不一致/,
   );
   assert.throws(
     () => assertTableColumns("sample", expected, [{ ...actual[0], pk: 0 }]),
-    /pk鬆・ｸ堺ｸ閾ｴ/,
+    /pk順不一致/,
   );
   assert.throws(
     () => assertTableColumns("sample", expected, []),
@@ -100,7 +100,7 @@ test("column manifest detects type, nullability, PK and missing columns", () => 
         ],
         actual,
       ),
-    /default荳堺ｸ閾ｴ/,
+    /default不一致/,
   );
 });
 
@@ -122,7 +122,7 @@ test("index manifest detects unique flag and column order", () => {
         unique: 0,
         columns: expected.columns,
       }),
-    /unique荳堺ｸ閾ｴ/,
+    /unique不一致/,
   );
   assert.throws(
     () =>
@@ -130,6 +130,6 @@ test("index manifest detects unique flag and column order", () => {
         unique: 1,
         columns: ["created_at", "event_id"],
       }),
-    /index蛻嶺ｸ堺ｸ閾ｴ/,
+    /index列不一致/,
   );
 });

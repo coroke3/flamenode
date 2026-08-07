@@ -32,11 +32,11 @@ test("ライブラリ一覧はinteraction IDをINへ展開せず動画へ直接J
 test("動画詳細のライブラリplaylistも直接JOINし、overlay障害を認証済み利用者の未承認扱いにしない", () => {
   assert.match(
     videoDetailPage,
-    /\.from\(videoInteractions\)[\s\S]*?\.innerJoin\([\s\S]*?videosTable,[\s\S]*?eq\(videosTable\.id, videoInteractions\.video_id\)/,
+    /\.from\(videoInteractionsAuth\)[\s\S]*?\.innerJoin\([\s\S]*?videosTable,[\s\S]*?eq\(videosTable\.id, videoInteractionsAuth\.video_id\)/,
   );
   assert.match(
     videoDetailPage,
-    /eq\(videoInteractions\.x_user_id, viewerActiveX\)[\s\S]*?eq\(videoInteractions\.interaction_type, kind\)[\s\S]*?eq\(videosTable\.visibility_status, "public"\)/,
+    /eq\(\s*videoInteractionsAuth\.auth_user_id,\s*authenticatedViewer\.id,\s*\)[\s\S]*?eq\(videoInteractionsAuth\.interaction_type, kind\)[\s\S]*?eq\(videosTable\.visibility_status, "public"\)/,
   );
   assert.doesNotMatch(videoDetailPage, /inArray\(videosTable\.id/);
   assert.match(
