@@ -75,7 +75,7 @@ export type WriteGuardOptions = {
   /**
    * 明示的な X 身元要件。指定時は requireActiveXId / requireApprovedActiveXId より優先する。
    * "none": X 不問。
-   * "requested_x": pending 申請または active X を持つことを要求（枠確保に使用）。
+   * "requested_x": pending 申請または active X を持つことを要求。枠確保には使わない（TOS 同意のみ）。
    * "approved_active_x": approved な active X を要求（作品投稿に使用）。
    */
   identityRequirement?: "none" | "requested_x" | "approved_active_x";

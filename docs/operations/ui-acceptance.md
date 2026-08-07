@@ -65,6 +65,10 @@
 - イベント最大枠数を後から下げても、既存予約の提出・個別解放・管理者強制解放は可能とする（拡張・結合でのサイズ増加のみ拒否）。
 - 埋まり枠数は reservation group 数ではなく actual slot 行数で集計する。
 - `anonymous` / `hidden` で他人が閲覧する場合は「確保済み」のみとし、連続枠の位置情報からグループ構造を推測できないようにする。
+- Discord のみログイン（X ID 未連携）でも、利用規約同意後は枠確保できる。`canTakeSlot` は `onboarding.canReserveSlot` ベースであり `viewerXId != null` を要求しない。
+- 枠行の高さは `SlotGrid.module.css` の `--slot-row-height` で統一する。
+- 提出済み枠のアイコンは `slot-submission-icon/{slotId}` 経由で表示する（`submitted_icon_url` / `submittedIcon`）。
+- 設定・オンボーディングの文言は「枠確保は規約同意後、投稿は X ID 承認後」とし、「枠確保は X ID 申請後」は使わない。
 
 ## 自動検査
 

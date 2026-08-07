@@ -248,21 +248,27 @@ export default async function OnboardingPage({
             FlameNode を利用する準備
           </h1>
           <p className="fn-jp fn-page-lead">
-            投稿やイベント参加のために、次の 2 つを設定します。
+            作品投稿のために、活動名義となる X ID を登録します。枠確保は規約同意後から利用できます。
           </p>
         </header>
         <ol className={styles.prepareList}>
           <li>利用規約への同意（完了済み）</li>
-          <li>活動名義となる X ID の登録</li>
+          <li>活動名義となる X ID の登録（作品投稿に必要）</li>
         </ol>
         <p className={styles.prepareNote}>所要時間：約1分</p>
         <div className={styles.stepActions}>
           <Link href={startHref} className="fn-btn fn-btn-primary">
             設定を始める
           </Link>
-          <Link href={next} className="fn-btn fn-btn-ghost">
-            あとで
-          </Link>
+          {state.canReserveSlot ? (
+            <Link href={next} className="fn-btn fn-btn-ghost">
+              あとで枠だけ確保する
+            </Link>
+          ) : (
+            <Link href={next} className="fn-btn fn-btn-ghost">
+              あとで
+            </Link>
+          )}
         </div>
       </div>
     );
@@ -274,7 +280,7 @@ export default async function OnboardingPage({
         <span className="fn-eyebrow">初期設定 2 / 2</span>
         <h1 className="fn-display fn-page-title">活動名義を登録</h1>
         <p className="fn-jp fn-page-lead">
-          作品投稿やイベント参加時に使用する X アカウントを登録してください。
+          作品投稿時に使用する X アカウントを登録してください。
         </p>
       </header>
 
@@ -283,9 +289,16 @@ export default async function OnboardingPage({
           X ID 申請
         </h2>
         <p className={styles.stepBody}>
-          運営による確認後、作品投稿が可能になります。枠の確保は申請完了後すぐに利用できます。
+          運営による確認後、作品投稿が可能になります。枠の確保は利用規約同意後から利用できます。
         </p>
         <OnboardingXIdForm />
+        {state.canReserveSlot ? (
+          <div className={styles.stepActions}>
+            <Link href={next} className="fn-btn fn-btn-ghost">
+              あとで枠だけ確保する
+            </Link>
+          </div>
+        ) : null}
       </section>
     </div>
   );

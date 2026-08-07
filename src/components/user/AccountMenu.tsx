@@ -184,7 +184,7 @@ export function AccountMenu({
                   <strong>X ID未連携</strong>
                   <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
                     いいね・セーブ・投稿には、利用規約への同意と承認済みの活動名義（Active X
-                    ID）が必要です。枠確保は X ID 申請後（承認待ち）から利用できます。
+                    ID）が必要です。枠確保は規約同意後から可能で、投稿は X ID 承認後です。
                   </p>
                   <div style={{ marginTop: 8 }}>
                     <Link

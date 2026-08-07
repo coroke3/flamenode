@@ -234,12 +234,29 @@ export default async function EntryPage({
         </div>
       ) : !onboarding.canPost ? (
         <div className="fn-entry-status fn-entry-status--warn" role="status">
-          <Icon name="clock" size={18} aria-hidden />
+          <Icon
+            name={onboarding.xIdentityStatus === "pending" ? "clock" : "alert"}
+            size={18}
+            aria-hidden
+          />
           <div>
-            <h2 className="fn-jp fn-panel-title">X ID 承認待ち</h2>
-            <p className="fn-jp fn-entry-status-lead">
-              枠確保は可能です。投稿は X ID 承認後に利用できます。
-            </p>
+            {onboarding.xIdentityStatus === "pending" ? (
+              <>
+                <h2 className="fn-jp fn-panel-title">X ID 承認待ち</h2>
+                <p className="fn-jp fn-entry-status-lead">
+                  枠確保は可能です。投稿は X ID 承認後に利用できます。
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="fn-jp fn-panel-title">
+                  作品投稿には X ID 連携が必要
+                </h2>
+                <p className="fn-jp fn-entry-status-lead">
+                  枠確保は可能です。投稿は X ID の承認後に利用できます。
+                </p>
+              </>
+            )}
           </div>
         </div>
       ) : (

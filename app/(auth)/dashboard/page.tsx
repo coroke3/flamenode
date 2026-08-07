@@ -277,7 +277,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         </div>
       </header>
 
-      {onboarding.needsTermsAcceptance || onboarding.xIdentityStatus === "none" ? (
+      {onboarding.needsTermsAcceptance ? (
         <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
           <Icon name="alert" size={18} aria-hidden />
           <div>
@@ -290,6 +290,23 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
             >
               初期設定を進める
+            </Link>
+          </div>
+        </div>
+      ) : onboarding.xIdentityStatus === "none" ? (
+        <div className="fn-pc-status-banner" role="status" style={{ marginBottom: 20 }}>
+          <Icon name="alert" size={18} aria-hidden />
+          <div>
+            <h3 className="fn-jp">X ID 未連携</h3>
+            <p className="fn-jp fn-pc-banner-lead">
+              投稿・一部機能には X ID が必要です。
+              {onboarding.canReserveSlot ? " 枠確保は可能です。" : ""}
+            </p>
+            <Link
+              href="/dashboard/settings?next=/dashboard"
+              className="fn-btn fn-btn-primary fn-btn-sm fn-mt-12"
+            >
+              X ID を連携する
             </Link>
           </div>
         </div>

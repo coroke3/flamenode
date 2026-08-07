@@ -98,7 +98,7 @@ export function OnboardingTermsForm({
         disabled={pending || !agreed}
         aria-busy={pending}
       >
-        {pending ? "同意中…" : "同意して X ID 登録へ"}
+        {pending ? "同意中…" : "同意して続ける"}
       </button>
     </form>
   );

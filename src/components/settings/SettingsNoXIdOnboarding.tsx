@@ -20,7 +20,7 @@ export function SettingsNoXIdOnboarding({
         </p>
         <ul className={pageStyles.onboardingList}>
           <li>作品の閲覧はログインなしでも可能です</li>
-          <li>枠確保は X ID 申請後（承認待ち）から利用できます</li>
+          <li>枠確保は規約同意後から利用できます。投稿は X ID 承認後</li>
           <li>いいね・セーブ・投稿には承認済みの活動名義（Active X ID）が必要です</li>
           <li>複数の X ID を連携し、アクティブを切り替えられます</li>
         </ul>
@@ -45,7 +45,7 @@ export function SettingsPageLead({
   if (!hasLinkedXIds) {
     return (
       <p className="fn-page-lead">
-        まず X ID を連携してください。承認後にいいね・セーブ・投稿ができます（枠確保は申請後から可能）。
+        まず X ID を連携してください。承認後にいいね・セーブ・投稿ができます（枠確保は規約同意後から可能）。
         {pendingCount > 0 ? " 申請中の連携は「申請履歴」タブで確認できます。" : ""}
       </p>
     );

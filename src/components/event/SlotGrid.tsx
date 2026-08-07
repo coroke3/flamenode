@@ -425,11 +425,14 @@ export function SlotGrid({
         setError(result.message ?? "枠の拡張に失敗しました。");
         return;
       }
+      const extendedCount = result.groupSize ?? 0;
       setSuccess({
         message:
-          (result.groupSize ?? 0) > 1
-            ? `連続${result.groupSize}枠になりました。`
-            : "枠を拡張しました。",
+          extendedCount > 1
+            ? `連続${extendedCount}枠になりました。`
+            : canPost
+              ? "枠を拡張しました。続けて作品情報を登録できます。"
+              : "枠を拡張しました。作品投稿には X ID の承認が必要です。",
         pendingPublicReflection: result.pendingPublicReflection,
       });
       router.refresh();
@@ -449,11 +452,14 @@ export function SlotGrid({
         setError(result.message ?? "枠の結合に失敗しました。");
         return;
       }
+      const mergedCount = result.groupSize ?? 0;
       setSuccess({
         message:
-          (result.groupSize ?? 0) > 1
-            ? `${result.groupSize}枠を1つの連続枠にまとめました。`
-            : "枠を結合しました。",
+          mergedCount > 1
+            ? `${mergedCount}枠を1つの連続枠にまとめました。`
+            : canPost
+              ? "枠を結合しました。続けて作品情報を登録できます。"
+              : "枠を結合しました。作品投稿には X ID の承認が必要です。",
         pendingPublicReflection: result.pendingPublicReflection,
       });
       router.refresh();
@@ -666,21 +672,39 @@ export function SlotGrid({
               </div>
             ) : null}
             {reservedSlotId ? (
-              <>
-                <Link
-                  href={`/entry/slotted?slot=${reservedSlotId}`}
-                  className="fn-btn fn-btn-primary"
-                >
-                  次へ: 作品情報を登録する
-                  <Icon name="chevron-right" size={14} aria-hidden />
-                </Link>
-                <Link
-                  href="/dashboard"
-                  className={styles.successCardSecondary}
-                >
-                  あとで登録する (ダッシュボードから再開できます)
-                </Link>
-              </>
+              canPost ? (
+                <>
+                  <Link
+                    href={`/entry/slotted?slot=${reservedSlotId}`}
+                    className="fn-btn fn-btn-primary"
+                  >
+                    次へ: 作品情報を登録する
+                    <Icon name="chevron-right" size={14} aria-hidden />
+                  </Link>
+                  <Link
+                    href="/dashboard"
+                    className={styles.successCardSecondary}
+                  >
+                    あとで登録する (ダッシュボードから再開できます)
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href={`/dashboard/settings?next=${encodeURIComponent(settingsNext)}`}
+                    className="fn-btn fn-btn-primary"
+                  >
+                    X ID を連携する
+                    <Icon name="chevron-right" size={14} aria-hidden />
+                  </Link>
+                  <Link
+                    href="/dashboard"
+                    className={styles.successCardSecondary}
+                  >
+                    あとで登録する (ダッシュボードから再開できます)
+                  </Link>
+                </>
+              )
             ) : null}
           </div>
         </div>

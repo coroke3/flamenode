@@ -73,7 +73,32 @@ forbidMatch(
 requireAll("src/components/event/SlotGrid.module.css", [
   [/\.partsRow\s*\{[^}]*overflow-x:\s*auto/s, "partsRow の横スクロール (overflow-x:auto) がありません。"],
   [/\.slotActionMenu\s*\{[^}]*position:\s*fixed/s, "編集メニューは position:fixed である必要があります。"],
+  [/--slot-row-height/, "slot row height CSS 変数 (--slot-row-height) がありません。"],
 ]);
+requireAll("src/components/event/SlotGrid.tsx", [
+  [/submitted_icon_url/, "提出済みアイコン (submitted_icon_url) の表示経路がありません。"],
+  [/styles\.submittedIcon/, "submittedIcon CSS class がありません。"],
+]);
+requireMatch(
+  "app/(public)/event/[id]/slots/page.tsx",
+  /canTakeSlot=\{accepting && onboarding\.canReserveSlot\}/,
+  "canTakeSlot は canReserveSlot ベースであり viewerXId 必須ではない。",
+);
+forbidMatch(
+  "app/(public)/event/[id]/slots/page.tsx",
+  /canTakeSlot=\{[^}]*viewerXId\s*!=\s*null/,
+  "canTakeSlot が viewerXId 必須になっています。",
+);
+requireMatch(
+  "app/(public)/event/[id]/slots/page.tsx",
+  /slot-submission-icon\/\$\{slot\.id\}/,
+  "提出済みアイコン API パス (slot-submission-icon) がありません。",
+);
+forbidMatch(
+  "src/components/settings/SettingsNoXIdOnboarding.tsx",
+  /枠確保は X ID 申請後/,
+  "枠確保に X ID 申請が必要と誤解される文言が残っています。",
+);
 
 requireAll("src/components/video/playerBridge.ts", [
   [/PLAYER_ENDED/, "再生終了イベント定数がありません。"],
