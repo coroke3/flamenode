@@ -32,6 +32,7 @@ import { syncBatch, countPendingSyncRows, type SyncBatchResult } from "../youtub
 import { syncEventPlaylists } from "../youtube-playlist-sync/index.ts";
 import { enqueueYoutubeRelatedProjectionRebuilds } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { syncGa4Trending } from "../ga-analytics/sync.ts";
+import { enqueueScoreDependentRebuilds } from "./scoreRankingRebuildThrottle.ts";
 
 export interface Env {
   DB: D1Database;
@@ -66,57 +67,6 @@ export function isPlaylistSyncSlot(now = new Date()): boolean {
     throw new Error("invalid playlist sync schedule");
   }
   return now.getUTCMinutes() === 52;
-}
-
-async function enqueueScoreDependentRebuilds(
-  env: Env,
-  signal?: AbortSignal,
-): Promise<{
-  processed: number;
-  failed: number;
-  skipped: number;
-  external_api_calls: number;
-  d1_changes: number;
-  retry_count: number;
-  quota_stopped: boolean;
-}> {
-  signal?.throwIfAborted();
-  const now = Math.floor(Date.now() / 1000);
-  const targets = ["top", "list_popular", "recommend"] as const;
-  const statements = targets.map((targetType) =>
-    env.DB.prepare(
-      `INSERT OR IGNORE INTO static_rebuild_queue (
-         id, target_type, target_id, reason, priority, status,
-         attempt_count, created_at, updated_at
-       ) VALUES (?, ?, 'global', 'score_recalc', 'normal', 'pending', 0, ?, ?)`,
-    ).bind(`srb:${targetType}:${crypto.randomUUID()}`, targetType, now, now),
-  );
-  const results = await env.DB.batch(statements);
-  signal?.throwIfAborted();
-  const processed = results.reduce(
-    (sum, result) =>
-      sum + Math.max(0, Number(result.meta?.changes ?? 0)),
-    0,
-  );
-  return processed > 0
-    ? {
-        processed,
-        failed: 0,
-        skipped: 0,
-        external_api_calls: 0,
-        d1_changes: processed,
-        retry_count: 0,
-        quota_stopped: false,
-      }
-    : {
-        processed: 0,
-        failed: 0,
-        skipped: 1,
-        external_api_calls: 0,
-        d1_changes: 0,
-        retry_count: 0,
-        quota_stopped: false,
-      };
 }
 
 async function wakeStaticRebuildAfterScoreEnqueue(

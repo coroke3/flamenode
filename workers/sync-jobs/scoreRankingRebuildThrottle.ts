@@ -1,0 +1,252 @@
+import { normalizeStaticEventsIndex } from "../../src/lib/publicData/staticEventsIndexCore.ts";
+import {
+  computeEventStatus,
+  type EventStatusInput,
+} from "../../src/lib/utils/eventStatusCore.ts";
+
+export const RANKING_LAST_SCORE_REBUILD_KV_KEY = "ranking:last-score-rebuild";
+export const SCORE_REBUILD_ACTIVE_INTERVAL_SEC = 3600;
+export const SCORE_REBUILD_INACTIVE_INTERVAL_SEC = 10800;
+export const EVENTS_INDEX_R2_KEY = "events/index.json";
+const D1_ACTIVE_EVENT_FALLBACK_LIMIT = 50;
+
+const SCORE_REBUILD_TARGETS = ["top", "list_popular", "recommend"] as const;
+
+export type ScoreRebuildEnqueueEnv = {
+  DB: D1Database;
+  R2: R2Bucket;
+  KV: KVNamespace;
+};
+
+export type ScoreRebuildEnqueueResult = {
+  processed: number;
+  failed: number;
+  skipped: number;
+  external_api_calls: number;
+  d1_changes: number;
+  retry_count: number;
+  quota_stopped: boolean;
+};
+
+export type ActiveOngoingEventSource = "r2" | "d1_fallback" | "safe_default";
+
+export type ActiveOngoingEventResolution = {
+  hasActiveOngoingEvent: boolean;
+  source: ActiveOngoingEventSource;
+};
+
+type D1EventStatusRow = {
+  visibility_status?: string | null;
+  start_time?: number | null;
+  end_time?: number | null;
+  entry_start_time?: number | null;
+  entry_end_time?: number | null;
+};
+
+export function scoreRebuildThrottleIntervalSec(
+  hasActiveOngoingEvent: boolean,
+): number {
+  return hasActiveOngoingEvent
+    ? SCORE_REBUILD_ACTIVE_INTERVAL_SEC
+    : SCORE_REBUILD_INACTIVE_INTERVAL_SEC;
+}
+
+export function shouldSkipScoreRebuildEnqueue(
+  lastEnqueueUnix: number | null,
+  nowUnix: number,
+  intervalSec: number,
+): boolean {
+  if (lastEnqueueUnix == null) return false;
+  return nowUnix - lastEnqueueUnix < intervalSec;
+}
+
+export function hasActiveOngoingEventStatus(
+  event: EventStatusInput,
+  nowUnix: number,
+): boolean {
+  return computeEventStatus(event, nowUnix) === "active";
+}
+
+export function indexHasActiveOngoingEvent(
+  events: readonly EventStatusInput[],
+  nowUnix: number,
+): boolean {
+  return events.some((event) => hasActiveOngoingEventStatus(event, nowUnix));
+}
+
+function parseLastScoreRebuildMarker(raw: string | null): number | null {
+  if (raw == null || raw.trim() === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+export async function readLastScoreRebuildMarker(
+  kv: KVNamespace,
+): Promise<number | null> {
+  const raw = await kv.get(RANKING_LAST_SCORE_REBUILD_KV_KEY);
+  return parseLastScoreRebuildMarker(raw);
+}
+
+export async function writeLastScoreRebuildMarker(
+  kv: KVNamespace,
+  nowUnix: number,
+): Promise<void> {
+  await kv.put(RANKING_LAST_SCORE_REBUILD_KV_KEY, String(nowUnix));
+}
+
+function collectEventsFromIndex(
+  payload: unknown,
+): EventStatusInput[] | null {
+  const normalized = normalizeStaticEventsIndex(
+    payload && typeof payload === "object"
+      ? (payload as { generated_at?: unknown; items?: unknown; group_sections?: unknown })
+      : {},
+  );
+  if (!normalized) return null;
+  const rows: EventStatusInput[] = [...normalized.events];
+  for (const section of normalized.groupSections) {
+    rows.push(...section.events);
+  }
+  return rows;
+}
+
+async function resolveHasActiveOngoingEventFromR2(
+  env: Pick<ScoreRebuildEnqueueEnv, "R2">,
+  nowUnix: number,
+  signal?: AbortSignal,
+): Promise<ActiveOngoingEventResolution | null> {
+  signal?.throwIfAborted();
+  try {
+    const object = await env.R2.get(EVENTS_INDEX_R2_KEY);
+    signal?.throwIfAborted();
+    if (!object) return null;
+    const payload = await object.json();
+    signal?.throwIfAborted();
+    const events = collectEventsFromIndex(payload);
+    if (!events) return null;
+    return {
+      hasActiveOngoingEvent: indexHasActiveOngoingEvent(events, nowUnix),
+      source: "r2",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveHasActiveOngoingEventFromD1(
+  env: Pick<ScoreRebuildEnqueueEnv, "DB">,
+  nowUnix: number,
+  signal?: AbortSignal,
+): Promise<ActiveOngoingEventResolution | null> {
+  signal?.throwIfAborted();
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT visibility_status, start_time, end_time, entry_start_time, entry_end_time
+         FROM events
+        WHERE visibility_status = 'public'
+        LIMIT ?`,
+    )
+      .bind(D1_ACTIVE_EVENT_FALLBACK_LIMIT)
+      .all<D1EventStatusRow>();
+    signal?.throwIfAborted();
+    const events = rows.results ?? [];
+    return {
+      hasActiveOngoingEvent: indexHasActiveOngoingEvent(events, nowUnix),
+      source: "d1_fallback",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveHasActiveOngoingEvent(
+  env: Pick<ScoreRebuildEnqueueEnv, "R2" | "DB">,
+  nowUnix: number,
+  signal?: AbortSignal,
+): Promise<ActiveOngoingEventResolution> {
+  const fromR2 = await resolveHasActiveOngoingEventFromR2(env, nowUnix, signal);
+  if (fromR2) return fromR2;
+  const fromD1 = await resolveHasActiveOngoingEventFromD1(env, nowUnix, signal);
+  if (fromD1) return fromD1;
+  return {
+    hasActiveOngoingEvent: true,
+    source: "safe_default",
+  };
+}
+
+export async function shouldThrottleScoreDependentRebuild(
+  env: ScoreRebuildEnqueueEnv,
+  nowUnix: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const lastMarker = await readLastScoreRebuildMarker(env.KV);
+  if (lastMarker == null) return false;
+
+  const resolution = await resolveHasActiveOngoingEvent(env, nowUnix, signal);
+  if (resolution.source === "safe_default") return false;
+
+  const intervalSec = scoreRebuildThrottleIntervalSec(
+    resolution.hasActiveOngoingEvent,
+  );
+  return shouldSkipScoreRebuildEnqueue(lastMarker, nowUnix, intervalSec);
+}
+
+export async function enqueueScoreDependentRebuilds(
+  env: ScoreRebuildEnqueueEnv,
+  signal?: AbortSignal,
+): Promise<ScoreRebuildEnqueueResult> {
+  signal?.throwIfAborted();
+  const now = Math.floor(Date.now() / 1000);
+
+  if (await shouldThrottleScoreDependentRebuild(env, now, signal)) {
+    return {
+      processed: 0,
+      failed: 0,
+      skipped: 1,
+      external_api_calls: 0,
+      d1_changes: 0,
+      retry_count: 0,
+      quota_stopped: false,
+    };
+  }
+
+  const statements = SCORE_REBUILD_TARGETS.map((targetType) =>
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO static_rebuild_queue (
+         id, target_type, target_id, reason, priority, status,
+         attempt_count, created_at, updated_at
+       ) VALUES (?, ?, 'global', 'score_recalc', 'normal', 'pending', 0, ?, ?)`,
+    ).bind(`srb:${targetType}:${crypto.randomUUID()}`, targetType, now, now),
+  );
+  const results = await env.DB.batch(statements);
+  signal?.throwIfAborted();
+  const processed = results.reduce(
+    (sum, result) => sum + Math.max(0, Number(result.meta?.changes ?? 0)),
+    0,
+  );
+
+  if (processed > 0) {
+    await writeLastScoreRebuildMarker(env.KV, now);
+  }
+
+  return processed > 0
+    ? {
+        processed,
+        failed: 0,
+        skipped: 0,
+        external_api_calls: 0,
+        d1_changes: processed,
+        retry_count: 0,
+        quota_stopped: false,
+      }
+    : {
+        processed: 0,
+        failed: 0,
+        skipped: 1,
+        external_api_calls: 0,
+        d1_changes: 0,
+        retry_count: 0,
+        quota_stopped: false,
+      };
+}
