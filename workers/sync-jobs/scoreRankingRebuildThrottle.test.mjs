@@ -19,6 +19,12 @@ import {
 
 const T0 = 1_700_000_000;
 
+function assertKvMarkerRecent(store, beforeSec, afterSec = Math.floor(Date.now() / 1000)) {
+  const marker = Number(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY));
+  assert.ok(Number.isFinite(marker));
+  assert.ok(marker >= beforeSec && marker <= afterSec);
+}
+
 function activeEvent(overrides = {}) {
   return {
     id: "evt-active",
@@ -305,11 +311,13 @@ test("active events throttle: skip under 1h and enqueue after 1h", async () => {
   };
 
   assert.equal(await shouldThrottleScoreDependentRebuild(laterEnv, now), false);
+  const before = Math.floor(Date.now() / 1000);
   const enqueued = await enqueueScoreDependentRebuilds(laterEnv);
+  const after = Math.floor(Date.now() / 1000);
   assert.equal(enqueued.processed, 3);
   assert.equal(enqueued.d1_changes, 3);
   assert.equal(batchCalls(), 1);
-  assert.equal(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY), String(Math.floor(Date.now() / 1000)));
+  assertKvMarkerRecent(store, before, after);
 });
 
 test("inactive events throttle: skip under 3h and enqueue after 3h", async () => {
@@ -344,9 +352,11 @@ test("inactive events throttle: skip under 3h and enqueue after 3h", async () =>
   };
 
   assert.equal(await shouldThrottleScoreDependentRebuild(laterEnv, now), false);
+  const beforeInactive = Math.floor(Date.now() / 1000);
   const enqueued = await enqueueScoreDependentRebuilds(laterEnv);
+  const afterInactive = Math.floor(Date.now() / 1000);
   assert.equal(enqueued.processed, 3);
-  assert.equal(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY), String(Math.floor(Date.now() / 1000)));
+  assertKvMarkerRecent(store, beforeInactive, afterInactive);
 });
 
 test("users_index in flight enqueues only list_popular", async () => {
@@ -363,12 +373,14 @@ test("users_index in flight enqueues only list_popular", async () => {
     DB: db,
   };
 
+  const before = Math.floor(Date.now() / 1000);
   const result = await enqueueScoreDependentRebuilds(env);
+  const after = Math.floor(Date.now() / 1000);
   assert.equal(result.processed, 1);
   assert.equal(result.d1_changes, 1);
   assert.equal(batchCalls(), 1);
   assert.equal(lastBatchStatementCount(), 1);
-  assert.equal(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY), String(Math.floor(Date.now() / 1000)));
+  assertKvMarkerRecent(store, before, after);
 });
 
 test("users_index in flight with deduped list_popular does not update KV marker", async () => {
@@ -410,9 +422,7 @@ test("missing KV marker always enqueues score rebuild", async () => {
   const after = Math.floor(Date.now() / 1000);
   assert.equal(result.processed, 3);
   assert.equal(batchCalls(), 1);
-  const marker = Number(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY));
-  assert.ok(Number.isFinite(marker));
-  assert.ok(marker >= before && marker <= after);
+  assertKvMarkerRecent(store, before, after);
 });
 
 test("R2 artifact missing uses D1 fallback for inactive throttle", async () => {
