@@ -44,6 +44,11 @@ test("override is a separate, short, confirmed and allowlisted emergency operati
   assert.match(overrideUi, /setCostGuardOverride/);
   assert.match(overrideUi, /clearCostGuardOverride/);
   assert.match(overrideUi, /15分限定/);
+  assert.doesNotMatch(
+    overrideUi,
+    /setFeatures\(\(current\)\s*=>\s*event\.currentTarget/,
+    "checkbox onChange は setState updater 内で SyntheticEvent を読まない",
+  );
 });
 
 test("control guard skips Active X lookup while keeping identity checks", async () => {

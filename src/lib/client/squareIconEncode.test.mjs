@@ -11,10 +11,31 @@ import {
   isIconPreviewError,
   isValidBitmap,
   sanitizeTransform,
+  validateIconImageFile,
 } from "./squareIconEncode.ts";
 
 const readSource = () =>
   readFileSync(fileURLToPath(new URL("./squareIconEncode.ts", import.meta.url)), "utf8");
+
+test("validateIconImageFile は octet-stream + .webp 名を許可する", () => {
+  const file = new File(["x"], "icon.webp", { type: "application/octet-stream" });
+  assert.doesNotThrow(() => validateIconImageFile(file));
+});
+
+test("validateIconImageFile は image/jpg を許可する", () => {
+  const file = new File(["x"], "photo.jpg", { type: "image/jpg" });
+  assert.doesNotThrow(() => validateIconImageFile(file));
+});
+
+test("validateIconImageFile は text/plain を拒否する", () => {
+  const file = new File(["x"], "notes.txt", { type: "text/plain" });
+  assert.throws(() => validateIconImageFile(file), /PNG・JPEG・WEBP/);
+});
+
+test("validateIconImageFile は image/gif を拒否する", () => {
+  const file = new File(["x"], "anim.gif", { type: "image/gif" });
+  assert.throws(() => validateIconImageFile(file), /PNG・JPEG・WEBP/);
+});
 
 test("getCoverBaseScale は cover 用の最大スケールを返す", () => {
   assert.equal(getCoverBaseScale(100, 200, 280), 2.8);

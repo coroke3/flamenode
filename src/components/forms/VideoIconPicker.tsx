@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { flushSync } from "react-dom";
 import { SquareIconEditor } from "@/components/media/SquareIconEditor";
 import { Icon } from "@/components/ui/Icon";
 import type { VideoIconMode } from "@/lib/video/videoFormSchema";
@@ -52,6 +53,7 @@ export function VideoIconPicker({
   const [selectedUrl, setSelectedUrl] = React.useState(initialUrl);
   const [tab, setTab] = React.useState<"select" | "upload">("select");
   const [uploadPreview, setUploadPreview] = React.useState<string | null>(null);
+  const [editorKey, setEditorKey] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const selectionBeforeUploadRef = React.useRef({
@@ -111,11 +113,16 @@ export function VideoIconPicker({
 
   const onUseUploadedImage = React.useCallback(
     async (file: File): Promise<{ ok: true } | { ok: false; message: string }> => {
-      selectionBeforeUploadRef.current = {
-        url: selectedUrl,
-        mode: iconMode,
-      };
+      if (iconMode !== "upload") {
+        selectionBeforeUploadRef.current = {
+          url: selectedUrl,
+          mode: iconMode,
+        };
+      }
       clearUploadPreview();
+      flushSync(() => {
+        setSelection("", "upload");
+      });
       const previewUrl = window.URL.createObjectURL(file);
       setUploadPreview(previewUrl);
       syncFileToNamedInput(file);
@@ -128,20 +135,18 @@ export function VideoIconPicker({
         return { ok: false as const, message };
       }
 
-      setSelection("", "upload");
       setError(null);
+      setEditorKey((key) => key + 1);
       return { ok: true as const };
     }, [clearUploadPreview, iconMode, selectedUrl, setSelection, syncFileToNamedInput],
   );
 
   const switchToSelectTab = React.useCallback(() => {
     setTab("select");
-    if (iconMode === "upload") {
-      discardUploadState();
-    } else {
+    if (iconMode !== "upload") {
       clearUploadPreview();
     }
-  }, [clearUploadPreview, discardUploadState, iconMode]);
+  }, [clearUploadPreview, iconMode]);
 
   const cancelUpload = () => {
     if (iconMode === "upload") discardUploadState();
@@ -217,7 +222,7 @@ export function VideoIconPicker({
         name={iconMode === "upload" ? "icon_file" : undefined}
         accept="image/png,image/jpeg,image/webp"
         style={{ display: "none" }}
-        disabled={disabled || iconMode !== "upload"}
+        disabled={disabled}
       />
       <div
         role="tablist"
@@ -257,6 +262,7 @@ export function VideoIconPicker({
       {tab === "upload" ? (
         <div style={{ display: "grid", gap: 10 }}>
           <SquareIconEditor
+            key={editorKey}
             disabled={disabled}
             onUseImage={onUseUploadedImage}
             onCancel={cancelUpload}
@@ -288,6 +294,11 @@ export function VideoIconPicker({
             </div>
           ) : null}
         </div>
+      ) : null}
+      {tab === "select" && iconMode === "upload" ? (
+        <p className="fn-muted fn-text-sm" style={{ margin: 0 }} role="status">
+          新規アップロードが選択中です。候補を選ぶとアップロードは破棄されます。
+        </p>
       ) : null}
       {tab === "select" && candidates.length > 0 ? (
         <div

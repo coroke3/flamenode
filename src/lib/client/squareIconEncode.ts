@@ -5,6 +5,7 @@ const MAX_PIXEL_COUNT = 50_000_000;
 
 const ACCEPTED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const ACCEPTED_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const REJECTED_MIME_TYPES = new Set(["image/gif"]);
 
 export type SquareIconTransform = {
   offsetX: number;
@@ -67,15 +68,18 @@ export function validateIconImageFile(file: File): void {
   if (file.size > MAX_FILE_BYTES) {
     throw new Error("ファイルサイズは 2MB までです。");
   }
-  const mime = file.type.toLowerCase();
-  if (mime && !ACCEPTED_MIME_TYPES.has(mime)) {
+  let mime = file.type.toLowerCase();
+  if (mime === "image/jpg") mime = "image/jpeg";
+  if (ACCEPTED_MIME_TYPES.has(mime)) return;
+  if (REJECTED_MIME_TYPES.has(mime)) {
     throw new Error("PNG・JPEG・WEBP 形式の画像を選んでください。");
   }
-  if (!mime) {
-    const ext = getFileExtension(file.name);
-    if (!ACCEPTED_EXTENSIONS.has(ext)) {
-      throw new Error("PNG・JPEG・WEBP 形式の画像を選んでください。");
-    }
+  if (mime && !mime.startsWith("image/") && mime !== "application/octet-stream") {
+    throw new Error("PNG・JPEG・WEBP 形式の画像を選んでください。");
+  }
+  const ext = getFileExtension(file.name);
+  if (!ACCEPTED_EXTENSIONS.has(ext)) {
+    throw new Error("PNG・JPEG・WEBP 形式の画像を選んでください。");
   }
 }
 

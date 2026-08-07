@@ -41,12 +41,26 @@ test("SquareIconEditor は確定操作まで Server Action を呼ばない", () 
 test("VideoIconPicker は upload 確定後のタブ切替と DataTransfer 失敗を扱う", () => {
   const picker = read("../../components/forms/VideoIconPicker.tsx");
   assert.match(picker, /switchToSelectTab/);
-  assert.match(picker, /iconMode === "upload"/);
+  assert.match(picker, /iconMode !== "upload"/);
   assert.match(picker, /discardUploadState/);
   assert.match(picker, /fileInputRef\.current\?\.files\?\.length/);
   assert.match(picker, /persistedIconUrl/);
   assert.match(picker, /selectionBeforeUploadRef/);
+  assert.match(picker, /if \(iconMode !== "upload"\)/);
+  assert.match(picker, /flushSync/);
+  assert.match(picker, /editorKey/);
+  assert.match(picker, /disabled=\{disabled\}/);
+  assert.doesNotMatch(picker, /disabled=\{disabled \|\| iconMode !== "upload"\}/);
   assert.match(picker, /return \{ ok: true(?: as const)? \}/);
+  const switchToSelectTabFn = picker.slice(
+    picker.indexOf("const switchToSelectTab"),
+    picker.indexOf("const cancelUpload"),
+  );
+  assert.doesNotMatch(
+    switchToSelectTabFn,
+    /discardUploadState/,
+    "switchToSelectTab は upload 状態を自動破棄しない",
+  );
 });
 
 test("XIdSettingsClient は SquareIconEditor 経由で uploadXIdIcon を呼ぶ", () => {
