@@ -14,15 +14,18 @@ test("videoReviewQueueOrder uses created_at DESC then id DESC", () => {
 });
 
 test("resolveApproveAndNextHref falls back to review queue list", () => {
-  assert.match(orderSource, /adminReviewQueueFallbackHref\(\)/);
+  assert.match(orderSource, /adminReviewQueueFallbackHref/);
   assert.match(orderSource, /\/admin\/videos\?status=review/);
+  assert.match(orderSource, /adminEventFilter/);
   assert.match(orderSource, /manageReviewQueueFallbackHref/);
   assert.match(orderSource, /\/videos\?status=review/);
 });
 
-test("buildReviewDetailHref scopes manage paths by event", () => {
+test("buildReviewDetailHref scopes manage paths by event and admin filter by query", () => {
   assert.match(orderSource, /\/admin\/videos\/\$\{videoId\}/);
   assert.match(orderSource, /\/manage\/events\/\$\{scope\.eventId\}\/videos\/\$\{videoId\}/);
+  assert.match(orderSource, /adminEventFilter/);
+  assert.match(orderSource, /\?event=/);
 });
 
 test("findNextPendingReviewVideoId queries pending items after current cursor", () => {

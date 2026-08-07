@@ -15,6 +15,18 @@ import {
 } from "@/lib/video/videoVisibilityTransition";
 import { SAME_VIDEO_STATUS_MESSAGE } from "@/lib/video/videoVisibilityStatusCore";
 
+const VISIBILITY_PRECOMMIT_ERROR_MARKERS = [
+  "public_visibility_fence",
+  "public_visibility_manifest",
+] as const;
+
+function isVisibilityPrecommitFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return VISIBILITY_PRECOMMIT_ERROR_MARKERS.some((marker) =>
+    message.includes(marker),
+  );
+}
+
 export type VideoStatusActionResult = PendingPublicReflection & {
   ok: boolean;
   message?: string;
@@ -103,6 +115,16 @@ export async function executeVideoVisibilityStatusMutation(
         errorCode: "concurrent_update",
         traceId,
         retryable: true,
+      };
+    }
+    if (isVisibilityPrecommitFailure(error)) {
+      console.error(`[${logTag}] visibility precommit failed`, { traceId, error });
+      return {
+        ok: false,
+        message: "公開ブロックの記録に失敗しました。",
+        errorCode: "visibility_precommit_failed",
+        traceId,
+        retryable: false,
       };
     }
     console.error(`[${logTag}] mutation failed`, { traceId, error });

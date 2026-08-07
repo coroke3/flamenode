@@ -29,13 +29,13 @@ export function VideoReviewQuickApproveButton({
   hiddenFields,
 }: VideoReviewQuickApproveButtonProps): React.ReactElement {
   const router = useRouter();
-  const [pending, startTransition] = React.useTransition();
+  const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [pendingPublicReflection, setPendingPublicReflection] =
     React.useState(false);
 
   const onApprove = () => {
-    if (pending) return;
+    if (submitting) return;
     setError(null);
     setPendingPublicReflection(false);
     const fd = new FormData();
@@ -44,7 +44,8 @@ export function VideoReviewQuickApproveButton({
     }
     fd.set("video_id", videoId);
 
-    startTransition(async () => {
+    setSubmitting(true);
+    void (async () => {
       try {
         const result = await action(fd);
         if (!result.ok) {
@@ -59,8 +60,10 @@ export function VideoReviewQuickApproveButton({
       } catch {
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
+      } finally {
+        setSubmitting(false);
       }
-    });
+    })();
   };
 
   return (
@@ -68,8 +71,8 @@ export function VideoReviewQuickApproveButton({
       <button
         type="button"
         className="fn-btn fn-btn-primary fn-btn-sm"
-        disabled={pending}
-        aria-busy={pending}
+        disabled={submitting}
+        aria-busy={submitting}
         onClick={onApprove}
       >
         <Icon name="check" size={11} aria-hidden /> 承認

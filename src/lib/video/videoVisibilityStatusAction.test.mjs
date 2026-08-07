@@ -40,6 +40,8 @@ test("admin setVideoStatus uses shared mutation helper and merged event ids", as
   assert.match(source, /executeVideoVisibilityStatusMutation/);
   assert.match(source, /SAME_VIDEO_STATUS_MESSAGE/);
   assert.match(source, /attachApproveAndNextHref/);
+  assert.match(source, /review_event_id/);
+  assert.match(source, /adminEventFilter/);
   assert.match(source, /unstable_rethrow\(error\)/);
 });
 
@@ -63,5 +65,6 @@ test("shared mutation helper performs CAS re-read once", async () => {
   );
   assert.match(source, /AuditMutationError/);
   assert.match(source, /reread\?\.visibility_status === requestedStatus/);
+  assert.match(source, /visibility_precommit_failed/);
   assert.match(source, /mutateWithAudit\(/);
 });

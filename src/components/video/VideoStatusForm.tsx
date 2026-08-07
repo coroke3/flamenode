@@ -55,10 +55,12 @@ export function AdminVideoStatusForm({
   videoId,
   currentStatus,
   openVoidCaseId,
+  hiddenFields,
 }: {
   videoId: string;
   currentStatus: string;
   openVoidCaseId?: string | null;
+  hiddenFields?: Record<string, string>;
 }): React.ReactElement {
   return (
     <VideoStatusForm
@@ -73,6 +75,7 @@ export function AdminVideoStatusForm({
       allowVoidReason
       openVoidCaseId={openVoidCaseId}
       showMessageIcons
+      hiddenFields={hiddenFields}
     />
   );
 }
@@ -127,7 +130,7 @@ export function VideoStatusForm({
   const [reason, setReason] = React.useState("");
   const [reasonCategory, setReasonCategory] =
     React.useState<string>("operator_decision");
-  const [pending, startTransition] = React.useTransition();
+  const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
@@ -160,6 +163,7 @@ export function VideoStatusForm({
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (submitting) return;
     if (status === currentStatus) {
       setError("変更先のステータスを選択してください。");
       return;
@@ -193,34 +197,39 @@ export function VideoStatusForm({
       fd.set("case_id", openVoidCaseId);
     }
 
-    startTransition(async () => {
-      let result: ActionResult;
+    setSubmitting(true);
+    void (async () => {
       try {
-        result = await action(fd);
-      } catch {
-        setError(COMMUNICATION_ERROR_MESSAGE);
-        router.refresh();
-        return;
-      }
-      if (!result.ok) {
-        setError(result.message ?? "更新に失敗しました。");
-        if (result.retryable) {
+        let result: ActionResult;
+        try {
+          result = await action(fd);
+        } catch {
+          setError(COMMUNICATION_ERROR_MESSAGE);
           router.refresh();
+          return;
         }
-      } else {
-        setSuccess(true);
-        setSuccessMessage(result.message ?? "ステータスを更新しました。");
-        setPendingPublicReflection(result.pendingPublicReflection === true);
-        if (allowVoidReason) {
-          setReason("");
-        }
-        if (result.nextHref) {
-          router.push(result.nextHref);
+        if (!result.ok) {
+          setError(result.message ?? "更新に失敗しました。");
+          if (result.retryable) {
+            router.refresh();
+          }
         } else {
-          router.refresh();
+          setSuccess(true);
+          setSuccessMessage(result.message ?? "ステータスを更新しました。");
+          setPendingPublicReflection(result.pendingPublicReflection === true);
+          if (allowVoidReason) {
+            setReason("");
+          }
+          if (result.nextHref) {
+            router.push(result.nextHref);
+          } else {
+            router.refresh();
+          }
         }
+      } finally {
+        setSubmitting(false);
       }
-    });
+    })();
   };
 
   return (
@@ -236,7 +245,7 @@ export function VideoStatusForm({
         className="fn-select"
         value={status}
         onChange={(e) => setStatus(e.target.value)}
-        disabled={pending}
+        disabled={submitting}
       >
         {statusOptions.map((value) => (
           <option key={value} value={value}>
@@ -254,7 +263,7 @@ export function VideoStatusForm({
             className="fn-select"
             value={reasonCategory}
             onChange={(e) => setReasonCategory(e.target.value)}
-            disabled={pending}
+            disabled={submitting}
           >
             {REASON_CATEGORIES.map((category) => (
               <option key={category} value={category}>
@@ -273,7 +282,7 @@ export function VideoStatusForm({
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             maxLength={500}
-            disabled={pending}
+            disabled={submitting}
           />
         </>
       ) : null}
@@ -288,11 +297,11 @@ export function VideoStatusForm({
         type="submit"
         className="fn-btn fn-btn-primary"
         disabled={
-          pending ||
+          submitting ||
           status === currentStatus ||
           (requiresCaseId && !openVoidCaseId?.trim())
         }
-        aria-busy={pending}
+        aria-busy={submitting}
       >
         <Icon name="check" size={13} aria-hidden /> {submitLabel}
       </button>

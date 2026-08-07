@@ -231,10 +231,17 @@ export default async function AdminVideosPage({
         <div style={{ marginTop: 18 }}>
           <VideoReviewQueueTable
             rows={reviewRows}
-            reviewHref={(videoId) => `/admin/videos/${videoId}`}
+            reviewHref={(videoId) =>
+              event
+                ? `/admin/videos/${videoId}?event=${encodeURIComponent(event)}`
+                : `/admin/videos/${videoId}`
+            }
             contentHref={(videoId) => `/dashboard/edit/${videoId}`}
             canApprove
             quickApproveAction={approveAdminVideoPublic}
+            quickApproveHiddenFields={
+              event ? { review_event_id: event } : undefined
+            }
             extraActions={(videoId) => (
               <>
                 <Link

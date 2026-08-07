@@ -86,6 +86,9 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   const reason = String(formData.get("reason") ?? "").trim();
   const caseId = String(formData.get("case_id") ?? "").trim();
   const andNext = formData.get("and_next") === "1";
+  const reviewEventId = String(formData.get("review_event_id") ?? "").trim();
+  const adminEventFilter =
+    reviewEventId && reviewEventId.length <= 128 ? reviewEventId : undefined;
   if (!videoId || videoId.length > 128) return { ok: false, message: "video_idが不正です。" };
   if (!VALID_STATUS.has(status)) return { ok: false, message: "不正なステータスです。" };
   if (status === "voided" && !reason) return { ok: false, message: "voidedへの変更には理由が必要です。" };
@@ -96,7 +99,7 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
     return attachApproveAndNextHref(
       db,
       { ok: true, message: SAME_VIDEO_STATUS_MESSAGE },
-      { andNext, status, current: before },
+      { andNext, status, current: before, adminEventFilter },
     );
   }
 
@@ -191,6 +194,7 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
       andNext,
       status,
       current: before,
+      adminEventFilter,
     });
   } catch (error) {
     unstable_rethrow(error);

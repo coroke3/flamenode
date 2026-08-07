@@ -64,6 +64,16 @@ if (!runningWithTsx) {
     },
   });
 
+  mock.module("@/lib/video/videoVisibilityTransition", {
+    namedExports: {
+      async preCommitVideoVisibilityDepublicization() {
+        if (currentHarness.precommitMode === "fail") {
+          throw new Error("public_visibility_fence_token_mismatch");
+        }
+      },
+    },
+  });
+
   const { AuditMutationError } = await import("@/lib/audit/mutate.ts");
   const { executeVideoVisibilityStatusMutation } = await import(
     "./videoVisibilityStatusAction.ts"
@@ -89,6 +99,7 @@ if (!runningWithTsx) {
     const harness = {
       sqlite,
       mutationMode: "success",
+      precommitMode: "success",
       mutationCalls: 0,
       AuditMutationError,
       db: {
@@ -117,7 +128,7 @@ if (!runningWithTsx) {
     return harness;
   }
 
-  function makeTransition(queueStatements = []) {
+  function makeTransition(queueStatements = [], options = {}) {
     return {
       mutationStatements: [{ kind: "mutation" }],
       expectedMutationChanges: [1],
@@ -128,8 +139,8 @@ if (!runningWithTsx) {
         expectedChanges: queueStatements.map(() => 1),
         acceptedTargetCount: queueStatements.length,
       },
-      depublicizedFromPublic: false,
-      fenceToken: null,
+      depublicizedFromPublic: options.depublicizedFromPublic ?? false,
+      fenceToken: options.fenceToken ?? null,
       publicCacheKeys: [],
     };
   }
@@ -191,6 +202,30 @@ if (!runningWithTsx) {
     assert.equal(result.errorCode, "concurrent_update");
     assert.equal(result.retryable, true);
     assert.match(result.message, /別の担当者が状態を変更しました/);
+    currentHarness.sqlite.close();
+  });
+
+  test("visibility precommit failure returns visibility_precommit_failed", async () => {
+    currentHarness = createHarness({ visibilityStatus: "public" });
+    currentHarness.precommitMode = "fail";
+
+    const result = await executeVideoVisibilityStatusMutation({
+      db: currentHarness.db,
+      videoId: "video-1",
+      requestedStatus: "private",
+      transition: makeTransition([], {
+        depublicizedFromPublic: true,
+        fenceToken: "fence-1",
+      }),
+      reason: null,
+      logTag: "test-video-status",
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.errorCode, "visibility_precommit_failed");
+    assert.equal(result.retryable, false);
+    assert.equal(result.message, "公開ブロックの記録に失敗しました。");
+    assert.equal(currentHarness.mutationCalls, 0);
     currentHarness.sqlite.close();
   });
 }

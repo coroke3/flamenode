@@ -14,11 +14,17 @@ const queueSource = await readFile(
   new URL("../../components/admin/VideoReviewQueueTable.tsx", import.meta.url),
   "utf8",
 );
+const quickApproveSource = await readFile(
+  new URL("../../components/admin/VideoReviewQuickApproveButton.tsx", import.meta.url),
+  "utf8",
+);
 
 test("VideoStatusForm catches rejected server actions", () => {
   assert.match(formSource, /try \{[\s\S]*result = await action\(fd\)/);
   assert.match(formSource, /catch \{[\s\S]*COMMUNICATION_ERROR_MESSAGE/);
   assert.match(formSource, /router\.refresh\(\)/);
+  assert.match(formSource, /submitting/);
+  assert.doesNotMatch(formSource, /useTransition/);
 });
 
 test("VideoApproveActions navigates via nextHref", () => {
@@ -31,4 +37,9 @@ test("VideoReviewQueueTable gates quick approve behind canApprove", () => {
   assert.match(queueSource, /canApprove/);
   assert.match(queueSource, /VideoReviewQuickApproveButton/);
   assert.match(queueSource, /visibility_status === "pending"/);
+});
+
+test("VideoReviewQuickApproveButton guards double submit with submitting state", () => {
+  assert.match(quickApproveSource, /submitting/);
+  assert.doesNotMatch(quickApproveSource, /useTransition/);
 });

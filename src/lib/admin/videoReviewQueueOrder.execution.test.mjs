@@ -8,6 +8,9 @@ if (runTestWithTsx(import.meta.url)) {
   const {
     attachApproveAndNextHref,
     adminReviewQueueFallbackHref,
+    buildReviewDetailHref,
+    resolveApproveAndNextHref,
+    findNextPendingReviewVideoId,
   } = await import("./videoReviewQueueOrder.ts");
 
   function createDb(sqlite) {
@@ -33,10 +36,20 @@ if (runTestWithTsx(import.meta.url)) {
         visibility_status TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE video_events (
+        video_id TEXT NOT NULL,
+        event_id TEXT NOT NULL
+      );
       INSERT INTO videos (id, visibility_status, created_at) VALUES
         ('video-current', 'public', 300),
         ('video-next', 'pending', 200),
-        ('video-later', 'pending', 100);
+        ('video-later', 'pending', 100),
+        ('video-other-event', 'pending', 150);
+      INSERT INTO video_events (video_id, event_id) VALUES
+        ('video-current', 'event-a'),
+        ('video-next', 'event-a'),
+        ('video-later', 'event-a'),
+        ('video-other-event', 'event-b');
     `);
   }
 
@@ -63,7 +76,8 @@ if (runTestWithTsx(import.meta.url)) {
   test("same-status approve-and-next falls back to review list when no next pending", async () => {
     const sqlite = new DatabaseSync(":memory:");
     seedVideos(sqlite);
-    sqlite.exec(`DELETE FROM videos WHERE id IN ('video-next', 'video-later')`);
+    sqlite.exec(`DELETE FROM videos WHERE id IN ('video-next', 'video-later', 'video-other-event')`);
+    sqlite.exec(`DELETE FROM video_events WHERE video_id IN ('video-next', 'video-later', 'video-other-event')`);
     const db = createDb(sqlite);
 
     const result = await attachApproveAndNextHref(
@@ -96,6 +110,52 @@ if (runTestWithTsx(import.meta.url)) {
     );
 
     assert.equal(result.nextHref, undefined);
+    sqlite.close();
+  });
+
+  test("adminEventFilter scopes next pending and hrefs", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    seedVideos(sqlite);
+    const db = createDb(sqlite);
+
+    const nextId = await findNextPendingReviewVideoId(
+      db,
+      { id: "video-current", created_at: 300 },
+      { adminEventFilter: "event-a" },
+    );
+    assert.equal(nextId, "video-next");
+
+    const otherEventNext = await findNextPendingReviewVideoId(
+      db,
+      { id: "video-current", created_at: 300 },
+      { adminEventFilter: "event-b" },
+    );
+    assert.equal(otherEventNext, "video-other-event");
+
+    assert.equal(
+      buildReviewDetailHref("video-next", { adminEventFilter: "event-a" }),
+      "/admin/videos/video-next?event=event-a",
+    );
+    assert.equal(
+      resolveApproveAndNextHref(null, { adminEventFilter: "event-a" }),
+      adminReviewQueueFallbackHref("event-a"),
+    );
+    assert.equal(
+      adminReviewQueueFallbackHref("event-a"),
+      "/admin/videos?status=review&event=event-a",
+    );
+
+    const result = await attachApproveAndNextHref(
+      db,
+      { ok: true, message: "すでに同じ状態へ更新されています。" },
+      {
+        andNext: true,
+        status: "public",
+        current: { id: "video-current", created_at: 300 },
+        adminEventFilter: "event-a",
+      },
+    );
+    assert.equal(result.nextHref, "/admin/videos/video-next?event=event-a");
     sqlite.close();
   });
 }

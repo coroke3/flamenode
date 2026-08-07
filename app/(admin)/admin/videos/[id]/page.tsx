@@ -18,18 +18,26 @@ import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
 import { fetchVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
 import { CreateModerationCaseForm } from "@/components/admin/CreateModerationCaseForm";
+import {
+  firstSearchParamValue,
+  type SearchParamValue,
+} from "#utils/next";
 
 export const metadata: Metadata = { title: "作品詳細" };
 export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ event?: SearchParamValue }>;
 }
 
 export default async function AdminVideoDetailPage({
   params,
+  searchParams,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
+  const sp = await searchParams;
+  const event = firstSearchParamValue(sp.event);
   const db = getDatabase();
   if (!db) notFound();
 
@@ -58,12 +66,17 @@ export default async function AdminVideoDetailPage({
     moderationCases.find((c) => c.status === "open")?.id ??
     null;
 
+  const reviewHiddenFields = event ? { review_event_id: event } : undefined;
+  const backHref = event
+    ? `/admin/videos?status=review&event=${encodeURIComponent(event)}`
+    : "/admin/videos";
+
   return (
     <div>
       <AdminPageHeader
         title={video.title}
         description={`作者: ${video.creator_name}${video.creator_x_user_id ? ` (@${video.creator_x_user_id})` : ""}`}
-        backHref="/admin/videos"
+        backHref={backHref}
         backLabel="作品一覧へ"
       />
 
@@ -82,11 +95,13 @@ export default async function AdminVideoDetailPage({
               currentStatus={video.visibility_status}
               approveAction={approveAdminVideoPublic}
               approveAndNextAction={approveAdminVideoPublicAndNext}
+              hiddenFields={reviewHiddenFields}
             />
             <AdminVideoStatusForm
               videoId={video.id}
               currentStatus={video.visibility_status}
               openVoidCaseId={openVoidCaseId}
+              hiddenFields={reviewHiddenFields}
             />
           </>
         }
