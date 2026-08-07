@@ -193,7 +193,7 @@ Legacy standalone worker directories are kept as importable modules only.
 | Worker | cron | 用途 | 必須環境変数 |
 |---|---|---|---|
 | `flamenode-fast-jobs` | `0 * * * *` | `notification_outbox` 配信・スロット締切リマインド（`notification-dispatcher` 統合） | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`（任意） |
-| `flamenode-content-jobs` | `15 * * * *` | コストガード自動昇格・静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
+| `flamenode-content-jobs` | `15 * * * *` | 静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
 | `flamenode-sync-jobs` | `7 * * * *`, `52 * * * *` | YouTube 同期・スコア再計算（`youtube-sync` / `score-recalc` 統合） | `YOUTUBE_API_KEY` |
 
 ### 3-1. デプロイ
@@ -234,8 +234,17 @@ cd workers/sync-jobs && wrangler deploy
 - お知らせの公開側取得は `target_audience=all`、公開中かつ期限内、最大3件に制限する。
 - 新規表示クエリは `videos.score` / `videos.app_like_count` を優先する。`video_stats` は score-recalc worker と旧DB fallback 用に当面残し、即 DROP しない。
 - `video_stats.app_view_count` は閲覧ごとに更新しない。like/bookmark と低頻度 score 再計算に限定する。
-- `cost_usage_snapshots` は高頻度保存しない。`/admin/cost-guard` で最新 snapshot と推奨 mode を確認し、閾値は `system_settings.cost_guard_thresholds_json` で管理する。
-- `system_settings.auto_cost_guard_enabled = 1` の場合、`content-jobs` は 15 分 Cron で最新 snapshot を読み、推奨 mode が現在より厳しい場合だけ `operation_mode` を自動昇格する。自動降格はしないため、復帰は管理者が `/admin/cost-guard` から行う。
+- Cloudflare 使用量は Cloudflare Dashboard で運用者が確認する。FlameNode は使用量を自動収集せず、`operation_mode` を自動変更しない。
+- 無料枠対策としての機能制限（`economy` / `read_only` / `static_only`）は、管理者が `/admin/cost-guard` から手動で mode を変更する場合のみ適用する。
+
+### 3-5. 機能制限とランタイム安全装置の区別
+
+| 種別 | 目的 | 変更方法 | 例 |
+| --- | --- | --- | --- |
+| **機能制限（admin-only）** | 無料枠・運用判断に応じたユーザー向け機能の段階停止 | 管理者が `/admin/cost-guard` で手動変更（自動昇格なし） | `operation_mode`、`disabled_features_json`、15分一時許可 |
+| **ランタイム安全装置** | invocation 内の暴走・枯渇防止（機能制限ではない） | コード内の固定上限。`operation_mode` は変更しない | D1 budget（40 statements/invocation）、YouTube quota budget、Discord 429 バックオフ、ExternalRequestBudget、Queue batch 上限 |
+
+`publicMode` が KV/D1 解決失敗時に `static_only` へ倒す挙動は、インフラ障害時の fail-closed であり、使用量ベースの自動 CostGuard ではない。
 
 ### 3-3. 通知失敗の調査クエリ
 
@@ -302,7 +311,6 @@ allowlist (許可される定義/参照ファイル):
 - `like_count_drift` — `video_stats.app_like_count` vs video_interactions 集計差 (±5 閾値)
 - `missing_video_stats` / `missing_video_youtube_metadata` — 派生行不足
 - `notification_processing_stuck` / `notification_failed_volume` — 通知 outbox の滞留・失敗
-- `cost_usage_snapshot_freshness` — usage snapshot の鮮度
 - `open_moderation_cases_overdue` — 期限切れモデレーション case
 - `active_api_endpoints_orphan_event` — 公開 API endpoint の event 参照
 - `x_id_merge_pending_stale` — X ID 統合申請の放置
@@ -420,7 +428,7 @@ SELECT status, COUNT(*) FROM notification_outbox
 - **legacy import / bulk import では通知しない**（`sendNotifications=false` / `notificationBehavior=none` がデフォルト）
 - failed は **`/admin/notifications`** から手動リトライ・キャンセル・強制再送できる
 - **`static_rebuild_queue` と責務を分ける**（dispatcher は outbox のみ、json-generator はキューのみ）
-- 通知ログを **KV に保存しない**（状態は D1 `notification_outbox`、cost guard 等のみ KV）
+- 通知ログを **KV に保存しない**（状態は D1 `notification_outbox`。KV は operation_mode ミラー等の低頻度フラグ用）
 
 ---
 
@@ -438,7 +446,6 @@ SELECT status, COUNT(*) FROM notification_outbox
 - Admin spreadsheet import では旧互換列 (`events.is_active` / `events.is_entry_open` / `events.is_archived`, `videos.custom_answers`, `videos.stage_permission`, `system_settings.cost_guard_mode`, `system_settings.is_maintenance_mode`, `video_chapters.video_member_id`) を読み取り専用として無視する
 - Admin spreadsheet import で `video_chapters` を追加する場合、MVP 方針に合わせて `marker_kind` は常に `chapter` に補完する
 - `announcements` は作らない（必要なら `system_settings.announcements_json` を管理画面から登録）
-- `cost_usage_snapshots` は D1 に保存せず KV へ逃がす（インポート処理では書かない）
 - `user_tos_consents` は利用規約同意履歴のため維持する
 - インポート後の静的 JSON 再生成は `static_rebuild_queue` に積む
 - 大量インポート時は **event** 単位の再生成を基本とし、動画単位の full は明示選択時のみ
@@ -485,7 +492,7 @@ SELECT status, COUNT(*) FROM notification_outbox
 | --- | --- |
 | `DB` | D1 `flamenode_db` |
 | `BUCKET` | R2 静的 JSON + メディア |
-| `KV` | cost guard スナップショット等 |
+| `KV` | operation_mode ミラー・degraded circuit 等 |
 
 ローカル: `npm run pages:dev`（`--d1=DB --r2=BUCKET --kv=KV`）
 

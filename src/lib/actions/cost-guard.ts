@@ -1,5 +1,11 @@
 "use server";
 
+/**
+ * 手動 CostGuard Server Actions。
+ * `operation_mode` / `disabled_features_json` の D1 書き込み正本はここ（と spreadsheet import の admin 経路）のみ。
+ * Cloudflare 使用量に基づく自動昇格・自動降格は行わない。
+ */
+
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";

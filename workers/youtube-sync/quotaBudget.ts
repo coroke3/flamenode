@@ -29,8 +29,8 @@ function positiveInteger(value: number): number {
 }
 
 /**
- * FlameNode内のYouTube quotaを1日80%までに制限する。
- * INSERT/UPSERTのWHEREで、複数invocationからの予約も上限超過させない。
+ * YouTube quota を1日80%までに制限する（ランタイム安全装置）。
+ * operation_mode は変更しない。
  */
 export async function reserveYoutubeQuota(
   env: YoutubeQuotaEnv,
