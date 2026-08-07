@@ -36,3 +36,12 @@ test("signOutViaAuthRouteは失敗時に内部情報を返さない", () => {
   assert.doesNotMatch(authSignOutClient, /error\.message/);
   assert.doesNotMatch(authSignOutClient, /console\.error/);
 });
+
+test("signOutViaAuthRouteはclient flowTraceを記録する", () => {
+  assert.match(authSignOutClient, /kind:\s*"flow_trace"/);
+  assert.match(authSignOutClient, /phase:\s*"signout_started"/);
+  assert.match(authSignOutClient, /phase:\s*"signout_completed"/);
+  assert.match(authSignOutClient, /flow:\s*"discord_auth"/);
+  assert.match(authSignOutClient, /AUTH_SIGNOUT_FAILED/);
+  assert.doesNotMatch(authSignOutClient, /@\/lib\/observability\/flowTrace/);
+});

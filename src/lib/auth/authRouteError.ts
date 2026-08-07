@@ -1,3 +1,8 @@
+import {
+  createTraceId,
+  logFlowTrace,
+} from "../observability/flowTrace.ts";
+
 const AUTH_ROUTE_UNAVAILABLE_CODES = new Set([
   "AUTH_DATABASE_UNAVAILABLE",
   "AUTH_SECRET_MISSING",
@@ -80,10 +85,34 @@ export function authTemporarilyUnavailableResponse(): Response {
   });
 }
 
+function logAuthRouteEntry(request: Request): void {
+  const pathname = new URL(request.url).pathname;
+  if (
+    pathname.includes("/api/auth/callback") ||
+    pathname.endsWith("callback/discord")
+  ) {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "oauth_callback_started",
+      trace_id: createTraceId(),
+      result: "started",
+    });
+  }
+  if (pathname.includes("/api/auth/signout") && request.method === "POST") {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "signout_started",
+      trace_id: createTraceId(),
+      result: "started",
+    });
+  }
+}
+
 export async function handleAuthRouteRequest<TRequest extends Request>(
   handler: (request: TRequest) => Response | Promise<Response>,
   request: TRequest,
 ): Promise<Response> {
+  logAuthRouteEntry(request);
   try {
     return await handler(request);
   } catch (error) {
