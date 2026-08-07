@@ -356,7 +356,7 @@ test("rebuildEventはD1公開詳細相当の作品紐付けと集計を使う", 
   assert.match(eventFn, /creator_x_user_id/);
 });
 
-test("rebuildUsersIndexはCreator Projectionを使い相関サブクエリを持たない", () => {
+test("rebuildUsersIndexはCreator Projectionを使い3 artifactを書く", () => {
   const usersIndexFn = source.match(
     /async function rebuildUsersIndex[\s\S]*?(?=async function )/,
   )?.[0];
@@ -364,20 +364,23 @@ test("rebuildUsersIndexはCreator Projectionを使い相関サブクエリを持
   assert.match(usersIndexFn, /loadPublicCreatorProjectionSources/);
   assert.match(usersIndexFn, /buildPublicUsersIndexItems/);
   assert.match(usersIndexFn, /USERS_INDEX_MAX_OBJECT_BYTES/);
+  assert.match(usersIndexFn, /buildPickupCreatorsArtifactFromProjection/);
+  assert.match(usersIndexFn, /PICKUP_CREATORS_OBJECT_KEY/);
+  assert.match(usersIndexFn, /PUBLIC_X_ICON_MAP_OBJECT_KEY/);
   assert.doesNotMatch(usersIndexFn, /SELECT COUNT\(DISTINCT v\.id\)/);
 });
 
-test("rebuildTopとrebuildRecommendはCreator Projectionを再利用する", () => {
+test("rebuildTopとrebuildRecommendは通常pathでR2 pickupを読む", () => {
   const topFn = source.match(/async function rebuildTop[\s\S]*?(?=async function )/)?.[0];
   const recommendFn = source.match(
     /async function rebuildRecommend[\s\S]*?(?=async function )/,
   )?.[0];
   assert.ok(topFn);
   assert.ok(recommendFn);
-  assert.match(topFn, /loadPublicCreatorProjectionSources/);
-  assert.match(recommendFn, /loadPublicCreatorProjectionSources/);
-  assert.match(topFn, /buildPickupCreatorsFromProjection/);
-  assert.match(recommendFn, /buildPickupCreatorsFromProjection/);
+  assert.doesNotMatch(topFn, /loadPublicCreatorProjectionSources\(env\.DB/);
+  assert.doesNotMatch(recommendFn, /loadPublicCreatorProjectionSources\(env\.DB/);
+  assert.match(topFn, /resolvePickupCreatorsWithFallback\(env, 30/);
+  assert.match(recommendFn, /resolvePickupCreatorsWithFallback\(env, 60/);
   assert.doesNotMatch(topFn, /WITH creator_counts AS/);
   assert.doesNotMatch(recommendFn, /WITH creator_counts AS/);
 });

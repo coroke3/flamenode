@@ -329,6 +329,78 @@ export function buildPublicUsersIndexItems(
     );
 }
 
+export const PICKUP_CREATORS_OBJECT_KEY = "users/pickup-creators.v1.json";
+export const PICKUP_CREATORS_SCHEMA_VERSION = 1 as const;
+/** recommend の上限。top は先頭 30 件を slice する。 */
+export const PICKUP_CREATORS_STORE_LIMIT = 60;
+export const PICKUP_CREATORS_MAX_OBJECT_BYTES = 1024 * 1024;
+
+export interface PickupCreatorsArtifact {
+  schema_version: 1;
+  generated_at: number;
+  creators: PublicPickupCreatorRow[];
+}
+
+function normalizePickupCreatorRow(value: unknown): PublicPickupCreatorRow | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const id = trimString(row.id);
+  if (!id) return null;
+  const x_name = trimNullable(row.x_name) ?? id;
+  if (!x_name) return null;
+  return {
+    id,
+    x_name,
+    icon_url: trimNullable(row.icon_url),
+    video_count: normalizeCount(row.video_count),
+    collab_count: normalizeCount(row.collab_count),
+  };
+}
+
+export function buildPickupCreatorsArtifactFromProjection(
+  sources: PublicCreatorProjectionSources,
+  generatedAt: number,
+): PickupCreatorsArtifact {
+  return {
+    schema_version: PICKUP_CREATORS_SCHEMA_VERSION,
+    generated_at: generatedAt,
+    creators: buildPickupCreatorsFromProjection(sources, PICKUP_CREATORS_STORE_LIMIT),
+  };
+}
+
+export function normalizePickupCreatorsArtifact(
+  value: unknown,
+): PickupCreatorsArtifact | null {
+  if (!value || typeof value !== "object") return null;
+  const payload = value as {
+    schema_version?: unknown;
+    generated_at?: unknown;
+    creators?: unknown;
+  };
+  if (Number(payload.schema_version) !== PICKUP_CREATORS_SCHEMA_VERSION) return null;
+  if (!Array.isArray(payload.creators)) return null;
+
+  const creators: PublicPickupCreatorRow[] = [];
+  for (const raw of payload.creators) {
+    const row = normalizePickupCreatorRow(raw);
+    if (!row) return null;
+    creators.push(row);
+  }
+
+  const generated = Number(payload.generated_at);
+  return {
+    schema_version: PICKUP_CREATORS_SCHEMA_VERSION,
+    generated_at: Number.isFinite(generated) ? Math.floor(generated) : 0,
+    creators,
+  };
+}
+
+export function pickupCreatorsArtifactByteLength(
+  payload: PickupCreatorsArtifact,
+): number {
+  return new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+}
+
 export function buildPickupCreatorsFromProjection(
   sources: PublicCreatorProjectionSources,
   limit: number,

@@ -31,9 +31,12 @@ import {
 } from "../../src/lib/publicData/topNostalgicShuffle.ts";
 import { YOUTUBE_SYNCED_PLAYABLE_SQL } from "../../src/lib/publicData/youtubeSyncedPlayableSql.ts";
 import {
-  buildPickupCreatorsFromProjection,
+  buildPickupCreatorsArtifactFromProjection,
   buildPublicUsersIndexItems,
   loadPublicCreatorProjectionSources,
+  PICKUP_CREATORS_MAX_OBJECT_BYTES,
+  PICKUP_CREATORS_OBJECT_KEY,
+  pickupCreatorsArtifactByteLength,
   USERS_INDEX_MAX_OBJECT_BYTES,
   USERS_INDEX_OBJECT_KEY,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
@@ -85,6 +88,7 @@ import {
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
 import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
+import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
 import { enqueueTopRebuild } from "./topRebuildEnqueue.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
@@ -297,7 +301,7 @@ export async function rebuildTarget(
       list_popular: "list/popular.json",
       events_index: "events/index.json",
       search_index: "search-index-lite.json",
-      users_index: [USERS_INDEX_OBJECT_KEY, PUBLIC_X_ICON_MAP_OBJECT_KEY],
+      users_index: [USERS_INDEX_OBJECT_KEY, PUBLIC_X_ICON_MAP_OBJECT_KEY, PICKUP_CREATORS_OBJECT_KEY],
       recommend: "recommend.json",
       rules: "rules/current.json",
       youtube_related_blocklist: YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
@@ -438,7 +442,6 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     nostalgic,
     activeEvents,
     latestEvents,
-    creatorProjection,
     announcements,
     publicVideoCount,
     creatorCount,
@@ -539,7 +542,6 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
        ORDER BY start_time DESC
        LIMIT 12`,
     ).all<Record<string, unknown>>(),
-    loadPublicCreatorProjectionSources(env.DB, now),
     env.DB.prepare(
       `SELECT id, title, body, severity, publish_at, expire_at
        FROM announcements
@@ -585,7 +587,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
     ? await env.DB.prepare(heroSlotStatsSql).bind(...heroEventIds).all()
     : { results: [] as { event_id: string; available: number; total: number }[] };
   throwIfAborted(signal);
-  const creators = buildPickupCreatorsFromProjection(creatorProjection, 30);
+  const creators = await resolvePickupCreatorsWithFallback(env, 30, "rebuildTop", signal);
   const nostalgicPool = Array.isArray(nostalgic.results) ? nostalgic.results : [];
   const payload = {
     generated_at: now,
@@ -1870,6 +1872,22 @@ async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void
     { targetType: "users_index", targetId: "global" },
     signal,
   );
+
+  const pickupArtifact = buildPickupCreatorsArtifactFromProjection(sources, now);
+  const pickupBytes = pickupCreatorsArtifactByteLength(pickupArtifact);
+  if (pickupBytes > PICKUP_CREATORS_MAX_OBJECT_BYTES) {
+    throw new Error(
+      `users/pickup-creators.v1.json exceeds size limit (${pickupBytes} > ${PICKUP_CREATORS_MAX_OBJECT_BYTES} bytes)`,
+    );
+  }
+  await putJson(
+    env,
+    PICKUP_CREATORS_OBJECT_KEY,
+    pickupArtifact,
+    "public, max-age=300, stale-while-revalidate=1800",
+    { targetType: "users_index", targetId: "global" },
+    signal,
+  );
 }
 
 async function rebuildYoutubeRelatedBlocklist(
@@ -2079,7 +2097,7 @@ async function rebuildRules(env: Env, signal?: RebuildSignal): Promise<void> {
 async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
-  const [recommended, latest, underrated, creatorProjection] = await Promise.all([
+  const [recommended, latest, underrated] = await Promise.all([
     env.DB.prepare(
       `SELECT ${STATIC_RECOMMEND_VIDEO_SELECT}
        FROM videos AS v
@@ -2101,11 +2119,10 @@ async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void>
        ORDER BY COALESCE(v.score, 0) ASC, v.scheduled_time DESC
        LIMIT 120`,
     ).all(),
-    loadPublicCreatorProjectionSources(env.DB, now),
   ]);
 
   throwIfAborted(signal);
-  const creators = buildPickupCreatorsFromProjection(creatorProjection, 60);
+  const creators = await resolvePickupCreatorsWithFallback(env, 60, "rebuildRecommend", signal);
   await putJson(
     env,
     "recommend.json",

@@ -140,6 +140,13 @@ test("作品保存は x_users プロフィール更新 plan を呼ばない", ()
   assert.match(update, /creator_other_social_links/);
 });
 
+test("メンバー更新は users_index を enqueue する", () => {
+  assert.match(adminMembers, /targetType: "users_index"/);
+  assert.match(adminMembers, /reason: "video_members_update"/);
+  assert.match(update, /creatorAggregationChanged/);
+  assert.match(update, /video_members_update/);
+});
+
 test("投稿候補はvideos snapshotから導出し候補履歴を二重書込みしない", () => {
   const combined = [create, submit, update].join("\n");
   assert.doesNotMatch(combined, /buildXIconCandidatePlan/);

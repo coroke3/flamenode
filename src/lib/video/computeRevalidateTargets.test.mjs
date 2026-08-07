@@ -17,6 +17,20 @@ test("computeVideoRevalidatePaths includes old and new youtube paths when id cha
   assert.ok(paths.includes("/new456"));
 });
 
+test("computeStaticRebuildFlags marks creator aggregation when members section touched", () => {
+  const flags = computeStaticRebuildFlags({
+    canEditIdentity: false,
+    allowSubmitterChange: false,
+    displayNameChanged: false,
+    iconChanged: false,
+    canEditPrimaryEvent: false,
+    hasEventIdsField: false,
+    membersSectionTouched: true,
+  });
+  assert.equal(flags.creatorAggregationChanged, true);
+  assert.equal(flags.randomPoolCardChanged, true);
+});
+
 test("computeStaticRebuildFlags marks event membership changed only when field present", () => {
   const flags = computeStaticRebuildFlags({
     canEditIdentity: false,

@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
+  buildPickupCreatorsArtifactFromProjection,
   buildPickupCreatorsFromProjection,
   buildPublicUsersIndexItems,
   loadPublicCreatorProjectionSources,
+  normalizePickupCreatorsArtifact,
+  PICKUP_CREATORS_STORE_LIMIT,
 } from "./publicCreatorProjection.ts";
 
 const migrationsDir = fileURLToPath(new URL("../../../migrations/", import.meta.url));
@@ -194,6 +197,41 @@ test("buildPickupCreatorsFromProjection は eligible だけを limit 件返す",
   assert.equal(creators.length, 1);
   assert.equal(creators[0].id, "collab");
   assert.equal(creators[0].collab_count, 2);
+});
+
+test("buildPickupCreatorsArtifactFromProjection は projection と deepEqual", () => {
+  const sources = baseSources({
+    registeredUsers: [
+      { id: "solo", x_name: "Solo", icon_url: null, profile_text: null, youtube_channel_url: null },
+      { id: "collab", x_name: "Collab", icon_url: "https://example.com/c.png", profile_text: null, youtube_channel_url: null },
+    ],
+    personalCounts: new Map([
+      ["solo", 1],
+      ["collab", 0],
+    ]),
+    collabCounts: new Map([["collab", 2]]),
+  });
+  const artifact = buildPickupCreatorsArtifactFromProjection(sources, 42);
+  assert.deepEqual(artifact, {
+    schema_version: 1,
+    generated_at: 42,
+    creators: buildPickupCreatorsFromProjection(sources, PICKUP_CREATORS_STORE_LIMIT),
+  });
+  assert.deepEqual(
+    normalizePickupCreatorsArtifact(artifact),
+    artifact,
+  );
+});
+
+test("normalizePickupCreatorsArtifact は schema_version 不一致を拒否する", () => {
+  assert.equal(
+    normalizePickupCreatorsArtifact({
+      schema_version: 2,
+      generated_at: 1,
+      creators: [],
+    }),
+    null,
+  );
 });
 
 test("loadPublicCreatorProjectionSources は公開作品から集計する", async () => {
