@@ -6,11 +6,13 @@ import { youtubeEmbedUrl, youtubeThumbUrl } from "@/lib/youtube/id";
 import {
   isYoutubePlayerMessageOrigin,
   parseYoutubePlayerMessage,
+  publishPlayerEnded,
   publishPlayerTime,
   requestYoutubeCurrentTime,
   seekYoutubeIframe,
   startYoutubePlayerListening,
   YOUTUBE_PLAYER_IFRAME_ID,
+  YOUTUBE_PLAYER_STATE_ENDED,
 } from "./playerBridge";
 
 interface YoutubePlayerProps {
@@ -29,6 +31,7 @@ export function YoutubePlayer({
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const readyRef = React.useRef(false);
   const pendingSeekRef = React.useRef<number | null>(null);
+  const endedDispatchedRef = React.useRef(false);
   const [embedOrigin] = React.useState<string | null>(() =>
     typeof window !== "undefined" ? window.location.origin : null,
   );
@@ -36,6 +39,7 @@ export function YoutubePlayer({
   React.useEffect(() => {
     readyRef.current = false;
     pendingSeekRef.current = null;
+    endedDispatchedRef.current = false;
   }, [embedOrigin, youtubeId]);
 
   React.useEffect(() => {
@@ -76,6 +80,12 @@ export function YoutubePlayer({
       requestYoutubeCurrentTime(iframe);
     };
 
+    const maybePublishEnded = () => {
+      if (endedDispatchedRef.current) return;
+      endedDispatchedRef.current = true;
+      publishPlayerEnded({ youtubeId });
+    };
+
     const onMessage = (event: MessageEvent) => {
       if (!isYoutubePlayerMessageOrigin(event.origin)) return;
       if (event.source !== iframe.contentWindow) return;
@@ -85,6 +95,7 @@ export function YoutubePlayer({
 
       if (parsed.kind === "ready") {
         readyRef.current = true;
+        endedDispatchedRef.current = false;
         startYoutubePlayerListening(iframe);
         requestYoutubeCurrentTime(iframe);
         flushPendingSeek();
@@ -94,7 +105,25 @@ export function YoutubePlayer({
         return;
       }
 
-      publishPlayerTime(parsed.currentTime);
+      if (parsed.kind === "time") {
+        publishPlayerTime(parsed.currentTime);
+        return;
+      }
+
+      if (parsed.kind === "ended") {
+        maybePublishEnded();
+        return;
+      }
+
+      if (typeof parsed.currentTime === "number") {
+        publishPlayerTime(parsed.currentTime);
+      }
+
+      if (parsed.playerState === YOUTUBE_PLAYER_STATE_ENDED) {
+        maybePublishEnded();
+      } else {
+        endedDispatchedRef.current = false;
+      }
     };
 
     const onLoad = () => {

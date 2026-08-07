@@ -4,6 +4,7 @@ import Link from "next/link";
 import styles from "./page.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import {
   PublicEventCard,
   type PublicEventCategory,
@@ -258,7 +259,7 @@ export default async function EventListPage({
         </div>
       </header>
 
-      <form className={styles.filterForm} method="get">
+      <ImeSafeGetForm className={styles.filterForm} method="get">
         <label className={styles.searchField}>
           <Icon name="search" size={14} aria-hidden />
           <span className="fn-sr-only">イベントを検索</span>
@@ -288,7 +289,7 @@ export default async function EventListPage({
             リセット
           </Link>
         ) : null}
-      </form>
+      </ImeSafeGetForm>
 
       <nav className={styles.statusChips} aria-label="イベントの状態">
         {EVENT_FILTER_STATUSES.map((item) => {

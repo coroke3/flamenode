@@ -5,6 +5,7 @@ import styles from "./page.module.css";
 import { Icon } from "@/components/ui/Icon";
 import { Pagination } from "@/components/ui/Pagination";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { buildPageMetadata } from "@/lib/seo";
 import {
@@ -123,7 +124,7 @@ export default async function UserListPage({
         </div>
       </header>
 
-      <form className={styles.controls} method="get">
+      <ImeSafeGetForm className={styles.controls} method="get">
         <label className={styles.searchBox}>
           <Icon name="search" size={14} aria-hidden />
           <span className="fn-sr-only">クリエイター検索</span>
@@ -148,7 +149,7 @@ export default async function UserListPage({
             リセット
           </Link>
         ) : null}
-      </form>
+      </ImeSafeGetForm>
 
       {isDegraded ? (
         <p className="fn-muted fn-text-sm" role="status">

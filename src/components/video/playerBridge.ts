@@ -3,13 +3,24 @@
  *
  * - `seekToTime(time)`: 埋め込み iframe へ seek 命令を送る（iframe 自体は再読み込みしない）。
  * - `publishPlayerTime(seconds)`: 現在の再生位置を CustomEvent で配信する。
+ * - `publishPlayerEnded(...)`: 再生終了を CustomEvent で配信する。
  */
 
 const SEEK = "flamenode:seek";
 export const PLAYER_TIME = "flamenode:player-time";
+export const PLAYER_ENDED = "flamenode:video-ended";
+
+/** YouTube IFrame API: YT.PlayerState.ENDED */
+export const YOUTUBE_PLAYER_STATE_ENDED = 0;
 
 export const YOUTUBE_PLAYER_ORIGIN = "https://www.youtube.com";
 export const YOUTUBE_PLAYER_IFRAME_ID = "flamenode-youtube-player";
+
+export type YoutubePlayerParsedMessage =
+  | { kind: "ready" }
+  | { kind: "time"; currentTime: number }
+  | { kind: "ended" }
+  | { kind: "state"; playerState: number; currentTime?: number };
 
 export function getYoutubePlayerListeningId(iframe: HTMLIFrameElement): string {
   return iframe.id || YOUTUBE_PLAYER_IFRAME_ID;
@@ -66,6 +77,15 @@ export function publishPlayerTime(seconds: number): void {
   );
 }
 
+export function publishPlayerEnded(detail?: { youtubeId?: string }): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(PLAYER_ENDED, {
+      detail: detail ?? {},
+    }),
+  );
+}
+
 export function subscribePlayerTime(
   callback: (seconds: number) => void,
 ): () => void {
@@ -95,6 +115,7 @@ export function startYoutubePlayerListening(
     }),
     targetOrigin,
   );
+  postYoutubePlayerCommand(iframe, "addEventListener", ["onStateChange"], targetOrigin);
 }
 
 export function requestYoutubeCurrentTime(
@@ -104,12 +125,25 @@ export function requestYoutubeCurrentTime(
   postYoutubePlayerCommand(iframe, "getCurrentTime", [], targetOrigin);
 }
 
+function readFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function readPlayerState(info: unknown): number | undefined {
+  if (typeof info === "number" && Number.isFinite(info)) return info;
+  if (!info || typeof info !== "object") return undefined;
+  const row = info as { playerState?: unknown; state?: unknown };
+  return readFiniteNumber(row.playerState) ?? readFiniteNumber(row.state);
+}
+
 export function parseYoutubePlayerMessage(
   data: unknown,
-):
-  | { kind: "ready" }
-  | { kind: "time"; currentTime: number }
-  | null {
+): YoutubePlayerParsedMessage | null {
   let parsed: unknown = data;
   if (typeof data === "string") {
     try {
@@ -122,19 +156,45 @@ export function parseYoutubePlayerMessage(
 
   const message = parsed as {
     event?: string;
-    info?: { currentTime?: number };
+    info?: unknown;
   };
 
   if (message.event === "onReady") {
     return { kind: "ready" };
   }
 
-  if (
-    message.event === "infoDelivery" &&
-    typeof message.info?.currentTime === "number" &&
-    Number.isFinite(message.info.currentTime)
-  ) {
-    return { kind: "time", currentTime: message.info.currentTime };
+  if (message.event === "onStateChange") {
+    const playerState = readPlayerState(message.info);
+    if (playerState === undefined) return null;
+    if (playerState === YOUTUBE_PLAYER_STATE_ENDED) {
+      return { kind: "ended" };
+    }
+    return { kind: "state", playerState };
+  }
+
+  if (message.event === "infoDelivery") {
+    const info =
+      message.info && typeof message.info === "object"
+        ? (message.info as { currentTime?: unknown; playerState?: unknown })
+        : null;
+    const currentTime = readFiniteNumber(info?.currentTime);
+    const playerState = readPlayerState(message.info);
+
+    if (playerState === YOUTUBE_PLAYER_STATE_ENDED) {
+      return currentTime !== undefined
+        ? { kind: "state", playerState, currentTime }
+        : { kind: "ended" };
+    }
+
+    if (currentTime !== undefined) {
+      return playerState === undefined
+        ? { kind: "time", currentTime }
+        : { kind: "state", playerState, currentTime };
+    }
+
+    if (playerState !== undefined) {
+      return { kind: "state", playerState };
+    }
   }
 
   return null;

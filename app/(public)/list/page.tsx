@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Pagination } from "@/components/ui/Pagination";
 import { TableScroll } from "@/components/ui/TableScroll";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
@@ -189,7 +190,7 @@ export default async function ListPage({
               {activeFilterCount > 0 ? `${activeFilterCount}件適用中` : "条件なし"}
             </span>
           </summary>
-          <form className="fn-list-toolbar" method="get">
+          <ImeSafeGetForm className="fn-list-toolbar" method="get">
             <label className="fn-list-search">
               <Icon name="search" size={14} aria-hidden />
               <span className="fn-sr-only">検索キーワード</span>
@@ -216,7 +217,7 @@ export default async function ListPage({
                 リセット
               </Link>
             ) : null}
-          </form>
+          </ImeSafeGetForm>
         </details>
 
         {activeFilterCount > 0 ? (

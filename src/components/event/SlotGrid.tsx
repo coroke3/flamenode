@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
@@ -28,6 +29,7 @@ import { areSlotsInSamePart } from "@/lib/utils/slotGroupingCore";
 import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import { normalizeXId } from "@/lib/utils/xid";
+import { computeFloatingMenuPosition } from "@/lib/ui/floatingMenuPosition";
 import styles from "./SlotGrid.module.css";
 
 export interface SlotRow {
@@ -82,6 +84,11 @@ interface ReserveTarget {
   label: string;
 }
 
+type ActionMenuState = {
+  slotId: string;
+  anchor: HTMLButtonElement;
+};
+
 const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
 const LEGACY_SLOT_DISPLAY_NAME_KEY = "fn:lastSlotDisplayName";
 
@@ -133,7 +140,14 @@ export function SlotGrid({
   const [confirmExtend, setConfirmExtend] = React.useState<ConfirmExtend | null>(null);
   const [confirmMerge, setConfirmMerge] = React.useState<ConfirmMerge | null>(null);
   const [reserveTarget, setReserveTarget] = React.useState<ReserveTarget | null>(null);
-  const [actionMenuSlotId, setActionMenuSlotId] = React.useState<string | null>(null);
+  const [actionMenu, setActionMenu] = React.useState<ActionMenuState | null>(null);
+  const [actionMenuCoords, setActionMenuCoords] = React.useState<{
+    top: number;
+    left: number;
+    ready: boolean;
+  }>({ top: 0, left: 0, ready: false });
+  const actionMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const partsRowRef = React.useRef<HTMLDivElement | null>(null);
   const [mergeDisplayName, setMergeDisplayName] = React.useState<string>("");
   const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
   const [reserveCount, setReserveCount] = React.useState("1");
@@ -158,7 +172,7 @@ export function SlotGrid({
     setConfirmExtend(null);
     setConfirmMerge(null);
     setReserveTarget(null);
-    setActionMenuSlotId(null);
+    setActionMenu(null);
     setMergeDisplayName("");
     setReserveDisplayName("");
     setReserveCount("1");
@@ -463,6 +477,89 @@ export function SlotGrid({
     [slots, eventMaxSlots, slotGapSec],
   );
 
+  const closeActionMenu = React.useCallback(() => {
+    setActionMenu(null);
+    setActionMenuCoords({ top: 0, left: 0, ready: false });
+  }, []);
+
+  const actionMenuSlot = React.useMemo(() => {
+    if (!actionMenu) return null;
+    for (const group of groups) {
+      for (const row of group.rows) {
+        if (row.kind === "slot" && row.slot.id === actionMenu.slotId) {
+          return row.slot;
+        }
+      }
+    }
+    return null;
+  }, [actionMenu, groups]);
+
+  const openActionMenu = React.useCallback(
+    (slotId: string, anchor: HTMLButtonElement) => {
+      previewSlot(slotId);
+      setActionMenuCoords({ top: 0, left: 0, ready: false });
+      setActionMenu((current) =>
+        current?.slotId === slotId ? null : { slotId, anchor },
+      );
+    },
+    [previewSlot],
+  );
+
+  React.useLayoutEffect(() => {
+    if (!actionMenu) {
+      setActionMenuCoords({ top: 0, left: 0, ready: false });
+      return;
+    }
+    const menuEl = actionMenuRef.current;
+    if (!menuEl) return;
+    const anchorRect = actionMenu.anchor.getBoundingClientRect();
+    const menuRect = menuEl.getBoundingClientRect();
+    const next = computeFloatingMenuPosition({
+      anchor: {
+        top: anchorRect.top,
+        left: anchorRect.left,
+        width: anchorRect.width,
+        height: anchorRect.height,
+      },
+      menu: { width: menuRect.width, height: menuRect.height },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      gap: 6,
+      margin: 8,
+    });
+    setActionMenuCoords({ top: next.top, left: next.left, ready: true });
+  }, [actionMenu]);
+
+  React.useEffect(() => {
+    if (!actionMenu) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (actionMenuRef.current?.contains(target)) return;
+      if (actionMenu.anchor.contains(target)) return;
+      closeActionMenu();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      const anchor = actionMenu.anchor;
+      closeActionMenu();
+      anchor.focus();
+    };
+    const onDismiss = () => closeActionMenu();
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onDismiss);
+    window.addEventListener("scroll", onDismiss, true);
+    partsRowRef.current?.addEventListener("scroll", onDismiss);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onDismiss);
+      window.removeEventListener("scroll", onDismiss, true);
+      partsRowRef.current?.removeEventListener("scroll", onDismiss);
+    };
+  }, [actionMenu, closeActionMenu]);
+
   const getMergeDefaultName = React.useCallback(
     (gapSlot: SlotAnnotatedRow): string => {
       const sorted = sortSlotsChronologically(slots);
@@ -548,7 +645,7 @@ export function SlotGrid({
         <span><i className={styles.legendPriority} />優先再取得中</span>
       </div>
 
-      <div className={styles.partsRow}>
+      <div className={styles.partsRow} ref={partsRowRef}>
         {groups.map((group, index) => (
           <section key={`part-${index}`} className={styles.partColumn}>
             <header className={styles.partHeader}>{group.label}</header>
@@ -666,80 +763,22 @@ export function SlotGrid({
                                 <button
                                   type="button"
                                   className={styles.editSlotButton}
-                                  aria-expanded={actionMenuSlotId === slot.id}
-                                  disabled={busy}
-                                  onClick={() =>
-                                    setActionMenuSlotId((current) =>
-                                      current === slot.id ? null : slot.id,
-                                    )
+                                  id={`slot-edit-${slot.id}`}
+                                  aria-haspopup="menu"
+                                  aria-expanded={actionMenu?.slotId === slot.id}
+                                  aria-controls={
+                                    actionMenu?.slotId === slot.id
+                                      ? `slot-action-menu-${slot.id}`
+                                      : undefined
                                   }
+                                  disabled={busy}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openActionMenu(slot.id, event.currentTarget);
+                                  }}
                                 >
                                   編集
                                 </button>
-                                {actionMenuSlotId === slot.id ? (
-                                  <div className={styles.slotActionMenu}>
-                                    <Link
-                                      href={`/entry/slotted?slot=${slot.id}`}
-                                      className={styles.slotActionMenuItem}
-                                      onClick={() => setActionMenuSlotId(null)}
-                                    >
-                                      <Icon name="upload" size={12} aria-hidden /> 作品登録
-                                    </Link>
-                                    <button
-                                      type="button"
-                                      className={styles.slotActionMenuItem}
-                                      disabled={busy}
-                                      onClick={() => {
-                                        setActionMenuSlotId(null);
-                                        setConfirmReleaseId(slot.id);
-                                      }}
-                                    >
-                                      <Icon name="trash" size={12} aria-hidden /> 解放
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={styles.slotActionMenuItem}
-                                      disabled={
-                                        busy || !canExtendDirection(slot, "backward")
-                                      }
-                                      title={
-                                        canExtendDirection(slot, "backward")
-                                          ? undefined
-                                          : "前方に連続する空き枠がありません"
-                                      }
-                                      onClick={() => {
-                                        setActionMenuSlotId(null);
-                                        setConfirmExtend({
-                                          slotId: slot.group_first_slot_id,
-                                          direction: "backward",
-                                        });
-                                      }}
-                                    >
-                                      前を追加
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className={styles.slotActionMenuItem}
-                                      disabled={
-                                        busy || !canExtendDirection(slot, "forward")
-                                      }
-                                      title={
-                                        canExtendDirection(slot, "forward")
-                                          ? undefined
-                                          : "後方に連続する空き枠がありません"
-                                      }
-                                      onClick={() => {
-                                        setActionMenuSlotId(null);
-                                        setConfirmExtend({
-                                          slotId: slot.group_last_slot_id,
-                                          direction: "forward",
-                                        });
-                                      }}
-                                    >
-                                      後を追加
-                                    </button>
-                                  </div>
-                                ) : null}
                               </div>
                             ) : null}
                           </div>
@@ -831,6 +870,93 @@ export function SlotGrid({
           </section>
         ))}
       </div>
+
+      {actionMenu && actionMenuSlot && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={actionMenuRef}
+              id={`slot-action-menu-${actionMenu.slotId}`}
+              className={styles.slotActionMenu}
+              role="menu"
+              aria-labelledby={`slot-edit-${actionMenu.slotId}`}
+              style={{
+                top: actionMenuCoords.top,
+                left: actionMenuCoords.left,
+                visibility: actionMenuCoords.ready ? "visible" : "hidden",
+              }}
+            >
+              <Link
+                href={`/entry/slotted?slot=${actionMenuSlot.id}`}
+                className={styles.slotActionMenuItem}
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeActionMenu();
+                }}
+              >
+                <Icon name="upload" size={12} aria-hidden /> 作品登録
+              </Link>
+              <button
+                type="button"
+                className={styles.slotActionMenuItem}
+                role="menuitem"
+                disabled={busy}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeActionMenu();
+                  setConfirmReleaseId(actionMenuSlot.id);
+                }}
+              >
+                <Icon name="trash" size={12} aria-hidden /> 解放
+              </button>
+              <button
+                type="button"
+                className={styles.slotActionMenuItem}
+                role="menuitem"
+                disabled={
+                  busy || !canExtendDirection(actionMenuSlot, "backward")
+                }
+                title={
+                  canExtendDirection(actionMenuSlot, "backward")
+                    ? undefined
+                    : "前方に連続する空き枠がありません"
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeActionMenu();
+                  setConfirmExtend({
+                    slotId: actionMenuSlot.group_first_slot_id,
+                    direction: "backward",
+                  });
+                }}
+              >
+                前を追加
+              </button>
+              <button
+                type="button"
+                className={styles.slotActionMenuItem}
+                role="menuitem"
+                disabled={busy || !canExtendDirection(actionMenuSlot, "forward")}
+                title={
+                  canExtendDirection(actionMenuSlot, "forward")
+                    ? undefined
+                    : "後方に連続する空き枠がありません"
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeActionMenu();
+                  setConfirmExtend({
+                    slotId: actionMenuSlot.group_last_slot_id,
+                    direction: "forward",
+                  });
+                }}
+              >
+                後を追加
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <ConfirmDialog
         open={confirmReleaseId !== null}

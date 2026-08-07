@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import type { XIdEntry } from "@/lib/xid/entries";
 import type { HeaderUser } from "@/lib/auth/headerUser";
 import { PublicAccountIsland, usePublicAccountSummary } from "@/components/layout/PublicAccountIsland";
-import { navigateGetForm } from "@/components/forms/AutoSubmitSelect";
+import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { sanitizeNextPath } from "#utils/next";
 import { useDismissablePanel } from "./useDismissablePanel";
 
@@ -274,17 +274,13 @@ export function PublicHeader({
         }`}
         hidden={!searchOpen}
       >
-        <form
+        <ImeSafeGetForm
           action="/list"
           method="get"
           className={`fn-public-container ${styles.searchPanelForm}`}
           role="search"
           aria-label="作品検索"
-          onSubmit={(e) => {
-            e.preventDefault();
-            navigateGetForm(e.currentTarget);
-            setSearchOpen(false);
-          }}
+          onNavigated={() => setSearchOpen(false)}
         >
           <label htmlFor="header-search-input" className="fn-sr-only">
             作品を検索
@@ -308,7 +304,7 @@ export function PublicHeader({
           >
             <Icon name="close" size={14} aria-hidden />
           </button>
-        </form>
+        </ImeSafeGetForm>
       </div>
 
       <div
@@ -327,17 +323,13 @@ export function PublicHeader({
           inert={!mobileOpen}
         >
           <div className={styles.mobileSection}>
-            <form
+            <ImeSafeGetForm
               action="/list"
               method="get"
               className={styles.mobileSearch}
               role="search"
               aria-label="作品検索"
-              onSubmit={(e) => {
-                e.preventDefault();
-                navigateGetForm(e.currentTarget);
-                closeMobilePanels();
-              }}
+              onNavigated={() => closeMobilePanels()}
             >
               <Icon name="search" size={16} aria-hidden />
               <label htmlFor="mobile-header-search-input" className="fn-sr-only">
@@ -350,7 +342,7 @@ export function PublicHeader({
                 placeholder="作品を検索"
                 autoComplete="off"
               />
-            </form>
+            </ImeSafeGetForm>
             <PublicAccountIsland
               user={accountUser}
               loading={showAccountLoading}

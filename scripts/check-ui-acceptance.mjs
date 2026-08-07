@@ -61,6 +61,34 @@ forbidMatch(
   /Math\.min\([\s\S]*MAX_ATOMIC_SLOT_ROWS/,
   "枠確保表で最大枠数を MAX_ATOMIC_SLOT_ROWS(3) へ clamp しています。",
 );
+requireAll("src/components/event/SlotGrid.tsx", [
+  [/createPortal/, "編集メニューは createPortal で overflow 外へ出してください。"],
+  [/computeFloatingMenuPosition/, "編集メニューの viewport 配置計算がありません。"],
+]);
+forbidMatch(
+  "src/components/event/SlotGrid.module.css",
+  /\.partsRow\s*\{[^}]*overflow\s*:\s*visible/,
+  "partsRow の overflow-x 横スクロールを visible で潰しています。",
+);
+requireAll("src/components/event/SlotGrid.module.css", [
+  [/\.partsRow\s*\{[^}]*overflow-x:\s*auto/s, "partsRow の横スクロール (overflow-x:auto) がありません。"],
+  [/\.slotActionMenu\s*\{[^}]*position:\s*fixed/s, "編集メニューは position:fixed である必要があります。"],
+]);
+
+requireAll("src/components/video/playerBridge.ts", [
+  [/PLAYER_ENDED/, "再生終了イベント定数がありません。"],
+  [/publishPlayerEnded/, "再生終了イベント発行がありません。"],
+  [/YOUTUBE_PLAYER_STATE_ENDED|playerState/, "YouTube ended state 検知がありません。"],
+]);
+requireAll("src/components/forms/ImeSafeGetForm.tsx", [
+  [/shouldBlockSearchKeySubmit/, "IME Enter ガードがありません。"],
+  [/navigateGetForm/, "公開検索は navigateGetForm を再利用してください。"],
+]);
+forbidMatch(
+  "src/components/forms/ImeSafeGetForm.tsx",
+  /window\.open|target=\{["_']blank["_']\}/,
+  "公開検索で別ウィンドウ遷移を導入しています。",
+);
 
 requireAll("src/components/forms/VideoForm.tsx", [
   [/"submitter"\s*\|\s*"work"\s*\|\s*"youtube"\s*\|\s*"confirm"/, "4段階投稿フローがありません。"],

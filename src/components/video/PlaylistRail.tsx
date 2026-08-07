@@ -52,6 +52,7 @@ export function PlaylistRail({
   const [autoNext, setAutoNext] = React.useState(false);
   const [hydrated, setHydrated] = React.useState(false);
   const [order, setOrder] = React.useState<string[]>([]);
+  const navigationInFlightRef = React.useRef(false);
 
   const orderKey = playlistId ? orderStorageKey(playlistId) : null;
 
@@ -133,13 +134,46 @@ export function PlaylistRail({
   }, []);
 
   React.useEffect(() => {
+    navigationInFlightRef.current = false;
+  }, [currentId]);
+
+  React.useEffect(() => {
     if (!autoNext || !nextItem) return;
-    const handler = () => {
+    const currentEntry =
+      currentIndex >= 0 ? orderedItems[currentIndex] : null;
+    const handler = (event: Event) => {
+      if (navigationInFlightRef.current) return;
+      const detailYoutubeId = (
+        event as CustomEvent<{ youtubeId?: string }>
+      ).detail?.youtubeId;
+      if (typeof detailYoutubeId === "string" && detailYoutubeId.trim() !== "") {
+        const matchesCurrent =
+          currentEntry?.youtube_video_id === detailYoutubeId ||
+          currentEntry?.id === detailYoutubeId ||
+          currentId === detailYoutubeId;
+        if (!matchesCurrent) return;
+      }
+      navigationInFlightRef.current = true;
       router.push(makeHref(nextItem));
+      window.setTimeout(() => {
+        navigationInFlightRef.current = false;
+      }, 2500);
     };
-    window.addEventListener("flamenode:video-ended", handler);
-    return () => window.removeEventListener("flamenode:video-ended", handler);
-  }, [autoNext, makeHref, nextItem, router]);
+    window.addEventListener("flamenode:video-ended", handler as EventListener);
+    return () =>
+      window.removeEventListener(
+        "flamenode:video-ended",
+        handler as EventListener,
+      );
+  }, [
+    autoNext,
+    currentId,
+    currentIndex,
+    makeHref,
+    nextItem,
+    orderedItems,
+    router,
+  ]);
 
   if (items.length === 0) return null;
 
