@@ -2,6 +2,7 @@ import type { AdapterAccount } from "next-auth/adapters";
 import type { BatchItem } from "drizzle-orm/batch";
 import { and, eq } from "drizzle-orm";
 import { expectedRowCondition } from "@/lib/audit/expectedRowCondition";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import {
   mutateWithAudit,
   type AtomicAuditMutationInput,
@@ -65,8 +66,8 @@ export function accountRowWithoutTokens(
 }
 
 /**
- * Auth.js adapterのlinkAccount境界でaccount作成・Discord ID更新・監査を
- * 同じD1 batchへ入れる。再実行は冪等。通知の組み立て・outbox登録はbest-effort。
+ * Auth.js adapterのlinkAccount境界でaccount作成・Discord ID更新・user監査を
+ * 同じD1 batchへ入れる。再実行は冪等。通知は認証commit成功後にbest-effort。
  */
 export async function linkDiscordAccountAtomically(
   db: DB,
@@ -195,59 +196,6 @@ export async function linkDiscordAccountAtomically(
     expectedMutationChanges.push(1);
   }
 
-  let notificationWakeSource: "web" | undefined;
-  if (isFirstDiscordLink) {
-    try {
-      const { buildWelcomeAccountNotification } = await import(
-        "@/lib/notifications/templates/user"
-      );
-      const { buildChannelAccountCreatedNotification } = await import(
-        "@/lib/notifications/templates/channel"
-      );
-      const { buildOpsChannelWebhookStatement } = await import(
-        "@/lib/notifications/opsWebhook"
-      );
-      const notificationEnv = siteOrigin
-        ? { NEXT_PUBLIC_SITE_URL: siteOrigin }
-        : undefined;
-      const welcomeNotification = await buildWelcomeNotification(db, {
-        recipientUserId: account.userId,
-        type: "welcome_account",
-        payload: buildWelcomeAccountNotification(notificationEnv),
-        dedupeKey: `welcome_account:${account.userId}`,
-        force: true,
-      });
-      const channelNotification = await buildOpsChannelWebhookStatement(db, {
-        actorUserId: account.userId,
-        payload: buildChannelAccountCreatedNotification({
-          userId: account.userId,
-          discordId: account.providerAccountId,
-          userName: beforeUser.name,
-          env: notificationEnv,
-        }),
-        dedupeKey: `channel_account_created:${account.userId}`,
-      });
-      if (welcomeNotification) {
-        mutationStatements.push(welcomeNotification.statement);
-        expectedMutationChanges.push(null);
-        notificationWakeSource = "web";
-      }
-      if (channelNotification) {
-        mutationStatements.push(channelNotification.statement);
-        expectedMutationChanges.push(null);
-        notificationWakeSource = "web";
-      }
-    } catch {
-      logFlowTrace({
-        flow: "discord_auth",
-        phase: "welcome_notification_skipped",
-        trace_id: traceId,
-        result: "skipped",
-        error_code: "WELCOME_NOTIFICATION_BUILD_FAILED",
-      });
-    }
-  }
-
   if (mutationStatements.length === 0) {
     logFlowTrace({
       flow: "discord_auth",
@@ -289,7 +237,6 @@ export async function linkDiscordAccountAtomically(
       mutationStatements,
       expectedMutationChanges,
       audits,
-      notificationWakeSource,
     });
   } else {
     for (const statement of mutationStatements) {
@@ -304,4 +251,114 @@ export async function linkDiscordAccountAtomically(
     result: "succeeded",
     committed: true,
   });
+
+  if (isFirstDiscordLink) {
+    await enqueueFirstDiscordLinkNotifications(
+      db,
+      {
+        account,
+        beforeUser,
+        buildWelcomeNotification,
+        siteOrigin,
+      },
+      traceId,
+    );
+  }
+}
+
+async function enqueueFirstDiscordLinkNotifications(
+  db: DB,
+  params: {
+    account: AdapterAccount;
+    beforeUser: typeof users.$inferSelect;
+    buildWelcomeNotification: WelcomeNotificationBuilder;
+    siteOrigin?: string;
+  },
+  traceId: string,
+): Promise<void> {
+  const notificationEnv = params.siteOrigin
+    ? { NEXT_PUBLIC_SITE_URL: params.siteOrigin }
+    : undefined;
+  const notificationStatements: BatchItem<"sqlite">[] = [];
+
+  try {
+    const { buildWelcomeAccountNotification } = await import(
+      "@/lib/notifications/templates/user"
+    );
+    const welcomeNotification = await params.buildWelcomeNotification(db, {
+      recipientUserId: params.account.userId,
+      type: "welcome_account",
+      payload: buildWelcomeAccountNotification(notificationEnv),
+      dedupeKey: `welcome_account:${params.account.userId}`,
+      force: true,
+    });
+    if (welcomeNotification) {
+      notificationStatements.push(welcomeNotification.statement);
+    }
+  } catch {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "welcome_notification_skipped",
+      trace_id: traceId,
+      result: "skipped",
+      error_code: "WELCOME_NOTIFICATION_BUILD_FAILED",
+    });
+  }
+
+  try {
+    const { buildChannelAccountCreatedNotification } = await import(
+      "@/lib/notifications/templates/channel"
+    );
+    const { buildOpsChannelWebhookStatement } = await import(
+      "@/lib/notifications/opsWebhook"
+    );
+    const channelNotification = await buildOpsChannelWebhookStatement(db, {
+      actorUserId: params.account.userId,
+      payload: buildChannelAccountCreatedNotification({
+        userId: params.account.userId,
+        discordId: params.account.providerAccountId,
+        userName: params.beforeUser.name,
+        env: notificationEnv,
+      }),
+      dedupeKey: `channel_account_created:${params.account.userId}`,
+    });
+    if (channelNotification) {
+      notificationStatements.push(channelNotification.statement);
+    }
+  } catch {
+    // ops channel 通知は welcome と独立。失敗しても認証・welcome は続行する。
+  }
+
+  if (notificationStatements.length === 0) {
+    return;
+  }
+
+  const warnings = await runPostCommitBestEffort(
+    { flow: "discord_auth", traceId },
+    [
+      {
+        name: "welcome_notification_enqueued",
+        run: async () => {
+          for (const statement of notificationStatements) {
+            await statement;
+          }
+          const { wakeNotificationQueueAfterCommit } = await import(
+            "@/lib/queues/wakeNotificationQueueAfterCommit"
+          );
+          await wakeNotificationQueueAfterCommit("web");
+        },
+      },
+    ],
+  );
+
+  if (warnings.length > 0) {
+    logFlowTrace({
+      flow: "discord_auth",
+      phase: "welcome_notification_skipped",
+      trace_id: traceId,
+      result: "skipped",
+      error_code:
+        warnings[0]?.error_code ?? "WELCOME_NOTIFICATION_EXECUTE_FAILED",
+    });
+  }
 }

@@ -96,7 +96,7 @@ test("auth completeは再試行後も読めないsessionを成功扱いしない
   assert.equal(reads, AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS.length + 1);
   assert.match(completePage, /session_missing_after_retry/);
   assert.match(completePage, /result: "skipped"/);
-  assert.match(completePage, /redirect\("\/entry"\)/);
+  assert.match(completePage, /redirect\("\/entry\?error=OAuthCallback"\)/);
   assert.match(completePage, /auth_temporarily_unavailable/);
 });
 
@@ -107,7 +107,7 @@ test("ログアウトはAuth.js signout routeへPOSTし、クライアントがh
   assert.match(authSignOutClient, /X-Auth-Return-Redirect/);
   assert.match(authSignOutClient, /credentials: "same-origin"/);
   assert.match(signOutButton, /signOutViaAuthRoute/);
-  assert.match(signOutButton, /window\.location\.replace\("\/entry"\)/);
+  assert.match(signOutButton, /window\.location\.replace\("\/"\)/);
   assert.doesNotMatch(signOutButton, /router\.push/);
   assert.doesNotMatch(signOutButton, /@\/lib\/actions\/authSignOut/);
 });

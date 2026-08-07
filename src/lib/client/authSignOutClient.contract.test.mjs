@@ -20,7 +20,7 @@ test("signOutViaAuthRouteはcsrf取得後にAuth.js signoutへPOSTする", () =>
     /"Content-Type": "application\/x-www-form-urlencoded"/,
   );
   assert.match(authSignOutClient, /"X-Auth-Return-Redirect": "1"/);
-  assert.match(authSignOutClient, /callbackUrl: "\/entry"/);
+  assert.match(authSignOutClient, /callbackUrl: "\/"/);
   assert.match(authSignOutClient, /return \{ ok: true \}/);
   assert.match(authSignOutClient, /ok: false/);
   assert.doesNotMatch(authSignOutClient, /method: "GET"/);

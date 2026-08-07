@@ -17,7 +17,7 @@ test("SignOutButtonはuseState pendingと二重送信防止、成功時hard navi
   assert.match(signOutButton, /aria-busy=\{pending\}/);
   assert.match(signOutButton, /signOutViaAuthRoute/);
   assert.doesNotMatch(signOutButton, /@\/lib\/actions\/authSignOut/);
-  assert.match(signOutButton, /window\.location\.replace\("\/entry"\)/);
+  assert.match(signOutButton, /window\.location\.replace\("\/"\)/);
   assert.doesNotMatch(signOutButton, /router\.push/);
   assert.doesNotMatch(signOutButton, /useRouter/);
 });

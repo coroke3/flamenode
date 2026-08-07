@@ -200,6 +200,9 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     };
     const { db } = fakeDb({ userRow: beforeUser });
     let captured;
+    let mutateResolved = false;
+    let welcomeBuilderCalled = false;
+    let welcomeBuilderCalledAfterMutate = false;
 
     await linkDiscordAccountAtomically(
       db,
@@ -207,36 +210,33 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
       async (receivedDb, input) => {
         assert.equal(receivedDb, db);
         captured = input;
+        mutateResolved = true;
         return ["audit-1"];
       },
-      mockWelcomeNotificationBuilder(),
+      async (...args) => {
+        welcomeBuilderCalled = true;
+        welcomeBuilderCalledAfterMutate = mutateResolved;
+        return mockWelcomeNotificationBuilder()(...args);
+      },
     );
 
-    assert.equal(captured.mutationStatements.length, 4);
-    assert.deepEqual(captured.expectedMutationChanges, [null, 1, null, null]);
+    assert.equal(captured.mutationStatements.length, 2);
+    assert.deepEqual(captured.expectedMutationChanges, [null, 1]);
     assert.equal(captured.mutationStatements[0].values.access_token, null);
     assert.equal(captured.mutationStatements[0].values.refresh_token, null);
     assert.deepEqual(captured.mutationStatements[1].values, {
       discord_id: "discord-1",
     });
-    assert.equal(captured.mutationStatements[2].values.type, "welcome_account");
     assert.equal(
-      captured.mutationStatements[2].values.dedupe_key,
-      "welcome_account:user-1",
-    );
-    assert.match(
-      JSON.parse(captured.mutationStatements[2].values.payload_json).content,
-      /\/onboarding/,
-    );
-    assert.equal(captured.mutationStatements[3].values.type, "discord_webhook");
-    assert.equal(
-      captured.mutationStatements[3].values.dedupe_key,
-      "channel_account_created:user-1",
+      captured.mutationStatements.some((s) => s.values?.type === "welcome_account"),
+      false,
     );
     assert.equal(captured.audits.length, 1);
     assert.equal(captured.audits[0].table_name, "user");
     assert.equal(captured.audits[0].before.discord_id, null);
     assert.equal(captured.audits[0].after.discord_id, "discord-1");
+    assert.equal(welcomeBuilderCalled, true);
+    assert.equal(welcomeBuilderCalledAfterMutate, true);
   });
 
   test("既に整合済みの再linkはno-op", async () => {
@@ -316,7 +316,7 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     assert.equal(called, false);
   });
 
-  test("welcome 通知の組み立て失敗でも account・discord_id・audit を atomic plan へ渡す", async () => {
+  test("welcome 通知の組み立て失敗でも auth link は成功する", async () => {
     const beforeUser = {
       id: "user-1",
       name: "User",
@@ -325,11 +325,13 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     };
     const { db } = fakeDb({ userRow: beforeUser });
     let captured;
+    let mutateCalled = false;
 
     await linkDiscordAccountAtomically(
       db,
       account,
       async (_receivedDb, input) => {
+        mutateCalled = true;
         captured = input;
         return ["audit-1"];
       },
@@ -337,6 +339,8 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
         throw new Error("notification URL unavailable");
       },
     );
+
+    assert.equal(mutateCalled, true);
 
     assert.equal(captured.mutationStatements.length, 2);
     assert.deepEqual(captured.expectedMutationChanges, [null, 1]);
@@ -389,7 +393,34 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
 
     assert.equal(linked.state.committed, true);
     assert.equal(linked.state.batches.length, 1);
-    assert.ok(linked.state.batches[0].length >= 5);
+    assert.ok(linked.state.batches[0].length >= 4);
+  });
+
+  test("通知の実行失敗でも auth link は成功する", async () => {
+    const beforeUser = {
+      id: "user-1",
+      name: "User",
+      discord_id: null,
+      created_at: 1,
+    };
+    const { db } = fakeDb({ userRow: beforeUser });
+    let mutateCalled = false;
+
+    await linkDiscordAccountAtomically(
+      db,
+      account,
+      async () => {
+        mutateCalled = true;
+        return ["audit-1"];
+      },
+      async () => ({
+        statement: (async () => {
+          throw new Error("outbox insert failed");
+        })(),
+      }),
+    );
+
+    assert.equal(mutateCalled, true);
   });
 
   test("atomic plan失敗を成功扱いせず、user欠落時はplanを作らない", async () => {

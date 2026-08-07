@@ -17,7 +17,10 @@ test("header X ID read pathは未連携active行を自動claimしない", () => 
 test("Discord auth linkは内部user ID更新・token消去・監査を単一batchにする", () => {
   const source = read("./index.ts");
   const adapter = read("./accountLinkAdapter.ts");
-  assert.match(source, /linkDiscordAccountAtomically\(db, account\)/);
+  assert.match(
+    source,
+    /linkDiscordAccountAtomically\(db, account, undefined, undefined, siteOrigin\)/,
+  );
   assert.doesNotMatch(source, /events:\s*\{[\s\S]*linkAccount/);
   assert.match(adapter, /await mutate\(db,/);
   assert.match(adapter, /db\.insert\(accounts\)\.values\(accountRow\)/);
@@ -31,6 +34,14 @@ test("Discord auth linkは内部user ID更新・token消去・監査を単一bat
   assert.match(adapter, /access_token: null/);
   assert.match(adapter, /refresh_token: null/);
   assert.match(adapter, /onConflictDoNothing/);
+  // 認証commit後に通知をbest-effort（同一atomic batchへ混ぜない）
+  assert.match(adapter, /runPostCommitBestEffort/);
+  assert.match(adapter, /enqueueFirstDiscordLinkNotifications/);
+  assert.match(adapter, /wakeNotificationQueueAfterCommit/);
+  assert.doesNotMatch(
+    adapter,
+    /await mutate\(db,\s*\{[\s\S]*notificationWakeSource/,
+  );
 });
 
 test("一般X ID lifecycleは逐次audit writeを残さずCAS付きatomic batchを使う", () => {
