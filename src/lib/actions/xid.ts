@@ -437,20 +437,32 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   let webhookNotification: NotificationOutboxStatement | null = null;
   if (isXIdLinkRequestType(requestType)) {
     try {
-      const { buildChannelXIdRequestNotification } = await import(
-        "@/lib/notifications/templates/xidChannel"
+      const { resolveNotificationActor } = await import(
+        "@/lib/notifications/actor"
       );
+      const {
+        buildChannelXIdRequestNotification,
+        buildXIdRequestThreadName,
+      } = await import("@/lib/notifications/templates/xidChannel");
       const { buildOpsChannelWebhookStatement } = await import(
         "@/lib/notifications/opsWebhook"
       );
-      const requester = (
-        await db
-          .select({ discord_id: users.discord_id })
-          .from(users)
-          .where(eq(users.id, authUserId))
-          .limit(1)
-      )[0];
+      const requester = await resolveNotificationActor(db, authUserId);
+      const xidForThread = requestedXId ?? sourceXUserId ?? targetXUserId ?? "不明";
+      let requestedXName: string | null = null;
+      if (requestedXId) {
+        const xRow = (
+          await db
+            .select({ x_name: xUsers.x_name })
+            .from(xUsers)
+            .where(eq(xUsers.id, requestedXId))
+            .limit(1)
+        )[0];
+        requestedXName = xRow?.x_name?.trim() || null;
+      }
       webhookNotification = await buildOpsChannelWebhookStatement(db, {
+        target: "account",
+        threadName: buildXIdRequestThreadName(xidForThread, requester),
         actorUserId: authUserId,
         payload: buildChannelXIdRequestNotification({
           requestId: id,
@@ -458,8 +470,8 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
           requestedXId,
           sourceXUserId,
           targetXUserId: targetXUserId || null,
-          requesterUserId: authUserId,
-          requesterDiscordId: requester?.discord_id ?? null,
+          requestedXName,
+          requester,
           requestedAt: now,
         }),
         dedupeKey: `xid_request_webhook:${id}`,
@@ -593,20 +605,25 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
     request.request_type === "alias"
   ) {
     try {
-      const { buildChannelXIdCancelledNotification } = await import(
-        "@/lib/notifications/templates/xidChannel"
+      const { resolveNotificationActor } = await import(
+        "@/lib/notifications/actor"
       );
+      const {
+        buildChannelXIdCancelledNotification,
+        buildXIdCancelThreadName,
+      } = await import("@/lib/notifications/templates/xidChannel");
       const { buildOpsChannelWebhookStatement } = await import(
         "@/lib/notifications/opsWebhook"
       );
-      const requester = (
-        await db
-          .select({ discord_id: users.discord_id })
-          .from(users)
-          .where(eq(users.id, authUserId))
-          .limit(1)
-      )[0];
+      const requester = await resolveNotificationActor(db, authUserId);
+      const xidForThread =
+        request.requested_x_id ??
+        request.source_x_user_id ??
+        request.target_x_user_id ??
+        "不明";
       cancelWebhookNotification = await buildOpsChannelWebhookStatement(db, {
+        target: "account",
+        threadName: buildXIdCancelThreadName(xidForThread, requester),
         actorUserId: authUserId,
         payload: buildChannelXIdCancelledNotification({
           requestId: request.id,
@@ -614,8 +631,7 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
           requestedXId: request.requested_x_id,
           sourceXUserId: request.source_x_user_id,
           targetXUserId: request.target_x_user_id,
-          requesterUserId: authUserId,
-          requesterDiscordId: requester?.discord_id ?? null,
+          requester,
           cancelledAt: now,
         }),
         dedupeKey: `xid_cancel_webhook:${request.id}`,

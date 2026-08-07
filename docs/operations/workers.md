@@ -140,20 +140,25 @@ YouTube metadata同期だけの理論最大は、sync-jobs 1回あたり通常4 
 
 `/admin/workers`はWorkerとqueueを集約し、`/admin/youtube-quota`は日次設定値、80%上限、推定使用量、残り予算を表示する。APIキー本体は管理画面やD1へ保存・表示しない。
 
-## Discord 通知（2系統）
+## Discord 通知（DM + Forum Webhook）
 
-利用者向け DM と運営チャンネル通知を分離する。
+利用者向け DM と運営 Forum 通知を分離する。outbox の `type` はどちらも既存のまま（Webhook は常に `discord_webhook`）。振り分けは payload の `webhook_target`（`account` / `event` / `system`）。
 
 | 経路 | Secret / binding | 配送先 | 主な種別 |
 | --- | --- | --- | --- |
 | DM（Bot） | `DISCORD_BOT_TOKEN` | `user.discord_id` | welcome、X ID、作品/枠、締切、強制解放 |
-| チャンネル（Webhook） | `DISCORD_WEBHOOK_URL` | 運営 Discord チャンネル | 初回ログイン、枠確保、作品登録、最終失敗 `@here` |
+| ACCOUNT Forum | `DISCORD_WEBHOOK_URL_FORUM_ACCOUNT` | アカウント系 Forum | 初回ログイン、X ID 申請/取消/承認/却下 |
+| EVENT Forum | `DISCORD_WEBHOOK_URL_FORUM_EVENT` | イベント系 Forum | 枠確保、作品登録（枠/自由/未所属） |
+| SYSTEM Forum | `DISCORD_WEBHOOK_URL_FORUM_SYSTEM` | システム系 Forum | DM 最終失敗 `@here` |
+| Legacy Webhook | `DISCORD_WEBHOOK_URL` | 旧単一チャンネル | `webhook_target` 無しの pending 行のみ |
 
 - outbox の `type=discord_webhook` だけが Webhook 経路。それ以外は Bot DM。
-- Discord API へ送る JSON は `content` / `embeds` / `allowed_mentions` のみ（`video_id` 等の内部メタは除去）。
+- Forum 投稿は Webhook 1 request（`thread_name` + `content`）。Bot で thread を別作成しない。
+- Discord API へ送る JSON は allow-list のみ（`webhook_target` / `video_id` / `event_id` / `url` 等の内部メタは除去）。
+- `webhook_target` 指定時に対応 Forum Secret が無い場合は配送失敗（他 Forum / DM へフォールバックしない）。
 - `discord_recipient_missing` は永久失敗（無限再試行しない）。
-- 最終失敗（`dead_letter`）時のみ運営チャンネルへ `@here` 通知。dedupe: `delivery_failed_alert:{outbox_id}`。再試行途中では送らない。
-- 文面テンプレート正本: `src/lib/notifications/templates/`。
+- 最終失敗（`dead_letter`）時のみ SYSTEM Forum へ `@here` 通知。dedupe: `delivery_failed_alert:{outbox_id}`。再試行途中では送らない。`discord_webhook` 自体の dead_letter では再通知しない（再帰防止）。
+- 文面テンプレート正本: `src/lib/notifications/templates/`。本番 Secret は `flamenode-fast-jobs` に設定する。
 
 ### Queue feature flags（本番有効化）
 

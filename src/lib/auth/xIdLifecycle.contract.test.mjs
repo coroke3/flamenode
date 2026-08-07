@@ -27,6 +27,9 @@ test("Discord auth linkは内部user ID更新・token消去・監査を単一bat
   assert.match(adapter, /expectedRowCondition\(\{/);
   assert.match(adapter, /discord_id: beforeUser\.discord_id/);
   assert.match(adapter, /buildNotificationOutboxStatement/);
+  assert.match(adapter, /resolveNotificationActor/);
+  assert.match(adapter, /target: "account"/);
+  assert.match(adapter, /\[アカウント作成\]/);
   assert.match(adapter, /welcomeNotification\.statement/);
   assert.match(adapter, /welcome_account/);
   assert.match(adapter, /expectedMutationChanges/);
@@ -51,7 +54,10 @@ test("一般X ID lifecycleは逐次audit writeを残さずCAS付きatomic batch�
   assert.match(source, /expectedRowCondition\(\{ expectedCurrent: row \}\)/);
   assert.match(source, /xicons\/staging/);
   assert.match(source, /Promise\.allSettled\(\[env\.BUCKET\.delete\(stagingKey\), env\.BUCKET\.delete\(key\)\]\)/);
+  assert.match(source, /resolveNotificationActor/);
+  assert.match(source, /target: "account"/);
   assert.match(source, /buildOpsChannelWebhookStatement/);
+  assert.match(source, /buildXIdRequestThreadName/);
   assert.match(source, /buildChannelXIdRequestNotification/);
   assert.match(source, /if \(isXIdLinkRequestType\(requestType\)\)/);
   assert.doesNotMatch(source, /type: "discord_webhook"/);
@@ -61,6 +67,7 @@ test("一般X ID lifecycleは逐次audit writeを残さずCAS付きatomic batch�
   assert.match(source, /notificationWakeSource: webhookNotification \? "web" : undefined/);
   assert.match(source, /\[requestXIdLink\] ops notification preparation failed/);
   assert.match(source, /unstable_rethrow\(error\)/);
+  assert.match(source, /buildXIdCancelThreadName/);
   assert.match(source, /buildChannelXIdCancelledNotification/);
   assert.match(source, /request\.request_type === "alias"/);
   assert.match(source, /xid_cancel_webhook:/);
@@ -105,6 +112,11 @@ test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付�
   assert.match(admin, /xid_approved:/);
   assert.match(admin, /xid_rejected:/);
   assert.match(admin, /buildOpsChannelWebhookStatement/);
+  assert.match(admin, /resolveNotificationActor/);
+  assert.match(admin, /buildChannelXIdApprovedNotification/);
+  assert.match(admin, /xid_approve_webhook:/);
+  assert.match(admin, /buildXIdApproveThreadName/);
+  assert.match(admin, /buildXIdRejectThreadName/);
   assert.match(admin, /buildChannelXIdRejectedNotification/);
   assert.doesNotMatch(admin, /type: "discord_webhook"/);
   assert.match(admin, /xid_reject_webhook:/);
@@ -129,6 +141,8 @@ test("X ID運営通知は構造化channel templateとメンション抑止を使
   assert.match(xidChannelSource, /buildChannelXIdRequestNotification/);
   assert.match(xidChannelSource, /buildChannelXIdRejectedNotification/);
   assert.match(xidChannelSource, /buildChannelXIdCancelledNotification/);
+  assert.match(xidChannelSource, /buildChannelXIdApprovedNotification/);
+  assert.match(xidChannelSource, /formatOpsActorSection/);
   assert.match(xidChannelSource, /buildNotificationBlocks/);
   assert.match(xidChannelSource, /buildAllowedMentions\(\)/);
   assert.match(xidChannelSource, /\/admin\/x-link-requests/);

@@ -1,10 +1,7 @@
-import { eq } from "drizzle-orm";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { getDatabase } from "@/lib/cloudflare";
-import { users } from "@/lib/db/schema";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
-import { buildChannelSlotReservedNotification } from "@/lib/notifications/templates/slot";
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
@@ -26,26 +23,25 @@ export async function enqueueSlotReserveOpsWebhookPostCommit(
     {
       name: "ops_webhook_notification",
       run: async () => {
+        const { buildChannelSlotReservedNotification, buildSlotReservedOpsThreadName } =
+          await import("@/lib/notifications/templates/slot");
+        const { resolveNotificationActor } = await import(
+          "@/lib/notifications/actor"
+        );
         const { buildOpsChannelWebhookStatement } = await import(
           "@/lib/notifications/opsWebhook"
         );
-        const actor = (
-          await db
-            .select({ discord_id: users.discord_id })
-            .from(users)
-            .where(eq(users.id, input.actorUserId))
-            .limit(1)
-        )[0];
+        const actor = await resolveNotificationActor(db, input.actorUserId);
         const channelNotification = await buildOpsChannelWebhookStatement(db, {
+          target: "event",
+          threadName: buildSlotReservedOpsThreadName(input.eventTitle, actor),
           actorUserId: input.actorUserId,
           payload: buildChannelSlotReservedNotification({
             eventId: input.eventId,
             eventTitle: input.eventTitle,
             slotCount: input.slotCount,
-            displayName: input.displayName,
-            xUserId: input.xUserId,
-            userId: input.actorUserId,
-            discordId: actor?.discord_id,
+            slotDisplayName: input.displayName,
+            actor,
           }),
           dedupeKey: `channel_slot_reserved:${input.eventId}:${input.actorUserId}:${input.anchorSlotId}:${input.groupId ?? "solo"}`,
           eventId: input.eventId,
@@ -71,6 +67,7 @@ export async function enqueueSlotSubmitNotificationsPostCommit(
     eventId: string;
     eventTitle: string;
     submittedYoutubeId: string | null;
+    creatorDisplayName?: string | null;
   },
   context: { flow: string; traceId: string },
 ): Promise<void> {
@@ -90,20 +87,18 @@ export async function enqueueSlotSubmitNotificationsPostCommit(
           }),
           eventId: input.eventId,
         });
-        const { buildChannelVideoRegisteredNotification } = await import(
-          "@/lib/notifications/templates/video"
+        const { buildChannelVideoRegisteredNotification, buildVideoRegisteredOpsThreadName } =
+          await import("@/lib/notifications/templates/video");
+        const { resolveNotificationActor } = await import(
+          "@/lib/notifications/actor"
         );
         const { buildOpsChannelWebhookStatement } = await import(
           "@/lib/notifications/opsWebhook"
         );
-        const actor = (
-          await db
-            .select({ discord_id: users.discord_id })
-            .from(users)
-            .where(eq(users.id, input.userId))
-            .limit(1)
-        )[0];
+        const actor = await resolveNotificationActor(db, input.userId);
         const channelNotification = await buildOpsChannelWebhookStatement(db, {
+          target: "event",
+          threadName: buildVideoRegisteredOpsThreadName(input.videoTitle, actor),
           actorUserId: input.userId,
           payload: buildChannelVideoRegisteredNotification({
             videoId: input.videoId,
@@ -112,8 +107,8 @@ export async function enqueueSlotSubmitNotificationsPostCommit(
             registrationKind: "slot",
             eventId: input.eventId,
             eventTitle: input.eventTitle,
-            userId: input.userId,
-            discordId: actor?.discord_id,
+            actor,
+            creatorDisplayName: input.creatorDisplayName,
           }),
           dedupeKey: `channel_video_registered:${input.videoId}`,
           eventId: input.eventId,

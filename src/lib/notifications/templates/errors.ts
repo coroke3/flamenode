@@ -20,9 +20,10 @@ export function buildDeliveryFailureOpsNotification(args: {
     args.lastError?.trim() || "エラー詳細は管理画面の通知ログを確認してください。";
   const content = buildNotificationBlocks([
     {
-      heading: "@here 【運営通知】Discord 通知の配送が最終失敗しました",
+      heading: "@here 【システム通知】Discord 通知の配送が最終失敗しました",
       lines: [
         "再試行上限に達したため、利用者への Discord 通知を配送できませんでした。",
+        "この通知は system フォーラム Webhook へ配送されます。",
         `通知種別: ${escapeDiscordMention(args.notificationType)}`,
         `outbox ID: ${args.outboxId}`,
         `宛先 user_id: ${args.recipientUserId}`,

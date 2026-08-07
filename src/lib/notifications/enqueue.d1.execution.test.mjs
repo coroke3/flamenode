@@ -334,6 +334,8 @@ if (runTestWithTsx(import.meta.url)) {
 
     async function buildCancelNotification() {
       const notification = await buildOpsChannelWebhookStatement(db, {
+        target: "account",
+        threadName: "[X ID取消] @rollback_x / Discord Name",
         actorUserId: "auth-user-1",
         payload: { content: "X ID cancel" },
         dedupeKey: `xid_cancel_webhook:${request.id}`,

@@ -87,6 +87,9 @@ if (!runningWithTsx) {
       buildChannelSlotReservedNotification() {
         return {};
       },
+      buildSlotReservedOpsThreadName() {
+        return "[枠確保] Event / @x";
+      },
       buildSlotVideoSubmittedNotification() {
         return {};
       },
@@ -97,6 +100,23 @@ if (!runningWithTsx) {
     namedExports: {
       buildChannelVideoRegisteredNotification() {
         return {};
+      },
+      buildVideoRegisteredOpsThreadName() {
+        return "[作品登録] Title / @x";
+      },
+    },
+  });
+
+  mock.module("@/lib/notifications/actor", {
+    namedExports: {
+      async resolveNotificationActor() {
+        return {
+          userId: "user-1",
+          discordId: "discord-1",
+          discordName: "Discord Name",
+          activeXId: "active_x",
+          activeXName: "Active X Name",
+        };
       },
     },
   });

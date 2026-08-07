@@ -4,6 +4,10 @@ import {
   buildNotificationOutboxStatement,
   type NotificationOutboxStatement,
 } from "./enqueue";
+import {
+  type OpsWebhookTarget,
+  sanitizeDiscordThreadName,
+} from "./forum";
 
 type AnyDb = LibSQLDatabase<any>;
 
@@ -11,16 +15,26 @@ type AnyDb = LibSQLDatabase<any>;
 export async function buildOpsChannelWebhookStatement(
   db: AnyDb,
   input: {
+    target: OpsWebhookTarget;
+    threadName: string;
     actorUserId: string;
     payload: Record<string, unknown>;
     dedupeKey: string;
     eventId?: string | null;
   },
 ): Promise<NotificationOutboxStatement | null> {
+  const payload = {
+    ...input.payload,
+    webhook_target: input.target,
+    thread_name: sanitizeDiscordThreadName(
+      input.threadName,
+      `[通知] ${input.target}`,
+    ),
+  };
   return buildNotificationOutboxStatement(db, {
     recipientUserId: input.actorUserId,
     type: "discord_webhook",
-    payload: input.payload,
+    payload,
     dedupeKey: input.dedupeKey,
     eventId: input.eventId ?? null,
     force: true,

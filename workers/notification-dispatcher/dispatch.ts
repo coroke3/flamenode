@@ -10,11 +10,19 @@ import {
   type FetchLike,
 } from "../shared/externalApi.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
+import {
+  isOpsWebhookTarget,
+  resolveForumWebhookUrl,
+  type OpsWebhookTarget,
+} from "../../src/lib/notifications/forum.ts";
 
 export type Env = {
   DB: D1Database;
   KV?: KVNamespace;
   DISCORD_WEBHOOK_URL?: string;
+  DISCORD_WEBHOOK_URL_FORUM_ACCOUNT?: string;
+  DISCORD_WEBHOOK_URL_FORUM_EVENT?: string;
+  DISCORD_WEBHOOK_URL_FORUM_SYSTEM?: string;
   DISCORD_BOT_TOKEN?: string;
   APP_ORIGIN?: string;
   NEXT_PUBLIC_APP_URL?: string;
@@ -654,7 +662,9 @@ async function enqueueDeadLetterOpsAlert(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  if (!env.DISCORD_WEBHOOK_URL || row.type === "discord_webhook") return;
+  if (row.type === "discord_webhook") return;
+  const webhookResolution = resolveForumWebhookUrl(env, "system");
+  if ("error" in webhookResolution) return;
   const dedupeKey = `delivery_failed_alert:${row.id}`;
   const existing = await env.DB.prepare(
     `SELECT id FROM notification_outbox
@@ -670,7 +680,10 @@ async function enqueueDeadLetterOpsAlert(
   const { buildDeliveryFailureOpsNotification } = await import(
     "../../src/lib/notifications/templates/errors.ts"
   );
-  const payload = buildDeliveryFailureOpsNotification({
+  const { sanitizeDiscordThreadName } = await import(
+    "../../src/lib/notifications/forum.ts"
+  );
+  const basePayload = buildDeliveryFailureOpsNotification({
     outboxId: row.id,
     notificationType: row.type,
     recipientUserId: row.recipient_user_id,
@@ -678,6 +691,14 @@ async function enqueueDeadLetterOpsAlert(
     attemptCount,
     lastError,
   });
+  const payload = {
+    ...basePayload,
+    webhook_target: "system" as OpsWebhookTarget,
+    thread_name: sanitizeDiscordThreadName(
+      `[通知エラー] ${row.type}`,
+      "[通知エラー] system",
+    ),
+  };
   await env.DB.prepare(
     `INSERT INTO notification_outbox (
       id, recipient_user_id, type, payload_json, status, attempt_count,
@@ -719,13 +740,33 @@ function discordApiBodyJson(payloadJson: string): string | null {
   if (typeof source.flags === "number") body.flags = source.flags;
   if (typeof source.username === "string") body.username = source.username;
   if (typeof source.avatar_url === "string") body.avatar_url = source.avatar_url;
+  if (typeof source.thread_name === "string") body.thread_name = source.thread_name;
+  if (Array.isArray(source.applied_tags)) body.applied_tags = source.applied_tags;
   if (typeof body.content !== "string" && !Array.isArray(body.embeds)) return null;
   return JSON.stringify(body);
 }
 
+function parseWebhookTarget(payloadJson: string): OpsWebhookTarget | null {
+  try {
+    const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
+    const target = parsed.webhook_target;
+    return isOpsWebhookTarget(target) ? target : null;
+  } catch {
+    return null;
+  }
+}
+
 async function deliverWithOutcome(
   row: { type: string; payload_json: string; discord_id: string },
-  env: Pick<Env, "KV" | "DISCORD_WEBHOOK_URL" | "DISCORD_BOT_TOKEN">,
+  env: Pick<
+    Env,
+    | "KV"
+    | "DISCORD_WEBHOOK_URL"
+    | "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT"
+    | "DISCORD_WEBHOOK_URL_FORUM_EVENT"
+    | "DISCORD_WEBHOOK_URL_FORUM_SYSTEM"
+    | "DISCORD_BOT_TOKEN"
+  >,
   budget: ExternalRequestBudget,
   kvWriteBudget: ExternalRequestBudget,
   cooldownKvWriteBudget: ExternalRequestBudget,
@@ -739,18 +780,21 @@ async function deliverWithOutcome(
     return { ok: false, errorCode: "discord_payload_invalid", permanent: true };
   }
   if (row.type === "discord_webhook") {
-    if (!env.DISCORD_WEBHOOK_URL) {
+    const webhookTarget = parseWebhookTarget(row.payload_json);
+    const resolved = resolveForumWebhookUrl(env, webhookTarget);
+    if ("error" in resolved) {
       return {
         ok: false,
-        errorCode: "discord_channel_webhook_unconfigured",
+        errorCode: resolved.error,
         retryAfterSeconds: 900,
+        permanent: resolved.error.startsWith("forum_webhook_unconfigured"),
       };
     }
-    const routeKey = `webhook:${env.DISCORD_WEBHOOK_URL}`;
+    const routeKey = `webhook:${resolved.url}`;
     const request = await discordRequest(
       env,
       routeKey,
-      env.DISCORD_WEBHOOK_URL,
+      resolved.url,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1053,7 +1097,15 @@ export async function processNotificationQueue(
 /** 既存テスト・呼出し互換用。詳細なrate limit情報はdispatcher内部で扱う。 */
 export async function deliver(
   row: { type: string; payload_json: string; discord_id: string },
-  env: Pick<Env, "KV" | "DISCORD_WEBHOOK_URL" | "DISCORD_BOT_TOKEN">,
+  env: Pick<
+    Env,
+    | "KV"
+    | "DISCORD_WEBHOOK_URL"
+    | "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT"
+    | "DISCORD_WEBHOOK_URL_FORUM_EVENT"
+    | "DISCORD_WEBHOOK_URL_FORUM_SYSTEM"
+    | "DISCORD_BOT_TOKEN"
+  >,
 ): Promise<boolean> {
   const outcome = await deliverWithOutcome(
     row,

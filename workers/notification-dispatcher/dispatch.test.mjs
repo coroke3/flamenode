@@ -780,3 +780,101 @@ test("deliver: payload の内部メタ(video_id等)をDiscordへ送らない", a
     globalThis.fetch = originalFetch;
   }
 });
+
+test("deliver: forum target は対応 FORUM Webhook URL へ配送する", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: String(init?.body ?? "") });
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "discord_webhook",
+        payload_json: JSON.stringify({
+          content: "forum hello",
+          webhook_target: "event",
+          thread_name: "イベント通知",
+          video_id: "vid-hidden",
+        }),
+        discord_id: "",
+      },
+      {
+        DISCORD_WEBHOOK_URL_FORUM_EVENT: "https://example.test/forum-event",
+      },
+    );
+    assert.equal(ok, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://example.test/forum-event");
+    assert.equal(
+      calls[0].body,
+      JSON.stringify({ content: "forum hello", thread_name: "イベント通知" }),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deliver: forum target 未設定で FORUM URL 欠落は配送しない", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "discord_webhook",
+        payload_json: JSON.stringify({
+          content: "hello",
+          webhook_target: "account",
+        }),
+        discord_id: "",
+      },
+      { DISCORD_WEBHOOK_URL: "https://example.test/legacy-only" },
+    );
+    assert.equal(ok, false);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("dead-letter ops alert は discord_webhook 失敗で再帰しない", async () => {
+  const source = await readFile(new URL("./dispatch.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /async function enqueueDeadLetterOpsAlert[\s\S]*?if \(row\.type === "discord_webhook"\) return;/,
+  );
+  assert.match(source, /webhook_target:\s*"system"/);
+});
+
+test("deliver: legacy discord_webhook は webhook_target なしで DISCORD_WEBHOOK_URL を使う", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: String(init?.body ?? "") });
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "discord_webhook",
+        payload_json: JSON.stringify({
+          content: "legacy",
+          event_id: "evt-hidden",
+        }),
+        discord_id: "",
+      },
+      { DISCORD_WEBHOOK_URL: "https://example.test/legacy-webhook" },
+    );
+    assert.equal(ok, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://example.test/legacy-webhook");
+    assert.equal(calls[0].body, JSON.stringify({ content: "legacy" }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

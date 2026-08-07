@@ -123,6 +123,9 @@ export const SENSITIVE_ENV_NAMES = Object.freeze([
   "GA4_SERVICE_ACCOUNT_PRIVATE_KEY",
   "DISCORD_BOT_TOKEN",
   "DISCORD_WEBHOOK_URL",
+  "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+  "DISCORD_WEBHOOK_URL_FORUM_EVENT",
+  "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
 ]);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
@@ -1121,14 +1124,18 @@ export function runRemoteSecretPreflight({
       );
     }
     const available = assertRemoteSecretPayload(payload, required, target.service);
-    if (
-      target.key === "fast-jobs" &&
-      !available.has("DISCORD_BOT_TOKEN") &&
-      !available.has("DISCORD_WEBHOOK_URL")
-    ) {
-      throw new Error(
-        `${target.service}: required remote Worker secret names are missing: DISCORD_BOT_TOKEN or DISCORD_WEBHOOK_URL. Configure one before retrying.`,
-      );
+    if (target.key === "fast-jobs") {
+      const hasBotToken = available.has("DISCORD_BOT_TOKEN");
+      const hasLegacyWebhook = available.has("DISCORD_WEBHOOK_URL");
+      const hasAllForumWebhooks =
+        available.has("DISCORD_WEBHOOK_URL_FORUM_ACCOUNT") &&
+        available.has("DISCORD_WEBHOOK_URL_FORUM_EVENT") &&
+        available.has("DISCORD_WEBHOOK_URL_FORUM_SYSTEM");
+      if (!hasBotToken && !hasLegacyWebhook && !hasAllForumWebhooks) {
+        throw new Error(
+          `${target.service}: required remote Worker secret names are missing: DISCORD_BOT_TOKEN, DISCORD_WEBHOOK_URL, or all three DISCORD_WEBHOOK_URL_FORUM_* secrets. Configure one before retrying.`,
+        );
+      }
     }
   }
 }

@@ -352,18 +352,30 @@ async function enqueueFirstDiscordLinkNotifications(
   }
 
   try {
+    const { resolveNotificationActor } = await import(
+      "@/lib/notifications/actor"
+    );
     const { buildChannelAccountCreatedNotification } = await import(
       "@/lib/notifications/templates/channel"
     );
     const { buildOpsChannelWebhookStatement } = await import(
       "@/lib/notifications/opsWebhook"
     );
+    const actor = await resolveNotificationActor(db, params.account.userId);
+    const discordName =
+      actor?.discordName?.trim() ||
+      params.beforeUser.name?.trim() ||
+      "不明";
     const channelNotification = await buildOpsChannelWebhookStatement(db, {
+      target: "account",
+      threadName: `[アカウント作成] ${discordName}`,
       actorUserId: params.account.userId,
       payload: buildChannelAccountCreatedNotification({
         userId: params.account.userId,
         discordId: params.account.providerAccountId,
-        userName: params.beforeUser.name,
+        discordName: actor?.discordName ?? params.beforeUser.name,
+        activeXId: actor?.activeXId,
+        activeXName: actor?.activeXName,
         env: notificationEnv,
       }),
       dedupeKey: `channel_account_created:${params.account.userId}`,

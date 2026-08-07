@@ -887,7 +887,7 @@ test("remote Worker secret preflight checks names only and never accepts a missi
           return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
         },
       }),
-    /DISCORD_BOT_TOKEN or DISCORD_WEBHOOK_URL/,
+    /DISCORD_BOT_TOKEN, DISCORD_WEBHOOK_URL, or all three DISCORD_WEBHOOK_URL_FORUM_/,
   );
 });
 

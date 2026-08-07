@@ -1,5 +1,4 @@
 import {
-  buildAllowedMentions,
   buildDiscordPayload,
   buildNotificationBlocks,
   escapeDiscordMention,
@@ -12,21 +11,31 @@ import type { NotificationUrlEnv } from "../format";
 export function buildChannelAccountCreatedNotification(args: {
   userId: string;
   discordId: string;
-  userName?: string | null;
+  discordName?: string | null;
+  activeXId?: string | null;
+  activeXName?: string | null;
   env?: NotificationUrlEnv;
 }): ReturnType<typeof buildDiscordPayload> {
-  const displayName = args.userName?.trim()
-    ? escapeDiscordMention(args.userName)
-    : args.userId;
+  const discordLabel = args.discordName?.trim()
+    ? escapeDiscordMention(args.discordName.trim())
+    : "未設定";
+  const activeXLabel = args.activeXName?.trim()
+    ? `${escapeDiscordMention(args.activeXName.trim())} (${args.activeXId?.trim() || "未設定"})`
+    : "未設定";
   const content = buildNotificationBlocks([
     {
       heading: "【運営通知】新規アカウントが作成されました",
       lines: [
         "Discord 連携による初回ログインが完了しました。",
-        `表示名: ${displayName}`,
-        `user_id: ${args.userId}`,
-        `Discord ID: ${args.discordId}`,
         `発生時刻（日本時間）: ${formatJstNow()}`,
+      ],
+    },
+    {
+      heading: "■ ユーザー",
+      lines: [
+        `Discord: ${discordLabel} (${args.discordId})`,
+        `user_id: ${args.userId}`,
+        `Active X: ${activeXLabel}`,
       ],
     },
     {

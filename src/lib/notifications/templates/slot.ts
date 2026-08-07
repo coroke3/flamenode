@@ -1,3 +1,5 @@
+import type { NotificationActor } from "../actor";
+import { formatOpsActorSection } from "../actor";
 import { appUrl } from "../format";
 import {
   buildDiscordPayload,
@@ -6,6 +8,24 @@ import {
   formatJstDateTime,
   linkLine,
 } from "./common";
+
+function opsThreadActorLabel(actor: NotificationActor | null): string {
+  if (!actor) return "unknown";
+  const xId = actor.activeXId?.trim();
+  if (xId) return `@${xId}`;
+  const discordName = actor.discordName?.trim();
+  if (discordName) return discordName;
+  return actor.userId;
+}
+
+/** EVENT forum 向け thread_name（枠確保）。 */
+export function buildSlotReservedOpsThreadName(
+  eventTitle: string,
+  actor: NotificationActor | null,
+): string {
+  const eventName = eventTitle.trim() || "イベント";
+  return `[枠確保] ${eventName} / ${opsThreadActorLabel(actor)}`;
+}
 
 /** 枠への作品投稿受付 DM。 */
 export function buildSlotVideoSubmittedNotification(args: {
@@ -138,25 +158,24 @@ export function buildChannelSlotReservedNotification(args: {
   eventId: string;
   eventTitle: string;
   slotCount: number;
-  displayName?: string | null;
-  xUserId?: string | null;
-  userId: string;
-  discordId?: string | null;
+  slotDisplayName: string;
+  actor: NotificationActor | null;
 }): ReturnType<typeof buildDiscordPayload> {
-  const eventName = escapeDiscordMention(args.eventTitle);
-  const actor =
-    args.displayName?.trim() ||
-    (args.xUserId ? `@${args.xUserId}` : args.userId);
+  const eventName = escapeDiscordMention(args.eventTitle.trim() || "イベント");
   const slotsLabel =
     args.slotCount > 1 ? `${args.slotCount} 枠` : "1 枠";
+  const reservationDisplayName = escapeDiscordMention(
+    args.slotDisplayName.trim() || "（未設定）",
+  );
   const content = buildNotificationBlocks([
     {
       heading: "【運営通知】枠が新規確保されました",
-      lines: [
-        `利用者がイベント「${eventName}」で ${slotsLabel} を確保しました。`,
-        `操作者: ${escapeDiscordMention(actor)}`,
-        args.discordId ? `Discord ID: ${args.discordId}` : null,
-      ],
+      lines: [`イベント: ${eventName}`, `確保枠: ${slotsLabel}`],
+    },
+    formatOpsActorSection(args.actor),
+    {
+      heading: "■ 予約上の表示名",
+      lines: [reservationDisplayName],
     },
     {
       heading: "■ 確認",

@@ -1,3 +1,5 @@
+import type { NotificationActor } from "../actor";
+import { formatOpsActorSection } from "../actor";
 import { appUrl, videoPublicPath } from "../format";
 import {
   buildDiscordPayload,
@@ -5,6 +7,24 @@ import {
   escapeDiscordMention,
   linkLine,
 } from "./common";
+
+function opsThreadActorLabel(actor: NotificationActor | null): string {
+  if (!actor) return "unknown";
+  const xId = actor.activeXId?.trim();
+  if (xId) return `@${xId}`;
+  const discordName = actor.discordName?.trim();
+  if (discordName) return discordName;
+  return actor.userId;
+}
+
+/** EVENT forum 向け thread_name（作品登録）。 */
+export function buildVideoRegisteredOpsThreadName(
+  videoTitle: string,
+  actor: NotificationActor | null,
+): string {
+  const title = videoTitle.trim() || "作品";
+  return `[作品登録] ${title} / ${opsThreadActorLabel(actor)}`;
+}
 
 /** 自由投稿・未所属作品の受付 DM。 */
 export function buildFreeVideoSubmittedNotification(args: {
@@ -178,8 +198,8 @@ export function buildChannelVideoRegisteredNotification(args: {
   registrationKind: "slot" | "free" | "unaffiliated";
   eventId?: string | null;
   eventTitle?: string | null;
-  userId: string;
-  discordId?: string | null;
+  actor: NotificationActor | null;
+  creatorDisplayName?: string | null;
 }): ReturnType<typeof buildDiscordPayload> {
   const kindLabel =
     args.registrationKind === "slot"
@@ -187,24 +207,32 @@ export function buildChannelVideoRegisteredNotification(args: {
       : args.registrationKind === "free"
         ? "自由投稿"
         : "未所属";
-  const title = escapeDiscordMention(args.videoTitle);
+  const title = escapeDiscordMention(args.videoTitle.trim() || "（タイトル未設定）");
+  const creatorDisplayName = args.creatorDisplayName?.trim();
   const eventLines: string[] = [];
   if (args.eventId) {
     eventLines.push(linkLine("イベントを見る", `/event/${args.eventId}`));
   }
-  const content = buildNotificationBlocks([
+  const blocks = [
     {
       heading: "【運営通知】作品が新規登録されました",
       lines: [
+        `作品名: ${title}`,
         `登録種別: ${kindLabel}`,
-        `作品: ${title}`,
         args.eventTitle
           ? `イベント: ${escapeDiscordMention(args.eventTitle)}`
           : null,
-        `登録者 user_id: ${args.userId}`,
-        args.discordId ? `Discord ID: ${args.discordId}` : null,
       ],
     },
+    formatOpsActorSection(args.actor),
+    ...(creatorDisplayName
+      ? [
+          {
+            heading: "■ 作品の表示名",
+            lines: [escapeDiscordMention(creatorDisplayName)],
+          },
+        ]
+      : []),
     {
       heading: "■ 確認",
       lines: [
@@ -213,7 +241,8 @@ export function buildChannelVideoRegisteredNotification(args: {
         ...eventLines,
       ],
     },
-  ]);
+  ];
+  const content = buildNotificationBlocks(blocks);
   return buildDiscordPayload({
     content,
     video_id: args.videoId,

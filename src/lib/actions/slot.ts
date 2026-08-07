@@ -12,7 +12,7 @@ import {
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
-import { events, slots, users } from "@/lib/db/schema";
+import { events, slots } from "@/lib/db/schema";
 import {
   MAX_SLOTS_PER_VIDEO,
   normalizeMaxSlotsPerVideo,
@@ -670,26 +670,26 @@ export async function reserveSlot(
     const { buildChannelSlotReservedNotification } = await import(
       "@/lib/notifications/templates/slot"
     );
+    const { buildSlotReservedOpsThreadName } = await import(
+      "@/lib/notifications/templates/slot"
+    );
+    const { resolveNotificationActor } = await import(
+      "@/lib/notifications/actor"
+    );
     const { buildOpsChannelWebhookStatement } = await import(
       "@/lib/notifications/opsWebhook"
     );
-    const actor = (
-      await db
-        .select({ discord_id: users.discord_id })
-        .from(users)
-        .where(eq(users.id, guard.user.id))
-        .limit(1)
-    )[0];
+    const actor = await resolveNotificationActor(db, guard.user.id);
     const channelNotification = await buildOpsChannelWebhookStatement(db, {
+      target: "event",
+      threadName: buildSlotReservedOpsThreadName(event.title ?? "イベント", actor),
       actorUserId: guard.user.id,
       payload: buildChannelSlotReservedNotification({
         eventId: anchor.event_id,
         eventTitle: event.title ?? "イベント",
         slotCount: targetRows.length,
-        displayName: parsed.data.display_name,
-        xUserId: identity.snapshotXId,
-        userId: guard.user.id,
-        discordId: actor?.discord_id,
+        slotDisplayName: parsed.data.display_name,
+        actor,
       }),
       dedupeKey: `channel_slot_reserved:${anchor.event_id}:${guard.user.id}:${anchor.id}:${groupId ?? "solo"}`,
       eventId: anchor.event_id,

@@ -27,6 +27,9 @@ import { handleNotificationWakeQueue } from "./notificationQueueConsumer.ts";
 export interface Env {
   DB: D1Database;
   DISCORD_WEBHOOK_URL?: string;
+  DISCORD_WEBHOOK_URL_FORUM_ACCOUNT?: string;
+  DISCORD_WEBHOOK_URL_FORUM_EVENT?: string;
+  DISCORD_WEBHOOK_URL_FORUM_SYSTEM?: string;
   DISCORD_BOT_TOKEN?: string;
   NEXT_PUBLIC_SITE_URL?: string;
   KV: KVNamespace;

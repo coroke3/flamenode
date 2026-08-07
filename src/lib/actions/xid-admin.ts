@@ -623,8 +623,45 @@ async function approveXIdLinkRequestOnce(
           }),
     dedupeKey: `xid_approved:${request.id}`,
   });
+  const { resolveNotificationActor } = await import(
+    "@/lib/notifications/actor"
+  );
+  const {
+    buildChannelXIdApprovedNotification,
+    buildXIdApproveThreadName,
+  } = await import("@/lib/notifications/templates/xidChannel");
+  const { buildOpsChannelWebhookStatement } = await import(
+    "@/lib/notifications/opsWebhook"
+  );
+  const requester = await resolveNotificationActor(db, requestedAuthUserId);
+  const operatorActor = await resolveNotificationActor(db, operatorAuthUserId);
+  const approveXIdLabel =
+    submittedXUserId ??
+    request.requested_x_id ??
+    request.source_x_user_id ??
+    "不明";
+  const channelNotification = await buildOpsChannelWebhookStatement(db, {
+    target: "account",
+    threadName: buildXIdApproveThreadName(approveXIdLabel, requester),
+    actorUserId: operatorAuthUserId,
+    payload: buildChannelXIdApprovedNotification({
+      requestId: request.id,
+      requestType: request.request_type,
+      requestedXId: request.requested_x_id,
+      sourceXUserId: request.source_x_user_id,
+      targetXUserId: request.target_x_user_id,
+      requester,
+      operator: operatorActor,
+      approvedAt: now,
+    }),
+    dedupeKey: `xid_approve_webhook:${request.id}`,
+  });
   if (notification) {
     statements.push(notification.statement);
+    expected.push(null);
+  }
+  if (channelNotification) {
+    statements.push(channelNotification.statement);
     expected.push(null);
   }
 
@@ -653,7 +690,8 @@ async function approveXIdLinkRequestOnce(
     mutationStatements: statements,
     expectedMutationChanges: expected,
     audits,
-    notificationWakeSource: notification ? "admin" : undefined,
+    notificationWakeSource:
+      notification || channelNotification ? "admin" : undefined,
     staticRebuildWakeSource:
       publicVisibilityChanged && notificationXUserId ? "admin" : undefined,
   });
@@ -762,20 +800,26 @@ async function rejectXIdLinkRequestOnce(
     }),
     dedupeKey: `xid_rejected:${request.id}`,
   });
-  const { buildChannelXIdRejectedNotification } = await import(
-    "@/lib/notifications/templates/xidChannel"
+  const { resolveNotificationActor } = await import(
+    "@/lib/notifications/actor"
   );
+  const {
+    buildChannelXIdRejectedNotification,
+    buildXIdRejectThreadName,
+  } = await import("@/lib/notifications/templates/xidChannel");
   const { buildOpsChannelWebhookStatement } = await import(
     "@/lib/notifications/opsWebhook"
   );
-  const requester = (
-    await db
-      .select({ discord_id: users.discord_id })
-      .from(users)
-      .where(eq(users.id, request.requested_by_auth_user_id))
-      .limit(1)
-  )[0];
+  const requester = await resolveNotificationActor(
+    db,
+    request.requested_by_auth_user_id,
+  );
+  const operatorActor = await resolveNotificationActor(db, operatorAuthUserId);
+  const rejectXIdLabel =
+    request.requested_x_id ?? request.source_x_user_id ?? "不明";
   const channelNotification = await buildOpsChannelWebhookStatement(db, {
+    target: "account",
+    threadName: buildXIdRejectThreadName(rejectXIdLabel, requester),
     actorUserId: operatorAuthUserId,
     payload: buildChannelXIdRejectedNotification({
       requestId: request.id,
@@ -783,9 +827,8 @@ async function rejectXIdLinkRequestOnce(
       requestedXId: request.requested_x_id,
       sourceXUserId: request.source_x_user_id,
       targetXUserId: request.target_x_user_id,
-      requesterUserId: request.requested_by_auth_user_id,
-      requesterDiscordId: requester?.discord_id ?? null,
-      operatorUserId: operatorAuthUserId,
+      requester,
+      operator: operatorActor,
       reason: reason || null,
       rejectedAt: now,
     }),

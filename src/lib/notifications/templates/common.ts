@@ -3,6 +3,7 @@ import {
   type DiscordNotificationPayload,
   type NotificationUrlEnv,
 } from "../format";
+import type { OpsWebhookTarget } from "../forum";
 
 export type DiscordAllowedMentions = {
   parse?: Array<"roles" | "users" | "everyone">;
@@ -132,14 +133,22 @@ export function buildDiscordPayload(args: {
   url?: string;
   video_id?: string;
   event_id?: string;
+  webhookTarget?: OpsWebhookTarget;
+  threadName?: string;
+  webhook_target?: OpsWebhookTarget;
+  thread_name?: string;
 }): DiscordNotificationBody {
   const videoId = args.videoId ?? args.video_id;
   const eventId = args.eventId ?? args.event_id;
+  const webhookTarget = args.webhookTarget ?? args.webhook_target;
+  const threadName = args.threadName ?? args.thread_name;
   return {
     content: args.content,
     ...(args.allowedMentions ? { allowed_mentions: args.allowedMentions } : {}),
     ...(videoId ? { video_id: videoId } : {}),
     ...(eventId ? { event_id: eventId } : {}),
     ...(args.url ? { url: args.url } : {}),
+    ...(webhookTarget ? { webhook_target: webhookTarget } : {}),
+    ...(threadName ? { thread_name: threadName } : {}),
   };
 }

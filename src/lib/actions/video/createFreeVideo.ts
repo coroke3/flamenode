@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
-import { videos, events, users } from "@/lib/db/schema";
+import { videos, events } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
@@ -260,6 +260,12 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     const { buildChannelVideoRegisteredNotification } = await import(
       "@/lib/notifications/templates/video"
     );
+    const { buildVideoRegisteredOpsThreadName } = await import(
+      "@/lib/notifications/templates/video"
+    );
+    const { resolveNotificationActor } = await import(
+      "@/lib/notifications/actor"
+    );
     const { buildOpsChannelWebhookStatement } = await import(
       "@/lib/notifications/opsWebhook"
     );
@@ -272,14 +278,10 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
             .limit(1)
         )[0]?.title ?? null
       : null;
-    const actor = (
-      await db
-        .select({ discord_id: users.discord_id })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1)
-    )[0];
+    const actor = await resolveNotificationActor(db, userId);
     const channelNotification = await buildOpsChannelWebhookStatement(db, {
+      target: "event",
+      threadName: buildVideoRegisteredOpsThreadName(parsed.data.title, actor),
       actorUserId: userId,
       payload: buildChannelVideoRegisteredNotification({
         videoId,
@@ -288,8 +290,8 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
         registrationKind: eventId ? "free" : "unaffiliated",
         eventId,
         eventTitle,
-        userId,
-        discordId: actor?.discord_id,
+        actor,
+        creatorDisplayName: parsed.data.display_name,
       }),
       dedupeKey: `channel_video_registered:${videoId}`,
       eventId,

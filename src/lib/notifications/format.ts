@@ -58,12 +58,19 @@ export function videoPublicPath(
   return `/${youtubeVideoId?.trim() || videoId}`;
 }
 
+import {
+  isOpsWebhookTarget,
+  type OpsWebhookTarget,
+} from "./forum";
+
 export type DiscordNotificationPayload = {
   content: string;
   embeds?: Array<Record<string, unknown>>;
   video_id?: string;
   event_id?: string;
   url?: string;
+  webhook_target?: OpsWebhookTarget;
+  thread_name?: string;
 };
 
 /** 通知 payload に必須キーが入っているかを検証する。 */
@@ -109,6 +116,21 @@ export function validateNotificationPayload(
   // Discord message content 上限は 2000。長い運用文面を落とさない。
   if (typeof content === "string" && content.length > 2000) {
     return { ok: false, reason: "payload.content は 2000 文字以内にしてください" };
+  }
+
+  const record = payload as Record<string, unknown>;
+  const webhookTarget = record.webhook_target;
+  if (webhookTarget !== undefined && !isOpsWebhookTarget(webhookTarget)) {
+    return { ok: false, reason: "payload.webhook_target が不正です" };
+  }
+  const threadName = record.thread_name;
+  if (threadName !== undefined) {
+    if (typeof threadName !== "string") {
+      return { ok: false, reason: "payload.thread_name は文字列である必要があります" };
+    }
+    if (threadName.length > 100) {
+      return { ok: false, reason: "payload.thread_name は 100 文字以内にしてください" };
+    }
   }
   return { ok: true };
 }

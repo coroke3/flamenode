@@ -15,6 +15,9 @@ export type NotificationQueueConsumerEnv = {
   DB: D1Database;
   KV?: KVNamespace;
   DISCORD_WEBHOOK_URL?: string;
+  DISCORD_WEBHOOK_URL_FORUM_ACCOUNT?: string;
+  DISCORD_WEBHOOK_URL_FORUM_EVENT?: string;
+  DISCORD_WEBHOOK_URL_FORUM_SYSTEM?: string;
   DISCORD_BOT_TOKEN?: string;
   APP_ORIGIN?: string;
   NEXT_PUBLIC_APP_URL?: string;
