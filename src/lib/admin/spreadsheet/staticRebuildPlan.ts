@@ -106,7 +106,7 @@ function addVideoCardGlobalTargets(
     priority: "low",
   });
   add(mutation, {
-    targetType: "recommend",
+    targetType: "recommend_core",
     targetId: "global",
     priority: "low",
   });

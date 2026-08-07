@@ -18,6 +18,7 @@ test("static rebuild targetはcanonical種だけを受理する", () => {
     "list_recent",
     "list_popular",
     "search_index",
+    "recommend_core",
     "recommend",
     "rules",
     "youtube_related_blocklist",

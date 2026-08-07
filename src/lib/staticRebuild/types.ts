@@ -9,6 +9,7 @@ export const STATIC_REBUILD_TARGET_TYPES = [
   "list_recent",
   "list_popular",
   "search_index",
+  "recommend_core",
   "recommend",
   "rules",
   "youtube_related_blocklist",

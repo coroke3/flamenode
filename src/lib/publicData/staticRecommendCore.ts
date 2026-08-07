@@ -7,6 +7,40 @@ import {
 } from "./normalize.ts";
 import { isPublicVideoListable } from "./visibility.ts";
 
+export const RECOMMEND_CORE_OBJECT_KEY = "recommend/core.v1.json";
+export const RECOMMEND_CORE_SCHEMA_VERSION = 1 as const;
+
+export interface StaticRecommendCorePayload {
+  schema_version?: unknown;
+  generated_at?: unknown;
+  recommended?: unknown;
+  latest?: unknown;
+  underrated?: unknown;
+}
+
+export interface StaticRecommendCoreData {
+  generatedAt: number;
+  recommended: VideoCardData[];
+  latest: VideoCardData[];
+  underrated: VideoCardData[];
+}
+
+export function normalizeRecommendCore(value: unknown): StaticRecommendCoreData | null {
+  if (!value || typeof value !== "object") return null;
+  const payload = value as StaticRecommendCorePayload;
+  if (Number(payload.schema_version) !== RECOMMEND_CORE_SCHEMA_VERSION) return null;
+  if (!Array.isArray(payload.recommended) || !Array.isArray(payload.latest)) return null;
+  if (!Array.isArray(payload.underrated)) return null;
+  const generatedAt = normalizeUnix(payload.generated_at);
+  if (generatedAt == null || generatedAt <= 0) return null;
+  return {
+    generatedAt,
+    recommended: normalizeVideoList(payload.recommended),
+    latest: normalizeVideoList(payload.latest),
+    underrated: normalizeVideoList(payload.underrated),
+  };
+}
+
 export interface StaticRecommendPayload {
   generated_at?: unknown;
   recommended?: unknown;

@@ -12,7 +12,7 @@ export const EVENTS_INDEX_R2_KEY = "events/index.json";
 export const EVENTS_INDEX_STALE_MAX_AGE_SEC =
   PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex * 2;
 /** processing の in-flight 判定は lease_expires_at > now（queue.ts PROCESSING_LEASE_SEC = 5分 と整合）。 */
-const SCORE_REBUILD_TARGETS = ["top", "list_popular", "recommend"] as const;
+const SCORE_REBUILD_TARGETS = ["top", "list_popular", "recommend_core"] as const;
 type ScoreRebuildTarget = (typeof SCORE_REBUILD_TARGETS)[number];
 
 export type ScoreRebuildEnqueueEnv = {

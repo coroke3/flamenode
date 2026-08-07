@@ -33,7 +33,7 @@ test("videosは詳細を常に再生成し、カード・visibilityの意味あ�
       "list_popular:global",
       "search_index:global",
       "top:global",
-      "recommend:global",
+      "recommend_core:global",
       "youtube_related_blocklist:global",
     ],
   );
@@ -56,7 +56,7 @@ test("videosは詳細を常に再生成し、カード・visibilityの意味あ�
       "list_popular:global",
       "search_index:global",
       "top:global",
-      "recommend:global",
+      "recommend_core:global",
     ],
   );
 
@@ -92,7 +92,7 @@ test("videosは詳細を常に再生成し、カード・visibilityの意味あ�
       "list_popular:global",
       "search_index:global",
       "top:global",
-      "recommend:global",
+      "recommend_core:global",
       "youtube_related_blocklist:global",
     ],
   );

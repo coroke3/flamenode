@@ -118,6 +118,22 @@ test("enqueueComposerFollowUps(users_index) は top/recommend 欠損時に INSER
   }
 });
 
+test("enqueueComposerFollowUps(recommend_core) は recommend 欠損時に INSERT する", async (t) => {
+  const harness = createHarness(t);
+
+  const changed = await enqueueComposerFollowUps(harness.env, "recommend_core");
+
+  assert.equal(changed, true);
+  assert.equal(harness.countRows(), 1);
+
+  const row = harness.readActiveRows()[0];
+  assert.equal(row.target_type, "recommend");
+  assert.equal(row.target_id, "global");
+  assert.equal(row.reason, "recommend_core_follow_up");
+  assert.equal(row.status, "pending");
+  assert.match(row.id, /^srb:recommend:/);
+});
+
 test("enqueueComposerFollowUps は未知 producer で false", async () => {
   const changed = await enqueueComposerFollowUps(createNoChangeEnv(), "unknown_producer");
   assert.equal(changed, false);

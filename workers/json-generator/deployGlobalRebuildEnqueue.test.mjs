@@ -22,7 +22,7 @@ test("deploy 共有 global target 定数と enqueue 契約", () => {
     "users_index",
     "top",
     "top_slot_stats",
-    "recommend",
+    "recommend_core",
     "events_index",
     "youtube_related_blocklist",
     "random_video_pool",

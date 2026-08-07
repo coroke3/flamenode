@@ -12,6 +12,10 @@ import {
   RANDOM_VIDEO_POOL_OBJECT_KEY,
 } from "../publicData/randomVideoPoolCore.ts";
 import {
+  normalizeRecommendCore,
+  RECOMMEND_CORE_OBJECT_KEY,
+} from "../publicData/staticRecommendCore.ts";
+import {
   normalizeYoutubeRelatedBlocklist,
   YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
 } from "../publicData/staticYoutubeRelatedBlocklistCore.ts";
@@ -32,6 +36,7 @@ export const ARTIFACT_SLO_MAX_AGE_SEC = Object.freeze({
   search: STATIC_ARTIFACT_SLO_MAX_AGE_SEC,
   top: STATIC_ARTIFACT_SLO_MAX_AGE_SEC,
   recommend: STATIC_ARTIFACT_SLO_MAX_AGE_SEC,
+  recommend_core: STATIC_ARTIFACT_SLO_MAX_AGE_SEC,
   events_index: STATIC_ARTIFACT_SLO_MAX_AGE_SEC,
   users_index: STATIC_ARTIFACT_SLO_MAX_AGE_SEC,
   related_blocklist: STATIC_ARTIFACT_SLO_MAX_AGE_SEC,
@@ -125,6 +130,18 @@ export const ARTIFACT_SLO_PROBES: readonly ArtifactSloProbe[] = Object.freeze([
     key: "users/index.json",
     requiredKeys: ["generated_at", "items"],
     maxAgeSec: ARTIFACT_SLO_MAX_AGE_SEC.users_index,
+  },
+  {
+    key: RECOMMEND_CORE_OBJECT_KEY,
+    requiredKeys: [
+      "schema_version",
+      "generated_at",
+      "recommended",
+      "latest",
+      "underrated",
+    ],
+    maxAgeSec: ARTIFACT_SLO_MAX_AGE_SEC.recommend_core,
+    allowMissing: true,
   },
   {
     key: "recommend.json",
@@ -232,6 +249,13 @@ function assertArtifactShape(
 
   if (probe.key === "users/index.json") {
     assertArrayField(payload, "items", probe.key);
+    return;
+  }
+
+  if (probe.key === RECOMMEND_CORE_OBJECT_KEY) {
+    if (!normalizeRecommendCore(payload)) {
+      throw new Error(`${probe.key}: malformed recommend core`);
+    }
     return;
   }
 

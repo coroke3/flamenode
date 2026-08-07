@@ -56,7 +56,7 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 
 静的再生成は Queue Consumer / Recovery Cron の各 invocation で **1 target** だけ処理する（`workers/json-generator/queuePolicy.ts` の `MAX_QUEUE_ITEMS_PER_RUN` = 1）。Recovery Cron は毎時最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS`（3）件まで排水する。D1 statement は `workers/shared/d1Budget.ts` の soft limit（40）で停止する。表示用ポリシー正本は `src/lib/operationMode/policy.ts` の `STATIC_REBUILD_ITEMS_PER_RUN` と一致させる。
 
-コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top`、`top_slot_stats`、`recommend`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。`rebuildTop` も `top/slot-stats.v1.json` を同時更新するが、`top_slot_stats` を別途 enqueue して欠損時の保険とする（冪等）。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
+コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top`、`top_slot_stats`、`recommend_core`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。`rebuildRecommendCore` 成功後は follow-up で `recommend` composer が enqueue される。`rebuildTop` も `top/slot-stats.v1.json` を同時更新するが、`top_slot_stats` を別途 enqueue して欠損時の保険とする（冪等）。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
 
 Admin Spreadsheetのうち `videos`、`video_youtube_metadata`、`video_events`、`video_members`、`video_chapters`、`x_users` の変更は、対象の動画詳細・関連動画共有JSON・クリエイター投影をplannerで導出し、data mutation・preview nonce消費・監査・`static_rebuild_queue`を同じD1 atomic batchへ入れる。1回のapplyは11行までとし、plannerは最大16 target（`SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT`）、queue helperは最大4 statementに収める。いずれかを超える場合はデータを書かず、行を分割して再実行する。
 
@@ -86,6 +86,7 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 | クリエイター一覧 | `users/index.json` | `users_index` |
 | Creator 棚（top/recommend） | `users/pickup-creators.v1.json` | `users_index` |
 | クリエイター詳細 | `users/{id}.json` + `users/{id}/works\|collabs/p{n}.json` | `user` |
+| おすすめコア | `recommend/core.v1.json` | `recommend_core` |
 | おすすめ | `recommend.json` | `recommend` |
 | 利用規約 | `rules/current.json` | `rules` |
 | 公開非表示マニフェスト | `visibility/blocked-entities.v1.json` | 初回非公開化まで欠落可（deep health / artifact SLO は bootstrap-ok）。存在時は shape・鮮度を検査 |
@@ -99,7 +100,7 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 
 `sync-jobs` の score-recalc は毎時最大 150 件を 1 SQL で更新する。metadata / video の dirty は即時優先し、それ以外は **72 時間**（`SCORE_FORCE_REFRESH_SEC`）以上 `score_updated_at` が古い公開作品を age-only で強制 refresh する。
 
-score 更新が 1 件以上あった invocation だけ、`ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend` の global target を `score_recalc` / normal で enqueue する。KV `ranking:last-score-rebuild` で throttle する。
+score 更新が 1 件以上あった invocation だけ、`ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend_core` の global target を `score_recalc` / normal で enqueue する。KV `ranking:last-score-rebuild` で throttle する。
 
 | 開催中イベント | throttle 間隔 |
 | --- | ---: |

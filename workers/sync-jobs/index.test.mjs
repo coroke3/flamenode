@@ -19,7 +19,7 @@ test("sync-jobs health は共通Cron Workerからserviceとcommitを返す", () 
   assert.match(sharedSource, /env\.BUILD_COMMIT_SHA/);
 });
 
-test("score変更時はtopとlist_popularとrecommendを重複排除付きで再生成予約する", () => {
+test("score変更時はtopとlist_popularとrecommend_coreを重複排除付きで再生成予約する", () => {
   assert.match(source, /from "\.\/scoreRankingRebuildThrottle\.ts"/);
   assert.match(source, /enqueueScoreDependentRebuilds\(env, signal\)/);
   assert.match(source, /rankingRebuild\.processed/);

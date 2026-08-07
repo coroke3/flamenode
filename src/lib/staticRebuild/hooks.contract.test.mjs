@@ -2,10 +2,40 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [hooks, xid] = await Promise.all([
+const [hooks, xid, enqueue] = await Promise.all([
   readFile(new URL("./hooks.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/xid.ts", import.meta.url), "utf8"),
+  readFile(new URL("./enqueue.ts", import.meta.url), "utf8"),
 ]);
+
+const MAX_STATIC_REBUILD_BATCH_TARGETS = Number(
+  enqueue.match(/MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*(\d+)/)?.[1],
+);
+const MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS = Number(
+  hooks.match(/MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS\s*=\s*(\d+)/)?.[1],
+);
+
+test("動画ステータス変更batchの最悪ケースはMAX_STATIC_REBUILD_BATCH_TARGETS以内", () => {
+  assert.ok(Number.isFinite(MAX_STATIC_REBUILD_BATCH_TARGETS));
+  assert.ok(Number.isFinite(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS));
+  const withoutCreator =
+    1 + // video
+    1 + // youtube_related_blocklist
+    1 + // random_video_pool
+    3 + // list_recent / list_popular / search_index
+    2 + // top / recommend_core
+    MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS;
+  const withCreator =
+    1 + // video
+    1 + // youtube_related_blocklist
+    1 + // random_video_pool
+    3 + // list targets
+    1 + // user
+    1 + // users_index
+    MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS;
+  const worstCase = Math.max(withoutCreator, withCreator);
+  assert.equal(worstCase, MAX_STATIC_REBUILD_BATCH_TARGETS);
+});
 
 test("動画作成はusers_index経由でtop/recommendを間接enqueueする", () => {
   assert.match(hooks, /globalListTargets\("video_create"\)/);

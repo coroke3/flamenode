@@ -11,6 +11,7 @@ const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
   list_recent: "作品一覧（新着）",
   list_popular: "作品一覧（人気）",
   search_index: "検索インデックス",
+  recommend_core: "おすすめコア（動画プール）",
   recommend: "おすすめページ",
   rules: "利用規約",
   youtube_related_blocklist: "YouTube関連blocklist",
@@ -28,6 +29,7 @@ const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
   list_recent: "ページ番号など",
   list_popular: "ページ番号など",
   search_index: "global など固定ID",
+  recommend_core: "global など固定ID",
   recommend: "global など固定ID",
   rules: "global など固定ID",
   youtube_related_blocklist: "global など固定ID",
@@ -70,6 +72,7 @@ export function staticRebuildAdminHref(
     case "users_index":
       return "/user";
     case "recommend":
+    case "recommend_core":
       return "/recommend";
     case "list_recent":
     case "list_popular":

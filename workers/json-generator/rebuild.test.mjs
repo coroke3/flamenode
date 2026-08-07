@@ -370,19 +370,36 @@ test("rebuildUsersIndexはCreator Projectionを使い3 artifactを書く", () =>
   assert.doesNotMatch(usersIndexFn, /SELECT COUNT\(DISTINCT v\.id\)/);
 });
 
-test("rebuildTopとrebuildRecommendは通常pathでR2 pickupを読む", () => {
+test("rebuildTopは通常pathでR2 pickupを読む", () => {
   const topFn = source.match(/async function rebuildTop\(env[\s\S]*?(?=async function )/)?.[0];
-  const recommendFn = source.match(
-    /async function rebuildRecommend[\s\S]*?(?=async function )/,
-  )?.[0];
   assert.ok(topFn);
-  assert.ok(recommendFn);
   assert.doesNotMatch(topFn, /loadPublicCreatorProjectionSources\(env\.DB/);
-  assert.doesNotMatch(recommendFn, /loadPublicCreatorProjectionSources\(env\.DB/);
   assert.match(topFn, /resolvePickupCreatorsWithFallback\(env, 30/);
-  assert.match(recommendFn, /resolvePickupCreatorsWithFallback\(env, 60/);
   assert.doesNotMatch(topFn, /WITH creator_counts AS/);
-  assert.doesNotMatch(recommendFn, /WITH creator_counts AS/);
+});
+
+test("rebuildRecommendCoreはD1 video queryのみでcore artifactを書く", () => {
+  const coreFn = source.match(
+    /async function rebuildRecommendCore\(env[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(coreFn);
+  assert.match(coreFn, /COUNTABLE_PUBLIC_VIDEO_SQL/);
+  assert.match(coreFn, /RECOMMEND_CORE_OBJECT_KEY/);
+  assert.doesNotMatch(coreFn, /resolvePickupCreatorsWithFallback/);
+  assert.doesNotMatch(coreFn, /loadPublicCreatorProjectionSources\(env\.DB/);
+});
+
+test("rebuildRecommend composerはR2 coreとpickup creatorsのみでrecommend.jsonを書く", () => {
+  const recommendFn = source.match(
+    /async function rebuildRecommend\(env[\s\S]*?(?=async function )/,
+  )?.[0];
+  assert.ok(recommendFn);
+  assert.match(recommendFn, /loadWorkerR2Json\(env, RECOMMEND_CORE_OBJECT_KEY/);
+  assert.match(recommendFn, /normalizeRecommendCore/);
+  assert.match(recommendFn, /recommend_core_required_for_recommend_composer/);
+  assert.match(recommendFn, /resolvePickupCreatorsWithFallback\(env, 60/);
+  assert.doesNotMatch(recommendFn, /COUNTABLE_PUBLIC_VIDEO_SQL/);
+  assert.doesNotMatch(recommendFn, /loadPublicCreatorProjectionSources\(env\.DB/);
 });
 
 test("rebuildTopのPromise.all分割代入はpublicEventCountを含む", () => {
@@ -674,6 +691,10 @@ test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async
 
 test("rebuildUsersIndex成功後にtop/recommend follow-upをenqueueする", () => {
   assert.match(source, /case "users_index":[\s\S]*enqueueComposerFollowUps/);
+});
+
+test("rebuildRecommendCore成功後にrecommend composer follow-upをenqueueする", () => {
+  assert.match(source, /case "recommend_core":[\s\S]*enqueueComposerFollowUps\(env, "recommend_core"\)/);
 });
 
 test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {

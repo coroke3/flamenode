@@ -90,6 +90,11 @@ import {
   topSlotStatsArtifactByteLength,
 } from "../../src/lib/publicData/staticTopSlotStatsCore.ts";
 import {
+  normalizeRecommendCore,
+  RECOMMEND_CORE_OBJECT_KEY,
+  RECOMMEND_CORE_SCHEMA_VERSION,
+} from "../../src/lib/publicData/staticRecommendCore.ts";
+import {
   pickHeroEvents,
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
@@ -288,6 +293,10 @@ export async function rebuildTarget(
     case "list_popular":
       await rebuildListPopular(env, signal);
       break;
+    case "recommend_core":
+      await rebuildRecommendCore(env, signal);
+      followUpPending = await enqueueComposerFollowUps(env, "recommend_core");
+      break;
     case "recommend":
       await rebuildRecommend(env, signal);
       break;
@@ -304,7 +313,7 @@ export async function rebuildTarget(
       throw new Error(`Unknown target_type: ${targetType}`);
   }
   throwIfAborted(signal);
-  if (["top", "top_slot_stats", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
+  if (["top", "top_slot_stats", "list_recent", "list_popular", "events_index", "search_index", "users_index", "recommend_core", "recommend", "rules", "youtube_related_blocklist", "random_video_pool"].includes(targetType)) {
     const keys: Record<string, string | string[]> = {
       top: "top.json",
       top_slot_stats: TOP_SLOT_STATS_OBJECT_KEY,
@@ -313,6 +322,7 @@ export async function rebuildTarget(
       events_index: "events/index.json",
       search_index: "search-index-lite.json",
       users_index: [USERS_INDEX_OBJECT_KEY, PUBLIC_X_ICON_MAP_OBJECT_KEY, PICKUP_CREATORS_OBJECT_KEY],
+      recommend_core: RECOMMEND_CORE_OBJECT_KEY,
       recommend: "recommend.json",
       rules: "rules/current.json",
       youtube_related_blocklist: YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
@@ -2163,7 +2173,7 @@ async function rebuildRules(env: Env, signal?: RebuildSignal): Promise<void> {
   );
 }
 
-async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void> {
+async function rebuildRecommendCore(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
   const [recommended, latest, underrated] = await Promise.all([
@@ -2191,15 +2201,39 @@ async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void>
   ]);
 
   throwIfAborted(signal);
+  await putJson(
+    env,
+    RECOMMEND_CORE_OBJECT_KEY,
+    {
+      schema_version: RECOMMEND_CORE_SCHEMA_VERSION,
+      generated_at: now,
+      recommended: recommended.results ?? [],
+      latest: latest.results ?? [],
+      underrated: underrated.results ?? [],
+    },
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.recommend),
+    { targetType: "recommend_core", targetId: "global" },
+    signal,
+  );
+}
+
+async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const corePayload = await loadWorkerR2Json(env, RECOMMEND_CORE_OBJECT_KEY, signal);
+  const core = normalizeRecommendCore(corePayload);
+  if (!core) {
+    throw new Error("recommend_core_required_for_recommend_composer");
+  }
+  throwIfAborted(signal);
   const creators = await resolvePickupCreatorsWithFallback(env, 60, "rebuildRecommend", signal);
   await putJson(
     env,
     "recommend.json",
     {
-      generated_at: now,
-      recommended: recommended.results ?? [],
-      latest: latest.results ?? [],
-      underrated: underrated.results ?? [],
+      generated_at: core.generatedAt,
+      recommended: core.recommended,
+      latest: core.latest,
+      underrated: core.underrated,
       creators,
     },
     "public, max-age=300, stale-while-revalidate=1800",

@@ -7,6 +7,7 @@ export const GLOBAL_STATIC_REBUILD_TARGET_TYPES = new Set([
   "events_index",
   "search_index",
   "users_index",
+  "recommend_core",
   "recommend",
   "rules",
   "youtube_related_blocklist",

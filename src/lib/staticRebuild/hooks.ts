@@ -20,7 +20,7 @@ function uniqueEventIds(primary: string | null | undefined, ids: readonly string
   return [...unique];
 }
 
-/** list_recent / list_popular / search_index。top・recommend・users_index は含めない。 */
+/** list_recent / list_popular / search_index。top・recommend_core・users_index は含めない。 */
 function globalListTargets(
   reason: string,
   searchPriority?: StaticRebuildPriority,
@@ -37,7 +37,7 @@ function globalListTargets(
   ];
 }
 
-/** 公開カード変更時に list / search / top / recommend へ波及するターゲット。 */
+/** 公開カード変更時に list / search / top / recommend_core へ波及するターゲット。 */
 export function buildVideoCardChangeFanOutTargets(opts: {
   reason: string;
   requestedByUserId?: string | null;
@@ -73,7 +73,7 @@ function topRecommendTargets(
       ...(priority ? { priority } : {}),
     },
     {
-      targetType: "recommend",
+      targetType: "recommend_core",
       targetId: "global",
       reason,
       ...(priority ? { priority } : {}),

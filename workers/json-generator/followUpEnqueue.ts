@@ -20,11 +20,14 @@ const COMPOSER_FOLLOW_UP_BY_PRODUCER: Readonly<
     ],
     reason: "users_index_follow_up",
   },
+  recommend_core: {
+    targets: [{ targetType: "recommend", targetId: "global" }],
+    reason: "recommend_core_follow_up",
+  },
 };
 
 // Future producer→composer continuations (not wired yet):
 // - top_recommended → top
-// - recommend_core → recommend
 // - event_base / event_slots → event
 // - top_slot_stats → top
 

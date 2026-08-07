@@ -127,14 +127,14 @@ Google Cloud Consoleの日次quotaが標準10,000以外の場合は、`workers/s
 - YouTube metadataの`synced_at`は最後にpublic/unlistedとして正常取得した時刻。`failed`時の再同期期限は`updated_at`を使う。
 - private / missing ではview_count・duration・公開時synced_atを上書きしない。適格性変更時と日次整合で`youtube_related_blocklist`を再生成する。
 - スコアは1 SQLで最大150件更新し、作品ごとのUPDATE loopを禁止する。72時間以上未更新の公開作品は age-only で強制 refresh する（`SCORE_FORCE_REFRESH_SEC`）。
-- score 更新後は `ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend` を throttle 付きで enqueue する（開催中イベントあり 1h / なし 3h。KV `ranking:last-score-rebuild`）。
+- score 更新後は `ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend_core` を throttle 付きで enqueue する（開催中イベントあり 1h / なし 3h。KV `ranking:last-score-rebuild`）。
 - 静的生成は1 invocationで1 targetだけ処理する。deploy 後の `BUILD_COMMIT_SHA` 変化時は Recovery Cron が共有 global target を high enqueue する（`static:last_generator_commit` で重複抑制）。
 - JSON生成対象は必ずSQL側の`LIMIT`を持ち、無制限全件取得を行わない。
 - 初回backlog処理中も通知を独立Workerで維持する。
 
 YouTube metadata同期だけの理論最大は、sync-jobs 1回あたり通常4 units（全batchで1回再試行した場合は最大8 units）。残り予算は他のYouTube API処理と共有し、合計8,000 units/dayを超えない。
 
-静的再生成queueのcanonical targetは`top`、`events_index`、`event`、`video`、`user`、`users_index`、`list_recent`、`list_popular`、`search_index`、`recommend`、`rules`、`youtube_related_blocklist`、`random_video_pool`だけである。旧別名・未知値のruntime正規化やno-op成功処理は行わず、有限retry後に`failed`として運用画面へ残す。
+静的再生成queueのcanonical targetは`top`、`top_slot_stats`、`events_index`、`event`、`video`、`user`、`users_index`、`list_recent`、`list_popular`、`search_index`、`recommend_core`、`recommend`、`rules`、`youtube_related_blocklist`、`random_video_pool`だけである。旧別名・未知値のruntime正規化やno-op成功処理は行わず、有限retry後に`failed`として運用画面へ残す。
 
 `content-jobs`（json-generator）は Queue Consumer で wake 駆動し、Recovery Cron は1時間ごとに failed/expired 回復と pending 処理を行う。`src/lib/operationMode/policy.ts`の`STATIC_REBUILD_ITEMS_PER_RUN`と`workers/json-generator/queuePolicy.ts`の`MAX_QUEUE_ITEMS_PER_RUN`は同じ値（1）を正本とする。
 
