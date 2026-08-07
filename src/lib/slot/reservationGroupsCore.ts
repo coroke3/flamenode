@@ -21,6 +21,7 @@ export type SlotReservationGroupCandidate = {
 export type SlotReservationAmbiguity =
   | "mixed_auth_user"
   | "mixed_x_user"
+  | "inconsistent_x_user"
   | "mixed_display_name"
   | "cross_event"
   | "reserved_without_group"
@@ -42,6 +43,16 @@ function uniqueNonEmpty(values: readonly (string | null | undefined)[]): string[
         .filter((value) => value.length > 0),
     ),
   ];
+}
+
+function analyzeXUserIdentity(
+  members: readonly SlotReservationSubjectRow[],
+): "consistent" | "mixed_x_user" | "inconsistent_x_user" {
+  const xUsers = uniqueNonEmpty(members.map((row) => row.x_user_id));
+  const hasNullOrEmpty = members.some((row) => !row.x_user_id?.trim());
+  if (xUsers.length > 1) return "mixed_x_user";
+  if (xUsers.length === 1 && hasNullOrEmpty) return "inconsistent_x_user";
+  return "consistent";
 }
 
 export function collectSlotReservationAmbiguities(
@@ -104,10 +115,10 @@ export function collectSlotReservationAmbiguities(
         eventId: eventIds[0] ?? null,
       });
     }
-    const xUsers = uniqueNonEmpty(members.map((row) => row.x_user_id));
-    if (xUsers.length > 1) {
+    const xIdentity = analyzeXUserIdentity(members);
+    if (xIdentity !== "consistent") {
       reports.push({
-        kind: "mixed_x_user",
+        kind: xIdentity,
         slotIds: members.map((row) => row.id),
         reservationGroupId: groupId,
         eventId: eventIds[0] ?? null,
@@ -155,11 +166,16 @@ export function buildSlotReservationGroupCandidates(
     const authUsers = uniqueNonEmpty(
       members.map((row) => row.reserved_by_user_id),
     );
-    const xUsers = uniqueNonEmpty(members.map((row) => row.x_user_id));
+    const xIdentity = analyzeXUserIdentity(members);
     const displayNames = uniqueNonEmpty(members.map((row) => row.display_name));
-    if (authUsers.length > 1 || xUsers.length > 1 || displayNames.length > 1) {
+    if (
+      authUsers.length > 1 ||
+      xIdentity !== "consistent" ||
+      displayNames.length > 1
+    ) {
       continue;
     }
+    const xUsers = uniqueNonEmpty(members.map((row) => row.x_user_id));
     candidates.push({
       groupId,
       eventId: eventIds[0]!,

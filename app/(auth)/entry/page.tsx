@@ -126,7 +126,10 @@ export default async function EntryPage({
             eq(slotsTable.reserved_by_user_id, sessionUser.id),
           )!,
         )
-      : eq(slotsTable.reserved_by_user_id, sessionUser.id);
+      : and(
+          isNull(slotsTable.x_user_id),
+          eq(slotsTable.reserved_by_user_id, sessionUser.id),
+        )!;
     reservedSlots = await db
       .select({
         id: slotsTable.id,

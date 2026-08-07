@@ -9,6 +9,7 @@ import { AccountMenu } from "@/components/user/AccountMenu";
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import type { AccountSummaryResponse } from "@/lib/account/summary";
 import type { PublicHeaderUser } from "@/components/layout/PublicHeader";
+import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
 
 const MOBILE_NAV_ITEMS = [
   { href: "/list", label: "動画", iconName: "grid" as const },
@@ -45,6 +46,15 @@ export function usePublicAccountSummary(
   const [user, setUser] = React.useState<PublicHeaderUser | null>(null);
   const [loading, setLoading] = React.useState(enabled);
   const [unavailable, setUnavailable] = React.useState(false);
+  const [refreshNonce, setRefreshNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!enabled) return;
+    const onActiveXChanged = () => setRefreshNonce((current) => current + 1);
+    window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
+    return () =>
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
+  }, [enabled]);
 
   React.useEffect(() => {
     if (!enabled) {
@@ -88,7 +98,7 @@ export function usePublicAccountSummary(
     return () => {
       cancelled = true;
     };
-  }, [enabled, preserveLoggedInOnFailure]);
+  }, [enabled, preserveLoggedInOnFailure, refreshNonce]);
 
   return { user, loading, unavailable };
 }
@@ -264,7 +274,7 @@ export function PublicAccountIsland({
               ? `@${activeEntry.x_user_id}`
               : "Active X ID未選択"}
           </span>
-          <small>現在の投稿・いいね・コメント主体</small>
+          <small>現在の投稿・コメントの活動名義</small>
         </div>
       </div>
 

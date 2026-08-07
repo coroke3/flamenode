@@ -122,3 +122,17 @@ test("単発・更新・CSVは生時刻を共通validatorと動画尺で検証�
   assert.match(composer, /fd\.set\("chapter_time", timeStr\.trim\(\)\)/);
   assert.doesNotMatch(composer, /Number\.isFinite\(n\) \? n : 0/);
 });
+
+test("createChapter/createChaptersBulk のみ active_x_snapshot を検証する", () => {
+  assert.equal(
+    (action.match(/validateActiveXSnapshot\(/g) ?? []).length,
+    2,
+  );
+  assert.match(createAction, /active_x_snapshot/);
+  assert.match(actionSection(
+    "export async function createChaptersBulk",
+    "/**",
+  ), /active_x_snapshot/);
+  assert.doesNotMatch(updateAction, /validateActiveXSnapshot/);
+  assert.doesNotMatch(deleteAction, /validateActiveXSnapshot/);
+});

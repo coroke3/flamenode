@@ -24,9 +24,13 @@ import {
 import { formatUnix } from "@/lib/utils/format";
 import { buildAccentVars } from "@/lib/theme/accent";
 import { Icon } from "@/components/ui/Icon";
-import { SlotGrid, type SlotRow } from "@/components/event/SlotGrid";
+import { SlotGrid } from "@/components/event/SlotGrid";
 import { SlotStatusBoard } from "@/components/event/SlotStatusBoard";
 import { buildPageMetadata } from "@/lib/seo";
+import {
+  canActAsSlotActor,
+  resolveSlotViewerRelation,
+} from "@/lib/slots/slotIdentityCore";
 
 export const dynamic = "force-dynamic";
 
@@ -127,13 +131,19 @@ export default async function EventSlotsPage({
     now > event.entry_end_time;
 
   const groupKeys = new Map<string, string>();
-  const slotsForUi: SlotRow[] = slotRows.map((slot) => {
-    const isOwnedByViewer = Boolean(
-      viewer &&
-        ((viewer.active_x_user_id &&
-          slot.x_user_id === viewer.active_x_user_id) ||
-          slot.reserved_by_user_id === viewer.id),
-    );
+  const slotsForUi = slotRows.map((slot) => {
+    const viewerRelation = resolveSlotViewerRelation({
+      reservedByUserId: slot.reserved_by_user_id,
+      slotXUserId: slot.x_user_id,
+      authUserId: viewer?.id ?? null,
+      activeXId: viewer?.active_x_user_id ?? null,
+    });
+    const isOwnedByViewer = canActAsSlotActor(viewerRelation);
+    const showDisplayName =
+      viewerRelation === "active" ||
+      viewerRelation === "unassigned" ||
+      viewerRelation === "account_other" ||
+      event.slot_visibility_mode === "public_name";
     let groupKey: string | null = null;
     const exposeGroupKey =
       isOwnedByViewer || event.slot_visibility_mode === "public_name";
@@ -150,11 +160,9 @@ export default async function EventSlotsPage({
       start_time: slot.start_time,
       sort_order: slot.sort_order,
       status: slot.status,
-      display_name:
-        isOwnedByViewer || event.slot_visibility_mode === "public_name"
-          ? slot.display_name
-          : null,
+      display_name: showDisplayName ? slot.display_name : null,
       is_owned_by_viewer: isOwnedByViewer,
+      viewer_relation: viewerRelation,
       group_key: groupKey,
       x_user_id: isOwnedByViewer ? slot.x_user_id : null,
     };

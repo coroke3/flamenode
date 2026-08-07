@@ -11,6 +11,10 @@ import {
   parseChapterBulkCsv,
 } from "@/lib/actions/chapterLimits";
 import { validateChapterTime } from "@/lib/utils/chapterTime";
+import { normalizeXId } from "@/lib/utils/xid";
+import {
+  ACTIVE_X_BEFORE_SWITCH_EVENT,
+} from "@/lib/client/activeXSwitchEvents";
 import { usePlayerTimeSnapshot } from "./usePlayerTime";
 
 interface ChapterComposerProps {
@@ -39,6 +43,8 @@ interface ChapterComposerProps {
     label: string;
     pendingPublicReflection?: boolean;
   }) => void;
+  /** チャプター投稿時の active_x_snapshot 用。 */
+  activeXId?: string | null;
 }
 
 function formatTimeInput(seconds: number): string {
@@ -75,6 +81,7 @@ export function ChapterComposer({
   presentation = "card",
   onCancel,
   onSuccess,
+  activeXId,
 }: ChapterComposerProps): React.ReactElement {
   const isInlineSheet = presentation === "inline-sheet";
   const router = useRouter();
@@ -94,6 +101,30 @@ export function ChapterComposer({
   const [bulkBusy, startBulkTransition] = React.useTransition();
   const [bulkMessage, setBulkMessage] = React.useState<string | null>(null);
   const [bulkErrors, setBulkErrors] = React.useState<string[]>([]);
+  const normalizedActiveXSnapshot = normalizeXId(activeXId ?? "");
+  const initialTimeFormatted = formatTimeInput(initialTime);
+
+  const isComposerDirty = React.useCallback((): boolean => {
+    if (bulkCsv.trim().length > 0) return true;
+    if (label.trim().length > 0 || note.trim().length > 0) return true;
+    if (isInlineSheet && timeStr.trim() !== initialTimeFormatted) return true;
+    return false;
+  }, [bulkCsv, initialTimeFormatted, isInlineSheet, label, note, timeStr]);
+
+  React.useEffect(() => {
+    const handler = (event: Event) => {
+      if (!isComposerDirty()) return;
+      const confirmed = window.confirm(
+        "入力中のチャプター情報があります。Active X ID を切り替えると内容が失われます。切り替えますか？",
+      );
+      if (!confirmed) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
+    return () =>
+      window.removeEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
+  }, [isComposerDirty]);
 
   React.useEffect(() => {
     if (!isInlineSheet || !active) return;
@@ -124,6 +155,9 @@ export function ChapterComposer({
     const fd = new FormData();
     fd.set("video_id", videoId);
     fd.set("csv", bulkCsv);
+    if (normalizedActiveXSnapshot) {
+      fd.set("active_x_snapshot", normalizedActiveXSnapshot);
+    }
     startBulkTransition(async () => {
       const r = await createChaptersBulk(fd);
       const baseMessage = r.message ?? null;
@@ -170,6 +204,9 @@ export function ChapterComposer({
     fd.set("visibility", isPublic ? "public" : "private");
     fd.set("marker_kind", "chapter");
     fd.set("show_on_player_bar", "0");
+    if (normalizedActiveXSnapshot) {
+      fd.set("active_x_snapshot", normalizedActiveXSnapshot);
+    }
     startTransition(async () => {
       const r = await createChapter(fd);
       if (!r.ok) {

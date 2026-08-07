@@ -864,6 +864,7 @@ function StaticVideoDetailView({
             canPost={viewerXApproved}
             loginHref={loginHref}
             settingsHref={settingsHref}
+            activeXId={viewerActiveX}
           />
 
           <section

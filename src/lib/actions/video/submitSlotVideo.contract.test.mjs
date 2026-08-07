@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const source = await readFile(new URL("./submitSlotVideo.ts", import.meta.url), "utf8");
+
+test("submitSlotVideo は ID 単独取得後に relation と snapshot を先に検証する", () => {
+  const fnStart = source.indexOf("export async function submitSlotVideo");
+  const fnBody = source.slice(fnStart);
+  const slotLoad = fnBody.indexOf('eq(slots.id, slotId)');
+  const relationCheck = fnBody.indexOf("const slotRelation = resolveSlotViewerRelation");
+  const snapshotCheck = fnBody.indexOf("validateActiveXSnapshot");
+  const parseForm = fnBody.indexOf("parseVideoForm");
+  const iconResolve = fnBody.indexOf("resolveVideoCreatorIcon");
+
+  assert.ok(slotLoad >= 0);
+  assert.ok(relationCheck > slotLoad, "relation 判定は slot 取得の後");
+  assert.ok(snapshotCheck > relationCheck, "snapshot 検証は relation 判定の後");
+  assert.ok(parseForm > snapshotCheck, "フォーム解析は snapshot 検証の後");
+  assert.ok(iconResolve > snapshotCheck, "snapshot 検証は icon 解決より前");
+});
+
+test("submitSlotVideo は group を SQL フィルタせず identity で拒否する", () => {
+  assert.match(source, /resolveSlotGroupIdentity/);
+  assert.match(source, /canActAsSlotActor/);
+  assert.doesNotMatch(source, /isNull\(slots\.x_user_id\)/);
+  assert.match(source, /x_user_id: after\.x_user_id/);
+  assert.match(source, /groupIdentity\.adoptNullRows/);
+});
+
+test("submitSlotVideo は account_other/none を漏洩しない一般メッセージで拒否する", () => {
+  assert.match(
+    source,
+    /slotRelation === "account_other" \|\| slotRelation === "none"[\s\S]*?SLOT_SUBMIT_REJECT_MESSAGE/,
+  );
+});

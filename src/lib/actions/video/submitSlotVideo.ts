@@ -2,10 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -25,7 +26,11 @@ import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectio
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { generateId } from "@/lib/utils/id";
-import { normalizeXId } from "@/lib/utils/xid";
+import {
+  canActAsSlotActor,
+  resolveSlotGroupIdentity,
+  resolveSlotViewerRelation,
+} from "@/lib/slots/slotIdentityCore";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import {
   appendVideoAtomicWritePlan,
@@ -64,11 +69,14 @@ import {
 import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 import { MAX_SLOTS_PER_VIDEO } from "@/lib/slots/limits";
-import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 import {
   areSlotsInSamePart,
   sortSlotsChronologically,
 } from "@/lib/utils/slotGroupingCore";
+
+const SLOT_SUBMIT_REJECT_MESSAGE = "枠が見つかりません。";
+const SLOT_GROUP_REJECT_MESSAGE =
+  "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";
 
 export async function submitSlotVideo(formData: FormData): Promise<VideoActionResult> {
   const guard = await writeGuard({
@@ -80,6 +88,35 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   const userId = sessionUser.id;
   const slotId = String(formData.get("slot_id") ?? "");
   if (!slotId) return { ok: false, message: "枠IDがありません。" };
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DBに接続できません。" };
+
+  const slotRow = (
+    await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
+  )[0];
+  if (!slotRow) return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+
+  const slotRelation = resolveSlotViewerRelation({
+    reservedByUserId: slotRow.reserved_by_user_id,
+    slotXUserId: slotRow.x_user_id,
+    authUserId: userId,
+    activeXId: guard.activeXId,
+  });
+  if (slotRelation === "account_other" || slotRelation === "none") {
+    return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+  }
+
+  const snapshotCheck = validateActiveXSnapshot({
+    submittedSnapshot: String(formData.get("active_x_snapshot") ?? ""),
+    currentActiveXId: guard.activeXId,
+  });
+  if (!snapshotCheck.ok) return { ok: false, message: snapshotCheck.message };
+
+  const activeX = guard.activeXId;
+  if (!activeX || !guard.approvedXIds.includes(activeX)) {
+    return { ok: false, message: "承認済みのX IDを選択してください。" };
+  }
+
   const parsed = parseVideoForm(Object.fromEntries(formData), { youtubeRequired: false });
   if (!parsed.ok) return parsed;
   // FormData presence is significant for re-submission: an omitted field keeps
@@ -89,20 +126,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   const socialLinksFieldPresent = formData.has("other_social_links");
   const youtubeChannelFieldPresent = formData.has("youtube_channel_url");
   const submittedYoutubeId = extractYoutubeId(parsed.data.youtube_url) ?? null;
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
-
-  const requestedX = normalizeXId(sessionUser.active_x_user_id);
-  const slotOwnerWhere = requestedX
-    ? or(
-        eq(slots.x_user_id, requestedX),
-        and(eq(slots.reserved_by_user_id, userId), isNull(slots.x_user_id))!,
-      )
-    : eq(slots.reserved_by_user_id, userId);
-  const slotRow = (
-    await db.select().from(slots).where(and(eq(slots.id, slotId), slotOwnerWhere)!).limit(1)
-  )[0];
-  if (!slotRow) return { ok: false, message: "枠が見つかりません。" };
 
   const videoId = slotRow.video_id ?? generateId("v");
   const existingVideo = slotRow.video_id
@@ -110,14 +133,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     : null;
   if (slotRow.video_id && !existingVideo) {
     return { ok: false, message: "枠に紐づく作品が見つかりません。" };
-  }
-  const slotX = normalizeXId(slotRow.x_user_id);
-  const activeX = slotX || normalizeXId(requestedX || slotRow.x_user_id);
-  if (!activeX || !guard.approvedXIds.includes(activeX)) {
-    return { ok: false, message: "承認済みのX IDを選択してください。" };
-  }
-  if (slotX && slotX !== normalizeXId(requestedX || slotRow.x_user_id)) {
-    return { ok: false, message: "投稿主体のX IDは予約時のIDに固定されています。" };
   }
 
   const stageFields = await getStagePermissionFieldsForEvents(db, [slotRow.event_id]);
@@ -167,8 +182,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     ? and(
         eq(slots.reservation_group_id, slotRow.reservation_group_id),
         eq(slots.event_id, slotRow.event_id),
-        eq(slots.reserved_by_user_id, userId),
-        slotRow.x_user_id ? eq(slots.x_user_id, slotRow.x_user_id) : isNull(slots.x_user_id),
       )!
     : eq(slots.id, slotRow.id);
   const submittedSlots = await db
@@ -195,6 +208,34 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       return { ok: false, message: "連続していない枠をまとめて提出できません。" };
     }
   }
+
+  const groupIdentity = resolveSlotGroupIdentity({
+    reservedByUserIds: submittedSlots.map((row) => row.reserved_by_user_id),
+    slotXUserIds: submittedSlots.map((row) => row.x_user_id),
+    authUserId: userId,
+    activeXId: guard.activeXId,
+  });
+  if (!groupIdentity.ok) {
+    if (
+      groupIdentity.reason === "mixed_non_null_x" ||
+      groupIdentity.reason === "different_active_x"
+    ) {
+      return { ok: false, message: SLOT_GROUP_REJECT_MESSAGE };
+    }
+    return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+  }
+  for (const row of submittedSlots) {
+    const relation = resolveSlotViewerRelation({
+      reservedByUserId: row.reserved_by_user_id,
+      slotXUserId: row.x_user_id,
+      authUserId: userId,
+      activeXId: guard.activeXId,
+    });
+    if (!canActAsSlotActor(relation)) {
+      return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
+    }
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const previousIconUrl = existingVideo?.creator_icon_url ?? null;
   const iconResolved = await resolveVideoCreatorIcon({
@@ -336,13 +377,31 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       actorUserId: userId,
     }));
     for (const row of submittedSlots) {
+      const adoptedXUserId =
+        groupIdentity.adoptNullRows &&
+        row.x_user_id === null &&
+        groupIdentity.targetXId !== null
+          ? groupIdentity.targetXId
+          : row.x_user_id;
       const after = {
         ...row,
         status: "submitted" as const,
         video_id: videoId,
+        x_user_id: adoptedXUserId,
         updated_at: now,
         version: row.version + 1,
       };
+      plan.statements.push(db.update(slots).set({
+        status: after.status,
+        video_id: after.video_id,
+        x_user_id: after.x_user_id,
+        updated_at: after.updated_at,
+        version: after.version,
+      }).where(and(
+        eq(slots.id, row.id),
+        expectedRowCondition({ expectedCurrent: row }),
+      )!));
+      plan.expectedChanges.push(1);
       plan.audits.push({
         table_name: "slots",
         target_id: row.id,
@@ -355,17 +414,6 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         strict: true,
       });
     }
-    plan.statements.push(
-      db.update(slots).set({
-        status: "submitted",
-        video_id: videoId,
-        updated_at: now,
-        version: sql`${slots.version} + 1`,
-      }).where(
-        versionedSlotWhere(slotRow.event_id, submittedSlots, "reserved"),
-      ),
-    );
-    plan.expectedChanges.push(submittedSlots.length);
 
     let notificationWakeSource: "web" | undefined;
     if (!existingVideo) {

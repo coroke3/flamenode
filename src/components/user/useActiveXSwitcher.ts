@@ -4,6 +4,10 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { setActiveXId } from "@/lib/actions/xid";
 import {
+  dispatchActiveXChanged,
+  dispatchBeforeActiveXSwitch,
+} from "@/lib/client/activeXSwitchEvents";
+import {
   normalizeXIdEntries,
   type XIdEntry,
 } from "@/lib/xid/entries";
@@ -70,13 +74,25 @@ export function useActiveXSwitcher({
         return;
       }
 
+      const fromXId = activeId;
+      const toXId = entry.x_user_id;
+
+      if (
+        !dispatchBeforeActiveXSwitch({
+          fromXId,
+          toXId,
+        })
+      ) {
+        return;
+      }
+
       const previousActiveId = activeId;
-      setActiveId(entry.x_user_id);
+      setActiveId(toXId);
 
       const formData = new FormData();
       formData.set(
         "x_user_id",
-        entry.x_user_id,
+        toXId,
       );
 
       startTransition(async () => {
@@ -92,7 +108,11 @@ export function useActiveXSwitcher({
           return;
         }
 
-        onSwitch?.(entry.x_user_id);
+        dispatchActiveXChanged({
+          fromXId,
+          toXId,
+        });
+        onSwitch?.(toXId);
         onSuccess?.();
         router.refresh();
       });

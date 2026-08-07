@@ -33,6 +33,9 @@ import {
 } from "@/lib/video/formSettings";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
 import {
+  ACTIVE_X_BEFORE_SWITCH_EVENT,
+} from "@/lib/client/activeXSwitchEvents";
+import {
   MAX_ATOMIC_VIDEO_EVENTS,
   MAX_ATOMIC_VIDEO_SOFTWARES,
 } from "@/lib/video/atomicLimits";
@@ -123,6 +126,8 @@ interface VideoFormProps {
   softwareSuggestions?: string[];
   xIdOptions?: XIdOption[];
   activeXId?: string | null;
+  /** free/slot 提出時の active_x_snapshot 用。正規化済み Active X ID。 */
+  activeXSnapshot?: string | null;
   /**
    * 編集権限がない section の key 一覧。
    * 指定された section は opacity / pointer-events で不活性化され、
@@ -217,6 +222,7 @@ export function VideoForm({
   softwareSuggestions = [],
   xIdOptions = [],
   activeXId,
+  activeXSnapshot,
   disabledSections,
   disabledFields,
   submitBlockedReason,
@@ -336,8 +342,26 @@ export function VideoForm({
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, pending]);
 
+  React.useEffect(() => {
+    const handler = (event: Event) => {
+      if (!dirty || pending) return;
+      const confirmed = window.confirm(
+        "入力中の作品情報があります。Active X ID を切り替えると内容が失われます。切り替えますか？",
+      );
+      if (!confirmed) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
+    return () =>
+      window.removeEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
+  }, [dirty, pending]);
+
   const normalizedInitialXId = normalizeXId(initial.creator_x_user_id || activeXId || "");
   const normalizedActiveXId = normalizeXId(activeXId || "");
+  const normalizedActiveXSnapshot = normalizeXId(
+    activeXSnapshot ?? activeXId ?? "",
+  );
   const hasSelectableXIds = xIdOptions.length > 0;
   const initialIsSelectable = xIdOptions.some(
     (opt) => normalizeXId(opt.id) === normalizedInitialXId,
@@ -633,6 +657,13 @@ export function VideoForm({
     >
       {slotId ? <input type="hidden" name="slot_id" value={slotId} /> : null}
       {videoId ? <input type="hidden" name="video_id" value={videoId} /> : null}
+      {mode === "free" || mode === "slot" ? (
+        <input
+          type="hidden"
+          name="active_x_snapshot"
+          value={normalizedActiveXSnapshot}
+        />
+      ) : null}
       <input type="hidden" name="mode" value={mode} />
       {mode === "edit" && editPrivilegeMode ? (
         <input

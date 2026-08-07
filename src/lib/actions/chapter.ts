@@ -11,6 +11,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { canEditVideo } from "@/lib/auth/ownership";
 
 import { writeGuard } from "@/lib/auth/writeGuard";
+import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { videoChapters, videos, videoYoutubeMetadata } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { validateChapterTime } from "@/lib/utils/chapterTime";
@@ -81,6 +82,12 @@ export async function createChapter(
   if (!activeX) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
   }
+
+  const snapshotCheck = validateActiveXSnapshot({
+    submittedSnapshot: String(formData.get("active_x_snapshot") ?? ""),
+    currentActiveXId: activeX,
+  });
+  if (!snapshotCheck.ok) return { ok: false, message: snapshotCheck.message };
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };
@@ -422,6 +429,12 @@ export async function createChaptersBulk(
   if (!activeX) {
     return { ok: false, message: "X ID を選択してから操作してください。" };
   }
+
+  const snapshotCheck = validateActiveXSnapshot({
+    submittedSnapshot: String(formData.get("active_x_snapshot") ?? ""),
+    currentActiveXId: activeX,
+  });
+  if (!snapshotCheck.ok) return { ok: false, message: snapshotCheck.message };
 
   const db = getDatabase();
   if (!db) return { ok: false, message: "DB に接続できません。" };

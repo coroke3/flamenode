@@ -343,6 +343,13 @@
   color: var(--accent-danger);
 }
 
+.slotIntegrityNotice {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .slotActions {
   position: relative;
   display: inline-flex;

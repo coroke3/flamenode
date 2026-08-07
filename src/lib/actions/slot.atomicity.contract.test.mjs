@@ -127,3 +127,23 @@ test("3行更新+queue+通知+完全auditはD1 Free query/bind上限内", () => 
   assert.ok(maxCasUpdateBinds <= 100);
   assert.ok(maxAuditChunkBinds <= 100);
 });
+
+test("利用者枠操作は slotIdentityCore で Active 一致を判定し authUserControlsXId を使わない", () => {
+  assert.doesNotMatch(source, /authUserControlsXId/);
+  assert.doesNotMatch(source, /ownsSlot/);
+  assert.doesNotMatch(source, /xUserAccountLinks/);
+  assert.match(source, /resolveSlotViewerRelation/);
+  assert.match(source, /canActAsSlotActor/);
+  assert.match(source, /resolveSlotGroupIdentity/);
+  assert.match(source, /loadBoundedGroupStructure/);
+  assert.match(source, /resolveBoundedGroupIdentity/);
+  assert.match(
+    source,
+    /この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。/,
+  );
+  assert.match(
+    source,
+    /relation === "account_other"[\s\S]*?SLOT_ACCOUNT_OTHER_MESSAGE/,
+  );
+  assert.match(source, /adoptNullRowPatch/);
+});

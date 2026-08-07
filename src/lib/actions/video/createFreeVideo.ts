@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
+import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { videos, events, users } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
@@ -63,6 +64,12 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   if (!activeX || !guard.approvedXIds.includes(activeX)) {
     return { ok: false, message: "承認済みのX IDを選択してください。" };
   }
+
+  const snapshotCheck = validateActiveXSnapshot({
+    submittedSnapshot: String(formData.get("active_x_snapshot") ?? ""),
+    currentActiveXId: activeX,
+  });
+  if (!snapshotCheck.ok) return { ok: false, message: snapshotCheck.message };
 
   const parsed = parseVideoForm(Object.fromEntries(formData));
   if (!parsed.ok) return parsed;

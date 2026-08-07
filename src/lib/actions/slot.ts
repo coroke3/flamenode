@@ -17,6 +17,13 @@ import {
   MAX_SLOTS_PER_VIDEO,
   normalizeMaxSlotsPerVideo,
 } from "@/lib/slots/limits";
+import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import {
+  canActAsSlotActor,
+  resolveSlotGroupIdentity,
+  resolveSlotViewerRelation,
+  type SlotViewerRelation,
+} from "@/lib/slots/slotIdentityCore";
 import { buildReleaseGroupDecisions } from "@/lib/slots/userSlotCore";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
 import { buildSlotChangeQueueBatch } from "@/lib/staticRebuild/hooks";
@@ -40,6 +47,9 @@ export interface SlotReserveResult extends PendingPublicReflection {
   groupSize?: number;
   reason?: WriteGuardDenyReason;
 }
+
+const SLOT_ACCOUNT_OTHER_MESSAGE =
+  "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";
 
 function slotMutationOk(
   slotId: string,
@@ -94,6 +104,20 @@ function mutationError(error: unknown): SlotReserveResult {
     "[user-slot] atomic mutation failed",
     error instanceof Error ? error.name : "UnknownError",
   );
+  if (error instanceof Error) {
+    const knownMessages = new Set([
+      SLOT_ACCOUNT_OTHER_MESSAGE,
+      "連続枠に別の利用者または状態が混在しています。",
+      "連続枠の完全な状態を確認できませんでした。",
+      `連続枠が上限 ${MAX_ATOMIC_SLOT_ROWS} 件を超えています。運営へ連絡してください。`,
+      "別の部または連続していない枠はまとめて操作できません。",
+      "原子的に処理できる枠数を超えています。",
+      "連続枠の状態を確定できませんでした。",
+    ]);
+    if (knownMessages.has(error.message)) {
+      return { ok: false, message: error.message };
+    }
+  }
   return {
     ok: false,
     message:
@@ -321,7 +345,49 @@ async function loadEvent(db: DB, eventId: string): Promise<EventRow | null> {
   )[0] ?? null;
 }
 
-async function loadBoundedGroup(db: DB, anchor: SlotRow): Promise<SlotRow[]> {
+function slotViewerRelation(
+  row: SlotRow,
+  userId: string,
+  activeXId: string | null,
+): SlotViewerRelation {
+  return resolveSlotViewerRelation({
+    reservedByUserId: row.reserved_by_user_id,
+    slotXUserId: row.x_user_id,
+    authUserId: userId,
+    activeXId,
+  });
+}
+
+function slotActorDeniedMessage(relation: SlotViewerRelation): string {
+  if (relation === "account_other") return SLOT_ACCOUNT_OTHER_MESSAGE;
+  return "自分が確保した枠のみ操作できます。";
+}
+
+function assertSlotActor(
+  row: SlotRow,
+  userId: string,
+  activeXId: string | null,
+): { ok: true } | { ok: false; message: string } {
+  const relation = slotViewerRelation(row, userId, activeXId);
+  if (!canActAsSlotActor(relation)) {
+    return { ok: false, message: slotActorDeniedMessage(relation) };
+  }
+  return { ok: true };
+}
+
+function groupIdentityError(
+  reason: "different_active_x" | "mixed_non_null_x" | "mixed_auth_user",
+): string {
+  if (reason === "mixed_auth_user") {
+    return "連続枠に別の利用者または状態が混在しています。";
+  }
+  return SLOT_ACCOUNT_OTHER_MESSAGE;
+}
+
+async function loadBoundedGroupStructure(
+  db: DB,
+  anchor: SlotRow,
+): Promise<SlotRow[]> {
   const groupId = anchor.reservation_group_id?.trim() || null;
   if (!groupId) return [anchor];
 
@@ -342,13 +408,53 @@ async function loadBoundedGroup(db: DB, anchor: SlotRow): Promise<SlotRow[]> {
     rows.some(
       (row) =>
         row.event_id !== anchor.event_id ||
-        row.reserved_by_user_id !== anchor.reserved_by_user_id ||
-        row.x_user_id !== anchor.x_user_id,
+        row.reserved_by_user_id !== anchor.reserved_by_user_id,
     )
   ) {
-    throw new Error("連続枠に別の利用者または X ID が混在しています。");
+    throw new Error("連続枠に別の利用者または状態が混在しています。");
   }
   return sortSlotsChronologically(rows);
+}
+
+function resolveBoundedGroupIdentity(
+  rows: readonly SlotRow[],
+  authUserId: string,
+  activeXId: string | null,
+): { targetXId: string | null; adoptNullRows: boolean } {
+  const result = resolveSlotGroupIdentity({
+    reservedByUserIds: rows.map((row) => row.reserved_by_user_id),
+    slotXUserIds: rows.map((row) => row.x_user_id),
+    authUserId,
+    activeXId,
+  });
+  if (!result.ok) {
+    throw new Error(groupIdentityError(result.reason));
+  }
+  return result;
+}
+
+async function loadBoundedGroup(
+  db: DB,
+  anchor: SlotRow,
+  authUserId: string,
+  activeXId: string | null,
+): Promise<{
+  rows: SlotRow[];
+  identity: { targetXId: string | null; adoptNullRows: boolean };
+}> {
+  const rows = await loadBoundedGroupStructure(db, anchor);
+  const identity = resolveBoundedGroupIdentity(rows, authUserId, activeXId);
+  return { rows, identity };
+}
+
+function adoptNullRowPatch(
+  row: SlotRow,
+  identity: { targetXId: string | null; adoptNullRows: boolean },
+): Pick<SlotPatch, "x_user_id"> {
+  if (identity.adoptNullRows && row.x_user_id === null && identity.targetXId !== null) {
+    return { x_user_id: identity.targetXId };
+  }
+  return {};
 }
 
 function orderCondition(row: SlotRow, direction: "forward" | "backward"): SQL {
@@ -451,40 +557,6 @@ function assertAdjacentSequence(rows: readonly SlotRow[], gapSec: number): void 
   }
 }
 
-async function authUserControlsXId(
-  db: DB,
-  authUserId: string,
-  xUserId: string,
-): Promise<boolean> {
-  return Boolean(
-    (
-      await db
-        .select({ x_user_id: xUserAccountLinks.x_user_id })
-        .from(xUserAccountLinks)
-        .where(
-          and(
-            eq(xUserAccountLinks.auth_user_id, authUserId),
-            eq(xUserAccountLinks.x_user_id, xUserId),
-          )!,
-        )
-        .limit(1)
-    )[0],
-  );
-}
-
-async function ownsSlot(
-  db: DB,
-  row: SlotRow,
-  userId: string,
-  activeXId: string | null,
-): Promise<boolean> {
-  if (row.x_user_id) {
-    if (row.x_user_id === activeXId) return true;
-    return authUserControlsXId(db, userId, row.x_user_id);
-  }
-  return row.reserved_by_user_id === userId;
-}
-
 export async function reserveSlot(
   formData: FormData,
 ): Promise<SlotReserveResult> {
@@ -511,8 +583,14 @@ export async function reserveSlot(
     if (!anchor) return { ok: false, message: "枠が見つかりません。" };
     if (anchor.status !== "available") {
       if (isOwnReservedSlot(anchor, guard.user.id)) {
-        const group = await loadBoundedGroup(db, anchor);
-        return slotMutationOk(anchor.id, group.length);
+        const relation = slotViewerRelation(anchor, guard.user.id, guard.activeXId);
+        if (relation === "account_other") {
+          return { ok: false, message: SLOT_ACCOUNT_OTHER_MESSAGE };
+        }
+        if (canActAsSlotActor(relation)) {
+          const group = await loadBoundedGroupStructure(db, anchor);
+          return slotMutationOk(anchor.id, group.length);
+        }
       }
       return { ok: false, message: "この枠はすでに確保されています。" };
     }
@@ -625,8 +703,9 @@ export async function releaseOwnSlot(
   try {
     const anchor = await loadSlot(db, slotId);
     if (!anchor) return { ok: false, message: "枠が見つかりません。" };
-    if (!(await ownsSlot(db, anchor, guard.user.id, guard.activeXId))) {
-      return { ok: false, message: "自分が確保した枠のみ解放できます。" };
+    const actorCheck = assertSlotActor(anchor, guard.user.id, guard.activeXId);
+    if (!actorCheck.ok) {
+      return { ok: false, message: actorCheck.message };
     }
     if (anchor.status !== "reserved") {
       return {
@@ -635,7 +714,12 @@ export async function releaseOwnSlot(
       };
     }
 
-    const groupRows = await loadBoundedGroup(db, anchor);
+    const { rows: groupRows } = await loadBoundedGroup(
+      db,
+      anchor,
+      guard.user.id,
+      guard.activeXId,
+    );
     if (groupRows.some((row) => row.status !== "reserved")) {
       return { ok: false, message: "予約中でない枠を含む連続枠は解放できません。" };
     }
@@ -677,18 +761,26 @@ export async function extendOwnSlotGroup(
   try {
     const anchor = await loadSlot(db, parsed.data.slot_id);
     if (!anchor) return { ok: false, message: "枠が見つかりません。" };
-    if (
-      anchor.status !== "reserved" ||
-      !(await ownsSlot(db, anchor, guard.user.id, guard.activeXId))
-    ) {
-      return { ok: false, message: "自分の予約中の枠のみ拡張できます。" };
+    const actorCheck = assertSlotActor(anchor, guard.user.id, guard.activeXId);
+    if (anchor.status !== "reserved" || !actorCheck.ok) {
+      return {
+        ok: false,
+        message: actorCheck.ok
+          ? "自分の予約中の枠のみ拡張できます。"
+          : actorCheck.message,
+      };
     }
     const event = await loadEvent(db, anchor.event_id);
     if (!event) return { ok: false, message: "イベントが見つかりません。" };
     if (!isAcceptingEntries(event)) {
       return { ok: false, message: "受付中ではないため枠を拡張できません。" };
     }
-    const groupRows = await loadBoundedGroup(db, anchor);
+    const { rows: groupRows, identity } = await loadBoundedGroup(
+      db,
+      anchor,
+      guard.user.id,
+      guard.activeXId,
+    );
     if (groupRows.length + 1 > eventDomainLimit(event)) {
       return { ok: false, message: "連続枠の上限を超えるため拡張できません。" };
     }
@@ -724,47 +816,34 @@ export async function extendOwnSlotGroup(
         message: "この連続枠は別の X ID で確保されているため拡張できません。",
       };
     }
-    // 既存 group の主体を継承。単枠(null)から2枠へ広げるときだけ現セッション X を採用。
-    const inheritedXUserId =
-      groupRows.length > 1 || groupXUserId != null
-        ? groupXUserId
-        : slotXUserId;
 
     const groupId = anchor.reservation_group_id || generateId("sgrp");
+    const targetXId = identity.targetXId ?? slotXUserId;
     const displayName = groupRows[0].display_name;
     const candidatePatch = {
       reserved_by_user_id: guard.user.id,
-      x_user_id: inheritedXUserId,
+      x_user_id: targetXId,
       display_name: displayName,
       reservation_group_id: groupId,
       status: "reserved" as const,
     };
-    const mutations: SlotBulkMutation[] = !anchor.reservation_group_id
-      ? [
-          {
-            rows: [anchor],
-            patch: {
-              reservation_group_id: groupId,
-              x_user_id: inheritedXUserId,
-            },
-            statusGuard: "reserved",
-          },
-          {
-            rows: [candidate],
-            patch: candidatePatch,
-            statusGuard: "available",
-          },
-        ]
-      : [
-          {
-            rows: [candidate],
-            patch: candidatePatch,
-            statusGuard: "available",
-          },
-        ];
     await commitSlotMutationPlan({
       db,
-      mutations,
+      mutations: [
+        ...groupRows.map((row) => ({
+          rows: [row],
+          patch: {
+            reservation_group_id: groupId,
+            ...adoptNullRowPatch(row, identity),
+          },
+          statusGuard: "reserved" as const,
+        })),
+        {
+          rows: [candidate],
+          patch: candidatePatch,
+          statusGuard: "available",
+        },
+      ],
       eventId: anchor.event_id,
       actorUserId: guard.user.id,
       reason: "slot_user_extend",
@@ -815,35 +894,48 @@ export async function mergeOwnSlotGroups(
       return { ok: false, message: "結合対象の隣接枠がありません。" };
     }
     assertAdjacentSequence([left, gap, right], slotPartGapSec(event));
+    const leftActor = assertSlotActor(left, guard.user.id, guard.activeXId);
+    const rightActor = assertSlotActor(right, guard.user.id, guard.activeXId);
     if (
       left.status !== "reserved" ||
       right.status !== "reserved" ||
-      !(await ownsSlot(db, left, guard.user.id, guard.activeXId)) ||
-      !(await ownsSlot(db, right, guard.user.id, guard.activeXId))
+      !leftActor.ok ||
+      !rightActor.ok
     ) {
-      return { ok: false, message: "自分の予約中の隣接枠どうしのみ結合できます。" };
+      return {
+        ok: false,
+        message: !leftActor.ok
+          ? leftActor.message
+          : !rightActor.ok
+            ? rightActor.message
+            : "自分の予約中の隣接枠どうしのみ結合できます。",
+      };
     }
     if (left.x_user_id !== right.x_user_id) {
       return { ok: false, message: "連続枠に別の X ID が混在しているため結合できません。" };
     }
 
-    const leftGroup = await loadBoundedGroup(db, left);
-    const rightGroup = await loadBoundedGroup(db, right);
+    const leftGroup = await loadBoundedGroupStructure(db, left);
+    const rightGroup = await loadBoundedGroupStructure(db, right);
     const byId = new Map<string, SlotRow>();
     for (const row of [...leftGroup, ...rightGroup]) byId.set(row.id, row);
     const reservedRows = sortSlotsChronologically([...byId.values()]);
     for (const row of reservedRows) {
-      if (
-        row.status !== "reserved" ||
-        !(await ownsSlot(db, row, guard.user.id, guard.activeXId))
-      ) {
-        return { ok: false, message: "連続枠に別の利用者または状態が混在しています。" };
+      const actorCheck = assertSlotActor(row, guard.user.id, guard.activeXId);
+      if (row.status !== "reserved" || !actorCheck.ok) {
+        return {
+          ok: false,
+          message: actorCheck.ok
+            ? "連続枠に別の利用者または状態が混在しています。"
+            : actorCheck.message,
+        };
       }
     }
-    const subjectX = reservedRows[0]?.x_user_id ?? null;
-    if (reservedRows.some((row) => row.x_user_id !== subjectX)) {
-      return { ok: false, message: "連続枠に別の X ID が混在しているため結合できません。" };
-    }
+    const identity = resolveBoundedGroupIdentity(
+      reservedRows,
+      guard.user.id,
+      guard.activeXId,
+    );
     if (reservedRows.length + 1 > eventDomainLimit(event)) {
       return { ok: false, message: "連続枠の上限を超えるため結合できません。" };
     }
@@ -853,14 +945,10 @@ export async function mergeOwnSlotGroups(
     );
 
     const groupId = generateId("sgrp");
-    const groupPatch = {
-      display_name: parsed.data.display_name,
-      reservation_group_id: groupId,
-      x_user_id: slotXUserId,
-    };
+    const targetXId = identity.targetXId ?? slotXUserId;
     const gapPatch = {
       reserved_by_user_id: guard.user.id,
-      x_user_id: slotXUserId,
+      x_user_id: targetXId,
       display_name: parsed.data.display_name,
       reservation_group_id: groupId,
       status: "reserved" as const,
@@ -868,11 +956,15 @@ export async function mergeOwnSlotGroups(
     await commitSlotMutationPlan({
       db,
       mutations: [
-        {
-          rows: reservedRows,
-          patch: groupPatch,
-          statusGuard: "reserved",
-        },
+        ...reservedRows.map((row) => ({
+          rows: [row],
+          patch: {
+            display_name: parsed.data.display_name,
+            reservation_group_id: groupId,
+            ...adoptNullRowPatch(row, identity),
+          },
+          statusGuard: "reserved" as const,
+        })),
         {
           rows: [gap],
           patch: gapPatch,
