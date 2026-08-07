@@ -258,13 +258,12 @@ async function processQueueRow(
       const completion = await completeQueueRow(env, row, token, now, signal, metrics);
       return { outcome: completion.outcome, followUpPending: completion.followUpPending };
     }
-    await rebuildTarget(env, row.target_type, row.target_id, signal);
+    const rebuildResult = await rebuildTarget(env, row.target_type, row.target_id, signal);
     throwIfAborted(signal, "static rebuild queue aborted");
-    const usersIndexFollowUp = row.target_type === "users_index";
     const completion = await completeQueueRow(env, row, token, now, signal, metrics);
     return {
       outcome: completion.outcome,
-      followUpPending: usersIndexFollowUp || completion.followUpPending,
+      followUpPending: rebuildResult.followUpPending || completion.followUpPending,
     };
   } catch (error) {
     if (signal?.aborted) throwIfAborted(signal, "static rebuild queue aborted");

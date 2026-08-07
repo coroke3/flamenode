@@ -93,7 +93,7 @@ import {
   pickHeroEvents,
   type HeroEventRow,
 } from "../../src/lib/utils/pickHeroEvents.ts";
-import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
+import { enqueueComposerFollowUps } from "./followUpEnqueue.ts";
 import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
 import { enqueueTopRebuild } from "./topRebuildEnqueue.ts";
 
@@ -245,8 +245,9 @@ export async function rebuildTarget(
   targetType: string,
   targetId: string,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<{ followUpPending: boolean }> {
   throwIfAborted(signal);
+  let followUpPending = false;
   if (env.artifactHashCache) {
     await env.artifactHashCache.preload(
       env.DB,
@@ -282,7 +283,7 @@ export async function rebuildTarget(
       break;
     case "users_index":
       await rebuildUsersIndex(env, signal);
-      await enqueueTopRecommendAfterUsersIndex(env);
+      followUpPending = await enqueueComposerFollowUps(env, "users_index");
       break;
     case "list_popular":
       await rebuildListPopular(env, signal);
@@ -326,6 +327,7 @@ export async function rebuildTarget(
       signal,
     );
   }
+  return { followUpPending };
 }
 
 async function putJson(

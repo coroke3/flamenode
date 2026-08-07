@@ -673,7 +673,7 @@ test("rebuildTopはpublicEventCount由来のstats.public_eventsを返す", async
 });
 
 test("rebuildUsersIndex成功後にtop/recommend follow-upをenqueueする", () => {
-  assert.match(source, /case "users_index":[\s\S]*enqueueTopRecommendAfterUsersIndex/);
+  assert.match(source, /case "users_index":[\s\S]*enqueueComposerFollowUps/);
 });
 
 test("200イベントの公開運営取得はD1 bind上限未満にchunkする", async () => {

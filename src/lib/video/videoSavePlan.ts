@@ -33,6 +33,10 @@ import {
   emptyVideoAtomicWritePlan,
   executeVideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
+import {
+  collectMemberAggregationAffectedXUserIds,
+  extractPreviousPublicMemberXUserIdsFromMembersPlan,
+} from "@/lib/video/memberAggregationFanOut";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { buildVideoCardChangeFanOutTargets } from "@/lib/staticRebuild/hooks";
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
@@ -277,6 +281,7 @@ export async function applyVideoUpdatePlan(
   plan: VideoSavePlan,
 ): Promise<boolean> {
   const { payload, sections } = plan;
+  const isPublicVideo = plan.target.visibility_status === "public";
   const existingEventRows = await db
     .select({ event_id: videoEvents.event_id })
     .from(videoEvents)
@@ -333,13 +338,17 @@ export async function applyVideoUpdatePlan(
       actorUserId: plan.operatorUserId,
     }));
   }
+  let previousMemberXUserIds: string[] = [];
   if ((sections.members || sections.member_chapters) && plan.memberSubmission) {
-    appendVideoAtomicWritePlan(atomic, await buildReplaceVideoMembersPlan(db, {
+    const membersPlan = await buildReplaceVideoMembersPlan(db, {
       videoId: plan.videoId,
       members: plan.memberSubmission.members,
       chaptersByIndex: plan.memberSubmission.chaptersByIndex,
       actorUserId: plan.operatorUserId,
-    }));
+    });
+    previousMemberXUserIds =
+      extractPreviousPublicMemberXUserIdsFromMembersPlan(membersPlan);
+    appendVideoAtomicWritePlan(atomic, membersPlan);
   }
   if (plan.syncedEventIds) {
     appendVideoAtomicWritePlan(atomic, await buildSyncVideoEventsPlan(db, plan.videoId, {
@@ -376,15 +385,13 @@ export async function applyVideoUpdatePlan(
     reason: "video_update",
     requestedByUserId: plan.operatorUserId,
   }];
-  if (plan.rebuildFlags.creatorAggregationChanged && plan.memberSubmission) {
-    const affectedCreatorIds = new Set(
-      [
-        plan.target.creator_x_user_id,
-        ...plan.memberSubmission.members
-          .map((member) => member.x_user_id?.trim())
-          .filter((id): id is string => Boolean(id)),
-      ].filter((id): id is string => Boolean(id)),
-    );
+  if (isPublicVideo && plan.rebuildFlags.creatorAggregationChanged && plan.memberSubmission) {
+    const affectedCreatorIds = collectMemberAggregationAffectedXUserIds({
+      previousCreatorXUserId: plan.target.creator_x_user_id,
+      nextCreatorXUserId: payload.creator_x_user_id,
+      previousMemberXUserIds,
+      nextMembers: plan.memberSubmission.members,
+    });
 
     for (const creatorXUserId of affectedCreatorIds) {
       queueItems.push({
@@ -402,7 +409,7 @@ export async function applyVideoUpdatePlan(
       requestedByUserId: plan.operatorUserId,
     });
   }
-  if (plan.rebuildFlags.identityChanged) {
+  if (isPublicVideo && plan.rebuildFlags.identityChanged) {
     const affectedCreatorIds = new Set(
       [
         plan.target.creator_x_user_id,
@@ -446,7 +453,7 @@ export async function applyVideoUpdatePlan(
       });
     }
   }
-  if (plan.rebuildFlags.randomPoolCardChanged) {
+  if (isPublicVideo && plan.rebuildFlags.randomPoolCardChanged) {
     queueItems.push({
       targetType: "random_video_pool",
       targetId: "global",

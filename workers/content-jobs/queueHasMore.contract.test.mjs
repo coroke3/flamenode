@@ -10,5 +10,5 @@ test("processStaticRebuildQueue は LIMIT+1 で hasMore を返す", () => {
   assert.match(source, /const hasMore = fetchedRows\.length > processLimit/);
   assert.match(source, /hasMore: hasMore \|\| followUpPending/);
   assert.match(source, /markResult === "requeued"/);
-  assert.match(source, /followUpPending: usersIndexFollowUp \|\| completion\.followUpPending/);
+  assert.match(source, /followUpPending: rebuildResult\.followUpPending \|\| completion\.followUpPending/);
 });

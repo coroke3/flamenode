@@ -7,6 +7,10 @@ import { writeGuard } from "@/lib/auth/writeGuard";
 import { getDatabase } from "@/lib/cloudflare";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
+import {
+  collectMemberAggregationAffectedXUserIds,
+  extractPreviousPublicMemberXUserIdsFromMembersPlan,
+} from "@/lib/video/memberAggregationFanOut";
 import { validateVideoMemberSubmission } from "@/lib/video/submissionValidation";
 import type { VideoActionResult } from "@/lib/video/types";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -104,31 +108,36 @@ export async function updateVideoMembersAdmin(
     before: { ...target }, after, actor_user_id: user.id,
     context: "admin-video-members", retention_class: "normal", strict: true,
   });
-  appendVideoAtomicWritePlan(plan, await buildReplaceVideoMembersPlan(db, {
+  const membersPlan = await buildReplaceVideoMembersPlan(db, {
     videoId,
     members,
     chaptersByIndex: memberValidation.value.chaptersByIndex,
     actorUserId: user.id,
-  }));
-  const memberXUserIds = [
-    ...new Set(
-      members
-        .map((member) => member.x_user_id?.trim())
-        .filter((id): id is string => Boolean(id)),
-    ),
-  ];
+  });
+  appendVideoAtomicWritePlan(plan, membersPlan);
+  const isPublicVideo = target.visibility_status === "public";
+  const affectedCreatorIds = isPublicVideo
+    ? collectMemberAggregationAffectedXUserIds({
+        previousCreatorXUserId: target.creator_x_user_id,
+        nextCreatorXUserId: target.creator_x_user_id,
+        previousMemberXUserIds:
+          extractPreviousPublicMemberXUserIdsFromMembersPlan(membersPlan),
+        nextMembers: members,
+      })
+    : new Set<string>();
   const queue = await buildStaticRebuildQueueBatch(db, [
     { targetType: "video", targetId: videoId, reason: "video_members_update", requestedByUserId: user.id },
     { targetType: "search_index", targetId: "global", reason: "video_members_update", priority: "low" },
-    { targetType: "users_index", targetId: "global", reason: "video_members_update" },
-    ...(target.creator_x_user_id ? [{ targetType: "user" as const, targetId: target.creator_x_user_id, reason: "video_members_update" }] : []),
-    ...memberXUserIds
-      .filter((xUserId) => xUserId !== target.creator_x_user_id)
-      .map((xUserId) => ({
-        targetType: "user" as const,
-        targetId: xUserId,
-        reason: "video_members_update",
-      })),
+    ...(isPublicVideo
+      ? [
+          { targetType: "users_index" as const, targetId: "global", reason: "video_members_update" },
+          ...[...affectedCreatorIds].map((xUserId) => ({
+            targetType: "user" as const,
+            targetId: xUserId,
+            reason: "video_members_update",
+          })),
+        ]
+      : []),
     ...(target.primary_event_id ? [{ targetType: "event" as const, targetId: target.primary_event_id, reason: "video_members_update" }] : []),
   ]);
   plan.statements.push(...queue.statements);

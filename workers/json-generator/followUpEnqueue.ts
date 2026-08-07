@@ -1,26 +1,48 @@
 type FollowUpEnv = { DB: D1Database };
 
-const USERS_INDEX_FOLLOW_UP_TARGETS = [
-  { targetType: "top", targetId: "global" },
-  { targetType: "recommend", targetId: "global" },
-] as const;
+type ComposerFollowUpTarget = {
+  targetType: string;
+  targetId: string;
+};
 
-const FOLLOW_UP_REASON = "users_index_follow_up";
+type ComposerFollowUpSpec = {
+  targets: readonly ComposerFollowUpTarget[];
+  reason: string;
+};
 
-/** users_index 成功後に top/recommend を冪等 enqueue。挿入・更新があれば true。 */
-export async function enqueueTopRecommendAfterUsersIndex(
+const COMPOSER_FOLLOW_UP_BY_PRODUCER: Readonly<
+  Record<string, ComposerFollowUpSpec>
+> = {
+  users_index: {
+    targets: [
+      { targetType: "top", targetId: "global" },
+      { targetType: "recommend", targetId: "global" },
+    ],
+    reason: "users_index_follow_up",
+  },
+};
+
+// Future producer→composer continuations (not wired yet):
+// - top_recommended → top
+// - recommend_core → recommend
+// - event_base / event_slots → event
+// - top_slot_stats → top
+
+async function enqueueComposerTargets(
   env: FollowUpEnv,
+  targets: readonly ComposerFollowUpTarget[],
+  reason: string,
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   let changed = false;
-  for (const target of USERS_INDEX_FOLLOW_UP_TARGETS) {
+  for (const target of targets) {
     const bumped = await env.DB.prepare(
       `UPDATE static_rebuild_queue
        SET reason = ?, updated_at = MAX(updated_at + 1, ?)
        WHERE target_type = ? AND target_id = ?
          AND status IN ('pending', 'processing')`,
     )
-      .bind(FOLLOW_UP_REASON, now, target.targetType, target.targetId)
+      .bind(reason, now, target.targetType, target.targetId)
       .run();
     if ((bumped.meta?.changes ?? 0) > 0) {
       changed = true;
@@ -36,7 +58,7 @@ export async function enqueueTopRecommendAfterUsersIndex(
         `srb:${target.targetType}:${crypto.randomUUID()}`,
         target.targetType,
         target.targetId,
-        FOLLOW_UP_REASON,
+        reason,
         now,
         now,
       )
@@ -44,4 +66,21 @@ export async function enqueueTopRecommendAfterUsersIndex(
     if ((inserted.meta?.changes ?? 0) > 0) changed = true;
   }
   return changed;
+}
+
+/** producer 成功後に composer target を冪等 enqueue。挿入・更新があれば true。 */
+export async function enqueueComposerFollowUps(
+  env: FollowUpEnv,
+  producerTargetType: string,
+): Promise<boolean> {
+  const spec = COMPOSER_FOLLOW_UP_BY_PRODUCER[producerTargetType];
+  if (!spec) return false;
+  return enqueueComposerTargets(env, spec.targets, spec.reason);
+}
+
+/** @deprecated Use enqueueComposerFollowUps(env, "users_index") */
+export async function enqueueTopRecommendAfterUsersIndex(
+  env: FollowUpEnv,
+): Promise<boolean> {
+  return enqueueComposerFollowUps(env, "users_index");
 }

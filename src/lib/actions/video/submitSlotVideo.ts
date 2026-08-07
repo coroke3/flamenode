@@ -22,6 +22,8 @@ import {
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotVideoSubmittedNotification } from "@/lib/notifications/templates/slot";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import { topSlotStatsGlobalTarget } from "@/lib/staticRebuild/hooks";
+import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
@@ -554,27 +556,41 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         notificationWakeSource = "web";
       }
     }
-    const queue = await buildStaticRebuildQueueBatch(db, [
-      { targetType: "video", targetId: videoId, reason: existingVideo ? "video_update" : "video_create", priority: "high", requestedByUserId: userId },
-      { targetType: "list_recent", targetId: "global", reason: "video_submit" },
-      { targetType: "list_popular", targetId: "global", reason: "video_submit" },
-      { targetType: "search_index", targetId: "global", reason: "video_submit" },
-      { targetType: "users_index", targetId: "global", reason: "video_submit" },
+    const isPublicResubmit = existingVideo?.visibility_status === "public";
+    const rebuildReason = existingVideo ? "video_update" : "video_create";
+    const rebuildTargets: EnqueueStaticRebuildInput[] = [
       {
-        targetType: "random_video_pool",
-        targetId: "global",
-        reason: existingVideo ? "video_card_update" : "video_create",
-        priority: "low",
+        targetType: "video",
+        targetId: videoId,
+        reason: rebuildReason,
+        priority: "high",
         requestedByUserId: userId,
       },
-      { targetType: "user", targetId: activeX, reason: "video_submit" },
       ...syncedEventIds.map((eventId) => ({
         targetType: "event" as const,
         targetId: eventId,
         reason: "video_submit",
         priority: "high" as const,
       })),
-    ]);
+      topSlotStatsGlobalTarget("video_submit", "normal"),
+    ];
+    if (isPublicResubmit) {
+      rebuildTargets.push(
+        { targetType: "list_recent", targetId: "global", reason: "video_submit" },
+        { targetType: "list_popular", targetId: "global", reason: "video_submit" },
+        { targetType: "search_index", targetId: "global", reason: "video_submit" },
+        { targetType: "users_index", targetId: "global", reason: "video_submit" },
+        {
+          targetType: "random_video_pool",
+          targetId: "global",
+          reason: "video_card_update",
+          priority: "low",
+          requestedByUserId: userId,
+        },
+        { targetType: "user", targetId: activeX, reason: "video_submit" },
+      );
+    }
+    const queue = await buildStaticRebuildQueueBatch(db, rebuildTargets);
     staticRebuildEnqueued = queue.statements.length > 0;
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);

@@ -34,3 +34,13 @@ test("submitSlotVideo は account_other/none を漏洩しない一般メッセ�
     /slotRelation === "account_other" \|\| slotRelation === "none"[\s\S]*?SLOT_SUBMIT_REJECT_MESSAGE/,
   );
 });
+
+test("submitSlotVideo は pending 提出で global list/search/users/user/random を enqueue しない", () => {
+  assert.match(source, /const isPublicResubmit = existingVideo\?\.visibility_status === "public"/);
+  assert.match(source, /topSlotStatsGlobalTarget\("video_submit", "normal"\)/);
+  assert.match(source, /if \(isPublicResubmit\) \{[\s\S]*list_recent/);
+  assert.doesNotMatch(
+    source,
+    /rebuildTargets[\s\S]*list_recent[\s\S]*topSlotStatsGlobalTarget/,
+  );
+});

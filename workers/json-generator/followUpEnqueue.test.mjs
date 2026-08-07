@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
+import { enqueueComposerFollowUps, enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
 
 const FOLLOW_UP_REASON = "users_index_follow_up";
 const BASELINE = readFileSync(
@@ -95,6 +95,33 @@ function createNoChangeEnv() {
     },
   };
 }
+
+test("enqueueComposerFollowUps(users_index) は top/recommend 欠損時に INSERT する", async (t) => {
+  const harness = createHarness(t);
+
+  const changed = await enqueueComposerFollowUps(harness.env, "users_index");
+
+  assert.equal(changed, true);
+  assert.equal(harness.countRows(), 2);
+
+  const rows = harness.readActiveRows();
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => row.target_type),
+    ["recommend", "top"],
+  );
+  for (const row of rows) {
+    assert.equal(row.target_id, "global");
+    assert.equal(row.reason, FOLLOW_UP_REASON);
+    assert.equal(row.status, "pending");
+    assert.match(row.id, /^srb:(top|recommend):/);
+  }
+});
+
+test("enqueueComposerFollowUps は未知 producer で false", async () => {
+  const changed = await enqueueComposerFollowUps(createNoChangeEnv(), "unknown_producer");
+  assert.equal(changed, false);
+});
 
 test("enqueueTopRecommendAfterUsersIndex は top/recommend 欠損時に INSERT する", async (t) => {
   const harness = createHarness(t);
