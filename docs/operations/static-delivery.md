@@ -37,6 +37,7 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 | 新着一覧 | 180 | 3分以内 |
 | 検索インデックス | 300 | 5分以内 |
 | ランキング / top | 600 | 10分以内 |
+| top slot-stats | 600 | 10分以内（`top.json` と同値） |
 | users/index | 600 | — |
 | 利用規約 | 3600 | — |
 | blocklist / random pool | 600 | — |
@@ -55,7 +56,7 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 
 静的再生成は Queue Consumer / Recovery Cron の各 invocation で **1 target** だけ処理する（`workers/json-generator/queuePolicy.ts` の `MAX_QUEUE_ITEMS_PER_RUN` = 1）。Recovery Cron は毎時最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS`（3）件まで排水する。D1 statement は `workers/shared/d1Budget.ts` の soft limit（40）で停止する。表示用ポリシー正本は `src/lib/operationMode/policy.ts` の `STATIC_REBUILD_ITEMS_PER_RUN` と一致させる。
 
-コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top`、`recommend`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
+コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top`、`top_slot_stats`、`recommend`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。`rebuildTop` も `top/slot-stats.v1.json` を同時更新するが、`top_slot_stats` を別途 enqueue して欠損時の保険とする（冪等）。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
 
 Admin Spreadsheetのうち `videos`、`video_youtube_metadata`、`video_events`、`video_members`、`video_chapters`、`x_users` の変更は、対象の動画詳細・関連動画共有JSON・クリエイター投影をplannerで導出し、data mutation・preview nonce消費・監査・`static_rebuild_queue`を同じD1 atomic batchへ入れる。1回のapplyは11行までとし、plannerは最大16 target（`SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT`）、queue helperは最大4 statementに収める。いずれかを超える場合はデータを書かず、行を分割して再実行する。
 
@@ -67,7 +68,7 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 
 関連動画の非公開除外は `youtube/related-blocklist.v1.json`、補完候補は `videos/random-pool.v1.json` を用いる。どちらも読み込みは fresh Cache → R2 → stale Cache（最大24h）→ unavailable とし、状態を捨てない。必要な共有JSONがunavailableのときは関連動画セクションを障害表示へ分離し、空blocklist・正常な0件へ倒さない。
 
-`/admin/static-builds` は両objectについて、R2 `head` による実体の有無、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、blocklist件数またはrandom pool件数を表示する。binding欠損・`head`失敗は「確認不可」とし、管理者write guardを通る個別再生成キューに加え、両方まとめて投入する操作を提供する。R2 object が欠けている場合は `content-jobs` Recovery Cron が high 優先度で両 target を自動 enqueue する。YouTube 関連の `youtube_related_blocklist` / `random_video_pool` に加え、`users/index.json` / `users/public-x-icon-map.v1.json` / `users/pickup-creators.v1.json` のいずれかが欠けているときは `users_index:global` を high で enqueue する（`rebuildUsersIndex` が3つを再生成する）。
+`/admin/static-builds` は両objectについて、R2 `head` による実体の有無、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、blocklist件数またはrandom pool件数を表示する。binding欠損・`head`失敗は「確認不可」とし、管理者write guardを通る個別再生成キューに加え、両方まとめて投入する操作を提供する。R2 object が欠けている場合は `content-jobs` Recovery Cron が high 優先度で両 target を自動 enqueue する。YouTube 関連の `youtube_related_blocklist` / `random_video_pool` に加え、`users/index.json` / `users/public-x-icon-map.v1.json` / `users/pickup-creators.v1.json` のいずれかが欠けているときは `users_index:global` を high で enqueue する（`rebuildUsersIndex` が3つを再生成する）。`top/slot-stats.v1.json` が欠けているときは `top_slot_stats:global` を high で enqueue する（`rebuildTopSlotStats` が artifact を再生成する）。
 
 主な公開 artifact:
 
@@ -91,3 +92,16 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 `list/recent.json` と `list/popular.json` は COUNTABLE 公開作品を最大 5000 件（`STATIC_LIST_MAX_ITEMS`）まで `items` に載せる。`total` は DB の全件数と `items.length` の小さい方とし、ページングが `items` を超えない。`search-index-lite.json` の `videos` も同上限。put 前に `STATIC_LIST_MAX_OBJECT_BYTES`（8MiB）でサイズガードする。users 側の 500 件上限は現状維持。
 
 `/list?event=` は専用 R2 key を持たず、degraded D1 の bounded 一覧（`fetchDegradedEventListPage`、LIMIT 24 + ページング）で補う。
+
+## スコア再計算とランキング再生成
+
+`sync-jobs` の score-recalc は毎時最大 150 件を 1 SQL で更新する。metadata / video の dirty は即時優先し、それ以外は **72 時間**（`SCORE_FORCE_REFRESH_SEC`）以上 `score_updated_at` が古い公開作品を age-only で強制 refresh する。
+
+score 更新が 1 件以上あった invocation だけ、`ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend` の global target を `score_recalc` / normal で enqueue する。KV `ranking:last-score-rebuild` で throttle する。
+
+| 開催中イベント | throttle 間隔 |
+| --- | ---: |
+| あり（`events/index.json` または D1 fallback） | 1 時間（3600 秒） |
+| なし | 3 時間（10800 秒） |
+
+`events/index.json` も D1 も読めないときは safe default（開催中あり扱い）とし throttle をかけない。enqueue 成功時に KV マーカーを更新し、static rebuild wake を送る。

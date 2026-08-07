@@ -123,6 +123,9 @@ const JOBS: readonly JobDefinition[] = [
   { jobName: "content-jobs:cleanup", label: "期限切れデータ整理", cadenceSeconds: 86400, warnAfterSeconds: 172800, criticalAfterSeconds: 259200, detailHref: "/admin/static-builds" },
 ] as const;
 
+/** score-recalc の SCORE_FORCE_REFRESH_SEC（72h）と揃える。 */
+const SCORE_STALE_THRESHOLD_SEC = 72 * 60 * 60;
+
 const QUEUE_WAKE_LAST_FAILURE_KV_KEYS = Object.freeze(
   Object.fromEntries(
     QUEUE_WAKE_KINDS.map((kind) => [
@@ -339,12 +342,12 @@ export async function loadWorkerMonitoring(
        SUM(CASE WHEN v.score_updated_at IS NULL
          OR v.score_updated_at < v.updated_at
          OR v.score_updated_at < COALESCE(ym.updated_at, 0)
-         OR v.score_updated_at <= ?1 - 86400 THEN 1 ELSE 0 END) AS stale,
+         OR v.score_updated_at <= ?1 - ?2 THEN 1 ELSE 0 END) AS stale,
        MIN(v.score_updated_at) AS oldest_updated_at
      FROM videos v
      LEFT JOIN video_youtube_metadata ym ON ym.video_id = v.id
      WHERE v.visibility_status = 'public'`,
-  ).bind(now).first<ScoreRow>();
+  ).bind(now, SCORE_STALE_THRESHOLD_SEC).first<ScoreRow>();
 
   const artifactRows = await db.prepare(
     `SELECT target_type, MAX(generated_at) AS generated_at
@@ -436,7 +439,7 @@ export async function loadWorkerMonitoring(
       backlog: scores.stale,
       capacityPerDay: 3_600,
       estimatedDrainMinutes: scoreDrain,
-      note: `公開作品 ${scores.eligible}件。変更動画限定 + 毎時Cron dirty。`,
+      note: `公開作品 ${scores.eligible}件。変更動画限定 + 毎時Cron dirty。72h 超過も stale 扱い。`,
       detailHref: "/admin/static-builds",
     },
   ];
