@@ -40,6 +40,8 @@ export interface SlotRow {
   status: "available" | "reserved" | "submitted";
   display_name: string | null;
   reserved_x_id: string | null;
+  profile_x_user_id?: string | null;
+  submitted_icon_url?: string | null;
   is_owned_by_viewer: boolean;
   viewer_relation?: SlotViewerRelation;
   group_key: string | null;
@@ -52,8 +54,10 @@ export interface SlotGridProps {
   viewerXId: string | null;
   isAuthenticated?: boolean;
   canReserve: boolean;
-  /** ログイン + TOS + X申請済み(pending可)。サーバー writeGuard requested_x と同条件。 */
+  /** ログイン + TOS 同意済み。サーバー writeGuard と同条件。 */
   canTakeSlot: boolean;
+  /** 作品投稿可能（approved X ID あり）。確保後メッセージ用。 */
+  canPost?: boolean;
   slotType: "time" | "count";
   maxSlotsPerVideo?: number;
   /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 15 分。 */
@@ -117,12 +121,58 @@ function formatBreakDetail(end: number | null, start: number | null): string | n
   return `${formatUnix(end, { timeOnly: true })} - ${formatUnix(start, { timeOnly: true })}`;
 }
 
+function ReservedXId({
+  reservedXId,
+  profileXUserId,
+}: {
+  reservedXId: string;
+  profileXUserId?: string | null;
+}): React.ReactElement {
+  if (profileXUserId) {
+    return (
+      <Link
+        href={`/user/${profileXUserId}`}
+        className={styles.slotReservedX}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        @{reservedXId}
+      </Link>
+    );
+  }
+  return <span className={styles.slotReservedX}>@{reservedXId}</span>;
+}
+
+function SubmittedIcon({
+  url,
+  alt,
+}: {
+  url: string;
+  alt: string;
+}): React.ReactElement {
+  const [hidden, setHidden] = React.useState(false);
+  if (hidden) return <></>;
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className={styles.submittedIcon}
+      width={30}
+      height={30}
+      loading="lazy"
+      decoding="async"
+      onError={() => setHidden(true)}
+    />
+  );
+}
+
 export function SlotGrid({
   slots,
   viewerXId,
   isAuthenticated = false,
   canReserve,
   canTakeSlot,
+  canPost = true,
   slotType,
   maxSlotsPerVideo = 1,
   slotPartGapSec,
@@ -330,7 +380,9 @@ export function SlotGrid({
         message:
           reservedCount > 1
             ? `${reservedCount}枠連続で確保しました。`
-            : "枠を確保しました。続けて作品情報を登録できます。",
+            : canPost
+              ? "枠を確保しました。続けて作品情報を登録できます。"
+              : "枠を確保しました。作品投稿には X ID の承認が必要です。",
         pendingPublicReflection: result.pendingPublicReflection,
       });
       setReservedSlotId(result.slotId ?? slotId);
@@ -679,6 +731,7 @@ export function SlotGrid({
                   }
 
                   const slot = item.slot;
+                  const uiSlot = slot as SlotRow;
                   const isMine = slot.is_owned_by_viewer;
                   const filled = slot.status !== "available";
                   const slotDisplayName = slot.display_name ?? "確保済み";
@@ -721,6 +774,13 @@ export function SlotGrid({
                           <div className={styles.slotTaken}>
                             <div className={styles.slotIdentity}>
                               <div className={styles.slotNameRow}>
+                                {uiSlot.status === "submitted" &&
+                                uiSlot.submitted_icon_url ? (
+                                  <SubmittedIcon
+                                    url={uiSlot.submitted_icon_url}
+                                    alt=""
+                                  />
+                                ) : null}
                                 <span
                                   className={cn(
                                     styles.slotName,
@@ -738,28 +798,32 @@ export function SlotGrid({
                                   </span>
                                 ) : null}
                               </div>
-                              {nameVisible && slot.reserved_x_id ? (
-                                <span className={styles.slotReservedX}>
-                                  @{slot.reserved_x_id}
-                                </span>
+                              {nameVisible && uiSlot.reserved_x_id ? (
+                                <ReservedXId
+                                  reservedXId={uiSlot.reserved_x_id}
+                                  profileXUserId={uiSlot.profile_x_user_id}
+                                />
                               ) : null}
                             </div>
                             {hasIntegrityError ? (
                               <p className={styles.slotIntegrityNotice}>
                                 枠グループの状態を確認できませんでした。画面を更新してください。
                               </p>
-                            ) : isAccountOther ? (
-                              <p className={styles.slotIntegrityNotice}>
-                                この枠は現在とは別の活動名義で確保されています。
-                              </p>
                             ) : null}
                             {isAccountOther && !hasIntegrityError ? (
                               <div className={styles.slotActions}>
+                                <span
+                                  className={styles.accountOtherBadge}
+                                  title="この枠は現在とは別の活動名義で確保されています。"
+                                >
+                                  別名義
+                                </span>
                                 <Link
                                   href={`/dashboard/settings?next=${encodeURIComponent(settingsNext)}`}
                                   className={styles.editSlotButton}
+                                  aria-label="Active X ID を切り替え"
                                 >
-                                  Active X ID を切り替え
+                                  X ID切替
                                 </Link>
                               </div>
                             ) : null}
@@ -848,7 +912,7 @@ export function SlotGrid({
                                 }
                                 title={
                                   isAuthenticated
-                                    ? "利用規約同意または X ID 申請が必要です"
+                                    ? "利用規約への同意が必要です"
                                     : "ログインが必要です"
                                 }
                               >
@@ -1167,7 +1231,8 @@ export function SlotGrid({
                 </p>
               ) : (
                 <p className={styles.reserveDialogHint}>
-                  取得可能な X ID がありません
+                  Discord のみの参加です。枠確保は可能ですが、作品投稿には X ID
+                  の申請が必要です。
                 </p>
               )}
             </div>
@@ -1183,9 +1248,7 @@ export function SlotGrid({
               <button
                 type="submit"
                 className="fn-btn fn-btn-primary"
-                disabled={
-                  busy || !viewerXId || reserveDisplayName.trim().length === 0
-                }
+                disabled={busy || reserveDisplayName.trim().length === 0}
                 aria-busy={busy}
               >
                 <Icon name="plus" size={12} aria-hidden />

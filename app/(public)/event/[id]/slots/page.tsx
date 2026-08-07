@@ -8,11 +8,11 @@ import { withDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots as slotsTable,
+  videos as videosTable,
 } from "@/lib/db/schema";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import {
   getOnboardingState,
-  onboardingHref,
   onboardingRulesHref,
 } from "@/lib/auth/onboarding";
 import {
@@ -105,8 +105,10 @@ export default async function EventSlotsPage({
         reserved_x_id_snapshot: slotsTable.reserved_x_id_snapshot,
         reserved_by_user_id: slotsTable.reserved_by_user_id,
         reservation_group_id: slotsTable.reservation_group_id,
+        creator_icon_url: videosTable.creator_icon_url,
       })
       .from(slotsTable)
+      .leftJoin(videosTable, eq(slotsTable.video_id, videosTable.id))
       .where(eq(slotsTable.event_id, id))
       .orderBy(asc(slotsTable.start_time), asc(slotsTable.sort_order));
     return { event, slotRows };
@@ -156,6 +158,12 @@ export default async function EventSlotsPage({
         groupKeys.set(slot.reservation_group_id, groupKey);
       }
     }
+    const submittedIconUrl =
+      canReveal &&
+      slot.status === "submitted" &&
+      slot.creator_icon_url
+        ? `/api/media/slot-submission-icon/${slot.id}`
+        : null;
     return {
       id: slot.id,
       slot_label: slot.slot_label,
@@ -166,6 +174,9 @@ export default async function EventSlotsPage({
       reserved_x_id: canReveal
         ? (slot.reserved_x_id_snapshot ?? slot.x_user_id)
         : null,
+      profile_x_user_id:
+        canReveal && slot.x_user_id ? slot.x_user_id : null,
+      submitted_icon_url: submittedIconUrl,
       is_owned_by_viewer: isOwnedByViewer,
       viewer_relation: viewerRelation,
       group_key: groupKey,
@@ -263,7 +274,7 @@ export default async function EventSlotsPage({
           <Link href={`/entry?next=${encodeURIComponent(`/event/${event.id}/slots`)}`}>
             ログイン
           </Link>
-          と初期設定（利用規約同意・X ID 申請）が必要です。
+          が必要です。
         </p>
       ) : onboarding.needsTermsAcceptance ? (
         <p className={styles.notice}>
@@ -272,14 +283,6 @@ export default async function EventSlotsPage({
             利用規約への同意
           </Link>
           が必要です。
-        </p>
-      ) : !onboarding.canReserveSlot ? (
-        <p className={styles.notice}>
-          <Icon name="info" size={13} aria-hidden /> 確保には X ID の申請が必要です（
-          <Link href={onboardingHref(`/event/${event.id}/slots`)}>
-            初期設定
-          </Link>
-          ）。
         </p>
       ) : null}
 
@@ -296,9 +299,8 @@ export default async function EventSlotsPage({
             viewerXId={viewerXId}
             isAuthenticated={Boolean(viewer?.id)}
             canReserve={accepting}
-            canTakeSlot={
-              accepting && onboarding.canReserveSlot && viewerXId != null
-            }
+            canTakeSlot={accepting && onboarding.canReserveSlot}
+            canPost={onboarding.canPost}
             slotType={(event.slot_type ?? "time") as "time" | "count"}
             maxSlotsPerVideo={event.max_slots_per_video ?? 1}
             slotPartGapSec={slotPartGapSec}

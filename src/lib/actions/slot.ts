@@ -569,7 +569,7 @@ export async function reserveSlot(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({
-    identityRequirement: "requested_x",
+    identityRequirement: "none",
     feature: "reserve_slot",
   });
   if (!guard.ok) {
@@ -775,7 +775,7 @@ export async function extendOwnSlotGroup(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({
-    identityRequirement: "requested_x",
+    identityRequirement: "none",
     feature: "extend_slot_group",
   });
   if (!guard.ok) {
@@ -906,7 +906,7 @@ export async function mergeOwnSlotGroups(
   formData: FormData,
 ): Promise<SlotReserveResult> {
   const guard = await writeGuard({
-    identityRequirement: "requested_x",
+    identityRequirement: "none",
     feature: "merge_slot_groups",
   });
   if (!guard.ok) {

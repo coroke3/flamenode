@@ -1,4 +1,5 @@
 .wrap {
+  --slot-row-height: 60px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -301,9 +302,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 58px;
-  padding: 10px 8px 10px 12px;
+  height: var(--slot-row-height);
+  min-height: var(--slot-row-height);
+  max-height: var(--slot-row-height);
+  padding: 8px 8px 8px 12px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .slotIdentity {
@@ -315,15 +319,34 @@
 
 .slotNameRow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .slotReservedX {
   font-size: 12px;
   color: var(--text-muted);
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slotReservedX:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.submittedIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
 }
 
 .slotName {
@@ -350,10 +373,28 @@
 }
 
 .slotIntegrityNotice {
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.4;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountOtherBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .slotActions {
@@ -362,19 +403,21 @@
   align-items: center;
   justify-content: flex-end;
   gap: 5px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex-shrink: 0;
 }
 
 .editSlotButton {
   min-height: 28px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent-danger) 58%, transparent);
   border-radius: var(--radius-pill);
   color: var(--accent-danger);
   background: color-mix(in srgb, var(--accent-danger) 12%, transparent);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
 }
 
@@ -432,17 +475,21 @@
 .emptySlot {
   display: inline-flex;
   width: 100%;
-  min-height: 58px;
+  height: var(--slot-row-height);
+  min-height: var(--slot-row-height);
+  max-height: var(--slot-row-height);
   align-items: center;
   justify-content: center;
-  padding: 10px 12px;
+  padding: 8px 12px;
   color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 55%, var(--text-muted));
   background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 6%, transparent);
 }
 
 .emptySlotButton {
   width: 100%;
-  min-height: 58px;
+  height: var(--slot-row-height);
+  min-height: var(--slot-row-height);
+  max-height: var(--slot-row-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -653,11 +700,15 @@
   .slotTaken {
     align-items: center;
     flex-direction: row;
-    min-height: 58px;
+    height: var(--slot-row-height);
+    min-height: var(--slot-row-height);
+    max-height: var(--slot-row-height);
   }
 
   .emptySlotButton {
-    min-height: 58px;
+    height: var(--slot-row-height);
+    min-height: var(--slot-row-height);
+    max-height: var(--slot-row-height);
   }
 
   .slotActions {

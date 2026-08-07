@@ -39,6 +39,10 @@ test("OnboardingState は新仕様フィールドを持つ", () => {
   assert.doesNotMatch(onboarding, /isComplete:/);
 });
 
+test("OnboardingState: canReserveSlot は TOS 同意のみ（X 不要）", () => {
+  assert.match(onboarding, /const canReserveSlot = db != null && !tosPending/);
+});
+
 test("OnboardingState: DB障害はfail-closedで canPost=false を返す", () => {
   // db=null のとき canPost=false, canReserveSlot=false
   assert.match(onboarding, /if \(!user\) return empty/);
@@ -130,13 +134,13 @@ test("writeGuard は枠確保対象の pending 申請だけを hasPendingXReques
   assert.match(writeGuard, /orderBy\(desc\(xIdentityRequests\.requested_at\), desc\(xIdentityRequests\.id\)\)/);
 });
 
-test("枠確保は identityRequirement: 'requested_x' を使う", () => {
+test("枠確保は identityRequirement: 'none' を使う（X 不要）", () => {
   for (const fn of ["reserveSlot", "extendOwnSlotGroup", "mergeOwnSlotGroups"]) {
     const start = slotAction.indexOf(`export async function ${fn}`);
     assert.ok(start >= 0, fn);
     const next = slotAction.indexOf("\nexport async function ", start + 1);
     const block = next < 0 ? slotAction.slice(start) : slotAction.slice(start, next);
-    assert.match(block, /identityRequirement: "requested_x"/, fn);
+    assert.match(block, /identityRequirement: "none"/, fn);
     assert.doesNotMatch(block, /requireActiveXId: true/, fn);
     assert.doesNotMatch(block, /requireApprovedActiveXId: true/, fn);
   }

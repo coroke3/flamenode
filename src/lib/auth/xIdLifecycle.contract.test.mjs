@@ -114,7 +114,7 @@ test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付�
   assert.match(admin, /if \(!duplicateLink\)/);
   assert.match(admin, /processedXIdRequestMessage\(request\.status, "approve"\)/);
   assert.match(admin, /processedXIdRequestMessage\(request\.status, "reject"\)/);
-  assert.ok((admin.match(/await mutateWithAudit\(/g) ?? []).length >= 2);
+  assert.ok((admin.match(/await mutateWithAudit\(/g) ?? []).length >= 3);
   assert.doesNotMatch(merge, /auditAction\(/);
   assert.match(merge, /executeApprovedXIdMergeRequest/);
   assert.match(merge, /restoreApprovedXIdMergeRevertRequest/);

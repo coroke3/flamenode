@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import type { SlotRow } from "./SlotGrid";
 import { buildSlotParts, formatSlotPartLabel, sortSlotsChronologically } from "@/lib/utils/slotGrouping";
 import { formatUnix } from "@/lib/utils/format";
@@ -162,7 +163,19 @@ export function SlotStatusBoard({
             {selected?.reserved_x_id ? (
               <div>
                 <dt>X ID</dt>
-                <dd className={styles.reservedXId}>@{selected.reserved_x_id}</dd>
+                <dd className={styles.reservedXId}>
+                  {selected.profile_x_user_id ? (
+                    <Link
+                      href={`/user/${selected.profile_x_user_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      @{selected.reserved_x_id}
+                    </Link>
+                  ) : (
+                    <>@{selected.reserved_x_id}</>
+                  )}
+                </dd>
               </div>
             ) : null}
           </>

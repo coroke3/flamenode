@@ -36,7 +36,9 @@ export async function resolveReservationXIdentity(
   db: DB,
   guard: ReservationGuardInput,
 ): Promise<ReservationXIdentity | { error: string }> {
-  const pendingRows = guard.hasPendingXRequest
+  // writeGuard が identityRequirement:"none" のとき hasPendingXRequest=false でも、
+  // Active X が無い場合は pending を読んで snapshot を解決する（単一 pending / Discord-only）。
+  const pendingRows = !guard.activeXId
     ? await db
         .select({ requested_x_id: xIdentityRequests.requested_x_id })
         .from(xIdentityRequests)

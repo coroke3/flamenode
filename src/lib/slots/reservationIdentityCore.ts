@@ -6,16 +6,21 @@ export const SLOT_RESERVATION_X_REQUEST_TYPES = [
   "alias",
 ] as const;
 
+/** 枠確保時に記録する X ID スナップショット。Discord-only 予約では null 可。 */
 export type ReservationXIdentity = {
-  snapshotXId: string;
+  snapshotXId: string | null;
   canonicalXUserId: string | null;
 };
 
+/**
+ * pending 申請・active X から枠確保用の X スナップショットを解決する。
+ * エラーは返さず、解決不能時は null を返す（Discord-only 枠確保）。
+ */
 export function resolveReservationXIdentityFromPending(input: {
   activeXId: string | null;
   approvedXIds: readonly string[];
   pendingRequestedXIds: readonly string[];
-}): ReservationXIdentity | { error: string } {
+}): ReservationXIdentity {
   const activeXId = input.activeXId ? normalizeXId(input.activeXId) : null;
   const approvedSet = new Set(
     input.approvedXIds.map((id) => normalizeXId(id)).filter(Boolean),
@@ -38,13 +43,5 @@ export function resolveReservationXIdentityFromPending(input: {
     return { snapshotXId: distinct[0]!, canonicalXUserId: null };
   }
 
-  if (distinct.length >= 2) {
-    return {
-      error: "複数の X ID 申請が保留中です。Active X ID を確定してください。",
-    };
-  }
-
-  return {
-    error: "枠確保に必要な X ID がありません。X ID を申請または承認してください。",
-  };
+  return { snapshotXId: null, canonicalXUserId: null };
 }

@@ -57,13 +57,28 @@ test("resolveReservationXIdentity: active なし + pending 1件", () => {
   });
 });
 
-test("resolveReservationXIdentity: 複数 distinct pending は fail-closed", () => {
+test("resolveReservationXIdentity: 複数 distinct pending は null を返す", () => {
   const result = resolveReservationXIdentityFromPending({
     activeXId: null,
     approvedXIds: [],
     pendingRequestedXIds: ["alpha", "beta"],
   });
-  assert.match(result.error, /複数の X ID 申請が保留中/);
+  assert.deepEqual(result, {
+    snapshotXId: null,
+    canonicalXUserId: null,
+  });
+});
+
+test("resolveReservationXIdentity: X 身元なしは null を返す", () => {
+  const result = resolveReservationXIdentityFromPending({
+    activeXId: null,
+    approvedXIds: [],
+    pendingRequestedXIds: [],
+  });
+  assert.deepEqual(result, {
+    snapshotXId: null,
+    canonicalXUserId: null,
+  });
 });
 
 test("reservationIdentity は DB から pending を読む", () => {

@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import {
+  slots,
   users,
   xIdentityRequests,
   xUserAccountLinks,
@@ -26,7 +27,16 @@ import {
   resolveCanonicalXUserId,
 } from "@/lib/auth/xIdentity";
 import { validateXIdentityRequestShape, buildXIdentityDecisionFields } from "@/lib/auth/xIdentityRequestCore";
-import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import {
+  buildStaticRebuildQueueBatch,
+  STATIC_REBUILD_BULK_UPSERT_ROWS,
+} from "@/lib/staticRebuild/enqueue";
+import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import {
+  D1_MAX_BATCH_QUERIES,
+  planD1AuditMutationBudget,
+} from "@/lib/audit/mutateBudget";
 import {
   isRetryableXIdMutationError,
   processedXIdRequestMessage,
@@ -41,6 +51,10 @@ type XIdLinkOperatorResult =
   | { ok: true; authUserId: string; db: DB; actorXUserId: string | null }
   | { ok: false; message: string };
 type XIdLinkOperator = Extract<XIdLinkOperatorResult, { ok: true }>;
+type SlotRow = typeof slots.$inferSelect;
+
+/** 承認時に一括で x_user_id を埋める reserved 枠の上限（D1 batch 予算保護）。 */
+const RESERVED_SLOT_BIND_CAP = 30;
 
 async function getXIdLinkOperator(): Promise<XIdLinkOperatorResult> {
   try {
@@ -96,6 +110,191 @@ function mutationError(error: unknown): XIdAdminResult {
   };
 }
 
+function snapshotSlot(row: SlotRow): Record<string, unknown> {
+  return { ...row };
+}
+
+function applySlotXUserBind(
+  before: SlotRow,
+  bindTargetXUserId: string,
+  now: number,
+): SlotRow {
+  return {
+    ...before,
+    x_user_id: bindTargetXUserId,
+    updated_at: now,
+    version: before.version + 1,
+  };
+}
+
+function groupSlotBindChunks(rows: readonly SlotRow[]): SlotRow[][] {
+  const byEvent = new Map<string, SlotRow[]>();
+  for (const row of rows) {
+    const current = byEvent.get(row.event_id) ?? [];
+    current.push(row);
+    byEvent.set(row.event_id, current);
+  }
+  const chunks: SlotRow[][] = [];
+  for (const eventRows of byEvent.values()) {
+    for (let index = 0; index < eventRows.length; index += MAX_ATOMIC_SLOT_ROWS) {
+      chunks.push(eventRows.slice(index, index + MAX_ATOMIC_SLOT_ROWS));
+    }
+  }
+  return chunks;
+}
+
+function planSlotBindBatchBudget(chunks: readonly SlotRow[][]): {
+  chunks: SlotRow[][];
+  deferred: number;
+} {
+  const accepted: SlotRow[][] = [];
+  for (const chunk of chunks) {
+    const slotCount = accepted.reduce((sum, rows) => sum + rows.length, 0) + chunk.length;
+    const eventIds = new Set(
+      [...accepted, chunk].flatMap((rows) => rows.map((row) => row.event_id)),
+    );
+    const budget = planD1AuditMutationBudget({
+      mutationStatementCount: accepted.length + 1,
+      mutationAssertionCount: accepted.length + 1,
+      auditEntryCount: slotCount,
+      postAuditStatementCount: Math.ceil(
+        eventIds.size / STATIC_REBUILD_BULK_UPSERT_ROWS,
+      ),
+      distinctActorCount: 1,
+    });
+    if (!budget.withinLimit || budget.totalQueryCount > D1_MAX_BATCH_QUERIES) {
+      break;
+    }
+    accepted.push(chunk);
+  }
+  const bound = accepted.reduce((sum, rows) => sum + rows.length, 0);
+  return {
+    chunks: accepted,
+    deferred: chunks.reduce((sum, rows) => sum + rows.length, 0) - bound,
+  };
+}
+
+async function bindReservedSlotsOnXApproval(args: {
+  db: DB;
+  requestedAuthUserId: string;
+  submittedXUserId: string;
+  bindTargetXUserId: string;
+  operatorAuthUserId: string;
+  operatorActorXUserId: string | null;
+}): Promise<string[]> {
+  const candidateRows = await args.db
+    .select()
+    .from(slots)
+    .where(
+      and(
+        eq(slots.reserved_by_user_id, args.requestedAuthUserId),
+        eq(slots.status, "reserved"),
+        isNull(slots.x_user_id),
+        or(
+          isNull(slots.reserved_x_id_snapshot),
+          eq(slots.reserved_x_id_snapshot, args.submittedXUserId),
+        )!,
+      )!,
+    )
+    .orderBy(
+      asc(slots.event_id),
+      asc(slots.start_time),
+      asc(slots.sort_order),
+      asc(slots.id),
+    )
+    .limit(RESERVED_SLOT_BIND_CAP);
+
+  if (candidateRows.length === 0) return [];
+
+  const allChunks = groupSlotBindChunks(candidateRows);
+  const allAffectedEventIds = new Set<string>();
+  let remainingChunks = allChunks;
+
+  while (remainingChunks.length > 0) {
+    const { chunks, deferred } = planSlotBindBatchBudget(remainingChunks);
+    if (chunks.length === 0) {
+      if (deferred > 0) {
+        console.warn(
+          "[xid-admin] reserved slot bind deferred due to D1 batch budget",
+          { deferred, cap: RESERVED_SLOT_BIND_CAP },
+        );
+      }
+      break;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const mutationStatements: BatchItem<"sqlite">[] = [];
+    const expectedMutationChanges: Array<number | null> = [];
+    const audits: WriteAuditLogInput[] = [];
+    const batchEventIds = new Set<string>();
+
+    for (const chunk of chunks) {
+      const eventId = chunk[0]!.event_id;
+      mutationStatements.push(
+        args.db
+          .update(slots)
+          .set({
+            x_user_id: args.bindTargetXUserId,
+            updated_at: now,
+            version: sql`${slots.version} + 1`,
+          })
+          .where(versionedSlotWhere(eventId, chunk, "reserved")),
+      );
+      expectedMutationChanges.push(chunk.length);
+      for (const before of chunk) {
+        audits.push({
+          table_name: "slots",
+          target_id: before.id,
+          operation: "UPDATE",
+          before: snapshotSlot(before),
+          after: snapshotSlot(
+            applySlotXUserBind(before, args.bindTargetXUserId, now),
+          ),
+          actor_user_id: args.operatorAuthUserId,
+          actor_x_user_id: args.operatorActorXUserId,
+          reason: "slot bind on X approve",
+          context: "x-identity-request",
+          retention_class: "normal",
+        });
+      }
+      batchEventIds.add(eventId);
+      allAffectedEventIds.add(eventId);
+    }
+
+    const rebuildTargets = [...batchEventIds].map((eventId) => ({
+      targetType: "event_slots" as const,
+      targetId: eventId,
+      reason: "x_id_approved_slot_bind",
+      priority: "high" as const,
+      requestedByUserId: args.operatorAuthUserId,
+    }));
+    const queue = await buildStaticRebuildQueueBatch(args.db, rebuildTargets);
+    mutationStatements.push(...queue.statements);
+    expectedMutationChanges.push(...queue.expectedChanges);
+
+    await mutateWithAudit(args.db, {
+      mutationStatements,
+      expectedMutationChanges,
+      audits,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+
+    remainingChunks = remainingChunks.slice(chunks.length);
+    if (remainingChunks.length > 0 && deferred > 0) {
+      console.warn(
+        "[xid-admin] reserved slot bind deferred due to D1 batch budget",
+        {
+          deferred: remainingChunks.reduce((sum, rows) => sum + rows.length, 0),
+          cap: RESERVED_SLOT_BIND_CAP,
+        },
+      );
+      break;
+    }
+  }
+
+  return [...allAffectedEventIds];
+}
+
 async function approveXIdLinkRequestOnce(
   operator: XIdLinkOperator,
   requestId: string,
@@ -135,6 +334,7 @@ async function approveXIdLinkRequestOnce(
   const expected: Array<number | null> = [];
   const audits: WriteAuditLogInput[] = [];
   let notificationXUserId: string | null = null;
+  let bindTargetXUserId: string | null = null;
   let publicVisibilityChanged = false;
 
   if (request.request_type === "alias") {
@@ -142,6 +342,7 @@ async function approveXIdLinkRequestOnce(
     if (!submittedXUserId || !targetXUserId) {
       return { ok: false, message: "別名申請のX IDまたは追加先が不足しています。" };
     }
+    bindTargetXUserId = targetXUserId;
     if (!(await isAuthUserLinkedToXUser(db, requestedAuthUserId, targetXUserId))) {
       return { ok: false, message: "申請者は追加先 X ID に紐づいていません。" };
     }
@@ -183,6 +384,7 @@ async function approveXIdLinkRequestOnce(
     if (!submittedXUserId) return { ok: false, message: "申請 X ID がありません。" };
     const canonicalXUserId = await resolveCanonicalXUserId(db, submittedXUserId);
     const effectiveXUserId = canonicalXUserId ?? submittedXUserId;
+    bindTargetXUserId = effectiveXUserId;
     // rejected行はcanonical resolverでは無効扱いだが、再申請の承認時には
     // 同じ主キーをINSERTせず既存行をapprovedへ戻す必要がある。
     const xUser = (
@@ -455,8 +657,24 @@ async function approveXIdLinkRequestOnce(
     staticRebuildWakeSource:
       publicVisibilityChanged && notificationXUserId ? "admin" : undefined,
   });
+
+  let slotBindEventIds: string[] = [];
+  if (bindTargetXUserId && submittedXUserId) {
+    slotBindEventIds = await bindReservedSlotsOnXApproval({
+      db,
+      requestedAuthUserId,
+      submittedXUserId,
+      bindTargetXUserId,
+      operatorAuthUserId,
+      operatorActorXUserId,
+    });
+  }
+
   await runXIdAdminPostCommit("xid-admin.approveXIdLinkRequest", () => {
     revalidateIdentityAdminPaths();
+    for (const eventId of slotBindEventIds) {
+      revalidatePath(`/event/${eventId}/slots`);
+    }
   });
   return { ok: true, message: request.request_type === "alias" ? "別名を承認しました。" : "連携を承認しました。" };
 }

@@ -24,7 +24,7 @@ export type OnboardingState = {
   requestedXId: string | null;
   /** active_x_user_id が承認済み (approved) のときの値。null = 投稿不可。 */
   activeApprovedXId: string | null;
-  /** ログイン + TOS同意 + X申請済み(pending含む)が満たされているとき true。枠確保の最低条件。 */
+  /** ログイン + TOS同意が満たされているとき true。枠確保の最低条件（X ID 不要）。 */
   canReserveSlot: boolean;
   /** ログイン + TOS同意 + active X が approved のとき true。作品投稿の条件。 */
   canPost: boolean;
@@ -100,9 +100,7 @@ export async function getOnboardingState(
 
   // DB 障害時は fail-closed: canPost/canReserveSlot は false のまま
   const canPost = !tosPending && activeApprovedXId != null;
-  const canReserveSlot =
-    !tosPending &&
-    (xIdentityStatus === "pending" || xIdentityStatus === "approved");
+  const canReserveSlot = db != null && !tosPending;
 
   return {
     isLoggedIn: true,

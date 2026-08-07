@@ -225,7 +225,7 @@ export default async function EntryPage({
           <div>
             <h2 className="fn-jp fn-panel-title">初期設定が未完了です</h2>
             <p className="fn-jp fn-entry-status-lead">
-              利用規約への同意と X ID 申請を完了してください。
+              利用規約への同意を完了してください。
             </p>
             <Link href={onboardingNext} className="fn-btn fn-btn-primary fn-mt-12">
               初期設定を続ける
