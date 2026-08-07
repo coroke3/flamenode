@@ -6,6 +6,10 @@ import { getDatabaseAsync, getEnvAsync } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
+import {
+  createTraceId,
+  logFlowTrace,
+} from "@/lib/observability/flowTrace";
 
 const LOCAL_DEV_AUTH_SECRET = "flamenode-local-development-auth-secret";
 
@@ -114,6 +118,89 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     },
     adapter: {
       ...drizzleAdapter,
+      ...(drizzleAdapter.createUser
+        ? {
+            async createUser(
+              data: Parameters<NonNullable<typeof drizzleAdapter.createUser>>[0],
+            ) {
+              const traceId = createTraceId();
+              try {
+                const user = await drizzleAdapter.createUser!(data);
+                logFlowTrace({
+                  flow: "discord_auth",
+                  phase: "user_created",
+                  trace_id: traceId,
+                  result: "succeeded",
+                });
+                return user;
+              } catch (error) {
+                logFlowTrace({
+                  flow: "discord_auth",
+                  phase: "user_created",
+                  trace_id: traceId,
+                  result: "failed",
+                  error_code: "AUTH_USER_CREATE_FAILED",
+                });
+                throw error;
+              }
+            },
+          }
+        : {}),
+      ...(drizzleAdapter.createSession
+        ? {
+            async createSession(
+              session: Parameters<
+                NonNullable<typeof drizzleAdapter.createSession>
+              >[0],
+            ) {
+              const traceId = createTraceId();
+              try {
+                const created = await drizzleAdapter.createSession!(session);
+                logFlowTrace({
+                  flow: "discord_auth",
+                  phase: "session_created",
+                  trace_id: traceId,
+                  result: "succeeded",
+                });
+                return created;
+              } catch (error) {
+                logFlowTrace({
+                  flow: "discord_auth",
+                  phase: "session_created",
+                  trace_id: traceId,
+                  result: "failed",
+                  error_code: "AUTH_SESSION_CREATE_FAILED",
+                });
+                throw error;
+              }
+            },
+          }
+        : {}),
+      ...(drizzleAdapter.deleteSession
+        ? {
+            async deleteSession(sessionToken: string): Promise<void> {
+              const traceId = createTraceId();
+              try {
+                await drizzleAdapter.deleteSession!(sessionToken);
+                logFlowTrace({
+                  flow: "discord_auth",
+                  phase: "signout_completed",
+                  trace_id: traceId,
+                  result: "succeeded",
+                });
+              } catch (error) {
+                logFlowTrace({
+                  flow: "discord_auth",
+                  phase: "signout_completed",
+                  trace_id: traceId,
+                  result: "failed",
+                  error_code: "AUTH_SESSION_DELETE_FAILED",
+                });
+                throw error;
+              }
+            },
+          }
+        : {}),
       async linkAccount(account) {
         await linkDiscordAccountAtomically(db, account, undefined, undefined, siteOrigin);
       },
