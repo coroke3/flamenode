@@ -49,12 +49,14 @@ export function normalizeStaticTopSlotStats(value: unknown): StaticTopSlotStats 
   };
 }
 
-/** 補助 artifact が有効なとき topSlotStats を置換する。無効時は top をそのまま返す。 */
+/** 補助 artifact が有効かつ top.json より新しいとき topSlotStats を置換する。 */
 export function applyTopSlotStatsOverride(
   top: StaticTopData,
   artifact: StaticTopSlotStats | null,
 ): StaticTopData {
   if (!artifact) return top;
+  const topGeneratedAt = top.generatedAt ?? 0;
+  if (artifact.generatedAt < topGeneratedAt) return top;
   return { ...top, topSlotStats: artifact.items };
 }
 

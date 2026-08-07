@@ -546,6 +546,11 @@ test("rebuildTopはヒーローイベントのslot_statsだけを集計する", 
   assert.equal(top.body.slot_stats.length, 2);
   assert.ok(top.body.slot_stats.every((row) => heroIds.includes(row.event_id)));
   assert.ok(top.body.slot_stats.every((row) => row.event_id !== "other-event"));
+  const artifact = puts.find((entry) => entry.key === "top/slot-stats.v1.json");
+  assert.ok(artifact);
+  assert.equal(artifact.body.schema_version, 1);
+  assert.equal(artifact.body.generated_at, top.body.generated_at);
+  assert.deepEqual(artifact.body.items, top.body.slot_stats);
 });
 
 test("rebuildTopSlotStatsはヒーローイベントのslot_statsだけをartifactへ書く", async () => {

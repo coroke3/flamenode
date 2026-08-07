@@ -30,6 +30,7 @@ test("normalizeStaticTopSlotStats: schema mismatch / malformed は null", () => 
 
 test("applyTopSlotStatsOverride: artifact 有効時は topSlotStats を置換する", () => {
   const top = normalizeStaticTop({
+    generated_at: 40,
     latest: [{ id: "v1", title: "Video", display_name: "Creator" }],
     slot_stats: [{ event_id: "event-1", available: 1, total: 10 }],
   });
@@ -42,6 +43,38 @@ test("applyTopSlotStatsOverride: artifact 有効時は topSlotStats を置換す
   const merged = applyTopSlotStatsOverride(top, artifact);
   assert.deepEqual(merged.topSlotStats.get("event-1"), { available: 9, total: 10 });
   assert.equal(merged.latest[0].id, "v1");
+});
+
+test("applyTopSlotStatsOverride: artifact.generated_at < top.generated_at なら top.json を維持", () => {
+  const top = normalizeStaticTop({
+    generated_at: 100,
+    latest: [{ id: "v1", title: "Video", display_name: "Creator" }],
+    slot_stats: [{ event_id: "event-1", available: 1, total: 10 }],
+  });
+  assert.ok(top);
+  const artifact = normalizeStaticTopSlotStats({
+    schema_version: 1,
+    generated_at: 50,
+    items: [{ event_id: "event-1", available: 9, total: 10 }],
+  });
+  const merged = applyTopSlotStatsOverride(top, artifact);
+  assert.deepEqual(merged.topSlotStats.get("event-1"), { available: 1, total: 10 });
+});
+
+test("applyTopSlotStatsOverride: artifact が新しいときは artifact を採用", () => {
+  const top = normalizeStaticTop({
+    generated_at: 50,
+    latest: [{ id: "v1", title: "Video", display_name: "Creator" }],
+    slot_stats: [{ event_id: "event-1", available: 1, total: 10 }],
+  });
+  assert.ok(top);
+  const artifact = normalizeStaticTopSlotStats({
+    schema_version: 1,
+    generated_at: 100,
+    items: [{ event_id: "event-1", available: 9, total: 10 }],
+  });
+  const merged = applyTopSlotStatsOverride(top, artifact);
+  assert.deepEqual(merged.topSlotStats.get("event-1"), { available: 9, total: 10 });
 });
 
 test("applyTopSlotStatsOverride: artifact 無効時は top.json.slot_stats を維持", () => {

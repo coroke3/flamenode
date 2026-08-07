@@ -487,14 +487,17 @@ async function loadHeroEventSlotStats(
   return slotStats.results ?? [];
 }
 
-async function rebuildTopSlotStats(env: Env, signal?: RebuildSignal): Promise<void> {
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
-  const items = await loadHeroEventSlotStats(env, activeEventItems, signal);
+type HeroEventSlotStatRow = { event_id: string; available: number; total: number };
+
+async function putTopSlotStatsArtifact(
+  env: Env,
+  items: readonly HeroEventSlotStatRow[],
+  generatedAt: number,
+  signal?: RebuildSignal,
+): Promise<void> {
   const payload = {
     schema_version: TOP_SLOT_STATS_SCHEMA_VERSION,
-    generated_at: now,
+    generated_at: generatedAt,
     items,
   };
   const byteLength = topSlotStatsArtifactByteLength(payload);
@@ -512,6 +515,14 @@ async function rebuildTopSlotStats(env: Env, signal?: RebuildSignal): Promise<vo
     { targetType: "top_slot_stats", targetId: "global" },
     signal,
   );
+}
+
+async function rebuildTopSlotStats(env: Env, signal?: RebuildSignal): Promise<void> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  const activeEventItems = await loadActivePublicEventItemsForTopHero(env, now, signal);
+  const items = await loadHeroEventSlotStats(env, activeEventItems, signal);
+  await putTopSlotStatsArtifact(env, items, now, signal);
 }
 
 async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
@@ -666,6 +677,7 @@ async function rebuildTop(env: Env, signal?: RebuildSignal): Promise<void> {
   };
   throwIfAborted(signal);
   await putJson(env, "top.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.top), { targetType: "top", targetId: "global" }, signal);
+  await putTopSlotStatsArtifact(env, slotStatsItems, now, signal);
   await env.KV.put(TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY, utcDayKey(now));
   throwIfAborted(signal);
   await env.KV.put(
