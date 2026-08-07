@@ -17,6 +17,7 @@ export type VideoEditSectionKey =
   | "video.primary_event"
   | "video.status"
   | "video.chapter_admin"
+  | "video.permissions"
   // Legacy / admin UI permission keys. Keep these accepted so
   // Old permission keys are still accepted so migrated staff rows keep working.
   | "videos.title"

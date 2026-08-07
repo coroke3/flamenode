@@ -60,20 +60,21 @@ export default async function EditVideoPermissionsPage({
   if (!video) notFound();
 
   const editUser = { id: user.id, role: user.role ?? null };
-  const canEditIdentity = await canEditVideo({
+  const canEditPermissions = await canEditVideo({
     db,
     user: editUser,
     video,
-    requiredKey: "video.identity",
+    requiredKey: "video.permissions",
     privilegeMode,
   });
-  if (!canEditIdentity) {
+  if (!canEditPermissions) {
     return (
       <div className="fn-public-container fn-page fn-guard-shell">
         <div className="fn-empty fn-guard-card">
           <h1 className="fn-guard-title">編集権限がありません</h1>
           <p className="fn-empty-message">
-            この作品の編集権限を管理する権限がありません。
+            共同編集権限を管理する権限がありません。作品の作者、または
+            video.permissions を持つ運営・管理者のみ設定できます。
           </p>
           <Link
             href={`/dashboard/edit/${id}${privilegedQuery(privilegeMode)}`}
@@ -165,6 +166,7 @@ export default async function EditVideoPermissionsPage({
               videoTitle={video.title}
               subjects={videoCollabSubjects}
               publicMembers={publicMembersForCollab}
+              editPrivilegeMode={privilegeMode}
             />
           </div>
         </section>

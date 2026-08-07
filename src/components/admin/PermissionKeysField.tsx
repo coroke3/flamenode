@@ -92,10 +92,10 @@ export function PermissionKeysField({
   const allSelected = selected.size === CHOICES.length;
   const selectedLabel =
     selected.size === 0
-      ? "このイベントでは追加で編集できる項目はありません"
+      ? "作品所有者はイベント既定の一般作品権限に従います"
       : allSelected
-        ? "すべての項目を編集できます"
-        : `${selected.size}項目を編集できます`;
+        ? "作品所有者が編集できるすべての項目を許可"
+        : `${selected.size}項目を作品所有者が編集できます`;
 
   return (
     <div style={{ display: "grid", gap: 12 }}>

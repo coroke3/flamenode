@@ -39,6 +39,14 @@ import {
   MAX_ATOMIC_VIDEO_EVENTS,
   MAX_ATOMIC_VIDEO_SOFTWARES,
 } from "@/lib/video/atomicLimits";
+import type { VideoEditPermissionViewModel } from "@/lib/video/videoEditPermissionView";
+import {
+  hasAnyEditableVideoFormSection,
+  resolvePermissionUnlockHint,
+} from "@/lib/video/permissionUnlockHint";
+import { PermissionBadge } from "@/components/video/permission/PermissionBadge";
+import { FieldLockNote } from "@/components/video/permission/FieldLockNote";
+import { PermissionFieldLabel } from "@/components/video/permission/PermissionFieldLabel";
 
 /** X ID 既定プロフィール。「再適用」ボタン用。作品スナップショットとは別。 */
 export interface VideoDefaultProfile {
@@ -186,6 +194,8 @@ interface VideoFormProps {
    * フォーム初期値とは別に渡す (編集時は video.creator_* が初期値)。
    */
   defaultProfile?: VideoDefaultProfile;
+  /** 編集モード時の権限 ViewModel。指定時のみ権限 UI を有効化する。 */
+  permissionView?: VideoEditPermissionViewModel;
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -206,6 +216,28 @@ function isFieldDisabled(
 /** CSS クラス名を条件結合する軽量ヘルパー。外部依存不要。 */
 function cx(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(" ");
+}
+
+function videoFormLockNoteId(key: string): string {
+  return `video-form-lock-${key}`;
+}
+
+function mergeDescribedBy(...ids: (string | undefined)[]): string | undefined {
+  const filtered = ids.filter(Boolean);
+  return filtered.length > 0 ? filtered.join(" ") : undefined;
+}
+
+function resolvePermissionSubmitBlockedHint(
+  viewModel: VideoEditPermissionViewModel,
+): string | null {
+  if (hasAnyEditableVideoFormSection(viewModel)) return null;
+  if (viewModel.canOfferEventMode) {
+    return "イベント運営権限で編集できる項目があります。上部の「イベント運営権限で編集」を選択してください。";
+  }
+  if (viewModel.canOfferAdminMode) {
+    return "管理者権限で編集できる項目があります。上部の「管理者権限で編集」を選択してください。";
+  }
+  return "現在の権限では編集できる項目がありません。";
 }
 
 /**
@@ -233,6 +265,7 @@ export function VideoForm({
   canChangeSubmitter = false,
   editPrivilegeMode,
   defaultProfile,
+  permissionView,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
@@ -372,8 +405,18 @@ export function VideoForm({
   // free/slot モードでは Active X ID が投稿主体に固定される。
   // edit モードでは admin のみ変更可。
   const isActiveXFixed = mode === "free" || mode === "slot";
+  const showPermissionUi = mode === "edit" && Boolean(permissionView);
+  const noEditableFormSections =
+    showPermissionUi &&
+    permissionView != null &&
+    !hasAnyEditableVideoFormSection(permissionView);
+  const permissionSubmitBlockedHint =
+    showPermissionUi && permissionView && !submitBlockedReason
+      ? resolvePermissionSubmitBlockedHint(permissionView)
+      : null;
   const canSubmit =
     !submitBlockedReason &&
+    !noEditableFormSections &&
     ((isActiveXFixed && !!normalizedActiveXId) ||
       (!isActiveXFixed && (hasSelectableXIds || !!normalizedInitialXId)));
 
@@ -649,7 +692,13 @@ export function VideoForm({
   return (
     <form
       ref={formRef}
-      className={styles.form}
+      className={[
+        styles.form,
+        mode === "edit" ? styles.formEditMode : "",
+        !isWizard && mode !== "edit" ? styles.formMobileDock : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       onSubmit={handleSubmit}
       onChange={() => {
         if (!dirty) setDirty(true);
@@ -743,12 +792,31 @@ export function VideoForm({
       >
         <h2 className={styles.sectionTitle}>
           <Icon name="user" size={14} aria-hidden /> 提出者情報
-          {submitterDisabled ? (
+          {showPermissionUi && permissionView ? (
+            <PermissionBadge
+              permission={permissionView.identity}
+              className={styles.sectionPermissionBadge}
+            />
+          ) : submitterDisabled ? (
             <span className={styles.sectionDisabledBadge} aria-label="編集不可">
               <Icon name="alert" size={11} aria-hidden /> 編集権限なし
             </span>
           ) : null}
         </h2>
+        {showPermissionUi && permissionView && submitterDisabled ? (
+          <FieldLockNote
+            id={videoFormLockNoteId("section-identity")}
+            permission={permissionView.identity}
+            unlockHint={resolvePermissionUnlockHint(
+              permissionView.identity,
+              permissionView,
+            )}
+          />
+        ) : submitterDisabled && mode === "edit" ? (
+          <p className={styles.help} role="status" id={videoFormLockNoteId("section-identity")}>
+            この項目は、現在の一般作品権限では編集できません。
+          </p>
+        ) : null}
         <p className={styles.help}>
           {mode === "edit" ? (
             <>
@@ -840,11 +908,14 @@ export function VideoForm({
                 setDirty(true);
               }}
               aria-invalid={stepError?.fieldId === "display_name" || undefined}
-              aria-describedby={
+              aria-describedby={mergeDescribedBy(
                 stepError?.fieldId === "display_name"
                   ? "wizard-validation-error"
-                  : undefined
-              }
+                  : undefined,
+                submitterDisabled
+                  ? videoFormLockNoteId("section-identity")
+                  : undefined,
+              )}
               readOnly={fieldDisabled("submitter.display_name")}
               aria-readonly={fieldDisabled("submitter.display_name") || undefined}
               style={fieldDisabled("submitter.display_name") ? { opacity: 0.65, cursor: "default" } : undefined}
@@ -886,7 +957,13 @@ export function VideoForm({
             className="fn-input"
             rows={3}
             maxLength={1000}
-            disabled={fieldDisabled("submitter.profile_text")}
+            readOnly={fieldDisabled("submitter.profile_text")}
+            aria-readonly={fieldDisabled("submitter.profile_text") || undefined}
+            style={
+              fieldDisabled("submitter.profile_text")
+                ? { opacity: 0.65, cursor: "default" }
+                : undefined
+            }
           />
         </div>
         <div className={cx(styles.field, styles.editableField)}>
@@ -932,17 +1009,46 @@ export function VideoForm({
       >
         <h2 className={styles.sectionTitle}>
           <Icon name="youtube" size={14} aria-hidden /> 動画と基本情報
-          {videoSectionDisabled ? (
+          {showPermissionUi && permissionView ? (
+            <PermissionBadge
+              permission={permissionView.basics}
+              className={styles.sectionPermissionBadge}
+            />
+          ) : videoSectionDisabled ? (
             <span className={styles.sectionDisabledBadge} aria-label="編集不可">
               <Icon name="alert" size={11} aria-hidden /> 編集権限なし
             </span>
           ) : null}
         </h2>
+        {showPermissionUi && permissionView && videoSectionDisabled ? (
+          <FieldLockNote
+            id={videoFormLockNoteId("section-video")}
+            permission={permissionView.basics}
+            unlockHint={resolvePermissionUnlockHint(
+              permissionView.basics,
+              permissionView,
+            )}
+          />
+        ) : videoSectionDisabled && mode === "edit" ? (
+          <p className={styles.help} role="status" id={videoFormLockNoteId("section-video")}>
+            この項目は、現在の一般作品権限では編集できません。
+          </p>
+        ) : null}
 
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={`${styles.label} ${styles.required}`} htmlFor="title">
-            作品タイトル
-          </label>
+          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            <PermissionFieldLabel
+              label="作品タイトル"
+              htmlFor="title"
+              permission={permissionView.basics}
+              required
+              noteId={videoFormLockNoteId("basics")}
+            />
+          ) : (
+            <label className={`${styles.label} ${styles.required}`} htmlFor="title">
+              作品タイトル
+            </label>
+          )}
           <input
             id="title"
             name="title"
@@ -957,15 +1063,34 @@ export function VideoForm({
                 setDirty(true);
               }}
               aria-invalid={stepError?.fieldId === "title" || undefined}
-              aria-describedby={
+              aria-describedby={mergeDescribedBy(
                 stepError?.fieldId === "title"
                   ? "wizard-validation-error"
-                  : undefined
-              }
+                  : undefined,
+                showPermissionUi &&
+                  permissionView &&
+                  !videoSectionDisabled &&
+                  !permissionView.basics.editable
+                  ? videoFormLockNoteId("basics")
+                  : undefined,
+                videoSectionDisabled
+                  ? videoFormLockNoteId("section-video")
+                  : undefined,
+              )}
             readOnly={fieldDisabled("video.title")}
             aria-readonly={fieldDisabled("video.title") || undefined}
             style={fieldDisabled("video.title") ? { opacity: 0.65, cursor: "default" } : undefined}
           />
+          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            <FieldLockNote
+              id={videoFormLockNoteId("basics")}
+              permission={permissionView.basics}
+              unlockHint={resolvePermissionUnlockHint(
+                permissionView.basics,
+                permissionView,
+              )}
+            />
+          ) : null}
         </div>
 
         {mode === "free" ? (
@@ -988,12 +1113,22 @@ export function VideoForm({
 
         {!isWizard ? (
         <div className={cx(styles.field, styles.editableField)}>
-          <label
-            className={`${styles.label} ${isYoutubeUrlRequired ? styles.required : ""}`}
-            htmlFor="youtube_url"
-          >
-            YouTube URL
-          </label>
+          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            <PermissionFieldLabel
+              label="YouTube URL"
+              htmlFor="youtube_url"
+              permission={permissionView.youtube}
+              required={isYoutubeUrlRequired}
+              noteId={videoFormLockNoteId("youtube")}
+            />
+          ) : (
+            <label
+              className={`${styles.label} ${isYoutubeUrlRequired ? styles.required : ""}`}
+              htmlFor="youtube_url"
+            >
+              YouTube URL
+            </label>
+          )}
           <input
             id="youtube_url"
             name="youtube_url"
@@ -1006,7 +1141,25 @@ export function VideoForm({
             readOnly={isYoutubeFieldDisabled}
             aria-readonly={isYoutubeFieldDisabled || undefined}
             style={isYoutubeFieldDisabled ? { opacity: 0.65, cursor: "default" } : undefined}
+            aria-describedby={mergeDescribedBy(
+              showPermissionUi &&
+                permissionView &&
+                !videoSectionDisabled &&
+                !permissionView.youtube.editable
+                ? videoFormLockNoteId("youtube")
+                : undefined,
+            )}
           />
+          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            <FieldLockNote
+              id={videoFormLockNoteId("youtube")}
+              permission={permissionView.youtube}
+              unlockHint={resolvePermissionUnlockHint(
+                permissionView.youtube,
+                permissionView,
+              )}
+            />
+          ) : null}
           {showYoutubeAddBlockedHint ? (
             <p className={styles.help}>
               YouTube URL は未登録です。追加する権限がありません。
@@ -1044,9 +1197,18 @@ export function VideoForm({
 
         <div className={`${styles.row} ${styles.cols2}`}>
           <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="music">
-              使用楽曲
-            </label>
+            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+              <PermissionFieldLabel
+                label="使用楽曲"
+                htmlFor="music"
+                permission={permissionView.credits}
+                noteId={videoFormLockNoteId("credits-music")}
+              />
+            ) : (
+              <label className={styles.label} htmlFor="music">
+                使用楽曲
+              </label>
+            )}
             <input
               id="music"
               name="music"
@@ -1056,6 +1218,14 @@ export function VideoForm({
               placeholder="アーティスト名 - 曲名"
               maxLength={200}
               disabled={fieldDisabled("video.music")}
+              aria-describedby={mergeDescribedBy(
+                showPermissionUi &&
+                  permissionView &&
+                  !videoSectionDisabled &&
+                  !permissionView.credits.editable
+                  ? videoFormLockNoteId("credits-music")
+                  : undefined,
+              )}
             />
             <input
               id="music_reference_url"
@@ -1068,14 +1238,33 @@ export function VideoForm({
               disabled={fieldDisabled("video.music")}
               style={{ marginTop: 6 }}
             />
+            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+              <FieldLockNote
+                id={videoFormLockNoteId("credits-music")}
+                permission={permissionView.credits}
+                unlockHint={resolvePermissionUnlockHint(
+                  permissionView.credits,
+                  permissionView,
+                )}
+              />
+            ) : null}
             <p className={styles.help}>
               楽曲ページ・ニコニコ動画・YouTube などのリンクを入れると、視聴者に楽曲ページへ飛んでもらえます。
             </p>
           </div>
           <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="credit">
-              クレジット
-            </label>
+            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+              <PermissionFieldLabel
+                label="クレジット"
+                htmlFor="credit"
+                permission={permissionView.credits}
+                noteId={videoFormLockNoteId("credits-credit")}
+              />
+            ) : (
+              <label className={styles.label} htmlFor="credit">
+                クレジット
+              </label>
+            )}
             <input
               id="credit"
               name="credit"
@@ -1085,13 +1274,49 @@ export function VideoForm({
               placeholder="提供 / 作詞作曲 など"
               maxLength={200}
               disabled={fieldDisabled("video.credit")}
+              aria-describedby={mergeDescribedBy(
+                showPermissionUi &&
+                  permissionView &&
+                  !videoSectionDisabled &&
+                  !permissionView.credits.editable
+                  ? videoFormLockNoteId("credits-credit")
+                  : undefined,
+              )}
             />
+            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+              <FieldLockNote
+                id={videoFormLockNoteId("credits-credit")}
+                permission={permissionView.credits}
+                unlockHint={resolvePermissionUnlockHint(
+                  permissionView.credits,
+                  permissionView,
+                )}
+              />
+            ) : null}
           </div>
         </div>
 
         {eventOptions.length > 0 ? (
           <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label}>所属イベント</label>
+            {showPermissionUi && permissionView ? (
+              <PermissionFieldLabel
+                label="所属イベント"
+                permission={permissionView.primaryEvent}
+                noteId={videoFormLockNoteId("primaryEvent")}
+              />
+            ) : (
+              <label className={styles.label}>所属イベント</label>
+            )}
+            {showPermissionUi && permissionView ? (
+              <FieldLockNote
+                id={videoFormLockNoteId("primaryEvent")}
+                permission={permissionView.primaryEvent}
+                unlockHint={resolvePermissionUnlockHint(
+                  permissionView.primaryEvent,
+                  permissionView,
+                )}
+              />
+            ) : null}
             <p className={styles.help}>
               この作品を関連付けるイベントを選択します。複数選択可。
               {slotId
@@ -1198,17 +1423,44 @@ export function VideoForm({
       >
         <h2 className={styles.sectionTitle}>
           <Icon name="edit" size={14} aria-hidden /> 紹介文
-          {descriptionsDisabled ? (
+          {showPermissionUi && permissionView ? (
+            <PermissionBadge
+              permission={permissionView.descriptions}
+              className={styles.sectionPermissionBadge}
+            />
+          ) : descriptionsDisabled ? (
             <span className={styles.sectionDisabledBadge} aria-label="編集不可">
               <Icon name="alert" size={11} aria-hidden /> 編集権限なし
             </span>
           ) : null}
         </h2>
+        {showPermissionUi && permissionView && descriptionsDisabled ? (
+          <FieldLockNote
+            id={videoFormLockNoteId("section-descriptions")}
+            permission={permissionView.descriptions}
+            unlockHint={resolvePermissionUnlockHint(
+              permissionView.descriptions,
+              permissionView,
+            )}
+          />
+        ) : descriptionsDisabled && mode === "edit" ? (
+          <p className={styles.help} role="status" id={videoFormLockNoteId("section-descriptions")}>
+            この項目は、現在の一般作品権限では編集できません。
+          </p>
+        ) : null}
 
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="intro_comment">
-            紹介コメント
-          </label>
+          {showPermissionUi && permissionView ? (
+            <PermissionFieldLabel
+              label="紹介コメント"
+              htmlFor="intro_comment"
+              permission={permissionView.descriptions}
+            />
+          ) : (
+            <label className={styles.label} htmlFor="intro_comment">
+              紹介コメント
+            </label>
+          )}
           <textarea
             id="intro_comment"
             name="intro_comment"
@@ -1217,7 +1469,18 @@ export function VideoForm({
             rows={3}
             maxLength={500}
             placeholder="作品の見どころを 1〜2 行で。"
-            disabled={fieldDisabled("descriptions.intro_comment")}
+            readOnly={fieldDisabled("descriptions.intro_comment")}
+            aria-readonly={fieldDisabled("descriptions.intro_comment") || undefined}
+            style={
+              fieldDisabled("descriptions.intro_comment")
+                ? { opacity: 0.65, cursor: "default" }
+                : undefined
+            }
+            aria-describedby={
+              descriptionsDisabled
+                ? videoFormLockNoteId("section-descriptions")
+                : undefined
+            }
           />
         </div>
 
@@ -1232,7 +1495,13 @@ export function VideoForm({
             className="fn-input"
             rows={4}
             maxLength={1000}
-            disabled={fieldDisabled("descriptions.highlights")}
+            readOnly={fieldDisabled("descriptions.highlights")}
+            aria-readonly={fieldDisabled("descriptions.highlights") || undefined}
+            style={
+              fieldDisabled("descriptions.highlights")
+                ? { opacity: 0.65, cursor: "default" }
+                : undefined
+            }
           />
         </div>
 
@@ -1247,7 +1516,13 @@ export function VideoForm({
             className="fn-input"
             rows={4}
             maxLength={1000}
-            disabled={fieldDisabled("descriptions.production_story")}
+            readOnly={fieldDisabled("descriptions.production_story")}
+            aria-readonly={fieldDisabled("descriptions.production_story") || undefined}
+            style={
+              fieldDisabled("descriptions.production_story")
+                ? { opacity: 0.65, cursor: "default" }
+                : undefined
+            }
           />
         </div>
 
@@ -1315,7 +1590,15 @@ export function VideoForm({
                 maxLength={1000}
                 required={question.required}
                 placeholder={question.placeholder}
-                disabled={fieldDisabled("descriptions.stage_permission")}
+                readOnly={fieldDisabled("descriptions.stage_permission")}
+                aria-readonly={
+                  fieldDisabled("descriptions.stage_permission") || undefined
+                }
+                style={
+                  fieldDisabled("descriptions.stage_permission")
+                    ? { opacity: 0.65, cursor: "default" }
+                    : undefined
+                }
                 aria-invalid={stepError?.fieldId === fieldId || undefined}
                 aria-describedby={
                   stepError?.fieldId === fieldId
@@ -1338,7 +1621,13 @@ export function VideoForm({
             className="fn-input"
             rows={3}
             maxLength={500}
-            disabled={fieldDisabled("descriptions.closing_comment")}
+            readOnly={fieldDisabled("descriptions.closing_comment")}
+            aria-readonly={fieldDisabled("descriptions.closing_comment") || undefined}
+            style={
+              fieldDisabled("descriptions.closing_comment")
+                ? { opacity: 0.65, cursor: "default" }
+                : undefined
+            }
           />
         </div>
       </section>
@@ -1352,12 +1641,31 @@ export function VideoForm({
       >
         <h2 className={styles.sectionTitle}>
           <Icon name="users" size={14} aria-hidden /> 合作メンバー
-          {membersSectionDisabled ? (
+          {showPermissionUi && permissionView ? (
+            <PermissionBadge
+              permission={permissionView.members}
+              className={styles.sectionPermissionBadge}
+            />
+          ) : membersSectionDisabled ? (
             <span className={styles.sectionDisabledBadge} aria-label="編集不可">
               <Icon name="alert" size={11} aria-hidden /> 編集権限なし
             </span>
           ) : null}
         </h2>
+        {showPermissionUi && permissionView && membersSectionDisabled ? (
+          <FieldLockNote
+            id={videoFormLockNoteId("section-members")}
+            permission={permissionView.members}
+            unlockHint={resolvePermissionUnlockHint(
+              permissionView.members,
+              permissionView,
+            )}
+          />
+        ) : membersSectionDisabled && mode === "edit" ? (
+          <p className={styles.help} role="status" id={videoFormLockNoteId("section-members")}>
+            この項目は、現在の一般作品権限では編集できません。
+          </p>
+        ) : null}
         <label
           style={{
             display: "inline-flex",
@@ -1380,6 +1688,11 @@ export function VideoForm({
                 readOnly
                 disabled
                 aria-readonly
+                aria-describedby={
+                  membersSectionDisabled
+                    ? videoFormLockNoteId("section-members")
+                    : undefined
+                }
               />
             </>
           ) : (
@@ -1716,6 +2029,24 @@ export function VideoForm({
           <Icon name="warning" size={13} aria-hidden />
           <span>{submitBlockedReason}</span>
         </div>
+      ) : noEditableFormSections && permissionSubmitBlockedHint ? (
+        <div
+          role="status"
+          style={{
+            padding: "12px 14px",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-sm)",
+            background: "var(--bg-elevated)",
+            color: "var(--text-primary)",
+            fontSize: 13,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+          }}
+        >
+          <Icon name="info" size={13} aria-hidden />
+          <span>{permissionSubmitBlockedHint}</span>
+        </div>
       ) : null}
       </div>
 
@@ -1807,54 +2138,56 @@ export function VideoForm({
         ) : null}
       </aside>
 
-      <div className={styles.actions}>
-        {isWizard ? (
-          <div className={styles.wizardNav}>
-            <button
-              type="button"
-              className="fn-btn fn-btn-ghost"
-              onClick={goWizardBack}
-              disabled={isWizardFirstStep || pending}
-            >
-              戻る
-            </button>
-            <span className={styles.wizardNavHint}>
-              {wizardSteps[currentStep]?.label ?? ""}
-            </span>
-            {isWizardLastStep ? (
-              <button
-                type="submit"
-                className="fn-btn fn-btn-primary"
-                disabled={pending || !canSubmit}
-                aria-busy={pending}
-              >
-                <Icon name="upload" size={14} aria-hidden />
-                {pending ? "送信中…" : "提出する"}
-              </button>
-            ) : (
+      {mode !== "edit" ? (
+        <div className={styles.actions}>
+          {isWizard ? (
+            <div className={styles.wizardNav}>
               <button
                 type="button"
-                className="fn-btn fn-btn-primary"
-                onClick={goWizardNext}
-                disabled={pending}
+                className="fn-btn fn-btn-ghost"
+                onClick={goWizardBack}
+                disabled={isWizardFirstStep || pending}
               >
-                次へ
-                <Icon name="chevron-right" size={14} aria-hidden />
+                戻る
               </button>
-            )}
-          </div>
-        ) : (
-          <button
-            type="submit"
-            className="fn-btn fn-btn-primary"
-            disabled={pending || !canSubmit}
-            aria-busy={pending}
-          >
-            <Icon name="upload" size={14} aria-hidden />
-            {pending ? "送信中…" : "提出する"}
-          </button>
-        )}
-      </div>
+              <span className={styles.wizardNavHint}>
+                {wizardSteps[currentStep]?.label ?? ""}
+              </span>
+              {isWizardLastStep ? (
+                <button
+                  type="submit"
+                  className="fn-btn fn-btn-primary"
+                  disabled={pending || !canSubmit}
+                  aria-busy={pending}
+                >
+                  <Icon name="upload" size={14} aria-hidden />
+                  {pending ? "送信中…" : "提出する"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="fn-btn fn-btn-primary"
+                  onClick={goWizardNext}
+                  disabled={pending}
+                >
+                  次へ
+                  <Icon name="chevron-right" size={14} aria-hidden />
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              type="submit"
+              className="fn-btn fn-btn-primary"
+              disabled={pending || !canSubmit}
+              aria-busy={pending}
+            >
+              <Icon name="upload" size={14} aria-hidden />
+              {pending ? "送信中…" : "提出する"}
+            </button>
+          )}
+        </div>
+      ) : null}
 
       {isWizard ? (
         <div className={styles.mobileWizardBar} aria-label="ステップ操作">
@@ -1887,25 +2220,33 @@ export function VideoForm({
           )}
         </div>
       ) : (
-      <div className={styles.mobileSubmitBar} aria-label="送信操作">
-        <span className={styles.mobileSubmitHint}>
-          {submitBlockedReason
-            ? "投稿できません"
-            : pending
-              ? "送信中…"
-              : mode === "edit"
-                ? "変更を保存できます"
-                : "入力後に提出できます"}
-        </span>
-        <button
-          type="submit"
-          className="fn-btn fn-btn-primary"
-          disabled={pending || !canSubmit}
-          aria-busy={pending}
+        <div
+          className={styles.submitDock}
+          aria-label={mode === "edit" ? "保存操作" : "送信操作"}
         >
-          {pending ? "送信中…" : mode === "edit" ? "保存する" : "提出する"}
-        </button>
-      </div>
+          <div className={styles.submitDockInner}>
+            <span className={styles.submitDockHint}>
+              {submitBlockedReason
+                ? "投稿できません"
+                : noEditableFormSections && permissionSubmitBlockedHint
+                  ? permissionSubmitBlockedHint
+                  : pending
+                    ? "送信中…"
+                    : mode === "edit"
+                      ? "変更を保存できます"
+                      : "入力後に提出できます"}
+            </span>
+            <button
+              type="submit"
+              className="fn-btn fn-btn-primary"
+              disabled={pending || !canSubmit}
+              aria-busy={pending}
+            >
+              <Icon name="upload" size={14} aria-hidden />
+              {pending ? "送信中…" : mode === "edit" ? "保存する" : "提出する"}
+            </button>
+          </div>
+        </div>
       )}
     </form>
   );

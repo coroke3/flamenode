@@ -20,7 +20,14 @@ const helperSources = [
 test("YouTube IDがあるときだけderived rows planを追加する", () => {
   assert.match(submit, /if \(youtubeFieldPresent && submittedYoutubeId\) \{[\s\S]*buildVideoDerivedRowsPlan/);
   assert.match(submit, /else if \(existingVideo && youtubeFieldPresent\) \{[\s\S]*buildVideoMetadataClearPlan/);
-  assert.match(update, /if \(sections\.youtube && plan\.youtubeChanged\)[\s\S]*buildVideoDerivedRowsPlan/);
+  assert.match(
+    update,
+    /if \(sections\.youtube && plan\.youtubeChanged\) \{[\s\S]*if \(plan\.youtubeId\) \{[\s\S]*buildVideoDerivedRowsPlan/,
+  );
+  assert.match(
+    update,
+    /if \(sections\.youtube && plan\.youtubeChanged\) \{[\s\S]*else \{[\s\S]*buildVideoMetadataClearPlan/,
+  );
 });
 
 test("枠投稿と編集はYouTube任意パースを使う", () => {

@@ -19,7 +19,8 @@ export type VideoPermissionKey =
   | "video.status"
   | "video.primary_event"
   | "video.youtube_id"
-  | "video.identity";
+  | "video.identity"
+  | "video.permissions";
 
 export type PermissionKey = EventPermissionKey | VideoPermissionKey;
 
@@ -57,6 +58,7 @@ export const VIDEO_PERMISSION_KEYS: readonly VideoPermissionKey[] = [
   "video.primary_event",
   "video.youtube_id",
   "video.identity",
+  "video.permissions",
 ];
 
 export const ALL_PERMISSION_KEYS: readonly PermissionKey[] = [
@@ -71,7 +73,10 @@ export const DANGEROUS_PERMISSION_KEYS: readonly PermissionKey[] = [
   "video.primary_event",
   "video.youtube_id",
   "video.identity",
-];export const PERMISSION_DEFINITIONS: Record<PermissionKey, PermissionDefinition> = {
+  "video.permissions",
+];
+
+export const PERMISSION_DEFINITIONS: Record<PermissionKey, PermissionDefinition> = {
   "event.basic": {
     key: "event.basic",
     label: "イベント基本情報",
@@ -198,7 +203,17 @@ export const DANGEROUS_PERMISSION_KEYS: readonly PermissionKey[] = [
     dangerous: true,
     adminOnly: true,
   },
-};export function isDangerousKey(key: PermissionKey): boolean {
+  "video.permissions": {
+    key: "video.permissions",
+    label: "共同編集権限",
+    description:
+      "合作メンバーへの共同編集権限 (video_members.can_edit) を付与・解除できます。",
+    category: "danger",
+    dangerous: true,
+  },
+};
+
+export function isDangerousKey(key: PermissionKey): boolean {
   return PERMISSION_DEFINITIONS[key].dangerous === true;
 }
 

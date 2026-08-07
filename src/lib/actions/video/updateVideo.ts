@@ -3,7 +3,10 @@
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
+import {
+  canUseEventPrivilegeModeForVideo,
+  type CanEditVideoPrivilegeMode,
+} from "@/lib/auth/ownership";
 import { videos, videoEvents, xUsers } from "@/lib/db/schema";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
@@ -43,6 +46,7 @@ import {
   MAX_ATOMIC_VIDEO_EVENTS,
   resolveVideoEventSyncTargetIds,
 } from "@/lib/video/syncVideoEvents";
+import { assertAllowedVideoFieldChanges } from "@/lib/video/assertAllowedVideoFieldChanges";
 import {
   applyVideoUpdatePlan,
   buildVideoUpdatePlan,
@@ -140,7 +144,14 @@ export async function updateVideo(
   if (rawPrivilegeMode === "admin" && sessionUser.role === "admin") {
     privilegeMode = "admin";
   } else if (rawPrivilegeMode === "event") {
-    privilegeMode = "event";
+    const canUseEvent = await canUseEventPrivilegeModeForVideo({
+      db,
+      user: { id: sessionUser.id, role: sessionUser.role ?? null },
+      video: target,
+    });
+    if (canUseEvent) {
+      privilegeMode = "event";
+    }
   }
 
   const editUser = { id: sessionUser.id, role: sessionUser.role ?? null };
@@ -151,7 +162,11 @@ export async function updateVideo(
     privilegeMode,
   });
   if (!hasAnyVideoEditSection(sections)) {
-    return { ok: false, message: "編集権限がありません。" };
+    return {
+      ok: false,
+      message:
+        "編集中に作品の編集権限が変更されました。ページを再読み込みして、現在の権限を確認してください。",
+    };
   }
 
   const rawYoutubeUrl = parsed.data.youtube_url.trim();
@@ -233,16 +248,55 @@ export async function updateVideo(
     }
   }
 
-  const changed = (a: string | null | undefined, b: string | null | undefined) =>
-    (a || null) !== (b || null);
-
   const nextCreatorYoutubeChannelUrl = snapshotYoutubeChannelUrl(
     parsedFormData.youtube_channel_url,
   );
+
+  const fieldChangeResult = assertAllowedVideoFieldChanges({
+    sections,
+    before: {
+      display_name: target.creator_display_name,
+      icon_url: target.creator_icon_url,
+      title: target.title,
+      youtube_video_id: target.youtube_video_id,
+      music: target.music,
+      credit: target.credit,
+      music_reference_url: target.music_reference_url,
+      intro_comment: target.intro_comment,
+      highlights: target.highlights,
+      production_story: target.production_story,
+      used_software: targetSoftwareLabel,
+      stage_permission: currentStagePermission,
+      closing_comment: target.closing_comment,
+      is_collab: target.collaboration_type === "collab",
+    },
+    after: {
+      display_name: parsedFormData.display_name,
+      icon_url: parsedFormData.icon_url,
+      title: parsedFormData.title,
+      youtube_video_id: youtubeId,
+      music: parsedFormData.music,
+      credit: parsedFormData.credit,
+      music_reference_url: parsedFormData.music_reference_url,
+      intro_comment: parsedFormData.intro_comment,
+      highlights: parsedFormData.highlights,
+      production_story: parsedFormData.production_story,
+      used_software: parsedFormData.used_software,
+      stage_permission: nextStagePermission,
+      closing_comment: parsedFormData.closing_comment,
+      is_collab: parsedFormData.is_collab ?? false,
+    },
+    submitterChangeRequested,
+    allowSubmitterChange,
+  });
+  if (!fieldChangeResult.ok) return fieldChangeResult;
+
+  const changed = (a: string | null | undefined, b: string | null | undefined) =>
+    (a || null) !== (b || null);
+
   if (
     !sections.identity &&
-    (changed(parsedFormData.display_name, target.creator_display_name) ||
-      iconChangeRequested ||
+    (iconChangeRequested ||
       changed(parsedFormData.profile_text, target.creator_profile_text) ||
       changed(
         normalizeSocialLinksForStorage(parsedFormData.other_social_links),
@@ -251,43 +305,6 @@ export async function updateVideo(
       changed(nextCreatorYoutubeChannelUrl, target.creator_youtube_channel_url))
   ) {
     return { ok: false, message: "提出者情報を編集する権限がありません。" };
-  }
-  if (submitterChangeRequested && !allowSubmitterChange) {
-    return {
-      ok: false,
-      message: "提出主体 X ID の変更には管理者権限が必要です。",
-    };
-  }
-  if (!sections.basics && parsedFormData.title !== target.title) {
-    return { ok: false, message: "作品タイトルを編集する権限がありません。" };
-  }
-  const youtubeChanged = (youtubeId ?? "") !== (target.youtube_video_id ?? "");
-  if (!sections.youtube && youtubeChanged) {
-    return { ok: false, message: "YouTube ID を編集する権限がありません。" };
-  }
-  if (
-    !sections.credits &&
-    (changed(parsedFormData.music, target.music) ||
-      changed(parsedFormData.credit, target.credit) ||
-      changed(parsedFormData.music_reference_url, target.music_reference_url))
-  ) {
-    return { ok: false, message: "楽曲・クレジットを編集する権限がありません。" };
-  }
-  if (
-    !sections.descriptions &&
-    (changed(parsedFormData.intro_comment, target.intro_comment) ||
-      changed(parsedFormData.highlights, target.highlights) ||
-      changed(parsedFormData.production_story, target.production_story) ||
-      changed(parsedFormData.used_software, targetSoftwareLabel) ||
-      changed(parsedFormData.closing_comment, target.closing_comment))
-  ) {
-    return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
-  }
-  if (
-    !sections.descriptions &&
-    changed(nextStagePermission, currentStagePermission)
-  ) {
-    return { ok: false, message: "紹介文・振り返り項目を編集する権限がありません。" };
   }
   if (
     !sections.members &&
@@ -442,6 +459,8 @@ export async function updateVideo(
     }
   }
 
+  const youtubeChanged =
+    (youtubeId ?? "") !== (target.youtube_video_id ?? "");
   if (sections.youtube && youtubeChanged && youtubeId) {
     if (await checkYoutubeVideoDuplicate(db, youtubeId, videoId)) {
       return { ok: false, message: "この YouTube 動画は既に登録されています。" };

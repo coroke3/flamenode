@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { getApprovedXIds } from "@/lib/auth/ownership";
 import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import styles from "./page.module.css";
@@ -10,6 +10,7 @@ import {
   events as eventsTable,
   slots as slotsTable,
   videoChapters as videoChaptersTable,
+  videoMembers,
   videoYoutubeMetadata,
   videos as videosTable,
   xUserAccountLinks,
@@ -42,10 +43,11 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const db = getDatabase();
   const onboarding = await getOnboardingState(db, user);
   const activeX = user.active_x_user_id ?? null;
-  let activeGalleryXId: string | null = null;
 
   let xIds: LinkedXRow[] = [];
+  let approvedXIds: string[] = [];
   let myVideos: VideoCardData[] = [];
+  let collabVideos: VideoCardData[] = [];
   let mySlot: typeof slotsTable.$inferSelect | null = null;
   let mySlotEvent: typeof eventsTable.$inferSelect | null = null;
   let myChapters: Array<{
@@ -73,9 +75,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         .innerJoin(xUsersTable, eq(xUsersTable.id, xUserAccountLinks.x_user_id))
         .where(eq(xUserAccountLinks.auth_user_id, user.id));
 
-      const approvedXIds = await getApprovedXIds(db, user.id);
-      activeGalleryXId =
-        activeX && approvedXIds.includes(activeX) ? activeX : null;
+      approvedXIds = await getApprovedXIds(db, user.id);
 
       if (approvedXIds.length > 0) {
         myVideos = (await db
@@ -93,13 +93,41 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .from(videosTable)
           .where(
             and(
-              activeGalleryXId
-                ? eq(videosTable.creator_x_user_id, activeGalleryXId)
-                : sql`0 = 1`,
+              inArray(videosTable.creator_x_user_id, approvedXIds),
               ne(videosTable.visibility_status, "voided"),
             )!,
           )
           .orderBy(desc(videosTable.created_at))) as VideoCardData[];
+
+        collabVideos = (await db
+          .select({
+            id: videosTable.id,
+            title: videosTable.title,
+            youtube_video_id: videosTable.youtube_video_id,
+            display_name: sql<string>`COALESCE(${videosTable.creator_display_name}, ${xUsersTable.x_name}, '@' || ${videosTable.creator_x_user_id})`,
+            icon_url: sql<string | null>`COALESCE(${videosTable.creator_icon_url}, ${xUsersTable.icon_url})`,
+            creator_x_user_id: videosTable.creator_x_user_id,
+            primary_event_id: videosTable.primary_event_id,
+            scheduled_time: videosTable.scheduled_time,
+            status: videosTable.visibility_status,
+          })
+          .from(videoMembers)
+          .innerJoin(videosTable, eq(videosTable.id, videoMembers.video_id))
+          .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
+          .where(
+            and(
+              inArray(videoMembers.x_user_id, approvedXIds),
+              eq(videoMembers.can_edit, 1),
+              ne(videosTable.visibility_status, "voided"),
+              or(
+                isNull(videosTable.creator_x_user_id),
+                notInArray(videosTable.creator_x_user_id, approvedXIds),
+              )!,
+            )!,
+          )
+          .orderBy(desc(videosTable.created_at))) as VideoCardData[];
+        const collabById = new Map(collabVideos.map((video) => [video.id, video]));
+        collabVideos = Array.from(collabById.values());
 
         myChapters = await db
           .select({
@@ -205,11 +233,15 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   const galleryEmptyMessage =
     xIds.length === 0
       ? "X ID を連携すると、承認後に作品の投稿やマイ・ギャラリーが使えるようになります。"
-      : !activeX
-        ? "アクティブ X ID を設定すると、その名義の作品だけが表示されます。"
-        : !activeGalleryXId
-          ? "アクティブ X ID が未承認のため、マイ・ギャラリーには作品を表示していません。"
-          : "アクティブ X ID の作品はまだ登録されていません。";
+      : approvedXIds.length === 0
+        ? "承認済み X ID がないため、作品を表示していません。"
+        : "自分の作品はまだ登録されていません。";
+  const collabEmptyMessage =
+    xIds.length === 0
+      ? "X ID を連携すると、共同編集できる作品が表示されます。"
+      : approvedXIds.length === 0
+        ? "承認済み X ID がないため、共同編集できる作品を表示していません。"
+        : "共同編集できる作品はまだありません。";
 
   return (
     <div className={`fn-public-container fn-page fn-dash ${styles.page}`}>
@@ -380,7 +412,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={`fn-dash-section ${styles.section}`}>
-        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>マイ・ギャラリー</h2>
+        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>自分の作品</h2>
         {myVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="grid" size={20} aria-hidden />
@@ -395,6 +427,28 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         ) : (
           <div className={`fn-gallery-grid ${styles.galleryGrid}`}>
             {myVideos.map((video) => (
+              <VideoCard
+                key={video.id}
+                video={video}
+                href={`/dashboard/edit/${video.id}`}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className={`fn-dash-section ${styles.section}`}>
+        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>
+          共同編集できる作品
+        </h2>
+        {collabVideos.length === 0 ? (
+          <div className="fn-empty">
+            <Icon name="users" size={20} aria-hidden />
+            <p className="fn-empty-message">{collabEmptyMessage}</p>
+          </div>
+        ) : (
+          <div className={`fn-gallery-grid ${styles.galleryGrid}`}>
+            {collabVideos.map((video) => (
               <VideoCard
                 key={video.id}
                 video={video}

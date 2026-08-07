@@ -37,6 +37,8 @@ interface Props {
   videoTitle: string;
   subjects: VideoCollabSubject[];
   publicMembers?: VideoPublicMemberCandidate[];
+  /** Server Action が再検証する privilegeMode。URL の ?privileged= と一致させる。 */
+  editPrivilegeMode?: "normal" | "admin" | "event";
 }
 
 type GrantDialogState = {
@@ -194,6 +196,7 @@ export function VideoCollabPermsManager({
   videoTitle,
   subjects,
   publicMembers = [],
+  editPrivilegeMode = "normal",
 }: Props): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
@@ -201,6 +204,12 @@ export function VideoCollabPermsManager({
   const [error, setError] = React.useState<string | null>(null);
   const [grantDialog, setGrantDialog] = React.useState<GrantDialogState | null>(null);
   const [revokeDialog, setRevokeDialog] = React.useState<RevokeDialogState | null>(null);
+
+  const appendPrivilegeMode = (fd: FormData) => {
+    if (editPrivilegeMode !== "normal") {
+      fd.set("edit_privilege_mode", editPrivilegeMode);
+    }
+  };
 
   const editors = subjects.filter((s) => s.can_edit === 1);
   const publicEditors = editors.filter((s) => s.is_public_member === 1);
@@ -236,6 +245,7 @@ export function VideoCollabPermsManager({
     fd.set("display_name", draft.display_name);
     fd.set("can_edit", "1");
     fd.set("notify", options.notify ? "1" : "0");
+    appendPrivilegeMode(fd);
     startTransition(async () => {
       const r = await upsertVideoCollaborator(fd);
       if (!r.ok) {
@@ -254,6 +264,7 @@ export function VideoCollabPermsManager({
     fd.set("video_id", videoId);
     if (subject.x_user_id) fd.set("x_user_id", subject.x_user_id);
     if (subject.user_id) fd.set("user_id", subject.user_id);
+    appendPrivilegeMode(fd);
     startTransition(async () => {
       const r = await deleteVideoCollaborator(fd);
       if (!r.ok) {
@@ -314,8 +325,9 @@ export function VideoCollabPermsManager({
   return (
     <div id="video-collab-perms" className={styles.root}>
       <p className={styles.intro}>
-        公開メンバーとして表示するかと、作品を編集できるかは別です。提出主体・YouTube
-        ID・公開状態などは管理者またはイベント権限が必要です。
+        共同編集権限（can_edit）を付与された人は作品所有者として扱われ、一般作品権限の範囲で編集できます。
+        付与・解除は作者所有者、または video.permissions を持つ運営・管理者のみ可能です。合作所有者は他者へ再委譲できません。
+        提出主体・YouTube ID・公開状態などは通常モードでは編集できず、管理者またはイベント運営権限が必要です。
       </p>
 
       {unlinkedEditors.length > 0 ? (

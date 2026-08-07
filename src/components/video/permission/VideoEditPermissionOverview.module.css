@@ -1,0 +1,100 @@
+.panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.normal {
+  border: 1px dashed var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+}
+
+.event {
+  border: 1px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 45%, var(--border-subtle));
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.admin {
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 55%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-danger) 10%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.normal .heading {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.event .heading,
+.admin .heading {
+  color: var(--text-primary);
+}
+
+.lead {
+  margin: 0;
+}
+
+.eventName {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.auditNote {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 35%, var(--border-subtle));
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.lists {
+  display: grid;
+  gap: 10px;
+}
+
+.listBlock {
+  margin: 0;
+}
+
+.listTitle {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.list {
+  margin: 0;
+  padding-left: 1.1em;
+  color: var(--text-primary);
+}
+
+.list li + li {
+  margin-top: 2px;
+}
+
+.emptyList {
+  margin: 0;
+  color: var(--text-muted);
+}

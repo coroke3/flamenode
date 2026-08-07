@@ -115,7 +115,10 @@ export default async function AdminVideoDetailPage({
             >
               <Icon name="external" size={12} aria-hidden /> 公開ページ
             </Link>
-            <Link href={`/dashboard/edit/${video.id}`} className="fn-btn fn-btn-ghost">
+            <Link
+              href={`/dashboard/edit/${video.id}?privileged=admin`}
+              className="fn-btn fn-btn-ghost"
+            >
               <Icon name="edit" size={12} aria-hidden /> 編集画面
             </Link>
             <Link href={`/admin/videos/${video.id}/members`} className="fn-btn fn-btn-ghost">
