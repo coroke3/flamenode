@@ -11,8 +11,7 @@ export const SCORE_REBUILD_INACTIVE_INTERVAL_SEC = 10800;
 export const EVENTS_INDEX_R2_KEY = "events/index.json";
 export const EVENTS_INDEX_STALE_MAX_AGE_SEC =
   PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex * 2;
-const D1_ACTIVE_EVENT_FALLBACK_LIMIT = 50;
-
+/** processing の in-flight 判定は lease_expires_at > now（queue.ts PROCESSING_LEASE_SEC = 5分 と整合）。 */
 const SCORE_REBUILD_TARGETS = ["top", "list_popular", "recommend"] as const;
 type ScoreRebuildTarget = (typeof SCORE_REBUILD_TARGETS)[number];
 
@@ -164,18 +163,25 @@ async function resolveHasActiveOngoingEventFromD1(
 ): Promise<ActiveOngoingEventResolution | null> {
   signal?.throwIfAborted();
   try {
-    const rows = await env.DB.prepare(
+    const row = await env.DB.prepare(
       `SELECT visibility_status, start_time, end_time, entry_start_time, entry_end_time
          FROM events
         WHERE visibility_status = 'public'
-        LIMIT ?`,
+          AND NOT (
+                (start_time IS NOT NULL AND end_time IS NULL)
+             OR (start_time IS NULL AND end_time IS NOT NULL)
+              )
+          AND (start_time IS NOT NULL OR end_time IS NOT NULL)
+          AND (end_time IS NULL OR end_time > ?)
+          AND (start_time IS NULL OR start_time <= ?)
+        LIMIT 1`,
     )
-      .bind(D1_ACTIVE_EVENT_FALLBACK_LIMIT)
-      .all<D1EventStatusRow>();
+      .bind(nowUnix, nowUnix)
+      .first<D1EventStatusRow>();
     signal?.throwIfAborted();
-    const events = rows.results ?? [];
     return {
-      hasActiveOngoingEvent: indexHasActiveOngoingEvent(events, nowUnix),
+      hasActiveOngoingEvent:
+        row != null && hasActiveOngoingEventStatus(row, nowUnix),
       source: "d1_fallback",
     };
   } catch {
@@ -217,6 +223,7 @@ export async function shouldThrottleScoreDependentRebuild(
 
 async function isUsersIndexRebuildInFlight(
   env: Pick<ScoreRebuildEnqueueEnv, "DB">,
+  nowUnix: number,
   signal?: AbortSignal,
 ): Promise<boolean> {
   signal?.throwIfAborted();
@@ -226,9 +233,17 @@ async function isUsersIndexRebuildInFlight(
          FROM static_rebuild_queue
         WHERE target_type = 'users_index'
           AND target_id = 'global'
-          AND status IN ('pending', 'processing')
+          AND (
+                status = 'pending'
+             OR (
+                  status = 'processing'
+              AND (lease_expires_at IS NULL OR lease_expires_at > ?)
+                )
+              )
         LIMIT 1`,
-    ).first<{ active?: number }>();
+    )
+      .bind(nowUnix)
+      .first<{ active?: number }>();
     signal?.throwIfAborted();
     return row?.active === 1;
   } catch {
@@ -262,9 +277,8 @@ export async function enqueueScoreDependentRebuilds(
     };
   }
 
-  const targets = resolveScoreRebuildTargets(
-    await isUsersIndexRebuildInFlight(env, signal),
-  );
+  const usersIndexInFlight = await isUsersIndexRebuildInFlight(env, now, signal);
+  const targets = resolveScoreRebuildTargets(usersIndexInFlight);
   if (targets.length === 0) {
     return {
       processed: 0,
@@ -292,7 +306,7 @@ export async function enqueueScoreDependentRebuilds(
     0,
   );
 
-  if (processed > 0) {
+  if (processed > 0 && !usersIndexInFlight) {
     await writeLastScoreRebuildMarker(env.KV, now);
   }
 

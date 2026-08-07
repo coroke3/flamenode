@@ -93,6 +93,7 @@ function createDb({
   failAll = false,
   failReads = false,
   usersIndexInFlight = false,
+  usersIndexLeaseExpiresAt = null,
 } = {}) {
   let batchCalls = 0;
   let lastBatchStatementCount = 0;
@@ -121,7 +122,31 @@ function createDb({
               throw new Error("d1_read_failed");
             }
             if (sql.includes("users_index")) {
-              return usersIndexInFlight ? { active: 1 } : null;
+              if (!usersIndexInFlight) return null;
+              const nowUnix = Number(statement.args[0]);
+              if (
+                usersIndexLeaseExpiresAt != null &&
+                usersIndexLeaseExpiresAt <= nowUnix
+              ) {
+                return null;
+              }
+              return { active: 1 };
+            }
+            if (sql.includes("FROM events") && sql.includes("LIMIT 1")) {
+              const nowUnix = Number(statement.args[0]);
+              const activeRow = rows.find((row) => {
+                if (row.visibility_status !== "public") return false;
+                const start = row.start_time ?? null;
+                const end = row.end_time ?? null;
+                const isPoint =
+                  (start != null && end == null) || (start == null && end != null);
+                if (isPoint) return false;
+                if (start == null && end == null) return false;
+                if (end != null && end <= nowUnix) return false;
+                if (start != null && start > nowUnix) return false;
+                return true;
+              });
+              return activeRow ?? null;
             }
             return null;
           },
@@ -373,14 +398,63 @@ test("users_index in flight enqueues only list_popular", async () => {
     DB: db,
   };
 
-  const before = Math.floor(Date.now() / 1000);
   const result = await enqueueScoreDependentRebuilds(env);
-  const after = Math.floor(Date.now() / 1000);
   assert.equal(result.processed, 1);
   assert.equal(result.d1_changes, 1);
   assert.equal(batchCalls(), 1);
   assert.equal(lastBatchStatementCount(), 1);
-  assertKvMarkerRecent(store, before, after);
+  assert.equal(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY), undefined);
+});
+
+test("expired users_index processing lease enqueues full score rebuild targets", async () => {
+  const { kv } = createKvStore();
+  const now = Math.floor(Date.now() / 1000);
+  const { db, batchCalls, lastBatchStatementCount } = createDb({
+    batchChanges: 1,
+    usersIndexInFlight: true,
+    usersIndexLeaseExpiresAt: now - 60,
+  });
+  const env = {
+    KV: kv,
+    R2: createR2(
+      new Map([[EVENTS_INDEX_R2_KEY, buildEventsIndexPayload([endedEvent()], now)]]),
+    ),
+    DB: db,
+  };
+
+  const result = await enqueueScoreDependentRebuilds(env);
+  assert.equal(result.processed, 3);
+  assert.equal(batchCalls(), 1);
+  assert.equal(lastBatchStatementCount(), 3);
+});
+
+test("D1 fallback ignores non-active public events", async () => {
+  const pointEvent = {
+    visibility_status: "public",
+    start_time: T0 - 100,
+    end_time: null,
+    entry_start_time: null,
+    entry_end_time: null,
+  };
+  const scheduledEvent = {
+    visibility_status: "public",
+    start_time: T0 + 100,
+    end_time: T0 + 200,
+    entry_start_time: null,
+    entry_end_time: null,
+  };
+  const { db } = createDb({ rows: [endedEvent(), pointEvent, scheduledEvent] });
+  const resolution = await resolveHasActiveOngoingEvent(
+    {
+      R2: createR2(),
+      DB: db,
+    },
+    T0,
+  );
+  assert.deepEqual(resolution, {
+    hasActiveOngoingEvent: false,
+    source: "d1_fallback",
+  });
 });
 
 test("users_index in flight with deduped list_popular does not update KV marker", async () => {

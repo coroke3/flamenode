@@ -106,4 +106,4 @@ score 更新が 1 件以上あった invocation だけ、`ranking-rebuild-enqueu
 | あり（`events/index.json` または D1 fallback） | 1 時間（3600 秒） |
 | なし | 3 時間（10800 秒） |
 
-`events/index.json` も D1 も読めないときは safe default（開催中あり扱い）とし throttle をかけない。enqueue 成功時に KV マーカーを更新し、static rebuild wake を送る。
+`events/index.json` も D1 も読めないときは safe default（開催中あり扱い）とし throttle をかけない。enqueue 成功時に KV マーカーを更新し、static rebuild wake を送る。`users_index` が in-flight のときは `list_popular` のみ enqueue し、KV マーカーは更新しない（フル target の throttle を維持する）。
