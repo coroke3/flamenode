@@ -26,6 +26,7 @@ test("discord_auth flowTrace phases are wired across auth entry points", () => {
 
   assert.match(accountLinkAdapter, /phase:\s*"account_link_started"/);
   assert.match(accountLinkAdapter, /phase:\s*"account_link_committed"/);
+  assert.match(accountLinkAdapter, /notification_post_commit_failed/);
 
   assert.match(authCompletePage, /phase:\s*"auth_complete_rendered"/);
 
@@ -34,7 +35,16 @@ test("discord_auth flowTrace phases are wired across auth entry points", () => {
 });
 
 test("auth route entry logging does not reference query secrets", () => {
-  assert.doesNotMatch(authRouteError, /searchParams|access_token|code=/);
+  assert.doesNotMatch(authRouteError, /access_token|searchParams\.get/);
+  assert.match(authRouteError, /searchParams\.has\("code"\)/);
+});
+
+test("oauth_callback_startedはGETかつcode付きcallbackのみ記録する", () => {
+  assert.match(authRouteError, /oauth_callback_started/);
+  assert.match(authRouteError, /oauth_callback_denied/);
+  assert.match(authRouteError, /request\.method === "GET"/);
+  assert.match(authRouteError, /pathname\.includes\("\/api\/auth\/callback"\)/);
+  assert.doesNotMatch(authRouteError, /endsWith\("callback\/discord"\)/);
 });
 
 test("adapter wrappers guard optional drizzle methods", () => {

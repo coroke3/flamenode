@@ -233,11 +233,50 @@ export async function linkDiscordAccountAtomically(
   }
 
   if (audits.length > 0) {
-    await mutate(db, {
-      mutationStatements,
-      expectedMutationChanges,
-      audits,
-    });
+    try {
+      await mutate(db, {
+        mutationStatements,
+        expectedMutationChanges,
+        audits,
+      });
+    } catch (error) {
+      // 並行linkでCAS失敗しても、再読込で整合済みなら冪等成功
+      const rereadAccount = (
+        await db
+          .select()
+          .from(accounts)
+          .where(
+            and(
+              eq(accounts.provider, account.provider),
+              eq(accounts.providerAccountId, account.providerAccountId),
+            )!,
+          )
+          .limit(1)
+      )[0];
+      const rereadUser = (
+        await db
+          .select()
+          .from(users)
+          .where(eq(users.id, account.userId))
+          .limit(1)
+      )[0];
+      if (
+        rereadAccount?.userId === account.userId &&
+        rereadUser?.discord_id === account.providerAccountId
+      ) {
+        logFlowTrace({
+          flow: "discord_auth",
+          phase: "account_link_committed",
+          trace_id: traceId,
+          result: "succeeded",
+          committed: true,
+          error_code: "AUTH_LINK_ALREADY_CONSISTENT",
+        });
+        // 並行勝者側が通知を担当する。ここでは再enqueueしない。
+        return;
+      }
+      throw error;
+    }
   } else {
     for (const statement of mutationStatements) {
       await statement;
@@ -279,7 +318,8 @@ async function enqueueFirstDiscordLinkNotifications(
   const notificationEnv = params.siteOrigin
     ? { NEXT_PUBLIC_SITE_URL: params.siteOrigin }
     : undefined;
-  const notificationStatements: BatchItem<"sqlite">[] = [];
+  const postCommitTasks: Array<{ name: string; run: () => Promise<void> }> =
+    [];
 
   try {
     const { buildWelcomeAccountNotification } = await import(
@@ -293,7 +333,13 @@ async function enqueueFirstDiscordLinkNotifications(
       force: true,
     });
     if (welcomeNotification) {
-      notificationStatements.push(welcomeNotification.statement);
+      const statement = welcomeNotification.statement;
+      postCommitTasks.push({
+        name: "welcome_notification_enqueued",
+        run: async () => {
+          await statement;
+        },
+      });
     }
   } catch {
     logFlowTrace({
@@ -323,42 +369,48 @@ async function enqueueFirstDiscordLinkNotifications(
       dedupeKey: `channel_account_created:${params.account.userId}`,
     });
     if (channelNotification) {
-      notificationStatements.push(channelNotification.statement);
+      const statement = channelNotification.statement;
+      postCommitTasks.push({
+        name: "ops_notification_enqueued",
+        run: async () => {
+          await statement;
+        },
+      });
     }
   } catch {
     // ops channel 通知は welcome と独立。失敗しても認証・welcome は続行する。
   }
 
-  if (notificationStatements.length === 0) {
+  if (postCommitTasks.length === 0) {
     return;
   }
 
   const warnings = await runPostCommitBestEffort(
     { flow: "discord_auth", traceId },
-    [
+    postCommitTasks,
+  );
+
+  if (postCommitTasks.length > warnings.length) {
+    await runPostCommitBestEffort({ flow: "discord_auth", traceId }, [
       {
-        name: "welcome_notification_enqueued",
+        name: "notification_queue_wake",
         run: async () => {
-          for (const statement of notificationStatements) {
-            await statement;
-          }
           const { wakeNotificationQueueAfterCommit } = await import(
             "@/lib/queues/wakeNotificationQueueAfterCommit"
           );
           await wakeNotificationQueueAfterCommit("web");
         },
       },
-    ],
-  );
+    ]);
+  }
 
   if (warnings.length > 0) {
     logFlowTrace({
       flow: "discord_auth",
-      phase: "welcome_notification_skipped",
+      phase: "notification_post_commit_failed",
       trace_id: traceId,
-      result: "skipped",
-      error_code:
-        warnings[0]?.error_code ?? "WELCOME_NOTIFICATION_EXECUTE_FAILED",
+      result: "failed",
+      error_code: warnings[0]?.error_code ?? "NOTIFICATION_EXECUTE_FAILED",
     });
   }
 }

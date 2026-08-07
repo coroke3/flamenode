@@ -96,7 +96,8 @@ test("auth completeは再試行後も読めないsessionを成功扱いしない
   assert.equal(reads, AUTH_COMPLETE_SESSION_RETRY_DELAYS_MS.length + 1);
   assert.match(completePage, /session_missing_after_retry/);
   assert.match(completePage, /result: "skipped"/);
-  assert.match(completePage, /redirect\("\/entry\?error=OAuthCallback"\)/);
+  assert.match(completePage, /redirect\("\/entry"\)/);
+  assert.doesNotMatch(completePage, /redirect\("\/entry\?error=OAuthCallback"\)/);
   assert.match(completePage, /auth_temporarily_unavailable/);
 });
 
@@ -130,6 +131,12 @@ test("auth complete page の next フォールバックは /dashboard", () => {
     completePage,
     /sanitizeAuthCompleteNext\(\s*firstSearchParamValue\(params\?\.next\),\s*"\/dashboard",\s*\)/,
   );
+});
+
+test("entryはsignIn失敗時にauth outageを安全にredirectする", () => {
+  assert.match(entryPage, /isAuthRouteTemporarilyUnavailable/);
+  assert.match(entryPage, /auth_temporarily_unavailable/);
+  assert.match(entryPage, /throw error/);
 });
 
 test("entryはAuth.js error codeを安全に表示する", () => {

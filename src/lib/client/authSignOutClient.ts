@@ -81,6 +81,34 @@ export async function signOutViaAuthRoute(): Promise<AuthSignOutResult> {
       return signOutFailed(traceId);
     }
 
+    // POST成功後、セッションcookieが残っていないか確認
+    try {
+      const sessionResponse = await fetch("/api/auth/session", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (sessionResponse.ok) {
+        const sessionData = (await sessionResponse.json()) as {
+          user?: { id?: unknown };
+        };
+        if (
+          sessionData.user &&
+          typeof sessionData.user.id === "string" &&
+          sessionData.user.id
+        ) {
+          logClientFlowTrace({
+            phase: "signout_completed",
+            trace_id: traceId,
+            result: "failed",
+            error_code: "AUTH_SIGNOUT_COOKIE_REMAINED",
+          });
+          return { ok: false, message: SIGN_OUT_ERROR_MESSAGE };
+        }
+      }
+    } catch {
+      // セッション確認失敗はログアウト成功扱い（false negative回避）
+    }
+
     logClientFlowTrace({
       phase: "signout_completed",
       trace_id: traceId,
