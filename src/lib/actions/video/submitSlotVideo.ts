@@ -77,7 +77,7 @@ import {
   sortSlotsChronologically,
 } from "@/lib/utils/slotGroupingCore";
 
-export const MAX_SUBMIT_SLOT_REBUILD_EVENT_TARGETS = 5;
+const MAX_SUBMIT_SLOT_REBUILD_EVENT_TARGETS = 5;
 
 const SLOT_SUBMIT_REJECT_MESSAGE = "枠が見つかりません。";
 const SLOT_GROUP_REJECT_MESSAGE =
