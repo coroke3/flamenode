@@ -205,22 +205,43 @@ test("list loaders use static pool size for shouldUseStaticCollection", () => {
   assert.doesNotMatch(searchBlock, /const itemCount = normalizedPage\?\.videos\.length/);
 });
 
-test("loadPublicEventVideosPage は heal 待ちのとき composed fallback を使わない", () => {
+test("loadPublicEventVideosPage は base 完全 miss 時に composed を miss enqueue より先に試す", () => {
+  const eventListBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicEventVideosPage"),
+    loaderSource.indexOf("export async function loadStaticRulesPage"),
+  );
+  assert.match(eventListBlock, /if \(baseResult\.payload === null\)/);
+  const completeMissBlock = eventListBlock.slice(
+    eventListBlock.indexOf("if (baseResult.payload === null)"),
+    eventListBlock.indexOf("let missMeta"),
+  );
+  assert.match(completeMissBlock, /tryCachedOrR2\(composedKey\)/);
+  assert.match(completeMissBlock, /resolvePublicJsonMiss\(missOptions\)/);
+  const composedIndex = completeMissBlock.indexOf("tryCachedOrR2(composedKey)");
+  const missIndex = completeMissBlock.indexOf("resolvePublicJsonMiss(missOptions)");
+  assert.ok(
+    composedIndex >= 0 && missIndex > composedIndex,
+    "composed precedes miss enqueue on complete base miss",
+  );
+});
+
+test("loadPublicEventVideosPage は incomplete base heal 時に composed fallback を使わない", () => {
   const eventListBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicEventVideosPage"),
     loaderSource.indexOf("export async function loadStaticRulesPage"),
   );
   assert.match(eventListBlock, /const needsHeal = shouldEnqueueEventBaseListHeal/);
   assert.match(eventListBlock, /if \(needsHeal\)/);
+  const incompleteHealBlock = eventListBlock.slice(
+    eventListBlock.indexOf("if (needsHeal)"),
+    eventListBlock.indexOf("if (!needsHeal)"),
+  );
+  assert.doesNotMatch(incompleteHealBlock, /tryCachedOrR2\(composedKey\)/);
   const composedFallbackBlock = eventListBlock.slice(
     eventListBlock.indexOf("if (!needsHeal)"),
     eventListBlock.indexOf("const db = getDatabase()"),
   );
   assert.match(composedFallbackBlock, /tryCachedOrR2\(composedKey\)/);
-  assert.doesNotMatch(
-    eventListBlock.slice(0, eventListBlock.indexOf("if (!needsHeal)")),
-    /tryCachedOrR2\(composedKey\)/,
-  );
 });
 
 test("loadPublicEventVideosPage は event_base R2 を優先しヒット時に getDatabase を呼ばない", () => {

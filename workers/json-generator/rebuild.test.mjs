@@ -236,7 +236,7 @@ test("public static JSON queries exclude private event relations", () => {
   );
   assert.match(
     source,
-    /SELECT ve\.event_id[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
+    /SELECT e\.id, e\.title[\s\S]*FROM video_events AS ve[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
   );
   assert.match(source, /software_labels/);
   assert.match(source, /public_chapters/);

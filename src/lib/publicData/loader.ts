@@ -1019,6 +1019,22 @@ export async function loadPublicEventVideosPage(params: {
     return baseResult.hit;
   }
 
+  const needsHeal = shouldEnqueueEventBaseListHeal(baseResult.payload, params.sort);
+
+  // base 完全 miss: composed を D1 / degraded より先に試す
+  if (baseResult.payload === null) {
+    const composedResult = await tryCachedOrR2(composedKey);
+    if (composedResult.hit) {
+      const miss = await resolvePublicJsonMiss(missOptions);
+      return {
+        ...composedResult.hit,
+        enqueued: miss.enqueued,
+        rebuildState: miss.rebuildState,
+        probe: miss.probe,
+      };
+    }
+  }
+
   let missMeta: Pick<
     PublicJsonLoadResult<StaticRecentVideoPage>,
     "enqueued" | "rebuildState" | "probe"
@@ -1028,7 +1044,6 @@ export async function loadPublicEventVideosPage(params: {
     probe: undefined,
   };
 
-  const needsHeal = shouldEnqueueEventBaseListHeal(baseResult.payload, params.sort);
   if (needsHeal) {
     if (baseResult.payload === null) {
       void recordDegradedCircuitR2Miss();
@@ -1042,7 +1057,7 @@ export async function loadPublicEventVideosPage(params: {
   }
 
   // 移行中: composed events/{id}.json があれば D1 を避けて一覧する（score 欠落時は非対応）
-  // heal 待ちの stale base は legacy composed へ逃がさない
+  // incomplete base heal 待ちの stale base は legacy composed へ逃がさない
   if (!needsHeal) {
     const composedResult = await tryCachedOrR2(composedKey);
     if (composedResult.hit) {

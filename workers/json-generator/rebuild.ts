@@ -1428,13 +1428,6 @@ async function rebuildEventBase(
   signal?: RebuildSignal,
 ): Promise<boolean> {
   throwIfAborted(signal);
-  const ev = await loadEventVisibilityRow(env, eventId, signal);
-  throwIfAborted(signal);
-  if (!ev || String(ev.visibility_status ?? "") !== "public") {
-    await removeAllEventArtifacts(env, eventId, signal);
-    return false;
-  }
-
   const eventRow = (
     await env.DB.prepare(
       `SELECT ${EVENT_DETAIL_COLUMNS}
@@ -1444,7 +1437,7 @@ async function rebuildEventBase(
       .first()
   ) as Record<string, unknown> | null;
   throwIfAborted(signal);
-  if (!eventRow) {
+  if (!eventRow || String(eventRow.visibility_status ?? "") !== "public") {
     await removeAllEventArtifacts(env, eventId, signal);
     return false;
   }
@@ -2163,22 +2156,12 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
   }
 
   const [
-    events,
     publicEvents,
     members,
     softwareLabels,
     publicChapters,
     memberChapters,
   ] = await Promise.all([
-    env.DB.prepare(
-      `SELECT ve.event_id
-       FROM video_events AS ve
-       INNER JOIN events AS e
-         ON e.id = ve.event_id AND e.visibility_status = 'public'
-       WHERE ve.video_id = ?`,
-    )
-      .bind(internalVideoId)
-      .all(),
     env.DB.prepare(
       `SELECT e.id, e.title, e.icon_url, e.accent_color,
               e.start_time, e.end_time, e.entry_start_time, e.entry_end_time,
@@ -2278,8 +2261,8 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
     publicMembers: publicMembersForProjection,
   });
 
-  const eventIds = (events.results ?? []).map(
-    (entry) => (entry as { event_id: string }).event_id,
+  const eventIds = (publicEvents.results ?? []).map((entry) =>
+    String((entry as { id: string }).id),
   );
 
   const publicMemberXIds = Array.from(
