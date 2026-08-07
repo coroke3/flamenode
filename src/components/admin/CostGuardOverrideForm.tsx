@@ -51,7 +51,19 @@ export function CostGuardOverrideForm(props: Props): React.ReactElement {
         <legend style={{ fontSize: 12 }}>対象機能（最大8件）</legend>
         {WRITE_FEATURE_KEYS.map((feature) => (
           <label key={feature} style={{ fontSize: 12 }}>
-            <input type="checkbox" checked={features.includes(feature)} onChange={(event) => setFeatures((current) => event.currentTarget.checked ? [...current, feature].slice(0, 8) : current.filter((item) => item !== feature))} /> {feature}
+            <input
+              type="checkbox"
+              checked={features.includes(feature)}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked;
+                setFeatures((current) =>
+                  checked
+                    ? [...current, feature].slice(0, 8)
+                    : current.filter((item) => item !== feature),
+                );
+              }}
+            />{" "}
+            {feature}
           </label>
         ))}
       </fieldset>
