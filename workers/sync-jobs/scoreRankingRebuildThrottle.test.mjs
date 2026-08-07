@@ -405,10 +405,14 @@ test("missing KV marker always enqueues score rebuild", async () => {
     DB: db,
   };
 
+  const before = Math.floor(Date.now() / 1000);
   const result = await enqueueScoreDependentRebuilds(env);
+  const after = Math.floor(Date.now() / 1000);
   assert.equal(result.processed, 3);
   assert.equal(batchCalls(), 1);
-  assert.equal(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY), String(Math.floor(Date.now() / 1000)));
+  const marker = Number(store.get(RANKING_LAST_SCORE_REBUILD_KV_KEY));
+  assert.ok(Number.isFinite(marker));
+  assert.ok(marker >= before && marker <= after);
 });
 
 test("R2 artifact missing uses D1 fallback for inactive throttle", async () => {
