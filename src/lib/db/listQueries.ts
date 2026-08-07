@@ -163,7 +163,6 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
   const rows = await db
     .select(publicVideoListSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .leftJoin(events, eq(events.id, videos.primary_event_id))
     .where(publicVideoFilters(db, params))
     .orderBy(publicVideoOrderBy(sort))
@@ -187,7 +186,6 @@ export async function fetchPublicVideosPage(
   const pageRows = await db
     .select(publicVideoPageSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .leftJoin(events, eq(events.id, videos.primary_event_id))
     .where(publicVideoFilters(db, params))
     .orderBy(publicVideoOrderBy(sort))
@@ -220,7 +218,6 @@ export async function fetchPublicVideoByIdOrYoutube(
   const rows = await db
     .select(publicVideoListSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .leftJoin(events, eq(events.id, videos.primary_event_id))
     .where(
       and(

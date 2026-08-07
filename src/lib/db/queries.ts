@@ -101,7 +101,6 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
   const rows = await db
     .select(scoredPublicVideoListSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicVideoCondition)
     .orderBy(coalescedVideoScoreDesc, desc(videos.scheduled_time))
     .limit(limit);
@@ -124,7 +123,6 @@ export async function fetchUnderratedVideos(db: DB, limit = 60) {
   const rows = await db
     .select(scoredPublicVideoListSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicVideoCondition)
     .orderBy(coalescedVideoScoreAsc, desc(videos.scheduled_time))
     .limit(limit);
@@ -136,7 +134,6 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
   const rows = await db
     .select(publicVideoListSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
@@ -158,7 +155,6 @@ export async function fetchAllPublicVideosForEvent(db: DB, eventId: string) {
   const rows = await db
     .select(eventPublicVideoListSelect)
     .from(videos)
-    .leftJoin(xUsers, eq(xUsers.id, videos.creator_x_user_id))
     .where(publicEventVideoCondition(eventId))
     .orderBy(asc(videos.scheduled_time), asc(videos.id));
   return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
