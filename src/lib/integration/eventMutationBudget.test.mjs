@@ -96,12 +96,9 @@ test("manage statusは共通queue lease semanticsとcaller予約内のbounded re
   assert.match(transition, /expectedRowCondition\(\{ expectedCurrent: \{ \.\.\.input\.video \} \}\)/);
   assert.match(transition, /before: \{ \.\.\.input\.video \}/);
   assert.match(transition, /after: \{ \.\.\.after \}/);
-  assert.match(action, /mutateWithAudit/);
+  assert.match(action, /executeVideoVisibilityStatusMutation/);
   assert.match(action, /planD1AuditMutationBudget/);
-  assert.match(
-    action,
-    /\.limit\(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS \+ 1\)/,
-  );
+  assert.match(action, /loadVideoRebuildEventIds/);
 
   assert.match(hooks, /MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS\s*=\s*8/);
   assert.match(hooks, /return buildStaticRebuildQueueBatch\(db, items\)/);

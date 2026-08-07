@@ -17,7 +17,11 @@ test("remaining admin mutations use canonical guards and atomic audit", () => {
   };
   for (const [name, feature] of Object.entries(features)) {
     assert.match(sources[name], new RegExp(`requireAdminWrite\\(\\"${feature}\\"\\)`));
-    assert.match(sources[name], /mutateWithAudit\(/);
+    if (name === "admin.ts") {
+      assert.match(sources[name], /executeVideoVisibilityStatusMutation/);
+    } else {
+      assert.match(sources[name], /mutateWithAudit\(/);
+    }
     assert.doesNotMatch(sources[name], /auditAction\(/);
   }
   assert.match(sources["video-collab-perms.ts"], /writeGuard\(\{ feature: "edit_video" \}\)/);

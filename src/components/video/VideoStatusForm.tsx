@@ -16,6 +16,9 @@ type ActionResult = {
   ok: boolean;
   message?: string;
   pendingPublicReflection?: boolean;
+  nextHref?: string;
+  traceId?: string;
+  retryable?: boolean;
 };
 
 type VideoStatusAction = (formData: FormData) => Promise<ActionResult>;
@@ -44,6 +47,9 @@ const ADMIN_STATUS_VALUES = [
 ] as const;
 
 const MANAGE_STATUS_VALUES = ["pending", "public", "private"] as const;
+
+const COMMUNICATION_ERROR_MESSAGE =
+  "通信エラーが発生しました。状態を再取得してもう一度お試しください。";
 
 export function AdminVideoStatusForm({
   videoId,
@@ -124,6 +130,7 @@ export function VideoStatusForm({
   const [pending, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
+  const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
   const [pendingPublicReflection, setPendingPublicReflection] =
     React.useState(false);
 
@@ -168,6 +175,7 @@ export function VideoStatusForm({
 
     setError(null);
     setSuccess(false);
+    setSuccessMessage(null);
     setPendingPublicReflection(false);
     const fd = new FormData();
     for (const [key, value] of Object.entries(hiddenFields ?? {})) {
@@ -186,16 +194,31 @@ export function VideoStatusForm({
     }
 
     startTransition(async () => {
-      const result = await action(fd);
+      let result: ActionResult;
+      try {
+        result = await action(fd);
+      } catch {
+        setError(COMMUNICATION_ERROR_MESSAGE);
+        router.refresh();
+        return;
+      }
       if (!result.ok) {
         setError(result.message ?? "更新に失敗しました。");
+        if (result.retryable) {
+          router.refresh();
+        }
       } else {
         setSuccess(true);
+        setSuccessMessage(result.message ?? "ステータスを更新しました。");
         setPendingPublicReflection(result.pendingPublicReflection === true);
         if (allowVoidReason) {
           setReason("");
         }
-        router.refresh();
+        if (result.nextHref) {
+          router.push(result.nextHref);
+        } else {
+          router.refresh();
+        }
       }
     });
   };
@@ -290,7 +313,7 @@ export function VideoStatusForm({
               <Icon name="check" size={12} aria-hidden />{" "}
             </>
           ) : null}
-          ステータスを更新しました。
+          {successMessage ?? "ステータスを更新しました。"}
           {pendingPublicReflection ? (
             <div style={{ marginTop: 8 }}>
               <PublicReflectionDelayNotice />
