@@ -8,7 +8,7 @@ export function PublicFooter(): React.ReactElement {
       <div className={`fn-public-container fn-footer-top ${styles.main}`}>
         <div className={`fn-footer-brand ${styles.brand}`}>
           <div className="fn-footer-logo-row">
-            <Logo showSub />
+            <Logo />
           </div>
           <p className={`fn-footer-tag fn-jp ${styles.tagline}`}>
             映像（フレーム）の結節点（ノード）。YouTube 埋め込みを利用した動画プラットフォーム。
@@ -40,7 +40,6 @@ export function PublicFooter(): React.ReactElement {
             { label: "利用規約", href: "/rules" },
             { label: "イベント開催相談", href: "/rules#event-host" },
             { label: "ログイン / 新規登録", href: "/entry" },
-            { label: "問い合わせ", href: "/rules#contact" },
           ]}
         />
         </div>
@@ -49,7 +48,6 @@ export function PublicFooter(): React.ReactElement {
       <div className="fn-footer-bottom">
         <div className={`fn-public-container ${styles.legalInner}`}>
           <span>© {new Date().getFullYear()} FlameNode</span>
-          <span>Built on Cloudflare D1 / R2 / KV / Workers</span>
         </div>
       </div>
     </footer>

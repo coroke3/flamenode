@@ -260,6 +260,59 @@ export default async function AboutPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
+      <section className={`fn-public-container fn-page-section ${styles.credits}`}>
+        <header className={styles.sectionHead}>
+          <p className="fn-eyebrow">CREDITS</p>
+          <h2 className="fn-page-title fn-page-title--compact">制作クレジット</h2>
+        </header>
+        <div className={styles.creditsGrid} aria-label="制作クレジット">
+          <article className={styles.creditItem}>
+            <h3>FlameNode Logo</h3>
+            <p className={styles.creditBy}>
+              制作：<strong>ともき</strong>
+            </p>
+            <div className={styles.creditLinks}>
+              <a
+                href="https://www.foriio.com/tomokidesign"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                foriio
+              </a>
+              <a
+                href="https://x.com/tomoki3192"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                X @tomoki3192
+              </a>
+            </div>
+          </article>
+          <article className={styles.creditItem}>
+            <h3>FlameNode Sans</h3>
+            <p className={styles.creditBy}>
+              制作：<strong>ともき</strong>
+            </p>
+            <div className={styles.creditLinks}>
+              <a
+                href="https://www.foriio.com/tomokidesign"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                foriio
+              </a>
+              <a
+                href="https://x.com/tomoki3192"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                X @tomoki3192
+              </a>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section className={`fn-public-container fn-page-section ${styles.entryPoints}`}>
         <header className={styles.sectionHead}>
           <p className="fn-eyebrow">Start</p>

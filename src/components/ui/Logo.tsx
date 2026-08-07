@@ -5,15 +5,12 @@ import { cn } from "@/lib/utils/cn";
 interface LogoProps {
   size?: number;
   showText?: boolean;
-  /** フッターなどで NODE.0426 を表示する場合のみ有効 */
-  showSub?: boolean;
   className?: string;
 }
 
 export function Logo({
   size = 24,
   showText = true,
-  showSub = false,
   className,
 }: LogoProps): React.ReactElement {
   const logoStyle = {
@@ -30,7 +27,6 @@ export function Logo({
           <span className={styles.title}>
             <span className={styles.visuallyHidden}>FlameNode</span>
           </span>
-          {showSub ? <span className={styles.sub}>NODE.0426</span> : null}
         </span>
       ) : null}
     </span>

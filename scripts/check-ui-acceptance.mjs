@@ -618,6 +618,28 @@ requireMatch(
   "モバイル投稿入口カードのコンパクトな見出しサイズがありません。",
 );
 
+forbidMatch(
+  "src/components/layout/PublicFooter.tsx",
+  /\/rules#contact/,
+  "Footer Guide に問い合わせ (/rules#contact) を再導入しています。",
+);
+forbidMatch(
+  "src/components/layout/PublicFooter.tsx",
+  /Built on Cloudflare/,
+  "Footer に Built on Cloudflare 表記を再導入しています。",
+);
+forbidMatch(
+  "src/components/ui/Logo.tsx",
+  /showSub|NODE\.0426/,
+  "Logo に showSub / NODE.0426 を再導入しています。",
+);
+requireAll("app/(public)/about/page.tsx", [
+  [/FlameNode Sans/, "About に FlameNode Sans クレジットがありません。"],
+  [/https:\/\/www\.foriio\.com\/tomokidesign/, "About に foriio (tomokidesign) URL がありません。"],
+  [/https:\/\/x\.com\/tomoki3192/, "About に X (tomoki3192) URL がありません。"],
+  [/制作クレジット/, "About に制作クレジット見出しがありません。"],
+]);
+
 const requiredWidths = [360, 390, 430, 640, 768, 1024, 1280, 1440, 1920];
 const acceptanceDoc = read("docs/operations/ui-acceptance.md");
 for (const width of requiredWidths) {

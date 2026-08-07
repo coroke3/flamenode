@@ -50,6 +50,12 @@
 - 動画詳細は、モバイルの固定playerをヘッダー直下へ水平ずれなく配置する。PCではチャプターコメント一覧だけを約200px上限の可変スクロールとし、関連動画はページ本体でスクロールできる。
 - hydration errorと主要操作時のconsole errorがない。
 
+## Footer・Aboutクレジット
+
+- Footer Guide に「問い合わせ」や `/rules#contact` を置かない。イベント開催相談は `/rules#event-host` を維持する。
+- Footer に `NODE.0426` や `Built on Cloudflare...` を表示しない。
+- `/about` の制作クレジットは FlameNode Logo と FlameNode Sans のみを対象とし、foriio / X の外部リンクを含む。
+
 ## 枠確保表（`/event/[id]/slots`）
 
 - 枠確保表は actual slot 行と 1:1 で表示する。連続予約でも行を collapse しない。

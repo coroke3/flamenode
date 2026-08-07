@@ -102,7 +102,7 @@ export default async function RulesPage({
             <Icon name="calendar" size={16} aria-hidden /> イベント開催相談
           </h2>
           <p className="fn-panel-lead">
-            第三者主催イベントを開催したい場合は、Discord またはお問い合わせから運営にご連絡ください。
+            第三者主催イベントを開催したい場合は、Discord から運営にご連絡ください。
             管理者が承認した X ID にイベント編集許可者ロールを付与します。
           </p>
         </section>

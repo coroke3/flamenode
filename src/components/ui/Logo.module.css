@@ -33,16 +33,6 @@
   mask: url("/brand/flamenode-wordmark.svg") center / contain no-repeat;
 }
 
-.sub {
-  display: block;
-  font-family: var(--font-brand);
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  line-height: 1;
-}
-
 .visuallyHidden {
   position: absolute;
   width: 1px;
