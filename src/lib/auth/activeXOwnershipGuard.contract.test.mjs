@@ -33,6 +33,42 @@ test("承認必須の共通ガードは Auth user 自身の承認済み X ID 集
   );
 });
 
+test("Active X 整合コアモジュールが存在する", async () => {
+  await Promise.all([
+    readSource("./activeXSnapshotCore.ts"),
+    readSource("../slots/slotIdentityCore.ts"),
+  ]);
+});
+
+test("作品提出・自由投稿・チャプター作成は validateActiveXSnapshot を呼ぶ", async () => {
+  const [submitSlot, createFree, chapter] = await Promise.all([
+    readSource("../actions/video/submitSlotVideo.ts"),
+    readSource("../actions/video/createFreeVideo.ts"),
+    readSource("../actions/chapter.ts"),
+  ]);
+
+  assert.match(submitSlot, /validateActiveXSnapshot/);
+  assert.match(createFree, /validateActiveXSnapshot/);
+
+  const createChapterStart = chapter.indexOf("export async function createChapter");
+  const createChaptersBulkStart = chapter.indexOf(
+    "export async function createChaptersBulk",
+  );
+  assert.ok(createChapterStart >= 0);
+  assert.ok(createChaptersBulkStart > createChapterStart);
+  const createChapterBody = chapter.slice(
+    createChapterStart,
+    createChaptersBulkStart,
+  );
+  assert.match(createChapterBody, /validateActiveXSnapshot/);
+});
+
+test("slot.ts は authUserControlsXId / ownsSlot を使わない", async () => {
+  const slotSource = await readSource("../actions/slot.ts");
+  assert.doesNotMatch(slotSource, /authUserControlsXId/);
+  assert.doesNotMatch(slotSource, /ownsSlot/);
+});
+
 test("チャプターコメントは承認済み Active X ID を必須にする。like/bookmark は Auth user 単位で Active X を要求しない", async () => {
   const [chapterSource, interactionSource, currentUserSource] = await Promise.all([
     readSource("../actions/chapter.ts"),

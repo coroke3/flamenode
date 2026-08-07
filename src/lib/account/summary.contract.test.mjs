@@ -57,6 +57,13 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   );
 });
 
+test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得する", () => {
+  assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
+  assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
+  assert.match(island, /setRefreshNonce/);
+  assert.match(island, /\[enabled, preserveLoggedInOnFailure, refreshNonce\]/);
+});
+
 test("ログアウトはSignOutButton経由でhard navigateする", () => {
   assert.match(island, /import \{ SignOutButton \} from "@\/components\/auth\/SignOutButton"/);
   assert.match(island, /<SignOutButton/);

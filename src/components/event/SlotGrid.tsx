@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
@@ -120,6 +120,7 @@ export function SlotGrid({
   slotPartGapSec,
 }: SlotGridProps): React.ReactElement {
   const router = useRouter();
+  const pathname = usePathname();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<{
@@ -629,6 +630,20 @@ export function SlotGrid({
                               <p className={styles.slotIntegrityNotice}>
                                 枠グループの状態を確認できませんでした。画面を更新してください。
                               </p>
+                            ) : isAccountOther ? (
+                              <p className={styles.slotIntegrityNotice}>
+                                この枠は現在とは別の活動名義で確保されています。
+                              </p>
+                            ) : null}
+                            {isAccountOther && !hasIntegrityError ? (
+                              <div className={styles.slotActions}>
+                                <Link
+                                  href={`/dashboard/settings?next=${encodeURIComponent(pathname)}`}
+                                  className={styles.editSlotButton}
+                                >
+                                  Active X ID を切り替え
+                                </Link>
+                              </div>
                             ) : null}
                             {canOperateMine ? (
                               <div className={styles.slotActions}>
