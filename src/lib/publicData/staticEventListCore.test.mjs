@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EVENT_LIST_POOL_MAX,
+  eventListPayloadSupportsSort,
   isCompleteEventBasePool,
   pageEventBaseVideos,
 } from "./staticEventListCore.ts";
@@ -34,6 +35,30 @@ test("isCompleteEventBasePool: video_total と pool 件数が一致するとき�
     isCompleteEventBasePool(basePayload(videos, EVENT_LIST_POOL_MAX + 1)),
     false,
   );
+});
+
+test("eventListPayloadSupportsSort: composed JSON の score 欠落を検知する", () => {
+  const withScore = basePayload([
+    {
+      id: "v1",
+      title: "Alpha",
+      creator_display_name: "Alice",
+      scheduled_time: 1,
+      score: 10,
+    },
+  ]);
+  const withoutScore = basePayload([
+    {
+      id: "v1",
+      title: "Alpha",
+      creator_display_name: "Alice",
+      scheduled_time: 1,
+    },
+  ]);
+  assert.equal(eventListPayloadSupportsSort(withScore, "score"), true);
+  assert.equal(eventListPayloadSupportsSort(withoutScore, "score"), false);
+  assert.equal(eventListPayloadSupportsSort(withoutScore, "new"), true);
+  assert.equal(eventListPayloadSupportsSort(basePayload([]), "score"), true);
 });
 
 test("pageEventBaseVideos: new / old / score と検索を R2 pool 上で処理する", () => {

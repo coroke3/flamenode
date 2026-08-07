@@ -211,15 +211,35 @@ test("loadPublicEventVideosPage は event_base R2 を優先しヒット時に ge
     loaderSource.indexOf("export async function loadStaticRulesPage"),
   );
   assert.match(eventListBlock, /eventBaseObjectKey/);
+  assert.match(eventListBlock, /eventComposedObjectKey/);
   assert.match(eventListBlock, /isCompleteEventBasePool/);
+  assert.match(eventListBlock, /eventListPayloadSupportsSort/);
   assert.match(eventListBlock, /pageEventBaseVideos/);
   assert.match(eventListBlock, /isLoaderTargetVisibilityBlocked\("event_base"/);
   assert.match(eventListBlock, /fetchDegradedEventListPage/);
   const staticHitBranch = eventListBlock.slice(
     eventListBlock.indexOf("const tryStaticEventList"),
-    eventListBlock.indexOf("const cached ="),
+    eventListBlock.indexOf("const tryCachedOrR2"),
   );
   assert.doesNotMatch(staticHitBranch, /getDatabase\(/);
+});
+
+test("loadStaticTopPage miss は全 section producers を enqueue する", () => {
+  const topBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticTopPage"),
+    loaderSource.indexOf("export async function loadStaticUsersIndex"),
+  );
+  assert.match(topBlock, /"top_events"/);
+  assert.match(topBlock, /"top_announcements"/);
+  assert.match(topBlock, /"top_slot_stats"/);
+  assert.match(topBlock, /"recommend_core"/);
+});
+
+test("public miss high priority に top/recommend/event producers を含む", () => {
+  assert.match(loaderSource, /"top_recommended"/);
+  assert.match(loaderSource, /"recommend_core"/);
+  assert.match(loaderSource, /"event_base"/);
+  assert.match(loaderSource, /"event_slots"/);
 });
 
 test("mapTargetTypeToFenceEntity は event_base を event フェンスにマップする", () => {

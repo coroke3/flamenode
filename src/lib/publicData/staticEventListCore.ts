@@ -35,6 +35,25 @@ export function isCompleteEventBasePool(
   return videoTotal === videos.length;
 }
 
+/**
+ * composed `events/{id}.json` は score を公開しないことがある。
+ * score ソートは score フィールドを持つ pool だけを静的処理する。
+ */
+export function eventListPayloadSupportsSort(
+  payload: StaticEventDetailPayload,
+  sort: "new" | "old" | "score",
+): boolean {
+  if (sort !== "score") return true;
+  const videos = payload.public_videos;
+  if (!Array.isArray(videos) || videos.length === 0) return true;
+  return videos.some(
+    (row) =>
+      Boolean(row) &&
+      typeof row === "object" &&
+      ("score" in row || "video_score" in row),
+  );
+}
+
 export function extractEventListInfo(
   payload: StaticEventDetailPayload,
 ): { id: string; title: string } | null {

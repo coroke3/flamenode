@@ -92,6 +92,10 @@ export function eventSlotsObjectKey(eventId: string): string {
   return `events/${eventId}/slots.v1.json`;
 }
 
+export function eventComposedObjectKey(eventId: string): string {
+  return `events/${eventId}.json`;
+}
+
 export interface StaticEventSlotsPayload {
   generated_at?: unknown;
   slots?: unknown;

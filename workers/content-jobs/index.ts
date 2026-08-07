@@ -12,6 +12,7 @@ import {
   reconcileStaleQueue,
 } from "../json-generator/queue.ts";
 import { ensureTopSlotStatsOnR2 } from "../json-generator/topSlotStatsEnqueue.ts";
+import { ensureTopSectionsOnR2 } from "../json-generator/topSectionsEnqueue.ts";
 import { ensureUsersSharedInputsOnR2 } from "../json-generator/usersSharedInputsEnqueue.ts";
 import { ensureDeployGlobalRebuilds } from "../json-generator/deployGlobalRebuildEnqueue.ts";
 import { ensureDailyTopNostalgicShuffle } from "../json-generator/rebuild.ts";
@@ -103,6 +104,11 @@ export async function runContentJobsRecovery(
             priority: "high",
             signal,
           });
+          const missingTopSections = await ensureTopSectionsOnR2(rebuildEnv, {
+            reason: "top_sections_missing_on_r2",
+            priority: "high",
+            signal,
+          });
           let nostalgicDailyShuffle = 0;
           try {
             nostalgicDailyShuffle = await ensureDailyTopNostalgicShuffle(
@@ -119,6 +125,7 @@ export async function runContentJobsRecovery(
             missingYoutubeSharedInputs > 0 ||
             missingUsersSharedInputs > 0 ||
             missingTopSlotStats > 0 ||
+            missingTopSections > 0 ||
             nostalgicDailyShuffle > 0
           ) {
             await sendWorkerQueueWakeBestEffort({

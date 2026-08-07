@@ -23,7 +23,9 @@ test("event 指定時は event_base 優先と degraded fallback を呼ぶ", () =
   assert.match(listPageSource, /loadPublicEventVideosPage/);
   assert.match(listPageSource, /eventListLoad/);
   assert.match(loaderSource, /eventBaseObjectKey/);
+  assert.match(loaderSource, /eventComposedObjectKey/);
   assert.match(loaderSource, /isCompleteEventBasePool/);
+  assert.match(loaderSource, /eventListPayloadSupportsSort/);
   assert.match(loaderSource, /fetchDegradedEventListPage/);
   assert.match(loaderSource, /canAttemptDegradedD1/);
 });

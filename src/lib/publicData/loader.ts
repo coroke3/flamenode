@@ -35,6 +35,7 @@ import type { PublicVisibilityFenceEntityType } from "./publicVisibilityManifest
 import {
   applyEventSlotsOverride,
   eventBaseObjectKey,
+  eventComposedObjectKey,
   eventSlotsObjectKey,
   normalizeStaticEventDetail,
   type StaticEventDetail,
@@ -103,6 +104,7 @@ import {
 } from "./staticVideoDetailCore";
 import {
   extractEventListInfo,
+  eventListPayloadSupportsSort,
   isCompleteEventBasePool,
   pageEventBaseVideos,
 } from "./staticEventListCore";
@@ -320,6 +322,19 @@ const PUBLIC_MISS_HIGH_PRIORITY_TARGET_TYPES = new Set<StaticRebuildTargetType>(
   "list_recent",
   "list_popular",
   "search_index",
+  "top",
+  "top_recommended",
+  "top_latest",
+  "top_nostalgic",
+  "top_events",
+  "top_announcements",
+  "top_stats",
+  "top_slot_stats",
+  "recommend",
+  "recommend_core",
+  "event",
+  "event_base",
+  "event_slots",
 ]);
 
 function resolvePublicMissEnqueuePriority(
@@ -928,6 +943,7 @@ export async function loadPublicEventVideosPage(params: {
   }
 
   const r2Key = eventBaseObjectKey(eventId);
+  const composedKey = eventComposedObjectKey(eventId);
   const missOptions: PublicJsonLoadOptions<StaticEventDetailPayload> = {
     r2Key,
     targetType: "event_base",
@@ -943,6 +959,7 @@ export async function loadPublicEventVideosPage(params: {
     strategy: PublicDataStrategy,
   ) => {
     if (!isCompleteEventBasePool(payload)) return null;
+    if (!eventListPayloadSupportsSort(payload, params.sort)) return null;
     const eventInfo = extractEventListInfo(payload);
     const page = pageEventBaseVideos({
       payload,
@@ -960,21 +977,47 @@ export async function loadPublicEventVideosPage(params: {
     };
   };
 
-  const cached = unwrapPublicJsonCachePayload<StaticEventDetailPayload>(
-    await readPublicJsonCache<unknown>(r2Key),
-  );
-  if (cached !== null) {
-    const strategy = getPublicDataStrategy(
-      await resolvePublicOperationMode({ allowD1: false }),
+  const tryCachedOrR2 = async (key: string) => {
+    const cached = unwrapPublicJsonCachePayload<StaticEventDetailPayload>(
+      await readPublicJsonCache<unknown>(key),
     );
-    const hit = tryStaticEventList(cached, "cached_static", strategy);
-    if (hit) {
-      recordPublicStaticHit();
-      return hit;
+    if (cached !== null) {
+      const strategy = getPublicDataStrategy(
+        await resolvePublicOperationMode({ allowD1: false }),
+      );
+      const hit = tryStaticEventList(cached, "cached_static", strategy);
+      if (hit) {
+        recordPublicStaticHit();
+        return { hit, payload: cached as StaticEventDetailPayload | null };
+      }
     }
+
+    const payload = await readStaticJson<StaticEventDetailPayload>(key);
+    if (payload !== null) {
+      void recordDegradedCircuitR2Hit();
+      const strategy = getPublicDataStrategy(
+        await resolvePublicOperationMode({ allowD1: false }),
+      );
+      writePublicJsonCacheBestEffort(
+        key,
+        payload,
+        PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+      );
+      const hit = tryStaticEventList(payload, "static", strategy);
+      if (hit) {
+        recordPublicStaticHit();
+        return { hit, payload };
+      }
+      return { hit: null, payload };
+    }
+    return { hit: null, payload: null };
+  };
+
+  const baseResult = await tryCachedOrR2(r2Key);
+  if (baseResult.hit) {
+    return baseResult.hit;
   }
 
-  const payload = await readStaticJson<StaticEventDetailPayload>(r2Key);
   let missMeta: Pick<
     PublicJsonLoadResult<StaticRecentVideoPage>,
     "enqueued" | "rebuildState" | "probe"
@@ -984,28 +1027,24 @@ export async function loadPublicEventVideosPage(params: {
     probe: undefined,
   };
 
-  if (payload !== null) {
-    void recordDegradedCircuitR2Hit();
-    const strategy = getPublicDataStrategy(
-      await resolvePublicOperationMode({ allowD1: false }),
-    );
-    writePublicJsonCacheBestEffort(
-      r2Key,
-      payload,
-      PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
-    );
-    const hit = tryStaticEventList(payload, "static", strategy);
-    if (hit) {
-      recordPublicStaticHit();
-      return hit;
-    }
-  } else {
+  if (baseResult.payload === null) {
     void recordDegradedCircuitR2Miss();
     const miss = await resolvePublicJsonMiss(missOptions);
     missMeta = {
       enqueued: miss.enqueued,
       rebuildState: miss.rebuildState,
       probe: miss.probe,
+    };
+  }
+
+  // 移行中: composed events/{id}.json があれば D1 を避けて一覧する（score 欠落時は非対応）
+  const composedResult = await tryCachedOrR2(composedKey);
+  if (composedResult.hit) {
+    return {
+      ...composedResult.hit,
+      enqueued: missMeta.enqueued,
+      rebuildState: missMeta.rebuildState,
+      probe: missMeta.probe,
     };
   }
 
@@ -1100,7 +1139,10 @@ export async function loadStaticTopPage(): Promise<
       "top_recommended",
       "top_latest",
       "top_nostalgic",
+      "top_events",
+      "top_announcements",
       "top_stats",
+      "top_slot_stats",
       "recommend_core",
     ],
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.top,
