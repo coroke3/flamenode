@@ -713,11 +713,28 @@ export async function extendOwnSlotGroup(
       slotPartGapSec(event),
     );
 
+    const groupXUserId = groupRows[0]?.x_user_id ?? null;
+    if (
+      groupXUserId != null &&
+      slotXUserId != null &&
+      groupXUserId !== slotXUserId
+    ) {
+      return {
+        ok: false,
+        message: "この連続枠は別の X ID で確保されているため拡張できません。",
+      };
+    }
+    // 既存 group の主体を継承。単枠(null)から2枠へ広げるときだけ現セッション X を採用。
+    const inheritedXUserId =
+      groupRows.length > 1 || groupXUserId != null
+        ? groupXUserId
+        : slotXUserId;
+
     const groupId = anchor.reservation_group_id || generateId("sgrp");
     const displayName = groupRows[0].display_name;
     const candidatePatch = {
       reserved_by_user_id: guard.user.id,
-      x_user_id: slotXUserId,
+      x_user_id: inheritedXUserId,
       display_name: displayName,
       reservation_group_id: groupId,
       status: "reserved" as const,
@@ -726,7 +743,10 @@ export async function extendOwnSlotGroup(
       ? [
           {
             rows: [anchor],
-            patch: { reservation_group_id: groupId },
+            patch: {
+              reservation_group_id: groupId,
+              x_user_id: inheritedXUserId,
+            },
             statusGuard: "reserved",
           },
           {
@@ -803,6 +823,9 @@ export async function mergeOwnSlotGroups(
     ) {
       return { ok: false, message: "自分の予約中の隣接枠どうしのみ結合できます。" };
     }
+    if (left.x_user_id !== right.x_user_id) {
+      return { ok: false, message: "連続枠に別の X ID が混在しているため結合できません。" };
+    }
 
     const leftGroup = await loadBoundedGroup(db, left);
     const rightGroup = await loadBoundedGroup(db, right);
@@ -817,6 +840,10 @@ export async function mergeOwnSlotGroups(
         return { ok: false, message: "連続枠に別の利用者または状態が混在しています。" };
       }
     }
+    const subjectX = reservedRows[0]?.x_user_id ?? null;
+    if (reservedRows.some((row) => row.x_user_id !== subjectX)) {
+      return { ok: false, message: "連続枠に別の X ID が混在しているため結合できません。" };
+    }
     if (reservedRows.length + 1 > eventDomainLimit(event)) {
       return { ok: false, message: "連続枠の上限を超えるため結合できません。" };
     }
@@ -829,6 +856,7 @@ export async function mergeOwnSlotGroups(
     const groupPatch = {
       display_name: parsed.data.display_name,
       reservation_group_id: groupId,
+      x_user_id: slotXUserId,
     };
     const gapPatch = {
       reserved_by_user_id: guard.user.id,

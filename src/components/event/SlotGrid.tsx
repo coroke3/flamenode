@@ -37,6 +37,8 @@ export interface SlotRow {
   display_name: string | null;
   is_owned_by_viewer: boolean;
   group_key: string | null;
+  /** 本人枠のみ。結合 UI の X 一致判定用。他人には渡さない。 */
+  x_user_id?: string | null;
 }
 
 export interface SlotGridProps {
@@ -149,6 +151,13 @@ export function SlotGrid({
       gapSec: slotGapSec,
     });
   }, [reserveTarget, slots, eventMaxSlots, slotGapSec]);
+
+  React.useEffect(() => {
+    const current = Number(reserveCount);
+    if (Number.isFinite(current) && current > reserveMaxCount) {
+      setReserveCount(String(reserveMaxCount));
+    }
+  }, [reserveMaxCount]);
 
   const reservePreviewSlots = React.useMemo(() => {
     if (!reserveTarget) return [] as SlotRow[];
@@ -363,12 +372,22 @@ export function SlotGrid({
       if (idx < 0) return null;
       const left = sorted[idx - 1];
       const right = sorted[idx + 1];
-      if (!left || !right) return null;
+      const gap = sorted[idx];
+      if (!left || !right || !gap) return null;
       if (
         left.status !== "reserved" ||
         !left.is_owned_by_viewer ||
         right.status !== "reserved" ||
         !right.is_owned_by_viewer
+      ) {
+        return null;
+      }
+      if ((left.x_user_id ?? null) !== (right.x_user_id ?? null)) {
+        return null;
+      }
+      if (
+        !areSlotsInSamePart(left, gap, slotGapSec) ||
+        !areSlotsInSamePart(gap, right, slotGapSec)
       ) {
         return null;
       }
@@ -387,16 +406,31 @@ export function SlotGrid({
       }
       return { ok: true };
     },
-    [slots, eventMaxSlots],
+    [slots, eventMaxSlots, slotGapSec],
+  );
+
+  const canExtendDirection = React.useCallback(
+    (slot: SlotAnnotatedRow, direction: "forward" | "backward"): boolean => {
+      if (slot.group_size >= eventMaxSlots) return false;
+      const sorted = sortSlotsChronologically(slots);
+      const edgeId =
+        direction === "backward" ? slot.group_first_slot_id : slot.group_last_slot_id;
+      const edgeIndex = sorted.findIndex((row) => row.id === edgeId);
+      if (edgeIndex < 0) return false;
+      const edge = sorted[edgeIndex];
+      const neighbor =
+        direction === "backward" ? sorted[edgeIndex - 1] : sorted[edgeIndex + 1];
+      if (!edge || !neighbor || neighbor.status !== "available") return false;
+      return direction === "backward"
+        ? areSlotsInSamePart(neighbor, edge, slotGapSec)
+        : areSlotsInSamePart(edge, neighbor, slotGapSec);
+    },
+    [slots, eventMaxSlots, slotGapSec],
   );
 
   const getMergeDefaultName = React.useCallback(
     (gapSlot: SlotAnnotatedRow): string => {
-      const sorted = [...slots].sort((a, b) => {
-        const aKey = a.sort_order ?? a.start_time ?? 0;
-        const bKey = b.sort_order ?? b.start_time ?? 0;
-        return aKey - bKey;
-      });
+      const sorted = sortSlotsChronologically(slots);
       const idx = sorted.findIndex((s) => s.id === gapSlot.id);
       if (idx < 0) return "";
       const left = sorted[idx - 1];
@@ -592,7 +626,14 @@ export function SlotGrid({
                                     <button
                                       type="button"
                                       className={styles.slotActionMenuItem}
-                                      disabled={busy || slot.group_size >= eventMaxSlots}
+                                      disabled={
+                                        busy || !canExtendDirection(slot, "backward")
+                                      }
+                                      title={
+                                        canExtendDirection(slot, "backward")
+                                          ? undefined
+                                          : "前方に連続する空き枠がありません"
+                                      }
                                       onClick={() => {
                                         setActionMenuSlotId(null);
                                         setConfirmExtend({
@@ -606,7 +647,14 @@ export function SlotGrid({
                                     <button
                                       type="button"
                                       className={styles.slotActionMenuItem}
-                                      disabled={busy || slot.group_size >= eventMaxSlots}
+                                      disabled={
+                                        busy || !canExtendDirection(slot, "forward")
+                                      }
+                                      title={
+                                        canExtendDirection(slot, "forward")
+                                          ? undefined
+                                          : "後方に連続する空き枠がありません"
+                                      }
                                       onClick={() => {
                                         setActionMenuSlotId(null);
                                         setConfirmExtend({

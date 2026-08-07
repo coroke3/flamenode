@@ -16,6 +16,13 @@ test("submitSlotVideoは20枠を1本のslot UPDATEにまとめる", () => {
   assert.match(source, /MAX_SLOTS_PER_VIDEO \+ 1/);
 });
 
+test("submitSlotVideoは提出枠の連続性をareSlotsInSamePartで検証する", () => {
+  assert.match(source, /sortSlotsChronologically\(submittedSlots\)/);
+  assert.match(source, /areSlotsInSamePart/);
+  assert.match(source, /連続していない枠をまとめて提出できません/);
+  assert.match(source, /slot_part_gap_minutes/);
+});
+
 test("20枠submitの代表planは1 slot statementと20 auditでD1上限内", () => {
   const slotAuditCount = MAX_SLOTS_PER_VIDEO;
   // video insert/update + derived/software/events/stage/custom/members + slot bulk + notify*2 + static rebuild

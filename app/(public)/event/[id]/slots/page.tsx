@@ -156,6 +156,7 @@ export default async function EventSlotsPage({
           : null,
       is_owned_by_viewer: isOwnedByViewer,
       group_key: groupKey,
+      x_user_id: isOwnedByViewer ? slot.x_user_id : null,
     };
   });
   const slotTotal = slotRows.length;

@@ -65,6 +65,10 @@ import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
 import { MAX_SLOTS_PER_VIDEO } from "@/lib/slots/limits";
 import { versionedSlotWhere } from "@/lib/slots/versionedPredicate";
+import {
+  areSlotsInSamePart,
+  sortSlotsChronologically,
+} from "@/lib/utils/slotGroupingCore";
 
 export async function submitSlotVideo(formData: FormData): Promise<VideoActionResult> {
   const guard = await writeGuard({
@@ -150,6 +154,7 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     await db
       .select({
         title: eventsTable.title,
+        slot_part_gap_minutes: eventsTable.slot_part_gap_minutes,
       })
       .from(eventsTable)
       .where(eq(eventsTable.id, slotRow.event_id))
@@ -176,6 +181,19 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   }
   if (submittedSlots.some((row) => row.status !== "reserved")) {
     return { ok: false, message: "予約中の枠だけ作品を提出できます。" };
+  }
+  const slotGapSec = (eventConfig.slot_part_gap_minutes ?? 15) * 60;
+  const orderedSubmittedSlots = sortSlotsChronologically(submittedSlots);
+  for (let index = 1; index < orderedSubmittedSlots.length; index += 1) {
+    if (
+      !areSlotsInSamePart(
+        orderedSubmittedSlots[index - 1],
+        orderedSubmittedSlots[index],
+        slotGapSec,
+      )
+    ) {
+      return { ok: false, message: "連続していない枠をまとめて提出できません。" };
+    }
   }
   const now = Math.floor(Date.now() / 1000);
   const previousIconUrl = existingVideo?.creator_icon_url ?? null;

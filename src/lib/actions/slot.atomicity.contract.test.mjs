@@ -72,6 +72,26 @@ test("複数枠機能を維持し、業務上限はmax_slots_per_videoを正本�
   assert.doesNotMatch(uiSource, /collapseReservationGroups/);
 });
 
+test("mergeOwnSlotGroupsはx_user_id混在を拒否しgroupPatchへslotXUserIdを書く", () => {
+  const mergeBlock =
+    source.match(/export async function mergeOwnSlotGroups[\s\S]*?(?=export async function|$)/)?.[0] ??
+    "";
+  assert.match(mergeBlock, /left\.x_user_id !== right\.x_user_id/);
+  assert.match(mergeBlock, /row\.x_user_id !== subjectX/);
+  assert.match(mergeBlock, /連続枠に別の X ID が混在しているため結合できません/);
+  assert.match(mergeBlock, /groupPatch[\s\S]*?x_user_id:\s*slotXUserId/);
+});
+
+test("extendOwnSlotGroupは既存groupのx_user_idを継承し別Xへの書換えを拒否する", () => {
+  const extendBlock =
+    source.match(
+      /export async function extendOwnSlotGroup[\s\S]*?(?=export async function mergeOwnSlotGroups)/,
+    )?.[0] ?? "";
+  assert.match(extendBlock, /groupXUserId !== slotXUserId/);
+  assert.match(extendBlock, /inheritedXUserId/);
+  assert.match(extendBlock, /x_user_id: inheritedXUserId/);
+});
+
 test("20枠reserveは1 bulk mutation+queue+通知+完全auditがD1上限内", () => {
   const slotRows = 20;
   const mutationStatementCount = 1 + 1 + 1;
