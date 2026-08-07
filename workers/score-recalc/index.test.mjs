@@ -13,7 +13,36 @@ const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 
 test("スコア更新は1回150件以下に固定する", () => {
   assert.equal(SCORE_RECALC_BATCH_SIZE, 150);
-  assert.equal(SCORE_FORCE_REFRESH_SEC, 24 * 60 * 60);
+  assert.equal(SCORE_FORCE_REFRESH_SEC, 72 * 60 * 60);
+});
+
+test("age-only force refresh は72時間（7日ではない）", () => {
+  assert.equal(SCORE_FORCE_REFRESH_SEC, 72 * 60 * 60);
+  assert.ok(SCORE_FORCE_REFRESH_SEC < 7 * 24 * 60 * 60);
+  assert.match(source, /score_updated_at <= \?1 - \?2/);
+  assert.match(source, /score_updated_at < v\.updated_at/);
+  assert.match(source, /score_updated_at < COALESCE\(ym\.updated_at, 0\)/);
+});
+
+test("recalcScoreBatch は force refresh 秒数を bind する", async () => {
+  let bound = [];
+  await recalcScoreBatch({
+    DB: {
+      prepare() {
+        return {
+          bind(...args) {
+            bound = args;
+            return this;
+          },
+          async run() {
+            return { meta: { changes: 0 } };
+          },
+        };
+      },
+    },
+  });
+  assert.equal(bound[1], SCORE_FORCE_REFRESH_SEC);
+  assert.equal(bound[2], SCORE_RECALC_BATCH_SIZE);
 });
 
 test("score result reports exact D1 changes and zero external metrics", async () => {

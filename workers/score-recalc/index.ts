@@ -32,10 +32,11 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 export const SCORE_RECALC_BATCH_SIZE = 150;
 /** nowを含めてもD1の1 statement最大100 bindings未満に収める。 */
 export const SCORE_RECALC_BIND_CHUNK_SIZE = 90;
-export const SCORE_FORCE_REFRESH_SEC = 24 * 60 * 60;
+/** age-only 強制 refresh。metadata/video dirty は従来どおり優先。 */
+export const SCORE_FORCE_REFRESH_SEC = 72 * 60 * 60;
 
 /**
- * 変更された作品と24時間以上未更新の作品を優先し、1 SQLで最大150件更新する。
+ * 変更された作品と72時間以上未更新の作品を優先し、1 SQLで最大150件更新する。
  * score更新ではvideos.updated_atを変更しない。自己更新で再びdirtyになる循環を防ぐ。
  */
 export async function recalcScoreForVideoIds(
