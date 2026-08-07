@@ -9,6 +9,7 @@ test("reserveSlot keeps ops webhook post-commit and out of atomic batch", async 
   const source = await read("./slot.ts");
   assert.match(source, /enqueueSlotReserveOpsWebhookPostCommit/);
   assert.match(source, /runPostCommitBestEffort/);
+  assert.match(source, /isOwnReservedSlot\(anchor, guard\.user\.id\)[\s\S]*enqueueSlotReserveOpsWebhookPostCommit/);
   assert.doesNotMatch(source, /extraStatements/);
   assert.doesNotMatch(
     source,

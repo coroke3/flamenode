@@ -42,6 +42,7 @@ import {
   sortSlotsChronologically,
 } from "@/lib/utils/slotGroupingCore";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { enqueueSlotReserveOpsWebhookPostCommit } from "@/lib/actions/slotNotificationsPostCommit";
 
 export interface SlotReserveResult extends PendingPublicReflection {
   ok: boolean;
@@ -592,8 +593,29 @@ export async function reserveSlot(
           return { ok: false, message: SLOT_ACCOUNT_OTHER_MESSAGE };
         }
         if (canActAsSlotActor(relation)) {
-          const group = await loadBoundedGroupStructure(db, anchor);
-          return slotMutationOk(anchor.id, group.length);
+          const event = await loadEvent(db, anchor.event_id);
+          let slotCount = 1;
+          try {
+            slotCount = (await loadBoundedGroupStructure(db, anchor)).length;
+          } catch {
+            // best-effort webhook requeue; dedupe key is anchor-scoped
+          }
+          const traceId = createTraceId();
+          await enqueueSlotReserveOpsWebhookPostCommit(
+            db,
+            {
+              actorUserId: guard.user.id,
+              eventId: anchor.event_id,
+              eventTitle: event?.title ?? "イベント",
+              slotCount,
+              displayName: anchor.display_name ?? parsed.data.display_name,
+              xUserId: anchor.x_user_id,
+              anchorSlotId: anchor.id,
+              groupId: anchor.reservation_group_id,
+            },
+            { flow: "slot.reserve", traceId },
+          );
+          return slotMutationOk(anchor.id, slotCount);
         }
       }
       return { ok: false, message: "この枠はすでに確保されています。" };

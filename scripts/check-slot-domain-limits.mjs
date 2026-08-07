@@ -24,6 +24,8 @@ import {
 
   formatCommandFailure,
 
+  runRemoteD1Command,
+
   runRemoteD1File,
 
 } from "./remote-d1-utils.mjs";
@@ -178,17 +180,36 @@ function collectIssuesFromRows({
 
 
 
+function sqlOverMaxSlots() {
+  return `SELECT id, max_slots_per_video
+     FROM events
+     WHERE max_slots_per_video > ${MAX_SLOTS_PER_VIDEO}`;
+}
+
+function sqlOverGroupSize() {
+  return `SELECT reservation_group_id, event_id, COUNT(*) AS slot_count
+     FROM slots
+     WHERE reservation_group_id IS NOT NULL
+     GROUP BY reservation_group_id, event_id
+     HAVING COUNT(*) > ${MAX_SLOTS_PER_VIDEO}`;
+}
+
+function sqlOverStageQuestions() {
+  return `SELECT event_id, COUNT(*) AS question_count
+     FROM event_custom_questions
+     WHERE question_key = 'stage_permission'
+        OR question_key LIKE 'stage_permission_%'
+     GROUP BY event_id
+     HAVING COUNT(*) > ${MAX_STAGE_PERMISSION_QUESTIONS}`;
+}
+
 function listDomainLimitIssues(databasePath) {
 
   const overMaxSlots = runSql(
 
     databasePath,
 
-    `SELECT id, max_slots_per_video
-
-     FROM events
-
-     WHERE max_slots_per_video > ${MAX_SLOTS_PER_VIDEO}`,
+    sqlOverMaxSlots(),
 
   );
 
@@ -196,15 +217,7 @@ function listDomainLimitIssues(databasePath) {
 
     databasePath,
 
-    `SELECT reservation_group_id, event_id, COUNT(*) AS slot_count
-
-     FROM slots
-
-     WHERE reservation_group_id IS NOT NULL
-
-     GROUP BY reservation_group_id, event_id
-
-     HAVING COUNT(*) > ${MAX_SLOTS_PER_VIDEO}`,
+    sqlOverGroupSize(),
 
   );
 
@@ -212,17 +225,7 @@ function listDomainLimitIssues(databasePath) {
 
     databasePath,
 
-    `SELECT event_id, COUNT(*) AS question_count
-
-     FROM event_custom_questions
-
-     WHERE question_key = 'stage_permission'
-
-        OR question_key LIKE 'stage_permission_%'
-
-     GROUP BY event_id
-
-     HAVING COUNT(*) > ${MAX_STAGE_PERMISSION_QUESTIONS}`,
+    sqlOverStageQuestions(),
 
   );
 
@@ -248,19 +251,19 @@ function listDomainLimitIssues(databasePath) {
 
 function listRemoteIssues() {
 
-  const overMaxSlots = runRemoteD1File(sqlPaths.events, {
+  const overMaxSlots = runRemoteD1Command(sqlOverMaxSlots(), {
 
     scriptName: "check:slot-domain-limits",
 
   });
 
-  const overGroupSize = runRemoteD1File(sqlPaths.groups, {
+  const overGroupSize = runRemoteD1Command(sqlOverGroupSize(), {
 
     scriptName: "check:slot-domain-limits",
 
   });
 
-  const overStageQuestions = runRemoteD1File(sqlPaths.stageQuestions, {
+  const overStageQuestions = runRemoteD1Command(sqlOverStageQuestions(), {
 
     scriptName: "check:slot-domain-limits",
 
@@ -351,6 +354,18 @@ function main() {
     const databasePath = explicit ?? findLocalD1Database();
 
     if (!databasePath) {
+
+      if (strict) {
+
+        console.error(
+
+          "[check:slot-domain-limits] --strict requires a local D1 database.",
+
+        );
+
+        process.exit(2);
+
+      }
 
       console.log(
 

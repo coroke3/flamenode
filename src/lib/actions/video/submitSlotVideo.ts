@@ -179,16 +179,27 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   // 絶対上限のみ MAX_SLOTS_PER_VIDEO で fail-closed。
   let submittedSlots: typeof slots.$inferSelect[];
   if (slotRow.reservation_group_id) {
-    const groupRows = await db
-      .select()
-      .from(slots)
-      .where(
-        and(
-          eq(slots.reservation_group_id, slotRow.reservation_group_id),
-          eq(slots.event_id, slotRow.event_id),
-        )!,
-      )
-      .limit(MAX_SLOTS_PER_VIDEO + 1);
+    const groupRows = sortSlotsChronologically(
+      await db
+        .select()
+        .from(slots)
+        .where(
+          and(
+            eq(slots.reservation_group_id, slotRow.reservation_group_id),
+            eq(slots.event_id, slotRow.event_id),
+          )!,
+        )
+        .limit(MAX_SLOTS_PER_VIDEO + 1),
+    );
+    if (groupRows.length > MAX_SLOTS_PER_VIDEO) {
+      return { ok: false, message: "連続枠の件数が上限を超えています。" };
+    }
+    if (!groupRows.some((row) => row.id === slotRow.id)) {
+      return {
+        ok: false,
+        message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
     const subjectResult = resolveSlotReservationSubject(groupRows);
     if (!subjectResult.ok) {
       return {

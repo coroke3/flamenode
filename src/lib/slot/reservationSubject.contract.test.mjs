@@ -43,6 +43,14 @@ test("extend/mergeはgroup subjectを候補枠へ継承しactive Xへ置換し�
   );
 });
 
+test("mergeOwnSlotGroupsはgap含む全枠へ同一display_nameを適用する", () => {
+  const mergeBlock =
+    slotSource.match(/export async function mergeOwnSlotGroups[\s\S]*$/)?.[0] ?? "";
+  const displayNameMatches = [...mergeBlock.matchAll(/display_name: parsed\.data\.display_name/g)];
+  assert.ok(displayNameMatches.length >= 2, "reserved rows and gap must use parsed.data.display_name");
+  assert.doesNotMatch(mergeBlock, /display_name: subject\.displayName/);
+});
+
 test("submitSlotVideoのgroup loadはx_user_idで絞らない", () => {
   assert.match(submitSource, /resolveSlotReservationSubject\(groupRows\)/);
   const groupBlock =
@@ -51,8 +59,16 @@ test("submitSlotVideoのgroup loadはx_user_idで絞らない", () => {
     )?.[0] ?? "";
   assert.match(groupBlock, /eq\(slots\.reservation_group_id/);
   assert.match(groupBlock, /eq\(slots\.event_id/);
+  assert.match(groupBlock, /sortSlotsChronologically/);
+  assert.match(groupBlock, /groupRows\.length > MAX_ATOMIC_SUBMITTED_SLOTS/);
+  assert.match(groupBlock, /groupRows\.some\(\(row\) => row\.id === slotRow\.id\)/);
   assert.doesNotMatch(groupBlock, /eq\(slots\.x_user_id/);
   assert.doesNotMatch(groupBlock, /isNull\(slots\.x_user_id\)/);
+});
+
+test("submitSlotVideoは毎回submit通知をpost-commit enqueueする", () => {
+  assert.match(submitSource, /await enqueueSlotSubmitNotificationsPostCommit/);
+  assert.doesNotMatch(submitSource, /if \(!existingVideo\) \{[\s\S]*enqueueSlotSubmitNotificationsPostCommit/);
 });
 
 test("EventFormはmax_slots 3とstage質問4件上限を反映", () => {

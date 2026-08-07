@@ -95,9 +95,9 @@ export function resolveWranglerCli(root = process.cwd()) {
   return path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
 }
 
-export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd() }) {
+export function runRemoteD1Command(sql, { scriptName, root = process.cwd() }) {
   const databaseTarget = resolveRemoteD1ExecuteTarget(root);
-  const sql = normalizeRemoteD1Sql(fs.readFileSync(sqlPath, "utf8"));
+  const normalized = normalizeRemoteD1Sql(sql);
   const wranglerCli = resolveWranglerCli(root);
   try {
     const output = execFileSync(
@@ -110,7 +110,7 @@ export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd() }) {
         "--remote",
         "--json",
         "--command",
-        sql,
+        normalized,
       ],
       {
         cwd: root,
@@ -125,4 +125,9 @@ export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd() }) {
     );
     throw error;
   }
+}
+
+export function runRemoteD1File(sqlPath, { scriptName, root = process.cwd() }) {
+  const sql = normalizeRemoteD1Sql(fs.readFileSync(sqlPath, "utf8"));
+  return runRemoteD1Command(sql, { scriptName, root });
 }

@@ -105,9 +105,10 @@ if (!runningWithTsx) {
     },
   });
 
-  const { compensateDepublicizationFenceOnD1Failure } = await import(
-    "./videoVisibilityTransition.ts"
-  );
+  const {
+    compensateDepublicizationFenceOnD1Failure,
+    handleVideoVisibilityMutationFailure,
+  } = await import("./videoVisibilityTransition.ts");
 
   function createDb() {
     return {
@@ -248,6 +249,32 @@ if (!runningWithTsx) {
       }),
     );
     assert.equal(state.writeCalls, 3);
+    assert.ok(
+      state.warnLogs.some((args) =>
+        String(args[0]).includes("stuck_fence_candidate"),
+      ),
+    );
+  });
+
+  test("handleVideoVisibilityMutationFailure returns ok:false when compensation throws", async () => {
+    reset();
+    state.readThrows = true;
+    const result = await handleVideoVisibilityMutationFailure(
+      createDb(),
+      new Error("d1_mutation_failed"),
+      {
+        flow: "admin_set_video_status",
+        traceId: "trace-8",
+        videoId: "video-1",
+        eventId: "event-1",
+        depublicizedFromPublic: true,
+        fenceToken: "fence-token-1",
+      },
+    );
+    assert.deepEqual(result, {
+      ok: false,
+      message: "更新が競合したか、監査記録に失敗しました。再読み込みしてお試しください。",
+    });
     assert.ok(
       state.warnLogs.some((args) =>
         String(args[0]).includes("stuck_fence_candidate"),

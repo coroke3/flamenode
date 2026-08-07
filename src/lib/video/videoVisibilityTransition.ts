@@ -479,11 +479,34 @@ export async function handleVideoVisibilityMutationFailure(
 ): Promise<{ ok: false; message: string }> {
   unstable_rethrow(error);
   if (input.depublicizedFromPublic && input.fenceToken) {
-    await compensateDepublicizationFenceOnD1Failure(db, {
-      videoId: input.videoId,
-      fenceToken: input.fenceToken,
-      traceId: input.traceId,
-    });
+    try {
+      await compensateDepublicizationFenceOnD1Failure(db, {
+        videoId: input.videoId,
+        fenceToken: input.fenceToken,
+        traceId: input.traceId,
+      });
+    } catch (compensateError) {
+      const compensate_error_code = visibilityErrorCode(compensateError);
+      logFlowTrace({
+        flow: input.flow,
+        phase: "stuck_fence_candidate",
+        trace_id: input.traceId,
+        result: "failed",
+        error_code: compensate_error_code,
+        committed: false,
+      });
+      console.warn(
+        JSON.stringify({
+          service: "visibility_status",
+          flow: input.flow,
+          trace_id: input.traceId,
+          phase: "stuck_fence_candidate",
+          error_code: compensate_error_code,
+          video_id: input.videoId,
+          ...(input.eventId ? { event_id: input.eventId } : {}),
+        }),
+      );
+    }
   }
   const error_code = visibilityErrorCode(error);
   logFlowTrace({

@@ -110,6 +110,12 @@ function main() {
       argValue("--database") ?? process.env.FLAMENODE_SLOT_GROUP_CHECK_DB ?? null;
     const databasePath = explicit ?? findLocalD1Database();
     if (!databasePath) {
+      if (strict) {
+        console.error(
+          "[check:slot-reservation-groups] --strict requires a local D1 database.",
+        );
+        process.exit(2);
+      }
       console.log(
         "check:slot-reservation-groups OK (static checks only; no local D1)",
       );

@@ -27,6 +27,7 @@ test("slot-reservation-groups script supports remote inspection via wrangler", (
   assert.match(source, /collectSlotReservationAmbiguities/);
   assert.match(source, /informational only/);
   assert.match(source, /informational: !strict/);
+  assert.match(source, /--strict requires a local D1 database/);
 });
 
 test("slot-reservation-groups local mode still resolves D1 path", () => {

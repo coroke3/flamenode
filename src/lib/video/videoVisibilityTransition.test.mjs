@@ -20,4 +20,8 @@ test("depublicization keeps R2 block before D1 and compensates only when safe", 
   assert.match(source, /releaseBlockedEntityInManifest/);
   assert.match(source, /r2_token_mismatch/);
   assert.match(source, /video_not_public/);
+  assert.match(
+    source,
+    /handleVideoVisibilityMutationFailure[\s\S]*?stuck_fence_candidate/,
+  );
 });
