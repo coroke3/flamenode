@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { planD1AuditMutationBudget } from "../audit/mutateBudget.ts";
+import { MAX_SLOTS_PER_VIDEO } from "../slots/limits.ts";
 
 const source = await readFile(new URL("./slot-admin.ts", import.meta.url), "utf8");
 const formSource = await readFile(
@@ -40,8 +42,7 @@ test("slot-admin は競合時に部分生成せず full snapshot と二重 CAS �
   assert.match(source, /NOT EXISTS \(/);
   assert.match(source, /UNION ALL/);
   assert.match(source, /expectedMutationChanges: \[rows\.length, \.\.\.queue\.expectedChanges\]/);
-  assert.match(source, /eq\(slots\.version, row\.version\)/);
-  assert.match(source, /eq\(slots\.updated_at, row\.updated_at\)/);
+  assert.match(source, /versionedSlotWhere/);
   assert.match(source, /before: snapshot\(/);
   assert.match(source, /after: (?:snapshot\(|after\(|\{ \.\.\.snapshot\()/);
 });
@@ -106,18 +107,69 @@ test("slot生成のUIとserverは同じ上限を案内・検証する", () => {
   assert.match(source, /chunkRows\(newRows, MAX_ATOMIC_SLOT_ROWS\)/);
 });
 
-test("上限判定前のavailable・group queryは4件目で打ち切る", () => {
-  assert.equal((source.match(/\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/g) ?? []).length, 2);
+test("releaseSlotはdomain上限、batch group queryはatomic chunk上限で打ち切る", () => {
+  assert.match(source, /MAX_SLOTS_PER_VIDEO \+ 1/);
+  assert.equal((source.match(/\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/g) ?? []).length, 1);
   assert.match(
     source,
     /deleteAvailableSlots[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS\)/,
   );
   assert.match(
     source,
-    /eq\(slots\.reservation_group_id, groupId\)[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/,
-  );
-  assert.match(
-    source,
     /inArray\(slots\.reservation_group_id, groupIds\)[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/,
   );
+  assert.match(source, /from "@\/lib\/slots\/versionedPredicate"/);
+  assert.match(source, /versionedSlotWhere/);
+});
+
+test("releaseSlotはMAX_SLOTS_PER_VIDEOまでのgroup loadでMAX_ATOMIC_SLOT_ROWSを使わない", () => {
+  const releaseSlotBlock =
+    source.match(
+      /export async function releaseSlot[\s\S]*?(?=export async function deleteSlot)/,
+    )?.[0] ?? "";
+  assert.ok(releaseSlotBlock.length > 0);
+  assert.match(releaseSlotBlock, /\.limit\(MAX_SLOTS_PER_VIDEO \+ 1\)/);
+  assert.doesNotMatch(releaseSlotBlock, /MAX_ATOMIC_SLOT_ROWS/);
+  assert.equal(MAX_SLOTS_PER_VIDEO, 20);
+});
+
+test("releaseRowsは1 bulk UPDATEとexpectedMutationChanges [rows.length, ...queue]を維持する", () => {
+  const releaseRowsBlock =
+    source.match(/async function releaseRows[\s\S]*?(?=export async function deleteSlot)/)?.[0] ??
+    "";
+  assert.ok(releaseRowsBlock.length > 0);
+  assert.match(
+    releaseRowsBlock,
+    /\.update\(slots\)[\s\S]*?versionedSlotWhere\(eventId, rows, "reserved"\)/,
+  );
+  assert.match(
+    releaseRowsBlock,
+    /expectedMutationChanges: \[rows\.length, \.\.\.queue\.expectedChanges\]/,
+  );
+  assert.equal((releaseRowsBlock.match(/\.update\(slots\)/g) ?? []).length, 1);
+});
+
+test("20枠admin releaseは1 mutation+queue+通知+完全auditがD1上限内", () => {
+  const slotRows = MAX_SLOTS_PER_VIDEO;
+  const queueStatementCount = 1;
+  const queueAssertionCount = 1;
+  const mutationStatementCount = 1 + queueStatementCount;
+  const mutationAssertionCount = 1 + queueAssertionCount;
+  const postAuditStatementCount = 1;
+  const budget = planD1AuditMutationBudget({
+    mutationStatementCount,
+    mutationAssertionCount,
+    auditEntryCount: slotRows,
+    postAuditStatementCount,
+    distinctActorCount: 1,
+  });
+
+  assert.equal(budget.mutationStatementCount, 2);
+  assert.equal(budget.withinLimit, true);
+  assert.ok(
+    budget.totalQueryCount <= budget.limit,
+    `totalQueryCount=${budget.totalQueryCount}`,
+  );
+  const bulkCasBinds = 2 + slotRows * 3 + 4;
+  assert.ok(bulkCasBinds <= 100, `bulkCasBinds=${bulkCasBinds}`);
 });

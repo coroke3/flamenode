@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  MAX_SLOTS_PER_VIDEO,
+  MIN_SLOTS_PER_VIDEO,
+} from "@/lib/slots/limits";
 import { normalizeHttpUrl } from "@/lib/utils/url";
 import { DEFAULT_STAGE_PERMISSION_FIELD } from "@/lib/video/formSettings";
 import {
@@ -42,7 +46,11 @@ export const eventSchema = z.object({
     .max(2000)
     .optional()
     .nullable(),
-  max_slots_per_video: z.coerce.number().min(1).max(20).default(1),
+  max_slots_per_video: z.coerce
+    .number()
+    .min(MIN_SLOTS_PER_VIDEO)
+    .max(MAX_SLOTS_PER_VIDEO)
+    .default(MIN_SLOTS_PER_VIDEO),
   slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(15),
   slot_type: z.enum(["time", "count"]).default("time"),
   slot_visibility_mode: z

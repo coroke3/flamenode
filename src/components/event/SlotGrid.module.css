@@ -313,12 +313,29 @@
   gap: 2px;
 }
 
+.slotNameRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
 .slotName {
   font-size: 15px;
   font-weight: 800;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.slotGroupPosition {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
   white-space: nowrap;
 }
 

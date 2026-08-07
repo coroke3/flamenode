@@ -36,9 +36,10 @@ test("枠処理はreservation_group_idとmax_slots_per_videoを維持する", as
   assert.match(slotAction, /event\.max_slots_per_video/);
   assert.match(slotAction, /extendOwnSlotGroup/);
   assert.match(slotAction, /mergeOwnSlotGroups/);
-  assert.match(submitAction, /eventConfig\.max_slots_per_video/);
+  assert.match(submitAction, /MAX_SLOTS_PER_VIDEO/);
   assert.match(submitAction, /reservation_group_id/);
-  assert.match(slotGrid, /collapseReservationGroups/);
+  assert.match(slotGrid, /annotateReservationGroups/);
+  assert.doesNotMatch(slotGrid, /collapseReservationGroups/);
   for (const retired of retiredEventAndSlotFields) {
     assert.doesNotMatch(combined, new RegExp(retired));
   }

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import type { SlotRow } from "./SlotGrid";
-import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
+import { buildSlotParts, formatSlotPartLabel, sortSlotsChronologically } from "@/lib/utils/slotGrouping";
 import { formatUnix } from "@/lib/utils/format";
 import styles from "./SlotStatusBoard.module.css";
 
@@ -100,16 +100,26 @@ export function SlotStatusBoard({
 
   const total = slots.length;
   const filled = slots.filter((slot) => slot.status !== "available").length;
-  if (total === 0) return <></>;
-
-  const pct = (numerator: number, denominator: number) =>
-    denominator === 0 ? 0 : Math.round((numerator / denominator) * 100);
-  const fillPct = pct(filled, total);
   const nextAvailable = slots.find((slot) => slot.status === "available");
   const manuallySelected = selectedSlotId
     ? slots.find((slot) => slot.id === selectedSlotId)
     : null;
   const selected = manuallySelected ?? nextAvailable ?? slots[0] ?? null;
+  const selectedGroupInfo = React.useMemo(() => {
+    if (!selected?.group_key) return null;
+    const groupSlots = sortSlotsChronologically(
+      slots.filter((slot) => slot.group_key === selected.group_key),
+    );
+    const position = groupSlots.findIndex((slot) => slot.id === selected.id) + 1;
+    if (position < 1) return null;
+    return { position, size: groupSlots.length };
+  }, [selected, slots]);
+
+  if (total === 0) return <></>;
+
+  const pct = (numerator: number, denominator: number) =>
+    denominator === 0 ? 0 : Math.round((numerator / denominator) * 100);
+  const fillPct = pct(filled, total);
   const selectedOwner = slotOwnerLabel(selected);
   const selectedTime = slotTimeLabel(selected);
   const selectedDate = slotDateLabel(selected);
@@ -142,6 +152,14 @@ export function SlotStatusBoard({
           <div>
             <dt>名義</dt>
             <dd>{selectedOwner}</dd>
+          </div>
+        ) : null}
+        {selectedGroupInfo ? (
+          <div>
+            <dt>連続枠</dt>
+            <dd>
+              {selectedGroupInfo.position}枠目 / 全{selectedGroupInfo.size}枠
+            </dd>
           </div>
         ) : null}
       </dl>

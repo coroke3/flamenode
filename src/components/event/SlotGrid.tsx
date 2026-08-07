@@ -12,16 +12,19 @@ import {
   releaseOwnSlot,
   reserveSlot,
 } from "@/lib/actions/slot";
-import { MAX_ATOMIC_SLOT_ROWS } from "@/lib/slots/atomicLimits";
+import { countContiguousAvailableForward } from "@/lib/slots/contiguousAvailable";
+import { normalizeMaxSlotsPerVideo } from "@/lib/slots/limits";
 import { formatUnix } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 import {
+  annotateReservationGroups,
   buildSlotParts,
-  collapseReservationGroups,
   formatSlotPartLabel,
+  sortSlotsChronologically,
+  type SlotAnnotatedRow,
   type SlotBase,
-  type SlotGroupRow,
 } from "@/lib/utils/slotGrouping";
+import { areSlotsInSamePart } from "@/lib/utils/slotGroupingCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import styles from "./SlotGrid.module.css";
 
@@ -55,7 +58,7 @@ interface SlotGroup {
 }
 
 type SlotDisplayRow =
-  | { kind: "slot"; slot: SlotGroupRow }
+  | { kind: "slot"; slot: SlotAnnotatedRow }
   | { kind: "break"; id: string; detail: string | null };
 
 interface ConfirmExtend {
@@ -69,7 +72,7 @@ interface ConfirmMerge {
 }
 
 interface ReserveTarget {
-  slot: SlotGroupRow;
+  slot: SlotAnnotatedRow;
   label: string;
 }
 
@@ -107,10 +110,8 @@ export function SlotGrid({
   const [reserveDisplayName, setReserveDisplayName] = React.useState<string>("");
   const [reserveCount, setReserveCount] = React.useState("1");
   const [savedName, setSavedName] = React.useState<string>("");
-  const atomicMaxConsecutiveSlots = Math.min(
-    Math.max(Math.floor(maxSlotsPerVideo), 1),
-    MAX_ATOMIC_SLOT_ROWS,
-  );
+  const eventMaxSlots = normalizeMaxSlotsPerVideo(maxSlotsPerVideo);
+  const slotGapSec = slotPartGapSec ?? 15 * 60;
 
   const redirectForGuardReason = React.useCallback(
     (reason?: string): boolean => {
@@ -130,9 +131,42 @@ export function SlotGrid({
     }
   }, []);
   const displayRows = React.useMemo(
-    () => collapseReservationGroups(slots as SlotBase[]),
+    () => annotateReservationGroups(slots as SlotBase[]),
     [slots],
   );
+
+  const releaseTargetSlot = React.useMemo(
+    () => displayRows.find((slot) => slot.id === confirmReleaseId) ?? null,
+    [displayRows, confirmReleaseId],
+  );
+
+  const reserveMaxCount = React.useMemo(() => {
+    if (!reserveTarget) return eventMaxSlots;
+    return countContiguousAvailableForward({
+      slots,
+      anchorId: reserveTarget.slot.id,
+      eventMax: eventMaxSlots,
+      gapSec: slotGapSec,
+    });
+  }, [reserveTarget, slots, eventMaxSlots, slotGapSec]);
+
+  const reservePreviewSlots = React.useMemo(() => {
+    if (!reserveTarget) return [] as SlotRow[];
+    const count = Number(reserveCount);
+    if (!Number.isFinite(count) || count < 2) return [];
+    const ordered = sortSlotsChronologically(slots);
+    const anchorIndex = ordered.findIndex((slot) => slot.id === reserveTarget.slot.id);
+    if (anchorIndex < 0) return [];
+    const picked: SlotRow[] = [ordered[anchorIndex]];
+    for (let i = anchorIndex + 1; i < ordered.length && picked.length < count; i++) {
+      const previous = ordered[i - 1];
+      const current = ordered[i];
+      if (current.status !== "available") break;
+      if (!areSlotsInSamePart(previous, current, slotGapSec)) break;
+      picked.push(current);
+    }
+    return picked;
+  }, [reserveTarget, reserveCount, slots, slotGapSec]);
 
   const groups = React.useMemo<SlotGroup[]>(() => {
     if (slotType !== "time") {
@@ -175,14 +209,18 @@ export function SlotGrid({
     return nextGroups;
   }, [displayRows, slotType, slotPartGapSec]);
 
-  const formatSlotLabel = (slot: SlotGroupRow): string => {
+  const formatSlotLabel = (
+    slot: Pick<SlotRow, "start_time" | "slot_label"> & {
+      sort_order?: number | null;
+    },
+  ): string => {
     if (slot.start_time) {
       return `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`;
     }
     return slot.slot_label ?? `#${slot.sort_order ?? "?"}`;
   };
 
-  const openReserveDialog = (slot: SlotGroupRow) => {
+  const openReserveDialog = (slot: SlotAnnotatedRow) => {
     setError(null);
     setSuccess(null);
     setReserveTarget({ slot, label: formatSlotLabel(slot) });
@@ -223,8 +261,17 @@ export function SlotGrid({
         setError(result.message ?? "枠の確保に失敗しました。");
         return;
       }
+      const resultMeta = result as typeof result & {
+        slotCount?: number;
+        groupSize?: number;
+      };
+      const reservedCount =
+        resultMeta.slotCount ?? resultMeta.groupSize ?? Number(consecutiveCount);
       setSuccess({
-        message: "枠を確保しました。続けて作品情報を登録できます。",
+        message:
+          reservedCount > 1
+            ? `${reservedCount}枠連続で確保しました。`
+            : "枠を確保しました。続けて作品情報を登録できます。",
         pendingPublicReflection: result.pendingPublicReflection,
       });
       setReservedSlotId(result.slotId ?? slotId);
@@ -268,7 +315,10 @@ export function SlotGrid({
         return;
       }
       setSuccess({
-        message: "枠を拡張しました。",
+        message:
+          (result.groupSize ?? 0) > 1
+            ? `連続${result.groupSize}枠になりました。`
+            : "枠を拡張しました。",
         pendingPublicReflection: result.pendingPublicReflection,
       });
       router.refresh();
@@ -289,7 +339,10 @@ export function SlotGrid({
         return;
       }
       setSuccess({
-        message: "枠を結合しました。",
+        message:
+          (result.groupSize ?? 0) > 1
+            ? `${result.groupSize}枠を1つの連続枠にまとめました。`
+            : "枠を結合しました。",
         pendingPublicReflection: result.pendingPublicReflection,
       });
       router.refresh();
@@ -297,38 +350,48 @@ export function SlotGrid({
   };
 
   /**
-   * available 枠の直前・直後が同じ viewerXId の reserved 枠かどうかを
-   * 元の slots 配列 (collapsed 前) で確認する。
+   * 自分の reserved で挟まれた available か（上限超過含む）。
+   * 上限超過時は結合不可だが、通常確保へ落とさず disabled merge を出す。
    */
-  const isMergeTarget = React.useCallback(
-    (gapSlot: SlotGroupRow): boolean => {
-      if (gapSlot.status !== "available") return false;
-      const sorted = [...slots].sort((a, b) => {
-        const aKey = a.sort_order ?? a.start_time ?? 0;
-        const bKey = b.sort_order ?? b.start_time ?? 0;
-        return aKey - bKey;
-      });
+  const getMergeCandidate = React.useCallback(
+    (
+      gapSlot: SlotAnnotatedRow,
+    ): { ok: true } | { ok: false; overflowMessage: string } | null => {
+      if (gapSlot.status !== "available") return null;
+      const sorted = sortSlotsChronologically(slots);
       const idx = sorted.findIndex((s) => s.id === gapSlot.id);
-      if (idx < 0) return false;
+      if (idx < 0) return null;
       const left = sorted[idx - 1];
       const right = sorted[idx + 1];
-      if (!left || !right) return false;
-      return (
-        left.status === "reserved" &&
-        left.is_owned_by_viewer &&
-        right.status === "reserved" &&
-        right.is_owned_by_viewer
-      );
+      if (!left || !right) return null;
+      if (
+        left.status !== "reserved" ||
+        !left.is_owned_by_viewer ||
+        right.status !== "reserved" ||
+        !right.is_owned_by_viewer
+      ) {
+        return null;
+      }
+      const leftSize = left.group_key
+        ? sorted.filter((slot) => slot.group_key === left.group_key).length
+        : 1;
+      const rightSize = right.group_key
+        ? sorted.filter((slot) => slot.group_key === right.group_key).length
+        : 1;
+      const total = leftSize + 1 + rightSize;
+      if (total > eventMaxSlots) {
+        return {
+          ok: false,
+          overflowMessage: `結合すると${total}枠となり、イベント上限${eventMaxSlots}枠を超えます`,
+        };
+      }
+      return { ok: true };
     },
-    [slots],
+    [slots, eventMaxSlots],
   );
 
-  /**
-   * merge ボタン押下時に使う display_name のデフォルト値を
-   * 隣接 reserved 枠から取得する。
-   */
   const getMergeDefaultName = React.useCallback(
-    (gapSlot: SlotGroupRow): string => {
+    (gapSlot: SlotAnnotatedRow): string => {
       const sorted = [...slots].sort((a, b) => {
         const aKey = a.sort_order ?? a.start_time ?? 0;
         const bKey = b.sort_order ?? b.start_time ?? 0;
@@ -393,13 +456,13 @@ export function SlotGrid({
         </div>
       ) : null}
 
-      {hasMineSlot && atomicMaxConsecutiveSlots > 1 ? (
+      {hasMineSlot && eventMaxSlots > 1 ? (
         <p className={styles.ownerHelp}>
           <strong>連続枠の操作:</strong>{" "}
           自分の枠の右側にある「<strong>前を追加</strong>」「<strong>後を追加</strong>」で
           隣接する空き枠を 1 つずつ取り込めます。
           自分の枠で挟まれた空き枠には「<strong>ここを埋めて結合</strong>」が表示され、
-          1 グループにまとめられます。連続上限は {atomicMaxConsecutiveSlots} 枠です。
+          1 グループにまとめられます。連続上限は {eventMaxSlots} 枠です。
         </p>
       ) : null}
 
@@ -440,6 +503,10 @@ export function SlotGrid({
                   const slot = item.slot;
                   const isMine = slot.is_owned_by_viewer;
                   const filled = slot.status !== "available";
+                  const slotDisplayName = slot.display_name ?? "確保済み";
+                  const nameVisible = Boolean(slot.display_name) || isMine;
+                  const showGroupPosition =
+                    slot.is_group && slot.group_position > 1 && nameVisible;
                   return (
                     <tr
                       key={slot.id}
@@ -468,14 +535,24 @@ export function SlotGrid({
                         {filled ? (
                           <div className={styles.slotTaken}>
                             <div className={styles.slotIdentity}>
-                              <span
-                                className={cn(
-                                  styles.slotName,
-                                  isMine && slot.status === "reserved" && styles.slotNameMine,
-                                )}
-                              >
-                                {slot.display_name ?? "確保済み"}
-                              </span>
+                              <div className={styles.slotNameRow}>
+                                <span
+                                  className={cn(
+                                    styles.slotName,
+                                    isMine && slot.status === "reserved" && styles.slotNameMine,
+                                  )}
+                                >
+                                  {slotDisplayName}
+                                </span>
+                                {showGroupPosition ? (
+                                  <span
+                                    className={styles.slotGroupPosition}
+                                    aria-label={`連続枠 ${slot.group_position}枠目 / 全${slot.group_size}枠`}
+                                  >
+                                    {slot.group_position}枠目
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
                             {isMine && slot.status === "reserved" ? (
                               <div className={styles.slotActions}>
@@ -515,11 +592,11 @@ export function SlotGrid({
                                     <button
                                       type="button"
                                       className={styles.slotActionMenuItem}
-                                      disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
+                                      disabled={busy || slot.group_size >= eventMaxSlots}
                                       onClick={() => {
                                         setActionMenuSlotId(null);
                                         setConfirmExtend({
-                                          slotId: slot.slot_ids[0] ?? slot.id,
+                                          slotId: slot.group_first_slot_id,
                                           direction: "backward",
                                         });
                                       }}
@@ -529,11 +606,11 @@ export function SlotGrid({
                                     <button
                                       type="button"
                                       className={styles.slotActionMenuItem}
-                                      disabled={busy || slot.group_size >= atomicMaxConsecutiveSlots}
+                                      disabled={busy || slot.group_size >= eventMaxSlots}
                                       onClick={() => {
                                         setActionMenuSlotId(null);
                                         setConfirmExtend({
-                                          slotId: slot.slot_ids[slot.slot_ids.length - 1] ?? slot.id,
+                                          slotId: slot.group_last_slot_id,
                                           direction: "forward",
                                         });
                                       }}
@@ -545,57 +622,85 @@ export function SlotGrid({
                               </div>
                             ) : null}
                           </div>
-                        ) : isMergeTarget(slot) ? (
-                          <button
-                            type="button"
-                            className={cn(styles.emptySlotButton, styles.emptySlotButtonMerge)}
-                            disabled={busy}
-                            onClick={() => {
-                              const defaultName = getMergeDefaultName(slot);
-                              setMergeDisplayName(defaultName);
-                              setConfirmMerge({ gapSlotId: slot.id, defaultName });
-                            }}
-                            aria-label={`${formatSlotLabel(slot)} を埋めて結合`}
-                            title="ここを埋めて結合"
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </button>
-                        ) : canTakeSlot ? (
-                          <button
-                            type="button"
-                            className={styles.emptySlotButton}
-                            disabled={busy}
-                            onClick={() => openReserveDialog(slot)}
-                            aria-label={`${formatSlotLabel(slot)} を確保`}
-                            title="枠を確保"
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </button>
-                        ) : canReserve ? (
-                          <span
-                            className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
-                            aria-label={
-                              isAuthenticated
-                                ? "空き。初期設定が未完了です"
-                                : "空き。ログインが必要です"
+                        ) : (() => {
+                          const mergeCandidate = getMergeCandidate(slot);
+                          if (mergeCandidate) {
+                            if (mergeCandidate.ok) {
+                              return (
+                                <button
+                                  type="button"
+                                  className={cn(styles.emptySlotButton, styles.emptySlotButtonMerge)}
+                                  disabled={busy}
+                                  onClick={() => {
+                                    const defaultName = getMergeDefaultName(slot);
+                                    setMergeDisplayName(defaultName);
+                                    setConfirmMerge({ gapSlotId: slot.id, defaultName });
+                                  }}
+                                  aria-label={`${formatSlotLabel(slot)} を埋めて結合`}
+                                  title="ここを埋めて結合"
+                                >
+                                  <span className={styles.emptyCircle} aria-hidden />
+                                </button>
+                              );
                             }
-                            title={
-                              isAuthenticated
-                                ? "利用規約同意または X ID 申請が必要です"
-                                : "ログインが必要です"
-                            }
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </span>
-                        ) : (
-                          <span
-                            className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
-                            aria-label="空き"
-                            title="空き"
-                          >
-                            <span className={styles.emptyCircle} aria-hidden />
-                          </span>
-                        )}
+                            return (
+                              <span
+                                className={cn(
+                                  styles.emptySlotButton,
+                                  styles.emptySlotButtonMerge,
+                                  styles.emptySlotUnavailable,
+                                )}
+                                role="img"
+                                aria-label={mergeCandidate.overflowMessage}
+                                title={mergeCandidate.overflowMessage}
+                              >
+                                <span className={styles.emptyCircle} aria-hidden />
+                              </span>
+                            );
+                          }
+                          if (canTakeSlot) {
+                            return (
+                              <button
+                                type="button"
+                                className={styles.emptySlotButton}
+                                disabled={busy}
+                                onClick={() => openReserveDialog(slot)}
+                                aria-label={`${formatSlotLabel(slot)} を確保`}
+                                title="枠を確保"
+                              >
+                                <span className={styles.emptyCircle} aria-hidden />
+                              </button>
+                            );
+                          }
+                          if (canReserve) {
+                            return (
+                              <span
+                                className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
+                                aria-label={
+                                  isAuthenticated
+                                    ? "空き。初期設定が未完了です"
+                                    : "空き。ログインが必要です"
+                                }
+                                title={
+                                  isAuthenticated
+                                    ? "利用規約同意または X ID 申請が必要です"
+                                    : "ログインが必要です"
+                                }
+                              >
+                                <span className={styles.emptyCircle} aria-hidden />
+                              </span>
+                            );
+                          }
+                          return (
+                            <span
+                              className={cn(styles.emptySlot, styles.emptySlotUnavailable)}
+                              aria-label="空き"
+                              title="空き"
+                            >
+                              <span className={styles.emptyCircle} aria-hidden />
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );
@@ -609,7 +714,26 @@ export function SlotGrid({
       <ConfirmDialog
         open={confirmReleaseId !== null}
         title="枠を解放しますか?"
-        message="この枠を解放します。よろしいですか?"
+        message={
+          releaseTargetSlot?.is_group ? (
+            <>
+              <p>
+                {releaseTargetSlot.start_time
+                  ? formatUnix(releaseTargetSlot.start_time, { timeOnly: true })
+                  : (releaseTargetSlot.slot_label ??
+                    `#${releaseTargetSlot.sort_order ?? "?"}`)}{" "}
+                の枠を解放しますか？
+              </p>
+              <p>
+                この枠は連続{releaseTargetSlot.group_size}枠の
+                {releaseTargetSlot.group_position}枠目です。
+                解放後は必要に応じて前後の枠が別の連続枠に分かれます。
+              </p>
+            </>
+          ) : (
+            "この枠を解放します。よろしいですか?"
+          )
+        }
         confirmLabel="解放する"
         tone="danger"
         onConfirm={() => {
@@ -743,31 +867,43 @@ export function SlotGrid({
                 autoFocus
               />
             </div>
-            <div className={styles.reserveDialogField}>
-              <label className="fn-label" htmlFor="reserve-count">
-                取得する枠数
-              </label>
-              <select
-                id="reserve-count"
-                className="fn-select"
-                value={reserveCount}
-                onChange={(e) => setReserveCount(e.target.value)}
-              >
-                {Array.from(
-                  { length: atomicMaxConsecutiveSlots },
-                  (_, i) => i + 1,
-                ).map((n) => (
-                  <option key={n} value={n}>
-                    {n === 1 ? "単枠で確保" : `${n}連続で確保`}
-                  </option>
-                ))}
-              </select>
-              {atomicMaxConsecutiveSlots > 1 ? (
+            {eventMaxSlots > 1 ? (
+              <div className={styles.reserveDialogField}>
+                <label className="fn-label" htmlFor="reserve-count">
+                  取得する枠数
+                </label>
+                <select
+                  id="reserve-count"
+                  className="fn-select"
+                  value={reserveCount}
+                  onChange={(e) => setReserveCount(e.target.value)}
+                >
+                  {Array.from(
+                    { length: Math.max(1, reserveMaxCount) },
+                    (_, i) => i + 1,
+                  ).map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1 ? "単枠で確保" : `${n}枠連続で確保`}
+                    </option>
+                  ))}
+                </select>
                 <p className={styles.reserveDialogHint}>
-                  連続枠は空きが隣接している場合だけまとめて確保されます。上限は {atomicMaxConsecutiveSlots} 枠です。
+                  連続枠は空きが隣接している場合だけまとめて確保されます。上限は {eventMaxSlots} 枠です。
                 </p>
-              ) : null}
-            </div>
+                {Number(reserveCount) >= 2 && reservePreviewSlots.length >= 2 ? (
+                  Number(reserveCount) >= 4 ? (
+                    <p className={styles.reserveDialogHint}>
+                      取得予定 {formatSlotLabel(reservePreviewSlots[0])} … · {reserveCount}枠
+                    </p>
+                  ) : (
+                    <p className={styles.reserveDialogHint}>
+                      取得予定:{" "}
+                      {reservePreviewSlots.map((slot) => formatSlotLabel(slot)).join("、")}
+                    </p>
+                  )
+                ) : null}
+              </div>
+            ) : null}
             {viewerXId ? (
               <p className={styles.reserveDialogHint}>
                 提出主体: <strong>@{viewerXId}</strong>

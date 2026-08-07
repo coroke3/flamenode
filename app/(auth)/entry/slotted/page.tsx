@@ -207,7 +207,7 @@ export default async function SlottedPostPage({
         }
       >
         {canPost
-          ? `イベント: ${ev.title} / 投稿者X ID: @${activeX ?? "未設定"} / 連続枠: ${groupSize}`
+          ? `イベント: ${ev.title} / 投稿者X ID: @${activeX ?? "未設定"} / 連続${groupSize}枠`
           : submitBlockedReason}
       </StatusPanel>
 

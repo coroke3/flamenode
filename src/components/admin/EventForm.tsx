@@ -28,6 +28,10 @@ import {
   useFormDraft,
 } from "@/lib/interactions/useFormDraft";
 import { useUnsavedChangesGuard } from "@/lib/interactions/useUnsavedChangesGuard";
+import {
+  MAX_SLOTS_PER_VIDEO,
+  MIN_SLOTS_PER_VIDEO,
+} from "@/lib/slots/limits";
 
 export interface EventFormInitial {
   id?: string;
@@ -785,12 +789,15 @@ export function EventForm({
             <input
               name="max_slots_per_video"
               type="number"
-              min={1}
-              max={20}
+              min={MIN_SLOTS_PER_VIDEO}
+              max={MAX_SLOTS_PER_VIDEO}
               defaultValue={initial.max_slots_per_video ?? 1}
               className="fn-input"
               {...gatedInputProps(canSlots)}
             />
+            <p className="fn-muted fn-text-sm">
+              1つの作品で連続して確保・使用できる枠数の上限です。1〜20枠で設定できます。
+            </p>
           </div>
           <div>
             <label className="fn-label">確保者表示</label>
