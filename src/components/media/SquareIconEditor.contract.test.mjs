@@ -63,4 +63,13 @@ test("SquareIconEditor は range input に min/max/step/value を維持する", 
   assert.match(source, /max=\{MAX_SCALE\}/);
   assert.match(source, /step=\{0\.01\}/);
   assert.match(source, /value=\{transform\.scale\}/);
+  assert.match(source, /aria-valuemin=\{MIN_SCALE\}/);
+  assert.match(source, /aria-valuemax=\{MAX_SCALE\}/);
+  assert.match(source, /aria-valuenow=\{transform\.scale\}/);
+});
+
+test("SquareIconEditor は ICON_PREVIEW_FAILED をユーザー向け文言へ変換する", () => {
+  const source = readEditor();
+  assert.match(source, /isIconPreviewError/);
+  assert.match(source, /画像のプレビューまたは変換に失敗しました。別の画像を選んでください。/);
 });

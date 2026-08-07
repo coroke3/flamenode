@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { YoutubeChannelPicker } from "@/components/settings/YoutubeChannelPicker";
 import { SocialLinksEditor } from "@/components/forms/SocialLinksEditor";
 import { SquareIconEditor } from "@/components/media/SquareIconEditor";
+import { SquareIconEditorBoundary } from "@/components/media/SquareIconEditorBoundary";
 
 /** 初回・追加を問わず同じ入力で送るX ID連携申請フォーム。 */
 export function XIdLinkForm({
@@ -512,12 +513,14 @@ function XIdIconPicker({
         {iconUploadButton}
       </div>
       {showCompactUploader ? (
-        <SquareIconEditor
-          key={editorKey}
-          pending={pending}
-          onUseImage={onUploadProcessedFile}
-          onCancel={() => setShowCompactUploader(false)}
-        />
+        <SquareIconEditorBoundary>
+          <SquareIconEditor
+            key={editorKey}
+            pending={pending}
+            onUseImage={onUploadProcessedFile}
+            onCancel={() => setShowCompactUploader(false)}
+          />
+        </SquareIconEditorBoundary>
       ) : null}
       {candidates.length === 0 ? (
         <p className="fn-muted fn-text-sm">
@@ -564,11 +567,13 @@ function XIdIconPicker({
             </div>
           ) : null}
           <div className={styles.uploadBody}>
-            <SquareIconEditor
-              key={editorKey}
-              pending={pending}
-              onUseImage={onUploadProcessedFile}
-            />
+            <SquareIconEditorBoundary>
+              <SquareIconEditor
+                key={editorKey}
+                pending={pending}
+                onUseImage={onUploadProcessedFile}
+              />
+            </SquareIconEditorBoundary>
           </div>
         </div>
       ) : null}

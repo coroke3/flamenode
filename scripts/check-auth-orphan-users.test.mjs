@@ -23,9 +23,11 @@ test("orphan-users script resolves explicit database path", () => {
   assert.equal(resolveDatabasePath({ explicit }), explicit);
 });
 
-test("orphan-users script documents remote limitation", () => {
+test("orphan-users script supports remote inspection via wrangler", () => {
   const source = fs.readFileSync(scriptPath, "utf8");
-  assert.match(source, /--remote is not supported/);
+  assert.match(source, /--remote/);
   assert.match(source, /wrangler d1 execute/);
+  assert.match(source, /flamenode_db/);
+  assert.doesNotMatch(source, /--remote is not supported/);
   assert.match(source, /process\.exit\(0\)/);
 });
