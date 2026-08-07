@@ -423,6 +423,69 @@ if (process.env.FLAMENODE_AUTH_ADAPTER_EXECUTION !== "1") {
     assert.equal(mutateCalled, true);
   });
 
+  test("mutate失敗後に再読込で整合済みなら冪等成功する", async () => {
+    const beforeUser = {
+      id: "user-1",
+      name: "User",
+      discord_id: null,
+      created_at: 1,
+    };
+    const consistentAccount = {
+      userId: "user-1",
+      provider: "discord",
+      providerAccountId: "discord-1",
+    };
+    const consistentUser = {
+      ...beforeUser,
+      discord_id: "discord-1",
+    };
+    let selectIndex = 0;
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => {
+              selectIndex += 1;
+              // 1: user, 2: account, 3: discord owner,
+              // 4+: recovery re-reads (account, user), ops recipient
+              if (selectIndex === 1) return [beforeUser];
+              if (selectIndex === 2) return [];
+              if (selectIndex === 3) return [];
+              if (selectIndex === 4) return [consistentAccount];
+              if (selectIndex === 5) return [consistentUser];
+              if (selectIndex === 6) return [consistentUser];
+              return [];
+            },
+          }),
+        }),
+      }),
+      insert: () => ({
+        values: (values) => {
+          const statement = { kind: "insert", values };
+          return { ...statement, onConflictDoNothing: () => statement };
+        },
+      }),
+      update: () => ({
+        set: (values) => ({
+          where: () => ({ kind: "update", values }),
+        }),
+      }),
+    };
+    let mutateCalls = 0;
+
+    await linkDiscordAccountAtomically(
+      db,
+      account,
+      async () => {
+        mutateCalls += 1;
+        throw new Error("simulated CAS conflict");
+      },
+      async () => null,
+    );
+
+    assert.equal(mutateCalls, 1);
+  });
+
   test("atomic plan失敗を成功扱いせず、user欠落時はplanを作らない", async () => {
     const beforeUser = {
       id: "user-1",

@@ -86,17 +86,28 @@ export function authTemporarilyUnavailableResponse(): Response {
 }
 
 function logAuthRouteEntry(request: Request): void {
-  const pathname = new URL(request.url).pathname;
+  const url = new URL(request.url);
+  const pathname = url.pathname;
   if (
-    pathname.includes("/api/auth/callback") ||
-    pathname.endsWith("callback/discord")
+    pathname.includes("/api/auth/callback") &&
+    request.method === "GET"
   ) {
-    logFlowTrace({
-      flow: "discord_auth",
-      phase: "oauth_callback_started",
-      trace_id: createTraceId(),
-      result: "started",
-    });
+    const traceId = createTraceId();
+    if (url.searchParams.has("code")) {
+      logFlowTrace({
+        flow: "discord_auth",
+        phase: "oauth_callback_started",
+        trace_id: traceId,
+        result: "started",
+      });
+    } else if (url.searchParams.has("error")) {
+      logFlowTrace({
+        flow: "discord_auth",
+        phase: "oauth_callback_denied",
+        trace_id: traceId,
+        result: "skipped",
+      });
+    }
   }
   if (pathname.includes("/api/auth/signout") && request.method === "POST") {
     logFlowTrace({

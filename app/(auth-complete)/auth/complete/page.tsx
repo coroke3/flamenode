@@ -62,7 +62,7 @@ export default async function AuthCompletePage({
       error_code: "session_missing_after_retry",
       duration_ms: Date.now() - started,
     });
-    redirect("/entry?error=OAuthCallback");
+    redirect("/entry");
   }
 
   if (resolution.kind !== "authenticated") {

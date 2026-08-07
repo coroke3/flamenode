@@ -1,9 +1,11 @@
 import * as React from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import styles from "./page.module.css";
 import { signIn } from "@/lib/auth";
+import { isAuthRouteTemporarilyUnavailable } from "@/lib/auth/authRouteError";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import { fetchActiveEvents } from "@/lib/db/queries";
@@ -195,7 +197,16 @@ export default async function EntryPage({
             <form
               action={async () => {
                 "use server";
-                await signIn("discord", { redirectTo: entryLoginRedirectTo(next) });
+                try {
+                  await signIn("discord", {
+                    redirectTo: entryLoginRedirectTo(next),
+                  });
+                } catch (error) {
+                  if (isAuthRouteTemporarilyUnavailable(error)) {
+                    redirect("/entry?error=auth_temporarily_unavailable");
+                  }
+                  throw error;
+                }
               }}
               className={styles.btnRow}
             >

@@ -21,6 +21,8 @@ test("signOutViaAuthRouteはcsrf取得後にAuth.js signoutへPOSTする", () =>
   );
   assert.match(authSignOutClient, /"X-Auth-Return-Redirect": "1"/);
   assert.match(authSignOutClient, /callbackUrl: "\/"/);
+  assert.match(authSignOutClient, /\/api\/auth\/session/);
+  assert.match(authSignOutClient, /AUTH_SIGNOUT_COOKIE_REMAINED/);
   assert.match(authSignOutClient, /return \{ ok: true \}/);
   assert.match(authSignOutClient, /ok: false/);
   assert.doesNotMatch(authSignOutClient, /method: "GET"/);
@@ -43,5 +45,6 @@ test("signOutViaAuthRouteはclient flowTraceを記録する", () => {
   assert.match(authSignOutClient, /phase:\s*"signout_completed"/);
   assert.match(authSignOutClient, /flow:\s*"discord_auth"/);
   assert.match(authSignOutClient, /AUTH_SIGNOUT_FAILED/);
+  assert.match(authSignOutClient, /AUTH_SIGNOUT_COOKIE_REMAINED/);
   assert.doesNotMatch(authSignOutClient, /@\/lib\/observability\/flowTrace/);
 });
