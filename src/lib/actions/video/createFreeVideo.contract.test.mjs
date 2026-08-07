@@ -25,3 +25,8 @@ test("createFreeVideo は video_create で top section visibility targets を en
   assert.ok(queueBlock);
   assert.match(queueBlock, /\.\.\.topVideoVisibilityTargets\("video_create"\)/);
 });
+
+test("createFreeVideo は buildOpsChannelWebhookStatement を event target で呼ぶ", () => {
+  assert.match(source, /buildOpsChannelWebhookStatement/);
+  assert.match(source, /target:\s*"event"/);
+});

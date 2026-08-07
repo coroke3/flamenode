@@ -278,7 +278,7 @@ Build Secrets（名前のみ）:
 | Worker | secret 名 |
 | --- | --- |
 | `flamenode-web` | `AUTH_SECRET`、`AUTH_DISCORD_SECRET`、`SPREADSHEET_IMPORT_PREVIEW_SECRET`、`WORKER_ADMIN_TOKEN` |
-| `flamenode-fast-jobs` | `DISCORD_BOT_TOKEN` または `DISCORD_WEBHOOK_URL` の少なくとも一方 |
+| `flamenode-fast-jobs` | `DISCORD_BOT_TOKEN` 必須。加えて Forum 3種（`DISCORD_WEBHOOK_URL_FORUM_ACCOUNT` / `_EVENT` / `_SYSTEM`）または移行用 `DISCORD_WEBHOOK_URL` |
 | `flamenode-content-jobs` | `WORKER_ADMIN_TOKEN` |
 | `flamenode-sync-jobs` | `YOUTUBE_API_KEY`、`YOUTUBE_OAUTH_CLIENT_ID`、`YOUTUBE_OAUTH_CLIENT_SECRET`、`YOUTUBE_OAUTH_REFRESH_TOKEN` |
 | `flamenode-sync-jobs`（条件付き） | `GA4_PROPERTY_ID`、`GA4_SERVICE_ACCOUNT_EMAIL`、`GA4_SERVICE_ACCOUNT_PRIVATE_KEY`（`GA4_SYNC_ENABLED=1` 時必須。詳細は [`google-analytics.md`](google-analytics.md)） |

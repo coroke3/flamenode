@@ -55,3 +55,8 @@ test("submitSlotVideo は rebuild enqueue の event 対象を上限件数に cap
   assert.match(source, /\.\.\.rebuildEventIds\.flatMap\(\(eventId\) => \[/);
   assert.match(source, /targetEventIds: syncedEventIds/);
 });
+
+test("submitSlotVideo は buildOpsChannelWebhookStatement を event target で呼ぶ", () => {
+  assert.match(source, /buildOpsChannelWebhookStatement/);
+  assert.match(source, /target:\s*"event"/);
+});

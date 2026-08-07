@@ -154,7 +154,7 @@ Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効
 | Worker | 必須secret名 |
 | --- | --- |
 | `flamenode-web` | `AUTH_SECRET`、`AUTH_DISCORD_SECRET`、`SPREADSHEET_IMPORT_PREVIEW_SECRET`、`WORKER_ADMIN_TOKEN` |
-| `flamenode-fast-jobs` | `DISCORD_BOT_TOKEN`または`DISCORD_WEBHOOK_URL`の少なくとも一方 |
+| `flamenode-fast-jobs` | `DISCORD_BOT_TOKEN`（必須）、`DISCORD_WEBHOOK_URL_FORUM_ACCOUNT` + `DISCORD_WEBHOOK_URL_FORUM_EVENT` + `DISCORD_WEBHOOK_URL_FORUM_SYSTEM`（新運用で必須）または移行中の legacy `DISCORD_WEBHOOK_URL`。Forum ルーティングは [`docs/operations/workers.md`](./docs/operations/workers.md) |
 | `flamenode-content-jobs` | `WORKER_ADMIN_TOKEN` |
 | `flamenode-sync-jobs` | `YOUTUBE_API_KEY`、`YOUTUBE_OAUTH_CLIENT_ID`、`YOUTUBE_OAUTH_CLIENT_SECRET`、`YOUTUBE_OAUTH_REFRESH_TOKEN` |
 

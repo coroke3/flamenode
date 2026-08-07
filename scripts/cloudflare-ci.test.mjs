@@ -527,7 +527,12 @@ test("GA4_SYNC_ENABLED=1 requires GA4 remote secrets during secret preflight", (
   };
   const byService = {
     "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
-    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-fast-jobs": [
+      "DISCORD_BOT_TOKEN",
+      "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+      "DISCORD_WEBHOOK_URL_FORUM_EVENT",
+      "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    ],
     "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
     "flamenode-sync-jobs": [
       "YOUTUBE_API_KEY",
@@ -565,7 +570,12 @@ test("GA4_SYNC_ENABLED=0 passes secret preflight without GA4 remote secrets", ()
   };
   const byService = {
     "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
-    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-fast-jobs": [
+      "DISCORD_BOT_TOKEN",
+      "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+      "DISCORD_WEBHOOK_URL_FORUM_EVENT",
+      "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    ],
     "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
     "flamenode-sync-jobs": [
       "YOUTUBE_API_KEY",
@@ -850,7 +860,12 @@ test("remote Worker secret preflight checks names only and never accepts a missi
   const env = productionEnv();
   const byService = {
     "flamenode-web": ["AUTH_SECRET", "AUTH_DISCORD_SECRET", "SPREADSHEET_IMPORT_PREVIEW_SECRET", "WORKER_ADMIN_TOKEN"],
-    "flamenode-fast-jobs": ["DISCORD_BOT_TOKEN"],
+    "flamenode-fast-jobs": [
+      "DISCORD_BOT_TOKEN",
+      "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+      "DISCORD_WEBHOOK_URL_FORUM_EVENT",
+      "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    ],
     "flamenode-content-jobs": ["WORKER_ADMIN_TOKEN"],
     "flamenode-sync-jobs": ["YOUTUBE_API_KEY", "YOUTUBE_OAUTH_CLIENT_ID", "YOUTUBE_OAUTH_CLIENT_SECRET", "YOUTUBE_OAUTH_REFRESH_TOKEN"],
   };
@@ -887,7 +902,56 @@ test("remote Worker secret preflight checks names only and never accepts a missi
           return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
         },
       }),
-    /DISCORD_BOT_TOKEN, DISCORD_WEBHOOK_URL, or all three DISCORD_WEBHOOK_URL_FORUM_/,
+    /DISCORD_BOT_TOKEN.*DISCORD_WEBHOOK_URL_FORUM_ACCOUNT/,
+  );
+  assert.throws(
+    () =>
+      runRemoteSecretPreflight({
+        env: productionEnv(),
+        repoRoot: root,
+        configs,
+        wranglerBin: "wrangler.mjs",
+        run: (request) => {
+          const service = request.args[request.args.indexOf("--name") + 1];
+          const names =
+            service === "flamenode-fast-jobs"
+              ? ["DISCORD_WEBHOOK_URL_FORUM_ACCOUNT", "DISCORD_WEBHOOK_URL_FORUM_EVENT", "DISCORD_WEBHOOK_URL_FORUM_SYSTEM"]
+              : byService[service];
+          return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
+        },
+      }),
+    /DISCORD_BOT_TOKEN/,
+  );
+  assert.throws(
+    () =>
+      runRemoteSecretPreflight({
+        env: productionEnv(),
+        repoRoot: root,
+        configs,
+        wranglerBin: "wrangler.mjs",
+        run: (request) => {
+          const service = request.args[request.args.indexOf("--name") + 1];
+          const names = service === "flamenode-fast-jobs" ? ["DISCORD_BOT_TOKEN"] : byService[service];
+          return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
+        },
+      }),
+    /DISCORD_WEBHOOK_URL_FORUM_ACCOUNT/,
+  );
+  assert.doesNotThrow(() =>
+    runRemoteSecretPreflight({
+      env: productionEnv(),
+      repoRoot: root,
+      configs,
+      wranglerBin: "wrangler.mjs",
+      run: (request) => {
+        const service = request.args[request.args.indexOf("--name") + 1];
+        const names =
+          service === "flamenode-fast-jobs"
+            ? ["DISCORD_BOT_TOKEN", "DISCORD_WEBHOOK_URL"]
+            : byService[service];
+        return { stdout: JSON.stringify(names.map((name) => ({ name }))) };
+      },
+    }),
   );
 });
 

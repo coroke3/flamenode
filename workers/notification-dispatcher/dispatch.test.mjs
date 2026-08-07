@@ -1,16 +1,51 @@
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { test } from "node:test";
-import {
-  deliver,
-  DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
-  MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN,
-  MAX_DISCORD_DM_KV_WRITES_PER_RUN,
-  MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
-  MAX_NOTIFICATION_BATCH,
-  processNotificationQueue,
-  recoverNotificationOutboxExpiredLeases,
-} from "./dispatch.ts";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const runningDispatchTests = process.env.FLAMENODE_DISPATCH_TEST === "1";
+
+if (!runningDispatchTests) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-test-module-mocks",
+      "--test",
+      "--experimental-strip-types",
+      fileURLToPath(import.meta.url),
+    ],
+    {
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        NODE_TEST_CONTEXT: undefined,
+        FLAMENODE_DISPATCH_TEST: "1",
+      },
+    },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exitCode = result.status ?? 1;
+} else {
+  const assert = (await import("node:assert/strict")).default;
+  const { readFile } = await import("node:fs/promises");
+  const { mock, test } = await import("node:test");
+
+  mock.module("../../src/lib/notifications/templates/errors.ts", {
+    namedExports: {
+      buildDeliveryFailureOpsNotification: (args) => ({
+        content: `ops alert for ${args.notificationType}`,
+      }),
+    },
+  });
+
+  const {
+    deliver,
+    DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
+    MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN,
+    MAX_DISCORD_DM_KV_WRITES_PER_RUN,
+    MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
+    MAX_NOTIFICATION_BATCH,
+    processNotificationQueue,
+    recoverNotificationOutboxExpiredLeases,
+  } = await import("./dispatch.ts");
 
 function okJson(value = {}, headers = {}) {
   return new Response(JSON.stringify(value), {
@@ -842,13 +877,209 @@ test("deliver: forum target 未設定で FORUM URL 欠落は配送しない", as
   }
 });
 
-test("dead-letter ops alert は discord_webhook 失敗で再帰しない", async () => {
-  const source = await readFile(new URL("./dispatch.ts", import.meta.url), "utf8");
-  assert.match(
-    source,
-    /async function enqueueDeadLetterOpsAlert[\s\S]*?if \(row\.type === "discord_webhook"\) return;/,
+function deadLetterQueueHarness(row, envExtras = {}) {
+  const inserts = [];
+  const state = {
+    status: "pending",
+    attempt_count: row.attempt_count ?? 0,
+    last_error: null,
+    lease_token: null,
+  };
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  const env = {
+    ...envExtras,
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            return {
+              async run() {
+                if (sql.includes("INSERT INTO notification_outbox")) {
+                  inserts.push({ sql, args });
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET status = 'processing'")) {
+                  state.status = "processing";
+                  state.lease_token = args[1];
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET attempt_count = ?1, status = ?2")) {
+                  state.attempt_count = args[0];
+                  state.status = args[1];
+                  state.last_error = args[3];
+                  state.lease_token = null;
+                  return { meta: { changes: 1 } };
+                }
+                return { meta: { changes: 0 } };
+              },
+              async all() {
+                if (sql.includes("FROM notification_outbox n") && sql.includes("INNER JOIN")) {
+                  return state.status === "pending"
+                    ? {
+                        results: [
+                          {
+                            id: row.id,
+                            recipient_user_id: row.recipient_user_id ?? "user-1",
+                            discord_id: row.discord_id ?? "",
+                            type: row.type,
+                            payload_json: row.payload_json,
+                            attempt_count: state.attempt_count,
+                          },
+                        ],
+                      }
+                    : { results: [] };
+                }
+                if (sql.includes("WHERE dedupe_key = ?1")) {
+                  return { results: [] };
+                }
+                return { results: [] };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+  return {
+    env,
+    state,
+    inserts,
+    get fetchCalls() {
+      return fetchCalls;
+    },
+    restore() {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+test("processNotificationQueue: DM 最終失敗で SYSTEM forum alert を enqueue する", async () => {
+  const outboxId = "dm-dead-letter-outbox";
+  const harness = deadLetterQueueHarness(
+    {
+      id: outboxId,
+      recipient_user_id: "user-dm-fail",
+      discord_id: "",
+      type: "announcement_broadcast",
+      payload_json: JSON.stringify({ content: "hello" }),
+    },
+    {
+      DISCORD_WEBHOOK_URL_FORUM_SYSTEM: "https://example.test/forum-system",
+      DISCORD_BOT_TOKEN: "bot-token",
+    },
   );
-  assert.match(source, /webhook_target:\s*"system"/);
+  try {
+    const result = await processNotificationQueue(harness.env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.failed, 1);
+    assert.equal(harness.fetchCalls, 0);
+    assert.equal(harness.state.status, "dead_letter");
+    assert.equal(harness.inserts.length, 1);
+    const insert = harness.inserts[0];
+    assert.match(insert.sql, /INSERT INTO notification_outbox/);
+    assert.match(insert.sql, /'discord_webhook'/);
+    const payload = JSON.parse(insert.args[2]);
+    assert.equal(payload.webhook_target, "system");
+    assert.match(payload.thread_name, /^\[通知エラー\]/);
+    assert.equal(insert.args[3], `delivery_failed_alert:${outboxId}`);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("deliver: forum event 未設定は legacy DISCORD_WEBHOOK_URL にフォールバックしない", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "discord_webhook",
+        payload_json: JSON.stringify({
+          content: "hello",
+          webhook_target: "event",
+        }),
+        discord_id: "",
+      },
+      { DISCORD_WEBHOOK_URL: "https://example.test/legacy-only" },
+    );
+    assert.equal(ok, false);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("processNotificationQueue: forum_webhook_unconfigured は初回で dead_letter になる", async () => {
+  const harness = deadLetterQueueHarness(
+    {
+      id: "forum-unconfigured-outbox",
+      type: "discord_webhook",
+      payload_json: JSON.stringify({
+        content: "hello",
+        webhook_target: "event",
+      }),
+    },
+    { DISCORD_WEBHOOK_URL: "https://example.test/legacy-only" },
+  );
+  try {
+    const result = await processNotificationQueue(harness.env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.failed, 1);
+    assert.equal(harness.fetchCalls, 0);
+    assert.equal(harness.state.status, "dead_letter");
+    assert.equal(harness.state.attempt_count, 1);
+    assert.match(harness.state.last_error, /^forum_webhook_unconfigured:event/);
+    assert.equal(harness.inserts.length, 0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("processNotificationQueue: discord_webhook dead_letter は SYSTEM alert を再帰 enqueue しない", async () => {
+  const harness = deadLetterQueueHarness(
+    {
+      id: "webhook-recursion-guard",
+      type: "discord_webhook",
+      payload_json: JSON.stringify({
+        content: "hello",
+        webhook_target: "event",
+      }),
+    },
+    {
+      DISCORD_WEBHOOK_URL: "https://example.test/legacy-only",
+      DISCORD_WEBHOOK_URL_FORUM_SYSTEM: "https://example.test/forum-system",
+    },
+  );
+  try {
+    const result = await processNotificationQueue(harness.env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.failed, 1);
+    assert.equal(harness.state.status, "dead_letter");
+    assert.equal(harness.inserts.length, 0);
+    assert.equal(
+      harness.inserts.some((insert) =>
+        String(insert.args[3] ?? "").startsWith("delivery_failed_alert:"),
+      ),
+      false,
+    );
+  } finally {
+    harness.restore();
+  }
 });
 
 test("deliver: legacy discord_webhook は webhook_target なしで DISCORD_WEBHOOK_URL を使う", async () => {
@@ -878,3 +1109,4 @@ test("deliver: legacy discord_webhook は webhook_target なしで DISCORD_WEBHO
     globalThis.fetch = originalFetch;
   }
 });
+}

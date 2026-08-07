@@ -1131,9 +1131,18 @@ export function runRemoteSecretPreflight({
         available.has("DISCORD_WEBHOOK_URL_FORUM_ACCOUNT") &&
         available.has("DISCORD_WEBHOOK_URL_FORUM_EVENT") &&
         available.has("DISCORD_WEBHOOK_URL_FORUM_SYSTEM");
-      if (!hasBotToken && !hasLegacyWebhook && !hasAllForumWebhooks) {
+      const missing = [];
+      if (!hasBotToken) {
+        missing.push("DISCORD_BOT_TOKEN");
+      }
+      if (!hasLegacyWebhook && !hasAllForumWebhooks) {
+        missing.push(
+          "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT + DISCORD_WEBHOOK_URL_FORUM_EVENT + DISCORD_WEBHOOK_URL_FORUM_SYSTEM (all three) or legacy DISCORD_WEBHOOK_URL",
+        );
+      }
+      if (missing.length > 0) {
         throw new Error(
-          `${target.service}: required remote Worker secret names are missing: DISCORD_BOT_TOKEN, DISCORD_WEBHOOK_URL, or all three DISCORD_WEBHOOK_URL_FORUM_* secrets. Configure one before retrying.`,
+          `${target.service}: required remote Worker secret names are missing: ${missing.join("; ")}. Configure before retrying.`,
         );
       }
     }

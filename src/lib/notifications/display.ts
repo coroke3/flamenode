@@ -97,11 +97,22 @@ export function getNotificationFailureGuidance(input: {
     };
   }
 
+  if (err.includes("forum_webhook_unconfigured")) {
+    return {
+      summary: "Forum 配信用 Discord Webhook URL が未設定です。",
+      nextSteps: [
+        "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT / DISCORD_WEBHOOK_URL_FORUM_EVENT / DISCORD_WEBHOOK_URL_FORUM_SYSTEM を確認する",
+        "移行中は legacy の DISCORD_WEBHOOK_URL も利用可能",
+        "設定修正後に失敗通知を再試行する",
+      ],
+    };
+  }
+
   if (err.includes("webhook_unconfigured")) {
     return {
       summary: "Discord Webhook URL が未設定です。",
       nextSteps: [
-        "DISCORD_WEBHOOK_URL を確認する",
+        "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT / DISCORD_WEBHOOK_URL_FORUM_EVENT / DISCORD_WEBHOOK_URL_FORUM_SYSTEM、または移行用 legacy DISCORD_WEBHOOK_URL を確認する",
         "設定修正後に失敗通知を再試行する",
       ],
     };

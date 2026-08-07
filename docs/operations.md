@@ -192,7 +192,7 @@ Legacy standalone worker directories are kept as importable modules only.
 
 | Worker | cron | 用途 | 必須環境変数 |
 |---|---|---|---|
-| `flamenode-fast-jobs` | `0 * * * *` | `notification_outbox` 配信・スロット締切リマインド（`notification-dispatcher` 統合） | `DISCORD_WEBHOOK_URL`, `DISCORD_BOT_TOKEN`（任意） |
+| `flamenode-fast-jobs` | `0 * * * *` | `notification_outbox` 配信・スロット締切リマインド（`notification-dispatcher` 統合） | `DISCORD_BOT_TOKEN`、Forum Webhook 3種または legacy `DISCORD_WEBHOOK_URL`（[`workers.md`](./operations/workers.md)） |
 | `flamenode-content-jobs` | `15 * * * *` | 静的 JSON 再生成・クリーンアップ（`json-generator` / `cleanup` 統合） | D1 / R2 / KV bind |
 | `flamenode-sync-jobs` | `7 * * * *`, `52 * * * *` | YouTube 同期・スコア再計算（`youtube-sync` / `score-recalc` 統合） | `YOUTUBE_API_KEY` |
 
