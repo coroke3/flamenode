@@ -35,6 +35,7 @@ function normalizeString(value: unknown): string | null {
 }
 
 function normalizeUnix(value: unknown): number | null {
+  if (value == null) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
