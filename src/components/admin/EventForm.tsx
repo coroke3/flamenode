@@ -388,10 +388,15 @@ export function EventForm({
     setPreview(formPreview(restored, initial));
     setDirty(true);
   }, [initial]);
-  const draftSnapshot = React.useMemo(
-    () => (formRef.current ? formDataToDraftValue(new FormData(formRef.current)) : {}),
-    [preview, questions],
-  );
+  const draftSnapshot = React.useMemo(() => {
+    // The DOM-backed snapshot must be refreshed when either UI model changes.
+    // Consume both values explicitly so exhaustive-deps documents this deliberate invalidation contract.
+    void preview;
+    void questions;
+    return formRef.current
+      ? formDataToDraftValue(new FormData(formRef.current))
+      : {};
+  }, [preview, questions]);
   const { clearDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
