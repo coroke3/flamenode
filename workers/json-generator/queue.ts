@@ -1,4 +1,4 @@
-import { rebuildTarget } from "./rebuild.ts";
+import { optimizedRebuildTarget } from "./optimizedRebuild.ts";
 import {
   queueLimitForMode,
   queueModeWhereClause,
@@ -35,6 +35,7 @@ type QueueRow = {
   target_id: string;
   priority: string;
   attempt_count: number;
+  updated_at: number;
 };
 
 type QueueOutcome = "processed" | "failed" | "skipped";
@@ -187,7 +188,7 @@ async function processStaticRebuildQueueImpl(
   throwIfAborted(signal, "static rebuild queue aborted");
 
   let query = `
-    SELECT id, target_type, target_id, priority, attempt_count
+    SELECT id, target_type, target_id, priority, attempt_count, updated_at
     FROM static_rebuild_queue
     WHERE status = 'pending'
       AND (next_retry_at IS NULL OR next_retry_at <= ?)
@@ -258,7 +259,13 @@ async function processQueueRow(
       const completion = await completeQueueRow(env, row, token, now, signal, metrics);
       return { outcome: completion.outcome, followUpPending: completion.followUpPending };
     }
-    const rebuildResult = await rebuildTarget(env, row.target_type, row.target_id, signal);
+    const rebuildResult = await optimizedRebuildTarget(
+      env,
+      row.target_type,
+      row.target_id,
+      Number(row.updated_at) || 0,
+      signal,
+    );
     throwIfAborted(signal, "static rebuild queue aborted");
     const completion = await completeQueueRow(env, row, token, now, signal, metrics);
     return {
