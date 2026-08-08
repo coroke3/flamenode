@@ -50,72 +50,52 @@ jobs:
         run: npm run test:static-rebuild
 
       - name: Verify fast
-        continue-on-error: true
         run: npm run verify:fast
 
       - name: Unit tests
-        continue-on-error: true
         run: npm run test:unit
 
       - name: Integration tests
-        continue-on-error: true
         run: npm run test:integration
 
       - name: DB schema
-        continue-on-error: true
         run: npm run check:db-schema
 
       - name: DB migration contract
-        continue-on-error: true
         run: npm run check:db-migration
 
       - name: D1 empty migration
-        continue-on-error: true
         run: npm run check:db-d1-empty
 
       - name: D1 legacy migration
-        continue-on-error: true
         run: npm run check:db-d1-legacy
 
       - name: Legacy DB checks
-        continue-on-error: true
         run: npm run check:db-legacy
 
       - name: Event owners
-        continue-on-error: true
         run: npm run check:event-owners
 
       - name: UI acceptance
-        continue-on-error: true
         run: npm run check:ui-acceptance
 
       - name: Public API contract
-        continue-on-error: true
         run: npm run check:public-api-contract
 
       - name: Docs
-        continue-on-error: true
         run: npm run check:docs
 
       - name: DB history
-        continue-on-error: true
         run: npm run check:db-history
 
       - name: Project docs
-        continue-on-error: true
         run: npm run check:project-docs
 
       - name: Slot reservation groups
-        continue-on-error: true
         run: npm run check:slot-reservation-groups
 
       - name: Slot domain limits
-        continue-on-error: true
         run: npm run check:slot-domain-limits
 
       - name: Public visibility fences
-        continue-on-error: true
         run: npm run check:public-visibility-fences
-
-      - name: Full verification suite
-        run: npm run verify:full
