@@ -107,11 +107,9 @@ function normalizeRankingRow(
     title,
     youtube_video_id: presentString(row.youtube_video_id),
     display_name: displayName,
-    creator_display_name:
-      presentString(row.creator_display_name) ?? displayName,
+    creator_display_name: presentString(row.creator_display_name) ?? displayName,
     creator_x_user_id: creatorXId,
-    icon_url:
-      presentString(row.icon_url) ?? presentString(row.creator_icon_url),
+    icon_url: presentString(row.icon_url) ?? presentString(row.creator_icon_url),
     creator_icon_url:
       presentString(row.creator_icon_url) ?? presentString(row.icon_url),
     primary_event_id: presentString(row.primary_event_id),
@@ -204,6 +202,7 @@ async function recordArtifact(
       now,
     )
     .run();
+  env.artifactHashCache?.set(objectKey, contentHash);
 }
 
 async function putTrackedJson(
@@ -218,13 +217,22 @@ async function putTrackedJson(
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
-  if (await resolveIdenticalJsonArtifactPut(env, objectKey, serialized)) return;
-  await env.R2.put(objectKey, serialized, {
-    httpMetadata: {
-      contentType: "application/json; charset=utf-8",
-      cacheControl,
-    },
-  });
+  const identical = await resolveIdenticalJsonArtifactPut(
+    env,
+    objectKey,
+    serialized,
+  );
+  throwIfAborted(signal);
+  if (!identical) {
+    await env.R2.put(objectKey, serialized, {
+      httpMetadata: {
+        contentType: "application/json; charset=utf-8",
+        cacheControl,
+      },
+    });
+  }
+  // R2 PUTをdedupeしても「このgenerationで正常に再構築できた」事実は更新する。
+  // これを省くとdeep health / artifact SLOが同一内容のartifactを古いと誤判定する。
   await recordArtifact(
     env,
     targetType,
@@ -235,13 +243,11 @@ async function putTrackedJson(
   );
 }
 
-function assertListSize(objectKey: string, body: unknown): void {
-  const bytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
-  if (bytes > STATIC_LIST_MAX_OBJECT_BYTES) {
-    throw new Error(
-      `${objectKey} exceeds size limit (${bytes} > ${STATIC_LIST_MAX_OBJECT_BYTES} bytes)`,
-    );
-  }
+function listPayloadFits(body: unknown): boolean {
+  return (
+    new TextEncoder().encode(JSON.stringify(body)).byteLength <=
+    STATIC_LIST_MAX_OBJECT_BYTES
+  );
 }
 
 async function capturePendingRankingRows(
@@ -352,8 +358,12 @@ async function rebuildRankingBundle(
     total: popularItems.length,
     items: popularItems.map(listProjection),
   };
-  assertListSize("list/recent.json", recentPayload);
-  assertListSize("list/popular.json", popularPayload);
+
+  // 5000件以下でも文字列が大きいとlist artifactの8MB上限を超え得る。
+  // bundle全体を失敗させず既存target SQLへfallbackし、top/recommendを巻き込まない。
+  if (!listPayloadFits(recentPayload) || !listPayloadFits(popularPayload)) {
+    return null;
+  }
 
   await Promise.all([
     putTrackedJson(
@@ -425,9 +435,8 @@ async function rebuildRankingBundle(
       enqueueComposerFollowUps(env, "recommend_core"),
     ]);
 
-  // Only rows that were pending before the snapshot and stayed unchanged are
-  // suppressed. A concurrent enqueue increments updated_at (or inserts a new id),
-  // so it remains pending and forces a fresh bundle on the next pass.
+  // Active enqueueはupdated_atを必ず+1以上進めるため、同一秒の再enqueueも
+  // このCAS条件から外れてpendingのまま残り、次generationで再構築される。
   await markCoveredRankingRowsDone(env, coveredRows, signal);
 
   return {
