@@ -40,17 +40,44 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Worker queue tests diagnostic
-        continue-on-error: true
-        run: node --test --experimental-strip-types workers/json-generator/queue.test.mjs
-
-      - name: Worker rebuild tests diagnostic
-        continue-on-error: true
-        run: node --test --experimental-strip-types workers/json-generator/rebuild.test.mjs
-
-      - name: Worker json-generator tests diagnostic
+      - name: Worker json-generator diagnostic
         continue-on-error: true
         run: node --test --experimental-strip-types workers/json-generator/*.test.mjs
+
+      - name: Worker shared diagnostic
+        continue-on-error: true
+        run: |
+          files=$(find workers/shared -type f -name '*.test.mjs' -print)
+          if [ -n "$files" ]; then node --test --experimental-strip-types $files; fi
+
+      - name: Worker fast-jobs diagnostic
+        continue-on-error: true
+        run: |
+          files=$(find workers/fast-jobs -type f -name '*.test.mjs' -print 2>/dev/null || true)
+          if [ -n "$files" ]; then node --test --experimental-strip-types $files; fi
+
+      - name: Worker sync-jobs diagnostic
+        continue-on-error: true
+        run: |
+          files=$(find workers/sync-jobs -type f -name '*.test.mjs' -print 2>/dev/null || true)
+          if [ -n "$files" ]; then node --test --experimental-strip-types $files; fi
+
+      - name: Worker youtube-playlist-sync diagnostic
+        continue-on-error: true
+        run: |
+          files=$(find workers/youtube-playlist-sync -type f -name '*.test.mjs' -print 2>/dev/null || true)
+          if [ -n "$files" ]; then node --test --experimental-strip-types $files; fi
+
+      - name: Other worker tests diagnostic
+        continue-on-error: true
+        run: |
+          files=$(find workers -type f -name '*.test.mjs' \
+            ! -path 'workers/json-generator/*' \
+            ! -path 'workers/shared/*' \
+            ! -path 'workers/fast-jobs/*' \
+            ! -path 'workers/sync-jobs/*' \
+            ! -path 'workers/youtube-playlist-sync/*' -print)
+          if [ -n "$files" ]; then node --test --experimental-strip-types $files; fi
 
       - name: Worker tests
         run: npm run test:workers
