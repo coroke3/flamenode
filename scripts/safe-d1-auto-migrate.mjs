@@ -142,6 +142,26 @@ export function readRemoteAppliedMigrationNames({
   return parseAppliedMigrationNames(payload);
 }
 
+export function formatSafeMigrationApplyError(error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const permissionLike =
+    /\b(?:401|403|unauthorized|forbidden|permission|permissions|authentication|api token)\b/i.test(
+      detail,
+    );
+  if (permissionLike) {
+    return (
+      "Automatic safe D1 index migration failed before Worker deployment. " +
+      "Ensure CLOUDFLARE_API_TOKEN has D1 write/edit permission, then retry. " +
+      detail
+    );
+  }
+  return (
+    "Automatic safe D1 index migration failed before Worker deployment. " +
+    "The failure was not classified as an API-token permission error; inspect the Wrangler error below. " +
+    detail
+  );
+}
+
 export function runSafeRemoteIndexMigrations({
   env = process.env,
   repoRoot = process.cwd(),
@@ -186,16 +206,15 @@ export function runSafeRemoteIndexMigrations({
   try {
     run({
       executable: process.execPath,
-      args: [migrationScript, "remote", "--config", webConfig, "--yes"],
+      // Wrangler 4 automatically skips D1 migration confirmation in CI/CD.
+      // Do not forward the removed legacy `--yes` flag.
+      args: [migrationScript, "remote", "--config", webConfig],
       cwd: repoRoot,
       env,
       label: "cloudflare-deploy:d1-safe-index-migrations",
     });
   } catch (error) {
-    throw new Error(
-      "Automatic safe D1 index migration failed. Ensure CLOUDFLARE_API_TOKEN has D1 write/edit permission, then retry. " +
-        (error instanceof Error ? error.message : String(error)),
-    );
+    throw new Error(formatSafeMigrationApplyError(error), { cause: error });
   }
 
   const appliedAfter = readApplied({
