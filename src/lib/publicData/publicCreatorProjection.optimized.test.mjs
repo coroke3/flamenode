@@ -100,7 +100,7 @@ test("creator projection は8 query相当を3 queryへ統合し既存意味論�
     ).run("registered", "Registered", "approved");
     sqlite.prepare(
       "INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)",
-    ).run("known-pending", "Pending", "pending");
+    ).run("known-rejected", "Rejected", "rejected");
     sqlite.prepare(
       "INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)",
     ).run("icon-user", "Icon User", "approved");
@@ -113,9 +113,9 @@ test("creator projection は8 query相当を3 queryへ統合し既存意味論�
       updated: 100,
     });
     insertVideo(sqlite, {
-      id: "known-pending-own",
-      creator: "known-pending",
-      display: "Pending Snapshot",
+      id: "known-rejected-own",
+      creator: "known-rejected",
+      display: "Rejected Snapshot",
       scheduled: 200,
       updated: 200,
     });
@@ -199,12 +199,12 @@ test("creator projection は8 query相当を3 queryへ統合し既存意味論�
     assert.deepEqual(
       sources.registeredUsers.map((row) => row.id).sort(),
       ["icon-user", "registered"],
-      "pending x_user must not be publicly registered",
+      "rejected x_user must not be publicly registered",
     );
     assert.equal(
-      sources.orphans.some((row) => row.x_id === "known-pending"),
+      sources.orphans.some((row) => row.x_id === "known-rejected"),
       false,
-      "existing but unapproved x_user must not be misclassified as orphan",
+      "existing but non-listable x_user must not be misclassified as orphan",
     );
 
     const orphan = sources.orphans.find((row) => row.x_id === "orphan");
