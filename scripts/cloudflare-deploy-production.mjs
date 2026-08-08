@@ -19,6 +19,7 @@ import {
   runWorkerUploadSizePreflight,
   verifyProductionEnvironment,
 } from "./cloudflare-production.mjs";
+import { runSafeRemoteIndexMigrations } from "./safe-d1-auto-migrate.mjs";
 
 export function deploymentEnvironment(
   env,
@@ -45,6 +46,7 @@ export function deployProduction({
   verify = verifyProductionEnvironment,
   prepareConfigs = materializeProductionConfigs,
   checkOutput = checkOpenNextOutput,
+  safeMigrationApply = runSafeRemoteIndexMigrations,
   schemaPreflight = runReadOnlySchemaPreflight,
   secretPreflight = runRemoteSecretPreflight,
   uploadSizePreflight = runWorkerUploadSizePreflight,
@@ -72,6 +74,16 @@ export function deployProduction({
 
   uploadSizePreflight({ env, repoRoot, configs, wranglerBin, run });
 
+  safeMigrationApply({
+    env,
+    repoRoot,
+    webConfig: configs.web,
+    wranglerBin,
+    run,
+  });
+
+  // Re-run the strict read-only contract after any safe index migration.
+  // Deployment never proceeds on the assumption that the apply succeeded.
   schemaPreflight({
     env,
     repoRoot,

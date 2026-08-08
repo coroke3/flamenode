@@ -1,16 +1,19 @@
 import { createRequire } from "node:module";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
-// next.config 評価時点で .dev.vars を読む（RSC ワーカーとフラグ判定のずれ防止）
-createRequire(import.meta.url)("./scripts/load-dev-vars.cjs");
+if (process.env.NODE_ENV === "development") {
+  // next.config 評価時点で .dev.vars を読む（RSC ワーカーとフラグ判定のずれ防止）。
+  // production build では Build Variables を正本とし、ローカル専用ファイルを参照しない。
+  createRequire(import.meta.url)("./scripts/load-dev-vars.cjs");
 
-if (process.env.NODE_ENV === "development" && process.env.LOCAL_BINDINGS !== "0") {
-  await initOpenNextCloudflareForDev({
-    configPath: "wrangler.toml",
-    persist: { path: ".wrangler/state/v3" },
-    remoteBindings: false,
-    envFiles: [],
-  });
+  if (process.env.LOCAL_BINDINGS !== "0") {
+    await initOpenNextCloudflareForDev({
+      configPath: "wrangler.toml",
+      persist: { path: ".wrangler/state/v3" },
+      remoteBindings: false,
+      envFiles: [],
+    });
+  }
 }
 
 /** @type {import('next').NextConfig} */
