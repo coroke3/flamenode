@@ -40,11 +40,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Worker tests serial diagnostic
-        continue-on-error: true
-        run: node --test --test-concurrency=1 --experimental-strip-types workers/**/*.test.mjs
-
-      - name: Worker tests current command
+      - name: Worker tests
         run: npm run test:workers
 
       - name: Cloudflare CI tests
