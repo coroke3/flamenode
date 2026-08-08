@@ -252,8 +252,9 @@ export function buildVideoUpdatePlan(args: {
       displayNameChanged: args.parsed.display_name !== args.target.creator_display_name,
       iconChanged:
         (args.parsed.icon_url || null) !== (args.target.creator_icon_url || null),
-      titleChanged: args.parsed.title !== args.target.title,
+      titleChanged: payload.title !== args.target.title,
       youtubeChanged: args.youtubeChanged,
+      partChanged: (payload.part ?? null) !== (args.target.part ?? null),
       canEditPrimaryEvent: args.sections.primary_event,
       hasEventIdsField: args.hasEventIdsField,
       membersSectionTouched:
@@ -442,21 +443,23 @@ export async function applyVideoUpdatePlan(
       requestedByUserId: plan.operatorUserId,
     });
   }
-  if (plan.rebuildFlags.eventMembershipChanged) {
+  if (isPublicVideo && plan.rebuildFlags.eventProjectionChanged) {
     for (const eventId of new Set([plan.primaryEventId, ...existingEventIds, ...targetEventIds])) {
       if (!eventId) continue;
       queueItems.push({
         targetType: "event_base",
         targetId: eventId,
-        reason: "video_update",
+        reason: "video_projection_update",
         requestedByUserId: plan.operatorUserId,
       });
-      queueItems.push({
-        targetType: "event_slots",
-        targetId: eventId,
-        reason: "video_update",
-        requestedByUserId: plan.operatorUserId,
-      });
+      if (plan.rebuildFlags.eventMembershipChanged) {
+        queueItems.push({
+          targetType: "event_slots",
+          targetId: eventId,
+          reason: "video_update",
+          requestedByUserId: plan.operatorUserId,
+        });
+      }
     }
   }
   if (isPublicVideo && plan.rebuildFlags.randomPoolCardChanged) {
