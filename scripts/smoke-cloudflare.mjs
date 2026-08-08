@@ -9,6 +9,7 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 /** Workers deploy can lag behind wrangler success; allow ~2 min before failing smoke. */
 const DEFAULT_PROPAGATION_ATTEMPTS = 60;
 const DEFAULT_PROPAGATION_RETRY_DELAY_MS = 2_000;
+const DEFAULT_DEEP_HEALTH_ATTEMPTS = 3;
 
 function propagationRequestOptions(env = process.env, requestOptions = {}) {
   const attemptsRaw = env.SMOKE_PROPAGATION_ATTEMPTS?.trim();
@@ -174,7 +175,6 @@ function assertWeakPublicListShell(html, label) {
   if (!html.includes("作品一覧")) {
     throw new Error(`${label}: missing list page title marker.`);
   }
-  // Next.js は隣接テキストに `<!-- -->` を挟むことがあるため、コメントを除いて照合する。
   const listText = html.replace(/<!--[\s\S]*?-->/g, "");
   if (!/\d[\d,]*\s*works/.test(listText)) {
     throw new Error(`${label}: missing works count marker.`);
@@ -195,7 +195,6 @@ function assertWeakPublicListShell(html, label) {
   }
 }
 
-/** トップの棚・カード骨格。一覧が空でも新着セクションが壊れていないことを弱く確認する。 */
 function assertWeakTopPublicShell(html, label) {
   if (html.includes("簡易表示:")) {
     throw new Error(`${label}: degraded D1 banner detected.`);
@@ -259,9 +258,6 @@ export function smokeEnvironment({
   if (!SHA_PATTERN.test(commit)) throw new Error("WORKERS_CI_COMMIT_SHA must be a 40-character hexadecimal SHA.");
   const token = env.WORKER_ADMIN_TOKEN?.trim();
   if (!token) throw new Error("WORKER_ADMIN_TOKEN is required for protected deep health.");
-
-  // Deploy rewrites Build Variables in-process; smoke is a separate npm script and
-  // must apply the same cutover rewrite so health/auth probes hit the public origin.
   const smokeEnv = { ...env };
   const urls = new Map();
   for (const name of ["FLAMENODE_WEB_URL", "NEXT_PUBLIC_SITE_URL", "AUTH_URL"]) {
@@ -269,12 +265,9 @@ export function smokeEnvironment({
     if (!raw) continue;
     try {
       urls.set(name, normalizedUrl(raw, name));
-    } catch {
-      // requiredUrl below reports invalid values.
-    }
+    } catch {}
   }
   rewriteWorkersDevWebOriginsForCutover(smokeEnv, urls, []);
-
   return {
     commit: commit.toLowerCase(),
     token,
@@ -289,12 +282,7 @@ export function smokeEnvironment({
 
 function validateWebHealthBody(settings, healthBody) {
   assertKeys(healthBody, ["ok", "service", "commit", "runtime"], "web health");
-  if (
-    healthBody.ok !== true ||
-    healthBody.service !== "flamenode-web" ||
-    healthBody.runtime !== "cloudflare-worker" ||
-    healthBody.commit !== settings.commit
-  ) {
+  if (healthBody.ok !== true || healthBody.service !== "flamenode-web" || healthBody.runtime !== "cloudflare-worker" || healthBody.commit !== settings.commit) {
     throw new Error("web health: invalid payload or commit mismatch.");
   }
 }
@@ -307,23 +295,10 @@ function validateCronHealthBody(settings, service, body) {
 }
 
 function validateDeepHealthBody(settings, body) {
-  assertKeys(
-    body,
-    ["ok", "service", "commit", "checks", "status", "public_visibility_guard_mode"],
-    "deep health",
-  );
-  assertKeys(
-    body.checks,
-    ["d1", "kv", "r2", "schema", "queues", "static_artifacts", "public_visibility"],
-    "deep health checks",
-  );
+  assertKeys(body, ["ok", "service", "commit", "checks", "status", "public_visibility_guard_mode"], "deep health");
+  assertKeys(body.checks, ["d1", "kv", "r2", "schema", "queues", "static_artifacts", "public_visibility"], "deep health checks");
   const guardMode = body.public_visibility_guard_mode;
-  if (
-    guardMode !== undefined &&
-    guardMode !== "off" &&
-    guardMode !== "observe" &&
-    guardMode !== "enforce"
-  ) {
+  if (guardMode !== undefined && guardMode !== "off" && guardMode !== "observe" && guardMode !== "enforce") {
     throw new Error("deep health: public_visibility_guard_mode must be off, observe, or enforce.");
   }
   if (
@@ -331,41 +306,22 @@ function validateDeepHealthBody(settings, body) {
     body.status !== "ok" ||
     body.service !== "flamenode-web" ||
     body.commit !== settings.commit ||
-    ["d1", "kv", "r2", "schema", "queues", "static_artifacts", "public_visibility"].some(
-      (name) => body.checks[name] !== "ok",
-    )
+    ["d1", "kv", "r2", "schema", "queues", "static_artifacts", "public_visibility"].some((name) => body.checks[name] !== "ok")
   ) {
     throw new Error("deep health: D1/KV/R2/schema/queues/static/visibility checks failed or commit mismatched.");
   }
 }
 
-const PUBLIC_VIDEO_ITEM_KEYS = [
-  "id",
-  "title",
-  "youtube_video_id",
-  "display_name",
-  "icon_url",
-  "primary_event_id",
-  "scheduled_time",
-  "status",
-];
+const PUBLIC_VIDEO_ITEM_KEYS = ["id", "title", "youtube_video_id", "display_name", "icon_url", "primary_event_id", "scheduled_time", "status"];
 
 function assertPublicVideosPayload(body, label) {
   assertKeys(body, ["items", "total", "page", "limit"], label);
-  if (!Array.isArray(body.items) || body.page !== 1) {
-    throw new Error(`${label}: invalid pagination payload.`);
-  }
-  if (!Number.isFinite(body.total) || body.total < 0) {
-    throw new Error(`${label}: invalid total.`);
-  }
-  if (body.items.length > body.limit) {
-    throw new Error(`${label}: items length exceeds limit.`);
-  }
+  if (!Array.isArray(body.items) || body.page !== 1) throw new Error(`${label}: invalid pagination payload.`);
+  if (!Number.isFinite(body.total) || body.total < 0) throw new Error(`${label}: invalid total.`);
+  if (body.items.length > body.limit) throw new Error(`${label}: items length exceeds limit.`);
   for (const [index, item] of body.items.entries()) {
     assertKeys(item, PUBLIC_VIDEO_ITEM_KEYS, `${label}.items[${index}]`);
-    if (item.status !== "public") {
-      throw new Error(`${label}.items[${index}]: status must be public.`);
-    }
+    if (item.status !== "public") throw new Error(`${label}.items[${index}]: status must be public.`);
   }
   assertNoForbiddenKeys(body, label);
 }
@@ -379,140 +335,79 @@ function parseWorksCountFromListHtml(html) {
 
 async function waitForProductionHealthConvergence(fetchImpl, settings, propagationOptions) {
   await Promise.all([
-    requestJsonUntilValid(
-      fetchImpl,
-      `${settings.web}/api/health`,
-      {},
-      "web health",
-      (body) => validateWebHealthBody(settings, body),
-      propagationOptions,
-    ),
+    requestJsonUntilValid(fetchImpl, `${settings.web}/api/health`, {}, "web health", (body) => validateWebHealthBody(settings, body), propagationOptions),
     ...settings.workers.map(([service, baseUrl]) =>
-      requestJsonUntilValid(
-        fetchImpl,
-        `${baseUrl}/health`,
-        {},
-        `${service} health`,
-        (body) => validateCronHealthBody(settings, service, body),
-        propagationOptions,
-      ),
-    ),
-    requestJsonUntilValid(
-      fetchImpl,
-      `${settings.web}/api/health/deep`,
-      { headers: { Authorization: `Bearer ${settings.token}` } },
-      "deep health",
-      (body) => validateDeepHealthBody(settings, body),
-      propagationOptions,
+      requestJsonUntilValid(fetchImpl, `${baseUrl}/health`, {}, `${service} health`, (body) => validateCronHealthBody(settings, service, body), propagationOptions),
     ),
   ]);
+
+  await requestJsonUntilValid(
+    fetchImpl,
+    `${settings.web}/api/health/deep`,
+    { headers: { Authorization: `Bearer ${settings.token}` } },
+    "deep health",
+    (body) => validateDeepHealthBody(settings, body),
+    {
+      ...propagationOptions,
+      attempts: Math.min(
+        DEFAULT_DEEP_HEALTH_ATTEMPTS,
+        Math.max(1, Number(propagationOptions.attempts) || 1),
+      ),
+    },
+  );
 }
 
-export async function runSmoke({
-  env = process.env,
-  repoRoot = process.cwd(),
-  expectedCommit,
-  fetchImpl = fetch,
-  requestOptions,
-} = {}) {
+export async function runSmoke({ env = process.env, repoRoot = process.cwd(), expectedCommit, fetchImpl = fetch, requestOptions } = {}) {
   const settings = smokeEnvironment({ env, repoRoot, expectedCommit });
   const propagationOptions = propagationRequestOptions(env, requestOptions);
   const degradedOptions = degradedRetryOptions(env, requestOptions);
-  const get = (url, options, label) =>
-    requestWithRetry(fetchImpl, url, options, label, requestOptions);
+  const get = (url, options, label) => requestWithRetry(fetchImpl, url, options, label, requestOptions);
 
   await waitForProductionHealthConvergence(fetchImpl, settings, propagationOptions);
 
-  const topHtml = await fetchHtmlWithDegradedRetry(
-    get,
-    settings.web,
-    "top page",
-    degradedOptions,
-  );
+  const topHtml = await fetchHtmlWithDegradedRetry(get, settings.web, "top page", degradedOptions);
   assertWeakTopPublicShell(topHtml, "top page");
   const assetPath = topHtml.match(/(?:src|href)=["']([^"']*\/_next\/static\/[^"']+)["']/i)?.[1];
   if (!assetPath) throw new Error("top page: no Next.js static asset was found.");
   const assetUrl = new URL(assetPath, `${settings.web}/`);
-  if (assetUrl.origin !== new URL(settings.web).origin) {
-    throw new Error("top page: static asset must use the production web origin.");
-  }
+  if (assetUrl.origin !== new URL(settings.web).origin) throw new Error("top page: static asset must use the production web origin.");
   const asset = await get(assetUrl.href, {}, "static asset");
   assertStatus(asset, [200], "static asset");
 
-  const listHtml = await fetchHtmlWithDegradedRetry(
-    get,
-    `${settings.web}/list`,
-    "list page",
-    degradedOptions,
-  );
+  const listHtml = await fetchHtmlWithDegradedRetry(get, `${settings.web}/list`, "list page", degradedOptions);
   assertWeakPublicListShell(listHtml, "list page");
 
-  const legacyImport = await get(
-    `${settings.web}/api/admin/import/legacy`,
-    {
-      method: "POST",
-      headers: { Origin: new URL(settings.web).origin },
-    },
-    "legacy import unauthenticated rejection",
-  );
+  const legacyImport = await get(`${settings.web}/api/admin/import/legacy`, { method: "POST", headers: { Origin: new URL(settings.web).origin } }, "legacy import unauthenticated rejection");
   assertStatus(legacyImport, [401, 403], "legacy import unauthenticated rejection");
 
   const auth = await get(`${settings.web}/api/auth/callback/discord`, {}, "auth callback");
-  if (auth.status >= 500 || auth.status === 404) {
-    throw new Error(`auth callback: unexpected status ${auth.status}.`);
-  }
+  if (auth.status >= 500 || auth.status === 404) throw new Error(`auth callback: unexpected status ${auth.status}.`);
 
   const contentUrl = settings.workers.find(([service]) => service === "flamenode-content-jobs")[1];
   for (const endpoint of ["/rebuild", "/process-queue"]) {
-    const response = await get(
-      contentUrl + endpoint,
-      {
-        method: "POST",
-        // Explicit empty body so edge proxies do not invent a non-zero payload.
-        headers: { "Content-Length": "0" },
-      },
-      `content-jobs ${endpoint}`,
-    );
+    const response = await get(contentUrl + endpoint, { method: "POST", headers: { "Content-Length": "0" } }, `content-jobs ${endpoint}`);
     assertStatus(response, [401, 403], `content-jobs ${endpoint} unauthenticated rejection`);
   }
 
-  const deepUnauthenticated = await get(
-    `${settings.web}/api/health/deep`,
-    {},
-    "deep health unauthenticated rejection",
-  );
+  const deepUnauthenticated = await get(`${settings.web}/api/health/deep`, {}, "deep health unauthenticated rejection");
   assertStatus(deepUnauthenticated, [401], "deep health unauthenticated rejection");
 
   const publicApi = await get(`${settings.web}/api/videos?limit=5`, {}, "public videos DTO");
   assertStatus(publicApi, [200], "public videos DTO");
   const publicBody = await parseJson(publicApi, "public videos DTO");
   assertPublicVideosPayload(publicBody, "public videos DTO");
-  if (publicBody.limit !== 5) {
-    throw new Error("public videos DTO: unexpected limit.");
-  }
+  if (publicBody.limit !== 5) throw new Error("public videos DTO: unexpected limit.");
   const listWorksCount = parseWorksCountFromListHtml(listHtml);
-  if (
-    listWorksCount !== null &&
-    Number.isFinite(publicBody.total) &&
-    publicBody.total < listWorksCount
-  ) {
-    throw new Error(
-      "public videos DTO: total is lower than list page works count marker.",
-    );
+  if (listWorksCount !== null && Number.isFinite(publicBody.total) && publicBody.total < listWorksCount) {
+    throw new Error("public videos DTO: total is lower than list page works count marker.");
   }
 
-  const missing = await get(
-    `${settings.web}/__flamenode-smoke-missing-${settings.commit.slice(0, 12)}`,
-    {},
-    "404 probe",
-  );
+  const missing = await get(`${settings.web}/__flamenode-smoke-missing-${settings.commit.slice(0, 12)}`, {}, "404 probe");
   assertStatus(missing, [404], "404 probe");
   const invalidMethod = await get(`${settings.web}/api/health`, { method: "POST" }, "invalid method probe");
   assertStatus(invalidMethod, [405], "invalid method probe");
 
-  console.log(
-    "[smoke-cloudflare] OK (health convergence, web, assets, list shell, top shell, legacy import guard, auth, cron admin guard, deep health auth, DTO, count consistency, 404, method)",
-  );
+  console.log("[smoke-cloudflare] OK (health convergence, web, assets, list shell, top shell, legacy import guard, auth, cron admin guard, deep health auth, DTO, count consistency, 404, method)");
   return { commit: settings.commit };
 }
 

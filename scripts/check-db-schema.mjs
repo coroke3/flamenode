@@ -20,6 +20,33 @@ const REMOVED_TABLES = new Set([
   "x_user_youtube_channels",
 ]);
 
+/**
+ * Query-plan-only indexes that are intentionally migration-owned rather than
+ * referenced by Drizzle query construction. The schema validator still treats
+ * them as strict canonical objects: missing, renamed, or wrong-column indexes
+ * fail the same exact manifest comparison as Drizzle-declared indexes.
+ */
+const OPERATIONAL_INDEX_MANIFEST = Object.freeze([
+  { table: "x_users", name: "x_users_icon_url_idx", properties: ["icon_url"] },
+  {
+    table: "videos",
+    name: "videos_creator_icon_url_idx",
+    properties: ["creator_icon_url"],
+  },
+  { table: "events", name: "events_icon_url_idx", properties: ["icon_url"] },
+  { table: "events", name: "events_img_url_idx", properties: ["img_url"] },
+  {
+    table: "event_groups",
+    name: "event_groups_icon_url_idx",
+    properties: ["icon_url"],
+  },
+  {
+    table: "event_groups",
+    name: "event_groups_img_url_idx",
+    properties: ["img_url"],
+  },
+]);
+
 function collectSourceFiles(dir, result = []) {
   if (!fs.existsSync(dir)) return result;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -104,6 +131,35 @@ function normalizeSchemaForManifest(schemaText) {
   );
 }
 
+function injectOperationalIndexManifest(schemaText) {
+  const segments = readTableSegments(schemaText);
+  const declarationsByTable = new Map();
+  for (const item of OPERATIONAL_INDEX_MANIFEST) {
+    const declarations = declarationsByTable.get(item.table) ?? [];
+    declarations.push(
+      `index("${item.name}").on(${item.properties.map((property) => `t.${property}`).join(", ")})`,
+    );
+    declarationsByTable.set(item.table, declarations);
+  }
+
+  let output = schemaText;
+  for (const segment of [...segments].sort((a, b) => b.end - a.end)) {
+    const declarations = declarationsByTable.get(segment.table);
+    if (!declarations?.length) continue;
+    output =
+      output.slice(0, segment.end) +
+      `\n// migration-owned operational index manifest\n${declarations.join("\n")}\n` +
+      output.slice(segment.end);
+    declarationsByTable.delete(segment.table);
+  }
+  if (declarationsByTable.size > 0) {
+    throw new Error(
+      `operational index table missing from canonical schema: ${[...declarationsByTable.keys()].join(", ")}`,
+    );
+  }
+  return output;
+}
+
 export function validateDbSchema(root = process.cwd()) {
   assertSchemaEntryPoint(root);
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-schema-check-"));
@@ -124,11 +180,11 @@ export function validateDbSchema(root = process.cwd()) {
         "utf8",
       ),
     );
-    const flattened = [
+    const flattened = injectOperationalIndexManifest([
       removeOverriddenAndRemovedTables(fragmentText, canonicalText),
       "\n// ===== schema.canonical.ts final definitions =====\n",
       canonicalText,
-    ].join("\n");
+    ].join("\n"));
     fs.writeFileSync(path.join(tempDbDir, "schema.ts"), flattened, "utf8");
     return validateBaseSchema(tempRoot);
   } finally {

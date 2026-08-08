@@ -28,12 +28,14 @@ export function computeStaticRebuildFlags(args: {
   iconChanged: boolean;
   titleChanged?: boolean;
   youtubeChanged?: boolean;
+  partChanged?: boolean;
   canEditPrimaryEvent: boolean;
   hasEventIdsField: boolean;
   membersSectionTouched?: boolean;
 }): {
   identityChanged: boolean;
   eventMembershipChanged: boolean;
+  eventProjectionChanged: boolean;
   creatorAggregationChanged: boolean;
   randomPoolCardChanged: boolean;
 } {
@@ -43,16 +45,20 @@ export function computeStaticRebuildFlags(args: {
   const eventMembershipChanged =
     args.canEditPrimaryEvent && args.hasEventIdsField;
   const creatorAggregationChanged = Boolean(args.membersSectionTouched);
+  const eventProjectionChanged =
+    Boolean(args.titleChanged) ||
+    Boolean(args.youtubeChanged) ||
+    Boolean(args.partChanged) ||
+    identityChanged ||
+    eventMembershipChanged;
 
   return {
     identityChanged,
     eventMembershipChanged,
+    eventProjectionChanged,
     creatorAggregationChanged,
     randomPoolCardChanged:
-      Boolean(args.titleChanged) ||
-      Boolean(args.youtubeChanged) ||
-      identityChanged ||
-      eventMembershipChanged ||
+      eventProjectionChanged ||
       creatorAggregationChanged,
   };
 }

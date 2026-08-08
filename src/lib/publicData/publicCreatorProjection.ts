@@ -5,13 +5,6 @@ import {
 } from "../utils/pickupCreators.ts";
 import { COUNTABLE_PUBLIC_VIDEO_SQL } from "./countablePublicVideoSql.ts";
 
-/**
- * Phase 0 メモ:
- * - rebuildUsersIndex: x_users 行ごとに表示名・アイコン×2・personal/collab/total/updated_at の相関サブクエリ
- * - rebuildTop / rebuildRecommend: x_users 行ごとに personal/collab の相関 COUNT
- * いずれも O(作者数×作品走査) になりやすい。本モジュールは一括 GROUP BY + ROW_NUMBER で置換する。
- */
-
 export interface PublicCreatorRegisteredUser {
   id: string;
   x_name: string | null;
@@ -60,6 +53,16 @@ export interface PublicPickupCreatorRow {
 
 type D1Queryable = Pick<D1Database, "prepare">;
 
+type CreatorAggregateRow = Record<string, unknown> & {
+  x_id?: unknown;
+  personal_count?: unknown;
+  collab_count?: unknown;
+  total_works?: unknown;
+  updated_at?: unknown;
+  personal_updated_at?: unknown;
+  x_user_exists?: unknown;
+};
+
 function normalizeCount(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -73,20 +76,6 @@ function trimNullable(value: unknown): string | null {
 
 function trimString(value: unknown): string {
   return String(value ?? "").trim();
-}
-
-function mapCountRows(
-  rows: Array<Record<string, unknown>> | undefined,
-  keyField: string,
-  valueField: string,
-): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const row of rows ?? []) {
-    const key = trimString(row[keyField]);
-    if (!key) continue;
-    map.set(key, normalizeCount(row[valueField]));
-  }
-  return map;
 }
 
 function mapStringRows(
@@ -108,11 +97,7 @@ function resolveRegisteredDisplayName(
   user: PublicCreatorRegisteredUser,
   sources: PublicCreatorProjectionSources,
 ): string {
-  return (
-    trimNullable(user.x_name) ??
-    sources.displayNames.get(user.id) ??
-    user.id
-  );
+  return trimNullable(user.x_name) ?? sources.displayNames.get(user.id) ?? user.id;
 }
 
 function resolveRegisteredIcon(
@@ -122,20 +107,21 @@ function resolveRegisteredIcon(
   return trimNullable(user.icon_url) ?? sources.iconUrls.get(user.id) ?? null;
 }
 
+/**
+ * 公開クリエイター projection のD1入力を3 set-level queryで構築する。
+ *
+ * 1. 公開対象 x_users
+ * 2. personal/collab/total/updated_at と x_users 存在判定を1集計
+ * 3. 動画snapshot由来の表示名/icon fallbackを1 window query
+ *
+ * orphan は従来どおり「x_users自体に存在しない primary creator」のみを対象にし、
+ * collab参加は orphan の件数・updated_at に加えない。
+ */
 export async function loadPublicCreatorProjectionSources(
   db: D1Queryable,
   now: number,
 ): Promise<PublicCreatorProjectionSources> {
-  const [
-    registeredUsers,
-    personalCounts,
-    collabCounts,
-    totalWorks,
-    updatedAts,
-    displayNames,
-    iconUrls,
-    orphans,
-  ] = await Promise.all([
+  const [registeredUsersResult, aggregateResult, profileFallbackResult] = await Promise.all([
     db
       .prepare(
         `SELECT id, x_name, icon_url, profile_text, youtube_channel_url
@@ -145,121 +131,129 @@ export async function loadPublicCreatorProjectionSources(
       .all<PublicCreatorRegisteredUser>(),
     db
       .prepare(
-        `SELECT v.creator_x_user_id AS x_id, COUNT(DISTINCT v.id) AS personal_count
-         FROM videos AS v
-         WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         GROUP BY v.creator_x_user_id`,
-      )
-      .all<Record<string, unknown>>(),
-    db
-      .prepare(
-        `SELECT vm.x_user_id AS x_id, COUNT(DISTINCT vm.video_id) AS collab_count
-         FROM video_members AS vm
-         INNER JOIN videos AS v ON v.id = vm.video_id
-         WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         GROUP BY vm.x_user_id`,
-      )
-      .all<Record<string, unknown>>(),
-    db
-      .prepare(
-        `SELECT x_id, COUNT(DISTINCT video_id) AS total_works
-         FROM (
-           SELECT v.creator_x_user_id AS x_id, v.id AS video_id
+        `WITH creator_video_relations AS (
+           SELECT
+             v.creator_x_user_id AS x_id,
+             v.id AS video_id,
+             1 AS is_personal,
+             0 AS is_collab,
+             v.updated_at AS updated_at,
+             v.updated_at AS personal_updated_at
            FROM videos AS v
            WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-           UNION
-           SELECT vm.x_user_id AS x_id, vm.video_id AS video_id
-           FROM video_members AS vm
-           INNER JOIN videos AS v ON v.id = vm.video_id
-           WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-         )
-         GROUP BY x_id`,
-      )
-      .all<Record<string, unknown>>(),
-    db
-      .prepare(
-        `SELECT x_id, MAX(updated_at) AS updated_at
-         FROM (
-           SELECT v.creator_x_user_id AS x_id, v.updated_at
-           FROM videos AS v
-           WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+
            UNION ALL
-           SELECT vm.x_user_id AS x_id, v.updated_at
+
+           SELECT
+             vm.x_user_id AS x_id,
+             vm.video_id AS video_id,
+             0 AS is_personal,
+             1 AS is_collab,
+             v.updated_at AS updated_at,
+             NULL AS personal_updated_at
            FROM video_members AS vm
            INNER JOIN videos AS v ON v.id = vm.video_id
            WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         ), creator_aggregates AS (
+           SELECT
+             x_id,
+             COUNT(DISTINCT CASE WHEN is_personal = 1 THEN video_id END) AS personal_count,
+             COUNT(DISTINCT CASE WHEN is_collab = 1 THEN video_id END) AS collab_count,
+             COUNT(DISTINCT video_id) AS total_works,
+             MAX(updated_at) AS updated_at,
+             MAX(personal_updated_at) AS personal_updated_at
+           FROM creator_video_relations
+           WHERE COALESCE(x_id, '') <> ''
+           GROUP BY x_id
          )
-         GROUP BY x_id`,
+         SELECT
+           ca.x_id,
+           ca.personal_count,
+           ca.collab_count,
+           ca.total_works,
+           ca.updated_at,
+           ca.personal_updated_at,
+           CASE WHEN xu.id IS NULL THEN 0 ELSE 1 END AS x_user_exists
+         FROM creator_aggregates AS ca
+         LEFT JOIN x_users AS xu ON xu.id = ca.x_id`,
       )
-      .all<Record<string, unknown>>(),
+      .all<CreatorAggregateRow>(),
     db
       .prepare(
-        `SELECT x_id, x_name
-         FROM (
+        `WITH ranked AS (
            SELECT
              v.creator_x_user_id AS x_id,
              v.creator_display_name AS x_name,
-             ROW_NUMBER() OVER (
-               PARTITION BY v.creator_x_user_id
-               ORDER BY v.scheduled_time DESC, v.created_at DESC
-             ) AS row_num
-           FROM videos AS v
-           WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-             AND v.creator_display_name IS NOT NULL
-         )
-         WHERE row_num = 1`,
-      )
-      .all<Record<string, unknown>>(),
-    db
-      .prepare(
-        `SELECT x_id, icon_url
-         FROM (
-           SELECT
-             v.creator_x_user_id AS x_id,
              v.creator_icon_url AS icon_url,
              ROW_NUMBER() OVER (
                PARTITION BY v.creator_x_user_id
-               ORDER BY CASE WHEN v.collaboration_type = 'individual' THEN 0 ELSE 1 END,
-                        v.scheduled_time DESC,
-                        v.created_at DESC,
-                        v.id DESC
-             ) AS row_num
+               ORDER BY
+                 CASE WHEN v.creator_display_name IS NULL THEN 1 ELSE 0 END,
+                 v.scheduled_time DESC,
+                 v.created_at DESC
+             ) AS display_rank,
+             ROW_NUMBER() OVER (
+               PARTITION BY v.creator_x_user_id
+               ORDER BY
+                 CASE WHEN v.creator_icon_url IS NULL THEN 1 ELSE 0 END,
+                 CASE WHEN v.collaboration_type = 'individual' THEN 0 ELSE 1 END,
+                 v.scheduled_time DESC,
+                 v.created_at DESC,
+                 v.id DESC
+             ) AS icon_rank
            FROM videos AS v
            WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-             AND v.creator_icon_url IS NOT NULL
          )
-         WHERE row_num = 1`,
-      )
-      .all<Record<string, unknown>>(),
-    db
-      .prepare(
-        `SELECT
-           v.creator_x_user_id AS x_id,
-           COUNT(DISTINCT v.id) AS personal_count,
-           MAX(v.updated_at) AS updated_at
-         FROM videos AS v
-         LEFT JOIN x_users AS xu ON xu.id = v.creator_x_user_id
-         WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-           AND v.creator_x_user_id <> 'anonymous'
-           AND xu.id IS NULL
-         GROUP BY v.creator_x_user_id`,
+         SELECT
+           x_id,
+           MAX(CASE WHEN display_rank = 1 THEN x_name END) AS x_name,
+           MAX(CASE WHEN icon_rank = 1 THEN icon_url END) AS icon_url
+         FROM ranked
+         GROUP BY x_id`,
       )
       .all<Record<string, unknown>>(),
   ]);
 
+  const personalCounts = new Map<string, number>();
+  const collabCounts = new Map<string, number>();
+  const totalWorks = new Map<string, number>();
+  const updatedAts = new Map<string, number>();
+  const orphans: PublicCreatorOrphanRow[] = [];
+
+  for (const row of aggregateResult.results ?? []) {
+    const xId = trimString(row.x_id);
+    if (!xId) continue;
+    const personalCount = normalizeCount(row.personal_count);
+    const collabCount = normalizeCount(row.collab_count);
+    const totalWorkCount = normalizeCount(row.total_works);
+    const updatedAt = normalizeCount(row.updated_at);
+    personalCounts.set(xId, personalCount);
+    collabCounts.set(xId, collabCount);
+    totalWorks.set(xId, totalWorkCount);
+    updatedAts.set(xId, updatedAt);
+
+    if (
+      xId !== "anonymous" &&
+      normalizeCount(row.x_user_exists) === 0 &&
+      personalCount > 0
+    ) {
+      orphans.push({
+        x_id: xId,
+        personal_count: personalCount,
+        updated_at: normalizeCount(row.personal_updated_at) || now,
+      });
+    }
+  }
+
   return {
-    registeredUsers: registeredUsers.results ?? [],
-    orphans: (orphans.results ?? []).map((row) => ({
-      x_id: trimString(row.x_id),
-      personal_count: normalizeCount(row.personal_count),
-      updated_at: normalizeCount(row.updated_at) || now,
-    })),
-    personalCounts: mapCountRows(personalCounts.results, "x_id", "personal_count"),
-    collabCounts: mapCountRows(collabCounts.results, "x_id", "collab_count"),
-    totalWorks: mapCountRows(totalWorks.results, "x_id", "total_works"),
-    updatedAts: mapCountRows(updatedAts.results, "x_id", "updated_at"),
-    displayNames: mapStringRows(displayNames.results, "x_id", "x_name"),
-    iconUrls: mapStringRows(iconUrls.results, "x_id", "icon_url"),
+    registeredUsers: registeredUsersResult.results ?? [],
+    orphans,
+    personalCounts,
+    collabCounts,
+    totalWorks,
+    updatedAts,
+    displayNames: mapStringRows(profileFallbackResult.results, "x_id", "x_name"),
+    iconUrls: mapStringRows(profileFallbackResult.results, "x_id", "icon_url"),
   };
 }
 
@@ -324,8 +318,7 @@ export function buildPublicUsersIndexItems(
     .filter((row) => row.x_id && row.x_name)
     .sort(
       (a, b) =>
-        b.sort_score - a.sort_score ||
-        a.x_name.localeCompare(b.x_name, "ja"),
+        b.sort_score - a.sort_score || a.x_name.localeCompare(b.x_name, "ja"),
     );
 }
 
