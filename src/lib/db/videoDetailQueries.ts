@@ -24,6 +24,12 @@ import {
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
 import { normalizeXId } from "@/lib/utils/xid";
+import { getEnv } from "@/lib/cloudflare";
+import {
+  eventPlaylistObjectKey,
+  normalizeStaticEventPlaylist,
+  type StaticEventPlaylistPayload,
+} from "@/lib/publicData/staticEventPlaylistCore";
 import {
   clampRelatedLimit,
   enforceDiversity,
@@ -442,14 +448,39 @@ export async function fetchRelatedVideos(
 }
 
 /**
- * 同一イベントの上映順 (scheduled_time 昇順) 全件を返す。
- * 再生リスト UI のソース。`primary_event_id` を主軸にする。
+ * 同一イベントの上映順 (scheduled_time 昇順) を返す。
+ * R2 の厳密な video_events projection を優先し、欠損・不完全時だけ D1 に fallback する。
  */
 export async function fetchEventPlaylistVideos(
   db: DB,
   eventId: string,
   limit = 50,
 ) {
+  const eventRow = (
+    await db
+      .select({ visibility_status: events.visibility_status })
+      .from(events)
+      .where(eq(events.id, eventId))
+      .limit(1)
+  )[0];
+  if (eventRow?.visibility_status !== "public") return [];
+
+  try {
+    const object = await getEnv().BUCKET.get(eventPlaylistObjectKey(eventId));
+    if (object) {
+      const payload = JSON.parse(await object.text()) as StaticEventPlaylistPayload;
+      const normalized = normalizeStaticEventPlaylist(payload, eventId);
+      if (
+        normalized &&
+        (normalized.complete || normalized.items.length >= limit)
+      ) {
+        return uniqueBy(normalized.items.slice(0, limit), (row) => row.id);
+      }
+    }
+  } catch {
+    // R2/context failure is non-fatal: retain the existing D1 semantics below.
+  }
+
   const rows = await db
     .select({
       id: videos.id,
