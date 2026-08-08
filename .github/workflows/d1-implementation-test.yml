@@ -49,6 +49,9 @@ jobs:
       - name: Static rebuild tests
         run: npm run test:static-rebuild
 
+      - name: Reset local D1 test state
+        run: rm -rf .wrangler/state
+
       - name: Verify fast
         run: npm run verify:fast
 
