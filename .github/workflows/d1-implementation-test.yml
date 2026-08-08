@@ -41,19 +41,7 @@ jobs:
         run: npm run typecheck
 
       - name: Worker tests
-        run: |
-          set +e
-          npm run test:workers > /tmp/worker-tests.log 2>&1
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ]; then
-            echo "----- worker failure summary -----"
-            grep -E "not ok|ERR_|AssertionError|Error:|fail|FAIL" /tmp/worker-tests.log | tail -n 120 || true
-            echo "----- worker log tail -----"
-            tail -n 160 /tmp/worker-tests.log
-            exit "$status"
-          fi
-          tail -n 20 /tmp/worker-tests.log
+        run: npm run test:workers
 
       - name: Cloudflare CI tests
         run: npm run test:cloudflare-ci
