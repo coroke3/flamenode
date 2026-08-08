@@ -29,9 +29,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      # This workflow is a branch-only test harness and must not alter the
-      # repository's production contract that tracked workflows have no
-      # automatic push/pull_request/schedule triggers.
       - name: Remove temporary workflow from validation worktree
         run: |
           rm -f .github/workflows/d1-implementation-test.yml
@@ -42,6 +39,18 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Worker queue tests diagnostic
+        continue-on-error: true
+        run: node --test --experimental-strip-types workers/json-generator/queue.test.mjs
+
+      - name: Worker rebuild tests diagnostic
+        continue-on-error: true
+        run: node --test --experimental-strip-types workers/json-generator/rebuild.test.mjs
+
+      - name: Worker json-generator tests diagnostic
+        continue-on-error: true
+        run: node --test --experimental-strip-types workers/json-generator/*.test.mjs
 
       - name: Worker tests
         run: npm run test:workers
