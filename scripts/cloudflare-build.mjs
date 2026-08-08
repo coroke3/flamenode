@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   assertCommitSha,
+  redactOutput,
   resolveTool,
   runProcess,
 } from "./cloudflare-production.mjs";
@@ -12,6 +13,17 @@ import {
   checkOpenNextOutput,
   writeBuildManifest,
 } from "./check-open-next-output.mjs";
+
+const EXPECTED_BUILD_BINDING_WARNING =
+  /\{"service":"public-static-json","object_key":"[^"]+","result":"read_failed","error_name":"CloudflareBindingsUnavailableError"\}/;
+
+export function filterExpectedOpenNextBuildNoise(output) {
+  return String(output ?? "")
+    .split(/\r?\n/)
+    .filter((line) => !EXPECTED_BUILD_BINDING_WARNING.test(line.trim()))
+    .join("\n")
+    .trim();
+}
 
 export function resolveManagedBuildOutput({
   env = process.env,
@@ -54,13 +66,22 @@ export function runCloudflareBuild({
   const outputRoot = resolveManagedBuildOutput({ env, repoRoot });
   if (fs.existsSync(outputRoot)) fs.rmSync(outputRoot, { recursive: true, force: true });
 
-  run({
+  const result = run({
     executable: process.execPath,
     args: [cli, "build"],
     cwd: repoRoot,
-    env,
+    env: {
+      ...env,
+      NEXT_TELEMETRY_DISABLED: env.NEXT_TELEMETRY_DISABLED || "1",
+    },
     label: "cloudflare-build:opennext",
+    allowOutput: false,
   });
+  const stdout = filterExpectedOpenNextBuildNoise(redactOutput(result?.stdout, env));
+  const stderr = filterExpectedOpenNextBuildNoise(redactOutput(result?.stderr, env));
+  if (stdout) console.log(stdout);
+  if (stderr) console.error(stderr);
+
   writeBuildManifest({ outputRoot, commit });
   check({ env, repoRoot, outputRoot, commit });
   console.log("[cloudflare-build] OpenNext artifact verified (single build)");

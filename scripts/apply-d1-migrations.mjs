@@ -8,7 +8,7 @@ const root = process.cwd();
 const mode = process.argv[2];
 if (mode !== "local" && mode !== "remote") {
   throw new Error(
-    "Usage: node scripts/apply-d1-migrations.mjs <local|remote> [--config path] [--persist-to path] [--yes]",
+    "Usage: node scripts/apply-d1-migrations.mjs <local|remote> [--config path] [--persist-to path]",
   );
 }
 
@@ -21,11 +21,16 @@ function optionValue(name) {
   return value;
 }
 
-const allowed = new Set(["--config", "--persist-to", "--yes"]);
+const allowed = new Set(["--config", "--persist-to"]);
 for (let index = 0; index < args.length; index += 1) {
   const argument = args[index];
+  if (argument === "--yes") {
+    throw new Error(
+      "Unsupported argument: --yes. Wrangler 4 skips D1 migration confirmation automatically in CI/CD; do not forward a legacy auto-confirm flag.",
+    );
+  }
   if (!allowed.has(argument)) throw new Error(`Unsupported argument: ${argument}`);
-  if (argument !== "--yes") index += 1;
+  index += 1;
 }
 if (mode === "remote" && args.includes("--persist-to")) {
   throw new Error("--persist-to is only available in local mode");
@@ -78,7 +83,6 @@ try {
       path.resolve(root, optionValue("--persist-to") ?? path.join(".wrangler", "state")),
     );
   }
-  if (args.includes("--yes")) wranglerArgs.push("--yes");
 
   const result = spawnSync(process.execPath, wranglerArgs, {
     cwd: root,

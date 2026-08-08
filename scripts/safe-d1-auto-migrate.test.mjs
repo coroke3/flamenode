@@ -6,6 +6,7 @@ import test from "node:test";
 import { deployProduction } from "./cloudflare-deploy-production.mjs";
 import {
   classifyAutoDeployMigration,
+  formatSafeMigrationApplyError,
   parseAppliedMigrationNames,
   pendingMigrationNames,
   runSafeRemoteIndexMigrations,
@@ -105,7 +106,7 @@ test("migration probe payload normalization ignores sql suffix differences", () 
   );
 });
 
-test("safe pending index migrations apply once and are verified again before deploy", () =>
+test("safe pending index migrations apply once without removed Wrangler --yes and are verified again", () =>
   withTempDirectory("flamenode-safe-d1-", (repoRoot) => {
     writeMigration(repoRoot, "0000_base.sql", safeIndexMigration.replaceAll("0001_safe", "0000_base"));
     writeMigration(repoRoot, "0001_safe.sql", safeIndexMigration);
@@ -126,13 +127,26 @@ test("safe pending index migrations apply once and are verified again before dep
     assert.deepEqual(result.appliedNames, ["0001_safe.sql"]);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].label, "cloudflare-deploy:d1-safe-index-migrations");
-    assert.deepEqual(calls[0].args.slice(-4), [
+    assert.deepEqual(calls[0].args.slice(-3), [
       "remote",
       "--config",
       path.join(repoRoot, "web.toml"),
-      "--yes",
     ]);
+    assert.ok(!calls[0].args.includes("--yes"));
   }));
+
+test("safe migration failures do not misdiagnose CLI errors as token permission failures", () => {
+  const cliMessage = formatSafeMigrationApplyError(
+    new Error("cloudflare-deploy:d1-safe-index-migrations FAILED: Unknown argument: yes"),
+  );
+  assert.match(cliMessage, /not classified as an API-token permission error/i);
+  assert.doesNotMatch(cliMessage, /Ensure CLOUDFLARE_API_TOKEN/);
+
+  const permissionMessage = formatSafeMigrationApplyError(
+    new Error("403 Forbidden: token permission denied"),
+  );
+  assert.match(permissionMessage, /CLOUDFLARE_API_TOKEN has D1 write\/edit permission/);
+});
 
 test("unsafe pending migrations fail closed before any D1 write", () =>
   withTempDirectory("flamenode-unsafe-d1-", (repoRoot) => {
