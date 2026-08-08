@@ -18,7 +18,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,32 +37,65 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Reproduce DB validation sequence
-        run: |
-          npm run check:db-schema
-          npm run check:db-migration
-          npm run check:db-d1-empty
-          npm run check:db-d1-legacy
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: Capture legacy DB check
-        id: legacy
-        shell: bash
-        run: |
-          set +e
-          npm run check:db-legacy > db-legacy.log 2>&1
-          status=$?
-          set -e
-          cat db-legacy.log
-          echo "status=$status" >> "$GITHUB_OUTPUT"
+      - name: Worker tests
+        run: npm run test:workers
 
-      - name: Upload legacy check log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: db-legacy-log
-          path: db-legacy.log
-          if-no-files-found: error
+      - name: Cloudflare CI tests
+        run: npm run test:cloudflare-ci
 
-      - name: Fail if legacy DB check failed
-        if: steps.legacy.outputs.status != '0'
-        run: exit 1
+      - name: Static rebuild tests
+        run: npm run test:static-rebuild
+
+      - name: Verify fast
+        run: npm run verify:fast
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: DB schema
+        run: npm run check:db-schema
+
+      - name: DB migration contract
+        run: npm run check:db-migration
+
+      - name: D1 empty migration
+        run: npm run check:db-d1-empty
+
+      - name: D1 legacy migration
+        run: npm run check:db-d1-legacy
+
+      - name: Legacy DB checks
+        run: npm run check:db-legacy
+
+      - name: Event owners
+        run: npm run check:event-owners
+
+      - name: UI acceptance
+        run: npm run check:ui-acceptance
+
+      - name: Public API contract
+        run: npm run check:public-api-contract
+
+      - name: Docs
+        run: npm run check:docs
+
+      - name: DB history
+        run: npm run check:db-history
+
+      - name: Project docs
+        run: npm run check:project-docs
+
+      - name: Slot reservation groups
+        run: npm run check:slot-reservation-groups
+
+      - name: Slot domain limits
+        run: npm run check:slot-domain-limits
+
+      - name: Public visibility fences
+        run: npm run check:public-visibility-fences
