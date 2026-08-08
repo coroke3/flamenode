@@ -1,9 +1,9 @@
 # FlameNode デプロイ手順書
 
 > Status: Active
-> Last verified: 2026-07-25
-> Verified against commit: `dc46eefa`
-> Source of truth: `package.json`, `scripts/cloudflare-*.mjs`, `wrangler.toml`, `workers/*/wrangler.toml`
+> Last verified: 2026-08-09
+> Verified against commit: `5064ac52`
+> Source of truth: `package.json`, `scripts/cloudflare-*.mjs`, `scripts/safe-d1-auto-migrate.mjs`, `wrangler.toml`, `workers/*/wrangler.toml`
 
 **AI:** 通常は §1 固定構成と §3–4（Build / Runtime Variables）だけ。初回準備チェックリストは [`docs/operations/deploy-setup-report.md`](./docs/operations/deploy-setup-report.md)。実 Cloudflare / Remote D1 / production secret は明示依頼時のみ。
 
@@ -27,6 +27,10 @@ main push
   -> npm ci（1回）
   -> verify:cloud（deploy契約検査のみ）
   -> OpenNext build（1回）
+  -> remote secret / upload size preflight
+  -> guarded D1 migration check
+       -> safe index-only pending がある場合だけ適用
+  -> strict Remote D1 read-only preflight
   -> flamenode-content-jobs
   -> flamenode-fast-jobs
   -> flamenode-sync-jobs
@@ -65,8 +69,8 @@ Static Assetsは`run_worker_first = false`とし、静的ファイルを通常�
 25. Deploy commandのproduction smokeが全項目成功したことを確認する。
 26. 旧Pages projectは削除条件をすべて満たすまで移行時rollback先としてだけ保持する。
 27. rollback時は4 Workerを同じ既知の正常commitへ戻し、再度smokeする。
-28. D1 migrationはbackup・レビュー後に運用者が手動適用し、自動deployへ組み込まない。
-29. 障害時はBuild stage、4 Workerのhealth/commit、binding、Queue binding、remote secret名、D1 schema、Cloudflare Metricsを順に確認する。
+28. D1 migrationは原則backup・レビュー後に手動適用する。唯一の例外として `Type: additive` / `Data loss: none` / `CREATE [UNIQUE] INDEX IF NOT EXISTS` のみで構成されるpending migrationは、guarded policyが全件を検証できた場合だけDeploy command内で自動適用できる。
+29. 障害時はBuild stage、guarded D1 migration stage、strict D1 preflight、4 Workerのhealth/commit、binding、Queue binding、remote secret名、Cloudflare Metricsを順に確認する。
 
 ## 3. Workers Builds設定
 
@@ -119,7 +123,7 @@ production resource IDはGit、Markdownの実値、artifact、logへ保存しま
 - `CLOUDFLARE_API_TOKEN`
 - `WORKER_ADMIN_TOKEN`
 
-`CLOUDFLARE_API_TOKEN`は4 Workerのdeploy、remote secret名の一覧取得、Remote D1のread-only検査に必要な最小権限だけを与えます。権限不足は迂回せずBuild失敗とします。
+`CLOUDFLARE_API_TOKEN`は4 Workerのdeploy、remote secret名の一覧取得、Remote D1 preflightに必要です。guarded index migrationを自動適用する場合は **D1 Edit** 権限も必要です。D1 Editが無い場合はsafe migration apply段階でfail-closedし、Worker deployを開始しません。一般的なschema migrationのために権限を広げて自動化することはしません。
 
 `WORKER_ADMIN_TOKEN`は、Deploy commandから保護された`/api/health/deep`を呼びD1/KV/R2/schemaをread-only確認するための唯一の例外です。同値を`flamenode-web`と`flamenode-content-jobs`のRuntime Secretにも登録します。値はartifact scanとlog redactionの対象で、出力・永続化しません。その他のRuntime Secret値はBuild環境へ渡しません。
 
@@ -220,25 +224,35 @@ npx wrangler queues create flamenode-youtube-sync-dlq
 1. exact nameの4 Workerを用意する。Cron WorkerへGitを接続しない。
 2. Queue 6本を作成し、wrangler群どおりproducer/consumer bindingを接続する。
 3. 各WorkerのRuntime Secretを上表どおり登録する。Queue feature flagは全Workerで`"0"`のまま開始する。
-4. D1を手動初期化し、必要なactive migrationを適用する。
+4. D1のbaselineと自動適用対象外の必要migrationを手動初期化する。安全なindex-only追加だけはguarded policyにより初回Buildで適用される場合がある。
 5. 4 Workerの`workers.dev` URLをBuild Variablesへ登録する。
 6. `flamenode-web`だけをGitへ接続し、Build/Deploy commandを保存する。
-7. `main` Buildを実行し、固定順deployとsmokeを確認する。
+7. `main` Buildを実行し、guarded D1 check、strict preflight、固定順deploy、smokeを確認する。
 
 secret preflightまたはD1 preflightが失敗した場合は不足を直し、同じBuild設定で再試行します。検査をskipする初回専用フラグは設けません。
 
 ## 6. D1 migrationとpreflight
 
-production deployはRemote D1へSELECTだけを実行し、次を確認します。
+production deployはRemote D1に対して、**guarded index-only migration適用を唯一の書き込み例外**とし、それ以外の検査はread-onlyで行います。
+
+最初に `d1_migrations` をSELECT-onlyで取得し、`migrations/` のactive migrationとの差分を求めます。未適用migrationがある場合、`scripts/safe-d1-auto-migrate.mjs` がpending全件を検査し、全件が次を満たす場合だけ自動適用します。
+
+- `Type: additive`
+- `Data loss: none`
+- executable SQLが `CREATE INDEX IF NOT EXISTS` または `CREATE UNIQUE INDEX IF NOT EXISTS` のみ
+
+1件でも `ALTER`、`DROP`、table作成、データ更新、backfill、破壊的変更、`IF NOT EXISTS`なしindexなどが混在すれば自動適用をせず停止します。
+
+safe migration apply後は、成功したというprocess終了コードだけを信用しません。`d1_migrations` を再取得して全pendingが消えたことを確認し、さらに既存のstrict read-only preflightを再実行して次を検証します。
 
 - D1へ接続できる。
 - `flamenode_schema_meta`のversionがコード要求値と一致する。
 - `src/lib/db/schema.ts`がexportする全正本テーブルと`d1_migrations`が存在する。
-- `migrations/`のactive migrationに明らかな未適用がない。
+- `migrations/`のactive migrationに未適用がない。
 
-不一致時はWebを含む全deployを開始しません。production deploy、runtime、Codexがmigrationを自動適用することは禁止です。
+不一致時はWebを含む全Worker deployを開始しません。migration apply中に失敗した場合も同様です。
 
-手動適用はbackup、対象SQL、change log、rollback方針をレビューした運用者だけが、production値を安全なoperator shellへ設定して実行します。
+自動適用対象外のmigrationはbackup、対象SQL、change log、rollback方針をレビューした運用者だけが、production値を安全なoperator shellへ設定して実行します。
 
 ```sh
 export WORKERS_CI_COMMIT_SHA="$(git rev-parse HEAD)"
@@ -246,7 +260,7 @@ node scripts/cloudflare-verify-environment.mjs
 npm run db:remote-apply -- --config .cloudflare/generated/web.toml
 ```
 
-PowerShellでは`$env:WORKERS_CI_COMMIT_SHA = (git rev-parse HEAD).Trim()`を使用します。実IDやtokenをコマンド行、shell history、Issueへ貼りません。適用後は停止したWorkers Buildを再試行し、read-only preflightからやり直します。詳細は[`docs/operations/migrations.md`](./docs/operations/migrations.md)を参照してください。
+PowerShellでは`$env:WORKERS_CI_COMMIT_SHA = (git rev-parse HEAD).Trim()`を使用します。実IDやtokenをコマンド行、shell history、Issueへ貼りません。適用後は停止したWorkers Buildを再試行し、guarded checkとstrict read-only preflightからやり直します。詳細は[`docs/operations/migrations.md`](./docs/operations/migrations.md)を参照してください。
 
 ## 7. Build・deploy・smoke
 
@@ -257,11 +271,13 @@ Deploy commandは次を行います。
 1. Build Variables、URL、実resource ID、commit SHAをfail-closedで検査する。
 2. production一時configを生成・検査する。
 3. remote secret名を検査する。
-4. Remote D1をread-only検査する。
-5. content→fast→sync→webの順でdeployする（Cron Workerを先に、Webを最後）。
-6. 全deploy成功後だけproduction smokeを行う。
+4. Cron Worker 3本のupload sizeをdry-run検査する。
+5. Remote D1の適用済みmigrationをread-onlyで確認し、安全なindex-only pendingだけをguarded auto-applyする。
+6. 適用後を含めRemote D1のstrict read-only schema preflightを行う。
+7. content→fast→sync→webの順でdeployする（Cron Workerを先に、Webを最後）。
+8. 全deploy成功後だけproduction smokeを行う。
 
-途中失敗時は後続Workerとsmokeへ進みません。4 Workerを跨ぐ単一transactionではないため、すでにdeploy済みのWorkerがある場合は「10. rollback」に従い同じ正常commitへ戻します。
+途中失敗時は後続Workerとsmokeへ進みません。guarded D1 migrationが失敗した場合はWorker deploy開始前なのでWorker世代は変更されません。4 Workerを跨ぐ単一transactionではないため、Worker deploy開始後に失敗した場合は「10. rollback」に従い同じ正常commitへ戻します。
 
 smokeは有限retryとtimeoutを持ち、URL未設定をskipしません。deploy直後はCloudflare edgeが一時的に直前の正常commitを返す場合があるため、HTTP 200でもhealthのcommitが一致するまで最大30回・1秒間隔で待機し、収束しない場合だけ失敗します。確認対象は次です。
 
@@ -319,17 +335,18 @@ Queue関連の緊急停止は、全Workerの`QUEUE_DISPATCH_ENABLED`・`QUEUE_CO
 
 ### D1
 
-code rollbackで旧schema fallback、二重書込み、runtime DDLを復活させません。migrationの逆操作が安全でない場合は事前backupから運用者が復旧します。
+code rollbackで旧schema fallback、二重書込み、runtime DDLを復活させません。guarded auto-applyはindex-onlyかつ冪等な追加に限定します。index追加のrollbackが必要な場合は対応する`DROP INDEX IF EXISTS`手順をレビューして実行し、それ以外のmigrationの逆操作が安全でない場合は事前backupから運用者が復旧します。
 
 ## 11. 障害時の確認順
 
 1. Workers Buildの`npm ci`、`verify:cloud`、OpenNext build、artifact検査のどこで失敗したか確認する。
 2. production環境検査が示す不足した**変数名、secret名、Worker名だけ**を確認する。
-3. Remote D1 preflightのschema version、必須table、migration名を確認する。
-4. content→fast→sync→webのどこまで同じcommitでdeployされたか確認する。
-5. 公開health、保護deep health、3 Cron health、smokeの最初の失敗を確認する。
-6. Cloudflare DashboardのInvocation Status、`exceededCpu`、D1 rows read/written、R2/KV、Cron履歴を確認する。
-7. secret、token、実resource ID、cookie、Webhook URL、OAuth情報をlog、Issue、監査snapshotへ貼らない。
+3. guarded D1 migration stageでpending名・allow-list判定・D1 Edit権限のどこで停止したか確認する。
+4. strict Remote D1 preflightのschema version、必須table、migration名を確認する。
+5. content→fast→sync→webのどこまで同じcommitでdeployされたか確認する。
+6. 公開health、保護deep health、3 Cron health、smokeの最初の失敗を確認する。
+7. Cloudflare DashboardのInvocation Status、`exceededCpu`、D1 rows read/written、R2/KV、Cron履歴を確認する。
+8. secret、token、実resource ID、cookie、Webhook URL、OAuth情報をlog、Issue、監査snapshotへ貼らない。
 
 詳細な一次対応は[`docs/operations/incident-response.md`](./docs/operations/incident-response.md)を参照してください。
 

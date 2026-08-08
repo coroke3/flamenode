@@ -1,9 +1,9 @@
 # Migration 運用
 
 > Status: Active
-> Last verified: 2026-07-21
-> Verified against commit: `47e6cee`
-> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `docs/database/change-log.md`
+> Last verified: 2026-08-09
+> Verified against commit: `5064ac52`
+> Source of truth: `src/lib/db/schema.ts`, `migrations/` active path, `scripts/safe-d1-auto-migrate.mjs`, `docs/database/change-log.md`
 
 ## 正本
 
@@ -16,7 +16,7 @@
 
 現行コードは旧列・旧tableのruntime fallback、旧方式への二重書き込み、起動時のschema変更を行わない。schema不一致はfail-fastで扱う。
 
-baselineには旧`events.event_group_id`が存在しない。Remote D1を自動repairせず、旧環境を破棄・再作成する場合も運用者がbackupと対象を確認して行う。
+baselineには旧`events.event_group_id`が存在しない。Remote D1をruntimeで自動repairせず、旧環境を破棄・再作成する場合も運用者がbackupと対象を確認して行う。
 
 ## ローカル
 
@@ -42,9 +42,27 @@ npm run check:db-history
 
 ## Remote D1
 
-Remote D1の作成、backup、migration適用、rollbackは運用者がCloudflareの手順に従い、対象D1とmigrationを確認して明示的に行う。CIとCodexはRemote D1を変更しない。
+Remote D1のmigrationは原則として運用者レビュー対象とする。production Workers Buildsで自動適用できる唯一の例外は、`scripts/safe-d1-auto-migrate.mjs` が**未適用migration全件**を検査し、全件が次の条件を満たす場合だけである。
 
-Remoteへ明示適用する場合は、生成済みWeb設定を指定して安全適用コマンドを使う。
+- migration headerが `Type: additive`
+- migration headerが `Data loss: none`
+- 実行SQLが `CREATE INDEX IF NOT EXISTS ...` または `CREATE UNIQUE INDEX IF NOT EXISTS ...` のみ
+- `ALTER` / `DROP` / table作成 / データ更新 / backfillなどを一切含まない
+
+このallow-listを満たさないmigrationが1件でもpendingなら、自動適用は一切行わずWorker deploy前にfail-closedで停止する。0054のような読み取り最適化用の冪等index追加だけがguarded auto-applyの対象であり、一般的なschema migrationを自動化する仕組みではない。
+
+production deployでは次の順序を固定する。
+
+1. Remote `d1_migrations` をSELECT-onlyで読み、未適用migrationを特定する。
+2. pendingがある場合、上記allow-listを全件検査する。
+3. 全件safeな場合だけ既存のD1互換migration runnerでRemoteへ適用する。
+4. 適用後に `d1_migrations` を再取得し、pendingが消えたことを確認する。
+5. 既存のstrict read-only schema preflightを改めて実行し、schema version・必須table・全active migrationを再検証する。
+6. ここまで成功した場合だけWorker deployを開始する。
+
+safe applyの成功を前提にWorker deployへ進まず、必ずread-backとstrict preflightを通す。D1 write権限が不足する、適用が失敗する、適用後もpendingが残る場合はいずれもWorkerを更新しない。
+
+Remoteへ手動適用する場合は、生成済みWeb設定を指定して安全適用コマンドを使う。
 
 ```sh
 npm run db:remote-apply -- --config .cloudflare/generated/web.toml
@@ -53,9 +71,13 @@ npm run db:remote-apply -- --config .cloudflare/generated/web.toml
 このコマンドも`0045`本文自体は変更せず、Wranglerへ渡す一時コピーだけでD1互換処理を行う。
 `0045`未適用の実データ入りD1へ生の`wrangler d1 migrations apply`を実行してはならない。
 
+自動適用対象外のmigrationは、schemaとmigrationの差分、backup、適用対象、rollback方針を確認した運用者が手動適用する。CloudflareのD1 migration applyは適用前backupを利用できるが、それを理由に破壊的変更を自動化しない。
+
+Workers Buildsでguarded index migrationを使う場合、Build用 `CLOUDFLARE_API_TOKEN` にはRemote D1の読み取りだけでなくD1 Edit権限も必要になる。権限不足時は安全migration適用段階で停止し、後続Workerをdeployしない。token値やresource IDはlog・Issue・文書へ記録しない。
+
 適用対象や差分は、`migrations/` と `src/lib/db/schema.ts` を照合したうえで検査scriptの結果を正本とする。個別migrationの目的と履歴は [`docs/db-history/README.md`](../db-history/README.md) と [`docs/database/change-log.md`](../database/change-log.md) から確認し、この文書へ一覧を重複記載しない。
 
-本番適用前にschemaとmigrationの差分、backup、適用対象、復旧手順を記録する。Remote D1の初期化や自動削除は行わない。
+Remote D1の初期化や自動削除は行わない。guarded auto-applyの対象をindex-onlyから広げる場合は、別変更として安全性・rollback・partial failureを再設計する。
 
 ## 変更手順
 
@@ -64,5 +86,6 @@ npm run db:remote-apply -- --config .cloudflare/generated/web.toml
 3. migrationヘッダーを [migration template](../templates/migration.md) に従って記載する。
 4. [`docs/database/change-log.md`](../database/change-log.md) と対応する `docs/db-history/<migration>.md` を同じ変更で更新する。
 5. `npm run check:db-schema`、`npm run check:db-history`、`npm run check:project-docs`を実行する。
+6. production自動適用を意図するindex-only migrationは、`scripts/safe-d1-auto-migrate.test.mjs` でallow-list適合とfail-closed回帰を確認する。
 
 rollbackがSQLだけで安全にできない変更は、backupからの運用者による復旧を手順化し、アプリケーションに旧形式fallbackを戻さない。
