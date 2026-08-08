@@ -2,8 +2,9 @@
  * Production runtime schema contract.
  *
  * Keep this list aligned with the tables exported by src/lib/db/schema.ts.
- * d1_migrations is included because production preflight must also prove that
- * every active migration was applied without performing a migration itself.
+ * d1_migrations is included because production deploy must prove every active
+ * migration is applied. Only the guarded additive index-only path may apply
+ * a migration before the strict read-only preflight runs.
  */
 export const REQUIRED_SCHEMA_VERSION = "2026-07-20-canonical-1";
 
