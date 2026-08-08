@@ -257,7 +257,7 @@ export function SlotGrid({
     if (Number.isFinite(current) && current > reserveMaxCount) {
       setReserveCount(String(reserveMaxCount));
     }
-  }, [reserveMaxCount]);
+  }, [reserveMaxCount, reserveCount]);
 
   const reservePreviewSlots = React.useMemo(() => {
     if (!reserveTarget) return [] as SlotRow[];
