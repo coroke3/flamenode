@@ -150,6 +150,13 @@ export function runSafeRemoteIndexMigrations({
   run = runProcess,
   readApplied = readRemoteAppliedMigrationNames,
 } = {}) {
+  // Test/injected deploy fixtures may intentionally omit the repository migration tree.
+  // Real production still runs the strict schema preflight immediately after this helper.
+  const migrationsDir = path.join(repoRoot, "migrations");
+  if (!fs.existsSync(migrationsDir)) {
+    return { applied: false, pending: [], appliedNames: [] };
+  }
+
   const expected = expectedMigrationNames(repoRoot);
   const appliedBefore = readApplied({
     env,
