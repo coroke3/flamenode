@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 const root = process.cwd();
 const migrationsDir = path.join(root, "migrations");
 const changeLogPath = path.join(root, "docs", "database", "change-log.md");
+const changeLogFragmentsDir = path.join(root, "docs", "database", "change-log.d");
 const historyDir = path.join(root, "docs", "db-history");
 const errors = [];
 
@@ -19,10 +20,6 @@ const ALLOWED_TYPES = new Set([
   "baseline",
 ]);
 const ALLOWED_DATA_LOSS = new Set(["none", "possible", "intentional"]);
-
-function read(relative) {
-  return fs.readFileSync(path.join(root, relative), "utf8");
-}
 
 function metadataValue(body, key) {
   const match = body.match(new RegExp(`^--\\s*${key}:\\s*(.+?)\\s*$`, "mi"));
@@ -51,8 +48,6 @@ function normalizeTrackedText(body) {
 }
 
 function checkAppliedMigrationChanges(migrationFiles) {
-  // PRのbaseが統合作業ブランチでも、main未適用migrationは修正可能にする。
-  // mainへ既に存在するactive migrationだけを不変として扱う。
   const explicitBase = process.env.DB_HISTORY_BASE_REF?.trim();
   const baseRef = explicitBase || "origin/main";
   if (git(["rev-parse", "--verify", baseRef]) === null) return;
@@ -67,6 +62,25 @@ function checkAppliedMigrationChanges(migrationFiles) {
       );
     }
   }
+}
+
+function readChangeLogCorpus() {
+  if (!fs.existsSync(changeLogPath)) {
+    errors.push("docs/database/change-log.md がありません。");
+    return "";
+  }
+  const parts = [fs.readFileSync(changeLogPath, "utf8")];
+  if (fs.existsSync(changeLogFragmentsDir)) {
+    const fragments = fs
+      .readdirSync(changeLogFragmentsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+      .map((entry) => entry.name)
+      .sort();
+    for (const fragment of fragments) {
+      parts.push(fs.readFileSync(path.join(changeLogFragmentsDir, fragment), "utf8"));
+    }
+  }
+  return parts.join("\n\n");
 }
 
 if (!fs.existsSync(migrationsDir)) {
@@ -93,8 +107,7 @@ for (const migrationName of migrationFiles) {
   else numberOwners.set(number, migrationName);
 }
 
-if (!fs.existsSync(changeLogPath)) errors.push("docs/database/change-log.md がありません。");
-const changeLog = fs.existsSync(changeLogPath) ? fs.readFileSync(changeLogPath, "utf8") : "";
+const changeLog = readChangeLogCorpus();
 
 for (const migrationName of migrationFiles) {
   const body = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
@@ -103,14 +116,16 @@ for (const migrationName of migrationFiles) {
   const type = assertMetadata(migrationName, body, "Type").toLowerCase();
   const summary = assertMetadata(migrationName, body, "Summary");
   const dataLossRaw = assertMetadata(migrationName, body, "Data loss").toLowerCase();
-  const dataLoss = (dataLossRaw.match(/^(none|possible|intentional)\b/)?.[1] ?? dataLossRaw);
+  const dataLoss = dataLossRaw.match(/^(none|possible|intentional)\b/)?.[1] ?? dataLossRaw;
   const rollback = assertMetadata(migrationName, body, "Rollback");
   const changeLogReference = assertMetadata(migrationName, body, "Change log");
 
   if (declaredMigration && declaredMigration !== migrationName) {
     errors.push(`${migrationName}: -- Migration: はファイル名と一致させてください。現在=${declaredMigration}`);
   }
-  if (date && !validDate(date)) errors.push(`${migrationName}: DateはYYYY-MM-DDの実在日付にしてください。現在=${date}`);
+  if (date && !validDate(date)) {
+    errors.push(`${migrationName}: DateはYYYY-MM-DDの実在日付にしてください。現在=${date}`);
+  }
   if (type && !ALLOWED_TYPES.has(type)) {
     errors.push(`${migrationName}: Typeは${[...ALLOWED_TYPES].join(" / ")}のいずれかです。現在=${type}`);
   }
@@ -120,8 +135,11 @@ for (const migrationName of migrationFiles) {
   if (rollback && /todo|tbd|未定|あとで/i.test(rollback)) {
     errors.push(`${migrationName}: Rollbackに未確定表現を使用できません。`);
   }
-  if (changeLogReference && !/docs\/database\/change-log\.md/i.test(changeLogReference)) {
-    errors.push(`${migrationName}: Change logはdocs/database/change-log.mdを参照してください。`);
+  if (
+    changeLogReference &&
+    !/docs\/database\/(?:change-log\.md|change-log\.d\/[^\s]+\.md)/i.test(changeLogReference)
+  ) {
+    errors.push(`${migrationName}: Change logはdocs/database/change-log.mdまたはchange-log.d配下を参照してください。`);
   }
   if (type === "destructive" && dataLoss === "none") {
     errors.push(`${migrationName}: destructive変更はData lossの影響をpossibleまたはintentionalで明示してください。`);
@@ -131,8 +149,8 @@ for (const migrationName of migrationFiles) {
   }
 
   const occurrences = changeLog.split(migrationName).length - 1;
-  if (occurrences === 0) errors.push(`${migrationName}: change-log.mdに対応項目がありません。`);
-  if (occurrences > 1) errors.push(`${migrationName}: change-log.mdに重複項目があります。`);
+  if (occurrences === 0) errors.push(`${migrationName}: change-log corpusに対応項目がありません。`);
+  if (occurrences > 1) errors.push(`${migrationName}: change-log corpusに重複項目があります。`);
 
   const detailPath = path.join(historyDir, migrationName.replace(/\.sql$/, ".md"));
   if (!fs.existsSync(detailPath)) {
@@ -140,8 +158,12 @@ for (const migrationName of migrationFiles) {
     continue;
   }
   const detail = fs.readFileSync(detailPath, "utf8");
-  if (!/Status:\s*Active/i.test(detail)) errors.push(`${migrationName}: DB履歴文書をStatus: Activeにしてください。`);
-  if (!detail.includes(migrationName)) errors.push(`${migrationName}: DB履歴文書内にmigration名がありません。`);
+  if (!/Status:\s*Active/i.test(detail)) {
+    errors.push(`${migrationName}: DB履歴文書をStatus: Activeにしてください。`);
+  }
+  if (!detail.includes(migrationName)) {
+    errors.push(`${migrationName}: DB履歴文書内にmigration名がありません。`);
+  }
   for (const section of ["目的", "変更内容", "データ損失", "ロールバック", "検証"]) {
     if (!new RegExp(`^#{1,6}\\s+.*${section}`, "mi").test(detail)) {
       errors.push(`${migrationName}: DB履歴文書に「${section}」節がありません。`);
@@ -152,7 +174,7 @@ for (const migrationName of migrationFiles) {
 for (const match of changeLog.matchAll(/\b\d{4}_[A-Za-z0-9_-]+\.sql\b/g)) {
   const migrationName = match[0];
   if (!migrationFiles.includes(migrationName)) {
-    errors.push(`change-log.md: active migrationに存在しない${migrationName}が記載されています。HistoricalならHistorical文書へ移動してください。`);
+    errors.push(`change-log corpus: active migrationに存在しない${migrationName}が記載されています。HistoricalならHistorical文書へ移動してください。`);
   }
 }
 
