@@ -107,3 +107,5 @@ jobs:
 
       - name: Public visibility fences
         run: npm run check:public-visibility-fences
+
+      # This workflow is temporary and removed after the consolidated run succeeds.
