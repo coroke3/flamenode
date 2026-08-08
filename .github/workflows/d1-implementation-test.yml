@@ -76,6 +76,11 @@ jobs:
       - name: Legacy DB checks
         run: npm run check:db-legacy
 
+      - name: Prepare canonical local D1 for owner check
+        run: |
+          rm -rf .wrangler/state
+          npm run db:local-apply
+
       - name: Event owners
         run: npm run check:event-owners
 
