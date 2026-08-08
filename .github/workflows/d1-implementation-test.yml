@@ -1,0 +1,53 @@
+name: D1 Implementation Test
+
+on:
+  push:
+    branches:
+      - agent/d1-max-read-reduction
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d1-implementation-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # This workflow is a branch-only test harness and must not alter the
+      # repository's production contract that tracked workflows have no
+      # automatic push/pull_request/schedule triggers.
+      - name: Remove temporary workflow from validation worktree
+        run: |
+          rm -f .github/workflows/d1-implementation-test.yml
+          git update-index --assume-unchanged .github/workflows/d1-implementation-test.yml || true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Worker tests
+        run: npm run test:workers
+
+      - name: Cloudflare CI tests
+        run: npm run test:cloudflare-ci
+
+      - name: Static rebuild tests
+        run: npm run test:static-rebuild
+
+      - name: Full verification suite
+        run: npm run verify:full
