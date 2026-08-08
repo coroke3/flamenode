@@ -50,6 +50,28 @@ test("normalizeStaticEventPlaylist validates schema and event id", () => {
   );
 });
 
+test("playlistのnull時刻は0へ変換せずnullのまま保持する", () => {
+  const normalized = normalizeStaticEventPlaylist({
+    schema_version: EVENT_PLAYLIST_SCHEMA_VERSION,
+    generated_at: null,
+    event_id: "event-a",
+    complete: true,
+    items: [
+      {
+        id: "video-a",
+        title: "Video A",
+        youtube_video_id: null,
+        display_name: "Creator",
+        scheduled_time: null,
+      },
+    ],
+  });
+
+  assert.ok(normalized);
+  assert.equal(normalized.generatedAt, null);
+  assert.equal(normalized.items[0].scheduled_time, null);
+});
+
 test("malformed playlist rows fail closed to D1 fallback", () => {
   assert.equal(
     normalizeStaticEventPlaylist({
