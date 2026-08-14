@@ -1,10 +1,11 @@
 "use server";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { revalidatePath } from "next/cache";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { slots, videos } from "@/lib/db/schema";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildSlotForceReleasedNotification } from "@/lib/notifications/templates/slot";
@@ -105,9 +106,10 @@ export async function forceReleaseSubmittedSlot(
   let shouldDetachVideoScheduling = false;
 
   if (videoId) {
-    videoBefore = (
-      await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
-    )[0] ?? null;
+    videoBefore =
+      (
+        await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
+      )[0] ?? null;
     if (!videoBefore) {
       return {
         ok: false,
@@ -194,19 +196,18 @@ export async function forceReleaseSubmittedSlot(
         .where(versionedSlotWhere(row.event_id, targetRows, "submitted")),
     ];
     const expectedMutationChanges: Array<number | null> = [targetRows.length];
-    const audits: Parameters<typeof mutateWithAudit>[1]["audits"][number][] =
-      targetRows.map((candidate, index) => ({
-        table_name: "slots",
-        target_id: candidate.id,
-        operation: "UPDATE",
-        before: snapshot(candidate),
-        after: snapshot(slotAfterRows[index]),
-        actor_user_id: guard.user.id,
-        context: "slot-admin:force-release-submitted",
-        reason: "管理者が提出済み枠を作品を削除せず強制解放",
-        retention_class: "long_audit",
-        strict: true,
-      }));
+    const audits: WriteAuditLogInput[] = targetRows.map((candidate, index) => ({
+      table_name: "slots",
+      target_id: candidate.id,
+      operation: "UPDATE",
+      before: snapshot(candidate),
+      after: snapshot(slotAfterRows[index]),
+      actor_user_id: guard.user.id,
+      context: "slot-admin:force-release-submitted",
+      reason: "管理者が提出済み枠を作品を削除せず強制解放",
+      retention_class: "long_audit",
+      strict: true,
+    }));
 
     if (videoBefore && videoAfter) {
       mutationStatements.push(
@@ -257,7 +258,11 @@ export async function forceReleaseSubmittedSlot(
     };
   }
 
-  revalidateForceReleasedPaths(row.event_id, videoId);
+  try {
+    revalidateForceReleasedPaths(row.event_id, videoId);
+  } catch (error) {
+    console.warn("[forceReleaseSubmittedSlot] post-commit revalidation failed", error);
+  }
   return markPendingPublicReflection(
     {
       ok: true,
