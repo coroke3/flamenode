@@ -3,7 +3,7 @@ import { getEnv } from "@/lib/cloudflare";
 import { servePublicMedia } from "@/lib/media/publicMedia";
 
 export async function GET(
-  _req: Request,
+  request: Request,
   { params }: { params: Promise<{ key?: string[] }> },
 ): Promise<Response> {
   const env = getEnv();
@@ -12,5 +12,5 @@ export async function GET(
   }
   const { key } = await params;
   const rawKey = key?.join("/") ?? "";
-  return servePublicMedia(env, rawKey);
+  return servePublicMedia(env, rawKey, request);
 }

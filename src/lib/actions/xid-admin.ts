@@ -2,7 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
@@ -24,8 +35,10 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import {
   isAuthUserLinkedToXUser,
+  getLinkedXUserIdsForAuthUser,
   resolveCanonicalXUserId,
 } from "@/lib/auth/xIdentity";
+import { isApprovedLinkedXUser } from "@/lib/auth/approvedX";
 import { validateXIdentityRequestShape, buildXIdentityDecisionFields } from "@/lib/auth/xIdentityRequestCore";
 import {
   buildStaticRebuildQueueBatch,
@@ -41,6 +54,7 @@ import {
   isRetryableXIdMutationError,
   processedXIdRequestMessage,
 } from "@/lib/actions/xidRequestReliabilityCore";
+import { canAutoBindUnassignedReservation } from "@/lib/slots/reservationBindIdentityCore";
 
 export interface XIdAdminResult {
   ok: boolean;
@@ -55,6 +69,11 @@ type SlotRow = typeof slots.$inferSelect;
 
 /** 承認時に一括で x_user_id を埋める reserved 枠の上限（D1 batch 予算保護）。 */
 const RESERVED_SLOT_BIND_CAP = 30;
+/** 1回のWeb Action/retryで読むbind page数。残件はpendingのままrecoveryへ渡す。 */
+const MAX_SLOT_BIND_PAGES_PER_REQUEST = 2;
+const SLOT_BIND_REQUEST_TYPES = ["new_link", "existing_link", "alias"] as const;
+/** D1のbind parameter上限に余裕を残したcandidate lookupの分割幅。 */
+const RESERVATION_BIND_CANONICALIZE_CHUNK = 80;
 
 async function getXIdLinkOperator(): Promise<XIdLinkOperatorResult> {
   try {
@@ -153,13 +172,18 @@ function planSlotBindBatchBudget(chunks: readonly SlotRow[][]): {
     const eventIds = new Set(
       [...accepted, chunk].flatMap((rows) => rows.map((row) => row.event_id)),
     );
+    // queue statements are appended to mutationStatements below and each has
+    // its own expected changes assertion. Keep the budget model identical to
+    // the actual mutateWithAudit batch instead of treating them as post-audit
+    // work (which would under/over-count depending on event count).
+    const queueStatementCount = Math.ceil(
+      eventIds.size / STATIC_REBUILD_BULK_UPSERT_ROWS,
+    );
     const budget = planD1AuditMutationBudget({
-      mutationStatementCount: accepted.length + 1,
-      mutationAssertionCount: accepted.length + 1,
+      mutationStatementCount: accepted.length + queueStatementCount,
+      mutationAssertionCount: accepted.length + queueStatementCount,
       auditEntryCount: slotCount,
-      postAuditStatementCount: Math.ceil(
-        eventIds.size / STATIC_REBUILD_BULK_UPSERT_ROWS,
-      ),
+      postAuditStatementCount: 0,
       distinctActorCount: 1,
     });
     if (!budget.withinLimit || budget.totalQueryCount > D1_MAX_BATCH_QUERIES) {
@@ -174,51 +198,391 @@ function planSlotBindBatchBudget(chunks: readonly SlotRow[][]): {
   };
 }
 
+type XIdentityRequestRow = typeof xIdentityRequests.$inferSelect;
+
+type SlotBindResult = {
+  eventIds: string[];
+  complete: boolean;
+};
+
+type SlotBindCasToken = {
+  updatedAt: number;
+  attemptCount: number;
+};
+
+function isSlotBindRequestType(
+  value: XIdentityRequestRow["request_type"],
+): value is (typeof SLOT_BIND_REQUEST_TYPES)[number] {
+  return (SLOT_BIND_REQUEST_TYPES as readonly string[]).includes(value);
+}
+
+async function canonicalizeReservationBindCandidates(
+  db: DB,
+  values: readonly (string | null | undefined)[],
+): Promise<string[]> {
+  const normalizedValues = [
+    ...new Set(
+      values
+        .map((value) => normalizeXId(value))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+  if (normalizedValues.length === 0) return [];
+
+  // resolveCanonicalXUserId は候補ごとに alias/exact の最大2 queryを発行
+  // していた。承認直後はリンク・pending申請が多いユーザーもいるため、
+  // ここをboundedな2段階IN lookupへまとめ、D1 statement budget超過を防ぐ。
+  const aliasByInput = new Map<string, string>();
+  for (
+    let offset = 0;
+    offset < normalizedValues.length;
+    offset += RESERVATION_BIND_CANONICALIZE_CHUNK
+  ) {
+    const chunk = normalizedValues.slice(
+      offset,
+      offset + RESERVATION_BIND_CANONICALIZE_CHUNK,
+    );
+    const rows = await db
+      .select({
+        alias_x_id: xUserAliases.alias_x_id,
+        x_user_id: xUserAliases.x_user_id,
+      })
+      .from(xUserAliases)
+      .where(inArray(xUserAliases.alias_x_id, chunk));
+    for (const row of rows) {
+      // Preserve the resolver's first-row behavior for malformed duplicate
+      // aliases while keeping the normalized input order below.
+      if (!aliasByInput.has(row.alias_x_id)) {
+        aliasByInput.set(row.alias_x_id, row.x_user_id);
+      }
+    }
+  }
+
+  const directIds = normalizedValues.filter((value) => !aliasByInput.has(value));
+  const directById = new Map<string, { id: string; approval_status: string | null }>();
+  for (
+    let offset = 0;
+    offset < directIds.length;
+    offset += RESERVATION_BIND_CANONICALIZE_CHUNK
+  ) {
+    const chunk = directIds.slice(
+      offset,
+      offset + RESERVATION_BIND_CANONICALIZE_CHUNK,
+    );
+    const rows = await db
+      .select({ id: xUsers.id, approval_status: xUsers.approval_status })
+      .from(xUsers)
+      .where(inArray(xUsers.id, chunk));
+    for (const row of rows) directById.set(row.id, row);
+  }
+
+  return [
+    ...new Set(
+      normalizedValues.map((value) => {
+        const alias = aliasByInput.get(value);
+        if (alias) return alias;
+        const direct = directById.get(value);
+        // Match the existing helper's fail-closed fallback: unresolved or
+        // rejected rows remain as the submitted normalized value so a pending
+        // identity can still prevent unsafe NULL-snapshot auto-binding.
+        return direct && direct.approval_status !== "rejected" ? direct.id : value;
+      }),
+    ),
+  ];
+}
+
+/** 承認直後の正本を読み、null snapshot枠へ自動bindしてよいかを判定する。 */
+async function canBindUnassignedSlotsAfterApproval(args: {
+  db: DB;
+  requestedAuthUserId: string;
+  bindTargetXUserId: string;
+}): Promise<boolean> {
+  const [approvedRaw, pendingRows] = await Promise.all([
+    getLinkedXUserIdsForAuthUser(args.db, args.requestedAuthUserId, {
+      approvedOnly: true,
+    }),
+    args.db
+      .select({ requested_x_id: xIdentityRequests.requested_x_id })
+      .from(xIdentityRequests)
+      .where(
+        and(
+          eq(
+            xIdentityRequests.requested_by_auth_user_id,
+            args.requestedAuthUserId,
+          ),
+          eq(xIdentityRequests.status, "pending"),
+          inArray(xIdentityRequests.request_type, [...SLOT_BIND_REQUEST_TYPES]),
+          isNotNull(xIdentityRequests.requested_x_id),
+        )!,
+      )
+      .orderBy(
+        desc(xIdentityRequests.requested_at),
+        desc(xIdentityRequests.id),
+      ),
+  ]);
+  const [approvedXIds, pendingXIds] = await Promise.all([
+    canonicalizeReservationBindCandidates(args.db, approvedRaw),
+    canonicalizeReservationBindCandidates(
+      args.db,
+      pendingRows.map((row) => row.requested_x_id),
+    ),
+  ]);
+  return canAutoBindUnassignedReservation({
+    bindTargetXId: args.bindTargetXUserId,
+    approvedXIds,
+    pendingXIds,
+  });
+}
+
+async function markSlotBindAttempt(args: {
+  db: DB;
+  requestId: string;
+  actorUserId: string;
+  actorXUserId: string | null;
+}): Promise<SlotBindCasToken | null> {
+  const current = (
+    await args.db
+      .select()
+      .from(xIdentityRequests)
+      .where(eq(xIdentityRequests.id, args.requestId))
+      .limit(1)
+  )[0];
+  if (
+    !current ||
+    current.status !== "approved" ||
+    current.slot_bind_status !== "pending"
+  ) {
+    return null;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const slotBindVersionCondition =
+    current.slot_bind_updated_at === null
+      ? isNull(xIdentityRequests.slot_bind_updated_at)
+      : eq(xIdentityRequests.slot_bind_updated_at, current.slot_bind_updated_at);
+  const after = {
+    ...current,
+    slot_bind_attempt_count: current.slot_bind_attempt_count + 1,
+    slot_bind_updated_at: now,
+  };
+  await mutateWithAudit(args.db, {
+    mutationStatements: [
+      args.db
+        .update(xIdentityRequests)
+        .set({
+          slot_bind_attempt_count: sql`${xIdentityRequests.slot_bind_attempt_count} + 1`,
+          slot_bind_updated_at: now,
+        })
+        .where(
+          and(
+            eq(xIdentityRequests.id, current.id),
+            eq(xIdentityRequests.status, "approved"),
+            eq(xIdentityRequests.slot_bind_status, "pending"),
+            eq(
+              xIdentityRequests.slot_bind_attempt_count,
+              current.slot_bind_attempt_count,
+            ),
+            slotBindVersionCondition,
+          )!,
+        ),
+    ],
+    expectedMutationChanges: [1],
+    audits: [
+      {
+        table_name: "x_identity_requests",
+        target_id: current.id,
+        operation: "UPDATE",
+        before: { ...current },
+        after,
+        actor_user_id: args.actorUserId,
+        actor_x_user_id: args.actorXUserId,
+        reason: "承認済みX IDの予約枠bindを開始",
+        context: "x-identity-request:slot-bind",
+        retention_class: "normal",
+      },
+    ],
+  });
+  return {
+    updatedAt: now,
+    attemptCount: current.slot_bind_attempt_count + 1,
+  };
+}
+
+async function markSlotBindComplete(args: {
+  db: DB;
+  requestId: string;
+  expectedSlotBindUpdatedAt: number | null;
+  expectedSlotBindAttemptCount: number;
+  actorUserId: string;
+  actorXUserId: string | null;
+}): Promise<boolean> {
+  const current = (
+    await args.db
+      .select()
+      .from(xIdentityRequests)
+      .where(eq(xIdentityRequests.id, args.requestId))
+      .limit(1)
+  )[0];
+  if (!current) return false;
+  if (current.slot_bind_status === "complete") return true;
+  if (current.status !== "approved" || current.slot_bind_status !== "pending") {
+    return false;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const slotBindVersionCondition =
+    args.expectedSlotBindUpdatedAt === null
+      ? isNull(xIdentityRequests.slot_bind_updated_at)
+      : eq(xIdentityRequests.slot_bind_updated_at, args.expectedSlotBindUpdatedAt);
+  const after = {
+    ...current,
+    slot_bind_status: "complete" as const,
+    slot_bind_updated_at: now,
+  };
+  await mutateWithAudit(args.db, {
+    mutationStatements: [
+      args.db
+        .update(xIdentityRequests)
+        .set({
+          slot_bind_status: "complete",
+          slot_bind_updated_at: now,
+        })
+        .where(
+          and(
+            eq(xIdentityRequests.id, current.id),
+            eq(xIdentityRequests.status, "approved"),
+            eq(xIdentityRequests.slot_bind_status, "pending"),
+            eq(
+              xIdentityRequests.slot_bind_attempt_count,
+              args.expectedSlotBindAttemptCount,
+            ),
+            slotBindVersionCondition,
+          )!,
+        ),
+    ],
+    expectedMutationChanges: [1],
+    audits: [
+      {
+        table_name: "x_identity_requests",
+        target_id: current.id,
+        operation: "UPDATE",
+        before: { ...current },
+        after,
+        actor_user_id: args.actorUserId,
+        actor_x_user_id: args.actorXUserId,
+        reason: "承認済みX IDの予約枠bindを完了",
+        context: "x-identity-request:slot-bind",
+        retention_class: "normal",
+      },
+    ],
+  });
+  return true;
+}
+
+/**
+ * Alias/slot bind は既存の正本を再利用するため、canonical resolver の
+ * pending/imported 許容をそのまま使わず、公開可能な approved 行へ限定する。
+ */
+async function resolveApprovedCanonicalXUserId(
+  db: DB,
+  candidateXUserId: string | null | undefined,
+): Promise<string | null> {
+  const canonicalXUserId = await resolveCanonicalXUserId(db, candidateXUserId);
+  if (!canonicalXUserId) return null;
+  const row = (
+    await db
+      .select({ approval_status: xUsers.approval_status })
+      .from(xUsers)
+      .where(eq(xUsers.id, canonicalXUserId))
+      .limit(1)
+  )[0];
+  return row?.approval_status === "approved" ? canonicalXUserId : null;
+}
+
+async function resolveApprovedSlotBindTarget(
+  db: DB,
+  request: XIdentityRequestRow,
+): Promise<{ submittedXUserId: string; bindTargetXUserId: string } | null> {
+  const submittedXUserId = normalizeXId(request.requested_x_id);
+  if (!submittedXUserId || !isSlotBindRequestType(request.request_type)) {
+    return null;
+  }
+  const bindTargetXUserId =
+    request.request_type === "alias"
+      ? await resolveApprovedCanonicalXUserId(db, request.target_x_user_id)
+      : await resolveApprovedCanonicalXUserId(db, submittedXUserId);
+  if (!bindTargetXUserId) return null;
+  return { submittedXUserId, bindTargetXUserId };
+}
+
 async function bindReservedSlotsOnXApproval(args: {
   db: DB;
+  requestId: string;
   requestedAuthUserId: string;
   submittedXUserId: string;
   bindTargetXUserId: string;
   operatorAuthUserId: string;
   operatorActorXUserId: string | null;
-}): Promise<string[]> {
-  const candidateRows = await args.db
-    .select()
-    .from(slots)
-    .where(
-      and(
-        eq(slots.reserved_by_user_id, args.requestedAuthUserId),
-        eq(slots.status, "reserved"),
-        isNull(slots.x_user_id),
-        or(
-          isNull(slots.reserved_x_id_snapshot),
-          eq(slots.reserved_x_id_snapshot, args.submittedXUserId),
-        )!,
-      )!,
-    )
-    .orderBy(
-      asc(slots.event_id),
-      asc(slots.start_time),
-      asc(slots.sort_order),
-      asc(slots.id),
-    )
-    .limit(RESERVED_SLOT_BIND_CAP);
-
-  if (candidateRows.length === 0) return [];
-
-  const allChunks = groupSlotBindChunks(candidateRows);
+}): Promise<SlotBindResult> {
+  const allowNullSnapshot = await canBindUnassignedSlotsAfterApproval({
+    db: args.db,
+    requestedAuthUserId: args.requestedAuthUserId,
+    bindTargetXUserId: args.bindTargetXUserId,
+  });
+  const snapshotCondition = allowNullSnapshot
+    ? or(
+        isNull(slots.reserved_x_id_snapshot),
+        eq(slots.reserved_x_id_snapshot, args.submittedXUserId),
+      )!
+    : eq(slots.reserved_x_id_snapshot, args.submittedXUserId);
   const allAffectedEventIds = new Set<string>();
-  let remainingChunks = allChunks;
+  let complete = false;
+  // Keep the CAS token owned by this binder. Re-reading the latest token at
+  // completion could let a concurrent retry complete a request while new
+  // unbound reservations are still being added.
+  let lastSlotBindToken: SlotBindCasToken | null = null;
 
-  while (remainingChunks.length > 0) {
-    const { chunks, deferred } = planSlotBindBatchBudget(remainingChunks);
+  for (let page = 0; page < MAX_SLOT_BIND_PAGES_PER_REQUEST; page += 1) {
+    const candidateRows = await args.db
+      .select()
+      .from(slots)
+      .where(
+        and(
+          eq(slots.reserved_by_user_id, args.requestedAuthUserId),
+          eq(slots.status, "reserved"),
+          isNull(slots.x_user_id),
+          snapshotCondition,
+        )!,
+      )
+      .orderBy(
+        asc(slots.event_id),
+        asc(slots.start_time),
+        asc(slots.sort_order),
+        asc(slots.id),
+      )
+      .limit(RESERVED_SLOT_BIND_CAP);
+
+    if (candidateRows.length === 0) {
+      complete = true;
+      break;
+    }
+
+    const bindUpdatedAt = await markSlotBindAttempt({
+      db: args.db,
+      requestId: args.requestId,
+      actorUserId: args.operatorAuthUserId,
+      actorXUserId: args.operatorActorXUserId,
+    });
+    if (bindUpdatedAt === null) break;
+    lastSlotBindToken = bindUpdatedAt;
+
+    const allChunks = groupSlotBindChunks(candidateRows);
+    const { chunks, deferred } = planSlotBindBatchBudget(allChunks);
     if (chunks.length === 0) {
-      if (deferred > 0) {
-        console.warn(
-          "[xid-admin] reserved slot bind deferred due to D1 batch budget",
-          { deferred, cap: RESERVED_SLOT_BIND_CAP },
-        );
-      }
+      console.warn(
+        "[xid-admin] reserved slot bind deferred due to D1 batch budget",
+        { deferred: candidateRows.length, cap: RESERVED_SLOT_BIND_CAP },
+      );
       break;
     }
 
@@ -279,20 +643,123 @@ async function bindReservedSlotsOnXApproval(args: {
       staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
     });
 
-    remainingChunks = remainingChunks.slice(chunks.length);
-    if (remainingChunks.length > 0 && deferred > 0) {
+    if (deferred > 0) {
       console.warn(
         "[xid-admin] reserved slot bind deferred due to D1 batch budget",
         {
-          deferred: remainingChunks.reduce((sum, rows) => sum + rows.length, 0),
+          deferred,
           cap: RESERVED_SLOT_BIND_CAP,
         },
       );
       break;
     }
+
+    // 成功した行は x_user_id IS NULL 条件から外れるため、次のpageへ進む。
+    // page上限に達した場合はpendingのまま次回recoveryへ渡す。
+    if (page === MAX_SLOT_BIND_PAGES_PER_REQUEST - 1) break;
   }
 
-  return [...allAffectedEventIds];
+  if (complete) {
+    let expectedSlotBindUpdatedAt = lastSlotBindToken?.updatedAt ?? null;
+    let expectedSlotBindAttemptCount = lastSlotBindToken?.attemptCount ?? null;
+    if (lastSlotBindToken === null) {
+      const current = (
+        await args.db
+          .select({
+            slot_bind_updated_at: xIdentityRequests.slot_bind_updated_at,
+            slot_bind_attempt_count: xIdentityRequests.slot_bind_attempt_count,
+          })
+          .from(xIdentityRequests)
+          .where(eq(xIdentityRequests.id, args.requestId))
+          .limit(1)
+      )[0];
+      expectedSlotBindUpdatedAt = current?.slot_bind_updated_at ?? null;
+      expectedSlotBindAttemptCount = current?.slot_bind_attempt_count ?? null;
+    }
+    if (
+      expectedSlotBindAttemptCount !== null &&
+      (expectedSlotBindUpdatedAt !== null || lastSlotBindToken === null)
+    ) {
+      await markSlotBindComplete({
+        db: args.db,
+        requestId: args.requestId,
+        expectedSlotBindUpdatedAt,
+        expectedSlotBindAttemptCount,
+        actorUserId: args.operatorAuthUserId,
+        actorXUserId: args.operatorActorXUserId,
+      });
+    }
+  }
+
+  return { eventIds: [...allAffectedEventIds], complete };
+}
+
+async function retryApprovedSlotBind(
+  operator: XIdLinkOperator,
+  request: XIdentityRequestRow,
+): Promise<string[]> {
+  if (!isSlotBindRequestType(request.request_type)) {
+    // slot_bind_status is only meaningful for link/alias requests. If a
+    // malformed legacy row is marked pending, close it safely without
+    // touching any reservation rather than leaving recovery permanently stuck.
+    const current = (
+      await operator.db
+        .select({
+          slot_bind_updated_at: xIdentityRequests.slot_bind_updated_at,
+          slot_bind_attempt_count: xIdentityRequests.slot_bind_attempt_count,
+        })
+        .from(xIdentityRequests)
+        .where(eq(xIdentityRequests.id, request.id))
+        .limit(1)
+    )[0];
+    if (current) {
+      await markSlotBindComplete({
+        db: operator.db,
+        requestId: request.id,
+        expectedSlotBindUpdatedAt: current.slot_bind_updated_at,
+        expectedSlotBindAttemptCount: current.slot_bind_attempt_count,
+        actorUserId: operator.authUserId,
+        actorXUserId: operator.actorXUserId,
+      });
+    }
+    return [];
+  }
+  const target = await resolveApprovedSlotBindTarget(operator.db, request);
+  if (!target) {
+    // 統合後に旧Xが正本から消えた等、安全なbind先がない場合は、
+    // null枠を別名義へ寄せず「実行すべき自動bindなし」として完了にする。
+    const current = (
+      await operator.db
+        .select({
+          slot_bind_updated_at: xIdentityRequests.slot_bind_updated_at,
+          slot_bind_attempt_count: xIdentityRequests.slot_bind_attempt_count,
+        })
+        .from(xIdentityRequests)
+        .where(eq(xIdentityRequests.id, request.id))
+        .limit(1)
+    )[0];
+    if (current) {
+      await markSlotBindComplete({
+        db: operator.db,
+        requestId: request.id,
+        expectedSlotBindUpdatedAt: current.slot_bind_updated_at,
+        expectedSlotBindAttemptCount: current.slot_bind_attempt_count,
+        actorUserId: operator.authUserId,
+        actorXUserId: operator.actorXUserId,
+      });
+    }
+    return [];
+  }
+  const result = await bindReservedSlotsOnXApproval({
+    db: operator.db,
+    requestId: request.id,
+    requestedAuthUserId: request.requested_by_auth_user_id,
+    submittedXUserId: target.submittedXUserId,
+    bindTargetXUserId: target.bindTargetXUserId,
+    operatorAuthUserId: operator.authUserId,
+    operatorActorXUserId: operator.actorXUserId,
+  });
+  return result.eventIds;
 }
 
 async function approveXIdLinkRequestOnce(
@@ -305,6 +772,22 @@ async function approveXIdLinkRequestOnce(
   )[0];
   if (!request) return { ok: false, message: "申請が見つかりません。" };
   if (request.status !== "pending") {
+    if (
+      request.status === "approved" &&
+      request.slot_bind_status === "pending"
+    ) {
+      const slotBindEventIds = await retryApprovedSlotBind(operator, request);
+      await runXIdAdminPostCommit("xid-admin.retryApprovedSlotBind", () => {
+        revalidateIdentityAdminPaths();
+        for (const eventId of slotBindEventIds) {
+          revalidatePath(`/event/${eventId}/slots`);
+        }
+      });
+      return {
+        ok: true,
+        message: "承認済み申請の予約枠反映を再試行しました。",
+      };
+    }
     return processedXIdRequestMessage(request.status, "approve");
   }
   if (request.request_type === "merge" || request.request_type === "revert_merge") {
@@ -342,12 +825,15 @@ async function approveXIdLinkRequestOnce(
   } | null = null;
 
   if (request.request_type === "alias") {
-    const targetXUserId = await resolveCanonicalXUserId(db, request.target_x_user_id);
+    const targetXUserId = await resolveApprovedCanonicalXUserId(
+      db,
+      request.target_x_user_id,
+    );
     if (!submittedXUserId || !targetXUserId) {
       return { ok: false, message: "別名申請のX IDまたは追加先が不足しています。" };
     }
     bindTargetXUserId = targetXUserId;
-    if (!(await isAuthUserLinkedToXUser(db, requestedAuthUserId, targetXUserId))) {
+    if (!(await isApprovedLinkedXUser(db, requestedAuthUserId, targetXUserId))) {
       return { ok: false, message: "申請者は追加先 X ID に紐づいていません。" };
     }
     const existingCanonical = await resolveCanonicalXUserId(db, submittedXUserId);
@@ -580,6 +1066,8 @@ async function approveXIdLinkRequestOnce(
   const afterRequest = {
     ...request,
     status: "approved" as const,
+    slot_bind_status: "pending" as const,
+    slot_bind_updated_at: now,
     updated_at: now,
     ...decisionFields,
   };
@@ -588,6 +1076,8 @@ async function approveXIdLinkRequestOnce(
       .update(xIdentityRequests)
       .set({
         status: "approved",
+        slot_bind_status: "pending",
+        slot_bind_updated_at: now,
         updated_at: now,
         ...decisionFields,
       })
@@ -710,14 +1200,39 @@ async function approveXIdLinkRequestOnce(
 
   let slotBindEventIds: string[] = [];
   if (bindTargetXUserId && submittedXUserId) {
-    slotBindEventIds = await bindReservedSlotsOnXApproval({
+    const slotBindResult = await bindReservedSlotsOnXApproval({
       db,
+      requestId: request.id,
       requestedAuthUserId,
       submittedXUserId,
       bindTargetXUserId,
       operatorAuthUserId,
       operatorActorXUserId,
     });
+    slotBindEventIds = slotBindResult.eventIds;
+  } else {
+    // 承認済みだが安全なbind先がない異常データは、予約枠を変更せずに
+    // completeへ進め、recoveryが同じ曖昧状態を永久再試行しないようにする。
+    const current = (
+      await db
+        .select({
+          slot_bind_updated_at: xIdentityRequests.slot_bind_updated_at,
+          slot_bind_attempt_count: xIdentityRequests.slot_bind_attempt_count,
+        })
+        .from(xIdentityRequests)
+        .where(eq(xIdentityRequests.id, request.id))
+        .limit(1)
+    )[0];
+    if (current) {
+      await markSlotBindComplete({
+        db,
+        requestId: request.id,
+        expectedSlotBindUpdatedAt: current.slot_bind_updated_at,
+        expectedSlotBindAttemptCount: current.slot_bind_attempt_count,
+        actorUserId: operatorAuthUserId,
+        actorXUserId: operatorActorXUserId,
+      });
+    }
   }
 
   await runXIdAdminPostCommit("xid-admin.approveXIdLinkRequest", () => {
@@ -743,12 +1258,33 @@ export async function approveXIdLinkRequest(formData: FormData): Promise<XIdAdmi
       try {
         const current = (
           await operator.db
-            .select({ status: xIdentityRequests.status })
+            .select({
+              status: xIdentityRequests.status,
+              slot_bind_status: xIdentityRequests.slot_bind_status,
+            })
             .from(xIdentityRequests)
             .where(eq(xIdentityRequests.id, requestId))
             .limit(1)
         )[0];
         if (!current) return { ok: false, message: "申請が見つかりません。" };
+        if (
+          current.status === "approved" &&
+          current.slot_bind_status === "pending" &&
+          attempt === 0
+        ) {
+          // identity transactionはcommit済みでもslot bindだけ失敗し得る。
+          // approvedを「処理済み」とみなして終わらせず、同じAction内で1回だけ再試行する。
+          continue;
+        }
+        if (
+          current.status === "approved" &&
+          current.slot_bind_status === "pending"
+        ) {
+          return {
+            ok: false,
+            message: "承認は完了しましたが、予約枠の反映は再試行待ちです。",
+          };
+        }
         if (current.status !== "pending") {
           const result = processedXIdRequestMessage(current.status, "approve");
           if (result.ok) {

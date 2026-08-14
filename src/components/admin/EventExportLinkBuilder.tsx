@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { EventExportUpdateMode } from "@/lib/api/eventExportPayload";
+import { writeTextToClipboard } from "@/lib/utils/clipboard";
 
 interface EventExportLinkBuilderProps {
   eventId: string;
@@ -15,6 +16,7 @@ export function EventExportLinkBuilder({
     React.useState<EventExportUpdateMode>("realtime");
   const [refreshMinutes, setRefreshMinutes] = React.useState("60");
   const [copied, setCopied] = React.useState(false);
+  const [copyError, setCopyError] = React.useState(false);
 
   const href = React.useMemo(() => {
     const params = new URLSearchParams({ update: updateMode });
@@ -24,7 +26,12 @@ export function EventExportLinkBuilder({
 
   async function copyUrl(): Promise<void> {
     const absoluteUrl = new URL(href, window.location.origin).toString();
-    await navigator.clipboard.writeText(absoluteUrl);
+    setCopyError(false);
+    if (!(await writeTextToClipboard(absoluteUrl))) {
+      setCopied(false);
+      setCopyError(true);
+      return;
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }
@@ -84,7 +91,7 @@ export function EventExportLinkBuilder({
         <button
           type="button"
           className="fn-btn fn-btn-sm fn-btn-primary"
-          onClick={copyUrl}
+          onClick={() => void copyUrl()}
         >
           {copied ? "コピー済み" : "URLをコピー"}
         </button>
@@ -97,6 +104,11 @@ export function EventExportLinkBuilder({
           出力を確認
         </Link>
       </div>
+      {copyError ? (
+        <p role="status" className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
+          URLのコピーに失敗しました。表示されたURLを手動でコピーしてください。
+        </p>
+      ) : null}
     </div>
   );
 }

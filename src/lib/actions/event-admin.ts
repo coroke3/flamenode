@@ -215,6 +215,7 @@ export async function createEvent(
     title: data.title,
     event_type: data.event_type,
     explanation: data.explanation ?? null,
+    youtube_description_template: data.youtube_description_template ?? null,
     icon_url: data.icon_url ?? null,
     img_url: data.img_url ?? null,
     accent_color: data.accent_color ?? null,

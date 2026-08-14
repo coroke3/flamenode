@@ -1,9 +1,65 @@
 # DB Change Log
 
+## 2026-08-15 — `0058_event_youtube_description_template.sql`
+
+| Item | Content |
+| --- | --- |
+| Type | additive |
+| Summary | Add an optional event-scoped plain-text template for YouTube descriptions. |
+| Reason | Let each event define reusable work variables so creators can copy a ready-to-paste YouTube description. |
+| Tables | `events` |
+| Data migration | none |
+| Compatibility | Existing events remain unset; the feature is opt-in and does not change public DTOs. |
+| Data loss | none |
+| Rollback | manual restore from backup; no destructive rollback is used. |
+| Validation | `check:db-schema`, `check:db-migration`, `check:db-history`, template unit tests, typecheck |
+
+## 2026-08-14 — `0055_notification_outbox_latest_idx.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive |
+| Summary | `/admin/notifications` の `ORDER BY created_at DESC LIMIT 100` 用 index を追加 |
+| Reason | 既存の status 複合 index は status 未指定の最新一覧で利用されず、全件 scan + sort になっていたため |
+| Tables | `notification_outbox` |
+| Data migration | なし |
+| Compatibility | 追加 index のみ。既存の配送・dedupe index は維持 |
+| Data loss | none |
+| Rollback | `DROP INDEX IF EXISTS notification_outbox_created_idx` |
+| Validation | `EXPLAIN QUERY PLAN`、`check:db-schema`、`check:db-migration`、typecheck |
+
+## 2026-08-14 — `0056_admin_operational_count_indexes.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive / partial index |
+| Summary | 管理トップの pending X ID申請と open moderation 集計用 index を追加 |
+| Reason | 既存 index は status が先頭列でなく、該当クエリが全件 scan になっていたため |
+| Tables | `x_identity_requests`, `video_moderation_cases` |
+| Data migration | なし |
+| Compatibility | status 条件付きの追加 index のみ。既存 index は維持 |
+| Data loss | none |
+| Rollback | `DROP INDEX IF EXISTS x_identity_requests_pending_type_idx; DROP INDEX IF EXISTS video_moderation_cases_open_due_idx` |
+| Validation | `EXPLAIN QUERY PLAN`、`check:db-schema`、`check:db-migration`、typecheck |
+
 > Status: Active
-> Last verified: 2026-08-07
-> Verified against commit: `313c5c90`
+> Last verified: 2026-08-14
+> Verified against commit: `32b57e16`
 > Source of truth: `migrations/` active path, `src/lib/db/schema.ts`
+
+## 2026-08-14 — `0057_x_id_slot_bind_recovery.sql`
+
+| 項目 | 内容 |
+| --- | --- |
+| Type | additive / partial index |
+| Summary | X ID承認後の予約枠bindを `pending` / `complete` で追跡し、bounded recoveryとmigration前approved link/aliasの再検査を可能にする |
+| Reason | 承認transaction後のslot bind失敗を再試行可能にし、30件超の予約枠を段階処理するため |
+| Tables | `x_identity_requests`, `slots` |
+| Data migration | 既存申請は `slot_bind_status=complete`、試行回数は `0` の既定値 |
+| Compatibility | 旧slots予約主体列と `slot_reservation_groups` expand構造を維持 |
+| Data loss | none |
+| Rollback | 追加indexは `DROP INDEX IF EXISTS`、列はバックアップ復元 |
+| Validation | `check:db-schema`、`check:db-migration`、reservation identity / slot bind tests |
 
 ## 2026-08-07 — `0053_slot_reserved_x_id_snapshot.sql`
 

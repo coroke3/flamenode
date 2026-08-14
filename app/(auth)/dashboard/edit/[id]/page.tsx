@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
@@ -13,8 +13,7 @@ import {
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
-import { inArray } from "drizzle-orm";
-import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { acceptingEntriesWhere } from "@/lib/utils/eventStatus";
 import { VideoEditPermissionSummary } from "@/components/video/VideoEditPermissionSummary";
 import {
   computeEditPermissionSummary,
@@ -50,6 +49,7 @@ import { buildVideoEditPermissionViewModel } from "@/lib/video/videoEditPermissi
 import type { VideoViewSectionKey } from "@/lib/video/videoEditPermissionView";
 import { hasAnyEditableVideoFormSection } from "@/lib/video/permissionUnlockHint";
 import type { VideoEditSectionKey } from "@/lib/auth/videoEditSections";
+import { absoluteUrl } from "@/lib/seo";
 
 export const metadata: Metadata = { title: "作品を編集" };
 export const dynamic = "force-dynamic";
@@ -217,10 +217,32 @@ export default async function EditVideoPage({
   if (video.primary_event_id && !currentEventIds.includes(video.primary_event_id)) {
     currentEventIds.push(video.primary_event_id);
   }
-  const allEventRows = await db
-    .select()
+  const now = Math.floor(Date.now() / 1000);
+  const acceptingEventWhere = and(
+    acceptingEntriesWhere(now),
+    eq(eventsTable.allow_user_video_event_links, 1),
+  )!;
+  const acceptingEventRows = await db
+    .select({
+      id: eventsTable.id,
+      title: eventsTable.title,
+      parts_json: eventsTable.parts_json,
+      youtube_description_template: eventsTable.youtube_description_template,
+    })
     .from(eventsTable)
-    .where(eq(eventsTable.visibility_status, "public"));
+    .where(acceptingEventWhere);
+  const attachedEventRows =
+    currentEventIds.length > 0
+      ? await db
+          .select({
+            id: eventsTable.id,
+            title: eventsTable.title,
+            parts_json: eventsTable.parts_json,
+            youtube_description_template: eventsTable.youtube_description_template,
+          })
+          .from(eventsTable)
+          .where(inArray(eventsTable.id, currentEventIds))
+      : [];
   const acceptingEventMap = new Map<
     string,
     {
@@ -228,30 +250,34 @@ export default async function EditVideoPage({
       title: string;
       video_form_settings_json?: string | null;
       parts_json?: string | null;
+      youtube_description_template?: string | null;
+      youtube_description_event_url?: string | null;
     }
   >();
-  for (const ev of allEventRows) {
-    // 受付中 + 「一般ユーザーの追加紐付け = 許可」のイベントを候補に出す。
-    // 既に紐付いているイベントは下の attached 補完で必ず候補に含まれる。
-    if (isAcceptingEntries(ev) && ev.allow_user_video_event_links === 1) {
-      acceptingEventMap.set(ev.id, {
-        id: ev.id,
-        title: ev.title,
-        parts_json: ev.parts_json,
-      });
-    }
+  // 受付中で追加紐付けを許可したイベント、または現在紐付いているイベント。
+  // 所属イベントは受付状態・公開状態を問わず候補に残す。
+  for (const ev of acceptingEventRows) {
+    acceptingEventMap.set(ev.id, {
+      id: ev.id,
+      title: ev.title,
+      parts_json: ev.parts_json,
+      youtube_description_template: ev.youtube_description_template,
+      youtube_description_event_url: absoluteUrl(
+        `/event/${encodeURIComponent(ev.id)}`,
+      ),
+    });
   }
-  // 現在紐付いているイベントは受付状態を問わず候補に含める
-  if (currentEventIds.length > 0) {
-    const attached = await db
-      .select({
-        id: eventsTable.id,
-        title: eventsTable.title,
-        parts_json: eventsTable.parts_json,
-      })
-      .from(eventsTable)
-      .where(inArray(eventsTable.id, currentEventIds));
-    for (const ev of attached) acceptingEventMap.set(ev.id, ev);
+  // 既存候補の値を従来どおり更新し、受付状態を問わず最後に所属イベントを補完する。
+  for (const ev of attachedEventRows) {
+    acceptingEventMap.set(ev.id, {
+      id: ev.id,
+      title: ev.title,
+      parts_json: ev.parts_json,
+      youtube_description_template: ev.youtube_description_template,
+      youtube_description_event_url: absoluteUrl(
+        `/event/${encodeURIComponent(ev.id)}`,
+      ),
+    });
   }
   const formSettingsByEvent = await loadStagePermissionFormSettingsJsonByEvents(
     db,
@@ -659,6 +685,16 @@ export default async function EditVideoPage({
         memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         eventOptions={eventOptions}
+        youtubeDescriptionContext={{
+          video_id: video.id,
+          creator_name: video.creator_display_name,
+          creator_x_id: video.creator_x_user_id,
+          creator_channel_url: video.creator_youtube_channel_url,
+          creator_profile: video.creator_profile_text,
+          creator_social_links: video.creator_other_social_links,
+          youtube_video_id: video.youtube_video_id,
+        }}
+        youtubeDescriptionEventId={video.primary_event_id}
         canEditEvents={canEditPrimaryEvent}
         canChangeSubmitter={privilegeMode === "admin" && user.role === "admin"}
         iconCandidates={iconCandidates}

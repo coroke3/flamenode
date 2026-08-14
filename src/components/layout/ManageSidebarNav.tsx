@@ -8,6 +8,7 @@ import {
   classifyManageEvent,
   filterManageEvents,
 } from "@/lib/manage/sidebarEvents";
+import { buildAccentVars } from "@/lib/theme/accent";
 import navStyles from "@/components/admin/AdminSidebarNav.module.css";
 
 export type ManageSidebarEvent = {
@@ -51,8 +52,8 @@ function EventLink({
       aria-current={active ? "page" : undefined}
       title={event.title}
       style={
-        event.accent_color
-          ? ({ "--event-accent": event.accent_color } as React.CSSProperties)
+        event.accent_color?.trim()
+          ? buildAccentVars(event.accent_color, "dark")
           : undefined
       }
       data-event-link="true"

@@ -3,6 +3,7 @@ import {
   parseVideoFormSettings,
   resolveStagePermissionFields,
 } from "@/lib/video/formSettings";
+import { buildAccentVars } from "@/lib/theme/accent";
 
 export interface EventSettingsPreviewValue {
   title?: string | null;
@@ -128,7 +129,9 @@ export function EventSettingsPreview({
 }: {
   event: EventSettingsPreviewValue;
 }): React.ReactElement {
-  const accent = event.accent_color?.trim() || "var(--accent-primary)";
+  const accentStyle = event.accent_color?.trim()
+    ? buildAccentVars(event.accent_color, "dark")
+    : undefined;
   const formSettings = parseVideoFormSettings(event.video_form_settings_json);
   const stageQuestions = resolveStagePermissionFields([formSettings]);
   const parts = parseParts(event);
@@ -157,8 +160,9 @@ export function EventSettingsPreview({
 
       <article
         style={{
+          ...accentStyle,
           border: "1px solid var(--border-subtle)",
-          borderTop: `4px solid ${accent}`,
+          borderTop: "4px solid var(--event-accent, var(--accent-primary))",
           borderRadius: "var(--radius-sm)",
           overflow: "hidden",
           background: "var(--bg-surface)",

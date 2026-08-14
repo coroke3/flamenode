@@ -10,6 +10,10 @@ import {
   normalizeEventVisibility,
   type EventVisibilityStatus,
 } from "@/lib/utils/eventStatus";
+import {
+  MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  normalizeYoutubeDescriptionTemplate,
+} from "@/lib/event/youtubeDescriptionTemplate";
 
 export const eventSchema = z.object({
   id: z.string().trim().min(1).max(64).optional(),
@@ -18,6 +22,17 @@ export const eventSchema = z.object({
     .enum(["event", "collabo", "type", "other"])
     .default("event"),
   explanation: z.string().trim().max(4000).optional().nullable(),
+  youtube_description_template: z.preprocess(
+    (value) =>
+      typeof value === "string"
+        ? normalizeYoutubeDescriptionTemplate(value)
+        : value,
+    z
+      .string()
+      .max(MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH)
+      .optional()
+      .nullable(),
+  ),
   icon_url: z.preprocess(
     (value) =>
       typeof value === "string"

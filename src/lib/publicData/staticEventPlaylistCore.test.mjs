@@ -83,3 +83,28 @@ test("malformed playlist rows fail closed to D1 fallback", () => {
     null,
   );
 });
+
+test("duplicate or oversized playlist artifacts fail closed", () => {
+  const duplicate = normalizeStaticEventPlaylist({
+    schema_version: EVENT_PLAYLIST_SCHEMA_VERSION,
+    event_id: "event-a",
+    complete: true,
+    items: [
+      { id: "video-a", title: "A", display_name: "Creator" },
+      { id: "video-a", title: "A copy", display_name: "Creator" },
+    ],
+  });
+  assert.equal(duplicate, null);
+
+  const oversized = normalizeStaticEventPlaylist({
+    schema_version: EVENT_PLAYLIST_SCHEMA_VERSION,
+    event_id: "event-a",
+    complete: true,
+    items: Array.from({ length: 501 }, (_, index) => ({
+      id: `video-${index}`,
+      title: `Video ${index}`,
+      display_name: "Creator",
+    })),
+  });
+  assert.equal(oversized, null);
+});

@@ -105,7 +105,7 @@ export default async function EventYoutubePlaylistPage({
 
       <section className="manage-section">
         <h2 className="fn-console-eyebrow">同期設定</h2>
-        <p className="fn-console-note" style={{ marginBottom: 12 }}>
+        <p className="fn-console-note manage-playlist-intro">
           OAuthで認証した1つのYouTubeチャンネルが所有する再生リストを対象にします。
           この画面で同期方式を有効にしたイベントだけが同期されます。
         </p>
@@ -159,9 +159,9 @@ export default async function EventYoutubePlaylistPage({
               </select>
             </div>
           </div>
-          <div className="fn-card" style={{ padding: 12 }}>
+          <div className="fn-card manage-playlist-info">
             <strong>同期方式と並び順</strong>
-            <p className="fn-muted fn-text-sm" style={{ marginBottom: 0 }}>
+            <p className="fn-muted fn-text-sm manage-playlist-info-copy">
               追加のみは、公開・限定公開になった作品だけを追加し、YouTube側で手動追加した動画を削除しません。
               完全同期はイベントから外れた項目も削除します。新規追加は作品の公開予定時刻順で挿入し、既存項目の全件並び替えは行いません。
               時刻順挿入にはYouTube側の再生リストを「手動」並び替えに設定してください。
@@ -220,7 +220,7 @@ export default async function EventYoutubePlaylistPage({
 
       <section className="manage-section">
         <h2 className="fn-console-eyebrow">無料枠向けの制御</h2>
-        <ul className="fn-muted fn-text-sm" style={{ lineHeight: 1.8, margin: 0, paddingLeft: 18 }}>
+        <ul className="fn-muted fn-text-sm manage-playlist-guardrails">
           <li>既定は12時間間隔・追加のみです。</li>
           <li>再生リスト全件確認はページ分割し、差分だけを書き込みます。</li>
           <li>1回のWorker実行と1日あたりのYouTubeクォータに上限を設け、超過分は次回へ繰り越します。</li>

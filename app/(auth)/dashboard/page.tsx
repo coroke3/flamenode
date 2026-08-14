@@ -25,6 +25,7 @@ import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { excludePvsfSummaryVideos } from "@/lib/db/queries";
+import { buildAccentVars } from "@/lib/theme/accent";
 
 export const metadata: Metadata = { title: "ダッシュボード" };
 export const dynamic = "force-dynamic";
@@ -560,8 +561,8 @@ function HeroCard({
   return (
     <section
       style={
-        event.accent_color
-          ? ({ ["--accent-primary" as never]: event.accent_color } as React.CSSProperties)
+        event.accent_color?.trim()
+          ? buildAccentVars(event.accent_color, "dark")
           : undefined
       }
     >

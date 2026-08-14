@@ -17,10 +17,11 @@ import { formatUnix } from "@/lib/utils/format";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
-import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { acceptingEntriesWhere } from "@/lib/utils/eventStatus";
 import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
+import { absoluteUrl } from "@/lib/seo";
 
 export const metadata: Metadata = { title: "枠提出" };
 export const dynamic = "force-dynamic";
@@ -118,26 +119,24 @@ export default async function SlottedPostPage({
     activeX && db ? await getYoutubeChannelCandidates(db, activeX) : [];
   // 所属イベント候補: 「許可フラグ付き」かつ受付中のイベント + スロットのイベント (常時固定)。
   const acceptingEvents = await db
-    .select()
+    .select({
+      id: eventsTable.id,
+      title: eventsTable.title,
+      parts_json: eventsTable.parts_json,
+      youtube_description_template: eventsTable.youtube_description_template,
+    })
     .from(eventsTable)
-    .where(eq(eventsTable.visibility_status, "public"))
-    .then((rows) =>
-      rows
-        .filter(
-          (event) =>
-            isAcceptingEntries(event) &&
-            event.allow_user_video_event_links === 1,
-        )
-        .map((event) => ({
-          id: event.id,
-          title: event.title,
-          parts_json: event.parts_json,
-        })),
+    .where(
+      and(
+        acceptingEntriesWhere(Math.floor(Date.now() / 1000)),
+        eq(eventsTable.allow_user_video_event_links, 1),
+      )!,
     );
   const slotEventOption = {
     id: ev.id,
     title: ev.title,
     parts_json: ev.parts_json,
+    youtube_description_template: ev.youtube_description_template,
   };
   const rawEventOptions = acceptingEvents.some((o) => o.id === ev.id)
     ? acceptingEvents
@@ -149,6 +148,9 @@ export default async function SlottedPostPage({
   const eventOptions = rawEventOptions.map((option) => ({
     ...option,
     video_form_settings_json: formSettingsByEvent.get(option.id) ?? null,
+    youtube_description_event_url: absoluteUrl(
+      `/event/${encodeURIComponent(option.id)}`,
+    ),
   }));
   const initialEventIds = [ev.id];
 

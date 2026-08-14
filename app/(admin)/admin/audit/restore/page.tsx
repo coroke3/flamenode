@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { auditLogs, auditRestoreRuns } from "@/lib/db/schema";
@@ -32,13 +32,12 @@ export default async function AdminAuditRestorePage(): Promise<React.ReactElemen
   const auditIds = Array.from(new Set(runs.map((r) => r.audit_log_id)));
   const auditMap = new Map<string, (typeof auditLogs.$inferSelect)>();
   if (auditIds.length > 0) {
-    for (const id of auditIds) {
-      const row = await db
-        .select()
-        .from(auditLogs)
-        .where(eq(auditLogs.id, id))
-        .limit(1);
-      if (row[0]) auditMap.set(id, row[0]);
+    const rows = await db
+      .select()
+      .from(auditLogs)
+      .where(inArray(auditLogs.id, auditIds));
+    for (const row of rows) {
+      auditMap.set(row.id, row);
     }
   }
 

@@ -40,6 +40,12 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 4. 再生リストURLまたはID、同期方式、同期間隔を保存します。
 5. 管理者は全体状況を `/admin/youtube-sync/playlists`、イベント運営は担当イベントの `/manage/events/{eventId}/youtube-playlist` で確認します。一般ユーザー向けの同期状況画面は提供しません。
 
+## 公開playlist projectionと既存イベントのbackfill
+
+- 公開イベントのplaylist表示は、公開visibilityをD1で1行確認した後、`events/{eventId}/playlist.v1.json` を優先します。R2が欠損・不正・不完全・読取エラーの場合だけ、D1の従来クエリへfallbackします。
+- fallbackのstructured logは `event_playlist_d1_fallback` として `r2_missing`、`r2_invalid`、`r2_incomplete`、`r2_error` を記録します。payloadにはevent ID以外の個人情報を含めません。
+- 既存public eventのprojection未生成分は、content-jobs Recovery Cronが `static:event-playlist-projection-repair:v1:cursor` / `static:event-playlist-projection-repair:v1:done` を使って1回10件ずつ `event_base:<eventId>` へenqueueします。playlist専用targetは追加しません。
+
 ## 同期方式
 
 - `追加のみ`: イベントの公開・限定公開作品を追加します。YouTube側だけにある項目は削除しません。

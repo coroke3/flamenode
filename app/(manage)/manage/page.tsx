@@ -27,6 +27,7 @@ import {
   computeEventStatus,
   eventStatusBadgeClass,
   eventStatusLabel,
+  isAcceptingEntries,
 } from "@/lib/utils/eventStatus";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
@@ -53,7 +54,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   const db = getDatabase();
   if (!db) {
     return (
-      <div>
+      <div className="manage-dashboard">
         <ManagePageHeader
           title="イベント運営"
           description="DB に接続できませんでした。"
@@ -173,6 +174,14 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
     role: user.role ?? null,
   });
 
+  const pendingReviewTotal = [...pendingByEvent.values()].reduce(
+    (total, count) => total + count,
+    0,
+  );
+  const acceptingEventCount = eventRows.filter((event) =>
+    isAcceptingEntries(event),
+  ).length;
+
   const staffRoleByEvent = new Map<string, "representative" | "editor">();
   if (!isAdmin) {
     for (const eventIdChunk of chunkEventIds(eventIds)) {
@@ -183,7 +192,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
 
   if (eventIds.length === 0) {
     return (
-      <div>
+      <div className="manage-dashboard">
         <ManagePageHeader
           title="イベント運営"
           description="担当イベントの現場運用（審査・枠・通知）です。"
@@ -218,7 +227,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   }
 
   return (
-    <div>
+    <div className="manage-dashboard">
       {!isAdmin ? (
         <ManageActiveXNotice
           userId={user.id}
@@ -239,6 +248,36 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
           </Link>
         ) : null}
       </ManagePageHeader>
+
+      <section className="manage-dashboard-summary" aria-labelledby="manage-summary-title">
+        <div className="manage-dashboard-summary-copy">
+          <p className="manage-dashboard-eyebrow">OPERATIONS OVERVIEW</p>
+          <h2 id="manage-summary-title">運営の全体像</h2>
+          <p>担当イベントの状態をひと目で確認し、必要な作業へ移動できます。</p>
+        </div>
+        <div className="manage-dashboard-kpi-grid">
+          <div className="manage-dashboard-kpi">
+            <span>担当イベント</span>
+            <strong>{eventRows.length.toLocaleString()}</strong>
+          </div>
+          <div
+            className={`manage-dashboard-kpi ${pendingReviewTotal > 0 ? "manage-dashboard-kpi--warn" : ""}`}
+          >
+            <span>審査待ち</span>
+            <strong>{pendingReviewTotal.toLocaleString()}</strong>
+          </div>
+          <div className="manage-dashboard-kpi">
+            <span>受付中</span>
+            <strong>{acceptingEventCount.toLocaleString()}</strong>
+          </div>
+          <div
+            className={`manage-dashboard-kpi ${failedCount > 0 ? "manage-dashboard-kpi--danger" : ""}`}
+          >
+            <span>通知失敗</span>
+            <strong>{failedCount.toLocaleString()}</strong>
+          </div>
+        </div>
+      </section>
 
       {failedCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger">
@@ -261,6 +300,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
           {eventRows.map((ev) => {
             const status = computeEventStatus(ev);
             const pending = pendingByEvent.get(ev.id) ?? 0;
+            const eventHrefId = encodeURIComponent(ev.id);
             const staffRole = isAdmin
               ? null
               : staffRoleByEvent.get(ev.id) ?? null;
@@ -272,7 +312,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
               >
                 <div className="fn-console-event-body">
                   <div className="fn-console-event-title-row">
-                    <Link href={`/manage/events/${ev.id}`}>
+                    <Link href={`/manage/events/${eventHrefId}`}>
                       {ev.title}
                     </Link>
                     <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
@@ -307,13 +347,13 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                 </div>
                 <div className="manage-actions">
                   <Link
-                    href={`/manage/events/${ev.id}`}
+                    href={`/manage/events/${eventHrefId}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     運営トップ
                   </Link>
                   <Link
-                    href={`/manage/events/${ev.id}/videos?status=pending`}
+                    href={`/manage/events/${eventHrefId}/videos?status=pending`}
                     className={`fn-btn fn-btn-sm ${
                       pending > 0 ? "fn-btn-primary" : "fn-btn-ghost"
                     }`}
@@ -322,20 +362,20 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                     {pending > 0 ? `審査 (${pending})` : "審査"}
                   </Link>
                   <Link
-                    href={`/manage/events/${ev.id}/slots`}
+                    href={`/manage/events/${eventHrefId}/slots`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     枠
                   </Link>
                   <Link
-                    href={`/event/${ev.id}`}
+                    href={`/event/${eventHrefId}`}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
                   >
                     公開ページ
                   </Link>
                   {isAdmin ? (
                     <Link
-                      href={`/manage/events/${ev.id}/edit`}
+                      href={`/manage/events/${eventHrefId}/edit`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
                       <Icon name="settings" size={12} aria-hidden /> 設定
@@ -351,12 +391,12 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
       {eventNotifications.length > 0 ? (
         <section className="fn-console-section">
           <h2 className="fn-console-eyebrow">イベント通知（直近）</h2>
-          <FnTable>
+          <FnTable className="manage-event-notifications-table">
             <thead>
               <tr>
                 <th>通知</th>
-                <th style={{ width: 130 }}>日時</th>
-                <th style={{ width: 120 }}>イベント</th>
+                <th className="manage-notification-th-date">日時</th>
+                <th className="manage-notification-th-event">イベント</th>
               </tr>
             </thead>
             <tbody>
@@ -371,9 +411,11 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                       <div>{formatUnix(n.created_at)}</div>
                       <div className="fn-td-muted">{formatRelative(n.created_at)}</div>
                     </td>
-                    <td style={{ fontSize: 12 }}>
+                    <td className="manage-notification-event-cell">
                       {ev ? (
-                        <Link href={`/manage/events/${ev.id}`}>{ev.title}</Link>
+                        <Link href={`/manage/events/${encodeURIComponent(ev.id)}`}>
+                          {ev.title}
+                        </Link>
                       ) : n.event_id ? (
                         <span className="fn-td-mono">{n.event_id.slice(0, 8)}…</span>
                       ) : (

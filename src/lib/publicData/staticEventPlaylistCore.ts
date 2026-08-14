@@ -64,8 +64,16 @@ export function normalizeStaticEventPlaylist(
   const eventId = normalizeString(payload.event_id);
   if (!eventId || (expectedEventId && eventId !== expectedEventId)) return null;
   if (!Array.isArray(payload.items)) return null;
+  // A duplicated video ID makes a `complete` artifact look healthy while the
+  // consumer's final dedupe silently drops entries. Treat the projection as
+  // corrupt so callers can use the authoritative D1 fallback instead.
+  if (payload.items.length > EVENT_PLAYLIST_MAX_ITEMS) return null;
   const items = payload.items.map(normalizeItem);
   if (items.some((item) => item === null)) return null;
+  const itemIds = new Set(
+    items.map((item) => (item as StaticEventPlaylistItem).id),
+  );
+  if (itemIds.size !== items.length) return null;
   return {
     generatedAt: normalizeUnix(payload.generated_at),
     eventId,

@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { xIdentityRequests, xUsers } from "@/lib/db/schema";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
@@ -17,7 +17,7 @@ import {
   rejectXIdMergeRevert,
 } from "@/lib/actions/xid-merge-admin";
 import {
-  fetchXIdMergeImpact,
+  fetchXIdMergeImpacts,
   summarizeMergeImpact,
   totalMergeImpact,
   type XIdMergeImpactItem,
@@ -65,6 +65,9 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
         decision_reason: xIdentityRequests.decision_reason,
         decided_by_auth_user_id: xIdentityRequests.decided_by_auth_user_id,
         decided_at: xIdentityRequests.decided_at,
+        slot_bind_status: xIdentityRequests.slot_bind_status,
+        slot_bind_attempt_count: xIdentityRequests.slot_bind_attempt_count,
+        slot_bind_updated_at: xIdentityRequests.slot_bind_updated_at,
         requested_at: xIdentityRequests.requested_at,
         updated_at: xIdentityRequests.updated_at,
         source_name: xUsers.x_name,
@@ -75,24 +78,55 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
       .orderBy(desc(xIdentityRequests.updated_at))
       .limit(50);
 
-    requests = await Promise.all(
-      requestRows.map(async (row, index) => ({
-        ...row,
-        target_name: row.target_x_user_id
-          ? (
-              await db
-                .select({ name: xUsers.x_name })
-                .from(xUsers)
-                .where(eq(xUsers.id, row.target_x_user_id))
-                .limit(1)
-            )[0]?.name ?? null
-          : null,
-        impact:
-          index < 20 && row.source_x_user_id && (row.status === "pending" || row.status === "approved")
-            ? await fetchXIdMergeImpact(db, row.source_x_user_id)
-            : [],
-      })),
+    // 統合先名を申請ごとに再読込すると、最大50件のN+1 D1 queryになる。
+    // 一覧に必要なIDだけを1回で取得し、表示順・null扱いは従来の個別lookupと揃える。
+    const targetXUserIds = Array.from(
+      new Set(
+        requestRows
+          .map((row) => row.target_x_user_id)
+          .filter((value): value is string => Boolean(value)),
+      ),
     );
+    const targetNameRows =
+      targetXUserIds.length > 0
+        ? await db
+            .select({ id: xUsers.id, name: xUsers.x_name })
+            .from(xUsers)
+            .where(inArray(xUsers.id, targetXUserIds))
+        : [];
+    const targetNameById = new Map(
+      targetNameRows.map((row) => [row.id, row.name] as const),
+    );
+
+    const impactSourceIds = Array.from(
+      new Set(
+        requestRows
+          .slice(0, 20)
+          .filter(
+            (row) =>
+              Boolean(row.source_x_user_id) &&
+              (row.status === "pending" || row.status === "approved"),
+          )
+          .map((row) => row.source_x_user_id as string),
+      ),
+    );
+    const impactBySourceId =
+      impactSourceIds.length > 0
+        ? await fetchXIdMergeImpacts(db, impactSourceIds)
+        : new Map<string, XIdMergeImpactItem[]>();
+
+    requests = requestRows.map((row, index) => ({
+      ...row,
+      target_name: row.target_x_user_id
+        ? targetNameById.get(row.target_x_user_id) ?? null
+        : null,
+      impact:
+        index < 20 &&
+        row.source_x_user_id &&
+        (row.status === "pending" || row.status === "approved")
+          ? impactBySourceId.get(row.source_x_user_id) ?? []
+          : [],
+    }));
     reverts = await db
       .select()
       .from(xIdentityRequests)

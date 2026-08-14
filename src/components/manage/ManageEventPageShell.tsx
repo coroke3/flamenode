@@ -42,7 +42,7 @@ export function ManageEventPageShell({
   activeXUserId,
 }: ManageEventPageShellProps): React.ReactElement {
   return (
-    <div style={accentStyle}>
+    <div className="manage-event-page-shell" style={accentStyle}>
       {showActiveXNotice && userId ? (
         <ManageActiveXNotice
           userId={userId}

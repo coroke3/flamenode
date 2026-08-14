@@ -46,3 +46,13 @@ test("anonymous video overlays may load only public event playlists", () => {
     /eq\(events\.visibility_status, "public"\)/,
   );
 });
+
+test("playlist R2 fallback は理由を分類して event visibility guard を維持する", () => {
+  assert.match(videoQueries, /r2_missing/);
+  assert.match(videoQueries, /r2_invalid/);
+  assert.match(videoQueries, /r2_incomplete/);
+  assert.match(videoQueries, /r2_error/);
+  assert.match(videoQueries, /event_playlist_d1_fallback/);
+  assert.match(videoQueries, /from\(events\)/);
+  assert.match(videoQueries, /visibility_status !== "public"/);
+});

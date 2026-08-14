@@ -7,12 +7,13 @@ import {
   getPublicMediaNamespace,
   isPublicMediaObjectSafe,
   normalizePublicMediaContentType,
+  PUBLIC_MEDIA_CACHE_CONTROL,
 } from "./publicMedia.ts";
 
 const SLOT_ID_RE =
   /^slot_[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const PUBLIC_CACHE_CONTROL = "public, max-age=300, must-revalidate";
+const PUBLIC_CACHE_CONTROL = PUBLIC_MEDIA_CACHE_CONTROL;
 const PRIVATE_CACHE_CONTROL =
   "private, no-store, no-cache, must-revalidate";
 

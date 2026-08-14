@@ -13,6 +13,9 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 
 公式制限: https://developers.cloudflare.com/workers/platform/limits/
 
+- `/admin/workers` の YouTube stale 集計は `video_youtube_metadata` 起点の `EXISTS` 判定を使い、既存の `(sync_status, synced_at)` index で候補を先に絞り込む。pending・active・default の候補は1つの集計条件へまとめ、active判定は1時間から24時間の差分帯だけに限定する。イベントの存在確認は候補動画ごとに bounded に行い、イベント結合による重複展開を避ける。
+- `/admin/x-id-merges` の影響件数は、先頭20件のsource X IDを `WITH source_ids ... UNION ALL` の1本の集約D1読取へ束ねる。申請ごとのCOUNT再走査を避け、既存index・migrationは追加しない。
+
 | Worker | Recovery Cron | Queue | 上限 |
 | --- | --- | --- | --- |
 | `fast-jobs` | 毎時0分 | `flamenode-notification-wake`（consumer/producer） | 通知最大6件、Discord外部request最大12件、DM cache KV書込最大2件。締切リマインダーはleaseで1時間間隔 |

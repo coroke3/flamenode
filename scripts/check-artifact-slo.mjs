@@ -22,6 +22,7 @@ const expectedKeys = [
   "search-index-lite.json",
   "events/index.json",
   "users/index.json",
+  "recommend/core.v1.json",
   "recommend.json",
   "rules/current.json",
   "youtube/related-blocklist.v1.json",

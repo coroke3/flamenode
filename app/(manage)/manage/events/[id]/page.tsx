@@ -36,6 +36,7 @@ import {
 } from "@/lib/notifications/types";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
+import { Icon } from "@/components/ui/Icon";
 import { SaveEventTemplateForm } from "@/components/admin/SaveEventTemplateForm";
 import {
   lookupNotificationRecipients,
@@ -231,6 +232,7 @@ export default async function ManageEventPage({
 
   const status = computeEventStatus(ev);
   const accepting = isAcceptingEntries(ev);
+  const eventHrefId = encodeURIComponent(id);
 
   const eventDateLead = (
     <>
@@ -278,75 +280,150 @@ export default async function ManageEventPage({
         </>
       }
     >
-      <section
-        className={`manage-section manage-attention ${
-          pendingTotal > 0 ? "manage-attention--warn" : "manage-attention--ok"
-        }`}
-      >
-        <div>
-          <h2 className="manage-attention-title">
-            {pendingTotal > 0
-              ? "対応が必要です"
-              : "現在、対応が必要な作品はありません"}
-          </h2>
-          <p className="manage-attention-lead">
-            {pendingTotal > 0
-              ? `審査待ち ${pendingTotal.toLocaleString()} 件があります。`
-              : "審査待ちの作品はありません。進行状況を確認できます。"}
-          </p>
-        </div>
-        {pendingTotal > 0 ? (
-          <Link
-            href={`/manage/events/${id}/videos?status=pending`}
-            className="fn-btn fn-btn-primary fn-btn-sm"
-          >
-            審査を開始
-          </Link>
-        ) : null}
-      </section>
+      <div className="manage-event-overview-grid">
+        <section
+          className={`manage-section manage-attention ${
+            pendingTotal > 0 ? "manage-attention--warn" : "manage-attention--ok"
+          }`}
+        >
+          <div>
+            <h2 className="manage-attention-title">
+              {pendingTotal > 0
+                ? "対応が必要です"
+                : "現在、対応が必要な作品はありません"}
+            </h2>
+            <p className="manage-attention-lead">
+              {pendingTotal > 0
+                ? `審査待ち ${pendingTotal.toLocaleString()} 件があります。`
+                : "審査待ちの作品はありません。進行状況を確認できます。"}
+            </p>
+          </div>
+          {pendingTotal > 0 ? (
+            <Link
+              href={`/manage/events/${eventHrefId}/videos?status=pending`}
+              className="fn-btn fn-btn-primary fn-btn-sm"
+            >
+              審査を開始
+            </Link>
+          ) : null}
+        </section>
 
-      <section className="manage-section manage-progress">
-        <div className="manage-progress-head">
-          <h2 className="manage-progress-label">進行状況</h2>
-          <span className="manage-progress-value">
-            公開作品 {publicTotal.toLocaleString()} 件
-          </span>
-        </div>
-        <div>
-          <div className="manage-progress-head" style={{ marginBottom: 6 }}>
-            <span className="manage-progress-label">枠の埋まり</span>
+        <section className="manage-section manage-progress">
+          <div className="manage-progress-head">
+            <h2 className="manage-progress-label">進行状況</h2>
             <span className="manage-progress-value">
-              {filledSlots.toLocaleString()} / {totalSlots.toLocaleString()}
+              公開作品 {publicTotal.toLocaleString()} 件
             </span>
           </div>
-          <div
-            className="manage-progress-bar"
-            role="progressbar"
-            aria-valuenow={slotFillPct}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label="枠の埋まり率"
-          >
+          <div>
+            <div className="manage-progress-head manage-progress-head--compact">
+              <span className="manage-progress-label">枠の埋まり</span>
+              <span className="manage-progress-value">
+                {filledSlots.toLocaleString()} / {totalSlots.toLocaleString()}
+              </span>
+            </div>
             <div
-              className="manage-progress-bar-fill"
-              style={{ width: `${slotFillPct}%` }}
-            />
+              className="manage-progress-bar"
+              role="progressbar"
+              aria-valuenow={slotFillPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="枠の埋まり率"
+            >
+              <div
+                className="manage-progress-bar-fill"
+                style={{ width: `${slotFillPct}%` }}
+              />
+            </div>
           </div>
-        </div>
-        <div className="manage-progress-stats">
-          <span>
-            確保済 <strong>{reservedSlots.toLocaleString()}</strong>
+          <div className="manage-progress-stats">
+            <span>
+              確保済 <strong>{reservedSlots.toLocaleString()}</strong>
+            </span>
+            <span>
+              提出済 <strong>{submittedSlots.toLocaleString()}</strong>
+            </span>
+          </div>
+        </section>
+      </div>
+
+      <nav
+        className="manage-event-action-rail"
+        aria-label="イベント運営ショートカット"
+      >
+        <Link
+          href={`/manage/events/${eventHrefId}/videos?status=pending`}
+          className={`manage-event-action-card ${
+            pendingTotal > 0 ? "manage-event-action-card--priority" : ""
+          }`}
+        >
+          <span className="manage-event-action-icon" aria-hidden="true">
+            <Icon name="check" size={17} />
           </span>
-          <span>
-            提出済 <strong>{submittedSlots.toLocaleString()}</strong>
+          <span className="manage-event-action-copy">
+            <span className="manage-event-action-title">審査キュー</span>
+            <span className="manage-event-action-meta">
+              {pendingTotal > 0
+                ? `${pendingTotal.toLocaleString()} 件を確認`
+                : "対応待ちはありません"}
+            </span>
           </span>
-        </div>
-      </section>
+          <Icon name="chevron-right" size={17} />
+        </Link>
+
+        <Link
+          href={`/manage/events/${eventHrefId}/videos?status=all`}
+          className="manage-event-action-card"
+        >
+          <span className="manage-event-action-icon" aria-hidden="true">
+            <Icon name="list" size={17} />
+          </span>
+          <span className="manage-event-action-copy">
+            <span className="manage-event-action-title">作品を管理</span>
+            <span className="manage-event-action-meta">
+              公開中 {publicTotal.toLocaleString()} 件
+            </span>
+          </span>
+          <Icon name="chevron-right" size={17} />
+        </Link>
+
+        <Link
+          href={`/manage/events/${eventHrefId}/slots`}
+          className="manage-event-action-card"
+        >
+          <span className="manage-event-action-icon" aria-hidden="true">
+            <Icon name="calendar" size={17} />
+          </span>
+          <span className="manage-event-action-copy">
+            <span className="manage-event-action-title">予約枠を確認</span>
+            <span className="manage-event-action-meta">
+              {totalSlots > 0
+                ? `埋まり率 ${slotFillPct}%`
+                : "予約枠が未設定です"}
+            </span>
+          </span>
+          <Icon name="chevron-right" size={17} />
+        </Link>
+
+        <Link
+          href={`/manage/events/${eventHrefId}/audience`}
+          className="manage-event-action-card"
+        >
+          <span className="manage-event-action-icon" aria-hidden="true">
+            <Icon name="users" size={17} />
+          </span>
+          <span className="manage-event-action-copy">
+            <span className="manage-event-action-title">参加者を確認</span>
+            <span className="manage-event-action-meta">参加状況を確認</span>
+          </span>
+          <Icon name="chevron-right" size={17} />
+        </Link>
+      </nav>
 
       {isAdmin ? (
         <section className="fn-console-section">
           <h2 className="fn-console-eyebrow">テンプレート化</h2>
-          <div className="fn-card" style={{ padding: "18px 22px" }}>
+          <div className="fn-card manage-template-card">
             <SaveEventTemplateForm eventId={ev.id} eventTitle={ev.title} />
           </div>
         </section>
@@ -359,7 +436,7 @@ export default async function ManageEventPage({
         </div>
       ) : null}
 
-      <section className="manage-section">
+      <section className="manage-section manage-event-pending-section">
         <h2 className="fn-console-eyebrow">直近の審査待ち</h2>
         {pendingVideos.length === 0 ? (
           <EmptyState
@@ -368,34 +445,36 @@ export default async function ManageEventPage({
             description="現在、このイベントで対応が必要な作品はありません。"
             iconName="check"
             actions={[
-              { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
+              { href: `/event/${eventHrefId}`, label: "公開ページを見る", variant: "primary" },
               {
-                href: `/manage/events/${id}/slots`,
+                href: `/manage/events/${eventHrefId}/slots`,
                 label: "枠を見る",
                 variant: "ghost",
               },
             ]}
           />
         ) : (
-          <FnTable>
+          <FnTable className="manage-event-pending-table">
             <thead>
               <tr>
-                <th>タイトル</th>
-                <th>作者</th>
-                <th>登録</th>
-                <th></th>
+                <th className="manage-event-pending-title-col">タイトル</th>
+                <th className="manage-event-pending-author-col">作者</th>
+                <th className="manage-event-pending-date-col">登録</th>
+                <th className="manage-event-pending-actions-col"></th>
               </tr>
             </thead>
             <tbody>
               {pendingVideos.map((v, index) => (
                 <tr key={`${v.id}-pending-${index}`}>
-                  <td>{v.title}</td>
-                  <td>{v.display_name}</td>
-                  <td className="fn-muted">{formatRelative(v.created_at)}</td>
-                  <td>
+                  <td className="manage-event-pending-title-cell">{v.title}</td>
+                  <td className="manage-event-pending-author-cell">{v.display_name}</td>
+                  <td className="manage-event-pending-date-cell fn-muted">
+                    {formatRelative(v.created_at)}
+                  </td>
+                  <td className="manage-event-pending-actions-cell">
                     <div className="fn-console-row-actions">
                       <Link
-                        href={`/manage/events/${id}/videos/${v.id}`}
+                        href={`/manage/events/${eventHrefId}/videos/${v.id}`}
                         className="fn-btn fn-btn-primary fn-btn-sm"
                       >
                         審査
@@ -442,8 +521,8 @@ export default async function ManageEventPage({
               {MANAGE_NOTIFICATION_FILTER_OPTIONS.map(({ key, label }) => {
                 const href =
                   key === "all"
-                    ? `/manage/events/${id}`
-                    : `/manage/events/${id}?notif=${key}`;
+                    ? `/manage/events/${eventHrefId}`
+                    : `/manage/events/${eventHrefId}?notif=${key}`;
                 return (
                   <Link
                     key={key}
@@ -462,7 +541,7 @@ export default async function ManageEventPage({
                 description="選択中のカテゴリに一致する通知ログはありません。"
                 actions={[
                   {
-                    href: `/manage/events/${id}`,
+                    href: `/manage/events/${eventHrefId}`,
                     label: "すべての通知を見る",
                     variant: "ghost",
                   },

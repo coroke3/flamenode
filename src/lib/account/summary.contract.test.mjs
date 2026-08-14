@@ -51,21 +51,23 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /summary\.unavailable/);
   assert.match(island, /ログイン状態を一時的に確認できません/);
   assert.match(island, /if \(unavailable \|\| !user\) \{/);
-  assert.match(
-    island,
-    /response\.status === 503 \|\| !response\.ok[\s\S]{0,200}if \(!preserveLoggedInOnFailure\) setUser\(null\)/,
-  );
-  assert.match(
-    island,
-    /catch \{[\s\S]{0,200}if \(!preserveLoggedInOnFailure\) setUser\(null\)/,
-  );
+  assert.match(island, /kind: "unavailable"/);
+  assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
 });
 
 test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得する", () => {
   assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /setRefreshNonce/);
-  assert.match(island, /\[enabled, preserveLoggedInOnFailure, refreshNonce\]/);
+  assert.match(island, /\[enabled, preserveLoggedInOnFailure, lazy, open, refreshNonce\]/);
+  assert.match(island, /lazy && !open/);
+  assert.match(island, /fetchedOnceRef/);
+  assert.match(island, /nonLazyAttemptedRef/);
+  assert.match(island, /!lazy && nonLazyAttemptedRef\.current/);
+  assert.match(island, /inFlightRef/);
+  assert.match(island, /if \(inFlight\)/);
+  assert.match(island, /refreshGenerationRef/);
+  assert.match(island, /request\.generation !== refreshGenerationRef\.current/);
 });
 
 test("ログアウトはSignOutButton経由でhard navigateする", () => {

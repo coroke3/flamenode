@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFile } from "node:fs/promises";
 import {
   markDone,
   markDoneOrSuppressRedelivery,
@@ -9,6 +10,14 @@ import {
   reconcileStaleQueue,
   REBUILD_SUCCEEDED_AWAITING_DONE_MARK,
 } from "./queue.ts";
+
+const queueSource = await readFile(new URL("./queue.ts", import.meta.url), "utf8");
+
+test("processStaticRebuildQueue は既定で reconcile し Recovery option のみ抑止する", () => {
+  assert.match(queueSource, /staleQueueAlreadyReconciled\?: boolean/);
+  assert.match(queueSource, /!options\.staleQueueAlreadyReconciled/);
+  assert.match(queueSource, /processStaticRebuildQueueImpl\(env, signal, options\)/);
+});
 
 function fakeDb(row) {
   const queries = [];
@@ -216,6 +225,42 @@ test("processing中の再enqueueは完了時にpendingへ戻す", async () => {
   assert.equal(row.processed_at, null);
   assert.equal(row.attempt_count, 0);
   assert.equal(row.lease_token, null);
+});
+
+test("retry wait removes its abort listener after the timer completes", async () => {
+  const row = {
+    id: "srb-abort-listener",
+    status: "processing",
+    lease_token: null,
+  };
+  const env = envFor(row);
+  const controller = new AbortController();
+  let added = 0;
+  let removed = 0;
+  const originalAdd = controller.signal.addEventListener.bind(controller.signal);
+  const originalRemove = controller.signal.removeEventListener.bind(controller.signal);
+  controller.signal.addEventListener = ((...args) => {
+    added += 1;
+    return originalAdd(...args);
+  });
+  controller.signal.removeEventListener = ((...args) => {
+    removed += 1;
+    return originalRemove(...args);
+  });
+
+  assert.equal(
+    await markDoneWithRetries(
+      env,
+      row.id,
+      "stale-token",
+      110,
+      undefined,
+      controller.signal,
+    ),
+    null,
+  );
+  assert.equal(added, 2);
+  assert.equal(removed, 2);
 });
 
 test("stale completion returns an invalidated processing row to pending", async () => {

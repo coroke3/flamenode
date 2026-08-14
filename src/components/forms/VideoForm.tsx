@@ -47,6 +47,11 @@ import {
 import { PermissionBadge } from "@/components/video/permission/PermissionBadge";
 import { FieldLockNote } from "@/components/video/permission/FieldLockNote";
 import { PermissionFieldLabel } from "@/components/video/permission/PermissionFieldLabel";
+import { YoutubeDescriptionPreview } from "@/components/forms/YoutubeDescriptionPreview";
+import {
+  formatYoutubeDescriptionMembers,
+  type YoutubeDescriptionContext,
+} from "@/lib/event/youtubeDescriptionTemplate";
 
 /** X ID 既定プロフィール。「再適用」ボタン用。作品スナップショットとは別。 */
 export interface VideoDefaultProfile {
@@ -88,6 +93,8 @@ export interface EventOption {
   id: string;
   title: string;
   video_form_settings_json?: string | null;
+  youtube_description_template?: string | null;
+  youtube_description_event_url?: string | null;
   /** イベントに設定された「部」候補 (JSON 文字列)。null/空配列なら部 UI を出さない。 */
   parts_json?: string | null;
 }
@@ -196,6 +203,10 @@ interface VideoFormProps {
   defaultProfile?: VideoDefaultProfile;
   /** 編集モード時の権限 ViewModel。指定時のみ権限 UI を有効化する。 */
   permissionView?: VideoEditPermissionViewModel;
+  /** 選択中イベントの概要欄テンプレートに渡す、作品に紐づく固定値。 */
+  youtubeDescriptionContext?: YoutubeDescriptionContext;
+  /** 初期表示時に優先するイベント（通常は作品の primary event）。 */
+  youtubeDescriptionEventId?: string | null;
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -225,6 +236,35 @@ function videoFormLockNoteId(key: string): string {
 function mergeDescribedBy(...ids: (string | undefined)[]): string | undefined {
   const filtered = ids.filter(Boolean);
   return filtered.length > 0 ? filtered.join(" ") : undefined;
+}
+
+const DESCRIPTION_FIELD_NAMES = [
+  "display_name",
+  "profile_text",
+  "youtube_channel_url",
+  "other_social_links",
+  "title",
+  "youtube_url",
+  "music",
+  "credit",
+  "intro_comment",
+  "highlights",
+  "production_story",
+  "used_software",
+  "closing_comment",
+  "creator_x_user_id",
+] as const;
+
+function readDescriptionFormValues(
+  form: HTMLFormElement,
+): Record<string, string> {
+  const formData = new FormData(form);
+  return Object.fromEntries(
+    DESCRIPTION_FIELD_NAMES.map((name) => [
+      name,
+      String(formData.get(name) ?? ""),
+    ]),
+  );
 }
 
 function resolvePermissionSubmitBlockedHint(
@@ -266,6 +306,8 @@ export function VideoForm({
   editPrivilegeMode,
   defaultProfile,
   permissionView,
+  youtubeDescriptionContext,
+  youtubeDescriptionEventId,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
@@ -299,6 +341,9 @@ export function VideoForm({
   const [members, setMembers] = React.useState<VideoMemberInput[]>(
     initial.members ?? [],
   );
+  const [descriptionFormValues, setDescriptionFormValues] = React.useState<
+    Record<string, string>
+  >({});
   // 所属イベントの選択状態。slot モードでは slot.event_id が initial.event_ids
   // に含まれている前提で、固定として扱う (UI でも変更不可)。
   const [selectedEventIds, setSelectedEventIds] = React.useState<string[]>(
@@ -424,6 +469,72 @@ export function VideoForm({
   const selectedEventLabels = eventOptions
     .filter((event) => selectedEventIds.includes(event.id))
     .map((event) => event.title);
+  const selectedDescriptionEvent = React.useMemo(() => {
+    const preferredIds = [
+      youtubeDescriptionEventId && selectedEventIds.includes(youtubeDescriptionEventId)
+        ? youtubeDescriptionEventId
+        : null,
+      ...selectedEventIds,
+    ].filter((eventId): eventId is string => Boolean(eventId));
+    const seen = new Set<string>();
+    for (const eventId of preferredIds) {
+      if (seen.has(eventId)) continue;
+      seen.add(eventId);
+      const event = eventOptions.find((candidate) => candidate.id === eventId);
+      if (event?.youtube_description_template?.trim()) return event;
+    }
+    return null;
+  }, [eventOptions, selectedEventIds, youtubeDescriptionEventId]);
+  const readDescriptionValue = React.useCallback(
+    (name: string, fallback: string | null | undefined): string =>
+      descriptionFormValues[name] ?? fallback ?? "",
+    [descriptionFormValues],
+  );
+  const youtubeDescriptionRenderContext = React.useMemo<YoutubeDescriptionContext>(() => {
+    const youtubeUrlValue = readDescriptionValue("youtube_url", initial.youtube_url);
+    const memberDescriptionValues = formatYoutubeDescriptionMembers(members);
+    return {
+      ...youtubeDescriptionContext,
+      event_title:
+        selectedDescriptionEvent?.title ?? youtubeDescriptionContext?.event_title,
+      event_id:
+        selectedDescriptionEvent?.id ?? youtubeDescriptionContext?.event_id,
+      event_url:
+        selectedDescriptionEvent?.youtube_description_event_url ??
+        youtubeDescriptionContext?.event_url,
+      title: readDescriptionValue("title", initial.title),
+      youtube_url: youtubeUrlValue,
+      youtube_video_id: extractYoutubeId(youtubeUrlValue) ?? "",
+      creator_name: submitterDisplayName,
+      creator_x_id: readDescriptionValue("creator_x_user_id", initial.creator_x_user_id),
+      creator_channel_url: submitterYoutubeChannel,
+      creator_profile: submitterProfileText,
+      creator_social_links: submitterSocialLinks,
+      ...memberDescriptionValues,
+      part: selectedPart,
+      music: readDescriptionValue("music", initial.music),
+      credit: readDescriptionValue("credit", initial.credit),
+      intro_comment: readDescriptionValue("intro_comment", initial.intro_comment),
+      highlights: readDescriptionValue("highlights", initial.highlights),
+      production_story: readDescriptionValue(
+        "production_story",
+        initial.production_story,
+      ),
+      used_software: readDescriptionValue("used_software", initial.used_software),
+      closing_comment: readDescriptionValue("closing_comment", initial.closing_comment),
+    };
+  }, [
+    initial,
+    members,
+    readDescriptionValue,
+    selectedDescriptionEvent,
+    selectedPart,
+    submitterDisplayName,
+    submitterProfileText,
+    submitterSocialLinks,
+    submitterYoutubeChannel,
+    youtubeDescriptionContext,
+  ]);
   const sidePreviewTitle = titlePreview.trim() || "作品タイトル未入力";
   const sidePreviewName =
     displayNamePreview.trim() ||
@@ -700,8 +811,9 @@ export function VideoForm({
         .filter(Boolean)
         .join(" ")}
       onSubmit={handleSubmit}
-      onChange={() => {
+      onChange={(event) => {
         if (!dirty) setDirty(true);
+        setDescriptionFormValues(readDescriptionFormValues(event.currentTarget));
       }}
     >
       {slotId ? <input type="hidden" name="slot_id" value={slotId} /> : null}
@@ -1413,6 +1525,14 @@ export function VideoForm({
           <input type="hidden" name="part" value="" />
         )}
       </section>
+
+      {selectedDescriptionEvent ? (
+        <YoutubeDescriptionPreview
+          template={selectedDescriptionEvent.youtube_description_template ?? ""}
+          eventTitle={selectedDescriptionEvent.title}
+          context={youtubeDescriptionRenderContext}
+        />
+      ) : null}
 
       <section
         className={cx(

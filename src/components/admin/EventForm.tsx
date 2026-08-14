@@ -33,12 +33,14 @@ import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
 } from "@/lib/slots/limits";
+import { YOUTUBE_DESCRIPTION_VARIABLES } from "@/lib/event/youtubeDescriptionTemplate";
 
 export interface EventFormInitial {
   id?: string;
   title?: string;
   event_type?: "event" | "collabo" | "type" | "other";
   explanation?: string | null;
+  youtube_description_template?: string | null;
   icon_url?: string | null;
   img_url?: string | null;
   accent_color?: string | null;
@@ -518,6 +520,27 @@ export function EventForm({
             maxLength={4000}
             {...gatedTextareaProps(canBasic)}
           />
+        </div>
+        <div>
+          <label className="fn-label" htmlFor="youtube_description_template">
+            YouTube概要欄テンプレート
+          </label>
+          <p className="fn-text-muted-sm" style={{ margin: "6px 0 8px" }}>
+            作品編集画面でイベントのテンプレートを作品情報に展開し、そのままコピーできます。空欄なら概要欄プレビューは表示されません。
+          </p>
+          <textarea
+            id="youtube_description_template"
+            name="youtube_description_template"
+            defaultValue={initial.youtube_description_template ?? ""}
+            className="fn-input"
+            rows={8}
+            maxLength={10000}
+            placeholder={`{{title}}\n{{event_title}}\n\n{{intro_comment}}\n\n{{youtube_url}}`}
+            {...gatedTextareaProps(canBasic)}
+          />
+          <p className="fn-text-muted-sm" style={{ marginTop: 8 }}>
+            変数: {YOUTUBE_DESCRIPTION_VARIABLES.map(({ key }) => `{{${key}}}`).join(" ・ ")}
+          </p>
         </div>
         <div className={styles.formGrid2}>
           <div>

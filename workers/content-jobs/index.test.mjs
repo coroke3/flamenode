@@ -13,6 +13,11 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.match(source, /reconcileStaleQueue/);
   assert.match(source, /ensureDeployGlobalRebuilds/);
   assert.match(source, /ensureDailyTopNostalgicShuffle/);
+  assert.match(source, /ensureEventPlaylistBackfill/);
+  assert.match(source, /eventPlaylistBackfill > 0/);
+  const reconcileIndex = source.indexOf("await reconcileStaleQueue(rebuildEnv, now, signal)");
+  const backfillIndex = source.indexOf("await ensureEventPlaylistBackfill(");
+  assert.ok(reconcileIndex >= 0 && backfillIndex > reconcileIndex);
   assert.match(source, /daily top nostalgic enqueue failed/);
   assert.match(source, /nostalgicDailyShuffle > 0/);
   assert.match(source, /ensureYoutubeRelatedSharedInputsOnR2/);
@@ -29,7 +34,10 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.match(source, /CONTENT_JOBS_RECOVERY_MAX_TARGETS = 3/);
   assert.match(source, /isD1BudgetExhausted\(rebuildEnv\.d1Budget\)/);
   assert.match(source, /rebuildEnvironment/);
-  assert.match(source, /processStaticRebuildQueue\(rebuildEnv, signal\)/);
+  assert.match(
+    source,
+    /processStaticRebuildQueue\(\s*rebuildEnv,\s*signal,\s*\{ staleQueueAlreadyReconciled: true \}/,
+  );
   assert.match(
     source,
     /CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED/,

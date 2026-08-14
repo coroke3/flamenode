@@ -19,6 +19,7 @@ import { StatusPanel } from "@/components/ui/StatusPanel";
 import styles from "./page.module.css";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { unslottedEventEligibilityWhere } from "@/lib/video/resolveUnslottedEventSyncTarget";
+import { absoluteUrl } from "@/lib/seo";
 
 export const metadata: Metadata = { title: "枠なし投稿" };
 export const dynamic = "force-dynamic";
@@ -84,6 +85,7 @@ export default async function UnslottedPostPage({
           end_time: events.end_time,
           allow_unslotted_posts: events.allow_unslotted_posts,
           parts_json: events.parts_json,
+          youtube_description_template: events.youtube_description_template,
         })
         .from(events)
         .where(
@@ -111,6 +113,10 @@ export default async function UnslottedPostPage({
     id: event.id,
     title: event.title,
     parts_json: event.parts_json,
+    youtube_description_template: event.youtube_description_template,
+    youtube_description_event_url: absoluteUrl(
+      `/event/${encodeURIComponent(event.id)}`,
+    ),
     custom_questions: questionsByEvent.get(event.id) ?? [],
     status_label:
       event.end_time != null && event.end_time <= now

@@ -72,12 +72,21 @@ export function PublicHeader({
   const pathname = usePathname();
   const fetchAccount = serverUser === undefined || hydrateAccount;
   const preserveLoggedInOnFailure = hydrateAccount && serverUser != null;
+  // admin/manage/auth のSSRヘッダーは最小情報を持っているため、詳細summaryは
+  // アカウントメニュー（またはモバイルナビ）を開いた時だけ補完する。
+  const hydrateOnOpen = hydrateAccount && serverUser != null;
+  const accountHydrationOpen = accountOpen || mobileOpen;
   const {
     user: fetchedUser,
     loading: accountLoading,
     unavailable: accountUnavailable,
   } =
-    usePublicAccountSummary(fetchAccount, preserveLoggedInOnFailure);
+    usePublicAccountSummary(
+      fetchAccount,
+      preserveLoggedInOnFailure,
+      hydrateOnOpen,
+      accountHydrationOpen,
+    );
   const showAccountLoading =
     fetchAccount && accountLoading && !preserveLoggedInOnFailure;
   const showAccountUnavailable =

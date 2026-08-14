@@ -294,45 +294,53 @@ export async function loadWorkerMonitoring(
   ).bind(now).first<QueueRow>();
 
   const youtubeRow = await db.prepare(
-    `WITH stale_candidates AS (
-       SELECT v.id
-         FROM video_youtube_metadata ym
-         INNER JOIN videos v ON v.id = ym.video_id
-        WHERE ym.sync_status = 'pending'
-          AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
-          AND v.visibility_status <> 'voided'
-       UNION
-       SELECT v.id
-         FROM events e
-         INNER JOIN videos v ON (
-           v.primary_event_id = e.id
-           OR EXISTS (
-             SELECT 1 FROM video_events ve
-             WHERE ve.video_id = v.id AND ve.event_id = e.id
-           )
-         )
-         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
-        WHERE e.visibility_status = 'public'
-          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
-          AND (e.start_time IS NULL OR e.start_time <= ?1 + 86400)
-          AND (e.end_time IS NULL OR e.end_time >= ?1 - 86400)
-          AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
-          AND v.visibility_status <> 'voided'
-          AND ym.sync_status IN ('synced', 'failed')
-          AND ym.synced_at IS NOT NULL AND ym.synced_at <= ?1 - 3600
-       UNION
-       SELECT v.id
-         FROM video_youtube_metadata ym
-         INNER JOIN videos v ON v.id = ym.video_id
-        WHERE ym.sync_status IN ('synced', 'failed')
-          AND ym.synced_at IS NOT NULL AND ym.synced_at <= ?1 - 86400
-          AND v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> ''
-          AND v.visibility_status <> 'voided'
-     )
-     SELECT
+    `SELECT
        (SELECT COUNT(*) FROM videos v WHERE v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> '' AND v.visibility_status <> 'voided') AS eligible,
        (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'pending') AS pending,
-       (SELECT COUNT(*) FROM stale_candidates) AS stale,
+       (SELECT COUNT(*)
+          FROM video_youtube_metadata ym
+          INNER JOIN videos v ON v.id = ym.video_id
+         WHERE v.youtube_video_id IS NOT NULL
+           AND v.youtube_video_id <> ''
+           AND v.visibility_status <> 'voided'
+           AND (
+             ym.sync_status = 'pending'
+             OR (
+               ym.sync_status IN ('synced', 'failed')
+               AND ym.synced_at IS NOT NULL
+               AND (
+                 -- The default lane already covers rows older than a day.
+                 -- Keep the active-event EXISTS check only for the 1h..24h band
+                 -- so the same metadata row is not scanned twice.
+                 ym.synced_at <= ?1 - 86400
+                 OR (
+                   ym.synced_at > ?1 - 86400
+                   AND ym.synced_at <= ?1 - 3600
+                   AND (
+                     EXISTS (
+                       SELECT 1
+                         FROM events e
+                        WHERE e.id = v.primary_event_id
+                          AND e.visibility_status = 'public'
+                          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
+                          AND (e.start_time IS NULL OR e.start_time <= ?1 + 86400)
+                          AND (e.end_time IS NULL OR e.end_time >= ?1 - 86400)
+                     )
+                     OR EXISTS (
+                       SELECT 1
+                         FROM video_events ve
+                         INNER JOIN events e ON e.id = ve.event_id
+                        WHERE ve.video_id = v.id
+                          AND e.visibility_status = 'public'
+                          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
+                          AND (e.start_time IS NULL OR e.start_time <= ?1 + 86400)
+                          AND (e.end_time IS NULL OR e.end_time >= ?1 - 86400)
+                     )
+                   )
+                 )
+               )
+             )
+           )) AS stale,
        (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'failed') AS failed,
        (SELECT MIN(synced_at) FROM video_youtube_metadata) AS oldest_synced_at`,
   ).bind(now).first<SyncRow>();

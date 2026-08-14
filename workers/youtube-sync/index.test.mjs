@@ -19,6 +19,39 @@ import {
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 
+test("scheduled eligibility は既存 sync index 向けの直接列比較と malformed repair lane を使う", () => {
+  assert.match(source, /const SYNCED_ELIGIBILITY_SQL = `ym\.synced_at`/);
+  const scheduledSql = source.match(
+    /const ACTIVE_PRIMARY_SYNCED_SQL[\s\S]*?const MALFORMED_SYNCED_SQL/,
+  )?.[0] ?? "";
+  assert.doesNotMatch(scheduledSql, /COALESCE\(ym\.synced_at/);
+  assert.doesNotMatch(scheduledSql, /COALESCE\(ym\.updated_at/);
+  assert.match(source, /AND \$\{SYNCED_ELIGIBILITY_SQL\} <= \?1 - \?2/);
+  assert.match(source, /ORDER BY \$\{SYNCED_ELIGIBILITY_SQL\} ASC, v\.id ASC/);
+  assert.match(source, /AND ym\.synced_at IS NULL/);
+  const malformedSql = source.match(
+    /const MALFORMED_SYNCED_SQL = `[^`]+`;/,
+  )?.[0] ?? "";
+  assert.match(malformedSql, /v\.visibility_status <> 'voided'/);
+  assert.doesNotMatch(malformedSql, /NOT_BLOCKED_FOR_RELATED_SQL/);
+  assert.match(source, /selectMalformedSyncedRows/);
+  assert.match(source, /MALFORMED_SYNC_REPAIR_MAX_VIDEOS_PER_RUN = 10/);
+});
+
+test("secondary event lane は EXISTS で同一動画の複数 event 展開を抑止する", () => {
+  const secondaryLanes = source.match(
+    /const ACTIVE_VIDEO_EVENTS_(?:SYNCED|FAILED)_SQL = `[\s\S]*?LIMIT \?4`;/g,
+  ) ?? [];
+  assert.equal(secondaryLanes.length, 2);
+  for (const lane of secondaryLanes) {
+    assert.match(lane, /FROM video_youtube_metadata ym/);
+    assert.match(lane, /AND EXISTS \(/);
+    assert.match(lane, /FROM video_events ve/);
+    assert.match(lane, /v\.primary_event_id IS NULL OR v\.primary_event_id <> e\.id/);
+  }
+  assert.match(source, /e\.visibility_status = 'public'/);
+});
+
 test("429と5xxは再試行対象", () => {
   assert.equal(isRetryableYoutubeStatus(429), true);
   assert.equal(isRetryableYoutubeStatus(503), true);
@@ -213,6 +246,87 @@ test("scheduled_only はpermanent failed行を再同期しない", async () => {
   assert.ok(
     sqlCalls.some(({ sql }) => sql.includes("sync_error LIKE 'permanent:%'")),
   );
+});
+
+test("synced_at=NULL は通常期限laneを汚染せず repair lane から再同期する", async () => {
+  const sqlCalls = [];
+  const batchCalls = [];
+  const env = {
+    YOUTUBE_API_KEY: "test-key",
+    KV: {
+      async get() {
+        return null;
+      },
+    },
+    DB: {
+      prepare(sql) {
+        const statement = {
+          bind(...bindings) {
+            sqlCalls.push({ sql, bindings });
+            return statement;
+          },
+          async all() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return { results: [{ used_units: 0 }], meta: { changes: 1 } };
+            }
+            if (sql.includes("sync_status = 'pending'")) {
+              return { results: [{ id: "pending-video", youtube_video_id: "pending-youtube-id" }] };
+            }
+            if (sql.includes("sync_status = 'synced'") && sql.includes("synced_at IS NULL")) {
+              return { results: [{ id: "malformed-video", youtube_video_id: "malformed-youtube-id" }] };
+            }
+            if (sql.includes("WHERE video_id IN")) {
+              return {
+                results: [{
+                  video_id: "malformed-video",
+                  view_count: 1,
+                  duration_seconds: 30,
+                  youtube_privacy_status: "public",
+                  youtube_availability_status: "public",
+                  sync_status: "synced",
+                }],
+              };
+            }
+            return { results: [] };
+          },
+          async first() {
+            if (sql.includes("INSERT INTO external_api_quota_usage")) {
+              return { used_units: 0 };
+            }
+            return null;
+          },
+          async run() {
+            return { meta: { changes: 1 } };
+          },
+        };
+        return statement;
+      },
+      async batch(statements) {
+        batchCalls.push(statements);
+        return statements.map(() => ({ meta: { changes: 1 } }));
+      },
+    },
+  };
+
+  const result = await syncBatch(
+    env,
+    async () => new Response(JSON.stringify({
+      items: [{
+        id: "malformed-youtube-id",
+        statistics: { viewCount: "10" },
+        status: { privacyStatus: "public" },
+        contentDetails: { duration: "PT30S" },
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+    undefined,
+    { mode: "scheduled_only", maxVideos: 1, maxApiBatches: 1 },
+  );
+
+  assert.equal(result.processed, 1);
+  assert.ok(sqlCalls.some(({ sql }) =>
+    sql.includes("sync_status = 'synced'") && sql.includes("synced_at IS NULL"),
+  ));
+  assert.ok(batchCalls.length >= 1);
 });
 
 test("YouTube durationを秒へ変換する", () => {

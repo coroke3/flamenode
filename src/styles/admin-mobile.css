@@ -32,6 +32,192 @@
     overflow-x: clip;
   }
 
+  [data-admin-shell] .admin-sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    padding: 12px 14px 28px;
+    background: var(--bg-base);
+    box-shadow: none;
+  }
+
+  [data-manage-shell] .admin-sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    border-radius: 0;
+    background: var(--bg-base);
+    box-shadow: none;
+  }
+
+  [data-admin-shell] .admin-mode-banner {
+    display: flex;
+    align-items: center;
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+  }
+
+  [data-admin-shell] .admin-mode-hint {
+    width: 100%;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-overview {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+    margin: 18px 0 22px;
+    padding: 16px;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-status {
+    width: 100%;
+    min-width: 0;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-section-meta {
+    justify-content: flex-start;
+    padding-bottom: 0;
+    text-align: left;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-support-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-panel {
+    padding: 15px;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-panel--manage {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-panel--manage .fn-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  [data-admin-shell] .fn-admin-pending-card {
+    min-height: 112px;
+  }
+
+  [data-manage-shell] .manage-event-status-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    padding: 14px 14px 14px 18px;
+  }
+
+  [data-manage-shell] .manage-event-status-card .manage-actions {
+    width: 100%;
+  }
+
+  [data-manage-shell] .manage-dashboard-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 15px;
+  }
+
+  [data-manage-shell] .manage-dashboard-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-manage-shell] .manage-event-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  [data-manage-shell] .manage-event-action-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 12px 0 20px;
+  }
+
+  [data-manage-shell] .manage-event-action-card {
+    min-height: 68px;
+    padding: 11px 10px;
+  }
+
+  [data-manage-shell] .manage-event-action-icon {
+    width: 30px;
+    height: 30px;
+  }
+
+  [data-manage-shell] .manage-attention,
+  [data-manage-shell] .manage-progress {
+    padding: 15px 16px 15px 18px;
+  }
+
+  [data-manage-shell] .manage-event-pending-section {
+    padding: 15px 16px 16px;
+  }
+
+  [data-manage-shell] .manage-event-pending-section > .fn-console-eyebrow {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+
+  [data-manage-shell] .manage-active-x-notice {
+    padding: 11px 12px;
+  }
+
+  [data-manage-shell] .manage-notification-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* イベントナビは折り返さず、ナビ自身だけを横スクロールさせる。 */
+  [data-manage-shell] .fn-console-event-nav {
+    position: sticky;
+    top: calc(var(--header-h, 56px) + 8px);
+    z-index: 20;
+    margin-right: -2px;
+    margin-left: -2px;
+    padding: 4px;
+    background: color-mix(in srgb, var(--bg-base) 90%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  [data-manage-shell] .fn-console-event-tabs,
+  [data-manage-shell] .fn-console-event-subtabs {
+    flex-wrap: nowrap;
+    width: 100%;
+    max-width: none;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  [data-manage-shell] .fn-console-event-tabs::-webkit-scrollbar,
+  [data-manage-shell] .fn-console-event-subtabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  [data-manage-shell] .fn-console-event-tabs a,
+  [data-manage-shell] .fn-console-event-subtabs a,
+  [data-manage-shell] .fn-console-event-more > summary {
+    flex: 0 0 auto;
+  }
+
+  [data-manage-shell] .fn-console-event-more-row {
+    flex-wrap: wrap;
+  }
+
   /* 現在地を常に確認できる、コンパクトなモバイルメニューバー */
   .fn-console-navigation {
     position: sticky;
@@ -369,6 +555,10 @@
     padding: 12px;
   }
 
+  [data-manage-shell] .manage-event-status-card {
+    padding: 14px 14px 14px 18px;
+  }
+
   [data-admin-shell] .admin-mode-banner,
   [data-manage-shell] .manage-mode-banner {
     gap: 6px;
@@ -395,6 +585,18 @@
     padding-right: var(--fn-console-gutter-inline-end);
   }
 
+  [data-manage-shell] .manage-notification-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-manage-shell] .manage-event-action-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-admin-shell] .fn-admin-dashboard-panel--tools .fn-admin-dashboard-panel-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .fn-console-trigger-copy strong,
   .fn-console-trigger-copy small {
     max-width: 64vw;
@@ -418,6 +620,10 @@
 }
 
 @media (max-width: 360px) {
+  [data-manage-shell] .manage-dashboard-kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .fn-admin-stat-grid,
   [data-admin-shell] .fn-console-stat-grid,
   [data-manage-shell] .fn-console-stat-grid {

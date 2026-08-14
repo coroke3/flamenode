@@ -21,6 +21,7 @@ export function snapshotEventSection(
         title: row.title,
         event_type: row.event_type,
         explanation: row.explanation,
+        youtube_description_template: row.youtube_description_template,
         icon_url: row.icon_url,
         img_url: row.img_url,
         accent_color: row.accent_color,

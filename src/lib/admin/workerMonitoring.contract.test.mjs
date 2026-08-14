@@ -29,6 +29,29 @@ test("YouTube監視は sync_status=pending 件数を返す", async () => {
   assert.doesNotMatch(text, /ym\.youtube_video_id/);
 });
 
+test("YouTube stale candidates are metadata-first and use event existence checks", async () => {
+  const text = await source("src/lib/admin/workerMonitoring.ts");
+
+  assert.match(
+    text,
+    /FROM video_youtube_metadata ym[\s\S]*INNER JOIN videos v ON v\.id = ym\.video_id[\s\S]*ym\.sync_status IN \('synced', 'failed'\)/,
+  );
+  assert.match(text, /EXISTS \([\s\S]*FROM events e[\s\S]*e\.id = v\.primary_event_id/);
+  assert.match(text, /EXISTS \([\s\S]*FROM video_events ve[\s\S]*INNER JOIN events e ON e\.id = ve\.event_id/);
+  assert.doesNotMatch(
+    text,
+    /FROM events e[\s\S]*INNER JOIN videos v ON \([\s\S]*v\.primary_event_id = e\.id/,
+  );
+});
+
+test("YouTube stale aggregate does not rescan the same metadata row across lanes", async () => {
+  const text = await source("src/lib/admin/workerMonitoring.ts");
+
+  assert.doesNotMatch(text, /WITH stale_candidates AS/);
+  assert.match(text, /FROM video_youtube_metadata ym[\s\S]*ym\.synced_at <= \?1 - 86400/);
+  assert.match(text, /ym\.synced_at > \?1 - 86400[\s\S]*ym\.synced_at <= \?1 - 3600/);
+});
+
 test("スコア stale 閾値は score-recalc の 72h と揃える", async () => {
   const text = await source("src/lib/admin/workerMonitoring.ts");
 

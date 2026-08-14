@@ -7,6 +7,7 @@ import {
   MAX_PUBLIC_MEDIA_BYTES,
   normalizePublicMediaContentType,
   PUBLIC_MEDIA_ACCESS_SQL,
+  PUBLIC_MEDIA_CACHE_CONTROL,
   servePublicMedia,
 } from "./publicMedia.ts";
 
@@ -73,6 +74,7 @@ async function requestMedia({
   allowed,
   contentType = "image/webp",
   size = 128,
+  request,
 }) {
   const state = { prepares: 0, gets: 0, bindings: null };
   const env = {
@@ -104,7 +106,7 @@ async function requestMedia({
       },
     },
   };
-  const response = await servePublicMedia(env, key);
+  const response = await servePublicMedia(env, key, request);
   return { response, state };
 }
 
@@ -130,7 +132,38 @@ test("公開entityは単一D1 lookup後に安全な画像だけ返す", async ()
     assert.deepEqual(state.bindings, [key, "event-icons", `/api/media/${key}`]);
     assert.deepEqual({ prepares: state.prepares, gets: state.gets }, { prepares: 1, gets: 1 });
     assert.equal(response.headers.get("content-type"), "image/webp");
+    assert.equal(response.headers.get("cache-control"), PUBLIC_MEDIA_CACHE_CONTROL);
     assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("public mediaはACL確認後にIf-None-Match一致を304へ変換する", async () => {
+  const first = await requestMedia({
+    key: "event-icons/event/a.png",
+    allowed: true,
+  });
+  const etag = first.response.headers.get("etag");
+  const second = await requestMedia({
+    key: "event-icons/event/a.png",
+    allowed: true,
+    request: new Request("https://example.test/api/media/event-icons/event/a.png", {
+      headers: { "If-None-Match": `"other", W/${etag}` },
+    }),
+  });
+  assert.equal(second.response.status, 304);
+  assert.equal(second.response.body, null);
+  assert.equal(second.response.headers.get("cache-control"), PUBLIC_MEDIA_CACHE_CONTROL);
+});
+
+test("public mediaはACL拒否時にIf-None-Match一致でも304を返さない", async () => {
+  const result = await requestMedia({
+    key: "event-icons/event/a.png",
+    allowed: false,
+    request: new Request("https://example.test/api/media/event-icons/event/a.png", {
+      headers: { "If-None-Match": '"etag"' },
+    }),
+  });
+  assert.equal(result.response.status, 404);
+  assert.equal(result.state.gets, 0);
 });
 
 test("公開entityでも危険MIMEまたは上限超過objectは404", async () => {

@@ -122,11 +122,19 @@ function boundedLimit(value: unknown): number {
 async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal);
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function cleanup(): void {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+    function onAbort(): void {
+      cleanup();
       reject(abortReason(signal!, "notification queue aborted"));
-    };
+    }
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
   throwIfAborted(signal);

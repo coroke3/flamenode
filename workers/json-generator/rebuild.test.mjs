@@ -500,6 +500,202 @@ test("rebuildTopNostalgicは新着100件と3年以上前のYouTube確認済み�
   assert.match(nostalgicFn, /if \(selection\.isNewDaySelection\)/);
 });
 
+test("top_nostalgic 同日再生成は RANDOM を再実行せず private 化動画を表示から外す", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(
+    new Date(now * 1000),
+  );
+  const queries = [];
+  const puts = [];
+  const previous = {
+    schema_version: 1,
+    generated_at: now - 10,
+    pool: [
+      { id: "n1", title: "N1", display_name: "Creator", youtube_video_id: "yt-1" },
+      { id: "n2", title: "N2", display_name: "Creator", youtube_video_id: "yt-2" },
+    ],
+    display: [
+      { id: "n1", title: "N1", display_name: "Creator", youtube_video_id: "yt-1" },
+      { id: "n2", title: "N2", display_name: "Creator", youtube_video_id: "yt-2" },
+    ],
+    shuffled_at: now - 100,
+    selection_day: today,
+  };
+  const env = {
+    DB: {
+      prepare(sql) {
+        const statement = {
+          sql,
+          bind(...args) {
+            queries.push({ sql, args });
+            return statement;
+          },
+          async all() {
+            if (sql.includes("json_each")) {
+              return { results: [{ id: "n1", title: "N1 refreshed", display_name: "Creator", youtube_video_id: "yt-1" }] };
+            }
+            return { results: [] };
+          },
+          async first() { return null; },
+          async run() { return { meta: { changes: 0 } }; },
+        };
+        return statement;
+      },
+      async batch() { return []; },
+    },
+    R2: {
+      async get(key) {
+        if (key === "top/sections/nostalgic.v1.json") return { async json() { return previous; } };
+        return null;
+      },
+      async head() { return null; },
+      async put(key, body) { puts.push({ key, body: JSON.parse(String(body)) }); },
+    },
+    KV: { async put() {} },
+  };
+
+  await rebuildTarget(env, "top_nostalgic", "global");
+
+  assert.equal(queries.filter((row) => row.sql.includes("ORDER BY RANDOM()")).length, 0);
+  const artifact = puts.find((entry) => entry.key === "top/sections/nostalgic.v1.json");
+  assert.ok(artifact);
+  assert.deepEqual(artifact.body.display.map((item) => item.id), ["n1"]);
+  assert.equal(artifact.body.display[0].title, "N1 refreshed");
+});
+
+test("top_nostalgic は JST 日付変更または壊れた artifact のときだけ RANDOM pool を再生成する", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(
+    new Date(now * 1000),
+  );
+  const yesterday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(
+    new Date((now - 86_400) * 1000),
+  );
+  const cases = [
+    {
+      name: "日付変更",
+      previous: {
+        schema_version: 1,
+        generated_at: now - 100,
+        pool: [{ id: "old", title: "Old", display_name: "Creator" }],
+        display: [{ id: "old", title: "Old", display_name: "Creator" }],
+        shuffled_at: now - 86_400,
+        selection_day: yesterday,
+      },
+    },
+    {
+      name: "壊れたpool",
+      previous: {
+        schema_version: 1,
+        generated_at: now - 100,
+        pool: [{ id: "broken" }],
+        display: [],
+        shuffled_at: now,
+        selection_day: today,
+      },
+    },
+    {
+      name: "pool上限超過",
+      previous: {
+        schema_version: 1,
+        generated_at: now - 100,
+        pool: Array.from({ length: 201 }, (_, index) => ({
+          id: `too-many-${index}`,
+          title: "Too many",
+          display_name: "Creator",
+        })),
+        display: [],
+        shuffled_at: now,
+        selection_day: today,
+      },
+    },
+    {
+      name: "pool重複ID",
+      previous: {
+        schema_version: 1,
+        generated_at: now - 100,
+        pool: [
+          { id: "duplicate", title: "Duplicate", display_name: "Creator" },
+          { id: "duplicate", title: "Duplicate", display_name: "Creator" },
+        ],
+        display: [{ id: "duplicate", title: "Duplicate", display_name: "Creator" }],
+        shuffled_at: now,
+        selection_day: today,
+      },
+    },
+    {
+      name: "pool非空でdisplay空",
+      previous: {
+        schema_version: 1,
+        generated_at: now - 100,
+        pool: [{ id: "pool-item", title: "Pool item", display_name: "Creator" }],
+        display: [],
+        shuffled_at: now,
+        selection_day: today,
+      },
+    },
+  ];
+
+  for (const { name, previous } of cases) {
+    const queries = [];
+    const puts = [];
+    const env = {
+      DB: {
+        prepare(sql) {
+          const statement = {
+            sql,
+            bind(...args) {
+              queries.push({ sql, args });
+              return statement;
+            },
+            async all() {
+              if (sql.includes("ORDER BY RANDOM()")) {
+                return {
+                  results: [{
+                    id: "fresh",
+                    title: "Fresh",
+                    display_name: "Creator",
+                    youtube_video_id: "yt-fresh",
+                  }],
+                };
+              }
+              return { results: [] };
+            },
+            async first() { return null; },
+            async run() { return { meta: { changes: 1 } }; },
+          };
+          return statement;
+        },
+        async batch() { return []; },
+      },
+      R2: {
+        async get(key) {
+          if (key === "top/sections/nostalgic.v1.json") {
+            return { async json() { return previous; } };
+          }
+          return null;
+        },
+        async head() { return null; },
+        async put(key, body) {
+          puts.push({ key, body: JSON.parse(String(body)) });
+        },
+      },
+      KV: { async put() {} },
+    };
+
+    await rebuildTarget(env, "top_nostalgic", "global");
+
+    assert.equal(
+      queries.filter((row) => row.sql.includes("ORDER BY RANDOM()")).length,
+      1,
+      name,
+    );
+    const artifact = puts.find((entry) => entry.key === "top/sections/nostalgic.v1.json");
+    assert.ok(artifact);
+    assert.deepEqual(artifact.body.display.map((item) => item.id), ["fresh"]);
+  }
+});
+
 test("ensureDailyTopNostalgicShuffleはJST日次でtop_nostalgic再生成をキュー登録する", () => {
   const fn = source.match(
     /export async function ensureDailyTopNostalgicShuffle[\s\S]*?(?=\/\*\*|export async function |async function )/,
@@ -975,4 +1171,16 @@ test("通常チャプターとメンバーチャプターは別queryで取得す
     videoFn,
     /allPublicChapters/,
   );
+});
+
+test("static related near-date lookup avoids an ABS full scan", () => {
+  const relatedFn = source.match(
+    /async function fetchStaticRelatedVideos[\s\S]*?(?=\nasync function )/,
+  )?.[0];
+
+  assert.ok(relatedFn);
+  assert.doesNotMatch(relatedFn, /ORDER BY ABS\(v\.scheduled_time/);
+  assert.match(relatedFn, /v\.scheduled_time <= \?/);
+  assert.match(relatedFn, /v\.scheduled_time > \?/);
+  assert.match(relatedFn, /nearDateCandidateLimit/);
 });

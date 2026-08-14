@@ -38,19 +38,57 @@ function mapSummaryToHeaderUser(
 export function usePublicAccountSummary(
   enabled: boolean,
   preserveLoggedInOnFailure = false,
+  lazy = false,
+  open = false,
 ): {
   user: PublicHeaderUser | null;
   loading: boolean;
   unavailable: boolean;
 } {
   const [user, setUser] = React.useState<PublicHeaderUser | null>(null);
-  const [loading, setLoading] = React.useState(enabled);
+  const [loading, setLoading] = React.useState(enabled && (!lazy || open));
   const [unavailable, setUnavailable] = React.useState(false);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  const fetchedOnceRef = React.useRef(false);
+  // Public header (lazy=false) already fetches on mount. Menu open/close must
+  // not turn that one request into a request per interaction, including when
+  // the first attempt ended in a temporary 503/network failure.
+  const nonLazyAttemptedRef = React.useRef(false);
+  const refreshRequestedRef = React.useRef(!lazy);
+  const mountedRef = React.useRef(false);
+  const inFlightRef = React.useRef<{
+    generation: number;
+    pendingGeneration: number | null;
+    promise: Promise<
+      | { kind: "summary"; summary: AccountSummaryResponse }
+      | { kind: "unavailable" }
+    >;
+  } | null>(null);
+  const refreshGenerationRef = React.useRef(0);
+  const enabledRef = React.useRef(enabled);
+  const preserveLoggedInOnFailureRef = React.useRef(preserveLoggedInOnFailure);
+  const lazyRef = React.useRef(lazy);
+  const openRef = React.useRef(open);
+
+  enabledRef.current = enabled;
+  preserveLoggedInOnFailureRef.current = preserveLoggedInOnFailure;
+  lazyRef.current = lazy;
+  openRef.current = open;
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!enabled) return;
-    const onActiveXChanged = () => setRefreshNonce((current) => current + 1);
+    const onActiveXChanged = () => {
+      refreshGenerationRef.current += 1;
+      refreshRequestedRef.current = true;
+      setRefreshNonce((current) => current + 1);
+    };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
     return () =>
       window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
@@ -63,48 +101,111 @@ export function usePublicAccountSummary(
       return;
     }
 
-    let cancelled = false;
+    // 管理画面などのSSR最小ヘッダーは、メニューを開くまでsummaryを読まない。
+    if (lazy && !open) {
+      setLoading(false);
+      return;
+    }
+    if (!lazy && nonLazyAttemptedRef.current && !refreshRequestedRef.current) {
+      setLoading(false);
+      return;
+    }
+    if (lazy && fetchedOnceRef.current && !refreshRequestedRef.current) {
+      setLoading(false);
+      return;
+    }
+
+    const generation = refreshGenerationRef.current;
+    const inFlight = inFlightRef.current;
+    if (inFlight) {
+      // StrictMode の effect 再実行や同一取得中のイベントでは同じ Promise を再利用し、
+      // 新しい世代だけを完了後に一度だけ再取得する。
+      if (inFlight.generation !== generation) {
+        inFlight.pendingGeneration = generation;
+      }
+      setLoading(true);
+      return;
+    }
+
+    refreshRequestedRef.current = false;
     setLoading(true);
 
-    void (async () => {
+    const request: {
+      generation: number;
+      pendingGeneration: number | null;
+      promise: Promise<
+        | { kind: "summary"; summary: AccountSummaryResponse }
+        | { kind: "unavailable" }
+      >;
+    } = {
+      generation,
+      pendingGeneration: null,
+      promise: Promise.resolve({ kind: "unavailable" }),
+    };
+    request.promise = (async () => {
       try {
         const response = await fetch("/api/account/summary", {
           credentials: "same-origin",
           cache: "no-store",
         });
         if (response.status === 503 || !response.ok) {
-          if (!cancelled) {
-            setUnavailable(true);
-            if (!preserveLoggedInOnFailure) setUser(null);
-          }
-          return;
+          return { kind: "unavailable" as const };
         }
-        const summary = (await response.json()) as AccountSummaryResponse;
-        if (!cancelled) {
-          if (summary.loggedIn) {
-            setUser(mapSummaryToHeaderUser(summary));
-            setUnavailable(false);
-          } else if (summary.unavailable) {
-            setUnavailable(true);
-          } else {
-            if (!preserveLoggedInOnFailure) setUser(null);
-            setUnavailable(false);
-          }
-        }
+        return {
+          kind: "summary" as const,
+          summary: (await response.json()) as AccountSummaryResponse,
+        };
       } catch {
-        if (!cancelled) {
-          setUnavailable(true);
-          if (!preserveLoggedInOnFailure) setUser(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+        return { kind: "unavailable" as const };
       }
     })();
+    inFlightRef.current = request;
 
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, preserveLoggedInOnFailure, refreshNonce]);
+    void request.promise.then((result) => {
+      if (!mountedRef.current || !enabledRef.current) return;
+
+      // ACTIVE_X_CHANGED_EVENT が取得中に発火した場合、古い summary は表示せず、
+      // 完了後に最新世代を一度だけ取り直す。
+      if (request.generation !== refreshGenerationRef.current) return;
+
+      if (result.kind === "summary") {
+        const summary = result.summary;
+        fetchedOnceRef.current = true;
+        if (summary.loggedIn) {
+          setUser(mapSummaryToHeaderUser(summary));
+          setUnavailable(false);
+        } else if (summary.unavailable) {
+          setUnavailable(true);
+        } else {
+          if (!preserveLoggedInOnFailureRef.current) setUser(null);
+          setUnavailable(false);
+        }
+      } else {
+        setUnavailable(true);
+        if (!preserveLoggedInOnFailureRef.current) setUser(null);
+      }
+    }).catch(() => {
+      if (!mountedRef.current || !enabledRef.current) return;
+      setUnavailable(true);
+      if (!preserveLoggedInOnFailureRef.current) setUser(null);
+    }).finally(() => {
+      if (inFlightRef.current !== request) return;
+      inFlightRef.current = null;
+      if (!lazyRef.current) nonLazyAttemptedRef.current = true;
+      if (!mountedRef.current || !enabledRef.current) return;
+
+      const needsRefresh =
+        refreshRequestedRef.current &&
+        (request.pendingGeneration !== null ||
+          request.generation !== refreshGenerationRef.current);
+      const canFetchNow = !lazyRef.current || openRef.current;
+      if (needsRefresh && canFetchNow) {
+        setRefreshNonce((current) => current + 1);
+      } else {
+        setLoading(false);
+      }
+    });
+  }, [enabled, preserveLoggedInOnFailure, lazy, open, refreshNonce]);
 
   return { user, loading, unavailable };
 }

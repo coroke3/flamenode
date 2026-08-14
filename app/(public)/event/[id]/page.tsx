@@ -33,6 +33,7 @@ import { UserAvatar } from "@/components/user/UserAvatar";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatCount } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
+import { buildAccentVars } from "@/lib/theme/accent";
 import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 import {
   canFallbackToDatabase,
@@ -158,9 +159,9 @@ function EventDetailView({
     has_public_profile?: boolean;
   }>;
 }): React.ReactElement {
-  const accentVar = {
-    "--event-accent": event.accent_color ?? "var(--accent-primary)",
-  } as React.CSSProperties;
+  const accentVar = event.accent_color?.trim()
+    ? buildAccentVars(event.accent_color, "dark")
+    : undefined;
   const now = Math.floor(Date.now() / 1000);
   const status = computeEventStatus(event);
   const accepting = isAcceptingEntries(event);

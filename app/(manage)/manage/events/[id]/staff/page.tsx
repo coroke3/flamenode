@@ -141,7 +141,7 @@ export default async function ManageEventStaffPage({
               <EventStaffReadOnlyList members={members} />
             </section>
           </div>
-          <p className="fn-alert" style={{ marginTop: 12 }}>
+          <p className="fn-alert manage-readonly-alert">
             この画面は閲覧のみです。メンバーの追加・編集には event.members 権限が必要です。
           </p>
         </section>

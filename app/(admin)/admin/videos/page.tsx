@@ -167,8 +167,10 @@ export default async function AdminVideosPage({
     return `/admin/videos?${sp.toString()}`;
   };
 
+  const useReviewTable = videoVisibilityGroupForFilter(status) === "review";
+
   const reviewSummaries =
-    db && rows.length > 0
+    useReviewTable && db && rows.length > 0
       ? await fetchVideoReviewSummaries(
           db,
           rows.map((r) => r.id),
@@ -189,8 +191,6 @@ export default async function AdminVideosPage({
       required_unanswered_count: summary?.required_unanswered_count ?? 0,
     };
   });
-
-  const useReviewTable = videoVisibilityGroupForFilter(status) === "review";
 
   return (
     <div>

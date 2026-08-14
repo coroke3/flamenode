@@ -268,6 +268,8 @@ export const events = sqliteTable("events", {
     enum: ["event", "collabo", "type", "other"],
   }).default("event"),
   explanation: text("explanation"),
+  /** YouTube概要欄のイベント共通テンプレート（plain text / 任意） */
+  youtube_description_template: text("youtube_description_template"),
   icon_url: text("icon_url"),
   img_url: text("img_url"),
   accent_color: text("accent_color"),
@@ -637,6 +639,9 @@ export const videoModerationCases = sqliteTable("video_moderation_cases", {
     t.case_type,
     t.status,
   ),
+  openDue: index("video_moderation_cases_open_due_idx")
+    .on(t.due_at)
+    .where(sql`status = 'open'`),
 }));
 
 export const videoEvents = sqliteTable(
@@ -885,6 +890,8 @@ export const notificationOutbox = sqliteTable(
       t.status,
       t.created_at,
     ),
+    // /admin/notifications の未指定フィルタは最新100件を作成日時で読む。
+    latestCreated: index("notification_outbox_created_idx").on(t.created_at),
     byProcessingStarted: index("notification_outbox_processing_started_idx").on(
       t.status,
       t.processing_started_at,

@@ -688,9 +688,10 @@ async function loadTopNostalgicPool(
   return nostalgic.results ?? [];
 }
 
-async function rehydrateTopPublicVideosById(
+async function rehydrateTopNostalgicVideosById(
   env: Env,
   ids: readonly string[],
+  nostalgiaCutoff: number,
   signal?: RebuildSignal,
 ): Promise<Record<string, unknown>[]> {
   if (ids.length === 0) return [];
@@ -698,12 +699,15 @@ async function rehydrateTopPublicVideosById(
   const rows = await env.DB.prepare(
     `SELECT ${TOP_PUBLIC_VIDEO_SELECT}
      FROM videos AS v
-     WHERE v.visibility_status = 'public'
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+       AND v.scheduled_time IS NOT NULL
+       AND v.scheduled_time <= ?
+       AND ${YOUTUBE_SYNCED_PLAYABLE_SQL}
        AND v.id IN (
          SELECT CAST(value AS TEXT)
          FROM json_each(?)
        )`,
-  ).bind(JSON.stringify(ids)).all();
+  ).bind(nostalgiaCutoff, JSON.stringify(ids)).all();
   throwIfAborted(signal);
   return rows.results ?? [];
 }
@@ -760,9 +764,45 @@ async function rebuildTopNostalgic(env: Env, signal?: RebuildSignal): Promise<vo
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
   const nostalgiaCutoff = unixYearsAgo(now, 3);
-  const nostalgicPool = await loadTopNostalgicPool(env, nostalgiaCutoff, signal);
   const previousPayload = await loadWorkerR2Json(env, TOP_NOSTALGIC_OBJECT_KEY, signal);
-  const previous = normalizeTopNostalgicSection(previousPayload);
+  const previousRecord =
+    previousPayload && typeof previousPayload === "object"
+      ? previousPayload as Record<string, unknown>
+      : null;
+  const previousPoolSource = previousRecord?.pool;
+  const previousDisplaySource = previousRecord?.display;
+  const previousArtifactWithinBounds =
+    Array.isArray(previousPoolSource) &&
+    previousPoolSource.length <= TOP_NOSTALGIA_POOL &&
+    Array.isArray(previousDisplaySource) &&
+    previousDisplaySource.length <= TOP_NOSTALGIA_LIMIT;
+  // 上限超過のR2 payloadはnormalize前に捨て、壊れたartifactによる過剰なCPU/D1誘発を防ぐ。
+  const normalizedPrevious = previousArtifactWithinBounds
+    ? normalizeTopNostalgicSection(previousPayload)
+    : null;
+  // normalizeVideoItems は不正行を捨てるため、要素数が変わった artifact は壊れた pool として扱う。
+  const previousArtifactIsStable =
+    normalizedPrevious != null &&
+    Array.isArray(previousPoolSource) &&
+    Array.isArray(previousDisplaySource) &&
+    normalizedPrevious.pool.length === previousPoolSource.length &&
+    normalizedPrevious.display.length === previousDisplaySource.length &&
+    new Set(normalizedPrevious.pool.map((item) => String(item.id))).size ===
+      normalizedPrevious.pool.length &&
+    new Set(normalizedPrevious.display.map((item) => String(item.id))).size ===
+      normalizedPrevious.display.length &&
+    (normalizedPrevious.pool.length === 0
+      ? normalizedPrevious.display.length === 0
+      : normalizedPrevious.display.length > 0 &&
+        normalizedPrevious.display.every((item) =>
+          normalizedPrevious.pool.some((poolItem) => poolItem.id === item.id),
+        ));
+  const previous =
+    previousArtifactIsStable &&
+    normalizedPrevious.pool.length <= TOP_NOSTALGIA_POOL &&
+    normalizedPrevious.display.length <= TOP_NOSTALGIA_LIMIT
+      ? normalizedPrevious
+      : null;
   const previousSelection = previous
     ? {
         displayIds: previous.display.map((item) => String(item.id)),
@@ -770,10 +810,38 @@ async function rebuildTopNostalgic(env: Env, signal?: RebuildSignal): Promise<vo
         shuffledAt: previous.shuffledAt,
       }
     : null;
-  const rehydrated =
-    previousSelection && previousSelection.selectionDay === jstDayKey(now)
-      ? await rehydrateTopPublicVideosById(env, previousSelection.displayIds, signal)
-      : [];
+  const sameDay = previousSelection?.selectionDay === jstDayKey(now);
+  const previousPoolIds = sameDay
+    ? previous?.pool.map((item) => String(item.id)) ?? []
+    : [];
+  const previousCandidateIds = sameDay
+    ? [...new Set([
+        ...previousPoolIds,
+        ...(previousSelection?.displayIds ?? []),
+      ])]
+    : [];
+  const rehydratedRows = sameDay
+    ? await rehydrateTopNostalgicVideosById(
+        env,
+        previousCandidateIds,
+        nostalgiaCutoff,
+        signal,
+      )
+    : [];
+  const rehydratedById = new Map(
+    rehydratedRows.map((row) => [String(row.id ?? ""), row]),
+  );
+  // 同日中は既存 pool をD1で再検証するだけで、ORDER BY RANDOM()を実行しない。
+  const nostalgicPool = sameDay
+    ? previousPoolIds
+        .map((id) => rehydratedById.get(id))
+        .filter((row): row is Record<string, unknown> => row != null)
+    : await loadTopNostalgicPool(env, nostalgiaCutoff, signal);
+  const rehydratedDisplay = sameDay
+    ? (previousSelection?.displayIds ?? [])
+        .map((id) => rehydratedById.get(id))
+        .filter((row): row is Record<string, unknown> => row != null)
+    : [];
   const selection = resolveNostalgicDisplaySelection({
     pool: nostalgicPool.map((row) => ({
       ...row,
@@ -783,7 +851,7 @@ async function rebuildTopNostalgic(env: Env, signal?: RebuildSignal): Promise<vo
     now,
     limit: TOP_NOSTALGIA_LIMIT,
     rehydrateById: () =>
-      rehydrated.map((row) => ({
+      rehydratedDisplay.map((row) => ({
         ...row,
         id: String(row.id ?? ""),
       })),
@@ -1945,22 +2013,54 @@ async function fetchStaticRelatedVideos(
   }
   throwIfAborted(signal);
 
+  const nearDateCandidateLimit = Math.min(16, nearDateLimit * 3);
+  // Keep the near-date lookup indexable. A single ABS sort scans every public
+  // video; two bounded range scans use the existing scheduled-time indexes and
+  // are merged in memory to preserve the original distance/score ordering.
   const nearDate =
     scheduledTime != null
-      ? mapRows(
-          (
-            await bindCurrent(
-              `SELECT ${STATIC_RELATED_VIDEO_SELECT}
-               FROM videos AS v
-               WHERE ${baseWhere}
-                 AND v.scheduled_time IS NOT NULL
-               ORDER BY ABS(v.scheduled_time - ?), COALESCE(v.score, 0) DESC
-               LIMIT ?`,
-              scheduledTime,
-              Math.min(16, nearDateLimit * 3),
-            ).all()
-          ).results ?? [],
-        )
+      ? await Promise.all([
+          bindCurrent(
+            `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+             FROM videos AS v
+             WHERE ${baseWhere}
+               AND v.scheduled_time IS NOT NULL
+               AND v.scheduled_time <= ?
+             ORDER BY v.scheduled_time DESC, COALESCE(v.score, 0) DESC
+             LIMIT ?`,
+            scheduledTime,
+            nearDateCandidateLimit,
+          ).all(),
+          bindCurrent(
+            `SELECT ${STATIC_RELATED_VIDEO_SELECT}
+             FROM videos AS v
+             WHERE ${baseWhere}
+               AND v.scheduled_time IS NOT NULL
+               AND v.scheduled_time > ?
+             ORDER BY v.scheduled_time ASC, COALESCE(v.score, 0) DESC
+             LIMIT ?`,
+            scheduledTime,
+            nearDateCandidateLimit,
+          ).all(),
+        ]).then(([previousResult, nextResult]) => {
+          const rows = [
+            ...mapRows(previousResult.results ?? []),
+            ...mapRows(nextResult.results ?? []),
+          ];
+          return rows
+            .sort((a, b) => {
+              const aDistance = Math.abs(
+                (a.scheduled_time ?? scheduledTime) - scheduledTime,
+              );
+              const bDistance = Math.abs(
+                (b.scheduled_time ?? scheduledTime) - scheduledTime,
+              );
+              if (aDistance !== bDistance) return aDistance - bDistance;
+              // STATIC_RELATED_VIDEO_SELECT uses COALESCE(score, 0).
+              return (b.video_score ?? 0) - (a.video_score ?? 0);
+            })
+            .slice(0, nearDateCandidateLimit);
+        })
       : [];
   throwIfAborted(signal);
 

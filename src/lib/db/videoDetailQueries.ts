@@ -7,6 +7,7 @@ import {
   inArray,
   isNotNull,
   lt,
+  lte,
   ne,
   notInArray,
   or,
@@ -395,18 +396,59 @@ export async function fetchRelatedVideos(
           })
       : [];
 
+  // `ORDER BY ABS(scheduled_time - ?)` forces SQLite to evaluate and sort the
+  // full public-video candidate set. Split the search into two bounded range
+  // scans so the existing `(visibility_status, scheduled_time)` indexes can
+  // stop after a small number of rows on each side of the current video.
+  const targetScheduledTime = current.scheduled_time;
+  const nearDateCandidateLimit = Math.min(16, nearDateLimit * 3);
   const nearDate: Row[] =
-    current.scheduled_time != null
-      ? await db
-          .select(baseSelect)
-          .from(videos)
-          .where(and(baseWhere, isNotNull(videos.scheduled_time))!)
-          .orderBy(
-            sql`ABS(${videos.scheduled_time} - ${current.scheduled_time})`,
-            desc(videoScoreExpr),
-          )
-          .limit(Math.min(16, nearDateLimit * 3))
-      : [];
+    targetScheduledTime == null
+      ? []
+      : await Promise.all([
+          db
+            .select(baseSelect)
+            .from(videos)
+            .where(
+              and(
+                baseWhere,
+                isNotNull(videos.scheduled_time),
+                lte(videos.scheduled_time, targetScheduledTime),
+              )!,
+            )
+            .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))
+            .limit(nearDateCandidateLimit),
+          db
+            .select(baseSelect)
+            .from(videos)
+            .where(
+              and(
+                baseWhere,
+                isNotNull(videos.scheduled_time),
+                gt(videos.scheduled_time, targetScheduledTime),
+              )!,
+            )
+            .orderBy(asc(videos.scheduled_time), desc(videoScoreExpr))
+            .limit(nearDateCandidateLimit),
+        ]).then(([previousRows, nextRows]) =>
+          [...previousRows, ...nextRows]
+            .sort((a, b) => {
+              const aDistance = Math.abs(
+                (a.scheduled_time ?? targetScheduledTime) - targetScheduledTime,
+              );
+              const bDistance = Math.abs(
+                (b.scheduled_time ?? targetScheduledTime) - targetScheduledTime,
+              );
+              if (aDistance !== bDistance) return aDistance - bDistance;
+
+              // Match the original SQL's secondary ordering. Equal-distance
+              // ties intentionally remain unspecified, as they were before.
+              // `videoScoreExpr` is COALESCE(score, 0) in SQL. Keep the
+              // in-memory merge identical even if a driver returns NULL.
+              return (b.video_score ?? 0) - (a.video_score ?? 0);
+            })
+            .slice(0, nearDateCandidateLimit),
+        );
 
   let initialCandidates = interleaveBuckets<Row>([
     { reason: "previous_date", rows: temporalPrevious },
@@ -465,20 +507,44 @@ export async function fetchEventPlaylistVideos(
   )[0];
   if (eventRow?.visibility_status !== "public") return [];
 
+  const logPlaylistFallback = (reason: "r2_missing" | "r2_invalid" | "r2_incomplete" | "r2_error") => {
+    console.warn(JSON.stringify({
+      event: "event_playlist_d1_fallback",
+      reason,
+      event_id: eventId,
+    }));
+  };
+
+  let object: R2ObjectBody | null = null;
+  let readError = false;
   try {
-    const object = await getEnv().BUCKET.get(eventPlaylistObjectKey(eventId));
-    if (object) {
-      const payload = JSON.parse(await object.text()) as StaticEventPlaylistPayload;
-      const normalized = normalizeStaticEventPlaylist(payload, eventId);
-      if (
-        normalized &&
-        (normalized.complete || normalized.items.length >= limit)
-      ) {
-        return uniqueBy(normalized.items.slice(0, limit), (row) => row.id);
+    object = await getEnv().BUCKET.get(eventPlaylistObjectKey(eventId));
+  } catch {
+    readError = true;
+    logPlaylistFallback("r2_error");
+  }
+
+  if (object) {
+    let raw: string | null = null;
+    try {
+      raw = await object.text();
+    } catch {
+      logPlaylistFallback("r2_error");
+    }
+    if (raw !== null) {
+      try {
+        const payload = JSON.parse(raw) as StaticEventPlaylistPayload;
+        const normalized = normalizeStaticEventPlaylist(payload, eventId);
+        if (normalized && (normalized.complete || normalized.items.length >= limit)) {
+          return uniqueBy(normalized.items.slice(0, limit), (row) => row.id);
+        }
+        logPlaylistFallback(normalized ? "r2_incomplete" : "r2_invalid");
+      } catch {
+        logPlaylistFallback("r2_invalid");
       }
     }
-  } catch {
-    // R2/context failure is non-fatal: retain the existing D1 semantics below.
+  } else if (!readError) {
+    logPlaylistFallback("r2_missing");
   }
 
   const rows = await db

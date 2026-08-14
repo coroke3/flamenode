@@ -7,6 +7,10 @@ import {
   type CustomQuestionType,
   type CustomQuestionVisibility,
 } from "../video/customQuestions.ts";
+import {
+  MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  normalizeYoutubeDescriptionTemplate,
+} from "../event/youtubeDescriptionTemplate.ts";
 
 export type EventRow = typeof events.$inferSelect;
 export type EventTemplateQuestionRow = {
@@ -41,6 +45,7 @@ export interface EventTemplateQuestionDefinition {
 export interface EventTemplateSnapshot {
   event_type: "event" | "collabo" | "type" | "other";
   explanation: string | null;
+  youtube_description_template: string | null;
   icon_url: string | null;
   img_url: string | null;
   accent_color: string | null;
@@ -58,6 +63,54 @@ export interface EventTemplateSnapshot {
   review_settings: string | null;
   editable_fields: string | null;
   repeat_rules: string | null;
+}
+
+const EVENT_TEMPLATE_EVENT_TYPES = [
+  "event",
+  "collabo",
+  "type",
+  "other",
+] as const;
+const EVENT_TEMPLATE_SLOT_TYPES = ["time", "count"] as const;
+const EVENT_TEMPLATE_SLOT_VISIBILITY_MODES = [
+  "public_name",
+  "anonymous",
+  "hidden",
+] as const;
+
+function isEventTemplateEventType(
+  value: unknown,
+): value is EventTemplateSnapshot["event_type"] {
+  return (
+    typeof value === "string" &&
+    (EVENT_TEMPLATE_EVENT_TYPES as readonly string[]).includes(value)
+  );
+}
+
+function isEventTemplateSlotType(
+  value: unknown,
+): value is EventTemplateSnapshot["slot_type"] {
+  return (
+    typeof value === "string" &&
+    (EVENT_TEMPLATE_SLOT_TYPES as readonly string[]).includes(value)
+  );
+}
+
+function isEventTemplateSlotVisibilityMode(
+  value: unknown,
+): value is EventTemplateSnapshot["slot_visibility_mode"] {
+  return (
+    typeof value === "string" &&
+    (EVENT_TEMPLATE_SLOT_VISIBILITY_MODES as readonly string[]).includes(value)
+  );
+}
+
+function nullableSnapshotString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function finiteSnapshotNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function questionRowToTemplateDefinition(
@@ -149,6 +202,7 @@ export function snapshotFromEvent(
   return {
     event_type: (event.event_type ?? "event") as EventTemplateSnapshot["event_type"],
     explanation: event.explanation,
+    youtube_description_template: event.youtube_description_template,
     icon_url: event.icon_url,
     img_url: event.img_url,
     accent_color: event.accent_color,
@@ -181,28 +235,68 @@ export function parseEventTemplateSnapshot(
       custom_question_definitions?: unknown;
     };
     if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.event_type || !parsed.slot_type) return null;
+    if (
+      !isEventTemplateEventType(parsed.event_type) ||
+      !isEventTemplateSlotType(parsed.slot_type)
+    ) {
+      return null;
+    }
+    const slotVisibilityMode = parsed.slot_visibility_mode ?? "public_name";
+    if (!isEventTemplateSlotVisibilityMode(slotVisibilityMode)) return null;
     const { custom_question_definitions } = parsed;
     const snapshot: Omit<EventTemplateSnapshot, "custom_question_definitions"> = {
       event_type: parsed.event_type,
-      explanation: parsed.explanation ?? null,
-      icon_url: parsed.icon_url ?? null,
-      img_url: parsed.img_url ?? null,
-      accent_color: parsed.accent_color ?? null,
-      allow_user_video_event_links: parsed.allow_user_video_event_links ?? 0,
-      allow_unslotted_posts: parsed.allow_unslotted_posts ?? 0,
-      allow_user_video_edits: parsed.allow_user_video_edits ?? 0,
-      user_video_edit_permission_keys_json:
-        parsed.user_video_edit_permission_keys_json ?? null,
-      video_form_settings_json: parsed.video_form_settings_json ?? null,
-      max_slots_per_video: parsed.max_slots_per_video ?? 1,
-      slot_part_gap_minutes: parsed.slot_part_gap_minutes ?? 15,
+      explanation: nullableSnapshotString(parsed.explanation),
+      // Templates are user-authored plain text. Do not let malformed legacy
+      // snapshots (for example a number/object or an oversized string) leak
+      // into EventForm. Keep the same normalization and limit as the live form.
+      youtube_description_template: (() => {
+        if (typeof parsed.youtube_description_template !== "string") {
+          return null;
+        }
+        const normalized = normalizeYoutubeDescriptionTemplate(
+          parsed.youtube_description_template,
+        );
+        return normalized &&
+          normalized.length <= MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH
+          ? normalized
+          : null;
+      })(),
+      icon_url: nullableSnapshotString(parsed.icon_url),
+      img_url: nullableSnapshotString(parsed.img_url),
+      accent_color: nullableSnapshotString(parsed.accent_color),
+      allow_user_video_event_links: finiteSnapshotNumber(
+        parsed.allow_user_video_event_links,
+        0,
+      ),
+      allow_unslotted_posts: finiteSnapshotNumber(
+        parsed.allow_unslotted_posts,
+        0,
+      ),
+      allow_user_video_edits: finiteSnapshotNumber(
+        parsed.allow_user_video_edits,
+        0,
+      ),
+      user_video_edit_permission_keys_json: nullableSnapshotString(
+        parsed.user_video_edit_permission_keys_json,
+      ),
+      video_form_settings_json: nullableSnapshotString(
+        parsed.video_form_settings_json,
+      ),
+      max_slots_per_video: finiteSnapshotNumber(
+        parsed.max_slots_per_video,
+        1,
+      ),
+      slot_part_gap_minutes: finiteSnapshotNumber(
+        parsed.slot_part_gap_minutes,
+        15,
+      ),
       slot_type: parsed.slot_type,
-      slot_visibility_mode: parsed.slot_visibility_mode ?? "public_name",
-      parts_json: parsed.parts_json ?? null,
-      review_settings: parsed.review_settings ?? null,
-      editable_fields: parsed.editable_fields ?? null,
-      repeat_rules: parsed.repeat_rules ?? null,
+      slot_visibility_mode: slotVisibilityMode,
+      parts_json: nullableSnapshotString(parsed.parts_json),
+      review_settings: nullableSnapshotString(parsed.review_settings),
+      editable_fields: nullableSnapshotString(parsed.editable_fields),
+      repeat_rules: nullableSnapshotString(parsed.repeat_rules),
     };
     return {
       ...snapshot,
@@ -222,6 +316,7 @@ export function snapshotToFormInitial(
   return {
     event_type: snapshot.event_type,
     explanation: snapshot.explanation,
+    youtube_description_template: snapshot.youtube_description_template,
     icon_url: snapshot.icon_url,
     img_url: snapshot.img_url,
     accent_color: snapshot.accent_color,

@@ -138,7 +138,7 @@ export default async function ManageNotificationsPage({
   );
 
   return (
-    <div>
+    <div className="manage-notifications">
       <ManageActiveXNotice
         userId={user.id}
         activeXUserId={user.active_x_user_id}
@@ -170,16 +170,7 @@ export default async function ManageNotificationsPage({
         </div>
       ) : null}
 
-      <form
-        method="get"
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          marginBottom: 12,
-          alignItems: "center",
-        }}
-      >
+      <form method="get" className="manage-notification-filters">
         <AutoSubmitSelect
           name="event"
           defaultValue={eventFilter}
@@ -229,8 +220,8 @@ export default async function ManageNotificationsPage({
           <thead>
             <tr>
               <th>通知</th>
-              <th style={{ width: 130 }}>日時</th>
-              <th style={{ width: 120 }}>イベント</th>
+              <th className="manage-notification-th-date">日時</th>
+              <th className="manage-notification-th-event">イベント</th>
             </tr>
           </thead>
           <tbody>
@@ -244,11 +235,11 @@ export default async function ManageNotificationsPage({
                     }
                   />
                 </td>
-                <td style={{ verticalAlign: "top" }}>
+                <td className="manage-notification-date-cell">
                   <div>{formatUnix(notification.created_at)}</div>
                   <div className="fn-td-muted">{formatRelative(notification.created_at)}</div>
                 </td>
-                <td style={{ verticalAlign: "top", fontSize: 12 }}>
+                <td className="manage-notification-event-cell">
                   {notification.event_id ? (
                     <Link href={`/manage/events/${notification.event_id}`}>
                       {eventTitleById.get(notification.event_id)?.slice(0, 24) ??

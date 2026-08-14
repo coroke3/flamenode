@@ -16,6 +16,10 @@ import { ensureTopSectionsOnR2 } from "../json-generator/topSectionsEnqueue.ts";
 import { ensureUsersSharedInputsOnR2 } from "../json-generator/usersSharedInputsEnqueue.ts";
 import { ensureDeployGlobalRebuilds } from "../json-generator/deployGlobalRebuildEnqueue.ts";
 import { ensureDailyTopNostalgicShuffle } from "../json-generator/rebuild.ts";
+import {
+  ensureEventPlaylistBackfill,
+  EVENT_PLAYLIST_BACKFILL_MAX_STATEMENTS,
+} from "../json-generator/eventPlaylistBackfill.ts";
 import { ensureYoutubeRelatedSharedInputsOnR2 } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
@@ -24,11 +28,15 @@ import {
   runJob,
   throwIfJobFailed,
 } from "../shared/runJob.ts";
-import { isD1BudgetExhausted } from "../shared/d1Budget.ts";
+import {
+  D1_QUERY_SOFT_LIMIT,
+  isD1BudgetExhausted,
+} from "../shared/d1Budget.ts";
 import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
 import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
 import { handleStaticRebuildWakeQueue } from "./staticRebuildWakeQueue.ts";
+import { reconcilePendingXIdSlotBinds } from "./xIdSlotBindRecovery.ts";
 
 export interface Env {
   DB: D1Database;
@@ -109,6 +117,37 @@ export async function runContentJobsRecovery(
             priority: "high",
             signal,
           });
+          // Recovery内のstale lease復旧を先に済ませ、後続の投影修復のbudget判定へ含める。
+          await reconcileStaleQueue(rebuildEnv, now, signal);
+          let xIdSlotBindRecovery = { processed: 0, completed: 0, bound: 0, failed: 0, hasMore: false };
+          try {
+            xIdSlotBindRecovery = await reconcilePendingXIdSlotBinds(
+              rebuildEnv,
+              signal,
+              rebuildEnv.d1Budget,
+            );
+          } catch (error) {
+            console.error("[content-jobs] X ID slot bind recovery failed", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          let eventPlaylistBackfill = 0;
+          if (
+            rebuildEnv.d1Budget.statements +
+              EVENT_PLAYLIST_BACKFILL_MAX_STATEMENTS <=
+            D1_QUERY_SOFT_LIMIT
+          ) {
+            try {
+              eventPlaylistBackfill = await ensureEventPlaylistBackfill(
+                rebuildEnv,
+                signal,
+              );
+            } catch (error) {
+              console.error("[content-jobs] event playlist projection repair failed", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
           let nostalgicDailyShuffle = 0;
           try {
             nostalgicDailyShuffle = await ensureDailyTopNostalgicShuffle(
@@ -126,6 +165,8 @@ export async function runContentJobsRecovery(
             missingUsersSharedInputs > 0 ||
             missingTopSlotStats > 0 ||
             missingTopSections > 0 ||
+            eventPlaylistBackfill > 0 ||
+            xIdSlotBindRecovery.bound > 0 ||
             nostalgicDailyShuffle > 0
           ) {
             await sendWorkerQueueWakeBestEffort({
@@ -136,7 +177,6 @@ export async function runContentJobsRecovery(
               kv: env.KV,
             });
           }
-          await reconcileStaleQueue(rebuildEnv, now, signal);
           let staticRebuildHasMore = false;
           const rebuild = await runJob(
             "content-jobs",
@@ -150,7 +190,11 @@ export async function runContentJobsRecovery(
                   staticRebuildHasMore = true;
                   break;
                 }
-                const result = await processStaticRebuildQueue(rebuildEnv, signal);
+                const result = await processStaticRebuildQueue(
+                  rebuildEnv,
+                  signal,
+                  { staleQueueAlreadyReconciled: true },
+                );
                 aggregated = combineJobCounters(aggregated, result);
                 staticRebuildHasMore ||= Boolean(result.hasMore);
                 if (!result.hasMore) {

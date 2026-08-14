@@ -110,8 +110,10 @@ export const BLOCKED_RECHECK_MAX_VIDEOS_PER_RUN = 10;
 const NOT_BLOCKED_FOR_RELATED_SQL = `COALESCE(ym.youtube_privacy_status, '') <> 'private'
           AND COALESCE(ym.youtube_availability_status, '')
               NOT IN ('private', 'missing_or_private')`;
-const SYNCED_ELIGIBILITY_SQL = `COALESCE(ym.synced_at, 0)`;
-const FAILED_ELIGIBILITY_SQL = `COALESCE(ym.updated_at, 0)`;
+/** sync_idx(sync_status, synced_at) に適合させ、NULL は repair lane で扱う。 */
+const SYNCED_ELIGIBILITY_SQL = `ym.synced_at`;
+/** updated_at は NOT NULL 正本列なので COALESCE は不要。 */
+const FAILED_ELIGIBILITY_SQL = `ym.updated_at`;
 const SCHEDULED_VIDEO_FILTERS_SQL = `
           AND v.youtube_video_id IS NOT NULL
           AND v.youtube_video_id <> ''
@@ -405,16 +407,20 @@ const ACTIVE_PRIMARY_SYNCED_SQL = `SELECT v.id, v.youtube_video_id, ${SYNCED_ELI
         LIMIT ?4`;
 
 const ACTIVE_VIDEO_EVENTS_SYNCED_SQL = `SELECT v.id, v.youtube_video_id, ${SYNCED_ELIGIBILITY_SQL} AS eligibility
-         FROM events e
-         INNER JOIN video_events ve ON ve.event_id = e.id
-         INNER JOIN videos v ON v.id = ve.video_id
-         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+         FROM video_youtube_metadata ym
+         INNER JOIN videos v ON v.id = ym.video_id
         WHERE 1 = 1
-          ${ACTIVE_EVENT_FILTERS_SQL}
-          AND (v.primary_event_id IS NULL OR v.primary_event_id <> e.id)
           ${SCHEDULED_VIDEO_FILTERS_SQL}
           AND ym.sync_status = 'synced'
           AND ${SYNCED_ELIGIBILITY_SQL} <= ?1 - ?2
+          AND EXISTS (
+            SELECT 1
+              FROM video_events ve
+              INNER JOIN events e ON e.id = ve.event_id
+             WHERE ve.video_id = v.id
+               ${ACTIVE_EVENT_FILTERS_SQL}
+               AND (v.primary_event_id IS NULL OR v.primary_event_id <> e.id)
+          )
         ORDER BY ${SYNCED_ELIGIBILITY_SQL} ASC, v.id ASC
         LIMIT ?4`;
 
@@ -432,17 +438,21 @@ const ACTIVE_PRIMARY_FAILED_SQL = `SELECT v.id, v.youtube_video_id, ${FAILED_ELI
         LIMIT ?4`;
 
 const ACTIVE_VIDEO_EVENTS_FAILED_SQL = `SELECT v.id, v.youtube_video_id, ${FAILED_ELIGIBILITY_SQL} AS eligibility
-         FROM events e
-         INNER JOIN video_events ve ON ve.event_id = e.id
-         INNER JOIN videos v ON v.id = ve.video_id
-         INNER JOIN video_youtube_metadata ym ON ym.video_id = v.id
+         FROM video_youtube_metadata ym
+         INNER JOIN videos v ON v.id = ym.video_id
         WHERE 1 = 1
-          ${ACTIVE_EVENT_FILTERS_SQL}
-          AND (v.primary_event_id IS NULL OR v.primary_event_id <> e.id)
           ${SCHEDULED_VIDEO_FILTERS_SQL}
           AND ym.sync_status = 'failed'
           AND NOT (ym.sync_error LIKE 'permanent:%')
           AND ${FAILED_ELIGIBILITY_SQL} <= ?1 - ?2
+          AND EXISTS (
+            SELECT 1
+              FROM video_events ve
+              INNER JOIN events e ON e.id = ve.event_id
+             WHERE ve.video_id = v.id
+               ${ACTIVE_EVENT_FILTERS_SQL}
+               AND (v.primary_event_id IS NULL OR v.primary_event_id <> e.id)
+          )
         ORDER BY ${FAILED_ELIGIBILITY_SQL} ASC, v.id ASC
         LIMIT ?4`;
 
@@ -471,6 +481,38 @@ const DEFAULT_FAILED_SQL = `SELECT v.id, v.youtube_video_id, ${FAILED_ELIGIBILIT
           ORDER BY ${FAILED_ELIGIBILITY_SQL} ASC, v.id ASC
           LIMIT ?3`;
 
+/**
+ * synced_at 欠落の malformed metadata は通常 lane の COALESCE で隠さず、軽量 repair lane で回復する。
+ *
+ * private/missing は通常の scheduled lane から除外するが、ここまで
+ * `sync_status='synced'` のまま壊れている行を除外すると、synced_at が
+ * 永久に NULL のまま残る。repair lane では YouTube の現在値を再確認し、
+ * public/unlisted なら synced_at を再生成、private/missing なら failed
+ * へ遷移させるため、voided 以外を対象にする。
+ */
+const MALFORMED_SYNCED_SQL = `SELECT v.id, v.youtube_video_id
+           FROM video_youtube_metadata ym
+           INNER JOIN videos v ON v.id = ym.video_id
+          WHERE ym.sync_status = 'synced'
+            AND ym.synced_at IS NULL
+            AND v.youtube_video_id IS NOT NULL
+            AND v.youtube_video_id <> ''
+            AND v.visibility_status <> 'voided'
+          ORDER BY ym.updated_at ASC, v.id ASC
+          LIMIT ?1`;
+/** 通常候補に埋もれて永久放置しないため、1 invocationにboundedなrepair枠を確保する。 */
+export const MALFORMED_SYNC_REPAIR_MAX_VIDEOS_PER_RUN = 10;
+
+async function selectMalformedSyncedRows(
+  env: Env,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<SyncRow[]> {
+  if (limit <= 0) return [];
+  signal?.throwIfAborted();
+  return querySyncRows(env, MALFORMED_SYNCED_SQL, [limit], signal);
+}
+
 /** 開催中・通常期限のみ（pending / blocked は含めない）。 */
 async function selectScheduledSyncRows(
   env: Env,
@@ -497,7 +539,22 @@ async function selectScheduledSyncRows(
     ),
   );
 
-  const remaining = limit - selected.size;
+  // malformed synced rows are repaired after active lanes but before the
+  // default lane, so active eligibility and pending/default priority remain
+  // unchanged while NULL synced_at rows cannot be hidden indefinitely.
+  let remaining = limit - selected.size;
+  if (remaining > 0) {
+    appendUniqueRows(
+      selected,
+      await selectMalformedSyncedRows(
+        env,
+        Math.min(remaining, MALFORMED_SYNC_REPAIR_MAX_VIDEOS_PER_RUN),
+        signal,
+      ),
+    );
+  }
+
+  remaining = limit - selected.size;
   if (remaining > 0) {
     appendUniqueRows(
       selected,
@@ -567,33 +624,28 @@ async function selectSyncRows(
     return selectBlockedRecheckRows(env, now, maxVideos, signal);
   }
 
-  if (mode === "scheduled_only") {
-    if (options.includePending) {
-      const selected = new Map<string, SyncRow>();
-      appendUniqueRows(
-        selected,
-        await selectPendingSyncRows(env, maxVideos, signal),
-      );
-      const remaining = maxVideos - selected.size;
-      if (remaining > 0) {
-        appendUniqueRows(
-          selected,
-          await selectScheduledSyncRows(env, now, remaining, signal),
-        );
-      }
-      return [...selected.values()];
-    }
-    return selectScheduledSyncRows(env, now, maxVideos, signal);
-  }
-
   const selected = new Map<string, SyncRow>();
 
-  appendUniqueRows(
-    selected,
-    await selectPendingSyncRows(env, maxVideos, signal),
-  );
+  if (mode === "scheduled_only" && !options.includePending) {
+    const remaining = maxVideos - selected.size;
+    if (remaining > 0) {
+      appendUniqueRows(
+        selected,
+        await selectScheduledSyncRows(env, now, remaining, signal),
+      );
+    }
+    return [...selected.values()];
+  }
 
   let remaining = maxVideos - selected.size;
+  if (remaining > 0) {
+    appendUniqueRows(
+      selected,
+      await selectPendingSyncRows(env, remaining, signal),
+    );
+  }
+
+  remaining = maxVideos - selected.size;
   if (remaining > 0) {
     appendUniqueRows(
       selected,

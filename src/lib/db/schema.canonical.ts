@@ -61,6 +61,16 @@ export const xIdentityRequests = sqliteTable(
       { onDelete: "set null" },
     ),
     decided_at: integer("decided_at"),
+    /** 承認済み申請の予約枠X ID bindをrecovery可能にする状態。 */
+    slot_bind_status: text("slot_bind_status", {
+      enum: ["pending", "complete"],
+    })
+      .notNull()
+      .default("complete"),
+    slot_bind_attempt_count: integer("slot_bind_attempt_count")
+      .notNull()
+      .default(0),
+    slot_bind_updated_at: integer("slot_bind_updated_at"),
     requested_at: integer("requested_at").notNull(),
     updated_at: integer("updated_at").notNull(),
   },
@@ -79,6 +89,12 @@ export const xIdentityRequests = sqliteTable(
       t.status,
     ),
     parentIdx: index("x_identity_requests_parent_idx").on(t.parent_request_id),
+    pendingTypeIdx: index("x_identity_requests_pending_type_idx")
+      .on(t.request_type)
+      .where(sql`status = 'pending'`),
+    slotBindPendingIdx: index("x_identity_requests_slot_bind_pending_idx")
+      .on(t.slot_bind_updated_at, t.id)
+      .where(sql`status = 'approved' AND slot_bind_status = 'pending'`),
     shapeCheck: check(
       "x_identity_requests_shape_check",
       sql`(
@@ -167,6 +183,8 @@ export const events = sqliteTable(
       enum: ["event", "collabo", "type", "other"],
     }).default("event"),
     explanation: text("explanation"),
+    /** YouTube概要欄のイベント共通テンプレート（plain text / 任意） */
+    youtube_description_template: text("youtube_description_template"),
     icon_url: text("icon_url"),
     img_url: text("img_url"),
     accent_color: text("accent_color"),
@@ -434,6 +452,18 @@ export const slots = sqliteTable(
     byReservationGroup: index("slots_reservation_group_idx").on(
       t.reservation_group_id,
     ),
+    reservedUnboundByOwnerIdx: index(
+      "slots_reserved_unbound_by_owner_snapshot_idx",
+    )
+      .on(
+        t.reserved_by_user_id,
+        t.reserved_x_id_snapshot,
+        t.event_id,
+        t.start_time,
+        t.sort_order,
+        t.id,
+      )
+      .where(sql`status = 'reserved' AND x_user_id IS NULL`),
   }),
 );
 

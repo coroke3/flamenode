@@ -17,6 +17,7 @@ test("basic section snapshot excludes publish/questions/slots fields", () => {
     title: "Test",
     event_type: "event",
     explanation: "desc",
+    youtube_description_template: "{{title}}",
     icon_url: null,
     img_url: null,
     accent_color: "#fff",
@@ -48,6 +49,7 @@ test("basic section snapshot excludes publish/questions/slots fields", () => {
     "img_url",
     "start_time",
     "title",
+    "youtube_description_template",
   ]);
 });
 

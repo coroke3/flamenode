@@ -71,6 +71,10 @@ const [
   readFile(new URL("../../../app/(manage)/manage/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("../auth/ownership.ts", import.meta.url), "utf8"),
 ]);
+const xIdMergesPage = await readFile(
+  new URL("../../../app/(admin)/admin/x-id-merges/page.tsx", import.meta.url),
+  "utf8",
+);
 
 test("セキュリティ検査はLIMIT後の配列長ではなく全件数を返す", () => {
   assert.doesNotMatch(securityChecks, /const count = rows\.length/);
@@ -96,6 +100,10 @@ test("X ID統合影響件数は単一DB読取で取得する", () => {
   assert.doesNotMatch(xIdMergeImpact, /Promise\.all/);
   assert.equal((xIdMergeImpact.match(/SELECT COUNT\(\*\)/g) ?? []).length, 9);
   assert.match(xIdMergeImpact, /impact_source/);
+  assert.match(xIdMergeImpact, /fetchXIdMergeImpacts/);
+  assert.match(xIdMergeImpact, /source_ids/);
+  assert.match(xIdMergesPage, /fetchXIdMergeImpacts/);
+  assert.doesNotMatch(xIdMergesPage, /Promise\.all\(\s*requestRows\.map/);
 });
 
 test("権限整合性検査は独立読取を並列化し総件数を保持する", () => {

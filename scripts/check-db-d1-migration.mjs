@@ -98,7 +98,11 @@ function assertCanonicalD1(context, expectedCounts = null) {
       return sum + db.prepare(`PRAGMA table_info("${escaped}")`).all().length;
     }, 0);
     assert.equal(tables.length, 44, "D1 canonical table count");
-    assert.equal(columnCount, 438, "D1 canonical column count");
+    // Keep this baseline in sync with the additive migrations. 0057 adds the
+    // three slot-bind recovery columns and 0058 adds the event description
+    // template column; a stale count makes every empty-D1 preflight fail even
+    // though the migrated schema is valid.
+    assert.equal(columnCount, 442, "D1 canonical column count");
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(db.prepare("PRAGMA quick_check").get()?.quick_check, "ok");
     assert.equal(

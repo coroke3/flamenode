@@ -30,3 +30,15 @@ test("関連動画・再生リストは videos.creator_* のみを使う", () =>
   assertNoCreatorXUsersJoin(videoDetailQueries, "videoDetailQueries.ts");
   assert.match(videoDetailQueries, /videoMembers\.x_user_id/);
 });
+
+test("near-date lookup uses bounded scheduled-time ranges instead of an ABS sort", () => {
+  assert.doesNotMatch(
+    videoDetailQueries,
+    /sql`ABS\(\$\{videos\.scheduled_time\}/,
+    "near-date candidates must not use an ABS sort expression",
+  );
+  assert.match(videoDetailQueries, /lte\(videos\.scheduled_time, targetScheduledTime\)/);
+  assert.match(videoDetailQueries, /gt\(videos\.scheduled_time, targetScheduledTime\)/);
+  assert.match(videoDetailQueries, /b\.video_score \?\? 0/);
+  assert.match(videoDetailQueries, /a\.video_score \?\? 0/);
+});

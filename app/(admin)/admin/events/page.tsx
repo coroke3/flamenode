@@ -10,6 +10,7 @@ import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import {
   computeEventStatus,
+  acceptingEntriesWhere,
   eventStatusBadgeClass,
   eventStatusLabel,
   isAcceptingEntries,
@@ -59,13 +60,12 @@ export default async function AdminEventsPage({
   const q = (sp.q ?? "").trim();
 
   const db = getDatabase();
-  const allRows = await loadEvents(db, filter, sort, q);
+  // SQL の受付条件とバッジ判定で同じ秒境界を使い、一覧と表示ラベルの
+  // 一時的な不一致を防ぐ。
+  const now = Math.floor(Date.now() / 1000);
+  const allRows = await loadEvents(db, filter, sort, q, now);
 
-  // accepting フィルタはアプリ側で時刻判定
-  const rows =
-    filter === "accepting"
-      ? allRows.filter((ev) => isAcceptingEntries(ev))
-      : allRows;
+  const rows = allRows;
 
   return (
     <div>
@@ -141,7 +141,7 @@ export default async function AdminEventsPage({
         </thead>
         <tbody>
           {rows.map((ev) => {
-            const status = computeEventStatus(ev);
+            const status = computeEventStatus(ev, now);
             return (
               <tr key={ev.id}>
                 <td>
@@ -160,7 +160,7 @@ export default async function AdminEventsPage({
                   <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>
                     {eventStatusLabel(status)}
                   </span>
-                  {isAcceptingEntries(ev) ? (
+                  {isAcceptingEntries(ev, now) ? (
                     <span
                       className="fn-badge fn-badge-soft"
                       style={{ marginLeft: 6 }}
@@ -213,6 +213,7 @@ async function loadEvents(
   filter: FilterKey,
   sort: SortKey,
   q: string,
+  now: number,
 ): Promise<(typeof eventsTable.$inferSelect)[]> {
   if (!db) return [];
   const term = `%${q}%`;
@@ -222,6 +223,7 @@ async function loadEvents(
       ? eq(eventsTable.visibility_status, filter)
       : undefined,
     q ? or(like(eventsTable.title, term), like(eventsTable.id, term)) : undefined,
+    filter === "accepting" ? acceptingEntriesWhere(now) : undefined,
   ].filter((c): c is NonNullable<typeof c> => c !== undefined);
   const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
   const order =

@@ -184,7 +184,7 @@ export default async function ManageEventAudiencePage({
           ]}
         />
       ) : (
-        <FnTable className="manage-audience-table" style={{ marginTop: 16 }}>
+        <FnTable className="manage-audience-table">
           <thead>
             <tr>
               <th>参加者</th>

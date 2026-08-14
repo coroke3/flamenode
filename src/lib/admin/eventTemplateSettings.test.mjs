@@ -70,3 +70,63 @@ test("parseEventTemplateSnapshot normalizes an absent question definition list",
   assert.ok(snapshot);
   assert.deepEqual(snapshot.custom_question_definitions, []);
 });
+
+test("parseEventTemplateSnapshot rejects malformed description templates", () => {
+  const snapshot = parseEventTemplateSnapshot(
+    JSON.stringify(
+      baseEvent({
+        youtube_description_template: 12345,
+      }),
+    ),
+  );
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.youtube_description_template, null);
+});
+
+test("parseEventTemplateSnapshot rejects oversized description templates", () => {
+  const snapshot = parseEventTemplateSnapshot(
+    JSON.stringify(
+      baseEvent({
+        youtube_description_template: "x".repeat(10_001),
+      }),
+    ),
+  );
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.youtube_description_template, null);
+});
+
+test("parseEventTemplateSnapshot rejects invalid enum values", () => {
+  for (const overrides of [
+    { event_type: "unknown" },
+    { slot_type: "unknown" },
+    { slot_visibility_mode: "unknown" },
+  ]) {
+    assert.equal(
+      parseEventTemplateSnapshot(JSON.stringify(baseEvent(overrides))),
+      null,
+    );
+  }
+});
+
+test("parseEventTemplateSnapshot does not leak malformed scalar values", () => {
+  const snapshot = parseEventTemplateSnapshot(
+    JSON.stringify(
+      baseEvent({
+        explanation: { unexpected: true },
+        icon_url: { unexpected: true },
+        allow_user_video_edits: "not-a-number",
+        max_slots_per_video: Number.NaN,
+        parts_json: ["not", "a", "string"],
+      }),
+    ),
+  );
+
+  assert.ok(snapshot);
+  assert.equal(snapshot.explanation, null);
+  assert.equal(snapshot.icon_url, null);
+  assert.equal(snapshot.allow_user_video_edits, 0);
+  assert.equal(snapshot.max_slots_per_video, 1);
+  assert.equal(snapshot.parts_json, null);
+});

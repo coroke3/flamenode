@@ -40,6 +40,10 @@ type QueueRow = {
 
 type QueueOutcome = "processed" | "failed" | "skipped";
 type QueueMetrics = { d1_changes: number };
+export type ProcessStaticRebuildQueueOptions = {
+  /** Recovery Cron が同一 invocation の先頭で reconcile 済みなら重複実行を抑止する。 */
+  staleQueueAlreadyReconciled?: boolean;
+};
 function recordD1Changes(metrics: QueueMetrics | undefined, result: { meta?: { changes?: number } }): void {
   if (metrics) metrics.d1_changes += result.meta?.changes ?? 0;
 }
@@ -69,12 +73,20 @@ function throwIfAborted(signal: AbortSignal | undefined, fallback: string): void
 async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal, "static rebuild queue aborted");
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function cleanup(): void {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+    function onAbort(): void {
+      cleanup();
       if (signal?.reason instanceof Error) reject(signal.reason);
       else reject(new Error(signal?.reason === undefined ? "static rebuild queue aborted" : String(signal.reason)));
-    };
+    }
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
   throwIfAborted(signal, "static rebuild queue aborted");
@@ -113,6 +125,7 @@ export async function getOperationMode(env: Env): Promise<OperationMode> {
 export async function processStaticRebuildQueue(
   env: Env,
   signal?: AbortSignal,
+  options: ProcessStaticRebuildQueueOptions = {},
 ): Promise<{
   processed: number;
   failed: number;
@@ -126,12 +139,13 @@ export async function processStaticRebuildQueue(
   quota_stopped: boolean;
   hasMore: boolean;
 }> {
-  return processStaticRebuildQueueImpl(env, signal);
+  return processStaticRebuildQueueImpl(env, signal, options);
 }
 
 async function processStaticRebuildQueueImpl(
   env: Env,
   signal?: AbortSignal,
+  options: ProcessStaticRebuildQueueOptions = {},
 ): Promise<{
   processed: number;
   failed: number;
@@ -182,7 +196,11 @@ async function processStaticRebuildQueueImpl(
   const processLimit = queueLimitForMode(mode);
   const fetchLimit = processLimit + 1;
 
-  if (shouldReconcileStaleQueue(mode) && !isEnvD1BudgetExhausted(env)) {
+  if (
+    shouldReconcileStaleQueue(mode) &&
+    !options.staleQueueAlreadyReconciled &&
+    !isEnvD1BudgetExhausted(env)
+  ) {
     await reconcileStaleQueue(env, now, signal, metrics);
   }
   throwIfAborted(signal, "static rebuild queue aborted");

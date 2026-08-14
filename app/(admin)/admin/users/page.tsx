@@ -14,8 +14,8 @@ import {
 } from "@/lib/db/schema";
 import { formatRelative } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
-import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
+import { loadAdminXUserEnrichment } from "@/lib/admin/adminXUserEnrichment";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { GlobalEditableFieldsPanel } from "@/components/admin/GlobalEditableFieldsPanel";
@@ -49,7 +49,6 @@ type AdminXUserRow = {
   approval_status: "pending" | "approved" | "rejected" | "imported" | null;
   primary_auth_user_id: string | null;
   primary_auth_user_name: string | null;
-  primary_auth_user_image: string | null;
   linked_auth_user_count: number;
   active_holder_count: number;
 };
@@ -112,170 +111,45 @@ export default async function AdminUsersPage({
       const normalizedXQuery = normalizeXId(rawQuery);
       const escapedX = escapeLike(normalizedXQuery || rawQuery);
       const xTerm = `%${escapedX.toLowerCase()}%`;
-      const activeXJoin = and(
-        sql`lower(${xUsersTable.id}) = lower(${usersTable.active_x_user_id})`,
-        eq(xUsersTable.approval_status, "approved"),
-        sql`EXISTS (
-          SELECT 1 FROM ${xUserAccountLinks} active_link
-          WHERE active_link.x_user_id = ${xUsersTable.id}
-            AND active_link.auth_user_id = ${usersTable.id}
-        )`,
-      )!;
-
-      const queryFilter = q
-        ? or(
-            like(sql<string>`lower(${usersTable.name})`, lowerTerm),
-            like(sql<string>`lower(${usersTable.email})`, lowerTerm),
-            eq(usersTable.id, q),
-            like(sql<string>`lower(${xUsersTable.id})`, xTerm),
-            like(sql<string>`lower(${xUsersTable.x_name})`, lowerTerm),
-          )
-        : undefined;
-      const statusFilter =
-        status === "banned"
-          ? eq(usersTable.is_banned, 1)
-          : status === "admin"
-            ? eq(usersTable.role, "admin")
-            : status === "moderator"
-              ? eq(usersTable.role, "moderator")
-              : status === "active"
-                ? eq(usersTable.is_banned, 0)
-                : status === "can_create_events"
-                  ? eq(usersTable.can_create_events, 1)
-                : status === "tos_not_accepted"
-                  ? eq(usersTable.is_tos_accepted, 0)
-                  : status === "no_active_x"
-                    ? isNull(usersTable.active_x_user_id)
-                    : undefined;
-      // Discordタブは実Discordログイン済みだけ。旧形式インポートの空discord_idプレースホルダーはX IDタブ側。
-      const discordPrincipalFilter = isNotNull(usersTable.discord_id);
-      const where =
-        queryFilter && statusFilter
-          ? and(discordPrincipalFilter, queryFilter, statusFilter)
-          : queryFilter
-            ? and(discordPrincipalFilter, queryFilter)
-            : statusFilter
-              ? and(discordPrincipalFilter, statusFilter)
-              : discordPrincipalFilter;
-      const userOffset = activeView === "discord" ? offset : 0;
-      const userLimit =
-        activeView === "discord" || activeView === "permissions"
-          ? pageSize
-          : USERS_PAGE_SIZE;
-
-      userRows = await db
-        .select({
-          id: usersTable.id,
-          name: usersTable.name,
-          email: usersTable.email,
-          image: usersTable.image,
-          role: usersTable.role,
-          is_banned: usersTable.is_banned,
-          can_create_events: usersTable.can_create_events,
-          active_x_user_id: usersTable.active_x_user_id,
-          active_x_name: xUsersTable.x_name,
-          active_x_icon_url: xUsersTable.icon_url,
-          created_at: usersTable.created_at,
-        })
-        .from(usersTable)
-        .leftJoin(xUsersTable, activeXJoin)
-        .where(where)
-        .orderBy(desc(usersTable.created_at))
-        .limit(userLimit)
-        .offset(userOffset);
-
-      if (activeView === "discord" || activeView === "permissions") {
-        const countRow = (
-          await db
-            .select({ c: sql<number>`COUNT(DISTINCT ${usersTable.id})` })
-            .from(usersTable)
-            .leftJoin(xUsersTable, activeXJoin)
-            .where(where)
-            .limit(1)
-        )[0];
-        totalUsers = Number(countRow?.c ?? 0);
-      }
-
-      const userRowsWithIcons = await resolveMissingIcons(
-        db,
-        userRows.map((u) => ({
-          ...u,
-          creator_x_user_id: u.active_x_user_id,
-          icon_url: u.active_x_icon_url,
-        })),
-      );
-      userRows = userRowsWithIcons.map((u) => ({
-        ...u,
-        active_x_icon_url: u.icon_url,
-      }));
-
-      const xFilter = q
-        ? or(
-            like(sql<string>`lower(${xUsersTable.id})`, xTerm),
-            like(sql<string>`lower(${xUsersTable.x_name})`, lowerTerm),
-            sql`EXISTS (
-              SELECT 1
-              FROM ${xUserAccountLinks} link
-              INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
-              WHERE link.x_user_id = ${xUsersTable.id}
-                AND (
-                  lower(COALESCE(auth_user.name, '')) LIKE ${lowerTerm}
-                  OR auth_user.id = ${rawQuery}
-                )
-            )`,
-          )
-        : undefined;
-      const xLimit = activeView === "xid" ? pageSize : USERS_PAGE_SIZE * 2;
-      const xOffset = activeView === "xid" ? offset : 0;
-      xRows = await db
-        .select({
-          id: xUsersTable.id,
-          x_name: xUsersTable.x_name,
-          icon_url: xUsersTable.icon_url,
-          approval_status: xUsersTable.approval_status,
-          primary_auth_user_id: sql<string | null>`(
-            SELECT link.auth_user_id
-            FROM ${xUserAccountLinks} link
-            WHERE link.x_user_id = ${xUsersTable.id}
-            ORDER BY CASE WHEN link.link_role = 'owner' THEN 0 ELSE 1 END, link.created_at, link.auth_user_id
-            LIMIT 1
-          )`,
-          primary_auth_user_name: sql<string | null>`(
-            SELECT auth_user.name
-            FROM ${xUserAccountLinks} link
-            INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
-            WHERE link.x_user_id = ${xUsersTable.id}
-            ORDER BY CASE WHEN link.link_role = 'owner' THEN 0 ELSE 1 END, link.created_at, link.auth_user_id
-            LIMIT 1
-          )`,
-          primary_auth_user_image: sql<string | null>`(
-            SELECT auth_user.image
-            FROM ${xUserAccountLinks} link
-            INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
-            WHERE link.x_user_id = ${xUsersTable.id}
-            ORDER BY CASE WHEN link.link_role = 'owner' THEN 0 ELSE 1 END, link.created_at, link.auth_user_id
-            LIMIT 1
-          )`,
-          linked_auth_user_count: sql<number>`(
-            SELECT COUNT(*) FROM ${xUserAccountLinks} link
-            WHERE link.x_user_id = ${xUsersTable.id}
-          )`,
-          active_holder_count: sql<number>`(
-            SELECT COUNT(*) FROM ${usersTable} active_holder
-            WHERE lower(active_holder.active_x_user_id) = lower(${xUsersTable.id})
-              AND EXISTS (
-                SELECT 1 FROM ${xUserAccountLinks} active_link
-                WHERE active_link.x_user_id = ${xUsersTable.id}
-                  AND active_link.auth_user_id = active_holder.id
-              )
-          )`,
-        })
-        .from(xUsersTable)
-        .where(xFilter)
-        .orderBy(xUsersTable.id)
-        .limit(xLimit)
-        .offset(xOffset);
-      if (activeView === "xid") {
+      if (activeView === "permissions") {
+        permissionSettings =
+          (await db
+            .select({
+              default_editable_fields: systemSettings.default_editable_fields,
+              upcoming_editable_fields: systemSettings.upcoming_editable_fields,
+            })
+            .from(systemSettings)
+            .where(eq(systemSettings.id, "default"))
+            .limit(1))[0] ?? permissionSettings;
+      } else if (activeView === "xid") {
+        const xFilter = q
+          ? or(
+              like(sql<string>`lower(${xUsersTable.id})`, xTerm),
+              like(sql<string>`lower(${xUsersTable.x_name})`, lowerTerm),
+              sql`EXISTS (
+                SELECT 1
+                FROM ${xUserAccountLinks} link
+                INNER JOIN ${usersTable} auth_user ON auth_user.id = link.auth_user_id
+                WHERE link.x_user_id = ${xUsersTable.id}
+                  AND (
+                    lower(COALESCE(auth_user.name, '')) LIKE ${lowerTerm}
+                    OR auth_user.id = ${rawQuery}
+                  )
+              )`,
+            )
+          : undefined;
+        const baseRows = await db
+          .select({
+            id: xUsersTable.id,
+            x_name: xUsersTable.x_name,
+            icon_url: xUsersTable.icon_url,
+            approval_status: xUsersTable.approval_status,
+          })
+          .from(xUsersTable)
+          .where(xFilter)
+          .orderBy(xUsersTable.id)
+          .limit(pageSize)
+          .offset(offset);
         const countRow = (
           await db
             .select({ c: sql<number>`COUNT(*)` })
@@ -284,51 +158,135 @@ export default async function AdminUsersPage({
             .limit(1)
         )[0];
         totalXUsers = Number(countRow?.c ?? 0);
-      }
-
-      const xRowsWithIcons = await resolveMissingIcons(
-        db,
-        xRows.map((x) => ({
-          ...x,
-          creator_x_user_id: x.id,
-          icon_url: x.icon_url,
-        })),
-      );
-      xRows = xRowsWithIcons.map((x) => ({ ...x, icon_url: x.icon_url }));
-
-      const visibleUserIds = userRows.map((u) => u.id);
-      linkedXRows =
-        visibleUserIds.length > 0
-          ? await db
-              .select({
-                user_id: xUserAccountLinks.auth_user_id,
-                x_user_id: xUsersTable.id,
-                x_name: xUsersTable.x_name,
-                icon_url: xUsersTable.icon_url,
-                approval_status: xUsersTable.approval_status,
-              })
-              .from(xUserAccountLinks)
-              .innerJoin(xUsersTable, eq(xUsersTable.id, xUserAccountLinks.x_user_id))
-              .where(
-                and(
-                  inArray(xUserAccountLinks.auth_user_id, visibleUserIds),
-                  eq(xUsersTable.approval_status, "approved"),
-                )!,
-              )
-              .orderBy(xUsersTable.id)
-          : [];
-
-      permissionSettings =
-        (
+        const enrichment = await loadAdminXUserEnrichment(
+          db,
+          baseRows.map((row) => row.id),
+        );
+        xRows = baseRows.map((row) => ({
+          ...row,
+          ...(enrichment.get(row.id) ?? {
+            primary_auth_user_id: null,
+            primary_auth_user_name: null,
+            linked_auth_user_count: 0,
+            active_holder_count: 0,
+          }),
+        }));
+      } else {
+        // DiscordタブはDiscordログイン済みだけ。X情報は表示対象ユーザーの
+        // linked rowsを後段で一括取得し、一覧の行ごとのJOINを避ける。
+        // 旧形式インポートの空discord_idプレースホルダーはX IDタブ側。
+        const statusFilter =
+          status === "banned"
+            ? eq(usersTable.is_banned, 1)
+            : status === "admin"
+              ? eq(usersTable.role, "admin")
+              : status === "moderator"
+                ? eq(usersTable.role, "moderator")
+                : status === "active"
+                  ? eq(usersTable.is_banned, 0)
+                  : status === "can_create_events"
+                    ? eq(usersTable.can_create_events, 1)
+                    : status === "tos_not_accepted"
+                      ? eq(usersTable.is_tos_accepted, 0)
+                      : status === "no_active_x"
+                        ? isNull(usersTable.active_x_user_id)
+                        : undefined;
+        const queryFilter = q
+          ? or(
+              like(sql<string>`lower(${usersTable.name})`, lowerTerm),
+              like(sql<string>`lower(${usersTable.email})`, lowerTerm),
+              eq(usersTable.id, q),
+              sql`EXISTS (
+                SELECT 1
+                FROM ${xUserAccountLinks} active_link
+                INNER JOIN ${xUsersTable} active_x ON active_x.id = active_link.x_user_id
+                WHERE active_link.auth_user_id = ${usersTable.id}
+                  AND active_x.approval_status = 'approved'
+                  AND lower(active_x.id) = lower(${usersTable.active_x_user_id})
+                  AND (
+                    lower(active_x.id) LIKE ${xTerm}
+                    OR lower(active_x.x_name) LIKE ${lowerTerm}
+                  )
+              )`,
+            )
+          : undefined;
+        const discordPrincipalFilter = isNotNull(usersTable.discord_id);
+        const where = and(
+          discordPrincipalFilter,
+          queryFilter,
+          statusFilter,
+        )!;
+        userRows = await db
+          .select({
+            id: usersTable.id,
+            name: usersTable.name,
+            email: usersTable.email,
+            image: usersTable.image,
+            role: usersTable.role,
+            is_banned: usersTable.is_banned,
+            can_create_events: usersTable.can_create_events,
+            active_x_user_id: usersTable.active_x_user_id,
+            active_x_name: sql<string | null>`NULL`,
+            active_x_icon_url: sql<string | null>`NULL`,
+            created_at: usersTable.created_at,
+          })
+          .from(usersTable)
+          .where(where)
+          .orderBy(desc(usersTable.created_at))
+          .limit(pageSize)
+          .offset(offset);
+        const countRow = (
           await db
-            .select({
-              default_editable_fields: systemSettings.default_editable_fields,
-              upcoming_editable_fields: systemSettings.upcoming_editable_fields,
-            })
-            .from(systemSettings)
-            .where(eq(systemSettings.id, "default"))
+            .select({ c: sql<number>`COUNT(*)` })
+            .from(usersTable)
+            .where(where)
             .limit(1)
-        )[0] ?? permissionSettings;
+        )[0];
+        totalUsers = Number(countRow?.c ?? 0);
+
+        const visibleUserIds = userRows.map((u) => u.id);
+        linkedXRows =
+          visibleUserIds.length > 0
+            ? await db
+                .select({
+                  user_id: xUserAccountLinks.auth_user_id,
+                  x_user_id: xUsersTable.id,
+                  x_name: xUsersTable.x_name,
+                  icon_url: xUsersTable.icon_url,
+                  approval_status: xUsersTable.approval_status,
+                })
+                .from(xUserAccountLinks)
+                .innerJoin(xUsersTable, eq(xUsersTable.id, xUserAccountLinks.x_user_id))
+                .where(
+                  and(
+                    inArray(xUserAccountLinks.auth_user_id, visibleUserIds),
+                    eq(xUsersTable.approval_status, "approved"),
+                  )!,
+                )
+                .orderBy(xUsersTable.id)
+            : [];
+        const linkedByUser = new Map<string, CurrentLinkedXRow[]>();
+        for (const row of linkedXRows) {
+          if (!row.user_id) continue;
+          const rows = linkedByUser.get(row.user_id) ?? [];
+          rows.push(row);
+          linkedByUser.set(row.user_id, rows);
+        }
+        userRows = userRows.map((row) => {
+          const activeId = normalizeXId(row.active_x_user_id);
+          // Keep the old SQL JOIN fail-closed for NULL/empty active IDs.
+          const active = activeId
+            ? (linkedByUser.get(row.id) ?? []).find(
+                (link) => normalizeXId(link.x_user_id) === activeId,
+              )
+            : undefined;
+          return {
+            ...row,
+            active_x_name: active?.x_name ?? null,
+            active_x_icon_url: active?.icon_url ?? null,
+          };
+        });
+      }
     } catch (e) {
       console.error("[AdminUsersPage] fetch failed", e);
     }
@@ -539,7 +497,7 @@ function DiscordTable({
                   詳細
                 </Link>
                 <Link
-                  href={`/admin/audit?operator=${encodeURIComponent(u.id)}`}
+                  href={`/admin/audit?actor=${encodeURIComponent(u.id)}`}
                   className="fn-btn fn-btn-ghost fn-btn-sm"
                   title="このユーザーが実行した管理操作の監査ログ"
                 >

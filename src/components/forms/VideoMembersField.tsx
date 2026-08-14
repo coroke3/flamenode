@@ -17,6 +17,7 @@ import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
 import {
   scoreSimpleMemberSuggestion,
 } from "@/lib/video/memberSuggestionRank";
+import { writeTextToClipboard } from "@/lib/utils/clipboard";
 
 export type {
   VideoMemberChapterInput,
@@ -390,7 +391,13 @@ export function VideoMembersField({
     lines.push("追加したい情報:");
     lines.push("(ここに貼り付けてください)");
 
-    await navigator.clipboard.writeText(lines.join("\n"));
+    const copiedSuccessfully = await writeTextToClipboard(lines.join("\n"));
+    if (!copiedSuccessfully) {
+      setCsvWarning("CSVのコピーに失敗しました。表示された内容を手動で選択してください。");
+      setCopied(false);
+      return;
+    }
+    setCsvWarning(null);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };

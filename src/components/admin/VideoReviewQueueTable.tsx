@@ -93,37 +93,22 @@ export function VideoReviewQueueTable({
         {rows.map((v) => (
           <tr key={v.id}>
             <td className="manage-queue-col-thumb">
-              <div
-                style={{
-                  width: 88,
-                  aspectRatio: "16 / 9",
-                  background: "var(--bg-elevated)",
-                  borderRadius: "var(--radius-sm)",
-                  overflow: "hidden",
-                }}
-              >
+              <div className="manage-queue-thumb-frame">
                 {v.youtube_video_id ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={youtubeThumbUrl(v.youtube_video_id, "default") ?? ""}
                     alt=""
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    className="manage-queue-thumb-image"
                   />
                 ) : (
-                  <span
-                    style={{
-                      display: "grid",
-                      placeItems: "center",
-                      height: "100%",
-                      color: "var(--text-muted)",
-                    }}
-                  >
+                  <span className="manage-queue-thumb-placeholder">
                     <Icon name="youtube" size={16} aria-hidden />
                   </span>
                 )}
               </div>
             </td>
-            <td style={{ fontWeight: 600, minWidth: 160 }}>{v.title}</td>
+            <td className="manage-queue-title">{v.title}</td>
             <td>{v.display_name}</td>
             <td className="manage-queue-col-status">
               {visibilityCell(v.visibility_status, isManage)}
@@ -142,7 +127,7 @@ export function VideoReviewQueueTable({
                 <span className="fn-badge fn-badge-warning">なし</span>
               )}
             </td>
-            <td style={{ fontSize: 12, maxWidth: 140 }}>{v.stage_permission_summary}</td>
+            <td className="manage-queue-stage">{v.stage_permission_summary}</td>
             <td className="manage-queue-col-unanswered">
               {v.required_unanswered_count > 0 ? (
                 <span className="fn-badge fn-badge-warning">
@@ -156,16 +141,9 @@ export function VideoReviewQueueTable({
             </td>
             <td className="manage-queue-col-actions">
               <div
-                className={
-                  isManage
-                    ? "fn-console-row-actions manage-queue-actions"
-                    : undefined
-                }
-                style={
-                  isManage
-                    ? undefined
-                    : { display: "flex", gap: 4, flexWrap: "wrap" }
-                }
+                className={`approval-queue-actions${
+                  isManage ? " fn-console-row-actions manage-queue-actions" : ""
+                }`}
               >
                 {canApprove ? (
                   <Link
@@ -198,7 +176,7 @@ export function VideoReviewQueueTable({
         {rows.length === 0 ? (
           <tr>
             <td colSpan={9}>
-              <p className="fn-empty-message" style={{ padding: 16, textAlign: "center" }}>
+              <p className="fn-empty-message approval-queue-empty">
                 条件に合う作品がありません。
               </p>
             </td>

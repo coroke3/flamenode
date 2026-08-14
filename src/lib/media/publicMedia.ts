@@ -1,6 +1,8 @@
 import type { FlameNodeEnv } from "@/lib/cloudflare";
 
 export const MAX_PUBLIC_MEDIA_BYTES = 5 * 1024 * 1024;
+/** 公開entityのACLは動的に再評価するため、長期immutable cacheは使わない。 */
+export const PUBLIC_MEDIA_CACHE_CONTROL = "public, max-age=300, must-revalidate";
 
 const PUBLIC_MEDIA_NAMESPACES = [
   "video-icons",
@@ -97,6 +99,7 @@ LIMIT 1
 export async function servePublicMedia(
   env: Pick<FlameNodeEnv, "DB" | "BUCKET">,
   rawKey: string,
+  request?: Request,
 ): Promise<Response> {
   if (
     !rawKey ||
@@ -133,7 +136,18 @@ export async function servePublicMedia(
   const headers = new Headers();
   headers.set("content-type", contentType);
   headers.set("etag", obj.httpEtag);
-  headers.set("cache-control", "public, max-age=31536000, immutable");
+  headers.set("cache-control", PUBLIC_MEDIA_CACHE_CONTROL);
   headers.set("x-content-type-options", "nosniff");
+  const ifNoneMatch = request?.headers.get("If-None-Match");
+  if (
+    ifNoneMatch &&
+    ifNoneMatch.split(",").some((candidate) => {
+      const normalized = candidate.trim();
+      return normalized === "*" || normalized.replace(/^W\//, "") === obj.httpEtag;
+    })
+  ) {
+    // ACL・MIME・サイズ検証の後にだけ304を返す。非公開化後のcache bypassを防ぐ。
+    return new Response(null, { status: 304, headers });
+  }
   return new Response(obj.body, { headers });
 }

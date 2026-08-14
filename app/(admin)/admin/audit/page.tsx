@@ -29,6 +29,8 @@ interface Props {
     table?: string;
     operation?: string;
     actor?: string;
+    /** 旧ブックマーク互換。新規リンクは actor を使う。 */
+    operator?: string;
     record?: string;
     restore_status?: string;
     limit?: string;
@@ -96,7 +98,7 @@ export default async function AdminAuditPage({
   const viewMode = normalizeViewMode(sp.view);
   const tableFilter = (sp.table ?? "").trim();
   const operationFilter = (sp.operation ?? "").trim().toUpperCase();
-  const actorFilter = (sp.actor ?? "").trim();
+  const actorFilter = (sp.actor ?? sp.operator ?? "").trim();
   const recordFilter = (sp.record ?? "").trim();
   const restoreStatusFilter = (sp.restore_status ?? "").trim();
   const sinceFilter = (sp.since ?? "").trim();

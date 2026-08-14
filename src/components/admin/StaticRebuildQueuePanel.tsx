@@ -11,6 +11,7 @@ import {
   staticRebuildTargetLabel,
 } from "@/lib/admin/staticRebuildLabels";
 import { retryFailedStaticRebuild } from "@/lib/actions/static-rebuild-admin";
+import { writeTextToClipboard } from "@/lib/utils/clipboard";
 
 export type StaticRebuildRow = {
   id: string;
@@ -31,19 +32,35 @@ interface StaticRebuildQueuePanelProps {
 
 function CopyButton({ text, label }: { text: string; label: string }): React.ReactElement {
   const [copied, setCopied] = React.useState(false);
+  const [copyError, setCopyError] = React.useState(false);
   return (
-    <button
-      type="button"
-      className="fn-btn fn-btn-ghost fn-btn-sm"
-      onClick={async () => {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      }}
-      aria-label={`${label}をコピー`}
-    >
-      {copied ? "コピー済" : label}
-    </button>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <button
+        type="button"
+        className="fn-btn fn-btn-ghost fn-btn-sm"
+        onClick={() => {
+          void (async () => {
+            setCopyError(false);
+            const copiedSuccessfully = await writeTextToClipboard(text);
+            if (!copiedSuccessfully) {
+              setCopied(false);
+              setCopyError(true);
+              return;
+            }
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          })();
+        }}
+        aria-label={`${label}をコピー`}
+      >
+        {copied ? "コピー済" : label}
+      </button>
+      {copyError ? (
+        <span role="status" className="fn-muted" style={{ fontSize: 11 }}>
+          失敗
+        </span>
+      ) : null}
+    </span>
   );
 }
 

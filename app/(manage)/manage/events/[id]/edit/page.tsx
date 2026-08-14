@@ -106,6 +106,7 @@ export default async function ManageEventEditPage({
               | "type"
               | "other",
             explanation: event.explanation,
+            youtube_description_template: event.youtube_description_template,
             icon_url: event.icon_url,
             img_url: event.img_url,
             accent_color: event.accent_color,
@@ -134,20 +135,20 @@ export default async function ManageEventEditPage({
 
       {isAdmin ? (
         <section className="manage-section fn-console-panel fn-console-panel--danger">
-          <h2 className="fn-console-panel-title" style={{ color: "var(--accent-danger)" }}>
+          <h2 className="fn-console-panel-title manage-danger-title">
             危険操作
           </h2>
-          <div style={{ display: "grid", gap: 20 }}>
+          <div className="manage-danger-stack">
             <div>
               <strong>イベントIDを変更</strong>
-              <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
+              <p className="fn-muted fn-text-sm manage-danger-copy">
                 参照先と公開用データをまとめて移行します。旧URLは無効になります。
               </p>
               <RenameEventIdForm eventId={event.id} />
             </div>
             <div>
               <strong>イベントを非公開化</strong>
-              <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
+              <p className="fn-muted fn-text-sm manage-danger-copy">
                 イベントを非公開にすると、公開ページと新規募集を停止します。枠・運営設定・作品との紐付けは保持されます。
               </p>
               <DeleteEventForm eventId={event.id} redirectHref="/manage" />

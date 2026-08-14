@@ -1,11 +1,9 @@
 import "server-only";
 
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
-  events as eventsTable,
   notificationOutbox as notificationOutboxTable,
-  slots as slotsTable,
   systemSettings,
   videoModerationCases as videoModerationCasesTable,
   videoYoutubeMetadata as videoYoutubeMetadataTable,
@@ -25,7 +23,6 @@ export type AdminPendingCounts = {
   youtubeFailed: number;
   moderationOpen: number;
   moderationOverdue: number;
-  reservedOpenSlots: number;
 };
 
 export const EMPTY_ADMIN_PENDING_COUNTS: AdminPendingCounts = {
@@ -38,7 +35,6 @@ export const EMPTY_ADMIN_PENDING_COUNTS: AdminPendingCounts = {
   youtubeFailed: 0,
   moderationOpen: 0,
   moderationOverdue: 0,
-  reservedOpenSlots: 0,
 };
 
 export type AdminTopSnapshot = {
@@ -59,7 +55,6 @@ export async function fetchAdminTopSnapshot(
     notificationCounts,
     youtubeFailed,
     moderationCounts,
-    reservedOpenSlots,
     sys,
   ] = await Promise.all([
     db
@@ -81,7 +76,19 @@ export async function fetchAdminTopSnapshot(
             AND ${xIdentityRequestsTable.request_type} = 'revert_merge'
           THEN 1 ELSE 0 END)`,
       })
-      .from(xIdentityRequestsTable),
+      .from(xIdentityRequestsTable)
+      .where(
+        and(
+          eq(xIdentityRequestsTable.status, "pending"),
+          inArray(xIdentityRequestsTable.request_type, [
+            "new_link",
+            "existing_link",
+            "alias",
+            "merge",
+            "revert_merge",
+          ]),
+        )!,
+      ),
     db
       .select({
         notificationFailed: sql<number>`SUM(CASE
@@ -91,7 +98,10 @@ export async function fetchAdminTopSnapshot(
             AND ${notificationOutboxTable.processing_started_at} < ${processingCutoff}
           THEN 1 ELSE 0 END)`,
       })
-      .from(notificationOutboxTable),
+      .from(notificationOutboxTable)
+      .where(
+        inArray(notificationOutboxTable.status, ["failed", "processing"]),
+      ),
     db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videoYoutubeMetadataTable)
@@ -105,24 +115,8 @@ export async function fetchAdminTopSnapshot(
             AND ${videoModerationCasesTable.due_at} < ${now}
           THEN 1 ELSE 0 END)`,
       })
-      .from(videoModerationCasesTable),
-    db
-      .select({ c: sql<number>`COUNT(*)` })
-      .from(slotsTable)
-      .leftJoin(eventsTable, eq(eventsTable.id, slotsTable.event_id))
-      .where(
-        and(
-          eq(slotsTable.status, "reserved"),
-          eq(eventsTable.visibility_status, "public"),
-          sql`(${eventsTable.entry_start_time} IS NOT NULL OR ${eventsTable.entry_end_time} IS NOT NULL)`,
-          sql`(${eventsTable.entry_start_time} IS NULL OR ${eventsTable.entry_start_time} <= ${now})`,
-          sql`(${eventsTable.entry_end_time} IS NULL OR ${eventsTable.entry_end_time} >= ${now})`,
-          sql`(
-            COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) IS NULL
-            OR COALESCE(${eventsTable.end_time}, ${eventsTable.start_time}) > ${now}
-          )`,
-        ),
-      ),
+      .from(videoModerationCasesTable)
+      .where(eq(videoModerationCasesTable.status, "open")),
     db.select().from(systemSettings).where(eq(systemSettings.id, "default")).limit(1),
   ]);
 
@@ -138,7 +132,6 @@ export async function fetchAdminTopSnapshot(
       youtubeFailed: Number(youtubeFailed[0]?.c ?? 0),
       moderationOpen: Number(moderationCounts[0]?.moderationOpen ?? 0),
       moderationOverdue: Number(moderationCounts[0]?.moderationOverdue ?? 0),
-      reservedOpenSlots: Number(reservedOpenSlots[0]?.c ?? 0),
     },
     mode,
     isMaintenance: mode === "maintenance" ? 1 : 0,

@@ -2,7 +2,8 @@ import "server-only";
 
 import type { DB } from "@/lib/db/client";
 import { normalizeXId } from "@/lib/utils/xid";
-import { getLinkedXUsersForAuthUser, type LinkedXUser } from "./xIdentity";
+import type { LinkedXUser } from "./xIdentity";
+import { getApprovedLinkedXUserIds } from "./approvedX";
 
 /**
  * users.active_x_user_id を x_user_account_links 上の承認済み X 名義だけに制限する。
@@ -15,17 +16,29 @@ export async function resolveActiveXUserId(
   approvedLinkedRows?: LinkedXUser[],
 ): Promise<string | null> {
   const normalizedCurrent = normalizeXId(currentActiveXUserId) || null;
-  const linkedRows =
-    approvedLinkedRows ??
-    (await getLinkedXUsersForAuthUser(db, authUserId, {
-      approvedOnly: true,
-    }));
-  if (linkedRows.length === 0) return null;
+  // 呼び出し元から行を受け取る場合も、認可の正本である approval_status を
+  // この境界で再確認する。比較キーは legacy の大文字/空白を許容して正規化し、
+  // 戻り値は D1 の正本 ID 表記を維持する。同一名義の重複は1件に畳む。
+  const linkedIds = new Map<string, string>();
+  const linkedRawIds = approvedLinkedRows
+    ? approvedLinkedRows
+        .filter((row) => row.approval_status === "approved")
+        .map((row) => row.x_user_id)
+    : await getApprovedLinkedXUserIds(db, authUserId);
+  const linkedValues = linkedRawIds
+    .map((xUserId) => ({ raw: xUserId, normalized: normalizeXId(xUserId) }))
+    .filter(
+      (xUserId): xUserId is { raw: string; normalized: string } =>
+        Boolean(xUserId.normalized),
+    );
+  for (const { raw, normalized } of linkedValues) {
+    if (!linkedIds.has(normalized)) linkedIds.set(normalized, raw);
+  }
+  if (linkedIds.size === 0) return null;
 
-  const linkedIds = new Set(linkedRows.map((row) => row.x_user_id));
   if (normalizedCurrent && linkedIds.has(normalizedCurrent)) {
-    return normalizedCurrent;
+    return linkedIds.get(normalizedCurrent) ?? null;
   }
 
-  return linkedIds.size === 1 ? linkedRows[0]?.x_user_id ?? null : null;
+  return linkedIds.size === 1 ? Array.from(linkedIds.values())[0] ?? null : null;
 }
