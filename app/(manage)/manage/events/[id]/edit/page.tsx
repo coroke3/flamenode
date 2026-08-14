@@ -10,6 +10,7 @@ import { events as eventsTable } from "@/lib/db/schema";
 import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { EventForm } from "@/components/admin/EventForm";
 import { DeleteEventForm } from "@/components/admin/DeleteEventForm";
+import { RenameEventIdForm } from "@/components/admin/RenameEventIdForm";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { Icon } from "@/components/ui/Icon";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
@@ -136,10 +137,22 @@ export default async function ManageEventEditPage({
           <h2 className="fn-console-panel-title" style={{ color: "var(--accent-danger)" }}>
             危険操作
           </h2>
-          <p className="fn-muted fn-text-sm">
-            イベントを非公開にすると、公開ページと新規募集を停止します。枠・運営設定・作品との紐付けは保持されます。
-          </p>
-          <DeleteEventForm eventId={event.id} redirectHref="/manage" />
+          <div style={{ display: "grid", gap: 20 }}>
+            <div>
+              <strong>イベントIDを変更</strong>
+              <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
+                参照先と公開用データをまとめて移行します。旧URLは無効になります。
+              </p>
+              <RenameEventIdForm eventId={event.id} />
+            </div>
+            <div>
+              <strong>イベントを非公開化</strong>
+              <p className="fn-muted fn-text-sm" style={{ marginTop: 6 }}>
+                イベントを非公開にすると、公開ページと新規募集を停止します。枠・運営設定・作品との紐付けは保持されます。
+              </p>
+              <DeleteEventForm eventId={event.id} redirectHref="/manage" />
+            </div>
+          </div>
         </section>
       ) : null}
     </ManageEventPageShell>
