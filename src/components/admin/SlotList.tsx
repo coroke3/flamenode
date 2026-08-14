@@ -14,6 +14,7 @@ import {
   deleteSlot,
   releaseSlot,
 } from "@/lib/actions/slot-admin";
+import { forceReleaseSubmittedSlot } from "@/lib/actions/slot-admin-danger";
 import { formatUnix } from "@/lib/utils/format";
 import { buildSlotParts } from "@/lib/utils/slotGrouping";
 
@@ -50,6 +51,7 @@ const STATUS_BADGE_CLASS: Record<SlotRowLite["status"], string> = {
 
 type ConfirmState =
   | { kind: "release"; id: string }
+  | { kind: "force-release-submitted"; id: string }
   | { kind: "delete"; id: string }
   | { kind: "batch-delete" }
   | { kind: "batch-release" }
@@ -61,11 +63,13 @@ export function SlotList({
   slots,
   slotPartGapSec = 15 * 60,
   variant = "admin",
+  canForceReleaseSubmitted = false,
 }: {
   eventId: string;
   slots: SlotRowLite[];
   slotPartGapSec?: number;
   variant?: "admin" | "manage";
+  canForceReleaseSubmitted?: boolean;
 }): React.ReactElement {
   const isManage = variant === "manage";
   const router = useRouter();
@@ -258,6 +262,7 @@ export function SlotList({
                     { timeOnly: true },
                   )}`
                 : (slot.slot_label ?? "—");
+              const isSubmitted = slot.status === "submitted";
 
               return (
                 <tr key={slot.id}>
@@ -347,16 +352,24 @@ export function SlotList({
                   <td>
                     <button
                       className="fn-btn fn-btn-ghost fn-btn-sm"
-                      disabled={busy || slot.status === "submitted"}
+                      disabled={busy || (isSubmitted && !canForceReleaseSubmitted)}
                       onClick={() =>
                         setConfirm({
                           kind:
-                            slot.status === "available" ? "delete" : "release",
+                            slot.status === "available"
+                              ? "delete"
+                              : isSubmitted
+                                ? "force-release-submitted"
+                                : "release",
                           id: slot.id,
                         })
                       }
                     >
-                      {slot.status === "available" ? "削除" : "解放"}
+                      {slot.status === "available"
+                        ? "削除"
+                        : isSubmitted
+                          ? "強制解放"
+                          : "解放"}
                     </button>
                   </td>
                 </tr>
@@ -368,9 +381,19 @@ export function SlotList({
 
       <ConfirmDialog
         open={confirm !== null}
-        title="枠操作を実行しますか?"
-        message="選択した枠の状態を変更します。"
-        confirmLabel="実行する"
+        title={
+          confirm?.kind === "force-release-submitted"
+            ? "提出済み枠を強制解放しますか?"
+            : "枠操作を実行しますか?"
+        }
+        message={
+          confirm?.kind === "force-release-submitted"
+            ? "作品は削除せず、提出済み枠との紐付けだけを解除して空き状態に戻します。連続枠の場合は同じ提出グループをまとめて解放します。"
+            : "選択した枠の状態を変更します。"
+        }
+        confirmLabel={
+          confirm?.kind === "force-release-submitted" ? "強制解放する" : "実行する"
+        }
         tone="danger"
         onCancel={() => setConfirm(null)}
         onConfirm={() => {
@@ -379,9 +402,17 @@ export function SlotList({
           setConfirm(null);
           const fd = new FormData();
           fd.set("event_id", eventId);
-          if (state.kind === "release" || state.kind === "delete") {
+          if (
+            state.kind === "release" ||
+            state.kind === "force-release-submitted" ||
+            state.kind === "delete"
+          ) {
             fd.set("slot_id", state.id);
-            void run(state.kind === "release" ? releaseSlot : deleteSlot, fd);
+            if (state.kind === "force-release-submitted") {
+              void run(forceReleaseSubmittedSlot, fd);
+            } else {
+              void run(state.kind === "release" ? releaseSlot : deleteSlot, fd);
+            }
             return;
           }
           fd.set("slot_ids", JSON.stringify(selectedIds));
