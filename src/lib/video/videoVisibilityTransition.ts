@@ -19,6 +19,20 @@ import {
 } from "@/lib/observability/flowTrace";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
 import {
+  eventBaseObjectKey,
+  eventComposedObjectKey,
+  eventSlotsObjectKey,
+} from "@/lib/publicData/staticEventDetailCore";
+import { RANDOM_VIDEO_POOL_OBJECT_KEY } from "@/lib/publicData/randomVideoPoolCore";
+import {
+  TOP_LATEST_OBJECT_KEY,
+  TOP_NOSTALGIC_OBJECT_KEY,
+  TOP_RECOMMENDED_OBJECT_KEY,
+  TOP_STATS_OBJECT_KEY,
+} from "@/lib/publicData/staticTopSectionsCore";
+import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
+import { YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY } from "@/lib/publicData/staticYoutubeRelatedBlocklistCore";
+import {
   readPublicVisibilityBlockedEntitiesManifest,
   writePublicVisibilityBlockedEntitiesManifest,
 } from "@/lib/publicData/publicVisibilityManifest";
@@ -65,8 +79,22 @@ function isPublicVisibility(status: string): boolean {
   return status === "public";
 }
 
-function videoPublicCacheKey(video: VideoRow): string {
-  return `videos/${video.youtube_video_id ?? video.id}.json`;
+function videoPublicCacheKeys(video: VideoRow): string[] {
+  const keys = new Set<string>([`videos/${video.id}.json`]);
+  if (video.youtube_video_id) {
+    keys.add(`videos/${video.youtube_video_id}.json`);
+  }
+  return [...keys];
+}
+
+function userPublicCacheKeys(xUserId: string | null): string[] {
+  if (!xUserId) return [];
+  const keys = [`users/${xUserId}.json`];
+  for (let page = 2; page <= STATIC_USER_MAX_PAGES; page += 1) {
+    keys.push(`users/${xUserId}/works/${page}.json`);
+    keys.push(`users/${xUserId}/collabs/${page}.json`);
+  }
+  return keys;
 }
 
 function buildFenceUpsertStatement(
@@ -111,6 +139,71 @@ function buildFenceUpsertStatement(
         updated_at: input.now,
       },
     });
+}
+
+export type VideoVisibilityFenceTransitionPlan = {
+  mutationStatements: BatchItem<"sqlite">[];
+  expectedMutationChanges: number[];
+  fenceToken: string | null;
+  depublicizedFromPublic: boolean;
+};
+
+/**
+ * 既存の videos 更新を別の atomic mutation（監査復元など）が担当する場合に、
+ * 公開状態フェンスだけを同じ D1 batch へ追加するための軽量 planner。
+ */
+export function planVideoVisibilityFenceTransition(
+  db: DB,
+  input: {
+    videoId: string;
+    previousStatus: VideoRow["visibility_status"];
+    nextStatus: VideoRow["visibility_status"];
+    actorUserId: string;
+    reason?: string | null;
+    now: number;
+  },
+): VideoVisibilityFenceTransitionPlan {
+  if (input.previousStatus === input.nextStatus) {
+    return {
+      mutationStatements: [],
+      expectedMutationChanges: [],
+      fenceToken: null,
+      depublicizedFromPublic: false,
+    };
+  }
+
+  const depublicizedFromPublic =
+    isPublicVisibility(input.previousStatus) &&
+    !isPublicVisibility(input.nextStatus);
+  const republished =
+    !isPublicVisibility(input.previousStatus) &&
+    isPublicVisibility(input.nextStatus);
+  if (!depublicizedFromPublic && !republished) {
+    return {
+      mutationStatements: [],
+      expectedMutationChanges: [],
+      fenceToken: null,
+      depublicizedFromPublic: false,
+    };
+  }
+
+  const fenceToken = generateId("vf");
+  return {
+    mutationStatements: [
+      buildFenceUpsertStatement(db, {
+        videoId: input.videoId,
+        fenceToken,
+        state: republished ? "release_pending" : "blocked",
+        reason: input.reason ?? null,
+        actorUserId: input.actorUserId,
+        now: input.now,
+        blockedAt: depublicizedFromPublic ? input.now : null,
+      }),
+    ],
+    expectedMutationChanges: [1],
+    fenceToken,
+    depublicizedFromPublic,
+  };
 }
 
 export async function planVideoVisibilityTransition(
@@ -237,8 +330,37 @@ export async function planVideoVisibilityTransition(
   mutationStatements.push(...queueBatch.statements);
   expectedMutationChanges.push(...queueBatch.expectedChanges);
 
-  const publicCacheKeys =
-    depublicizedFromPublic ? [videoPublicCacheKey(input.video)] : [];
+  // A previously public payload can remain in Cache API after a private or
+  // voided period. Remove it on every visibility transition so a later
+  // re-publication cannot serve that stale projection after its fence releases.
+  const publicCacheKeys = visibilityChanged
+    ? [
+        ...videoPublicCacheKeys(input.video),
+        "list/recent.json",
+        "list/popular.json",
+        "search-index-lite.json",
+        RANDOM_VIDEO_POOL_OBJECT_KEY,
+        YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
+        TOP_RECOMMENDED_OBJECT_KEY,
+        TOP_LATEST_OBJECT_KEY,
+        TOP_NOSTALGIC_OBJECT_KEY,
+        TOP_STATS_OBJECT_KEY,
+        "top.json",
+        ...(input.video.creator_x_user_id
+          ? [
+              ...userPublicCacheKeys(input.video.creator_x_user_id),
+              "users/index.json",
+              "users/public-x-icon-map.v1.json",
+              "users/pickup-creators.v1.json",
+            ]
+          : []),
+        ...[...new Set(input.eventIds)].filter(Boolean).flatMap((eventId) => [
+          eventComposedObjectKey(eventId),
+          eventBaseObjectKey(eventId),
+          eventSlotsObjectKey(eventId),
+        ]),
+      ]
+    : [];
 
   return {
     mutationStatements,
@@ -315,6 +437,11 @@ export async function compensateDepublicizationFenceOnD1Failure(
     videoId: string;
     fenceToken: string;
     traceId: string;
+    /**
+     * A non-public -> public transition also precommits a block. If its D1
+     * transaction is rolled back, the exact token must be removed.
+     */
+    allowNonPublicRollback?: boolean;
   },
 ): Promise<void> {
   const video = (
@@ -324,21 +451,10 @@ export async function compensateDepublicizationFenceOnD1Failure(
       .where(eq(videos.id, input.videoId))
       .limit(1)
   )[0];
-  if (!video || video.visibility_status !== "public") {
-    logFlowTrace({
-      flow: "video_visibility_depublicize",
-      phase: "compensate_skipped",
-      trace_id: input.traceId,
-      result: "skipped",
-      error_code: "video_not_public",
-    });
-    return;
-  }
-
   const fence = await getPublicVisibilityFence(db, "video", input.videoId);
   if (
     fence &&
-    fence.state === "blocked" &&
+    (fence.state === "blocked" || fence.state === "release_pending") &&
     fence.fence_token === input.fenceToken
   ) {
     logFlowTrace({
@@ -347,6 +463,20 @@ export async function compensateDepublicizationFenceOnD1Failure(
       trace_id: input.traceId,
       result: "skipped",
       error_code: "d1_fence_confirmed",
+    });
+    return;
+  }
+
+  if (
+    !video ||
+    (video.visibility_status !== "public" && !input.allowNonPublicRollback)
+  ) {
+    logFlowTrace({
+      flow: "video_visibility_depublicize",
+      phase: "compensate_skipped",
+      trace_id: input.traceId,
+      result: "skipped",
+      error_code: "video_not_public",
     });
     return;
   }
@@ -478,12 +608,13 @@ export async function handleVideoVisibilityMutationFailure(
   },
 ): Promise<{ ok: false; message: string }> {
   unstable_rethrow(error);
-  if (input.depublicizedFromPublic && input.fenceToken) {
+  if (input.fenceToken) {
     try {
       await compensateDepublicizationFenceOnD1Failure(db, {
         videoId: input.videoId,
         fenceToken: input.fenceToken,
         traceId: input.traceId,
+        allowNonPublicRollback: !input.depublicizedFromPublic,
       });
     } catch (compensateError) {
       const compensate_error_code = visibilityErrorCode(compensateError);

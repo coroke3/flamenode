@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   shouldUseIncomingQueueMetadata,
   pickHigherPriority,
+  resolveQueueReason,
 } from "./priorityCore.ts";
 
 test("低優先度入力は高優先度 reason を上書きしない", () => {
@@ -18,6 +19,25 @@ test("pickHigherPriority は高い方を返す", () => {
   assert.equal(pickHigherPriority("low", "normal"), "normal");
 });
 
+test("video visibility fence reason is never hidden by queue metadata merging", () => {
+  assert.equal(
+    resolveQueueReason("video_visibility_update", "event_id_rename", "high", "high"),
+    "video_visibility_update",
+  );
+  assert.equal(
+    resolveQueueReason("event_id_rename", "video_visibility_update", "high", "low"),
+    "video_visibility_update",
+  );
+  assert.equal(
+    resolveQueueReason("event_id_rename", "event_id_rename_old_cleanup", "high", "normal"),
+    "event_id_rename_old_cleanup",
+  );
+  assert.equal(
+    resolveQueueReason("event_id_rename_old_cleanup", "event_id_rename", "high", "high"),
+    "event_id_rename_old_cleanup",
+  );
+});
+
 test("atomic builder は latest done skip を持たない", async () => {
   const source = await readFile(new URL("./enqueue.ts", import.meta.url), "utf8");
   const batchFn = source.slice(
@@ -29,6 +49,7 @@ test("atomic builder は latest done skip を持たない", async () => {
   assert.doesNotMatch(batchFn, /latest_static_rebuild_queue/);
   assert.match(source, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0/);
   assert.match(batchFn, /ON CONFLICT\(target_type, target_id\) WHERE status IN \('pending', 'processing'\)/);
+  assert.match(batchFn, /event_id_rename_old_cleanup/);
   assert.match(batchFn, /FROM json_each\(\$\{payload\}\)/);
   assert.doesNotMatch(batchFn, /shouldUseIncomingQueueMetadata/);
 });

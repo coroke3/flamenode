@@ -114,6 +114,12 @@ import {
 import { enqueueComposerFollowUps, enqueuePerTargetComposerFollowUp } from "./followUpEnqueue.ts";
 import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
 import { enqueueTopSectionRebuild } from "./topRebuildEnqueue.ts";
+import {
+  readWorkerVisibilityBlockedEntitiesManifest,
+  releaseBlockedEntityInManifest,
+  writeWorkerVisibilityBlockedEntitiesManifest,
+  type PublicVisibilityFenceEntityType,
+} from "../shared/publicVisibilityManifest.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
@@ -289,6 +295,7 @@ export async function rebuildTarget(
   targetType: string,
   targetId: string,
   signal?: AbortSignal,
+  reason?: string | null,
 ): Promise<{ followUpPending: boolean }> {
   throwIfAborted(signal);
   let followUpPending = false;
@@ -364,10 +371,10 @@ export async function rebuildTarget(
       break;
     }
     case "event":
-      await rebuildEvent(env, targetId, signal);
+      await rebuildEvent(env, targetId, signal, reason);
       break;
     case "video":
-      await rebuildVideo(env, targetId, signal);
+      await rebuildVideo(env, targetId, signal, reason);
       break;
     case "user":
       await rebuildUser(env, targetId, signal);
@@ -1443,6 +1450,127 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
   await putJson(env, "search-index-lite.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex), { targetType: "search_index", targetId: "global" }, signal);
 }
 
+/**
+ * 公開状態へ戻した entity は、成果物を正常に書き終えるまで manifest の
+ * block を残す。成果物の成功後に D1 fence token を CAS 確認してから解除する
+ * ことで、再公開と直後の非公開化が競合しても新しい block を消さない。
+ */
+async function releaseVisibilityFenceAfterRebuild(
+  env: Env,
+  entityType: PublicVisibilityFenceEntityType,
+  entityId: string,
+  signal?: RebuildSignal,
+  sourceUpdatedAt?: number | null,
+): Promise<void> {
+  if (!env.R2 || typeof env.R2.get !== "function") return;
+  throwIfAborted(signal);
+
+  const fence = await env.DB.prepare(
+    `SELECT fence_token, state
+     FROM public_visibility_fences
+     WHERE entity_type = ? AND entity_id = ?
+     LIMIT 1`,
+  )
+    .bind(entityType, entityId)
+    .first<{ fence_token?: string; state?: string }>();
+  const fenceToken = String(fence?.fence_token ?? "").trim();
+  if (fence?.state !== "release_pending" || !fenceToken) return;
+
+  // Event composed output depends on two producer artifacts. Do not release
+  // a promotion fence while either artifact is older than the current D1 row;
+  // a concurrent composer could otherwise publish the previous public JSON.
+  if (entityType === "event") {
+    const currentEvent = await env.DB.prepare(
+      `SELECT visibility_status, updated_at
+       FROM events WHERE id = ? LIMIT 1`,
+    )
+      .bind(entityId)
+      .first<{ visibility_status?: string; updated_at?: number }>();
+    const currentUpdatedAt = Number(currentEvent?.updated_at ?? 0) || 0;
+    const builtFrom = Number(sourceUpdatedAt ?? 0) || 0;
+    if (
+      currentEvent?.visibility_status !== "public" ||
+      currentUpdatedAt <= 0 ||
+      builtFrom < currentUpdatedAt
+    ) {
+      return;
+    }
+
+    const producerArtifacts = await env.DB.prepare(
+      `SELECT target_type, source_updated_at
+       FROM static_artifacts
+       WHERE target_id = ?
+         AND target_type IN ('event_base', 'event_slots')
+         AND deleted_at IS NULL`,
+    )
+      .bind(entityId)
+      .all<{ target_type?: string; source_updated_at?: number }>();
+    const sourceByTarget = new Map(
+      (producerArtifacts.results ?? []).map((row) => [
+        String(row.target_type ?? ""),
+        Number(row.source_updated_at ?? 0) || 0,
+      ]),
+    );
+    if (
+      (sourceByTarget.get("event_base") ?? 0) < currentUpdatedAt ||
+      (sourceByTarget.get("event_slots") ?? 0) < currentUpdatedAt
+    ) {
+      return;
+    }
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    throwIfAborted(signal);
+    const { manifest, etag } =
+      await readWorkerVisibilityBlockedEntitiesManifest(env.R2);
+    const entry = manifest.entities.find(
+      (row) => row.entity_type === entityType && row.entity_id === entityId,
+    );
+
+    // 旧データには manifest entry がない場合がある。成果物が生成済みなら
+    // fence だけ released にして、次回以降の再構築を不要にする。
+    if (!entry) {
+      await env.DB.prepare(
+        `UPDATE public_visibility_fences
+         SET state = 'released', updated_at = MAX(updated_at + 1, ?)
+         WHERE entity_type = ? AND entity_id = ?
+           AND state = 'release_pending' AND fence_token = ?`,
+      )
+        .bind(Math.floor(Date.now() / 1000), entityType, entityId, fenceToken)
+        .run();
+      return;
+    }
+
+    // 別の非公開化が先に manifest を更新した場合は、その新しい block を
+    // 触らずに終了する。
+    if (entry.fence_token !== fenceToken) return;
+    const released = releaseBlockedEntityInManifest(
+      manifest,
+      entityType,
+      entityId,
+      fenceToken,
+      Math.floor(Date.now() / 1000),
+    );
+    if (!released) return;
+    try {
+      await writeWorkerVisibilityBlockedEntitiesManifest(env.R2, released, etag);
+    } catch (error) {
+      if (attempt === 2) throw error;
+      continue;
+    }
+
+    await env.DB.prepare(
+      `UPDATE public_visibility_fences
+       SET state = 'released', updated_at = MAX(updated_at + 1, ?)
+       WHERE entity_type = ? AND entity_id = ?
+         AND state = 'release_pending' AND fence_token = ?`,
+    )
+      .bind(Math.floor(Date.now() / 1000), entityType, entityId, fenceToken)
+      .run();
+    return;
+  }
+}
+
 async function removeAllEventArtifacts(
   env: Env,
   eventId: string,
@@ -1451,6 +1579,17 @@ async function removeAllEventArtifacts(
   await removeTrackedArtifacts(env, "event", eventId, 20, signal);
   await removeTrackedArtifacts(env, "event_base", eventId, 20, signal);
   await removeTrackedArtifacts(env, "event_slots", eventId, 20, signal);
+  // Older rows may have lost their static_artifacts bookkeeping. Delete the
+  // canonical keys explicitly so an old event ID cannot remain reachable just
+  // because its tracking row is missing.
+  for (const key of [
+    `events/${eventId}.json`,
+    eventBaseObjectKey(eventId),
+    eventSlotsObjectKey(eventId),
+  ]) {
+    throwIfAborted(signal);
+    await env.R2.delete(key);
+  }
 }
 
 function eventBaseObjectKey(eventId: string): string {
@@ -1679,12 +1818,20 @@ function stripEventPublicVideoScore(
   return rest;
 }
 
-async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): Promise<void> {
+async function rebuildEvent(
+  env: Env,
+  eventId: string,
+  signal?: RebuildSignal,
+  reason?: string | null,
+): Promise<void> {
   throwIfAborted(signal);
   const ev = await loadEventVisibilityRow(env, eventId, signal);
   throwIfAborted(signal);
   if (!ev || String(ev.visibility_status ?? "") !== "public") {
     await removeAllEventArtifacts(env, eventId, signal);
+    // An old event ID is deliberately kept blocked after a successful rename.
+    // Removing its canonical artifacts is safe; releasing the tombstone would
+    // allow a stale cache/object (or a future ID reuse) to become public again.
     return;
   }
 
@@ -1753,6 +1900,13 @@ async function rebuildEvent(env: Env, eventId: string, signal?: RebuildSignal): 
     [`events/${eventId}.json`],
     20,
     signal,
+  );
+  await releaseVisibilityFenceAfterRebuild(
+    env,
+    "event",
+    eventId,
+    signal,
+    Number(ev.updated_at ?? 0) || null,
   );
 }
 
@@ -2234,7 +2388,12 @@ async function fetchVideoRowForRebuild(
   return (byYoutube as Record<string, unknown> | null) ?? null;
 }
 
-async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): Promise<void> {
+async function rebuildVideo(
+  env: Env,
+  videoId: string,
+  signal?: RebuildSignal,
+  reason?: string | null,
+): Promise<void> {
   throwIfAborted(signal);
   const row = await fetchVideoRowForRebuild(env, videoId, signal);
   throwIfAborted(signal);
@@ -2502,6 +2661,9 @@ async function rebuildVideo(env: Env, videoId: string, signal?: RebuildSignal): 
     `videos/${internalVideoId}.json`,
     ...(youtubeVideoId && youtubeVideoId !== internalVideoId ? [`videos/${youtubeVideoId}.json`] : []),
   ], 20, signal);
+  if (reason === "video_visibility_update") {
+    await releaseVisibilityFenceAfterRebuild(env, "video", internalVideoId, signal);
+  }
 }
 
 async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void> {

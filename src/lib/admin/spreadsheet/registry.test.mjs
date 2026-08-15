@@ -11,6 +11,9 @@ import {
   isSpreadsheetTableBlocklisted,
   SPREADSHEET_COLUMN_POLICIES,
   SPREADSHEET_COST_GUARD_READONLY_COLUMNS,
+  SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES,
+  SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS,
+  isSpreadsheetPhysicalDeleteBlocked,
   primaryKeysFromColumns,
   resolveSpreadsheetTableDef,
 } from "./registry.ts";
@@ -90,4 +93,21 @@ test("system_settings CostGuard canonical columns are spreadsheet-readonly", () 
   }
   assert.equal(isSpreadsheetColumnEditable(def, "operation_mode"), false);
   assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), true);
+});
+
+test("event/video visibility status is controlled by the dedicated transition actions", () => {
+  const eventDef = resolveSpreadsheetTableDef("events", true);
+  const videoDef = resolveSpreadsheetTableDef("videos", true);
+  assert.equal(isSpreadsheetColumnEditable(eventDef, "visibility_status"), false);
+  assert.equal(isSpreadsheetColumnEditable(videoDef, "visibility_status"), false);
+  assert.equal(isSpreadsheetColumnEditable(eventDef, "title"), true);
+  assert.equal(isSpreadsheetColumnEditable(videoDef, "title"), true);
+  assert.equal(SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has("events.visibility_status"), true);
+});
+
+test("event/video physical deletes are blocked from the generic spreadsheet route", () => {
+  assert.equal(isSpreadsheetPhysicalDeleteBlocked("events"), true);
+  assert.equal(isSpreadsheetPhysicalDeleteBlocked("videos"), true);
+  assert.equal(isSpreadsheetPhysicalDeleteBlocked("event_groups"), false);
+  assert.equal(SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES.has("videos"), true);
 });

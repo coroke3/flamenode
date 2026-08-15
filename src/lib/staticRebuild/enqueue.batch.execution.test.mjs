@@ -266,6 +266,83 @@ if (runTestWithTsx(import.meta.url)) {
     sqlite.close();
   });
 
+  test("video visibility fence reason survives a competing active enqueue", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(baseline);
+    sqlite.exec(`
+      INSERT INTO static_rebuild_queue (
+        id, target_type, target_id, reason, priority, status,
+        attempt_count, created_at, updated_at
+      ) VALUES (
+        'srb-visibility', 'video', 'video-visibility',
+        'video_visibility_update', 'high', 'pending', 0, 1, 1
+      );
+    `);
+
+    await runBatch(sqlite, [{
+      targetType: "video",
+      targetId: "video-visibility",
+      reason: "event_id_rename",
+      priority: "high",
+    }]);
+
+    const row = getRow(sqlite, "video", "video-visibility");
+    assert.equal(row.reason, "video_visibility_update");
+    assert.equal(row.priority, "high");
+    sqlite.close();
+  });
+
+  test("a visibility enqueue restores its release reason even at lower incoming priority", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(baseline);
+    sqlite.exec(`
+      INSERT INTO static_rebuild_queue (
+        id, target_type, target_id, reason, priority, status,
+        attempt_count, created_at, updated_at
+      ) VALUES (
+        'srb-ordinary', 'video', 'video-visibility-incoming',
+        'event_update', 'high', 'pending', 0, 1, 1
+      );
+    `);
+
+    await runBatch(sqlite, [{
+      targetType: "video",
+      targetId: "video-visibility-incoming",
+      reason: "video_visibility_update",
+      priority: "low",
+    }]);
+
+    const row = getRow(sqlite, "video", "video-visibility-incoming");
+    assert.equal(row.reason, "video_visibility_update");
+    assert.equal(row.priority, "high");
+    sqlite.close();
+  });
+
+  test("old-event cleanup reason survives a competing active enqueue", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    sqlite.exec(baseline);
+    sqlite.exec(`
+      INSERT INTO static_rebuild_queue (
+        id, target_type, target_id, reason, priority, status,
+        attempt_count, created_at, updated_at
+      ) VALUES (
+        'srb-rename-cleanup', 'event', 'old-event-id',
+        'event_id_rename_old_cleanup', 'high', 'pending', 0, 1, 1
+      );
+    `);
+
+    await runBatch(sqlite, [{
+      targetType: "event",
+      targetId: "old-event-id",
+      reason: "event_settings_update",
+      priority: "high",
+    }]);
+
+    const row = getRow(sqlite, "event", "old-event-id");
+    assert.equal(row.reason, "event_id_rename_old_cleanup");
+    sqlite.close();
+  });
+
   // Source of truth: workers/json-generator/queue.ts markDoneAttempt
   const MARK_DONE_SQL = `UPDATE static_rebuild_queue
      SET status = CASE

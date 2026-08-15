@@ -383,8 +383,8 @@ export function buildAfterVideoStatusChangeQueueBatch(
     {
       targetType: "video",
       targetId: opts.videoId,
-      reason: "video_update",
-      priority: "normal",
+      reason: "video_visibility_update",
+      priority: "high",
       requestedByUserId: opts.requestedByUserId,
     },
     {
@@ -459,12 +459,34 @@ export function buildEventChangeQueueBatch(
     reason: string;
     requestedByUserId?: string | null;
     priority?: StaticRebuildPriority;
+    /**
+     * ID rename の旧IDだけは composed artifact も削除する必要がある。
+     * 通常のイベント更新では composer が旧行を読むため有効にしない。
+     */
+    includeComposedCleanup?: boolean;
   },
 ): Promise<StaticRebuildQueueBatch> {
   const priority = opts.priority ?? "normal";
-  return buildStaticRebuildQueueBatch(db, [
+  const targets: EnqueueStaticRebuildInput[] = [
     eventBaseTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
     eventSlotsTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
+    // list/recent and list/popular embed the primary event title. Refresh
+    // both projections whenever an event is hidden, renamed, or edited so a
+    // stale public event label is not served until the normal TTL expires.
+    {
+      targetType: "list_recent",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "list_popular",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    },
     {
       targetType: "events_index",
       targetId: "global",
@@ -483,7 +505,17 @@ export function buildEventChangeQueueBatch(
       ...target,
       requestedByUserId: opts.requestedByUserId,
     })),
-  ]);
+  ];
+  if (opts.includeComposedCleanup) {
+    targets.unshift({
+      targetType: "event",
+      targetId: opts.eventId,
+      reason: opts.reason,
+      priority,
+      requestedByUserId: opts.requestedByUserId,
+    });
+  }
+  return buildStaticRebuildQueueBatch(db, targets);
 }
 
 export function buildAnnouncementChangeQueueBatch(

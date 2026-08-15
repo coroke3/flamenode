@@ -323,4 +323,33 @@ if (runTestWithTsx(import.meta.url)) {
     );
     assert.equal(harness.getWakeSendCalls(), 1);
   });
+
+  test("direct enqueue keeps the video visibility release reason", async (t) => {
+    const harness = createHarness(t);
+    harness.insertRow({
+      id: "queue-visibility",
+      targetId: "video-visibility-direct",
+      reason: "video_visibility_update",
+      priority: "high",
+      status: "pending",
+      updatedAt: 150,
+    });
+
+    const result = await directEnqueueStaticRebuild(
+      harness.db,
+      {
+        targetType: "video",
+        targetId: "video-visibility-direct",
+        reason: "manual_repair",
+        priority: "high",
+      },
+      { kind: "manual_repair", cooldownSeconds: 0 },
+      harness.wakeOptions,
+    );
+
+    assert.equal(result.ok, true);
+    const row = harness.readRow("queue-visibility");
+    assert.equal(row.reason, "video_visibility_update");
+    assert.equal(row.priority, "high");
+  });
 }

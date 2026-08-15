@@ -32,6 +32,10 @@ import {
   type StaticEventPlaylistPayload,
 } from "@/lib/publicData/staticEventPlaylistCore";
 import {
+  isPublicEntityVisibilityBlocked,
+  resolvePublicVisibilityGuardModeFromEnv,
+} from "@/lib/publicData/publicVisibilityManifest";
+import {
   clampRelatedLimit,
   enforceDiversity,
   interleaveBuckets,
@@ -506,6 +510,26 @@ export async function fetchEventPlaylistVideos(
       .limit(1)
   )[0];
   if (eventRow?.visibility_status !== "public") return [];
+
+  // During a public re-publish, D1 visibility can become public before the
+  // event playlist artifact has been rebuilt. The public visibility fence is
+  // the authoritative fail-closed guard for that window; never serve the old
+  // R2 playlist while the event is still blocked/release-pending.
+  try {
+    if (
+      await isPublicEntityVisibilityBlocked({
+        entityType: "event",
+        entityId: eventId,
+        guardMode: resolvePublicVisibilityGuardModeFromEnv(),
+      })
+    ) {
+      return [];
+    }
+  } catch {
+    // A malformed/unavailable visibility manifest must fail closed for this
+    // public projection rather than risk serving stale R2 content.
+    return [];
+  }
 
   const logPlaylistFallback = (reason: "r2_missing" | "r2_invalid" | "r2_incomplete" | "r2_error") => {
     console.warn(JSON.stringify({

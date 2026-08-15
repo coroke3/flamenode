@@ -145,6 +145,57 @@ export function planSpreadsheetStaticRebuildTargets(
 
   for (const mutation of mutations) {
     switch (mutation.table) {
+      case "events": {
+        const eventId = valueFromMutation(mutation, "id");
+        if (!eventId) {
+          throw new Error("spreadsheet_static_rebuild_target_id_missing:events");
+        }
+        // イベントのタイトル・説明・スタッフ表示設定などは event_base に、
+        // 枠関連の再計算と公開一覧の波及は専用 target に任せる。公開状態は
+        // spreadsheet から編集不可だが、その他の編集でも古い R2 artifact を
+        // 残さないため、CREATE/UPDATE の両方で同じ fan-out を行う。
+        add(mutation, {
+          targetType: "event_base",
+          targetId: eventId,
+          priority: "high",
+        });
+        add(mutation, {
+          targetType: "event_slots",
+          targetId: eventId,
+          priority: "high",
+        });
+        add(mutation, {
+          targetType: "events_index",
+          targetId: "global",
+          priority: "low",
+        });
+        add(mutation, {
+          targetType: "search_index",
+          targetId: "global",
+          priority: "low",
+        });
+        add(mutation, {
+          targetType: "top_events",
+          targetId: "global",
+        });
+        add(mutation, {
+          targetType: "top_stats",
+          targetId: "global",
+        });
+        add(mutation, {
+          targetType: "top_slot_stats",
+          targetId: "global",
+        });
+        break;
+      }
+      case "event_groups": {
+        add(mutation, {
+          targetType: "events_index",
+          targetId: "global",
+          priority: "low",
+        });
+        break;
+      }
       case "videos": {
         const videoId = valueFromMutation(mutation, "id");
         if (!videoId)

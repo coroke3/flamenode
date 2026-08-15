@@ -64,6 +64,11 @@ test("audit restore source contains payload, stale-snapshot, and atomic failure 
   assert.match(capability, /payloadExceeded/);
   assert.match(capability, /snapshotRedacted/);
   assert.match(restore, /computeChangedKeys\(after, current\)/);
+  assert.match(restore, /planEventVisibilityTransition/);
+  assert.match(restore, /planVideoVisibilityFenceTransition/);
+  assert.match(restore, /buildEventChangeQueueBatch/);
+  assert.match(restore, /buildAfterVideoStatusChangeQueueBatch/);
+  assert.match(restore, /deletePublicJsonCaches/);
   assert.match(mutate, /changes\(\) =/);
   assert.match(mutate, /json_extract\('not-valid-json'/);
 });

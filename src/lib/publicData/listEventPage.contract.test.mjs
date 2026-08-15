@@ -37,9 +37,14 @@ test("degraded event list SQL は COUNTABLE 条件と LIMIT を含む", () => {
   assert.doesNotMatch(sql, /COUNT\(\*\) OVER/i);
   assert.match(sql, /v\.creator_display_name/);
   assert.match(sql, /v\.creator_icon_url/);
+  assert.match(sql, /LEFT JOIN events AS pe[\s\S]*pe\.visibility_status = 'public'/);
   assert.doesNotMatch(sql, /x_users|xu\.x_name|xu\.icon_url/i);
   const scoreSql = buildDegradedEventListPageSql("score");
   assert.match(scoreSql, /COALESCE\(v\.score, 0\) DESC/);
   assert.match(degradedSource, /fetchDegradedEventListPage/);
   assert.match(degradedSource, /\.limit\(fetchLimit\)/);
+  assert.match(
+    degradedSource,
+    /leftJoin\(\s*events,[\s\S]*visibility_status,\s*\"public\"/,
+  );
 });

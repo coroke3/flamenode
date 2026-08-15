@@ -114,7 +114,7 @@ test("動画詳細の作者表示は作品スナップショットのアイコ�
 });
 
 test("動画詳細はメンバーを含む必要なX IDをR2アイコンローダーへ渡す", () => {
-  assert.match(videoPage, /staticProbe\.data\.publicMembers\.map/);
+  assert.match(videoPage, /detail\.publicMembers\.map/);
   assert.match(videoPage, /loadPublicXIconMapOptional\(staticIconXIds\)/);
   assert.match(videoPage, /extraFallbackIconXIds/);
   assert.match(videoPage, /hasProjectedPublicProfile/);

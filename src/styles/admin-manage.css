@@ -922,12 +922,7 @@
   border: 1px solid var(--admin-border);
   border-radius: var(--radius-xl, 14px);
   padding: 12px 10px 16px;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent-primary) 5%, var(--admin-surface)),
-      var(--admin-surface) 180px
-    );
+  background: var(--admin-surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -957,11 +952,6 @@
   white-space: nowrap;
 }
 
-[data-admin-shell] .admin-sidebar [data-event-link="true"] {
-  border-left: 0;
-  padding-left: 11px;
-}
-
 [data-admin-shell] .admin-sidebar .console-sidebar-empty {
   margin: 8px 10px 0;
   font-size: 11px;
@@ -973,11 +963,7 @@
   min-height: calc(100vh - var(--header-h, 56px));
   padding: 28px 0 64px;
   min-width: 0;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-primary) 3%, transparent),
-    transparent 280px
-  );
+  background: var(--admin-bg);
 }
 
 [data-admin-shell] .admin-main > *,
@@ -1036,40 +1022,20 @@
 /* ─── 管理トップ ────────────────────────────────────────────── */
 
 [data-admin-shell] .fn-admin-dashboard-overview {
-  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
   margin: 24px 0 26px;
   padding: 20px 22px;
-  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
   border-radius: var(--radius-xl, 14px);
-  background:
-    radial-gradient(
-      circle at 100% 0%,
-      color-mix(in srgb, var(--accent-primary) 18%, transparent),
-      transparent 42%
-    ),
-    var(--bg-surface);
+  background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
-}
-
-[data-admin-shell] .fn-admin-dashboard-overview::before {
-  position: absolute;
-  top: 18px;
-  bottom: 18px;
-  left: 0;
-  width: 4px;
-  border-radius: 0 4px 4px 0;
-  background: var(--accent-primary);
-  content: "";
 }
 
 [data-admin-shell] .fn-admin-dashboard-overview-copy {
   min-width: 0;
-  padding-left: 4px;
 }
 
 [data-admin-shell] .fn-admin-dashboard-eyebrow {
@@ -1213,13 +1179,11 @@
 }
 
 [data-admin-shell] .fn-admin-pending-card {
-  position: relative;
   display: flex;
   min-height: 126px;
   flex-direction: column;
   gap: 8px;
   padding: 14px 15px;
-  overflow: hidden;
   color: var(--text-primary);
   text-decoration: none;
   border: 1px solid var(--border-subtle);
@@ -1228,17 +1192,6 @@
   background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
-}
-
-[data-admin-shell] .fn-admin-pending-card::after {
-  position: absolute;
-  right: -18px;
-  bottom: -18px;
-  width: 68px;
-  height: 68px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
-  content: "";
 }
 
 [data-admin-shell] .fn-admin-pending-card:hover {
@@ -1314,8 +1267,6 @@
 }
 
 [data-admin-shell] .fn-admin-pending-card-value {
-  position: relative;
-  z-index: 1;
   margin-top: auto;
   font-size: clamp(25px, 3vw, 31px);
   font-variant-numeric: tabular-nums;
@@ -1323,8 +1274,6 @@
 }
 
 [data-admin-shell] .fn-admin-pending-card-description {
-  position: relative;
-  z-index: 1;
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -1371,12 +1320,7 @@
   justify-content: space-between;
   gap: 18px;
   border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border-subtle));
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--accent-primary-soft) 45%, var(--bg-surface)),
-      var(--bg-surface)
-    );
+  background: var(--bg-surface);
 }
 
 [data-admin-shell] .fn-admin-dashboard-panel-heading {
@@ -1485,12 +1429,7 @@
   padding: 14px 12px 20px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl, 14px);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--manage-accent-fallback) 6%, var(--bg-surface)),
-      var(--bg-surface) 190px
-    );
+  background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -1515,11 +1454,6 @@
   height: 8px;
   border-radius: 50%;
   background: var(--event-accent, var(--accent-primary));
-}
-
-[data-manage-shell] .admin-sidebar [data-event-link="true"] {
-  border-left: 0;
-  padding-left: 11px;
 }
 
 /* モバイルでは横スクロールのナビを使わず、同じナビをドロワーとして表示する。 */
@@ -2136,17 +2070,11 @@
   padding: 18px 20px;
   border-bottom: 0;
   border-radius: var(--radius-xl, 14px);
-  background:
-    radial-gradient(
-      circle at 100% 0%,
-      color-mix(in srgb, var(--manage-event-accent, var(--manage-accent-fallback)) 18%, transparent),
-      transparent 46%
-    ),
-    color-mix(
-      in srgb,
-      var(--manage-event-accent, var(--manage-accent-fallback)) 9%,
-      var(--bg-surface)
-    );
+  background: color-mix(
+    in srgb,
+    var(--manage-event-accent, var(--manage-accent-fallback)) 9%,
+    var(--bg-surface)
+  );
   border: 1px solid color-mix(
     in srgb,
     var(--manage-event-accent, var(--manage-accent-fallback)) 30%,
@@ -2255,13 +2183,7 @@
     var(--border-subtle)
   );
   border-radius: var(--radius-xl, 14px);
-  background:
-    radial-gradient(
-      circle at 100% 0%,
-      color-mix(in srgb, var(--manage-accent-fallback) 16%, transparent),
-      transparent 44%
-    ),
-    var(--bg-surface);
+  background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
 }
 
@@ -2368,22 +2290,9 @@
 }
 
 [data-manage-shell] .manage-event-status-card {
-  position: relative;
   align-items: stretch;
-  overflow: hidden;
-  padding: 16px 18px 16px 20px;
+  padding: 16px 18px;
   border-radius: var(--radius-lg, 10px);
-}
-
-[data-manage-shell] .manage-event-status-card::before {
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 0;
-  width: 4px;
-  border-radius: 0 4px 4px 0;
-  background: var(--manage-event-accent, var(--manage-accent-fallback));
-  content: "";
 }
 
 [data-manage-shell] .manage-event-status-card .fn-console-event-body {
@@ -2698,15 +2607,6 @@
     white-space: normal;
   }
 
-  .fn-console-drawer-panel nav a::before,
-  .fn-console-drawer-panel .console-manage-nav a::before {
-    top: 6px;
-    right: auto;
-    bottom: 6px;
-    left: 0;
-    width: 3px;
-    height: auto;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3212,33 +3112,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px 16px;
-  position: relative;
-  overflow: hidden;
-  padding: 18px 20px 18px 22px;
+  padding: 18px 20px;
   border-radius: var(--radius-lg, 10px);
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
 }
 
-[data-manage-shell] .manage-attention::before {
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 0;
-  width: 4px;
-  border-radius: 0 4px 4px 0;
-  background: var(--manage-event-accent, var(--manage-accent-fallback));
-  content: "";
-}
-
 [data-manage-shell] .manage-attention--warn {
   border-color: color-mix(in srgb, var(--accent-warning) 45%, var(--border-subtle));
   background: color-mix(in srgb, var(--accent-warning-soft) 55%, var(--bg-surface));
-}
-
-[data-manage-shell] .manage-attention--warn::before {
-  background: var(--accent-warning);
 }
 
 [data-manage-shell] .manage-attention--ok {
@@ -3270,12 +3153,7 @@
   padding: 18px 20px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg, 10px);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--manage-event-accent, var(--manage-accent-fallback)) 7%, var(--bg-surface)),
-      var(--bg-surface)
-    );
+  background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
 }
 

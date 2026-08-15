@@ -381,7 +381,13 @@ export async function fetchDegradedEventListPage(
       part: videos.part,
     })
     .from(videos)
-    .leftJoin(events, eq(events.id, videos.primary_event_id))
+    .leftJoin(
+      events,
+      and(
+        eq(events.id, videos.primary_event_id),
+        eq(events.visibility_status, "public"),
+      )!,
+    )
     .where(
       and(
         countablePublicVideoCondition,

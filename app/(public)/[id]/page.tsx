@@ -52,11 +52,15 @@ import {
   shouldPublicPageShowUnavailable,
   type StaticVideoDetail,
 } from "@/lib/publicData/loader";
+import { isPublicEntityVisibilityBlocked } from "@/lib/publicData/publicVisibilityManifest";
 import {
   logPublicRequestMetrics,
   setPublicRequestRoute,
 } from "@/lib/publicData/loader";
-import { buildPublicVideoViewModelFromStatic } from "@/lib/publicData/publicVideoDetailViewModel";
+import {
+  buildPublicVideoViewModelFromStatic,
+  filterPublicVideoDetailEvents,
+} from "@/lib/publicData/publicVideoDetailViewModel";
 import {
   loadPublicXIconMapOptional,
   loadRandomVideoPool,
@@ -120,23 +124,24 @@ export default async function VideoDetailPage({
 
   const staticProbe = await loadStaticVideoDetail(rawId);
   if (staticProbe.data) {
+    const detail = await filterBlockedVideoEvents(staticProbe.data);
     const overlay = await fetchVideoViewerOverlay({
       rawId,
-      videoId: staticProbe.data.video.id,
+      videoId: detail.video.id,
       playlist,
       playlistEventTitle:
-        staticProbe.data.publicEvents.find((event) => event.id === playlist)
+        detail.publicEvents.find((event) => event.id === playlist)
           ?.title ?? null,
     });
     const relatedIconCandidates = [
-      ...staticProbe.data.relatedVideos,
-      ...staticProbe.data.relatedReserve,
-      ...staticProbe.data.relatedRandomReserve,
+      ...detail.relatedVideos,
+      ...detail.relatedReserve,
+      ...detail.relatedRandomReserve,
     ];
 
     const staticIconXIds = [
-      staticProbe.data.video.creator_x_user_id,
-      ...staticProbe.data.publicMembers.map((member) => member.x_user_id),
+      detail.video.creator_x_user_id,
+      ...detail.publicMembers.map((member) => member.x_user_id),
       ...relatedIconCandidates.map((video) => video.creator_x_user_id),
     ].filter((xId): xId is string => Boolean(xId));
     const needsIconMap = staticIconXIds.length > 0;
@@ -154,12 +159,12 @@ export default async function VideoDetailPage({
       const embeddedIds = new Set<string>();
 
       for (const candidate of [
-        ...staticProbe.data.relatedVideos,
-        ...staticProbe.data.relatedReserve,
-        ...staticProbe.data.relatedRandomReserve,
+        ...detail.relatedVideos,
+        ...detail.relatedReserve,
+        ...detail.relatedRandomReserve,
       ]) {
         if (
-          candidate.id === staticProbe.data.video.id ||
+          candidate.id === detail.video.id ||
           blocklist.value.blockedIds.has(candidate.id)
         ) {
           continue;
@@ -168,7 +173,7 @@ export default async function VideoDetailPage({
       }
 
       if (
-        staticProbe.data.schemaVersion === 1 ||
+        detail.schemaVersion === 1 ||
         embeddedIds.size < RELATED_MIN_LIMIT
       ) {
         const randomPool = await loadRandomVideoPool();
@@ -205,7 +210,7 @@ export default async function VideoDetailPage({
 
     return (
       <StaticVideoDetailView
-        detail={staticProbe.data}
+        detail={detail}
         rawId={rawId}
         playlist={playlist}
         overlay={overlay}
@@ -226,6 +231,31 @@ export default async function VideoDetailPage({
     notFound();
   }
   notFound();
+}
+
+async function filterBlockedVideoEvents(
+  detail: StaticVideoDetail,
+): Promise<StaticVideoDetail> {
+  const eventIds = new Set([
+    ...detail.eventIds,
+    ...detail.publicEvents.map((event) => event.id),
+  ]);
+  if (eventIds.size === 0) return detail;
+
+  const blockedEventIds = new Set<string>();
+  await Promise.all(
+    [...eventIds].map(async (eventId) => {
+      if (
+        await isPublicEntityVisibilityBlocked({
+          entityType: "event",
+          entityId: eventId,
+        })
+      ) {
+        blockedEventIds.add(eventId);
+      }
+    }),
+  );
+  return filterPublicVideoDetailEvents(detail, blockedEventIds);
 }
 
 type VideoViewerOverlay = {

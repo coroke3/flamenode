@@ -116,7 +116,7 @@
     flex-direction: column;
     align-items: stretch;
     gap: 14px;
-    padding: 14px 14px 14px 18px;
+    padding: 14px;
   }
 
   [data-manage-shell] .manage-event-status-card .manage-actions {
@@ -157,7 +157,7 @@
 
   [data-manage-shell] .manage-attention,
   [data-manage-shell] .manage-progress {
-    padding: 15px 16px 15px 18px;
+    padding: 15px 16px;
   }
 
   [data-manage-shell] .manage-event-pending-section {
@@ -556,7 +556,7 @@
   }
 
   [data-manage-shell] .manage-event-status-card {
-    padding: 14px 14px 14px 18px;
+    padding: 14px;
   }
 
   [data-admin-shell] .admin-mode-banner,

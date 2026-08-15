@@ -13,7 +13,7 @@ import {
 } from "./activeLookupColumns";
 import {
   pickHigherPriority,
-  shouldUseIncomingQueueMetadata,
+  resolveQueueReason,
 } from "./priorityCore";
 import type {
   DirectEnqueueCause,
@@ -55,11 +55,15 @@ function isAllowedDirectEnqueueCause(
 function wouldActiveRowMetadataChange(
   row: StaticRebuildActiveLookupRow,
   input: EnqueueStaticRebuildInput,
-  useIncomingMetadata: boolean,
+  existingPriority: StaticRebuildPriority,
+  incomingPriority: StaticRebuildPriority,
 ): boolean {
-  const nextReason = useIncomingMetadata
-    ? input.reason
-    : row.reason ?? input.reason;
+  const nextReason = resolveQueueReason(
+    row.reason,
+    input.reason,
+    existingPriority,
+    incomingPriority,
+  );
   const nextRequestedByUserId =
     input.requestedByUserId ?? row.requested_by_user_id ?? null;
   const currentRequestedByUserId = row.requested_by_user_id ?? null;
@@ -76,7 +80,7 @@ function shouldNoOpActiveRowUpdate(
   cause: DirectEnqueueCause,
   existingPriority: StaticRebuildPriority,
   mergedPriority: StaticRebuildPriority,
-  useIncomingMetadata: boolean,
+  incomingPriority: StaticRebuildPriority,
 ): boolean {
   if (cause.kind === "public_miss" && row.status === "processing") {
     return true;
@@ -86,7 +90,12 @@ function shouldNoOpActiveRowUpdate(
   }
   return (
     mergedPriority === existingPriority &&
-    !wouldActiveRowMetadataChange(row, input, useIncomingMetadata)
+    !wouldActiveRowMetadataChange(
+      row,
+      input,
+      existingPriority,
+      incomingPriority,
+    )
   );
 }
 
@@ -200,10 +209,6 @@ export async function directEnqueueStaticRebuild(
       if (row) {
         const existingPriority = row.priority;
         const mergedPriority = pickHigherPriority(existingPriority, priority);
-        const useIncomingMetadata = shouldUseIncomingQueueMetadata(
-          existingPriority,
-          priority,
-        );
         if (
           shouldNoOpActiveRowUpdate(
             row,
@@ -211,7 +216,7 @@ export async function directEnqueueStaticRebuild(
             cause,
             existingPriority,
             mergedPriority,
-            useIncomingMetadata,
+            priority,
           )
         ) {
           return rebuildStateForAction("active_updated");
@@ -219,9 +224,12 @@ export async function directEnqueueStaticRebuild(
         const result = await db
           .update(staticRebuildQueue)
           .set({
-            reason: useIncomingMetadata
-              ? input.reason
-              : row.reason ?? input.reason,
+            reason: resolveQueueReason(
+              row.reason,
+              input.reason,
+              existingPriority,
+              priority,
+            ),
             priority: mergedPriority,
             requested_by_user_id:
               input.requestedByUserId ?? row.requested_by_user_id,

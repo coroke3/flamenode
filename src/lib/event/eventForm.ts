@@ -15,8 +15,20 @@ import {
   normalizeYoutubeDescriptionTemplate,
 } from "@/lib/event/youtubeDescriptionTemplate";
 
+/** URL / route-safe event IDs used for newly-created events and admin rename. */
+export const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+function normalizeOptionalEventId(value: unknown): unknown {
+  // EventForm intentionally leaves ID blank to request an auto-generated ID.
+  // Treat the browser's empty string as omitted instead of failing `.min(1)`.
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
 export const eventSchema = z.object({
-  id: z.string().trim().min(1).max(64).optional(),
+  id: z.preprocess(
+    normalizeOptionalEventId,
+    z.string().trim().min(1).max(64).optional(),
+  ),
   title: z.string().trim().min(1).max(200),
   event_type: z
     .enum(["event", "collabo", "type", "other"])

@@ -761,6 +761,18 @@ test("旧形式applyは作品スナップショット列をvideosへ書き込む
   assert.doesNotMatch(apply, /UPDATE x_users[\s\S]*creator_profile_text/);
 });
 
+test("legacy import visibility changes use the public visibility fence", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");
+  assert.match(apply, /planEventVisibilityTransition/);
+  assert.match(apply, /preCommitEventVisibilityTransition/);
+  assert.match(apply, /planVideoVisibilityFenceTransition/);
+  assert.match(apply, /preCommitVideoVisibilityDepublicization/);
+  assert.match(apply, /video_visibility_update/);
+  assert.match(apply, /deletePublicJsonCaches/);
+  assert.match(apply, /static_rebuild_queue\.reason = 'video_visibility_update'/);
+});
+
 test("カスタム質問・回答applyは手動回答保護とD1予算を維持する", () => {
   const root = path.resolve(import.meta.dirname, "../../../..");
   const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");

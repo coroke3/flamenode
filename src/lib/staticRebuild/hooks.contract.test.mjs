@@ -66,6 +66,14 @@ test("枠変更はevent_slotsとtop_slot_statsを同一batchでenqueueする", (
     /buildSlotChangeQueueBatch[\s\S]*topGlobalTarget/,
   );
 });
+test("event visibility/update refreshes list projections that embed the event title", () => {
+  const eventBatch = hooks.match(
+    /export function buildEventChangeQueueBatch[\s\S]*?^}/m,
+  )?.[0];
+  assert.ok(eventBatch);
+  assert.match(eventBatch, /targetType: "list_recent"/);
+  assert.match(eventBatch, /targetType: "list_popular"/);
+});
 test("X ID公開プロフィール更新は user と users_index をenqueueする", () => {
   assert.match(hooks, /export async function enqueueAfterXUserPublicUpdate/);
   assert.match(

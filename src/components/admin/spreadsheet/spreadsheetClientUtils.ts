@@ -51,6 +51,8 @@ export function formatSpreadsheetApiError(
     case "column_not_editable":
     case "unknown_column":
       return "この列は編集できません。";
+    case "physical_delete_requires_visibility_status":
+      return "イベント・作品は物理削除できません。イベントは非公開化、作品は private / voided へ変更してください。";
     case "missing_primary_key":
       return "主キーが未入力、またはこのテーブルでは行の特定ができません。";
     case "row_not_found":

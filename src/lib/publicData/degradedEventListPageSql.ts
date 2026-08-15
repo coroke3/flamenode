@@ -23,7 +23,11 @@ export function buildDegradedEventListPageSql(
       v.scheduled_time,
       v.part
     FROM videos AS v
-    LEFT JOIN events AS pe ON pe.id = v.primary_event_id
+    -- A private/archived primary event must not leak its title through the
+    -- degraded list fallback while the static projection is being rebuilt.
+    LEFT JOIN events AS pe
+      ON pe.id = v.primary_event_id
+     AND pe.visibility_status = 'public'
     LEFT JOIN video_events AS ve ON ve.video_id = v.id AND ve.event_id = ?
     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
       AND (ve.video_id IS NOT NULL OR v.primary_event_id = ?)

@@ -156,7 +156,8 @@ test("旧archivedイベントは公開対象にせずartifactを削除する", a
   await rebuildTarget(env, "event", "event-1");
   assert.deepEqual(env.puts, []);
   assert.ok(env.deletes.includes("events/event-1.json"));
-  assert.equal(env.deletes.filter((key) => key === "events/event-1.json").length, 3);
+  assert.ok(env.deletes.includes("events/event-1/base.v1.json"));
+  assert.ok(env.deletes.includes("events/event-1/slots.v1.json"));
 });
 
 test("旧limited作品は公開対象にせずartifactを削除する", async () => {
@@ -963,6 +964,19 @@ test("rebuildEventBase/rebuildEventSlotsは非公開時にcompose不要を返す
   assert.match(eventSlotsFn, /return true;/);
 });
 
+test("rename old-event cleanup removes canonical artifacts and retains its tombstone", () => {
+  const eventFn = source.match(
+    /async function rebuildEvent\([\s\S]*?(?=type StaticRelatedVideoRow)/,
+  )?.[0];
+  assert.ok(eventFn);
+  assert.match(source, /case "event":[\s\S]*rebuildEvent\(env, targetId, signal, reason\)/);
+  assert.match(eventFn, /removeAllEventArtifacts\(env, eventId, signal\)/);
+  assert.match(eventFn, /old event ID is deliberately kept blocked/);
+  assert.doesNotMatch(source, /clearEventRenameTombstone/);
+  assert.doesNotMatch(source, /DELETE FROM public_visibility_fences/);
+  assert.match(source, /`events\/\$\{eventId\}\.json`/);
+});
+
 test("rebuildRecommendCore成功後にrecommend composer follow-upをenqueueする", () => {
   assert.match(source, /case "recommend_core":[\s\S]*enqueueComposerFollowUps\(env, "recommend_core"\)/);
 });
@@ -1171,6 +1185,14 @@ test("通常チャプターとメンバーチャプターは別queryで取得す
     videoFn,
     /allPublicChapters/,
   );
+});
+
+test("再公開 artifact 完成後だけ release_pending fence を token CAS で解除する", () => {
+  assert.match(source, /releaseVisibilityFenceAfterRebuild/);
+  assert.match(source, /state = 'release_pending'/);
+  assert.match(source, /entry\.fence_token !== fenceToken/);
+  assert.match(source, /state = 'released'/);
+  assert.match(source, /writeWorkerVisibilityBlockedEntitiesManifest/);
 });
 
 test("static related near-date lookup avoids an ABS full scan", () => {

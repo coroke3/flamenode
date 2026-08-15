@@ -54,6 +54,22 @@ export const SPREADSHEET_COST_GUARD_READONLY_COLUMNS = new Set([
   "cost_guard_exception_features_json",
 ]);
 
+/**
+ * 公開状態の変更は、R2 の可視性フェンス・静的再生成・Cache API 無効化を
+ * 同じ書き込みフローで行う必要があるため、汎用スプレッドシートからは
+ * 直接編集させない。明示的なイベント／作品ステータス操作を正本とする。
+ */
+export const SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS = new Set([
+  "events.visibility_status",
+  "videos.visibility_status",
+]);
+
+/** イベント／作品は物理削除せず、専用の非公開・voided 操作を利用する。 */
+export const SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES = new Set([
+  "events",
+  "videos",
+]);
+
 export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
 
 export function getSpreadsheetColumnPolicy(
@@ -263,6 +279,9 @@ export function isSpreadsheetColumnEditable(
 ): boolean {
   if (def.mode === "readonly") return false;
   if (isSpreadsheetSecretColumn(column)) return false;
+  if (SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has(`${def.table}.${column}`)) {
+    return false;
+  }
   if (
     def.table === "system_settings" &&
     SPREADSHEET_COST_GUARD_READONLY_COLUMNS.has(column)
@@ -270,4 +289,8 @@ export function isSpreadsheetColumnEditable(
     return false;
   }
   return true;
+}
+
+export function isSpreadsheetPhysicalDeleteBlocked(table: string): boolean {
+  return SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES.has(table);
 }

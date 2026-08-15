@@ -26,6 +26,7 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId, logFlowTrace } from "@/lib/observability/flowTrace";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
 import {
+  compensateDepublicizationFenceOnD1Failure,
   enqueueVideoVisibilityNotificationsPostCommit,
   handleVideoVisibilityMutationFailure,
   planVideoVisibilityTransition,
@@ -195,7 +196,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     statements.unshift(...transition.mutationStatements);
     expected.unshift(...transition.expectedMutationChanges);
     audits.unshift(...transition.audits);
-    if (transition.depublicizedFromPublic && transition.fenceToken) {
+    if (transition.fenceToken) {
       try {
         await preCommitVideoVisibilityDepublicization({
           videoId,
@@ -204,6 +205,16 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
         });
       } catch (error) {
         unstable_rethrow(error);
+        try {
+          await compensateDepublicizationFenceOnD1Failure(db, {
+            videoId,
+            fenceToken: transition.fenceToken,
+            traceId,
+            allowNonPublicRollback: !transition.depublicizedFromPublic,
+          });
+        } catch (compensationError) {
+          console.warn("[moderation-admin] visibility precommit compensation failed", compensationError);
+        }
         const error_code =
           error instanceof Error ? error.name : "UnknownError";
         logFlowTrace({
@@ -299,7 +310,7 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
     statements.push(...transition.mutationStatements);
     expected.push(...transition.expectedMutationChanges);
     audits.push(...transition.audits);
-    if (transition.depublicizedFromPublic && transition.fenceToken) {
+    if (transition.fenceToken) {
       try {
         await preCommitVideoVisibilityDepublicization({
           videoId: video.id,
@@ -308,6 +319,16 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
         });
       } catch (error) {
         unstable_rethrow(error);
+        try {
+          await compensateDepublicizationFenceOnD1Failure(db, {
+            videoId: video.id,
+            fenceToken: transition.fenceToken,
+            traceId,
+            allowNonPublicRollback: !transition.depublicizedFromPublic,
+          });
+        } catch (compensationError) {
+          console.warn("[moderation-admin] visibility precommit compensation failed", compensationError);
+        }
         const error_code =
           error instanceof Error ? error.name : "UnknownError";
         logFlowTrace({

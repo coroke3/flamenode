@@ -31,6 +31,32 @@ export interface PublicVideoDetailViewModel {
   relatedVideos: VideoCardData[];
 }
 
+/**
+ * Remove event references that are still present in a stale video artifact
+ * while the event visibility fence is blocking public delivery.
+ *
+ * Video artifacts are rebuilt independently from event artifacts. Keeping
+ * this projection pure lets the request layer apply the R2 fence without
+ * changing the static payload format or issuing per-event D1 reads.
+ */
+export function filterPublicVideoDetailEvents(
+  detail: StaticVideoDetail,
+  blockedEventIds: ReadonlySet<string>,
+): StaticVideoDetail {
+  if (blockedEventIds.size === 0) return detail;
+  const publicEvents = detail.publicEvents.filter(
+    (event) => !blockedEventIds.has(event.id),
+  );
+  const eventIds = detail.eventIds.filter((eventId) => !blockedEventIds.has(eventId));
+  if (
+    publicEvents.length === detail.publicEvents.length &&
+    eventIds.length === detail.eventIds.length
+  ) {
+    return detail;
+  }
+  return { ...detail, publicEvents, eventIds };
+}
+
 export function buildPublicVideoViewModelFromStatic(
   detail: StaticVideoDetail,
   options?: {

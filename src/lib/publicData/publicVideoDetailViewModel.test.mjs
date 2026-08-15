@@ -6,6 +6,7 @@ if (runTestWithTsx(import.meta.url)) {
   const {
     buildPublicVideoViewModelFromDatabase,
     buildPublicVideoViewModelFromStatic,
+    filterPublicVideoDetailEvents,
   } = await import("./publicVideoDetailViewModel.ts");
 
   const staticDetail = {
@@ -131,6 +132,13 @@ if (runTestWithTsx(import.meta.url)) {
       vm.relatedVideos[0].creator_x_user_id,
       "other",
     );
+  });
+
+  test("filters fenced events from stale static video references", () => {
+    const filtered = filterPublicVideoDetailEvents(staticDetail, new Set(["event1"]));
+    assert.deepEqual(filtered.eventIds, []);
+    assert.deepEqual(filtered.publicEvents, []);
+    assert.equal(staticDetail.eventIds[0], "event1");
   });
 
   test("buildPublicVideoViewModelFromDatabase maps D1 bundle shape", () => {

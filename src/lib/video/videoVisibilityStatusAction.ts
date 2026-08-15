@@ -10,6 +10,7 @@ import type { QueueWakeSource } from "@/lib/queues/wakeBudget";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import {
+  compensateDepublicizationFenceOnD1Failure,
   preCommitVideoVisibilityDepublicization,
   type VideoVisibilityTransitionPlan,
 } from "@/lib/video/videoVisibilityTransition";
@@ -81,7 +82,7 @@ export async function executeVideoVisibilityStatusMutation(
   const audits = [...transition.audits, ...(input.extraAudits ?? [])];
 
   try {
-    if (transition.depublicizedFromPublic && transition.fenceToken) {
+    if (transition.fenceToken) {
       await preCommitVideoVisibilityDepublicization({
         videoId,
         fenceToken: transition.fenceToken,
@@ -98,6 +99,21 @@ export async function executeVideoVisibilityStatusMutation(
     });
   } catch (error) {
     unstable_rethrow(error);
+    if (transition.fenceToken) {
+      try {
+        await compensateDepublicizationFenceOnD1Failure(db, {
+          videoId,
+          fenceToken: transition.fenceToken,
+          traceId,
+          allowNonPublicRollback: !transition.depublicizedFromPublic,
+        });
+      } catch (compensationError) {
+        console.warn(`[${logTag}] visibility compensation failed`, {
+          traceId,
+          error: compensationError,
+        });
+      }
+    }
     if (error instanceof AuditMutationError) {
       const reread = (
         await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)

@@ -1,5 +1,24 @@
 # Static Delivery
 
+## Visibility fence lifecycle
+
+When an event or video changes from public to a non-public status, the D1
+mutation is paired with an R2 blocked-visibility manifest entry before the
+transaction. Re-publication keeps that block in `release_pending` until the
+static artifact rebuild has completed. The generator then removes only the
+matching token with an ETag/CAS check. This keeps D1 authoritative and avoids
+serving stale public JSON during either transition.
+The video detail projection also filters event references against the same
+manifest, so an event that is being withdrawn is not shown from a stale video
+artifact while its event projections are rebuilding.
+The `video_visibility_update` queue reason is retained when active queue rows
+are merged, so a competing enqueue cannot prevent the release worker from
+clearing the matching promotion fence.
+Event ID rename also writes an old-ID tombstone before the D1 key migration
+and queues an explicit composed-artifact cleanup. The tombstone remains as a
+permanent old-URL block so a stale object can never become public again, and
+the old ID cannot be reused by a newly-created event.
+
 > Status: Active
 > Last verified: 2026-07-31
 > Verified against: `src/lib/publicData/`, `src/lib/admin/staticSharedInputDiagnostics.ts`, `app/(public)/`, `app/(admin)/admin/static-builds/`, `workers/json-generator/`, `wrangler.toml`

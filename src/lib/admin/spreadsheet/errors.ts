@@ -34,6 +34,7 @@ export function spreadsheetHttpStatus(message: string): number {
     case SPREADSHEET_ERROR.UNKNOWN_TABLE:
     case SPREADSHEET_ERROR.TABLE_READONLY:
     case "column_not_editable":
+    case "physical_delete_requires_visibility_status":
     case "unknown_column":
     case "missing_fields":
     case "empty_row":

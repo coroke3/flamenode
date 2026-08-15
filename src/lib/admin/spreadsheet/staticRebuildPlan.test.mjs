@@ -15,6 +15,36 @@ function keys(targets) {
   return targets.map((target) => `${target.targetType}:${target.targetId}`);
 }
 
+test("eventsの編集はイベント詳細・枠・公開一覧を再生成する", () => {
+  assert.deepEqual(
+    keys(
+      planSpreadsheetStaticRebuildTargets([
+        mutation("events", "UPDATE", { id: "event-1", title: "旧" }, { id: "event-1", title: "新" }),
+      ]),
+    ),
+    [
+      "event_base:event-1",
+      "event_slots:event-1",
+      "events_index:global",
+      "search_index:global",
+      "top_events:global",
+      "top_stats:global",
+      "top_slot_stats:global",
+    ],
+  );
+});
+
+test("event_groupsの編集はイベント一覧を再生成する", () => {
+  assert.deepEqual(
+    keys(
+      planSpreadsheetStaticRebuildTargets([
+        mutation("event_groups", "UPDATE", { id: "group-1", name: "旧" }, { id: "group-1", name: "新" }),
+      ]),
+    ),
+    ["events_index:global"],
+  );
+});
+
 test("videosは詳細を常に再生成し、カード・visibilityの意味ある変更だけglobalへ波及する", () => {
   assert.deepEqual(
     keys(

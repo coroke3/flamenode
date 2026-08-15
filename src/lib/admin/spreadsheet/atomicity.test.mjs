@@ -75,3 +75,13 @@ test("spreadsheet foreign-key prevalidation deduplicates values into bounded IN 
   assert.match(querySource, /IN \(\$\{placeholders\}\)/);
   assert.match(querySource, /offset \+= 99/);
 });
+
+test("spreadsheet cannot bypass event/video lifecycle transitions with physical deletes", () => {
+  assert.match(querySource, /isSpreadsheetPhysicalDeleteBlocked\(ctx\.def\.table\)/);
+  assert.match(querySource, /physical_delete_requires_visibility_status/);
+});
+
+test("spreadsheet inserts enforce the same column policy as updates and imports", () => {
+  assert.match(querySource, /for \(const column of Object\.keys\(opts\.row\)\)/);
+  assert.match(querySource, /assertColumnEditable\(ctx, column\)/);
+});

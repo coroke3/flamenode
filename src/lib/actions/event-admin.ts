@@ -8,6 +8,7 @@ import {
   eventStaff,
   eventTemplates,
   events,
+  publicVisibilityFences,
   videoCustomAnswers,
   xUserAccountLinks,
   xUsers,
@@ -24,10 +25,22 @@ import { generateId } from "@/lib/utils/id";
 import { resolveStagePermissionFieldsFromJson } from "@/lib/video/formSettings";
 import { stagePermissionQuestionKeyCondition } from "@/lib/video/stagePermissionAnswers";
 import { buildEventChangeQueueBatch } from "@/lib/staticRebuild/hooks";
+import {
+  compensateEventVisibilityFenceOnD1Failure,
+  planEventVisibilityTransition,
+  preCommitEventVisibilityTransition,
+} from "@/lib/event/eventVisibilityTransition";
 import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
+import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
+import {
+  eventBaseObjectKey,
+  eventComposedObjectKey,
+  eventSlotsObjectKey,
+} from "@/lib/publicData/staticEventDetailCore";
 import {
   buildPartsJson,
   buildVideoFormSettingsJson,
+  EVENT_ID_PATTERN,
   parseEventForm,
   resolveSubmittedEventVisibility,
 } from "@/lib/event/eventForm";
@@ -151,6 +164,16 @@ export async function createEvent(
   if (!parsed.ok) return parsed;
   const data = parsed.data;
   const id = data.id?.trim() || generateId("ev");
+  // The browser applies the same pattern, but this action must not trust a
+  // client-provided FormData. Legacy/imported IDs remain readable/editable;
+  // only newly-created IDs are constrained to route-safe characters.
+  if (!EVENT_ID_PATTERN.test(id)) {
+    return {
+      ok: false,
+      message:
+        "イベントIDは64文字以内で、英数字・_・-のみ使用できます。",
+    };
+  }
   const now = Math.floor(Date.now() / 1000);
 
   let templateSnapshot: EventTemplateSnapshot | null = null;
@@ -176,6 +199,32 @@ export async function createEvent(
     await db.select({ id: events.id }).from(events).where(eq(events.id, id)).limit(1)
   )[0];
   if (duplicate) return { ok: false, message: `ID「${id}」は既に存在します。` };
+
+  // A renamed event leaves a permanent old-ID tombstone so a stale R2
+  // projection can never become public again. Do not allow a new event to
+  // reuse that ID while the public manifest still blocks it; otherwise the
+  // new event would be silently hidden by the stale-URL guard.
+  const renameTombstone = (
+    await db
+      .select({ id: publicVisibilityFences.entity_id })
+      .from(publicVisibilityFences)
+      .where(
+        and(
+          eq(publicVisibilityFences.entity_type, "event"),
+          eq(publicVisibilityFences.entity_id, id),
+          eq(publicVisibilityFences.state, "blocked"),
+          eq(publicVisibilityFences.reason, "event_id_rename_old_cleanup"),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (renameTombstone) {
+    return {
+      ok: false,
+      message:
+        "このイベントIDは旧URLの公開データ削除中のため、しばらく再利用できません。",
+    };
+  }
 
   const activeXUserId = guard.user.active_x_user_id?.trim() || null;
   if (!activeXUserId) {
@@ -389,7 +438,10 @@ export async function updateEvent(
   )[0];
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
 
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.max(
+    Math.floor(Date.now() / 1000),
+    before.updated_at + 1,
+  );
   const built = buildEventUpdatePayload({
     data,
     before,
@@ -398,6 +450,15 @@ export async function updateEvent(
     now,
   });
   const after = { ...before, ...built.payload } as typeof events.$inferSelect;
+  const visibilityTransition = planEventVisibilityTransition({
+    db,
+    eventId: data.id,
+    previousStatus: before.visibility_status,
+    nextStatus: after.visibility_status,
+    actorUserId,
+    reason: "event_visibility_update",
+    now,
+  });
   const mutations: Array<
     Parameters<typeof mutateWithAudit>[1]["mutationStatements"][number]
   > = [
@@ -405,8 +466,9 @@ export async function updateEvent(
       .update(events)
       .set(built.payload)
       .where(and(eq(events.id, data.id), eq(events.updated_at, before.updated_at))),
+    ...visibilityTransition.mutationStatements,
   ];
-  const expected = [1];
+  const expected = [1, ...visibilityTransition.expectedMutationChanges];
   const audits: Array<
     Parameters<typeof mutateWithAudit>[1]["audits"][number]
   > = [
@@ -597,21 +659,80 @@ export async function updateEvent(
 
   const queue = await buildEventChangeQueueBatch(db, {
     eventId: data.id,
-    reason: "event_settings_update",
+    reason: visibilityTransition.fenceToken
+      ? "event_visibility_update"
+      : "event_settings_update",
     requestedByUserId: actorUserId,
+    priority: visibilityTransition.fenceToken ? "high" : undefined,
   });
   const mutationStatements = [...mutations, ...queue.statements];
   if (!fitsD1AtomicBatchBudget(mutationStatements.length, audits.length)) {
     return { ok: false, message: "イベント更新の原子的処理がD1の上限を超えます。" };
   }
-  await mutateWithAudit(db, {
-    mutationStatements,
-    expectedMutationChanges: [...expected, ...queue.expectedChanges],
-    audits,
-    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
-  });
+  if (visibilityTransition.fenceToken) {
+    try {
+      await preCommitEventVisibilityTransition({
+        eventId: data.id,
+        fenceToken: visibilityTransition.fenceToken,
+        reason: "event_visibility_update",
+      });
+    } catch (error) {
+      try {
+        await compensateEventVisibilityFenceOnD1Failure(db, {
+          eventId: data.id,
+          fenceToken: visibilityTransition.fenceToken,
+          allowNonPublicRollback: !visibilityTransition.depublicizedFromPublic,
+        });
+      } catch (compensationError) {
+        console.warn("[event-admin] visibility precommit compensation failed", compensationError);
+      }
+      console.warn("[event-admin] visibility precommit failed", error);
+      return { ok: false, message: "イベント公開状態の安全な反映準備に失敗しました。" };
+    }
+  }
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements,
+      expectedMutationChanges: [...expected, ...queue.expectedChanges],
+      audits,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+  } catch (error) {
+    if (visibilityTransition.fenceToken) {
+      try {
+        await compensateEventVisibilityFenceOnD1Failure(db, {
+          eventId: data.id,
+          fenceToken: visibilityTransition.fenceToken,
+          allowNonPublicRollback: !visibilityTransition.depublicizedFromPublic,
+        });
+      } catch (compensationError) {
+        console.warn("[event-admin] visibility mutation compensation failed", compensationError);
+      }
+    }
+    console.error("[event-admin] event mutation failed", error);
+    return { ok: false, message: "イベント更新に失敗しました。状態を再取得してもう一度お試しください。" };
+  }
 
-  if (after.visibility_status !== "public") {
+  if (
+    visibilityTransition.fenceToken ||
+    built.updatedSections.includes("basic")
+  ) {
+    await deletePublicJsonCaches([
+      eventComposedObjectKey(data.id),
+      eventBaseObjectKey(data.id),
+      eventSlotsObjectKey(data.id),
+      "events/index.json",
+      "list/recent.json",
+      "list/popular.json",
+      "top/sections/events.v1.json",
+      "top.json",
+    ]);
+  }
+  // Visibility transitions can leave a cached 404/old export on promotion as
+  // well as a stale public payload on depublication. Invalidate both sides
+  // whenever the fence was changed; keep the existing private/settings guard
+  // for updates that were already non-public.
+  if (visibilityTransition.fenceToken || after.visibility_status !== "public") {
     await invalidateEventExportCache(data.id);
   }
   revalidateEventPaths(data.id);
@@ -639,46 +760,112 @@ export async function deleteEvent(
   }
 
   const { db } = guard;
-  const now = Math.floor(Date.now() / 1000);
   const before = (
     await db.select().from(events).where(eq(events.id, eventId)).limit(1)
   )[0];
+  const now = Math.max(
+    Math.floor(Date.now() / 1000),
+    before?.updated_at != null ? before.updated_at + 1 : 0,
+  );
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
   const after = {
     ...before,
     visibility_status: "private" as const,
     updated_at: now,
   };
+  const visibilityTransition = planEventVisibilityTransition({
+    db,
+    eventId,
+    previousStatus: before.visibility_status,
+    nextStatus: after.visibility_status,
+    actorUserId,
+    reason: "event_private",
+    now,
+  });
   const queue = await buildEventChangeQueueBatch(db, {
     eventId,
     reason: "event_private",
     requestedByUserId: actorUserId,
     priority: "high",
   });
-  await mutateWithAudit(db, {
-    mutationStatements: [
-      db
-        .update(events)
-        .set({ visibility_status: "private", updated_at: now })
-        .where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))),
-      ...queue.statements,
-    ],
-    expectedMutationChanges: [1, ...queue.expectedChanges],
-    audits: [
-      {
-        table_name: "events",
-        target_id: eventId,
-        operation: "UPDATE",
-        before,
-        after,
-        actor_user_id: actorUserId,
-        retention_class: "long_audit",
-        strict: true,
-      },
-    ],
-    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
-  });
+  const mutationStatements = [
+    db
+      .update(events)
+      .set({ visibility_status: "private", updated_at: now })
+      .where(and(eq(events.id, eventId), eq(events.updated_at, before.updated_at))),
+    ...visibilityTransition.mutationStatements,
+    ...queue.statements,
+  ];
+  if (!fitsD1AtomicBatchBudget(mutationStatements.length, 1)) {
+    return { ok: false, message: "イベント非公開化の原子的処理がD1の上限を超えます。" };
+  }
+  if (visibilityTransition.fenceToken) {
+    try {
+      await preCommitEventVisibilityTransition({
+        eventId,
+        fenceToken: visibilityTransition.fenceToken,
+        reason: "event_private",
+      });
+    } catch (error) {
+      try {
+        await compensateEventVisibilityFenceOnD1Failure(db, {
+          eventId,
+          fenceToken: visibilityTransition.fenceToken,
+        });
+      } catch (compensationError) {
+        console.warn("[event-admin] visibility precommit compensation failed", compensationError);
+      }
+      console.warn("[event-admin] visibility precommit failed", error);
+      return { ok: false, message: "イベント非公開化の安全な反映準備に失敗しました。" };
+    }
+  }
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements,
+      expectedMutationChanges: [
+        1,
+        ...visibilityTransition.expectedMutationChanges,
+        ...queue.expectedChanges,
+      ],
+      audits: [
+        {
+          table_name: "events",
+          target_id: eventId,
+          operation: "UPDATE",
+          before,
+          after,
+          actor_user_id: actorUserId,
+          retention_class: "long_audit",
+          strict: true,
+        },
+      ],
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+  } catch (error) {
+    if (visibilityTransition.fenceToken) {
+      try {
+        await compensateEventVisibilityFenceOnD1Failure(db, {
+          eventId,
+          fenceToken: visibilityTransition.fenceToken,
+        });
+      } catch (compensationError) {
+        console.warn("[event-admin] visibility mutation compensation failed", compensationError);
+      }
+    }
+    console.error("[event-admin] event archive mutation failed", error);
+    return { ok: false, message: "イベント非公開化に失敗しました。状態を再取得してもう一度お試しください。" };
+  }
 
+  await deletePublicJsonCaches([
+    eventComposedObjectKey(eventId),
+    eventBaseObjectKey(eventId),
+    eventSlotsObjectKey(eventId),
+    "events/index.json",
+    "list/recent.json",
+    "list/popular.json",
+    "top/sections/events.v1.json",
+    "top.json",
+  ]);
   await invalidateEventExportCache(eventId);
   revalidateEventPaths(eventId);
   return markPendingPublicReflection({ ok: true }, queue.statements.length > 0);

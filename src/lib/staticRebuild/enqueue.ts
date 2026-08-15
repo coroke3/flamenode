@@ -14,7 +14,7 @@ import { wakeStaticRebuildQueueAfterCommit } from "@/lib/queues/wakeStaticRebuil
 import {
   pickHigherPriority,
   PRIORITY_RANK,
-  shouldUseIncomingQueueMetadata,
+  resolveQueueReason,
 } from "./priorityCore";
 import type {
   EnqueueStaticRebuildInput,
@@ -42,15 +42,16 @@ function dedupeStaticRebuildInputs(
     const existingPriority = (existing.priority ?? "normal") as StaticRebuildPriority;
     const incomingPriority = (item.priority ?? "normal") as StaticRebuildPriority;
     const mergedPriority = pickHigherPriority(existingPriority, incomingPriority);
-    const useIncomingMetadata = shouldUseIncomingQueueMetadata(
-      existingPriority,
-      incomingPriority,
-    );
     byKey.set(key, {
       ...existing,
       ...item,
       priority: mergedPriority,
-      reason: useIncomingMetadata ? item.reason : existing.reason,
+      reason: resolveQueueReason(
+        existing.reason,
+        item.reason,
+        existingPriority,
+        incomingPriority,
+      ),
       requestedByUserId:
         item.requestedByUserId ?? existing.requestedByUserId,
     });
@@ -131,6 +132,10 @@ export async function buildStaticRebuildQueueBatch(
         ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
         DO UPDATE SET
           reason = CASE
+            WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup')
+              THEN excluded.reason
+            WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup')
+              THEN static_rebuild_queue.reason
             WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END)
               >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END)
             THEN excluded.reason
@@ -239,12 +244,13 @@ export async function enqueueStaticRebuild(
       if (row) {
         const existingPriority = row.priority;
         const mergedPriority = pickHigherPriority(existingPriority, priority);
-        const useIncomingMetadata = shouldUseIncomingQueueMetadata(
-          existingPriority,
-          priority,
-        );
         const update = db.update(staticRebuildQueue).set({
-          reason: useIncomingMetadata ? target.reason : row.reason ?? target.reason,
+          reason: resolveQueueReason(
+            row.reason,
+            target.reason,
+            existingPriority,
+            priority,
+          ),
           priority: mergedPriority,
           requested_by_user_id:
             target.requestedByUserId ?? row.requested_by_user_id,

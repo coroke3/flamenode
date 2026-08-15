@@ -55,4 +55,10 @@ test("playlist R2 fallback は理由を分類して event visibility guard を�
   assert.match(videoQueries, /event_playlist_d1_fallback/);
   assert.match(videoQueries, /from\(events\)/);
   assert.match(videoQueries, /visibility_status !== "public"/);
+  assert.match(videoQueries, /isPublicEntityVisibilityBlocked/);
+  assert.match(videoQueries, /entityType: "event"/);
+  assert.match(
+    videoQueries,
+    /resolvePublicVisibilityGuardModeFromEnv\(\)/,
+  );
 });

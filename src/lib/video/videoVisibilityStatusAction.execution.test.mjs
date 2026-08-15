@@ -66,6 +66,7 @@ if (!runningWithTsx) {
 
   mock.module("@/lib/video/videoVisibilityTransition", {
     namedExports: {
+      async compensateDepublicizationFenceOnD1Failure() {},
       async preCommitVideoVisibilityDepublicization() {
         if (currentHarness.precommitMode === "fail") {
           throw new Error("public_visibility_fence_token_mismatch");

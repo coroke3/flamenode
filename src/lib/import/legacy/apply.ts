@@ -38,6 +38,23 @@ import type {
 import { legacyImportRebuildQueueId } from "./rebuildQueueCore";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
+import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
+import {
+  eventBaseObjectKey,
+  eventComposedObjectKey,
+  eventSlotsObjectKey,
+} from "@/lib/publicData/staticEventDetailCore";
+import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
+import {
+  compensateEventVisibilityFenceOnD1Failure,
+  planEventVisibilityTransition,
+  preCommitEventVisibilityTransition,
+} from "@/lib/event/eventVisibilityTransition";
+import {
+  compensateDepublicizationFenceOnD1Failure,
+  planVideoVisibilityFenceTransition,
+  preCommitVideoVisibilityDepublicization,
+} from "@/lib/video/videoVisibilityTransition";
 
 const LEGACY_IMPORT_SYSTEM_USER_ID = "system_legacy_import";
 const MAX_IDS_PER_QUERY = 80;
@@ -62,6 +79,7 @@ type LegacyRebuildTarget = {
   targetType: StaticRebuildTargetType;
   targetId: string;
   priority: StaticRebuildPriority;
+  reason?: string;
 };
 
 const REBUILD_PRIORITY_RANK: Record<StaticRebuildPriority, number> = {
@@ -94,6 +112,7 @@ function legacyRebuildQueueMutation(
     target_type: target.targetType,
     target_id: target.targetId,
     priority: target.priority,
+    reason: target.reason ?? "legacy_import",
   }));
   const payload = JSON.stringify(rows);
   return {
@@ -106,14 +125,19 @@ function legacyRebuildQueueMutation(
         json_extract(incoming.value, '$.id'),
         json_extract(incoming.value, '$.target_type'),
         json_extract(incoming.value, '$.target_id'),
-        'legacy_import',
+        json_extract(incoming.value, '$.reason'),
         json_extract(incoming.value, '$.priority'),
         'pending', 0, ${options.actorAuthUserId}, ${now}, ${now}
       FROM json_each(${payload}) AS incoming
       WHERE 1 = 1
       ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing')
       DO UPDATE SET
-        reason = excluded.reason,
+        reason = CASE
+          WHEN static_rebuild_queue.reason = 'video_visibility_update'
+               AND excluded.reason <> 'video_visibility_update'
+            THEN static_rebuild_queue.reason
+          ELSE excluded.reason
+        END,
         priority = CASE
           WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high'
           WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal'
@@ -1180,13 +1204,32 @@ async function applyEvent(
     snapshotDigest(nextManagedEvent),
     snapshotDigest(nextStaff),
   ]);
+  const visibilityTransition = existing
+    ? planEventVisibilityTransition({
+        db,
+        eventId: event.id,
+        previousStatus: existing.visibility_status,
+        nextStatus: event.visibility_status,
+        actorUserId: options.actorAuthUserId,
+        reason: "legacy_import_visibility",
+        now,
+      })
+    : {
+        mutationStatements: [],
+        expectedMutationChanges: [],
+        fenceToken: null,
+        depublicizedFromPublic: false,
+      };
+  const rebuildReason = visibilityTransition.fenceToken
+    ? "event_visibility_update"
+    : undefined;
   const rebuildQueue = legacyRebuildQueueMutation(
     db,
     [
-      { targetType: "event_base", targetId: event.id, priority: "high" },
-      { targetType: "event_slots", targetId: event.id, priority: "high" },
-      { targetType: "events_index", targetId: "global", priority: "low" },
-      { targetType: "search_index", targetId: "global", priority: "low" },
+      { targetType: "event_base", targetId: event.id, priority: "high", reason: rebuildReason },
+      { targetType: "event_slots", targetId: event.id, priority: "high", reason: rebuildReason },
+      { targetType: "events_index", targetId: "global", priority: "low", reason: rebuildReason },
+      { targetType: "search_index", targetId: "global", priority: "low", reason: rebuildReason },
     ],
     options,
     now,
@@ -1270,6 +1313,7 @@ async function applyEvent(
             ${event.start_time}, ${event.end_time}, NULL, NULL, ${now}, ${now}, 1, 15, 0
           )
         `),
+    ...visibilityTransition.mutationStatements,
     ...(existing && beforeStaff.length > 0
       ? [db.run(sql`DELETE FROM event_staff WHERE event_id = ${event.id}`)]
       : []),
@@ -1295,14 +1339,36 @@ async function applyEvent(
   const expected = [
     ...(existing ? [null] : []),
     1,
+    ...visibilityTransition.expectedMutationChanges,
     ...(existing && beforeStaff.length > 0 ? [beforeStaff.length] : []),
     ...(nextStaff.length > 0 ? [nextStaff.length] : []),
     rebuildQueue.expectedChanges,
   ];
-  await mutateWithAudit(db, {
-    mutationStatements,
-    expectedMutationChanges: expected,
-    audits: [
+  if (visibilityTransition.fenceToken) {
+    try {
+      await preCommitEventVisibilityTransition({
+        eventId: event.id,
+        fenceToken: visibilityTransition.fenceToken,
+        reason: "legacy_import_visibility",
+      });
+    } catch (error) {
+      try {
+        await compensateEventVisibilityFenceOnD1Failure(db, {
+          eventId: event.id,
+          fenceToken: visibilityTransition.fenceToken,
+          allowNonPublicRollback: !visibilityTransition.depublicizedFromPublic,
+        });
+      } catch (compensationError) {
+        console.warn("[legacy-import] event visibility precommit compensation failed", compensationError);
+      }
+      throw error;
+    }
+  }
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements,
+      expectedMutationChanges: expected,
+      audits: [
       {
         table_name: "events",
         target_id: event.id,
@@ -1338,9 +1404,31 @@ async function applyEvent(
             options.actorAuthUserId,
           )]
         : []),
-    ],
-    staticRebuildWakeSource: "import",
-  });
+      ],
+      staticRebuildWakeSource: "import",
+    });
+  } catch (error) {
+    if (visibilityTransition.fenceToken) {
+      try {
+        await compensateEventVisibilityFenceOnD1Failure(db, {
+          eventId: event.id,
+          fenceToken: visibilityTransition.fenceToken,
+          allowNonPublicRollback: !visibilityTransition.depublicizedFromPublic,
+        });
+      } catch (compensationError) {
+        console.warn("[legacy-import] event visibility mutation compensation failed", compensationError);
+      }
+    }
+    throw error;
+  }
+  if (visibilityTransition.fenceToken) {
+    await deletePublicJsonCaches([
+      eventComposedObjectKey(event.id),
+      eventBaseObjectKey(event.id),
+      eventSlotsObjectKey(event.id),
+    ]);
+    await invalidateEventExportCache(event.id);
+  }
   return existing ? "replaced" : "created";
 }
 
@@ -1764,10 +1852,28 @@ async function applyVideo(
     [video.primary_event_id, ...nextEvents.map((row) => row.event_id)]
       .filter((eventId): eventId is string => !!eventId),
   )];
+  const visibilityTransition = existing
+    ? planVideoVisibilityFenceTransition(db, {
+        videoId: video.id,
+        previousStatus: existing.visibility_status,
+        nextStatus: video.visibility_status,
+        actorUserId: options.actorAuthUserId,
+        reason: "legacy_import_visibility",
+        now,
+      })
+    : {
+        mutationStatements: [],
+        expectedMutationChanges: [],
+        fenceToken: null,
+        depublicizedFromPublic: false,
+      };
+  const videoRebuildReason = visibilityTransition.fenceToken
+    ? "video_visibility_update"
+    : undefined;
   const rebuildQueue = legacyRebuildQueueMutation(
     db,
     [
-      { targetType: "video", targetId: video.id, priority: "high" },
+      { targetType: "video", targetId: video.id, priority: "high", reason: videoRebuildReason },
       { targetType: "top_recommended", targetId: "global", priority: "normal" },
       { targetType: "top_latest", targetId: "global", priority: "normal" },
       { targetType: "top_nostalgic", targetId: "global", priority: "normal" },
@@ -1784,11 +1890,13 @@ async function applyVideo(
           targetType: "event_base" as const,
           targetId: eventId,
           priority: "high" as const,
+          reason: videoRebuildReason,
         },
         {
           targetType: "event_slots" as const,
           targetId: eventId,
           priority: "high" as const,
+          reason: videoRebuildReason,
         },
       ]),
     ],
@@ -2071,6 +2179,7 @@ async function applyVideo(
             ${video.created_at}, ${now}
           )
         `),
+    ...visibilityTransition.mutationStatements,
     ...(questionSnapshotRows.length
       ? [db.run(sql`
           SELECT CASE WHEN (
@@ -2212,6 +2321,7 @@ async function applyVideo(
   ];
   const expected = [
     1,
+    ...visibilityTransition.expectedMutationChanges,
     ...(questionSnapshotRows.length ? [null] : []),
     null,
     ...(support.beforeEventCount ? [support.beforeEventCount] : []),
@@ -2228,10 +2338,32 @@ async function applyVideo(
     ...(video.youtube_video_id ? [1] : []),
     rebuildQueue.expectedChanges,
   ];
-  await mutateWithAudit(db, {
-    mutationStatements: statements,
-    expectedMutationChanges: expected,
-    audits: [
+  if (visibilityTransition.fenceToken) {
+    try {
+      await preCommitVideoVisibilityDepublicization({
+        videoId: video.id,
+        fenceToken: visibilityTransition.fenceToken,
+        reason: "legacy_import_visibility",
+      });
+    } catch (error) {
+      try {
+        await compensateDepublicizationFenceOnD1Failure(db, {
+          videoId: video.id,
+          fenceToken: visibilityTransition.fenceToken,
+          traceId: `legacy-import:${options.stepTargetId}:${video.id}`,
+          allowNonPublicRollback: !visibilityTransition.depublicizedFromPublic,
+        });
+      } catch (compensationError) {
+        console.warn("[legacy-import] video visibility precommit compensation failed", compensationError);
+      }
+      throw error;
+    }
+  }
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: statements,
+      expectedMutationChanges: expected,
+      audits: [
       {
         table_name: "videos",
         target_id: video.id,
@@ -2308,10 +2440,39 @@ async function applyVideo(
             options.actorAuthUserId,
           )]
         : []),
-    ],
-    staticRebuildWakeSource: "import",
-    wakeSentKinds,
-  });
+      ],
+      staticRebuildWakeSource: "import",
+      wakeSentKinds,
+    });
+  } catch (error) {
+    if (visibilityTransition.fenceToken) {
+      try {
+        await compensateDepublicizationFenceOnD1Failure(db, {
+          videoId: video.id,
+          fenceToken: visibilityTransition.fenceToken,
+          traceId: `legacy-import:${options.stepTargetId}:${video.id}`,
+          allowNonPublicRollback: !visibilityTransition.depublicizedFromPublic,
+        });
+      } catch (compensationError) {
+        console.warn("[legacy-import] video visibility mutation compensation failed", compensationError);
+      }
+    }
+    throw error;
+  }
+  if (visibilityTransition.fenceToken) {
+    const cacheIds = new Set([
+      existing?.youtube_video_id ?? existing?.id ?? video.id,
+      video.youtube_video_id ?? video.id,
+    ]);
+    await deletePublicJsonCaches([
+      ...[...cacheIds].map((id) => `videos/${id}.json`),
+      ...rebuildEventIds.flatMap((eventId) => [
+        eventComposedObjectKey(eventId),
+        eventBaseObjectKey(eventId),
+        eventSlotsObjectKey(eventId),
+      ]),
+    ]);
+  }
   return existing ? "replaced" : "created";
 }
 

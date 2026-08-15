@@ -283,6 +283,7 @@ async function processQueueRow(
       row.target_id,
       Number(row.updated_at) || 0,
       signal,
+      row.reason,
     );
     throwIfAborted(signal, "static rebuild queue aborted");
     const completion = await completeQueueRow(env, row, token, now, signal, metrics);

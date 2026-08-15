@@ -12,6 +12,7 @@ import {
   isSpreadsheetSecretColumn,
   getSpreadsheetColumnPolicy,
   SPREADSHEET_DEFAULT_MAX_CELL_CHARS,
+  isSpreadsheetPhysicalDeleteBlocked,
 } from "./registry";
 import { validateSpreadsheetDisabledFeaturesJson } from "./disabledFeaturesCore";
 export { validateSpreadsheetDisabledFeaturesJson } from "./disabledFeaturesCore";
@@ -637,6 +638,11 @@ async function insertSpreadsheetRowWithContext(
   },
 ): Promise<SpreadsheetMutationOutcome> {
   assertTableEditable(ctx);
+  for (const column of Object.keys(opts.row)) {
+    // INSERT も UPDATE / import と同じ列ポリシーを通す。ここを省くと
+    // secret・CostGuard・visibility_status を単発 API から直接書けてしまう。
+    assertColumnEditable(ctx, column);
+  }
   await validateSpreadsheetForeignKeys(ctx, [opts.row]);
   const pendingPublicReflection = await executeSpreadsheetMutations([
     buildInsertMutation(ctx, opts.row, opts.operatorId),
@@ -663,6 +669,9 @@ export async function deleteSpreadsheetRow(opts: {
 }): Promise<SpreadsheetMutationOutcome> {
   const ctx = await resolveSpreadsheetTableContext(opts.table);
   assertTableEditable(ctx);
+  if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) {
+    throw new Error("physical_delete_requires_visibility_status");
+  }
   const primaryKey = normalizePrimaryKeyRecord(
     ctx.primaryKeys,
     opts.primaryKey,

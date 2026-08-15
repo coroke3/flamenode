@@ -1,11 +1,39 @@
 import { and, eq, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
-import { auditLogs, auditRestoreRuns, users } from "@/lib/db/schema";
+import { auditLogs, auditRestoreRuns, users, videoEvents } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { evaluateRestoreCapability } from "./capability";
 import { assertChanges, mutateWithAudit } from "./mutate";
 import { getRestoreRegistration } from "./registry";
 import { computeChangedKeys } from "./snapshot";
+import { buildEventChangeQueueBatch, buildAfterVideoStatusChangeQueueBatch, MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
+import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
+import {
+  eventBaseObjectKey,
+  eventComposedObjectKey,
+  eventSlotsObjectKey,
+} from "@/lib/publicData/staticEventDetailCore";
+import { RANDOM_VIDEO_POOL_OBJECT_KEY } from "@/lib/publicData/randomVideoPoolCore";
+import {
+  TOP_LATEST_OBJECT_KEY,
+  TOP_NOSTALGIC_OBJECT_KEY,
+  TOP_RECOMMENDED_OBJECT_KEY,
+  TOP_STATS_OBJECT_KEY,
+} from "@/lib/publicData/staticTopSectionsCore";
+import { YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY } from "@/lib/publicData/staticYoutubeRelatedBlocklistCore";
+import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
+import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
+import {
+  compensateEventVisibilityFenceOnD1Failure,
+  planEventVisibilityTransition,
+  preCommitEventVisibilityTransition,
+} from "@/lib/event/eventVisibilityTransition";
+import {
+  compensateDepublicizationFenceOnD1Failure,
+  planVideoVisibilityFenceTransition,
+  preCommitVideoVisibilityDepublicization,
+} from "@/lib/video/videoVisibilityTransition";
 import {
   AuditOperation,
   RestoreFailureReason,
@@ -41,6 +69,16 @@ const PERMANENT_RESTORE_REASONS = new Set([
   "event_staff_subject_missing",
   "required_field_missing",
 ]);
+
+function userPublicCacheKeys(xUserId: string | null): string[] {
+  if (!xUserId) return [];
+  const keys = [`users/${xUserId}.json`];
+  for (let page = 2; page <= STATIC_USER_MAX_PAGES; page += 1) {
+    keys.push(`users/${xUserId}/works/${page}.json`);
+    keys.push(`users/${xUserId}/collabs/${page}.json`);
+  }
+  return keys;
+}
 
 function sanitizeRestoreError(
   error: unknown,
@@ -401,22 +439,172 @@ export async function restoreAuditLog(
     };
   }
 
-  const restoreStatements =
+  const baseRestoreStatements =
     restoreMutation.statements != null
       ? restoreMutation.statements
       : [restoreMutation.query];
 
-  const restoreExpectedChanges =
+  const baseRestoreExpectedChanges: Array<number | null> =
     restoreMutation.expectedMutationChanges != null
-      ? restoreMutation.expectedMutationChanges
-      : restoreMutation.expectedChanges;
+      ? [...restoreMutation.expectedMutationChanges]
+      : [restoreMutation.expectedChanges];
 
   const restoreRunId = generateId("rst");
+  let restoreStatements: BatchItem<"sqlite">[] = [...baseRestoreStatements];
+  let restoreExpectedMutationChanges: Array<number | null> = [
+    ...baseRestoreExpectedChanges,
+  ];
+  let visibilityEntity: "event" | "video" | null = null;
+  let visibilityFenceToken: string | null = null;
+  let depublicizedFromPublic = false;
+  let publicCacheKeys: string[] = [];
   try {
+    if (log.table_name === "events") {
+      const previousStatus = String(current?.visibility_status ?? "");
+      const nextStatus = String(target.visibility_status ?? "");
+      const transition = planEventVisibilityTransition({
+        db,
+        eventId: log.target_id,
+        previousStatus: previousStatus as "private" | "public",
+        nextStatus: nextStatus as "private" | "public",
+        actorUserId: userId,
+        reason: "audit_restore_visibility",
+        now,
+      });
+      const queue = await buildEventChangeQueueBatch(db, {
+        eventId: log.target_id,
+        reason: "audit_restore",
+        requestedByUserId: userId,
+        priority: transition.fenceToken ? "high" : undefined,
+      });
+      restoreStatements.push(...transition.mutationStatements, ...queue.statements);
+      restoreExpectedMutationChanges.push(
+        ...transition.expectedMutationChanges,
+        ...queue.expectedChanges,
+      );
+      visibilityEntity = "event";
+      visibilityFenceToken = transition.fenceToken;
+      depublicizedFromPublic = transition.depublicizedFromPublic;
+      publicCacheKeys = [
+        eventComposedObjectKey(log.target_id),
+        eventBaseObjectKey(log.target_id),
+        eventSlotsObjectKey(log.target_id),
+        "events/index.json",
+        "list/recent.json",
+        "list/popular.json",
+        "top/sections/events.v1.json",
+        "top.json",
+      ];
+    } else if (log.table_name === "videos") {
+      const eventRows = await db
+        .select({ event_id: videoEvents.event_id })
+        .from(videoEvents)
+        .where(eq(videoEvents.video_id, log.target_id))
+        .limit(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1);
+      if (eventRows.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
+        throw new Error("video_status_rebuild_event_limit_exceeded");
+      }
+      const previousStatus = String(current?.visibility_status ?? "");
+      const nextStatus = String(target.visibility_status ?? "");
+      const transition = planVideoVisibilityFenceTransition(db, {
+        videoId: log.target_id,
+        previousStatus: previousStatus as "pending" | "public" | "private" | "voided",
+        nextStatus: nextStatus as "pending" | "public" | "private" | "voided",
+        actorUserId: userId,
+        reason: "audit_restore_visibility",
+        now,
+      });
+      const queue = await buildAfterVideoStatusChangeQueueBatch(db, {
+        videoId: log.target_id,
+        eventIds: eventRows.map((row) => row.event_id),
+        creatorXUserId: String(current?.creator_x_user_id ?? "").trim() || null,
+        primaryEventId: String(current?.primary_event_id ?? "").trim() || null,
+        requestedByUserId: userId,
+      });
+      restoreStatements.push(...transition.mutationStatements, ...queue.statements);
+      restoreExpectedMutationChanges.push(
+        ...transition.expectedMutationChanges,
+        ...queue.expectedChanges,
+      );
+      visibilityEntity = "video";
+      visibilityFenceToken = transition.fenceToken;
+      depublicizedFromPublic = transition.depublicizedFromPublic;
+      const cacheKeys = new Set<string>();
+      const cacheIds = new Set<string>([
+        log.target_id,
+        String(current?.youtube_video_id ?? "").trim(),
+        String(target.youtube_video_id ?? "").trim(),
+      ]);
+      for (const id of cacheIds) {
+        if (id) cacheKeys.add(`videos/${id}.json`);
+      }
+
+      // Keep audit restore in lockstep with the normal visibility action. A
+      // restore can move a video back to public/private just like moderation;
+      // leaving a global projection or a user page cached would otherwise
+      // expose the pre-restore state until its TTL expires.
+      for (const key of [
+        "list/recent.json",
+        "list/popular.json",
+        "search-index-lite.json",
+        RANDOM_VIDEO_POOL_OBJECT_KEY,
+        YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
+        TOP_RECOMMENDED_OBJECT_KEY,
+        TOP_LATEST_OBJECT_KEY,
+        TOP_NOSTALGIC_OBJECT_KEY,
+        TOP_STATS_OBJECT_KEY,
+        "top.json",
+        "users/index.json",
+        "users/public-x-icon-map.v1.json",
+        "users/pickup-creators.v1.json",
+      ]) {
+        cacheKeys.add(key);
+      }
+
+      const creatorIds = new Set<string>([
+        String(current?.creator_x_user_id ?? "").trim(),
+        String(target.creator_x_user_id ?? "").trim(),
+      ]);
+      for (const creatorId of creatorIds) {
+        for (const key of userPublicCacheKeys(creatorId || null)) {
+          cacheKeys.add(key);
+        }
+      }
+
+      const eventIds = new Set<string>([
+        ...eventRows.map((row) => String(row.event_id ?? "").trim()),
+        String(current?.primary_event_id ?? "").trim(),
+        String(target.primary_event_id ?? "").trim(),
+      ]);
+      for (const eventId of eventIds) {
+        if (!eventId) continue;
+        cacheKeys.add(eventComposedObjectKey(eventId));
+        cacheKeys.add(eventBaseObjectKey(eventId));
+        cacheKeys.add(eventSlotsObjectKey(eventId));
+      }
+      publicCacheKeys = [...cacheKeys];
+    }
+
+    if (visibilityFenceToken) {
+      if (visibilityEntity === "event") {
+        await preCommitEventVisibilityTransition({
+          eventId: log.target_id,
+          fenceToken: visibilityFenceToken,
+          reason: "audit_restore_visibility",
+        });
+      } else if (visibilityEntity === "video") {
+        await preCommitVideoVisibilityDepublicization({
+          videoId: log.target_id,
+          fenceToken: visibilityFenceToken,
+          reason: "audit_restore_visibility",
+        });
+      }
+    }
+
     await mutateWithAudit(db, {
       mutationStatements: restoreStatements,
       expectedMutationChanges:
-        restoreExpectedChanges,
+        restoreExpectedMutationChanges,
       audits: [{
         table_name: log.table_name,
         target_id: log.target_id,
@@ -446,6 +634,7 @@ export async function restoreAuditLog(
         }),
         db.run(assertChanges(1)),
       ],
+      staticRebuildWakeSource: visibilityEntity ? "admin" : undefined,
     });
   } catch (error) {
     const message =
@@ -454,6 +643,27 @@ export async function restoreAuditLog(
       }`;
 
     let failedRunId: string | undefined;
+
+    if (visibilityFenceToken) {
+      try {
+        if (visibilityEntity === "event") {
+          await compensateEventVisibilityFenceOnD1Failure(db, {
+            eventId: log.target_id,
+            fenceToken: visibilityFenceToken,
+            allowNonPublicRollback: !depublicizedFromPublic,
+          });
+        } else if (visibilityEntity === "video") {
+          await compensateDepublicizationFenceOnD1Failure(db, {
+            videoId: log.target_id,
+            fenceToken: visibilityFenceToken,
+            traceId: `audit-restore:${restoreRunId}`,
+            allowNonPublicRollback: !depublicizedFromPublic,
+          });
+        }
+      } catch (compensationError) {
+        console.warn("[audit-restore] visibility compensation failed", compensationError);
+      }
+    }
 
     try {
       failedRunId =
@@ -488,6 +698,13 @@ export async function restoreAuditLog(
       restore_status: log.restore_status,
       restore_run_id: failedRunId,
     };
+  }
+
+  if (publicCacheKeys.length > 0) {
+    await deletePublicJsonCaches(publicCacheKeys);
+  }
+  if (log.table_name === "events") {
+    await invalidateEventExportCache(log.target_id);
   }
 
   return { ok: true, message: "復元が完了しました。", restore_run_id: restoreRunId };

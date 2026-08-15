@@ -185,6 +185,18 @@ if (!runningWithTsx) {
     assert.equal(state.writeCalls, 0);
   });
 
+  test("private video promotion rollback can release its exact precommit token", async () => {
+    reset();
+    state.videoVisibility = "private";
+    await compensateDepublicizationFenceOnD1Failure(createDb(), {
+      videoId: "video-1",
+      fenceToken: "fence-token-1",
+      traceId: "trace-promotion-rollback",
+      allowNonPublicRollback: true,
+    });
+    assert.equal(state.writeCalls, 1);
+  });
+
   test("confirmed D1 blocked fence with same token does not write", async () => {
     reset();
     state.fence = {

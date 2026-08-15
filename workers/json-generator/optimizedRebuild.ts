@@ -535,6 +535,7 @@ export async function optimizedRebuildTarget(
   targetId: string,
   _sourceUpdatedAt: number,
   signal?: AbortSignal,
+  reason?: string | null,
 ): Promise<{ followUpPending: boolean }> {
   throwIfAborted(signal);
 
@@ -543,7 +544,7 @@ export async function optimizedRebuildTarget(
     if (bundled) return bundled;
   }
 
-  const result = await rebuildTarget(env, targetType, targetId, signal);
+  const result = await rebuildTarget(env, targetType, targetId, signal, reason);
   if (targetType === "event_base") {
     await syncEventPlaylistArtifact(env, targetId, signal);
   }
