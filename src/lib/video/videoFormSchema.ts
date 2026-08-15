@@ -3,6 +3,7 @@ import { normalizeHttpUrl } from "@/lib/utils/url";
 import { validateSocialLinksJson } from "@/lib/socialLinks";
 import { normalizeSoftwareLabels } from "@/lib/utils/softwareLabels";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@/lib/video/atomicLimits";
+import { extractYoutubeId } from "@/lib/youtube/id";
 
 export function normalizeIconUrl(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
@@ -35,14 +36,19 @@ function preprocessOptionalYoutubeUrl(val: unknown): unknown {
   return normalizeHttpUrl(trimmed, { maxLength: 500 }) ?? trimmed;
 }
 
+const youtubeUrlValueSchema = z.string().trim().refine(
+  (value) => Boolean(extractYoutubeId(value)),
+  "YouTube URLまたは11文字の動画IDを入力してください。",
+);
+
 const youtubeUrlRequiredField = z.preprocess(
   preprocessYoutubeUrl,
-  z.string().trim().url(),
+  youtubeUrlValueSchema,
 );
 
 const youtubeUrlOptionalField = z.preprocess(
   preprocessOptionalYoutubeUrl,
-  z.union([z.literal(""), z.string().trim().url()]),
+  z.union([z.literal(""), youtubeUrlValueSchema]),
 );
 
 export const videoIconModeSchema = z.enum(["existing", "upload", "none", "keep"]);

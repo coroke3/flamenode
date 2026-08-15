@@ -141,7 +141,14 @@ async function requestIcon({ slotId, row, viewer, bucket = true }) {
         };
       },
     },
-    BUCKET: bucket
+    BUCKET: bucket === "error"
+      ? {
+          async get() {
+            state.gets += 1;
+            throw new Error("R2 unavailable");
+          },
+        }
+      : bucket
       ? {
           async get() {
             state.gets += 1;
@@ -219,4 +226,24 @@ test("R2 iconはACL通過後に安全objectだけ返す", async () => {
   assert.equal(state.gets, 1);
   assert.equal(response.headers.get("content-type"), "image/webp");
   assert.match(response.headers.get("cache-control") ?? "", /^public,/);
+});
+
+test("R2読み取り障害はslot iconを503へfail-closedする", async () => {
+  const { response, state } = await requestIcon({
+    slotId: VALID_SLOT_ID,
+    bucket: "error",
+    row: {
+      slot_status: "submitted",
+      reserved_by_user_id: "user-1",
+      slot_x_user_id: "x",
+      slot_visibility_mode: "public_name",
+      event_visibility_status: "public",
+      creator_icon_url: "/api/media/video-icons/x/icon.webp",
+    },
+    viewer: null,
+  });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("retry-after"), "30");
+  assert.equal(state.gets, 1);
 });

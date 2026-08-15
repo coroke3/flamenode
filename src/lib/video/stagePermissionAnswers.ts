@@ -57,47 +57,68 @@ export async function readStagePermissionCustomAnswers(
   const eventIds = Array.from(new Set(args.eventIds.filter(Boolean)));
   if (eventIds.length === 0) return null;
 
-  const questions = await db
-    .select({
-      id: eventCustomQuestions.id,
-      event_id: eventCustomQuestions.event_id,
-      question_key: eventCustomQuestions.question_key,
-      label: eventCustomQuestions.label,
-      sort_order: eventCustomQuestions.sort_order,
-      is_active: eventCustomQuestions.is_active,
-    })
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        inArray(eventCustomQuestions.event_id, eventIds),
-        stagePermissionQuestionKeyCondition(),
-      )!,
-    )
-    .limit(MAX_STAGE_PERMISSION_QUESTIONS + 1);
-  if (questions.length > MAX_STAGE_PERMISSION_QUESTIONS) {
-    throw new Error("video_stage_answer_read_limit_exceeded");
+  const questions: StagePermissionQuestionRow[] = [];
+  // A detail page can be opened for imported/legacy data whose event-link
+  // count predates MAX_ATOMIC_VIDEO_EVENTS. Split this read as well as the
+  // batch reader so the single-query 100-bind ceiling is still fail-closed.
+  for (const eventIdChunk of chunkStringIds(
+    eventIds,
+    D1_STAGE_EVENT_ID_CHUNK_SIZE,
+  )) {
+    const chunkQuestions = await db
+      .select({
+        id: eventCustomQuestions.id,
+        event_id: eventCustomQuestions.event_id,
+        question_key: eventCustomQuestions.question_key,
+        label: eventCustomQuestions.label,
+        sort_order: eventCustomQuestions.sort_order,
+        is_active: eventCustomQuestions.is_active,
+      })
+      .from(eventCustomQuestions)
+      .where(
+        and(
+          inArray(eventCustomQuestions.event_id, eventIdChunk),
+          stagePermissionQuestionKeyCondition(),
+        )!,
+      )
+      .limit(MAX_STAGE_PERMISSION_QUESTIONS + 1);
+    questions.push(...chunkQuestions);
+    if (questions.length > MAX_STAGE_PERMISSION_QUESTIONS) {
+      throw new Error("video_stage_answer_read_limit_exceeded");
+    }
   }
   if (questions.length === 0) return null;
 
-  const answers = await db
-    .select({
-      question_id: videoCustomAnswers.question_id,
-      answer_text: videoCustomAnswers.answer_text,
-    })
-    .from(videoCustomAnswers)
-    .where(
-      and(
-        eq(videoCustomAnswers.video_id, args.videoId),
-        inArray(videoCustomAnswers.event_id, eventIds),
-        inArray(
-          videoCustomAnswers.question_id,
-          questions.map((question) => question.id),
-        ),
-      )!,
-    )
-    .limit(5);
-  if (answers.length > 4) {
-    throw new Error("video_stage_answer_read_limit_exceeded");
+  const questionIds = questions.map((question) => question.id);
+  const questionEventIds = Array.from(
+    new Set(questions.map((question) => question.event_id)),
+  );
+  const answers: Array<{
+    question_id: string;
+    answer_text: string | null;
+  }> = [];
+  for (const eventIdChunk of chunkStringIds(
+    questionEventIds,
+    D1_STAGE_EVENT_ID_CHUNK_SIZE,
+  )) {
+    const chunkAnswers = await db
+      .select({
+        question_id: videoCustomAnswers.question_id,
+        answer_text: videoCustomAnswers.answer_text,
+      })
+      .from(videoCustomAnswers)
+      .where(
+        and(
+          eq(videoCustomAnswers.video_id, args.videoId),
+          inArray(videoCustomAnswers.event_id, eventIdChunk),
+          inArray(videoCustomAnswers.question_id, questionIds),
+        )!,
+      )
+      .limit(5);
+    answers.push(...chunkAnswers);
+    if (answers.length > 4) {
+      throw new Error("video_stage_answer_read_limit_exceeded");
+    }
   }
   const answerByQuestionId = new Map(
     answers.map((answer) => [answer.question_id, answer.answer_text ?? ""]),
@@ -214,11 +235,22 @@ export async function batchReadStagePermissionCustomAnswers(
       (eventId) => questionsByEvent.get(eventId) ?? [],
     );
     if (scopedQuestions.length === 0) continue;
-    answerScopes.push({
-      videoId: item.videoId,
-      eventIds: scopedEventIds,
-      questionIds: Array.from(new Set(scopedQuestions.map((question) => question.id))),
-    });
+    const questionIds = Array.from(
+      new Set(scopedQuestions.map((question) => question.id)),
+    );
+    // A single legacy video can be linked to more than the normal atomic
+    // event limit. Split that scope before the grouping pass as well; without
+    // this, an otherwise empty group could still issue one 200-event IN query.
+    for (const eventIdChunk of chunkStringIds(
+      scopedEventIds,
+      D1_STAGE_EVENT_ID_CHUNK_SIZE,
+    )) {
+      answerScopes.push({
+        videoId: item.videoId,
+        eventIds: eventIdChunk,
+        questionIds,
+      });
+    }
   }
 
   // Group scopes until the three IN lists remain below the D1 bind ceiling.

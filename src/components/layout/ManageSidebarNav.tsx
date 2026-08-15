@@ -43,7 +43,7 @@ function EventLink({
   event: ManageSidebarEvent;
   pathname: string | null;
 }): React.ReactElement {
-  const href = `/manage/events/${event.id}`;
+  const href = `/manage/events/${encodeURIComponent(event.id)}`;
   const active = isManageHrefActive(href, pathname);
   return (
     <Link

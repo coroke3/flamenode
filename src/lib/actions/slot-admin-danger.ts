@@ -85,6 +85,14 @@ export async function forceReleaseSubmittedSlot(
       message: `一度に強制解放できる枠は ${MAX_SLOTS_PER_VIDEO} 件までです。`,
     };
   }
+  // A concurrent submit/release can split the group between the anchor read
+  // and this query. Do not force-release a different remaining group.
+  if (!targetRows.some((candidate) => candidate.id === row.id)) {
+    return {
+      ok: false,
+      message: "指定した枠の状態が変わりました。再試行してください。",
+    };
+  }
   if (
     targetRows.some(
       (candidate) =>

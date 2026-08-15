@@ -7,6 +7,10 @@ import { normalizeMemberChapters } from "@/lib/video/memberInputs";
 import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
 import { extractVideoMemberIdFromChapterId } from "@/lib/video/memberChapterProjection";
 import type { MemberSubmissionBaseline } from "@/lib/video/memberSubmissionCompare";
+export {
+  remapMemberChaptersByIdentity,
+  type MemberChapterIdentityRemap,
+} from "./memberChapterIdentity.ts";
 
 export type { MemberSubmissionBaseline } from "@/lib/video/memberSubmissionCompare";
 export {

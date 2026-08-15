@@ -55,7 +55,9 @@ export default async function ManageXLinkRequestsPage(): Promise<React.ReactElem
   } catch {
     authSecret = undefined;
   }
-  const enrichedPending = await enrichXLinkPendingRows(db, pendingBase);
+  const enrichedPending = await enrichXLinkPendingRows(db, pendingBase, {
+    includeVideoIconFallback: true,
+  });
   const pending = await Promise.all(
     enrichedPending.map(async (row) => {
       const [requestedIconUrl, targetIconUrl] = await Promise.all([

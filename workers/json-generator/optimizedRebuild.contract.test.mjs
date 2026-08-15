@@ -8,6 +8,20 @@ const source = readFileSync(
   "utf8",
 );
 
+test("ranking queueの滞留読取と完了更新をCloudflare向けにbounded/batch化する", () => {
+  const captureStart = source.indexOf("async function capturePendingRankingRows(");
+  const captureEnd = source.indexOf("\nasync function loadCompleteRankingSnapshot", captureStart);
+  const capture = source.slice(captureStart, captureEnd);
+  assert.match(capture, /LIMIT \?/);
+  assert.match(capture, /\.bind\(\.\.\.RANKING_TARGETS, RANKING_PENDING_CAPTURE_LIMIT\)/);
+
+  const doneStart = source.indexOf("async function markCoveredRankingRowsDone(");
+  const doneEnd = source.indexOf("\nasync function rebuildRankingBundle", doneStart);
+  const done = source.slice(doneStart, doneEnd);
+  assert.match(done, /const statements: D1PreparedStatement\[\] = \[\]/);
+  assert.match(done, /await env\.DB\.batch\(statements\)/);
+});
+
 test("dedupeされたR2 artifactでもstatic_artifacts鮮度を更新する", () => {
   const putTrackedStart = source.indexOf("async function putTrackedJson(");
   const putTrackedEnd = source.indexOf("\nfunction listPayloadFits", putTrackedStart);

@@ -45,10 +45,17 @@ export function normalizePublicVisibilityBlockedEntitiesManifest(
 ): PublicVisibilityBlockedEntitiesManifest | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Partial<PublicVisibilityBlockedEntitiesManifest>;
+  const schemaVersion = row.schema_version;
+  const revision = row.revision;
+  const generatedAt = row.generated_at;
   if (
-    typeof row.schema_version !== "number" ||
-    typeof row.revision !== "number" ||
-    typeof row.generated_at !== "number" ||
+    schemaVersion !== PUBLIC_VISIBILITY_MANIFEST_SCHEMA_VERSION ||
+    typeof revision !== "number" ||
+    !Number.isSafeInteger(revision) ||
+    revision < 0 ||
+    typeof generatedAt !== "number" ||
+    !Number.isFinite(generatedAt) ||
+    generatedAt < 0 ||
     !Array.isArray(row.entities)
   ) {
     return null;
@@ -57,14 +64,22 @@ export function normalizePublicVisibilityBlockedEntitiesManifest(
   for (const entry of row.entities) {
     if (!entry || typeof entry !== "object") return null;
     const entity = entry as Partial<PublicVisibilityBlockedEntity>;
+    const blockedAt = entity.blocked_at;
     if (
       (entity.entity_type !== "video" &&
         entity.entity_type !== "event" &&
         entity.entity_type !== "x_user" &&
         entity.entity_type !== "event_group") ||
       typeof entity.entity_id !== "string" ||
+      entity.entity_id.length === 0 ||
       typeof entity.fence_token !== "string" ||
-      typeof entity.blocked_at !== "number"
+      entity.fence_token.length === 0 ||
+      typeof blockedAt !== "number" ||
+      !Number.isFinite(blockedAt) ||
+      blockedAt < 0 ||
+      (entity.reason !== undefined &&
+        entity.reason !== null &&
+        typeof entity.reason !== "string")
     ) {
       return null;
     }
@@ -72,14 +87,14 @@ export function normalizePublicVisibilityBlockedEntitiesManifest(
       entity_type: entity.entity_type,
       entity_id: entity.entity_id,
       fence_token: entity.fence_token,
-      blocked_at: entity.blocked_at,
+      blocked_at: blockedAt,
       reason: entity.reason ?? null,
     });
   }
   return {
-    schema_version: row.schema_version,
-    revision: row.revision,
-    generated_at: row.generated_at,
+    schema_version: schemaVersion,
+    revision,
+    generated_at: generatedAt,
     entities,
   };
 }

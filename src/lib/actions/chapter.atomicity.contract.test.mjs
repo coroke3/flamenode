@@ -136,3 +136,34 @@ test("createChapter/createChaptersBulk のみ active_x_snapshot を検証する"
   assert.doesNotMatch(updateAction, /validateActiveXSnapshot/);
   assert.doesNotMatch(deleteAction, /validateActiveXSnapshot/);
 });
+
+test("CSV visibility values are limited to public or private", () => {
+  assert.match(
+    action,
+    /rawVisibility && rawVisibility !== "public" && rawVisibility !== "private"/,
+  );
+  assert.match(action, /visibility は public または private を指定してください/);
+});
+
+test("queue 構築失敗も各投稿経路の保存エラーへ変換する", () => {
+  for (const section of [createAction, updateAction, deleteAction]) {
+    const queueIndex = section.indexOf("queue = await buildStaticRebuildQueueBatch");
+    const mutationIndex = section.indexOf("await mutateWithAudit");
+    assert.ok(queueIndex >= 0 && queueIndex < mutationIndex);
+    assert.match(
+      section.slice(Math.max(0, queueIndex - 120), mutationIndex),
+      /try\s*\{/,
+    );
+  }
+  const bulkAction = actionSection(
+    "export async function createChaptersBulk",
+    "/**",
+  );
+  const queueIndex = bulkAction.indexOf("queue = await buildStaticRebuildQueueBatch");
+  const mutationIndex = bulkAction.indexOf("await mutateWithAudit");
+  assert.ok(queueIndex >= 0 && queueIndex < mutationIndex);
+  assert.match(
+    bulkAction.slice(Math.max(0, queueIndex - 120), mutationIndex),
+    /try\s*\{/,
+  );
+});

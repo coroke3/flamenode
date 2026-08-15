@@ -2,7 +2,6 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
@@ -11,10 +10,6 @@ import {
   getManageAuthorizationSnapshot,
 } from "@/lib/auth/manageAuthorization";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
-import {
-  videos as videosTable,
-  videoEvents as videoEventsTable,
-} from "@/lib/db/schema";
 import { ManageVideoStatusForm } from "@/components/video/VideoStatusForm";
 import { VideoApproveActions } from "@/components/video/VideoApproveActions";
 import {
@@ -25,7 +20,7 @@ import { Icon } from "@/components/ui/Icon";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
-import { fetchVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
+import { fetchEventVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
 
 export const dynamic = "force-dynamic";
 
@@ -61,22 +56,7 @@ export default async function ManageEventVideoDetailPage({
   const ev = navigation.events.find((event) => event.id === id);
   if (!ev) notFound();
 
-  const linked = (
-    await db
-      .select({ id: videosTable.id })
-      .from(videosTable)
-      .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
-      .where(
-        and(
-          eq(videoEventsTable.event_id, id),
-          eq(videosTable.id, videoId),
-        )!,
-      )
-      .limit(1)
-  )[0];
-  if (!linked) notFound();
-
-  const video = await fetchVideoReviewDetail(db, videoId, [id]);
+  const video = await fetchEventVideoReviewDetail(db, id, videoId);
   if (!video) notFound();
 
   const isAdmin = user.role === "admin";

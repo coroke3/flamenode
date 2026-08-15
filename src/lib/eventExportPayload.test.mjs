@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { buildEventExportPayload } from "./api/eventExportPayload.ts";
+import { findForbiddenPublicKeys } from "./api/publicDto.ts";
 
 const snapshot = {
   event: {
@@ -124,7 +125,13 @@ test("イベント公開API v5はDB正本の構造だけを返す", () => {
   assert.equal(video.softwares[0].source_label, "AE");
   assert.match(video.source.thumbnails.medium_url, /mqdefault\.jpg$/);
   assert.match(video.source.thumbnails.large_url, /maxresdefault\.jpg$/);
-  assert.equal(video.custom_answers_by_key.stage_permission, "可");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      video.custom_answers_by_key,
+      "stage_permission",
+    ),
+    false,
+  );
   assert.deepEqual(video.creator.other_social_links, {
     portfolio: "https://example.com",
   });
@@ -154,6 +161,43 @@ test("イベント公開APIに旧形式フィールドと内部情報を含め�
   ]) {
     assert.equal(serialized.includes(`\"${forbidden}\"`), false, forbidden);
   }
+});
+
+test("イベント公開APIは任意のanswer_jsonオブジェクトとSNS内部キーを公開しない", () => {
+  const unsafeSnapshot = {
+    ...snapshot,
+    event: { ...snapshot.event },
+    videos: [
+      {
+        ...snapshot.videos[0],
+        creator_other_social_links: JSON.stringify({
+          portfolio: "https://example.com",
+          user_id: "secret-user",
+          nested: { access_token: "secret-token", label: "公開ラベル" },
+        }),
+        answers: [
+          {
+            key: "user_id",
+            label: "選択",
+            answer_text: null,
+            answer_json: JSON.stringify({ user_id: "secret-answer" }),
+            sort_order: 0,
+          },
+        ],
+      },
+    ],
+  };
+
+  const payload = buildEventExportPayload(unsafeSnapshot);
+  const video = payload.videos[0];
+  assert.deepEqual(video.creator.other_social_links, {
+    portfolio: "https://example.com",
+    nested: { label: "公開ラベル" },
+  });
+  assert.equal(video.custom_answers[0].value, null);
+  assert.equal(video.custom_answers[0].key, "user_id");
+  assert.equal(Object.prototype.hasOwnProperty.call(video.custom_answers_by_key, "user_id"), false);
+  assert.deepEqual(findForbiddenPublicKeys(payload), []);
 });
 
 test("イベントAPIはformatパラメータを410で拒否しv5だけを返す", async () => {

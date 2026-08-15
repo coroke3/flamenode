@@ -44,6 +44,14 @@ test("外部API処理は固定予算・timeout・provider cooldownを持つ", ()
 
 test("外部API処理は無制限retryを持たない", () => {
   assert.doesNotMatch(discord, /while \(true\)/);
-  assert.doesNotMatch(imageProxy, /while \(true\)/);
+  // The image proxy has one bounded stream-reader loop. It exits on EOF or
+  // cancels as soon as maxObjectBytes is exceeded; do not classify that body
+  // reader as a provider retry loop.
+  const imageProxyWithoutBoundedReader = imageProxy.replace(
+    /async function readBodyUpToLimit\([\s\S]*?\n}\r?\n\r?\nasync function fetchWithTimeout/,
+    "async function fetchWithTimeout",
+  );
+  assert.doesNotMatch(imageProxyWithoutBoundedReader, /while \(true\)/);
+  assert.match(imageProxy, /readBodyUpToLimit/);
   assert.match(youtube, /YOUTUBE_SYNC_MAX_ATTEMPTS = 2/);
 });

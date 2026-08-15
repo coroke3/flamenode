@@ -7,7 +7,6 @@ import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
-  events as eventsTable,
   slots as slotsTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
@@ -22,6 +21,7 @@ import {
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import { getManageEventForRender } from "@/lib/manage/manageEventRender";
 import { resolveManageXIconUrl } from "@/lib/media/manageXIcon";
 
 export const dynamic = "force-dynamic";
@@ -34,13 +34,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
   if (!db) return { title: `登録者プレビュー (${id})` };
-  const ev = (
-    await db
-      .select({ title: eventsTable.title })
-      .from(eventsTable)
-      .where(eq(eventsTable.id, id))
-      .limit(1)
-  )[0];
+  const ev = await getManageEventForRender(id);
   return {
     title: ev?.title ? `${ev.title} 登録者プレビュー` : "登録者プレビュー",
   };

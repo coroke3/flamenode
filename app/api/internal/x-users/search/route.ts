@@ -33,6 +33,11 @@ const MAX_QUERY_LENGTH = 64;
 const SOURCE_LIMIT = 200;
 const IN_CLAUSE_SIZE = 80;
 const MIN_SEARCH_CHARS = 2;
+const PRIVATE_HEADERS = {
+  "Cache-Control": "private, no-store, no-cache, must-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+} as const;
 
 function likeColumn(column: unknown, term: string) {
   return sql`${column} LIKE ${term} ESCAPE '\\'`;
@@ -81,15 +86,24 @@ export async function GET(
   if (!userGuard.ok) {
     return NextResponse.json(
       { error: userGuard.error },
-      { status: userGuard.status },
+      { status: userGuard.status, headers: PRIVATE_HEADERS },
     );
   }
 
-  const db = getDatabase();
+  let db: ReturnType<typeof getDatabase>;
+  try {
+    db = getDatabase();
+  } catch (error) {
+    console.error("[x-users-search] runtime bindings unavailable", error);
+    return NextResponse.json(
+      { error: "db_unavailable" },
+      { status: 503, headers: PRIVATE_HEADERS },
+    );
+  }
   if (!db) {
     return NextResponse.json(
       { error: "db_unavailable" },
-      { status: 503 },
+      { status: 503, headers: PRIVATE_HEADERS },
     );
   }
 
@@ -128,8 +142,9 @@ export async function GET(
         )
       : 0;
 
-  if (!rawQuery) {
-    const rows = await db
+  try {
+    if (!rawQuery) {
+      const rows = await db
       .select({
         id: xUsers.id,
         x_name: xUsers.x_name,
@@ -148,39 +163,45 @@ export async function GET(
 
     const hasMore = rows.length > limit;
 
-    return NextResponse.json({
-      items: rows
-        .slice(0, limit)
-        .map((row) => ({
-          id: row.id,
-          x_name: row.x_name,
-          score: 0,
-          matchedBy: "recent",
-        })),
-      query: rawQuery,
-      limit,
-      offset,
-      nextOffset: hasMore
-        ? offset + limit
-        : null,
-      hasMore,
-      hint: null,
-    });
-  }
+      return NextResponse.json(
+      {
+        items: rows
+          .slice(0, limit)
+          .map((row) => ({
+            id: row.id,
+            x_name: row.x_name,
+            score: 0,
+            matchedBy: "recent",
+          })),
+        query: rawQuery,
+        limit,
+        offset,
+        nextOffset: hasMore
+          ? offset + limit
+          : null,
+        hasMore,
+        hint: null,
+      },
+      { headers: PRIVATE_HEADERS },
+      );
+    }
 
   const normalizedQuery =
     normalizeMemberSearchText(rawQuery);
-  if (compactSearchChars(normalizedQuery).length < MIN_SEARCH_CHARS) {
-    return NextResponse.json({
-      items: [],
-      query: rawQuery,
-      limit,
-      offset,
-      nextOffset: null,
-      hasMore: false,
-      hint: "search_too_short",
-    });
-  }
+    if (compactSearchChars(normalizedQuery).length < MIN_SEARCH_CHARS) {
+      return NextResponse.json(
+      {
+        items: [],
+        query: rawQuery,
+        limit,
+        offset,
+        nextOffset: null,
+        hasMore: false,
+        hint: "search_too_short",
+      },
+      { headers: PRIVATE_HEADERS },
+      );
+    }
 
   const directPattern = buildLikePattern(normalizedQuery);
 
@@ -511,7 +532,7 @@ export async function GET(
   const hasMore =
     ranked.length > offset + page.length;
 
-  return NextResponse.json(
+    return NextResponse.json(
     {
       items: page.map((item) => ({
         id: item.x_user_id,
@@ -531,9 +552,14 @@ export async function GET(
         : null,
     },
     {
-      headers: {
-        "Cache-Control": "no-store",
-      },
+      headers: PRIVATE_HEADERS,
     },
-  );
+    );
+  } catch (error) {
+    console.error("[x-users-search] database query failed", error);
+    return NextResponse.json(
+      { error: "db_unavailable" },
+      { status: 503, headers: PRIVATE_HEADERS },
+    );
+  }
 }

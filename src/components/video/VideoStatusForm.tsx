@@ -131,6 +131,7 @@ export function VideoStatusForm({
   const [reasonCategory, setReasonCategory] =
     React.useState<string>("operator_decision");
   const [submitting, setSubmitting] = React.useState(false);
+  const submittingRef = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
@@ -163,7 +164,7 @@ export function VideoStatusForm({
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || submittingRef.current) return;
     if (status === currentStatus) {
       setError("変更先のステータスを選択してください。");
       return;
@@ -197,6 +198,7 @@ export function VideoStatusForm({
       fd.set("case_id", openVoidCaseId);
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     void (async () => {
       try {
@@ -227,6 +229,7 @@ export function VideoStatusForm({
           }
         }
       } finally {
+        submittingRef.current = false;
         setSubmitting(false);
       }
     })();

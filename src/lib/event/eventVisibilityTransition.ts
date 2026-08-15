@@ -152,6 +152,26 @@ export async function preCommitEventVisibilityTransition(input: {
   );
   await writePublicVisibilityBlockedEntitiesManifest(updated, {
     ifMatchEtag: etag,
+    mutateOnConflict: (latest) => {
+      const current = latest.entities.find(
+        (entry) =>
+          entry.entity_type === "event" && entry.entity_id === input.eventId,
+      );
+      if (current && current.fence_token !== input.fenceToken) {
+        throw new Error("public_visibility_fence_token_mismatch");
+      }
+      return upsertBlockedEntityInManifest(
+        latest,
+        {
+          entity_type: "event",
+          entity_id: input.eventId,
+          fence_token: input.fenceToken,
+          blocked_at: Math.floor(Date.now() / 1000),
+          reason: input.reason ?? null,
+        },
+        Math.floor(Date.now() / 1000),
+      );
+    },
   });
 
   const { manifest: confirmed } =
@@ -225,6 +245,43 @@ export async function preCommitEventVisibilityFenceRename(input: {
   );
   await writePublicVisibilityBlockedEntitiesManifest(next, {
     ifMatchEtag: etag,
+    mutateOnConflict: (latest) => {
+      const previous = latest.entities.find(
+        (entry) =>
+          entry.entity_type === "event" && entry.entity_id === input.oldEventId,
+      ) ?? null;
+      const current = latest.entities.find(
+        (entry) =>
+          entry.entity_type === "event" && entry.entity_id === input.newEventId,
+      );
+      if (
+        (previous && previous.fence_token !== input.fenceToken) ||
+        (current && current.fence_token !== input.fenceToken)
+      ) {
+        throw new Error("public_visibility_fence_token_mismatch");
+      }
+      const withoutNew = {
+        ...latest,
+        entities: latest.entities.filter(
+          (entry) =>
+            !(
+              entry.entity_type === "event" &&
+              entry.entity_id === input.newEventId
+            ),
+        ),
+      };
+      return upsertBlockedEntityInManifest(
+        withoutNew,
+        {
+          entity_type: "event",
+          entity_id: input.newEventId,
+          fence_token: input.fenceToken,
+          blocked_at: previous?.blocked_at ?? Math.floor(Date.now() / 1000),
+          reason: previous?.reason ?? input.reason ?? null,
+        },
+        Math.floor(Date.now() / 1000),
+      );
+    },
   });
 
   const { manifest: confirmed } =
@@ -277,6 +334,24 @@ export async function preCommitEventVisibilityRenameTombstone(input: {
   );
   await writePublicVisibilityBlockedEntitiesManifest(next, {
     ifMatchEtag: etag,
+    mutateOnConflict: (latest) => {
+      const previous = latest.entities.find(
+        (entry) =>
+          entry.entity_type === "event" && entry.entity_id === input.eventId,
+      ) ?? null;
+      return upsertBlockedEntityInManifest(
+        latest,
+        {
+          entity_type: "event",
+          entity_id: input.eventId,
+          fence_token: input.fenceToken,
+          blocked_at: previous?.blocked_at ?? Math.floor(Date.now() / 1000),
+          reason:
+            previous?.reason ?? input.reason ?? "event_id_rename_old_cleanup",
+        },
+        Math.floor(Date.now() / 1000),
+      );
+    },
   });
 
   const { manifest: confirmed } =

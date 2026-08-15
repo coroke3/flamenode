@@ -153,13 +153,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       }
 
       const slotOwnerWhere = activeX
-        ? or(
-            eq(slotsTable.x_user_id, activeX),
-            and(
-              isNull(slotsTable.x_user_id),
-              eq(slotsTable.reserved_by_user_id, user.id),
-            )!,
-          )
+        ? and(
+            eq(slotsTable.reserved_by_user_id, user.id),
+            or(eq(slotsTable.x_user_id, activeX), isNull(slotsTable.x_user_id))!,
+          )!
         : and(
             isNull(slotsTable.x_user_id),
             eq(slotsTable.reserved_by_user_id, user.id),

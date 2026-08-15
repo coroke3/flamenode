@@ -4,6 +4,7 @@ import {
   RUNTIME_CRITICAL_TABLES,
 } from "./schemaContract.ts";
 import {
+  ARTIFACT_SLO_PROBES,
   assertArtifactSloFresh,
   assertTrackedDetailArtifactSloFresh,
   type TrackedDetailArtifactSloRow,
@@ -102,30 +103,62 @@ export function authorizeDeepHealth(
   return null;
 }
 
-async function assertPublicVisibilityManifestFresh(
+type PublicVisibilityHealth = {
+  status: DeepHealthCheckStatus;
+  blocksOverallHealth: boolean;
+};
+
+async function checkPublicVisibilityManifestHealth(
   bucket: DeepHealthEnv["BUCKET"],
   nowSec: number,
-): Promise<void> {
-  const object = await bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
-  if (!object) {
-    return;
+  guardMode: PublicVisibilityGuardMode,
+): Promise<PublicVisibilityHealth> {
+  if (guardMode === "off") {
+    return { status: "ok", blocksOverallHealth: false };
   }
-  let payload: unknown;
+
+  const reportDegraded = (reason: string, error?: unknown) => {
+    console.warn(
+      JSON.stringify({
+        service: "deep-health",
+        check: "public_visibility",
+        mode: guardMode,
+        status: "degraded",
+        reason,
+        error: error instanceof Error ? error.message : undefined,
+      }),
+    );
+    return {
+      status: "degraded" as const,
+      blocksOverallHealth: guardMode === "enforce",
+    };
+  };
+
   try {
-    payload = JSON.parse(await object.text());
-  } catch {
-    throw new Error("public visibility manifest malformed");
-  }
-  const normalized = normalizePublicVisibilityBlockedEntitiesManifest(payload);
-  if (!normalized) {
-    throw new Error("public visibility manifest malformed");
-  }
-  const generatedAt = Number(normalized.generated_at);
-  if (!Number.isFinite(generatedAt) || generatedAt <= 0) {
-    throw new Error("public visibility manifest: invalid generated_at");
-  }
-  if (generatedAt > nowSec + 60) {
-    throw new Error("public visibility manifest: generated_at is in the future");
+    const object = await bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
+    if (!object) {
+      return reportDegraded("manifest_missing");
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(await object.text());
+    } catch (error) {
+      return reportDegraded("manifest_malformed", error);
+    }
+    const normalized = normalizePublicVisibilityBlockedEntitiesManifest(payload);
+    if (!normalized) {
+      return reportDegraded("manifest_malformed");
+    }
+    const generatedAt = Number(normalized.generated_at);
+    if (!Number.isFinite(generatedAt) || generatedAt <= 0) {
+      return reportDegraded("manifest_invalid_generated_at");
+    }
+    if (generatedAt > nowSec + 60) {
+      return reportDegraded("manifest_generated_at_in_future");
+    }
+    return { status: "ok", blocksOverallHealth: false };
+  } catch (error) {
+    return reportDegraded("manifest_unavailable", error);
   }
 }
 
@@ -175,12 +208,22 @@ export async function runDeepHealthChecks(
   }
 
   const queueEvaluation = evaluateDeepHealthQueueConfiguration(env);
-  assertTrackedDetailArtifactSloFresh(schema, nowSec);
-  await assertArtifactSloFresh(env.BUCKET, nowSec);
   const guardMode = resolvePublicVisibilityGuardMode(
     env.PUBLIC_VISIBILITY_GUARD_MODE,
   );
-  await assertPublicVisibilityManifestFresh(env.BUCKET, nowSec);
+  // The visibility manifest has its own observe/enforce health semantics. Do
+  // not let the generic artifact SLO turn a malformed/missing manifest into a
+  // raw 500 before that status can be reported in the response.
+  const artifactSloProbes = ARTIFACT_SLO_PROBES.filter(
+    (probe) => probe.key !== PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
+  );
+  assertTrackedDetailArtifactSloFresh(schema, nowSec);
+  await assertArtifactSloFresh(env.BUCKET, nowSec, artifactSloProbes);
+  const visibilityHealth = await checkPublicVisibilityManifestHealth(
+    env.BUCKET,
+    nowSec,
+    guardMode,
+  );
 
   const checks: DeepHealthChecks = {
     d1: "ok",
@@ -189,9 +232,10 @@ export async function runDeepHealthChecks(
     schema: "ok",
     queues: queueEvaluation.status,
     static_artifacts: "ok",
-    public_visibility: "ok",
+    public_visibility: visibilityHealth.status,
   };
-  const degraded = queueEvaluation.status === "degraded";
+  const degraded =
+    queueEvaluation.status === "degraded" || visibilityHealth.blocksOverallHealth;
 
   return {
     ok: !degraded,

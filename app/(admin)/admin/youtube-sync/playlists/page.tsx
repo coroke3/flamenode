@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -26,6 +26,19 @@ export const metadata: Metadata = { title: "イベント再生リスト同期" }
 export const dynamic = "force-dynamic";
 
 const LIMIT = 100;
+// Keep one fixed bind for the event-id predicate and headroom for future
+// conditions.  The visible page is still aggregated in at most two bounded
+// queries (100 rows split into 80 + 20), never once per event.
+const EVENT_ID_CHUNK_SIZE = 80;
+
+function chunkEventIds(ids: readonly string[]): string[][] {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  const chunks: string[][] = [];
+  for (let index = 0; index < unique.length; index += EVENT_ID_CHUNK_SIZE) {
+    chunks.push(unique.slice(index, index + EVENT_ID_CHUNK_SIZE));
+  }
+  return chunks;
+}
 
 interface Props {
   searchParams?: Promise<{
@@ -91,7 +104,10 @@ export default async function AdminYoutubePlaylistSyncPage({
       conds.push(eq(eventYoutubePlaylistSync.sync_status, statusFilter as never));
     }
 
-    const result = await db
+    // Select the configured events first.  The playlist/video joins can fan
+    // out to many rows per event, so applying LIMIT after GROUP BY would read
+    // every configured event before the page boundary is known.
+    const configResult = await db
       .select({
         event_id: eventYoutubePlaylistSync.event_id,
         event_title: eventsTable.title,
@@ -104,57 +120,13 @@ export default async function AdminYoutubePlaylistSyncPage({
         last_synced_at: eventYoutubePlaylistSync.last_synced_at,
         last_full_scan_at: eventYoutubePlaylistSync.last_full_scan_at,
         last_error: eventYoutubePlaylistSync.last_error,
-        linked_count: sql<number>`COUNT(DISTINCT CASE
-          WHEN ${videosTable.id} IS NOT NULL
-           AND ${videosTable.visibility_status} <> 'voided'
-          THEN ${videosTable.id} END)`,
-        eligible_count: sql<number>`COUNT(DISTINCT CASE
-          WHEN ${videosTable.visibility_status} = 'public'
-           AND ${videosTable.youtube_video_id} IS NOT NULL
-           AND ${videosTable.youtube_video_id} <> ''
-          THEN ${videosTable.id} END)`,
-        synced_count: sql<number>`COUNT(DISTINCT CASE
-          WHEN ${eventYoutubePlaylistItems.playlist_item_id} IS NOT NULL
-           AND ${videosTable.visibility_status} = 'public'
-          THEN ${videosTable.id} END)`,
       })
       .from(eventYoutubePlaylistSync)
       .innerJoin(
         eventsTable,
         eq(eventsTable.id, eventYoutubePlaylistSync.event_id),
       )
-      .leftJoin(
-        videoEvents,
-        eq(videoEvents.event_id, eventYoutubePlaylistSync.event_id),
-      )
-      .leftJoin(videosTable, eq(videosTable.id, videoEvents.video_id))
-      .leftJoin(
-        eventYoutubePlaylistItems,
-        and(
-          eq(
-            eventYoutubePlaylistItems.event_id,
-            eventYoutubePlaylistSync.event_id,
-          ),
-          eq(
-            eventYoutubePlaylistItems.youtube_video_id,
-            videosTable.youtube_video_id,
-          ),
-        ),
-      )
       .where(conds.length > 0 ? and(...conds) : undefined)
-      .groupBy(
-        eventYoutubePlaylistSync.event_id,
-        eventsTable.title,
-        eventYoutubePlaylistSync.playlist_id,
-        eventYoutubePlaylistSync.enabled,
-        eventYoutubePlaylistSync.sync_mode,
-        eventYoutubePlaylistSync.sync_interval_minutes,
-        eventYoutubePlaylistSync.sync_status,
-        eventYoutubePlaylistSync.next_sync_at,
-        eventYoutubePlaylistSync.last_synced_at,
-        eventYoutubePlaylistSync.last_full_scan_at,
-        eventYoutubePlaylistSync.last_error,
-      )
       .orderBy(
         desc(sql`CASE ${eventYoutubePlaylistSync.sync_status}
           WHEN 'failed' THEN 4
@@ -166,13 +138,68 @@ export default async function AdminYoutubePlaylistSyncPage({
       )
       .limit(LIMIT + 1);
 
-    rows = result.slice(0, LIMIT).map((row) => ({
-      ...row,
-      linked_count: Number(row.linked_count ?? 0),
-      eligible_count: Number(row.eligible_count ?? 0),
-      synced_count: Number(row.synced_count ?? 0),
-    })) as PlaylistSyncAdminRow[];
-    hasMore = result.length > LIMIT;
+    const visibleConfigs = configResult.slice(0, LIMIT);
+    hasMore = configResult.length > LIMIT;
+
+    if (visibleConfigs.length > 0) {
+      const eventIds = visibleConfigs.map((row) => row.event_id);
+      const aggregateResult = [];
+      for (const eventIdChunk of chunkEventIds(eventIds)) {
+        const chunkResult = await db
+          .select({
+            event_id: videoEvents.event_id,
+            linked_count: sql<number>`COUNT(DISTINCT CASE
+              WHEN ${videosTable.id} IS NOT NULL
+               AND ${videosTable.visibility_status} <> 'voided'
+              THEN ${videosTable.id} END)`,
+            eligible_count: sql<number>`COUNT(DISTINCT CASE
+              WHEN ${videosTable.visibility_status} = 'public'
+               AND ${videosTable.youtube_video_id} IS NOT NULL
+               AND ${videosTable.youtube_video_id} <> ''
+              THEN ${videosTable.id} END)`,
+            synced_count: sql<number>`COUNT(DISTINCT CASE
+              WHEN ${eventYoutubePlaylistItems.playlist_item_id} IS NOT NULL
+               AND ${videosTable.visibility_status} = 'public'
+              THEN ${videosTable.id} END)`,
+          })
+          .from(videoEvents)
+          .leftJoin(videosTable, eq(videosTable.id, videoEvents.video_id))
+          .leftJoin(
+            eventYoutubePlaylistItems,
+            and(
+              eq(eventYoutubePlaylistItems.event_id, videoEvents.event_id),
+              eq(
+                eventYoutubePlaylistItems.youtube_video_id,
+                videosTable.youtube_video_id,
+              ),
+            ),
+          )
+          .where(inArray(videoEvents.event_id, eventIdChunk))
+          .groupBy(videoEvents.event_id);
+        aggregateResult.push(...chunkResult);
+      }
+      const countsByEventId = new Map(
+        aggregateResult.map((row) => [
+          row.event_id,
+          {
+            linked_count: Number(row.linked_count ?? 0),
+            eligible_count: Number(row.eligible_count ?? 0),
+            synced_count: Number(row.synced_count ?? 0),
+          },
+        ]),
+      );
+
+      rows = visibleConfigs.map((row) => ({
+        ...row,
+        ...(countsByEventId.get(row.event_id) ?? {
+          linked_count: 0,
+          eligible_count: 0,
+          synced_count: 0,
+        }),
+      })) as PlaylistSyncAdminRow[];
+    } else {
+      rows = [];
+    }
   }
 
   const totalWaiting = rows.reduce(

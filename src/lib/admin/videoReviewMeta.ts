@@ -110,7 +110,13 @@ export async function fetchVideoReviewSummaries(
         and(
           eq(videoCustomAnswers.video_id, videoEvents.video_id),
           eq(videoCustomAnswers.question_id, eventCustomQuestions.id),
-          sql`trim(coalesce(${videoCustomAnswers.answer_text}, '')) <> ''`,
+          sql`(
+            trim(coalesce(${videoCustomAnswers.answer_text}, '')) <> ''
+            OR (
+              trim(coalesce(${videoCustomAnswers.answer_json}, '')) <> ''
+              AND trim(coalesce(${videoCustomAnswers.answer_json}, '')) NOT IN ('[]', '{}', 'null', '""')
+            )
+          )`,
         )!,
       )
       .where(

@@ -224,6 +224,41 @@ test("deliver: Discord 429はRetry-Afterを読んでinline retryしない", asyn
   }
 });
 
+test("deliver: header付きDiscord 429はresponse bodyを解放する", async () => {
+  const originalFetch = globalThis.fetch;
+  let cancelled = false;
+  globalThis.fetch = async () => {
+    const body = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("rate limited"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    return new Response(body, {
+      status: 429,
+      headers: { "retry-after": "12" },
+    });
+  };
+  try {
+    const ok = await deliver(
+      {
+        type: "discord_webhook",
+        payload_json: JSON.stringify({ content: "hello" }),
+        discord_id: "",
+      },
+      {
+        DISCORD_WEBHOOK_URL: `https://example.test/rate-limited-body-${Date.now()}-${Math.random()}`,
+      },
+    );
+    assert.equal(ok, false);
+    assert.equal(cancelled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("deliver: discord_webhook without webhook URL does not fall back to DM", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -733,6 +768,71 @@ test("配送成功後にmarkSentが常に失敗してもlease回復で再配送�
   } finally {
     harness.restore();
   }
+});
+
+test("sent marker rows beyond the recovery limit are not requeued", async () => {
+  const markerRows = Array.from(
+    { length: MAX_NOTIFICATION_BATCH + 1 },
+    (_, index) => ({
+      id: `marker-${index}`,
+      status: "processing",
+      attempt_count: 0,
+      last_error: DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
+      lease_expires_at: 1,
+    }),
+  );
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            return {
+              async run() {
+                if (
+                  sql.includes("SET status = 'sent'") &&
+                  sql.includes("last_error = ?2")
+                ) {
+                  const recoverable = markerRows
+                    .filter((row) => row.status === "processing")
+                    .slice(0, Number(args[2]));
+                  for (const row of recoverable) {
+                    row.status = "sent";
+                    row.last_error = null;
+                  }
+                  return { meta: { changes: recoverable.length } };
+                }
+                if (
+                  sql.includes("SET status = 'pending'") ||
+                  sql.includes("SET status = 'dead_letter'")
+                ) {
+                  assert.match(
+                    sql,
+                    /last_error IS NULL\s+OR last_error <> \?4/,
+                  );
+                  assert.equal(args[3], DELIVERY_SUCCEEDED_AWAITING_SENT_MARK);
+                  return { meta: { changes: 0 } };
+                }
+                return { meta: { changes: 0 } };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+
+  const recovered = await recoverNotificationOutboxExpiredLeases(env, {
+    limit: MAX_NOTIFICATION_BATCH,
+  });
+  assert.equal(recovered, MAX_NOTIFICATION_BATCH);
+  assert.equal(
+    markerRows.filter((row) => row.status === "sent").length,
+    MAX_NOTIFICATION_BATCH,
+  );
+  assert.equal(
+    markerRows.filter((row) => row.status === "processing").length,
+    1,
+  );
 });
 
 test("deliver: missing discord_id does not call Discord API", async () => {

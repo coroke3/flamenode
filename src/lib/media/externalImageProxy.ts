@@ -47,6 +47,18 @@ const DEFAULT_MAX_CACHE_BYTES = 24 * 1024 * 1024;
 const DEFAULT_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RETRY_AFTER_MS = 60 * 60 * 1_000;
 
+// The proxy is used by <img> tags, but the endpoint can also be opened
+// directly.  Do not reflect an upstream SVG (or an unlabelled body) as an
+// image: an SVG can carry active content when it is navigated directly, and a
+// missing content type would otherwise make arbitrary bytes look like JPEG.
+const SAFE_EXTERNAL_IMAGE_CONTENT_TYPES = new Set([
+  "image/avif",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
 const globalState = globalThis as typeof globalThis & {
   __flamenodeExternalImageProxyStores?: Map<string, ProxyStore>;
 };
@@ -137,6 +149,7 @@ function imageResponse(
     "cache-control":
       "public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800",
     "content-type": entry.contentType,
+    "x-content-type-options": "nosniff",
     "x-fn-media-cache": cacheState,
   });
   if (entry.etag) headers.set("etag", entry.etag);
@@ -151,6 +164,7 @@ function fallbackResponse(
   const headers = new Headers({
     "cache-control": "public, max-age=300, s-maxage=600",
     "content-type": "image/svg+xml; charset=utf-8",
+    "x-content-type-options": "nosniff",
     "x-fn-media-cache": cacheState,
   });
   if (status != null) headers.set("x-fn-upstream-status", String(status));
@@ -162,6 +176,89 @@ async function cancelBody(response: Response): Promise<void> {
     await response.body?.cancel();
   } catch {
     // best effort
+  }
+}
+
+function normalizeExternalImageContentType(
+  value: string | null,
+): string | null {
+  const normalized = value?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return SAFE_EXTERNAL_IMAGE_CONTENT_TYPES.has(normalized) ? normalized : null;
+}
+
+type ReadBodyResult =
+  | { bytes: Uint8Array; tooLarge: false }
+  | { bytes: null; tooLarge: true };
+
+/** Read an upstream body without ever buffering more than maxObjectBytes. */
+async function readBodyUpToLimit(
+  response: Response,
+  maxObjectBytes: number,
+  timeoutMs: number,
+): Promise<ReadBodyResult> {
+  const body = response.body;
+  if (!body) {
+    const timeout = Math.max(1, Math.floor(timeoutMs));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const buffer = await Promise.race([
+      response.arrayBuffer(),
+      new Promise<ArrayBuffer>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("external_image_body_timeout")),
+          timeout,
+        );
+      }),
+    ]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
+    if (buffer.byteLength > maxObjectBytes) {
+      return { bytes: null, tooLarge: true };
+    }
+    return { bytes: new Uint8Array(buffer), tooLarge: false };
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const read = (async (): Promise<ReadBodyResult> => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.byteLength === 0) continue;
+        total += value.byteLength;
+        if (total > maxObjectBytes) {
+          await reader.cancel();
+          return { bytes: null, tooLarge: true };
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { bytes, tooLarge: false };
+  })();
+  const timeout = Math.max(1, Math.floor(timeoutMs));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<ReadBodyResult>((_, reject) => {
+        timer = setTimeout(() => {
+          void reader.cancel();
+          reject(new Error("external_image_body_timeout"));
+        }, timeout);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -226,13 +323,13 @@ async function refreshImage(
       return { kind: "image", entry: refreshed, state: "miss" };
     }
 
-    const contentType =
-      upstream.headers.get("content-type")?.split(";")[0].trim() ||
-      options.defaultContentType;
+    const contentType = normalizeExternalImageContentType(
+      upstream.headers.get("content-type"),
+    );
     const contentLength = Number(upstream.headers.get("content-length"));
     if (
       !upstream.ok ||
-      !contentType.startsWith("image/") ||
+      !contentType ||
       (Number.isFinite(contentLength) && contentLength > options.maxObjectBytes)
     ) {
       const retryAfter = parseExternalRetryAfterMs(
@@ -256,8 +353,12 @@ async function refreshImage(
       return { kind: "failure", status };
     }
 
-    const buffer = await upstream.arrayBuffer();
-    if (buffer.byteLength > options.maxObjectBytes) {
+    const body = await readBodyUpToLimit(
+      upstream,
+      options.maxObjectBytes,
+      options.fetchTimeoutMs,
+    );
+    if (body.tooLarge) {
       store.failures.set(options.cacheKey, {
         status: 413,
         expiresAt: now + options.failureTtlMs,
@@ -270,7 +371,7 @@ async function refreshImage(
     }
 
     const entry: ImageCacheEntry = {
-      bytes: new Uint8Array(buffer),
+      bytes: body.bytes,
       contentType,
       etag: upstream.headers.get("etag") ?? cached?.etag,
       expiresAt: now + options.successTtlMs,

@@ -10,6 +10,18 @@ import { stagePermissionQuestionKeyCondition } from "./stagePermissionAnswers.ts
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
+// Keep event-id IN predicates below D1's 100-bind ceiling while preserving
+// the batch read used by the entry and dashboard forms.
+const D1_STAGE_EVENT_ID_CHUNK_SIZE = 80;
+
+function chunkIds(ids: readonly string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export async function syncStagePermissionCustomQuestions(
   db: DB,
   eventId: string,
@@ -138,25 +150,38 @@ export async function loadStagePermissionFormSettingsJsonByEvents(
   const out = new Map<string, string | null>();
   if (ids.length === 0) return out;
 
-  const rows = await db
-    .select({
-      event_id: eventCustomQuestions.event_id,
-      question_key: eventCustomQuestions.question_key,
-      label: eventCustomQuestions.label,
-      description: eventCustomQuestions.description,
-      placeholder: eventCustomQuestions.placeholder,
-      required: eventCustomQuestions.required,
-      is_active: eventCustomQuestions.is_active,
-      sort_order: eventCustomQuestions.sort_order,
-    })
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        inArray(eventCustomQuestions.event_id, ids),
-        stagePermissionQuestionKeyCondition(),
-      )!,
-    )
-    .orderBy(eventCustomQuestions.event_id, eventCustomQuestions.sort_order);
+  const rows: Array<{
+    event_id: string;
+    question_key: string;
+    label: string;
+    description: string | null;
+    placeholder: string | null;
+    required: number;
+    is_active: number;
+    sort_order: number;
+  }> = [];
+  for (const chunk of chunkIds(ids, D1_STAGE_EVENT_ID_CHUNK_SIZE)) {
+    const chunkRows = await db
+      .select({
+        event_id: eventCustomQuestions.event_id,
+        question_key: eventCustomQuestions.question_key,
+        label: eventCustomQuestions.label,
+        description: eventCustomQuestions.description,
+        placeholder: eventCustomQuestions.placeholder,
+        required: eventCustomQuestions.required,
+        is_active: eventCustomQuestions.is_active,
+        sort_order: eventCustomQuestions.sort_order,
+      })
+      .from(eventCustomQuestions)
+      .where(
+        and(
+          inArray(eventCustomQuestions.event_id, chunk),
+          stagePermissionQuestionKeyCondition(),
+        )!,
+      )
+      .orderBy(eventCustomQuestions.event_id, eventCustomQuestions.sort_order);
+    rows.push(...chunkRows);
+  }
 
   const grouped = new Map<string, typeof rows>();
   for (const row of rows) {

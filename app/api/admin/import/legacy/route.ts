@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getEnv } from "@/lib/cloudflare";
+import {
+  CloudflareBindingsUnavailableError,
+  getEnv,
+} from "@/lib/cloudflare";
 import { CurrentUserUnavailableError } from "@/lib/auth/currentUser";
 import { isTransientDbError } from "@/lib/db/transientDbErrorCore";
 import { requireAdminWrite, type WriteGuardResult } from "@/lib/auth/writeGuard";
@@ -70,6 +73,12 @@ function stringField(formData: FormData, key: string): string {
 }
 
 function previewErrorResponse(cause: unknown): NextResponse {
+  if (cause instanceof CloudflareBindingsUnavailableError) {
+    return error("runtime_bindings_unavailable", 503, {
+      retryable: true,
+      requires_repreview: false,
+    });
+  }
   if (!(cause instanceof LegacyImportPreviewError)) {
     const retryable = isTransientDbError(cause);
     return error(

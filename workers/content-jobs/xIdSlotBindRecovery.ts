@@ -210,9 +210,13 @@ async function resolveIdentity(
 }
 
 function snapshotFilterSql(identity: IdentityState): string {
+  // 0053 backfills the legacy raw value. Keep candidate lookup aligned with
+  // normalizeXId so casing, @ prefixes, and surrounding whitespace do not
+  // leave an approved reservation permanently unbound.
+  const normalized = "lower(trim(ltrim(reserved_x_id_snapshot, '@'))) = ?5";
   return identity.allowNullSnapshot
-    ? "(reserved_x_id_snapshot IS NULL OR reserved_x_id_snapshot = ?5)"
-    : "reserved_x_id_snapshot = ?5";
+    ? `(reserved_x_id_snapshot IS NULL OR ${normalized})`
+    : normalized;
 }
 
 function buildSlotUpdateStatement(
@@ -483,8 +487,8 @@ async function loadCandidateSlots(
         AND status = 'reserved'
         AND x_user_id IS NULL
         AND ${identity.allowNullSnapshot
-          ? "(reserved_x_id_snapshot IS NULL OR reserved_x_id_snapshot = ?2)"
-          : "reserved_x_id_snapshot = ?2"}
+          ? "(reserved_x_id_snapshot IS NULL OR lower(trim(ltrim(reserved_x_id_snapshot, '@'))) = ?2)"
+          : "lower(trim(ltrim(reserved_x_id_snapshot, '@'))) = ?2"}
       ORDER BY event_id ASC, start_time ASC, sort_order ASC, id ASC
       LIMIT ?3
     `)
@@ -510,8 +514,8 @@ async function hasMoreCandidates(
         AND status = 'reserved'
         AND x_user_id IS NULL
         AND ${identity.allowNullSnapshot
-          ? "(reserved_x_id_snapshot IS NULL OR reserved_x_id_snapshot = ?2)"
-          : "reserved_x_id_snapshot = ?2"}
+          ? "(reserved_x_id_snapshot IS NULL OR lower(trim(ltrim(reserved_x_id_snapshot, '@'))) = ?2)"
+          : "lower(trim(ltrim(reserved_x_id_snapshot, '@'))) = ?2"}
       LIMIT 1
     `)
     .bind(request.requested_by_auth_user_id, identity.submittedXUserId)

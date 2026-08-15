@@ -93,59 +93,60 @@ export async function updateVideoMembersAdmin(
   const nextCollaborationType = members.length > 0 || isCollab ? "collab" : "individual";
   const now = Math.floor(Date.now() / 1000);
 
-  const after = { ...target, collaboration_type: nextCollaborationType, updated_at: now };
-  const plan = emptyVideoAtomicWritePlan();
-  plan.statements.push(db.update(videos).set({
-    collaboration_type: nextCollaborationType,
-    updated_at: now,
-  }).where(and(
-    eq(videos.id, videoId),
-    expectedRowCondition({ expectedCurrent: target }),
-  )!));
-  plan.expectedChanges.push(1);
-  plan.audits.push({
-    table_name: "videos", target_id: videoId, operation: "UPDATE",
-    before: { ...target }, after, actor_user_id: user.id,
-    context: "admin-video-members", retention_class: "normal", strict: true,
-  });
-  const membersPlan = await buildReplaceVideoMembersPlan(db, {
-    videoId,
-    members,
-    chaptersByIndex: memberValidation.value.chaptersByIndex,
-    actorUserId: user.id,
-  });
-  appendVideoAtomicWritePlan(plan, membersPlan);
-  const hasMemberAudit = membersPlan.audits.some(
-    (audit) => audit.table_name === "video_members_set",
-  );
-  const isPublicVideo = target.visibility_status === "public";
-  const affectedCreatorIds = isPublicVideo
-    && hasMemberAudit
-    ? collectMemberAggregationAffectedXUserIds({
-        previousCreatorXUserId: target.creator_x_user_id,
-        nextCreatorXUserId: target.creator_x_user_id,
-        previousMemberXUserIds:
-          extractPreviousPublicMemberXUserIdsFromMembersPlan(membersPlan),
-        nextMembers: members,
-      })
-    : new Set<string>();
-  const memberAggregationChanged = affectedCreatorIds.size > 0;
-  const queue = await buildStaticRebuildQueueBatch(db, [
-    { targetType: "video", targetId: videoId, reason: "video_members_update", requestedByUserId: user.id },
-    ...(isPublicVideo && memberAggregationChanged
-      ? [
-          { targetType: "users_index" as const, targetId: "global", reason: "video_members_update" },
-          ...[...affectedCreatorIds].map((xUserId) => ({
-            targetType: "user" as const,
-            targetId: xUserId,
-            reason: "video_members_update",
-          })),
-        ]
-      : []),
-  ]);
-  plan.statements.push(...queue.statements);
-  plan.expectedChanges.push(...queue.expectedChanges);
+  let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
   try {
+    const after = { ...target, collaboration_type: nextCollaborationType, updated_at: now };
+    const plan = emptyVideoAtomicWritePlan();
+    plan.statements.push(db.update(videos).set({
+      collaboration_type: nextCollaborationType,
+      updated_at: now,
+    }).where(and(
+      eq(videos.id, videoId),
+      expectedRowCondition({ expectedCurrent: target }),
+    )!));
+    plan.expectedChanges.push(1);
+    plan.audits.push({
+      table_name: "videos", target_id: videoId, operation: "UPDATE",
+      before: { ...target }, after, actor_user_id: user.id,
+      context: "admin-video-members", retention_class: "normal", strict: true,
+    });
+    const membersPlan = await buildReplaceVideoMembersPlan(db, {
+      videoId,
+      members,
+      chaptersByIndex: memberValidation.value.chaptersByIndex,
+      actorUserId: user.id,
+    });
+    appendVideoAtomicWritePlan(plan, membersPlan);
+    const hasMemberAudit = membersPlan.audits.some(
+      (audit) => audit.table_name === "video_members_set",
+    );
+    const isPublicVideo = target.visibility_status === "public";
+    const affectedCreatorIds = isPublicVideo
+      && hasMemberAudit
+      ? collectMemberAggregationAffectedXUserIds({
+          previousCreatorXUserId: target.creator_x_user_id,
+          nextCreatorXUserId: target.creator_x_user_id,
+          previousMemberXUserIds:
+            extractPreviousPublicMemberXUserIdsFromMembersPlan(membersPlan),
+          nextMembers: members,
+        })
+      : new Set<string>();
+    const memberAggregationChanged = affectedCreatorIds.size > 0;
+    queue = await buildStaticRebuildQueueBatch(db, [
+      { targetType: "video", targetId: videoId, reason: "video_members_update", requestedByUserId: user.id },
+      ...(isPublicVideo && memberAggregationChanged
+        ? [
+            { targetType: "users_index" as const, targetId: "global", reason: "video_members_update" },
+            ...[...affectedCreatorIds].map((xUserId) => ({
+              targetType: "user" as const,
+              targetId: xUserId,
+              reason: "video_members_update",
+            })),
+          ]
+        : []),
+    ]);
+    plan.statements.push(...queue.statements);
+    plan.expectedChanges.push(...queue.expectedChanges);
     await executeVideoAtomicWritePlan(db, plan, {
       staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
     });

@@ -456,6 +456,10 @@ async function discordFailure(
     throwIfAborted(signal);
   }
 
+  // Header-based 429 responses are not parsed as JSON.  Release the body
+  // before deferring the outbox row so a burst of rate limits cannot retain
+  // response streams until the worker isolate is reclaimed.
+  await cancelResponseBody(response);
   throwIfAborted(signal);
   if (retryAfterMs != null && retryAfterMs > 0) {
     await setCooldown(
@@ -517,8 +521,9 @@ async function recoverExpiredLeases(
         AND lease_expires_at IS NOT NULL
         AND lease_expires_at <= ?1
         AND COALESCE(attempt_count, 0) < ?2
+        AND (last_error IS NULL OR last_error <> ?4)
       LIMIT ?3`,
-  ).bind(now, MAX_RETRIES, limit).run();
+  ).bind(now, MAX_RETRIES, limit, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK).run();
   throwIfAborted(signal);
 
   throwIfAborted(signal);
@@ -531,8 +536,9 @@ async function recoverExpiredLeases(
         AND lease_expires_at IS NOT NULL
         AND lease_expires_at <= ?1
         AND COALESCE(attempt_count, 0) >= ?2
+        AND (last_error IS NULL OR last_error <> ?4)
       LIMIT ?3`,
-  ).bind(now, MAX_RETRIES, limit).run();
+  ).bind(now, MAX_RETRIES, limit, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK).run();
   throwIfAborted(signal);
   return (
     deliveredRecovery +

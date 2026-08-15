@@ -6,6 +6,8 @@ import {
   PLAYLIST_STALE_DELETE_BATCH_SIZE,
   calculateSyncDiff,
   cleanupStaleScanItems,
+  isYoutubeApiQuotaResponse,
+  parseYoutubeApiErrorReason,
   syncEventPlaylists,
 } from "./index.ts";
 
@@ -17,6 +19,48 @@ const remote = [
 
 test("worker module loads in Node strip-only mode", () => {
   assert.equal(typeof calculateSyncDiff, "function");
+});
+
+test("playlist API quota reasonはmetadata同期と同じ集合をdeferred扱いにする", () => {
+  for (const reason of [
+    "quotaExceeded",
+    "dailyLimitExceeded",
+    "dailyLimitExceededUnreg",
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+  ]) {
+    assert.equal(isYoutubeApiQuotaResponse(403, reason), true, reason);
+  }
+  assert.equal(isYoutubeApiQuotaResponse(429, "tooManyRequests"), true);
+  assert.equal(isYoutubeApiQuotaResponse(403, "forbidden"), false);
+});
+
+test("playlist API error reasonはmalformed本文でstatus mappingを壊さない", () => {
+  assert.equal(
+    parseYoutubeApiErrorReason({ error: { errors: [{ reason: "rateLimitExceeded" }] } }),
+    "rateLimitExceeded",
+  );
+  assert.equal(
+    parseYoutubeApiErrorReason({ error: { errors: [{ reason: 429 }], status: "RESOURCE_EXHAUSTED" } }),
+    "resource_exhausted",
+  );
+  assert.equal(parseYoutubeApiErrorReason(null), "request_failed");
+});
+
+test("OAuth secretが空白だけなら外部APIを呼ばずskipする", async () => {
+  const env = playlistAbortEnv();
+  env.YOUTUBE_OAUTH_CLIENT_SECRET = "   ";
+  let fetchCalls = 0;
+  const result = await syncEventPlaylists(
+    env,
+    undefined,
+    async () => {
+      fetchCalls += 1;
+      return new Response("{}", { status: 200 });
+    },
+  );
+  assert.equal(result.skipped, 1);
+  assert.equal(fetchCalls, 0);
 });
 
 test("append_only adds missing videos without deleting remote items", () => {

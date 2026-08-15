@@ -14,7 +14,7 @@ import {
 } from "../shared/externalApi.ts";
 import {
   jobFailureWithCounters,
-  type JobFailureWithCounters,
+  JobFailureWithCounters,
 } from "../shared/runJob.ts";
 import {
   refundYoutubeQuota,
@@ -1092,11 +1092,10 @@ export async function syncBatch(
   let reportedResult: SyncBatchResult | undefined;
   let reportedFailure: JobFailureWithCounters | undefined;
   let startedChunks = 0;
-  const existingMetadata = await loadExistingMetadata(
-    env,
-    rows.map((row) => row.id),
-    signal,
-  );
+  // Keep the pre-fetch D1 lookup inside the reservation's try/finally scope.
+  // A read failure (or deadline while reading) must refund the reservation;
+  // otherwise quota is consumed even though no YouTube request was made.
+  let existingMetadata = new Map<string, ExistingMetadataRow>();
   const itemMap = new Map<string, YoutubeItem>();
   const persistedVideoIds = new Set<string>();
   const committedWrites: MetadataWrite[] = [];
@@ -1105,6 +1104,11 @@ export async function syncBatch(
   let quotaStopReason: string | null = null;
 
   try {
+    existingMetadata = await loadExistingMetadata(
+      env,
+      rows.map((row) => row.id),
+      signal,
+    );
     for (const chunk of chunks) {
       signal?.throwIfAborted();
       const pendingChunk = chunk.filter((row) => !persistedVideoIds.has(row.id));
@@ -1244,21 +1248,39 @@ export async function syncBatch(
     });
     throw reportedFailure;
   } finally {
-    if (!signal?.aborted) {
-      const refundChanges = await refundYoutubeQuota(
+    // Refund with no caller signal so an aborted invocation does not leave a
+    // permanent quota reservation behind.  The operation has already stopped
+    // at every signal checkpoint; this final D1 bookkeeping is best-effort.
+    let refundChanges = 0;
+    try {
+      refundChanges = await refundYoutubeQuota(
         env,
         reservation,
         reservation.reservedUnits - budget.used,
         Math.floor(Date.now() / 1000),
-        signal,
       );
-      if (reportedResult) {
-        reportedResult.d1_changes += reservation.d1Changes + refundChanges;
+    } catch (refundError) {
+      // Preserve an existing metadata/API failure (or an AbortError), but
+      // turn a refund failure on the otherwise-successful path into a job
+      // failure so the caller retries the idempotent sync work.
+      console.error("[youtube-sync] quota refund failed", refundError);
+      if (reportedResult && !reportedFailure && !signal?.aborted) {
+        reportedFailure = jobFailureWithCounters(refundError, {
+          failed: 1,
+          processed: reportedResult.processed,
+          external_api_calls: budget.used,
+          d1_changes: reportedResult.d1_changes + reservation.d1Changes,
+          retry_count: Math.max(0, budget.used - startedChunks),
+        });
+        throw reportedFailure;
       }
-      if (reportedFailure) {
-        reportedFailure.counters.d1_changes =
-          (reportedFailure.counters.d1_changes ?? 0) + refundChanges;
-      }
+    }
+    if (reportedResult) {
+      reportedResult.d1_changes += reservation.d1Changes + refundChanges;
+    }
+    if (reportedFailure) {
+      reportedFailure.counters.d1_changes =
+        (reportedFailure.counters.d1_changes ?? 0) + refundChanges;
     }
   }
 }

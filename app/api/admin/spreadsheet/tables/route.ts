@@ -12,6 +12,12 @@ import {
 import { getSpreadsheetPageSize } from "@/lib/admin/spreadsheet/settings";
 import { invalidateSpreadsheetColumnCache } from "@/lib/admin/spreadsheet/tableContext";
 
+const PRIVATE_HEADERS = {
+  "Cache-Control": "private, no-store, no-cache, must-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+} as const;
+
 export async function GET(req: Request): Promise<Response> {
   const guard = await requireSpreadsheetAdmin();
   if (!guard.ok) return guard.response;
@@ -30,14 +36,17 @@ export async function GET(req: Request): Promise<Response> {
 
     const { notInSchema, inSchemaNotInDb } = getSpreadsheetSyncWarnings();
 
-    return NextResponse.json({
-      tables,
-      groups,
-      pageSize: getSpreadsheetPageSize(),
-      discoveredAt: new Date().toISOString(),
-      ...(notInSchema.length > 0 ? { notInSchema } : {}),
-      ...(inSchemaNotInDb.length > 0 ? { inSchemaNotInDb } : {}),
-    });
+    return NextResponse.json(
+      {
+        tables,
+        groups,
+        pageSize: getSpreadsheetPageSize(),
+        discoveredAt: new Date().toISOString(),
+        ...(notInSchema.length > 0 ? { notInSchema } : {}),
+        ...(inSchemaNotInDb.length > 0 ? { inSchemaNotInDb } : {}),
+      },
+      { headers: PRIVATE_HEADERS },
+    );
   } catch (e) {
     return spreadsheetErrorResponse(e);
   }

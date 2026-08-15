@@ -139,10 +139,14 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   if (slotRow.video_id && !existingVideo) {
     return { ok: false, message: "枠に紐づく作品が見つかりません。" };
   }
+  // Existing submissions may explicitly clear their YouTube URL, but a new
+  // slotted video is always a YouTube-backed record (source_type = youtube).
+  // Fail closed before building any dependent plans so we never create an
+  // unusable video with youtube_video_id = NULL.
+  if (!existingVideo && !submittedYoutubeId) {
+    return { ok: false, message: "新規投稿にはYouTube URLが必要です。" };
+  }
 
-  const stageFields = await getStagePermissionFieldsForEvents(db, [slotRow.event_id]);
-  const stageResult = buildStagePermissionSubmission(formData, stageFields);
-  if (!stageResult.ok) return stageResult;
   const slotPart = await resolvePartFromSlot(db, slotRow);
   if (
     submittedYoutubeId &&
@@ -167,6 +171,15 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
     console.warn("[submitSlotVideo] event plan rejected", error);
     return { ok: false, message: "選択イベント数が保存上限を超えています。" };
   }
+  let stageFields: Awaited<ReturnType<typeof getStagePermissionFieldsForEvents>>;
+  try {
+    stageFields = await getStagePermissionFieldsForEvents(db, syncedEventIds);
+  } catch (error) {
+    console.warn("[submitSlotVideo] stage permission fields read rejected", error);
+    return { ok: false, message: "ステージ許諾項目を読み込めませんでした。" };
+  }
+  const stageResult = buildStagePermissionSubmission(formData, stageFields);
+  if (!stageResult.ok) return stageResult;
   const customValidation = await validateCustomAnswersForEvents(db, formData, syncedEventIds);
   if (!customValidation.ok) return customValidation;
 
@@ -204,6 +217,17 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       return {
         ok: false,
         message: "連続枠の予約者情報が不整合です。運営へ連絡してください。",
+      };
+    }
+    const groupSnapshotXId = groupRows[0]?.reserved_x_id_snapshot ?? null;
+    if (
+      groupRows.some(
+        (candidate) => candidate.reserved_x_id_snapshot !== groupSnapshotXId,
+      )
+    ) {
+      return {
+        ok: false,
+        message: "予約グループのX IDスナップショットが一致しません。",
       };
     }
     const subjectResult = resolveSlotReservationSubject(groupRows);

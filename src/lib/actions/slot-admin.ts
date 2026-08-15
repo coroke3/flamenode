@@ -472,6 +472,15 @@ export async function releaseSlot(
       message: `一度に解放できる枠は ${MAX_SLOTS_PER_VIDEO} 件までです。`,
     };
   }
+  // The anchor can be released/split after the first read and before the
+  // group read. Never release the remaining rows when the requested slot is
+  // no longer in that group.
+  if (!rows.some((candidate) => candidate.id === row.id)) {
+    return {
+      ok: false,
+      message: "指定した枠の状態が変わりました。再試行してください。",
+    };
+  }
   if (
     rows.some(
       (candidate) =>

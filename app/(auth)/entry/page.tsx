@@ -123,13 +123,10 @@ export default async function EntryPage({
   const activeX = sessionUser?.active_x_user_id ?? null;
   if (db && sessionUser?.id) {
     const ownerWhere = activeX
-      ? or(
-          eq(slotsTable.x_user_id, activeX),
-          and(
-            isNull(slotsTable.x_user_id),
-            eq(slotsTable.reserved_by_user_id, sessionUser.id),
-          )!,
-        )
+      ? and(
+          eq(slotsTable.reserved_by_user_id, sessionUser.id),
+          or(eq(slotsTable.x_user_id, activeX), isNull(slotsTable.x_user_id))!,
+        )!
       : and(
           isNull(slotsTable.x_user_id),
           eq(slotsTable.reserved_by_user_id, sessionUser.id),

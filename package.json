@@ -86,6 +86,7 @@
     "check:slot-domain-limits": "node scripts/check-slot-domain-limits.mjs",
     "backfill:slot-reservation-groups": "node scripts/backfill-slot-reservation-groups.mjs",
     "cf:bootstrap": "node scripts/cloudflare-bootstrap.mjs",
+    "cf:bootstrap-visibility": "node --experimental-strip-types scripts/bootstrap-public-visibility-manifest.mjs",
     "preview": "node scripts/cloudflare-preview.mjs",
     "wrangler:types": "wrangler types",
     "check:db-d1-empty": "node scripts/check-db-d1-migration.mjs empty",

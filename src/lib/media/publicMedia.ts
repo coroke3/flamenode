@@ -20,6 +20,18 @@ const ALLOWED_PUBLIC_MEDIA_TYPES = new Set([
   "image/webp",
 ]);
 
+const MEDIA_UNAVAILABLE_HEADERS = {
+  "cache-control": "no-store",
+  "retry-after": "30",
+};
+
+function mediaUnavailableResponse(message: string): Response {
+  return new Response(message, {
+    status: 503,
+    headers: MEDIA_UNAVAILABLE_HEADERS,
+  });
+}
+
 export function getPublicMediaNamespace(key: string): PublicMediaNamespace | null {
   const separator = key.indexOf("/");
   if (separator <= 0 || separator === key.length - 1) return null;
@@ -121,11 +133,17 @@ export async function servePublicMedia(
       .first<{ allowed: number }>();
   } catch (error) {
     console.error("[public-media] D1 access check failed", error);
-    return new Response("Media access check unavailable", { status: 503 });
+    return mediaUnavailableResponse("Media access check unavailable");
   }
   if (allowed?.allowed !== 1) return new Response("Not found", { status: 404 });
 
-  const obj = await env.BUCKET.get(rawKey);
+  let obj: Awaited<ReturnType<FlameNodeEnv["BUCKET"]["get"]>> | null;
+  try {
+    obj = await env.BUCKET.get(rawKey);
+  } catch (error) {
+    console.error("[public-media] R2 read failed", error);
+    return mediaUnavailableResponse("Media storage unavailable");
+  }
   if (!obj) return new Response("Not found", { status: 404 });
 
   const contentType = normalizePublicMediaContentType(obj.httpMetadata?.contentType);

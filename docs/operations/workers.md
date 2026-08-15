@@ -187,3 +187,5 @@ YouTube metadata同期だけの理論最大は、sync-jobs 1回あたり通常4 
 - WebのSSR/Authと各CronのCPU時間をWorker別に確認し、4 Workerのcommit世代が一致することを確認する。
 
 Cloudflare Dashboardで`exceededCpu`、D1 rows read/written、Worker requests、queue滞留を確認する。CronのCPU超過が継続する場合はYouTubeの1回batch数を4から下げる。WebのAuth/SSRまたはCronが10msを継続的に超える場合、Free枠で安定運用できるとは扱わずPaid移行を判断する。D1の現行料金・無料枠は https://developers.cloudflare.com/d1/platform/pricing/ を正本とし、数値をこの文書へ重複固定しない。
+
+ランキング静的再構築は、滞留したpending行の取得をboundedにし、同一generationの完了CAS更新をD1 batchへまとめる。通常のtarget単位の処理順とCAS条件は維持し、滞留時のrows_readとD1 round-tripだけを抑える。

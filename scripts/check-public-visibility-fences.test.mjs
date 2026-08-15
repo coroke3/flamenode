@@ -70,6 +70,10 @@ test("public-visibility-fences script supports read-only remote inspection", () 
   assert.match(source, /r2_block_unknown_or_nonpublic_\$\{manifestEntry\.entity_type\}/);
   assert.doesNotMatch(source, /auto-release|auto_release/i);
   assert.match(source, /process\.exit\(2\)/);
+  assert.match(source, /--strict/);
+  assert.match(source, /manifest_missing/);
+  assert.match(source, /strict inspection failed/);
+  assert.match(source, /normalizePublicVisibilityBlockedEntitiesManifest/);
 });
 
 test("release_pending の一致 token は公開行でも正常な promotion window として扱う", () => {

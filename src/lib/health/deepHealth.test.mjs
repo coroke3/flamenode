@@ -326,6 +326,92 @@ test("deep health defaults public visibility guard mode to observe", async () =>
   assert.equal(result.public_visibility_guard_mode, "observe");
 });
 
+test("deep health observes a missing visibility manifest without failing the service", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const baseBucket = createBucket(now);
+  const env = createBaseEnv(now, {
+    BUCKET: {
+      head: baseBucket.head,
+      get: async (key) =>
+        key === "visibility/blocked-entities.v1.json"
+          ? null
+          : baseBucket.get(key),
+    },
+  });
+  const result = await runDeepHealthChecks(env);
+  assert.equal(result.status, "ok");
+  assert.equal(result.ok, true);
+  assert.equal(result.checks.public_visibility, "degraded");
+});
+
+test("deep health makes a missing visibility manifest blocking in enforce mode", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const baseBucket = createBucket(now);
+  const env = createBaseEnv(now, {
+    PUBLIC_VISIBILITY_GUARD_MODE: "enforce",
+    BUCKET: {
+      head: baseBucket.head,
+      get: async (key) =>
+        key === "visibility/blocked-entities.v1.json"
+          ? null
+          : baseBucket.get(key),
+    },
+  });
+  const result = await runDeepHealthChecks(env);
+  assert.equal(result.status, "degraded");
+  assert.equal(result.ok, false);
+  assert.equal(result.checks.public_visibility, "degraded");
+});
+
+test("deep health reports malformed or unavailable visibility manifests as degraded", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  for (const getManifest of [
+    async () => ({ text: async () => "{not-json" }),
+    async () => {
+      throw new Error("r2 temporarily unavailable");
+    },
+  ]) {
+    const baseBucket = createBucket(now);
+    const env = createBaseEnv(now, {
+      PUBLIC_VISIBILITY_GUARD_MODE: "enforce",
+      BUCKET: {
+        head: baseBucket.head,
+        get: async (key) =>
+          key === "visibility/blocked-entities.v1.json"
+            ? getManifest()
+            : baseBucket.get(key),
+      },
+    });
+    const result = await runDeepHealthChecks(env);
+    assert.equal(result.status, "degraded");
+    assert.equal(result.ok, false);
+    assert.equal(result.checks.public_visibility, "degraded");
+  }
+});
+
+test("deep health skips the visibility manifest read when guard mode is off", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const visibilityReads = [];
+  const baseBucket = createBucket(now);
+  const env = createBaseEnv(now, {
+    PUBLIC_VISIBILITY_GUARD_MODE: "off",
+    BUCKET: {
+      head: baseBucket.head,
+      get: async (key) => {
+        visibilityReads.push(key);
+        return baseBucket.get(key);
+      },
+    },
+  });
+  const result = await runDeepHealthChecks(env);
+  assert.equal(result.status, "ok");
+  assert.equal(result.checks.public_visibility, "ok");
+  assert.equal(
+    visibilityReads.includes("visibility/blocked-entities.v1.json"),
+    false,
+  );
+});
+
 test("artifact SLO allows missing visibility blocked-entities manifest (bootstrap-ok)", async () => {
   const now = Math.floor(Date.now() / 1000);
   const bucket = {

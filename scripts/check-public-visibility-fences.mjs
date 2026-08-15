@@ -7,7 +7,10 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY } from "../src/lib/publicData/publicVisibilityManifestCore.ts";
+import {
+  normalizePublicVisibilityBlockedEntitiesManifest,
+  PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
+} from "../src/lib/publicData/publicVisibilityManifestCore.ts";
 import {
   assertRemoteD1Configured,
   formatCommandFailure,
@@ -96,7 +99,7 @@ const publicEventGroupsSqlPath = path.join(
   "scripts/sql/check-public-visibility-event-groups-public.sql",
 );
 
-function fetchRemoteManifest() {
+function fetchRemoteManifest(strict = false) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-r2-"));
   const tempFile = path.join(tempDir, "manifest.json");
   const objectPath = `${R2_BUCKET}/${PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY}`;
@@ -123,11 +126,22 @@ function fetchRemoteManifest() {
     if (!parsed || !Array.isArray(parsed.entities)) {
       throw new Error("R2 manifest is malformed or missing entities array.");
     }
+    if (strict && !normalizePublicVisibilityBlockedEntitiesManifest(parsed)) {
+      throw new Error("R2 manifest is malformed in strict mode.");
+    }
     return parsed;
   } catch (error) {
     const message = formatCommandFailure(error);
     if (/not found|does not exist|404/i.test(message)) {
-      return { schema_version: 1, revision: 0, generated_at: 0, entities: [] };
+      return {
+        schema_version: 1,
+        revision: 0,
+        generated_at: 0,
+        entities: [],
+        // Keep the non-schema marker internal so strict mode can distinguish
+        // a bootstrap gap from a valid empty manifest.
+        __missing: true,
+      };
     }
     throw new Error(`R2 manifest fetch failed: ${message}`);
   } finally {
@@ -301,7 +315,7 @@ export function collectRemoteIssues({
   return issues;
 }
 
-function printRemoteIssues(issues) {
+function printRemoteIssues(issues, strict = false) {
   console.log(`[check:public-visibility-fences] count=${issues.length}`);
   if (issues.length === 0) {
     console.log("check:public-visibility-fences OK (remote inspection)");
@@ -310,11 +324,17 @@ function printRemoteIssues(issues) {
   for (const issue of issues) {
     console.error(JSON.stringify(issue));
   }
+  if (strict) {
+    console.error(
+      "[check:public-visibility-fences] strict inspection failed.",
+    );
+    return 1;
+  }
   console.log("[check:public-visibility-fences] informational only.");
   return 0;
 }
 
-function runRemoteInspection() {
+function runRemoteInspection(strict = false) {
   assertRemoteD1Configured("check:public-visibility-fences");
   const fenceRows = runRemoteD1File(fencesSqlPath, {
     scriptName: "check:public-visibility-fences",
@@ -340,7 +360,7 @@ function runRemoteInspection() {
   const publicEventGroupRows = runRemoteD1File(publicEventGroupsSqlPath, {
     scriptName: "check:public-visibility-fences",
   });
-  const manifest = fetchRemoteManifest();
+  const manifest = fetchRemoteManifest(strict);
   const issues = collectRemoteIssues({
     fenceRows: [
       ...fenceRows,
@@ -354,13 +374,16 @@ function runRemoteInspection() {
     publicEventGroupRows,
     manifest,
   });
-  process.exit(printRemoteIssues(issues));
+  if (strict && manifest.__missing) {
+    issues.unshift({ kind: "manifest_missing" });
+  }
+  process.exit(printRemoteIssues(issues, strict));
 }
 
 function main() {
   if (process.argv.includes("--remote")) {
     try {
-      runRemoteInspection();
+      runRemoteInspection(process.argv.includes("--strict"));
     } catch (error) {
       console.error(
         `[check:public-visibility-fences] remote inspection failed: ${formatCommandFailure(error)}`,

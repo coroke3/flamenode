@@ -168,13 +168,8 @@ async function readApiError(
   signal?.throwIfAborted();
   let reason = "request_failed";
   try {
-    const body = (await response.json()) as {
-      error?: { errors?: Array<{ reason?: string }>; status?: string };
-    };
-    reason =
-      body.error?.errors?.[0]?.reason ??
-      body.error?.status?.toLowerCase() ??
-      reason;
+    const body = (await response.json()) as unknown;
+    reason = parseYoutubeApiErrorReason(body);
     signal?.throwIfAborted();
   } catch {
     signal?.throwIfAborted();
@@ -214,9 +209,9 @@ async function refreshAccessToken(
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          client_id: env.YOUTUBE_OAUTH_CLIENT_ID ?? "",
-          client_secret: env.YOUTUBE_OAUTH_CLIENT_SECRET ?? "",
-          refresh_token: env.YOUTUBE_OAUTH_REFRESH_TOKEN ?? "",
+          client_id: trimmedSecret(env.YOUTUBE_OAUTH_CLIENT_ID),
+          client_secret: trimmedSecret(env.YOUTUBE_OAUTH_CLIENT_SECRET),
+          refresh_token: trimmedSecret(env.YOUTUBE_OAUTH_REFRESH_TOKEN),
           grant_type: "refresh_token",
         }),
         signal,
@@ -305,6 +300,32 @@ async function youtubeJson<T>(
     signal?.throwIfAborted();
     throw error;
   }
+}
+
+const YOUTUBE_QUOTA_REASONS = new Set([
+  "quotaExceeded",
+  "dailyLimitExceeded",
+  "dailyLimitExceededUnreg",
+  "rateLimitExceeded",
+  "userRateLimitExceeded",
+]);
+
+/** API本文からログへ保存してよい短いreasonだけを取り出す。 */
+export function parseYoutubeApiErrorReason(body: unknown): string {
+  if (!body || typeof body !== "object") return "request_failed";
+  const error = (body as Record<string, unknown>).error;
+  if (!error || typeof error !== "object") return "request_failed";
+
+  const errors = (error as Record<string, unknown>).errors;
+  const first = Array.isArray(errors) ? errors[0] : undefined;
+  const reason = first && typeof first === "object"
+    ? (first as Record<string, unknown>).reason
+    : undefined;
+  if (typeof reason === "string" && reason.trim()) return reason.trim();
+
+  const status = (error as Record<string, unknown>).status;
+  if (typeof status === "string" && status.trim()) return status.trim().toLowerCase();
+  return "request_failed";
 }
 
 async function listPlaylistPage(
@@ -768,14 +789,20 @@ function errorCode(error: unknown): string {
   return "youtube_playlist_sync_failed";
 }
 
+export function isYoutubeApiQuotaResponse(status: number, reason: string): boolean {
+  return status === 429 || YOUTUBE_QUOTA_REASONS.has(reason);
+}
+
 function isQuotaError(error: unknown): boolean {
   return (
     error instanceof QuotaDeferredError ||
     (error instanceof YouTubeApiError &&
-      (error.status === 429 ||
-        error.reason === "quotaExceeded" ||
-        error.reason === "dailyLimitExceeded"))
+      isYoutubeApiQuotaResponse(error.status, error.reason))
   );
+}
+
+function trimmedSecret(value: string | undefined): string {
+  return value?.trim() ?? "";
 }
 
 async function markEventError(
@@ -1018,9 +1045,9 @@ export async function syncEventPlaylists(
     }),
   } as PlaylistSyncEnv;
   const hasOAuth =
-    Boolean(env.YOUTUBE_OAUTH_CLIENT_ID) &&
-    Boolean(env.YOUTUBE_OAUTH_CLIENT_SECRET) &&
-    Boolean(env.YOUTUBE_OAUTH_REFRESH_TOKEN);
+    trimmedSecret(env.YOUTUBE_OAUTH_CLIENT_ID) !== "" &&
+    trimmedSecret(env.YOUTUBE_OAUTH_CLIENT_SECRET) !== "" &&
+    trimmedSecret(env.YOUTUBE_OAUTH_REFRESH_TOKEN) !== "";
   if (!hasOAuth) return result({ processed: 0, skipped: 1, failed: 0 });
 
   const now = unixNow();

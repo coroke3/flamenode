@@ -23,7 +23,27 @@ The read-only `check:public-visibility-fences --remote` check covers video,
 event, event-group, and X-user fences. A matching `release_pending` row with
 its manifest entry is an expected promotion window; a missing entry, token
 mismatch, or released row that still appears in the manifest is reported for
-follow-up.
+follow-up. Use `npm run check:public-visibility-fences -- --remote --strict`
+before an enforce rollout; strict mode returns a non-zero exit for a missing
+or malformed manifest and for any reported consistency issue, while the
+default remote check remains informational.
+
+R2 manifest writes use conditional PUTs. A first producer uses
+`If-None-Match: *`; if another producer wins that create race, the latest
+manifest is re-read, the mutation is reapplied, and the write is retried with
+the latest ETag. Manifest read/write size guards use UTF-8 bytes (not
+JavaScript string length), and a failed conditional PUT is never treated as
+success.
+Deep health skips the manifest probe in `off`, reports missing/unavailable or
+malformed state as a non-blocking degraded check in `observe`, and makes it a
+blocking degraded result in `enforce`. The tracked default remains `observe`;
+switching to `enforce` is a separate configuration deployment after the
+strict remote check and bootstrap verification.
+
+Before switching to `enforce`, bootstrap a missing manifest once with
+`npm run cf:bootstrap-visibility -- --confirm-bootstrap --bucket <bucket>`.
+The command refuses to overwrite an existing or malformed manifest; it only
+creates the canonical empty schema when the object is absent.
 
 > Status: Active
 > Last verified: 2026-07-31

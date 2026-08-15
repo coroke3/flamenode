@@ -181,3 +181,32 @@ test("公開entityでも危険MIMEまたは上限超過objectは404", async () =
     });
     assert.equal(large.response.status, 404);
 });
+
+test("R2読み取り障害は公開mediaを503へfail-closedする", async () => {
+  const response = await servePublicMedia(
+    {
+      DB: {
+        prepare() {
+          return {
+            bind() {
+              return {
+                async first() {
+                  return { allowed: 1 };
+                },
+              };
+            },
+          };
+        },
+      },
+      BUCKET: {
+        async get() {
+          throw new Error("R2 unavailable");
+        },
+      },
+    },
+    "event-icons/event/failing.png",
+  );
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("retry-after"), "30");
+});

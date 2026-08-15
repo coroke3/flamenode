@@ -19,6 +19,12 @@ import {
 } from "@/lib/admin/spreadsheet/settings";
 import { isRecord } from "@/lib/admin/spreadsheet/validation";
 
+const PRIVATE_HEADERS = {
+  "Cache-Control": "private, no-store, no-cache, must-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+} as const;
+
 export async function GET(req: Request): Promise<Response> {
   const guard = await requireSpreadsheetAdmin();
   if (!guard.ok) return guard.response;
@@ -26,7 +32,10 @@ export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const table = (url.searchParams.get("table") ?? "").trim();
   if (!table) {
-    return NextResponse.json({ error: "unknown_table" }, { status: 400 });
+    return NextResponse.json(
+      { error: "unknown_table" },
+      { status: 400, headers: PRIVATE_HEADERS },
+    );
   }
 
   const page = normalizeSpreadsheetPage(
@@ -40,7 +49,7 @@ export async function GET(req: Request): Promise<Response> {
 
   try {
     const data = await fetchSpreadsheetPage({ table, page, limit });
-    return NextResponse.json(data);
+    return NextResponse.json(data, { headers: PRIVATE_HEADERS });
   } catch (e) {
     return spreadsheetErrorResponse(e);
   }

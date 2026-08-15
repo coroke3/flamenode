@@ -1,4 +1,4 @@
-import { and, eq, inArray, not, or } from "drizzle-orm";
+import { and, asc, eq, inArray, not, or } from "drizzle-orm";
 import type { getDatabase } from "@/lib/cloudflare";
 import {
   eventCustomQuestions,
@@ -7,6 +7,7 @@ import {
 import {
   type CustomAnswerDraft,
   type CustomQuestion,
+  type CustomQuestionRow,
   rowToQuestion,
 } from "./customQuestions";
 import { stagePermissionQuestionKeyCondition } from "./stagePermissionAnswers";
@@ -17,7 +18,36 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
+/** イベントごとの業務上限。複数イベントをまとめて読むためグローバル上限にしない。 */
 export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = 18;
+
+export function maxQuestionsForEvents(eventIds: readonly string[]): number {
+  return Math.max(1, new Set(eventIds.filter(Boolean)).size) *
+    MAX_VIDEO_CUSTOM_QUESTIONS_READ;
+}
+
+const D1_CUSTOM_QUESTION_EVENT_ID_CHUNK_SIZE = 80;
+
+function chunkEventIds(ids: readonly string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function assertQuestionRowsWithinPerEventLimit(
+  rows: readonly Pick<CustomQuestionRow, "event_id">[],
+): void {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const count = (counts.get(row.event_id) ?? 0) + 1;
+    if (count > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+      throw new Error("video_custom_question_read_limit_exceeded");
+    }
+    counts.set(row.event_id, count);
+  }
+}
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
@@ -37,6 +67,7 @@ export async function buildReplaceGeneralCustomAnswersPlan(
     throw new Error("video_custom_answer_atomic_limit_exceeded");
   }
 
+  const maxQuestions = maxQuestionsForEvents(eventIds);
   const questions = await db
     .select({
       id: eventCustomQuestions.id,
@@ -51,10 +82,16 @@ export async function buildReplaceGeneralCustomAnswersPlan(
         not(stagePermissionQuestionKeyCondition()),
       )!,
     )
-    .limit(MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1);
-  if (questions.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+    .orderBy(
+      asc(eventCustomQuestions.event_id),
+      asc(eventCustomQuestions.sort_order),
+      asc(eventCustomQuestions.id),
+    )
+    .limit(maxQuestions + 1);
+  if (questions.length > maxQuestions) {
     throw new Error("video_custom_question_read_limit_exceeded");
   }
+  assertQuestionRowsWithinPerEventLimit(questions);
 
   if (questions.length === 0) return emptyVideoAtomicWritePlan();
 
@@ -140,20 +177,30 @@ export async function fetchActiveCustomQuestionsForEvents(
   const out = new Map<string, CustomQuestion[]>();
   if (ids.length === 0) return out;
 
-  const rows = await db
-    .select()
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        inArray(eventCustomQuestions.event_id, ids),
-        eq(eventCustomQuestions.is_active, 1),
-        not(stagePermissionQuestionKeyCondition()),
-      )!,
-    )
-    .orderBy(eventCustomQuestions.sort_order)
-    .limit(MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1);
-  if (rows.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
-    throw new Error("video_custom_question_read_limit_exceeded");
+  const rows: CustomQuestionRow[] = [];
+  for (const chunk of chunkEventIds(ids, D1_CUSTOM_QUESTION_EVENT_ID_CHUNK_SIZE)) {
+    const maxQuestions = maxQuestionsForEvents(chunk);
+    const chunkRows = await db
+      .select()
+      .from(eventCustomQuestions)
+      .where(
+        and(
+          inArray(eventCustomQuestions.event_id, chunk),
+          eq(eventCustomQuestions.is_active, 1),
+          not(stagePermissionQuestionKeyCondition()),
+        )!,
+      )
+      .orderBy(
+        asc(eventCustomQuestions.event_id),
+        asc(eventCustomQuestions.sort_order),
+        asc(eventCustomQuestions.id),
+      )
+      .limit(maxQuestions + 1);
+    if (chunkRows.length > maxQuestions) {
+      throw new Error("video_custom_question_read_limit_exceeded");
+    }
+    assertQuestionRowsWithinPerEventLimit(chunkRows);
+    rows.push(...chunkRows);
   }
 
   for (const row of rows) {

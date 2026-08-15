@@ -13,8 +13,8 @@ import {
   getManageAuthorizationSnapshot,
 } from "@/lib/auth/manageAuthorization";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import { getManageEventForRender } from "@/lib/manage/manageEventRender";
 import {
-  events as eventsTable,
   auditLogs as auditLogsTable,
   notificationOutbox as notificationOutboxTable,
   slots as slotsTable,
@@ -54,16 +54,10 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const db = getDatabase();
-  if (!db) return { title: id };
   try {
-    const ev = await db
-      .select({ title: eventsTable.title })
-      .from(eventsTable)
-      .where(eq(eventsTable.id, id))
-      .limit(1);
-    return ev[0]?.title
-      ? { title: `${ev[0].title} 運営` }
+    const event = await getManageEventForRender(id);
+    return event?.title
+      ? { title: `${event.title} 運営` }
       : { title: "イベント運営" };
   } catch {
     return { title: id };

@@ -45,6 +45,9 @@ const RANKING_TARGETS = [
   "recommend_core",
 ] as const;
 const RANKING_TARGET_SET = new Set<string>(RANKING_TARGETS);
+// 滞留した重複世代で、1回の再構築が無制限にqueueを読み込まないようにする。
+// 通常はtargetごとにactive行が1件だけなので、平常時の結果は変わらない。
+const RANKING_PENDING_CAPTURE_LIMIT = 50;
 
 type RankingPoolRow = {
   id: string;
@@ -260,9 +263,10 @@ async function capturePendingRankingRows(
      FROM static_rebuild_queue
      WHERE status = 'pending'
        AND target_id = 'global'
-       AND target_type IN (${RANKING_TARGETS.map(() => "?").join(",")})`,
+       AND target_type IN (${RANKING_TARGETS.map(() => "?").join(",")})
+     LIMIT ?`,
   )
-    .bind(...RANKING_TARGETS)
+    .bind(...RANKING_TARGETS, RANKING_PENDING_CAPTURE_LIMIT)
     .all<PendingRankingQueueRow>();
   throwIfAborted(signal);
   return result.results ?? [];
@@ -313,26 +317,29 @@ async function markCoveredRankingRowsDone(
 ): Promise<void> {
   if (coveredRows.length === 0) return;
   const now = Math.floor(Date.now() / 1000);
+  const statements: D1PreparedStatement[] = [];
   for (const row of coveredRows) {
     throwIfAborted(signal);
-    await env.DB.prepare(
-      `UPDATE static_rebuild_queue
-       SET status = 'done',
-           processed_at = ?,
-           attempt_count = 0,
-           error = NULL,
-           processing_started_at = NULL,
-           lease_token = NULL,
-           lease_expires_at = NULL,
-           next_retry_at = NULL,
-           updated_at = ?
-       WHERE id = ?
-         AND status = 'pending'
-         AND updated_at = ?`,
-    )
-      .bind(now, now, row.id, row.updated_at)
-      .run();
+    statements.push(
+      env.DB.prepare(
+        `UPDATE static_rebuild_queue
+         SET status = 'done',
+             processed_at = ?,
+             attempt_count = 0,
+             error = NULL,
+             processing_started_at = NULL,
+             lease_token = NULL,
+             lease_expires_at = NULL,
+             next_retry_at = NULL,
+             updated_at = ?
+         WHERE id = ?
+           AND status = 'pending'
+           AND updated_at = ?`,
+      ).bind(now, now, row.id, row.updated_at),
+    );
   }
+  // D1 round-tripを1回にまとめ、各行のupdated_at CAS条件は維持する。
+  await env.DB.batch(statements);
 }
 
 async function rebuildRankingBundle(

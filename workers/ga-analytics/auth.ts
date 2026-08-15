@@ -171,7 +171,16 @@ export async function getGa4AccessToken(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const cached = parseCachedToken(await env.KV.get(GA4_ACCESS_TOKEN_KV_KEY));
+  // KV is only a token cache.  A transient read failure must not prevent a
+  // fresh OAuth exchange; cancellation remains fail-fast for the cron lease.
+  let cachedRaw: string | null = null;
+  try {
+    cachedRaw = await env.KV.get(GA4_ACCESS_TOKEN_KV_KEY);
+  } catch {
+    signal?.throwIfAborted();
+  }
+  signal?.throwIfAborted();
+  const cached = parseCachedToken(cachedRaw);
   if (cached && cached.expires_at - now > GA4_TOKEN_SAFETY_SEC) {
     return cached.access_token;
   }

@@ -581,6 +581,7 @@ export async function reconcileStaleQueue(
      WHERE status = 'processing'
        AND lease_expires_at IS NOT NULL
        AND lease_expires_at <= ?
+       AND (error IS NULL OR error <> ?)
      LIMIT ?`,
   )
     .bind(
@@ -591,6 +592,7 @@ export async function reconcileStaleQueue(
       now + 60,
       now,
       now,
+      REBUILD_SUCCEEDED_AWAITING_DONE_MARK,
       STALE_QUEUE_RECONCILE_LIMIT,
     )
     .run();

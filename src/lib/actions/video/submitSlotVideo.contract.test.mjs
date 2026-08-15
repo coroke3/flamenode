@@ -60,3 +60,22 @@ test("submitSlotVideo は buildOpsChannelWebhookStatement を event target で�
   assert.match(source, /buildOpsChannelWebhookStatement/);
   assert.match(source, /target:\s*"event"/);
 });
+
+test("submitSlotVideo は同期対象イベント全体のステージ回答項目を検証する", () => {
+  const syncIndex = source.indexOf("syncedEventIds = await resolveVideoEventSyncTargetIds");
+  const stageIndex = source.indexOf("getStagePermissionFieldsForEvents(db, syncedEventIds)");
+  const customIndex = source.indexOf("validateCustomAnswersForEvents(db, formData, syncedEventIds)");
+  assert.ok(syncIndex >= 0 && stageIndex > syncIndex);
+  assert.ok(customIndex > stageIndex);
+  assert.doesNotMatch(
+    source.slice(0, syncIndex),
+    /getStagePermissionFieldsForEvents\(db, \[slotRow\.event_id\]\)/,
+  );
+});
+
+test("submitSlotVideo はステージ項目の読取失敗を保存前に返す", () => {
+  assert.match(
+    source,
+    /try\s*\{\s*stageFields = await getStagePermissionFieldsForEvents\(db, syncedEventIds\)[\s\S]*?stage permission fields read rejected/,
+  );
+});

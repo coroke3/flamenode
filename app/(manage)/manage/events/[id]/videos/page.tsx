@@ -11,7 +11,6 @@ import {
   getManageAuthorizationSnapshot,
 } from "@/lib/auth/manageAuthorization";
 import {
-  events as eventsTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
 } from "@/lib/db/schema";
@@ -23,6 +22,7 @@ import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
 import { videoReviewQueueOrder } from "@/lib/admin/videoReviewQueueOrder";
 import { approveManageVideoPublic } from "@/lib/actions/manage-video";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import { getManageEventForRender } from "@/lib/manage/manageEventRender";
 import {
   VIDEO_VISIBILITY_GROUPS,
   normalizeVideoVisibilityFilter,
@@ -56,13 +56,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
   if (!db) return { title: `作品・審査 (${id})` };
-  const ev = (
-    await db
-      .select({ title: eventsTable.title })
-      .from(eventsTable)
-      .where(eq(eventsTable.id, id))
-      .limit(1)
-  )[0];
+  const ev = await getManageEventForRender(id);
   return { title: ev?.title ? `${ev.title} 作品・審査` : "作品・審査" };
 }
 

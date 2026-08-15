@@ -12,4 +12,6 @@ test("YouTube thumbnail routeは共通proxyと2MB上限を利用する", () => {
   assert.match(source, /namespace: "youtube-thumbnail"/);
   assert.match(source, /MAX_OBJECT_BYTES = 2 \* 1024 \* 1024/);
   assert.match(source, /i\.ytimg\.com\/vi/);
+  assert.match(source, /decodeURIComponent/);
+  assert.doesNotMatch(source, /getDatabase/);
 });

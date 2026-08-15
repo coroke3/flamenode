@@ -16,6 +16,17 @@ const SLOT_ID_RE =
 const PUBLIC_CACHE_CONTROL = PUBLIC_MEDIA_CACHE_CONTROL;
 const PRIVATE_CACHE_CONTROL =
   "private, no-store, no-cache, must-revalidate";
+const MEDIA_UNAVAILABLE_HEADERS = {
+  "cache-control": "no-store",
+  "retry-after": "30",
+};
+
+function mediaUnavailableResponse(message: string): Response {
+  return new Response(message, {
+    status: 503,
+    headers: MEDIA_UNAVAILABLE_HEADERS,
+  });
+}
 
 export function isValidSlotSubmissionIconSlotId(slotId: string): boolean {
   if (!slotId || slotId.includes("..") || slotId.includes("\\")) return false;
@@ -123,7 +134,7 @@ export async function serveSlotSubmissionIcon(
       .first<SlotSubmissionIconLookupRow>();
   } catch (error) {
     console.error("[slot-submission-icon] D1 lookup failed", error);
-    return new Response("Media access check unavailable", { status: 503 });
+    return mediaUnavailableResponse("Media access check unavailable");
   }
 
   const access = resolveSlotSubmissionIconAccess(row, viewer);
@@ -146,7 +157,13 @@ export async function serveSlotSubmissionIcon(
     return new Response("Storage not configured", { status: 500 });
   }
 
-  const obj = await env.BUCKET.get(r2Key);
+  let obj: R2ObjectBody | null;
+  try {
+    obj = await env.BUCKET.get(r2Key);
+  } catch (error) {
+    console.error("[slot-submission-icon] R2 read failed", error);
+    return mediaUnavailableResponse("Media storage unavailable");
+  }
   if (!obj) return new Response("Not found", { status: 404 });
 
   const contentType = normalizePublicMediaContentType(obj.httpMetadata?.contentType);

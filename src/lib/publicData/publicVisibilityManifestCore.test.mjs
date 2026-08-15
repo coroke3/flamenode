@@ -1,64 +1,51 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  isEntityBlockedInManifest,
-  normalizePublicVisibilityBlockedEntitiesManifest,
-  releaseBlockedEntityInManifest,
-  resolvePublicVisibilityGuardMode,
-  upsertBlockedEntityInManifest,
-} from "./publicVisibilityManifestCore.ts";
 
-test("guard mode 既定は observe", () => {
-  assert.equal(resolvePublicVisibilityGuardMode(undefined), "observe");
-  assert.equal(resolvePublicVisibilityGuardMode(""), "observe");
-  assert.equal(resolvePublicVisibilityGuardMode("enforce"), "enforce");
-});
+const { normalizePublicVisibilityBlockedEntitiesManifest } = await import(
+  "./publicVisibilityManifestCore.ts"
+);
 
-test("malformed manifest は null", () => {
-  assert.equal(normalizePublicVisibilityBlockedEntitiesManifest(null), null);
-  assert.equal(
-    normalizePublicVisibilityBlockedEntitiesManifest({ revision: 1 }),
-    null,
+const validManifest = {
+  schema_version: 1,
+  revision: 0,
+  generated_at: 100,
+  entities: [],
+};
+
+test("visibility manifest normalizer accepts the canonical schema", () => {
+  assert.deepEqual(
+    normalizePublicVisibilityBlockedEntitiesManifest(validManifest),
+    validManifest,
   );
 });
 
-test("manifest revision は単調増加し token 一致でのみ解除", () => {
-  const base = normalizePublicVisibilityBlockedEntitiesManifest({
-    schema_version: 1,
-    revision: 3,
-    generated_at: 100,
-    entities: [
-      {
-        entity_type: "video",
-        entity_id: "video-1",
-        fence_token: "tok-a",
-        blocked_at: 90,
-      },
-    ],
-  });
-  assert.ok(base);
-  const blocked = upsertBlockedEntityInManifest(base, {
-    entity_type: "video",
-    entity_id: "video-2",
-    fence_token: "tok-b",
-    blocked_at: 95,
-  }, 101);
-  assert.equal(blocked.revision, 4);
-  assert.equal(
-    releaseBlockedEntityInManifest(blocked, "video", "video-1", "tok-wrong", 102),
-    null,
-  );
-  const released = releaseBlockedEntityInManifest(
-    blocked,
-    "video",
-    "video-1",
-    "tok-a",
-    102,
-  );
-  assert.ok(released);
-  assert.equal(released.revision, 5);
-  assert.equal(
-    isEntityBlockedInManifest(released, "video", "video-1"),
-    false,
-  );
+test("visibility manifest normalizer rejects an unknown schema and invalid numbers", () => {
+  for (const value of [
+    { ...validManifest, schema_version: 2 },
+    { ...validManifest, revision: 1.5 },
+    { ...validManifest, generated_at: Number.NaN },
+    { ...validManifest, generated_at: -1 },
+  ]) {
+    assert.equal(
+      normalizePublicVisibilityBlockedEntitiesManifest(value),
+      null,
+    );
+  }
+});
+
+test("visibility manifest normalizer rejects unusable entity rows", () => {
+  for (const entity of [
+    { entity_type: "video", entity_id: "", fence_token: "token", blocked_at: 1 },
+    { entity_type: "video", entity_id: "v1", fence_token: "", blocked_at: 1 },
+    { entity_type: "video", entity_id: "v1", fence_token: "token", blocked_at: -1 },
+    { entity_type: "video", entity_id: "v1", fence_token: "token", blocked_at: 1, reason: 42 },
+  ]) {
+    assert.equal(
+      normalizePublicVisibilityBlockedEntitiesManifest({
+        ...validManifest,
+        entities: [entity],
+      }),
+      null,
+    );
+  }
 });

@@ -151,6 +151,27 @@ export async function preCommitXUserVisibilityTransition(input: {
   );
   await writePublicVisibilityBlockedEntitiesManifest(next, {
     ifMatchEtag: etag,
+    mutateOnConflict: (latest) => {
+      const current = latest.entities.find(
+        (entry) =>
+          entry.entity_type === "x_user" &&
+          entry.entity_id.toLowerCase() === xUserId,
+      );
+      if (current && current.fence_token !== input.fenceToken) {
+        throw new Error("public_visibility_fence_token_mismatch");
+      }
+      return upsertBlockedEntityInManifest(
+        latest,
+        {
+          entity_type: "x_user",
+          entity_id: xUserId,
+          fence_token: input.fenceToken,
+          blocked_at: Math.floor(Date.now() / 1000),
+          reason: input.reason ?? null,
+        },
+        Math.floor(Date.now() / 1000),
+      );
+    },
   });
   const { manifest: confirmed } =
     await readPublicVisibilityBlockedEntitiesManifest();

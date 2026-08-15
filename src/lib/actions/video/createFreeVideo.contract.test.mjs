@@ -26,6 +26,14 @@ test("createFreeVideo は video_create で top section visibility targets を en
   assert.match(queueBlock, /\.\.\.topVideoVisibilityTargets\("video_create"\)/);
 });
 
+test("イベント付きfree投稿はevent baseとslotsを同じqueue batchへ入れる", () => {
+  const queueBlock = source.match(/const queueTargets = \[[\s\S]*?\];/)?.[0];
+  assert.ok(queueBlock);
+  const eventBranch = queueBlock.match(/\.\.\.\(eventId[\s\S]*?\]/)?.[0] ?? "";
+  assert.match(eventBranch, /targetType: "event_base"/);
+  assert.match(eventBranch, /targetType: "event_slots"/);
+});
+
 test("createFreeVideo は buildOpsChannelWebhookStatement を event target で呼ぶ", () => {
   assert.match(source, /buildOpsChannelWebhookStatement/);
   assert.match(source, /target:\s*"event"/);

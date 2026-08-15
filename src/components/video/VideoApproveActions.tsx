@@ -37,6 +37,7 @@ export function VideoApproveActions({
   const [pendingMode, setPendingMode] = React.useState<"approve" | "next" | null>(
     null,
   );
+  const pendingModeRef = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
   const [pendingPublicReflection, setPendingPublicReflection] =
@@ -45,7 +46,8 @@ export function VideoApproveActions({
   if (currentStatus !== "pending") return null;
 
   const run = (mode: "approve" | "next") => {
-    if (pendingMode) return;
+    if (pendingMode || pendingModeRef.current) return;
+    pendingModeRef.current = true;
     setPendingMode(mode);
     setError(null);
     setSuccess(false);
@@ -80,6 +82,7 @@ export function VideoApproveActions({
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       } finally {
+        pendingModeRef.current = false;
         setPendingMode(null);
       }
     })();

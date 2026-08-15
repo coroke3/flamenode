@@ -439,7 +439,107 @@ test("deadline中断はfetch再試行やmetadata D1書込みへ変換しない",
   assert.equal(env.batchCalls.length, 0);
   assert.equal(
     env.sqlCalls.some(({ sql }) => sql.includes("UPDATE external_api_quota_usage")),
-    false,
+    true,
+  );
+});
+
+test("metadata D1 lookup failure refunds the reserved quota", async () => {
+  const env = metadataAbortEnv();
+  const originalPrepare = env.DB.prepare;
+  env.DB.prepare = function prepare(sql) {
+    if (sql.includes("WHERE video_id IN")) {
+      return {
+        bind() {
+          return {
+            async all() {
+              throw new Error("d1_metadata_lookup_failed");
+            },
+          };
+        },
+      };
+    }
+    return originalPrepare.call(this, sql);
+  };
+
+  await assert.rejects(
+    () => syncBatch(env),
+    /d1_metadata_lookup_failed/,
+  );
+  assert.equal(
+    env.sqlCalls.some(({ sql }) => sql.includes("UPDATE external_api_quota_usage")),
+    true,
+  );
+});
+
+test("quota refund failure does not mask the original D1 failure", async () => {
+  const env = metadataAbortEnv();
+  const originalPrepare = env.DB.prepare;
+  env.DB.prepare = function prepare(sql) {
+    if (sql.includes("WHERE video_id IN")) {
+      return {
+        bind() {
+          return {
+            async all() {
+              throw new Error("d1_metadata_lookup_failed");
+            },
+          };
+        },
+      };
+    }
+    if (sql.includes("UPDATE external_api_quota_usage")) {
+      return {
+        bind() {
+          return {
+            async run() {
+              throw new Error("d1_quota_refund_failed");
+            },
+          };
+        },
+      };
+    }
+    return originalPrepare.call(this, sql);
+  };
+
+  await assert.rejects(
+    () => syncBatch(env),
+    /d1_metadata_lookup_failed/,
+  );
+});
+
+test("quota refund failure turns an otherwise successful sync into a retryable job failure", async () => {
+  const env = metadataAbortEnv();
+  const originalPrepare = env.DB.prepare;
+  env.DB.prepare = function prepare(sql) {
+    if (sql.includes("UPDATE external_api_quota_usage")) {
+      return {
+        bind() {
+          return {
+            async run() {
+              throw new Error("d1_quota_refund_failed");
+            },
+          };
+        },
+      };
+    }
+    return originalPrepare.call(this, sql);
+  };
+
+  await assert.rejects(
+    () => syncBatch(
+      env,
+      async () => new Response(JSON.stringify({
+        items: [{
+          id: "youtube-id",
+          statistics: { viewCount: "120" },
+          status: { privacyStatus: "public" },
+          contentDetails: { duration: "PT1M" },
+        }],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+    /d1_quota_refund_failed/,
   );
 });
 

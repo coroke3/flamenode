@@ -17,11 +17,27 @@ test("extractYoutubePlaylistId accepts raw IDs and YouTube URLs", () => {
     extractYoutubePlaylistId(`https://www.youtube.com/watch?v=abcdefghijk&list=${id}`),
     id,
   );
+  assert.equal(
+    extractYoutubePlaylistId(`https://youtu.be/abcdefghijk?list=${id}`),
+    id,
+  );
 });
 
 test("extractYoutubePlaylistId rejects missing or malformed IDs", () => {
   assert.equal(extractYoutubePlaylistId(""), null);
   assert.equal(extractYoutubePlaylistId("https://example.com/playlist"), null);
+  assert.equal(
+    extractYoutubePlaylistId("https://evil-youtube.com/?list=PL1234567890abcdefghij"),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId("https://example.com/?list=PL1234567890abcdefghij"),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId("ftp://youtube.com/?list=PL1234567890abcdefghij"),
+    null,
+  );
   assert.equal(extractYoutubePlaylistId("bad id"), null);
 });
 

@@ -197,6 +197,30 @@ test("検索パラメータ先頭値の正規化を共通化する", () => {
   assert.doesNotMatch(youtubePlaylists, /function clean\(/);
 });
 
+test("YouTube playlist一覧はconfigを先に101件選び先頭100件だけ集計する", () => {
+  const configIndex = youtubePlaylists.indexOf("const configResult = await db");
+  const visibleIndex = youtubePlaylists.indexOf(
+    "const visibleConfigs = configResult.slice(0, LIMIT)",
+  );
+  const aggregateIndex = youtubePlaylists.indexOf(
+    "const aggregateResult = []",
+  );
+  assert.ok(configIndex >= 0);
+  assert.ok(visibleIndex > configIndex);
+  assert.ok(aggregateIndex > visibleIndex);
+  assert.match(youtubePlaylists, /\.limit\(LIMIT \+ 1\)/);
+  assert.match(
+    youtubePlaylists,
+    /const EVENT_ID_CHUNK_SIZE = 80/,
+  );
+  assert.match(youtubePlaylists, /chunkEventIds\(eventIds\)/);
+  assert.match(
+    youtubePlaylists,
+    /\.where\(inArray\(videoEvents\.event_id, eventIdChunk\)\)/,
+  );
+  assert.match(youtubePlaylists, /const countsByEventId = new Map/);
+});
+
 test("公開作品選択列を共通化し動的importを不要化する", () => {
   assert.match(dbQueries, /const publicVideoListSelect/);
   assert.match(dbQueries, /const scoredPublicVideoListSelect/);
@@ -236,8 +260,17 @@ test("X ID申請一覧は相関サブクエリを使わずpendingを上限付き
   }
   assert.match(enrichXLinkPendingRows, /D1_MAX_BIND_PARAMETERS/);
   assert.match(enrichXLinkPendingRows, /inArray\(xUsers\.id, chunk\)/);
-  assert.doesNotMatch(manageXLinkRequestsPage, /includeVideoIconFallback/);
-  assert.doesNotMatch(enrichXLinkPendingRows, /videos\.|creator_icon_url|includeVideoIconFallback/);
+  assert.match(
+    enrichXLinkPendingRows,
+    /lower\(trim\(\$\{xUsers\.id\}\)\)/,
+  );
+  // The manage moderation screen intentionally preserves the historical
+  // best-effort icon fallback from public video snapshots. Canonical staff/
+  // audience/user lists still use only the signed x_users icon path.
+  assert.match(manageXLinkRequestsPage, /includeVideoIconFallback:\s*true/);
+  assert.match(enrichXLinkPendingRows, /videos\.creator_x_user_id/);
+  assert.match(enrichXLinkPendingRows, /videos\.creator_icon_url/);
+  assert.match(enrichXLinkPendingRows, /includeVideoIconFallback/);
 });
 
 test("管理トップは同一テーブルのCOUNTを条件付き集計へ統合する", () => {
@@ -249,6 +282,10 @@ test("管理トップは同一テーブルのCOUNTを条件付き集計へ統合
   assert.match(adminPendingCounts, /reservedOpenSlots/);
   assert.match(adminPendingCounts, /acceptingEntriesWhere\(now\)/);
   assert.match(adminTopPage, /counts\.reservedOpenSlots/);
+  assert.match(adminTopPage, /countsTowardPending: false/);
+  assert.match(adminTopPage, /item\.countsTowardPending \? item\.value : 0/);
+  assert.match(adminTopPage, /admin-operational-counts/);
+  assert.match(adminTopPage, /items\.filter\(\(item\) => !item\.countsTowardPending\)/);
   assert.equal((adminPendingCounts.match(/\.from\(xIdentityRequestsTable\)/g) ?? []).length, 1);
   assert.equal((adminPendingCounts.match(/\.from\(notificationOutboxTable\)/g) ?? []).length, 1);
   assert.equal((adminPendingCounts.match(/\.from\(videoModerationCasesTable\)/g) ?? []).length, 1);

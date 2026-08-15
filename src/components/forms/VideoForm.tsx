@@ -52,6 +52,7 @@ import {
   formatYoutubeDescriptionMembers,
   type YoutubeDescriptionContext,
 } from "@/lib/event/youtubeDescriptionTemplate";
+import type { CustomQuestion } from "@/lib/video/customQuestions";
 
 /** X ID 既定プロフィール。「再適用」ボタン用。作品スナップショットとは別。 */
 export interface VideoDefaultProfile {
@@ -77,6 +78,8 @@ export interface VideoFormInitialValues {
   intro_comment?: string;
   used_software?: string;
   custom_question_answers_json?: string;
+  /** 一般イベント質問の既存回答。キーは `${eventId}:${questionKey}`。 */
+  custom_answers?: Record<string, string | string[]>;
   highlights?: string;
   production_story?: string;
   closing_comment?: string;
@@ -97,6 +100,8 @@ export interface EventOption {
   youtube_description_event_url?: string | null;
   /** イベントに設定された「部」候補 (JSON 文字列)。null/空配列なら部 UI を出さない。 */
   parts_json?: string | null;
+  /** イベントに設定された一般カスタム質問。 */
+  custom_questions?: CustomQuestion[];
 }
 
 function parsePartsJson(value: string | null | undefined): string[] {
@@ -108,6 +113,19 @@ function parsePartsJson(value: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+function customAnswerKey(eventId: string, questionKey: string): string {
+  return `${eventId}:${questionKey}`;
+}
+
+function customQuestionFieldId(eventId: string, questionKey: string): string {
+  return `custom_answer_${eventId}_${questionKey}`;
+}
+
+function customAnswerValues(value: string | string[] | undefined): string[] {
+  if (Array.isArray(value)) return value.map((item) => item.trim()).filter(Boolean);
+  return value?.trim() ? [value.trim()] : [];
 }
 
 export interface XIdOption {
@@ -353,6 +371,9 @@ export function VideoForm({
   const [selectedPart, setSelectedPart] = React.useState<string>(
     initial.part ?? "",
   );
+  const [customAnswers, setCustomAnswers] = React.useState<
+    Record<string, string | string[]>
+  >(initial.custom_answers ?? {});
   // 所属イベントの parts_json から、選択可能な部の候補 (重複排除) を作る。
   const availableParts = React.useMemo(() => {
     const seen = new Set<string>();
@@ -383,6 +404,18 @@ export function VideoForm({
       ),
     [eventOptions, selectedEventIds],
   );
+  const selectedCustomQuestions = React.useMemo(
+    () =>
+      eventOptions.flatMap((event) =>
+        selectedEventIds.includes(event.id)
+          ? (event.custom_questions ?? []).map((question) => ({
+              event,
+              question,
+            }))
+          : [],
+      ),
+    [eventOptions, selectedEventIds],
+  );
   const [stageAnswers, setStageAnswers] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
@@ -402,6 +435,9 @@ export function VideoForm({
   }, [initial.custom_question_answers_json, selectedStagePermissionFields]);
 
   const [pending, startTransition] = React.useTransition();
+  // useTransition の pending が反映される前の同一イベントループでも、
+  // 2つある submit ボタン（PC / モバイル）からの二重送信を拒否する。
+  const submitInFlightRef = React.useRef(false);
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
   // 未保存変更がある状態でブラウザを離れようとしたときに警告を出すための dirty 判定。
   // 入力長文 (紹介文・メンバー編集・アイコン選択) を持つフォームなので、
@@ -596,6 +632,21 @@ export function VideoForm({
     return false;
   };
 
+  const validateRequiredCustomQuestions = (): WizardValidationError | null => {
+    if (descriptionsDisabled) return null;
+    for (const { event, question } of selectedCustomQuestions) {
+      if (!question.required) continue;
+      const key = customAnswerKey(event.id, question.question_key);
+      if (customAnswerValues(customAnswers[key]).length > 0) continue;
+      return {
+        step: "work",
+        fieldId: customQuestionFieldId(event.id, question.question_key),
+        message: `「${question.label}」を入力してください。`,
+      };
+    }
+    return null;
+  };
+
   const validateWizardStep = (
     stepKey: WizardStepKey,
   ): WizardValidationError | null => {
@@ -646,6 +697,8 @@ export function VideoForm({
           };
         }
       }
+      const customQuestionError = validateRequiredCustomQuestions();
+      if (customQuestionError) return customQuestionError;
       return null;
     }
 
@@ -742,7 +795,16 @@ export function VideoForm({
 
   const handleSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
+    if (pending || submitInFlightRef.current) return;
     const form = ev.currentTarget;
+    if (mode === "edit") {
+      const customQuestionError = validateRequiredCustomQuestions();
+      if (customQuestionError) {
+        setStepError(customQuestionError);
+        setResult({ ok: false, message: customQuestionError.message });
+        return;
+      }
+    }
     if (mode === "edit") {
       const allowChange =
         String(new FormData(form).get("allow_submitter_change") ?? "").trim() ===
@@ -769,33 +831,44 @@ export function VideoForm({
     }
     const formData = new FormData(form);
     setResult(null);
+    submitInFlightRef.current = true;
     startTransition(async () => {
-      const action =
-        mode === "slot"
-          ? submitSlotVideo
-          : mode === "edit"
-            ? updateVideo
-            : createFreeVideo;
-      const r = await action(formData);
-      const currentPath =
-        typeof window === "undefined"
-          ? "/"
-          : `${window.location.pathname}${window.location.search}`;
-      if (!r.ok && redirectForGuardReason(router, r.reason, currentPath)) {
-        // リダイレクトで離脱するので dirty 警告は不要にする。
-        setDirty(false);
-        return;
-      }
-      setResult(r);
-      if (r.ok) {
-        // 保存成功時は dirty を解除し、編集画面遷移時の警告を抑制する。
-        setDirty(false);
-      }
-      // 新規投稿後は自動遷移をやめて成功 CTA (公開ページ / イベント / 編集を続ける) を出す。
-      // 「投稿できた → 公開ページ確認したい」「→ イベントに戻りたい」を選べるようにする。
-      // 編集モードはその場に留まり、router.refresh で最新値を反映する。
-      if (r.ok && mode === "edit") {
-        router.refresh();
+      try {
+        const action =
+          mode === "slot"
+            ? submitSlotVideo
+            : mode === "edit"
+              ? updateVideo
+              : createFreeVideo;
+        const r = await action(formData);
+        const currentPath =
+          typeof window === "undefined"
+            ? "/"
+            : `${window.location.pathname}${window.location.search}`;
+        if (!r.ok && redirectForGuardReason(router, r.reason, currentPath)) {
+          // リダイレクトで離脱するので dirty 警告は不要にする。
+          setDirty(false);
+          return;
+        }
+        setResult(r);
+        if (r.ok) {
+          // 保存成功時は dirty を解除し、編集画面遷移時の警告を抑制する。
+          setDirty(false);
+        }
+        // 新規投稿後は自動遷移をやめて成功 CTA (公開ページ / イベント / 編集を続ける) を出す。
+        // 「投稿できた → 公開ページ確認したい」「→ イベントに戻りたい」を選べるようにする。
+        // 編集モードはその場に留まり、router.refresh で最新値を反映する。
+        if (r.ok && mode === "edit") {
+          router.refresh();
+        }
+      } catch (error) {
+        console.error("[VideoForm] submit failed", error);
+        setResult({
+          ok: false,
+          message: "送信中に予期しないエラーが発生しました。もう一度お試しください。",
+        });
+      } finally {
+        submitInFlightRef.current = false;
       }
     });
   };
@@ -1244,7 +1317,8 @@ export function VideoForm({
           <input
             id="youtube_url"
             name="youtube_url"
-            type="url"
+            type="text"
+            inputMode="url"
             value={youtubeUrl}
             onChange={(e) => setYoutubeUrl(e.target.value)}
             className="fn-input"
@@ -1730,6 +1804,155 @@ export function VideoForm({
           );
         })}
 
+        {selectedCustomQuestions.map(({ event, question }) => {
+          const answerKey = customAnswerKey(event.id, question.question_key);
+          const fieldId = customQuestionFieldId(event.id, question.question_key);
+          const name = `custom_answer:${event.id}:${question.question_key}`;
+          const values = customAnswerValues(customAnswers[answerKey]);
+          const textValue = values[0] ?? "";
+          const maxLength =
+            question.max_length != null && question.max_length > 0
+              ? question.max_length
+              : question.type === "text"
+                ? 200
+                : 1000;
+          const disabled = fieldDisabled("descriptions.custom_answers");
+          const describedBy =
+            stepError?.fieldId === fieldId
+              ? "wizard-validation-error"
+              : undefined;
+          const updateAnswer = (next: string | string[]) => {
+            setCustomAnswers((current) => ({ ...current, [answerKey]: next }));
+            setDirty(true);
+          };
+          const label =
+            selectedEventIds.length > 1
+              ? `${event.title}: ${question.label}`
+              : question.label;
+
+          return (
+            <div
+              key={`${event.id}:${question.id}`}
+              className={cx(styles.field, styles.editableField)}
+            >
+              <label
+                className={`${styles.label} ${question.required ? styles.required : ""}`}
+                htmlFor={fieldId}
+              >
+                {label}
+              </label>
+              {question.description ? (
+                <p className={styles.help}>{question.description}</p>
+              ) : null}
+              {question.type === "textarea" ? (
+                <textarea
+                  id={fieldId}
+                  name={name}
+                  value={textValue}
+                  onChange={(event) => updateAnswer(event.target.value)}
+                  className="fn-input"
+                  rows={3}
+                  maxLength={maxLength}
+                  required={question.required}
+                  placeholder={question.placeholder ?? undefined}
+                  disabled={disabled}
+                  aria-invalid={stepError?.fieldId === fieldId || undefined}
+                  aria-describedby={describedBy}
+                />
+              ) : question.type === "select" && question.options.length > 0 ? (
+                <select
+                  id={fieldId}
+                  name={name}
+                  value={textValue}
+                  onChange={(event) => updateAnswer(event.target.value)}
+                  className="fn-select"
+                  required={question.required}
+                  disabled={disabled}
+                  aria-invalid={stepError?.fieldId === fieldId || undefined}
+                  aria-describedby={describedBy}
+                >
+                  <option value="">選択してください</option>
+                  {question.options.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              ) : question.type === "radio" && question.options.length > 0 ? (
+                <div
+                  id={`${fieldId}_group`}
+                  role="radiogroup"
+                  aria-describedby={describedBy}
+                  aria-invalid={stepError?.fieldId === fieldId || undefined}
+                  style={{ display: "grid", gap: 6 }}
+                >
+                  {question.options.map((option, optionIndex) => (
+                    <label key={option} style={{ display: "flex", gap: 8 }}>
+                      <input
+                        id={optionIndex === 0 ? fieldId : `${fieldId}_${optionIndex}`}
+                        type="radio"
+                        name={name}
+                        value={option}
+                        checked={textValue === option}
+                        onChange={(event) => updateAnswer(event.target.value)}
+                        required={question.required}
+                        disabled={disabled}
+                      />
+                      <span>{option}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : question.type === "checkbox" && question.options.length > 0 ? (
+                <div
+                  id={`${fieldId}_group`}
+                  role="group"
+                  aria-describedby={describedBy}
+                  aria-invalid={stepError?.fieldId === fieldId || undefined}
+                  style={{ display: "grid", gap: 6 }}
+                >
+                  {question.options.map((option, optionIndex) => (
+                    <label key={option} style={{ display: "flex", gap: 8 }}>
+                      <input
+                        id={optionIndex === 0 ? fieldId : `${fieldId}_${optionIndex}`}
+                        type="checkbox"
+                        name={name}
+                        value={option}
+                        checked={values.includes(option)}
+                        onChange={(event) => {
+                          const next = event.target.checked
+                            ? Array.from(new Set([...values, option]))
+                            : values.filter((value) => value !== option);
+                          updateAnswer(next);
+                        }}
+                        // checkbox の required を各選択肢へ付けると全選択必須になるため、
+                        // 必須判定は validateRequiredCustomQuestions で行う。
+                        required={false}
+                        disabled={disabled}
+                      />
+                      <span>{option}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  id={fieldId}
+                  name={name}
+                  type="text"
+                  value={textValue}
+                  onChange={(event) => updateAnswer(event.target.value)}
+                  className="fn-input"
+                  maxLength={maxLength}
+                  required={question.required}
+                  placeholder={question.placeholder ?? undefined}
+                  disabled={disabled}
+                  aria-invalid={stepError?.fieldId === fieldId || undefined}
+                  aria-describedby={describedBy}
+                />
+              )}
+            </div>
+          );
+        })}
+
         <div className={cx(styles.field, styles.editableField)}>
           <label className={styles.label} htmlFor="closing_comment">
             あとがき
@@ -1870,7 +2093,8 @@ export function VideoForm({
                 <input
                   id="youtube_url"
                   name="youtube_url"
-                  type="url"
+                  type="text"
+                  inputMode="url"
                   value={youtubeUrl}
                   onChange={(e) => {
                     setYoutubeUrl(e.target.value);

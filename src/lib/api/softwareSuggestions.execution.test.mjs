@@ -34,7 +34,7 @@ if (!runningExecution) {
   mock.module("@/lib/cloudflare", {
     namedExports: {
       async withDatabase(callback) {
-        return callback(currentDb);
+        return currentDb ? callback(currentDb) : null;
       },
     },
   });
@@ -132,5 +132,15 @@ if (!runningExecution) {
     assert.equal((await requestSuggestions("?limit=51")).length, 50);
     assert.equal((await requestSuggestions("?limit=999")).length, 50);
     harness.sqlite.close();
+  });
+
+  test("D1未接続を空配列200へ変換せず503で返す", async () => {
+    currentDb = undefined;
+    const response = await GET(
+      new Request("https://example.test/api/software/suggestions"),
+    );
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    assert.equal((await response.json()).error, "database_unavailable");
   });
 }

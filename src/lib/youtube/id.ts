@@ -27,12 +27,13 @@ export function extractYoutubeId(input: string | null | undefined): string | nul
 
   try {
     const url = new URL(trimmed);
-    const host = url.hostname.replace(/^www\./, "");
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
     if (host === "youtu.be") {
       const id = url.pathname.split("/").filter(Boolean)[0];
       return id && YOUTUBE_ID_RE.test(id) ? id : null;
     }
-    if (host.endsWith("youtube.com")) {
+    if (host === "youtube.com" || host.endsWith(".youtube.com")) {
       const v = url.searchParams.get("v");
       if (v && YOUTUBE_ID_RE.test(v)) return v;
       // /shorts/ID, /embed/ID, /live/ID

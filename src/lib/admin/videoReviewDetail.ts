@@ -13,6 +13,20 @@ import {
 import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { formatChapterTime } from "@/lib/utils/chapterTime";
+import { formatVideoReviewAnswer } from "./videoReviewAnswer";
+
+// Keep event/question IN predicates below D1's 100-bind ceiling even for
+// imported detail rows that predate the four-event write limit.
+const D1_REVIEW_ID_CHUNK_SIZE = 80;
+
+function chunkReviewIds(ids: readonly string[]): string[][] {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  const chunks: string[][] = [];
+  for (let index = 0; index < unique.length; index += D1_REVIEW_ID_CHUNK_SIZE) {
+    chunks.push(unique.slice(index, index + D1_REVIEW_ID_CHUNK_SIZE));
+  }
+  return chunks;
+}
 
 export type VideoReviewCustomAnswer = {
   label: string;
@@ -48,84 +62,98 @@ export type VideoReviewDetail = {
   members: VideoReviewMember[];
 };
 
-export async function fetchVideoReviewDetail(
-  db: DB,
-  videoId: string,
-  eventIds?: readonly string[],
-): Promise<VideoReviewDetail | null> {
-  const video = (
-    await db
-      .select({
-        id: videos.id,
-        title: videos.title,
-        creator_name: videos.creator_display_name,
-        creator_x_user_id: videos.creator_x_user_id,
-        created_at: videos.created_at,
-        youtube_video_id: videos.youtube_video_id,
-        music: videos.music,
-        credit: videos.credit,
-        intro_comment: videos.intro_comment,
-        highlights: videos.highlights,
-        production_story: videos.production_story,
-        visibility_status: videos.visibility_status,
-      })
-      .from(videos)
-      .where(eq(videos.id, videoId))
-      .limit(1)
-  )[0];
-  if (!video) return null;
+type VideoReviewVideoRow = {
+  id: string;
+  title: string;
+  creator_name: string | null;
+  creator_x_user_id: string | null;
+  created_at: number;
+  youtube_video_id: string | null;
+  music: string | null;
+  credit: string | null;
+  intro_comment: string | null;
+  highlights: string | null;
+  production_story: string | null;
+  visibility_status: string;
+};
 
-  const linkedEventIds =
-    eventIds && eventIds.length > 0
-      ? [...eventIds]
-      : (
-          await db
-            .select({ event_id: videoEvents.event_id })
-            .from(videoEvents)
-            .where(eq(videoEvents.video_id, videoId))
-        ).map((row) => row.event_id);
+const videoReviewVideoSelect = {
+  id: videos.id,
+  title: videos.title,
+  creator_name: videos.creator_display_name,
+  creator_x_user_id: videos.creator_x_user_id,
+  created_at: videos.created_at,
+  youtube_video_id: videos.youtube_video_id,
+  music: videos.music,
+  credit: videos.credit,
+  intro_comment: videos.intro_comment,
+  highlights: videos.highlights,
+  production_story: videos.production_story,
+  visibility_status: videos.visibility_status,
+} as const;
+
+async function buildVideoReviewDetail(
+  db: DB,
+  video: VideoReviewVideoRow,
+  linkedEventIds: readonly string[],
+): Promise<VideoReviewDetail> {
+  const normalizedEventIds = Array.from(new Set(linkedEventIds.filter(Boolean)));
 
   const stagePermission = await readStagePermissionCustomAnswers(db, {
-    videoId,
-    eventIds: linkedEventIds,
+    videoId: video.id,
+    eventIds: normalizedEventIds,
   });
 
-  const questions =
-    linkedEventIds.length > 0
-      ? await db
-          .select({
-            id: eventCustomQuestions.id,
-            label: eventCustomQuestions.label,
-            required: eventCustomQuestions.required,
-            question_key: eventCustomQuestions.question_key,
-          })
-          .from(eventCustomQuestions)
-          .where(inArray(eventCustomQuestions.event_id, linkedEventIds))
-      : [];
+  const questions: Array<{
+    id: string;
+    label: string;
+    required: number;
+    question_key: string;
+  }> = [];
+  for (const eventIdChunk of chunkReviewIds(normalizedEventIds)) {
+    const chunkQuestions = await db
+      .select({
+        id: eventCustomQuestions.id,
+        label: eventCustomQuestions.label,
+        required: eventCustomQuestions.required,
+        question_key: eventCustomQuestions.question_key,
+      })
+      .from(eventCustomQuestions)
+      .where(inArray(eventCustomQuestions.event_id, eventIdChunk));
+    questions.push(...chunkQuestions);
+  }
 
   const nonStageQuestions = questions.filter(
     (question) => !question.question_key.startsWith("stage_permission"),
   );
-  const answers =
-    nonStageQuestions.length > 0
-      ? await db
-          .select({
-            question_id: videoCustomAnswers.question_id,
-            answer_text: videoCustomAnswers.answer_text,
-          })
-          .from(videoCustomAnswers)
-          .where(
-            and(
-              eq(videoCustomAnswers.video_id, videoId),
-              inArray(
-                videoCustomAnswers.question_id,
-                nonStageQuestions.map((question) => question.id),
-              ),
-            )!,
-          )
-      : [];
+  const answers: Array<{
+    question_id: string;
+    answer_text: string | null;
+    answer_json: string | null;
+  }> = [];
+  for (const questionIdChunk of chunkReviewIds(
+    nonStageQuestions.map((question) => question.id),
+  )) {
+    const chunkAnswers = await db
+      .select({
+        question_id: videoCustomAnswers.question_id,
+        answer_text: videoCustomAnswers.answer_text,
+        answer_json: videoCustomAnswers.answer_json,
+      })
+      .from(videoCustomAnswers)
+      .where(
+        and(
+          eq(videoCustomAnswers.video_id, video.id),
+          inArray(videoCustomAnswers.question_id, questionIdChunk),
+        )!,
+      );
+    answers.push(...chunkAnswers);
+  }
   const answerMap = new Map(
-    answers.map((answer) => [answer.question_id, answer.answer_text ?? ""]),
+    answers.map((answer) => [
+      answer.question_id,
+      formatVideoReviewAnswer(answer.answer_text, answer.answer_json),
+    ]),
   );
 
   const members = await db
@@ -136,7 +164,7 @@ export async function fetchVideoReviewDetail(
       is_public_member: videoMembers.is_public_member,
     })
     .from(videoMembers)
-    .where(eq(videoMembers.video_id, videoId))
+    .where(eq(videoMembers.video_id, video.id))
     .orderBy(asc(videoMembers.order_index));
 
   const chapters = await db
@@ -146,7 +174,7 @@ export async function fetchVideoReviewDetail(
       chapter_label: videoChapters.chapter_label,
     })
     .from(videoChapters)
-    .where(eq(videoChapters.video_id, videoId))
+    .where(eq(videoChapters.video_id, video.id))
     .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id));
   const chaptersByXUserId = new Map<string, string[]>();
   for (const chapter of chapters) {
@@ -170,8 +198,8 @@ export async function fetchVideoReviewDetail(
     production_story: video.production_story,
     stagePermission,
     visibility_status: video.visibility_status,
-    software_label: await getVideoSoftwareLabel(db, videoId),
-    event_ids: linkedEventIds,
+    software_label: await getVideoSoftwareLabel(db, video.id),
+    event_ids: normalizedEventIds,
     customAnswers: nonStageQuestions.map((question) => ({
       label: question.label,
       required: question.required === 1,
@@ -187,4 +215,64 @@ export async function fetchVideoReviewDetail(
         : null,
     })),
   };
+}
+
+export async function fetchVideoReviewDetail(
+  db: DB,
+  videoId: string,
+  eventIds?: readonly string[],
+): Promise<VideoReviewDetail | null> {
+  const video = (
+    await db
+      .select(videoReviewVideoSelect)
+      .from(videos)
+      .where(eq(videos.id, videoId))
+      .limit(1)
+  )[0] as VideoReviewVideoRow | undefined;
+  if (!video) return null;
+
+  const linkedEventIds =
+    eventIds && eventIds.length > 0
+      ? [...eventIds]
+      : (
+          await db
+            .select({ event_id: videoEvents.event_id })
+            .from(videoEvents)
+            .where(eq(videoEvents.video_id, videoId))
+        ).map((row) => row.event_id);
+
+  return buildVideoReviewDetail(db, video, linkedEventIds);
+}
+
+/**
+ * Event-scoped detail loader for manage review pages.
+ *
+ * The membership guard and video projection intentionally share one indexed
+ * query. A separate guard query followed by fetchVideoReviewDetail would
+ * re-read the same video row and could not improve the 404 semantics.
+ */
+export async function fetchEventVideoReviewDetail(
+  db: DB,
+  eventId: string,
+  videoId: string,
+): Promise<VideoReviewDetail | null> {
+  const video = (
+    await db
+      .select({
+        ...videoReviewVideoSelect,
+        event_id: videoEvents.event_id,
+      })
+      .from(videos)
+      .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
+      .where(
+        and(
+          eq(videos.id, videoId),
+          eq(videoEvents.event_id, eventId),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (!video) return null;
+
+  return buildVideoReviewDetail(db, video, [video.event_id]);
 }

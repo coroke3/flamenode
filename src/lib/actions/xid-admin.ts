@@ -529,12 +529,19 @@ async function bindReservedSlotsOnXApproval(args: {
     requestedAuthUserId: args.requestedAuthUserId,
     bindTargetXUserId: args.bindTargetXUserId,
   });
+  // Migration 0053 preserves legacy raw snapshots.  New reservations store
+  // normalized IDs, but old rows may still contain casing, @ prefixes, or
+  // surrounding whitespace.  Match by the same identity key as normalizeXId
+  // so an approved reservation is not stranded during bind/recovery.
+  const normalizedSnapshotCondition = sql`
+    lower(trim(ltrim(${slots.reserved_x_id_snapshot}, '@'))) = ${args.submittedXUserId}
+  `;
   const snapshotCondition = allowNullSnapshot
     ? or(
         isNull(slots.reserved_x_id_snapshot),
-        eq(slots.reserved_x_id_snapshot, args.submittedXUserId),
+        normalizedSnapshotCondition,
       )!
-    : eq(slots.reserved_x_id_snapshot, args.submittedXUserId);
+    : normalizedSnapshotCondition;
   const allAffectedEventIds = new Set<string>();
   let complete = false;
   // Keep the CAS token owned by this binder. Re-reading the latest token at

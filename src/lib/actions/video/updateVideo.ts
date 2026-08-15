@@ -40,6 +40,7 @@ import {
   loadMemberSubmissionBaseline,
   memberChaptersPayloadChanged,
   memberListPayloadChanged,
+  remapMemberChaptersByIdentity,
 } from "@/lib/video/memberSubmissionBaseline";
 import type { CustomAnswerDraft } from "@/lib/video/customQuestions";
 import {
@@ -81,7 +82,13 @@ export async function updateVideo(
   if (stageEventIds.length > MAX_ATOMIC_VIDEO_EVENTS) {
     return { ok: false, message: "選択イベント数が保存上限を超えています。" };
   }
-  const editStageFields = await getStagePermissionFieldsForEvents(db, stageEventIds);
+  let editStageFields: Awaited<ReturnType<typeof getStagePermissionFieldsForEvents>>;
+  try {
+    editStageFields = await getStagePermissionFieldsForEvents(db, stageEventIds);
+  } catch (error) {
+    console.warn("[updateVideo] stage permission fields read rejected", error);
+    return { ok: false, message: "ステージ許諾項目を読み込めませんでした。" };
+  }
   let currentStagePermission: string | null;
   try {
     currentStagePermission = await readStagePermissionCustomAnswers(db, {
@@ -318,6 +325,13 @@ export async function updateVideo(
     null;
   let submittedMemberBaseline: Awaited<ReturnType<typeof loadMemberSubmissionBaseline>> | null =
     null;
+  let memberChapterRemap: Extract<
+    ReturnType<typeof remapMemberChaptersByIdentity>,
+    { ok: true }
+  > | null = null;
+  let chapterComparisonBaseline: Awaited<
+    ReturnType<typeof loadMemberSubmissionBaseline>
+  > | null = null;
   const isCollabSubmission = parsed.data.is_collab ?? false;
   if (formData.has("members_json") || sections.members || sections.member_chapters) {
     const memberValidation = validateVideoMemberSubmission(
@@ -338,9 +352,32 @@ export async function updateVideo(
       return { ok: false, message: "合作メンバーを編集する権限がありません。" };
     }
 
+    chapterComparisonBaseline = submittedMemberBaseline;
+    if (sections.members && !sections.member_chapters) {
+      const remap = remapMemberChaptersByIdentity(
+        existingMemberBaseline,
+        submittedMemberBaseline,
+      );
+      if (!remap.ok) {
+        return {
+          ok: false,
+          message:
+            "メンバーの識別情報が重複または不整合のため、チャプターを安全に引き継げません。再読み込みして確認してください。",
+        };
+      }
+      if (remap.unmatchedSubmittedWithChapters) {
+        return { ok: false, message: "メンバーチャプターを編集する権限がありません。" };
+      }
+      memberChapterRemap = remap;
+      chapterComparisonBaseline = {
+        ...submittedMemberBaseline,
+        chaptersByIndex: remap.byBaselineIndex,
+      };
+    }
+
     if (
       !sections.member_chapters &&
-      memberChaptersPayloadChanged(existingMemberBaseline, submittedMemberBaseline)
+      memberChaptersPayloadChanged(existingMemberBaseline, chapterComparisonBaseline)
     ) {
       return { ok: false, message: "メンバーチャプターを編集する権限がありません。" };
     }
@@ -350,7 +387,9 @@ export async function updateVideo(
       if (!sections.member_chapters) {
         memberSubmission = {
           ...memberSubmission,
-          chaptersByIndex: existingMemberBaseline.chaptersByIndex,
+          chaptersByIndex:
+            memberChapterRemap?.bySubmittedIndex ??
+            existingMemberBaseline.chaptersByIndex,
         };
       }
     } else if (sections.member_chapters) {
@@ -449,7 +488,10 @@ export async function updateVideo(
       sections.members &&
       submittedMemberBaseline &&
       existingMemberBaseline &&
-      memberChaptersPayloadChanged(existingMemberBaseline, submittedMemberBaseline) &&
+      memberChaptersPayloadChanged(
+        existingMemberBaseline,
+        chapterComparisonBaseline ?? submittedMemberBaseline,
+      ) &&
       !generalFields.has("chapters")
     ) {
       return { ok: false, message: "メンバーチャプターを編集する権限がありません。" };

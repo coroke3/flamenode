@@ -119,4 +119,22 @@ if (runTestWithTsx(import.meta.url)) {
       /targetType: "(?:search_index|event_base|random_video_pool|list_recent|list_popular|top_recommended|top_latest|top_nostalgic|top_stats|recommend_core)"/,
     );
   });
+
+  test("event-link-only updates do not replace general custom answers", () => {
+    const fnStart = source.indexOf("export async function applyVideoUpdatePlan");
+    const fnBody = source.slice(fnStart);
+    assert.match(
+      fnBody,
+      /const shouldReplaceStagePermission =\s*sections\.descriptions \|\| \(plan\.stagePermissionDeleteEventIds\?\.length \?\? 0\) > 0/,
+    );
+    const stageStart = fnBody.indexOf("if (shouldReplaceStagePermission)");
+    assert.ok(stageStart >= 0);
+    const stageBranch = fnBody.slice(stageStart, fnBody.indexOf("const queueItems", stageStart));
+    const generalStart = stageBranch.indexOf("buildReplaceGeneralCustomAnswersPlan");
+    assert.ok(generalStart >= 0);
+    assert.match(
+      stageBranch.slice(Math.max(0, generalStart - 180), generalStart + 80),
+      /if \(sections\.descriptions\)/,
+    );
+  });
 }

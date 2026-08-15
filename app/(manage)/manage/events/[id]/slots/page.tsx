@@ -6,7 +6,6 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
-  events as eventsTable,
   slots as slotsTable,
   users as usersTable,
 } from "@/lib/db/schema";
@@ -20,6 +19,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import { getManageEventForRender } from "@/lib/manage/manageEventRender";
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const db = getDatabase();
   if (!db) return { title: `枠管理 (${id})` };
-  const ev = (
-    await db
-      .select({ title: eventsTable.title })
-      .from(eventsTable)
-      .where(eq(eventsTable.id, id))
-      .limit(1)
-  )[0];
+  const ev = await getManageEventForRender(id);
   return { title: ev?.title ? `${ev.title} 枠管理` : "枠管理" };
 }
 
@@ -68,9 +62,7 @@ export default async function ManageEventSlotsPage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const event = (
-    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-  )[0];
+  const event = await getManageEventForRender(id);
   if (!event) notFound();
   const isAdmin = guard.user.role === "admin";
   const authorization = await getManageAuthorizationSnapshot(

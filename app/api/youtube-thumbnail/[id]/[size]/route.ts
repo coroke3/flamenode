@@ -17,14 +17,22 @@ function normalizeSize(raw: string | undefined): YoutubeThumbSize | null {
     : null;
 }
 
+function decodePathSegment(raw: string | undefined): string | null {
+  try {
+    return decodeURIComponent(raw ?? "").trim();
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id?: string; size?: string }> },
 ): Promise<Response> {
   const { id: rawId, size: rawSize } = await params;
-  const id = (rawId ?? "").trim();
-  const size = normalizeSize(rawSize);
-  if (!YOUTUBE_ID_RE.test(id) || !size) {
+  const id = decodePathSegment(rawId);
+  const size = normalizeSize(decodePathSegment(rawSize) ?? undefined);
+  if (!id || !YOUTUBE_ID_RE.test(id) || !size) {
     return new Response("Not found", { status: 404 });
   }
 

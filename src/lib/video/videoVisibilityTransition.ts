@@ -396,6 +396,26 @@ export async function preCommitVideoVisibilityDepublicization(input: {
   );
   await writePublicVisibilityBlockedEntitiesManifest(updated, {
     ifMatchEtag: etag,
+    mutateOnConflict: (latest) => {
+      const current = latest.entities.find(
+        (entry) =>
+          entry.entity_type === "video" && entry.entity_id === input.videoId,
+      );
+      if (current && current.fence_token !== input.fenceToken) {
+        throw new Error("public_visibility_fence_token_mismatch");
+      }
+      return upsertBlockedEntityInManifest(
+        latest,
+        {
+          entity_type: "video",
+          entity_id: input.videoId,
+          fence_token: input.fenceToken,
+          blocked_at: Math.floor(Date.now() / 1000),
+          reason: input.reason ?? null,
+        },
+        Math.floor(Date.now() / 1000),
+      );
+    },
   });
   const { manifest: confirmed } =
     await readPublicVisibilityBlockedEntitiesManifest();

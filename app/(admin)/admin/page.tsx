@@ -42,6 +42,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "作品審査キュー",
       icon: "youtube",
       tone: counts.pendingVideos > 0 ? "warn" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "未提出予約枠",
@@ -50,6 +51,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "受付中イベントの reserved",
       icon: "calendar",
       tone: counts.reservedOpenSlots > 0 ? "warn" : "neutral",
+      countsTowardPending: false,
     },
     {
       label: "X ID連携申請",
@@ -58,6 +60,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "Discord と X ID の連携",
       icon: "user",
       tone: counts.xLinkRequests > 0 ? "warn" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "X ID統合申請",
@@ -66,6 +69,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "既存 X ID 同士の統合",
       icon: "users",
       tone: counts.xMergeRequests > 0 ? "danger" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "統合取り消し申請",
@@ -74,6 +78,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "restore snapshot の確認",
       icon: "refresh",
       tone: counts.xMergeReverts > 0 ? "danger" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "通知失敗",
@@ -82,6 +87,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "Discord 送信 failed",
       icon: "alert",
       tone: counts.notificationFailed > 0 ? "danger" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "通知処理固着",
@@ -90,6 +96,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "processing 15分超",
       icon: "clock",
       tone: counts.notificationStuck > 0 ? "danger" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "YouTube同期失敗",
@@ -98,6 +105,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "metadata sync failed",
       icon: "refresh",
       tone: counts.youtubeFailed > 0 ? "warn" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "未解決ケース",
@@ -106,6 +114,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "モデレーション open",
       icon: "warning",
       tone: counts.moderationOpen > 0 ? "warn" : "neutral",
+      countsTowardPending: true,
     },
     {
       label: "期限切れケース",
@@ -114,6 +123,7 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       description: "due_at 超過",
       icon: "alert",
       tone: counts.moderationOverdue > 0 ? "danger" : "neutral",
+      countsTowardPending: true,
     },
   ] satisfies Array<{
     label: string;
@@ -122,9 +132,13 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
     description: string;
     icon: IconName;
     tone: Tone;
+    countsTowardPending: boolean;
   }>;
 
-  const pendingTotal = items.reduce((sum, item) => sum + item.value, 0);
+  const pendingTotal = items.reduce(
+    (sum, item) => sum + (item.countsTowardPending ? item.value : 0),
+    0,
+  );
 
   return (
     <div className="fn-admin-dashboard">
@@ -196,7 +210,25 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
           </div>
         </div>
         <div className="fn-admin-stat-grid">
-          {items.map((item) => (
+          {items.filter((item) => item.countsTowardPending).map((item) => (
+            <PendingCountCard key={item.label} {...item} />
+          ))}
+        </div>
+      </section>
+
+      <section
+        aria-labelledby="admin-operational-counts"
+        className="fn-admin-dashboard-section fn-admin-dashboard-section--secondary"
+      >
+        <div className="fn-admin-dashboard-section-heading">
+          <div>
+            <p className="fn-admin-dashboard-eyebrow">OPERATIONS</p>
+            <h2 id="admin-operational-counts">運営状況</h2>
+          </div>
+          <span className="fn-muted fn-text-sm">対応待ち合計には含めません</span>
+        </div>
+        <div className="fn-admin-stat-grid">
+          {items.filter((item) => !item.countsTowardPending).map((item) => (
             <PendingCountCard key={item.label} {...item} />
           ))}
         </div>
@@ -312,6 +344,7 @@ function PendingCountCard({
   description: string;
   icon: IconName;
   tone: Tone;
+  countsTowardPending: boolean;
 }): React.ReactElement {
   const badgeClass =
     tone === "danger"

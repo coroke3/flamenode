@@ -195,6 +195,14 @@ test("resolvePublicJsonMiss は公開 miss を high 優先度で enqueue する"
   );
 });
 
+test("video alias miss は probe の canonical ID で rebuild queue を共有する", () => {
+  assert.match(loaderSource, /const canonicalTargetId = probe\.canonicalTargetId/);
+  assert.match(
+    loaderSource,
+    /targetType: missTargetType,[\s\S]*targetId: canonicalTargetId/,
+  );
+});
+
 test("degraded user profile は works/collabs の total を COUNT で返す", async () => {
   const degradedSource = await readFile(
     new URL("./degradedQueries.ts", import.meta.url),

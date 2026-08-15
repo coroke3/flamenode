@@ -10,6 +10,7 @@ import {
   // 互換のため import は維持しない。
   videoEvents as videoEventsTable,
   videoMembers,
+  videoCustomAnswers,
   videos as videosTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
@@ -46,6 +47,7 @@ import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAnswers";
 import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
+import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { buildVideoEditPermissionViewModel } from "@/lib/video/videoEditPermissionView";
 import type { VideoViewSectionKey } from "@/lib/video/videoEditPermissionView";
 import { hasAnyEditableVideoFormSection } from "@/lib/video/permissionUnlockHint";
@@ -61,6 +63,16 @@ interface Props {
 }
 
 type PrivilegeMode = "normal" | "admin" | "event";
+
+const D1_VIDEO_ANSWER_ID_CHUNK_SIZE = 80;
+
+function chunkIds(ids: readonly string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
 
 function normalizePrivilegeMode(raw: string | undefined): PrivilegeMode {
   return raw === "admin" || raw === "event" ? raw : "normal";
@@ -284,10 +296,68 @@ export default async function EditVideoPage({
     db,
     Array.from(acceptingEventMap.keys()),
   );
+  const customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(
+    db,
+    Array.from(acceptingEventMap.keys()),
+  );
   const eventOptions = Array.from(acceptingEventMap.values()).map((event) => ({
     ...event,
     video_form_settings_json: formSettingsByEvent.get(event.id) ?? null,
+    custom_questions: customQuestionsByEvent.get(event.id) ?? [],
   }));
+  const customQuestionById = new Map(
+    Array.from(customQuestionsByEvent.values())
+      .flat()
+      .map((question) => [question.id, question] as const),
+  );
+  const customQuestionIds = Array.from(customQuestionById.keys());
+  const customAnswerRows = [];
+  for (const questionIdChunk of chunkIds(
+    customQuestionIds,
+    D1_VIDEO_ANSWER_ID_CHUNK_SIZE,
+  )) {
+    const rows = await db
+      .select({
+        event_id: videoCustomAnswers.event_id,
+        question_id: videoCustomAnswers.question_id,
+        answer_text: videoCustomAnswers.answer_text,
+        answer_json: videoCustomAnswers.answer_json,
+      })
+      .from(videoCustomAnswers)
+      .where(
+        and(
+          eq(videoCustomAnswers.video_id, video.id),
+          inArray(videoCustomAnswers.question_id, questionIdChunk),
+        )!,
+      )
+      // 既存回答は質問数分すべて復元する。5件に丸めると、6件目以降の
+      // 必須質問が編集画面で空欄になり、保存時に不意に拒否される。
+      .limit(questionIdChunk.length);
+    customAnswerRows.push(...rows);
+  }
+  const initialCustomAnswers: Record<string, string | string[]> = {};
+  for (const row of customAnswerRows) {
+    const question = customQuestionById.get(row.question_id);
+    if (!question) continue;
+    if (row.answer_json?.trim()) {
+      try {
+        const parsed = JSON.parse(row.answer_json) as unknown;
+        if (Array.isArray(parsed)) {
+          initialCustomAnswers[`${row.event_id}:${question.question_key}`] = parsed
+            .filter((value): value is string => typeof value === "string")
+            .map((value) => value.trim())
+            .filter(Boolean);
+          continue;
+        }
+      } catch {
+        // 不正な回答 JSON は空欄として扱い、編集画面を壊さない。
+      }
+    }
+    if (row.answer_text?.trim()) {
+      initialCustomAnswers[`${row.event_id}:${question.question_key}`] =
+        row.answer_text.trim();
+    }
+  }
   const stagePermissionInitial = await readStagePermissionCustomAnswers(db, {
     videoId: video.id,
     eventIds: currentEventIds,
@@ -674,6 +744,7 @@ export default async function EditVideoPage({
           intro_comment: video.intro_comment ?? undefined,
           used_software: softwareLabel ?? undefined,
           custom_question_answers_json: stagePermissionInitial ?? undefined,
+          custom_answers: initialCustomAnswers,
           highlights: video.highlights ?? undefined,
           production_story: video.production_story ?? undefined,
           closing_comment: video.closing_comment ?? undefined,

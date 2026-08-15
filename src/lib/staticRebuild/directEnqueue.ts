@@ -126,11 +126,10 @@ function rebuildStateForAction(
 async function shouldSkipDirectEnqueueCooldown(
   db: DB,
   input: EnqueueStaticRebuildInput,
+  cause: DirectEnqueueCause,
   cooldownSeconds: number,
   now: number,
 ): Promise<boolean> {
-  if (cooldownSeconds <= 0) return false;
-
   const latest = (
     await db
       .select()
@@ -149,7 +148,19 @@ async function shouldSkipDirectEnqueueCooldown(
   if (latest.status === "pending" || latest.status === "processing") {
     return false;
   }
-  if (latest.status !== "done") return false;
+  // Public misses and periodic repairs must respect a worker retry backoff;
+  // otherwise every stale-cache read can create a new pending row while the
+  // same target is intentionally waiting for its next retry. Manual repair is
+  // an explicit operator override and bypasses both forms of suppression.
+  if (
+    latest.status === "failed" &&
+    cause.kind !== "manual_repair" &&
+    (latest.next_retry_at ?? 0) > now
+  ) {
+    return true;
+  }
+  if (latest.status !== "done" || cause.kind === "manual_repair") return false;
+  if (cooldownSeconds <= 0) return false;
 
   const processedAt = latest.processed_at ?? latest.updated_at ?? 0;
   return processedAt > 0 && now - processedAt < cooldownSeconds;
@@ -260,6 +271,7 @@ export async function directEnqueueStaticRebuild(
         await shouldSkipDirectEnqueueCooldown(
           db,
           input,
+          cause,
           cause.cooldownSeconds,
           now,
         )

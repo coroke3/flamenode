@@ -87,16 +87,25 @@ export default async function ManageNotificationsPage({
     user.id,
     user.role ?? null,
   );
-  const editableIds = authorization.manageableEventIds;
+  // Admins can inspect notifications for every event even though the event
+  // selector remains hidden. Reuse the same request-local projection used by
+  // /manage so the scope is complete without a second events read.
+  const accessibleEventIds = isAdmin
+    ? navigation.events.map((event) => event.id)
+    : authorization.manageableEventIds;
   // Keep the historical admin behavior (no event dropdown), while reusing
   // the sidebar's request-local event projection for non-admin operators.
   const managedEvents = isAdmin
     ? []
-    : navigation.events.map(({ id, title }) => ({ id, title }));
+    : (navigation?.events ?? []).map(({ id, title }) => ({ id, title }));
 
-  let eventIds = eventFilter ? [eventFilter] : managedEvents.map((event) => event.id);
+  let eventIds = eventFilter
+    ? [eventFilter]
+    : accessibleEventIds.length > 0
+      ? accessibleEventIds.slice()
+      : [];
   if (eventFilter) {
-    if (!editableIds.includes(eventFilter)) {
+    if (!accessibleEventIds.includes(eventFilter)) {
       const allowed = canAccessManageEventFromSnapshot(
         authorization,
         eventFilter,
@@ -166,7 +175,7 @@ export default async function ManageNotificationsPage({
     isTerminalNotificationFailure(row.status),
   ).length;
   const eventTitleById = new Map(
-    managedEvents.map((event) => [event.id, event.title]),
+    navigation.events.map((event) => [event.id, event.title]),
   );
 
   return (

@@ -204,6 +204,17 @@ npm ci --no-audit --no-fund
 npm run cf:bootstrap -- --confirm-create
 ```
 
+Before an enforce rollout, bootstrap the R2 visibility manifest explicitly:
+
+```sh
+npm run cf:bootstrap-visibility -- --confirm-bootstrap --bucket <production-r2-bucket>
+```
+
+This command creates only the canonical empty
+`visibility/blocked-entities.v1.json` when the object is absent. Existing or
+malformed manifests are never overwritten, and no remote write occurs without
+`--confirm-bootstrap`.
+
 `cf:bootstrap`はD1、R2、KVだけを作成し、IDを表示・保存せず、migration、Worker deploy、secret更新を行いません。Cloudflare Dashboardで実IDを確認し、Build Variablesへ直接登録します。
 
 Queue 6本（wake 3 + DLQ 3）は初回のみ手動作成します。binding名・consumer設定の正本はtracked wrangler群です。

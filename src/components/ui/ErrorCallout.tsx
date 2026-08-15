@@ -43,6 +43,19 @@ function buildNext(): string {
   return `${window.location.pathname}${window.location.search}`;
 }
 
+function withQueryParam(path: string, key: string, value: string): string {
+  const hashIndex = path.indexOf("#");
+  const hash = hashIndex >= 0 ? path.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? path.slice(0, hashIndex) : path;
+  const queryIndex = withoutHash.indexOf("?");
+  const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  const query = queryIndex >= 0 ? withoutHash.slice(queryIndex + 1) : "";
+  const params = new URLSearchParams(query);
+  params.set(key, value);
+  const encoded = params.toString();
+  return `${pathname}${encoded ? `?${encoded}` : ""}${hash}`;
+}
+
 function ctaFor(reason: ErrorCalloutReason): CtaSpec | null {
   const next = buildNext();
   switch (reason) {
@@ -64,7 +77,10 @@ function ctaFor(reason: ErrorCalloutReason): CtaSpec | null {
     case "duplicate_youtube_id":
       return { href: "/list", label: "既存作品を探す" };
     case "submitter_change_denied":
-      return { href: `${buildNext()}?privileged=admin`, label: "管理者モードに切替" };
+      return {
+        href: withQueryParam(buildNext(), "privileged", "admin"),
+        label: "管理者モードに切替",
+      };
     case "banned":
     case "maintenance_mode":
     case "cost_guard_blocked":

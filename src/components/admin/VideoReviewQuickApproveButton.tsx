@@ -30,12 +30,13 @@ export function VideoReviewQuickApproveButton({
 }: VideoReviewQuickApproveButtonProps): React.ReactElement {
   const router = useRouter();
   const [submitting, setSubmitting] = React.useState(false);
+  const submittingRef = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [pendingPublicReflection, setPendingPublicReflection] =
     React.useState(false);
 
   const onApprove = () => {
-    if (submitting) return;
+    if (submitting || submittingRef.current) return;
     setError(null);
     setPendingPublicReflection(false);
     const fd = new FormData();
@@ -44,6 +45,7 @@ export function VideoReviewQuickApproveButton({
     }
     fd.set("video_id", videoId);
 
+    submittingRef.current = true;
     setSubmitting(true);
     void (async () => {
       try {
@@ -61,6 +63,7 @@ export function VideoReviewQuickApproveButton({
         setError(COMMUNICATION_ERROR_MESSAGE);
         router.refresh();
       } finally {
+        submittingRef.current = false;
         setSubmitting(false);
       }
     })();

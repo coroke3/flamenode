@@ -19,6 +19,7 @@ import { getXIconCandidates } from "@/lib/db/xIconResolution";
 import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { acceptingEntriesWhere } from "@/lib/utils/eventStatus";
 import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
+import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 import { absoluteUrl } from "@/lib/seo";
@@ -47,10 +48,13 @@ export default async function SlottedPostPage({
   if (!slotId) redirect("/entry");
   const activeXId = user.active_x_user_id ?? null;
   const slotOwnerWhere = activeXId
-    ? or(
-        eq(slotsTable.x_user_id, activeXId),
-        and(isNull(slotsTable.x_user_id), eq(slotsTable.reserved_by_user_id, user.id))!,
-      )
+    ? and(
+        // x_user_id is the reservation's identity snapshot, not its owner.
+        // Keep the authenticated reservation owner check in both branches so
+        // another account linked to the same X ID cannot open this form.
+        eq(slotsTable.reserved_by_user_id, user.id),
+        or(eq(slotsTable.x_user_id, activeXId), isNull(slotsTable.x_user_id))!,
+      )!
     : eq(slotsTable.reserved_by_user_id, user.id);
   const rows = await db
     .select()
@@ -81,7 +85,12 @@ export default async function SlottedPostPage({
     const groupRows = await db
       .select({ start_time: slotsTable.start_time })
       .from(slotsTable)
-      .where(eq(slotsTable.reservation_group_id, slot.reservation_group_id));
+      .where(
+        and(
+          eq(slotsTable.event_id, slot.event_id),
+          eq(slotsTable.reservation_group_id, slot.reservation_group_id),
+        )!,
+      );
     if (groupRows.length > 0) {
       groupSize = groupRows.length;
       const starts = groupRows
@@ -91,7 +100,16 @@ export default async function SlottedPostPage({
         .map((r) => r.start_time)
         .filter((v): v is number => typeof v === "number");
       if (starts.length > 0) slotStart = Math.min(...starts);
-      if (ends.length > 0) slotEnd = Math.max(...ends);
+      if (ends.length > 0) {
+        // 連続枠の終了時刻は最終枠の開始時刻ではなく、枠間隔ぶん先。
+        // 開始時刻だけを表示すると、2枠以上でも終了が開始と同じに見える。
+        const configuredGapMinutes = ev.slot_part_gap_minutes ?? 15;
+        const slotGapSeconds =
+          Number.isFinite(configuredGapMinutes) && configuredGapMinutes >= 0
+            ? configuredGapMinutes * 60
+            : 15 * 60;
+        slotEnd = Math.max(...ends) + slotGapSeconds;
+      }
     }
   }
   const activeX = slot.x_user_id ?? activeXId;
@@ -145,9 +163,14 @@ export default async function SlottedPostPage({
     db,
     rawEventOptions.map((option) => option.id),
   );
+  const customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(
+    db,
+    rawEventOptions.map((option) => option.id),
+  );
   const eventOptions = rawEventOptions.map((option) => ({
     ...option,
     video_form_settings_json: formSettingsByEvent.get(option.id) ?? null,
+    custom_questions: customQuestionsByEvent.get(option.id) ?? [],
     youtube_description_event_url: absoluteUrl(
       `/event/${encodeURIComponent(option.id)}`,
     ),

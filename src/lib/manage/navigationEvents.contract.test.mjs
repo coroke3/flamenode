@@ -39,9 +39,28 @@ test("manage overview and auxiliary pages reuse request-local reads", () => {
   assert.match(overviewSource, /navigation\.events\.find\(\(event\) => event\.id === id\)/);
   assert.doesNotMatch(overviewSource, /await db\.select\(\)\.from\(eventsTable\)/);
   assert.match(notificationsSource, /getManageNavigationSnapshot/);
-  assert.doesNotMatch(notificationsSource, /from\(eventsTable\)/);
+  assert.match(
+    notificationsSource,
+    /const navigation = await getManageNavigationSnapshot\(/,
+  );
+  assert.doesNotMatch(
+    notificationsSource,
+    /getEditableEventIds|events as eventsTable|eventIdsForTitles/,
+  );
   assert.match(notificationsSource, /D1_SAFE_EVENT_ID_CHUNK_SIZE = 80/);
   assert.match(notificationsSource, /chunkEventIds\(eventIds\)/);
+  assert.match(
+    notificationsSource,
+    /const accessibleEventIds = isAdmin\s*\?\s*navigation\.events\.map\(\(event\) => event\.id\)/,
+  );
+  assert.match(
+    notificationsSource,
+    /let eventIds = eventFilter[\s\S]*accessibleEventIds\.slice\(\)/,
+  );
+  assert.match(
+    notificationsSource,
+    /const eventTitleById = new Map\(\s*navigation\.events\.map\(\(event\) => \[event\.id, event\.title\]\)/,
+  );
   assert.match(
     notificationsSource,
     /candidates\s*\.sort\(\(left, right\) => right\.created_at - left\.created_at\)/,

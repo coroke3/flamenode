@@ -25,6 +25,7 @@ import {
   publicJsonBodyResponse,
   publicJsonResponse,
 } from "@/lib/api/publicApi";
+import { assertNoForbiddenKeys } from "@/lib/api/publicDto";
 
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
 
@@ -42,6 +43,14 @@ function parseRefreshMinutes(
   return Number.isInteger(parsed) && isEventExportRefreshMinutes(parsed)
     ? parsed
     : null;
+}
+
+function decodePathSegment(raw: string | undefined): string | null {
+  try {
+    return decodeURIComponent(raw ?? "").trim();
+  } catch {
+    return null;
+  }
 }
 
 function isPublicExportEvent(event: EventExportEventRow | null): boolean {
@@ -125,7 +134,7 @@ export async function GET(
   if (limited) return limited;
 
   const { id } = await params;
-  const eventId = id.trim();
+  const eventId = decodePathSegment(id);
   if (!eventId) return notFoundResponse(req);
 
   const url = new URL(req.url);
@@ -209,8 +218,21 @@ export async function GET(
   };
 
   // KVのpositive cacheを公開認可の正本にしない。payload HIT前にも必ずD1を確認する。
-  const prefetchedEvent: EventExportEventRow | null =
-    await loadEventExportEvent(db, eventId);
+  let prefetchedEvent: EventExportEventRow | null;
+  try {
+    prefetchedEvent = await loadEventExportEvent(db, eventId);
+  } catch (error) {
+    console.error("[event-export-api] event lookup failed", {
+      eventId,
+      error,
+    });
+    return publicJsonResponse(
+      req,
+      { error: "database_unavailable" },
+      "no-store",
+      503,
+    );
+  }
   const allowed = isPublicExportEvent(prefetchedEvent);
   if (!allowed) {
     if (kv) {
@@ -241,16 +263,44 @@ export async function GET(
   }
 
   const generatedAt = Math.floor(Date.now() / 1000);
-  const snapshot = await loadEventExportSnapshot(
-    db,
-    eventId,
-    prefetchedEvent,
-  );
-  const body = snapshot
-    ? JSON.stringify(
-        buildEventExportPayload(snapshot, generatedAt, updateMode),
-      )
-    : null;
+  let snapshot: Awaited<ReturnType<typeof loadEventExportSnapshot>>;
+  try {
+    snapshot = await loadEventExportSnapshot(
+      db,
+      eventId,
+      prefetchedEvent,
+    );
+  } catch (error) {
+    console.error("[event-export-api] snapshot query failed", {
+      eventId,
+      error,
+    });
+    return publicJsonResponse(
+      req,
+      { error: "database_unavailable" },
+      "no-store",
+      503,
+    );
+  }
+  let body: string | null = null;
+  if (snapshot) {
+    const payload = buildEventExportPayload(snapshot, generatedAt, updateMode);
+    try {
+      assertNoForbiddenKeys(payload);
+    } catch (error) {
+      console.error("[event-export-api] public payload boundary failed", {
+        eventId,
+        error,
+      });
+      return publicJsonResponse(
+        req,
+        { error: "public_payload_unavailable" },
+        "no-store",
+        503,
+      );
+    }
+    body = JSON.stringify(payload);
+  }
 
   if (body === null) {
     if (kv) {

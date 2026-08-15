@@ -64,6 +64,17 @@ test("イベント出力の関連行取得はD1 bind上限未満へ分割する"
 test("イベント出力はrequest境界を越えてD1 Promiseを共有しない", () => {
   assert.doesNotMatch(route, /inFlightExports|buildPayloadOnce/);
   assert.doesNotMatch(route, /new Map<string,\s*Promise/);
-  assert.match(route, /const snapshot = await loadEventExportSnapshot/);
-  assert.match(route, /const body = snapshot\s*\? JSON\.stringify/);
+  assert.match(route, /(?:const snapshot|snapshot) = await loadEventExportSnapshot/);
+  assert.match(route, /let body: string \| null = null/);
+  assert.match(route, /body = JSON\.stringify\(payload\)/);
+});
+
+test("公開exportの不正なpath/D1障害はfail-closed応答にする", () => {
+  assert.match(route, /function decodePathSegment\(/);
+  assert.match(route, /catch \{\s*return null;/);
+  assert.match(route, /if \(!eventId\) return notFoundResponse\(req\)/);
+  assert.match(route, /event lookup failed/);
+  assert.match(route, /snapshot query failed/);
+  assert.match(route, /\{ error: "database_unavailable" \}[\s\S]*?"no-store"[\s\S]*?503/);
+  assert.match(route, /assertNoForbiddenKeys\(payload\)/);
 });

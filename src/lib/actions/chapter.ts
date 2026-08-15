@@ -146,16 +146,17 @@ export async function createChapter(
     )
   `)];
   const expectedMutationChanges = [1];
-  const queue = await buildStaticRebuildQueueBatch(db, [{
-    targetType: "video",
-    targetId: data.video_id,
-    reason: "chapter_create",
-    requestedByUserId: sUser.id,
-  }]);
-  mutationStatements.push(...queue.statements);
-  expectedMutationChanges.push(...queue.expectedChanges);
-
+  let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
+  /* queue preparation belongs to the same error boundary as the mutation. */
   try {
+    queue = await buildStaticRebuildQueueBatch(db, [{
+      targetType: "video",
+      targetId: data.video_id,
+      reason: "chapter_create",
+      requestedByUserId: sUser.id,
+    }]);
+    mutationStatements.push(...queue.statements);
+    expectedMutationChanges.push(...queue.expectedChanges);
     await mutateWithAudit(db, {
       mutationStatements,
       expectedMutationChanges,
@@ -276,13 +277,14 @@ export async function updateChapter(
     visibility: parsed.data.visibility,
     updated_at: now,
   };
-  const queue = await buildStaticRebuildQueueBatch(db, [{
-    targetType: "video",
-    targetId: existing.video_id,
-    reason: "chapter_update",
-    requestedByUserId: guard.user.id,
-  }]);
+  let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
   try {
+    queue = await buildStaticRebuildQueueBatch(db, [{
+      targetType: "video",
+      targetId: existing.video_id,
+      reason: "chapter_update",
+      requestedByUserId: guard.user.id,
+    }]);
     await mutateWithAudit(db, {
       mutationStatements: [
         db.update(videoChapters).set({
@@ -356,13 +358,14 @@ export async function deleteChapter(
     return { ok: false, message: "このチャプターを削除する権限がありません。" };
   }
 
-  const queue = await buildStaticRebuildQueueBatch(db, [{
-    targetType: "video",
-    targetId: existing.video_id,
-    reason: "chapter_delete",
-    requestedByUserId: guard.user.id,
-  }]);
+  let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
   try {
+    queue = await buildStaticRebuildQueueBatch(db, [{
+      targetType: "video",
+      targetId: existing.video_id,
+      reason: "chapter_delete",
+      requestedByUserId: guard.user.id,
+    }]);
     await mutateWithAudit(db, {
       mutationStatements: [
         db.delete(videoChapters).where(expectedRowCondition({ expectedCurrent: existing })),
@@ -536,6 +539,11 @@ export async function createChaptersBulk(
       skipped += 1;
       continue;
     }
+    if (rawVisibility && rawVisibility !== "public" && rawVisibility !== "private") {
+      errors.push(`行${i + 1}: visibility は public または private を指定してください。`);
+      skipped += 1;
+      continue;
+    }
     const visibility: "public" | "private" =
       rawVisibility === "private" ? "private" : "public";
     // 5 列目 (rawMember) は旧仕様で「担当メンバー名/XID」だったが、メンバーチャプター
@@ -549,14 +557,15 @@ export async function createChaptersBulk(
   }
 
   if (inserted > 0) {
-    const queue = await buildStaticRebuildQueueBatch(db, [{
-      targetType: "video",
-      targetId: video_id,
-      reason: "chapter_bulk_create",
-      requestedByUserId: sUser.id,
-    }]);
-    enqueuedPublicReflection = queue.statements.length > 0;
+    let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
     try {
+      queue = await buildStaticRebuildQueueBatch(db, [{
+        targetType: "video",
+        targetId: video_id,
+        reason: "chapter_bulk_create",
+        requestedByUserId: sUser.id,
+      }]);
+      enqueuedPublicReflection = queue.statements.length > 0;
       await mutateWithAudit(db, {
         mutationStatements: [db.run(sql`
         INSERT INTO video_chapters (

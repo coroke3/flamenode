@@ -150,8 +150,8 @@ if (runTestWithTsx(import.meta.url)) {
             `INSERT INTO static_rebuild_queue (
               id, target_type, target_id, reason, priority, status,
               attempt_count, created_at, updated_at, lease_token,
-              requested_by_user_id, processed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+              requested_by_user_id, processed_at, next_retry_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             row.id,
@@ -165,6 +165,7 @@ if (runTestWithTsx(import.meta.url)) {
             row.leaseToken ?? null,
             row.requestedByUserId ?? null,
             row.processedAt ?? null,
+            row.nextRetryAt ?? null,
           );
       },
       readRow(id) {
@@ -351,5 +352,64 @@ if (runTestWithTsx(import.meta.url)) {
     const row = harness.readRow("queue-visibility");
     assert.equal(row.reason, "video_visibility_update");
     assert.equal(row.priority, "high");
+  });
+
+  test("public_miss は failed の retry backoff 中に pending を増やさない", async (t) => {
+    const harness = createHarness(t);
+    const now = Math.floor(Date.now() / 1000);
+    harness.insertRow({
+      id: "queue-failed-backoff",
+      status: "failed",
+      updatedAt: now - 10,
+      nextRetryAt: now + 120,
+    });
+
+    const result = await directEnqueueStaticRebuild(
+      harness.db,
+      BASE_INPUT,
+      PUBLIC_MISS_CAUSE,
+      harness.wakeOptions,
+    );
+
+    assert.deepEqual(result, {
+      ok: true,
+      action: "cooldown_skipped",
+      rebuildState: "cooldown_suppressed",
+    });
+    assert.equal(
+      harness.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM static_rebuild_queue WHERE status = 'pending'")
+        .get().count,
+      0,
+    );
+    assert.equal(harness.getWakeSendCalls(), 0);
+  });
+
+  test("manual_repair は failed の retry backoff を明示的に上書きする", async (t) => {
+    const harness = createHarness(t);
+    const now = Math.floor(Date.now() / 1000);
+    harness.insertRow({
+      id: "queue-failed-manual",
+      status: "failed",
+      updatedAt: now - 10,
+      nextRetryAt: now + 120,
+    });
+
+    const result = await directEnqueueStaticRebuild(
+      harness.db,
+      { ...BASE_INPUT, reason: "manual_repair" },
+      { kind: "manual_repair", cooldownSeconds: 300 },
+      harness.wakeOptions,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "inserted");
+    assert.equal(
+      harness.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM static_rebuild_queue WHERE status = 'pending'")
+        .get().count,
+      1,
+    );
+    assert.equal(harness.getWakeSendCalls(), 1);
   });
 }

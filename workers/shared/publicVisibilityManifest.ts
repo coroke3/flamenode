@@ -15,6 +15,10 @@ export {
 
 const MANIFEST_PUT_MAX_RETRIES = 3;
 
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
 type R2BucketLike = {
   get(key: string): Promise<{
     text(): Promise<string>;
@@ -23,7 +27,7 @@ type R2BucketLike = {
   put(
     key: string,
     value: string,
-    options?: { httpMetadata?: { cacheControl?: string }; onlyIf?: unknown },
+    options?: R2PutOptions,
   ): Promise<unknown>;
 };
 
@@ -48,7 +52,7 @@ export async function readWorkerVisibilityBlockedEntitiesManifest(
     };
   }
   const text = await object.text();
-  if (text.length > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
+  if (utf8ByteLength(text) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
     throw new Error("public_visibility_manifest_too_large");
   }
   const parsed = normalizePublicVisibilityBlockedEntitiesManifest(
@@ -67,21 +71,22 @@ export async function writeWorkerVisibilityBlockedEntitiesManifest(
 ): Promise<void> {
   const { PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY, PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES } =
     await import("../../src/lib/publicData/publicVisibilityManifestCore.ts");
-  const body = JSON.stringify(manifest);
-  if (body.length > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
-    throw new Error("public_visibility_manifest_too_large");
-  }
+  let candidate = manifest;
+  let conditionalEtag = ifMatchEtag;
   let lastError: unknown;
   for (let attempt = 0; attempt < MANIFEST_PUT_MAX_RETRIES; attempt += 1) {
     try {
-      const putOptions: {
-        httpMetadata: { cacheControl: string };
-        onlyIf?: { etagMatches: string };
-      } = {
+      const body = JSON.stringify(candidate);
+      if (utf8ByteLength(body) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
+        throw new Error("public_visibility_manifest_too_large");
+      }
+      const putOptions: R2PutOptions = {
         httpMetadata: { cacheControl: "no-store" },
       };
-      if (ifMatchEtag) {
-        putOptions.onlyIf = { etagMatches: ifMatchEtag };
+      if (conditionalEtag) {
+        putOptions.onlyIf = { etagMatches: conditionalEtag };
+      } else if (ifMatchEtag === null && conditionalEtag === null) {
+        putOptions.onlyIf = new Headers({ "If-None-Match": "*" });
       }
       const result = await bucket.put(
         PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
@@ -91,6 +96,32 @@ export async function writeWorkerVisibilityBlockedEntitiesManifest(
       // R2 resolves conditional PUT failures with null. Convert that into a
       // retryable error instead of reporting a lost CAS as a successful write.
       if (result == null) {
+        if (ifMatchEtag === null && conditionalEtag === null) {
+          const latest = await readWorkerVisibilityBlockedEntitiesManifest(bucket);
+          if (!latest.etag) {
+            throw new Error("public_visibility_manifest_precondition_failed");
+          }
+          const entityKey = (entry) =>
+            `${entry.entity_type}:${entry.entity_type === "x_user" ? entry.entity_id.toLowerCase() : entry.entity_id}`;
+          const byEntity = new Map(
+            latest.manifest.entities.map((entry) => [entityKey(entry), entry]),
+          );
+          for (const entry of candidate.entities) {
+            const key = entityKey(entry);
+            if (!byEntity.has(key)) byEntity.set(key, entry);
+          }
+          candidate = {
+            ...latest.manifest,
+            revision: Math.max(latest.manifest.revision, candidate.revision) + 1,
+            generated_at: Math.max(
+              latest.manifest.generated_at,
+              candidate.generated_at,
+            ),
+            entities: [...byEntity.values()],
+          };
+          conditionalEtag = latest.etag;
+          continue;
+        }
         throw new Error("public_visibility_manifest_precondition_failed");
       }
       return;

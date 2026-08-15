@@ -34,7 +34,13 @@ export async function GET(req: Request): Promise<Response> {
     MAX_PUBLIC_LIST_LIMIT,
   );
 
-  const db = getDatabase();
+  let db: ReturnType<typeof getDatabase>;
+  try {
+    db = getDatabase();
+  } catch (error) {
+    console.error("[public-videos] runtime bindings unavailable", error);
+    return publicServiceUnavailableResponse("database_unavailable");
+  }
   if (!db) return publicServiceUnavailableResponse("database_unavailable");
 
   const params: ListVideoParams = {
@@ -44,7 +50,16 @@ export async function GET(req: Request): Promise<Response> {
     limit,
     offset: (page - 1) * limit,
   };
-  const { items: rows, total } = await fetchPublicVideosPage(db, params);
+  let rows: Awaited<ReturnType<typeof fetchPublicVideosPage>>["items"];
+  let total: number;
+  try {
+    const result = await fetchPublicVideosPage(db, params);
+    rows = result.items;
+    total = result.total;
+  } catch (error) {
+    console.error("[public-videos] list query failed", error);
+    return publicServiceUnavailableResponse("database_unavailable");
+  }
 
   // DB側で明示列を絞り込んでいるが、ルート層でもホワイトリストを適用する。
   const items: PublicVideoDto[] = rows.map((row) => ({

@@ -7,6 +7,7 @@ import { Icon } from "@/components/ui/Icon";
 import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
 import { updateVideoMembersAdmin } from "@/lib/actions/video";
 import type { VideoActionResult } from "@/lib/video/types";
+import { redirectForGuardReason } from "@/lib/client/guardRedirect";
 import {
   VideoMembersField,
   type VideoMemberInput,
@@ -34,16 +35,36 @@ export function AdminVideoMembersForm({
     video.collaboration_type === "collab" || initialMembers.length > 0,
   );
   const [pending, startTransition] = React.useTransition();
+  const submitInFlightRef = React.useRef(false);
   const [result, setResult] = React.useState<VideoActionResult | null>(null);
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (pending || submitInFlightRef.current) return;
     const formData = new FormData(event.currentTarget);
     setResult(null);
+    submitInFlightRef.current = true;
     startTransition(async () => {
-      const next = await updateVideoMembersAdmin(formData);
-      setResult(next);
-      if (next.ok) router.refresh();
+      try {
+        const next = await updateVideoMembersAdmin(formData);
+        const currentPath =
+          typeof window === "undefined"
+            ? "/"
+            : `${window.location.pathname}${window.location.search}`;
+        if (!next.ok && redirectForGuardReason(router, next.reason, currentPath)) {
+          return;
+        }
+        setResult(next);
+        if (next.ok) router.refresh();
+      } catch (error) {
+        console.error("[AdminVideoMembersForm] submit failed", error);
+        setResult({
+          ok: false,
+          message: "保存中に予期しないエラーが発生しました。もう一度お試しください。",
+        });
+      } finally {
+        submitInFlightRef.current = false;
+      }
     });
   };
 
@@ -105,7 +126,7 @@ export function AdminVideoMembersForm({
       )}
 
       {result ? (
-        <div role="status" style={{ justifySelf: "start" }}>
+        <div role={result.ok ? "status" : "alert"} style={{ justifySelf: "start" }}>
           <p
             className={result.ok ? "fn-badge fn-badge-accent" : "fn-badge fn-badge-danger"}
             style={{ justifySelf: "start" }}

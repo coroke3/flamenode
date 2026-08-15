@@ -550,3 +550,59 @@ test("rebuild成功後にmarkDoneが常に失敗してもlease回復でdoneへ�
   assert.equal(row.error, null);
   assert.equal(row.processed_at, 100);
 });
+
+test("successful rebuild markers beyond the recovery limit are not requeued", async () => {
+  const recoveryLimit = 20;
+  const rows = Array.from(
+    { length: recoveryLimit + 1 },
+    (_, index) => ({
+      id: `marker-${index}`,
+      status: "processing",
+      attempt_count: 0,
+      error: REBUILD_SUCCEEDED_AWAITING_DONE_MARK,
+      lease_token: `token-${index}`,
+      lease_expires_at: 1,
+    }),
+  );
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            return {
+              async run() {
+                if (
+                  sql.includes("SET status = 'done'") &&
+                  sql.includes("error = ?")
+                ) {
+                  const recoverable = rows
+                    .filter((row) => row.status === "processing")
+                    .slice(0, Number(args.at(-1)));
+                  for (const row of recoverable) {
+                    row.status = "done";
+                    row.error = null;
+                    row.lease_token = null;
+                  }
+                  return { meta: { changes: recoverable.length } };
+                }
+                if (
+                  sql.includes("SET status = CASE") &&
+                  sql.includes("lease_expires_at <=")
+                ) {
+                  assert.match(sql, /error IS NULL\s+OR error <> \?/);
+                  assert.equal(args.at(-2), REBUILD_SUCCEEDED_AWAITING_DONE_MARK);
+                  return { meta: { changes: 0 } };
+                }
+                return { meta: { changes: 0 } };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+
+  await reconcileStaleQueue(env, 900);
+  assert.equal(rows.filter((row) => row.status === "done").length, recoveryLimit);
+  assert.equal(rows.filter((row) => row.status === "processing").length, 1);
+});

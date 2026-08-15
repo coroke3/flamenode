@@ -373,7 +373,9 @@ export async function applyVideoUpdatePlan(
       actorUserId: plan.operatorUserId,
     }));
   }
-  if (sections.descriptions || plan.stagePermissionDeleteEventIds) {
+  const shouldReplaceStagePermission =
+    sections.descriptions || (plan.stagePermissionDeleteEventIds?.length ?? 0) > 0;
+  if (shouldReplaceStagePermission) {
     const stagePermission = sections.descriptions
       ? plan.stagePermission
       : await readStagePermissionCustomAnswers(db, {
@@ -388,13 +390,19 @@ export async function applyVideoUpdatePlan(
       now: payload.updated_at,
       actorUserId: plan.operatorUserId,
     }));
-    appendVideoAtomicWritePlan(atomic, await buildReplaceGeneralCustomAnswersPlan(db, {
-      videoId: plan.videoId,
-      eventIds: targetEventIds,
-      drafts: plan.customAnswerDrafts,
-      now: payload.updated_at,
-      actorUserId: plan.operatorUserId,
-    }));
+    // General custom answers are only replaced when their editable section was
+    // submitted. Event-link updates without description permission must retain
+    // existing answers for the remaining events; passing the default empty
+    // draft list here would silently delete them.
+    if (sections.descriptions) {
+      appendVideoAtomicWritePlan(atomic, await buildReplaceGeneralCustomAnswersPlan(db, {
+        videoId: plan.videoId,
+        eventIds: targetEventIds,
+        drafts: plan.customAnswerDrafts,
+        now: payload.updated_at,
+        actorUserId: plan.operatorUserId,
+      }));
+    }
   }
   const queueItems: EnqueueStaticRebuildInput[] = [{
     targetType: "video",

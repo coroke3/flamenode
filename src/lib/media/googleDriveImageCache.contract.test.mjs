@@ -23,7 +23,11 @@ test("画像cacheは件数・総bytes・単一object bytesを制限する", () =
   assert.match(helperSource, /DEFAULT_MAX_CACHE_BYTES = 24 \* 1024 \* 1024/);
   assert.match(helperSource, /DEFAULT_MAX_OBJECT_BYTES = 8 \* 1024 \* 1024/);
   assert.match(helperSource, /store\.totalBytes/);
-  assert.match(helperSource, /buffer\.byteLength > options\.maxObjectBytes/);
+  // The helper now enforces the same limit in a bounded reader so that
+  // chunked upstream responses are cancelled before they are fully buffered.
+  assert.match(helperSource, /readBodyUpToLimit\([\s\S]*?maxObjectBytes/);
+  assert.match(helperSource, /buffer\.byteLength > maxObjectBytes/);
+  assert.match(helperSource, /total > maxObjectBytes/);
 });
 
 test("同一画像の同時missを集約しETagで304再検証する", () => {

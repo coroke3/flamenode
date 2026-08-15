@@ -480,13 +480,21 @@ async function resolvePublicJsonMiss<T = never>(
         strategy,
         options.targetType,
       );
+      // Public detail routes accept both the canonical video ID and its
+      // YouTube alias.  The probe resolves the latter to the canonical
+      // primary key; enqueue every miss target against that key so the worker
+      // updates the same queue/artifact row used by mutation hooks and
+      // visibility fences.  Keeping the raw alias here creates a second
+      // `video:<youtube-id>` queue row and can leave the canonical projection
+      // stale when the alias path is the first miss after a publish.
+      const canonicalTargetId = probe.canonicalTargetId;
       const missTargets = options.missRebuildTargetTypes ?? [options.targetType];
       for (const missTargetType of missTargets) {
         const enqueueResult = await directEnqueueStaticRebuild(
           db,
           {
             targetType: missTargetType,
-            targetId: options.targetId,
+            targetId: canonicalTargetId,
             reason: options.reason,
             priority,
           },

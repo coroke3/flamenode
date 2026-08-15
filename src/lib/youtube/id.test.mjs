@@ -66,6 +66,17 @@ test("extractYoutubeId: 別ドメインは null", () => {
   assert.equal(extractYoutubeId("https://vimeo.com/123456789"), null);
 });
 
+test("extractYoutubeId: YouTubeに似た別ホストや非HTTP URLは null", () => {
+  assert.equal(
+    extractYoutubeId("https://evil-youtube.com/watch?v=dQw4w9WgXcQ"),
+    null,
+  );
+  assert.equal(
+    extractYoutubeId("ftp://youtube.com/watch?v=dQw4w9WgXcQ"),
+    null,
+  );
+});
+
 test("extractYoutubeId: v= が不正 (短い) なら null", () => {
   assert.equal(
     extractYoutubeId("https://www.youtube.com/watch?v=short"),

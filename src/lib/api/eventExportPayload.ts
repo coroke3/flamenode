@@ -1,3 +1,5 @@
+import { FORBIDDEN_PUBLIC_KEYS } from "./publicDto.ts";
+
 export type EventExportUpdateMode = "realtime" | "scheduled";
 
 export interface EventExportStaffSnapshot {
@@ -117,10 +119,45 @@ function isoFromUnix(value: number | null): string | null {
   return new Date(value * 1000).toISOString();
 }
 
-function parseJson(value: string | null): unknown {
+/**
+ * `answer_json` is currently written only for checkbox questions, where the
+ * value is a JSON array of strings.  Do not deserialize an arbitrary object
+ * from a legacy/corrupted row into a public payload: custom answers are user
+ * controlled and an object could carry an internal key such as `user_id`.
+ */
+function parsePublicAnswerJson(value: string | null): string[] | null {
+  if (!value?.trim()) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Profile social links historically accepted both an object map and the
+ * newer array form.  Keep that public shape for compatibility, but remove
+ * forbidden keys recursively before serializing arbitrary legacy JSON.
+ */
+function sanitizePublicJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizePublicJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !FORBIDDEN_PUBLIC_KEYS.has(key))
+      .map(([key, nested]) => [key, sanitizePublicJson(nested)]),
+  );
+}
+
+function parsePublicJson(value: string | null): unknown {
   if (!value) return null;
   try {
-    return JSON.parse(value) as unknown;
+    return sanitizePublicJson(JSON.parse(value) as unknown);
   } catch {
     return value;
   }
@@ -128,7 +165,7 @@ function parseJson(value: string | null): unknown {
 
 function answerValue(answer: EventExportAnswerSnapshot): unknown {
   return answer.answer_json
-    ? parseJson(answer.answer_json)
+    ? parsePublicAnswerJson(answer.answer_json)
     : answer.answer_text;
 }
 
@@ -184,6 +221,14 @@ export function buildEventExportPayload(
         value: answerValue(answer),
         order: answer.sort_order,
       }));
+      const customAnswersByKey = Object.fromEntries(
+        customAnswers
+          // Question keys are admin-defined. A key such as `user_id` remains
+          // visible in the ordered list, but must not become a forbidden
+          // public object property (the route boundary checks object keys).
+          .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
+          .map((answer) => [answer.key, answer.value]),
+      );
       return {
         id: video.id,
         title: video.title,
@@ -214,7 +259,7 @@ export function buildEventExportPayload(
           icon_url: video.creator_icon_url,
           profile_text: video.creator_profile_text,
           youtube_channel_url: video.creator_youtube_channel_url,
-          other_social_links: parseJson(video.creator_other_social_links),
+          other_social_links: parsePublicJson(video.creator_other_social_links),
         },
         music: {
           title: video.music,
@@ -262,9 +307,7 @@ export function buildEventExportPayload(
           order: software.order_index,
         })),
         custom_answers: customAnswers,
-        custom_answers_by_key: Object.fromEntries(
-          customAnswers.map((answer) => [answer.key, answer.value]),
-        ),
+        custom_answers_by_key: customAnswersByKey,
       };
     }),
     meta: {

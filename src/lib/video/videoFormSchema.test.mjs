@@ -41,6 +41,21 @@ test("parseVideoForm accepts valid youtube_url when youtubeRequired is false", (
   assert.equal(result.ok, true);
 });
 
+test("parseVideoForm accepts a bare YouTube video ID", () => {
+  const result = parseVideoForm({ ...base, youtube_url: "dQw4w9WgXcQ" });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.youtube_url, "dQw4w9WgXcQ");
+});
+
+test("parseVideoForm accepts a bare YouTube video ID for optional updates", () => {
+  const result = parseVideoForm(
+    { ...base, youtube_url: " dQw4w9WgXcQ " },
+    { youtubeRequired: false },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.youtube_url, "dQw4w9WgXcQ");
+});
+
 test("parseVideoForm accepts valid youtube_url by default", () => {
   const result = parseVideoForm({
     ...base,
