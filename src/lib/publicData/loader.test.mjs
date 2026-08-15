@@ -108,6 +108,40 @@ test("loadPublicJson applies empty collection semantic miss on cache and R2 hits
   );
 });
 
+test("detail/event/user/rules loaders use R2-first freshness with bounded stale fallback", () => {
+  assert.match(loaderSource, /cacheMode\?: PublicJsonCacheMode/);
+  assert.match(loaderSource, /cacheMode === "bypass"/);
+  assert.match(loaderSource, /cacheMode !== "bypass" && options\.cacheTtlSeconds/);
+  assert.match(loaderSource, /staleCacheMaxAgeSec/);
+  const detailBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticEventDetail"),
+    loaderSource.indexOf("export async function loadStaticEventsIndex"),
+  );
+  assert.match(detailBlock, /cacheMode: "r2_first"/);
+  assert.match(loaderSource, /missOptions\.cacheMode !== "bypass"/);
+  const rulesBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticRulesPage"),
+    loaderSource.indexOf("export async function loadStaticTopPage"),
+  );
+  assert.match(rulesBlock, /cacheMode: "r2_first"/);
+  assert.match(rulesBlock, /allowStaleCacheFallback: false/);
+  const userBlock = loaderSource.slice(
+    loaderSource.indexOf("export const loadStaticUserProfile"),
+    loaderSource.indexOf("export type {\n  StaticEventDetail"),
+  );
+  assert.match(userBlock, /cacheMode: "r2_first"/);
+  const videoBlock = loaderSource.slice(
+    loaderSource.indexOf("export const loadStaticVideoDetail"),
+  );
+  assert.match(videoBlock, /cacheMode: "r2_first"/);
+});
+
+test("visibility manifest failure is unavailable only in enforce mode", () => {
+  assert.match(loaderSource, /manifest_read_failed/);
+  assert.match(loaderSource, /mode === "enforce"/);
+  assert.match(loaderSource, /public_visibility_manifest_unavailable/);
+});
+
 test("events index, top, and recommend loaders wire empty collection semantic miss", () => {
   const eventsIndexBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticEventsIndex"),
@@ -255,7 +289,7 @@ test("loadPublicEventVideosPage は event_base R2 を優先しヒット時に ge
   assert.match(eventListBlock, /shouldEnqueueEventBaseListHeal/);
   assert.match(eventListBlock, /eventListPayloadSupportsSort/);
   assert.match(eventListBlock, /pageEventBaseVideos/);
-  assert.match(eventListBlock, /isLoaderTargetVisibilityBlocked\("event_base"/);
+  assert.match(eventListBlock, /resolvePublicVisibilityGuard\("event_base"/);
   assert.match(eventListBlock, /fetchDegradedEventListPage/);
   const staticHitBranch = eventListBlock.slice(
     eventListBlock.indexOf("const tryStaticEventList"),

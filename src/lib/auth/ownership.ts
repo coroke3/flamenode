@@ -26,7 +26,7 @@ import {
   sectionAllowedByGeneralFields,
   type GeneralEditableFieldKey,
 } from "@/lib/video/generalEditPermissions";
-import { getApprovedLinkedXUserIds } from "./approvedX";
+import { approvedXIdsWhere, getApprovedLinkedXUserIds } from "./approvedX";
 import { expandPermissionAliases } from "./permissions/aliases";
 import {
   getManageStaffRole,
@@ -89,7 +89,7 @@ export async function resolveVideoOwnership(args: {
         and(
           eq(videoMembers.video_id, args.video.id),
           eq(videoMembers.can_edit, 1),
-          inArray(videoMembers.x_user_id, Array.from(approved)),
+          approvedXIdsWhere(videoMembers.x_user_id, Array.from(approved)),
         )!,
       )
       .limit(1);
@@ -123,10 +123,10 @@ export async function getEditableEventIds(
     .where(
       candidateIds
         ? and(
-            inArray(eventStaff.x_user_id, xIds),
+            approvedXIdsWhere(eventStaff.x_user_id, xIds),
             inArray(eventStaff.event_id, candidateIds),
           )!
-        : inArray(eventStaff.x_user_id, xIds),
+        : approvedXIdsWhere(eventStaff.x_user_id, xIds),
     );
   const rows = candidateIds
     ? await rowsQuery.limit(candidateIds.length * 4 + 1)
@@ -153,7 +153,7 @@ export async function getCollaboratorPermissions(
     .where(
       and(
         eq(eventStaff.event_id, eventId),
-        inArray(eventStaff.x_user_id, xIds),
+        approvedXIdsWhere(eventStaff.x_user_id, xIds),
       )!,
     );
   const keys = new Set<string>();
@@ -197,7 +197,7 @@ export async function resolveXIdLinkRequestAuthorization(
   const rows = await db
     .select({ x_user_id: eventStaff.x_user_id, ...staffPermissionSelect })
     .from(eventStaff)
-    .where(inArray(eventStaff.x_user_id, xIds));
+    .where(approvedXIdsWhere(eventStaff.x_user_id, xIds));
   const authorizedRows = rows.filter((row) =>
     resolveStaffPermissionKeys(row).has("xid.link_requests"),
   );
@@ -247,7 +247,7 @@ export async function getManageStaffRolesForEvents(
     .where(
       and(
         inArray(eventStaff.event_id, eventIds),
-        inArray(eventStaff.x_user_id, xIds),
+        approvedXIdsWhere(eventStaff.x_user_id, xIds),
       )!,
     );
   for (const row of rows) {
@@ -275,7 +275,7 @@ export async function getManageStaffXUserIds(
     .where(
       and(
         inArray(eventStaff.event_id, eventIds),
-        inArray(eventStaff.x_user_id, xIds),
+        approvedXIdsWhere(eventStaff.x_user_id, xIds),
       )!,
     );
   return Array.from(
@@ -324,7 +324,7 @@ export async function resolveEventEditAuthorization(
     .where(
       and(
         eq(eventStaff.event_id, eventId),
-        inArray(eventStaff.x_user_id, xIds),
+        approvedXIdsWhere(eventStaff.x_user_id, xIds),
       )!,
     );
   const authorizedRows = rows.filter((row) =>
@@ -404,7 +404,7 @@ export async function resolveEventStaffVideoPermissionGrant(args: {
     .where(
       and(
         inArray(eventStaff.event_id, eventIds),
-        inArray(eventStaff.x_user_id, Array.from(approved)),
+        approvedXIdsWhere(eventStaff.x_user_id, Array.from(approved)),
       )!,
     );
 
@@ -478,9 +478,16 @@ export async function canEditVideo(args: {
   requiredKey: VideoEditSectionKey;
   privilegeMode: CanEditVideoPrivilegeMode;
   generalFields?: Set<GeneralEditableFieldKey>;
+  /**
+   * Reuse a caller's already-loaded linked+approved X IDs. Public viewers
+   * resolve this once for the private chapter overlay; omitting the value
+   * preserves the existing query behavior for all other callers.
+   */
+  approvedXUserIds?: readonly string[];
 }): Promise<boolean> {
   const { db, user, video, requiredKey, privilegeMode, generalFields } = args;
-  const approved = await getApprovedXIds(db, user.id);
+  const approved =
+    args.approvedXUserIds ?? (await getApprovedXIds(db, user.id));
   const ownership = await resolveVideoOwnership({
     db,
     userId: user.id,

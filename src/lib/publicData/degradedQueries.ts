@@ -26,6 +26,7 @@ import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { recordPublicD1Query } from "@/lib/observability/publicRequestMetrics";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 import { activeEventWhere } from "@/lib/utils/eventStatus";
+import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
 import { pickHeroEvents } from "@/lib/utils/pickHeroEvents";
 import { buildDegradedUsersPageSql, DEGRADED_USERS_PAGE_SIZE } from "./degradedUsersPageSql";
 import { buildHeroEventSlotStatsSql } from "./heroEventSlotStatsSql";
@@ -574,7 +575,7 @@ export async function fetchDegradedVideoDetailPayload(
       )!,
     )
     .orderBy(videoMembers.order_index)
-    .limit(50);
+    .limit(MAX_VIDEO_MEMBERS);
 
   noteQuery();
   const publicChapters = await db

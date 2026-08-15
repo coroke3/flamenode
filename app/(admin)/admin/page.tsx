@@ -44,6 +44,14 @@ export default async function AdminTopPage(): Promise<React.ReactElement> {
       tone: counts.pendingVideos > 0 ? "warn" : "neutral",
     },
     {
+      label: "未提出予約枠",
+      value: counts.reservedOpenSlots,
+      href: "/admin/events",
+      description: "受付中イベントの reserved",
+      icon: "calendar",
+      tone: counts.reservedOpenSlots > 0 ? "warn" : "neutral",
+    },
+    {
       label: "X ID連携申請",
       value: counts.xLinkRequests,
       href: "/admin/x-link-requests",

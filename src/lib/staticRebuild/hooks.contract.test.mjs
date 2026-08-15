@@ -37,7 +37,7 @@ test("動画ステータス変更batchの最悪ケースはMAX_STATIC_REBUILD_BA
     MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS;
   const worstCase = Math.max(withoutCreator, withCreator);
   assert.equal(worstCase, 21);
-  assert.equal(MAX_STATIC_REBUILD_BATCH_TARGETS, 24);
+  assert.ok(MAX_STATIC_REBUILD_BATCH_TARGETS >= 205);
   assert.ok(worstCase <= MAX_STATIC_REBUILD_BATCH_TARGETS);
   assert.ok(MAX_STATIC_REBUILD_BATCH_TARGETS > 16);
 });
@@ -76,6 +76,7 @@ test("event visibility/update refreshes list projections that embed the event ti
 });
 test("X ID公開プロフィール更新は user と users_index をenqueueする", () => {
   assert.match(hooks, /export async function enqueueAfterXUserPublicUpdate/);
+  assert.match(hooks, /export function buildAfterXUserPublicUpdateQueueBatch/);
   assert.match(
     hooks,
     /enqueueAfterXUserPublicUpdate[\s\S]*targetType: "user"[\s\S]*usersIndexTarget\(opts\.reason\)/,
@@ -83,21 +84,21 @@ test("X ID公開プロフィール更新は user と users_index をenqueueす�
   assert.match(hooks, /await enqueueStaticRebuildMany\(db, \[/);
 });
 test("本人X IDプロフィール・アイコン更新成功時に静的再生成フックを呼ぶ", () => {
-  assert.match(xid, /enqueueAfterXUserPublicUpdate/);
+  assert.match(xid, /buildAfterXUserPublicUpdateQueueBatch/);
   assert.match(
     xid,
-    /updateXIdProfile[\s\S]*enqueueAfterXUserPublicUpdate\(db, \{[\s\S]*reason: "x_user_profile_update"/,
+    /updateXIdProfile[\s\S]*buildAfterXUserPublicUpdateQueueBatch\(db, \{[\s\S]*reason: "x_user_profile_update"/,
   );
   assert.match(
     xid,
-    /setXIdIcon[\s\S]*enqueueAfterXUserPublicUpdate\(db, \{[\s\S]*reason: "x_user_icon_update"/,
+    /setXIdIcon[\s\S]*buildAfterXUserPublicUpdateQueueBatch\(db, \{[\s\S]*reason: "x_user_icon_update"/,
   );
   assert.match(
     xid,
-    /uploadXIdIcon[\s\S]*enqueueAfterXUserPublicUpdate\(db, \{[\s\S]*reason: "x_user_icon_update"/,
+    /uploadXIdIcon[\s\S]*buildAfterXUserPublicUpdateQueueBatch\(db, \{[\s\S]*reason: "x_user_icon_update"/,
     );
   assert.equal(
-    (xid.match(/await enqueueAfterXUserPublicUpdate\(/g) ?? []).length,
+    (xid.match(/const queue = await buildAfterXUserPublicUpdateQueueBatch\(/g) ?? []).length,
     3,
   );
 });

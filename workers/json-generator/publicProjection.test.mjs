@@ -90,6 +90,34 @@ function fixture() {
       4,
       123,
     );
+  const insertChapter = sqlite.prepare(
+    `INSERT INTO video_chapters (
+       id, video_id, x_user_id, chapter_time, chapter_label,
+       note, visibility, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  insertChapter.run(
+    "chapter-public",
+    "video-1",
+    "creator",
+    10,
+    "Public chapter",
+    null,
+    "public",
+    123,
+    123,
+  );
+  insertChapter.run(
+    "chapter-private",
+    "video-1",
+    "creator",
+    20,
+    "Private chapter",
+    "private note",
+    "private",
+    123,
+    123,
+  );
   const insertVideoEvent = sqlite.prepare(
     `INSERT INTO video_events (video_id, event_id) VALUES (?, ?)`,
   );
@@ -133,6 +161,11 @@ test("public static artifacts exclude private event identifiers and titles", asy
     assert.equal(video.video.music_reference_url, "https://example.com/music");
     assert.ok(Array.isArray(video.software_labels));
     assert.ok(Array.isArray(video.public_chapters));
+    assert.deepEqual(
+      video.public_chapters.map((chapter) => chapter.id),
+      ["chapter-public"],
+    );
+    assert.doesNotMatch(JSON.stringify(video), /Private chapter/);
     assert.ok(Array.isArray(video.member_chapters));
     assert.equal(video.public_events.length, 1);
     assert.equal(video.public_events[0].title, "Public Event");

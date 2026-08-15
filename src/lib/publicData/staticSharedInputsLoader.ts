@@ -44,6 +44,11 @@ import {
 import { normalizeXId } from "../utils/xid";
 
 export type StaticJsonLoadStatus = "fresh" | "stale" | "unavailable";
+export type StaticJsonCacheMode =
+  | "default"
+  | "cache_first"
+  | "r2_first"
+  | "bypass";
 
 export type StaticJsonLoadResult<T> = {
   status: StaticJsonLoadStatus;
@@ -76,6 +81,8 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   normalize: (value: unknown) => T | null;
   maxStaleAgeSec: number;
   cacheTtlSeconds?: number;
+  /** `r2_first` reads R2 first and permits bounded stale Cache fallback. */
+  cacheMode?: StaticJsonCacheMode;
   nowSec?: number;
   /** fresh Cache hit 時も R2 を読み、generated_at が新しければ R2 を採用する。 */
   getGeneratedAt?: (value: T) => number;
@@ -83,10 +90,14 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const cacheTtl = args.cacheTtlSeconds ?? 300;
 
-  const freshCached = coercePublicJsonCacheEnvelope(
-    await readPublicJsonCache<unknown>(args.key),
-    now,
-  );
+  const cacheMode = args.cacheMode ?? "cache_first";
+  const cacheFirst = cacheMode === "default" || cacheMode === "cache_first";
+  const freshCached = cacheFirst
+    ? coercePublicJsonCacheEnvelope(
+        await readPublicJsonCache<unknown>(args.key),
+        now,
+      )
+    : null;
   if (freshCached) {
     const age = now - freshCached.stored_at;
     if (age >= 0 && age <= cacheTtl) {
@@ -100,11 +111,13 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
               const cacheGeneratedAt = args.getGeneratedAt(normalized);
               const r2GeneratedAt = args.getGeneratedAt(r2Normalized);
               if (r2GeneratedAt > cacheGeneratedAt) {
-                writePublicJsonCacheBestEffort(
-                  args.key,
-                  { payload: r2Payload, stored_at: now },
-                  Math.max(cacheTtl, args.maxStaleAgeSec),
-                );
+                if (cacheMode !== "bypass") {
+                  writePublicJsonCacheBestEffort(
+                    args.key,
+                    { payload: r2Payload, stored_at: now },
+                    Math.max(cacheTtl, args.maxStaleAgeSec),
+                  );
+                }
                 return { status: "fresh", value: r2Normalized };
               }
             }
@@ -119,16 +132,33 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   if (payload !== null) {
     const normalized = args.normalize(payload);
     if (normalized !== null) {
-      writePublicJsonCacheBestEffort(
-        args.key,
-        { payload, stored_at: now },
-        Math.max(cacheTtl, args.maxStaleAgeSec),
-      );
+      if (cacheMode !== "bypass") {
+        writePublicJsonCacheBestEffort(
+          args.key,
+          { payload, stored_at: now },
+          Math.max(cacheTtl, args.maxStaleAgeSec),
+        );
+      }
       return { status: "fresh", value: normalized };
     }
   }
 
-  if (freshCached) {
+  if (cacheMode === "r2_first") {
+    const staleCached = freshCached ?? coercePublicJsonCacheEnvelope(
+      await readPublicJsonCache<unknown>(args.key),
+      now,
+      { requireStoredAt: true },
+    );
+    if (staleCached) {
+      const age = now - staleCached.stored_at;
+      if (age >= 0 && age <= args.maxStaleAgeSec) {
+        const normalized = args.normalize(staleCached.payload);
+        if (normalized !== null) {
+          return { status: "stale", value: normalized };
+        }
+      }
+    }
+  } else if (freshCached) {
     const age = now - freshCached.stored_at;
     if (age >= 0 && age <= args.maxStaleAgeSec) {
       const normalized = args.normalize(freshCached.payload);

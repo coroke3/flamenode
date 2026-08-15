@@ -33,11 +33,16 @@ export function unwrapPublicJsonCachePayload<T>(value: unknown): T | null {
 export function coercePublicJsonCacheEnvelope(
   value: unknown,
   fallbackStoredAt: number,
+  options?: { requireStoredAt?: boolean },
 ): PublicJsonCacheEnvelope | null {
   if (value == null) return null;
   if (isPublicJsonCacheEnvelope(value)) {
     return value;
   }
+  // A legacy raw payload has no age metadata. It may still be used by the
+  // cache-first compatibility path, but it cannot satisfy a bounded stale
+  // fallback after an R2 miss.
+  if (options?.requireStoredAt) return null;
   return { payload: value, stored_at: fallbackStoredAt };
 }
 

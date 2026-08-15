@@ -28,7 +28,7 @@ test("公開詳細ページは内容に対応するSEO画像を使う", () => {
     /image: metadataYoutubeId[\s\S]*?youtubeThumbUrl\(metadataYoutubeId, "maxresdefault"\)/,
   );
   assert.match(videoPage, /ogType: "video\.other"/);
-  assert.match(userPage, /const metadataIcon = resolveProjectedIcon/);
+  assert.match(userPage, /const metadataIcon[\s\S]{0,500}resolveProjectedIcon\(\{/);
   assert.match(userPage, /image: cachedGoogleImageUrl\(metadataIcon\)/);
   assert.match(userPage, /"@type": "Person"/);
   assert.match(eventPage, /event\.img_url \?\? event\.icon_url/);

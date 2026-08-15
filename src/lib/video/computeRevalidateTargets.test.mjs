@@ -17,7 +17,7 @@ test("computeVideoRevalidatePaths includes old and new youtube paths when id cha
   assert.ok(paths.includes("/new456"));
 });
 
-test("computeStaticRebuildFlags marks creator aggregation when members section touched", () => {
+test("computeStaticRebuildFlags marks creator aggregation only for a member X ID set change", () => {
   const flags = computeStaticRebuildFlags({
     canEditIdentity: false,
     allowSubmitterChange: false,
@@ -25,10 +25,25 @@ test("computeStaticRebuildFlags marks creator aggregation when members section t
     iconChanged: false,
     canEditPrimaryEvent: false,
     hasEventIdsField: false,
-    membersSectionTouched: true,
+    memberAggregationChanged: true,
   });
   assert.equal(flags.creatorAggregationChanged, true);
-  assert.equal(flags.randomPoolCardChanged, true);
+  assert.equal(flags.randomPoolCardChanged, false);
+  assert.equal(flags.eventProjectionChanged, false);
+});
+
+test("member field-only edits do not mark creator aggregation or card fan-out", () => {
+  const flags = computeStaticRebuildFlags({
+    canEditIdentity: false,
+    allowSubmitterChange: false,
+    displayNameChanged: false,
+    iconChanged: false,
+    canEditPrimaryEvent: false,
+    hasEventIdsField: false,
+    memberAggregationChanged: false,
+  });
+  assert.equal(flags.creatorAggregationChanged, false);
+  assert.equal(flags.randomPoolCardChanged, false);
   assert.equal(flags.eventProjectionChanged, false);
 });
 

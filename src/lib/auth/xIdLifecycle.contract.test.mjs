@@ -86,18 +86,18 @@ test("imported 等の非 approved X ID はプロフィール・アイコン更�
 
 test("本人X IDプロフィール・アイコン更新はmutation成功後に静的queueへenqueueする", () => {
   const source = read("../actions/xid.ts");
-  assert.match(source, /enqueueAfterXUserPublicUpdate/);
+  assert.match(source, /buildAfterXUserPublicUpdateQueueBatch/);
   assert.match(
     source,
-    /updateXIdProfile[\s\S]*await mutateWithAudit\(db,[\s\S]*await enqueueAfterXUserPublicUpdate/,
+    /updateXIdProfile[\s\S]*buildAfterXUserPublicUpdateQueueBatch[\s\S]*mutateWithAudit\(db,[\s\S]*\.\.\.queue\.statements/,
   );
   assert.match(
     source,
-    /setXIdIcon[\s\S]*await mutateWithAudit\(db,[\s\S]*await enqueueAfterXUserPublicUpdate/,
+    /setXIdIcon[\s\S]*buildAfterXUserPublicUpdateQueueBatch[\s\S]*mutateWithAudit\(db,[\s\S]*\.\.\.queue\.statements/,
   );
   assert.match(
     source,
-    /uploadXIdIcon[\s\S]*await mutateWithAudit\(db,[\s\S]*await enqueueAfterXUserPublicUpdate/,
+    /uploadXIdIcon[\s\S]*buildAfterXUserPublicUpdateQueueBatch[\s\S]*mutateWithAudit\(db,[\s\S]*\.\.\.queue\.statements/,
   );
 });
 

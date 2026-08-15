@@ -365,6 +365,35 @@ export async function enqueueAfterXUserPublicUpdate(
   ]);
 }
 
+/**
+ * Xプロフィール/アイコンのD1更新と同じmutateWithAudit batchへ含める
+ * 静的投影キューを構築する。呼び出し側は statements/expectedChanges を
+ * 本体mutationへ追加し、staticRebuildWakeSourceも渡すこと。
+ */
+export function buildAfterXUserPublicUpdateQueueBatch(
+  db: DB,
+  opts: {
+    xUserId: string;
+    reason: string;
+    requestedByUserId?: string | null;
+  },
+): Promise<StaticRebuildQueueBatch> {
+  return buildStaticRebuildQueueBatch(db, [
+    {
+      targetType: "user",
+      targetId: opts.xUserId,
+      reason: opts.reason,
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "users_index",
+      targetId: "global",
+      reason: opts.reason,
+      requestedByUserId: opts.requestedByUserId,
+    },
+  ]);
+}
+
 export function buildAfterVideoStatusChangeQueueBatch(
   db: DB,
   opts: {

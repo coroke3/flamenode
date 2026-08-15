@@ -164,7 +164,7 @@ if (runTestWithTsx(import.meta.url)) {
     sqlite.close();
   });
 
-  test("Case D: 24 targetは3 UPSERT文でbind上限内", async () => {
+  test("Case D: 256 targetは50行chunkの6 UPSERT文でbind上限内", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
     const items = Array.from({ length: MAX_STATIC_REBUILD_BATCH_TARGETS }, (_, index) => ({
@@ -174,8 +174,8 @@ if (runTestWithTsx(import.meta.url)) {
     }));
     const db = createDb(sqlite);
     const batch = await buildStaticRebuildQueueBatch(db, items);
-    assert.equal(batch.statements.length, 3);
-    assert.deepEqual(batch.expectedChanges, [10, 10, 4]);
+    assert.equal(batch.statements.length, 6);
+    assert.deepEqual(batch.expectedChanges, [50, 50, 50, 50, 50, 6]);
     for (const statement of batch.statements) {
       const { params } = sqlFromStatement(statement);
       assert.ok(params.length <= 100);
@@ -184,7 +184,7 @@ if (runTestWithTsx(import.meta.url)) {
     const count = sqlite
       .prepare("SELECT COUNT(*) AS count FROM static_rebuild_queue")
       .get().count;
-    assert.equal(count, 24);
+    assert.equal(count, MAX_STATIC_REBUILD_BATCH_TARGETS);
     sqlite.close();
   });
 

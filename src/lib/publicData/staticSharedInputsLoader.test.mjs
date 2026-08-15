@@ -82,7 +82,7 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
 
   mock.module("./publicCache.ts", {
     namedExports: {
-      coercePublicJsonCacheEnvelope(value, fallbackStoredAt) {
+      coercePublicJsonCacheEnvelope(value, fallbackStoredAt, options) {
         if (value == null) return null;
         if (
           typeof value === "object" &&
@@ -91,6 +91,7 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
         ) {
           return value;
         }
+        if (options?.requireStoredAt) return null;
         return { payload: value, stored_at: fallbackStoredAt };
       },
       async readPublicJsonCache(key) {
@@ -170,5 +171,78 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     assert.equal(result.status, "fresh");
     assert.equal(result.value?.generatedAt, 200);
     assert.equal(cacheWrites.length, 0);
+  });
+
+  test("loadStaticJsonFreshStaleUnavailable bypass skips cache read/write", async () => {
+    resetHarness();
+    const now = 1_700_000_000;
+    cacheStore.set(TOP_SLOT_STATS_OBJECT_KEY, {
+      payload: slotStatsPayload(300),
+      stored_at: now - 60,
+    });
+    r2Objects.set(TOP_SLOT_STATS_OBJECT_KEY, slotStatsPayload(100));
+
+    const result = await loadStaticJsonFreshStaleUnavailable({
+      key: TOP_SLOT_STATS_OBJECT_KEY,
+      normalize: normalizeStaticTopSlotStats,
+      maxStaleAgeSec: 1200,
+      cacheTtlSeconds: 600,
+      cacheMode: "bypass",
+      nowSec: now,
+      getGeneratedAt: (value) => value.generatedAt,
+    });
+
+    assert.equal(result.status, "fresh");
+    assert.equal(result.value?.generatedAt, 100);
+    assert.equal(cacheWrites.length, 0);
+  });
+
+  test("loadStaticJsonFreshStaleUnavailable r2_first uses bounded stale cache only after R2 miss", async () => {
+    resetHarness();
+    const now = 1_700_000_000;
+    cacheStore.set(TOP_SLOT_STATS_OBJECT_KEY, {
+      payload: slotStatsPayload(300),
+      stored_at: now - 600,
+    });
+
+    const stale = await loadStaticJsonFreshStaleUnavailable({
+      key: TOP_SLOT_STATS_OBJECT_KEY,
+      normalize: normalizeStaticTopSlotStats,
+      maxStaleAgeSec: 1200,
+      cacheTtlSeconds: 600,
+      cacheMode: "r2_first",
+      nowSec: now,
+      getGeneratedAt: (value) => value.generatedAt,
+    });
+    assert.equal(stale.status, "stale");
+    assert.equal(stale.value?.generatedAt, 300);
+
+    cacheStore.set(TOP_SLOT_STATS_OBJECT_KEY, {
+      payload: slotStatsPayload(300),
+      stored_at: now - 1201,
+    });
+    const unavailable = await loadStaticJsonFreshStaleUnavailable({
+      key: TOP_SLOT_STATS_OBJECT_KEY,
+      normalize: normalizeStaticTopSlotStats,
+      maxStaleAgeSec: 1200,
+      cacheTtlSeconds: 600,
+      cacheMode: "r2_first",
+      nowSec: now,
+      getGeneratedAt: (value) => value.generatedAt,
+    });
+    assert.equal(unavailable.status, "unavailable");
+    assert.equal(unavailable.value, null);
+
+    cacheStore.set(TOP_SLOT_STATS_OBJECT_KEY, slotStatsPayload(300));
+    const legacyUnavailable = await loadStaticJsonFreshStaleUnavailable({
+      key: TOP_SLOT_STATS_OBJECT_KEY,
+      normalize: normalizeStaticTopSlotStats,
+      maxStaleAgeSec: 1200,
+      cacheTtlSeconds: 600,
+      cacheMode: "r2_first",
+      nowSec: now,
+      getGeneratedAt: (value) => value.generatedAt,
+    });
+    assert.equal(legacyUnavailable.status, "unavailable");
   });
 }

@@ -40,10 +40,16 @@ test("video visibility fence reason is never hidden by queue metadata merging", 
 
 test("atomic builder は latest done skip を持たない", async () => {
   const source = await readFile(new URL("./enqueue.ts", import.meta.url), "utf8");
-  const batchFn = source.slice(
-    source.indexOf("export async function buildStaticRebuildQueueBatch"),
-    source.indexOf("async function shouldSkipRecentEnqueue"),
+  const batchStart = source.indexOf(
+    "export async function buildStaticRebuildQueueBatch",
   );
+  const batchEnd = source.indexOf(
+    "export async function enqueueStaticRebuild(",
+    batchStart,
+  );
+  assert.ok(batchStart >= 0);
+  assert.ok(batchEnd > batchStart);
+  const batchFn = source.slice(batchStart, batchEnd);
   assert.doesNotMatch(batchFn, /shouldSkipRecentRow/);
   assert.doesNotMatch(batchFn, /latestRows/);
   assert.doesNotMatch(batchFn, /latest_static_rebuild_queue/);

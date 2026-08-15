@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { staticRebuildQueue } from "@/lib/db/schema";
@@ -59,13 +59,18 @@ function dedupeStaticRebuildInputs(
   return Array.from(byKey.values());
 }
 
-const PUBLIC_MISS_COOLDOWN_SEC = 5 * 60;
-const DEFAULT_DONE_COOLDOWN_SEC = 60;
 const ENQUEUE_MANY_CONCURRENCY = 4;
 const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
-export const MAX_STATIC_REBUILD_BATCH_TARGETS = 24;
+// A full 100-member replacement can invalidate both old and new user pages
+// (up to 200 user targets) plus the video/index/event projections. Keep the
+// complete fanout in one atomic queue batch instead of dropping user/global
+// targets when the request crosses the legacy 24-target cap.
+export const MAX_STATIC_REBUILD_BATCH_TARGETS = 256;
 export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0;
-export const STATIC_REBUILD_BULK_UPSERT_ROWS = 10;
+// JSON1 carries each chunk as one bind, so 50 rows keeps the resulting
+// statement/assertion count within the D1 50-query atomic budget for the
+// largest member fanout while remaining below D1's 100-bind ceiling.
+export const STATIC_REBUILD_BULK_UPSERT_ROWS = 50;
 
 export type StaticRebuildQueueBatch = {
   statements: BatchItem<"sqlite">[];
@@ -163,55 +168,16 @@ export async function buildStaticRebuildQueueBatch(
   };
 }
 
-async function shouldSkipRecentEnqueue(
-  db: DB,
-  input: EnqueueStaticRebuildInput,
-  now: number,
-): Promise<boolean> {
-  const latest = (
-    await db
-      .select()
-      .from(staticRebuildQueue)
-      .where(
-        and(
-          eq(staticRebuildQueue.target_type, input.targetType),
-          eq(staticRebuildQueue.target_id, input.targetId),
-        )!,
-      )
-      .orderBy(desc(staticRebuildQueue.updated_at))
-      .limit(1)
-  )[0];
-
-  return shouldSkipRecentRow(input, latest, now);
-}
-
-function shouldSkipRecentRow(
-  input: EnqueueStaticRebuildInput,
-  latest: typeof staticRebuildQueue.$inferSelect | undefined,
-  now: number,
-): boolean {
-  if (!latest) return false;
-  if (latest.status === "pending" || latest.status === "processing") {
-    return false;
-  }
-
-  if (latest.status === "failed") {
-    const retryAt = latest.next_retry_at ?? 0;
-    return retryAt > now;
-  }
-
-  if (latest.status !== "done") return false;
-
-  const processedAt = latest.processed_at ?? latest.updated_at ?? 0;
-  const cooldown = input.reason.startsWith("public_")
-    ? PUBLIC_MISS_COOLDOWN_SEC
-    : DEFAULT_DONE_COOLDOWN_SEC;
-  return processedAt > 0 && now - processedAt < cooldown;
-}
-
 /**
  * 静的 JSON 再生成キューへ投入。保存処理は成功させ、enqueue 失敗は warn のみ。
  * atomic mutation では buildStaticRebuildQueueBatch を使用すること。
+ *
+ * Mutation-derived invalidations must not be suppressed by a recent done or
+ * failed history row. The source may have changed again after that
+ * generation. Active rows are still coalesced by the partial unique index;
+ * updating their timestamp preserves the dirty-generation CAS used by the
+ * worker. Public misses, periodic refreshes, and manual repairs use
+ * directEnqueueStaticRebuild for their explicit cooldown policy.
  */
 export async function enqueueStaticRebuild(
   db: DB,
@@ -276,8 +242,6 @@ export async function enqueueStaticRebuild(
         }
         continue;
       }
-
-      if (await shouldSkipRecentEnqueue(db, target, now)) return;
 
       const insertResult = await db
         .insert(staticRebuildQueue)

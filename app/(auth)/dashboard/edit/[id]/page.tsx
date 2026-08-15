@@ -14,6 +14,7 @@ import {
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { acceptingEntriesWhere } from "@/lib/utils/eventStatus";
+import { approvedXIdsWhere } from "@/lib/auth/approvedX";
 import { VideoEditPermissionSummary } from "@/components/video/VideoEditPermissionSummary";
 import {
   computeEditPermissionSummary,
@@ -334,7 +335,7 @@ export default async function EditVideoPage({
       .where(
         and(
           eq(videoMembers.video_id, video.id),
-          inArray(videoMembers.x_user_id, approvedXIds),
+          approvedXIdsWhere(videoMembers.x_user_id, approvedXIds),
         )!,
       )
       .limit(8);

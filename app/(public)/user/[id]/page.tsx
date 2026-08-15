@@ -41,6 +41,7 @@ import {
 } from "@/lib/publicData/staticSharedInputsLoader";
 import {
   publicXIconEntriesToMap,
+  normalizePublicIconUrl,
   resolveProjectedIcon,
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
@@ -77,11 +78,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   ]);
   if (staticLoaded.data) {
     const { user } = staticLoaded.data;
-    const metadataIcon = resolveProjectedIcon({
-      xUserId: user.id,
-      iconMap: publicXIconEntriesToMap(iconMapPayload),
-      legacyIconUrl: user.icon_url,
-    });
+    const iconMap = publicXIconEntriesToMap(iconMapPayload);
+    const metadataIcon =
+      normalizePublicIconUrl(user.icon_url) ??
+      resolveProjectedIcon({ xUserId: user.id, iconMap, legacyIconUrl: null });
     return buildPageMetadata({
       title: `${user.x_name} - クリエイター`,
       description:
@@ -284,11 +284,8 @@ function StaticUserProfileView({
     return `${basePath}?${usp.toString()}`;
   };
   const profileIcon = cachedGoogleImageUrl(
-    resolveProjectedIcon({
-      xUserId: user.id,
-      iconMap,
-      legacyIconUrl: user.icon_url,
-    }),
+    normalizePublicIconUrl(user.icon_url) ??
+      resolveProjectedIcon({ xUserId: user.id, iconMap, legacyIconUrl: null }),
   );
   const profileName = user.x_name || user.id;
   const socialLinks = parseSocialLinks(user.other_social_links);

@@ -8,7 +8,7 @@ import { termsVersions, users } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
-import { enqueueStaticRebuild } from "@/lib/staticRebuild/enqueue";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   markPendingPublicReflection,
   type PendingPublicReflection,
@@ -150,21 +150,23 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
   statements.push(db.update(termsVersions).set({ status: "published", published_at: now, updated_at: now }).where(and(eq(termsVersions.id, target.id), expectedRowCondition({ expectedCurrent: snapshot(target) }))!));
   expected.push(1);
   audits.push({ table_name: "terms_versions", target_id: target.id, operation: "UPDATE" as const, before: snapshot(target), after: snapshot(targetAfter), actor_user_id: guard.user.id, retention_class: "long_audit" as const, context: "admin_terms_publish", reason: "規約版の公開", strict: true });
+  let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
   try {
-    await mutateWithAudit(db, { mutationStatements: statements, expectedMutationChanges: expected, audits });
+    queue = await buildStaticRebuildQueueBatch(db, [{
+      targetType: "rules",
+      targetId: "global",
+      reason: "admin_terms_publish",
+      priority: "high",
+      requestedByUserId: guard.user.id,
+    }]);
+    await mutateWithAudit(db, {
+      mutationStatements: [...statements, ...queue.statements],
+      expectedMutationChanges: [...expected, ...queue.expectedChanges],
+      audits,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
   } catch (error) { return mutationError(error); }
   await runRulesPostCommit("rules.publish", [
-    {
-      name: "static_rebuild",
-      run: async () => {
-        await enqueueStaticRebuild(db, {
-          targetType: "rules",
-          targetId: "global",
-          reason: "admin_terms_publish",
-          priority: "high",
-        });
-      },
-    },
     {
       name: "revalidate",
       run: () => {
@@ -239,28 +241,29 @@ export async function archiveTermsVersion(formData: FormData): Promise<RulesResu
   const before = (await db.select().from(termsVersions).where(eq(termsVersions.id, id)).limit(1))[0];
   if (!before) return { ok: false, message: "対象が見つかりません。" };
   const after = { ...before, status: "archived" as const, updated_at: Math.floor(Date.now() / 1000) };
+  let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>> | null = null;
   try {
+    if (before.status === "published") {
+      queue = await buildStaticRebuildQueueBatch(db, [{
+        targetType: "rules",
+        targetId: "global",
+        reason: "admin_terms_archive",
+        priority: "high",
+        requestedByUserId: guard.user.id,
+      }]);
+    }
+    const mutationStatements = [
+      db.update(termsVersions).set({ status: after.status, updated_at: after.updated_at }).where(and(eq(termsVersions.id, id), expectedRowCondition({ expectedCurrent: snapshot(before) }))!),
+      ...(queue?.statements ?? []),
+    ];
     await mutateWithAudit(db, {
-      mutationStatements: [db.update(termsVersions).set({ status: after.status, updated_at: after.updated_at }).where(and(eq(termsVersions.id, id), expectedRowCondition({ expectedCurrent: snapshot(before) }))!)],
-      expectedMutationChanges: [1],
+      mutationStatements,
+      expectedMutationChanges: [1, ...(queue?.expectedChanges ?? [])],
       audits: [{ table_name: "terms_versions", target_id: id, operation: "UPDATE", before: snapshot(before), after: snapshot(after), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_terms_archive", reason: "規約版のアーカイブ", strict: true }],
+      staticRebuildWakeSource: queue?.statements.length ? "admin" : undefined,
     });
   } catch (error) { return mutationError(error); }
-  const wasPublished = before.status === "published";
   await runRulesPostCommit("rules.archive", [
-    ...(wasPublished
-      ? [{
-          name: "static_rebuild",
-          run: async () => {
-            await enqueueStaticRebuild(db, {
-              targetType: "rules",
-              targetId: "global",
-              reason: "admin_terms_archive",
-              priority: "high",
-            });
-          },
-        }]
-      : []),
     {
       name: "revalidate",
       run: () => {
@@ -269,5 +272,5 @@ export async function archiveTermsVersion(formData: FormData): Promise<RulesResu
       },
     },
   ]);
-  return markPendingPublicReflection({ ok: true, id }, wasPublished);
+  return markPendingPublicReflection({ ok: true, id }, before.status === "published");
 }

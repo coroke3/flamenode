@@ -63,7 +63,11 @@ test("管理トップの集計は operational status だけを対象にする", 
   assert.match(pendingCounts, /eq\(xIdentityRequestsTable\.status, "pending"\)/);
   assert.match(pendingCounts, /inArray\(notificationOutboxTable\.status, \["failed", "processing"\]\)/);
   assert.match(pendingCounts, /eq\(videoModerationCasesTable\.status, "open"\)/);
-  assert.doesNotMatch(pendingCounts, /reservedOpenSlots/);
+  assert.match(pendingCounts, /reservedOpenSlots/);
+  assert.match(pendingCounts, /acceptingEntriesWhere\(now\)/);
+  assert.match(pendingCounts, /\.from\(slotsTable\)/);
+  assert.match(pendingCounts, /\.innerJoin\(eventsTable, eq\(eventsTable\.id, slotsTable\.event_id\)\)/);
+  assert.doesNotMatch(pendingCounts, /COALESCE\([^)]*entry_(start|end)_time/);
 });
 
 test("通知一覧は全履歴 GROUP BY を行わず最新100件と運用件数を読む", () => {

@@ -3,7 +3,9 @@ import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
+  events as eventsTable,
   notificationOutbox as notificationOutboxTable,
+  slots as slotsTable,
   videoModerationCases as videoModerationCasesTable,
   videoYoutubeMetadata as videoYoutubeMetadataTable,
   videos as videosTable,
@@ -12,9 +14,11 @@ import {
 import { readAdminSystemSettings } from "@/lib/admin/adminSystemSettings";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";
+import { acceptingEntriesWhere } from "@/lib/utils/eventStatus";
 
 export type AdminPendingCounts = {
   pendingVideos: number;
+  reservedOpenSlots: number;
   xLinkRequests: number;
   xMergeRequests: number;
   xMergeReverts: number;
@@ -27,6 +31,7 @@ export type AdminPendingCounts = {
 
 export const EMPTY_ADMIN_PENDING_COUNTS: AdminPendingCounts = {
   pendingVideos: 0,
+  reservedOpenSlots: 0,
   xLinkRequests: 0,
   xMergeRequests: 0,
   xMergeReverts: 0,
@@ -51,6 +56,7 @@ export async function fetchAdminTopSnapshot(
 
   const [
     pendingVideos,
+    reservedOpenSlots,
     xIdentityCounts,
     notificationCounts,
     youtubeFailed,
@@ -61,6 +67,16 @@ export async function fetchAdminTopSnapshot(
       .select({ c: sql<number>`COUNT(*)` })
       .from(videosTable)
       .where(eq(videosTable.visibility_status, "pending")),
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(slotsTable)
+      .innerJoin(eventsTable, eq(eventsTable.id, slotsTable.event_id))
+      .where(
+        and(
+          eq(slotsTable.status, "reserved"),
+          acceptingEntriesWhere(now),
+        )!,
+      ),
     db
       .select({
         xLinkRequests: sql<number>`SUM(CASE
@@ -124,6 +140,7 @@ export async function fetchAdminTopSnapshot(
   return {
     counts: {
       pendingVideos: Number(pendingVideos[0]?.c ?? 0),
+      reservedOpenSlots: Number(reservedOpenSlots[0]?.c ?? 0),
       xLinkRequests: Number(xIdentityCounts[0]?.xLinkRequests ?? 0),
       xMergeRequests: Number(xIdentityCounts[0]?.xMergeRequests ?? 0),
       xMergeReverts: Number(xIdentityCounts[0]?.xMergeReverts ?? 0),

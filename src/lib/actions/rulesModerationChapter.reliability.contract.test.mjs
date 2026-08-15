@@ -31,24 +31,22 @@ test("rules, moderation, chapter import unstable_rethrow", () => {
   }
 });
 
-test("rules publish keeps D1 commit separate from post-commit cache work", () => {
+test("rules publish stores the rebuild queue in the same audited D1 batch", () => {
   const publish = rules.slice(
     rules.indexOf("export async function publishTermsVersion"),
     rules.indexOf("export async function broadcastTermsReaccept"),
   );
-  assert.match(publish, /await mutateWithAudit\(db, \{ mutationStatements: statements/);
+  assert.match(publish, /await mutateWithAudit\(db, \{[\s\S]*mutationStatements: \[\.\.\.statements, \.\.\.queue\.statements\]/);
   const commitBlock = publish.match(
-    /try \{[\s\S]*?await mutateWithAudit\(db, \{ mutationStatements: statements[\s\S]*?\} catch/,
+    /try \{[\s\S]*?await mutateWithAudit\(db, \{[\s\S]*?\} catch/,
   )?.[0];
   assert.ok(commitBlock, "publish commit block must exist");
-  assert.doesNotMatch(commitBlock, /enqueueStaticRebuild/);
-  assert.match(
-    publish,
-    /runRulesPostCommit\("rules\.publish"[\s\S]*enqueueStaticRebuild/,
-    "static rebuild must run in post-commit",
-  );
+  assert.match(publish, /buildStaticRebuildQueueBatch/);
+  assert.match(commitBlock, /\.\.\.queue\.statements/);
+  assert.match(commitBlock, /expectedMutationChanges:\s*\[\.\.\.expected, \.\.\.queue\.expectedChanges\]/);
+  assert.match(commitBlock, /staticRebuildWakeSource/);
+  assert.doesNotMatch(publish, /enqueueStaticRebuild/);
   assert.match(publish, /runRulesPostCommit\("rules\.publish"/);
-  assert.match(publish, /name: "static_rebuild"/);
   assert.match(publish, /name: "revalidate"/);
 });
 
@@ -70,6 +68,14 @@ test("rules broadcast keeps the no-DM terms touch atomic", () => {
   assert.match(broadcast, /revalidatePath\("\/rules"\)/);
   assert.match(broadcast, /revalidatePath\("\/onboarding"\)/);
   assert.doesNotMatch(broadcast, /touchWarning/);
+});
+
+test("published rules archive keeps the rebuild queue atomic", () => {
+  const archive = rules.slice(rules.indexOf("export async function archiveTermsVersion"));
+  assert.match(archive, /before\.status === "published"[\s\S]*buildStaticRebuildQueueBatch/);
+  assert.match(archive, /\.\.\.\(queue\?\.statements \?\? \[\]\)/);
+  assert.match(archive, /staticRebuildWakeSource/);
+  assert.doesNotMatch(archive, /enqueueStaticRebuild/);
 });
 
 test("admin video detail surfaces moderation create failures in client form", () => {

@@ -10,6 +10,12 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { buildEventGroupChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
 import {
+  compensateEventGroupVisibilityOnD1Failure,
+  planEventGroupVisibilityFenceTransition,
+  preCommitEventGroupVisibilityTransition,
+  type EventGroupVisibilityFencePlan,
+} from "@/lib/event/eventGroupVisibilityTransition";
+import {
   markPendingPublicReflection,
   type PendingPublicReflection,
 } from "@/lib/staticRebuild/publicReflectionNotice";
@@ -109,18 +115,51 @@ async function mutateEventGroupWithQueue(
     audits: Parameters<typeof mutateWithAudit>[1]["audits"];
     reason: string;
     requestedByUserId: string;
+    groupId: string;
+    visibilityFence?: EventGroupVisibilityFencePlan;
   },
 ): Promise<boolean> {
   const queue = await buildEventGroupChangeQueueBatch(db, input);
-  await mutateWithAudit(db, {
-    mutationStatements: [...input.mutationStatements, ...queue.statements],
-    expectedMutationChanges: [
-      ...input.expectedMutationChanges,
-      ...queue.expectedChanges,
-    ],
-    audits: input.audits,
-    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
-  });
+  const fence = input.visibilityFence;
+  try {
+    if (fence?.fenceToken) {
+      await preCommitEventGroupVisibilityTransition({
+        groupId: input.groupId,
+        fenceToken: fence.fenceToken,
+        reason: input.reason,
+      });
+    }
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        ...input.mutationStatements,
+        ...(fence?.mutationStatements ?? []),
+        ...queue.statements,
+      ],
+      expectedMutationChanges: [
+        ...input.expectedMutationChanges,
+        ...(fence?.expectedMutationChanges ?? []),
+        ...queue.expectedChanges,
+      ],
+      audits: input.audits,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+  } catch (error) {
+    if (fence?.fenceToken) {
+      try {
+        await compensateEventGroupVisibilityOnD1Failure({
+          db,
+          groupId: input.groupId,
+          fenceToken: fence.fenceToken,
+        });
+      } catch (compensationError) {
+        console.warn("[event-group] visibility compensation failed", {
+          groupId: input.groupId,
+          error: compensationError,
+        });
+      }
+    }
+    throw error;
+  }
   return queue.statements.length > 0;
 }
 
@@ -161,6 +200,18 @@ export async function createEventGroup(
     created_at: now,
     updated_at: now,
   } satisfies typeof eventGroups.$inferInsert;
+  const visibilityFence =
+    data.visibility_status === "public"
+      ? await planEventGroupVisibilityFenceTransition({
+          db,
+          groupId: id,
+          previousStatus: "private",
+          nextStatus: "public",
+          actorUserId: guard.userId,
+          reason: "event_group_create",
+          now,
+        })
+      : undefined;
 
   const staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
     mutationStatements: [db.insert(eventGroups).values(createdRow)],
@@ -177,6 +228,8 @@ export async function createEventGroup(
     ],
     reason: "event_group_create",
     requestedByUserId: guard.userId,
+    groupId: id,
+    visibilityFence,
   });
 
   revalidatePath("/admin/event-groups");
@@ -227,6 +280,15 @@ export async function updateEventGroup(
     updated_at: now,
   } satisfies Partial<typeof eventGroups.$inferInsert>;
   const updatedRow = { ...existing, ...updatedValues };
+  const visibilityFence = await planEventGroupVisibilityFenceTransition({
+    db,
+    groupId: id,
+    previousStatus: existing.visibility_status,
+    nextStatus: updatedValues.visibility_status,
+    actorUserId: guard.userId,
+    reason: "event_group_visibility_update",
+    now,
+  });
 
   const staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
     mutationStatements: [
@@ -251,6 +313,8 @@ export async function updateEventGroup(
     ],
     reason: "event_group_update",
     requestedByUserId: guard.userId,
+    groupId: id,
+    visibilityFence,
   });
 
   revalidatePath("/admin/event-groups");
@@ -279,6 +343,16 @@ export async function deleteEventGroup(
     .select()
     .from(eventGroupEvents)
     .where(eq(eventGroupEvents.event_group_id, id));
+  const now = Math.floor(Date.now() / 1000);
+  const visibilityFence = await planEventGroupVisibilityFenceTransition({
+    db,
+    groupId: id,
+    previousStatus: existing.visibility_status,
+    nextStatus: "archived",
+    actorUserId: guard.userId,
+    reason: "event_group_delete",
+    now,
+  });
   await mutateEventGroupWithQueue(db, {
     mutationStatements: [
       db.delete(eventGroupEvents).where(eq(eventGroupEvents.event_group_id, id)),
@@ -309,6 +383,8 @@ export async function deleteEventGroup(
     ],
     reason: "event_group_delete",
     requestedByUserId: guard.userId,
+    groupId: id,
+    visibilityFence,
   });
 
   revalidatePath("/admin/event-groups");
@@ -378,6 +454,7 @@ export async function addEventsToGroup(input: {
     })),
     reason: "event_group_member_add",
     requestedByUserId: guard.userId,
+    groupId,
   });
 
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
@@ -446,6 +523,7 @@ export async function removeEventFromGroup(input: {
     ],
     reason: "event_group_member_remove",
     requestedByUserId: guard.userId,
+    groupId,
   });
 
   revalidatePath(`/admin/event-groups/${groupId}/edit`);

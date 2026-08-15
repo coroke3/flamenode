@@ -40,7 +40,7 @@ test("user profile metadata avoids full D1 when static is unavailable", () => {
 
 test("user profile metadata and visible avatar use the shared R2 icon projection", () => {
   assert.match(page, /loadPublicXIconMapOptional\(\[id\]\)/);
-  assert.match(page, /const metadataIcon = resolveProjectedIcon/);
+  assert.match(page, /const metadataIcon[\s\S]{0,500}resolveProjectedIcon\(\{/);
   assert.match(page, /image: cachedGoogleImageUrl\(metadataIcon\)/);
   assert.match(page, /const profileIcon = cachedGoogleImageUrl/);
   assert.match(page, /<UserAvatar[\s\S]*?iconUrl=\{profileIcon\}/);
@@ -51,7 +51,7 @@ test("user profile metadata and visible avatar use the shared R2 icon projection
 test("portfolio projects shared X icons into metadata, profile, and work cards", () => {
   assert.match(portfolioPage, /loadPublicXIconMapOptional/);
   assert.match(portfolioPage, /publicXIconEntriesToMap/);
-  assert.match(portfolioPage, /const metadataIcon = resolveProjectedIcon/);
+  assert.match(portfolioPage, /const metadataIcon[\s\S]{0,500}resolveProjectedIcon\(\{/);
   assert.match(portfolioPage, /image: cachedGoogleImageUrl\(metadataIcon\)/);
   assert.match(portfolioPage, /const userIcon = cachedGoogleImageUrl\([\s\S]*?xUserId: user\.id/);
   assert.match(portfolioPage, /<UserAvatar[\s\S]*?iconUrl=\{userIcon\}/);

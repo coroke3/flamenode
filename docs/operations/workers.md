@@ -15,6 +15,7 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 
 - `/admin/workers` の YouTube stale 集計は `video_youtube_metadata` 起点の `EXISTS` 判定を使い、既存の `(sync_status, synced_at)` index で候補を先に絞り込む。pending・active・default の候補は1つの集計条件へまとめ、active判定は1時間から24時間の差分帯だけに限定する。イベントの存在確認は候補動画ごとに bounded に行い、イベント結合による重複展開を避ける。
 - `/admin/x-id-merges` は統合申請一覧の初期表示で影響範囲を読まず、管理者が選択した pending / approved の1申請だけを必要なD1読取で確認する。`view=reverts` では統合申請・影響範囲のqueryを実行しない。既存index・migrationは追加しない。
+- X ID統合・差し戻しは、正本の更新対象から動画・関連イベントの `video` / `event_base` / `event_slots` とカード系global projectionも同じatomic static rebuild queueへ積む。対象数が上限を超える場合はD1 mutationごとfail-closedにして、古い公開projectionだけを残さない。
 - 高密度の管理一覧では装飾用画像のN+1 ACL readを発生させない。`/admin/users` のX ID表と `/manage/events/[id]/audience` は、同じ一覧クエリで取得した canonical `x_users.icon_url` / `approval_status` から承認済み内部アイコンだけを短期署名URLへ変換し、未承認・不正URLはfallbackする。Discordタブは `users.image` のみ、監査一覧は名前・X ID・件数を維持したままXアイコン列を読まない。`system_settings/default` は管理CostGuard・トップ集計・権限タブで request-local `React.cache()` を共有し、KV/TTLへ複製しない。
 
 | Worker | Recovery Cron | Queue | 上限 |
@@ -22,6 +23,8 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 | `fast-jobs` | 毎時0分 | `flamenode-notification-wake`（consumer/producer） | 通知最大6件、Discord外部request最大12件、DM cache KV書込最大2件。締切リマインダーはleaseで1時間間隔 |
 | `content-jobs` | 毎時15分 | `flamenode-static-rebuild-wake` | Queue Consumer + Recovery。静的queue 1 target。cleanupはleaseで日次 |
 | `sync-jobs` | 毎時7分・52分 | `flamenode-youtube-sync-wake` | metadata外部API最大8件、playlist専用実行最大12件（同一invocationでは両方を実行しない）、score最大150件 |
+
+- 認証・関連動画の可変X ID集合は、80件以下だけを通常の`IN`へ展開し、それを超える場合はJSON1の1 bindへ切り替える。承認済みリンクが多い利用者や合作メンバー100人でもD1の100 bind上限を超えず、認可結果と関連動画の並びは維持する。
 
 ## Cloudflare Queues（wake ドアベル）
 

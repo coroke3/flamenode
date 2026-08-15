@@ -11,14 +11,34 @@ if (runTestWithTsx(import.meta.url)) {
 
   const source = await readFile(new URL("./videoSavePlan.ts", import.meta.url), "utf8");
 
-  test("collectMemberAggregationAffectedXUserIds unions previous and next member x IDs", () => {
+  test("collectMemberAggregationAffectedXUserIds returns only changed member x IDs", () => {
     const affected = collectMemberAggregationAffectedXUserIds({
       previousCreatorXUserId: "creator",
       nextCreatorXUserId: "creator",
       previousMemberXUserIds: ["removed", "stays"],
       nextMembers: [{ x_user_id: "stays" }, { x_user_id: "added" }],
     });
-    assert.deepEqual([...affected].sort(), ["added", "creator", "removed", "stays"]);
+    assert.deepEqual([...affected].sort(), ["added", "removed"]);
+  });
+
+  test("same public member x ID set produces no member aggregation targets", () => {
+    const affected = collectMemberAggregationAffectedXUserIds({
+      previousCreatorXUserId: "creator",
+      nextCreatorXUserId: "creator",
+      previousMemberXUserIds: ["member-a", "member-b"],
+      nextMembers: [{ x_user_id: "member-b" }, { x_user_id: "member-a" }],
+    });
+    assert.deepEqual([...affected], []);
+  });
+
+  test("creator X ID changes still target only the old and new creator", () => {
+    const affected = collectMemberAggregationAffectedXUserIds({
+      previousCreatorXUserId: "creator-old",
+      nextCreatorXUserId: "creator-new",
+      previousMemberXUserIds: ["member-a"],
+      nextMembers: [{ x_user_id: "member-a" }],
+    });
+    assert.deepEqual([...affected].sort(), ["creator-new", "creator-old"]);
   });
 
   test("extractPreviousPublicMemberXUserIdsFromMembersPlan reads member audit snapshot", () => {
@@ -66,15 +86,37 @@ if (runTestWithTsx(import.meta.url)) {
     const fnBody = source.slice(fnStart);
 
     assert.match(fnBody, /const isPublicVideo = plan\.target\.visibility_status === "public"/);
-    assert.match(fnBody, /if \(isPublicVideo && plan\.rebuildFlags\.creatorAggregationChanged/);
+    assert.match(fnBody, /const creatorAggregationChanged = memberAggregationChanged/);
+    assert.match(fnBody, /if \(isPublicVideo && creatorAggregationChanged/);
     assert.match(fnBody, /collectMemberAggregationAffectedXUserIds/);
     assert.match(fnBody, /previousMemberXUserIds/);
     assert.match(fnBody, /if \(isPublicVideo && plan\.rebuildFlags\.identityChanged/);
-    assert.match(fnBody, /if \(isPublicVideo && plan\.rebuildFlags\.randomPoolCardChanged/);
+    assert.match(fnBody, /const randomPoolCardChanged =/);
+    assert.match(fnBody, /if \(isPublicVideo && randomPoolCardChanged/);
     assert.match(fnBody, /if \(plan\.rebuildFlags\.eventMembershipChanged\)/);
     assert.doesNotMatch(
       fnBody,
       /if \(plan\.rebuildFlags\.randomPoolCardChanged\)/,
+    );
+  });
+
+  test("member X ID set fan-out keeps only user pages and users_index", () => {
+    const fnStart = source.indexOf("export async function applyVideoUpdatePlan");
+    const fnBody = source.slice(fnStart);
+    const memberStart = fnBody.indexOf(
+      "if (isPublicVideo && creatorAggregationChanged && plan.memberSubmission)",
+    );
+    const identityStart = fnBody.indexOf(
+      "if (isPublicVideo && plan.rebuildFlags.identityChanged)",
+      memberStart,
+    );
+    assert.ok(memberStart >= 0 && identityStart > memberStart);
+    const memberBranch = fnBody.slice(memberStart, identityStart);
+    assert.match(memberBranch, /targetType: "user"/);
+    assert.match(memberBranch, /targetType: "users_index"/);
+    assert.doesNotMatch(
+      memberBranch,
+      /targetType: "(?:search_index|event_base|random_video_pool|list_recent|list_popular|top_recommended|top_latest|top_nostalgic|top_stats|recommend_core)"/,
     );
   });
 }

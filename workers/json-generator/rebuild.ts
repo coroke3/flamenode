@@ -117,6 +117,7 @@ import { enqueueTopSectionRebuild } from "./topRebuildEnqueue.ts";
 import {
   readWorkerVisibilityBlockedEntitiesManifest,
   releaseBlockedEntityInManifest,
+  upsertBlockedEntityInManifest,
   writeWorkerVisibilityBlockedEntitiesManifest,
   type PublicVisibilityFenceEntityType,
 } from "../shared/publicVisibilityManifest.ts";
@@ -465,15 +466,15 @@ async function putJson(
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
   throwIfAborted(signal);
-  if (await resolveIdenticalJsonArtifactPut(env, key, serialized)) {
-    return;
+  const identical = await resolveIdenticalJsonArtifactPut(env, key, serialized);
+  if (!identical) {
+    await env.R2.put(key, serialized, {
+      httpMetadata: {
+        contentType: "application/json; charset=utf-8",
+        cacheControl,
+      },
+    });
   }
-  await env.R2.put(key, serialized, {
-    httpMetadata: {
-      contentType: "application/json; charset=utf-8",
-      cacheControl,
-    },
-  });
   throwIfAborted(signal);
   if (target) await recordArtifact(env, target, key, serialized, signal);
 }
@@ -511,6 +512,7 @@ async function recordArtifact(
     target.sourceUpdatedAt ?? null,
     now,
   ).run();
+  env.artifactHashCache?.set(objectKey, contentHash);
   throwIfAborted(signal);
 }
 
@@ -1227,6 +1229,28 @@ async function rebuildEventsIndex(env: Env, signal?: RebuildSignal): Promise<voi
     },
     signal,
   );
+
+  // The group projection is part of this global artifact. Keep a promotion
+  // fence blocked until the complete index (including group sections) exists.
+  const pendingGroups = await env.DB.prepare(
+    `SELECT f.entity_id, g.updated_at
+       FROM public_visibility_fences AS f
+       INNER JOIN event_groups AS g ON g.id = f.entity_id
+      WHERE f.entity_type = 'event_group'
+        AND f.state = 'release_pending'
+        AND g.visibility_status = 'public'`,
+  ).all<{ entity_id?: string; updated_at?: number }>();
+  for (const row of pendingGroups.results ?? []) {
+    const groupId = String(row.entity_id ?? "").trim();
+    if (!groupId) continue;
+    await releaseVisibilityFenceAfterRebuild(
+      env,
+      "event_group",
+      groupId,
+      signal,
+      Number(row.updated_at ?? 0) || null,
+    );
+  }
 }
 
 async function rebuildEventGroupSections(env: Env, signal?: RebuildSignal): Promise<unknown[]> {
@@ -1465,14 +1489,21 @@ async function releaseVisibilityFenceAfterRebuild(
   if (!env.R2 || typeof env.R2.get !== "function") return;
   throwIfAborted(signal);
 
+  // x_user ids are case-insensitive handles.  Fences are stored in their
+  // normalized form, while legacy queue/artifact rows may still carry the
+  // original casing.  Keep the fence/manifest CAS key canonical without
+  // changing the artifact target id used by the rebuild itself.
+  const fenceEntityId =
+    entityType === "x_user" ? entityId.trim().toLowerCase() : entityId;
+
   const fence = await env.DB.prepare(
-    `SELECT fence_token, state
+    `SELECT fence_token, state, updated_at
      FROM public_visibility_fences
      WHERE entity_type = ? AND entity_id = ?
      LIMIT 1`,
   )
-    .bind(entityType, entityId)
-    .first<{ fence_token?: string; state?: string }>();
+    .bind(entityType, fenceEntityId)
+    .first<{ fence_token?: string; state?: string; updated_at?: number }>();
   const fenceToken = String(fence?.fence_token ?? "").trim();
   if (fence?.state !== "release_pending" || !fenceToken) return;
 
@@ -1518,26 +1549,153 @@ async function releaseVisibilityFenceAfterRebuild(
       return;
     }
   }
+  if (entityType === "event_group") {
+    const currentGroup = await env.DB.prepare(
+      `SELECT visibility_status, updated_at
+       FROM event_groups WHERE id = ? LIMIT 1`,
+    )
+      .bind(entityId)
+      .first<{ visibility_status?: string; updated_at?: number }>();
+    const currentUpdatedAt = Number(currentGroup?.updated_at ?? 0) || 0;
+    const builtFrom = Number(sourceUpdatedAt ?? 0) || 0;
+    if (
+      currentGroup?.visibility_status !== "public" ||
+      currentUpdatedAt <= 0 ||
+      builtFrom < currentUpdatedAt
+    ) {
+      return;
+    }
+  }
+  if (entityType === "x_user") {
+    const currentUser = await env.DB.prepare(
+      `SELECT approval_status
+       FROM x_users WHERE LOWER(id) = LOWER(?) LIMIT 1`,
+    )
+      .bind(entityId)
+      .first<{ approval_status?: string }>();
+    const listable = ["approved", "pending", "imported"].includes(
+      String(currentUser?.approval_status ?? ""),
+    );
+    const fenceUpdatedAt = Number(fence.updated_at ?? 0) || 0;
+    if (!listable || fenceUpdatedAt <= 0) {
+      return;
+    }
+    const artifacts = await env.DB.prepare(
+      `SELECT target_type, generated_at
+       FROM static_artifacts
+       WHERE deleted_at IS NULL
+         AND ((target_type = 'user' AND LOWER(target_id) = LOWER(?))
+           OR (target_type = 'users_index' AND target_id = 'global'))`,
+    )
+      .bind(entityId)
+      .all<{
+        target_type?: string;
+        generated_at?: number;
+      }>();
+    const userArtifact = (artifacts.results ?? []).find(
+      (row) => row.target_type === "user",
+    );
+    const indexArtifact = (artifacts.results ?? []).find(
+      (row) => row.target_type === "users_index",
+    );
+    if (
+      Number(userArtifact?.generated_at ?? 0) < fenceUpdatedAt ||
+      Number(indexArtifact?.generated_at ?? 0) < fenceUpdatedAt
+    ) {
+      return;
+    }
+  }
+
+  async function markReleased(): Promise<boolean> {
+    const result = await env.DB.prepare(
+      `UPDATE public_visibility_fences
+       SET state = 'released', updated_at = MAX(updated_at + 1, ?)
+       WHERE entity_type = ? AND entity_id = ?
+         AND state = 'release_pending' AND fence_token = ?`,
+    )
+      .bind(
+        Math.floor(Date.now() / 1000),
+        entityType,
+        fenceEntityId,
+        fenceToken,
+      )
+      .run();
+    return (result.meta?.changes ?? 0) === 1;
+  }
+
+  async function restoreBlockAfterCasLoss(): Promise<void> {
+    // If the R2 block was removed but the D1 token CAS lost a race, restore a
+    // block for the newer D1 token. Never overwrite a newer manifest entry.
+    const currentFence = await env.DB.prepare(
+      `SELECT fence_token, state
+       FROM public_visibility_fences
+       WHERE entity_type = ? AND entity_id = ?
+       LIMIT 1`,
+    )
+      .bind(entityType, fenceEntityId)
+      .first<{ fence_token?: string; state?: string }>();
+    const currentToken = String(currentFence?.fence_token ?? "").trim();
+    if (
+      !currentToken ||
+      (currentFence?.state !== "blocked" &&
+        currentFence?.state !== "release_pending")
+    ) {
+      return;
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      throwIfAborted(signal);
+      const { manifest, etag } =
+        await readWorkerVisibilityBlockedEntitiesManifest(env.R2);
+      const currentEntry = manifest.entities.find(
+        (row) =>
+          row.entity_type === entityType &&
+          (entityType === "x_user"
+            ? row.entity_id.toLowerCase() === fenceEntityId
+            : row.entity_id === fenceEntityId),
+      );
+      if (currentEntry) return;
+      const now = Math.floor(Date.now() / 1000);
+      const restored = upsertBlockedEntityInManifest(
+        manifest,
+        {
+          entity_type: entityType,
+          entity_id: fenceEntityId,
+          fence_token: currentToken,
+          blocked_at: now,
+          reason: "visibility_release_cas_lost",
+        },
+        now,
+      );
+      try {
+        await writeWorkerVisibilityBlockedEntitiesManifest(
+          env.R2,
+          restored,
+          etag,
+        );
+        return;
+      } catch {
+        if (attempt === 2) return;
+      }
+    }
+  }
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     throwIfAborted(signal);
     const { manifest, etag } =
       await readWorkerVisibilityBlockedEntitiesManifest(env.R2);
     const entry = manifest.entities.find(
-      (row) => row.entity_type === entityType && row.entity_id === entityId,
+      (row) =>
+        row.entity_type === entityType &&
+        (entityType === "x_user"
+          ? row.entity_id.toLowerCase() === fenceEntityId
+          : row.entity_id === fenceEntityId),
     );
 
     // 旧データには manifest entry がない場合がある。成果物が生成済みなら
     // fence だけ released にして、次回以降の再構築を不要にする。
     if (!entry) {
-      await env.DB.prepare(
-        `UPDATE public_visibility_fences
-         SET state = 'released', updated_at = MAX(updated_at + 1, ?)
-         WHERE entity_type = ? AND entity_id = ?
-           AND state = 'release_pending' AND fence_token = ?`,
-      )
-        .bind(Math.floor(Date.now() / 1000), entityType, entityId, fenceToken)
-        .run();
+      await markReleased();
       return;
     }
 
@@ -1547,7 +1705,7 @@ async function releaseVisibilityFenceAfterRebuild(
     const released = releaseBlockedEntityInManifest(
       manifest,
       entityType,
-      entityId,
+      fenceEntityId,
       fenceToken,
       Math.floor(Date.now() / 1000),
     );
@@ -1559,14 +1717,10 @@ async function releaseVisibilityFenceAfterRebuild(
       continue;
     }
 
-    await env.DB.prepare(
-      `UPDATE public_visibility_fences
-       SET state = 'released', updated_at = MAX(updated_at + 1, ?)
-       WHERE entity_type = ? AND entity_id = ?
-         AND state = 'release_pending' AND fence_token = ?`,
-    )
-      .bind(Math.floor(Date.now() / 1000), entityType, entityId, fenceToken)
-      .run();
+    const releasedByCas = await markReleased();
+    if (!releasedByCas) {
+      await restoreBlockAfterCasLoss();
+    }
     return;
   }
 }
@@ -2661,9 +2815,13 @@ async function rebuildVideo(
     `videos/${internalVideoId}.json`,
     ...(youtubeVideoId && youtubeVideoId !== internalVideoId ? [`videos/${youtubeVideoId}.json`] : []),
   ], 20, signal);
-  if (reason === "video_visibility_update") {
-    await releaseVisibilityFenceAfterRebuild(env, "video", internalVideoId, signal);
-  }
+  // A successful public video artifact is sufficient to advance a pending
+  // promotion fence. Visibility queue rows normally carry
+  // `video_visibility_update`, but recovery/manual rebuilds may use another
+  // reason; gating release on that metadata could leave a valid
+  // release_pending fence stuck forever. The helper still performs the D1
+  // state/token CAS and is a no-op unless a matching fence is pending.
+  await releaseVisibilityFenceAfterRebuild(env, "video", internalVideoId, signal);
 }
 
 async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void> {
@@ -2722,6 +2880,26 @@ async function rebuildUsersIndex(env: Env, signal?: RebuildSignal): Promise<void
     { targetType: "users_index", targetId: "global" },
     signal,
   );
+
+  const pendingUsers = await env.DB.prepare(
+    `SELECT f.entity_id
+       FROM public_visibility_fences AS f
+       INNER JOIN x_users AS xu ON LOWER(xu.id) = LOWER(f.entity_id)
+      WHERE f.entity_type = 'x_user'
+        AND f.state = 'release_pending'
+        AND xu.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})`,
+  ).all<{ entity_id?: string }>();
+  for (const row of pendingUsers.results ?? []) {
+    const xId = String(row.entity_id ?? "").trim();
+    if (!xId) continue;
+    await releaseVisibilityFenceAfterRebuild(
+      env,
+      "x_user",
+      xId,
+      signal,
+      null,
+    );
+  }
 }
 
 async function rebuildYoutubeRelatedBlocklist(
@@ -3167,4 +3345,11 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
   }
 
   await reconcileTrackedArtifacts(env, userTarget, liveKeys, 20, signal);
+  await releaseVisibilityFenceAfterRebuild(
+    env,
+    "x_user",
+    xId,
+    signal,
+    null,
+  );
 }

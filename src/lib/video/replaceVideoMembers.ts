@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { videoChapters, videoMembers, xUsers } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { generateId } from "@/lib/utils/id";
@@ -14,6 +14,112 @@ import {
   buildVideoMemberSetGuardSql,
   buildVideoMemberSetSnapshot,
 } from "@/lib/video/memberSetSnapshot";
+
+/** Keep each JSON1 bind comfortably below D1/R2 string limits. */
+export const VIDEO_CHAPTER_JSON_MAX_BYTES = 1_000_000;
+const JSON_ENCODER = new TextEncoder();
+
+export function jsonUtf8ByteLength(value: unknown): number {
+  return JSON_ENCODER.encode(JSON.stringify(value)).byteLength;
+}
+
+/**
+ * Split JSON1 rows by serialized UTF-8 bytes, not only by row count. This
+ * keeps a 100 x 30 chapter replacement bounded even when notes are long or
+ * multibyte. A single row larger than the cap is rejected before mutation.
+ */
+export function chunkRowsByJsonByteSize<T>(
+  rows: readonly T[],
+  maxBytes = VIDEO_CHAPTER_JSON_MAX_BYTES,
+): T[][] {
+  if (!Number.isInteger(maxBytes) || maxBytes < 256) {
+    throw new Error("video_chapter_json_chunk_limit_invalid");
+  }
+  const chunks: T[][] = [];
+  let current: T[] = [];
+  let currentBytes = 2; // []
+  for (const row of rows) {
+    const rowBytes = jsonUtf8ByteLength(row);
+    const nextBytes = currentBytes + (current.length > 0 ? 1 : 0) + rowBytes;
+    if (rowBytes + 2 > maxBytes) {
+      throw new Error("video_chapter_json_row_too_large");
+    }
+    if (current.length > 0 && nextBytes > maxBytes) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 2;
+    }
+    current.push(row);
+    currentBytes += (current.length > 1 ? 1 : 0) + rowBytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+type ChapterBulkStatement = {
+  statement: ReturnType<typeof sql>;
+  rowCount: number;
+  payloadBytes: number;
+};
+
+function buildVideoChapterBulkDeleteSql(
+  videoId: string,
+  rows: readonly (typeof videoChapters.$inferSelect)[],
+): ChapterBulkStatement[] {
+  if (rows.length === 0) throw new Error("video_chapter_bulk_delete_empty");
+  return chunkRowsByJsonByteSize(rows.map((row) => row.id)).map((chunk) => {
+    const payload = JSON.stringify(chunk);
+    return {
+      statement: sql`
+        DELETE FROM video_chapters
+        WHERE video_id = ${videoId}
+          AND id IN (
+            SELECT CAST(value AS TEXT)
+            FROM json_each(${payload})
+          )
+      `,
+      rowCount: chunk.length,
+      payloadBytes: jsonUtf8ByteLength(chunk),
+    };
+  });
+}
+
+function buildVideoChapterBulkInsertSql(
+  rows: readonly (typeof videoChapters.$inferSelect)[],
+): ChapterBulkStatement[] {
+  if (rows.length === 0) throw new Error("video_chapter_bulk_insert_empty");
+  return chunkRowsByJsonByteSize(rows).map((chunk) => {
+    const payload = JSON.stringify(chunk);
+    return {
+      statement: sql`
+        INSERT INTO video_chapters (
+          id,
+          video_id,
+          x_user_id,
+          chapter_time,
+          chapter_label,
+          note,
+          visibility,
+          created_at,
+          updated_at
+        )
+        SELECT
+          json_extract(value, '$.id'),
+          json_extract(value, '$.video_id'),
+          json_extract(value, '$.x_user_id'),
+          json_extract(value, '$.chapter_time'),
+          json_extract(value, '$.chapter_label'),
+          json_extract(value, '$.note'),
+          json_extract(value, '$.visibility'),
+          json_extract(value, '$.created_at'),
+          json_extract(value, '$.updated_at')
+        FROM json_each(${payload})
+      `,
+      rowCount: chunk.length,
+      payloadBytes: jsonUtf8ByteLength(chunk),
+    };
+  });
+}
 
 export async function buildReplaceVideoMembersPlan(
   db: DB,
@@ -51,12 +157,14 @@ export async function buildReplaceVideoMembersPlan(
         .where(
           and(
             eq(videoChapters.video_id, args.videoId),
-            or(
-              ...existingMemberIds.flatMap((memberId) => [
-                like(videoChapters.id, `${memberId}:legacy:%`),
-                like(videoChapters.id, `${memberId}:member:%`),
-              ]),
-            ),
+            sql`EXISTS (
+              SELECT 1
+              FROM json_each(${JSON.stringify(existingMemberIds)}) AS member_ids
+              WHERE ${videoChapters.id} LIKE
+                CAST(member_ids.value AS TEXT) || ':legacy:%'
+                OR ${videoChapters.id} LIKE
+                CAST(member_ids.value AS TEXT) || ':member:%'
+            )`,
           )!,
         )
         .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id))
@@ -78,7 +186,10 @@ export async function buildReplaceVideoMembersPlan(
           .where(
             and(
               eq(videoMembers.video_id, args.videoId),
-              inArray(videoMembers.x_user_id, xIds),
+              sql`${videoMembers.x_user_id} IN (
+                SELECT CAST(value AS TEXT)
+                FROM json_each(${JSON.stringify(xIds)})
+              )`,
             )!,
           )
           .limit(MAX_VIDEO_MEMBERS * 2 + 1)
@@ -284,19 +395,19 @@ export async function buildReplaceVideoMembersPlan(
   }
 
   if (chaptersChanged && existingManagedChapters.length > 0) {
-    plan.statements.push(
-      db.delete(videoChapters).where(
-        inArray(
-          videoChapters.id,
-          existingManagedChapters.map((chapter) => chapter.id),
-        ),
-      ),
-    );
-    plan.expectedChanges.push(existingManagedChapters.length);
+    for (const chunk of buildVideoChapterBulkDeleteSql(
+      args.videoId,
+      existingManagedChapters,
+    )) {
+      plan.statements.push(db.run(chunk.statement));
+      plan.expectedChanges.push(chunk.rowCount);
+    }
   }
   if (chaptersChanged && nextManagedChapters.length > 0) {
-    plan.statements.push(db.insert(videoChapters).values(nextManagedChapters));
-    plan.expectedChanges.push(nextManagedChapters.length);
+    for (const chunk of buildVideoChapterBulkInsertSql(nextManagedChapters)) {
+      plan.statements.push(db.run(chunk.statement));
+      plan.expectedChanges.push(chunk.rowCount);
+    }
   }
   if (chaptersChanged) {
     plan.audits.push({

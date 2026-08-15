@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth/currentUser";
 import {
   canEditVideo,
+  getApprovedXIds,
   resolveAdminOrEventVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
 import { withDatabase } from "@/lib/cloudflare";
@@ -19,7 +20,11 @@ import {
   videos as videosTable,
   xUsers,
 } from "@/lib/db/schema";
-import { fetchEventPlaylistVideos } from "@/lib/db/videoDetailQueries";
+import {
+  fetchAuthorizedPrivateVideoChapters,
+  fetchEventPlaylistVideos,
+  type AuthorizedPrivateVideoChapter,
+} from "@/lib/db/videoDetailQueries";
 import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
@@ -68,6 +73,7 @@ import {
 } from "@/lib/publicData/staticSharedInputsLoader";
 import { RELATED_MIN_LIMIT } from "@/lib/publicData/relatedVideoProjection";
 import type { StaticRelatedVideo } from "@/lib/publicData/staticVideoDetailCore";
+import { mergeVideoChapterOverlay } from "@/lib/publicData/privateVideoChapterOverlay";
 import {
   hasProjectedPublicProfile,
   publicXIconEntriesToMap,
@@ -265,6 +271,7 @@ type VideoViewerOverlay = {
   bookmarkActive: boolean;
   viewerXApproved: boolean;
   viewerCanEditChapters: boolean;
+  privateChapters: AuthorizedPrivateVideoChapter[];
   playlistLabel: string;
   playlistItems: {
     id: string;
@@ -292,6 +299,7 @@ async function fetchVideoViewerOverlay({
     bookmarkActive: false,
     viewerXApproved: false,
     viewerCanEditChapters: false,
+    privateChapters: [],
     playlistLabel: "再生リスト",
     playlistItems: [],
   };
@@ -324,7 +332,12 @@ async function fetchVideoViewerOverlay({
   try {
     const overlay = await withDatabase(async (db) => {
       let viewerCanEditChapters = false;
+      let approvedXIds: string[] = [];
+      let privateChapters: AuthorizedPrivateVideoChapter[] = [];
       if (authenticatedViewer) {
+        if (authenticatedViewer.role !== "admin") {
+          approvedXIds = await getApprovedXIds(db, authenticatedViewer.id);
+        }
         const probe = await fetchVideoRowByIdOrYoutube(db, rawId);
         if (probe) {
           viewerCanEditChapters = await canEditVideo({
@@ -338,7 +351,21 @@ async function fetchVideoViewerOverlay({
             privilegeMode: resolveAdminOrEventVideoPrivilegeMode(
               authenticatedViewer.role,
             ),
+            approvedXUserIds: approvedXIds,
           });
+        }
+
+        if (viewerCanEditChapters || approvedXIds.length > 0) {
+          privateChapters = await fetchAuthorizedPrivateVideoChapters(
+            db,
+            videoId,
+            {
+              id: authenticatedViewer.id,
+              role: authenticatedViewer.role ?? null,
+              approvedXIds,
+              canEditChapters: viewerCanEditChapters,
+            },
+          );
         }
       }
 
@@ -361,6 +388,8 @@ async function fetchVideoViewerOverlay({
         );
       }
       if (viewerActiveX) {
+        // Keep the existing comment-posting semantics (global approval),
+        // while private chapter visibility below remains linked+approved-only.
         const xRow = (
           await db
             .select({ approval_status: xUsers.approval_status })
@@ -433,6 +462,7 @@ async function fetchVideoViewerOverlay({
         bookmarkActive,
         viewerXApproved,
         viewerCanEditChapters,
+        privateChapters,
         playlistLabel,
         playlistItems,
       };
@@ -449,6 +479,7 @@ async function fetchVideoViewerOverlay({
       bookmarkActive: overlay.bookmarkActive,
       viewerXApproved: overlay.viewerXApproved,
       viewerCanEditChapters: overlay.viewerCanEditChapters,
+      privateChapters: overlay.privateChapters,
       playlistLabel: overlay.playlistLabel,
       playlistItems: overlay.playlistItems,
     };
@@ -635,15 +666,20 @@ function StaticVideoDetailView({
   const settingsHref =
     `/dashboard/settings?next=${encodeURIComponent(currentPath)}`;
 
-  const chapterEntries = vm.publicChapters.map((chapter) => ({
-    id: chapter.id,
-    chapter_time: chapter.chapter_time,
-    chapter_label: chapter.chapter_label,
-    visibility: "public" as const,
+  const chapterEntries = mergeVideoChapterOverlay(
+    vm.publicChapters.map((chapter) => ({
+      id: chapter.id,
+      chapter_time: chapter.chapter_time,
+      chapter_label: chapter.chapter_label,
+      visibility: "public" as const,
+      note: chapter.note,
+      author_name: chapter.author_name,
+      author_icon: chapter.author_icon,
+    })),
+    overlay?.privateChapters ?? [],
+  ).map((chapter) => ({
+    ...chapter,
     marker_kind: "comment" as const,
-    note: chapter.note,
-    author_name: chapter.author_name,
-    author_icon: chapter.author_icon,
   }));
 
   return (

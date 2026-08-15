@@ -1,10 +1,11 @@
-import { and, asc, eq, like, or } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { videoChapters, videoMembers } from "@/lib/db/schema";
 import { formatMemberChapterTime } from "@/lib/video/memberInput";
 import type { MemberInput } from "@/lib/video/memberInputs";
 import { normalizeMemberChapters } from "@/lib/video/memberInputs";
 import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
+import { extractVideoMemberIdFromChapterId } from "@/lib/video/memberChapterProjection";
 import type { MemberSubmissionBaseline } from "@/lib/video/memberSubmissionCompare";
 
 export type { MemberSubmissionBaseline } from "@/lib/video/memberSubmissionCompare";
@@ -33,26 +34,30 @@ export async function loadMemberSubmissionBaseline(
   const existingMemberIds = existing.map((row) => row.id);
   const existingManagedChapters =
     existingMemberIds.length > 0
-      ? await db
-          .select()
-          .from(videoChapters)
-          .where(
-            and(
-              eq(videoChapters.video_id, videoId),
-              or(
-                ...existingMemberIds.flatMap((memberId) => [
-                  like(videoChapters.id, `${memberId}:legacy:%`),
-                  like(videoChapters.id, `${memberId}:member:%`),
-                ]),
-              ),
-            )!,
-          )
-          .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id))
+      ? (
+          await db
+            .select()
+            .from(videoChapters)
+            .where(
+              and(
+                eq(videoChapters.video_id, videoId),
+                sql`EXISTS (
+                  SELECT 1
+                  FROM json_each(${JSON.stringify(existingMemberIds)}) AS member_ids
+                  WHERE ${videoChapters.id} LIKE
+                    CAST(member_ids.value AS TEXT) || ':legacy:%'
+                    OR ${videoChapters.id} LIKE
+                    CAST(member_ids.value AS TEXT) || ':member:%'
+                )`,
+              )!,
+            )
+            .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id))
+        )
       : [];
 
   const chaptersByMemberId = new Map<string, typeof existingManagedChapters>();
   for (const chapter of existingManagedChapters) {
-    const memberId = chapter.id.split(":")[0] ?? "";
+    const memberId = extractVideoMemberIdFromChapterId(chapter.id) ?? "";
     if (!memberId) continue;
     const list = chaptersByMemberId.get(memberId) ?? [];
     list.push(chapter);

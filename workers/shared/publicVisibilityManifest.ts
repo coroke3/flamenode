@@ -83,11 +83,16 @@ export async function writeWorkerVisibilityBlockedEntitiesManifest(
       if (ifMatchEtag) {
         putOptions.onlyIf = { etagMatches: ifMatchEtag };
       }
-      await bucket.put(
+      const result = await bucket.put(
         PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
         body,
         putOptions,
       );
+      // R2 resolves conditional PUT failures with null. Convert that into a
+      // retryable error instead of reporting a lost CAS as a successful write.
+      if (result == null) {
+        throw new Error("public_visibility_manifest_precondition_failed");
+      }
       return;
     } catch (error) {
       lastError = error;

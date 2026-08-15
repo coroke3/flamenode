@@ -246,6 +246,9 @@ test("管理トップは同一テーブルのCOUNTを条件付き集計へ統合
   assert.match(adminPendingCounts, /xLinkRequests: sql<number>`SUM\(CASE/);
   assert.match(adminPendingCounts, /notificationFailed: sql<number>`SUM\(CASE/);
   assert.match(adminPendingCounts, /moderationOpen: sql<number>`SUM\(CASE/);
+  assert.match(adminPendingCounts, /reservedOpenSlots/);
+  assert.match(adminPendingCounts, /acceptingEntriesWhere\(now\)/);
+  assert.match(adminTopPage, /counts\.reservedOpenSlots/);
   assert.equal((adminPendingCounts.match(/\.from\(xIdentityRequestsTable\)/g) ?? []).length, 1);
   assert.equal((adminPendingCounts.match(/\.from\(notificationOutboxTable\)/g) ?? []).length, 1);
   assert.equal((adminPendingCounts.match(/\.from\(videoModerationCasesTable\)/g) ?? []).length, 1);

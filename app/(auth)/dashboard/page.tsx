@@ -1,7 +1,11 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import {
+  approvedXIdsNotWhere,
+  approvedXIdsWhere,
+} from "@/lib/auth/approvedX";
 import { getApprovedXIds } from "@/lib/auth/ownership";
 import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import styles from "./page.module.css";
@@ -94,7 +98,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .from(videosTable)
           .where(
             and(
-              inArray(videosTable.creator_x_user_id, approvedXIds),
+              approvedXIdsWhere(videosTable.creator_x_user_id, approvedXIds),
               ne(videosTable.visibility_status, "voided"),
             )!,
           )
@@ -117,12 +121,12 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
           .where(
             and(
-              inArray(videoMembers.x_user_id, approvedXIds),
+              approvedXIdsWhere(videoMembers.x_user_id, approvedXIds),
               eq(videoMembers.can_edit, 1),
               ne(videosTable.visibility_status, "voided"),
               or(
                 isNull(videosTable.creator_x_user_id),
-                notInArray(videosTable.creator_x_user_id, approvedXIds),
+                approvedXIdsNotWhere(videosTable.creator_x_user_id, approvedXIds),
               )!,
             )!,
           )
@@ -143,7 +147,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           })
           .from(videoChaptersTable)
           .leftJoin(videosTable, eq(videosTable.id, videoChaptersTable.video_id))
-          .where(inArray(videoChaptersTable.x_user_id, approvedXIds))
+          .where(approvedXIdsWhere(videoChaptersTable.x_user_id, approvedXIds))
           .orderBy(desc(videoChaptersTable.created_at))
           .limit(80);
       }
@@ -200,7 +204,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           )
           .where(
             and(
-              inArray(videosTable.creator_x_user_id, approvedXIds),
+              approvedXIdsWhere(videosTable.creator_x_user_id, approvedXIds),
               ne(videosTable.visibility_status, "voided"),
               excludePvsfSummaryVideos(),
             )!,

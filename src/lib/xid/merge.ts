@@ -7,6 +7,7 @@ import {
   slots,
   users,
   videoChapters,
+  videoEvents,
   videoInteractions,
   videoMembers,
   videos,
@@ -16,6 +17,13 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
+import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
+import {
+  compensateXUserVisibilityOnD1Failure,
+  planXUserVisibilityFenceTransition,
+  preCommitXUserVisibilityTransition,
+} from "./xUserVisibilityTransition";
 import { buildEventStaffMergeAudits } from "./mergeAudits";
 
 export const X_ID_MERGE_REVERT_WINDOW_SECONDS = 7 * 24 * 60 * 60;
@@ -31,6 +39,8 @@ export type XIdMergeRestoreSnapshot = {
   account_links: Array<typeof xUserAccountLinks.$inferSelect>;
   videos: Array<typeof videos.$inferSelect>;
   video_chapters: Array<typeof videoChapters.$inferSelect>;
+  /** Linked event IDs for affected videos; optional for pre-fanout snapshots. */
+  video_event_links?: Array<typeof videoEvents.$inferSelect>;
   video_members: Array<typeof videoMembers.$inferSelect>;
   slots: Array<typeof slots.$inferSelect>;
   video_interactions: Array<typeof videoInteractions.$inferSelect>;
@@ -71,7 +81,113 @@ function parseSnapshot(raw: string): XIdMergeRestoreSnapshot {
   ) {
     throw new Error("restore_snapshot_json の形式またはversionが不正です。");
   }
-  return parsed as XIdMergeRestoreSnapshot;
+  return {
+    ...(parsed as XIdMergeRestoreSnapshot),
+    video_event_links: Array.isArray(parsed.video_event_links)
+      ? (parsed.video_event_links as Array<typeof videoEvents.$inferSelect>)
+      : [],
+  };
+}
+
+function buildMergeStaticRebuildTargets(opts: {
+  snapshot: XIdMergeRestoreSnapshot;
+  sourceXUserId: string;
+  targetXUserId: string;
+  reason: string;
+  requestedByUserId: string;
+}): EnqueueStaticRebuildInput[] {
+  const { snapshot } = opts;
+  const targets: EnqueueStaticRebuildInput[] = [
+    {
+      targetType: "user",
+      targetId: opts.sourceXUserId,
+      reason: opts.reason,
+      priority: "high",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "user",
+      targetId: opts.targetXUserId,
+      reason: opts.reason,
+      priority: "normal",
+      requestedByUserId: opts.requestedByUserId,
+    },
+    {
+      targetType: "users_index",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "normal",
+      requestedByUserId: opts.requestedByUserId,
+    },
+  ];
+
+  const videoIds = new Set<string>();
+  for (const row of snapshot.videos) videoIds.add(row.id);
+  for (const row of snapshot.video_chapters) videoIds.add(row.video_id);
+  for (const row of snapshot.video_members) videoIds.add(row.video_id);
+  for (const row of snapshot.video_event_links ?? []) videoIds.add(row.video_id);
+
+  const eventIds = new Set<string>();
+  for (const row of snapshot.event_staff) eventIds.add(row.event_id);
+  for (const row of snapshot.slots) eventIds.add(row.event_id);
+  for (const row of snapshot.videos) {
+    if (row.primary_event_id) eventIds.add(row.primary_event_id);
+  }
+  for (const row of snapshot.video_event_links ?? []) eventIds.add(row.event_id);
+
+  for (const videoId of videoIds) {
+    targets.push({
+      targetType: "video",
+      targetId: videoId,
+      reason: opts.reason,
+      priority: "high",
+      requestedByUserId: opts.requestedByUserId,
+    });
+  }
+  for (const eventId of eventIds) {
+    targets.push(
+      {
+        targetType: "event_base",
+        targetId: eventId,
+        reason: opts.reason,
+        priority: "high",
+        requestedByUserId: opts.requestedByUserId,
+      },
+      {
+        targetType: "event_slots",
+        targetId: eventId,
+        reason: opts.reason,
+        priority: "high",
+        requestedByUserId: opts.requestedByUserId,
+      },
+    );
+  }
+
+  // Video cards embed creator/member snapshots. Rebuild their global
+  // projections as well; the section producers enqueue their composers after
+  // the new source rows are available.
+  if (videoIds.size > 0) {
+    for (const targetType of [
+      "random_video_pool",
+      "list_recent",
+      "list_popular",
+      "search_index",
+      "top_recommended",
+      "top_latest",
+      "top_nostalgic",
+      "recommend_core",
+    ] as const) {
+      targets.push({
+        targetType,
+        targetId: "global",
+        reason: opts.reason,
+        priority: "low",
+        requestedByUserId: opts.requestedByUserId,
+      });
+    }
+  }
+
+  return targets;
 }
 
 function assertMergeRequest(request: MergeRequestRow): {
@@ -106,7 +222,7 @@ export async function captureXIdMergeRestoreSnapshot(
     throw new Error("統合元はすでに無効化されています。");
   }
 
-  const [activeUsers, accountLinks, creatorVideos, chapters, members, slotRows, interactions, staffRows, aliases] =
+  const [activeUsers, accountLinks, creatorVideos, chapters, members, slotRows, interactions, staffRows, aliases, videoEventLinks] =
     await Promise.all([
       db
         .select({ id: users.id, active_x_user_id: users.active_x_user_id })
@@ -137,6 +253,18 @@ export async function captureXIdMergeRestoreSnapshot(
             inArray(xUserAliases.alias_x_id, [sourceXUserId, targetXUserId]),
           )!,
         ),
+      db
+        .select()
+        .from(videoEvents)
+        .where(sql`
+          ${videoEvents.video_id} IN (
+            SELECT id FROM videos WHERE creator_x_user_id = ${sourceXUserId}
+            UNION
+            SELECT video_id FROM video_chapters WHERE x_user_id = ${sourceXUserId}
+            UNION
+            SELECT video_id FROM video_members WHERE x_user_id = ${sourceXUserId}
+          )
+        `),
     ]);
 
   return {
@@ -150,6 +278,7 @@ export async function captureXIdMergeRestoreSnapshot(
     account_links: accountLinks,
     videos: creatorVideos,
     video_chapters: chapters,
+    video_event_links: videoEventLinks,
     video_members: members,
     slots: slotRows,
     video_interactions: interactions,
@@ -309,6 +438,31 @@ export async function executeApprovedXIdMergeRequest(
     `),
   ];
 
+  const visibilityFence = await planXUserVisibilityFenceTransition({
+    db,
+    xUserId: source,
+    previousStatus: snapshot.source_x_user.approval_status,
+    nextStatus: "rejected",
+    actorUserId: input.actorAuthUserId,
+    reason: "x_id_merge_source_rejected",
+    now,
+  });
+  const queue = await buildStaticRebuildQueueBatch(
+    db,
+    buildMergeStaticRebuildTargets({
+      snapshot,
+      sourceXUserId: source,
+      targetXUserId: target,
+      reason: "x_id_merge",
+      requestedByUserId: input.actorAuthUserId,
+    }),
+  );
+  const mutationStatements = [
+    ...statements,
+    ...visibilityFence.mutationStatements,
+    ...queue.statements,
+  ];
+
   const promotedTargetStaffIds = new Set(
     promotedTargetStaff.map((row) => row.id),
   );
@@ -330,8 +484,16 @@ export async function executeApprovedXIdMergeRequest(
     toXId: target,
   });
 
-  await mutateWithAudit(db, {
-    mutationStatements: statements,
+  try {
+    if (visibilityFence.fenceToken) {
+      await preCommitXUserVisibilityTransition({
+        xUserId: source,
+        fenceToken: visibilityFence.fenceToken,
+        reason: "x_id_merge_source_rejected",
+      });
+    }
+    await mutateWithAudit(db, {
+      mutationStatements,
     expectedMutationChanges: [
       interactionCollisions.length,
       promotedTargetStaff.length,
@@ -351,6 +513,8 @@ export async function executeApprovedXIdMergeRequest(
       activeSourceUsers.length,
       1,
       1,
+      ...visibilityFence.expectedMutationChanges,
+      ...queue.expectedChanges,
     ],
     audits: [
       ...eventStaffAudits,
@@ -412,7 +576,18 @@ export async function executeApprovedXIdMergeRequest(
         restore_strategy: "none",
       },
     ],
-  });
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+  } catch (error) {
+    if (visibilityFence.fenceToken) {
+      await compensateXUserVisibilityOnD1Failure({
+        db,
+        xUserId: source,
+        fenceToken: visibilityFence.fenceToken,
+      });
+    }
+    throw error;
+  }
 
   return { counts, restoreSnapshotJson, revertDeadlineAt };
 }
@@ -579,8 +754,41 @@ export async function restoreApprovedXIdMergeRevertRequest(
     `),
   ];
 
-  await mutateWithAudit(db, {
-    mutationStatements: statements,
+  const visibilityFence = await planXUserVisibilityFenceTransition({
+    db,
+    xUserId: source,
+    previousStatus: "rejected",
+    nextStatus: snapshot.source_x_user.approval_status,
+    actorUserId: input.actorAuthUserId,
+    reason: "x_id_merge_revert_source_restored",
+    now,
+  });
+  const queue = await buildStaticRebuildQueueBatch(
+    db,
+    buildMergeStaticRebuildTargets({
+      snapshot,
+      sourceXUserId: source,
+      targetXUserId: target,
+      reason: "x_id_merge_revert",
+      requestedByUserId: input.actorAuthUserId,
+    }),
+  );
+  const mutationStatements = [
+    ...statements,
+    ...visibilityFence.mutationStatements,
+    ...queue.statements,
+  ];
+
+  try {
+    if (visibilityFence.fenceToken) {
+      await preCommitXUserVisibilityTransition({
+        xUserId: source,
+        fenceToken: visibilityFence.fenceToken,
+        reason: "x_id_merge_revert_source_restored",
+      });
+    }
+    await mutateWithAudit(db, {
+      mutationStatements,
     expectedMutationChanges: [
       snapshot.videos.length,
       snapshot.video_chapters.length,
@@ -598,6 +806,8 @@ export async function restoreApprovedXIdMergeRevertRequest(
       1,
       1,
       1,
+      ...visibilityFence.expectedMutationChanges,
+      ...queue.expectedChanges,
     ],
     audits: [
       {
@@ -630,7 +840,18 @@ export async function restoreApprovedXIdMergeRevertRequest(
         restore_strategy: "none",
       },
     ],
-  });
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+  } catch (error) {
+    if (visibilityFence.fenceToken) {
+      await compensateXUserVisibilityOnD1Failure({
+        db,
+        xUserId: source,
+        fenceToken: visibilityFence.fenceToken,
+      });
+    }
+    throw error;
+  }
 
   return {
     videos: snapshot.videos.length,

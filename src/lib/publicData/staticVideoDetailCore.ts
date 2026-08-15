@@ -269,6 +269,14 @@ function normalizePublicChapter(value: unknown): StaticPublicChapter | null {
   const id = normalizeString(row.id);
   const chapterLabel = normalizeString(row.chapter_label);
   const chapterTime = normalizeUnix(row.chapter_time);
+  // Public artifacts historically omitted visibility because the generator
+  // already filtered it. If a stale/malformed artifact includes the field,
+  // fail closed instead of reclassifying a private chapter as public.
+  // Preserve legacy artifacts that omitted the field, but reject every
+  // explicit non-public/malformed marker (including null or an empty string).
+  if (Object.prototype.hasOwnProperty.call(row, "visibility") && row.visibility !== "public") {
+    return null;
+  }
   if (!id || !chapterLabel || chapterTime == null) return null;
   return {
     id,

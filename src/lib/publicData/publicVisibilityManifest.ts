@@ -94,11 +94,17 @@ export async function writePublicVisibilityBlockedEntitiesManifest(
       if (options?.ifMatchEtag) {
         putOptions.onlyIf = { etagMatches: options.ifMatchEtag };
       }
-      await resolvedBucket.put(
+      const result = await resolvedBucket.put(
         PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
         body,
         putOptions,
       );
+      // R2 returns null (rather than throwing) when an onlyIf precondition
+      // fails. Treat that as a CAS failure so callers never assume that a
+      // stale manifest write was committed.
+      if (result == null) {
+        throw new Error("public_visibility_manifest_precondition_failed");
+      }
       return;
     } catch (error) {
       lastError = error;

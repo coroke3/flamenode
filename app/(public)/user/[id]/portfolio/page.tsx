@@ -23,6 +23,7 @@ import {
 import { loadPublicXIconMapOptional } from "@/lib/publicData/staticSharedInputsLoader";
 import {
   publicXIconEntriesToMap,
+  normalizePublicIconUrl,
   resolveProjectedIcon,
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
@@ -43,11 +44,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   ]);
   const user = staticLoaded.data?.user;
   const name = user?.x_name || id;
-  const metadataIcon = resolveProjectedIcon({
-    xUserId: user?.id ?? id,
-    iconMap: publicXIconEntriesToMap(iconMapPayload),
-    legacyIconUrl: user?.icon_url,
-  });
+  const iconMap = publicXIconEntriesToMap(iconMapPayload);
+  const metadataIcon =
+    normalizePublicIconUrl(user?.icon_url) ??
+    resolveProjectedIcon({
+      xUserId: user?.id ?? id,
+      iconMap,
+      legacyIconUrl: null,
+    });
   return buildPageMetadata({
     title: `${name} - Portfolio`,
     description:
@@ -91,11 +95,8 @@ export default async function PortfolioPage({
   const totalWorks = staticLoaded.data.works.total;
   const name = user.x_name || user.id;
   const userIcon = cachedGoogleImageUrl(
-    resolveProjectedIcon({
-      xUserId: user.id,
-      iconMap,
-      legacyIconUrl: user.icon_url,
-    }),
+    normalizePublicIconUrl(user.icon_url) ??
+      resolveProjectedIcon({ xUserId: user.id, iconMap, legacyIconUrl: null }),
   );
   const socialLinks = parseSocialLinks(user.other_social_links);
   const portfolioContact = normalizePortfolioContact(user.portfolio_contact);

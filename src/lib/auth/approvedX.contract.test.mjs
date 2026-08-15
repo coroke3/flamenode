@@ -15,6 +15,15 @@ test("approved X helper は x_user_account_links と approved だけを参照す
   assert.doesNotMatch(source, /approval_status,\s*"imported"/);
 });
 
+test("approved X membership stays below D1 bind limits for large link sets", () => {
+  const source = read("src/lib/auth/approvedX.ts");
+  assert.match(source, /APPROVED_X_IDS_IN_ARRAY_MAX = 80/);
+  assert.match(source, /approvedXIdsWhere/);
+  assert.match(source, /approvedXIdsNotWhere/);
+  assert.match(source, /FROM json_each\(\$\{JSON\.stringify\(unique\)\}/);
+  assert.match(source, /return sql`\$\{column\} IS NOT NULL AND NOT EXISTS/);
+});
+
 test("event ownership は approved helper を使う", () => {
   const source = read("src/lib/event/eventOwnership.ts");
   assert.match(source, /getApprovedLinkedXUserIds/);

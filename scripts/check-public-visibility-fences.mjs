@@ -67,9 +67,33 @@ const fencesSqlPath = path.join(
   root,
   "scripts/sql/check-public-visibility-fences-db.sql",
 );
+const eventFencesSqlPath = path.join(
+  root,
+  "scripts/sql/check-public-visibility-fences-events-db.sql",
+);
 const publicVideosSqlPath = path.join(
   root,
   "scripts/sql/check-public-visibility-videos-public.sql",
+);
+const publicEventsSqlPath = path.join(
+  root,
+  "scripts/sql/check-public-visibility-events-public.sql",
+);
+const xUserFencesSqlPath = path.join(
+  root,
+  "scripts/sql/check-public-visibility-fences-x-users-db.sql",
+);
+const eventGroupFencesSqlPath = path.join(
+  root,
+  "scripts/sql/check-public-visibility-fences-event-groups-db.sql",
+);
+const publicXUsersSqlPath = path.join(
+  root,
+  "scripts/sql/check-public-visibility-x-users-public.sql",
+);
+const publicEventGroupsSqlPath = path.join(
+  root,
+  "scripts/sql/check-public-visibility-event-groups-public.sql",
 );
 
 function fetchRemoteManifest() {
@@ -111,44 +135,104 @@ function fetchRemoteManifest() {
   }
 }
 
-function collectRemoteIssues({ fenceRows, publicVideoRows, manifest }) {
+export function collectRemoteIssues({
+  fenceRows,
+  publicVideoRows,
+  publicEventRows,
+  publicXUserRows = [],
+  publicEventGroupRows = [],
+  manifest,
+}) {
   const issues = [];
   const nowSec = Math.floor(Date.now() / 1000);
-  const publicVideoIds = new Set(publicVideoRows.map((row) => row.id));
-  const fenceByVideoId = new Map(
-    fenceRows.map((row) => [row.entity_id, row]),
+  const publicRowsByType = new Map([
+    ["video", publicVideoRows],
+    ["event", publicEventRows],
+    ["x_user", publicXUserRows],
+    ["event_group", publicEventGroupRows],
+  ]);
+  const normalizeEntityId = (entityType, entityId) =>
+    entityType === "x_user"
+      ? String(entityId ?? "").trim().toLowerCase()
+      : String(entityId ?? "").trim();
+  const entityKey = (entityType, entityId) =>
+    `${entityType}:${normalizeEntityId(entityType, entityId)}`;
+  const idFieldByType = {
+    video: "video_id",
+    event: "event_id",
+    x_user: "x_user_id",
+    event_group: "event_group_id",
+  };
+  const fenceByEntityKey = new Map(
+    fenceRows.map((row) => [entityKey(row.entity_type, row.entity_id), row]),
   );
-  const manifestVideoEntries = manifest.entities.filter(
-    (entry) => entry.entity_type === "video",
+  const manifestEntries = manifest.entities.filter(
+    (entry) =>
+      entry.entity_type === "video" ||
+      entry.entity_type === "event" ||
+      entry.entity_type === "x_user" ||
+      entry.entity_type === "event_group",
   );
-  const manifestByVideoId = new Map(
-    manifestVideoEntries.map((entry) => [entry.entity_id, entry]),
+  const manifestByEntityKey = new Map(
+    manifestEntries.map((entry) => [
+      entityKey(entry.entity_type, entry.entity_id),
+      entry,
+    ]),
   );
 
-  for (const videoId of publicVideoIds) {
-    const manifestEntry = manifestByVideoId.get(videoId);
-    if (manifestEntry) {
-      issues.push({
-        kind: "public_video_r2_blocked",
-        video_id: videoId,
-        fence_token: manifestEntry.fence_token,
-      });
+  for (const [entityType, rows] of publicRowsByType) {
+    for (const row of rows) {
+      const entityId = row.id;
+      const manifestEntry = manifestByEntityKey.get(
+        entityKey(entityType, entityId),
+      );
+      const fence = fenceByEntityKey.get(entityKey(entityType, entityId));
+      // A promotion intentionally keeps the R2 block while the composed
+      // artifact is rebuilt. Do not report that expected release_pending
+      // window as a leak; token mismatch or any other state remains an issue.
+      if (
+        manifestEntry &&
+        !(
+          fence?.state === "release_pending" &&
+          fence.fence_token === manifestEntry.fence_token
+        )
+      ) {
+        const kindByType = {
+          video: "public_video_r2_blocked",
+          event: "public_event_r2_blocked",
+          x_user: "public_x_user_r2_blocked",
+          event_group: "public_event_group_r2_blocked",
+        };
+        issues.push({
+          kind: kindByType[entityType],
+          ...({
+            video: { video_id: entityId },
+            event: { event_id: entityId },
+            x_user: { x_user_id: entityId },
+            event_group: { event_group_id: entityId },
+          }[entityType]),
+          fence_token: manifestEntry.fence_token,
+        });
+      }
     }
   }
 
   for (const fence of fenceRows) {
-    const manifestEntry = manifestByVideoId.get(fence.entity_id);
+    const key = entityKey(fence.entity_type, fence.entity_id);
+    const manifestEntry = manifestByEntityKey.get(key);
+    const idField = idFieldByType[fence.entity_type];
+    const idValue = fence.entity_id;
     if (fence.state === "blocked") {
       if (!manifestEntry) {
         issues.push({
           kind: "d1_blocked_missing_r2_entry",
-          video_id: fence.entity_id,
+          [idField]: idValue,
           fence_token: fence.fence_token,
         });
       } else if (manifestEntry.fence_token !== fence.fence_token) {
         issues.push({
           kind: "d1_r2_fence_token_mismatch",
-          video_id: fence.entity_id,
+          [idField]: idValue,
           d1_fence_token: fence.fence_token,
           r2_fence_token: manifestEntry.fence_token,
         });
@@ -159,42 +243,56 @@ function collectRemoteIssues({ fenceRows, publicVideoRows, manifest }) {
       ) {
         issues.push({
           kind: "long_lived_blocked_fence",
-          video_id: fence.entity_id,
+          [idField]: idValue,
           blocked_at: fence.blocked_at,
           age_sec: nowSec - fence.blocked_at,
         });
       }
     }
 
-    if (
-      (fence.state === "released" || fence.state === "release_pending") &&
-      manifestEntry
-    ) {
+    if (fence.state === "release_pending" && !manifestEntry) {
+      issues.push({
+        kind: "release_pending_missing_r2_entry",
+        [idField]: idValue,
+        fence_token: fence.fence_token,
+      });
+    }
+
+    if (fence.state === "released" && manifestEntry) {
       issues.push({
         kind: "released_fence_still_in_manifest",
-        video_id: fence.entity_id,
+        [idField]: idValue,
         d1_state: fence.state,
         r2_fence_token: manifestEntry.fence_token,
       });
     }
   }
 
-  for (const manifestEntry of manifestVideoEntries) {
-    if (!fenceByVideoId.has(manifestEntry.entity_id)) {
+  for (const manifestEntry of manifestEntries) {
+    const key = entityKey(manifestEntry.entity_type, manifestEntry.entity_id);
+    const fence = fenceByEntityKey.get(key);
+    const idField = idFieldByType[manifestEntry.entity_type];
+    if (!fence) {
       issues.push({
         kind: "r2_block_missing_d1_fence",
-        video_id: manifestEntry.entity_id,
+        [idField]: manifestEntry.entity_id,
         fence_token: manifestEntry.fence_token,
       });
       continue;
     }
-    const videoRow = publicVideoRows.find(
-      (row) => row.id === manifestEntry.entity_id,
+    const entityRows = publicRowsByType.get(manifestEntry.entity_type) ?? [];
+    const entityRow = entityRows.find(
+      (row) =>
+        normalizeEntityId(manifestEntry.entity_type, row.id) ===
+        normalizeEntityId(manifestEntry.entity_type, manifestEntry.entity_id),
     );
-    if (!videoRow) {
+    const isRenameTombstone =
+      manifestEntry.entity_type === "event" &&
+      fence.reason === "event_id_rename_old_cleanup";
+    if (!entityRow && !isRenameTombstone) {
       issues.push({
-        kind: "r2_block_unknown_or_nonpublic_video",
-        video_id: manifestEntry.entity_id,
+        kind: `r2_block_unknown_or_nonpublic_${manifestEntry.entity_type}`,
+        [idField]: manifestEntry.entity_id,
         fence_token: manifestEntry.fence_token,
       });
     }
@@ -221,11 +319,41 @@ function runRemoteInspection() {
   const fenceRows = runRemoteD1File(fencesSqlPath, {
     scriptName: "check:public-visibility-fences",
   });
+  const eventFenceRows = runRemoteD1File(eventFencesSqlPath, {
+    scriptName: "check:public-visibility-fences",
+  });
+  const xUserFenceRows = runRemoteD1File(xUserFencesSqlPath, {
+    scriptName: "check:public-visibility-fences",
+  });
+  const eventGroupFenceRows = runRemoteD1File(eventGroupFencesSqlPath, {
+    scriptName: "check:public-visibility-fences",
+  });
   const publicVideoRows = runRemoteD1File(publicVideosSqlPath, {
     scriptName: "check:public-visibility-fences",
   });
+  const publicEventRows = runRemoteD1File(publicEventsSqlPath, {
+    scriptName: "check:public-visibility-fences",
+  });
+  const publicXUserRows = runRemoteD1File(publicXUsersSqlPath, {
+    scriptName: "check:public-visibility-fences",
+  });
+  const publicEventGroupRows = runRemoteD1File(publicEventGroupsSqlPath, {
+    scriptName: "check:public-visibility-fences",
+  });
   const manifest = fetchRemoteManifest();
-  const issues = collectRemoteIssues({ fenceRows, publicVideoRows, manifest });
+  const issues = collectRemoteIssues({
+    fenceRows: [
+      ...fenceRows,
+      ...eventFenceRows,
+      ...xUserFenceRows,
+      ...eventGroupFenceRows,
+    ],
+    publicVideoRows,
+    publicEventRows,
+    publicXUserRows,
+    publicEventGroupRows,
+    manifest,
+  });
   process.exit(printRemoteIssues(issues));
 }
 

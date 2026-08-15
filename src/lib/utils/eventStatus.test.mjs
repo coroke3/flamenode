@@ -71,5 +71,6 @@ test("entry acceptance is a separate date-window calculation", () => {
   assert.equal(isAcceptingEntries({ visibility_status: "public", start_time: null, end_time: null, entry_start_time: T0 - 10, entry_end_time: T0 + 10 }, T0), true);
   assert.equal(isAcceptingEntries({ visibility_status: "public", start_time: null, end_time: null, entry_start_time: T0 - 10, entry_end_time: T0 }, T0), false);
   assert.equal(isAcceptingEntries({ visibility_status: "public", start_time: null, end_time: T0 - 1, entry_start_time: T0 - 10, entry_end_time: T0 + 10 }, T0), true);
+  assert.equal(isAcceptingEntries({ visibility_status: "public", start_time: T0 + 100, end_time: null, entry_start_time: T0 - 10, entry_end_time: T0 + 10 }, T0), true);
   assert.equal(isAcceptingEntries({ visibility_status: "private", start_time: null, end_time: null, entry_start_time: T0 - 10, entry_end_time: T0 + 10 }, T0), false);
 });

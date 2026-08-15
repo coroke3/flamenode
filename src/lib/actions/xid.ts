@@ -43,7 +43,7 @@ import {
   processedXIdRequestMessage,
   reconcilePendingXIdRequest,
 } from "@/lib/actions/xidRequestReliabilityCore";
-import { enqueueAfterXUserPublicUpdate } from "@/lib/staticRebuild/hooks";
+import { buildAfterXUserPublicUpdateQueueBatch } from "@/lib/staticRebuild/hooks";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { maybeMarkOnboardingComplete } from "@/lib/auth/onboarding";
@@ -830,11 +830,17 @@ export async function updateXIdProfile(formData: FormData): Promise<XIdActionRes
     otherSocialLinks: otherSocialLinks.value,
   });
   const after = { ...row, ...updateValues };
+  const queue = await buildAfterXUserPublicUpdateQueueBatch(db, {
+    xUserId,
+    reason: "x_user_profile_update",
+    requestedByUserId: authUserId,
+  });
   await mutateWithAudit(db, {
     mutationStatements: [
       db.update(xUsers).set(updateValues).where(expectedRowCondition({ expectedCurrent: row })),
+      ...queue.statements,
     ],
-    expectedMutationChanges: [1],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
     audits: [
       {
         table_name: "x_users",
@@ -847,11 +853,7 @@ export async function updateXIdProfile(formData: FormData): Promise<XIdActionRes
         retention_class: "long_audit",
       },
     ],
-  });
-  await enqueueAfterXUserPublicUpdate(db, {
-    xUserId,
-    reason: "x_user_profile_update",
-    requestedByUserId: authUserId,
+    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   });
 
   revalidateXIdentityPaths(xUserId);
@@ -959,11 +961,17 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
 
   const oldIconUrl = row.icon_url;
   const after = { ...row, icon_url: iconUrl };
+  const queue = await buildAfterXUserPublicUpdateQueueBatch(db, {
+    xUserId,
+    reason: "x_user_icon_update",
+    requestedByUserId: authUserId,
+  });
   await mutateWithAudit(db, {
     mutationStatements: [
       db.update(xUsers).set({ icon_url: iconUrl }).where(expectedRowCondition({ expectedCurrent: row })),
+      ...queue.statements,
     ],
-    expectedMutationChanges: [1],
+    expectedMutationChanges: [1, ...queue.expectedChanges],
     audits: [
       {
         table_name: "x_users",
@@ -977,15 +985,9 @@ export async function setXIdIcon(formData: FormData): Promise<XIdActionResult> {
         retention_class: "long_audit",
       },
     ],
+    staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
   });
   const env = getEnv();
-  await runXIdPostCommit("xid.setXIdIcon", "static_rebuild_enqueue", async () => {
-    await enqueueAfterXUserPublicUpdate(db, {
-      xUserId,
-      reason: "x_user_icon_update",
-      requestedByUserId: authUserId,
-    });
-  });
   if (env.BUCKET) {
     await runXIdPostCommit("xid.setXIdIcon", "orphan_icon_cleanup", async () => {
       await tryDeleteUnreferencedIcon(db.$client, env.BUCKET, oldIconUrl, iconUrl);
@@ -1042,11 +1044,17 @@ export async function uploadXIdIcon(
   try {
     await env.BUCKET.put(stagingKey, buffer, { httpMetadata: { contentType: image.contentType } });
     await env.BUCKET.put(key, buffer, { httpMetadata: { contentType: image.contentType } });
+    const queue = await buildAfterXUserPublicUpdateQueueBatch(db, {
+      xUserId,
+      reason: "x_user_icon_update",
+      requestedByUserId: authUserId,
+    });
     await mutateWithAudit(db, {
       mutationStatements: [
         db.update(xUsers).set({ icon_url: iconUrl }).where(expectedRowCondition({ expectedCurrent: row })),
+        ...queue.statements,
       ],
-      expectedMutationChanges: [1],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
       audits: [
         {
           table_name: "x_users",
@@ -1060,6 +1068,7 @@ export async function uploadXIdIcon(
           retention_class: "long_audit",
         },
       ],
+      staticRebuildWakeSource: queue.statements.length > 0 ? "web" : undefined,
     });
     dbCommitted = true;
   } catch (error) {
@@ -1073,13 +1082,6 @@ export async function uploadXIdIcon(
   }
   await env.BUCKET.delete(stagingKey).catch((error) => {
     console.warn("[uploadXIdIcon] staging cleanup failed", { traceId, error });
-  });
-  await runXIdPostCommit("xid.uploadXIdIcon", "static_rebuild_enqueue", async () => {
-    await enqueueAfterXUserPublicUpdate(db, {
-      xUserId,
-      reason: "x_user_icon_update",
-      requestedByUserId: authUserId,
-    });
   });
   await runXIdPostCommit("xid.uploadXIdIcon", "orphan_icon_cleanup", async () => {
     await tryDeleteUnreferencedIcon(db.$client, env.BUCKET, oldIconUrl, iconUrl);

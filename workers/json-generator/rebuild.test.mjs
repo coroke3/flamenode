@@ -27,6 +27,21 @@ const projectionSource = await readFile(
   "utf8",
 );
 
+test("通常putJsonはR2 dedupe後もstatic_artifacts追跡を更新する", () => {
+  const start = source.indexOf("async function putJson(");
+  const end = source.indexOf("\nasync function recordArtifact(", start);
+  const body = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(body, /const identical = await resolveIdenticalJsonArtifactPut/);
+  assert.match(body, /if \(!identical\) \{[\s\S]*await env\.R2\.put/);
+  assert.match(body, /if \(target\) await recordArtifact/);
+  assert.ok(
+    body.indexOf("await recordArtifact") > body.indexOf("if (!identical)"),
+    "artifact tracking must run after the optional R2 PUT",
+  );
+  assert.doesNotMatch(body, /if \(await resolveIdenticalJsonArtifactPut[\s\S]*\) \{\s*return;/);
+});
+
 function statement(sql, state) {
   return {
     bind(...args) {
@@ -1191,8 +1206,32 @@ test("再公開 artifact 完成後だけ release_pending fence を token CAS で
   assert.match(source, /releaseVisibilityFenceAfterRebuild/);
   assert.match(source, /state = 'release_pending'/);
   assert.match(source, /entry\.fence_token !== fenceToken/);
+  assert.match(source, /result\.meta\?\.changes/);
   assert.match(source, /state = 'released'/);
   assert.match(source, /writeWorkerVisibilityBlockedEntitiesManifest/);
+});
+
+test("legacy X ID casing does not strand a release fence", () => {
+  const releaseFn = source.match(
+    /async function releaseVisibilityFenceAfterRebuild\([\s\S]*?(?=\nasync function )/,
+  )?.[0];
+  assert.ok(releaseFn);
+  assert.match(
+    releaseFn,
+    /const fenceEntityId =\s*\n\s*entityType === "x_user" \? entityId\.trim\(\)\.toLowerCase\(\) : entityId/,
+  );
+  assert.match(releaseFn, /LOWER\(id\) = LOWER\(\?\)/);
+  assert.match(releaseFn, /LOWER\(target_id\) = LOWER\(\?\)/);
+  assert.match(releaseFn, /entityType,\s*fenceEntityId,\s*fenceToken/);
+});
+
+test("video artifact success checks pending fence independent of queue reason", () => {
+  const videoFn = source.match(
+    /async function rebuildVideo\([\s\S]*?(?=\nasync function rebuildUsersIndex)/,
+  )?.[0];
+  assert.ok(videoFn);
+  assert.match(videoFn, /releaseVisibilityFenceAfterRebuild\(env, "video"/);
+  assert.doesNotMatch(videoFn, /if \(reason === "video_visibility_update"\)/);
 });
 
 test("static related near-date lookup avoids an ABS full scan", () => {

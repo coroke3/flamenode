@@ -9,6 +9,7 @@ import {
   lt,
   lte,
   ne,
+  notLike,
   notInArray,
   or,
   sql,
@@ -25,6 +26,7 @@ import {
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
 import { normalizeXId } from "@/lib/utils/xid";
+import { approvedXIdsWhere } from "@/lib/auth/approvedX";
 import { getEnv } from "@/lib/cloudflare";
 import {
   eventPlaylistObjectKey,
@@ -63,6 +65,77 @@ export interface VideoDetailViewer {
   approvedXIds: string[];
   /** 動画オーナー or chapter_admin 権限保持者は private チャプターを全件閲覧可。 */
   canEditChapters: boolean;
+}
+
+export interface AuthorizedPrivateVideoChapter {
+  id: string;
+  chapter_time: number;
+  chapter_label: string;
+  visibility: "private";
+  note: string | null;
+  x_user_id: string | null;
+  author_name: string | null;
+  author_icon: string | null;
+}
+
+/**
+ * 公開動画詳細の静的JSONには private chapter を含めない。
+ * この helper は、認証済み viewer に許可された private 行だけを
+ * viewer overlay 用に読む。anonymous/未承認 viewer は空配列で早期終了する。
+ */
+export async function fetchAuthorizedPrivateVideoChapters(
+  db: DB,
+  videoId: string,
+  viewer?: VideoDetailViewer,
+): Promise<AuthorizedPrivateVideoChapter[]> {
+  if (!viewer?.id) return [];
+
+  const canSeeAllPrivate =
+    viewer.role === "admin" || viewer.canEditChapters === true;
+  const approvedXIds = viewer.approvedXIds ?? [];
+  if (!canSeeAllPrivate && approvedXIds.length === 0) return [];
+
+  const ownerCondition = canSeeAllPrivate
+    ? eq(videoChapters.visibility, "private")
+    : and(
+        eq(videoChapters.visibility, "private"),
+        // Keep the approved-link set in one JSON1 bind. A user can own many
+        // approved X IDs; expanding them into an `IN (?, ...)` list would
+        // cross D1's 100-bind limit and turn an otherwise optional overlay
+        // into a page failure.
+        sql`${videoChapters.x_user_id} IN (
+          SELECT CAST(value AS TEXT)
+          FROM json_each(${JSON.stringify(approvedXIds)})
+        )`,
+        // Re-check the canonical approval row in the same D1 statement so a
+        // status change between the linked-ID read and this query fails closed.
+        eq(xUsers.approval_status, "approved"),
+      )!;
+
+  return db
+    .select({
+      id: videoChapters.id,
+      chapter_time: videoChapters.chapter_time,
+      chapter_label: videoChapters.chapter_label,
+      visibility: sql<"private">`'private'`,
+      note: videoChapters.note,
+      x_user_id: videoChapters.x_user_id,
+      author_name: xUsers.x_name,
+      author_icon: xUsers.icon_url,
+    })
+    .from(videoChapters)
+    .leftJoin(xUsers, eq(xUsers.id, videoChapters.x_user_id))
+    .where(
+      and(
+        eq(videoChapters.video_id, videoId),
+        ownerCondition,
+        // member/legacy chapters are rendered in their dedicated member
+        // projection, never in the public chapter/comment timeline.
+        notLike(videoChapters.id, "%:member:%"),
+        notLike(videoChapters.id, "%:legacy:%"),
+      )!,
+    )
+    .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id));
 }
 
 export async function fetchVideoDetail(
@@ -142,7 +215,7 @@ export async function fetchVideoDetail(
       eq(videoChapters.visibility, "public"),
       and(
         eq(videoChapters.visibility, "private"),
-        inArray(videoChapters.x_user_id, selfXIds),
+        approvedXIdsWhere(videoChapters.x_user_id, selfXIds),
       ),
     )!;
   } else {
@@ -354,6 +427,17 @@ export async function fetchRelatedVideos(
     .filter((id): id is string => Boolean(id));
   const uniqueMemberXIds = Array.from(new Set(memberXIds));
   const memberLimit = perMemberLimit(uniqueMemberXIds.length);
+  const sharedMemberIdsWhere =
+    uniqueMemberXIds.length <= 80
+      ? inArray(
+          sql<string>`LOWER(${videoMembers.x_user_id})`,
+          uniqueMemberXIds,
+        )
+      : sql`EXISTS (
+          SELECT 1
+          FROM json_each(${JSON.stringify(uniqueMemberXIds)}) AS related_member_x_ids
+          WHERE CAST(related_member_x_ids.value AS TEXT) = LOWER(${videoMembers.x_user_id})
+        )`;
   const sharedMembers: Row[] =
     uniqueMemberXIds.length > 0
       ? await db
@@ -367,10 +451,7 @@ export async function fetchRelatedVideos(
             and(
               baseWhere,
               isNotNull(videoMembers.x_user_id),
-              inArray(
-                sql<string>`LOWER(${videoMembers.x_user_id})`,
-                uniqueMemberXIds,
-              ),
+              sharedMemberIdsWhere,
             )!,
           )
           .orderBy(desc(videos.scheduled_time), desc(videoScoreExpr))

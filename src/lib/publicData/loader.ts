@@ -29,9 +29,13 @@ import {
 } from "./publicDataState";
 import {
   isPublicEntityVisibilityBlocked,
+  loadPublicVisibilityBlockedEntitiesManifest,
   resolvePublicVisibilityGuardModeFromEnv,
 } from "./publicVisibilityManifest";
-import type { PublicVisibilityFenceEntityType } from "./publicVisibilityManifestCore";
+import type {
+  PublicVisibilityBlockedEntitiesManifest,
+  PublicVisibilityFenceEntityType,
+} from "./publicVisibilityManifestCore";
 import {
   applyEventSlotsOverride,
   eventBaseObjectKey,
@@ -134,6 +138,7 @@ import {
   fetchDegradedVideoDetailPayload,
 } from "./degradedQueries";
 import {
+  coercePublicJsonCacheEnvelope,
   readPublicJsonCache,
   unwrapPublicJsonCachePayload,
   writePublicJsonCacheBestEffort,
@@ -143,6 +148,18 @@ import {
   toPublicJsonLegacySource,
   type PublicDataMode,
 } from "./publicDataMode";
+import {
+  buildPublicArtifactVisibilityContext,
+  filterPublicArtifactPayload,
+  type PublicArtifactVisibilityContext,
+} from "./publicArtifactVisibility";
+
+export type PublicJsonCacheMode =
+  | "default"
+  | "cache_first"
+  | "r2_first"
+  /** Backward-compatible strict mode for internal callers/tests. */
+  | "bypass";
 
 export { canFallbackToDatabase, isMaintenanceStrategy };
 export {
@@ -170,6 +187,12 @@ export type PublicJsonLoadOptions<TPayload = unknown> = {
   targetId: string;
   reason: string;
   cacheTtlSeconds?: number;
+  /** Cache API mode. Collections default to cache_first; detail uses r2_first. */
+  cacheMode?: PublicJsonCacheMode;
+  /** Maximum age for a stale Cache envelope after an r2_first miss. */
+  staleCacheMaxAgeSec?: number;
+  /** Rules/current deliberately disables stale fallback. */
+  allowStaleCacheFallback?: boolean;
   degradedFetcher?: () => Promise<TPayload | null>;
   /** overlay 時に空コレクションを semantic miss として扱う */
   isEmptyCollection?: (payload: TPayload) => boolean;
@@ -199,6 +222,9 @@ type PublicJsonLoaderConfig<TPayload, TResult> = {
   targetId?: (id: string) => string;
   reason: string;
   cacheTtlSeconds?: number;
+  cacheMode?: PublicJsonCacheMode;
+  staleCacheMaxAgeSec?: number;
+  allowStaleCacheFallback?: boolean;
   normalize: (payload: TPayload) => TResult | null;
   degradedFetcher?: (id: string) => Promise<TPayload | null>;
 };
@@ -215,6 +241,7 @@ function mapTargetTypeToFenceEntity(
 async function isLoaderTargetVisibilityBlocked(
   targetType: StaticRebuildTargetType,
   targetId: string,
+  manifest?: PublicVisibilityBlockedEntitiesManifest,
 ): Promise<boolean> {
   const entityType = mapTargetTypeToFenceEntity(targetType);
   if (!entityType) return false;
@@ -222,7 +249,68 @@ async function isLoaderTargetVisibilityBlocked(
     entityType,
     entityId: targetId,
     guardMode: resolvePublicVisibilityGuardModeFromEnv(),
+    manifest,
   });
+}
+
+type PublicVisibilityGuardResult = {
+  blocked: boolean;
+  unavailable: boolean;
+  manifest?: PublicVisibilityBlockedEntitiesManifest;
+  artifactContext?: PublicArtifactVisibilityContext;
+};
+
+function warnPublicVisibilityManifestFailure(
+  mode: ReturnType<typeof resolvePublicVisibilityGuardModeFromEnv>,
+  error: unknown,
+): void {
+  console.warn(
+    JSON.stringify({
+      service: "public-visibility-guard",
+      mode,
+      result: "manifest_read_failed",
+      error_name: error instanceof Error ? error.name : undefined,
+    }),
+  );
+}
+
+async function resolvePublicVisibilityGuard(
+  targetType: StaticRebuildTargetType,
+  targetId: string,
+): Promise<PublicVisibilityGuardResult> {
+  const mode = resolvePublicVisibilityGuardModeFromEnv();
+  let manifest: PublicVisibilityBlockedEntitiesManifest | undefined;
+  let artifactContext: PublicArtifactVisibilityContext | undefined;
+  if (mode === "enforce") {
+    try {
+      manifest = await loadPublicVisibilityBlockedEntitiesManifest();
+      artifactContext = buildPublicArtifactVisibilityContext(manifest);
+    } catch (error) {
+      warnPublicVisibilityManifestFailure(mode, error);
+      return { blocked: false, unavailable: true };
+    }
+  }
+
+  try {
+    return {
+      blocked: await isLoaderTargetVisibilityBlocked(
+        targetType,
+        targetId,
+        manifest,
+      ),
+      unavailable: false,
+      manifest,
+      artifactContext,
+    };
+  } catch (error) {
+    warnPublicVisibilityManifestFailure(mode, error);
+    return {
+      blocked: false,
+      unavailable: mode === "enforce",
+      manifest,
+      artifactContext,
+    };
+  }
 }
 
 function buildStaticHitResult<T>(
@@ -459,6 +547,9 @@ export function createPublicJsonLoader<TPayload, TResult>({
   targetId = (id) => id,
   reason,
   cacheTtlSeconds,
+  cacheMode,
+  staleCacheMaxAgeSec,
+  allowStaleCacheFallback,
   normalize,
   degradedFetcher,
 }: PublicJsonLoaderConfig<TPayload, TResult>) {
@@ -469,6 +560,9 @@ export function createPublicJsonLoader<TPayload, TResult>({
       targetId: targetId(id),
       reason,
       cacheTtlSeconds,
+      cacheMode,
+      staleCacheMaxAgeSec,
+      allowStaleCacheFallback,
       degradedFetcher: degradedFetcher
         ? () => degradedFetcher(id)
         : undefined,
@@ -502,7 +596,24 @@ export async function loadPublicJson<T>(
     });
   }
 
-  if (await isLoaderTargetVisibilityBlocked(options.targetType, options.targetId)) {
+  const visibility = await resolvePublicVisibilityGuard(
+    options.targetType,
+    options.targetId,
+  );
+  if (visibility.unavailable) {
+    return buildMissResult<T>({
+      data: null,
+      mode: "unavailable",
+      strategy: maintenanceStrategy,
+      enqueued: false,
+      probe: {
+        state: "unknown",
+        errorCode: "public_visibility_manifest_unavailable",
+      },
+    });
+  }
+
+  if (visibility.blocked) {
     return buildMissResult<T>({
       data: null,
       mode: "unavailable",
@@ -512,9 +623,19 @@ export async function loadPublicJson<T>(
     });
   }
 
-  const cached = unwrapPublicJsonCachePayload<T>(
-    await readPublicJsonCache<unknown>(options.r2Key),
-  );
+  const cacheMode = options.cacheMode ?? "cache_first";
+  const cacheFirst = cacheMode === "default" || cacheMode === "cache_first";
+  const r2First = cacheMode === "r2_first";
+  let cachedEnvelope: ReturnType<typeof coercePublicJsonCacheEnvelope> = null;
+  const cached = cacheFirst
+    ? filterPublicArtifactPayload<T>(
+        options.targetType,
+        unwrapPublicJsonCachePayload<T>(
+          await readPublicJsonCache<unknown>(options.r2Key),
+        ),
+        visibility.artifactContext,
+      )
+    : null;
   if (cached !== null) {
     if (options.isEmptyCollection?.(cached)) {
       return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
@@ -525,7 +646,11 @@ export async function loadPublicJson<T>(
     return buildStaticHitResult(cached, "cached_static", strategy);
   }
 
-  const payload = await readStaticJson<T>(options.r2Key);
+  const payload = filterPublicArtifactPayload(
+    options.targetType,
+    await readStaticJson<T>(options.r2Key),
+    visibility.artifactContext,
+  );
   if (payload !== null) {
     void recordDegradedCircuitR2Hit();
     if (options.isEmptyCollection?.(payload)) {
@@ -534,10 +659,13 @@ export async function loadPublicJson<T>(
     recordPublicStaticHit();
     const operationMode = await resolvePublicOperationMode({ allowD1: false });
     const strategy = getPublicDataStrategy(operationMode);
-    if (options.cacheTtlSeconds) {
+    if (cacheMode !== "bypass" && options.cacheTtlSeconds) {
       writePublicJsonCacheBestEffort(
         options.r2Key,
-        payload,
+        {
+          payload,
+          stored_at: Math.floor(Date.now() / 1000),
+        },
         options.cacheTtlSeconds,
       );
     }
@@ -545,6 +673,37 @@ export async function loadPublicJson<T>(
   }
 
   void recordDegradedCircuitR2Miss();
+  if (
+    r2First &&
+    options.allowStaleCacheFallback !== false &&
+    (options.staleCacheMaxAgeSec ?? 0) > 0
+  ) {
+    const now = Math.floor(Date.now() / 1000);
+    cachedEnvelope = coercePublicJsonCacheEnvelope(
+      await readPublicJsonCache<unknown>(options.r2Key),
+      now,
+      { requireStoredAt: true },
+    );
+    if (cachedEnvelope) {
+      const age = now - cachedEnvelope.stored_at;
+      if (age >= 0 && age <= (options.staleCacheMaxAgeSec ?? 0)) {
+        const stale = filterPublicArtifactPayload<T>(
+          options.targetType,
+          cachedEnvelope.payload as T,
+          visibility.artifactContext,
+        );
+        if (stale !== null && !options.isEmptyCollection?.(stale)) {
+          recordPublicStaticHit();
+          const operationMode = await resolvePublicOperationMode({ allowD1: false });
+          return buildStaticHitResult(
+            stale,
+            "cached_static",
+            getPublicDataStrategy(operationMode),
+          );
+        }
+      }
+    }
+  }
   return resolvePublicJsonMiss(options);
 }
 
@@ -624,6 +783,8 @@ export async function loadStaticEventDetail(
     targetId: eventId,
     reason: "public_event_detail_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
     missRebuildTargetTypes: ["event_base", "event_slots"],
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -648,6 +809,7 @@ export async function loadStaticEventDetail(
       value && typeof value === "object" ? (value as StaticEventSlotsPayload) : null,
     maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+    cacheMode: "r2_first",
   });
   const detail = applyEventSlotsOverride(normalized, slotsResult.value);
   return { ...result, data: detail };
@@ -937,7 +1099,17 @@ export async function loadPublicEventVideosPage(params: {
     return unavailable(maintenanceStrategy);
   }
 
-  if (await isLoaderTargetVisibilityBlocked("event_base", eventId)) {
+  const visibility = await resolvePublicVisibilityGuard("event_base", eventId);
+  if (visibility.unavailable) {
+    return unavailable(maintenanceStrategy, {
+      probe: {
+        state: "unknown",
+        errorCode: "public_visibility_manifest_unavailable",
+      },
+    });
+  }
+
+  if (visibility.blocked) {
     return unavailable(maintenanceStrategy, {
       probe: { state: "not_public", canonicalTargetId: eventId },
     });
@@ -951,6 +1123,8 @@ export async function loadPublicEventVideosPage(params: {
     targetId: eventId,
     reason: "public_event_list_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
     missRebuildTargetTypes: ["event_base", "event_slots"],
   };
 
@@ -979,9 +1153,17 @@ export async function loadPublicEventVideosPage(params: {
   };
 
   const tryCachedOrR2 = async (key: string) => {
-    const cached = unwrapPublicJsonCachePayload<StaticEventDetailPayload>(
-      await readPublicJsonCache<unknown>(key),
-    );
+    const r2First = missOptions.cacheMode === "r2_first";
+    const cached =
+      r2First || missOptions.cacheMode === "bypass"
+        ? null
+        : filterPublicArtifactPayload<StaticEventDetailPayload>(
+            "event_base",
+            unwrapPublicJsonCachePayload<StaticEventDetailPayload>(
+              await readPublicJsonCache<unknown>(key),
+            ),
+            visibility.artifactContext,
+          );
     if (cached !== null) {
       const strategy = getPublicDataStrategy(
         await resolvePublicOperationMode({ allowD1: false }),
@@ -993,23 +1175,57 @@ export async function loadPublicEventVideosPage(params: {
       }
     }
 
-    const payload = await readStaticJson<StaticEventDetailPayload>(key);
+    const payload = filterPublicArtifactPayload<StaticEventDetailPayload>(
+      "event_base",
+      await readStaticJson<StaticEventDetailPayload>(key),
+      visibility.artifactContext,
+    );
     if (payload !== null) {
       void recordDegradedCircuitR2Hit();
       const strategy = getPublicDataStrategy(
         await resolvePublicOperationMode({ allowD1: false }),
       );
-      writePublicJsonCacheBestEffort(
-        key,
-        payload,
-        PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
-      );
+      if (missOptions.cacheMode !== "bypass") {
+        writePublicJsonCacheBestEffort(
+          key,
+          { payload, stored_at: Math.floor(Date.now() / 1000) },
+          PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+        );
+      }
       const hit = tryStaticEventList(payload, "static", strategy);
       if (hit) {
         recordPublicStaticHit();
         return { hit, payload };
       }
       return { hit: null, payload };
+    }
+    if (r2First && (missOptions.staleCacheMaxAgeSec ?? 0) > 0) {
+      const now = Math.floor(Date.now() / 1000);
+      const staleEnvelope = coercePublicJsonCacheEnvelope(
+        await readPublicJsonCache<unknown>(key),
+        now,
+        { requireStoredAt: true },
+      );
+      if (staleEnvelope) {
+        const age = now - staleEnvelope.stored_at;
+        if (age >= 0 && age <= (missOptions.staleCacheMaxAgeSec ?? 0)) {
+          const stale = filterPublicArtifactPayload<StaticEventDetailPayload>(
+            "event_base",
+            staleEnvelope.payload as StaticEventDetailPayload,
+            visibility.artifactContext,
+          );
+          if (stale !== null) {
+            const strategy = getPublicDataStrategy(
+              await resolvePublicOperationMode({ allowD1: false }),
+            );
+            const hit = tryStaticEventList(stale, "cached_static", strategy);
+            if (hit) {
+              recordPublicStaticHit();
+              return { hit, payload: stale };
+            }
+          }
+        }
+      }
     }
     return { hit: null, payload: null };
   };
@@ -1139,6 +1355,8 @@ export async function loadStaticRulesPage(): Promise<
     targetId: "global",
     reason: "public_rules_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.rules,
+    cacheMode: "r2_first",
+    allowStaleCacheFallback: false,
     degradedFetcher: async () => {
       const db = getDatabase();
       if (!db) return null;
@@ -1273,6 +1491,8 @@ export const loadStaticUserProfile = createPublicJsonLoader<
   targetType: "user",
   reason: "public_user_profile_miss",
   cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.userDetail,
+  cacheMode: "r2_first",
+  staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.userDetail * 2,
   normalize: normalizeStaticUserProfile,
   degradedFetcher: async (xUserId) => {
     const db = getDatabase();
@@ -1325,6 +1545,8 @@ export async function loadStaticUserWorksPage(params: {
     targetType: "user",
     targetId: params.userId,
     reason: "public_user_works_page_miss",
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.userDetail * 2,
   });
   const normalizedPage = result.data
     ? normalizeStaticUserVideoPage(
@@ -1372,6 +1594,8 @@ export async function loadStaticUserCollabsPage(params: {
     targetType: "user",
     targetId: params.userId,
     reason: "public_user_collabs_page_miss",
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.userDetail * 2,
   });
   const normalizedPage = result.data
     ? normalizeStaticUserVideoPage(
@@ -1396,6 +1620,8 @@ export const loadStaticVideoDetail = createPublicJsonLoader<
   targetType: "video",
   reason: "public_video_detail_miss",
   cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.videoDetail,
+  cacheMode: "r2_first",
+  staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.videoDetail * 2,
   normalize: normalizeStaticVideoDetail,
   degradedFetcher: async (videoId) => {
     const db = getDatabase();

@@ -52,9 +52,18 @@ const enqueueSource = readFileSync(
   path.join(root, "src/lib/staticRebuild/enqueue.ts"),
   "utf8",
 );
+const batchStart = enqueueSource.indexOf(
+  "export async function buildStaticRebuildQueueBatch",
+);
+const batchEnd = enqueueSource.indexOf(
+  "export async function enqueueStaticRebuild(",
+  batchStart,
+);
+assert.ok(batchStart >= 0, "static rebuild batch builder is missing");
+assert.ok(batchEnd > batchStart, "static rebuild enqueue boundary is missing");
 const batchBuilderSource = enqueueSource.slice(
-  enqueueSource.indexOf("export async function buildStaticRebuildQueueBatch"),
-  enqueueSource.indexOf("async function shouldSkipRecentEnqueue"),
+  batchStart,
+  batchEnd,
 );
 assert.match(batchBuilderSource, /FROM json_each\(\$\{payload\}\)/);
 assert.match(

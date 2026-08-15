@@ -31,7 +31,7 @@ export function computeStaticRebuildFlags(args: {
   partChanged?: boolean;
   canEditPrimaryEvent: boolean;
   hasEventIdsField: boolean;
-  membersSectionTouched?: boolean;
+  memberAggregationChanged?: boolean;
 }): {
   identityChanged: boolean;
   eventMembershipChanged: boolean;
@@ -44,7 +44,7 @@ export function computeStaticRebuildFlags(args: {
     (args.displayNameChanged || args.iconChanged || args.allowSubmitterChange);
   const eventMembershipChanged =
     args.canEditPrimaryEvent && args.hasEventIdsField;
-  const creatorAggregationChanged = Boolean(args.membersSectionTouched);
+  const creatorAggregationChanged = Boolean(args.memberAggregationChanged);
   const eventProjectionChanged =
     Boolean(args.titleChanged) ||
     Boolean(args.youtubeChanged) ||
@@ -57,8 +57,6 @@ export function computeStaticRebuildFlags(args: {
     eventMembershipChanged,
     eventProjectionChanged,
     creatorAggregationChanged,
-    randomPoolCardChanged:
-      eventProjectionChanged ||
-      creatorAggregationChanged,
+    randomPoolCardChanged: eventProjectionChanged,
   };
 }

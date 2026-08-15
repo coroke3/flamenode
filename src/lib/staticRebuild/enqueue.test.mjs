@@ -20,10 +20,10 @@ test("通常 enqueue は active row のCASと同時insert競合を有限回だ�
 test("bulk queue builderはprefetchなしのjson_each UPSERTを使う", () => {
   const batchFn = source.slice(
     source.indexOf("export async function buildStaticRebuildQueueBatch"),
-    source.indexOf("async function shouldSkipRecentEnqueue"),
+    source.indexOf("export async function enqueueStaticRebuild"),
   );
   assert.match(source, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0/);
-  assert.match(source, /STATIC_REBUILD_BULK_UPSERT_ROWS = 10/);
+  assert.match(source, /STATIC_REBUILD_BULK_UPSERT_ROWS = 50/);
   assert.doesNotMatch(batchFn, /\.select\(staticRebuildActiveLookupSelect\)/);
   assert.doesNotMatch(batchFn, /indexUniqueStaticRebuildTargetRows/);
   assert.match(batchFn, /FROM json_each\(\$\{payload\}\)/);
@@ -89,8 +89,8 @@ test("16 target UPSERTはchunk 10以下でbind上限内", async () => {
       reason: "test_enqueue",
     }));
     const batch = await buildStaticRebuildQueueBatch(db, items);
-    assert.equal(batch.statements.length, 2);
-    assert.deepEqual(batch.expectedChanges, [10, 6]);
+    assert.equal(batch.statements.length, 1);
+    assert.deepEqual(batch.expectedChanges, [16]);
     for (const statement of batch.statements) {
       const query =
         typeof statement.getQuery === "function"

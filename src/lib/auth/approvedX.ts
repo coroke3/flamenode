@@ -1,6 +1,7 @@
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { DB } from "@/lib/db/client";
 import { xUserAccountLinks, xUsers } from "@/lib/db/schema";
 import type { XUserLinkRole } from "./xIdentity";
@@ -8,6 +9,50 @@ import type { XUserLinkRole } from "./xIdentity";
 export type ApprovedXQueryOptions = {
   linkRoles?: readonly XUserLinkRole[];
 };
+
+/**
+ * Keep authorization predicates below D1's bind limit even for an account
+ * linked to many approved X identities.  Small sets retain the indexed IN
+ * plan; larger sets travel as one JSON1 bind instead of overflowing a
+ * statement that also contains video/event predicates.
+ */
+export const APPROVED_X_IDS_IN_ARRAY_MAX = 80;
+
+function uniqueXIds(ids: readonly string[]): string[] {
+  return Array.from(new Set(ids.map((id) => String(id).trim()).filter(Boolean)));
+}
+
+export function approvedXIdsWhere(
+  column: AnySQLiteColumn,
+  ids: readonly string[],
+): SQL {
+  const unique = uniqueXIds(ids);
+  if (unique.length === 0) return sql`false`;
+  if (unique.length <= APPROVED_X_IDS_IN_ARRAY_MAX) {
+    return inArray(column, unique);
+  }
+  return sql`EXISTS (
+    SELECT 1
+    FROM json_each(${JSON.stringify(unique)}) AS approved_x_ids
+    WHERE CAST(approved_x_ids.value AS TEXT) = ${column}
+  )`;
+}
+
+export function approvedXIdsNotWhere(
+  column: AnySQLiteColumn,
+  ids: readonly string[],
+): SQL {
+  const unique = uniqueXIds(ids);
+  if (unique.length === 0) return sql`true`;
+  if (unique.length <= APPROVED_X_IDS_IN_ARRAY_MAX) {
+    return sql`NOT (${inArray(column, unique)})`;
+  }
+  return sql`${column} IS NOT NULL AND NOT EXISTS (
+    SELECT 1
+    FROM json_each(${JSON.stringify(unique)}) AS approved_x_ids
+    WHERE CAST(approved_x_ids.value AS TEXT) = ${column}
+  )`;
+}
 
 function approvedLinkConditions(
   authUserId: string,

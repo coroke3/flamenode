@@ -1,6 +1,7 @@
 import type { VideoAtomicWritePlan } from "./atomicWritePlan.ts";
 import type { MemberInput } from "./memberInputs.ts";
 import { parseVideoMemberSetSnapshot } from "./memberSetSnapshot.ts";
+import { normalizeXId } from "#utils/xid";
 
 export function extractPreviousPublicMemberXUserIdsFromMembersPlan(
   membersPlan: VideoAtomicWritePlan,
@@ -15,7 +16,7 @@ export function extractPreviousPublicMemberXUserIdsFromMembersPlan(
   return [
     ...new Set(
       snapshot.rows
-        .map((row) => row.x_user_id?.trim())
+        .map((row) => normalizeXId(row.x_user_id ?? ""))
         .filter((id): id is string => Boolean(id)),
     ),
   ];
@@ -29,12 +30,31 @@ export function collectMemberAggregationAffectedXUserIds(args: {
 }): Set<string> {
   const ids = new Set<string>();
   const add = (id: string | null | undefined) => {
-    const trimmed = id?.trim();
-    if (trimmed) ids.add(trimmed);
+    const normalized = normalizeXId(id ?? "");
+    if (normalized) ids.add(normalized);
   };
-  add(args.previousCreatorXUserId);
-  add(args.nextCreatorXUserId);
-  for (const id of args.previousMemberXUserIds) add(id);
-  for (const member of args.nextMembers) add(member.x_user_id);
+  const previousMembers = new Set(
+    args.previousMemberXUserIds
+      .map((id) => normalizeXId(id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const nextMembers = new Set(
+    args.nextMembers
+      .map((member) => normalizeXId(member.x_user_id))
+      .filter((id): id is string => Boolean(id)),
+  );
+  for (const id of previousMembers) {
+    if (!nextMembers.has(id)) add(id);
+  }
+  for (const id of nextMembers) {
+    if (!previousMembers.has(id)) add(id);
+  }
+  if (
+    normalizeXId(args.previousCreatorXUserId ?? "") !==
+    normalizeXId(args.nextCreatorXUserId ?? "")
+  ) {
+    add(args.previousCreatorXUserId);
+    add(args.nextCreatorXUserId);
+  }
   return ids;
 }

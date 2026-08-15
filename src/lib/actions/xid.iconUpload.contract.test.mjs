@@ -21,7 +21,8 @@ test("uploadXIdIcon は連携確認・承認済みチェック・検証・失敗
   );
   assert.match(uploadBlock, /tryDeleteUnreferencedIcon/);
   assert.match(uploadBlock, /runXIdPostCommit\([\s\S]*orphan_icon_cleanup/);
-  assert.match(uploadBlock, /runXIdPostCommit\([\s\S]*static_rebuild_enqueue/);
+  assert.match(uploadBlock, /buildAfterXUserPublicUpdateQueueBatch/);
+  assert.match(uploadBlock, /\.\.\.queue\.statements/);
   assert.match(uploadBlock, /xicons\/staging\//);
   assert.match(uploadBlock, /unstable_rethrow\(error\)/);
   assert.match(uploadBlock, /createTraceId\(\)/);
@@ -44,5 +45,6 @@ test("setXIdIcon は候補検証後に orphan cleanup を post-commit する", (
   assert.match(setBlock, /requireApprovedForEdit\(row\)/);
   assert.match(setBlock, /tryDeleteUnreferencedIcon/);
   assert.match(setBlock, /runXIdPostCommit\([\s\S]*orphan_icon_cleanup/);
-  assert.match(setBlock, /runXIdPostCommit\([\s\S]*static_rebuild_enqueue/);
+  assert.match(setBlock, /buildAfterXUserPublicUpdateQueueBatch/);
+  assert.match(setBlock, /\.\.\.queue\.statements/);
 });

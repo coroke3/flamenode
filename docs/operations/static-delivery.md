@@ -2,12 +2,13 @@
 
 ## Visibility fence lifecycle
 
-When an event or video changes from public to a non-public status, the D1
-mutation is paired with an R2 blocked-visibility manifest entry before the
-transaction. Re-publication keeps that block in `release_pending` until the
-static artifact rebuild has completed. The generator then removes only the
-matching token with an ETag/CAS check. This keeps D1 authoritative and avoids
-serving stale public JSON during either transition.
+When an event, video, event group, or listable X user changes from public to a
+non-public status, the D1 mutation is paired with an R2 blocked-visibility
+manifest entry before the transaction. Re-publication keeps that block in
+`release_pending` until the static artifact rebuild has completed. The
+generator then removes only the matching token with an ETag/CAS check. This
+keeps D1 authoritative and avoids serving stale public JSON during either
+transition.
 The video detail projection also filters event references against the same
 manifest, so an event that is being withdrawn is not shown from a stale video
 artifact while its event projections are rebuilding.
@@ -18,6 +19,11 @@ Event ID rename also writes an old-ID tombstone before the D1 key migration
 and queues an explicit composed-artifact cleanup. The tombstone remains as a
 permanent old-URL block so a stale object can never become public again, and
 the old ID cannot be reused by a newly-created event.
+The read-only `check:public-visibility-fences --remote` check covers video,
+event, event-group, and X-user fences. A matching `release_pending` row with
+its manifest entry is an expected promotion window; a missing entry, token
+mismatch, or released row that still appears in the manifest is reported for
+follow-up.
 
 > Status: Active
 > Last verified: 2026-07-31
@@ -39,6 +45,25 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しない。各呼び出しは、そのrequestのCloudflare bindingだけで完結させる。重複読み込みの抑制とstale復旧はCache APIで行う。
 
 `static_json_with_live_overlay` では、R2の一覧JSONが空でもD1へ公開作品が追加済みの可能性があるため、空のcollectionをsemantic missとして扱い degraded D1 へ進める。`static_json_only` と `maintenance` では、空の静的JSONをそのまま利用するか、D1 fallback しない。
+
+Detail/event/user/rules loaders opt into `cacheMode: "r2_first"` when a
+freshness-sensitive projection is required. They read R2 before Cache API and
+may use only a bounded-age Cache envelope when R2 is unavailable; raw legacy
+Cache payloads without `stored_at` are not accepted as stale fallback. The
+existing visibility fence guard still runs first, and an enforce-mode manifest
+read failure is reported as `unavailable`. `cacheMode: "bypass"` remains
+available for strict callers and skips both Cache API reads and writes. All
+public artifact reads also pass through a pure target-type visibility filter
+before normalization, so explicit private rows in stale artifacts cannot be
+rendered. X-user rows use the canonical public-listable approval set
+(`approved`, `pending`, and `imported`); unknown or rejected markers are
+filtered. Large approved-X authorization predicates use one JSON1 bind while
+preserving the old NULL semantics.
+
+Public video artifacts contain public chapters only. An authenticated video
+viewer may receive a separate private-chapter overlay after the normal
+ownership and approved-X checks; overlay failure is fail-closed for private
+rows and does not replace usable public static detail.
 
 ### Kill switch / static-only / circuit breaker
 
