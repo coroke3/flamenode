@@ -128,15 +128,6 @@ export default async function SettingsPage({
     other_social_links: x.other_social_links,
   }));
 
-  const iconCandidatesById: Record<string, string[]> = {};
-  const channelCandidatesById: Record<string, string[]> = {};
-  if (db && xIds.length > 0) {
-    for (const x of xIds) {
-      iconCandidatesById[x.id] = await getXIconCandidates(db, x.id, 12);
-      channelCandidatesById[x.id] = await getYoutubeChannelCandidates(db, x.id, 24);
-    }
-  }
-
   const hasLinkedXIds = xIds.length > 0;
   const mergeCandidates = xIds
     .filter((x) => x.approval_status === "approved")
@@ -160,6 +151,7 @@ export default async function SettingsPage({
     null;
 
   const activeXPanel = selectedX ?? defaultX;
+
   const showUtilityTab =
     isOnboarding
       ? "link"
@@ -169,6 +161,19 @@ export default async function SettingsPage({
           : xIds.length === 0 && requestHistory.length > 0
             ? "history"
             : null);
+  const xTabSelected = showUtilityTab == null && activeXPanel != null;
+
+  // 候補フォームは表示中のActive X IDだけが使うため、全連携X IDを走査しない。
+  const iconCandidatesById: Record<string, string[]> = {};
+  const channelCandidatesById: Record<string, string[]> = {};
+  if (db && xTabSelected && activeXPanel) {
+    const [iconCandidates, channelCandidates] = await Promise.all([
+      getXIconCandidates(db, activeXPanel.id, 12),
+      getYoutubeChannelCandidates(db, activeXPanel.id, 24),
+    ]);
+    iconCandidatesById[activeXPanel.id] = iconCandidates;
+    channelCandidatesById[activeXPanel.id] = channelCandidates;
+  }
 
   const buildSettingsHref = (opts: {
     x?: string | null;
@@ -187,8 +192,6 @@ export default async function SettingsPage({
   };
 
   const onboardingSuccessHref = next ?? "/dashboard";
-
-  const xTabSelected = showUtilityTab == null && activeXPanel != null;
 
   return (
     <div className={`fn-public-container fn-page ${pageStyles.wrap}`}>

@@ -10,13 +10,16 @@ import {
   slots as slotsTable,
   users as usersTable,
 } from "@/lib/db/schema";
-import { canEditEvent } from "@/lib/auth/ownership";
+import {
+  canEditEventFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
 import { SlotBatchForm } from "@/components/admin/SlotBatchForm";
 import { SlotList } from "@/components/admin/SlotList";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
-import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 
 export const dynamic = "force-dynamic";
 
@@ -70,15 +73,11 @@ export default async function ManageEventSlotsPage({
   )[0];
   if (!event) notFound();
   const isAdmin = guard.user.role === "admin";
-  if (
-    !isAdmin &&
-    !(await canEditEvent(
-      db,
-      { id: guard.user.id, role: guard.user.role ?? null },
-      id,
-      "event.slots",
-    ))
-  ) {
+  const authorization = await getManageAuthorizationSnapshot(
+    guard.user.id,
+    guard.user.role ?? null,
+  );
+  if (!canEditEventFromSnapshot(authorization, id, "event.slots")) {
     notFound();
   }
 
@@ -123,7 +122,11 @@ export default async function ManageEventSlotsPage({
     countRows.map((row) => [row.status, Number(row.count ?? 0)]),
   );
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-  const pendingCount = await getEventPendingReviewVideoCount(id);
+  const navigation = await getManageNavigationSnapshot(
+    guard.user.id,
+    guard.user.role ?? null,
+  );
+  const pendingCount = navigation.pendingByEvent.get(id) ?? 0;
 
   return (
     <ManageEventPageShell

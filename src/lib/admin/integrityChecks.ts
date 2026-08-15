@@ -44,18 +44,6 @@ function eventHref(id: string): string {
   return `/manage/events/${encodeURIComponent(id)}`;
 }
 
-async function countRows(
-  db: DB,
-  from: SQL,
-  where: SQL = sql`1 = 1`,
-): Promise<number> {
-  const rows = await db
-    .select({ c: sql<number>`COUNT(*)` })
-    .from(from)
-    .where(where);
-  return Number(rows[0]?.c ?? 0);
-}
-
 function finalize(
   base: Omit<IntegrityCheckResult, "moreCount">,
 ): IntegrityCheckResult {
@@ -79,14 +67,18 @@ export async function makeCheck(args: {
   sqlPreview?: string;
   mapIssue(row: RawRow): IntegrityIssue;
 }): Promise<IntegrityCheckResult> {
-  const [count, rows] = await Promise.all([
-    countRows(args.db, args.from, args.where),
-    args.db
-      .select(args.sampleSelect)
-      .from(args.from)
-      .where(args.where ?? sql`1 = 1`)
-      .limit(DISPLAY_LIMIT),
-  ]);
+  // The window count keeps the full matching-row count while returning only
+  // the bounded sample. This removes one full COUNT(*) scan per check.
+  const rows = await args.db
+    .select({
+      ...args.sampleSelect,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
+    .from(args.from)
+    .where(args.where ?? sql`1 = 1`)
+    .limit(DISPLAY_LIMIT);
+  const rawRows = rows as RawRow[];
+  const count = Number(rawRows[0]?.total_count ?? 0);
   return finalize({
     id: args.id,
     title: args.title,
@@ -94,9 +86,62 @@ export async function makeCheck(args: {
     severity: args.severity,
     description: args.description,
     count,
-    issues: (rows as RawRow[]).map(args.mapIssue),
+    issues: rawRows.map(args.mapIssue),
     recommendation: args.recommendation,
     sqlPreview: args.sqlPreview,
+  });
+}
+
+/**
+ * 同一 event / start_time の別枠を、D1側の self-join で一意なペアとして数える。
+ * NULL の reservation_group_id は既存のJS検査と同じく別グループ扱いにする。
+ */
+async function makeSlotDuplicateStartTimeCheck(
+  db: DB,
+): Promise<IntegrityCheckResult> {
+  const pairWhere = sql`
+    s1.start_time IS NOT NULL
+    AND s2.start_time = s1.start_time
+    AND s2.event_id = s1.event_id
+    AND s1.id < s2.id
+    AND (
+      s1.reservation_group_id IS NULL
+      OR s2.reservation_group_id IS NULL
+      OR s1.reservation_group_id <> s2.reservation_group_id
+    )
+  `;
+  const pairFrom = sql`slots AS s1, slots AS s2`;
+  const sampleRows = await db
+    .select({
+      left_id: sql<string>`s1.id`,
+      right_id: sql<string>`s2.id`,
+      event_id: sql<string>`s1.event_id`,
+      start_time: sql<number>`s1.start_time`,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
+    .from(pairFrom)
+    .where(pairWhere)
+    .orderBy(sql`s1.event_id, s1.start_time, s1.id, s2.id`)
+    .limit(5);
+  const count = Number(sampleRows[0]?.total_count ?? 0);
+  const issues = sampleRows.map((row) => ({
+    id: `${text(row.left_id)}:${text(row.right_id)}`,
+    title: `slot:${text(row.left_id)} / ${text(row.right_id)}`,
+    description: `event:${text(row.event_id)} start_time:${text(row.start_time)}`,
+    adminHref: eventHref(text(row.event_id)),
+  }));
+  return finalize({
+    id: "slots_duplicate_start_time",
+    area: "slots",
+    title: "同一開始時刻の別枠",
+    severity: "warning",
+    description:
+      "同一 event 内に同じ start_time で、reservation_group_id が異なる枠が存在する状態。",
+    count,
+    issues,
+    recommendation:
+      "連続枠なら同じ reservation_group_id に揃え、別枠なら開始時刻または部の切り方を見直してください。",
+    sqlPreview: "-- Review start_time and reservation_group_id for the sampled slots.",
   });
 }
 
@@ -523,39 +568,7 @@ export async function runIntegrityChecks(
         adminHref: eventHref(text(r.event_id)),
       }),
     }),
-    makeCheck({
-      db,
-      id: "slots_duplicate_start_time",
-      area: "slots",
-      title: "同一開始時刻の別枠",
-      severity: "warning",
-      description:
-        "同一 event 内に同じ start_time で、reservation_group_id が異なる枠が存在する状態。",
-      from: sql`slots`,
-      where: sql`start_time IS NOT NULL
-        AND EXISTS (
-          SELECT 1 FROM slots s2
-          WHERE s2.event_id = slots.event_id
-            AND s2.id <> slots.id
-            AND s2.start_time = slots.start_time
-            AND COALESCE(s2.reservation_group_id, '') <> COALESCE(slots.reservation_group_id, '')
-        )`,
-      sampleSelect: {
-        id: sql<string>`id`,
-        event_id: sql<string>`event_id`,
-        start_time: sql<number>`start_time`,
-      },
-      recommendation:
-        "連続枠なら同じ reservation_group_id に揃え、別枠なら開始時刻または部の切り方を見直してください。",
-      sqlPreview:
-        "-- Review start_time and reservation_group_id for the sampled slots.",
-      mapIssue: (r) => ({
-        id: text(r.id),
-        title: `slot:${text(r.id)}`,
-        description: `start_time:${text(r.start_time)}`,
-        adminHref: eventHref(text(r.event_id)),
-      }),
-    }),
+    makeSlotDuplicateStartTimeCheck(db),
     makeCheck({
       db,
       id: "derived_missing_youtube_metadata",

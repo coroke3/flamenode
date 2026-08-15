@@ -1,9 +1,9 @@
 import "server-only";
 
-import { and, desc, inArray, isNotNull } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import type { XLinkRequestRow } from "@/components/admin/XLinkRequestTable";
 import type { DB } from "@/lib/db/client";
-import { videos, xUsers } from "@/lib/db/schema";
+import { xUsers } from "@/lib/db/schema";
 import { D1_MAX_BIND_PARAMETERS } from "@/lib/audit/mutateBudget";
 import { normalizeXId } from "@/lib/utils/xid";
 
@@ -30,7 +30,6 @@ function chunkIds(ids: string[], size = D1_MAX_BIND_PARAMETERS): string[][] {
 export async function enrichXLinkPendingRows(
   db: DB,
   pendingBase: XLinkPendingBaseRow[],
-  options: { includeVideoIconFallback?: boolean } = {},
 ): Promise<XLinkRequestRow[]> {
   const xIds = new Set<string>();
   for (const row of pendingBase) {
@@ -40,7 +39,10 @@ export async function enrichXLinkPendingRows(
     if (target) xIds.add(target);
   }
 
-  const xUserById = new Map<string, { x_name: string; icon_url: string | null }>();
+  const xUserById = new Map<
+    string,
+    { x_name: string; icon_url: string | null; approval_status: string | null }
+  >();
   const idList = Array.from(xIds);
   for (const chunk of chunkIds(idList)) {
     if (chunk.length === 0) continue;
@@ -49,43 +51,18 @@ export async function enrichXLinkPendingRows(
         id: xUsers.id,
         x_name: xUsers.x_name,
         icon_url: xUsers.icon_url,
+        approval_status: xUsers.approval_status,
       })
       .from(xUsers)
       .where(inArray(xUsers.id, chunk));
     for (const row of xUserRows) {
-      xUserById.set(row.id, { x_name: row.x_name, icon_url: row.icon_url });
+      xUserById.set(row.id, {
+        x_name: row.x_name,
+        icon_url: row.icon_url,
+        approval_status: row.approval_status,
+      });
     }
   }
-
-  const videoIconByXId = new Map<string, string>();
-  if (options.includeVideoIconFallback) {
-    const needingIcon = idList.filter((id) => !xUserById.get(id)?.icon_url);
-    for (const chunk of chunkIds(needingIcon)) {
-      if (chunk.length === 0) continue;
-      const videoRows = await db
-        .select({
-          creator_x_user_id: videos.creator_x_user_id,
-          creator_icon_url: videos.creator_icon_url,
-        })
-        .from(videos)
-        .where(
-          and(
-            inArray(videos.creator_x_user_id, chunk),
-            isNotNull(videos.creator_icon_url),
-          )!,
-        )
-        .orderBy(desc(videos.created_at));
-      for (const row of videoRows) {
-        const xId = normalizeXId(row.creator_x_user_id);
-        if (xId && row.creator_icon_url && !videoIconByXId.has(xId)) {
-          videoIconByXId.set(xId, row.creator_icon_url);
-        }
-      }
-    }
-  }
-
-  const resolveIcon = (xId: string): string | null =>
-    xUserById.get(xId)?.icon_url ?? videoIconByXId.get(xId) ?? null;
 
   return pendingBase.map((row) => {
     const requestedXId = normalizeXId(row.requested_x_id);
@@ -101,8 +78,18 @@ export async function enrichXLinkPendingRows(
       request_type: row.request_type as XLinkRequestRow["request_type"],
       target_x_user_id: row.target_x_user_id,
       requested_x_name: requestedXUser?.x_name ?? null,
-      requested_icon_url: requestedXId ? resolveIcon(requestedXId) : null,
-      target_icon_url: targetXId ? resolveIcon(targetXId) : null,
+      requested_icon_url: requestedXId
+        ? xUserById.get(requestedXId)?.icon_url ?? null
+        : null,
+      requested_approval_status: requestedXId
+        ? xUserById.get(requestedXId)?.approval_status ?? null
+        : null,
+      target_icon_url: targetXId
+        ? xUserById.get(targetXId)?.icon_url ?? null
+        : null,
+      target_approval_status: targetXId
+        ? xUserById.get(targetXId)?.approval_status ?? null
+        : null,
     };
   });
 }

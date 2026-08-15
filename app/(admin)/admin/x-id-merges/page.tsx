@@ -17,7 +17,7 @@ import {
   rejectXIdMergeRevert,
 } from "@/lib/actions/xid-merge-admin";
 import {
-  fetchXIdMergeImpacts,
+  fetchXIdMergeImpact,
   summarizeMergeImpact,
   totalMergeImpact,
   type XIdMergeImpactItem,
@@ -33,7 +33,7 @@ async function run(action: (formData: FormData) => Promise<unknown>, formData: F
 }
 
 interface Props {
-  searchParams?: Promise<{ view?: string }>;
+  searchParams?: Promise<{ view?: string; impact?: string }>;
 }
 
 type MergeRow = typeof xIdentityRequests.$inferSelect & {
@@ -45,11 +45,12 @@ type MergeRow = typeof xIdentityRequests.$inferSelect & {
 export default async function AdminXIdMergesPage({ searchParams }: Props): Promise<React.ReactElement> {
   const sp = (await searchParams) ?? {};
   const view = sp.view === "reverts" ? "reverts" : "requests";
+  const selectedImpactId = (sp.impact ?? "").trim().slice(0, 128);
   const db = getDatabase();
   let requests: MergeRow[] = [];
   let reverts: Array<typeof xIdentityRequests.$inferSelect> = [];
 
-  if (db) {
+  if (db && view === "requests") {
     const requestRows = await db
       .select({
         id: xIdentityRequests.id,
@@ -98,35 +99,27 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
       targetNameRows.map((row) => [row.id, row.name] as const),
     );
 
-    const impactSourceIds = Array.from(
-      new Set(
-        requestRows
-          .slice(0, 20)
-          .filter(
-            (row) =>
-              Boolean(row.source_x_user_id) &&
-              (row.status === "pending" || row.status === "approved"),
-          )
-          .map((row) => row.source_x_user_id as string),
-      ),
+    // Impact counts are intentionally loaded only after an administrator selects
+    // one pending/approved request. The normal list must not scan nine unrelated
+    // tables for every visible row.
+    const selectedRequest = requestRows.find(
+      (row) =>
+        row.id === selectedImpactId &&
+        Boolean(row.source_x_user_id) &&
+        (row.status === "pending" || row.status === "approved"),
     );
-    const impactBySourceId =
-      impactSourceIds.length > 0
-        ? await fetchXIdMergeImpacts(db, impactSourceIds)
-        : new Map<string, XIdMergeImpactItem[]>();
+    const selectedImpact = selectedRequest?.source_x_user_id
+      ? await fetchXIdMergeImpact(db, selectedRequest.source_x_user_id)
+      : [];
 
-    requests = requestRows.map((row, index) => ({
+    requests = requestRows.map((row) => ({
       ...row,
       target_name: row.target_x_user_id
         ? targetNameById.get(row.target_x_user_id) ?? null
         : null,
-      impact:
-        index < 20 &&
-        row.source_x_user_id &&
-        (row.status === "pending" || row.status === "approved")
-          ? impactBySourceId.get(row.source_x_user_id) ?? []
-          : [],
+      impact: row.id === selectedImpactId ? selectedImpact : [],
     }));
+  } else if (db) {
     reverts = await db
       .select()
       .from(xIdentityRequests)
@@ -157,7 +150,7 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
               <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm"><Icon name="plus" size={12} aria-hidden />申請作成</button>
             </form>
           </section>
-          <MergeRequestTable rows={requests} />
+          <MergeRequestTable rows={requests} selectedImpactId={selectedImpactId} />
         </>
       ) : (
         <RevertTable rows={reverts} />
@@ -166,7 +159,13 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
   );
 }
 
-function MergeRequestTable({ rows }: { rows: MergeRow[] }): React.ReactElement {
+function MergeRequestTable({
+  rows,
+  selectedImpactId,
+}: {
+  rows: MergeRow[];
+  selectedImpactId: string;
+}): React.ReactElement {
   return (
     <section style={{ marginTop: 22 }}>
       <FnTable>
@@ -182,7 +181,21 @@ function MergeRequestTable({ rows }: { rows: MergeRow[] }): React.ReactElement {
                   <div className="fn-muted" style={{ fontSize: 11 }}>{row.source_name ?? "?"} → {row.target_name ?? "?"}</div>
                 </td>
                 <td>
-                  {row.impact.length === 0 ? <span className="fn-muted fn-text-sm">完了・却下済み、または未計算</span> : (
+                  {row.impact.length === 0 ? (
+                    row.id === selectedImpactId ? (
+                      <span className="fn-muted fn-text-sm">完了・却下済み、または未計算</span>
+                    ) : row.source_x_user_id &&
+                      (row.status === "pending" || row.status === "approved") ? (
+                      <Link
+                        href={`/admin/x-id-merges?impact=${encodeURIComponent(row.id)}`}
+                        className="fn-btn fn-btn-ghost fn-btn-sm"
+                      >
+                        影響範囲を確認
+                      </Link>
+                    ) : (
+                      <span className="fn-muted fn-text-sm">完了・却下済み、または未計算</span>
+                    )
+                  ) : (
                     <details><summary>{total.toLocaleString()} 行 / {summarizeMergeImpact(row.impact)}</summary>
                       <ul style={{ margin: "6px 0 0", paddingLeft: 16, fontSize: 12 }}>{row.impact.map((item) => <li key={item.key}><code>{item.key}</code>: {item.count}</li>)}</ul>
                     </details>

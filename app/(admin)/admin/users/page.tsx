@@ -5,10 +5,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { and, desc, eq, isNotNull, isNull, like, or, sql, inArray } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import {
   users as usersTable,
-  systemSettings,
   xUserAccountLinks,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
@@ -22,6 +21,9 @@ import { GlobalEditableFieldsPanel } from "@/components/admin/GlobalEditableFiel
 import { Pagination } from "@/components/ui/Pagination";
 import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import { readAdminSystemSettings } from "@/lib/admin/adminSystemSettings";
+import { ManageXIcon } from "@/components/manage/ManageXIcon";
+import { resolveManageXIconUrl } from "@/lib/media/manageXIcon";
 
 const USERS_PAGE_SIZE = 50;
 
@@ -31,14 +33,12 @@ export const dynamic = "force-dynamic";
 type AdminUserRow = {
   id: string;
   name: string | null;
-  email: string | null;
   image: string | null;
   role: "user" | "admin" | "moderator" | null;
   is_banned: number | null;
   can_create_events: number | null;
   active_x_user_id: string | null;
   active_x_name: string | null;
-  active_x_icon_url: string | null;
   created_at: number;
 };
 
@@ -57,7 +57,6 @@ type CurrentLinkedXRow = {
   user_id: string | null;
   x_user_id: string;
   x_name: string | null;
-  icon_url: string | null;
   approval_status: string | null;
 };
 
@@ -112,15 +111,13 @@ export default async function AdminUsersPage({
       const escapedX = escapeLike(normalizedXQuery || rawQuery);
       const xTerm = `%${escapedX.toLowerCase()}%`;
       if (activeView === "permissions") {
-        permissionSettings =
-          (await db
-            .select({
-              default_editable_fields: systemSettings.default_editable_fields,
-              upcoming_editable_fields: systemSettings.upcoming_editable_fields,
-            })
-            .from(systemSettings)
-            .where(eq(systemSettings.id, "default"))
-            .limit(1))[0] ?? permissionSettings;
+        const settings = await readAdminSystemSettings(db);
+        if (settings) {
+          permissionSettings = {
+            default_editable_fields: settings.default_editable_fields,
+            upcoming_editable_fields: settings.upcoming_editable_fields,
+          };
+        }
       } else if (activeView === "xid") {
         const xFilter = q
           ? or(
@@ -162,15 +159,29 @@ export default async function AdminUsersPage({
           db,
           baseRows.map((row) => row.id),
         );
-        xRows = baseRows.map((row) => ({
-          ...row,
-          ...(enrichment.get(row.id) ?? {
-            primary_auth_user_id: null,
-            primary_auth_user_name: null,
-            linked_auth_user_count: 0,
-            active_holder_count: 0,
-          }),
-        }));
+        let authSecret: string | undefined;
+        try {
+          authSecret = getEnv().AUTH_SECRET;
+        } catch {
+          // Manage icon signing is fail-closed when the runtime env is unavailable.
+          authSecret = undefined;
+        }
+        xRows = await Promise.all(
+          baseRows.map(async (row) => ({
+            ...row,
+            icon_url: await resolveManageXIconUrl({
+              iconUrl: row.icon_url,
+              approvalStatus: row.approval_status,
+              authSecret,
+            }),
+            ...(enrichment.get(row.id) ?? {
+              primary_auth_user_id: null,
+              primary_auth_user_name: null,
+              linked_auth_user_count: 0,
+              active_holder_count: 0,
+            }),
+          })),
+        );
       } else {
         // DiscordタブはDiscordログイン済みだけ。X情報は表示対象ユーザーの
         // linked rowsを後段で一括取得し、一覧の行ごとのJOINを避ける。
@@ -220,14 +231,12 @@ export default async function AdminUsersPage({
           .select({
             id: usersTable.id,
             name: usersTable.name,
-            email: usersTable.email,
             image: usersTable.image,
             role: usersTable.role,
             is_banned: usersTable.is_banned,
             can_create_events: usersTable.can_create_events,
             active_x_user_id: usersTable.active_x_user_id,
             active_x_name: sql<string | null>`NULL`,
-            active_x_icon_url: sql<string | null>`NULL`,
             created_at: usersTable.created_at,
           })
           .from(usersTable)
@@ -252,7 +261,6 @@ export default async function AdminUsersPage({
                   user_id: xUserAccountLinks.auth_user_id,
                   x_user_id: xUsersTable.id,
                   x_name: xUsersTable.x_name,
-                  icon_url: xUsersTable.icon_url,
                   approval_status: xUsersTable.approval_status,
                 })
                 .from(xUserAccountLinks)
@@ -283,7 +291,6 @@ export default async function AdminUsersPage({
           return {
             ...row,
             active_x_name: active?.x_name ?? null,
-            active_x_icon_url: active?.icon_url ?? null,
           };
         });
       }
@@ -405,10 +412,10 @@ function DiscordTable({
           <tr key={u.id}>
             <td>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {u.image ?? u.active_x_icon_url ? (
+                {u.image ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={u.image ?? u.active_x_icon_url ?? ""}
+                    src={u.image}
                     alt=""
                     width={28}
                     height={28}
@@ -416,6 +423,7 @@ function DiscordTable({
                   />
                 ) : (
                   <span
+                    aria-hidden="true"
                     style={{
                       width: 28,
                       height: 28,
@@ -537,30 +545,7 @@ function XIdTable({ rows }: { rows: AdminXUserRow[] }): React.ReactElement {
             <tr key={`${x.id}-x-row-${index}`}>
               <td>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {x.icon_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={x.icon_url}
-                      alt=""
-                      width={28}
-                      height={28}
-                      style={{ borderRadius: 999, objectFit: "cover" }}
-                    />
-                  ) : (
-                    <span
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 999,
-                        display: "grid",
-                        placeItems: "center",
-                        background: "var(--bg-elevated)",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      <Icon name="user" size={12} aria-hidden />
-                    </span>
-                  )}
+                  <ManageXIcon iconUrl={x.icon_url} label={x.x_name} size={28} />
                   <span>
                     <strong>{x.x_name}</strong>
                     <span style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>

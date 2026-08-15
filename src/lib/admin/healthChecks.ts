@@ -236,59 +236,36 @@ async function checkVoidedVideoVisible(db: AnyDb): Promise<HealthCheckResult> {
 
 /** Detect same-start slots that are not part of the same reservation group. */
 async function checkSlotDuplicateStartTime(db: AnyDb): Promise<HealthCheckResult> {
-  // Slot end_time is intentionally ignored; continuous slots are start/gap based.
-  const rows = await db
+  // Keep the existing semantics (NULL groups are distinct, while two
+  // non-NULL rows in the same reservation group are one continuous slot),
+  // but let SQLite/D1 compare pairs instead of loading every slot into JS.
+  // `s1.id < s2.id` makes each unordered pair count once.
+  const pairWhere = sql`
+    s1.start_time IS NOT NULL
+    AND s2.start_time = s1.start_time
+    AND s2.event_id = s1.event_id
+    AND s1.id < s2.id
+    AND (
+      s1.reservation_group_id IS NULL
+      OR s2.reservation_group_id IS NULL
+      OR s1.reservation_group_id <> s2.reservation_group_id
+    )
+  `;
+  const pairFrom = sql`slots AS s1, slots AS s2`;
+  const sampleRows = await db
     .select({
-      id: slotsTable.id,
-      event_id: slotsTable.event_id,
-      start_time: slotsTable.start_time,
-      reservation_group_id: slotsTable.reservation_group_id,
+      left_id: sql<string>`s1.id`,
+      right_id: sql<string>`s2.id`,
+      total_count: sql<number>`COUNT(*) OVER()`,
     })
-    .from(slotsTable)
-    .where(isNotNull(slotsTable.start_time));
-
-  // Group by event_id before comparing start_time.
-  const byEvent = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const key = row.event_id;
-    let list = byEvent.get(key);
-    if (!list) {
-      list = [];
-      byEvent.set(key, list);
-    }
-    list.push(row);
-  }
-
-  const duplicateSamples: string[] = [];
-  let duplicateCount = 0;
-
-  for (const [, slotList] of byEvent) {
-    // Compare only rows with the same start_time.
-    slotList.sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0));
-
-    for (let i = 0; i < slotList.length; i++) {
-      const cur = slotList[i];
-      const curStart = cur.start_time ?? 0;
-      for (let j = i + 1; j < slotList.length; j++) {
-        const next = slotList[j];
-        const nextStart = next.start_time ?? 0;
-        if (nextStart !== curStart) break;
-
-        // Same reservation_group_id means these rows are one continuous slot.
-        if (
-          cur.reservation_group_id != null &&
-          cur.reservation_group_id === next.reservation_group_id
-        ) {
-          continue;
-        }
-
-        duplicateCount++;
-        if (duplicateSamples.length < 5) {
-          duplicateSamples.push(`${cur.id} / ${next.id}`);
-        }
-      }
-    }
-  }
+    .from(pairFrom)
+    .where(pairWhere)
+    .orderBy(sql`s1.event_id, s1.start_time, s1.id, s2.id`)
+    .limit(5);
+  const duplicateCount = Number(sampleRows[0]?.total_count ?? 0);
+  const duplicateSamples = sampleRows.map(
+    (row) => `${row.left_id} / ${row.right_id}`,
+  );
 
   return {
     id: "slot_duplicate_start_time",
@@ -717,5 +694,23 @@ export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
     checkActiveApiEndpointsOrphanEvent(db),
     checkXIdMergePendingStale(db),
     checkAuditLogsRetentionCandidates(db),
+  ]);
+}
+
+/**
+ * 通常の管理画面表示で確認する、短時間で終わる運用チェックだけを実行する。
+ *
+ * 参照整合性の全件走査、like_count の全動画集計、slot のペア検査などは
+ * `runHealthChecks`（deep/run 明示時）へ残し、通常アクセスでD1を圧迫しない。
+ */
+export async function runOperationalHealthChecks(
+  db: AnyDb,
+): Promise<HealthCheckResult[]> {
+  return Promise.all([
+    checkSystemSettingsSingleRow(db),
+    checkNotificationProcessingStuck(db),
+    checkNotificationFailedVolume(db),
+    checkOpenModerationCasesOverdue(db),
+    checkXIdMergePendingStale(db),
   ]);
 }

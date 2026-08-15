@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { approveXIdLinkRequest, rejectXIdLinkRequest } from "@/lib/actions/xid-admin";
 import { formatUnix } from "@/lib/utils/format";
 import { Icon } from "@/components/ui/Icon";
+import { ManageXIcon } from "@/components/manage/ManageXIcon";
 
 export interface XLinkRequestRow {
   id: string;
@@ -17,7 +18,9 @@ export interface XLinkRequestRow {
   target_x_user_id?: string | null;
   requested_x_name?: string | null;
   requested_icon_url?: string | null;
+  requested_approval_status?: string | null;
   target_icon_url?: string | null;
+  target_approval_status?: string | null;
 }
 
 function xUrl(xId: string): string {
@@ -46,7 +49,6 @@ function XIdPreview({
   iconUrl?: string | null;
   compact?: boolean;
 }): React.ReactElement {
-  const initial = (name ?? xId).trim().slice(0, 1).toUpperCase() || "?";
   return (
     <div
       style={{
@@ -56,41 +58,18 @@ function XIdPreview({
         minWidth: 0,
       }}
     >
-      {iconUrl ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={iconUrl}
-          alt=""
-          width={compact ? 24 : 36}
-          height={compact ? 24 : 36}
-          style={{
-            borderRadius: 6,
-            objectFit: "cover",
-            border: "1px solid var(--border-subtle)",
-            background: "var(--bg-elevated)",
-            flexShrink: 0,
-          }}
-        />
-      ) : (
-        <span
-          aria-hidden
-          style={{
-            width: compact ? 24 : 36,
-            height: compact ? 24 : 36,
-            borderRadius: 6,
-            display: "grid",
-            placeItems: "center",
-            border: "1px solid var(--border-subtle)",
-            background: "var(--bg-elevated)",
-            color: "var(--text-secondary)",
-            fontSize: compact ? 10 : 13,
-            fontWeight: 900,
-            flexShrink: 0,
-          }}
-        >
-          {initial}
-        </span>
-      )}
+      <ManageXIcon
+        iconUrl={iconUrl}
+        label={name ?? xId}
+        size={compact ? 24 : 36}
+        className="x-link-request-avatar"
+        fallbackClassName="x-link-request-avatar-fallback"
+        style={{
+          border: "1px solid var(--border-subtle)",
+          background: "var(--bg-elevated)",
+          flexShrink: 0,
+        }}
+      />
       <span style={{ minWidth: 0 }}>
         <strong style={{ display: "block" }}>
           {name ? `${name} ` : ""}@{xId}

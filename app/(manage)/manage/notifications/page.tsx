@@ -5,9 +5,13 @@ import { notFound } from "next/navigation";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
-import { canAccessManageEvent, getEditableEventIds } from "@/lib/auth/ownership";
 import {
-  events as eventsTable,
+  canAccessManageEventFromSnapshot,
+  getManageAuthorizationSnapshot,
+  getManageStaffXUserIdsFromSnapshot,
+} from "@/lib/auth/manageAuthorization";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import {
   notificationOutbox as notificationOutboxTable,
 } from "@/lib/db/schema";
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
@@ -33,6 +37,16 @@ import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/Conso
 
 export const metadata: Metadata = { title: "通知センター" };
 export const dynamic = "force-dynamic";
+
+const D1_SAFE_EVENT_ID_CHUNK_SIZE = 80;
+
+function chunkEventIds(ids: readonly string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += D1_SAFE_EVENT_ID_CHUNK_SIZE) {
+    chunks.push(ids.slice(index, index + D1_SAFE_EVENT_ID_CHUNK_SIZE));
+  }
+  return chunks;
+}
 
 interface Props {
   searchParams?: Promise<{
@@ -65,19 +79,28 @@ export default async function ManageNotificationsPage({
   if (!db) notFound();
 
   const isAdmin = user.role === "admin";
-  const editableIds = await getEditableEventIds(db, user.id);
-  const managedEvents =
-    editableIds.length > 0
-      ? await db
-          .select({ id: eventsTable.id, title: eventsTable.title })
-          .from(eventsTable)
-          .where(inArray(eventsTable.id, editableIds))
-      : [];
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const editableIds = authorization.manageableEventIds;
+  // Keep the historical admin behavior (no event dropdown), while reusing
+  // the sidebar's request-local event projection for non-admin operators.
+  const managedEvents = isAdmin
+    ? []
+    : navigation.events.map(({ id, title }) => ({ id, title }));
 
   let eventIds = eventFilter ? [eventFilter] : managedEvents.map((event) => event.id);
   if (eventFilter) {
     if (!editableIds.includes(eventFilter)) {
-      const allowed = await canAccessManageEvent(db, user, eventFilter);
+      const allowed = canAccessManageEventFromSnapshot(
+        authorization,
+        eventFilter,
+      );
       if (!allowed) notFound();
     }
     eventIds = [eventFilter];
@@ -88,35 +111,44 @@ export default async function ManageNotificationsPage({
 
   if (eventIds.length > 0) {
     try {
-      const conditions = [inArray(notificationOutboxTable.event_id, eventIds)];
-      if (notifFilter !== "all") {
-        conditions.push(
-          drizzleManageNotificationFilter(
-            notifFilter,
-            notificationOutboxTable.type,
-          ),
-        );
+      const candidates: (typeof notificationOutboxTable.$inferSelect)[] = [];
+      for (const eventIdChunk of chunkEventIds(eventIds)) {
+        const conditions = [
+          inArray(notificationOutboxTable.event_id, eventIdChunk),
+        ];
+        if (notifFilter !== "all") {
+          conditions.push(
+            drizzleManageNotificationFilter(
+              notifFilter,
+              notificationOutboxTable.type,
+            ),
+          );
+        }
+        if (statusFilter === "failed") {
+          conditions.push(
+            inArray(notificationOutboxTable.status, [
+              ...TERMINAL_NOTIFICATION_FAILURE_STATUSES,
+            ]),
+          );
+        } else if (
+          statusFilter === "pending" ||
+          statusFilter === "processing" ||
+          statusFilter === "sent" ||
+          statusFilter === "cancelled"
+        ) {
+          conditions.push(eq(notificationOutboxTable.status, statusFilter));
+        }
+        const chunkRows = await db
+          .select()
+          .from(notificationOutboxTable)
+          .where(and(...conditions)!)
+          .orderBy(desc(notificationOutboxTable.created_at))
+          .limit(50);
+        candidates.push(...chunkRows);
       }
-      if (statusFilter === "failed") {
-        conditions.push(
-          inArray(notificationOutboxTable.status, [
-            ...TERMINAL_NOTIFICATION_FAILURE_STATUSES,
-          ]),
-        );
-      } else if (
-        statusFilter === "pending" ||
-        statusFilter === "processing" ||
-        statusFilter === "sent" ||
-        statusFilter === "cancelled"
-      ) {
-        conditions.push(eq(notificationOutboxTable.status, statusFilter));
-      }
-      rows = await db
-        .select()
-        .from(notificationOutboxTable)
-        .where(and(...conditions)!)
-        .orderBy(desc(notificationOutboxTable.created_at))
-        .limit(50);
+      rows = candidates
+        .sort((left, right) => right.created_at - left.created_at)
+        .slice(0, 50);
     } catch {
       schemaMissing = true;
     }
@@ -140,8 +172,8 @@ export default async function ManageNotificationsPage({
   return (
     <div className="manage-notifications">
       <ManageActiveXNotice
-        userId={user.id}
         activeXUserId={user.active_x_user_id}
+        manageStaffXUserIds={getManageStaffXUserIdsFromSnapshot(authorization)}
       />
       <ManagePageHeader
         title="通知センター"

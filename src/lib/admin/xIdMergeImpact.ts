@@ -142,9 +142,9 @@ export async function fetchXIdMergeImpact(
 /**
  * Fetch impact counts for several source IDs in one bounded D1 statement.
  *
- * The old single-ID helper remains the compatibility path for callers that only
- * need one source. This batch path is used by the admin list, where up to 20
- * rows can otherwise cause 20 repeated scans of each impact table.
+ * The single-ID helper is the default path for the admin list: it is called only
+ * after one request is selected. Keep this bounded batch helper for future
+ * explicit multi-request tooling, but do not call it during an initial page view.
  */
 export async function fetchXIdMergeImpacts(
   db: AnyDb,

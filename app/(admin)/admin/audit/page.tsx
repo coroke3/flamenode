@@ -80,7 +80,6 @@ const COMMON_TABLES = [
   "x_identity_requests",
   "notification_outbox",
   "system_settings",
-  "system_settings",
 ] as const;
 
 function diffSummary(row: AuditRow): { keys: string[]; count: number } {
@@ -165,10 +164,8 @@ export default async function AdminAuditPage({
         .select({
           id: usersTable.id,
           name: usersTable.name,
-          image: usersTable.image,
           active_x_user_id: usersTable.active_x_user_id,
           x_name: xUsersTable.x_name,
-          x_icon: xUsersTable.icon_url,
         })
         .from(usersTable)
         .leftJoin(
@@ -475,10 +472,8 @@ function DiffSummaryCell({
 type OperatorInfo = {
   id: string;
   name: string | null;
-  image: string | null;
   active_x_user_id: string | null;
   x_name: string | null;
-  x_icon: string | null;
 };
 
 function OperatorBadge({
@@ -492,7 +487,6 @@ function OperatorBadge({
     discord_name?: string | null;
     x_user_id?: string | null;
     x_name?: string | null;
-    icon_url?: string | null;
   } | null = null;
   if (row.actor_snapshot_json) {
     try {
@@ -506,7 +500,6 @@ function OperatorBadge({
     snapshot?.discord_name ?? live?.name ?? row.actor_user_id;
   const xId = snapshot?.x_user_id ?? live?.active_x_user_id ?? null;
   const xName = snapshot?.x_name ?? live?.x_name ?? null;
-  const iconUrl = snapshot?.icon_url ?? live?.x_icon ?? live?.image ?? null;
   return (
     <span
       style={{
@@ -516,16 +509,6 @@ function OperatorBadge({
         minWidth: 0,
       }}
     >
-      {iconUrl ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={iconUrl}
-          alt=""
-          width={20}
-          height={20}
-          style={{ borderRadius: 999, objectFit: "cover", flexShrink: 0 }}
-        />
-      ) : null}
       <span style={{ display: "grid", lineHeight: 1.15, minWidth: 0 }}>
         <span
           style={{

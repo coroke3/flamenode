@@ -5,12 +5,15 @@ import type { Metadata } from "next";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
-import { canAccessManageEvent, canEditEvent } from "@/lib/auth/ownership";
+import {
+  canAccessManageEventFromSnapshot,
+  canEditEventFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
 import {
   events as eventsTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
-  xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
@@ -19,7 +22,7 @@ import { VideoReviewQueueTable } from "@/components/admin/VideoReviewQueueTable"
 import { fetchVideoReviewSummaries } from "@/lib/admin/videoReviewMeta";
 import { videoReviewQueueOrder } from "@/lib/admin/videoReviewQueueOrder";
 import { approveManageVideoPublic } from "@/lib/actions/manage-video";
-import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import {
   VIDEO_VISIBILITY_GROUPS,
   normalizeVideoVisibilityFilter,
@@ -84,15 +87,20 @@ export default async function ManageEventVideosPage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const ev = (
-    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-  )[0];
-  if (!ev) notFound();
-
   const isAdmin = user.role === "admin";
-  if (!(await canAccessManageEvent(db, user, id))) notFound();
-  const canApproveVideoStatus =
-    isAdmin || (await canEditEvent(db, user, id, "video.status"));
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
+  if (!canAccessManageEventFromSnapshot(authorization, id)) notFound();
+  const ev = navigation.events.find((event) => event.id === id);
+  if (!ev) notFound();
+  const canApproveVideoStatus = canEditEventFromSnapshot(
+    authorization,
+    id,
+    "video.status",
+  );
 
   const statusValues = videoVisibilityStatusesForFilter(statusFilter);
   const statusCond =
@@ -115,16 +123,18 @@ export default async function ManageEventVideosPage({
     })
     .from(videosTable)
     .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
-    .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
     .where(where)
     .orderBy(...videoReviewQueueOrder)
     .limit(200);
 
-  const summaries = await fetchVideoReviewSummaries(
-    db,
-    baseRows.map((row) => row.id),
-    id,
-  );
+  const summaries =
+    baseRows.length > 0
+      ? await fetchVideoReviewSummaries(
+          db,
+          baseRows.map((row) => row.id),
+          id,
+        )
+      : new Map();
 
   const rows = baseRows.map((row) => {
     const summary = summaries.get(row.id);
@@ -138,7 +148,7 @@ export default async function ManageEventVideosPage({
   const filterLabel = statusFilter
     ? videoVisibilityFilterLabel(statusFilter)
     : "すべて";
-  const pendingCount = await getEventPendingReviewVideoCount(id);
+  const pendingCount = navigation.pendingByEvent.get(id) ?? 0;
 
   return (
     <ManageEventPageShell

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { and, eq, isNotNull, or, sql } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
   events as eventsTable,
@@ -13,12 +13,16 @@ import {
   videoEvents as videoEventsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
-import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { getCollaboratorPermissions } from "@/lib/auth/ownership";
+import { ManageXIcon } from "@/components/manage/ManageXIcon";
+import {
+  getEventPermissionsFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
-import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import { resolveManageXIconUrl } from "@/lib/media/manageXIcon";
 
 export const dynamic = "force-dynamic";
 
@@ -55,15 +59,17 @@ export default async function ManageEventAudiencePage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const ev = (
-    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-  )[0];
-  if (!ev) notFound();
-
   const isAdmin = user.role === "admin";
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
+  const ev = navigation.events.find((event) => event.id === id);
+  if (!ev) notFound();
   const permissions = isAdmin
     ? new Set<string>()
-    : await getCollaboratorPermissions(db, user.id, id);
+    : getEventPermissionsFromSnapshot(authorization, id);
   if (!isAdmin && permissions.size === 0) notFound();
 
   const slotAudienceXId = sql<string>`COALESCE(${slotsTable.reserved_x_id_snapshot}, ${slotsTable.x_user_id})`;
@@ -73,6 +79,7 @@ export default async function ManageEventAudiencePage({
       x_user_id: slotAudienceXId,
       x_name: xUsersTable.x_name,
       icon_url: xUsersTable.icon_url,
+      approval_status: xUsersTable.approval_status,
       slot_count: sql<number>`COUNT(*)`,
       submitted_count: sql<number>`SUM(CASE WHEN ${slotsTable.status} = 'submitted' THEN 1 ELSE 0 END)`,
     })
@@ -95,6 +102,7 @@ export default async function ManageEventAudiencePage({
       x_user_id: videosTable.creator_x_user_id,
       x_name: xUsersTable.x_name,
       icon_url: xUsersTable.icon_url,
+      approval_status: xUsersTable.approval_status,
       video_count: sql<number>`COUNT(*)`,
     })
     .from(videosTable)
@@ -114,6 +122,7 @@ export default async function ManageEventAudiencePage({
       x_user_id: string;
       x_name: string | null;
       icon_url: string | null;
+      approval_status: string | null;
       slot_count: number;
       submitted_count: number;
       video_count: number;
@@ -125,6 +134,7 @@ export default async function ManageEventAudiencePage({
       x_user_id: s.x_user_id,
       x_name: s.x_name,
       icon_url: s.icon_url,
+      approval_status: s.approval_status,
       slot_count: Number(s.slot_count ?? 0),
       submitted_count: Number(s.submitted_count ?? 0),
       video_count: 0,
@@ -137,11 +147,15 @@ export default async function ManageEventAudiencePage({
       existing.video_count = Number(v.video_count ?? 0);
       if (!existing.x_name && v.x_name) existing.x_name = v.x_name;
       if (!existing.icon_url && v.icon_url) existing.icon_url = v.icon_url;
+      if (!existing.approval_status && v.approval_status) {
+        existing.approval_status = v.approval_status;
+      }
     } else {
       audienceMap.set(v.x_user_id, {
         x_user_id: v.x_user_id,
         x_name: v.x_name,
         icon_url: v.icon_url,
+        approval_status: v.approval_status,
         slot_count: 0,
         submitted_count: 0,
         video_count: Number(v.video_count ?? 0),
@@ -149,14 +163,30 @@ export default async function ManageEventAudiencePage({
     }
   }
 
-  const audience = Array.from(audienceMap.values()).sort((a, b) => {
+  const sortedAudience = Array.from(audienceMap.values()).sort((a, b) => {
     if (b.submitted_count !== a.submitted_count) {
       return b.submitted_count - a.submitted_count;
     }
     if (b.video_count !== a.video_count) return b.video_count - a.video_count;
     return b.slot_count - a.slot_count;
   });
-  const pendingCount = await getEventPendingReviewVideoCount(id);
+  let authSecret: string | undefined;
+  try {
+    authSecret = getEnv().AUTH_SECRET;
+  } catch {
+    authSecret = undefined;
+  }
+  const audience = await Promise.all(
+    sortedAudience.map(async (row) => ({
+      ...row,
+      icon_url: await resolveManageXIconUrl({
+        iconUrl: row.icon_url,
+        approvalStatus: row.approval_status,
+        authSecret,
+      }),
+    })),
+  );
+  const pendingCount = navigation.pendingByEvent.get(id) ?? 0;
 
   return (
     <ManageEventPageShell
@@ -198,20 +228,13 @@ export default async function ManageEventAudiencePage({
               <tr key={`${a.x_user_id}-audience-${index}`}>
                 <td>
                   <div className="manage-audience-identity">
-                    {a.icon_url ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={a.icon_url}
-                        alt=""
-                        className="manage-audience-avatar"
-                        width={32}
-                        height={32}
-                      />
-                    ) : (
-                      <span className="manage-audience-avatar manage-audience-avatar-fallback">
-                        <Icon name="user" size={13} aria-hidden />
-                      </span>
-                    )}
+                    <ManageXIcon
+                      iconUrl={a.icon_url}
+                      label={a.x_name ?? a.x_user_id}
+                      size={32}
+                      className="manage-audience-avatar"
+                      fallbackClassName="manage-audience-avatar-fallback"
+                    />
                     <div className="manage-audience-identity-text">
                       <Link href={`/user/${a.x_user_id}`} className="manage-audience-name">
                         {a.x_name ?? a.x_user_id}

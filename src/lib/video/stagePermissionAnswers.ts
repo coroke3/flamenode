@@ -21,6 +21,19 @@ import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
 const STAGE_PERMISSION_KEY_PREFIX = `${DEFAULT_STAGE_PERMISSION_QUESTION_KEY}_`;
+// D1 currently limits a statement to 100 bound parameters. Keep fixed
+// predicates and future additions below that ceiling for batch review reads.
+const D1_STAGE_READ_BIND_LIMIT = 90;
+const D1_STAGE_EVENT_ID_CHUNK_SIZE = 80;
+
+function chunkStringIds(ids: readonly string[], size: number): string[][] {
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  const chunks: string[][] = [];
+  for (let index = 0; index < unique.length; index += size) {
+    chunks.push(unique.slice(index, index + size));
+  }
+  return chunks;
+}
 
 export interface ReplaceStagePermissionCustomAnswersArgs {
   videoId: string;
@@ -140,22 +153,31 @@ export async function batchReadStagePermissionCustomAnswers(
     return out;
   }
 
-  const questions = await db
-    .select({
-      id: eventCustomQuestions.id,
-      event_id: eventCustomQuestions.event_id,
-      question_key: eventCustomQuestions.question_key,
-      label: eventCustomQuestions.label,
-      sort_order: eventCustomQuestions.sort_order,
-      is_active: eventCustomQuestions.is_active,
-    })
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        inArray(eventCustomQuestions.event_id, eventIds),
-        stagePermissionQuestionKeyCondition(),
-      )!,
-    );
+  const questions: StagePermissionQuestionRow[] = [];
+  // The event-id list is independently bounded; this also keeps the first
+  // read safe for admin review pages spanning many events.
+  for (const eventIdChunk of chunkStringIds(
+    eventIds,
+    D1_STAGE_EVENT_ID_CHUNK_SIZE,
+  )) {
+    const chunkQuestions = await db
+      .select({
+        id: eventCustomQuestions.id,
+        event_id: eventCustomQuestions.event_id,
+        question_key: eventCustomQuestions.question_key,
+        label: eventCustomQuestions.label,
+        sort_order: eventCustomQuestions.sort_order,
+        is_active: eventCustomQuestions.is_active,
+      })
+      .from(eventCustomQuestions)
+      .where(
+        and(
+          inArray(eventCustomQuestions.event_id, eventIdChunk),
+          stagePermissionQuestionKeyCondition(),
+        )!,
+      );
+    questions.push(...chunkQuestions);
+  }
 
   const questionsByEvent = new Map<string, StagePermissionQuestionRow[]>();
   for (const question of questions) {
@@ -164,33 +186,95 @@ export async function batchReadStagePermissionCustomAnswers(
     questionsByEvent.set(question.event_id, list);
   }
 
-  const videoIds = items.map((item) => item.videoId);
-  const questionIds = questions.map((question) => question.id);
-  const answers =
-    questionIds.length > 0
-      ? await db
-          .select({
-            video_id: videoCustomAnswers.video_id,
-            question_id: videoCustomAnswers.question_id,
-            answer_text: videoCustomAnswers.answer_text,
-          })
-          .from(videoCustomAnswers)
-          .where(
-            and(
-              inArray(videoCustomAnswers.video_id, [...videoIds]),
-              inArray(videoCustomAnswers.event_id, eventIds),
-              inArray(videoCustomAnswers.question_id, questionIds),
-            )!,
-          )
-      : [];
+  // Validate the per-video stage-question limit before constructing the
+  // answers IN-list. Besides preserving the existing read-limit error, this
+  // prevents a malformed event with many stage questions from pushing the
+  // subsequent D1 statement over its bind budget.
+  for (const item of items) {
+    const scopedEventIds = Array.from(new Set(item.eventIds.filter(Boolean)));
+    const scopedQuestions = scopedEventIds.flatMap(
+      (eventId) => questionsByEvent.get(eventId) ?? [],
+    );
+    if (scopedQuestions.length > 4) {
+      throw new Error("video_stage_answer_read_limit_exceeded");
+    }
+  }
 
   const answersByVideo = new Map<string, Map<string, string>>();
-  for (const answer of answers) {
-    const byQuestion =
-      answersByVideo.get(answer.video_id) ?? new Map<string, string>();
-    byQuestion.set(answer.question_id, answer.answer_text ?? "");
-    answersByVideo.set(answer.video_id, byQuestion);
+  type AnswerScope = {
+    videoId: string;
+    eventIds: string[];
+    questionIds: string[];
+  };
+  const answerScopes: AnswerScope[] = [];
+  for (const item of items) {
+    const scopedEventIds = Array.from(new Set(item.eventIds.filter(Boolean)))
+      .filter((eventId) => (questionsByEvent.get(eventId)?.length ?? 0) > 0);
+    const scopedQuestions = scopedEventIds.flatMap(
+      (eventId) => questionsByEvent.get(eventId) ?? [],
+    );
+    if (scopedQuestions.length === 0) continue;
+    answerScopes.push({
+      videoId: item.videoId,
+      eventIds: scopedEventIds,
+      questionIds: Array.from(new Set(scopedQuestions.map((question) => question.id))),
+    });
   }
+
+  // Group scopes until the three IN lists remain below the D1 bind ceiling.
+  // For the common case (one event, <=4 questions) this is still a single
+  // answer read, preserving the original two-read batch behavior.
+  let currentScopes: AnswerScope[] = [];
+  let currentVideoIds = new Set<string>();
+  let currentEventIds = new Set<string>();
+  let currentQuestionIds = new Set<string>();
+  const flushAnswerScopes = async () => {
+    if (currentScopes.length === 0 || currentQuestionIds.size === 0) return;
+    const answers = await db
+      .select({
+        video_id: videoCustomAnswers.video_id,
+        question_id: videoCustomAnswers.question_id,
+        answer_text: videoCustomAnswers.answer_text,
+      })
+      .from(videoCustomAnswers)
+      .where(
+        and(
+          inArray(videoCustomAnswers.video_id, [...currentVideoIds]),
+          inArray(videoCustomAnswers.event_id, [...currentEventIds]),
+          inArray(videoCustomAnswers.question_id, [...currentQuestionIds]),
+        )!,
+      );
+    for (const answer of answers) {
+      const byQuestion =
+        answersByVideo.get(answer.video_id) ?? new Map<string, string>();
+      byQuestion.set(answer.question_id, answer.answer_text ?? "");
+      answersByVideo.set(answer.video_id, byQuestion);
+    }
+  };
+
+  for (const scope of answerScopes) {
+    const candidateVideoIds = new Set(currentVideoIds).add(scope.videoId);
+    const candidateEventIds = new Set(currentEventIds);
+    for (const eventId of scope.eventIds) candidateEventIds.add(eventId);
+    const candidateQuestionIds = new Set(currentQuestionIds);
+    for (const questionId of scope.questionIds) candidateQuestionIds.add(questionId);
+    const bindCount =
+      candidateVideoIds.size +
+      candidateEventIds.size +
+      candidateQuestionIds.size;
+    if (currentScopes.length > 0 && bindCount > D1_STAGE_READ_BIND_LIMIT) {
+      await flushAnswerScopes();
+      currentScopes = [];
+      currentVideoIds = new Set<string>();
+      currentEventIds = new Set<string>();
+      currentQuestionIds = new Set<string>();
+    }
+    currentScopes.push(scope);
+    currentVideoIds.add(scope.videoId);
+    for (const eventId of scope.eventIds) currentEventIds.add(eventId);
+    for (const questionId of scope.questionIds) currentQuestionIds.add(questionId);
+  }
+  await flushAnswerScopes();
 
   for (const item of items) {
     const scopedEventIds = Array.from(new Set(item.eventIds.filter(Boolean)));

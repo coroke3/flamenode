@@ -116,3 +116,21 @@ test("RequestAuthContextはenrichment失敗を認可ゲートと分離する", (
   assert.match(requestAuthContext, /enrichmentFailed = true/);
   assert.match(requestAuthContext, /header_enrichment_failed/);
 });
+
+test("layout auth surfaceはonboarding readを実行せず、完全contextだけが取得する", () => {
+  assert.match(requestAuthContext, /export const getRequestAuthBase = cache\(/);
+  assert.match(requestAuthContext, /export const getLayoutAuthSurface = cache\(/);
+  const layoutStart = requestAuthContext.indexOf("async function loadLayoutAuthSurface");
+  assert.ok(layoutStart >= 0, "layout surface loaderが存在する");
+  const layoutSource = requestAuthContext.slice(layoutStart);
+  assert.match(layoutSource, /getRequestAuthBase\(\)/);
+  assert.match(layoutSource, /loadManagementAccess\(/);
+  assert.doesNotMatch(layoutSource, /loadOnboardingFlags\(/);
+  assert.doesNotMatch(layoutSource, /xIdentityRequests|pendingSlotReservationXRequestWhere/);
+  assert.doesNotMatch(layoutSource, /getRequestAuthContext\(/);
+
+  const contextStart = requestAuthContext.indexOf("async function loadRequestAuthContext");
+  assert.ok(contextStart >= 0, "full context loaderが存在する");
+  const contextSource = requestAuthContext.slice(contextStart, layoutStart);
+  assert.match(contextSource, /loadOnboardingFlags\(/);
+});

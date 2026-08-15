@@ -5,10 +5,15 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
-import { canAccessManageEvent, canEditEvent } from "@/lib/auth/ownership";
+import {
+  canAccessManageEventFromSnapshot,
+  canEditEventFromSnapshot,
+  getManageStaffXUserIdsFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import {
   eventYoutubePlaylistSync,
-  events as eventsTable,
 } from "@/lib/db/schema";
 import {
   queueEventYoutubePlaylistSync,
@@ -17,7 +22,6 @@ import {
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { formatUnix } from "@/lib/utils/format";
-import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 
 export const metadata: Metadata = { title: "YouTube再生リスト同期" };
 export const dynamic = "force-dynamic";
@@ -56,15 +60,20 @@ export default async function EventYoutubePlaylistPage({
 
   const db = getDatabase();
   if (!db) notFound();
-  const ev = (
-    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-  )[0];
+  const authorization = await getManageAuthorizationSnapshot(
+    guard.user.id,
+    guard.user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(
+    guard.user.id,
+    guard.user.role ?? null,
+  );
+  if (!canAccessManageEventFromSnapshot(authorization, id)) notFound();
+  const ev = navigation.events.find((event) => event.id === id);
   if (!ev) notFound();
-  if (!(await canAccessManageEvent(db, guard.user, id))) notFound();
 
-  const canEdit = await canEditEvent(
-    db,
-    { id: guard.user.id, role: guard.user.role ?? null },
+  const canEdit = canEditEventFromSnapshot(
+    authorization,
     id,
     "event.publish",
   );
@@ -79,7 +88,7 @@ export default async function EventYoutubePlaylistPage({
   const playlistId = config?.playlist_id ?? "";
   const mode = config?.sync_mode ?? "off";
   const interval = config?.sync_interval_minutes ?? 720;
-  const pendingCount = await getEventPendingReviewVideoCount(ev.id);
+  const pendingCount = navigation.pendingByEvent.get(ev.id) ?? 0;
 
   return (
     <ManageEventPageShell
@@ -92,8 +101,8 @@ export default async function EventYoutubePlaylistPage({
       pendingCount={pendingCount}
       accentStyle={manageEventAccentStyle(ev.accent_color)}
       showActiveXNotice
-      userId={guard.user.id}
       activeXUserId={guard.user.active_x_user_id}
+      manageStaffXUserIds={getManageStaffXUserIdsFromSnapshot(authorization)}
     >
       {sp.saved === "1" ? (
         <p className="fn-alert fn-alert-success">設定を保存し、次回同期を予約しました。</p>

@@ -1,30 +1,18 @@
 import * as React from "react";
 import Link from "next/link";
-import { getDatabase } from "@/lib/cloudflare";
-import {
-  getEditableEventIds,
-  getManageStaffXUserIds,
-  shouldWarnManageActiveXMismatch,
-} from "@/lib/auth/ownership";
+import { shouldWarnManageActiveXMismatch } from "@/lib/auth/ownership";
 
 type ManageActiveXNoticeProps = {
-  userId: string;
   activeXUserId: string | null | undefined;
+  manageStaffXUserIds: readonly string[];
 };
 
 /** /manage 本文上部: Active X と運営 X の不一致を示す（入場判定には使わない） */
-export async function ManageActiveXNotice({
-  userId,
+export function ManageActiveXNotice({
   activeXUserId,
-}: ManageActiveXNoticeProps): Promise<React.ReactElement | null> {
-  const db = getDatabase();
-  if (!db) return null;
-
-  const eventIds = await getEditableEventIds(db, userId);
-  if (eventIds.length === 0) return null;
-
-  const manageStaffXIds = await getManageStaffXUserIds(db, userId, eventIds);
-  if (!shouldWarnManageActiveXMismatch(activeXUserId, manageStaffXIds)) {
+  manageStaffXUserIds,
+}: ManageActiveXNoticeProps): React.ReactElement | null {
+  if (!shouldWarnManageActiveXMismatch(activeXUserId, manageStaffXUserIds)) {
     return null;
   }
 

@@ -2,27 +2,23 @@ import * as React from "react";
 import { FnTable } from "@/components/ui/FnTable";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
-  canManageXIdLinkRequests,
-  getEditableEventIds,
-  getManageStaffRolesForEvents,
-} from "@/lib/auth/ownership";
+  getManageAuthorizationSnapshot,
+  getManageStaffXUserIdsFromSnapshot,
+} from "@/lib/auth/manageAuthorization";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import { ManageActiveXNotice } from "@/components/layout/ManageActiveXNotice";
 import {
-  events as eventsTable,
   auditLogs as auditLogsTable,
   notificationOutbox as notificationOutboxTable,
-  videos as videosTable,
-  videoEvents as videoEventsTable,
 } from "@/lib/db/schema";
 import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { NotificationOutboxSummary } from "@/components/notifications/NotificationOutboxSummary";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
-import { compareEventsByUpcomingPriority } from "@/lib/utils/eventOrdering";
 import {
   computeEventStatus,
   eventStatusBadgeClass,
@@ -65,62 +61,16 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
   }
 
   const isAdmin = user.role === "admin";
-  /** ManageSidebar / canAccessManageEvent と同じ一覧（Active X 非依存） */
-  const editableEventIds = isAdmin ? [] : await getEditableEventIds(db, user.id);
-
-  let eventRows: (typeof eventsTable.$inferSelect)[];
-  if (isAdmin) {
-    eventRows = await db
-      .select()
-      .from(eventsTable)
-      .orderBy(
-        desc(eventsTable.start_time),
-        desc(eventsTable.created_at),
-        desc(eventsTable.id),
-      );
-  } else {
-    eventRows = [];
-    // 担当イベント数をそのままINへ展開せず、全chunk成功後に同じ表示順へ戻す。
-    for (const eventIdChunk of chunkEventIds(editableEventIds)) {
-      const rows = await db
-        .select()
-        .from(eventsTable)
-        .where(inArray(eventsTable.id, eventIdChunk))
-        .orderBy(
-          desc(eventsTable.start_time),
-          desc(eventsTable.created_at),
-          desc(eventsTable.id),
-        );
-      eventRows.push(...rows);
-    }
-  }
-  eventRows.sort(compareEventsByUpcomingPriority);
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
+  // /manage keeps its historical upcoming/status priority; the sidebar uses
+  // navigation.events' SQL-compatible start/created/id order separately.
+  const eventRows = navigation.dashboardEvents;
   const eventIds = eventRows.map((event) => event.id);
-
-  // 各イベントごとの審査待ち件数
-  const pendingByEvent = new Map<string, number>();
-  for (const eventIdChunk of chunkEventIds(eventIds)) {
-    const rows = await db
-      .select({
-        event_id: videoEventsTable.event_id,
-        c: sql<number>`COUNT(*)`,
-      })
-      .from(videosTable)
-      .innerJoin(
-        videoEventsTable,
-        eq(videoEventsTable.video_id, videosTable.id),
-      )
-      .where(
-        and(
-          inArray(videoEventsTable.event_id, eventIdChunk),
-          eq(videosTable.visibility_status, "pending"),
-        )!,
-      )
-      .groupBy(videoEventsTable.event_id);
-    for (const r of rows) {
-      pendingByEvent.set(r.event_id, Number(r.c ?? 0));
-    }
-  }
+  const pendingByEvent = navigation.pendingByEvent;
 
   // 担当イベント関連の audit_logs を直近で取得 (event_id を target_id として参照する記録)
   const recentInboxCandidates: (typeof auditLogsTable.$inferSelect)[] = [];
@@ -169,10 +119,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
 
   // failed 件数集計 (担当イベント分のみ)
   const failedCount = eventNotifications.filter((n) => n.status === "failed").length;
-  const canManageXLinks = await canManageXIdLinkRequests(db, {
-    id: user.id,
-    role: user.role ?? null,
-  });
+  const canManageXLinks = authorization.canManageXIdLinkRequests;
 
   const pendingReviewTotal = [...pendingByEvent.values()].reduce(
     (total, count) => total + count,
@@ -182,13 +129,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
     isAcceptingEntries(event),
   ).length;
 
-  const staffRoleByEvent = new Map<string, "representative" | "editor">();
-  if (!isAdmin) {
-    for (const eventIdChunk of chunkEventIds(eventIds)) {
-      const roles = await getManageStaffRolesForEvents(db, user.id, eventIdChunk);
-      for (const [eventId, role] of roles) staffRoleByEvent.set(eventId, role);
-    }
-  }
+  const staffRoleByEvent = authorization.roleByEvent;
 
   if (eventIds.length === 0) {
     return (
@@ -230,8 +171,8 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
     <div className="manage-dashboard">
       {!isAdmin ? (
         <ManageActiveXNotice
-          userId={user.id}
           activeXUserId={user.active_x_user_id}
+          manageStaffXUserIds={getManageStaffXUserIdsFromSnapshot(authorization)}
         />
       ) : null}
       <ManagePageHeader

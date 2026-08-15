@@ -8,17 +8,20 @@ import {
 } from "@/components/admin/EventStaffManager";
 import { EventStaffReadOnlyList } from "@/components/admin/EventStaffReadOnlyList";
 import { requireSession } from "@/lib/auth/guard";
-import { getCollaboratorPermissions } from "@/lib/auth/ownership";
-import { getDatabase } from "@/lib/cloudflare";
+import {
+  getEventPermissionsFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
 import {
   eventStaff as eventStaffTable,
-  events as eventsTable,
   xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
-import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import { resolveManageXIconUrl } from "@/lib/media/manageXIcon";
 
 export const dynamic = "force-dynamic";
 
@@ -43,15 +46,17 @@ export default async function ManageEventStaffPage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const event = (
-    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-  )[0];
-  if (!event) notFound();
-
   const isAdmin = user.role === "admin";
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
+  const event = navigation.events.find((item) => item.id === id);
+  if (!event) notFound();
   const currentPermissions = isAdmin
     ? new Set<string>()
-    : await getCollaboratorPermissions(db, user.id, id);
+    : getEventPermissionsFromSnapshot(authorization, id);
   if (!isAdmin && currentPermissions.size === 0) notFound();
   const canManageMembers =
     isAdmin || currentPermissions.has("event.members");
@@ -75,17 +80,32 @@ export default async function ManageEventStaffPage({
     .where(eq(eventStaffTable.event_id, id))
     .orderBy(asc(eventStaffTable.display_name));
 
-  const members: EventStaffMemberRow[] = rows.map((row) => ({
-    id: row.id,
-    x_user_id: row.x_user_id,
-    display_name: row.display_name,
-    permission_preset: row.permission_preset,
-    is_public: row.is_public,
-    public_role_label: row.public_role_label,
-    permission_keys: Array.from(resolveStaffPermissionKeys(row)),
-    x_name: row.x_name,
-    icon_url: row.icon_url,
-  }));
+  // Internal profile icons are signed only after the canonical X account has
+  // been approved. External HTTPS URLs remain unchanged; malformed/internal
+  // URLs and missing secrets resolve to null so the avatar falls back safely.
+  let authSecret: string | undefined;
+  try {
+    authSecret = getEnv().AUTH_SECRET;
+  } catch {
+    authSecret = undefined;
+  }
+  const members: EventStaffMemberRow[] = await Promise.all(
+    rows.map(async (row) => ({
+      id: row.id,
+      x_user_id: row.x_user_id,
+      display_name: row.display_name,
+      permission_preset: row.permission_preset,
+      is_public: row.is_public,
+      public_role_label: row.public_role_label,
+      permission_keys: Array.from(resolveStaffPermissionKeys(row)),
+      x_name: row.x_name,
+      icon_url: await resolveManageXIconUrl({
+        iconUrl: row.icon_url,
+        approvalStatus: row.approval_status,
+        authSecret,
+      }),
+    })),
+  );
   const ownerCount = rows.filter(
     (row) => row.permission_preset === "owner",
   ).length;
@@ -93,7 +113,7 @@ export default async function ManageEventStaffPage({
   const approvedCount = rows.filter(
     (row) => row.approval_status === "approved",
   ).length;
-  const pendingCount = await getEventPendingReviewVideoCount(id);
+  const pendingCount = navigation.pendingByEvent.get(id) ?? 0;
 
   return (
     <ManageEventPageShell

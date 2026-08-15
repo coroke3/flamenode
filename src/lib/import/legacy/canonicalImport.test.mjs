@@ -472,8 +472,13 @@ test("admin users Discordタブはdiscord_idがある認証ユーザーだけを
 test("admin users 権限タブは system_settings default を正本として読む", () => {
   const root = path.resolve(import.meta.dirname, "../../../..");
   const page = fs.readFileSync(path.join(root, "app/(admin)/admin/users/page.tsx"), "utf8");
-  assert.match(page, /eq\(systemSettings\.id, "default"\)/);
-  assert.doesNotMatch(page, /eq\(systemSettings\.id, "global"\)/);
+  const settingsHelper = fs.readFileSync(
+    path.join(root, "src/lib/admin/adminSystemSettings.ts"),
+    "utf8",
+  );
+  assert.match(page, /readAdminSystemSettings\(db\)/);
+  assert.match(settingsHelper, /eq\(systemSettings\.id, "default"\)/);
+  assert.doesNotMatch(settingsHelper, /eq\(systemSettings\.id, "global"\)/);
   assert.match(page, /GlobalEditableFieldsPanel/);
 });
 

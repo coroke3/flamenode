@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
+import { ManageXIcon } from "@/components/manage/ManageXIcon";
 import {
   bulkUpsertEventStaffFromCsv,
   removeEventStaffMember,
@@ -70,32 +71,6 @@ function permissionKeysForPreset(
   customKeys: readonly string[],
 ): string[] {
   return preset === "custom" ? [...customKeys] : [...getPresetPermissions(preset)];
-}
-
-function StaffAvatar({
-  iconUrl,
-  name,
-}: {
-  iconUrl: string | null;
-  name: string;
-}): React.ReactElement {
-  if (iconUrl) {
-    return (
-      /* eslint-disable-next-line @next/next/no-img-element */
-      <img
-        src={iconUrl}
-        alt=""
-        className="manage-staff-avatar"
-        width={36}
-        height={36}
-      />
-    );
-  }
-  return (
-    <span className="manage-staff-avatar manage-staff-avatar-fallback" aria-hidden>
-      {(name.trim()[0] ?? "?").toUpperCase()}
-    </span>
-  );
 }
 
 export function EventStaffManager({
@@ -202,7 +177,11 @@ export function EventStaffManager({
                     )
                   }
                 >
-                  <StaffAvatar iconUrl={member.icon_url} name={displayName} />
+                  <ManageXIcon
+                    iconUrl={member.icon_url}
+                    label={displayName}
+                    size={36}
+                  />
                   <span className="manage-staff-list-main">
                     <strong>{displayName}</strong>
                     <span className="manage-staff-list-xid">@{member.x_user_id}</span>

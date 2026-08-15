@@ -4,12 +4,12 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   notificationOutbox as notificationOutboxTable,
-  systemSettings,
   videoModerationCases as videoModerationCasesTable,
   videoYoutubeMetadata as videoYoutubeMetadataTable,
   videos as videosTable,
   xIdentityRequests as xIdentityRequestsTable,
 } from "@/lib/db/schema";
+import { readAdminSystemSettings } from "@/lib/admin/adminSystemSettings";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";
 
@@ -117,10 +117,10 @@ export async function fetchAdminTopSnapshot(
       })
       .from(videoModerationCasesTable)
       .where(eq(videoModerationCasesTable.status, "open")),
-    db.select().from(systemSettings).where(eq(systemSettings.id, "default")).limit(1),
+    readAdminSystemSettings(db),
   ]);
 
-  const mode = resolveOperationMode(sys[0]);
+  const mode = resolveOperationMode(sys);
   return {
     counts: {
       pendingVideos: Number(pendingVideos[0]?.c ?? 0),

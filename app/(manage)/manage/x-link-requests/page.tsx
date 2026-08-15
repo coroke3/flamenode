@@ -7,9 +7,10 @@ import { enrichXLinkPendingRows } from "@/lib/admin/enrichXLinkPendingRows";
 import { ConsolePageHeader as ManagePageHeader } from "@/components/layout/ConsolePageHeader";
 import { Icon } from "@/components/ui/Icon";
 import { requireSession } from "@/lib/auth/guard";
-import { canManageXIdLinkRequests } from "@/lib/auth/ownership";
-import { getDatabase } from "@/lib/cloudflare";
+import { getManageAuthorizationSnapshot } from "@/lib/auth/manageAuthorization";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { users, xIdentityRequests } from "@/lib/db/schema";
+import { resolveManageXIconUrl } from "@/lib/media/manageXIcon";
 
 export const metadata: Metadata = { title: "X ID 申請" };
 export const dynamic = "force-dynamic";
@@ -20,7 +21,11 @@ export default async function ManageXLinkRequestsPage(): Promise<React.ReactElem
   if (!guard.ok) return guard.element;
   const db = getDatabase();
   if (!db) notFound();
-  if (!(await canManageXIdLinkRequests(db, { id: guard.user.id, role: guard.user.role ?? null }))) notFound();
+  const authorization = await getManageAuthorizationSnapshot(
+    guard.user.id,
+    guard.user.role ?? null,
+  );
+  if (!authorization.canManageXIdLinkRequests) notFound();
 
   const pendingBase = await db
     .select({
@@ -44,9 +49,34 @@ export default async function ManageXLinkRequestsPage(): Promise<React.ReactElem
     .orderBy(desc(xIdentityRequests.requested_at))
     .limit(PENDING_LIMIT);
 
-  const pending = await enrichXLinkPendingRows(db, pendingBase, {
-    includeVideoIconFallback: true,
-  });
+  let authSecret: string | undefined;
+  try {
+    authSecret = getEnv().AUTH_SECRET;
+  } catch {
+    authSecret = undefined;
+  }
+  const enrichedPending = await enrichXLinkPendingRows(db, pendingBase);
+  const pending = await Promise.all(
+    enrichedPending.map(async (row) => {
+      const [requestedIconUrl, targetIconUrl] = await Promise.all([
+        resolveManageXIconUrl({
+          iconUrl: row.requested_icon_url,
+          approvalStatus: row.requested_approval_status,
+          authSecret,
+        }),
+        resolveManageXIconUrl({
+          iconUrl: row.target_icon_url,
+          approvalStatus: row.target_approval_status,
+          authSecret,
+        }),
+      ]);
+      return {
+        ...row,
+        requested_icon_url: requestedIconUrl,
+        target_icon_url: targetIconUrl,
+      };
+    }),
+  );
 
   return (
     <div>

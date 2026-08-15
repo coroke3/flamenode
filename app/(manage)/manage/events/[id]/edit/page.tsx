@@ -5,7 +5,11 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
-import { canEditEvent } from "@/lib/auth/ownership";
+import {
+  canEditEventFromSnapshot,
+  getManageStaffXUserIdsFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
 import { events as eventsTable } from "@/lib/db/schema";
 import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { EventForm } from "@/components/admin/EventForm";
@@ -14,7 +18,7 @@ import { RenameEventIdForm } from "@/components/admin/RenameEventIdForm";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { Icon } from "@/components/ui/Icon";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
-import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 
 export const metadata: Metadata = { title: "イベント設定" };
 export const dynamic = "force-dynamic";
@@ -42,14 +46,18 @@ export default async function ManageEventEditPage({
   if (!event) notFound();
 
   const videoFormSettingsJson = await loadStagePermissionFormSettingsJson(db, id);
-  const editor = { id: user.id, role: user.role ?? null };
-  const [canManageBasic, canManagePublish, canManageQuestions, canManageSlots] =
-    await Promise.all([
-      canEditEvent(db, editor, id, "event.basic"),
-      canEditEvent(db, editor, id, "event.publish"),
-      canEditEvent(db, editor, id, "event.questions"),
-      canEditEvent(db, editor, id, "event.slots"),
-    ]);
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const canManageBasic = canEditEventFromSnapshot(authorization, id, "event.basic");
+  const canManagePublish = canEditEventFromSnapshot(authorization, id, "event.publish");
+  const canManageQuestions = canEditEventFromSnapshot(
+    authorization,
+    id,
+    "event.questions",
+  );
+  const canManageSlots = canEditEventFromSnapshot(authorization, id, "event.slots");
   if (
     !canManageBasic &&
     !canManagePublish &&
@@ -60,7 +68,8 @@ export default async function ManageEventEditPage({
   }
 
   const isAdmin = user.role === "admin";
-  const pendingCount = await getEventPendingReviewVideoCount(id);
+  const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
+  const pendingCount = navigation.pendingByEvent.get(id) ?? 0;
   return (
     <ManageEventPageShell
       eventId={event.id}
@@ -72,8 +81,8 @@ export default async function ManageEventEditPage({
       pendingCount={pendingCount}
       accentStyle={manageEventAccentStyle(event.accent_color)}
       showActiveXNotice={!isAdmin}
-      userId={user.id}
       activeXUserId={user.active_x_user_id}
+      manageStaffXUserIds={getManageStaffXUserIdsFromSnapshot(authorization)}
     >
       <section className="manage-slot-quicklink" aria-label="枠設定へのショートカット">
         <div>

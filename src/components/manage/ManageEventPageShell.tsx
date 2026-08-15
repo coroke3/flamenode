@@ -21,8 +21,8 @@ export interface ManageEventPageShellProps {
   pendingCount?: number;
   /** overview / edit / youtube-playlist only — each notice adds D1 reads. */
   showActiveXNotice?: boolean;
-  userId?: string;
   activeXUserId?: string | null;
+  manageStaffXUserIds?: readonly string[];
 }
 
 export function ManageEventPageShell({
@@ -38,15 +38,15 @@ export function ManageEventPageShell({
   headerChildren,
   pendingCount,
   showActiveXNotice = false,
-  userId,
   activeXUserId,
+  manageStaffXUserIds = [],
 }: ManageEventPageShellProps): React.ReactElement {
   return (
     <div className="manage-event-page-shell" style={accentStyle}>
-      {showActiveXNotice && userId ? (
+      {showActiveXNotice ? (
         <ManageActiveXNotice
-          userId={userId}
           activeXUserId={activeXUserId ?? null}
+          manageStaffXUserIds={manageStaffXUserIds}
         />
       ) : null}
       <ConsolePageHeader

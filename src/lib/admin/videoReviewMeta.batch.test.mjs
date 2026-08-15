@@ -14,3 +14,10 @@ test("fetchVideoReviewSummaries uses batch stage permission reader", () => {
     /await readStagePermissionCustomAnswers/,
   );
 });
+
+test("event-scoped review summaries avoid rediscovering video membership and stay chunked", () => {
+  assert.match(metaSource, /if \(eventId\) \{/);
+  assert.match(metaSource, /eventIdsByVideo\.set\(videoId, \[eventId\]\)/);
+  assert.match(metaSource, /D1_SAFE_VIDEO_ID_CHUNK_SIZE = 80/);
+  assert.match(metaSource, /for \(const videoIdChunk of chunkIds\(uniqueVideoIds\)\)/);
+});

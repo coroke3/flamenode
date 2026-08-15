@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import { getDatabase, getEnv } from "@/lib/cloudflare";
 import { auditLogs, users, xIdentityRequests } from "@/lib/db/schema";
 import { XLinkRequestTable } from "@/components/admin/XLinkRequestTable";
 import { enrichXLinkPendingRows } from "@/lib/admin/enrichXLinkPendingRows";
@@ -11,6 +11,7 @@ import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/Consol
 import { AdminUserManagementTabs } from "@/components/admin/AdminUserManagementTabs";
 import { parseAuditDiff } from "@/lib/audit/diff";
 import { FnTable } from "@/components/ui/FnTable";
+import { resolveManageXIconUrl } from "@/lib/media/manageXIcon";
 
 export const metadata: Metadata = { title: "X ID 申請" };
 export const dynamic = "force-dynamic";
@@ -92,7 +93,36 @@ export default async function AdminXLinkRequestsPage(): Promise<React.ReactEleme
       ])
     : [[], [], []];
 
-  const pending = db ? await enrichXLinkPendingRows(db, pendingBase) : [];
+  let authSecret: string | undefined;
+  try {
+    authSecret = getEnv().AUTH_SECRET;
+  } catch {
+    authSecret = undefined;
+  }
+  const enrichedPending = db
+    ? await enrichXLinkPendingRows(db, pendingBase)
+    : [];
+  const pending = await Promise.all(
+    enrichedPending.map(async (row) => {
+      const [requestedIconUrl, targetIconUrl] = await Promise.all([
+        resolveManageXIconUrl({
+          iconUrl: row.requested_icon_url,
+          approvalStatus: row.requested_approval_status,
+          authSecret,
+        }),
+        resolveManageXIconUrl({
+          iconUrl: row.target_icon_url,
+          approvalStatus: row.target_approval_status,
+          authSecret,
+        }),
+      ]);
+      return {
+        ...row,
+        requested_icon_url: requestedIconUrl,
+        target_icon_url: targetIconUrl,
+      };
+    }),
+  );
 
   return (
     <div>

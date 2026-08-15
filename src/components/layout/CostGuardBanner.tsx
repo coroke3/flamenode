@@ -1,10 +1,9 @@
 import * as React from "react";
 import { getDatabase } from "@/lib/cloudflare";
-import { systemSettings } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import { resolveCostGuardBannerSnapshot } from "@/lib/operationMode/publicMode";
 import type { OperationMode } from "@/lib/operationMode/types";
+import { readAdminSystemSettings } from "@/lib/admin/adminSystemSettings";
 import styles from "./CostGuardBanner.module.css";
 
 const TONE: Record<
@@ -60,12 +59,7 @@ export async function CostGuardBanner({
     const db = getDatabase();
     if (!db) return null;
     try {
-      const rows = await db
-        .select()
-        .from(systemSettings)
-        .where(eq(systemSettings.id, "default"))
-        .limit(1);
-      const row = rows[0];
+      const row = await readAdminSystemSettings(db);
       if (row) {
         mode = resolveOperationMode(row);
         reason = row.cost_guard_reason ?? null;

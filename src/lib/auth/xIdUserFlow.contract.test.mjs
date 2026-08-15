@@ -29,6 +29,23 @@ test("X ID連携は初回・追加で同じ解析フローを使い、統合だ�
   assert.match(settings, /初回・2件目以降とも同じ手順/);
 });
 
+test("設定の候補取得は表示中のActive X ID 1件へ限定する", () => {
+  const settings = read("../../../app/(auth)/dashboard/settings/page.tsx");
+  assert.match(settings, /if \(db && xTabSelected && activeXPanel\)/);
+  assert.match(settings, /const \[iconCandidates, channelCandidates\] = await Promise\.all\(\[/);
+  assert.match(settings, /getXIconCandidates\(\s*db,\s*activeXPanel\.id/);
+  assert.match(settings, /getYoutubeChannelCandidates\(\s*db,\s*activeXPanel\.id/);
+  assert.match(settings, /const xTabSelected = showUtilityTab == null && activeXPanel != null/);
+  assert.doesNotMatch(
+    settings,
+    /for \(const x of xIds\)[\s\S]*getXIconCandidates\(/,
+  );
+  assert.doesNotMatch(
+    settings,
+    /for \(const x of xIds\)[\s\S]*getYoutubeChannelCandidates\(/,
+  );
+});
+
 test("本人はpendingのX ID申請を取り下げできる", () => {
   const action = read("../actions/xid.ts");
   const history = read("../../components/settings/XIdLinkedList.tsx");

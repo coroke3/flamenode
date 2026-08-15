@@ -6,11 +6,12 @@ import { and, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
-  canAccessManageEvent,
-  canEditEvent,
-} from "@/lib/auth/ownership";
+  canAccessManageEventFromSnapshot,
+  canEditEventFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import {
-  events as eventsTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
 } from "@/lib/db/schema";
@@ -25,7 +26,6 @@ import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
 import { fetchVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
-import { getEventPendingReviewVideoCount } from "@/lib/manage/pendingReviewVideos";
 
 export const dynamic = "force-dynamic";
 
@@ -52,11 +52,14 @@ export default async function ManageEventVideoDetailPage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const ev = (
-    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-  )[0];
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
+  if (!canAccessManageEventFromSnapshot(authorization, id)) notFound();
+  const ev = navigation.events.find((event) => event.id === id);
   if (!ev) notFound();
-  if (!(await canAccessManageEvent(db, user, id))) notFound();
 
   const linked = (
     await db
@@ -77,9 +80,12 @@ export default async function ManageEventVideoDetailPage({
   if (!video) notFound();
 
   const isAdmin = user.role === "admin";
-  const canReview =
-    isAdmin || (await canEditEvent(db, user, id, "video.status"));
-  const pendingCount = await getEventPendingReviewVideoCount(id);
+  const canReview = canEditEventFromSnapshot(
+    authorization,
+    id,
+    "video.status",
+  );
+  const pendingCount = navigation.pendingByEvent.get(id) ?? 0;
 
   return (
     <ManageEventPageShell

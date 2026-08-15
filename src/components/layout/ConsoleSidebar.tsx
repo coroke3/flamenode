@@ -1,26 +1,14 @@
 import * as React from "react";
-import {
-  and,
-  countDistinct,
-  desc,
-  eq,
-  inArray,
-} from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import {
-  getEditableEventIds,
-  getManageStaffXUserIds,
-  canManageXIdLinkRequests,
-  shouldWarnManageActiveXMismatch,
-} from "@/lib/auth/ownership";
-import {
-  events as eventsTable,
-  videoEvents,
-  videos,
-} from "@/lib/db/schema";
+  getManageAuthorizationSnapshot,
+  getManageStaffXUserIdsFromSnapshot,
+} from "@/lib/auth/manageAuthorization";
+import { shouldWarnManageActiveXMismatch } from "@/lib/auth/ownership";
 import { AdminSidebarNav } from "@/components/admin/AdminSidebarNav";
 import { buildAdminNavGroups } from "@/lib/admin/adminNavGroups";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import { ManageSidebarNav } from "./ManageSidebarNav";
 
 function ConsoleModeBanner({
@@ -102,110 +90,28 @@ export async function ConsoleSidebar({
     );
   }
 
-  const [editableEventIds, showXLinkRequests] = await Promise.all([
-    isAdmin ? Promise.resolve([]) : getEditableEventIds(db, u.id),
-    canManageXIdLinkRequests(db, {
-      id: u.id,
-      role: u.role ?? null,
-    }),
-  ]);
-  if (!isAdmin && editableEventIds.length === 0 && !showXLinkRequests) {
+  const authorization = await getManageAuthorizationSnapshot(
+    u.id,
+    u.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(u.id, u.role ?? null);
+  if (
+    !isAdmin &&
+    navigation.events.length === 0 &&
+    !authorization.canManageXIdLinkRequests
+  ) {
     return null;
   }
 
-  const eventSelect = {
-    id: eventsTable.id,
-    title: eventsTable.title,
-    accent_color: eventsTable.accent_color,
-    visibility_status:
-      eventsTable.visibility_status,
-    start_time: eventsTable.start_time,
-    end_time: eventsTable.end_time,
-    entry_start_time:
-      eventsTable.entry_start_time,
-    entry_end_time:
-      eventsTable.entry_end_time,
-    pending_review_count:
-      countDistinct(videos.id),
-  };
-
-  const eventQuery = db
-    .select(eventSelect)
-    .from(eventsTable)
-    .leftJoin(
-      videoEvents,
-      eq(
-        videoEvents.event_id,
-        eventsTable.id,
-      ),
-    )
-    .leftJoin(
-      videos,
-      and(
-        eq(
-          videos.id,
-          videoEvents.video_id,
-        ),
-        eq(
-          videos.visibility_status,
-          "pending",
-        ),
-      ),
-    )
-    .where(
-      isAdmin
-        ? undefined
-        : inArray(
-            eventsTable.id,
-            editableEventIds,
-          ),
-    )
-    .groupBy(
-      eventsTable.id,
-      eventsTable.title,
-      eventsTable.accent_color,
-      eventsTable.visibility_status,
-      eventsTable.start_time,
-      eventsTable.end_time,
-      eventsTable.entry_start_time,
-      eventsTable.entry_end_time,
-    )
-    .orderBy(
-      desc(eventsTable.start_time),
-      desc(eventsTable.created_at),
-      desc(eventsTable.id),
-    );
-
-  const events =
-    editableEventIds.length > 0 || isAdmin
-      ? await eventQuery
-      : [];
-
-  const normalizedEvents = events.map(
-    (event) => ({
-      ...event,
-      pending_review_count:
-        Number(
-          event.pending_review_count ?? 0,
-        ),
-    }),
-  );
-
   const activeX = u.active_x_user_id?.trim() || null;
-  const manageStaffXIds = isAdmin
-    ? []
-    : await getManageStaffXUserIds(
-        db,
-        u.id,
-        normalizedEvents.map((event) => event.id),
-      );
+  const manageStaffXIds = getManageStaffXUserIdsFromSnapshot(authorization);
   const warnActiveX = !isAdmin && shouldWarnManageActiveXMismatch(activeX, manageStaffXIds);
   return (
     <aside className="admin-sidebar">
       <SidebarModeBanner mode="manage" />
       <ManageSidebarNav
-        events={normalizedEvents}
-        showXLinkRequests={showXLinkRequests}
+        events={navigation.events}
+        showXLinkRequests={authorization.canManageXIdLinkRequests}
         warnActiveX={warnActiveX}
         activeX={activeX}
       />

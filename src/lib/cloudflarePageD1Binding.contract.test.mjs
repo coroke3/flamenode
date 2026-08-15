@@ -53,17 +53,15 @@ test("運営トップは100件超のイベントIDをD1安全幅へ分割する"
   assert.ok(Number(chunkSizeMatch[1]) > 0);
   assert.ok(Number(chunkSizeMatch[1]) < 100);
 
-  assert.match(managePage, /chunkEventIds\(editableEventIds\)/);
+  assert.match(managePage, /getManageNavigationSnapshot/);
+  assert.match(managePage, /pendingByEvent/);
   assert.ok(
-    (managePage.match(/chunkEventIds\(eventIds\)/g) ?? []).length >= 4,
+    (managePage.match(/chunkEventIds\(eventIds\)/g) ?? []).length >= 2,
     "pending・audit・notification・staff roleをすべてchunkする",
   );
   assert.doesNotMatch(
     managePage,
     /inArray\([^\n]+,\s*(?:editableEventIds|eventIds)\s*\)/,
   );
-  assert.match(
-    managePage,
-    /getManageStaffRolesForEvents\(db, user\.id, eventIdChunk\)/,
-  );
+  assert.doesNotMatch(managePage, /getManageStaffRolesForEvents\(db, user\.id/);
 });

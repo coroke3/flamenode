@@ -7,9 +7,12 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
-  canAccessManageEvent,
-  getManageStaffRoleForEvent,
-} from "@/lib/auth/ownership";
+  canAccessManageEventFromSnapshot,
+  getManageStaffRoleFromSnapshot,
+  getManageStaffXUserIdsFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
+import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import {
   events as eventsTable,
   auditLogs as auditLogsTable,
@@ -17,7 +20,6 @@ import {
   slots as slotsTable,
   videos as videosTable,
   videoEvents as videoEventsTable,
-  xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import {
   computeEventStatus,
@@ -42,7 +44,6 @@ import {
   lookupNotificationRecipients,
   type RecipientLookup,
 } from "@/lib/notifications/recipient";
-import { countPendingReviewVideos } from "@/lib/manage/pendingReviewVideos";
 
 export const dynamic = "force-dynamic";
 
@@ -92,21 +93,24 @@ export default async function ManageEventPage({
   const db = getDatabase();
   if (!db) notFound();
 
-  const ev = (
-    await db.select().from(eventsTable).where(eq(eventsTable.id, id)).limit(1)
-  )[0];
-  if (!ev) notFound();
-
   const isAdmin = user.role === "admin";
-  const canAccess = await canAccessManageEvent(db, user, id);
-  if (!canAccess) notFound();
+  const authorization = await getManageAuthorizationSnapshot(
+    user.id,
+    user.role ?? null,
+  );
+  const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
+  if (!canAccessManageEventFromSnapshot(authorization, id)) notFound();
+  // The navigation snapshot already contains every display field used by
+  // this overview. Avoid a second full events-row read after the sidebar.
+  const ev = navigation.events.find((event) => event.id === id);
+  if (!ev) notFound();
 
   const editorRole = isAdmin
     ? null
-    : await getManageStaffRoleForEvent(db, user.id, id);
+    : getManageStaffRoleFromSnapshot(authorization, id);
+  const pendingTotal = navigation.pendingByEvent.get(id) ?? 0;
 
-  const [pendingTotal, publicCount, slotCounts] = await Promise.all([
-    countPendingReviewVideos(db, id),
+  const [publicCount, slotCounts] = await Promise.all([
     db
       .select({ c: sql<number>`COUNT(*)` })
       .from(videosTable)
@@ -148,7 +152,6 @@ export default async function ManageEventPage({
     })
     .from(videosTable)
     .innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
-    .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id))
     .where(
       and(
         eq(videoEventsTable.event_id, id),
@@ -260,8 +263,8 @@ export default async function ManageEventPage({
       pendingCount={pendingTotal}
       accentStyle={manageEventAccentStyle(ev.accent_color)}
       showActiveXNotice
-      userId={user.id}
       activeXUserId={user.active_x_user_id}
+      manageStaffXUserIds={getManageStaffXUserIdsFromSnapshot(authorization)}
       headerChildren={
         <>
           <span className={`fn-badge ${eventStatusBadgeClass(status)}`}>

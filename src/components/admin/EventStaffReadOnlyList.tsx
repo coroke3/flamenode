@@ -1,35 +1,10 @@
 import * as React from "react";
 import type { EventStaffMemberRow } from "@/components/admin/EventStaffManager";
+import { ManageXIcon } from "@/components/manage/ManageXIcon";
 import { PRESET_DEFINITIONS } from "@/lib/auth/permissions/presets";
 
 interface EventStaffReadOnlyListProps {
   members: EventStaffMemberRow[];
-}
-
-function StaffAvatar({
-  iconUrl,
-  name,
-}: {
-  iconUrl: string | null;
-  name: string;
-}): React.ReactElement {
-  if (iconUrl) {
-    return (
-      /* eslint-disable-next-line @next/next/no-img-element */
-      <img
-        src={iconUrl}
-        alt=""
-        className="manage-staff-avatar"
-        width={36}
-        height={36}
-      />
-    );
-  }
-  return (
-    <span className="manage-staff-avatar manage-staff-avatar-fallback" aria-hidden>
-      {(name.trim()[0] ?? "?").toUpperCase()}
-    </span>
-  );
 }
 
 export function EventStaffReadOnlyList({
@@ -56,7 +31,11 @@ export function EventStaffReadOnlyList({
         return (
           <li key={member.id} className="manage-staff-list-item">
             <div className="manage-staff-list-row manage-staff-list-row--static">
-              <StaffAvatar iconUrl={member.icon_url} name={displayName} />
+              <ManageXIcon
+                iconUrl={member.icon_url}
+                label={displayName}
+                size={36}
+              />
               <span className="manage-staff-list-main">
                 <strong>{displayName}</strong>
                 <span className="manage-staff-list-xid">@{member.x_user_id}</span>

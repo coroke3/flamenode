@@ -1,14 +1,20 @@
 import * as React from "react";
-import { FnTable } from "@/components/ui/FnTable";
-
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
-import { runHealthChecks, type HealthCheckResult } from "@/lib/admin/healthChecks";
+import {
+  runHealthChecks,
+  runOperationalHealthChecks,
+  type HealthCheckResult,
+} from "@/lib/admin/healthChecks";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
+import {
+  DiagnosticStatusResults,
+  type DiagnosticFilter,
+} from "@/components/admin/DiagnosticStatusResults";
 
 export const metadata: Metadata = { title: "DB ヘルスチェック" };
 export const dynamic = "force-dynamic";
@@ -16,7 +22,7 @@ export const dynamic = "force-dynamic";
 type StatusFilter = "all" | "warn" | "info" | "ok";
 
 interface Props {
-  searchParams?: Promise<{ status?: string }>;
+  searchParams?: Promise<{ status?: string; deep?: string; run?: string }>;
 }
 
 export default async function AdminHealthPage({
@@ -26,7 +32,7 @@ export default async function AdminHealthPage({
   if (!user || user.role !== "admin") notFound();
 
   const sp = (await searchParams) ?? {};
-  const filter: StatusFilter = (() => {
+  const initialFilter: StatusFilter = (() => {
     switch (sp.status) {
       case "warn":
       case "info":
@@ -36,6 +42,7 @@ export default async function AdminHealthPage({
         return "all";
     }
   })();
+  const fullRun = sp.deep === "1" || sp.run === "1";
 
   const db = getDatabase();
   let results: HealthCheckResult[] = [];
@@ -43,23 +50,15 @@ export default async function AdminHealthPage({
 
   if (db) {
     try {
-      results = await runHealthChecks(db);
+      results = fullRun
+        ? await runHealthChecks(db)
+        : await runOperationalHealthChecks(db);
     } catch (e) {
       error = String(e);
     }
   } else {
     error = "DB に接続できませんでした。";
   }
-
-  const counts = {
-    all: results.length,
-    warn: results.filter((r) => r.status === "warn").length,
-    info: results.filter((r) => r.status === "info").length,
-    ok: results.filter((r) => r.status === "ok").length,
-  };
-
-  const visible =
-    filter === "all" ? results : results.filter((r) => r.status === filter);
 
   return (
     <div>
@@ -82,44 +81,30 @@ export default async function AdminHealthPage({
         }}
       >
         <div>
-          <strong>DB整合性チェック</strong>
+          <strong>{fullRun ? "全体診断" : "運用チェック"}</strong>
           <p className="fn-muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-            参照切れ、派生行欠落、枠状態矛盾をカード形式で確認できます。
+            {fullRun
+              ? "参照切れ、派生行欠落、枠状態矛盾を含む全項目を確認しています。"
+              : "通知・モデレーション・設定など、通常運用に必要な項目だけを確認します。詳細診断は明示的に実行してください。"}
           </p>
         </div>
-        <Link href="/admin/health/integrity" className="fn-btn fn-btn-primary">
-          DB整合性チェックへ
-        </Link>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {!fullRun ? (
+            <Link href="/admin/health?deep=1" className="fn-btn fn-btn-primary">
+              全体診断を実行
+            </Link>
+          ) : (
+            <Link href="/admin/health" className="fn-btn fn-btn-ghost">
+              通常の運用チェックへ戻る
+            </Link>
+          )}
+          <Link href="/admin/health/integrity" className="fn-btn fn-btn-ghost">
+            DB整合性チェックへ
+          </Link>
+        </div>
       </section>
 
-      <nav
-        aria-label="状態フィルタ"
-        style={{
-          marginTop: 16,
-          display: "flex",
-          gap: 6,
-          flexWrap: "wrap",
-        }}
-      >
-        {(
-          [
-            ["all", "すべて"],
-            ["warn", "WARN"],
-            ["info", "INFO"],
-            ["ok", "OK"],
-          ] as const
-        ).map(([key, label]) => (
-          <Link
-            key={key}
-            href={key === "all" ? "/admin/health" : `/admin/health?status=${key}`}
-            className={`fn-btn fn-btn-sm ${filter === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
-          >
-            {label} ({counts[key]})
-          </Link>
-        ))}
-      </nav>
-
-      {error ? (
+  {error ? (
         <div
           style={{
             marginTop: 20,
@@ -134,106 +119,12 @@ export default async function AdminHealthPage({
           エラー: {error}
         </div>
       ) : (
-        <>
-          {counts.warn > 0 ? (
-            <div
-              role="status"
-              style={{
-                marginTop: 14,
-                padding: "10px 14px",
-                background: "var(--accent-warning-soft, #fef3c7)",
-                border: "1px solid var(--accent-warning, #d97706)",
-                borderRadius: "var(--radius-md)",
-                color: "var(--accent-warning, #92400e)",
-                fontSize: 13,
-              }}
-            >
-              <strong>WARN {counts.warn} 件</strong>
-              {" "}が検出されています。一覧から確認してください。
-            </div>
-          ) : (
-            <div
-              role="status"
-              style={{
-                marginTop: 14,
-                padding: "10px 14px",
-                background: "var(--accent-success-soft, #dcfce7)",
-                border: "1px solid var(--accent-success, #16a34a)",
-                borderRadius: "var(--radius-md)",
-                color: "var(--accent-success, #166534)",
-                fontSize: 13,
-              }}
-            >
-              現在 WARN はありません ({counts.ok} 件 OK, {counts.info} 件 INFO)。
-            </div>
-          )}
-        </>
+        <DiagnosticStatusResults
+          kind="health"
+          results={results}
+          initialFilter={initialFilter as DiagnosticFilter}
+        />
       )}
-      {!error ? (
-        <section style={{ marginTop: 22 }}>
-          <FnTable>
-            <thead>
-              <tr>
-                <th>チェック項目</th>
-                <th>状態</th>
-                <th>件数</th>
-                <th>サンプル (最大5件)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.length === 0 ? (
-                <tr>
-                  <td colSpan={4} style={{ padding: 16, textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-                    フィルタ条件に該当する項目はありません。
-                  </td>
-                </tr>
-              ) : null}
-              {visible.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{r.label}</div>
-                    {r.note ? (
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                        {r.note}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <span
-                      className={`fn-badge ${
-                        r.status === "ok"
-                          ? "fn-badge-accent"
-                          : r.status === "info"
-                            ? "fn-badge-neutral"
-                            : "fn-badge-warning"
-                      }`}
-                    >
-                      {r.status === "ok"
-                        ? "OK"
-                        : r.status === "info"
-                          ? "INFO"
-                          : "WARN"}
-                    </span>
-                  </td>
-                  <td style={{ fontVariantNumeric: "tabular-nums" }}>{r.count}</td>
-                  <td>
-                    {r.samples.length === 0 ? (
-                      <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>
-                    ) : (
-                      <ul style={{ margin: 0, padding: 0, listStyle: "none", fontSize: 11, lineHeight: 1.6 }}>
-                        {r.samples.map((s, i) => (
-                          // eslint-disable-next-line react/no-array-index-key
-                          <li key={i} style={{ fontFamily: "monospace" }}>{s}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </FnTable>
-        </section>
-      ) : null}
     </div>
   );
 }

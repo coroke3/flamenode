@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import type { Session } from "next-auth";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { unstable_rethrow } from "next/navigation";
 import {
   CurrentUserUnavailableError,
@@ -12,12 +12,10 @@ import {
 import { getAuthSession } from "@/lib/auth/session";
 import { withDatabaseRead } from "@/lib/cloudflare";
 import {
-  eventStaff,
   xIdentityRequests,
   xUserAccountLinks,
-  xUsers,
 } from "@/lib/db/schema";
-import { resolveStaffPermissionKeys } from "@/lib/auth/permissions/permissionResolver";
+import { getManageAuthorizationSnapshot } from "@/lib/auth/manageAuthorization";
 import type { HeaderUser } from "@/lib/auth/headerUser";
 import { normalizeXId } from "@/lib/utils/xid";
 import { pendingSlotReservationXRequestWhere } from "@/lib/slots/reservationIdentity";
@@ -41,45 +39,40 @@ export type RequestAuthContext = {
   enrichmentFailed: boolean;
 };
 
+type RequestAuthBase = {
+  session: Session | null;
+  currentUser: CurrentUser | null;
+  traceId: string;
+  started: number;
+};
+
+function emptyOnboarding(): MinimalOnboardingState {
+  return {
+    needsXIdOnboarding: false,
+    hasLinkedXId: false,
+    hasPendingXIdRequest: false,
+  };
+}
+
+function defaultManagement(
+  user: CurrentUser,
+): HeaderUser["management"] {
+  return {
+    canAccessAdmin: user.role === "admin",
+    canAccessManage: user.role === "admin",
+    manageableEventCount: 0,
+  };
+}
+
 async function loadManagementAccess(
   authUserId: string,
   role: CurrentUser["role"],
 ): Promise<HeaderUser["management"]> {
-  if (role === "admin") {
-    return {
-      canAccessAdmin: true,
-      canAccessManage: true,
-      manageableEventCount: 0,
-    };
-  }
-
-  const canAccessManage = await withDatabaseRead(async (db) => {
-    // 任意の件数の linked X / event_staff を対象に、bind 数を増やさず直接JOINする。
-    // 無順序 limit は権限行を範囲外にして管理導線を隠し得るため使用しない。
-    const rows = await db
-      .select({
-        permission_preset: eventStaff.permission_preset,
-        custom_permission_keys_json: eventStaff.custom_permission_keys_json,
-      })
-      .from(eventStaff)
-      .innerJoin(
-        xUserAccountLinks,
-        eq(xUserAccountLinks.x_user_id, eventStaff.x_user_id),
-      )
-      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-      .where(
-        and(
-          eq(xUserAccountLinks.auth_user_id, authUserId),
-          eq(xUsers.approval_status, "approved"),
-        )!,
-      );
-
-    return rows.some((row) => resolveStaffPermissionKeys(row).size > 0);
-  });
+  const snapshot = await getManageAuthorizationSnapshot(authUserId, role);
 
   return {
-    canAccessAdmin: false,
-    canAccessManage: canAccessManage === true,
+    canAccessAdmin: snapshot.canAccessAdmin,
+    canAccessManage: snapshot.canAccessManage,
     manageableEventCount: 0,
   };
 }
@@ -157,7 +150,8 @@ function buildMinimalHeaderUser(
   };
 }
 
-async function loadRequestAuthContext(): Promise<RequestAuthContext> {
+/** session/currentUserだけを読む共通base。onboarding readは含めない。 */
+async function loadRequestAuthBase(): Promise<RequestAuthBase> {
   const started = Date.now();
   const traceId = crypto.randomUUID().slice(0, 8);
 
@@ -191,30 +185,34 @@ async function loadRequestAuthContext(): Promise<RequestAuthContext> {
     throw error;
   }
 
+  return { session, currentUser, traceId, started };
+}
+
+/** 同一Server Component request内のbase認証を共有する。 */
+export const getRequestAuthBase = cache(loadRequestAuthBase);
+
+function unauthenticatedContext(
+  session: Session | null,
+  currentUser: CurrentUser | null,
+): RequestAuthContext {
+  return {
+    session,
+    currentUser: currentUser?.is_banned === 1 ? currentUser : null,
+    headerUser: null,
+    onboarding: emptyOnboarding(),
+    enrichmentFailed: false,
+  };
+}
+
+async function loadRequestAuthContext(): Promise<RequestAuthContext> {
+  const { session, currentUser, traceId, started } = await getRequestAuthBase();
+
   if (!currentUser || currentUser.is_banned === 1) {
-    return {
-      session,
-      currentUser: currentUser?.is_banned === 1 ? currentUser : null,
-      headerUser: null,
-      onboarding: {
-        needsXIdOnboarding: false,
-        hasLinkedXId: false,
-        hasPendingXIdRequest: false,
-      },
-      enrichmentFailed: false,
-    };
+    return unauthenticatedContext(session, currentUser);
   }
 
-  let management: HeaderUser["management"] = {
-    canAccessAdmin: currentUser.role === "admin",
-    canAccessManage: currentUser.role === "admin",
-    manageableEventCount: 0,
-  };
-  let onboarding: MinimalOnboardingState = {
-    needsXIdOnboarding: false,
-    hasLinkedXId: false,
-    hasPendingXIdRequest: false,
-  };
+  let management = defaultManagement(currentUser);
+  let onboarding = emptyOnboarding();
 
   let enrichmentFailed = false;
   try {
@@ -258,16 +256,55 @@ async function loadRequestAuthContext(): Promise<RequestAuthContext> {
 /** 同一 Server Component request 内の認証関連取得を1回にまとめる。 */
 export const getRequestAuthContext = cache(loadRequestAuthContext);
 
-/** layout 用: 追加情報失敗でもログイン済みヘッダーを返す。 */
-export async function getLayoutAuthSurface(): Promise<{
+/**
+ * layout用: onboarding用のlinked/pending readを実行せず、
+ * session/currentUser + managementだけを解決する。
+ */
+async function loadLayoutAuthSurface(): Promise<{
   currentUser: CurrentUser | null;
   headerUser: MinimalHeaderUser | null;
   enrichmentFailed: boolean;
 }> {
-  const ctx = await getRequestAuthContext();
+  const { currentUser, traceId, started } = await getRequestAuthBase();
+  if (!currentUser || currentUser.is_banned === 1) {
+    return {
+      currentUser: currentUser?.is_banned === 1 ? currentUser : null,
+      headerUser: null,
+      enrichmentFailed: false,
+    };
+  }
+
+  let management = defaultManagement(currentUser);
+  let enrichmentFailed = false;
+  try {
+    management = await loadManagementAccess(currentUser.id, currentUser.role);
+  } catch (error) {
+    unstable_rethrow(error);
+    enrichmentFailed = true;
+    logFlowTrace({
+      flow: "request_auth",
+      phase: "header_enrichment",
+      trace_id: traceId,
+      result: "failed",
+      error_code: "header_enrichment_failed",
+      retryable: true,
+    });
+  }
+
+  logFlowTrace({
+    flow: "request_auth",
+    phase: "context_ready",
+    trace_id: traceId,
+    result: "succeeded",
+    duration_ms: Date.now() - started,
+  });
+
   return {
-    currentUser: ctx.currentUser,
-    headerUser: ctx.headerUser,
-    enrichmentFailed: ctx.enrichmentFailed,
+    currentUser,
+    headerUser: buildMinimalHeaderUser(currentUser, management),
+    enrichmentFailed,
   };
 }
+
+/** 同一Server Component request内のlayout surfaceを共有する。 */
+export const getLayoutAuthSurface = cache(loadLayoutAuthSurface);

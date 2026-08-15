@@ -117,11 +117,23 @@ export default async function AdminVideosPage({
           status: videosTable.visibility_status,
           created_at: videosTable.created_at,
         })
-        .from(videosTable)
-        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id));
-      const withEventJoin = event
-        ? base.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
+        .from(videosTable);
+      // X-user lookup is only needed for q's X name/ID search. Avoiding the
+      // LEFT JOIN on the common unfiltered/status/event views keeps the D1
+      // planner on the videos table and preserves rows whose creator link is
+      // missing.
+      const withCreatorJoin = q
+        ? base.leftJoin(
+            xUsersTable,
+            eq(xUsersTable.id, videosTable.creator_x_user_id),
+          )
         : base;
+      const withEventJoin = event
+        ? withCreatorJoin.innerJoin(
+            videoEventsTable,
+            eq(videoEventsTable.video_id, videosTable.id),
+          )
+        : withCreatorJoin;
       const rowsQuery = withEventJoin
         .where(where)
         .orderBy(...videoReviewQueueOrder)
@@ -130,11 +142,19 @@ export default async function AdminVideosPage({
 
       const countBase = db
         .select({ c: sql<number>`COUNT(*)` })
-        .from(videosTable)
-        .leftJoin(xUsersTable, eq(xUsersTable.id, videosTable.creator_x_user_id));
-      const countWithJoin = event
-        ? countBase.innerJoin(videoEventsTable, eq(videoEventsTable.video_id, videosTable.id))
+        .from(videosTable);
+      const countWithCreatorJoin = q
+        ? countBase.leftJoin(
+            xUsersTable,
+            eq(xUsersTable.id, videosTable.creator_x_user_id),
+          )
         : countBase;
+      const countWithJoin = event
+        ? countWithCreatorJoin.innerJoin(
+            videoEventsTable,
+            eq(videoEventsTable.video_id, videosTable.id),
+          )
+        : countWithCreatorJoin;
       const countQuery = countWithJoin.where(where).limit(1);
 
       const eventsQuery = db

@@ -52,6 +52,13 @@ test("通常の作品一覧では review metadata を読まない", () => {
   assert.match(videosPage, /useReviewTable && db && rows\.length > 0/);
 });
 
+test("admin videos は q なしの一覧・件数で x_users JOIN を省略する", () => {
+  assert.match(videosPage, /const withCreatorJoin = q\s*\n\s*\? base\.leftJoin/);
+  assert.match(videosPage, /const countWithCreatorJoin = q\s*\n\s*\? countBase\.leftJoin/);
+  assert.match(videosPage, /like\(xUsersTable\.x_name, term\)/);
+  assert.match(videosPage, /const countWithJoin = event/);
+});
+
 test("管理トップの集計は operational status だけを対象にする", () => {
   assert.match(pendingCounts, /eq\(xIdentityRequestsTable\.status, "pending"\)/);
   assert.match(pendingCounts, /inArray\(notificationOutboxTable\.status, \["failed", "processing"\]\)/);
@@ -62,9 +69,14 @@ test("管理トップの集計は operational status だけを対象にする", 
 test("通知一覧は全履歴 GROUP BY を行わず最新100件と運用件数を読む", () => {
   assert.match(notifications, /\.orderBy\(desc\(notificationOutbox\.created_at\)\)/);
   assert.match(notifications, /\.limit\(100\)/);
-  assert.match(notifications, /groupBy\(notificationOutbox\.status\)/);
-  assert.match(notifications, /statusCounts/);
-  assert.match(notifications, /all: total/);
+  assert.doesNotMatch(notifications, /groupBy\(notificationOutbox\.status\)/);
+  assert.match(notifications, /operationalCounts/);
+  assert.match(notifications, /SUM\(CASE WHEN .*notificationOutbox\.status/);
+  assert.match(notifications, /inArray\(notificationOutbox\.status, \[\s*"pending",[\s\S]*"dead_letter"/);
+  assert.match(notifications, /dead_letter/);
+  assert.match(notifications, /rows\.length > 0/);
+  assert.doesNotMatch(notifications, /statusCounts/);
+  assert.doesNotMatch(notifications, /counts\.sent/);
 });
 
 test("監査 actor は canonical と legacy operator を受け付け、新規リンクは actor を使う", async () => {

@@ -5,12 +5,13 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { and, desc, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
-import { auditLogs, systemSettings } from "@/lib/db/schema";
+import { auditLogs } from "@/lib/db/schema";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
 import { CostGuardOverrideForm } from "@/components/admin/CostGuardOverrideForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { parseAuditDiff } from "@/lib/audit/diff";
+import { readAdminSystemSettings } from "@/lib/admin/adminSystemSettings";
 import { resolveOperationMode } from "@/lib/operationMode/resolve";
 import type { OperationMode } from "@/lib/operationMode/types";
 
@@ -66,14 +67,14 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
   let history: (typeof auditLogs.$inferSelect)[] = [];
   if (db) {
     try {
-      const rows = await db.select().from(systemSettings).limit(1);
-      if (rows[0]) {
-        mode = resolveOperationMode(rows[0]);
+      const settings = await readAdminSystemSettings(db);
+      if (settings) {
+        mode = resolveOperationMode(settings);
         isMaintenance = mode === "maintenance" ? 1 : 0;
-        reason = rows[0].cost_guard_reason;
-        updatedAt = rows[0].cost_guard_updated_at ?? null;
-        exceptionUntil = rows[0].cost_guard_exception_until ?? null;
-        exceptionFeaturesJson = rows[0].cost_guard_exception_features_json;
+        reason = settings.cost_guard_reason;
+        updatedAt = settings.cost_guard_updated_at ?? null;
+        exceptionUntil = settings.cost_guard_exception_until ?? null;
+        exceptionFeaturesJson = settings.cost_guard_exception_features_json;
       }
       history = await db
         .select()

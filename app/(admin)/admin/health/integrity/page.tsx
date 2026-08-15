@@ -190,20 +190,30 @@ function CheckCard({ result }: { result: IntegrityCheckResult }): React.ReactEle
   );
 }
 
-export default async function AdminIntegrityPage(): Promise<React.ReactElement> {
+interface Props {
+  searchParams?: Promise<{ run?: string }>;
+}
+
+export default async function AdminIntegrityPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
   const user = await getCurrentUser();
   if (!user || user.role !== "admin") notFound();
 
+  const sp = (await searchParams) ?? {};
+  const shouldRun = sp.run === "1";
   const db = getDatabase();
   let results: IntegrityCheckResult[] = [];
   let error: string | null = null;
-  if (!db) {
-    error = "DB に接続できませんでした。";
-  } else {
-    try {
-      results = await runIntegrityChecks(db);
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+  if (shouldRun) {
+    if (!db) {
+      error = "DB に接続できませんでした。";
+    } else {
+      try {
+        results = await runIntegrityChecks(db);
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+      }
     }
   }
 
@@ -216,33 +226,55 @@ export default async function AdminIntegrityPage(): Promise<React.ReactElement> 
     <div>
       <AdminPageHeader
         title="DB 整合性チェック"
-        description="videos / video_events / video_members / slots / 派生行 / audit_logs の参照整合性を読み取り専用で確認します。"
+        description="videos / video_events / video_members / slots / 派生行 / audit_logs の参照整合性を読み取り専用で確認します。初期表示では実行せず、必要なときだけ明示的に実行します。"
         backHref="/admin/health"
         backLabel="ヘルスチェックへ"
       />
 
       <AdminSectionTabs hub="health" />
 
-      <section
-        style={{
-          marginTop: 16,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-          gap: 8,
-        }}
-      >
-        <Metric label="総検出件数" value={issueCount} />
-        <Metric label="危険チェック" value={dangerCount} tone="danger" />
-        <Metric label="警告チェック" value={warningCount} tone="warning" />
-        <Metric label="確認チェック" value={infoCount} />
-      </section>
+      {!shouldRun ? (
+        <section className="fn-card" style={{ marginTop: 18 }}>
+          <strong>DB整合性診断は未実行です</strong>
+          <p className="fn-muted" style={{ margin: "6px 0 12px", fontSize: 12, lineHeight: 1.6 }}>
+            全件走査を含む読み取り専用診断です。必要なときだけ実行してください。
+          </p>
+          <Link href="/admin/health/integrity?run=1" className="fn-btn fn-btn-primary">
+            DB整合性診断を実行
+          </Link>
+        </section>
+      ) : null}
+
+      {shouldRun ? (
+        <div style={{ marginTop: 16 }}>
+          <Link href="/admin/health/integrity?run=1" className="fn-btn fn-btn-ghost fn-btn-sm">
+            最新状態で再チェック
+          </Link>
+        </div>
+      ) : null}
+
+      {shouldRun ? (
+        <section
+          style={{
+            marginTop: 16,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 8,
+          }}
+        >
+          <Metric label="総検出件数" value={issueCount} />
+          <Metric label="危険チェック" value={dangerCount} tone="danger" />
+          <Metric label="警告チェック" value={warningCount} tone="warning" />
+          <Metric label="確認チェック" value={infoCount} />
+        </section>
+      ) : null}
 
       {error ? (
         <div className="fn-card" style={{ marginTop: 18, borderColor: "var(--accent-danger)" }}>
           <strong style={{ color: "var(--accent-danger)" }}>エラー</strong>
           <p style={{ marginBottom: 0 }}>{error}</p>
         </div>
-      ) : (
+      ) : shouldRun ? (
         <section
           style={{
             marginTop: 20,
@@ -255,7 +287,7 @@ export default async function AdminIntegrityPage(): Promise<React.ReactElement> 
             <CheckCard key={result.id} result={result} />
           ))}
         </section>
-      )}
+      ) : null}
     </div>
   );
 }

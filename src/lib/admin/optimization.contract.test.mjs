@@ -100,9 +100,13 @@ test("X ID統合影響件数は単一DB読取で取得する", () => {
   assert.doesNotMatch(xIdMergeImpact, /Promise\.all/);
   assert.equal((xIdMergeImpact.match(/SELECT COUNT\(\*\)/g) ?? []).length, 9);
   assert.match(xIdMergeImpact, /impact_source/);
-  assert.match(xIdMergeImpact, /fetchXIdMergeImpacts/);
+  assert.match(xIdMergeImpact, /fetchXIdMergeImpact/);
   assert.match(xIdMergeImpact, /source_ids/);
-  assert.match(xIdMergesPage, /fetchXIdMergeImpacts/);
+  assert.match(xIdMergesPage, /fetchXIdMergeImpact\(db/);
+  assert.doesNotMatch(xIdMergesPage, /fetchXIdMergeImpacts/);
+  assert.doesNotMatch(xIdMergesPage, /impactSourceIds/);
+  assert.match(xIdMergesPage, /if \(db && view === "requests"\)/);
+  assert.match(xIdMergesPage, /selectedImpactId/);
   assert.doesNotMatch(xIdMergesPage, /Promise\.all\(\s*requestRows\.map/);
 });
 
@@ -232,6 +236,8 @@ test("X ID申請一覧は相関サブクエリを使わずpendingを上限付き
   }
   assert.match(enrichXLinkPendingRows, /D1_MAX_BIND_PARAMETERS/);
   assert.match(enrichXLinkPendingRows, /inArray\(xUsers\.id, chunk\)/);
+  assert.doesNotMatch(manageXLinkRequestsPage, /includeVideoIconFallback/);
+  assert.doesNotMatch(enrichXLinkPendingRows, /videos\.|creator_icon_url|includeVideoIconFallback/);
 });
 
 test("管理トップは同一テーブルのCOUNTを条件付き集計へ統合する", () => {
@@ -246,7 +252,8 @@ test("管理トップは同一テーブルのCOUNTを条件付き集計へ統合
 });
 
 test("運営トップは担当イベントのスタッフロール取得をバッチ化する", () => {
-  assert.match(manageTopPage, /getManageStaffRolesForEvents/);
+  assert.match(manageTopPage, /getManageAuthorizationSnapshot/);
+  assert.match(manageTopPage, /roleByEvent/);
   assert.doesNotMatch(manageTopPage, /getManageStaffRoleForEvent/);
   assert.match(ownership, /export async function getManageStaffRolesForEvents/);
   assert.match(ownership, /getManageStaffRoleForEvent[\s\S]*getManageStaffRolesForEvents/);

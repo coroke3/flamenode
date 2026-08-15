@@ -44,7 +44,11 @@ type StatusFilter =
   | "failed"
   | "cancelled";
 
-type Counts = Record<StatusFilter, number>;
+type Counts = {
+  pending: number;
+  processing: number;
+  failed: number;
+};
 
 interface Props {
   searchParams?: Promise<{
@@ -118,12 +122,9 @@ export default async function AdminNotificationsPage({
   const db = getDatabase();
   let rows: (typeof notificationOutbox.$inferSelect)[] = [];
   let counts: Counts = {
-    all: 0,
     pending: 0,
     processing: 0,
-    sent: 0,
     failed: 0,
-    cancelled: 0,
   };
   let deadLetterCount = 0;
   let expiredLeaseCount = 0;
@@ -150,7 +151,7 @@ export default async function AdminNotificationsPage({
             : and(...conditions);
       const now = Math.floor(Date.now() / 1000);
 
-      const [list, counted, expiredLeases] = await Promise.all([
+      const [list, operationalCounts, expiredLeases] = await Promise.all([
         where
           ? db
               .select()
@@ -163,13 +164,26 @@ export default async function AdminNotificationsPage({
               .from(notificationOutbox)
               .orderBy(desc(notificationOutbox.created_at))
               .limit(100),
+        // Only operational states need an exact, real-time count. Terminal
+        // history (sent/cancelled) is deliberately represented by the bounded
+        // latest list below; scanning all historical deliveries here defeats the
+        // latest-100 index and was the main source of rows_read on this page.
         db
           .select({
-            status: notificationOutbox.status,
-            count: sql<number>`COUNT(*)`,
+            pending: sql<number>`SUM(CASE WHEN ${notificationOutbox.status} = 'pending' THEN 1 ELSE 0 END)`,
+            processing: sql<number>`SUM(CASE WHEN ${notificationOutbox.status} = 'processing' THEN 1 ELSE 0 END)`,
+            failed: sql<number>`SUM(CASE WHEN ${notificationOutbox.status} = 'failed' THEN 1 ELSE 0 END)`,
+            deadLetter: sql<number>`SUM(CASE WHEN ${notificationOutbox.status} = 'dead_letter' THEN 1 ELSE 0 END)`,
           })
           .from(notificationOutbox)
-          .groupBy(notificationOutbox.status),
+          .where(
+            inArray(notificationOutbox.status, [
+              "pending",
+              "processing",
+              "failed",
+              "dead_letter",
+            ]),
+          ),
         db
           .select({ count: sql<number>`COUNT(*)` })
           .from(notificationOutbox)
@@ -182,23 +196,17 @@ export default async function AdminNotificationsPage({
       ]);
 
       rows = list;
-      const statusCounts: Record<string, number> = {};
-      let total = 0;
-      for (const row of counted) {
-        const key = row.status ?? "unknown";
-        const value = Number(row.count ?? 0);
-        statusCounts[key] = value;
-        total += value;
-      }
+      const operational = operationalCounts[0];
+      const pending = Number(operational?.pending ?? 0);
+      const processing = Number(operational?.processing ?? 0);
+      const failed = Number(operational?.failed ?? 0);
+      const deadLetter = Number(operational?.deadLetter ?? 0);
       counts = {
-        all: total,
-        pending: statusCounts.pending ?? 0,
-        processing: statusCounts.processing ?? 0,
-        sent: statusCounts.sent ?? 0,
-        failed: statusCounts.failed ?? 0,
-        cancelled: statusCounts.cancelled ?? 0,
+        pending,
+        processing,
+        failed,
       };
-      deadLetterCount = statusCounts.dead_letter ?? 0;
+      deadLetterCount = deadLetter;
       expiredLeaseCount = Number(expiredLeases[0]?.count ?? 0);
     } catch (cause) {
       error = String(cause);
@@ -254,9 +262,9 @@ export default async function AdminNotificationsPage({
         <div role="status" className="fn-alert fn-alert--warn" style={{ marginTop: 14 }}>
           配信待ち <strong>{counts.pending} 件</strong>（Queue wake で処理、毎時 Recovery がバックアップ）
         </div>
-      ) : counts.sent > 0 ? (
+      ) : rows.length > 0 ? (
         <div role="status" className="fn-alert fn-alert--success" style={{ marginTop: 14 }}>
-          失敗・滞留はありません（送信済み {counts.sent} 件）。
+          現在、失敗・滞留はありません。
         </div>
       ) : null}
 
@@ -279,7 +287,10 @@ export default async function AdminNotificationsPage({
             href={filterHref({ status: key, ...filterInput })}
             className={`fn-btn fn-btn-sm ${status === key ? "fn-btn-primary" : "fn-btn-ghost"}`}
           >
-            {label} ({key === "failed" ? counts.failed + deadLetterCount : counts[key]})
+            {label}
+            {key === "pending" || key === "processing" || key === "failed"
+              ? ` (${key === "failed" ? counts.failed + deadLetterCount : key === "pending" ? counts.pending : counts.processing})`
+              : ""}
           </Link>
         ))}
       </nav>
