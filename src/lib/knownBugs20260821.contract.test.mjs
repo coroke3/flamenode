@@ -26,14 +26,16 @@ test("dashboardはActive X表示・イベント重複排除・DB側の枠順序�
   assert.doesNotMatch(source, /sortSlotsChronologically/);
 });
 
-test("募集カードと枠ページは募集締切境界を同じ契約で扱う", () => {
+test("募集カードと公開イベント画面は募集締切境界を同じ契約で扱う", () => {
   const recruitCard = read("../components/layout/EventRecruitCard.tsx");
+  const eventPage = read("../../app/(public)/event/[id]/page.tsx");
   const slotsPage = read("../../app/(public)/event/[id]/slots/page.tsx");
 
   assert.match(recruitCard, /now >= event\.entry_end_time/);
   assert.match(recruitCard, /state === "accepting" \|\| state === "full"/);
   assert.match(recruitCard, /heading:\s*"募集締切まで"/);
   assert.match(recruitCard, /resolveCountdown\(event, now, state\)/);
+  assert.match(eventPage, /now >= event\.entry_end_time/);
   assert.match(slotsPage, /now >= event\.entry_end_time/);
 });
 
