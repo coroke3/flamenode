@@ -4,7 +4,7 @@ import { cache } from "react";
 import { and, eq } from "drizzle-orm";
 import { withDatabaseRead } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
-import { eventStaff, xUserAccountLinks, xUsers } from "@/lib/db/schema";
+import { eventStaff, users, xUserAccountLinks, xUsers } from "@/lib/db/schema";
 import {
   expandPermissionAliases,
   getManageStaffRole,
@@ -21,6 +21,7 @@ export type ManageAuthorizationStaffRow = {
   x_user_id: string;
   permission_preset: string | null;
   custom_permission_keys_json: string | null;
+  active_x_user_id?: string | null;
 };
 
 export type ManageAuthorizationSnapshot = {
@@ -60,9 +61,9 @@ function emptySnapshot(
 /**
  * DB行をメモリ上の表示用認可へ集約する純粋処理。
  *
- * 同一イベントに複数の承認済み X ID / staff 行がある場合は、権限を
- * unionする。表示ロールは既存 getManageStaffRolesForEvents と同じく、
- * 最初に解決できた staff 行を採用し、今回の最適化で優先順位を変更しない。
+ * 同一イベントに複数の承認済み X ID / staff 行がある場合は権限を union する。
+ * 表示ロールは Active X ID の staff 行を最優先し、Active X に該当行がない場合は
+ * representative を editor より優先して DB の行順に依存しない結果にする。
  */
 export function buildManageAuthorizationSnapshot(
   authUserId: string,
@@ -76,6 +77,7 @@ export function buildManageAuthorizationSnapshot(
   const manageStaffXUserIds = new Set<string>();
   const permissionsByEvent = new Map<string, Set<string>>();
   const roleByEvent = new Map<string, "representative" | "editor">();
+  const rolePriorityByEvent = new Map<string, number>();
   let canManageXIdLinkRequests = false;
 
   for (const row of rows) {
@@ -99,9 +101,20 @@ export function buildManageAuthorizationSnapshot(
     for (const key of permissionKeys) eventPermissions.add(key);
     permissionsByEvent.set(eventId, eventPermissions);
 
-    if (!roleByEvent.has(eventId)) {
-      const displayRole = getManageStaffRole(row);
-      if (displayRole) roleByEvent.set(eventId, displayRole);
+    const displayRole = getManageStaffRole(row);
+    if (displayRole) {
+      const activeXUserId = row.active_x_user_id?.trim() || null;
+      const isActiveX = Boolean(xUserId && activeXUserId === xUserId);
+      const displayPriority = isActiveX
+        ? 2
+        : displayRole === "representative"
+          ? 1
+          : 0;
+      const currentPriority = rolePriorityByEvent.get(eventId) ?? -1;
+      if (displayPriority > currentPriority) {
+        roleByEvent.set(eventId, displayRole);
+        rolePriorityByEvent.set(eventId, displayPriority);
+      }
     }
   }
 
@@ -139,12 +152,14 @@ async function loadStaffRows(
       x_user_id: eventStaff.x_user_id,
       permission_preset: eventStaff.permission_preset,
       custom_permission_keys_json: eventStaff.custom_permission_keys_json,
+      active_x_user_id: users.active_x_user_id,
     })
     .from(eventStaff)
     .innerJoin(
       xUserAccountLinks,
       eq(xUserAccountLinks.x_user_id, eventStaff.x_user_id),
     )
+    .innerJoin(users, eq(users.id, xUserAccountLinks.auth_user_id))
     .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
     .where(
       and(
