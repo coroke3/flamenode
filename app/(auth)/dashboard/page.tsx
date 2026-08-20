@@ -1,19 +1,19 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import {
   approvedXIdsNotWhere,
   approvedXIdsWhere,
 } from "@/lib/auth/approvedX";
 import { getApprovedXIds } from "@/lib/auth/ownership";
-import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots as slotsTable,
   videoChapters as videoChaptersTable,
+  videoEvents,
   videoMembers,
   videoYoutubeMetadata,
   videos as videosTable,
@@ -22,9 +22,6 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
-import {
-  sortSlotsChronologically,
-} from "@/lib/utils/slotGrouping";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
@@ -83,26 +80,28 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       approvedXIds = await getApprovedXIds(db, user.id);
 
       if (approvedXIds.length > 0) {
-        myVideos = (await db
-          .select({
-            id: videosTable.id,
-            title: videosTable.title,
-            youtube_video_id: videosTable.youtube_video_id,
-            display_name: videosTable.creator_display_name,
-            icon_url: videosTable.creator_icon_url,
-            creator_x_user_id: videosTable.creator_x_user_id,
-            primary_event_id: videosTable.primary_event_id,
-            scheduled_time: videosTable.scheduled_time,
-            status: videosTable.visibility_status,
-          })
-          .from(videosTable)
-          .where(
-            and(
-              approvedXIdsWhere(videosTable.creator_x_user_id, approvedXIds),
-              ne(videosTable.visibility_status, "voided"),
-            )!,
-          )
-          .orderBy(desc(videosTable.created_at))) as VideoCardData[];
+        if (onboarding.activeApprovedXId) {
+          myVideos = (await db
+            .select({
+              id: videosTable.id,
+              title: videosTable.title,
+              youtube_video_id: videosTable.youtube_video_id,
+              display_name: videosTable.creator_display_name,
+              icon_url: videosTable.creator_icon_url,
+              creator_x_user_id: videosTable.creator_x_user_id,
+              primary_event_id: videosTable.primary_event_id,
+              scheduled_time: videosTable.scheduled_time,
+              status: videosTable.visibility_status,
+            })
+            .from(videosTable)
+            .where(
+              and(
+                eq(videosTable.creator_x_user_id, onboarding.activeApprovedXId),
+                ne(videosTable.visibility_status, "voided"),
+              )!,
+            )
+            .orderBy(desc(videosTable.created_at))) as VideoCardData[];
+        }
 
         collabVideos = (await db
           .select({
@@ -173,8 +172,14 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             )!,
           )!,
         )
-        .limit(50);
-      mySlot = sortSlotsChronologically(slotRows)[0] ?? null;
+        .orderBy(
+          sql`CASE WHEN ${slotsTable.start_time} IS NULL THEN 1 ELSE 0 END`,
+          asc(slotsTable.start_time),
+          asc(slotsTable.sort_order),
+          asc(slotsTable.id),
+        )
+        .limit(1);
+      mySlot = slotRows[0] ?? null;
       if (mySlot) {
         mySlotEvent =
           (
@@ -187,30 +192,41 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       }
 
       if (approvedXIds.length > 0) {
+        const statsVideoWhere = and(
+          approvedXIdsWhere(videosTable.creator_x_user_id, approvedXIds),
+          ne(videosTable.visibility_status, "voided"),
+          excludePvsfSummaryVideos(),
+        )!;
         const aggRows = await db
           .select({
             likes: sql<number>`COALESCE(SUM(${videosTable.app_like_count}),0)`,
             views: sql<number>`COALESCE(SUM(${videoYoutubeMetadata.view_count}),0)`,
             c: sql<number>`COUNT(*)`,
-            ec: sql<number>`COUNT(${videosTable.primary_event_id})`,
           })
           .from(videosTable)
           .leftJoin(
             videoYoutubeMetadata,
             eq(videoYoutubeMetadata.video_id, videosTable.id),
           )
-          .where(
-            and(
-              approvedXIdsWhere(videosTable.creator_x_user_id, approvedXIds),
-              ne(videosTable.visibility_status, "voided"),
-              excludePvsfSummaryVideos(),
-            )!,
-          );
+          .where(statsVideoWhere);
+        const eventRows = await db
+          .selectDistinct({
+            primary_event_id: videosTable.primary_event_id,
+            linked_event_id: videoEvents.event_id,
+          })
+          .from(videosTable)
+          .leftJoin(videoEvents, eq(videoEvents.video_id, videosTable.id))
+          .where(statsVideoWhere);
+        const participatingEventIds = new Set<string>();
+        for (const row of eventRows) {
+          if (row.primary_event_id) participatingEventIds.add(row.primary_event_id);
+          if (row.linked_event_id) participatingEventIds.add(row.linked_event_id);
+        }
         stats = {
           likes: Number(aggRows[0]?.likes ?? 0),
           views: Number(aggRows[0]?.views ?? 0),
           video_count: Number(aggRows[0]?.c ?? 0),
-          event_count: Number(aggRows[0]?.ec ?? 0),
+          event_count: participatingEventIds.size,
         };
       }
     } catch (error) {
@@ -237,7 +253,9 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       ? "X ID を連携すると、承認後に作品の投稿やマイ・ギャラリーが使えるようになります。"
       : approvedXIds.length === 0
         ? "承認済み X ID がないため、作品を表示していません。"
-        : "自分の作品はまだ登録されていません。";
+        : !onboarding.activeApprovedXId
+          ? "Active X ID を設定すると、その名義の作品が表示されます。"
+          : "自分の作品はまだ登録されていません。";
   const collabEmptyMessage =
     xIds.length === 0
       ? "X ID を連携すると、共同編集できる作品が表示されます。"
