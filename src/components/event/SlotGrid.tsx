@@ -113,9 +113,11 @@ function slotDisplayNameStorageKey(viewerXId: string | null): string {
 function readSavedSlotDisplayName(viewerXId: string | null): string {
   if (typeof window === "undefined") return "";
   try {
+    const normalizedViewerXId = normalizeXId(viewerXId ?? "");
     const scopedKey = slotDisplayNameStorageKey(viewerXId);
     const scoped = window.localStorage.getItem(scopedKey);
     if (scoped) return scoped;
+    if (normalizedViewerXId) return "";
     const legacy = window.localStorage.getItem(LEGACY_SLOT_DISPLAY_NAME_KEY);
     return legacy ?? "";
   } catch {
@@ -347,7 +349,6 @@ export function SlotGrid({
     setReserveDisplayName(savedName);
     setReserveCount("1");
   };
-
   const previewSlot = React.useCallback((slotId: string) => {
     window.dispatchEvent(
       new CustomEvent(SLOT_PREVIEW_EVENT, { detail: { slotId } }),
