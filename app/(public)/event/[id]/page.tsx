@@ -175,7 +175,7 @@ function EventDetailView({
   const inPostPeriod =
     !accepting &&
     event.entry_end_time != null &&
-    now > event.entry_end_time &&
+    now >= event.entry_end_time &&
     event.start_time != null &&
     now < event.start_time;
   const dayMetric = getDayMetric(event, now);
