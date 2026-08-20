@@ -104,7 +104,7 @@ function resolveState(
   if (status === "active") return "ongoing";
 
   const eventPoint = event.start_time ?? event.end_time;
-  if (event.entry_end_time != null && now > event.entry_end_time && eventPoint) {
+  if (event.entry_end_time != null && now >= event.entry_end_time && eventPoint) {
     return (eventPoint - now) / DAY_SECONDS <= 3 ? "soon" : "after_entry";
   }
   return "before_entry";
@@ -113,8 +113,36 @@ function resolveState(
 function resolveCountdown(
   event: RecruitEvent,
   now: number,
+  state: RecruitState,
 ): { heading: string; seconds: number | null; range: string } {
   const postRange = formatRange(event.start_time, event.end_time);
+  const entryRange = formatRange(
+    event.entry_start_time ?? null,
+    event.entry_end_time ?? null,
+  );
+
+  if (
+    state === "before_entry" &&
+    event.entry_start_time != null &&
+    event.entry_start_time > now
+  ) {
+    return {
+      heading: "募集開始まで",
+      seconds: event.entry_start_time - now,
+      range: entryRange,
+    };
+  }
+  if (
+    (state === "accepting" || state === "full") &&
+    event.entry_end_time != null &&
+    event.entry_end_time > now
+  ) {
+    return {
+      heading: "募集締切まで",
+      seconds: event.entry_end_time - now,
+      range: entryRange,
+    };
+  }
   if (event.start_time != null && event.start_time > now) {
     return {
       heading: "投稿期間まで",
@@ -127,20 +155,6 @@ function resolveCountdown(
       heading: "投稿期間終了まで",
       seconds: event.end_time - now,
       range: postRange,
-    };
-  }
-  if (event.entry_end_time != null && event.entry_end_time > now) {
-    return {
-      heading: "募集締切まで",
-      seconds: event.entry_end_time - now,
-      range: formatRange(event.entry_start_time ?? null, event.entry_end_time),
-    };
-  }
-  if (event.entry_start_time != null && event.entry_start_time > now) {
-    return {
-      heading: "募集開始まで",
-      seconds: event.entry_start_time - now,
-      range: formatRange(event.entry_start_time, event.entry_end_time ?? null),
     };
   }
   return {
@@ -347,7 +361,7 @@ export function EventRecruitCard({
   const state = resolveState(event, available, now);
   const kind = toRecruitKind(state);
   const statusTitle = stateLabel(state);
-  const countdown = resolveCountdown(event, now);
+  const countdown = resolveCountdown(event, now, state);
   const countdownDisplay = formatRemainingTimeMetric(countdown.seconds);
   const timeline = buildTimeline(event, now, state);
   const slotTotal = total ?? null;
