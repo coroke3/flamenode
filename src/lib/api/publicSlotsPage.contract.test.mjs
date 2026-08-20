@@ -50,7 +50,12 @@ test("public slots page selects public events and serializes a reduced viewer DT
     /onboarding\.requestedXId/,
     "requestedXId フォールバックは使わない",
   );
-  assert.match(page, /canTakeSlot=\{accepting && onboarding\.canReserveSlot\}/);
+  assert.match(
+    page,
+    /canTakeSlot=\{[\s\S]*onboarding\.canReserveSlot[\s\S]*operatorOverrideAllowed/,
+    "運営例外を含む canTakeSlot 判定",
+  );
+  assert.match(page, /operatorOverrideAllowed/);
   assert.match(page, /canPost=\{onboarding\.canPost\}/);
   assert.doesNotMatch(page, /X ID の申請が必要/);
   assert.match(grid, /reserved_x_id: string \| null/);

@@ -91,11 +91,11 @@ test("slot.tsはextend/mergeのみeventDomainLimitを使いreleaseOwnSlotでは�
   assert.match(slotSource, /normalizeMaxSlotsPerVideo/);
   assert.match(
     slotSource,
-    /extendOwnSlotGroup[\s\S]*?groupRows\.length \+ 1 > eventDomainLimit\(event\)/,
+    /extendOwnSlotGroup[\s\S]*?operatorOverride\s*\?\s*MAX_SLOTS_PER_VIDEO[\s\S]*?groupRows\.length \+ 1 > maxRows/,
   );
   assert.match(
     slotSource,
-    /mergeOwnSlotGroups[\s\S]*?reservedRows\.length \+ 1 > eventDomainLimit\(event\)/,
+    /mergeOwnSlotGroups[\s\S]*?operatorOverride\s*\?\s*MAX_SLOTS_PER_VIDEO[\s\S]*?reservedRows\.length \+ 1 > maxRows/,
   );
 
   const releaseBlock =

@@ -12,8 +12,8 @@ import {
   type EventSettingsPreviewValue,
 } from "@/components/admin/EventSettingsPreview";
 import {
-  createDefaultStagePermissionQuestion,
   DEFAULT_STAGE_PERMISSION_FIELD,
+  filterImplicitEmptyStagePermissionQuestions,
   getStagePermissionQuestions,
   parseVideoFormSettings,
   type StagePermissionFieldSettings,
@@ -355,7 +355,9 @@ export function EventForm({
       const current = getStagePermissionQuestions(
         parseVideoFormSettings(initial.video_form_settings_json),
       );
-      return current.length ? current : [createDefaultStagePermissionQuestion()];
+      // 質問未設定の新規作成／既存イベントは空欄のまま開始する。
+      // ここで暗黙の1件を追加すると、保存時に意図しない質問が常時作成される。
+      return filterImplicitEmptyStagePermissionQuestions(current);
     },
   );
 
@@ -386,7 +388,9 @@ export function EventForm({
         element.value = values.shift() ?? "";
       }
     }
-    setQuestions(readQuestions(restored));
+    setQuestions(
+      filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
+    );
     setPreview(formPreview(restored, initial));
     setDirty(true);
   }, [initial]);

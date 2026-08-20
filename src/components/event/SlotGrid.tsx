@@ -14,7 +14,10 @@ import {
   reserveSlot,
 } from "@/lib/actions/slot";
 import { countContiguousAvailableForward } from "@/lib/slots/contiguousAvailable";
-import { normalizeMaxSlotsPerVideo } from "@/lib/slots/limits";
+import {
+  MAX_SLOTS_PER_VIDEO,
+  normalizeMaxSlotsPerVideo,
+} from "@/lib/slots/limits";
 import { formatUnix } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -60,6 +63,8 @@ export interface SlotGridProps {
   canPost?: boolean;
   slotType: "time" | "count";
   maxSlotsPerVideo?: number;
+  /** event.slots を持つ運営スタッフ／adminの例外予約を許可する表示フラグ。 */
+  operatorOverrideAllowed?: boolean;
   /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 15 分。 */
   slotPartGapSec?: number;
 }
@@ -76,11 +81,13 @@ type SlotDisplayRow =
 interface ConfirmExtend {
   slotId: string;
   direction: "forward" | "backward";
+  operatorOverrideRequired: boolean;
 }
 
 interface ConfirmMerge {
   gapSlotId: string;
   defaultName: string;
+  operatorOverrideRequired: boolean;
 }
 
 interface ReserveTarget {
@@ -176,6 +183,7 @@ export function SlotGrid({
   slotType,
   maxSlotsPerVideo = 1,
   slotPartGapSec,
+  operatorOverrideAllowed = false,
 }: SlotGridProps): React.ReactElement {
   const router = useRouter();
   const pathname = usePathname();
@@ -203,6 +211,9 @@ export function SlotGrid({
   const [reserveCount, setReserveCount] = React.useState("1");
   const [savedName, setSavedName] = React.useState<string>("");
   const eventMaxSlots = normalizeMaxSlotsPerVideo(maxSlotsPerVideo);
+  const effectiveMaxSlots = operatorOverrideAllowed
+    ? MAX_SLOTS_PER_VIDEO
+    : eventMaxSlots;
   const slotGapSec = slotPartGapSec ?? 15 * 60;
 
   const redirectForGuardReason = React.useCallback(
@@ -247,10 +258,10 @@ export function SlotGrid({
     return countContiguousAvailableForward({
       slots,
       anchorId: reserveTarget.slot.id,
-      eventMax: eventMaxSlots,
+      eventMax: effectiveMaxSlots,
       gapSec: slotGapSec,
     });
-  }, [reserveTarget, slots, eventMaxSlots, slotGapSec]);
+  }, [reserveTarget, slots, effectiveMaxSlots, eventMaxSlots, slotGapSec]);
 
   React.useEffect(() => {
     const current = Number(reserveCount);
@@ -354,6 +365,11 @@ export function SlotGrid({
     fd.set("slot_id", slotId);
     fd.set("display_name", displayName);
     fd.set("consecutive_count", consecutiveCount);
+    const requestedCount = Number(consecutiveCount);
+    const operatorOverrideRequired =
+      operatorOverrideAllowed &&
+      (!canReserve || requestedCount > eventMaxSlots);
+    if (operatorOverrideRequired) fd.set("operator_override", "1");
     const dn = displayName.trim();
     if (dn) {
       try {
@@ -412,12 +428,17 @@ export function SlotGrid({
     });
   };
 
-  const onExtend = (slotId: string, direction: "forward" | "backward") => {
+  const onExtend = (
+    slotId: string,
+    direction: "forward" | "backward",
+    operatorOverrideRequired = false,
+  ) => {
     setError(null);
     setSuccess(null);
     const fd = new FormData();
     fd.set("slot_id", slotId);
     fd.set("direction", direction);
+    if (operatorOverrideRequired) fd.set("operator_override", "1");
     startTransition(async () => {
       const result = await extendOwnSlotGroup(fd);
       if (!result.ok) {
@@ -439,12 +460,17 @@ export function SlotGrid({
     });
   };
 
-  const onMerge = (gapSlotId: string, displayName: string) => {
+  const onMerge = (
+    gapSlotId: string,
+    displayName: string,
+    operatorOverrideRequired = false,
+  ) => {
     setError(null);
     setSuccess(null);
     const fd = new FormData();
     fd.set("gap_slot_id", gapSlotId);
     fd.set("display_name", displayName);
+    if (operatorOverrideRequired) fd.set("operator_override", "1");
     startTransition(async () => {
       const result = await mergeOwnSlotGroups(fd);
       if (!result.ok) {
@@ -473,7 +499,10 @@ export function SlotGrid({
   const getMergeCandidate = React.useCallback(
     (
       gapSlot: SlotAnnotatedRow,
-    ): { ok: true } | { ok: false; overflowMessage: string } | null => {
+    ): {
+      ok: true;
+      operatorOverrideRequired: boolean;
+    } | { ok: false; overflowMessage: string } | null => {
       if (gapSlot.status !== "available") return null;
       const sorted = sortSlotsChronologically(slots);
       const idx = sorted.findIndex((s) => s.id === gapSlot.id);
@@ -509,20 +538,31 @@ export function SlotGrid({
         ? sorted.filter((slot) => slot.group_key === right.group_key).length
         : 1;
       const total = leftSize + 1 + rightSize;
-      if (total > eventMaxSlots) {
+      if (total > effectiveMaxSlots) {
         return {
           ok: false,
           overflowMessage: `結合すると${total}枠となり、イベント上限${eventMaxSlots}枠を超えます`,
         };
       }
-      return { ok: true };
+      return {
+        ok: true,
+        operatorOverrideRequired:
+          operatorOverrideAllowed && (!canReserve || total > eventMaxSlots),
+      };
     },
-    [slots, eventMaxSlots, slotGapSec],
+    [
+      slots,
+      effectiveMaxSlots,
+      eventMaxSlots,
+      slotGapSec,
+      operatorOverrideAllowed,
+      canReserve,
+    ],
   );
 
   const canExtendDirection = React.useCallback(
     (slot: SlotAnnotatedRow, direction: "forward" | "backward"): boolean => {
-      if (slot.group_size >= eventMaxSlots) return false;
+      if (slot.group_size >= effectiveMaxSlots) return false;
       const sorted = sortSlotsChronologically(slots);
       const edgeId =
         direction === "backward" ? slot.group_first_slot_id : slot.group_last_slot_id;
@@ -536,7 +576,7 @@ export function SlotGrid({
         ? areSlotsInSamePart(neighbor, edge, slotGapSec)
         : areSlotsInSamePart(edge, neighbor, slotGapSec);
     },
-    [slots, eventMaxSlots, slotGapSec],
+    [slots, effectiveMaxSlots, slotGapSec],
   );
 
   const closeActionMenu = React.useCallback(() => {
@@ -655,6 +695,11 @@ export function SlotGrid({
 
   return (
     <div className={styles.wrap}>
+      {operatorOverrideAllowed ? (
+        <p role="note" className={styles.ownerHelp}>
+          <Icon name="warning" size={12} aria-hidden /> 運営権限の例外操作が有効です。募集開始前の確保やイベント設定上限を超える予約では、実行前に警告を確認してください。
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className={styles.errorBar}>
           <Icon name="warning" size={12} aria-hidden /> {error}
@@ -887,7 +932,12 @@ export function SlotGrid({
                                   onClick={() => {
                                     const defaultName = getMergeDefaultName(slot);
                                     setMergeDisplayName(defaultName);
-                                    setConfirmMerge({ gapSlotId: slot.id, defaultName });
+                                    setConfirmMerge({
+                                      gapSlotId: slot.id,
+                                      defaultName,
+                                      operatorOverrideRequired:
+                                        mergeCandidate.operatorOverrideRequired,
+                                    });
                                   }}
                                   aria-label={`${formatSlotLabel(slot)} を埋めて結合`}
                                   title="ここを埋めて結合"
@@ -1020,6 +1070,9 @@ export function SlotGrid({
                   setConfirmExtend({
                     slotId: actionMenuSlot.group_first_slot_id,
                     direction: "backward",
+                    operatorOverrideRequired:
+                      operatorOverrideAllowed &&
+                      (!canReserve || actionMenuSlot.group_size + 1 > eventMaxSlots),
                   });
                 }}
               >
@@ -1041,6 +1094,9 @@ export function SlotGrid({
                   setConfirmExtend({
                     slotId: actionMenuSlot.group_last_slot_id,
                     direction: "forward",
+                    operatorOverrideRequired:
+                      operatorOverrideAllowed &&
+                      (!canReserve || actionMenuSlot.group_size + 1 > eventMaxSlots),
                   });
                 }}
               >
@@ -1097,7 +1153,13 @@ export function SlotGrid({
         onConfirm={() => {
           const info = confirmExtend;
           setConfirmExtend(null);
-          if (info) onExtend(info.slotId, info.direction);
+          if (info) {
+            onExtend(
+              info.slotId,
+              info.direction,
+              info.operatorOverrideRequired,
+            );
+          }
         }}
         onCancel={() => setConfirmExtend(null)}
       />
@@ -1147,7 +1209,13 @@ export function SlotGrid({
                 onClick={() => {
                   const info = confirmMerge;
                   setConfirmMerge(null);
-                  if (info) onMerge(info.gapSlotId, mergeDisplayName.trim());
+                  if (info) {
+                    onMerge(
+                      info.gapSlotId,
+                      mergeDisplayName.trim(),
+                      info.operatorOverrideRequired,
+                    );
+                  }
                 }}
                 // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus
@@ -1207,7 +1275,7 @@ export function SlotGrid({
                 autoFocus
               />
             </div>
-            {eventMaxSlots > 1 ? (
+            {effectiveMaxSlots > 1 ? (
               <div className={styles.reserveDialogField}>
                 <label className="fn-label" htmlFor="reserve-count">
                   取得する枠数
@@ -1230,6 +1298,12 @@ export function SlotGrid({
                 <p className={styles.reserveDialogHint}>
                   連続枠は空きが隣接している場合だけまとめて確保されます。上限は {eventMaxSlots} 枠です。
                 </p>
+                {operatorOverrideAllowed &&
+                (!canReserve || Number(reserveCount) > eventMaxSlots) ? (
+                  <p role="alert" className={styles.reserveDialogHint}>
+                    運営権限による例外操作です。募集開始前、またはイベント設定上限を超えて確保します。
+                  </p>
+                ) : null}
                 {Number(reserveCount) >= 2 && reservePreviewSlots.length >= 2 ? (
                   Number(reserveCount) >= 4 ? (
                     <p className={styles.reserveDialogHint}>

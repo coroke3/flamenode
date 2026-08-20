@@ -32,6 +32,11 @@ import {
   resolveSlotViewerRelation,
 } from "@/lib/slots/slotIdentityCore";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
+import { canUseSlotOperatorOverride } from "@/lib/slots/operatorReservationCore";
+import {
+  canEditEventFromSnapshot,
+  getManageAuthorizationSnapshot,
+} from "@/lib/auth/manageAuthorization";
 
 export const dynamic = "force-dynamic";
 
@@ -133,6 +138,21 @@ export default async function EventSlotsPage({
     !accepting &&
     event.entry_end_time != null &&
     now > event.entry_end_time;
+
+  let operatorOverrideAllowed = false;
+  if (
+    viewer?.id &&
+    (viewer.role === "admin" || onboarding.xIdentityStatus === "approved")
+  ) {
+    const authorization = await getManageAuthorizationSnapshot(
+      viewer.id,
+      viewer.role ?? null,
+    );
+    operatorOverrideAllowed =
+      canEditEventFromSnapshot(authorization, event.id, "event.slots") &&
+      onboarding.canReserveSlot &&
+      canUseSlotOperatorOverride(event, now);
+  }
 
   const groupKeys = new Map<string, string>();
   const slotsForUi = slotRows.map((slot) => {
@@ -259,7 +279,7 @@ export default async function EventSlotsPage({
         </div>
       </header>
 
-      {!accepting ? (
+      {!accepting && !operatorOverrideAllowed ? (
         <p className={styles.notice}>
           <Icon name="info" size={13} aria-hidden />
           {status === "ended"
@@ -284,6 +304,11 @@ export default async function EventSlotsPage({
           </Link>
           が必要です。
         </p>
+      ) : !accepting && operatorOverrideAllowed ? (
+        <p className={styles.notice} role="note">
+          <Icon name="warning" size={13} aria-hidden />
+          イベント運営権限で、募集開始前の枠確保やイベント上限を超える予約ができます。実行時に警告を確認してください。
+        </p>
       ) : null}
 
       {viewerXIdNotice ? (
@@ -299,7 +324,11 @@ export default async function EventSlotsPage({
             viewerXId={viewerXId}
             isAuthenticated={Boolean(viewer?.id)}
             canReserve={accepting}
-            canTakeSlot={accepting && onboarding.canReserveSlot}
+            canTakeSlot={
+              onboarding.canReserveSlot &&
+              (accepting || operatorOverrideAllowed)
+            }
+            operatorOverrideAllowed={operatorOverrideAllowed}
             canPost={onboarding.canPost}
             slotType={(event.slot_type ?? "time") as "time" | "count"}
             maxSlotsPerVideo={event.max_slots_per_video ?? 1}

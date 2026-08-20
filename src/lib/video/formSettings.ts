@@ -100,6 +100,32 @@ export function createDefaultStagePermissionQuestion(
   };
 }
 
+/**
+ * EventForm v1 used to materialize one disabled placeholder question even
+ * when an event had no configured questions.  Do not resurrect that legacy
+ * placeholder from an old draft or template snapshot.
+ */
+export function isImplicitEmptyStagePermissionQuestion(
+  question: StagePermissionFieldSettings,
+): boolean {
+  return (
+    question.id === DEFAULT_STAGE_PERMISSION_QUESTION_KEY &&
+    !question.enabled &&
+    !question.required &&
+    question.label === DEFAULT_STAGE_PERMISSION_FIELD.label &&
+    question.description === DEFAULT_STAGE_PERMISSION_FIELD.description &&
+    question.placeholder === DEFAULT_STAGE_PERMISSION_FIELD.placeholder
+  );
+}
+
+export function filterImplicitEmptyStagePermissionQuestions(
+  questions: readonly StagePermissionFieldSettings[],
+): StagePermissionFieldSettings[] {
+  return questions.filter(
+    (question) => !isImplicitEmptyStagePermissionQuestion(question),
+  );
+}
+
 export function resolveStagePermissionFields(
   settingsList: readonly VideoFormSettings[],
 ): StagePermissionFieldSettings[] {

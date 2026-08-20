@@ -7,6 +7,7 @@ import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { assertCanEditEvent } from "@/lib/auth/ownership";
 import {
   writeGuard,
   type WriteGuardDenyReason,
@@ -37,6 +38,7 @@ import {
   type PendingPublicReflection,
 } from "@/lib/staticRebuild/publicReflectionNotice";
 import { isAcceptingEntries } from "@/lib/utils/eventStatus";
+import { canUseSlotOperatorOverride } from "@/lib/slots/operatorReservationCore";
 import { generateId } from "@/lib/utils/id";
 import {
   areSlotsInSamePart,
@@ -56,6 +58,11 @@ export interface SlotReserveResult extends PendingPublicReflection {
 
 const SLOT_ACCOUNT_OTHER_MESSAGE =
   "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";
+
+const SLOT_OPERATOR_PERMISSION_MESSAGE =
+  "イベント運営権限がないため、例外の枠確保は実行できません。";
+const SLOT_OPERATOR_WINDOW_MESSAGE =
+  "例外の枠確保は、受付開始前または受付中のイベントでのみ実行できます。";
 
 function slotMutationOk(
   slotId: string,
@@ -133,6 +140,38 @@ function mutationError(error: unknown): SlotReserveResult {
 
 function eventDomainLimit(event: EventRow): number {
   return normalizeMaxSlotsPerVideo(event.max_slots_per_video);
+}
+
+function formFlag(formData: FormData, name: string): boolean {
+  const value = String(formData.get(name) ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "on";
+}
+
+async function resolveSlotOperatorOverride(args: {
+  db: DB;
+  user: { id: string; role?: string | null };
+  event: EventRow;
+  requested: boolean;
+}): Promise<
+  | { ok: true; enabled: boolean }
+  | { ok: false; message: string }
+> {
+  if (!args.requested) return { ok: true, enabled: false };
+  try {
+    await assertCanEditEvent(
+      args.db,
+      { id: args.user.id, role: args.user.role ?? null },
+      args.event.id,
+      "event.slots",
+    );
+  } catch (error) {
+    unstable_rethrow(error);
+    return { ok: false, message: SLOT_OPERATOR_PERMISSION_MESSAGE };
+  }
+  if (!canUseSlotOperatorOverride(args.event)) {
+    return { ok: false, message: SLOT_OPERATOR_WINDOW_MESSAGE };
+  }
+  return { ok: true, enabled: true };
 }
 
 function applySlotPatch(
@@ -629,10 +668,20 @@ export async function reserveSlot(
     }
     const event = await loadEvent(db, anchor.event_id);
     if (!event) return { ok: false, message: "イベントが見つかりません。" };
-    if (!isAcceptingEntries(event)) {
+    const operatorCheck = await resolveSlotOperatorOverride({
+      db,
+      user: guard.user,
+      event,
+      requested: formFlag(formData, "operator_override"),
+    });
+    if (!operatorCheck.ok) return { ok: false, message: operatorCheck.message };
+    const operatorOverride = operatorCheck.enabled;
+    if (!isAcceptingEntries(event) && !operatorOverride) {
       return { ok: false, message: "受付中ではないため枠を確保できません。" };
     }
-    const maxRows = eventDomainLimit(event);
+    const maxRows = operatorOverride
+      ? MAX_SLOTS_PER_VIDEO
+      : eventDomainLimit(event);
     if (parsed.data.consecutive_count > maxRows) {
       return {
         ok: false,
@@ -805,7 +854,15 @@ export async function extendOwnSlotGroup(
     }
     const event = await loadEvent(db, anchor.event_id);
     if (!event) return { ok: false, message: "イベントが見つかりません。" };
-    if (!isAcceptingEntries(event)) {
+    const operatorCheck = await resolveSlotOperatorOverride({
+      db,
+      user: guard.user,
+      event,
+      requested: formFlag(formData, "operator_override"),
+    });
+    if (!operatorCheck.ok) return { ok: false, message: operatorCheck.message };
+    const operatorOverride = operatorCheck.enabled;
+    if (!isAcceptingEntries(event) && !operatorOverride) {
       return { ok: false, message: "受付中ではないため枠を拡張できません。" };
     }
     const slotXUserId = resolveSlotXUserId(guard);
@@ -815,7 +872,10 @@ export async function extendOwnSlotGroup(
       guard.user.id,
       guard.activeXId,
     );
-    if (groupRows.length + 1 > eventDomainLimit(event)) {
+    const maxRows = operatorOverride
+      ? MAX_SLOTS_PER_VIDEO
+      : eventDomainLimit(event);
+    if (groupRows.length + 1 > maxRows) {
       return { ok: false, message: "連続枠の上限を超えるため拡張できません。" };
     }
     if (groupRows.some((row) => row.status !== "reserved")) {
@@ -930,7 +990,15 @@ export async function mergeOwnSlotGroups(
     }
     const event = await loadEvent(db, gap.event_id);
     if (!event) return { ok: false, message: "イベントが見つかりません。" };
-    if (!isAcceptingEntries(event)) {
+    const operatorCheck = await resolveSlotOperatorOverride({
+      db,
+      user: guard.user,
+      event,
+      requested: formFlag(formData, "operator_override"),
+    });
+    if (!operatorCheck.ok) return { ok: false, message: operatorCheck.message };
+    const operatorOverride = operatorCheck.enabled;
+    if (!isAcceptingEntries(event) && !operatorOverride) {
       return { ok: false, message: "受付中ではないため結合できません。" };
     }
 
@@ -1003,7 +1071,10 @@ export async function mergeOwnSlotGroups(
       guard.user.id,
       guard.activeXId,
     );
-    if (reservedRows.length + 1 > eventDomainLimit(event)) {
+    const maxRows = operatorOverride
+      ? MAX_SLOTS_PER_VIDEO
+      : eventDomainLimit(event);
+    if (reservedRows.length + 1 > maxRows) {
       return { ok: false, message: "連続枠の上限を超えるため結合できません。" };
     }
     assertAdjacentSequence(

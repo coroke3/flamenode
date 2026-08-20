@@ -81,8 +81,13 @@ requireAll("src/components/event/SlotGrid.tsx", [
 ]);
 requireMatch(
   "app/(public)/event/[id]/slots/page.tsx",
-  /canTakeSlot=\{accepting && onboarding\.canReserveSlot\}/,
-  "canTakeSlot は canReserveSlot ベースであり viewerXId 必須ではない。",
+  /canTakeSlot=\{[\s\S]*onboarding\.canReserveSlot[\s\S]*operatorOverrideAllowed/,
+  "canTakeSlot は canReserveSlot ベースであり、event.slots の運営例外だけを追加する。",
+);
+requireMatch(
+  "app/(public)/event/[id]/slots/page.tsx",
+  /canUseSlotOperatorOverride\(event, now\)/,
+  "募集開始前の運営例外は共有境界ヘルパーで判定する。",
 );
 forbidMatch(
   "app/(public)/event/[id]/slots/page.tsx",

@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_STAGE_PERMISSION_FIELD,
+  createDefaultStagePermissionQuestion,
+  filterImplicitEmptyStagePermissionQuestions,
   parseVideoFormSettings,
   resolveStagePermissionFieldsFromJson,
 } from "./formSettings.ts";
@@ -46,5 +48,22 @@ test("resolveStagePermissionFieldsFromJson hides field when no event enables it"
       "{}",
     ]),
     [],
+  );
+});
+
+test("legacy disabled placeholder is not restored as a configured question", () => {
+  assert.deepEqual(
+    filterImplicitEmptyStagePermissionQuestions([
+      createDefaultStagePermissionQuestion(),
+    ]),
+    [],
+  );
+  const configured = {
+    ...createDefaultStagePermissionQuestion(),
+    enabled: true,
+  };
+  assert.deepEqual(
+    filterImplicitEmptyStagePermissionQuestions([configured]),
+    [configured],
   );
 });
