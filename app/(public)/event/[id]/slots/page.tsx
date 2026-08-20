@@ -137,7 +137,7 @@ export default async function EventSlotsPage({
   const entryClosed =
     !accepting &&
     event.entry_end_time != null &&
-    now > event.entry_end_time;
+    now >= event.entry_end_time;
 
   let operatorOverrideAllowed = false;
   if (
