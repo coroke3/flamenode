@@ -203,7 +203,7 @@ export async function prepareAuditLogEntries(
   }
 
   const actorJsonById = new Map<string, string>();
-  const actorXUserIdByAuditKey = new Map<string, string | null>();
+  const actorXUserIdByInput = new Map<WriteAuditLogInput, string | null>();
   const actorUserIds = [
     ...new Set(activeInputs.map((input) => input.actor_user_id)),
   ];
@@ -230,10 +230,9 @@ export async function prepareAuditLogEntries(
   }
 
   for (const input of activeInputs) {
-    const key = `${input.table_name}:${input.target_id}:${input.operation}`;
     try {
-      actorXUserIdByAuditKey.set(
-        key,
+      actorXUserIdByInput.set(
+        input,
         await validateActorXUserId(
           db,
           input.actor_user_id,
@@ -243,19 +242,18 @@ export async function prepareAuditLogEntries(
       );
     } catch (error) {
       if (input.strict) throw error;
-      actorXUserIdByAuditKey.set(key, null);
+      actorXUserIdByInput.set(input, null);
     }
   }
 
-  return inputs.map((input) => {
-    const key = `${input.table_name}:${input.target_id}:${input.operation}`;
-    return buildPreparedAuditLogEntry(
+  return inputs.map((input) =>
+    buildPreparedAuditLogEntry(
       input,
       settings,
       actorJsonById.get(input.actor_user_id) ?? EMPTY_ACTOR_JSON,
-      actorXUserIdByAuditKey.get(key) ?? null,
-    );
-  });
+      actorXUserIdByInput.get(input) ?? null,
+    ),
+  );
 }
 
 export async function prepareAuditLogEntry(
