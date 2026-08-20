@@ -22,3 +22,12 @@ export function normalizeHttpUrl(
     return null;
   }
 }
+
+/** URI の一部を表示用にデコードし、壊れた入力では null を返す。 */
+export function safeDecodeURIComponent(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}

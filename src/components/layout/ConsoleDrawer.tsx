@@ -3,6 +3,7 @@
 import * as React from "react";
 import { usePathname } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
+import { safeDecodeURIComponent } from "@/lib/utils/url";
 
 const FOCUSABLE = [
   'a[href]',
@@ -21,7 +22,7 @@ function fallbackConsolePageLabel(
   const segments = pathname
     .split("/")
     .filter(Boolean)
-    .map((segment) => decodeURIComponent(segment));
+    .map((segment) => safeDecodeURIComponent(segment) ?? segment);
 
   if (segments[0] === "manage") {
     const eventIndex = segments.indexOf("events");

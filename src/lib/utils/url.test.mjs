@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeHttpUrl } from "./url.ts";
+import { normalizeHttpUrl, safeDecodeURIComponent } from "./url.ts";
 
 test("null/空文字は null を返す", () => {
   assert.equal(normalizeHttpUrl(null), null);
@@ -27,4 +27,9 @@ test("不正な URL 形式は null を返す", () => {
 
 test("文字数上限オーバーは null を返す", () => {
   assert.equal(normalizeHttpUrl("https://example.com", { maxLength: 10 }), null);
+});
+
+test("safeDecodeURIComponent returns null for malformed escapes", () => {
+  assert.equal(safeDecodeURIComponent("event%20id"), "event id");
+  assert.equal(safeDecodeURIComponent("broken%"), null);
 });

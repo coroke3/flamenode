@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { safeDecodeURIComponent } from "@/lib/utils/url";
 
 const EVENT_GROUP_HASH_PREFIX = "event-group-";
 
@@ -10,7 +11,8 @@ export function EventGroupHashScroll(): null {
     const raw = window.location.hash;
     if (!raw || raw.length < 2) return;
 
-    const id = decodeURIComponent(raw.slice(1));
+    const id = safeDecodeURIComponent(raw.slice(1));
+    if (!id) return;
     if (!id.startsWith(EVENT_GROUP_HASH_PREFIX)) return;
 
     const scrollToTarget = () => {

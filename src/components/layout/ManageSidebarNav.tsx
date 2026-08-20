@@ -9,6 +9,7 @@ import {
   filterManageEvents,
 } from "@/lib/manage/sidebarEvents";
 import { buildAccentVars } from "@/lib/theme/accent";
+import { safeDecodeURIComponent } from "@/lib/utils/url";
 import navStyles from "@/components/admin/AdminSidebarNav.module.css";
 
 export type ManageSidebarEvent = {
@@ -148,8 +149,8 @@ export function ManageSidebarNav({
 
     if (!match) return;
 
-    const eventId =
-      decodeURIComponent(match[1]);
+    const eventId = safeDecodeURIComponent(match[1]);
+    if (!eventId) return;
 
     const available =
       new Set(events.map((event) => event.id));
