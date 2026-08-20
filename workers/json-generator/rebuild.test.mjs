@@ -979,14 +979,14 @@ test("rebuildEventBase/rebuildEventSlotsは非公開時にcompose不要を返す
   assert.match(eventSlotsFn, /return true;/);
 });
 
-test("rename old-event cleanup removes canonical artifacts and retains its tombstone", () => {
+test("rename old-event cleanup removes canonical artifacts while retaining its tombstone during worker processing", () => {
   const eventFn = source.match(
     /async function rebuildEvent\([\s\S]*?(?=type StaticRelatedVideoRow)/,
   )?.[0];
   assert.ok(eventFn);
   assert.match(source, /case "event":[\s\S]*rebuildEvent\(env, targetId, signal, reason\)/);
   assert.match(eventFn, /removeAllEventArtifacts\(env, eventId, signal\)/);
-  assert.match(eventFn, /old event ID is deliberately kept blocked/);
+  assert.match(eventFn, /old event ID remains blocked while cleanup is running/);
   assert.doesNotMatch(source, /clearEventRenameTombstone/);
   assert.doesNotMatch(source, /DELETE FROM public_visibility_fences/);
   assert.match(source, /`events\/\$\{eventId\}\.json`/);

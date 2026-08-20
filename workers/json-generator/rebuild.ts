@@ -1983,9 +1983,11 @@ async function rebuildEvent(
   throwIfAborted(signal);
   if (!ev || String(ev.visibility_status ?? "") !== "public") {
     await removeAllEventArtifacts(env, eventId, signal);
-    // An old event ID is deliberately kept blocked after a successful rename.
-    // Removing its canonical artifacts is safe; releasing the tombstone would
-    // allow a stale cache/object (or a future ID reuse) to become public again.
+    // An old event ID remains blocked while cleanup is running. The admin
+    // reuse path may release its D1/manifest tombstone only after the bounded
+    // retention window and all canonical artifacts have been verified absent.
+    // Removing artifacts here is safe; this worker never releases the fence
+    // on its own.
     return;
   }
 

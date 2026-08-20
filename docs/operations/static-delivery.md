@@ -16,9 +16,14 @@ The `video_visibility_update` queue reason is retained when active queue rows
 are merged, so a competing enqueue cannot prevent the release worker from
 clearing the matching promotion fence.
 Event ID rename also writes an old-ID tombstone before the D1 key migration
-and queues an explicit composed-artifact cleanup. The tombstone remains as a
-permanent old-URL block so a stale object can never become public again, and
-the old ID cannot be reused by a newly-created event.
+and queues an explicit composed-artifact cleanup. The tombstone is retained
+for a 24-hour safety window, matching the maximum bounded stale fallback.
+After that window, an ID can be reused only when
+the rename-cleanup queue targets are all done, tracked artifacts are deleted,
+canonical R2 objects are absent, and the manifest entry is removed by a
+token-checked mutation together with the new event/rename. This prevents a
+stale object from becoming public while allowing an old ID to be recovered
+after deletion has actually completed.
 The read-only `check:public-visibility-fences --remote` check covers video,
 event, event-group, and X-user fences. A matching `release_pending` row with
 its manifest entry is an expected promotion window; a missing entry, token

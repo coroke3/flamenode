@@ -21,6 +21,12 @@ import {
   type EventVisibilityRenameTombstonePrecommit,
 } from "@/lib/event/eventVisibilityTransition";
 import {
+  compensateEventIdReuseOnD1Failure,
+  preCommitEventIdReuse,
+  type EventIdReusePrecommit,
+  type EventIdReuseTombstone,
+} from "@/lib/event/eventIdReuse";
+import {
   buildEventChangeQueueBatch,
 } from "@/lib/staticRebuild/hooks";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
@@ -116,13 +122,12 @@ export async function renameEventId(
     return { ok: false, message: `ID「${newId}」は既に存在します。` };
   }
 
-  // Renamed-away IDs keep a permanent old-URL tombstone so stale R2 payloads
-  // cannot become public again. Reusing one as the new ID would inherit that
-  // blocked fence (especially when the current event has no fence row), so
-  // reject it explicitly instead of creating an event that can never publish.
+  // Renamed-away IDs keep a temporary old-URL tombstone. Reuse is evaluated
+  // after the cleanup queue is planned and only succeeds once all old public
+  // artifacts have been removed.
   const targetTombstone = (
     await db
-      .select({ id: publicVisibilityFences.entity_id })
+      .select()
       .from(publicVisibilityFences)
       .where(
         and(
@@ -134,14 +139,6 @@ export async function renameEventId(
       )
       .limit(1)
   )[0];
-  if (targetTombstone) {
-    return {
-      ok: false,
-      message:
-        "指定した新しいIDは旧URL保護用のため再利用できません。別のIDを指定してください。",
-    };
-  }
-
   // Do not move a release-pending fence without its R2 manifest entry. The
   // worker would otherwise see the new D1 id but the old manifest id and
   // could clear the fence before the renamed public projection is safe.
@@ -260,6 +257,24 @@ export async function renameEventId(
     (batch) => batch.expectedChanges,
   );
 
+  let targetReusePrecommit: EventIdReusePrecommit | null = null;
+  if (targetTombstone) {
+    const reuse = await preCommitEventIdReuse({
+      db,
+      eventId: newId,
+      tombstone: targetTombstone satisfies EventIdReuseTombstone,
+      now: Math.floor(Date.now() / 1000),
+    });
+    if (!reuse.ok) {
+      return {
+        ok: false,
+        message:
+          "指定したIDは旧URL保護のため再利用できません。公開データの削除完了後に再試行してください。",
+      };
+    }
+    targetReusePrecommit = reuse.precommit;
+  }
+
   // Keep every statement-builder await before the R2 pre-commit. If queue
   // planning fails, no manifest mutation has happened and the D1 row remains
   // untouched, so there is nothing to compensate.
@@ -309,6 +324,15 @@ export async function renameEventId(
           compensationError,
         );
       }
+    }
+    if (targetReusePrecommit) {
+      await compensateEventIdReuseOnD1Failure(targetReusePrecommit).catch(
+        (compensationError) =>
+          console.warn(
+            "[event-admin-danger] event ID reuse compensation failed",
+            compensationError,
+          ),
+      );
     }
     console.warn(
       "[event-admin-danger] visibility fence rename precommit failed",
@@ -382,10 +406,27 @@ export async function renameEventId(
         updated_at: now,
       },
     });
+  const targetFenceDelete = targetReusePrecommit
+    ? db
+        .delete(publicVisibilityFences)
+        .where(
+          and(
+            eq(publicVisibilityFences.entity_type, "event"),
+            eq(publicVisibilityFences.entity_id, newId),
+            eq(publicVisibilityFences.fence_token, targetReusePrecommit.fenceToken),
+            eq(publicVisibilityFences.state, "blocked"),
+            eq(
+              publicVisibilityFences.reason,
+              "event_id_rename_old_cleanup",
+            ),
+          )!,
+        )
+    : null;
 
   try {
     const mutationStatements = [
       db.run(sql`PRAGMA defer_foreign_keys = on`),
+      ...(targetFenceDelete ? [targetFenceDelete] : []),
       db
         .update(events)
         .set({ id: newId, updated_at: now })
@@ -398,6 +439,7 @@ export async function renameEventId(
     ];
     const expectedMutationChanges = [
       null,
+      ...(targetFenceDelete ? [1] : []),
       1,
       ...referenceUpdates.map(() => null),
       1,
@@ -410,6 +452,22 @@ export async function renameEventId(
       mutationStatements,
       expectedMutationChanges,
       audits: [
+        ...(targetReusePrecommit
+          ? [
+              {
+                table_name: "public_visibility_fences",
+                target_id: newId,
+                operation: "DELETE" as const,
+                before: targetTombstone,
+                after: null,
+                actor_user_id: actorUserId,
+                context: "event-id-rename:release-target-tombstone",
+                reason: "event_id_rename_old_cleanup_complete",
+                retention_class: "long_audit" as const,
+                strict: true,
+              },
+            ]
+          : []),
         {
           table_name: "events",
           target_id: newId,
@@ -453,6 +511,15 @@ export async function renameEventId(
           compensationError,
         );
       }
+    }
+    if (targetReusePrecommit) {
+      await compensateEventIdReuseOnD1Failure(targetReusePrecommit).catch(
+        (compensationError) =>
+          console.warn(
+            "[event-admin-danger] event ID reuse compensation failed",
+            compensationError,
+          ),
+      );
     }
     return {
       ok: false,

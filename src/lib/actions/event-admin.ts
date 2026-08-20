@@ -30,6 +30,12 @@ import {
   planEventVisibilityTransition,
   preCommitEventVisibilityTransition,
 } from "@/lib/event/eventVisibilityTransition";
+import {
+  compensateEventIdReuseOnD1Failure,
+  preCommitEventIdReuse,
+  type EventIdReusePrecommit,
+  type EventIdReuseTombstone,
+} from "@/lib/event/eventIdReuse";
 import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
 import {
@@ -200,13 +206,12 @@ export async function createEvent(
   )[0];
   if (duplicate) return { ok: false, message: `ID「${id}」は既に存在します。` };
 
-  // A renamed event leaves a permanent old-ID tombstone so a stale R2
-  // projection can never become public again. Do not allow a new event to
-  // reuse that ID while the public manifest still blocks it; otherwise the
-  // new event would be silently hidden by the stale-URL guard.
+  // A renamed event leaves a temporary old-ID tombstone. It may be released
+  // only after the retention window and a complete D1/R2 cleanup; otherwise a
+  // new event would be silently hidden by a stale-URL guard.
   const renameTombstone = (
     await db
-      .select({ id: publicVisibilityFences.entity_id })
+      .select()
       .from(publicVisibilityFences)
       .where(
         and(
@@ -218,14 +223,6 @@ export async function createEvent(
       )
       .limit(1)
   )[0];
-  if (renameTombstone) {
-    return {
-      ok: false,
-      message:
-        "このイベントIDは旧URLの公開データ削除中のため、しばらく再利用できません。",
-    };
-  }
-
   const activeXUserId = guard.user.active_x_user_id?.trim() || null;
   if (!activeXUserId) {
     return {
@@ -351,19 +348,70 @@ export async function createEvent(
     requestedByUserId: actorUserId,
     priority: "high",
   });
+  let reusePrecommit: EventIdReusePrecommit | null = null;
+  if (renameTombstone) {
+    const reuse = await preCommitEventIdReuse({
+      db,
+      eventId: id,
+      tombstone: renameTombstone satisfies EventIdReuseTombstone,
+      now,
+    });
+    if (!reuse.ok) {
+      return {
+        ok: false,
+        message:
+          "このイベントIDは旧URLの公開データ削除中です。削除完了後に再試行してください。",
+      };
+    }
+    reusePrecommit = reuse.precommit;
+  }
+  const reuseFenceDelete = reusePrecommit
+    ? db
+        .delete(publicVisibilityFences)
+        .where(
+          and(
+            eq(publicVisibilityFences.entity_type, "event"),
+            eq(publicVisibilityFences.entity_id, id),
+            eq(publicVisibilityFences.fence_token, reusePrecommit.fenceToken),
+            eq(publicVisibilityFences.state, "blocked"),
+            eq(
+              publicVisibilityFences.reason,
+              "event_id_rename_old_cleanup",
+            ),
+          )!,
+        )
+    : null;
   const mutationStatements = [
+    ...(reuseFenceDelete ? [reuseFenceDelete] : []),
     db.insert(events).values(createdRow),
     db.insert(eventStaff).values(ownerRow),
     ...questionChunks.map((chunk) => db.insert(eventCustomQuestions).values(chunk)),
     ...queue.statements,
   ];
   const expectedMutationChanges = [
+    ...(reuseFenceDelete ? [1] : []),
     1,
     1,
     ...questionChunks.map((chunk) => chunk.length),
     ...queue.expectedChanges,
   ];
   const audits: Parameters<typeof mutateWithAudit>[1]["audits"] = [
+    ...(reusePrecommit
+      ? [
+          {
+            table_name: "public_visibility_fences",
+            target_id: id,
+            operation: "DELETE" as const,
+            before: renameTombstone,
+            after: null,
+            actor_user_id: actorUserId,
+            context: "event-create:release-old-id-tombstone",
+            reason: "event_id_rename_old_cleanup_complete",
+            retention_class: "long_audit" as const,
+            strict: true,
+          },
+        ]
+      : []),
     {
       table_name: "events",
       target_id: id,
@@ -400,14 +448,30 @@ export async function createEvent(
     })),
   ];
   if (!fitsD1AtomicBatchBudget(mutationStatements.length, audits.length)) {
+    if (reusePrecommit) {
+      await compensateEventIdReuseOnD1Failure(reusePrecommit);
+    }
     return { ok: false, message: "イベント作成の原子的処理がD1の上限を超えます。" };
   }
-  await mutateWithAudit(db, {
-    mutationStatements,
-    expectedMutationChanges,
-    audits,
-    staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
-  });
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements,
+      expectedMutationChanges,
+      audits,
+      staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
+    });
+  } catch (error) {
+    if (reusePrecommit) {
+      await compensateEventIdReuseOnD1Failure(reusePrecommit).catch(
+        (compensationError) =>
+          console.warn(
+            "[event-admin] event ID reuse compensation failed",
+            compensationError,
+          ),
+      );
+    }
+    throw error;
+  }
 
   revalidateEventListPaths();
   revalidateEventPaths(id);
