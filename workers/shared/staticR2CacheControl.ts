@@ -16,7 +16,8 @@ export const STATIC_R2_MAX_AGE_SEC = {
   eventsIndex: 180,
   searchIndex: 300,
   usersIndex: 600,
-  topSlotStats: 600,
+  // top 本体は10分のまま、枠数projectionだけ30秒で更新する。
+  topSlotStats: 30,
   recommend: 600,
   rules: 3600,
   blocklistPool: 600,
