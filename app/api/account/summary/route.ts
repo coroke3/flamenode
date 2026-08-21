@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { buildHeaderUser } from "@/lib/auth/headerUser";
 import {
   CurrentUserUnavailableError,
-  getCurrentUser,
+  getCurrentUserContext,
 } from "@/lib/auth/currentUser";
 import type { AccountSummaryResponse } from "@/lib/account/summary";
 
@@ -19,9 +19,9 @@ function loggedOut(): NextResponse<AccountSummaryResponse> {
 }
 
 export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
-  let sessionUser;
+  let currentContext;
   try {
-    sessionUser = await getCurrentUser();
+    currentContext = await getCurrentUserContext();
   } catch (error) {
     if (error instanceof CurrentUserUnavailableError) {
       return NextResponse.json(
@@ -32,19 +32,21 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
     throw error;
   }
 
+  const sessionUser = currentContext.user;
   if (!sessionUser || sessionUser.is_banned === 1) {
     return loggedOut();
   }
 
   let headerUser;
   try {
-    // getCurrentUser() が同一requestでDB正本から解決済みの role / active X を再利用する。
-    // Auth.js sessionの古い値を authoritative snapshot として扱わない。
+    // getCurrentUserContext() が同一requestでDB正本から解決済みの
+    // role / active X / linked X rowsを再利用し、Auth.js sessionを認可根拠にしない。
     headerUser = await buildHeaderUser(sessionUser, {
       authoritativeUserSnapshot: {
         role: sessionUser.role,
         active_x_user_id: sessionUser.active_x_user_id,
       },
+      authoritativeLinkedXRows: currentContext.linkedXUsers,
     });
   } catch {
     // X ID一覧・管理イベント取得失敗でもログイン済み要約は返す。
