@@ -11,6 +11,13 @@ import {
  */
 export const MAX_VIDEO_MEMBERS = 100;
 
+/**
+ * TSV権限列の一括反映は1リクエストあたりこの件数まで。
+ * members_json経由ではなく専用batch Server Actionだけが権限を変更できるため、
+ * 上限もpermission intent側で管理する。
+ */
+export const MAX_COLLABORATOR_PERMISSION_BATCH = 50;
+
 export const MAX_ATOMIC_VIDEO_SOFTWARES = 4;
 export const MAX_ATOMIC_VIDEO_EVENTS = 4;
 export const MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS = 4;

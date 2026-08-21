@@ -21,8 +21,8 @@ import {
 import { writeTextToClipboard } from "@/lib/utils/clipboard";
 import {
   applyVideoCollaboratorPermissionsBatch,
-  MAX_COLLABORATOR_PERMISSION_BATCH,
 } from "@/lib/actions/video-collab-perms";
+import { MAX_COLLABORATOR_PERMISSION_BATCH } from "@/lib/video/atomicLimits";
 
 export type {
   VideoMemberChapterInput,

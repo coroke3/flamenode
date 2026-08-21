@@ -13,7 +13,7 @@ import {
   type CanEditVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
 import { videoMembers, videos, xUsers } from "@/lib/db/schema";
-import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
+import { MAX_COLLABORATOR_PERMISSION_BATCH, MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
 import { generateId } from "@/lib/utils/id";
 import { normalizeXId } from "@/lib/utils/xid";
 import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueue";
@@ -65,10 +65,9 @@ const upsertSchema = z.object({
 /**
  * TSV権限列の反映は permission intent として分離し、members_json 経由では絶対に
  * can_edit を保存させない。このbatch actionだけが video.permissions 権限の再検証の
- * 上で差分 UPDATE / INSERT / DELETE を行う。
+ * 上で差分 UPDATE / INSERT / DELETE を行う。バッチ件数上限は
+ * MAX_COLLABORATOR_PERMISSION_BATCH (atomicLimits)。
  */
-export const MAX_COLLABORATOR_PERMISSION_BATCH = 50;
-
 const permissionIntentSchema = z.object({
   x_user_id: z.string().trim().min(1).max(64).transform((value) => normalizeXId(value)),
   display_name: z.string().trim().min(1).max(80),
