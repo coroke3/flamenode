@@ -14,8 +14,12 @@ const loaderSource = await readFile(
   new URL("../../src/lib/publicData/staticUsersIndexV2Loader.ts", import.meta.url),
   "utf8",
 );
+const pageSource = await readFile(
+  new URL("../../app/(public)/user/page.tsx", import.meta.url),
+  "utf8",
+);
 
-test("users index v2 は generation 固有 page/search 完了後に manifest をcommit pointとして書く", () => {
+test("users index v2 は3 sortのgeneration固有page/search完了後にmanifestをcommitする", () => {
   const pagePut = source.indexOf("await putTrackedJson(env, entry.key, entry.page, signal)");
   const searchPut = source.indexOf("await putTrackedJson(env, searchKey, artifacts.searchLite, signal)");
   const manifestPut = source.indexOf("USERS_INDEX_V2_MANIFEST_OBJECT_KEY,\n    artifacts.manifest");
@@ -25,10 +29,21 @@ test("users index v2 は generation 固有 page/search 完了後に manifest を
   assert.ok(searchPut > pagePut);
   assert.ok(manifestPut > searchPut);
   assert.ok(reconcile > manifestPut);
-  assert.match(source, /usersIndexV2ScorePageObjectKey\(generation, page\.page\)/);
+  assert.match(source, /artifacts\.scorePages/);
+  assert.match(source, /artifacts\.worksPages/);
+  assert.match(source, /artifacts\.namePages/);
+  assert.match(source, /usersIndexV2PageObjectKey\(generation, page\.sort, page\.page\)/);
   assert.match(source, /usersIndexV2SearchLiteObjectKey\(generation\)/);
-  assert.match(loaderSource, /search\.generation !== manifest\.generation/);
   assert.match(loaderSource, /page\.generation !== manifest\.generation/);
+  assert.match(loaderSource, /page\.sort !== params\.sort/);
+  assert.match(pageSource, /loadStaticUsersIndexV2Page/);
+});
+
+test("stale generation cleanup はR2 bulk deleteとD1単一UPDATEへまとめる", () => {
+  assert.match(source, /await env\.R2\.delete\(staleKeys\)/);
+  assert.match(source, /FROM json_each\(\?\) AS stale_keys/);
+  assert.match(source, /JSON\.stringify\(staleKeys\)/);
+  assert.doesNotMatch(source, /for \(const row of staleRows\)[\s\S]*env\.R2\.delete/);
 });
 
 test("v2生成失敗はmanifest無効化に成功した場合だけlegacy fallback成功扱いにする", () => {
