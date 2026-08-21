@@ -10,6 +10,10 @@ const optimizedSource = await readFile(
   new URL("./optimizedRebuild.ts", import.meta.url),
   "utf8",
 );
+const loaderSource = await readFile(
+  new URL("../../src/lib/publicData/staticUsersIndexV2Loader.ts", import.meta.url),
+  "utf8",
+);
 
 test("users index v2 は page/search 完了後に manifest をcommit pointとして書く", () => {
   const pagePut = source.indexOf("await putTrackedJson(env, key, page, signal)");
@@ -21,7 +25,8 @@ test("users index v2 は page/search 完了後に manifest をcommit pointとし
   assert.ok(searchPut > pagePut);
   assert.ok(manifestPut > searchPut);
   assert.ok(reconcile > manifestPut);
-  assert.match(source, /generation !== manifest\.generation|same generation/i);
+  assert.match(loaderSource, /search\.generation !== manifest\.generation/);
+  assert.match(loaderSource, /page\.generation !== manifest\.generation/);
 });
 
 test("users_index canonical rebuild 後にv2生成を必ず実行する", () => {
