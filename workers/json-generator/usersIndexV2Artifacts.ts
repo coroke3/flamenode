@@ -29,6 +29,8 @@ import {
 const USERS_INDEX_V2_ARTIFACT_TARGET_TYPE = "users_index_v2";
 const USERS_INDEX_V2_ARTIFACT_TARGET_ID = "global";
 const USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION = 2;
+/** generation-specific keyのpayload layout/sort規則を変える時は必ず上げる。 */
+const USERS_INDEX_V2_GENERATION_LAYOUT_VERSION = 2;
 /** R2 bulk delete は1000 keys/callまで。1回のrebuild cleanupはさらに小さく抑える。 */
 const USERS_INDEX_V2_CLEANUP_LIMIT = 500;
 
@@ -58,8 +60,9 @@ function assertArtifactSize(key: string, value: unknown, maxBytes: number): void
 }
 
 function generationMaterial(items: readonly UsersIndexV2SourceEntry[]): string {
-  return JSON.stringify(
-    items.map((item) => ({
+  return JSON.stringify({
+    layout_version: USERS_INDEX_V2_GENERATION_LAYOUT_VERSION,
+    items: items.map((item) => ({
       x_id: item.x_id,
       x_name: item.x_name,
       icon_url: item.icon_url,
@@ -68,7 +71,7 @@ function generationMaterial(items: readonly UsersIndexV2SourceEntry[]): string {
       total_works: item.total_works,
       sort_score: item.sort_score,
     })),
-  );
+  });
 }
 
 function emptyLegacyGeneratedAt(payload: unknown): number | null {
