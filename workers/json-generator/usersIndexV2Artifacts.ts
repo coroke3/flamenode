@@ -20,14 +20,16 @@ import {
   USERS_INDEX_V2_MAX_PAGE_BYTES,
   USERS_SEARCH_LITE_V1_MAX_BYTES,
   usersIndexV2ArtifactByteLength,
-  usersIndexV2ScorePageObjectKey,
+  usersIndexV2PageObjectKey,
   usersIndexV2SearchLiteObjectKey,
+  type UsersIndexV2Page,
   type UsersIndexV2SourceEntry,
 } from "../../src/lib/publicData/staticUsersIndexV2Core.ts";
 
 const USERS_INDEX_V2_ARTIFACT_TARGET_TYPE = "users_index_v2";
 const USERS_INDEX_V2_ARTIFACT_TARGET_ID = "global";
 const USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION = 2;
+/** R2 bulk delete は1000 keys/callまで。1回のrebuild cleanupはさらに小さく抑える。 */
 const USERS_INDEX_V2_CLEANUP_LIMIT = 500;
 
 type Env = {
@@ -159,27 +161,37 @@ async function reconcileTrackedArtifacts(
     .all<TrackedArtifactRow>();
   throwIfAborted(signal);
 
-  const staleRows = (rows.results ?? []).filter((row) => !live.has(row.object_key));
-  if (staleRows.length === 0) return;
+  const staleKeys = (rows.results ?? [])
+    .map((row) => row.object_key)
+    .filter((key) => !live.has(key));
+  if (staleKeys.length === 0) return;
+
+  // R2は最大1000 keysを1 callでdeleteできる。D1もjson_eachで1 UPDATEへ集約し、
+  // generationが増えた後のcleanupで500回の逐次I/O/UPDATEを発生させない。
+  await env.R2.delete(staleKeys);
+  throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
-  for (const row of staleRows) {
-    throwIfAborted(signal);
-    await env.R2.delete(row.object_key);
-    throwIfAborted(signal);
-    await env.DB.prepare(
-      `UPDATE static_artifacts
-          SET deleted_at = ?
-        WHERE target_type = ? AND target_id = ? AND object_key = ?
-          AND deleted_at IS NULL`,
+  await env.DB.prepare(
+    `UPDATE static_artifacts
+        SET deleted_at = ?
+      WHERE target_type = ?
+        AND target_id = ?
+        AND deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM json_each(?) AS stale_keys
+          WHERE CAST(stale_keys.value AS TEXT) = static_artifacts.object_key
+        )`,
+  )
+    .bind(
+      now,
+      USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
+      USERS_INDEX_V2_ARTIFACT_TARGET_ID,
+      JSON.stringify(staleKeys),
     )
-      .bind(
-        now,
-        USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
-        USERS_INDEX_V2_ARTIFACT_TARGET_ID,
-        row.object_key,
-      )
-      .run();
-  }
+    .run();
+  for (const key of staleKeys) env.artifactHashCache?.set(key, null);
+  throwIfAborted(signal);
 }
 
 async function invalidateUsersIndexV2Manifest(
@@ -209,10 +221,20 @@ async function invalidateUsersIndexV2Manifest(
   throwIfAborted(signal);
 }
 
+function pageEntries(
+  generation: string,
+  pages: readonly UsersIndexV2Page[],
+): Array<{ key: string; page: UsersIndexV2Page }> {
+  return pages.map((page) => ({
+    key: usersIndexV2PageObjectKey(generation, page.sort, page.page),
+    page,
+  }));
+}
+
 /**
- * page/search は generation 固有keyへ書き、manifestだけを最後のcommit pointにする。
- * 新世代の途中失敗で旧世代objectを上書きしないため、旧manifestがCache APIに残っても
- * 旧世代は自己整合したまま。manifest更新後だけ新世代へ切り替わる。
+ * score / works / name pageとsearchは generation 固有keyへ書き、
+ * manifestだけを最後のcommit pointにする。新世代の途中失敗で旧世代objectを
+ * 上書きしないため、manifest更新後だけ新世代へ切り替わる。
  */
 export async function rebuildUsersIndexV2Artifacts(
   env: Env,
@@ -228,14 +250,15 @@ export async function rebuildUsersIndexV2Artifacts(
     generatedAt,
     generation,
   });
-  const scoreEntries = artifacts.scorePages.map((page) => ({
-    key: usersIndexV2ScorePageObjectKey(generation, page.page),
-    page,
-  }));
+  const pages = [
+    ...pageEntries(generation, artifacts.scorePages),
+    ...pageEntries(generation, artifacts.worksPages),
+    ...pageEntries(generation, artifacts.namePages),
+  ];
   const searchKey = usersIndexV2SearchLiteObjectKey(generation);
 
   // 全size guardをR2 PUT前に評価する。guard失敗で半端な新世代を作らない。
-  for (const entry of scoreEntries) {
+  for (const entry of pages) {
     assertArtifactSize(entry.key, entry.page, USERS_INDEX_V2_MAX_PAGE_BYTES);
   }
   assertArtifactSize(
@@ -250,7 +273,7 @@ export async function rebuildUsersIndexV2Artifacts(
   );
 
   const liveKeys: string[] = [];
-  for (const entry of scoreEntries) {
+  for (const entry of pages) {
     await putTrackedJson(env, entry.key, entry.page, signal);
     liveKeys.push(entry.key);
   }
