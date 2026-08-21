@@ -216,6 +216,14 @@ export const events = sqliteTable(
     created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
     updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
     max_slots_per_video: integer("max_slots_per_video").notNull().default(1),
+    /** 1 X ID あたりの論理予約件数上限。0 は無制限。 */
+    max_slot_reservation_groups_per_xid: integer(
+      "max_slot_reservation_groups_per_xid",
+    )
+      .notNull()
+      .default(0),
+    /** 連続枠ガイダンス用の枠間隔。null は実枠時刻から自動推定。 */
+    slot_interval_minutes: integer("slot_interval_minutes"),
     review_settings: text("review_settings"),
     editable_fields: text("editable_fields"),
     repeat_rules: text("repeat_rules"),
@@ -412,6 +420,21 @@ export const slotReservationGroups = sqliteTable(
   },
   (t) => ({
     byEvent: index("slot_reservation_groups_event_idx").on(t.event_id),
+  }),
+);
+
+export const slotReservationSubjectCounts = sqliteTable(
+  "slot_reservation_subject_counts",
+  {
+    event_id: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    x_id_snapshot: text("x_id_snapshot").notNull(),
+    reservation_count: integer("reservation_count").notNull().default(0),
+    updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.event_id, t.x_id_snapshot] }),
   }),
 );
 
