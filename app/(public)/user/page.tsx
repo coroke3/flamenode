@@ -15,9 +15,8 @@ import {
   type StaticUsersIndexEntry,
 } from "@/lib/publicData/loader";
 import {
-  filterUsersIndexItems,
   paginateUsersIndexItems,
-  sortUsersIndexItems,
+  prepareUsersIndexItems,
   type UsersIndexSort,
 } from "@/lib/publicData/staticUsersIndexCore";
 
@@ -80,9 +79,9 @@ export default async function UserListPage({
 
   let creators: CreatorRow[];
   if (staticLoaded.index && !isDegraded) {
-    const filtered = filterUsersIndexItems(staticLoaded.index.items, q);
-    const sorted = sortUsersIndexItems(filtered, sortKey);
-    creators = sorted.map(mapIndexEntry);
+    creators = prepareUsersIndexItems(staticLoaded.index.items, q, sortKey).map(
+      mapIndexEntry,
+    );
   } else if (staticLoaded.index && isDegraded) {
     creators = staticLoaded.index.items.map(mapIndexEntry);
     if (q.trim()) {
