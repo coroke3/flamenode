@@ -146,7 +146,7 @@ requireAll("src/components/forms/VideoForm.tsx", [
 requireAll("src/components/forms/VideoMembersField.tsx", [
   [/onChange\?\.\(normalizedRows\)/, "正規化メンバーの即時通知がありません。"],
   [/MAX_VIDEO_MEMBERS/, "メンバー件数上限がありません。"],
-  [/parseVideoMemberCsv/, "CSV入力経路がありません。"],
+  [/parseVideoMemberText/, "CSV/TSV入力経路がありません。"],
   [/viewMode.*"card".*"table"/s, "カード/表の表示切替がありません。"],
 ]);
 
