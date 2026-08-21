@@ -72,13 +72,17 @@ test("members_jsonからはcan_editを読まない（schema側で剥がす）", 
   assert.doesNotMatch(memberInputs, /can_edit/);
 });
 
-test("batch actionはMAX_VIDEO_MEMBERSとバッチ上限を守る", () => {
+test("batch actionはMAX_VIDEO_MEMBERSとバッチ上限を守る", async () => {
   const body = actionBody("applyVideoCollaboratorPermissionsBatch");
   assert.match(body, /MAX_VIDEO_MEMBERS/);
-  assert.match(
-    source,
-    /MAX_COLLABORATOR_PERMISSION_BATCH = \d+/,
+  const atomicLimits = await readFile(
+    new URL("../video/atomicLimits.ts", import.meta.url),
+    "utf8",
   );
+  // 上限定数はclient共有モジュールに置く（"use server"ファイルはasync関数しかexportできない）。
+  assert.match(atomicLimits, /MAX_COLLABORATOR_PERMISSION_BATCH = \d+/);
+  // バッチ上限はzod schemaで強制される。
+  assert.match(source, /\.max\(MAX_COLLABORATOR_PERMISSION_BATCH\)/);
 });
 
 test("付与時の通知はsingle actionと同じ意味論を共有する", () => {
