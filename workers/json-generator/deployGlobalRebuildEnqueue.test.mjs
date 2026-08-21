@@ -31,6 +31,7 @@ test("deploy 共有 global target 定数と enqueue 契約", () => {
     "events_index",
     "youtube_related_blocklist",
     "random_video_pool",
+    "member_suggestions",
   ]);
   assert.equal(STATIC_LAST_GENERATOR_COMMIT_KV_KEY, "static:last_generator_commit");
   assert.match(source, /deploy_generator_change/);

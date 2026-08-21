@@ -114,6 +114,7 @@ import {
 import { enqueueComposerFollowUps, enqueuePerTargetComposerFollowUp } from "./followUpEnqueue.ts";
 import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
 import { enqueueTopSectionRebuild } from "./topRebuildEnqueue.ts";
+import { rebuildMemberSuggestions } from "./memberSuggestionsArtifacts.ts";
 import {
   readWorkerVisibilityBlockedEntitiesManifest,
   releaseBlockedEntityInManifest,
@@ -402,6 +403,9 @@ export async function rebuildTarget(
       break;
     case "random_video_pool":
       await rebuildRandomVideoPool(env, signal);
+      break;
+    case "member_suggestions":
+      await rebuildMemberSuggestions(env, signal);
       break;
     default:
       throw new Error(`Unknown target_type: ${targetType}`);

@@ -14,6 +14,7 @@ export const DEPLOY_GLOBAL_REBUILD_TARGETS = [
   "events_index",
   "youtube_related_blocklist",
   "random_video_pool",
+  "member_suggestions",
 ] as const;
 
 export const STATIC_LAST_GENERATOR_COMMIT_KV_KEY =

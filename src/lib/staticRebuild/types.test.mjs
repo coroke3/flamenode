@@ -30,6 +30,7 @@ test("static rebuild targetはcanonical種だけを受理する", () => {
     "rules",
     "youtube_related_blocklist",
     "random_video_pool",
+    "member_suggestions",
   ]);
   for (const target of STATIC_REBUILD_TARGET_TYPES) {
     assert.equal(isStaticRebuildTargetType(target), true);
@@ -44,6 +45,18 @@ test("static rebuild targetはcanonical種だけを受理する", () => {
   ]) {
     assert.equal(isStaticRebuildTargetType(alias), false, alias);
   }
+});
+test("member_suggestionsはglobal targetとしてworkerとenqueueに登録される", () => {
+  const globalTargets = readFileSync(
+    new URL("../../../workers/json-generator/staticGlobalRebuildTargets.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(globalTargets, /"member_suggestions"/);
+  const workerRebuild = readFileSync(
+    new URL("../../../workers/json-generator/rebuild.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(workerRebuild, /case "member_suggestions":/);
 });
 test("enqueueとWorkerは旧target aliasを正規化・no-op完了しない", () => {
   const enqueue = readFileSync(new URL("./enqueue.ts", import.meta.url), "utf8");

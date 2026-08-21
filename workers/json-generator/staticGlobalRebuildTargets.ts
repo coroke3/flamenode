@@ -18,6 +18,7 @@ export const GLOBAL_STATIC_REBUILD_TARGET_TYPES = new Set([
   "rules",
   "youtube_related_blocklist",
   "random_video_pool",
+  "member_suggestions",
 ]);
 
 export function isGlobalStaticRebuildTarget(targetType: string): boolean {
