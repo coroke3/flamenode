@@ -9,7 +9,10 @@ import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "./resolveActiveXId";
 import { getEditableEventIds } from "./ownership";
 import { getEditableEventIdsByApprovedXIds } from "./editableEventIdsByXIds";
-import { getLinkedXUsersForAuthUser, type LinkedXUser } from "./xIdentity";
+import {
+  getHeaderLinkedXUsersForAuthUser,
+  type HeaderLinkedXUser,
+} from "./headerLinkedXUsers";
 import {
   normalizeXIdApprovalStatus,
   xIdApprovalRank,
@@ -83,10 +86,12 @@ function normalizeRole(role: string | null | undefined): HeaderUser["role"] {
 async function fetchHeaderXIdEntries(
   db: DB,
   authUserId: string,
-  linkedRows?: LinkedXUser[],
+  linkedRows?: readonly HeaderLinkedXUser[],
 ): Promise<XIdEntry[]> {
   const [resolvedLinkedRows, pendingRequests] = await Promise.all([
-    linkedRows ? Promise.resolve(linkedRows) : getLinkedXUsersForAuthUser(db, authUserId),
+    linkedRows
+      ? Promise.resolve(linkedRows)
+      : getHeaderLinkedXUsersForAuthUser(db, authUserId),
     db
       .select({ requested_x_id: xIdentityRequests.requested_x_id })
       .from(xIdentityRequests)
@@ -150,7 +155,7 @@ export async function buildHeaderUser(
 
   const dbPayload = includeXIds
     ? await withDatabase(async (db) => {
-        const linkedRows = await getLinkedXUsersForAuthUser(db, authUserId);
+        const linkedRows = await getHeaderLinkedXUsersForAuthUser(db, authUserId);
         const [userRows, entries] = await Promise.all([
           db
             .select({ active_x_user_id: users.active_x_user_id, role: users.role })
