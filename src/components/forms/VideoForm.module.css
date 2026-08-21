@@ -1,7 +1,7 @@
 .form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: 28px;
+  gap: clamp(18px, 3vw, 28px);
   align-items: start;
 }
 
@@ -9,26 +9,34 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .section {
   background-color: var(--bg-surface);
   border: 1px solid var(--hairline, var(--border-subtle));
-  border-radius: 0;
+  border-radius: var(--r-card, var(--radius-md));
   padding: 16px 18px 18px;
   overflow: hidden;
+  box-shadow: 0 12px 28px -24px color-mix(in srgb, var(--text-primary) 42%, transparent);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
 .section:focus-within {
   border-color: var(--accent-primary);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent),
+    0 12px 28px -24px color-mix(in srgb, var(--text-primary) 42%, transparent);
 }
 
 .sectionTitle {
   font-family: var(--font-display);
   font-size: clamp(17px, 2vw, 22px);
   font-weight: 900;
-  letter-spacing: 0;
+  letter-spacing: -0.02em;
   margin: -16px -18px 16px;
   padding: 15px 18px 14px;
   display: flex;
@@ -106,12 +114,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   padding: 10px var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 16px)) 10px
     var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 16px));
   padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
 
 .submitDockHint {
+  min-width: 0;
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -129,10 +139,6 @@
   padding-bottom: calc(var(--fn-submit-dock-h) + env(safe-area-inset-bottom, 0px));
 }
 
-.formEditMode .actions {
-  display: none;
-}
-
 .formEditMode .submitDock {
   position: fixed;
   bottom: 0;
@@ -144,10 +150,53 @@
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-top: 1px solid var(--border-subtle);
+  box-shadow: 0 -12px 28px -24px color-mix(in srgb, var(--text-primary) 55%, transparent);
 }
 
-.mobileWizardBar {
-  display: none;
+/* ウィザード操作は画面幅に関係なく固定Dockへ統一。
+   本文最下部までスクロールしても入力項目・エラー表示がDockの裏に隠れないよう
+   フォーム側に逃げ余白を確保する。 */
+.formWizardMode {
+  --fn-wizard-dock-h: 76px;
+  padding-bottom: calc(var(--fn-wizard-dock-h) + env(safe-area-inset-bottom, 0px));
+}
+
+.wizardDock {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 80;
+  background: color-mix(in srgb, var(--bg-base) 94%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border-subtle);
+  box-shadow: 0 -12px 28px -24px color-mix(in srgb, var(--text-primary) 55%, transparent);
+}
+
+.wizardDockInner {
+  max-width: var(--content-max, 1360px);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px var(--fn-page-gutter-inline-end, var(--fn-page-gutter, 16px)) 10px
+    var(--fn-page-gutter-inline-start, var(--fn-page-gutter, 16px));
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+.wizardDockInner .wizardNavHint {
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizardDock :global(.fn-btn) {
+  min-height: var(--fn-control-h);
+  flex-shrink: 0;
 }
 
 .preview {
@@ -155,9 +204,10 @@
   gap: 12px;
   align-items: flex-start;
   padding: 12px;
-  border-radius: 0;
+  border-radius: var(--r-card, var(--radius-md));
   background-color: var(--bg-elevated);
   border: 1px solid var(--hairline, var(--border-subtle));
+  box-shadow: 0 10px 24px -24px color-mix(in srgb, var(--text-primary) 42%, transparent);
 }
 
 .previewThumb {
@@ -185,7 +235,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .sideEyebrow {
@@ -202,9 +252,10 @@
 .saveId,
 .previewEvents {
   border: 1px solid var(--hairline, var(--border-subtle));
-  border-radius: 0;
+  border-radius: var(--r-card, var(--radius-md));
   background: var(--bg-surface);
   overflow: hidden;
+  box-shadow: 0 10px 24px -24px color-mix(in srgb, var(--text-primary) 42%, transparent);
 }
 
 .previewVisual {
@@ -387,7 +438,7 @@
   align-self: flex-start;
   padding: 4px 8px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 11.5px;
@@ -454,6 +505,34 @@
 .editableField select:not([disabled]):focus {
   border-color: var(--accent-primary);
   box-shadow: none;
+}
+
+.form :global(.fn-input),
+.form :global(.fn-select),
+.form :global(.fn-textarea) {
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.form :global(.fn-input:focus-visible),
+.form :global(.fn-select:focus-visible),
+.form :global(.fn-textarea:focus-visible) {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
+.section :global(.fn-card) {
+  border-radius: var(--r-card, var(--radius-md));
+  box-shadow: 0 8px 20px -22px color-mix(in srgb, var(--text-primary) 42%, transparent);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.section :global(.fn-card:focus-within) {
+  border-color: color-mix(in srgb, var(--accent-primary) 52%, var(--border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 @media (max-width: 1040px) {
@@ -534,12 +613,22 @@
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 6px 8px;
+  min-height: 42px;
+  padding: 8px 10px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
   font-size: 12px;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.eventOption:hover,
+.eventOption:focus-within {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary-soft) 58%, transparent);
 }
 
 .eventOptionChecked {
@@ -556,6 +645,10 @@
 .stepProgress {
   grid-column: 1 / -1;
   margin-bottom: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card, var(--radius-md));
+  background: color-mix(in srgb, var(--bg-elevated) 62%, var(--bg-surface));
 }
 
 .stepProgressList {
@@ -574,6 +667,8 @@
 
 .stepProgressButton {
   width: 100%;
+  min-width: 0;
+  min-height: var(--fn-control-h);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -616,6 +711,13 @@
   color: var(--text-primary);
 }
 
+.stepProgressButton > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stepProgressIndex {
   flex-shrink: 0;
   width: 22px;
@@ -653,7 +755,7 @@
 .stepError {
   padding: 10px 12px;
   border: 1px solid var(--accent-danger);
-  border-radius: var(--radius-sm);
+  border-radius: var(--r-card, var(--radius-md));
   background: var(--accent-danger-soft);
   color: var(--accent-danger);
   font-size: 12px;
@@ -809,14 +911,6 @@
   object-fit: cover;
 }
 
-.wizardNav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .wizardNavHint {
   font-size: 11px;
   color: var(--text-muted);
@@ -836,31 +930,24 @@
     flex-direction: column;
   }
 
-  .actions :global(.fn-btn) {
-    min-height: var(--fn-control-h-touch);
-  }
-
-  .mobileWizardBar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 80;
-    display: flex;
-    align-items: stretch;
+  /* ウィザードDock: モバイルは [ 戻る ][ 次へ / 提出する ] の2ボタン構成。 */
+  .wizardDockInner {
+    justify-content: stretch;
     gap: 8px;
-    padding: 10px var(--fn-page-gutter, 16px);
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-    background: var(--bg-base);
-    border-top: 1px solid var(--border-subtle);
+    padding-left: var(--fn-page-gutter, 16px);
+    padding-right: var(--fn-page-gutter, 16px);
   }
 
-  .mobileWizardBar .fn-btn {
+  .wizardDockInner .wizardNavHint {
+    display: none;
+  }
+
+  .wizardDock :global(.fn-btn) {
     min-height: var(--fn-control-h-touch);
     flex: 1;
   }
 
-  .mobileWizardBar .fn-btn-primary {
+  .wizardDock :global(.fn-btn-primary) {
     flex: 1.4;
   }
 }
@@ -923,6 +1010,18 @@
   grid-template-columns: minmax(0, 1fr) minmax(120px, 220px);
   gap: 14px;
   align-items: start;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section,
+  .section :global(.fn-card),
+  .form :global(.fn-input),
+  .form :global(.fn-select),
+  .form :global(.fn-textarea),
+  .eventOption,
+  .stepProgressButton {
+    transition: none;
+  }
 }
 
 @media (max-width: 640px) {

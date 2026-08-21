@@ -880,6 +880,7 @@ export function VideoForm({
         styles.form,
         mode === "edit" ? styles.formEditMode : "",
         !isWizard && mode !== "edit" ? styles.formMobileDock : "",
+        isWizard ? styles.formWizardMode : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -2484,88 +2485,21 @@ export function VideoForm({
         ) : null}
       </aside>
 
-      {mode !== "edit" ? (
+      {!isWizard && mode !== "edit" ? (
         <div className={styles.actions}>
-          {isWizard ? (
-            <div className={styles.wizardNav}>
-              <button
-                type="button"
-                className="fn-btn fn-btn-ghost"
-                onClick={goWizardBack}
-                disabled={isWizardFirstStep || pending}
-              >
-                戻る
-              </button>
-              <span className={styles.wizardNavHint}>
-                {wizardSteps[currentStep]?.label ?? ""}
-              </span>
-              {isWizardLastStep ? (
-                <button
-                  type="submit"
-                  className="fn-btn fn-btn-primary"
-                  disabled={pending || !canSubmit}
-                  aria-busy={pending}
-                >
-                  <Icon name="upload" size={14} aria-hidden />
-                  {pending ? "送信中…" : "提出する"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="fn-btn fn-btn-primary"
-                  onClick={goWizardNext}
-                  disabled={pending}
-                >
-                  次へ
-                  <Icon name="chevron-right" size={14} aria-hidden />
-                </button>
-              )}
-            </div>
-          ) : (
-            <button
-              type="submit"
-              className="fn-btn fn-btn-primary"
-              disabled={pending || !canSubmit}
-              aria-busy={pending}
-            >
-              <Icon name="upload" size={14} aria-hidden />
-              {pending ? "送信中…" : "提出する"}
-            </button>
-          )}
+          <button
+            type="submit"
+            className="fn-btn fn-btn-primary"
+            disabled={pending || !canSubmit}
+            aria-busy={pending}
+          >
+            <Icon name="upload" size={14} aria-hidden />
+            {pending ? "送信中…" : "提出する"}
+          </button>
         </div>
       ) : null}
 
-      {isWizard ? (
-        <div className={styles.mobileWizardBar} aria-label="ステップ操作">
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost"
-            onClick={goWizardBack}
-            disabled={isWizardFirstStep || pending}
-          >
-            戻る
-          </button>
-          {isWizardLastStep ? (
-            <button
-              type="submit"
-              className="fn-btn fn-btn-primary"
-              disabled={pending || !canSubmit}
-              aria-busy={pending}
-            >
-              {pending ? "送信中…" : "提出する"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="fn-btn fn-btn-primary"
-              onClick={goWizardNext}
-              disabled={pending}
-            >
-              次へ
-            </button>
-          )}
-        </div>
-      ) : (
+      {mode === "edit" || !isWizard ? (
         <div
           className={styles.submitDock}
           aria-label={mode === "edit" ? "保存操作" : "送信操作"}
@@ -2591,6 +2525,43 @@ export function VideoForm({
               <Icon name="upload" size={14} aria-hidden />
               {pending ? "送信中…" : mode === "edit" ? "保存する" : "提出する"}
             </button>
+          </div>
+        </div>
+      ) : (
+        <div className={styles.wizardDock} aria-label="ステップ操作">
+          <div className={styles.wizardDockInner}>
+            <button
+              type="button"
+              className="fn-btn fn-btn-ghost"
+              onClick={goWizardBack}
+              disabled={isWizardFirstStep || pending}
+            >
+              戻る
+            </button>
+            <span className={styles.wizardNavHint}>
+              {wizardSteps[currentStep]?.label ?? ""}
+            </span>
+            {isWizardLastStep ? (
+              <button
+                type="submit"
+                className="fn-btn fn-btn-primary"
+                disabled={pending || !canSubmit}
+                aria-busy={pending}
+              >
+                <Icon name="upload" size={14} aria-hidden />
+                {pending ? "送信中…" : "提出する"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="fn-btn fn-btn-primary"
+                onClick={goWizardNext}
+                disabled={pending}
+              >
+                次へ
+                <Icon name="chevron-right" size={14} aria-hidden />
+              </button>
+            )}
           </div>
         </div>
       )}
