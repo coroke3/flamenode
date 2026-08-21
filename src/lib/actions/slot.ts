@@ -515,6 +515,27 @@ function adoptNullRowPatch(
   return {};
 }
 
+/** 同じpatchを最大2群へまとめ、D1 statement数を枠数比例にしない。 */
+function buildRegroupMutations(
+  rows: readonly SlotRow[],
+  patch: SlotPatch,
+  identity: { targetXId: string | null; adoptNullRows: boolean },
+): SlotBulkMutation[] {
+  const keepRows: SlotRow[] = [];
+  const adoptRows: SlotRow[] = [];
+  for (const row of rows) {
+    if (identity.adoptNullRows && row.x_user_id === null && identity.targetXId !== null) {
+      adoptRows.push(row);
+    } else {
+      keepRows.push(row);
+    }
+  }
+  return [
+    ...(keepRows.length ? [{ rows: keepRows, patch, statusGuard: "reserved" as const }] : []),
+    ...(adoptRows.length ? [{ rows: adoptRows, patch: { ...patch, x_user_id: identity.targetXId }, statusGuard: "reserved" as const }] : []),
+  ];
+}
+
 function orderCondition(row: SlotRow, direction: "forward" | "backward"): SQL {
   const sortOrder = row.sort_order ?? 0;
   if (row.start_time != null) {
@@ -1002,14 +1023,11 @@ export async function extendOwnSlotGroup(
     await commitSlotMutationPlan({
       db,
       mutations: [
-        ...groupRows.map((row) => ({
-          rows: [row],
-          patch: {
-            reservation_group_id: groupId,
-            ...adoptNullRowPatch(row, identity),
-          },
-          statusGuard: "reserved" as const,
-        })),
+        ...buildRegroupMutations(
+          groupRows,
+          { reservation_group_id: groupId },
+          identity,
+        ),
         {
           rows: [candidate],
           patch: candidatePatch,
@@ -1163,15 +1181,11 @@ export async function mergeOwnSlotGroups(
     await commitSlotMutationPlan({
       db,
       mutations: [
-        ...reservedRows.map((row) => ({
-          rows: [row],
-          patch: {
-            display_name: parsed.data.display_name,
-            reservation_group_id: groupId,
-            ...adoptNullRowPatch(row, identity),
-          },
-          statusGuard: "reserved" as const,
-        })),
+        ...buildRegroupMutations(
+          reservedRows,
+          { display_name: parsed.data.display_name, reservation_group_id: groupId },
+          identity,
+        ),
         {
           rows: [gap],
           patch: gapPatch,

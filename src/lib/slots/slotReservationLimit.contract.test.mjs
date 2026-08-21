@@ -36,3 +36,10 @@ test("migration keeps existing events backward compatible and indexes the hot pa
   assert.match(migration, /slot_interval_minutes INTEGER/);
   assert.match(migration, /slots_event_x_snapshot_active_group_idx/);
 });
+
+
+test("extend and merge bulk regroup instead of one UPDATE per slot", () => {
+  assert.match(slotAction, /function buildRegroupMutations/);
+  assert.match(slotAction, /...buildRegroupMutations\(\s*groupRows/);
+  assert.match(slotAction, /...buildRegroupMutations\(\s*reservedRows/);
+});
