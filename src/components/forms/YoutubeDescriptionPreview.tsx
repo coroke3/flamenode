@@ -6,6 +6,7 @@ import {
   YOUTUBE_DESCRIPTION_VARIABLES,
   renderYoutubeDescriptionTemplate,
   type YoutubeDescriptionContext,
+  type YoutubeDescriptionLoopMember,
   type YoutubeDescriptionVariableKey,
 } from "@/lib/event/youtubeDescriptionTemplate";
 
@@ -13,6 +14,8 @@ export interface YoutubeDescriptionPreviewProps {
   template: string;
   eventTitle: string;
   context: YoutubeDescriptionContext;
+  /** {{#members}} ループ用の生メンバー行。未指定時はループが空で出力される。 */
+  members?: readonly YoutubeDescriptionLoopMember[];
 }
 
 const VARIABLE_LABELS = new Map<YoutubeDescriptionVariableKey, string>(
@@ -46,12 +49,13 @@ export function YoutubeDescriptionPreview({
   template,
   eventTitle,
   context,
+  members,
 }: YoutubeDescriptionPreviewProps): React.ReactElement {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const [copyState, setCopyState] = React.useState<"idle" | "copied" | "error">("idle");
   const rendered = React.useMemo(
-    () => renderYoutubeDescriptionTemplate(template, context),
-    [context, template],
+    () => renderYoutubeDescriptionTemplate(template, context, { members }),
+    [context, members, template],
   );
   const [draftText, setDraftText] = React.useState(rendered.text);
 

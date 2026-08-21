@@ -1605,6 +1605,7 @@ export function VideoForm({
           template={selectedDescriptionEvent.youtube_description_template ?? ""}
           eventTitle={selectedDescriptionEvent.title}
           context={youtubeDescriptionRenderContext}
+          members={members}
         />
       ) : null}
 
@@ -2061,6 +2062,7 @@ export function VideoForm({
               chaptersDisabled={chaptersFieldDisabled}
               onChange={handleMembersChange}
               collabPermsHref="#video-collab-perms"
+              permissionTargetVideoId={mode === "edit" ? (videoId ?? null) : null}
             />
             <p className={styles.help} style={{ marginTop: 8 }}>
               X ID 欄は @ 抜きで入力します。未承認 X ID も受け付け、後で本人連携時に紐付け可能です。
