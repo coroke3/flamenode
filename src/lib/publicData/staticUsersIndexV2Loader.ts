@@ -3,6 +3,10 @@ import "server-only";
 import { loadPublicJson, type PublicDataMode } from "./loader";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import {
+  loadPublicVisibilityBlockedEntitiesManifest,
+  resolvePublicVisibilityGuardModeFromEnv,
+} from "./publicVisibilityManifest";
+import {
   filterUsersSearchLiteByQuery,
   normalizeUsersIndexV2Manifest,
   normalizeUsersIndexV2ScorePage,
@@ -28,10 +32,19 @@ function pageMetadata(total: number, requestedPage: number, pageSize: number) {
   return { totalPages, safePage };
 }
 
+async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
+  if (resolvePublicVisibilityGuardModeFromEnv() !== "enforce") return false;
+  const manifest = await loadPublicVisibilityBlockedEntitiesManifest();
+  return manifest.entities.some((entry) => entry.entity_type === "x_user");
+}
+
 /**
  * score route 専用のv2 loader。
- * manifest/page/search の generation が一致し、visibility filter 後も期待件数が
- * 一致する場合だけ採用する。不一致・移行前・途中生成は null を返して legacy に戻す。
+ * manifest/page/search の generation が一致する場合だけ採用する。
+ *
+ * shard単位のfilterだけでは、別pageにblocked X userがいる場合にmanifest.totalが
+ * staleなまま残り得る。enforce中にX user fenceが1件でも存在するときはv2を使わず、
+ * 全件にfenceを適用できるlegacy users/index.jsonへ戻す。
  */
 export async function loadStaticUsersIndexV2ScorePage(params: {
   page: number;
@@ -47,6 +60,7 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
   });
   const manifest = normalizeUsersIndexV2Manifest(manifestResult.data);
   if (!manifest) return null;
+  if (await hasEnforcedXUserVisibilityFence()) return null;
 
   const query = params.q?.trim() ?? "";
   if (query) {
