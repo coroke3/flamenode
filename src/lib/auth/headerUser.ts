@@ -44,6 +44,11 @@ export type BuildHeaderUserOptions = {
    * Auth.js sessionやクライアント入力を正本扱いする用途では使わない。
    */
   authoritativeUserSnapshot?: AuthoritativeHeaderUserSnapshot;
+  /**
+   * 同一requestでD1から取得済みのlinked X最小projectionだけを渡す。
+   * 外部入力・session由来配列を認可根拠として渡してはいけない。
+   */
+  authoritativeLinkedXRows?: readonly HeaderLinkedXUser[];
 };
 
 type SessionUserLike = {
@@ -181,7 +186,9 @@ export async function buildHeaderUser(
 
   const dbPayload = includeXIds
     ? await withDatabase(async (db) => {
-        const linkedRows = await getHeaderLinkedXUsersForAuthUser(db, authUserId);
+        const linkedRows =
+          options?.authoritativeLinkedXRows ??
+          (await getHeaderLinkedXUsersForAuthUser(db, authUserId));
         const [userRow, entries] = await Promise.all([
           resolveAuthoritativeUserSnapshot(
             db,
