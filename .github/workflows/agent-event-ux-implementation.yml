@@ -1,20 +1,21 @@
-name: Apply event UX implementation
+name: Finish event UX implementation
 
 on:
-  push:
+  pull_request:
     branches:
-      - feature/event-ux-slot-limits-stability-20260821
-    paths:
-      - scripts/agent-event-ux-implementation.mjs.gz.b64
-      - .github/workflows/agent-event-ux-implementation.yml
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
-  apply:
-    if: github.actor != 'github-actions[bot]'
+  finish-and-verify:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/event-ux-slot-limits-stability-20260821'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout feature branch
         uses: actions/checkout@v4
@@ -22,22 +23,21 @@ jobs:
           ref: feature/event-ux-slot-limits-stability-20260821
           fetch-depth: 0
 
-      - name: Apply implementation
-        shell: bash
-        run: |
-          base64 -d scripts/agent-event-ux-implementation.mjs.gz.b64 | gzip -d > /tmp/agent-event-ux-implementation.mjs
-          node --check /tmp/agent-event-ux-implementation.mjs
-          node /tmp/agent-event-ux-implementation.mjs
+      - name: Apply remaining implementation
+        run: node scripts/finish-event-ux.mjs
 
-      - name: Commit implementation
+      - name: Validate patch shape
+        run: |
+          git diff --check
+          git diff --stat
+
+      - name: Commit implementation before verification
         shell: bash
         run: |
-          rm -f scripts/agent-event-ux-implementation.mjs.gz.b64 .github/workflows/agent-event-ux-implementation.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- \
             app/'(public)'/event/'[id]'/slots/page.tsx \
-            docs/operations/static-delivery.md \
             migrations/0059_event_slot_reservation_limits.sql \
             src/components/admin/EventForm.tsx \
             src/components/admin/EventSettingsPreview.tsx \
@@ -45,23 +45,61 @@ jobs:
             src/components/admin/YoutubeDescriptionTemplateEditor.tsx \
             src/components/admin/eventUxEnhancements.contract.test.mjs \
             src/components/event/SlotGrid.tsx \
-            src/components/forms/YoutubeDescriptionPreview.tsx \
-            src/lib/actions/event-admin.ts \
             src/lib/actions/slot.ts \
-            src/lib/actions/slotReservationLimit.contract.test.mjs \
-            src/lib/admin/eventTemplateSettings.ts \
-            src/lib/db/schema.canonical.ts \
-            src/lib/event/eventForm.ts \
-            src/lib/event/eventPayload.ts \
-            src/lib/publicData/publicJsonCacheTtl.ts \
             src/lib/publicData/topSlotStatsTtl.contract.test.mjs \
-            src/lib/slots/slotGuidance.ts \
-            src/lib/slots/slotReservationLimit.ts \
-            src/lib/slots/slotReservationLimit.test.mjs \
-            workers/shared/staticR2CacheControl.ts \
+            src/lib/slots/slotReservationLimit.contract.test.mjs \
+            src/lib/slots/slotReservationLimitGuard.ts
+          if ! git diff --cached --quiet; then
+            git diff --cached --check
+            git commit -m "枠上限と運営UXの残実装を完了"
+            git push origin HEAD:feature/event-ux-slot-limits-stability-20260821
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Contract tests
+        run: >-
+          node --test
+          src/lib/slots/slotReservationLimit.contract.test.mjs
+          src/components/admin/eventUxEnhancements.contract.test.mjs
+          src/lib/publicData/topSlotStatsTtl.contract.test.mjs
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Fast verification
+        run: npm run verify:fast
+
+      - name: DB schema verification
+        run: npm run check:db-schema
+
+      - name: DB migration verification
+        run: npm run check:db-migration
+
+      - name: Slot reservation group verification
+        run: npm run check:slot-reservation-groups
+
+      - name: Slot domain limit verification
+        run: npm run check:slot-domain-limits
+
+      - name: Static rebuild tests
+        run: npm run test:static-rebuild
+
+      - name: Worker tests
+        run: npm run test:workers
+
+      - name: Cleanup temporary implementation harness
+        shell: bash
+        run: |
+          rm -f \
+            scripts/finish-event-ux.mjs \
+            scripts/agent-event-ux-implementation.mjs.gz.b64 \
+            .github/workflows/agent-event-ux-implementation.yml
+          git add -- \
+            scripts/finish-event-ux.mjs \
             scripts/agent-event-ux-implementation.mjs.gz.b64 \
             .github/workflows/agent-event-ux-implementation.yml
           git diff --cached --check
-          git diff --cached --stat
-          git commit -m "イベント設定UXと枠上限を強化"
+          git commit -m "一時実装ハーネスを削除"
           git push origin HEAD:feature/event-ux-slot-limits-stability-20260821
