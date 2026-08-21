@@ -2,29 +2,31 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildUsersIndexV2Artifacts,
-  filterUsersSearchLiteByQuery,
   normalizeUsersIndexV2Manifest,
+  normalizeUsersIndexV2Page,
   normalizeUsersIndexV2ScorePage,
   normalizeUsersSearchLiteV1,
+  prepareUsersSearchLiteItems,
+  usersIndexV2PageObjectKey,
   usersIndexV2ScorePageObjectKey,
   usersIndexV2SearchLiteObjectKey,
 } from "./staticUsersIndexV2Core.ts";
 
-function source(id, score) {
+function source(id, score, works = 1, name = id) {
   return {
     x_id: id,
-    x_name: id,
+    x_name: name,
     icon_url: null,
-    personal_count: 1,
+    personal_count: works,
     collab_count: 0,
-    total_works: 1,
+    total_works: works,
     sort_score: score,
   };
 }
 
-test("users index v2 は生成済みscore順を48件単位で分割する", () => {
+test("users index v2 はscore/works/nameを48件単位で事前分割する", () => {
   const items = Array.from({ length: 49 }, (_, index) =>
-    source(`creator-${index + 1}`, 100 - index),
+    source(`creator-${index + 1}`, 100 - index, index + 1),
   );
   const artifacts = buildUsersIndexV2Artifacts({
     items,
@@ -35,13 +37,18 @@ test("users index v2 は生成済みscore順を48件単位で分割する", () =
   assert.equal(artifacts.manifest.total, 49);
   assert.equal(artifacts.manifest.page_size, 48);
   assert.equal(artifacts.manifest.total_pages, 2);
+  assert.deepEqual(artifacts.manifest.sorts, ["score", "works", "name"]);
   assert.equal(artifacts.scorePages[0].items.length, 48);
   assert.equal(artifacts.scorePages[1].items.length, 1);
-  assert.equal(artifacts.scorePages[0].items[0].x_id, "creator-1");
-  assert.equal(artifacts.scorePages[1].items[0].x_id, "creator-49");
+  assert.equal(artifacts.worksPages[0].items[0].x_id, "creator-49");
+  assert.equal(artifacts.namePages[0].sort, "name");
   assert.equal(
     usersIndexV2ScorePageObjectKey("generation-a", 2),
     "users/index.v2/g/generation-a/score/2.json",
+  );
+  assert.equal(
+    usersIndexV2PageObjectKey("generation-a", "works", 1),
+    "users/index.v2/g/generation-a/works/1.json",
   );
   assert.equal(
     usersIndexV2SearchLiteObjectKey("generation-a"),
@@ -49,22 +56,38 @@ test("users index v2 は生成済みscore順を48件単位で分割する", () =
   );
 });
 
-test("search-lite はscore順を維持したまま検索する", () => {
+test("search-lite はfilter後に指定sortだけを候補集合へ適用する", () => {
   const artifacts = buildUsersIndexV2Artifacts({
-    items: [source("creator-a", 30), source("other", 20), source("creator-b", 10)],
+    items: [
+      source("creator-b", 30, 1, "Beta Creator"),
+      source("other", 20, 9, "Other"),
+      source("creator-a", 10, 3, "Alpha Creator"),
+    ],
     generatedAt: 1_700_000_000,
     generation: "generation-a",
   });
 
   assert.deepEqual(
-    filterUsersSearchLiteByQuery(artifacts.searchLite.items, "creator").map(
+    prepareUsersSearchLiteItems(artifacts.searchLite.items, "creator", "score").map(
+      (item) => item.x_id,
+    ),
+    ["creator-b", "creator-a"],
+  );
+  assert.deepEqual(
+    prepareUsersSearchLiteItems(artifacts.searchLite.items, "creator", "works").map(
+      (item) => item.x_id,
+    ),
+    ["creator-a", "creator-b"],
+  );
+  assert.deepEqual(
+    prepareUsersSearchLiteItems(artifacts.searchLite.items, "creator", "name").map(
       (item) => item.x_id,
     ),
     ["creator-a", "creator-b"],
   );
 });
 
-test("空のusers indexも1ページの有効世代として生成できる", () => {
+test("空のusers indexも各sort 1ページの有効世代として生成できる", () => {
   const artifacts = buildUsersIndexV2Artifacts({
     items: [],
     generatedAt: 1_700_000_000,
@@ -74,11 +97,13 @@ test("空のusers indexも1ページの有効世代として生成できる", ()
   assert.equal(artifacts.manifest.total, 0);
   assert.equal(artifacts.manifest.total_pages, 1);
   assert.equal(artifacts.scorePages.length, 1);
+  assert.equal(artifacts.worksPages.length, 1);
+  assert.equal(artifacts.namePages.length, 1);
   assert.deepEqual(artifacts.scorePages[0].items, []);
   assert.deepEqual(artifacts.searchLite.items, []);
 });
 
-test("manifest/page/search は世代情報を厳密に正規化する", () => {
+test("manifest/page/search は世代とsort情報を厳密に正規化する", () => {
   const artifacts = buildUsersIndexV2Artifacts({
     items: [source("creator-a", 10)],
     generatedAt: 1_700_000_000,
@@ -94,6 +119,10 @@ test("manifest/page/search は世代情報を厳密に正規化する", () => {
     artifacts.scorePages[0],
   );
   assert.deepEqual(
+    normalizeUsersIndexV2Page(artifacts.worksPages[0]),
+    artifacts.worksPages[0],
+  );
+  assert.deepEqual(
     normalizeUsersSearchLiteV1(artifacts.searchLite),
     artifacts.searchLite,
   );
@@ -101,19 +130,23 @@ test("manifest/page/search は世代情報を厳密に正規化する", () => {
   assert.equal(
     normalizeUsersIndexV2Manifest({
       ...artifacts.manifest,
-      total_pages: 2,
+      sorts: ["score"],
     }),
     null,
   );
   assert.equal(
-    normalizeUsersIndexV2ScorePage({
-      ...artifacts.scorePages[0],
-      items: [{ broken: true }],
+    normalizeUsersIndexV2Page({
+      ...artifacts.worksPages[0],
+      sort: "broken",
     }),
     null,
   );
   assert.throws(
     () => usersIndexV2ScorePageObjectKey("../unsafe", 1),
     /invalid users index v2 generation/,
+  );
+  assert.equal(
+    usersIndexV2PageObjectKey("generation-a", "score", Number.NaN),
+    "users/index.v2/g/generation-a/score/1.json",
   );
 });
