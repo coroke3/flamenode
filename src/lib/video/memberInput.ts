@@ -1,4 +1,9 @@
-import { parseDelimited } from "#utils/delimited";
+import {
+  detectDelimiter,
+  parseDelimited,
+  serializeDelimited,
+  type DelimiterChar,
+} from "#utils/delimited";
 import { normalizeXId } from "#utils/xid";
 
 export interface VideoMemberChapterInput {
@@ -107,7 +112,7 @@ export function chapterKey(mk: string, ch: VideoMemberChapterInput): string {
   return `${mk}:${normalizeMemberChapterTime(ch.time) ?? ch.time.trim()}`;
 }
 
-/** CSV「編集権」列: ON / OFF / true / false / 1 / 0 / 空欄 */
+/** CSV/TSV「編集権」列: ON / OFF / true / false / 1 / 0 / yes / no / はい / いいえ / 空欄 */
 export function parseMemberEditPermissionCell(raw: string | undefined): boolean | undefined {
   const v = (raw ?? "").trim().toLowerCase();
   if (!v) return undefined;
@@ -124,28 +129,37 @@ function headerIndex(headers: string[], aliases: string[]): number | null {
   return index >= 0 ? index : null;
 }
 
-export function parseVideoMemberCsv(
+export interface ParsedVideoMemberTextOptions {
+  suggestions?: VideoMemberSuggestion[];
+  existingMembers?: VideoMemberInput[];
+}
+
+/**
+ * 合作メンバーの区切りテキスト（CSV / TSV 共通）を解析する正本。
+ * 標準列順: 1.ユーザー名 2.X ID 3.チャプター 4.役職 5.コメント 6.権限。
+ * ヘッダーあり・なし両対応。末尾列の省略と途中空列（タブ位置維持）を扱う。
+ */
+export function parseVideoMemberDelimited(
   input: string,
-  options: {
-    suggestions?: VideoMemberSuggestion[];
-    existingMembers?: VideoMemberInput[];
-  } = {},
+  delimiter: DelimiterChar,
+  options: ParsedVideoMemberTextOptions = {},
 ): ParsedVideoMemberCsv {
   try {
-    let rowsRaw = parseDelimited(input, ",");
+    let rowsRaw = parseDelimited(input, delimiter);
     if (rowsRaw.length === 0) {
-      return { members: [], warnings: ["CSVに有効な行がありません。"] };
+      return { members: [], warnings: ["データに有効な行がありません。"] };
     }
 
     const firstLower = rowsRaw[0]!.map((c) => c.trim().toLowerCase());
     const header = {
-      name: headerIndex(firstLower, ["活動名", "name", "display_name"]),
+      name: headerIndex(firstLower, ["ユーザー名", "活動名", "name", "display_name"]),
       xid: headerIndex(firstLower, ["id", "x id", "x_id", "x_user_id"]),
       chapters: headerIndex(firstLower, ["チャプター", "chapter", "chapters"]),
-      role: headerIndex(firstLower, ["役割", "role"]),
+      role: headerIndex(firstLower, ["役職", "役割", "role"]),
       comment: headerIndex(firstLower, ["コメント", "comment"]),
       canEdit: headerIndex(firstLower, [
         "編集権",
+        "権限",
         "can_edit",
         "edit",
         "作品編集",
@@ -195,8 +209,13 @@ export function parseVideoMemberCsv(
           : hasExplicitChapterColumn
             ? (cols[4] ?? "")
             : (cols[3] ?? "");
-      const canEditRaw = hasHeader && header.canEdit !== null ? cols[header.canEdit] : "";
-      const canEditParsed = parseMemberEditPermissionCell(canEditRaw);
+      // 6列目（権限）はヘッダーなしでも固定位置で解析する。
+      const canEditRaw = hasHeader && header.canEdit !== null
+        ? cols[header.canEdit]
+        : (!hasHeader && cols.length >= 6 ? cols[5] : "");
+      const canEditParsed = parseMemberEditPermissionCell(
+        typeof canEditRaw === "string" ? canEditRaw : "",
+      );
       const xid = normalizeXId(xidRaw);
       const hit = xid ? suggestionsById.get(xid) : null;
       const member: VideoMemberInput = {
@@ -242,7 +261,7 @@ export function parseVideoMemberCsv(
     const editOnMembers = members.filter((m) => m.can_edit === 1 || m.can_edit === true);
     if (editOnMembers.length > 0) {
       warnings.push(
-        `編集権ONの行が ${editOnMembers.length} 件あります。メンバー欄への取り込み後、下の「編集できる人」から付与してください（CSV貼り付けだけでは編集権は付与されません）。`,
+        `編集権ONの行が ${editOnMembers.length} 件あります。メンバー欄への取り込み後、下の「編集できる人」から付与してください（貼り付けだけでは編集権は付与されません）。`,
       );
     }
 
@@ -250,7 +269,51 @@ export function parseVideoMemberCsv(
   } catch {
     return {
       members: [],
-      warnings: ["CSVを解析できませんでした。引用符やカンマの数を確認してください。"],
+      warnings: [
+        delimiter === "\t"
+          ? "TSVを解析できませんでした。引用符やタブの数を確認してください。"
+          : "CSVを解析できませんでした。引用符やカンマの数を確認してください。",
+      ],
     };
   }
+}
+
+/** 先頭行からCSV / TSVを自動判定して解析する。スプレッドシート貼り付け用。 */
+export function parseVideoMemberText(
+  input: string,
+  options: ParsedVideoMemberTextOptions = {},
+): ParsedVideoMemberCsv {
+  return parseVideoMemberDelimited(input, detectDelimiter(input), options);
+}
+
+/** 後方互換wrapper。CSV（カンマ区切り）として解析する。 */
+export function parseVideoMemberCsv(
+  input: string,
+  options: ParsedVideoMemberTextOptions = {},
+): ParsedVideoMemberCsv {
+  return parseVideoMemberDelimited(input, ",", options);
+}
+
+/**
+ * メンバー行をTSVへ直列化する。常に6セル（ユーザー名/X ID/チャプター/役職/コメント/権限）を
+ * 出力し、値がない列も空セルとして位置を維持する。Google Sheets / Excelへ直接貼り付け可能。
+ */
+export function serializeVideoMemberTsv(
+  members: readonly VideoMemberInput[],
+): string {
+  return serializeDelimited(
+    members.map((member) => [
+      member.name.trim(),
+      normalizeXId(member.x_user_id),
+      serializeChaptersCell(member.chapters ?? []),
+      member.role.trim(),
+      member.comment.trim(),
+      member.can_edit === 1 || member.can_edit === true
+        ? "ON"
+        : member.can_edit === 0 || member.can_edit === false
+          ? "OFF"
+          : "",
+    ]),
+    "\t",
+  );
 }

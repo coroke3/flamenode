@@ -6,15 +6,11 @@ import { getDatabase } from "@/lib/cloudflare";
 import {
   videoMembers,
   videos as videosTable,
-  xUsers,
 } from "@/lib/db/schema";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoMembersForm } from "@/components/admin/AdminVideoMembersForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
-import type {
-  VideoMemberInput,
-  VideoMemberSuggestion,
-} from "@/components/forms/VideoMembersField";
+import type { VideoMemberInput } from "@/components/forms/VideoMembersField";
 
 export const metadata: Metadata = { title: "参加者設定" };
 export const dynamic = "force-dynamic";
@@ -68,15 +64,8 @@ export default async function AdminVideoMembersPage({
     is_public_member: member.is_public_member,
   }));
 
-  const suggestionRows = await db
-    .select({ name: xUsers.x_name, x_user_id: xUsers.id })
-    .from(xUsers)
-    .orderBy(xUsers.id)
-    .limit(2000);
-  const memberSuggestions: VideoMemberSuggestion[] = suggestionRows.map((row) => ({
-    name: row.name,
-    x_user_id: row.x_user_id,
-  }));
+  // autocomplete候補はR2静的index経由の /api/internal/x-users/search から取得する。
+  // D1からの大量preload（旧 limit(2000)）は撤去済み。
 
   return (
     <div>
@@ -95,7 +84,6 @@ export default async function AdminVideoMembersPage({
         <AdminVideoMembersForm
           video={video}
           initialMembers={initialMembers}
-          memberSuggestions={memberSuggestions}
         />
       </div>
     </div>

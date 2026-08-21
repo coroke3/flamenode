@@ -22,13 +22,14 @@ interface AdminVideoMembersFormProps {
     collaboration_type: string | null;
   };
   initialMembers: VideoMemberInput[];
-  memberSuggestions: VideoMemberSuggestion[];
+  /** 後方互換のため任意。autocomplete候補はR2 index経由の検索APIから取得する。 */
+  memberSuggestions?: VideoMemberSuggestion[];
 }
 
 export function AdminVideoMembersForm({
   video,
   initialMembers,
-  memberSuggestions,
+  memberSuggestions = [],
 }: AdminVideoMembersFormProps): React.ReactElement {
   const router = useRouter();
   const [isCollab, setIsCollab] = React.useState(
@@ -111,6 +112,7 @@ export function AdminVideoMembersForm({
           initialMembers={initialMembers}
           suggestions={memberSuggestions}
           disabled={pending}
+          permissionTargetVideoId={video.id}
         />
       ) : (
         <section
