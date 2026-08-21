@@ -9,6 +9,11 @@ import {
   STATIC_R2_MAX_AGE_SEC,
 } from "../shared/staticR2CacheControl.ts";
 import {
+  normalizeStaticUsersIndex,
+  type StaticUsersIndexPayload,
+} from "../../src/lib/publicData/staticUsersIndexCore.ts";
+import { USERS_INDEX_OBJECT_KEY } from "../../src/lib/publicData/publicCreatorProjection.ts";
+import {
   buildUsersIndexV2Artifacts,
   USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
   USERS_INDEX_V2_MAX_MANIFEST_BYTES,
@@ -226,4 +231,37 @@ export async function rebuildUsersIndexV2Artifacts(
 
   await reconcileTrackedArtifacts(env, liveKeys, signal);
   return { liveKeys, objectCount: liveKeys.length };
+}
+
+/**
+ * 既存 rebuildTarget が書いた canonical legacy users/index.json を入力にする。
+ * projection query を二重実行せず、legacy互換を維持したままv2だけを追加する。
+ */
+export async function rebuildUsersIndexV2FromLegacyArtifact(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<{ liveKeys: string[]; objectCount: number }> {
+  throwIfAborted(signal);
+  const object = await env.R2.get(USERS_INDEX_OBJECT_KEY);
+  throwIfAborted(signal);
+  if (!object) throw new Error("users_index_v2_requires_legacy_artifact");
+
+  let payload: unknown;
+  try {
+    payload = await object.json();
+  } catch {
+    throw new Error("users_index_v2_legacy_artifact_invalid_json");
+  }
+  throwIfAborted(signal);
+  const normalized = normalizeStaticUsersIndex(payload as StaticUsersIndexPayload);
+  if (!normalized || normalized.generatedAt == null) {
+    throw new Error("users_index_v2_legacy_artifact_invalid");
+  }
+
+  return rebuildUsersIndexV2Artifacts(
+    env,
+    normalized.items,
+    normalized.generatedAt,
+    signal,
+  );
 }
