@@ -8,6 +8,7 @@ import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "./resolveActiveXId";
 import { getEditableEventIds } from "./ownership";
+import { getEditableEventIdsByApprovedXIds } from "./editableEventIdsByXIds";
 import { getLinkedXUsersForAuthUser, type LinkedXUser } from "./xIdentity";
 import {
   normalizeXIdApprovalStatus,
@@ -40,21 +41,39 @@ type SessionUserLike = {
   active_x_user_id?: string | null;
 };
 
-async function getManagementAccess(user: {
-  id: string;
-  role?: string | null;
-}): Promise<HeaderUser["management"]> {
-  if (user.role === "admin") {
-    return { canAccessAdmin: true, canAccessManage: true, manageableEventCount: 0 };
-  }
-  const db = getDatabase();
-  if (!db) return { canAccessAdmin: false, canAccessManage: false, manageableEventCount: 0 };
-  const manageableEventCount = (await getEditableEventIds(db, user.id)).length;
+function adminManagement(): HeaderUser["management"] {
+  return { canAccessAdmin: true, canAccessManage: true, manageableEventCount: 0 };
+}
+
+function userManagement(manageableEventCount: number): HeaderUser["management"] {
   return {
     canAccessAdmin: false,
     canAccessManage: manageableEventCount > 0,
     manageableEventCount,
   };
+}
+
+async function getManagementAccess(user: {
+  id: string;
+  role?: string | null;
+}): Promise<HeaderUser["management"]> {
+  if (user.role === "admin") return adminManagement();
+  const db = getDatabase();
+  if (!db) return userManagement(0);
+  const manageableEventCount = (await getEditableEventIds(db, user.id)).length;
+  return userManagement(manageableEventCount);
+}
+
+async function getManagementAccessFromApprovedXIds(
+  db: DB,
+  role: HeaderUser["role"],
+  approvedXUserIds: readonly string[],
+): Promise<HeaderUser["management"]> {
+  if (role === "admin") return adminManagement();
+  const manageableEventCount = (
+    await getEditableEventIdsByApprovedXIds(db, approvedXUserIds)
+  ).length;
+  return userManagement(manageableEventCount);
 }
 
 function normalizeRole(role: string | null | undefined): HeaderUser["role"] {
@@ -145,12 +164,18 @@ export async function buildHeaderUser(
         const approvedLinkedRows = linkedRows.filter(
           (row) => row.approval_status === "approved",
         );
-        const resolvedActive = await resolveActiveXUserId(
-          db,
-          authUserId,
-          normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
-          approvedLinkedRows,
+        const approvedXUserIds = Array.from(
+          new Set(approvedLinkedRows.map((row) => row.x_user_id)),
         );
+        const [resolvedActive, management] = await Promise.all([
+          resolveActiveXUserId(
+            db,
+            authUserId,
+            normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
+            approvedLinkedRows,
+          ),
+          getManagementAccessFromApprovedXIds(db, role, approvedXUserIds),
+        ]);
         const normalizedActive = normalizeXId(resolvedActive) || null;
         return {
           role,
@@ -159,6 +184,7 @@ export async function buildHeaderUser(
             is_active:
               entry.approval_status !== "rejected" && entry.x_user_id === normalizedActive,
           })),
+          management,
         };
       })
     : await withDatabase(async (db) => {
@@ -170,11 +196,13 @@ export async function buildHeaderUser(
         return {
           role: normalizeRole(userRows[0]?.role ?? sessionUser.role),
           xIds: [] as XIdEntry[],
+          management: null,
         };
       });
 
   const role = dbPayload?.role ?? fallbackRole;
-  const management = await getManagementAccess({ id: authUserId, role });
+  const management =
+    dbPayload?.management ?? (await getManagementAccess({ id: authUserId, role }));
   return {
     id: authUserId,
     name: sessionUser.name?.trim() || "guest",
