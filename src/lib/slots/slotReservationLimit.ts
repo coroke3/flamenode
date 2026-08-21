@@ -16,7 +16,30 @@ export function slotReservationLimitMessage(limit: number): string {
     : "";
 }
 
-/** 1 logical reservation から1枠を解放した後の論理予約件数差分。 */
+export type LogicalReservationRow = {
+  id: string;
+  reservation_group_id: string | null;
+};
+
+/**
+ * DB側の COUNT(DISTINCT CASE ...) と同じ論理予約キーを返す。
+ * 連続枠は group 単位、legacy / 単枠の null group は slot 単位で数える。
+ */
+export function logicalReservationKey(row: LogicalReservationRow): string {
+  const groupId = row.reservation_group_id?.trim();
+  return groupId ? `group:${groupId}` : `slot:${row.id}`;
+}
+
+export function countLogicalReservations(
+  rows: readonly LogicalReservationRow[],
+): number {
+  return new Set(rows.map(logicalReservationKey)).size;
+}
+
+/**
+ * 1 logical reservation から1枠を解放した後の論理予約件数差分。
+ * 中央解放で左右に分裂すると +1、端の解放や単枠解放は 0 / -1。
+ */
 export function releaseLogicalReservationDelta(
   groupSize: number,
   targetIndex: number,
