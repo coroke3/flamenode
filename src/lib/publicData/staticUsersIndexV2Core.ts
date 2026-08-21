@@ -8,8 +8,7 @@ export const USERS_INDEX_V2_SCHEMA_VERSION = 2 as const;
 export const USERS_INDEX_V2_PAGE_SIZE = 48;
 export const USERS_INDEX_V2_MANIFEST_OBJECT_KEY =
   "users/index.v2/manifest.json";
-export const USERS_INDEX_V2_SCORE_PREFIX = "users/index.v2/score";
-export const USERS_SEARCH_LITE_V1_OBJECT_KEY = "users/search-lite.v1.json";
+export const USERS_INDEX_V2_GENERATION_PREFIX = "users/index.v2/g";
 export const USERS_INDEX_V2_MAX_PAGE_BYTES = 256 * 1024;
 export const USERS_SEARCH_LITE_V1_MAX_BYTES = 2 * 1024 * 1024;
 export const USERS_INDEX_V2_MAX_MANIFEST_BYTES = 64 * 1024;
@@ -59,9 +58,24 @@ export type UsersIndexV2Artifacts = {
   searchLite: UsersSearchLiteV1;
 };
 
-export function usersIndexV2ScorePageObjectKey(page: number): string {
+function safeGenerationForObjectKey(generation: string): string {
+  const normalized = generation.trim();
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(normalized)) {
+    throw new Error("invalid users index v2 generation");
+  }
+  return normalized;
+}
+
+export function usersIndexV2ScorePageObjectKey(
+  generation: string,
+  page: number,
+): string {
   const safePage = Math.max(1, Math.floor(page));
-  return `${USERS_INDEX_V2_SCORE_PREFIX}/${safePage}.json`;
+  return `${USERS_INDEX_V2_GENERATION_PREFIX}/${safeGenerationForObjectKey(generation)}/score/${safePage}.json`;
+}
+
+export function usersIndexV2SearchLiteObjectKey(generation: string): string {
+  return `${USERS_INDEX_V2_GENERATION_PREFIX}/${safeGenerationForObjectKey(generation)}/search-lite.v1.json`;
 }
 
 function compactEntry(entry: UsersIndexV2SourceEntry): UsersIndexV2Entry {
@@ -133,7 +147,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function normalizeGeneration(value: unknown): string | null {
   const generation = normalizeString(value);
-  return generation && generation.length <= 128 ? generation : null;
+  return generation && /^[A-Za-z0-9._-]{1,128}$/.test(generation)
+    ? generation
+    : null;
 }
 
 function normalizePositiveInt(value: unknown): number | null {
