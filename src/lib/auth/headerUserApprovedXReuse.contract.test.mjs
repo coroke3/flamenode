@@ -11,6 +11,10 @@ const linkedSource = await readFile(
   new URL("./headerLinkedXUsers.ts", import.meta.url),
   "utf8",
 );
+const accountSummarySource = await readFile(
+  new URL("../../../app/api/account/summary/route.ts", import.meta.url),
+  "utf8",
+);
 
 test("buildHeaderUser は同一requestで取得済みapproved X IDsを管理権限判定へ渡す", () => {
   assert.match(headerSource, /approval_status === "approved"/);
@@ -28,6 +32,14 @@ test("header X一覧は表示に必要な最小列だけを読み汎用profile J
   assert.match(linkedSource, /approval_status: xUsers\.approval_status/);
   assert.doesNotMatch(linkedSource, /xIdentityRequests/);
   assert.doesNotMatch(linkedSource, /profile_text|portfolio_contact|other_social_links/);
+});
+
+test("account summary は getCurrentUser のDB正本snapshotを再利用しsession/user再読取を増やさない", () => {
+  assert.match(accountSummarySource, /authoritativeUserSnapshot/);
+  assert.match(accountSummarySource, /role: sessionUser\.role/);
+  assert.match(accountSummarySource, /active_x_user_id: sessionUser\.active_x_user_id/);
+  assert.doesNotMatch(accountSummarySource, /getAuthSession/);
+  assert.match(headerSource, /resolveAuthoritativeUserSnapshot/);
 });
 
 test("preloaded approved X query は従来同様 permission を持つ event_staff だけを返す", () => {
