@@ -19,6 +19,8 @@ import {
   prepareUsersIndexItems,
   type UsersIndexSort,
 } from "@/lib/publicData/staticUsersIndexCore";
+import { loadStaticUsersIndexV2ScorePage } from "@/lib/publicData/staticUsersIndexV2Loader";
+import type { UsersIndexV2Entry } from "@/lib/publicData/staticUsersIndexV2Core";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/user",
@@ -46,11 +48,21 @@ type CreatorRow = {
   total_count: number;
 };
 
+type CreatorIndexEntry = Pick<
+  StaticUsersIndexEntry | UsersIndexV2Entry,
+  | "x_id"
+  | "x_name"
+  | "icon_url"
+  | "personal_count"
+  | "collab_count"
+  | "total_works"
+>;
+
 function parseUsersIndexSort(value: string | undefined): UsersIndexSort {
   return value === "name" || value === "works" ? value : "score";
 }
 
-function mapIndexEntry(entry: StaticUsersIndexEntry): CreatorRow {
+function mapIndexEntry(entry: CreatorIndexEntry): CreatorRow {
   return {
     id: entry.x_id,
     x_name: entry.x_name,
@@ -70,40 +82,73 @@ export default async function UserListPage({
   const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
   const sortKey = parseUsersIndexSort(sort);
   setPublicRequestRoute("/user");
-  const staticLoaded = await loadStaticUsersIndex({
-    page: pageNum,
-    pageSize: PAGE_SIZE,
-    q: q.trim() || undefined,
-  });
-  const isDegraded = isDegradedD1Mode(staticLoaded.mode);
+
+  const v2Loaded =
+    sortKey === "score"
+      ? await loadStaticUsersIndexV2ScorePage({
+          page: pageNum,
+          q: q.trim() || undefined,
+        })
+      : null;
 
   let creators: CreatorRow[];
-  if (staticLoaded.index && !isDegraded) {
-    creators = prepareUsersIndexItems(staticLoaded.index.items, q, sortKey).map(
-      mapIndexEntry,
-    );
-  } else if (staticLoaded.index && isDegraded) {
-    creators = staticLoaded.index.items.map(mapIndexEntry);
-    if (q.trim()) {
-      const keyword = q.trim().toLocaleLowerCase();
-      creators = creators.filter(
-        (creator) =>
-          creator.x_name.toLocaleLowerCase().includes(keyword) ||
-          creator.id.toLocaleLowerCase().includes(keyword),
-      );
-    }
-    if (sortKey === "name") {
-      creators.sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
-    }
-  } else {
-    creators = [];
-  }
+  let total: number;
+  let totalPages: number;
+  let safePage: number;
+  let current: CreatorRow[];
+  let isDegraded = false;
+  let unavailable = false;
+  let effectivePageSize = PAGE_SIZE;
 
-  const { total, totalPages, safePage, current } = paginateUsersIndexItems(
-    creators,
-    isDegraded ? 1 : pageNum,
-    PAGE_SIZE,
-  );
+  if (v2Loaded && !isDegradedD1Mode(v2Loaded.mode)) {
+    creators = v2Loaded.items.map(mapIndexEntry);
+    total = v2Loaded.total;
+    totalPages = v2Loaded.totalPages;
+    safePage = v2Loaded.safePage;
+    current = creators;
+    effectivePageSize = v2Loaded.pageSize;
+  } else {
+    // v2 is optional during rollout and whenever a generation/visibility check
+    // fails. The legacy artifact remains the compatibility and degraded path.
+    const staticLoaded = await loadStaticUsersIndex({
+      page: pageNum,
+      pageSize: PAGE_SIZE,
+      q: q.trim() || undefined,
+    });
+    isDegraded = isDegradedD1Mode(staticLoaded.mode);
+    unavailable = staticLoaded.mode === "unavailable";
+
+    if (staticLoaded.index && !isDegraded) {
+      creators = prepareUsersIndexItems(staticLoaded.index.items, q, sortKey).map(
+        mapIndexEntry,
+      );
+    } else if (staticLoaded.index && isDegraded) {
+      creators = staticLoaded.index.items.map(mapIndexEntry);
+      if (q.trim()) {
+        const keyword = q.trim().toLocaleLowerCase();
+        creators = creators.filter(
+          (creator) =>
+            creator.x_name.toLocaleLowerCase().includes(keyword) ||
+            creator.id.toLocaleLowerCase().includes(keyword),
+        );
+      }
+      if (sortKey === "name") {
+        creators.sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
+      }
+    } else {
+      creators = [];
+    }
+
+    const paged = paginateUsersIndexItems(
+      creators,
+      isDegraded ? 1 : pageNum,
+      PAGE_SIZE,
+    );
+    total = paged.total;
+    totalPages = paged.totalPages;
+    safePage = paged.safePage;
+    current = paged.current;
+  }
 
   const params = (override: Partial<SearchParams> = {}) => {
     const p = new URLSearchParams();
@@ -160,7 +205,7 @@ export default async function UserListPage({
         <div className="fn-empty">
           <Icon name="info" size={24} aria-hidden />
           <p className="fn-empty-message">
-            {staticLoaded.mode === "unavailable"
+            {unavailable
               ? "公開クリエイター一覧を一時的に表示できません。"
               : "条件に合うクリエイターが見つかりませんでした。"}
           </p>
@@ -214,7 +259,7 @@ export default async function UserListPage({
               currentPage={safePage}
               totalPages={totalPages}
               total={total}
-              pageSize={PAGE_SIZE}
+              pageSize={effectivePageSize}
               buildHref={(nextPage) => `/user?${params({ page: String(nextPage) })}`}
             />
           ) : null}
