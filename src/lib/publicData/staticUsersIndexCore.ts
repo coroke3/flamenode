@@ -80,6 +80,20 @@ export function sortUsersIndexItems(
   return sorted;
 }
 
+/**
+ * users/index.json は生成時に score DESC → 日本語名順で正規化済み。
+ * filter() は順序を維持するため score 表示では request-time の再 sort を避ける。
+ * name / works は従来どおり request-time sort を行う。
+ */
+export function prepareUsersIndexItems(
+  items: readonly StaticUsersIndexEntry[],
+  query: string,
+  sort: UsersIndexSort,
+): StaticUsersIndexEntry[] {
+  const filtered = filterUsersIndexItems(items, query);
+  return sort === "score" ? filtered : sortUsersIndexItems(filtered, sort);
+}
+
 export function paginateUsersIndexItems<T>(
   items: readonly T[],
   page: number,
