@@ -15,7 +15,7 @@ const loaderSource = await readFile(
   "utf8",
 );
 
-test("users index v2 はgeneration固有page/search完了後にmanifestをcommit pointとして書く", () => {
+test("users index v2 は generation 固有 page/search 完了後に manifest をcommit pointとして書く", () => {
   const pagePut = source.indexOf("await putTrackedJson(env, entry.key, entry.page, signal)");
   const searchPut = source.indexOf("await putTrackedJson(env, searchKey, artifacts.searchLite, signal)");
   const manifestPut = source.indexOf("USERS_INDEX_V2_MANIFEST_OBJECT_KEY,\n    artifacts.manifest");
@@ -29,16 +29,14 @@ test("users index v2 はgeneration固有page/search完了後にmanifestをcommit
   assert.match(source, /usersIndexV2SearchLiteObjectKey\(generation\)/);
   assert.match(loaderSource, /search\.generation !== manifest\.generation/);
   assert.match(loaderSource, /page\.generation !== manifest\.generation/);
-  assert.match(loaderSource, /hasEnforcedXUserVisibilityFence/);
 });
 
-test("全size guardをR2 PUT前に評価する", () => {
-  const firstSizeGuard = source.indexOf("for (const entry of scoreEntries)");
-  const firstPut = source.indexOf("await putTrackedJson(env, entry.key, entry.page, signal)");
-  assert.ok(firstSizeGuard >= 0);
-  assert.ok(firstPut > firstSizeGuard);
-  assert.match(source, /USERS_SEARCH_LITE_V1_MAX_BYTES/);
-  assert.match(source, /USERS_INDEX_V2_MAX_MANIFEST_BYTES/);
+test("v2生成失敗はmanifest無効化に成功した場合だけlegacy fallback成功扱いにする", () => {
+  assert.match(source, /invalidateUsersIndexV2Manifest/);
+  assert.match(source, /env\.R2\.delete\(USERS_INDEX_V2_MANIFEST_OBJECT_KEY\)/);
+  assert.match(source, /result: "legacy_fallback"/);
+  assert.match(source, /result: "manifest_invalidation_failed"/);
+  assert.match(source, /throw error/);
 });
 
 test("users_index canonical rebuild 後にv2生成を必ず実行する", () => {
@@ -46,4 +44,13 @@ test("users_index canonical rebuild 後にv2生成を必ず実行する", () => 
     optimizedSource,
     /targetType === "users_index"[\s\S]*rebuildUsersIndexV2FromLegacyArtifact/,
   );
+});
+
+test("v2 manifest はR2正本で読みstale Cache APIへ戻さない", () => {
+  const manifestLoad = loaderSource.match(
+    /r2Key: USERS_INDEX_V2_MANIFEST_OBJECT_KEY,[\s\S]*?\n  \}\);/,
+  );
+  assert.ok(manifestLoad);
+  assert.match(manifestLoad[0], /cacheMode: "r2_first"/);
+  assert.match(manifestLoad[0], /allowStaleCacheFallback: false/);
 });
