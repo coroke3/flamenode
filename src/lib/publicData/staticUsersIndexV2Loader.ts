@@ -1,11 +1,12 @@
 import "server-only";
 
-import { loadPublicJson, type PublicDataMode } from "./loader";
+import type { PublicDataMode } from "./publicDataMode";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import {
   loadPublicVisibilityBlockedEntitiesManifest,
   resolvePublicVisibilityGuardModeFromEnv,
 } from "./publicVisibilityManifest";
+import { loadStaticJsonFreshStaleUnavailable } from "./staticSharedInputsLoader";
 import {
   normalizeUsersIndexV2Manifest,
   normalizeUsersIndexV2Page,
@@ -37,6 +38,10 @@ function pageMetadata(total: number, requestedPage: number, pageSize: number) {
   return { totalPages, safePage };
 }
 
+function staticModeForStatus(status: "fresh" | "stale"): PublicDataMode {
+  return status === "stale" ? "cached_static" : "static";
+}
+
 async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
   if (resolvePublicVisibilityGuardModeFromEnv() !== "enforce") return false;
   const manifest = await loadPublicVisibilityBlockedEntitiesManifest();
@@ -44,17 +49,10 @@ async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
 }
 
 /**
- * /user 専用のv2 loader。
- * 検索なしは score / works / name を生成済みpage shardから読み、request-time全件sortを避ける。
- * 検索ありだけcompact search-liteをfilterし、score以外はfilter後の候補だけをsortする。
- *
- * manifest は世代切替の唯一のcommit pointなので Cache API の古い値を正本にしない。
- * R2を必ず先に読み、R2からmanifestが消えた場合はstale cacheへ戻さずlegacyへ倒す。
- * page/searchはgeneration固有keyのため通常のCache APIを安全に利用できる。
- *
- * shard単位のfilterだけでは、別pageにblocked X userがいる場合にmanifest.totalが
- * staleなまま残り得る。enforce中にX user fenceが1件でも存在するときはv2を使わず、
- * 全件にfenceを適用できるlegacy users/index.jsonへ戻す。
+ * /user 専用の任意v2 loader。
+ * v2欠損時はD1 probe/degraded fallback/rebuild enqueueへ進まず、即legacyへ戻す。
+ * manifestは唯一のcommit pointなのでCache APIを使わずR2を直接正本として読む。
+ * generation固有page/searchはimmutableなのでCache APIのbounded stale fallbackを許可する。
  */
 export async function loadStaticUsersIndexV2Page(params: {
   page: number;
@@ -62,29 +60,29 @@ export async function loadStaticUsersIndexV2Page(params: {
   q?: string;
 }): Promise<StaticUsersIndexV2PageResult | null> {
   const requestedPage = safeRequestedPage(params.page);
-  const manifestResult = await loadPublicJson<unknown>({
-    r2Key: USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-    targetType: "users_index",
-    targetId: "global",
-    reason: "public_users_index_v2_manifest_miss",
+  const manifestResult = await loadStaticJsonFreshStaleUnavailable({
+    key: USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
+    normalize: normalizeUsersIndexV2Manifest,
+    maxStaleAgeSec: 0,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
-    cacheMode: "r2_first",
-    allowStaleCacheFallback: false,
+    cacheMode: "bypass",
   });
-  const manifest = normalizeUsersIndexV2Manifest(manifestResult.data);
+  const manifest = manifestResult.value;
   if (!manifest || !manifest.sorts.includes(params.sort)) return null;
+
+  // shard単位では別pageのblocked X userをtotalから除外できないため、
+  // enforce中にX user fenceがあれば全件filter可能なlegacyへ戻す。
   if (await hasEnforcedXUserVisibilityFence()) return null;
 
   const query = params.q?.trim() ?? "";
   if (query) {
-    const searchResult = await loadPublicJson<unknown>({
-      r2Key: usersIndexV2SearchLiteObjectKey(manifest.generation),
-      targetType: "users_index",
-      targetId: "global",
-      reason: "public_users_search_lite_miss",
+    const searchResult = await loadStaticJsonFreshStaleUnavailable({
+      key: usersIndexV2SearchLiteObjectKey(manifest.generation),
+      normalize: normalizeUsersSearchLiteV1,
+      maxStaleAgeSec: 24 * 60 * 60,
       cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
     });
-    const search = normalizeUsersSearchLiteV1(searchResult.data);
+    const search = searchResult.value;
     if (
       !search ||
       search.generation !== manifest.generation ||
@@ -110,7 +108,9 @@ export async function loadStaticUsersIndexV2Page(params: {
       totalPages,
       safePage,
       pageSize: manifest.page_size,
-      mode: searchResult.mode,
+      mode: staticModeForStatus(
+        searchResult.status === "stale" ? "stale" : "fresh",
+      ),
     };
   }
 
@@ -119,18 +119,17 @@ export async function loadStaticUsersIndexV2Page(params: {
     requestedPage,
     manifest.page_size,
   );
-  const pageResult = await loadPublicJson<unknown>({
-    r2Key: usersIndexV2PageObjectKey(
+  const pageResult = await loadStaticJsonFreshStaleUnavailable({
+    key: usersIndexV2PageObjectKey(
       manifest.generation,
       params.sort,
       safePage,
     ),
-    targetType: "users_index",
-    targetId: "global",
-    reason: `public_users_index_v2_${params.sort}_page_miss`,
+    normalize: normalizeUsersIndexV2Page,
+    maxStaleAgeSec: 24 * 60 * 60,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
   });
-  const page = normalizeUsersIndexV2Page(pageResult.data);
+  const page = pageResult.value;
   const expectedItems = Math.max(
     0,
     Math.min(
@@ -156,11 +155,12 @@ export async function loadStaticUsersIndexV2Page(params: {
     totalPages,
     safePage,
     pageSize: manifest.page_size,
-    mode: pageResult.mode,
+    mode: staticModeForStatus(
+      pageResult.status === "stale" ? "stale" : "fresh",
+    ),
   };
 }
 
-/** Backward-compatible score helper for isolated callers/tests. */
 export async function loadStaticUsersIndexV2ScorePage(params: {
   page: number;
   q?: string;
