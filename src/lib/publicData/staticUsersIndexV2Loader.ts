@@ -7,14 +7,15 @@ import {
   resolvePublicVisibilityGuardModeFromEnv,
 } from "./publicVisibilityManifest";
 import {
-  filterUsersSearchLiteByQuery,
   normalizeUsersIndexV2Manifest,
-  normalizeUsersIndexV2ScorePage,
+  normalizeUsersIndexV2Page,
   normalizeUsersSearchLiteV1,
+  prepareUsersSearchLiteItems,
   USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-  usersIndexV2ScorePageObjectKey,
+  usersIndexV2PageObjectKey,
   usersIndexV2SearchLiteObjectKey,
   type UsersIndexV2Entry,
+  type UsersIndexV2Sort,
 } from "./staticUsersIndexV2Core";
 
 export type StaticUsersIndexV2PageResult = {
@@ -26,9 +27,13 @@ export type StaticUsersIndexV2PageResult = {
   mode: PublicDataMode;
 };
 
+function safeRequestedPage(page: number): number {
+  return Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+}
+
 function pageMetadata(total: number, requestedPage: number, pageSize: number) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(Math.max(1, requestedPage), totalPages);
+  const safePage = Math.min(safeRequestedPage(requestedPage), totalPages);
   return { totalPages, safePage };
 }
 
@@ -39,8 +44,9 @@ async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
 }
 
 /**
- * score route 専用のv2 loader。
- * manifestが示すgeneration固有のpage/searchだけを読み、世代一致を再確認する。
+ * /user 専用のv2 loader。
+ * 検索なしは score / works / name を生成済みpage shardから読み、request-time全件sortを避ける。
+ * 検索ありだけcompact search-liteをfilterし、score以外はfilter後の候補だけをsortする。
  *
  * manifest は世代切替の唯一のcommit pointなので Cache API の古い値を正本にしない。
  * R2を必ず先に読み、R2からmanifestが消えた場合はstale cacheへ戻さずlegacyへ倒す。
@@ -50,11 +56,12 @@ async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
  * staleなまま残り得る。enforce中にX user fenceが1件でも存在するときはv2を使わず、
  * 全件にfenceを適用できるlegacy users/index.jsonへ戻す。
  */
-export async function loadStaticUsersIndexV2ScorePage(params: {
+export async function loadStaticUsersIndexV2Page(params: {
   page: number;
+  sort: UsersIndexV2Sort;
   q?: string;
 }): Promise<StaticUsersIndexV2PageResult | null> {
-  const requestedPage = Math.max(1, Math.floor(params.page));
+  const requestedPage = safeRequestedPage(params.page);
   const manifestResult = await loadPublicJson<unknown>({
     r2Key: USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
     targetType: "users_index",
@@ -65,7 +72,7 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
     allowStaleCacheFallback: false,
   });
   const manifest = normalizeUsersIndexV2Manifest(manifestResult.data);
-  if (!manifest) return null;
+  if (!manifest || !manifest.sorts.includes(params.sort)) return null;
   if (await hasEnforcedXUserVisibilityFence()) return null;
 
   const query = params.q?.trim() ?? "";
@@ -86,7 +93,11 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
       return null;
     }
 
-    const filtered = filterUsersSearchLiteByQuery(search.items, query);
+    const filtered = prepareUsersSearchLiteItems(
+      search.items,
+      query,
+      params.sort,
+    );
     const { totalPages, safePage } = pageMetadata(
       filtered.length,
       requestedPage,
@@ -109,13 +120,17 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
     manifest.page_size,
   );
   const pageResult = await loadPublicJson<unknown>({
-    r2Key: usersIndexV2ScorePageObjectKey(manifest.generation, safePage),
+    r2Key: usersIndexV2PageObjectKey(
+      manifest.generation,
+      params.sort,
+      safePage,
+    ),
     targetType: "users_index",
     targetId: "global",
-    reason: "public_users_index_v2_page_miss",
+    reason: `public_users_index_v2_${params.sort}_page_miss`,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
   });
-  const page = normalizeUsersIndexV2ScorePage(pageResult.data);
+  const page = normalizeUsersIndexV2Page(pageResult.data);
   const expectedItems = Math.max(
     0,
     Math.min(
@@ -126,6 +141,7 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
   if (
     !page ||
     page.generation !== manifest.generation ||
+    page.sort !== params.sort ||
     page.page !== safePage ||
     page.page_size !== manifest.page_size ||
     page.total !== manifest.total ||
@@ -142,4 +158,12 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
     pageSize: manifest.page_size,
     mode: pageResult.mode,
   };
+}
+
+/** Backward-compatible score helper for isolated callers/tests. */
+export async function loadStaticUsersIndexV2ScorePage(params: {
+  page: number;
+  q?: string;
+}): Promise<StaticUsersIndexV2PageResult | null> {
+  return loadStaticUsersIndexV2Page({ ...params, sort: "score" });
 }
