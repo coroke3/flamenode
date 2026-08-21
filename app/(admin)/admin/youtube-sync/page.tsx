@@ -10,7 +10,6 @@ import { getDatabase } from "@/lib/cloudflare";
 import {
   videos as videosTable,
   videoYoutubeMetadata,
-  xUsers as xUsersTable,
 } from "@/lib/db/schema";
 import { queueYoutubeMetadataResync } from "@/lib/actions/youtube-sync-admin";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
@@ -156,10 +155,6 @@ export default async function AdminYoutubeSyncPage({
       .leftJoin(
         videoYoutubeMetadata,
         eq(videoYoutubeMetadata.video_id, videosTable.id),
-      )
-      .leftJoin(
-        xUsersTable,
-        sql`lower(${xUsersTable.id}) = lower(${videosTable.creator_x_user_id})`,
       )
       .where(conds.length > 0 ? and(...conds) : undefined)
       .orderBy(desc(sql`COALESCE(${videoYoutubeMetadata.updated_at}, ${videosTable.updated_at}, ${videosTable.created_at})`))
