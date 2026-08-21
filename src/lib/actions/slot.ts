@@ -46,6 +46,14 @@ import {
 } from "@/lib/utils/slotGroupingCore";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { enqueueSlotReserveOpsWebhookPostCommit } from "@/lib/actions/slotNotificationsPostCommit";
+import {
+  buildReservationLimitGuardStatement,
+  loadLogicalReservationCountForXId,
+} from "@/lib/slots/slotReservationLimitGuard";
+import {
+  normalizeSlotReservationLimit,
+  slotReservationLimitMessage,
+} from "@/lib/slots/slotReservationLimit";
 
 export interface SlotReserveResult extends PendingPublicReflection {
   ok: boolean;
@@ -123,6 +131,7 @@ function mutationError(error: unknown): SlotReserveResult {
       "連続枠に別の利用者または状態が混在しています。",
       "連続枠の完全な状態を確認できませんでした。",
       `連続枠が上限 ${MAX_ATOMIC_SLOT_ROWS} 件を超えています。運営へ連絡してください。`,
+      `連続枠が上限 ${MAX_SLOTS_PER_VIDEO} 件を超えています。運営へ連絡してください。`,
       "別の部または連続していない枠はまとめて操作できません。",
       "原子的に処理できる枠数を超えています。",
       "連続枠の状態を確定できませんでした。",
@@ -311,8 +320,10 @@ async function commitSlotMutationPlan(args: {
     requestedByUserId: args.actorUserId,
   });
   const extra = args.extraStatements ?? [];
-  const wakeNotification =
-    args.notificationWakeSource ?? (extra.length > 0 ? "web" : undefined);
+  // extraStatements には通知以外の atomic guard も入る。
+  // extra の有無だけで通知 Queue を wake すると無料枠を無駄に消費するため、
+  // 実際に通知 outbox を追加した呼び出しだけ wake する。
+  const wakeNotification = args.notificationWakeSource;
   await mutateWithAudit(args.db, {
     mutationStatements: [
       ...mutationStatements,
@@ -504,6 +515,27 @@ function adoptNullRowPatch(
   return {};
 }
 
+/** 同じpatchを最大2群へまとめ、D1 statement数を枠数比例にしない。 */
+function buildRegroupMutations(
+  rows: readonly SlotRow[],
+  patch: SlotPatch,
+  identity: { targetXId: string | null; adoptNullRows: boolean },
+): SlotBulkMutation[] {
+  const keepRows: SlotRow[] = [];
+  const adoptRows: SlotRow[] = [];
+  for (const row of rows) {
+    if (identity.adoptNullRows && row.x_user_id === null && identity.targetXId !== null) {
+      adoptRows.push(row);
+    } else {
+      keepRows.push(row);
+    }
+  }
+  return [
+    ...(keepRows.length ? [{ rows: keepRows, patch, statusGuard: "reserved" as const }] : []),
+    ...(adoptRows.length ? [{ rows: adoptRows, patch: { ...patch, x_user_id: identity.targetXId }, statusGuard: "reserved" as const }] : []),
+  ];
+}
+
 function orderCondition(row: SlotRow, direction: "forward" | "backward"): SQL {
   const sortOrder = row.sort_order ?? 0;
   if (row.start_time != null) {
@@ -689,6 +721,27 @@ export async function reserveSlot(
       };
     }
 
+    // X ID ごとの上限は新しい logical reservation を作る reserve だけで増える。
+    // 事前チェックは分かりやすいエラー表示用。競合安全性は後段の同一 D1 batch
+    // 内 guard が担保する。Discord-only は X ID 制限の対象外。
+    const xidReservationLimit = operatorOverride
+      ? 0
+      : normalizeSlotReservationLimit(
+          event.max_slot_reservation_groups_per_xid,
+        );
+    if (xidReservationLimit > 0 && identity.snapshotXId) {
+      const currentLogicalReservations = await loadLogicalReservationCountForXId(
+        db,
+        { eventId: anchor.event_id, xIdSnapshot: identity.snapshotXId },
+      );
+      if (currentLogicalReservations >= xidReservationLimit) {
+        return {
+          ok: false,
+          message: slotReservationLimitMessage(xidReservationLimit),
+        };
+      }
+    }
+
     const targetRows = [anchor];
     if (parsed.data.consecutive_count > 1) {
       const candidates = await loadOrderedNeighbors(
@@ -749,21 +802,54 @@ export async function reserveSlot(
       extraStatements.push(channelNotification.statement);
       notificationWakeSource = "web";
     }
-    await commitSlotMutationPlan({
-      db,
-      mutations: [
-        {
-          rows: targetRows,
-          patch: reservePatch,
-          statusGuard: "available",
-        },
-      ],
+    const reservationLimitGuard = buildReservationLimitGuardStatement(db, {
       eventId: anchor.event_id,
-      actorUserId: guard.user.id,
-      reason: "slot_user_reserve",
-      extraStatements,
-      notificationWakeSource,
+      xIdSnapshot: identity.snapshotXId,
+      limit: xidReservationLimit,
     });
+    if (reservationLimitGuard) {
+      // slot UPDATE 後に評価することで、同時 reserve でも上限突破側の
+      // D1 batch 全体（slot / audit / queue / notification）を rollback する。
+      extraStatements.push(reservationLimitGuard);
+    }
+    try {
+      await commitSlotMutationPlan({
+        db,
+        mutations: [
+          {
+            rows: targetRows,
+            patch: reservePatch,
+            statusGuard: "available",
+          },
+        ],
+        eventId: anchor.event_id,
+        actorUserId: guard.user.id,
+        reason: "slot_user_reserve",
+        extraStatements,
+        notificationWakeSource,
+      });
+    } catch (error) {
+      // race で atomic guard に負けた場合だけ再確認し、generic error ではなく
+      // 上限理由を返す。通常成功時の D1 read は増やさない。
+      if (xidReservationLimit > 0 && identity.snapshotXId) {
+        try {
+          const currentLogicalReservations =
+            await loadLogicalReservationCountForXId(db, {
+              eventId: anchor.event_id,
+              xIdSnapshot: identity.snapshotXId,
+            });
+          if (currentLogicalReservations >= xidReservationLimit) {
+            return {
+              ok: false,
+              message: slotReservationLimitMessage(xidReservationLimit),
+            };
+          }
+        } catch {
+          // 元の atomic mutation error を優先する。
+        }
+      }
+      throw error;
+    }
     await runSlotPostCommit("slot.reserve", anchor.event_id);
     return slotMutationOk(anchor.id, targetRows.length);
   } catch (error) {
@@ -937,14 +1023,11 @@ export async function extendOwnSlotGroup(
     await commitSlotMutationPlan({
       db,
       mutations: [
-        ...groupRows.map((row) => ({
-          rows: [row],
-          patch: {
-            reservation_group_id: groupId,
-            ...adoptNullRowPatch(row, identity),
-          },
-          statusGuard: "reserved" as const,
-        })),
+        ...buildRegroupMutations(
+          groupRows,
+          { reservation_group_id: groupId },
+          identity,
+        ),
         {
           rows: [candidate],
           patch: candidatePatch,
@@ -1098,15 +1181,11 @@ export async function mergeOwnSlotGroups(
     await commitSlotMutationPlan({
       db,
       mutations: [
-        ...reservedRows.map((row) => ({
-          rows: [row],
-          patch: {
-            display_name: parsed.data.display_name,
-            reservation_group_id: groupId,
-            ...adoptNullRowPatch(row, identity),
-          },
-          statusGuard: "reserved" as const,
-        })),
+        ...buildRegroupMutations(
+          reservedRows,
+          { display_name: parsed.data.display_name, reservation_group_id: groupId },
+          identity,
+        ),
         {
           rows: [gap],
           patch: gapPatch,

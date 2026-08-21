@@ -3,14 +3,28 @@
 import * as React from "react";
 import styles from "./YoutubeDescriptionPreview.module.css";
 import {
+  YOUTUBE_DESCRIPTION_VARIABLES,
   renderYoutubeDescriptionTemplate,
   type YoutubeDescriptionContext,
+  type YoutubeDescriptionVariableKey,
 } from "@/lib/event/youtubeDescriptionTemplate";
 
 export interface YoutubeDescriptionPreviewProps {
   template: string;
   eventTitle: string;
   context: YoutubeDescriptionContext;
+}
+
+const VARIABLE_LABELS = new Map<YoutubeDescriptionVariableKey, string>(
+  YOUTUBE_DESCRIPTION_VARIABLES.map((variable) => [variable.key, variable.label]),
+);
+
+function variableLabel(key: YoutubeDescriptionVariableKey): string {
+  return VARIABLE_LABELS.get(key) ?? key;
+}
+
+function hasValue(value: unknown): boolean {
+  return value != null && String(value).trim().length > 0;
 }
 
 async function copyText(text: string, textarea: HTMLTextAreaElement | null): Promise<void> {
@@ -39,12 +53,23 @@ export function YoutubeDescriptionPreview({
     () => renderYoutubeDescriptionTemplate(template, context),
     [context, template],
   );
+  const [draftText, setDraftText] = React.useState(rendered.text);
+
+  React.useEffect(() => {
+    setDraftText(rendered.text);
+    setCopyState("idle");
+  }, [rendered.text]);
+
+  const missingVariables = React.useMemo(
+    () => rendered.usedVariables.filter((key) => !hasValue(context[key])),
+    [context, rendered.usedVariables],
+  );
 
   const handleCopy = async () => {
-    if (!rendered.text) return;
+    if (!draftText) return;
     setCopyState("idle");
     try {
-      await copyText(rendered.text, textareaRef.current);
+      await copyText(draftText, textareaRef.current);
       setCopyState("copied");
     } catch {
       setCopyState("error");
@@ -58,27 +83,60 @@ export function YoutubeDescriptionPreview({
           <h3 id="youtube-description-preview-title" className={styles.title}>
             YouTube概要欄（コピー用）
           </h3>
-          <p className={styles.event}>テンプレート: {eventTitle}</p>
+          <p className={styles.event}>イベントテンプレート: {eventTitle}</p>
         </div>
         <button
           type="button"
           className={`fn-btn fn-btn-primary fn-btn-sm ${styles.copyButton}`}
           onClick={handleCopy}
-          disabled={!rendered.text}
+          disabled={!draftText}
         >
           {copyState === "copied" ? "コピーしました" : "概要欄をコピー"}
         </button>
       </div>
+
+      {missingVariables.length > 0 ? (
+        <div className={styles.warning} role="status">
+          <strong>テンプレートで使う情報に未入力があります。</strong>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {missingVariables.map((key) => (
+              <li key={key}>{variableLabel(key)}が未入力です。</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <textarea
         ref={textareaRef}
         className={`fn-input ${styles.textarea}`}
-        value={rendered.text}
-        readOnly
+        value={draftText}
+        onChange={(event) => {
+          setDraftText(event.target.value);
+          setCopyState("idle");
+        }}
         aria-label={`${eventTitle} のYouTube概要欄`}
       />
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <p className={styles.hint} style={{ margin: 0 }}>
+          入力中の作品情報から自動生成しています。ここでの最終調整は作品データには保存されません。
+        </p>
+        {draftText !== rendered.text ? (
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={() => {
+              setDraftText(rendered.text);
+              setCopyState("idle");
+            }}
+          >
+            自動生成に戻す
+          </button>
+        ) : null}
+      </div>
+
       {rendered.unknownVariables.length > 0 ? (
         <p className={styles.warning} role="alert">
-          未知の変数を空欄にしました: {rendered.unknownVariables.map((key) => `{{${key}}}`).join("、")}
+          テンプレートに未登録の変数があります。空欄として出力しました: {rendered.unknownVariables.map((key) => `{{${key}}}`).join("、")}
         </p>
       ) : null}
       {copyState === "error" ? (
@@ -89,11 +147,7 @@ export function YoutubeDescriptionPreview({
         <p className={styles.status} role="status">
           YouTubeの概要欄へ貼り付けできます。
         </p>
-      ) : (
-        <p className={styles.hint}>
-          入力中の作品情報を反映しています。保存前でもコピーできます。
-        </p>
-      )}
+      ) : null}
     </section>
   );
 }

@@ -23,6 +23,8 @@ export interface EventSettingsPreviewValue {
   user_video_edit_permission_keys_json?: string | null;
   video_form_settings_json?: string | null;
   max_slots_per_video?: number | string | null;
+  max_slot_reservation_groups_per_xid?: number | string | null;
+  slot_interval_minutes?: number | string | null;
   slot_type?: string | null;
   slot_visibility_mode?: string | null;
   slot_part_gap_minutes?: number | string | null;
@@ -51,7 +53,6 @@ function visibilityLabel(event: EventSettingsPreviewValue): {
     default:
       return { label: "下書き", className: "fn-badge-soft" };
   }
-  return { label: "非公開・準備中", className: "fn-badge-soft" };
 }
 
 function displayDate(value: number | string | null | undefined): string {
@@ -137,6 +138,7 @@ export function EventSettingsPreview({
   const parts = parseParts(event);
   const slotType = event.slot_type ?? "time";
   const visibility = visibilityLabel(event);
+  const reservationLimit = Number(event.max_slot_reservation_groups_per_xid ?? 0);
 
   return (
     <section
@@ -238,12 +240,7 @@ export function EventSettingsPreview({
             <div style={{ display: "grid", gap: 10 }}>
               {stageQuestions.map((question, index) => (
                 <div key={question.id} style={{ display: "grid", gap: 6 }}>
-                  <span
-                    className={`fn-badge ${
-                      question.required ? "fn-badge-warning" : "fn-badge-soft"
-                    }`}
-                    style={{ justifySelf: "start" }}
-                  >
+                  <span className={`fn-badge ${question.required ? "fn-badge-warning" : "fn-badge-soft"}`} style={{ justifySelf: "start" }}>
                     質問 {index + 1} / {question.required ? "必須" : "任意"}
                   </span>
                   <Field label="ラベル" value={question.label} />
@@ -253,9 +250,7 @@ export function EventSettingsPreview({
               ))}
             </div>
           ) : (
-            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
-              追加質問は表示されません。
-            </p>
+            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>追加質問は表示されません。</p>
           )}
         </article>
 
@@ -266,69 +261,42 @@ export function EventSettingsPreview({
           ) : parts.parts.length > 0 ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {parts.parts.map((part) => (
-                <span key={part} className="fn-badge fn-badge-soft">
-                  {part}
-                </span>
+                <span key={part} className="fn-badge fn-badge-soft">{part}</span>
               ))}
             </div>
           ) : (
-            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
-              部の選択は表示されません。
-            </p>
+            <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>部の選択は表示されません。</p>
           )}
         </article>
 
         <article className="fn-card" style={{ padding: 12 }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>枠設定</h3>
           <div style={{ display: "grid", gap: 6 }}>
+            <Field label="枠タイプ" value={slotType === "count" ? "件数枠" : "時間枠"} />
+            <Field label="確保者表示" value={event.slot_visibility_mode ?? "public_name"} />
+            <Field label="1作品あたり最大枠数" value={event.max_slots_per_video ?? 1} />
             <Field
-              label="枠タイプ"
-              value={slotType === "count" ? "件数枠" : "時間枠"}
+              label="1 X IDあたりの確保上限"
+              value={reservationLimit > 0 ? `${reservationLimit} 件` : "無制限"}
             />
             <Field
-              label="確保者表示"
-              value={event.slot_visibility_mode ?? "public_name"}
+              label="枠同士の間隔"
+              value={event.slot_interval_minutes ? `${event.slot_interval_minutes} 分` : "自動判定"}
             />
-            <Field
-              label="1作品あたり最大枠数"
-              value={event.max_slots_per_video ?? 1}
-            />
-            <Field
-              label="部の分割閾値"
-              value={`${event.slot_part_gap_minutes ?? 15} 分`}
-            />
-            <Field
-              label="見え方"
-              value={
-                slotType === "count"
-                  ? "番号付きの件数枠として表示"
-                  : "開始・終了時刻付きで表示"
-              }
-            />
+            <Field label="部の分割閾値" value={`${event.slot_part_gap_minutes ?? 15} 分`} />
+            <Field label="見え方" value={slotType === "count" ? "番号付きの件数枠として表示" : "開始・終了時刻付きで表示"} />
           </div>
         </article>
 
         <article className="fn-card" style={{ padding: 12 }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>権限・運用設定</h3>
           <div style={{ display: "grid", gap: 6 }}>
-            <Field
-              label="ユーザーの追加紐付け"
-              value={toBool(event.allow_user_video_event_links) ? "許可" : "不許可"}
-            />
-            <Field
-              label="枠なし投稿の紐づけ"
-              value={toBool(event.allow_unslotted_posts) ? "許可" : "不許可"}
-            />
-            <Field
-              label="所有者の一般作品権限"
-              value={toBool(event.allow_user_video_edits) ? "個別指定" : "既定"}
-            />
-            <Field
-              label="許可キー"
-              value={tryJsonSummary(event.user_video_edit_permission_keys_json)}
-            />
-            <Field label="editable_fields" value={tryJsonSummary(event.editable_fields)} />
-            <Field label="review_settings" value={tryJsonSummary(event.review_settings)} />
+            <Field label="ユーザーの追加紐付け" value={toBool(event.allow_user_video_event_links) ? "許可" : "不許可"} />
+            <Field label="枠なし投稿の紐づけ" value={toBool(event.allow_unslotted_posts) ? "許可" : "不許可"} />
+            <Field label="所有者の一般作品権限" value={toBool(event.allow_user_video_edits) ? "個別指定" : "既定"} />
+            <Field label="一般作品の編集許可" value={tryJsonSummary(event.user_video_edit_permission_keys_json)} />
+            <Field label="編集対象フィールド" value={tryJsonSummary(event.editable_fields)} />
+            <Field label="審査設定" value={tryJsonSummary(event.review_settings)} />
           </div>
         </article>
       </div>

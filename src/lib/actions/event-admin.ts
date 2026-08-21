@@ -170,9 +170,6 @@ export async function createEvent(
   if (!parsed.ok) return parsed;
   const data = parsed.data;
   const id = data.id?.trim() || generateId("ev");
-  // The browser applies the same pattern, but this action must not trust a
-  // client-provided FormData. Legacy/imported IDs remain readable/editable;
-  // only newly-created IDs are constrained to route-safe characters.
   if (!EVENT_ID_PATTERN.test(id)) {
     return {
       ok: false,
@@ -206,9 +203,6 @@ export async function createEvent(
   )[0];
   if (duplicate) return { ok: false, message: `ID「${id}」は既に存在します。` };
 
-  // A renamed event leaves a temporary old-ID tombstone. It may be released
-  // only after the retention window and a complete D1/R2 cleanup; otherwise a
-  // new event would be silently hidden by a stale-URL guard.
   const renameTombstone = (
     await db
       .select()
@@ -276,6 +270,9 @@ export async function createEvent(
     entry_start_time: parseDateInput(data.entry_start_time),
     entry_end_time: parseDateInput(data.entry_end_time),
     max_slots_per_video: data.max_slots_per_video,
+    max_slot_reservation_groups_per_xid:
+      data.max_slot_reservation_groups_per_xid,
+    slot_interval_minutes: data.slot_interval_minutes ?? null,
     slot_part_gap_minutes: data.slot_part_gap_minutes,
     slot_type: data.slot_type,
     slot_visibility_mode: data.slot_visibility_mode,
@@ -792,10 +789,6 @@ export async function updateEvent(
       "top.json",
     ]);
   }
-  // Visibility transitions can leave a cached 404/old export on promotion as
-  // well as a stale public payload on depublication. Invalidate both sides
-  // whenever the fence was changed; keep the existing private/settings guard
-  // for updates that were already non-public.
   if (visibilityTransition.fenceToken || after.visibility_status !== "public") {
     await invalidateEventExportCache(data.id);
   }

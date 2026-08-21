@@ -7,6 +7,7 @@ import styles from "./EventForm.module.css";
 import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
 import { createEvent, updateEvent } from "@/lib/actions/event-admin";
 import { PermissionKeysField } from "@/components/admin/PermissionKeysField";
+import { YoutubeDescriptionTemplateEditor } from "@/components/admin/YoutubeDescriptionTemplateEditor";
 import {
   EventSettingsPreview,
   type EventSettingsPreviewValue,
@@ -33,7 +34,6 @@ import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
 } from "@/lib/slots/limits";
-import { YOUTUBE_DESCRIPTION_VARIABLES } from "@/lib/event/youtubeDescriptionTemplate";
 
 export interface EventFormInitial {
   id?: string;
@@ -55,6 +55,8 @@ export interface EventFormInitial {
   user_video_edit_permission_keys_json?: string | null;
   video_form_settings_json?: string | null;
   max_slots_per_video?: number;
+  max_slot_reservation_groups_per_xid?: number;
+  slot_interval_minutes?: number | null;
   slot_type?: "time" | "count";
   slot_visibility_mode?: "public_name" | "anonymous" | "hidden";
   slot_part_gap_minutes?: number | null;
@@ -209,6 +211,9 @@ function initialPreview(initial: EventFormInitial): EventSettingsPreviewValue {
       initial.user_video_edit_permission_keys_json,
     video_form_settings_json: initial.video_form_settings_json,
     max_slots_per_video: initial.max_slots_per_video ?? 1,
+    max_slot_reservation_groups_per_xid:
+      initial.max_slot_reservation_groups_per_xid ?? 0,
+    slot_interval_minutes: initial.slot_interval_minutes ?? null,
     slot_type: initial.slot_type ?? "time",
     slot_visibility_mode: initial.slot_visibility_mode ?? "public_name",
     slot_part_gap_minutes: initial.slot_part_gap_minutes ?? 15,
@@ -247,6 +252,9 @@ function formPreview(
     ),
     video_form_settings_json: buildVideoFormSettingsFromQuestions(questions),
     max_slots_per_video: textValue(formData, "max_slots_per_video") || "1",
+    max_slot_reservation_groups_per_xid:
+      textValue(formData, "max_slot_reservation_groups_per_xid") || "0",
+    slot_interval_minutes: textValue(formData, "slot_interval_minutes") || null,
     slot_type: textValue(formData, "slot_type") || "time",
     slot_visibility_mode:
       textValue(formData, "slot_visibility_mode") || "public_name",
@@ -347,6 +355,8 @@ export function EventForm({
     message: string;
     pendingPublicReflection?: boolean;
   } | null>(null);
+  const [youtubeDescriptionTemplate, setYoutubeDescriptionTemplate] =
+    React.useState(initial.youtube_description_template ?? "");
   const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
     initialPreview(initial),
   );
@@ -355,8 +365,6 @@ export function EventForm({
       const current = getStagePermissionQuestions(
         parseVideoFormSettings(initial.video_form_settings_json),
       );
-      // 質問未設定の新規作成／既存イベントは空欄のまま開始する。
-      // ここで暗黙の1件を追加すると、保存時に意図しない質問が常時作成される。
       return filterImplicitEmptyStagePermissionQuestions(current);
     },
   );
@@ -386,8 +394,14 @@ export function EventForm({
         element.checked = values.includes("1");
       } else if (values.length > 0) {
         element.value = values.shift() ?? "";
+        if (element.name === "youtube_description_template") {
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+        }
       }
     }
+    setYoutubeDescriptionTemplate(
+      textValue(restored, "youtube_description_template"),
+    );
     setQuestions(
       filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
     );
@@ -395,14 +409,13 @@ export function EventForm({
     setDirty(true);
   }, [initial]);
   const draftSnapshot = React.useMemo(() => {
-    // The DOM-backed snapshot must be refreshed when either UI model changes.
-    // Consume both values explicitly so exhaustive-deps documents this deliberate invalidation contract.
     void preview;
     void questions;
+    void youtubeDescriptionTemplate;
     return formRef.current
       ? formDataToDraftValue(new FormData(formRef.current))
       : {};
-  }, [preview, questions]);
+  }, [preview, questions, youtubeDescriptionTemplate]);
   const { clearDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
@@ -525,27 +538,15 @@ export function EventForm({
             {...gatedTextareaProps(canBasic)}
           />
         </div>
-        <div>
-          <label className="fn-label" htmlFor="youtube_description_template">
-            YouTube概要欄テンプレート
-          </label>
-          <p className="fn-text-muted-sm" style={{ margin: "6px 0 8px" }}>
-            作品編集画面でイベントのテンプレートを作品情報に展開し、そのままコピーできます。空欄なら概要欄プレビューは表示されません。
-          </p>
-          <textarea
-            id="youtube_description_template"
-            name="youtube_description_template"
-            defaultValue={initial.youtube_description_template ?? ""}
-            className="fn-input"
-            rows={8}
-            maxLength={10000}
-            placeholder={`{{title}}\n{{event_title}}\n\n{{intro_comment}}\n\n{{youtube_url}}`}
-            {...gatedTextareaProps(canBasic)}
-          />
-          <p className="fn-text-muted-sm" style={{ marginTop: 8 }}>
-            変数: {YOUTUBE_DESCRIPTION_VARIABLES.map(({ key }) => `{{${key}}}`).join(" ・ ")}
-          </p>
-        </div>
+        <YoutubeDescriptionTemplateEditor
+          value={youtubeDescriptionTemplate}
+          onChange={(next) => {
+            setYoutubeDescriptionTemplate(next);
+            setDirty(true);
+          }}
+          eventTitle={preview.title}
+          disabled={!canBasic}
+        />
         <div className={styles.formGrid2}>
           <div>
             <label className="fn-label">アイコンURL</label>
@@ -693,25 +694,9 @@ export function EventForm({
               style={{ padding: 12, display: "grid", gap: 10 }}
             >
               <input type="hidden" name="custom_question_id" value={question.id} />
-              <input
-                type="hidden"
-                name="custom_question_enabled"
-                value={question.enabled ? "1" : "0"}
-              />
-              <input
-                type="hidden"
-                name="custom_question_required"
-                value={question.required ? "1" : "0"}
-              />
-              <header
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                  flexWrap: "wrap",
-                }}
-              >
+              <input type="hidden" name="custom_question_enabled" value={question.enabled ? "1" : "0"} />
+              <input type="hidden" name="custom_question_required" value={question.required ? "1" : "0"} />
+              <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <strong>質問 {index + 1}</strong>
                 <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                   <label>
@@ -719,34 +704,16 @@ export function EventForm({
                       type="checkbox"
                       checked={question.enabled}
                       disabled={!canQuestions}
-                      onChange={(event) =>
-                        setQuestions((current) =>
-                          current.map((item) =>
-                            item.id === question.id
-                              ? { ...item, enabled: event.target.checked }
-                              : item,
-                          ),
-                        )
-                      }
-                    />{" "}
-                    表示
+                      onChange={(event) => setQuestions((current) => current.map((item) => item.id === question.id ? { ...item, enabled: event.target.checked } : item))}
+                    />{" "}表示
                   </label>
                   <label>
                     <input
                       type="checkbox"
                       checked={question.required}
                       disabled={!canQuestions}
-                      onChange={(event) =>
-                        setQuestions((current) =>
-                          current.map((item) =>
-                            item.id === question.id
-                              ? { ...item, required: event.target.checked }
-                              : item,
-                          ),
-                        )
-                      }
-                    />{" "}
-                    必須
+                      onChange={(event) => setQuestions((current) => current.map((item) => item.id === question.id ? { ...item, required: event.target.checked } : item))}
+                    />{" "}必須
                   </label>
                   <button
                     type="button"
@@ -754,9 +721,7 @@ export function EventForm({
                     disabled={!canQuestions}
                     onClick={() => {
                       setDirty(true);
-                      setQuestions((current) =>
-                        current.filter((item) => item.id !== question.id),
-                      );
+                      setQuestions((current) => current.filter((item) => item.id !== question.id));
                     }}
                   >
                     <Icon name="trash" size={12} aria-hidden /> 削除
@@ -766,11 +731,7 @@ export function EventForm({
               {(["label", "description", "placeholder"] as const).map((key) => (
                 <div key={key}>
                   <label className="fn-label">
-                    {key === "label"
-                      ? "質問名"
-                      : key === "description"
-                        ? "補足文"
-                        : "入力例"}
+                    {key === "label" ? "質問名" : key === "description" ? "補足文" : "入力例"}
                   </label>
                   {key === "description" ? (
                     <textarea
@@ -778,35 +739,15 @@ export function EventForm({
                       value={question.description}
                       readOnly={!canQuestions}
                       className="fn-input"
-                      onChange={(event) =>
-                        setQuestions((current) =>
-                          current.map((item) =>
-                            item.id === question.id
-                              ? { ...item, description: event.target.value }
-                              : item,
-                          ),
-                        )
-                      }
+                      onChange={(event) => setQuestions((current) => current.map((item) => item.id === question.id ? { ...item, description: event.target.value } : item))}
                     />
                   ) : (
                     <input
-                      name={
-                        key === "label"
-                          ? "custom_question_label"
-                          : "custom_question_placeholder"
-                      }
+                      name={key === "label" ? "custom_question_label" : "custom_question_placeholder"}
                       value={question[key]}
                       readOnly={!canQuestions}
                       className="fn-input"
-                      onChange={(event) =>
-                        setQuestions((current) =>
-                          current.map((item) =>
-                            item.id === question.id
-                              ? { ...item, [key]: event.target.value }
-                              : item,
-                          ),
-                        )
-                      }
+                      onChange={(event) => setQuestions((current) => current.map((item) => item.id === question.id ? { ...item, [key]: event.target.value } : item))}
                     />
                   )}
                 </div>
@@ -838,9 +779,7 @@ export function EventForm({
           <Icon name="plus" size={13} aria-hidden /> 質問を追加
         </button>
         {questions.length >= MAX_STAGE_PERMISSION_QUESTIONS ? (
-          <p className="fn-hint">
-            ステージ・権利確認質問は最大{MAX_STAGE_PERMISSION_QUESTIONS}件です
-          </p>
+          <p className="fn-hint">ステージ・権利確認質問は最大{MAX_STAGE_PERMISSION_QUESTIONS}件です</p>
         ) : null}
       </FormSection>
 
@@ -848,11 +787,7 @@ export function EventForm({
         <div className={styles.formGrid2}>
           <div>
             <label className="fn-label">枠タイプ</label>
-            <GatedSelect
-              allowed={canSlots}
-              name="slot_type"
-              defaultValue={initial.slot_type ?? "time"}
-            >
+            <GatedSelect allowed={canSlots} name="slot_type" defaultValue={initial.slot_type ?? "time"}>
               <option value="time">時間枠</option>
               <option value="count">件数枠</option>
             </GatedSelect>
@@ -868,21 +803,42 @@ export function EventForm({
               className="fn-input"
               {...gatedInputProps(canSlots)}
             />
-            <p className="fn-muted fn-text-sm">
-              1つの作品で連続して確保・使用できる枠数の上限です。1〜20枠で設定できます。
-            </p>
+            <p className="fn-muted fn-text-sm">1つの作品で連続して確保・使用できる枠数の上限です。1〜20枠で設定できます。</p>
+          </div>
+          <div>
+            <label className="fn-label">1 X IDあたりの確保上限</label>
+            <input
+              name="max_slot_reservation_groups_per_xid"
+              type="number"
+              min={0}
+              max={100}
+              defaultValue={initial.max_slot_reservation_groups_per_xid ?? 0}
+              className="fn-input"
+              {...gatedInputProps(canSlots)}
+            />
+            <p className="fn-muted fn-text-sm">単枠は1件、連続枠は複数枠使用していても1件として数えます。0は無制限です。</p>
           </div>
           <div>
             <label className="fn-label">確保者表示</label>
-            <GatedSelect
-              allowed={canSlots}
-              name="slot_visibility_mode"
-              defaultValue={initial.slot_visibility_mode ?? "public_name"}
-            >
+            <GatedSelect allowed={canSlots} name="slot_visibility_mode" defaultValue={initial.slot_visibility_mode ?? "public_name"}>
               <option value="public_name">公開名</option>
               <option value="anonymous">匿名</option>
               <option value="hidden">非表示</option>
             </GatedSelect>
+          </div>
+          <div>
+            <label className="fn-label">枠同士の間隔（分）</label>
+            <input
+              name="slot_interval_minutes"
+              type="number"
+              min={1}
+              max={1440}
+              defaultValue={initial.slot_interval_minutes ?? ""}
+              className="fn-input"
+              placeholder="自動判定"
+              {...gatedInputProps(canSlots)}
+            />
+            <p className="fn-muted fn-text-sm">連続枠の案内文に使います。空欄の場合は実際の枠時刻から自動判定します。</p>
           </div>
           <div>
             <label className="fn-label">部の分割閾値（分）</label>
@@ -911,29 +867,15 @@ export function EventForm({
       </FormSection>
 
       {error ? <p className="fn-error">{error}</p> : null}
-      {success ? (
-        <SaveSuccessNotice
-          message={success.message}
-          pendingPublicReflection={success.pendingPublicReflection}
-        />
-      ) : null}
+      {success ? <SaveSuccessNotice message={success.message} pendingPublicReflection={success.pendingPublicReflection} /> : null}
 
       {isManage ? (
-        <div
-          className={`${styles.manageSaveBar}${dirty ? ` ${styles.manageSaveBarDirty}` : ""}`}
-          role="status"
-        >
-          <span className={styles.manageSaveBarStatus}>
-            {dirty ? "未保存の変更があります" : "保存済み"}
-          </span>
-          <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
-            {submitLabel}
-          </button>
+        <div className={`${styles.manageSaveBar}${dirty ? ` ${styles.manageSaveBarDirty}` : ""}`} role="status">
+          <span className={styles.manageSaveBarStatus}>{dirty ? "未保存の変更があります" : "保存済み"}</span>
+          <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>{submitLabel}</button>
         </div>
       ) : (
-        <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>
-          {submitLabel}
-        </button>
+        <button type="submit" className="fn-btn fn-btn-primary" disabled={busy}>{submitLabel}</button>
       )}
 
       {isManage ? (

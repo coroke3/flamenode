@@ -33,6 +33,11 @@ import type { SlotViewerRelation } from "@/lib/slots/slotIdentityCore";
 import { redirectForGuardReason as redirectForGuard } from "@/lib/client/guardRedirect";
 import { normalizeXId } from "@/lib/utils/xid";
 import { computeFloatingMenuPosition } from "@/lib/ui/floatingMenuPosition";
+import { buildConsecutiveSlotGuidance } from "@/lib/slots/slotGuidance";
+import {
+  normalizeSlotReservationLimit,
+  slotReservationLimitMessage,
+} from "@/lib/slots/slotReservationLimit";
 import styles from "./SlotGrid.module.css";
 
 export interface SlotRow {
@@ -63,6 +68,10 @@ export interface SlotGridProps {
   canPost?: boolean;
   slotType: "time" | "count";
   maxSlotsPerVideo?: number;
+  /** 1 X ID あたりの logical reservation 上限。0 は無制限。 */
+  maxSlotReservationsPerXId?: number;
+  /** 連続枠ガイダンス用の実際の枠間隔。time型で判定不能なら null。 */
+  slotIntervalSec?: number | null;
   /** event.slots を持つ運営スタッフ／adminの例外予約を許可する表示フラグ。 */
   operatorOverrideAllowed?: boolean;
   /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 15 分。 */
@@ -184,6 +193,8 @@ export function SlotGrid({
   canPost = true,
   slotType,
   maxSlotsPerVideo = 1,
+  maxSlotReservationsPerXId = 0,
+  slotIntervalSec = null,
   slotPartGapSec,
   operatorOverrideAllowed = false,
 }: SlotGridProps): React.ReactElement {
@@ -217,6 +228,12 @@ export function SlotGrid({
     ? MAX_SLOTS_PER_VIDEO
     : eventMaxSlots;
   const slotGapSec = slotPartGapSec ?? 15 * 60;
+  const xidReservationLimit = normalizeSlotReservationLimit(
+    maxSlotReservationsPerXId,
+  );
+  const consecutiveGuidance = buildConsecutiveSlotGuidance(
+    slotType === "time" ? slotIntervalSec : null,
+  );
 
   const redirectForGuardReason = React.useCallback(
     (reason?: string): boolean => {
@@ -1297,8 +1314,14 @@ export function SlotGrid({
                   ))}
                 </select>
                 <p className={styles.reserveDialogHint}>
-                  連続枠は空きが隣接している場合だけまとめて確保されます。上限は {eventMaxSlots} 枠です。
+                  {consecutiveGuidance} 連続上限は {eventMaxSlots} 枠です。
                 </p>
+                {Number(reserveCount) >= 2 ? (
+                  <p className={styles.reserveDialogHint}>
+                    <strong>この選択は1作品分です。</strong>{" "}
+                    別作品を投稿する場合は、作品ごとに別の枠を確保してください。
+                  </p>
+                ) : null}
                 {operatorOverrideAllowed &&
                 (!canReserve || Number(reserveCount) > eventMaxSlots) ? (
                   <p role="alert" className={styles.reserveDialogHint}>
@@ -1324,6 +1347,11 @@ export function SlotGrid({
                 取得名義:{" "}
                 <strong>{reserveDisplayName.trim() || "未入力"}</strong>
               </p>
+              {viewerXId && xidReservationLimit > 0 ? (
+                <p className={styles.reserveDialogHint}>
+                  {slotReservationLimitMessage(xidReservationLimit)}
+                </p>
+              ) : null}
               {viewerXId ? (
                 <p className={styles.reserveDialogHint}>
                   取得 X ID: <strong>@{viewerXId}</strong>

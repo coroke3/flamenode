@@ -89,6 +89,9 @@ export function buildEventUpdatePayload(args: {
   if (permissions.slots) {
     Object.assign(updatePayload, {
       max_slots_per_video: data.max_slots_per_video,
+      max_slot_reservation_groups_per_xid:
+        data.max_slot_reservation_groups_per_xid,
+      slot_interval_minutes: data.slot_interval_minutes ?? null,
       slot_part_gap_minutes: data.slot_part_gap_minutes,
       slot_type: data.slot_type,
       slot_visibility_mode: data.slot_visibility_mode,

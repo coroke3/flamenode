@@ -79,6 +79,17 @@ export const eventSchema = z.object({
     .min(MIN_SLOTS_PER_VIDEO)
     .max(MAX_SLOTS_PER_VIDEO)
     .default(MIN_SLOTS_PER_VIDEO),
+  max_slot_reservation_groups_per_xid: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .default(0),
+  slot_interval_minutes: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? null : value,
+    z.coerce.number().int().min(1).max(1440).nullable().optional(),
+  ),
   slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(15),
   slot_type: z.enum(["time", "count"]).default("time"),
   slot_visibility_mode: z
