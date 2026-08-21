@@ -289,7 +289,7 @@ export default async function AdminYoutubePlaylistSyncPage({
                 return (
                   <tr key={row.event_id}>
                     <td>
-                      <Link href={`/manage/events/${row.event_id}`} style={{ fontWeight: 700 }}>
+                      <Link href={`/manage/events/${encodeURIComponent(row.event_id)}`} style={{ fontWeight: 700 }}>
                         {row.event_title}
                       </Link>
                       <div className="fn-muted fn-text-xs fn-mono">{row.event_id}</div>
@@ -330,7 +330,7 @@ export default async function AdminYoutubePlaylistSyncPage({
                     <td>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         <Link
-                          href={`/manage/events/${row.event_id}/youtube-playlist`}
+                          href={`/manage/events/${encodeURIComponent(row.event_id)}/youtube-playlist`}
                           className="fn-btn fn-btn-ghost fn-btn-sm"
                         >
                           設定

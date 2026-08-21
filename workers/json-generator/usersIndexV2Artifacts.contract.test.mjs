@@ -20,15 +20,33 @@ const pageSource = await readFile(
 );
 
 test("users index v2 は3 sortのgeneration固有page/search完了後にmanifestをcommitする", () => {
-  const pagePut = source.indexOf("await putTrackedJson(env, entry.key, entry.page, signal)");
-  const searchPut = source.indexOf("await putTrackedJson(env, searchKey, artifacts.searchLite, signal)");
-  const manifestPut = source.indexOf("USERS_INDEX_V2_MANIFEST_OBJECT_KEY,\n    artifacts.manifest");
+  const pagePut = source.search(
+    /await putTrackedJson\(\s*env,\s*entry\.key,\s*entry\.page,\s*signal/,
+  );
+  const searchPut = source.search(
+    /await putTrackedJson\(\s*env,\s*searchKey,\s*artifacts\.searchLite,\s*signal/,
+  );
+  const manifestPut = source.search(
+    /await putTrackedJson\(\s*env,\s*USERS_INDEX_V2_MANIFEST_OBJECT_KEY,\s*artifacts\.manifest/,
+  );
   const reconcile = source.indexOf("await reconcileTrackedArtifacts(env, liveKeys, signal)");
+  const manifestRecord = source.search(
+    /await recordArtifacts\(env,\s*\[manifestArtifact\],\s*signal\)/,
+  );
 
   assert.ok(pagePut >= 0);
   assert.ok(searchPut > pagePut);
   assert.ok(manifestPut > searchPut);
-  assert.ok(reconcile > manifestPut);
+  assert.ok(manifestRecord > manifestPut);
+  assert.ok(reconcile > manifestRecord);
+  assert.match(
+    source,
+    /liveKeys\.push\(entry\.key\);\s*await flushPendingArtifacts\(\);/,
+  );
+  assert.match(
+    source,
+    /liveKeys\.push\(searchKey\);[\s\S]*?await flushPendingArtifacts\(true\);[\s\S]*?const manifestArtifact/,
+  );
   assert.match(source, /artifacts\.scorePages/);
   assert.match(source, /artifacts\.worksPages/);
   assert.match(source, /artifacts\.namePages/);

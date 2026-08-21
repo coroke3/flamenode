@@ -409,7 +409,7 @@ export default async function AdminNotificationsPage({
                         </span>
                         {row.event_id ? (
                           <div style={{ fontSize: 10, marginTop: 6, wordBreak: "break-all" }}>
-                            <Link href={`/manage/events/${row.event_id}`}>
+                            <Link href={`/manage/events/${encodeURIComponent(row.event_id)}`}>
                               {row.event_id.slice(0, 10)}…
                             </Link>
                           </div>

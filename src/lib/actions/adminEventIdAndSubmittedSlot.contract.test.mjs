@@ -86,5 +86,8 @@ test("event ID rename control is rendered inside the admin danger section", () =
     adminEditSource,
     /redirect\(`\/manage\/events\/\$\{encodeURIComponent\(id\)\}\/edit`\)/,
   );
-  assert.match(adminListSource, /href=\{`\/manage\/events\/\$\{ev\.id\}\/edit`\}/);
+  assert.match(
+    adminListSource,
+    /href=\{`\/manage\/events\/\$\{encodeURIComponent\(ev\.id\)\}\/edit`\}/,
+  );
 });

@@ -64,6 +64,7 @@ export default async function ManageEventSlotsPage({
 
   const event = await getManageEventForRender(id);
   if (!event) notFound();
+  const eventHrefId = encodeURIComponent(id);
   const isAdmin = guard.user.role === "admin";
   const authorization = await getManageAuthorizationSnapshot(
     guard.user.id,
@@ -125,7 +126,7 @@ export default async function ManageEventSlotsPage({
       eventId={id}
       title={event.title}
       description={`枠管理 — 全${total}件中、最大500件を表示`}
-      backHref={`/manage/events/${id}`}
+      backHref={`/manage/events/${eventHrefId}`}
       backLabel="イベント概要へ"
       isAdmin={isAdmin}
       pendingCount={pendingCount}
@@ -136,8 +137,8 @@ export default async function ManageEventSlotsPage({
           const count = key === "all" ? total : (counts[key] ?? 0);
           const href =
             key === "all"
-              ? `/manage/events/${id}/slots`
-              : `/manage/events/${id}/slots?status=${key}`;
+              ? `/manage/events/${eventHrefId}/slots`
+              : `/manage/events/${eventHrefId}/slots?status=${key}`;
           return (
             <Link
               key={key}
@@ -169,7 +170,7 @@ export default async function ManageEventSlotsPage({
             description="上のフォームから作成してください。"
             actions={[
               {
-                href: `/manage/events/${id}`,
+                href: `/manage/events/${eventHrefId}`,
                 label: "イベント概要へ",
                 variant: "ghost",
               },

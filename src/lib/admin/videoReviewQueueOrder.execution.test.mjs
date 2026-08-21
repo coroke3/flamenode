@@ -8,6 +8,7 @@ if (runTestWithTsx(import.meta.url)) {
   const {
     attachApproveAndNextHref,
     adminReviewQueueFallbackHref,
+    manageReviewQueueFallbackHref,
     buildReviewDetailHref,
     resolveApproveAndNextHref,
     findNextPendingReviewVideoId,
@@ -135,6 +136,14 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(
       buildReviewDetailHref("video-next", { adminEventFilter: "event-a" }),
       "/admin/videos/video-next?event=event-a",
+    );
+    assert.equal(
+      buildReviewDetailHref("video-next", { eventId: "legacy/import?event" }),
+      "/manage/events/legacy%2Fimport%3Fevent/videos/video-next",
+    );
+    assert.equal(
+      manageReviewQueueFallbackHref("legacy/import?event"),
+      "/manage/events/legacy%2Fimport%3Fevent/videos?status=review",
     );
     assert.equal(
       resolveApproveAndNextHref(null, { adminEventFilter: "event-a" }),

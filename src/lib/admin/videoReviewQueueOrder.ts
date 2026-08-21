@@ -58,7 +58,7 @@ export function adminReviewQueueFallbackHref(adminEventFilter?: string): string 
 }
 
 export function manageReviewQueueFallbackHref(eventId: string): string {
-  return `/manage/events/${eventId}/videos?status=review`;
+  return `/manage/events/${encodeURIComponent(eventId)}/videos?status=review`;
 }
 
 export function buildReviewDetailHref(
@@ -66,7 +66,7 @@ export function buildReviewDetailHref(
   scope?: ReviewQueueScope,
 ): string {
   if (scope?.eventId) {
-    return `/manage/events/${scope.eventId}/videos/${videoId}`;
+    return `/manage/events/${encodeURIComponent(scope.eventId)}/videos/${videoId}`;
   }
   if (scope?.adminEventFilter) {
     return `/admin/videos/${videoId}?event=${encodeURIComponent(scope.adminEventFilter)}`;

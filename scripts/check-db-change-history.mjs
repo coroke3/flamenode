@@ -21,13 +21,17 @@ const ALLOWED_TYPES = new Set([
 ]);
 const ALLOWED_DATA_LOSS = new Set(["none", "possible", "intentional"]);
 
-function metadataValue(body, key) {
+function metadataValue(body, key, sidecarBody = "") {
   const match = body.match(new RegExp(`^--\\s*${key}:\\s*(.+?)\\s*$`, "mi"));
-  return match?.[1]?.trim() ?? "";
+  if (match?.[1]?.trim()) return match[1].trim();
+  // Applied migrations are immutable. Their metadata may be kept in the
+  // corresponding active history document instead of changing the SQL file.
+  const sidecarMatch = sidecarBody.match(new RegExp(`^>\\s*${key}:\\s*(.+?)\\s*$`, "mi"));
+  return sidecarMatch?.[1]?.trim() ?? "";
 }
 
-function assertMetadata(migrationName, body, key) {
-  const value = metadataValue(body, key);
+function assertMetadata(migrationName, body, key, sidecarBody = "") {
+  const value = metadataValue(body, key, sidecarBody);
   if (!value) errors.push(`${migrationName}: -- ${key}: がありません。`);
   return value;
 }
@@ -111,14 +115,16 @@ const changeLog = readChangeLogCorpus();
 
 for (const migrationName of migrationFiles) {
   const body = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
-  const declaredMigration = assertMetadata(migrationName, body, "Migration");
-  const date = assertMetadata(migrationName, body, "Date");
-  const type = assertMetadata(migrationName, body, "Type").toLowerCase();
-  const summary = assertMetadata(migrationName, body, "Summary");
-  const dataLossRaw = assertMetadata(migrationName, body, "Data loss").toLowerCase();
+  const detailPath = path.join(historyDir, migrationName.replace(/\.sql$/, ".md"));
+  const detail = fs.existsSync(detailPath) ? fs.readFileSync(detailPath, "utf8") : "";
+  const declaredMigration = assertMetadata(migrationName, body, "Migration", detail);
+  const date = assertMetadata(migrationName, body, "Date", detail);
+  const type = assertMetadata(migrationName, body, "Type", detail).toLowerCase();
+  const summary = assertMetadata(migrationName, body, "Summary", detail);
+  const dataLossRaw = assertMetadata(migrationName, body, "Data loss", detail).toLowerCase();
   const dataLoss = dataLossRaw.match(/^(none|possible|intentional)\b/)?.[1] ?? dataLossRaw;
-  const rollback = assertMetadata(migrationName, body, "Rollback");
-  const changeLogReference = assertMetadata(migrationName, body, "Change log");
+  const rollback = assertMetadata(migrationName, body, "Rollback", detail);
+  const changeLogReference = assertMetadata(migrationName, body, "Change log", detail);
 
   if (declaredMigration && declaredMigration !== migrationName) {
     errors.push(`${migrationName}: -- Migration: はファイル名と一致させてください。現在=${declaredMigration}`);
@@ -152,12 +158,10 @@ for (const migrationName of migrationFiles) {
   if (occurrences === 0) errors.push(`${migrationName}: change-log corpusに対応項目がありません。`);
   if (occurrences > 1) errors.push(`${migrationName}: change-log corpusに重複項目があります。`);
 
-  const detailPath = path.join(historyDir, migrationName.replace(/\.sql$/, ".md"));
   if (!fs.existsSync(detailPath)) {
     errors.push(`${migrationName}: ${path.relative(root, detailPath)} がありません。`);
     continue;
   }
-  const detail = fs.readFileSync(detailPath, "utf8");
   if (!/Status:\s*Active/i.test(detail)) {
     errors.push(`${migrationName}: DB履歴文書をStatus: Activeにしてください。`);
   }

@@ -90,6 +90,7 @@ export default async function ManageEventVideosPage({
   if (!canAccessManageEventFromSnapshot(authorization, id)) notFound();
   const ev = navigation.events.find((event) => event.id === id);
   if (!ev) notFound();
+  const eventHrefId = encodeURIComponent(id);
   const canApproveVideoStatus = canEditEventFromSnapshot(
     authorization,
     id,
@@ -149,7 +150,7 @@ export default async function ManageEventVideosPage({
       eventId={id}
       title={ev.title}
       description={`作品・審査 — ${rows.length} 件（${filterLabel}）`}
-      backHref={`/manage/events/${id}`}
+      backHref={`/manage/events/${eventHrefId}`}
       backLabel="イベント概要へ"
       isAdmin={isAdmin}
       pendingCount={pendingCount}
@@ -162,7 +163,7 @@ export default async function ManageEventVideosPage({
         {STATUS_FILTERS.map((f) => {
           const active =
             f.value === "all" ? statusFilter === "" : f.value === activeStatusGroup;
-          const href = `/manage/events/${id}/videos?status=${encodeURIComponent(f.value)}`;
+          const href = `/manage/events/${eventHrefId}/videos?status=${encodeURIComponent(f.value)}`;
           return (
             <Link
               key={f.value}
@@ -190,9 +191,9 @@ export default async function ManageEventVideosPage({
           }
           iconName={isReviewFilter ? "check" : "info"}
           actions={[
-            { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
+            { href: `/event/${eventHrefId}`, label: "公開ページを見る", variant: "primary" },
             {
-              href: `/manage/events/${id}`,
+              href: `/manage/events/${eventHrefId}`,
               label: "イベント概要へ",
               variant: "ghost",
             },
@@ -202,7 +203,9 @@ export default async function ManageEventVideosPage({
         <VideoReviewQueueTable
           rows={rows}
           variant="manage"
-          reviewHref={(videoId) => `/manage/events/${id}/videos/${videoId}`}
+          reviewHref={(videoId) =>
+            `/manage/events/${eventHrefId}/videos/${encodeURIComponent(videoId)}`
+          }
           contentHref={(videoId) => `/dashboard/edit/${videoId}?privileged=event`}
           canApprove={canApproveVideoStatus}
           quickApproveAction={approveManageVideoPublic}

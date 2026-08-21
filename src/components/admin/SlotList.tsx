@@ -130,7 +130,7 @@ export function SlotList({
 
   const videoHref = (videoId: string): string =>
     isManage
-      ? `/manage/events/${eventId}/videos/${videoId}`
+      ? `/manage/events/${encodeURIComponent(eventId)}/videos/${encodeURIComponent(videoId)}`
       : `/admin/videos/${videoId}`;
 
   if (slots.length === 0) {

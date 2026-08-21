@@ -61,6 +61,7 @@ export default async function ManageEventAudiencePage({
   const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
   const ev = navigation.events.find((event) => event.id === id);
   if (!ev) notFound();
+  const eventHrefId = encodeURIComponent(id);
   const permissions = isAdmin
     ? new Set<string>()
     : getEventPermissionsFromSnapshot(authorization, id);
@@ -187,7 +188,7 @@ export default async function ManageEventAudiencePage({
       eventId={id}
       title={ev.title}
       description={`登録者プレビュー — ${audience.length} 名（読み取り専用）`}
-      backHref={`/manage/events/${id}`}
+      backHref={`/manage/events/${eventHrefId}`}
       backLabel="イベント概要へ"
       isAdmin={isAdmin}
       pendingCount={pendingCount}
@@ -199,9 +200,9 @@ export default async function ManageEventAudiencePage({
           title="登録者はまだいません"
           description="このイベントで枠を確保した、または作品を提出した X ID がここに表示されます。"
           actions={[
-            { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
+            { href: `/event/${eventHrefId}`, label: "公開ページを見る", variant: "primary" },
             {
-              href: `/manage/events/${id}`,
+              href: `/manage/events/${eventHrefId}`,
               label: "イベント概要へ",
               variant: "ghost",
             },

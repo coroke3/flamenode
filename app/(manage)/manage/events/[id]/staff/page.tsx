@@ -54,6 +54,7 @@ export default async function ManageEventStaffPage({
   const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
   const event = navigation.events.find((item) => item.id === id);
   if (!event) notFound();
+  const eventHrefId = encodeURIComponent(id);
   const currentPermissions = isAdmin
     ? new Set<string>()
     : getEventPermissionsFromSnapshot(authorization, id);
@@ -120,13 +121,13 @@ export default async function ManageEventStaffPage({
       eventId={id}
       title={event.title}
       description="権限は担当プリセット、公開ページの肩書は公開肩書から解決します。"
-      backHref={`/manage/events/${id}`}
+      backHref={`/manage/events/${eventHrefId}`}
       backLabel="イベント概要へ"
       isAdmin={isAdmin}
       pendingCount={pendingCount}
       accentStyle={manageEventAccentStyle(event.accent_color)}
       actions={[
-        { href: `/event/${id}`, label: "公開ページを見る", variant: "primary" },
+        { href: `/event/${eventHrefId}`, label: "公開ページを見る", variant: "primary" },
       ]}
     >
       <section

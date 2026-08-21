@@ -196,7 +196,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
                   </span>
                 </td>
                 <td>
-                  <Link href={`/manage/events/${row.event_id}`}>
+                  <Link href={`/manage/events/${encodeURIComponent(row.event_id)}`}>
                     {row.event_title}
                   </Link>
                   <div className="fn-muted" style={{ marginTop: 4, fontSize: 11 }}>

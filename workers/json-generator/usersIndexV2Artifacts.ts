@@ -33,6 +33,11 @@ const USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION = 2;
 const USERS_INDEX_V2_GENERATION_LAYOUT_VERSION = 2;
 /** R2 bulk delete は1000 keys/callまで。1回のrebuild cleanupはさらに小さく抑える。 */
 const USERS_INDEX_V2_CLEANUP_LIMIT = 500;
+/**
+ * Each row uses seven bind variables. Keep every multi-row INSERT below D1's
+ * 100-parameter limit (12 * 7 = 84), leaving room for future fixed binds.
+ */
+const USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE = 12;
 
 type Env = {
   DB: D1Database;
@@ -44,6 +49,11 @@ type RebuildSignal = AbortSignal | undefined;
 
 type TrackedArtifactRow = {
   object_key: string;
+};
+
+type PendingArtifact = {
+  objectKey: string;
+  contentHash: string;
 };
 
 function throwIfAborted(signal: RebuildSignal): void {
@@ -83,53 +93,19 @@ function emptyLegacyGeneratedAt(payload: unknown): number | null {
   return Math.floor(generatedAt);
 }
 
-async function recordArtifact(
-  env: Env,
-  objectKey: string,
-  serialized: string,
-  signal?: RebuildSignal,
-): Promise<void> {
-  throwIfAborted(signal);
-  const contentHash = await staticArtifactContentHash(serialized);
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  const id = `sta:${USERS_INDEX_V2_ARTIFACT_TARGET_TYPE}:${USERS_INDEX_V2_ARTIFACT_TARGET_ID}:${objectKey}`;
-  await env.DB.prepare(
-    `INSERT INTO static_artifacts
-       (id, target_type, target_id, object_key, content_hash, schema_version,
-        source_updated_at, generated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)
-     ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
-       content_hash = excluded.content_hash,
-       schema_version = excluded.schema_version,
-       source_updated_at = NULL,
-       generated_at = excluded.generated_at,
-       deleted_at = NULL`,
-  )
-    .bind(
-      id,
-      USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
-      USERS_INDEX_V2_ARTIFACT_TARGET_ID,
-      objectKey,
-      contentHash,
-      USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION,
-      now,
-    )
-    .run();
-  env.artifactHashCache?.set(objectKey, contentHash);
-  throwIfAborted(signal);
-}
-
 async function putTrackedJson(
   env: Env,
   key: string,
   body: unknown,
   signal?: RebuildSignal,
-): Promise<void> {
+  options?: { deduplicate?: boolean },
+): Promise<PendingArtifact> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
-  const identical = await resolveIdenticalJsonArtifactPut(env, key, serialized);
+  const identical = options?.deduplicate === false
+    ? null
+    : await resolveIdenticalJsonArtifactPut(env, key, serialized);
   if (!identical) {
     await env.R2.put(key, serialized, {
       httpMetadata: {
@@ -139,7 +115,118 @@ async function putTrackedJson(
     });
   }
   throwIfAborted(signal);
-  await recordArtifact(env, key, serialized, signal);
+  const contentHash = await staticArtifactContentHash(serialized);
+  throwIfAborted(signal);
+  return { objectKey: key, contentHash };
+}
+
+async function recordArtifacts(
+  env: Env,
+  artifacts: readonly PendingArtifact[],
+  signal?: RebuildSignal,
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  for (
+    let offset = 0;
+    offset < artifacts.length;
+    offset += USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE
+  ) {
+    throwIfAborted(signal);
+    const chunk = artifacts.slice(
+      offset,
+      offset + USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE,
+    );
+    const placeholders = chunk
+      .map(() => "(?, ?, ?, ?, ?, ?, NULL, ?, NULL)")
+      .join(", ");
+    const binds = chunk.flatMap(({ objectKey, contentHash }) => [
+      `sta:${USERS_INDEX_V2_ARTIFACT_TARGET_TYPE}:${USERS_INDEX_V2_ARTIFACT_TARGET_ID}:${objectKey}`,
+      USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
+      USERS_INDEX_V2_ARTIFACT_TARGET_ID,
+      objectKey,
+      contentHash,
+      USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION,
+      now,
+    ]);
+    await env.DB.prepare(
+      `INSERT INTO static_artifacts
+         (id, target_type, target_id, object_key, content_hash, schema_version,
+          source_updated_at, generated_at, deleted_at)
+       VALUES ${placeholders}
+       ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
+         content_hash = excluded.content_hash,
+         schema_version = excluded.schema_version,
+         source_updated_at = NULL,
+         generated_at = excluded.generated_at,
+         deleted_at = NULL`,
+    )
+      .bind(...binds)
+      .run();
+    for (const artifact of chunk) {
+      env.artifactHashCache?.set(artifact.objectKey, artifact.contentHash);
+    }
+    throwIfAborted(signal);
+  }
+}
+
+type ManifestGenerationState =
+  | { kind: "absent" }
+  | { kind: "known"; generation: string }
+  | { kind: "unknown" };
+
+async function readCurrentManifestGeneration(
+  env: Env,
+): Promise<ManifestGenerationState> {
+  try {
+    const object = await env.R2.get(USERS_INDEX_V2_MANIFEST_OBJECT_KEY);
+    if (!object) return { kind: "absent" };
+    const payload = await object.json<unknown>();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { kind: "unknown" };
+    }
+    const generation = (payload as { generation?: unknown }).generation;
+    return typeof generation === "string" && generation.length > 0
+      ? { kind: "known", generation }
+      : { kind: "unknown" };
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "users-index-v2",
+        result: "chunk_cleanup_manifest_read_failed",
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+    return { kind: "unknown" };
+  }
+}
+
+/**
+ * Remove a failed chunk only when the current manifest cannot point at it.
+ * A retry can generate the same immutable key as a published generation; in
+ * that case deleting the chunk would break currently visible data.
+ */
+async function cleanupFailedArtifactChunk(
+  env: Env,
+  chunk: readonly PendingArtifact[],
+  generation: string,
+): Promise<void> {
+  const keys = [...new Set(chunk.map((artifact) => artifact.objectKey))];
+  if (keys.length === 0) return;
+  const manifest = await readCurrentManifestGeneration(env);
+  if (manifest.kind === "unknown") return;
+  if (manifest.kind === "known" && manifest.generation === generation) return;
+  try {
+    await env.R2.delete(keys);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "users-index-v2",
+        result: "chunk_cleanup_failed",
+        key_count: keys.length,
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+  }
 }
 
 async function reconcileTrackedArtifacts(
@@ -276,16 +363,51 @@ export async function rebuildUsersIndexV2Artifacts(
   );
 
   const liveKeys: string[] = [];
+  const pendingArtifacts: PendingArtifact[] = [];
+  const flushPendingArtifacts = async (force = false): Promise<void> => {
+    while (
+      pendingArtifacts.length >= USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE ||
+      (force && pendingArtifacts.length > 0)
+    ) {
+      const chunk = pendingArtifacts.splice(
+        0,
+        USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE,
+      );
+      try {
+        await recordArtifacts(env, chunk, signal);
+      } catch (error) {
+        await cleanupFailedArtifactChunk(env, chunk, generation);
+        throw error;
+      }
+    }
+  };
+
   for (const entry of pages) {
-    await putTrackedJson(env, entry.key, entry.page, signal);
+    // Generation-specific keys are immutable by construction.  Avoid one D1
+    // hash lookup per page; the tracking rows are persisted in bounded chunks
+    // before the manifest write below.
+    pendingArtifacts.push(
+      await putTrackedJson(env, entry.key, entry.page, signal, {
+        deduplicate: false,
+      }),
+    );
     liveKeys.push(entry.key);
+    await flushPendingArtifacts();
   }
 
-  await putTrackedJson(env, searchKey, artifacts.searchLite, signal);
+  pendingArtifacts.push(
+    await putTrackedJson(env, searchKey, artifacts.searchLite, signal, {
+      deduplicate: false,
+    }),
+  );
   liveKeys.push(searchKey);
+  // Track every page/search object before publishing the manifest. A failed
+  // page or search PUT can still leave an earlier chunk in R2, but that chunk
+  // is already represented in static_artifacts for the next reconciliation.
+  await flushPendingArtifacts(true);
 
   // manifest is the only commit point and must be written last.
-  await putTrackedJson(
+  const manifestArtifact = await putTrackedJson(
     env,
     USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
     artifacts.manifest,
@@ -293,6 +415,9 @@ export async function rebuildUsersIndexV2Artifacts(
   );
   liveKeys.push(USERS_INDEX_V2_MANIFEST_OBJECT_KEY);
 
+  // Track the manifest immediately after its R2 commit. If this write fails,
+  // the caller invalidates the manifest so no untracked commit point remains.
+  await recordArtifacts(env, [manifestArtifact], signal);
   await reconcileTrackedArtifacts(env, liveKeys, signal);
   return { liveKeys, objectCount: liveKeys.length };
 }

@@ -450,7 +450,7 @@ export function EventForm({
         pendingPublicReflection: result.pendingPublicReflection,
       });
       if (mode === "create" && result.eventId) {
-        router.push(`/manage/events/${result.eventId}/edit`);
+        router.push(`/manage/events/${encodeURIComponent(result.eventId)}/edit`);
       } else {
         router.refresh();
       }

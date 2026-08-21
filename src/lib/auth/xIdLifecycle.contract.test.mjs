@@ -11,7 +11,8 @@ test("header X ID read pathは未連携active行を自動claimしない", () => 
   const source = read("./headerUser.ts");
   assert.doesNotMatch(source, /\.update\(xUsers\)/);
   assert.doesNotMatch(source, /or\(\.\.\.rowConditions/);
-  assert.match(source, /getLinkedXUsersForAuthUser\(db, authUserId\)/);
+  assert.match(source, /getHeaderLinkedXUsersForAuthUser\(db, authUserId\)/);
+  assert.doesNotMatch(source, /getLinkedXUsersForAuthUser\(db, authUserId\)/);
 });
 
 test("Discord auth linkは内部user ID更新・token消去・監査を単一batchにする", () => {

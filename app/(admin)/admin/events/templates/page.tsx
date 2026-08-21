@@ -67,7 +67,7 @@ export default async function AdminEventTemplatesPage(): Promise<React.ReactElem
                   </td>
                   <td>
                     {t.source_event_id ? (
-                      <Link href={`/manage/events/${t.source_event_id}`}>
+                      <Link href={`/manage/events/${encodeURIComponent(t.source_event_id)}`}>
                         {t.source_event_id}
                       </Link>
                     ) : (

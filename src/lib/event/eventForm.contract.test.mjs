@@ -14,9 +14,11 @@ test("blank create-event IDs are omitted for server-side auto-generation", () =>
   assert.match(source, /id: z\.preprocess\(/);
 });
 
-test("new event IDs are validated server-side with the route-safe pattern", () => {
+test("create-event IDs are validated server-side with the route-safe pattern", () => {
   const source = readRepoFile("src/lib/actions/event-admin.ts");
 
-  assert.match(source, /EVENT_ID_PATTERN\.test\(id\)/);
-  assert.match(source, /only newly-created IDs are constrained/);
+  assert.match(
+    source,
+    /const id = data\.id\?\.trim\(\) \|\| generateId\("ev"\);[\s\S]*?if \(!EVENT_ID_PATTERN\.test\(id\)\)/,
+  );
 });

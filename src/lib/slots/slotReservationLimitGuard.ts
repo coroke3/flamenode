@@ -1,27 +1,47 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { slots } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 import { normalizeSlotReservationLimit } from "./slotReservationLimit";
 
-function logicalReservationCountSql() {
-  return sql<number>`COUNT(DISTINCT CASE
-    WHEN ${slots.reservation_group_id} IS NOT NULL
-      AND TRIM(${slots.reservation_group_id}) <> ''
-      THEN 'group:' || ${slots.reservation_group_id}
-    ELSE 'slot:' || ${slots.id}
-  END)`;
-}
-
-function activeReservationSubjectWhere(eventId: string, xIdSnapshot: string) {
-  return and(
-    eq(slots.event_id, eventId),
-    eq(slots.reserved_x_id_snapshot, xIdSnapshot),
-    sql`${slots.status} IN ('reserved', 'submitted')`,
-  )!;
+/**
+ * 0053以前のraw snapshotを正規化済み値と同じ論理X IDへ集約する。
+ *
+ * ORでexact/legacy条件を1つのWHEREにまとめると、SQLite/D1が部分indexを
+ * 利用できずslots全走査へ退行する。exact branchとnormalized fallbackを
+ * UNION ALLへ分け、fallback側ではexact値を除外して重複を防ぐ。
+ */
+function logicalReservationCountSql(
+  eventId: string,
+  xIdSnapshot: string,
+) {
+  const matchingRows = sql`
+    SELECT ${slots.id} AS id, ${slots.reservation_group_id} AS reservation_group_id
+    FROM ${sql.raw("slots")}
+    WHERE ${slots.event_id} = ${eventId}
+      AND ${slots.reserved_x_id_snapshot} = ${xIdSnapshot}
+      AND ${slots.status} IN ('reserved', 'submitted')
+    UNION ALL
+    SELECT ${slots.id} AS id, ${slots.reservation_group_id} AS reservation_group_id
+    FROM ${sql.raw("slots")}
+    WHERE ${slots.event_id} = ${eventId}
+      AND ${slots.reserved_x_id_snapshot} IS NOT NULL
+      AND ${slots.reserved_x_id_snapshot} <> ${xIdSnapshot}
+      AND lower(trim(ltrim(trim(${slots.reserved_x_id_snapshot}), '@'))) = ${xIdSnapshot}
+      AND ${slots.status} IN ('reserved', 'submitted')
+  `;
+  return sql`
+    SELECT COUNT(DISTINCT CASE
+      WHEN matched.reservation_group_id IS NOT NULL
+        AND TRIM(matched.reservation_group_id) <> ''
+        THEN 'group:' || TRIM(matched.reservation_group_id)
+      ELSE 'slot:' || matched.id
+    END) AS reservation_count
+    FROM (${matchingRows}) AS matched
+  `;
 }
 
 export async function loadLogicalReservationCountForXId(
@@ -31,12 +51,8 @@ export async function loadLogicalReservationCountForXId(
   const xIdSnapshot = normalizeXId(args.xIdSnapshot ?? "");
   if (!xIdSnapshot) return 0;
   const row = (
-    await db
-      .select({ reservation_count: logicalReservationCountSql() })
-      .from(slots)
-      .where(activeReservationSubjectWhere(args.eventId, xIdSnapshot))
-      .limit(1)
-  )[0];
+    await db.all(logicalReservationCountSql(args.eventId, xIdSnapshot))
+  )[0] as { reservation_count?: unknown } | undefined;
   const count = Number(row?.reservation_count ?? 0);
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
@@ -61,18 +77,7 @@ export function buildReservationLimitGuardStatement(
   return db.run(
     sql`
       SELECT CASE
-        WHEN (
-          SELECT COUNT(DISTINCT CASE
-            WHEN reservation_group_id IS NOT NULL
-              AND TRIM(reservation_group_id) <> ''
-              THEN 'group:' || reservation_group_id
-            ELSE 'slot:' || id
-          END)
-          FROM slots
-          WHERE event_id = ${args.eventId}
-            AND reserved_x_id_snapshot = ${xIdSnapshot}
-            AND status IN ('reserved', 'submitted')
-        ) <= ${limit}
+        WHEN (${logicalReservationCountSql(args.eventId, xIdSnapshot)}) <= ${limit}
         THEN 1
         ELSE json_extract('not-valid-json', '$')
       END

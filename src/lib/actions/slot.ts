@@ -445,7 +445,11 @@ async function loadBoundedGroupStructure(
   db: DB,
   anchor: SlotRow,
 ): Promise<SlotRow[]> {
-  const groupId = anchor.reservation_group_id?.trim() || null;
+  // 旧行の group ID に前後空白が残っていても、保存値そのもので取得する。
+  // trim後の値を exact 比較すると同じ group を単独枠として誤認する。
+  const groupId = anchor.reservation_group_id?.trim()
+    ? anchor.reservation_group_id
+    : null;
   if (!groupId) return [anchor];
 
   const rows = await db
@@ -503,16 +507,6 @@ async function loadBoundedGroup(
   const rows = await loadBoundedGroupStructure(db, anchor);
   const identity = resolveBoundedGroupIdentity(rows, authUserId, activeXId);
   return { rows, identity };
-}
-
-function adoptNullRowPatch(
-  row: SlotRow,
-  identity: { targetXId: string | null; adoptNullRows: boolean },
-): Pick<SlotPatch, "x_user_id"> {
-  if (identity.adoptNullRows && row.x_user_id === null && identity.targetXId !== null) {
-    return { x_user_id: identity.targetXId };
-  }
-  return {};
 }
 
 /** 同じpatchを最大2群へまとめ、D1 statement数を枠数比例にしない。 */

@@ -282,7 +282,7 @@ export default async function ManageNotificationsPage({
                 </td>
                 <td className="manage-notification-event-cell">
                   {notification.event_id ? (
-                    <Link href={`/manage/events/${notification.event_id}`}>
+                    <Link href={`/manage/events/${encodeURIComponent(notification.event_id)}`}>
                       {eventTitleById.get(notification.event_id)?.slice(0, 24) ??
                         `${notification.event_id.slice(0, 8)}…`}
                     </Link>

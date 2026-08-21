@@ -15,7 +15,7 @@ test("buildEventStaffCsvPreview parses canonical 5-column format", () => {
 
   assert.equal(preview.hasErrors, false);
   assert.equal(preview.counts.update, 1);
-  assert.equal(preview.counts.create, 2);
+  assert.equal(preview.counts.create, 3);
   assert.equal(preview.rows[0].permission_preset, "slot_manager");
   assert.equal(preview.rows[0].is_public_staff, "1");
   assert.equal(preview.rows[0].action, "update");

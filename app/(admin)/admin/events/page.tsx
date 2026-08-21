@@ -172,19 +172,19 @@ export default async function AdminEventsPage({
                 <td>
                   <div className="fn-console-row-actions">
                     <Link
-                      href={`/manage/events/${ev.id}/edit`}
+                      href={`/manage/events/${encodeURIComponent(ev.id)}/edit`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
                       運営設定を開く
                     </Link>
                     <Link
-                      href={`/manage/events/${ev.id}`}
+                      href={`/manage/events/${encodeURIComponent(ev.id)}`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
                       運営ビュー
                     </Link>
                     <Link
-                      href={`/manage/events/${ev.id}/staff`}
+                      href={`/manage/events/${encodeURIComponent(ev.id)}/staff`}
                       className="fn-btn fn-btn-ghost fn-btn-sm"
                     >
                       運営権限を編集

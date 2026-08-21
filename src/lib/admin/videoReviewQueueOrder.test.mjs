@@ -23,7 +23,10 @@ test("resolveApproveAndNextHref falls back to review queue list", () => {
 
 test("buildReviewDetailHref scopes manage paths by event and admin filter by query", () => {
   assert.match(orderSource, /\/admin\/videos\/\$\{videoId\}/);
-  assert.match(orderSource, /\/manage\/events\/\$\{scope\.eventId\}\/videos\/\$\{videoId\}/);
+  assert.match(
+    orderSource,
+    /\/manage\/events\/\$\{encodeURIComponent\(scope\.eventId\)\}\/videos\/\$\{videoId\}/,
+  );
   assert.match(orderSource, /adminEventFilter/);
   assert.match(orderSource, /\?event=/);
 });

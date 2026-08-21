@@ -102,7 +102,7 @@ test("mergeOwnSlotGroupsはx_user_id混在を拒否しidentityでgapへtargetXId
     "";
   assert.match(mergeBlock, /left\.x_user_id !== right\.x_user_id/);
   assert.match(mergeBlock, /resolveBoundedGroupIdentity/);
-  assert.match(mergeBlock, /adoptNullRowPatch/);
+  assert.match(mergeBlock, /buildRegroupMutations\(\s*reservedRows/);
   assert.match(mergeBlock, /x_user_id:\s*targetXId/);
 });
 
@@ -113,7 +113,7 @@ test("extendOwnSlotGroupはidentityでx_user_idを継承し別Xへの書換え�
     )?.[0] ?? "";
   assert.match(extendBlock, /groupXUserId !== slotXUserId/);
   assert.match(extendBlock, /identity\.targetXId/);
-  assert.match(extendBlock, /adoptNullRowPatch/);
+  assert.match(extendBlock, /buildRegroupMutations\(\s*groupRows/);
   assert.match(extendBlock, /x_user_id:\s*targetXId/);
 });
 
@@ -170,5 +170,5 @@ test("利用者枠操作は slotIdentityCore で Active 一致を判定し authU
     source,
     /relation === "account_other"[\s\S]*?SLOT_ACCOUNT_OTHER_MESSAGE/,
   );
-  assert.match(source, /adoptNullRowPatch/);
+  assert.match(source, /buildRegroupMutations/);
 });

@@ -17,8 +17,14 @@ test("X ID limit uses slots as source of truth and an atomic post-update guard",
   assert.match(slotAction, /loadLogicalReservationCountForXId/);
   assert.match(slotAction, /buildReservationLimitGuardStatement/);
   assert.match(slotAction, /extraStatements\.push\(reservationLimitGuard\)/);
-  assert.match(limitGuard, /status IN \('reserved', 'submitted'\)/);
+  assert.match(limitGuard, /\$\{slots\.status\} IN \('reserved', 'submitted'\)/);
   assert.match(limitGuard, /COUNT\(DISTINCT CASE/);
+  assert.match(limitGuard, /TRIM\(matched\.reservation_group_id\)/);
+  assert.match(limitGuard, /UNION ALL/);
+  assert.match(
+    limitGuard,
+    /\$\{slots\.reserved_x_id_snapshot\} = \$\{xIdSnapshot\}[\s\S]*?\$\{slots\.reserved_x_id_snapshot\} <> \$\{xIdSnapshot\}[\s\S]*?lower\(trim\(ltrim\(trim\(\$\{slots\.reserved_x_id_snapshot\}\), '@'\)\)\) = \$\{xIdSnapshot\}/,
+  );
   assert.doesNotMatch(migration, /slot_reservation_subject_counts/);
   assert.doesNotMatch(schema, /slotReservationSubjectCounts/);
 });

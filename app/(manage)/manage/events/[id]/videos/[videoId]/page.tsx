@@ -37,6 +37,7 @@ export default async function ManageEventVideoDetailPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const { id, videoId } = await params;
+  const eventHrefId = encodeURIComponent(id);
 
   const guard = await requireSession({
     next: `/manage/events/${encodeURIComponent(id)}/videos/${encodeURIComponent(videoId)}`,
@@ -72,7 +73,7 @@ export default async function ManageEventVideoDetailPage({
       eventId={id}
       title={ev.title}
       description={`作品審査 — ${video.title}`}
-      backHref={`/manage/events/${id}/videos?status=pending`}
+      backHref={`/manage/events/${eventHrefId}/videos?status=pending`}
       backLabel="審査キューへ"
       isAdmin={isAdmin}
       pendingCount={pendingCount}

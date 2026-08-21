@@ -408,7 +408,7 @@ export default async function ManageTopPage(): Promise<React.ReactElement> {
                     </td>
                     <td>
                       {ev ? (
-                        <Link href={`/event/${ev.id}`}>{ev.title}</Link>
+                        <Link href={`/event/${encodeURIComponent(ev.id)}`}>{ev.title}</Link>
                       ) : (
                         <span className="fn-td-mono">{h.target_id}</span>
                       )}

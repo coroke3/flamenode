@@ -95,7 +95,7 @@ export default async function EventYoutubePlaylistPage({
       eventId={ev.id}
       title={ev.title}
       description="イベントの公開作品を、指定したYouTube再生リストへ差分同期します。"
-      backHref={`/manage/events/${ev.id}`}
+      backHref={`/manage/events/${encodeURIComponent(ev.id)}`}
       backLabel="イベント概要へ"
       isAdmin={isAdmin}
       pendingCount={pendingCount}

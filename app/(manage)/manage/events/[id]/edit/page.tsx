@@ -66,6 +66,7 @@ export default async function ManageEventEditPage({
   ) {
     notFound();
   }
+  const eventHrefId = encodeURIComponent(event.id);
 
   const isAdmin = user.role === "admin";
   const navigation = await getManageNavigationSnapshot(user.id, user.role ?? null);
@@ -75,7 +76,7 @@ export default async function ManageEventEditPage({
       eventId={event.id}
       title={event.title}
       description="イベントの基本設定・公開・投稿フォーム・枠ルールを編集します。"
-      backHref={`/manage/events/${event.id}`}
+      backHref={`/manage/events/${eventHrefId}`}
       backLabel="イベント概要へ"
       isAdmin={isAdmin}
       pendingCount={pendingCount}
@@ -89,7 +90,7 @@ export default async function ManageEventEditPage({
           <strong>イベント枠を設定する</strong>
           <p>募集枠の生成・整理・予約状況の管理は、枠設定画面から行えます。</p>
         </div>
-        <Link href={`/manage/events/${event.id}/slots`} className="fn-btn fn-btn-primary">
+        <Link href={`/manage/events/${eventHrefId}/slots`} className="fn-btn fn-btn-primary">
           枠設定を開く
           <Icon name="chevron-right" size={14} aria-hidden />
         </Link>

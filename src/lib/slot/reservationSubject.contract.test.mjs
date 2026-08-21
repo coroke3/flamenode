@@ -33,7 +33,23 @@ test("extend/mergeはsubject検証とActive X identityで候補枠を更新す�
   assert.match(slotSource, /resolveSlotReservationSubject\(groupRows\)/);
   assert.match(slotSource, /subjectsEqual\(leftSubjectResult\.subject, rightSubjectResult\.subject\)/);
   assert.match(slotSource, /identity\.targetXId/);
-  assert.match(slotSource, /adoptNullRowPatch/);
+  assert.match(slotSource, /buildRegroupMutations/);
+});
+
+test("legacy group ID はtrim後の値ではなく保存値で取得する", () => {
+  const groupBlock =
+    slotSource.match(
+      /async function loadBoundedGroupStructure[\s\S]*?async function loadBoundedGroup\(/,
+    )?.[0] ?? "";
+  assert.match(
+    groupBlock,
+    /const groupId = anchor\.reservation_group_id\?\.trim\(\)[\s\S]*?anchor\.reservation_group_id/,
+  );
+  assert.match(groupBlock, /\.where\(reservationGroupScope\(groupId, anchor\.event_id\)\)/);
+  assert.match(
+    slotSource,
+    /function reservationGroupScope[\s\S]*?eq\(slots\.reservation_group_id, groupId\)/,
+  );
 });
 
 test("mergeOwnSlotGroupsはgap含む全枠へ同一display_nameを適用する", () => {

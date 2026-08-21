@@ -13,5 +13,5 @@ export default async function AdminEventSlotsPage({
   params,
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
-  redirect(`/manage/events/${id}/slots`);
+  redirect(`/manage/events/${encodeURIComponent(id)}/slots`);
 }
