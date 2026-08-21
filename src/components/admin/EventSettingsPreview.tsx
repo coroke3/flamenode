@@ -294,9 +294,9 @@ export function EventSettingsPreview({
             <Field label="ユーザーの追加紐付け" value={toBool(event.allow_user_video_event_links) ? "許可" : "不許可"} />
             <Field label="枠なし投稿の紐づけ" value={toBool(event.allow_unslotted_posts) ? "許可" : "不許可"} />
             <Field label="所有者の一般作品権限" value={toBool(event.allow_user_video_edits) ? "個別指定" : "既定"} />
-            <Field label="許可キー" value={tryJsonSummary(event.user_video_edit_permission_keys_json)} />
-            <Field label="editable_fields" value={tryJsonSummary(event.editable_fields)} />
-            <Field label="review_settings" value={tryJsonSummary(event.review_settings)} />
+            <Field label="一般作品の編集許可" value={tryJsonSummary(event.user_video_edit_permission_keys_json)} />
+            <Field label="編集対象フィールド" value={tryJsonSummary(event.editable_fields)} />
+            <Field label="審査設定" value={tryJsonSummary(event.review_settings)} />
           </div>
         </article>
       </div>

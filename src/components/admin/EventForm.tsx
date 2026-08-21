@@ -355,6 +355,8 @@ export function EventForm({
     message: string;
     pendingPublicReflection?: boolean;
   } | null>(null);
+  const [youtubeDescriptionTemplate, setYoutubeDescriptionTemplate] =
+    React.useState(initial.youtube_description_template ?? "");
   const [preview, setPreview] = React.useState<EventSettingsPreviewValue>(() =>
     initialPreview(initial),
   );
@@ -397,6 +399,9 @@ export function EventForm({
         }
       }
     }
+    setYoutubeDescriptionTemplate(
+      textValue(restored, "youtube_description_template"),
+    );
     setQuestions(
       filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
     );
@@ -406,10 +411,11 @@ export function EventForm({
   const draftSnapshot = React.useMemo(() => {
     void preview;
     void questions;
+    void youtubeDescriptionTemplate;
     return formRef.current
       ? formDataToDraftValue(new FormData(formRef.current))
       : {};
-  }, [preview, questions]);
+  }, [preview, questions, youtubeDescriptionTemplate]);
   const { clearDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
@@ -533,7 +539,11 @@ export function EventForm({
           />
         </div>
         <YoutubeDescriptionTemplateEditor
-          defaultValue={initial.youtube_description_template ?? ""}
+          value={youtubeDescriptionTemplate}
+          onChange={(next) => {
+            setYoutubeDescriptionTemplate(next);
+            setDirty(true);
+          }}
           eventTitle={preview.title}
           disabled={!canBasic}
         />

@@ -13,7 +13,9 @@ import {
 } from "@/lib/actions/event-staff-admin";
 import {
   ALL_PERMISSION_KEYS,
+  PERMISSION_DEFINITIONS,
   isAdminOnlyKey,
+  type PermissionCategory,
   type PermissionKey,
 } from "@/lib/auth/permissions/keys";
 import {
@@ -71,6 +73,50 @@ function permissionKeysForPreset(
   customKeys: readonly string[],
 ): string[] {
   return preset === "custom" ? [...customKeys] : [...getPresetPermissions(preset)];
+}
+
+const PERMISSION_CATEGORY_LABELS: Record<PermissionCategory, string> = {
+  event: "イベント",
+  video: "作品",
+  xid: "X ID",
+  danger: "高度・危険な操作",
+};
+
+function PresetPermissionSummary({
+  preset,
+  isSiteAdmin,
+}: {
+  preset: EventStaffPreset;
+  isSiteAdmin: boolean;
+}): React.ReactElement {
+  const permissions = getPresetPermissions(preset).filter(
+    (key) => isSiteAdmin || !isAdminOnlyKey(key),
+  );
+  return (
+    <div className="fn-console-note" style={{ margin: 0, display: "grid", gap: 8 }}>
+      <span>{PRESET_DEFINITIONS[preset].description}</span>
+      {permissions.length > 0 ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {permissions.map((key) => {
+            const definition = PERMISSION_DEFINITIONS[key];
+            return (
+              <span
+                key={key}
+                className={`fn-badge ${
+                  definition.dangerous ? "fn-badge-warning" : "fn-badge-soft"
+                }`}
+                title={definition.description}
+              >
+                {definition.label}
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <span className="fn-muted">内部操作権限はありません。</span>
+      )}
+    </div>
+  );
 }
 
 export function EventStaffManager({
@@ -382,10 +428,7 @@ function MemberEditor({
           disabled={busy}
         />
       ) : (
-        <p className="fn-console-note" style={{ margin: 0 }}>
-          {PRESET_DEFINITIONS[preset].description}（
-          {permissionKeysForPreset(preset, []).length}権限）
-        </p>
+        <PresetPermissionSummary preset={preset} isSiteAdmin={isSiteAdmin} />
       )}
 
       {isLastOwner ? (
@@ -559,7 +602,9 @@ function AddMemberForm({
             onChange={setCustomKeys}
             disabled={busy}
           />
-        ) : null}
+        ) : (
+          <PresetPermissionSummary preset={preset} isSiteAdmin={isSiteAdmin} />
+        )}
         <button className="fn-btn fn-btn-primary" disabled={busy}>
           <Icon name="plus" size={12} aria-hidden /> 追加
         </button>
@@ -710,25 +755,67 @@ function PermissionChecklist({
   const keys = ALL_PERMISSION_KEYS.filter(
     (key) => isSiteAdmin || !isAdminOnlyKey(key),
   );
+  const categoryOrder: PermissionCategory[] = [
+    "event",
+    "video",
+    "xid",
+    "danger",
+  ];
+
   return (
-    <div className="manage-permission-checklist">
-      {keys.map((key: PermissionKey) => (
-        <label key={key} className="fn-label">
-          <input
-            type="checkbox"
-            checked={selectedSet.has(key)}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange(
-                event.target.checked
-                  ? [...selectedSet, key]
-                  : selected.filter((item) => item !== key),
-              )
-            }
-          />{" "}
-          {key}
-        </label>
-      ))}
+    <div className="manage-permission-checklist" style={{ display: "grid", gap: 12 }}>
+      {categoryOrder.map((category) => {
+        const categoryKeys = keys.filter(
+          (key) => PERMISSION_DEFINITIONS[key].category === category,
+        );
+        if (categoryKeys.length === 0) return null;
+        return (
+          <fieldset key={category} style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend className="fn-console-note" style={{ marginBottom: 6, fontWeight: 700 }}>
+              {PERMISSION_CATEGORY_LABELS[category]}
+            </legend>
+            <div style={{ display: "grid", gap: 8 }}>
+              {categoryKeys.map((key: PermissionKey) => {
+                const definition = PERMISSION_DEFINITIONS[key];
+                return (
+                  <label
+                    key={key}
+                    className="fn-label"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "auto 1fr auto",
+                      alignItems: "start",
+                      gap: 8,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(key)}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        onChange(
+                          event.target.checked
+                            ? [...selectedSet, key]
+                            : selected.filter((item) => item !== key),
+                        )
+                      }
+                    />
+                    <span style={{ display: "grid", gap: 2 }}>
+                      <strong>{definition.label}</strong>
+                      <span className="fn-muted fn-text-sm">
+                        {definition.description}
+                      </span>
+                    </span>
+                    {definition.dangerous ? (
+                      <span className="fn-badge fn-badge-warning">注意</span>
+                    ) : null}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        );
+      })}
     </div>
   );
 }

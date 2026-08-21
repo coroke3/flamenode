@@ -95,15 +95,16 @@ const SAMPLE_CONTEXT: YoutubeDescriptionContext = {
 const SAMPLE_TEMPLATE = `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n投稿者: {{creator_name}} {{creator_x_id}}\n楽曲: {{music}}\n\n{{credit}}\n\n{{youtube_url}}`;
 
 export function YoutubeDescriptionTemplateEditor({
-  defaultValue,
+  value,
+  onChange,
   eventTitle,
   disabled = false,
 }: {
-  defaultValue: string;
+  value: string;
+  onChange: (value: string) => void;
   eventTitle?: string | null;
   disabled?: boolean;
 }): React.ReactElement {
-  const [value, setValue] = React.useState(defaultValue);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const context = React.useMemo<YoutubeDescriptionContext>(
     () => ({
@@ -118,14 +119,14 @@ export function YoutubeDescriptionTemplateEditor({
   );
 
   const setTextareaValue = React.useCallback((next: string, caret?: number) => {
-    setValue(next);
+    onChange(next);
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
       textarea.focus();
       if (caret != null) textarea.setSelectionRange(caret, caret);
     });
-  }, []);
+  }, [onChange]);
 
   const insertVariable = (key: YoutubeDescriptionVariableKey) => {
     if (disabled) return;
@@ -155,7 +156,7 @@ export function YoutubeDescriptionTemplateEditor({
           id="youtube_description_template"
           name="youtube_description_template"
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => onChange(event.target.value)}
           className="fn-input"
           rows={10}
           maxLength={MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH}

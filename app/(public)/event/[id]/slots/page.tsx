@@ -33,6 +33,7 @@ import {
 } from "@/lib/slots/slotIdentityCore";
 import { resolveReservationXIdentity } from "@/lib/slots/reservationIdentity";
 import { canUseSlotOperatorOverride } from "@/lib/slots/operatorReservationCore";
+import { resolveSlotIntervalSec } from "@/lib/slots/slotGuidance";
 import {
   canEditEventFromSnapshot,
   getManageAuthorizationSnapshot,
@@ -86,6 +87,9 @@ export default async function EventSlotsPage({
           slot_type: eventsTable.slot_type,
           slot_visibility_mode: eventsTable.slot_visibility_mode,
           max_slots_per_video: eventsTable.max_slots_per_video,
+          max_slot_reservation_groups_per_xid:
+            eventsTable.max_slot_reservation_groups_per_xid,
+          slot_interval_minutes: eventsTable.slot_interval_minutes,
           slot_part_gap_minutes: eventsTable.slot_part_gap_minutes,
         })
         .from(eventsTable)
@@ -213,6 +217,14 @@ export default async function EventSlotsPage({
       ? Math.min(100, Math.round((filledSlots / slotTotal) * 100))
       : 0;
   const slotPartGapSec = (event.slot_part_gap_minutes ?? 15) * 60;
+  const slotIntervalSec =
+    event.slot_type === "count"
+      ? null
+      : resolveSlotIntervalSec({
+          explicitMinutes: event.slot_interval_minutes,
+          slots: slotRows,
+          partGapSec: slotPartGapSec,
+        });
 
   let viewerXId: string | null = null;
   let viewerXIdNotice: string | null = null;
@@ -332,6 +344,10 @@ export default async function EventSlotsPage({
             canPost={onboarding.canPost}
             slotType={(event.slot_type ?? "time") as "time" | "count"}
             maxSlotsPerVideo={event.max_slots_per_video ?? 1}
+            maxSlotReservationsPerXId={
+              event.max_slot_reservation_groups_per_xid ?? 0
+            }
+            slotIntervalSec={slotIntervalSec}
             slotPartGapSec={slotPartGapSec}
           />
         </div>
