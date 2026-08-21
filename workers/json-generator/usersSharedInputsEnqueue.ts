@@ -3,6 +3,7 @@ import {
   USERS_INDEX_OBJECT_KEY,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
 import { PUBLIC_X_ICON_MAP_OBJECT_KEY } from "../../src/lib/publicData/publicIconProjection.ts";
+import { USERS_INDEX_V2_MANIFEST_OBJECT_KEY } from "../../src/lib/publicData/staticUsersIndexV2Core.ts";
 
 type EnqueueEnv = { DB: D1Database; R2: R2Bucket };
 
@@ -56,12 +57,13 @@ export async function ensureUsersSharedInputsOnR2(
   },
 ): Promise<number> {
   options.signal?.throwIfAborted();
-  const [indexHead, iconMapHead, pickupHead] = await Promise.all([
+  const [indexHead, v2ManifestHead, iconMapHead, pickupHead] = await Promise.all([
     env.R2.head(USERS_INDEX_OBJECT_KEY),
+    env.R2.head(USERS_INDEX_V2_MANIFEST_OBJECT_KEY),
     env.R2.head(PUBLIC_X_ICON_MAP_OBJECT_KEY),
     env.R2.head(PICKUP_CREATORS_OBJECT_KEY),
   ]);
-  if (indexHead && iconMapHead && pickupHead) {
+  if (indexHead && v2ManifestHead && iconMapHead && pickupHead) {
     return 0;
   }
   return enqueueUsersIndexRebuild(
