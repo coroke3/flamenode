@@ -66,11 +66,12 @@ test("users_index canonical rebuild 後にv2生成を必ず実行する", () => 
   );
 });
 
-test("v2 manifest はR2正本で読みstale Cache APIへ戻さない", () => {
+test("v2 miss はD1 probe/enqueueへ進まず任意static artifactとしてfail-fastする", () => {
+  assert.match(loaderSource, /loadStaticJsonFreshStaleUnavailable/);
+  assert.doesNotMatch(loaderSource, /loadPublicJson/);
+  assert.doesNotMatch(loaderSource, /targetType:\s*"users_index"/);
   const manifestLoad = loaderSource.match(
-    /r2Key: USERS_INDEX_V2_MANIFEST_OBJECT_KEY,[\s\S]*?\n  \}\);/,
+    /key: USERS_INDEX_V2_MANIFEST_OBJECT_KEY,[\s\S]*?cacheMode: "bypass"/,
   );
   assert.ok(manifestLoad);
-  assert.match(manifestLoad[0], /cacheMode: "r2_first"/);
-  assert.match(manifestLoad[0], /allowStaleCacheFallback: false/);
 });
