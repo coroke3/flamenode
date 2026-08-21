@@ -19,7 +19,7 @@ import {
   prepareUsersIndexItems,
   type UsersIndexSort,
 } from "@/lib/publicData/staticUsersIndexCore";
-import { loadStaticUsersIndexV2ScorePage } from "@/lib/publicData/staticUsersIndexV2Loader";
+import { loadStaticUsersIndexV2Page } from "@/lib/publicData/staticUsersIndexV2Loader";
 import type { UsersIndexV2Entry } from "@/lib/publicData/staticUsersIndexV2Core";
 
 export const metadata: Metadata = buildPageMetadata({
@@ -62,6 +62,11 @@ function parseUsersIndexSort(value: string | undefined): UsersIndexSort {
   return value === "name" || value === "works" ? value : "score";
 }
 
+function parsePageNumber(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "1", 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
 function mapIndexEntry(entry: CreatorIndexEntry): CreatorRow {
   return {
     id: entry.x_id,
@@ -79,17 +84,15 @@ export default async function UserListPage({
   searchParams: Promise<SearchParams>;
 }): Promise<React.ReactElement> {
   const { q = "", sort = "score", page = "1" } = await searchParams;
-  const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
+  const pageNum = parsePageNumber(page);
   const sortKey = parseUsersIndexSort(sort);
   setPublicRequestRoute("/user");
 
-  const v2Loaded =
-    sortKey === "score"
-      ? await loadStaticUsersIndexV2ScorePage({
-          page: pageNum,
-          q: q.trim() || undefined,
-        })
-      : null;
+  const v2Loaded = await loadStaticUsersIndexV2Page({
+    page: pageNum,
+    sort: sortKey,
+    q: q.trim() || undefined,
+  });
 
   let creators: CreatorRow[];
   let total: number;
@@ -152,7 +155,12 @@ export default async function UserListPage({
 
   const params = (override: Partial<SearchParams> = {}) => {
     const p = new URLSearchParams();
-    const merged = { q, sort, page: String(safePage), ...override };
+    const merged = {
+      q,
+      sort: sortKey,
+      page: String(safePage),
+      ...override,
+    };
     if (merged.q) p.set("q", merged.q);
     if (merged.sort && merged.sort !== "score") p.set("sort", merged.sort);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
@@ -182,13 +190,17 @@ export default async function UserListPage({
         </label>
         <label className={styles.sortBox}>
           <span>並び替え</span>
-          <AutoSubmitSelect className="fn-select" name="sort" defaultValue={sort}>
+          <AutoSubmitSelect
+            className="fn-select"
+            name="sort"
+            defaultValue={sortKey}
+          >
             <option value="score">おすすめ順</option>
             <option value="works">作品数順</option>
             <option value="name">名前順</option>
           </AutoSubmitSelect>
         </label>
-        {q || sort !== "score" ? (
+        {q || sortKey !== "score" ? (
           <Link href="/user" className="fn-btn fn-btn-ghost">
             リセット
           </Link>
