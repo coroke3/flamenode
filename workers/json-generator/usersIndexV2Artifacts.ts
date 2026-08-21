@@ -19,9 +19,9 @@ import {
   USERS_INDEX_V2_MAX_MANIFEST_BYTES,
   USERS_INDEX_V2_MAX_PAGE_BYTES,
   USERS_SEARCH_LITE_V1_MAX_BYTES,
-  USERS_SEARCH_LITE_V1_OBJECT_KEY,
   usersIndexV2ArtifactByteLength,
   usersIndexV2ScorePageObjectKey,
+  usersIndexV2SearchLiteObjectKey,
   type UsersIndexV2SourceEntry,
 } from "../../src/lib/publicData/staticUsersIndexV2Core.ts";
 
@@ -183,10 +183,9 @@ async function reconcileTrackedArtifacts(
 }
 
 /**
- * v2 pages/search を先に完成させ、manifest を最後に更新する。
- * page/search は manifest と同じ generation を持ち、loader 側も一致を必須にする。
- * そのため途中失敗で既存キーが上書きされても旧manifestとは世代不一致となり、
- * legacy users/index.json へ安全にフォールバックできる。
+ * page/search は generation 固有keyへ書き、manifestだけを最後のcommit pointにする。
+ * 新世代の途中失敗で旧世代objectを上書きしないため、旧manifestがCache APIに残っても
+ * 旧世代は自己整合したまま。manifest更新後だけ新世代へ切り替わる。
  */
 export async function rebuildUsersIndexV2Artifacts(
   env: Env,
@@ -202,34 +201,37 @@ export async function rebuildUsersIndexV2Artifacts(
     generatedAt,
     generation,
   });
-  const liveKeys: string[] = [];
+  const scoreEntries = artifacts.scorePages.map((page) => ({
+    key: usersIndexV2ScorePageObjectKey(generation, page.page),
+    page,
+  }));
+  const searchKey = usersIndexV2SearchLiteObjectKey(generation);
 
-  for (const page of artifacts.scorePages) {
-    const key = usersIndexV2ScorePageObjectKey(page.page);
-    assertArtifactSize(key, page, USERS_INDEX_V2_MAX_PAGE_BYTES);
-    await putTrackedJson(env, key, page, signal);
-    liveKeys.push(key);
+  // 全size guardをR2 PUT前に評価する。guard失敗で半端な新世代を作らない。
+  for (const entry of scoreEntries) {
+    assertArtifactSize(entry.key, entry.page, USERS_INDEX_V2_MAX_PAGE_BYTES);
   }
-
   assertArtifactSize(
-    USERS_SEARCH_LITE_V1_OBJECT_KEY,
+    searchKey,
     artifacts.searchLite,
     USERS_SEARCH_LITE_V1_MAX_BYTES,
   );
-  await putTrackedJson(
-    env,
-    USERS_SEARCH_LITE_V1_OBJECT_KEY,
-    artifacts.searchLite,
-    signal,
-  );
-  liveKeys.push(USERS_SEARCH_LITE_V1_OBJECT_KEY);
-
-  // manifest is the commit point for this generation and must be written last.
   assertArtifactSize(
     USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
     artifacts.manifest,
     USERS_INDEX_V2_MAX_MANIFEST_BYTES,
   );
+
+  const liveKeys: string[] = [];
+  for (const entry of scoreEntries) {
+    await putTrackedJson(env, entry.key, entry.page, signal);
+    liveKeys.push(entry.key);
+  }
+
+  await putTrackedJson(env, searchKey, artifacts.searchLite, signal);
+  liveKeys.push(searchKey);
+
+  // manifest is the only commit point and must be written last.
   await putTrackedJson(
     env,
     USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
