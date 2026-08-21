@@ -34,10 +34,11 @@ const USERS_INDEX_V2_GENERATION_LAYOUT_VERSION = 2;
 /** R2 bulk delete は1000 keys/callまで。1回のrebuild cleanupはさらに小さく抑える。 */
 const USERS_INDEX_V2_CLEANUP_LIMIT = 500;
 /**
- * Each row uses seven bind variables. Keep every multi-row INSERT below D1's
- * 100-parameter limit (12 * 7 = 84), leaving room for future fixed binds.
+ * Tracking rows are sent as one JSON1 bind instead of seven binds per row.
+ * Keep chunks bounded so JSON parsing and the serialized bind stay small while
+ * avoiding one D1 statement per generated page.
  */
-const USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE = 12;
+const USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE = 500;
 
 type Env = {
   DB: D1Database;
@@ -136,23 +137,29 @@ async function recordArtifacts(
       offset,
       offset + USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE,
     );
-    const placeholders = chunk
-      .map(() => "(?, ?, ?, ?, ?, ?, NULL, ?, NULL)")
-      .join(", ");
-    const binds = chunk.flatMap(({ objectKey, contentHash }) => [
-      `sta:${USERS_INDEX_V2_ARTIFACT_TARGET_TYPE}:${USERS_INDEX_V2_ARTIFACT_TARGET_ID}:${objectKey}`,
-      USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
-      USERS_INDEX_V2_ARTIFACT_TARGET_ID,
-      objectKey,
-      contentHash,
-      USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION,
-      now,
-    ]);
+    const artifactJson = JSON.stringify(chunk);
     await env.DB.prepare(
-      `INSERT INTO static_artifacts
+      `WITH artifacts AS (
+         SELECT
+           json_extract(value, '$.objectKey') AS object_key,
+           json_extract(value, '$.contentHash') AS content_hash
+         FROM json_each(?1)
+       )
+       INSERT INTO static_artifacts
          (id, target_type, target_id, object_key, content_hash, schema_version,
           source_updated_at, generated_at, deleted_at)
-       VALUES ${placeholders}
+       SELECT
+         'sta:users_index_v2:global:' || artifacts.object_key,
+         'users_index_v2',
+         'global',
+         artifacts.object_key,
+         artifacts.content_hash,
+         ${USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION},
+         NULL,
+         ?2,
+         NULL
+       FROM artifacts
+       WHERE artifacts.object_key IS NOT NULL
        ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
          content_hash = excluded.content_hash,
          schema_version = excluded.schema_version,
@@ -160,7 +167,7 @@ async function recordArtifacts(
          generated_at = excluded.generated_at,
          deleted_at = NULL`,
     )
-      .bind(...binds)
+      .bind(artifactJson, now)
       .run();
     for (const artifact of chunk) {
       env.artifactHashCache?.set(artifact.objectKey, artifact.contentHash);
@@ -386,20 +393,59 @@ export async function rebuildUsersIndexV2Artifacts(
     // Generation-specific keys are immutable by construction.  Avoid one D1
     // hash lookup per page; the tracking rows are persisted in bounded chunks
     // before the manifest write below.
-    pendingArtifacts.push(
-      await putTrackedJson(env, entry.key, entry.page, signal, {
-        deduplicate: false,
-      }),
-    );
+    try {
+      pendingArtifacts.push(
+        await putTrackedJson(env, entry.key, entry.page, signal, {
+          deduplicate: false,
+        }),
+      );
+    } catch (error) {
+      // A page failure can happen before the current bounded chunk reaches
+      // D1. Remove those successful-but-untracked R2 objects so a retry does
+      // not leave an orphaned generation behind.
+      if (pendingArtifacts.length > 0) {
+        const orphaned = pendingArtifacts.splice(0);
+        await cleanupFailedArtifactChunk(
+          env,
+          [...orphaned, { objectKey: entry.key, contentHash: "" }],
+          generation,
+        );
+      } else {
+        await cleanupFailedArtifactChunk(
+          env,
+          [{ objectKey: entry.key, contentHash: "" }],
+          generation,
+        );
+      }
+      throw error;
+    }
     liveKeys.push(entry.key);
     await flushPendingArtifacts();
   }
 
-  pendingArtifacts.push(
-    await putTrackedJson(env, searchKey, artifacts.searchLite, signal, {
-      deduplicate: false,
-    }),
-  );
+  try {
+    pendingArtifacts.push(
+      await putTrackedJson(env, searchKey, artifacts.searchLite, signal, {
+        deduplicate: false,
+      }),
+    );
+  } catch (error) {
+    if (pendingArtifacts.length > 0) {
+      const orphaned = pendingArtifacts.splice(0);
+      await cleanupFailedArtifactChunk(
+        env,
+        [...orphaned, { objectKey: searchKey, contentHash: "" }],
+        generation,
+      );
+    } else {
+      await cleanupFailedArtifactChunk(
+        env,
+        [{ objectKey: searchKey, contentHash: "" }],
+        generation,
+      );
+    }
+    throw error;
+  }
   liveKeys.push(searchKey);
   // Track every page/search object before publishing the manifest. A failed
   // page or search PUT can still leave an earlier chunk in R2, but that chunk

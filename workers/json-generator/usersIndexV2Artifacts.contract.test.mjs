@@ -52,6 +52,8 @@ test("users index v2 は3 sortのgeneration固有page/search完了後にmanifest
   assert.match(source, /artifacts\.namePages/);
   assert.match(source, /usersIndexV2PageObjectKey\(generation, page\.sort, page\.page\)/);
   assert.match(source, /usersIndexV2SearchLiteObjectKey\(generation\)/);
+  assert.match(source, /json_each\(\?1\)/);
+  assert.match(source, /USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE = 500/);
   assert.match(loaderSource, /page\.generation !== manifest\.generation/);
   assert.match(loaderSource, /page\.sort !== params\.sort/);
   assert.match(pageSource, /loadStaticUsersIndexV2Page/);

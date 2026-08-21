@@ -124,7 +124,7 @@ export async function serveSlotSubmissionIcon(
     return new Response("Not found", { status: 404 });
   }
   if (!env.DB) {
-    return new Response("Media access check unavailable", { status: 503 });
+    return mediaUnavailableResponse("Media access check unavailable");
   }
 
   let row: SlotSubmissionIconLookupRow | null = null;
@@ -164,7 +164,7 @@ export async function serveSlotSubmissionIcon(
   const namespace = getPublicMediaNamespace(r2Key);
   if (!namespace) return new Response("Not found", { status: 404 });
   if (!env.BUCKET) {
-    return new Response("Storage not configured", { status: 500 });
+    return mediaUnavailableResponse("Media storage unavailable");
   }
 
   let obj: R2ObjectBody | null;

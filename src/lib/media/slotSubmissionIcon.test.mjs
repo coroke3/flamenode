@@ -123,10 +123,10 @@ test("slot submission icon lookup SQLはACL条件を満たす行だけ返す前�
   db.close();
 });
 
-async function requestIcon({ slotId, row, viewer, bucket = true }) {
+async function requestIcon({ slotId, row, viewer, bucket = true, db = true }) {
   const state = { prepares: 0, gets: 0 };
   const env = {
-    DB: {
+    DB: db ? {
       prepare(sql) {
         state.prepares += 1;
         assert.equal(sql, SLOT_SUBMISSION_ICON_LOOKUP_SQL);
@@ -140,7 +140,7 @@ async function requestIcon({ slotId, row, viewer, bucket = true }) {
           },
         };
       },
-    },
+    } : null,
     BUCKET: bucket === "error"
       ? {
           async get() {
@@ -268,4 +268,33 @@ test("R2読み取り障害はslot iconを503へfail-closedする", async () => {
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("retry-after"), "30");
   assert.equal(state.gets, 1);
+});
+
+test("slot icon binding欠損は503/no-storeで返す", async () => {
+  const missingDb = await requestIcon({
+    slotId: VALID_SLOT_ID,
+    row: null,
+    viewer: null,
+    db: false,
+  });
+  assert.equal(missingDb.response.status, 503);
+  assert.equal(missingDb.response.headers.get("cache-control"), "no-store");
+  assert.equal(missingDb.response.headers.get("retry-after"), "30");
+
+  const missingBucket = await requestIcon({
+    slotId: VALID_SLOT_ID,
+    row: {
+      slot_status: "submitted",
+      reserved_by_user_id: "user-1",
+      slot_x_user_id: "x",
+      slot_visibility_mode: "public_name",
+      event_visibility_status: "public",
+      creator_icon_url: "/api/media/video-icons/x/icon.webp",
+    },
+    viewer: null,
+    bucket: false,
+  });
+  assert.equal(missingBucket.response.status, 503);
+  assert.equal(missingBucket.response.headers.get("cache-control"), "no-store");
+  assert.equal(missingBucket.response.headers.get("retry-after"), "30");
 });
