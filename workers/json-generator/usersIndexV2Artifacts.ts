@@ -69,6 +69,15 @@ function generationMaterial(items: readonly UsersIndexV2SourceEntry[]): string {
   );
 }
 
+function emptyLegacyGeneratedAt(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const row = payload as Record<string, unknown>;
+  if (!Array.isArray(row.items) || row.items.length !== 0) return null;
+  const generatedAt = Number(row.generated_at);
+  if (!Number.isFinite(generatedAt) || generatedAt < 0) return null;
+  return Math.floor(generatedAt);
+}
+
 async function recordArtifact(
   env: Env,
   objectKey: string,
@@ -253,6 +262,15 @@ export async function rebuildUsersIndexV2FromLegacyArtifact(
     throw new Error("users_index_v2_legacy_artifact_invalid_json");
   }
   throwIfAborted(signal);
+
+  // normalizeStaticUsersIndex intentionally rejects empty collections for the
+  // public legacy loader. Rebuild generation itself must still support a valid
+  // empty canonical artifact so the queue cannot become permanently stuck.
+  const emptyGeneratedAt = emptyLegacyGeneratedAt(payload);
+  if (emptyGeneratedAt != null) {
+    return rebuildUsersIndexV2Artifacts(env, [], emptyGeneratedAt, signal);
+  }
+
   const normalized = normalizeStaticUsersIndex(payload as StaticUsersIndexPayload);
   if (!normalized || normalized.generatedAt == null) {
     throw new Error("users_index_v2_legacy_artifact_invalid");
