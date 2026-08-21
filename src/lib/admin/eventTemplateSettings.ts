@@ -55,6 +55,8 @@ export interface EventTemplateSnapshot {
   user_video_edit_permission_keys_json: string | null;
   video_form_settings_json: string | null;
   max_slots_per_video: number;
+  max_slot_reservation_groups_per_xid: number;
+  slot_interval_minutes: number | null;
   slot_part_gap_minutes: number;
   slot_type: "time" | "count";
   slot_visibility_mode: "public_name" | "anonymous" | "hidden";
@@ -111,6 +113,12 @@ function nullableSnapshotString(value: unknown): string | null {
 
 function finiteSnapshotNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function nullablePositiveInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const normalized = Math.floor(value);
+  return normalized >= 1 && normalized <= 1440 ? normalized : null;
 }
 
 function questionRowToTemplateDefinition(
@@ -213,6 +221,9 @@ export function snapshotFromEvent(
       event.user_video_edit_permission_keys_json,
     video_form_settings_json: videoFormSettingsJson,
     max_slots_per_video: event.max_slots_per_video,
+    max_slot_reservation_groups_per_xid:
+      event.max_slot_reservation_groups_per_xid ?? 0,
+    slot_interval_minutes: event.slot_interval_minutes ?? null,
     slot_part_gap_minutes: event.slot_part_gap_minutes ?? 15,
     slot_type: (event.slot_type ?? "time") as "time" | "count",
     slot_visibility_mode: (event.slot_visibility_mode ?? "public_name") as
@@ -247,9 +258,6 @@ export function parseEventTemplateSnapshot(
     const snapshot: Omit<EventTemplateSnapshot, "custom_question_definitions"> = {
       event_type: parsed.event_type,
       explanation: nullableSnapshotString(parsed.explanation),
-      // Templates are user-authored plain text. Do not let malformed legacy
-      // snapshots (for example a number/object or an oversized string) leak
-      // into EventForm. Keep the same normalization and limit as the live form.
       youtube_description_template: (() => {
         if (typeof parsed.youtube_description_template !== "string") {
           return null;
@@ -287,6 +295,19 @@ export function parseEventTemplateSnapshot(
         parsed.max_slots_per_video,
         1,
       ),
+      max_slot_reservation_groups_per_xid: Math.max(
+        0,
+        Math.min(
+          100,
+          Math.floor(
+            finiteSnapshotNumber(
+              parsed.max_slot_reservation_groups_per_xid,
+              0,
+            ),
+          ),
+        ),
+      ),
+      slot_interval_minutes: nullablePositiveInteger(parsed.slot_interval_minutes),
       slot_part_gap_minutes: finiteSnapshotNumber(
         parsed.slot_part_gap_minutes,
         15,
@@ -332,6 +353,9 @@ export function snapshotToFormInitial(
       snapshot.user_video_edit_permission_keys_json,
     video_form_settings_json: snapshot.video_form_settings_json,
     max_slots_per_video: snapshot.max_slots_per_video,
+    max_slot_reservation_groups_per_xid:
+      snapshot.max_slot_reservation_groups_per_xid,
+    slot_interval_minutes: snapshot.slot_interval_minutes,
     slot_part_gap_minutes: snapshot.slot_part_gap_minutes,
     slot_type: snapshot.slot_type,
     slot_visibility_mode: snapshot.slot_visibility_mode,
