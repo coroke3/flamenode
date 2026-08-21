@@ -2,8 +2,12 @@ import "server-only";
 
 import type { DB } from "@/lib/db/client";
 import { normalizeXId } from "@/lib/utils/xid";
-import type { LinkedXUser } from "./xIdentity";
 import { getApprovedLinkedXUserIds } from "./approvedX";
+
+export type ActiveXApprovedLinkedRow = {
+  x_user_id: string;
+  approval_status: string | null;
+};
 
 /**
  * users.active_x_user_id を x_user_account_links 上の承認済み X 名義だけに制限する。
@@ -13,7 +17,7 @@ export async function resolveActiveXUserId(
   db: DB,
   authUserId: string,
   currentActiveXUserId: string | null,
-  approvedLinkedRows?: LinkedXUser[],
+  approvedLinkedRows?: readonly ActiveXApprovedLinkedRow[],
 ): Promise<string | null> {
   const normalizedCurrent = normalizeXId(currentActiveXUserId) || null;
   // 呼び出し元から行を受け取る場合も、認可の正本である approval_status を
