@@ -12,8 +12,8 @@ import {
   normalizeUsersIndexV2ScorePage,
   normalizeUsersSearchLiteV1,
   USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-  USERS_SEARCH_LITE_V1_OBJECT_KEY,
   usersIndexV2ScorePageObjectKey,
+  usersIndexV2SearchLiteObjectKey,
   type UsersIndexV2Entry,
 } from "./staticUsersIndexV2Core";
 
@@ -40,7 +40,7 @@ async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
 
 /**
  * score route 専用のv2 loader。
- * manifest/page/search の generation が一致する場合だけ採用する。
+ * manifestが示すgeneration固有のpage/searchだけを読み、世代一致を再確認する。
  *
  * shard単位のfilterだけでは、別pageにblocked X userがいる場合にmanifest.totalが
  * staleなまま残り得る。enforce中にX user fenceが1件でも存在するときはv2を使わず、
@@ -65,7 +65,7 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
   const query = params.q?.trim() ?? "";
   if (query) {
     const searchResult = await loadPublicJson<unknown>({
-      r2Key: USERS_SEARCH_LITE_V1_OBJECT_KEY,
+      r2Key: usersIndexV2SearchLiteObjectKey(manifest.generation),
       targetType: "users_index",
       targetId: "global",
       reason: "public_users_search_lite_miss",
@@ -103,7 +103,7 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
     manifest.page_size,
   );
   const pageResult = await loadPublicJson<unknown>({
-    r2Key: usersIndexV2ScorePageObjectKey(safePage),
+    r2Key: usersIndexV2ScorePageObjectKey(manifest.generation, safePage),
     targetType: "users_index",
     targetId: "global",
     reason: "public_users_index_v2_page_miss",
