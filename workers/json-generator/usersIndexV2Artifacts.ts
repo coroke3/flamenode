@@ -182,6 +182,33 @@ async function reconcileTrackedArtifacts(
   }
 }
 
+async function invalidateUsersIndexV2Manifest(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  await env.R2.delete(USERS_INDEX_V2_MANIFEST_OBJECT_KEY);
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `UPDATE static_artifacts
+        SET deleted_at = ?
+      WHERE target_type = ?
+        AND target_id = ?
+        AND object_key = ?
+        AND deleted_at IS NULL`,
+  )
+    .bind(
+      now,
+      USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
+      USERS_INDEX_V2_ARTIFACT_TARGET_ID,
+      USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
+    )
+    .run();
+  env.artifactHashCache?.set(USERS_INDEX_V2_MANIFEST_OBJECT_KEY, null);
+  throwIfAborted(signal);
+}
+
 /**
  * page/search は generation 固有keyへ書き、manifestだけを最後のcommit pointにする。
  * 新世代の途中失敗で旧世代objectを上書きしないため、旧manifestがCache APIに残っても
@@ -244,11 +271,7 @@ export async function rebuildUsersIndexV2Artifacts(
   return { liveKeys, objectCount: liveKeys.length };
 }
 
-/**
- * 既存 rebuildTarget が書いた canonical legacy users/index.json を入力にする。
- * projection query を二重実行せず、legacy互換を維持したままv2だけを追加する。
- */
-export async function rebuildUsersIndexV2FromLegacyArtifact(
+async function rebuildUsersIndexV2FromLegacyArtifactStrict(
   env: Env,
   signal?: RebuildSignal,
 ): Promise<{ liveKeys: string[]; objectCount: number }> {
@@ -284,4 +307,44 @@ export async function rebuildUsersIndexV2FromLegacyArtifact(
     normalized.generatedAt,
     signal,
   );
+}
+
+/**
+ * v2 は canonical legacy users/index.json に対する任意の高速化成果物。
+ * v2生成に失敗してもlegacyの正常生成まで失敗扱いにするとqueue retryが増幅するため、
+ * manifestをR2から除去してlegacy fallbackを強制できた場合だけbest-effort成功扱いにする。
+ * manifest無効化自体が失敗した場合は古いv2を正本化しないため例外を伝播して再試行する。
+ */
+export async function rebuildUsersIndexV2FromLegacyArtifact(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<{ liveKeys: string[]; objectCount: number }> {
+  try {
+    return await rebuildUsersIndexV2FromLegacyArtifactStrict(env, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    try {
+      await invalidateUsersIndexV2Manifest(env, signal);
+    } catch (invalidationError) {
+      console.error(
+        JSON.stringify({
+          service: "users-index-v2",
+          result: "manifest_invalidation_failed",
+          error_name:
+            invalidationError instanceof Error
+              ? invalidationError.name
+              : "UnknownError",
+        }),
+      );
+      throw error;
+    }
+    console.warn(
+      JSON.stringify({
+        service: "users-index-v2",
+        result: "legacy_fallback",
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+    return { liveKeys: [], objectCount: 0 };
+  }
 }
