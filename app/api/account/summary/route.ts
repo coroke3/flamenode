@@ -4,7 +4,6 @@ import {
   CurrentUserUnavailableError,
   getCurrentUser,
 } from "@/lib/auth/currentUser";
-import { getAuthSession } from "@/lib/auth/session";
 import type { AccountSummaryResponse } from "@/lib/account/summary";
 
 export const dynamic = "force-dynamic";
@@ -37,11 +36,16 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
     return loggedOut();
   }
 
-  // getCurrentUser と同一requestの session cache を再利用する（auth() の再実行を避ける）。
-  const session = await getAuthSession();
   let headerUser;
   try {
-    headerUser = await buildHeaderUser(session?.user);
+    // getCurrentUser() が同一requestでDB正本から解決済みの role / active X を再利用する。
+    // Auth.js sessionの古い値を authoritative snapshot として扱わない。
+    headerUser = await buildHeaderUser(sessionUser, {
+      authoritativeUserSnapshot: {
+        role: sessionUser.role,
+        active_x_user_id: sessionUser.active_x_user_id,
+      },
+    });
   } catch {
     // X ID一覧・管理イベント取得失敗でもログイン済み要約は返す。
     return NextResponse.json(
