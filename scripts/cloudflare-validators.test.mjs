@@ -191,6 +191,7 @@ function writeValidTemplate(root) {
       'QUEUE_DISPATCH_ENABLED = "0"',
       'QUEUE_CONTINUATION_ENABLED = "0"',
       'QUEUE_YOUTUBE_SYNC_ENABLED = "0"',
+      'PUBLIC_VISIBILITY_GUARD_MODE = "observe"',
       "",
       "[[queues.producers]]",
       'queue = "flamenode-notification-wake"',

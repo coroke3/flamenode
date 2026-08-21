@@ -31,10 +31,10 @@ main push
   -> guarded D1 migration check
        -> safe index-only pending がある場合だけ適用
   -> strict Remote D1 read-only preflight
-  -> flamenode-content-jobs
-  -> flamenode-fast-jobs
-  -> flamenode-sync-jobs
   -> flamenode-web
+  -> flamenode-fast-jobs
+  -> flamenode-content-jobs
+  -> flamenode-sync-jobs
   -> production smoke
 ```
 
@@ -285,7 +285,7 @@ Deploy commandは次を行います。
 4. Cron Worker 3本のupload sizeをdry-run検査する。
 5. Remote D1の適用済みmigrationをread-onlyで確認し、安全なindex-only pendingだけをguarded auto-applyする。
 6. 適用後を含めRemote D1のstrict read-only schema preflightを行う。
-7. content→fast→sync→webの順でdeployする（Cron Workerを先に、Webを最後）。
+7. web→fast→content→syncの順でdeployする（Webを先に、Cron Workerを順に更新）。
 8. 全deploy成功後だけproduction smokeを行う。
 
 途中失敗時は後続Workerとsmokeへ進みません。guarded D1 migrationが失敗した場合はWorker deploy開始前なのでWorker世代は変更されません。4 Workerを跨ぐ単一transactionではないため、Worker deploy開始後に失敗した場合は「10. rollback」に従い同じ正常commitへ戻します。
@@ -354,7 +354,7 @@ code rollbackで旧schema fallback、二重書込み、runtime DDLを復活さ�
 2. production環境検査が示す不足した**変数名、secret名、Worker名だけ**を確認する。
 3. guarded D1 migration stageでpending名・allow-list判定・D1 Edit権限のどこで停止したか確認する。
 4. strict Remote D1 preflightのschema version、必須table、migration名を確認する。
-5. content→fast→sync→webのどこまで同じcommitでdeployされたか確認する。
+5. web→fast→content→syncのどこまで同じcommitでdeployされたか確認する。
 6. 公開health、保護deep health、3 Cron health、smokeの最初の失敗を確認する。
 7. Cloudflare DashboardのInvocation Status、`exceededCpu`、D1 rows read/written、R2/KV、Cron履歴を確認する。
 8. secret、token、実resource ID、cookie、Webhook URL、OAuth情報をlog、Issue、監査snapshotへ貼らない。

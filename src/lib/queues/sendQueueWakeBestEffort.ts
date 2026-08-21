@@ -142,7 +142,10 @@ export async function sendQueueWakeBestEffort(
   }
 
   let sendFailed = false;
-  const sendPromise = queue.send(message).then(
+  // Queue bindings normally return a Promise, but a test/local binding (or a
+  // runtime shim) may throw before returning one. Normalize both paths so the
+  // best-effort contract never leaks a synchronous send failure.
+  const sendPromise = Promise.resolve().then(() => queue.send(message)).then(
     () => {
       options.sentKinds?.add(options.kind);
     },
@@ -166,12 +169,23 @@ export async function sendQueueWakeBestEffort(
   if (waitUntil) {
     // 非同期送信中の重複抑止のため先に予約し、失敗時は解除する
     options.sentKinds?.add(options.kind);
-    waitUntil(
-      sendPromise.then(() => {
-        if (sendFailed) options.sentKinds?.delete(options.kind);
-      }),
-    );
-    return { sent: true, reason: "async_pending" };
+    const trackedPromise = sendPromise.then(() => {
+      if (sendFailed) options.sentKinds?.delete(options.kind);
+    });
+    try {
+      waitUntil(trackedPromise);
+      return { sent: true, reason: "async_pending" };
+    } catch {
+      // A local/runtime shim may throw before registering waitUntil. Await the
+      // already-started send so this best-effort helper never leaks that
+      // synchronous registration failure or leaves a stale sentKinds marker.
+      await trackedPromise;
+      if (sendFailed) {
+        options.sentKinds?.delete(options.kind);
+        return { sent: false, reason: "send_failed" };
+      }
+      return { sent: true };
+    }
   }
 
   await sendPromise;

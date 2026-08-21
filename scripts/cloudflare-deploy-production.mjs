@@ -95,10 +95,11 @@ export function deployProduction({
 
   const deploys = [
     {
-      label: "cloudflare-deploy:flamenode-content-jobs",
-      service: "flamenode-content-jobs",
+      label: "cloudflare-deploy:flamenode-web",
+      service: "flamenode-web",
+      preserveWorkersBuildName: true,
       executable: process.execPath,
-      args: [wranglerBin, "deploy", "--config", configs["content-jobs"]],
+      args: [openNextBin, "deploy", "--config", configs.web],
     },
     {
       label: "cloudflare-deploy:flamenode-fast-jobs",
@@ -107,17 +108,16 @@ export function deployProduction({
       args: [wranglerBin, "deploy", "--config", configs["fast-jobs"]],
     },
     {
+      label: "cloudflare-deploy:flamenode-content-jobs",
+      service: "flamenode-content-jobs",
+      executable: process.execPath,
+      args: [wranglerBin, "deploy", "--config", configs["content-jobs"]],
+    },
+    {
       label: "cloudflare-deploy:flamenode-sync-jobs",
       service: "flamenode-sync-jobs",
       executable: process.execPath,
       args: [wranglerBin, "deploy", "--config", configs["sync-jobs"]],
-    },
-    {
-      label: "cloudflare-deploy:flamenode-web",
-      service: "flamenode-web",
-      preserveWorkersBuildName: true,
-      executable: process.execPath,
-      args: [openNextBin, "deploy", "--config", configs.web],
     },
   ];
 

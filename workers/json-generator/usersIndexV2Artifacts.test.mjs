@@ -4,6 +4,7 @@ import {
   rebuildUsersIndexV2Artifacts,
   rebuildUsersIndexV2FromLegacyArtifact,
 } from "./usersIndexV2Artifacts.ts";
+import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 
 function source(index) {
   return {
@@ -120,6 +121,21 @@ test("users index v2 tracks all generation objects within a bounded D1 statement
           .length <= 12,
     ),
   );
+});
+
+test("rebuild環境はimmutable page/searchのdeduplicate falseを二重probeしない", async () => {
+  const env = createEnv();
+  const rebuildEnv = rebuildEnvironment({ ...env, KV: {} });
+
+  await rebuildUsersIndexV2Artifacts(
+    rebuildEnv,
+    [source(0)],
+    1_700_000_000,
+  );
+
+  // Only the manifest is content-deduplicated. Generation-specific pages and
+  // search use immutable keys and must not trigger implicit D1 hash probes.
+  assert.equal(env.calls.first, 1);
 });
 
 test("manifest R2 failure leaves every successful page/search PUT tracked", async () => {

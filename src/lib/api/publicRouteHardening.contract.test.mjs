@@ -74,6 +74,10 @@ test("公開export/mediaと内部検索は認可後の障害・cacheを安全に
   assert.match(sources.media, /CloudflareBindingsUnavailableError/);
   assert.match(sources.media, /status: 503/);
   assert.match(sources.slotIcon, /CloudflareBindingsUnavailableError/);
+  assert.match(
+    sources.slotIcon,
+    /CurrentUserUnavailableError[\s\S]*?status: 503,[\s\S]*?headers: UNAVAILABLE_HEADERS/,
+  );
   assert.match(sources.slotIcon, /media read failed/);
   assert.match(
     sources.xSearch,

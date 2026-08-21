@@ -87,6 +87,25 @@ test("pending only は最大50件・API batch 1件に固定する", () => {
   assert.match(source, /has_more_pending/);
 });
 
+test("syncBatchの呼出し側オプションもD1読取・外部APIのhard capを超えない", async () => {
+  assert.match(source, /function boundedSyncOption/);
+  assert.match(source, /YOUTUBE_SYNC_MAX_ROWS_PER_RUN/);
+  assert.match(source, /YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN/);
+
+  const { env, fetchImpl } = multiChunkEnv(1_000);
+  await syncBatch(env, fetchImpl, undefined, {
+    mode: "pending_only",
+    maxVideos: 9_999,
+    maxApiBatches: 9_999,
+  });
+
+  const lookupCalls = env.sqlCalls.filter(({ sql }) =>
+    sql.includes("WHERE video_id IN"),
+  );
+  assert.equal(lookupCalls.length, 3);
+  assert.ok(env.fetchCalls <= YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN);
+});
+
 test("Recovery Cronの既存metadata読取はD1の100 bind未満へ分割する", async () => {
   assert.equal(YOUTUBE_METADATA_LOOKUP_CHUNK_SIZE, 90);
   const { env, fetchImpl } = multiChunkEnv(200);
@@ -603,8 +622,10 @@ function multiChunkEnv(videoCount = 51) {
     },
     DB: {
       prepare(sql) {
+        let currentBindings = [];
         const statement = {
           bind(...bindings) {
+            currentBindings = bindings;
             sqlCalls.push({ sql, bindings });
             return statement;
           },
@@ -616,7 +637,12 @@ function multiChunkEnv(videoCount = 51) {
               };
             }
             if (sql.includes("sync_status = 'pending'")) {
-              return { results: rows };
+              const limit = Number(currentBindings[0]);
+              return {
+                results: Number.isFinite(limit) && limit >= 0
+                  ? rows.slice(0, Math.floor(limit))
+                  : rows,
+              };
             }
             if (sql.includes("WHERE video_id IN")) {
               const videoIds = sqlCalls.at(-1)?.bindings ?? [];

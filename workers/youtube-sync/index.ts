@@ -984,6 +984,17 @@ function splitRows(
   return chunks.slice(0, maxApiBatches);
 }
 
+function boundedSyncOption(
+  value: number | undefined,
+  fallback: number,
+  maximum: number,
+): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(0, Math.floor(parsed)));
+}
+
 function resolveSyncBatchLimits(options: SyncBatchOptions = {}): {
   mode: SyncBatchMode;
   maxVideos: number;
@@ -994,23 +1005,47 @@ function resolveSyncBatchLimits(options: SyncBatchOptions = {}): {
   if (mode === "pending_only") {
     return {
       mode,
-      maxVideos: options.maxVideos ?? YOUTUBE_PENDING_MAX_VIDEOS_PER_RUN,
-      maxApiBatches: options.maxApiBatches ?? YOUTUBE_PENDING_MAX_API_BATCHES_PER_RUN,
+      maxVideos: boundedSyncOption(
+        options.maxVideos,
+        YOUTUBE_PENDING_MAX_VIDEOS_PER_RUN,
+        YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
+      ),
+      maxApiBatches: boundedSyncOption(
+        options.maxApiBatches,
+        YOUTUBE_PENDING_MAX_API_BATCHES_PER_RUN,
+        YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
+      ),
       includePending: false,
     };
   }
   if (mode === "blocked_recheck_only") {
     return {
       mode,
-      maxVideos: options.maxVideos ?? BLOCKED_RECHECK_MAX_VIDEOS_PER_RUN,
-      maxApiBatches: options.maxApiBatches ?? 1,
+      maxVideos: boundedSyncOption(
+        options.maxVideos,
+        BLOCKED_RECHECK_MAX_VIDEOS_PER_RUN,
+        YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
+      ),
+      maxApiBatches: boundedSyncOption(
+        options.maxApiBatches,
+        1,
+        YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
+      ),
       includePending: false,
     };
   }
   return {
     mode,
-    maxVideos: options.maxVideos ?? YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
-    maxApiBatches: options.maxApiBatches ?? YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
+    maxVideos: boundedSyncOption(
+      options.maxVideos,
+      YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
+      YOUTUBE_SYNC_MAX_ROWS_PER_RUN,
+    ),
+    maxApiBatches: boundedSyncOption(
+      options.maxApiBatches,
+      YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
+      YOUTUBE_SYNC_MAX_API_CALLS_PER_RUN,
+    ),
     includePending: options.includePending === true,
   };
 }

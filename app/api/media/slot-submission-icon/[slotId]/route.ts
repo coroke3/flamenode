@@ -40,7 +40,10 @@ export async function GET(
     }
   } catch (error) {
     if (error instanceof CurrentUserUnavailableError) {
-      return new Response("Media access check unavailable", { status: 503 });
+      return new Response("Media access check unavailable", {
+        status: 503,
+        headers: UNAVAILABLE_HEADERS,
+      });
     }
     throw error;
   }

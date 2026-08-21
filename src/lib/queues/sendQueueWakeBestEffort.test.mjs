@@ -144,4 +144,52 @@ if (runTestWithTsx(import.meta.url)) {
       "version",
     ]);
   });
+
+  test("sendがPromiseを返す前にthrowしてもbest-effortで握りつぶす", async () => {
+    resetQueueWakeWarningStateForTests();
+    const puts = [];
+    const result = await sendQueueWakeBestEffort({
+      kind: "notification_available",
+      source: "web",
+      queue: {
+        send() {
+          throw new Error("queue binding threw synchronously");
+        },
+      },
+      envFlags: enabledFlags,
+      kv: {
+        async put(key, value) {
+          puts.push({ key, value });
+        },
+      },
+    });
+    assert.equal(result.sent, false);
+    assert.equal(result.reason, "send_failed");
+    assert.equal(puts.length, 1);
+    assert.equal(JSON.parse(puts[0].value).reason, "send_failed");
+  });
+
+  test("waitUntil登録の同期throwもbest-effortで握りつぶす", async () => {
+    resetQueueWakeWarningStateForTests();
+    const sentKinds = new Set();
+    let sendCalls = 0;
+    const result = await sendQueueWakeBestEffort({
+      kind: "notification_available",
+      source: "web",
+      queue: {
+        async send() {
+          sendCalls += 1;
+        },
+      },
+      waitUntil() {
+        throw new Error("waitUntil unavailable");
+      },
+      envFlags: enabledFlags,
+      sentKinds,
+    });
+    assert.equal(result.sent, true);
+    assert.equal(result.reason, undefined);
+    assert.equal(sendCalls, 1);
+    assert.equal(sentKinds.has("notification_available"), true);
+  });
 }

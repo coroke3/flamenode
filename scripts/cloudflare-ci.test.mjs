@@ -992,7 +992,7 @@ test("wrangler dry-run upload size parser enforces warn and fail thresholds", ()
   );
 });
 
-test("production deploy order is content, fast, sync, web and failure stops every later target", () =>
+test("production deploy order is web, fast, content, sync and failure stops every later target", () =>
   withTempDirectory("flamenode-deploy-order-", (repoRoot) => {
     const fakeOpenNext = path.join(repoRoot, "opennext.mjs");
     const fakeWrangler = path.join(repoRoot, "wrangler.mjs");
@@ -1024,10 +1024,10 @@ test("production deploy order is content, fast, sync, web and failure stops ever
       "secrets",
       "upload-sizes",
       "schema",
-      "cloudflare-deploy:flamenode-content-jobs",
-      "cloudflare-deploy:flamenode-fast-jobs",
-      "cloudflare-deploy:flamenode-sync-jobs",
       "cloudflare-deploy:flamenode-web",
+      "cloudflare-deploy:flamenode-fast-jobs",
+      "cloudflare-deploy:flamenode-content-jobs",
+      "cloudflare-deploy:flamenode-sync-jobs",
     ]);
 
     labels.length = 0;
@@ -1040,8 +1040,8 @@ test("production deploy order is content, fast, sync, web and failure stops ever
         },
       }),
     );
+    assert.ok(!labels.includes("cloudflare-deploy:flamenode-content-jobs"));
     assert.ok(!labels.includes("cloudflare-deploy:flamenode-sync-jobs"));
-    assert.ok(!labels.includes("cloudflare-deploy:flamenode-web"));
   }));
 
 test("Workers Builds identity variables are limited to the web deployment", () => {

@@ -142,7 +142,17 @@ export async function serveSlotSubmissionIcon(
 
   const { iconUrl, cacheControl } = access;
   if (iconUrl.startsWith("https://")) {
-    return Response.redirect(iconUrl, 302);
+    // Keep the ACL-derived cache policy on redirects as well as R2 responses.
+    // A private slot must not leave its external icon URL in an intermediary
+    // cache that could serve it after the viewer authorization has changed.
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: iconUrl,
+        "cache-control": cacheControl,
+        "x-content-type-options": "nosniff",
+      },
+    });
   }
   if (iconUrl.startsWith("http://")) {
     return new Response("Not found", { status: 404 });

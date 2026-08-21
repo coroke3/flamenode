@@ -191,6 +191,8 @@ test("https外部iconは302、httpは404", async () => {
   });
   assert.equal(https.response.status, 302);
   assert.equal(https.response.headers.get("location"), "https://cdn.example/icon.png");
+  assert.match(https.response.headers.get("cache-control") ?? "", /^public,/);
+  assert.equal(https.response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(https.state.gets, 0);
 
   const http = await requestIcon({
@@ -206,6 +208,26 @@ test("https外部iconは302、httpは404", async () => {
     viewer: null,
   });
   assert.equal(http.response.status, 404);
+});
+
+test("非公開slotの外部icon redirectはACL由来のprivate no-storeを維持する", async () => {
+  const { response, state } = await requestIcon({
+    slotId: VALID_SLOT_ID,
+    row: {
+      slot_status: "submitted",
+      reserved_by_user_id: "user-1",
+      slot_x_user_id: "x",
+      slot_visibility_mode: "anonymous",
+      event_visibility_status: "public",
+      creator_icon_url: "https://cdn.example/private-icon.png",
+    },
+    viewer: { id: "user-1", active_x_user_id: "x" },
+  });
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get("location"), "https://cdn.example/private-icon.png");
+  assert.match(response.headers.get("cache-control") ?? "", /private, no-store/);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(state.gets, 0);
 });
 
 test("R2 iconはACL通過後に安全objectだけ返す", async () => {

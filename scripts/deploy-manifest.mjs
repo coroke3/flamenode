@@ -5,10 +5,10 @@ export const DEPLOY_MANIFEST_RELATIVE_PATH =
   ".deploy/flamenode-production-deploy.json";
 
 export const PRODUCTION_DEPLOY_ORDER = Object.freeze([
-  "flamenode-content-jobs",
-  "flamenode-fast-jobs",
-  "flamenode-sync-jobs",
   "flamenode-web",
+  "flamenode-fast-jobs",
+  "flamenode-content-jobs",
+  "flamenode-sync-jobs",
 ]);
 
 export function deployManifestPath(repoRoot = process.cwd()) {

@@ -222,10 +222,10 @@ test("production deploy applies guarded migrations before strict schema prefligh
       "upload-sizes",
       "safe-migration-apply",
       "strict-schema-preflight",
-      "cloudflare-deploy:flamenode-content-jobs",
-      "cloudflare-deploy:flamenode-fast-jobs",
-      "cloudflare-deploy:flamenode-sync-jobs",
       "cloudflare-deploy:flamenode-web",
+      "cloudflare-deploy:flamenode-fast-jobs",
+      "cloudflare-deploy:flamenode-content-jobs",
+      "cloudflare-deploy:flamenode-sync-jobs",
     ]);
   }));
 

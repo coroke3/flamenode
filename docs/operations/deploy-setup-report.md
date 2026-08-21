@@ -345,7 +345,7 @@ npm run test:cloudflare-ci
 4. [ ] 初回 `workers.dev` smoke 用に Build Variables へ `FLAMENODE_ALLOW_WORKERS_DEV_ORIGIN=1` を設定（custom domain 切替後は削除し未設定のままにする）
 5. [ ] `flamenode-web` だけ Git 連携し、§4 の Build / Deploy command を保存
 6. [ ] `main` へ push し、Workers Build を実行
-7. [ ] deploy 固定順（content → fast → sync → web）が完了し、production smoke が次をすべて成功
+7. [ ] deploy 固定順（web → fast → content → sync）が完了し、production smoke が次をすべて成功
     - 正式トップと同一 origin の `_next/static` asset
     - 公開 `/api/health` の service / runtime / commit
     - Discord Auth callback が 404 / 5xx ではない
