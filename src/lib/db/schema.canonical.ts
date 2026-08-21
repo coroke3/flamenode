@@ -423,21 +423,6 @@ export const slotReservationGroups = sqliteTable(
   }),
 );
 
-export const slotReservationSubjectCounts = sqliteTable(
-  "slot_reservation_subject_counts",
-  {
-    event_id: text("event_id")
-      .notNull()
-      .references(() => events.id, { onDelete: "cascade" }),
-    x_id_snapshot: text("x_id_snapshot").notNull(),
-    reservation_count: integer("reservation_count").notNull().default(0),
-    updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.event_id, t.x_id_snapshot] }),
-  }),
-);
-
 export const slots = sqliteTable(
   "slots",
   {
@@ -475,6 +460,19 @@ export const slots = sqliteTable(
     byReservationGroup: index("slots_reservation_group_idx").on(
       t.reservation_group_id,
     ),
+    activeReservationSubjectIdx: index(
+      "slots_event_x_snapshot_active_group_idx",
+    )
+      .on(
+        t.event_id,
+        t.reserved_x_id_snapshot,
+        t.status,
+        t.reservation_group_id,
+        t.id,
+      )
+      .where(
+        sql`reserved_x_id_snapshot IS NOT NULL AND status IN ('reserved', 'submitted')`,
+      ),
     reservedUnboundByOwnerIdx: index(
       "slots_reserved_unbound_by_owner_snapshot_idx",
     )
