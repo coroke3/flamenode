@@ -283,13 +283,20 @@ export function filterPublicArtifactPayload<T>(
         isPublicVideoRow(row, context),
       ) as T;
     case "search_index":
-      return withFilteredRows(
-        withFilteredRows(root, ["videos"], (row) =>
+      {
+        let next = withFilteredRows(root, ["videos"], (row) =>
           isPublicVideoRow(row, context),
-        ),
-        ["users"],
-        (row) => isPublicUserRow(row, context),
-      ) as T;
+        );
+        next = withFilteredNestedRows(
+          next,
+          "records",
+          ["items"],
+          (row) => isPublicVideoRow(row, context),
+        );
+        return withFilteredRows(next, ["users"], (row) =>
+          isPublicUserRow(row, context),
+        ) as T;
+      }
     case "user": {
       const user = root.user;
       if (user != null && !isPublicUserRow(user, context)) return null;

@@ -21,7 +21,12 @@
 .trigger:hover,
 .triggerActive {
   background-color: var(--bg-elevated);
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 3px;
 }
 
 .triggerAvatar {
@@ -75,7 +80,9 @@
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg, 16px);
-  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 18px 42px -18px color-mix(in srgb, var(--text-primary) 44%, transparent);
+  backdrop-filter: blur(14px) saturate(115%);
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
   padding: 12px;
   z-index: 50;
   display: flex;
@@ -116,6 +123,11 @@
 
 .headerInfoLink:hover {
   background-color: var(--accent-primary-soft);
+}
+
+.headerInfoLink:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 .headerLinkIcon {
@@ -212,6 +224,12 @@
 .menuItem:hover {
   color: var(--text-primary);
   background-color: var(--bg-elevated);
+}
+
+.menuItem:focus-visible,
+.xidOption:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 .menuItemDanger {

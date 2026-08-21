@@ -58,10 +58,12 @@ async function readOperationModeFromD1(db: DB): Promise<OperationMode | null> {
  * 2. isolate 短時間キャッシュ
  * 3. KV 複製
  * 4. allowD1 時のみ D1 system_settings
- * 5. すべて失敗 → static_only（normal へは倒さない）
+ * 5. すべて失敗 → normal（static_only へ自動遷移しない）
  *
- * 手順 5 の fail-closed はインフラ障害時の配信安全策であり、
- * Cloudflare 使用量に基づく自動 CostGuard ではない。
+ * operation_mode は CostGuard の明示設定でのみ変更する。KV/D1 の一時的な
+ * binding 障害を static_only と解釈すると、公開の live overlay や degraded
+ * fallback まで機能制限されるため、設定を解決できない場合は通常モードを
+ * 維持する。書き込み側の CostGuard は従来どおり D1 正本を直接確認する。
  *
  * KV と D1 が不一致のとき:
  * 強制 env > isolate TTL 内キャッシュ > KV > D1
@@ -92,7 +94,7 @@ export async function resolvePublicOperationMode(
     }
   }
 
-  const fallback: OperationMode = "static_only";
+  const fallback: OperationMode = "normal";
   writeIsolateModeCache(fallback);
   return fallback;
 }

@@ -6,6 +6,10 @@ import {
 
 export const PUBLIC_REQUEST_METRICS_LOG_KEY = "public_request_metrics";
 
+export type PublicPathMode = "v2" | "legacy" | "degraded_d1" | "unavailable";
+export type PublicArtifactMode = "fresh" | "stale" | "unavailable";
+export type PublicSearchBackend = "postings-v1" | "legacy" | "degraded_d1";
+
 export type PublicRequestMetricsSnapshot = {
   route: string;
   d1_queries: number;
@@ -15,6 +19,12 @@ export type PublicRequestMetricsSnapshot = {
   static_miss: number;
   d1_fallback: boolean;
   public_data_mode: PublicDataMode | null;
+  path_mode: PublicPathMode | null;
+  artifact_mode: PublicArtifactMode | null;
+  search_backend: PublicSearchBackend | null;
+  search_shards_read: number;
+  search_candidates: number | null;
+  fallback_reason: string | null;
 };
 
 type MutablePublicRequestMetrics = {
@@ -27,6 +37,12 @@ type MutablePublicRequestMetrics = {
   static_miss: number;
   d1_fallback: boolean;
   public_data_mode: PublicDataMode | null;
+  path_mode: PublicPathMode | null;
+  artifact_mode: PublicArtifactMode | null;
+  search_backend: PublicSearchBackend | null;
+  search_shards_read: number;
+  search_candidates: number | null;
+  fallback_reason: string | null;
 };
 
 const storage = new AsyncLocalStorage<MutablePublicRequestMetrics>();
@@ -42,6 +58,12 @@ function createMetricsState(route: string): MutablePublicRequestMetrics {
     static_miss: 0,
     d1_fallback: false,
     public_data_mode: null,
+    path_mode: null,
+    artifact_mode: null,
+    search_backend: null,
+    search_shards_read: 0,
+    search_candidates: null,
+    fallback_reason: null,
   };
 }
 
@@ -77,6 +99,12 @@ export function getPublicRequestMetricsSnapshot():
     static_miss: state.static_miss,
     d1_fallback: state.d1_fallback,
     public_data_mode: state.public_data_mode,
+    path_mode: state.path_mode,
+    artifact_mode: state.artifact_mode,
+    search_backend: state.search_backend,
+    search_shards_read: state.search_shards_read,
+    search_candidates: state.search_candidates,
+    fallback_reason: state.fallback_reason,
   };
 }
 
@@ -87,6 +115,50 @@ export function notePublicDataMode(mode: PublicDataMode): void {
   if (mode === "degraded_d1") {
     state.d1_fallback = true;
   }
+}
+
+export function notePublicPathMode(mode: PublicPathMode): void {
+  const state = storage.getStore();
+  if (state) state.path_mode = mode;
+}
+
+export function notePublicArtifactMode(mode: PublicArtifactMode): void {
+  const state = storage.getStore();
+  if (!state) return;
+  const rank: Record<PublicArtifactMode, number> = {
+    fresh: 0,
+    stale: 1,
+    unavailable: 2,
+  };
+  if (
+    state.artifact_mode === null ||
+    rank[mode] > rank[state.artifact_mode]
+  ) {
+    state.artifact_mode = mode;
+  }
+}
+
+export function notePublicSearchBackend(backend: PublicSearchBackend): void {
+  const state = storage.getStore();
+  if (state) state.search_backend = backend;
+}
+
+export function recordPublicSearchShard(): void {
+  const state = storage.getStore();
+  if (state) state.search_shards_read += 1;
+}
+
+export function recordPublicSearchCandidates(count: number): void {
+  const state = storage.getStore();
+  if (!state || !Number.isFinite(count)) return;
+  state.search_candidates = Math.max(0, Math.floor(count));
+}
+
+export function recordPublicFallbackReason(reason: string): void {
+  const state = storage.getStore();
+  if (!state) return;
+  const normalized = reason.trim().slice(0, 80);
+  if (normalized) state.fallback_reason = normalized;
 }
 
 export function recordPublicR2Get(): void {

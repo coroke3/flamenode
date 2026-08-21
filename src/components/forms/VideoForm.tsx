@@ -2310,27 +2310,15 @@ export function VideoForm({
         />
       ) : null}
       {result && result.ok ? (
-        <div
-          role="status"
-          style={{
-            padding: "12px 14px",
-            border: "1px solid var(--accent-primary)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--accent-primary-soft)",
-            color: "var(--text-primary)",
-            fontSize: 13,
-            display: "grid",
-            gap: 10,
-          }}
-        >
-          <div>
+        <div role="status" className={styles.resultNotice}>
+          <div className={styles.resultNoticeHeader}>
             <Icon name="check" size={13} aria-hidden />{" "}
             {mode === "edit"
               ? "保存しました。"
               : "提出が完了しました。続けて以下から進めてください。"}
           </div>
           {result.pendingPublicReflection ? <PublicReflectionDelayNotice /> : null}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className={styles.resultActions}>
             {result.youtubeVideoId || result.videoId ? (
               <Link
                 href={`/${result.youtubeVideoId ?? result.videoId}`}
@@ -2359,38 +2347,12 @@ export function VideoForm({
         </div>
       ) : null}
       {submitBlockedReason ? (
-        <div
-          role="alert"
-          style={{
-            padding: "12px 14px",
-            border: "1px solid var(--accent-warning, #c08a00)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--accent-warning-soft, rgba(255, 200, 0, 0.08))",
-            color: "var(--text-primary)",
-            fontSize: 13,
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-          }}
-        >
+        <div role="alert" className={styles.blockedNotice}>
           <Icon name="warning" size={13} aria-hidden />
           <span>{submitBlockedReason}</span>
         </div>
       ) : noEditableFormSections && permissionSubmitBlockedHint ? (
-        <div
-          role="status"
-          style={{
-            padding: "12px 14px",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-sm)",
-            background: "var(--bg-elevated)",
-            color: "var(--text-primary)",
-            fontSize: 13,
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-          }}
-        >
+        <div role="status" className={styles.permissionNotice}>
           <Icon name="info" size={13} aria-hidden />
           <span>{permissionSubmitBlockedHint}</span>
         </div>

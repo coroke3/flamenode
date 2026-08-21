@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "./PublicHeader.module.css";
 import { Logo } from "@/components/ui/Logo";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import type { XIdEntry } from "@/lib/xid/entries";
 import type { HeaderUser } from "@/lib/auth/headerUser";
@@ -13,22 +13,7 @@ import { PublicAccountIsland, usePublicAccountSummary } from "@/components/layou
 import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { sanitizeNextPath } from "#utils/next";
 import { useDismissablePanel } from "./useDismissablePanel";
-
-const PUBLIC_NAV_ITEMS: {
-  href: string;
-  label: string;
-  iconName: IconName;
-}[] = [
-  { href: "/list", label: "動画", iconName: "grid" },
-  { href: "/user", label: "クリエイター", iconName: "users" },
-  { href: "/event", label: "イベント", iconName: "calendar" },
-];
-
-function isPathActive(pathname: string | null, href: string): boolean {
-  if (!pathname) return false;
-  if (href === "/") return pathname === "/";
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
+import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "./publicNavigation";
 
 export type PublicHeaderUser = Pick<
   HeaderUser,
@@ -198,7 +183,7 @@ export function PublicHeader({
           aria-label="メインナビゲーション"
         >
           {PUBLIC_NAV_ITEMS.map((item) => {
-            const active = isPathActive(pathname, item.href);
+            const active = isPublicNavItemActive(pathname, item.href);
             return (
               <Link
                 key={item.href}
@@ -208,6 +193,7 @@ export function PublicHeader({
                 }`}
                 aria-current={active ? "page" : undefined}
               >
+                <Icon name={item.iconName} size={14} aria-hidden />
                 {item.label}
               </Link>
             );

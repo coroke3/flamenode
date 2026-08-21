@@ -3,10 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { requireRouteUser } from "@/lib/auth/routeGuard";
 import { getEnv } from "@/lib/cloudflare";
-import {
-  normalizeMemberSearchText,
-  rankMemberSuggestionCandidates,
-} from "@/lib/video/memberSuggestionRank";
+import { searchMemberSuggestions } from "@/lib/video/memberSuggestionSearch";
 import { loadMemberSuggestionsIndexFromBucket } from "@/lib/video/memberSuggestionsLoader";
 
 const MAX_LIMIT = 50;
@@ -96,8 +93,12 @@ export async function GET(
       );
     }
 
-    const normalizedQuery = normalizeMemberSearchText(rawQuery);
-    if (compactSearchChars(normalizedQuery).length < 1) {
+    const normalizedQueryForLength = rawQuery
+      .normalize("NFKC")
+      .toLowerCase()
+      .trim()
+      .replace(/^[＠@]+/, "");
+    if (compactSearchChars(normalizedQueryForLength).length < 1) {
       return NextResponse.json(
         {
           items: [],
@@ -112,20 +113,18 @@ export async function GET(
       );
     }
 
-    const candidates = onlyApproved
-      ? loaded.items.filter((item) => item.approvalStatus === "approved")
-      : loaded.items;
-
-    // 既存rankerを再利用: exact / alias / prefix / contains /
-    // Levenshtein距離1/2（3文字以上）/ occurrence bonus / recency bonus。
-    const ranked = rankMemberSuggestionCandidates(candidates, rawQuery);
-
-    const page = ranked.slice(offset, offset + limit);
-    const hasMore = ranked.length > offset + page.length;
+    const result = searchMemberSuggestions(loaded.items, {
+      query: rawQuery,
+      limit,
+      offset,
+      onlyApproved,
+    });
+    const hasMore = result.hasMore;
 
     return NextResponse.json(
       {
-        items: page.map((item) => ({
+        // 既存のVideoMembersFieldが利用する内部API DTOを維持する。
+        items: result.items.map((item) => ({
           id: item.x_user_id,
           x_name: item.name,
           score: item.score,
@@ -134,7 +133,7 @@ export async function GET(
         query: rawQuery,
         limit,
         offset,
-        nextOffset: hasMore ? offset + page.length : null,
+        nextOffset: result.nextOffset,
         hasMore,
         hint: hasMore
           ? "候補が多いため、名前またはX IDを追加で入力してください。"

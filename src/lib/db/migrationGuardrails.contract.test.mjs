@@ -12,7 +12,12 @@ async function readWorkersSources() {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) await walk(full);
-      else if (/\.(ts|mjs|js)$/.test(entry.name)) files.push(full);
+      // Execution/contract fixtures may create in-memory SQLite tables; they
+      // are not deployed Worker source and must not trip the runtime-DDL
+      // guard. Only production source files participate in this check.
+      else if (/\.(ts|mjs|js)$/.test(entry.name) && !/\.test\.(ts|mjs|js)$/.test(entry.name)) {
+        files.push(full);
+      }
     }
   }
   await walk(workersDir);

@@ -144,16 +144,20 @@
     gap: 8px;
   }
 
+  [data-fn-surface="personal"] .fn-header-inner,
   [data-fn-surface="admin"] .fn-header-inner,
   [data-fn-surface="manage"] .fn-header-inner {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
     align-items: center;
-    justify-content: space-between;
+    justify-content: normal;
   }
 
+  [data-fn-surface="personal"] .fn-header-right,
   [data-fn-surface="admin"] .fn-header-right,
   [data-fn-surface="manage"] .fn-header-right {
-    margin-left: auto;
+    margin-left: 0;
+    justify-self: end;
   }
 
   [data-fn-surface="public"] .fn-logo,

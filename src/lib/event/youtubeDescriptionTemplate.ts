@@ -210,12 +210,11 @@ function resolveLoopMembers(
   members?: readonly YoutubeDescriptionLoopMember[] | null,
 ): ResolvedLoopMember[] {
   return (members ?? [])
-      .map((member, index) => {
+      .map((member) => {
         const chapters = (member.chapters ?? [])
           .map((chapter) => canonicalChapterTime(chapter?.time))
           .filter(Boolean);
         return {
-          member_index: String(index + 1),
           member_name: cleanMemberValue(member.name),
           member_x_id: cleanMemberXId(member.x_user_id),
           member_chapter: chapters[0] ?? "",
@@ -226,7 +225,11 @@ function resolveLoopMembers(
       })
       .filter(
         (member) => member.member_name || member.member_x_id,
-      );
+      )
+      .map((member, index) => ({
+        ...member,
+        member_index: String(index + 1),
+      }));
 }
 
 /**

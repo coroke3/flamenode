@@ -10,12 +10,7 @@ import { SignOutButton } from "@/components/auth/SignOutButton";
 import type { AccountSummaryResponse } from "@/lib/account/summary";
 import type { PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
-
-const MOBILE_NAV_ITEMS = [
-  { href: "/list", label: "動画", iconName: "grid" as const },
-  { href: "/user", label: "クリエイター", iconName: "users" as const },
-  { href: "/event", label: "イベント", iconName: "calendar" as const },
-];
+import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "./publicNavigation";
 
 function mapSummaryToHeaderUser(
   summary: Extract<AccountSummaryResponse, { loggedIn: true }>,
@@ -330,15 +325,33 @@ export function PublicAccountIsland({
   }
 
   if (loading) {
-    return null;
+    return (
+      <div className={styles.mobileSection} aria-busy="true">
+        {PUBLIC_NAV_ITEMS.map((item) => {
+          const active = isPublicNavItemActive(pathname, item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`${styles.mobileLink} ${
+                active ? styles.mobileLinkActive : ""
+              }`}
+              onClick={onClosePanels}
+              aria-current={active ? "page" : undefined}
+            >
+              <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
+            </Link>
+          );
+        })}
+      </div>
+    );
   }
 
   if (unavailable || !user) {
     return (
       <div className={styles.mobileSection}>
-        {MOBILE_NAV_ITEMS.map((item) => {
-          const active =
-            pathname === item.href || pathname?.startsWith(`${item.href}/`);
+        {PUBLIC_NAV_ITEMS.map((item) => {
+          const active = isPublicNavItemActive(pathname, item.href);
           return (
             <Link
               key={item.href}
@@ -390,9 +403,8 @@ export function PublicAccountIsland({
       </div>
 
       <div className={styles.mobileSection}>
-        {MOBILE_NAV_ITEMS.map((item) => {
-          const active =
-            pathname === item.href || pathname?.startsWith(`${item.href}/`);
+        {PUBLIC_NAV_ITEMS.map((item) => {
+          const active = isPublicNavItemActive(pathname, item.href);
           return (
             <Link
               key={item.href}

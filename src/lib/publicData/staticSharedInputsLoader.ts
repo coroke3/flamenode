@@ -2,7 +2,10 @@ import "server-only";
 
 import { cache } from "react";
 import { getEnv } from "@/lib/cloudflare";
-import { recordPublicR2Get } from "@/lib/observability/publicRequestMetrics";
+import {
+  notePublicArtifactMode,
+  recordPublicR2Get,
+} from "@/lib/observability/publicRequestMetrics";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import {
   coercePublicJsonCacheEnvelope,
@@ -89,6 +92,10 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
 }): Promise<StaticJsonLoadResult<T | null>> {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const cacheTtl = args.cacheTtlSeconds ?? 300;
+  const finish = <T>(status: StaticJsonLoadStatus, value: T | null) => {
+    notePublicArtifactMode(status);
+    return { status, value } satisfies StaticJsonLoadResult<T | null>;
+  };
 
   const cacheMode = args.cacheMode ?? "cache_first";
   const cacheFirst = cacheMode === "default" || cacheMode === "cache_first";
@@ -118,12 +125,12 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
                     Math.max(cacheTtl, args.maxStaleAgeSec),
                   );
                 }
-                return { status: "fresh", value: r2Normalized };
+                return finish("fresh", r2Normalized);
               }
             }
           }
         }
-        return { status: "fresh", value: normalized };
+        return finish("fresh", normalized);
       }
     }
   }
@@ -139,7 +146,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
           Math.max(cacheTtl, args.maxStaleAgeSec),
         );
       }
-      return { status: "fresh", value: normalized };
+      return finish("fresh", normalized);
     }
   }
 
@@ -154,7 +161,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
       if (age >= 0 && age <= args.maxStaleAgeSec) {
         const normalized = args.normalize(staleCached.payload);
         if (normalized !== null) {
-          return { status: "stale", value: normalized };
+          return finish("stale", normalized);
         }
       }
     }
@@ -163,12 +170,12 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
     if (age >= 0 && age <= args.maxStaleAgeSec) {
       const normalized = args.normalize(freshCached.payload);
       if (normalized !== null) {
-        return { status: "stale", value: normalized };
+        return finish("stale", normalized);
       }
     }
   }
 
-  return { status: "unavailable", value: null };
+  return finish("unavailable", null);
 }
 
 export async function loadYoutubeRelatedBlocklist(): Promise<

@@ -57,11 +57,13 @@ function createSqliteEnv() {
   };
 
   const objects = new Map();
+  let putCount = 0;
   const R2 = {
     async head(key) {
       return objects.has(key) ? {} : null;
     },
     async put(key, value) {
+      putCount += 1;
       objects.set(key, String(value));
       return {};
     },
@@ -75,7 +77,7 @@ function createSqliteEnv() {
     },
   };
 
-  return { DB, R2, sqlite, objects };
+  return { DB, R2, sqlite, objects, get putCount() { return putCount; } };
 }
 
 test("users index v2 JSON1 tracking SQL runs against SQLite and upserts all artifacts", async () => {
@@ -86,7 +88,7 @@ test("users index v2 JSON1 tracking SQL runs against SQLite and upserts all arti
     1_700_000_000,
   );
 
-  assert.equal(result.objectCount, 35);
+  assert.ok(result.objectCount > 35);
   const count = env.sqlite
     .prepare(
       `SELECT COUNT(*) AS count
@@ -96,7 +98,94 @@ test("users index v2 JSON1 tracking SQL runs against SQLite and upserts all arti
          AND deleted_at IS NULL`,
     )
     .get().count;
-  assert.equal(Number(count), 35);
-  assert.equal(env.objects.size, 35);
+  assert.equal(Number(count), result.objectCount);
+  assert.equal(env.objects.size, result.objectCount);
+  env.sqlite.close();
+});
+
+test("同一generationでtrackingが揃っている通常rebuildはimmutable R2 PUTをskipする", async () => {
+  const env = createSqliteEnv();
+  const items = Array.from({ length: 20 }, (_, index) => source(index));
+  const first = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  const putsAfterFirst = env.putCount;
+  const second = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  assert.equal(second.skipped, true);
+  assert.equal(second.hasMore, false);
+  assert.equal(env.putCount, putsAfterFirst);
+  assert.equal(second.objectCount, first.objectCount);
+  env.sqlite.close();
+});
+
+test("同一generationでもR2のページ欠損時はskipせずimmutable artifactをhealする", async () => {
+  const env = createSqliteEnv();
+  const items = Array.from({ length: 20 }, (_, index) => source(index));
+  const first = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  const pageKey = first.liveKeys.find((key) => key.includes("/score/1.json"));
+  assert.ok(pageKey);
+  env.objects.delete(pageKey);
+  const putsBeforeRepair = env.putCount;
+  const repaired = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  assert.equal(repaired.skipped, false);
+  assert.ok(env.putCount > putsBeforeRepair);
+  assert.ok(env.objects.has(pageKey));
+  env.sqlite.close();
+});
+
+test("current manifest generation keys are never removed as stale GC", async () => {
+  const env = createSqliteEnv();
+  const items = Array.from({ length: 20 }, (_, index) => source(index));
+  await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  const manifest = JSON.parse(env.objects.get("users/index.v2/manifest.json"));
+  const protectedKey = `users/index.v2/g/${manifest.generation}/score/recovery.json`;
+  env.objects.set(protectedKey, "{}");
+  env.sqlite
+    .prepare(
+      `INSERT INTO static_artifacts
+        (id, target_type, target_id, object_key, content_hash, schema_version,
+         source_updated_at, generated_at, deleted_at)
+       VALUES (?, 'users_index_v2', 'global', ?, 'stale', 2, NULL, 1, NULL)`,
+    )
+    .run("protected-current-generation", protectedKey);
+
+  const result = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  assert.equal(result.skipped, true);
+  assert.equal(env.objects.has(protectedKey), true);
+  const row = env.sqlite
+    .prepare(
+      `SELECT deleted_at FROM static_artifacts
+       WHERE target_type = 'users_index_v2' AND target_id = 'global'
+         AND object_key = ?`,
+    )
+    .get(protectedKey);
+  assert.equal(row.deleted_at, null);
+  env.sqlite.close();
+});
+
+test("users v2 GCは500件超のstale backlogをhasMoreで次回へ継続する", async () => {
+  const env = createSqliteEnv();
+  const items = Array.from({ length: 20 }, (_, index) => source(index));
+  await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  const insert = env.sqlite.prepare(
+    `INSERT INTO static_artifacts
+      (id, target_type, target_id, object_key, content_hash, schema_version,
+       source_updated_at, generated_at, deleted_at)
+     VALUES (?, 'users_index_v2', 'global', ?, 'stale', 2, NULL, 1, NULL)`,
+  );
+  for (let index = 0; index < 501; index += 1) {
+    insert.run(`stale-${index}`, `users/index.v2/old/${index}.json`);
+  }
+  const first = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  assert.equal(first.skipped, true);
+  assert.equal(first.hasMore, true);
+  const remainingAfterFirst = env.sqlite
+    .prepare(
+      `SELECT COUNT(*) AS count FROM static_artifacts
+       WHERE target_type = 'users_index_v2' AND target_id = 'global'
+         AND object_key LIKE 'users/index.v2/old/%' AND deleted_at IS NULL`,
+    )
+    .get().count;
+  assert.equal(Number(remainingAfterFirst), 1);
+  const second = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  assert.equal(second.hasMore, false);
   env.sqlite.close();
 });

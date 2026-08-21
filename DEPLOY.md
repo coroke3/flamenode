@@ -179,7 +179,7 @@ deploy preflightはremoteに登録されたsecretの**名前だけ**を検査し
 | `flamenode-web` | D1 `DB`、R2 `BUCKET`、R2 incremental cache `NEXT_INC_CACHE_R2_BUCKET`、KV `KV`、Assets `ASSETS`、service `WORKER_SELF_REFERENCE`、Queue producer `NOTIFICATION_WAKE_QUEUE`、`STATIC_REBUILD_WAKE_QUEUE`、`YOUTUBE_SYNC_WAKE_QUEUE` |
 | `flamenode-fast-jobs` | D1 `DB`、KV `KV`、Queue producer/consumer `NOTIFICATION_WAKE_QUEUE` |
 | `flamenode-content-jobs` | D1 `DB`、R2 `R2`、KV `KV`、Queue producer/consumer `STATIC_REBUILD_WAKE_QUEUE` |
-| `flamenode-sync-jobs` | D1 `DB`、R2 `R2`、KV `KV`、Queue producer/consumer `YOUTUBE_SYNC_WAKE_QUEUE` |
+| `flamenode-sync-jobs` | D1 `DB`、R2 `R2`、KV `KV`、Queue producer/consumer `YOUTUBE_SYNC_WAKE_QUEUE`、producer `STATIC_REBUILD_WAKE_QUEUE` |
 
 論理binding名はコードとwrangler群の契約です。production IDやbucket名だけをBuild Variablesから一時configへ注入します。Queue binding欠落は`npm run check:cloudflare-template`とproduction config検証で**fail-closed**とし、deployを停止します。consumer設定の正本は`workers/*/wrangler.toml`、詳細は[`docs/operations/workers.md`](./docs/operations/workers.md)を参照してください。
 
@@ -217,7 +217,7 @@ malformed manifests are never overwritten, and no remote write occurs without
 
 `cf:bootstrap`はD1、R2、KVだけを作成し、IDを表示・保存せず、migration、Worker deploy、secret更新を行いません。Cloudflare Dashboardで実IDを確認し、Build Variablesへ直接登録します。
 
-Queue 6本（wake 3 + DLQ 3）は初回のみ手動作成します。binding名・consumer設定の正本はtracked wrangler群です。
+Queue 6本（wake 3 + DLQ 3）は初回のみ手動作成します。binding名・consumer設定の正本はtracked wrangler群です。`flamenode-sync-jobs` の `STATIC_REBUILD_WAKE_QUEUE` producer はスコア起因の静的再生成予約を content-jobs へ渡すため、省略しません。
 
 ```sh
 npx wrangler queues create flamenode-notification-wake

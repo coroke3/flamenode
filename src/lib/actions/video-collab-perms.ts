@@ -242,8 +242,16 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
 
-  const db = getDatabase();
+  let db: ReturnType<typeof getDatabase>;
+  try {
+    db = getDatabase();
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[video-collab-perms] database binding unavailable", error);
+    return { ok: false, message: "DB に接続できません。" };
+  }
   if (!db) return { ok: false, message: "DB に接続できません。" };
+  try {
   const video = await loadEditableVideo(db, actor, parsed.data.video_id, formData);
   if (!video) return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
   const privilegeMode = video.privilegeMode;
@@ -398,6 +406,11 @@ export async function upsertVideoCollaborator(formData: FormData): Promise<Video
   }
   await revalidateVideoCollabPathsBestEffort(video.id);
   return { ok: true, message: canEdit ? "作品編集への参加を付与しました。" : "作品編集への参加を無効化しました。" };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[video-collab-perms] collaborator action failed", error);
+    return { ok: false, message: "合作権限の読込・更新に失敗しました。" };
+  }
 }
 
 export async function deleteVideoCollaborator(formData: FormData): Promise<VideoCollabResult> {
@@ -408,8 +421,16 @@ export async function deleteVideoCollaborator(formData: FormData): Promise<Video
   const xUserId = normalizeXId(String(formData.get("x_user_id") ?? ""));
   if (!videoId || !xUserId) return { ok: false, message: "video_id と X ID が必要です。" };
 
-  const db = getDatabase();
+  let db: ReturnType<typeof getDatabase>;
+  try {
+    db = getDatabase();
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[video-collab-perms] database binding unavailable", error);
+    return { ok: false, message: "DB に接続できません。" };
+  }
   if (!db) return { ok: false, message: "DB に接続できません。" };
+  try {
   const video = await loadEditableVideo(db, actor, videoId, formData);
   if (!video) return { ok: false, message: "対象作品が見つからない、または権限がありません。" };
   const privilegeMode = video.privilegeMode;
@@ -463,6 +484,11 @@ export async function deleteVideoCollaborator(formData: FormData): Promise<Video
   }
   await revalidateVideoCollabPathsBestEffort(video.id);
   return { ok: true, message: "作品編集への参加を解除しました。" };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[video-collab-perms] collaborator revoke failed", error);
+    return { ok: false, message: "合作権限の読込・解除に失敗しました。" };
+  }
 }
 
 const PERMISSION_BATCH_IN_CLAUSE_SIZE = 80;
@@ -511,8 +537,16 @@ export async function applyVideoCollaboratorPermissionsBatch(
     return { ok: true, granted: [], revoked: [], unchanged: 0 };
   }
 
-  const db = getDatabase();
+  let db: ReturnType<typeof getDatabase>;
+  try {
+    db = getDatabase();
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[video-collab-perms] database binding unavailable", error);
+    return { ok: false, message: "DB に接続できません。" };
+  }
   if (!db) return { ok: false, message: "DB に接続できません。" };
+  try {
   const video = await loadEditableVideoForPermissions(
     db,
     actor,
@@ -523,8 +557,7 @@ export async function applyVideoCollaboratorPermissionsBatch(
   const privilegeMode = video.privilegeMode;
 
   // 既存video_membersをbounded queryで取得。
-  const existingRows = (
-    await db
+  const existingRows = await db
       .select()
       .from(videoMembers)
       .where(
@@ -537,7 +570,7 @@ export async function applyVideoCollaboratorPermissionsBatch(
           )})`,
         )!,
       )
-  ).slice(0, MAX_VIDEO_MEMBERS + xids.length);
+      .limit(MAX_VIDEO_MEMBERS + xids.length);
   const existingByXid = new Map<string, typeof videoMembers.$inferSelect>();
   for (const row of existingRows) {
     const key = normalizeXId(row.x_user_id ?? "");
@@ -783,4 +816,9 @@ export async function applyVideoCollaboratorPermissionsBatch(
     revoked: revokedNames,
     unchanged,
   };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[video-collab-perms] batch preparation failed", error);
+    return { ok: false, message: "合作権限の読込・準備に失敗しました。" };
+  }
 }

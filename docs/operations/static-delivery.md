@@ -39,11 +39,17 @@ manifest is re-read, the mutation is reapplied, and the write is retried with
 the latest ETag. Manifest read/write size guards use UTF-8 bytes (not
 JavaScript string length), and a failed conditional PUT is never treated as
 success.
+Users-index-v2 manifest reads intentionally bypass Cache API: saving one R2 GET
+does not justify weakening the commit-point freshness and visibility checks.
+Worker Logs are the source of truth for production CPU/R2 cost; local tests do
+not establish p95/p99 CPU.
 Deep health skips the manifest probe in `off`, reports missing/unavailable or
 malformed state as a non-blocking degraded check in `observe`, and makes it a
 blocking degraded result in `enforce`. The tracked default remains `observe`;
 switching to `enforce` is a separate configuration deployment after the
 strict remote check and bootstrap verification.
+Member suggestions rebuilds restore the previous manifest when tracking the
+new manifest fails, so a failed tracking write cannot expose a missing index.
 
 Before switching to `enforce`, bootstrap a missing manifest once with
 `npm run cf:bootstrap-visibility -- --confirm-bootstrap --bucket <bucket>`.
@@ -67,7 +73,7 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 3. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ）
 4. **Unavailable**（空表示・メッセージ。`maintenance` / `static_json_only` / kill switch 無効時は D1 に進まない）
 
-R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しない。各呼び出しは、そのrequestのCloudflare bindingだけで完結させる。重複読み込みの抑制とstale復旧はCache APIで行う。
+R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しない。各呼び出しは、そのrequestのCloudflare bindingだけで完結させる。重複読み込みの抑制とstale復旧はCache APIで行い、metadataと本文が同一Server Component request内で同じ詳細JSONを要求する場合はReactのrequest-local cacheで重複取得を抑える。top.jsonが正規化できないmissではslot-statsを追加取得せず、slot統計の障害をtop本体のmiss処理へ混ぜない。
 
 `static_json_with_live_overlay` では、R2の一覧JSONが空でもD1へ公開作品が追加済みの可能性があるため、空のcollectionをsemantic missとして扱い degraded D1 へ進める。`static_json_only` と `maintenance` では、空の静的JSONをそのまま利用するか、D1 fallback しない。
 
@@ -84,6 +90,12 @@ rendered. X-user rows use the canonical public-listable approval set
 (`approved`, `pending`, and `imported`); unknown or rejected markers are
 filtered. Large approved-X authorization predicates use one JSON1 bind while
 preserving the old NULL semantics.
+
+If an R2 miss reaches the degraded path while the Cloudflare D1 binding is
+unavailable, the loader records the binding failure and returns the bounded
+`unavailable` result instead of allowing a public document/API request to
+surface a 500. The next static rebuild or health check can recover the missing
+artifact once the binding is available again.
 
 Public video artifacts contain public chapters only. An authenticated video
 viewer may receive a separate private-chapter overlay after the normal
@@ -113,11 +125,13 @@ rows and does not replace usable public static detail.
 
 正本定数: `src/lib/publicData/publicJsonCacheTtl.ts`（web）、`workers/shared/staticR2CacheControl.ts`（R2 PUT）。
 
-ミス時のみ `operation_mode` を解決（`FORCE_STATIC_ONLY` > isolate 短時間キャッシュ > KV 複製 > D1）。解決不能時は `static_only` へ倒し、`normal` へは倒さない。ここでの `static_only` フォールバックは配信経路の安全側倒しであり、使用量トリガーの自動 CostGuard ではない。cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない。
+ミス時のみ `operation_mode` を解決（`FORCE_STATIC_ONLY` > isolate 短時間キャッシュ > KV 複製 > D1）。解決不能時は `normal` を維持し、`static_only` へ自動遷移しない。KV/D1 の一時的な binding 障害で公開の live overlay や degraded fallback まで機能制限されないようにするためである。`static_only` / `maintenance` への変更は CostGuard の明示操作だけが行い、書き込み側は従来どおり D1 正本の write guard で停止する。cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない。Edge middleware の maintenance redirect は別の5秒isolate cacheとKVの30秒 `cacheTtl` を使い、KV障害時は短時間だけ fail-open して500化を防ぐ。これは認可境界ではなく運用停止リダイレクトのためのbounded-staleである。
 
 ## 観測と UI
 
-公開 layout の `CostGuardBanner` は `source` 省略（= public）で、D1 の `system_settings` を読まず env / isolate / KV のみ参照する。admin layout は `source="admin"` で D1 正本を読む。
+公開 layout の `CostGuardBanner` は `source` 省略（= public）で、D1 の `system_settings` を読まず env / isolate / KV のみ参照する。公開側のKVミラーはisolate内で30秒だけ共有し、modeとreason取得の重複readを抑える。admin layout は `source="admin"` で D1 正本を読む。
+
+R2 hit時の degraded circuit は、通常の公開リクエストごとにKVを読むのではなく、isolate内の30秒probeを使う。openを確認したisolateだけが3 hit到達時にKVを再確認してcloseする。R2 miss時のopen判定とmiss counter更新は従来どおり行い、KV障害は公開配信を停止させない。
 
 公開主要ページは `PublicMetricsShell` 内で `runWithPublicRequestMetrics` を使い、構造化ログ（`public_request_metrics`）を出す。D1 への永続化はしない。`degraded_d1` 時は同じ ALS スコープ内の `PublicDegradedBanner`（`role="status"`）が簡易表示を知らせる。
 
@@ -132,6 +146,12 @@ Admin Spreadsheetのうち `videos`、`video_youtube_metadata`、`video_events`�
 Spreadsheet planner（`src/lib/admin/spreadsheet/staticRebuildPlan.ts`）は mutation の before/after だけから target を導出し、同一 apply 内では `Map` で `targetType:targetId` を dedupe する。`videos` の CREATE または `visibility_status` 変更では、動画詳細 `video` に加え `random_video_pool:global`、`youtube_related_blocklist:global`、`list_recent:global`、`list_popular:global`、`search_index:global` へ fan-out する（public 作品 CREATE の例: 上記6 target）。タイトルや intro だけの UPDATE は `video` だけ。1 apply で public 作品を3行 CREATE すると 18 target となり 16 上限を超えるため、行の分割が必要になる。
 
 Creator Projection（`workers/json-generator`）は公開用カード・詳細 JSON を R2 に書き、一覧は `list/recent.json` / `list/popular.json`、検索は `search-index-lite.json`、クリエイター索引は `users/index.json` を正本とする。`users_index` 再生成時に `users/public-x-icon-map.v1.json`（entries形式）と `users/pickup-creators.v1.json`（top/recommend の Creator 棚用、最大60件）も同時出力する。`users_index` の v2 page/search の `static_artifacts` 追跡は、D1 の100 bind制限を超えないよう12行（84 bind）単位のmulti-row UPSERTにまとめる。`top` / `recommend` の Creator 棚は通常時この pickup artifact を読み、欠損・破損時のみ D1 projection へ fallback する。登録ユーザーは icon 欠損時も `source: none` とし、historical icon は表示用に保持する。公開ページのXアイコン補完は fresh/stale Cacheを含む共有icon map → R2 `users/index.json` → 詳細JSON埋め込み値の順で解決し、entry 欠損や `source: video` のときだけ index で `registered` / `none` へ昇格を試みる。この補完経路からD1へは降りない。`users/index.json` 補完ではアイコンなしの公開プロフィールも `source: none` として保持し、古い動画詳細JSONでもプロフィールリンクを復元しつつ、画像欠損時は共通デフォルトアイコンへ切り替える。
+`member_suggestions` は履歴クエリに主キーのタイブレークを付けて同時刻行の順序を固定する。R2 の index/manifest を公開する前に各オブジェクトを `static_artifacts` へ追跡し、追跡失敗時は今回生成した未公開キーだけを削除して旧世代を壊さない。loader は manifest の `total` と index 件数が一致しない世代を無効として扱う。
+内部候補検索はこのR2 indexだけを読み、bucket単位の短命isolate cache（30秒）を使う。検索前の包含一致／fuzzy長さ窓フィルタでrank計算をboundedにし、APIの既存DTO（`id` / `x_name`）は変更しない。cacheは別bucketへ跨がず、manifest/indexの件数検証後だけ投入する。
+公開 `/user?q=` と `/list?q=` は generation 固有の `postings-v1` R2 索引を優先する。query の 1/2/3 文字 gram から最小 posting を選び、directory が指す bounded page だけを読むため、検索 corpus 全体の JSON parse/filter/sort は request time に行わない。1文字などの高頻度 gram が明示したページ上限を超える場合はページを途中で切らず、旧 `search-lite.v1.json` / `search-index-lite.json` または degraded 経路へ安全に fallback する。旧 artifact は索引欠損・世代不一致時の互換 fallback として残し、欠損 posting を部分結果として返さない。users v2 の同一 generation で tracking rows と対象 R2 object の存在確認が揃っている通常 rebuild は immutable objects の PUT を省略し、repair/miss/visibility/deploy 系 reason では強制再生成する。対象 object 数が大きく R2 の全件確認を安全な subrequest 範囲で完了できない場合も skip せず、通常 rebuild で自己修復する。
+
+posting manifest は空の bucket directory を生成せず、非空 bucket の一覧を持つ。これにより小規模 generation の R2 object 数と同世代検証の subrequest を抑えつつ、未知・欠損 shard は従来どおり全体検索へ部分結果を返さず fallback する。
+users v2 の stale artifact cleanup は R2 bulk delete と JSON1 UPDATE を 1 invocation 500行以内に制限し、`hasMore` を既存 static rebuild wake に返して排水を継続する。`deleted_at` の physical purge は24時間の安全期間後、live manifest/object key を除外して bounded に実施する。current manifest generation は cleanup/purge の対象外である。
 
 `top.json` は section producer が R2 に書いた `top/sections/*.v1.json` と `top/slot-stats.v1.json`、`users/pickup-creators.v1.json` を composer（`top:global`）が読み込んで合成する。新着最大100件と、公開から3年以上経過した作品を最大200件プールする懐かし棚は `top_nostalgic` producer が担当する。懐かし棚は YouTube API 同期済みで `public` / `unlisted` と確認された作品だけを `nostalgic_pool` に入れ、JST 日次境界で ID 抽選し `nostalgic` 最大20件を保持する（KV `static:top_nostalgic_shuffle_day` は新日付の抽選成功時のみ更新）。同日中は selected IDs を維持し title/icon/youtube/visibility を再評価する。トップ表示時は `nostalgic` をそのまま使い、リクエストごとの再シャッフルはしない。hero 用 `slot_stats` は `top_slot_stats` producer が `top/slot-stats.v1.json` に書き、composer が `top.json` へ合成する。枠の reserve/release 等では `top_slot_stats` のみを更新し follow-up で `top` composer を enqueue する。公開 loader は `generated_at` が新しい方の `slot_stats` を採用する（欠損・破損時は `top.json.slot_stats` へ fallback）。YouTube 公開可否の変化時は必要な top section と `youtube_related_blocklist` / `random_video_pool` を同時に再生成予約する。
 

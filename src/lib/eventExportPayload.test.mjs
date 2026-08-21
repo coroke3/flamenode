@@ -213,7 +213,8 @@ test("イベントAPIはformatパラメータを410で拒否しv5だけを返す
   assert.doesNotMatch(route, /buildEventExportPayloadForFormat/);
   assert.doesNotMatch(route, /value === "legacy"|value === "new"/);
   assert.match(route, /eventExportPayloadCacheKey\(\s*eventId,\s*refreshMinutes/);
-  assert.match(route, /eventExportAccessCacheKey/);
+  assert.doesNotMatch(route, /eventExportAccessCacheKey/);
+  assert.doesNotMatch(route, /kv\.put\(accessKey/);
   assert.match(route, /s-maxage=60/);
 });
 

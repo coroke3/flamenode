@@ -76,6 +76,7 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
 
   mock.module("@/lib/observability/publicRequestMetrics", {
     namedExports: {
+      notePublicArtifactMode() {},
       recordPublicR2Get() {},
     },
   });

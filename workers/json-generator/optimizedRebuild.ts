@@ -554,7 +554,15 @@ export async function optimizedRebuildTarget(
 
   const result = await rebuildTarget(env, targetType, targetId, signal, reason);
   if (targetType === "users_index") {
-    await rebuildUsersIndexV2FromLegacyArtifact(env, signal);
+    const v2 = await rebuildUsersIndexV2FromLegacyArtifact(env, signal, {
+      forceRepair:
+        typeof reason === "string" &&
+        (reason.includes("miss") ||
+          reason.includes("repair") ||
+          reason.includes("visibility") ||
+          reason.includes("deploy_generator_change")),
+    });
+    if (v2.hasMore) return { followUpPending: true };
   }
   if (targetType === "event_base") {
     await syncEventPlaylistArtifact(env, targetId, signal);

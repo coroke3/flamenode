@@ -96,6 +96,22 @@ test("createPublicJsonLoader treats normalize failure as semantic miss without d
   );
 });
 
+test("metadata/page reuse is request-local and top misses do not read slot stats", () => {
+  assert.match(loaderSource, /import \{ cache \} from "react"/);
+  assert.match(
+    loaderSource,
+    /return cache\(async \(id: string\): Promise<PublicJsonLoadResult<TResult>>/,
+  );
+  const topBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadStaticTopPage"),
+    loaderSource.indexOf("export async function loadStaticUsersIndex"),
+  );
+  const missGuard = topBlock.indexOf("if (!normalized)");
+  const slotStatsRead = topBlock.indexOf("TOP_SLOT_STATS_OBJECT_KEY");
+  assert.ok(missGuard >= 0, "top miss guard is present");
+  assert.ok(slotStatsRead > missGuard, "slot stats are read after the top miss guard");
+});
+
 test("loadPublicJson applies empty collection semantic miss on cache and R2 hits", () => {
   assert.match(loaderSource, /isEmptyCollection/);
   assert.match(
@@ -304,6 +320,23 @@ test("loadPublicEventVideosPage は event_base R2 を優先しヒット時に ge
     eventListBlock.indexOf("const tryCachedOrR2"),
   );
   assert.doesNotMatch(staticHitBranch, /getDatabase\(/);
+});
+
+test("R2 miss 後の D1 binding 例外は公開 unavailable へ収束する", () => {
+  const missBlock = loaderSource.slice(
+    loaderSource.indexOf("async function resolvePublicJsonMiss"),
+    loaderSource.indexOf("export function createPublicJsonLoader"),
+  );
+  assert.match(missBlock, /let db: ReturnType<typeof getDatabase> = null/);
+  assert.match(missBlock, /try \{\s*db = getDatabase\(\);/);
+  assert.match(missBlock, /warnPublicStaticJson\(options\.r2Key, "database_unavailable", error\)/);
+
+  const eventListBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicEventVideosPage"),
+    loaderSource.indexOf("export async function loadStaticRulesPage"),
+  );
+  assert.match(eventListBlock, /warnPublicStaticJson\(`list\/event\/\$\{eventId\}`, "database_unavailable", error\)/);
+  assert.match(eventListBlock, /return unavailable\(maintenanceStrategy, missMeta\)/);
 });
 
 test("loadStaticTopPage miss は全 section producers を enqueue する", () => {

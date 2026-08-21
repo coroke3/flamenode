@@ -44,6 +44,49 @@ function compactSearchText(value: string): string {
   );
 }
 
+/**
+ * R2 index全件へrankerを走らせる前の軽量プリフィルタ。
+ *
+ * - 部分一致候補はhaystack包含で残す
+ * - fuzzy(distance<=2)の理論下限として長さ差<=2の候補も残す
+ * - 空queryは何も残さない（呼び出し側の空query早期returnと重ねて安全側）
+ *
+ * rankerが0点を付ける候補しか除外しないため、最終順位・結果は変わらない。
+ */
+export function prefilterMemberSuggestionCandidates<T extends MemberSuggestionCandidate>(
+  candidates: readonly T[],
+  query: string,
+): T[] {
+  const normalizedQuery = normalizeMemberSearchText(query);
+  if (!normalizedQuery) return [];
+  const compactQuery = normalizedQuery.replace(/[^\p{L}\p{N}_]+/gu, "");
+  const queryLength = compactQuery.length;
+  const out: T[] = [];
+  for (const candidate of candidates) {
+    const targets = [
+      candidate.x_user_id,
+      candidate.name,
+      ...(candidate.xAliases ?? []),
+      ...(candidate.nameAliases ?? []),
+    ];
+    let matched = false;
+    let lengthDeltaOk = false;
+    for (const target of targets) {
+      if (!target) continue;
+      const normalizedTarget = normalizeMemberSearchText(target);
+      if (!matched && normalizedTarget.includes(normalizedQuery)) matched = true;
+      const compactLength = normalizedTarget.replace(
+        /[^\p{L}\p{N}_]+/gu,
+        "",
+      ).length;
+      if (Math.abs(compactLength - queryLength) <= 2) lengthDeltaOk = true;
+      if (matched && lengthDeltaOk) break;
+    }
+    if (matched || lengthDeltaOk) out.push(candidate);
+  }
+  return out;
+}
+
 function limitedLevenshtein(
   left: string,
   right: string,

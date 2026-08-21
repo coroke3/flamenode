@@ -40,6 +40,8 @@ test("deploy 共有 global target 定数と enqueue 契約", () => {
   assert.match(source, /INSERT OR IGNORE INTO static_rebuild_queue/);
   assert.match(source, /env\.KV\.get/);
   assert.match(source, /env\.KV\.put/);
+  assert.match(source, /FROM json_each\(\?\)/);
+  assert.match(source, /const statements = \[activeUpdate, insert\]/);
 });
 
 function createFakeEnv({
@@ -119,6 +121,21 @@ test("不正 commit は enqueue せず KV も更新しない", async () => {
   assert.equal(kvStore.has(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), false);
 });
 
+test("deploy global enqueueは固定targetを2 statementのatomic batchへ縮約する", async () => {
+  const { env, getBatchCalls } = createFakeEnv({ batchChanges: 1 });
+  let statementCount = null;
+  const originalBatch = env.DB.batch;
+  env.DB.batch = async (statements) => {
+    statementCount = statements.length;
+    return originalBatch(statements);
+  };
+
+  await ensureDeployGlobalRebuilds(env, { commitSha: VALID_SHA });
+
+  assert.equal(getBatchCalls(), 1);
+  assert.equal(statementCount, 2);
+});
+
 test("同一 commit で failed がなければ enqueue せず 0 を返す", async () => {
   const { env, getBatchCalls } = createFakeEnv({ storedCommit: VALID_SHA });
   const count = await ensureDeployGlobalRebuilds(env, { commitSha: VALID_SHA });
@@ -135,7 +152,7 @@ test("同一 commit でも deploy reason の failed があれば再 enqueue す�
   });
   const count = await ensureDeployGlobalRebuilds(env, { commitSha: VALID_SHA });
   assert.equal(getBatchCalls(), 1);
-  assert.equal(count, DEPLOY_GLOBAL_REBUILD_TARGETS.length * 2);
+  assert.equal(count, 2);
   assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), VALID_SHA);
 });
 
@@ -147,7 +164,7 @@ test("commit 変化時は global target を enqueue し KV を更新する", asy
   });
   const count = await ensureDeployGlobalRebuilds(env, { commitSha: VALID_SHA });
   assert.equal(getBatchCalls(), 1);
-  assert.equal(count, DEPLOY_GLOBAL_REBUILD_TARGETS.length * 2);
+  assert.equal(count, 2);
   assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), VALID_SHA);
 });
 

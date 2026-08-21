@@ -41,38 +41,44 @@ async function enqueueDeployGlobalRebuildTargets(
   signal?.throwIfAborted();
 
   const now = Math.floor(Date.now() / 1000);
-  const statements = DEPLOY_GLOBAL_REBUILD_TARGETS.flatMap((targetType) => {
-    const activeUpdate = env.DB.prepare(
-      `UPDATE static_rebuild_queue
-          SET reason = ?,
-              priority = CASE
-                WHEN priority = 'high' OR ? = 'high' THEN 'high'
-                ELSE priority
-              END,
-              updated_at = MAX(updated_at + 1, ?)
-        WHERE target_type = ?
-          AND target_id = 'global'
-          AND status IN ('pending', 'processing')`,
-    ).bind(reason, priority, now, targetType);
+  // The target list is fixed and small, but expanding it into one UPDATE and
+  // one INSERT per target consumes 2*N D1 statements during a deploy. Keep
+  // the batch atomic while using JSON1 for the target set so recovery still
+  // has room for its bounded reads and the first rebuild.
+  const targetRows = DEPLOY_GLOBAL_REBUILD_TARGETS.map((targetType) => ({
+    id: `srb:${targetType}:${crypto.randomUUID()}`,
+    target_type: targetType,
+  }));
+  const targetJson = JSON.stringify(targetRows);
+  const activeUpdate = env.DB.prepare(
+    `UPDATE static_rebuild_queue
+        SET reason = ?,
+            priority = CASE
+              WHEN priority = 'high' OR ? = 'high' THEN 'high'
+              ELSE priority
+            END,
+            updated_at = MAX(updated_at + 1, ?)
+      WHERE target_id = 'global'
+        AND status IN ('pending', 'processing')
+        AND target_type IN (
+          SELECT CAST(json_extract(value, '$.target_type') AS TEXT)
+          FROM json_each(?)
+        )`,
+  ).bind(reason, priority, now, targetJson);
 
-    const insert = env.DB.prepare(
-      `INSERT OR IGNORE INTO static_rebuild_queue (
-         id, target_type, target_id, reason, priority, status,
-         attempt_count, created_at, updated_at
-       ) VALUES (
-         ?, ?, 'global', ?, ?, 'pending', 0, ?, ?
-       )`,
-    ).bind(
-      `srb:${targetType}:${crypto.randomUUID()}`,
-      targetType,
-      reason,
-      priority,
-      now,
-      now,
-    );
+  const insert = env.DB.prepare(
+    `INSERT OR IGNORE INTO static_rebuild_queue (
+       id, target_type, target_id, reason, priority, status,
+       attempt_count, created_at, updated_at
+     )
+     SELECT
+       CAST(json_extract(value, '$.id') AS TEXT),
+       CAST(json_extract(value, '$.target_type') AS TEXT),
+       'global', ?, ?, 'pending', 0, ?, ?
+     FROM json_each(?)`,
+  ).bind(reason, priority, now, now, targetJson);
 
-    return [activeUpdate, insert];
-  });
+  const statements = [activeUpdate, insert];
 
   const results = await env.DB.batch(statements);
   signal?.throwIfAborted();

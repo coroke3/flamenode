@@ -86,6 +86,7 @@ async function loadSourceEntries(
   const aliasResult = await env.DB.prepare(
     `SELECT x_user_id, alias_x_id
        FROM x_user_aliases
+      ORDER BY x_user_id ASC, alias_x_id ASC
       LIMIT ?`,
   )
     .bind(SOURCE_LIMIT_ALIASES)
@@ -101,7 +102,7 @@ async function loadSourceEntries(
     `SELECT creator_x_user_id, creator_display_name, updated_at
        FROM videos
       WHERE creator_x_user_id IS NOT NULL
-      ORDER BY updated_at DESC
+      ORDER BY updated_at DESC, id DESC
       LIMIT ?`,
   )
     .bind(SOURCE_LIMIT_VIDEO_HISTORY)
@@ -124,7 +125,7 @@ async function loadSourceEntries(
        FROM video_members
        INNER JOIN videos ON videos.id = video_members.video_id
       WHERE video_members.x_user_id IS NOT NULL
-      ORDER BY videos.updated_at DESC
+      ORDER BY videos.updated_at DESC, videos.id DESC, video_members.id DESC
       LIMIT ?`,
   )
     .bind(SOURCE_LIMIT_VIDEO_HISTORY)
@@ -259,16 +260,81 @@ async function reconcileTrackedArtifacts(
   }
 }
 
+type MemberSuggestionsTrackedArtifact = {
+  objectKey: string;
+  contentHash: string;
+  wrote: boolean;
+};
+
+async function cleanupWrittenArtifacts(
+  env: Env,
+  artifacts: readonly MemberSuggestionsTrackedArtifact[],
+): Promise<void> {
+  const keys = [
+    ...new Set(
+      artifacts
+        .filter((artifact) => artifact.wrote)
+        .map((artifact) => artifact.objectKey),
+    ),
+  ];
+  if (keys.length === 0) return;
+  try {
+    await env.R2.delete(keys);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "member-suggestions",
+        result: "tracking_cleanup_r2_failed",
+        key_count: keys.length,
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+    return;
+  }
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `UPDATE static_artifacts
+          SET deleted_at = ?
+        WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1
+              FROM json_each(?) AS removed_keys
+             WHERE CAST(removed_keys.value AS TEXT) = static_artifacts.object_key
+          )`,
+    )
+      .bind(
+        now,
+        MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
+        MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
+        JSON.stringify(keys),
+      )
+      .run();
+    for (const key of keys) env.artifactHashCache?.set(key, null);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "member-suggestions",
+        result: "tracking_cleanup_d1_failed",
+        key_count: keys.length,
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+  }
+}
+
 async function putTrackedJson(
   env: Env,
   key: string,
   body: unknown,
   signal: RebuildSignal,
   options?: { deduplicate?: boolean },
-): Promise<{ objectKey: string; contentHash: string }> {
+): Promise<MemberSuggestionsTrackedArtifact> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
+  const contentHash = await staticArtifactContentHash(serialized);
+  throwIfAborted(signal);
   const identical =
     options?.deduplicate === false
       ? null
@@ -281,10 +347,47 @@ async function putTrackedJson(
       },
     });
   }
+  return { objectKey: key, contentHash, wrote: !identical };
+}
+
+type PreviousManifestBody = string | null;
+
+async function readPreviousManifest(
+  env: Env,
+  signal: RebuildSignal,
+): Promise<PreviousManifestBody> {
   throwIfAborted(signal);
-  const contentHash = await staticArtifactContentHash(serialized);
+  const object = await env.R2.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
+  if (!object) return null;
+  const body = await object.text();
   throwIfAborted(signal);
-  return { objectKey: key, contentHash };
+  return body;
+}
+
+async function restorePreviousManifest(
+  env: Env,
+  body: PreviousManifestBody,
+): Promise<void> {
+  try {
+    if (body === null) {
+      await env.R2.delete(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
+      return;
+    }
+    await env.R2.put(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, body, {
+      httpMetadata: {
+        contentType: "application/json; charset=utf-8",
+        cacheControl: "private, max-age=0, must-revalidate",
+      },
+    });
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "member-suggestions",
+        result: "manifest_restore_failed",
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+  }
 }
 
 export type MemberSuggestionsRebuildResult = {
@@ -324,17 +427,43 @@ export async function rebuildMemberSuggestions(
   assertArtifactSize(indexKey, index, MEMBER_SUGGESTIONS_MAX_INDEX_BYTES);
   assertArtifactSize(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, manifest, MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES);
 
-  // generation objectを書いてからmanifest（唯一のcommit point）を最後に書く。
-  // 途中失敗しても旧manifestは壊れない。書けた不変オブジェクトはtrackingされない
-  // ためreconcileの削除対象にもならない（次回成功時に追跡される）。
-  const committed: Array<{ objectKey: string; contentHash: string }> = [];
-  committed.push(await putTrackedJson(env, indexKey, index, signal, { deduplicate: true }));
-  committed.push(
-    await putTrackedJson(env, MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, manifest, signal, {
+  // indexを追跡してからmanifest（唯一のcommit point）を最後に書く。
+  // trackingまたは後続のmanifest準備に失敗した場合は、今回実際にPUTした
+  // generation-specific keyだけをbest-effort削除し、旧manifestを維持する。
+  const committed: MemberSuggestionsTrackedArtifact[] = [];
+  let previousManifest: PreviousManifestBody | undefined;
+  let manifestArtifact: MemberSuggestionsTrackedArtifact | undefined;
+  let manifestPutCompleted = false;
+  try {
+    const indexArtifact = await putTrackedJson(env, indexKey, index, signal, {
       deduplicate: true,
-    }),
-  );
-  await recordArtifacts(env, committed, generatedAt, signal);
+    });
+    committed.push(indexArtifact);
+    await recordArtifacts(env, [indexArtifact], generatedAt, signal);
+
+    previousManifest = await readPreviousManifest(env, signal);
+    manifestArtifact = await putTrackedJson(
+      env,
+      MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+      manifest,
+      signal,
+      { deduplicate: true },
+    );
+    manifestPutCompleted = true;
+    committed.push(manifestArtifact);
+    await recordArtifacts(env, [manifestArtifact], generatedAt, signal);
+  } catch (error) {
+    await cleanupWrittenArtifacts(env, committed);
+    if (
+      previousManifest !== undefined &&
+      (previousManifest !== null
+        ? manifestArtifact?.wrote === true || !manifestPutCompleted
+        : manifestArtifact === undefined && !manifestPutCompleted)
+    ) {
+      await restorePreviousManifest(env, previousManifest);
+    }
+    throw error;
+  }
 
   const liveKeys = committed.map((artifact) => artifact.objectKey);
   await reconcileTrackedArtifacts(env, liveKeys, signal);

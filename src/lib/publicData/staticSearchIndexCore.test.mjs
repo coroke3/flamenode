@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { searchStaticIndexVideos } from "./staticSearchIndexCore.ts";
+import {
+  buildStaticVideoSearchPostingArtifacts,
+  normalizeStaticVideoSearchPostingManifest,
+  normalizeStaticVideoSearchPostingPage,
+} from "./staticSearchIndexCore.ts";
 
 test("searchStaticIndexVideos matches title and creator fields", () => {
   const page = searchStaticIndexVideos({
@@ -47,4 +52,32 @@ test("searchStaticIndexVideos can reverse for old sort", () => {
     pageSize: 24,
   });
   assert.equal(page?.videos[0]?.id, "v2");
+});
+
+test("video search posting はタイトル・X ID・日本語名を候補化し、世代を固定する", () => {
+  const artifacts = buildStaticVideoSearchPostingArtifacts({
+    generation: "g-video",
+    generatedAt: 100,
+    items: [
+      {
+        id: "v1",
+        title: "東京の作品",
+        youtube_video_id: "abc123",
+        display_name: "Creator",
+        creator_x_user_id: "tokyo_user",
+        creator_x_user_name: "東京ユーザー",
+      },
+    ],
+  });
+  assert.equal(artifacts.manifest.generation, "videos-g-video");
+  assert.deepEqual(
+    normalizeStaticVideoSearchPostingManifest(artifacts.manifest),
+    artifacts.manifest,
+  );
+  const page = artifacts.pages[0]?.page;
+  assert.ok(page);
+  assert.deepEqual(
+    normalizeStaticVideoSearchPostingPage(page),
+    page,
+  );
 });

@@ -25,6 +25,16 @@ test("single/batch両actionがwriteGuardを通過する", () => {
   }
 });
 
+test("D1 binding unavailable時もcollaborator actionsはUI向け失敗へ収束する", () => {
+  for (const name of [
+    "upsertVideoCollaborator",
+    "deleteVideoCollaborator",
+    "applyVideoCollaboratorPermissionsBatch",
+  ]) {
+    assert.match(actionBody(name), /database binding unavailable/);
+  }
+});
+
 test("batch actionはvideo.permissions権限を再検証してから差分適用する", () => {
   const body = actionBody("applyVideoCollaboratorPermissionsBatch");
   // 権限検証はloadEditableVideoForPermissions（canEditVideo requiredKey video.permissions）経由。
@@ -97,4 +107,22 @@ test("member_suggestions再生成は本体mutationと同じatomic writeへ含ま
   const body = actionBody("applyVideoCollaboratorPermissionsBatch");
   assert.match(body, /buildStaticRebuildQueueBatch\(db, \[\s*memberSuggestionsTarget\(/);
   assert.match(body, /\.\.\.queue\.statements/);
+});
+
+test("batch existing-row read is bounded in SQL and preparation failures are returned", () => {
+  const body = actionBody("applyVideoCollaboratorPermissionsBatch");
+  assert.match(body, /\.limit\(MAX_VIDEO_MEMBERS \+ xids\.length\)/);
+  assert.match(body, /let db: ReturnType<typeof getDatabase>/);
+  assert.match(body, /database binding unavailable/);
+  assert.match(body, /try \{\s*const video = await loadEditableVideoForPermissions/);
+  assert.match(body, /batch preparation failed/);
+});
+test("single collaborator actions keep D1 read and queue-plan failures inside the UI error boundary", () => {
+  const upsert = actionBody("upsertVideoCollaborator");
+  assert.match(upsert, /try \{\s*const video = await loadEditableVideo/);
+  assert.match(upsert, /collaborator action failed/);
+
+  const revoke = actionBody("deleteVideoCollaborator");
+  assert.match(revoke, /try \{\s*const video = await loadEditableVideo/);
+  assert.match(revoke, /collaborator revoke failed/);
 });

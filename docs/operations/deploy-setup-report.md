@@ -35,10 +35,10 @@ main push
   -> npm ci（1回）
   -> verify:cloud（deploy契約検査のみ）
   -> OpenNext build（1回）
-  -> flamenode-content-jobs
-  -> flamenode-fast-jobs
-  -> flamenode-sync-jobs
   -> flamenode-web
+  -> flamenode-fast-jobs
+  -> flamenode-content-jobs
+  -> flamenode-sync-jobs
   -> production smoke
 ```
 
@@ -103,7 +103,7 @@ npm run cf:bootstrap -- --confirm-create
 | `flamenode-web` | `DB` | `BUCKET`、`NEXT_INC_CACHE_R2_BUCKET` | `KV` | producer: `NOTIFICATION_WAKE_QUEUE`、`STATIC_REBUILD_WAKE_QUEUE`、`YOUTUBE_SYNC_WAKE_QUEUE` | Assets `ASSETS`、service `WORKER_SELF_REFERENCE` |
 | `flamenode-fast-jobs` | `DB` | — | `KV` | producer/consumer: `NOTIFICATION_WAKE_QUEUE` | — |
 | `flamenode-content-jobs` | `DB` | `R2` | `KV` | producer/consumer: `STATIC_REBUILD_WAKE_QUEUE` | — |
-| `flamenode-sync-jobs` | `DB` | `R2` | `KV` | producer/consumer: `YOUTUBE_SYNC_WAKE_QUEUE` | — |
+| `flamenode-sync-jobs` | `DB` | `R2` | `KV` | producer/consumer: `YOUTUBE_SYNC_WAKE_QUEUE`; producer: `STATIC_REBUILD_WAKE_QUEUE` | — |
 
 **注意:** 追跡対象の `wrangler.toml` / `workers/*/wrangler.toml` は placeholder ID のまま維持する。production の実 ID は Build 時に `.cloudflare/generated/` へ注入され、Git 管理外とする。
 
@@ -135,7 +135,7 @@ npx wrangler queues create flamenode-youtube-sync-dlq
 | Queue | binding | producer | consumer | DLQ |
 | --- | --- | --- | --- | --- |
 | `flamenode-notification-wake` | `NOTIFICATION_WAKE_QUEUE` | `flamenode-web`、`flamenode-fast-jobs` | `flamenode-fast-jobs` | `flamenode-notification-dlq` |
-| `flamenode-static-rebuild-wake` | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-web`、`flamenode-content-jobs` | `flamenode-content-jobs` | `flamenode-static-rebuild-dlq` |
+| `flamenode-static-rebuild-wake` | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-web`、`flamenode-content-jobs`、`flamenode-sync-jobs` | `flamenode-content-jobs` | `flamenode-static-rebuild-dlq` |
 | `flamenode-youtube-sync-wake` | `YOUTUBE_SYNC_WAKE_QUEUE` | `flamenode-web`、`flamenode-sync-jobs` | `flamenode-sync-jobs` | `flamenode-youtube-sync-dlq` |
 
 - [ ] wake Queue 3本 + DLQ 3本を作成済み

@@ -1,11 +1,17 @@
 import "server-only";
 
+import { cache } from "react";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
 import {
   logPublicRequestMetrics,
+  recordPublicFallbackReason,
   notePublicDataMode,
+  notePublicPathMode,
+  notePublicSearchBackend,
   recordPublicD1Query,
   recordPublicR2Get,
+  recordPublicSearchCandidates,
+  recordPublicSearchShard,
   recordPublicStaticHit,
   recordPublicStaticMiss,
   runWithPublicRequestMetrics,
@@ -68,8 +74,23 @@ import {
 import {
   normalizeStaticSearchIndexPayload,
   searchStaticIndexVideos,
+  normalizeStaticVideoSearchPostingDirectory,
+  normalizeStaticVideoSearchPostingManifest,
+  normalizeStaticVideoSearchPostingPage,
+  staticSearchVideoMatchesQuery,
+  staticVideoSearchPostingManifestObjectKey,
+  staticVideoSearchPostingDirectoryObjectKey,
+  staticVideoSearchPostingPageObjectKey,
+  toListVideo,
+  type StaticSearchIndexVideo,
   type StaticSearchIndexPayload,
 } from "./staticSearchIndexCore";
+import {
+  staticSearchPostingBucket,
+  staticSearchQueryGrams,
+  STATIC_SEARCH_POSTINGS_MAX_QUERY_PAGES,
+  type StaticSearchPostingDirectory,
+} from "./staticSearchPostingsCore";
 import {
   normalizeStaticRecommend,
   type StaticRecommendPayload,
@@ -164,7 +185,12 @@ export type PublicJsonCacheMode =
 export { canFallbackToDatabase, isMaintenanceStrategy };
 export {
   logPublicRequestMetrics,
+  recordPublicFallbackReason,
   notePublicDataMode,
+  notePublicPathMode,
+  notePublicSearchBackend,
+  recordPublicSearchCandidates,
+  recordPublicSearchShard,
   runWithPublicRequestMetrics,
   setPublicRequestRoute,
 } from "@/lib/observability/publicRequestMetrics";
@@ -373,7 +399,8 @@ function warnPublicStaticJson(
     | "invalid_json"
     | "read_failed"
     | "target_probe_failed"
-    | "enqueue_failed",
+    | "enqueue_failed"
+    | "database_unavailable",
   error?: unknown,
 ): void {
   console.warn(
@@ -442,7 +469,15 @@ async function resolvePublicJsonMiss<T = never>(
   if (!missOptions?.skipStaticMissRecord) {
     recordPublicStaticMiss();
   }
-  const db = getDatabase();
+  let db: ReturnType<typeof getDatabase> = null;
+  try {
+    db = getDatabase();
+  } catch (error) {
+    // R2 miss recovery must not turn a missing Cloudflare binding into a
+    // document/API 500.  The caller can still expose the bounded unavailable
+    // result and let the next rebuild/health check recover the artifact.
+    warnPublicStaticJson(options.r2Key, "database_unavailable", error);
+  }
   const mode = await resolvePublicOperationMode({ allowD1: true, db });
   const strategy = getPublicDataStrategy(mode);
 
@@ -561,7 +596,12 @@ export function createPublicJsonLoader<TPayload, TResult>({
   normalize,
   degradedFetcher,
 }: PublicJsonLoaderConfig<TPayload, TResult>) {
-  return async (id: string): Promise<PublicJsonLoadResult<TResult>> => {
+  // Metadata and the page component are rendered in separate Server
+  // Component branches but within the same request. React's request-local
+  // cache prevents a profile/video artifact (and its visibility probe) from
+  // being fetched and normalized twice without introducing process-global
+  // mutable state or changing cross-request freshness.
+  return cache(async (id: string): Promise<PublicJsonLoadResult<TResult>> => {
     const options: PublicJsonLoadOptions<TPayload> = {
       r2Key: r2Key(id),
       targetType,
@@ -587,7 +627,7 @@ export function createPublicJsonLoader<TPayload, TResult>({
       options as unknown as PublicJsonLoadOptions<TResult>,
       { skipStaticMissRecord: true },
     );
-  };
+  });
 }
 
 export async function loadPublicJson<T>(
@@ -983,6 +1023,146 @@ export async function loadStaticPopularVideosPage(params: {
   return { ...result, data: page, page };
 }
 
+async function loadStaticVideoPostingPage(params: {
+  q: string;
+  sort: "new" | "old" | "score";
+  page: number;
+  pageSize: number;
+}): Promise<
+  PublicJsonLoadResult<StaticRecentVideoPage> & {
+    page: StaticRecentVideoPage | null;
+  } | null
+> {
+  const manifestResult = await loadPublicJson<unknown>({
+    r2Key: staticVideoSearchPostingManifestObjectKey("current"),
+    targetType: "search_index",
+    targetId: "global",
+    reason: "public_list_search_postings_miss",
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.searchIndex,
+  });
+  // The generation is part of the immutable key.  The current manifest is
+  // therefore a tiny discovery object; old deployments simply return null and
+  // continue through the existing search-index-lite compatibility path.
+  const manifest = manifestResult.data
+    ? normalizeStaticVideoSearchPostingManifest(manifestResult.data)
+    : null;
+  if (!manifest || !manifest.generation.startsWith("videos-")) {
+    recordPublicFallbackReason("video_postings_manifest_miss");
+    return null;
+  }
+  notePublicSearchBackend("postings-v1");
+
+  const query = params.q.trim().toLocaleLowerCase();
+  const grams = staticSearchQueryGrams(query);
+  if (grams.length === 0) return null;
+  const directories = new Map<number, StaticSearchPostingDirectory>();
+  const options: Array<{ gram: string; total: number; pages: number[] }> = [];
+  for (const gram of grams) {
+    const bucket = staticSearchPostingBucket(gram);
+    // Sparse postings manifests omit empty buckets. Treat those as a valid
+    // zero-candidate lookup; an older manifest without `buckets` keeps the
+    // conservative missing-directory fallback below.
+    if (manifest.buckets && !manifest.buckets.includes(bucket)) continue;
+    let directory = directories.get(bucket);
+    if (!directory) {
+      const result = await loadPublicJson<unknown>({
+        r2Key: staticVideoSearchPostingDirectoryObjectKey(
+          manifest.generation.slice("videos-".length),
+          bucket,
+        ),
+        targetType: "search_index",
+        targetId: "global",
+        reason: "public_list_search_postings_miss",
+        cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.searchIndex,
+      });
+      const normalizedDirectory = result.data
+        ? normalizeStaticVideoSearchPostingDirectory(result.data)
+        : null;
+      if (
+        !normalizedDirectory ||
+        normalizedDirectory.generation !== manifest.generation ||
+        normalizedDirectory.bucket !== bucket
+      ) {
+        recordPublicFallbackReason("video_postings_directory_miss");
+        return null;
+      }
+      directory = normalizedDirectory;
+      directories.set(bucket, normalizedDirectory);
+      recordPublicSearchShard();
+    }
+    const entry = directory.grams[gram];
+    if (entry) options.push({ gram, ...entry });
+  }
+  if (options.length === 0) {
+    const empty: StaticRecentVideoPage = {
+      videos: [],
+      total: 0,
+      generatedAt: manifest.generated_at,
+    };
+    return { ...manifestResult, data: empty, page: empty };
+  }
+  options.sort((a, b) => a.total - b.total || a.gram.localeCompare(b.gram));
+  const selected = options[0];
+  // Keep a common one-character query inside the Workers subrequest budget.
+  // A posting set beyond this explicit bound falls through to the existing
+  // compatibility/degraded path instead of returning a partial result.
+  if (selected.pages.length > STATIC_SEARCH_POSTINGS_MAX_QUERY_PAGES) {
+    recordPublicFallbackReason("video_postings_page_budget");
+    return null;
+  }
+  const candidates = new Map<string, StaticSearchIndexVideo>();
+  const generation = manifest.generation.slice("videos-".length);
+  for (const pageNumber of selected.pages) {
+    const result = await loadPublicJson<unknown>({
+      r2Key: staticVideoSearchPostingPageObjectKey(
+        generation,
+        staticSearchPostingBucket(selected.gram),
+        pageNumber,
+      ),
+      targetType: "search_index",
+      targetId: "global",
+      reason: "public_list_search_postings_miss",
+      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.searchIndex,
+    });
+    const postingPage = result.data
+      ? normalizeStaticVideoSearchPostingPage(result.data)
+      : null;
+    if (
+      !postingPage ||
+      postingPage.generation !== manifest.generation ||
+      postingPage.bucket !== staticSearchPostingBucket(selected.gram) ||
+      postingPage.page !== pageNumber
+    ) {
+      recordPublicFallbackReason("video_postings_page_miss");
+      return null;
+    }
+    recordPublicSearchShard();
+    for (const record of postingPage.records) {
+      if (record.gram !== selected.gram) continue;
+      for (const item of record.items) candidates.set(item.id, item);
+    }
+  }
+  if (candidates.size !== selected.total) {
+    recordPublicFallbackReason("video_postings_candidate_mismatch");
+    return null;
+  }
+  recordPublicSearchCandidates(candidates.size);
+  const filtered = [...candidates.values()].filter((video) =>
+    staticSearchVideoMatchesQuery(video, query),
+  );
+  const ordered = params.sort === "old" ? [...filtered].reverse() : filtered;
+  const total = ordered.length;
+  const totalPages = Math.max(1, Math.ceil(total / params.pageSize));
+  const safePage = Math.min(Math.max(1, Math.floor(params.page)), totalPages);
+  const start = (safePage - 1) * params.pageSize;
+  const page: StaticRecentVideoPage = {
+    videos: ordered.slice(start, start + params.pageSize).map(toListVideo),
+    total,
+    generatedAt: manifest.generated_at,
+  };
+  return { ...manifestResult, data: page, page };
+}
+
 export async function loadStaticSearchVideosPage(params: {
   q: string;
   sort: "new" | "old" | "score";
@@ -993,6 +1173,14 @@ export async function loadStaticSearchVideosPage(params: {
     page: StaticRecentVideoPage | null;
   }
 > {
+  const postingPage = await loadStaticVideoPostingPage(params);
+  if (postingPage) {
+    notePublicPathMode("v2");
+    return postingPage;
+  }
+  notePublicPathMode("legacy");
+  notePublicSearchBackend("legacy");
+  recordPublicFallbackReason("video_postings_compatibility");
   const loadOptions: PublicJsonLoadOptions<StaticSearchIndexPayload> = {
     r2Key: "search-index-lite.json",
     targetType: "search_index",
@@ -1245,7 +1433,7 @@ export async function loadPublicEventVideosPage(params: {
 
   const needsHeal = shouldEnqueueEventBaseListHeal(baseResult.payload, params.sort);
 
-  // base 完全 miss: composed を D1 / degraded より先に試す
+  // base 螳悟・ miss: composed 繧・D1 / degraded 繧医ｊ蜈医↓隧ｦ縺・
   if (baseResult.payload === null) {
     const composedResult = await tryCachedOrR2(composedKey);
     if (composedResult.hit) {
@@ -1280,8 +1468,8 @@ export async function loadPublicEventVideosPage(params: {
     };
   }
 
-  // 移行中: composed events/{id}.json があれば D1 を避けて一覧する（score 欠落時は非対応）
-  // incomplete base heal 待ちの stale base は legacy composed へ逃がさない
+  // 遘ｻ陦御ｸｭ: composed events/{id}.json 縺後≠繧後・ D1 繧帝∩縺代※荳隕ｧ縺吶ｋ・・core 谺關ｽ譎ゅ・髱槫ｯｾ蠢懶ｼ・
+  // incomplete base heal 蠕・■縺ｮ stale base 縺ｯ legacy composed 縺ｸ騾・′縺輔↑縺・
   if (!needsHeal) {
     const composedResult = await tryCachedOrR2(composedKey);
     if (composedResult.hit) {
@@ -1294,7 +1482,13 @@ export async function loadPublicEventVideosPage(params: {
     }
   }
 
-  const db = getDatabase();
+  let db: ReturnType<typeof getDatabase> = null;
+  try {
+    db = getDatabase();
+  } catch (error) {
+    warnPublicStaticJson(`list/event/${eventId}`, "database_unavailable", error);
+    return unavailable(maintenanceStrategy, missMeta);
+  }
   const strategy = getPublicDataStrategy(
     await resolvePublicOperationMode({ allowD1: true, db }),
   );
@@ -1402,6 +1596,9 @@ export async function loadStaticTopPage(): Promise<
     },
   });
   const normalized = result.data ? normalizeStaticTop(result.data) : null;
+  if (!normalized) {
+    return { ...result, data: null, top: null };
+  }
   const slotStatsResult = await loadStaticJsonFreshStaleUnavailable({
     key: TOP_SLOT_STATS_OBJECT_KEY,
     normalize: normalizeStaticTopSlotStats,
@@ -1409,8 +1606,10 @@ export async function loadStaticTopPage(): Promise<
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats,
   });
   const slotStatsArtifact = slotStatsResult.value;
-  const normalizedWithSlotStats =
-    normalized ? applyTopSlotStatsOverride(normalized, slotStatsArtifact) : null;
+  const normalizedWithSlotStats = applyTopSlotStatsOverride(
+    normalized,
+    slotStatsArtifact,
+  );
   const top =
     normalizedWithSlotStats &&
     (result.mode === "degraded_d1" ||

@@ -5,6 +5,18 @@ import {
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
 import type { StaticRecentVideo, StaticRecentVideoPage } from "./staticRecentVideoCore";
+import {
+  buildStaticSearchPostingArtifacts,
+  normalizeStaticSearchPostingDirectory,
+  normalizeStaticSearchPostingManifest,
+  normalizeStaticSearchPostingPage,
+  staticSearchPostingDirectoryObjectKey,
+  staticSearchPostingPageObjectKey,
+  type StaticSearchPostingArtifacts,
+  type StaticSearchPostingDirectory,
+  type StaticSearchPostingManifest,
+  type StaticSearchPostingPage,
+} from "./staticSearchPostingsCore.ts";
 
 export interface StaticSearchIndexPayload {
   generated_at?: unknown;
@@ -12,15 +24,16 @@ export interface StaticSearchIndexPayload {
   users?: unknown;
 }
 
-interface StaticSearchIndexVideo {
+export interface StaticSearchIndexVideo {
   id: string;
   title: string;
   youtube_video_id: string | null;
   display_name: string;
   creator_x_user_id: string | null;
+  creator_x_user_name?: string | null;
 }
 
-function normalizeSearchVideo(value: unknown): StaticSearchIndexVideo | null {
+export function normalizeSearchVideo(value: unknown): StaticSearchIndexVideo | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   const id = normalizeString(row.id);
@@ -35,6 +48,7 @@ function normalizeSearchVideo(value: unknown): StaticSearchIndexVideo | null {
       normalizeString(row.display_name) ??
       "unknown",
     creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
+    creator_x_user_name: normalizeNullableString(row.creator_x_user_name),
   };
 }
 
@@ -67,10 +81,19 @@ function matchesQuery(
   if (creatorId && userNames.has(creatorId)) {
     haystacks.push(userNames.get(creatorId)!);
   }
+  if (video.creator_x_user_name) haystacks.push(video.creator_x_user_name);
   return haystacks.some((value) => value.toLowerCase().includes(query));
 }
 
-function toListVideo(video: StaticSearchIndexVideo): StaticRecentVideo {
+export function staticSearchVideoMatchesQuery(
+  video: StaticSearchIndexVideo,
+  query: string,
+  userNames = new Map<string, string>(),
+): boolean {
+  return matchesQuery(video, userNames, query.trim().toLowerCase());
+}
+
+export function toListVideo(video: StaticSearchIndexVideo): StaticRecentVideo {
   return {
     id: video.id,
     title: video.title,
@@ -123,4 +146,62 @@ export function normalizeStaticSearchIndexPayload(
 ): StaticSearchIndexPayload | null {
   if (!Array.isArray(payload.videos)) return null;
   return payload;
+}
+
+export function buildStaticVideoSearchPostingArtifacts(args: {
+  items: readonly StaticSearchIndexVideo[];
+  generatedAt: number;
+  generation: string;
+}): StaticSearchPostingArtifacts<StaticSearchIndexVideo> {
+  return buildStaticSearchPostingArtifacts({
+    ...args,
+    generation: `videos-${args.generation}`,
+    textOf: (video) => [
+      video.id,
+      video.title,
+      video.display_name,
+      video.creator_x_user_id ?? "",
+      video.creator_x_user_name ?? "",
+      video.youtube_video_id ?? "",
+    ],
+    keyOf: (video) => video.id,
+  });
+}
+
+export function normalizeStaticVideoSearchPostingManifest(
+  value: unknown,
+): StaticSearchPostingManifest | null {
+  return normalizeStaticSearchPostingManifest(value);
+}
+
+export function normalizeStaticVideoSearchPostingDirectory(
+  value: unknown,
+): StaticSearchPostingDirectory | null {
+  return normalizeStaticSearchPostingDirectory(value);
+}
+
+export function normalizeStaticVideoSearchPostingPage(
+  value: unknown,
+): StaticSearchPostingPage<StaticSearchIndexVideo> | null {
+  return normalizeStaticSearchPostingPage(value, normalizeSearchVideo);
+}
+
+export function staticVideoSearchPostingManifestObjectKey(generation: string): string {
+  void generation;
+  return "search-index-postings.v1/manifest.json";
+}
+
+export function staticVideoSearchPostingDirectoryObjectKey(
+  generation: string,
+  bucket: number,
+): string {
+  return staticSearchPostingDirectoryObjectKey(`videos-${generation}`, bucket);
+}
+
+export function staticVideoSearchPostingPageObjectKey(
+  generation: string,
+  bucket: number,
+  page: number,
+): string {
+  return staticSearchPostingPageObjectKey(`videos-${generation}`, bucket, page);
 }

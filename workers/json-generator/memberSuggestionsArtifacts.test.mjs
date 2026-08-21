@@ -12,10 +12,12 @@ import { rebuildMemberSuggestions } from "./memberSuggestionsArtifacts.ts";
 /** 最小限のD1 fake。member suggestions generatorが使うprepare().bind()...のみ。 */
 function createFakeDb(options = {}) {
   const statements = [];
+  let trackingRunCount = 0;
   const xUsersRows = options.xUsersRows ?? [];
   const aliasRows = options.aliasRows ?? [];
   const creatorRows = options.creatorRows ?? [];
   const memberRows = options.memberRows ?? [];
+  const failTrackingAt = options.failTrackingAt ?? null;
   // object_key → 既存content_hash（dedup検証用）。
   const knownHashes = options.knownHashes ?? {};
   return {
@@ -26,6 +28,12 @@ function createFakeDb(options = {}) {
         bind(...args) {
           const run = async () => {
             statements.push({ sql: sqlText, args });
+            if (/INSERT INTO static_artifacts/i.test(sqlText)) {
+              trackingRunCount += 1;
+              if (failTrackingAt === trackingRunCount) {
+                throw new Error("tracking_failed");
+              }
+            }
             return { meta: { changes: 1 } };
           };
           return {
@@ -61,26 +69,34 @@ function createFakeR2() {
   const objects = new Map();
   const puts = [];
   const heads = [];
+  const deletes = [];
   return {
     objects,
     puts,
     heads,
+    deletes,
     async put(key, value) {
       puts.push({ key, value });
       objects.set(key, value);
       return { key };
     },
-    async get(key) {
+  async get(key) {
       const value = objects.get(key);
       if (value == null) return null;
-      return { key, json: async () => JSON.parse(value) };
+      return {
+        key,
+        json: async () => JSON.parse(value),
+        text: async () => value,
+      };
     },
     async head(key) {
       heads.push(key);
       return objects.has(key) ? { key } : null;
     },
     async delete(keys) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+      const normalized = Array.isArray(keys) ? keys : [keys];
+      deletes.push([...normalized]);
+      for (const key of normalized) objects.delete(key);
     },
   };
 }
@@ -183,6 +199,32 @@ test("同一内容の再buildはR2 PUT dedupで省略される", async () => {
   await rebuildMemberSuggestions({ DB: dedupDb, R2: dedupR2 });
   // 同一内容ならPUTは一切発生しない（head確認のみ）。
   assert.equal(dedupR2.puts.length, 0);
+});
+
+test("static_artifacts tracking failure removes newly written suggestions artifacts", async () => {
+  const env = createEnv({ ...BASIC_SOURCE, failTrackingAt: 2 });
+  await assert.rejects(() => rebuildMemberSuggestions(env), /tracking_failed/);
+  assert.equal(env.r2.objects.size, 0);
+  assert.equal(env.r2.deletes.length, 1);
+  assert.equal(env.r2.deletes[0].length, 2);
+});
+
+test("manifest tracking failure restores the previous manifest", async () => {
+  const env = createEnv({ ...BASIC_SOURCE, failTrackingAt: 2 });
+  const previousManifest = JSON.stringify({
+    schema_version: 1,
+    generation: "previous",
+    generated_at: 1,
+    total: 0,
+    object_key: memberSuggestionsIndexObjectKey("previous"),
+  });
+  env.r2.objects.set(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, previousManifest);
+
+  await assert.rejects(() => rebuildMemberSuggestions(env), /tracking_failed/);
+  assert.equal(
+    env.r2.objects.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY),
+    previousManifest,
+  );
 });
 
 test("size guard超過で旧manifestを壊さず失敗する", async () => {

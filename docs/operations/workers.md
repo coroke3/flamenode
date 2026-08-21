@@ -33,10 +33,11 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 | Queue | binding | DLQ | 用途 |
 | --- | --- | --- | --- |
 | `flamenode-notification-wake` | `NOTIFICATION_WAKE_QUEUE` | `flamenode-notification-dlq` | 通知 outbox の drain |
-| `flamenode-static-rebuild-wake` | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-static-rebuild-dlq` | 静的 JSON 再生成 |
+| `flamenode-static-rebuild-wake` | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-static-rebuild-dlq` | 静的 JSON 再生成（sync-jobs のスコア起因予約を含む） |
 | `flamenode-youtube-sync-wake` | `YOUTUBE_SYNC_WAKE_QUEUE` | `flamenode-youtube-sync-dlq` | YouTube pending 同期 |
 
 - `flamenode-web` は3 Queue すべてへ **producer** のみ持つ（`wrangler.toml`）。
+- `flamenode-static-rebuild-wake` は `flamenode-web` / `flamenode-content-jobs` / `flamenode-sync-jobs` が producer、`flamenode-content-jobs` が consumer。sync の producer は score 起因の静的再生成予約に使う。
 - 各 Cron Worker は対応 Queue の **consumer**（`max_concurrency = 1`、`max_batch_timeout = 1`）と、継続 wake 用 **producer** を持つ。
 - Consumer 設定: `max_batch_size = 10`、`max_retries = 3`。通知・静的は `retry_delay = 60`、YouTube は `retry_delay = 300`。
 - Recovery Cron は Queue wake が届かなかった場合の安全網。通常運用では Queue 駆動を優先し、Cron は補助とする。`QUEUE_DISPATCH_ENABLED` / `QUEUE_CONTINUATION_ENABLED` が `"0"` のときも、Recovery は `processStaticRebuildQueue` を最大 `CONTENT_JOBS_RECOVERY_MAX_TARGETS`（3）回までループし、1 Cron あたり最大3 target まで排水する（`MAX_QUEUE_ITEMS_PER_RUN` は1のまま）。D1 statement は invocation 内で `D1_QUERY_SOFT_LIMIT`（40）に達したら早期停止し continuation wake を送る。これは invocation 内の D1 安全装置であり、`operation_mode` を自動変更しない（CostGuard 手動のみ。Guardrails §4-0）。

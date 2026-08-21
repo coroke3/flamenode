@@ -15,14 +15,13 @@ import {
   type VideoMemberSuggestion,
 } from "@/lib/video/memberInput";
 import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
-import {
-  scoreSimpleMemberSuggestion,
-} from "@/lib/video/memberSuggestionRank";
+import { scoreSimpleMemberSuggestion } from "@/lib/video/memberSuggestionRank";
 import { writeTextToClipboard } from "@/lib/utils/clipboard";
 import {
   applyVideoCollaboratorPermissionsBatch,
 } from "@/lib/actions/video-collab-perms";
 import { MAX_COLLABORATOR_PERMISSION_BATCH } from "@/lib/video/atomicLimits";
+import styles from "./VideoForm.module.css";
 
 export type {
   VideoMemberChapterInput,
@@ -89,6 +88,15 @@ function normalizeMemberRows(rows: VideoMemberInput[]): VideoMemberInput[] {
     .filter((r) => r.name || r.x_user_id);
 }
 
+function isAbortError(error: unknown): boolean {
+  return Boolean(
+    (typeof DOMException !== "undefined" &&
+      error instanceof DOMException &&
+      error.name === "AbortError") ||
+      (error instanceof Error && error.name === "AbortError"),
+  );
+}
+
 export function VideoMembersField({
   initialMembers = [],
   suggestions = [],
@@ -108,6 +116,16 @@ export function VideoMembersField({
   const [copied, setCopied] = React.useState(false);
   const [copiedLabel, setCopiedLabel] = React.useState<string | null>(null);
   const [bulkWarning, setBulkWarning] = React.useState<string | null>(null);
+  // 連続コピー時に前のタイマーが新しい「コピーしました」表示を即座に消さないよう管理する。
+  const copiedTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+    };
+  }, []);
 
   // /api/internal/x-users/search からの追加候補 (debounce 検索)
   const [fetched, setFetched] = React.useState<VideoMemberSuggestion[]>([]);
@@ -118,10 +136,13 @@ export function VideoMembersField({
   const [searchHint, setSearchHint] = React.useState<string | null>(null);
   const [searchHasMore, setSearchHasMore] = React.useState(false);
   const [nextOffset, setNextOffset] = React.useState<number | null>(null);
+  const suggestionRequestIdRef = React.useRef(0);
+  const loadMoreControllerRef = React.useRef<AbortController | null>(null);
 
   const fetchSuggestions = React.useCallback(
     async (q: string, offset: number, signal?: AbortSignal) => {
       if (disabled) return;
+      const requestId = ++suggestionRequestIdRef.current;
       setSearchStatus("loading");
       setSearchHint(null);
       try {
@@ -149,6 +170,7 @@ export function VideoMembersField({
             matchedBy: row.matchedBy,
           }),
         );
+        if (signal?.aborted || requestId !== suggestionRequestIdRef.current) return;
         setFetched((prev) => {
           const map = new Map<string, VideoMemberSuggestion>();
           if (offset > 0) {
@@ -168,7 +190,13 @@ export function VideoMembersField({
         );
         setSearchStatus("done");
       } catch (e) {
-        if (e instanceof DOMException && e.name === "AbortError") return;
+        if (
+          isAbortError(e) ||
+          signal?.aborted ||
+          requestId !== suggestionRequestIdRef.current
+        ) {
+          return;
+        }
         setSearchStatus("error");
         setSearchHint("候補の取得に失敗しました。少し待って再入力してください。");
       }
@@ -179,6 +207,9 @@ export function VideoMembersField({
   React.useEffect(() => {
     const q = searchQuery.trim();
     if (disabled || q.length < 1) {
+      suggestionRequestIdRef.current += 1;
+      loadMoreControllerRef.current?.abort();
+      loadMoreControllerRef.current = null;
       setFetched([]);
       setSearchStatus("idle");
       setSearchHint(null);
@@ -192,9 +223,24 @@ export function VideoMembersField({
     }, 150);
     return () => {
       controller.abort();
+      suggestionRequestIdRef.current += 1;
+      loadMoreControllerRef.current?.abort();
+      loadMoreControllerRef.current = null;
       window.clearTimeout(t);
     };
   }, [disabled, fetchSuggestions, searchQuery]);
+
+  const loadMoreSuggestions = React.useCallback(() => {
+    if (disabled || nextOffset === null) return;
+    loadMoreControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadMoreControllerRef.current = controller;
+    void fetchSuggestions(searchQuery.trim(), nextOffset, controller.signal).finally(() => {
+      if (loadMoreControllerRef.current === controller) {
+        loadMoreControllerRef.current = null;
+      }
+    });
+  }, [disabled, fetchSuggestions, nextOffset, searchQuery]);
 
   // props + fetched を id ベースで重複排除して 1 つの suggestion 配列にまとめる
   const mergedSuggestions =
@@ -362,6 +408,10 @@ export function VideoMembersField({
 
   const copyWithLabel = async (text: string, label: string, failure: string) => {
     const ok = await writeTextToClipboard(text);
+    if (copiedTimerRef.current !== null) {
+      window.clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = null;
+    }
     if (!ok) {
       setBulkWarning(failure);
       setCopied(false);
@@ -371,7 +421,8 @@ export function VideoMembersField({
     setBulkWarning(null);
     setCopied(true);
     setCopiedLabel(label);
-    window.setTimeout(() => {
+    copiedTimerRef.current = window.setTimeout(() => {
+      copiedTimerRef.current = null;
       setCopied(false);
       setCopiedLabel(null);
     }, 1800);
@@ -1054,7 +1105,7 @@ export function VideoMembersField({
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => void fetchSuggestions(searchQuery.trim(), nextOffset)}
+            onClick={loadMoreSuggestions}
             disabled={disabled || searchStatus === "loading"}
           >
             候補をさらに読み込む

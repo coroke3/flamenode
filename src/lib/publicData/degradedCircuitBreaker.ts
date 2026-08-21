@@ -14,6 +14,33 @@ import {
   shouldOpenDegradedCircuit,
 } from "./degradedCircuitBreakerCore";
 
+const DEGRADED_CIRCUIT_LOCAL_PROBE_MS = 30_000;
+
+let localCircuitState: {
+  open: boolean;
+  openUntil: number;
+  hitStreak: number;
+  lastKvProbeAt: number;
+} = {
+  open: false,
+  openUntil: 0,
+  hitStreak: 0,
+  lastKvProbeAt: 0,
+};
+
+function markCircuitOpen(nowMs: number): void {
+  localCircuitState.open = true;
+  localCircuitState.openUntil = nowMs + DEGRADED_CIRCUIT_OPEN_TTL_SEC * 1_000;
+  localCircuitState.hitStreak = 0;
+}
+
+function markCircuitClosed(nowMs: number): void {
+  localCircuitState.open = false;
+  localCircuitState.openUntil = 0;
+  localCircuitState.hitStreak = 0;
+  localCircuitState.lastKvProbeAt = nowMs;
+}
+
 function parseCount(raw: string | null): number {
   if (raw == null || raw === "") return 0;
   const value = Number(raw);
@@ -26,7 +53,13 @@ export async function isDegradedD1CircuitOpen(): Promise<boolean> {
   if (!kv) return false;
   try {
     const open = await kv.get(degradedCircuitOpenKey());
-    return open === "1";
+    const now = Date.now();
+    if (open === "1") {
+      markCircuitOpen(now);
+      return true;
+    }
+    markCircuitClosed(now);
+    return false;
   } catch {
     return false;
   }
@@ -39,7 +72,12 @@ export async function recordDegradedCircuitR2Miss(
   const kv = getOperationModeKv();
   if (!kv) return;
   try {
-    if ((await kv.get(degradedCircuitOpenKey())) === "1") return;
+    if ((await kv.get(degradedCircuitOpenKey())) === "1") {
+      markCircuitOpen(nowMs);
+      return;
+    }
+
+    markCircuitClosed(nowMs);
 
     const bucket = currentDegradedCircuitMinuteBucket(nowMs);
     const missKey = degradedCircuitMissKey(bucket);
@@ -53,6 +91,7 @@ export async function recordDegradedCircuitR2Miss(
     await kv.put(degradedCircuitOpenKey(), "1", {
       expirationTtl: DEGRADED_CIRCUIT_OPEN_TTL_SEC,
     });
+    markCircuitOpen(nowMs);
     await kv.delete(degradedCircuitHitStreakKey());
     console.warn(
       JSON.stringify({
@@ -72,20 +111,54 @@ export async function recordDegradedCircuitR2Miss(
 export async function recordDegradedCircuitR2Hit(): Promise<void> {
   const kv = getOperationModeKv();
   if (!kv) return;
+  const now = Date.now();
+
+  // R2 hits are the hot path.  When this isolate recently observed the
+  // circuit closed, avoid one KV read per public request.  An open circuit
+  // still probes after the local hit streak reaches the close threshold.
+  if (
+    !localCircuitState.open &&
+    now - localCircuitState.lastKvProbeAt < DEGRADED_CIRCUIT_LOCAL_PROBE_MS
+  ) {
+    return;
+  }
+
+  if (localCircuitState.open && now >= localCircuitState.openUntil) {
+    localCircuitState.open = false;
+    localCircuitState.hitStreak = 0;
+  }
+
+  localCircuitState.hitStreak += 1;
+  if (
+    localCircuitState.open &&
+    !shouldCloseDegradedCircuit(localCircuitState.hitStreak)
+  ) {
+    return;
+  }
+
   try {
-    if ((await kv.get(degradedCircuitOpenKey())) !== "1") return;
+    localCircuitState.lastKvProbeAt = now;
+    if ((await kv.get(degradedCircuitOpenKey())) !== "1") {
+      markCircuitClosed(now);
+      return;
+    }
+
+    const hitStreak = localCircuitState.hitStreak;
+    markCircuitOpen(now);
+    localCircuitState.hitStreak = Math.max(
+      hitStreak,
+      1,
+    );
 
     const streakKey = degradedCircuitHitStreakKey();
-    const nextStreak = parseCount(await kv.get(streakKey)) + 1;
+    const nextStreak = localCircuitState.hitStreak;
     if (!shouldCloseDegradedCircuit(nextStreak)) {
-      await kv.put(streakKey, String(nextStreak), {
-        expirationTtl: DEGRADED_CIRCUIT_OPEN_TTL_SEC,
-      });
       return;
     }
 
     await kv.delete(degradedCircuitOpenKey());
     await kv.delete(streakKey);
+    markCircuitClosed(now);
     console.warn(
       JSON.stringify({
         service: "degraded-circuit",

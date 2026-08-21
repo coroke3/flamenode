@@ -52,6 +52,10 @@ test("users index v2 は3 sortのgeneration固有page/search完了後にmanifest
   assert.match(source, /artifacts\.namePages/);
   assert.match(source, /usersIndexV2PageObjectKey\(generation, page\.sort, page\.page\)/);
   assert.match(source, /usersIndexV2SearchLiteObjectKey\(generation\)/);
+  assert.match(source, /usersIndexV2SearchManifestObjectKey\(generation\)/);
+  assert.match(source, /searchPostingEntries/);
+  assert.match(source, /canSkipSameGeneration/);
+  assert.match(source, /forceRepair/);
   assert.match(source, /json_each\(\?1\)/);
   assert.match(source, /USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE = 500/);
   assert.match(loaderSource, /page\.generation !== manifest\.generation/);
@@ -68,6 +72,8 @@ test("stale generation cleanup はR2 bulk deleteとD1単一UPDATEへまとめる
   assert.match(source, /await env\.R2\.delete\(staleKeys\)/);
   assert.match(source, /FROM json_each\(\?\) AS stale_keys/);
   assert.match(source, /JSON\.stringify\(staleKeys\)/);
+  assert.match(source, /purgeDeletedArtifacts/);
+  assert.match(source, /gc_has_more/);
   assert.doesNotMatch(source, /for \(const row of staleRows\)[\s\S]*env\.R2\.delete/);
 });
 

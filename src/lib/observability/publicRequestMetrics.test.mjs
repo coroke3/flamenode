@@ -8,9 +8,15 @@ if (runTestWithTsx(import.meta.url)) {
     PUBLIC_REQUEST_METRICS_LOG_KEY,
     getPublicRequestMetricsSnapshot,
     logPublicRequestMetrics,
+    notePublicArtifactMode,
     recordPublicD1Fallback,
     recordPublicD1Query,
     recordPublicR2Get,
+    notePublicPathMode,
+    notePublicSearchBackend,
+    recordPublicFallbackReason,
+    recordPublicSearchCandidates,
+    recordPublicSearchShard,
     recordPublicStaticHit,
     recordPublicStaticMiss,
     runWithPublicRequestMetrics,
@@ -24,6 +30,12 @@ if (runTestWithTsx(import.meta.url)) {
       recordPublicStaticMiss();
       recordPublicD1Query(12);
       recordPublicD1Fallback();
+      notePublicPathMode("v2");
+      notePublicArtifactMode("stale");
+      notePublicSearchBackend("postings-v1");
+      recordPublicSearchShard();
+      recordPublicSearchCandidates(7);
+      recordPublicFallbackReason("test_fallback");
       return getPublicRequestMetricsSnapshot();
     });
 
@@ -35,6 +47,12 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(snapshot.d1_queries, 1);
     assert.equal(snapshot.rows_read, 12);
     assert.equal(snapshot.d1_fallback, true);
+    assert.equal(snapshot.path_mode, "v2");
+    assert.equal(snapshot.artifact_mode, "stale");
+    assert.equal(snapshot.search_backend, "postings-v1");
+    assert.equal(snapshot.search_shards_read, 1);
+    assert.equal(snapshot.search_candidates, 7);
+    assert.equal(snapshot.fallback_reason, "test_fallback");
     assert.equal(Object.hasOwn(snapshot, "sql"), false);
   });
 

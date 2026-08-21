@@ -116,6 +116,14 @@ import { resolvePickupCreatorsWithFallback } from "./pickupCreatorsR2.ts";
 import { enqueueTopSectionRebuild } from "./topRebuildEnqueue.ts";
 import { rebuildMemberSuggestions } from "./memberSuggestionsArtifacts.ts";
 import {
+  buildStaticVideoSearchPostingArtifacts,
+  normalizeSearchVideo,
+  staticVideoSearchPostingDirectoryObjectKey,
+  staticVideoSearchPostingManifestObjectKey,
+  staticVideoSearchPostingPageObjectKey,
+  type StaticSearchIndexVideo,
+} from "../../src/lib/publicData/staticSearchIndexCore.ts";
+import {
   readWorkerVisibilityBlockedEntitiesManifest,
   releaseBlockedEntityInManifest,
   upsertBlockedEntityInManifest,
@@ -418,7 +426,6 @@ export async function rebuildTarget(
     "list_recent",
     "list_popular",
     "events_index",
-    "search_index",
     "users_index",
     "recommend_core",
     "recommend",
@@ -438,7 +445,6 @@ export async function rebuildTarget(
       list_recent: "list/recent.json",
       list_popular: "list/popular.json",
       events_index: "events/index.json",
-      search_index: "search-index-lite.json",
       users_index: [USERS_INDEX_OBJECT_KEY, PUBLIC_X_ICON_MAP_OBJECT_KEY, PICKUP_CREATORS_OBJECT_KEY],
       recommend_core: RECOMMEND_CORE_OBJECT_KEY,
       recommend: "recommend.json",
@@ -481,6 +487,79 @@ async function putJson(
   }
   throwIfAborted(signal);
   if (target) await recordArtifact(env, target, key, serialized, signal);
+}
+
+type PendingStaticArtifact = { objectKey: string; contentHash: string };
+
+async function putJsonUntracked(
+  env: Env,
+  key: string,
+  body: unknown,
+  cacheControl: string,
+  signal?: RebuildSignal,
+): Promise<PendingStaticArtifact> {
+  throwIfAborted(signal);
+  assertNoForbiddenPublicKeys(body);
+  const serialized = JSON.stringify(body);
+  await env.R2.put(key, serialized, {
+    httpMetadata: {
+      contentType: "application/json; charset=utf-8",
+      cacheControl,
+    },
+  });
+  throwIfAborted(signal);
+  return {
+    objectKey: key,
+    contentHash: await staticArtifactContentHash(serialized),
+  };
+}
+
+async function recordArtifactsBatch(
+  env: Env,
+  target: ArtifactTarget,
+  artifacts: readonly PendingStaticArtifact[],
+  signal?: RebuildSignal,
+): Promise<void> {
+  const chunkSize = 500;
+  const now = Math.floor(Date.now() / 1000);
+  for (let offset = 0; offset < artifacts.length; offset += chunkSize) {
+    throwIfAborted(signal);
+    const chunk = artifacts.slice(offset, offset + chunkSize);
+    await env.DB.prepare(
+      `WITH artifacts AS (
+         SELECT
+           json_extract(value, '$.objectKey') AS object_key,
+           json_extract(value, '$.contentHash') AS content_hash
+         FROM json_each(?)
+       )
+       INSERT INTO static_artifacts
+         (id, target_type, target_id, object_key, content_hash, schema_version,
+          source_updated_at, generated_at, deleted_at)
+       SELECT
+         'sta:' || ? || ':' || ? || ':' || artifacts.object_key,
+         ?, ?, artifacts.object_key, artifacts.content_hash, ?, ?, ?, NULL
+       FROM artifacts
+       WHERE artifacts.object_key IS NOT NULL
+       ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
+         content_hash = excluded.content_hash,
+         schema_version = excluded.schema_version,
+         source_updated_at = excluded.source_updated_at,
+         generated_at = excluded.generated_at,
+         deleted_at = NULL`,
+    )
+      .bind(
+        JSON.stringify(chunk),
+        target.targetType,
+        target.targetId,
+        target.targetType,
+        target.targetId,
+        STATIC_ARTIFACT_SCHEMA_VERSION,
+        target.sourceUpdatedAt ?? null,
+        now,
+      )
+      .run();
+    throwIfAborted(signal);
+  }
 }
 
 async function recordArtifact(
@@ -558,10 +637,19 @@ async function reconcileTrackedArtifacts(
   throwIfAborted(signal);
   const rows = await env.DB.prepare(
     `SELECT object_key FROM static_artifacts
-     WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
-       AND object_key NOT IN (${liveKeys.length ? liveKeys.map(() => "?").join(",") : "NULL"})
-     ORDER BY generated_at ASC LIMIT ?`,
-  ).bind(target.targetType, target.targetId, ...liveKeys, limit).all<ArtifactRow>();
+      WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM json_each(?) AS live_keys
+          WHERE CAST(live_keys.value AS TEXT) = static_artifacts.object_key
+        )
+      ORDER BY generated_at ASC LIMIT ?`,
+  ).bind(
+    target.targetType,
+    target.targetId,
+    JSON.stringify(liveKeys),
+    limit,
+  ).all<ArtifactRow>();
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
   for (const row of rows.results ?? []) {
@@ -1469,13 +1557,130 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
      ORDER BY id ASC LIMIT 500`,
   ).all();
   throwIfAborted(signal);
+  const userNames = new Map(
+    (users.results ?? []).map((row) => [
+      String((row as Record<string, unknown>).id ?? "").toLowerCase(),
+      String((row as Record<string, unknown>).x_name ?? ""),
+    ]),
+  );
+  const postingItems = (videos.results ?? [])
+    .map((row) =>
+      normalizeSearchVideo({
+        ...(row as Record<string, unknown>),
+        creator_x_user_name: userNames.get(
+          String((row as Record<string, unknown>).creator_x_user_id ?? "").toLowerCase(),
+        ) ?? null,
+      }),
+    )
+    .filter((row): row is StaticSearchIndexVideo => row !== null);
+  const generatedAt = Math.floor(Date.now() / 1000);
   const payload = {
-    generated_at: Math.floor(Date.now() / 1000),
+    generated_at: generatedAt,
     videos: videos.results ?? [],
     users: users.results ?? [],
   };
+  const generation = await staticArtifactContentHash(
+    JSON.stringify({ videos: postingItems, users: users.results ?? [] }),
+  );
+  const postings = buildStaticVideoSearchPostingArtifacts({
+    items: postingItems,
+    generatedAt,
+    generation,
+  });
   assertStaticListObjectSize("search-index-lite.json", payload);
-  await putJson(env, "search-index-lite.json", payload, staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex), { targetType: "search_index", targetId: "global" }, signal);
+  await putJson(
+    env,
+    "search-index-lite.json",
+    payload,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex),
+    { targetType: "search_index", targetId: "global" },
+    signal,
+  );
+
+  const liveKeys = ["search-index-lite.json"];
+  const pendingPostingArtifacts: PendingStaticArtifact[] = [];
+  try {
+    for (const { bucket, directory } of postings.directories) {
+      const key = staticVideoSearchPostingDirectoryObjectKey(generation, bucket);
+      assertStaticListObjectSize(key, directory);
+      pendingPostingArtifacts.push(
+        await putJsonUntracked(
+          env,
+          key,
+          directory,
+          staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex),
+          signal,
+        ),
+      );
+      liveKeys.push(key);
+    }
+    for (const { bucket, page } of postings.pages) {
+      const key = staticVideoSearchPostingPageObjectKey(generation, bucket, page.page);
+      assertStaticListObjectSize(key, page);
+      pendingPostingArtifacts.push(
+        await putJsonUntracked(
+          env,
+          key,
+          page,
+          staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex),
+          signal,
+        ),
+      );
+      liveKeys.push(key);
+    }
+  } catch (error) {
+    try {
+      await env.R2.delete(pendingPostingArtifacts.map((artifact) => artifact.objectKey));
+    } catch (cleanupError) {
+      console.warn(
+        JSON.stringify({
+          service: "search-index",
+          result: "posting_put_cleanup_failed",
+          error_name: cleanupError instanceof Error ? cleanupError.name : "UnknownError",
+        }),
+      );
+    }
+    throw error;
+  }
+  try {
+    await recordArtifactsBatch(
+      env,
+      { targetType: "search_index", targetId: "global" },
+      pendingPostingArtifacts,
+      signal,
+    );
+  } catch (error) {
+    try {
+      await env.R2.delete(pendingPostingArtifacts.map((artifact) => artifact.objectKey));
+    } catch (cleanupError) {
+      console.warn(
+        JSON.stringify({
+          service: "search-index",
+          result: "posting_orphan_cleanup_failed",
+          error_name: cleanupError instanceof Error ? cleanupError.name : "UnknownError",
+        }),
+      );
+    }
+    throw error;
+  }
+  const manifestKey = staticVideoSearchPostingManifestObjectKey(generation);
+  assertStaticListObjectSize(manifestKey, postings.manifest);
+  await putJson(
+    env,
+    manifestKey,
+    postings.manifest,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex),
+    { targetType: "search_index", targetId: "global" },
+    signal,
+  );
+  liveKeys.push(manifestKey);
+  await reconcileTrackedArtifacts(
+    env,
+    { targetType: "search_index", targetId: "global" },
+    liveKeys,
+    20,
+    signal,
+  );
 }
 
 /**

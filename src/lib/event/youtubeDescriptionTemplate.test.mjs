@@ -108,6 +108,15 @@ test("members loop repeats per member in input order", () => {
   assert.deepEqual(rendered.templateWarnings, []);
 });
 
+test("members loop numbers only non-empty members", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}{{member_index}}:{{member_name}};{{/members}}",
+    {},
+    { members: [{}, { name: "Alice" }] },
+  );
+  assert.equal(rendered.text, "1:Alice;");
+});
+
 test("members loop disappears entirely with zero members", () => {
   const rendered = renderYoutubeDescriptionTemplate(
     "参加者:\n{{#members}}- {{member_name}}\n{{/members}}おわり",

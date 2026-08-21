@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -7,7 +7,14 @@ import {
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
   memberSuggestionsIndexObjectKey,
 } from "./memberSuggestionsCore.ts";
-import { loadMemberSuggestionsIndexFromBucket } from "./memberSuggestionsLoader.ts";
+import {
+  loadMemberSuggestionsIndexFromBucket,
+  resetMemberSuggestionsCacheForTest,
+} from "./memberSuggestionsLoader.ts";
+
+beforeEach(() => {
+  resetMemberSuggestionsCacheForTest();
+});
 
 function createBucket(objects) {
   return {
@@ -81,6 +88,16 @@ test("generation-specific indexが無い場合はindex_missing", async () => {
   );
   const result = await loadMemberSuggestionsIndexFromBucket(createBucket(objects));
   assert.equal(result.reason, "index_missing");
+});
+
+test("manifest total and index item count must agree", async () => {
+  const objects = new Map();
+  publishValidIndex(objects);
+  const manifest = JSON.parse(objects.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY));
+  manifest.total += 1;
+  objects.set(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, JSON.stringify(manifest));
+  const result = await loadMemberSuggestionsIndexFromBucket(createBucket(objects));
+  assert.deepEqual(result, { ok: false, reason: "index_total_mismatch" });
 });
 
 test("indexのgenerationがmanifestと不一致ならindex_invalid", async () => {

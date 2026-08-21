@@ -77,3 +77,18 @@ test("YouTube入力は生IDを送れるtext欄でサーバー検証へ委ねる"
     assert.match(match[0], /inputMode=\"url\"/);
   }
 });
+
+test("固定送信DockのグローバルボタンへCSS Modulesのスタイルを適用する", async () => {
+  const source = await read("src/components/forms/VideoForm.module.css");
+  assert.match(source, /\.submitDock\s+:global\(\.fn-btn\)/);
+  assert.doesNotMatch(source, /\.submitDock\s+\.fn-btn\b/);
+});
+
+test("member suggestion pagination aborts stale requests and ignores late responses", async () => {
+  const source = await read("src/components/forms/VideoMembersField.tsx");
+  assert.match(source, /suggestionRequestIdRef\s*=\s*React\.useRef\(0\)/);
+  assert.match(source, /loadMoreControllerRef\s*=\s*React\.useRef<AbortController \| null>\(null\)/);
+  assert.match(source, /new AbortController\(\)/);
+  assert.match(source, /requestId !== suggestionRequestIdRef\.current/);
+  assert.match(source, /fetchSuggestions\(searchQuery\.trim\(\), nextOffset, controller\.signal\)/);
+});

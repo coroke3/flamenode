@@ -21,6 +21,12 @@
   color: var(--accent-ink);
 }
 
+.button:focus-visible,
+.segment:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 3px;
+}
+
 .button:active {
   transform: scale(0.96);
 }
@@ -63,4 +69,9 @@
 .segment[data-active="true"] {
   background: var(--accent-primary);
   color: var(--accent-ink);
+}
+
+.segment:hover:not([data-active="true"]) {
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-elevated));
+  color: var(--text-primary);
 }

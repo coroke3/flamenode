@@ -3,6 +3,20 @@ import {
   normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
+import {
+  buildStaticSearchPostingArtifacts,
+  normalizeStaticSearchPostingDirectory,
+  normalizeStaticSearchPostingManifest,
+  normalizeStaticSearchPostingPage,
+  staticSearchPostingDirectoryObjectKey,
+  staticSearchPostingManifestObjectKey,
+  staticSearchPostingPageObjectKey,
+  STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
+  type StaticSearchPostingArtifacts,
+  type StaticSearchPostingDirectory,
+  type StaticSearchPostingManifest,
+  type StaticSearchPostingPage,
+} from "./staticSearchPostingsCore.ts";
 
 export const USERS_INDEX_V2_SCHEMA_VERSION = 2 as const;
 export const USERS_INDEX_V2_PAGE_SIZE = 48;
@@ -40,6 +54,8 @@ export type UsersIndexV2Manifest = {
   page_size: number;
   total_pages: number;
   sorts: UsersIndexV2Sort[];
+  search_backend?: "postings-v1";
+  search_bucket_count?: number;
 };
 
 export type UsersIndexV2Page = {
@@ -70,6 +86,7 @@ export type UsersIndexV2Artifacts = {
   worksPages: UsersIndexV2Page[];
   namePages: UsersIndexV2Page[];
   searchLite: UsersSearchLiteV1;
+  searchPostings: StaticSearchPostingArtifacts<UsersIndexV2Entry>;
 };
 
 function safeGenerationForObjectKey(generation: string): string {
@@ -108,6 +125,25 @@ export function usersIndexV2ScorePageObjectKey(
 
 export function usersIndexV2SearchLiteObjectKey(generation: string): string {
   return `${USERS_INDEX_V2_GENERATION_PREFIX}/${safeGenerationForObjectKey(generation)}/search-lite.v1.json`;
+}
+
+export function usersIndexV2SearchManifestObjectKey(generation: string): string {
+  return staticSearchPostingManifestObjectKey(`users-${generation}`);
+}
+
+export function usersIndexV2SearchDirectoryObjectKey(
+  generation: string,
+  bucket: number,
+): string {
+  return staticSearchPostingDirectoryObjectKey(`users-${generation}`, bucket);
+}
+
+export function usersIndexV2SearchPostingPageObjectKey(
+  generation: string,
+  bucket: number,
+  page: number,
+): string {
+  return staticSearchPostingPageObjectKey(`users-${generation}`, bucket, page);
 }
 
 function compactEntry(entry: UsersIndexV2SourceEntry): UsersIndexV2Entry {
@@ -186,6 +222,13 @@ export function buildUsersIndexV2Artifacts(args: {
   const score = sortUsersIndexV2Entries(compact, "score");
   const works = sortUsersIndexV2Entries(compact, "works");
   const name = sortUsersIndexV2Entries(compact, "name");
+  const searchPostings = buildStaticSearchPostingArtifacts({
+    items: score,
+    generatedAt: args.generatedAt,
+    generation: args.generation,
+    textOf: (entry) => [entry.x_id, entry.x_name],
+    keyOf: (entry) => entry.x_id,
+  });
 
   return {
     manifest: {
@@ -196,6 +239,8 @@ export function buildUsersIndexV2Artifacts(args: {
       page_size: pageSize,
       total_pages: totalPages,
       sorts: [...USERS_INDEX_V2_SORTS],
+      search_backend: "postings-v1",
+      search_bucket_count: searchPostings.manifest.bucket_count,
     },
     scorePages: paginateSortedEntries({
       items: score,
@@ -231,6 +276,7 @@ export function buildUsersIndexV2Artifacts(args: {
       total,
       items: score,
     },
+    searchPostings,
   };
 }
 
@@ -317,7 +363,35 @@ export function normalizeUsersIndexV2Manifest(
     page_size: pageSize,
     total_pages: totalPages,
     sorts: [...USERS_INDEX_V2_SORTS],
+    ...(row.search_backend === "postings-v1"
+      ? {
+          search_backend: "postings-v1" as const,
+          search_bucket_count:
+            Number(row.search_bucket_count) ===
+            STATIC_SEARCH_POSTINGS_BUCKET_COUNT
+              ? STATIC_SEARCH_POSTINGS_BUCKET_COUNT
+              : undefined,
+        }
+      : {}),
   };
+}
+
+export function normalizeUsersSearchPostingManifest(
+  value: unknown,
+): StaticSearchPostingManifest | null {
+  return normalizeStaticSearchPostingManifest(value);
+}
+
+export function normalizeUsersSearchPostingDirectory(
+  value: unknown,
+): StaticSearchPostingDirectory | null {
+  return normalizeStaticSearchPostingDirectory(value);
+}
+
+export function normalizeUsersSearchPostingPage(
+  value: unknown,
+): StaticSearchPostingPage<UsersIndexV2Entry> | null {
+  return normalizeStaticSearchPostingPage(value, normalizeEntry);
 }
 
 export function normalizeUsersIndexV2Page(

@@ -162,9 +162,16 @@ test("enforced fence IDs filter id-only global artifacts", () => {
     "search_index",
     {
       videos: [{ id: "v-ok", title: "ok" }],
+      records: [
+        {
+          gram: "ok",
+          items: [{ id: "v-hidden", title: "old" }, { id: "v-ok", title: "ok" }],
+        },
+      ],
       users: [{ id: "creatorhidden", x_name: "old" }, { id: "ok", x_name: "ok" }],
     },
     context,
   );
+  assert.deepEqual(search?.records?.[0]?.items, [{ id: "v-ok", title: "ok" }]);
   assert.deepEqual(search?.users, [{ id: "ok", x_name: "ok" }]);
 });

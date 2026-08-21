@@ -12,9 +12,7 @@ import {
   type EventExportUpdateMode,
 } from "@/lib/api/eventExportPayload";
 import {
-  EVENT_EXPORT_ACCESS_TTL_SECONDS,
   EVENT_EXPORT_REFRESH_MINUTES,
-  eventExportAccessCacheKey,
   eventExportPayloadCacheKey,
   getEventExportKv,
   isEventExportRefreshMinutes,
@@ -94,10 +92,11 @@ async function readCachedPayload(
   kv: KVNamespace,
   cacheKey: string,
   eventId: string,
+  cacheTtlSeconds: number,
 ): Promise<string | null> {
   let cached: string | null;
   try {
-    cached = await kv.get(cacheKey);
+    cached = await kv.get(cacheKey, { cacheTtl: cacheTtlSeconds });
   } catch (error) {
     console.warn("[event-export-api] KV payload read failed", {
       eventId,
@@ -198,14 +197,18 @@ export async function GET(
     );
   }
 
-  const accessKey = eventExportAccessCacheKey(eventId);
   const payloadCacheKey = eventExportPayloadCacheKey(
     eventId,
     refreshMinutes,
   );
   const cachedResponse = async (): Promise<Response | null> => {
     if (!kv) return null;
-    const cached = await readCachedPayload(kv, payloadCacheKey, eventId);
+    const cached = await readCachedPayload(
+      kv,
+      payloadCacheKey,
+      eventId,
+      refreshMinutes * 60,
+    );
     return cached === null
       ? null
       : exportResponse(
@@ -235,30 +238,11 @@ export async function GET(
   }
   const allowed = isPublicExportEvent(prefetchedEvent);
   if (!allowed) {
-    if (kv) {
-      try {
-        await kv.put(accessKey, "0", {
-          expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
-        });
-      } catch {
-        // D1の404判定を優先する。
-      }
-    }
     return notFoundResponse(req);
   }
 
   if (kv) {
-    const accessWrite = kv
-      .put(accessKey, "1", {
-        expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
-      })
-      .catch((error) => {
-        console.warn("[event-export-api] KV access gate write failed", {
-          eventId,
-          error,
-        });
-      });
-    const [response] = await Promise.all([cachedResponse(), accessWrite]);
+    const response = await cachedResponse();
     if (response) return response;
   }
 
@@ -303,15 +287,6 @@ export async function GET(
   }
 
   if (body === null) {
-    if (kv) {
-      try {
-        await kv.put(accessKey, "0", {
-          expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
-        });
-      } catch {
-        // 404応答を優先する。
-      }
-    }
     return notFoundResponse(req);
   }
 
@@ -319,9 +294,6 @@ export async function GET(
     const writes = await Promise.allSettled([
       kv.put(payloadCacheKey, body, {
         expirationTtl: refreshMinutes * 60,
-      }),
-      kv.put(accessKey, "1", {
-        expirationTtl: EVENT_EXPORT_ACCESS_TTL_SECONDS,
       }),
     ]);
     if (writes.some((result) => result.status === "rejected")) {

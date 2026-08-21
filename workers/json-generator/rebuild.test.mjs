@@ -353,6 +353,26 @@ test("search-index-liteのvideosはCOUNTABLE条件でSTATIC_LIST_MAX_ITEMS件ま
   assert.match(searchFn, /ORDER BY id ASC LIMIT 500/);
 });
 
+test("search-indexはgeneration固定のbounded posting shardも生成する", () => {
+  assert.match(source, /buildStaticVideoSearchPostingArtifacts/);
+  assert.match(source, /staticVideoSearchPostingManifestObjectKey/);
+  assert.match(source, /staticVideoSearchPostingDirectoryObjectKey/);
+  assert.match(source, /staticVideoSearchPostingPageObjectKey/);
+  assert.match(source, /recordArtifactsBatch/);
+  assert.match(source, /FROM json_each\(\?\)/);
+  assert.match(source, /await reconcileTrackedArtifacts\(/);
+});
+
+test("search-indexのposting trackingは生成関数自身が完了するため共通cleanupで削除しない", () => {
+  const rebuildTargetTail = source.slice(source.indexOf("export async function rebuildTarget"));
+  const cleanupBlock = rebuildTargetTail.match(
+    /if \(\[\s*[\s\S]*?\]\.includes\(targetType\)\) \{[\s\S]*?await reconcileTrackedArtifacts\(/,
+  )?.[0];
+  assert.ok(cleanupBlock);
+  assert.doesNotMatch(cleanupBlock, /"search_index"/);
+  assert.doesNotMatch(cleanupBlock, /search-index-lite\.json/);
+});
+
 test("rebuildEventBaseはD1公開詳細相当の作品紐付けと集計を使う", () => {
   const eventFn = source.match(
     /async function rebuildEventBase\([\s\S]*?(?=async function rebuildEventSlots)/,
@@ -566,6 +586,7 @@ test("top_nostalgic 同日再生成は RANDOM を再実行せず private 化動�
       },
       async head() { return null; },
       async put(key, body) { puts.push({ key, body: JSON.parse(String(body)) }); },
+      async delete() {},
     },
     KV: { async put() {} },
   };

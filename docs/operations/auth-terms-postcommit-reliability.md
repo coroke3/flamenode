@@ -3,6 +3,7 @@
 > Status: Active
 > Last verified: 2026-07-29
 > Source of truth: `src/lib/auth/`, `src/lib/actions/terms.ts`, `src/lib/audit/postCommit.ts`, workers
+> Video collaborator permission actions catch D1 binding and preparation failures before mutation and return a UI-facing failure result.
 
 ## 変更概要
 

@@ -51,9 +51,9 @@ test("parseOperationModeKvMirror は reason を保持する", () => {
   assert.equal(mirror?.reason, "manual");
 });
 
-test("resolvePublicOperationMode: 失敗時は static_only へ倒す", () => {
-  assert.match(publicModeSource, /const fallback: OperationMode = "static_only"/);
-  assert.doesNotMatch(publicModeSource, /return "normal"/);
+test("resolvePublicOperationMode: 設定解決不能時も static_only へ自動遷移しない", () => {
+  assert.match(publicModeSource, /const fallback: OperationMode = "normal"/);
+  assert.match(publicModeSource, /static_only へ自動遷移しない/);
 });
 
 test("resolvePublicOperationMode: 優先順位コメントを保持する", () => {
