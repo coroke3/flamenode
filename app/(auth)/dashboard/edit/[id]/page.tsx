@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
@@ -205,11 +205,8 @@ export default async function EditVideoPage({
           .limit(1)
       )[0]
     : null;
-  const memberSuggestions = await db
-    .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
-    .from(xUsersTable)
-    .orderBy(asc(xUsersTable.x_name))
-    .limit(2000);
+  // autocomplete候補はR2静的index経由の /api/internal/x-users/search から取得する。
+  // D1からの大量preload（旧 limit(2000)）は撤去済み。
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
   const softwareLabel = await getVideoSoftwareLabel(db, video.id);
   // 編集対象作品の主体 X ID に紐づく候補を出す。
@@ -754,7 +751,6 @@ export default async function EditVideoPage({
           part: video.part ?? undefined,
         }}
         defaultProfile={defaultProfile}
-        memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         eventOptions={eventOptions}
         youtubeDescriptionContext={{

@@ -128,6 +128,13 @@ async function revalidateEventStaffPathsBestEffort(args: {
                 priority: "low",
                 requestedByUserId: args.actorUserId,
               },
+              // スタッフ登録でpending x_usersを作り得るため候補indexも更新する。
+              {
+                targetType: "member_suggestions",
+                targetId: "global",
+                reason: args.reason,
+                priority: "low",
+              },
             ],
             { wakeSource: "web" },
           );

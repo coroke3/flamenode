@@ -594,6 +594,8 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
         priority: "high",
         requestedByUserId: userId,
       },
+      // 新規提出・再提出ともメンバー/クリエイター履歴を書き換え得る。
+      { targetType: "member_suggestions", targetId: "global", reason: rebuildReason },
       ...rebuildEventIds.flatMap((eventId) => [
         {
           targetType: "event_base" as const,

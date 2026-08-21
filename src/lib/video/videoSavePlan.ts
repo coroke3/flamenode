@@ -39,7 +39,7 @@ import {
   extractPreviousPublicMemberXUserIdsFromMembersPlan,
 } from "@/lib/video/memberAggregationFanOut";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { buildVideoCardChangeFanOutTargets } from "@/lib/staticRebuild/hooks";
+import { buildVideoCardChangeFanOutTargets, memberSuggestionsTarget } from "@/lib/staticRebuild/hooks";
 import type { EnqueueStaticRebuildInput } from "@/lib/staticRebuild/types";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
@@ -434,6 +434,8 @@ export async function applyVideoUpdatePlan(
       reason: "video_members_update",
       requestedByUserId: plan.operatorUserId,
     });
+    // メンバー構成の変化はoccurrence / nameAliasesに響く。
+    queueItems.push(memberSuggestionsTarget("video_members_update"));
   }
   if (isPublicVideo && plan.rebuildFlags.identityChanged) {
     const affectedCreatorIds = new Set(

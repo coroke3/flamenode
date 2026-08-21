@@ -119,6 +119,15 @@ function buildMergeStaticRebuildTargets(opts: {
       priority: "normal",
       requestedByUserId: opts.requestedByUserId,
     },
+    // X ID統合はvideo_members / creator履歴 / x_user_aliasesを書き換えるため
+    // member suggestions indexも必ず再生成する。
+    {
+      targetType: "member_suggestions",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "normal",
+      requestedByUserId: opts.requestedByUserId,
+    },
   ];
 
   const videoIds = new Set<string>();

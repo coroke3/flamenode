@@ -67,13 +67,8 @@ export default async function UnslottedPostPage({
         .orderBy(asc(xUsers.x_name), asc(xUsers.id))
     : [];
 
-  const memberSuggestions = db
-    ? await db
-        .select({ name: xUsers.x_name, x_user_id: xUsers.id })
-        .from(xUsers)
-        .orderBy(asc(xUsers.x_name))
-        .limit(2000)
-    : [];
+  // autocomplete候補はR2静的index経由の /api/internal/x-users/search から取得する。
+  // D1からの大量preload（旧 limit(2000)）は撤去済み。
   const softwareSuggestions = db ? await getUsedSoftwareSuggestions(db) : [];
 
   const eventOptions = db
@@ -223,7 +218,6 @@ export default async function UnslottedPostPage({
           ...initialProfile,
         }}
         defaultProfile={initialProfile}
-        memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}
         iconCandidates={iconCandidates}

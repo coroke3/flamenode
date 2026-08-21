@@ -1195,6 +1195,21 @@ async function approveXIdLinkRequestOnce(
     expected.push(...queue.expectedChanges);
   }
 
+  // 別名（alias）追加・pending x_users作成は公開可否変化と無関係に
+  // member suggestions indexの候補へ響くため、常に同一atomic batchで再生成する。
+  if (notificationXUserId || bindTargetXUserId) {
+    const suggestionsQueue = await buildStaticRebuildQueueBatch(db, [
+      {
+        targetType: "member_suggestions",
+        targetId: "global",
+        reason: "x_id_approved",
+        priority: "low",
+      },
+    ]);
+    statements.push(...suggestionsQueue.statements);
+    expected.push(...suggestionsQueue.expectedChanges);
+  }
+
   await mutateWithAudit(db, {
     mutationStatements: statements,
     expectedMutationChanges: expected,

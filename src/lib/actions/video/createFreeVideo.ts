@@ -314,6 +314,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       { targetType: "list_popular" as const, targetId: "global", reason: "video_create" },
       { targetType: "search_index" as const, targetId: "global", reason: "video_create" },
       { targetType: "users_index" as const, targetId: "global", reason: "video_create" },
+      { targetType: "member_suggestions" as const, targetId: "global", reason: "video_create" },
       ...topVideoVisibilityTargets("video_create"),
       {
         targetType: "random_video_pool" as const,

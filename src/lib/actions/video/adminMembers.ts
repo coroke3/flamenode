@@ -134,6 +134,7 @@ export async function updateVideoMembersAdmin(
     const memberAggregationChanged = affectedCreatorIds.size > 0;
     queue = await buildStaticRebuildQueueBatch(db, [
       { targetType: "video", targetId: videoId, reason: "video_members_update", requestedByUserId: user.id },
+      { targetType: "member_suggestions" as const, targetId: "global", reason: "video_members_update" },
       ...(isPublicVideo && memberAggregationChanged
         ? [
             { targetType: "users_index" as const, targetId: "global", reason: "video_members_update" },

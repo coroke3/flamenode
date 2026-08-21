@@ -126,11 +126,8 @@ export default async function SlottedPostPage({
   const xIdOptions = (await getLinkedXUsersForAuthUser(db, user.id, { approvedOnly: true }))
     .map((row) => ({ id: row.x_user_id, x_name: row.x_name }))
     .sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
-  const memberSuggestions = await db
-    .select({ name: xUsersTable.x_name, x_user_id: xUsersTable.id })
-    .from(xUsersTable)
-    .orderBy(asc(xUsersTable.x_name))
-    .limit(2000);
+  // autocomplete候補はR2静的index経由の /api/internal/x-users/search から取得する。
+  // D1からの大量preload（旧 limit(2000)）は撤去済み。
   const softwareSuggestions = await getUsedSoftwareSuggestions(db);
   const iconCandidates = activeX ? await getXIconCandidates(db, activeX) : [];
   const channelCandidates =
@@ -283,7 +280,6 @@ export default async function SlottedPostPage({
           event_ids: initialEventIds,
         }}
         defaultProfile={initialProfile}
-        memberSuggestions={memberSuggestions}
         softwareSuggestions={softwareSuggestions}
         submitBlockedReason={submitBlockedReason}
         iconCandidates={iconCandidates}

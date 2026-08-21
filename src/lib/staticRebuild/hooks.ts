@@ -210,6 +210,17 @@ function eventSlotsTarget(
 function usersIndexTarget(reason: string): EnqueueStaticRebuildInput {
   return { targetType: "users_index", targetId: "global", reason };
 }
+
+/**
+ * 合作メンバーX ID候補インデックス（内部autocomplete用R2 artifact）。
+ * targetIdは常にglobalで統一し、重複enqueueはqueueのdedupeに任せる。
+ */
+export function memberSuggestionsTarget(
+  reason: string,
+  priority: StaticRebuildPriority = "low",
+): EnqueueStaticRebuildInput {
+  return { targetType: "member_suggestions", targetId: "global", reason, priority };
+}
 /** 枠変更で top slot-stats artifact を更新する。 */
 
 export function topSlotStatsGlobalTarget(
@@ -261,6 +272,8 @@ export async function enqueueAfterVideoCreate(
       usersIndexTarget("video_create"),
     );
   }
+  // 作品作成はクリエイター/メンバーのoccurrence・lastSeenを変える。
+  items.push(memberSuggestionsTarget("video_create"));
   for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
     items.push(eventBaseTarget(eventId, "video_create", "high", opts.requestedByUserId));
   }
@@ -306,6 +319,8 @@ export async function enqueueAfterVideoUpdate(
         priority: "low",
       },
     );
+    // クリエイター表示名・X IDの変更はmember suggestionsのname/occurrenceに響く。
+    items.push(memberSuggestionsTarget("video_identity_update"));
     chainsTopRecommendViaUsersIndex = true;
   }
   const listAffecting =
@@ -362,6 +377,7 @@ export async function enqueueAfterXUserPublicUpdate(
       requestedByUserId: opts.requestedByUserId,
     },
     usersIndexTarget(opts.reason),
+    memberSuggestionsTarget(opts.reason),
   ]);
 }
 
@@ -391,6 +407,7 @@ export function buildAfterXUserPublicUpdateQueueBatch(
       reason: opts.reason,
       requestedByUserId: opts.requestedByUserId,
     },
+    memberSuggestionsTarget(opts.reason),
   ]);
 }
 
