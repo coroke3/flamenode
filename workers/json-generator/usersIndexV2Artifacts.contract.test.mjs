@@ -39,6 +39,11 @@ test("users index v2 は3 sortのgeneration固有page/search完了後にmanifest
   assert.match(pageSource, /loadStaticUsersIndexV2Page/);
 });
 
+test("generation hash はcontentだけでなくlayout versionも含める", () => {
+  assert.match(source, /USERS_INDEX_V2_GENERATION_LAYOUT_VERSION/);
+  assert.match(source, /layout_version: USERS_INDEX_V2_GENERATION_LAYOUT_VERSION/);
+});
+
 test("stale generation cleanup はR2 bulk deleteとD1単一UPDATEへまとめる", () => {
   assert.match(source, /await env\.R2\.delete\(staleKeys\)/);
   assert.match(source, /FROM json_each\(\?\) AS stale_keys/);
