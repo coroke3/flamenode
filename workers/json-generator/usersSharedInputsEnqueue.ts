@@ -46,7 +46,7 @@ export async function enqueueUsersIndexRebuild(
   );
 }
 
-/** R2上の users 共有JSONが欠けていれば users_index:global を enqueue する。 */
+/** R2上の users 正本共有JSONが欠けていれば users_index:global を enqueue する。v2 manifestは任意の高速化成果物なので必須判定に含めない。 */
 export async function ensureUsersSharedInputsOnR2(
   env: EnqueueEnv,
   options: {

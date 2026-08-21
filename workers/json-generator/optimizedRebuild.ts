@@ -6,6 +6,7 @@ import {
 } from "./r2Dedup.ts";
 import { enqueueComposerFollowUps } from "./followUpEnqueue.ts";
 import { rebuildTarget } from "./rebuild.ts";
+import { rebuildUsersIndexV2FromLegacyArtifact } from "./usersIndexV2Artifacts.ts";
 import {
   staticR2CacheControl,
   STATIC_R2_MAX_AGE_SEC,
@@ -552,6 +553,9 @@ export async function optimizedRebuildTarget(
   }
 
   const result = await rebuildTarget(env, targetType, targetId, signal, reason);
+  if (targetType === "users_index") {
+    await rebuildUsersIndexV2FromLegacyArtifact(env, signal);
+  }
   if (targetType === "event_base") {
     await syncEventPlaylistArtifact(env, targetId, signal);
   }

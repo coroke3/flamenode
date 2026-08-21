@@ -8,7 +8,11 @@ import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "./resolveActiveXId";
 import { getEditableEventIds } from "./ownership";
-import { getLinkedXUsersForAuthUser, type LinkedXUser } from "./xIdentity";
+import { getEditableEventIdsByApprovedXIds } from "./editableEventIdsByXIds";
+import {
+  getHeaderLinkedXUsersForAuthUser,
+  type HeaderLinkedXUser,
+} from "./headerLinkedXUsers";
 import {
   normalizeXIdApprovalStatus,
   xIdApprovalRank,
@@ -28,8 +32,23 @@ export type HeaderUser = {
   };
 };
 
+export type AuthoritativeHeaderUserSnapshot = {
+  role?: string | null;
+  active_x_user_id?: string | null;
+};
+
 export type BuildHeaderUserOptions = {
   includeXIds?: boolean;
+  /**
+   * 同一requestで getCurrentUser() 等がDB正本から取得済みの値だけを渡す。
+   * Auth.js sessionやクライアント入力を正本扱いする用途では使わない。
+   */
+  authoritativeUserSnapshot?: AuthoritativeHeaderUserSnapshot;
+  /**
+   * 同一requestでD1から取得済みのlinked X最小projectionだけを渡す。
+   * 外部入力・session由来配列を認可根拠として渡してはいけない。
+   */
+  authoritativeLinkedXRows?: readonly HeaderLinkedXUser[];
 };
 
 type SessionUserLike = {
@@ -40,21 +59,39 @@ type SessionUserLike = {
   active_x_user_id?: string | null;
 };
 
-async function getManagementAccess(user: {
-  id: string;
-  role?: string | null;
-}): Promise<HeaderUser["management"]> {
-  if (user.role === "admin") {
-    return { canAccessAdmin: true, canAccessManage: true, manageableEventCount: 0 };
-  }
-  const db = getDatabase();
-  if (!db) return { canAccessAdmin: false, canAccessManage: false, manageableEventCount: 0 };
-  const manageableEventCount = (await getEditableEventIds(db, user.id)).length;
+function adminManagement(): HeaderUser["management"] {
+  return { canAccessAdmin: true, canAccessManage: true, manageableEventCount: 0 };
+}
+
+function userManagement(manageableEventCount: number): HeaderUser["management"] {
   return {
     canAccessAdmin: false,
     canAccessManage: manageableEventCount > 0,
     manageableEventCount,
   };
+}
+
+async function getManagementAccess(user: {
+  id: string;
+  role?: string | null;
+}): Promise<HeaderUser["management"]> {
+  if (user.role === "admin") return adminManagement();
+  const db = getDatabase();
+  if (!db) return userManagement(0);
+  const manageableEventCount = (await getEditableEventIds(db, user.id)).length;
+  return userManagement(manageableEventCount);
+}
+
+async function getManagementAccessFromApprovedXIds(
+  db: DB,
+  role: HeaderUser["role"],
+  approvedXUserIds: readonly string[],
+): Promise<HeaderUser["management"]> {
+  if (role === "admin") return adminManagement();
+  const manageableEventCount = (
+    await getEditableEventIdsByApprovedXIds(db, approvedXUserIds)
+  ).length;
+  return userManagement(manageableEventCount);
 }
 
 function normalizeRole(role: string | null | undefined): HeaderUser["role"] {
@@ -64,10 +101,12 @@ function normalizeRole(role: string | null | undefined): HeaderUser["role"] {
 async function fetchHeaderXIdEntries(
   db: DB,
   authUserId: string,
-  linkedRows?: LinkedXUser[],
+  linkedRows?: readonly HeaderLinkedXUser[],
 ): Promise<XIdEntry[]> {
   const [resolvedLinkedRows, pendingRequests] = await Promise.all([
-    linkedRows ? Promise.resolve(linkedRows) : getLinkedXUsersForAuthUser(db, authUserId),
+    linkedRows
+      ? Promise.resolve(linkedRows)
+      : getHeaderLinkedXUsersForAuthUser(db, authUserId),
     db
       .select({ requested_x_id: xIdentityRequests.requested_x_id })
       .from(xIdentityRequests)
@@ -119,6 +158,22 @@ async function fetchHeaderXIdEntries(
   }));
 }
 
+async function resolveAuthoritativeUserSnapshot(
+  db: DB,
+  authUserId: string,
+  provided?: AuthoritativeHeaderUserSnapshot,
+): Promise<AuthoritativeHeaderUserSnapshot> {
+  if (provided) return provided;
+  const row = (
+    await db
+      .select({ active_x_user_id: users.active_x_user_id, role: users.role })
+      .from(users)
+      .where(eq(users.id, authUserId))
+      .limit(1)
+  )[0];
+  return row ?? {};
+}
+
 export async function buildHeaderUser(
   sessionUser: SessionUserLike | null | undefined,
   options?: BuildHeaderUserOptions,
@@ -131,26 +186,33 @@ export async function buildHeaderUser(
 
   const dbPayload = includeXIds
     ? await withDatabase(async (db) => {
-        const linkedRows = await getLinkedXUsersForAuthUser(db, authUserId);
-        const [userRows, entries] = await Promise.all([
-          db
-            .select({ active_x_user_id: users.active_x_user_id, role: users.role })
-            .from(users)
-            .where(eq(users.id, authUserId))
-            .limit(1),
+        const linkedRows =
+          options?.authoritativeLinkedXRows ??
+          (await getHeaderLinkedXUsersForAuthUser(db, authUserId));
+        const [userRow, entries] = await Promise.all([
+          resolveAuthoritativeUserSnapshot(
+            db,
+            authUserId,
+            options?.authoritativeUserSnapshot,
+          ),
           fetchHeaderXIdEntries(db, authUserId, linkedRows),
         ]);
-        const userRow = userRows[0];
-        const role = normalizeRole(userRow?.role ?? sessionUser.role);
+        const role = normalizeRole(userRow.role ?? sessionUser.role);
         const approvedLinkedRows = linkedRows.filter(
           (row) => row.approval_status === "approved",
         );
-        const resolvedActive = await resolveActiveXUserId(
-          db,
-          authUserId,
-          normalizeXId(userRow?.active_x_user_id) || fallbackActiveXId,
-          approvedLinkedRows,
+        const approvedXUserIds = Array.from(
+          new Set(approvedLinkedRows.map((row) => row.x_user_id)),
         );
+        const [resolvedActive, management] = await Promise.all([
+          resolveActiveXUserId(
+            db,
+            authUserId,
+            normalizeXId(userRow.active_x_user_id) || fallbackActiveXId,
+            approvedLinkedRows,
+          ),
+          getManagementAccessFromApprovedXIds(db, role, approvedXUserIds),
+        ]);
         const normalizedActive = normalizeXId(resolvedActive) || null;
         return {
           role,
@@ -159,22 +221,25 @@ export async function buildHeaderUser(
             is_active:
               entry.approval_status !== "rejected" && entry.x_user_id === normalizedActive,
           })),
+          management,
         };
       })
     : await withDatabase(async (db) => {
-        const userRows = await db
-          .select({ role: users.role })
-          .from(users)
-          .where(eq(users.id, authUserId))
-          .limit(1);
+        const userRow = await resolveAuthoritativeUserSnapshot(
+          db,
+          authUserId,
+          options?.authoritativeUserSnapshot,
+        );
         return {
-          role: normalizeRole(userRows[0]?.role ?? sessionUser.role),
+          role: normalizeRole(userRow.role ?? sessionUser.role),
           xIds: [] as XIdEntry[],
+          management: null,
         };
       });
 
   const role = dbPayload?.role ?? fallbackRole;
-  const management = await getManagementAccess({ id: authUserId, role });
+  const management =
+    dbPayload?.management ?? (await getManagementAccess({ id: authUserId, role }));
   return {
     id: authUserId,
     name: sessionUser.name?.trim() || "guest",

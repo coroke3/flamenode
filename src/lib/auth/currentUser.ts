@@ -10,6 +10,10 @@ import { users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "@/lib/auth/resolveActiveXId";
 import {
+  getHeaderLinkedXUsersForAuthUser,
+  type HeaderLinkedXUser,
+} from "@/lib/auth/headerLinkedXUsers";
+import {
   getLatestPublishedMajorTerms,
   termsReacceptRequiredValue,
 } from "@/lib/terms/reaccept";
@@ -29,6 +33,15 @@ export type CurrentUser = {
   terms_reaccept_required: number;
 };
 
+/**
+ * 同一request内でのみ再利用するDB正本スナップショット。
+ * linkedXUsers は認証・active X解決時にD1から取得した行で、外部入力ではない。
+ */
+export type CurrentUserContext = {
+  user: CurrentUser | null;
+  linkedXUsers: HeaderLinkedXUser[];
+};
+
 export type CurrentUserUnavailableCode =
   | "auth_temporarily_unavailable"
   | "database_unavailable";
@@ -43,7 +56,7 @@ export class CurrentUserUnavailableError extends Error {
   }
 }
 
-async function loadCurrentUser(): Promise<CurrentUser | null> {
+async function loadCurrentUserContext(): Promise<CurrentUserContext> {
   let session: Session | null;
   try {
     session = await getAuthSession();
@@ -68,7 +81,7 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
     | undefined;
 
   // authが正常終了してsessionが無い場合だけ未ログイン扱いにする。
-  if (!sessionUser?.id) return null;
+  if (!sessionUser?.id) return { user: null, linkedXUsers: [] };
   const userId = sessionUser.id;
 
   const fallback: CurrentUser = {
@@ -112,12 +125,22 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
         )[0];
 
         if (!userRow) return { kind: "missing" as const };
+
+        // active X解決とaccount/header表示で同じlinked X行を再利用できるよう、
+        // ここで最小projectionを1回だけ読む。認可判定はapproval_statusを境界で再確認する。
+        const linkedXUsers = await getHeaderLinkedXUsersForAuthUser(db, userId);
         const resolvedActive = await resolveActiveXUserId(
           db,
           userId,
           normalizeXId(userRow.active_x_user_id) || null,
+          linkedXUsers,
         );
-        return { kind: "found" as const, userRow, resolvedActive };
+        return {
+          kind: "found" as const,
+          userRow,
+          resolvedActive,
+          linkedXUsers,
+        };
       });
     } catch (error) {
       unstable_rethrow(error);
@@ -129,25 +152,33 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
     throw new CurrentUserUnavailableError("database_unavailable");
   }
   // Auth.js側に古いsessionが残っていても、消失したDB userのroleを復活させない。
-  if (loaded.kind === "missing") return null;
+  if (loaded.kind === "missing") return { user: null, linkedXUsers: [] };
 
-  const { userRow, resolvedActive } = loaded;
+  const { userRow, resolvedActive, linkedXUsers } = loaded;
   return {
-    id: userRow.id,
-    name: userRow.name ?? fallback.name,
-    email: userRow.email ?? fallback.email,
-    image: userRow.image ?? fallback.image,
-    role:
-      userRow.role === "admin" || userRow.role === "moderator"
-        ? userRow.role
-        : "user",
-    is_banned: userRow.is_banned ?? 0,
-    active_x_user_id: resolvedActive,
-    is_tos_accepted: userRow.is_tos_accepted ?? 0,
-    accepted_terms_version_id: userRow.accepted_terms_version_id ?? null,
-    terms_reaccept_required: userRow.terms_reaccept_required === 1 ? 1 : 0,
+    user: {
+      id: userRow.id,
+      name: userRow.name ?? fallback.name,
+      email: userRow.email ?? fallback.email,
+      image: userRow.image ?? fallback.image,
+      role:
+        userRow.role === "admin" || userRow.role === "moderator"
+          ? userRow.role
+          : "user",
+      is_banned: userRow.is_banned ?? 0,
+      active_x_user_id: resolvedActive,
+      is_tos_accepted: userRow.is_tos_accepted ?? 0,
+      accepted_terms_version_id: userRow.accepted_terms_version_id ?? null,
+      terms_reaccept_required: userRow.terms_reaccept_required === 1 ? 1 : 0,
+    },
+    linkedXUsers,
   };
 }
 
 /** 同一Server Component request内のauth/DB/X-ID解決を1回にまとめる。 */
-export const getCurrentUser = cache(loadCurrentUser);
+export const getCurrentUserContext = cache(loadCurrentUserContext);
+
+/** 既存callers向け。context cacheを共有するため追加D1 readは発生しない。 */
+export const getCurrentUser = cache(
+  async (): Promise<CurrentUser | null> => (await getCurrentUserContext()).user,
+);
