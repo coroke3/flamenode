@@ -1,6 +1,11 @@
 import { detectDelimiter, parseDelimited } from "#utils/delimited";
 import { canonicalizePermissionKey } from "../auth/permissions/aliases.ts";
-import { isAdminOnlyKey, type PermissionKey } from "../auth/permissions/keys.ts";
+import {
+  ALL_PERMISSION_KEYS,
+  PERMISSION_DEFINITIONS,
+  isAdminOnlyKey,
+  type PermissionKey,
+} from "../auth/permissions/keys.ts";
 import {
   isEventStaffPreset,
   PRESET_DEFINITIONS,
@@ -36,15 +41,46 @@ export interface EventStaffCsvPreview {
 export const EVENT_STAFF_CSV_HEADER =
   "表示名,X ID,担当プリセット,公開フラグ,公開ラベル";
 
+// 通常利用者向けサンプルでは内部 preset/key を露出させない。
+// 旧CSVとの後方互換性のため parser は内部コードも引き続き受理する。
 export const EVENT_STAFF_CSV_SAMPLE = [
   EVENT_STAFF_CSV_HEADER,
-  "進行担当,yamada,slot_manager,1,進行",
-  "審査担当,sato,reviewer,0,",
-  "作品修正担当,tanaka,content_editor,0,",
+  "進行担当,yamada,枠管理担当,1,進行",
+  "審査担当,sato,レビュー担当,0,",
+  "作品修正担当,tanaka,作品修正担当,0,",
+  "限定担当,suzuki,カスタム:枠管理|作品基本情報,0,",
 ].join("\n");
 
 function normalizeXId(raw: string): string {
   return raw.replace(/^@+/, "").trim().toLowerCase();
+}
+
+function normalizePreset(raw: string): EventStaffCsvPreset | null {
+  const value = raw.trim();
+  if (isEventStaffPreset(value)) return value;
+  for (const [preset, definition] of Object.entries(PRESET_DEFINITIONS)) {
+    if (definition.label === value && isEventStaffPreset(preset)) return preset;
+  }
+  return null;
+}
+
+function normalizePermission(raw: string): PermissionKey | null {
+  const value = raw.trim();
+  if (!value) return null;
+  const canonical = canonicalizePermissionKey(value);
+  if (canonical) return canonical;
+  return (
+    ALL_PERMISSION_KEYS.find(
+      (key) => PERMISSION_DEFINITIONS[key].label === value,
+    ) ?? null
+  );
+}
+
+function customPrefixLength(value: string): number {
+  if (value.startsWith("custom:")) return "custom:".length;
+  if (value.startsWith("カスタム:")) return "カスタム:".length;
+  if (value.startsWith("カスタム：")) return "カスタム：".length;
+  return 0;
 }
 
 function parseAssignment(raw: string): {
@@ -54,16 +90,19 @@ function parseAssignment(raw: string): {
 } {
   const value = raw.trim();
   if (!value) return { preset: "public_staff", keys: [], errors: [] };
-  if (isEventStaffPreset(value)) return { preset: value, keys: [], errors: [] };
-  const keySource = value.startsWith("custom:")
-    ? value.slice("custom:".length)
-    : value;
+  const preset = normalizePreset(value);
+  if (preset) return { preset, keys: [], errors: [] };
+
+  const prefixLength = customPrefixLength(value);
+  const keySource = prefixLength > 0 ? value.slice(prefixLength) : value;
   const keys: PermissionKey[] = [];
   const errors: string[] = [];
   for (const part of keySource.split(/[|;]/)) {
-    const canonical = canonicalizePermissionKey(part.trim());
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const canonical = normalizePermission(trimmed);
     if (!canonical) {
-      if (part.trim()) errors.push("選べない権限が含まれています。");
+      errors.push(`選べない権限「${trimmed}」が含まれています。`);
       continue;
     }
     if (!keys.includes(canonical)) keys.push(canonical);
