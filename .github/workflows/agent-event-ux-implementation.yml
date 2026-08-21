@@ -2,8 +2,7 @@ name: Finish event UX implementation
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -15,91 +14,65 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'feature/event-ux-slot-limits-stability-20260821'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
-      - name: Checkout feature branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: feature/event-ux-slot-limits-stability-20260821
           fetch-depth: 0
-
       - name: Apply remaining implementation
         run: node scripts/finish-event-ux.mjs
-
-      - name: Validate patch shape
-        run: |
-          git diff --check
-          git diff --stat
-
-      - name: Commit implementation before verification
+      - name: Commit generated implementation
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- \
-            app/'(public)'/event/'[id]'/slots/page.tsx \
-            migrations/0059_event_slot_reservation_limits.sql \
-            src/components/admin/EventForm.tsx \
-            src/components/admin/EventSettingsPreview.tsx \
-            src/components/admin/EventStaffManager.tsx \
-            src/components/admin/YoutubeDescriptionTemplateEditor.tsx \
-            src/components/admin/eventUxEnhancements.contract.test.mjs \
-            src/components/event/SlotGrid.tsx \
-            src/lib/actions/slot.ts \
-            src/lib/publicData/topSlotStatsTtl.contract.test.mjs \
-            src/lib/slots/slotReservationLimit.contract.test.mjs \
-            src/lib/slots/slotReservationLimitGuard.ts
+          git add -- src/lib/actions/slot.ts src/lib/slots/slotReservationLimit.contract.test.mjs
           if ! git diff --cached --quiet; then
             git diff --cached --check
-            git commit -m "枠上限と運営UXの残実装を完了"
+            git commit -m "連続枠更新のD1 statement数を削減"
             git push origin HEAD:feature/event-ux-slot-limits-stability-20260821
           fi
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Contract tests
-        run: >-
-          node --test
-          src/lib/slots/slotReservationLimit.contract.test.mjs
-          src/components/admin/eventUxEnhancements.contract.test.mjs
-          src/lib/publicData/topSlotStatsTtl.contract.test.mjs
-
+      - run: npm ci
+      - name: New contract tests
+        run: node --test src/lib/slots/slotReservationLimit.contract.test.mjs src/components/admin/eventUxEnhancements.contract.test.mjs src/lib/publicData/topSlotStatsTtl.contract.test.mjs
       - name: Typecheck
         run: npm run typecheck
-
-      - name: Fast verification
-        run: npm run verify:fast
-
-      - name: DB schema verification
-        run: npm run check:db-schema
-
-      - name: DB migration verification
-        run: npm run check:db-migration
-
-      - name: Slot reservation group verification
-        run: npm run check:slot-reservation-groups
-
-      - name: Slot domain limit verification
-        run: npm run check:slot-domain-limits
-
-      - name: Static rebuild tests
-        run: npm run test:static-rebuild
-
+      - name: Lint
+        run: npm run lint
+      - name: Critical tests
+        run: npm run test:critical
       - name: Worker tests
         run: npm run test:workers
-
+      - name: Cloudflare CI tests
+        run: npm run test:cloudflare-ci
+      - name: Cloudflare template
+        run: npm run check:cloudflare-template
+      - name: Public API leak check
+        run: npm run check:public-api-leaks
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Integration tests
+        run: npm run test:integration
+      - name: DB schema verification
+        run: npm run check:db-schema
+      - name: DB migration verification
+        run: npm run check:db-migration
+      - name: Slot reservation groups
+        run: npm run check:slot-reservation-groups
+      - name: Slot domain limits
+        run: npm run check:slot-domain-limits
+      - name: UI acceptance
+        run: npm run check:ui-acceptance
+      - name: Static rebuild tests
+        run: npm run test:static-rebuild
+      - name: Cloudflare build
+        run: npm run cf:build
       - name: Cleanup temporary implementation harness
         shell: bash
         run: |
-          rm -f \
-            scripts/finish-event-ux.mjs \
-            scripts/agent-event-ux-implementation.mjs.gz.b64 \
-            .github/workflows/agent-event-ux-implementation.yml
-          git add -- \
-            scripts/finish-event-ux.mjs \
-            scripts/agent-event-ux-implementation.mjs.gz.b64 \
-            .github/workflows/agent-event-ux-implementation.yml
+          rm -f scripts/finish-event-ux.mjs scripts/agent-event-ux-implementation.mjs.gz.b64 .github/workflows/agent-event-ux-implementation.yml
+          git add -- scripts/finish-event-ux.mjs scripts/agent-event-ux-implementation.mjs.gz.b64 .github/workflows/agent-event-ux-implementation.yml
           git diff --cached --check
           git commit -m "一時実装ハーネスを削除"
           git push origin HEAD:feature/event-ux-slot-limits-stability-20260821
