@@ -42,10 +42,23 @@ function staticModeForStatus(status: "fresh" | "stale"): PublicDataMode {
   return status === "stale" ? "cached_static" : "static";
 }
 
-async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
+async function shouldFallbackForVisibilityFence(): Promise<boolean> {
   if (resolvePublicVisibilityGuardModeFromEnv() !== "enforce") return false;
-  const manifest = await loadPublicVisibilityBlockedEntitiesManifest();
-  return manifest.entities.some((entry) => entry.entity_type === "x_user");
+  try {
+    const manifest = await loadPublicVisibilityBlockedEntitiesManifest();
+    return manifest.entities.some((entry) => entry.entity_type === "x_user");
+  } catch (error) {
+    // v2は任意高速化成果物。visibility manifest障害時にv2を返すとfail-openになるため、
+    // legacy loaderへ戻して既存のfail-closed unavailable判定へ委ねる。
+    console.warn(
+      JSON.stringify({
+        service: "users-index-v2",
+        result: "visibility_fence_fallback",
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+    return true;
+  }
 }
 
 /**
@@ -71,8 +84,8 @@ export async function loadStaticUsersIndexV2Page(params: {
   if (!manifest || !manifest.sorts.includes(params.sort)) return null;
 
   // shard単位では別pageのblocked X userをtotalから除外できないため、
-  // enforce中にX user fenceがあれば全件filter可能なlegacyへ戻す。
-  if (await hasEnforcedXUserVisibilityFence()) return null;
+  // enforce中にX user fenceがある、またはmanifestを安全に読めない場合はlegacyへ戻す。
+  if (await shouldFallbackForVisibilityFence()) return null;
 
   const query = params.q?.trim() ?? "";
   if (query) {
