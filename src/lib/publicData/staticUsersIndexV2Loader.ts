@@ -42,6 +42,10 @@ async function hasEnforcedXUserVisibilityFence(): Promise<boolean> {
  * score route 専用のv2 loader。
  * manifestが示すgeneration固有のpage/searchだけを読み、世代一致を再確認する。
  *
+ * manifest は世代切替の唯一のcommit pointなので Cache API の古い値を正本にしない。
+ * R2を必ず先に読み、R2からmanifestが消えた場合はstale cacheへ戻さずlegacyへ倒す。
+ * page/searchはgeneration固有keyのため通常のCache APIを安全に利用できる。
+ *
  * shard単位のfilterだけでは、別pageにblocked X userがいる場合にmanifest.totalが
  * staleなまま残り得る。enforce中にX user fenceが1件でも存在するときはv2を使わず、
  * 全件にfenceを適用できるlegacy users/index.jsonへ戻す。
@@ -57,6 +61,8 @@ export async function loadStaticUsersIndexV2ScorePage(params: {
     targetId: "global",
     reason: "public_users_index_v2_manifest_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
+    cacheMode: "r2_first",
+    allowStaleCacheFallback: false,
   });
   const manifest = normalizeUsersIndexV2Manifest(manifestResult.data);
   if (!manifest) return null;
