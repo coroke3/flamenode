@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { isImeComposingForm } from "@/lib/forms/imeSafeSearch";
+import { submitFormCompat } from "@/lib/forms/submitFormCompat";
 
 
 
@@ -22,7 +23,7 @@ export function navigateGetForm(form: HTMLFormElement): void {
 
   if (method !== "get") {
 
-    form.requestSubmit();
+    submitFormCompat(form);
 
     return;
 

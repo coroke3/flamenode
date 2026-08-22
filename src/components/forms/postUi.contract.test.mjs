@@ -166,15 +166,30 @@ test("admin/event privilege can clear an existing YouTube ID from the edit form"
   );
 });
 
-test("wizard YouTube step always advances to confirmation before submit", async () => {
-  const source = await read("src/components/forms/VideoForm.tsx");
+test("wizard advances to confirmation and only its explicit button can submit", async () => {
+  const [source, submitCompat] = await Promise.all([
+    read("src/components/forms/VideoForm.tsx"),
+    read("src/lib/forms/submitFormCompat.ts"),
+  ]);
   assert.match(source, /const isWizardLastStep = isWizard && currentStepKey === "confirm"/);
+  assert.match(source, /wizardConfirmSubmitRequestedRef = React\.useRef\(false\)/);
   assert.match(
     source,
-    /if \(isWizard && currentStepKey !== "confirm"\) \{[\s\S]*goWizardNext\(\);[\s\S]*return;/,
+    /if \(isWizard\) \{[\s\S]*if \(currentStepKey !== "confirm"\) \{[\s\S]*goWizardNext\(\);[\s\S]*return;/,
   );
   assert.match(
     source,
-    /\{isWizardLastStep \?[\s\S]*type="submit"[\s\S]*: \([\s\S]*type="button"[\s\S]*onClick=\{goWizardNext\}/,
+    /if \(!wizardConfirmSubmitRequestedRef\.current\) \{[\s\S]*「提出する」を押してください。[\s\S]*return;/,
+  );
+  assert.match(
+    source,
+    /const submitWizardFromConfirmation = \(\) => \{[\s\S]*submitFormCompat\(form\);/,
+  );
+  assert.match(submitCompat, /requestSubmit\.call\(form\)/);
+  assert.match(submitCompat, /checkValidity\(\)/);
+  assert.match(submitCompat, /dispatchEvent\(new Event\("submit"/);
+  assert.match(
+    source,
+    /\{isWizardLastStep \?[\s\S]*type="button"[\s\S]*onClick=\{submitWizardFromConfirmation\}[\s\S]*: \([\s\S]*type="button"[\s\S]*onClick=\{goWizardNext\}/,
   );
 });

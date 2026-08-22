@@ -32,6 +32,7 @@ import {
   resolveStagePermissionFieldsFromJson,
 } from "@/lib/video/formSettings";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
+import { submitFormCompat } from "@/lib/forms/submitFormCompat";
 import {
   ACTIVE_X_BEFORE_SWITCH_EVENT,
 } from "@/lib/client/activeXSwitchEvents";
@@ -418,6 +419,10 @@ export function VideoForm({
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
+  // Wizard forms must only submit after an explicit confirmation-button click.
+  // This blocks an implicit Enter-key submit from becoming a server action
+  // while React is advancing from the previous step to confirmation.
+  const wizardConfirmSubmitRequestedRef = React.useRef(false);
   const isWizard = mode === "slot" || mode === "free";
   const wizardSteps = mode === "slot" ? WIZARD_STEPS_SLOT : WIZARD_STEPS_FREE;
   const [currentStep, setCurrentStep] = React.useState(0);
@@ -1182,6 +1187,20 @@ export function VideoForm({
     setCurrentStep((prev) => Math.max(0, prev - 1));
   };
 
+  const submitWizardFromConfirmation = () => {
+    if (!isWizard || !isWizardLastStep || pending || !canSubmit) return;
+    const form = formRef.current;
+    if (!form) return;
+    wizardConfirmSubmitRequestedRef.current = true;
+    try {
+      submitFormCompat(form);
+    } finally {
+      // requestSubmit dispatches synchronously; reset as well when native
+      // constraint validation prevents the submit event from firing.
+      wizardConfirmSubmitRequestedRef.current = false;
+    }
+  };
+
   const jumpToWizardStep = React.useCallback(
     (key: WizardStepKey) => {
       const nextIndex = wizardSteps.findIndex(
@@ -1236,9 +1255,20 @@ export function VideoForm({
     // is meant to be "次へ" (for example, pressing Enter in the YouTube
     // field). Never send from steps 1–3; advance to the explicit confirmation
     // step and keep the server action untouched until the user submits there.
-    if (isWizard && currentStepKey !== "confirm") {
-      goWizardNext();
-      return;
+    if (isWizard) {
+      if (currentStepKey !== "confirm") {
+        wizardConfirmSubmitRequestedRef.current = false;
+        goWizardNext();
+        return;
+      }
+      if (!wizardConfirmSubmitRequestedRef.current) {
+        setStepError({
+          step: "confirm",
+          message: "内容を確認してから「提出する」を押してください。",
+        });
+        return;
+      }
+      wizardConfirmSubmitRequestedRef.current = false;
     }
     if (mode === "edit") {
       const customQuestionError = validateRequiredCustomQuestions();
@@ -3017,8 +3047,9 @@ export function VideoForm({
             </span>
             {isWizardLastStep ? (
               <button
-                type="submit"
+                type="button"
                 className="fn-btn fn-btn-primary"
+                onClick={submitWizardFromConfirmation}
                 disabled={pending || !canSubmit}
                 aria-busy={pending}
               >
