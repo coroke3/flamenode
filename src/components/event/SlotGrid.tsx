@@ -329,14 +329,9 @@ export function SlotGrid({
       const dateLabel = part.start_time
         ? formatUnix(part.start_time, { dateOnly: true })
         : null;
-      // Configured part names should remain visible even when multiple parts
-      // share a calendar date. Keep the historical date grouping when no
-      // custom names are configured.
-      const dateKey = dateLabel
-        ? parts.length > 0
-          ? `${dateLabel}・${partLabel}`
-          : dateLabel
-        : partLabel;
+      // Keep one column per calendar date. When a day has multiple parts,
+      // the parts remain separated by break rows inside that date column.
+      const dateKey = dateLabel ?? partLabel;
 
       if (!currentGroup || currentDateKey !== dateKey) {
         currentDateKey = dateKey;
