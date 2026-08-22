@@ -1043,7 +1043,10 @@ export function VideoForm({
   }, []);
 
   const currentStepKey = isWizard ? wizardSteps[currentStep]?.key : null;
-  const isWizardLastStep = isWizard && currentStep === wizardSteps.length - 1;
+  // The confirmation step is the only step allowed to submit.  Use the
+  // semantic key instead of the array index so a future step insertion or a
+  // restored draft can never turn the YouTube step into a submit action.
+  const isWizardLastStep = isWizard && currentStepKey === "confirm";
   const isWizardFirstStep = isWizard && currentStep === 0;
   const showSidePreview =
     !isWizard ||
@@ -1229,6 +1232,14 @@ export function VideoForm({
     // Persist the latest keystroke before validation/action invocation.  A
     // Worker 1102 or a thrown Server Action must leave this draft intact.
     if (dirty) flushDraft(buildCurrentDraft() ?? undefined);
+    // A browser/keyboard submit can fire even when the visible wizard control
+    // is meant to be "次へ" (for example, pressing Enter in the YouTube
+    // field). Never send from steps 1–3; advance to the explicit confirmation
+    // step and keep the server action untouched until the user submits there.
+    if (isWizard && currentStepKey !== "confirm") {
+      goWizardNext();
+      return;
+    }
     if (mode === "edit") {
       const customQuestionError = validateRequiredCustomQuestions();
       if (customQuestionError) {
@@ -2813,15 +2824,14 @@ export function VideoForm({
               ? "保存しました。"
               : "提出が完了しました。続けて以下から進めてください。"}
           </div>
-          {result.requiresYoutubeBeforePublish ? (
+          {mode === "slot" && !result.youtubeVideoId ? (
             <p className={styles.resultNoticeMessage}>
-              YouTube URL未設定のため、公開前に追加してください。後から編集画面で設定できます。
+              YouTube URLが未設定でも作品情報は公開できます。必要に応じて後から追加できます。
             </p>
           ) : null}
           {result.pendingPublicReflection ? <PublicReflectionDelayNotice /> : null}
           <div className={styles.resultActions}>
-            {!result.requiresYoutubeBeforePublish &&
-            (result.youtubeVideoId || result.videoId) ? (
+            {(result.youtubeVideoId || result.videoId) ? (
               <Link
                 href={`/${result.youtubeVideoId ?? result.videoId}`}
                 className="fn-btn fn-btn-primary fn-btn-sm"
@@ -2837,15 +2847,7 @@ export function VideoForm({
                 <Icon name="calendar" size={12} aria-hidden /> イベントへ戻る
               </Link>
             ) : null}
-            {result.requiresYoutubeBeforePublish && result.videoId ? (
-              <Link
-                href={`/dashboard/edit/${result.videoId}`}
-                className="fn-btn fn-btn-primary fn-btn-sm"
-              >
-                <Icon name="edit" size={12} aria-hidden /> YouTube URLを追加する
-              </Link>
-            ) : null}
-            {mode !== "edit" && !result.requiresYoutubeBeforePublish && result.videoId ? (
+            {mode !== "edit" && result.videoId ? (
               <Link
                 href={`/dashboard/edit/${result.videoId}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"

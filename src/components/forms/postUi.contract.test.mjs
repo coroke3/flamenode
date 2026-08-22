@@ -84,11 +84,11 @@ test("固定送信DockのグローバルボタンへCSS Modulesのスタイル�
   assert.doesNotMatch(source, /\.submitDock\s+\.fn-btn\b/);
 });
 
-test("YouTube未設定の枠提出は公開導線を出さず編集導線を出す", async () => {
+test("YouTube未設定の枠提出は公開導線と後付け編集導線を表示する", async () => {
   const source = await read("src/components/forms/VideoForm.tsx");
-  assert.match(source, /requiresYoutubeBeforePublish/);
-  assert.match(source, /YouTube URLを追加する/);
-  assert.match(source, /!result\.requiresYoutubeBeforePublish/);
+  assert.match(source, /mode === "slot" && !result\.youtubeVideoId/);
+  assert.match(source, /YouTube URLが未設定でも作品情報は公開できます/);
+  assert.match(source, /\(result\.youtubeVideoId \|\| result\.videoId\)/);
 });
 
 test("初回YouTube紐付け時は一般field設定由来のdisabled指定を解除する", async () => {
@@ -163,5 +163,18 @@ test("admin/event privilege can clear an existing YouTube ID from the edit form"
   assert.match(
     source,
     /mode === "edit" && hasInitialYoutube && !privilegedYoutubeEdit/,
+  );
+});
+
+test("wizard YouTube step always advances to confirmation before submit", async () => {
+  const source = await read("src/components/forms/VideoForm.tsx");
+  assert.match(source, /const isWizardLastStep = isWizard && currentStepKey === "confirm"/);
+  assert.match(
+    source,
+    /if \(isWizard && currentStepKey !== "confirm"\) \{[\s\S]*goWizardNext\(\);[\s\S]*return;/,
+  );
+  assert.match(
+    source,
+    /\{isWizardLastStep \?[\s\S]*type="submit"[\s\S]*: \([\s\S]*type="button"[\s\S]*onClick=\{goWizardNext\}/,
   );
 });

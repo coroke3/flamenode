@@ -104,6 +104,23 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(detail.relatedVideos[0].display_name, "Other");
   });
 
+  test("normalizeStaticVideoDetail: accepts a public video without a YouTube ID", () => {
+    const detail = normalizeStaticVideoDetail({
+      video: {
+        id: "video-no-youtube",
+        title: "作品情報のみ",
+        youtube_video_id: null,
+        creator_display_name: "Creator",
+        intro_comment: "作品の説明",
+        visibility_status: "public",
+      },
+    });
+
+    assert.ok(detail);
+    assert.equal(detail.video.youtube_video_id, null);
+    assert.equal(detail.video.intro_comment, "作品の説明");
+  });
+
   test("normalizeStaticVideoDetail: rejects payload without video title", () => {
     assert.equal(normalizeStaticVideoDetail({ video: { id: "video1" } }), null);
   });

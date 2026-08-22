@@ -8,7 +8,7 @@ const source = readFileSync(
   "utf8",
 );
 
-test("audit video restore applies the public YouTube eligibility guard", () => {
+test("audit video restore uses the shared public eligibility hook", () => {
   assert.match(source, /validateVideoPublicEligibility/);
   assert.match(source, /nextStatus/);
   assert.match(source, /if \(!publicEligibility\.ok\)/);

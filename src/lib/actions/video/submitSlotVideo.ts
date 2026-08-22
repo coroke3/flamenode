@@ -684,7 +684,6 @@ async function submitSlotVideoCore(
       videoId,
       youtubeVideoId: submittedYoutubeId ?? undefined,
       eventId: slotRow.event_id,
-      requiresYoutubeBeforePublish: !submittedYoutubeId,
     },
     staticRebuildEnqueued,
   );

@@ -127,7 +127,14 @@ export function VideoReviewQueueTable({
                   <span className="fn-badge fn-badge-soft">あり</span>
                 )
               ) : (
-                <span className="fn-badge fn-badge-warning">
+                <span
+                  className="fn-badge fn-badge-soft"
+                  title={
+                    v.source_type === "youtube"
+                      ? "YouTube URL未設定でも動画情報は公開できます"
+                      : undefined
+                  }
+                >
                   {v.source_type === "youtube" ? "URL未設定" : "なし"}
                 </span>
               )}
@@ -160,7 +167,6 @@ export function VideoReviewQueueTable({
                 ) : null}
                 {canApprove &&
                 v.visibility_status === "pending" &&
-                !(v.source_type === "youtube" && !youtubeVideoId) &&
                 showQuickApprove ? (
                   <VideoReviewQuickApproveButton
                     videoId={v.id}

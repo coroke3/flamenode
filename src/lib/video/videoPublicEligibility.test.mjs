@@ -5,13 +5,12 @@ const { validateVideoPublicEligibility } = await import(
   "./videoPublicEligibility.ts"
 );
 
-test("YouTube source without an ID cannot become public", () => {
+test("YouTube source without an ID can become public when its video info is available", () => {
   const result = validateVideoPublicEligibility(
     { source_type: "youtube", youtube_video_id: null },
     "public",
   );
-  assert.equal(result.ok, false);
-  assert.equal(result.code, "youtube_required_for_public");
+  assert.deepEqual(result, { ok: true });
 });
 test("an attached YouTube ID and non-YouTube sources remain eligible", () => {
   assert.deepEqual(

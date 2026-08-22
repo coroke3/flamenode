@@ -116,14 +116,12 @@ export default async function ManageEventVideoDetailPage({
             >
               <Icon name="edit" size={11} aria-hidden /> 作品内容を確認
             </Link>
-            {youtubeVideoId ? (
-              <Link
-                href={`/${youtubeVideoId}`}
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-              >
-                公開ページ
-              </Link>
-            ) : null}
+            <Link
+              href={`/${youtubeVideoId ?? video.id}`}
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+            >
+              公開ページ
+            </Link>
             {isAdmin ? (
               <Link
                 href={`/admin/videos/${video.id}`}

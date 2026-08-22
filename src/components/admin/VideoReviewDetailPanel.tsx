@@ -79,8 +79,8 @@ export function VideoReviewDetailPanel({
             <Field
               label="YouTube URL"
               value={
-                <span style={{ color: "var(--accent-warning)" }}>
-                  YouTube URL未設定。公開前に投稿者が追加する必要があります。
+                <span style={{ color: "var(--text-muted)" }}>
+                  未設定（動画情報のみ公開できます。後から追加可能です）
                 </span>
               }
             />

@@ -65,7 +65,7 @@ creates the canonical empty schema when the object is absent.
 
 **AI:** 公開静的 JSON / degraded D1 / Cache の仕様。正本コードは `src/lib/publicData/loader.ts`。軽量モデルは調査・文書修正まで。loader・権限・公開 DTO 変更は中位以上。
 
-D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを一覧・検索・R2・公開APIへ出し、`limited`は直接詳細だけ、その他は権限者以外へ出さない。artifactのkey、hash、version、source更新時刻を追跡し、非公開化やYouTube ID変更時は旧keyを削除する。
+D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを一覧・検索・R2・公開APIへ出し、`limited`は直接詳細だけ、その他は権限者以外へ出さない。YouTube作品はURL未設定でも`public`にでき、タイトル・作者・イベント・コメント等の作品情報を公開する（YouTubeプレイヤーと同期依存の棚だけは未設定のまま除外する）。artifactのkey、hash、version、source更新時刻を追跡し、非公開化やYouTube ID変更時は旧keyを削除する。
 
 ## 公開データの取得順
 

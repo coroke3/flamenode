@@ -128,8 +128,6 @@ const REASON_CATEGORIES = [
 export function VideoStatusForm({
   videoId,
   currentStatus,
-  sourceType,
-  youtubeVideoId = null,
   statuses,
   action,
   formIdPrefix,
@@ -173,8 +171,6 @@ export function VideoStatusForm({
     }
     return options;
   }, [currentStatus, statuses]);
-  const youtubeRequired = sourceType === "youtube" && !youtubeVideoId?.trim();
-
   React.useEffect(() => {
     setStatus(currentStatus);
   }, [currentStatus]);
@@ -271,17 +267,11 @@ export function VideoStatusForm({
           <option
             key={value}
             value={value}
-            disabled={value === "public" && youtubeRequired}
           >
             {formatStatusOption(value, optionDescription)}
           </option>
         ))}
       </select>
-      {youtubeRequired && statusOptions.includes("public") ? (
-        <p role="status" style={{ color: "var(--accent-warning)", fontSize: 12 }}>
-          YouTube URL未設定のため公開できません。投稿者に追加を依頼してください。
-        </p>
-      ) : null}
       {requiresReason ? (
         <>
           <label className="fn-label" htmlFor={categoryFieldId}>

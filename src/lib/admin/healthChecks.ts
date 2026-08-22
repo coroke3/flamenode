@@ -190,7 +190,7 @@ async function checkReservationGroupUserMix(
   };
 }
 
-/** public 動画に youtube_video_id がない */
+/** public 動画のうち YouTube URL 未設定の件数（情報表示用） */
 async function checkPublicVideoWithoutYoutubeId(
   db: AnyDb,
 ): Promise<HealthCheckResult> {
@@ -208,10 +208,14 @@ async function checkPublicVideoWithoutYoutubeId(
   const count = Number(countRows[0]?.c ?? 0);
   return {
     id: "public_video_without_youtube_id",
-    label: "public 動画に youtube_video_id なし",
-    status: count === 0 ? "ok" : "warn",
+    label: "public 動画（YouTube URL未設定）",
+    status: count === 0 ? "ok" : "info",
     count,
     samples: sampleRows.slice(0, 5).map((r) => r.id),
+    note:
+      count > 0
+        ? "YouTube未設定でも作品情報は公開できます。必要に応じて後からURLを追加してください。"
+        : undefined,
   };
 }
 

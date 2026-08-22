@@ -708,7 +708,7 @@ function StaticVideoDetailView({
                   className="fn-empty"
                   style={{ aspectRatio: "16 / 9", display: "grid", placeItems: "center" }}
                 >
-                  <p>YouTube 動画 ID が登録されていません。</p>
+                  <p>YouTube動画は未登録ですが、作品情報を公開しています。</p>
                 </div>
               )}
             </FixedVideoPlayerFrame>

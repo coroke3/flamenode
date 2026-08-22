@@ -42,13 +42,17 @@ test("VideoReviewQueueTable gates quick approve behind canApprove", () => {
   assert.match(queueSource, /VideoReviewQuickApproveButton/);
   assert.match(queueSource, /visibility_status === "pending"/);
   assert.match(queueSource, /youtube_video_id\?\.trim\(\) \|\| null/);
-  assert.match(queueSource, /!youtubeVideoId/);
+  assert.doesNotMatch(
+    queueSource,
+    /v\.visibility_status === "pending"[\s\S]*source_type === "youtube"[\s\S]*!youtubeVideoId/,
+  );
 });
 
 test("review detail treats whitespace-only YouTube IDs as missing", () => {
   assert.match(detailSource, /youtube_video_id\?\.trim\(\) \|\| null/);
   assert.match(detailSource, /youtubeVideoId \? \(/);
   assert.match(detailSource, /!youtubeVideoId/);
+  assert.match(detailSource, /動画情報のみ公開できます/);
 });
 
 test("VideoReviewQuickApproveButton guards double submit with submitting state", () => {

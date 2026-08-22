@@ -14,7 +14,6 @@ test("新規の枠投稿は YouTube ID なしでも保存でき、後から追�
   assert.ok(missingExistingVideoCheck > existingVideoCheck);
   assert.ok(videoInsert > missingExistingVideoCheck);
   assert.ok(youtubeAssignment > videoInsert);
-  assert.match(source, /requiresYoutubeBeforePublish:\s*!submittedYoutubeId/);
   assert.match(source, /parseVideoForm\(Object\.fromEntries\(formData\), \{ youtubeRequired: false \}\)/);
   assert.doesNotMatch(source, /新規投稿にはYouTube URLが必要です。/);
 });
