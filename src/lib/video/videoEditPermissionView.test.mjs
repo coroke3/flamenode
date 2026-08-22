@@ -286,7 +286,7 @@ test("buildPermissionSummaryLists: editable / locked ラベルを分類", () => 
   ]);
 });
 
-test("buildVideoEditPermissionViewModel: 所有者通常モードで危険キーは admin_only", () => {
+test("buildVideoEditPermissionViewModel: 一般作品権限で拒否された可変項目は owner_policy_denied", () => {
   const vm = buildVideoEditPermissionViewModel({
     privilegeMode: "normal",
     ownership: owner,
@@ -310,7 +310,9 @@ test("buildVideoEditPermissionViewModel: 所有者通常モードで危険キー
   assert.equal(vm.ownership.isCreatorOwner, true);
   assert.equal(vm.canOfferAdminMode, true);
   assert.equal(vm.basics.reason, "allowed");
-  assert.equal(vm.youtube.reason, "admin_only");
+  assert.equal(vm.identity.reason, "owner_policy_denied");
+  assert.equal(vm.youtube.reason, "owner_policy_denied");
+  assert.equal(vm.primaryEvent.reason, "owner_policy_denied");
   assert.equal(vm.permissions.reason, "admin_only");
   assert.equal(vm.memberChapters.reason, "owner_policy_denied");
 

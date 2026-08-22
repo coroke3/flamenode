@@ -48,6 +48,9 @@ malformed state as a non-blocking degraded check in `observe`, and makes it a
 blocking degraded result in `enforce`. The tracked default remains `observe`;
 switching to `enforce` is a separate configuration deployment after the
 strict remote check and bootstrap verification.
+In `enforce`, a missing `BUCKET` binding is a binding-unavailable failure, not
+an empty manifest; an existing bucket with no manifest object remains the
+bootstrap/empty-manifest case described below.
 Member suggestions rebuilds restore the previous manifest when tracking the
 new manifest fails, so a failed tracking write cannot expose a missing index.
 

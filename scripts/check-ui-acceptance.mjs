@@ -148,6 +148,54 @@ requireAll("src/components/forms/VideoMembersField.tsx", [
   [/MAX_VIDEO_MEMBERS/, "メンバー件数上限がありません。"],
   [/parseVideoMemberText/, "CSV/TSV入力経路がありません。"],
   [/viewMode.*"card".*"table"/s, "カード/表の表示切替がありません。"],
+  [/<table\s+className=\{styles\.sampleTable\}/, "一括入力の実例表がありません。"],
+  [/Alice[\s\S]*alice_x[\s\S]*0:12;1:05[\s\S]*モーション担当[\s\S]*>ON</, "実例表のAlice行がありません。"],
+  [/Bob[\s\S]*bob123[\s\S]*0:30[\s\S]*背景担当[\s\S]*>OFF</, "実例表のBob行がありません。"],
+]);
+forbidMatch(
+  "src/components/forms/VideoMembersField.tsx",
+  /minHeight\s*:\s*28|padding\s*:\s*["']2px 8px["']/,
+  "メンバー操作ボタンに28pxの局所サイズ指定が残っています。",
+);
+forbidMatch(
+  "src/components/ui/StatusPanel.module.css",
+  /border-(?:left|inline-start)/,
+  "StatusPanelに片側アクセント線を再導入しています。",
+);
+forbidMatch(
+  "src/components/forms/VideoForm.module.css",
+  /linear-gradient|radial-gradient|\.sectionTitle::before|\.wizardDock::before|\.submitDock::before/,
+  "VideoFormに装飾gradientまたは縦アクセント疑似要素が残っています。",
+);
+forbidMatch(
+  "src/components/layout/PublicHeader.module.css",
+  /\.mobileLinkActive\s*\{[^}]*?(?:border\s*:\s*1px|box-shadow\s*:\s*inset\s+3px\s+0)|header::after|linear-gradient|radial-gradient/,
+  "PublicHeaderに装飾gradientまたは片側アクセントが残っています。",
+);
+requireAll("src/components/layout/PublicHeader.module.css", [
+  [/\.mobileNav:focus-visible\s*\{[\s\S]*?outline:\s*0/, "モバイルダイアログのコンテナに不要なフォーカス枠が復活しています。"],
+]);
+forbidMatch(
+  "src/components/event/SlotGrid.module.css",
+  /\.rowMine[\s\S]*?box-shadow\s*:\s*inset\s+2px\s+0/,
+  "SlotGridの自分の枠に片側アクセント線が残っています。",
+);
+requireAll("src/components/forms/VideoMembersField.module.css", [
+  [/sampleTableScroll/, "実例表の横スクロールラッパがありません。"],
+  [/min-width:\s*620px/, "実例表のモバイル横スクロール幅がありません。"],
+  [/bulkPreviewTable/, "一括入力プレビュー表の共通スタイルがありません。"],
+  [/bulkHintList/, "一括入力の列説明が共通spacingを使っていません。"],
+]);
+requireAll("app/(auth)/entry/slotted/page.tsx", [
+  [/className="fn-entry-flow"/, "枠投稿ページが共通vertical rhythmを使っていません。"],
+]);
+requireAll("app/(auth)/entry/unslotted/page.tsx", [
+  [/className="fn-entry-flow"/, "枠なし投稿ページが共通vertical rhythmを使っていません。"],
+  [/fn-entry-search/, "イベント検索がentry共通vertical rhythmに接続されていません。"],
+]);
+requireAll("src/styles/globals.css", [
+  [/\.fn-entry-flow\s*\{/, "entry共通stackがありません。"],
+  [/gap:\s*clamp\(18px,\s*2\.4vw,\s*28px\)/, "entry共通stackのgap tokenがありません。"],
 ]);
 
 requireAll("app/(public)/event/page.tsx", [

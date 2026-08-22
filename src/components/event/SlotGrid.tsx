@@ -76,6 +76,8 @@ export interface SlotGridProps {
   operatorOverrideAllowed?: boolean;
   /** 「部」分割閾値 (秒)。events.slot_part_gap_minutes から派生。未指定で 15 分。 */
   slotPartGapSec?: number;
+  /** events.parts_json を解析した最新の部名称。 */
+  parts?: readonly string[];
 }
 
 interface SlotGroup {
@@ -197,6 +199,7 @@ export function SlotGrid({
   slotIntervalSec = null,
   slotPartGapSec,
   operatorOverrideAllowed = false,
+  parts = [],
 }: SlotGridProps): React.ReactElement {
   const router = useRouter();
   const pathname = usePathname();
@@ -315,16 +318,25 @@ export function SlotGrid({
       }];
     }
 
-    const parts = buildSlotParts(displayRows, slotPartGapSec);
+    const slotParts = buildSlotParts(displayRows, slotPartGapSec);
     const nextGroups: SlotGroup[] = [];
     let currentDateKey: string | null = null;
     let currentGroup: SlotGroup | null = null;
     let previousPartEnd: number | null = null;
 
-    for (const part of parts) {
-      const dateKey = part.start_time
+    for (const part of slotParts) {
+      const partLabel = formatSlotPartLabel(part, "short", parts);
+      const dateLabel = part.start_time
         ? formatUnix(part.start_time, { dateOnly: true })
-        : formatSlotPartLabel(part, "short");
+        : null;
+      // Configured part names should remain visible even when multiple parts
+      // share a calendar date. Keep the historical date grouping when no
+      // custom names are configured.
+      const dateKey = dateLabel
+        ? parts.length > 0
+          ? `${dateLabel}・${partLabel}`
+          : dateLabel
+        : partLabel;
 
       if (!currentGroup || currentDateKey !== dateKey) {
         currentDateKey = dateKey;
@@ -346,7 +358,7 @@ export function SlotGrid({
     }
 
     return nextGroups;
-  }, [displayRows, slotType, slotPartGapSec]);
+  }, [displayRows, slotType, slotPartGapSec, parts]);
 
   const formatSlotLabel = (
     slot: Pick<SlotRow, "start_time" | "slot_label"> & {

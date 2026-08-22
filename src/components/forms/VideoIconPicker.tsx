@@ -25,6 +25,11 @@ export interface VideoIconPickerProps {
   isEdit?: boolean;
   value?: string;
   onChange?: (url: string) => void;
+  /** Restored, already-cropped upload from the browser-local draft store. */
+  restoredUploadFile?: File | null;
+  /** Called when the confirmed upload file changes or is discarded. */
+  onUploadFileChange?: (file: File | null) => void;
+  onDraftFileError?: (message: string) => void;
 }
 
 export function VideoIconPicker({
@@ -35,6 +40,9 @@ export function VideoIconPicker({
   isEdit = false,
   value,
   onChange,
+  restoredUploadFile = null,
+  onUploadFileChange,
+  onDraftFileError,
 }: VideoIconPickerProps): React.ReactElement {
   const initialUrl = value ?? initialIconUrl ?? "";
   const persistedUrl =
@@ -61,6 +69,7 @@ export function VideoIconPicker({
     url: initialUrl,
     mode: resolveModeForUrl(initialUrl),
   });
+  const restoredFileRef = React.useRef<File | null>(null);
 
   const setSelection = React.useCallback(
     (url: string, mode: VideoIconMode) => {
@@ -89,10 +98,11 @@ export function VideoIconPicker({
     (url: string) => {
       if (disabled) return;
       clearUploadPreview();
+      onUploadFileChange?.(null);
       setSelection(url, resolveModeForUrl(url));
       setError(null);
       setTab("select");
-    }, [clearUploadPreview, disabled, resolveModeForUrl, setSelection],
+    }, [clearUploadPreview, disabled, onUploadFileChange, resolveModeForUrl, setSelection],
   );
 
   const syncFileToNamedInput = React.useCallback((file: File) => {
@@ -105,12 +115,13 @@ export function VideoIconPicker({
 
   const discardUploadState = React.useCallback(() => {
     clearUploadPreview();
+    onUploadFileChange?.(null);
     setError(null);
     setSelection(
       selectionBeforeUploadRef.current.url,
       selectionBeforeUploadRef.current.mode,
     );
-  }, [clearUploadPreview, setSelection]);
+  }, [clearUploadPreview, onUploadFileChange, setSelection]);
 
   const onUseUploadedImage = React.useCallback(
     async (file: File): Promise<{ ok: true } | { ok: false; message: string }> => {
@@ -138,9 +149,27 @@ export function VideoIconPicker({
 
       setError(null);
       setEditorKey((key) => key + 1);
+      onUploadFileChange?.(file);
       return { ok: true as const };
-    }, [clearUploadPreview, iconMode, selectedUrl, setSelection, syncFileToNamedInput],
+    }, [
+      clearUploadPreview,
+      iconMode,
+      onUploadFileChange,
+      selectedUrl,
+      setSelection,
+      syncFileToNamedInput,
+    ],
   );
+
+  React.useEffect(() => {
+    if (!restoredUploadFile || restoredFileRef.current === restoredUploadFile || disabled) {
+      return;
+    }
+    restoredFileRef.current = restoredUploadFile;
+    void onUseUploadedImage(restoredUploadFile).then((result) => {
+      if (!result.ok) onDraftFileError?.(result.message);
+    });
+  }, [disabled, onDraftFileError, onUseUploadedImage, restoredUploadFile]);
 
   const switchToSelectTab = React.useCallback(() => {
     setTab("select");
@@ -384,6 +413,7 @@ export function VideoIconPicker({
               const next = event.target.value;
               setSelection(next, resolveModeForUrl(next));
               clearUploadPreview();
+              onUploadFileChange?.(null);
               setError(null);
             }}
             placeholder="アイコン URL を直接入力 (任意)"

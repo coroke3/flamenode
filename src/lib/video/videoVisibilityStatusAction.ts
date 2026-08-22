@@ -71,6 +71,10 @@ export async function executeVideoVisibilityStatusMutation(
     logTag,
   } = input;
 
+  if (transition.validationError) {
+    return { ok: false, message: transition.validationError };
+  }
+
   const statements = [
     ...transition.mutationStatements,
     ...(input.extraStatements ?? []),

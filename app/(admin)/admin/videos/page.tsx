@@ -44,6 +44,7 @@ const EVENT_OPTIONS_LIMIT = 200;
 type AdminVideoRow = {
   id: string;
   title: string;
+  source_type: string;
   youtube_video_id: string | null;
   display_name: string;
   status: string;
@@ -112,6 +113,7 @@ export default async function AdminVideosPage({
         .select({
           id: videosTable.id,
           title: videosTable.title,
+          source_type: videosTable.source_type,
           youtube_video_id: videosTable.youtube_video_id,
           display_name: videosTable.creator_display_name,
           status: videosTable.visibility_status,
@@ -203,6 +205,7 @@ export default async function AdminVideosPage({
     return {
       id: v.id,
       title: v.title,
+      source_type: v.source_type,
       youtube_video_id: v.youtube_video_id,
       display_name: v.display_name,
       visibility_status: v.status,
@@ -305,10 +308,10 @@ export default async function AdminVideosPage({
                     overflow: "hidden",
                   }}
                 >
-                  {v.youtube_video_id ? (
+                  {(v.youtube_video_id?.trim() || null) ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={youtubeThumbUrl(v.youtube_video_id, "default") ?? ""}
+                      src={youtubeThumbUrl(v.youtube_video_id?.trim() || "", "default") ?? ""}
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "cover" }}
                     />

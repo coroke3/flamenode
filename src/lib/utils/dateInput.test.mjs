@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   formatJstDatetimeLocal,
   parseJstDatetimeLocal,
+  parseJstDatetimeLocalStrict,
 } from "./dateInput.ts";
 
 test("parseJstDatetimeLocal treats datetime-local as JST", () => {
@@ -37,4 +38,28 @@ test("formatJstDatetimeLocal round-trips with parseJstDatetimeLocal", () => {
 test("formatJstDatetimeLocal returns empty for invalid input", () => {
   assert.equal(formatJstDatetimeLocal(null), "");
   assert.equal(formatJstDatetimeLocal(Number.NaN), "");
+});
+
+test("parseJstDatetimeLocal rejects normalized or timezone-bearing values", () => {
+  for (const value of [
+    "2026-02-29T12:00",
+    "2026-02-30T12:00",
+    "2026-13-01T12:00",
+    "2026-01-01T24:00",
+    "2026-01-01T23:60",
+    "2026-01-01T12:00Z",
+    "2026-01-01T12:00+09:00",
+  ]) {
+    assert.equal(parseJstDatetimeLocal(value), null, value);
+    assert.deepEqual(parseJstDatetimeLocalStrict(value), {
+      ok: false,
+      reason: "invalid_datetime",
+    });
+  }
+});
+
+test("parseJstDatetimeLocal accepts leap day and distinguishes empty input", () => {
+  assert.equal(parseJstDatetimeLocal("2028-02-29T12:00"),
+    Math.floor(Date.UTC(2028, 1, 29, 3, 0, 0) / 1000));
+  assert.deepEqual(parseJstDatetimeLocalStrict(""), { ok: true, value: null });
 });

@@ -22,3 +22,11 @@ test("create-event IDs are validated server-side with the route-safe pattern", (
     /const id = data\.id\?\.trim\(\) \|\| generateId\("ev"\);[\s\S]*?if \(!EVENT_ID_PATTERN\.test\(id\)\)/,
   );
 });
+
+test("manage event edit carries the rendered revision and rejects stale saves", () => {
+  const formSource = readRepoFile("src/components/admin/EventForm.tsx");
+  const actionSource = readRepoFile("src/lib/actions/event-admin.ts");
+  assert.match(formSource, /name="revision"/);
+  assert.match(actionSource, /formData\.get\("revision"\)/);
+  assert.match(actionSource, /submittedRevision !== before\.updated_at/);
+});

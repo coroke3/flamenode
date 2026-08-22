@@ -1,13 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import { eventGroupEvents, eventGroups, events } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { planD1AuditMutationBudget } from "@/lib/audit/mutateBudget";
 import { buildEventGroupChangeQueueBatch } from "@/lib/staticRebuild/hooks";
+import {
+  queryEventGroupEventOptions,
+  type EventGroupEventOptionsPage,
+} from "@/lib/admin/eventGroupEventOptions";
 import { generateId } from "@/lib/utils/id";
 import {
   compensateEventGroupVisibilityOnD1Failure,
@@ -37,6 +43,7 @@ const visibilityEnum = z.enum(["public", "private", "archived"]);
 
 const groupSchema = z.object({
   id: z.string().trim().optional(),
+  base_updated_at: z.coerce.number().int().nonnegative().optional().nullable(),
   name: z.string().trim().min(1).max(120),
   slug: z
     .string()
@@ -58,6 +65,53 @@ const groupSchema = z.object({
   visibility_status: visibilityEnum.default("public"),
   sort_order: z.coerce.number().int().min(-9999).max(9999).default(0).optional(),
 });
+
+function eventGroupMutationError(error: unknown): EventGroupActionResult {
+  unstable_rethrow(error);
+  console.error("[event-group] atomic mutation failed", error);
+  return {
+    ok: false,
+    message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
+  };
+}
+
+const EVENT_GROUP_ADD_MAX = 80;
+
+export async function searchEventGroupEventOptions(input: unknown): Promise<
+  | ({ ok: true } & EventGroupEventOptionsPage)
+  | { ok: false; message: string }
+> {
+  const guard = await requireAdmin();
+  if (!guard.ok) {
+    return {
+      ok: false,
+      message: guard.result.message ?? "管理者権限が必要です。",
+    };
+  }
+  const raw =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const request = {
+    groupId: typeof raw.groupId === "string" ? raw.groupId : "",
+    query: typeof raw.query === "string" ? raw.query : null,
+    cursor: typeof raw.cursor === "string" ? raw.cursor : null,
+  };
+  try {
+    const page = await queryEventGroupEventOptions(guard.db, request);
+    return { ok: true, ...page };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[event-group] event option search failed", {
+      groupId: request.groupId,
+      error,
+    });
+    return {
+      ok: false,
+      message: "イベント候補の取得に失敗しました。もう一度お試しください。",
+    };
+  }
+}
 
 async function requireAdmin(): Promise<
   | { ok: true; userId: string; db: DB }
@@ -119,32 +173,50 @@ async function mutateEventGroupWithQueue(
     visibilityFence?: EventGroupVisibilityFencePlan;
   },
 ): Promise<boolean> {
-  const queue = await buildEventGroupChangeQueueBatch(db, input);
   const fence = input.visibilityFence;
+  let fenceWasPreCommitted = false;
+  let queue: Awaited<ReturnType<typeof buildEventGroupChangeQueueBatch>> | null = null;
   try {
+    queue = await buildEventGroupChangeQueueBatch(db, input);
+    const mutationStatements = [
+      ...input.mutationStatements,
+      ...(fence?.mutationStatements ?? []),
+      ...queue.statements,
+    ];
+    const expectedMutationChanges = [
+      ...input.expectedMutationChanges,
+      ...(fence?.expectedMutationChanges ?? []),
+      ...queue.expectedChanges,
+    ];
+    const budget = planD1AuditMutationBudget({
+      mutationStatementCount: mutationStatements.length,
+      mutationAssertionCount: expectedMutationChanges.length,
+      auditEntryCount: input.audits.length,
+      distinctActorCount: new Set(
+        input.audits.map((audit) => audit.actor_user_id),
+      ).size,
+    });
+    if (!budget.withinLimit) {
+      throw new Error(
+        `この操作は原子更新上限を超えています（${budget.totalQueryCount}/${budget.limit} query）。対象を分けて実行してください`,
+      );
+    }
     if (fence?.fenceToken) {
       await preCommitEventGroupVisibilityTransition({
         groupId: input.groupId,
         fenceToken: fence.fenceToken,
         reason: input.reason,
       });
+      fenceWasPreCommitted = true;
     }
     await mutateWithAudit(db, {
-      mutationStatements: [
-        ...input.mutationStatements,
-        ...(fence?.mutationStatements ?? []),
-        ...queue.statements,
-      ],
-      expectedMutationChanges: [
-        ...input.expectedMutationChanges,
-        ...(fence?.expectedMutationChanges ?? []),
-        ...queue.expectedChanges,
-      ],
+      mutationStatements,
+      expectedMutationChanges,
       audits: input.audits,
       staticRebuildWakeSource: queue.statements.length > 0 ? "admin" : undefined,
     });
   } catch (error) {
-    if (fence?.fenceToken) {
+    if (fence?.fenceToken && fenceWasPreCommitted) {
       try {
         await compensateEventGroupVisibilityOnD1Failure({
           db,
@@ -160,7 +232,7 @@ async function mutateEventGroupWithQueue(
     }
     throw error;
   }
-  return queue.statements.length > 0;
+  return Boolean(queue?.statements.length);
 }
 
 export async function createEventGroup(
@@ -180,7 +252,13 @@ export async function createEventGroup(
   const db = guard.db;
 
   const data = parsed.data;
-  if (!(await ensureUniqueSlug(db, data.slug))) {
+  let slugAvailable: boolean;
+  try {
+    slugAvailable = await ensureUniqueSlug(db, data.slug);
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
+  if (!slugAvailable) {
     return { ok: false, message: "このスラッグは既に使われています。" };
   }
 
@@ -200,37 +278,47 @@ export async function createEventGroup(
     created_at: now,
     updated_at: now,
   } satisfies typeof eventGroups.$inferInsert;
-  const visibilityFence =
-    data.visibility_status === "public"
-      ? await planEventGroupVisibilityFenceTransition({
-          db,
-          groupId: id,
-          previousStatus: "private",
-          nextStatus: "public",
-          actorUserId: guard.userId,
-          reason: "event_group_create",
-          now,
-        })
-      : undefined;
+  let visibilityFence: EventGroupVisibilityFencePlan | undefined;
+  try {
+    visibilityFence =
+      data.visibility_status === "public"
+        ? await planEventGroupVisibilityFenceTransition({
+            db,
+            groupId: id,
+            previousStatus: "private",
+            nextStatus: "public",
+            actorUserId: guard.userId,
+            reason: "event_group_create",
+            now,
+          })
+        : undefined;
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
 
-  const staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
-    mutationStatements: [db.insert(eventGroups).values(createdRow)],
-    expectedMutationChanges: [1],
-    audits: [
-      {
-        table_name: "event_groups",
-        target_id: id,
-        operation: "CREATE",
-        after: groupSnapshot(createdRow as typeof eventGroups.$inferSelect),
-        actor_user_id: guard.userId,
-        retention_class: "restorable",
-      },
-    ],
-    reason: "event_group_create",
-    requestedByUserId: guard.userId,
-    groupId: id,
-    visibilityFence,
-  });
+  let staticRebuildEnqueued: boolean;
+  try {
+    staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
+      mutationStatements: [db.insert(eventGroups).values(createdRow)],
+      expectedMutationChanges: [1],
+      audits: [
+        {
+          table_name: "event_groups",
+          target_id: id,
+          operation: "CREATE",
+          after: groupSnapshot(createdRow as typeof eventGroups.$inferSelect),
+          actor_user_id: guard.userId,
+          retention_class: "restorable",
+        },
+      ],
+      reason: "event_group_create",
+      requestedByUserId: guard.userId,
+      groupId: id,
+      visibilityFence,
+    });
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
 
   revalidatePath("/admin/event-groups");
   revalidatePath("/event");
@@ -256,16 +344,33 @@ export async function updateEventGroup(
 
   const db = guard.db;
 
-  const existing = (
-    await db.select().from(eventGroups).where(eq(eventGroups.id, id)).limit(1)
-  )[0];
+  let existing: typeof eventGroups.$inferSelect | undefined;
+  try {
+    existing = (
+      await db.select().from(eventGroups).where(eq(eventGroups.id, id)).limit(1)
+    )[0];
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   if (!existing) return { ok: false, message: "グループが見つかりません。" };
 
   const data = parsed.data;
-  if (!(await ensureUniqueSlug(db, data.slug, id))) {
+  let slugAvailable: boolean;
+  try {
+    slugAvailable = await ensureUniqueSlug(db, data.slug, id);
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
+  if (!slugAvailable) {
     return { ok: false, message: "このスラッグは既に使われています。" };
   }
 
+  if (data.base_updated_at == null || data.base_updated_at !== existing.updated_at) {
+    return {
+      ok: false,
+      message: "他の操作で更新されています。再読み込みして確認してください。",
+    };
+  }
   const now = Math.floor(Date.now() / 1000);
   const updatedValues = {
     name: data.name,
@@ -273,24 +378,30 @@ export async function updateEventGroup(
     description: data.description?.trim() || null,
     group_type: data.group_type,
     icon_url: normalizeOptionalUrl(data.icon_url),
-    img_url: null,
     accent_color: normalizeOptionalColor(data.accent_color),
     visibility_status: data.visibility_status,
     sort_order: data.sort_order ?? existing.sort_order,
-    updated_at: now,
+    updated_at: Math.max(now, existing.updated_at + 1),
   } satisfies Partial<typeof eventGroups.$inferInsert>;
   const updatedRow = { ...existing, ...updatedValues };
-  const visibilityFence = await planEventGroupVisibilityFenceTransition({
-    db,
-    groupId: id,
-    previousStatus: existing.visibility_status,
-    nextStatus: updatedValues.visibility_status,
-    actorUserId: guard.userId,
-    reason: "event_group_visibility_update",
-    now,
-  });
+  let visibilityFence: EventGroupVisibilityFencePlan;
+  try {
+    visibilityFence = await planEventGroupVisibilityFenceTransition({
+      db,
+      groupId: id,
+      previousStatus: existing.visibility_status,
+      nextStatus: updatedValues.visibility_status,
+      actorUserId: guard.userId,
+      reason: "event_group_visibility_update",
+      now,
+    });
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
 
-  const staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
+  let staticRebuildEnqueued: boolean;
+  try {
+    staticRebuildEnqueued = await mutateEventGroupWithQueue(db, {
     mutationStatements: [
       db
         .update(eventGroups)
@@ -315,7 +426,10 @@ export async function updateEventGroup(
     requestedByUserId: guard.userId,
     groupId: id,
     visibilityFence,
-  });
+    });
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
 
   revalidatePath("/admin/event-groups");
   revalidatePath(`/admin/event-groups/${id}/edit`);
@@ -329,31 +443,47 @@ export async function deleteEventGroup(
   const guard = await requireAdmin();
   if (!guard.ok) return guard.result;
 
-  const id = groupId.trim();
+  const id = typeof groupId === "string" ? groupId.trim() : "";
   if (!id) return { ok: false, message: "ID が必要です。" };
 
   const db = guard.db;
 
-  const existing = (
-    await db.select().from(eventGroups).where(eq(eventGroups.id, id)).limit(1)
-  )[0];
+  let existing: typeof eventGroups.$inferSelect | undefined;
+  try {
+    existing = (
+      await db.select().from(eventGroups).where(eq(eventGroups.id, id)).limit(1)
+    )[0];
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   if (!existing) return { ok: false, message: "グループが見つかりません。" };
 
-  const relationRows = await db
-    .select()
-    .from(eventGroupEvents)
-    .where(eq(eventGroupEvents.event_group_id, id));
+  let relationRows: (typeof eventGroupEvents.$inferSelect)[];
+  try {
+    relationRows = await db
+      .select()
+      .from(eventGroupEvents)
+      .where(eq(eventGroupEvents.event_group_id, id));
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   const now = Math.floor(Date.now() / 1000);
-  const visibilityFence = await planEventGroupVisibilityFenceTransition({
-    db,
-    groupId: id,
-    previousStatus: existing.visibility_status,
-    nextStatus: "archived",
-    actorUserId: guard.userId,
-    reason: "event_group_delete",
-    now,
-  });
-  await mutateEventGroupWithQueue(db, {
+  let visibilityFence: EventGroupVisibilityFencePlan;
+  try {
+    visibilityFence = await planEventGroupVisibilityFenceTransition({
+      db,
+      groupId: id,
+      previousStatus: existing.visibility_status,
+      nextStatus: "archived",
+      actorUserId: guard.userId,
+      reason: "event_group_delete",
+      now,
+    });
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
+  try {
+    await mutateEventGroupWithQueue(db, {
     mutationStatements: [
       db.delete(eventGroupEvents).where(eq(eventGroupEvents.event_group_id, id)),
       db
@@ -387,6 +517,9 @@ export async function deleteEventGroup(
     visibilityFence,
   });
 
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   revalidatePath("/admin/event-groups");
   revalidatePath("/event");
   return { ok: true };
@@ -399,28 +532,60 @@ export async function addEventsToGroup(input: {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.result;
 
-  const groupId = input.groupId.trim();
-  const eventIds = [...new Set(input.eventIds.map((id) => id.trim()).filter(Boolean))];
+  const groupId = typeof input?.groupId === "string" ? input.groupId.trim() : "";
+  const rawEventIds = Array.isArray(input?.eventIds) ? input.eventIds : [];
+  const eventIds = [
+    ...new Set(
+      rawEventIds
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (eventIds.length > EVENT_GROUP_ADD_MAX) {
+    return {
+      ok: false,
+      message: `一度に追加できるイベントは${EVENT_GROUP_ADD_MAX}件までです。分けて実行してください。`,
+    };
+  }
   if (!groupId || eventIds.length === 0) {
     return { ok: false, message: "追加するイベントを選択してください。" };
   }
 
   const db = guard.db;
 
-  const group = (
-    await db.select().from(eventGroups).where(eq(eventGroups.id, groupId)).limit(1)
-  )[0];
+  let group: typeof eventGroups.$inferSelect | undefined;
+  try {
+    group = (
+      await db.select().from(eventGroups).where(eq(eventGroups.id, groupId)).limit(1)
+    )[0];
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   if (!group) return { ok: false, message: "グループが見つかりません。" };
 
-  const existingRows = await db
-    .select()
-    .from(eventGroupEvents)
-    .where(eq(eventGroupEvents.event_group_id, groupId));
+  let existingRows: (typeof eventGroupEvents.$inferSelect)[];
+  let validRows: { id: string }[];
+  try {
+    // Only inspect the submitted IDs. Reading every group relation here made
+    // large groups pay an unnecessary D1 rows-read cost before the atomic plan.
+    existingRows = await db
+      .select()
+      .from(eventGroupEvents)
+      .where(
+        and(
+          eq(eventGroupEvents.event_group_id, groupId),
+          inArray(eventGroupEvents.event_id, eventIds),
+        ),
+      );
+    validRows = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(inArray(events.id, eventIds));
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   const existingIds = new Set(existingRows.map((row) => row.event_id));
-  const validRows = await db
-    .select({ id: events.id })
-    .from(events)
-    .where(inArray(events.id, eventIds));
   if (validRows.length !== eventIds.length) {
     return { ok: false, message: "存在しないイベントは追加できません。" };
   }
@@ -441,7 +606,8 @@ export async function addEventsToGroup(input: {
       }) satisfies typeof eventGroupEvents.$inferInsert,
   );
 
-  await mutateEventGroupWithQueue(db, {
+  try {
+    await mutateEventGroupWithQueue(db, {
     mutationStatements: [db.insert(eventGroupEvents).values(insertedRows)],
     expectedMutationChanges: [insertedRows.length],
     audits: insertedRows.map((row) => ({
@@ -455,7 +621,10 @@ export async function addEventsToGroup(input: {
     reason: "event_group_member_add",
     requestedByUserId: guard.userId,
     groupId,
-  });
+    });
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
 
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
   revalidatePath("/event");
@@ -469,36 +638,47 @@ export async function removeEventFromGroup(input: {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.result;
 
-  const groupId = input.groupId.trim();
-  const eventId = input.eventId.trim();
+  const groupId = typeof input?.groupId === "string" ? input.groupId.trim() : "";
+  const eventId = typeof input?.eventId === "string" ? input.eventId.trim() : "";
   if (!groupId || !eventId) {
     return { ok: false, message: "グループとイベントを指定してください。" };
   }
 
   const db = guard.db;
 
-  const group = (
-    await db.select().from(eventGroups).where(eq(eventGroups.id, groupId)).limit(1)
-  )[0];
+  let group: typeof eventGroups.$inferSelect | undefined;
+  try {
+    group = (
+      await db.select().from(eventGroups).where(eq(eventGroups.id, groupId)).limit(1)
+    )[0];
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   if (!group) return { ok: false, message: "グループが見つかりません。" };
 
-  const relation = (
-    await db
-      .select()
-      .from(eventGroupEvents)
-      .where(
-        and(
-          eq(eventGroupEvents.event_group_id, groupId),
-          eq(eventGroupEvents.event_id, eventId),
-        ),
-      )
-      .limit(1)
-  )[0];
+  let relation: typeof eventGroupEvents.$inferSelect | undefined;
+  try {
+    relation = (
+      await db
+        .select()
+        .from(eventGroupEvents)
+        .where(
+          and(
+            eq(eventGroupEvents.event_group_id, groupId),
+            eq(eventGroupEvents.event_id, eventId),
+          ),
+        )
+        .limit(1)
+    )[0];
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
   if (!relation) {
     return { ok: false, message: "イベントはグループに追加されていません。" };
   }
 
-  await mutateEventGroupWithQueue(db, {
+  try {
+    await mutateEventGroupWithQueue(db, {
     mutationStatements: [
       db
         .delete(eventGroupEvents)
@@ -524,7 +704,10 @@ export async function removeEventFromGroup(input: {
     reason: "event_group_member_remove",
     requestedByUserId: guard.userId,
     groupId,
-  });
+    });
+  } catch (error) {
+    return eventGroupMutationError(error);
+  }
 
   revalidatePath(`/admin/event-groups/${groupId}/edit`);
   revalidatePath("/event");

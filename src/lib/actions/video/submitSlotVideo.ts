@@ -8,7 +8,6 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import { getDatabase } from "@/lib/cloudflare";
 import {
   events as eventsTable,
   slots,
@@ -83,7 +82,9 @@ const SLOT_SUBMIT_REJECT_MESSAGE = "枠が見つかりません。";
 const SLOT_GROUP_REJECT_MESSAGE =
   "この枠は現在とは別の活動名義で確保されています。Active X IDを切り替えてから操作してください。";
 
-export async function submitSlotVideo(formData: FormData): Promise<VideoActionResult> {
+async function submitSlotVideoCore(
+  formData: FormData,
+): Promise<VideoActionResult> {
   const guard = await writeGuard({
     requireApprovedActiveXId: true,
     feature: "post_video_slotted",
@@ -93,8 +94,11 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   const userId = sessionUser.id;
   const slotId = String(formData.get("slot_id") ?? "");
   if (!slotId) return { ok: false, message: "枠IDがありません。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  // writeGuard has already resolved and authorized the request-local D1
+  // binding. Re-resolving getDatabase() here can fail independently in a
+  // Cloudflare request context and used to surface as the generic client-side
+  // "unexpected error" before any action result was returned.
+  const db = guard.db;
 
   const slotRow = (
     await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
@@ -139,13 +143,10 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
   if (slotRow.video_id && !existingVideo) {
     return { ok: false, message: "枠に紐づく作品が見つかりません。" };
   }
-  // Existing submissions may explicitly clear their YouTube URL, but a new
-  // slotted video is always a YouTube-backed record (source_type = youtube).
-  // Fail closed before building any dependent plans so we never create an
-  // unusable video with youtube_video_id = NULL.
-  if (!existingVideo && !submittedYoutubeId) {
-    return { ok: false, message: "新規投稿にはYouTube URLが必要です。" };
-  }
+  // A new slotted video may be saved before its YouTube URL is known. Keep the
+  // source_type as youtube and leave youtube_video_id nullable so the creator
+  // can add the URL later through the normal edit action. Existing submissions
+  // still support an explicit clear when the field is present and empty.
 
   const slotPart = await resolvePartFromSlot(db, slotRow);
   if (
@@ -683,7 +684,32 @@ export async function submitSlotVideo(formData: FormData): Promise<VideoActionRe
       videoId,
       youtubeVideoId: submittedYoutubeId ?? undefined,
       eventId: slotRow.event_id,
+      requiresYoutubeBeforePublish: !submittedYoutubeId,
     },
     staticRebuildEnqueued,
   );
+}
+
+const SLOT_SUBMIT_UNEXPECTED_ERROR_MESSAGE =
+  "枠への投稿処理で一時的なエラーが発生しました。ページを再読み込みしてから、もう一度お試しください。";
+
+/**
+ * Keep read/preflight failures inside the Server Action result contract.
+ * D1/R2/network failures before the atomic-save try block must not escape to
+ * React's action transport, which otherwise collapses them into a generic
+ * client-side submission error and gives the user no retryable result.
+ */
+export async function submitSlotVideo(
+  formData: FormData,
+): Promise<VideoActionResult> {
+  try {
+    return await submitSlotVideoCore(formData);
+  } catch (error) {
+    unstable_rethrow(error);
+    console.warn("[submitSlotVideo] preflight rejected", error);
+    return {
+      ok: false,
+      message: SLOT_SUBMIT_UNEXPECTED_ERROR_MESSAGE,
+    };
+  }
 }

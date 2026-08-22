@@ -193,7 +193,6 @@ export function PublicHeader({
                 }`}
                 aria-current={active ? "page" : undefined}
               >
-                <Icon name={item.iconName} size={14} aria-hidden />
                 {item.label}
               </Link>
             );

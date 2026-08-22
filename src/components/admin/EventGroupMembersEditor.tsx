@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   addEventsToGroup,
   removeEventFromGroup,
+  searchEventGroupEventOptions,
 } from "@/lib/actions/event-group-admin";
 import { formatUnix } from "@/lib/utils/format";
 
@@ -25,21 +26,71 @@ interface Props {
   groupId: string;
   members: EventGroupMemberRow[];
   eventOptions: EventOption[];
+  initialEventOptionsCursor?: string | null;
 }
 
 export function EventGroupMembersEditor({
   groupId,
   members,
   eventOptions,
+  initialEventOptionsCursor = null,
 }: Props): React.ReactElement {
   const router = useRouter();
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [search, setSearch] = React.useState("");
+  const [loadedOptions, setLoadedOptions] = React.useState(eventOptions);
+  const [nextCursor, setNextCursor] = React.useState<string | null>(
+    initialEventOptionsCursor,
+  );
+  const searchRequestRef = React.useRef(0);
+  const loadedQueryRef = React.useRef("");
 
   const memberIds = new Set(members.map((m) => m.event_id));
-  const availableEvents = eventOptions.filter((e) => !memberIds.has(e.id));
+  const availableEvents = loadedOptions.filter((e) => !memberIds.has(e.id));
+
+  const runEventSearch = (cursor: string | null) => {
+    const requestId = ++searchRequestRef.current;
+    const requestedQuery = cursor ? loadedQueryRef.current : search;
+    if (!cursor) loadedQueryRef.current = search;
+    startTransition(async () => {
+      try {
+        const result = await searchEventGroupEventOptions({
+          groupId,
+          query: requestedQuery,
+          cursor,
+        });
+        if (requestId !== searchRequestRef.current) return;
+        if (!result.ok) {
+          setError(result.message);
+          return;
+        }
+        setLoadedOptions((current) =>
+          cursor
+            ? [
+                ...current,
+                ...result.options.filter(
+                  (option) => !current.some((item) => item.id === option.id),
+                ),
+              ]
+            : result.options,
+        );
+        setNextCursor(result.nextCursor);
+      } catch {
+        if (requestId !== searchRequestRef.current) return;
+        setError("イベント候補の取得に失敗しました。もう一度お試しください。");
+      }
+    });
+  };
+
+  const onSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    runEventSearch(null);
+  };
 
   const toggleSelected = (eventId: string) => {
     setSelectedIds((current) => {
@@ -55,17 +106,21 @@ export function EventGroupMembersEditor({
     setError(null);
     setMessage(null);
     startTransition(async () => {
-      const r = await addEventsToGroup({
-        groupId,
-        eventIds: [...selectedIds],
-      });
-      if (!r.ok) {
-        setError(r.message ?? "追加に失敗しました。");
-        return;
+      try {
+        const r = await addEventsToGroup({
+          groupId,
+          eventIds: [...selectedIds],
+        });
+        if (!r.ok) {
+          setError(r.message ?? "追加に失敗しました。");
+          return;
+        }
+        setSelectedIds(new Set());
+        setMessage(`${r.added ?? selectedIds.size} 件を追加しました。`);
+        router.refresh();
+      } catch {
+        setError("追加に失敗しました。もう一度お試しください。");
       }
-      setSelectedIds(new Set());
-      setMessage(`${r.added ?? selectedIds.size} 件を追加しました。`);
-      router.refresh();
     });
   };
 
@@ -73,19 +128,45 @@ export function EventGroupMembersEditor({
     setError(null);
     setMessage(null);
     startTransition(async () => {
-      const r = await removeEventFromGroup({ groupId, eventId });
-      if (!r.ok) {
-        setError(r.message ?? "削除に失敗しました。");
-        return;
+      try {
+        const r = await removeEventFromGroup({ groupId, eventId });
+        if (!r.ok) {
+          setError(r.message ?? "削除に失敗しました。");
+          return;
+        }
+        router.refresh();
+      } catch {
+        setError("削除に失敗しました。もう一度お試しください。");
       }
-      router.refresh();
     });
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {availableEvents.length > 0 ? (
+      {availableEvents.length > 0 || nextCursor || search ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <form
+            onSubmit={onSearch}
+            style={{ display: "flex", gap: 8, alignItems: "center" }}
+          >
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.currentTarget.value)}
+              maxLength={64}
+              placeholder="イベント名で検索"
+              className="fn-input"
+              style={{ flex: 1, minWidth: 0 }}
+              disabled={busy}
+            />
+            <button
+              type="submit"
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+              disabled={busy}
+            >
+              検索
+            </button>
+          </form>
           <div
             style={{
               display: "flex",
@@ -157,6 +238,16 @@ export function EventGroupMembersEditor({
               </label>
             ))}
           </div>
+          {nextCursor ? (
+            <button
+              type="button"
+              className="fn-btn fn-btn-ghost fn-btn-sm"
+              onClick={() => runEventSearch(nextCursor)}
+              disabled={busy}
+            >
+              さらに読み込む
+            </button>
+          ) : null}
         </div>
       ) : (
         <p className="fn-muted" style={{ fontSize: 13, margin: 0 }}>

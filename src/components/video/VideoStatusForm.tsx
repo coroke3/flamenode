@@ -26,6 +26,8 @@ type VideoStatusAction = (formData: FormData) => Promise<ActionResult>;
 interface VideoStatusFormProps {
   videoId: string;
   currentStatus: string;
+  sourceType?: string | null;
+  youtubeVideoId?: string | null;
   statuses: readonly [VideoVisibilityStatus, ...VideoVisibilityStatus[]];
   action: VideoStatusAction;
   formIdPrefix: string;
@@ -54,11 +56,15 @@ const COMMUNICATION_ERROR_MESSAGE =
 export function AdminVideoStatusForm({
   videoId,
   currentStatus,
+  sourceType,
+  youtubeVideoId,
   openVoidCaseId,
   hiddenFields,
 }: {
   videoId: string;
   currentStatus: string;
+  sourceType?: string | null;
+  youtubeVideoId?: string | null;
   openVoidCaseId?: string | null;
   hiddenFields?: Record<string, string>;
 }): React.ReactElement {
@@ -66,6 +72,8 @@ export function AdminVideoStatusForm({
     <VideoStatusForm
       videoId={videoId}
       currentStatus={currentStatus}
+      sourceType={sourceType}
+      youtubeVideoId={youtubeVideoId}
       statuses={ADMIN_STATUS_VALUES}
       action={setVideoStatus}
       formIdPrefix="admin-video"
@@ -84,15 +92,21 @@ export function ManageVideoStatusForm({
   eventId,
   videoId,
   currentStatus,
+  sourceType,
+  youtubeVideoId,
 }: {
   eventId: string;
   videoId: string;
   currentStatus: string;
+  sourceType?: string | null;
+  youtubeVideoId?: string | null;
 }): React.ReactElement {
   return (
     <VideoStatusForm
       videoId={videoId}
       currentStatus={currentStatus}
+      sourceType={sourceType}
+      youtubeVideoId={youtubeVideoId}
       statuses={MANAGE_STATUS_VALUES}
       action={setManageVideoStatus}
       formIdPrefix={`manage-video-${videoId}`}
@@ -114,6 +128,8 @@ const REASON_CATEGORIES = [
 export function VideoStatusForm({
   videoId,
   currentStatus,
+  sourceType,
+  youtubeVideoId = null,
   statuses,
   action,
   formIdPrefix,
@@ -157,6 +173,7 @@ export function VideoStatusForm({
     }
     return options;
   }, [currentStatus, statuses]);
+  const youtubeRequired = sourceType === "youtube" && !youtubeVideoId?.trim();
 
   React.useEffect(() => {
     setStatus(currentStatus);
@@ -251,11 +268,20 @@ export function VideoStatusForm({
         disabled={submitting}
       >
         {statusOptions.map((value) => (
-          <option key={value} value={value}>
+          <option
+            key={value}
+            value={value}
+            disabled={value === "public" && youtubeRequired}
+          >
             {formatStatusOption(value, optionDescription)}
           </option>
         ))}
       </select>
+      {youtubeRequired && statusOptions.includes("public") ? (
+        <p role="status" style={{ color: "var(--accent-warning)", fontSize: 12 }}>
+          YouTube URL未設定のため公開できません。投稿者に追加を依頼してください。
+        </p>
+      ) : null}
       {requiresReason ? (
         <>
           <label className="fn-label" htmlFor={categoryFieldId}>

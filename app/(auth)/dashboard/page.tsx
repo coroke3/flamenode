@@ -512,7 +512,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             {myChapters.map((chapter) => (
               <Link
                 key={chapter.id}
-                href={`/${chapter.youtube_video_id ?? chapter.video_id}`}
+                href={`/${chapter.youtube_video_id?.trim() || chapter.video_id}`}
                 className="fn-card fn-stack-item"
               >
                 <div className="fn-stack-item-head">

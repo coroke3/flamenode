@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
-import { getDatabase } from "@/lib/cloudflare";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
 import {
@@ -74,7 +73,8 @@ export async function updateVideoMembersAdmin(
     return { ok: false, message: "管理者権限が必要です。" };
   }
 
-  const db = getDatabase();
+  // Reuse the request-local D1 resolved by writeGuard.
+  const db = guard.db;
   if (!db) return { ok: false, message: "DB に接続できません。" };
 
   const videoId = String(formData.get("video_id") ?? "").trim();

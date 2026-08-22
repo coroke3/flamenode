@@ -111,6 +111,7 @@ export default async function ManageEventVideosPage({
     .select({
       id: videosTable.id,
       title: videosTable.title,
+      source_type: videosTable.source_type,
       youtube_video_id: videosTable.youtube_video_id,
       display_name: videosTable.creator_display_name,
       visibility_status: videosTable.visibility_status,

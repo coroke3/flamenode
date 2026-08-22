@@ -153,6 +153,48 @@ export function buildSlotForceReleasedNotification(args: {
   });
 }
 
+/** 提出作品だけを解除し、予約枠は維持したことを予約者へ知らせる。 */
+export function buildSlotSubmissionReleasedNotification(args: {
+  eventId: string;
+  eventTitle?: string | null;
+  slotIds: string[];
+  reservationGroupId?: string | null;
+}): ReturnType<typeof buildDiscordPayload> {
+  const eventName = escapeDiscordMention(args.eventTitle ?? "イベント");
+  const slotLabel =
+    args.slotIds.length > 1 ? `${args.slotIds.length}枠` : "1枠";
+  const content = buildNotificationBlocks([
+    {
+      heading: "【FlameNode】枠の作品提出が解除されました",
+      lines: [
+        `運営操作により、イベント「${eventName}」の${slotLabel}から提出作品が解除されました。`,
+        "予約枠自体は引き続き確保されています。別の作品を再提出できます。",
+      ],
+    },
+    {
+      heading: "状態",
+      lines: [
+        `対象枠数: ${args.slotIds.length}`,
+        args.reservationGroupId
+          ? `提出グループ: ${args.reservationGroupId}`
+          : null,
+      ],
+    },
+    {
+      heading: "次にできること",
+      lines: [
+        linkLine("イベントの枠一覧を開く", `/event/${args.eventId}/slots`),
+        linkLine("イベントページを開く", `/event/${args.eventId}`),
+      ],
+    },
+  ]);
+  return buildDiscordPayload({
+    content,
+    event_id: args.eventId,
+    url: appUrl(`/event/${args.eventId}/slots`),
+  });
+}
+
 /** 運営チャンネル向け: 利用者による枠新規確保通知。 */
 export function buildChannelSlotReservedNotification(args: {
   eventId: string;

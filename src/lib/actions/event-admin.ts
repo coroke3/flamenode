@@ -499,6 +499,22 @@ export async function updateEvent(
   )[0];
   if (!before) return { ok: false, message: "イベントが見つかりません。" };
 
+  // Compare against the revision rendered in the form. Re-reading the row
+  // here must not turn a stale editor into a full overwrite of newer data.
+  const submittedRevisionRaw = String(formData.get("revision") ?? "").trim();
+  const submittedRevision = Number(submittedRevisionRaw);
+  if (
+    !submittedRevisionRaw ||
+    !Number.isSafeInteger(submittedRevision) ||
+    submittedRevision !== before.updated_at
+  ) {
+    return {
+      ok: false,
+      message:
+        "このイベントは別の操作で更新されています。最新状態を確認してから再度保存してください。",
+    };
+  }
+
   const now = Math.max(
     Math.floor(Date.now() / 1000),
     before.updated_at + 1,

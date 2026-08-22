@@ -8,7 +8,7 @@ test("members-only update projects chapter checks and writes through identity", 
   assert.match(source, /remapMemberChaptersByIdentity\(/);
   assert.match(
     source,
-    /if \(sections\.members && !sections\.member_chapters\) \{[\s\S]*?memberChaptersPayloadChanged\(existingMemberBaseline, chapterComparisonBaseline\)/,
+    /const canEditMembersField =\s*[\s\S]*?const canEditChaptersField =\s*[\s\S]*?if \(canEditMembersField && !canEditChaptersField\) \{[\s\S]*?remapMemberChaptersByIdentity\([\s\S]*?memberChaptersPayloadChanged\(existingMemberBaseline, chapterComparisonBaseline\)/,
   );
   assert.match(
     source,

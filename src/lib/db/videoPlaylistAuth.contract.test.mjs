@@ -15,7 +15,10 @@ const [eventPage, videoPage, videoQueries] = await Promise.all([
 ]);
 
 test("event cards preserve the public event playlist", () => {
-  assert.match(eventPage, /const target = video\.youtube_video_id \?\? video\.id/);
+  assert.match(
+    eventPage,
+    /const target = video\.youtube_video_id\?\.trim\(\) \|\| video\.id/,
+  );
   assert.match(
     eventPage,
     /href=\{`\/\$\{target\}\?playlist=\$\{encodeURIComponent\(eventId\)\}`\}/,

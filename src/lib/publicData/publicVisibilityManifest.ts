@@ -29,15 +29,39 @@ type R2BucketLike = {
   put: R2Bucket["put"];
 };
 
+function resolveManifestBucket(
+  bucket: R2BucketLike | null | undefined,
+): R2BucketLike | null {
+  if (bucket !== undefined) return bucket;
+  try {
+    return getEnv().BUCKET ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function readPublicVisibilityBlockedEntitiesManifest(
   bucket?: R2BucketLike | null,
 ): Promise<{
   manifest: PublicVisibilityBlockedEntitiesManifest;
   etag: string | null;
 }> {
-  const resolvedBucket = bucket ?? getEnv().BUCKET ?? null;
+  const resolvedBucket = resolveManifestBucket(bucket);
   const now = Math.floor(Date.now() / 1000);
   if (!resolvedBucket) {
+    const mode = resolvePublicVisibilityGuardModeFromEnv();
+    if (mode === "enforce") {
+      throw new Error("public_visibility_manifest_bucket_missing");
+    }
+    if (mode === "observe") {
+      console.warn(
+        JSON.stringify({
+          service: "public-visibility-guard",
+          mode,
+          result: "manifest_bucket_missing",
+        }),
+      );
+    }
     return {
       manifest: emptyPublicVisibilityBlockedEntitiesManifest(now),
       etag: null,

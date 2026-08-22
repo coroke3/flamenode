@@ -109,6 +109,7 @@ export default async function ManageEventEditPage({
           }}
           initial={{
             id: event.id,
+            updated_at: event.updated_at,
             title: event.title,
             event_type: (event.event_type ?? "event") as
               | "event"
@@ -132,6 +133,9 @@ export default async function ManageEventEditPage({
               event.user_video_edit_permission_keys_json,
             video_form_settings_json: videoFormSettingsJson,
             max_slots_per_video: event.max_slots_per_video,
+            max_slot_reservation_groups_per_xid:
+              event.max_slot_reservation_groups_per_xid,
+            slot_interval_minutes: event.slot_interval_minutes,
             slot_part_gap_minutes: event.slot_part_gap_minutes,
             slot_type: (event.slot_type ?? "time") as "time" | "count",
             slot_visibility_mode: (event.slot_visibility_mode ??

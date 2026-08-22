@@ -23,6 +23,7 @@ import {
 import type { SessionUserLike } from "./ownershipCore";
 import {
   loadGeneralEditableFieldSet,
+  parseGeneralEditableFields,
   sectionAllowedByGeneralFields,
   type GeneralEditableFieldKey,
 } from "@/lib/video/generalEditPermissions";
@@ -107,8 +108,11 @@ export async function getEditableEventIds(
   db: DB,
   userId: string,
   candidateEventIds?: readonly string[],
+  approvedXUserIds?: readonly string[],
 ): Promise<string[]> {
-  const xIds = await getApprovedXIds(db, userId);
+  const xIds = approvedXUserIds
+    ? Array.from(approvedXUserIds)
+    : await getApprovedXIds(db, userId);
   if (xIds.length === 0) return [];
   const candidateIds = candidateEventIds
     ? Array.from(new Set(candidateEventIds.filter(Boolean)))
@@ -441,9 +445,12 @@ export async function eventStaffHasExactVideoPermission(args: {
 async function loadPrimaryEventOwnerPolicy(
   db: DB,
   primaryEventId: string | null | undefined,
-): Promise<Set<string>> {
+  video?: Pick<VideoRow, "visibility_status">,
+): Promise<Set<GeneralEditableFieldKey>> {
   if (!primaryEventId) {
-    return resolveOwnerGeneralPolicyKeys({ primaryEvent: null });
+    return video
+      ? loadGeneralEditableFieldSet(db, video)
+      : (resolveOwnerGeneralPolicyKeys({ primaryEvent: null }) as Set<GeneralEditableFieldKey>);
   }
   const row = (
     await db
@@ -456,7 +463,21 @@ async function loadPrimaryEventOwnerPolicy(
       .where(eq(eventsTable.id, primaryEventId))
       .limit(1)
   )[0];
-  return resolveOwnerGeneralPolicyKeys({ primaryEvent: row ?? null });
+  if (row?.allow_user_video_edits === 1) {
+    return parseGeneralEditableFields(row.user_video_edit_permission_keys_json);
+  }
+  return video
+    ? loadGeneralEditableFieldSet(db, video)
+    : (resolveOwnerGeneralPolicyKeys({ primaryEvent: null }) as Set<GeneralEditableFieldKey>);
+}
+
+/** normal owner の最終 field set。イベント個別設定が有効な場合だけ完全上書きし、
+ * それ以外は system_settings の公開状態別グローバル設定を使う。 */
+export async function loadEffectiveOwnerEditableFieldSet(
+  db: DB,
+  video: Pick<VideoRow, "primary_event_id" | "visibility_status">,
+): Promise<Set<GeneralEditableFieldKey>> {
+  return loadPrimaryEventOwnerPolicy(db, video.primary_event_id, video);
 }
 
 /**
@@ -484,25 +505,28 @@ export async function canEditVideo(args: {
    * preserves the existing query behavior for all other callers.
    */
   approvedXUserIds?: readonly string[];
+  /** Request-local ownership result shared by section probes. */
+  ownership?: VideoOwnership;
 }): Promise<boolean> {
   const { db, user, video, requiredKey, privilegeMode, generalFields } = args;
   const approved =
     args.approvedXUserIds ?? (await getApprovedXIds(db, user.id));
-  const ownership = await resolveVideoOwnership({
-    db,
-    userId: user.id,
-    video,
-    approvedXUserIds: approved,
-  });
+  const ownership = args.ownership ?? await resolveVideoOwnership({
+      db,
+      userId: user.id,
+      video,
+      approvedXUserIds: approved,
+    });
 
   if (privilegeMode === "normal") {
     if (!ownership.isOwner) return false;
 
-    if (requiredKey === "video.identity") {
-      const fields =
-        generalFields ?? (await loadGeneralEditableFieldSet(db, video));
-      return sectionAllowedByGeneralFields(requiredKey, fields);
-    }
+    // YouTube is intentionally not part of the normal owner policy.  The
+    // slotted first-attachment exception is derived by computeEditSections
+    // from the authoritative video state; keeping this section locked here
+    // prevents a configured/general field set from becoming a broad ID
+    // replacement or clear permission through this lower-level helper.
+    if (requiredKey === "video.youtube_id") return false;
 
     if (requiredKey === "video.permissions") {
       return decideCanEditVideo({
@@ -514,17 +538,16 @@ export async function canEditVideo(args: {
         eventStaffAllows: false,
       });
     }
+
+    const fields =
+      generalFields ?? (await loadPrimaryEventOwnerPolicy(db, video.primary_event_id, video));
+    return sectionAllowedByGeneralFields(requiredKey, fields);
   }
 
   let ownerPolicyKeys: Set<string> = new Set();
   let eventStaffAllows = false;
 
-  if (privilegeMode === "normal") {
-    ownerPolicyKeys = await loadPrimaryEventOwnerPolicy(
-      db,
-      video.primary_event_id,
-    );
-  } else if (privilegeMode === "event") {
+  if (privilegeMode === "event") {
     eventStaffAllows = await eventStaffHasExactVideoPermission({
       db,
       user,
@@ -544,11 +567,7 @@ export async function canEditVideo(args: {
   });
   if (!allowed) return false;
 
-  if (privilegeMode !== "normal") return true;
-
-  const fields =
-    generalFields ?? (await loadGeneralEditableFieldSet(db, video));
-  return sectionAllowedByGeneralFields(requiredKey, fields);
+  return true;
 }
 
 /**

@@ -27,6 +27,7 @@ import {
 } from "@/lib/utils/eventStatus";
 import {
   buildFormDraftStorageKey,
+  type DraftMetadata,
   useFormDraft,
 } from "@/lib/interactions/useFormDraft";
 import { useUnsavedChangesGuard } from "@/lib/interactions/useUnsavedChangesGuard";
@@ -37,6 +38,7 @@ import {
 
 export interface EventFormInitial {
   id?: string;
+  updated_at?: number | null;
   title?: string;
   event_type?: "event" | "collabo" | "type" | "other";
   explanation?: string | null;
@@ -348,6 +350,7 @@ export function EventForm({
   const initial = initialProp ?? EMPTY_EVENT_FORM_INITIAL;
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
+  const submitInFlightRef = React.useRef(false);
   const [busy, startTransition] = React.useTransition();
   const [dirty, setDirty] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -378,9 +381,24 @@ export function EventForm({
     ? buildFormDraftStorageKey({
         authUserId: draftAuthUserId.trim(),
         formId: `event-${mode}-${initial.id ?? templateId ?? "new"}`,
-        schemaVersion: "event-form-v1",
+        schemaVersion: "event-form-v2",
       })
     : "";
+  const draftMetadata = React.useMemo<DraftMetadata>(
+    () => ({
+      schemaVersion: "event-form-v2",
+      authUserId: draftAuthUserId?.trim() ?? null,
+      mode,
+      eventId: initial.id ?? null,
+      baseRevision: mode === "edit" ? initial.updated_at ?? null : null,
+    }),
+    [draftAuthUserId, initial.id, initial.updated_at, mode],
+  );
+  const handleStaleDraft = React.useCallback(() => {
+    setError(
+      "以前の編集内容は現在のイベント状態と一致しないため自動復元しませんでした。必要なら内容を確認してから手動で反映してください。",
+    );
+  }, []);
   const restoreDraft = React.useCallback((draft: EventFormDraftValue) => {
     const form = formRef.current;
     if (!form) return;
@@ -420,7 +438,9 @@ export function EventForm({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
     enabled: Boolean(draftAuthUserId?.trim()),
+    metadata: draftMetadata,
     onRestore: restoreDraft,
+    onStale: handleStaleDraft,
   });
   useUnsavedChangesGuard({ dirty: dirty && !busy });
 
@@ -433,11 +453,14 @@ export function EventForm({
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (busy || submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
     setError(null);
     setSuccess(null);
     const formData = new FormData(event.currentTarget);
     startTransition(async () => {
-      const result =
+      try {
+        const result =
         mode === "create" ? await createEvent(formData) : await updateEvent(formData);
       if (!result.ok) {
         setError(result.message ?? "保存に失敗しました。");
@@ -453,6 +476,12 @@ export function EventForm({
         router.push(`/manage/events/${encodeURIComponent(result.eventId)}/edit`);
       } else {
         router.refresh();
+        }
+      } catch (submitError) {
+        console.error("[EventForm] submit failed", submitError);
+        setError("保存中に予期しないエラーが発生しました。入力内容を保持したまま再試行してください。");
+      } finally {
+        submitInFlightRef.current = false;
       }
     });
   };
@@ -483,6 +512,9 @@ export function EventForm({
       ) : null}
       {mode === "edit" && initial.id ? (
         <input type="hidden" name="id" value={initial.id} />
+      ) : null}
+      {mode === "edit" && initial.id && initial.updated_at != null ? (
+        <input type="hidden" name="revision" value={initial.updated_at} />
       ) : null}
       {mode === "create" && templateId ? (
         <input type="hidden" name="template_id" value={templateId} />

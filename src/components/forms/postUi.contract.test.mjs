@@ -84,6 +84,69 @@ test("固定送信DockのグローバルボタンへCSS Modulesのスタイル�
   assert.doesNotMatch(source, /\.submitDock\s+\.fn-btn\b/);
 });
 
+test("YouTube未設定の枠提出は公開導線を出さず編集導線を出す", async () => {
+  const source = await read("src/components/forms/VideoForm.tsx");
+  assert.match(source, /requiresYoutubeBeforePublish/);
+  assert.match(source, /YouTube URLを追加する/);
+  assert.match(source, /!result\.requiresYoutubeBeforePublish/);
+});
+
+test("初回YouTube紐付け時は一般field設定由来のdisabled指定を解除する", async () => {
+  const source = await read("app/(auth)/dashboard/edit/[id]/page.tsx");
+  assert.match(
+    source,
+    /disabledFieldKeysFromGeneralFields\(generalFields\)\.filter\([\s\S]*allowInitialYoutubeAttach[\s\S]*video\.youtube_url/,
+  );
+});
+
+test("投稿draftは成功時だけ消去し、画像はブラウザ側で復元する", async () => {
+  const [videoForm, iconPicker, unslotted] = await Promise.all([
+    read("src/components/forms/VideoForm.tsx"),
+    read("src/components/forms/VideoIconPicker.tsx"),
+    read("src/components/forms/UnslottedPostForm.tsx"),
+  ]);
+  assert.match(videoForm, /flushDraft\(\)/);
+  assert.match(videoForm, /if \(r\.ok\) \{[\s\S]*clearVideoDraft\(\)/);
+  assert.match(videoForm, /onSubmitSuccess\?\.\(\)/);
+  assert.match(videoForm, /restoredUploadFile/);
+  assert.match(videoForm, /loadDraftFile/);
+  assert.match(videoForm, /saveDraftFile/);
+  assert.match(videoForm, /restoreStaleVideoDraft/);
+  assert.match(videoForm, /restoreStaleDraft\(\)[\s\S]{0,900}loadDraftFile/);
+  assert.match(videoForm, /draftFileOperationRef/);
+  assert.match(videoForm, /enqueueDraftFileOperation/);
+  assert.match(videoForm, /const generation = \+\+draftFileRestoreGenerationRef\.current/);
+  assert.match(iconPicker, /restoredUploadFile\?: File \| null/);
+  assert.match(iconPicker, /onUploadFileChange\?: \(file: File \| null\)/);
+  assert.match(unslotted, /unslotted-shell/);
+  assert.match(unslotted, /onSubmitSuccess/);
+  assert.doesNotMatch(videoForm, /clearVideoDraft\(\)[\s\S]{0,80}if \(!r\.ok/);
+});
+
+test("iPad Safariの固定Dockはタップ可能なネイティブボタンとしてフォールバックする", async () => {
+  const source = await read("src/components/forms/VideoForm.module.css");
+  assert.match(source, /\.submitDock\s*,\s*\n\.wizardDock\s*\{[\s\S]*pointer-events:\s*auto/);
+  assert.match(source, /-webkit-appearance:\s*none/);
+  assert.match(source, /touch-action:\s*manipulation/);
+  assert.match(source, /@supports\s*\(-webkit-touch-callout:\s*none\)/);
+  assert.match(source, /backdrop-filter:\s*none/);
+  assert.match(source, /-webkit-backdrop-filter:\s*none/);
+  assert.match(source, /@media\s*\(hover:\s*none\)\s*and\s*\(pointer:\s*coarse\)/);
+  assert.match(source, /min-height:\s*var\(--fn-control-h-touch\)/);
+});
+
+test("枠付き作品の編集画面は部を読み取り専用にする", async () => {
+  const [formSource, pageSource] = await Promise.all([
+    read("src/components/forms/VideoForm.tsx"),
+    read("app/(auth)/dashboard/edit/[id]/page.tsx"),
+  ]);
+  assert.match(formSource, /schedulingType\?:\s*"manual" \| "slotted" \| null/);
+  assert.match(formSource, /schedulingType === "slotted"/);
+  assert.match(formSource, /枠に設定された部を自動で使用します/);
+  assert.match(formSource, /<input type="hidden" name="part" value=\{initial\.part \?\? ""\} \/>/);
+  assert.match(pageSource, /schedulingType=\{video\.scheduling_type\}/);
+});
+
 test("member suggestion pagination aborts stale requests and ignores late responses", async () => {
   const source = await read("src/components/forms/VideoMembersField.tsx");
   assert.match(source, /suggestionRequestIdRef\s*=\s*React\.useRef\(0\)/);
@@ -91,4 +154,14 @@ test("member suggestion pagination aborts stale requests and ignores late respon
   assert.match(source, /new AbortController\(\)/);
   assert.match(source, /requestId !== suggestionRequestIdRef\.current/);
   assert.match(source, /fetchSuggestions\(searchQuery\.trim\(\), nextOffset, controller\.signal\)/);
+});
+test("admin/event privilege can clear an existing YouTube ID from the edit form", async () => {
+  const source = await read("src/components/forms/VideoForm.tsx");
+  assert.match(source, /const privilegedYoutubeEdit =/);
+  assert.match(source, /privilegeMode !== "normal"/);
+  assert.match(source, /youtube\.editable === true/);
+  assert.match(
+    source,
+    /mode === "edit" && hasInitialYoutube && !privilegedYoutubeEdit/,
+  );
 });

@@ -26,6 +26,7 @@ import {
   SAME_VIDEO_STATUS_MESSAGE,
   type VideoStatusActionResult,
 } from "@/lib/video/videoVisibilityStatusAction";
+import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
 
 export type ManageVideoActionResult = VideoStatusActionResult;
 
@@ -121,6 +122,10 @@ export async function setManageVideoStatus(
   if (!target) return { ok: false, message: "対象作品が見つかりません。" };
 
   const prevStatus = target.visibility_status;
+  const publicEligibility = validateVideoPublicEligibility(target, status);
+  if (!publicEligibility.ok) {
+    return { ok: false, message: publicEligibility.message };
+  }
   if (prevStatus === status) {
     return attachApproveAndNextHref(
       db,
@@ -157,6 +162,9 @@ export async function setManageVideoStatus(
       notificationEventId: eventId,
       now,
     });
+    if (transition.validationError) {
+      return { ok: false, message: transition.validationError };
+    }
 
     const mutationStatements = [...transition.mutationStatements];
     const budget = planD1AuditMutationBudget({

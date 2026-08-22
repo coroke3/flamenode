@@ -53,24 +53,32 @@ test("event ID rename is admin-only, atomic, and migrates all event references",
   assert.doesNotMatch(source, /UPDATE static_artifacts/);
 });
 
-test("submitted slot force release is admin-only and preserves the video record", () => {
+test("submitted slot operations use the slot event permission and preserve the video record", () => {
   const source = readRepoFile("src/lib/actions/slot-admin-danger.ts");
 
-  assert.match(source, /requireAdminWrite\("manage_slot_update"\)/);
+  assert.match(source, /writeGuard\(\{ feature: "manage_slot_update" \}\)/);
+  assert.match(source, /assertCanEditEvent\([\s\S]*row\.event_id[\s\S]*"event\.slots"/);
+  assert.match(source, /releaseSubmittedVideoKeepReservation/);
+  assert.doesNotMatch(source, /requireAdminWrite\("manage_slot_update"\)/);
   assert.match(source, /row\.status !== "submitted"/);
   assert.match(source, /versionedSlotWhere\(row\.event_id, targetRows, "submitted"\)/);
   assert.match(source, /scheduling_type: "manual"/);
+  assert.match(source, /status: "reserved"/);
+  assert.match(source, /video_id: null/);
+  assert.match(source, /slot_submission_released/);
   assert.doesNotMatch(source, /delete\(videos\)/);
   assert.doesNotMatch(source, /visibility_status:\s*"voided"/);
 });
 
-test("submitted-slot release control is only enabled for global admins", () => {
+test("submitted-slot release controls use the event.slots page permission", () => {
   const listSource = readRepoFile("src/components/admin/SlotList.tsx");
   const pageSource = readRepoFile("app/(manage)/manage/events/[id]/slots/page.tsx");
 
-  assert.match(listSource, /canForceReleaseSubmitted = false/);
+  assert.match(listSource, /canManageSubmittedSlots = false/);
+  assert.match(listSource, /releaseSubmittedVideoKeepReservation/);
   assert.match(listSource, /forceReleaseSubmittedSlot/);
-  assert.match(pageSource, /canForceReleaseSubmitted=\{isAdmin\}/);
+  assert.match(pageSource, /canManageSubmittedSlots=\{canEditSlots\}/);
+  assert.match(pageSource, /canEditEventFromSnapshot\([\s\S]*"event\.slots"/);
 });
 
 test("event ID rename control is rendered inside the admin danger section", () => {

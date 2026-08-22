@@ -19,9 +19,10 @@ test("admin release requires the requested anchor to remain in its group", async
 
 test("force release applies the same anchor membership guard", async () => {
   const source = await read("./slot-admin-danger.ts");
+  const forceStart = source.indexOf("export async function forceReleaseSubmittedSlot");
   const releaseBlock = source.slice(
-    source.indexOf("export async function forceReleaseSubmittedSlot"),
-    source.indexOf("const videoId = row.video_id"),
+    forceStart,
+    source.indexOf("const videoId = row.video_id", forceStart),
   );
   assert.match(
     releaseBlock,

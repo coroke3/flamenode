@@ -137,7 +137,8 @@
 }
 
 .tabCurrent:not(.tabActive) {
-  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent-primary) 55%, transparent);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 6%, var(--bg-surface));
 }
 
 .accountPanel {

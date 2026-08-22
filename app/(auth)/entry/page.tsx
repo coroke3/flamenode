@@ -27,6 +27,8 @@ export const metadata: Metadata = { title: "エントリー / 投稿" };
 export const dynamic = "force-dynamic";
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  auth_check_failed:
+    "ログイン確認の有効期限が切れました。もう一度 Discord でログインしてください。",
   AccessDenied: "Discord認証がキャンセルされました",
   OAuthCallback: "Discord認証を完了できませんでした",
   OAuthCallbackError: "Discord認証を完了できませんでした",

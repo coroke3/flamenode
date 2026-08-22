@@ -4,8 +4,7 @@
   justify-content: space-between;
   gap: 18px;
   padding: 18px 20px 18px 18px;
-  border: 0;
-  border-left: 4px solid var(--accent-primary);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--bg-surface);
 }
@@ -28,20 +27,21 @@
 }
 
 .info {
-  border-left-color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .success {
-  border-left-color: var(--accent-success);
+  border-color: color-mix(in srgb, var(--accent-success) 36%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-success) 8%, var(--bg-surface));
 }
 
 .warning {
-  border-left-color: var(--accent-warning);
+  border-color: color-mix(in srgb, var(--accent-warning) 42%, var(--border-subtle));
   background: var(--accent-warning-soft);
 }
 
 .danger {
-  border-left-color: var(--accent-danger);
+  border-color: color-mix(in srgb, var(--accent-danger) 42%, var(--border-subtle));
   background: var(--accent-danger-soft);
 }
 

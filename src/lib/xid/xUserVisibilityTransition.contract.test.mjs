@@ -9,7 +9,7 @@ const transition = fs.readFileSync(
 const merge = fs.readFileSync(
   new URL("./merge.ts", import.meta.url),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 const rebuild = fs.readFileSync(
   new URL("../../../workers/json-generator/rebuild.ts", import.meta.url),
   "utf8",

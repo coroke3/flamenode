@@ -4,6 +4,7 @@ import { videos, videoEvents } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import type { CanEditVideoPrivilegeMode } from "@/lib/auth/ownership";
+import type { GeneralEditableFieldKey } from "@/lib/video/generalEditPermissions";
 import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
 import { normalizeXId } from "#utils/xid";
 import {
@@ -94,6 +95,7 @@ export interface VideoSavePlan {
   primaryEventId: string | null;
   previousYoutubeVideoId: string | null;
   target: typeof videos.$inferSelect;
+  ownerEditableFields?: ReadonlySet<GeneralEditableFieldKey>;
 }
 
 export function buildVideoUpdatePayload(args: {
@@ -106,6 +108,8 @@ export function buildVideoUpdatePayload(args: {
   privilegeMode: CanEditVideoPrivilegeMode;
   now: number;
   creatorYoutubeChannelUrl: string | null;
+  ownerEditableFields?: ReadonlySet<GeneralEditableFieldKey>;
+  allowInitialYoutubeAttach?: boolean;
 }): VideoUpdatePayload {
   const {
     target,
@@ -117,53 +121,75 @@ export function buildVideoUpdatePayload(args: {
     privilegeMode,
     now,
     creatorYoutubeChannelUrl,
+    ownerEditableFields,
+    allowInitialYoutubeAttach = false,
   } = args;
+  const ownerAllows = (key: GeneralEditableFieldKey, fallback: boolean) =>
+    privilegeMode === "normal" && ownerEditableFields
+      ? ownerEditableFields.has(key)
+      : fallback;
   const displayNameChanged =
-    sections.identity && parsed.display_name !== target.creator_display_name;
+    ownerAllows("display_name", sections.identity) &&
+    parsed.display_name !== target.creator_display_name;
   return {
-    title: sections.basics ? parsed.title : target.title,
-    youtube_video_id: sections.youtube ? youtubeId : target.youtube_video_id,
+    title: ownerAllows("title", sections.basics) ? parsed.title : target.title,
+    youtube_video_id:
+      allowInitialYoutubeAttach ||
+      (privilegeMode !== "normal" && sections.youtube)
+        ? youtubeId
+        : target.youtube_video_id,
     creator_x_user_id: allowSubmitterChange ? nextCreatorX || null : target.creator_x_user_id,
-    creator_display_name: sections.identity ? parsed.display_name : target.creator_display_name,
-    creator_display_name_yomi: sections.identity
+    creator_display_name: ownerAllows("display_name", sections.identity)
+      ? parsed.display_name
+      : target.creator_display_name,
+    creator_display_name_yomi: ownerAllows("display_name", sections.identity)
       ? displayNameChanged
         ? null
         : target.creator_display_name_yomi
       : target.creator_display_name_yomi,
-    creator_icon_url: sections.identity ? parsed.icon_url || null : target.creator_icon_url,
+    creator_icon_url: ownerAllows("icon_url", sections.identity)
+      ? parsed.icon_url || null
+      : target.creator_icon_url,
     creator_youtube_channel_url:
-      sections.identity && privilegeMode !== "normal"
+      ownerAllows("youtube_channel_url", sections.identity)
       ? creatorYoutubeChannelUrl
       : target.creator_youtube_channel_url,
     creator_profile_text:
-      sections.identity && privilegeMode !== "normal"
+      ownerAllows("profile_text", sections.identity)
       ? parsed.profile_text ?? null
       : target.creator_profile_text,
     creator_other_social_links:
-      sections.identity && privilegeMode !== "normal"
+      ownerAllows("other_social_links", sections.identity)
       ? normalizeSocialLinksForStorage(parsed.other_social_links)
       : target.creator_other_social_links,
-    music: sections.credits ? parsed.music ?? null : target.music,
-    music_reference_url: sections.credits
+    music: ownerAllows("music", sections.credits) ? parsed.music ?? null : target.music,
+    music_reference_url: ownerAllows("music_reference_url", sections.credits)
       ? parsed.music_reference_url ?? null
       : target.music_reference_url,
-    credit: sections.credits ? parsed.credit ?? null : target.credit,
-    intro_comment: sections.descriptions
+    credit: ownerAllows("credit", sections.credits) ? parsed.credit ?? null : target.credit,
+    intro_comment: ownerAllows("intro_comment", sections.descriptions)
       ? parsed.intro_comment ?? null
       : target.intro_comment,
-    highlights: sections.descriptions ? parsed.highlights ?? null : target.highlights,
-    production_story: sections.descriptions
+    highlights: ownerAllows("highlights", sections.descriptions)
+      ? parsed.highlights ?? null
+      : target.highlights,
+    production_story: ownerAllows("production_story", sections.descriptions)
       ? parsed.production_story ?? null
       : target.production_story,
-    closing_comment: sections.descriptions
+    closing_comment: ownerAllows("closing_comment", sections.descriptions)
       ? parsed.closing_comment ?? null
       : target.closing_comment,
-    collaboration_type: sections.members
+    collaboration_type: ownerAllows("is_collab", sections.members)
       ? parsed.is_collab
         ? "collab"
         : "individual"
       : target.collaboration_type,
-    part: sections.basics ? parsed.part?.trim() || null : target.part,
+    part:
+      target.scheduling_type === "slotted"
+        ? target.part
+        : ownerAllows("part", sections.basics)
+          ? parsed.part?.trim() || null
+          : target.part,
     updated_at: now,
   };
 }
@@ -188,6 +214,8 @@ export function buildVideoUpdatePlan(args: {
   stagePermissionDeleteEventIds: string[] | undefined;
   hasEventIdsField: boolean;
   now: number;
+  ownerEditableFields?: ReadonlySet<GeneralEditableFieldKey>;
+  allowInitialYoutubeAttach?: boolean;
 }): VideoSavePlan {
   const payload = buildVideoUpdatePayload({
     target: args.target,
@@ -199,9 +227,15 @@ export function buildVideoUpdatePlan(args: {
     privilegeMode: args.privilegeMode,
     now: args.now,
     creatorYoutubeChannelUrl: args.creatorYoutubeChannelUrl,
+    ownerEditableFields: args.ownerEditableFields,
+    allowInitialYoutubeAttach: args.allowInitialYoutubeAttach,
   });
 
   const auditBefore = buildVideoAuditSnapshot(args.target, undefined, args.targetSoftwareLabel);
+  const ownerAllows = (key: GeneralEditableFieldKey, fallback: boolean) =>
+    args.privilegeMode === "normal" && args.ownerEditableFields
+      ? args.ownerEditableFields.has(key)
+      : fallback;
   const auditAfter = buildVideoAuditSnapshot(args.target, {
     title: payload.title,
     youtube_video_id: payload.youtube_video_id,
@@ -214,7 +248,7 @@ export function buildVideoUpdatePlan(args: {
     intro_comment: payload.intro_comment,
     highlights: payload.highlights,
     production_story: payload.production_story,
-    used_software: args.sections.descriptions
+    used_software: ownerAllows("used_software", args.sections.descriptions)
       ? args.parsed.used_software ?? null
       : args.targetSoftwareLabel,
     closing_comment: payload.closing_comment,
@@ -250,9 +284,10 @@ export function buildVideoUpdatePlan(args: {
     rebuildFlags: computeStaticRebuildFlags({
       canEditIdentity: args.sections.identity,
       allowSubmitterChange: args.allowSubmitterChange,
-      displayNameChanged: args.parsed.display_name !== args.target.creator_display_name,
+      displayNameChanged:
+        payload.creator_display_name !== args.target.creator_display_name,
       iconChanged:
-        (args.parsed.icon_url || null) !== (args.target.creator_icon_url || null),
+        (payload.creator_icon_url || null) !== (args.target.creator_icon_url || null),
       titleChanged: payload.title !== args.target.title,
       youtubeChanged: args.youtubeChanged,
       partChanged: (payload.part ?? null) !== (args.target.part ?? null),
@@ -266,6 +301,7 @@ export function buildVideoUpdatePlan(args: {
     primaryEventId: args.target.primary_event_id,
     previousYoutubeVideoId: args.target.youtube_video_id,
     target: { ...args.target },
+    ownerEditableFields: args.ownerEditableFields,
   };
 }
 
@@ -284,6 +320,10 @@ export async function applyVideoUpdatePlan(
   plan: VideoSavePlan,
 ): Promise<boolean> {
   const { payload, sections } = plan;
+  const ownerAllows = (key: GeneralEditableFieldKey, sectionAllowed = true) =>
+    plan.privilegeMode === "normal" && plan.ownerEditableFields
+      ? plan.ownerEditableFields.has(key)
+      : sectionAllowed;
   const isPublicVideo = plan.target.visibility_status === "public";
   const existingEventRows = await db
     .select({ event_id: videoEvents.event_id })
@@ -334,7 +374,7 @@ export async function applyVideoUpdatePlan(
       }));
     }
   }
-  if (sections.descriptions) {
+  if (sections.descriptions && ownerAllows("used_software", sections.descriptions)) {
     appendVideoAtomicWritePlan(atomic, await buildReplaceVideoSoftwarePlan(db, {
       videoId: plan.videoId,
       raw: plan.usedSoftware,
@@ -374,9 +414,10 @@ export async function applyVideoUpdatePlan(
     }));
   }
   const shouldReplaceStagePermission =
-    sections.descriptions || (plan.stagePermissionDeleteEventIds?.length ?? 0) > 0;
+    ownerAllows("stage_permission", sections.descriptions) ||
+    (plan.stagePermissionDeleteEventIds?.length ?? 0) > 0;
   if (shouldReplaceStagePermission) {
-    const stagePermission = sections.descriptions
+    const stagePermission = ownerAllows("stage_permission", sections.descriptions)
       ? plan.stagePermission
       : await readStagePermissionCustomAnswers(db, {
           videoId: plan.videoId,
@@ -390,19 +431,18 @@ export async function applyVideoUpdatePlan(
       now: payload.updated_at,
       actorUserId: plan.operatorUserId,
     }));
-    // General custom answers are only replaced when their editable section was
-    // submitted. Event-link updates without description permission must retain
-    // existing answers for the remaining events; passing the default empty
-    // draft list here would silently delete them.
-    if (sections.descriptions) {
-      appendVideoAtomicWritePlan(atomic, await buildReplaceGeneralCustomAnswersPlan(db, {
-        videoId: plan.videoId,
-        eventIds: targetEventIds,
-        drafts: plan.customAnswerDrafts,
-        now: payload.updated_at,
-        actorUserId: plan.operatorUserId,
-      }));
-    }
+  }
+  // General answers are independent from descriptions. In particular, a
+  // custom_answers-only owner permission must not be lost when no stage plan
+  // is needed, while an unrelated descriptions edit must not replace them.
+  if (ownerAllows("custom_answers", sections.descriptions)) {
+    appendVideoAtomicWritePlan(atomic, await buildReplaceGeneralCustomAnswersPlan(db, {
+      videoId: plan.videoId,
+      eventIds: targetEventIds,
+      drafts: plan.customAnswerDrafts,
+      now: payload.updated_at,
+      actorUserId: plan.operatorUserId,
+    }));
   }
   const queueItems: EnqueueStaticRebuildInput[] = [{
     targetType: "video",

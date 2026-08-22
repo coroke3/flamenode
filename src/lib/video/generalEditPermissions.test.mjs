@@ -11,6 +11,14 @@ import {
   serializeGeneralEditableFields,
 } from "./generalEditPermissionsCore.ts";
 
+test("normal owner field registry never exposes YouTube ID editing", () => {
+  assert.equal(GENERAL_EDITABLE_FIELD_KEYS.includes("youtube_url"), false);
+  assert.equal(
+    sectionAllowedByGeneralFields("video.youtube_id", new Set(["title"])),
+    false,
+  );
+});
+
 test("normalizeGeneralEditableFields: fixed order and unknown drop", () => {
   const normalized = normalizeGeneralEditableFields([
     "chapters",
@@ -87,9 +95,17 @@ test("disabledFieldKeysFromGeneralFields: music key maps to video.music (covers 
   assert.ok(disabled.includes("video.music"));
 });
 
-test("normalModeAlwaysDisabledFieldKeys: stage_permission is always disabled", () => {
+test("normalModeAlwaysDisabledFieldKeys: field-level policy controls stage permission", () => {
   const keys = normalModeAlwaysDisabledFieldKeys();
-  assert.ok(keys.includes("descriptions.stage_permission"));
+  assert.deepEqual(keys, []);
+  assert.ok(
+    disabledFieldKeysFromGeneralFields(new Set(["stage_permission"])).every(
+      (field) => field !== "descriptions.stage_permission",
+    ),
+  );
+  assert.ok(
+    disabledFieldKeysFromGeneralFields(new Set()).includes("descriptions.stage_permission"),
+  );
 });
 
 test("sectionAllowedByGeneralFields: members without chapters", () => {

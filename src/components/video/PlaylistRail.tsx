@@ -130,7 +130,7 @@ export function PlaylistRail({
 
   const makeHref = React.useCallback(
     (item: PlaylistEntry) => {
-      const target = item.youtube_video_id ?? item.id;
+      const target = item.youtube_video_id?.trim() || item.id;
       return playlistId
         ? `/${target}?playlist=${encodeURIComponent(playlistId)}`
         : `/${target}`;
@@ -284,6 +284,7 @@ export function PlaylistRail({
       <ol className={styles.list}>
         {orderedItems.map((v, i) => {
           const active = i === currentIndex;
+          const youtubeId = extractYoutubeId(v.youtube_video_id);
           return (
             <li key={`${v.id}-${i}`} className={styles.row}>
               <div className={styles.reorderControls}>
@@ -318,10 +319,10 @@ export function PlaylistRail({
                   {active ? <Icon name="play" size={11} /> : <span>{i + 1}</span>}
                 </span>
                 <span className={styles.itemThumb}>
-                  {v.youtube_video_id ? (
+                  {youtubeId ? (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
-                      src={youtubeThumbUrl(v.youtube_video_id, "default")}
+                      src={youtubeThumbUrl(youtubeId, "default")}
                       alt=""
                       loading="lazy"
                     />

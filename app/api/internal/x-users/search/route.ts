@@ -10,10 +10,16 @@ const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 20;
 const MAX_OFFSET = 5000;
 const MAX_QUERY_LENGTH = 64;
+const MIN_SEARCH_CHARS = 2;
+const INDEX_LOAD_TIMEOUT_MS = 2500;
 const PRIVATE_HEADERS = {
   "Cache-Control": "private, no-store, no-cache, must-revalidate",
   Pragma: "no-cache",
   Expires: "0",
+} as const;
+const UNAVAILABLE_HEADERS = {
+  ...PRIVATE_HEADERS,
+  "Retry-After": "3",
 } as const;
 
 function compactSearchChars(value: string): string {
@@ -55,6 +61,12 @@ export async function GET(
       ? Math.min(Math.floor(offsetValue), MAX_OFFSET)
       : 0;
 
+  const normalizedQueryForMinLength = rawQuery
+    .normalize("NFKC")
+    .toLowerCase()
+    .trim()
+    .replace(/^[^\p{L}\p{N}_]+/u, "");
+
   // 空queryはR2にもD1にも触れない。
   if (!rawQuery) {
     return NextResponse.json(
@@ -71,6 +83,23 @@ export async function GET(
     );
   }
 
+  // Short input is handled by the already loaded client-side candidates. Keep
+  // this before binding/R2 access so typing does not wake the Worker per key.
+  if (compactSearchChars(normalizedQueryForMinLength).length < MIN_SEARCH_CHARS) {
+    return NextResponse.json(
+      {
+        items: [],
+        query: rawQuery,
+        limit,
+        offset,
+        nextOffset: null,
+        hasMore: false,
+        hint: "search_too_short",
+      },
+      { headers: PRIVATE_HEADERS },
+    );
+  }
+
   try {
     let bucket: Pick<R2Bucket, "get">;
     try {
@@ -81,15 +110,30 @@ export async function GET(
       });
       return NextResponse.json(
         { error: "suggestions_unavailable" },
-        { status: 503, headers: PRIVATE_HEADERS },
+        { status: 503, headers: UNAVAILABLE_HEADERS },
       );
     }
-    const loaded = await loadMemberSuggestionsIndexFromBucket(bucket);
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error("suggestions_index_timeout")),
+        INDEX_LOAD_TIMEOUT_MS,
+      );
+    });
+    let loaded: Awaited<ReturnType<typeof loadMemberSuggestionsIndexFromBucket>>;
+    try {
+      loaded = await Promise.race([
+        loadMemberSuggestionsIndexFromBucket(bucket),
+        timeout,
+      ]);
+    } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    }
     if (!loaded.ok) {
       console.warn("[x-users-search] suggestions unavailable", { reason: loaded.reason });
       return NextResponse.json(
         { error: "suggestions_unavailable" },
-        { status: 503, headers: PRIVATE_HEADERS },
+        { status: 503, headers: UNAVAILABLE_HEADERS },
       );
     }
 
@@ -145,7 +189,7 @@ export async function GET(
     console.error("[x-users-search] suggestion lookup failed", error);
     return NextResponse.json(
       { error: "suggestions_unavailable" },
-      { status: 503, headers: PRIVATE_HEADERS },
+      { status: 503, headers: UNAVAILABLE_HEADERS },
     );
   }
 }

@@ -199,7 +199,7 @@ export default async function SlottedPostPage({
   };
 
   return (
-    <AppShell size="default">
+    <AppShell size="default" className="fn-entry-flow">
       <header className="fn-page-head fn-page-head--split entry-slot-page-head">
         <div className="fn-page-head-main">
           <p className="fn-eyebrow">Slot Post</p>
@@ -271,6 +271,7 @@ export default async function SlottedPostPage({
       <div className="entry-slot-form-shell">
       <VideoForm
         mode="slot"
+        draftAuthUserId={user.id}
         slotId={slot.id}
         xIdOptions={xIdOptions}
         activeXId={activeX ?? undefined}

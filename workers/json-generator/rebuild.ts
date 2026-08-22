@@ -247,6 +247,7 @@ const EVENT_DETAIL_COLUMNS = `
   id, title, explanation, icon_url, img_url, accent_color,
   event_type, slot_type, slot_visibility_mode,
   max_slots_per_video, slot_part_gap_minutes,
+  parts_json,
   start_time, end_time, entry_start_time, entry_end_time,
   visibility_status, updated_at
 `;

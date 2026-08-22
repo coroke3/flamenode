@@ -13,6 +13,7 @@ import { VideoReviewQuickApproveButton } from "@/components/admin/VideoReviewQui
 export type VideoReviewQueueRow = {
   id: string;
   title: string;
+  source_type: string;
   youtube_video_id: string | null;
   display_name: string;
   visibility_status: string;
@@ -90,14 +91,16 @@ export function VideoReviewQueueTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((v) => (
+        {rows.map((v) => {
+          const youtubeVideoId = v.youtube_video_id?.trim() || null;
+          return (
           <tr key={v.id}>
             <td className="manage-queue-col-thumb">
               <div className="manage-queue-thumb-frame">
-                {v.youtube_video_id ? (
+                {youtubeVideoId ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={youtubeThumbUrl(v.youtube_video_id, "default") ?? ""}
+                    src={youtubeThumbUrl(youtubeVideoId, "default") ?? ""}
                     alt=""
                     className="manage-queue-thumb-image"
                   />
@@ -117,14 +120,16 @@ export function VideoReviewQueueTable({
               {formatRelative(v.created_at)}
             </td>
             <td className="manage-queue-col-youtube">
-              {v.youtube_video_id ? (
+              {youtubeVideoId ? (
                 isManage ? (
                   <span className="manage-queue-muted">あり</span>
                 ) : (
                   <span className="fn-badge fn-badge-soft">あり</span>
                 )
               ) : (
-                <span className="fn-badge fn-badge-warning">なし</span>
+                <span className="fn-badge fn-badge-warning">
+                  {v.source_type === "youtube" ? "URL未設定" : "なし"}
+                </span>
               )}
             </td>
             <td className="manage-queue-stage">{v.stage_permission_summary}</td>
@@ -155,6 +160,7 @@ export function VideoReviewQueueTable({
                 ) : null}
                 {canApprove &&
                 v.visibility_status === "pending" &&
+                !(v.source_type === "youtube" && !youtubeVideoId) &&
                 showQuickApprove ? (
                   <VideoReviewQuickApproveButton
                     videoId={v.id}
@@ -172,7 +178,8 @@ export function VideoReviewQueueTable({
               </div>
             </td>
           </tr>
-        ))}
+          );
+        })}
         {rows.length === 0 ? (
           <tr>
             <td colSpan={9}>

@@ -968,6 +968,22 @@ select {
   padding-right: var(--fn-page-gutter-inline-end);
 }
 
+/* Entry pages share one vertical rhythm so status, event search, summary and
+   the form never depend on incidental margins owned by individual cards. */
+.fn-entry-flow {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(18px, 2.4vw, 28px);
+}
+
+.fn-entry-flow > .fn-page-head,
+.fn-entry-flow > .fn-highlight-card,
+.fn-entry-flow > .fn-page-footnote,
+.fn-entry-flow > .fn-entry-search {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
 /* 公開ページのセクション区切り。控えめな下線+余白だけ */
 .fn-section-heading {
   display: flex;

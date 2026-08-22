@@ -12,6 +12,7 @@ import { AdminSectionTabs } from "@/components/admin/AdminSectionTabs";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { ConsolePanel } from "@/components/layout/ConsolePanel";
 import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
+import { queryEventGroupEventOptions } from "@/lib/admin/eventGroupEventOptions";
 
 export const metadata: Metadata = { title: "イベントグループ編集" };
 export const dynamic = "force-dynamic";
@@ -43,11 +44,11 @@ export default async function AdminEventGroupEditPage({
       .innerJoin(events, eq(events.id, eventGroupEvents.event_id))
       .where(eq(eventGroupEvents.event_group_id, id))
       .orderBy(desc(events.start_time), asc(events.id)),
-    db
-      .select({ id: events.id, title: events.title, start_time: events.start_time })
-      .from(events)
-      .orderBy(desc(events.start_time))
-      .limit(500),
+    queryEventGroupEventOptions(db, {
+      groupId: id,
+      query: "",
+      cursor: null,
+    }),
   ]);
 
   return (
@@ -81,6 +82,7 @@ export default async function AdminEventGroupEditPage({
           mode="edit"
           initial={{
             id: row.id,
+            base_updated_at: row.updated_at,
             name: row.name,
             slug: row.slug,
             description: row.description,
@@ -101,7 +103,8 @@ export default async function AdminEventGroupEditPage({
             title: member.title,
             start_time: member.start_time,
           }))}
-          eventOptions={eventOptions}
+          eventOptions={eventOptions.options}
+          initialEventOptionsCursor={eventOptions.nextCursor}
         />
       </ConsolePanel>
 

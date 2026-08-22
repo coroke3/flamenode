@@ -4,7 +4,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeXId, parseXIdentityInput } from "./xid.ts";
+import {
+  isCanonicalXId,
+  normalizeXId,
+  parseCanonicalXId,
+  parseXIdentityInput,
+} from "./xid.ts";
 
 test("normalizeXId: @ を取り除き小文字化", () => {
   assert.equal(normalizeXId("@FooBar"), "foobar");
@@ -43,4 +48,15 @@ test("parseXIdentityInput: 拒否対象", () => {
   assert.equal(parseXIdentityInput(""), null);
   assert.equal(parseXIdentityInput("a".repeat(21)), null);
   assert.equal(parseXIdentityInput("https://x.com/coroke3/status/1"), null);
+});
+
+test("parseCanonicalXId: write boundary accepts friendly forms but returns canonical", () => {
+  assert.equal(parseCanonicalXId("@ABC"), "abc");
+  assert.equal(parseCanonicalXId("https://x.com/ABC"), "abc");
+  assert.equal(parseCanonicalXId("a".repeat(20)), "a".repeat(20));
+  assert.equal(parseCanonicalXId("a".repeat(21)), null);
+  assert.equal(parseCanonicalXId("foo-bar"), null);
+  assert.equal(parseCanonicalXId("foo/bar"), null);
+  assert.equal(isCanonicalXId("abc_123"), true);
+  assert.equal(isCanonicalXId("ABC"), false);
 });

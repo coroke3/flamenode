@@ -33,6 +33,24 @@ test("tablet header exposes one menu entry point", () => {
   assert.match(tablet, /\.menuToggle[\s\S]*?display:\s*inline-flex/);
 });
 
+test("desktop public navigation stays text-only and undecorated", () => {
+  const header = read("src/components/layout/PublicHeader.tsx");
+  const css = read("src/components/layout/PublicHeader.module.css");
+
+  assert.doesNotMatch(header, /<Icon\s+name=\{item\.iconName\}/);
+  assert.doesNotMatch(css, /\.desktopNavLink::after/);
+  assert.doesNotMatch(css, /\.header::after/);
+  assert.match(css, /\.header\s*\{[\s\S]*?background:\s*var\(--bg-overlay\);/);
+  assert.doesNotMatch(css, /\.desktopNavLink:hover::after|\.desktopNavLinkActive::after/);
+});
+
+test("mobile active navigation uses color only and the dialog container has no focus frame", () => {
+  const css = read("src/components/layout/PublicHeader.module.css");
+
+  assert.doesNotMatch(css, /\.mobileLinkActive\s*\{[^}]*border\s*:/s);
+  assert.match(css, /\.mobileNav:focus-visible\s*\{[^}]*outline:\s*0/s);
+});
+
 test("personal and console headers use the same container geometry as home", () => {
   const shellCss = read("src/styles/admin-manage.css");
   const mobileCss = read("src/styles/mobile-hardening.css");

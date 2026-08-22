@@ -128,3 +128,25 @@ test("indexのgenerationがmanifestと不一致ならindex_invalid", async () =>
   assert.equal(result.ok, false);
   assert.equal(result.reason, "index_invalid");
 });
+
+test("同じR2 bucketへの同時ロードは読み込みを共有する", async () => {
+  const objects = new Map();
+  publishValidIndex(objects);
+  const base = createBucket(objects);
+  let getCount = 0;
+  const bucket = {
+    async get(key) {
+      getCount += 1;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return base.get(key);
+    },
+  };
+
+  const [first, second] = await Promise.all([
+    loadMemberSuggestionsIndexFromBucket(bucket),
+    loadMemberSuggestionsIndexFromBucket(bucket),
+  ]);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(getCount, 2);
+});

@@ -14,6 +14,10 @@ const queueSource = await readFile(
   new URL("../../components/admin/VideoReviewQueueTable.tsx", import.meta.url),
   "utf8",
 );
+const detailSource = await readFile(
+  new URL("../../components/admin/VideoReviewDetailPanel.tsx", import.meta.url),
+  "utf8",
+);
 const quickApproveSource = await readFile(
   new URL("../../components/admin/VideoReviewQuickApproveButton.tsx", import.meta.url),
   "utf8",
@@ -37,6 +41,14 @@ test("VideoReviewQueueTable gates quick approve behind canApprove", () => {
   assert.match(queueSource, /canApprove/);
   assert.match(queueSource, /VideoReviewQuickApproveButton/);
   assert.match(queueSource, /visibility_status === "pending"/);
+  assert.match(queueSource, /youtube_video_id\?\.trim\(\) \|\| null/);
+  assert.match(queueSource, /!youtubeVideoId/);
+});
+
+test("review detail treats whitespace-only YouTube IDs as missing", () => {
+  assert.match(detailSource, /youtube_video_id\?\.trim\(\) \|\| null/);
+  assert.match(detailSource, /youtubeVideoId \? \(/);
+  assert.match(detailSource, /!youtubeVideoId/);
 });
 
 test("VideoReviewQuickApproveButton guards double submit with submitting state", () => {

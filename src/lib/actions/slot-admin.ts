@@ -43,10 +43,15 @@ const batchSchema = z.object({
   mode: z.enum(["time", "count"]),
   start_at: z.string().optional().nullable(),
   end_at: z.string().optional().nullable(),
-  interval_minutes: z.coerce.number().min(1).max(60 * 24).default(5),
-  count: z.coerce.number().min(1).max(MAX_SLOT_BATCH_GENERATE_COUNT).default(1),
+  interval_minutes: z.coerce.number().int().min(1).max(60 * 24).default(5),
+  count: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_SLOT_BATCH_GENERATE_COUNT)
+    .default(1),
   label_prefix: z.string().trim().max(40).optional().nullable(),
-  start_index: z.coerce.number().min(0).max(9999).default(1),
+  start_index: z.coerce.number().int().min(0).max(9999).default(1),
 });
 
 function revalidateEventSlotPaths(eventId: string): void {
@@ -104,10 +109,10 @@ async function ensureCanEditSlots(
   if (!guard.ok) {
     return { ok: false, result: { ok: false, message: guard.message } };
   }
-  const db = getDatabase();
-  if (!db) {
-    return { ok: false, result: { ok: false, message: "DB に接続できません。" } };
-  }
+  // writeGuard already resolved and validated the request-local D1 binding.
+  // Re-resolving it here can fail independently in a Worker invocation and
+  // would make the authorization read and mutation use different handles.
+  const db = guard.db;
   try {
     await assertCanEditEvent(
       db,
@@ -136,6 +141,15 @@ function mutationError(error: unknown): SlotActionResult {
       error instanceof Error
         ? `スロット更新を取り消しました: ${error.message}`
         : "スロット更新を取り消しました。",
+  };
+}
+
+function slotReadError(error: unknown): SlotActionResult {
+  unstable_rethrow(error);
+  console.error("[slot-admin] slot lookup failed", error);
+  return {
+    ok: false,
+    message: "枠の状態を確認できませんでした。時間をおいて再試行してください。",
   };
 }
 
@@ -252,7 +266,9 @@ export async function generateSlotsBatch(
   if (data.mode === "time") {
     const start = parseJstDatetimeLocal(data.start_at);
     const end = parseJstDatetimeLocal(data.end_at);
-    if (!start || !end || end <= start) {
+    // Unix epoch (0) is a valid parsed timestamp; use an explicit null check
+    // so it is not mistaken for an empty/invalid datetime input.
+    if (start == null || end == null || end <= start) {
       return { ok: false, message: "開始・終了日時を正しく指定してください。" };
     }
     const interval = data.interval_minutes * 60;
@@ -442,18 +458,26 @@ export async function releaseSlot(
 ): Promise<SlotActionResult> {
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = (
-    await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
-  )[0];
+  let db: DB;
+  let row: SlotRow | undefined;
+  try {
+    const resolvedDb = getDatabase();
+    if (!resolvedDb) return { ok: false, message: "DB に接続できません。" };
+    db = resolvedDb;
+    row = (
+      await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
+    )[0];
+  } catch (error) {
+    return slotReadError(error);
+  }
   if (!row) return { ok: false, message: "枠が見つかりません。" };
   const guard = await ensureCanEditSlots(row.event_id, "manage_slot_update");
   if (!guard.ok) return guard.result;
   if (row.status !== "reserved") {
     return { ok: false, message: "予約中の枠だけ解放できます。" };
   }
-  const groupId = row.reservation_group_id?.trim() || null;
+  const groupValue = row.reservation_group_id;
+  const groupId = groupValue?.trim() || null;
   const rows = groupId
     ? await guard.db
         .select()
@@ -461,7 +485,10 @@ export async function releaseSlot(
         .where(
           and(
             eq(slots.event_id, row.event_id),
-            eq(slots.reservation_group_id, groupId),
+            // Match the persisted value exactly. Legacy/imported rows may
+            // retain surrounding whitespace; querying the trimmed value can
+            // silently turn a group release into an anchor-only release.
+            eq(slots.reservation_group_id, groupValue!),
           )!,
         )
         .limit(MAX_SLOTS_PER_VIDEO + 1)
@@ -582,11 +609,18 @@ export async function deleteSlot(
 ): Promise<SlotActionResult> {
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
-  const row = (
-    await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
-  )[0];
+  let db: DB;
+  let row: SlotRow | undefined;
+  try {
+    const resolvedDb = getDatabase();
+    if (!resolvedDb) return { ok: false, message: "DB に接続できません。" };
+    db = resolvedDb;
+    row = (
+      await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
+    )[0];
+  } catch (error) {
+    return slotReadError(error);
+  }
   if (!row) return { ok: false, message: "枠が見つかりません。" };
   if (row.status !== "available") {
     return { ok: false, message: "予約済み・投稿済みの枠は削除できません。" };
@@ -633,21 +667,24 @@ export async function batchReleaseReservedSlots(
   if (rows.length !== slotIds.length || rows.some((row) => row.status !== "reserved")) {
     return { ok: false, message: "対象に予約中以外または存在しない枠があります。" };
   }
-  const groupIds = Array.from(
+  const groupValues = Array.from(
     new Set(
       rows
-        .map((row) => row.reservation_group_id?.trim() || null)
-        .filter((id): id is string => Boolean(id)),
+        .map((row) => row.reservation_group_id)
+        .filter(
+          (value): value is string =>
+            typeof value === "string" && value.trim().length > 0,
+        ),
     ),
   );
-  const groupRows = groupIds.length
+  const groupRows = groupValues.length
     ? await guard.db
         .select()
         .from(slots)
         .where(
           and(
             eq(slots.event_id, eventId),
-            inArray(slots.reservation_group_id, groupIds),
+            inArray(slots.reservation_group_id, groupValues),
           )!,
         )
         .limit(MAX_ATOMIC_SLOT_ROWS + 1)
@@ -664,9 +701,9 @@ export async function batchReleaseReservedSlots(
   if (releaseTargets.some((row) => row.status !== "reserved")) {
     return { ok: false, message: "reservation_group 全体が予約中ではありません。" };
   }
-  for (const groupId of groupIds) {
+  for (const groupValue of groupValues) {
     const members = releaseTargets.filter(
-      (row) => row.reservation_group_id === groupId,
+      (row) => row.reservation_group_id === groupValue,
     );
     const representative = members[0];
     if (

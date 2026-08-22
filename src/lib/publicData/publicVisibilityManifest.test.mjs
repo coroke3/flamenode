@@ -51,6 +51,20 @@ if (runTestWithTsx(import.meta.url)) {
     );
   });
 
+  test("enforce mode fails closed when the R2 manifest bucket is missing", async () => {
+    const previous = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+    process.env.PUBLIC_VISIBILITY_GUARD_MODE = "enforce";
+    try {
+      await assert.rejects(
+        () => readPublicVisibilityBlockedEntitiesManifest(null),
+        /public_visibility_manifest_bucket_missing/,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+      else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previous;
+    }
+  });
+
   test("conditional manifest conflict re-reads and reapplies the mutator", async () => {
     let current = {
       etag: "newer-etag",

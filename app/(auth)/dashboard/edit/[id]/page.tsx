@@ -25,14 +25,13 @@ import { requireSession } from "@/lib/auth/guard";
 import { getLinkedXUsersForAuthUser } from "@/lib/auth/xIdentity";
 import {
   disabledFieldKeysFromGeneralFields,
-  loadGeneralEditableFieldSet,
-  normalModeAlwaysDisabledFieldKeys,
 } from "@/lib/video/generalEditPermissions";
 import {
   canEditVideo,
   canUseEventPrivilegeModeForVideo,
   getApprovedXIds,
   getEditableEventIds,
+  loadEffectiveOwnerEditableFieldSet,
   resolveEventStaffVideoPermissionGrant,
   resolveVideoOwnership,
 } from "@/lib/auth/ownership";
@@ -49,6 +48,7 @@ import { readStagePermissionCustomAnswers } from "@/lib/video/stagePermissionAns
 import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { buildVideoEditPermissionViewModel } from "@/lib/video/videoEditPermissionView";
+import { canAttachInitialYoutubeToSlottedVideo } from "@/lib/video/youtubeAttachEligibility";
 import type { VideoViewSectionKey } from "@/lib/video/videoEditPermissionView";
 import { hasAnyEditableVideoFormSection } from "@/lib/video/permissionUnlockHint";
 import type { VideoEditSectionKey } from "@/lib/auth/videoEditSections";
@@ -152,6 +152,7 @@ export default async function EditVideoPage({
     .limit(1);
   const video = rows[0];
   if (!video) notFound();
+  const youtubeVideoId = video.youtube_video_id?.trim() || null;
 
   const editUser = { id: user.id, role: user.role ?? null };
   const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
@@ -380,16 +381,22 @@ export default async function EditVideoPage({
 
   const generalFields =
     privilegeMode === "normal"
-      ? await loadGeneralEditableFieldSet(db, video)
+      ? await loadEffectiveOwnerEditableFieldSet(db, video)
       : undefined;
 
+  const approvedXIds = await getApprovedXIds(db, user.id);
   const ownership = await resolveVideoOwnership({
     db,
     userId: user.id,
     video,
+    approvedXUserIds: approvedXIds,
   });
-  const approvedXIds = await getApprovedXIds(db, user.id);
-  const editableEventIds = await getEditableEventIds(db, user.id, currentEventIds);
+  const editableEventIds = await getEditableEventIds(
+    db,
+    user.id,
+    currentEventIds,
+    approvedXIds,
+  );
   const isEventStaffForVideo = editableEventIds.length > 0;
 
   let membershipHint: "none" | "member_no_edit" | "outsider" = "outsider";
@@ -416,7 +423,7 @@ export default async function EditVideoPage({
   const [
     canEditIdentity,
     canEditBasics,
-    canEditYoutube,
+    canEditYoutubeByPolicy,
     canEditCredits,
     canEditDescriptions,
     canEditMembers,
@@ -425,12 +432,12 @@ export default async function EditVideoPage({
     canEditPrimaryEvent,
     canEditVisibility,
   ] = await Promise.all([
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode, generalFields }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode, generalFields }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode, generalFields }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode, generalFields }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode, generalFields }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
     canEditVideo({
       db,
       user: editUser,
@@ -438,11 +445,26 @@ export default async function EditVideoPage({
       requiredKey: "video.member_chapters",
       privilegeMode,
       generalFields,
+      approvedXUserIds: approvedXIds,
+      ownership,
     }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.permissions", privilegeMode, generalFields }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.primary_event", privilegeMode, generalFields }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.status", privilegeMode, generalFields }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.permissions", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.primary_event", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.status", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
   ]);
+
+  const allowInitialYoutubeAttach = canAttachInitialYoutubeToSlottedVideo({
+    sourceType: video.source_type,
+    schedulingType: video.scheduling_type,
+    visibilityStatus: video.visibility_status,
+    youtubeVideoId,
+    privilegeMode,
+    isCreatorOwner: ownership.isCreatorOwner,
+  });
+  const canEditYoutube =
+    privilegeMode === "normal"
+      ? allowInitialYoutubeAttach
+      : canEditYoutubeByPolicy || allowInitialYoutubeAttach;
 
   const canOfferAdminMode = user.role === "admin" && privilegeMode !== "admin";
   const eventTitleById = new Map(
@@ -576,7 +598,7 @@ export default async function EditVideoPage({
               ダッシュボードへ
             </Link>
             <Link
-              href={`/${video.youtube_video_id ?? video.id}`}
+              href={`/${youtubeVideoId ?? video.id}`}
               className="fn-btn fn-btn-primary"
             >
               公開ページを見る
@@ -596,17 +618,11 @@ export default async function EditVideoPage({
 
   const generalDisabledFields =
     generalFields !== undefined
-      ? disabledFieldKeysFromGeneralFields(generalFields)
+      ? disabledFieldKeysFromGeneralFields(generalFields).filter(
+          (field) =>
+            !(allowInitialYoutubeAttach && field === "video.youtube_url"),
+        )
       : [];
-  const normalModeIdentityExtras =
-    privilegeMode === "normal"
-      ? [
-          "submitter.profile_text",
-          "submitter.youtube_channel_url",
-          "submitter.other_social_links",
-        ]
-      : [];
-
   const disabledFields = [
     !canEditIdentity ? "submitter.display_name" : null,
     !canEditIdentity ? "submitter.icon_url" : null,
@@ -619,9 +635,7 @@ export default async function EditVideoPage({
     !canEditCredits ? "video.music" : null,
     !canEditCredits ? "video.credit" : null,
     !canEditMemberChapters ? "chapters" : null,
-    !canEditMembers ? "members.list" : null,
-    ...normalModeIdentityExtras,
-    ...(privilegeMode === "normal" ? normalModeAlwaysDisabledFieldKeys() : []),
+    !canEditMembers ? "members" : null,
     ...generalDisabledFields,
   ].filter((v): v is string => Boolean(v));
 
@@ -642,9 +656,9 @@ export default async function EditVideoPage({
       <p className="fn-page-meta">
         現在の状態:
         <span className="fn-badge fn-badge-soft">{video.visibility_status}</span>
-        {video.youtube_video_id ? (
+        {youtubeVideoId ? (
           <a
-            href={youtubeWatchUrl(video.youtube_video_id)}
+            href={youtubeWatchUrl(youtubeVideoId)}
             target="_blank"
             rel="noopener noreferrer"
             className="fn-btn fn-btn-ghost fn-btn-sm"
@@ -654,7 +668,7 @@ export default async function EditVideoPage({
           </a>
         ) : null}
         <Link
-          href={`/${video.youtube_video_id ?? video.id}`}
+          href={`/${youtubeVideoId ?? video.id}`}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
           <Icon name="external" size={12} aria-hidden />
@@ -697,7 +711,7 @@ export default async function EditVideoPage({
       {privilegeMode === "admin" && user.role === "admin" ? (
         <AdminVideoTabs
           videoId={video.id}
-          youtubeVideoId={video.youtube_video_id}
+          youtubeVideoId={youtubeVideoId}
           active="edit"
         />
       ) : null}
@@ -709,7 +723,9 @@ export default async function EditVideoPage({
 
       <VideoForm
         mode="edit"
+        draftAuthUserId={user.id}
         videoId={video.id}
+        schedulingType={video.scheduling_type}
         xIdOptions={xIdOptions}
         activeXId={user.active_x_user_id ?? undefined}
         disabledSections={disabledSections}
@@ -725,6 +741,7 @@ export default async function EditVideoPage({
             : undefined
         }
         initial={{
+          updated_at: video.updated_at,
           display_name: video.creator_display_name ?? undefined,
           creator_x_user_id: video.creator_x_user_id ?? undefined,
           icon_url: video.creator_icon_url ?? undefined,
@@ -732,8 +749,8 @@ export default async function EditVideoPage({
           youtube_channel_url: video.creator_youtube_channel_url ?? undefined,
           other_social_links: video.creator_other_social_links ?? undefined,
           title: video.title,
-          youtube_url: video.youtube_video_id
-            ? youtubeWatchUrl(video.youtube_video_id)
+          youtube_url: youtubeVideoId
+            ? youtubeWatchUrl(youtubeVideoId)
             : undefined,
           music: video.music ?? undefined,
           music_reference_url: video.music_reference_url ?? undefined,
@@ -760,7 +777,7 @@ export default async function EditVideoPage({
           creator_channel_url: video.creator_youtube_channel_url,
           creator_profile: video.creator_profile_text,
           creator_social_links: video.creator_other_social_links,
-          youtube_video_id: video.youtube_video_id,
+          youtube_video_id: youtubeVideoId,
         }}
         youtubeDescriptionEventId={video.primary_event_id}
         canEditEvents={canEditPrimaryEvent}

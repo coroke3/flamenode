@@ -75,6 +75,47 @@ export function isAuthRouteTemporarilyUnavailable(error: unknown): boolean {
   return false;
 }
 
+function isInvalidAuthCheckError(value: unknown): boolean {
+  if (!isErrorContainer(value)) return false;
+  const message = typeof value.message === "string" ? value.message : "";
+  return value.name === "InvalidCheck" || /pkceCodeVerifier/i.test(message);
+}
+
+function isAuthCheckFailure(error: unknown): boolean {
+  const pending: unknown[] = [error];
+  const seen = new Set<unknown>();
+  while (pending.length > 0 && seen.size < 8) {
+    const current = pending.shift();
+    if (current == null || seen.has(current)) continue;
+    seen.add(current);
+    if (isInvalidAuthCheckError(current)) return true;
+    if (!isErrorContainer(current)) continue;
+    if (current.cause !== undefined) pending.push(current.cause);
+    if (current.err !== undefined) pending.push(current.err);
+  }
+  return false;
+}
+
+function isAuthCallbackRequest(request: Request): boolean {
+  return (
+    request.method === "GET" &&
+    new URL(request.url).pathname.includes("/api/auth/callback/")
+  );
+}
+
+export function authCheckFailedResponse(request: Request): Response {
+  const requestUrl = new URL(request.url);
+  const target = new URL("/entry", requestUrl.origin);
+  target.searchParams.set("error", "auth_check_failed");
+  return new Response(null, {
+    status: 303,
+    headers: {
+      Location: target.href,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export function authTemporarilyUnavailableResponse(): Response {
   return new Response(AUTH_UNAVAILABLE_BODY, {
     status: 503,
@@ -127,6 +168,9 @@ export async function handleAuthRouteRequest<TRequest extends Request>(
   try {
     return await handler(request);
   } catch (error) {
+    if (isAuthCallbackRequest(request) && isAuthCheckFailure(error)) {
+      return authCheckFailedResponse(request);
+    }
     if (!isAuthRouteTemporarilyUnavailable(error)) throw error;
     return authTemporarilyUnavailableResponse();
   }

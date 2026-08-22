@@ -17,7 +17,7 @@ import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectio
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { generateId } from "@/lib/utils/id";
-import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
+import { parseJstDatetimeLocalStrict } from "@/lib/utils/dateInput";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import {
   appendVideoAtomicWritePlan,
@@ -48,6 +48,9 @@ import {
 } from "@/lib/video/resolveVideoCreatorIcon";
 import { cleanupReplacedVideoCreatorIcon } from "@/lib/video/videoIconPostCommit";
 import { isYoutubeIdUniqueConstraintError } from "@/lib/video/youtubeDuplicate";
+
+const CREATE_FREE_VIDEO_UNEXPECTED_ERROR_MESSAGE =
+  "投稿処理中に一時的なエラーが発生しました。入力内容を確認して、もう一度お試しください。";
 
 export async function createFreeVideo(formData: FormData): Promise<VideoActionResult> {
   const guard = await writeGuard({
@@ -106,7 +109,14 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   }
   const eventIds = eventId ? [eventId] : [];
 
-  if (await checkYoutubeVideoDuplicate(db, youtubeId)) {
+  let youtubeDuplicate = false;
+  try {
+    youtubeDuplicate = await checkYoutubeVideoDuplicate(db, youtubeId);
+  } catch (error) {
+    console.warn("[createFreeVideo] duplicate check failed", error);
+    return { ok: false, message: CREATE_FREE_VIDEO_UNEXPECTED_ERROR_MESSAGE };
+  }
+  if (youtubeDuplicate) {
     return { ok: false, message: "このYouTube動画は既に登録されています。" };
   }
 
@@ -117,27 +127,44 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   if (!memberValidation.ok) return memberValidation;
 
   // 質問定義・回答は event_custom_questions / video_custom_answers だけを使用する。
-  const customValidation = await validateCustomAnswersForEvents(
-    db,
-    formData,
-    eventIds,
-  );
+  let customValidation: Awaited<
+    ReturnType<typeof validateCustomAnswersForEvents>
+  >;
+  try {
+    customValidation = await validateCustomAnswersForEvents(
+      db,
+      formData,
+      eventIds,
+    );
+  } catch (error) {
+    console.warn("[createFreeVideo] custom answer validation failed", error);
+    return { ok: false, message: CREATE_FREE_VIDEO_UNEXPECTED_ERROR_MESSAGE };
+  }
   if (!customValidation.ok) return customValidation;
 
   const videoId = generateId("v");
-  const iconResolved = await resolveVideoCreatorIcon({
-    formData,
-    parsed: parsed.data,
-    activeXId: activeX,
-    videoId,
-    existingIconUrl: null,
-    db,
-  });
-  if (!iconResolved.ok) return iconResolved;
-
   const now = Math.floor(Date.now() / 1000);
-  const scheduledTime =
-    parseJstDatetimeLocal(String(formData.get("scheduled_time") ?? "")) ?? now;
+  const scheduledRaw = String(formData.get("scheduled_time") ?? "");
+  const scheduledParsed = parseJstDatetimeLocalStrict(scheduledRaw);
+  if (!scheduledParsed.ok) {
+    return { ok: false, message: "scheduled_time の日時が正しくありません。" };
+  }
+  const scheduledTime = scheduledParsed.value ?? now;
+  let iconResolved: Awaited<ReturnType<typeof resolveVideoCreatorIcon>>;
+  try {
+    iconResolved = await resolveVideoCreatorIcon({
+      formData,
+      parsed: parsed.data,
+      activeXId: activeX,
+      videoId,
+      existingIconUrl: null,
+      db,
+    });
+  } catch (error) {
+    console.warn("[createFreeVideo] creator icon resolution failed", error);
+    return { ok: false, message: CREATE_FREE_VIDEO_UNEXPECTED_ERROR_MESSAGE };
+  }
+  if (!iconResolved.ok) return iconResolved;
   const videoAfter: typeof videos.$inferSelect = {
     id: videoId,
     primary_event_id: eventId,

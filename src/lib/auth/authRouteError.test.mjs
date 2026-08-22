@@ -81,6 +81,33 @@ test("unknown failures are rethrown by identity", async () => {
   );
 });
 
+test("stale PKCE callbacks return to login instead of leaking a 500", async () => {
+  const request = new Request(
+    "https://flamenode.example/api/auth/callback/discord?code=stale",
+  );
+  const invalidCheck = new Error("pkceCodeVerifier value could not be parsed");
+  invalidCheck.name = "InvalidCheck";
+  const response = await handleAuthRouteRequest(async () => {
+    throw new Error("Auth.js wrapper", { cause: { err: invalidCheck } });
+  }, request);
+
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get("location"), "https://flamenode.example/entry?error=auth_check_failed");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
+test("PKCE errors outside the callback are not swallowed", async () => {
+  const request = new Request("https://flamenode.example/api/auth/session");
+  const invalidCheck = new Error("pkceCodeVerifier value could not be parsed");
+  invalidCheck.name = "InvalidCheck";
+  await assert.rejects(
+    handleAuthRouteRequest(async () => {
+      throw invalidCheck;
+    }, request),
+    (error) => error === invalidCheck,
+  );
+});
+
 test("generic response helper is exact and does not cache", async () => {
   const response = authTemporarilyUnavailableResponse();
   assert.equal(response.status, 503);

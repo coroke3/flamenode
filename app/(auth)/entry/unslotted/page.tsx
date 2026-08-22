@@ -144,7 +144,7 @@ export default async function UnslottedPostPage({
   };
 
   return (
-    <AppShell size="default">
+    <AppShell size="default" className="fn-entry-flow">
       <header className="fn-page-head fn-page-head--split">
         <div className="fn-page-head-main">
           <p className="fn-eyebrow">Unslotted Post</p>
@@ -179,7 +179,7 @@ export default async function UnslottedPostPage({
           : submitBlockedReason}
       </StatusPanel>
 
-      <form method="get" role="search" className={styles.eventSearchForm}>
+      <form method="get" role="search" className={`${styles.eventSearchForm} fn-entry-search`}>
         <label
           className={`fn-label ${styles.eventSearchLabel}`}
           htmlFor="unslotted_event_search"
@@ -211,6 +211,7 @@ export default async function UnslottedPostPage({
       </form>
 
       <UnslottedPostForm
+        draftAuthUserId={user.id}
         xIdOptions={xIdOptions}
         activeXId={activeX ?? undefined}
         initial={{

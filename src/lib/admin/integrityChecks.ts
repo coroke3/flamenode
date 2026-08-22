@@ -568,6 +568,220 @@ export async function runIntegrityChecks(
         adminHref: eventHref(text(r.event_id)),
       }),
     }),
+    makeCheck({
+      db,
+      id: "slots_available_with_reservation_metadata",
+      area: "slots",
+      title: "available slot has reservation metadata",
+      severity: "danger",
+      description:
+        "An available slot still contains owner, X, group, display, or video reservation fields.",
+      from: sql`slots`,
+      where: sql`status = 'available' AND (
+        (reserved_by_user_id IS NOT NULL AND trim(reserved_by_user_id) <> '') OR
+        (x_user_id IS NOT NULL AND trim(x_user_id) <> '') OR
+        (reserved_x_id_snapshot IS NOT NULL AND trim(reserved_x_id_snapshot) <> '') OR
+        (reservation_group_id IS NOT NULL AND trim(reservation_group_id) <> '') OR
+        (display_name IS NOT NULL AND trim(display_name) <> '') OR
+        (video_id IS NOT NULL AND trim(video_id) <> '')
+      )`,
+      sampleSelect: {
+        id: sql<string>`id`,
+        event_id: sql<string>`event_id`,
+        status: sql<string>`status`,
+      },
+      recommendation:
+        "Clear reservation metadata or restore the slot to the appropriate reserved/submitted state.",
+      sqlPreview:
+        "UPDATE slots SET reserved_by_user_id = NULL, x_user_id = NULL, reserved_x_id_snapshot = NULL, reservation_group_id = NULL, display_name = NULL, video_id = NULL WHERE id = '<slot_id>';",
+      mapIssue: (r) => ({
+        id: text(r.id),
+        title: `slot:${text(r.id)}`,
+        description: "available slot retains reservation metadata",
+        adminHref: eventHref(text(r.event_id)),
+      }),
+    }),
+    makeCheck({
+      db,
+      id: "slots_group_mixed_status",
+      area: "slots",
+      title: "reservation group has mixed statuses",
+      severity: "danger",
+      description:
+        "All rows in one reservation_group_id must share the same available/reserved/submitted status.",
+      from: sql`(
+        SELECT reservation_group_id, COUNT(DISTINCT status) AS status_count,
+               MIN(event_id) AS event_id
+        FROM slots
+        WHERE reservation_group_id IS NOT NULL AND trim(reservation_group_id) <> ''
+        GROUP BY reservation_group_id
+        HAVING COUNT(DISTINCT status) > 1
+      ) AS mixed`,
+      where: sql`1 = 1`,
+      sampleSelect: {
+        reservation_group_id: sql<string>`reservation_group_id`,
+        status_count: sql<number>`status_count`,
+        event_id: sql<string>`event_id`,
+      },
+      recommendation:
+        "Reconcile the group atomically before allowing another reservation or submission.",
+      sqlPreview:
+        "SELECT * FROM slots WHERE reservation_group_id = '<reservation_group_id>' ORDER BY start_time, id;",
+      mapIssue: (r) => ({
+        id: text(r.reservation_group_id),
+        title: `group:${text(r.reservation_group_id)}`,
+        description: `status variants:${text(r.status_count)}`,
+        adminHref: eventHref(text(r.event_id)),
+      }),
+    }),
+    makeCheck({
+      db,
+      id: "slots_reserved_without_owner",
+      area: "slots",
+      title: "reserved slot has no reservation owner",
+      severity: "danger",
+      description:
+        "A reserved slot must retain the auth user that owns the reservation.",
+      from: sql`slots`,
+      where: sql`status = 'reserved' AND (reserved_by_user_id IS NULL OR trim(reserved_by_user_id) = '')`,
+      sampleSelect: {
+        id: sql<string>`id`,
+        event_id: sql<string>`event_id`,
+        reservation_group_id: sql<string>`reservation_group_id`,
+      },
+      recommendation:
+        "Recover the reservation owner from the audit record or release the slot atomically.",
+      sqlPreview:
+        "UPDATE slots SET status = 'available', reservation_group_id = NULL, reserved_x_id_snapshot = NULL WHERE id = '<slot_id>';",
+      mapIssue: (r) => ({
+        id: text(r.id),
+        title: `slot:${text(r.id)}`,
+        description: "reserved slot has no reserved_by_user_id",
+        adminHref: eventHref(text(r.event_id)),
+      }),
+    }),
+    makeCheck({
+      db,
+      id: "slots_group_mixed_owner",
+      area: "slots",
+      title: "reservation group has mixed auth owners",
+      severity: "warning",
+      description:
+        "Rows in a reservation group should share one reserved_by_user_id; mixed rows require recovery review.",
+      from: sql`(
+        SELECT reservation_group_id,
+               COUNT(DISTINCT COALESCE(trim(reserved_by_user_id), '')) AS owner_count,
+               MIN(event_id) AS event_id
+        FROM slots
+        WHERE reservation_group_id IS NOT NULL AND trim(reservation_group_id) <> ''
+        GROUP BY reservation_group_id
+        HAVING COUNT(DISTINCT COALESCE(trim(reserved_by_user_id), '')) > 1
+      ) AS mixed`,
+      where: sql`1 = 1`,
+      sampleSelect: {
+        reservation_group_id: sql<string>`reservation_group_id`,
+        owner_count: sql<number>`owner_count`,
+        event_id: sql<string>`event_id`,
+      },
+      recommendation:
+        "Review the group split/adoption audit before allowing submission or release.",
+      sqlPreview:
+        "SELECT * FROM slots WHERE reservation_group_id = '<reservation_group_id>' ORDER BY start_time, id;",
+      mapIssue: (r) => ({
+        id: text(r.reservation_group_id),
+        title: `group:${text(r.reservation_group_id)}`,
+        description: `auth owner variants:${text(r.owner_count)}`,
+        adminHref: eventHref(text(r.event_id)),
+      }),
+    }),
+    makeCheck({
+      db,
+      id: "slots_group_mixed_x_identity",
+      area: "slots",
+      title: "reservation group has mixed X identities",
+      severity: "danger",
+      description:
+        "Rows in a reservation group should resolve to one normalized X identity across x_user_id and reserved_x_id_snapshot.",
+      from: sql`(
+        SELECT reservation_group_id,
+               COUNT(DISTINCT lower(trim(ltrim(
+                 COALESCE(
+                   NULLIF(trim(x_user_id), ''),
+                   NULLIF(trim(reserved_x_id_snapshot), '')
+                 ), '@'
+               )))) AS x_identity_count,
+               SUM(CASE WHEN NULLIF(trim(x_user_id), '') IS NOT NULL
+                   AND NULLIF(trim(reserved_x_id_snapshot), '') IS NOT NULL
+                   AND lower(trim(ltrim(x_user_id, '@'))) <> lower(trim(ltrim(reserved_x_id_snapshot, '@')))
+                 THEN 1 ELSE 0 END) AS row_identity_mismatch_count,
+               MIN(event_id) AS event_id
+        FROM slots
+        WHERE reservation_group_id IS NOT NULL AND trim(reservation_group_id) <> ''
+        GROUP BY reservation_group_id
+        HAVING COUNT(DISTINCT lower(trim(ltrim(
+          COALESCE(
+            NULLIF(trim(x_user_id), ''),
+            NULLIF(trim(reserved_x_id_snapshot), '')
+          ), '@'
+        )))) > 1
+        OR SUM(CASE WHEN NULLIF(trim(x_user_id), '') IS NOT NULL
+                 AND NULLIF(trim(reserved_x_id_snapshot), '') IS NOT NULL
+                 AND lower(trim(ltrim(x_user_id, '@'))) <> lower(trim(ltrim(reserved_x_id_snapshot, '@')))
+               THEN 1 ELSE 0 END) > 0
+      ) AS mixed`,
+      where: sql`1 = 1`,
+      sampleSelect: {
+        reservation_group_id: sql<string>`reservation_group_id`,
+        x_identity_count: sql<number>`x_identity_count`,
+        row_identity_mismatch_count: sql<number>`row_identity_mismatch_count`,
+        event_id: sql<string>`event_id`,
+      },
+      recommendation:
+        "Reconcile x_user_id and reserved_x_id_snapshot to one normalized X identity before allowing another group mutation.",
+      sqlPreview:
+        "SELECT * FROM slots WHERE reservation_group_id = '<reservation_group_id>' ORDER BY start_time, id;",
+      mapIssue: (r) => ({
+        id: text(r.reservation_group_id),
+        title: `group:${text(r.reservation_group_id)}`,
+        description: `X identity variants:${text(r.x_identity_count)} / row mismatches:${text(r.row_identity_mismatch_count)}`,
+        adminHref: eventHref(text(r.event_id)),
+      }),
+    }),
+    makeCheck({
+      db,
+      id: "slots_submitted_group_mixed_video",
+      area: "slots",
+      title: "submitted reservation group has mixed videos",
+      severity: "danger",
+      description:
+        "Submitted rows in one reservation group must point at one video.",
+      from: sql`(
+        SELECT reservation_group_id, COUNT(DISTINCT video_id) AS video_count,
+               MIN(event_id) AS event_id
+        FROM slots
+        WHERE reservation_group_id IS NOT NULL
+          AND status = 'submitted'
+          AND video_id IS NOT NULL AND trim(video_id) <> ''
+        GROUP BY reservation_group_id
+        HAVING COUNT(DISTINCT video_id) > 1
+      ) AS mixed`,
+      where: sql`1 = 1`,
+      sampleSelect: {
+        reservation_group_id: sql<string>`reservation_group_id`,
+        video_count: sql<number>`video_count`,
+        event_id: sql<string>`event_id`,
+      },
+      recommendation:
+        "Keep one video_id for the submitted group or split the group before resubmitting.",
+      sqlPreview:
+        "SELECT * FROM slots WHERE reservation_group_id = '<reservation_group_id>' ORDER BY start_time, id;",
+      mapIssue: (r) => ({
+        id: text(r.reservation_group_id),
+        title: `group:${text(r.reservation_group_id)}`,
+        description: `submitted video variants:${text(r.video_count)}`,
+        adminHref: eventHref(text(r.event_id)),
+      }),
+    }),
     makeSlotDuplicateStartTimeCheck(db),
     makeCheck({
       db,

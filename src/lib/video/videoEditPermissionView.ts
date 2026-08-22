@@ -73,10 +73,12 @@ export const VIDEO_VIEW_SECTION_LABELS: Record<VideoViewSectionKey, string> = {
   permissions: "共同編集権限",
 };
 
+// Only control-plane fields are inherently administrator-only.  Identity
+// snapshots, the YouTube URL, and event membership are covered by the
+// canonical owner field registry, so a normal owner who is denied one of
+// those fields must see the owner-policy reason rather than an inaccurate
+// "admin only" label.
 const DANGEROUS_VIEW_SECTIONS = new Set<VideoViewSectionKey>([
-  "identity",
-  "youtube",
-  "primaryEvent",
   "visibility",
   "permissions",
 ]);

@@ -35,6 +35,7 @@ import { formatCount } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { buildAccentVars } from "@/lib/theme/accent";
 import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
+import { parseEventPartsJson } from "@/lib/video/parseEventIds";
 import {
   canFallbackToDatabase,
   loadStaticEventDetail,
@@ -171,6 +172,7 @@ function EventDetailView({
   const slotSummary = buildSlotSummary(
     slotRows,
     (event.slot_part_gap_minutes ?? 15) * 60,
+    parseEventPartsJson(event.parts_json),
   );
   const inPostPeriod =
     !accepting &&
@@ -380,9 +382,10 @@ function StaticEventDetailView({
       );
   const eventRow = {
     ...event,
+    parts_json: event.parts.length > 0 ? JSON.stringify(event.parts) : null,
     slot_part_gap_minutes: event.slot_part_gap_minutes ?? 15,
     slot_visibility_mode: event.slot_visibility_mode ?? "public_name",
-  } as EventRow;
+  } as unknown as EventRow;
   return (
     <EventDetailView
       event={eventRow}
@@ -431,7 +434,7 @@ function VideoSection({ eventId, videos: rows, total }: { eventId: string; video
       ) : (
         <div className="fn-video-grid">
           {rows.map((video) => {
-            const target = video.youtube_video_id ?? video.id;
+            const target = video.youtube_video_id?.trim() || video.id;
             return (
               <VideoCard
                 key={video.id}
@@ -480,7 +483,7 @@ function getDayMetric(event: EventRow, now: number) {
     : { label: "終了", value: 0 };
 }
 
-function buildSlotSummary(rows: SlotRow[], gapSec: number) {
+function buildSlotSummary(rows: SlotRow[], gapSec: number, configuredParts: readonly string[] = []) {
   if (rows.length === 0) return null;
   const toStat = (label: string, subset: SlotRow[]): SlotFillStat => {
     const total = subset.length;
@@ -490,7 +493,7 @@ function buildSlotSummary(rows: SlotRow[], gapSec: number) {
   return {
     overall: toStat("全体", rows),
     parts: buildSlotParts(rows, gapSec).map((part) =>
-      toStat(formatSlotPartLabel(part, "short"), part.rows as SlotRow[]),
+      toStat(formatSlotPartLabel(part, "short", configuredParts), part.rows as SlotRow[]),
     ),
   };
 }

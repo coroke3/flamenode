@@ -48,6 +48,7 @@ export type VideoReviewDetail = {
   creator_name: string;
   creator_x_user_id: string | null;
   created_at: number;
+  source_type: string;
   youtube_video_id: string | null;
   music: string | null;
   credit: string | null;
@@ -68,6 +69,7 @@ type VideoReviewVideoRow = {
   creator_name: string | null;
   creator_x_user_id: string | null;
   created_at: number;
+  source_type: string;
   youtube_video_id: string | null;
   music: string | null;
   credit: string | null;
@@ -83,6 +85,7 @@ const videoReviewVideoSelect = {
   creator_name: videos.creator_display_name,
   creator_x_user_id: videos.creator_x_user_id,
   created_at: videos.created_at,
+  source_type: videos.source_type,
   youtube_video_id: videos.youtube_video_id,
   music: videos.music,
   credit: videos.credit,
@@ -190,6 +193,7 @@ async function buildVideoReviewDetail(
     creator_name: video.creator_name ?? video.creator_x_user_id ?? "—",
     creator_x_user_id: video.creator_x_user_id,
     created_at: video.created_at,
+    source_type: video.source_type,
     youtube_video_id: video.youtube_video_id,
     music: video.music,
     credit: video.credit,

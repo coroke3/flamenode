@@ -93,7 +93,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const staticLoaded = await loadStaticVideoDetail(id);
   if (staticLoaded.data) {
       const { video } = staticLoaded.data;
-      const videoPath = `/${video.youtube_video_id ?? video.id}`;
+      const youtubeVideoId = video.youtube_video_id?.trim() || null;
+      const videoPath = `/${youtubeVideoId ?? video.id}`;
       const description = compactText(
         video.intro_comment ||
           video.highlights ||
@@ -104,7 +105,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
             .filter(Boolean)
             .join(" / "),
       );
-      const metadataYoutubeId = extractYoutubeId(video.youtube_video_id);
+      const metadataYoutubeId = extractYoutubeId(youtubeVideoId);
       return buildPageMetadata({
         title: `${video.title} - ${video.creator_display_name ?? "unknown"}`,
         description,
@@ -543,9 +544,8 @@ function StaticVideoDetailView({
       hasProjectedPublicProfile({ xUserId: creatorId, iconMap }))
       ? `/user/${creatorId}`
       : null;
-  const youtubeId = video.youtube_video_id
-    ? extractYoutubeId(video.youtube_video_id)
-    : null;
+  const youtubeVideoId = video.youtube_video_id?.trim() || null;
+  const youtubeId = extractYoutubeId(youtubeVideoId);
   const primaryEvent = vm.primaryEvent;
   const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
   const accentVar = primaryEvent?.accent_color
@@ -562,7 +562,7 @@ function StaticVideoDetailView({
         video.closing_comment ||
         (video.music ? `使用楽曲: ${video.music}` : null),
     ),
-    url: absoluteUrl(`/${video.youtube_video_id ?? video.id}`),
+    url: absoluteUrl(`/${youtubeVideoId ?? video.id}`),
     thumbnailUrl: youtubeId
       ? [absoluteUrl(youtubeThumbUrl(youtubeId, "maxresdefault"))]
       : undefined,

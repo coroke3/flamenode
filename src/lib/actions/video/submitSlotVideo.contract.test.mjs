@@ -5,7 +5,7 @@ import { test } from "node:test";
 const source = await readFile(new URL("./submitSlotVideo.ts", import.meta.url), "utf8");
 
 test("submitSlotVideo は ID 単独取得後に relation と snapshot を先に検証する", () => {
-  const fnStart = source.indexOf("export async function submitSlotVideo");
+  const fnStart = source.indexOf("async function submitSlotVideoCore");
   const fnBody = source.slice(fnStart);
   const slotLoad = fnBody.indexOf('eq(slots.id, slotId)');
   const relationCheck = fnBody.indexOf("const slotRelation = resolveSlotViewerRelation");

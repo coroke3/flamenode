@@ -12,6 +12,10 @@ import {
 } from "@/lib/client/activeXSwitchEvents";
 import { normalizeXId } from "@/lib/utils/xid";
 import type { CustomQuestion } from "@/lib/video/customQuestions";
+import {
+  buildFormDraftStorageKey,
+  useFormDraft,
+} from "@/lib/interactions/useFormDraft";
 
 interface UnslottedEventOption extends EventOption {
   status_label: string;
@@ -38,17 +42,70 @@ export function UnslottedPostForm({
   const [affiliation, setAffiliation] = React.useState<AffiliationChoice>(null);
   const [selectedEventId, setSelectedEventId] = React.useState("");
   const [formDirty, setFormDirty] = React.useState(false);
+  const [shellDirty, setShellDirty] = React.useState(false);
+  const [missingRestoredEvent, setMissingRestoredEvent] = React.useState(false);
+  const videoDraftFlushRef = React.useRef<() => boolean>(() => false);
 
   const selectedEvent = eventOptions.find((event) => event.id === selectedEventId);
+  const selectedEventOptions = React.useMemo(
+    () => (selectedEvent ? [selectedEvent] : []),
+    [selectedEvent],
+  );
   const activeXKey = normalizeXId(videoFormProps.activeXId ?? "") || "unassigned";
-  const formKey = `unslotted:${activeXKey}:${selectedEvent ? selectedEvent.id : "none"}`;
+  const authUserId = videoFormProps.draftAuthUserId?.trim() ?? "";
+  const shellDraftKey = authUserId
+    ? buildFormDraftStorageKey({
+        authUserId,
+        formId: `unslotted-shell:${activeXKey}`,
+        schemaVersion: "unslotted-shell-v1",
+      })
+    : "";
+  const formKey = `unslotted-video:${authUserId || "anonymous"}:${activeXKey}`;
+
+  const restoreShellDraft = React.useCallback((value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const draft = value as Record<string, unknown>;
+    const nextAffiliation = draft.affiliation === "none" || draft.affiliation === "event"
+      ? draft.affiliation
+      : null;
+    const nextEventId = typeof draft.selectedEventId === "string" ? draft.selectedEventId : "";
+    setAffiliation(nextAffiliation);
+    if (nextAffiliation === "event" && !eventOptions.some((event) => event.id === nextEventId)) {
+      setSelectedEventId("");
+      setMissingRestoredEvent(Boolean(nextEventId));
+    } else {
+      setSelectedEventId(nextAffiliation === "event" ? nextEventId : "");
+      setMissingRestoredEvent(false);
+    }
+  }, [eventOptions]);
+
+  const shellDraftValue = React.useMemo(
+    () => ({ affiliation, selectedEventId }),
+    [affiliation, selectedEventId],
+  );
+  const { clearDraft: clearShellDraft } = useFormDraft({
+    storageKey: shellDraftKey || "fn:draft:disabled:unslotted-shell-v1",
+    value: shellDraftValue,
+    enabled: Boolean(authUserId),
+    ttlMs: 7 * 24 * 60 * 60 * 1000,
+    shouldSave: shellDirty || formDirty,
+    onRestore: restoreShellDraft,
+  });
+
+  const handleVideoDraftFlushReady = React.useCallback((flush: () => boolean) => {
+    videoDraftFlushRef.current = flush;
+  }, []);
+  const handleVideoSubmitSuccess = React.useCallback(() => {
+    clearShellDraft();
+    setShellDirty(false);
+    setFormDirty(false);
+  }, [clearShellDraft]);
 
   const confirmReset = React.useCallback((): boolean => {
-    if (!formDirty) return true;
-    return window.confirm(
-      "掲載方法または所属イベントを変更すると、入力中の作品情報がリセットされます。変更しますか？",
-    );
-  }, [formDirty]);
+    // Event/affiliation changes no longer remount VideoForm, so the common
+    // work draft remains available while the selected event changes.
+    return true;
+  }, []);
 
   React.useEffect(() => {
     const handler = (event: Event) => {
@@ -67,14 +124,20 @@ export function UnslottedPostForm({
 
   const selectAffiliation = (next: Exclude<AffiliationChoice, null>) => {
     if (next === affiliation || !confirmReset()) return;
-    setFormDirty(false);
+    videoDraftFlushRef.current();
+    setShellDirty(true);
     setAffiliation(next);
-    if (next === "none") setSelectedEventId("");
+    if (next === "none") {
+      setSelectedEventId("");
+      setMissingRestoredEvent(false);
+    }
   };
 
   const selectEvent = (eventId: string) => {
     if (eventId === selectedEventId || !confirmReset()) return;
-    setFormDirty(false);
+    videoDraftFlushRef.current();
+    setShellDirty(true);
+    setMissingRestoredEvent(false);
     setSelectedEventId(eventId);
   };
 
@@ -185,11 +248,14 @@ export function UnslottedPostForm({
         </div>
       ) : affiliation === "event" && !selectedEvent ? (
         <div role="status" className="fn-muted" style={{ padding: 14 }}>
-          <Icon name="calendar" size={13} aria-hidden /> 所属イベントを選択してください。
+          <Icon name="calendar" size={13} aria-hidden />{" "}
+          {missingRestoredEvent
+            ? "保存済みイベントは現在の候補にありません。イベントを検索して選び直してください。作品情報の下書きは保持されています。"
+            : "所属イベントを選択してください。"}
         </div>
       ) : (
-        <VideoForm
-          key={formKey}
+       <VideoForm
+           key={formKey}
           {...videoFormProps}
           mode="free"
           activeXSnapshot={videoFormProps.activeXId}
@@ -198,9 +264,11 @@ export function UnslottedPostForm({
             event_ids: selectedEvent ? [selectedEvent.id] : [],
             part: null,
           }}
-          eventOptions={selectedEvent ? [selectedEvent] : []}
-          canEditEvents={false}
-        />
+           eventOptions={selectedEventOptions}
+           canEditEvents={false}
+           onDraftFlushReady={handleVideoDraftFlushReady}
+           onSubmitSuccess={handleVideoSubmitSuccess}
+         />
       )}
     </div>
   );

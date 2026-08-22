@@ -12,6 +12,7 @@ export {
   GENERAL_EDITABLE_FIELD_LABELS,
   GENERAL_EDITABLE_FIELD_HELP,
   GENERAL_EDITABLE_FIELD_GROUPS,
+  OWNER_EDITABLE_FIELD_DEFINITIONS,
   normalizeGeneralEditableFields,
   serializeGeneralEditableFields,
   parseGeneralEditableFields,
@@ -21,6 +22,7 @@ export {
   normalModeAlwaysDisabledFieldKeys,
   NORMAL_MODE_ALWAYS_DISABLED_FIELD_KEYS,
   type GeneralEditableFieldKey,
+  type OwnerEditableFieldDefinition,
 } from "./generalEditPermissionsCore";
 
 export async function loadGeneralEditableFieldSet(

@@ -244,7 +244,9 @@ export default async function AdminYoutubeSyncPage({
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              rows.map((row) => {
+                const youtubeVideoId = row.youtube_video_id?.trim() || null;
+                return (
                 <tr key={row.video_id}>
                   <td>
                     <Link href={`/admin/videos/${row.video_id}`} style={{ fontWeight: 700 }}>
@@ -255,7 +257,7 @@ export default async function AdminYoutubeSyncPage({
                     </div>
                   </td>
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    {row.youtube_video_id || (
+                    {youtubeVideoId || (
                       <span className="fn-badge fn-badge-warning">なし</span>
                     )}
                   </td>
@@ -313,7 +315,7 @@ export default async function AdminYoutubeSyncPage({
                         管理
                       </Link>
                       <Link
-                        href={`/${row.youtube_video_id ?? row.video_id}`}
+                        href={`/${youtubeVideoId ?? row.video_id}`}
                         className="fn-btn fn-btn-ghost fn-btn-sm"
                         target="_blank"
                         rel="noopener noreferrer"
@@ -333,7 +335,8 @@ export default async function AdminYoutubeSyncPage({
                     </div>
                   </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </FnTable>

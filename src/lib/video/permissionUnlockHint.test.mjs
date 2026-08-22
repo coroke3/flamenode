@@ -79,7 +79,7 @@ test("resolvePermissionUnlockHint: event 案内を優先できる", () => {
   assert.equal(resolvePermissionUnlockHint(vm.basics, vm), "event");
 });
 
-test("resolvePermissionUnlockHint: admin_only は event 案内しない", () => {
+test("resolvePermissionUnlockHint: 一般作品権限拒否は event 案内を優先する", () => {
   const vm = buildVideoEditPermissionViewModel({
     privilegeMode: "normal",
     ownership: ownershipOwner,
@@ -98,7 +98,7 @@ test("resolvePermissionUnlockHint: admin_only は event 案内しない", () => 
       permissions: false,
     },
   });
-  assert.equal(resolvePermissionUnlockHint(vm.youtube, vm), "admin");
+  assert.equal(resolvePermissionUnlockHint(vm.youtube, vm), "event");
 });
 
 test("hasAnyEditableVideoFormSection: visibility/permissions は含めない", () => {
@@ -150,6 +150,6 @@ test("フォーム: membersDisabled 時は is_collab 現状値を hidden 送信�
     new URL("../../components/forms/VideoForm.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /membersListDisabled \? \(/);
+  assert.match(source, /isCollabFieldDisabled \? \(/);
   assert.match(source, /value=\{isCollab \? "true" : "false"\}/);
 });

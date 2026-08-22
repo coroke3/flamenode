@@ -43,6 +43,7 @@ export default async function AdminVideoDetailPage({
 
   const video = await fetchVideoReviewDetail(db, id);
   if (!video) notFound();
+  const youtubeVideoId = video.youtube_video_id?.trim() || null;
 
   const moderationCases = await db
     .select({
@@ -93,6 +94,8 @@ export default async function AdminVideoDetailPage({
             <VideoApproveActions
               videoId={video.id}
               currentStatus={video.visibility_status}
+              sourceType={video.source_type}
+              youtubeVideoId={video.youtube_video_id}
               approveAction={approveAdminVideoPublic}
               approveAndNextAction={approveAdminVideoPublicAndNext}
               hiddenFields={reviewHiddenFields}
@@ -100,6 +103,8 @@ export default async function AdminVideoDetailPage({
             <AdminVideoStatusForm
               videoId={video.id}
               currentStatus={video.visibility_status}
+              sourceType={video.source_type}
+              youtubeVideoId={video.youtube_video_id}
               openVoidCaseId={openVoidCaseId}
               hiddenFields={reviewHiddenFields}
             />
@@ -108,7 +113,7 @@ export default async function AdminVideoDetailPage({
         footerLinks={
           <>
             <Link
-              href={`/${video.youtube_video_id ?? video.id}`}
+              href={`/${youtubeVideoId ?? video.id}`}
               className="fn-btn fn-btn-ghost"
               target="_blank"
               rel="noopener noreferrer"

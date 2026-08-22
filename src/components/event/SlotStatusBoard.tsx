@@ -13,6 +13,7 @@ interface SlotStatusBoardProps {
   eventTitle?: string;
   slotFormatLabel?: string;
   deadlineLabel?: string | null;
+  parts?: readonly string[];
 }
 
 interface PartStat {
@@ -72,6 +73,7 @@ export function SlotStatusBoard({
   eventTitle,
   slotFormatLabel,
   deadlineLabel,
+  parts = [],
 }: SlotStatusBoardProps): React.ReactElement {
   const [selectedSlotId, setSelectedSlotId] = React.useState<string | null>(null);
 
@@ -93,11 +95,11 @@ export function SlotStatusBoard({
   const partitioned = React.useMemo(() => {
     if (slots.length === 0) return [] as PartStat[];
     return buildSlotParts(slots, slotPartGapSec).map((part) => ({
-      label: formatSlotPartLabel(part, "short"),
+      label: formatSlotPartLabel(part, "short", parts),
       total: part.rows.length,
       filled: part.rows.filter((slot) => slot.status !== "available").length,
     }));
-  }, [slots, slotPartGapSec]);
+  }, [slots, slotPartGapSec, parts]);
 
   const total = slots.length;
   const filled = slots.filter((slot) => slot.status !== "available").length;

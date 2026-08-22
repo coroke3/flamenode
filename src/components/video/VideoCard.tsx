@@ -30,7 +30,7 @@ export function VideoCard({
   size = "default",
   href,
 }: VideoCardProps): React.ReactElement {
-  const link = href ?? `/${video.youtube_video_id ?? video.id}`;
+  const link = href ?? `/${video.youtube_video_id?.trim() || video.id}`;
   const thumb = youtubeThumbUrl(video.youtube_video_id, "mqdefault");
   const creatorIcon = cachedGoogleImageUrl(video.icon_url);
 

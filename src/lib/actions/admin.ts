@@ -27,6 +27,7 @@ import {
   SAME_VIDEO_STATUS_MESSAGE,
   type VideoStatusActionResult,
 } from "@/lib/video/videoVisibilityStatusAction";
+import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
 
 export type AdminActionResult = VideoStatusActionResult & PendingPublicReflection;
 
@@ -95,6 +96,10 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   const { db } = guard;
   const before = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!before) return { ok: false, message: "対象作品が見つかりません。" };
+  const publicEligibility = validateVideoPublicEligibility(before, status);
+  if (!publicEligibility.ok) {
+    return { ok: false, message: publicEligibility.message };
+  }
   if (before.visibility_status === status) {
     return attachApproveAndNextHref(
       db,
@@ -125,6 +130,9 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
       forceNotify: formData.get("force_notify") === "1",
       now,
     });
+    if (transition.validationError) {
+      return { ok: false, message: transition.validationError };
+    }
 
     const statements: BatchItem<"sqlite">[] = [...transition.mutationStatements];
     const expected: (number | null)[] = [...transition.expectedMutationChanges];

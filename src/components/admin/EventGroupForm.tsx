@@ -11,6 +11,7 @@ import { eventGroupPublicHref } from "@/lib/eventGroupRoutes";
 
 export interface EventGroupInitial {
   id?: string;
+  base_updated_at?: number | null;
   name?: string;
   slug?: string;
   description?: string | null;
@@ -53,22 +54,26 @@ export function EventGroupForm({
     setSuccess(null);
     const fd = new FormData(e.currentTarget);
     startTransition(async () => {
-      const r =
-        mode === "create"
-          ? await createEventGroup(fd)
-          : await updateEventGroup(fd);
-      if (!r.ok) {
-        setError(r.message ?? "失敗しました。");
-        return;
-      }
-      setSuccess({
-        message: "保存しました。",
-        pendingPublicReflection: r.pendingPublicReflection,
-      });
-      if (mode === "create" && r.id) {
-        router.push(`/admin/event-groups/${r.id}/edit`);
-      } else {
-        router.refresh();
+      try {
+        const r =
+          mode === "create"
+            ? await createEventGroup(fd)
+            : await updateEventGroup(fd);
+        if (!r.ok) {
+          setError(r.message ?? "失敗しました。");
+          return;
+        }
+        setSuccess({
+          message: "保存しました。",
+          pendingPublicReflection: r.pendingPublicReflection,
+        });
+        if (mode === "create" && r.id) {
+          router.push(`/admin/event-groups/${r.id}/edit`);
+        } else {
+          router.refresh();
+        }
+      } catch {
+        setError("保存に失敗しました。再読み込みして、もう一度お試しください。");
       }
     });
   };
@@ -80,6 +85,13 @@ export function EventGroupForm({
     >
       {mode === "edit" && initial.id ? (
         <input type="hidden" name="id" value={initial.id} />
+      ) : null}
+      {mode === "edit" && initial.base_updated_at != null ? (
+        <input
+          type="hidden"
+          name="base_updated_at"
+          value={initial.base_updated_at}
+        />
       ) : null}
       <div>
         <label className="fn-label">名前 *</label>

@@ -35,6 +35,8 @@ export function VideoReviewDetailPanel({
   statusForm,
   footerLinks,
 }: VideoReviewDetailPanelProps): React.ReactElement {
+  const youtubeVideoId = video.youtube_video_id?.trim() || null;
+
   return (
     <div
       className={styles.panel}
@@ -49,10 +51,10 @@ export function VideoReviewDetailPanel({
             overflow: "hidden",
           }}
         >
-          {video.youtube_video_id ? (
+          {youtubeVideoId ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={youtubeThumbUrl(video.youtube_video_id, "maxresdefault") ?? ""}
+              src={youtubeThumbUrl(youtubeVideoId, "maxresdefault") ?? ""}
               alt=""
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
@@ -73,6 +75,16 @@ export function VideoReviewDetailPanel({
         <dl
           className={styles.details}
         >
+          {video.source_type === "youtube" && !youtubeVideoId ? (
+            <Field
+              label="YouTube URL"
+              value={
+                <span style={{ color: "var(--accent-warning)" }}>
+                  YouTube URL未設定。公開前に投稿者が追加する必要があります。
+                </span>
+              }
+            />
+          ) : null}
           <Field label="状態" value={
             <span className={`fn-badge ${videoVisibilityBadgeClass(video.visibility_status)}`}>
               {videoVisibilityLabel(video.visibility_status)}
@@ -82,13 +94,13 @@ export function VideoReviewDetailPanel({
           <Field
             label="YouTube ID"
             value={
-              video.youtube_video_id ? (
+              youtubeVideoId ? (
                 <a
-                  href={youtubeWatchUrl(video.youtube_video_id)}
+                  href={youtubeWatchUrl(youtubeVideoId)}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  {video.youtube_video_id}
+                  {youtubeVideoId}
                 </a>
               ) : (
                 "なし"

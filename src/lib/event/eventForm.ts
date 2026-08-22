@@ -10,6 +10,7 @@ import {
   normalizeEventVisibility,
   type EventVisibilityStatus,
 } from "@/lib/utils/eventStatus";
+import { validateEventDateValues } from "./eventFormValidation";
 import {
   MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
   normalizeYoutubeDescriptionTemplate,
@@ -65,9 +66,9 @@ export const eventSchema = z.object({
   entry_start_time: z.string().trim().optional().nullable(),
   entry_end_time: z.string().trim().optional().nullable(),
   visibility_status: z.enum(["private", "public"]).optional(),
-  allow_user_video_event_links: z.coerce.number().min(0).max(1).default(0),
-  allow_unslotted_posts: z.coerce.number().min(0).max(1).default(0),
-  allow_user_video_edits: z.coerce.number().min(0).max(1).default(0),
+  allow_user_video_event_links: z.coerce.number().int().min(0).max(1).default(0),
+  allow_unslotted_posts: z.coerce.number().int().min(0).max(1).default(0),
+  allow_user_video_edits: z.coerce.number().int().min(0).max(1).default(0),
   user_video_edit_permission_keys_json: z
     .string()
     .trim()
@@ -76,6 +77,7 @@ export const eventSchema = z.object({
     .nullable(),
   max_slots_per_video: z.coerce
     .number()
+    .int()
     .min(MIN_SLOTS_PER_VIDEO)
     .max(MAX_SLOTS_PER_VIDEO)
     .default(MIN_SLOTS_PER_VIDEO),
@@ -90,7 +92,12 @@ export const eventSchema = z.object({
       typeof value === "string" && value.trim() === "" ? null : value,
     z.coerce.number().int().min(1).max(1440).nullable().optional(),
   ),
-  slot_part_gap_minutes: z.coerce.number().min(1).max(1440).default(15),
+  slot_part_gap_minutes: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(1440)
+    .default(15),
   slot_type: z.enum(["time", "count"]).default("time"),
   slot_visibility_mode: z
     .enum(["public_name", "anonymous", "hidden"])
@@ -186,5 +193,10 @@ export function parseEventForm(
       message: parsed.error.issues[0]?.message ?? "入力エラー",
     };
   }
-  return { ok: true, data: parsed.data };
+  const data = parsed.data;
+  const dateValidation = validateEventDateValues(data);
+  if (!dateValidation.ok) {
+    return { ok: false, message: dateValidation.message };
+  }
+  return { ok: true, data };
 }

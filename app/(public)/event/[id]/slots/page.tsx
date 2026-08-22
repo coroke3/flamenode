@@ -27,6 +27,7 @@ import { Icon } from "@/components/ui/Icon";
 import { SlotGrid } from "@/components/event/SlotGrid";
 import { SlotStatusBoard } from "@/components/event/SlotStatusBoard";
 import { buildPageMetadata } from "@/lib/seo";
+import { parseEventPartsJson } from "@/lib/video/parseEventIds";
 import {
   canActAsSlotActor,
   resolveSlotViewerRelation,
@@ -91,6 +92,7 @@ export default async function EventSlotsPage({
             eventsTable.max_slot_reservation_groups_per_xid,
           slot_interval_minutes: eventsTable.slot_interval_minutes,
           slot_part_gap_minutes: eventsTable.slot_part_gap_minutes,
+          parts_json: eventsTable.parts_json,
         })
         .from(eventsTable)
         .where(
@@ -349,6 +351,7 @@ export default async function EventSlotsPage({
             }
             slotIntervalSec={slotIntervalSec}
             slotPartGapSec={slotPartGapSec}
+            parts={parseEventPartsJson(event.parts_json)}
           />
         </div>
         <aside className={styles.aside}>
@@ -364,6 +367,7 @@ export default async function EventSlotsPage({
                 ? formatUnix(event.entry_end_time)
                 : null
             }
+            parts={parseEventPartsJson(event.parts_json)}
           />
         </aside>
       </div>

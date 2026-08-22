@@ -38,3 +38,9 @@ test("createFreeVideo は buildOpsChannelWebhookStatement を event target で�
   assert.match(source, /buildOpsChannelWebhookStatement/);
   assert.match(source, /target:\s*"event"/);
 });
+
+test("createFreeVideo rejects a non-empty invalid scheduled_time instead of using now", () => {
+  assert.match(source, /parseJstDatetimeLocalStrict/);
+  assert.match(source, /if \(!scheduledParsed\.ok\)/);
+  assert.match(source, /scheduledParsed\.value \?\? now/);
+});

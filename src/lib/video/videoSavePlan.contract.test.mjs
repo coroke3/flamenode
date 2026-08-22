@@ -11,6 +11,14 @@ if (runTestWithTsx(import.meta.url)) {
 
   const source = await readFile(new URL("./videoSavePlan.ts", import.meta.url), "utf8");
 
+  test("initial YouTube attach exception reaches the update payload", () => {
+    assert.match(source, /allowInitialYoutubeAttach\?: boolean/);
+    assert.match(
+      source,
+      /allowInitialYoutubeAttach \|\|\s*\(privilegeMode !== "normal" && sections\.youtube\)/,
+    );
+  });
+
   test("collectMemberAggregationAffectedXUserIds returns only changed member x IDs", () => {
     const affected = collectMemberAggregationAffectedXUserIds({
       previousCreatorXUserId: "creator",
@@ -125,7 +133,7 @@ if (runTestWithTsx(import.meta.url)) {
     const fnBody = source.slice(fnStart);
     assert.match(
       fnBody,
-      /const shouldReplaceStagePermission =\s*sections\.descriptions \|\| \(plan\.stagePermissionDeleteEventIds\?\.length \?\? 0\) > 0/,
+      /const shouldReplaceStagePermission =\s*ownerAllows\("stage_permission", sections\.descriptions\) \|\|\s*\(plan\.stagePermissionDeleteEventIds\?\.length \?\? 0\) > 0/,
     );
     const stageStart = fnBody.indexOf("if (shouldReplaceStagePermission)");
     assert.ok(stageStart >= 0);
@@ -134,7 +142,7 @@ if (runTestWithTsx(import.meta.url)) {
     assert.ok(generalStart >= 0);
     assert.match(
       stageBranch.slice(Math.max(0, generalStart - 180), generalStart + 80),
-      /if \(sections\.descriptions\)/,
+      /if \(ownerAllows\("custom_answers", sections\.descriptions\)/,
     );
   });
 }

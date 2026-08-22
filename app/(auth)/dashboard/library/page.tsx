@@ -83,7 +83,7 @@ export default async function DashboardLibraryPage({
   const playlistLabel = tab === "like" ? "いいねした作品" : "セーブした作品";
   const firstVideo = videos[0];
   const firstVideoHref = firstVideo
-    ? `/${firstVideo.youtube_video_id ?? firstVideo.id}?playlist=${playlistId}`
+    ? `/${firstVideo.youtube_video_id?.trim() || firstVideo.id}?playlist=${playlistId}`
     : null;
 
   return (
@@ -156,7 +156,7 @@ export default async function DashboardLibraryPage({
               <div key={`${v.id}-library-${index}`}>
                 <VideoCard
                   video={v}
-                  href={`/${v.youtube_video_id ?? v.id}?playlist=${playlistId}`}
+                  href={`/${v.youtube_video_id?.trim() || v.id}?playlist=${playlistId}`}
                 />
               </div>
             ))}

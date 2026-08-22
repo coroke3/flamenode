@@ -223,7 +223,6 @@
 
 .rowMine {
   background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent);
-  box-shadow: inset 2px 0 0 var(--event-accent, var(--accent-primary));
 }
 
 .breakRow {

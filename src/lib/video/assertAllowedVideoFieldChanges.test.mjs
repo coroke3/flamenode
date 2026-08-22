@@ -59,7 +59,7 @@ test("identity 権限なしで display_name 変更は拒否", () => {
   });
   assert.equal(result.ok, false);
   if (!result.ok) {
-    assert.equal(result.message, "提出者情報を編集する権限がありません。");
+    assert.equal(result.message, "表示名を編集する権限がありません。");
   }
 });
 
@@ -197,4 +197,56 @@ test("提出主体 X ID 変更要求で allowSubmitterChange=false は拒否", (
   if (!result.ok) {
     assert.equal(result.message, "提出主体 X ID の変更には管理者権限が必要です。");
   }
+});
+test("initial youtube attach exception is narrow", () => {
+  const before = baseSnapshot({ youtube_video_id: null });
+  const after = { ...before, youtube_video_id: "new-youtube-id" };
+  const result = assertAllowedVideoFieldChanges({
+    sections: allSections({ youtube: true }),
+    before,
+    after,
+    privilegeMode: "normal",
+    editableFields: new Set(["title"]),
+    allowInitialYoutubeAttach: true,
+  });
+  assert.deepEqual(result, { ok: true });
+});
+
+test("youtube field remains blocked without the initial attach exception", () => {
+  const before = baseSnapshot({ youtube_video_id: null });
+  const after = { ...before, youtube_video_id: "new-youtube-id" };
+  const result = assertAllowedVideoFieldChanges({
+    sections: allSections({ youtube: true }),
+    before,
+    after,
+    privilegeMode: "normal",
+    editableFields: new Set(["title"]),
+  });
+  assert.equal(result.ok, false);
+});
+
+test("normal owner policy cannot turn into general YouTube replacement permission", () => {
+  const before = baseSnapshot({ youtube_video_id: "old-youtube-id" });
+  const after = { ...before, youtube_video_id: "replacement-id" };
+  const result = assertAllowedVideoFieldChanges({
+    sections: allSections({ youtube: true }),
+    before,
+    after,
+    privilegeMode: "normal",
+    editableFields: new Set(["title"]),
+  });
+  assert.equal(result.ok, false);
+});
+
+test("YouTube IDの前後空白だけでは権限外変更として扱わない", () => {
+  const before = baseSnapshot({ youtube_video_id: "  yt123  " });
+  const after = { ...before, youtube_video_id: "yt123" };
+  const result = assertAllowedVideoFieldChanges({
+    sections: allSections({ youtube: false }),
+    before,
+    after,
+    privilegeMode: "normal",
+    editableFields: new Set(["title"]),
+  });
+  assert.deepEqual(result, { ok: true });
 });

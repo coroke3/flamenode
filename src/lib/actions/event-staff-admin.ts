@@ -33,7 +33,8 @@ import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { generateId } from "@/lib/utils/id";
-import { normalizeXId } from "@/lib/utils/xid";
+import { parseCanonicalXId } from "@/lib/utils/xid";
+import { planD1AuditMutationBudget } from "@/lib/audit/mutateBudget";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
 import {
   markPendingPublicReflection,
@@ -43,6 +44,15 @@ import {
 export interface StaffActionResult extends PendingPublicReflection {
   ok: boolean;
   message?: string;
+}
+
+function staffPreparationError(error: unknown): StaffActionResult {
+  unstable_rethrow(error);
+  console.error("[event-staff] preparation read failed", error);
+  return {
+    ok: false,
+    message: "スタッフ情報の取得に失敗しました。再読み込みして、もう一度お試しください。",
+  };
 }
 
 async function ensureEventManager(eventId: string): Promise<
@@ -192,7 +202,7 @@ async function findStaffByXUserId(
   eventId: string,
   xUserId: string,
 ): Promise<typeof eventStaff.$inferSelect | null> {
-  return (
+  const exact = (
     await db
       .select()
       .from(eventStaff)
@@ -203,7 +213,23 @@ async function findStaffByXUserId(
         )!,
       )
       .limit(1)
-  )[0] ?? null;
+  )[0];
+  if (exact) return exact;
+
+  // Legacy/imported rows may retain @-prefixed or mixed-case IDs. Keep the
+  // canonical fast path above, and only scan this event when it misses so a
+  // new canonical write cannot create a duplicate logical staff subject.
+  const legacyCandidates = await db
+    .select()
+    .from(eventStaff)
+    .where(eq(eventStaff.event_id, eventId));
+  const matches = legacyCandidates.filter(
+    (row) => parseCanonicalXId(row.x_user_id) === xUserId,
+  );
+  if (matches.length > 1) {
+    throw new Error("同じX IDを指す既存スタッフ行が複数あるため、先に整理してください。");
+  }
+  return matches[0] ?? null;
 }
 
 async function findStaffById(db: DB, eventId: string, staffId: string) {
@@ -261,13 +287,13 @@ const staffMemberSchema = z.object({
   event_id: z.string().trim().min(1),
   staff_id: z.string().trim().optional().nullable(),
   display_name: z.string().trim().min(1).max(80),
-  x_user_id: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z0-9_]{1,32}$/),
+  x_user_id: z.string().trim().refine(
+    (value) => parseCanonicalXId(value) !== null,
+    "X IDは英数字/アンダースコア20文字以内で入力してください",
+  ),
   permission_preset: z.enum(EVENT_STAFF_PRESETS).default("public_staff"),
   permission_keys: z.string().trim().optional().nullable(),
-  is_public: z.coerce.number().min(0).max(1).default(0),
+  is_public: z.coerce.number().int().min(0).max(1).default(0),
   public_role_label: z.string().trim().max(40).optional().nullable(),
   reason: z.string().trim().min(1).max(500),
   confirm_text: z.string().trim().optional().nullable(),
@@ -290,7 +316,8 @@ export async function upsertEventStaffMember(
     };
   }
   const data = parsed.data;
-  const xUserId = normalizeXId(data.x_user_id);
+  const xUserId = parseCanonicalXId(data.x_user_id);
+  if (!xUserId) return { ok: false, message: "X IDが不正です" };
   const guard = await ensureEventManager(data.event_id);
   if (!guard.ok) return guard.result;
 
@@ -309,9 +336,22 @@ export async function upsertEventStaffMember(
     };
   }
 
-  const existing = data.staff_id
-    ? await findStaffById(guard.db, data.event_id, data.staff_id)
-    : await findStaffByXUserId(guard.db, data.event_id, xUserId);
+  let existing: typeof eventStaff.$inferSelect | null;
+  let atomicExtras: EventStaffAtomicExtras | undefined;
+  try {
+    existing = data.staff_id
+      ? await findStaffById(guard.db, data.event_id, data.staff_id)
+      : await findStaffByXUserId(guard.db, data.event_id, xUserId);
+    atomicExtras = await prepareXUserExtras({
+      db: guard.db,
+      xUserId,
+      displayName: data.display_name,
+      actorUserId: guard.userId,
+      context: "event-staff-admin",
+    });
+  } catch (error) {
+    return staffPreparationError(error);
+  }
   if (
     assignment.permission_preset === "owner" &&
     existing?.permission_preset !== "owner"
@@ -333,13 +373,6 @@ export async function upsertEventStaffMember(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const atomicExtras = await prepareXUserExtras({
-    db: guard.db,
-    xUserId,
-    displayName: data.display_name,
-    actorUserId: guard.userId,
-    context: "event-staff-admin",
-  });
   const values = {
     x_user_id: xUserId,
     display_name: data.display_name,
@@ -407,6 +440,28 @@ const csvImportSchema = z.object({
   rows: z.array(csvImportRowSchema).min(1).max(100),
 });
 
+function csvValidationMessage(input: unknown, error: z.ZodError): string {
+  const issue = error.issues[0];
+  const path = issue?.path ?? [];
+  if (path[0] === "rows" && typeof path[1] === "number") {
+    const rows =
+      input && typeof input === "object"
+        ? (input as { rows?: unknown }).rows
+        : null;
+    const rawRow = Array.isArray(rows) ? rows[path[1]] : null;
+    const lineNumber =
+      rawRow &&
+      typeof rawRow === "object" &&
+      typeof (rawRow as { lineNumber?: unknown }).lineNumber === "number"
+        ? (rawRow as { lineNumber: number }).lineNumber
+        : path[1] + 1;
+    if (path[2] === "x_user_id") {
+      return `${lineNumber}行目: X IDが不正です`;
+    }
+  }
+  return issue?.message ?? "CSVの入力内容を確認してください。";
+}
+
 export async function bulkUpsertEventStaffFromCsv(
   input: unknown,
 ): Promise<StaffActionResult> {
@@ -414,7 +469,7 @@ export async function bulkUpsertEventStaffFromCsv(
   if (!parsed.success) {
     return {
       ok: false,
-      message: parsed.error.issues[0]?.message ?? "CSV入力エラーです。",
+      message: csvValidationMessage(input, parsed.error),
     };
   }
   const data = parsed.data;
@@ -444,7 +499,13 @@ export async function bulkUpsertEventStaffFromCsv(
       normalizedRows.push({
         lineNumber: row.lineNumber,
         displayName: row.display_name,
-        xUserId: normalizeXId(row.x_user_id),
+        xUserId: (() => {
+          const parsed = parseCanonicalXId(row.x_user_id);
+          if (!parsed) {
+            throw new Error(`${row.lineNumber}行目: X IDが不正です`);
+          }
+          return parsed;
+        })(),
         assignment,
         isPublic: Number(row.is_public_staff),
         publicRoleLabel: row.public_role_label || null,
@@ -461,21 +522,46 @@ export async function bulkUpsertEventStaffFromCsv(
   const requestedXIds = Array.from(
     new Set(normalizedRows.map((row) => row.xUserId)),
   );
-  const [existingStaffRows, knownXRows] = await Promise.all([
-    guard.db
-      .select()
-      .from(eventStaff)
-      .where(eq(eventStaff.event_id, data.eventId)),
-    guard.db
-      .select({ id: xUsers.id })
-      .from(xUsers)
-      .where(inArray(xUsers.id, requestedXIds)),
-  ]);
-  const existingByX = new Map(
-    existingStaffRows.map((row) => [row.x_user_id, row] as const),
-  );
+  let existingStaffRows: (typeof eventStaff.$inferSelect)[];
+  let knownXRows: Array<{ id: string }>;
+  try {
+    [existingStaffRows, knownXRows] = await Promise.all([
+      guard.db
+        .select()
+        .from(eventStaff)
+        .where(eq(eventStaff.event_id, data.eventId)),
+      guard.db
+        .select({ id: xUsers.id })
+        .from(xUsers)
+        .where(inArray(xUsers.id, requestedXIds)),
+    ]);
+  } catch (error) {
+    return staffPreparationError(error);
+  }
+  const requestedXIdSet = new Set(requestedXIds);
+  const existingByX = new Map<string, (typeof eventStaff.$inferSelect) | null>();
+  for (const row of existingStaffRows) {
+    const normalized = parseCanonicalXId(row.x_user_id);
+    if (!normalized || !requestedXIdSet.has(normalized)) continue;
+    if (existingByX.has(normalized)) {
+      return {
+        ok: false,
+        message: "同じX IDを指す既存スタッフ行が複数あるため、先に整理してください。",
+      };
+    }
+    existingByX.set(normalized, row);
+  }
   const upserts: EventStaffBulkUpsert[] = [];
+  const seenCsvXIds = new Map<string, number>();
   for (const row of normalizedRows) {
+    const previousLine = seenCsvXIds.get(row.xUserId);
+    if (previousLine !== undefined) {
+      return {
+        ok: false,
+        message: `${row.lineNumber}行目: X IDは${previousLine}行目と重複しています`,
+      };
+    }
+    seenCsvXIds.set(row.xUserId, row.lineNumber);
     const existing = existingByX.get(row.xUserId) ?? null;
     if (existing?.permission_preset === "owner") {
       return {
@@ -523,6 +609,19 @@ export async function bulkUpsertEventStaffFromCsv(
     restore_strategy: "delete_created",
     strict: true,
   }));
+
+  const budget = planD1AuditMutationBudget({
+    mutationStatementCount: upserts.length + newXRows.length,
+    mutationAssertionCount: upserts.length + newXRows.length,
+    auditEntryCount: upserts.length + newXRows.length,
+    distinctActorCount: 1,
+  });
+  if (!budget.withinLimit) {
+    return {
+      ok: false,
+      message: `このCSVは1回の原子更新上限を超えています（${budget.totalQueryCount}/${budget.limit} query）。件数を分けて登録してください`,
+    };
+  }
 
   try {
     await bulkUpsertEventStaffWithProtection({
@@ -577,7 +676,12 @@ export async function removeEventStaffMember(
   const data = parsed.data;
   const guard = await ensureEventManager(data.event_id);
   if (!guard.ok) return guard.result;
-  const existing = await findStaffById(guard.db, data.event_id, data.staff_id);
+  let existing: typeof eventStaff.$inferSelect | null;
+  try {
+    existing = await findStaffById(guard.db, data.event_id, data.staff_id);
+  } catch (error) {
+    return staffPreparationError(error);
+  }
   if (!existing) return { ok: true };
   try {
     await deleteEventStaffWithProtection({

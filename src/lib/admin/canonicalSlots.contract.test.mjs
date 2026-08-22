@@ -12,6 +12,9 @@ test("管理ヘルスチェックは廃止済みのslots.slot_kindを参照し�
   assert.doesNotMatch(healthChecks, /\bslot_kind\b/);
   assert.match(integrityChecks, /s1\.start_time IS NOT NULL\s+AND s2\.start_time = s1\.start_time/);
   assert.match(integrityChecks, /s1\.id < s2\.id/);
+  assert.match(integrityChecks, /slots_group_mixed_x_identity/);
+  assert.match(integrityChecks, /row_identity_mismatch_count/);
+  assert.match(integrityChecks, /reserved_x_id_snapshot/);
 });
 
 test("整合性検査は0043後の正本列のみを参照する", () => {

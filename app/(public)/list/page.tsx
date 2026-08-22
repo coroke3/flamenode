@@ -286,8 +286,9 @@ export default async function ListPage({
                 </thead>
                 <tbody>
                   {videos.map((v, index) => {
-                    const href = `/${v.youtube_video_id ?? v.id}`;
-                    const youtubeId = v.youtube_video_id ? extractYoutubeId(v.youtube_video_id) : null;
+                    const youtubeVideoId = v.youtube_video_id?.trim() || null;
+                    const href = `/${youtubeVideoId ?? v.id}`;
+                    const youtubeId = extractYoutubeId(youtubeVideoId);
                     return (
                       <tr key={`${v.id}-index-${index}`}>
                         <td className={styles.thumbCell}>

@@ -1,68 +1,23 @@
 "use client";
 
 import * as React from "react";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { Icon } from "@/components/ui/Icon";
+import {
+  GENERAL_EDITABLE_FIELD_GROUPS,
+  GENERAL_EDITABLE_FIELD_KEYS,
+  GENERAL_EDITABLE_FIELD_LABELS,
+  parseGeneralEditableFields,
+  type GeneralEditableFieldKey,
+} from "@/lib/video/generalEditPermissions";
 
-type PermissionChoiceId = "basic" | "credits" | "descriptions" | "members";
-
-const CHOICES: Array<{
-  id: PermissionChoiceId;
-  label: string;
-  summary: string;
-  icon: IconName;
-  keys: string[];
-}> = [
-  {
-    id: "basic",
-    label: "タイトルと基本情報",
-    summary: "タイトル、表示名、作品アイコンなど",
-    icon: "edit",
-    keys: ["video.basics", "videos.title"],
-  },
-  {
-    id: "credits",
-    label: "楽曲・クレジット",
-    summary: "楽曲名、楽曲URL、クレジット表記",
-    icon: "bookmark",
-    keys: ["video.credits", "videos.music_credit"],
-  },
-  {
-    id: "descriptions",
-    label: "紹介文・制作コメント",
-    summary: "紹介コメント、見どころ、制作エピソード、締めコメント",
-    icon: "comment",
-    keys: ["video.descriptions", "videos.review_data"],
-  },
-  {
-    id: "members",
-    label: "合作メンバー",
-    summary: "メンバー、担当チャプター、メンバーコメント",
-    icon: "users",
-    keys: ["video.members", "video.member_chapters", "videos.members"],
-  },
-];
-
-function parseSelectedIds(value: string | null | undefined): Set<PermissionChoiceId> {
-  if (!value) return new Set();
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return new Set();
-    const keys = new Set(parsed.filter((v): v is string => typeof v === "string"));
-    return new Set(
-      CHOICES.filter((choice) => choice.keys.some((key) => keys.has(key))).map(
-        (choice) => choice.id,
-      ),
-    );
-  } catch {
-    return new Set();
-  }
+function parseSelectedFields(value: string | null | undefined): Set<GeneralEditableFieldKey> {
+  return parseGeneralEditableFields(value);
 }
 
-function buildPermissionJson(selected: Set<PermissionChoiceId>): string {
-  const keys = CHOICES.flatMap((choice) =>
-    selected.has(choice.id) ? choice.keys : [],
+function buildPermissionJson(selected: Set<GeneralEditableFieldKey>): string {
+  return JSON.stringify(
+    GENERAL_EDITABLE_FIELD_KEYS.filter((key) => selected.has(key)),
   );
-  return JSON.stringify(Array.from(new Set(keys)));
 }
 
 export function PermissionKeysField({
@@ -74,25 +29,25 @@ export function PermissionKeysField({
   defaultValue: string | null | undefined;
   disabled?: boolean;
 }): React.ReactElement {
-  const [selected, setSelected] = React.useState<Set<PermissionChoiceId>>(() =>
-    parseSelectedIds(defaultValue),
+  const [selected, setSelected] = React.useState<Set<GeneralEditableFieldKey>>(() =>
+    parseSelectedFields(defaultValue),
   );
+  const value = buildPermissionJson(selected);
 
-  const toggle = (id: PermissionChoiceId) => {
+  const toggle = (key: GeneralEditableFieldKey, checked: boolean) => {
     if (disabled) return;
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (checked) next.add(key);
+      else next.delete(key);
       return next;
     });
   };
 
-  const value = buildPermissionJson(selected);
-  const allSelected = selected.size === CHOICES.length;
+  const allSelected = selected.size === GENERAL_EDITABLE_FIELD_KEYS.length;
   const selectedLabel =
     selected.size === 0
-      ? "作品所有者はイベント既定の一般作品権限に従います"
+      ? "作品所有者はこのイベントで編集できません"
       : allSelected
         ? "作品所有者が編集できるすべての項目を許可"
         : `${selected.size}項目を作品所有者が編集できます`;
@@ -100,124 +55,65 @@ export function PermissionKeysField({
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <input type="hidden" name={name} value={value} />
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 10,
-        }}
-      >
-        {CHOICES.map((choice) => {
-          const checked = selected.has(choice.id);
-          return (
-            <label
-              key={choice.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "auto minmax(0, 1fr)",
-                gap: 10,
-                alignItems: "flex-start",
-                minHeight: 92,
-                padding: "12px 13px",
-                border: `1px solid ${
-                  checked ? "var(--accent-primary)" : "var(--border-subtle)"
-                }`,
-                borderRadius: 10,
-                background: checked
-                  ? "var(--accent-primary-soft)"
-                  : "var(--bg-surface)",
-                boxShadow: checked ? "0 0 0 1px var(--accent-primary-soft) inset" : "none",
-                cursor: disabled ? "not-allowed" : "pointer",
-                opacity: disabled ? 0.65 : 1,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggle(choice.id)}
-                disabled={disabled}
-                style={{
-                  width: 18,
-                  height: 18,
-                  marginTop: 2,
-                  accentColor: "var(--accent-primary)",
-                }}
-              />
-              <span style={{ minWidth: 0 }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    marginBottom: 6,
-                    color: checked ? "var(--accent-primary)" : "var(--text-muted)",
-                    fontSize: 11,
-                    fontWeight: 800,
-                  }}
-                >
-                  <Icon name={choice.icon} size={12} aria-hidden />
-                  {checked ? "許可中" : "未許可"}
-                </span>
-                <span
-                  style={{
-                    display: "block",
-                    color: "var(--text-primary)",
-                    fontSize: 13.5,
-                    fontWeight: 800,
-                  }}
-                >
-                  {choice.label}
-                </span>
-                <span
-                  style={{
-                    display: "block",
-                    marginTop: 4,
-                    color: "var(--text-muted)",
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {choice.summary}
-                </span>
-              </span>
-            </label>
-          );
-        })}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
-        <span
-          style={{
-            color: "var(--text-muted)",
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          {selectedLabel}
-        </span>
-        <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => setSelected(new Set(CHOICES.map((choice) => choice.id)))}
+      {GENERAL_EDITABLE_FIELD_GROUPS.map((group) => (
+        <section key={group.label} style={{ display: "grid", gap: 8 }}>
+          <div>
+            <strong style={{ fontSize: 12 }}>{group.label}</strong>
+            <p className="fn-muted" style={{ margin: "2px 0 0", fontSize: 11 }}>
+              {group.description}
+            </p>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+              gap: 8,
+            }}
           >
-            <Icon name="check" size={11} aria-hidden />
-            すべて選択
+            {group.fields.map(([key]) => {
+              const checked = selected.has(key);
+              const label = GENERAL_EDITABLE_FIELD_LABELS[key];
+              return (
+                <label
+                  key={key}
+                  title={label}
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    minHeight: 44,
+                    padding: "9px 10px",
+                    border: `1px solid ${checked ? "var(--accent-primary)" : "var(--border-subtle)"}`,
+                    borderRadius: 9,
+                    background: checked ? "var(--accent-primary-soft)" : "var(--bg-surface)",
+                    opacity: disabled ? 0.65 : 1,
+                    cursor: disabled ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={(event) => toggle(key, event.target.checked)}
+                    style={{ width: 16, height: 16, marginTop: 2, accentColor: "var(--accent-primary)" }}
+                  />
+                  <span style={{ fontSize: 12, fontWeight: 750, lineHeight: 1.45 }}>
+                    {label}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <span className="fn-muted" style={{ fontSize: 12, fontWeight: 700 }}>{selectedLabel}</span>
+        <span style={{ display: "inline-flex", gap: 8 }}>
+          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={disabled} onClick={() => setSelected(new Set(GENERAL_EDITABLE_FIELD_KEYS))}>
+            <Icon name="check" size={11} aria-hidden /> すべて選択
           </button>
-          <button
-            type="button"
-            className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => setSelected(new Set())}
-          >
-            <Icon name="x" size={11} aria-hidden />
-            すべて解除
+          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={disabled} onClick={() => setSelected(new Set())}>
+            <Icon name="x" size={11} aria-hidden /> すべて解除
           </button>
         </span>
       </div>

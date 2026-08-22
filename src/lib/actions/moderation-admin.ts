@@ -33,6 +33,7 @@ import {
   preCommitVideoVisibilityDepublicization,
   runVideoVisibilityTransitionPostCommit,
 } from "@/lib/video/videoVisibilityTransition";
+import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
 
 export interface ModerationAdminResult extends PendingPublicReflection {
   ok: boolean;
@@ -182,6 +183,12 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "CREATE", after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_create", reason: publicReason || "運営確認ケースの作成", strict: true }];
 
   let transition = null as Awaited<ReturnType<typeof planVideoVisibilityTransition>> | null;
+  if (nextVideoStatus) {
+    const publicEligibility = validateVideoPublicEligibility(video, nextVideoStatus);
+    if (!publicEligibility.ok) {
+      return { ok: false, message: publicEligibility.message };
+    }
+  }
   if (nextVideoStatus && nextVideoStatus !== video.visibility_status) {
     const eventIds = await loadVideoEventIds(db, videoId);
     transition = await planVideoVisibilityTransition(db, {
@@ -193,6 +200,9 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
       eventIds,
       now,
     });
+    if (transition.validationError) {
+      return { ok: false, message: transition.validationError };
+    }
     statements.unshift(...transition.mutationStatements);
     expected.unshift(...transition.expectedMutationChanges);
     audits.unshift(...transition.audits);
@@ -296,6 +306,12 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "UPDATE", before: snapshot(current), after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_update", reason: note || `ケース状態を ${status} に変更`, strict: true }];
 
   let transition = null as Awaited<ReturnType<typeof planVideoVisibilityTransition>> | null;
+  if (nextVideoStatus) {
+    const publicEligibility = validateVideoPublicEligibility(video, nextVideoStatus);
+    if (!publicEligibility.ok) {
+      return { ok: false, message: publicEligibility.message };
+    }
+  }
   if (nextVideoStatus && nextVideoStatus !== video.visibility_status) {
     const eventIds = await loadVideoEventIds(db, video.id);
     transition = await planVideoVisibilityTransition(db, {
@@ -307,6 +323,9 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
       eventIds,
       now,
     });
+    if (transition.validationError) {
+      return { ok: false, message: transition.validationError };
+    }
     statements.push(...transition.mutationStatements);
     expected.push(...transition.expectedMutationChanges);
     audits.push(...transition.audits);

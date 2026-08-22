@@ -7,6 +7,17 @@ export function normalizeXId(value: string | null | undefined): string {
 
 const X_HANDLE_RE = /^[a-z0-9_]{1,20}$/;
 
+/** Return true only for a canonical, persistable X handle. */
+export function isCanonicalXId(value: string | null | undefined): value is string {
+  return typeof value === "string" && X_HANDLE_RE.test(value);
+}
+
+/** Parse the friendly UI forms and return the canonical lowercase handle. */
+export function parseCanonicalXId(raw: string | null | undefined): string | null {
+  const parsed = parseXIdentityInput(String(raw ?? ""));
+  return parsed && isCanonicalXId(parsed) ? parsed : null;
+}
+
 /**
  * ユーザー入力から X ハンドルを解析する。
  * 受け付け: username / @username / x.com・twitter.com のプロフィール URL。

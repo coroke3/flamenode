@@ -40,6 +40,7 @@ export interface StaticEventDetailEvent {
   img_url: string | null;
   accent_color: string | null;
   slot_part_gap_minutes: number | null;
+  parts: string[];
   slot_visibility_mode: "public_name" | "anonymous" | "hidden" | null;
   start_time: number | null;
   end_time: number | null;
@@ -184,6 +185,7 @@ function normalizeEvent(value: unknown): StaticEventDetailEvent | null {
     img_url: normalizeNullableString(row.img_url),
     accent_color: normalizeNullableString(row.accent_color),
     slot_part_gap_minutes: normalizeCount(row.slot_part_gap_minutes),
+    parts: normalizeEventParts(row.parts, row.parts_json),
     slot_visibility_mode: normalizeSlotVisibilityMode(row.slot_visibility_mode),
     start_time: normalizeUnix(row.start_time),
     end_time: normalizeUnix(row.end_time),
@@ -191,6 +193,21 @@ function normalizeEvent(value: unknown): StaticEventDetailEvent | null {
     entry_end_time: normalizeUnix(row.entry_end_time),
     visibility_status: visibility,
   };
+}
+
+function normalizeEventParts(partsValue: unknown, partsJsonValue: unknown): string[] {
+  const source = Array.isArray(partsValue)
+    ? partsValue
+    : typeof partsJsonValue === "string"
+      ? (() => {
+          try { return JSON.parse(partsJsonValue) as unknown; } catch { return []; }
+        })()
+      : [];
+  if (!Array.isArray(source)) return [];
+  return source
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 64);
 }
 
 function normalizeSlotVisibilityMode(

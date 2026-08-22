@@ -7,5 +7,7 @@ export interface VideoActionResult extends PendingPublicReflection {
   videoId?: string;
   youtubeVideoId?: string;
   eventId?: string;
+  /** 枠投稿を保存したが、公開前にYouTube URLの追加が必要な状態。 */
+  requiresYoutubeBeforePublish?: boolean;
   reason?: WriteGuardDenyReason;
 }

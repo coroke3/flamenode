@@ -34,6 +34,7 @@ import {
   planVideoVisibilityFenceTransition,
   preCommitVideoVisibilityDepublicization,
 } from "@/lib/video/videoVisibilityTransition";
+import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
 import {
   AuditOperation,
   RestoreFailureReason,
@@ -506,6 +507,31 @@ export async function restoreAuditLog(
       }
       const previousStatus = String(current?.visibility_status ?? "");
       const nextStatus = String(target.visibility_status ?? "");
+      // Audit restore is another server-side visibility transition path. Do
+      // not let a historical snapshot bypass the same YouTube-public
+      // invariant enforced by admin/manage/moderation actions.
+      const restoredSourceType = Object.prototype.hasOwnProperty.call(
+        target,
+        "source_type",
+      )
+        ? target.source_type
+        : current?.source_type;
+      const restoredYoutubeVideoId = Object.prototype.hasOwnProperty.call(
+        target,
+        "youtube_video_id",
+      )
+        ? target.youtube_video_id
+        : current?.youtube_video_id;
+      const publicEligibility = validateVideoPublicEligibility(
+        {
+          source_type: String(restoredSourceType ?? ""),
+          youtube_video_id: String(restoredYoutubeVideoId ?? ""),
+        },
+        nextStatus,
+      );
+      if (!publicEligibility.ok) {
+        throw new Error(publicEligibility.message);
+      }
       const transition = planVideoVisibilityFenceTransition(db, {
         videoId: log.target_id,
         previousStatus: previousStatus as "pending" | "public" | "private" | "voided",

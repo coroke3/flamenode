@@ -20,6 +20,7 @@ import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import { getManageEventForRender } from "@/lib/manage/manageEventRender";
+import { parseEventPartsJson } from "@/lib/video/parseEventIds";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,12 @@ export default async function ManageEventSlotsPage({
     guard.user.id,
     guard.user.role ?? null,
   );
-  if (!canEditEventFromSnapshot(authorization, id, "event.slots")) {
+  const canEditSlots = canEditEventFromSnapshot(
+    authorization,
+    id,
+    "event.slots",
+  );
+  if (!canEditSlots) {
     notFound();
   }
 
@@ -181,8 +187,9 @@ export default async function ManageEventSlotsPage({
             eventId={id}
             slots={rows}
             slotPartGapSec={(event.slot_part_gap_minutes ?? 15) * 60}
+            parts={parseEventPartsJson(event.parts_json)}
             variant="manage"
-            canForceReleaseSubmitted={isAdmin}
+            canManageSubmittedSlots={canEditSlots}
           />
         )}
       </section>

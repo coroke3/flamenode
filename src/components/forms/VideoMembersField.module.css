@@ -1,0 +1,128 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sampleTableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sampleTable {
+  min-width: 620px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--bg-surface);
+}
+
+.sampleTable th,
+.sampleTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sampleTable th {
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sampleTable td {
+  color: var(--text-secondary);
+}
+
+.sampleTable tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-elevated) 54%, var(--bg-surface));
+}
+
+.bulkTextarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.bulkWarning {
+  margin: 0;
+  color: var(--accent-warning);
+  font-size: 12px;
+}
+
+.bulkDetails {
+  margin-top: 6px;
+}
+
+.bulkDetailsSummary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.bulkContent {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.sampleSection {
+  display: grid;
+  gap: 4px;
+}
+
+.bulkSection {
+  display: grid;
+  gap: 6px;
+}
+
+.bulkPreviewSection {
+  display: grid;
+  gap: 8px;
+}
+
+.bulkLabel {
+  font-size: 12px;
+}
+
+.bulkHint {
+  margin: 0;
+}
+
+.bulkHintList {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.bulkActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bulkPreviewTable {
+  min-width: 640px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.bulkPreviewTable th,
+.bulkPreviewTable td {
+  padding: 4px;
+}
+
+.bulkPreviewTable th {
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.bulkPreviewTable td {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.bulkPreviewInvalid {
+  color: var(--accent-warning);
+}

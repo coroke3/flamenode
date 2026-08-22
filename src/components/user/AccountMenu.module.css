@@ -13,19 +13,24 @@
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 600;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
   height: 32px;
 }
 
-.trigger:hover,
-.triggerActive {
+.trigger:hover {
   background-color: var(--bg-elevated);
-  border-color: color-mix(in srgb, var(--accent-primary) 24%, var(--border-subtle));
+  border-color: transparent;
+}
+
+/* Opening the menu should not add an accent-colored selection frame. */
+.triggerActive {
+  background-color: transparent;
+  border-color: transparent;
 }
 
 .trigger:focus-visible {
-  outline: 2px solid var(--accent-primary);
+  outline: 2px solid var(--border-strong, var(--text-muted));
   outline-offset: 3px;
 }
 
@@ -80,7 +85,7 @@
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg, 16px);
-  box-shadow: 0 18px 42px -18px color-mix(in srgb, var(--text-primary) 44%, transparent);
+  box-shadow: none;
   backdrop-filter: blur(14px) saturate(115%);
   -webkit-backdrop-filter: blur(14px) saturate(115%);
   padding: 12px;
@@ -122,11 +127,11 @@
 }
 
 .headerInfoLink:hover {
-  background-color: var(--accent-primary-soft);
+  background-color: var(--bg-elevated);
 }
 
 .headerInfoLink:focus-visible {
-  outline: 2px solid var(--accent-primary);
+  outline: 2px solid var(--border-strong, var(--text-muted));
   outline-offset: 2px;
 }
 
@@ -228,7 +233,7 @@
 
 .menuItem:focus-visible,
 .xidOption:focus-visible {
-  outline: 2px solid var(--accent-primary);
+  outline: 2px solid var(--border-strong, var(--text-muted));
   outline-offset: 2px;
 }
 

@@ -10,6 +10,7 @@ export type ManageEventRender = {
   title: string;
   accent_color: string | null;
   slot_part_gap_minutes: number | null;
+  parts_json: string | null;
 };
 
 /** Request-local projection shared by manage pages and generateMetadata. */
@@ -26,6 +27,7 @@ async function loadManageEventForRender(
         title: events.title,
         accent_color: events.accent_color,
         slot_part_gap_minutes: events.slot_part_gap_minutes,
+        parts_json: events.parts_json,
       })
       .from(events)
       .where(eq(events.id, eventId))

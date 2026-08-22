@@ -215,13 +215,14 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
     const hasSubmitted = groupRows.some(
       (candidate) => candidate.status === "submitted",
     );
+    const statuses = new Set(groupRows.map((candidate) => candidate.status));
     const status = hasSubmitted
       ? "submitted"
       : hasReserved
         ? "reserved"
         : "available";
     let integrity_error: SlotIntegrityError | null = null;
-    if (hasReserved && hasSubmitted) {
+    if (statuses.size > 1) {
       integrity_error = "mixed_status";
     } else {
       const relations = groupRows

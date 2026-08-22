@@ -22,6 +22,10 @@ let cache: {
   items: MemberSuggestionItem[];
   fetchedAt: number;
 } | null = null;
+let inFlight: {
+  bucket: SuggestionsBucket;
+  promise: Promise<MemberSuggestionsLoadResult>;
+} | null = null;
 
 function readCache(
   bucket: SuggestionsBucket,
@@ -39,6 +43,7 @@ function readCache(
 /** 主にテスト用。プロセス内キャッシュを破棄する。 */
 export function resetMemberSuggestionsCacheForTest(): void {
   cache = null;
+  inFlight = null;
 }
 
 /**
@@ -49,6 +54,9 @@ export function resetMemberSuggestionsCacheForTest(): void {
 export async function loadMemberSuggestionsIndexFromBucket(
   bucket: SuggestionsBucket,
 ): Promise<MemberSuggestionsLoadResult> {
+  if (inFlight?.bucket === bucket) return inFlight.promise;
+
+  const promise = (async (): Promise<MemberSuggestionsLoadResult> => {
   const nowSec = Math.floor(Date.now() / 1000);
   const cachedItems = readCache(bucket, nowSec);
   if (cachedItems) {
@@ -85,4 +93,12 @@ export async function loadMemberSuggestionsIndexFromBucket(
 
   cache = { bucket, items, fetchedAt: nowSec };
   return { ok: true, items };
+  })();
+
+  inFlight = { bucket, promise };
+  try {
+    return await promise;
+  } finally {
+    if (inFlight?.promise === promise) inFlight = null;
+  }
 }

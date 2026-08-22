@@ -12,6 +12,7 @@ import styles from "./AnnouncementForm.module.css";
 
 export interface AnnouncementInitial {
   id?: string;
+  base_updated_at?: number | null;
   title?: string;
   body?: string;
   severity?: "info" | "warning" | "danger";
@@ -41,17 +42,23 @@ export function AnnouncementForm({
     setSuccess(null);
     const fd = new FormData(e.currentTarget);
     startTransition(async () => {
-      const r =
-        mode === "create" ? await createAnnouncement(fd) : await updateAnnouncement(fd);
-      if (!r.ok) {
-        setError(r.message ?? "失敗しました。");
-        return;
-      }
-      setSuccess("保存しました。");
-      if (mode === "create" && r.id) {
-        router.push(`/admin/announcements/${r.id}/edit`);
-      } else {
-        router.refresh();
+      try {
+        const r =
+          mode === "create"
+            ? await createAnnouncement(fd)
+            : await updateAnnouncement(fd);
+        if (!r.ok) {
+          setError(r.message ?? "失敗しました。");
+          return;
+        }
+        setSuccess("保存しました。");
+        if (mode === "create" && r.id) {
+          router.push(`/admin/announcements/${r.id}/edit`);
+        } else {
+          router.refresh();
+        }
+      } catch {
+        setError("保存に失敗しました。再読み込みして、もう一度お試しください。");
       }
     });
   };
@@ -63,6 +70,13 @@ export function AnnouncementForm({
     >
       {mode === "edit" && initial.id ? (
         <input type="hidden" name="id" value={initial.id} />
+      ) : null}
+      {mode === "edit" && initial.base_updated_at != null ? (
+        <input
+          type="hidden"
+          name="base_updated_at"
+          value={initial.base_updated_at}
+        />
       ) : null}
       <div>
         <label className="fn-label">タイトル *</label>

@@ -53,6 +53,28 @@ import {
   type YoutubeDescriptionContext,
 } from "@/lib/event/youtubeDescriptionTemplate";
 import type { CustomQuestion } from "@/lib/video/customQuestions";
+import {
+  buildFormDraftStorageKey,
+  draftMetadataMatches,
+  type DraftMetadata,
+  useFormDraft,
+} from "@/lib/interactions/useFormDraft";
+import {
+  buildVideoFormDraft,
+  parseVideoFormDraft,
+  videoFormDraftAnswersToRecord,
+  videoFormDraftStageAnswersToRecord,
+  videoFormDraftToFields,
+  VIDEO_FORM_DRAFT_SCHEMA_VERSION,
+  type VideoFormDraftV1,
+} from "@/lib/video/videoFormDraft";
+import {
+  cleanupExpiredDraftFiles,
+  deleteDraftFile,
+  DRAFT_FILE_TTL_MS,
+  loadDraftFile,
+  saveDraftFile,
+} from "@/lib/interactions/draftFileStore";
 
 /** X ID 既定プロフィール。「再適用」ボタン用。作品スナップショットとは別。 */
 export interface VideoDefaultProfile {
@@ -64,6 +86,7 @@ export interface VideoDefaultProfile {
 }
 
 export interface VideoFormInitialValues {
+  updated_at?: number | null;
   display_name?: string;
   creator_x_user_id?: string;
   icon_url?: string;
@@ -128,6 +151,10 @@ function customAnswerValues(value: string | string[] | undefined): string[] {
   return value?.trim() ? [value.trim()] : [];
 }
 
+function draftText(formData: FormData, name: string): string {
+  return String(formData.get(name) ?? "");
+}
+
 export interface XIdOption {
   id: string;
   x_name: string;
@@ -155,6 +182,8 @@ interface VideoFormProps {
   initial?: VideoFormInitialValues;
   slotId?: string;
   videoId?: string;
+  /** 編集対象が枠投稿の場合、部は slot の値を正本として読み取り専用にする。 */
+  schedulingType?: "manual" | "slotted" | null;
   memberSuggestions?: VideoMemberSuggestion[];
   softwareSuggestions?: string[];
   xIdOptions?: XIdOption[];
@@ -225,6 +254,12 @@ interface VideoFormProps {
   youtubeDescriptionContext?: YoutubeDescriptionContext;
   /** 初期表示時に優先するイベント（通常は作品の primary event）。 */
   youtubeDescriptionEventId?: string | null;
+  /** Auth user id used to isolate local post/edit drafts. */
+  draftAuthUserId?: string;
+  /** 枠なし投稿の外側draftを、作品保存成功時に削除するための通知。 */
+  onSubmitSuccess?: () => void;
+  /** 親のイベント切替前に最新の入力を同期保存するための登録口。 */
+  onDraftFlushReady?: (flush: () => boolean) => void;
 }
 
 /** section key が disabledSections に含まれているか確認する小関数。 */
@@ -240,6 +275,56 @@ function isFieldDisabled(
   key: string,
 ): boolean {
   return Array.isArray(disabledFields) && disabledFields.includes(key);
+}
+
+function canRestoreDraftField(
+  name: string,
+  disabledSections: string[] | undefined,
+  disabledFields: string[] | undefined,
+): boolean {
+  const permissionByName: Record<string, { section?: string; field?: string }> = {
+    display_name: { section: "submitter", field: "submitter.display_name" },
+    profile_text: { section: "submitter", field: "submitter.profile_text" },
+    icon_url: { section: "submitter", field: "submitter.icon_url" },
+    youtube_channel_url: {
+      section: "submitter",
+      field: "submitter.youtube_channel_url",
+    },
+    other_social_links: {
+      section: "submitter",
+      field: "submitter.other_social_links",
+    },
+    title: { section: "video", field: "video.title" },
+    scheduled_time: { section: "video", field: "video.scheduled_time" },
+    music: { section: "video", field: "video.music" },
+    music_reference_url: { section: "video", field: "video.music_reference_url" },
+    credit: { section: "video", field: "video.credit" },
+    youtube_url: { section: "video", field: "video.youtube_url" },
+    part: { section: "video", field: "video.part" },
+    intro_comment: { section: "descriptions", field: "descriptions.intro_comment" },
+    highlights: { section: "descriptions", field: "descriptions.highlights" },
+    production_story: {
+      section: "descriptions",
+      field: "descriptions.production_story",
+    },
+    used_software: { section: "descriptions", field: "descriptions.used_software" },
+    closing_comment: { section: "descriptions", field: "descriptions.closing_comment" },
+    event_ids: { field: "event_ids" },
+    is_collab: { section: "members", field: "members.is_collab" },
+    members: { section: "members", field: "members" },
+    chapters: { section: "members", field: "chapters" },
+    custom_answers: { section: "descriptions", field: "descriptions.custom_answers" },
+    stage_permission: {
+      section: "descriptions",
+      field: "descriptions.stage_permission",
+    },
+  };
+  const permission = permissionByName[name];
+  if (!permission) return true;
+  return !(
+    (permission.section && isSectionDisabled(disabledSections, permission.section)) ||
+    (permission.field && isFieldDisabled(disabledFields, permission.field))
+  );
 }
 
 /** CSS クラス名を条件結合する軽量ヘルパー。外部依存不要。 */
@@ -308,6 +393,7 @@ export function VideoForm({
   initial = {},
   slotId,
   videoId,
+  schedulingType,
   memberSuggestions = [],
   softwareSuggestions = [],
   xIdOptions = [],
@@ -326,6 +412,9 @@ export function VideoForm({
   permissionView,
   youtubeDescriptionContext,
   youtubeDescriptionEventId,
+  draftAuthUserId,
+  onSubmitSuccess,
+  onDraftFlushReady,
 }: VideoFormProps): React.ReactElement {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
@@ -352,6 +441,7 @@ export function VideoForm({
     initial.other_social_links ?? "",
   );
   const [submitterFieldsKey, setSubmitterFieldsKey] = React.useState(0);
+  const [membersFieldsKey, setMembersFieldsKey] = React.useState(0);
   const displayNamePreview = submitterDisplayName;
   const [isCollab, setIsCollab] = React.useState(
     Boolean(initial.is_collab || (initial.members?.length ?? 0) > 0),
@@ -359,6 +449,8 @@ export function VideoForm({
   const [members, setMembers] = React.useState<VideoMemberInput[]>(
     initial.members ?? [],
   );
+  const membersRef = React.useRef(members);
+  membersRef.current = members;
   const [descriptionFormValues, setDescriptionFormValues] = React.useState<
     Record<string, string>
   >({});
@@ -374,6 +466,18 @@ export function VideoForm({
   const [customAnswers, setCustomAnswers] = React.useState<
     Record<string, string | string[]>
   >(initial.custom_answers ?? {});
+  const initialEventIdsKey = (initial.event_ids ?? []).join("\u001f");
+  const initialEventIdsForDraftSync = React.useMemo(
+    () => (initialEventIdsKey ? initialEventIdsKey.split("\u001f") : []),
+    [initialEventIdsKey],
+  );
+  React.useEffect(() => {
+    // The shell owns event selection for free posts.  Keep the form's
+    // questions/hidden event_ids in sync without remounting the whole form.
+    if (mode === "free" && !canEditEvents) {
+      setSelectedEventIds(initialEventIdsForDraftSync);
+    }
+  }, [canEditEvents, initialEventIdsForDraftSync, mode]);
   // 所属イベントの parts_json から、選択可能な部の候補 (重複排除) を作る。
   const availableParts = React.useMemo(() => {
     const seen = new Set<string>();
@@ -443,6 +547,317 @@ export function VideoForm({
   // 入力長文 (紹介文・メンバー編集・アイコン選択) を持つフォームなので、
   // 誤ってリロード / タブ閉じが起きると入力が失われる事故を避ける。
   const [dirty, setDirty] = React.useState(false);
+  const [draftFormReady, setDraftFormReady] = React.useState(false);
+  const [draftStale, setDraftStale] = React.useState(false);
+  const [draftFileError, setDraftFileError] = React.useState<string | null>(null);
+  const [restoredUploadFile, setRestoredUploadFile] = React.useState<File | null>(null);
+  const draftFileRestoreGenerationRef = React.useRef(0);
+  const draftFileOperationRef = React.useRef<Promise<void>>(Promise.resolve());
+
+  const enqueueDraftFileOperation = React.useCallback(
+    (operation: () => Promise<unknown>) => {
+      const next = draftFileOperationRef.current
+        .catch(() => undefined)
+        .then(() => operation().then(() => undefined));
+      draftFileOperationRef.current = next;
+      return next;
+    },
+    [],
+  );
+
+  React.useEffect(() => {
+    setDraftFormReady(true);
+  }, []);
+
+  const normalizedDraftActiveXId = normalizeXId(
+    activeXId ?? initial.creator_x_user_id ?? "",
+  ) || "unassigned";
+  const draftFormId =
+    mode === "slot"
+      ? `video-slot:${slotId ?? "unknown"}`
+      : mode === "edit"
+        ? `video-edit:${videoId ?? "unknown"}:${editPrivilegeMode ?? "normal"}`
+        : `video-free:${normalizedDraftActiveXId}`;
+  const draftStorageKey = draftAuthUserId?.trim()
+    ? buildFormDraftStorageKey({
+        authUserId: draftAuthUserId.trim(),
+        formId: draftFormId,
+        schemaVersion: VIDEO_FORM_DRAFT_SCHEMA_VERSION,
+      })
+    : "";
+  const draftFileStorageKey = draftStorageKey ? `${draftStorageKey}:icon` : "";
+  const draftMetadata = React.useMemo<DraftMetadata>(
+    () => ({
+      schemaVersion: VIDEO_FORM_DRAFT_SCHEMA_VERSION,
+      authUserId: draftAuthUserId?.trim() ?? null,
+      mode,
+      slotId: slotId ?? null,
+      videoId: videoId ?? null,
+      activeXId: mode === "edit" ? null : normalizeXId(activeXId ?? "") || null,
+      baseRevision: mode === "edit" ? initial.updated_at ?? null : null,
+    }),
+    [activeXId, draftAuthUserId, initial.updated_at, mode, slotId, videoId],
+  );
+  const restoreVideoDraft = React.useCallback((rawDraft: VideoFormDraftV1 | unknown) => {
+    const draft = parseVideoFormDraft(rawDraft);
+    if (!draft) return;
+    setDraftStale(false);
+    const form = formRef.current;
+    if (!form) return;
+    const fields = videoFormDraftToFields(draft);
+    const restored = new FormData();
+    for (const [key, raw] of Object.entries(fields)) {
+      for (const item of Array.isArray(raw) ? raw : [raw]) restored.append(key, item);
+    }
+    for (const element of Array.from(form.elements)) {
+      if (
+        !(
+          element instanceof HTMLInputElement ||
+          element instanceof HTMLTextAreaElement ||
+          element instanceof HTMLSelectElement
+        )
+      ) continue;
+      if (!element.name || !canRestoreDraftField(element.name, disabledSections, disabledFields)) continue;
+      const values = restored.getAll(element.name).map(String);
+      if (element instanceof HTMLInputElement && element.type === "checkbox") {
+        element.checked = values.includes("1") || values.includes("true");
+      } else if (element instanceof HTMLInputElement && element.type === "radio") {
+        element.checked = values.includes(element.value);
+      } else if (values.length > 0) {
+        element.value = values[0] ?? "";
+      }
+    }
+    setDescriptionFormValues(readDescriptionFormValues(form));
+    const fieldText = (name: string): string => {
+      const value = fields[name as keyof typeof fields];
+      return Array.isArray(value) ? (value[0] ?? "") : value ?? "";
+    };
+    if (canRestoreDraftField("youtube_url", disabledSections, disabledFields)) {
+      setYoutubeUrl(fieldText("youtube_url"));
+    }
+    if (canRestoreDraftField("title", disabledSections, disabledFields)) {
+      setTitlePreview(fieldText("title"));
+    }
+    if (canRestoreDraftField("display_name", disabledSections, disabledFields)) {
+      setSubmitterDisplayName(fieldText("display_name"));
+    }
+    if (canRestoreDraftField("profile_text", disabledSections, disabledFields)) {
+      setSubmitterProfileText(fieldText("profile_text"));
+    }
+    if (canRestoreDraftField("icon_url", disabledSections, disabledFields)) {
+      setSubmitterIconUrl(fieldText("icon_url"));
+    }
+    if (
+      canRestoreDraftField(
+        "youtube_channel_url",
+        disabledSections,
+        disabledFields,
+      )
+    ) {
+      setSubmitterYoutubeChannel(fieldText("youtube_channel_url"));
+    }
+    if (canRestoreDraftField("other_social_links", disabledSections, disabledFields)) {
+      setSubmitterSocialLinks(fieldText("other_social_links"));
+    }
+    const availableEventIds = new Set(eventOptions.map((event) => event.id));
+    if (canRestoreDraftField("event_ids", disabledSections, disabledFields)) {
+      const parentEventIds = initialEventIdsForDraftSync;
+      const restoredEventIds =
+        mode === "slot" || !canEditEvents
+          ? parentEventIds
+          : draft.selectedEventIds.filter((id) => availableEventIds.has(id));
+      setSelectedEventIds(restoredEventIds);
+    }
+    if (canRestoreDraftField("part", disabledSections, disabledFields)) {
+      setSelectedPart(draft.selectedPart);
+    }
+    if (canRestoreDraftField("is_collab", disabledSections, disabledFields)) {
+      setIsCollab(draft.isCollab);
+    }
+    if (canRestoreDraftField("members", disabledSections, disabledFields)) {
+      const nextMembers = draft.members.map((member, index) => ({
+        ...member,
+        chapters: canRestoreDraftField("chapters", disabledSections, disabledFields)
+          ? member.chapters
+          : membersRef.current[index]?.chapters ?? [],
+      }));
+      if (nextMembers.length > 0 || draft.isCollab) setMembers(nextMembers);
+    }
+    if (canRestoreDraftField("custom_answers", disabledSections, disabledFields)) {
+      setCustomAnswers(videoFormDraftAnswersToRecord(draft.customAnswers));
+    }
+    if (canRestoreDraftField("stage_permission", disabledSections, disabledFields)) {
+      setStageAnswers(videoFormDraftStageAnswersToRecord(draft.stageAnswers));
+    }
+    setCurrentStep(Math.min(draft.currentStep, wizardSteps.length - 1));
+    setMaxReachedStep(Math.min(Math.max(draft.maxReachedStep, draft.currentStep), wizardSteps.length - 1));
+    setSubmitterFieldsKey((current) => current + 1);
+    setMembersFieldsKey((current) => current + 1);
+    setDirty(true);
+  }, [
+    canEditEvents,
+    disabledFields,
+    disabledSections,
+    eventOptions,
+    initialEventIdsForDraftSync,
+    mode,
+    wizardSteps.length,
+  ]);
+  const buildCurrentDraft = React.useCallback((): VideoFormDraftV1 | null => {
+    if (!draftFormReady || !formRef.current) return null;
+    // descriptionFormValues is the change signal for otherwise uncontrolled
+    // inputs; reading it here keeps the synchronous submit flush current.
+    void descriptionFormValues;
+    return buildVideoFormDraft({
+      formData: new FormData(formRef.current),
+      customAnswers,
+      stageAnswers,
+      members,
+      selectedEventIds,
+      selectedPart,
+      isCollab,
+      currentStep,
+      maxReachedStep,
+      baselineUpdatedAt: initial.updated_at,
+      iconUploadSaved: Boolean(restoredUploadFile),
+    });
+  }, [
+    customAnswers,
+    currentStep,
+    descriptionFormValues,
+    draftFormReady,
+    initial.updated_at,
+    isCollab,
+    maxReachedStep,
+    members,
+    restoredUploadFile,
+    selectedEventIds,
+    selectedPart,
+    stageAnswers,
+  ]);
+  const draftSnapshot = React.useMemo(
+    () => buildCurrentDraft(),
+    [buildCurrentDraft],
+  );
+  const handleStaleVideoDraft = React.useCallback(() => {
+    setDraftStale(true);
+  }, []);
+  const {
+    clearDraft,
+    flushDraft,
+    restoreStaleDraft,
+    restored,
+    lastSavedAt,
+    saveError,
+  } = useFormDraft<VideoFormDraftV1 | null>({
+    storageKey: draftStorageKey || "fn:draft:disabled:video-form-v1",
+    value: draftSnapshot,
+    enabled: Boolean(draftAuthUserId?.trim()),
+    ttlMs: 7 * 24 * 60 * 60 * 1000,
+    debounceMs: 500,
+    shouldSave: dirty,
+    metadata: draftMetadata,
+    onRestore: restoreVideoDraft,
+    onStale: handleStaleVideoDraft,
+  });
+
+  const clearVideoDraft = React.useCallback(() => {
+    draftFileRestoreGenerationRef.current += 1;
+    clearDraft();
+    setRestoredUploadFile(null);
+    if (draftFileStorageKey) {
+      void enqueueDraftFileOperation(() => deleteDraftFile(draftFileStorageKey));
+    }
+  }, [clearDraft, draftFileStorageKey, enqueueDraftFileOperation]);
+
+  const restoreStaleVideoDraft = React.useCallback(() => {
+    const restored = restoreStaleDraft();
+    if (!restored || !draftFileStorageKey) return restored;
+
+    // Stale edit drafts deliberately do not auto-restore their icon. Once the
+    // user explicitly chooses the old draft, restore the matching file too,
+    // while still guarding against a concurrent clear or unmount.
+    const generation = ++draftFileRestoreGenerationRef.current;
+    void loadDraftFile(draftFileStorageKey).then((file) => {
+      if (
+        generation !== draftFileRestoreGenerationRef.current ||
+        !file
+      ) {
+        return;
+      }
+      setDraftFileError(null);
+      setRestoredUploadFile(file);
+    });
+    return restored;
+  }, [draftFileStorageKey, restoreStaleDraft]);
+
+  const handleUploadFileChange = React.useCallback(
+    (file: File | null) => {
+      if (!draftFileStorageKey) return;
+      const generation = ++draftFileRestoreGenerationRef.current;
+      setDraftFileError(null);
+      setRestoredUploadFile(file);
+      if (!file) {
+        void enqueueDraftFileOperation(() => deleteDraftFile(draftFileStorageKey));
+        return;
+      }
+      void enqueueDraftFileOperation(() => saveDraftFile(draftFileStorageKey, file).then((saved) => {
+        if (!saved && generation === draftFileRestoreGenerationRef.current) {
+          setDraftFileError(
+            "文章の下書きは保存されていますが、アップロード画像は保存できませんでした。",
+          );
+        }
+      }));
+    },
+    [draftFileStorageKey, enqueueDraftFileOperation],
+  );
+
+  React.useEffect(() => {
+    if (!draftFileStorageKey || typeof window === "undefined") return;
+    const generation = draftFileRestoreGenerationRef.current;
+    let cancelled = false;
+    let hasCurrentDraft = false;
+    try {
+      const raw = window.localStorage.getItem(draftStorageKey);
+      if (raw) {
+        const envelope = JSON.parse(raw) as {
+          savedAt?: unknown;
+          metadata?: unknown;
+        };
+        const savedAt = envelope?.savedAt;
+        hasCurrentDraft =
+          typeof savedAt === "number" &&
+          Number.isFinite(savedAt) &&
+          Date.now() - savedAt <= 7 * 24 * 60 * 60 * 1000 &&
+          savedAt <= Date.now() + 60_000 &&
+          draftMetadataMatches(draftMetadata, envelope.metadata);
+      }
+    } catch {
+      hasCurrentDraft = false;
+    }
+    void cleanupExpiredDraftFiles(DRAFT_FILE_TTL_MS);
+    // A file is meaningful only when its text draft is still current.  This
+    // prevents an edit draft's stale icon from being restored before the user
+    // chooses between the database version and the older draft.
+    if (!hasCurrentDraft) return;
+    void loadDraftFile(draftFileStorageKey).then((file) => {
+      if (
+        !cancelled &&
+        generation === draftFileRestoreGenerationRef.current &&
+        file
+      ) {
+        setRestoredUploadFile(file);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftFileStorageKey, draftMetadata, draftStorageKey]);
+
+  React.useEffect(() => {
+    onDraftFlushReady?.(flushDraft);
+    return () => onDraftFlushReady?.(() => false);
+  }, [flushDraft, onDraftFlushReady]);
 
   React.useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -459,6 +874,7 @@ export function VideoForm({
   React.useEffect(() => {
     const handler = (event: Event) => {
       if (!dirty || pending) return;
+      flushDraft();
       const confirmed = window.confirm(
         "入力中の作品情報があります。Active X ID を切り替えると内容が失われます。切り替えますか？",
       );
@@ -469,7 +885,7 @@ export function VideoForm({
     window.addEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
     return () =>
       window.removeEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
-  }, [dirty, pending]);
+  }, [dirty, flushDraft, pending]);
 
   const normalizedInitialXId = normalizeXId(initial.creator_x_user_id || activeXId || "");
   const normalizedActiveXId = normalizeXId(activeXId || "");
@@ -582,17 +998,29 @@ export function VideoForm({
   const descriptionsDisabled = isSectionDisabled(disabledSections, "descriptions");
   const membersSectionDisabled = isSectionDisabled(disabledSections, "members");
   const membersListDisabled =
-    membersSectionDisabled || isFieldDisabled(disabledFields, "members.list");
+    membersSectionDisabled || isFieldDisabled(disabledFields, "members");
+  const isCollabFieldDisabled =
+    membersSectionDisabled || isFieldDisabled(disabledFields, "members.is_collab");
   const chaptersFieldDisabled = isFieldDisabled(disabledFields, "chapters");
   const fieldDisabled = (key: string) =>
     isFieldDisabled(disabledFields, key) ||
     (key.startsWith("submitter.") && submitterDisabled) ||
     (key.startsWith("video.") && videoSectionDisabled) ||
     (key.startsWith("descriptions.") && descriptionsDisabled) ||
-    (key.startsWith("members.") && membersListDisabled);
+    (key.startsWith("members.") && key !== "members.is_collab" && membersListDisabled);
   const hasInitialYoutube = Boolean(initial.youtube_url?.trim());
+  // updateVideo intentionally keeps the established admin/event privilege
+  // path able to clear or replace an attached YouTube ID.  The normal-owner
+  // convenience rule must not add a browser-only required constraint that
+  // makes that existing privileged path impossible from this form.
+  const privilegedYoutubeEdit =
+    mode === "edit" &&
+    hasInitialYoutube &&
+    permissionView?.privilegeMode !== "normal" &&
+    permissionView?.youtube.editable === true;
   const isYoutubeUrlRequired =
-    mode === "free" || (mode === "edit" && hasInitialYoutube);
+    mode === "free" ||
+    (mode === "edit" && hasInitialYoutube && !privilegedYoutubeEdit);
   const isYoutubeFieldDisabled = fieldDisabled("video.youtube_url");
   const showYoutubeAddBlockedHint =
     mode === "edit" &&
@@ -611,6 +1039,7 @@ export function VideoForm({
   ).length;
   const handleMembersChange = React.useCallback((next: VideoMemberInput[]) => {
     setMembers(next);
+    setDirty(true);
   }, []);
 
   const currentStepKey = isWizard ? wizardSteps[currentStep]?.key : null;
@@ -633,7 +1062,7 @@ export function VideoForm({
   };
 
   const validateRequiredCustomQuestions = (): WizardValidationError | null => {
-    if (descriptionsDisabled) return null;
+    if (fieldDisabled("descriptions.custom_answers")) return null;
     for (const { event, question } of selectedCustomQuestions) {
       if (!question.required) continue;
       const key = customAnswerKey(event.id, question.question_key);
@@ -797,6 +1226,9 @@ export function VideoForm({
     ev.preventDefault();
     if (pending || submitInFlightRef.current) return;
     const form = ev.currentTarget;
+    // Persist the latest keystroke before validation/action invocation.  A
+    // Worker 1102 or a thrown Server Action must leave this draft intact.
+    if (dirty) flushDraft(buildCurrentDraft() ?? undefined);
     if (mode === "edit") {
       const customQuestionError = validateRequiredCustomQuestions();
       if (customQuestionError) {
@@ -852,6 +1284,8 @@ export function VideoForm({
         }
         setResult(r);
         if (r.ok) {
+          clearVideoDraft();
+          onSubmitSuccess?.();
           // 保存成功時は dirty を解除し、編集画面遷移時の警告を抑制する。
           setDirty(false);
         }
@@ -892,6 +1326,9 @@ export function VideoForm({
     >
       {slotId ? <input type="hidden" name="slot_id" value={slotId} /> : null}
       {videoId ? <input type="hidden" name="video_id" value={videoId} /> : null}
+      {mode === "edit" && initial.updated_at != null ? (
+        <input type="hidden" name="revision" value={initial.updated_at} />
+      ) : null}
       {mode === "free" || mode === "slot" ? (
         <input
           type="hidden"
@@ -954,6 +1391,48 @@ export function VideoForm({
       ) : null}
 
       <div className={styles.formMain}>
+
+      {draftStale ? (
+        <div className={styles.stepError} role="alert">
+          <Icon name="warning" size={13} aria-hidden />
+          <span>
+            この下書きの保存後に作品が更新されています。現在のDB内容を使うか、古い下書きを復元してください。
+          </span>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={() => {
+              setDraftStale(false);
+              restoreStaleVideoDraft();
+            }}
+          >
+            古い下書きを復元
+          </button>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={() => {
+              setDraftStale(false);
+              clearVideoDraft();
+            }}
+          >
+            現在のDB内容を使う
+          </button>
+        </div>
+      ) : null}
+      {saveError || draftFileError ? (
+        <div className={styles.stepError} role="status" aria-live="polite">
+          <Icon name="warning" size={13} aria-hidden />
+          <span>{saveError ?? draftFileError}</span>
+        </div>
+      ) : restored || lastSavedAt ? (
+        <p className={styles.help} aria-live="polite">
+          {restored ? "前回の下書きを復元しました。" : "下書き保存済み "}
+          {!restored && lastSavedAt
+            ? new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit" }).format(lastSavedAt)
+            : null}
+        </p>
+      ) : null}
 
       {stepError ? (
         <div id="wizard-validation-error" className={styles.stepError} role="alert">
@@ -1124,6 +1603,9 @@ export function VideoForm({
               setSubmitterIconUrl(url);
               setDirty(true);
             }}
+            restoredUploadFile={restoredUploadFile}
+            onUploadFileChange={handleUploadFileChange}
+            onDraftFileError={setDraftFileError}
             disabled={fieldDisabled("submitter.icon_url")}
             isEdit={mode === "edit"}
           />
@@ -1404,7 +1886,7 @@ export function VideoForm({
               className="fn-input"
               placeholder="アーティスト名 - 曲名"
               maxLength={200}
-              disabled={fieldDisabled("video.music")}
+               disabled={fieldDisabled("video.music")}
               aria-describedby={mergeDescribedBy(
                 showPermissionUi &&
                   permissionView &&
@@ -1422,7 +1904,7 @@ export function VideoForm({
               className="fn-input"
               placeholder="楽曲リンク URL (任意, https://...)"
               maxLength={500}
-              disabled={fieldDisabled("video.music")}
+               disabled={fieldDisabled("video.music_reference_url")}
               style={{ marginTop: 6 }}
             />
             {showPermissionUi && permissionView && !videoSectionDisabled ? (
@@ -1567,6 +2049,19 @@ export function VideoForm({
 
         {mode === "slot" ? (
           <input type="hidden" name="part" value={initial.part ?? ""} />
+        ) : schedulingType === "slotted" ? (
+          <div className={cx(styles.field, styles.editableField)}>
+            <label className={styles.label} htmlFor="part-readonly">
+              部
+            </label>
+            <p className={styles.help}>
+              枠に設定された部を自動で使用します。作品編集画面から変更できません。
+            </p>
+            <output id="part-readonly" className="fn-input">
+              {initial.part?.trim() || "未設定"}
+            </output>
+            <input type="hidden" name="part" value={initial.part ?? ""} />
+          </div>
         ) : availableParts.length > 0 ? (
           <div className={cx(styles.field, styles.editableField)}>
             <label className={styles.label} htmlFor="part">
@@ -2011,16 +2506,16 @@ export function VideoForm({
             この項目は、現在の一般作品権限では編集できません。
           </p>
         ) : null}
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            cursor: membersListDisabled ? "default" : "pointer",
-            fontSize: 13,
-          }}
-        >
-          {membersListDisabled ? (
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              cursor: isCollabFieldDisabled ? "default" : "pointer",
+              fontSize: 13,
+            }}
+          >
+          {isCollabFieldDisabled ? (
             <>
               <input
                 type="hidden"
@@ -2057,7 +2552,8 @@ export function VideoForm({
         {isCollab ? (
           <div style={{ marginTop: 12 }}>
             <VideoMembersField
-              initialMembers={initial.members}
+              key={`video-members-${membersFieldsKey}`}
+              initialMembers={members}
               suggestions={memberSuggestions}
               disabled={membersListDisabled}
               chaptersDisabled={chaptersFieldDisabled}
@@ -2317,9 +2813,15 @@ export function VideoForm({
               ? "保存しました。"
               : "提出が完了しました。続けて以下から進めてください。"}
           </div>
+          {result.requiresYoutubeBeforePublish ? (
+            <p className={styles.resultNoticeMessage}>
+              YouTube URL未設定のため、公開前に追加してください。後から編集画面で設定できます。
+            </p>
+          ) : null}
           {result.pendingPublicReflection ? <PublicReflectionDelayNotice /> : null}
           <div className={styles.resultActions}>
-            {result.youtubeVideoId || result.videoId ? (
+            {!result.requiresYoutubeBeforePublish &&
+            (result.youtubeVideoId || result.videoId) ? (
               <Link
                 href={`/${result.youtubeVideoId ?? result.videoId}`}
                 className="fn-btn fn-btn-primary fn-btn-sm"
@@ -2335,7 +2837,15 @@ export function VideoForm({
                 <Icon name="calendar" size={12} aria-hidden /> イベントへ戻る
               </Link>
             ) : null}
-            {mode !== "edit" && result.videoId ? (
+            {result.requiresYoutubeBeforePublish && result.videoId ? (
+              <Link
+                href={`/dashboard/edit/${result.videoId}`}
+                className="fn-btn fn-btn-primary fn-btn-sm"
+              >
+                <Icon name="edit" size={12} aria-hidden /> YouTube URLを追加する
+              </Link>
+            ) : null}
+            {mode !== "edit" && !result.requiresYoutubeBeforePublish && result.videoId ? (
               <Link
                 href={`/dashboard/edit/${result.videoId}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"

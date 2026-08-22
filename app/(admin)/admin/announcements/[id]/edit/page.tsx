@@ -48,6 +48,7 @@ export default async function AdminAnnouncementEditPage({
           mode="edit"
           initial={{
             id: row.id,
+            base_updated_at: row.updated_at,
             title: row.title,
             body: row.body,
             severity: (row.severity ?? "info") as "info" | "warning" | "danger",

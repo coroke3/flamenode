@@ -1,3 +1,7 @@
+// Keep this pure domain module directly runnable by the Node contract tests;
+// unlike Next's server graph, those tests do not install the `@/` alias.
+import { isCanonicalXId } from "../utils/xid.ts";
+
 export type EventStaffPreset =
   | "owner"
   | "manager"
@@ -27,7 +31,7 @@ export function isEventOwner(
 export function validateEventStaffSubject(input: {
   xUserId: string | null | undefined;
 }): void {
-  if (!input.xUserId?.trim()) {
+  if (!isCanonicalXId(input.xUserId)) {
     throw new Error("イベントスタッフには X ID が必要です。");
   }
 }

@@ -21,15 +21,6 @@
     box-shadow 160ms ease;
 }
 
-.choiceCard::before {
-  content: none;
-  position: absolute;
-  inset: 0;
-  background-image: none;
-  opacity: 0.5;
-  pointer-events: none;
-}
-
 .choiceCard:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-soft);
@@ -260,10 +251,10 @@
 }
 
 .slotRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .slotRow > :global(.fn-pc-slot) {
@@ -311,6 +302,7 @@
   }
 
   .slotRow {
+    display: flex;
     flex-direction: column;
     align-items: stretch;
   }

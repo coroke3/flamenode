@@ -59,6 +59,7 @@ export default async function ManageEventVideoDetailPage({
 
   const video = await fetchEventVideoReviewDetail(db, id, videoId);
   if (!video) notFound();
+  const youtubeVideoId = video.youtube_video_id?.trim() || null;
 
   const isAdmin = user.role === "admin";
   const canReview = canEditEventFromSnapshot(
@@ -87,6 +88,8 @@ export default async function ManageEventVideoDetailPage({
               <VideoApproveActions
                 videoId={video.id}
                 currentStatus={video.visibility_status}
+                sourceType={video.source_type}
+                youtubeVideoId={video.youtube_video_id}
                 approveAction={approveManageVideoPublic}
                 approveAndNextAction={approveManageVideoPublicAndNext}
                 hiddenFields={{ event_id: id }}
@@ -95,6 +98,8 @@ export default async function ManageEventVideoDetailPage({
                 eventId={id}
                 videoId={video.id}
                 currentStatus={video.visibility_status}
+                sourceType={video.source_type}
+                youtubeVideoId={video.youtube_video_id}
               />
             </>
           ) : (
@@ -111,9 +116,9 @@ export default async function ManageEventVideoDetailPage({
             >
               <Icon name="edit" size={11} aria-hidden /> 作品内容を確認
             </Link>
-            {video.youtube_video_id ? (
+            {youtubeVideoId ? (
               <Link
-                href={`/${video.youtube_video_id}`}
+                href={`/${youtubeVideoId}`}
                 className="fn-btn fn-btn-ghost fn-btn-sm"
               >
                 公開ページ

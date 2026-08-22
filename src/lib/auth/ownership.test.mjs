@@ -280,7 +280,7 @@ test("privilegeMode: can_edit 合作は所有者 (isCollaboratorOwner)", () => {
 test("ownership.ts: normal モードで eventStaffHasExactVideoPermission を呼ばない", () => {
   const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
   const normalBlock = source.match(
-    /if \(privilegeMode === "normal"\)\s*\{[\s\S]*?\}\s*else if \(privilegeMode === "event"\)/,
+    /export async function canEditVideo\([\s\S]*?if \(privilegeMode === "normal"\)[\s\S]*?\r?\n\s*let ownerPolicyKeys/,
   )?.[0];
   assert.ok(normalBlock, "normal privilege block not found");
   assert.doesNotMatch(
@@ -293,7 +293,7 @@ test("ownership.ts: normal モードで eventStaffHasExactVideoPermission を呼
 test("ownership.ts: normal モードは非所有者を早期拒否する", () => {
   const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
   const normalBlock = source.match(
-    /if \(privilegeMode === "normal"\)\s*\{[\s\S]*?\}\s*else if \(privilegeMode === "event"\)/,
+    /export async function canEditVideo\([\s\S]*?if \(privilegeMode === "normal"\)[\s\S]*?\r?\n\s*let ownerPolicyKeys/,
   )?.[0];
   assert.ok(normalBlock, "normal privilege block not found");
   assert.match(normalBlock, /if \(!ownership\.isOwner\) return false/);
@@ -375,4 +375,13 @@ test("canEditVideo: normal モードは general fields で section 判定", () =
     source,
     /approved\.includes\(video\.creator_x_user_id\)[\s\S]*return true/,
   );
+});
+
+test("canEditVideo: normal モードは youtube section を一般fieldから許可しない", () => {
+  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const normalBlock = source.match(
+    /if \(privilegeMode === "normal"\)[\s\S]*?\n\s*let ownerPolicyKeys/,
+  )?.[0];
+  assert.ok(normalBlock, "normal privilege block not found");
+  assert.match(normalBlock, /requiredKey === "video\.youtube_id"\) return false/);
 });

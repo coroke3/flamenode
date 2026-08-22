@@ -152,7 +152,7 @@ export function AdminVideoMembersForm({
           詳細へ戻る
         </Link>
         <Link
-          href={`/${video.youtube_video_id ?? video.id}`}
+          href={`/${video.youtube_video_id?.trim() || video.id}`}
           className="fn-btn fn-btn-ghost"
           target="_blank"
           rel="noopener noreferrer"

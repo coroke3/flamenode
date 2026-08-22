@@ -91,7 +91,15 @@ test("slot生成は件数を行配列作成前に検証し、UIとserverは同�
   assert.match(formSource, /from "@\/lib\/slots\/atomicLimits"/);
   assert.match(
     source,
-    /count: z\.coerce\.number\(\)\.min\(1\)\.max\(MAX_SLOT_BATCH_GENERATE_COUNT\)/,
+    /count:\s*z\.coerce[\s\S]*?\.number\(\)[\s\S]*?\.int\(\)[\s\S]*?\.min\(1\)[\s\S]*?\.max\(MAX_SLOT_BATCH_GENERATE_COUNT\)/,
+  );
+  assert.match(
+    source,
+    /interval_minutes: z\.coerce\.number\(\)\.int\(\)\.min\(1\)\.max\(60 \* 24\)/,
+  );
+  assert.match(
+    source,
+    /start_index: z\.coerce\.number\(\)\.int\(\)\.min\(0\)\.max\(9999\)/,
   );
   assert.match(formSource, /max=\{MAX_SLOT_BATCH_GENERATE_COUNT\}/);
   assert.match(formSource, /defaultValue=\{10\}/);
@@ -116,10 +124,35 @@ test("releaseSlotはdomain上限、batch group queryはatomic chunk上限で打�
   );
   assert.match(
     source,
-    /inArray\(slots\.reservation_group_id, groupIds\)[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/,
+    /inArray\(slots\.reservation_group_id, groupValues\)[\s\S]*?\.limit\(MAX_ATOMIC_SLOT_ROWS \+ 1\)/,
   );
   assert.match(source, /from "@\/lib\/slots\/versionedPredicate"/);
   assert.match(source, /versionedSlotWhere/);
+});
+
+test("legacy reservation group whitespace is queried by its persisted value", () => {
+  const releaseSlotBlock =
+    source.match(
+      /export async function releaseSlot[\s\S]*?(?=async function releaseRows)/,
+    )?.[0] ?? "";
+  assert.match(releaseSlotBlock, /const groupValue = row\.reservation_group_id;/);
+  assert.match(
+    releaseSlotBlock,
+    /eq\(slots\.reservation_group_id, groupValue!\)/,
+  );
+  const batchBlock =
+    source.match(
+      /export async function batchReleaseReservedSlots[\s\S]*?(?=export async function batchUpdateSlotLabels)/,
+    )?.[0] ?? "";
+  assert.match(batchBlock, /const groupValues = Array\.from/);
+  assert.match(
+    batchBlock,
+    /inArray\(slots\.reservation_group_id, groupValues\)/,
+  );
+  assert.match(
+    batchBlock,
+    /row\.reservation_group_id === groupValue/,
+  );
 });
 
 test("releaseSlotはMAX_SLOTS_PER_VIDEOまでのgroup loadでMAX_ATOMIC_SLOT_ROWSを使わない", () => {

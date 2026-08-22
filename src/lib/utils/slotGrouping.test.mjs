@@ -474,3 +474,23 @@ test("annotateReservationGroups: 件数枠(null start_time)も全行返す", () 
   assert.equal(output[0].group_size, 2);
   assert.equal(output[2].group_id, null);
 });
+
+test("collapseReservationGroups: available mixed with reserved/submitted is integrity_error", () => {
+  for (const statuses of [
+    ["available", "reserved"],
+    ["available", "submitted"],
+    ["available", "reserved", "submitted"],
+  ]) {
+    const output = collapseReservationGroups(
+      statuses.map((status, index) => ({
+        ...baseSlot,
+        id: `mixed-${index}`,
+        start_time: 100 + index * 100,
+        sort_order: index,
+        group_key: "mixed",
+        status,
+      })),
+    );
+    assert.equal(output[0]?.integrity_error, "mixed_status");
+  }
+});

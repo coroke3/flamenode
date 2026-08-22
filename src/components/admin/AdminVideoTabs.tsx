@@ -18,7 +18,7 @@ export function AdminVideoTabs({
   active?: AdminVideoTabKey;
 }) {
   const id = encodeURIComponent(videoId);
-  const publicId = encodeURIComponent(youtubeVideoId || videoId);
+  const publicId = encodeURIComponent(youtubeVideoId?.trim() || videoId);
   return (
     <AdminResourceTabs
       active={active}

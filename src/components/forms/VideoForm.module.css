@@ -4,7 +4,6 @@
   gap: clamp(18px, 3vw, 28px);
   align-items: start;
   --form-card-radius: var(--r-card, var(--radius-md));
-  --form-card-shadow: 0 12px 28px -24px color-mix(in srgb, var(--text-primary) 42%, transparent);
   --form-section-bg: color-mix(in srgb, var(--bg-surface) 96%, var(--bg-elevated));
 }
 
@@ -21,26 +20,17 @@
   border-radius: var(--form-card-radius);
   padding: 16px 18px 18px;
   overflow: hidden;
-  box-shadow: var(--form-card-shadow);
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--accent-primary) 2%, transparent), transparent 38%),
-    var(--form-section-bg);
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+  background: var(--form-section-bg, var(--bg-surface));
+  transition: border-color 160ms ease;
 }
 
 .section:hover {
   border-color: color-mix(in srgb, var(--accent-primary) 26%, var(--hairline, var(--border-subtle)));
-  box-shadow: 0 16px 32px -28px color-mix(in srgb, var(--text-primary) 56%, transparent);
 }
 
 .section:focus-within {
   border-color: var(--accent-primary);
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent),
-    0 12px 28px -24px color-mix(in srgb, var(--text-primary) 42%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent);
 }
 
 .sectionTitle {
@@ -59,23 +49,7 @@
   border-bottom: 1px solid var(--hairline, var(--border-subtle));
   color: var(--text-primary);
   text-wrap: balance;
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--accent-primary) 8%, transparent),
-      transparent 42%
-    ),
-    color-mix(in srgb, var(--bg-elevated) 72%, transparent);
-}
-
-.sectionTitle::before {
-  content: "";
-  width: 3px;
-  height: 22px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--accent-primary);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-primary) 38%, transparent);
+  background: var(--bg-elevated);
 }
 
 .field {
@@ -174,11 +148,6 @@
   flex-shrink: 0;
 }
 
-.submitDock :global(.fn-btn-primary),
-.wizardDock :global(.fn-btn-primary) {
-  box-shadow: 0 8px 18px -14px color-mix(in srgb, var(--accent-primary) 78%, transparent);
-}
-
 .formEditMode {
   --fn-submit-dock-h: 72px;
   padding-bottom: calc(var(--fn-submit-dock-h) + env(safe-area-inset-bottom, 0px));
@@ -195,23 +164,6 @@
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-top: 1px solid var(--border-subtle);
-  box-shadow: 0 -12px 28px -24px color-mix(in srgb, var(--text-primary) 55%, transparent);
-}
-
-.formEditMode .submitDock::before,
-.wizardDock::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--accent-primary) 64%, transparent) 22%,
-    color-mix(in srgb, var(--accent-primary) 22%, transparent) 78%,
-    transparent
-  );
-  pointer-events: none;
 }
 
 /* ウィザード操作は画面幅に関係なく固定Dockへ統一。
@@ -228,16 +180,13 @@
   left: 0;
   right: 0;
   z-index: 80;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-surface) 86%, transparent),
-      color-mix(in srgb, var(--bg-base) 96%, transparent)
-    );
+  /* iPad Safariの固定レイヤーでも子要素を確実にタップ対象にする。 */
+  pointer-events: auto;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--bg-base) 96%, var(--bg-surface));
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-top: 1px solid var(--border-subtle);
-  box-shadow: 0 -16px 34px -26px color-mix(in srgb, var(--text-primary) 66%, transparent);
 }
 
 .wizardDockInner {
@@ -278,6 +227,19 @@
   flex-shrink: 0;
 }
 
+.submitDock,
+.wizardDock {
+  pointer-events: auto;
+}
+
+.submitDock :global(.fn-btn),
+.wizardDock :global(.fn-btn) {
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .preview {
   display: flex;
   gap: 12px;
@@ -286,7 +248,6 @@
   border-radius: var(--r-card, var(--radius-md));
   background-color: var(--bg-elevated);
   border: 1px solid var(--hairline, var(--border-subtle));
-  box-shadow: var(--form-card-shadow);
 }
 
 .previewThumb {
@@ -334,18 +295,14 @@
   border-radius: var(--form-card-radius);
   background: var(--bg-surface);
   overflow: hidden;
-  box-shadow: var(--form-card-shadow);
 }
 
 .previewCard {
-  transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease;
+  transition: border-color 160ms ease;
 }
 
 .previewCard:hover {
   border-color: color-mix(in srgb, var(--accent-primary) 34%, var(--hairline, var(--border-subtle)));
-  box-shadow: 0 18px 36px -28px color-mix(in srgb, var(--text-primary) 60%, transparent);
 }
 
 .previewVisual {
@@ -355,25 +312,7 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  background:
-    radial-gradient(
-      circle at 18% 18%,
-      color-mix(in srgb, var(--accent-primary) 28%, transparent),
-      transparent 42%
-    ),
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent-primary) 14%, var(--bg-inset, var(--bg-elevated))),
-      var(--bg-inset, var(--bg-elevated))
-    );
-}
-
-.previewVisual::after {
-  content: none;
-  position: absolute;
-  inset: 0;
-  background-image: none;
-  pointer-events: none;
+  background: var(--bg-inset, var(--bg-elevated));
 }
 
 .previewVisual img {
@@ -637,10 +576,7 @@
 
 .section :global(.fn-card) {
   border-radius: var(--r-card, var(--radius-md));
-  box-shadow: 0 8px 20px -22px color-mix(in srgb, var(--text-primary) 42%, transparent);
-  transition:
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+  transition: border-color 140ms ease;
 }
 
 .section :global(.fn-card:focus-within) {
@@ -765,22 +701,6 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--r-card, var(--radius-md));
   background: color-mix(in srgb, var(--bg-elevated) 62%, var(--bg-surface));
-  box-shadow: 0 10px 24px -24px color-mix(in srgb, var(--text-primary) 52%, transparent);
-}
-
-.stepProgress::before {
-  content: "";
-  position: absolute;
-  inset: 0 18% auto;
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--accent-primary) 58%, transparent),
-    transparent
-  );
-  pointer-events: none;
 }
 
 .stepProgressList {
@@ -906,7 +826,6 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  box-shadow: 0 8px 20px -18px color-mix(in srgb, var(--accent-danger) 60%, transparent);
 }
 
 .slotDoneCard {
@@ -1074,11 +993,8 @@
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--accent-primary) 72%, var(--border-subtle));
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 12%, transparent), transparent 58%),
-    var(--accent-primary-soft);
+  background: var(--accent-primary-soft);
   color: var(--text-primary);
-  box-shadow: 0 12px 26px -24px color-mix(in srgb, var(--accent-primary) 72%, transparent);
 }
 
 .resultNoticeHeader {
@@ -1231,5 +1147,36 @@
 @media (max-width: 640px) {
   .confirmYoutube {
     grid-template-columns: 1fr;
+  }
+}
+
+.resultNoticeMessage {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/*
+ * iPadOS Safariでは、backdrop-filterを持つfixed子孫がフォーム内にあると
+ * 見えているボタンのタップがスクロールレイヤーへ吸われることがある。
+ * タッチ端末だけは不透明背景へフォールバックし、操作可能性を優先する。
+ */
+@supports (-webkit-touch-callout: none) {
+  .formEditMode .submitDock,
+  .formMobileDock .submitDock,
+  .wizardDock {
+    background: var(--bg-base);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* iPadのタッチポインタは640pxを超えることがあるため、幅ではなく入力方式でも
+   主要操作のタップ領域を44px以上にそろえる。 */
+@media (hover: none) and (pointer: coarse) {
+  .submitDock :global(.fn-btn),
+  .wizardDock :global(.fn-btn) {
+    min-height: var(--fn-control-h-touch);
   }
 }

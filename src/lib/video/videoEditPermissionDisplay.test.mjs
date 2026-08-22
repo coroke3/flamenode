@@ -36,10 +36,10 @@ test("表示: 許可項目は editable、未許可は locked のまま reason �
   assert.equal(vm.basics.editable, true);
   assert.equal(formatPermissionBadge(vm.basics).text, "編集可能");
   assert.equal(vm.youtube.editable, false);
-  assert.equal(vm.youtube.reason, "admin_only");
+  assert.equal(vm.youtube.reason, "owner_policy_denied");
   assert.match(
     formatVideoFieldPermissionReason(vm.youtube),
-    /管理者権限でのみ変更できます/,
+    /一般作品権限では編集できません/,
   );
   assert.doesNotMatch(
     formatVideoFieldPermissionReason(vm.youtube),
@@ -139,4 +139,11 @@ test("admin 編集導線は privileged=admin を付ける", () => {
     "utf8",
   );
   assert.match(tabs, /privileged=admin/);
+  assert.match(tabs, /youtubeVideoId\?\.trim\(\) \|\| videoId/);
+  const editPage = readFileSync(
+    new URL("../../../app/(auth)/dashboard/edit/[id]/page.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(editPage, /const youtubeVideoId = video\.youtube_video_id\?\.trim\(\) \|\| null/);
+  assert.match(editPage, /youtube_url: youtubeVideoId/);
 });

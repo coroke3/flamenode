@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Icon } from "@/components/ui/Icon";
+import styles from "./VideoMembersField.module.css";
 import { normalizeXId } from "@/lib/utils/xid";
 import {
   chapterKey,
@@ -21,7 +22,6 @@ import {
   applyVideoCollaboratorPermissionsBatch,
 } from "@/lib/actions/video-collab-perms";
 import { MAX_COLLABORATOR_PERMISSION_BATCH } from "@/lib/video/atomicLimits";
-import styles from "./VideoForm.module.css";
 
 export type {
   VideoMemberChapterInput,
@@ -53,6 +53,7 @@ const EMPTY_ROW: VideoMemberInput = {
   comment: "",
   chapters: [],
 };
+const REMOTE_SEARCH_MIN_CHARS = 2;
 
 function chapterLabelForMember(member: VideoMemberInput): string {
   const xid = normalizeXId(member.x_user_id);
@@ -206,7 +207,12 @@ export function VideoMembersField({
 
   React.useEffect(() => {
     const q = searchQuery.trim();
-    if (disabled || q.length < 1) {
+    const searchableChars = q
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/^[^\p{L}\p{N}_]+/u, "")
+      .replace(/[^\p{L}\p{N}_]/gu, "");
+    if (disabled || searchableChars.length < REMOTE_SEARCH_MIN_CHARS) {
       suggestionRequestIdRef.current += 1;
       loadMoreControllerRef.current?.abort();
       loadMoreControllerRef.current = null;
@@ -220,7 +226,7 @@ export function VideoMembersField({
     const controller = new AbortController();
     const t = window.setTimeout(() => {
       void fetchSuggestions(q, 0, controller.signal);
-    }, 150);
+    }, 250);
     return () => {
       controller.abort();
       suggestionRequestIdRef.current += 1;
@@ -722,7 +728,7 @@ export function VideoMembersField({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className={styles.root}>
       <input type="hidden" name={hiddenName} value={payload} />
       <datalist id="member-name-suggestions">
         {visibleSuggestions.map((s) => (
@@ -1069,7 +1075,6 @@ export function VideoMembersField({
                   <a
                     href={collabPermsHref}
                     className="fn-btn fn-btn-ghost fn-btn-sm"
-                    style={{ padding: "2px 8px", minHeight: 28 }}
                   >
                     編集権を管理
                   </a>
@@ -1113,19 +1118,51 @@ export function VideoMembersField({
         ) : null}
       </div>
       {bulkWarning ? (
-        <p role="alert" style={{ margin: 0, fontSize: 12, color: "var(--accent-warning)" }}>
+        <p role="alert" className={styles.bulkWarning}>
           {bulkWarning}
         </p>
       ) : null}
 
-      <details style={{ marginTop: 6 }}>
-        <summary style={{ fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}>
+      <details className={styles.bulkDetails}>
+        <summary className={styles.bulkDetailsSummary}>
           スプレッドシート / AIから一括入力
         </summary>
-        <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
-          <section style={{ display: "grid", gap: 4 }}>
-            <strong style={{ fontSize: 12 }}>列の説明</strong>
-            <ol className="fn-text-muted-sm" style={{ margin: 0, paddingLeft: 18 }}>
+        <div className={styles.bulkContent}>
+          <section className={styles.sampleSection}>
+            <strong className={styles.bulkLabel}>列の説明</strong>
+            <div className={`fn-table-scroll ${styles.sampleTableScroll}`}>
+              <table className={styles.sampleTable} aria-label="メンバー一括入力の例">
+                <thead>
+                  <tr>
+                    <th>ユーザー名</th>
+                    <th>X ID</th>
+                    <th>チャプター</th>
+                    <th>役職</th>
+                    <th>コメント</th>
+                    <th>権限</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Alice</td>
+                    <td>alice_x</td>
+                    <td>0:12;1:05</td>
+                    <td>映像</td>
+                    <td>モーション担当</td>
+                    <td>ON</td>
+                  </tr>
+                  <tr>
+                    <td>Bob</td>
+                    <td>bob123</td>
+                    <td>0:30</td>
+                    <td>イラスト</td>
+                    <td>背景担当</td>
+                    <td>OFF</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <ol className={`fn-text-muted-sm ${styles.bulkHintList}`}>
               <li>ユーザー名</li>
               <li>X ID（@なし・大文字小文字はどちらでも可）</li>
               <li>チャプター（m:ss / mm:ss。複数は ; 区切り、例: 0:12;1:05）</li>
@@ -1134,21 +1171,20 @@ export function VideoMembersField({
               <li>権限（ON / OFF / 空欄）</li>
             </ol>
             {!permissionTargetVideoId ? (
-              <p className="fn-text-muted-sm" style={{ margin: 0 }}>
+              <p className={`fn-text-muted-sm ${styles.bulkHint}`}>
                 権限列は作品作成後、作品編集画面から反映できます。この画面ではメンバー情報だけ取り込みます。
               </p>
             ) : null}
           </section>
 
-          <section style={{ display: "grid", gap: 6 }}>
+          <section className={styles.bulkSection}>
             <label className="fn-label" htmlFor="members-tsv-input">
               TSV貼り付け（スプレッドシートからそのまま貼り付けできます）
             </label>
             <textarea
               id="members-tsv-input"
-              className="fn-input"
+              className={`${styles.bulkTextarea} fn-input`}
               rows={5}
-              style={{ fontFamily: "monospace", fontSize: 12 }}
               placeholder={"例:\nAlice\talice_x\t1:23\t映像\tモーション担当\tON\nBob\tbob123\t12:05\tイラスト\t背景担当\tOFF"}
               value={bulkSource.text}
               onChange={(e) => setBulkSource((prev) => ({ ...prev, text: e.target.value }))}
@@ -1165,8 +1201,8 @@ export function VideoMembersField({
             </button>
           </section>
 
-          <section style={{ display: "grid", gap: 6 }}>
-            <strong style={{ fontSize: 12 }}>AIでTSVを作る</strong>
+          <section className={styles.bulkSection}>
+            <strong className={styles.bulkLabel}>AIでTSVを作る</strong>
             <button
               type="button"
               className="fn-btn fn-btn-ghost fn-btn-sm"
@@ -1176,14 +1212,13 @@ export function VideoMembersField({
               <Icon name="copy" size={11} aria-hidden />
               {copied && copiedLabel === "AIプロンプト" ? "コピーしました" : "プロンプトをコピー"}
             </button>
-            <p className="fn-text-muted-sm" style={{ margin: 0 }}>
+            <p className={`fn-text-muted-sm ${styles.bulkHint}`}>
               コピーしたプロンプトをAIエージェントに渡し、出力されたTSVを下に貼り付けてください。
             </p>
             <textarea
               aria-label="AIが出力したTSV"
-              className="fn-input"
+              className={`${styles.bulkTextarea} fn-input`}
               rows={4}
-              style={{ fontFamily: "monospace", fontSize: 12 }}
               placeholder={"AI出力のTSVをここへ貼り付け"}
               value={aiText}
               onChange={(e) => setAiText(e.target.value)}
@@ -1200,25 +1235,25 @@ export function VideoMembersField({
           </section>
 
           {bulkPreview ? (
-            <section style={{ display: "grid", gap: 8 }}>
-              <strong style={{ fontSize: 12 }}>確認（{bulkPreview.members.length}行）</strong>
+            <section className={styles.bulkPreviewSection}>
+              <strong className={styles.bulkLabel}>確認（{bulkPreview.members.length}行）</strong>
               {bulkPreview.members.length === 0 ? (
-                <p className="fn-text-muted-sm" style={{ margin: 0 }}>
+                <p className={`fn-text-muted-sm ${styles.bulkHint}`}>
                   有効な行がありません。
                 </p>
               ) : (
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 640 }}>
+                <div className={`fn-table-scroll ${styles.sampleTableScroll}`}>
+                  <table className={styles.bulkPreviewTable}>
                     <thead>
-                      <tr style={{ textAlign: "left", color: "var(--text-muted)" }}>
-                        <th style={{ padding: 4 }}>#</th>
-                        <th style={{ padding: 4 }}>ユーザー名</th>
-                        <th style={{ padding: 4 }}>X ID</th>
-                        <th style={{ padding: 4 }}>チャプター</th>
-                        <th style={{ padding: 4 }}>役職</th>
-                        <th style={{ padding: 4 }}>コメント</th>
-                        <th style={{ padding: 4 }}>権限</th>
-                        <th style={{ padding: 4 }}>検証結果</th>
+                      <tr>
+                        <th>#</th>
+                        <th>ユーザー名</th>
+                        <th>X ID</th>
+                        <th>チャプター</th>
+                        <th>役職</th>
+                        <th>コメント</th>
+                        <th>権限</th>
+                        <th>検証結果</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1233,17 +1268,17 @@ export function VideoMembersField({
                               ? "OFF"
                               : "変更なし";
                         return (
-                          <tr key={index} style={{ borderTop: "1px solid var(--border-subtle)" }}>
-                            <td style={{ padding: 4 }}>{index + 1}</td>
-                            <td style={{ padding: 4 }}>{member.name}</td>
-                            <td style={{ padding: 4 }}>{xid ? `@${xid}` : ""}</td>
-                            <td style={{ padding: 4 }}>
+                          <tr key={index}>
+                            <td>{index + 1}</td>
+                            <td>{member.name}</td>
+                            <td>{xid ? `@${xid}` : ""}</td>
+                            <td>
                               {serializeChaptersCell(member.chapters ?? [])}
                             </td>
-                            <td style={{ padding: 4 }}>{member.role}</td>
-                            <td style={{ padding: 4 }}>{member.comment}</td>
-                            <td style={{ padding: 4 }}>{permissionText}</td>
-                            <td style={{ padding: 4, color: invalid ? "var(--accent-warning)" : undefined }}>
+                            <td>{member.role}</td>
+                            <td>{member.comment}</td>
+                            <td>{permissionText}</td>
+                            <td className={invalid ? styles.bulkPreviewInvalid : undefined}>
                               {invalid
                                 ? "エラー: 名前とX IDが空"
                                 : duplicate
@@ -1257,7 +1292,7 @@ export function VideoMembersField({
                   </table>
                 </div>
               )}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className={styles.bulkActions}>
                 <button
                   type="button"
                   className="fn-btn fn-btn-primary fn-btn-sm"

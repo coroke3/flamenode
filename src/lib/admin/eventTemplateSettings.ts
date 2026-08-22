@@ -115,6 +115,10 @@ function finiteSnapshotNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function binarySnapshotNumber(value: unknown, fallback: 0 | 1): 0 | 1 {
+  return value === 0 || value === 1 ? value : fallback;
+}
+
 function nullablePositiveInteger(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   const normalized = Math.floor(value);
@@ -273,15 +277,15 @@ export function parseEventTemplateSnapshot(
       icon_url: nullableSnapshotString(parsed.icon_url),
       img_url: nullableSnapshotString(parsed.img_url),
       accent_color: nullableSnapshotString(parsed.accent_color),
-      allow_user_video_event_links: finiteSnapshotNumber(
+      allow_user_video_event_links: binarySnapshotNumber(
         parsed.allow_user_video_event_links,
         0,
       ),
-      allow_unslotted_posts: finiteSnapshotNumber(
+      allow_unslotted_posts: binarySnapshotNumber(
         parsed.allow_unslotted_posts,
         0,
       ),
-      allow_user_video_edits: finiteSnapshotNumber(
+      allow_user_video_edits: binarySnapshotNumber(
         parsed.allow_user_video_edits,
         0,
       ),

@@ -18,6 +18,8 @@ type ApproveAction = (formData: FormData) => Promise<ApproveActionResult>;
 interface VideoApproveActionsProps {
   videoId: string;
   currentStatus: string;
+  sourceType?: string | null;
+  youtubeVideoId?: string | null;
   approveAction: ApproveAction;
   approveAndNextAction: ApproveAction;
   hiddenFields?: Record<string, string>;
@@ -29,6 +31,8 @@ const COMMUNICATION_ERROR_MESSAGE =
 export function VideoApproveActions({
   videoId,
   currentStatus,
+  sourceType,
+  youtubeVideoId = null,
   approveAction,
   approveAndNextAction,
   hiddenFields,
@@ -44,6 +48,15 @@ export function VideoApproveActions({
     React.useState(false);
 
   if (currentStatus !== "pending") return null;
+
+  const youtubeRequired = sourceType === "youtube" && !youtubeVideoId?.trim();
+  if (youtubeRequired) {
+    return (
+      <p role="status" style={{ color: "var(--accent-warning)", fontSize: 12 }}>
+        YouTube URL未設定のため公開できません。投稿者に追加を依頼してください。
+      </p>
+    );
+  }
 
   const run = (mode: "approve" | "next") => {
     if (pendingMode || pendingModeRef.current) return;

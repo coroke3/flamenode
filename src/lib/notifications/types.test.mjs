@@ -28,4 +28,13 @@ test("getNotificationSeverity", () => {
   assert.equal(getNotificationSeverity("video_voided"), "critical");
   assert.equal(getNotificationSeverity("video_submitted"), "info");
   assert.equal(getNotificationSeverity("welcome_account"), "info");
+  assert.equal(getNotificationSeverity("slot_submission_released"), "warning");
+});
+
+test("slot submission released is a slot notification", () => {
+  assert.equal(categorizeNotificationType("slot_submission_released"), "slot");
+  assert.equal(
+    getNotificationTypeLabel("slot_submission_released"),
+    "枠の作品提出が解除されました",
+  );
 });

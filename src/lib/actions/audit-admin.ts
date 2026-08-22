@@ -126,7 +126,7 @@ const restoreSchema = z.object({
   audit_id: z.string().trim().min(1),
   reason: z.string().trim().min(1).max(500),
   confirm_text: z.string().trim().optional(),
-  force_overwrite: z.coerce.number().min(0).max(1).default(0),
+  force_overwrite: z.coerce.number().int().min(0).max(1).default(0),
 });
 
 export interface RestoreAuditLogActionResult {

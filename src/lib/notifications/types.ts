@@ -36,6 +36,7 @@ const TYPE_LABELS: Record<string, string> = {
   slot_video_submitted: "枠投稿を受け付けました",
   slot_deadline_reminder: "投稿締切が近づいています",
   slot_force_released: "枠が解放されました",
+  slot_submission_released: "枠の作品提出が解除されました",
   slot_voided: "枠が無効になりました",
   x_id_approved: "X ID が承認されました",
   x_id_rejected: "X ID が却下されました",
@@ -51,6 +52,7 @@ const TYPE_LABELS: Record<string, string> = {
 const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {
   video_voided: "critical",
   slot_force_released: "warning",
+  slot_submission_released: "warning",
   x_id_rejected: "warning",
   moderation_created: "warning",
   slot_deadline_reminder: "warning",

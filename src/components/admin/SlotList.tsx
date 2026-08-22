@@ -14,9 +14,15 @@ import {
   deleteSlot,
   releaseSlot,
 } from "@/lib/actions/slot-admin";
-import { forceReleaseSubmittedSlot } from "@/lib/actions/slot-admin-danger";
+import {
+  forceReleaseSubmittedSlot,
+  releaseSubmittedVideoKeepReservation,
+} from "@/lib/actions/slot-admin-danger";
 import { formatUnix } from "@/lib/utils/format";
-import { buildSlotParts } from "@/lib/utils/slotGrouping";
+import {
+  buildSlotParts,
+  resolveSlotPartDisplayLabel,
+} from "@/lib/utils/slotGrouping";
 
 export interface SlotRowLite {
   id: string;
@@ -51,6 +57,7 @@ const STATUS_BADGE_CLASS: Record<SlotRowLite["status"], string> = {
 
 type ConfirmState =
   | { kind: "release"; id: string }
+  | { kind: "release-submitted-video"; id: string }
   | { kind: "force-release-submitted"; id: string }
   | { kind: "delete"; id: string }
   | { kind: "batch-delete" }
@@ -62,14 +69,16 @@ export function SlotList({
   eventId,
   slots,
   slotPartGapSec = 15 * 60,
+  parts = [],
   variant = "admin",
-  canForceReleaseSubmitted = false,
+  canManageSubmittedSlots = false,
 }: {
   eventId: string;
   slots: SlotRowLite[];
   slotPartGapSec?: number;
+  parts?: readonly string[];
   variant?: "admin" | "manage";
-  canForceReleaseSubmitted?: boolean;
+  canManageSubmittedSlots?: boolean;
 }): React.ReactElement {
   const isManage = variant === "manage";
   const router = useRouter();
@@ -86,11 +95,13 @@ export function SlotList({
   const partLabels = React.useMemo(() => {
     const map = new Map<string, string>();
     for (const part of buildSlotParts(slots, slotPartGapSec)) {
-      const label = part.is_timeless ? "件数枠" : `第${part.index}部`;
+      const label = part.is_timeless
+        ? "件数枠"
+        : resolveSlotPartDisplayLabel(part.index, parts);
       for (const row of part.rows) map.set(row.id, label);
     }
     return map;
-  }, [slots, slotPartGapSec]);
+  }, [slots, slotPartGapSec, parts]);
 
   const run = async (
     action: (formData: FormData) => Promise<{
@@ -104,20 +115,29 @@ export function SlotList({
     setBusy(true);
     setError(null);
     setSuccess(null);
-    const result = await action(formData);
-    if (!result.ok) {
-      setError(result.message ?? "操作に失敗しました。");
-    } else {
-      setSelected(new Set());
-      if (okMessage || result.message) {
-        setSuccess({
-          message: result.message ?? okMessage ?? "操作が完了しました。",
-          pendingPublicReflection: result.pendingPublicReflection,
-        });
+    try {
+      const result = await action(formData);
+      if (!result.ok) {
+        setError(result.message ?? "枠の操作に失敗しました。");
+      } else {
+        setSelected(new Set());
+        if (okMessage || result.message) {
+          setSuccess({
+            message: result.message ?? okMessage ?? "枠を更新しました。",
+            pendingPublicReflection: result.pendingPublicReflection,
+          });
+        }
       }
+      router.refresh();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "枠の操作中に予期しないエラーが発生しました。",
+      );
+    } finally {
+      setBusy(false);
     }
-    router.refresh();
-    setBusy(false);
   };
 
   const selectedIds = [...selected];
@@ -350,9 +370,23 @@ export function SlotList({
                     )}
                   </td>
                   <td>
+                    {isSubmitted && canManageSubmittedSlots ? (
+                      <button
+                        className="fn-btn fn-btn-ghost fn-btn-sm"
+                        disabled={busy}
+                        onClick={() =>
+                          setConfirm({
+                            kind: "release-submitted-video",
+                            id: slot.id,
+                          })
+                        }
+                      >
+                        作品のみ解放
+                      </button>
+                    ) : null}
                     <button
                       className="fn-btn fn-btn-ghost fn-btn-sm"
-                      disabled={busy || (isSubmitted && !canForceReleaseSubmitted)}
+                      disabled={busy || (isSubmitted && !canManageSubmittedSlots)}
                       onClick={() =>
                         setConfirm({
                           kind:
@@ -382,17 +416,25 @@ export function SlotList({
       <ConfirmDialog
         open={confirm !== null}
         title={
-          confirm?.kind === "force-release-submitted"
-            ? "提出済み枠を強制解放しますか?"
-            : "枠操作を実行しますか?"
+          confirm?.kind === "release-submitted-video"
+            ? "作品の提出を解除しますか？"
+            : confirm?.kind === "force-release-submitted"
+            ? "提出済み枠を強制解放しますか？"
+            : "枠操作を実行しますか？"
         }
         message={
-          confirm?.kind === "force-release-submitted"
+          confirm?.kind === "release-submitted-video"
+            ? `枠の確保状態は維持したまま、現在提出されている作品を枠から外します。利用者はこの枠へ別の作品を再度提出できます。${confirm?.kind === "release-submitted-video" && slots.find((slot) => slot.id === confirm.id)?.reservation_group_id ? "同じ提出グループの連続枠もまとめて未提出状態へ戻します。" : ""}`
+            : confirm?.kind === "force-release-submitted"
             ? "作品は削除せず、提出済み枠との紐付けだけを解除して空き状態に戻します。連続枠の場合は同じ提出グループをまとめて解放します。"
             : "選択した枠の状態を変更します。"
         }
         confirmLabel={
-          confirm?.kind === "force-release-submitted" ? "強制解放する" : "実行する"
+          confirm?.kind === "release-submitted-video"
+            ? "作品のみ解放"
+            : confirm?.kind === "force-release-submitted"
+              ? "強制解放する"
+              : "実行する"
         }
         tone="danger"
         onCancel={() => setConfirm(null)}
@@ -404,11 +446,14 @@ export function SlotList({
           fd.set("event_id", eventId);
           if (
             state.kind === "release" ||
+            state.kind === "release-submitted-video" ||
             state.kind === "force-release-submitted" ||
             state.kind === "delete"
           ) {
             fd.set("slot_id", state.id);
-            if (state.kind === "force-release-submitted") {
+            if (state.kind === "release-submitted-video") {
+              void run(releaseSubmittedVideoKeepReservation, fd);
+            } else if (state.kind === "force-release-submitted") {
               void run(forceReleaseSubmittedSlot, fd);
             } else {
               void run(state.kind === "release" ? releaseSlot : deleteSlot, fd);

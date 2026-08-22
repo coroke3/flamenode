@@ -54,6 +54,7 @@ const EMPTY_QUEUE_BATCH: StaticRebuildQueueBatch = {
   acceptedTargetCount: 0,
 };
 import { generateId } from "@/lib/utils/id";
+import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
 
 export type VideoVisibilityTransitionContext =
   | "admin_video_status"
@@ -73,6 +74,8 @@ export type VideoVisibilityTransitionPlan = {
   fenceToken: string | null;
   depublicizedFromPublic: boolean;
   publicCacheKeys: string[];
+  /** Validation failure is returned as data so every caller can surface it. */
+  validationError?: string;
 };
 
 function isPublicVisibility(status: string): boolean {
@@ -225,6 +228,25 @@ export async function planVideoVisibilityTransition(
   const now =
     input.now ??
     Math.max(Math.floor(Date.now() / 1000), input.video.updated_at + 1);
+
+  const publicEligibility = validateVideoPublicEligibility(
+    input.video,
+    input.nextStatus,
+  );
+  if (!publicEligibility.ok) {
+    return {
+      mutationStatements: [],
+      expectedMutationChanges: [],
+      audits: [],
+      notificationBatch: { statements: [], expectedChanges: [] },
+      queueBatch: EMPTY_QUEUE_BATCH,
+      visibilityChanged,
+      fenceToken: null,
+      depublicizedFromPublic: false,
+      publicCacheKeys: [],
+      validationError: publicEligibility.message,
+    };
+  }
   const after: VideoRow = {
     ...input.video,
     visibility_status: input.nextStatus,

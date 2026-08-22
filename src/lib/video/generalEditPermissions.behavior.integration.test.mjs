@@ -92,19 +92,19 @@ test("normal mode compares submitter fields with the video snapshot, not x_users
 
 test("updateVideo rejects music_reference_url without music general field", () => {
   assert.match(updateVideoSource, /changed\(parsed\.data\.music_reference_url, target\.music_reference_url\)/);
-  assert.match(updateVideoSource, /!generalFields\.has\("music"\)/);
+  assert.match(updateVideoSource, /!generalFields\?\.has\("music_reference_url"\)/);
   assert.match(updateVideoSource, /楽曲参照URLを編集する権限がありません。/);
 });
 
 test("updateVideo rejects member chapters without chapters general field", () => {
   assert.match(updateVideoSource, /memberChaptersPayloadChanged/);
-  assert.match(updateVideoSource, /!generalFields\.has\("chapters"\)/);
+  assert.match(updateVideoSource, /!generalFields\?\.has\("chapters"\)/);
   assert.match(updateVideoSource, /メンバーチャプターを編集する権限がありません。/);
 });
 
 test("updateVideo rejects member list when members section disabled", () => {
   assert.match(updateVideoSource, /memberListPayloadChanged/);
-  assert.match(updateVideoSource, /!sections\.members/);
+  assert.match(updateVideoSource, /!canEditMembersField/);
 });
 
 test("updateVideo allows chapter-only save when member_chapters section enabled", () => {
@@ -122,11 +122,11 @@ test("createChaptersBulk does not use normal member_chapters permission", () => 
 });
 
 test("VideoForm preserves is_collab when members list disabled", () => {
-  assert.match(videoFormSource, /membersListDisabled \?/);
+  assert.match(videoFormSource, /isCollabFieldDisabled \?/);
   assert.match(videoFormSource, /value=\{isCollab \? "true" : "false"\}/);
   assert.doesNotMatch(
     videoFormSource,
-    /membersListDisabled[\s\S]{0,400}<input type="hidden" name="is_collab" value="false" \/>/,
+    /isCollabFieldDisabled[\s\S]{0,400}<input type="hidden" name="is_collab" value="false" \/>/,
   );
 });
 
