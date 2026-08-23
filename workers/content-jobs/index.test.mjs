@@ -62,26 +62,26 @@ test("Cron lease・cleanup・rebuildは同じD1 budget wrapperを共有する", 
   assert.doesNotMatch(source, /runCleanupWithRetry\(env, cleanupSignal\)/);
 });
 
-test("R2欠落修復はworst-case statement数がsoft limit内に収まる時だけ実行する", () => {
+test("R2欠落修復は各実装が公開するworst-case予算をsoft limit前に使う", () => {
   assert.match(source, /function hasSoftD1Budget\(/);
   assert.match(source, /budget\.statements \+ requiredStatements <= D1_QUERY_SOFT_LIMIT/);
-  assert.match(source, /DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS = 4/);
-  assert.match(source, /YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS = 14/);
-  assert.match(source, /USERS_SHARED_REPAIR_MAX_D1_STATEMENTS = 2/);
-  assert.match(source, /TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS = 2/);
-  assert.match(source, /TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS = 12/);
+
   for (const name of [
-    "DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS",
-    "YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS",
+    "DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS",
+    "YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS",
     "USERS_SHARED_REPAIR_MAX_D1_STATEMENTS",
     "TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS",
     "TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS",
   ]) {
+    assert.match(source, new RegExp(`import[\\s\\S]*?${name}`));
     assert.match(
       source,
       new RegExp(`hasSoftD1Budget\\([\\s\\S]*?${name}`),
     );
   }
+
+  assert.doesNotMatch(source, /DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS\s*=/);
+  assert.doesNotMatch(source, /YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS\s*=/);
 });
 
 test("Queue wake成功時はCronでstatic rebuildを直接実行しない", () => {
