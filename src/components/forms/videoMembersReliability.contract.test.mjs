@@ -43,6 +43,16 @@ test("参加者保存はD1等の失敗を一律に競合と断定せずbudget er
   assert.doesNotMatch(source, /保存が競合しました。再読み込みして再試行してください/);
 });
 
+test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本にする", async () => {
+  const adminSource = await read("src/lib/actions/video/adminMembers.ts");
+  const memberPlanSource = await read("src/lib/video/replaceVideoMembers.ts");
+  assert.doesNotMatch(adminSource, /expectedRowCondition/);
+  assert.match(adminSource, /\.where\(eq\(videos\.id, videoId\)\)/);
+  assert.match(adminSource, /member-set CAS/);
+  assert.match(memberPlanSource, /buildVideoMemberSetGuardSql/);
+  assert.match(memberPlanSource, /plan\.expectedChanges\.push\(null\)/);
+});
+
 test("user詳細の作品カードは作品snapshot iconをcurrent X iconより優先する", async () => {
   const source = await read("app/(public)/user/[id]/page.tsx");
   const projection = source.match(
