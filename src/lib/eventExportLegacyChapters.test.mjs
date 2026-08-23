@@ -19,7 +19,7 @@ const event = {
 };
 
 const baseVideo = {
-  id: "video-legacy",
+  id: "legacy_video_fixture",
   title: "Legacy Video",
   primary_event_id: "event-legacy",
   event_ids: ["event-legacy"],
@@ -74,6 +74,31 @@ test("個人作品はlegacy import由来のauthor未設定chapterからstartsを
 
   assert.equal(payload[0].starts, "59");
   assert.equal(payload[0].ends, "");
+});
+
+test("通常の個人作品のchapterを旧startsへ誤変換しない", () => {
+  const payload = buildLegacyEventExportPayload({
+    event,
+    videos: [
+      {
+        ...baseVideo,
+        id: "native-video",
+        chapters: [
+          {
+            id: "chapter-native",
+            x_user_id: "creator",
+            chapter_time: 42,
+            chapter_label: "見どころ",
+            note: null,
+          },
+        ],
+      },
+    ],
+    limit: 500,
+    truncated: false,
+  });
+
+  assert.equal(payload[0].starts, "");
 });
 
 test("X IDなし合作メンバーは同名chapterだけをstartsへ対応付ける", () => {
