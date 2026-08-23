@@ -30,7 +30,10 @@ import {
   type WorkerQueueSendBinding,
 } from "../shared/queueWake.ts";
 import { syncBatch, countPendingSyncRows, type SyncBatchResult } from "../youtube-sync/index.ts";
-import { syncEventPlaylists } from "../youtube-playlist-sync/index.ts";
+import {
+  syncEventPlaylists,
+  type PlaylistSyncBatchResult,
+} from "../youtube-playlist-sync/index.ts";
 import { enqueueYoutubeRelatedProjectionRebuilds } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { syncGa4Trending } from "../ga-analytics/sync.ts";
 import { enqueueScoreDependentRebuilds } from "./scoreRankingRebuildThrottle.ts";
@@ -89,6 +92,22 @@ export function isDailyYoutubeRelatedSlot(now = new Date()): boolean {
     throw new Error("invalid youtube related schedule");
   }
   return now.getUTCHours() === DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR;
+}
+
+/**
+ * playlist workerはquota枯渇時に対象eventをD1上でdeferredへ移す。
+ * その状態をQueue/Cronの「失敗」にすると即時retryしてquotaとQueue readを浪費するため、
+ * 実行境界ではfailedをskippedへ正規化する。OAuth/DB等の実障害はそのままfailedにする。
+ */
+export function normalizePlaylistQuotaStop(
+  result: PlaylistSyncBatchResult,
+): PlaylistSyncBatchResult {
+  if (!result.quota_stopped || result.failed <= 0) return result;
+  return {
+    ...result,
+    skipped: result.skipped + result.failed,
+    failed: 0,
+  };
 }
 
 /** metadata commit 後の score 更新と静的 rebuild 予約。失敗しても metadata は巻き戻さない。 */
@@ -238,8 +257,6 @@ async function maybeContinueYoutubePlaylistSync(
     due = row?.due === 1;
   } catch (error) {
     signal?.throwIfAborted();
-    // continuation判定はbest-effort。ここで本体成功をretryさせると、
-    // Queue readとD1負荷を増幅するためRecovery Cronへ委ねる。
     console.warn(
       JSON.stringify({
         service: "sync-jobs",
@@ -345,7 +362,7 @@ export async function handleYoutubeSyncWakeQueue(
       const playlistJob = await runJob(
         "sync-jobs",
         "youtube-playlist-sync",
-        () => syncEventPlaylists(env),
+        async () => normalizePlaylistQuotaStop(await syncEventPlaylists(env)),
         { commitSha: env.BUILD_COMMIT_SHA },
       );
       if (!playlistJob.succeeded) {
@@ -411,7 +428,9 @@ export async function runSyncJobs(
               "youtube-playlist-sync",
               async () => {
                 signal?.throwIfAborted();
-                const result = await syncEventPlaylists(env, signal);
+                const result = normalizePlaylistQuotaStop(
+                  await syncEventPlaylists(env, signal),
+                );
                 signal?.throwIfAborted();
                 return result;
               },
