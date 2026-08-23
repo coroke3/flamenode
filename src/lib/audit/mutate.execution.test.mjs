@@ -23,6 +23,8 @@ if (!runningWithTsx) {
 } else {
   const { sql } = await import("drizzle-orm");
   const { drizzle } = await import("drizzle-orm/d1");
+  const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+  const dialect = new SQLiteSyncDialect();
   const {
     AUDIT_INSERT_CHUNK_SIZE,
     D1_MAX_BATCH_QUERIES,
@@ -64,17 +66,7 @@ if (!runningWithTsx) {
           typeof query === "string"
             ? { sql: query, params: [] }
             : typeof query?.getSQL === "function"
-              ? (() => {
-                  const sqlQuery = query.getSQL();
-                  return {
-                    sql: String(sqlQuery),
-                    params: sqlQuery.shouldInlineParams
-                      ? []
-                      : Array.isArray(sqlQuery.params)
-                        ? [...sqlQuery.params]
-                        : [],
-                  };
-                })()
+              ? dialect.sqlToQuery(query.getSQL())
               : { sql: String(query), params: [] };
         return {
           kind: "query",
@@ -157,6 +149,7 @@ if (!runningWithTsx) {
 
     const auditInsert = state.batches[0][2];
     assert.notEqual(auditInsert.query.shouldInlineParams, true);
+    assert.ok(new TextEncoder().encode(auditInsert.getQuery().sql).byteLength < 100_000);
     const stringParams = auditInsert.getQuery().params.filter(
       (value) => typeof value === "string",
     );
