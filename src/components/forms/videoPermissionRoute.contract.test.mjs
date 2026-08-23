@@ -25,6 +25,11 @@ test("メンバー欄の#video-collab-perms導線には実在するtargetと専�
   assert.match(summarySource, /編集できる人を管理/);
 });
 
+test("専用管理ページリンクは現在のprivileged queryを維持する", () => {
+  assert.match(summarySource, /privilegedQuery = ""/);
+  assert.match(summarySource, /\/permissions\$\{privilegedQuery\}/);
+});
+
 test("権限管理ページはquery無しの正当なadmin/event運営をServer側で補完する", () => {
   assert.match(permissionPageSource, /const hasExplicitPrivilegeMode = Boolean\(rawRequestedMode\)/);
   assert.match(permissionPageSource, /if \(!canEditPermissions && !hasExplicitPrivilegeMode\)/);
