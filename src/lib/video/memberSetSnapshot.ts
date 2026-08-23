@@ -40,9 +40,19 @@ export function toVideoMemberSnapshotRow(
   };
 }
 
-/** SQLiteの既定BINARY collationに合わせ、locale依存の並び順を使わない。 */
+const SQLITE_BINARY_ENCODER = new TextEncoder();
+
+/** SQLite TEXTの既定BINARY collationと同じUTF-8 byte列の辞書順で比較する。 */
 export function compareSqliteBinaryText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+  if (left === right) return 0;
+  const leftBytes = SQLITE_BINARY_ENCODER.encode(left);
+  const rightBytes = SQLITE_BINARY_ENCODER.encode(right);
+  const length = Math.min(leftBytes.length, rightBytes.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftBytes[index] === rightBytes[index]) continue;
+    return leftBytes[index]! < rightBytes[index]! ? -1 : 1;
+  }
+  return leftBytes.length < rightBytes.length ? -1 : 1;
 }
 
 function sortRows(
