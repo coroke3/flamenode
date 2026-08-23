@@ -77,10 +77,12 @@ export function eventExportVideoIdsWhere(
   if (unique.length <= EVENT_EXPORT_VIDEO_IDS_IN_ARRAY_MAX) {
     return inArray(column, unique);
   }
-  return sql`EXISTS (
-    SELECT 1
-    FROM json_each(${JSON.stringify(unique)}) AS event_export_video_ids
-    WHERE CAST(event_export_video_ids.value AS TEXT) = ${column}
+  // D1 recommends a JSON1 subquery for large ID sets so one bind can retain
+  // the indexed column on the left side of IN instead of using a correlated
+  // EXISTS predicate for every candidate row.
+  return sql`${column} IN (
+    SELECT CAST(value AS TEXT)
+    FROM json_each(${JSON.stringify(unique)})
   )`;
 }
 
