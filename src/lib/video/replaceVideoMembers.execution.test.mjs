@@ -257,7 +257,7 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(queue.acceptedTargetCount, queueTargets.length);
     assert.ok(queue.acceptedTargetCount > 200);
     assert.ok(queue.acceptedTargetCount <= MAX_STATIC_REBUILD_BATCH_TARGETS);
-    assert.equal(queue.statements.length, 5);
+    assert.equal(queue.statements.length, 3);
     const queuePayload = queue.statements
       .map(queryOf)
       .flatMap((query) => query.params)
