@@ -60,7 +60,7 @@ test("single/batchともvideo.permissionsとprivilege modeをServer側で再検�
   assert.match(source, /actor\.role === "admin"/);
 });
 
-test("permission inputは最大100件かつ実在するX handle形式だけ許可する", async () => {
+test("permission inputは最大100件かつcanonical X handle形式だけ許可する", async () => {
   const atomicLimits = await readFile(
     new URL("../video/atomicLimits.ts", import.meta.url),
     "utf8",
@@ -78,6 +78,7 @@ test("bulk intentはx_user_aliasesをJSON1 1クエリで現行X IDへ解決す�
   assert.match(canonicalize, /xUserAliases\.alias_x_id/);
   assert.match(canonicalize, /json_each\(\$\{JSON\.stringify\(candidates\)\}\)/);
   assert.match(canonicalize, /ambiguous_x_user_alias/);
+  assert.match(canonicalize, /invalid_x_user_alias_target/);
   assert.match(mutation, /await canonicalizePermissionIntents\(db, args\.intents\)/);
 });
 
@@ -88,7 +89,7 @@ test("aliasと現行IDが同じ正本へ収束した重複intentは先勝ちに�
   assert.match(body, /同じ X ID の権限指定が重複しています/);
 });
 
-test("permission mutationはJSON1で対象member/X userを一括取得する", () => {
+test("permission mutationはJSON1で対象member\/X userを一括取得する", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(body, /json_each\(\$\{xidsPayload\}\)/);
   assert.match(body, /json_each\(\$\{JSON\.stringify\(grantXids\)\}\)/);
@@ -99,7 +100,7 @@ test("permission mutationはJSON1で対象member/X userを一括取得する", (
 test("permission mutationは集合CAS guardとJSON1 bulk DMLを使う", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(body, /buildPermissionSetGuardSql/);
-  assert.match(body, /buildMemberCountGuardSql/);
+  assert.match(body, /buildHiddenEditorCountGuardSql/);
   assert.match(body, /buildXUsersBulkInsertSql/);
   assert.match(body, /buildMemberPermissionBulkUpdateSql/);
   assert.match(body, /buildHiddenMemberBulkInsertSql/);
@@ -109,7 +110,6 @@ test("permission mutationは集合CAS guardとJSON1 bulk DMLを使う", () => {
 
 test("権限batchは公開メンバーの表示名・役割・コメントを書き換えない", () => {
   const body = functionBody("buildMemberPermissionBulkUpdateSql");
-  assert.match(source, /権限batchは表示用の name\/role\/comment を変更しない/);
   assert.doesNotMatch(body, /name\s*=/);
   assert.doesNotMatch(body, /role\s*=/);
   assert.doesNotMatch(body, /comment\s*=/);
@@ -136,19 +136,39 @@ test("ON時もpublic+hidden重複をX ID単位で統合する", () => {
   assert.match(body, /hiddenRows\.slice\(1\)/);
 });
 
-test("100人上限はintent入力順ではなく全変更後のnet row countで判定する", () => {
+test("hidden editor上限は公開100人と分離し全intent後のnet countで判定する", async () => {
+  const atomicLimits = await readFile(
+    new URL("../video/atomicLimits.ts", import.meta.url),
+    "utf8",
+  );
   const body = functionBody("applyPermissionIntentsToVideo");
   const loopIndex = body.indexOf("for (const [xid, intentInfo] of intents)");
-  const netCheckIndex = body.indexOf("nextMemberCount > MAX_VIDEO_MEMBERS");
+  const netCheckIndex = body.indexOf("nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS");
   assert.ok(loopIndex >= 0);
   assert.ok(netCheckIndex > loopIndex);
+  assert.match(atomicLimits, /MAX_VIDEO_HIDDEN_EDITORS = 100/);
 });
 
 test("対象member readが上限に達した場合は重複データを黙って切り捨てない", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
-  assert.match(body, /const existingRowLimit = MAX_VIDEO_MEMBERS \+ xids\.length \+ 1/);
+  assert.match(
+    body,
+    /const existingRowLimit = MAX_VIDEO_MEMBERS \+ MAX_VIDEO_HIDDEN_EDITORS \+ 1/,
+  );
   assert.match(body, /existingRows\.length >= existingRowLimit/);
   assert.match(body, /重複データを整理してください/);
+});
+
+test("拒否済みX IDへ編集権限を再付与しない", () => {
+  const body = functionBody("applyPermissionIntentsToVideo");
+  assert.match(body, /approval_status: xUsers\.approval_status/);
+  assert.match(body, /row\.approval_status === "rejected"/);
+  assert.match(body, /拒否済みの X ID には編集権限を付与できません/);
+});
+
+test("permission CASのID順はlocaleCompareでなくSQLite互換比較を使う", () => {
+  assert.match(source, /compareSqliteBinaryText/);
+  assert.doesNotMatch(source, /id\.localeCompare/);
 });
 
 test("members_jsonからはcan_editを読まない", async () => {
