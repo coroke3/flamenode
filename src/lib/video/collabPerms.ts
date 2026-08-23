@@ -49,8 +49,8 @@ export async function loadVideoCollabSubjects(
         display_name: videoMembers.name,
         can_edit: videoMembers.can_edit,
         is_public_member: videoMembers.is_public_member,
-        // 実際の所有者判定と同じく「承認済みX ID + account link」が揃った時だけ
-        // 編集可能として表示する。link行だけ存在するpending/rejected Xは未連携扱い。
+        // 実際のownership判定と同じく、承認済みX IDとaccount linkが
+        // 両方存在するときだけ「編集可能」と表示する。
         has_account_link: sql<number>`EXISTS (
           SELECT 1
           FROM ${xUserAccountLinks} link
@@ -68,12 +68,13 @@ export async function loadVideoCollabSubjects(
         .filter((row) => row.can_edit === 1 || row.is_public_member === 0)
         .map((row) => ({
           x_user_id: row.x_user_id,
+          // 権限正本はX ID。Auth.js user IDを表示DTOへ混ぜない。
           user_id: null,
           display_name: row.display_name,
           can_edit: row.can_edit,
           is_public_member: row.is_public_member,
-          // legacy field name。意味は Discord 直接紐付けではなく
-          // 「承認済みX IDがAuth userへ連携済み」。UIではアカウント連携と表示する。
+          // legacy field name。意味はDiscord直結ではなく
+          // 「承認済みX IDがAuth userへ連携済み」。
           has_discord_link: row.has_account_link === 1,
         })),
     };
@@ -100,13 +101,15 @@ export interface EditPermissionSummary {
 }
 
 function editorHasAccountLink(subject: VideoCollabSubject): boolean {
-  return Boolean(subject.user_id?.trim() || subject.has_discord_link);
+  return Boolean(subject.has_discord_link);
 }
 
 export function computeEditPermissionSummary(
   subjects: VideoCollabSubject[],
-  options?: {
+  _legacyOptions?: {
+    /** @deprecated 権限正本はX ID。比較用Auth/Discord IDをDTOへ戻さない。 */
     viewerDiscordId?: string | null;
+    /** @deprecated 権限正本はX ID。比較用Auth/Discord IDをDTOへ戻さない。 */
     ownerDiscordId?: string | null;
   },
 ): EditPermissionSummary {
@@ -135,19 +138,8 @@ export function computeEditPermissionSummary(
     });
   }
 
-  const viewer = options?.viewerDiscordId?.trim();
-  const owner = options?.ownerDiscordId?.trim();
-  if (
-    editors.some((editor) => {
-      const discord = editor.user_id?.trim();
-      return (!viewer || discord !== viewer) && (!owner || discord !== owner);
-    })
-  ) {
-    warnings.push({
-      tone: "info",
-      title: "他のメンバーにも編集権限が設定されています。",
-    });
-  }
+  // loaderは意図的にAuth.js user IDを返さないため、旧viewer/owner IDとの比較から
+  // 「他のメンバー」と推測してはいけない。対象者はdisplayNames/権限管理一覧で明示する。
 
   return {
     editorCount: editors.length,
