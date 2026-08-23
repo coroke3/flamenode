@@ -290,7 +290,7 @@ if (!runningWithTsx) {
         expectedMutationChanges: 1,
         audits,
       }),
-      /前処理41.*batch22.*予約10\/50/,
+      /前処理41.*batch22.*予約18\/50/,
     );
     assert.equal(state.gets, 0);
     assert.equal(state.batches.length, 0);
@@ -304,7 +304,7 @@ if (!runningWithTsx) {
         expectedMutationChanges: 1,
         audits: Array.from({ length: 100 }, (_, index) => makeAudit(index)),
       }),
-      /batch52.*予約10\/50/,
+      /batch52.*予約18\/50/,
     );
     assert.equal(state.batches.length, 0);
   });
