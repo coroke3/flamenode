@@ -49,7 +49,7 @@ test("枠なし投稿のActive X切替確認はVideoFormだけが担当し二重
   assert.doesNotMatch(shell, /ACTIVE_X_BEFORE_SWITCH_EVENT/);
   assert.doesNotMatch(shell, /addEventListener\(ACTIVE_X_BEFORE_SWITCH_EVENT/);
   assert.match(form, /addEventListener\(ACTIVE_X_BEFORE_SWITCH_EVENT/);
-  assert.match(form, /flushVideoDraft/);
+  assert.match(form, /flushDraft\(\)/);
 });
 
 test("概要欄管理Editorはプリセット・出力例コピー・レスポンシブ2ペインを持つ", async () => {
