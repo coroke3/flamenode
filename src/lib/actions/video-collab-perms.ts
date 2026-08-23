@@ -25,6 +25,7 @@ import {
   MAX_VIDEO_HIDDEN_EDITORS,
   MAX_VIDEO_MEMBERS,
 } from "@/lib/video/atomicLimits";
+import { compareSqliteBinaryText } from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
@@ -156,10 +157,6 @@ async function resolvePrivilegeMode(
   return "normal";
 }
 
-/**
- * video.permissions の認可を single / batch で共有する。
- * mode 未指定時だけ normal → admin → event を安全に補完する。
- */
 async function loadEditableVideoForPermissions(
   db: DB,
   actor: { id: string; role?: string | null },
@@ -260,10 +257,6 @@ async function resolveSubjectXUserId(
   return { ok: true, xUserId: linked[0]! };
 }
 
-/**
- * 最大100件のpermission intentを、x_user_aliases 1クエリで現行X IDへ解決する。
- * aliasと現行IDが同一正本へ収束した場合は、後段の重複検査で拒否する。
- */
 async function canonicalizePermissionIntents(
   db: DB,
   input: readonly PermissionIntent[],
@@ -292,7 +285,9 @@ async function canonicalizePermissionIntents(
   for (const row of aliases) {
     const alias = normalizeXId(row.alias_x_id);
     const target = normalizeXId(row.x_user_id);
-    if (!alias || !target) continue;
+    if (!alias || !target || !isCanonicalXId(target)) {
+      throw new Error(`invalid_x_user_alias_target:${alias || "unknown"}`);
+    }
     const targets = targetsByAlias.get(alias) ?? new Set<string>();
     targets.add(target);
     targetsByAlias.set(alias, targets);
@@ -328,7 +323,7 @@ function permissionSnapshotRow(row: VideoMemberRow) {
 }
 
 function sortPermissionRows(rows: readonly VideoMemberRow[]): VideoMemberRow[] {
-  return [...rows].sort((left, right) => left.id.localeCompare(right.id));
+  return [...rows].sort((left, right) => compareSqliteBinaryText(left.id, right.id));
 }
 
 function buildPermissionSetGuardSql(
@@ -415,10 +410,6 @@ function buildXUsersBulkInsertSql(rows: readonly (typeof xUsers.$inferInsert)[])
   `;
 }
 
-/**
- * 権限batchは表示用の name/role/comment を変更しない。
- * members_json と permission intent を分離する契約をDB mutationでも守る。
- */
 function buildMemberPermissionBulkUpdateSql(rows: readonly VideoMemberRow[]) {
   const payload = JSON.stringify(rows.map(permissionSnapshotRow));
   return sql`
@@ -518,10 +509,6 @@ async function loadNotifiableRecipientLinks(
     );
 }
 
-/**
- * 手動付与/解除とTSV一括反映の共通実装。
- * 1 X ID = 1 permission intent として扱い、同一batch内の重複は曖昧なので拒否する。
- */
 async function applyPermissionIntentsToVideo(
   db: DB,
   actor: { id: string; role?: string | null },
@@ -603,7 +590,7 @@ async function applyPermissionIntentsToVideo(
       (left, right) =>
         right.is_public_member - left.is_public_member ||
         right.can_edit - left.can_edit ||
-        left.id.localeCompare(right.id),
+        compareSqliteBinaryText(left.id, right.id),
     );
   }
 
@@ -624,13 +611,27 @@ async function applyPermissionIntentsToVideo(
     grantXids.length === 0
       ? []
       : await db
-          .select({ id: xUsers.id })
+          .select({
+            id: xUsers.id,
+            approval_status: xUsers.approval_status,
+          })
           .from(xUsers)
           .where(sql`lower(${xUsers.id}) IN (
             SELECT lower(CAST(value AS TEXT))
             FROM json_each(${JSON.stringify(grantXids)})
           )`)
           .limit(grantXids.length + 1);
+  const rejectedProfileIds = existingProfiles
+    .filter((row) => row.approval_status === "rejected")
+    .map((row) => normalizeXId(row.id));
+  if (rejectedProfileIds.length > 0) {
+    return {
+      ok: false,
+      message: `拒否済みの X ID には編集権限を付与できません: ${rejectedProfileIds
+        .map((xid) => `@${xid}`)
+        .join("、")}`,
+    };
+  }
   const existingProfileIds = new Set(
     existingProfiles.map((row) => normalizeXId(row.id)),
   );
@@ -673,10 +674,9 @@ async function applyPermissionIntentsToVideo(
           (left, right) =>
             right.can_edit - left.can_edit ||
             Number(right.edit_updated_at ?? 0) - Number(left.edit_updated_at ?? 0) ||
-            left.id.localeCompare(right.id),
+            compareSqliteBinaryText(left.id, right.id),
         )[0]!;
 
-        // 同一X IDの公開行が複数あっても、表示データを残したまま権限だけ揃える。
         for (const target of publicRows) {
           if (target.can_edit === 1) continue;
           updateRows.push({
@@ -1028,7 +1028,6 @@ export async function deleteVideoCollaborator(
   }
 }
 
-/** TSV権限列の最大100件一括反映。 */
 export async function applyVideoCollaboratorPermissionsBatch(
   input: unknown,
 ): Promise<VideoCollabPermissionBatchResult> {
