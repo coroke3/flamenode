@@ -215,6 +215,21 @@
   gap: 2px;
 }
 
+/* 全体カード + 6部 = 7枚のときだけ、PC幅では1行に固定する。
+   7部以上を無理に詰めず、既存のauto-fit挙動はそのまま維持する。 */
+@media (min-width: 1024px) {
+  .slotSummaryGrid:has(> .slotSummaryCard:nth-child(7):last-child) {
+    grid-template-columns: minmax(150px, 1.35fr) repeat(6, minmax(0, 1fr));
+    gap: clamp(8px, 0.8vw, 12px);
+  }
+
+  .slotSummaryGrid:has(> .slotSummaryCard:nth-child(7):last-child)
+    > .slotSummaryCard {
+    padding-left: clamp(10px, 1vw, 14px);
+    padding-right: clamp(10px, 1vw, 14px);
+  }
+}
+
 .crewList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
