@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { isPlaylistSyncSlot } from "./index.ts";
+import {
+  isPlaylistSyncSlot,
+  normalizePlaylistQuotaStop,
+} from "./index.ts";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 const sharedSource = await readFile(
@@ -38,6 +41,36 @@ test("score起因ランキングenqueueは専用throttleモジュールへ委譲
   assert.match(source, /scoreRankingRebuildThrottle/);
   assert.match(source, /ranking-rebuild-enqueue/);
   assert.doesNotMatch(source, /enqueueStaticRebuild/);
+});
+
+test("playlist quota停止はQueue/Cron retry対象ではなくdeferred skipへ正規化する", () => {
+  const quotaStopped = normalizePlaylistQuotaStop({
+    processed: 0,
+    skipped: 0,
+    failed: 1,
+    external_api_calls: 2,
+    d1_changes: 1,
+    retry_count: 0,
+    quota_stopped: true,
+    quota_stop_reason: "youtube_quota_deferred",
+  });
+  assert.equal(quotaStopped.failed, 0);
+  assert.equal(quotaStopped.skipped, 1);
+  assert.equal(quotaStopped.quota_stopped, true);
+  assert.equal(quotaStopped.external_api_calls, 2);
+
+  const actualFailure = normalizePlaylistQuotaStop({
+    processed: 0,
+    skipped: 0,
+    failed: 1,
+    external_api_calls: 1,
+    d1_changes: 1,
+    retry_count: 0,
+    quota_stopped: false,
+    quota_stop_reason: null,
+  });
+  assert.equal(actualFailure.failed, 1);
+  assert.equal(actualFailure.skipped, 0);
 });
 
 test("UTC分が52の時だけを再生リスト同期の専用Cron枠にする", () => {
