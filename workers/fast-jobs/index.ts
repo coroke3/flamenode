@@ -15,7 +15,10 @@ import {
 } from "../notification-dispatcher/dispatch.ts";
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
-import { withD1Budget } from "../shared/d1Budget.ts";
+import {
+  D1_QUERY_HARD_LIMIT,
+  withD1Budget,
+} from "../shared/d1Budget.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
 import {
   sendWorkerQueueWakeBestEffort,
@@ -49,9 +52,34 @@ const REMINDER_INTERVAL_SEC = 3600;
 const FAST_JOBS_LEASE_SEC = 4 * 60;
 const REMINDER_LEASE_SEC = 4 * 60;
 const FAST_JOBS_WALL_CLOCK_DEADLINE_MS = 3 * 60 * 1_000;
+/** orphan cleanup + pending SELECT。 */
+const NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS = 2;
+/** claim + markSent最大3回 + suppress-redelivery。failure/dead-letter経路もこれ以下。 */
+const NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 5;
+/** outer lease成功/解放2本 + 3分deadline中に発生し得るheartbeat最大2本を残す。 */
+const FAST_JOBS_OUTER_LEASE_D1_RESERVE = 4;
 
 function isAbortError(error: unknown): error is Error {
   return error instanceof Error && error.name === "AbortError";
+}
+
+/**
+ * Discord送信後のmarkSentをD1 hard limitで失敗させると、lease切れ後に同じ通知を
+ * 再配送し得る。Cron fallbackでは「送信前」に後処理worst-caseまで入る行数へ縮める。
+ */
+export function notificationFallbackLimitForD1Budget(
+  currentStatements: number,
+): number {
+  const available =
+    D1_QUERY_HARD_LIMIT -
+    Math.max(0, Math.floor(currentStatements)) -
+    FAST_JOBS_OUTER_LEASE_D1_RESERVE -
+    NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS;
+  if (available < NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW) return 0;
+  return Math.min(
+    MAX_NOTIFICATION_BATCH,
+    Math.floor(available / NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW),
+  );
 }
 
 async function maybeResendNotificationWake(
@@ -161,8 +189,8 @@ export async function runNotificationRecovery(
             return combineJobCounters(reminders, { skipped: 1 });
           }
 
-          // Free CronはCPU 10msだがQueue consumerは大幅に長いCPU枠を持つ。
-          // Queue wakeが成功した場合はDiscord配送をCronで二重実行せずconsumerへ委譲する。
+          // Queue wake成功時は配送を別invocationへ分離し、CronのCPU/D1予算と共有しない。
+          // FreeではQueue consumerにもプラン側CPU上限が適用されるため、長時間CPUを前提にしない。
           // feature flag無効・binding欠落・send失敗なら従来通りCronで直接drainして可用性を維持する。
           const alreadyDelegated = wakeSentKinds.has("notification_available");
           const delegatedToQueue =
@@ -183,6 +211,14 @@ export async function runNotificationRecovery(
             });
           }
 
+          const fallbackLimit = notificationFallbackLimitForD1Budget(
+            budgetEnv.d1Budget.statements,
+          );
+          if (fallbackLimit <= 0) {
+            // pending rowはD1正本に残るため、危険な半端配送をせず次回Recoveryへ繰り越す。
+            return combineJobCounters(reminders, { skipped: 1 });
+          }
+
           let notificationAbortError: Error | undefined;
           const notifications = await runJob(
             "fast-jobs",
@@ -190,7 +226,7 @@ export async function runNotificationRecovery(
             async () => {
               try {
                 return await processNotificationQueue(budgetEnv, {
-                  limit: MAX_NOTIFICATION_BATCH,
+                  limit: fallbackLimit,
                   signal,
                   skipLeaseRecovery: true,
                 });
