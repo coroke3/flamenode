@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 
@@ -175,6 +175,83 @@ export async function buildKnownRecipientNotificationBatch(
   return {
     statements,
     expectedChanges: statements.map(() => null),
+    rows,
+  };
+}
+
+/**
+ * 大人数のrequired_atomic通知向けJSON1 builder。
+ * 1 recipient = 1 D1 statement にせず、最大200件を1 statementへまとめる。
+ * active dedupe partial uniqueとの競合は INSERT OR IGNORE でidempotentに扱うため、
+ * expectedChangesはnullとする。payload自体はbind parameterのまま保持すること。
+ */
+export async function buildKnownRecipientNotificationBulkBatch(
+  db: AnyDb,
+  inputs: readonly KnownRecipientNotificationInput[],
+): Promise<NotificationOutboxBatch> {
+  if (inputs.length === 0) {
+    return { statements: [], expectedChanges: [], rows: [] };
+  }
+  if (inputs.length > 200) throw new Error("notification_bulk_batch_limit_exceeded");
+
+  const preparedInputs = inputs.map((input) => ({
+    input,
+    prepared: prepareNotification(input),
+  }));
+  const nonNullKeys = preparedInputs
+    .map(({ prepared }) => prepared.dedupeKey)
+    .filter((key): key is string => key !== null);
+  if (new Set(nonNullKeys).size !== nonNullKeys.length) {
+    throw new Error("notification_batch_duplicate_dedupe_key");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const rows = preparedInputs.map(({ input, prepared }) => {
+    const recipientUserId = input.recipientUserId.trim();
+    if (!recipientUserId) throw new Error("notification_recipient_required");
+    return buildNotificationRow(prepared, recipientUserId, now);
+  });
+  const payload = JSON.stringify(rows);
+  const statement = db.run(sql`
+    INSERT OR IGNORE INTO notification_outbox (
+      id,
+      recipient_user_id,
+      type,
+      payload_json,
+      status,
+      attempt_count,
+      processing_started_at,
+      lease_token,
+      lease_expires_at,
+      next_attempt_at,
+      last_error,
+      processed_at,
+      event_id,
+      dedupe_key,
+      created_at
+    )
+    SELECT
+      json_extract(value, '$.id'),
+      json_extract(value, '$.recipient_user_id'),
+      json_extract(value, '$.type'),
+      json_extract(value, '$.payload_json'),
+      json_extract(value, '$.status'),
+      json_extract(value, '$.attempt_count'),
+      json_extract(value, '$.processing_started_at'),
+      json_extract(value, '$.lease_token'),
+      json_extract(value, '$.lease_expires_at'),
+      json_extract(value, '$.next_attempt_at'),
+      json_extract(value, '$.last_error'),
+      json_extract(value, '$.processed_at'),
+      json_extract(value, '$.event_id'),
+      json_extract(value, '$.dedupe_key'),
+      json_extract(value, '$.created_at')
+    FROM json_each(${payload})
+  `);
+
+  return {
+    statements: [statement],
+    expectedChanges: [null],
     rows,
   };
 }
