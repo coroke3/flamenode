@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, or } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   eventCustomQuestions,
@@ -148,12 +148,24 @@ export async function loadEventExportSnapshot(
         created_at: videos.created_at,
         updated_at: videos.updated_at,
       })
-      .from(videoEvents)
-      .innerJoin(videos, eq(videos.id, videoEvents.video_id))
+      // 正規形は video_events だが、旧/移行データで primary_event_id だけが
+      // 残る場合も公開APIから作品を落とさない。JOIN条件を対象eventへ絞ることで
+      // 他イベントrelationによる重複行を作らない。
+      .from(videos)
+      .leftJoin(
+        videoEvents,
+        and(
+          eq(videoEvents.video_id, videos.id),
+          eq(videoEvents.event_id, eventId),
+        ),
+      )
       .where(
         and(
-          eq(videoEvents.event_id, eventId),
           eq(videos.visibility_status, "public"),
+          or(
+            eq(videoEvents.event_id, eventId),
+            eq(videos.primary_event_id, eventId),
+          ),
         ),
       )
       .orderBy(asc(videos.scheduled_time), asc(videos.id))
@@ -340,18 +352,27 @@ export async function loadEventExportSnapshot(
     }
   }
 
-  const exportVideos: EventExportVideoSnapshot[] = selectedVideos.map((video) => ({
-    ...video,
-    collaboration_type: video.collaboration_type ?? "individual",
-    source_type: video.source_type ?? "youtube",
-    creator_profile_text: video.creator_profile_text ?? null,
-    creator_other_social_links: video.creator_other_social_links ?? null,
-    event_ids: eventIdsByVideo.get(video.id) ?? [eventId],
-    members: membersByVideo.get(video.id) ?? [],
-    softwares: softwaresByVideo.get(video.id) ?? [],
-    answers: answersByVideo.get(video.id) ?? [],
-    chapters: chaptersByVideo.get(video.id) ?? [],
-  }));
+  const exportVideos: EventExportVideoSnapshot[] = selectedVideos.map((video) => {
+    const publicRelationIds = eventIdsByVideo.get(video.id) ?? [];
+    // primary_event_id fallbackで選ばれた旧データも、現在公開中の対象eventだけを
+    // event_idsへ補完する。他の非公開primary event IDはここでは追加しない。
+    const eventIds =
+      video.primary_event_id === eventId && !publicRelationIds.includes(eventId)
+        ? [...publicRelationIds, eventId]
+        : publicRelationIds;
+    return {
+      ...video,
+      collaboration_type: video.collaboration_type ?? "individual",
+      source_type: video.source_type ?? "youtube",
+      creator_profile_text: video.creator_profile_text ?? null,
+      creator_other_social_links: video.creator_other_social_links ?? null,
+      event_ids: eventIds,
+      members: membersByVideo.get(video.id) ?? [],
+      softwares: softwaresByVideo.get(video.id) ?? [],
+      answers: answersByVideo.get(video.id) ?? [],
+      chapters: chaptersByVideo.get(video.id) ?? [],
+    };
+  });
 
   return {
     event: {
