@@ -618,7 +618,9 @@ export async function buildReplaceVideoMembersPlan(
     });
   }
 
-  if (existing.length > 0) {
+  // チャプターだけ変更した保存では公開メンバー集合をDELETE/INSERTし直さない。
+  // 不要なD1 writeと権限metadataの再書込みを避け、member-set CASだけを競合ガードに使う。
+  if (membersChanged && existing.length > 0) {
     plan.statements.push(
       db
         .delete(videoMembers)
@@ -632,7 +634,7 @@ export async function buildReplaceVideoMembersPlan(
     plan.expectedChanges.push(existing.length);
   }
 
-  if (afterSnapshot.rows.length > 0) {
+  if (membersChanged && afterSnapshot.rows.length > 0) {
     plan.statements.push(
       db.run(buildVideoMemberBulkInsertSql(afterSnapshot.rows)),
     );
@@ -669,18 +671,20 @@ export async function buildReplaceVideoMembersPlan(
     });
   }
 
-  plan.audits.push({
-    table_name: "video_members_set",
-    target_id: args.videoId,
-    operation: "MERGE",
-    before: beforeSnapshot,
-    after: afterSnapshot,
-    actor_user_id: args.actorUserId,
-    context: "video-save:members",
-    retention_class: "restorable",
-    restore_strategy: "custom_adapter",
-    strict: true,
-  });
+  if (membersChanged) {
+    plan.audits.push({
+      table_name: "video_members_set",
+      target_id: args.videoId,
+      operation: "MERGE",
+      before: beforeSnapshot,
+      after: afterSnapshot,
+      actor_user_id: args.actorUserId,
+      context: "video-save:members",
+      retention_class: "restorable",
+      restore_strategy: "custom_adapter",
+      strict: true,
+    });
+  }
 
   return plan;
 }
