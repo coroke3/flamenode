@@ -76,15 +76,45 @@ export async function runContentJobsRecovery(
     "content-jobs",
     "cron",
     async () => {
+      // Cron lease / cleanup / static rebuildを同じbudget wrapperへ通す。
+      // 以前はcleanupだけraw DBで最大3retryし、再生成40queryの後にD1 50query上限を
+      // 飛び越えられた。outer lease acquisitionから一貫して同じbudgetを共有する。
+      const rebuildEnv = rebuildEnvironment(env);
       const leased = await withCronLease(
-        env,
+        rebuildEnv,
         {
           jobName: "content-jobs",
           leaseSeconds: CONTENT_JOBS_LEASE_SEC,
           signal: context.signal,
         },
         async (signal) => {
-          const rebuildEnv = rebuildEnvironment(env);
+          // 日次cleanupを先に処理する。cleanup後の通常処理はsoft limit 40で止まるため、
+          // cleanup retryとlease lifecycleを含めてもhard limit 50を超えない。
+          const cleanupLease = await withCronLease(
+            rebuildEnv,
+            {
+              jobName: "content-jobs:cleanup",
+              leaseSeconds: CLEANUP_LEASE_SEC,
+              minimumIntervalSeconds: CLEANUP_INTERVAL_SEC,
+              signal,
+            },
+            (cleanupSignal) =>
+              runJob(
+                "content-jobs",
+                "cleanup",
+                () => runCleanupWithRetry(rebuildEnv, cleanupSignal),
+                { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
+              ),
+          );
+          const cleanup = cleanupLease.acquired
+            ? (cleanupLease.value ?? {})
+            : await runJob(
+                "content-jobs",
+                "cleanup",
+                async () => ({ skipped: 1 }),
+                { commitSha: env.BUILD_COMMIT_SHA },
+              );
+
           const now = Math.floor(Date.now() / 1000);
           const deployGlobalRebuilds = await ensureDeployGlobalRebuilds(
             rebuildEnv,
@@ -234,34 +264,10 @@ export async function runContentJobsRecovery(
               kv: env.KV,
             });
           }
-          const cleanupLease = await withCronLease(
-            env,
-            {
-              jobName: "content-jobs:cleanup",
-              leaseSeconds: CLEANUP_LEASE_SEC,
-              minimumIntervalSeconds: CLEANUP_INTERVAL_SEC,
-              signal,
-            },
-            (cleanupSignal) =>
-              runJob(
-                "content-jobs",
-                "cleanup",
-                () => runCleanupWithRetry(env, cleanupSignal),
-                { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
-              ),
-          );
-          const cleanup = cleanupLease.acquired
-            ? (cleanupLease.value ?? {})
-            : await runJob(
-                "content-jobs",
-                "cleanup",
-                async () => ({ skipped: 1 }),
-                { commitSha: env.BUILD_COMMIT_SHA },
-              );
           return throwIfJobFailed(
             "content-jobs",
             "cron",
-            combineJobCounters(rebuild, cleanup),
+            combineJobCounters(cleanup, rebuild),
           );
         },
       );
@@ -291,15 +297,16 @@ export async function handleContentJobsFetch(
   let queueResult: QueueResult | undefined;
   let leaseResult: { acquired: boolean; value?: QueueResult };
   try {
+    const rebuildEnv = rebuildEnvironment(env);
     leaseResult = await withCronLease(
-      env,
+      rebuildEnv,
       { jobName: "content-jobs", leaseSeconds: CONTENT_JOBS_LEASE_SEC },
       async () => {
         await runJob(
           "content-jobs",
           "manual-static-rebuild",
           async () => {
-            queueResult = await runQueue(rebuildEnvironment(env));
+            queueResult = await runQueue(rebuildEnv);
             return queueResult;
           },
           { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
