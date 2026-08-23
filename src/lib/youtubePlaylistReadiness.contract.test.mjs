@@ -18,7 +18,7 @@ const REQUIRED_PLAYLIST_TABLES = [
   "external_api_quota_usage",
 ];
 
-test("YouTube再生リスト同期は現行sync-jobsの52分枠と必要bindingを持つ", async () => {
+test("YouTube再生リスト同期は現行sync-jobsの52分Recovery枠と必要bindingを持つ", async () => {
   const [wrangler, worker] = await Promise.all([
     readFromRoot("workers/sync-jobs/wrangler.toml"),
     readFromRoot("workers/sync-jobs/index.ts"),
@@ -31,6 +31,8 @@ test("YouTube再生リスト同期は現行sync-jobsの52分枠と必要binding�
   assert.match(wrangler, /binding\s*=\s*"STATIC_REBUILD_WAKE_QUEUE"/);
   assert.match(worker, /return now\.getUTCMinutes\(\) === 52/);
   assert.match(worker, /syncEventPlaylists\(env, signal\)/);
+  assert.match(worker, /wake\?\.kind === "youtube_playlist_sync"/);
+  assert.match(worker, /syncEventPlaylists\(env\)/);
 });
 
 test("production deploy契約はplaylist同期に必要なsecret名をfail-closed検査する", async () => {
@@ -51,11 +53,15 @@ test("production schema契約はplaylist同期テーブルとYouTube quota正本
   }
 });
 
-test("管理画面の実行予約はHTTP内でYouTube APIを直接呼ばずD1 due状態だけを更新する", async () => {
+test("管理画面の実行予約はD1 due commit後にQueue wakeしHTTP内でYouTube APIを直接呼ばない", async () => {
   const action = await readFromRoot("src/lib/actions/event-youtube-playlist.ts");
+  const helper = await readFromRoot("src/lib/queues/youtubePlaylistSyncWake.ts");
   assert.match(action, /export async function queueEventYoutubePlaylistSync/);
   assert.match(action, /next_sync_at:\s*now/);
   assert.match(action, /sync_status:\s*"idle"/);
+  assert.match(action, /sendYoutubePlaylistSyncWakeBestEffort\("manage"\)/);
+  assert.match(helper, /kind:\s*"youtube_playlist_sync"/);
+  assert.match(helper, /requireYoutubeFlag:\s*true/);
   assert.doesNotMatch(action, /googleapis\.com\/youtube|syncEventPlaylists\(/);
 });
 
