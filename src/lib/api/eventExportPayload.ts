@@ -201,20 +201,55 @@ function legacyDateParts(value: number | null): { date: string; time: string } {
   return { date: `${month}/${day}`, time: `${hour}:${minute}` };
 }
 
+function earliestChapterTime(
+  chapters: readonly EventExportChapterSnapshot[],
+): string {
+  let earliest: number | null = null;
+  for (const chapter of chapters) {
+    if (!Number.isFinite(chapter.chapter_time) || chapter.chapter_time < 0) continue;
+    earliest =
+      earliest == null
+        ? chapter.chapter_time
+        : Math.min(earliest, chapter.chapter_time);
+  }
+  return earliest == null ? "" : String(earliest);
+}
+
 function firstMemberChapter(
   video: EventExportVideoSnapshot,
   member: EventExportMemberSnapshot,
 ): string {
-  if (!member.x_user_id) return "";
-  let earliest: number | null = null;
-  for (const chapter of video.chapters) {
-    if (chapter.x_user_id !== member.x_user_id) continue;
-    if (!Number.isFinite(chapter.chapter_time) || chapter.chapter_time < 0) continue;
-    earliest = earliest == null
-      ? chapter.chapter_time
-      : Math.min(earliest, chapter.chapter_time);
+  const memberName = member.name.trim();
+  return earliestChapterTime(
+    video.chapters.filter((chapter) => {
+      if (member.x_user_id) return chapter.x_user_id === member.x_user_id;
+      return (
+        chapter.x_user_id == null &&
+        memberName.length > 0 &&
+        chapter.chapter_label.trim() === memberName
+      );
+    }),
+  );
+}
+
+function legacyStarts(video: EventExportVideoSnapshot): string {
+  if (video.members.length > 0) {
+    return video.members
+      .map((member) => firstMemberChapter(video, member))
+      .join(",");
   }
-  return earliest == null ? "" : String(earliest);
+
+  // 旧形式の個人作品では `starts` が単独値で、legacy import時には
+  // author未設定のpublic chapterとして正規化されることがある。
+  // creator自身またはauthor未設定のchapterに限定し、最古の時刻だけを復元する。
+  return earliestChapterTime(
+    video.chapters.filter(
+      (chapter) =>
+        chapter.x_user_id == null ||
+        (video.creator_x_user_id != null &&
+          chapter.x_user_id === video.creator_x_user_id),
+    ),
+  );
 }
 
 /**
@@ -229,9 +264,7 @@ export function buildLegacyEventExportPayload(
     const schedule = legacyDateParts(video.scheduled_time);
     const isCollaboration =
       video.collaboration_type === "collab" || video.members.length > 1;
-    const starts = video.members
-      .map((member) => firstMemberChapter(video, member))
-      .join(",");
+    const starts = legacyStarts(video);
     const emptyMemberAligned = video.members.map(() => "").join(",");
 
     return {
