@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizeXId } from "#utils/xid";
+import { isCanonicalXId, normalizeXId } from "#utils/xid";
 import { parseMemberChapterTime } from "./memberInput.ts";
 import { MAX_VIDEO_MEMBERS } from "./atomicLimits.ts";
 
@@ -68,10 +68,28 @@ export function parseVideoMemberInputs(
   }
 
   const members: MemberInput[] = [];
+  const seenXIds = new Set<string>();
   for (const item of result.data) {
     const xid = normalizeXId(item.x_user_id);
     const name = item.name.trim();
     if (!name && !xid) continue;
+
+    // フロントのpatternだけに依存せず、DB write境界でもcanonical X handleを保証する。
+    // 空欄は許可するが、入力された値は英数字/underscore 20文字以内だけを保存する。
+    if (xid && !isCanonicalXId(xid)) {
+      return {
+        ok: false,
+        message: `${name || item.x_user_id} の X ID が不正です。英数字とアンダースコア20文字以内で入力してください。`,
+      };
+    }
+    if (xid && seenXIds.has(xid)) {
+      return {
+        ok: false,
+        message: `同じ X ID（@${xid}）が複数のメンバーに設定されています。1人にまとめてください。`,
+      };
+    }
+    if (xid) seenXIds.add(xid);
+
     members.push({
       name: name || (xid ? `@${xid}` : ""),
       x_user_id: xid,
