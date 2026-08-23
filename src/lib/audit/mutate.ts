@@ -138,10 +138,6 @@ function isDbRunBatchItem(statement: unknown): boolean {
   return typeof config?.action === "string" && config.table === undefined;
 }
 
-function inlineBatchSql(query: SQL): SQL {
-  return query.inlineParams();
-}
-
 function hasPrepare(value: unknown): value is BatchItem<"sqlite"> {
   return (
     typeof value === "object" &&
@@ -160,29 +156,19 @@ function hasGetSQL(value: unknown): value is SQLWrapper {
 
 function asBatchRunnable(db: DB, statement: BatchItem<"sqlite">): BatchItem<"sqlite"> {
   const candidate: unknown = statement;
-  if (isDbRunBatchItem(candidate)) {
-    if (
-      typeof candidate === "object" &&
-      candidate !== null &&
-      typeof (candidate as { getQuery?: unknown }).getQuery === "function" &&
-      hasGetSQL(candidate)
-    ) {
-      const raw = candidate as {
-        getSQL: () => SQL;
-        getQuery: () => { params: unknown[] };
-      };
-      if (raw.getQuery().params.length === 0) {
-        return statement;
-      }
-      return db.run(inlineBatchSql(raw.getSQL()));
-    }
-    return statement;
+
+  // Drizzle D1 の db.batch() は RunnableQuery._prepare() からSQLとparamsを取得し、
+  // D1PreparedStatement.bind(...params) して実行する。ここでinlineParams()すると、
+  // JSON1の大きなpayloadまでSQL本文へ展開されD1のSQLサイズ上限へ到達し得るため、
+  // db.run() が返したRunnableQueryはbindを保持したまま渡す。
+  if (isDbRunBatchItem(candidate) && hasPrepare(candidate)) {
+    return candidate;
   }
   if (hasPrepare(candidate)) {
     return candidate;
   }
   if (hasGetSQL(candidate)) {
-    return db.run(inlineBatchSql(candidate.getSQL()));
+    return db.run(candidate.getSQL());
   }
   throw new AuditMutationError(
     "D1 batch に渡せない mutation statement です。await 済みの結果を渡していないか確認してください。",
