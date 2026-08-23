@@ -1,5 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { desc, eq } from "drizzle-orm";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
@@ -17,17 +18,39 @@ import { formatUnix } from "@/lib/utils/format";
 export const metadata: Metadata = { title: "作品情報出力API" };
 export const dynamic = "force-dynamic";
 
+interface Props {
+  searchParams?: Promise<{ notice?: string; error?: string }>;
+}
+
+function pageHref(params: Record<string, string>): string {
+  const query = new URLSearchParams(params);
+  return `/admin/api-endpoints?${query.toString()}`;
+}
+
 async function createApiEndpointAction(formData: FormData): Promise<void> {
   "use server";
-  await createApiEndpoint(formData);
+  const result = await createApiEndpoint(formData);
+  redirect(
+    result.ok
+      ? pageHref({ notice: result.message ?? "公開APIを有効化しました。" })
+      : pageHref({ error: result.message ?? "公開APIを有効化できませんでした。" }),
+  );
 }
 
 async function setApiEndpointActiveAction(formData: FormData): Promise<void> {
   "use server";
-  await setApiEndpointActive(formData);
+  const result = await setApiEndpointActive(formData);
+  redirect(
+    result.ok
+      ? pageHref({ notice: result.message ?? "公開API設定を更新しました。" })
+      : pageHref({ error: result.message ?? "公開API設定を更新できませんでした。" }),
+  );
 }
 
-export default async function AdminApiEndpointsPage(): Promise<React.ReactElement> {
+export default async function AdminApiEndpointsPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
+  const sp = (await searchParams) ?? {};
   const db = getDatabase();
   let rows: Array<{
     id: string;
@@ -77,6 +100,17 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         title="作品情報出力API"
         description="イベント単位で公開作品情報リンクを発行します。新形式v5と旧EventArchives系互換、リアルタイム更新と節約定期更新を組み合わせて選択できます。"
       />
+
+      {sp.notice ? (
+        <p className="fn-alert fn-alert-success" role="status" style={{ marginTop: 16 }}>
+          {sp.notice}
+        </p>
+      ) : null}
+      {sp.error ? (
+        <p className="fn-alert fn-alert-danger" role="alert" style={{ marginTop: 16 }}>
+          {sp.error}
+        </p>
+      ) : null}
 
       <section
         style={{
