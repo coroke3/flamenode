@@ -12,6 +12,7 @@ import { resolveEventEditPermissions } from "@/lib/event/eventEditPermissions";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { sendYoutubePlaylistSyncWakeBestEffort } from "@/lib/queues/youtubePlaylistSyncWake";
 import {
   extractYoutubePlaylistId,
   parsePlaylistSyncInterval,
@@ -194,6 +195,11 @@ export async function saveEventYoutubePlaylistSettings(
     );
   }
 
+  // D1のnext_sync_atを正本として先にcommitし、Queueはドアベルだけにする。
+  // Queue無効/送信失敗なら従来どおり :52 Cron が回収する。
+  if (enabled === 1) {
+    await sendYoutubePlaylistSyncWakeBestEffort("manage");
+  }
   await revalidateEventYoutubePlaylistPathBestEffort(eventId);
   redirect(settingsHref(eventId, { saved: "1" }));
 }
@@ -276,6 +282,7 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
     );
   }
 
+  await sendYoutubePlaylistSyncWakeBestEffort("manage");
   await revalidateEventYoutubePlaylistPathBestEffort(eventId);
   redirect(settingsHref(eventId, { queued: "1" }));
 }
