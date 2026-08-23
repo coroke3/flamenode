@@ -29,24 +29,24 @@ test("staff CSV preflights the complete atomic mutation before calling the write
   assert.match(source, /auditEntryCount: upserts\.length \+ newXRows\.length/);
 
   const existingRows = planD1AuditMutationBudget({
-    mutationStatementCount: 15,
-    mutationAssertionCount: 15,
-    auditEntryCount: 15,
+    mutationStatementCount: 12,
+    mutationAssertionCount: 12,
+    auditEntryCount: 12,
     distinctActorCount: 1,
   });
   const newRows = planD1AuditMutationBudget({
-    mutationStatementCount: 14,
-    mutationAssertionCount: 14,
-    auditEntryCount: 14,
+    mutationStatementCount: 12,
+    mutationAssertionCount: 12,
+    auditEntryCount: 12,
     distinctActorCount: 1,
   });
   assert.equal(existingRows.withinLimit, true);
   assert.equal(newRows.withinLimit, true);
   assert.equal(
     planD1AuditMutationBudget({
-      mutationStatementCount: 16,
-      mutationAssertionCount: 16,
-      auditEntryCount: 16,
+      mutationStatementCount: 13,
+      mutationAssertionCount: 13,
+      auditEntryCount: 13,
       distinctActorCount: 1,
     }).withinLimit,
     false,

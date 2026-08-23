@@ -13,7 +13,7 @@ test("content cron propagates its deadline signal through queue and cleanup", as
 
   assert.match(content, /signal: context\.signal/);
   assert.match(content, /processStaticRebuildQueue\([\s\S]*signal/);
-  assert.match(content, /runCleanupWithRetry\(env, cleanupSignal\)/);
+  assert.match(content, /runCleanupWithRetry\(rebuildEnv, cleanupSignal\)/);
   assert.match(queue, /throwIfAborted\(signal/);
   assert.match(
     queue,

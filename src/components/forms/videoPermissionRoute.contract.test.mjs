@@ -13,7 +13,7 @@ const summarySource = await readFile(
 const permissionPageSource = await readFile(
   new URL("../../../app/(auth)/dashboard/edit/[id]/permissions/page.tsx", import.meta.url),
   "utf8",
-);
+).then((source) => source.replace(/\r\n/g, "\n"));
 
 test("メンバー欄の#video-collab-perms導線には実在するtargetと専用管理ページリンクがある", () => {
   assert.match(membersSource, /collabPermsHref/);

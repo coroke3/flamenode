@@ -122,7 +122,7 @@ test("member_suggestions再生成フックは必須mutationへ接続されてい
   assert.match(createFreeVideo, /"member_suggestions"/);
   assert.match(submitSlotVideo, /"member_suggestions"/);
   // 権限single/batch actionは同一atomic write内でindex再生成をenqueueする。
-  assert.match(collabPerms, /memberSuggestionsTarget\("video_collab_permissions"\)/);
+  assert.match(collabPerms, /async function applyPermissionIntentsToVideo[\s\S]*memberSuggestionsTarget\("video_permissions_batch"\)/);
   assert.match(collabPerms, /memberSuggestionsTarget\("video_permissions_batch"\)/);
 });
 

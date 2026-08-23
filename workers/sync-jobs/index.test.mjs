@@ -4,11 +4,20 @@ import { test } from "node:test";
 import {
   DAILY_BLOCKED_RECHECK_D1_RESERVE,
   isPlaylistSyncSlot,
+  normalizePlaylistQuotaStop,
 } from "./index.ts";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 const sharedSource = await readFile(
   new URL("../shared/createCronWorker.ts", import.meta.url),
+  "utf8",
+);
+const wakeBudgetSource = await readFile(
+  new URL("../../src/lib/queues/wakeBudget.ts", import.meta.url),
+  "utf8",
+);
+const playlistActionSource = await readFile(
+  new URL("../../src/lib/actions/event-youtube-playlist.ts", import.meta.url),
   "utf8",
 );
 
@@ -35,7 +44,37 @@ test("score起因ランキングenqueueは専用throttleモジュールへ委譲
   assert.doesNotMatch(source, /enqueueStaticRebuild/);
 });
 
-test("UTC分が52の時だけを再生リスト同期の専用枠にする", () => {
+test("playlist quota停止はQueue/Cron retry対象ではなくdeferred skipへ正規化する", () => {
+  const quotaStopped = normalizePlaylistQuotaStop({
+    processed: 0,
+    skipped: 0,
+    failed: 1,
+    external_api_calls: 2,
+    d1_changes: 1,
+    retry_count: 0,
+    quota_stopped: true,
+    quota_stop_reason: "youtube_quota_deferred",
+  });
+  assert.equal(quotaStopped.failed, 0);
+  assert.equal(quotaStopped.skipped, 1);
+  assert.equal(quotaStopped.quota_stopped, true);
+  assert.equal(quotaStopped.external_api_calls, 2);
+
+  const actualFailure = normalizePlaylistQuotaStop({
+    processed: 0,
+    skipped: 0,
+    failed: 1,
+    external_api_calls: 1,
+    d1_changes: 1,
+    retry_count: 0,
+    quota_stopped: false,
+    quota_stop_reason: null,
+  });
+  assert.equal(actualFailure.failed, 1);
+  assert.equal(actualFailure.skipped, 0);
+});
+
+test("UTC分が52の時だけを再生リスト同期の専用Cron枠にする", () => {
   assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:07:00Z")), false);
   assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:22:00Z")), false);
   assert.equal(isPlaylistSyncSlot(new Date("2026-07-13T00:37:00Z")), false);
@@ -47,6 +86,72 @@ test("UTC分が52の時だけを再生リスト同期の専用枠にする", () 
   assert.match(source, /youtube-playlist-sync/);
   assert.match(source, /isPlaylistSyncSlot\(new Date\(execution\.scheduledTime\)\)/);
   assert.doesNotMatch(source, /if \(isPlaylistSyncSlot\(\)\)/);
+});
+
+test("再生リスト手動予約はD1 commit後にQueue wakeし52分Cronをfallbackに残す", () => {
+  assert.match(wakeBudgetSource, /"youtube_playlist_sync"/);
+  assert.match(
+    wakeBudgetSource,
+    /case "youtube_sync_pending":[\s\S]*case "youtube_playlist_sync":[\s\S]*youtubeSyncWake/,
+  );
+  assert.match(playlistActionSource, /sendYoutubePlaylistSyncWakeBestEffort\("manage"\)/);
+  assert.match(playlistActionSource, /next_sync_at:\s*now/);
+  assert.match(source, /wake\?\.kind === "youtube_playlist_sync"/);
+  assert.match(source, /syncEventPlaylists\(env\)/);
+  assert.match(source, /ackAll\(playlistMessages\)/);
+  assert.match(source, /retryAll\(playlistMessages\)/);
+  assert.match(source, /syncEventPlaylists\(budgetEnv, signal\)/);
+});
+
+test("playlist backlogはindexed due判定後に1件だけcontinuation wakeする", () => {
+  assert.match(source, /async function maybeContinueYoutubePlaylistSync/);
+  assert.match(source, /flags\.continuationEnabled/);
+  assert.match(
+    source,
+    /SELECT 1 AS due[\s\S]*FROM event_youtube_playlist_sync[\s\S]*COALESCE\(next_sync_at, 0\) <= \?1[\s\S]*LIMIT 1/,
+  );
+  assert.match(
+    source,
+    /kind:\s*"youtube_playlist_sync"[\s\S]*source:\s*"continuation"/,
+  );
+  assert.match(source, /continued \|\|= playlistContinued/);
+  assert.match(source, /playlistJob\.quota_stopped/);
+  assert.match(source, /playlistCounters\.quota_stopped/);
+  assert.match(source, /deferred_to_recovery/);
+  assert.ok(
+    source.match(/maybeContinueYoutubePlaylistSync\(/g)?.length >= 3,
+    "helper definition + Queue + Cron calls are required",
+  );
+});
+
+test("mixed YouTube batchではplaylistだけを実行しmetadataは1 wakeへcoalesceする", () => {
+  assert.match(source, /const mixedYoutubeKinds =/);
+  assert.match(
+    source,
+    /if \(metadataMessages\.length > 0 && !mixedYoutubeKinds\)/,
+  );
+  assert.match(source, /if \(playlistMessages\.length > 0\)/);
+  assert.match(
+    source,
+    /if \(mixedYoutubeKinds\)[\s\S]*ackAll\(metadataMessages\)[\s\S]*maybeResendYoutubePendingWake\([\s\S]*env,[\s\S]*"continuation",[\s\S]*\)/,
+  );
+  assert.match(
+    source,
+    /source === "continuation" && !flags\.continuationEnabled/,
+  );
+  assert.match(source, /skipped \+= metadataMessages\.length/);
+  assert.match(source, /youtube-pending-recovery-check/);
+  assert.match(source, /deferred_to_recovery/);
+});
+
+test("metadataとplaylistのQueueメッセージは種類別にack/retryする", () => {
+  assert.match(source, /const metadataMessages: Message<unknown>\[\] = \[\]/);
+  assert.match(source, /const playlistMessages: Message<unknown>\[\] = \[\]/);
+  assert.match(source, /ackAll\(metadataMessages\)/);
+  assert.match(source, /retryAll\(metadataMessages\)/);
+  assert.match(source, /ackAll\(playlistMessages\)/);
+  assert.match(source, /retryAll\(playlistMessages\)/);
+  assert.doesNotMatch(source, /extractValidatedWakeFromBatch/);
 });
 
 test("Cron deadline signalをmetadata同期とplaylist同期へ渡す", () => {

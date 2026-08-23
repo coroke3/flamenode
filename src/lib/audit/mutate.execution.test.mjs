@@ -28,6 +28,7 @@ if (!runningWithTsx) {
   const {
     AUDIT_INSERT_CHUNK_SIZE,
     D1_MAX_BATCH_QUERIES,
+    asBatchRunnable,
     mutateWithAudit,
   } = await import("./mutate.ts");
 
@@ -222,7 +223,7 @@ if (!runningWithTsx) {
     const db = drizzle(client);
 
     await db.batch([
-      db.run(sql`SELECT ${"bound-value"} AS value`),
+      asBatchRunnable(db, db.run(sql`SELECT ${"bound-value"} AS value`)),
     ]);
 
     assert.equal(prepared.length, 1);
@@ -255,7 +256,7 @@ if (!runningWithTsx) {
     assert.ok(payloadBytes < 2_000_000);
 
     await db.batch([
-      db.run(sql`SELECT json_array_length(${payload})`),
+      asBatchRunnable(db, db.run(sql`SELECT json_array_length(${payload})`)),
     ]);
 
     assert.equal(prepared.length, 1);

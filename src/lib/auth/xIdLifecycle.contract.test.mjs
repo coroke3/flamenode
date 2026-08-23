@@ -157,7 +157,7 @@ test("X ID lifecycleの最大atomic planはD1 50 query以内に収まる", () =>
     auditEntryCount: 3,
     distinctActorCount: 1,
   });
-  assert.equal(budget.totalQueryCount, 22);
+  assert.equal(budget.totalQueryCount, 30);
   assert.equal(budget.withinLimit, true);
   assert.ok(4 * 21 < 100, "最大4行の監査chunkも100 bind未満である");
 });

@@ -1,5 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { desc, eq } from "drizzle-orm";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
@@ -17,17 +18,39 @@ import { formatUnix } from "@/lib/utils/format";
 export const metadata: Metadata = { title: "作品情報出力API" };
 export const dynamic = "force-dynamic";
 
+interface Props {
+  searchParams?: Promise<{ notice?: string; error?: string }>;
+}
+
+function pageHref(params: Record<string, string>): string {
+  const query = new URLSearchParams(params);
+  return `/admin/api-endpoints?${query.toString()}`;
+}
+
 async function createApiEndpointAction(formData: FormData): Promise<void> {
   "use server";
-  await createApiEndpoint(formData);
+  const result = await createApiEndpoint(formData);
+  redirect(
+    result.ok
+      ? pageHref({ notice: result.message ?? "公開APIを有効化しました。" })
+      : pageHref({ error: result.message ?? "公開APIを有効化できませんでした。" }),
+  );
 }
 
 async function setApiEndpointActiveAction(formData: FormData): Promise<void> {
   "use server";
-  await setApiEndpointActive(formData);
+  const result = await setApiEndpointActive(formData);
+  redirect(
+    result.ok
+      ? pageHref({ notice: result.message ?? "公開API設定を更新しました。" })
+      : pageHref({ error: result.message ?? "公開API設定を更新できませんでした。" }),
+  );
 }
 
-export default async function AdminApiEndpointsPage(): Promise<React.ReactElement> {
+export default async function AdminApiEndpointsPage({
+  searchParams,
+}: Props): Promise<React.ReactElement> {
+  const sp = (await searchParams) ?? {};
   const db = getDatabase();
   let rows: Array<{
     id: string;
@@ -75,8 +98,19 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
     <div>
       <AdminPageHeader
         title="作品情報出力API"
-        description="イベント単位で公開作品情報リンクを発行します。旧形式互換・新形式v3と、リアルタイム更新・節約定期更新を組み合わせて選択できます。"
+        description="イベント単位で公開作品情報リンクを発行します。新形式v5と旧EventArchives系互換、リアルタイム更新と節約定期更新を組み合わせて選択できます。"
       />
+
+      {sp.notice ? (
+        <p className="fn-alert fn-alert-success" role="status" style={{ marginTop: 16 }}>
+          {sp.notice}
+        </p>
+      ) : null}
+      {sp.error ? (
+        <p className="fn-alert fn-alert-danger" role="alert" style={{ marginTop: 16 }}>
+          {sp.error}
+        </p>
+      ) : null}
 
       <section
         style={{
@@ -126,9 +160,9 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
             borderRadius: "var(--radius-md)",
           }}
         >
-          <strong className="fn-text-sm">新形式 v3</strong>
+          <strong className="fn-text-sm">新形式 v5</strong>
           <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
-            イベント、作品、制作者、公開メンバー、チャプター、使用ソフト、公開回答を構造化して返します。
+            イベント、作品、制作者、公開メンバー、チャプター、使用ソフト、公開回答を現在のFlameNode正本に沿って構造化して返します。
           </p>
         </article>
         <article
@@ -141,7 +175,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         >
           <strong className="fn-text-sm">旧形式互換</strong>
           <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
-            旧EventArchives系の配列・列名で返します。正規化済みデータから互換列を再構成します。
+            旧EventArchives系の配列・列名で返します。正規化済みの公開データから安全に復元できる値だけを再構成します。
           </p>
         </article>
         <article
@@ -167,7 +201,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
         >
           <strong className="fn-text-sm">節約定期更新</strong>
           <p className="fn-muted fn-text-sm" style={{ margin: "6px 0 0" }}>
-            形式別にKV共有キャッシュし、指定間隔ごとにだけD1から再生成します。公開可否は短期キャッシュで確認します。
+            形式別にKV共有キャッシュし、指定間隔ごとにだけD1から再生成します。公開可否はキャッシュ利用前にD1で確認します。
           </p>
         </article>
       </section>
@@ -244,7 +278,7 @@ export default async function AdminApiEndpointsPage(): Promise<React.ReactElemen
           出力仕様
         </h2>
         <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
-          新形式v3は公開情報を構造化して返し、旧形式互換は同じ正規化データから旧列を生成します。どちらも公開イベント・公開作品・公開運営・公開メンバー・公開チャプター・公開カスタム回答だけを出力し、内部ユーザーID、権限、監査情報、非公開データは含めません。作品は最大500件です。
+          新形式v5は公開情報を構造化して返し、旧形式互換は同じ正規化済み公開データから旧列を生成します。どちらも公開イベント・公開作品・公開運営・公開メンバー・公開チャプター・公開カスタム回答だけを出力し、内部ユーザーID、権限、監査情報、非公開データは含めません。作品は最大500件です。旧形式の終了時刻など現行正本から復元できない値は推測せず空欄になります。
         </p>
       </section>
     </div>

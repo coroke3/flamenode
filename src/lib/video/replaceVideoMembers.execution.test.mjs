@@ -188,7 +188,7 @@ if (runTestWithTsx(import.meta.url)) {
       (call) => call.query.includes("video_members") && call.query.includes("json_each"),
     );
     assert.equal(carryCalls.length, 1);
-    assert.equal(carryCalls[0].params.length, 2);
+    assert.equal(carryCalls[0].params.length, 3);
     for (const query of queries) {
       assert.ok(query.params.length <= 100, `bind count ${query.params.length}`);
     }

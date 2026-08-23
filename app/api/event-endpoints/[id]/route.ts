@@ -8,7 +8,8 @@ import {
   type EventExportEventRow,
 } from "@/lib/api/eventExportData";
 import {
-  buildEventExportPayload,
+  buildEventExportPayloadForFormat,
+  type EventExportFormat,
   type EventExportUpdateMode,
 } from "@/lib/api/eventExportPayload";
 import {
@@ -26,10 +27,52 @@ import {
 import { assertNoForbiddenKeys } from "@/lib/api/publicDto";
 
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
+const EVENT_EXPORT_CACHE_METADATA_MARKER = "public-export-validated-v1";
+
+type EventExportCacheMetadata = {
+  marker: typeof EVENT_EXPORT_CACHE_METADATA_MARKER;
+  format: EventExportFormat;
+  schema_version: 1 | 5;
+};
+
+function cacheMetadataForFormat(
+  format: EventExportFormat,
+): EventExportCacheMetadata {
+  return {
+    marker: EVENT_EXPORT_CACHE_METADATA_MARKER,
+    format,
+    schema_version: format === "legacy" ? 1 : 5,
+  };
+}
+
+function isTrustedCacheMetadata(
+  metadata: unknown,
+  format: EventExportFormat,
+): boolean {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return false;
+  }
+  const value = metadata as Partial<EventExportCacheMetadata>;
+  return (
+    value.marker === EVENT_EXPORT_CACHE_METADATA_MARKER &&
+    value.format === format &&
+    value.schema_version === (format === "legacy" ? 1 : 5)
+  );
+}
+
+function parseFormat(value: string | null): EventExportFormat | null {
+  if (value == null || value === "" || value === "v5" || value === "new") {
+    return "v5";
+  }
+  if (value === "legacy" || value === "old" || value === "v1") {
+    return "legacy";
+  }
+  return null;
+}
 
 function parseUpdateMode(value: string | null): EventExportUpdateMode | null {
   if (value === "realtime") return "realtime";
-  if (value === "scheduled") return "scheduled";
+  if (value === "scheduled" || value === "economy") return "scheduled";
   return null;
 }
 
@@ -71,6 +114,7 @@ function notFoundResponse(req: Request): Promise<Response> {
 async function exportResponse(
   req: Request,
   body: string,
+  format: EventExportFormat,
   updateMode: EventExportUpdateMode,
   refreshMinutes: EventExportRefreshMinutes,
   cacheState: "HIT" | "MISS" | "BYPASS",
@@ -80,8 +124,14 @@ async function exportResponse(
       ? "no-store"
       : "public, max-age=60, s-maxage=60, stale-while-revalidate=60";
   const response = await publicJsonBodyResponse(req, body, cacheControl);
-  response.headers.set("X-FlameNode-Schema-Version", "5");
-  response.headers.set("X-FlameNode-Format", "flamenode-event-export");
+  response.headers.set(
+    "X-FlameNode-Schema-Version",
+    format === "legacy" ? "1" : "5",
+  );
+  response.headers.set(
+    "X-FlameNode-Format",
+    format === "legacy" ? "legacy" : "flamenode-event-export",
+  );
   response.headers.set("X-FlameNode-Update-Mode", updateMode);
   response.headers.set("X-FlameNode-Refresh-Minutes", String(refreshMinutes));
   response.headers.set("X-FlameNode-Cache", cacheState);
@@ -92,28 +142,56 @@ async function readCachedPayload(
   kv: KVNamespace,
   cacheKey: string,
   eventId: string,
+  format: EventExportFormat,
   cacheTtlSeconds: number,
 ): Promise<string | null> {
   let cached: string | null;
+  let metadata: unknown = null;
   try {
-    cached = await kv.get(cacheKey, { cacheTtl: cacheTtlSeconds });
+    const result = await kv.getWithMetadata(cacheKey, {
+      type: "text",
+      cacheTtl: cacheTtlSeconds,
+    });
+    cached = typeof result.value === "string" ? result.value : null;
+    metadata = result.metadata;
   } catch (error) {
     console.warn("[event-export-api] KV payload read failed", {
       eventId,
       cacheKey,
+      format,
       error,
     });
     return null;
   }
   if (!cached) return null;
+
+  // New cache entries are validated before write and carry an immutable format
+  // marker in KV metadata. Avoid JSON.parse + recursive leak scanning on every
+  // hot cache hit; legacy entries without metadata still take the safe fallback.
+  if (isTrustedCacheMetadata(metadata, format)) return cached;
+
   try {
-    const parsed = JSON.parse(cached) as { schema_version?: unknown };
-    if (parsed.schema_version !== 5) throw new Error("stale_schema");
+    const parsed = JSON.parse(cached) as unknown;
+    if (format === "legacy") {
+      if (!Array.isArray(parsed)) throw new Error("stale_legacy_schema");
+    } else {
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        (parsed as { schema_version?: unknown }).schema_version !== 5
+      ) {
+        throw new Error("stale_schema");
+      }
+    }
+    // Old/manual cache entries have no trusted metadata. Validate them fully
+    // before returning so a stale key can never bypass the public DTO fence.
+    assertNoForbiddenKeys(parsed);
     return cached;
   } catch (error) {
     console.warn("[event-export-api] invalid KV payload evicted", {
       eventId,
       cacheKey,
+      format,
       error,
     });
     try {
@@ -137,17 +215,16 @@ export async function GET(
   if (!eventId) return notFoundResponse(req);
 
   const url = new URL(req.url);
-  if (url.searchParams.has("format")) {
+  const format = parseFormat(url.searchParams.get("format"));
+  if (!format) {
     return publicJsonResponse(
       req,
       {
-        error: "format_parameter_removed",
-        schema_version: 5,
-        message:
-          "旧形式は廃止されました。formatパラメータを削除し、v5形式を利用してください。",
+        error: "invalid_format",
+        allowed: ["v5", "legacy"],
       },
       "no-store",
-      410,
+      400,
     );
   }
 
@@ -161,6 +238,7 @@ export async function GET(
       {
         error: "invalid_export_options",
         allowed: {
+          format: ["v5", "legacy"],
           update: ["realtime", "scheduled"],
           refresh: EVENT_EXPORT_REFRESH_MINUTES,
         },
@@ -199,6 +277,7 @@ export async function GET(
 
   const payloadCacheKey = eventExportPayloadCacheKey(
     eventId,
+    format,
     refreshMinutes,
   );
   const cachedResponse = async (): Promise<Response | null> => {
@@ -207,6 +286,7 @@ export async function GET(
       kv,
       payloadCacheKey,
       eventId,
+      format,
       refreshMinutes * 60,
     );
     return cached === null
@@ -214,6 +294,7 @@ export async function GET(
       : exportResponse(
           req,
           cached,
+          format,
           updateMode,
           refreshMinutes,
           "HIT",
@@ -268,12 +349,18 @@ export async function GET(
   }
   let body: string | null = null;
   if (snapshot) {
-    const payload = buildEventExportPayload(snapshot, generatedAt, updateMode);
+    const payload = buildEventExportPayloadForFormat(
+      snapshot,
+      format,
+      generatedAt,
+      updateMode,
+    );
     try {
       assertNoForbiddenKeys(payload);
     } catch (error) {
       console.error("[event-export-api] public payload boundary failed", {
         eventId,
+        format,
         error,
       });
       return publicJsonResponse(
@@ -291,15 +378,17 @@ export async function GET(
   }
 
   if (kv) {
-    const writes = await Promise.allSettled([
-      kv.put(payloadCacheKey, body, {
+    try {
+      await kv.put(payloadCacheKey, body, {
         expirationTtl: refreshMinutes * 60,
-      }),
-    ]);
-    if (writes.some((result) => result.status === "rejected")) {
-      console.warn("[event-export-api] KV write partially failed", {
+        metadata: cacheMetadataForFormat(format),
+      });
+    } catch (error) {
+      console.warn("[event-export-api] KV write failed", {
         eventId,
+        format,
         refreshMinutes,
+        error,
       });
     }
   }
@@ -307,6 +396,7 @@ export async function GET(
   return exportResponse(
     req,
     body,
+    format,
     updateMode,
     refreshMinutes,
     updateMode === "scheduled" ? "MISS" : "BYPASS",

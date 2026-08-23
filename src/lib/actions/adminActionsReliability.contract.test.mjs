@@ -81,12 +81,21 @@ for (const target of reliabilityTargets) {
     assert.match(source, /runPostCommitBestEffort/);
     assert.match(source, new RegExp(target.revalidateHelper));
     assert.match(source, /unstable_rethrow\(/);
-    assert.match(
-      source,
-      new RegExp(
-        `export async function ${target.exportName}[\\s\\S]*${target.revalidateHelper}`,
-      ),
-    );
+    const exportIndex = source.indexOf(`export async function ${target.exportName}`);
+    assert.ok(exportIndex >= 0, `${target.file} must export ${target.exportName}`);
+    if (target.exportName === "upsertVideoCollaborator") {
+      // The single-row action delegates to the shared intent applier, which
+      // owns post-commit revalidation for both single and batch writes.
+      assert.match(source, /applyPermissionIntentsToVideo\(/);
+      assert.match(source, /applyPermissionIntentsToVideo[\s\S]*revalidateVideoCollabPathsBestEffort/);
+    } else {
+      assert.match(
+        source,
+        new RegExp(
+          `export async function ${target.exportName}[\\s\\S]*${target.revalidateHelper}`,
+        ),
+      );
+    }
     assert.doesNotMatch(
       source,
       /catch \(error\) \{\s*return \{\s*ok: false/m,

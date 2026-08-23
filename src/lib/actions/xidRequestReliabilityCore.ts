@@ -1,3 +1,5 @@
+import { isTransientDbError } from "@/lib/db/transientDbErrorCore";
+
 export const X_ID_LINK_REQUEST_TYPES = ["new_link", "existing_link"] as const;
 export const X_ID_PENDING_REQUEST_LIMIT = 5;
 
@@ -40,16 +42,13 @@ function errorChainSome(
  * schema不一致や入力不正は再試行しても直らないため対象にしない。
  */
 export function isRetryableXIdMutationError(error: unknown): boolean {
-  return errorChainSome(error, ({ code, message }) => {
+  // Cloudflareがretry推奨する接続瞬断・instance resetは共通classifierへ集約する。
+  // ここではX ID固有のCAS/constraint競合だけを追加判定する。
+  if (isTransientDbError(error)) return true;
+  return errorChainSome(error, ({ message }) => {
     const text = typeof message === "string" ? message : "";
-    return (
-      code === "SQLITE_BUSY" ||
-      code === "ECONNRESET" ||
-      code === "ECONNREFUSED" ||
-      code === "ETIMEDOUT" ||
-      /SQLITE_(?:BUSY|CONSTRAINT)|database is locked|constraint failed|malformed json|D1_ERROR.*(?:internal error|constraint)|fetch failed|UND_ERR_SOCKET|socket hang up|Failed to parse body as JSON.*internal error/i.test(
-        text,
-      )
+    return /SQLITE_CONSTRAINT|constraint failed|malformed json|D1_ERROR.*constraint/i.test(
+      text,
     );
   });
 }

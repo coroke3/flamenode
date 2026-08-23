@@ -1,5 +1,6 @@
 import { FORBIDDEN_PUBLIC_KEYS } from "./publicDto.ts";
 
+export type EventExportFormat = "v5" | "legacy";
 export type EventExportUpdateMode = "realtime" | "scheduled";
 
 export interface EventExportStaffSnapshot {
@@ -163,16 +164,209 @@ function parsePublicJson(value: string | null): unknown {
   }
 }
 
+function legacyPublicJsonText(value: string | null): string {
+  const parsed = parsePublicJson(value);
+  if (parsed == null) return "";
+  if (typeof parsed === "string") return parsed;
+  try {
+    return JSON.stringify(parsed);
+  } catch {
+    return "";
+  }
+}
+
 function answerValue(answer: EventExportAnswerSnapshot): unknown {
   return answer.answer_json
     ? parsePublicAnswerJson(answer.answer_json)
     : answer.answer_text;
 }
 
+function answerText(video: EventExportVideoSnapshot, key: string): string {
+  const answer = video.answers.find((candidate) => candidate.key === key);
+  if (!answer) return "";
+  const value = answerValue(answer);
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.join(",");
+  return "";
+}
+
+function legacyDateParts(value: number | null): { date: string; time: string } {
+  if (value == null || !Number.isFinite(value)) return { date: "", time: "" };
+  const date = new Date((value + 9 * 60 * 60) * 1000);
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return { date: `${month}/${day}`, time: `${hour}:${minute}` };
+}
+
+type LegacyImportedNoteKey = "ステージ利用" | "登壇" | "制作経験" | "コメント";
+
+const LEGACY_IMPORTED_NOTE_RE = /^(ステージ利用|登壇|制作経験|コメント):\s?(.*)$/;
+
+function isLegacyImportedVideo(video: EventExportVideoSnapshot): boolean {
+  // normalizeLegacyFiles() が生成するIDは legacy_<youtube id> または
+  // legacy_video_<hash>。通常作品のproduction_storyを旧メタデータとして
+  // 誤解釈しないため、この由来が分かる作品だけ復元対象にする。
+  return video.id.startsWith("legacy_");
+}
+
+function parseLegacyImportedNotes(
+  video: EventExportVideoSnapshot,
+): ReadonlyMap<LegacyImportedNoteKey, string> {
+  const out = new Map<LegacyImportedNoteKey, string>();
+  if (!isLegacyImportedVideo(video) || !video.production_story?.trim()) return out;
+
+  let activeKey: LegacyImportedNoteKey | null = null;
+  for (const line of video.production_story.replace(/\r\n?/g, "\n").split("\n")) {
+    const match = line.match(LEGACY_IMPORTED_NOTE_RE);
+    if (match) {
+      activeKey = match[1] as LegacyImportedNoteKey;
+      out.set(activeKey, match[2] ?? "");
+      continue;
+    }
+    if (!activeKey) continue;
+    const current = out.get(activeKey) ?? "";
+    out.set(activeKey, current ? `${current}\n${line}` : line);
+  }
+
+  return out;
+}
+
+function earliestChapterTime(
+  chapters: readonly EventExportChapterSnapshot[],
+): string {
+  let earliest: number | null = null;
+  for (const chapter of chapters) {
+    if (!Number.isFinite(chapter.chapter_time) || chapter.chapter_time < 0) continue;
+    earliest =
+      earliest == null
+        ? chapter.chapter_time
+        : Math.min(earliest, chapter.chapter_time);
+  }
+  return earliest == null ? "" : String(earliest);
+}
+
+function firstMemberChapter(
+  video: EventExportVideoSnapshot,
+  member: EventExportMemberSnapshot,
+): string {
+  const memberName = member.name.trim();
+  return earliestChapterTime(
+    video.chapters.filter((chapter) => {
+      if (member.x_user_id) return chapter.x_user_id === member.x_user_id;
+      return (
+        chapter.x_user_id == null &&
+        memberName.length > 0 &&
+        chapter.chapter_label.trim() === memberName
+      );
+    }),
+  );
+}
+
+function legacyStarts(video: EventExportVideoSnapshot): string {
+  if (video.members.length > 0) {
+    return video.members
+      .map((member) => firstMemberChapter(video, member))
+      .join(",");
+  }
+
+  // メンバーがない通常作品のchapterを旧 `starts` とみなす根拠はない。
+  // legacy import由来だけは importer が旧startsをpublic chapterへ変換するため復元できる。
+  if (!isLegacyImportedVideo(video)) return "";
+  return earliestChapterTime(
+    video.chapters.filter(
+      (chapter) =>
+        chapter.x_user_id == null ||
+        (video.creator_x_user_id != null &&
+          chapter.x_user_id === video.creator_x_user_id),
+    ),
+  );
+}
+
 /**
- * FlameNodeイベント公開APIの唯一の出力形式。
- * 旧形式変換は提供せず、DB正本の概念だけを返す。
+ * 旧EventArchives系の公開JSON互換アダプター。
+ * DB旧形式を復活させず、現在の公開snapshotから安全に再構成できる値だけを返す。
+ * `ends` / `startm` / `endm` はcanonical schemaに復元元がないため推測しない。
  */
+export function buildLegacyEventExportPayload(
+  snapshot: EventExportSnapshot,
+): Array<Record<string, unknown>> {
+  return snapshot.videos.map((video) => {
+    const schedule = legacyDateParts(video.scheduled_time);
+    const isCollaboration =
+      video.collaboration_type === "collab" || video.members.length > 1;
+    const starts = legacyStarts(video);
+    const emptyMemberAligned = video.members.map(() => "").join(",");
+    const importedNotes = parseLegacyImportedNotes(video);
+    const productionExperience =
+      answerText(video, "production_experience") ||
+      importedNotes.get("制作経験") ||
+      "";
+    const stagePermission =
+      answerText(video, "stage_permission") ||
+      importedNotes.get("ステージ利用") ||
+      "";
+    const stageParticipation =
+      answerText(video, "stage_participation") ||
+      importedNotes.get("登壇") ||
+      "";
+    const legacyGeneralComment = importedNotes.get("コメント") || video.intro_comment || "";
+
+    return {
+      id: video.id,
+      eventid: snapshot.event.id,
+      timestamp:
+        isoFromUnix(video.created_at) ?? isoFromUnix(video.scheduled_time) ?? "",
+      type1: isCollaboration ? "複数人" : "個人",
+      type2: isCollaboration ? "団体" : "個人",
+      type: video.part ?? "",
+      creator: video.creator_display_name,
+      yomi: video.creator_display_name_yomi ?? "",
+      movieyear: productionExperience,
+      tlink: video.creator_x_user_id ?? "",
+      ychlink: video.creator_youtube_channel_url ?? "",
+      icon: video.creator_icon_url ?? "",
+      member: video.members.map((member) => member.name).join(","),
+      memberid: video.members
+        .map((member) => (member.x_user_id ? `@${member.x_user_id}` : ""))
+        .join(","),
+      data: schedule.date,
+      time: schedule.time,
+      title: video.title,
+      music: video.music ?? "",
+      credit: video.credit ?? "",
+      ymulink: video.music_reference_url ?? "",
+      up: "",
+      othersns: legacyPublicJsonText(video.creator_other_social_links),
+      righttype: stagePermission,
+      comment: legacyGeneralComment,
+      ylink: youtubeUrl(video.youtube_video_id) ?? "",
+      "": "",
+      beforecomment: video.intro_comment ?? "",
+      aftercomment: video.closing_comment ?? "",
+      soft: video.softwares
+        .map((software) => software.raw_label || software.name)
+        .filter(Boolean)
+        .join(","),
+      toudan: stageParticipation,
+      hitokoto: video.highlights ?? "",
+      starts,
+      ends: emptyMemberAligned,
+      startm: "",
+      endm: "",
+      ycomment: video.highlights ?? "",
+      status: "public",
+      small: youtubeThumbnail(video.youtube_video_id, "medium") ?? "",
+      largeThumbnail: youtubeThumbnail(video.youtube_video_id, "large") ?? "",
+      link: xProfileUrl(video.creator_x_user_id) ?? "",
+      fu: video.part ?? "",
+    };
+  });
+}
+
+/** FlameNodeイベント公開API v5。DB正本の概念を構造化して返す。 */
 export function buildEventExportPayload(
   snapshot: EventExportSnapshot,
   generatedAt = Math.floor(Date.now() / 1000),
@@ -223,9 +417,6 @@ export function buildEventExportPayload(
       }));
       const customAnswersByKey = Object.fromEntries(
         customAnswers
-          // Question keys are admin-defined. A key such as `user_id` remains
-          // visible in the ordered list, but must not become a forbidden
-          // public object property (the route boundary checks object keys).
           .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
           .map((answer) => [answer.key, answer.value]),
       );
@@ -316,4 +507,15 @@ export function buildEventExportPayload(
       truncated: snapshot.truncated,
     },
   };
+}
+
+export function buildEventExportPayloadForFormat(
+  snapshot: EventExportSnapshot,
+  format: EventExportFormat,
+  generatedAt = Math.floor(Date.now() / 1000),
+  updateMode: EventExportUpdateMode = "realtime",
+): unknown {
+  return format === "legacy"
+    ? buildLegacyEventExportPayload(snapshot)
+    : buildEventExportPayload(snapshot, generatedAt, updateMode);
 }

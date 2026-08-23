@@ -99,11 +99,11 @@ test("D1 bind/query予算はbulk上限8でも制約内に収まる", () => {
   });
   assert.deepEqual(
     { total: createBudget.totalQueryCount, withinLimit: createBudget.withinLimit },
-    { total: 18, withinLimit: true },
+    { total: 26, withinLimit: true },
   );
   assert.deepEqual(
     { total: bulkBudget.totalQueryCount, withinLimit: bulkBudget.withinLimit },
-    { total: 20, withinLimit: true },
+    { total: 28, withinLimit: true },
   );
 });
 

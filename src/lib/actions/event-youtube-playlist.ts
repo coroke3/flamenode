@@ -12,6 +12,7 @@ import { resolveEventEditPermissions } from "@/lib/event/eventEditPermissions";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { sendYoutubePlaylistSyncWakeBestEffort } from "@/lib/queues/youtubePlaylistSyncWake";
 import {
   extractYoutubePlaylistId,
   parsePlaylistSyncInterval,
@@ -194,6 +195,11 @@ export async function saveEventYoutubePlaylistSettings(
     );
   }
 
+  // D1のnext_sync_atを正本として先にcommitし、Queueはドアベルだけにする。
+  // Queue無効/送信失敗なら従来どおり :52 Cron が回収する。
+  if (enabled === 1) {
+    await sendYoutubePlaylistSyncWakeBestEffort("manage");
+  }
   await revalidateEventYoutubePlaylistPathBestEffort(eventId);
   redirect(settingsHref(eventId, { saved: "1" }));
 }
@@ -234,6 +240,10 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
     ...before,
     sync_status: "idle" as const,
     next_sync_at: now,
+    // 手動同期はremote membershipと投稿枠順の両方を再検証する。
+    last_full_scan_at: null,
+    scan_started_at: null,
+    scan_page_token: null,
     last_error: null,
     updated_at: now,
   };
@@ -245,6 +255,9 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
           .set({
             sync_status: after.sync_status,
             next_sync_at: after.next_sync_at,
+            last_full_scan_at: after.last_full_scan_at,
+            scan_started_at: after.scan_started_at,
+            scan_page_token: after.scan_page_token,
             last_error: after.last_error,
             updated_at: after.updated_at,
           })
@@ -276,6 +289,7 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
     );
   }
 
+  await sendYoutubePlaylistSyncWakeBestEffort("manage");
   await revalidateEventYoutubePlaylistPathBestEffort(eventId);
   redirect(settingsHref(eventId, { queued: "1" }));
 }

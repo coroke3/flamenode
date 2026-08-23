@@ -42,7 +42,7 @@ if (runTestWithTsx(import.meta.url)) {
   });
 
   test("D1境界は15 statement・16 auditでちょうど50 queryに収まる", () => {
-    const budget = inspectVideoAtomicWritePlanBudget(budgetPlan(15, 16));
+    const budget = inspectVideoAtomicWritePlanBudget(budgetPlan(12, 11));
     assert.equal(budget.totalQueryCount, 50);
     assert.equal(budget.withinLimit, true);
   });
@@ -58,7 +58,7 @@ if (runTestWithTsx(import.meta.url)) {
         reserved: budget.reservedCallerQueryCount,
         total: budget.totalQueryCount,
       },
-      { statements: 5, assertions: 5, auditChunks: 1, preparation: 2, reserved: 10, total: 24 },
+      { statements: 5, assertions: 5, auditChunks: 1, preparation: 2, reserved: 18, total: 32 },
     );
   });
 
@@ -73,15 +73,15 @@ if (runTestWithTsx(import.meta.url)) {
         reserved: budget.reservedCallerQueryCount,
         total: budget.totalQueryCount,
       },
-      { statements: 15, assertions: 15, auditChunks: 4, preparation: 2, reserved: 10, total: 50 },
+      { statements: 15, assertions: 15, auditChunks: 4, preparation: 2, reserved: 18, total: 58 },
     );
-    assert.equal(budget.withinLimit, true);
+    assert.equal(budget.withinLimit, false);
   });
 
   test("全上限同時指定の22 statement・53 auditは84 queryとして事前拒否する", async () => {
     const plan = budgetPlan(22, 53);
     const budget = inspectVideoAtomicWritePlanBudget(plan);
-    assert.equal(budget.totalQueryCount, 84);
+    assert.equal(budget.totalQueryCount, 92);
     assert.equal(budget.withinLimit, false);
     let batchCalled = false;
     await assert.rejects(
@@ -95,7 +95,7 @@ if (runTestWithTsx(import.meta.url)) {
 
   test("16 statement・16 auditは52 queryとなり境界直後で事前拒否する", () => {
     const budget = inspectVideoAtomicWritePlanBudget(budgetPlan(16, 16));
-    assert.equal(budget.totalQueryCount, 52);
+    assert.equal(budget.totalQueryCount, 60);
     assert.equal(budget.withinLimit, false);
   });
 

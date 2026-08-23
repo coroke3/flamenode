@@ -19,7 +19,9 @@ test("legacy import apply は step ごとに static rebuild wake を最大1件",
 });
 
 test("enqueue many は sentKinds を共有して wake を dedupe する", () => {
-  assert.match(enqueue, /const sentKinds = options\?\.sentKinds \?\? new Set/);
-  assert.match(enqueue, /enqueueStaticRebuild\(db, item, \{ \.\.\.options, sentKinds \}\)/);
-  assert.match(enqueue, /wakeAfterSuccessfulEnqueue/);
+  assert.match(apply, /wakeSentKinds/);
+  assert.match(apply, /staticRebuildWakeSource:\s*"import"/);
+  assert.match(apply, /sendYoutubeSyncPendingWakeBestEffort\("import", wakeSentKinds\)/);
+  assert.match(enqueue, /export async function buildStaticRebuildQueueBatch/);
+  assert.match(enqueue, /STATIC_REBUILD_BULK_UPSERT_ROWS/);
 });

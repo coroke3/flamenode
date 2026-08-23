@@ -174,8 +174,8 @@ if (runTestWithTsx(import.meta.url)) {
     }));
     const db = createDb(sqlite);
     const batch = await buildStaticRebuildQueueBatch(db, items);
-    assert.equal(batch.statements.length, 6);
-    assert.deepEqual(batch.expectedChanges, [50, 50, 50, 50, 50, 6]);
+    assert.equal(batch.statements.length, 3);
+    assert.deepEqual(batch.expectedChanges, [100, 100, 56]);
     for (const statement of batch.statements) {
       const { params } = sqlFromStatement(statement);
       assert.ok(params.length <= 100);

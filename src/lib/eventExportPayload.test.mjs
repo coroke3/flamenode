@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { buildEventExportPayload } from "./api/eventExportPayload.ts";
+import {
+  buildEventExportPayload,
+  buildEventExportPayloadForFormat,
+  buildLegacyEventExportPayload,
+} from "./api/eventExportPayload.ts";
 import { findForbiddenPublicKeys } from "./api/publicDto.ts";
 
 const snapshot = {
@@ -73,6 +77,13 @@ const snapshot = {
           chapter_label: "見どころ",
           note: "注記",
         },
+        {
+          id: "chapter-2",
+          x_user_id: "member_id",
+          chapter_time: 45,
+          chapter_label: "担当開始",
+          note: null,
+        },
       ],
       softwares: [
         { name: "After Effects", raw_label: "AE", order_index: 0 },
@@ -92,7 +103,7 @@ const snapshot = {
   truncated: false,
 };
 
-test("イベント公開API v5はDB正本の構造だけを返す", () => {
+test("イベント公開API v5はDB正本の構造を維持する", () => {
   const payload = buildEventExportPayload(
     snapshot,
     1_700_000_200,
@@ -137,7 +148,7 @@ test("イベント公開API v5はDB正本の構造だけを返す", () => {
   });
 });
 
-test("イベント公開APIに旧形式フィールドと内部情報を含めない", () => {
+test("v5 payloadには旧形式フィールドと内部情報を混ぜない", () => {
   const serialized = JSON.stringify(buildEventExportPayload(snapshot));
   for (const forbidden of [
     "submitted_by_user_id",
@@ -161,6 +172,48 @@ test("イベント公開APIに旧形式フィールドと内部情報を含め�
   ]) {
     assert.equal(serialized.includes(`\"${forbidden}\"`), false, forbidden);
   }
+});
+
+test("旧形式互換はcanonical snapshotから旧EventArchives列を再構成する", () => {
+  const payload = buildLegacyEventExportPayload(snapshot);
+  assert.equal(Array.isArray(payload), true);
+  assert.equal(payload.length, 1);
+  const video = payload[0];
+  assert.equal(video.id, "video-1");
+  assert.equal(video.eventid, "event-1");
+  assert.equal(video.type1, "複数人");
+  assert.equal(video.type2, "団体");
+  assert.equal(video.creator, "制作者");
+  assert.equal(video.member, "メンバー");
+  assert.equal(video.memberid, "@member_id");
+  assert.equal(video.beforecomment, "紹介");
+  assert.equal(video.aftercomment, "後書き");
+  assert.equal(video.soft, "AE");
+  assert.equal(video.righttype, "可");
+  assert.equal(video.starts, "45");
+  assert.equal(video.ends, "");
+  assert.equal(video.startm, "");
+  assert.equal(video.endm, "");
+  assert.match(String(video.ylink), /youtube\.com\/watch\?v=abcdefghijk/);
+  assert.match(String(video.largeThumbnail), /maxresdefault\.jpg$/);
+  assert.deepEqual(findForbiddenPublicKeys(payload), []);
+});
+
+test("形式dispatcherはv5を既定契約のまま保ちlegacyだけ配列へ変換する", () => {
+  const v5 = buildEventExportPayloadForFormat(
+    snapshot,
+    "v5",
+    1_700_000_200,
+    "realtime",
+  );
+  const legacy = buildEventExportPayloadForFormat(
+    snapshot,
+    "legacy",
+    1_700_000_200,
+    "realtime",
+  );
+  assert.equal(v5.schema_version, 5);
+  assert.equal(Array.isArray(legacy), true);
 });
 
 test("イベント公開APIは任意のanswer_jsonオブジェクトとSNS内部キーを公開しない", () => {
@@ -198,45 +251,62 @@ test("イベント公開APIは任意のanswer_jsonオブジェクトとSNS内部
   assert.equal(video.custom_answers[0].key, "user_id");
   assert.equal(Object.prototype.hasOwnProperty.call(video.custom_answers_by_key, "user_id"), false);
   assert.deepEqual(findForbiddenPublicKeys(payload), []);
+
+  const legacy = buildLegacyEventExportPayload(unsafeSnapshot);
+  const serializedLegacy = JSON.stringify(legacy);
+  assert.equal(serializedLegacy.includes("secret-user"), false);
+  assert.equal(serializedLegacy.includes("secret-token"), false);
+  assert.deepEqual(findForbiddenPublicKeys(legacy), []);
 });
 
-test("イベントAPIはformatパラメータを410で拒否しv5だけを返す", async () => {
+test("イベントAPIはformatなし/v5をv5、legacyを旧形式として受け付ける", async () => {
   const route = await readFile(
     new URL("../../app/api/event-endpoints/[id]/route.ts", import.meta.url),
     "utf8",
   );
-  assert.match(route, /format_parameter_removed/);
-  assert.match(route, /schema_version:\s*5/);
-  assert.match(route, /"no-store",\s*410/);
-  assert.match(route, /X-FlameNode-Schema-Version\", \"5\"/);
-  assert.match(route, /buildEventExportPayload/);
-  assert.doesNotMatch(route, /buildEventExportPayloadForFormat/);
-  assert.doesNotMatch(route, /value === "legacy"|value === "new"/);
-  assert.match(route, /eventExportPayloadCacheKey\(\s*eventId,\s*refreshMinutes/);
-  assert.doesNotMatch(route, /eventExportAccessCacheKey/);
-  assert.doesNotMatch(route, /kv\.put\(accessKey/);
+  assert.match(route, /function parseFormat/);
+  assert.match(route, /value === "v5"/);
+  assert.match(route, /value === "legacy"/);
+  assert.match(route, /error: "invalid_format"/);
+  assert.match(route, /allowed: \["v5", "legacy"\]/);
+  assert.doesNotMatch(route, /format_parameter_removed/);
+  assert.match(route, /buildEventExportPayloadForFormat/);
+  assert.match(
+    route,
+    /eventExportPayloadCacheKey\(\s*eventId,\s*format,\s*refreshMinutes/,
+  );
+  assert.match(route, /X-FlameNode-Schema-Version/);
+  assert.match(route, /format === "legacy" \? "1" : "5"/);
+  assert.match(route, /format === "legacy" \? "legacy" : "flamenode-event-export"/);
   assert.match(route, /s-maxage=60/);
+
+  const authCheck = route.indexOf("loadEventExportEvent(db, eventId)");
+  const cacheHitCheck = route.indexOf("const response = await cachedResponse()");
+  assert.ok(authCheck >= 0 && cacheHitCheck > authCheck, "D1公開可否確認をKV HITより先に行う");
 });
 
-test("管理画面は形式選択を持たず更新方式だけを選ぶ", async () => {
+test("管理画面はv5を既定にし旧形式互換を明示選択できる", async () => {
   const builder = await readFile(
     new URL("../components/admin/EventExportLinkBuilder.tsx", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(builder, /option value="new"|option value="legacy"/);
-  assert.doesNotMatch(builder, /name="format"|\{ format,/);
-  assert.match(builder, /イベントAPI v5に統一/);
-  assert.match(builder, /update:\s*updateMode/);
+  assert.match(builder, /useState<EventExportFormat>\("v5"\)/);
+  assert.match(builder, /option value="v5">新形式 v5/);
+  assert.match(builder, /option value="legacy">旧形式互換/);
+  assert.match(builder, /format === "legacy"/);
+  assert.match(builder, /params\.set\("format", "legacy"\)/);
 });
 
-test("旧形式ビルダーとディスパッチ型を再導入しない", async () => {
-  const payloadSource = await readFile(
-    new URL("./api/eventExportPayload.ts", import.meta.url),
+test("scheduled KV cacheはv5とlegacyで衝突せず無効化時に両方消す", async () => {
+  const cacheSource = await readFile(
+    new URL("./api/eventExportCache.ts", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(
-    payloadSource,
-    /buildLegacyEventExportPayload|buildEventExportPayloadForFormat|EventExportFormat/,
+  assert.match(cacheSource, /EventExportCacheFormat = "v5" \| "legacy"/);
+  assert.match(
+    cacheSource,
+    /eventExportPayloadCacheKey\(\s*eventId,\s*format,\s*refreshMinutes/,
   );
-  assert.doesNotMatch(payloadSource, /legacyDateParts|memberChapterBounds/);
+  assert.match(cacheSource, /\["v5", "legacy"\] as const/);
+  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 6/);
 });

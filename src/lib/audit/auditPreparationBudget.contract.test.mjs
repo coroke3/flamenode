@@ -13,7 +13,7 @@ const atomicSource = await readFile(
 test("actor_x_user_id検証はaudit件数分SELECTせずJSON1 1 queryへまとめる", () => {
   assert.match(loggerSource, /async function loadApprovedActorXPairs/);
   assert.match(loggerSource, /FROM json_each\(\$\{payload\}\)/);
-  assert.match(loggerSource, /const approvedActorXPairs =/);
+  assert.match(loggerSource, /(?:const|let) approvedActorXPairs =/);
   assert.doesNotMatch(loggerSource, /for \(const input of activeInputs\)[\s\S]*?await validateActorXUserId/);
 });
 

@@ -35,7 +35,10 @@ test("CAS snapshots and same-batch side effects remain explicit", () => {
       assert.match(sources[name], /planVideoVisibilityTransition/);
       continue;
     }
-    assert.match(sources[name], /expectedRowCondition|operation: "CREATE"/);
+    assert.match(
+      sources[name],
+      /expectedRowCondition|buildPermissionSetGuardSql|operation: "CREATE"/,
+    );
   }
   assert.match(sources["admin.ts"], /planVideoVisibilityTransition/);
   assert.match(sources["admin.ts"], /buildVideoStatusChangeNotificationBatch|planVideoVisibilityTransition/);

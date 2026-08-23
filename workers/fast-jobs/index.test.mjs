@@ -136,7 +136,9 @@ test("recovery: Queue無しでも due pending を処理できる", async () => {
               return { results: [] };
             }
             if (sql.includes("FROM notification_outbox n")) {
-              if (sql.includes("LIMIT 1") && !sql.includes("INNER JOIN")) {
+              // hasDuePendingNotifications now joins users for recipient validity;
+              // identify its literal LIMIT 1 probe, not the JOIN shape.
+              if (sql.includes("LIMIT 1")) {
                 return { results: [{ id: "pending-1" }] };
               }
               dispatchRan = true;
@@ -186,7 +188,7 @@ test("recovery: Queue有効でwake成功ならdirect dispatchを省略する", a
           async all() {
             if (sql.includes("FROM slots s")) return { results: [] };
             if (sql.includes("FROM notification_outbox n")) {
-              if (sql.includes("LIMIT 1") && !sql.includes("INNER JOIN")) {
+              if (sql.includes("LIMIT 1")) {
                 return { results: [{ id: "pending-1" }] };
               }
               dispatchRan = true;

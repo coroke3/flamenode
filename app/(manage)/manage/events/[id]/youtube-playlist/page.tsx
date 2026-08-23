@@ -40,6 +40,34 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "同期失敗",
 };
 
+const SYNC_DETAIL_LABELS: Record<string, string> = {
+  playlist_mutation_batch_continuing:
+    "追加・削除の処理上限に達したため、次回へ継続します。",
+  playlist_scan_continuing:
+    "再生リストの全件確認を分割して続行しています。",
+  playlist_stale_cleanup_continuing:
+    "全件確認後の古い項目情報を分割して整理しています。",
+  playlist_order_repair_continuing:
+    "投稿枠順とのずれを少量ずつ自動補正しています。",
+  playlist_order_repair_request_budget:
+    "外部API呼び出し上限に達する前に停止し、次回へ順序補正を継続します。",
+  playlist_order_repair_quota_deferred:
+    "YouTube APIクォータの余裕が不足したため、既存項目の順序補正を後回しにしました。",
+  playlist_order_repair_scan_limit_exceeded:
+    "再生リストが大きく、安全に確認できる範囲を超えたため既存項目の自動並び替えを停止しました。",
+  playlist_order_repair_ambiguous_remote_items:
+    "YouTube側の対象動画に欠落・重複があり、安全な自動並び替えを確定できませんでした。",
+  playlist_order_fallback_manual_sort_required:
+    "YouTube側の並び順を「手動」にしてください。投稿枠位置への挿入・既存順序補正ができませんでした。",
+  youtube_quota_budget_deferred:
+    "YouTube APIの日次クォータ上限に近いため、次回へ繰り越しました。",
+};
+
+function syncDetailLabel(value: string | null | undefined): string {
+  if (!value) return "なし";
+  return SYNC_DETAIL_LABELS[value] ?? value;
+}
+
 function statusClass(status: string | null | undefined): string {
   if (status === "failed") return "fn-badge-danger";
   if (status === "deferred" || status === "scanning") return "fn-badge-warning";
@@ -105,10 +133,14 @@ export default async function EventYoutubePlaylistPage({
       manageStaffXUserIds={getManageStaffXUserIdsFromSnapshot(authorization)}
     >
       {sp.saved === "1" ? (
-        <p className="fn-alert fn-alert-success">設定を保存し、次回同期を予約しました。</p>
+        <p className="fn-alert fn-alert-success">
+          設定を保存し、同期を予約しました。Queueが有効ならすぐ処理を開始します。
+        </p>
       ) : null}
       {sp.queued === "1" ? (
-        <p className="fn-alert fn-alert-success">次回のWorker実行で同期するよう予約しました。</p>
+        <p className="fn-alert fn-alert-success">
+          同期を予約しました。Queueが有効ならすぐ処理を開始します。
+        </p>
       ) : null}
       {sp.error ? <p className="fn-alert fn-alert-danger">{sp.error}</p> : null}
 
@@ -171,9 +203,9 @@ export default async function EventYoutubePlaylistPage({
           <div className="fn-card manage-playlist-info">
             <strong>同期方式と並び順</strong>
             <p className="fn-muted fn-text-sm manage-playlist-info-copy">
-              追加のみは、公開・限定公開になった作品だけを追加し、YouTube側で手動追加した動画を削除しません。
-              完全同期はイベントから外れた項目も削除します。新規追加は作品の公開予定時刻順で挿入し、既存項目の全件並び替えは行いません。
-              時刻順挿入にはYouTube側の再生リストを「手動」並び替えに設定してください。
+              追加のみは、イベントの公開作品だけを追加し、YouTube側で手動追加した動画を削除しません。
+              完全同期はイベント外の項目と同じ作品の重複項目も整理します。投稿枠付き作品は提出済みの投稿枠順を最優先し、枠がない作品は公開予定時刻・作成日時順で後ろに並べます。
+              連続枠は先頭の投稿枠を基準にし、既存項目の順序ずれもWorkerの上限内で少量ずつ自動補正します。位置指定にはYouTube側の再生リストを「手動」並び替えに設定してください。
             </p>
           </div>
           {canEdit ? (
@@ -202,8 +234,8 @@ export default async function EventYoutubePlaylistPage({
           <dd>{config?.last_full_scan_at ? formatUnix(config.last_full_scan_at) : "未実行"}</dd>
           <dt className="fn-muted">次回予定</dt>
           <dd>{config?.next_sync_at ? formatUnix(config.next_sync_at) : "なし"}</dd>
-          <dt className="fn-muted">エラー</dt>
-          <dd>{config?.last_error ?? "なし"}</dd>
+          <dt className="fn-muted">状態詳細</dt>
+          <dd title={config?.last_error ?? undefined}>{syncDetailLabel(config?.last_error)}</dd>
         </dl>
         {playlistId ? (
           <p>
@@ -218,12 +250,17 @@ export default async function EventYoutubePlaylistPage({
           </p>
         ) : null}
         {canEdit && config?.enabled === 1 ? (
-          <form action={queueEventYoutubePlaylistSync}>
-            <input type="hidden" name="event_id" value={ev.id} />
-            <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
-              次回実行へ予約
-            </button>
-          </form>
+          <>
+            <form action={queueEventYoutubePlaylistSync}>
+              <input type="hidden" name="event_id" value={ev.id} />
+              <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
+                今すぐ同期を予約
+              </button>
+            </form>
+            <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
+              remote状態と投稿枠順を再確認します。Queueを利用できない場合も予約はD1に残り、毎時52分のRecovery Cronが処理します。
+            </p>
+          </>
         ) : null}
       </section>
 
@@ -232,6 +269,7 @@ export default async function EventYoutubePlaylistPage({
         <ul className="fn-muted fn-text-sm manage-playlist-guardrails">
           <li>既定は12時間間隔・追加のみです。</li>
           <li>再生リスト全件確認はページ分割し、差分だけを書き込みます。</li>
+          <li>既存の並び替えも1回で全部処理せず、少量ずつ継続します。</li>
           <li>1回のWorker実行と1日あたりのYouTubeクォータに上限を設け、超過分は次回へ繰り越します。</li>
           <li>OAuthのクライアントID・シークレット・更新トークンはWorker secretだけに保存します。</li>
         </ul>
