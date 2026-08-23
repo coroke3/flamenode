@@ -75,6 +75,16 @@ test("parseVideoMemberText reads spreadsheet TSV with 6 columns and permission",
   assert.deepEqual(parsed.members[0]?.chapters?.map((c) => c.time), ["1:23"]);
 });
 
+test("parseVideoMemberText rejects more than 100 valid rows instead of truncating", () => {
+  const text = Array.from({ length: 101 }, (_, index) =>
+    `User${index}\tuser_${index}`,
+  ).join("\n");
+  const parsed = parseVideoMemberText(text);
+  assert.equal(parsed.members.length, 0);
+  assert.ok(parsed.warnings.some((warning) => warning.includes("最大100人")));
+  assert.ok(parsed.warnings.some((warning) => warning.includes("101件")));
+});
+
 test("parseVideoMemberText keeps intermediate empty cells by tab position", () => {
   const parsed = parseVideoMemberText("Alice\talice_x\t1:23\t\tコメント\tON");
   const member = parsed.members[0];
