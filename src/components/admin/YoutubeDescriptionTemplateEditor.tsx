@@ -76,7 +76,8 @@ const SAMPLE_CONTEXT: YoutubeDescriptionContext = {
   youtube_video_id: "dQw4w9WgXcQ",
   youtube_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
   creator_name: "Flame Creator",
-  creator_x_id: "@sample_creator",
+  // 実フォームと同じく scalar のX IDは @ なし。必要ならテンプレート側で @ を付ける。
+  creator_x_id: "sample_creator",
   creator_channel_url: "https://www.youtube.com/@sample_creator",
   creator_profile: "映像制作をしています。",
   creator_social_links: "X: @sample_creator",
@@ -105,22 +106,22 @@ const PRESETS = [
   {
     id: "simple",
     label: "シンプル",
-    body: `{{title}}\n\n{{intro_comment}}\n\n{{creator_name}} {{creator_x_id}}\n{{youtube_url}}`,
+    body: `{{title}}\n\n{{intro_comment}}\n\n{{creator_name}} @{{creator_x_id}}\n{{youtube_url}}`,
   },
   {
     id: "event",
     label: "イベント標準",
-    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n部: {{part}}\n投稿者: {{creator_name}} {{creator_x_id}}\n楽曲: {{music}}\n使用ソフト: {{used_software}}\n\n{{credit}}\n\n{{youtube_url}}`,
+    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n部: {{part}}\n投稿者: {{creator_name}} @{{creator_x_id}}\n楽曲: {{music}}\n使用ソフト: {{used_software}}\n\n{{credit}}\n\n{{youtube_url}}`,
   },
   {
     id: "collab",
     label: "合作",
-    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} {{creator_x_id}}\n\n共同制作者\n{{#members}}\n- {{member_name}} @{{member_x_id}} {{member_role}}\n{{member_comment}}\n{{/members}}\n\n楽曲: {{music}}\n{{credit}}`,
+    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} @{{creator_x_id}}\n\n共同制作者\n{{#members}}\n- {{member_name}} @{{member_x_id}} {{member_role}}\n{{member_comment}}\n{{/members}}\n\n楽曲: {{music}}\n{{credit}}`,
   },
   {
     id: "collab-chapter",
     label: "合作＋チャプター",
-    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} {{creator_x_id}}\n\n共同制作者 / チャプター\n{{#members}}\n{{member_chapter}} {{member_name}} @{{member_x_id}}\n{{member_role}}\n{{member_comment}}\n{{/members}}\n\n楽曲: {{music}}\n{{credit}}`,
+    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} @{{creator_x_id}}\n\n共同制作者 / チャプター\n{{#members}}\n{{member_chapter}} {{member_name}} @{{member_x_id}}\n{{member_role}}\n{{member_comment}}\n{{/members}}\n\n楽曲: {{music}}\n{{credit}}`,
   },
 ] as const;
 
@@ -178,12 +179,21 @@ export function YoutubeDescriptionTemplateEditor({
 
   const setTextareaValue = React.useCallback(
     (next: string, caret?: number) => {
-      onChange(next);
+      // maxLength はユーザー入力には効くが、ボタンによる文字列挿入には効かない。
+      // サーバー側上限を超える値をUIから生成しないよう、ここでも同じ上限に揃える。
+      const bounded = next.slice(0, MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH);
+      const boundedCaret =
+        caret == null ? undefined : Math.min(caret, bounded.length);
+      onChange(bounded);
+      setCopyState("idle");
+      setPreviewCopyState("idle");
       window.requestAnimationFrame(() => {
         const textarea = textareaRef.current;
         if (!textarea) return;
         textarea.focus();
-        if (caret != null) textarea.setSelectionRange(caret, caret);
+        if (boundedCaret != null) {
+          textarea.setSelectionRange(boundedCaret, boundedCaret);
+        }
       });
     },
     [onChange],
