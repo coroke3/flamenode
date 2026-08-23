@@ -158,6 +158,7 @@ export function YoutubeDescriptionTemplateEditor({
   const [previewCopyState, setPreviewCopyState] = React.useState<
     "idle" | "copied" | "error"
   >("idle");
+  const [limitBlocked, setLimitBlocked] = React.useState(false);
   const context = React.useMemo<YoutubeDescriptionContext>(
     () => ({
       ...SAMPLE_CONTEXT,
@@ -178,23 +179,27 @@ export function YoutubeDescriptionTemplateEditor({
   }, [rendered.text]);
 
   const setTextareaValue = React.useCallback(
-    (next: string, caret?: number) => {
-      // maxLength はユーザー入力には効くが、ボタンによる文字列挿入には効かない。
-      // サーバー側上限を超える値をUIから生成しないよう、ここでも同じ上限に揃える。
-      const bounded = next.slice(0, MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH);
-      const boundedCaret =
-        caret == null ? undefined : Math.min(caret, bounded.length);
-      onChange(bounded);
+    (next: string, caret?: number): boolean => {
+      // textareaのmaxLengthはボタン挿入には適用されない。一方、ここでsliceすると
+      // カーソルより後ろの既存本文を黙って削るため、上限超過時は変更自体を拒否する。
+      if (next.length > MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH) {
+        setLimitBlocked(true);
+        return false;
+      }
+      setLimitBlocked(false);
+      onChange(next);
       setCopyState("idle");
       setPreviewCopyState("idle");
       window.requestAnimationFrame(() => {
         const textarea = textareaRef.current;
         if (!textarea) return;
         textarea.focus();
-        if (boundedCaret != null) {
-          textarea.setSelectionRange(boundedCaret, boundedCaret);
+        if (caret != null) {
+          const safeCaret = Math.min(caret, next.length);
+          textarea.setSelectionRange(safeCaret, safeCaret);
         }
       });
+      return true;
     },
     [onChange],
   );
@@ -294,7 +299,10 @@ export function YoutubeDescriptionTemplateEditor({
               id="youtube_description_template"
               name="youtube_description_template"
               value={value}
-              onChange={(event) => onChange(event.target.value)}
+              onChange={(event) => {
+                setLimitBlocked(false);
+                onChange(event.target.value);
+              }}
               className={`fn-input ${styles.textarea}`}
               maxLength={MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH}
               disabled={disabled}
@@ -338,6 +346,11 @@ export function YoutubeDescriptionTemplateEditor({
                 </button>
               </div>
             </div>
+            {limitBlocked ? (
+              <p className="fn-alert fn-alert--warning" role="status" style={{ margin: "8px 0 0" }}>
+                文字数上限を超えるため挿入できません。既存の本文は変更していません。
+              </p>
+            ) : null}
           </div>
 
           <div className={styles.variableGroups} aria-label="概要欄に挿入できる項目">
