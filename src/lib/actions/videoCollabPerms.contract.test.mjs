@@ -36,6 +36,7 @@ test("single/batchすべてのactionがwriteGuardを通過する", () => {
 test("D1 binding unavailableは共通helperでUI向け失敗へ収束する", () => {
   assert.match(source, /function getDatabaseForPermissionAction\(\)/);
   assert.match(source, /database binding unavailable/);
+  assert.match(source, /unstable_rethrow\(error\)/);
   for (const name of [
     "upsertVideoCollaborator",
     "deleteVideoCollaborator",
@@ -71,7 +72,16 @@ test("permission inputは最大100件かつ実在するX handle形式だけ許�
   assert.match(source, /z\.enum\(\["normal", "admin", "event"\]\)/);
 });
 
-test("同一X IDの重複permission intentは先勝ちにせず拒否する", () => {
+test("bulk intentはx_user_aliasesをJSON1 1クエリで現行X IDへ解決する", () => {
+  const canonicalize = functionBody("canonicalizePermissionIntents");
+  const mutation = functionBody("applyPermissionIntentsToVideo");
+  assert.match(canonicalize, /xUserAliases\.alias_x_id/);
+  assert.match(canonicalize, /json_each\(\$\{JSON\.stringify\(candidates\)\}\)/);
+  assert.match(canonicalize, /ambiguous_x_user_alias/);
+  assert.match(mutation, /await canonicalizePermissionIntents\(db, args\.intents\)/);
+});
+
+test("aliasと現行IDが同じ正本へ収束した重複intentは先勝ちにせず拒否する", () => {
   const body = functionBody("applyPermissionIntentsToVideo");
   assert.match(body, /const duplicateXids = new Set/);
   assert.match(body, /if \(intents\.has\(xid\)\)/);
@@ -189,7 +199,7 @@ test("single grant/revokeとTSV batchは同じpermission mutation正本を使う
   assert.doesNotMatch(source, /expectedRowCondition/);
 });
 
-test("single actionは統合済みaliasを現在のX IDへ解決してから権限を操作する", () => {
+test("single actionも統合済みaliasを現在のX IDへ解決してから権限を操作する", () => {
   const resolver = functionBody("resolveSubjectXUserId");
   assert.match(resolver, /resolveCanonicalXUserId/);
   assert.match(resolver, /approvedOnly: true/);
