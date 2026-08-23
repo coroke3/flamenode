@@ -180,6 +180,68 @@ async function maybeResendYoutubePendingWake(env: Env): Promise<void> {
   });
 }
 
+/**
+ * 1 invocationで再生リストは最大1イベントだけ処理するため、処理後にまだdue行が
+ * 残っていれば同じQueueへ continuation doorbellを1件だけ送る。
+ * 状態正本はD1なので、判定/送信失敗時も52分Cronが回収できる。
+ */
+async function maybeContinueYoutubePlaylistSync(
+  env: Env,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted();
+  const flags = resolveQueueFeatureFlags(env);
+  if (
+    !flags.dispatchEnabled ||
+    !flags.youtubeSyncEnabled ||
+    !flags.continuationEnabled
+  ) {
+    return false;
+  }
+
+  let due = false;
+  try {
+    const now = Math.floor(Date.now() / 1_000);
+    const row = await env.DB.prepare(
+      `SELECT 1 AS due
+         FROM event_youtube_playlist_sync
+        WHERE enabled = 1
+          AND playlist_id IS NOT NULL
+          AND playlist_id <> ''
+          AND sync_mode IN ('append_only', 'mirror')
+          AND COALESCE(next_sync_at, 0) <= ?1
+        LIMIT 1`,
+    )
+      .bind(now)
+      .first<{ due: number }>();
+    signal?.throwIfAborted();
+    due = row?.due === 1;
+  } catch (error) {
+    signal?.throwIfAborted();
+    // continuation判定はbest-effort。ここで本体成功をretryさせると、
+    // Queue readとD1負荷を増幅するためRecovery Cronへ委ねる。
+    console.warn(
+      JSON.stringify({
+        service: "sync-jobs",
+        job: "youtube-playlist-continuation-check",
+        result: "deferred_to_recovery",
+        error_name: error instanceof Error ? error.name : undefined,
+      }),
+    );
+    return false;
+  }
+  if (!due) return false;
+
+  return sendWorkerQueueWakeBestEffort({
+    queue: env.YOUTUBE_SYNC_WAKE_QUEUE ?? null,
+    kind: "youtube_playlist_sync",
+    source: "continuation",
+    envFlags: env,
+    requireYoutubeFlag: true,
+    kv: env.KV,
+  });
+}
+
 export async function handleYoutubeSyncWakeQueue(
   batch: MessageBatch<unknown>,
   env: Env,
@@ -266,6 +328,10 @@ export async function handleYoutubeSyncWakeQueue(
       if (!playlistJob.succeeded) {
         throw new Error("youtube_playlist_sync_failed");
       }
+      if (!playlistJob.quota_stopped) {
+        const playlistContinued = await maybeContinueYoutubePlaylistSync(env);
+        continued ||= playlistContinued;
+      }
       ackAll(playlistMessages);
       processed += playlistJob.processed;
       skipped += playlistJob.skipped;
@@ -316,11 +382,15 @@ export async function runSyncJobs(
               },
               { commitSha: env.BUILD_COMMIT_SHA },
             );
-            return throwIfJobFailed(
+            const playlistCounters = throwIfJobFailed(
               "sync-jobs",
               "cron",
               playlist,
             );
+            if (!playlistCounters.quota_stopped) {
+              await maybeContinueYoutubePlaylistSync(env, signal);
+            }
+            return playlistCounters;
           }
 
           await runJob(
