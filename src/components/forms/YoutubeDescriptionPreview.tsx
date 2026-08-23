@@ -52,7 +52,9 @@ export function YoutubeDescriptionPreview({
   members,
 }: YoutubeDescriptionPreviewProps): React.ReactElement {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const manualBaseTextRef = React.useRef("");
   const [copyState, setCopyState] = React.useState<"idle" | "copied" | "error">("idle");
+  const [draftMode, setDraftMode] = React.useState<"auto" | "manual">("auto");
   const rendered = React.useMemo(
     () => renderYoutubeDescriptionTemplate(template, context, { members }),
     [context, members, template],
@@ -60,14 +62,19 @@ export function YoutubeDescriptionPreview({
   const [draftText, setDraftText] = React.useState(rendered.text);
 
   React.useEffect(() => {
-    setDraftText(rendered.text);
+    if (draftMode === "auto") {
+      setDraftText(rendered.text);
+      manualBaseTextRef.current = rendered.text;
+    }
     setCopyState("idle");
-  }, [rendered.text]);
+  }, [draftMode, rendered.text]);
 
   const missingVariables = React.useMemo(
     () => rendered.usedVariables.filter((key) => !hasValue(context[key])),
     [context, rendered.usedVariables],
   );
+  const sourceChangedWhileEditing =
+    draftMode === "manual" && manualBaseTextRef.current !== rendered.text;
 
   const handleCopy = async () => {
     if (!draftText) return;
@@ -78,6 +85,20 @@ export function YoutubeDescriptionPreview({
     } catch {
       setCopyState("error");
     }
+  };
+
+  const restoreAuto = () => {
+    setDraftMode("auto");
+    setDraftText(rendered.text);
+    manualBaseTextRef.current = rendered.text;
+    setCopyState("idle");
+  };
+
+  const refreshManualFromSource = () => {
+    setDraftMode("manual");
+    setDraftText(rendered.text);
+    manualBaseTextRef.current = rendered.text;
+    setCopyState("idle");
   };
 
   return (
@@ -110,11 +131,32 @@ export function YoutubeDescriptionPreview({
         </div>
       ) : null}
 
+      {sourceChangedWhileEditing ? (
+        <div className={styles.warning} role="status">
+          <strong>作品情報が更新されています。</strong>
+          <p style={{ margin: "6px 0 0" }}>
+            手動調整した概要欄は保持しています。最新の作品情報を反映する場合だけ更新してください。
+          </p>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            style={{ marginTop: 8 }}
+            onClick={refreshManualFromSource}
+          >
+            最新の自動生成を反映
+          </button>
+        </div>
+      ) : null}
+
       <textarea
         ref={textareaRef}
         className={`fn-input ${styles.textarea}`}
         value={draftText}
         onChange={(event) => {
+          if (draftMode !== "manual") {
+            manualBaseTextRef.current = rendered.text;
+            setDraftMode("manual");
+          }
           setDraftText(event.target.value);
           setCopyState("idle");
         }}
@@ -122,16 +164,15 @@ export function YoutubeDescriptionPreview({
       />
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <p className={styles.hint} style={{ margin: 0 }}>
-          入力中の作品情報から自動生成しています。ここでの最終調整は作品データには保存されません。
+          {draftMode === "manual"
+            ? "手動調整中です。作品情報が変わっても自動では上書きしません。ここでの調整は作品データには保存されません。"
+            : "入力中の作品情報から自動生成しています。ここでの最終調整は作品データには保存されません。"}
         </p>
-        {draftText !== rendered.text ? (
+        {draftMode === "manual" ? (
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
-            onClick={() => {
-              setDraftText(rendered.text);
-              setCopyState("idle");
-            }}
+            onClick={restoreAuto}
           >
             自動生成に戻す
           </button>
