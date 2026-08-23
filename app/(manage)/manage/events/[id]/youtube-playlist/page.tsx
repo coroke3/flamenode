@@ -175,9 +175,9 @@ export default async function EventYoutubePlaylistPage({
           <div className="fn-card manage-playlist-info">
             <strong>同期方式と並び順</strong>
             <p className="fn-muted fn-text-sm manage-playlist-info-copy">
-              追加のみは、公開・限定公開になった作品だけを追加し、YouTube側で手動追加した動画を削除しません。
-              完全同期はイベントから外れた項目も削除します。新規追加は作品の公開予定時刻順で挿入し、既存項目の全件並び替えは行いません。
-              時刻順挿入にはYouTube側の再生リストを「手動」並び替えに設定してください。
+              追加のみは、イベントの公開作品だけを追加し、YouTube側で手動追加した動画を削除しません。
+              完全同期はイベントから外れた項目も削除します。新規追加は提出済みの投稿枠順を最優先し、枠がない作品は公開予定時刻・作成日時順で後ろに並べます。
+              連続枠は先頭の投稿枠を基準にします。位置指定にはYouTube側の再生リストを「手動」並び替えに設定してください。
             </p>
           </div>
           {canEdit ? (
