@@ -1,7 +1,7 @@
 /**
  * content-jobs: 静的 JSON 再生成 Queue Consumer と Recovery Cron。
  * - Queue Consumer: wake 受信時に最大1 target を処理（Cron lease なし）
- * - Recovery Cron: 1時間ごとに failed/expired 回復 + pending 処理、cleanup は日次
+ * - Recovery Cron: 軽量修復 + Queue wake。Queue無効/失敗時だけpendingを直接処理、cleanupは日次
  */
 import {
   createCronWorker,
@@ -34,7 +34,10 @@ import {
 } from "../shared/d1Budget.ts";
 import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
-import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
+import {
+  sendWorkerQueueWakeBestEffort,
+  type QueueWakeKind,
+} from "../shared/queueWake.ts";
 import { handleStaticRebuildWakeQueue } from "./staticRebuildWakeQueue.ts";
 import { reconcilePendingXIdSlotBinds } from "./xIdSlotBindRecovery.ts";
 
@@ -55,7 +58,7 @@ export interface Env {
 const CLEANUP_INTERVAL_SEC = 24 * 3600;
 const CONTENT_JOBS_LEASE_SEC = 55 * 60;
 const CLEANUP_LEASE_SEC = 10 * 60;
-/** Recovery Cron が1回で排水できる static rebuild 上限（MAX_QUEUE_ITEMS_PER_RUN=1 のまま複数回呼ぶ）。 */
+/** Queueが利用できないRecovery Cronだけが1回で排水する static rebuild 上限。 */
 export const CONTENT_JOBS_RECOVERY_MAX_TARGETS = 3;
 /** lease 競合で processed=0 が続くときの無限ループ防止。 */
 export const CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED = 3;
@@ -77,8 +80,7 @@ export async function runContentJobsRecovery(
     "cron",
     async () => {
       // Cron lease / cleanup / static rebuildを同じbudget wrapperへ通す。
-      // 以前はcleanupだけraw DBで最大3retryし、再生成40queryの後にD1 50query上限を
-      // 飛び越えられた。outer lease acquisitionから一貫して同じbudgetを共有する。
+      // cleanupだけraw DBで実行してD1 50queryを飛び越える経路を作らない。
       const rebuildEnv = rebuildEnvironment(env);
       const leased = await withCronLease(
         rebuildEnv,
@@ -88,8 +90,9 @@ export async function runContentJobsRecovery(
           signal: context.signal,
         },
         async (signal) => {
+          const wakeSentKinds = new Set<QueueWakeKind>();
           // 日次cleanupを先に処理する。cleanup後の通常処理はsoft limit 40で止まるため、
-          // cleanup retryとlease lifecycleを含めてもhard limit 50を超えない。
+          // cleanup retryとlease lifecycleを含めてもhard limit 50を同じguardで共有する。
           const cleanupLease = await withCronLease(
             rebuildEnv,
             {
@@ -147,7 +150,6 @@ export async function runContentJobsRecovery(
             priority: "high",
             signal,
           });
-          // Recovery内のstale lease復旧を先に済ませ、後続の投影修復のbudget判定へ含める。
           await reconcileStaleQueue(rebuildEnv, now, signal);
           let xIdSlotBindRecovery = { processed: 0, completed: 0, bound: 0, failed: 0, hasMore: false };
           try {
@@ -205,63 +207,93 @@ export async function runContentJobsRecovery(
               source: "recovery",
               envFlags: env,
               kv: env.KV,
+              sentKinds: wakeSentKinds,
             });
           }
-          let staticRebuildHasMore = false;
-          const rebuild = await runJob(
-            "content-jobs",
-            "static-rebuild-queue",
-            async () => {
-              let aggregated = combineJobCounters();
-              let consecutiveEmptyProcessed = 0;
-              for (let i = 0; i < CONTENT_JOBS_RECOVERY_MAX_TARGETS; i += 1) {
-                signal.throwIfAborted();
-                if (isD1BudgetExhausted(rebuildEnv.d1Budget)) {
-                  staticRebuildHasMore = true;
-                  break;
-                }
-                const result = await processStaticRebuildQueue(
-                  rebuildEnv,
-                  signal,
-                  { staleQueueAlreadyReconciled: true },
-                );
-                aggregated = combineJobCounters(aggregated, result);
-                staticRebuildHasMore ||= Boolean(result.hasMore);
-                if (!result.hasMore) {
-                  break;
-                }
-                if (result.processed === 0) {
-                  if ((result.skipped ?? 0) === 0) {
-                    break;
+
+          // Queue有効時はRecovery Cronをドアベルに限定し、重いR2/JSON再生成は
+          // Queue consumerの長いCPU枠へ委譲する。無効・binding欠落・send失敗時だけ
+          // 従来のCron直処理へfallbackするため、Queue未構築環境も壊さない。
+          const alreadyDelegated = wakeSentKinds.has("static_rebuild_available");
+          const delegatedToQueue =
+            alreadyDelegated ||
+            (await sendWorkerQueueWakeBestEffort({
+              queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
+              kind: "static_rebuild_available",
+              source: "recovery",
+              envFlags: env,
+              kv: env.KV,
+              sentKinds: wakeSentKinds,
+            }));
+
+          let staticRebuildHasMore = delegatedToQueue;
+          const rebuild = delegatedToQueue
+            ? await runJob(
+                "content-jobs",
+                "static-rebuild-queue",
+                async () => ({
+                  processed: 0,
+                  failed: 0,
+                  skipped: 1,
+                  hasMore: true,
+                  d1_statements: rebuildEnv.d1Budget.statements,
+                  d1_rows_read: rebuildEnv.d1Budget.rowsRead,
+                  d1_rows_written: rebuildEnv.d1Budget.rowsWritten,
+                }),
+                { commitSha: env.BUILD_COMMIT_SHA },
+              )
+            : await runJob(
+                "content-jobs",
+                "static-rebuild-queue",
+                async () => {
+                  let aggregated = combineJobCounters();
+                  let consecutiveEmptyProcessed = 0;
+                  for (let i = 0; i < CONTENT_JOBS_RECOVERY_MAX_TARGETS; i += 1) {
+                    signal.throwIfAborted();
+                    if (isD1BudgetExhausted(rebuildEnv.d1Budget)) {
+                      staticRebuildHasMore = true;
+                      break;
+                    }
+                    const result = await processStaticRebuildQueue(
+                      rebuildEnv,
+                      signal,
+                      { staleQueueAlreadyReconciled: true },
+                    );
+                    aggregated = combineJobCounters(aggregated, result);
+                    staticRebuildHasMore ||= Boolean(result.hasMore);
+                    if (!result.hasMore) break;
+                    if (result.processed === 0) {
+                      if ((result.skipped ?? 0) === 0) break;
+                      consecutiveEmptyProcessed += 1;
+                      if (
+                        consecutiveEmptyProcessed >=
+                        CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED
+                      ) {
+                        break;
+                      }
+                      continue;
+                    }
+                    consecutiveEmptyProcessed = 0;
                   }
-                  consecutiveEmptyProcessed += 1;
-                  if (
-                    consecutiveEmptyProcessed >=
-                    CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED
-                  ) {
-                    break;
-                  }
-                  continue;
-                }
-                consecutiveEmptyProcessed = 0;
-              }
-              return {
-                ...aggregated,
-                hasMore: staticRebuildHasMore,
-                d1_statements: rebuildEnv.d1Budget.statements,
-                d1_rows_read: rebuildEnv.d1Budget.rowsRead,
-                d1_rows_written: rebuildEnv.d1Budget.rowsWritten,
-              };
-            },
-            { commitSha: env.BUILD_COMMIT_SHA },
-          );
-          if (staticRebuildHasMore) {
+                  return {
+                    ...aggregated,
+                    hasMore: staticRebuildHasMore,
+                    d1_statements: rebuildEnv.d1Budget.statements,
+                    d1_rows_read: rebuildEnv.d1Budget.rowsRead,
+                    d1_rows_written: rebuildEnv.d1Budget.rowsWritten,
+                  };
+                },
+                { commitSha: env.BUILD_COMMIT_SHA },
+              );
+
+          if (!delegatedToQueue && staticRebuildHasMore) {
             await sendWorkerQueueWakeBestEffort({
               queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
               kind: "static_rebuild_available",
               source: "recovery",
               envFlags: env,
               kv: env.KV,
+              sentKinds: wakeSentKinds,
             });
           }
           return throwIfJobFailed(
