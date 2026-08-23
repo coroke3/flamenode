@@ -2,6 +2,8 @@ import { TOP_SLOT_STATS_OBJECT_KEY } from "../../src/lib/publicData/staticTopSlo
 
 type EnqueueEnv = { DB: D1Database; R2: R2Bucket };
 
+export const TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS = 2;
+
 export async function enqueueTopSlotStatsRebuild(
   env: EnqueueEnv,
   reason: string,
