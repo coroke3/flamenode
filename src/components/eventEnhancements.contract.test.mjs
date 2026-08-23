@@ -54,6 +54,12 @@ test("概要欄管理Editorはプリセット・出力例コピー・レスポ�
   assert.match(editor, /writeTextToClipboard\(rendered\.text\)/);
   assert.match(editor, /出力例をコピー/);
   assert.match(editor, /テンプレート本文をコピー/);
+  assert.match(
+    editor,
+    /next\.slice\(0, MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH\)/,
+  );
+  assert.match(editor, /creator_x_id: "sample_creator"/);
+  assert.match(editor, /@\{\{creator_x_id\}\}/);
   assert.match(editor, /className=\{styles\.workspace\}/);
   assert.match(editor, /className=\{styles\.previewColumn\}/);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 1\.25fr\) minmax\(300px, 0\.75fr\)/);
@@ -61,11 +67,17 @@ test("概要欄管理Editorはプリセット・出力例コピー・レスポ�
   assert.match(css, /@media \(max-width: 980px\)[\s\S]*grid-template-columns:\s*1fr/);
 });
 
-test("投稿者向け概要欄は手動編集後の作品情報更新で勝手に上書きしない", async () => {
+test("投稿者向け概要欄は同じイベントの手動編集を保持しイベント切替時だけリセットする", async () => {
   const preview = await readFromRoot("src/components/forms/YoutubeDescriptionPreview.tsx");
   assert.match(preview, /useState<"auto" \| "manual">\("auto"\)/);
   assert.match(preview, /if \(draftMode === "auto"\)[\s\S]*setDraftText\(rendered\.text\)/);
   assert.match(preview, /sourceChangedWhileEditing/);
+  assert.match(preview, /sourceIdentityRef = React\.useRef\(sourceIdentity\)/);
+  assert.match(
+    preview,
+    /if \(sourceIdentityRef\.current === sourceIdentity\) return;[\s\S]*setDraftMode\("auto"\);[\s\S]*setDraftText\(rendered\.text\)/,
+  );
+  assert.match(preview, /context\.event_id \?\? eventTitle/);
   assert.match(preview, /最新の自動生成を反映/);
   assert.match(preview, /自動生成に戻す/);
   assert.match(preview, /作品情報が変わっても自動では上書きしません/);
