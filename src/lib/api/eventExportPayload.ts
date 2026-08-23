@@ -1,5 +1,6 @@
 import { FORBIDDEN_PUBLIC_KEYS } from "./publicDto.ts";
 
+export type EventExportFormat = "v5" | "legacy";
 export type EventExportUpdateMode = "realtime" | "scheduled";
 
 export interface EventExportStaffSnapshot {
@@ -169,10 +170,112 @@ function answerValue(answer: EventExportAnswerSnapshot): unknown {
     : answer.answer_text;
 }
 
+function answerText(video: EventExportVideoSnapshot, key: string): string {
+  const answer = video.answers.find((candidate) => candidate.key === key);
+  if (!answer) return "";
+  const value = answerValue(answer);
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.join(",");
+  return "";
+}
+
+function legacyDateParts(value: number | null): { date: string; time: string } {
+  if (value == null || !Number.isFinite(value)) return { date: "", time: "" };
+  const date = new Date((value + 9 * 60 * 60) * 1000);
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return { date: `${month}/${day}`, time: `${hour}:${minute}` };
+}
+
+function firstMemberChapter(
+  video: EventExportVideoSnapshot,
+  member: EventExportMemberSnapshot,
+): string {
+  if (!member.x_user_id) return "";
+  let earliest: number | null = null;
+  for (const chapter of video.chapters) {
+    if (chapter.x_user_id !== member.x_user_id) continue;
+    if (!Number.isFinite(chapter.chapter_time) || chapter.chapter_time < 0) continue;
+    earliest = earliest == null
+      ? chapter.chapter_time
+      : Math.min(earliest, chapter.chapter_time);
+  }
+  return earliest == null ? "" : String(earliest);
+}
+
 /**
- * FlameNodeイベント公開APIの唯一の出力形式。
- * 旧形式変換は提供せず、DB正本の概念だけを返す。
+ * 旧EventArchives系の公開JSON互換アダプター。
+ * DB旧形式を復活させず、現在の公開snapshotから安全に再構成できる値だけを返す。
+ * `ends` / `startm` / `endm` はcanonical schemaに復元元がないため推測しない。
  */
+export function buildLegacyEventExportPayload(
+  snapshot: EventExportSnapshot,
+): Array<Record<string, unknown>> {
+  return snapshot.videos.map((video) => {
+    const schedule = legacyDateParts(video.scheduled_time);
+    const isCollaboration =
+      video.collaboration_type === "collab" || video.members.length > 1;
+    const starts = video.members
+      .map((member) => firstMemberChapter(video, member))
+      .join(",");
+    const emptyMemberAligned = video.members.map(() => "").join(",");
+
+    return {
+      id: video.id,
+      eventid: snapshot.event.id,
+      timestamp:
+        isoFromUnix(video.created_at) ?? isoFromUnix(video.scheduled_time) ?? "",
+      type1: isCollaboration ? "複数人" : "個人",
+      type2: isCollaboration ? "団体" : "個人",
+      type: video.part ?? "",
+      creator: video.creator_display_name,
+      yomi: video.creator_display_name_yomi ?? "",
+      movieyear: answerText(video, "production_experience"),
+      tlink: video.creator_x_user_id ?? "",
+      ychlink: video.creator_youtube_channel_url ?? "",
+      icon: video.creator_icon_url ?? "",
+      member: video.members.map((member) => member.name).join(","),
+      memberid: video.members
+        .map((member) => (member.x_user_id ? `@${member.x_user_id}` : ""))
+        .join(","),
+      data: schedule.date,
+      time: schedule.time,
+      title: video.title,
+      music: video.music ?? "",
+      credit: video.credit ?? "",
+      ymulink: video.music_reference_url ?? "",
+      up: "",
+      othersns: video.creator_other_social_links ?? "",
+      righttype: answerText(video, "stage_permission"),
+      comment: video.intro_comment ?? "",
+      ylink: youtubeUrl(video.youtube_video_id) ?? "",
+      "": "",
+      beforecomment: video.intro_comment ?? "",
+      aftercomment: video.closing_comment ?? "",
+      soft: video.softwares
+        .map((software) => software.raw_label || software.name)
+        .filter(Boolean)
+        .join(","),
+      toudan: answerText(video, "stage_participation"),
+      hitokoto: video.highlights ?? "",
+      starts,
+      ends: emptyMemberAligned,
+      startm: "",
+      endm: "",
+      ycomment: video.highlights ?? "",
+      status: "public",
+      small: youtubeThumbnail(video.youtube_video_id, "medium") ?? "",
+      largeThumbnail: youtubeThumbnail(video.youtube_video_id, "large") ?? "",
+      link: xProfileUrl(video.creator_x_user_id) ?? "",
+      fu: video.part ?? "",
+    };
+  });
+}
+
+/** FlameNodeイベント公開API v5。DB正本の概念を構造化して返す。 */
 export function buildEventExportPayload(
   snapshot: EventExportSnapshot,
   generatedAt = Math.floor(Date.now() / 1000),
@@ -316,4 +419,15 @@ export function buildEventExportPayload(
       truncated: snapshot.truncated,
     },
   };
+}
+
+export function buildEventExportPayloadForFormat(
+  snapshot: EventExportSnapshot,
+  format: EventExportFormat,
+  generatedAt = Math.floor(Date.now() / 1000),
+  updateMode: EventExportUpdateMode = "realtime",
+): unknown {
+  return format === "legacy"
+    ? buildLegacyEventExportPayload(snapshot)
+    : buildEventExportPayload(snapshot, generatedAt, updateMode);
 }
