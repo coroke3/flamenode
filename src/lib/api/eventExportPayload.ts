@@ -201,6 +201,39 @@ function legacyDateParts(value: number | null): { date: string; time: string } {
   return { date: `${month}/${day}`, time: `${hour}:${minute}` };
 }
 
+type LegacyImportedNoteKey = "ステージ利用" | "登壇" | "制作経験" | "コメント";
+
+const LEGACY_IMPORTED_NOTE_RE = /^(ステージ利用|登壇|制作経験|コメント):\s?(.*)$/;
+
+function isLegacyImportedVideo(video: EventExportVideoSnapshot): boolean {
+  // normalizeLegacyFiles() が生成するIDは legacy_<youtube id> または
+  // legacy_video_<hash>。通常作品のproduction_storyを旧メタデータとして
+  // 誤解釈しないため、この由来が分かる作品だけ復元対象にする。
+  return video.id.startsWith("legacy_");
+}
+
+function parseLegacyImportedNotes(
+  video: EventExportVideoSnapshot,
+): ReadonlyMap<LegacyImportedNoteKey, string> {
+  const out = new Map<LegacyImportedNoteKey, string>();
+  if (!isLegacyImportedVideo(video) || !video.production_story?.trim()) return out;
+
+  let activeKey: LegacyImportedNoteKey | null = null;
+  for (const line of video.production_story.replace(/\r\n?/g, "\n").split("\n")) {
+    const match = line.match(LEGACY_IMPORTED_NOTE_RE);
+    if (match) {
+      activeKey = match[1] as LegacyImportedNoteKey;
+      out.set(activeKey, match[2] ?? "");
+      continue;
+    }
+    if (!activeKey) continue;
+    const current = out.get(activeKey) ?? "";
+    out.set(activeKey, current ? `${current}\n${line}` : line);
+  }
+
+  return out;
+}
+
 function earliestChapterTime(
   chapters: readonly EventExportChapterSnapshot[],
 ): string {
@@ -239,9 +272,9 @@ function legacyStarts(video: EventExportVideoSnapshot): string {
       .join(",");
   }
 
-  // 旧形式の個人作品では `starts` が単独値で、legacy import時には
-  // author未設定のpublic chapterとして正規化されることがある。
-  // creator自身またはauthor未設定のchapterに限定し、最古の時刻だけを復元する。
+  // メンバーがない通常作品のchapterを旧 `starts` とみなす根拠はない。
+  // legacy import由来だけは importer が旧startsをpublic chapterへ変換するため復元できる。
+  if (!isLegacyImportedVideo(video)) return "";
   return earliestChapterTime(
     video.chapters.filter(
       (chapter) =>
@@ -266,6 +299,20 @@ export function buildLegacyEventExportPayload(
       video.collaboration_type === "collab" || video.members.length > 1;
     const starts = legacyStarts(video);
     const emptyMemberAligned = video.members.map(() => "").join(",");
+    const importedNotes = parseLegacyImportedNotes(video);
+    const productionExperience =
+      answerText(video, "production_experience") ||
+      importedNotes.get("制作経験") ||
+      "";
+    const stagePermission =
+      answerText(video, "stage_permission") ||
+      importedNotes.get("ステージ利用") ||
+      "";
+    const stageParticipation =
+      answerText(video, "stage_participation") ||
+      importedNotes.get("登壇") ||
+      "";
+    const legacyGeneralComment = importedNotes.get("コメント") || video.intro_comment || "";
 
     return {
       id: video.id,
@@ -277,7 +324,7 @@ export function buildLegacyEventExportPayload(
       type: video.part ?? "",
       creator: video.creator_display_name,
       yomi: video.creator_display_name_yomi ?? "",
-      movieyear: answerText(video, "production_experience"),
+      movieyear: productionExperience,
       tlink: video.creator_x_user_id ?? "",
       ychlink: video.creator_youtube_channel_url ?? "",
       icon: video.creator_icon_url ?? "",
@@ -293,8 +340,8 @@ export function buildLegacyEventExportPayload(
       ymulink: video.music_reference_url ?? "",
       up: "",
       othersns: legacyPublicJsonText(video.creator_other_social_links),
-      righttype: answerText(video, "stage_permission"),
-      comment: video.intro_comment ?? "",
+      righttype: stagePermission,
+      comment: legacyGeneralComment,
       ylink: youtubeUrl(video.youtube_video_id) ?? "",
       "": "",
       beforecomment: video.intro_comment ?? "",
@@ -303,7 +350,7 @@ export function buildLegacyEventExportPayload(
         .map((software) => software.raw_label || software.name)
         .filter(Boolean)
         .join(","),
-      toudan: answerText(video, "stage_participation"),
+      toudan: stageParticipation,
       hitokoto: video.highlights ?? "",
       starts,
       ends: emptyMemberAligned,
