@@ -27,6 +27,38 @@ import {
 import { assertNoForbiddenKeys } from "@/lib/api/publicDto";
 
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
+const EVENT_EXPORT_CACHE_METADATA_MARKER = "public-export-validated-v1";
+
+type EventExportCacheMetadata = {
+  marker: typeof EVENT_EXPORT_CACHE_METADATA_MARKER;
+  format: EventExportFormat;
+  schema_version: 1 | 5;
+};
+
+function cacheMetadataForFormat(
+  format: EventExportFormat,
+): EventExportCacheMetadata {
+  return {
+    marker: EVENT_EXPORT_CACHE_METADATA_MARKER,
+    format,
+    schema_version: format === "legacy" ? 1 : 5,
+  };
+}
+
+function isTrustedCacheMetadata(
+  metadata: unknown,
+  format: EventExportFormat,
+): boolean {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return false;
+  }
+  const value = metadata as Partial<EventExportCacheMetadata>;
+  return (
+    value.marker === EVENT_EXPORT_CACHE_METADATA_MARKER &&
+    value.format === format &&
+    value.schema_version === (format === "legacy" ? 1 : 5)
+  );
+}
 
 function parseFormat(value: string | null): EventExportFormat | null {
   if (value == null || value === "" || value === "v5" || value === "new") {
@@ -114,8 +146,14 @@ async function readCachedPayload(
   cacheTtlSeconds: number,
 ): Promise<string | null> {
   let cached: string | null;
+  let metadata: unknown = null;
   try {
-    cached = await kv.get(cacheKey, { cacheTtl: cacheTtlSeconds });
+    const result = await kv.getWithMetadata(cacheKey, {
+      type: "text",
+      cacheTtl: cacheTtlSeconds,
+    });
+    cached = typeof result.value === "string" ? result.value : null;
+    metadata = result.metadata;
   } catch (error) {
     console.warn("[event-export-api] KV payload read failed", {
       eventId,
@@ -126,6 +164,12 @@ async function readCachedPayload(
     return null;
   }
   if (!cached) return null;
+
+  // New cache entries are validated before write and carry an immutable format
+  // marker in KV metadata. Avoid JSON.parse + recursive leak scanning on every
+  // hot cache hit; legacy entries without metadata still take the safe fallback.
+  if (isTrustedCacheMetadata(metadata, format)) return cached;
+
   try {
     const parsed = JSON.parse(cached) as unknown;
     if (format === "legacy") {
@@ -139,8 +183,8 @@ async function readCachedPayload(
         throw new Error("stale_schema");
       }
     }
-    // Cache HITでも公開境界を再検査し、過去バージョンや手動投入KVから
-    // 内部キーを返さない。壊れたcacheは下のcatchで削除してD1再生成する。
+    // Old/manual cache entries have no trusted metadata. Validate them fully
+    // before returning so a stale key can never bypass the public DTO fence.
     assertNoForbiddenKeys(parsed);
     return cached;
   } catch (error) {
@@ -334,16 +378,17 @@ export async function GET(
   }
 
   if (kv) {
-    const writes = await Promise.allSettled([
-      kv.put(payloadCacheKey, body, {
+    try {
+      await kv.put(payloadCacheKey, body, {
         expirationTtl: refreshMinutes * 60,
-      }),
-    ]);
-    if (writes.some((result) => result.status === "rejected")) {
-      console.warn("[event-export-api] KV write partially failed", {
+        metadata: cacheMetadataForFormat(format),
+      });
+    } catch (error) {
+      console.warn("[event-export-api] KV write failed", {
         eventId,
         format,
         refreshMinutes,
+        error,
       });
     }
   }
