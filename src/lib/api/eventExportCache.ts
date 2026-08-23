@@ -2,9 +2,10 @@ import "server-only";
 
 import { getEnv } from "@/lib/cloudflare";
 
-const EVENT_EXPORT_CACHE_VERSION = 5;
+const EVENT_EXPORT_CACHE_VERSION = 6;
 export const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
 
+export type EventExportCacheFormat = "v5" | "legacy";
 export type EventExportRefreshMinutes =
   (typeof EVENT_EXPORT_REFRESH_MINUTES)[number];
 
@@ -18,12 +19,14 @@ export function isEventExportRefreshMinutes(
 
 export function eventExportPayloadCacheKey(
   eventId: string,
+  format: EventExportCacheFormat,
   refreshMinutes: EventExportRefreshMinutes,
 ): string {
   return [
     "public-event-export",
     EVENT_EXPORT_CACHE_VERSION,
     encodeURIComponent(eventId),
+    format,
     refreshMinutes,
   ].join(":");
 }
@@ -38,11 +41,11 @@ export async function invalidateEventExportCache(
   const kv = getEventExportKv();
   if (!kv) return;
 
-  const keys = [
-    ...EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
-      eventExportPayloadCacheKey(eventId, refreshMinutes),
+  const keys = (["v5", "legacy"] as const).flatMap((format) =>
+    EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
+      eventExportPayloadCacheKey(eventId, format, refreshMinutes),
     ),
-  ];
+  );
 
   let failed = 0;
   for (let offset = 0; offset < keys.length; offset += 6) {
