@@ -105,10 +105,14 @@ export default async function EventYoutubePlaylistPage({
       manageStaffXUserIds={getManageStaffXUserIdsFromSnapshot(authorization)}
     >
       {sp.saved === "1" ? (
-        <p className="fn-alert fn-alert-success">設定を保存し、次回同期を予約しました。</p>
+        <p className="fn-alert fn-alert-success">
+          設定を保存し、同期を予約しました。Queueが有効ならすぐ処理を開始します。
+        </p>
       ) : null}
       {sp.queued === "1" ? (
-        <p className="fn-alert fn-alert-success">次回のWorker実行で同期するよう予約しました。</p>
+        <p className="fn-alert fn-alert-success">
+          同期を予約しました。Queueが有効ならすぐ処理を開始します。
+        </p>
       ) : null}
       {sp.error ? <p className="fn-alert fn-alert-danger">{sp.error}</p> : null}
 
@@ -218,12 +222,17 @@ export default async function EventYoutubePlaylistPage({
           </p>
         ) : null}
         {canEdit && config?.enabled === 1 ? (
-          <form action={queueEventYoutubePlaylistSync}>
-            <input type="hidden" name="event_id" value={ev.id} />
-            <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
-              次回実行へ予約
-            </button>
-          </form>
+          <>
+            <form action={queueEventYoutubePlaylistSync}>
+              <input type="hidden" name="event_id" value={ev.id} />
+              <button type="submit" className="fn-btn fn-btn-ghost fn-btn-sm">
+                今すぐ同期を予約
+              </button>
+            </form>
+            <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
+              Queueを利用できない場合も予約はD1に残り、毎時52分のRecovery Cronが処理します。
+            </p>
+          </>
         ) : null}
       </section>
 
