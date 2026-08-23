@@ -37,6 +37,15 @@ test("権限一覧の連携済み判定はX ID approval_status=approvedを要求
   assert.match(loaderSource, /xu\.approval_status = 'approved'/);
 });
 
+test("通知可能人数は承認済みX ID連携かつユーザー通知ONだけを数える", () => {
+  assert.match(loaderSource, /has_notifiable_link/);
+  assert.match(loaderSource, /INNER JOIN \$\{users\} auth_user ON auth_user\.id = link\.auth_user_id/);
+  assert.match(loaderSource, /auth_user\.is_notification_enabled = 1/);
+  assert.match(loaderSource, /can_notify: row\.has_notifiable_link === 1/);
+  assert.match(loaderSource, /if \(editor\.can_notify\) notifiableEditorCount \+= 1/);
+  assert.doesNotMatch(loaderSource, /notifiableEditorCount: editors\.length - unlinkedEditorCount/);
+});
+
 test("権限summaryはX ID DTOへAuth/Discord IDを混ぜて他人判定しない", () => {
   assert.match(loaderSource, /user_id: null/);
   assert.match(loaderSource, /権限正本はX ID/);
