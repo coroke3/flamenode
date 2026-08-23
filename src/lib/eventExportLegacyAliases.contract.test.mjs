@@ -24,6 +24,15 @@ test("旧new/economy aliasesは現行v5/scheduledへ安全に正規化する", (
   assert.match(route, /return "scheduled";/);
 });
 
+test("v2/v3指定をv5へ偽装せず不明formatとして扱う", () => {
+  const parseFormat = route.slice(
+    route.indexOf("function parseFormat"),
+    route.indexOf("function parseUpdateMode"),
+  );
+  assert.doesNotMatch(parseFormat, /value === "v2"/);
+  assert.doesNotMatch(parseFormat, /value === "v3"/);
+});
+
 test("エラー応答はaliasesではなく推奨canonical値だけを案内する", () => {
   assert.match(route, /allowed: \["v5", "legacy"\]/);
   assert.match(route, /update: \["realtime", "scheduled"\]/);
