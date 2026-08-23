@@ -41,6 +41,17 @@ test("投稿Wizardは確認画面への遷移では送信せず明示ボタン�
   assert.doesNotMatch(form, /form\.submit\(\)/);
 });
 
+test("枠なし投稿のActive X切替確認はVideoFormだけが担当し二重confirmを出さない", async () => {
+  const [shell, form] = await Promise.all([
+    readFromRoot("src/components/forms/UnslottedPostForm.tsx"),
+    readFromRoot("src/components/forms/VideoForm.tsx"),
+  ]);
+  assert.doesNotMatch(shell, /ACTIVE_X_BEFORE_SWITCH_EVENT/);
+  assert.doesNotMatch(shell, /addEventListener\(ACTIVE_X_BEFORE_SWITCH_EVENT/);
+  assert.match(form, /addEventListener\(ACTIVE_X_BEFORE_SWITCH_EVENT/);
+  assert.match(form, /flushVideoDraft/);
+});
+
 test("概要欄管理Editorはプリセット・出力例コピー・レスポンシブ2ペインを持つ", async () => {
   const [editor, css] = await Promise.all([
     readFromRoot("src/components/admin/YoutubeDescriptionTemplateEditor.tsx"),
