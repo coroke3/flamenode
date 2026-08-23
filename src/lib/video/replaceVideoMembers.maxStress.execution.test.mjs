@@ -67,6 +67,11 @@ if (runTestWithTsx(import.meta.url)) {
         creative_start_date INTEGER,
         approval_status TEXT
       );
+      CREATE TABLE x_user_aliases (
+        x_user_id TEXT NOT NULL,
+        alias_x_id TEXT NOT NULL,
+        PRIMARY KEY (x_user_id, alias_x_id)
+      );
       CREATE TABLE static_rebuild_queue (
         id TEXT PRIMARY KEY,
         target_type TEXT NOT NULL,
@@ -110,7 +115,7 @@ if (runTestWithTsx(import.meta.url)) {
     );
     for (let index = 0; index < 100; index += 1) {
       const memberId = `old-vm-${index}`;
-      const xId = `old-x-${index}`;
+      const xId = `old_x_${index}`;
       insertMember.run(memberId, xId, `Old ${index}`, index);
       insertXUser.run(xId, `Old X ${index}`);
       for (let chapterIndex = 0; chapterIndex < 30; chapterIndex += 1) {
@@ -165,7 +170,7 @@ if (runTestWithTsx(import.meta.url)) {
 
     const members = Array.from({ length: 100 }, (_, index) => ({
       name: `新メンバー ${index}`,
-      x_user_id: `new-x-${index}`,
+      x_user_id: `new_x_${index}`,
       role: "映像",
       comment: "日本語コメント",
       chapters: [],
@@ -249,14 +254,14 @@ if (runTestWithTsx(import.meta.url)) {
     const sqlite = new DatabaseSync(":memory:");
     createSchema(sqlite);
     sqlite.prepare(
-      `INSERT INTO x_users (id, x_name, approval_status) VALUES ('x-1', 'X1', 'approved')`,
+      `INSERT INTO x_users (id, x_name, approval_status) VALUES ('x_1', 'X1', 'approved')`,
     ).run();
     sqlite.prepare(
       `INSERT INTO video_members
        (id, video_id, x_user_id, name, role, comment, order_index,
         can_edit, is_public_member, edit_granted_by_auth_user_id,
         edit_granted_at, edit_updated_at)
-       VALUES ('hidden-1', 'video-1', 'x-1', 'X1', NULL, NULL, 9999,
+       VALUES ('hidden-1', 'video-1', 'x_1', 'X1', NULL, NULL, 9999,
         1, 0, 'grant-user', 100, 101)`,
     ).run();
 
@@ -266,7 +271,7 @@ if (runTestWithTsx(import.meta.url)) {
       members: [
         {
           name: "X1 public",
-          x_user_id: "x-1",
+          x_user_id: "x_1",
           role: "映像",
           comment: "",
           chapters: [],
@@ -287,7 +292,7 @@ if (runTestWithTsx(import.meta.url)) {
       .prepare(
         `SELECT id, x_user_id, can_edit, is_public_member,
                 edit_granted_by_auth_user_id, edit_granted_at, edit_updated_at
-         FROM video_members WHERE video_id = 'video-1' AND x_user_id = 'x-1'`,
+         FROM video_members WHERE video_id = 'video-1' AND x_user_id = 'x_1'`,
       )
       .all();
     assert.equal(rows.length, 1);
@@ -297,6 +302,51 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(rows[0].edit_granted_at, 100);
     assert.equal(rows[0].edit_updated_at, 101);
 
+    sqlite.close();
+  });
+
+  test("旧aliasで保存しても現行X IDへ寄せてhidden権限を公開行へ統合する", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    createSchema(sqlite);
+    sqlite.prepare(
+      `INSERT INTO x_users (id, x_name, approval_status) VALUES ('current_x', 'Current', 'approved')`,
+    ).run();
+    sqlite.prepare(
+      `INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('current_x', 'old_x')`,
+    ).run();
+    sqlite.prepare(
+      `INSERT INTO video_members
+       (id, video_id, x_user_id, name, role, comment, order_index,
+        can_edit, is_public_member, edit_granted_by_auth_user_id,
+        edit_granted_at, edit_updated_at)
+       VALUES ('hidden-alias', 'video-1', 'current_x', 'Current', NULL, NULL, 9999,
+        1, 0, 'grant-user', 100, 101)`,
+    ).run();
+
+    const db = makeDb(sqlite);
+    const plan = await buildReplaceVideoMembersPlan(db, {
+      videoId: "video-1",
+      members: [
+        {
+          name: "Current public",
+          x_user_id: "old_x",
+          role: "映像",
+          comment: "",
+          chapters: [],
+        },
+      ],
+      chaptersByIndex: new Map([[0, []]]),
+      actorUserId: "operator-1",
+    });
+    for (const statement of plan.statements) executePlanStatement(sqlite, statement);
+
+    const rows = sqlite
+      .prepare(`SELECT x_user_id, can_edit, is_public_member FROM video_members WHERE video_id = 'video-1'`)
+      .all();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].x_user_id, "current_x");
+    assert.equal(rows[0].can_edit, 1);
+    assert.equal(rows[0].is_public_member, 1);
     sqlite.close();
   });
 }
