@@ -4,7 +4,8 @@
  *        + GA4 trending 同期（YouTube と独立。失敗は相互に伝播しない）
  * - 52分: 設定済みイベントの YouTube 再生リスト差分同期
  *
- * YouTube pending は Queue consumer が処理し、Cron lease は Queue 経路では使わない。
+ * YouTube pending / playlist manual wake は Queue consumer が処理し、
+ * Cron lease は Queue 経路では使わない。D1 の pending/due 状態が常に正本。
  */
 import {
   createCronWorker,
@@ -22,7 +23,7 @@ import {
 import { resolveQueueFeatureFlags } from "../shared/queueWake.ts";
 import {
   ackAll,
-  extractValidatedWakeFromBatch,
+  parseQueueWakeMessage,
   retryAll,
   sendWorkerQueueWakeBestEffort,
   type QueueConsumerResult,
@@ -183,75 +184,106 @@ export async function handleYoutubeSyncWakeQueue(
   batch: MessageBatch<unknown>,
   env: Env,
 ): Promise<QueueConsumerResult> {
-  const { messages, wake } = extractValidatedWakeFromBatch(
-    batch,
-    "youtube_sync_pending",
-  );
-  if (!wake) {
-    ackAll(messages);
-    return {
-      retryBatch: false,
-      continued: false,
-      processed: 0,
-      skipped: messages.length,
-      failed: 0,
-    };
+  const metadataMessages: Message<unknown>[] = [];
+  const playlistMessages: Message<unknown>[] = [];
+  const invalidMessages: Message<unknown>[] = [];
+
+  // 同じQueueをmetadataとplaylistで共有する。種類ごとに別々にack/retryし、
+  // 片方の外部API障害で成功済みのもう片方を再実行しない。
+  for (const message of batch.messages) {
+    const wake = parseQueueWakeMessage(message.body);
+    if (wake?.kind === "youtube_sync_pending") {
+      metadataMessages.push(message);
+    } else if (wake?.kind === "youtube_playlist_sync") {
+      playlistMessages.push(message);
+    } else {
+      invalidMessages.push(message);
+    }
   }
+  ackAll(invalidMessages);
 
-  try {
-    let continued = false;
-    let youtube: SyncBatchResult | null = null;
-    const metadataJob = await runJob(
-      "sync-jobs",
-      "youtube-sync-metadata",
-      async () => {
-        youtube = await syncBatch(env, undefined, undefined, {
-          mode: "pending_only",
-        });
-        return youtube;
-      },
-      { commitSha: env.BUILD_COMMIT_SHA },
-    );
-    if (!metadataJob.succeeded) {
-      throw new Error("youtube_metadata_commit_failed");
-    }
-    if (!youtube) {
-      throw new Error("youtube_sync_result_missing");
-    }
+  let retryBatch = false;
+  let continued = false;
+  let processed = 0;
+  let skipped = invalidMessages.length;
+  let failed = 0;
 
-    await runYoutubeSyncPostCommit(env, youtube, {
-      commitSha: env.BUILD_COMMIT_SHA,
-    });
+  if (metadataMessages.length > 0) {
+    try {
+      let youtube: SyncBatchResult | null = null;
+      const metadataJob = await runJob(
+        "sync-jobs",
+        "youtube-sync-metadata",
+        async () => {
+          youtube = await syncBatch(env, undefined, undefined, {
+            mode: "pending_only",
+          });
+          return youtube;
+        },
+        { commitSha: env.BUILD_COMMIT_SHA },
+      );
+      if (!metadataJob.succeeded) {
+        throw new Error("youtube_metadata_commit_failed");
+      }
+      if (!youtube) {
+        throw new Error("youtube_sync_result_missing");
+      }
 
-    if (youtube.has_more_pending && !youtube.quota_stopped) {
-      continued = await sendWorkerQueueWakeBestEffort({
-        queue: env.YOUTUBE_SYNC_WAKE_QUEUE,
-        kind: "youtube_sync_pending",
-        source: "continuation",
-        envFlags: env,
-        requireYoutubeFlag: true,
-        kv: env.KV,
+      await runYoutubeSyncPostCommit(env, youtube, {
+        commitSha: env.BUILD_COMMIT_SHA,
       });
-    }
 
-    ackAll(messages);
-    return {
-      retryBatch: false,
-      continued,
-      processed: metadataJob.processed,
-      skipped: metadataJob.skipped,
-      failed: metadataJob.failed,
-    };
-  } catch {
-    retryAll(messages);
-    return {
-      retryBatch: true,
-      continued: false,
-      processed: 0,
-      skipped: 0,
-      failed: messages.length,
-    };
+      if (youtube.has_more_pending && !youtube.quota_stopped) {
+        continued = await sendWorkerQueueWakeBestEffort({
+          queue: env.YOUTUBE_SYNC_WAKE_QUEUE,
+          kind: "youtube_sync_pending",
+          source: "continuation",
+          envFlags: env,
+          requireYoutubeFlag: true,
+          kv: env.KV,
+        });
+      }
+
+      ackAll(metadataMessages);
+      processed += metadataJob.processed;
+      skipped += metadataJob.skipped;
+      failed += metadataJob.failed;
+    } catch {
+      retryAll(metadataMessages);
+      retryBatch = true;
+      failed += metadataMessages.length;
+    }
   }
+
+  if (playlistMessages.length > 0) {
+    try {
+      const playlistJob = await runJob(
+        "sync-jobs",
+        "youtube-playlist-sync",
+        () => syncEventPlaylists(env),
+        { commitSha: env.BUILD_COMMIT_SHA },
+      );
+      if (!playlistJob.succeeded) {
+        throw new Error("youtube_playlist_sync_failed");
+      }
+      ackAll(playlistMessages);
+      processed += playlistJob.processed;
+      skipped += playlistJob.skipped;
+      failed += playlistJob.failed;
+    } catch {
+      retryAll(playlistMessages);
+      retryBatch = true;
+      failed += playlistMessages.length;
+    }
+  }
+
+  return {
+    retryBatch,
+    continued,
+    processed,
+    skipped,
+    failed,
+  };
 }
 
 export async function runSyncJobs(
