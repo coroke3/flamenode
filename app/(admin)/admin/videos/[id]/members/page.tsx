@@ -1,7 +1,7 @@
 import * as React from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import {
   videoMembers,
@@ -40,6 +40,9 @@ export default async function AdminVideoMembersPage({
   )[0];
   if (!video) notFound();
 
+  // 参加者設定は公開メンバーだけを編集する。is_public_member=0 は
+  // 「編集できる人」専用のhidden editorであり、ここへ混ぜると次回保存時に
+  // 公開メンバーとして再投入されるため明示的に除外する。
   const memberRows = await db
     .select({
       name: videoMembers.name,
@@ -51,7 +54,12 @@ export default async function AdminVideoMembersPage({
       is_public_member: videoMembers.is_public_member,
     })
     .from(videoMembers)
-    .where(eq(videoMembers.video_id, video.id))
+    .where(
+      and(
+        eq(videoMembers.video_id, video.id),
+        eq(videoMembers.is_public_member, 1),
+      )!,
+    )
     .orderBy(videoMembers.order_index, videoMembers.name);
 
   const initialMembers: VideoMemberInput[] = memberRows.map((member) => ({
