@@ -29,14 +29,18 @@ import { assertNoForbiddenKeys } from "@/lib/api/publicDto";
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
 
 function parseFormat(value: string | null): EventExportFormat | null {
-  if (value == null || value === "" || value === "v5") return "v5";
-  if (value === "legacy") return "legacy";
+  if (value == null || value === "" || value === "v5" || value === "new") {
+    return "v5";
+  }
+  if (value === "legacy" || value === "old" || value === "v1") {
+    return "legacy";
+  }
   return null;
 }
 
 function parseUpdateMode(value: string | null): EventExportUpdateMode | null {
   if (value === "realtime") return "realtime";
-  if (value === "scheduled") return "scheduled";
+  if (value === "scheduled" || value === "economy") return "scheduled";
   return null;
 }
 
@@ -173,7 +177,7 @@ export async function GET(
       req,
       {
         error: "invalid_format",
-        allowed: ["v5", "legacy"],
+        allowed: ["v5", "legacy", "new", "old", "v1"],
       },
       "no-store",
       400,
@@ -190,8 +194,8 @@ export async function GET(
       {
         error: "invalid_export_options",
         allowed: {
-          format: ["v5", "legacy"],
-          update: ["realtime", "scheduled"],
+          format: ["v5", "legacy", "new", "old", "v1"],
+          update: ["realtime", "scheduled", "economy"],
           refresh: EVENT_EXPORT_REFRESH_MINUTES,
         },
       },
