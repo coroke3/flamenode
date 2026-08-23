@@ -13,6 +13,7 @@ import {
   buildVideoMemberBulkInsertSql,
   buildVideoMemberSetGuardSql,
   buildVideoMemberSetSnapshot,
+  toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
 
 /** Keep each JSON1 bind comfortably below D1/R2 string limits. */
@@ -121,6 +122,69 @@ function buildVideoChapterBulkInsertSql(
   });
 }
 
+/**
+ * 公開メンバー化するX IDに既存hidden editorがある場合、その行を削除する前に
+ * 読み取り時の完全snapshotと一致することを確認する。permission actionとの競合で
+ * 新しいcan_editを消さないため、public member set guardとは別にfail-closedにする。
+ */
+function buildHiddenCarryRowsGuardSql(
+  videoId: string,
+  rows: readonly (typeof videoMembers.$inferSelect)[],
+) {
+  const expectedRows = [...rows]
+    .map(toVideoMemberSnapshotRow)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const idsPayload = JSON.stringify(expectedRows.map((row) => row.id));
+  const expectedJson = JSON.stringify(expectedRows);
+  return sql`
+    SELECT CASE
+      WHEN (
+        SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
+        FROM (
+          SELECT json_object(
+            'id', id,
+            'video_id', video_id,
+            'x_user_id', x_user_id,
+            'name', name,
+            'role', role,
+            'comment', comment,
+            'order_index', order_index,
+            'can_edit', can_edit,
+            'is_public_member', is_public_member,
+            'edit_granted_by_auth_user_id', edit_granted_by_auth_user_id,
+            'edit_granted_at', edit_granted_at,
+            'edit_updated_at', edit_updated_at
+          ) AS row_json
+          FROM video_members
+          WHERE video_id = ${videoId}
+            AND is_public_member = 0
+            AND id IN (
+              SELECT CAST(value AS TEXT) FROM json_each(${idsPayload})
+            )
+          ORDER BY id ASC
+        )
+      ) = json(${expectedJson})
+      THEN 1
+      ELSE json_extract('video-hidden-member-conflict', '$')
+    END
+  `;
+}
+
+function buildHiddenCarryRowsDeleteSql(
+  videoId: string,
+  rows: readonly (typeof videoMembers.$inferSelect)[],
+) {
+  const idsPayload = JSON.stringify(rows.map((row) => row.id));
+  return sql`
+    DELETE FROM video_members
+    WHERE video_id = ${videoId}
+      AND is_public_member = 0
+      AND id IN (
+        SELECT CAST(value AS TEXT) FROM json_each(${idsPayload})
+      )
+  `;
+}
+
 export async function buildReplaceVideoMembersPlan(
   db: DB,
   args: {
@@ -198,12 +262,23 @@ export async function buildReplaceVideoMembersPlan(
     throw new Error("video_member_carry_limit_exceeded");
   }
 
+  const xIdSet = new Set(xIds);
+  const hiddenCarryRows = carryRows.filter(
+    (row) =>
+      row.is_public_member === 0 &&
+      Boolean(normalizeXId(row.x_user_id)) &&
+      xIdSet.has(normalizeXId(row.x_user_id)),
+  );
+
   const permissionCarryByXId = new Map<
     string,
     typeof videoMembers.$inferSelect
   >();
   for (const row of [...carryRows].sort(
-    (left, right) => right.can_edit - left.can_edit,
+    (left, right) =>
+      right.can_edit - left.can_edit ||
+      right.is_public_member - left.is_public_member ||
+      left.id.localeCompare(right.id),
   )) {
     const xId = normalizeXId(row.x_user_id);
     if (xId && !permissionCarryByXId.has(xId)) {
@@ -323,12 +398,24 @@ export async function buildReplaceVideoMembersPlan(
     JSON.stringify(chapterSnapshot(nextManagedChapters));
 
   const plan = emptyVideoAtomicWritePlan();
-  if (!membersChanged && !chaptersChanged && newXUsers.length === 0) return plan;
+  if (
+    !membersChanged &&
+    !chaptersChanged &&
+    newXUsers.length === 0 &&
+    hiddenCarryRows.length === 0
+  ) return plan;
 
   plan.statements.push(
     db.run(buildVideoMemberSetGuardSql(args.videoId, beforeSnapshot.rows)),
   );
   plan.expectedChanges.push(null);
+
+  if (hiddenCarryRows.length > 0) {
+    plan.statements.push(
+      db.run(buildHiddenCarryRowsGuardSql(args.videoId, hiddenCarryRows)),
+    );
+    plan.expectedChanges.push(null);
+  }
 
   if (newXUsers.length > 0) {
     const payload = JSON.stringify(newXUsers);
@@ -367,6 +454,29 @@ export async function buildReplaceVideoMembersPlan(
       after: { id: args.videoId, rows: newXUsers },
       actor_user_id: args.actorUserId,
       context: "video-save:member-profile",
+      retention_class: "long_audit",
+      restore_strategy: "none",
+      strict: true,
+    });
+  }
+
+  if (hiddenCarryRows.length > 0) {
+    plan.statements.push(
+      db.run(buildHiddenCarryRowsDeleteSql(args.videoId, hiddenCarryRows)),
+    );
+    plan.expectedChanges.push(hiddenCarryRows.length);
+    plan.audits.push({
+      table_name: "video_member_hidden_carry_cleanup",
+      target_id: args.videoId,
+      operation: "DELETE",
+      before: {
+        id: args.videoId,
+        rows: hiddenCarryRows.map(toVideoMemberSnapshotRow),
+      },
+      after: { id: args.videoId, rows: [] },
+      actor_user_id: args.actorUserId,
+      context: "video-save:members",
+      reason: "公開メンバー化したX IDのhidden editorを公開行へ統合",
       retention_class: "long_audit",
       restore_strategy: "none",
       strict: true,
