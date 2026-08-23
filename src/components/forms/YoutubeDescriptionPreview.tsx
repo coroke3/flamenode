@@ -105,9 +105,18 @@ export function YoutubeDescriptionPreview({
     <section className={styles.panel} aria-labelledby="youtube-description-preview-title">
       <div className={styles.head}>
         <div>
-          <h3 id="youtube-description-preview-title" className={styles.title}>
-            YouTube概要欄（コピー用）
-          </h3>
+          <div className={styles.titleRow}>
+            <h3 id="youtube-description-preview-title" className={styles.title}>
+              YouTube概要欄（コピー用）
+            </h3>
+            <span
+              className={styles.modeBadge}
+              data-mode={draftMode}
+              aria-label={draftMode === "auto" ? "自動生成モード" : "手動調整モード"}
+            >
+              {draftMode === "auto" ? "自動生成" : "手動調整中"}
+            </span>
+          </div>
           <p className={styles.event}>イベントテンプレート: {eventTitle}</p>
         </div>
         <button
@@ -123,7 +132,7 @@ export function YoutubeDescriptionPreview({
       {missingVariables.length > 0 ? (
         <div className={styles.warning} role="status">
           <strong>テンプレートで使う情報に未入力があります。</strong>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+          <ul className={styles.warningList}>
             {missingVariables.map((key) => (
               <li key={key}>{variableLabel(key)}が未入力です。</li>
             ))}
@@ -132,15 +141,16 @@ export function YoutubeDescriptionPreview({
       ) : null}
 
       {sourceChangedWhileEditing ? (
-        <div className={styles.warning} role="status">
-          <strong>作品情報が更新されています。</strong>
-          <p style={{ margin: "6px 0 0" }}>
-            手動調整した概要欄は保持しています。最新の作品情報を反映する場合だけ更新してください。
-          </p>
+        <div className={styles.warningBox} role="status">
+          <div>
+            <strong>作品情報が更新されています。</strong>
+            <p>
+              手動調整した概要欄は保持しています。最新データへ置き換える場合だけ更新してください。
+            </p>
+          </div>
           <button
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
-            style={{ marginTop: 8 }}
             onClick={refreshManualFromSource}
           >
             最新の自動生成を反映
@@ -162,8 +172,8 @@ export function YoutubeDescriptionPreview({
         }}
         aria-label={`${eventTitle} のYouTube概要欄`}
       />
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <p className={styles.hint} style={{ margin: 0 }}>
+      <div className={styles.footer}>
+        <p className={styles.hint}>
           {draftMode === "manual"
             ? "手動調整中です。作品情報が変わっても自動では上書きしません。ここでの調整は作品データには保存されません。"
             : "入力中の作品情報から自動生成しています。ここでの最終調整は作品データには保存されません。"}
