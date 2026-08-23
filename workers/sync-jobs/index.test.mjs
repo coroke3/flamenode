@@ -69,6 +69,27 @@ test("再生リスト手動予約はD1 commit後にQueue wakeし52分Cronをfall
   assert.match(source, /syncEventPlaylists\(env, signal\)/);
 });
 
+test("playlist backlogはindexed due判定後に1件だけcontinuation wakeする", () => {
+  assert.match(source, /async function maybeContinueYoutubePlaylistSync/);
+  assert.match(source, /flags\.continuationEnabled/);
+  assert.match(
+    source,
+    /SELECT 1 AS due[\s\S]*FROM event_youtube_playlist_sync[\s\S]*COALESCE\(next_sync_at, 0\) <= \?1[\s\S]*LIMIT 1/,
+  );
+  assert.match(
+    source,
+    /kind:\s*"youtube_playlist_sync"[\s\S]*source:\s*"continuation"/,
+  );
+  assert.match(source, /continued \|\|= playlistContinued/);
+  assert.match(source, /playlistJob\.quota_stopped/);
+  assert.match(source, /playlistCounters\.quota_stopped/);
+  assert.match(source, /deferred_to_recovery/);
+  assert.ok(
+    source.match(/maybeContinueYoutubePlaylistSync\(/g)?.length >= 3,
+    "helper definition + Queue + Cron calls are required",
+  );
+});
+
 test("metadataとplaylistのQueueメッセージは別々にack/retryする", () => {
   assert.match(source, /const metadataMessages: Message<unknown>\[\] = \[\]/);
   assert.match(source, /const playlistMessages: Message<unknown>\[\] = \[\]/);
