@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [worker, migration] = await Promise.all([
+const [worker, schema] = await Promise.all([
   readFile(new URL("./index.ts", import.meta.url), "utf8"),
   readFile(
-    new URL("../../migrations/0060_youtube_playlist_slot_order_index.sql", import.meta.url),
+    new URL("../../src/lib/db/schema.canonical.ts", import.meta.url),
     "utf8",
   ),
 ]);
@@ -20,9 +20,9 @@ test("YouTube再生リストのsourceは投稿枠を最優先し枠順で並ぶ"
   assert.match(worker, /const sourcePositions = new Map\([\s\S]*sourceVideoIds\.map\(\(videoId, index\) => \[videoId, index\]\)/);
 });
 
-test("投稿枠順JOINはD1の部分複合indexで支える", () => {
-  assert.match(migration, /CREATE INDEX IF NOT EXISTS "slots_playlist_order_idx"/);
-  assert.match(migration, /ON "slots" \("event_id", "video_id", "start_time", "sort_order"\)/);
-  assert.match(migration, /WHERE "status" = 'submitted' AND "video_id" IS NOT NULL/);
-  assert.match(migration, /PRAGMA optimize/);
+test("投稿枠順JOINは既存D1 indexを利用しschema-only最適化migrationを増やさない", () => {
+  assert.match(schema, /index\("slots_event_idx"\)\.on\(t\.event_id, t\.start_time\)/);
+  assert.match(schema, /index\("slots_video_idx"\)\.on\(t\.video_id\)/);
+  assert.match(worker, /s\.event_id = \?1/);
+  assert.match(worker, /s\.video_id = v\.id/);
 });
