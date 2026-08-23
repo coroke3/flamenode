@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { isPlaylistSyncSlot } from "./index.ts";
+import {
+  DAILY_BLOCKED_RECHECK_D1_RESERVE,
+  isPlaylistSyncSlot,
+} from "./index.ts";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
 const sharedSource = await readFile(
@@ -67,7 +70,7 @@ test("GA4 trending sync runs before youtube metadata in 07 slot", () => {
 });
 
 test("Cron全体とQueue consumerは同じD1 hard-limit guardを使う", () => {
-  assert.match(source, /import \{ withD1Budget \} from "\.\.\/shared\/d1Budget\.ts"/);
+  assert.match(source, /withD1Budget/);
   const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
   assert.match(cronBlock, /const budgetEnv = withD1Budget\(env\)/);
   assert.match(cronBlock, /withCronLease\(\s*budgetEnv,/);
@@ -79,5 +82,27 @@ test("Cron全体とQueue consumerは同じD1 hard-limit guardを使う", () => {
   assert.match(
     queueBlock,
     /handleYoutubeSyncWakeQueue\(batch, withD1Budget\(env\)\)/,
+  );
+});
+
+test("日次blocked再確認は外部API開始前にD1 soft headroomを確保する", () => {
+  assert.equal(DAILY_BLOCKED_RECHECK_D1_RESERVE, 13);
+  assert.match(source, /D1_QUERY_SOFT_LIMIT/);
+  assert.match(source, /function hasSoftD1Budget\(/);
+  assert.match(
+    source,
+    /isDailyYoutubeRelatedSlot\(now\)[\s\S]*?hasSoftD1Budget\([\s\S]*?DAILY_BLOCKED_RECHECK_D1_RESERVE/,
+  );
+  assert.match(source, /mode:\s*"blocked_recheck_only"/);
+});
+
+test("blocked適格性変更でhigh enqueue済みならdaily low enqueueを重ねない", () => {
+  assert.match(
+    source,
+    /const relatedAlreadyEnqueued = Boolean\([\s\S]*?related_eligibility_changed_video_ids\.length > 0/,
+  );
+  assert.match(
+    source,
+    /if \([\s\S]*?!relatedAlreadyEnqueued[\s\S]*?YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS[\s\S]*?youtube_related_blocklist_daily_reconcile/,
   );
 });
