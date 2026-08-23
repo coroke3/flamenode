@@ -90,7 +90,23 @@ test("playlist backlogはindexed due判定後に1件だけcontinuation wakeす�
   );
 });
 
-test("metadataとplaylistのQueueメッセージは別々にack/retryする", () => {
+test("mixed YouTube batchではplaylistだけを実行しmetadataは1 wakeへcoalesceする", () => {
+  assert.match(source, /const mixedYoutubeKinds =/);
+  assert.match(
+    source,
+    /if \(metadataMessages\.length > 0 && !mixedYoutubeKinds\)/,
+  );
+  assert.match(source, /if \(playlistMessages\.length > 0\)/);
+  assert.match(
+    source,
+    /if \(mixedYoutubeKinds\)[\s\S]*ackAll\(metadataMessages\)[\s\S]*maybeResendYoutubePendingWake\(env\)/,
+  );
+  assert.match(source, /skipped \+= metadataMessages\.length/);
+  assert.match(source, /youtube-pending-recovery-check/);
+  assert.match(source, /deferred_to_recovery/);
+});
+
+test("metadataとplaylistのQueueメッセージは種類別にack/retryする", () => {
   assert.match(source, /const metadataMessages: Message<unknown>\[\] = \[\]/);
   assert.match(source, /const playlistMessages: Message<unknown>\[\] = \[\]/);
   assert.match(source, /ackAll\(metadataMessages\)/);
