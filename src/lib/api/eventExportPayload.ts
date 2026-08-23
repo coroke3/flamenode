@@ -164,6 +164,17 @@ function parsePublicJson(value: string | null): unknown {
   }
 }
 
+function legacyPublicJsonText(value: string | null): string {
+  const parsed = parsePublicJson(value);
+  if (parsed == null) return "";
+  if (typeof parsed === "string") return parsed;
+  try {
+    return JSON.stringify(parsed);
+  } catch {
+    return "";
+  }
+}
+
 function answerValue(answer: EventExportAnswerSnapshot): unknown {
   return answer.answer_json
     ? parsePublicAnswerJson(answer.answer_json)
@@ -248,7 +259,7 @@ export function buildLegacyEventExportPayload(
       credit: video.credit ?? "",
       ymulink: video.music_reference_url ?? "",
       up: "",
-      othersns: video.creator_other_social_links ?? "",
+      othersns: legacyPublicJsonText(video.creator_other_social_links),
       righttype: answerText(video, "stage_permission"),
       comment: video.intro_comment ?? "",
       ylink: youtubeUrl(video.youtube_video_id) ?? "",
@@ -326,9 +337,6 @@ export function buildEventExportPayload(
       }));
       const customAnswersByKey = Object.fromEntries(
         customAnswers
-          // Question keys are admin-defined. A key such as `user_id` remains
-          // visible in the ordered list, but must not become a forbidden
-          // public object property (the route boundary checks object keys).
           .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
           .map((answer) => [answer.key, answer.value]),
       );
