@@ -59,6 +59,34 @@ test("member置換はaliasを1クエリでcanonicalizeし変換後重複を拒�
   assert.match(source, /lower\(\$\{xUsers\.id\}\)/);
 });
 
+test("managed chapter同値判定はDB取得順ではなくID順へ正規化する", async () => {
+  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  assert.match(source, /function canonicalChapterRows/);
+  assert.match(source, /compareSqliteBinaryText\(left\.id, right\.id\)/);
+  assert.match(source, /function managedChapterRowsEqual/);
+  assert.match(
+    source,
+    /const chaptersChanged = !managedChapterRowsEqual\([\s\S]*existingManagedChapters,[\s\S]*nextManagedChapters/,
+  );
+  assert.doesNotMatch(
+    source,
+    /JSON\.stringify\(chapterSnapshot\(existingManagedChapters\)\)/,
+  );
+});
+
+test("chapter監査は巨大rows snapshotを持たず存在しないrestore adapterを指定しない", async () => {
+  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  const audit = source.match(
+    /table_name: "video_chapters_member_set"[\s\S]*?strict: true,/,
+  )?.[0];
+  assert.ok(audit);
+  assert.match(audit, /buildChapterAuditSummary/);
+  assert.match(audit, /retention_class: "long_audit"/);
+  assert.match(audit, /restore_strategy: "none"/);
+  assert.doesNotMatch(audit, /rows:/);
+  assert.doesNotMatch(audit, /restore_strategy: "custom_adapter"/);
+});
+
 test("チャプターだけの変更では公開メンバー100行をDELETE/INSERTし直さない", async () => {
   const source = await read("src/lib/video/replaceVideoMembers.ts");
   assert.match(source, /if \(membersChanged && existing\.length > 0\)/);
