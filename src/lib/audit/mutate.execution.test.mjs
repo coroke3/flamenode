@@ -117,7 +117,7 @@ if (!runningWithTsx) {
     assert.equal(state.committed, true);
   });
 
-  test("監査とchanges assertionの固定SQLはinlineのままbatchへ渡す", async () => {
+  test("監査INSERTとassertionも値をinlineせずbindのままbatchへ渡す", async () => {
     const { db, state } = makeDb();
     await mutateWithAudit(db, {
       mutationStatements: [makeMutation()],
@@ -125,9 +125,43 @@ if (!runningWithTsx) {
       audits: [makeAudit(0)],
     });
     const [, mutationAssertion, auditInsert, auditAssertion] = state.batches[0];
-    assert.equal(mutationAssertion.query.shouldInlineParams, true);
-    assert.equal(auditInsert.query.shouldInlineParams, true);
-    assert.equal(auditAssertion.query.shouldInlineParams, true);
+    assert.notEqual(mutationAssertion.query.shouldInlineParams, true);
+    assert.notEqual(auditInsert.query.shouldInlineParams, true);
+    assert.notEqual(auditAssertion.query.shouldInlineParams, true);
+    assert.equal(mutationAssertion.getQuery().params.length, 1);
+    assert.equal(auditInsert.getQuery().params.length, 21);
+    assert.equal(auditAssertion.getQuery().params.length, 2);
+  });
+
+  test("100KB級の監査snapshotをSQL本文へ展開せずbindとして保持する", async () => {
+    const { db, state } = makeDb();
+    const longBefore = "あ".repeat(18_000);
+    const longAfter = "い".repeat(18_000);
+    const combinedBytes = new TextEncoder().encode(
+      JSON.stringify({ note: longBefore }) + JSON.stringify({ note: longAfter }),
+    ).byteLength;
+    assert.ok(combinedBytes > 100_000);
+    assert.ok(combinedBytes < 120_000);
+
+    await mutateWithAudit(db, {
+      mutationStatements: [makeMutation()],
+      expectedMutationChanges: 1,
+      audits: [
+        {
+          ...makeAudit(0),
+          before: { note: longBefore },
+          after: { note: longAfter },
+        },
+      ],
+    });
+
+    const auditInsert = state.batches[0][2];
+    assert.notEqual(auditInsert.query.shouldInlineParams, true);
+    const stringParams = auditInsert.getQuery().params.filter(
+      (value) => typeof value === "string",
+    );
+    assert.ok(stringParams.some((value) => value.includes(longBefore.slice(0, 100))));
+    assert.ok(stringParams.some((value) => value.includes(longAfter.slice(0, 100))));
   });
 
   test("builder は db.run せずそのまま batch へ渡す", async () => {
