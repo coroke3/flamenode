@@ -22,7 +22,7 @@
 
 `cf:deploy-production` のproduction preflightはRemote D1のruntime schemaと `sync-jobs` の必須secret名をfail-closedで検査するため、同スクリプトを通して最新commitが正常デプロイ済みなら、Cloudflare側のテーブル・binding・secret名不足は原則として除外できます。ただしrefresh tokenの失効、YouTube Data APIの無効化、対象再生リストの所有権・編集権限は最初の実API同期まで確定できません。
 
-コード側の回帰確認は `src/lib/youtube/playlistReadiness.contract.test.mjs` と `workers/youtube-playlist-sync/index.test.mjs` を使用します。
+コード側の回帰確認は `src/lib/youtubePlaylistReadiness.contract.test.mjs` と `workers/youtube-playlist-sync/index.test.mjs` を使用します。
 
 ## Google Cloud / YouTube側
 
