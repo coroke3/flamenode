@@ -70,8 +70,8 @@ const SYNC_JOBS_WALL_CLOCK_DEADLINE_MS = 13 * 60 * 1_000;
 const DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR = 3;
 /**
  * blocked recheck(最大5 D1) + related enqueue(2) + targeted score(1)
- * + ranking enqueue worst-case(5)。related変化なし時はdaily reconcile(2)と入れ替わり、
- * いずれも13以内。soft limit 40までに開始判定し、hard 50のlease余白を残す。
+ * + ranking enqueue worst-case(3)。related変化なし時はdaily reconcile(2)と入れ替わる。
+ * 実装上は最大11程度だが、13を予約してsoft limit 40/hard limit 50にlease余白を残す。
  */
 export const DAILY_BLOCKED_RECHECK_D1_RESERVE = 13;
 
@@ -417,7 +417,12 @@ export async function runSyncJobs(
             }
           }
 
-          if (queueFlags.youtubeSyncEnabled) {
+          // pending再通知はRecovery上の補助処理であり、本体同期の成功より優先しない。
+          // soft limitに達していたらCOUNTを打たず、次回Cronへ安全に繰り越す。
+          if (
+            queueFlags.youtubeSyncEnabled &&
+            hasSoftD1Budget(budgetEnv.d1Budget, 1)
+          ) {
             await maybeResendYoutubePendingWake(budgetEnv);
           }
 
