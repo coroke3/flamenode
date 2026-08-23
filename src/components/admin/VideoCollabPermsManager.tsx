@@ -8,6 +8,7 @@ import {
   upsertVideoCollaborator,
 } from "@/lib/actions/video-collab-perms";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
+import { parseCanonicalXId } from "@/lib/utils/xid";
 import styles from "./VideoCollabPermsManager.module.css";
 
 /**
@@ -62,12 +63,18 @@ function subjectKey(s: Pick<VideoCollabSubject, "x_user_id" | "user_id">): strin
   return s.x_user_id ? `x:${s.x_user_id}` : `u:${s.user_id ?? ""}`;
 }
 
+function resolvedSubjectXId(s: {
+  x_user_id?: string | null;
+}): string | null {
+  return parseCanonicalXId(s.x_user_id);
+}
+
 function hasResolvableSubject(s: {
   x_user_id?: string | null;
 }): boolean {
-  // 共同編集所有者の正本は X ID。Discord Snowflake / Auth.js内部IDを
-  // UIから直接指定する経路は作らず、X ID連携後に認証ユーザーへ解決する。
-  return Boolean(s.x_user_id?.trim());
+  // 共同編集所有者の正本は X ID。Server Action と同じcanonical parserを使い、
+  // UIだけが無効なX IDを「付与可能」と見せる状態を作らない。
+  return resolvedSubjectXId(s) !== null;
 }
 
 function hasAccountLink(subject: VideoCollabSubject): boolean {
@@ -224,13 +231,13 @@ export function VideoCollabPermsManager({
   const unlinkedEditors = editors.filter((s) => !hasAccountLink(s));
   const grantCandidates = publicMembers.filter((p) => {
     if (p.can_edit === 1) return false;
-    if (!p.x_user_id?.trim() && !p.display_name.trim()) return false;
+    const candidateXId = parseCanonicalXId(p.x_user_id);
+    // X IDなし/不正な公開メンバーは、押しても必ず失敗するため候補に出さない。
+    if (!candidateXId) return false;
     const already = subjects.some(
       (s) =>
         s.can_edit === 1 &&
-        p.x_user_id &&
-        s.x_user_id &&
-        p.x_user_id.toLowerCase() === s.x_user_id.toLowerCase(),
+        parseCanonicalXId(s.x_user_id) === candidateXId,
     );
     return !already;
   });
@@ -239,15 +246,16 @@ export function VideoCollabPermsManager({
     draft: VideoCollabSubject | NewSubjectDraft,
     options: { notify: boolean },
   ) => {
-    if (!hasResolvableSubject(draft)) {
-      setError("編集権を付与するには X ID が必要です。メンバーの X ID を設定してください。");
+    const xUserId = resolvedSubjectXId(draft);
+    if (!xUserId) {
+      setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
       return;
     }
     setError(null);
     setMessage(null);
     const fd = new FormData();
     fd.set("video_id", videoId);
-    if (draft.x_user_id) fd.set("x_user_id", draft.x_user_id);
+    fd.set("x_user_id", xUserId);
     fd.set("display_name", draft.display_name);
     fd.set("can_edit", "1");
     fd.set("notify", options.notify ? "1" : "0");
@@ -264,9 +272,9 @@ export function VideoCollabPermsManager({
   };
 
   const submitRevoke = (subject: VideoCollabSubject) => {
-    const xUserId = subject.x_user_id?.trim();
+    const xUserId = resolvedSubjectXId(subject);
     if (!xUserId) {
-      setError("編集権限を解除するには X ID が必要です。");
+      setError("編集権限を解除するには有効な X ID が必要です。");
       return;
     }
     setError(null);
@@ -300,7 +308,7 @@ export function VideoCollabPermsManager({
     displayName: string,
   ) => {
     if (!hasResolvableSubject(subject)) {
-      setError("編集権を付与するには X ID が必要です。メンバーの X ID を設定してください。");
+      setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
       return;
     }
     setGrantDialog({ subject, displayName });
@@ -400,25 +408,18 @@ export function VideoCollabPermsManager({
           </p>
           <ul className={styles.candidateList}>
             {grantCandidates.map((p) => {
-              const label = p.x_user_id
-                ? `${p.display_name} @${p.x_user_id}`
-                : `${p.display_name}（X ID未設定）`;
-              const canGrant = Boolean(p.x_user_id?.trim());
+              const xUserId = parseCanonicalXId(p.x_user_id)!;
+              const label = `${p.display_name} @${xUserId}`;
               return (
-                <li key={`pub-${p.x_user_id ?? p.display_name}`}>
+                <li key={`pub-${xUserId}`}>
                   <button
                     type="button"
                     className={styles.candidateBtn}
-                    disabled={pending || !canGrant}
-                    title={
-                      canGrant
-                        ? undefined
-                        : "編集権を付与するには X ID が必要です。メンバー欄で X ID を設定してください。"
-                    }
+                    disabled={pending}
                     onClick={() =>
                       openGrantDialog(
                         {
-                          x_user_id: p.x_user_id ?? "",
+                          x_user_id: xUserId,
                           display_name: p.display_name,
                           user_id: null,
                           can_edit: 0,
@@ -555,7 +556,9 @@ function AddHiddenEditorForm({
     );
   }
 
-  const canSubmit = name.trim().length > 0 && xUserId.trim().length > 0;
+  const canonicalXUserId = parseCanonicalXId(xUserId);
+  const canSubmit = name.trim().length > 0 && canonicalXUserId !== null;
+  const showXIdError = xUserId.trim().length > 0 && canonicalXUserId === null;
 
   return (
     <div className={styles.addPanel}>
@@ -579,19 +582,27 @@ function AddHiddenEditorForm({
           placeholder="X ID (@ なし・必須)"
           value={xUserId}
           onChange={(e) => setXUserId(e.target.value)}
-          pattern="[A-Za-z0-9_]{1,32}"
+          pattern="[A-Za-z0-9_]{1,20}"
+          maxLength={20}
+          aria-invalid={showXIdError || undefined}
           required
         />
       </div>
+      {showXIdError ? (
+        <p className={styles.feedbackErr} role="alert">
+          X ID は英数字とアンダースコア20文字以内で入力してください。
+        </p>
+      ) : null}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <button
           type="button"
           className="fn-btn fn-btn-primary fn-btn-sm"
           disabled={!canSubmit || pending}
           onClick={() => {
+            if (!canonicalXUserId) return;
             onAdd({
               display_name: name.trim(),
-              x_user_id: xUserId.trim(),
+              x_user_id: canonicalXUserId,
               user_id: null,
             });
             setName("");
