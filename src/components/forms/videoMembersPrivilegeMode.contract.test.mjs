@@ -31,3 +31,14 @@ test("権限batch成功後はmembers_jsonを汚さずローカルcan_edit表示�
   const normalizeBody = source.match(/function normalizeMemberRows\([\s\S]*?\n}/)?.[0] ?? "";
   assert.doesNotMatch(normalizeBody, /can_edit/);
 });
+
+test("TSV置き換えで権限列が空欄なら既存X IDのcan_edit表示を維持する", () => {
+  const replaceBody = source.match(/const replaceRowsWith = [\s\S]*?\n  };/)?.[0] ?? "";
+  assert.match(replaceBody, /setRows\(\(previous\) =>/);
+  assert.match(replaceBody, /const permissionByXid = new Map<string, boolean>/);
+  assert.match(replaceBody, /permissionByXid\.set\(xid, canEdit\)/);
+  assert.match(replaceBody, /previousCanEdit/);
+  assert.match(replaceBody, /can_edit: previousCanEdit \? 1 : 0/);
+  const normalizeBody = source.match(/function normalizeMemberRows\([\s\S]*?\n}/)?.[0] ?? "";
+  assert.doesNotMatch(normalizeBody, /can_edit/);
+});
