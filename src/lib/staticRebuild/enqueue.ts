@@ -67,10 +67,10 @@ const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
 // targets when the request crosses the legacy 24-target cap.
 export const MAX_STATIC_REBUILD_BATCH_TARGETS = 256;
 export const STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0;
-// JSON1 carries each chunk as one bind, so 50 rows keeps the resulting
-// statement/assertion count within the D1 50-query atomic budget for the
-// largest member fanout while remaining below D1's 100-bind ceiling.
-export const STATIC_REBUILD_BULK_UPSERT_ROWS = 50;
+// Each JSON1 chunk is a single bind regardless of row count. 100 rows keeps
+// payloads compact while reducing a 200+ target member fanout from five
+// statements to three, leaving headroom under the D1 Free 50-query limit.
+export const STATIC_REBUILD_BULK_UPSERT_ROWS = 100;
 
 export type StaticRebuildQueueBatch = {
   statements: BatchItem<"sqlite">[];
