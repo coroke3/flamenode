@@ -17,6 +17,7 @@ import {
   appendVideoAtomicWritePlan,
   emptyVideoAtomicWritePlan,
   executeVideoAtomicWritePlan,
+  VideoAtomicPlanBudgetError,
 } from "@/lib/video/atomicWritePlan";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
@@ -92,6 +93,7 @@ export async function updateVideoMembersAdmin(
   const members = memberValidation.value.members;
   const nextCollaborationType = members.length > 0 || isCollab ? "collab" : "individual";
   const now = Math.floor(Date.now() / 1000);
+  const traceId = createTraceId();
 
   let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
   try {
@@ -153,8 +155,34 @@ export async function updateVideoMembersAdmin(
     });
   } catch (error) {
     unstable_rethrow(error);
-    console.warn("[updateVideoMembersAdmin] atomic save rejected", error);
-    return { ok: false, message: "保存が競合しました。再読み込みして再試行してください。" };
+    const errorName = error instanceof Error ? error.name : typeof error;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const budget = error instanceof VideoAtomicPlanBudgetError ? error.budget : null;
+    console.warn("[updateVideoMembersAdmin] atomic save rejected", {
+      traceId,
+      videoId,
+      errorName,
+      errorMessage,
+      budget: budget
+        ? {
+            totalQueryCount: budget.totalQueryCount,
+            batchQueryCount: budget.batchQueryCount,
+            limit: budget.limit,
+          }
+        : null,
+    });
+    if (error instanceof VideoAtomicPlanBudgetError) {
+      return {
+        ok: false,
+        message: "参加者設定が一度に処理できる上限を超えています。入力内容を確認してください。",
+      };
+    }
+    // D1 / audit / optimistic guard の失敗を一律に「競合」と断定しない。
+    // member-set guard自体はfail-closedのままなのでlost updateは防止される。
+    return {
+      ok: false,
+      message: "参加者設定の保存に失敗しました。最新状態を確認して再試行してください。",
+    };
   }
 
   await revalidateVideoMembersAdminPathsBestEffort({
