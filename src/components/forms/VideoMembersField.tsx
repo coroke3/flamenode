@@ -683,10 +683,33 @@ export function VideoMembersField({
   };
 
   const replaceRowsWith = (members: VideoMemberInput[]) => {
-    setRows(() => {
+    setRows((previous) => {
       if (members.length === 0) return [{ ...EMPTY_ROW }];
+
+      // 権限列が空欄の置き換えでは、DB側と同じく既存権限を維持して見せる。
+      // can_editはnormalizeMemberRows()でmembers_jsonから除外されるため、これは表示stateのみ。
+      const permissionByXid = new Map<string, boolean>();
+      for (const row of previous) {
+        const xid = normalizeXId(row.x_user_id);
+        if (!xid) continue;
+        const canEdit = row.can_edit === true || row.can_edit === 1;
+        if (canEdit || !permissionByXid.has(xid)) {
+          permissionByXid.set(xid, canEdit);
+        }
+      }
+
       return members
-        .map((r) => ({ ...r, chapters: r.chapters ?? [] }))
+        .map((row) => {
+          const xid = normalizeXId(row.x_user_id);
+          const previousCanEdit = xid ? permissionByXid.get(xid) : undefined;
+          return {
+            ...row,
+            chapters: row.chapters ?? [],
+            ...(previousCanEdit === undefined
+              ? {}
+              : { can_edit: previousCanEdit ? 1 : 0 }),
+          };
+        })
         .slice(0, MAX_VIDEO_MEMBERS);
     });
   };
@@ -839,11 +862,7 @@ export function VideoMembersField({
         </button>
       </div>
       {viewMode === "table" ? (
-        <div
-          style={{
-            overflowX: "auto",
-          }}
-        >
+        <div style={{ overflowX: "auto" }}>
           <div
             style={{
               display: "grid",
@@ -883,9 +902,7 @@ export function VideoMembersField({
                   marginTop: 6,
                 }}
               >
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {i + 1}
-                </span>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{i + 1}</span>
                 <input
                   type="text"
                   value={r.name}
@@ -985,11 +1002,7 @@ export function VideoMembersField({
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
           {rows.map((r, i) => (
-            <section
-              key={i}
-              className="fn-card"
-              style={{ padding: 12, display: "grid", gap: 10 }}
-            >
+            <section key={i} className="fn-card" style={{ padding: 12, display: "grid", gap: 10 }}>
               <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="fn-badge fn-badge-soft">{i + 1}</span>
                 <strong style={{ fontSize: 13, flex: 1 }}>
@@ -1119,10 +1132,7 @@ export function VideoMembersField({
                   チャプター {r.chapters?.length ?? 0} 件
                 </span>
                 {collabPermsHref && !disabled ? (
-                  <a
-                    href={collabPermsHref}
-                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                  >
+                  <a href={collabPermsHref} className="fn-btn fn-btn-ghost fn-btn-sm">
                     編集権を管理
                   </a>
                 ) : null}
@@ -1285,9 +1295,7 @@ export function VideoMembersField({
             <section className={styles.bulkPreviewSection}>
               <strong className={styles.bulkLabel}>確認（{bulkPreview.members.length}行）</strong>
               {bulkPreview.members.length === 0 ? (
-                <p className={`fn-text-muted-sm ${styles.bulkHint}`}>
-                  有効な行がありません。
-                </p>
+                <p className={`fn-text-muted-sm ${styles.bulkHint}`}>有効な行がありません。</p>
               ) : (
                 <div className={`fn-table-scroll ${styles.sampleTableScroll}`}>
                   <table className={styles.bulkPreviewTable}>
@@ -1319,9 +1327,7 @@ export function VideoMembersField({
                             <td>{index + 1}</td>
                             <td>{member.name}</td>
                             <td>{xid ? `@${xid}` : ""}</td>
-                            <td>
-                              {serializeChaptersCell(member.chapters ?? [])}
-                            </td>
+                            <td>{serializeChaptersCell(member.chapters ?? [])}</td>
                             <td>{member.role}</td>
                             <td>{member.comment}</td>
                             <td>{permissionText}</td>
@@ -1389,23 +1395,14 @@ export function VideoMembersField({
               現在のメンバーを置き換えますか？
             </p>
             <p style={{ margin: 0, fontSize: 13, lineHeight: 1.65, color: "var(--text-secondary)" }}>
-              現在入力済みの {normalizedRows.length} 人分のメンバーを、確認済み
-              {" "}
+              現在入力済みの {normalizedRows.length} 人分のメンバーを、確認済み {" "}
               {bulkPreview?.members.length ?? 0} 行で置き換えます。この操作は取り消せません。
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-                onClick={() => setReplaceConfirmOpen(false)}
-              >
+              <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => setReplaceConfirmOpen(false)}>
                 キャンセル
               </button>
-              <button
-                type="button"
-                className="fn-btn fn-btn-primary fn-btn-sm"
-                onClick={onReplaceConfirmed}
-              >
+              <button type="button" className="fn-btn fn-btn-primary fn-btn-sm" onClick={onReplaceConfirmed}>
                 置き換える
               </button>
             </div>
@@ -1447,9 +1444,7 @@ export function VideoMembersField({
                         <span style={{ color: "var(--text-muted)" }}> なし</span>
                       ) : (
                         <ul style={{ margin: "2px 0 6px", paddingLeft: 18 }}>
-                          {grants.map((i) => (
-                            <li key={`grant-${i.xid}`}>{i.label}</li>
-                          ))}
+                          {grants.map((i) => <li key={`grant-${i.xid}`}>{i.label}</li>)}
                         </ul>
                       )}
                     </div>
@@ -1459,9 +1454,7 @@ export function VideoMembersField({
                         <span style={{ color: "var(--text-muted)" }}> なし</span>
                       ) : (
                         <ul style={{ margin: "2px 0 6px", paddingLeft: 18 }}>
-                          {revokes.map((i) => (
-                            <li key={`revoke-${i.xid}`}>{i.label}</li>
-                          ))}
+                          {revokes.map((i) => <li key={`revoke-${i.xid}`}>{i.label}</li>)}
                         </ul>
                       )}
                     </div>
