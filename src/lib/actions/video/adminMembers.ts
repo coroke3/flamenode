@@ -97,45 +97,6 @@ export async function updateVideoMembersAdmin(
   let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
   try {
     const plan = emptyVideoAtomicWritePlan();
-
-    // 参加者保存の同時更新保護は buildReplaceVideoMembersPlan の member-set CAS を正本にする。
-    // ここで videos 行全体を expectedRowCondition すると、タイトル・説明・YouTube同期など
-    // メンバーと無関係な項目が並行更新されただけでも保存が失敗し、
-    // 「競合しました。再読み込みして再試行してください。」相当の偽競合になる。
-    // collaboration_type はメンバー集合から導出されるため、対象 video が存在することだけを
-    // 条件に同一atomic batch内で更新する。member-set CAS失敗時はbatch全体がrollbackされる。
-    plan.statements.push(
-      db
-        .update(videos)
-        .set({
-          collaboration_type: nextCollaborationType,
-          updated_at: now,
-        })
-        .where(eq(videos.id, videoId)),
-    );
-    plan.expectedChanges.push(1);
-    plan.audits.push({
-      table_name: "videos",
-      target_id: videoId,
-      operation: "UPDATE",
-      before: {
-        id: target.id,
-        collaboration_type: target.collaboration_type,
-        updated_at: target.updated_at,
-      },
-      after: {
-        id: target.id,
-        collaboration_type: nextCollaborationType,
-        updated_at: now,
-      },
-      actor_user_id: user.id,
-      context: "admin-video-members",
-      reason: "参加者設定から合作区分を同期",
-      retention_class: "normal",
-      restore_strategy: "none",
-      strict: true,
-    });
-
     const membersPlan = await buildReplaceVideoMembersPlan(db, {
       videoId,
       members,
@@ -143,12 +104,57 @@ export async function updateVideoMembersAdmin(
       actorUserId: user.id,
     });
     appendVideoAtomicWritePlan(plan, membersPlan);
+
     const hasMemberAudit = membersPlan.audits.some(
       (audit) => audit.table_name === "video_members_set",
     );
+    const hasChapterAudit = membersPlan.audits.some(
+      (audit) => audit.table_name === "video_chapters_member_set",
+    );
+    const collaborationTypeChanged =
+      target.collaboration_type !== nextCollaborationType;
+    const videoPublicContentChanged =
+      collaborationTypeChanged || hasMemberAudit || hasChapterAudit;
+
+    // 旧実装は保存内容が同じでもvideos.updated_atを毎回更新し、score dirty化と
+    // 不要なstatic rebuildを誘発していた。公開内容か合作区分が実際に変わる時だけ
+    // video本体をdirtyにする。member-set CASはmembersPlan側で引き続きfail-closed。
+    if (videoPublicContentChanged) {
+      plan.statements.push(
+        db
+          .update(videos)
+          .set({
+            collaboration_type: nextCollaborationType,
+            updated_at: now,
+          })
+          .where(eq(videos.id, videoId)),
+      );
+      plan.expectedChanges.push(1);
+      plan.audits.push({
+        table_name: "videos",
+        target_id: videoId,
+        operation: "UPDATE",
+        before: {
+          id: target.id,
+          collaboration_type: target.collaboration_type,
+          updated_at: target.updated_at,
+        },
+        after: {
+          id: target.id,
+          collaboration_type: nextCollaborationType,
+          updated_at: now,
+        },
+        actor_user_id: user.id,
+        context: "admin-video-members",
+        reason: "参加者設定から合作区分を同期",
+        retention_class: "normal",
+        restore_strategy: "none",
+        strict: true,
+      });
+    }
+
     const isPublicVideo = target.visibility_status === "public";
-    const affectedCreatorIds = isPublicVideo
-      && hasMemberAudit
+    const affectedCreatorIds = isPublicVideo && hasMemberAudit
       ? collectMemberAggregationAffectedXUserIds({
           previousCreatorXUserId: target.creator_x_user_id,
           nextCreatorXUserId: target.creator_x_user_id,
@@ -158,12 +164,31 @@ export async function updateVideoMembersAdmin(
         })
       : new Set<string>();
     const memberAggregationChanged = affectedCreatorIds.size > 0;
-    queue = await buildStaticRebuildQueueBatch(db, [
-      { targetType: "video", targetId: videoId, reason: "video_members_update", requestedByUserId: user.id },
-      { targetType: "member_suggestions" as const, targetId: "global", reason: "video_members_update" },
+    const hasMembersPlanChanges = membersPlan.statements.length > 0;
+
+    const queueItems = [
+      ...(videoPublicContentChanged
+        ? [{
+            targetType: "video" as const,
+            targetId: videoId,
+            reason: "video_members_update",
+            requestedByUserId: user.id,
+          }]
+        : []),
+      ...(hasMembersPlanChanges
+        ? [{
+            targetType: "member_suggestions" as const,
+            targetId: "global",
+            reason: "video_members_update",
+          }]
+        : []),
       ...(isPublicVideo && memberAggregationChanged
         ? [
-            { targetType: "users_index" as const, targetId: "global", reason: "video_members_update" },
+            {
+              targetType: "users_index" as const,
+              targetId: "global",
+              reason: "video_members_update",
+            },
             ...[...affectedCreatorIds].map((xUserId) => ({
               targetType: "user" as const,
               targetId: xUserId,
@@ -171,7 +196,20 @@ export async function updateVideoMembersAdmin(
             })),
           ]
         : []),
-    ]);
+    ];
+
+    // 完全no-opならD1 mutation・audit・static rebuildを発生させない。
+    if (plan.statements.length === 0) {
+      return {
+        ok: true,
+        message: "参加者設定に変更はありません。",
+        videoId,
+        youtubeVideoId: target.youtube_video_id ?? undefined,
+        eventId: target.primary_event_id ?? undefined,
+      };
+    }
+
+    queue = await buildStaticRebuildQueueBatch(db, queueItems);
     plan.statements.push(...queue.statements);
     plan.expectedChanges.push(...queue.expectedChanges);
     await executeVideoAtomicWritePlan(db, plan, {
