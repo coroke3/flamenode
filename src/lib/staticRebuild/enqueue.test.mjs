@@ -35,6 +35,19 @@ test("bulk queue builderはprefetchなしのjson_each UPSERTを使う", () => {
   assert.doesNotMatch(batchFn, /eq\(staticRebuildQueue\.status, item\.row\.status\)/);
 });
 
+test("複数enqueueは1件ずつSELECTするN+1経路ではなくbulk builderを使う", () => {
+  const manyFn = source.slice(
+    source.indexOf("export async function enqueueStaticRebuildMany"),
+    source.indexOf("async function wakeAfterSuccessfulEnqueue"),
+  );
+  assert.match(manyFn, /buildStaticRebuildQueueBatch\(db, items\)/);
+  assert.match(manyFn, /await db\.batch/);
+  assert.match(manyFn, /wakeAfterSuccessfulEnqueue/);
+  assert.doesNotMatch(manyFn, /Promise\.all/);
+  assert.doesNotMatch(manyFn, /enqueueStaticRebuild\(db, item/);
+  assert.doesNotMatch(source, /ENQUEUE_MANY_CONCURRENCY/);
+});
+
 test("queueBatchCoreはactive重複をfail-closedにする", () => {
   const rows = Array.from({ length: 16 }, (_, index) => ({
     target_type: "event",
