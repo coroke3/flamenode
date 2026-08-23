@@ -31,6 +31,7 @@ import {
 import {
   D1_QUERY_SOFT_LIMIT,
   isD1BudgetExhausted,
+  type D1Budget,
 } from "../shared/d1Budget.ts";
 import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
@@ -62,6 +63,24 @@ const CLEANUP_LEASE_SEC = 10 * 60;
 export const CONTENT_JOBS_RECOVERY_MAX_TARGETS = 3;
 /** lease 競合で processed=0 が続くときの無限ループ防止。 */
 export const CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED = 3;
+
+// Recovery repairはR2欠落時だけD1へenqueueするが、複数artifactが同時欠落すると
+// 1回のCronで一気にstatement数が増える。各処理のworst-caseをsoft limit前に予約し、
+// 入らない修復は次回Cronへ繰り越す。hard limit 50は例外ではなく最後の安全網にする。
+const DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS = 4;
+const YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS = 14;
+const USERS_SHARED_REPAIR_MAX_D1_STATEMENTS = 2;
+const TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS = 2;
+const TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS = 12;
+const STALE_QUEUE_RECONCILE_MAX_D1_STATEMENTS = 1;
+
+function hasSoftD1Budget(budget: D1Budget, requiredStatements: number): boolean {
+  return (
+    Number.isInteger(requiredStatements) &&
+    requiredStatements >= 0 &&
+    budget.statements + requiredStatements <= D1_QUERY_SOFT_LIMIT
+  );
+}
 
 type QueueResult = {
   processed: number;
@@ -119,55 +138,113 @@ export async function runContentJobsRecovery(
               );
 
           const now = Math.floor(Date.now() / 1000);
-          const deployGlobalRebuilds = await ensureDeployGlobalRebuilds(
-            rebuildEnv,
-            {
-              commitSha: env.BUILD_COMMIT_SHA,
-              signal,
-            },
-          );
-          const missingYoutubeSharedInputs =
-            await ensureYoutubeRelatedSharedInputsOnR2(rebuildEnv, {
-              reason: "shared_related_inputs_missing_on_r2",
-              priority: "high",
-              signal,
-            });
-          const missingUsersSharedInputs = await ensureUsersSharedInputsOnR2(
-            rebuildEnv,
-            {
-              reason: "shared_users_inputs_missing_on_r2",
-              priority: "high",
-              signal,
-            },
-          );
-          const missingTopSlotStats = await ensureTopSlotStatsOnR2(rebuildEnv, {
-            reason: "top_slot_stats_missing_on_r2",
-            priority: "high",
-            signal,
-          });
-          const missingTopSections = await ensureTopSectionsOnR2(rebuildEnv, {
-            reason: "top_sections_missing_on_r2",
-            priority: "high",
-            signal,
-          });
-          await reconcileStaleQueue(rebuildEnv, now, signal);
-          let xIdSlotBindRecovery = { processed: 0, completed: 0, bound: 0, failed: 0, hasMore: false };
-          try {
-            xIdSlotBindRecovery = await reconcilePendingXIdSlotBinds(
-              rebuildEnv,
-              signal,
+
+          let deployGlobalRebuilds = 0;
+          if (
+            hasSoftD1Budget(
               rebuildEnv.d1Budget,
+              DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS,
+            )
+          ) {
+            deployGlobalRebuilds = await ensureDeployGlobalRebuilds(
+              rebuildEnv,
+              {
+                commitSha: env.BUILD_COMMIT_SHA,
+                signal,
+              },
             );
-          } catch (error) {
-            console.error("[content-jobs] X ID slot bind recovery failed", {
-              error: error instanceof Error ? error.message : String(error),
+          }
+
+          let missingYoutubeSharedInputs = 0;
+          if (
+            hasSoftD1Budget(
+              rebuildEnv.d1Budget,
+              YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS,
+            )
+          ) {
+            missingYoutubeSharedInputs =
+              await ensureYoutubeRelatedSharedInputsOnR2(rebuildEnv, {
+                reason: "shared_related_inputs_missing_on_r2",
+                priority: "high",
+                signal,
+              });
+          }
+
+          let missingUsersSharedInputs = 0;
+          if (
+            hasSoftD1Budget(
+              rebuildEnv.d1Budget,
+              USERS_SHARED_REPAIR_MAX_D1_STATEMENTS,
+            )
+          ) {
+            missingUsersSharedInputs = await ensureUsersSharedInputsOnR2(
+              rebuildEnv,
+              {
+                reason: "shared_users_inputs_missing_on_r2",
+                priority: "high",
+                signal,
+              },
+            );
+          }
+
+          let missingTopSlotStats = 0;
+          if (
+            hasSoftD1Budget(
+              rebuildEnv.d1Budget,
+              TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS,
+            )
+          ) {
+            missingTopSlotStats = await ensureTopSlotStatsOnR2(rebuildEnv, {
+              reason: "top_slot_stats_missing_on_r2",
+              priority: "high",
+              signal,
             });
           }
+
+          let missingTopSections = 0;
+          if (
+            hasSoftD1Budget(
+              rebuildEnv.d1Budget,
+              TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS,
+            )
+          ) {
+            missingTopSections = await ensureTopSectionsOnR2(rebuildEnv, {
+              reason: "top_sections_missing_on_r2",
+              priority: "high",
+              signal,
+            });
+          }
+
+          if (
+            hasSoftD1Budget(
+              rebuildEnv.d1Budget,
+              STALE_QUEUE_RECONCILE_MAX_D1_STATEMENTS,
+            )
+          ) {
+            await reconcileStaleQueue(rebuildEnv, now, signal);
+          }
+
+          let xIdSlotBindRecovery = { processed: 0, completed: 0, bound: 0, failed: 0, hasMore: false };
+          if (!isD1BudgetExhausted(rebuildEnv.d1Budget)) {
+            try {
+              xIdSlotBindRecovery = await reconcilePendingXIdSlotBinds(
+                rebuildEnv,
+                signal,
+                rebuildEnv.d1Budget,
+              );
+            } catch (error) {
+              console.error("[content-jobs] X ID slot bind recovery failed", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
           let eventPlaylistBackfill = 0;
           if (
-            rebuildEnv.d1Budget.statements +
-              EVENT_PLAYLIST_BACKFILL_MAX_STATEMENTS <=
-            D1_QUERY_SOFT_LIMIT
+            hasSoftD1Budget(
+              rebuildEnv.d1Budget,
+              EVENT_PLAYLIST_BACKFILL_MAX_STATEMENTS,
+            )
           ) {
             try {
               eventPlaylistBackfill = await ensureEventPlaylistBackfill(
@@ -180,17 +257,21 @@ export async function runContentJobsRecovery(
               });
             }
           }
+
           let nostalgicDailyShuffle = 0;
-          try {
-            nostalgicDailyShuffle = await ensureDailyTopNostalgicShuffle(
-              rebuildEnv,
-              signal,
-            );
-          } catch (error) {
-            console.error("[content-jobs] daily top nostalgic enqueue failed", {
-              error: error instanceof Error ? error.message : String(error),
-            });
+          if (!isD1BudgetExhausted(rebuildEnv.d1Budget)) {
+            try {
+              nostalgicDailyShuffle = await ensureDailyTopNostalgicShuffle(
+                rebuildEnv,
+                signal,
+              );
+            } catch (error) {
+              console.error("[content-jobs] daily top nostalgic enqueue failed", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
           }
+
           if (
             deployGlobalRebuilds > 0 ||
             missingYoutubeSharedInputs > 0 ||
@@ -211,8 +292,9 @@ export async function runContentJobsRecovery(
             });
           }
 
-          // Queue有効時はRecovery Cronをドアベルに限定し、重いR2/JSON再生成は
-          // Queue consumerの長いCPU枠へ委譲する。無効・binding欠落・send失敗時だけ
+          // Queue有効時は重いR2/JSON再生成を別invocationへ分離し、CronのCPU/D1予算を
+          // 同じ実処理と共有しない。Freeでも各invocationのCPU上限自体は別途適用されるため、
+          // 「Queueなら長時間CPUを使える」とは仮定しない。無効・binding欠落・send失敗時だけ
           // 従来のCron直処理へfallbackするため、Queue未構築環境も壊さない。
           const alreadyDelegated = wakeSentKinds.has("static_rebuild_available");
           const delegatedToQueue =
