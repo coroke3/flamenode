@@ -40,16 +40,28 @@ test("Queue wake成功時はCronでDiscord dispatchを二重実行しない", ()
   assert.doesNotMatch(source, /Queue consumerは大幅に長いCPU枠/);
 });
 
-test("Cron fallbackは外部送信後のD1完了処理まで収まる件数へ縮める", () => {
+test("Cron fallbackは外部送信後のD1完了処理と残件probeまで収まる件数へ縮める", () => {
   assert.equal(notificationFallbackLimitForD1Budget(0), 6);
-  assert.equal(notificationFallbackLimitForD1Budget(14), 6);
+  assert.equal(notificationFallbackLimitForD1Budget(14), 5);
   assert.equal(notificationFallbackLimitForD1Budget(15), 5);
-  assert.equal(notificationFallbackLimitForD1Budget(39), 1);
+  assert.equal(notificationFallbackLimitForD1Budget(39), 0);
   assert.equal(notificationFallbackLimitForD1Budget(40), 0);
   assert.equal(notificationFallbackLimitForD1Budget(49), 0);
   assert.match(source, /NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 5/);
+  assert.match(source, /NOTIFICATION_FALLBACK_POST_DRAIN_PROBE_D1_STATEMENTS = 1/);
   assert.match(source, /FAST_JOBS_OUTER_LEASE_D1_RESERVE = 4/);
   assert.match(source, /if \(fallbackLimit <= 0\)/);
+});
+
+test("Queue無効時はdirect drain後の残件SELECTを実行しない", () => {
+  const helper = source.slice(
+    source.indexOf("async function maybeResendNotificationWake"),
+    source.indexOf("export async function runNotificationRecovery"),
+  );
+  const flagIndex = helper.indexOf("if (!flags.dispatchEnabled) return");
+  const probeIndex = helper.indexOf("hasDuePendingNotifications(env)");
+  assert.ok(flagIndex >= 0);
+  assert.ok(probeIndex > flagIndex);
 });
 
 test("reminder失敗後もQueue無効ならnotification dispatchを実行し最後に集約失敗する", async () => {
