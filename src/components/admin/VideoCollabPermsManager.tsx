@@ -4,8 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import {
+  applyVideoCollaboratorPermissionsBatch,
   upsertVideoCollaborator,
-  deleteVideoCollaborator,
 } from "@/lib/actions/video-collab-perms";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import styles from "./VideoCollabPermsManager.module.css";
@@ -264,14 +264,28 @@ export function VideoCollabPermsManager({
   };
 
   const submitRevoke = (subject: VideoCollabSubject) => {
+    const xUserId = subject.x_user_id?.trim();
+    if (!xUserId) {
+      setError("編集権限を解除するには X ID が必要です。");
+      return;
+    }
     setError(null);
     setMessage(null);
-    const fd = new FormData();
-    fd.set("video_id", videoId);
-    if (subject.x_user_id) fd.set("x_user_id", subject.x_user_id);
-    appendPrivilegeMode(fd);
     startTransition(async () => {
-      const r = await deleteVideoCollaborator(fd);
+      const r = await applyVideoCollaboratorPermissionsBatch({
+        video_id: videoId,
+        ...(editPrivilegeMode !== "normal"
+          ? { edit_privilege_mode: editPrivilegeMode }
+          : {}),
+        notify: false,
+        intents: [
+          {
+            x_user_id: xUserId,
+            display_name: subject.display_name || `@${xUserId}`,
+            intent: "off",
+          },
+        ],
+      });
       if (!r.ok) {
         setError(r.message ?? "解除に失敗しました。");
         return;
