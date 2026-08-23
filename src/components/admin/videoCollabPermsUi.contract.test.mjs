@@ -48,3 +48,12 @@ test("メンバー欄の権限設定アンカーは実在し専用管理ペー�
   assert.match(summarySource, /\/dashboard\/edit\/\$\{encodeURIComponent\(videoId\)\}\/permissions/);
   assert.match(summarySource, /編集できる人を管理/);
 });
+
+test("手動解除も1行deleteではなくX ID集合batchへ統一する", () => {
+  const revoke = managerSource.match(/const submitRevoke = [\s\S]*?\n  };/)?.[0];
+  assert.ok(revoke);
+  assert.match(revoke, /applyVideoCollaboratorPermissionsBatch/);
+  assert.match(revoke, /intent: "off"/);
+  assert.match(revoke, /edit_privilege_mode: editPrivilegeMode/);
+  assert.doesNotMatch(revoke, /deleteVideoCollaborator/);
+});
