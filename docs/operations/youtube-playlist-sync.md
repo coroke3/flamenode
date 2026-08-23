@@ -9,7 +9,7 @@
 - Queueが無効・binding不足・送信失敗の場合も予約状態はD1に残るため、次の52分台Cronが回収します。
 - 再生リスト同期は1 invocationで最大1イベントだけ処理します。処理後もD1にdueイベントが残る場合は、Queue継続機能が有効なときだけ `youtube_playlist_sync` continuation wakeを1件送ります。Queueメッセージ件数ではなくD1の `next_sync_at` を正本にするため、重複doorbellを増幅しません。
 - 同じYouTube Queueへmetadata wakeとplaylist wakeが同時に届いた場合、最大8 requestのmetadata同期と最大12 requestのplaylist同期を同一invocationで重ねません。playlistを処理し、metadata doorbellはACKしてD1 pending状態から最大1件へcoalesceします。
-- quota枯渇は対象イベントをD1上で `deferred` にした後、Queue即時retryやCron失敗へ変換しません。OAuth/DB/Workerの実障害だけをretry対象にします。
+- quota枯渇は対象イベントをD1上で `deferred` にした後、Queue即時retryやCron失敗へ変換しません。OAuth/権限等の処理済みエラーもD1へ `failed` と次回時刻を保存できた場合は同じdoorbellを即retryせず、関数自体がthrowするD1/Worker障害だけQueue retryします。
 - 再生リスト同期はイベント設定の `next_sync_at` と同期間隔で実行します。
 - `event_youtube_playlist_sync.enabled = 1` かつ `sync_mode != 'off'` のイベントだけを同期します。未設定イベントを自動で同期しません。
 - OAuth credentialはD1/KVへ保存せず、Worker secretだけに保持します。
@@ -29,7 +29,7 @@ Queue即時経路を利用するには、さらに `QUEUE_DISPATCH_ENABLED=1` / 
 
 `cf:deploy-production` のproduction preflightはRemote D1のruntime schemaと `sync-jobs` の必須secret名をfail-closedで検査するため、同スクリプトを通して最新commitが正常デプロイ済みなら、Cloudflare側のテーブル・binding・secret名不足は原則として除外できます。ただしrefresh tokenの失効、YouTube Data APIの無効化、対象再生リストの所有権・編集権限は最初の実API同期まで確定できません。
 
-コード側の回帰確認は `src/lib/youtubePlaylistReadiness.contract.test.mjs`、`workers/sync-jobs/index.test.mjs`、`workers/sync-jobs/youtubeQueueIsolation.contract.test.mjs`、`workers/youtube-playlist-sync/index.test.mjs`、`workers/youtube-playlist-sync/slotOrder.contract.test.mjs`、`workers/youtube-playlist-sync/orderRepair.test.mjs`、`workers/youtube-playlist-sync/orderRepair.contract.test.mjs` を使用します。`youtubeQueueIsolation.contract.test.mjs` は `test:cloudflare-ci` に含め、Workers Buildsの軽量検証でもmixed batch・continuation・quota deferの回帰を止めます。
+コード側の回帰確認は `src/lib/youtubePlaylistReadiness.contract.test.mjs`、`workers/sync-jobs/index.test.mjs`、`workers/sync-jobs/youtubeQueueIsolation.contract.test.mjs`、`workers/youtube-playlist-sync/index.test.mjs`、`workers/youtube-playlist-sync/slotOrder.contract.test.mjs`、`workers/youtube-playlist-sync/orderRepair.test.mjs`、`workers/youtube-playlist-sync/orderRepair.contract.test.mjs` を使用します。`youtubeQueueIsolation.contract.test.mjs` は `test:cloudflare-ci` に含め、Workers Buildsの軽量検証でもmixed batch・continuation・quota defer・ACK/retry境界の回帰を止めます。
 
 ## Google Cloud / YouTube側
 
