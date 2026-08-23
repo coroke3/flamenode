@@ -633,15 +633,28 @@ export function VideoMembersField({
     setAiText("");
   };
 
+  const runPendingApply = () => {
+    pendingApplyRef.current?.();
+    pendingApplyRef.current = null;
+  };
+
   const applyBulk = (mode: "merge" | "replace") => {
     if (!bulkPreview || disabled || bulkPreview.members.length === 0) return;
+    pendingApplyRef.current = () => finishApply(mode, bulkPreview.members);
     if (mode === "replace") {
       // 置き換えは必ず明示確認を挟む。
-      pendingApplyRef.current = () => finishApply("replace", bulkPreview.members);
       setReplaceConfirmOpen(true);
       return;
     }
-    finishApply("merge", bulkPreview.members);
+    // 追加（merge）でも権限列を捨てず、置き換えと同じ権限確認フローへ進む。
+    if (
+      bulkPreview.permissionIntents.length > 0 &&
+      permissionTargetVideoId
+    ) {
+      setPermConfirmOpen(true);
+      return;
+    }
+    runPendingApply();
   };
 
   /** 置き換え確認後、権限intentがあれば編集権限の確認dialogへ進む。 */
@@ -655,8 +668,7 @@ export function VideoMembersField({
       setPermConfirmOpen(true);
       return;
     }
-    pendingApplyRef.current?.();
-    pendingApplyRef.current = null;
+    runPendingApply();
   };
 
   const replaceRowsWith = (members: VideoMemberInput[]) => {
@@ -690,8 +702,7 @@ export function VideoMembersField({
       });
       if (result.ok) {
         setPermConfirmOpen(false);
-        pendingApplyRef.current?.();
-        pendingApplyRef.current = null;
+        runPendingApply();
         setBulkPreview(null);
         setBulkSource({ label: "spreadsheet", text: "" });
         setAiText("");
