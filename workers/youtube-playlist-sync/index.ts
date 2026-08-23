@@ -158,7 +158,6 @@ class DailyQuotaBudget {
       reservation.dailyBudgetUnits - reservation.usedUnits,
     );
   }
-
 }
 
 async function readApiError(
@@ -527,15 +526,32 @@ async function loadSourceVideoIds(
 ): Promise<string[]> {
   signal?.throwIfAborted();
   const result = await env.DB.prepare(
-    `SELECT v.youtube_video_id
-     FROM video_events ve
-     INNER JOIN videos v ON v.id = ve.video_id
-     WHERE ve.event_id = ?1
-       AND v.youtube_video_id IS NOT NULL
+    `WITH event_videos AS (
+       SELECT video_id
+       FROM video_events
+       WHERE event_id = ?1
+       UNION
+       SELECT id AS video_id
+       FROM videos
+       WHERE primary_event_id = ?1
+     )
+     SELECT v.youtube_video_id
+     FROM event_videos ev
+     INNER JOIN videos v ON v.id = ev.video_id
+     LEFT JOIN slots s
+       ON s.event_id = ?1
+      AND s.video_id = v.id
+      AND s.status = 'submitted'
+     WHERE v.youtube_video_id IS NOT NULL
        AND v.youtube_video_id <> ''
        AND v.visibility_status = 'public'
      GROUP BY v.youtube_video_id
-     ORDER BY MIN(COALESCE(v.scheduled_time, v.created_at)), MIN(v.id)
+     ORDER BY
+       CASE WHEN COUNT(s.id) > 0 THEN 0 ELSE 1 END,
+       MIN(CASE WHEN s.start_time IS NULL THEN 9223372036854775807 ELSE s.start_time END),
+       MIN(CASE WHEN s.sort_order IS NULL THEN 2147483647 ELSE s.sort_order END),
+       MIN(COALESCE(v.scheduled_time, v.created_at)),
+       MIN(v.id)
      LIMIT ?2`,
   )
     .bind(eventId, MAX_SOURCE_VIDEOS + 1)
@@ -1016,30 +1032,61 @@ export async function syncEventPlaylists(
   fetchImpl: FetchLike = fetch,
 ): Promise<PlaylistSyncBatchResult> {
   signal?.throwIfAborted();
-  const result = (base: Pick<PlaylistSyncBatchResult, "processed" | "skipped" | "failed">, extra: Partial<PlaylistSyncBatchResult> = {}): PlaylistSyncBatchResult => ({ external_api_calls: 0, d1_changes: 0, retry_count: 0, quota_stopped: false, quota_stop_reason: null, ...base, ...extra });
+  const result = (
+    base: Pick<PlaylistSyncBatchResult, "processed" | "skipped" | "failed">,
+    extra: Partial<PlaylistSyncBatchResult> = {},
+  ): PlaylistSyncBatchResult => ({
+    external_api_calls: 0,
+    d1_changes: 0,
+    retry_count: 0,
+    quota_stopped: false,
+    quota_stop_reason: null,
+    ...base,
+    ...extra,
+  });
   const changes = { value: 0 };
   const trackedEnv = {
     ...env,
     DB: new Proxy(env.DB, {
       get(target, property, receiver) {
-        if (property !== "prepare" && property !== "batch") return Reflect.get(target, property, receiver);
-        if (property === "batch") return async (statements: D1PreparedStatement[]) => {
-          const results = await target.batch(statements);
-          changes.value += results.reduce((sum, item) => sum + Math.max(0, Number(item?.meta?.changes ?? 0)), 0);
-          return results;
-        };
+        if (property !== "prepare" && property !== "batch") {
+          return Reflect.get(target, property, receiver);
+        }
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            const results = await target.batch(statements);
+            changes.value += results.reduce(
+              (sum, item) => sum + Math.max(0, Number(item?.meta?.changes ?? 0)),
+              0,
+            );
+            return results;
+          };
+        }
         return (sql: string) => {
           const statement = target.prepare(sql);
-          return new Proxy(statement, { get(stmt, key, recv) {
-            if (key !== "bind") return Reflect.get(stmt, key, recv);
-            return (...args: unknown[]) => {
-              const bound = stmt.bind(...args);
-              return new Proxy(bound, { get(inner, innerKey, innerRecv) {
-                if (innerKey !== "run") return Reflect.get(inner, innerKey, innerRecv);
-                return async () => { const outcome = await inner.run(); changes.value += Math.max(0, Number(outcome?.meta?.changes ?? 0)); return outcome; };
-              } });
-            };
-          } });
+          return new Proxy(statement, {
+            get(stmt, key, recv) {
+              if (key !== "bind") return Reflect.get(stmt, key, recv);
+              return (...args: unknown[]) => {
+                const bound = stmt.bind(...args);
+                return new Proxy(bound, {
+                  get(inner, innerKey, innerRecv) {
+                    if (innerKey !== "run") {
+                      return Reflect.get(inner, innerKey, innerRecv);
+                    }
+                    return async () => {
+                      const outcome = await inner.run();
+                      changes.value += Math.max(
+                        0,
+                        Number(outcome?.meta?.changes ?? 0),
+                      );
+                      return outcome;
+                    };
+                  },
+                });
+              };
+            },
+          });
         };
       },
     }),
@@ -1052,7 +1099,9 @@ export async function syncEventPlaylists(
 
   const now = unixNow();
   const configs = await loadDueConfigs(trackedEnv, now, signal);
-  if (configs.length === 0) return result({ processed: 0, skipped: 1, failed: 0 });
+  if (configs.length === 0) {
+    return result({ processed: 0, skipped: 1, failed: 0 });
+  }
 
   const quota = await DailyQuotaBudget.load(trackedEnv, now, signal);
   const requestBudget = new ExternalRequestBudget(MAX_EXTERNAL_REQUESTS_PER_RUN);
@@ -1067,7 +1116,13 @@ export async function syncEventPlaylists(
   } catch (error) {
     signal?.throwIfAborted();
     await markOAuthFailure(trackedEnv, configs, error, now, signal);
-    return result({ processed: 0, skipped: 0, failed: configs.length }, { external_api_calls: requestBudget.used, d1_changes: changes.value });
+    return result(
+      { processed: 0, skipped: 0, failed: configs.length },
+      {
+        external_api_calls: requestBudget.used,
+        d1_changes: changes.value,
+      },
+    );
   }
 
   let processed = 0;
@@ -1101,10 +1156,13 @@ export async function syncEventPlaylists(
   }
 
   signal?.throwIfAborted();
-  return result({ processed, skipped: 0, failed }, {
-    external_api_calls: requestBudget.used,
-    d1_changes: changes.value + quota.d1Changes,
-    quota_stopped: quotaStopped,
-    quota_stop_reason: quotaStopped ? "youtube_quota_deferred" : null,
-  });
+  return result(
+    { processed, skipped: 0, failed },
+    {
+      external_api_calls: requestBudget.used,
+      d1_changes: changes.value + quota.d1Changes,
+      quota_stopped: quotaStopped,
+      quota_stop_reason: quotaStopped ? "youtube_quota_deferred" : null,
+    },
+  );
 }
