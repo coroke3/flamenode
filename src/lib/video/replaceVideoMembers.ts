@@ -1,8 +1,8 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { videoChapters, videoMembers, xUsers } from "@/lib/db/schema";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { videoChapters, videoMembers, xUserAliases, xUsers } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { generateId } from "@/lib/utils/id";
-import { normalizeXId } from "#utils/xid";
+import { isCanonicalXId, normalizeXId } from "#utils/xid";
 import type { MemberInput, ParsedMemberChapter } from "@/lib/video/memberInputs";
 import {
   emptyVideoAtomicWritePlan,
@@ -13,6 +13,7 @@ import {
   buildVideoMemberBulkInsertSql,
   buildVideoMemberSetGuardSql,
   buildVideoMemberSetSnapshot,
+  compareSqliteBinaryText,
   toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
 
@@ -123,6 +124,67 @@ function buildVideoChapterBulkInsertSql(
 }
 
 /**
+ * 既存aliasを1クエリで正本X IDへ寄せる。alias変換後の重複は、同一人物を
+ * 複数public member行へ分裂させるためfail-closedにする。
+ */
+async function canonicalizeMemberInputs(
+  db: DB,
+  members: readonly MemberInput[],
+): Promise<MemberInput[]> {
+  const normalized = members.map((member) => ({
+    ...member,
+    x_user_id: normalizeXId(member.x_user_id),
+  }));
+  const candidates = Array.from(
+    new Set(normalized.map((member) => member.x_user_id).filter(Boolean)),
+  );
+  const aliases = candidates.length === 0
+    ? []
+    : await db
+        .select({
+          alias_x_id: xUserAliases.alias_x_id,
+          x_user_id: xUserAliases.x_user_id,
+        })
+        .from(xUserAliases)
+        .where(sql`lower(${xUserAliases.alias_x_id}) IN (
+          SELECT lower(CAST(value AS TEXT))
+          FROM json_each(${JSON.stringify(candidates)})
+        )`);
+
+  const targetsByAlias = new Map<string, Set<string>>();
+  for (const row of aliases) {
+    const alias = normalizeXId(row.alias_x_id);
+    const target = normalizeXId(row.x_user_id);
+    if (!alias || !target || !isCanonicalXId(target)) {
+      throw new Error("video_member_alias_target_invalid");
+    }
+    const targets = targetsByAlias.get(alias) ?? new Set<string>();
+    targets.add(target);
+    targetsByAlias.set(alias, targets);
+  }
+  for (const targets of targetsByAlias.values()) {
+    if (targets.size > 1) throw new Error("video_member_ambiguous_x_user_alias");
+  }
+
+  const canonical = normalized.map((member) => {
+    if (!member.x_user_id) return member;
+    const targets = targetsByAlias.get(member.x_user_id);
+    const target = targets ? Array.from(targets)[0] : undefined;
+    return target ? { ...member, x_user_id: target } : member;
+  });
+
+  const seen = new Set<string>();
+  for (const member of canonical) {
+    const xid = member.x_user_id;
+    if (!xid) continue;
+    if (!isCanonicalXId(xid)) throw new Error("video_member_x_user_id_invalid");
+    if (seen.has(xid)) throw new Error("video_member_duplicate_x_user_id");
+    seen.add(xid);
+  }
+  return canonical;
+}
+
+/**
  * 公開メンバー化するX IDに既存hidden editorがある場合、その行を削除する前に
  * 読み取り時の完全snapshotと一致することを確認する。permission actionとの競合で
  * 新しいcan_editを消さないため、public member set guardとは別にfail-closedにする。
@@ -133,7 +195,7 @@ function buildHiddenCarryRowsGuardSql(
 ) {
   const expectedRows = [...rows]
     .map(toVideoMemberSnapshotRow)
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .sort((left, right) => compareSqliteBinaryText(left.id, right.id));
   const idsPayload = JSON.stringify(expectedRows.map((row) => row.id));
   const expectedJson = JSON.stringify(expectedRows);
   return sql`
@@ -197,6 +259,7 @@ export async function buildReplaceVideoMembersPlan(
   if (args.members.length > MAX_VIDEO_MEMBERS) {
     throw new Error("video_member_limit_exceeded");
   }
+  const members = await canonicalizeMemberInputs(db, args.members);
 
   const existing = await db
     .select()
@@ -224,10 +287,14 @@ export async function buildReplaceVideoMembersPlan(
             sql`EXISTS (
               SELECT 1
               FROM json_each(${JSON.stringify(existingMemberIds)}) AS member_ids
-              WHERE ${videoChapters.id} LIKE
-                CAST(member_ids.value AS TEXT) || ':legacy:%'
-                OR ${videoChapters.id} LIKE
-                CAST(member_ids.value AS TEXT) || ':member:%'
+              WHERE instr(
+                      ${videoChapters.id},
+                      CAST(member_ids.value AS TEXT) || ':legacy:'
+                    ) = 1
+                 OR instr(
+                      ${videoChapters.id},
+                      CAST(member_ids.value AS TEXT) || ':member:'
+                    ) = 1
             )`,
           )!,
         )
@@ -236,7 +303,7 @@ export async function buildReplaceVideoMembersPlan(
 
   const xIds = Array.from(
     new Set(
-      args.members
+      members
         .map((member) => normalizeXId(member.x_user_id))
         .filter(Boolean),
     ),
@@ -250,8 +317,8 @@ export async function buildReplaceVideoMembersPlan(
           .where(
             and(
               eq(videoMembers.video_id, args.videoId),
-              sql`${videoMembers.x_user_id} IN (
-                SELECT CAST(value AS TEXT)
+              sql`lower(${videoMembers.x_user_id}) IN (
+                SELECT lower(CAST(value AS TEXT))
                 FROM json_each(${JSON.stringify(xIds)})
               )`,
             )!,
@@ -278,7 +345,7 @@ export async function buildReplaceVideoMembersPlan(
     (left, right) =>
       right.can_edit - left.can_edit ||
       right.is_public_member - left.is_public_member ||
-      left.id.localeCompare(right.id),
+      compareSqliteBinaryText(left.id, right.id),
   )) {
     const xId = normalizeXId(row.x_user_id);
     if (xId && !permissionCarryByXId.has(xId)) {
@@ -307,13 +374,19 @@ export async function buildReplaceVideoMembersPlan(
 
   const existingXUsers =
     xIds.length > 0
-      ? await db.select().from(xUsers).where(inArray(xUsers.id, xIds))
+      ? await db
+          .select({ id: xUsers.id })
+          .from(xUsers)
+          .where(sql`lower(${xUsers.id}) IN (
+            SELECT lower(CAST(value AS TEXT))
+            FROM json_each(${JSON.stringify(xIds)})
+          )`)
       : [];
-  const existingXIds = new Set(existingXUsers.map((row) => row.id.toLowerCase()));
+  const existingXIds = new Set(existingXUsers.map((row) => normalizeXId(row.id)));
 
   const newXUsers: Array<typeof xUsers.$inferInsert> = [];
   const nextMembers: Array<typeof videoMembers.$inferSelect> = [];
-  for (const [index, member] of args.members.entries()) {
+  for (const [index, member] of members.entries()) {
     const xId = normalizeXId(member.x_user_id) || null;
     if (xId && !existingXIds.has(xId)) {
       newXUsers.push({
