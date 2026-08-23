@@ -22,6 +22,7 @@ import {
 } from "@/lib/db/schema";
 import {
   MAX_COLLABORATOR_PERMISSION_BATCH,
+  MAX_VIDEO_HIDDEN_EDITORS,
   MAX_VIDEO_MEMBERS,
 } from "@/lib/video/atomicLimits";
 import { generateId } from "@/lib/utils/id";
@@ -373,12 +374,15 @@ function buildPermissionSetGuardSql(
   `;
 }
 
-function buildMemberCountGuardSql(videoId: string, expectedCount: number) {
+function buildHiddenEditorCountGuardSql(videoId: string, expectedCount: number) {
   return sql`
     SELECT CASE
-      WHEN (SELECT COUNT(*) FROM video_members WHERE video_id = ${videoId}) = ${expectedCount}
+      WHEN (
+        SELECT COUNT(*) FROM video_members
+        WHERE video_id = ${videoId} AND is_public_member = 0
+      ) = ${expectedCount}
       THEN 1
-      ELSE json_extract('video-member-count-conflict', '$')
+      ELSE json_extract('video-hidden-editor-count-conflict', '$')
     END
   `;
 }
@@ -565,7 +569,7 @@ async function applyPermissionIntentsToVideo(
   }
 
   const xidsPayload = JSON.stringify(xids);
-  const existingRowLimit = MAX_VIDEO_MEMBERS + xids.length + 1;
+  const existingRowLimit = MAX_VIDEO_MEMBERS + MAX_VIDEO_HIDDEN_EDITORS + 1;
   const existingRows = await db
     .select()
     .from(videoMembers)
@@ -603,12 +607,17 @@ async function applyPermissionIntentsToVideo(
     );
   }
 
-  const currentCountRow = await db
+  const currentHiddenCountRow = await db
     .select({ count: sql<number>`count(*)` })
     .from(videoMembers)
-    .where(eq(videoMembers.video_id, video.id));
-  const currentMemberCount = Number(currentCountRow[0]?.count ?? 0);
-  let nextMemberCount = currentMemberCount;
+    .where(
+      and(
+        eq(videoMembers.video_id, video.id),
+        eq(videoMembers.is_public_member, 0),
+      )!,
+    );
+  const currentHiddenEditorCount = Number(currentHiddenCountRow[0]?.count ?? 0);
+  let nextHiddenEditorCount = currentHiddenEditorCount;
 
   const grantXids = xids.filter((xid) => intents.get(xid)?.intent === "on");
   const existingProfiles =
@@ -686,7 +695,7 @@ async function applyPermissionIntentsToVideo(
         }
         for (const hidden of hiddenRows) {
           deleteHiddenIds.push(hidden.id);
-          nextMemberCount -= 1;
+          nextHiddenEditorCount -= 1;
         }
       } else if (hiddenRows.length > 0) {
         const target = hiddenRows[0]!;
@@ -701,7 +710,7 @@ async function applyPermissionIntentsToVideo(
         }
         for (const duplicate of hiddenRows.slice(1)) {
           deleteHiddenIds.push(duplicate.id);
-          nextMemberCount -= 1;
+          nextHiddenEditorCount -= 1;
         }
       } else {
         insertHiddenRows.push({
@@ -718,7 +727,7 @@ async function applyPermissionIntentsToVideo(
           edit_granted_at: now,
           edit_updated_at: now,
         });
-        nextMemberCount += 1;
+        nextHiddenEditorCount += 1;
       }
 
       if (hadEffectiveEdit) {
@@ -736,16 +745,19 @@ async function applyPermissionIntentsToVideo(
     }
     for (const hidden of hiddenRows) {
       deleteHiddenIds.push(hidden.id);
-      nextMemberCount -= 1;
+      nextHiddenEditorCount -= 1;
     }
     if (hadEffectiveEdit) revokedNames.push(label);
     else unchanged += 1;
   }
 
-  if (insertHiddenRows.length > 0 && nextMemberCount > MAX_VIDEO_MEMBERS) {
+  if (
+    insertHiddenRows.length > 0 &&
+    nextHiddenEditorCount > MAX_VIDEO_HIDDEN_EDITORS
+  ) {
     return {
       ok: false,
-      message: `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。これ以上編集権を付与できません。`,
+      message: `非公開編集者は最大${MAX_VIDEO_HIDDEN_EDITORS}人です。これ以上編集権を付与できません。`,
     };
   }
 
@@ -771,7 +783,9 @@ async function applyPermissionIntentsToVideo(
   statements.push(db.run(buildPermissionSetGuardSql(video.id, xids, existingRows)));
   expected.push(null);
   if (insertHiddenRows.length > 0 || deleteHiddenIds.length > 0) {
-    statements.push(db.run(buildMemberCountGuardSql(video.id, currentMemberCount)));
+    statements.push(
+      db.run(buildHiddenEditorCountGuardSql(video.id, currentHiddenEditorCount)),
+    );
     expected.push(null);
   }
   if (newXUsers.length > 0) {
