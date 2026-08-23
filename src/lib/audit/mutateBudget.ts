@@ -5,13 +5,15 @@ export const D1_MAX_BATCH_QUERIES = 50;
 /** caller の権限・対象行取得など、監査関数外の query 用に予約する余裕。 */
 export const D1_RESERVED_CALLER_QUERIES = 10;
 
-const AUDIT_COLUMN_COUNT = 20;
-const AUDIT_CONDITION_BIND_COUNT = 1;
+/** audit_logs INSERTで1 entryあたりbindする列数。AUDIT_COLUMNSと同期すること。 */
+const AUDIT_COLUMN_BIND_COUNT = 21;
+/** audit assertionで同じchunkのID + 件数をbindするための余裕。 */
+const AUDIT_ASSERTION_RESERVED_BIND_COUNT = 1;
 
-/** 監査INSERT 1 queryへ安全に含められる最大entry数。 */
-export const AUDIT_INSERT_CHUNK_SIZE = Math.floor(
-  (D1_MAX_BIND_PARAMETERS - AUDIT_CONDITION_BIND_COUNT) /
-    (AUDIT_COLUMN_COUNT + AUDIT_CONDITION_BIND_COUNT),
+/** 監査INSERT / assertion の双方がD1の100 bindを超えない最大entry数。 */
+export const AUDIT_INSERT_CHUNK_SIZE = Math.min(
+  Math.floor(D1_MAX_BIND_PARAMETERS / AUDIT_COLUMN_BIND_COUNT),
+  D1_MAX_BIND_PARAMETERS - AUDIT_ASSERTION_RESERVED_BIND_COUNT,
 );
 
 export type D1AuditMutationBudgetInput = {
