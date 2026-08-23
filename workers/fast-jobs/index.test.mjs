@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runFastJobs } from "./index.ts";
+import {
+  notificationFallbackLimitForD1Budget,
+  runFastJobs,
+} from "./index.ts";
 import { readFile } from "node:fs/promises";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
@@ -21,19 +24,32 @@ test("fast-jobs health は共通Cron Workerからserviceとcommitを返す", () 
 test("outer leaseのAbortSignalをnotification dispatcherへ渡す", () => {
   assert.match(
     source,
-    /processNotificationQueue\(env,\s*\{[\s\S]*?limit:\s*MAX_NOTIFICATION_BATCH,[\s\S]*?signal,[\s\S]*?\}\)/,
+    /processNotificationQueue\(budgetEnv,\s*\{[\s\S]*?limit:\s*fallbackLimit,[\s\S]*?signal,[\s\S]*?\}\)/,
   );
   assert.match(source, /if \(isAbortError\(error\)\) notificationAbortError = error/);
   assert.match(source, /if \(notificationAbortError\) throw notificationAbortError/);
 });
 
 test("Queue wake成功時はCronでDiscord dispatchを二重実行しない", () => {
-  const dueIndex = source.indexOf("if (!(await hasDuePendingNotifications(env, signal)))");
+  const dueIndex = source.indexOf("if (!(await hasDuePendingNotifications(budgetEnv, signal)))");
   const wakeIndex = source.indexOf("const delegatedToQueue =", dueIndex);
-  const dispatchIndex = source.indexOf("processNotificationQueue(env", dueIndex);
+  const dispatchIndex = source.indexOf("processNotificationQueue(budgetEnv", dueIndex);
   assert.ok(dueIndex >= 0 && wakeIndex > dueIndex && dispatchIndex > wakeIndex);
   assert.match(source, /if \(delegatedToQueue\) \{[\s\S]*?skipped: 1/);
   assert.match(source, /sentKinds: wakeSentKinds/);
+  assert.doesNotMatch(source, /Queue consumerは大幅に長いCPU枠/);
+});
+
+test("Cron fallbackは外部送信後のD1完了処理まで収まる件数へ縮める", () => {
+  assert.equal(notificationFallbackLimitForD1Budget(0), 6);
+  assert.equal(notificationFallbackLimitForD1Budget(14), 6);
+  assert.equal(notificationFallbackLimitForD1Budget(15), 5);
+  assert.equal(notificationFallbackLimitForD1Budget(39), 1);
+  assert.equal(notificationFallbackLimitForD1Budget(40), 0);
+  assert.equal(notificationFallbackLimitForD1Budget(49), 0);
+  assert.match(source, /NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 5/);
+  assert.match(source, /FAST_JOBS_OUTER_LEASE_D1_RESERVE = 4/);
+  assert.match(source, /if \(fallbackLimit <= 0\)/);
 });
 
 test("reminder失敗後もQueue無効ならnotification dispatchを実行し最後に集約失敗する", async () => {
