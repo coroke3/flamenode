@@ -5,6 +5,7 @@ import {
   type DelimiterChar,
 } from "#utils/delimited";
 import { normalizeXId } from "#utils/xid";
+import { MAX_VIDEO_MEMBERS } from "./atomicLimits.ts";
 
 export interface VideoMemberChapterInput {
   time: string;
@@ -233,6 +234,19 @@ export function parseVideoMemberDelimited(
       }
       members.push(member);
     });
+
+    // UI側でslice(0, 100)すると、100人超の置き換えで末尾だけが黙って消える。
+    // 権限列を別Server Actionへ先に送る画面もあるため、parser正本で全体を適用不可にし、
+    // 「メンバー100人・権限101人」のような部分成功も防ぐ。
+    if (members.length > MAX_VIDEO_MEMBERS) {
+      return {
+        members: [],
+        warnings: [
+          ...warnings,
+          `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。有効な行が${members.length}件あるため、件数を減らしてから再度取り込んでください。`,
+        ],
+      };
+    }
 
     const pastedXids = new Set<string>();
     const duplicatedXids = new Set<string>();
