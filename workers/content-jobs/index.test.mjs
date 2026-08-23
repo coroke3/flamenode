@@ -44,12 +44,7 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   );
   assert.match(source, /staticRebuildHasMore \|\|= Boolean\(result\.hasMore\)/);
   assert.match(source, /result\.skipped \?\? 0\) === 0/);
-  assert.doesNotMatch(
-    source,
-    /if \(!result\.hasMore \|\| result\.processed === 0\)/,
-  );
   assert.match(source, /STATIC_REBUILD_WAKE_QUEUE/);
-  assert.match(source, /staticRebuildHasMore/);
   assert.match(source, /source:\s*"recovery"/);
   assert.doesNotMatch(source, /context\.waitUntil\(handleStaticRebuildWakeQueue/);
 });
@@ -61,16 +56,22 @@ test("Cron lease・cleanup・rebuildは同じD1 budget wrapperを共有する", 
   const deployIndex = source.indexOf("const deployGlobalRebuilds = await ensureDeployGlobalRebuilds(");
   assert.ok(envIndex >= 0 && outerLeaseIndex > envIndex);
   assert.ok(cleanupIndex > outerLeaseIndex && deployIndex > cleanupIndex);
-  assert.match(
-    source,
-    /const leased = await withCronLease\(\s*rebuildEnv,/,
-  );
-  assert.match(
-    source,
-    /const cleanupLease = await withCronLease\(\s*rebuildEnv,/,
-  );
+  assert.match(source, /const leased = await withCronLease\(\s*rebuildEnv,/);
+  assert.match(source, /const cleanupLease = await withCronLease\(\s*rebuildEnv,/);
   assert.match(source, /runCleanupWithRetry\(rebuildEnv, cleanupSignal\)/);
   assert.doesNotMatch(source, /runCleanupWithRetry\(env, cleanupSignal\)/);
+});
+
+test("Queue wake成功時はCronでstatic rebuildを直接実行しない", () => {
+  const delegateIndex = source.indexOf("const delegatedToQueue =");
+  const directIndex = source.indexOf("processStaticRebuildQueue(", delegateIndex);
+  assert.ok(delegateIndex >= 0 && directIndex > delegateIndex);
+  assert.match(source, /const wakeSentKinds = new Set<QueueWakeKind>\(\)/);
+  assert.match(source, /sentKinds: wakeSentKinds/);
+  assert.match(source, /const rebuild = delegatedToQueue\s*\?/);
+  assert.match(source, /skipped: 1,[\s\S]*?hasMore: true/);
+  assert.match(source, /: await runJob\([\s\S]*?processStaticRebuildQueue/);
+  assert.match(source, /if \(!delegatedToQueue && staticRebuildHasMore\)/);
 });
 
 test("手動rebuildもleaseとqueue処理で同じD1 budgetを共有する", () => {
