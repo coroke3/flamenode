@@ -221,6 +221,11 @@ export async function mutateWithAudit(
   const mutationAssertionCount = perStatementExpectedChanges
     ? perStatementExpectedChanges.filter((expected) => expected !== null).length
     : 1;
+  const actorXValidationQueryCount = input.audits.some((audit) =>
+    Boolean(audit.actor_x_user_id?.trim()),
+  )
+    ? 1
+    : 0;
   const budget = planD1AuditMutationBudget({
     mutationStatementCount: input.mutationStatements.length,
     mutationAssertionCount,
@@ -229,6 +234,7 @@ export async function mutateWithAudit(
     distinctActorCount: new Set(
       input.audits.map((audit) => audit.actor_user_id),
     ).size,
+    actorXValidationQueryCount,
   });
   if (!budget.withinLimit) {
     throw new AuditMutationError(
