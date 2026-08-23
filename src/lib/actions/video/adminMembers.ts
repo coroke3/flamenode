@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos } from "@/lib/db/schema";
 import { buildReplaceVideoMembersPlan } from "@/lib/video/replaceVideoMembers";
@@ -12,7 +12,6 @@ import {
 } from "@/lib/video/memberAggregationFanOut";
 import { validateVideoMemberSubmission } from "@/lib/video/submissionValidation";
 import type { VideoActionResult } from "@/lib/video/types";
-import { expectedRowCondition } from "@/lib/audit/adapters";
 import {
   appendVideoAtomicWritePlan,
   emptyVideoAtomicWritePlan,
@@ -97,21 +96,46 @@ export async function updateVideoMembersAdmin(
 
   let queue: Awaited<ReturnType<typeof buildStaticRebuildQueueBatch>>;
   try {
-    const after = { ...target, collaboration_type: nextCollaborationType, updated_at: now };
     const plan = emptyVideoAtomicWritePlan();
-    plan.statements.push(db.update(videos).set({
-      collaboration_type: nextCollaborationType,
-      updated_at: now,
-    }).where(and(
-      eq(videos.id, videoId),
-      expectedRowCondition({ expectedCurrent: target }),
-    )!));
+
+    // 参加者保存の同時更新保護は buildReplaceVideoMembersPlan の member-set CAS を正本にする。
+    // ここで videos 行全体を expectedRowCondition すると、タイトル・説明・YouTube同期など
+    // メンバーと無関係な項目が並行更新されただけでも保存が失敗し、
+    // 「競合しました。再読み込みして再試行してください。」相当の偽競合になる。
+    // collaboration_type はメンバー集合から導出されるため、対象 video が存在することだけを
+    // 条件に同一atomic batch内で更新する。member-set CAS失敗時はbatch全体がrollbackされる。
+    plan.statements.push(
+      db
+        .update(videos)
+        .set({
+          collaboration_type: nextCollaborationType,
+          updated_at: now,
+        })
+        .where(eq(videos.id, videoId)),
+    );
     plan.expectedChanges.push(1);
     plan.audits.push({
-      table_name: "videos", target_id: videoId, operation: "UPDATE",
-      before: { ...target }, after, actor_user_id: user.id,
-      context: "admin-video-members", retention_class: "normal", strict: true,
+      table_name: "videos",
+      target_id: videoId,
+      operation: "UPDATE",
+      before: {
+        id: target.id,
+        collaboration_type: target.collaboration_type,
+        updated_at: target.updated_at,
+      },
+      after: {
+        id: target.id,
+        collaboration_type: nextCollaborationType,
+        updated_at: now,
+      },
+      actor_user_id: user.id,
+      context: "admin-video-members",
+      reason: "参加者設定から合作区分を同期",
+      retention_class: "normal",
+      restore_strategy: "none",
+      strict: true,
     });
+
     const membersPlan = await buildReplaceVideoMembersPlan(db, {
       videoId,
       members,
