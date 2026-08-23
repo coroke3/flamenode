@@ -15,6 +15,7 @@ import {
 } from "../notification-dispatcher/dispatch.ts";
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
+import { withD1Budget } from "../shared/d1Budget.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
 import {
   sendWorkerQueueWakeBestEffort,
@@ -72,12 +73,14 @@ export async function runNotificationRecovery(
   env: Env,
   execution: CronRunContext,
 ): Promise<void> {
+  // Cron lease・reminder・fallback dispatchを同一D1 hard-limit guardへ通す。
+  const budgetEnv = withD1Budget(env);
   await runJob(
     "fast-jobs",
     "cron",
     async () => {
       const leased = await withCronLease(
-        env,
+        budgetEnv,
         {
           jobName: "fast-jobs",
           leaseSeconds: FAST_JOBS_LEASE_SEC,
@@ -86,7 +89,7 @@ export async function runNotificationRecovery(
         async (signal) => {
           const wakeSentKinds = new Set<QueueWakeKind>();
           signal?.throwIfAborted();
-          await recoverNotificationOutboxExpiredLeases(env, {
+          await recoverNotificationOutboxExpiredLeases(budgetEnv, {
             limit: MAX_NOTIFICATION_BATCH,
             signal,
           });
@@ -94,7 +97,7 @@ export async function runNotificationRecovery(
           let reminders: unknown;
           try {
             const reminderLease = await withCronLease(
-              env,
+              budgetEnv,
               {
                 jobName: "fast-jobs:slot-deadline-reminders",
                 leaseSeconds: REMINDER_LEASE_SEC,
@@ -110,17 +113,17 @@ export async function runNotificationRecovery(
                       async (attempt) => {
                         reminderSignal?.throwIfAborted();
                         const processed = await enqueueSlotDeadlineReminders(
-                          env,
+                          budgetEnv,
                           undefined,
                           reminderSignal,
                         );
                         if (processed > 0) {
                           await sendWorkerQueueWakeBestEffort({
-                            queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
+                            queue: budgetEnv.NOTIFICATION_WAKE_QUEUE ?? null,
                             kind: "notification_available",
                             source: "sync",
-                            envFlags: env,
-                            kv: env.KV,
+                            envFlags: budgetEnv,
+                            kv: budgetEnv.KV,
                             sentKinds: wakeSentKinds,
                           });
                         }
@@ -137,7 +140,7 @@ export async function runNotificationRecovery(
                         delayMs: 100,
                       },
                     ),
-                  { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
+                  { rethrow: true, commitSha: budgetEnv.BUILD_COMMIT_SHA },
                 ),
             );
             reminders = reminderLease.acquired
@@ -146,7 +149,7 @@ export async function runNotificationRecovery(
                   "fast-jobs",
                   "slot-deadline-reminders",
                   async () => ({ skipped: 1 }),
-                  { commitSha: env.BUILD_COMMIT_SHA },
+                  { commitSha: budgetEnv.BUILD_COMMIT_SHA },
                 );
           } catch (error) {
             if (signal?.aborted) throw error;
@@ -154,7 +157,7 @@ export async function runNotificationRecovery(
           }
 
           signal?.throwIfAborted();
-          if (!(await hasDuePendingNotifications(env, signal))) {
+          if (!(await hasDuePendingNotifications(budgetEnv, signal))) {
             return combineJobCounters(reminders, { skipped: 1 });
           }
 
@@ -165,11 +168,11 @@ export async function runNotificationRecovery(
           const delegatedToQueue =
             alreadyDelegated ||
             (await sendWorkerQueueWakeBestEffort({
-              queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
+              queue: budgetEnv.NOTIFICATION_WAKE_QUEUE ?? null,
               kind: "notification_available",
               source: "recovery",
-              envFlags: env,
-              kv: env.KV,
+              envFlags: budgetEnv,
+              kv: budgetEnv.KV,
               sentKinds: wakeSentKinds,
             }));
           if (delegatedToQueue) {
@@ -177,7 +180,6 @@ export async function runNotificationRecovery(
               processed: 0,
               failed: 0,
               skipped: 1,
-              queue_delegated: 1,
             });
           }
 
@@ -187,7 +189,7 @@ export async function runNotificationRecovery(
             "notification-dispatch",
             async () => {
               try {
-                return await processNotificationQueue(env, {
+                return await processNotificationQueue(budgetEnv, {
                   limit: MAX_NOTIFICATION_BATCH,
                   signal,
                   skipLeaseRecovery: true,
@@ -197,11 +199,11 @@ export async function runNotificationRecovery(
                 throw error;
               }
             },
-            { commitSha: env.BUILD_COMMIT_SHA },
+            { commitSha: budgetEnv.BUILD_COMMIT_SHA },
           );
           if (notificationAbortError) throw notificationAbortError;
           signal?.throwIfAborted();
-          await maybeResendNotificationWake(env, wakeSentKinds);
+          await maybeResendNotificationWake(budgetEnv, wakeSentKinds);
           return throwIfJobFailed(
             "fast-jobs",
             "cron",
@@ -211,7 +213,7 @@ export async function runNotificationRecovery(
       );
       return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
     },
-    { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
+    { rethrow: true, commitSha: budgetEnv.BUILD_COMMIT_SHA },
   );
 }
 
@@ -231,6 +233,6 @@ export default {
     batch: MessageBatch<unknown>,
     env: Env,
   ): Promise<void> {
-    await handleNotificationWakeQueue(batch, env);
+    await handleNotificationWakeQueue(batch, withD1Budget(env));
   },
 };
