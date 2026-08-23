@@ -1,6 +1,11 @@
 import { eq, sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { videoMembers, xUserAccountLinks, xUsers } from "@/lib/db/schema";
+import {
+  users,
+  videoMembers,
+  xUserAccountLinks,
+  xUsers,
+} from "@/lib/db/schema";
 import type { VideoCollabSubject } from "@/components/admin/VideoCollabPermsManager";
 
 function isMissingDbObjectError(
@@ -37,11 +42,14 @@ function isMissingDbObjectError(
 }
 
 type AnyDb = LibSQLDatabase<any>;
+type VideoCollabSubjectWithDelivery = VideoCollabSubject & {
+  can_notify?: boolean;
+};
 
 export async function loadVideoCollabSubjects(
   db: AnyDb,
   videoId: string,
-): Promise<{ subjects: VideoCollabSubject[]; tableAvailable: boolean }> {
+): Promise<{ subjects: VideoCollabSubjectWithDelivery[]; tableAvailable: boolean }> {
   try {
     const rows = await db
       .select({
@@ -57,6 +65,17 @@ export async function loadVideoCollabSubjects(
           INNER JOIN ${xUsers} xu ON xu.id = link.x_user_id
           WHERE link.x_user_id = ${videoMembers.x_user_id}
             AND xu.approval_status = 'approved'
+        )`,
+        // 通知可能はownershipとは別条件。承認済みlinkに加え、少なくとも1つの
+        // Auth userが通知ONである場合だけtrueにする。
+        has_notifiable_link: sql<number>`EXISTS (
+          SELECT 1
+          FROM ${xUserAccountLinks} link
+          INNER JOIN ${xUsers} xu ON xu.id = link.x_user_id
+          INNER JOIN ${users} auth_user ON auth_user.id = link.auth_user_id
+          WHERE link.x_user_id = ${videoMembers.x_user_id}
+            AND xu.approval_status = 'approved'
+            AND auth_user.is_notification_enabled = 1
         )`,
       })
       .from(videoMembers)
@@ -76,6 +95,7 @@ export async function loadVideoCollabSubjects(
           // legacy field name。意味はDiscord直結ではなく
           // 「承認済みX IDがAuth userへ連携済み」。
           has_discord_link: row.has_account_link === 1,
+          can_notify: row.has_notifiable_link === 1,
         })),
     };
   } catch (error) {
@@ -105,7 +125,7 @@ function editorHasAccountLink(subject: VideoCollabSubject): boolean {
 }
 
 export function computeEditPermissionSummary(
-  subjects: VideoCollabSubject[],
+  subjects: VideoCollabSubjectWithDelivery[],
   _legacyOptions?: {
     /** @deprecated 権限正本はX ID。比較用Auth/Discord IDをDTOへ戻さない。 */
     viewerDiscordId?: string | null;
@@ -116,9 +136,11 @@ export function computeEditPermissionSummary(
   const editors = subjects.filter((subject) => subject.can_edit === 1);
   const names: string[] = [];
   let unlinkedEditorCount = 0;
+  let notifiableEditorCount = 0;
   for (const editor of editors) {
     if (editor.display_name) names.push(editor.display_name);
     if (!editorHasAccountLink(editor)) unlinkedEditorCount += 1;
+    if (editor.can_notify) notifiableEditorCount += 1;
   }
 
   const displayNames =
@@ -144,7 +166,7 @@ export function computeEditPermissionSummary(
   return {
     editorCount: editors.length,
     unlinkedEditorCount,
-    notifiableEditorCount: editors.length - unlinkedEditorCount,
+    notifiableEditorCount,
     displayNames,
     warnings,
   };
