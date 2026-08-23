@@ -15,7 +15,11 @@ import {
   recalcScoreForVideoIds,
 } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
-import { withD1Budget } from "../shared/d1Budget.ts";
+import {
+  D1_QUERY_SOFT_LIMIT,
+  withD1Budget,
+  type D1Budget,
+} from "../shared/d1Budget.ts";
 import {
   runJob,
   throwIfJobFailed,
@@ -31,7 +35,10 @@ import {
 } from "../shared/queueWake.ts";
 import { syncBatch, countPendingSyncRows, type SyncBatchResult } from "../youtube-sync/index.ts";
 import { syncEventPlaylists } from "../youtube-playlist-sync/index.ts";
-import { enqueueYoutubeRelatedProjectionRebuilds } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
+import {
+  enqueueYoutubeRelatedProjectionRebuilds,
+  YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS,
+} from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { syncGa4Trending } from "../ga-analytics/sync.ts";
 import { enqueueScoreDependentRebuilds } from "./scoreRankingRebuildThrottle.ts";
 
@@ -61,6 +68,20 @@ const SYNC_JOBS_HEARTBEAT_SEC = 4 * 60;
 const SYNC_JOBS_WALL_CLOCK_DEADLINE_MS = 13 * 60 * 1_000;
 /** UTC 03:00台で blocked 復旧確認と blocklist 日次整合を1回走らせる。 */
 const DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR = 3;
+/**
+ * blocked recheck(最大5 D1) + related enqueue(2) + targeted score(1)
+ * + ranking enqueue worst-case(5)。related変化なし時はdaily reconcile(2)と入れ替わり、
+ * いずれも13以内。soft limit 40までに開始判定し、hard 50のlease余白を残す。
+ */
+export const DAILY_BLOCKED_RECHECK_D1_RESERVE = 13;
+
+function hasSoftD1Budget(budget: D1Budget, requiredStatements: number): boolean {
+  return (
+    Number.isInteger(requiredStatements) &&
+    requiredStatements >= 0 &&
+    budget.statements + requiredStatements <= D1_QUERY_SOFT_LIMIT
+  );
+}
 
 /** Cronは7,52分。UTC分が52の時だけを再生リスト専用枠にする。 */
 export function isPlaylistSyncSlot(now = new Date()): boolean {
@@ -341,7 +362,14 @@ export async function runSyncJobs(
           });
 
           const now = new Date(execution.scheduledTime);
-          if (isDailyYoutubeRelatedSlot(now) && !youtube.quota_stopped) {
+          if (
+            isDailyYoutubeRelatedSlot(now) &&
+            !youtube.quota_stopped &&
+            hasSoftD1Budget(
+              budgetEnv.d1Budget,
+              DAILY_BLOCKED_RECHECK_D1_RESERVE,
+            )
+          ) {
             let blockedYoutube: SyncBatchResult | null = null;
             const blockedRecheck = await runJob(
               "sync-jobs",
@@ -356,6 +384,12 @@ export async function runSyncJobs(
               },
               { rethrow: false, commitSha: budgetEnv.BUILD_COMMIT_SHA },
             );
+
+            const relatedAlreadyEnqueued = Boolean(
+              blockedRecheck.succeeded &&
+              blockedYoutube &&
+              blockedYoutube.related_eligibility_changed_video_ids.length > 0,
+            );
             if (blockedRecheck.succeeded && blockedYoutube) {
               await runYoutubeSyncPostCommit(budgetEnv, blockedYoutube, {
                 signal,
@@ -363,13 +397,24 @@ export async function runSyncJobs(
               });
             }
 
-            const reconciled = await enqueueYoutubeRelatedProjectionRebuilds(
-              budgetEnv,
-              "youtube_related_blocklist_daily_reconcile",
-              "low",
-              signal,
-            );
-            await wakeStaticRebuildAfterScoreEnqueue(budgetEnv, reconciled);
+            // related適格性が変わった場合はpost-commitが同じ7 targetをhighで予約済み。
+            // 直後にdaily low enqueueを重ねるD1 writeを省く。変化なし/再確認失敗時だけ
+            // 日次整合として全関連projectionを低優先度で再予約する。
+            if (
+              !relatedAlreadyEnqueued &&
+              hasSoftD1Budget(
+                budgetEnv.d1Budget,
+                YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS,
+              )
+            ) {
+              const reconciled = await enqueueYoutubeRelatedProjectionRebuilds(
+                budgetEnv,
+                "youtube_related_blocklist_daily_reconcile",
+                "low",
+                signal,
+              );
+              await wakeStaticRebuildAfterScoreEnqueue(budgetEnv, reconciled);
+            }
           }
 
           if (queueFlags.youtubeSyncEnabled) {
