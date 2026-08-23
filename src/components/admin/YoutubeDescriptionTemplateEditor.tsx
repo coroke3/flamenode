@@ -154,6 +154,9 @@ export function YoutubeDescriptionTemplateEditor({
 }): React.ReactElement {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const [copyState, setCopyState] = React.useState<"idle" | "copied" | "error">("idle");
+  const [previewCopyState, setPreviewCopyState] = React.useState<
+    "idle" | "copied" | "error"
+  >("idle");
   const context = React.useMemo<YoutubeDescriptionContext>(
     () => ({
       ...SAMPLE_CONTEXT,
@@ -169,15 +172,22 @@ export function YoutubeDescriptionTemplateEditor({
     [context, value],
   );
 
-  const setTextareaValue = React.useCallback((next: string, caret?: number) => {
-    onChange(next);
-    window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.focus();
-      if (caret != null) textarea.setSelectionRange(caret, caret);
-    });
-  }, [onChange]);
+  React.useEffect(() => {
+    setPreviewCopyState("idle");
+  }, [rendered.text]);
+
+  const setTextareaValue = React.useCallback(
+    (next: string, caret?: number) => {
+      onChange(next);
+      window.requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.focus();
+        if (caret != null) textarea.setSelectionRange(caret, caret);
+      });
+    },
+    [onChange],
+  );
 
   const insertAtCursor = (snippet: string) => {
     const textarea = textareaRef.current;
@@ -226,6 +236,18 @@ export function YoutubeDescriptionTemplateEditor({
     }
     setCopyState("copied");
     window.setTimeout(() => setCopyState("idle"), 1800);
+  };
+
+  const copyRenderedPreview = async () => {
+    if (!rendered.text) return;
+    const ok = await writeTextToClipboard(rendered.text);
+    if (!ok) {
+      setPreviewCopyState("error");
+      window.setTimeout(() => setPreviewCopyState("idle"), 2400);
+      return;
+    }
+    setPreviewCopyState("copied");
+    window.setTimeout(() => setPreviewCopyState("idle"), 1800);
   };
 
   return (
@@ -291,7 +313,7 @@ export function YoutubeDescriptionTemplateEditor({
                     ? "コピーしました"
                     : copyState === "error"
                       ? "コピー失敗"
-                      : "本文をコピー"}
+                      : "テンプレート本文をコピー"}
                 </button>
                 <button
                   type="button"
@@ -362,6 +384,18 @@ export function YoutubeDescriptionTemplateEditor({
             <div className={styles.previewHead}>
               <strong>ライブプレビュー</strong>
               <span className="fn-badge fn-badge-soft">サンプル値で表示</span>
+              <button
+                type="button"
+                className="fn-btn fn-btn-ghost fn-btn-sm"
+                disabled={!rendered.text}
+                onClick={() => void copyRenderedPreview()}
+              >
+                {previewCopyState === "copied"
+                  ? "出力例をコピーしました"
+                  : previewCopyState === "error"
+                    ? "コピー失敗"
+                    : "出力例をコピー"}
+              </button>
             </div>
             <pre className={styles.previewText}>
               {rendered.text || "テンプレートを入力するとここに表示されます。"}
