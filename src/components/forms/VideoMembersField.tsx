@@ -98,6 +98,17 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+/**
+ * 編集画面の ?privileged= はServer側でも再検証されるが、TSV権限batchでも
+ * admin/event を明示的に伝える。queryが無いadmin参加者画面では値を送らず、
+ * Server Actionの安全な normal→admin→event 補完を維持する。
+ */
+function currentExplicitPermissionPrivilegeMode(): "admin" | "event" | undefined {
+  if (typeof window === "undefined") return undefined;
+  const raw = new URLSearchParams(window.location.search).get("privileged");
+  return raw === "admin" || raw === "event" ? raw : undefined;
+}
+
 export function VideoMembersField({
   initialMembers = [],
   suggestions = [],
@@ -680,15 +691,39 @@ export function VideoMembersField({
     });
   };
 
+  /**
+   * 権限はmembers_jsonへ保存しないが、専用Server Action成功後の画面表示は
+   * 実DBの結果と一致させる。Reactのfunctional updateなのでreplace/mergeの
+   * setRowsが直前にqueueされていても、その次のstateへON/OFFを適用できる。
+   */
+  const syncPermissionIntentsToLocalRows = (
+    intents: readonly { xid: string; intent: boolean }[],
+  ) => {
+    const byXid = new Map(
+      intents.map((intent) => [normalizeXId(intent.xid), intent.intent] as const),
+    );
+    setRows((previous) =>
+      previous.map((row) => {
+        const xid = normalizeXId(row.x_user_id);
+        if (!xid || !byXid.has(xid)) return row;
+        return { ...row, can_edit: byXid.get(xid) ? 1 : 0 };
+      }),
+    );
+  };
+
   /** 編集権限だけを専用batch Server Actionで一括反映する。 */
   const applyPermissionsBatch = async () => {
     if (!bulkPreview || !permissionTargetVideoId || permPending) return;
     const intents = bulkPreview.permissionIntents.slice(0, MAX_COLLABORATOR_PERMISSION_BATCH);
+    const explicitPrivilegeMode = currentExplicitPermissionPrivilegeMode();
     setPermPending(true);
     setPermResult(null);
     try {
       const result = await applyVideoCollaboratorPermissionsBatch({
         video_id: permissionTargetVideoId,
+        ...(explicitPrivilegeMode
+          ? { edit_privilege_mode: explicitPrivilegeMode }
+          : {}),
         notify: true,
         intents: intents.map((intent) => ({
           x_user_id: intent.xid,
@@ -703,6 +738,7 @@ export function VideoMembersField({
       if (result.ok) {
         setPermConfirmOpen(false);
         runPendingApply();
+        syncPermissionIntentsToLocalRows(intents);
         setBulkPreview(null);
         setBulkSource({ label: "spreadsheet", text: "" });
         setAiText("");
