@@ -3,8 +3,8 @@
 ## 構成
 
 - Workerは既存の `flamenode-sync-jobs` を使用し、Worker数を増やしません。
-- Cronは7、22、37、52分に起動し、52分台だけを再生リスト同期の専用枠にします。
-- 7、22、37分は動画メタデータ同期・スコア差分再計算を維持します。
+- Cronは毎時7分・52分に起動し、52分台だけを再生リスト同期の専用枠にします。
+- 7分台は動画メタデータ同期・スコア差分再計算を維持します。
 - 再生リスト同期はイベント設定の `next_sync_at` と同期間隔で実行します。
 - `event_youtube_playlist_sync.enabled = 1` かつ `sync_mode != 'off'` のイベントだけを同期します。未設定イベントを自動で同期しません。
 - OAuth credentialはD1/KVへ保存せず、Worker secretだけに保持します。
@@ -40,6 +40,8 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 4. 再生リストURLまたはID、同期方式、同期間隔を保存します。
 5. 管理者は全体状況を `/admin/youtube-sync/playlists`、イベント運営は担当イベントの `/manage/events/{eventId}/youtube-playlist` で確認します。一般ユーザー向けの同期状況画面は提供しません。
 
+「次回実行へ予約」は `next_sync_at` を現在時刻へ更新する処理です。HTTPリクエスト内でYouTube APIを直接呼ぶ即時同期ではなく、次の52分台のRecovery Cronで処理されます。
+
 ## 公開playlist projectionと既存イベントのbackfill
 
 - 公開イベントのplaylist表示は、公開visibilityをD1で1行確認した後、`events/{eventId}/playlist.v1.json` を優先します。R2が欠損・不正・不完全・読取エラーの場合だけ、D1の従来クエリへfallbackします。
@@ -48,7 +50,7 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 
 ## 同期方式
 
-- `追加のみ`: イベントの公開・限定公開作品を追加します。YouTube側だけにある項目は削除しません。
+- `追加のみ`: イベントの公開作品を追加します。YouTube側だけにある項目は削除しません。
 - `完全同期`: 追加に加え、イベントに存在しない再生リスト項目を定期全件確認後に削除します。
 - 新規追加時は `videos.scheduled_time`、未設定時は作成日時の順に `snippet.position` を指定します。
 - YouTube側が手動並び替えでない場合は末尾追加へ自動フォールバックし、`playlist_order_fallback_manual_sort_required` を管理画面へ表示します。
