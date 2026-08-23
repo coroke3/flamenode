@@ -3,6 +3,9 @@ main = "index.ts"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 
+[observability]
+enabled = true
+
 # Recovery Cron: hourly fallback when Queue wake is missed.
 [triggers]
 crons = ["0 * * * *"]
