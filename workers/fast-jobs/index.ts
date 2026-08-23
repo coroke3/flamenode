@@ -21,6 +21,7 @@ import {
 } from "../shared/d1Budget.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
 import {
+  resolveQueueFeatureFlags,
   sendWorkerQueueWakeBestEffort,
   type QueueWakeKind,
 } from "../shared/queueWake.ts";
@@ -54,6 +55,8 @@ const REMINDER_LEASE_SEC = 4 * 60;
 const FAST_JOBS_WALL_CLOCK_DEADLINE_MS = 3 * 60 * 1_000;
 /** orphan cleanup + pending SELECT。 */
 const NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS = 2;
+/** direct drain後、Queue有効時に残件確認するSELECT 1本。 */
+const NOTIFICATION_FALLBACK_POST_DRAIN_PROBE_D1_STATEMENTS = 1;
 /** claim + markSent最大3回 + suppress-redelivery。failure/dead-letter経路もこれ以下。 */
 const NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 5;
 /** outer lease成功/解放2本 + 3分deadline中に発生し得るheartbeat最大2本を残す。 */
@@ -74,7 +77,8 @@ export function notificationFallbackLimitForD1Budget(
     D1_QUERY_HARD_LIMIT -
     Math.max(0, Math.floor(currentStatements)) -
     FAST_JOBS_OUTER_LEASE_D1_RESERVE -
-    NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS;
+    NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS -
+    NOTIFICATION_FALLBACK_POST_DRAIN_PROBE_D1_STATEMENTS;
   if (available < NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW) return 0;
   return Math.min(
     MAX_NOTIFICATION_BATCH,
@@ -86,6 +90,10 @@ async function maybeResendNotificationWake(
   env: Env,
   sentKinds?: Set<QueueWakeKind>,
 ): Promise<void> {
+  // Queue機能自体が無効なら残件SELECTをしても送信できない。Recovery Cronが次回
+  // また処理するため、無駄なD1 1本を使わず終了する。
+  const flags = resolveQueueFeatureFlags(env);
+  if (!flags.dispatchEnabled) return;
   if (!(await hasDuePendingNotifications(env))) return;
   await sendWorkerQueueWakeBestEffort({
     queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
