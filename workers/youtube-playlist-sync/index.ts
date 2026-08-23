@@ -30,6 +30,7 @@ interface SyncConfigRow {
   last_full_scan_at: number | null;
   scan_started_at: number | null;
   scan_page_token: string | null;
+  last_error: string | null;
 }
 
 interface RemoteItemRow {
@@ -52,6 +53,23 @@ interface InsertedPlaylistItem {
   ordered: boolean;
 }
 
+export type PlaylistOrderRepairPlan =
+  | { status: "aligned" }
+  | { status: "ambiguous" }
+  | {
+      status: "move";
+      playlistItemId: string;
+      videoId: string;
+      fromIndex: number;
+      toIndex: number;
+    };
+
+interface PlaylistOrderSnapshot {
+  items: PlaylistPageItem[];
+  complete: boolean;
+  reason: "request_budget" | "quota" | "page_limit" | null;
+}
+
 export interface PlaylistSyncBatchResult {
   processed: number;
   skipped: number;
@@ -65,7 +83,9 @@ export interface PlaylistSyncBatchResult {
 
 const MAX_EVENTS_PER_RUN = 1;
 const MAX_SCAN_PAGES_PER_EVENT = 3;
+const MAX_ORDER_SCAN_PAGES_PER_EVENT = 8;
 const MAX_MUTATIONS_PER_RUN = 4;
+const MAX_ORDER_REPAIRS_PER_RUN = 2;
 const MAX_SOURCE_VIDEOS = 5000;
 export const PLAYLIST_MAX_REMOTE_ITEMS = 5000;
 export const PLAYLIST_STALE_DELETE_BATCH_SIZE = 100;
@@ -75,7 +95,7 @@ const FULL_SCAN_INTERVAL_SEC = 24 * 60 * 60;
 const RETRY_DELAY_SEC = 60 * 60;
 const FAILURE_RETRY_SEC = 6 * 60 * 60;
 const API_TIMEOUT_MS = 10_000;
-/** OAuth 1 + scan 3 + insertion fallback込みmutation 8。 */
+/** OAuth / scan / bounded order check / mutationを同一invocationで12 subrequest以内に閉じる。 */
 const MAX_EXTERNAL_REQUESTS_PER_RUN = 12;
 const OAUTH_TOKEN_SAFETY_MS = 60_000;
 
@@ -463,6 +483,56 @@ async function insertPlaylistItem(
   }
 }
 
+async function updatePlaylistItemPosition(
+  playlistId: string,
+  item: PlaylistPageItem,
+  position: number,
+  accessToken: string,
+  quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
+  fetchImpl: FetchLike = fetch,
+): Promise<boolean> {
+  signal?.throwIfAborted();
+  const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+  url.searchParams.set("part", "snippet");
+  url.searchParams.set("fields", "id");
+  url.searchParams.set("prettyPrint", "false");
+  try {
+    await youtubeJson<{ id?: string }>(
+      url,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          id: item.playlistItemId,
+          snippet: {
+            playlistId,
+            resourceId: { kind: "youtube#video", videoId: item.videoId },
+            position: Math.max(0, position),
+          },
+        }),
+      },
+      accessToken,
+      quota,
+      requestBudget,
+      50,
+      signal,
+      fetchImpl,
+    );
+    return true;
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (
+      error instanceof YouTubeApiError &&
+      (error.reason === "manualSortRequired" ||
+        error.reason === "invalidPlaylistItemPosition")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function deletePlaylistItem(
   playlistItemId: string,
   accessToken: string,
@@ -493,6 +563,103 @@ async function deletePlaylistItem(
   }
 }
 
+async function loadPlaylistOrderSnapshot(
+  playlistId: string,
+  accessToken: string,
+  quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
+  fetchImpl: FetchLike = fetch,
+): Promise<PlaylistOrderSnapshot> {
+  const items: PlaylistPageItem[] = [];
+  const seenTokens = new Set<string>();
+  let pageToken: string | null = null;
+
+  for (let page = 0; page < MAX_ORDER_SCAN_PAGES_PER_EVENT; page += 1) {
+    signal?.throwIfAborted();
+    // 次のGET(1 unit/subrequest)と最低1回のposition更新(50 units/subrequest)を残す。
+    if (requestBudget.remaining <= 1) {
+      return { items, complete: false, reason: "request_budget" };
+    }
+    if (!quota.canSpend(51)) {
+      return { items, complete: false, reason: "quota" };
+    }
+    const result = await listPlaylistPage(
+      playlistId,
+      pageToken,
+      accessToken,
+      quota,
+      requestBudget,
+      signal,
+      fetchImpl,
+    );
+    items.push(...result.items);
+    if (!result.nextPageToken) {
+      return { items, complete: true, reason: null };
+    }
+    if (seenTokens.has(result.nextPageToken)) {
+      throw new Error("youtube_playlist_order_scan_token_cycle");
+    }
+    seenTokens.add(result.nextPageToken);
+    pageToken = result.nextPageToken;
+  }
+
+  return { items, complete: false, reason: "page_limit" };
+}
+
+export function planPlaylistOrderRepair(
+  sourceVideoIds: readonly string[],
+  remoteItems: readonly PlaylistPageItem[],
+): PlaylistOrderRepairPlan {
+  if (sourceVideoIds.length === 0) return { status: "aligned" };
+  const desiredSet = new Set(sourceVideoIds);
+  if (desiredSet.size !== sourceVideoIds.length) return { status: "ambiguous" };
+
+  const relevant = remoteItems.flatMap((item, absoluteIndex) =>
+    desiredSet.has(item.videoId) ? [{ item, absoluteIndex }] : [],
+  );
+  if (relevant.length !== sourceVideoIds.length) return { status: "ambiguous" };
+
+  const occurrences = new Map<string, number>();
+  for (const entry of relevant) {
+    occurrences.set(entry.item.videoId, (occurrences.get(entry.item.videoId) ?? 0) + 1);
+  }
+  if (sourceVideoIds.some((videoId) => occurrences.get(videoId) !== 1)) {
+    return { status: "ambiguous" };
+  }
+
+  for (let index = 0; index < sourceVideoIds.length; index += 1) {
+    const expectedVideoId = sourceVideoIds[index];
+    const atIndex = relevant[index];
+    if (atIndex?.item.videoId === expectedVideoId) continue;
+    const expected = relevant.find(
+      (entry, candidateIndex) =>
+        candidateIndex > index && entry.item.videoId === expectedVideoId,
+    );
+    if (!expected || !atIndex || expected.absoluteIndex <= atIndex.absoluteIndex) {
+      return { status: "ambiguous" };
+    }
+    return {
+      status: "move",
+      playlistItemId: expected.item.playlistItemId,
+      videoId: expected.item.videoId,
+      fromIndex: expected.absoluteIndex,
+      toIndex: atIndex.absoluteIndex,
+    };
+  }
+  return { status: "aligned" };
+}
+
+function applyLocalOrderMove(
+  items: PlaylistPageItem[],
+  fromIndex: number,
+  toIndex: number,
+): void {
+  if (fromIndex <= toIndex || fromIndex >= items.length || toIndex < 0) return;
+  const [moved] = items.splice(fromIndex, 1);
+  if (moved) items.splice(toIndex, 0, moved);
+}
+
 async function loadDueConfigs(
   env: PlaylistSyncEnv,
   now: number,
@@ -502,7 +669,7 @@ async function loadDueConfigs(
   const result = await env.DB.prepare(
     `SELECT event_id, playlist_id, sync_mode, sync_interval_minutes,
             sync_status, next_sync_at, last_synced_at, last_full_scan_at,
-            scan_started_at, scan_page_token
+            scan_started_at, scan_page_token, last_error
      FROM event_youtube_playlist_sync
      WHERE enabled = 1
        AND playlist_id IS NOT NULL
@@ -787,12 +954,19 @@ export function calculateSyncDiff(
 ): { additions: string[]; removals: RemoteItemRow[] } {
   const sourceSet = new Set(sourceVideoIds);
   const remoteVideoSet = new Set(remoteItems.map((item) => item.youtube_video_id));
+  const seenSourceRemote = new Set<string>();
+  const removals =
+    mode === "mirror"
+      ? remoteItems.filter((item) => {
+          if (!sourceSet.has(item.youtube_video_id)) return true;
+          if (seenSourceRemote.has(item.youtube_video_id)) return true;
+          seenSourceRemote.add(item.youtube_video_id);
+          return false;
+        })
+      : [];
   return {
     additions: sourceVideoIds.filter((videoId) => !remoteVideoSet.has(videoId)),
-    removals:
-      mode === "mirror"
-        ? remoteItems.filter((item) => !sourceSet.has(item.youtube_video_id))
-        : [],
+    removals,
   };
 }
 
@@ -918,6 +1092,8 @@ async function syncOneEvent(
   let added = 0;
   let removed = 0;
   let orderFallback = false;
+  let orderRepairPending = false;
+  let orderRepairWarning: string | null = null;
   const sourcePositions = new Map(
     sourceVideoIds.map((videoId, index) => [videoId, index]),
   );
@@ -974,13 +1150,92 @@ async function syncOneEvent(
     removed += 1;
   }
 
-  const hasRemaining =
+  const mutationDiffRemaining =
     added < additions.length || removed < removals.length;
-  const lastError = hasRemaining
+  const shouldRepairOrder =
+    !mutationDiffRemaining &&
+    !orderFallback &&
+    mutationBudget.remaining > 0 &&
+    (scanRequired ||
+      added > 0 ||
+      removed > 0 ||
+      config.last_error === "playlist_order_repair_continuing" ||
+      config.last_error === "playlist_order_repair_request_budget");
+
+  if (shouldRepairOrder) {
+    const snapshot = await loadPlaylistOrderSnapshot(
+      config.playlist_id,
+      accessToken,
+      quota,
+      requestBudget,
+      signal,
+      fetchImpl,
+    );
+    if (!snapshot.complete) {
+      if (snapshot.reason === "request_budget") {
+        orderRepairPending = true;
+        orderRepairWarning = "playlist_order_repair_request_budget";
+      } else if (snapshot.reason === "quota") {
+        orderRepairWarning = "playlist_order_repair_quota_deferred";
+      } else {
+        orderRepairWarning = "playlist_order_repair_scan_limit_exceeded";
+      }
+    } else {
+      const workingOrder = [...snapshot.items];
+      let repaired = 0;
+      while (
+        repaired < MAX_ORDER_REPAIRS_PER_RUN &&
+        mutationBudget.remaining > 0
+      ) {
+        signal?.throwIfAborted();
+        const plan = planPlaylistOrderRepair(sourceVideoIds, workingOrder);
+        if (plan.status === "aligned") break;
+        if (plan.status === "ambiguous") {
+          orderRepairWarning = "playlist_order_repair_ambiguous_remote_items";
+          break;
+        }
+        if (!quota.canSpend(50) || requestBudget.remaining <= 0) {
+          orderRepairPending = true;
+          orderRepairWarning = "playlist_order_repair_request_budget";
+          break;
+        }
+        const moved = await updatePlaylistItemPosition(
+          config.playlist_id,
+          { playlistItemId: plan.playlistItemId, videoId: plan.videoId },
+          plan.toIndex,
+          accessToken,
+          quota,
+          requestBudget,
+          signal,
+          fetchImpl,
+        );
+        if (!moved) {
+          orderFallback = true;
+          break;
+        }
+        mutationBudget.remaining -= 1;
+        repaired += 1;
+        applyLocalOrderMove(workingOrder, plan.fromIndex, plan.toIndex);
+      }
+
+      if (!orderFallback && !orderRepairWarning) {
+        const remainingPlan = planPlaylistOrderRepair(sourceVideoIds, workingOrder);
+        if (remainingPlan.status === "move") {
+          orderRepairPending = true;
+          orderRepairWarning = "playlist_order_repair_continuing";
+        } else if (remainingPlan.status === "ambiguous") {
+          orderRepairWarning = "playlist_order_repair_ambiguous_remote_items";
+        }
+      }
+    }
+  }
+
+  const hasRemaining = mutationDiffRemaining || orderRepairPending;
+  const lastError = mutationDiffRemaining
     ? "playlist_mutation_batch_continuing"
     : orderFallback
       ? "playlist_order_fallback_manual_sort_required"
-      : null;
+      : orderRepairWarning;
   signal?.throwIfAborted();
   await env.DB.prepare(
     `UPDATE event_youtube_playlist_sync
