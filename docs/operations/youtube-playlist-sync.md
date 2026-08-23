@@ -53,7 +53,7 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 
 ## FlameNode側
 
-1. `0042_event_youtube_playlist_sync.sql` と、現行までの全migration（投稿枠順のD1 indexは `0060_youtube_playlist_slot_order_index.sql`）を対象D1へ適用します。
+1. `0042_event_youtube_playlist_sync.sql` を含む現行までの全migrationを対象D1へ適用します。
 2. Workerをデプロイします。
 3. `/manage/events/{eventId}/youtube-playlist` を開きます。
 4. 再生リストURLまたはID、同期方式、同期間隔を保存します。
@@ -81,11 +81,11 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 
 ## Cloudflare / D1 最適化
 
-- `0060_youtube_playlist_slot_order_index.sql` は `status='submitted' AND video_id IS NOT NULL` の枠だけを対象に、`(event_id, video_id, start_time, sort_order)` のpartial composite indexを作成します。
-- 投稿枠順JOINで全 `slots` を走査しないためのindexで、既存データの更新やテーブル再構築は行いません。
-- migration末尾の `PRAGMA optimize` で追加indexをquery plannerへ反映させます。
-- source取得はD1側でYouTube ID重複排除と順序決定を行い、Worker側で全件sortし直しません。
+- 投稿枠順の取得はD1側でYouTube ID重複排除と順序決定を行い、Worker側で全作品を再sortしません。
+- `slots` には現行schemaで `slots_event_idx(event_id, start_time)` と `slots_video_idx(video_id)` が存在します。今回の同期順変更はこの既存indexを利用し、新しいschema migrationを追加しません。
+- migration-onlyのindexを追加すると `schema.ts` とactive migrationのindex manifestがずれるため、最適化目的だけのschema driftは作らない方針です。
 - 外部APIは1 invocationあたり固定request budget、YouTube mutationは固定件数上限を持ち、Workerの長時間化とquota急増を防ぎます。
+- Web Worker側はSmart Placementを利用し、静的assetsはWorkerを通さずedge配信する構成を維持します。
 
 ## 無料枠向け上限
 
