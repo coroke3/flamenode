@@ -72,6 +72,9 @@ const SYNC_JOBS_HEARTBEAT_SEC = 4 * 60;
 const SYNC_JOBS_WALL_CLOCK_DEADLINE_MS = 13 * 60 * 1_000;
 /** UTC 03:00台で blocked 復旧確認と blocklist 日次整合を1回走らせる。 */
 const DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR = 3;
+// Cron runs at :07 and :52 every hour. Restrict the daily reconciliation to
+// the metadata slot so it cannot run three times during the 03:00 hour.
+const DAILY_YOUTUBE_RELATED_SLOT_UTC_MINUTE = 7;
 /**
  * blocked recheck(最大5 D1) + related enqueue(2) + targeted score(1)
  * + ranking enqueue worst-case(3)。related変化なし時はdaily reconcile(2)と入れ替わる。
@@ -113,7 +116,10 @@ export function isDailyYoutubeRelatedSlot(now = new Date()): boolean {
   if (Number.isNaN(now.getTime())) {
     throw new Error("invalid youtube related schedule");
   }
-  return now.getUTCHours() === DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR;
+  return (
+    now.getUTCHours() === DAILY_YOUTUBE_RELATED_SLOT_UTC_HOUR &&
+    now.getUTCMinutes() === DAILY_YOUTUBE_RELATED_SLOT_UTC_MINUTE
+  );
 }
 
 /**

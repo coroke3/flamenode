@@ -87,6 +87,9 @@ test("Cloudflare D1のretry推奨transient errorをqueueでも再試行する", 
     "Cannot resolve D1 DB due to transient issue on remote node.",
     "Internal error in D1 DB storage caused object to be reset.",
     "reset because its code was updated",
+    "SQLITE_BUSY: database is locked",
+    "D1_ERROR: internal error",
+    "Failed to parse body as JSON: internal error",
   ]) {
     assert.equal(isRetryableQueueError(new Error(message)), true, message);
   }

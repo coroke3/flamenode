@@ -61,6 +61,9 @@ if (!runningWithTsx) {
         }
         throw new Error(`unexpected mutation mode: ${currentHarness.mutationMode}`);
       },
+      asBatchRunnable(statement) {
+        return statement;
+      },
     },
   });
 

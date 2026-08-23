@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
+import { asBatchRunnable } from "@/lib/audit/mutate";
 import { staticRebuildQueue } from "@/lib/db/schema";
 import { auditAction } from "@/lib/audit/helpers";
 import { generateId } from "@/lib/utils/id";
@@ -301,7 +302,11 @@ export async function enqueueStaticRebuildMany(
     if (batch.statements.length === 0) return;
 
     await db.batch(
-      batch.statements as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]],
+      batch.statements
+        .map((statement) => asBatchRunnable(db, statement)) as [
+        BatchItem<"sqlite">,
+        ...BatchItem<"sqlite">[],
+      ],
     );
     await wakeAfterSuccessfulEnqueue({
       ...options,

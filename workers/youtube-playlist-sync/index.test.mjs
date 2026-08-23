@@ -171,7 +171,7 @@ test("stale削除が上限到達時はcleanup cursorで再開待ちにする", a
   const env = staleCleanupEnv(PLAYLIST_STALE_DELETE_BATCH_SIZE);
   const completed = await cleanupStaleScanItems(
     env,
-    { event_id: "event-1" },
+    { event_id: "event-1", playlist_id: "playlist-1" },
     123,
     456,
   );
@@ -179,7 +179,12 @@ test("stale削除が上限到達時はcleanup cursorで再開待ちにする", a
   const deleteCall = env.calls.find(({ sql }) =>
     sql.includes("DELETE FROM event_youtube_playlist_items"),
   );
-  assert.deepEqual(deleteCall.args, ["event-1", 123, PLAYLIST_STALE_DELETE_BATCH_SIZE]);
+  assert.deepEqual(deleteCall.args, [
+    "event-1",
+    123,
+    PLAYLIST_STALE_DELETE_BATCH_SIZE,
+    "playlist-1",
+  ]);
   assert.ok(env.calls.some(({ args }) => args.includes("__flamenode_stale_cleanup__")));
 });
 
@@ -187,7 +192,7 @@ test("stale削除が上限未満ならscanを完了する", async () => {
   const env = staleCleanupEnv(3);
   const completed = await cleanupStaleScanItems(
     env,
-    { event_id: "event-1" },
+    { event_id: "event-1", playlist_id: "playlist-1" },
     123,
     456,
   );
@@ -198,7 +203,12 @@ test("stale削除が上限未満ならscanを完了する", async () => {
 test("stale削除のchangesが得られない場合は完了扱いにしない", async () => {
   const env = staleCleanupEnv(undefined);
   await assert.rejects(
-    () => cleanupStaleScanItems(env, { event_id: "event-1" }, 123, 456),
+    () => cleanupStaleScanItems(
+      env,
+      { event_id: "event-1", playlist_id: "playlist-1" },
+      123,
+      456,
+    ),
     /youtube_playlist_stale_cleanup_changes_unavailable/,
   );
   assert.equal(
@@ -214,7 +224,7 @@ test("stale削除中のdeadline中断後は状態更新を続けない", async (
   await assert.rejects(
     () => cleanupStaleScanItems(
       env,
-      { event_id: "event-1" },
+      { event_id: "event-1", playlist_id: "playlist-1" },
       123,
       456,
       controller.signal,

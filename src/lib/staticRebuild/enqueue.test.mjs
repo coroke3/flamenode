@@ -41,6 +41,7 @@ test("複数enqueueは1件ずつSELECTするN+1経路ではなくbulk builderを
     source.indexOf("async function wakeAfterSuccessfulEnqueue"),
   );
   assert.match(manyFn, /buildStaticRebuildQueueBatch\(db, items\)/);
+  assert.match(manyFn, /map\(\(statement\) => asBatchRunnable\(db, statement\)\)/);
   assert.match(manyFn, /await db\.batch/);
   assert.match(manyFn, /wakeAfterSuccessfulEnqueue/);
   assert.doesNotMatch(manyFn, /Promise\.all/);

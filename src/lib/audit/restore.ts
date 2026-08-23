@@ -4,7 +4,7 @@ import type { DB } from "@/lib/db/client";
 import { auditLogs, auditRestoreRuns, users, videoEvents } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import { evaluateRestoreCapability } from "./capability";
-import { assertChanges, mutateWithAudit } from "./mutate";
+import { asBatchRunnable, assertChanges, mutateWithAudit } from "./mutate";
 import { getRestoreRegistration } from "./registry";
 import { computeChangedKeys } from "./snapshot";
 import { buildEventChangeQueueBatch, buildAfterVideoStatusChangeQueueBatch, MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
@@ -138,7 +138,7 @@ async function persistPermanentRestoreFailure(args: {
   const status =
     args.status ?? RestoreStatus.not_restorable;
 
-  await args.db.batch([
+  const statements = [
     args.db
       .update(auditLogs)
       .set({
@@ -163,7 +163,11 @@ async function persistPermanentRestoreFailure(args: {
       executed_at: args.now,
     }),
     args.db.run(assertChanges(1)),
-  ]);
+  ].map((statement) => asBatchRunnable(args.db, statement));
+
+  await args.db.batch(
+    statements as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]],
+  );
 
   return runId;
 }

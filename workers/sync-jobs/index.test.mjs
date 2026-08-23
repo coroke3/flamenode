@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
   DAILY_BLOCKED_RECHECK_D1_RESERVE,
+  isDailyYoutubeRelatedSlot,
   isPlaylistSyncSlot,
   normalizePlaylistQuotaStop,
 } from "./index.ts";
@@ -29,6 +30,14 @@ test("sync-jobs health は共通Cron Workerからserviceとcommitを返す", () 
   assert.match(sharedSource, /pathname\s*===\s*[\r\n\s]*"\/health"/);
   assert.match(sharedSource, /commit:/);
   assert.match(sharedSource, /env\.BUILD_COMMIT_SHA/);
+});
+
+test("日次YouTube関連再確認は03:07 UTCの1回だけ実行する", () => {
+  assert.equal(isDailyYoutubeRelatedSlot(new Date("2026-07-13T03:07:00Z")), true);
+  assert.equal(isDailyYoutubeRelatedSlot(new Date("2026-07-13T03:22:00Z")), false);
+  assert.equal(isDailyYoutubeRelatedSlot(new Date("2026-07-13T03:37:00Z")), false);
+  assert.equal(isDailyYoutubeRelatedSlot(new Date("2026-07-13T03:52:00Z")), false);
+  assert.equal(isDailyYoutubeRelatedSlot(new Date("2026-07-13T04:07:00Z")), false);
 });
 
 test("score変更時はtopとlist_popularとrecommend_coreを重複排除付きで再生成予約する", () => {

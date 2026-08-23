@@ -17,7 +17,7 @@ export interface BoundedRetryOptions {
 }
 
 const RETRYABLE_MESSAGE =
-  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up|Network connection lost|Replica disconnected from primary|Cannot resolve D1 DB due to transient issue on remote node|storage caused object to be reset|reset because its code was updated|rate.?limit|too many requests|\b429\b|\b5\d\d\b|temporar(?:y|ily)|transient|try again|timeout/i;
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up|Network connection lost|Replica disconnected from primary|Cannot resolve D1 DB due to transient issue on remote node|storage caused object to be reset|reset because its code was updated|SQLITE_BUSY|database is locked|D1_ERROR.*internal error|Failed to parse body as JSON.*internal error|rate.?limit|too many requests|\b429\b|\b5\d\d\b|temporar(?:y|ily)|transient|try again|timeout/i;
 const FATAL_MESSAGE =
   /no such table|no such column|schema|constraint failed|foreign key|not null|unique constraint|invalid (?:input|payload|config)|unauthorized|forbidden|missing (?:binding|secret|token|configuration)|D1 DB is overloaded|D1 DB(?:'s)? isolate exceeded its memory limit|D1 DB exceeded its CPU time limit|D1 DB storage operation exceeded timeout/i;
 

@@ -762,6 +762,7 @@ async function loadRemoteItems(
 async function upsertScannedItems(
   env: PlaylistSyncEnv,
   eventId: string,
+  playlistId: string,
   items: PlaylistPageItem[],
   seenAt: number,
   signal?: AbortSignal,
@@ -771,20 +772,30 @@ async function upsertScannedItems(
   for (let offset = 0; offset < items.length; offset += SCAN_UPSERT_CHUNK_SIZE) {
     signal?.throwIfAborted();
     const chunk = items.slice(offset, offset + SCAN_UPSERT_CHUNK_SIZE);
-    const placeholders = chunk.map(() => "(?, ?, ?, ?, 0, ?)").join(", ");
+    // Guard every scan write by the playlist identity. An in-flight worker
+    // must not attach the old playlist's remote items after an admin changes
+    // the event configuration.
+    const selects = chunk
+      .map(
+        () =>
+          "SELECT ?, ?, ?, ?, 0, ? WHERE EXISTS (SELECT 1 FROM event_youtube_playlist_sync WHERE event_id = ? AND playlist_id = ? AND enabled = 1)",
+      )
+      .join(" UNION ALL ");
     const values = chunk.flatMap((item) => [
       eventId,
       item.playlistItemId,
       item.videoId,
       seenAt,
       seenAt,
+      eventId,
+      playlistId,
     ]);
     statements.push(
       env.DB.prepare(
         `INSERT INTO event_youtube_playlist_items (
            event_id, playlist_item_id, youtube_video_id, seen_at,
            managed_by_flamenode, created_at
-         ) VALUES ${placeholders}
+         ) ${selects}
          ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
            youtube_video_id = excluded.youtube_video_id,
            seen_at = excluded.seen_at`,
@@ -793,7 +804,14 @@ async function upsertScannedItems(
   }
   signal?.throwIfAborted();
   if (statements.length > 0) {
-    await env.DB.batch(statements);
+    const results = await env.DB.batch(statements);
+    const changed = results.reduce(
+      (sum, result) => sum + Math.max(0, Number(result?.meta?.changes ?? 0)),
+      0,
+    );
+    if (changed < items.length) {
+      throw new Error("youtube_playlist_config_changed");
+    }
     signal?.throwIfAborted();
   }
 }
@@ -801,6 +819,7 @@ async function upsertScannedItems(
 async function markScanStarted(
   env: PlaylistSyncEnv,
   eventId: string,
+  playlistId: string,
   scanStartedAt: number,
   now: number,
   signal?: AbortSignal,
@@ -810,10 +829,16 @@ async function markScanStarted(
     `UPDATE event_youtube_playlist_sync
      SET sync_status = 'scanning', scan_started_at = ?1,
          scan_page_token = NULL, last_error = NULL, updated_at = ?2
-     WHERE event_id = ?3`,
+     WHERE event_id = ?3 AND playlist_id = ?4`,
   )
-    .bind(scanStartedAt, now, eventId)
-    .run();
+    .bind(scanStartedAt, now, eventId, playlistId)
+    .run()
+    .then((result) => {
+      if (Number(result.meta?.changes ?? 0) !== 1) {
+        throw new Error("youtube_playlist_config_changed");
+      }
+      return result;
+    });
   signal?.throwIfAborted();
 }
 
@@ -828,6 +853,10 @@ export async function cleanupStaleScanItems(
   const result = await env.DB.prepare(
     `DELETE FROM event_youtube_playlist_items
      WHERE event_id = ?1
+       AND EXISTS (
+         SELECT 1 FROM event_youtube_playlist_sync
+         WHERE event_id = ?1 AND playlist_id = ?4 AND enabled = 1
+       )
        AND playlist_item_id IN (
          SELECT playlist_item_id
          FROM event_youtube_playlist_items
@@ -840,6 +869,7 @@ export async function cleanupStaleScanItems(
       config.event_id,
       scanStartedAt,
       PLAYLIST_STALE_DELETE_BATCH_SIZE,
+      config.playlist_id,
     )
     .run();
   signal?.throwIfAborted();
@@ -854,7 +884,7 @@ export async function cleanupStaleScanItems(
        SET sync_status = 'scanning', scan_started_at = ?1,
            scan_page_token = ?2, next_sync_at = ?3,
            last_error = 'playlist_stale_cleanup_continuing', updated_at = ?4
-       WHERE event_id = ?5`,
+       WHERE event_id = ?5 AND playlist_id = ?6`,
     )
       .bind(
         scanStartedAt,
@@ -862,8 +892,15 @@ export async function cleanupStaleScanItems(
         now + RETRY_DELAY_SEC,
         now,
         config.event_id,
+        config.playlist_id,
       )
-      .run();
+      .run()
+      .then((update) => {
+        if (Number(update.meta?.changes ?? 0) !== 1) {
+          throw new Error("youtube_playlist_config_changed");
+        }
+        return update;
+      });
     signal?.throwIfAborted();
     return false;
   }
@@ -873,10 +910,16 @@ export async function cleanupStaleScanItems(
      SET sync_status = 'idle', last_full_scan_at = ?1,
          scan_started_at = NULL, scan_page_token = NULL,
          next_sync_at = ?1, last_error = NULL, updated_at = ?1
-     WHERE event_id = ?2`,
+       WHERE event_id = ?2 AND playlist_id = ?3`,
   )
-    .bind(now, config.event_id)
-    .run();
+    .bind(now, config.event_id, config.playlist_id)
+    .run()
+    .then((result) => {
+      if (Number(result.meta?.changes ?? 0) !== 1) {
+        throw new Error("youtube_playlist_config_changed");
+      }
+      return result;
+    });
   signal?.throwIfAborted();
   return true;
 }
@@ -899,7 +942,14 @@ async function scanPlaylist(
   }
   let pageToken = config.scan_started_at ? config.scan_page_token : null;
   if (config.scan_started_at == null) {
-    await markScanStarted(env, config.event_id, scanStartedAt, now, signal);
+    await markScanStarted(
+      env,
+      config.event_id,
+      config.playlist_id,
+      scanStartedAt,
+      now,
+      signal,
+    );
   }
 
   for (let page = 0; page < MAX_SCAN_PAGES_PER_EVENT; page += 1) {
@@ -917,6 +967,7 @@ async function scanPlaylist(
     await upsertScannedItems(
       env,
       config.event_id,
+      config.playlist_id,
       result.items,
       scanStartedAt,
       signal,
@@ -929,10 +980,22 @@ async function scanPlaylist(
          SET sync_status = 'scanning', scan_started_at = ?1,
              scan_page_token = ?2,
              last_error = 'playlist_stale_cleanup_continuing', updated_at = ?3
-         WHERE event_id = ?4`,
+         WHERE event_id = ?4 AND playlist_id = ?5`,
       )
-        .bind(scanStartedAt, STALE_CLEANUP_CURSOR, now, config.event_id)
-        .run();
+        .bind(
+          scanStartedAt,
+          STALE_CLEANUP_CURSOR,
+          now,
+          config.event_id,
+          config.playlist_id,
+        )
+        .run()
+        .then((update) => {
+          if (Number(update.meta?.changes ?? 0) !== 1) {
+            throw new Error("youtube_playlist_config_changed");
+          }
+          return update;
+        });
       signal?.throwIfAborted();
       return cleanupStaleScanItems(env, config, scanStartedAt, now, signal);
     }
@@ -944,10 +1007,23 @@ async function scanPlaylist(
      SET sync_status = 'scanning', scan_started_at = ?1,
          scan_page_token = ?2, next_sync_at = ?3,
          last_error = 'playlist_scan_continuing', updated_at = ?4
-     WHERE event_id = ?5`,
+     WHERE event_id = ?5 AND playlist_id = ?6`,
   )
-    .bind(scanStartedAt, pageToken, now + RETRY_DELAY_SEC, now, config.event_id)
-    .run();
+    .bind(
+      scanStartedAt,
+      pageToken,
+      now + RETRY_DELAY_SEC,
+      now,
+      config.event_id,
+      config.playlist_id,
+    )
+    .run()
+    .then((update) => {
+      if (Number(update.meta?.changes ?? 0) !== 1) {
+        throw new Error("youtube_playlist_config_changed");
+      }
+      return update;
+    });
   signal?.throwIfAborted();
   return false;
 }
@@ -1002,7 +1078,7 @@ function trimmedSecret(value: string | undefined): string {
 
 async function markEventError(
   env: PlaylistSyncEnv,
-  eventId: string,
+  config: SyncConfigRow,
   error: unknown,
   now: number,
   signal?: AbortSignal,
@@ -1014,22 +1090,30 @@ async function markEventError(
      SET sync_status = ?1, next_sync_at = ?2,
          last_error = ?3, last_full_scan_at = NULL,
          scan_started_at = NULL, scan_page_token = NULL, updated_at = ?4
-     WHERE event_id = ?5`,
+     WHERE event_id = ?5 AND playlist_id = ?6`,
   )
     .bind(
       deferred ? "deferred" : "failed",
       now + (deferred ? FULL_SCAN_INTERVAL_SEC : FAILURE_RETRY_SEC),
       errorCode(error),
       now,
-      eventId,
+      config.event_id,
+      config.playlist_id,
     )
-    .run();
+    .run()
+    .then((update) => {
+      if (Number(update.meta?.changes ?? 0) !== 1) {
+        throw new Error("youtube_playlist_config_changed");
+      }
+      return update;
+    });
   signal?.throwIfAborted();
 }
 
 async function insertLocalItem(
   env: PlaylistSyncEnv,
   eventId: string,
+  playlistId: string,
   playlistItemId: string,
   videoId: string,
   now: number,
@@ -1040,14 +1124,25 @@ async function insertLocalItem(
     `INSERT INTO event_youtube_playlist_items (
        event_id, playlist_item_id, youtube_video_id, seen_at,
        managed_by_flamenode, created_at
-     ) VALUES (?1, ?2, ?3, ?4, 1, ?4)
+     )
+     SELECT ?1, ?2, ?3, ?4, 1, ?4
+     WHERE EXISTS (
+       SELECT 1 FROM event_youtube_playlist_sync
+       WHERE event_id = ?1 AND playlist_id = ?5 AND enabled = 1
+     )
      ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
        youtube_video_id = excluded.youtube_video_id,
        seen_at = excluded.seen_at,
        managed_by_flamenode = 1`,
   )
-    .bind(eventId, playlistItemId, videoId, now)
-    .run();
+    .bind(eventId, playlistItemId, videoId, now, playlistId)
+    .run()
+    .then((result) => {
+      if (Number(result.meta?.changes ?? 0) !== 1) {
+        throw new Error("youtube_playlist_config_changed");
+      }
+      return result;
+    });
   signal?.throwIfAborted();
 }
 
@@ -1130,6 +1225,7 @@ async function syncOneEvent(
     await insertLocalItem(
       env,
       config.event_id,
+      config.playlist_id,
       inserted.id,
       videoId,
       now,
@@ -1159,10 +1255,20 @@ async function syncOneEvent(
     mutationBudget.remaining -= 1;
     await env.DB.prepare(
       `DELETE FROM event_youtube_playlist_items
-       WHERE event_id = ?1 AND playlist_item_id = ?2`,
+       WHERE event_id = ?1 AND playlist_item_id = ?2
+         AND EXISTS (
+           SELECT 1 FROM event_youtube_playlist_sync
+           WHERE event_id = ?1 AND playlist_id = ?3 AND enabled = 1
+         )`,
     )
-      .bind(config.event_id, item.playlist_item_id)
-      .run();
+      .bind(config.event_id, item.playlist_item_id, config.playlist_id)
+      .run()
+      .then((result) => {
+        if (Number(result.meta?.changes ?? 0) !== 1) {
+          throw new Error("youtube_playlist_config_changed");
+        }
+        return result;
+      });
     signal?.throwIfAborted();
     removed += 1;
   }
@@ -1259,7 +1365,7 @@ async function syncOneEvent(
     `UPDATE event_youtube_playlist_sync
      SET sync_status = ?1, next_sync_at = ?2,
          last_synced_at = ?3, last_error = ?4, updated_at = ?5
-     WHERE event_id = ?6`,
+     WHERE event_id = ?6 AND playlist_id = ?7`,
   )
     .bind(
       hasRemaining ? "deferred" : "synced",
@@ -1270,8 +1376,15 @@ async function syncOneEvent(
       lastError,
       now,
       config.event_id,
+      config.playlist_id,
     )
-    .run();
+    .run()
+    .then((update) => {
+      if (Number(update.meta?.changes ?? 0) !== 1) {
+        throw new Error("youtube_playlist_config_changed");
+      }
+      return update;
+    });
   signal?.throwIfAborted();
   return;
 }
@@ -1291,10 +1404,16 @@ async function markOAuthFailure(
       `UPDATE event_youtube_playlist_sync
        SET sync_status = 'failed', next_sync_at = ?1,
            last_error = ?2, updated_at = ?3
-       WHERE event_id = ?4`,
+       WHERE event_id = ?4 AND playlist_id = ?5`,
     )
-      .bind(now + FAILURE_RETRY_SEC, code, now, config.event_id)
-      .run();
+      .bind(now + FAILURE_RETRY_SEC, code, now, config.event_id, config.playlist_id)
+      .run()
+      .then((result) => {
+        if (Number(result.meta?.changes ?? 0) !== 1) {
+          throw new Error("youtube_playlist_config_changed");
+        }
+        return result;
+      });
     signal?.throwIfAborted();
   }
 }
@@ -1419,7 +1538,7 @@ export async function syncEventPlaylists(
       processed += 1;
     } catch (error) {
       signal?.throwIfAborted();
-      await markEventError(trackedEnv, config.event_id, error, now, signal);
+      await markEventError(trackedEnv, config, error, now, signal);
       failed += 1;
       if (isQuotaError(error)) {
         quotaStopped = true;
