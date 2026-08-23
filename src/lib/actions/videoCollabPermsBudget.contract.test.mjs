@@ -65,3 +65,22 @@ test("100人通知はJSON1 bindの1 statementへまとめ、必要時だけ200�
   assert.match(actionSource, /offset \+= 200/);
   assert.match(actionSource, /notificationInputs\.slice\(offset, offset \+ 200\)/);
 });
+
+test("編集権限の解除後再付与は過去sent dedupeに吸収されず新しい通知遷移になる", () => {
+  assert.match(
+    notificationSource,
+    /function scopeBulkNotificationDedupeForTransition\(/,
+  );
+  assert.match(
+    notificationSource,
+    /prepared\.type !== "video_edit_permission_granted"/,
+  );
+  assert.match(
+    notificationSource,
+    /dedupeKey: `\$\{prepared\.dedupeKey\}:transition:\$\{crypto\.randomUUID\(\)\}`/,
+  );
+  assert.match(
+    notificationSource,
+    /scopeBulkNotificationDedupeForTransition\(prepared\)/,
+  );
+});
