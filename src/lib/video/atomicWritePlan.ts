@@ -30,6 +30,11 @@ export class VideoAtomicPlanBudgetError extends Error {
 export function inspectVideoAtomicWritePlanBudget(
   plan: VideoAtomicWritePlan,
 ): D1AuditMutationBudget {
+  const actorXValidationQueryCount = plan.audits.some(
+    (audit) => Boolean(audit.actor_x_user_id?.trim()),
+  )
+    ? 1
+    : 0;
   return planD1AuditMutationBudget({
     mutationStatementCount: plan.statements.length,
     mutationAssertionCount: plan.expectedChanges.filter(
@@ -37,6 +42,7 @@ export function inspectVideoAtomicWritePlanBudget(
     ).length,
     auditEntryCount: plan.audits.length,
     distinctActorCount: new Set(plan.audits.map((audit) => audit.actor_user_id)).size,
+    actorXValidationQueryCount,
   });
 }
 
