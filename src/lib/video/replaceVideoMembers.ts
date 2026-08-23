@@ -145,6 +145,69 @@ function buildVideoChapterBulkInsertSql(
   ];
 }
 
+type ManagedChapterRow = typeof videoChapters.$inferSelect;
+
+function canonicalChapterRows(
+  rows: readonly ManagedChapterRow[],
+): ManagedChapterRow[] {
+  return [...rows].sort((left, right) =>
+    compareSqliteBinaryText(left.id, right.id),
+  );
+}
+
+/**
+ * created_at / updated_at はchapter内容の同値判定に含めない。
+ * DB readはchapter_time,id順、新規配列はmember順なので入力順を比較すると偽変更になる。
+ */
+function managedChapterRowsEqual(
+  leftRows: readonly ManagedChapterRow[],
+  rightRows: readonly ManagedChapterRow[],
+): boolean {
+  if (leftRows.length !== rightRows.length) return false;
+  const left = canonicalChapterRows(leftRows);
+  const right = canonicalChapterRows(rightRows);
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]!;
+    const b = right[index]!;
+    if (
+      a.id !== b.id ||
+      a.video_id !== b.video_id ||
+      a.x_user_id !== b.x_user_id ||
+      a.chapter_time !== b.chapter_time ||
+      a.chapter_label !== b.chapter_label ||
+      a.note !== b.note ||
+      a.visibility !== b.visibility
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function buildChapterAuditSummary(
+  videoId: string,
+  rows: readonly ManagedChapterRow[],
+): Record<string, unknown> {
+  const memberIds = new Set<string>();
+  let minTime: number | null = null;
+  let maxTime: number | null = null;
+  let noteCount = 0;
+  for (const row of rows) {
+    if (row.x_user_id) memberIds.add(row.x_user_id);
+    minTime = minTime === null ? row.chapter_time : Math.min(minTime, row.chapter_time);
+    maxTime = maxTime === null ? row.chapter_time : Math.max(maxTime, row.chapter_time);
+    if (row.note) noteCount += 1;
+  }
+  return {
+    id: videoId,
+    row_count: rows.length,
+    member_count: memberIds.size,
+    min_time: minTime,
+    max_time: maxTime,
+    note_count: noteCount,
+  };
+}
+
 type CanonicalizedMemberInputs = {
   members: MemberInput[];
   canonicalByXId: Map<string, string>;
@@ -518,19 +581,10 @@ export async function buildReplaceVideoMembersPlan(
       });
     }
   }
-  const chapterSnapshot = (rows: Array<typeof videoChapters.$inferSelect>) =>
-    rows.map((row) => ({
-      id: row.id,
-      video_id: row.video_id,
-      x_user_id: row.x_user_id,
-      chapter_time: row.chapter_time,
-      chapter_label: row.chapter_label,
-      note: row.note,
-      visibility: row.visibility,
-    }));
-  const chaptersChanged =
-    JSON.stringify(chapterSnapshot(existingManagedChapters)) !==
-    JSON.stringify(chapterSnapshot(nextManagedChapters));
+  const chaptersChanged = !managedChapterRowsEqual(
+    existingManagedChapters,
+    nextManagedChapters,
+  );
 
   const plan = emptyVideoAtomicWritePlan();
   if (
@@ -661,12 +715,14 @@ export async function buildReplaceVideoMembersPlan(
       table_name: "video_chapters_member_set",
       target_id: args.videoId,
       operation: "MERGE",
-      before: { id: args.videoId, rows: chapterSnapshot(existingManagedChapters) },
-      after: { id: args.videoId, rows: chapterSnapshot(nextManagedChapters) },
+      before: buildChapterAuditSummary(args.videoId, existingManagedChapters),
+      after: buildChapterAuditSummary(args.videoId, nextManagedChapters),
       actor_user_id: args.actorUserId,
       context: "video-save:member-chapters",
-      retention_class: "restorable",
-      restore_strategy: "custom_adapter",
+      reason: "管理チャプター集合を更新（CPU/D1負荷抑制のため監査は集約情報のみ保持）",
+      retention_class: "long_audit",
+      // video_chapters_member_set のrestore adapterは存在しないため、復元可能と誤表示しない。
+      restore_strategy: "none",
       strict: true,
     });
   }
