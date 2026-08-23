@@ -6,6 +6,8 @@ import { PUBLIC_X_ICON_MAP_OBJECT_KEY } from "../../src/lib/publicData/publicIco
 
 type EnqueueEnv = { DB: D1Database; R2: R2Bucket };
 
+export const USERS_SHARED_REPAIR_MAX_D1_STATEMENTS = 2;
+
 export async function enqueueUsersIndexRebuild(
   env: EnqueueEnv,
   reason: string,
