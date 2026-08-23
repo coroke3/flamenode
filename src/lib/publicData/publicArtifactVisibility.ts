@@ -219,6 +219,23 @@ export function filterPublicArtifactPayload<T>(
         isPublicVideoRow(row, context),
       ) as T;
     }
+    case "event_release": {
+      const event = root.event;
+      if (event != null && !isPublicEventRow(event, context)) return null;
+      const next = withFilteredRows(root, ["videos"], (row) =>
+        isPublicVideoRow(row, context),
+      );
+      // Do not expose the pre-filter count when a visibility fence removed a
+      // stale video from the public artifact. Preserve the truncation signal,
+      // but make the count describe only rows that can be returned.
+      if (next !== root && Array.isArray(next.videos)) {
+        return {
+          ...next,
+          total: next.videos.length,
+        } as T;
+      }
+      return next as T;
+    }
     case "events_index":
       return withFilteredNestedRows(
         withFilteredRows(

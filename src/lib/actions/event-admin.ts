@@ -42,6 +42,7 @@ import {
   eventBaseObjectKey,
   eventComposedObjectKey,
   eventSlotsObjectKey,
+  eventReleaseObjectKey,
 } from "@/lib/publicData/staticEventDetailCore";
 import {
   buildPartsJson,
@@ -798,6 +799,7 @@ export async function updateEvent(
       eventComposedObjectKey(data.id),
       eventBaseObjectKey(data.id),
       eventSlotsObjectKey(data.id),
+      eventReleaseObjectKey(data.id),
       "events/index.json",
       "list/recent.json",
       "list/popular.json",
@@ -933,6 +935,7 @@ export async function deleteEvent(
     eventComposedObjectKey(eventId),
     eventBaseObjectKey(eventId),
     eventSlotsObjectKey(eventId),
+    eventReleaseObjectKey(eventId),
     "events/index.json",
     "list/recent.json",
     "list/popular.json",

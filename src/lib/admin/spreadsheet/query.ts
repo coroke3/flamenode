@@ -1,9 +1,9 @@
 import "server-only";
-import { and, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
 import { mutateWithAudit } from "@/lib/audit/mutate";
-import { spreadsheetImportRuns } from "@/lib/db/schema";
+import { spreadsheetImportRuns, videoEvents, videos } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { SpreadsheetImportPreviewClaims } from "./importPreviewToken";
 import type { SpreadsheetTableDef } from "./registry";
@@ -236,6 +236,60 @@ function spreadsheetDb() {
   const db = getDatabase();
   if (!db) throw new Error("db_unavailable");
   return db;
+}
+
+const SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE = 80;
+
+async function loadSpreadsheetVideoReleaseEvents(
+  mutations: readonly SpreadsheetMutation[],
+): Promise<Map<string, string[]>> {
+  const videoIds = [
+    ...new Set(
+      mutations
+        .filter((mutation) => mutation.audit.table_name === "video_members")
+        .flatMap((mutation) =>
+          [mutation.audit.before?.video_id, mutation.audit.after?.video_id]
+            .map((value) => (value == null ? null : String(value).trim()))
+            .filter((value): value is string => Boolean(value)),
+        ),
+    ),
+  ];
+  const eventIdsByVideo = new Map<string, Set<string>>();
+  if (videoIds.length === 0) return new Map();
+
+  const db = spreadsheetDb();
+  for (
+    let offset = 0;
+    offset < videoIds.length;
+    offset += SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE
+  ) {
+    const chunk = videoIds.slice(
+      offset,
+      offset + SPREADSHEET_VIDEO_EVENT_LOOKUP_CHUNK_SIZE,
+    );
+    const rows = await db
+      .select({
+        videoId: videos.id,
+        eventId: videoEvents.event_id,
+        primaryEventId: videos.primary_event_id,
+      })
+      .from(videos)
+      .leftJoin(videoEvents, eq(videoEvents.video_id, videos.id))
+      .where(inArray(videos.id, chunk));
+    for (const row of rows) {
+      const videoId = String(row.videoId ?? "").trim();
+      if (!videoId) continue;
+      const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
+      for (const eventId of [row.eventId, row.primaryEventId]) {
+        const normalized = String(eventId ?? "").trim();
+        if (normalized) eventIds.add(normalized);
+      }
+      eventIdsByVideo.set(videoId, eventIds);
+    }
+  }
+  return new Map(
+    [...eventIdsByVideo].map(([videoId, eventIds]) => [videoId, [...eventIds]]),
+  );
 }
 
 async function validateSpreadsheetForeignKeys(
@@ -479,6 +533,7 @@ async function executeSpreadsheetMutations(
     : mutations;
   if (allMutations.length === 0) return false;
   const db = spreadsheetDb();
+  const videoReleaseEvents = await loadSpreadsheetVideoReleaseEvents(mutations);
   const staticRebuildTargets = planSpreadsheetStaticRebuildTargets(
     mutations.map((mutation) => ({
       table: mutation.audit.table_name,
@@ -486,6 +541,17 @@ async function executeSpreadsheetMutations(
       before: mutation.audit.before,
       after: mutation.audit.after,
       actorUserId: mutation.audit.actor_user_id,
+      eventReleaseEventIds:
+        mutation.audit.table_name === "video_members"
+          ? [
+              ...new Set(
+                [mutation.audit.before?.video_id, mutation.audit.after?.video_id]
+                  .map((value) => (value == null ? null : String(value).trim()))
+                  .filter((value): value is string => Boolean(value))
+                  .flatMap((videoId) => videoReleaseEvents.get(videoId) ?? []),
+              ),
+            ]
+          : undefined,
     })),
   );
   const queue = await buildStaticRebuildQueueBatch(db, staticRebuildTargets);

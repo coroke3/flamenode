@@ -383,6 +383,7 @@ export async function applyVideoUpdatePlan(
   }
   let previousMemberXUserIds: string[] = [];
   let memberAggregationChanged = false;
+  let memberProjectionChanged = false;
   if ((sections.members || sections.member_chapters) && plan.memberSubmission) {
     const membersPlan = await buildReplaceVideoMembersPlan(db, {
       videoId: plan.videoId,
@@ -393,6 +394,7 @@ export async function applyVideoUpdatePlan(
     const hasMemberAudit = membersPlan.audits.some(
       (audit) => audit.table_name === "video_members_set",
     );
+    memberProjectionChanged = hasMemberAudit;
     if (hasMemberAudit) {
       previousMemberXUserIds =
         extractPreviousPublicMemberXUserIdsFromMembersPlan(membersPlan);
@@ -510,11 +512,17 @@ export async function applyVideoUpdatePlan(
       requestedByUserId: plan.operatorUserId,
     });
   }
-  if (isPublicVideo && plan.rebuildFlags.eventProjectionChanged) {
+  if (isPublicVideo && (plan.rebuildFlags.eventProjectionChanged || memberProjectionChanged)) {
     for (const eventId of new Set([plan.primaryEventId, ...existingEventIds, ...targetEventIds])) {
       if (!eventId) continue;
       queueItems.push({
         targetType: "event_base",
+        targetId: eventId,
+        reason: "video_projection_update",
+        requestedByUserId: plan.operatorUserId,
+      });
+      queueItems.push({
+        targetType: "event_release",
         targetId: eventId,
         reason: "video_projection_update",
         requestedByUserId: plan.operatorUserId,

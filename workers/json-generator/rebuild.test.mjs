@@ -406,6 +406,15 @@ test("rebuildEventSlotsはslots 1 queryとJS summaryを使う", () => {
   assert.doesNotMatch(slotsFn, /GROUP BY status/);
 });
 
+test("rebuildEventReleaseは公開動画を500件・公開メンバーを100件へbounded projectionする", () => {
+  const block = source.slice(source.indexOf("async function rebuildEventRelease"), source.indexOf("function stripEventPublicVideoScore"));
+  assert.match(block, /vm\.is_public_member = 1/);
+  assert.match(block, /LIMIT \$\{EVENT_RELEASE_MAX_VIDEOS \+ 1\}/);
+  assert.match(block, /EVENT_RELEASE_MAX_MEMBERS_PER_VIDEO/);
+  assert.match(block, /targetType: "event_release"/);
+  assert.match(source, /case "event_release"/);
+});
+
 test("rebuildEvent composerはR2 base/slotsのみでevents/{id}.jsonを書く", () => {
   const eventFn = source.match(
     /async function rebuildEvent\([\s\S]*?(?=type StaticRelatedVideoRow)/,
@@ -1230,6 +1239,30 @@ test("再公開 artifact 完成後だけ release_pending fence を token CAS で
   assert.match(source, /result\.meta\?\.changes/);
   assert.match(source, /state = 'released'/);
   assert.match(source, /writeWorkerVisibilityBlockedEntitiesManifest/);
+});
+
+test("event release is required before an event promotion fence is released", () => {
+  const releaseFn = source.match(
+    /async function releaseVisibilityFenceAfterRebuild\([\s\S]*?(?=\nasync function )/,
+  )?.[0];
+  assert.ok(releaseFn);
+  assert.match(releaseFn, /target_type IN \('event_base', 'event_slots', 'event_release'\)/);
+  assert.match(releaseFn, /sourceByTarget\.get\("event_release"\)/);
+  const eventReleaseFn = source.match(
+    /async function rebuildEventRelease\([\s\S]*?(?=\nfunction stripEventPublicVideoScore)/,
+  )?.[0];
+  assert.ok(eventReleaseFn);
+  assert.match(eventReleaseFn, /releaseVisibilityFenceAfterRebuild\([\s\S]*?"event"/);
+});
+
+test("event release member query bounds public member rows per video", () => {
+  const eventReleaseFn = source.match(
+    /async function rebuildEventRelease\([\s\S]*?(?=\nfunction stripEventPublicVideoScore)/,
+  )?.[0];
+  assert.ok(eventReleaseFn);
+  assert.match(eventReleaseFn, /ROW_NUMBER\(\) OVER/);
+  assert.match(eventReleaseFn, /member_rank <= \$\{EVENT_RELEASE_MAX_MEMBERS_PER_VIDEO\}/);
+  assert.match(eventReleaseFn, /vm\.is_public_member = 1/);
 });
 
 test("legacy X ID casing does not strand a release fence", () => {

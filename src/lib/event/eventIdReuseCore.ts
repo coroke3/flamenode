@@ -7,6 +7,7 @@ export const EVENT_ID_RENAME_CLEANUP_TARGETS = [
   ["event", "__event_id__"],
   ["event_base", "__event_id__"],
   ["event_slots", "__event_id__"],
+  ["event_release", "__event_id__"],
   ["list_recent", "global"],
   ["list_popular", "global"],
   ["events_index", "global"],

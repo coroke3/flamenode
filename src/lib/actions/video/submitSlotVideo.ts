@@ -610,6 +610,12 @@ async function submitSlotVideoCore(
           reason: "video_submit",
           priority: "high" as const,
         },
+        {
+          targetType: "event_release" as const,
+          targetId: eventId,
+          reason: "video_submit",
+          priority: "high" as const,
+        },
       ]),
       topSlotStatsGlobalTarget("video_submit", "normal"),
     ];

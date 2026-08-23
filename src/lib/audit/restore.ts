@@ -13,6 +13,7 @@ import {
   eventBaseObjectKey,
   eventComposedObjectKey,
   eventSlotsObjectKey,
+  eventReleaseObjectKey,
 } from "@/lib/publicData/staticEventDetailCore";
 import { RANDOM_VIDEO_POOL_OBJECT_KEY } from "@/lib/publicData/randomVideoPoolCore";
 import {
@@ -494,6 +495,7 @@ export async function restoreAuditLog(
         eventComposedObjectKey(log.target_id),
         eventBaseObjectKey(log.target_id),
         eventSlotsObjectKey(log.target_id),
+        eventReleaseObjectKey(log.target_id),
         "events/index.json",
         "list/recent.json",
         "list/popular.json",
@@ -611,6 +613,7 @@ export async function restoreAuditLog(
         cacheKeys.add(eventComposedObjectKey(eventId));
         cacheKeys.add(eventBaseObjectKey(eventId));
         cacheKeys.add(eventSlotsObjectKey(eventId));
+        cacheKeys.add(eventReleaseObjectKey(eventId));
       }
       publicCacheKeys = [...cacheKeys];
     }

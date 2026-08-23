@@ -22,6 +22,7 @@ import {
   eventBaseObjectKey,
   eventComposedObjectKey,
   eventSlotsObjectKey,
+  eventReleaseObjectKey,
 } from "@/lib/publicData/staticEventDetailCore";
 import { RANDOM_VIDEO_POOL_OBJECT_KEY } from "@/lib/publicData/randomVideoPoolCore";
 import {
@@ -380,6 +381,7 @@ export async function planVideoVisibilityTransition(
           eventComposedObjectKey(eventId),
           eventBaseObjectKey(eventId),
           eventSlotsObjectKey(eventId),
+          eventReleaseObjectKey(eventId),
         ]),
       ]
     : [];

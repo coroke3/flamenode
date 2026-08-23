@@ -38,5 +38,5 @@ test("a newer cleanup attempt wins over an older failed attempt", () => {
     { ...target, status: "done", updatedAt: 2 },
   ]);
   assert.equal(hasCompletedEventIdRenameCleanup("old-id", rows), true);
-  assert.equal(EVENT_ID_RENAME_CLEANUP_TARGETS.length, 10);
+  assert.equal(EVENT_ID_RENAME_CLEANUP_TARGETS.length, 11);
 });

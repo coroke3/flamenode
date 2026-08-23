@@ -22,6 +22,7 @@ import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
 
 function formDataBoolean(formData: FormData, name: string): boolean {
   return formData
@@ -84,6 +85,13 @@ export async function updateVideoMembersAdmin(
     await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)
   )[0];
   if (!target) return { ok: false, message: "作品が見つかりません。" };
+
+  const rebuildEvents = await loadVideoRebuildEventIds(
+    db,
+    videoId,
+    target.primary_event_id,
+  );
+  if (!rebuildEvents.ok) return { ok: false, message: rebuildEvents.message };
 
   const isCollab = formDataBoolean(formData, "is_collab");
   const memberValidation = validateVideoMemberSubmission(formData, isCollab);
@@ -181,6 +189,15 @@ export async function updateVideoMembersAdmin(
             targetId: "global",
             reason: "video_members_update",
           }]
+        : []),
+      ...(videoPublicContentChanged
+        ? rebuildEvents.eventIds.map((eventId) => ({
+            targetType: "event_release" as const,
+            targetId: eventId,
+            reason: "video_members_update",
+            priority: "high" as const,
+            requestedByUserId: user.id,
+          }))
         : []),
       ...(isPublicVideo && memberAggregationChanged
         ? [

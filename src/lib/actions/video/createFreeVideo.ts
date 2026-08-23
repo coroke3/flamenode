@@ -365,6 +365,12 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
               reason: "video_create",
               priority: "high" as const,
             },
+            {
+              targetType: "event_release" as const,
+              targetId: eventId,
+              reason: "video_create",
+              priority: "high" as const,
+            },
           ]
         : []),
     ];

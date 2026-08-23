@@ -38,7 +38,7 @@ export function queueModeWhereClause(mode: OperationMode): string {
   if (mode === "static_only") return ` AND priority = 'high'`;
   if (mode === "read_only") {
     return ` AND target_type IN (
-      'event', 'event_base', 'event_slots', 'video', 'user',
+      'event', 'event_base', 'event_slots', 'event_release', 'video', 'user',
       'top', 'top_announcements', 'top_events', 'top_latest', 'top_nostalgic', 'top_recommended', 'top_slot_stats', 'top_stats',
       'recommend', 'recommend_core', 'users_index'
     )`;

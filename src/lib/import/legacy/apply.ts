@@ -43,6 +43,7 @@ import {
   eventBaseObjectKey,
   eventComposedObjectKey,
   eventSlotsObjectKey,
+  eventReleaseObjectKey,
 } from "@/lib/publicData/staticEventDetailCore";
 import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
 import {
@@ -1228,6 +1229,7 @@ async function applyEvent(
     [
       { targetType: "event_base", targetId: event.id, priority: "high", reason: rebuildReason },
       { targetType: "event_slots", targetId: event.id, priority: "high", reason: rebuildReason },
+      { targetType: "event_release", targetId: event.id, priority: "high", reason: rebuildReason },
       { targetType: "events_index", targetId: "global", priority: "low", reason: rebuildReason },
       { targetType: "search_index", targetId: "global", priority: "low", reason: rebuildReason },
     ],
@@ -1426,6 +1428,7 @@ async function applyEvent(
       eventComposedObjectKey(event.id),
       eventBaseObjectKey(event.id),
       eventSlotsObjectKey(event.id),
+      eventReleaseObjectKey(event.id),
     ]);
     await invalidateEventExportCache(event.id);
   }
@@ -1894,6 +1897,12 @@ async function applyVideo(
         },
         {
           targetType: "event_slots" as const,
+          targetId: eventId,
+          priority: "high" as const,
+          reason: videoRebuildReason,
+        },
+        {
+          targetType: "event_release" as const,
           targetId: eventId,
           priority: "high" as const,
           reason: videoRebuildReason,
@@ -2470,6 +2479,7 @@ async function applyVideo(
         eventComposedObjectKey(eventId),
         eventBaseObjectKey(eventId),
         eventSlotsObjectKey(eventId),
+        eventReleaseObjectKey(eventId),
       ]),
     ]);
   }

@@ -1,6 +1,7 @@
 import type { StaticRebuildTargetType } from "@/lib/staticRebuild/types";
 
 const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
+  event_release: "イベント公開Release",
   top: "トップページ（composer）",
   top_recommended: "トップ注目棚",
   top_latest: "トップ新着棚",
@@ -28,6 +29,7 @@ const TARGET_LABELS: Record<StaticRebuildTargetType, string> = {
 };
 
 const TARGET_ID_HINTS: Record<StaticRebuildTargetType, string> = {
+  event_release: "イベントID",
   top: "global など固定ID",
   top_recommended: "global など固定ID",
   top_latest: "global など固定ID",
@@ -82,6 +84,7 @@ export function staticRebuildAdminHref(
     case "event":
     case "event_base":
     case "event_slots":
+    case "event_release":
       return `/manage/events/${encodeURIComponent(targetId)}`;
     case "video":
       return `/admin/videos/${encodeURIComponent(targetId)}`;

@@ -95,6 +95,12 @@ if (runTestWithTsx(import.meta.url)) {
 
     assert.match(fnBody, /const isPublicVideo = plan\.target\.visibility_status === "public"/);
     assert.match(fnBody, /const creatorAggregationChanged = memberAggregationChanged/);
+    assert.match(fnBody, /let memberProjectionChanged = false/);
+    assert.match(fnBody, /memberProjectionChanged = hasMemberAudit/);
+    assert.match(
+      fnBody,
+      /isPublicVideo && \(plan\.rebuildFlags\.eventProjectionChanged \|\| memberProjectionChanged\)/,
+    );
     assert.match(fnBody, /if \(isPublicVideo && creatorAggregationChanged/);
     assert.match(fnBody, /collectMemberAggregationAffectedXUserIds/);
     assert.match(fnBody, /previousMemberXUserIds/);

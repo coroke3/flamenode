@@ -10,6 +10,7 @@ export const STATIC_REBUILD_TARGET_TYPES = [
   "events_index",
   "event_base",
   "event_slots",
+  "event_release",
   "event",
   "video",
   "user",
