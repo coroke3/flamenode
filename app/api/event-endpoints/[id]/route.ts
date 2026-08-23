@@ -177,7 +177,7 @@ export async function GET(
       req,
       {
         error: "invalid_format",
-        allowed: ["v5", "legacy", "new", "old", "v1"],
+        allowed: ["v5", "legacy"],
       },
       "no-store",
       400,
@@ -194,8 +194,8 @@ export async function GET(
       {
         error: "invalid_export_options",
         allowed: {
-          format: ["v5", "legacy", "new", "old", "v1"],
-          update: ["realtime", "scheduled", "economy"],
+          format: ["v5", "legacy"],
+          update: ["realtime", "scheduled"],
           refresh: EVENT_EXPORT_REFRESH_MINUTES,
         },
       },
