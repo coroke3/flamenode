@@ -15,6 +15,7 @@ import {
   recalcScoreForVideoIds,
 } from "../score-recalc/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
+import { withD1Budget } from "../shared/d1Budget.ts";
 import {
   runJob,
   throwIfJobFailed,
@@ -258,12 +259,15 @@ export async function runSyncJobs(
   env: Env,
   execution: CronRunContext,
 ): Promise<void> {
+  // Cloudflare D1 Freeの50 queries/invocationは個別jobではなくCron全体へ適用される。
+  // lease heartbeat・GA4・YouTube・score・日次blocked再確認まで同じhard guardを共有する。
+  const budgetEnv = withD1Budget(env);
   await runJob(
     "sync-jobs",
     "cron",
     async () => {
       const leased = await withCronLease(
-        env,
+        budgetEnv,
         {
           jobName: "sync-jobs",
           leaseSeconds: SYNC_JOBS_LEASE_SEC,
@@ -278,11 +282,11 @@ export async function runSyncJobs(
               "youtube-playlist-sync",
               async () => {
                 signal?.throwIfAborted();
-                const result = await syncEventPlaylists(env, signal);
+                const result = await syncEventPlaylists(budgetEnv, signal);
                 signal?.throwIfAborted();
                 return result;
               },
-              { commitSha: env.BUILD_COMMIT_SHA },
+              { commitSha: budgetEnv.BUILD_COMMIT_SHA },
             );
             return throwIfJobFailed(
               "sync-jobs",
@@ -296,14 +300,14 @@ export async function runSyncJobs(
             "ga4-trending-sync",
             async () => {
               signal?.throwIfAborted();
-              const result = await syncGa4Trending(env, signal);
+              const result = await syncGa4Trending(budgetEnv, signal);
               signal?.throwIfAborted();
               return result;
             },
-            { rethrow: false, commitSha: env.BUILD_COMMIT_SHA },
+            { rethrow: false, commitSha: budgetEnv.BUILD_COMMIT_SHA },
           );
 
-          const queueFlags = resolveQueueFeatureFlags(env);
+          const queueFlags = resolveQueueFeatureFlags(budgetEnv);
           const includePending = !queueFlags.youtubeSyncEnabled;
           let youtube: SyncBatchResult | null = null;
           const metadataJob = await runJob(
@@ -311,14 +315,14 @@ export async function runSyncJobs(
             "youtube-sync-metadata",
             async () => {
               signal?.throwIfAborted();
-              youtube = await syncBatch(env, undefined, signal, {
+              youtube = await syncBatch(budgetEnv, undefined, signal, {
                 mode: "scheduled_only",
                 includePending,
               });
               signal?.throwIfAborted();
               return youtube;
             },
-            { commitSha: env.BUILD_COMMIT_SHA },
+            { commitSha: budgetEnv.BUILD_COMMIT_SHA },
           );
           if (!metadataJob.succeeded) {
             return throwIfJobFailed(
@@ -330,10 +334,10 @@ export async function runSyncJobs(
           if (!youtube) {
             throw new Error("youtube_sync_result_missing");
           }
-          await runYoutubeSyncPostCommit(env, youtube, {
+          await runYoutubeSyncPostCommit(budgetEnv, youtube, {
             signal,
             useScoreBatchFallback: true,
-            commitSha: env.BUILD_COMMIT_SHA,
+            commitSha: budgetEnv.BUILD_COMMIT_SHA,
           });
 
           const now = new Date(execution.scheduledTime);
@@ -344,32 +348,32 @@ export async function runSyncJobs(
               "youtube-blocked-recheck",
               async () => {
                 signal?.throwIfAborted();
-                blockedYoutube = await syncBatch(env, undefined, signal, {
+                blockedYoutube = await syncBatch(budgetEnv, undefined, signal, {
                   mode: "blocked_recheck_only",
                 });
                 signal?.throwIfAborted();
                 return blockedYoutube;
               },
-              { rethrow: false, commitSha: env.BUILD_COMMIT_SHA },
+              { rethrow: false, commitSha: budgetEnv.BUILD_COMMIT_SHA },
             );
             if (blockedRecheck.succeeded && blockedYoutube) {
-              await runYoutubeSyncPostCommit(env, blockedYoutube, {
+              await runYoutubeSyncPostCommit(budgetEnv, blockedYoutube, {
                 signal,
-                commitSha: env.BUILD_COMMIT_SHA,
+                commitSha: budgetEnv.BUILD_COMMIT_SHA,
               });
             }
 
             const reconciled = await enqueueYoutubeRelatedProjectionRebuilds(
-              env,
+              budgetEnv,
               "youtube_related_blocklist_daily_reconcile",
               "low",
               signal,
             );
-            await wakeStaticRebuildAfterScoreEnqueue(env, reconciled);
+            await wakeStaticRebuildAfterScoreEnqueue(budgetEnv, reconciled);
           }
 
           if (queueFlags.youtubeSyncEnabled) {
-            await maybeResendYoutubePendingWake(env);
+            await maybeResendYoutubePendingWake(budgetEnv);
           }
 
           return throwIfJobFailed(
@@ -383,7 +387,7 @@ export async function runSyncJobs(
         ? (leased.value ?? { skipped: 1 })
         : { skipped: 1 };
     },
-    { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
+    { rethrow: true, commitSha: budgetEnv.BUILD_COMMIT_SHA },
   );
 }
 
@@ -400,6 +404,7 @@ export default {
     batch: MessageBatch<unknown>,
     env: Env,
   ): Promise<void> {
-    await handleYoutubeSyncWakeQueue(batch, env);
+    // pending consumerもmetadata/score/continuationを同一invocation budgetで計測する。
+    await handleYoutubeSyncWakeQueue(batch, withD1Budget(env));
   },
 };
