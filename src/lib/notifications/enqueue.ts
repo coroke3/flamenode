@@ -180,6 +180,27 @@ export async function buildKnownRecipientNotificationBatch(
 }
 
 /**
+ * 編集権限付与は同じ作品・同じ利用者でも「解除→再付与」が別イベントになる。
+ * notification_outbox のdedupe uniqueはsentも対象なので、永続keyのままだと再付与通知が
+ * 古いsent行に吸収される。bulk builderを使うこの通知だけ、1付与遷移ごとのkeyへする。
+ * 同一batch内の重複は変換前keyで検査し、同時付与はpermission CAS側が片方だけcommitする。
+ */
+function scopeBulkNotificationDedupeForTransition(
+  prepared: PreparedNotification,
+): PreparedNotification {
+  if (
+    prepared.type !== "video_edit_permission_granted" ||
+    !prepared.dedupeKey
+  ) {
+    return prepared;
+  }
+  return {
+    ...prepared,
+    dedupeKey: `${prepared.dedupeKey}:transition:${crypto.randomUUID()}`,
+  };
+}
+
+/**
  * 大人数のrequired_atomic通知向けJSON1 builder。
  * 1 recipient = 1 D1 statement にせず、最大200件を1 statementへまとめる。
  * active dedupe partial uniqueとの競合は INSERT OR IGNORE でidempotentに扱うため、
@@ -209,7 +230,11 @@ export async function buildKnownRecipientNotificationBulkBatch(
   const rows = preparedInputs.map(({ input, prepared }) => {
     const recipientUserId = input.recipientUserId.trim();
     if (!recipientUserId) throw new Error("notification_recipient_required");
-    return buildNotificationRow(prepared, recipientUserId, now);
+    return buildNotificationRow(
+      scopeBulkNotificationDedupeForTransition(prepared),
+      recipientUserId,
+      now,
+    );
   });
   const payload = JSON.stringify(rows);
   const statement = db.run(sql`
