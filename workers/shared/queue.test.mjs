@@ -80,6 +80,30 @@ test("HTTP 429 and 5xx are retryable but 4xx validation errors are not", () => {
   );
 });
 
+test("Cloudflare D1のretry推奨transient errorをqueueでも再試行する", () => {
+  for (const message of [
+    "Network connection lost.",
+    "Replica disconnected from primary.",
+    "Cannot resolve D1 DB due to transient issue on remote node.",
+    "Internal error in D1 DB storage caused object to be reset.",
+    "reset because its code was updated",
+  ]) {
+    assert.equal(isRetryableQueueError(new Error(message)), true, message);
+  }
+});
+
+test("D1 overload/CPU/memory limitは同一invocation内でblind retryしない", () => {
+  for (const message of [
+    "D1 DB is overloaded. Requests queued for too long.",
+    "D1 DB is overloaded. Too many requests queued.",
+    "D1 DB's isolate exceeded its memory limit and was reset.",
+    "D1 DB exceeded its CPU time limit and was reset.",
+    "D1 DB storage operation exceeded timeout which caused object to be reset.",
+  ]) {
+    assert.equal(isRetryableQueueError({ status: 503, message }), false, message);
+  }
+});
+
 test("a custom retry classifier can override the default", async () => {
   let calls = 0;
   const value = await withBoundedRetry(
