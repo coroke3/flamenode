@@ -40,6 +40,17 @@ test("X IDなし・不正な公開メンバーは押しても失敗する付与�
   assert.doesNotMatch(candidates, /!p\.x_user_id\?\.trim\(\) && !p\.display_name\.trim\(\)/);
 });
 
+test("権限loaderは公開メンバーをcan_edit=0でも残しhiddenはeditorだけ残す", () => {
+  assert.match(
+    loaderSource,
+    /if \(row\.is_public_member !== 1 && row\.can_edit !== 1\) continue/,
+  );
+  assert.doesNotMatch(
+    loaderSource,
+    /if \(row\.can_edit !== 1 && row\.is_public_member !== 0\) continue/,
+  );
+});
+
 test("権限送信前にもX IDをcanonical化してServerと同じ20文字制約を使う", () => {
   const submit = managerSource.match(/const submitUpsert = [\s\S]*?\n  };/)?.[0];
   assert.ok(submit);
@@ -63,7 +74,7 @@ test("通知可能人数は承認済みX ID連携かつユーザー通知ONだ�
   assert.match(loaderSource, /has_notifiable_link/);
   assert.match(loaderSource, /INNER JOIN \$\{users\} auth_user ON auth_user\.id = link\.auth_user_id/);
   assert.match(loaderSource, /auth_user\.is_notification_enabled = 1/);
-  assert.match(loaderSource, /can_notify: row\.has_notifiable_link === 1/);
+  assert.match(loaderSource, /can_notify: Boolean\(existing\?\.can_notify\) \|\| row\.has_notifiable_link === 1/);
   assert.match(loaderSource, /if \(editor\.can_notify\) notifiableEditorCount \+= 1/);
   assert.doesNotMatch(loaderSource, /notifiableEditorCount: editors\.length - unlinkedEditorCount/);
 });
