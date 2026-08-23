@@ -632,17 +632,23 @@ export async function buildReplaceVideoMembersPlan(
           json_extract(value, '$.creative_start_date'),
           json_extract(value, '$.approval_status')
         FROM json_each(${payload})
+        WHERE 1 = 1
+        ON CONFLICT(id) DO UPDATE SET
+          id = excluded.id
       `),
     );
+    // SELECT後に別requestが同じX IDを作っていても、同一IDのno-op UPDATEを
+    // 1 changeとして扱い、参加者保存全体を不要なUNIQUE競合で落とさない。
     plan.expectedChanges.push(newXUsers.length);
     plan.audits.push({
       table_name: "x_users_member_batch",
       target_id: args.videoId,
-      operation: "CREATE",
+      operation: "MERGE",
       before: null,
       after: { id: args.videoId, rows: newXUsers },
       actor_user_id: args.actorUserId,
       context: "video-save:member-profile",
+      reason: "参加者X IDプロフィール行をpendingで一括確保",
       retention_class: "long_audit",
       restore_strategy: "none",
       strict: true,
