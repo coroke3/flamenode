@@ -11,16 +11,31 @@ import {
   processStaticRebuildQueue,
   reconcileStaleQueue,
 } from "../json-generator/queue.ts";
-import { ensureTopSlotStatsOnR2 } from "../json-generator/topSlotStatsEnqueue.ts";
-import { ensureTopSectionsOnR2 } from "../json-generator/topSectionsEnqueue.ts";
-import { ensureUsersSharedInputsOnR2 } from "../json-generator/usersSharedInputsEnqueue.ts";
-import { ensureDeployGlobalRebuilds } from "../json-generator/deployGlobalRebuildEnqueue.ts";
+import {
+  ensureTopSlotStatsOnR2,
+  TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS,
+} from "../json-generator/topSlotStatsEnqueue.ts";
+import {
+  ensureTopSectionsOnR2,
+  TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS,
+} from "../json-generator/topSectionsEnqueue.ts";
+import {
+  ensureUsersSharedInputsOnR2,
+  USERS_SHARED_REPAIR_MAX_D1_STATEMENTS,
+} from "../json-generator/usersSharedInputsEnqueue.ts";
+import {
+  ensureDeployGlobalRebuilds,
+  DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS,
+} from "../json-generator/deployGlobalRebuildEnqueue.ts";
 import { ensureDailyTopNostalgicShuffle } from "../json-generator/rebuild.ts";
 import {
   ensureEventPlaylistBackfill,
   EVENT_PLAYLIST_BACKFILL_MAX_STATEMENTS,
 } from "../json-generator/eventPlaylistBackfill.ts";
-import { ensureYoutubeRelatedSharedInputsOnR2 } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
+import {
+  ensureYoutubeRelatedSharedInputsOnR2,
+  YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS,
+} from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import {
@@ -63,15 +78,7 @@ const CLEANUP_LEASE_SEC = 10 * 60;
 export const CONTENT_JOBS_RECOVERY_MAX_TARGETS = 3;
 /** lease 競合で processed=0 が続くときの無限ループ防止。 */
 export const CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED = 3;
-
-// Recovery repairはR2欠落時だけD1へenqueueするが、複数artifactが同時欠落すると
-// 1回のCronで一気にstatement数が増える。各処理のworst-caseをsoft limit前に予約し、
-// 入らない修復は次回Cronへ繰り越す。hard limit 50は例外ではなく最後の安全網にする。
-const DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS = 4;
-const YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS = 14;
-const USERS_SHARED_REPAIR_MAX_D1_STATEMENTS = 2;
-const TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS = 2;
-const TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS = 12;
+/** reconcileStaleQueue は bounded UPDATE 1本。 */
 const STALE_QUEUE_RECONCILE_MAX_D1_STATEMENTS = 1;
 
 function hasSoftD1Budget(budget: D1Budget, requiredStatements: number): boolean {
@@ -139,11 +146,13 @@ export async function runContentJobsRecovery(
 
           const now = Math.floor(Date.now() / 1000);
 
+          // 各repair自身がworst-case statement数をexportする。実装変更時に呼出側の
+          // 手書き予算だけ古くなりhard limitを越える、または過剰にskipする状態を防ぐ。
           let deployGlobalRebuilds = 0;
           if (
             hasSoftD1Budget(
               rebuildEnv.d1Budget,
-              DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS,
+              DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS,
             )
           ) {
             deployGlobalRebuilds = await ensureDeployGlobalRebuilds(
@@ -159,7 +168,7 @@ export async function runContentJobsRecovery(
           if (
             hasSoftD1Budget(
               rebuildEnv.d1Budget,
-              YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS,
+              YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS,
             )
           ) {
             missingYoutubeSharedInputs =
