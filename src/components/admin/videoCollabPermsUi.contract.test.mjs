@@ -23,7 +23,29 @@ test("共同編集権限UIはDiscord Snowflake直接入力ではなくX IDを正
   assert.match(managerSource, /編集権限は X ID に付与されます/);
   assert.match(managerSource, /placeholder="X ID \(@ なし・必須\)"/);
   assert.doesNotMatch(managerSource, /placeholder="Discord User ID/);
-  assert.match(managerSource, /const canSubmit = name\.trim\(\)\.length > 0 && xUserId\.trim\(\)\.length > 0/);
+  assert.match(managerSource, /parseCanonicalXId/);
+  assert.match(managerSource, /pattern="\[A-Za-z0-9_\]\{1,20\}"/);
+  assert.match(managerSource, /maxLength=\{20\}/);
+  assert.match(managerSource, /canonicalXUserId !== null/);
+});
+
+test("X IDなし・不正な公開メンバーは押しても失敗する付与候補として表示しない", () => {
+  const candidates = managerSource.match(
+    /const grantCandidates = publicMembers\.filter\([\s\S]*?\n  \}\);/,
+  )?.[0];
+  assert.ok(candidates);
+  assert.match(candidates, /const candidateXId = parseCanonicalXId\(p\.x_user_id\)/);
+  assert.match(candidates, /if \(!candidateXId\) return false/);
+  assert.match(candidates, /parseCanonicalXId\(s\.x_user_id\) === candidateXId/);
+  assert.doesNotMatch(candidates, /!p\.x_user_id\?\.trim\(\) && !p\.display_name\.trim\(\)/);
+});
+
+test("権限送信前にもX IDをcanonical化してServerと同じ20文字制約を使う", () => {
+  const submit = managerSource.match(/const submitUpsert = [\s\S]*?\n  };/)?.[0];
+  assert.ok(submit);
+  assert.match(submit, /const xUserId = resolvedSubjectXId\(draft\)/);
+  assert.match(submit, /fd\.set\("x_user_id", xUserId\)/);
+  assert.match(submit, /英数字とアンダースコア20文字以内/);
 });
 
 test("未連携can_edit行を編集可能と誤表示しない", () => {
