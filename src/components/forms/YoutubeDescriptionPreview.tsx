@@ -60,6 +60,19 @@ export function YoutubeDescriptionPreview({
     [context, members, template],
   );
   const [draftText, setDraftText] = React.useState(rendered.text);
+  const sourceIdentity = `${String(context.event_id ?? eventTitle)}\u0000${template}`;
+  const sourceIdentityRef = React.useRef(sourceIdentity);
+
+  React.useEffect(() => {
+    if (sourceIdentityRef.current === sourceIdentity) return;
+    sourceIdentityRef.current = sourceIdentity;
+    // 別イベント/別テンプレートへ切り替わったときに、前のイベント用の
+    // 手動調整文を持ち越さない。作品情報だけの更新とは区別する。
+    setDraftMode("auto");
+    setDraftText(rendered.text);
+    manualBaseTextRef.current = rendered.text;
+    setCopyState("idle");
+  }, [rendered.text, sourceIdentity]);
 
   React.useEffect(() => {
     if (draftMode === "auto") {
