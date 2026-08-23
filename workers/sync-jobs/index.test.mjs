@@ -106,3 +106,12 @@ test("blocked適格性変更でhigh enqueue済みならdaily low enqueueを重�
     /if \([\s\S]*?!relatedAlreadyEnqueued[\s\S]*?YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS[\s\S]*?youtube_related_blocklist_daily_reconcile/,
   );
 });
+
+test("pending recovery probeはsoft limitに余裕がある時だけCOUNTを実行する", () => {
+  const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
+  const wakeIndex = cronBlock.lastIndexOf("maybeResendYoutubePendingWake(budgetEnv)");
+  assert.ok(wakeIndex > 0);
+  const guardBlock = cronBlock.slice(Math.max(0, wakeIndex - 260), wakeIndex + 80);
+  assert.match(guardBlock, /queueFlags\.youtubeSyncEnabled/);
+  assert.match(guardBlock, /hasSoftD1Budget\(budgetEnv\.d1Budget, 1\)/);
+});
