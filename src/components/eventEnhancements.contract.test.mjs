@@ -67,8 +67,13 @@ test("概要欄管理Editorはプリセット・出力例コピー・レスポ�
   assert.match(editor, /テンプレート本文をコピー/);
   assert.match(
     editor,
+    /if \(next\.length > MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH\) \{[\s\S]*setLimitBlocked\(true\);[\s\S]*return false;/,
+  );
+  assert.doesNotMatch(
+    editor,
     /next\.slice\(0, MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH\)/,
   );
+  assert.match(editor, /既存の本文は変更していません/);
   assert.match(editor, /creator_x_id: "sample_creator"/);
   assert.match(editor, /@\{\{creator_x_id\}\}/);
   assert.match(editor, /className=\{styles\.workspace\}/);
