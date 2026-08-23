@@ -407,6 +407,10 @@ function buildXUsersBulkInsertSql(rows: readonly (typeof xUsers.$inferInsert)[])
       json_extract(value, '$.creative_start_date'),
       json_extract(value, '$.approval_status')
     FROM json_each(${payload})
+    WHERE 1 = 1
+    ON CONFLICT(id) DO UPDATE SET
+      id = excluded.id
+    WHERE COALESCE(x_users.approval_status, 'pending') <> 'rejected'
   `;
 }
 
@@ -790,16 +794,19 @@ async function applyPermissionIntentsToVideo(
   }
   if (newXUsers.length > 0) {
     statements.push(db.run(buildXUsersBulkInsertSql(newXUsers)));
+    // INSERT/同時作成済みpending・approvedはいずれも1 change/rowになる。
+    // 同時にrejected化された行だけDO UPDATE WHEREが0 changeとなり、直後の
+    // changes assertionでpermission mutation全体をfail-closed rollbackする。
     expected.push(newXUsers.length);
     audits.push({
       table_name: "x_users_permission_batch",
       target_id: video.id,
-      operation: "CREATE",
+      operation: "MERGE",
       before: null,
       after: { id: video.id, rows: newXUsers },
       actor_user_id: actor.id,
       context: "video_collab_permissions",
-      reason: `共同編集者X IDをpending一括作成 privilege:${video.privilegeMode}`,
+      reason: `共同編集者X IDをpending一括確保 privilege:${video.privilegeMode}`,
       retention_class: "long_audit",
       restore_strategy: "none",
       strict: true,
