@@ -99,7 +99,11 @@ test("mixed YouTube batchではplaylistだけを実行しmetadataは1 wakeへcoa
   assert.match(source, /if \(playlistMessages\.length > 0\)/);
   assert.match(
     source,
-    /if \(mixedYoutubeKinds\)[\s\S]*ackAll\(metadataMessages\)[\s\S]*maybeResendYoutubePendingWake\(env\)/,
+    /if \(mixedYoutubeKinds\)[\s\S]*ackAll\(metadataMessages\)[\s\S]*maybeResendYoutubePendingWake\([\s\S]*env,[\s\S]*"continuation",[\s\S]*\)/,
+  );
+  assert.match(
+    source,
+    /source === "continuation" && !flags\.continuationEnabled/,
   );
   assert.match(source, /skipped \+= metadataMessages\.length/);
   assert.match(source, /youtube-pending-recovery-check/);
