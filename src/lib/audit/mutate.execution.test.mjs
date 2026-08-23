@@ -117,7 +117,7 @@ if (!runningWithTsx) {
     assert.equal(state.committed, true);
   });
 
-  test("D1 batchへ渡すraw SQLはbind依存を避けるためinline化する", async () => {
+  test("監査とchanges assertionの固定SQLはinlineのままbatchへ渡す", async () => {
     const { db, state } = makeDb();
     await mutateWithAudit(db, {
       mutationStatements: [makeMutation()],
@@ -153,23 +153,16 @@ if (!runningWithTsx) {
     assert.equal(state.batches[0][0], builder);
   });
 
-  test("bind パラメータ付き db.run は batch 前に inline 化する", async () => {
+  test("bind パラメータ付き db.run はinlineせずbatchまで保持する", async () => {
     const { db, state } = makeDb();
-    const parametric = {
-      config: { action: "run" },
-      getSQL: () => sql`SELECT ${"bound-value"} AS value`,
-      getQuery: () => ({ sql: "select ?", params: ["bound-value"] }),
-      _prepare: () => ({
-        getQuery: () => ({ sql: "select ?", params: ["bound-value"] }),
-        stmt: { bind: () => ({}) },
-      }),
-    };
+    const parametric = db.run(sql`SELECT ${"bound-value"} AS value`);
     await mutateWithAudit(db, {
       mutationStatements: [parametric],
       expectedMutationChanges: [null],
       audits: [makeAudit(0)],
     });
-    assert.equal(state.batches[0][0]?.getQuery().params.length, 0);
+    assert.equal(state.batches[0][0], parametric);
+    assert.deepEqual(state.batches[0][0]?.getQuery().params, ["bound-value"]);
   });
 
   test("getSQL だけ持つ statement は db.run で batch 可能な RunnableQuery に正規化する", async () => {
@@ -186,7 +179,7 @@ if (!runningWithTsx) {
     assert.equal(state.batches[0][0]?.kind, "query");
   });
 
-  test("Drizzle D1のraw batchでinline済みSQLをprepareできる", async () => {
+  test("Drizzle D1のraw batchはbind parameterをD1PreparedStatement.bindへ渡す", async () => {
     const prepared = [];
     const client = {
       prepare: (query) => ({
@@ -202,12 +195,46 @@ if (!runningWithTsx) {
     const db = drizzle(client);
 
     await db.batch([
-      db.run(sql`SELECT ${"bound-value"} AS value`.inlineParams()),
+      db.run(sql`SELECT ${"bound-value"} AS value`),
     ]);
 
     assert.equal(prepared.length, 1);
-    assert.equal(prepared[0].params.length, 0);
-    assert.match(prepared[0].query, /bound-value/);
+    assert.deepEqual(prepared[0].params, ["bound-value"]);
+    assert.doesNotMatch(prepared[0].query, /bound-value/);
+  });
+
+  test("100KB超のJSON payloadもSQL本文へ展開せず2MB未満の1 bindとして保持する", async () => {
+    const prepared = [];
+    const client = {
+      prepare: (query) => ({
+        bind: (...params) => {
+          const statement = { query, params };
+          prepared.push(statement);
+          return statement;
+        },
+      }),
+      batch: async (statements) =>
+        statements.map(() => ({ success: true, results: [], meta: {} })),
+    };
+    const db = drizzle(client);
+    const payload = JSON.stringify(
+      Array.from({ length: 300 }, (_, index) => ({
+        id: index,
+        note: "あ".repeat(400),
+      })),
+    );
+    const payloadBytes = new TextEncoder().encode(payload).byteLength;
+    assert.ok(payloadBytes > 100_000);
+    assert.ok(payloadBytes < 2_000_000);
+
+    await db.batch([
+      db.run(sql`SELECT json_array_length(${payload})`),
+    ]);
+
+    assert.equal(prepared.length, 1);
+    assert.equal(prepared[0].params.length, 1);
+    assert.equal(prepared[0].params[0], payload);
+    assert.ok(new TextEncoder().encode(prepared[0].query).byteLength < 100_000);
   });
 
   test("複数actorでは設定1回とunique actorごとのqueryになる", async () => {
@@ -266,6 +293,20 @@ if (!runningWithTsx) {
       /query 数が上限を超える/,
     );
     assert.equal(state.batches.length, 0);
+  });
+
+  test("mutation changes assertion失敗時はmutationをcommitしない", async () => {
+    const { db, state } = makeDb({ failOnMutationAssertion: true });
+    await assert.rejects(
+      mutateWithAudit(db, {
+        mutationStatements: [makeMutation()],
+        expectedMutationChanges: 1,
+        audits: [makeAudit(0)],
+      }),
+      /simulated mutation changes assertion failure/,
+    );
+    assert.equal(state.batches.length, 1);
+    assert.equal(state.committed, false);
   });
 
   test("監査chunk assertion失敗時はmutationをcommitしない", async () => {
