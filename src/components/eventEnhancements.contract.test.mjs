@@ -20,6 +20,27 @@ test("上映枠サマリーは全体+6部だけPCで7列固定しモバイル1�
   assert.doesNotMatch(css, /nth-child\(8\):last-child/);
 });
 
+test("投稿Wizardは確認画面への遷移では送信せず明示ボタンだけで提出する", async () => {
+  const [form, submitCompat] = await Promise.all([
+    readFromRoot("src/components/forms/VideoForm.tsx"),
+    readFromRoot("src/lib/forms/submitFormCompat.ts"),
+  ]);
+  assert.match(form, /wizardConfirmSubmitRequestedRef = React\.useRef\(false\)/);
+  assert.match(
+    form,
+    /if \(currentStepKey !== "confirm"\) \{[\s\S]*goWizardNext\(\);[\s\S]*return;/,
+  );
+  assert.match(
+    form,
+    /if \(!wizardConfirmSubmitRequestedRef\.current\) \{[\s\S]*「提出する」を押してください。[\s\S]*return;/,
+  );
+  assert.match(form, /type="button"[\s\S]*onClick=\{submitWizardFromConfirmation\}/);
+  assert.match(form, /if \(pending \|\| submitInFlightRef\.current\) return/);
+  assert.match(submitCompat, /requestSubmit\.call\(form\)/);
+  assert.match(submitCompat, /checkValidity\(\)/);
+  assert.doesNotMatch(form, /form\.submit\(\)/);
+});
+
 test("概要欄管理Editorはプリセットとレスポンシブ2ペインを持つ", async () => {
   const [editor, css] = await Promise.all([
     readFromRoot("src/components/admin/YoutubeDescriptionTemplateEditor.tsx"),
