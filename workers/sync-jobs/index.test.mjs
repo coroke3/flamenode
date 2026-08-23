@@ -47,14 +47,14 @@ test("UTC分が52の時だけを再生リスト同期の専用枠にする", () 
 });
 
 test("Cron deadline signalをmetadata同期とplaylist同期へ渡す", () => {
-  assert.match(source, /syncEventPlaylists\(env, signal\)/);
-  assert.match(source, /syncBatch\(env, undefined, signal,/);
+  assert.match(source, /syncEventPlaylists\(budgetEnv, signal\)/);
+  assert.match(source, /syncBatch\(budgetEnv, undefined, signal,/);
   assert.match(source, /mode:\s*"scheduled_only"/);
 });
 
 test("GA4 trending sync runs before youtube metadata in 07 slot", () => {
   assert.match(source, /ga4-trending-sync/);
-  assert.match(source, /syncGa4Trending\(env, signal\)/);
+  assert.match(source, /syncGa4Trending\(budgetEnv, signal\)/);
   const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
   const ga4Index = cronBlock.indexOf("ga4-trending-sync");
   const youtubeIndex = cronBlock.indexOf("youtube-sync-metadata");
@@ -63,5 +63,21 @@ test("GA4 trending sync runs before youtube metadata in 07 slot", () => {
   assert.doesNotMatch(
     source,
     /isPlaylistSyncSlot[\s\S]{0,500}ga4-trending-sync/,
+  );
+});
+
+test("Cron全体とQueue consumerは同じD1 hard-limit guardを使う", () => {
+  assert.match(source, /import \{ withD1Budget \} from "\.\.\/shared\/d1Budget\.ts"/);
+  const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
+  assert.match(cronBlock, /const budgetEnv = withD1Budget\(env\)/);
+  assert.match(cronBlock, /withCronLease\(\s*budgetEnv,/);
+  assert.match(cronBlock, /syncEventPlaylists\(budgetEnv, signal\)/);
+  assert.match(cronBlock, /syncGa4Trending\(budgetEnv, signal\)/);
+  assert.match(cronBlock, /syncBatch\(budgetEnv, undefined, signal,/);
+  assert.match(cronBlock, /runYoutubeSyncPostCommit\(budgetEnv, youtube,/);
+  const queueBlock = source.slice(source.indexOf("export default"));
+  assert.match(
+    queueBlock,
+    /handleYoutubeSyncWakeQueue\(batch, withD1Budget\(env\)\)/,
   );
 });
