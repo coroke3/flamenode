@@ -72,11 +72,32 @@ test("batch mutationは集合CAS guardとJSON1 bulk DMLを使う", () => {
   assert.match(body, /mutateWithAudit\(db, \{/);
 });
 
-test("OFF時は公開行を保持しhidden editorだけ削除する", () => {
+test("OFF時は全公開行の権限を落とし、全hidden editorを削除する", () => {
   const body = actionBody("applyVideoCollaboratorPermissionsBatch");
-  assert.match(body, /existing\.is_public_member === 0/);
-  assert.match(body, /deleteHiddenIds\.push\(existing\.id\)/);
-  assert.match(body, /updateRows\.push\(\{ \.\.\.existing, can_edit: 0/);
+  assert.match(body, /const publicRows = rowsForXid\.filter/);
+  assert.match(body, /const hiddenRows = rowsForXid\.filter/);
+  assert.match(body, /for \(const row of publicRows\)/);
+  assert.match(body, /updateRows\.push\(\{ \.\.\.row, can_edit: 0/);
+  assert.match(body, /for \(const hidden of hiddenRows\)/);
+  assert.match(body, /deleteHiddenIds\.push\(hidden\.id\)/);
+});
+
+test("ON時もpublic+hidden重複をX ID単位で統合する", () => {
+  const body = actionBody("applyVideoCollaboratorPermissionsBatch");
+  assert.match(body, /const rowsByXid = new Map/);
+  assert.match(body, /if \(publicRows\.length > 0\)/);
+  assert.match(body, /for \(const hidden of hiddenRows\)/);
+  assert.match(body, /deleteHiddenIds\.push\(hidden\.id\)/);
+  assert.match(body, /hiddenRows\.slice\(1\)/);
+});
+
+test("100人上限はintent入力順ではなく全変更後のnet row countで判定する", () => {
+  const body = actionBody("applyVideoCollaboratorPermissionsBatch");
+  const loopIndex = body.indexOf("for (const [xid, intentInfo] of intents)");
+  const netCheckIndex = body.indexOf("nextMemberCount > MAX_VIDEO_MEMBERS");
+  assert.ok(loopIndex >= 0);
+  assert.ok(netCheckIndex > loopIndex);
+  assert.match(body, /全intentのnet row count/);
 });
 
 test("members_jsonからはcan_editを読まない（schema側で剥がす）", async () => {
@@ -92,7 +113,9 @@ test("100人通知はX linkを一括取得しJSON1 outbox bulk builderへ渡す"
   assert.match(body, /xUserAccountLinks/);
   assert.match(body, /json_each\(\$\{JSON\.stringify\(notifyXids\)\}\)/);
   assert.match(body, /buildKnownRecipientNotificationBulkBatch\(/);
+  assert.match(body, /notificationInputs\.slice\(offset, offset \+ 200\)/);
   assert.doesNotMatch(body, /await getAuthUserIdsForXUser\(db, xid\)/);
+  assert.doesNotMatch(body, /\.limit\(notifyXids\.length/);
   const single = actionBody("upsertVideoCollaborator");
   assert.match(single, /getAuthUserIdsForXUser/);
   assert.match(single, /buildKnownRecipientNotificationBatch\(/);
@@ -103,7 +126,7 @@ test("batch監査は1人1auditでなく集合snapshotにまとめる", () => {
   assert.match(body, /table_name: "video_member_permissions_batch"/);
   assert.match(body, /operation: "MERGE"/);
   assert.match(body, /restore_strategy: "none"/);
-  assert.doesNotMatch(body, /for \(const \[xid, intentInfo\] of intents\)[\s\S]*?audits\.push\(\{[\s\S]*?target_id: existing\.id/);
+  assert.doesNotMatch(body, /target_id: existing\.id/);
 });
 
 test("member_suggestions dirty登録は本体mutationと同じatomic writeへ含まれる", () => {
