@@ -9,6 +9,7 @@ export const QUEUE_WAKE_KINDS = [
   "notification_available",
   "static_rebuild_available",
   "youtube_sync_pending",
+  "youtube_playlist_sync",
 ] as const;
 
 export type QueueWakeKind = (typeof QUEUE_WAKE_KINDS)[number];
@@ -85,6 +86,7 @@ export function kindToBindingName(kind: QueueWakeKind): string {
     case "static_rebuild_available":
       return QUEUE_BINDING_NAMES.staticRebuildWake;
     case "youtube_sync_pending":
+    case "youtube_playlist_sync":
       return QUEUE_BINDING_NAMES.youtubeSyncWake;
     default: {
       const _exhaustive: never = kind;
