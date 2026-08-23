@@ -17,6 +17,7 @@ import {
   videoMembers,
   videos,
   xUserAccountLinks,
+  xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
 import {
@@ -258,6 +259,56 @@ async function resolveSubjectXUserId(
   return { ok: true, xUserId: linked[0]! };
 }
 
+/**
+ * 最大100件のpermission intentを、x_user_aliases 1クエリで現行X IDへ解決する。
+ * aliasと現行IDが同一正本へ収束した場合は、後段の重複検査で拒否する。
+ */
+async function canonicalizePermissionIntents(
+  db: DB,
+  input: readonly PermissionIntent[],
+): Promise<PermissionIntent[]> {
+  const normalized = input.map((item) => ({
+    ...item,
+    x_user_id: normalizeXId(item.x_user_id),
+  }));
+  const candidates = Array.from(
+    new Set(normalized.map((item) => item.x_user_id).filter(Boolean)),
+  );
+  if (candidates.length === 0) return normalized;
+
+  const aliases = await db
+    .select({
+      alias_x_id: xUserAliases.alias_x_id,
+      x_user_id: xUserAliases.x_user_id,
+    })
+    .from(xUserAliases)
+    .where(sql`lower(${xUserAliases.alias_x_id}) IN (
+      SELECT lower(CAST(value AS TEXT))
+      FROM json_each(${JSON.stringify(candidates)})
+    )`);
+
+  const targetsByAlias = new Map<string, Set<string>>();
+  for (const row of aliases) {
+    const alias = normalizeXId(row.alias_x_id);
+    const target = normalizeXId(row.x_user_id);
+    if (!alias || !target) continue;
+    const targets = targetsByAlias.get(alias) ?? new Set<string>();
+    targets.add(target);
+    targetsByAlias.set(alias, targets);
+  }
+  for (const [alias, targets] of targetsByAlias) {
+    if (targets.size > 1) {
+      throw new Error(`ambiguous_x_user_alias:${alias}`);
+    }
+  }
+
+  return normalized.map((item) => {
+    const target = targetsByAlias.get(item.x_user_id);
+    const canonical = target ? Array.from(target)[0] : undefined;
+    return canonical ? { ...item, x_user_id: canonical } : item;
+  });
+}
+
 function permissionSnapshotRow(row: VideoMemberRow) {
   return {
     id: row.id,
@@ -476,9 +527,10 @@ async function applyPermissionIntentsToVideo(
     notify: boolean;
   },
 ): Promise<VideoCollabPermissionBatchResult> {
+  const canonicalIntents = await canonicalizePermissionIntents(db, args.intents);
   const intents = new Map<string, { displayName: string; intent: "on" | "off" }>();
   const duplicateXids = new Set<string>();
-  for (const item of args.intents) {
+  for (const item of canonicalIntents) {
     const xid = normalizeXId(item.x_user_id);
     if (!xid || !isCanonicalXId(xid)) {
       return { ok: false, message: "有効な X ID を指定してください。" };
@@ -853,6 +905,7 @@ function getDatabaseForPermissionAction(): DB | null {
   try {
     return getDatabase();
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[video-collab-perms] database binding unavailable", error);
     return null;
   }
