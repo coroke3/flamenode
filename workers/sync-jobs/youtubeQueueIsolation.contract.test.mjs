@@ -45,6 +45,20 @@ test("playlist quota停止はQueue retryやCron失敗へ変換しない", () => 
   );
 });
 
+test("playlistでD1へ保存済みのevent errorはdoorbellを即retryしない", () => {
+  assert.match(source, /let playlistReturned = false/);
+  assert.match(source, /playlistReturned = true/);
+  assert.match(
+    source,
+    /if \(!playlistJob\.succeeded && !playlistReturned\)/,
+  );
+  assert.match(
+    source,
+    /if \(!playlistJob\.succeeded && !playlistReturned\)[\s\S]*throw new Error\("youtube_playlist_sync_failed"\)/,
+  );
+  assert.match(source, /ackAll\(playlistMessages\)/);
+});
+
 test("continuation判定失敗は成功済みjobを壊さずRecovery Cronへ委ねる", () => {
   assert.match(source, /youtube-playlist-continuation-check/);
   assert.match(source, /youtube-pending-recovery-check/);
