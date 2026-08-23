@@ -40,7 +40,7 @@ test("参加者保存はD1等の失敗を一律に競合と断定せずbudget er
   assert.match(source, /traceId/);
   assert.match(source, /参加者設定が一度に処理できる上限を超えています/);
   assert.match(source, /参加者設定の保存に失敗しました。最新状態を確認して再試行してください/);
-  assert.doesNotMatch(source, /保存が競合しました。再読み込みして再試行してください/);
+  assert.doesNotMatch(source, /return \{ ok: false, message: "保存が競合しました。再読み込みして再試行してください。" \}/);
 });
 
 test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本にする", async () => {
@@ -51,6 +51,15 @@ test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本
   assert.match(adminSource, /member-set CAS/);
   assert.match(memberPlanSource, /buildVideoMemberSetGuardSql/);
   assert.match(memberPlanSource, /plan\.expectedChanges\.push\(null\)/);
+});
+
+test("100人stress testは実canonicalのstatic_rebuild_queue shapeを持つ", async () => {
+  const stress = await read("src/lib/video/replaceVideoMembers.maxStress.execution.test.mjs");
+  assert.match(stress, /CREATE TABLE static_rebuild_queue/);
+  assert.match(stress, /id TEXT PRIMARY KEY/);
+  assert.match(stress, /priority TEXT NOT NULL DEFAULT 'normal'/);
+  assert.match(stress, /status TEXT NOT NULL DEFAULT 'pending'/);
+  assert.match(stress, /static_rebuild_queue_target_pending_uniq/);
 });
 
 test("user詳細の作品カードは作品snapshot iconをcurrent X iconより優先する", async () => {
