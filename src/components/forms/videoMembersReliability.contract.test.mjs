@@ -59,6 +59,17 @@ test("member置換はaliasを1クエリでcanonicalizeし変換後重複を拒�
   assert.match(source, /lower\(\$\{xUsers\.id\}\)/);
 });
 
+test("チャプターだけの変更では公開メンバー100行をDELETE/INSERTし直さない", async () => {
+  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  assert.match(source, /if \(membersChanged && existing\.length > 0\)/);
+  assert.match(source, /if \(membersChanged && afterSnapshot\.rows\.length > 0\)/);
+  assert.match(
+    source,
+    /if \(membersChanged\) \{[\s\S]*table_name: "video_members_set"/,
+  );
+  assert.match(source, /if \(chaptersChanged\) \{[\s\S]*table_name: "video_chapters_member_set"/);
+});
+
 test("参加者保存はD1等の失敗を一律に競合と断定せずbudget errorを分離する", async () => {
   const source = await read("src/lib/actions/video/adminMembers.ts");
   assert.match(source, /VideoAtomicPlanBudgetError/);
