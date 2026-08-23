@@ -14,6 +14,10 @@ const ownershipSource = await readFile(
   new URL("../../lib/auth/ownership.ts", import.meta.url),
   "utf8",
 );
+const summarySource = await readFile(
+  new URL("../video/VideoEditPermissionSummary.tsx", import.meta.url),
+  "utf8",
+);
 
 test("共同編集権限UIはDiscord Snowflake直接入力ではなくX IDを正本にする", () => {
   assert.match(managerSource, /編集権限は X ID に付与されます/);
@@ -37,4 +41,10 @@ test("実際の合作所有者判定もcan_edit=1と承認済みX IDの両方を
   assert.match(ownershipSource, /eq\(videoMembers\.can_edit, 1\)/);
   assert.match(ownershipSource, /approvedXIdsWhere\(videoMembers\.x_user_id/);
   assert.match(ownershipSource, /hasCollaboratorEdit = rows\.length > 0/);
+});
+
+test("メンバー欄の権限設定アンカーは実在し専用管理ページへ到達できる", () => {
+  assert.match(summarySource, /id="video-collab-perms"/);
+  assert.match(summarySource, /\/dashboard\/edit\/\$\{encodeURIComponent\(videoId\)\}\/permissions/);
+  assert.match(summarySource, /編集できる人を管理/);
 });
