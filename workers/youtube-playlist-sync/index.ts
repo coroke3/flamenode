@@ -281,6 +281,11 @@ async function youtubeJson<T>(
   fetchImpl: FetchLike = fetch,
 ): Promise<T> {
   signal?.throwIfAborted();
+  // fetch budgetを使い切っている場合、YouTubeへ到達しないrequestのquotaをD1へ
+  // 先に予約しない。network開始後の失敗は到達有無を判定できないため返却しない。
+  if (requestBudget.remaining <= 0) {
+    throw new Error("youtube_playlist_request_budget_exhausted");
+  }
   await quota.spend(cost);
   signal?.throwIfAborted();
   const headers = new Headers(init.headers);
@@ -1100,8 +1105,14 @@ async function syncOneEvent(
 
   for (const videoId of additions) {
     signal?.throwIfAborted();
-    // position指定失敗時の末尾追加まで含め、最大100 unitsを確保してから開始する。
-    if (mutationBudget.remaining <= 0 || !quota.canSpend(100)) break;
+    // position指定失敗時の末尾追加まで含め、最大100 units / 2 subrequestを確保してから開始する。
+    if (
+      mutationBudget.remaining <= 0 ||
+      requestBudget.remaining < 2 ||
+      !quota.canSpend(100)
+    ) {
+      break;
+    }
     const position = sourcePositions.get(videoId) ?? 0;
     const inserted = await insertPlaylistItem(
       config.playlist_id,
@@ -1129,7 +1140,13 @@ async function syncOneEvent(
 
   for (const item of removals) {
     signal?.throwIfAborted();
-    if (mutationBudget.remaining <= 0 || !quota.canSpend(50)) break;
+    if (
+      mutationBudget.remaining <= 0 ||
+      requestBudget.remaining <= 0 ||
+      !quota.canSpend(50)
+    ) {
+      break;
+    }
     await deletePlaylistItem(
       item.playlist_item_id,
       accessToken,
@@ -1153,6 +1170,7 @@ async function syncOneEvent(
   const mutationDiffRemaining =
     added < additions.length || removed < removals.length;
   const shouldRepairOrder =
+    sourceVideoIds.length > 1 &&
     !mutationDiffRemaining &&
     !orderFallback &&
     mutationBudget.remaining > 0 &&
