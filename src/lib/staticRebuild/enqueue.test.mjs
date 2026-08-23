@@ -48,6 +48,20 @@ test("複数enqueueは1件ずつSELECTするN+1経路ではなくbulk builderを
   assert.doesNotMatch(source, /ENQUEUE_MANY_CONCURRENCY/);
 });
 
+test("複数enqueueのplan生成失敗もbest-effort境界内で吸収する", () => {
+  const manyFn = source.slice(
+    source.indexOf("export async function enqueueStaticRebuildMany"),
+    source.indexOf("async function wakeAfterSuccessfulEnqueue"),
+  );
+  const tryIndex = manyFn.indexOf("try {");
+  const buildIndex = manyFn.indexOf("buildStaticRebuildQueueBatch(db, items)");
+  const catchIndex = manyFn.indexOf("catch (error)");
+  assert.ok(tryIndex >= 0);
+  assert.ok(buildIndex > tryIndex);
+  assert.ok(catchIndex > buildIndex);
+  assert.match(manyFn, /targetCount: items\.length/);
+});
+
 test("queueBatchCoreはactive重複をfail-closedにする", () => {
   const rows = Array.from({ length: 16 }, (_, index) => ({
     target_type: "event",
