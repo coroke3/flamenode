@@ -1,9 +1,16 @@
 /** D1 の 1 query あたり bind parameter 上限。 */
 export const D1_MAX_BIND_PARAMETERS = 100;
-/** D1 Free の 1 invocation あたり batch query 上限。 */
+/** D1 Free の 1 invocation あたり query 上限。 */
 export const D1_MAX_BATCH_QUERIES = 50;
-/** caller の権限・対象行取得など、監査関数外の query 用に予約する余裕。 */
-export const D1_RESERVED_CALLER_QUERIES = 10;
+/**
+ * caller の認証・CostGuard・対象行・権限・alias/profile/通知先取得など、
+ * mutateWithAudit 外で既に消費される D1 query 用の安全余裕。
+ *
+ * 旧10では admin member save / video permission save の実経路が境界超過し得た。
+ * 100人保存側はchapter JSON chunksを1 compound statementへ畳み、batch側を削減した上で
+ * callerへ18 queryを確保する。
+ */
+export const D1_RESERVED_CALLER_QUERIES = 18;
 
 /** audit_logs INSERTで1 entryあたりbindする列数。AUDIT_COLUMNSと同期すること。 */
 const AUDIT_COLUMN_BIND_COUNT = 21;
