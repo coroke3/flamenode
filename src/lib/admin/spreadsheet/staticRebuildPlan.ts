@@ -8,6 +8,8 @@ export type SpreadsheetStaticRebuildMutation = {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   actorUserId: string;
+  /** Existing event links for video_members rows, loaded by the mutation caller. */
+  eventReleaseEventIds?: readonly string[];
 };
 
 /** buildStaticRebuildQueueBatch() の入力上限と同じ。超過時はapply前に分割を要求する。 */
@@ -165,6 +167,11 @@ export function planSpreadsheetStaticRebuildTargets(
           priority: "high",
         });
         add(mutation, {
+          targetType: "event_release",
+          targetId: eventId,
+          priority: "high",
+        });
+        add(mutation, {
           targetType: "events_index",
           targetId: "global",
           priority: "low",
@@ -207,6 +214,13 @@ export function planSpreadsheetStaticRebuildTargets(
           targetId: videoId,
           priority: "high",
         });
+        for (const eventId of valuesFromMutation(mutation, "primary_event_id")) {
+          add(mutation, {
+            targetType: "event_release",
+            targetId: eventId,
+            priority: "high",
+          });
+        }
         if (changed(mutation, VIDEO_RANDOM_POOL_FIELDS)) {
           addVideoCardGlobalTargets(mutation, add);
         }
@@ -270,6 +284,13 @@ export function planSpreadsheetStaticRebuildTargets(
             priority: "high",
           });
         }
+        for (const eventId of valuesFromMutation(mutation, "event_id")) {
+          add(mutation, {
+            targetType: "event_release",
+            targetId: eventId,
+            priority: "high",
+          });
+        }
         add(mutation, {
           targetType: "random_video_pool",
           targetId: "global",
@@ -296,6 +317,13 @@ export function planSpreadsheetStaticRebuildTargets(
             targetId: "global",
             priority: "low",
           });
+          for (const eventId of mutation.eventReleaseEventIds ?? []) {
+            add(mutation, {
+              targetType: "event_release",
+              targetId: eventId,
+              priority: "high",
+            });
+          }
         }
         break;
       }

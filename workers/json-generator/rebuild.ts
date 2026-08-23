@@ -25,6 +25,12 @@ import {
   COUNTABLE_PUBLIC_VIDEO_SQL,
   PVSF_SUMMARY_EVENT_ID,
 } from "../../src/lib/publicData/countablePublicVideoSql.ts";
+import {
+  EVENT_RELEASE_MAX_MEMBERS_PER_VIDEO,
+  EVENT_RELEASE_MAX_VIDEOS,
+  EVENT_RELEASE_SCHEMA_VERSION,
+  eventReleaseObjectKey,
+} from "../../src/lib/publicData/staticEventReleaseCore.ts";
 import { jstDayKey, resolveNostalgicDisplaySelection } from "../../src/lib/publicData/topNostalgicDaily.ts";
 import { YOUTUBE_SYNCED_PLAYABLE_SQL } from "../../src/lib/publicData/youtubeSyncedPlayableSql.ts";
 import {
@@ -381,6 +387,9 @@ export async function rebuildTarget(
       }
       break;
     }
+    case "event_release":
+      await rebuildEventRelease(env, targetId, signal);
+      break;
     case "event":
       await rebuildEvent(env, targetId, signal, reason);
       break;
@@ -1741,7 +1750,7 @@ async function releaseVisibilityFenceAfterRebuild(
       `SELECT target_type, source_updated_at
        FROM static_artifacts
        WHERE target_id = ?
-         AND target_type IN ('event_base', 'event_slots')
+         AND target_type IN ('event_base', 'event_slots', 'event_release')
          AND deleted_at IS NULL`,
     )
       .bind(entityId)
@@ -1754,7 +1763,8 @@ async function releaseVisibilityFenceAfterRebuild(
     );
     if (
       (sourceByTarget.get("event_base") ?? 0) < currentUpdatedAt ||
-      (sourceByTarget.get("event_slots") ?? 0) < currentUpdatedAt
+      (sourceByTarget.get("event_slots") ?? 0) < currentUpdatedAt ||
+      (sourceByTarget.get("event_release") ?? 0) < currentUpdatedAt
     ) {
       return;
     }
@@ -1943,6 +1953,7 @@ async function removeAllEventArtifacts(
   await removeTrackedArtifacts(env, "event", eventId, 20, signal);
   await removeTrackedArtifacts(env, "event_base", eventId, 20, signal);
   await removeTrackedArtifacts(env, "event_slots", eventId, 20, signal);
+  await removeTrackedArtifacts(env, "event_release", eventId, 20, signal);
   // Older rows may have lost their static_artifacts bookkeeping. Delete the
   // canonical keys explicitly so an old event ID cannot remain reachable just
   // because its tracking row is missing.
@@ -1950,6 +1961,7 @@ async function removeAllEventArtifacts(
     `events/${eventId}.json`,
     eventBaseObjectKey(eventId),
     eventSlotsObjectKey(eventId),
+    eventReleaseObjectKey(eventId),
   ]) {
     throwIfAborted(signal);
     await env.R2.delete(key);
@@ -2172,6 +2184,153 @@ async function rebuildEventSlots(
     signal,
   );
   return true;
+}
+
+/**
+ * PVSF-compatible public release projection.  Keep this separate from the
+ * event detail artifact: release consumers need the public member rows, while
+ * the normal event page intentionally does not expose them.  The CTE caps the
+ * video pool before joining members, so a large collaboration cannot consume
+ * an unbounded video set or exceed the worker JSON payload budget.
+ */
+async function rebuildEventRelease(
+  env: Env,
+  eventId: string,
+  signal?: RebuildSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  const eventRow = (await env.DB.prepare(
+    `SELECT id, title, accent_color, visibility_status, updated_at
+     FROM events WHERE id = ? LIMIT 1`,
+  ).bind(eventId).first()) as Record<string, unknown> | null;
+  if (!eventRow || String(eventRow.visibility_status ?? "") !== "public") {
+    await removeAllEventArtifacts(env, eventId, signal);
+    return;
+  }
+
+  const eventVideoWhere = eventPublicVideoWhereSql("v");
+  const rows = await env.DB.prepare(
+    `WITH release_videos AS (
+       SELECT v.id, v.title, v.youtube_video_id, v.scheduled_time,
+              v.collaboration_type, v.part, v.intro_comment,
+              v.creator_display_name, v.creator_x_user_id,
+              v.creator_icon_url, v.visibility_status
+       FROM videos AS v
+       WHERE ${eventVideoWhere}
+       ORDER BY v.scheduled_time IS NULL ASC, v.scheduled_time ASC, v.id ASC
+       LIMIT ${EVENT_RELEASE_MAX_VIDEOS + 1}
+     ), public_members AS (
+       SELECT vm.video_id, vm.name, vm.x_user_id, vm.role, vm.comment,
+              vm.order_index, vm.id,
+              ROW_NUMBER() OVER (
+                PARTITION BY vm.video_id
+                ORDER BY vm.order_index ASC, vm.id ASC
+              ) AS member_rank
+       FROM video_members AS vm
+       INNER JOIN release_videos AS rv ON rv.id = vm.video_id
+       WHERE vm.is_public_member = 1
+     )
+     SELECT rv.id, rv.title, rv.youtube_video_id, rv.scheduled_time,
+            rv.collaboration_type, rv.part, rv.intro_comment,
+            rv.creator_display_name, rv.creator_x_user_id,
+            rv.creator_icon_url, rv.visibility_status,
+            vm.name AS member_name, vm.x_user_id AS member_x_user_id,
+            vm.role AS member_role, vm.comment AS member_comment,
+            vm.order_index AS member_order_index, vm.id AS member_id
+     FROM release_videos AS rv
+     LEFT JOIN public_members AS vm
+       ON vm.video_id = rv.id AND vm.member_rank <= ${EVENT_RELEASE_MAX_MEMBERS_PER_VIDEO}
+     ORDER BY rv.scheduled_time IS NULL ASC, rv.scheduled_time ASC, rv.id ASC,
+              vm.order_index ASC, vm.id ASC`,
+  ).bind(eventId, eventId).all();
+  throwIfAborted(signal);
+
+  const videos = new Map<string, Record<string, unknown> & { members: unknown[] }>();
+  for (const row of (rows.results ?? []) as Record<string, unknown>[]) {
+    const id = String(row.id ?? "").trim();
+    if (!id) continue;
+    let video = videos.get(id);
+    if (!video) {
+      video = {
+        id,
+        title: row.title,
+        youtube_video_id: row.youtube_video_id ?? null,
+        scheduled_time: row.scheduled_time ?? null,
+        collaboration_type: row.collaboration_type === "collab" ? "collab" : "individual",
+        part: row.part ?? null,
+        intro_comment: row.intro_comment ?? null,
+        creator_display_name: row.creator_display_name,
+        creator_x_user_id: row.creator_x_user_id ?? null,
+        creator_icon_url: row.creator_icon_url ?? null,
+        visibility_status: "public",
+        members: [],
+      };
+      videos.set(id, video);
+    }
+    if (video.members.length >= EVENT_RELEASE_MAX_MEMBERS_PER_VIDEO) continue;
+    const memberName = String(row.member_name ?? "").trim();
+    if (!memberName || row.member_id == null) continue;
+    video.members.push({
+      name: memberName,
+      x_user_id: row.member_x_user_id ?? null,
+      role: row.member_role ?? null,
+      comment: row.member_comment ?? null,
+      order_index: Number(row.member_order_index ?? 0) || 0,
+    });
+  }
+
+  const allVideos = [...videos.values()];
+  const truncated = allVideos.length > EVENT_RELEASE_MAX_VIDEOS;
+  const listedVideos = truncated
+    ? allVideos.slice(0, EVENT_RELEASE_MAX_VIDEOS)
+    : allVideos;
+  let total = listedVideos.length;
+  if (truncated) {
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) AS c FROM videos AS v WHERE ${eventVideoWhere}`,
+    ).bind(eventId, eventId).first<{ c?: number }>();
+    total = Number(count?.c ?? listedVideos.length);
+  }
+  const payload = {
+    schema_version: EVENT_RELEASE_SCHEMA_VERSION,
+    generated_at: Math.floor(Date.now() / 1000),
+    event: {
+      id: eventRow.id,
+      title: eventRow.title,
+      accent_color: eventRow.accent_color ?? null,
+      visibility_status: "public",
+    },
+    videos: listedVideos,
+    total,
+    truncated,
+  };
+  assertStaticListObjectSize(eventReleaseObjectKey(eventId), payload);
+  await putJson(
+    env,
+    eventReleaseObjectKey(eventId),
+    payload,
+    staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.eventDetail),
+    {
+      targetType: "event_release",
+      targetId: eventId,
+      sourceUpdatedAt: Number(eventRow.updated_at ?? 0) || null,
+    },
+    signal,
+  );
+  await reconcileTrackedArtifacts(
+    env,
+    { targetType: "event_release", targetId: eventId },
+    [eventReleaseObjectKey(eventId)],
+    20,
+    signal,
+  );
+  await releaseVisibilityFenceAfterRebuild(
+    env,
+    "event",
+    eventId,
+    signal,
+    Number(eventRow.updated_at ?? 0) || null,
+  );
 }
 
 function stripEventPublicVideoScore(

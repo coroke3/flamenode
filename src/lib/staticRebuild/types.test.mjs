@@ -18,6 +18,7 @@ test("static rebuild targetはcanonical種だけを受理する", () => {
     "events_index",
     "event_base",
     "event_slots",
+    "event_release",
     "event",
     "video",
     "user",

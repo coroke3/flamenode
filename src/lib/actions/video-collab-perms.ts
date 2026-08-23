@@ -38,6 +38,7 @@ import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { memberSuggestionsTarget } from "@/lib/staticRebuild/hooks";
+import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
 import {
   getLinkedXUserIdsForAuthUser,
   resolveCanonicalXUserId,
@@ -900,8 +901,24 @@ async function applyPermissionIntentsToVideo(
     }
   }
 
+  const rebuildEvents = await loadVideoRebuildEventIds(
+    db,
+    video.id,
+    video.primary_event_id,
+  );
+  if (!rebuildEvents.ok) return { ok: false, message: rebuildEvents.message };
+
   const queue = await buildStaticRebuildQueueBatch(db, [
     memberSuggestionsTarget("video_permissions_batch"),
+    ...(video.visibility_status === "public"
+      ? rebuildEvents.eventIds.map((eventId) => ({
+          targetType: "event_release" as const,
+          targetId: eventId,
+          reason: "video_permissions_batch",
+          priority: "high" as const,
+          requestedByUserId: actor.id,
+        }))
+      : []),
   ]);
   statements.push(...queue.statements);
   expected.push(...queue.expectedChanges);

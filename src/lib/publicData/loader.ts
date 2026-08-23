@@ -53,6 +53,12 @@ import {
   type StaticEventSlotsPayload,
 } from "./staticEventDetailCore";
 import {
+  eventReleaseObjectKey,
+  normalizeStaticEventRelease,
+  type StaticEventRelease,
+  type StaticEventReleasePayload,
+} from "./staticEventReleaseCore";
+import {
   normalizeStaticEventsIndex,
   type StaticEventsIndex,
   type StaticEventsIndexPayload,
@@ -259,7 +265,11 @@ function mapTargetTypeToFenceEntity(
   targetType: StaticRebuildTargetType,
 ): PublicVisibilityFenceEntityType | null {
   if (targetType === "video") return "video";
-  if (targetType === "event" || targetType === "event_base") return "event";
+  if (
+    targetType === "event" ||
+    targetType === "event_base" ||
+    targetType === "event_release"
+  ) return "event";
   if (targetType === "user") return "x_user";
   return null;
 }
@@ -451,6 +461,7 @@ const PUBLIC_MISS_HIGH_PRIORITY_TARGET_TYPES = new Set<StaticRebuildTargetType>(
   "event",
   "event_base",
   "event_slots",
+  "event_release",
 ]);
 
 function resolvePublicMissEnqueuePriority(
@@ -861,6 +872,20 @@ export async function loadStaticEventDetail(
   });
   const detail = applyEventSlotsOverride(normalized, slotsResult.value);
   return { ...result, data: detail };
+}
+
+export async function loadStaticEventRelease(
+  eventId: string,
+): Promise<PublicJsonLoadResult<StaticEventRelease>> {
+  return createPublicJsonLoader<StaticEventReleasePayload, StaticEventRelease>({
+    r2Key: eventReleaseObjectKey,
+    targetType: "event_release",
+    reason: "public_event_release_miss",
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
+    normalize: normalizeStaticEventRelease,
+  })(eventId);
 }
 
 export async function loadStaticEventsIndex(): Promise<{

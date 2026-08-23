@@ -207,6 +207,21 @@ function eventSlotsTarget(
   };
 }
 
+function eventReleaseTarget(
+  eventId: string,
+  reason: string,
+  priority?: StaticRebuildPriority,
+  requestedByUserId?: string | null,
+): EnqueueStaticRebuildInput {
+  return {
+    targetType: "event_release",
+    targetId: eventId,
+    reason,
+    ...(priority ? { priority } : {}),
+    ...(requestedByUserId !== undefined ? { requestedByUserId } : {}),
+  };
+}
+
 function usersIndexTarget(reason: string): EnqueueStaticRebuildInput {
   return { targetType: "users_index", targetId: "global", reason };
 }
@@ -276,6 +291,7 @@ export async function enqueueAfterVideoCreate(
   items.push(memberSuggestionsTarget("video_create"));
   for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
     items.push(eventBaseTarget(eventId, "video_create", "high", opts.requestedByUserId));
+    items.push(eventReleaseTarget(eventId, "video_create", "high", opts.requestedByUserId));
   }
   await enqueueStaticRebuildMany(db, items);
 }
@@ -356,6 +372,7 @@ export async function enqueueAfterVideoUpdate(
   if (opts.eventMembershipChanged || opts.visibilityChanged) {
     for (const eventId of uniqueEventIds(opts.primaryEventId, opts.eventIds)) {
       items.push(eventBaseTarget(eventId, "video_update"));
+      items.push(eventReleaseTarget(eventId, "video_update", undefined, opts.requestedByUserId));
     }
   }
   await enqueueStaticRebuildMany(db, items);
@@ -465,6 +482,7 @@ export function buildAfterVideoStatusChangeQueueBatch(
   }));
   for (const eventId of eventIds) {
     items.push(eventBaseTarget(eventId, "video_update", undefined, opts.requestedByUserId));
+    items.push(eventReleaseTarget(eventId, "video_update", undefined, opts.requestedByUserId));
   }
   return buildStaticRebuildQueueBatch(db, items);
 }
@@ -494,6 +512,7 @@ export function buildSlotChangeQueueBatch(
 ): Promise<StaticRebuildQueueBatch> {
   return buildStaticRebuildQueueBatch(db, [
     eventSlotsTarget(opts.eventId, opts.reason, "high", opts.requestedByUserId),
+    eventReleaseTarget(opts.eventId, opts.reason, "high", opts.requestedByUserId),
     topSlotStatsGlobalTarget(opts.reason, "normal"),
   ]);
 }
@@ -516,6 +535,7 @@ export function buildEventChangeQueueBatch(
   const targets: EnqueueStaticRebuildInput[] = [
     eventBaseTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
     eventSlotsTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
+    eventReleaseTarget(opts.eventId, opts.reason, priority, opts.requestedByUserId),
     // list/recent and list/popular embed the primary event title. Refresh
     // both projections whenever an event is hidden, renamed, or edited so a
     // stale public event label is not served until the normal TTL expires.

@@ -25,6 +25,7 @@ test("eventsの編集はイベント詳細・枠・公開一覧を再生成す�
     [
       "event_base:event-1",
       "event_slots:event-1",
+      "event_release:event-1",
       "events_index:global",
       "search_index:global",
       "top_events:global",
@@ -185,7 +186,8 @@ test("YouTube status・event・member・chapterのmappingをdedupeする", () =>
     "video:video-1",
     "youtube_related_blocklist:global",
     "random_video_pool:global",
-    "users_index:global",
+      "event_release:event-1",
+      "users_index:global",
     "video:video-2",
   ]);
 });
@@ -224,6 +226,8 @@ test("video_eventsの付け替えは旧・新videoとrandom poolをすべて再�
   assert.deepEqual(keys(targets), [
     "video:video-old",
     "video:video-new",
+    "event_release:event-old",
+    "event_release:event-new",
     "random_video_pool:global",
   ]);
 });
@@ -249,6 +253,21 @@ test("x_usersは個別userと共有icon mapを含むusers_indexを再生成す�
   ]);
   assert.deepEqual(keys(targets), ["user:x-1", "users_index:global"]);
   assert.equal(targets[0].requestedByUserId, "admin-1");
+});
+
+test("video_members can include all linked event release targets", () => {
+  const targets = planSpreadsheetStaticRebuildTargets([
+    {
+      ...mutation("video_members", "UPDATE", { video_id: "video-1" }, { video_id: "video-1" }),
+      eventReleaseEventIds: ["event-1", "event-2"],
+    },
+  ]);
+  assert.deepEqual(keys(targets), [
+    "video:video-1",
+    "users_index:global",
+    "event_release:event-1",
+    "event_release:event-2",
+  ]);
 });
 
 test("16 targetを超えるplanner入力はapplyせず分割を要求する", () => {

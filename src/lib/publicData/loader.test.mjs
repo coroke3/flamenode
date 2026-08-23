@@ -360,6 +360,6 @@ test("public miss high priority に top/recommend/event producers を含む", ()
 test("mapTargetTypeToFenceEntity は event_base を event フェンスにマップする", () => {
   assert.match(
     loaderSource,
-    /targetType === "event" \|\| targetType === "event_base"\) return "event"/,
+    /targetType === "event"[\s\S]*targetType === "event_base"[\s\S]*targetType === "event_release"[\s\S]*return "event"/,
   );
 });

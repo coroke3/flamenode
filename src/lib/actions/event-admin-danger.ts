@@ -35,6 +35,7 @@ import {
   eventBaseObjectKey,
   eventComposedObjectKey,
   eventSlotsObjectKey,
+  eventReleaseObjectKey,
 } from "@/lib/publicData/staticEventDetailCore";
 import { EVENT_ID_PATTERN } from "@/lib/event/eventForm";
 import {
@@ -537,9 +538,11 @@ export async function renameEventId(
       eventComposedObjectKey(oldId),
       eventBaseObjectKey(oldId),
       eventSlotsObjectKey(oldId),
+      eventReleaseObjectKey(oldId),
       eventComposedObjectKey(newId),
       eventBaseObjectKey(newId),
       eventSlotsObjectKey(newId),
+      eventReleaseObjectKey(newId),
       // Event IDs are embedded in the global event/top projections too.  The
       // queue rebuild will refresh R2, but the Cache API can otherwise serve
       // the old ID until its normal TTL expires.

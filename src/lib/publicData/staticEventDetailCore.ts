@@ -7,7 +7,7 @@ import {
   normalizeCoercedString as normalizeNullableString,
   normalizeNullableUnix as normalizeUnix,
   normalizeTrimmedString as normalizeString,
-} from "./normalize";
+} from "./normalize.ts";
 
 export interface StaticEventDetailPayload {
   generated_at?: unknown;
@@ -84,6 +84,7 @@ export interface StaticEventDetail {
 
 export const EVENT_BASE_SCHEMA_VERSION = 1 as const;
 export const EVENT_SLOTS_SCHEMA_VERSION = 1 as const;
+export const EVENT_RELEASE_SCHEMA_VERSION = 1 as const;
 
 export function eventBaseObjectKey(eventId: string): string {
   return `events/${eventId}/base.v1.json`;
@@ -95,6 +96,10 @@ export function eventSlotsObjectKey(eventId: string): string {
 
 export function eventComposedObjectKey(eventId: string): string {
   return `events/${eventId}.json`;
+}
+
+export function eventReleaseObjectKey(eventId: string): string {
+  return `events/${eventId}/release.v1.json`;
 }
 
 export interface StaticEventSlotsPayload {

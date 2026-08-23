@@ -60,7 +60,14 @@ test("getStaticRebuildPolicy: mirrors worker queue mode behavior", () => {
   assert.deepEqual(getStaticRebuildPolicy("read_only"), {
     maxItemsPerRun: 1,
     highPriorityOnly: false,
-    allowedTargetTypes: ["event", "event_base", "event_slots", "video", "user"],
+    allowedTargetTypes: [
+      "event",
+      "event_base",
+      "event_slots",
+      "event_release",
+      "video",
+      "user",
+    ],
     skipTargetTypesUnlessHighPriority: [],
     reconcileStaleQueue: false,
   });

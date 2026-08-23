@@ -69,6 +69,29 @@ test("video detail filter removes private related rows and events", () => {
   assert.equal(payload.related_videos.length, 2);
 });
 
+test("event release filter removes fenced videos and adjusts the public count", () => {
+  const filtered = filterPublicArtifactPayload(
+    "event_release",
+    {
+      event: { id: "e1", visibility_status: "public" },
+      videos: [
+        { id: "v-hidden", title: "old", visibility_status: "public" },
+        { id: "v-ok", title: "ok", visibility_status: "public" },
+      ],
+      total: 2,
+      truncated: false,
+    },
+    buildPublicArtifactVisibilityContext({
+      schema_version: 1,
+      revision: 1,
+      generated_at: 1,
+      entities: [{ entity_type: "video", entity_id: "v-hidden", fence_token: "f", blocked_at: 1 }],
+    }),
+  );
+  assert.deepEqual(filtered?.videos, [{ id: "v-ok", title: "ok", visibility_status: "public" }]);
+  assert.equal(filtered?.total, 1);
+});
+
 test("enforced fence IDs filter id-only global artifacts", () => {
   const context = buildPublicArtifactVisibilityContext({
     schema_version: 1,

@@ -160,6 +160,10 @@ users v2 の stale artifact cleanup は R2 bulk delete と JSON1 UPDATE を 1 in
 
 `events/{id}.json` は `event_base` / `event_slots` producer が R2 に書いた `events/{id}/base.v1.json` と `events/{id}/slots.v1.json` を composer（`event:{id}`）が読み込んで合成する。composer は required section 欠損時に throw し旧 JSON を保持する。枠変更では `event_slots` と `top_slot_stats` のみを更新し、イベント metadata 変更では `event_base`（必要なら `top_events`）を更新する。公開 loader は `events/{id}/slots.v1.json` が `events/{id}.json` より新しいとき slots / slots_summary を overlay する。
 
+PVSF互換の公開Release一覧は `event_release:{id}` が `events/{id}/release.v1.json` を生成する。イベント・公開作品・公開メンバーの変更は同targetをfan-outし、動画は最大500件、公開メンバーは作品ごとに最大100件でboundedにする。Release artifactも通常のevent visibility fence・rename cleanup・R2追跡の対象とし、公開対象外の行は生成・配信しない。イベントを再公開する場合のfence解除は `event_base`・`event_slots`・`event_release` の3 producerが現行イベントの `updated_at` 以降に追跡済みであることを確認してから行う。
+
+Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象videoの `video_events` と `primary_event_id` を80件以下のIDチャンクで解決し、関連する全 `event_release` をfan-outする。イベント所属変更を同じbatchで行う場合は `video_events` mutationのbefore/after event IDも別途対象に含める。
+
 関連動画の非公開除外は `youtube/related-blocklist.v1.json`、補完候補は `videos/random-pool.v1.json` を用いる。どちらも読み込みは fresh Cache → R2 → stale Cache（最大24h）→ unavailable とし、状態を捨てない。必要な共有JSONがunavailableのときは関連動画セクションを障害表示へ分離し、空blocklist・正常な0件へ倒さない。
 
 `/admin/static-builds` は両objectについて、R2 `head` による実体の有無、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、blocklist件数またはrandom pool件数を表示する。binding欠損・`head`失敗は「確認不可」とし、管理者write guardを通る個別再生成キューに加え、両方まとめて投入する操作を提供する。R2 object が欠けている場合は `content-jobs` Recovery Cron が high 優先度で両 target を自動 enqueue する。YouTube 関連の `youtube_related_blocklist` / `random_video_pool` に加え、`users/index.json` / `users/public-x-icon-map.v1.json` / `users/pickup-creators.v1.json` のいずれかが欠けているときは `users_index:global` を high で enqueue する（`rebuildUsersIndex` が3つを再生成する）。`top/slot-stats.v1.json` が欠けているときは `top_slot_stats:global` を high で enqueue する（`rebuildTopSlotStats` が artifact を再生成する）。
@@ -184,6 +188,7 @@ users v2 の stale artifact cleanup は R2 bulk delete と JSON1 UPDATE を 1 in
 | イベント一覧 | `events/index.json` | `events_index` |
 | イベント詳細 base | `events/{id}/base.v1.json` | `event_base` |
 | イベント詳細 slots | `events/{id}/slots.v1.json` | `event_slots` |
+| イベント公開Release | `events/{id}/release.v1.json` | `event_release` |
 | イベント詳細（composer） | `events/{id}.json` | `event` |
 | クリエイター一覧 | `users/index.json` | `users_index` |
 | Creator 棚（top/recommend） | `users/pickup-creators.v1.json` | `users_index` |

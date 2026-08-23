@@ -169,6 +169,13 @@ function buildMergeStaticRebuildTargets(opts: {
         priority: "high",
         requestedByUserId: opts.requestedByUserId,
       },
+      {
+        targetType: "event_release",
+        targetId: eventId,
+        reason: opts.reason,
+        priority: "high",
+        requestedByUserId: opts.requestedByUserId,
+      },
     );
   }
 
