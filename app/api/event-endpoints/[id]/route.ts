@@ -135,6 +135,9 @@ async function readCachedPayload(
         throw new Error("stale_schema");
       }
     }
+    // Cache HITでも公開境界を再検査し、過去バージョンや手動投入KVから
+    // 内部キーを返さない。壊れたcacheは下のcatchで削除してD1再生成する。
+    assertNoForbiddenKeys(parsed);
     return cached;
   } catch (error) {
     console.warn("[event-export-api] invalid KV payload evicted", {
