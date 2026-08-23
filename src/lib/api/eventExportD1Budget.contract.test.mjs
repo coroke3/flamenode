@@ -8,8 +8,11 @@ test("大規模event export relationはJSON1 1-bindでD1 query数を固定する
   assert.match(source, /EVENT_EXPORT_VIDEO_IDS_IN_ARRAY_MAX = 80/);
   assert.match(source, /export function eventExportVideoIdsWhere/);
   assert.match(source, /if \(unique\.length <= EVENT_EXPORT_VIDEO_IDS_IN_ARRAY_MAX\)/);
-  assert.match(source, /FROM json_each\(\$\{JSON\.stringify\(unique\)\}\)/);
-  assert.match(source, /CAST\(event_export_video_ids\.value AS TEXT\) = \$\{column\}/);
+  assert.match(
+    source,
+    /\$\{column\} IN \([\s\S]*SELECT CAST\(value AS TEXT\)[\s\S]*FROM json_each\(\$\{JSON\.stringify\(unique\)\}\)[\s\S]*\)/,
+  );
+  assert.doesNotMatch(source, /EXISTS \([\s\S]*event_export_video_ids/);
   assert.doesNotMatch(source, /loadRowsByVideoIdChunks/);
   assert.doesNotMatch(source, /EVENT_EXPORT_VIDEO_ID_CHUNK_SIZE/);
 });
