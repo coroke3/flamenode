@@ -1,0 +1,26 @@
+name: PR186 consolidated verify
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: pr186-consolidated-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Full repository verification
+        run: npm run verify:full
+      - name: Cloudflare OpenNext build
+        run: npm run cf:build
