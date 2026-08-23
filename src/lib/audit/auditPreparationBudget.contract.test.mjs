@@ -40,3 +40,20 @@ test("監査INSERTは21列bindを4entry以下へchunkする", () => {
   assert.match(budgetSource, /AUDIT_COLUMN_BIND_COUNT = 21/);
   assert.match(budgetSource, /D1_MAX_BIND_PARAMETERS \/ AUDIT_COLUMN_BIND_COUNT/);
 });
+
+test("上限超過監査は巨大snapshotへchangedKeys/inversePatchを再計算しない", () => {
+  const payloadIndex = loggerSource.indexOf("const payloadExceeded =");
+  const changedIndex = loggerSource.indexOf("const changedKeys = payloadExceeded");
+  const inverseIndex = loggerSource.indexOf("const inversePatch = payloadExceeded");
+  assert.ok(payloadIndex >= 0);
+  assert.ok(changedIndex > payloadIndex);
+  assert.ok(inverseIndex > payloadIndex);
+  assert.match(
+    loggerSource,
+    /const changedKeys = payloadExceeded\s*\? \[\]\s*:\s*computeChangedKeys/,
+  );
+  assert.match(
+    loggerSource,
+    /const inversePatch = payloadExceeded\s*\? null\s*:\s*buildInversePatch/,
+  );
+});
