@@ -37,6 +37,13 @@ test("権限一覧の連携済み判定はX ID approval_status=approvedを要求
   assert.match(loaderSource, /xu\.approval_status = 'approved'/);
 });
 
+test("権限summaryはX ID DTOへAuth/Discord IDを混ぜて他人判定しない", () => {
+  assert.match(loaderSource, /user_id: null/);
+  assert.match(loaderSource, /権限正本はX ID/);
+  assert.doesNotMatch(loaderSource, /editor\.user_id\?\.trim\(\)/);
+  assert.doesNotMatch(loaderSource, /他のメンバーにも編集権限が設定されています/);
+});
+
 test("実際の合作所有者判定もcan_edit=1と承認済みX IDの両方を要求する", () => {
   assert.match(ownershipSource, /eq\(videoMembers\.can_edit, 1\)/);
   assert.match(ownershipSource, /approvedXIdsWhere\(videoMembers\.x_user_id/);
