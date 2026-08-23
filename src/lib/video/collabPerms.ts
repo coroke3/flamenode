@@ -82,11 +82,13 @@ export async function loadVideoCollabSubjects(
       .from(videoMembers)
       .where(eq(videoMembers.video_id, videoId));
 
+    // 公開メンバーはcan_edit=0でも「付与候補」として権限UIへ必要。
+    // hidden rowは編集者専用なのでcan_edit=1だけを残す。旧条件はこれを逆に判定し、
+    // 未付与の公開メンバーを消す一方でcan_edit=0のhidden行を残していた。
     // legacyデータにpublic/hidden重複行が残っていても、権限UIは1 X ID = 1 subjectにする。
-    // これによりReact key衝突・人数二重計上・同じ人の重複表示を防ぐ。
     const byXId = new Map<string, VideoCollabSubjectWithDelivery>();
     for (const row of rows) {
-      if (row.can_edit !== 1 && row.is_public_member !== 0) continue;
+      if (row.is_public_member !== 1 && row.can_edit !== 1) continue;
       const xid = normalizeXId(row.x_user_id);
       // X IDなしの旧hidden行は実際のownership主体になれずUIからも操作不能なので除外する。
       if (!xid) continue;
