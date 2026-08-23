@@ -121,23 +121,6 @@ async function resolvePrivilegeMode(
   return "normal";
 }
 
-async function resolvePrivilegeModeFromForm(
-  db: DB,
-  formData: FormData,
-  user: { id: string; role?: string | null },
-  video: Pick<
-    typeof videos.$inferSelect,
-    | "id"
-    | "primary_event_id"
-    | "creator_x_user_id"
-    | "submitted_by_user_id"
-    | "visibility_status"
-  >,
-): Promise<CanEditVideoPrivilegeMode> {
-  const raw = String(formData.get("edit_privilege_mode") ?? "").trim();
-  return resolvePrivilegeMode(db, raw, user, video);
-}
-
 type EditableVideo = Pick<
   typeof videos.$inferSelect,
   | "id"
@@ -222,7 +205,6 @@ async function loadEditableVideo(
   const raw = String(formData.get("edit_privilege_mode") ?? "").trim();
   const loaded = await loadEditableVideoForPermissions(db, user, videoId, raw);
   if (!loaded) return null;
-  void raw;
   return loaded;
 }
 
@@ -766,16 +748,21 @@ export async function applyVideoCollaboratorPermissionsBatch(
       )
       .limit(MAX_VIDEO_MEMBERS + xids.length);
 
-    const preferredRows = [...existingRows].sort(
-      (left, right) =>
-        right.is_public_member - left.is_public_member ||
-        right.can_edit - left.can_edit ||
-        left.id.localeCompare(right.id),
-    );
-    const existingByXid = new Map<string, VideoMemberRow>();
-    for (const row of preferredRows) {
+    const rowsByXid = new Map<string, VideoMemberRow[]>();
+    for (const row of existingRows) {
       const key = normalizeXId(row.x_user_id ?? "");
-      if (key && !existingByXid.has(key)) existingByXid.set(key, row);
+      if (!key) continue;
+      const current = rowsByXid.get(key) ?? [];
+      current.push(row);
+      rowsByXid.set(key, current);
+    }
+    for (const rows of rowsByXid.values()) {
+      rows.sort(
+        (left, right) =>
+          right.is_public_member - left.is_public_member ||
+          right.can_edit - left.can_edit ||
+          left.id.localeCompare(right.id),
+      );
     }
 
     const currentCountRow = await db
@@ -810,22 +797,12 @@ export async function applyVideoCollaboratorPermissionsBatch(
 
     for (const [xid, intentInfo] of intents) {
       const label = `${intentInfo.displayName} @${xid}`;
-      const existing = existingByXid.get(xid);
+      const rowsForXid = rowsByXid.get(xid) ?? [];
+      const publicRows = rowsForXid.filter((row) => row.is_public_member === 1);
+      const hiddenRows = rowsForXid.filter((row) => row.is_public_member === 0);
+      const hadEffectiveEdit = rowsForXid.some((row) => row.can_edit === 1);
 
       if (intentInfo.intent === "on") {
-        if (existing?.can_edit === 1) {
-          unchanged += 1;
-          continue;
-        }
-        if (!existing) {
-          nextMemberCount += 1;
-          if (nextMemberCount > MAX_VIDEO_MEMBERS) {
-            return {
-              ok: false,
-              message: `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。これ以上編集権を付与できません。`,
-            };
-          }
-        }
         if (!existingProfileIds.has(xid)) {
           newXUsers.push({
             id: xid,
@@ -840,15 +817,51 @@ export async function applyVideoCollaboratorPermissionsBatch(
           });
           existingProfileIds.add(xid);
         }
-        if (existing) {
-          updateRows.push({
-            ...existing,
-            name: intentInfo.displayName || existing.name,
-            can_edit: 1,
-            edit_granted_by_auth_user_id: actor.id,
-            edit_granted_at: existing.edit_granted_at == null ? now : existing.edit_granted_at,
-            edit_updated_at: now,
-          });
+
+        if (publicRows.length > 0) {
+          const target = publicRows[0]!;
+          const permissionSource = [...rowsForXid].sort(
+            (left, right) =>
+              right.can_edit - left.can_edit ||
+              Number(right.edit_updated_at ?? 0) - Number(left.edit_updated_at ?? 0) ||
+              left.id.localeCompare(right.id),
+          )[0]!;
+          if (target.can_edit !== 1) {
+            updateRows.push({
+              ...target,
+              name: intentInfo.displayName || target.name,
+              can_edit: 1,
+              edit_granted_by_auth_user_id:
+                permissionSource.can_edit === 1
+                  ? permissionSource.edit_granted_by_auth_user_id
+                  : actor.id,
+              edit_granted_at:
+                permissionSource.can_edit === 1 && permissionSource.edit_granted_at != null
+                  ? permissionSource.edit_granted_at
+                  : now,
+              edit_updated_at: now,
+            });
+          }
+          for (const hidden of hiddenRows) {
+            deleteHiddenIds.push(hidden.id);
+            nextMemberCount -= 1;
+          }
+        } else if (hiddenRows.length > 0) {
+          const target = hiddenRows[0]!;
+          if (target.can_edit !== 1) {
+            updateRows.push({
+              ...target,
+              name: intentInfo.displayName || target.name,
+              can_edit: 1,
+              edit_granted_by_auth_user_id: actor.id,
+              edit_granted_at: target.edit_granted_at ?? now,
+              edit_updated_at: now,
+            });
+          }
+          for (const duplicate of hiddenRows.slice(1)) {
+            deleteHiddenIds.push(duplicate.id);
+            nextMemberCount -= 1;
+          }
         } else {
           insertHiddenRows.push({
             id: generateId("vm"),
@@ -864,23 +877,37 @@ export async function applyVideoCollaboratorPermissionsBatch(
             edit_granted_at: now,
             edit_updated_at: now,
           });
+          nextMemberCount += 1;
         }
-        grantedNames.push(label);
-        if (parsed.data.notify) notifyXids.push(xid);
+
+        if (hadEffectiveEdit) {
+          unchanged += 1;
+        } else {
+          grantedNames.push(label);
+          if (parsed.data.notify) notifyXids.push(xid);
+        }
         continue;
       }
 
-      if (!existing || existing.can_edit !== 1) {
-        unchanged += 1;
-        continue;
+      for (const row of publicRows) {
+        if (row.can_edit !== 1) continue;
+        updateRows.push({ ...row, can_edit: 0, edit_updated_at: now });
       }
-      if (existing.is_public_member === 0) {
-        deleteHiddenIds.push(existing.id);
+      for (const hidden of hiddenRows) {
+        deleteHiddenIds.push(hidden.id);
         nextMemberCount -= 1;
-      } else {
-        updateRows.push({ ...existing, can_edit: 0, edit_updated_at: now });
       }
-      revokedNames.push(label);
+      if (hadEffectiveEdit) revokedNames.push(label);
+      else unchanged += 1;
+    }
+
+    // ON/OFFが同一batchに混在しても入力順で上限判定が変わらないよう、
+    // 全intentのnet row countを計算してから判定する。
+    if (insertHiddenRows.length > 0 && nextMemberCount > MAX_VIDEO_MEMBERS) {
+      return {
+        ok: false,
+        message: `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。これ以上編集権を付与できません。`,
+      };
     }
 
     if (
@@ -970,27 +997,42 @@ export async function applyVideoCollaboratorPermissionsBatch(
           auth_user_id: xUserAccountLinks.auth_user_id,
         })
         .from(xUserAccountLinks)
-        .where(sql`${xUserAccountLinks.x_user_id} IN (
-          SELECT CAST(value AS TEXT) FROM json_each(${JSON.stringify(notifyXids)})
-        )`)
-        .limit(notifyXids.length * 4 + 1);
-      const notificationInputs = links
-        .filter((link) => link.auth_user_id !== actor.id)
-        .map((link) => ({
+        .where(sql`lower(${xUserAccountLinks.x_user_id}) IN (
+          SELECT lower(CAST(value AS TEXT)) FROM json_each(${JSON.stringify(notifyXids)})
+        )`);
+      const notificationByKey = new Map<
+        string,
+        {
+          recipientUserId: string;
+          type: "video_edit_permission_granted";
+          dedupeKey: string;
+          payload: ReturnType<typeof buildVideoEditPermissionGrantedNotification>;
+          eventId: string | null;
+        }
+      >();
+      for (const link of links) {
+        if (link.auth_user_id === actor.id) continue;
+        const dedupeKey = `video_edit_permission_granted:${video.id}:x:${link.x_user_id}:user:${link.auth_user_id}`;
+        notificationByKey.set(dedupeKey, {
           recipientUserId: link.auth_user_id,
           type: "video_edit_permission_granted",
-          dedupeKey: `video_edit_permission_granted:${video.id}:x:${link.x_user_id}:user:${link.auth_user_id}`,
+          dedupeKey,
           payload: buildVideoEditPermissionGrantedNotification({
             videoId: video.id,
             videoTitle: video.title,
           }),
           eventId: video.primary_event_id,
-        }));
-      if (notificationInputs.length > 0) {
-        const notification = await buildKnownRecipientNotificationBulkBatch(db, notificationInputs);
+        });
+      }
+      const notificationInputs = [...notificationByKey.values()];
+      for (let offset = 0; offset < notificationInputs.length; offset += 200) {
+        const notification = await buildKnownRecipientNotificationBulkBatch(
+          db,
+          notificationInputs.slice(offset, offset + 200),
+        );
         statements.push(...notification.statements);
         expected.push(...notification.expectedChanges);
-        notificationWakeSource = "manage";
+        if (notification.statements.length > 0) notificationWakeSource = "manage";
       }
     }
 
