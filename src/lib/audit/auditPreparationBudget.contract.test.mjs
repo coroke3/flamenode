@@ -5,6 +5,10 @@ import { test } from "node:test";
 const loggerSource = await readFile(new URL("./logger.ts", import.meta.url), "utf8");
 const mutateSource = await readFile(new URL("./mutate.ts", import.meta.url), "utf8");
 const budgetSource = await readFile(new URL("./mutateBudget.ts", import.meta.url), "utf8");
+const atomicSource = await readFile(
+  new URL("../video/atomicWritePlan.ts", import.meta.url),
+  "utf8",
+);
 
 test("actor_x_user_id検証はaudit件数分SELECTせずJSON1 1 queryへまとめる", () => {
   assert.match(loggerSource, /async function loadApprovedActorXPairs/);
@@ -21,6 +25,15 @@ test("actor X検証queryはmutateWithAuditのD1予算にも含める", () => {
     budgetSource,
     /1 \+ Math\.max\(0, input\.distinctActorCount\) \+ actorXValidationQueryCount/,
   );
+});
+
+test("VideoAtomicWritePlanのpreflightもactor X検証1queryを同じ式で数える", () => {
+  assert.match(
+    atomicSource,
+    /const actorXValidationQueryCount = plan\.audits\.some/,
+  );
+  assert.match(atomicSource, /Boolean\(audit\.actor_x_user_id\?\.trim\(\)\)/);
+  assert.match(atomicSource, /actorXValidationQueryCount,/);
 });
 
 test("監査INSERTは21列bindを4entry以下へchunkする", () => {
