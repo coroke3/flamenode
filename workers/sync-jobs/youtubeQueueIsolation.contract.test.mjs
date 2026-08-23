@@ -34,6 +34,17 @@ test("playlist backlogはD1 due正本からbounded continuationへ変換する",
   assert.match(source, /playlistCounters\.quota_stopped/);
 });
 
+test("playlist quota停止はQueue retryやCron失敗へ変換しない", () => {
+  assert.match(source, /export function normalizePlaylistQuotaStop/);
+  assert.match(source, /!result\.quota_stopped \|\| result\.failed <= 0/);
+  assert.match(source, /skipped:\s*result\.skipped \+ result\.failed/);
+  assert.match(source, /failed:\s*0/);
+  assert.ok(
+    (source.match(/normalizePlaylistQuotaStop\(/g) ?? []).length >= 3,
+    "normalizer definition + Queue + Cron calls are required",
+  );
+});
+
 test("continuation判定失敗は成功済みjobを壊さずRecovery Cronへ委ねる", () => {
   assert.match(source, /youtube-playlist-continuation-check/);
   assert.match(source, /youtube-pending-recovery-check/);
