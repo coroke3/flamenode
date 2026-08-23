@@ -22,6 +22,8 @@ export type D1AuditMutationBudgetInput = {
   auditEntryCount: number;
   postAuditStatementCount?: number;
   distinctActorCount: number;
+  /** actor_x_user_id が1件でもあればJSON1一括検証に1 query使う。 */
+  actorXValidationQueryCount?: number;
 };
 
 export type D1AuditMutationBudget = {
@@ -31,6 +33,7 @@ export type D1AuditMutationBudget = {
   auditQueryCount: number;
   postAuditStatementCount: number;
   preparationQueryCount: number;
+  actorXValidationQueryCount: number;
   reservedCallerQueryCount: number;
   batchQueryCount: number;
   totalQueryCount: number;
@@ -49,12 +52,16 @@ export function planD1AuditMutationBudget(
     0,
     input.postAuditStatementCount ?? 0,
   );
+  const actorXValidationQueryCount = Math.max(
+    0,
+    input.actorXValidationQueryCount ?? 0,
+  );
   const auditChunkCount = auditEntryCount > 0
     ? Math.ceil(auditEntryCount / AUDIT_INSERT_CHUNK_SIZE)
     : 0;
   const auditQueryCount = auditChunkCount * 2;
   const preparationQueryCount = auditEntryCount > 0
-    ? 1 + Math.max(0, input.distinctActorCount)
+    ? 1 + Math.max(0, input.distinctActorCount) + actorXValidationQueryCount
     : 0;
   const batchQueryCount =
     mutationStatementCount +
@@ -73,6 +80,7 @@ export function planD1AuditMutationBudget(
     auditQueryCount,
     postAuditStatementCount,
     preparationQueryCount,
+    actorXValidationQueryCount,
     reservedCallerQueryCount: D1_RESERVED_CALLER_QUERIES,
     batchQueryCount,
     totalQueryCount,
