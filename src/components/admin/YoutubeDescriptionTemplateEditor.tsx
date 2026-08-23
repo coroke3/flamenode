@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import styles from "./YoutubeDescriptionTemplateEditor.module.css";
 import {
   MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
   YOUTUBE_DESCRIPTION_VARIABLES,
@@ -94,13 +95,34 @@ const SAMPLE_CONTEXT: YoutubeDescriptionContext = {
   closing_comment: "ご視聴ありがとうございました。",
 };
 
-const SAMPLE_TEMPLATE = `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n投稿者: {{creator_name}} {{creator_x_id}}\n楽曲: {{music}}\n\n{{credit}}\n\n{{youtube_url}}`;
-
 const MEMBERS_LOOP_SAMPLE = `{{#members}}
 {{member_chapter}} {{member_name}} @{{member_x_id}}
 {{member_role}}
 {{member_comment}}
 {{/members}}`;
+
+const PRESETS = [
+  {
+    id: "simple",
+    label: "シンプル",
+    body: `{{title}}\n\n{{intro_comment}}\n\n{{creator_name}} {{creator_x_id}}\n{{youtube_url}}`,
+  },
+  {
+    id: "event",
+    label: "イベント標準",
+    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n部: {{part}}\n投稿者: {{creator_name}} {{creator_x_id}}\n楽曲: {{music}}\n使用ソフト: {{used_software}}\n\n{{credit}}\n\n{{youtube_url}}`,
+  },
+  {
+    id: "collab",
+    label: "合作",
+    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} {{creator_x_id}}\n\n共同制作者\n{{#members}}\n- {{member_name}} @{{member_x_id}} {{member_role}}\n{{member_comment}}\n{{/members}}\n\n楽曲: {{music}}\n{{credit}}`,
+  },
+  {
+    id: "collab-chapter",
+    label: "合作＋チャプター",
+    body: `{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} {{creator_x_id}}\n\n共同制作者 / チャプター\n{{#members}}\n{{member_chapter}} {{member_name}} @{{member_x_id}}\n{{member_role}}\n{{member_comment}}\n{{/members}}\n\n楽曲: {{music}}\n{{credit}}`,
+  },
+] as const;
 
 const SAMPLE_LOOP_MEMBERS: YoutubeDescriptionLoopMember[] = [
   {
@@ -157,6 +179,22 @@ export function YoutubeDescriptionTemplateEditor({
     });
   }, [onChange]);
 
+  const insertAtCursor = (snippet: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      setTextareaValue(`${value}${snippet}`);
+      return;
+    }
+    const start = textarea.selectionStart ?? value.length;
+    const end = textarea.selectionEnd ?? start;
+    const prefix =
+      snippet.startsWith("{{#members}") && start > 0 && value[start - 1] !== "\n"
+        ? "\n"
+        : "";
+    const next = `${value.slice(0, start)}${prefix}${snippet}${value.slice(end)}`;
+    setTextareaValue(next, start + prefix.length + snippet.length);
+  };
+
   const insertVariable = (key: YoutubeDescriptionVariableKey) => {
     if (disabled) return;
     insertAtCursor(`{{${key}}}`);
@@ -167,21 +205,15 @@ export function YoutubeDescriptionTemplateEditor({
     insertAtCursor(MEMBERS_LOOP_SAMPLE);
   };
 
-  const insertAtCursor = (snippet: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      setTextareaValue(`${value}${snippet}`);
+  const applyPreset = (body: string, label: string) => {
+    if (disabled) return;
+    if (
+      value.trim() &&
+      !window.confirm(`現在のテンプレートを「${label}」プリセットで置き換えますか？`)
+    ) {
       return;
     }
-    const start = textarea.selectionStart ?? value.length;
-    const end = textarea.selectionEnd ?? start;
-    // 直前が行頭でない場合は改行を挟んで挿入し、loopブロックを見やすく保つ。
-    const prefix =
-      snippet.startsWith("{{#members}") && start > 0 && value[start - 1] !== "\n"
-        ? "\n"
-        : "";
-    const next = `${value.slice(0, start)}${prefix}${snippet}${value.slice(end)}`;
-    setTextareaValue(next, start + prefix.length + snippet.length);
+    setTextareaValue(body);
   };
 
   const copyBody = async () => {
@@ -197,171 +229,164 @@ export function YoutubeDescriptionTemplateEditor({
   };
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div>
+    <div className={styles.root}>
+      <div className={styles.header}>
         <label className="fn-label" htmlFor="youtube_description_template">
           YouTube概要欄テンプレート
         </label>
-        <p className="fn-text-muted-sm" style={{ margin: "6px 0 8px" }}>
-          日本語の項目ボタンから変数を挿入できます。作品編集画面では実際の作品情報に置き換えてコピーできます。
+        <p className={styles.description}>
+          日本語の項目ボタンから変数を挿入できます。右側で実際の出力例を確認しながら編集できます。
         </p>
-        <textarea
-          ref={textareaRef}
-          id="youtube_description_template"
-          name="youtube_description_template"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="fn-input"
-          rows={10}
-          maxLength={MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH}
-          disabled={disabled}
-          placeholder="作品タイトルや投稿者情報を、下のボタンから組み立ててください。"
-        />
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            marginTop: 6,
-          }}
-        >
-          <span className="fn-text-muted-sm">
-            {value.length.toLocaleString("ja-JP")} / {MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH.toLocaleString("ja-JP")}文字
-          </span>
-          <span style={{ display: "flex", gap: 6 }}>
-            <button
-              type="button"
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-              disabled={disabled}
-              onClick={() => setTextareaValue(SAMPLE_TEMPLATE)}
-            >
-              サンプルを挿入
-            </button>
-            <button
-              type="button"
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-              disabled={disabled}
-              onClick={insertMembersLoop}
-            >
-              メンバー繰り返しを挿入
-            </button>
-            <button
-              type="button"
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-              disabled={disabled || !value}
-              onClick={() => void copyBody()}
-            >
-              {copyState === "copied"
-                ? "コピーしました"
-                : copyState === "error"
-                  ? "コピー失敗"
-                  : "テンプレート本文をコピー"}
-            </button>
-            <button
-              type="button"
-              className="fn-btn fn-btn-ghost fn-btn-sm"
-              disabled={disabled || !value}
-              onClick={() => setTextareaValue("")}
-            >
-              クリア
-            </button>
-          </span>
-        </div>
       </div>
 
-      <div style={{ display: "grid", gap: 10 }} aria-label="概要欄に挿入できる項目">
-        {VARIABLE_GROUPS.map((group) => (
-          <section key={group.label} style={{ display: "grid", gap: 6 }}>
-            <strong style={{ fontSize: 12 }}>{group.label}</strong>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {group.keys.map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  className="fn-btn fn-btn-ghost fn-btn-sm"
-                  disabled={disabled}
-                  onClick={() => insertVariable(key)}
-                  title={`{{${key}}}`}
-                >
-                  {VARIABLE_LABELS.get(key) ?? key}
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
-      </div>
-
-      <section
-        className="fn-card"
-        style={{ padding: 12, display: "grid", gap: 8 }}
-        aria-label="メンバー繰り返しの使い方"
-      >
-        <strong style={{ fontSize: 12 }}>
-          {"メンバー繰り返し（{{#members}} ... {{/members}}）"}
-        </strong>
-        <p className="fn-text-muted-sm" style={{ margin: 0 }}>
-          ブロック内は合作メンバーの人数だけ繰り返し出力されます（入力順・0人ならブロックごと消えます）。ネストはできません。
-        </p>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div className={styles.presetBar} aria-label="概要欄テンプレートのプリセット">
+        <span className={styles.presetLabel}>プリセット</span>
+        {PRESETS.map((preset) => (
           <button
+            key={preset.id}
             type="button"
             className="fn-btn fn-btn-ghost fn-btn-sm"
             disabled={disabled}
-            onClick={insertMembersLoop}
+            onClick={() => applyPreset(preset.body, preset.label)}
           >
-            メンバー繰り返しを挿入
+            {preset.label}
           </button>
-        </div>
-        <ul className="fn-text-muted-sm" style={{ margin: 0, paddingLeft: 18 }}>
-          {[
-            "member_index — メンバー番号（1始まり）",
-            "member_name — 表示名",
-            "member_x_id — X ID（@なし。@{{member_x_id}} のように書けます）",
-            "member_chapter — 最初のチャプター時刻（例: 0:12）",
-            "member_chapters — 全チャプター時刻（; 区切り、例: 0:12;1:05）",
-            "member_role — 役職",
-            "member_comment — コメント",
-          ].map((label) => (
-            <li key={label}>{label}</li>
-          ))}
-        </ul>
-      </section>
+        ))}
+      </div>
 
-      <section className="fn-card" style={{ padding: 12, display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <strong>ライブプレビュー</strong>
-          <span className="fn-badge fn-badge-soft">サンプル値で表示</span>
-        </div>
-        <pre
-          style={{
-            margin: 0,
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-            font: "inherit",
-            lineHeight: 1.7,
-          }}
-        >
-          {rendered.text || "テンプレートを入力するとここに表示されます。"}
-        </pre>
-        {rendered.usedVariables.length > 0 ? (
-          <p className="fn-text-muted-sm" style={{ margin: 0 }}>
-            使用中: {rendered.usedVariables.map((key) => VARIABLE_LABELS.get(key) ?? key).join("、")}
-          </p>
-        ) : null}
-        {rendered.unknownVariables.length > 0 ? (
-          <p className="fn-alert fn-alert--danger" role="alert" style={{ margin: 0 }}>
-            未登録の変数があります: {rendered.unknownVariables.map((key) => `{{${key}}}`).join("、")}
-          </p>
-        ) : null}
-        {rendered.templateWarnings.length > 0 ? (
-          <div className="fn-alert fn-alert--warning" role="status" style={{ margin: 0 }}>
-            {rendered.templateWarnings.map((warning) => (
-              <p key={warning} style={{ margin: "2px 0" }}>{warning}</p>
+      <div className={styles.workspace}>
+        <div className={styles.editorColumn}>
+          <div>
+            <textarea
+              ref={textareaRef}
+              id="youtube_description_template"
+              name="youtube_description_template"
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              className={`fn-input ${styles.textarea}`}
+              maxLength={MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH}
+              disabled={disabled}
+              placeholder="作品タイトルや投稿者情報を、下のボタンから組み立ててください。"
+            />
+            <div className={styles.textareaMeta}>
+              <span className="fn-text-muted-sm">
+                {value.length.toLocaleString("ja-JP")} / {MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH.toLocaleString("ja-JP")}文字
+              </span>
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  disabled={disabled}
+                  onClick={insertMembersLoop}
+                >
+                  メンバー繰り返しを挿入
+                </button>
+                <button
+                  type="button"
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  disabled={disabled || !value}
+                  onClick={() => void copyBody()}
+                >
+                  {copyState === "copied"
+                    ? "コピーしました"
+                    : copyState === "error"
+                      ? "コピー失敗"
+                      : "本文をコピー"}
+                </button>
+                <button
+                  type="button"
+                  className="fn-btn fn-btn-ghost fn-btn-sm"
+                  disabled={disabled || !value}
+                  onClick={() => {
+                    if (!window.confirm("現在のテンプレートを空にしますか？")) return;
+                    setTextareaValue("");
+                  }}
+                >
+                  クリア
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className={styles.variableGroups} aria-label="概要欄に挿入できる項目">
+            {VARIABLE_GROUPS.map((group) => (
+              <section key={group.label} className={styles.variableGroup}>
+                <strong className={styles.variableGroupTitle}>{group.label}</strong>
+                <div className={styles.variableButtons}>
+                  {group.keys.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.variableButton}`}
+                      disabled={disabled}
+                      onClick={() => insertVariable(key)}
+                      title={`{{${key}}}`}
+                    >
+                      <span>{VARIABLE_LABELS.get(key) ?? key}</span>
+                      <span className={styles.variableToken}>{`{{${key}}}`}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
-        ) : null}
-      </section>
+
+          <section
+            className={`fn-card ${styles.helpCard}`}
+            aria-label="メンバー繰り返しの使い方"
+          >
+            <strong style={{ fontSize: 12 }}>
+              {"メンバー繰り返し（{{#members}} ... {{/members}}）"}
+            </strong>
+            <p className="fn-text-muted-sm">
+              ブロック内は合作メンバーの人数だけ繰り返し出力されます。0人ならブロックごと消え、ネストはできません。
+            </p>
+            <ul className="fn-text-muted-sm" style={{ paddingLeft: 18 }}>
+              {[
+                "member_index — メンバー番号（1始まり）",
+                "member_name — 表示名",
+                "member_x_id — X ID（@なし）",
+                "member_chapter — 最初のチャプター時刻",
+                "member_chapters — 全チャプター時刻",
+                "member_role — 役職",
+                "member_comment — コメント",
+              ].map((label) => (
+                <li key={label}>{label}</li>
+              ))}
+            </ul>
+          </section>
+        </div>
+
+        <aside className={styles.previewColumn} aria-label="概要欄テンプレートのプレビュー">
+          <section className={`fn-card ${styles.previewCard}`}>
+            <div className={styles.previewHead}>
+              <strong>ライブプレビュー</strong>
+              <span className="fn-badge fn-badge-soft">サンプル値で表示</span>
+            </div>
+            <pre className={styles.previewText}>
+              {rendered.text || "テンプレートを入力するとここに表示されます。"}
+            </pre>
+            {rendered.usedVariables.length > 0 ? (
+              <p className="fn-text-muted-sm">
+                使用中: {rendered.usedVariables.map((key) => VARIABLE_LABELS.get(key) ?? key).join("、")}
+              </p>
+            ) : null}
+          </section>
+
+          {rendered.unknownVariables.length > 0 ? (
+            <p className="fn-alert fn-alert--danger" role="alert" style={{ margin: 0 }}>
+              未登録の変数があります: {rendered.unknownVariables.map((key) => `{{${key}}}`).join("、")}
+            </p>
+          ) : null}
+          {rendered.templateWarnings.length > 0 ? (
+            <div className="fn-alert fn-alert--warning" role="status" style={{ margin: 0 }}>
+              {rendered.templateWarnings.map((warning) => (
+                <p key={warning} style={{ margin: "2px 0" }}>{warning}</p>
+              ))}
+            </div>
+          ) : null}
+        </aside>
+      </div>
     </div>
   );
 }
