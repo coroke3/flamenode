@@ -289,16 +289,17 @@ export async function enqueueStaticRebuild(
  * 複数targetはJSON1 bulk UPSERTへまとめる。
  * 旧実装はtargetごとにSELECT→UPDATE/INSERTを最大3回再試行していたため、
  * 100人合作などのfanoutでD1 50 queries/invocationを超え得た。
+ * best-effort APIなのでplan生成時の上限超過も呼び出し元へ漏らさない。
  */
 export async function enqueueStaticRebuildMany(
   db: DB,
   items: EnqueueStaticRebuildInput[],
   options?: EnqueueStaticRebuildOptions,
 ): Promise<void> {
-  const batch = await buildStaticRebuildQueueBatch(db, items);
-  if (batch.statements.length === 0) return;
-
   try {
+    const batch = await buildStaticRebuildQueueBatch(db, items);
+    if (batch.statements.length === 0) return;
+
     await db.batch(
       batch.statements as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]],
     );
@@ -307,9 +308,9 @@ export async function enqueueStaticRebuildMany(
       sentKinds: options?.sentKinds ?? new Set<QueueWakeKind>(),
     });
   } catch (error) {
-    // rebuild enqueueは本体保存後のbest-effort経路。大量fanoutでも本体成功を巻き戻さない。
+    // rebuild enqueueは本体保存後のbest-effort経路。大量fanoutやplan上限でも本体成功を巻き戻さない。
     console.warn("[enqueueStaticRebuildMany] bulk enqueue failed", {
-      targetCount: batch.acceptedTargetCount,
+      targetCount: items.length,
       error,
     });
   }
