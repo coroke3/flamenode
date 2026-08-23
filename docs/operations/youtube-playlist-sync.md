@@ -9,6 +9,21 @@
 - `event_youtube_playlist_sync.enabled = 1` かつ `sync_mode != 'off'` のイベントだけを同期します。未設定イベントを自動で同期しません。
 - OAuth credentialはD1/KVへ保存せず、Worker secretだけに保持します。
 
+## 稼働可能判定
+
+コード上は、次の条件が揃えば再生リスト同期を実行できます。
+
+- `flamenode-sync-jobs` が現行commitでデプロイ済み
+- Cronが `7 * * * *` / `52 * * * *`
+- `DB` / `KV` / `YOUTUBE_SYNC_WAKE_QUEUE` / `STATIC_REBUILD_WAKE_QUEUE` bindingが存在
+- `event_youtube_playlist_sync` / `event_youtube_playlist_items` / `external_api_quota_usage` がRemote D1に存在
+- `YOUTUBE_API_KEY` / `YOUTUBE_OAUTH_CLIENT_ID` / `YOUTUBE_OAUTH_CLIENT_SECRET` / `YOUTUBE_OAUTH_REFRESH_TOKEN` のsecret名が登録済み
+- refresh tokenを発行したGoogleアカウントが対象再生リストを編集できる
+
+`cf:deploy-production` のproduction preflightはRemote D1のruntime schemaと `sync-jobs` の必須secret名をfail-closedで検査するため、同スクリプトを通して最新commitが正常デプロイ済みなら、Cloudflare側のテーブル・binding・secret名不足は原則として除外できます。ただしrefresh tokenの失効、YouTube Data APIの無効化、対象再生リストの所有権・編集権限は最初の実API同期まで確定できません。
+
+コード側の回帰確認は `src/lib/youtube/playlistReadiness.contract.test.mjs` と `workers/youtube-playlist-sync/index.test.mjs` を使用します。
+
 ## Google Cloud / YouTube側
 
 1. YouTube Data API v3を有効化します。
