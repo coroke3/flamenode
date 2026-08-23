@@ -23,7 +23,7 @@ test("bulk queue builderはprefetchなしのjson_each UPSERTを使う", () => {
     source.indexOf("export async function enqueueStaticRebuild"),
   );
   assert.match(source, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0/);
-  assert.match(source, /STATIC_REBUILD_BULK_UPSERT_ROWS = 50/);
+  assert.match(source, /STATIC_REBUILD_BULK_UPSERT_ROWS = 100/);
   assert.doesNotMatch(batchFn, /\.select\(staticRebuildActiveLookupSelect\)/);
   assert.doesNotMatch(batchFn, /indexUniqueStaticRebuildTargetRows/);
   assert.match(batchFn, /FROM json_each\(\$\{payload\}\)/);
@@ -66,7 +66,7 @@ test("queueBatchCoreはactive重複をfail-closedにする", () => {
   );
 });
 
-test("16 target UPSERTはchunk 10以下でbind上限内", async () => {
+test("100 target UPSERTも1 JSON bindでbind上限内", async () => {
   if (process.env.FLAMENODE_TSX_TEST_ENTRY) {
     const { registerHooks } = await import("node:module");
     registerHooks({
@@ -83,14 +83,14 @@ test("16 target UPSERTはchunk 10以下でbind上限内", async () => {
     const { drizzle } = await import("drizzle-orm/sqlite-proxy");
     const { buildStaticRebuildQueueBatch } = await import("./enqueue.ts");
     const db = drizzle(async () => ({ rows: [] }));
-    const items = Array.from({ length: 16 }, (_, index) => ({
+    const items = Array.from({ length: 100 }, (_, index) => ({
       targetType: "event",
       targetId: `event-${index}`,
       reason: "test_enqueue",
     }));
     const batch = await buildStaticRebuildQueueBatch(db, items);
     assert.equal(batch.statements.length, 1);
-    assert.deepEqual(batch.expectedChanges, [16]);
+    assert.deepEqual(batch.expectedChanges, [100]);
     for (const statement of batch.statements) {
       const query =
         typeof statement.getQuery === "function"
