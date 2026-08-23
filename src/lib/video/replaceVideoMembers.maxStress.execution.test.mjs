@@ -48,13 +48,11 @@ if (runTestWithTsx(import.meta.url)) {
       CREATE TABLE video_chapters (
         id TEXT PRIMARY KEY,
         video_id TEXT NOT NULL,
-        x_user_id TEXT NOT NULL,
+        x_user_id TEXT,
         chapter_time REAL NOT NULL,
         chapter_label TEXT NOT NULL,
         note TEXT,
-        visibility TEXT,
-        show_on_player_bar INTEGER DEFAULT 0,
-        order_index INTEGER DEFAULT 0,
+        visibility TEXT NOT NULL DEFAULT 'public',
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -67,12 +65,29 @@ if (runTestWithTsx(import.meta.url)) {
         youtube_channel_url TEXT,
         other_social_links TEXT,
         creative_start_date INTEGER,
-        linked_user_id TEXT,
-        verification_token TEXT,
-        token_expires_at INTEGER,
-        approval_status TEXT,
-        approval_requested_at INTEGER
+        approval_status TEXT
       );
+      CREATE TABLE static_rebuild_queue (
+        id TEXT PRIMARY KEY,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        reason TEXT,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        requested_by_user_id TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        processing_started_at INTEGER,
+        lease_token TEXT,
+        lease_expires_at INTEGER,
+        processed_at INTEGER,
+        next_retry_at INTEGER,
+        error TEXT
+      );
+      CREATE UNIQUE INDEX static_rebuild_queue_target_pending_uniq
+        ON static_rebuild_queue(target_type, target_id)
+        WHERE status IN ('pending', 'processing');
     `);
   }
 
