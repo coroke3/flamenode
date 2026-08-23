@@ -4,6 +4,19 @@ import { test } from "node:test";
 import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
 
 if (runTestWithTsx(import.meta.url)) {
+  const { registerHooks } = await import("node:module");
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier === "server-only") {
+        return {
+          url: "data:text/javascript,export%20{}",
+          shortCircuit: true,
+        };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+
   const { drizzle } = await import("drizzle-orm/sqlite-proxy");
   const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
   const {
@@ -59,23 +72,6 @@ if (runTestWithTsx(import.meta.url)) {
         token_expires_at INTEGER,
         approval_status TEXT,
         approval_requested_at INTEGER
-      );
-      CREATE TABLE static_rebuild_queue (
-        target_type TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        reason TEXT NOT NULL,
-        requested_by_user_id TEXT,
-        status TEXT NOT NULL,
-        priority INTEGER NOT NULL DEFAULT 0,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        requested_at INTEGER NOT NULL,
-        available_at INTEGER NOT NULL,
-        processing_started_at INTEGER,
-        completed_at INTEGER,
-        last_error TEXT,
-        updated_at INTEGER NOT NULL,
-        metadata_json TEXT,
-        PRIMARY KEY (target_type, target_id)
       );
     `);
   }
@@ -208,11 +204,9 @@ if (runTestWithTsx(import.meta.url)) {
     assert.ok(budget.totalQueryCount <= 50);
 
     const queries = combined.statements.map(queryOf).filter(Boolean);
-    let maxBindCount = 0;
     let maxBindPayloadBytes = 0;
     let maxSqlBytes = 0;
     for (const query of queries) {
-      maxBindCount = Math.max(maxBindCount, query.params.length);
       maxSqlBytes = Math.max(
         maxSqlBytes,
         new TextEncoder().encode(query.sql).byteLength,
