@@ -54,6 +54,32 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.doesNotMatch(source, /context\.waitUntil\(handleStaticRebuildWakeQueue/);
 });
 
+test("Cron lease・cleanup・rebuildは同じD1 budget wrapperを共有する", () => {
+  const envIndex = source.indexOf("const rebuildEnv = rebuildEnvironment(env)");
+  const outerLeaseIndex = source.indexOf("const leased = await withCronLease(");
+  const cleanupIndex = source.indexOf("const cleanupLease = await withCronLease(");
+  const deployIndex = source.indexOf("const deployGlobalRebuilds = await ensureDeployGlobalRebuilds(");
+  assert.ok(envIndex >= 0 && outerLeaseIndex > envIndex);
+  assert.ok(cleanupIndex > outerLeaseIndex && deployIndex > cleanupIndex);
+  assert.match(
+    source,
+    /const leased = await withCronLease\(\s*rebuildEnv,/,
+  );
+  assert.match(
+    source,
+    /const cleanupLease = await withCronLease\(\s*rebuildEnv,/,
+  );
+  assert.match(source, /runCleanupWithRetry\(rebuildEnv, cleanupSignal\)/);
+  assert.doesNotMatch(source, /runCleanupWithRetry\(env, cleanupSignal\)/);
+});
+
+test("手動rebuildもleaseとqueue処理で同じD1 budgetを共有する", () => {
+  const manual = source.slice(source.indexOf("export async function handleContentJobsFetch"));
+  assert.match(manual, /const rebuildEnv = rebuildEnvironment\(env\)/);
+  assert.match(manual, /withCronLease\(\s*rebuildEnv,/);
+  assert.match(manual, /queueResult = await runQueue\(rebuildEnv\)/);
+});
+
 test("無認証 rebuild / process-queue を拒否する", () => {
   assert.match(source, /rejectUnauthorizedWorkerRequest/);
   assert.match(source, /\/rebuild/);
