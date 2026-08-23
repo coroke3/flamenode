@@ -40,12 +40,18 @@ export function toVideoMemberSnapshotRow(
   };
 }
 
+/** SQLiteの既定BINARY collationに合わせ、locale依存の並び順を使わない。 */
+export function compareSqliteBinaryText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function sortRows(
   rows: readonly VideoMemberSnapshotRow[],
 ): VideoMemberSnapshotRow[] {
   return [...rows].sort(
     (left, right) =>
-      left.order_index - right.order_index || left.id.localeCompare(right.id),
+      left.order_index - right.order_index ||
+      compareSqliteBinaryText(left.id, right.id),
   );
 }
 
