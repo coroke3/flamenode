@@ -165,12 +165,28 @@ export async function runYoutubeSyncPostCommit(
   }
 }
 
-async function maybeResendYoutubePendingWake(env: Env): Promise<void> {
+/** pending recoveryはドアベルなので、D1 read失敗で成功済みjobを再試行しない。 */
+async function maybeResendYoutubePendingWake(env: Env): Promise<boolean> {
   const flags = resolveQueueFeatureFlags(env);
-  if (!flags.dispatchEnabled || !flags.youtubeSyncEnabled) return;
-  const pending = await countPendingSyncRows(env);
-  if (pending <= 0) return;
-  await sendWorkerQueueWakeBestEffort({
+  if (!flags.dispatchEnabled || !flags.youtubeSyncEnabled) return false;
+
+  let pending = 0;
+  try {
+    pending = await countPendingSyncRows(env);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "sync-jobs",
+        job: "youtube-pending-recovery-check",
+        result: "deferred_to_recovery",
+        error_name: error instanceof Error ? error.name : undefined,
+      }),
+    );
+    return false;
+  }
+  if (pending <= 0) return false;
+
+  return sendWorkerQueueWakeBestEffort({
     queue: env.YOUTUBE_SYNC_WAKE_QUEUE ?? null,
     kind: "youtube_sync_pending",
     source: "recovery",
@@ -250,8 +266,9 @@ export async function handleYoutubeSyncWakeQueue(
   const playlistMessages: Message<unknown>[] = [];
   const invalidMessages: Message<unknown>[] = [];
 
-  // 同じQueueをmetadataとplaylistで共有する。種類ごとに別々にack/retryし、
-  // 片方の外部API障害で成功済みのもう片方を再実行しない。
+  // 同じQueueをmetadataとplaylistで共有する。外部APIの重い2 jobを同一invocationで
+  // 実行すると最大8+12 requestが重なるため、mixed batchではplaylistを優先し、
+  // metadataはD1正本を確認して1件のrecovery doorbellへcoalesceする。
   for (const message of batch.messages) {
     const wake = parseQueueWakeMessage(message.body);
     if (wake?.kind === "youtube_sync_pending") {
@@ -264,13 +281,15 @@ export async function handleYoutubeSyncWakeQueue(
   }
   ackAll(invalidMessages);
 
+  const mixedYoutubeKinds =
+    metadataMessages.length > 0 && playlistMessages.length > 0;
   let retryBatch = false;
   let continued = false;
   let processed = 0;
   let skipped = invalidMessages.length;
   let failed = 0;
 
-  if (metadataMessages.length > 0) {
+  if (metadataMessages.length > 0 && !mixedYoutubeKinds) {
     try {
       let youtube: SyncBatchResult | null = null;
       const metadataJob = await runJob(
@@ -341,6 +360,15 @@ export async function handleYoutubeSyncWakeQueue(
       retryBatch = true;
       failed += playlistMessages.length;
     }
+  }
+
+  if (mixedYoutubeKinds) {
+    // metadata doorbell自体に業務データは無いのでACKして重複を捨てる。
+    // D1 pendingが残っている場合だけ1件を再送し、送信失敗時は7分Cronが回収する。
+    ackAll(metadataMessages);
+    skipped += metadataMessages.length;
+    const metadataContinued = await maybeResendYoutubePendingWake(env);
+    continued ||= metadataContinued;
   }
 
   return {
