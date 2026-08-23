@@ -59,7 +59,6 @@ function dedupeStaticRebuildInputs(
   return Array.from(byKey.values());
 }
 
-const ENQUEUE_MANY_CONCURRENCY = 4;
 const ENQUEUE_CONFLICT_RETRY_LIMIT = 3;
 // A full 100-member replacement can invalidate both old and new user pages
 // (up to 200 user targets) plus the video/index/event projections. Keep the
@@ -286,21 +285,33 @@ export async function enqueueStaticRebuild(
   }
 }
 
+/**
+ * 複数targetはJSON1 bulk UPSERTへまとめる。
+ * 旧実装はtargetごとにSELECT→UPDATE/INSERTを最大3回再試行していたため、
+ * 100人合作などのfanoutでD1 50 queries/invocationを超え得た。
+ */
 export async function enqueueStaticRebuildMany(
   db: DB,
   items: EnqueueStaticRebuildInput[],
   options?: EnqueueStaticRebuildOptions,
 ): Promise<void> {
-  const sentKinds = options?.sentKinds ?? new Set<QueueWakeKind>();
-  const deduped = dedupeStaticRebuildInputs(items);
-  for (let offset = 0; offset < deduped.length; offset += ENQUEUE_MANY_CONCURRENCY) {
-    await Promise.all(
-      deduped
-        .slice(offset, offset + ENQUEUE_MANY_CONCURRENCY)
-        .map((item) =>
-          enqueueStaticRebuild(db, item, { ...options, sentKinds }),
-        ),
+  const batch = await buildStaticRebuildQueueBatch(db, items);
+  if (batch.statements.length === 0) return;
+
+  try {
+    await db.batch(
+      batch.statements as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]],
     );
+    await wakeAfterSuccessfulEnqueue({
+      ...options,
+      sentKinds: options?.sentKinds ?? new Set<QueueWakeKind>(),
+    });
+  } catch (error) {
+    // rebuild enqueueは本体保存後のbest-effort経路。大量fanoutでも本体成功を巻き戻さない。
+    console.warn("[enqueueStaticRebuildMany] bulk enqueue failed", {
+      targetCount: batch.acceptedTargetCount,
+      error,
+    });
   }
 }
 
