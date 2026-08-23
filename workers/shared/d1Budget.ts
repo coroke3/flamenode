@@ -79,6 +79,10 @@ function recordD1ResultMetrics(budget: D1Budget, result: unknown): void {
 /**
  * invocation 内の D1 statement 数と rows read/write を集計し、Free hard limit超過を
  * D1へ送る前に拒否する。`withSerializedD1` の外側へ重ねる。
+ *
+ * `DB.exec()` は複数SQLを1文字列で実行でき、実行前に正確なstatement数を確定できない。
+ * Cloudflareもmaintenance/one-shot用途としているため、budgeted runtimeではfail-closedにし、
+ * prepare/batchだけを許可する。将来execが追加されても50 query上限を迂回させない。
  */
 export function withD1Budget<Env extends SerializedEnv>(
   env: Env,
@@ -129,6 +133,16 @@ export function withD1Budget<Env extends SerializedEnv>(
             recordD1ResultMetrics(budget, result);
           }
           return results;
+        };
+      }
+      if (property === "exec") {
+        return async () => {
+          throw new Error("d1_exec_disallowed_in_budgeted_worker");
+        };
+      }
+      if (property === "withSession") {
+        return () => {
+          throw new Error("d1_session_disallowed_in_budgeted_worker");
         };
       }
       const value = Reflect.get(target, property, target);
