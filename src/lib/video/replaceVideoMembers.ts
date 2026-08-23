@@ -17,8 +17,10 @@ import {
   toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
 
-/** Keep each JSON1 bind comfortably below D1/R2 string limits. */
+/** Keep each individual JSON1 bind well below D1's 2 MB string/bind ceiling. */
 export const VIDEO_CHAPTER_JSON_MAX_BYTES = 1_000_000;
+/** One compound statement must also stay below D1's 100-bound-parameter limit. */
+export const VIDEO_CHAPTER_JSON_MAX_BINDS = 90;
 const JSON_ENCODER = new TextEncoder();
 
 export function jsonUtf8ByteLength(value: unknown): number {
@@ -59,35 +61,60 @@ type ChapterBulkStatement = {
   payloadBytes: number;
 };
 
+function buildChunkValueUnion(chunks: readonly unknown[][]) {
+  if (chunks.length === 0) throw new Error("video_chapter_json_chunk_empty");
+  if (chunks.length > VIDEO_CHAPTER_JSON_MAX_BINDS) {
+    throw new Error("video_chapter_json_bind_limit_exceeded");
+  }
+  const payloads = chunks.map((chunk) => JSON.stringify(chunk));
+  return {
+    source: sql.join(
+      payloads.map(
+        (payload) => sql`SELECT value FROM json_each(${payload})`,
+      ),
+      sql` UNION ALL `,
+    ),
+    maxPayloadBytes: Math.max(
+      ...chunks.map((chunk) => jsonUtf8ByteLength(chunk)),
+    ),
+  };
+}
+
 function buildVideoChapterBulkDeleteSql(
   videoId: string,
   rows: readonly (typeof videoChapters.$inferSelect)[],
 ): ChapterBulkStatement[] {
   if (rows.length === 0) throw new Error("video_chapter_bulk_delete_empty");
-  return chunkRowsByJsonByteSize(rows.map((row) => row.id)).map((chunk) => {
-    const payload = JSON.stringify(chunk);
-    return {
+  const chunks = chunkRowsByJsonByteSize(rows.map((row) => row.id));
+  const { source, maxPayloadBytes } = buildChunkValueUnion(chunks);
+  return [
+    {
       statement: sql`
         DELETE FROM video_chapters
         WHERE video_id = ${videoId}
           AND id IN (
-            SELECT CAST(value AS TEXT)
-            FROM json_each(${payload})
+            SELECT CAST(chapter_ids.value AS TEXT)
+            FROM (${source}) AS chapter_ids
           )
       `,
-      rowCount: chunk.length,
-      payloadBytes: jsonUtf8ByteLength(chunk),
-    };
-  });
+      rowCount: rows.length,
+      payloadBytes: maxPayloadBytes,
+    },
+  ];
 }
 
 function buildVideoChapterBulkInsertSql(
   rows: readonly (typeof videoChapters.$inferSelect)[],
 ): ChapterBulkStatement[] {
   if (rows.length === 0) throw new Error("video_chapter_bulk_insert_empty");
-  return chunkRowsByJsonByteSize(rows).map((chunk) => {
-    const payload = JSON.stringify(chunk);
-    return {
+  // Large 100-member payloads are split into <=1MB bound strings, but those
+  // binds are consumed by one compound INSERT. This avoids turning every byte
+  // chunk into a separate D1 statement + changes() assertion while keeping
+  // each individual bind comfortably below the 2MB platform limit.
+  const chunks = chunkRowsByJsonByteSize(rows);
+  const { source, maxPayloadBytes } = buildChunkValueUnion(chunks);
+  return [
+    {
       statement: sql`
         INSERT INTO video_chapters (
           id,
@@ -101,21 +128,21 @@ function buildVideoChapterBulkInsertSql(
           updated_at
         )
         SELECT
-          json_extract(value, '$.id'),
-          json_extract(value, '$.video_id'),
-          json_extract(value, '$.x_user_id'),
-          json_extract(value, '$.chapter_time'),
-          json_extract(value, '$.chapter_label'),
-          json_extract(value, '$.note'),
-          json_extract(value, '$.visibility'),
-          json_extract(value, '$.created_at'),
-          json_extract(value, '$.updated_at')
-        FROM json_each(${payload})
+          json_extract(chapter_rows.value, '$.id'),
+          json_extract(chapter_rows.value, '$.video_id'),
+          json_extract(chapter_rows.value, '$.x_user_id'),
+          json_extract(chapter_rows.value, '$.chapter_time'),
+          json_extract(chapter_rows.value, '$.chapter_label'),
+          json_extract(chapter_rows.value, '$.note'),
+          json_extract(chapter_rows.value, '$.visibility'),
+          json_extract(chapter_rows.value, '$.created_at'),
+          json_extract(chapter_rows.value, '$.updated_at')
+        FROM (${source}) AS chapter_rows
       `,
-      rowCount: chunk.length,
-      payloadBytes: jsonUtf8ByteLength(chunk),
-    };
-  });
+      rowCount: rows.length,
+      payloadBytes: maxPayloadBytes,
+    },
+  ];
 }
 
 type CanonicalizedMemberInputs = {
