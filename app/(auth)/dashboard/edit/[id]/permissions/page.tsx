@@ -40,7 +40,9 @@ export default async function EditVideoPermissionsPage({
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
   const sp = (await searchParams) ?? {};
-  const requestedMode = normalizePrivilegeMode(sp.privileged);
+  const rawRequestedMode = sp.privileged?.trim();
+  const hasExplicitPrivilegeMode = Boolean(rawRequestedMode);
+  const requestedMode = normalizePrivilegeMode(rawRequestedMode);
   const guard = await requireSession({
     next: `/dashboard/edit/${encodeURIComponent(id)}/permissions`,
   });
@@ -62,8 +64,11 @@ export default async function EditVideoPermissionsPage({
     video,
   });
 
-  // 管理者以外が ?privileged=admin を付けても normal にフォールバック。
-  // event モードは canUseEventPrivilegeModeForVideo が true のときだけ。
+  // 明示された privilege mode は従来どおりfail-closedで扱う。
+  // queryが無い通常導線だけは normal を最初に試し、作者所有者でなければ
+  // site admin → event staff の順にServer側で安全に補完する。
+  // これにより /dashboard/edit/:id/permissions へ直接遷移しても、正当な管理者・
+  // イベント運営が「権限がありません」になる導線切れを防ぐ。
   let privilegeMode: PrivilegeMode = "normal";
   if (requestedMode === "admin" && user.role === "admin") {
     privilegeMode = "admin";
@@ -71,13 +76,44 @@ export default async function EditVideoPermissionsPage({
     privilegeMode = "event";
   }
 
-  const canEditPermissions = await canEditVideo({
+  let canEditPermissions = await canEditVideo({
     db,
     user: editUser,
     video,
     requiredKey: "video.permissions",
     privilegeMode,
   });
+
+  if (!canEditPermissions && !hasExplicitPrivilegeMode) {
+    if (user.role === "admin") {
+      const adminAllowed = await canEditVideo({
+        db,
+        user: editUser,
+        video,
+        requiredKey: "video.permissions",
+        privilegeMode: "admin",
+      });
+      if (adminAllowed) {
+        privilegeMode = "admin";
+        canEditPermissions = true;
+      }
+    }
+
+    if (!canEditPermissions && canOfferEventMode) {
+      const eventAllowed = await canEditVideo({
+        db,
+        user: editUser,
+        video,
+        requiredKey: "video.permissions",
+        privilegeMode: "event",
+      });
+      if (eventAllowed) {
+        privilegeMode = "event";
+        canEditPermissions = true;
+      }
+    }
+  }
+
   if (!canEditPermissions) {
     return (
       <div className="fn-public-container fn-page fn-guard-shell">
