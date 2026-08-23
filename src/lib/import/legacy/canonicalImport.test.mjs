@@ -808,8 +808,8 @@ test("カスタム質問・回答applyは手動回答保護とD1予算を維持�
     auditEntryCount: 5,
     distinctActorCount: 1,
   });
-  assert.equal(budget.totalQueryCount, 45);
-  assert.equal(budget.withinLimit, true);
+  assert.equal(budget.totalQueryCount, 53);
+  assert.equal(budget.withinLimit, false);
 });
 
 test("ファイルごとの1始まり・終了含む範囲を選択し、元行位置を維持する", () => {

@@ -2,7 +2,10 @@
 
 import * as React from "react";
 import Link from "next/link";
-import type { EventExportUpdateMode } from "@/lib/api/eventExportPayload";
+import type {
+  EventExportFormat,
+  EventExportUpdateMode,
+} from "@/lib/api/eventExportPayload";
 import { writeTextToClipboard } from "@/lib/utils/clipboard";
 
 interface EventExportLinkBuilderProps {
@@ -12,6 +15,7 @@ interface EventExportLinkBuilderProps {
 export function EventExportLinkBuilder({
   eventId,
 }: EventExportLinkBuilderProps): React.ReactElement {
+  const [format, setFormat] = React.useState<EventExportFormat>("v5");
   const [updateMode, setUpdateMode] =
     React.useState<EventExportUpdateMode>("realtime");
   const [refreshMinutes, setRefreshMinutes] = React.useState("60");
@@ -20,9 +24,11 @@ export function EventExportLinkBuilder({
 
   const href = React.useMemo(() => {
     const params = new URLSearchParams({ update: updateMode });
+    // 現行v5 URLとの互換性を維持し、旧形式を選んだ場合だけformatを明示する。
+    if (format === "legacy") params.set("format", "legacy");
     if (updateMode === "scheduled") params.set("refresh", refreshMinutes);
     return `/api/event-endpoints/${encodeURIComponent(eventId)}?${params.toString()}`;
-  }, [eventId, refreshMinutes, updateMode]);
+  }, [eventId, format, refreshMinutes, updateMode]);
 
   async function copyUrl(): Promise<void> {
     const absoluteUrl = new URL(href, window.location.origin).toString();
@@ -39,9 +45,21 @@ export function EventExportLinkBuilder({
   return (
     <div style={{ display: "grid", gap: 8, minWidth: 280 }}>
       <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>
-        出力形式はFlameNodeイベントAPI v5に統一されています。
+        新規連携はv5を推奨します。旧EventArchives系の利用先だけ旧形式互換を選択してください。
       </p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <label className="fn-field" style={{ minWidth: 150 }}>
+          <span className="fn-label">データ形式</span>
+          <select
+            className="fn-select"
+            value={format}
+            onChange={(event) => setFormat(event.target.value as EventExportFormat)}
+          >
+            <option value="v5">新形式 v5</option>
+            <option value="legacy">旧形式互換</option>
+          </select>
+        </label>
+
         <label className="fn-field" style={{ minWidth: 150 }}>
           <span className="fn-label">更新方式</span>
           <select

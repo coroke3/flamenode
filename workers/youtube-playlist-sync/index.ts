@@ -30,6 +30,7 @@ interface SyncConfigRow {
   last_full_scan_at: number | null;
   scan_started_at: number | null;
   scan_page_token: string | null;
+  last_error: string | null;
 }
 
 interface RemoteItemRow {
@@ -52,6 +53,23 @@ interface InsertedPlaylistItem {
   ordered: boolean;
 }
 
+export type PlaylistOrderRepairPlan =
+  | { status: "aligned" }
+  | { status: "ambiguous" }
+  | {
+      status: "move";
+      playlistItemId: string;
+      videoId: string;
+      fromIndex: number;
+      toIndex: number;
+    };
+
+interface PlaylistOrderSnapshot {
+  items: PlaylistPageItem[];
+  complete: boolean;
+  reason: "request_budget" | "quota" | "page_limit" | null;
+}
+
 export interface PlaylistSyncBatchResult {
   processed: number;
   skipped: number;
@@ -65,7 +83,9 @@ export interface PlaylistSyncBatchResult {
 
 const MAX_EVENTS_PER_RUN = 1;
 const MAX_SCAN_PAGES_PER_EVENT = 3;
+const MAX_ORDER_SCAN_PAGES_PER_EVENT = 8;
 const MAX_MUTATIONS_PER_RUN = 4;
+const MAX_ORDER_REPAIRS_PER_RUN = 2;
 const MAX_SOURCE_VIDEOS = 5000;
 export const PLAYLIST_MAX_REMOTE_ITEMS = 5000;
 export const PLAYLIST_STALE_DELETE_BATCH_SIZE = 100;
@@ -75,7 +95,7 @@ const FULL_SCAN_INTERVAL_SEC = 24 * 60 * 60;
 const RETRY_DELAY_SEC = 60 * 60;
 const FAILURE_RETRY_SEC = 6 * 60 * 60;
 const API_TIMEOUT_MS = 10_000;
-/** OAuth 1 + scan 3 + insertion fallback込みmutation 8。 */
+/** OAuth / scan / bounded order check / mutationを同一invocationで12 subrequest以内に閉じる。 */
 const MAX_EXTERNAL_REQUESTS_PER_RUN = 12;
 const OAUTH_TOKEN_SAFETY_MS = 60_000;
 
@@ -158,7 +178,6 @@ class DailyQuotaBudget {
       reservation.dailyBudgetUnits - reservation.usedUnits,
     );
   }
-
 }
 
 async function readApiError(
@@ -262,6 +281,11 @@ async function youtubeJson<T>(
   fetchImpl: FetchLike = fetch,
 ): Promise<T> {
   signal?.throwIfAborted();
+  // fetch budgetを使い切っている場合、YouTubeへ到達しないrequestのquotaをD1へ
+  // 先に予約しない。network開始後の失敗は到達有無を判定できないため返却しない。
+  if (requestBudget.remaining <= 0) {
+    throw new Error("youtube_playlist_request_budget_exhausted");
+  }
   await quota.spend(cost);
   signal?.throwIfAborted();
   const headers = new Headers(init.headers);
@@ -464,6 +488,56 @@ async function insertPlaylistItem(
   }
 }
 
+async function updatePlaylistItemPosition(
+  playlistId: string,
+  item: PlaylistPageItem,
+  position: number,
+  accessToken: string,
+  quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
+  fetchImpl: FetchLike = fetch,
+): Promise<boolean> {
+  signal?.throwIfAborted();
+  const url = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+  url.searchParams.set("part", "snippet");
+  url.searchParams.set("fields", "id");
+  url.searchParams.set("prettyPrint", "false");
+  try {
+    await youtubeJson<{ id?: string }>(
+      url,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          id: item.playlistItemId,
+          snippet: {
+            playlistId,
+            resourceId: { kind: "youtube#video", videoId: item.videoId },
+            position: Math.max(0, position),
+          },
+        }),
+      },
+      accessToken,
+      quota,
+      requestBudget,
+      50,
+      signal,
+      fetchImpl,
+    );
+    return true;
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (
+      error instanceof YouTubeApiError &&
+      (error.reason === "manualSortRequired" ||
+        error.reason === "invalidPlaylistItemPosition")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function deletePlaylistItem(
   playlistItemId: string,
   accessToken: string,
@@ -494,6 +568,103 @@ async function deletePlaylistItem(
   }
 }
 
+async function loadPlaylistOrderSnapshot(
+  playlistId: string,
+  accessToken: string,
+  quota: DailyQuotaBudget,
+  requestBudget: ExternalRequestBudget,
+  signal?: AbortSignal,
+  fetchImpl: FetchLike = fetch,
+): Promise<PlaylistOrderSnapshot> {
+  const items: PlaylistPageItem[] = [];
+  const seenTokens = new Set<string>();
+  let pageToken: string | null = null;
+
+  for (let page = 0; page < MAX_ORDER_SCAN_PAGES_PER_EVENT; page += 1) {
+    signal?.throwIfAborted();
+    // 次のGET(1 unit/subrequest)と最低1回のposition更新(50 units/subrequest)を残す。
+    if (requestBudget.remaining <= 1) {
+      return { items, complete: false, reason: "request_budget" };
+    }
+    if (!quota.canSpend(51)) {
+      return { items, complete: false, reason: "quota" };
+    }
+    const result = await listPlaylistPage(
+      playlistId,
+      pageToken,
+      accessToken,
+      quota,
+      requestBudget,
+      signal,
+      fetchImpl,
+    );
+    items.push(...result.items);
+    if (!result.nextPageToken) {
+      return { items, complete: true, reason: null };
+    }
+    if (seenTokens.has(result.nextPageToken)) {
+      throw new Error("youtube_playlist_order_scan_token_cycle");
+    }
+    seenTokens.add(result.nextPageToken);
+    pageToken = result.nextPageToken;
+  }
+
+  return { items, complete: false, reason: "page_limit" };
+}
+
+export function planPlaylistOrderRepair(
+  sourceVideoIds: readonly string[],
+  remoteItems: readonly PlaylistPageItem[],
+): PlaylistOrderRepairPlan {
+  if (sourceVideoIds.length === 0) return { status: "aligned" };
+  const desiredSet = new Set(sourceVideoIds);
+  if (desiredSet.size !== sourceVideoIds.length) return { status: "ambiguous" };
+
+  const relevant = remoteItems.flatMap((item, absoluteIndex) =>
+    desiredSet.has(item.videoId) ? [{ item, absoluteIndex }] : [],
+  );
+  if (relevant.length !== sourceVideoIds.length) return { status: "ambiguous" };
+
+  const occurrences = new Map<string, number>();
+  for (const entry of relevant) {
+    occurrences.set(entry.item.videoId, (occurrences.get(entry.item.videoId) ?? 0) + 1);
+  }
+  if (sourceVideoIds.some((videoId) => occurrences.get(videoId) !== 1)) {
+    return { status: "ambiguous" };
+  }
+
+  for (let index = 0; index < sourceVideoIds.length; index += 1) {
+    const expectedVideoId = sourceVideoIds[index];
+    const atIndex = relevant[index];
+    if (atIndex?.item.videoId === expectedVideoId) continue;
+    const expected = relevant.find(
+      (entry, candidateIndex) =>
+        candidateIndex > index && entry.item.videoId === expectedVideoId,
+    );
+    if (!expected || !atIndex || expected.absoluteIndex <= atIndex.absoluteIndex) {
+      return { status: "ambiguous" };
+    }
+    return {
+      status: "move",
+      playlistItemId: expected.item.playlistItemId,
+      videoId: expected.item.videoId,
+      fromIndex: expected.absoluteIndex,
+      toIndex: atIndex.absoluteIndex,
+    };
+  }
+  return { status: "aligned" };
+}
+
+function applyLocalOrderMove(
+  items: PlaylistPageItem[],
+  fromIndex: number,
+  toIndex: number,
+): void {
+  if (fromIndex <= toIndex || fromIndex >= items.length || toIndex < 0) return;
+  const [moved] = items.splice(fromIndex, 1);
+  if (moved) items.splice(toIndex, 0, moved);
+}
+
 async function loadDueConfigs(
   env: PlaylistSyncEnv,
   now: number,
@@ -503,7 +674,7 @@ async function loadDueConfigs(
   const result = await env.DB.prepare(
     `SELECT event_id, playlist_id, sync_mode, sync_interval_minutes,
             sync_status, next_sync_at, last_synced_at, last_full_scan_at,
-            scan_started_at, scan_page_token
+            scan_started_at, scan_page_token, last_error
      FROM event_youtube_playlist_sync
      WHERE enabled = 1
        AND playlist_id IS NOT NULL
@@ -527,15 +698,32 @@ async function loadSourceVideoIds(
 ): Promise<string[]> {
   signal?.throwIfAborted();
   const result = await env.DB.prepare(
-    `SELECT v.youtube_video_id
-     FROM video_events ve
-     INNER JOIN videos v ON v.id = ve.video_id
-     WHERE ve.event_id = ?1
-       AND v.youtube_video_id IS NOT NULL
+    `WITH event_videos AS (
+       SELECT video_id
+       FROM video_events
+       WHERE event_id = ?1
+       UNION
+       SELECT id AS video_id
+       FROM videos
+       WHERE primary_event_id = ?1
+     )
+     SELECT v.youtube_video_id
+     FROM event_videos ev
+     INNER JOIN videos v ON v.id = ev.video_id
+     LEFT JOIN slots s
+       ON s.event_id = ?1
+      AND s.video_id = v.id
+      AND s.status = 'submitted'
+     WHERE v.youtube_video_id IS NOT NULL
        AND v.youtube_video_id <> ''
        AND v.visibility_status = 'public'
      GROUP BY v.youtube_video_id
-     ORDER BY MIN(COALESCE(v.scheduled_time, v.created_at)), MIN(v.id)
+     ORDER BY
+       CASE WHEN COUNT(s.id) > 0 THEN 0 ELSE 1 END,
+       MIN(CASE WHEN s.start_time IS NULL THEN 9223372036854775807 ELSE s.start_time END),
+       MIN(CASE WHEN s.sort_order IS NULL THEN 2147483647 ELSE s.sort_order END),
+       MIN(COALESCE(v.scheduled_time, v.created_at)),
+       MIN(v.id)
      LIMIT ?2`,
   )
     .bind(eventId, MAX_SOURCE_VIDEOS + 1)
@@ -771,12 +959,19 @@ export function calculateSyncDiff(
 ): { additions: string[]; removals: RemoteItemRow[] } {
   const sourceSet = new Set(sourceVideoIds);
   const remoteVideoSet = new Set(remoteItems.map((item) => item.youtube_video_id));
+  const seenSourceRemote = new Set<string>();
+  const removals =
+    mode === "mirror"
+      ? remoteItems.filter((item) => {
+          if (!sourceSet.has(item.youtube_video_id)) return true;
+          if (seenSourceRemote.has(item.youtube_video_id)) return true;
+          seenSourceRemote.add(item.youtube_video_id);
+          return false;
+        })
+      : [];
   return {
     additions: sourceVideoIds.filter((videoId) => !remoteVideoSet.has(videoId)),
-    removals:
-      mode === "mirror"
-        ? remoteItems.filter((item) => !sourceSet.has(item.youtube_video_id))
-        : [],
+    removals,
   };
 }
 
@@ -902,14 +1097,22 @@ async function syncOneEvent(
   let added = 0;
   let removed = 0;
   let orderFallback = false;
+  let orderRepairPending = false;
+  let orderRepairWarning: string | null = null;
   const sourcePositions = new Map(
     sourceVideoIds.map((videoId, index) => [videoId, index]),
   );
 
   for (const videoId of additions) {
     signal?.throwIfAborted();
-    // position指定失敗時の末尾追加まで含め、最大100 unitsを確保してから開始する。
-    if (mutationBudget.remaining <= 0 || !quota.canSpend(100)) break;
+    // position指定失敗時の末尾追加まで含め、最大100 units / 2 subrequestを確保してから開始する。
+    if (
+      mutationBudget.remaining <= 0 ||
+      requestBudget.remaining < 2 ||
+      !quota.canSpend(100)
+    ) {
+      break;
+    }
     const position = sourcePositions.get(videoId) ?? 0;
     const inserted = await insertPlaylistItem(
       config.playlist_id,
@@ -937,7 +1140,13 @@ async function syncOneEvent(
 
   for (const item of removals) {
     signal?.throwIfAborted();
-    if (mutationBudget.remaining <= 0 || !quota.canSpend(50)) break;
+    if (
+      mutationBudget.remaining <= 0 ||
+      requestBudget.remaining <= 0 ||
+      !quota.canSpend(50)
+    ) {
+      break;
+    }
     await deletePlaylistItem(
       item.playlist_item_id,
       accessToken,
@@ -958,13 +1167,93 @@ async function syncOneEvent(
     removed += 1;
   }
 
-  const hasRemaining =
+  const mutationDiffRemaining =
     added < additions.length || removed < removals.length;
-  const lastError = hasRemaining
+  const shouldRepairOrder =
+    sourceVideoIds.length > 1 &&
+    !mutationDiffRemaining &&
+    !orderFallback &&
+    mutationBudget.remaining > 0 &&
+    (scanRequired ||
+      added > 0 ||
+      removed > 0 ||
+      config.last_error === "playlist_order_repair_continuing" ||
+      config.last_error === "playlist_order_repair_request_budget");
+
+  if (shouldRepairOrder) {
+    const snapshot = await loadPlaylistOrderSnapshot(
+      config.playlist_id,
+      accessToken,
+      quota,
+      requestBudget,
+      signal,
+      fetchImpl,
+    );
+    if (!snapshot.complete) {
+      if (snapshot.reason === "request_budget") {
+        orderRepairPending = true;
+        orderRepairWarning = "playlist_order_repair_request_budget";
+      } else if (snapshot.reason === "quota") {
+        orderRepairWarning = "playlist_order_repair_quota_deferred";
+      } else {
+        orderRepairWarning = "playlist_order_repair_scan_limit_exceeded";
+      }
+    } else {
+      const workingOrder = [...snapshot.items];
+      let repaired = 0;
+      while (
+        repaired < MAX_ORDER_REPAIRS_PER_RUN &&
+        mutationBudget.remaining > 0
+      ) {
+        signal?.throwIfAborted();
+        const plan = planPlaylistOrderRepair(sourceVideoIds, workingOrder);
+        if (plan.status === "aligned") break;
+        if (plan.status === "ambiguous") {
+          orderRepairWarning = "playlist_order_repair_ambiguous_remote_items";
+          break;
+        }
+        if (!quota.canSpend(50) || requestBudget.remaining <= 0) {
+          orderRepairPending = true;
+          orderRepairWarning = "playlist_order_repair_request_budget";
+          break;
+        }
+        const moved = await updatePlaylistItemPosition(
+          config.playlist_id,
+          { playlistItemId: plan.playlistItemId, videoId: plan.videoId },
+          plan.toIndex,
+          accessToken,
+          quota,
+          requestBudget,
+          signal,
+          fetchImpl,
+        );
+        if (!moved) {
+          orderFallback = true;
+          break;
+        }
+        mutationBudget.remaining -= 1;
+        repaired += 1;
+        applyLocalOrderMove(workingOrder, plan.fromIndex, plan.toIndex);
+      }
+
+      if (!orderFallback && !orderRepairWarning) {
+        const remainingPlan = planPlaylistOrderRepair(sourceVideoIds, workingOrder);
+        if (remainingPlan.status === "move") {
+          orderRepairPending = true;
+          orderRepairWarning = "playlist_order_repair_continuing";
+        } else if (remainingPlan.status === "ambiguous") {
+          orderRepairWarning = "playlist_order_repair_ambiguous_remote_items";
+        }
+      }
+    }
+  }
+
+  const hasRemaining = mutationDiffRemaining || orderRepairPending;
+  const lastError = mutationDiffRemaining
     ? "playlist_mutation_batch_continuing"
     : orderFallback
       ? "playlist_order_fallback_manual_sort_required"
-      : null;
+      : orderRepairWarning;
   signal?.throwIfAborted();
   await env.DB.prepare(
     `UPDATE event_youtube_playlist_sync
@@ -1016,30 +1305,61 @@ export async function syncEventPlaylists(
   fetchImpl: FetchLike = fetch,
 ): Promise<PlaylistSyncBatchResult> {
   signal?.throwIfAborted();
-  const result = (base: Pick<PlaylistSyncBatchResult, "processed" | "skipped" | "failed">, extra: Partial<PlaylistSyncBatchResult> = {}): PlaylistSyncBatchResult => ({ external_api_calls: 0, d1_changes: 0, retry_count: 0, quota_stopped: false, quota_stop_reason: null, ...base, ...extra });
+  const result = (
+    base: Pick<PlaylistSyncBatchResult, "processed" | "skipped" | "failed">,
+    extra: Partial<PlaylistSyncBatchResult> = {},
+  ): PlaylistSyncBatchResult => ({
+    external_api_calls: 0,
+    d1_changes: 0,
+    retry_count: 0,
+    quota_stopped: false,
+    quota_stop_reason: null,
+    ...base,
+    ...extra,
+  });
   const changes = { value: 0 };
   const trackedEnv = {
     ...env,
     DB: new Proxy(env.DB, {
       get(target, property, receiver) {
-        if (property !== "prepare" && property !== "batch") return Reflect.get(target, property, receiver);
-        if (property === "batch") return async (statements: D1PreparedStatement[]) => {
-          const results = await target.batch(statements);
-          changes.value += results.reduce((sum, item) => sum + Math.max(0, Number(item?.meta?.changes ?? 0)), 0);
-          return results;
-        };
+        if (property !== "prepare" && property !== "batch") {
+          return Reflect.get(target, property, receiver);
+        }
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            const results = await target.batch(statements);
+            changes.value += results.reduce(
+              (sum, item) => sum + Math.max(0, Number(item?.meta?.changes ?? 0)),
+              0,
+            );
+            return results;
+          };
+        }
         return (sql: string) => {
           const statement = target.prepare(sql);
-          return new Proxy(statement, { get(stmt, key, recv) {
-            if (key !== "bind") return Reflect.get(stmt, key, recv);
-            return (...args: unknown[]) => {
-              const bound = stmt.bind(...args);
-              return new Proxy(bound, { get(inner, innerKey, innerRecv) {
-                if (innerKey !== "run") return Reflect.get(inner, innerKey, innerRecv);
-                return async () => { const outcome = await inner.run(); changes.value += Math.max(0, Number(outcome?.meta?.changes ?? 0)); return outcome; };
-              } });
-            };
-          } });
+          return new Proxy(statement, {
+            get(stmt, key, recv) {
+              if (key !== "bind") return Reflect.get(stmt, key, recv);
+              return (...args: unknown[]) => {
+                const bound = stmt.bind(...args);
+                return new Proxy(bound, {
+                  get(inner, innerKey, innerRecv) {
+                    if (innerKey !== "run") {
+                      return Reflect.get(inner, innerKey, innerRecv);
+                    }
+                    return async () => {
+                      const outcome = await inner.run();
+                      changes.value += Math.max(
+                        0,
+                        Number(outcome?.meta?.changes ?? 0),
+                      );
+                      return outcome;
+                    };
+                  },
+                });
+              };
+            },
+          });
         };
       },
     }),
@@ -1052,7 +1372,9 @@ export async function syncEventPlaylists(
 
   const now = unixNow();
   const configs = await loadDueConfigs(trackedEnv, now, signal);
-  if (configs.length === 0) return result({ processed: 0, skipped: 1, failed: 0 });
+  if (configs.length === 0) {
+    return result({ processed: 0, skipped: 1, failed: 0 });
+  }
 
   const quota = await DailyQuotaBudget.load(trackedEnv, now, signal);
   const requestBudget = new ExternalRequestBudget(MAX_EXTERNAL_REQUESTS_PER_RUN);
@@ -1067,7 +1389,13 @@ export async function syncEventPlaylists(
   } catch (error) {
     signal?.throwIfAborted();
     await markOAuthFailure(trackedEnv, configs, error, now, signal);
-    return result({ processed: 0, skipped: 0, failed: configs.length }, { external_api_calls: requestBudget.used, d1_changes: changes.value });
+    return result(
+      { processed: 0, skipped: 0, failed: configs.length },
+      {
+        external_api_calls: requestBudget.used,
+        d1_changes: changes.value,
+      },
+    );
   }
 
   let processed = 0;
@@ -1101,10 +1429,13 @@ export async function syncEventPlaylists(
   }
 
   signal?.throwIfAborted();
-  return result({ processed, skipped: 0, failed }, {
-    external_api_calls: requestBudget.used,
-    d1_changes: changes.value + quota.d1Changes,
-    quota_stopped: quotaStopped,
-    quota_stop_reason: quotaStopped ? "youtube_quota_deferred" : null,
-  });
+  return result(
+    { processed, skipped: 0, failed },
+    {
+      external_api_calls: requestBudget.used,
+      d1_changes: changes.value + quota.d1Changes,
+      quota_stopped: quotaStopped,
+      quota_stop_reason: quotaStopped ? "youtube_quota_deferred" : null,
+    },
+  );
 }

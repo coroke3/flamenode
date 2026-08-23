@@ -158,21 +158,47 @@ function hasGetSQL(value: unknown): value is SQLWrapper {
   );
 }
 
-function asBatchRunnable(db: DB, statement: BatchItem<"sqlite">): BatchItem<"sqlite"> {
+type D1BatchRuntime = DB & {
+  dialect?: {
+    sqlToQuery?: (query: unknown) => { sql: string; params: unknown[] };
+  };
+  $client?: {
+    prepare?: (query: string) => { bind: (...params: unknown[]) => unknown };
+  };
+};
+
+/** Convert Drizzle SQL wrappers into statements accepted by D1Session.batch(). */
+export function asBatchRunnable(
+  db: DB,
+  statement: BatchItem<"sqlite">,
+): BatchItem<"sqlite"> {
   const candidate: unknown = statement;
 
   // Drizzle D1 の db.batch() は RunnableQuery._prepare() からSQLとparamsを取得し、
   // D1PreparedStatement.bind(...params) して実行する。ここでinlineParams()すると、
   // JSON1の大きなpayloadまでSQL本文へ展開されD1のSQLサイズ上限へ到達し得るため、
   // db.run() が返したRunnableQueryはbindを保持したまま渡す。
-  if (isDbRunBatchItem(candidate) && hasPrepare(candidate)) {
-    return candidate;
+  if (hasGetSQL(candidate)) {
+    const runtimeDb = db as D1BatchRuntime;
+    const query = runtimeDb.dialect?.sqlToQuery?.(candidate.getSQL());
+    const client = runtimeDb.$client;
+    if (isDbRunBatchItem(candidate) && query && client?.prepare) {
+      const stmt = client.prepare(query.sql);
+      return {
+        _prepare: () => ({
+          getQuery: () => query,
+          stmt,
+          mapResult: (result: unknown) => result,
+        }),
+      } as unknown as BatchItem<"sqlite">;
+    }
   }
   if (hasPrepare(candidate)) {
     return candidate;
   }
   if (hasGetSQL(candidate)) {
-    return db.run(candidate.getSQL());
+    const fallback = db.run(candidate.getSQL());
+    return fallback;
   }
   throw new AuditMutationError(
     "D1 batch に渡せない mutation statement です。await 済みの結果を渡していないか確認してください。",

@@ -14,7 +14,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 
 test("共通plannerはaudit chunk、前処理、post-audit、caller予約を実数算定する", () => {
   assert.equal(AUDIT_INSERT_CHUNK_SIZE, 4);
-  assert.equal(D1_RESERVED_CALLER_QUERIES, 10);
+  assert.equal(D1_RESERVED_CALLER_QUERIES, 18);
   assert.equal(D1_MAX_BATCH_QUERIES, 50);
 
   const createMax = planD1AuditMutationBudget({
@@ -26,7 +26,7 @@ test("共通plannerはaudit chunk、前処理、post-audit、caller予約を実�
   });
   assert.equal(createMax.auditChunkCount, 5);
   assert.equal(createMax.preparationQueryCount, 2);
-  assert.equal(createMax.totalQueryCount, 36);
+  assert.equal(createMax.totalQueryCount, 44);
   assert.equal(createMax.withinLimit, true);
 
   const maxQuestions = 18;
@@ -39,7 +39,7 @@ test("共通plannerはaudit chunk、前処理、post-audit、caller予約を実�
     postAuditStatementCount: 0,
     distinctActorCount: 1,
   });
-  assert.equal(updateWorst.totalQueryCount, 66);
+  assert.equal(updateWorst.totalQueryCount, 74);
   assert.equal(updateWorst.withinLimit, false);
 
   const withPostAudit = planD1AuditMutationBudget({
@@ -50,7 +50,7 @@ test("共通plannerはaudit chunk、前処理、post-audit、caller予約を実�
     distinctActorCount: 1,
   });
   assert.equal(withPostAudit.postAuditStatementCount, 7);
-  assert.equal(withPostAudit.totalQueryCount, 41);
+  assert.equal(withPostAudit.totalQueryCount, 49);
 });
 
 test("event question同期はbounded read、完全per-row snapshot、CASを持つ", () => {

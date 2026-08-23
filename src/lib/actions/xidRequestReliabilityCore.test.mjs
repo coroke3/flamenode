@@ -26,6 +26,13 @@ if (runTestWithTsx(import.meta.url)) {
       ),
       true,
     );
+    for (const message of [
+      "Network connection lost.",
+      "storage caused object to be reset",
+      "reset because its code was updated",
+    ]) {
+      assert.equal(isRetryableXIdMutationError(new Error(message)), true, message);
+    }
     assert.equal(
       isRetryableXIdMutationError(new Error("invalid X ID request shape")),
       false,

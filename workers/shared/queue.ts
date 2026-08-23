@@ -17,9 +17,9 @@ export interface BoundedRetryOptions {
 }
 
 const RETRYABLE_MESSAGE =
-  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up|rate.?limit|too many requests|\b429\b|\b5\d\d\b|temporar(?:y|ily)|transient|try again|timeout/i;
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up|Network connection lost|Replica disconnected from primary|Cannot resolve D1 DB due to transient issue on remote node|storage caused object to be reset|reset because its code was updated|rate.?limit|too many requests|\b429\b|\b5\d\d\b|temporar(?:y|ily)|transient|try again|timeout/i;
 const FATAL_MESSAGE =
-  /no such table|no such column|schema|constraint failed|foreign key|not null|unique constraint|invalid (?:input|payload|config)|unauthorized|forbidden|missing (?:binding|secret|token|configuration)/i;
+  /no such table|no such column|schema|constraint failed|foreign key|not null|unique constraint|invalid (?:input|payload|config)|unauthorized|forbidden|missing (?:binding|secret|token|configuration)|D1 DB is overloaded|D1 DB(?:'s)? isolate exceeded its memory limit|D1 DB exceeded its CPU time limit|D1 DB storage operation exceeded timeout/i;
 
 function boundedAttempts(value: number | undefined): number {
   if (!Number.isFinite(value)) return MAX_QUEUE_ATTEMPTS;
@@ -72,6 +72,11 @@ export function isRetryableQueueError(error: unknown): boolean {
       message?: unknown;
       cause?: unknown;
     };
+    const message = String(candidate.message ?? "");
+    // D1 overload/CPU/memory/schema 系は同一 invocation 内で即時retryすると
+    // さらにqueueを詰まらせるため、HTTP statusより先にfail-fast判定する。
+    if (FATAL_MESSAGE.test(message)) return false;
+
     const status = Number(candidate.status ?? candidate.statusCode);
     if (
       status === 408 ||
@@ -89,8 +94,6 @@ export function isRetryableQueueError(error: unknown): boolean {
     ) {
       return true;
     }
-    const message = String(candidate.message ?? "");
-    if (FATAL_MESSAGE.test(message)) return false;
     if (RETRYABLE_MESSAGE.test(message)) return true;
     if (candidate.cause && candidate.cause !== error) {
       return isRetryableQueueError(candidate.cause);

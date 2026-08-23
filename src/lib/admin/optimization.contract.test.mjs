@@ -169,11 +169,11 @@ test("イベント出力APIは404とキャッシュヒット応答を共通化�
   assert.ok((eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 3);
   assert.equal(
     (eventExportRoute.match(
-      /readCachedPayload\(\s*kv,\s*payloadCacheKey,\s*eventId,\s*refreshMinutes\s*\*\s*60,\s*\)/g,
+      /readCachedPayload\(\s*kv,\s*payloadCacheKey,\s*eventId,\s*format,\s*refreshMinutes\s*\*\s*60,\s*\)/g,
     ) ?? []).length,
     1,
   );
-  assert.match(eventExportRoute, /kv\.get\(cacheKey,\s*\{\s*cacheTtl:/);
+  assert.match(eventExportRoute, /kv\.getWithMetadata\(cacheKey,\s*\{\s*type:\s*"text",\s*cacheTtl:/);
 });
 
 test("メンバーCSV/TSV解析は区切り文字共通実装へ直接集約する", () => {

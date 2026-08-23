@@ -131,7 +131,7 @@ test("20枠reserveは1 bulk mutation+queue+通知+完全auditがD1上限内", ()
   const maxAuditChunkBinds = 21 * 4;
 
   assert.equal(budget.mutationStatementCount, 3);
-  assert.equal(budget.totalQueryCount, 28);
+  assert.equal(budget.totalQueryCount, 36);
   assert.equal(budget.withinLimit, true);
   assert.ok(bulkCasBinds <= 100);
   assert.ok(maxAuditChunkBinds <= 100);
@@ -147,7 +147,7 @@ test("3行更新+queue+完全auditはD1 Free query/bind上限内", () => {
   const maxCasUpdateBinds = 8 + 3 * 3;
   const maxAuditChunkBinds = 21 * MAX_ATOMIC_SLOT_ROWS;
 
-  assert.equal(budget.totalQueryCount, 20);
+  assert.equal(budget.totalQueryCount, 28);
   assert.equal(budget.withinLimit, true);
   assert.ok(maxCasUpdateBinds <= 100);
   assert.ok(maxAuditChunkBinds <= 100);

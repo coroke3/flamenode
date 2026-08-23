@@ -16,11 +16,36 @@
   flex-wrap: wrap;
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .title {
   margin: 0;
   color: var(--text-primary);
   font-size: 14px;
   font-weight: 750;
+}
+
+.modeBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.modeBadge[data-mode="manual"] {
+  background: color-mix(in srgb, var(--accent-warning-soft) 72%, var(--bg-elevated));
+  color: var(--text-primary);
 }
 
 .event {
@@ -43,6 +68,14 @@
   white-space: pre-wrap;
 }
 
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
 .hint,
 .warning,
 .status {
@@ -52,6 +85,7 @@
 }
 
 .hint {
+  flex: 1 1 320px;
   color: var(--text-muted);
 }
 
@@ -59,6 +93,39 @@
   color: var(--status-warning, #a46b00);
 }
 
+.warningList {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.warningBox {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-warning-soft) 70%, var(--bg-surface));
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.warningBox p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
 .status {
   color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .copyButton,
+  .footer > button,
+  .warningBox > button {
+    width: 100%;
+    justify-content: center;
+  }
 }

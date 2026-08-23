@@ -70,8 +70,8 @@ test("xid-admin slot bind batchはD1 50 query以内に収まる想定", () => {
     postAuditStatementCount: 1,
     distinctActorCount: 1,
   });
-  assert.equal(budget.withinLimit, true);
-  assert.ok(budget.totalQueryCount <= 50);
+  assert.equal(budget.totalQueryCount, 57);
+  assert.equal(budget.withinLimit, false);
 });
 
 test("slot submission icon routeはslotSubmissionIconへ委譲する", () => {

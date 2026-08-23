@@ -7,9 +7,6 @@ import {
   type VideoFormInitialValues,
 } from "@/components/forms/VideoForm";
 import { Icon } from "@/components/ui/Icon";
-import {
-  ACTIVE_X_BEFORE_SWITCH_EVENT,
-} from "@/lib/client/activeXSwitchEvents";
 import { normalizeXId } from "@/lib/utils/xid";
 import type { CustomQuestion } from "@/lib/video/customQuestions";
 import {
@@ -107,20 +104,9 @@ export function UnslottedPostForm({
     return true;
   }, []);
 
-  React.useEffect(() => {
-    const handler = (event: Event) => {
-      if (!formDirty) return;
-      const confirmed = window.confirm(
-        "入力中の作品情報があります。Active X ID を切り替えると内容が失われます。切り替えますか？",
-      );
-      if (!confirmed) {
-        event.preventDefault();
-      }
-    };
-    window.addEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
-    return () =>
-      window.removeEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, handler);
-  }, [formDirty]);
+  // Active X ID 切替時の未保存確認と同期flushは子の VideoForm が一元管理する。
+  // 親でも同じイベントを購読すると1回の切替でconfirmが二重表示されるため、
+  // shell側は選択状態のdraft保存だけを担当する。
 
   const selectAffiliation = (next: Exclude<AffiliationChoice, null>) => {
     if (next === affiliation || !confirmReset()) return;
@@ -254,8 +240,8 @@ export function UnslottedPostForm({
             : "所属イベントを選択してください。"}
         </div>
       ) : (
-       <VideoForm
-           key={formKey}
+        <VideoForm
+          key={formKey}
           {...videoFormProps}
           mode="free"
           activeXSnapshot={videoFormProps.activeXId}
@@ -264,11 +250,11 @@ export function UnslottedPostForm({
             event_ids: selectedEvent ? [selectedEvent.id] : [],
             part: null,
           }}
-           eventOptions={selectedEventOptions}
-           canEditEvents={false}
-           onDraftFlushReady={handleVideoDraftFlushReady}
-           onSubmitSuccess={handleVideoSubmitSuccess}
-         />
+          eventOptions={selectedEventOptions}
+          canEditEvents={false}
+          onDraftFlushReady={handleVideoDraftFlushReady}
+          onSubmitSuccess={handleVideoSubmitSuccess}
+        />
       )}
     </div>
   );

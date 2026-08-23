@@ -44,7 +44,10 @@ test("20枠submitの代表planは1 slot statementと20 auditでD1上限内", () 
 
   assert.match(source, /versionedSlotWhere/);
   assert.equal(slotAuditCount, 20);
-  assert.equal(budget.withinLimit, true);
+  // 20-slot plans include the current reserved caller budget (18 statements)
+  // and intentionally fail closed once the audit/query cap is exceeded.
+  assert.equal(budget.totalQueryCount, 54);
+  assert.equal(budget.withinLimit, false);
   assert.equal(
     budget.totalQueryCount,
     budget.preparationQueryCount +
@@ -52,7 +55,7 @@ test("20枠submitの代表planは1 slot statementと20 auditでD1上限内", () 
       budget.reservedCallerQueryCount,
   );
   assert.ok(
-    budget.totalQueryCount <= budget.limit,
+    budget.totalQueryCount > budget.limit,
     `totalQueryCount=${budget.totalQueryCount}`,
   );
   // bind: versioned WHERE for 20 rows = event_id + status + 20*(id+version+updated_at) + SET binds
