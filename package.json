@@ -76,7 +76,7 @@
     "test:youtube": "node --test --experimental-strip-types src/lib/youtube/id.test.mjs",
     "test:unit": "node --test --experimental-strip-types src/**/*.test.mjs",
     "test:integration": "node --test --experimental-strip-types src/**/*.integration.test.mjs",
-    "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs scripts/d1-migration-compat.test.mjs scripts/safe-d1-auto-migrate.test.mjs",
+    "test:cloudflare-ci": "node --test scripts/cloudflare-ci.test.mjs scripts/d1-migration-compat.test.mjs scripts/safe-d1-auto-migrate.test.mjs src/lib/cloudflarePlacement.contract.test.mjs",
     "test:static-rebuild": "node --test scripts/static-rebuild.test.mjs src/lib/staticRebuild/*.test.mjs",
     "check:static-rebuild-atomicity": "node scripts/check-static-rebuild-atomicity.mjs",
     "check:artifact-slo": "node scripts/check-artifact-slo.mjs",
