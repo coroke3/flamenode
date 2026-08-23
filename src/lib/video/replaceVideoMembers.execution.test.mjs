@@ -72,6 +72,11 @@ if (runTestWithTsx(import.meta.url)) {
         approval_status TEXT,
         approval_requested_at INTEGER
       );
+      CREATE TABLE x_user_aliases (
+        x_user_id TEXT NOT NULL,
+        alias_x_id TEXT NOT NULL,
+        PRIMARY KEY (x_user_id, alias_x_id)
+      );
     `);
 
     const insertMember = sqlite.prepare(
@@ -92,7 +97,7 @@ if (runTestWithTsx(import.meta.url)) {
     );
     for (let index = 0; index < 100; index += 1) {
       const memberId = `vm-${index}`;
-      const xId = `x-${index}`;
+      const xId = `x_${index}`;
       insertMember.run(memberId, "video-1", xId, `Member ${index}`, null, null, index, 0, 1, null, null, null);
       insertXUser.run(xId, `X ${index}`);
       for (let chapterIndex = 0; chapterIndex < 30; chapterIndex += 1) {
@@ -138,7 +143,7 @@ if (runTestWithTsx(import.meta.url)) {
     const db = makeDb(sqlite, calls);
     const members = Array.from({ length: 100 }, (_, index) => ({
       name: `Member ${index}`,
-      x_user_id: `x-${index}`,
+      x_user_id: `x_${index}`,
       role: "",
       comment: "",
       chapters: [],
@@ -180,7 +185,7 @@ if (runTestWithTsx(import.meta.url)) {
       (call) => call.query.includes("video_members") && call.query.includes("json_each"),
     );
     assert.equal(carryCalls.length, 1);
-    assert.equal(carryCalls[0].params.length, 3);
+    assert.equal(carryCalls[0].params.length, 2);
     for (const query of queries) {
       assert.ok(query.params.length <= 100, `bind count ${query.params.length}`);
     }
