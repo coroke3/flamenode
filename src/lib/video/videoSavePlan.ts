@@ -135,6 +135,7 @@ export function buildVideoUpdatePayload(args: {
     title: ownerAllows("title", sections.basics) ? parsed.title : target.title,
     youtube_video_id:
       allowInitialYoutubeAttach ||
+      ownerAllows("youtube_url", sections.youtube) ||
       (privilegeMode !== "normal" && sections.youtube)
         ? youtubeId
         : target.youtube_video_id,

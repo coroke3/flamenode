@@ -12,6 +12,7 @@ import { requireSession } from "@/lib/auth/guard";
 import {
   canEditVideo,
   canUseEventPrivilegeModeForVideo,
+  resolveVideoEditAccessContext,
 } from "@/lib/auth/ownership";
 import { loadVideoCollabSubjects } from "@/lib/video/collabPerms";
 import { Icon } from "@/components/ui/Icon";
@@ -58,10 +59,16 @@ export default async function EditVideoPermissionsPage({
   if (!video) notFound();
 
   const editUser = { id: user.id, role: user.role ?? null };
+  const accessContext = await resolveVideoEditAccessContext({
+    db,
+    user: editUser,
+    video,
+  });
   const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
     db,
     user: editUser,
     video,
+    accessContext,
   });
 
   // 明示された privilege mode は従来どおりfail-closedで扱う。
@@ -82,6 +89,7 @@ export default async function EditVideoPermissionsPage({
     video,
     requiredKey: "video.permissions",
     privilegeMode,
+    accessContext,
   });
 
   if (!canEditPermissions && !hasExplicitPrivilegeMode) {
@@ -92,6 +100,7 @@ export default async function EditVideoPermissionsPage({
         video,
         requiredKey: "video.permissions",
         privilegeMode: "admin",
+        accessContext,
       });
       if (adminAllowed) {
         privilegeMode = "admin";
@@ -106,6 +115,7 @@ export default async function EditVideoPermissionsPage({
         video,
         requiredKey: "video.permissions",
         privilegeMode: "event",
+        accessContext,
       });
       if (eventAllowed) {
         privilegeMode = "event";

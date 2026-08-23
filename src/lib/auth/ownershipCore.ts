@@ -4,6 +4,7 @@
  */
 
 import type { VideoEditSectionKey } from "./videoEditSections";
+import type { GeneralEditableFieldKey } from "../video/generalEditPermissionsCore.ts";
 
 export type SessionUserLike = {
   id: string;
@@ -18,6 +19,51 @@ export type VideoOwnership = {
 };
 
 export type CanEditVideoPrivilegeMode = "normal" | "admin" | "event";
+
+/** Request-local authorization snapshot. Never store this in module/global cache. */
+export type VideoEditAccessContext = {
+  userId: string;
+  videoId: string;
+  approvedXUserIds: readonly string[];
+  ownership: VideoOwnership;
+  currentEventIds: readonly string[];
+  ownerEditableFields: ReadonlySet<GeneralEditableFieldKey>;
+  eventPermissionKeysByEvent: ReadonlyMap<string, ReadonlySet<string>>;
+};
+
+function ownerFieldAllowsSection(
+  sectionKey: VideoEditSectionKey,
+  fields: ReadonlySet<GeneralEditableFieldKey>,
+): boolean {
+  switch (sectionKey) {
+    case "video.basics":
+    case "videos.title":
+      return fields.has("title") || fields.has("part");
+    case "video.identity":
+      return ["display_name", "icon_url", "profile_text", "youtube_channel_url", "other_social_links"]
+        .some((key) => fields.has(key as GeneralEditableFieldKey));
+    case "video.credits":
+    case "videos.music_credit":
+      return fields.has("music") || fields.has("music_reference_url") || fields.has("credit");
+    case "video.descriptions":
+    case "videos.review_data":
+      return ["intro_comment", "used_software", "highlights", "production_story", "closing_comment", "custom_answers", "stage_permission"]
+        .some((key) => fields.has(key as GeneralEditableFieldKey));
+    case "video.members":
+    case "videos.members":
+      return fields.has("members") || fields.has("is_collab");
+    case "video.member_chapters":
+      return fields.has("chapters");
+    case "video.youtube_id":
+    case "videos.youtube_id":
+      return fields.has("youtube_url");
+    case "video.primary_event":
+    case "videos.primary_event":
+      return fields.has("event_ids");
+    default:
+      return false;
+  }
+}
 
 /**
  * admin と event の両方を許可する画面・操作でも、一度の判定では権限源を混ぜない。
@@ -78,6 +124,7 @@ export const DANGEROUS_ADMIN_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
  * permissions) は含めない。
  */
 export const OWNER_GENERAL_POLICY_WHITELIST = new Set<string>([
+  "youtube_url",
   "videos.title",
   "videos.music_credit",
   "videos.members",
@@ -154,6 +201,9 @@ export function ownerGeneralPolicyAllows(
   policyKeys: ReadonlySet<string>,
   requiredKey: VideoEditSectionKey,
 ): boolean {
+  if (requiredKey === "video.youtube_id" || requiredKey === "videos.youtube_id") {
+    return policyKeys.has("youtube_url");
+  }
   // 危険キーは一般作品権限では絶対に許可しない (タイトル等のエイリアス経由も不可)。
   if (DANGEROUS_ADMIN_VIDEO_EDIT_KEYS.has(requiredKey)) return false;
   if (!OWNER_GENERAL_POLICY_WHITELIST.has(requiredKey)) return false;
@@ -208,6 +258,65 @@ export function decideCanEditVideo(args: {
   }
 
   return false;
+}
+
+/** Pure section decision using a request-local context. */
+export function decideCanEditVideoFromAccessContext(args: {
+  context: VideoEditAccessContext;
+  userRole: string | null | undefined;
+  requiredKey: VideoEditSectionKey;
+  privilegeMode: CanEditVideoPrivilegeMode;
+}): boolean {
+  const { context, userRole, requiredKey, privilegeMode } = args;
+  if (privilegeMode === "admin") {
+    return adminPolicyAllows(userRole, requiredKey);
+  }
+  if (privilegeMode === "normal") {
+    if (!context.ownership.isOwner) return false;
+    if (creatorOwnerCanManagePermissions(context.ownership, requiredKey)) return true;
+    return ownerFieldAllowsSection(requiredKey, context.ownerEditableFields);
+  }
+  return Boolean(resolveEventPermissionFromAccessContext(context, requiredKey));
+}
+
+export function resolveEventPermissionFromAccessContext(
+  context: VideoEditAccessContext,
+  requiredKey: VideoEditSectionKey,
+): { allowed: true; eventId: string } | { allowed: false } {
+  const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
+  for (const eventId of context.currentEventIds) {
+    const keys = context.eventPermissionKeysByEvent.get(eventId);
+    if (keys && aliases.some((alias) => keys.has(alias))) {
+      return { allowed: true, eventId };
+    }
+  }
+  return { allowed: false };
+}
+
+export function canUseEventPrivilegeFromAccessContext(
+  context: VideoEditAccessContext,
+): boolean {
+  const probeKeys: VideoEditSectionKey[] = [
+    "video.basics",
+    "video.descriptions",
+    "video.credits",
+    "video.members",
+    "video.member_chapters",
+    "video.status",
+    "video.permissions",
+    "video.identity",
+    "video.youtube_id",
+    "video.primary_event",
+    "video.chapter_admin",
+  ];
+  return probeKeys.some((requiredKey) =>
+    decideCanEditVideoFromAccessContext({
+      context,
+      userRole: null,
+      requiredKey,
+      privilegeMode: "event",
+    }),
+  );
 }
 
 export function isSafeNormalVideoEditKey(key: VideoEditSectionKey): boolean {

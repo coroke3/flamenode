@@ -5,6 +5,7 @@ import {
   getApprovedXIds,
   loadEffectiveOwnerEditableFieldSet,
   resolveVideoOwnership,
+  type VideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
   type VideoOwnership,
 } from "@/lib/auth/ownership";
@@ -53,17 +54,21 @@ export async function computeAllowedVideoEditSections(args: {
   approvedXUserIds?: readonly string[];
   /** Reuse the caller's request-local ownership result when available. */
   ownership?: VideoOwnership;
+  /** Reuse one request-local authorization snapshot for every section. */
+  accessContext?: VideoEditAccessContext;
 }): Promise<AllowedVideoEditSections> {
   const generalFields =
     args.privilegeMode === "normal"
-      ? (args.generalFields ??
+      ? (args.generalFields ?? args.accessContext?.ownerEditableFields ??
         (await loadEffectiveOwnerEditableFieldSet(args.db, args.video)))
       : undefined;
   const approvedXUserIds = args.approvedXUserIds
     ? Array.from(args.approvedXUserIds)
-    : await getApprovedXIds(args.db, args.user.id);
+    : args.accessContext?.approvedXUserIds
+      ? Array.from(args.accessContext.approvedXUserIds)
+      : await getApprovedXIds(args.db, args.user.id);
   const ownership =
-    args.ownership ??
+    args.ownership ?? args.accessContext?.ownership ??
     (await resolveVideoOwnership({
       db: args.db,
       userId: args.user.id,
@@ -82,6 +87,7 @@ export async function computeAllowedVideoEditSections(args: {
         approvedXUserIds,
         ownership,
         ...(generalFields !== undefined ? { generalFields } : {}),
+        ...(args.accessContext ? { accessContext: args.accessContext } : {}),
       }),
     })),
   );
@@ -98,10 +104,8 @@ export async function computeAllowedVideoEditSections(args: {
   for (const { section, allowed } of results) {
     out[section] = allowed;
   }
-  // YouTube remains a dangerous field in the general owner policy.  The only
-  // normal-mode exception is the creator's first attachment to a non-public
-  // slotted submission; keep this exception local to the derived section
-  // result instead of adding youtube_url to the general editable registry.
+  // When the general registry denies YouTube, retain the historical narrow
+  // first-attachment exception for slotted creator submissions.
   out.youtube =
     out.youtube ||
     canAttachInitialYoutubeToSlottedVideo({

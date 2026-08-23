@@ -15,7 +15,7 @@ if (runTestWithTsx(import.meta.url)) {
     assert.match(source, /allowInitialYoutubeAttach\?: boolean/);
     assert.match(
       source,
-      /allowInitialYoutubeAttach \|\|\s*\(privilegeMode !== "normal" && sections\.youtube\)/,
+      /allowInitialYoutubeAttach\s*\|\|\s*ownerAllows\("youtube_url",\s*sections\.youtube\)\s*\|\|\s*\(privilegeMode !== "normal" && sections\.youtube\)/,
     );
   });
 

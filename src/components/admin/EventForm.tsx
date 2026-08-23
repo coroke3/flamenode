@@ -715,6 +715,7 @@ export function EventForm({
         <PermissionKeysField
           name="user_video_edit_permission_keys_json"
           defaultValue={initial.user_video_edit_permission_keys_json}
+          allowUserVideoEdits={initial.allow_user_video_edits ?? 0}
           disabled={!canQuestions}
         />
         <input type="hidden" name="custom_questions_present" value="1" />

@@ -21,8 +21,13 @@ export {
   disabledFieldKeysFromGeneralFields,
   normalModeAlwaysDisabledFieldKeys,
   NORMAL_MODE_ALWAYS_DISABLED_FIELD_KEYS,
+  parseGeneralEditablePolicyV2,
+  resolveGeneralEditableFieldsFromPolicy,
+  VIDEO_SYSTEM_ONLY_PARAMETER_KEYS,
   type GeneralEditableFieldKey,
   type OwnerEditableFieldDefinition,
+  type GeneralEditablePolicyV2,
+  type VideoParameterRisk,
 } from "./generalEditPermissionsCore";
 
 export async function loadGeneralEditableFieldSet(

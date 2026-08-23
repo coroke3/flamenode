@@ -17,6 +17,10 @@ import {
   decideCanEditVideo,
   resolveOwnerGeneralPolicyKeys,
   resolveVideoOwnershipSync,
+  decideCanEditVideoFromAccessContext,
+  canUseEventPrivilegeFromAccessContext,
+  resolveEventPermissionFromAccessContext,
+  type VideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
   type VideoOwnership,
 } from "./ownershipCore";
@@ -24,11 +28,14 @@ import type { SessionUserLike } from "./ownershipCore";
 import {
   loadGeneralEditableFieldSet,
   parseGeneralEditableFields,
+  parseGeneralEditablePolicyV2,
+  resolveGeneralEditableFieldsFromPolicy,
   sectionAllowedByGeneralFields,
   type GeneralEditableFieldKey,
 } from "@/lib/video/generalEditPermissions";
 import { approvedXIdsWhere, getApprovedLinkedXUserIds } from "./approvedX";
 import { expandPermissionAliases } from "./permissions/aliases";
+import { MAX_ATOMIC_VIDEO_EVENTS } from "@/lib/video/atomicLimits";
 import {
   getManageStaffRole,
   resolveStaffPermissionKeys,
@@ -36,7 +43,12 @@ import {
   type StaffPermissionRow,
 } from "./permissions/permissionResolver";
 
-export type { SessionUserLike, VideoOwnership, CanEditVideoPrivilegeMode };
+export type {
+  SessionUserLike,
+  VideoOwnership,
+  CanEditVideoPrivilegeMode,
+  VideoEditAccessContext,
+};
 export {
   isSafeNormalVideoEditKey,
   isDangerousAdminVideoEditKey,
@@ -46,6 +58,9 @@ export {
   resolveOwnerGeneralPolicyKeys,
   adminPolicyAllows,
   ownerGeneralPolicyAllows,
+  decideCanEditVideoFromAccessContext,
+  canUseEventPrivilegeFromAccessContext,
+  resolveEventPermissionFromAccessContext,
 } from "./ownershipCore";
 
 function staffRowHasAnyPermissions(row: StaffPermissionRow): boolean {
@@ -357,7 +372,7 @@ export async function assertCanEditEvent(
   return evidence.actorXUserId;
 }
 
-async function loadVideoEventIds(
+export async function loadVideoEventIdsForAccessContext(
   db: DB,
   video: Pick<VideoRow, "id" | "primary_event_id">,
 ): Promise<string[]> {
@@ -366,9 +381,88 @@ async function loadVideoEventIds(
   const rows = await db
     .select({ event_id: videoEvents.event_id })
     .from(videoEvents)
-    .where(eq(videoEvents.video_id, video.id));
+    .where(eq(videoEvents.video_id, video.id))
+    .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
   for (const row of rows) ids.add(row.event_id);
-  return Array.from(ids);
+  // Keep the authorization snapshot within the same bounded event universe
+  // used by the atomic video write path.  If legacy data exceeds the limit,
+  // retain the primary event/first rows only; omitted event permissions are
+  // denied rather than overflowing D1's IN/bind budget.
+  return Array.from(ids).slice(0, MAX_ATOMIC_VIDEO_EVENTS);
+}
+
+/**
+ * Resolve all video-edit authorization inputs once per request.  Callers may
+ * pass the writeGuard-approved X snapshot; no auth/KV cache is consulted.
+ */
+export async function resolveVideoEditAccessContext(args: {
+  db: DB;
+  user: SessionUserLike;
+  video: Pick<VideoRow, "id" | "creator_x_user_id" | "primary_event_id" | "visibility_status">;
+  approvedXUserIds?: readonly string[];
+  currentEventIds?: readonly string[];
+}): Promise<VideoEditAccessContext> {
+  const approved = Array.from(
+    args.approvedXUserIds ?? (await getApprovedXIds(args.db, args.user.id)),
+  );
+  const ownership = await resolveVideoOwnership({
+    db: args.db,
+    userId: args.user.id,
+    video: args.video,
+    approvedXUserIds: approved,
+  });
+  const eventIds = Array.from(
+    new Set(
+      args.currentEventIds ??
+        (await loadVideoEventIdsForAccessContext(args.db, args.video)),
+    ),
+  );
+  // Keep the primary event in the bounded snapshot even when a caller passes
+  // an unordered/oversized list from a UI read.  It is the canonical source
+  // for owner policy and must not be evicted by an arbitrary LIMIT.
+  const currentEventIds = [
+    ...(args.video.primary_event_id
+      ? [args.video.primary_event_id]
+      : []),
+    ...eventIds.filter((eventId) => eventId !== args.video.primary_event_id),
+  ].slice(0, MAX_ATOMIC_VIDEO_EVENTS);
+  const eventPermissionKeysByEvent = new Map<string, Set<string>>();
+  if (approved.length > 0 && currentEventIds.length > 0) {
+    const rows = await args.db
+      .select({ event_id: eventStaff.event_id, ...staffPermissionSelect })
+      .from(eventStaff)
+      .where(
+        and(
+          inArray(eventStaff.event_id, currentEventIds),
+          approvedXIdsWhere(eventStaff.x_user_id, approved),
+        )!,
+      );
+    for (const row of rows) {
+      const keys = eventPermissionKeysByEvent.get(row.event_id) ?? new Set<string>();
+      for (const key of resolveStaffPermissionKeys(row)) {
+        keys.add(key);
+        for (const [section, aliases] of Object.entries(VIDEO_PERMISSION_ALIASES)) {
+          if (aliases.includes(key)) keys.add(section);
+        }
+      }
+      eventPermissionKeysByEvent.set(row.event_id, keys);
+    }
+  }
+  // Event staff/admin requests do not need the normal owner policy.  Avoid an
+  // extra primary-event/system-settings read for non-owners while retaining
+  // the complete policy snapshot for owner/edit UI requests.
+  const ownerEditableFields = ownership.isOwner
+    ? await loadEffectiveOwnerEditableFieldSet(args.db, args.video)
+    : new Set<GeneralEditableFieldKey>();
+  return {
+    userId: args.user.id,
+    videoId: args.video.id,
+    approvedXUserIds: approved,
+    ownership,
+    currentEventIds,
+    ownerEditableFields,
+    eventPermissionKeysByEvent,
+  };
 }
 
 /**
@@ -387,7 +481,7 @@ export async function resolveEventStaffVideoPermissionGrant(args: {
     (await getApprovedXIds(args.db, args.user.id));
   if (approved.length === 0) return { allowed: false };
 
-  const eventIds = await loadVideoEventIds(args.db, args.video);
+  const eventIds = await loadVideoEventIdsForAccessContext(args.db, args.video);
   if (eventIds.length === 0) return { allowed: false };
 
   const aliases = VIDEO_PERMISSION_ALIASES[args.requiredKey] ?? [
@@ -464,7 +558,30 @@ async function loadPrimaryEventOwnerPolicy(
       .limit(1)
   )[0];
   if (row?.allow_user_video_edits === 1) {
-    return parseGeneralEditableFields(row.user_video_edit_permission_keys_json);
+    const policyJson = row.user_video_edit_permission_keys_json?.trim() ?? "";
+    if (policyJson.startsWith("[")) {
+      // Legacy arrays are exact event overrides. Keep their historical
+      // semantics so adding a field to the global registry cannot silently
+      // grant it to existing events.
+      return parseGeneralEditableFields(policyJson);
+    }
+    if (!policyJson.startsWith("{")) {
+      // A few legacy/imported rows used the parser's original CSV form rather
+      // than JSON. Keep those exact overrides compatible with the old path.
+      return parseGeneralEditableFields(policyJson);
+    }
+    if (parseGeneralEditablePolicyV2(policyJson)) {
+      const globalFields = video
+        ? await loadGeneralEditableFieldSet(db, video)
+        : new Set<GeneralEditableFieldKey>();
+      return resolveGeneralEditableFieldsFromPolicy({
+        allowUserVideoEdits: row.allow_user_video_edits,
+        policyJson,
+        globalFields,
+      });
+    }
+    // A malformed/unknown policy must not fall back to the global policy.
+    return new Set();
   }
   return video
     ? loadGeneralEditableFieldSet(db, video)
@@ -498,7 +615,7 @@ export async function canEditVideo(args: {
   >;
   requiredKey: VideoEditSectionKey;
   privilegeMode: CanEditVideoPrivilegeMode;
-  generalFields?: Set<GeneralEditableFieldKey>;
+  generalFields?: ReadonlySet<GeneralEditableFieldKey>;
   /**
    * Reuse a caller's already-loaded linked+approved X IDs. Public viewers
    * resolve this once for the private chapter overlay; omitting the value
@@ -507,7 +624,21 @@ export async function canEditVideo(args: {
   approvedXUserIds?: readonly string[];
   /** Request-local ownership result shared by section probes. */
   ownership?: VideoOwnership;
+  /** A request-local context avoids repeated event/staff/ownership reads. */
+  accessContext?: VideoEditAccessContext;
 }): Promise<boolean> {
+  if (args.accessContext) {
+    if (
+      args.accessContext.userId !== args.user.id ||
+      args.accessContext.videoId !== args.video.id
+    ) return false;
+    return decideCanEditVideoFromAccessContext({
+      context: args.accessContext,
+      userRole: args.user.role,
+      requiredKey: args.requiredKey,
+      privilegeMode: args.privilegeMode,
+    });
+  }
   const { db, user, video, requiredKey, privilegeMode, generalFields } = args;
   const approved =
     args.approvedXUserIds ?? (await getApprovedXIds(db, user.id));
@@ -520,13 +651,6 @@ export async function canEditVideo(args: {
 
   if (privilegeMode === "normal") {
     if (!ownership.isOwner) return false;
-
-    // YouTube is intentionally not part of the normal owner policy.  The
-    // slotted first-attachment exception is derived by computeEditSections
-    // from the authoritative video state; keeping this section locked here
-    // prevents a configured/general field set from becoming a broad ID
-    // replacement or clear permission through this lower-level helper.
-    if (requiredKey === "video.youtube_id") return false;
 
     if (requiredKey === "video.permissions") {
       return decideCanEditVideo({
@@ -586,7 +710,15 @@ export async function canUseEventPrivilegeModeForVideo(args: {
     | "submitted_by_user_id"
     | "visibility_status"
   >;
+  accessContext?: VideoEditAccessContext;
 }): Promise<boolean> {
+  if (args.accessContext) {
+    if (
+      args.accessContext.userId !== args.user.id ||
+      args.accessContext.videoId !== args.video.id
+    ) return false;
+    return canUseEventPrivilegeFromAccessContext(args.accessContext);
+  }
   const probeKeys: VideoEditSectionKey[] = [
     "video.basics",
     "video.descriptions",

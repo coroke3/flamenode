@@ -10,7 +10,9 @@ import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canEditVideo,
   canUseEventPrivilegeModeForVideo,
+  resolveVideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
+  type VideoEditAccessContext,
 } from "@/lib/auth/ownership";
 import {
   users,
@@ -148,10 +150,11 @@ async function resolvePrivilegeMode(
     | "submitted_by_user_id"
     | "visibility_status"
   >,
+  accessContext?: VideoEditAccessContext,
 ): Promise<CanEditVideoPrivilegeMode> {
   if (rawMode === "admin" && user.role === "admin") return "admin";
   if (rawMode === "event") {
-    const canUseEvent = await canUseEventPrivilegeModeForVideo({ db, user, video });
+    const canUseEvent = await canUseEventPrivilegeModeForVideo({ db, user, video, accessContext });
     if (canUseEvent) return "event";
   }
   return "normal";
@@ -183,14 +186,20 @@ async function loadEditableVideoForPermissions(
     ...row,
     submitted_by_user_id: row.submitted_by_user_id ?? "",
   };
+  const accessContext = await resolveVideoEditAccessContext({
+    db,
+    user: actor,
+    video,
+  });
   const requested = privilegeModeRaw.trim();
-  const requestedMode = await resolvePrivilegeMode(db, requested, actor, video);
+  const requestedMode = await resolvePrivilegeMode(db, requested, actor, video, accessContext);
   const requestedAllowed = await canEditVideo({
     db,
     user: actor,
     video,
     requiredKey: "video.permissions",
     privilegeMode: requestedMode,
+    accessContext,
   });
   if (requestedAllowed) return { ...video, privilegeMode: requestedMode };
 
@@ -202,11 +211,12 @@ async function loadEditableVideoForPermissions(
       video,
       requiredKey: "video.permissions",
       privilegeMode: "admin",
+      accessContext,
     });
     if (adminAllowed) return { ...video, privilegeMode: "admin" };
   }
 
-  const canUseEvent = await canUseEventPrivilegeModeForVideo({ db, user: actor, video });
+  const canUseEvent = await canUseEventPrivilegeModeForVideo({ db, user: actor, video, accessContext });
   if (canUseEvent) {
     const eventAllowed = await canEditVideo({
       db,
@@ -214,6 +224,7 @@ async function loadEditableVideoForPermissions(
       video,
       requiredKey: "video.permissions",
       privilegeMode: "event",
+      accessContext,
     });
     if (eventAllowed) return { ...video, privilegeMode: "event" };
   }

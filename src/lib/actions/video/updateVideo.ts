@@ -5,7 +5,7 @@ import { unstable_rethrow } from "next/navigation";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import {
   canUseEventPrivilegeModeForVideo,
-  resolveVideoOwnership,
+  resolveVideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
 import { events as eventsTable, videos, videoEvents, xUsers } from "@/lib/db/schema";
@@ -32,7 +32,6 @@ import {
   computeAllowedVideoEditSections,
   hasAnyVideoEditSection,
 } from "@/lib/video/computeEditSections";
-import { loadEffectiveOwnerEditableFieldSet } from "@/lib/auth/ownership";
 import type { GeneralEditableFieldKey } from "@/lib/video/generalEditPermissions";
 import {
   validateCustomAnswersForEvents,
@@ -86,6 +85,15 @@ async function updateVideoCore(
   // mutating the stored value unless the caller is already allowed to edit
   // the YouTube field.
   const targetYoutubeVideoId = target.youtube_video_id?.trim() || null;
+
+  // Resolve the request-local authorization snapshot once. Section probes,
+  // event privilege selection and later field checks all reuse this result.
+  const accessContext = await resolveVideoEditAccessContext({
+    db,
+    user: { id: sessionUser.id, role: sessionUser.role ?? null },
+    video: target,
+    approvedXUserIds: guard.approvedXIds,
+  });
 
   const targetSoftwareLabel = await getVideoSoftwareLabel(db, videoId);
   const stageEventIds = parseEventIdsFromForm(formData);
@@ -149,6 +157,7 @@ async function updateVideoCore(
       db,
       user: { id: sessionUser.id, role: sessionUser.role ?? null },
       video: target,
+      accessContext,
     });
     if (canUseEvent) {
       privilegeMode = "event";
@@ -158,14 +167,9 @@ async function updateVideoCore(
   const editUser = { id: sessionUser.id, role: sessionUser.role ?? null };
   const generalFields: Set<GeneralEditableFieldKey> | undefined =
     privilegeMode === "normal"
-      ? await loadEffectiveOwnerEditableFieldSet(db, target)
+      ? new Set(accessContext.ownerEditableFields)
       : undefined;
-  const ownership = await resolveVideoOwnership({
-    db,
-    userId: sessionUser.id,
-    video: target,
-    approvedXUserIds: guard.approvedXIds,
-  });
+  const ownership = accessContext.ownership;
   const sections = await computeAllowedVideoEditSections({
     db,
     user: editUser,
@@ -174,6 +178,7 @@ async function updateVideoCore(
     generalFields,
     approvedXUserIds: guard.approvedXIds,
     ownership,
+    accessContext,
   });
   if (!hasAnyVideoEditSection(sections)) {
     return {
@@ -221,11 +226,10 @@ async function updateVideoCore(
     youtubeId = targetYoutubeVideoId;
   }
 
-  // computeAllowedVideoEditSections resolves ownership from the request's
-  // approved X IDs and only enables this section for the creator owner.  Keep
-  // the final before/after rule explicit here as a second server-side fence:
-  // normal owners may add the first ID, but may never clear or replace one
-  // that has already been attached.
+  // computeAllowedVideoEditSections resolves ownership and the effective
+  // normal-owner field policy from the request-local authorization snapshot.
+  // Keep the first-attachment predicate as a second server-side fence for
+  // events that have not opted into the general youtube_url permission.
   const initialYoutubeAttachAllowed =
     sections.youtube &&
     canAttachInitialYoutubeToSlottedVideo({

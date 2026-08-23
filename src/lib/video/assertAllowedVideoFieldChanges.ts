@@ -61,6 +61,8 @@ export function assertAllowedVideoFieldChanges(
       : sectionAllowed;
   const youtubeFieldAllowed =
     args.allowInitialYoutubeAttach === true ||
+    (args.privilegeMode === "normal" &&
+      args.editableFields?.has("youtube_url") === true) ||
     (args.privilegeMode !== "normal" && sections.youtube);
 
   const submitterFields: Array<[GeneralEditableFieldKey, string | null | undefined, string | null | undefined, string]> = [

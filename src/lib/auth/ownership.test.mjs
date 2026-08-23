@@ -383,5 +383,6 @@ test("canEditVideo: normal モードは youtube section を一般fieldから許�
     /if \(privilegeMode === "normal"\)[\s\S]*?\n\s*let ownerPolicyKeys/,
   )?.[0];
   assert.ok(normalBlock, "normal privilege block not found");
-  assert.match(normalBlock, /requiredKey === "video\.youtube_id"\) return false/);
+  assert.match(normalBlock, /sectionAllowedByGeneralFields/);
+  assert.doesNotMatch(normalBlock, /requiredKey === "video\.youtube_id"\) return false/);
 });

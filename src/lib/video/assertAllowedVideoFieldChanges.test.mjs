@@ -238,6 +238,26 @@ test("normal owner policy cannot turn into general YouTube replacement permissio
   assert.equal(result.ok, false);
 });
 
+test("normal owner YouTube policy allows replacement and clear", () => {
+  const replacement = assertAllowedVideoFieldChanges({
+    sections: allSections({ youtube: true }),
+    before: baseSnapshot({ youtube_video_id: "old-youtube-id" }),
+    after: baseSnapshot({ youtube_video_id: "new-youtube-id" }),
+    privilegeMode: "normal",
+    editableFields: new Set(["youtube_url"]),
+  });
+  assert.deepEqual(replacement, { ok: true });
+
+  const clear = assertAllowedVideoFieldChanges({
+    sections: allSections({ youtube: true }),
+    before: baseSnapshot({ youtube_video_id: "old-youtube-id" }),
+    after: baseSnapshot({ youtube_video_id: null }),
+    privilegeMode: "normal",
+    editableFields: new Set(["youtube_url"]),
+  });
+  assert.deepEqual(clear, { ok: true });
+});
+
 test("YouTube IDの前後空白だけでは権限外変更として扱わない", () => {
   const before = baseSnapshot({ youtube_video_id: "  yt123  " });
   const after = { ...before, youtube_video_id: "yt123" };

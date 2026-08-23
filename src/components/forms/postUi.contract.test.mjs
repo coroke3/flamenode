@@ -193,3 +193,15 @@ test("wizard advances to confirmation and only its explicit button can submit", 
     /\{isWizardLastStep \?[\s\S]*type="button"[\s\S]*onClick=\{submitWizardFromConfirmation\}[\s\S]*: \([\s\S]*type="button"[\s\S]*onClick=\{goWizardNext\}/,
   );
 });
+
+test("YouTube policy permission remains visible in the edit UI", async () => {
+  const source = await read("app/(auth)/dashboard/edit/[id]/page.tsx");
+  assert.match(source, /const canEditYoutube = canEditYoutubeByPolicy \|\| allowInitialYoutubeAttach/);
+});
+
+test("v2 event policy fallback deny is preserved when the permission UI is edited", async () => {
+  const source = await read("src/components/admin/PermissionKeysField.tsx");
+  assert.match(source, /policy\.fallback === "deny"/);
+  assert.match(source, /omittedState/);
+  assert.match(source, /buildPermissionJson\(states\)/);
+});

@@ -29,11 +29,8 @@ import {
 import {
   canEditVideo,
   canUseEventPrivilegeModeForVideo,
-  getApprovedXIds,
-  getEditableEventIds,
-  loadEffectiveOwnerEditableFieldSet,
-  resolveEventStaffVideoPermissionGrant,
-  resolveVideoOwnership,
+  resolveVideoEditAccessContext,
+  resolveEventPermissionFromAccessContext,
 } from "@/lib/auth/ownership";
 import { VideoForm } from "@/components/forms/VideoForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
@@ -155,20 +152,10 @@ export default async function EditVideoPage({
   const youtubeVideoId = video.youtube_video_id?.trim() || null;
 
   const editUser = { id: user.id, role: user.role ?? null };
-  const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
-    db,
-    user: editUser,
-    video,
-  });
 
   // 管理者以外が ?privileged=admin を付けても normal にフォールバック。
   // event モードは canUseEventPrivilegeModeForVideo が true のときだけ。
   let privilegeMode: PrivilegeMode = "normal";
-  if (requestedMode === "admin" && user.role === "admin") {
-    privilegeMode = "admin";
-  } else if (requestedMode === "event" && canOfferEventMode) {
-    privilegeMode = "event";
-  }
 
   const memberRows = await db
     .select({
@@ -227,6 +214,23 @@ export default async function EditVideoPage({
   const currentEventIds = currentVideoEvents.map((r) => r.event_id);
   if (video.primary_event_id && !currentEventIds.includes(video.primary_event_id)) {
     currentEventIds.push(video.primary_event_id);
+  }
+  const accessContext = await resolveVideoEditAccessContext({
+    db,
+    user: editUser,
+    video,
+    currentEventIds,
+  });
+  const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
+    db,
+    user: editUser,
+    video,
+    accessContext,
+  });
+  if (requestedMode === "admin" && user.role === "admin") {
+    privilegeMode = "admin";
+  } else if (requestedMode === "event" && canOfferEventMode) {
+    privilegeMode = "event";
   }
   const now = Math.floor(Date.now() / 1000);
   const acceptingEventWhere = and(
@@ -381,21 +385,13 @@ export default async function EditVideoPage({
 
   const generalFields =
     privilegeMode === "normal"
-      ? await loadEffectiveOwnerEditableFieldSet(db, video)
+      ? new Set(accessContext.ownerEditableFields)
       : undefined;
 
-  const approvedXIds = await getApprovedXIds(db, user.id);
-  const ownership = await resolveVideoOwnership({
-    db,
-    userId: user.id,
-    video,
-    approvedXUserIds: approvedXIds,
-  });
-  const editableEventIds = await getEditableEventIds(
-    db,
-    user.id,
-    currentEventIds,
-    approvedXIds,
+  const approvedXIds = Array.from(accessContext.approvedXUserIds);
+  const ownership = accessContext.ownership;
+  const editableEventIds = currentEventIds.filter(
+    (eventId) => (accessContext.eventPermissionKeysByEvent.get(eventId)?.size ?? 0) > 0,
   );
   const isEventStaffForVideo = editableEventIds.length > 0;
 
@@ -432,12 +428,12 @@ export default async function EditVideoPage({
     canEditPrimaryEvent,
     canEditVisibility,
   ] = await Promise.all([
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.identity", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.basics", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.youtube_id", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.credits", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.descriptions", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.members", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
     canEditVideo({
       db,
       user: editUser,
@@ -447,10 +443,11 @@ export default async function EditVideoPage({
       generalFields,
       approvedXUserIds: approvedXIds,
       ownership,
+      accessContext,
     }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.permissions", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.primary_event", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
-    canEditVideo({ db, user: editUser, video, requiredKey: "video.status", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.permissions", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.primary_event", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
+    canEditVideo({ db, user: editUser, video, requiredKey: "video.status", privilegeMode, generalFields, approvedXUserIds: approvedXIds, ownership, accessContext }),
   ]);
 
   const allowInitialYoutubeAttach = canAttachInitialYoutubeToSlottedVideo({
@@ -461,10 +458,10 @@ export default async function EditVideoPage({
     privilegeMode,
     isCreatorOwner: ownership.isCreatorOwner,
   });
-  const canEditYoutube =
-    privilegeMode === "normal"
-      ? allowInitialYoutubeAttach
-      : canEditYoutubeByPolicy || allowInitialYoutubeAttach;
+  // The normal owner policy controls replacements/clears when youtube_url is
+  // explicitly allowed.  The first-attachment predicate remains the narrow
+  // fallback for the historical OFF policy.
+  const canEditYoutube = canEditYoutubeByPolicy || allowInitialYoutubeAttach;
 
   const canOfferAdminMode = user.role === "admin" && privilegeMode !== "admin";
   const eventTitleById = new Map(
@@ -500,22 +497,16 @@ export default async function EditVideoPage({
     | undefined;
   if (privilegeMode === "event") {
     sectionEventSources = {};
-    await Promise.all(
-      sectionPermissionKeys.map(async ({ section, key }) => {
-        const grant = await resolveEventStaffVideoPermissionGrant({
-          db,
-          user: editUser,
-          video,
-          requiredKey: key,
-          approvedXUserIds: approvedXIds,
-        });
-        if (!grant.allowed || !grant.eventId) return;
+    for (const { section, key } of sectionPermissionKeys) {
+      const grant = resolveEventPermissionFromAccessContext(accessContext, key);
+      if (!grant.allowed) continue;
+      {
         sectionEventSources![section] = {
           eventId: grant.eventId,
           eventTitle: eventTitleById.get(grant.eventId),
         };
-      }),
-    );
+      }
+    }
   }
 
   const eventTitleForMode =

@@ -6,15 +6,116 @@ import {
   normalModeAlwaysDisabledFieldKeys,
   normalizeGeneralEditableFields,
   parseGeneralEditableFields,
+  parseGeneralEditablePolicyV2,
+  resolveGeneralEditableFieldsFromPolicy,
   resolveGeneralEditableScope,
   sectionAllowedByGeneralFields,
   serializeGeneralEditableFields,
 } from "./generalEditPermissionsCore.ts";
 
-test("normal owner field registry never exposes YouTube ID editing", () => {
-  assert.equal(GENERAL_EDITABLE_FIELD_KEYS.includes("youtube_url"), false);
+test("normal owner field registry exposes the YouTube URL policy key", () => {
+  assert.equal(GENERAL_EDITABLE_FIELD_KEYS.includes("youtube_url"), true);
+  assert.equal(
+    sectionAllowedByGeneralFields("video.youtube_id", new Set(["youtube_url"])),
+    true,
+  );
   assert.equal(
     sectionAllowedByGeneralFields("video.youtube_id", new Set(["title"])),
+    false,
+  );
+});
+
+test("v2 policy resolves allow/deny/inherit against the global set", () => {
+  const policy = JSON.stringify({
+    version: 2,
+    fallback: "deny",
+    allow: ["youtube_url"],
+    deny: ["title"],
+    inherit: ["music"],
+  });
+  const parsed = parseGeneralEditablePolicyV2(policy);
+  assert.ok(parsed);
+  const resolved = resolveGeneralEditableFieldsFromPolicy({
+    allowUserVideoEdits: 1,
+    policyJson: policy,
+    globalFields: new Set(["title", "music", "chapters"]),
+  });
+  assert.deepEqual(Array.from(resolved), ["youtube_url", "music"]);
+});
+
+test("v2 policy rejects malformed, unknown versions, and overlapping keys", () => {
+  assert.equal(parseGeneralEditablePolicyV2("not-json"), null);
+  assert.equal(parseGeneralEditablePolicyV2(JSON.stringify({ version: 1 })), null);
+  assert.equal(
+    parseGeneralEditablePolicyV2(JSON.stringify({
+      version: 2,
+      fallback: "inherit",
+      allow: ["title"],
+      deny: ["title"],
+      inherit: [],
+    })),
+    null,
+  );
+  assert.equal(
+    parseGeneralEditablePolicyV2(JSON.stringify({
+      version: 2,
+      fallback: "inherit",
+      allow: ["title", 1],
+      deny: [],
+      inherit: [],
+    })),
+    null,
+  );
+  assert.equal(
+    resolveGeneralEditableFieldsFromPolicy({
+      allowUserVideoEdits: 1,
+      policyJson: JSON.stringify({ version: 9, fallback: "inherit", allow: [], deny: [], inherit: [] }),
+      globalFields: new Set(["title"]),
+    }).size,
+    0,
+  );
+});
+
+test("legacy CSV event overrides remain exact and do not broaden on v2 rollout", () => {
+  const resolved = resolveGeneralEditableFieldsFromPolicy({
+    allowUserVideoEdits: 1,
+    policyJson: "title,music",
+    globalFields: new Set(["title", "music", "youtube_url"]),
+  });
+  assert.deepEqual(Array.from(resolved), ["title", "music"]);
+});
+
+test("event override off inherits global, while v2 deny overrides global", () => {
+  const denyYoutube = JSON.stringify({
+    version: 2,
+    fallback: "inherit",
+    allow: [],
+    deny: ["youtube_url"],
+    inherit: [],
+  });
+  const globalFields = new Set(["title", "youtube_url"]);
+  assert.equal(
+    resolveGeneralEditableFieldsFromPolicy({
+      allowUserVideoEdits: 0,
+      policyJson: denyYoutube,
+      globalFields,
+    }).has("youtube_url"),
+    true,
+  );
+  assert.equal(
+    resolveGeneralEditableFieldsFromPolicy({
+      allowUserVideoEdits: 1,
+      policyJson: denyYoutube,
+      globalFields,
+    }).has("youtube_url"),
+    false,
+  );
+  assert.equal(
+    resolveGeneralEditableFieldsFromPolicy({
+      allowUserVideoEdits: 1,
+      policyJson: '["title"]',
+      globalFields,
+    }).has("youtube_url"),
     false,
   );
 });

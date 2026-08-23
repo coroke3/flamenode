@@ -2,6 +2,7 @@ import type { VideoEditSectionKey } from "@/lib/auth/videoEditSections";
 
 export const GENERAL_EDITABLE_FIELD_KEYS = [
   "title",
+  "youtube_url",
   "display_name",
   "icon_url",
   "profile_text",
@@ -26,9 +27,32 @@ export const GENERAL_EDITABLE_FIELD_KEYS = [
 
 export type GeneralEditableFieldKey = (typeof GENERAL_EDITABLE_FIELD_KEYS)[number];
 
+export type VideoParameterRisk = "normal" | "sensitive" | "dangerous" | "system";
+
+/**
+ * Database-backed video values which are intentionally not part of the
+ * owner-configurable registry.  Keeping this list explicit prevents a new
+ * column from becoming editable merely because it is added to a form.
+ */
+export const VIDEO_SYSTEM_ONLY_PARAMETER_KEYS = [
+  "creator_x_user_id",
+  "submitted_by_user_id",
+  "source_type",
+  "scheduling_type",
+  "scheduled_time",
+  "visibility_status",
+  "app_like_count",
+  "score",
+  "score_updated_at",
+  "created_at",
+  "updated_at",
+  "creator_display_name_yomi",
+] as const;
+
 const GENERAL_EDITABLE_FIELD_KEY_SET = new Set<string>(GENERAL_EDITABLE_FIELD_KEYS);
 
 export const GENERAL_EDITABLE_FIELD_LABELS: Record<GeneralEditableFieldKey, string> = {
+  youtube_url: "YouTube URL",
   title: "タイトル",
   display_name: "表示名",
   icon_url: "アイコン",
@@ -53,6 +77,7 @@ export const GENERAL_EDITABLE_FIELD_LABELS: Record<GeneralEditableFieldKey, stri
 };
 
 export const GENERAL_EDITABLE_FIELD_HELP: Record<GeneralEditableFieldKey, string> = {
+  youtube_url: "YouTube URL",
   title: "作品タイトルを直せます",
   display_name: "作品ごとの作者名を直せます",
   icon_url: "作品ごとのアイコンを直せます",
@@ -97,6 +122,7 @@ export const GENERAL_EDITABLE_FIELD_GROUPS: Array<{
     description: "作品の基本情報と公開先に関わる項目",
     fields: [
       ["title", GENERAL_EDITABLE_FIELD_LABELS.title],
+      ["youtube_url", GENERAL_EDITABLE_FIELD_LABELS.youtube_url],
       ["part", GENERAL_EDITABLE_FIELD_LABELS.part],
     ],
   },
@@ -173,6 +199,7 @@ const LEGACY_GENERAL_FIELD_EXPANSIONS: Record<string, readonly GeneralEditableFi
 
 const DISABLED_FIELD_PATH_BY_KEY: Record<GeneralEditableFieldKey, string> = {
   title: "video.title",
+  youtube_url: "video.youtube_url",
   display_name: "submitter.display_name",
   icon_url: "submitter.icon_url",
   profile_text: "submitter.profile_text",
@@ -197,6 +224,7 @@ const DISABLED_FIELD_PATH_BY_KEY: Record<GeneralEditableFieldKey, string> = {
 
 const EVENT_PERMISSION_KEY_BY_FIELD: Record<GeneralEditableFieldKey, VideoEditSectionKey> = {
   title: "video.basics",
+  youtube_url: "video.youtube_id",
   display_name: "video.identity",
   icon_url: "video.identity",
   profile_text: "video.identity",
@@ -227,6 +255,9 @@ export type OwnerEditableFieldDefinition = {
   group: string;
   formPath: string;
   eventPermissionKey: VideoEditSectionKey;
+  risk: VideoParameterRisk;
+  ownerConfigurable: boolean;
+  eventOverrideConfigurable: boolean;
   dangerous: false;
 };
 
@@ -241,6 +272,9 @@ export const OWNER_EDITABLE_FIELD_DEFINITIONS: readonly OwnerEditableFieldDefini
       )?.label ?? "その他",
     formPath: DISABLED_FIELD_PATH_BY_KEY[key],
     eventPermissionKey: EVENT_PERMISSION_KEY_BY_FIELD[key],
+    risk: key === "youtube_url" ? "sensitive" : "normal",
+    ownerConfigurable: true,
+    eventOverrideConfigurable: true,
     dangerous: false,
   }));
 
@@ -303,6 +337,84 @@ export function parseGeneralEditableFields(
   return out;
 }
 
+export type GeneralEditablePolicyV2 = {
+  version: 2;
+  fallback: "inherit" | "deny";
+  allow: GeneralEditableFieldKey[];
+  deny: GeneralEditableFieldKey[];
+  inherit: GeneralEditableFieldKey[];
+};
+
+function normalizePolicyFieldList(value: unknown): GeneralEditableFieldKey[] | null {
+  if (!Array.isArray(value)) return null;
+  // A v2 policy is an explicit server-side contract.  Unknown string keys
+  // are intentionally ignored for forward compatibility, but non-string
+  // entries make the document malformed and must fail closed.
+  if (value.some((entry) => typeof entry !== "string")) return null;
+  const normalized = normalizeGeneralEditableFields(
+    value,
+  );
+  return normalized;
+}
+
+/** Parse the opt-in v2 policy. Invalid/unknown versions fail closed. */
+export function parseGeneralEditablePolicyV2(
+  value: string | null | undefined,
+): GeneralEditablePolicyV2 | null {
+  if (!value?.trim()) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (!parsed || parsed.version !== 2) return null;
+    if (parsed.fallback !== "inherit" && parsed.fallback !== "deny") return null;
+    const allow = normalizePolicyFieldList(parsed.allow);
+    const deny = normalizePolicyFieldList(parsed.deny);
+    const inherit = normalizePolicyFieldList(parsed.inherit);
+    if (!allow || !deny || !inherit) return null;
+    const seen = new Set<GeneralEditableFieldKey>();
+    for (const list of [allow, deny, inherit]) {
+      for (const key of list) {
+        if (seen.has(key)) return null;
+        seen.add(key);
+      }
+    }
+    return { version: 2, fallback: parsed.fallback, allow, deny, inherit };
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve one event policy against the current global field set. */
+export function resolveGeneralEditableFieldsFromPolicy(args: {
+  allowUserVideoEdits: number | null | undefined;
+  policyJson: string | null | undefined;
+  globalFields: ReadonlySet<GeneralEditableFieldKey>;
+}): Set<GeneralEditableFieldKey> {
+  if (args.allowUserVideoEdits !== 1) return new Set(args.globalFields);
+  const raw = args.policyJson?.trim() ?? "";
+  if (!raw) return new Set();
+  if (raw.startsWith("[")) return parseGeneralEditableFields(raw);
+  // Some pre-v2 imports stored the same exact override as a comma-separated
+  // string. Preserve that legacy representation; object-shaped values are
+  // reserved for v2 and therefore fail closed when invalid.
+  if (!raw.startsWith("{")) return parseGeneralEditableFields(raw);
+  const policy = parseGeneralEditablePolicyV2(raw);
+  if (!policy) return new Set();
+  const allow = new Set(policy.allow);
+  const deny = new Set(policy.deny);
+  const inherit = new Set(policy.inherit);
+  const resolved = new Set<GeneralEditableFieldKey>();
+  for (const key of GENERAL_EDITABLE_FIELD_KEYS) {
+    if (allow.has(key)) {
+      resolved.add(key);
+    } else if (deny.has(key)) {
+      continue;
+    } else if (inherit.has(key) || policy.fallback === "inherit") {
+      if (args.globalFields.has(key)) resolved.add(key);
+    }
+  }
+  return resolved;
+}
+
 export function resolveGeneralEditableScope(
   video: { visibility_status: string },
 ): "default" | "upcoming" {
@@ -311,7 +423,7 @@ export function resolveGeneralEditableScope(
 
 export function sectionAllowedByGeneralFields(
   sectionKey: VideoEditSectionKey | string,
-  fields: Set<GeneralEditableFieldKey>,
+  fields: ReadonlySet<GeneralEditableFieldKey>,
 ): boolean {
   switch (sectionKey) {
     case "video.basics":
@@ -333,10 +445,7 @@ export function sectionAllowedByGeneralFields(
       return fields.has("chapters");
     case "video.youtube_id":
     case "videos.youtube_id":
-      // YouTube remains a dangerous field. Normal owner policy never grants
-      // it; the slotted first-attachment exception is derived separately from
-      // the authoritative video state.
-      return false;
+      return fields.has("youtube_url");
     case "video.primary_event":
     case "videos.primary_event":
       return fields.has("event_ids");
@@ -357,7 +466,7 @@ export function normalModeAlwaysDisabledFieldKeys(): string[] {
 }
 
 export function disabledFieldKeysFromGeneralFields(
-  fields: Set<GeneralEditableFieldKey>,
+  fields: ReadonlySet<GeneralEditableFieldKey>,
 ): string[] {
   return GENERAL_EDITABLE_FIELD_KEYS
     .filter((key) => !fields.has(key))
