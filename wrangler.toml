@@ -13,6 +13,12 @@ command = "node scripts/workers-ci-wrangler-guard.mjs"
 [observability]
 enabled = true
 
+# Dynamic requests are D1/R2/API heavy. Smart Placement lets Cloudflare run
+# fetch handlers closer to the dominant backend only when that is faster.
+# Static assets still bypass the Worker and remain edge-local below.
+[placement]
+mode = "smart"
+
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
