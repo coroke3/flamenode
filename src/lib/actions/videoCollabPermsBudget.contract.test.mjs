@@ -35,24 +35,24 @@ test("100人permission batchの通常最大経路はD1 Free 50-query budgetに�
   // = 最大8 statement（通知200件以内の通常ケース）。
   // 数値changes assertionは x_users/update/insert/delete/static rebuild の最大5件。
   // aggregate auditは2件なので1 chunk => audit insert + assertionの2 query。
-  // audit preparation 2 + reserved caller 10を加えても27 query。
-  // alias canonicalize / video / member / profile / notification recipient のreadは
-  // caller予約10件の範囲で実行し、人数分のreadへ戻さない。
+  // audit preparation 2 + caller reserve 18を加えても35 query。
+  // caller reserveにはauth/session/current user/CostGuard/video authorizationに加え、
+  // alias/member/profile/notification recipient等のreadを含める。
   const mutationStatementCount = 8;
   const mutationAssertionCount = 5;
   const auditQueryCount = 2;
   const preparationQueryCount = 2;
-  const reservedCallerQueryCount = 10;
+  const reservedCallerQueryCount = 18;
   const total =
     mutationStatementCount +
     mutationAssertionCount +
     auditQueryCount +
     preparationQueryCount +
     reservedCallerQueryCount;
-  assert.equal(total, 27);
+  assert.equal(total, 35);
   assert.ok(total <= 50);
   assert.match(budgetSource, /D1_MAX_BATCH_QUERIES = 50/);
-  assert.match(budgetSource, /D1_RESERVED_CALLER_QUERIES = 10/);
+  assert.match(budgetSource, /D1_RESERVED_CALLER_QUERIES = 18/);
   assert.match(actionSource, /canonicalizePermissionIntents/);
   assert.doesNotMatch(actionSource, /Promise\.all\([^)]*resolveCanonicalXUserId/);
 });
