@@ -358,17 +358,27 @@ export async function handleYoutubeSyncWakeQueue(
   }
 
   if (playlistMessages.length > 0) {
+    let playlistReturned = false;
     try {
       const playlistJob = await runJob(
         "sync-jobs",
         "youtube-playlist-sync",
-        async () => normalizePlaylistQuotaStop(await syncEventPlaylists(env)),
+        async () => {
+          const result = normalizePlaylistQuotaStop(
+            await syncEventPlaylists(env),
+          );
+          playlistReturned = true;
+          return result;
+        },
         { commitSha: env.BUILD_COMMIT_SHA },
       );
-      if (!playlistJob.succeeded) {
+      // syncEventPlaylistsが結果を返した場合、event error/deferredはD1へ保存済みで
+      // next_sync_atも更新済み。doorbellを即retryしてもno-opになるためACKする。
+      // 関数自体がthrowした場合だけ、D1/Worker障害としてQueue retryする。
+      if (!playlistJob.succeeded && !playlistReturned) {
         throw new Error("youtube_playlist_sync_failed");
       }
-      if (!playlistJob.quota_stopped) {
+      if (playlistJob.succeeded && !playlistJob.quota_stopped) {
         const playlistContinued = await maybeContinueYoutubePlaylistSync(env);
         continued ||= playlistContinued;
       }
