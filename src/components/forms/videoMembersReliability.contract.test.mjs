@@ -15,14 +15,8 @@ test("TSV merge/replaceはどちらもpermission intentを確認してからmemb
     source,
     /mode === "replace"[\s\S]*setReplaceConfirmOpen\(true\)[\s\S]*bulkPreview\.permissionIntents\.length > 0[\s\S]*setPermConfirmOpen\(true\)/,
   );
-  assert.doesNotMatch(
-    source,
-    /finishApply\("merge", bulkPreview\.members\)/,
-  );
-  assert.match(
-    source,
-    /if \(result\.ok\) \{[\s\S]*runPendingApply\(\)/,
-  );
+  assert.doesNotMatch(source, /finishApply\("merge", bulkPreview\.members\)/);
+  assert.match(source, /if \(result\.ok\) \{[\s\S]*runPendingApply\(\)/);
 });
 
 test("参加者管理ページはhidden editorを除外しmanaged chapterを初期値へ戻す", async () => {
@@ -32,6 +26,37 @@ test("参加者管理ページはhidden editorを除外しmanaged chapterを初�
   assert.match(source, /extractVideoMemberIdFromChapterId/);
   assert.match(source, /formatMemberChapterTime/);
   assert.match(source, /chapters:\s*\(chaptersByMemberId\.get\(member\.id\)/);
+});
+
+test("managed chapterのmember ID prefixはLIKE wildcardでなく完全prefix判定する", async () => {
+  for (const path of [
+    "app/(admin)/admin/videos/[id]/members/page.tsx",
+    "src/lib/video/memberSubmissionBaseline.ts",
+    "src/lib/video/replaceVideoMembers.ts",
+  ]) {
+    const source = await read(path);
+    assert.match(source, /instr\([\s\S]*':legacy:'[\s\S]*\) = 1/);
+    assert.match(source, /instr\([\s\S]*':member:'[\s\S]*\) = 1/);
+    assert.doesNotMatch(source, /LIKE[\s\S]*':(?:legacy|member):%'/);
+  }
+});
+
+test("member X IDはServer write境界でもcanonical形式と重複を検証する", async () => {
+  const source = await read("src/lib/video/memberInputs.ts");
+  assert.match(source, /isCanonicalXId/);
+  assert.match(source, /英数字とアンダースコア20文字以内/);
+  assert.match(source, /const seenXIds = new Set/);
+  assert.match(source, /同じ X ID（@\$\{xid\}）が複数/);
+});
+
+test("member置換はaliasを1クエリでcanonicalizeし変換後重複を拒否する", async () => {
+  const source = await read("src/lib/video/replaceVideoMembers.ts");
+  assert.match(source, /canonicalizeMemberInputs/);
+  assert.match(source, /xUserAliases/);
+  assert.match(source, /FROM json_each\(\$\{JSON\.stringify\(candidates\)\}\)/);
+  assert.match(source, /video_member_duplicate_x_user_id/);
+  assert.match(source, /lower\(\$\{videoMembers\.x_user_id\}\)/);
+  assert.match(source, /lower\(\$\{xUsers\.id\}\)/);
 });
 
 test("参加者保存はD1等の失敗を一律に競合と断定せずbudget errorを分離する", async () => {
@@ -51,6 +76,14 @@ test("参加者保存はvideos全行CASを使わずmember-set CASを競合正本
   assert.match(adminSource, /member-set CAS/);
   assert.match(memberPlanSource, /buildVideoMemberSetGuardSql/);
   assert.match(memberPlanSource, /plan\.expectedChanges\.push\(null\)/);
+});
+
+test("member-set CASのID順はlocaleCompareに依存しない", async () => {
+  const snapshot = await read("src/lib/video/memberSetSnapshot.ts");
+  const replace = await read("src/lib/video/replaceVideoMembers.ts");
+  assert.match(snapshot, /compareSqliteBinaryText/);
+  assert.doesNotMatch(snapshot, /id\.localeCompare/);
+  assert.match(replace, /compareSqliteBinaryText/);
 });
 
 test("100人stress testは実canonicalのstatic_rebuild_queue shapeを持つ", async () => {
