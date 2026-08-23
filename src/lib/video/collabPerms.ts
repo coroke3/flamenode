@@ -7,6 +7,7 @@ import {
   xUsers,
 } from "@/lib/db/schema";
 import type { VideoCollabSubject } from "@/components/admin/VideoCollabPermsManager";
+import { normalizeXId } from "@/lib/utils/xid";
 
 function isMissingDbObjectError(
   error: unknown,
@@ -63,7 +64,7 @@ export async function loadVideoCollabSubjects(
           SELECT 1
           FROM ${xUserAccountLinks} link
           INNER JOIN ${xUsers} xu ON xu.id = link.x_user_id
-          WHERE link.x_user_id = ${videoMembers.x_user_id}
+          WHERE lower(link.x_user_id) = lower(${videoMembers.x_user_id})
             AND xu.approval_status = 'approved'
         )`,
         // 通知可能はownershipとは別条件。承認済みlinkに加え、少なくとも1つの
@@ -73,7 +74,7 @@ export async function loadVideoCollabSubjects(
           FROM ${xUserAccountLinks} link
           INNER JOIN ${xUsers} xu ON xu.id = link.x_user_id
           INNER JOIN ${users} auth_user ON auth_user.id = link.auth_user_id
-          WHERE link.x_user_id = ${videoMembers.x_user_id}
+          WHERE lower(link.x_user_id) = lower(${videoMembers.x_user_id})
             AND xu.approval_status = 'approved'
             AND auth_user.is_notification_enabled = 1
         )`,
@@ -81,22 +82,39 @@ export async function loadVideoCollabSubjects(
       .from(videoMembers)
       .where(eq(videoMembers.video_id, videoId));
 
+    // legacyデータにpublic/hidden重複行が残っていても、権限UIは1 X ID = 1 subjectにする。
+    // これによりReact key衝突・人数二重計上・同じ人の重複表示を防ぐ。
+    const byXId = new Map<string, VideoCollabSubjectWithDelivery>();
+    for (const row of rows) {
+      if (row.can_edit !== 1 && row.is_public_member !== 0) continue;
+      const xid = normalizeXId(row.x_user_id);
+      // X IDなしの旧hidden行は実際のownership主体になれずUIからも操作不能なので除外する。
+      if (!xid) continue;
+
+      const existing = byXId.get(xid);
+      const next: VideoCollabSubjectWithDelivery = {
+        x_user_id: xid,
+        // 権限正本はX ID。Auth.js user IDを表示DTOへ混ぜない。
+        user_id: null,
+        display_name:
+          existing && existing.is_public_member === 1 && row.is_public_member === 0
+            ? existing.display_name
+            : row.display_name,
+        can_edit: existing?.can_edit === 1 || row.can_edit === 1 ? 1 : 0,
+        is_public_member:
+          existing?.is_public_member === 1 || row.is_public_member === 1 ? 1 : 0,
+        // legacy field name。意味はDiscord直結ではなく
+        // 「承認済みX IDがAuth userへ連携済み」。
+        has_discord_link:
+          Boolean(existing?.has_discord_link) || row.has_account_link === 1,
+        can_notify: Boolean(existing?.can_notify) || row.has_notifiable_link === 1,
+      };
+      byXId.set(xid, next);
+    }
+
     return {
       tableAvailable: true,
-      subjects: rows
-        .filter((row) => row.can_edit === 1 || row.is_public_member === 0)
-        .map((row) => ({
-          x_user_id: row.x_user_id,
-          // 権限正本はX ID。Auth.js user IDを表示DTOへ混ぜない。
-          user_id: null,
-          display_name: row.display_name,
-          can_edit: row.can_edit,
-          is_public_member: row.is_public_member,
-          // legacy field name。意味はDiscord直結ではなく
-          // 「承認済みX IDがAuth userへ連携済み」。
-          has_discord_link: row.has_account_link === 1,
-          can_notify: row.has_notifiable_link === 1,
-        })),
+      subjects: Array.from(byXId.values()),
     };
   } catch (error) {
     if (isMissingDbObjectError(error, "video_members")) {
