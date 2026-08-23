@@ -12,7 +12,7 @@ const [route, eventAction, cache, eventExportData] = await Promise.all([
   readFile(new URL("./eventExportData.ts", import.meta.url), "utf8"),
 ]);
 
-test("scheduled payload cache HIT前にもD1の公開可否を検査する", () => {
+test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を検査する", () => {
   const d1Gate = route.indexOf("await loadEventExportEvent(db, eventId)");
   const cacheHit = route.indexOf("const response = await cachedResponse()");
   assert.ok(d1Gate >= 0 && cacheHit >= 0 && d1Gate < cacheHit);
@@ -20,6 +20,10 @@ test("scheduled payload cache HIT前にもD1の公開可否を検査する", () 
   assert.doesNotMatch(route, /kv\.put\(accessKey/);
   assert.match(route, /event\.public_api_enabled === 1/);
   assert.match(route, /event\.visibility_status === "public"/);
+  assert.match(
+    route,
+    /async function readCachedPayload[\s\S]*assertNoForbiddenKeys\(parsed\)/,
+  );
   assert.doesNotMatch(route, /export const runtime = "edge"/);
 });
 
