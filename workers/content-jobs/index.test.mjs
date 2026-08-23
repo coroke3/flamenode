@@ -53,13 +53,35 @@ test("Cron lease・cleanup・rebuildは同じD1 budget wrapperを共有する", 
   const envIndex = source.indexOf("const rebuildEnv = rebuildEnvironment(env)");
   const outerLeaseIndex = source.indexOf("const leased = await withCronLease(");
   const cleanupIndex = source.indexOf("const cleanupLease = await withCronLease(");
-  const deployIndex = source.indexOf("const deployGlobalRebuilds = await ensureDeployGlobalRebuilds(");
+  const deployIndex = source.indexOf("deployGlobalRebuilds = await ensureDeployGlobalRebuilds(");
   assert.ok(envIndex >= 0 && outerLeaseIndex > envIndex);
   assert.ok(cleanupIndex > outerLeaseIndex && deployIndex > cleanupIndex);
   assert.match(source, /const leased = await withCronLease\(\s*rebuildEnv,/);
   assert.match(source, /const cleanupLease = await withCronLease\(\s*rebuildEnv,/);
   assert.match(source, /runCleanupWithRetry\(rebuildEnv, cleanupSignal\)/);
   assert.doesNotMatch(source, /runCleanupWithRetry\(env, cleanupSignal\)/);
+});
+
+test("R2欠落修復はworst-case statement数がsoft limit内に収まる時だけ実行する", () => {
+  assert.match(source, /function hasSoftD1Budget\(/);
+  assert.match(source, /budget\.statements \+ requiredStatements <= D1_QUERY_SOFT_LIMIT/);
+  assert.match(source, /DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS = 4/);
+  assert.match(source, /YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS = 14/);
+  assert.match(source, /USERS_SHARED_REPAIR_MAX_D1_STATEMENTS = 2/);
+  assert.match(source, /TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS = 2/);
+  assert.match(source, /TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS = 12/);
+  for (const name of [
+    "DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS",
+    "YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS",
+    "USERS_SHARED_REPAIR_MAX_D1_STATEMENTS",
+    "TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS",
+    "TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS",
+  ]) {
+    assert.match(
+      source,
+      new RegExp(`hasSoftD1Budget\\([\\s\\S]*?${name}`),
+    );
+  }
 });
 
 test("Queue wake成功時はCronでstatic rebuildを直接実行しない", () => {
@@ -72,6 +94,7 @@ test("Queue wake成功時はCronでstatic rebuildを直接実行しない", () =
   assert.match(source, /skipped: 1,[\s\S]*?hasMore: true/);
   assert.match(source, /: await runJob\([\s\S]*?processStaticRebuildQueue/);
   assert.match(source, /if \(!delegatedToQueue && staticRebuildHasMore\)/);
+  assert.doesNotMatch(source, /Queue consumerの長いCPU枠/);
 });
 
 test("手動rebuildもleaseとqueue処理で同じD1 budgetを共有する", () => {
