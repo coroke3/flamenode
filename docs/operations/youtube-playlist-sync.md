@@ -26,7 +26,7 @@ Queue即時経路を利用するには、さらに `QUEUE_DISPATCH_ENABLED=1` / 
 
 `cf:deploy-production` のproduction preflightはRemote D1のruntime schemaと `sync-jobs` の必須secret名をfail-closedで検査するため、同スクリプトを通して最新commitが正常デプロイ済みなら、Cloudflare側のテーブル・binding・secret名不足は原則として除外できます。ただしrefresh tokenの失効、YouTube Data APIの無効化、対象再生リストの所有権・編集権限は最初の実API同期まで確定できません。
 
-コード側の回帰確認は `src/lib/youtubePlaylistReadiness.contract.test.mjs`、`workers/sync-jobs/index.test.mjs`、`workers/youtube-playlist-sync/index.test.mjs` を使用します。
+コード側の回帰確認は `src/lib/youtubePlaylistReadiness.contract.test.mjs`、`workers/sync-jobs/index.test.mjs`、`workers/youtube-playlist-sync/index.test.mjs`、`workers/youtube-playlist-sync/slotOrder.contract.test.mjs` を使用します。
 
 ## Google Cloud / YouTube側
 
@@ -34,7 +34,7 @@ Queue即時経路を利用するには、さらに `QUEUE_DISPATCH_ENABLED=1` / 
 2. OAuth同意画面とOAuthクライアントを作成します。
 3. 再生リストを所有するYouTubeチャンネルで認可し、`https://www.googleapis.com/auth/youtube` scopeのrefresh tokenを取得します。
 4. イベントごとの再生リストはYouTube側で作成します。
-5. 公開予定時刻順の挿入を有効にするには、再生リストの並び順をYouTube側で「手動」にします。
+5. 投稿枠順のposition指定を有効にするには、再生リストの並び順をYouTube側で「手動」にします。
 
 YouTubeのサービスアカウントではなく、再生リストを所有するチャンネルのOAuth認可を使用します。
 
@@ -53,7 +53,7 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 
 ## FlameNode側
 
-1. `0042_event_youtube_playlist_sync.sql` を対象D1へ適用します。
+1. `0042_event_youtube_playlist_sync.sql` と、現行までの全migration（投稿枠順のD1 indexは `0060_youtube_playlist_slot_order_index.sql`）を対象D1へ適用します。
 2. Workerをデプロイします。
 3. `/manage/events/{eventId}/youtube-playlist` を開きます。
 4. 再生リストURLまたはID、同期方式、同期間隔を保存します。
@@ -67,13 +67,25 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 - fallbackのstructured logは `event_playlist_d1_fallback` として `r2_missing`、`r2_invalid`、`r2_incomplete`、`r2_error` を記録します。payloadにはevent ID以外の個人情報を含めません。
 - 既存public eventのprojection未生成分は、content-jobs Recovery Cronが `static:event-playlist-projection-repair:v1:cursor` / `static:event-playlist-projection-repair:v1:done` を使って1回10件ずつ `event_base:<eventId>` へenqueueします。playlist専用targetは追加しません。
 
-## 同期方式
+## 同期方式と投稿枠順
 
 - `追加のみ`: イベントの公開作品を追加します。YouTube側だけにある項目は削除しません。
 - `完全同期`: 追加に加え、イベントに存在しない再生リスト項目を定期全件確認後に削除します。
-- 新規追加時は `videos.scheduled_time`、未設定時は作成日時の順に `snippet.position` を指定します。
+- 同期対象作品は `video_events` に加えて `videos.primary_event_id` も参照します。旧データや移行データで片方だけが存在しても同期対象から落としません。
+- 新規追加の基準順は **提出済みの投稿枠順** です。時刻枠は最初の `slots.start_time`、カウント枠や同時刻のtie-breakは `slots.sort_order` を使用します。
+- 連続枠で1作品が複数枠を使用する場合は、その作品が使用する最初の提出済み枠を基準位置にします。
+- 投稿枠がない公開作品は、投稿枠付き作品の後ろに `videos.scheduled_time`、未設定時は作成日時順で並べます。
+- YouTubeの `snippet.position` は上記基準順から算出します。途中の枠作品が後から追加された場合も、そのpositionへ挿入するため後続項目はYouTube側で後ろへずれます。
 - YouTube側が手動並び替えでない場合は末尾追加へ自動フォールバックし、`playlist_order_fallback_manual_sort_required` を管理画面へ表示します。
-- 無料枠を守るため、既存項目の全件並び替えは行いません。設定変更後は新規追加分から時刻順を適用します。
+- 無料枠とYouTube API quotaを守るため、毎回既存項目を全件updateして強制再整列はしません。枠順そのものを後から変更した場合やYouTube側で手動並び替えした既存項目は、自動で全件再配置しません。
+
+## Cloudflare / D1 最適化
+
+- `0060_youtube_playlist_slot_order_index.sql` は `status='submitted' AND video_id IS NOT NULL` の枠だけを対象に、`(event_id, video_id, start_time, sort_order)` のpartial composite indexを作成します。
+- 投稿枠順JOINで全 `slots` を走査しないためのindexで、既存データの更新やテーブル再構築は行いません。
+- migration末尾の `PRAGMA optimize` で追加indexをquery plannerへ反映させます。
+- source取得はD1側でYouTube ID重複排除と順序決定を行い、Worker側で全件sortし直しません。
+- 外部APIは1 invocationあたり固定request budget、YouTube mutationは固定件数上限を持ち、Workerの長時間化とquota急増を防ぎます。
 
 ## 無料枠向け上限
 
@@ -93,7 +105,7 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 - `failed`: OAuth、権限、存在しない再生リスト、APIエラーを確認します。
 - `deferred`: 日次クォータまたは1回の処理上限です。通常は自動再開します。
 - `scanning`: 大きな再生リストをページ分割で確認中です。
-- `playlist_order_fallback_manual_sort_required`: 同期は完了していますが時刻順挿入ができていません。YouTube側の並び順を「手動」に変更します。
+- `playlist_order_fallback_manual_sort_required`: 同期は完了していますが投稿枠位置への挿入ができていません。YouTube側の並び順を「手動」に変更します。
 - Queue送信失敗: D1の `next_sync_at` が残るため、操作自体は成功扱いとし52分台Cronで回収します。
 - YouTube書き込み後にD1更新が失敗した場合は、次回実行で全件走査から復旧し、重複追加を避けます。
 - 再生リストを変更した場合は設定を保存し直すと項目索引を破棄し、全件確認から再開します。
