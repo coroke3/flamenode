@@ -41,7 +41,7 @@ test("投稿Wizardは確認画面への遷移では送信せず明示ボタン�
   assert.doesNotMatch(form, /form\.submit\(\)/);
 });
 
-test("概要欄管理Editorはプリセットとレスポンシブ2ペインを持つ", async () => {
+test("概要欄管理Editorはプリセット・出力例コピー・レスポンシブ2ペインを持つ", async () => {
   const [editor, css] = await Promise.all([
     readFromRoot("src/components/admin/YoutubeDescriptionTemplateEditor.tsx"),
     readFromRoot("src/components/admin/YoutubeDescriptionTemplateEditor.module.css"),
@@ -50,6 +50,10 @@ test("概要欄管理Editorはプリセットとレスポンシブ2ペインを�
     assert.match(editor, new RegExp(label));
   }
   assert.match(editor, /window\.confirm/);
+  assert.match(editor, /copyRenderedPreview/);
+  assert.match(editor, /writeTextToClipboard\(rendered\.text\)/);
+  assert.match(editor, /出力例をコピー/);
+  assert.match(editor, /テンプレート本文をコピー/);
   assert.match(editor, /className=\{styles\.workspace\}/);
   assert.match(editor, /className=\{styles\.previewColumn\}/);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 1\.25fr\) minmax\(300px, 0\.75fr\)/);
