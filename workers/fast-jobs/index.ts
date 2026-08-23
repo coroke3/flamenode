@@ -1,6 +1,6 @@
 /**
  * fast-jobs: 通知 Recovery Cron + Queue Consumer。
- * - scheduled: 期限切れ lease 回復、リマインダー enqueue、due pending の drain
+ * - scheduled: 期限切れ lease 回復、リマインダー enqueue、Queue wake（Queue無効/失敗時だけ直接drain）
  * - queue: wake 受信時の bounded notification dispatch
  */
 import {
@@ -16,7 +16,10 @@ import {
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
-import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
+import {
+  sendWorkerQueueWakeBestEffort,
+  type QueueWakeKind,
+} from "../shared/queueWake.ts";
 import {
   combineJobCounters,
   runJob,
@@ -50,7 +53,10 @@ function isAbortError(error: unknown): error is Error {
   return error instanceof Error && error.name === "AbortError";
 }
 
-async function maybeResendNotificationWake(env: Env): Promise<void> {
+async function maybeResendNotificationWake(
+  env: Env,
+  sentKinds?: Set<QueueWakeKind>,
+): Promise<void> {
   if (!(await hasDuePendingNotifications(env))) return;
   await sendWorkerQueueWakeBestEffort({
     queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
@@ -58,6 +64,7 @@ async function maybeResendNotificationWake(env: Env): Promise<void> {
     source: "recovery",
     envFlags: env,
     kv: env.KV,
+    sentKinds,
   });
 }
 
@@ -77,6 +84,7 @@ export async function runNotificationRecovery(
           signal: execution.signal,
         },
         async (signal) => {
+          const wakeSentKinds = new Set<QueueWakeKind>();
           signal?.throwIfAborted();
           await recoverNotificationOutboxExpiredLeases(env, {
             limit: MAX_NOTIFICATION_BATCH,
@@ -113,6 +121,7 @@ export async function runNotificationRecovery(
                             source: "sync",
                             envFlags: env,
                             kv: env.KV,
+                            sentKinds: wakeSentKinds,
                           });
                         }
                         return {
@@ -149,6 +158,29 @@ export async function runNotificationRecovery(
             return combineJobCounters(reminders, { skipped: 1 });
           }
 
+          // Free CronはCPU 10msだがQueue consumerは大幅に長いCPU枠を持つ。
+          // Queue wakeが成功した場合はDiscord配送をCronで二重実行せずconsumerへ委譲する。
+          // feature flag無効・binding欠落・send失敗なら従来通りCronで直接drainして可用性を維持する。
+          const alreadyDelegated = wakeSentKinds.has("notification_available");
+          const delegatedToQueue =
+            alreadyDelegated ||
+            (await sendWorkerQueueWakeBestEffort({
+              queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
+              kind: "notification_available",
+              source: "recovery",
+              envFlags: env,
+              kv: env.KV,
+              sentKinds: wakeSentKinds,
+            }));
+          if (delegatedToQueue) {
+            return combineJobCounters(reminders, {
+              processed: 0,
+              failed: 0,
+              skipped: 1,
+              queue_delegated: 1,
+            });
+          }
+
           let notificationAbortError: Error | undefined;
           const notifications = await runJob(
             "fast-jobs",
@@ -169,7 +201,7 @@ export async function runNotificationRecovery(
           );
           if (notificationAbortError) throw notificationAbortError;
           signal?.throwIfAborted();
-          await maybeResendNotificationWake(env);
+          await maybeResendNotificationWake(env, wakeSentKinds);
           return throwIfJobFailed(
             "fast-jobs",
             "cron",
