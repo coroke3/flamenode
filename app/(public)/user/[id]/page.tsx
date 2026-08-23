@@ -414,10 +414,15 @@ function projectVideoCardIcons(
 ): VideoCardData[] {
   return videos.map((video) => ({
     ...video,
-    icon_url: resolveProjectedIcon({
-      xUserId: video.creator_x_user_id,
-      iconMap,
-      legacyIconUrl: video.icon_url,
-    }),
+    // 作品カードは投稿・作品保存時のsnapshotを正本にする。snapshotが無い場合だけ
+    // 現在のXプロフィールアイコンへfallbackする。プロフィールヘッダーは従来通り
+    // current profile iconを優先するため、作品単位の見た目だけを修正する。
+    icon_url:
+      normalizePublicIconUrl(video.icon_url) ??
+      resolveProjectedIcon({
+        xUserId: video.creator_x_user_id,
+        iconMap,
+        legacyIconUrl: null,
+      }),
   }));
 }
