@@ -1,6 +1,9 @@
-/** ローカル Miniflare / リモート D1 接続の瞬断や SQLite ロックで付きやすいコード・メッセージ */
+/**
+ * ローカル Miniflare / リモート D1 接続の瞬断や SQLite ロックで付きやすいコード・メッセージ。
+ * Cloudflare D1 の retry guidance にある current transient markers もここへ集約する。
+ */
 const TRANSIENT_DB_MARKERS =
-  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|UND_ERR_SOCKET|socket hang up|SQLITE_BUSY|database is locked|D1_ERROR.*internal error|Failed to parse body as JSON.*internal error/i;
+  /ECONNRESET|ECONNREFUSED|ETIMEDOUT|fetch failed|UND_ERR_SOCKET|socket hang up|Network connection lost|storage caused object to be reset|reset because its code was updated|SQLITE_BUSY|database is locked|D1_ERROR.*internal error|Failed to parse body as JSON.*internal error/i;
 
 /** 読み取り専用 retry 対象の一時的 DB エラーか判定する。 */
 export function isTransientDbError(err: unknown): boolean {
@@ -27,6 +30,9 @@ export function isTransientDbError(err: unknown): boolean {
       }
       cur = o.cause;
       continue;
+    }
+    if (typeof cur === "string" && TRANSIENT_DB_MARKERS.test(cur)) {
+      return true;
     }
     break;
   }
