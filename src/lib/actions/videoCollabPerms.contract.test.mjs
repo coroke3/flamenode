@@ -108,6 +108,19 @@ test("permission mutationは集合CAS guardとJSON1 bulk DMLを使う", () => {
   assert.match(body, /mutateWithAudit\(db, \{/);
 });
 
+test("X userの同時作成は成功扱いにし、同時rejected化だけatomic assertionで拒否する", () => {
+  const builder = functionBody("buildXUsersBulkInsertSql");
+  const mutation = functionBody("applyPermissionIntentsToVideo");
+  assert.match(builder, /ON CONFLICT\(id\) DO UPDATE SET/);
+  assert.match(builder, /id = excluded\.id/);
+  assert.match(
+    builder,
+    /COALESCE\(x_users\.approval_status, 'pending'\) <> 'rejected'/,
+  );
+  assert.match(mutation, /expected\.push\(newXUsers\.length\)/);
+  assert.match(mutation, /operation: "MERGE"/);
+});
+
 test("権限batchは公開メンバーの表示名・役割・コメントを書き換えない", () => {
   const body = functionBody("buildMemberPermissionBulkUpdateSql");
   assert.doesNotMatch(body, /name\s*=/);
