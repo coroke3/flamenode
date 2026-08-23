@@ -69,12 +69,13 @@ export type AtomicAuditMutationInput = {
 
 /** 直前の DML が期待した行数を変更しなければ SQLite error にして batch を中断する。 */
 export function assertChanges(expectedChanges: number): SQL {
+  // 小さなassertionもbindのまま統一し、mutateWithAudit内でSQL textへ値を展開しない。
   return sql`
     SELECT CASE
       WHEN changes() = ${expectedChanges} THEN 1
       ELSE json_extract('not-valid-json', '$')
     END
-  `.inlineParams();
+  `;
 }
 
 function auditSelect(
@@ -101,13 +102,14 @@ function assertionSql(entries: readonly PreparedAuditLogEntry[]): SQL {
   );
   // json_extract の不正 JSON は SQLite/D1 でエラーになる。条件付き INSERT が
   // 0 行になった場合も batch 全体を rollback するための fail-closed assertion。
+  // audit idもbindにしてSQL textのサイズを値の長さへ依存させない。
   return sql`
     SELECT CASE
       WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (${ids})) = ${entries.length}
       THEN 1
       ELSE json_extract('not-valid-json', '$')
     END
-  `.inlineParams();
+  `;
 }
 
 function chunkEntries(
@@ -125,10 +127,12 @@ function auditInsertSql(
   condition: SQL,
 ): SQL {
   const selects = entries.map((entry) => auditSelect(entry, condition));
+  // before_json / after_json は監査設定上100KBを超える場合がある。
+  // inlineParams()するとD1のSQL text上限へ到達するためprepared bindのまま保持する。
   return sql`
     INSERT INTO audit_logs (${AUDIT_COLUMNS})
     ${sql.join(selects, sql` UNION ALL `)}
-  `.inlineParams();
+  `;
 }
 
 /** `db.run()` が返す SQLiteRaw。builder とは config 形状で区別する。 */
