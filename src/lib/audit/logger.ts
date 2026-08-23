@@ -161,13 +161,20 @@ function buildPreparedAuditLogEntry(
   );
   const beforeJson = sanitizedBefore ? JSON.stringify(sanitizedBefore) : null;
   const afterJson = sanitizedAfter ? JSON.stringify(sanitizedAfter) : null;
-  const changedKeys = computeChangedKeys(sanitizedBefore, sanitizedAfter);
-  const inversePatch = buildInversePatch(sanitizedBefore, sanitizedAfter);
   const payloadSize = calculatePayloadSize(beforeJson, afterJson);
   const payloadExceeded = payloadSize > settings.max_payload_bytes;
+
+  // 大きなsnapshotは最終的にbefore/afterを保存しない。以前はこの判定後も
+  // rows配列などをcomputeChangedKeys/buildInversePatchで再JSON.stringifyしており、
+  // 100人×多数chapterの保存でWorker CPUを無駄に消費していた。
+  const changedKeys = payloadExceeded
+    ? []
+    : computeChangedKeys(sanitizedBefore, sanitizedAfter);
+  const inversePatch = payloadExceeded
+    ? null
+    : buildInversePatch(sanitizedBefore, sanitizedAfter);
   const changedKeysJson = changedKeys.length > 0 ? JSON.stringify(changedKeys) : null;
-  const inversePatchJson =
-    payloadExceeded || !inversePatch ? null : JSON.stringify(inversePatch);
+  const inversePatchJson = inversePatch ? JSON.stringify(inversePatch) : null;
   const finalBeforeJson = payloadExceeded ? null : beforeJson;
   const finalAfterJson = payloadExceeded ? null : afterJson;
   const capability = evaluateRestoreCapability({
