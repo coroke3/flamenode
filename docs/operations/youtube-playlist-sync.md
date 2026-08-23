@@ -3,8 +3,10 @@
 ## 構成
 
 - Workerは既存の `flamenode-sync-jobs` を使用し、Worker数を増やしません。
-- Cronは毎時7分・52分に起動し、52分台だけを再生リスト同期の専用枠にします。
+- Cronは毎時7分・52分に起動し、52分台だけを再生リスト同期のRecovery枠にします。
 - 7分台は動画メタデータ同期・スコア差分再計算を維持します。
+- 設定保存・手動同期予約では、D1の `next_sync_at` を先に現在時刻へ更新した後、`YOUTUBE_SYNC_WAKE_QUEUE` に `youtube_playlist_sync` のドアベルをbest-effort送信します。
+- Queueが無効・binding不足・送信失敗の場合も予約状態はD1に残るため、次の52分台Cronが回収します。
 - 再生リスト同期はイベント設定の `next_sync_at` と同期間隔で実行します。
 - `event_youtube_playlist_sync.enabled = 1` かつ `sync_mode != 'off'` のイベントだけを同期します。未設定イベントを自動で同期しません。
 - OAuth credentialはD1/KVへ保存せず、Worker secretだけに保持します。
@@ -20,9 +22,11 @@
 - `YOUTUBE_API_KEY` / `YOUTUBE_OAUTH_CLIENT_ID` / `YOUTUBE_OAUTH_CLIENT_SECRET` / `YOUTUBE_OAUTH_REFRESH_TOKEN` のsecret名が登録済み
 - refresh tokenを発行したGoogleアカウントが対象再生リストを編集できる
 
+Queue即時経路を利用するには、さらに `QUEUE_DISPATCH_ENABLED=1` / `QUEUE_YOUTUBE_SYNC_ENABLED=1` が必要です。これらが無効でも52分台Cronによる同期は維持されます。
+
 `cf:deploy-production` のproduction preflightはRemote D1のruntime schemaと `sync-jobs` の必須secret名をfail-closedで検査するため、同スクリプトを通して最新commitが正常デプロイ済みなら、Cloudflare側のテーブル・binding・secret名不足は原則として除外できます。ただしrefresh tokenの失効、YouTube Data APIの無効化、対象再生リストの所有権・編集権限は最初の実API同期まで確定できません。
 
-コード側の回帰確認は `src/lib/youtubePlaylistReadiness.contract.test.mjs` と `workers/youtube-playlist-sync/index.test.mjs` を使用します。
+コード側の回帰確認は `src/lib/youtubePlaylistReadiness.contract.test.mjs`、`workers/sync-jobs/index.test.mjs`、`workers/youtube-playlist-sync/index.test.mjs` を使用します。
 
 ## Google Cloud / YouTube側
 
@@ -55,7 +59,7 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 4. 再生リストURLまたはID、同期方式、同期間隔を保存します。
 5. 管理者は全体状況を `/admin/youtube-sync/playlists`、イベント運営は担当イベントの `/manage/events/{eventId}/youtube-playlist` で確認します。一般ユーザー向けの同期状況画面は提供しません。
 
-「次回実行へ予約」は `next_sync_at` を現在時刻へ更新する処理です。HTTPリクエスト内でYouTube APIを直接呼ぶ即時同期ではなく、次の52分台のRecovery Cronで処理されます。
+「今すぐ同期を予約」はHTTPリクエスト内でYouTube APIを直接呼びません。まず `next_sync_at` を現在時刻へcommitし、その後Queue wakeを送ります。Queue consumerはdueイベントだけを最大1件処理するため、WebリクエストのCPU/外部API時間を増やしません。Queue経路が利用できなければ52分台Recovery Cronへ自動フォールバックします。
 
 ## 公開playlist projectionと既存イベントのbackfill
 
@@ -80,7 +84,7 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 - position指定が拒否された追加は、末尾追加の再試行を含め最大100 unitsとして事前判定
 - 1日のYouTube全処理クォータ: 標準8,000 units（設定quotaの80%を共有）
 - 全件確認: 24時間に1回。それ以外はD1の項目索引とイベント作品を比較
-- metadata・score・ランキング再生成と再生リスト書込みを同一invocationで実行しません。
+- metadata・score・ランキング再生成と再生リスト書込みはQueue内でも別wakeとして分離し、片方の失敗で成功済みのもう片方を再試行しません。
 
 上限に達した処理は `deferred` として次回以降へ繰り越します。
 
@@ -90,5 +94,6 @@ YouTube Data APIの全処理は `YOUTUBE_DAILY_QUOTA_LIMIT` の80%を共有上�
 - `deferred`: 日次クォータまたは1回の処理上限です。通常は自動再開します。
 - `scanning`: 大きな再生リストをページ分割で確認中です。
 - `playlist_order_fallback_manual_sort_required`: 同期は完了していますが時刻順挿入ができていません。YouTube側の並び順を「手動」に変更します。
+- Queue送信失敗: D1の `next_sync_at` が残るため、操作自体は成功扱いとし52分台Cronで回収します。
 - YouTube書き込み後にD1更新が失敗した場合は、次回実行で全件走査から復旧し、重複追加を避けます。
 - 再生リストを変更した場合は設定を保存し直すと項目索引を破棄し、全件確認から再開します。
