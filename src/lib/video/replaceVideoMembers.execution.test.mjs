@@ -6,8 +6,11 @@ import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
 if (runTestWithTsx(import.meta.url)) {
   const { drizzle } = await import("drizzle-orm/sqlite-proxy");
   const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
-  const { buildReplaceVideoMembersPlan } = await import("./replaceVideoMembers.ts");
-  const { VIDEO_CHAPTER_JSON_MAX_BYTES } = await import("./replaceVideoMembers.ts");
+  const {
+    buildReplaceVideoMembersPlan,
+    VIDEO_CHAPTER_JSON_MAX_BINDS,
+    VIDEO_CHAPTER_JSON_MAX_BYTES,
+  } = await import("./replaceVideoMembers.ts");
   const { loadMemberSubmissionBaseline } = await import("./memberSubmissionBaseline.ts");
   const { inspectVideoAtomicWritePlanBudget } = await import("./atomicWritePlan.ts");
   const { registerHooks } = await import("node:module");
@@ -72,6 +75,11 @@ if (runTestWithTsx(import.meta.url)) {
         approval_status TEXT,
         approval_requested_at INTEGER
       );
+      CREATE TABLE x_user_aliases (
+        x_user_id TEXT NOT NULL,
+        alias_x_id TEXT NOT NULL,
+        PRIMARY KEY (x_user_id, alias_x_id)
+      );
     `);
 
     const insertMember = sqlite.prepare(
@@ -92,7 +100,7 @@ if (runTestWithTsx(import.meta.url)) {
     );
     for (let index = 0; index < 100; index += 1) {
       const memberId = `vm-${index}`;
-      const xId = `x-${index}`;
+      const xId = `x_${index}`;
       insertMember.run(memberId, "video-1", xId, `Member ${index}`, null, null, index, 0, 1, null, null, null);
       insertXUser.run(xId, `X ${index}`);
       for (let chapterIndex = 0; chapterIndex < 30; chapterIndex += 1) {
@@ -132,13 +140,13 @@ if (runTestWithTsx(import.meta.url)) {
     return new SQLiteSyncDialect().sqlToQuery(statement.getSQL());
   }
 
-  test("100人×管理チャプター30件でもquery bindは100未満のJSON1文になる", async () => {
+  test("100人×管理チャプター30件でも大payloadを1 compound JSON1 statementへ畳む", async () => {
     const sqlite = createDatabase();
     const calls = [];
     const db = makeDb(sqlite, calls);
     const members = Array.from({ length: 100 }, (_, index) => ({
       name: `Member ${index}`,
-      x_user_id: `x-${index}`,
+      x_user_id: `x_${index}`,
       role: "",
       comment: "",
       chapters: [],
@@ -180,28 +188,37 @@ if (runTestWithTsx(import.meta.url)) {
       (call) => call.query.includes("video_members") && call.query.includes("json_each"),
     );
     assert.equal(carryCalls.length, 1);
-    assert.equal(carryCalls[0].params.length, 3);
+    assert.equal(carryCalls[0].params.length, 2);
     for (const query of queries) {
       assert.ok(query.params.length <= 100, `bind count ${query.params.length}`);
     }
     const chapterDeletes = queries.filter((query) => /DELETE FROM video_chapters/.test(query.sql));
     const chapterInserts = queries.filter((query) => /INSERT INTO video_chapters/.test(query.sql));
-    assert.ok(chapterDeletes.length >= 1);
-    assert.ok(chapterInserts.length > 1, "large chapter payload must be byte-chunked");
-    let deletedRows = 0;
-    for (const chapterDelete of chapterDeletes) {
-      assert.match(chapterDelete.sql, /json_each/);
-      assert.equal(chapterDelete.params.length, 2);
-      assert.ok(new TextEncoder().encode(String(chapterDelete.params[1])).byteLength <= VIDEO_CHAPTER_JSON_MAX_BYTES);
-      deletedRows += sqlite.prepare(chapterDelete.sql).run(...chapterDelete.params).changes;
+    assert.equal(chapterDeletes.length, 1);
+    assert.equal(chapterInserts.length, 1);
+
+    const chapterDelete = chapterDeletes[0];
+    assert.match(chapterDelete.sql, /json_each/);
+    assert.ok(chapterDelete.params.length >= 2);
+    for (const payload of chapterDelete.params.slice(1)) {
+      assert.ok(
+        new TextEncoder().encode(String(payload)).byteLength <= VIDEO_CHAPTER_JSON_MAX_BYTES,
+      );
     }
-    let insertedRows = 0;
-    for (const chapterInsert of chapterInserts) {
-      assert.match(chapterInsert.sql, /FROM json_each/);
-      assert.equal(chapterInsert.params.length, 1);
-      assert.ok(new TextEncoder().encode(String(chapterInsert.params[0])).byteLength <= VIDEO_CHAPTER_JSON_MAX_BYTES);
-      insertedRows += sqlite.prepare(chapterInsert.sql).run(...chapterInsert.params).changes;
+    const deletedRows = sqlite.prepare(chapterDelete.sql).run(...chapterDelete.params).changes;
+
+    const chapterInsert = chapterInserts[0];
+    assert.match(chapterInsert.sql, /UNION ALL/);
+    assert.match(chapterInsert.sql, /json_each/);
+    assert.ok(chapterInsert.params.length > 1, "fixture must span multiple JSON binds");
+    assert.ok(chapterInsert.params.length <= VIDEO_CHAPTER_JSON_MAX_BINDS);
+    for (const payload of chapterInsert.params) {
+      assert.ok(
+        new TextEncoder().encode(String(payload)).byteLength <= VIDEO_CHAPTER_JSON_MAX_BYTES,
+      );
     }
+    const insertedRows = sqlite.prepare(chapterInsert.sql).run(...chapterInsert.params).changes;
+
     assert.equal(deletedRows, 3000);
     assert.equal(insertedRows, 3000);
     assert.equal(
@@ -240,7 +257,7 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(queue.acceptedTargetCount, queueTargets.length);
     assert.ok(queue.acceptedTargetCount > 200);
     assert.ok(queue.acceptedTargetCount <= MAX_STATIC_REBUILD_BATCH_TARGETS);
-    assert.equal(queue.statements.length, 5);
+    assert.equal(queue.statements.length, 3);
     const queuePayload = queue.statements
       .map(queryOf)
       .flatMap((query) => query.params)
@@ -266,6 +283,7 @@ if (runTestWithTsx(import.meta.url)) {
     });
     assert.ok(budget.withinLimit, `query budget ${budget.totalQueryCount}/${budget.limit}`);
     assert.ok(budget.totalQueryCount <= 50);
+    assert.equal(budget.reservedCallerQueryCount, 18);
     sqlite.close();
   });
 }

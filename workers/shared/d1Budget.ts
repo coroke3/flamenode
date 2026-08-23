@@ -9,10 +9,29 @@ const ASYNC_STATEMENT_METHODS = new Set<PropertyKey>([
   "raw",
 ] satisfies AsyncStatementMethod[]);
 
-/** D1 Free の 50 statements/invocation 手前で安全停止する。operation_mode は変更しない（ランタイム安全装置）。 */
+/** D1 Free の 50 statements/invocation 手前で通常処理を安全停止する。 */
 export const D1_QUERY_SOFT_LIMIT = 40;
+/** Cloudflare D1 Free の 1 Worker invocation あたり hard limit。 */
+export const D1_QUERY_HARD_LIMIT = 50;
+
+export class D1BudgetExceededError extends Error {
+  readonly currentStatements: number;
+  readonly requestedStatements: number;
+  readonly limit: number;
+
+  constructor(currentStatements: number, requestedStatements: number) {
+    super(
+      `d1_query_budget_exceeded:${currentStatements}+${requestedStatements}/${D1_QUERY_HARD_LIMIT}`,
+    );
+    this.name = "D1BudgetExceededError";
+    this.currentStatements = currentStatements;
+    this.requestedStatements = requestedStatements;
+    this.limit = D1_QUERY_HARD_LIMIT;
+  }
+}
 
 export type D1Budget = {
+  /** 実行済み + 実行開始済みのstatement数。失敗したattemptも安全側で消費扱いにする。 */
   statements: number;
   rowsRead: number;
   rowsWritten: number;
@@ -30,8 +49,23 @@ export type EnvWithD1Budget<Env extends SerializedEnv> = Env & {
   d1Budget: D1Budget;
 };
 
-function recordD1Result(budget: D1Budget, result: unknown): void {
-  budget.statements += 1;
+/**
+ * D1 callを開始する前にstatement枠を予約する。
+ * 完了後に加算すると、39件消費済みから12件batchを開始して51件へ飛び越えられるため、
+ * batch/並行Promiseのどちらでも先に予約してCloudflareのhard limitをfail-closedで守る。
+ */
+function reserveD1Statements(budget: D1Budget, count: number): void {
+  if (!Number.isInteger(count) || count < 0) {
+    throw new Error("d1_query_budget_invalid_reservation");
+  }
+  if (count === 0) return;
+  if (budget.statements + count > D1_QUERY_HARD_LIMIT) {
+    throw new D1BudgetExceededError(budget.statements, count);
+  }
+  budget.statements += count;
+}
+
+function recordD1ResultMetrics(budget: D1Budget, result: unknown): void {
   const meta = (
     result as {
       meta?: { rows_read?: number; rows_written?: number; changes?: number };
@@ -43,8 +77,12 @@ function recordD1Result(budget: D1Budget, result: unknown): void {
 }
 
 /**
- * invocation 内の D1 statement 数と rows read/write を集計する。
- * `withSerializedD1` の外側へ重ねる。
+ * invocation 内の D1 statement 数と rows read/write を集計し、Free hard limit超過を
+ * D1へ送る前に拒否する。`withSerializedD1` の外側へ重ねる。
+ *
+ * `DB.exec()` は複数SQLを1文字列で実行でき、実行前に正確なstatement数を確定できない。
+ * Cloudflareもmaintenance/one-shot用途としているため、budgeted runtimeではfail-closedにし、
+ * prepare/batchだけを許可する。将来execが追加されても50 query上限を迂回させない。
  */
 export function withD1Budget<Env extends SerializedEnv>(
   env: Env,
@@ -63,8 +101,9 @@ export function withD1Budget<Env extends SerializedEnv>(
           const method = Reflect.get(target, property, target);
           if (typeof method !== "function") return method;
           return async (...args: unknown[]) => {
+            reserveD1Statements(budget, 1);
             const result = await Reflect.apply(method, statement, args);
-            recordD1Result(budget, result);
+            recordD1ResultMetrics(budget, result);
             return result;
           };
         }
@@ -83,6 +122,7 @@ export function withD1Budget<Env extends SerializedEnv>(
       }
       if (property === "batch") {
         return async (statements: D1PreparedStatement[]) => {
+          reserveD1Statements(budget, statements.length);
           const results = await env.DB.batch(
             statements.map(
               (statement) =>
@@ -90,9 +130,19 @@ export function withD1Budget<Env extends SerializedEnv>(
             ),
           );
           for (const result of results) {
-            recordD1Result(budget, result);
+            recordD1ResultMetrics(budget, result);
           }
           return results;
+        };
+      }
+      if (property === "exec") {
+        return async () => {
+          throw new Error("d1_exec_disallowed_in_budgeted_worker");
+        };
+      }
+      if (property === "withSession") {
+        return () => {
+          throw new Error("d1_session_disallowed_in_budgeted_worker");
         };
       }
       const value = Reflect.get(target, property, target);

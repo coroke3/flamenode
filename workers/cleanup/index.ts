@@ -17,6 +17,12 @@ export interface Env {
 
 type CleanupMetrics = { d1Changes: number };
 
+/** settings SELECT + 6 bounded UPDATE/DELETE statements. */
+export const CLEANUP_D1_STATEMENTS_PER_ATTEMPT = 7;
+/** 同一invocation内でretryを全て使い切った場合の最大D1 statement数。 */
+export const CLEANUP_D1_MAX_STATEMENTS =
+  CLEANUP_D1_STATEMENTS_PER_ATTEMPT * CLEANUP_MAX_RETRIES;
+
 function recordD1Changes(
   result: D1Result<unknown>,
   metrics?: CleanupMetrics,

@@ -1,6 +1,6 @@
 /**
  * fast-jobs: 通知 Recovery Cron + Queue Consumer。
- * - scheduled: 期限切れ lease 回復、リマインダー enqueue、due pending の drain
+ * - scheduled: 期限切れ lease 回復、リマインダー enqueue、Queue wake（Queue無効/失敗時だけ直接drain）
  * - queue: wake 受信時の bounded notification dispatch
  */
 import {
@@ -15,8 +15,16 @@ import {
 } from "../notification-dispatcher/dispatch.ts";
 import { enqueueSlotDeadlineReminders } from "../notification-dispatcher/reminders.ts";
 import { withCronLease } from "../shared/cronLease.ts";
+import {
+  D1_QUERY_HARD_LIMIT,
+  withD1Budget,
+} from "../shared/d1Budget.ts";
 import { withBoundedRetry } from "../shared/queue.ts";
-import { sendWorkerQueueWakeBestEffort } from "../shared/queueWake.ts";
+import {
+  resolveQueueFeatureFlags,
+  sendWorkerQueueWakeBestEffort,
+  type QueueWakeKind,
+} from "../shared/queueWake.ts";
 import {
   combineJobCounters,
   runJob,
@@ -45,12 +53,47 @@ const REMINDER_INTERVAL_SEC = 3600;
 const FAST_JOBS_LEASE_SEC = 4 * 60;
 const REMINDER_LEASE_SEC = 4 * 60;
 const FAST_JOBS_WALL_CLOCK_DEADLINE_MS = 3 * 60 * 1_000;
+/** orphan cleanup + pending SELECT。 */
+const NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS = 2;
+/** direct drain後、Queue有効時に残件確認するSELECT 1本。 */
+const NOTIFICATION_FALLBACK_POST_DRAIN_PROBE_D1_STATEMENTS = 1;
+/** claim + markSent最大3回 + suppress-redelivery。failure/dead-letter経路もこれ以下。 */
+const NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 5;
+/** outer lease成功/解放2本 + 3分deadline中に発生し得るheartbeat最大2本を残す。 */
+const FAST_JOBS_OUTER_LEASE_D1_RESERVE = 4;
 
 function isAbortError(error: unknown): error is Error {
   return error instanceof Error && error.name === "AbortError";
 }
 
-async function maybeResendNotificationWake(env: Env): Promise<void> {
+/**
+ * Discord送信後のmarkSentをD1 hard limitで失敗させると、lease切れ後に同じ通知を
+ * 再配送し得る。Cron fallbackでは「送信前」に後処理worst-caseまで入る行数へ縮める。
+ */
+export function notificationFallbackLimitForD1Budget(
+  currentStatements: number,
+): number {
+  const available =
+    D1_QUERY_HARD_LIMIT -
+    Math.max(0, Math.floor(currentStatements)) -
+    FAST_JOBS_OUTER_LEASE_D1_RESERVE -
+    NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS -
+    NOTIFICATION_FALLBACK_POST_DRAIN_PROBE_D1_STATEMENTS;
+  if (available < NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW) return 0;
+  return Math.min(
+    MAX_NOTIFICATION_BATCH,
+    Math.floor(available / NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW),
+  );
+}
+
+async function maybeResendNotificationWake(
+  env: Env,
+  sentKinds?: Set<QueueWakeKind>,
+): Promise<void> {
+  // Queue機能自体が無効なら残件SELECTをしても送信できない。Recovery Cronが次回
+  // また処理するため、無駄なD1 1本を使わず終了する。
+  const flags = resolveQueueFeatureFlags(env);
+  if (!flags.dispatchEnabled) return;
   if (!(await hasDuePendingNotifications(env))) return;
   await sendWorkerQueueWakeBestEffort({
     queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
@@ -58,6 +101,7 @@ async function maybeResendNotificationWake(env: Env): Promise<void> {
     source: "recovery",
     envFlags: env,
     kv: env.KV,
+    sentKinds,
   });
 }
 
@@ -65,20 +109,23 @@ export async function runNotificationRecovery(
   env: Env,
   execution: CronRunContext,
 ): Promise<void> {
+  // Cron lease・reminder・fallback dispatchを同一D1 hard-limit guardへ通す。
+  const budgetEnv = withD1Budget(env);
   await runJob(
     "fast-jobs",
     "cron",
     async () => {
       const leased = await withCronLease(
-        env,
+        budgetEnv,
         {
           jobName: "fast-jobs",
           leaseSeconds: FAST_JOBS_LEASE_SEC,
           signal: execution.signal,
         },
         async (signal) => {
+          const wakeSentKinds = new Set<QueueWakeKind>();
           signal?.throwIfAborted();
-          await recoverNotificationOutboxExpiredLeases(env, {
+          await recoverNotificationOutboxExpiredLeases(budgetEnv, {
             limit: MAX_NOTIFICATION_BATCH,
             signal,
           });
@@ -86,7 +133,7 @@ export async function runNotificationRecovery(
           let reminders: unknown;
           try {
             const reminderLease = await withCronLease(
-              env,
+              budgetEnv,
               {
                 jobName: "fast-jobs:slot-deadline-reminders",
                 leaseSeconds: REMINDER_LEASE_SEC,
@@ -102,17 +149,18 @@ export async function runNotificationRecovery(
                       async (attempt) => {
                         reminderSignal?.throwIfAborted();
                         const processed = await enqueueSlotDeadlineReminders(
-                          env,
+                          budgetEnv,
                           undefined,
                           reminderSignal,
                         );
                         if (processed > 0) {
                           await sendWorkerQueueWakeBestEffort({
-                            queue: env.NOTIFICATION_WAKE_QUEUE ?? null,
+                            queue: budgetEnv.NOTIFICATION_WAKE_QUEUE ?? null,
                             kind: "notification_available",
                             source: "sync",
-                            envFlags: env,
-                            kv: env.KV,
+                            envFlags: budgetEnv,
+                            kv: budgetEnv.KV,
+                            sentKinds: wakeSentKinds,
                           });
                         }
                         return {
@@ -128,7 +176,7 @@ export async function runNotificationRecovery(
                         delayMs: 100,
                       },
                     ),
-                  { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
+                  { rethrow: true, commitSha: budgetEnv.BUILD_COMMIT_SHA },
                 ),
             );
             reminders = reminderLease.acquired
@@ -137,7 +185,7 @@ export async function runNotificationRecovery(
                   "fast-jobs",
                   "slot-deadline-reminders",
                   async () => ({ skipped: 1 }),
-                  { commitSha: env.BUILD_COMMIT_SHA },
+                  { commitSha: budgetEnv.BUILD_COMMIT_SHA },
                 );
           } catch (error) {
             if (signal?.aborted) throw error;
@@ -145,7 +193,37 @@ export async function runNotificationRecovery(
           }
 
           signal?.throwIfAborted();
-          if (!(await hasDuePendingNotifications(env, signal))) {
+          if (!(await hasDuePendingNotifications(budgetEnv, signal))) {
+            return combineJobCounters(reminders, { skipped: 1 });
+          }
+
+          // Queue wake成功時は配送を別invocationへ分離し、CronのCPU/D1予算と共有しない。
+          // FreeではQueue consumerにもプラン側CPU上限が適用されるため、長時間CPUを前提にしない。
+          // feature flag無効・binding欠落・send失敗なら従来通りCronで直接drainして可用性を維持する。
+          const alreadyDelegated = wakeSentKinds.has("notification_available");
+          const delegatedToQueue =
+            alreadyDelegated ||
+            (await sendWorkerQueueWakeBestEffort({
+              queue: budgetEnv.NOTIFICATION_WAKE_QUEUE ?? null,
+              kind: "notification_available",
+              source: "recovery",
+              envFlags: budgetEnv,
+              kv: budgetEnv.KV,
+              sentKinds: wakeSentKinds,
+            }));
+          if (delegatedToQueue) {
+            return combineJobCounters(reminders, {
+              processed: 0,
+              failed: 0,
+              skipped: 1,
+            });
+          }
+
+          const fallbackLimit = notificationFallbackLimitForD1Budget(
+            budgetEnv.d1Budget.statements,
+          );
+          if (fallbackLimit <= 0) {
+            // pending rowはD1正本に残るため、危険な半端配送をせず次回Recoveryへ繰り越す。
             return combineJobCounters(reminders, { skipped: 1 });
           }
 
@@ -155,8 +233,8 @@ export async function runNotificationRecovery(
             "notification-dispatch",
             async () => {
               try {
-                return await processNotificationQueue(env, {
-                  limit: MAX_NOTIFICATION_BATCH,
+                return await processNotificationQueue(budgetEnv, {
+                  limit: fallbackLimit,
                   signal,
                   skipLeaseRecovery: true,
                 });
@@ -165,11 +243,11 @@ export async function runNotificationRecovery(
                 throw error;
               }
             },
-            { commitSha: env.BUILD_COMMIT_SHA },
+            { commitSha: budgetEnv.BUILD_COMMIT_SHA },
           );
           if (notificationAbortError) throw notificationAbortError;
           signal?.throwIfAborted();
-          await maybeResendNotificationWake(env);
+          await maybeResendNotificationWake(budgetEnv, wakeSentKinds);
           return throwIfJobFailed(
             "fast-jobs",
             "cron",
@@ -179,7 +257,7 @@ export async function runNotificationRecovery(
       );
       return leased.acquired ? (leased.value ?? { skipped: 1 }) : { skipped: 1 };
     },
-    { rethrow: true, commitSha: env.BUILD_COMMIT_SHA },
+    { rethrow: true, commitSha: budgetEnv.BUILD_COMMIT_SHA },
   );
 }
 
@@ -199,6 +277,6 @@ export default {
     batch: MessageBatch<unknown>,
     env: Env,
   ): Promise<void> {
-    await handleNotificationWakeQueue(batch, env);
+    await handleNotificationWakeQueue(batch, withD1Budget(env));
   },
 };

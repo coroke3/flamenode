@@ -14,6 +14,8 @@ export const EVENTS_INDEX_STALE_MAX_AGE_SEC =
 /** processing の in-flight 判定は lease_expires_at > now（queue.ts PROCESSING_LEASE_SEC = 5分 と整合）。 */
 const SCORE_REBUILD_TARGETS = ["top_recommended", "list_popular", "recommend_core"] as const;
 type ScoreRebuildTarget = (typeof SCORE_REBUILD_TARGETS)[number];
+/** R2失敗時events D1 fallback 1 + users_index in-flight 1 + JSON1 enqueue 1。 */
+export const SCORE_RANKING_REBUILD_MAX_D1_STATEMENTS = 3;
 
 export type ScoreRebuildEnqueueEnv = {
   DB: D1Database;
@@ -290,20 +292,27 @@ export async function enqueueScoreDependentRebuilds(
     };
   }
 
-  const statements = targets.map((targetType) =>
-    env.DB.prepare(
-      `INSERT OR IGNORE INTO static_rebuild_queue (
-         id, target_type, target_id, reason, priority, status,
-         attempt_count, created_at, updated_at
-       ) VALUES (?, ?, 'global', 'score_recalc', 'high', 'pending', 0, ?, ?)`,
-    ).bind(`srb:${targetType}:${crypto.randomUUID()}`, targetType, now, now),
-  );
-  const results = await env.DB.batch(statements);
+  // 固定3 targetを1 INSERT/SELECTへまとめる。旧実装は3 prepared statementsを
+  // batchしていたため、YouTube同期後のD1 invocation budgetを余計に消費していた。
+  const targetRows = targets.map((targetType) => ({
+    id: `srb:${targetType}:${crypto.randomUUID()}`,
+    target_type: targetType,
+  }));
+  const targetJson = JSON.stringify(targetRows);
+  const insert = env.DB.prepare(
+    `INSERT OR IGNORE INTO static_rebuild_queue (
+       id, target_type, target_id, reason, priority, status,
+       attempt_count, created_at, updated_at
+     )
+     SELECT
+       CAST(json_extract(value, '$.id') AS TEXT),
+       CAST(json_extract(value, '$.target_type') AS TEXT),
+       'global', 'score_recalc', 'high', 'pending', 0, ?, ?
+     FROM json_each(?)`,
+  ).bind(now, now, targetJson);
+  const result = await insert.run();
   signal?.throwIfAborted();
-  const processed = results.reduce(
-    (sum, result) => sum + Math.max(0, Number(result.meta?.changes ?? 0)),
-    0,
-  );
+  const processed = Math.max(0, Number(result.meta?.changes ?? 0));
 
   if (processed > 0 && !usersIndexInFlight) {
     await writeLastScoreRebuildMarker(env.KV, now);

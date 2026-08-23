@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { auditLogs, users, xUsers, xUserAccountLinks } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
@@ -90,33 +90,54 @@ const EMPTY_ACTOR_JSON = JSON.stringify({
   icon_url: null,
 });
 
-async function validateActorXUserId(
+function actorXPairKey(actorUserId: string, actorXUserId: string): string {
+  return `${actorUserId}\u0000${actorXUserId.trim().toLowerCase()}`;
+}
+
+/**
+ * 全auditのactor/X ID連携をJSON1 1 queryで検証する。
+ * entryごとのSELECTを避け、mutateWithAuditのD1 query budgetと実消費を一致させる。
+ */
+async function loadApprovedActorXPairs(
   db: DB,
-  actorUserId: string,
-  actorXUserId: string | null | undefined,
-  strict: boolean,
-): Promise<string | null> {
-  const normalized = actorXUserId?.trim() || null;
-  if (!normalized) return null;
-  const row = (
-    await db
-      .select({ x_user_id: xUserAccountLinks.x_user_id })
-      .from(xUserAccountLinks)
-      .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
-      .where(
-        and(
-          eq(xUserAccountLinks.auth_user_id, actorUserId),
-          eq(xUserAccountLinks.x_user_id, normalized),
-          eq(xUsers.approval_status, "approved"),
-        )!,
+  inputs: readonly WriteAuditLogInput[],
+): Promise<Set<string>> {
+  const pairs = Array.from(
+    new Map(
+      inputs
+        .map((input) => ({
+          actor_user_id: input.actor_user_id,
+          x_user_id: input.actor_x_user_id?.trim().toLowerCase() || "",
+        }))
+        .filter((pair) => pair.x_user_id)
+        .map((pair) => [actorXPairKey(pair.actor_user_id, pair.x_user_id), pair] as const),
+    ).values(),
+  );
+  if (pairs.length === 0) return new Set();
+
+  const payload = JSON.stringify(pairs);
+  const rows = await db
+    .select({
+      auth_user_id: xUserAccountLinks.auth_user_id,
+      x_user_id: xUserAccountLinks.x_user_id,
+    })
+    .from(xUserAccountLinks)
+    .innerJoin(xUsers, eq(xUsers.id, xUserAccountLinks.x_user_id))
+    .where(sql`
+      ${xUsers.approval_status} = 'approved'
+      AND EXISTS (
+        SELECT 1
+        FROM json_each(${payload}) AS requested_pairs
+        WHERE CAST(json_extract(requested_pairs.value, '$.actor_user_id') AS TEXT)
+                = ${xUserAccountLinks.auth_user_id}
+          AND lower(CAST(json_extract(requested_pairs.value, '$.x_user_id') AS TEXT))
+                = lower(${xUserAccountLinks.x_user_id})
       )
-      .limit(1)
-  )[0];
-  const linked = Boolean(row);
-  if (!linked && strict) {
-    throw new Error("actor_x_user_id is not linked to actor_user_id");
-  }
-  return linked ? normalized : null;
+    `);
+
+  return new Set(
+    rows.map((row) => actorXPairKey(row.auth_user_id, row.x_user_id)),
+  );
 }
 
 function buildPreparedAuditLogEntry(
@@ -140,13 +161,20 @@ function buildPreparedAuditLogEntry(
   );
   const beforeJson = sanitizedBefore ? JSON.stringify(sanitizedBefore) : null;
   const afterJson = sanitizedAfter ? JSON.stringify(sanitizedAfter) : null;
-  const changedKeys = computeChangedKeys(sanitizedBefore, sanitizedAfter);
-  const inversePatch = buildInversePatch(sanitizedBefore, sanitizedAfter);
   const payloadSize = calculatePayloadSize(beforeJson, afterJson);
   const payloadExceeded = payloadSize > settings.max_payload_bytes;
+
+  // 大きなsnapshotは最終的にbefore/afterを保存しない。以前はこの判定後も
+  // rows配列などをcomputeChangedKeys/buildInversePatchで再JSON.stringifyしており、
+  // 100人×多数chapterの保存でWorker CPUを無駄に消費していた。
+  const changedKeys = payloadExceeded
+    ? []
+    : computeChangedKeys(sanitizedBefore, sanitizedAfter);
+  const inversePatch = payloadExceeded
+    ? null
+    : buildInversePatch(sanitizedBefore, sanitizedAfter);
   const changedKeysJson = changedKeys.length > 0 ? JSON.stringify(changedKeys) : null;
-  const inversePatchJson =
-    payloadExceeded || !inversePatch ? null : JSON.stringify(inversePatch);
+  const inversePatchJson = inversePatch ? JSON.stringify(inversePatch) : null;
   const finalBeforeJson = payloadExceeded ? null : beforeJson;
   const finalAfterJson = payloadExceeded ? null : afterJson;
   const capability = evaluateRestoreCapability({
@@ -187,7 +215,7 @@ function buildPreparedAuditLogEntry(
   };
 }
 
-/** Prepare audit entries with one settings query and one actor query per unique actor. */
+/** Prepare audit entries with bounded queries independent of entry count. */
 export async function prepareAuditLogEntries(
   db: DB,
   inputs: readonly WriteAuditLogInput[],
@@ -203,7 +231,6 @@ export async function prepareAuditLogEntries(
   }
 
   const actorJsonById = new Map<string, string>();
-  const actorXUserIdByInput = new Map<WriteAuditLogInput, string | null>();
   const actorUserIds = [
     ...new Set(activeInputs.map((input) => input.actor_user_id)),
   ];
@@ -229,21 +256,33 @@ export async function prepareAuditLogEntries(
     );
   }
 
-  for (const input of activeInputs) {
-    try {
-      actorXUserIdByInput.set(
-        input,
-        await validateActorXUserId(
-          db,
-          input.actor_user_id,
-          input.actor_x_user_id,
-          Boolean(input.strict),
-        ),
-      );
-    } catch (error) {
-      if (input.strict) throw error;
-      actorXUserIdByInput.set(input, null);
+  let approvedActorXPairs = new Set<string>();
+  try {
+    approvedActorXPairs = await loadApprovedActorXPairs(db, activeInputs);
+  } catch (error) {
+    if (
+      activeInputs.some(
+        (input) => Boolean(input.strict && input.actor_x_user_id?.trim()),
+      )
+    ) {
+      throw error;
     }
+  }
+
+  const actorXUserIdByInput = new Map<WriteAuditLogInput, string | null>();
+  for (const input of activeInputs) {
+    const normalized = input.actor_x_user_id?.trim().toLowerCase() || null;
+    if (!normalized) {
+      actorXUserIdByInput.set(input, null);
+      continue;
+    }
+    const linked = approvedActorXPairs.has(
+      actorXPairKey(input.actor_user_id, normalized),
+    );
+    if (!linked && input.strict) {
+      throw new Error("actor_x_user_id is not linked to actor_user_id");
+    }
+    actorXUserIdByInput.set(input, linked ? normalized : null);
   }
 
   return inputs.map((input) =>

@@ -69,12 +69,13 @@ export type AtomicAuditMutationInput = {
 
 /** 直前の DML が期待した行数を変更しなければ SQLite error にして batch を中断する。 */
 export function assertChanges(expectedChanges: number): SQL {
+  // 小さなassertionもbindのまま統一し、mutateWithAudit内でSQL textへ値を展開しない。
   return sql`
     SELECT CASE
       WHEN changes() = ${expectedChanges} THEN 1
       ELSE json_extract('not-valid-json', '$')
     END
-  `.inlineParams();
+  `;
 }
 
 function auditSelect(
@@ -101,13 +102,14 @@ function assertionSql(entries: readonly PreparedAuditLogEntry[]): SQL {
   );
   // json_extract の不正 JSON は SQLite/D1 でエラーになる。条件付き INSERT が
   // 0 行になった場合も batch 全体を rollback するための fail-closed assertion。
+  // audit idもbindにしてSQL textのサイズを値の長さへ依存させない。
   return sql`
     SELECT CASE
       WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (${ids})) = ${entries.length}
       THEN 1
       ELSE json_extract('not-valid-json', '$')
     END
-  `.inlineParams();
+  `;
 }
 
 function chunkEntries(
@@ -125,10 +127,12 @@ function auditInsertSql(
   condition: SQL,
 ): SQL {
   const selects = entries.map((entry) => auditSelect(entry, condition));
+  // before_json / after_json は監査設定上100KBを超える場合がある。
+  // inlineParams()するとD1のSQL text上限へ到達するためprepared bindのまま保持する。
   return sql`
     INSERT INTO audit_logs (${AUDIT_COLUMNS})
     ${sql.join(selects, sql` UNION ALL `)}
-  `.inlineParams();
+  `;
 }
 
 /** `db.run()` が返す SQLiteRaw。builder とは config 形状で区別する。 */
@@ -136,10 +140,6 @@ function isDbRunBatchItem(statement: unknown): boolean {
   const config = (statement as { config?: { action?: string; table?: unknown } })
     ?.config;
   return typeof config?.action === "string" && config.table === undefined;
-}
-
-function inlineBatchSql(query: SQL): SQL {
-  return query.inlineParams();
 }
 
 function hasPrepare(value: unknown): value is BatchItem<"sqlite"> {
@@ -160,29 +160,19 @@ function hasGetSQL(value: unknown): value is SQLWrapper {
 
 function asBatchRunnable(db: DB, statement: BatchItem<"sqlite">): BatchItem<"sqlite"> {
   const candidate: unknown = statement;
-  if (isDbRunBatchItem(candidate)) {
-    if (
-      typeof candidate === "object" &&
-      candidate !== null &&
-      typeof (candidate as { getQuery?: unknown }).getQuery === "function" &&
-      hasGetSQL(candidate)
-    ) {
-      const raw = candidate as {
-        getSQL: () => SQL;
-        getQuery: () => { params: unknown[] };
-      };
-      if (raw.getQuery().params.length === 0) {
-        return statement;
-      }
-      return db.run(inlineBatchSql(raw.getSQL()));
-    }
-    return statement;
+
+  // Drizzle D1 の db.batch() は RunnableQuery._prepare() からSQLとparamsを取得し、
+  // D1PreparedStatement.bind(...params) して実行する。ここでinlineParams()すると、
+  // JSON1の大きなpayloadまでSQL本文へ展開されD1のSQLサイズ上限へ到達し得るため、
+  // db.run() が返したRunnableQueryはbindを保持したまま渡す。
+  if (isDbRunBatchItem(candidate) && hasPrepare(candidate)) {
+    return candidate;
   }
   if (hasPrepare(candidate)) {
     return candidate;
   }
   if (hasGetSQL(candidate)) {
-    return db.run(inlineBatchSql(candidate.getSQL()));
+    return db.run(candidate.getSQL());
   }
   throw new AuditMutationError(
     "D1 batch に渡せない mutation statement です。await 済みの結果を渡していないか確認してください。",
@@ -231,6 +221,11 @@ export async function mutateWithAudit(
   const mutationAssertionCount = perStatementExpectedChanges
     ? perStatementExpectedChanges.filter((expected) => expected !== null).length
     : 1;
+  const actorXValidationQueryCount = input.audits.some((audit) =>
+    Boolean(audit.actor_x_user_id?.trim()),
+  )
+    ? 1
+    : 0;
   const budget = planD1AuditMutationBudget({
     mutationStatementCount: input.mutationStatements.length,
     mutationAssertionCount,
@@ -239,6 +234,7 @@ export async function mutateWithAudit(
     distinctActorCount: new Set(
       input.audits.map((audit) => audit.actor_user_id),
     ).size,
+    actorXValidationQueryCount,
   });
   if (!budget.withinLimit) {
     throw new AuditMutationError(

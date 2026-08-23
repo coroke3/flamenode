@@ -21,7 +21,7 @@ export function VideoEditPermissionSummary({
 
   if (!tableAvailable) {
     return (
-      <section className="fn-card fn-card-compact" style={{ marginTop: 20 }}>
+      <section id="video-collab-perms" className="fn-card fn-card-compact" style={{ marginTop: 20 }}>
         <div className="fn-card-body" style={{ padding: "14px 16px" }}>
           <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>参加者の編集権限</h2>
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6 }}>
@@ -36,13 +36,13 @@ export function VideoEditPermissionSummary({
 
   if (!canManage) {
     return (
-      <section className="fn-card fn-card-compact" style={{ marginTop: 20 }}>
+      <section id="video-collab-perms" className="fn-card fn-card-compact" style={{ marginTop: 20 }}>
         <div className="fn-card-body" style={{ padding: "14px 16px" }}>
           <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>参加者の編集権限</h2>
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--text-muted)" }}>
-            編集できる人 {summary.editorCount}人
+            編集権限設定 {summary.editorCount}人
             {summary.unlinkedEditorCount > 0
-              ? ` / 未連携 ${summary.unlinkedEditorCount}人`
+              ? ` / X ID連携待ち ${summary.unlinkedEditorCount}人`
               : ""}
           </p>
         </div>
@@ -54,6 +54,7 @@ export function VideoEditPermissionSummary({
 
   return (
     <section
+      id="video-collab-perms"
       className="fn-card fn-card-compact"
       style={{
         marginTop: 20,
@@ -75,9 +76,9 @@ export function VideoEditPermissionSummary({
             }}
           >
             <span>
-              編集できる人 {summary.editorCount}人
+              編集権限設定 {summary.editorCount}人
               {summary.unlinkedEditorCount > 0
-                ? ` · 未連携 ${summary.unlinkedEditorCount}人`
+                ? ` · X ID連携待ち ${summary.unlinkedEditorCount}人`
                 : ""}
               {summary.notifiableEditorCount > 0 &&
               summary.notifiableEditorCount !== summary.editorCount
@@ -93,7 +94,7 @@ export function VideoEditPermissionSummary({
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5 }}>{summary.displayNames}</p>
         ) : summary.editorCount === 0 ? (
           <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>
-            まだ編集できる人はいません。
+            まだ編集権限を付与された人はいません。
           </p>
         ) : null}
 

@@ -1,8 +1,8 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { videoChapters, videoMembers, xUsers } from "@/lib/db/schema";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { videoChapters, videoMembers, xUserAliases, xUsers } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { generateId } from "@/lib/utils/id";
-import { normalizeXId } from "#utils/xid";
+import { isCanonicalXId, normalizeXId } from "#utils/xid";
 import type { MemberInput, ParsedMemberChapter } from "@/lib/video/memberInputs";
 import {
   emptyVideoAtomicWritePlan,
@@ -13,21 +13,20 @@ import {
   buildVideoMemberBulkInsertSql,
   buildVideoMemberSetGuardSql,
   buildVideoMemberSetSnapshot,
+  compareSqliteBinaryText,
+  toVideoMemberSnapshotRow,
 } from "@/lib/video/memberSetSnapshot";
 
-/** Keep each JSON1 bind comfortably below D1/R2 string limits. */
+/** Keep each individual JSON1 bind well below D1's 2 MB string/bind ceiling. */
 export const VIDEO_CHAPTER_JSON_MAX_BYTES = 1_000_000;
+/** One compound statement must also stay below D1's 100-bound-parameter limit. */
+export const VIDEO_CHAPTER_JSON_MAX_BINDS = 90;
 const JSON_ENCODER = new TextEncoder();
 
 export function jsonUtf8ByteLength(value: unknown): number {
   return JSON_ENCODER.encode(JSON.stringify(value)).byteLength;
 }
 
-/**
- * Split JSON1 rows by serialized UTF-8 bytes, not only by row count. This
- * keeps a 100 x 30 chapter replacement bounded even when notes are long or
- * multibyte. A single row larger than the cap is rejected before mutation.
- */
 export function chunkRowsByJsonByteSize<T>(
   rows: readonly T[],
   maxBytes = VIDEO_CHAPTER_JSON_MAX_BYTES,
@@ -37,7 +36,7 @@ export function chunkRowsByJsonByteSize<T>(
   }
   const chunks: T[][] = [];
   let current: T[] = [];
-  let currentBytes = 2; // []
+  let currentBytes = 2;
   for (const row of rows) {
     const rowBytes = jsonUtf8ByteLength(row);
     const nextBytes = currentBytes + (current.length > 0 ? 1 : 0) + rowBytes;
@@ -62,35 +61,60 @@ type ChapterBulkStatement = {
   payloadBytes: number;
 };
 
+function buildChunkValueUnion(chunks: readonly unknown[][]) {
+  if (chunks.length === 0) throw new Error("video_chapter_json_chunk_empty");
+  if (chunks.length > VIDEO_CHAPTER_JSON_MAX_BINDS) {
+    throw new Error("video_chapter_json_bind_limit_exceeded");
+  }
+  const payloads = chunks.map((chunk) => JSON.stringify(chunk));
+  return {
+    source: sql.join(
+      payloads.map(
+        (payload) => sql`SELECT value FROM json_each(${payload})`,
+      ),
+      sql` UNION ALL `,
+    ),
+    maxPayloadBytes: Math.max(
+      ...chunks.map((chunk) => jsonUtf8ByteLength(chunk)),
+    ),
+  };
+}
+
 function buildVideoChapterBulkDeleteSql(
   videoId: string,
   rows: readonly (typeof videoChapters.$inferSelect)[],
 ): ChapterBulkStatement[] {
   if (rows.length === 0) throw new Error("video_chapter_bulk_delete_empty");
-  return chunkRowsByJsonByteSize(rows.map((row) => row.id)).map((chunk) => {
-    const payload = JSON.stringify(chunk);
-    return {
+  const chunks = chunkRowsByJsonByteSize(rows.map((row) => row.id));
+  const { source, maxPayloadBytes } = buildChunkValueUnion(chunks);
+  return [
+    {
       statement: sql`
         DELETE FROM video_chapters
         WHERE video_id = ${videoId}
           AND id IN (
-            SELECT CAST(value AS TEXT)
-            FROM json_each(${payload})
+            SELECT CAST(chapter_ids.value AS TEXT)
+            FROM (${source}) AS chapter_ids
           )
       `,
-      rowCount: chunk.length,
-      payloadBytes: jsonUtf8ByteLength(chunk),
-    };
-  });
+      rowCount: rows.length,
+      payloadBytes: maxPayloadBytes,
+    },
+  ];
 }
 
 function buildVideoChapterBulkInsertSql(
   rows: readonly (typeof videoChapters.$inferSelect)[],
 ): ChapterBulkStatement[] {
   if (rows.length === 0) throw new Error("video_chapter_bulk_insert_empty");
-  return chunkRowsByJsonByteSize(rows).map((chunk) => {
-    const payload = JSON.stringify(chunk);
-    return {
+  // Large 100-member payloads are split into <=1MB bound strings, but those
+  // binds are consumed by one compound INSERT. This avoids turning every byte
+  // chunk into a separate D1 statement + changes() assertion while keeping
+  // each individual bind comfortably below the 2MB platform limit.
+  const chunks = chunkRowsByJsonByteSize(rows);
+  const { source, maxPayloadBytes } = buildChunkValueUnion(chunks);
+  return [
+    {
       statement: sql`
         INSERT INTO video_chapters (
           id,
@@ -104,21 +128,238 @@ function buildVideoChapterBulkInsertSql(
           updated_at
         )
         SELECT
-          json_extract(value, '$.id'),
-          json_extract(value, '$.video_id'),
-          json_extract(value, '$.x_user_id'),
-          json_extract(value, '$.chapter_time'),
-          json_extract(value, '$.chapter_label'),
-          json_extract(value, '$.note'),
-          json_extract(value, '$.visibility'),
-          json_extract(value, '$.created_at'),
-          json_extract(value, '$.updated_at')
-        FROM json_each(${payload})
+          json_extract(chapter_rows.value, '$.id'),
+          json_extract(chapter_rows.value, '$.video_id'),
+          json_extract(chapter_rows.value, '$.x_user_id'),
+          json_extract(chapter_rows.value, '$.chapter_time'),
+          json_extract(chapter_rows.value, '$.chapter_label'),
+          json_extract(chapter_rows.value, '$.note'),
+          json_extract(chapter_rows.value, '$.visibility'),
+          json_extract(chapter_rows.value, '$.created_at'),
+          json_extract(chapter_rows.value, '$.updated_at')
+        FROM (${source}) AS chapter_rows
       `,
-      rowCount: chunk.length,
-      payloadBytes: jsonUtf8ByteLength(chunk),
-    };
+      rowCount: rows.length,
+      payloadBytes: maxPayloadBytes,
+    },
+  ];
+}
+
+type ManagedChapterRow = typeof videoChapters.$inferSelect;
+
+function canonicalChapterRows(
+  rows: readonly ManagedChapterRow[],
+): ManagedChapterRow[] {
+  return [...rows].sort((left, right) =>
+    compareSqliteBinaryText(left.id, right.id),
+  );
+}
+
+/**
+ * created_at / updated_at はchapter内容の同値判定に含めない。
+ * DB readはchapter_time,id順、新規配列はmember順なので入力順を比較すると偽変更になる。
+ */
+function managedChapterRowsEqual(
+  leftRows: readonly ManagedChapterRow[],
+  rightRows: readonly ManagedChapterRow[],
+): boolean {
+  if (leftRows.length !== rightRows.length) return false;
+  const left = canonicalChapterRows(leftRows);
+  const right = canonicalChapterRows(rightRows);
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]!;
+    const b = right[index]!;
+    if (
+      a.id !== b.id ||
+      a.video_id !== b.video_id ||
+      a.x_user_id !== b.x_user_id ||
+      a.chapter_time !== b.chapter_time ||
+      a.chapter_label !== b.chapter_label ||
+      a.note !== b.note ||
+      a.visibility !== b.visibility
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function buildChapterAuditSummary(
+  videoId: string,
+  rows: readonly ManagedChapterRow[],
+): Record<string, unknown> {
+  const memberIds = new Set<string>();
+  let minTime: number | null = null;
+  let maxTime: number | null = null;
+  let noteCount = 0;
+  for (const row of rows) {
+    if (row.x_user_id) memberIds.add(row.x_user_id);
+    minTime = minTime === null ? row.chapter_time : Math.min(minTime, row.chapter_time);
+    maxTime = maxTime === null ? row.chapter_time : Math.max(maxTime, row.chapter_time);
+    if (row.note) noteCount += 1;
+  }
+  return {
+    id: videoId,
+    row_count: rows.length,
+    member_count: memberIds.size,
+    min_time: minTime,
+    max_time: maxTime,
+    note_count: noteCount,
+  };
+}
+
+type CanonicalizedMemberInputs = {
+  members: MemberInput[];
+  canonicalByXId: Map<string, string>;
+  lookupXIds: string[];
+};
+
+/**
+ * 入力X IDと、その正本X IDに紐づく既存aliasを1 queryで読み、
+ * public/hidden既存行も同一identityとして扱えるlookupを作る。
+ */
+async function canonicalizeMemberInputs(
+  db: DB,
+  members: readonly MemberInput[],
+): Promise<CanonicalizedMemberInputs> {
+  const normalized = members.map((member) => ({
+    ...member,
+    x_user_id: normalizeXId(member.x_user_id),
+  }));
+  const candidates = Array.from(
+    new Set(normalized.map((member) => member.x_user_id).filter(Boolean)),
+  );
+  const aliases = candidates.length === 0
+    ? []
+    : await db
+        .select({
+          alias_x_id: xUserAliases.alias_x_id,
+          x_user_id: xUserAliases.x_user_id,
+        })
+        .from(xUserAliases)
+        .where(sql`
+          lower(${xUserAliases.alias_x_id}) IN (
+            SELECT lower(CAST(value AS TEXT))
+            FROM json_each(${JSON.stringify(candidates)})
+          )
+          OR lower(${xUserAliases.x_user_id}) IN (
+            SELECT lower(CAST(value AS TEXT))
+            FROM json_each(${JSON.stringify(candidates)})
+          )
+        `);
+
+  const targetsByAlias = new Map<string, Set<string>>();
+  const canonicalByXId = new Map<string, string>();
+  for (const candidate of candidates) canonicalByXId.set(candidate, candidate);
+
+  for (const row of aliases) {
+    const alias = normalizeXId(row.alias_x_id);
+    const target = normalizeXId(row.x_user_id);
+    if (!alias || !target || !isCanonicalXId(target)) {
+      throw new Error("video_member_alias_target_invalid");
+    }
+    const targets = targetsByAlias.get(alias) ?? new Set<string>();
+    targets.add(target);
+    targetsByAlias.set(alias, targets);
+    canonicalByXId.set(target, target);
+  }
+  for (const [alias, targets] of targetsByAlias) {
+    if (targets.size > 1) throw new Error("video_member_ambiguous_x_user_alias");
+    canonicalByXId.set(alias, Array.from(targets)[0]!);
+  }
+
+  const canonical = normalized.map((member) => {
+    if (!member.x_user_id) return member;
+    const target = canonicalByXId.get(member.x_user_id) ?? member.x_user_id;
+    return target === member.x_user_id
+      ? member
+      : { ...member, x_user_id: target };
   });
+
+  const seen = new Set<string>();
+  const canonicalIds = new Set<string>();
+  for (const member of canonical) {
+    const xid = member.x_user_id;
+    if (!xid) continue;
+    if (!isCanonicalXId(xid)) throw new Error("video_member_x_user_id_invalid");
+    if (seen.has(xid)) throw new Error("video_member_duplicate_x_user_id");
+    seen.add(xid);
+    canonicalIds.add(xid);
+  }
+
+  const lookupXIds = new Set<string>(canonicalIds);
+  for (const row of aliases) {
+    const alias = normalizeXId(row.alias_x_id);
+    const target = normalizeXId(row.x_user_id);
+    if (canonicalIds.has(target)) {
+      lookupXIds.add(alias);
+      lookupXIds.add(target);
+    }
+  }
+
+  return {
+    members: canonical,
+    canonicalByXId,
+    lookupXIds: Array.from(lookupXIds),
+  };
+}
+
+function buildHiddenCarryRowsGuardSql(
+  videoId: string,
+  rows: readonly (typeof videoMembers.$inferSelect)[],
+) {
+  const expectedRows = [...rows]
+    .map(toVideoMemberSnapshotRow)
+    .sort((left, right) => compareSqliteBinaryText(left.id, right.id));
+  const idsPayload = JSON.stringify(expectedRows.map((row) => row.id));
+  const expectedJson = JSON.stringify(expectedRows);
+  return sql`
+    SELECT CASE
+      WHEN (
+        SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
+        FROM (
+          SELECT json_object(
+            'id', id,
+            'video_id', video_id,
+            'x_user_id', x_user_id,
+            'name', name,
+            'role', role,
+            'comment', comment,
+            'order_index', order_index,
+            'can_edit', can_edit,
+            'is_public_member', is_public_member,
+            'edit_granted_by_auth_user_id', edit_granted_by_auth_user_id,
+            'edit_granted_at', edit_granted_at,
+            'edit_updated_at', edit_updated_at
+          ) AS row_json
+          FROM video_members
+          WHERE video_id = ${videoId}
+            AND is_public_member = 0
+            AND id IN (
+              SELECT CAST(value AS TEXT) FROM json_each(${idsPayload})
+            )
+          ORDER BY id ASC
+        )
+      ) = json(${expectedJson})
+      THEN 1
+      ELSE json_extract('video-hidden-member-conflict', '$')
+    END
+  `;
+}
+
+function buildHiddenCarryRowsDeleteSql(
+  videoId: string,
+  rows: readonly (typeof videoMembers.$inferSelect)[],
+) {
+  const idsPayload = JSON.stringify(rows.map((row) => row.id));
+  return sql`
+    DELETE FROM video_members
+    WHERE video_id = ${videoId}
+      AND is_public_member = 0
+      AND id IN (
+        SELECT CAST(value AS TEXT) FROM json_each(${idsPayload})
+      )
+  `;
 }
 
 export async function buildReplaceVideoMembersPlan(
@@ -133,6 +374,14 @@ export async function buildReplaceVideoMembersPlan(
   if (args.members.length > MAX_VIDEO_MEMBERS) {
     throw new Error("video_member_limit_exceeded");
   }
+  const canonicalized = await canonicalizeMemberInputs(db, args.members);
+  const members = canonicalized.members;
+  const canonicalIdentity = (raw: string | null | undefined): string => {
+    const normalized = normalizeXId(raw);
+    return normalized
+      ? (canonicalized.canonicalByXId.get(normalized) ?? normalized)
+      : "";
+  };
 
   const existing = await db
     .select()
@@ -160,10 +409,14 @@ export async function buildReplaceVideoMembersPlan(
             sql`EXISTS (
               SELECT 1
               FROM json_each(${JSON.stringify(existingMemberIds)}) AS member_ids
-              WHERE ${videoChapters.id} LIKE
-                CAST(member_ids.value AS TEXT) || ':legacy:%'
-                OR ${videoChapters.id} LIKE
-                CAST(member_ids.value AS TEXT) || ':member:%'
+              WHERE instr(
+                      ${videoChapters.id},
+                      CAST(member_ids.value AS TEXT) || ':legacy:'
+                    ) = 1
+                 OR instr(
+                      ${videoChapters.id},
+                      CAST(member_ids.value AS TEXT) || ':member:'
+                    ) = 1
             )`,
           )!,
         )
@@ -172,23 +425,27 @@ export async function buildReplaceVideoMembersPlan(
 
   const xIds = Array.from(
     new Set(
-      args.members
+      members
         .map((member) => normalizeXId(member.x_user_id))
         .filter(Boolean),
     ),
   );
+  const xIdSet = new Set(xIds);
+  const identityLookupXIds = canonicalized.lookupXIds.length > 0
+    ? canonicalized.lookupXIds
+    : xIds;
 
   const carryRows =
-    xIds.length > 0
+    identityLookupXIds.length > 0
       ? await db
           .select()
           .from(videoMembers)
           .where(
             and(
               eq(videoMembers.video_id, args.videoId),
-              sql`${videoMembers.x_user_id} IN (
-                SELECT CAST(value AS TEXT)
-                FROM json_each(${JSON.stringify(xIds)})
+              sql`lower(${videoMembers.x_user_id}) IN (
+                SELECT lower(CAST(value AS TEXT))
+                FROM json_each(${JSON.stringify(identityLookupXIds)})
               )`,
             )!,
           )
@@ -198,14 +455,24 @@ export async function buildReplaceVideoMembersPlan(
     throw new Error("video_member_carry_limit_exceeded");
   }
 
+  const hiddenCarryRows = carryRows.filter(
+    (row) =>
+      row.is_public_member === 0 &&
+      Boolean(canonicalIdentity(row.x_user_id)) &&
+      xIdSet.has(canonicalIdentity(row.x_user_id)),
+  );
+
   const permissionCarryByXId = new Map<
     string,
     typeof videoMembers.$inferSelect
   >();
   for (const row of [...carryRows].sort(
-    (left, right) => right.can_edit - left.can_edit,
+    (left, right) =>
+      right.can_edit - left.can_edit ||
+      right.is_public_member - left.is_public_member ||
+      compareSqliteBinaryText(left.id, right.id),
   )) {
-    const xId = normalizeXId(row.x_user_id);
+    const xId = canonicalIdentity(row.x_user_id);
     if (xId && !permissionCarryByXId.has(xId)) {
       permissionCarryByXId.set(xId, row);
     }
@@ -220,7 +487,7 @@ export async function buildReplaceVideoMembersPlan(
     typeof videoMembers.$inferSelect
   >();
   for (const row of existing) {
-    const xId = normalizeXId(row.x_user_id);
+    const xId = canonicalIdentity(row.x_user_id);
     if (xId && !existingPublicByXId.has(xId)) {
       existingPublicByXId.set(xId, row);
     }
@@ -232,13 +499,19 @@ export async function buildReplaceVideoMembersPlan(
 
   const existingXUsers =
     xIds.length > 0
-      ? await db.select().from(xUsers).where(inArray(xUsers.id, xIds))
+      ? await db
+          .select({ id: xUsers.id })
+          .from(xUsers)
+          .where(sql`lower(${xUsers.id}) IN (
+            SELECT lower(CAST(value AS TEXT))
+            FROM json_each(${JSON.stringify(xIds)})
+          )`)
       : [];
-  const existingXIds = new Set(existingXUsers.map((row) => row.id.toLowerCase()));
+  const existingXIds = new Set(existingXUsers.map((row) => normalizeXId(row.id)));
 
   const newXUsers: Array<typeof xUsers.$inferInsert> = [];
   const nextMembers: Array<typeof videoMembers.$inferSelect> = [];
-  for (const [index, member] of args.members.entries()) {
+  for (const [index, member] of members.entries()) {
     const xId = normalizeXId(member.x_user_id) || null;
     if (xId && !existingXIds.has(xId)) {
       newXUsers.push({
@@ -308,27 +581,30 @@ export async function buildReplaceVideoMembersPlan(
       });
     }
   }
-  const chapterSnapshot = (rows: Array<typeof videoChapters.$inferSelect>) =>
-    rows.map((row) => ({
-      id: row.id,
-      video_id: row.video_id,
-      x_user_id: row.x_user_id,
-      chapter_time: row.chapter_time,
-      chapter_label: row.chapter_label,
-      note: row.note,
-      visibility: row.visibility,
-    }));
-  const chaptersChanged =
-    JSON.stringify(chapterSnapshot(existingManagedChapters)) !==
-    JSON.stringify(chapterSnapshot(nextManagedChapters));
+  const chaptersChanged = !managedChapterRowsEqual(
+    existingManagedChapters,
+    nextManagedChapters,
+  );
 
   const plan = emptyVideoAtomicWritePlan();
-  if (!membersChanged && !chaptersChanged && newXUsers.length === 0) return plan;
+  if (
+    !membersChanged &&
+    !chaptersChanged &&
+    newXUsers.length === 0 &&
+    hiddenCarryRows.length === 0
+  ) return plan;
 
   plan.statements.push(
     db.run(buildVideoMemberSetGuardSql(args.videoId, beforeSnapshot.rows)),
   );
   plan.expectedChanges.push(null);
+
+  if (hiddenCarryRows.length > 0) {
+    plan.statements.push(
+      db.run(buildHiddenCarryRowsGuardSql(args.videoId, hiddenCarryRows)),
+    );
+    plan.expectedChanges.push(null);
+  }
 
   if (newXUsers.length > 0) {
     const payload = JSON.stringify(newXUsers);
@@ -356,24 +632,55 @@ export async function buildReplaceVideoMembersPlan(
           json_extract(value, '$.creative_start_date'),
           json_extract(value, '$.approval_status')
         FROM json_each(${payload})
+        WHERE 1 = 1
+        ON CONFLICT(id) DO UPDATE SET
+          id = excluded.id
       `),
     );
+    // SELECT後に別requestが同じX IDを作っていても、同一IDのno-op UPDATEを
+    // 1 changeとして扱い、参加者保存全体を不要なUNIQUE競合で落とさない。
     plan.expectedChanges.push(newXUsers.length);
     plan.audits.push({
       table_name: "x_users_member_batch",
       target_id: args.videoId,
-      operation: "CREATE",
+      operation: "MERGE",
       before: null,
       after: { id: args.videoId, rows: newXUsers },
       actor_user_id: args.actorUserId,
       context: "video-save:member-profile",
+      reason: "参加者X IDプロフィール行をpendingで一括確保",
       retention_class: "long_audit",
       restore_strategy: "none",
       strict: true,
     });
   }
 
-  if (existing.length > 0) {
+  if (hiddenCarryRows.length > 0) {
+    plan.statements.push(
+      db.run(buildHiddenCarryRowsDeleteSql(args.videoId, hiddenCarryRows)),
+    );
+    plan.expectedChanges.push(hiddenCarryRows.length);
+    plan.audits.push({
+      table_name: "video_member_hidden_carry_cleanup",
+      target_id: args.videoId,
+      operation: "DELETE",
+      before: {
+        id: args.videoId,
+        rows: hiddenCarryRows.map(toVideoMemberSnapshotRow),
+      },
+      after: { id: args.videoId, rows: [] },
+      actor_user_id: args.actorUserId,
+      context: "video-save:members",
+      reason: "公開メンバー化したX IDのhidden editorを公開行へ統合",
+      retention_class: "long_audit",
+      restore_strategy: "none",
+      strict: true,
+    });
+  }
+
+  // チャプターだけ変更した保存では公開メンバー集合をDELETE/INSERTし直さない。
+  // 不要なD1 writeと権限metadataの再書込みを避け、member-set CASだけを競合ガードに使う。
+  if (membersChanged && existing.length > 0) {
     plan.statements.push(
       db
         .delete(videoMembers)
@@ -387,7 +694,7 @@ export async function buildReplaceVideoMembersPlan(
     plan.expectedChanges.push(existing.length);
   }
 
-  if (afterSnapshot.rows.length > 0) {
+  if (membersChanged && afterSnapshot.rows.length > 0) {
     plan.statements.push(
       db.run(buildVideoMemberBulkInsertSql(afterSnapshot.rows)),
     );
@@ -414,28 +721,32 @@ export async function buildReplaceVideoMembersPlan(
       table_name: "video_chapters_member_set",
       target_id: args.videoId,
       operation: "MERGE",
-      before: { id: args.videoId, rows: chapterSnapshot(existingManagedChapters) },
-      after: { id: args.videoId, rows: chapterSnapshot(nextManagedChapters) },
+      before: buildChapterAuditSummary(args.videoId, existingManagedChapters),
+      after: buildChapterAuditSummary(args.videoId, nextManagedChapters),
       actor_user_id: args.actorUserId,
       context: "video-save:member-chapters",
+      reason: "管理チャプター集合を更新（CPU/D1負荷抑制のため監査は集約情報のみ保持）",
+      retention_class: "long_audit",
+      // video_chapters_member_set のrestore adapterは存在しないため、復元可能と誤表示しない。
+      restore_strategy: "none",
+      strict: true,
+    });
+  }
+
+  if (membersChanged) {
+    plan.audits.push({
+      table_name: "video_members_set",
+      target_id: args.videoId,
+      operation: "MERGE",
+      before: beforeSnapshot,
+      after: afterSnapshot,
+      actor_user_id: args.actorUserId,
+      context: "video-save:members",
       retention_class: "restorable",
       restore_strategy: "custom_adapter",
       strict: true,
     });
   }
-
-  plan.audits.push({
-    table_name: "video_members_set",
-    target_id: args.videoId,
-    operation: "MERGE",
-    before: beforeSnapshot,
-    after: afterSnapshot,
-    actor_user_id: args.actorUserId,
-    context: "video-save:members",
-    retention_class: "restorable",
-    restore_strategy: "custom_adapter",
-    strict: true,
-  });
 
   return plan;
 }

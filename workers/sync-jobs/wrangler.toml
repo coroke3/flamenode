@@ -3,6 +3,9 @@ main = "index.ts"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 
+[observability]
+enabled = true
+
 # Recovery Cron: metadata/score at :07, playlist sync at :52.
 [triggers]
 crons = ["7 * * * *", "52 * * * *"]

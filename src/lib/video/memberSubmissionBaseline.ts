@@ -48,10 +48,14 @@ export async function loadMemberSubmissionBaseline(
                 sql`EXISTS (
                   SELECT 1
                   FROM json_each(${JSON.stringify(existingMemberIds)}) AS member_ids
-                  WHERE ${videoChapters.id} LIKE
-                    CAST(member_ids.value AS TEXT) || ':legacy:%'
-                    OR ${videoChapters.id} LIKE
-                    CAST(member_ids.value AS TEXT) || ':member:%'
+                  WHERE instr(
+                          ${videoChapters.id},
+                          CAST(member_ids.value AS TEXT) || ':legacy:'
+                        ) = 1
+                     OR instr(
+                          ${videoChapters.id},
+                          CAST(member_ids.value AS TEXT) || ':member:'
+                        ) = 1
                 )`,
               )!,
             )

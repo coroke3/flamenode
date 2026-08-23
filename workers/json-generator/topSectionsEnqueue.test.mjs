@@ -23,6 +23,13 @@ test("top section artifacts は TOP_SECTION_OBJECT_KEYS の head で欠損を検
   assert.match(source, /top_stats/);
   assert.match(source, /ensureTopSectionsOnR2/);
   assert.match(source, /env\.R2\.head/);
-  assert.match(source, /enqueueTopSectionRebuild/);
   assert.doesNotMatch(source, /top_slot_stats/);
+});
+
+test("複数top section欠落はJSON1のUPDATE+INSERT 2 statementsへ集約する", () => {
+  assert.match(source, /TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS = 2/);
+  assert.match(source, /async function enqueueMissingTopSections/);
+  assert.match(source, /FROM json_each\(\?\)/);
+  assert.match(source, /env\.DB\.batch\(\[activeUpdate, insert\]\)/);
+  assert.doesNotMatch(source, /enqueueTopSectionRebuild/);
 });

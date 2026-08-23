@@ -4,15 +4,18 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import {
+  applyVideoCollaboratorPermissionsBatch,
   upsertVideoCollaborator,
-  deleteVideoCollaborator,
 } from "@/lib/actions/video-collab-perms";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
+import { parseCanonicalXId } from "@/lib/utils/xid";
 import styles from "./VideoCollabPermsManager.module.css";
 
 /**
  * 作品の「編集できる人」(video_members.can_edit) を管理する UI。
  * 公開メンバー (is_public_member=1) とは画面で役割を分け、内部テーブルは共通。
+ * 実際の所有者判定は can_edit=1 に加えて、認証ユーザーと承認済み X ID の
+ * x_user_account_links が必要。未連携状態は「権限付与済み」として区別する。
  */
 
 export interface VideoCollabSubject {
@@ -60,14 +63,21 @@ function subjectKey(s: Pick<VideoCollabSubject, "x_user_id" | "user_id">): strin
   return s.x_user_id ? `x:${s.x_user_id}` : `u:${s.user_id ?? ""}`;
 }
 
-function hasResolvableSubject(s: {
+function resolvedSubjectXId(s: {
   x_user_id?: string | null;
-  user_id?: string | null;
-}): boolean {
-  return Boolean(s.x_user_id?.trim() || s.user_id?.trim());
+}): string | null {
+  return parseCanonicalXId(s.x_user_id);
 }
 
-function hasDiscordLink(subject: VideoCollabSubject): boolean {
+function hasResolvableSubject(s: {
+  x_user_id?: string | null;
+}): boolean {
+  // 共同編集所有者の正本は X ID。Server Action と同じcanonical parserを使い、
+  // UIだけが無効なX IDを「付与可能」と見せる状態を作らない。
+  return resolvedSubjectXId(s) !== null;
+}
+
+function hasAccountLink(subject: VideoCollabSubject): boolean {
   return Boolean(subject.user_id?.trim() || subject.has_discord_link);
 }
 
@@ -77,13 +87,15 @@ function CompactEditorBadges({
 }: {
   subject: VideoCollabSubject;
 }): React.ReactElement {
-  const hasDiscord = hasDiscordLink(subject);
+  const linked = hasAccountLink(subject);
   const hasX = Boolean(subject.x_user_id?.trim());
   return (
     <div className={styles.badges}>
-      <span className={`${styles.badge} ${styles.badgeOk}`}>編集可</span>
-      {!hasDiscord && hasX ? (
-        <span className={`${styles.badge} ${styles.badgeWarn}`}>未連携</span>
+      <span className={`${styles.badge} ${linked ? styles.badgeOk : styles.badgeWarn}`}>
+        {linked ? "編集可能" : "権限付与済み"}
+      </span>
+      {!linked && hasX ? (
+        <span className={`${styles.badge} ${styles.badgeWarn}`}>X ID連携待ち</span>
       ) : null}
     </div>
   );
@@ -91,7 +103,7 @@ function CompactEditorBadges({
 
 function SubjectBadges({ subject }: { subject: VideoCollabSubject }): React.ReactElement {
   const isPublic = subject.is_public_member === 1;
-  const hasDiscord = hasDiscordLink(subject);
+  const linked = hasAccountLink(subject);
   const hasX = Boolean(subject.x_user_id?.trim());
 
   return (
@@ -101,13 +113,15 @@ function SubjectBadges({ subject }: { subject: VideoCollabSubject }): React.Reac
       ) : (
         <span className={`${styles.badge} ${styles.badgeWarn}`}>非公開編集者</span>
       )}
-      <span className={`${styles.badge} ${styles.badgeOk}`}>編集可</span>
-      {hasDiscord ? (
-        <span className={`${styles.badge} ${styles.badgeOk}`}>Discord連携済み</span>
+      <span className={`${styles.badge} ${linked ? styles.badgeOk : styles.badgeWarn}`}>
+        {linked ? "編集可能" : "権限付与済み"}
+      </span>
+      {linked ? (
+        <span className={`${styles.badge} ${styles.badgeOk}`}>アカウント連携済み</span>
       ) : hasX ? (
-        <span className={`${styles.badge} ${styles.badgeWarn}`}>未連携</span>
+        <span className={`${styles.badge} ${styles.badgeWarn}`}>X ID連携待ち</span>
       ) : (
-        <span className={styles.badge}>通知不可</span>
+        <span className={styles.badge}>X ID未設定</span>
       )}
     </div>
   );
@@ -214,16 +228,16 @@ export function VideoCollabPermsManager({
   const editors = subjects.filter((s) => s.can_edit === 1);
   const publicEditors = editors.filter((s) => s.is_public_member === 1);
   const hiddenEditors = editors.filter((s) => s.is_public_member === 0);
-  const unlinkedEditors = editors.filter((s) => !hasDiscordLink(s));
+  const unlinkedEditors = editors.filter((s) => !hasAccountLink(s));
   const grantCandidates = publicMembers.filter((p) => {
     if (p.can_edit === 1) return false;
-    if (!p.x_user_id?.trim() && !p.display_name.trim()) return false;
+    const candidateXId = parseCanonicalXId(p.x_user_id);
+    // X IDなし/不正な公開メンバーは、押しても必ず失敗するため候補に出さない。
+    if (!candidateXId) return false;
     const already = subjects.some(
       (s) =>
         s.can_edit === 1 &&
-        p.x_user_id &&
-        s.x_user_id &&
-        p.x_user_id.toLowerCase() === s.x_user_id.toLowerCase(),
+        parseCanonicalXId(s.x_user_id) === candidateXId,
     );
     return !already;
   });
@@ -232,16 +246,16 @@ export function VideoCollabPermsManager({
     draft: VideoCollabSubject | NewSubjectDraft,
     options: { notify: boolean },
   ) => {
-    if (!hasResolvableSubject(draft)) {
-      setError("編集権を付与するには X ID または Discord User ID が必要です。");
+    const xUserId = resolvedSubjectXId(draft);
+    if (!xUserId) {
+      setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
       return;
     }
     setError(null);
     setMessage(null);
     const fd = new FormData();
     fd.set("video_id", videoId);
-    if (draft.x_user_id) fd.set("x_user_id", draft.x_user_id);
-    if (draft.user_id) fd.set("user_id", draft.user_id);
+    fd.set("x_user_id", xUserId);
     fd.set("display_name", draft.display_name);
     fd.set("can_edit", "1");
     fd.set("notify", options.notify ? "1" : "0");
@@ -258,15 +272,28 @@ export function VideoCollabPermsManager({
   };
 
   const submitRevoke = (subject: VideoCollabSubject) => {
+    const xUserId = resolvedSubjectXId(subject);
+    if (!xUserId) {
+      setError("編集権限を解除するには有効な X ID が必要です。");
+      return;
+    }
     setError(null);
     setMessage(null);
-    const fd = new FormData();
-    fd.set("video_id", videoId);
-    if (subject.x_user_id) fd.set("x_user_id", subject.x_user_id);
-    if (subject.user_id) fd.set("user_id", subject.user_id);
-    appendPrivilegeMode(fd);
     startTransition(async () => {
-      const r = await deleteVideoCollaborator(fd);
+      const r = await applyVideoCollaboratorPermissionsBatch({
+        video_id: videoId,
+        ...(editPrivilegeMode !== "normal"
+          ? { edit_privilege_mode: editPrivilegeMode }
+          : {}),
+        notify: false,
+        intents: [
+          {
+            x_user_id: xUserId,
+            display_name: subject.display_name || `@${xUserId}`,
+            intent: "off",
+          },
+        ],
+      });
       if (!r.ok) {
         setError(r.message ?? "解除に失敗しました。");
         return;
@@ -281,7 +308,7 @@ export function VideoCollabPermsManager({
     displayName: string,
   ) => {
     if (!hasResolvableSubject(subject)) {
-      setError("編集権を付与するには X ID または Discord User ID が必要です。");
+      setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
       return;
     }
     setGrantDialog({ subject, displayName });
@@ -293,51 +320,53 @@ export function VideoCollabPermsManager({
       videoTitle,
     }).content;
 
-  const renderEditorRow = (s: VideoCollabSubject) => (
-    <li key={subjectKey(s)} className={styles.row}>
-      <div className={styles.rowHead}>
-        <div className={styles.rowIdentity}>
-          <strong>{s.display_name}</strong>
-          <div className={styles.rowSub}>
-            {s.x_user_id
-              ? `@${s.x_user_id}`
-              : s.user_id
-                ? `user:${s.user_id}`
-                : "(ID未設定)"}
+  const renderEditorRow = (s: VideoCollabSubject) => {
+    const linked = hasAccountLink(s);
+    return (
+      <li key={subjectKey(s)} className={styles.row}>
+        <div className={styles.rowHead}>
+          <div className={styles.rowIdentity}>
+            <strong>{s.display_name}</strong>
+            <div className={styles.rowSub}>
+              {s.x_user_id ? `@${s.x_user_id}` : "(X ID未設定)"}
+            </div>
+            <p className={styles.rowStatus}>
+              {linked
+                ? "編集できます"
+                : "権限は付与済みです。X IDをログインアカウントへ連携すると編集できます。"}
+            </p>
           </div>
-          <p className={styles.rowStatus}>編集できます</p>
+          <CompactEditorBadges subject={s} />
         </div>
-        <CompactEditorBadges subject={s} />
-      </div>
-      <div className={styles.rowActions}>
-        <button
-          type="button"
-          className="fn-btn fn-btn-ghost fn-btn-sm"
-          disabled={pending}
-          onClick={() => setRevokeDialog({ subject: s })}
-        >
-          変更
-        </button>
-      </div>
-    </li>
-  );
+        <div className={styles.rowActions}>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            disabled={pending}
+            onClick={() => setRevokeDialog({ subject: s })}
+          >
+            変更
+          </button>
+        </div>
+      </li>
+    );
+  };
 
   return (
     <div id="video-collab-perms" className={styles.root}>
       <p className={styles.intro}>
-        共同編集権限（can_edit）を付与された人は作品所有者として扱われ、一般作品権限の範囲で編集できます。
-        付与・解除は作者所有者、または video.permissions を持つ運営・管理者のみ可能です。合作所有者は他者へ再委譲できません。
-        提出主体・YouTube ID・公開状態などは通常モードでは編集できず、管理者またはイベント運営権限が必要です。
+        共同編集権限（can_edit）は X ID に付与します。その X ID がログインアカウントへ承認済み連携されると、
+        作品所有者として一般作品権限の範囲で実際に編集できます。未連携でも権限を先に付与できますが、
+        連携完了までは編集できません。付与・解除は作者所有者、または video.permissions を持つ運営・管理者のみ可能です。
+        合作所有者は他者へ再委譲できません。提出主体・YouTube ID・公開状態などは通常モードでは編集できず、
+        管理者またはイベント運営権限が必要です。
       </p>
 
       {unlinkedEditors.length > 0 ? (
-        <div
-          role="status"
-          className={styles.calloutWarn}
-        >
-          <strong>未連携の編集者が {unlinkedEditors.length} 人います</strong>
+        <div role="status" className={styles.calloutWarn}>
+          <strong>X ID連携待ちの編集者が {unlinkedEditors.length} 人います</strong>
           <p style={{ margin: "6px 0 0", fontSize: 12, lineHeight: 1.55 }}>
-            Discord 連携が完了すると編集・通知が有効になります。
+            権限自体は保存済みです。対象の X ID とログインアカウントの連携が承認されると編集できるようになります。
           </p>
         </div>
       ) : null}
@@ -352,7 +381,7 @@ export function VideoCollabPermsManager({
           <ul className={styles.rowList}>{publicEditors.map(renderEditorRow)}</ul>
         ) : (
           <p className={styles.sectionHint}>
-            公開メンバーとして編集できる人はいません。非公開編集者のみの場合は下のセクションを確認してください。
+            公開メンバーとして権限が付与された人はいません。非公開編集者のみの場合は下のセクションを確認してください。
           </p>
         )}
       </section>
@@ -379,25 +408,18 @@ export function VideoCollabPermsManager({
           </p>
           <ul className={styles.candidateList}>
             {grantCandidates.map((p) => {
-              const label = p.x_user_id
-                ? `${p.display_name} @${p.x_user_id}`
-                : `${p.display_name}（X ID未設定）`;
-              const canGrant = Boolean(p.x_user_id?.trim());
+              const xUserId = parseCanonicalXId(p.x_user_id)!;
+              const label = `${p.display_name} @${xUserId}`;
               return (
-                <li key={`pub-${p.x_user_id ?? p.display_name}`}>
+                <li key={`pub-${xUserId}`}>
                   <button
                     type="button"
                     className={styles.candidateBtn}
-                    disabled={pending || !canGrant}
-                    title={
-                      canGrant
-                        ? undefined
-                        : "編集権を付与するには X ID が必要です。メンバー欄で X ID を設定してください。"
-                    }
+                    disabled={pending}
                     onClick={() =>
                       openGrantDialog(
                         {
-                          x_user_id: p.x_user_id ?? "",
+                          x_user_id: xUserId,
                           display_name: p.display_name,
                           user_id: null,
                           can_edit: 0,
@@ -442,10 +464,10 @@ export function VideoCollabPermsManager({
         title="作品編集に参加させますか？"
         message={
           grantDialog
-            ? `${grantDialog.displayName} さんに、作品「${videoTitle}」の編集権限を付与します。この人は、許可された範囲で作品情報を編集できます。`
+            ? `${grantDialog.displayName} さんの X ID に、作品「${videoTitle}」の編集権限を付与します。X IDがログインアカウントに連携済みなら、許可された範囲で直ちに作品情報を編集できます。`
             : ""
         }
-        note="提出主体・YouTube ID・公開状態などの重要項目は、管理者またはイベント権限が必要です。"
+        note="未連携の X ID にも権限は保存できます。その場合はアカウント連携の承認後に編集可能になります。提出主体・YouTube ID・公開状態などの重要項目は、管理者またはイベント権限が必要です。"
         preview={
           grantDialog ? notificationPreview(grantDialog.displayName) : undefined
         }
@@ -519,7 +541,6 @@ function AddHiddenEditorForm({
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [xUserId, setXUserId] = React.useState("");
-  const [discordId, setDiscordId] = React.useState("");
 
   if (!open) {
     return (
@@ -535,15 +556,16 @@ function AddHiddenEditorForm({
     );
   }
 
-  const canSubmit =
-    name.trim().length > 0 && (xUserId.trim().length > 0 || discordId.trim().length > 0);
+  const canonicalXUserId = parseCanonicalXId(xUserId);
+  const canSubmit = name.trim().length > 0 && canonicalXUserId !== null;
+  const showXIdError = xUserId.trim().length > 0 && canonicalXUserId === null;
 
   return (
     <div className={styles.addPanel}>
       <p className={styles.sectionHint} style={{ margin: 0 }}>
         公開メンバーとして表示したい場合は、上のメンバー欄に追加してください。ここは
         <strong> 表示されない編集者 </strong>
-        向けです。
+        向けです。編集権限は X ID に付与されます。
       </p>
       <div className={styles.fieldRow}>
         <input
@@ -557,33 +579,34 @@ function AddHiddenEditorForm({
         <input
           type="text"
           className="fn-input"
-          placeholder="X ID (@ なし)"
+          placeholder="X ID (@ なし・必須)"
           value={xUserId}
           onChange={(e) => setXUserId(e.target.value)}
-          pattern="[A-Za-z0-9_]{1,32}"
-        />
-        <input
-          type="text"
-          className="fn-input"
-          placeholder="Discord User ID（任意）"
-          value={discordId}
-          onChange={(e) => setDiscordId(e.target.value)}
+          pattern="[A-Za-z0-9_]{1,20}"
+          maxLength={20}
+          aria-invalid={showXIdError || undefined}
+          required
         />
       </div>
+      {showXIdError ? (
+        <p className={styles.feedbackErr} role="alert">
+          X ID は英数字とアンダースコア20文字以内で入力してください。
+        </p>
+      ) : null}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <button
           type="button"
           className="fn-btn fn-btn-primary fn-btn-sm"
           disabled={!canSubmit || pending}
           onClick={() => {
+            if (!canonicalXUserId) return;
             onAdd({
               display_name: name.trim(),
-              x_user_id: xUserId.trim(),
-              user_id: discordId.trim() || null,
+              x_user_id: canonicalXUserId,
+              user_id: null,
             });
             setName("");
             setXUserId("");
-            setDiscordId("");
             setOpen(false);
           }}
         >
@@ -597,7 +620,6 @@ function AddHiddenEditorForm({
             setOpen(false);
             setName("");
             setXUserId("");
-            setDiscordId("");
           }}
         >
           キャンセル

@@ -98,6 +98,17 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
+/**
+ * 編集画面の ?privileged= はServer側でも再検証されるが、TSV権限batchでも
+ * admin/event を明示的に伝える。queryが無いadmin参加者画面では値を送らず、
+ * Server Actionの安全な normal→admin→event 補完を維持する。
+ */
+function currentExplicitPermissionPrivilegeMode(): "admin" | "event" | undefined {
+  if (typeof window === "undefined") return undefined;
+  const raw = new URLSearchParams(window.location.search).get("privileged");
+  return raw === "admin" || raw === "event" ? raw : undefined;
+}
+
 export function VideoMembersField({
   initialMembers = [],
   suggestions = [],
@@ -633,15 +644,28 @@ export function VideoMembersField({
     setAiText("");
   };
 
+  const runPendingApply = () => {
+    pendingApplyRef.current?.();
+    pendingApplyRef.current = null;
+  };
+
   const applyBulk = (mode: "merge" | "replace") => {
     if (!bulkPreview || disabled || bulkPreview.members.length === 0) return;
+    pendingApplyRef.current = () => finishApply(mode, bulkPreview.members);
     if (mode === "replace") {
       // 置き換えは必ず明示確認を挟む。
-      pendingApplyRef.current = () => finishApply("replace", bulkPreview.members);
       setReplaceConfirmOpen(true);
       return;
     }
-    finishApply("merge", bulkPreview.members);
+    // 追加（merge）でも権限列を捨てず、置き換えと同じ権限確認フローへ進む。
+    if (
+      bulkPreview.permissionIntents.length > 0 &&
+      permissionTargetVideoId
+    ) {
+      setPermConfirmOpen(true);
+      return;
+    }
+    runPendingApply();
   };
 
   /** 置き換え確認後、権限intentがあれば編集権限の確認dialogへ進む。 */
@@ -655,28 +679,74 @@ export function VideoMembersField({
       setPermConfirmOpen(true);
       return;
     }
-    pendingApplyRef.current?.();
-    pendingApplyRef.current = null;
+    runPendingApply();
   };
 
   const replaceRowsWith = (members: VideoMemberInput[]) => {
-    setRows(() => {
+    setRows((previous) => {
       if (members.length === 0) return [{ ...EMPTY_ROW }];
+
+      // 権限列が空欄の置き換えでは、DB側と同じく既存権限を維持して見せる。
+      // can_editはnormalizeMemberRows()でmembers_jsonから除外されるため、これは表示stateのみ。
+      const permissionByXid = new Map<string, boolean>();
+      for (const row of previous) {
+        const xid = normalizeXId(row.x_user_id);
+        if (!xid) continue;
+        const canEdit = row.can_edit === true || row.can_edit === 1;
+        if (canEdit || !permissionByXid.has(xid)) {
+          permissionByXid.set(xid, canEdit);
+        }
+      }
+
       return members
-        .map((r) => ({ ...r, chapters: r.chapters ?? [] }))
+        .map((row) => {
+          const xid = normalizeXId(row.x_user_id);
+          const previousCanEdit = xid ? permissionByXid.get(xid) : undefined;
+          return {
+            ...row,
+            chapters: row.chapters ?? [],
+            ...(previousCanEdit === undefined
+              ? {}
+              : { can_edit: previousCanEdit ? 1 : 0 }),
+          };
+        })
         .slice(0, MAX_VIDEO_MEMBERS);
     });
+  };
+
+  /**
+   * 権限はmembers_jsonへ保存しないが、専用Server Action成功後の画面表示は
+   * 実DBの結果と一致させる。Reactのfunctional updateなのでreplace/mergeの
+   * setRowsが直前にqueueされていても、その次のstateへON/OFFを適用できる。
+   */
+  const syncPermissionIntentsToLocalRows = (
+    intents: readonly { xid: string; intent: boolean }[],
+  ) => {
+    const byXid = new Map(
+      intents.map((intent) => [normalizeXId(intent.xid), intent.intent] as const),
+    );
+    setRows((previous) =>
+      previous.map((row) => {
+        const xid = normalizeXId(row.x_user_id);
+        if (!xid || !byXid.has(xid)) return row;
+        return { ...row, can_edit: byXid.get(xid) ? 1 : 0 };
+      }),
+    );
   };
 
   /** 編集権限だけを専用batch Server Actionで一括反映する。 */
   const applyPermissionsBatch = async () => {
     if (!bulkPreview || !permissionTargetVideoId || permPending) return;
     const intents = bulkPreview.permissionIntents.slice(0, MAX_COLLABORATOR_PERMISSION_BATCH);
+    const explicitPrivilegeMode = currentExplicitPermissionPrivilegeMode();
     setPermPending(true);
     setPermResult(null);
     try {
       const result = await applyVideoCollaboratorPermissionsBatch({
         video_id: permissionTargetVideoId,
+        ...(explicitPrivilegeMode
+          ? { edit_privilege_mode: explicitPrivilegeMode }
+          : {}),
         notify: true,
         intents: intents.map((intent) => ({
           x_user_id: intent.xid,
@@ -690,8 +760,8 @@ export function VideoMembersField({
       });
       if (result.ok) {
         setPermConfirmOpen(false);
-        pendingApplyRef.current?.();
-        pendingApplyRef.current = null;
+        runPendingApply();
+        syncPermissionIntentsToLocalRows(intents);
         setBulkPreview(null);
         setBulkSource({ label: "spreadsheet", text: "" });
         setAiText("");
@@ -792,11 +862,7 @@ export function VideoMembersField({
         </button>
       </div>
       {viewMode === "table" ? (
-        <div
-          style={{
-            overflowX: "auto",
-          }}
-        >
+        <div style={{ overflowX: "auto" }}>
           <div
             style={{
               display: "grid",
@@ -836,9 +902,7 @@ export function VideoMembersField({
                   marginTop: 6,
                 }}
               >
-                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {i + 1}
-                </span>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{i + 1}</span>
                 <input
                   type="text"
                   value={r.name}
@@ -938,11 +1002,7 @@ export function VideoMembersField({
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
           {rows.map((r, i) => (
-            <section
-              key={i}
-              className="fn-card"
-              style={{ padding: 12, display: "grid", gap: 10 }}
-            >
+            <section key={i} className="fn-card" style={{ padding: 12, display: "grid", gap: 10 }}>
               <header style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="fn-badge fn-badge-soft">{i + 1}</span>
                 <strong style={{ fontSize: 13, flex: 1 }}>
@@ -1072,10 +1132,7 @@ export function VideoMembersField({
                   チャプター {r.chapters?.length ?? 0} 件
                 </span>
                 {collabPermsHref && !disabled ? (
-                  <a
-                    href={collabPermsHref}
-                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                  >
+                  <a href={collabPermsHref} className="fn-btn fn-btn-ghost fn-btn-sm">
                     編集権を管理
                   </a>
                 ) : null}
@@ -1238,9 +1295,7 @@ export function VideoMembersField({
             <section className={styles.bulkPreviewSection}>
               <strong className={styles.bulkLabel}>確認（{bulkPreview.members.length}行）</strong>
               {bulkPreview.members.length === 0 ? (
-                <p className={`fn-text-muted-sm ${styles.bulkHint}`}>
-                  有効な行がありません。
-                </p>
+                <p className={`fn-text-muted-sm ${styles.bulkHint}`}>有効な行がありません。</p>
               ) : (
                 <div className={`fn-table-scroll ${styles.sampleTableScroll}`}>
                   <table className={styles.bulkPreviewTable}>
@@ -1272,9 +1327,7 @@ export function VideoMembersField({
                             <td>{index + 1}</td>
                             <td>{member.name}</td>
                             <td>{xid ? `@${xid}` : ""}</td>
-                            <td>
-                              {serializeChaptersCell(member.chapters ?? [])}
-                            </td>
+                            <td>{serializeChaptersCell(member.chapters ?? [])}</td>
                             <td>{member.role}</td>
                             <td>{member.comment}</td>
                             <td>{permissionText}</td>
@@ -1342,23 +1395,14 @@ export function VideoMembersField({
               現在のメンバーを置き換えますか？
             </p>
             <p style={{ margin: 0, fontSize: 13, lineHeight: 1.65, color: "var(--text-secondary)" }}>
-              現在入力済みの {normalizedRows.length} 人分のメンバーを、確認済み
-              {" "}
+              現在入力済みの {normalizedRows.length} 人分のメンバーを、確認済み {" "}
               {bulkPreview?.members.length ?? 0} 行で置き換えます。この操作は取り消せません。
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                className="fn-btn fn-btn-ghost fn-btn-sm"
-                onClick={() => setReplaceConfirmOpen(false)}
-              >
+              <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => setReplaceConfirmOpen(false)}>
                 キャンセル
               </button>
-              <button
-                type="button"
-                className="fn-btn fn-btn-primary fn-btn-sm"
-                onClick={onReplaceConfirmed}
-              >
+              <button type="button" className="fn-btn fn-btn-primary fn-btn-sm" onClick={onReplaceConfirmed}>
                 置き換える
               </button>
             </div>
@@ -1400,9 +1444,7 @@ export function VideoMembersField({
                         <span style={{ color: "var(--text-muted)" }}> なし</span>
                       ) : (
                         <ul style={{ margin: "2px 0 6px", paddingLeft: 18 }}>
-                          {grants.map((i) => (
-                            <li key={`grant-${i.xid}`}>{i.label}</li>
-                          ))}
+                          {grants.map((i) => <li key={`grant-${i.xid}`}>{i.label}</li>)}
                         </ul>
                       )}
                     </div>
@@ -1412,9 +1454,7 @@ export function VideoMembersField({
                         <span style={{ color: "var(--text-muted)" }}> なし</span>
                       ) : (
                         <ul style={{ margin: "2px 0 6px", paddingLeft: 18 }}>
-                          {revokes.map((i) => (
-                            <li key={`revoke-${i.xid}`}>{i.label}</li>
-                          ))}
+                          {revokes.map((i) => <li key={`revoke-${i.xid}`}>{i.label}</li>)}
                         </ul>
                       )}
                     </div>

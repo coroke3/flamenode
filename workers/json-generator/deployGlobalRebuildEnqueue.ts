@@ -21,6 +21,11 @@ export const STATIC_LAST_GENERATOR_COMMIT_KV_KEY =
   "static:last_generator_commit";
 
 const DEPLOY_GLOBAL_REBUILD_REASON = "deploy_generator_change";
+/**
+ * 同commit時はfailed COUNT 1 + JSON1 enqueue 2 + coverage COUNT 2 = 最大5。
+ * commit変更直後は4だが、Recovery側はworst-case 5を予約する。
+ */
+export const DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS = 5;
 
 type EnqueueEnv = { DB: D1Database; KV: KVNamespace };
 

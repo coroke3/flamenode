@@ -77,6 +77,27 @@ function resolveWaitUntil(
   return null;
 }
 
+async function persistFailureWithinWorkerLifetime(
+  options: SendQueueWakeOptions,
+  reason: string,
+): Promise<void> {
+  const promise = recordQueueWakeFailureBestEffort({
+    kind: options.kind,
+    reason,
+    kv: options.kv,
+  });
+  const waitUntil = resolveWaitUntil(options.waitUntil);
+  if (waitUntil) {
+    try {
+      waitUntil(promise);
+      return;
+    } catch {
+      // local/runtime shimでwaitUntil登録に失敗したら、このcall内で完了まで待つ。
+    }
+  }
+  await promise;
+}
+
 /**
  * D1 本体保存完了後だけ呼ぶ。Queue 送信失敗は本体成功を壊さない。
  * 同一処理内で同一 kind は最大1回。
@@ -133,11 +154,9 @@ export async function sendQueueWakeBestEffort(
       result: "binding_missing",
       kind: options.kind,
     });
-    void recordQueueWakeFailureBestEffort({
-      kind: options.kind,
-      reason: "binding_missing",
-      kv: options.kv,
-    });
+    // bare `void promise`にせず、Worker response後もKV失敗記録が完了できるよう
+    // waitUntilへ紐付ける。waitUntilが無い環境では同期的に完了まで待つ。
+    await persistFailureWithinWorkerLifetime(options, "binding_missing");
     return { sent: false, reason: "binding_missing" };
   }
 
@@ -149,7 +168,7 @@ export async function sendQueueWakeBestEffort(
     () => {
       options.sentKinds?.add(options.kind);
     },
-    (error: unknown) => {
+    async (error: unknown) => {
       sendFailed = true;
       warnOnce(`wake_send_failed:${options.kind}`, {
         service: "queue-wake",
@@ -157,7 +176,9 @@ export async function sendQueueWakeBestEffort(
         kind: options.kind,
         error_name: error instanceof Error ? error.name : undefined,
       });
-      void recordQueueWakeFailureBestEffort({
+      // このPromise自体が下でawaitまたはwaitUntil登録されるため、失敗telemetryも
+      // 同じlifetimeへ含める。response後に投げ捨てられるfloating Promiseを作らない。
+      await recordQueueWakeFailureBestEffort({
         kind: options.kind,
         reason: "send_failed",
         kv: options.kv,

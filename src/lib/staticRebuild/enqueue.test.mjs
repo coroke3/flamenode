@@ -23,7 +23,7 @@ test("bulk queue builderはprefetchなしのjson_each UPSERTを使う", () => {
     source.indexOf("export async function enqueueStaticRebuild"),
   );
   assert.match(source, /STATIC_REBUILD_BATCH_PREFETCH_QUERY_COUNT = 0/);
-  assert.match(source, /STATIC_REBUILD_BULK_UPSERT_ROWS = 50/);
+  assert.match(source, /STATIC_REBUILD_BULK_UPSERT_ROWS = 100/);
   assert.doesNotMatch(batchFn, /\.select\(staticRebuildActiveLookupSelect\)/);
   assert.doesNotMatch(batchFn, /indexUniqueStaticRebuildTargetRows/);
   assert.match(batchFn, /FROM json_each\(\$\{payload\}\)/);
@@ -33,6 +33,33 @@ test("bulk queue builderはprefetchなしのjson_each UPSERTを使う", () => {
   );
   assert.match(batchFn, /updated_at = MAX\(static_rebuild_queue\.updated_at \+ 1, excluded\.updated_at\)/);
   assert.doesNotMatch(batchFn, /eq\(staticRebuildQueue\.status, item\.row\.status\)/);
+});
+
+test("複数enqueueは1件ずつSELECTするN+1経路ではなくbulk builderを使う", () => {
+  const manyFn = source.slice(
+    source.indexOf("export async function enqueueStaticRebuildMany"),
+    source.indexOf("async function wakeAfterSuccessfulEnqueue"),
+  );
+  assert.match(manyFn, /buildStaticRebuildQueueBatch\(db, items\)/);
+  assert.match(manyFn, /await db\.batch/);
+  assert.match(manyFn, /wakeAfterSuccessfulEnqueue/);
+  assert.doesNotMatch(manyFn, /Promise\.all/);
+  assert.doesNotMatch(manyFn, /enqueueStaticRebuild\(db, item/);
+  assert.doesNotMatch(source, /ENQUEUE_MANY_CONCURRENCY/);
+});
+
+test("複数enqueueのplan生成失敗もbest-effort境界内で吸収する", () => {
+  const manyFn = source.slice(
+    source.indexOf("export async function enqueueStaticRebuildMany"),
+    source.indexOf("async function wakeAfterSuccessfulEnqueue"),
+  );
+  const tryIndex = manyFn.indexOf("try {");
+  const buildIndex = manyFn.indexOf("buildStaticRebuildQueueBatch(db, items)");
+  const catchIndex = manyFn.indexOf("catch (error)");
+  assert.ok(tryIndex >= 0);
+  assert.ok(buildIndex > tryIndex);
+  assert.ok(catchIndex > buildIndex);
+  assert.match(manyFn, /targetCount: items\.length/);
 });
 
 test("queueBatchCoreはactive重複をfail-closedにする", () => {
@@ -66,7 +93,7 @@ test("queueBatchCoreはactive重複をfail-closedにする", () => {
   );
 });
 
-test("16 target UPSERTはchunk 10以下でbind上限内", async () => {
+test("100 target UPSERTも1 JSON bindでbind上限内", async () => {
   if (process.env.FLAMENODE_TSX_TEST_ENTRY) {
     const { registerHooks } = await import("node:module");
     registerHooks({
@@ -83,14 +110,14 @@ test("16 target UPSERTはchunk 10以下でbind上限内", async () => {
     const { drizzle } = await import("drizzle-orm/sqlite-proxy");
     const { buildStaticRebuildQueueBatch } = await import("./enqueue.ts");
     const db = drizzle(async () => ({ rows: [] }));
-    const items = Array.from({ length: 16 }, (_, index) => ({
+    const items = Array.from({ length: 100 }, (_, index) => ({
       targetType: "event",
       targetId: `event-${index}`,
       reason: "test_enqueue",
     }));
     const batch = await buildStaticRebuildQueueBatch(db, items);
     assert.equal(batch.statements.length, 1);
-    assert.deepEqual(batch.expectedChanges, [16]);
+    assert.deepEqual(batch.expectedChanges, [100]);
     for (const statement of batch.statements) {
       const query =
         typeof statement.getQuery === "function"
