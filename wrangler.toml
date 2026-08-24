@@ -4,6 +4,9 @@ main = ".open-next/worker.js"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 workers_dev = true
+# Keep production uploads within Cloudflare Workers Free's script limit.
+# The generated production config and OpenNext deploy inherit this setting.
+minify = true
 
 # Workers Builds may still run bare `wrangler deploy` against this tracked template.
 # The build hook fails closed in WORKERS_CI before placeholder bindings can deploy.

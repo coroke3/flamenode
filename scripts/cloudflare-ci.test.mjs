@@ -36,6 +36,7 @@ import {
   runProcess,
   runReadOnlySchemaPreflight,
   runRemoteSecretPreflight,
+  runWorkerUploadSizePreflight,
   verifyProductionEnvironment,
 } from "./cloudflare-production.mjs";
 import {
@@ -113,7 +114,11 @@ function writeFixtureTemplates(repoRoot) {
   for (const [relative, content] of Object.entries(configs)) {
     const filePath = path.join(repoRoot, relative);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, content, "utf8");
+    const fixtureContent = content.replace(
+      /(\bmain = [^\r\n]*?)(\r?\n)/,
+      "$1$2minify = true\n",
+    );
+    fs.writeFileSync(filePath, fixtureContent, "utf8");
   }
 }
 
@@ -412,10 +417,12 @@ test("tracked placeholder configs produce four private production configs withou
     assert.match(web, /main = "\.\.\/\.\.\/\.open-next\/worker\.js"/);
     assert.match(web, /directory = "\.\.\/\.\.\/\.open-next\/assets"/);
     assert.match(web, /migrations_dir = "\.\.\/\.\.\/migrations"/);
+    assert.match(web, /^minify = true$/m);
     assert.doesNotMatch(web, new RegExp(env.AUTH_SECRET));
     const fast = fs.readFileSync(configs["fast-jobs"], "utf8");
     assert.match(fast, /NEXT_PUBLIC_SITE_URL = "https:\/\/flamenode\.example\.com"/);
     assert.match(fast, /main = "\.\.\/\.\.\/workers\/fast-jobs\/index\.ts"/);
+    assert.match(fast, /^minify = true$/m);
   }));
 
 test("GA4_SYNC_ENABLED=1 injects sync-jobs feature flag from Build env", () =>
@@ -981,6 +988,10 @@ test("remote Worker secret preflight checks names only and never accepts a missi
 test("wrangler dry-run upload size parser enforces warn and fail thresholds", () => {
   assert.equal(
     parseWranglerTotalUploadBytes("Total Upload: 76.81 KiB / gzip: 18.92 KiB"),
+    Math.round(18.92 * 1024),
+  );
+  assert.equal(
+    parseWranglerTotalUploadBytes("Total Upload: 76.81 KiB"),
     Math.round(76.81 * 1024),
   );
   assert.throws(
@@ -990,6 +1001,33 @@ test("wrangler dry-run upload size parser enforces warn and fail thresholds", ()
   assert.doesNotThrow(() =>
     assertWorkerUploadSizeWithinLimit(100 * 1024, "flamenode-fast-jobs"),
   );
+});
+
+test("upload-size preflight measures every Worker with its checked-in config", () => {
+  const calls = [];
+  runWorkerUploadSizePreflight({
+    env: productionEnv(),
+    repoRoot: root,
+    configs: {
+      web: "web.toml",
+      "fast-jobs": "fast.toml",
+      "content-jobs": "content.toml",
+      "sync-jobs": "sync.toml",
+    },
+    wranglerBin: "wrangler.mjs",
+    run: (request) => {
+      calls.push(request);
+      return { stdout: "Total Upload: 1 KiB / gzip: 1 KiB", stderr: "", status: 0 };
+    },
+  });
+  assert.deepEqual(
+    calls.map(({ args }) => args[args.indexOf("--config") + 1]),
+    ["web.toml", "fast.toml", "content.toml", "sync.toml"],
+  );
+  for (const { args } of calls) {
+    assert.deepEqual(args.slice(0, 3), ["wrangler.mjs", "deploy", "--dry-run"]);
+    assert.ok(!args.includes("--minify"));
+  }
 });
 
 test("production deploy order is web, fast, content, sync and failure stops every later target", () =>

@@ -1168,9 +1168,15 @@ const UPLOAD_UNIT_BYTES = {
 };
 
 export function parseWranglerTotalUploadBytes(output) {
-  const match = String(output ?? "").match(
-    /Total Upload:\s+([\d.]+)\s+(B|KiB|MiB|GiB)\b/i,
-  );
+  const text = String(output ?? "");
+  // Cloudflare's Worker script limit is evaluated after gzip compression.
+  // Prefer the gzip figure from the same dry-run line; keep a total-upload
+  // fallback for older Wrangler output that omitted gzip.
+  const match =
+    text.match(
+      /Total Upload:\s+[\d.]+\s+(?:B|KiB|MiB|GiB)\s*\/\s*gzip:\s*([\d.]+)\s+(B|KiB|MiB|GiB)\b/i,
+    ) ??
+    text.match(/Total Upload:\s+([\d.]+)\s+(B|KiB|MiB|GiB)\b/i);
   if (!match) return null;
   const amount = Number(match[1]);
   const unit = match[2].toLowerCase();
@@ -1204,10 +1210,15 @@ export function runWorkerUploadSizePreflight({
   run = runProcess,
 } = {}) {
   for (const target of DEPLOY_TARGETS) {
-    if (target.key === "web") continue;
     const result = run({
       executable: process.execPath,
-      args: [wranglerBin, "deploy", "--dry-run", "--config", configs[target.key]],
+      args: [
+        wranglerBin,
+        "deploy",
+        "--dry-run",
+        "--config",
+        configs[target.key],
+      ],
       cwd: repoRoot,
       env,
       label: `cloudflare-deploy:${target.service}:upload-size-preflight`,
