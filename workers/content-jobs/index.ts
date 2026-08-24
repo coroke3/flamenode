@@ -78,8 +78,8 @@ const CLEANUP_LEASE_SEC = 10 * 60;
 export const CONTENT_JOBS_RECOVERY_MAX_TARGETS = 3;
 /** lease 競合で processed=0 が続くときの無限ループ防止。 */
 export const CONTENT_JOBS_RECOVERY_MAX_CONSECUTIVE_EMPTY_PROCESSED = 3;
-/** reconcileStaleQueue は bounded UPDATE 1本。 */
-const STALE_QUEUE_RECONCILE_MAX_D1_STATEMENTS = 1;
+/** reconcileStaleQueue は lease欠損・再生成済み・期限切れを各1 UPDATEで回復する。 */
+const STALE_QUEUE_RECONCILE_MAX_D1_STATEMENTS = 3;
 
 function hasSoftD1Budget(budget: D1Budget, requiredStatements: number): boolean {
   return (

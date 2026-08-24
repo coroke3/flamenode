@@ -18,9 +18,11 @@ import {
 } from "@/lib/actions/xid-merge-admin";
 import {
   fetchXIdMergeImpact,
+  fetchXIdMergePreview,
   summarizeMergeImpact,
   totalMergeImpact,
   type XIdMergeImpactItem,
+  type XIdMergePreviewRow,
 } from "@/lib/admin/xIdMergeImpact";
 import { formatUnix } from "@/lib/utils/format";
 
@@ -40,6 +42,7 @@ type MergeRow = typeof xIdentityRequests.$inferSelect & {
   source_name: string | null;
   target_name: string | null;
   impact: XIdMergeImpactItem[];
+  preview: XIdMergePreviewRow[];
 };
 
 export default async function AdminXIdMergesPage({ searchParams }: Props): Promise<React.ReactElement> {
@@ -100,8 +103,8 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
     );
 
     // Impact counts are intentionally loaded only after an administrator selects
-    // one pending/approved request. The normal list must not scan nine unrelated
-    // tables for every visible row.
+    // one pending/approved request. The normal list must not scan unrelated
+    // impact tables for every visible row.
     const selectedRequest = requestRows.find(
       (row) =>
         row.id === selectedImpactId &&
@@ -111,6 +114,9 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
     const selectedImpact = selectedRequest?.source_x_user_id
       ? await fetchXIdMergeImpact(db, selectedRequest.source_x_user_id)
       : [];
+    const selectedPreview = selectedRequest?.source_x_user_id
+      ? await fetchXIdMergePreview(db, selectedRequest.source_x_user_id)
+      : [];
 
     requests = requestRows.map((row) => ({
       ...row,
@@ -118,6 +124,7 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
         ? targetNameById.get(row.target_x_user_id) ?? null
         : null,
       impact: row.id === selectedImpactId ? selectedImpact : [],
+      preview: row.id === selectedImpactId ? selectedPreview : [],
     }));
   } else if (db) {
     reverts = await db
@@ -127,6 +134,12 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
       .orderBy(desc(xIdentityRequests.updated_at))
       .limit(100);
   }
+
+  const selectedPreviewRow = requests.find(
+    (row) =>
+      row.id === selectedImpactId &&
+      (row.status === "pending" || row.status === "approved"),
+  ) ?? null;
 
   return (
     <div>
@@ -150,12 +163,100 @@ export default async function AdminXIdMergesPage({ searchParams }: Props): Promi
               <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm"><Icon name="plus" size={12} aria-hidden />申請作成</button>
             </form>
           </section>
+          {selectedPreviewRow ? <MergePreviewPanel row={selectedPreviewRow} /> : null}
           <MergeRequestTable rows={requests} selectedImpactId={selectedImpactId} />
         </>
       ) : (
         <RevertTable rows={reverts} />
       )}
     </div>
+  );
+}
+
+function MergePreviewPanel({ row }: { row: MergeRow }): React.ReactElement {
+  const previewLimit = 50;
+  const hasMore = row.preview.length > previewLimit;
+  const visibleRows = row.preview.slice(0, previewLimit);
+  const impactRows = row.impact.filter((item) => item.count > 0);
+  return (
+    <section className="fn-card" style={{ marginTop: 18 }} aria-labelledby={`merge-preview-${row.id}`}>
+      <div className="fn-card-body" style={{ display: "grid", gap: 12 }}>
+        <div>
+          <h2 id={`merge-preview-${row.id}`} style={{ margin: 0, fontSize: 16 }}>
+            統合前の確認: @{row.source_x_user_id ?? "?"} → @{row.target_x_user_id ?? "?"}
+          </h2>
+          <p className="fn-muted" style={{ margin: "6px 0 0", fontSize: 12, lineHeight: 1.6 }}>
+            実行時に統合元の参照を統合先へ付け替え、統合元は通常の選択対象から外れる無効状態にします。
+            作品レコードは削除せず、作品投稿者・合作メンバー・チャプター・予約枠・審査案件の参照を更新します。
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
+          <span className="fn-badge fn-badge-danger">統合元: 無効化（復元期限内は内部保持）</span>
+          <span className="fn-badge fn-badge-accent">統合先: 継続利用</span>
+          <span className="fn-badge fn-badge-neutral">作品一覧: {visibleRows.length}{hasMore ? "+" : ""}件</span>
+        </div>
+        {impactRows.length > 0 ? (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", fontSize: 12 }} aria-label="統合対象の件数">
+            {impactRows.map((item) => (
+              <span className="fn-badge fn-badge-neutral" key={item.key}>
+                {item.label}: {item.count.toLocaleString()}件
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {visibleRows.length > 0 ? (
+          <div className="fn-table-scroll">
+            <table className="fn-table" style={{ minWidth: 680 }}>
+              <thead>
+                <tr>
+                  <th>作品</th>
+                  <th>統合元の対象</th>
+                  <th>公開状態</th>
+                  <th>実行後</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((item) => {
+                  const changes = [
+                    item.creator_change ? "投稿者" : "",
+                    item.member_rows > 0 ? `メンバー ${item.member_rows}` : "",
+                    item.chapter_rows > 0 ? `チャプター ${item.chapter_rows}` : "",
+                    item.slot_rows > 0 ? `予約枠 ${item.slot_rows}` : "",
+                    item.interaction_rows > 0 ? `リアクション ${item.interaction_rows}` : "",
+                    item.moderation_rows > 0 ? `審査案件 ${item.moderation_rows}` : "",
+                  ].filter(Boolean);
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        <Link href={`/admin/videos/${encodeURIComponent(item.id)}`}>
+                          {item.title || item.id}
+                        </Link>
+                        <div className="fn-muted" style={{ fontSize: 11 }}>{item.id}</div>
+                      </td>
+                      <td>{changes.length > 0 ? changes.join(" / ") : "関連参照"}</td>
+                      <td className="fn-muted">{item.visibility_status}</td>
+                      <td>各対象欄のX IDが統合先へ変更</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
+            作品への直接参照はありません。認証ユーザー、スタッフ、予約枠、aliasなどの影響は下の件数で確認できます。
+          </p>
+        )}
+        {hasMore ? (
+          <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
+            作品一覧は先頭50件まで表示しています。実行時は一覧外の対象も同じ原子処理で更新します。
+          </p>
+        ) : null}
+        <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
+          表示は現在のDBから取得した確認用です。実行時に再取得し、競合や不整合があれば全体を中止します。
+        </p>
+      </div>
+    </section>
   );
 }
 

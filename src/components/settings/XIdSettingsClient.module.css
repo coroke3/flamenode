@@ -189,6 +189,55 @@
   margin-top: 6px;
 }
 
+.mergePreview {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-surface));
+}
+
+.mergeRoute {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.mergeSource,
+.mergeTarget {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mergeSource {
+  color: var(--accent-danger);
+}
+
+.mergeTarget {
+  color: var(--accent-primary);
+}
+
+.mergeChanges {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.mergeHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .iconPicker {
   display: grid;
   gap: 12px;

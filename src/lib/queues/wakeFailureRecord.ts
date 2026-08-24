@@ -3,16 +3,29 @@ import "server-only";
 import { getEnv } from "@/lib/cloudflare";
 import type { QueueWakeKind } from "./wakeBudget";
 import {
+  QUEUE_WAKE_LAST_FAILURE_COALESCE_MS,
+  QUEUE_WAKE_LAST_FAILURE_REASON_COALESCE_MS,
   QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
   queueWakeLastFailureKvKey,
   serializeQueueWakeLastFailure,
 } from "./wakeFailureRecordCore";
 
 export {
+  QUEUE_WAKE_LAST_FAILURE_COALESCE_MS,
+  QUEUE_WAKE_LAST_FAILURE_REASON_COALESCE_MS,
   QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
   queueWakeLastFailureKvKey,
   serializeQueueWakeLastFailure,
 } from "./wakeFailureRecordCore";
+
+type FailureWriteState = {
+  kv: KVNamespace;
+  reason: string;
+  attemptedAt: number;
+};
+
+// QueueWakeKind is a fixed, bounded set, so this map cannot grow with input.
+const recentFailureWrites = new Map<string, FailureWriteState>();
 
 /**
  * Queue wake 送信失敗を KV に上書き記録する（best-effort）。
@@ -46,6 +59,24 @@ export async function recordQueueWakeFailureBestEffort(input: {
     return;
   }
 
+  const now = Date.now();
+  const previous = recentFailureWrites.get(input.kind);
+  if (
+    previous &&
+    previous.kv === kv &&
+    now - previous.attemptedAt <
+      (previous.reason === input.reason
+        ? QUEUE_WAKE_LAST_FAILURE_COALESCE_MS
+        : QUEUE_WAKE_LAST_FAILURE_REASON_COALESCE_MS)
+  ) {
+    return;
+  }
+  recentFailureWrites.set(input.kind, {
+    kv,
+    reason: input.reason,
+    attemptedAt: now,
+  });
+
   try {
     await kv.put(queueWakeLastFailureKvKey(input.kind), payload, {
       expirationTtl: QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
@@ -61,4 +92,8 @@ export async function recordQueueWakeFailureBestEffort(input: {
       }),
     );
   }
+}
+
+export function resetQueueWakeFailureRecordStateForTests(): void {
+  recentFailureWrites.clear();
 }

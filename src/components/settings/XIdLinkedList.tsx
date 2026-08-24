@@ -143,6 +143,11 @@ export function XIdentityRequestHistoryList({
                       ? `・最終更新 ${formatUnix(row.updated_at, { dateOnly: true })} ${formatUnix(row.updated_at, { timeOnly: true })}`
                       : ""}
                   </span>
+                  {row.request_type === "merge" ? (
+                    <span className={pageStyles.rowDate}>
+                      作品・合作メンバー・チャプター・予約枠・審査案件を統合先へ付け替え、統合元を無効化
+                    </span>
+                  ) : null}
                 </div>
                 <div className={pageStyles.rowBadges}>
                   <span className={statusClass(row.status)}>

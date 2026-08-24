@@ -14,7 +14,8 @@ const REQUIRED_PATTERNS = [
   },
   {
     file: "src/lib/audit/logger.ts",
-    pattern: /validateActorXUserId/,
+    pattern:
+      /loadApprovedActorXPairs\(db, activeInputs\)[\s\S]*?if \(!linked && input\.strict\) \{[\s\S]*?throw new Error\("actor_x_user_id is not linked to actor_user_id"\)/,
     message: "audit logger must validate actor_x_user_id for strict audits",
   },
   {

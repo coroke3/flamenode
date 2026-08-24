@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
+const queueSource = await readFile(
+  new URL("../json-generator/queue.ts", import.meta.url),
+  "utf8",
+);
 
 test("content-jobs は Queue consumer と Recovery Cron を公開する", () => {
   assert.match(source, /service:\s*"flamenode-content-jobs"/);
@@ -82,6 +86,28 @@ test("R2欠落修復は各実装が公開するworst-case予算をsoft limit前�
 
   assert.doesNotMatch(source, /DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS\s*=/);
   assert.doesNotMatch(source, /YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS\s*=/);
+});
+
+test("stale queue reconcileは実行する3 UPDATE分をsoft limit前に予約する", () => {
+  const reservationMatch = source.match(
+    /const STALE_QUEUE_RECONCILE_MAX_D1_STATEMENTS = (\d+);/,
+  );
+  assert.ok(reservationMatch, "reconcile D1 reservation is required");
+
+  const reconcileStart = queueSource.indexOf(
+    "export async function reconcileStaleQueue",
+  );
+  assert.ok(reconcileStart >= 0, "reconcileStaleQueue is required");
+  const reconcileSource = queueSource.slice(reconcileStart);
+  const actualStatements =
+    reconcileSource.match(/env\.DB\.prepare\(/g)?.length ?? 0;
+
+  assert.equal(Number(reservationMatch[1]), actualStatements);
+  assert.equal(actualStatements, 3);
+  assert.match(
+    source,
+    /hasSoftD1Budget\([\s\S]*?STALE_QUEUE_RECONCILE_MAX_D1_STATEMENTS[\s\S]*?await reconcileStaleQueue\(rebuildEnv, now, signal\)/,
+  );
 });
 
 test("Queue wake成功時はCronでstatic rebuildを直接実行しない", () => {

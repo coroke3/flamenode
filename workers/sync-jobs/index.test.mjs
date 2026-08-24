@@ -199,6 +199,18 @@ test("Cron全体とQueue consumerは同じD1 hard-limit guardを使う", () => {
   );
 });
 
+test("playlist Cronのcontinuation due判定も同じD1 budgetを共有する", () => {
+  const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
+  assert.match(
+    cronBlock,
+    /maybeContinueYoutubePlaylistSync\(budgetEnv, signal\)/,
+  );
+  assert.doesNotMatch(
+    cronBlock,
+    /maybeContinueYoutubePlaylistSync\(env, signal\)/,
+  );
+});
+
 test("日次blocked再確認は外部API開始前にD1 soft headroomを確保する", () => {
   assert.equal(DAILY_BLOCKED_RECHECK_D1_RESERVE, 13);
   assert.match(source, /D1_QUERY_SOFT_LIMIT/);

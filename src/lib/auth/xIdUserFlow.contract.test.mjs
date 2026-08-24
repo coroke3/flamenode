@@ -18,6 +18,10 @@ test("X ID連携は初回・追加で同じ解析フローを使い、統合だ�
   assert.match(component, /parseXIdentityInput/);
   assert.doesNotMatch(component, /新規・既存を自動判定|別名を追加/);
   assert.match(component, /export function XIdMergeForm/);
+  assert.match(component, /const effectiveSourceId/);
+  assert.match(component, /const effectiveTargetId/);
+  assert.match(component, /value=\{effectiveSourceId\}/);
+  assert.match(component, /value=\{effectiveTargetId\}/);
   assert.match(settings, /<XIdMergeForm linkedXIds=\{mergeCandidates\}/);
   assert.match(settings, /eq\(linkReqTable\.requested_by_auth_user_id, user\.id\)/);
   assert.doesNotMatch(settings, /ne\(linkReqTable\.status, "approved"\)/);

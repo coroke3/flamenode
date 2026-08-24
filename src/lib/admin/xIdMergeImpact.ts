@@ -9,6 +9,19 @@ import type { XIdMergeImpactItem } from "./xIdMergeImpactCore";
 
 type AnyDb = LibSQLDatabase<any>;
 
+export type XIdMergePreviewRow = {
+  id: string;
+  title: string;
+  visibility_status: string;
+  primary_event_id: string | null;
+  creator_change: number;
+  member_rows: number;
+  chapter_rows: number;
+  slot_rows: number;
+  interaction_rows: number;
+  moderation_rows: number;
+};
+
 type MergeImpactCounts = {
   creatorVideos: number;
   members: number;
@@ -19,6 +32,10 @@ type MergeImpactCounts = {
   aliasesOwned: number;
   aliasesPointing: number;
   slotRows: number;
+  slotReservationGroups: number;
+  slotSnapshots: number;
+  moderationCases: number;
+  activeUsers: number;
 };
 
 type BatchImpactRow = {
@@ -101,6 +118,20 @@ const BATCH_IMPACT_SPECS: readonly BatchImpactSpec[] = [
     key: "slots.x_user_id",
     label: "\u4e88\u7d04\u67a0",
   },
+  {
+    table: "slot_reservation_groups",
+    column: "x_user_id",
+    countColumn: "id",
+    key: "slot_reservation_groups.x_user_id",
+    label: "\u9023\u7d9a\u67a0\u30b0\u30eb\u30fc\u30d7",
+  },
+  {
+    table: "video_moderation_cases",
+    column: "related_x_user_id",
+    countColumn: "id",
+    key: "video_moderation_cases.related_x_user_id",
+    label: "\u5be9\u67fb\u30fb\u30e2\u30c7\u30ec\u30fc\u30b7\u30e7\u30f3\u6848\u4ef6",
+  },
 ];
 
 function count(value: unknown): number {
@@ -122,6 +153,10 @@ export async function fetchXIdMergeImpact(
       aliasesOwned: sql<number>`(SELECT COUNT(*) FROM x_user_aliases WHERE x_user_id = ${fromXId})`,
       aliasesPointing: sql<number>`(SELECT COUNT(*) FROM x_user_aliases WHERE alias_x_id = ${fromXId})`,
       slotRows: sql<number>`(SELECT COUNT(*) FROM slots WHERE x_user_id = ${fromXId})`,
+      slotReservationGroups: sql<number>`(SELECT COUNT(*) FROM slot_reservation_groups WHERE x_user_id = ${fromXId})`,
+      slotSnapshots: sql<number>`(SELECT COUNT(*) FROM slots WHERE lower(trim(ltrim(trim(reserved_x_id_snapshot), '@'))) = lower(${fromXId}))`,
+      moderationCases: sql<number>`(SELECT COUNT(*) FROM video_moderation_cases WHERE related_x_user_id = ${fromXId})`,
+      activeUsers: sql<number>`(SELECT COUNT(*) FROM "user" WHERE lower(trim(ltrim(trim(active_x_user_id), '@'))) = lower(${fromXId}))`,
     })
     .from(sql`(SELECT 1) AS impact_source`);
   const counts = (rows[0] ?? {}) as Partial<MergeImpactCounts>;
@@ -136,7 +171,91 @@ export async function fetchXIdMergeImpact(
     { key: "x_user_aliases.x_user_id", label: "alias所有", count: count(counts.aliasesOwned) },
     { key: "x_user_aliases.alias_x_id", label: "alias参照", count: count(counts.aliasesPointing) },
     { key: "slots.x_user_id", label: "予約枠", count: count(counts.slotRows) },
+    { key: "slot_reservation_groups.x_user_id", label: "連続枠グループ", count: count(counts.slotReservationGroups) },
+    { key: "slots.reserved_x_id_snapshot", label: "予約主体スナップショット", count: count(counts.slotSnapshots) },
+    { key: "video_moderation_cases.related_x_user_id", label: "審査・モデレーション案件", count: count(counts.moderationCases) },
+    { key: "user.active_x_user_id", label: "利用中のActive X", count: count(counts.activeUsers) },
   ];
+}
+
+/**
+ * Return a bounded, human-readable work list for the selected request.
+ * One query covers creator/member/chapter/slot/interaction/moderation references so the admin page can
+ * explain exactly which works will be rewritten without an N+1 lookup.
+ */
+export async function fetchXIdMergePreview(
+  db: AnyDb,
+  fromXId: string,
+  limit = 51,
+): Promise<XIdMergePreviewRow[]> {
+  // The admin page passes a literal, but this helper is also exported for
+  // future tooling.  A runtime NaN would otherwise flow into the SQL LIMIT
+  // expression and make D1 reject the query instead of returning a bounded
+  // preview.  Treat every non-finite value as the safe default.
+  const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : 51;
+  const boundedLimit = Math.min(51, Math.max(1, requestedLimit));
+  const rows = await db.all<{
+    id: string;
+    title: string;
+    visibility_status: string;
+    primary_event_id: string | null;
+    creator_change: number | string | null;
+    member_rows: number | string | null;
+    chapter_rows: number | string | null;
+    slot_rows: number | string | null;
+    interaction_rows: number | string | null;
+    moderation_rows: number | string | null;
+  }>(sql`
+    WITH affected_video_ids(video_id, creator_change) AS (
+      SELECT id, 1 FROM videos WHERE creator_x_user_id = ${fromXId}
+      UNION
+      SELECT video_id, 0 FROM video_members WHERE x_user_id = ${fromXId}
+      UNION
+      SELECT video_id, 0 FROM video_chapters WHERE x_user_id = ${fromXId}
+      UNION
+      SELECT video_id, 0 FROM slots
+       WHERE video_id IS NOT NULL
+         AND (
+           x_user_id = ${fromXId}
+           OR lower(trim(ltrim(trim(reserved_x_id_snapshot), '@'))) = lower(${fromXId})
+         )
+      UNION
+      SELECT video_id, 0 FROM video_interactions WHERE x_user_id = ${fromXId}
+      UNION
+      SELECT video_id, 0 FROM video_moderation_cases WHERE related_x_user_id = ${fromXId}
+    )
+    SELECT
+      v.id,
+      v.title,
+      v.visibility_status,
+      v.primary_event_id,
+      MAX(affected_video_ids.creator_change) AS creator_change,
+      (SELECT COUNT(*) FROM video_members vm WHERE vm.video_id = v.id AND vm.x_user_id = ${fromXId}) AS member_rows,
+      (SELECT COUNT(*) FROM video_chapters vc WHERE vc.video_id = v.id AND vc.x_user_id = ${fromXId}) AS chapter_rows,
+      (SELECT COUNT(*) FROM slots s WHERE s.video_id = v.id AND (
+        s.x_user_id = ${fromXId}
+        OR lower(trim(ltrim(trim(s.reserved_x_id_snapshot), '@'))) = lower(${fromXId})
+      )) AS slot_rows,
+      (SELECT COUNT(*) FROM video_interactions vi WHERE vi.video_id = v.id AND vi.x_user_id = ${fromXId}) AS interaction_rows,
+      (SELECT COUNT(*) FROM video_moderation_cases vmc WHERE vmc.video_id = v.id AND vmc.related_x_user_id = ${fromXId}) AS moderation_rows
+    FROM affected_video_ids
+    INNER JOIN videos v ON v.id = affected_video_ids.video_id
+    GROUP BY v.id, v.title, v.visibility_status, v.primary_event_id
+    ORDER BY v.title COLLATE NOCASE, v.id
+    LIMIT ${boundedLimit}
+  `);
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    visibility_status: row.visibility_status,
+    primary_event_id: row.primary_event_id,
+    creator_change: count(row.creator_change),
+    member_rows: count(row.member_rows),
+    chapter_rows: count(row.chapter_rows),
+    slot_rows: count(row.slot_rows),
+    interaction_rows: count(row.interaction_rows),
+    moderation_rows: count(row.moderation_rows),
+  }));
 }
 
 /**

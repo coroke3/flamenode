@@ -98,11 +98,12 @@ test("表計算カタログの同時更新は単一Promiseへ集約する", () =
 
 test("X ID統合影響件数は単一DB読取で取得する", () => {
   assert.doesNotMatch(xIdMergeImpact, /Promise\.all/);
-  assert.equal((xIdMergeImpact.match(/SELECT COUNT\(\*\)/g) ?? []).length, 9);
+  assert.equal((xIdMergeImpact.match(/SELECT COUNT\(\*\)/g) ?? []).length, 18);
   assert.match(xIdMergeImpact, /impact_source/);
   assert.match(xIdMergeImpact, /fetchXIdMergeImpact/);
   assert.match(xIdMergeImpact, /source_ids/);
   assert.match(xIdMergesPage, /fetchXIdMergeImpact\(db/);
+  assert.match(xIdMergesPage, /fetchXIdMergePreview\(db/);
   assert.doesNotMatch(xIdMergesPage, /fetchXIdMergeImpacts/);
   assert.doesNotMatch(xIdMergesPage, /impactSourceIds/);
   assert.match(xIdMergesPage, /if \(db && view === "requests"\)/);

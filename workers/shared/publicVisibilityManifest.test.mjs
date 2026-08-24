@@ -41,6 +41,27 @@ test("worker manifest size guard uses UTF-8 bytes", async () => {
   );
 });
 
+test("worker rejects oversized R2 metadata before text buffering", async () => {
+  let textCalls = 0;
+  const bucket = {
+    async get() {
+      return {
+        size: 1024 * 1024 + 1,
+        text: async () => {
+          textCalls += 1;
+          return "{}";
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => readWorkerVisibilityBlockedEntitiesManifest(bucket),
+    /public_visibility_manifest_too_large/,
+  );
+  assert.equal(textCalls, 0);
+});
+
 test("conditional manifest PUT treats R2 null as a CAS failure", async () => {
   let calls = 0;
   const bucket = {

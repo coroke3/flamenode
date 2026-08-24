@@ -23,6 +23,7 @@ type R2BucketLike = {
   get(key: string): Promise<{
     text(): Promise<string>;
     etag?: string;
+    size?: number;
   } | null>;
   put(
     key: string,
@@ -50,6 +51,15 @@ export async function readWorkerVisibilityBlockedEntitiesManifest(
       manifest: emptyPublicVisibilityBlockedEntitiesManifest(now),
       etag: null,
     };
+  }
+  // Reject by metadata before buffering an oversized R2 body in memory.
+  if (
+    typeof object.size === "number" &&
+    (!Number.isFinite(object.size) ||
+      object.size < 0 ||
+      object.size > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES)
+  ) {
+    throw new Error("public_visibility_manifest_too_large");
   }
   const text = await object.text();
   if (utf8ByteLength(text) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {

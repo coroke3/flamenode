@@ -117,6 +117,23 @@ export function XIdMergeForm({
   const [pending, startTransition] = React.useTransition();
   const [okMsg, setOkMsg] = React.useState<string | null>(null);
   const [errMsg, setErrMsg] = React.useState<string | null>(null);
+  const [sourceId, setSourceId] = React.useState(linkedXIds[0]?.id ?? "");
+  const [targetId, setTargetId] = React.useState(linkedXIds[1]?.id ?? "");
+  // The server can refresh this list after a link/merge request. Keep the
+  // controlled selects valid for that render even before React state catches
+  // up; otherwise a removed ID produces an empty select and stale FormData.
+  const linkedIds = linkedXIds.map((x) => x.id);
+  const linkedIdSet = new Set(linkedIds);
+  const fallbackSourceId = linkedIds[0] ?? "";
+  const fallbackTargetId = linkedIds.find((id) => id !== fallbackSourceId) ?? "";
+  const effectiveSourceId = linkedIdSet.has(sourceId) ? sourceId : fallbackSourceId;
+  const effectiveTargetId =
+    linkedIdSet.has(targetId) && targetId !== effectiveSourceId
+      ? targetId
+      : fallbackTargetId;
+  const sameIds = Boolean(
+    effectiveSourceId && effectiveTargetId && effectiveSourceId === effectiveTargetId,
+  );
 
   if (linkedXIds.length < 2) return null;
 
@@ -144,14 +161,30 @@ export function XIdMergeForm({
   return (
     <form className={styles.stack} onSubmit={onSubmit} aria-labelledby="xid-merge-heading">
       <p id="xid-merge-heading" className={styles.introNote}>
-        連携済みのX ID同士を1つの名義へ統合します。運営承認後に反映されます。
+        連携済みのX ID同士を1つの名義へ統合します。運営が対象作品と変更内容を確認してから承認・実行します。
       </p>
+      <div className={styles.mergePreview} aria-live="polite">
+        <div className={styles.mergeRoute}>
+          <span className={styles.mergeSource}>@{effectiveSourceId || "統合元"}</span>
+          <Icon name="chevron-right" size={14} aria-hidden />
+          <span className={styles.mergeTarget}>@{effectiveTargetId || "統合先"}</span>
+        </div>
+        <ul className={styles.mergeChanges}>
+          <li>統合元が投稿者・合作メンバー・チャプターになっている作品を統合先へ付け替えます。</li>
+          <li>予約枠・連続枠・イベントスタッフ・認証ユーザー・審査案件の紐付けも統合先へ揃えます。</li>
+          <li>作品データは削除せず、統合元は無効化します。差し戻し期限中のみ復元用に内部保持します。</li>
+        </ul>
+        <p className={styles.mergeHint}>
+          具体的な対象作品と件数は、申請後に運営の確認画面へ一覧表示されます。実行時にも再確認し、競合があれば統合全体を中止します。
+        </p>
+      </div>
       <label className={styles.compactLabel}>
         統合元 X ID
         <select
           name="x_id"
           className={styles.input}
-          defaultValue={linkedXIds[0].id}
+          value={effectiveSourceId}
+          onChange={(event) => setSourceId(event.target.value)}
           disabled={pending}
         >
           {linkedXIds.map((x) => (
@@ -164,7 +197,8 @@ export function XIdMergeForm({
         <select
           name="target_x_user_id"
           className={styles.input}
-          defaultValue={linkedXIds[1].id}
+          value={effectiveTargetId}
+          onChange={(event) => setTargetId(event.target.value)}
           disabled={pending}
         >
           {linkedXIds.map((x) => (
@@ -175,12 +209,13 @@ export function XIdMergeForm({
       <button
         type="submit"
         className="fn-btn fn-btn-ghost fn-btn-sm"
-        disabled={pending}
+        disabled={pending || sameIds}
         aria-busy={pending}
       >
         <Icon name="refresh" size={12} aria-hidden />
         {pending ? "送信中…" : "統合を申請"}
       </button>
+      {sameIds ? <p className={styles.msgErr} role="alert">統合元と統合先は別のX IDを選択してください。</p> : null}
       {okMsg ? <p className={styles.msgOk} role="status"><Icon name="check" size={13} aria-hidden /> {okMsg}</p> : null}
       {errMsg ? <p className={styles.msgErr} role="alert"><Icon name="warning" size={13} aria-hidden /> {errMsg}</p> : null}
     </form>

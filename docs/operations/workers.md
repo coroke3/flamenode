@@ -193,3 +193,7 @@ Cloudflare Dashboardで`exceededCpu`、D1 rows read/written、Worker requests、
 ランキング静的再構築は、滞留したpending行の取得をboundedにし、同一generationの完了CAS更新をD1 batchへまとめる。通常のtarget単位の処理順とCAS条件は維持し、滞留時のrows_readとD1 round-tripだけを抑える。
 
 - `users_index_v2` の page/search artifact tracking は、D1 の bind 数と round-trip を抑えるため、500 行以内の JSON1 bulk UPSERT として記録する。R2 PUT 後に D1 記録できなかった世代は、その chunk の orphan object を削除してから retry/fallback する。
+
+Queue wake の失敗テレメトリは best-effort とする。同じ `kind` の書込みは isolate 内の短い期間でまとめ、reason が変わった場合も同一キーの1秒レート制限を過ぎてから記録する。Queue の retry 挙動は変更せず、KV の書込み制限だけを守る。
+
+公開 visibility manifest は、R2 オブジェクトの `size` が1 MiB上限を超えている場合、本文をbufferする前に拒否する。R2 miss の circuit 記録は best-effort とし、利用可能なら request の `waitUntil` へ登録する。miss は isolate 内でまとめてから KV counter を更新する。

@@ -51,6 +51,27 @@ if (runTestWithTsx(import.meta.url)) {
     );
   });
 
+  test("R2 size metadata rejects an oversized manifest before text buffering", async () => {
+    let textCalls = 0;
+    const bucket = {
+      async get() {
+        return {
+          size: 1024 * 1024 + 1,
+          text: async () => {
+            textCalls += 1;
+            return "{}";
+          },
+        };
+      },
+    };
+
+    await assert.rejects(
+      () => readPublicVisibilityBlockedEntitiesManifest(bucket),
+      /public_visibility_manifest_too_large/,
+    );
+    assert.equal(textCalls, 0);
+  });
+
   test("enforce mode fails closed when the R2 manifest bucket is missing", async () => {
     const previous = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
     process.env.PUBLIC_VISIBILITY_GUARD_MODE = "enforce";

@@ -1,15 +1,28 @@
 import type { QueueWakeKind } from "../../src/lib/queues/wakeBudget.ts";
 import {
+  QUEUE_WAKE_LAST_FAILURE_COALESCE_MS,
+  QUEUE_WAKE_LAST_FAILURE_REASON_COALESCE_MS,
   QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
   queueWakeLastFailureKvKey,
   serializeQueueWakeLastFailure,
 } from "../../src/lib/queues/wakeFailureRecordCore.ts";
 
 export {
+  QUEUE_WAKE_LAST_FAILURE_COALESCE_MS,
+  QUEUE_WAKE_LAST_FAILURE_REASON_COALESCE_MS,
   QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
   queueWakeLastFailureKvKey,
   serializeQueueWakeLastFailure,
 };
+
+type FailureWriteState = {
+  kv: KVNamespace;
+  reason: string;
+  attemptedAt: number;
+};
+
+// QueueWakeKind is a fixed, bounded set; isolate-local state stays bounded.
+const recentFailureWrites = new Map<string, FailureWriteState>();
 
 /**
  * Worker 側 Queue wake 失敗の last-failure 記録（best-effort）。
@@ -34,6 +47,23 @@ export async function recordQueueWakeFailureBestEffort(input: {
     return;
   }
 
+  const now = Date.now();
+  const previous = recentFailureWrites.get(input.kind);
+  if (
+    previous &&
+    previous.kv === kv &&
+    (previous.reason === input.reason
+      ? now - previous.attemptedAt < QUEUE_WAKE_LAST_FAILURE_COALESCE_MS
+      : now - previous.attemptedAt < QUEUE_WAKE_LAST_FAILURE_REASON_COALESCE_MS)
+  ) {
+    return;
+  }
+  recentFailureWrites.set(input.kind, {
+    kv,
+    reason: input.reason,
+    attemptedAt: now,
+  });
+
   try {
     await kv.put(queueWakeLastFailureKvKey(input.kind), payload, {
       expirationTtl: QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
@@ -49,4 +79,8 @@ export async function recordQueueWakeFailureBestEffort(input: {
       }),
     );
   }
+}
+
+export function resetQueueWakeFailureRecordStateForTests(): void {
+  recentFailureWrites.clear();
 }

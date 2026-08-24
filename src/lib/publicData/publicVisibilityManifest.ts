@@ -76,6 +76,16 @@ export async function readPublicVisibilityBlockedEntitiesManifest(
       etag: null,
     };
   }
+  // R2 exposes the object size before the body is read. Reject oversized
+  // manifests before text() can allocate a large string in the Worker.
+  if (
+    typeof object.size === "number" &&
+    (!Number.isFinite(object.size) ||
+      object.size < 0 ||
+      object.size > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES)
+  ) {
+    throw new Error("public_visibility_manifest_too_large");
+  }
   const text = await object.text();
   if (utf8ByteLength(text) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
     throw new Error("public_visibility_manifest_too_large");

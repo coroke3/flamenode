@@ -4,12 +4,14 @@ import { eq, inArray, or, sql } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import {
   eventStaff,
+  slotReservationGroups,
   slots,
   users,
   videoChapters,
   videoEvents,
   videoInteractions,
   videoMembers,
+  videoModerationCases,
   videos,
   xIdentityRequests,
   xUserAccountLinks,
@@ -25,6 +27,7 @@ import {
   preCommitXUserVisibilityTransition,
 } from "./xUserVisibilityTransition";
 import { buildEventStaffMergeAudits } from "./mergeAudits";
+import { normalizeXId } from "@/lib/utils/xid";
 
 export const X_ID_MERGE_REVERT_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
@@ -43,6 +46,10 @@ export type XIdMergeRestoreSnapshot = {
   video_event_links?: Array<typeof videoEvents.$inferSelect>;
   video_members: Array<typeof videoMembers.$inferSelect>;
   slots: Array<typeof slots.$inferSelect>;
+  /** Reservation-group identity is an active reference and must follow the merge. */
+  slot_reservation_groups?: Array<typeof slotReservationGroups.$inferSelect>;
+  /** Moderation cases keep an X-ID relation for operator context. */
+  video_moderation_cases?: Array<typeof videoModerationCases.$inferSelect>;
   video_interactions: Array<typeof videoInteractions.$inferSelect>;
   event_staff: Array<typeof eventStaff.$inferSelect>;
   aliases: Array<typeof xUserAliases.$inferSelect>;
@@ -85,6 +92,12 @@ function parseSnapshot(raw: string): XIdMergeRestoreSnapshot {
     ...(parsed as XIdMergeRestoreSnapshot),
     video_event_links: Array.isArray(parsed.video_event_links)
       ? (parsed.video_event_links as Array<typeof videoEvents.$inferSelect>)
+      : [],
+    slot_reservation_groups: Array.isArray(parsed.slot_reservation_groups)
+      ? (parsed.slot_reservation_groups as Array<typeof slotReservationGroups.$inferSelect>)
+      : [],
+    video_moderation_cases: Array.isArray(parsed.video_moderation_cases)
+      ? (parsed.video_moderation_cases as Array<typeof videoModerationCases.$inferSelect>)
       : [],
   };
 }
@@ -134,11 +147,13 @@ function buildMergeStaticRebuildTargets(opts: {
   for (const row of snapshot.videos) videoIds.add(row.id);
   for (const row of snapshot.video_chapters) videoIds.add(row.video_id);
   for (const row of snapshot.video_members) videoIds.add(row.video_id);
+  for (const row of snapshot.video_moderation_cases ?? []) videoIds.add(row.video_id);
   for (const row of snapshot.video_event_links ?? []) videoIds.add(row.video_id);
 
   const eventIds = new Set<string>();
   for (const row of snapshot.event_staff) eventIds.add(row.event_id);
   for (const row of snapshot.slots) eventIds.add(row.event_id);
+  for (const row of snapshot.slot_reservation_groups ?? []) eventIds.add(row.event_id);
   for (const row of snapshot.videos) {
     if (row.primary_event_id) eventIds.add(row.primary_event_id);
   }
@@ -234,16 +249,24 @@ export async function captureXIdMergeRestoreSnapshot(
   const source = sourceRows[0];
   const target = targetRows[0];
   if (!source || !target) throw new Error("統合元または統合先のX名義が見つかりません。");
-  if (source.approval_status === "rejected") {
-    throw new Error("統合元はすでに無効化されています。");
+  if (source.approval_status === "rejected" || target.approval_status === "rejected") {
+    throw new Error("無効化済みのX名義は統合できません。");
+  }
+  if (
+    !["approved", "imported"].includes(source.approval_status ?? "") ||
+    !["approved", "imported"].includes(target.approval_status ?? "")
+  ) {
+    throw new Error("統合元と統合先は承認済みのX名義である必要があります。");
   }
 
-  const [activeUsers, accountLinks, creatorVideos, chapters, members, slotRows, interactions, staffRows, aliases, videoEventLinks] =
+  const [activeUsers, accountLinks, creatorVideos, chapters, members, slotRows, reservationGroups, moderationCases, interactions, staffRows, aliases, videoEventLinks] =
     await Promise.all([
       db
         .select({ id: users.id, active_x_user_id: users.active_x_user_id })
         .from(users)
-        .where(inArray(users.active_x_user_id, [sourceXUserId, targetXUserId])),
+        .where(
+          sql`lower(trim(ltrim(trim(${users.active_x_user_id}), '@'))) IN (lower(${sourceXUserId}), lower(${targetXUserId}))`,
+        ),
       db
         .select()
         .from(xUserAccountLinks)
@@ -251,7 +274,17 @@ export async function captureXIdMergeRestoreSnapshot(
       db.select().from(videos).where(eq(videos.creator_x_user_id, sourceXUserId)),
       db.select().from(videoChapters).where(eq(videoChapters.x_user_id, sourceXUserId)),
       db.select().from(videoMembers).where(eq(videoMembers.x_user_id, sourceXUserId)),
-      db.select().from(slots).where(eq(slots.x_user_id, sourceXUserId)),
+      db
+        .select()
+        .from(slots)
+        .where(
+          or(
+            eq(slots.x_user_id, sourceXUserId),
+            sql`lower(trim(ltrim(trim(${slots.reserved_x_id_snapshot}), '@'))) = lower(${sourceXUserId})`,
+          ),
+        ),
+      db.select().from(slotReservationGroups).where(eq(slotReservationGroups.x_user_id, sourceXUserId)),
+      db.select().from(videoModerationCases).where(eq(videoModerationCases.related_x_user_id, sourceXUserId)),
       db
         .select()
         .from(videoInteractions)
@@ -279,6 +312,13 @@ export async function captureXIdMergeRestoreSnapshot(
             SELECT video_id FROM video_chapters WHERE x_user_id = ${sourceXUserId}
             UNION
             SELECT video_id FROM video_members WHERE x_user_id = ${sourceXUserId}
+            UNION
+            SELECT video_id FROM slots
+            WHERE video_id IS NOT NULL
+              AND (
+                x_user_id = ${sourceXUserId}
+                OR lower(trim(ltrim(trim(reserved_x_id_snapshot), '@'))) = lower(${sourceXUserId})
+              )
           )
         `),
     ]);
@@ -297,6 +337,8 @@ export async function captureXIdMergeRestoreSnapshot(
     video_event_links: videoEventLinks,
     video_members: members,
     slots: slotRows,
+    slot_reservation_groups: reservationGroups,
+    video_moderation_cases: moderationCases,
     video_interactions: interactions,
     event_staff: staffRows,
     aliases,
@@ -345,13 +387,17 @@ export async function executeApprovedXIdMergeRequest(
   const aliasCollisions = sourceAliases.filter((row) => targetAliasIds.has(row.alias_x_id));
   const aliasPointingAtSource = snapshot.aliases.filter((row) => row.alias_x_id === source);
   const sourceLinks = snapshot.account_links.filter((row) => row.x_user_id === source);
-  const activeSourceUsers = snapshot.active_users.filter((row) => row.active_x_user_id === source);
+  const activeSourceUsers = snapshot.active_users.filter(
+    (row) => normalizeXId(row.active_x_user_id) === source,
+  );
 
   const counts = {
     videos: snapshot.videos.length,
     video_chapters: snapshot.video_chapters.length,
     video_members: snapshot.video_members.length,
     slots: snapshot.slots.length,
+    slot_reservation_groups: snapshot.slot_reservation_groups?.length ?? 0,
+    video_moderation_cases: snapshot.video_moderation_cases?.length ?? 0,
     video_interactions: sourceInteractions.length,
     event_staff: sourceStaff.length,
     x_user_aliases: sourceAliases.length,
@@ -404,7 +450,21 @@ export async function executeApprovedXIdMergeRequest(
     db.run(sql`UPDATE videos SET creator_x_user_id = ${target}, updated_at = ${now} WHERE creator_x_user_id = ${source}`),
     db.run(sql`UPDATE video_chapters SET x_user_id = ${target}, updated_at = ${now} WHERE x_user_id = ${source}`),
     db.run(sql`UPDATE video_members SET x_user_id = ${target} WHERE x_user_id = ${source}`),
-    db.run(sql`UPDATE slots SET x_user_id = ${target}, updated_at = ${now} WHERE x_user_id = ${source}`),
+    db.run(sql`
+      UPDATE slots
+      SET x_user_id = CASE WHEN x_user_id = ${source} THEN ${target} ELSE x_user_id END,
+          reserved_x_id_snapshot = CASE
+            WHEN lower(trim(ltrim(trim(reserved_x_id_snapshot), '@'))) = lower(${source})
+            THEN ${target}
+            ELSE reserved_x_id_snapshot
+          END,
+          updated_at = ${now},
+          version = version + 1
+      WHERE x_user_id = ${source}
+         OR lower(trim(ltrim(trim(reserved_x_id_snapshot), '@'))) = lower(${source})
+    `),
+    db.run(sql`UPDATE slot_reservation_groups SET x_user_id = ${target}, updated_at = ${now}, version = version + 1 WHERE x_user_id = ${source}`),
+    db.run(sql`UPDATE video_moderation_cases SET related_x_user_id = ${target} WHERE related_x_user_id = ${source}`),
     db.run(sql`UPDATE video_interactions SET x_user_id = ${target} WHERE x_user_id = ${source}`),
     db.run(sql`UPDATE event_staff SET x_user_id = ${target}, updated_at = ${now} WHERE x_user_id = ${source}`),
     db.run(sql`UPDATE x_user_aliases SET x_user_id = ${target} WHERE x_user_id = ${source}`),
@@ -433,13 +493,18 @@ export async function executeApprovedXIdMergeRequest(
     db.run(sql`
       UPDATE "user"
       SET active_x_user_id = ${target}
-      WHERE active_x_user_id = ${source}
+      WHERE lower(trim(ltrim(trim(active_x_user_id), '@'))) = lower(${source})
     `),
     db.run(sql`
       UPDATE x_users
       SET approval_status = 'rejected'
       WHERE id = ${source}
         AND approval_status IS ${snapshot.source_x_user.approval_status}
+        AND EXISTS (
+          SELECT 1 FROM x_users
+          WHERE id = ${target}
+            AND approval_status IS ${snapshot.target_x_user.approval_status}
+        )
     `),
     db.run(sql`
       UPDATE x_identity_requests
@@ -520,6 +585,8 @@ export async function executeApprovedXIdMergeRequest(
       snapshot.video_chapters.length,
       snapshot.video_members.length,
       snapshot.slots.length,
+      snapshot.slot_reservation_groups?.length ?? 0,
+      snapshot.video_moderation_cases?.length ?? 0,
       sourceInteractions.length - interactionCollisions.length,
       sourceStaff.length - collidedStaff.length,
       sourceAliases.length - aliasCollisions.length,
@@ -645,7 +712,9 @@ export async function restoreApprovedXIdMergeRevertRequest(
     throw new Error("親統合申請と復元snapshotのX名義が一致しません。");
   }
   const snapshotJson = JSON.stringify(snapshot);
-  const activeSourceUsers = snapshot.active_users.filter((row) => row.active_x_user_id === source);
+  const activeSourceUsers = snapshot.active_users.filter(
+    (row) => normalizeXId(row.active_x_user_id) === source,
+  );
 
   const statements = [
     db.run(sql`
@@ -664,9 +733,38 @@ export async function restoreApprovedXIdMergeRevertRequest(
         AND id IN (SELECT json_extract(value, '$.id') FROM json_each(${snapshotJson}, '$.video_members'))
     `),
     db.run(sql`
-      UPDATE slots SET x_user_id = ${source}
+      UPDATE slots SET
+        x_user_id = (
+          SELECT json_extract(value, '$.x_user_id')
+          FROM json_each(${snapshotJson}, '$.slots')
+          WHERE json_extract(value, '$.id') = slots.id
+        ),
+        reserved_x_id_snapshot = (
+          SELECT json_extract(value, '$.reserved_x_id_snapshot')
+          FROM json_each(${snapshotJson}, '$.slots')
+          WHERE json_extract(value, '$.id') = slots.id
+        )
+      WHERE id IN (SELECT json_extract(value, '$.id') FROM json_each(${snapshotJson}, '$.slots'))
+        AND (
+          x_user_id = ${target}
+          OR lower(trim(ltrim(trim(reserved_x_id_snapshot), '@'))) = lower(${target})
+        )
+    `),
+    db.run(sql`
+      UPDATE slot_reservation_groups SET x_user_id = ${source}, version = version + 1
       WHERE x_user_id = ${target}
-        AND id IN (SELECT json_extract(value, '$.id') FROM json_each(${snapshotJson}, '$.slots'))
+        AND id IN (
+          SELECT json_extract(value, '$.id')
+          FROM json_each(${snapshotJson}, '$.slot_reservation_groups')
+        )
+    `),
+    db.run(sql`
+      UPDATE video_moderation_cases SET related_x_user_id = ${source}
+      WHERE related_x_user_id = ${target}
+        AND id IN (
+          SELECT json_extract(value, '$.id')
+          FROM json_each(${snapshotJson}, '$.video_moderation_cases')
+        )
     `),
     db.run(sql`
       DELETE FROM video_interactions
@@ -738,19 +836,29 @@ export async function restoreApprovedXIdMergeRevertRequest(
     `),
     db.run(sql`
       UPDATE "user"
-      SET active_x_user_id = ${source}
+      SET active_x_user_id = (
+        SELECT json_extract(value, '$.active_x_user_id')
+        FROM json_each(${snapshotJson}, '$.active_users')
+        WHERE json_extract(value, '$.id') = "user".id
+      )
       WHERE active_x_user_id = ${target}
         AND id IN (SELECT json_extract(value, '$.id') FROM json_each(${snapshotJson}, '$.active_users'))
         AND id IN (
           SELECT json_extract(value, '$.id')
           FROM json_each(${snapshotJson}, '$.active_users')
-          WHERE json_extract(value, '$.active_x_user_id') = ${source}
+          WHERE lower(trim(ltrim(trim(json_extract(value, '$.active_x_user_id')), '@'))) = lower(${source})
         )
     `),
     db.run(sql`
       UPDATE x_users
       SET approval_status = ${snapshot.source_x_user.approval_status}
-      WHERE id = ${source} AND approval_status = 'rejected'
+      WHERE id = ${source}
+        AND approval_status = 'rejected'
+        AND EXISTS (
+          SELECT 1 FROM x_users
+          WHERE id = ${target}
+            AND approval_status IS ${snapshot.target_x_user.approval_status}
+        )
     `),
     db.run(sql`
       UPDATE x_identity_requests
@@ -810,6 +918,8 @@ export async function restoreApprovedXIdMergeRevertRequest(
       snapshot.video_chapters.length,
       snapshot.video_members.length,
       snapshot.slots.length,
+      snapshot.slot_reservation_groups?.length ?? 0,
+      snapshot.video_moderation_cases?.length ?? 0,
       null,
       snapshot.video_interactions.length,
       null,

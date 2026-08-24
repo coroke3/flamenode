@@ -52,8 +52,9 @@ test("kill switch: PUBLIC_DEGRADED_D1_ENABLED=0 disables degraded D1", () => {
 
 test("degraded D1 circuit breaker blocks fallback when KV reports open", () => {
   assert.match(loaderSource, /isDegradedD1CircuitOpen/);
-  assert.match(loaderSource, /recordDegradedCircuitR2Miss/);
-  assert.match(loaderSource, /recordDegradedCircuitR2Hit/);
+  assert.match(loaderSource, /recordDegradedCircuitR2MissBestEffort/);
+  assert.match(loaderSource, /recordDegradedCircuitR2HitBestEffort/);
+  assert.doesNotMatch(loaderSource, /void\s+recordDegradedCircuitR2(?:Miss|Hit)\(/);
 });
 
 test("degraded users SQL has no correlated subquery and LIMIT 48", () => {

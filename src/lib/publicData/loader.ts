@@ -148,8 +148,8 @@ import {
 import { canAttemptDegradedD1 } from "./degradedPolicy";
 import {
   isDegradedD1CircuitOpen,
-  recordDegradedCircuitR2Hit,
-  recordDegradedCircuitR2Miss,
+  recordDegradedCircuitR2HitBestEffort,
+  recordDegradedCircuitR2MissBestEffort,
 } from "./degradedCircuitBreaker";
 import {
   fetchDegradedEventDetailPayload,
@@ -711,7 +711,7 @@ export async function loadPublicJson<T>(
     visibility.artifactContext,
   );
   if (payload !== null) {
-    void recordDegradedCircuitR2Hit();
+    recordDegradedCircuitR2HitBestEffort();
     if (options.isEmptyCollection?.(payload)) {
       return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
     }
@@ -731,7 +731,7 @@ export async function loadPublicJson<T>(
     return buildStaticHitResult(payload, "static", strategy);
   }
 
-  void recordDegradedCircuitR2Miss();
+  recordDegradedCircuitR2MissBestEffort();
   if (
     r2First &&
     options.allowStaleCacheFallback !== false &&
@@ -1402,7 +1402,7 @@ export async function loadPublicEventVideosPage(params: {
       visibility.artifactContext,
     );
     if (payload !== null) {
-      void recordDegradedCircuitR2Hit();
+      recordDegradedCircuitR2HitBestEffort();
       const strategy = getPublicDataStrategy(
         await resolvePublicOperationMode({ allowD1: false }),
       );
@@ -1483,7 +1483,7 @@ export async function loadPublicEventVideosPage(params: {
 
   if (needsHeal) {
     if (baseResult.payload === null) {
-      void recordDegradedCircuitR2Miss();
+      recordDegradedCircuitR2MissBestEffort();
     }
     const miss = await resolvePublicJsonMiss(missOptions);
     missMeta = {

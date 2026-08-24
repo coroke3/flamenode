@@ -483,7 +483,7 @@ export async function runSyncJobs(
               playlist,
             );
             if (!playlistCounters.quota_stopped) {
-              await maybeContinueYoutubePlaylistSync(env, signal);
+              await maybeContinueYoutubePlaylistSync(budgetEnv, signal);
             }
             return playlistCounters;
           }
