@@ -17,8 +17,20 @@
 }
 
 .editable {
-  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-subtle));
-  background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-surface));
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.editable.privilegedEditable {
+  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.mixed {
+  border-color: color-mix(in srgb, var(--accent-warning) 52%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-warning-soft) 82%, var(--bg-surface));
   color: var(--text-primary);
 }
 

@@ -31,6 +31,7 @@ import {
   EVENT_RELEASE_SCHEMA_VERSION,
   eventReleaseObjectKey,
 } from "../../src/lib/publicData/staticEventReleaseCore.ts";
+import { eventPlaylistObjectKey } from "../../src/lib/publicData/staticEventPlaylistCore.ts";
 import { jstDayKey, resolveNostalgicDisplaySelection } from "../../src/lib/publicData/topNostalgicDaily.ts";
 import { YOUTUBE_SYNCED_PLAYABLE_SQL } from "../../src/lib/publicData/youtubeSyncedPlayableSql.ts";
 import {
@@ -255,6 +256,10 @@ const EVENT_DETAIL_COLUMNS = `
   max_slots_per_video, slot_part_gap_minutes,
   parts_json,
   start_time, end_time, entry_start_time, entry_end_time,
+  (SELECT playlist_id
+   FROM event_youtube_playlist_sync
+   WHERE event_id = events.id
+   LIMIT 1) AS youtube_playlist_id,
   visibility_status, updated_at
 `;
 
@@ -1750,7 +1755,7 @@ async function releaseVisibilityFenceAfterRebuild(
       `SELECT target_type, source_updated_at
        FROM static_artifacts
        WHERE target_id = ?
-         AND target_type IN ('event_base', 'event_slots', 'event_release')
+         AND target_type IN ('event_base', 'event_slots', 'event_release', 'event_playlist')
          AND deleted_at IS NULL`,
     )
       .bind(entityId)
@@ -1764,7 +1769,8 @@ async function releaseVisibilityFenceAfterRebuild(
     if (
       (sourceByTarget.get("event_base") ?? 0) < currentUpdatedAt ||
       (sourceByTarget.get("event_slots") ?? 0) < currentUpdatedAt ||
-      (sourceByTarget.get("event_release") ?? 0) < currentUpdatedAt
+      (sourceByTarget.get("event_release") ?? 0) < currentUpdatedAt ||
+      (sourceByTarget.get("event_playlist") ?? 0) < currentUpdatedAt
     ) {
       return;
     }
@@ -1954,6 +1960,7 @@ async function removeAllEventArtifacts(
   await removeTrackedArtifacts(env, "event_base", eventId, 20, signal);
   await removeTrackedArtifacts(env, "event_slots", eventId, 20, signal);
   await removeTrackedArtifacts(env, "event_release", eventId, 20, signal);
+  await removeTrackedArtifacts(env, "event_playlist", eventId, 20, signal);
   // Older rows may have lost their static_artifacts bookkeeping. Delete the
   // canonical keys explicitly so an old event ID cannot remain reachable just
   // because its tracking row is missing.
@@ -1962,6 +1969,7 @@ async function removeAllEventArtifacts(
     eventBaseObjectKey(eventId),
     eventSlotsObjectKey(eventId),
     eventReleaseObjectKey(eventId),
+    eventPlaylistObjectKey(eventId),
   ]) {
     throwIfAborted(signal);
     await env.R2.delete(key);
@@ -2058,7 +2066,7 @@ async function rebuildEventBase(
               v.scheduled_time, v.part, COALESCE(v.score, 0) AS score
        FROM videos AS v
        WHERE ${eventVideoWhere}
-       ORDER BY v.scheduled_time ASC, v.id ASC
+       ORDER BY v.scheduled_time IS NULL ASC, v.scheduled_time ASC, v.id ASC
        LIMIT 501`,
     )
       .bind(eventId, eventId)
@@ -2950,13 +2958,19 @@ async function rebuildVideo(
       `SELECT e.id, e.title, e.icon_url, e.accent_color,
               e.start_time, e.end_time, e.entry_start_time, e.entry_end_time,
               e.visibility_status
-       FROM video_events AS ve
-       INNER JOIN events AS e
-         ON e.id = ve.event_id AND e.visibility_status = 'public'
-       WHERE ve.video_id = ?
+       FROM events AS e
+       WHERE e.visibility_status = 'public'
+         AND (
+           EXISTS (
+             SELECT 1
+             FROM video_events AS ve
+             WHERE ve.video_id = ? AND ve.event_id = e.id
+           )
+           OR e.id = ?
+         )
        ORDER BY e.start_time DESC, e.id ASC`,
     )
-      .bind(internalVideoId)
+      .bind(internalVideoId, (row as { primary_event_id?: string | null }).primary_event_id ?? null)
       .all(),
     env.DB.prepare(
       `SELECT vm.id, vm.name AS display_name, vm.x_user_id,

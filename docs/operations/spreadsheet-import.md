@@ -17,7 +17,7 @@
 - tokenの有効期限は5分。`spreadsheet_import_runs`へnonceを保存する。
 - applyは署名と全claimsを再検証し、nonceの条件付き消費、本体mutation、監査、対象tableから導出した静的JSON再生成キューを同じD1 batchで実行する。
 - tokenは一回限り。期限切れ、別実行者、table/mode/payload/schema変更、二重applyを拒否する。
-- D1 query/bind安全枠、nonce guard、最大4件の静的再生成queue statementを含め、1回のapplyは最大11行。previewは最大500行で、分割applyする。
+- D1 query/bind安全枠、nonce guard、最大4件の静的再生成queue statementを含め、1回のapplyは最大7行。previewは最大500行で、分割applyする。
 - 静的再生成plannerは1回につき最大16 targetとし、超過時は本体を書き込まず行の分割を要求する。
 
 ## cleanup

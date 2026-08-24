@@ -221,6 +221,12 @@ test("member_suggestions dirty登録は本体mutationと同じatomic writeへ含
   assert.match(body, /staticRebuildWakeSource/);
 });
 
+test("新規pending X ID作成時はusers_indexも同じqueue batchへ含める", () => {
+  const body = functionBody("applyPermissionIntentsToVideo");
+  assert.match(body, /newXUsers\.length > 0/);
+  assert.match(body, /targetType: "users_index"/);
+});
+
 test("single grant/revokeとTSV batchは同じpermission mutation正本を使う", () => {
   for (const name of [
     "upsertVideoCollaborator",

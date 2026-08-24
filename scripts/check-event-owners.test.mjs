@@ -27,7 +27,7 @@ CREATE TABLE event_staff (
 );
 CREATE UNIQUE INDEX event_staff_event_x_uniq ON event_staff(event_id, x_user_id);
 CREATE TABLE flamenode_schema_meta (id TEXT PRIMARY KEY, version TEXT NOT NULL);
-INSERT INTO flamenode_schema_meta VALUES ('current', '2026-07-20-canonical-1');
+INSERT INTO flamenode_schema_meta VALUES ('current', '2026-08-24-observability-1');
 `;
 
 function runCheck(databasePath) {
@@ -217,7 +217,7 @@ function seedHealthy(db) {
 test("ローカルD1はcanonical schema versionの候補を一意に選ぶ", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owner-resolve-"));
   fs.writeFileSync(path.join(dir, "metadata.sqlite"), "");
-  const expected = makeCandidate(dir, "canonical.sqlite", "2026-07-20-canonical-1");
+  const expected = makeCandidate(dir, "canonical.sqlite", "2026-08-24-observability-1");
   makeCandidate(dir, "legacy.sqlite", "2026-07-11-baseline-1");
   assert.equal(findLocalD1Database(dir), expected);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -230,8 +230,8 @@ test("canonical候補が0件または複数ならfail-closed", () => {
   fs.rmSync(emptyDir, { recursive: true, force: true });
 
   const multiDir = fs.mkdtempSync(path.join(os.tmpdir(), "owner-resolve-"));
-  makeCandidate(multiDir, "one.sqlite", "2026-07-20-canonical-1");
-  makeCandidate(multiDir, "two.sqlite", "2026-07-20-canonical-1");
+  makeCandidate(multiDir, "one.sqlite", "2026-08-24-observability-1");
+  makeCandidate(multiDir, "two.sqlite", "2026-08-24-observability-1");
   assert.equal(findLocalD1Database(multiDir), null);
   fs.rmSync(multiDir, { recursive: true, force: true });
 });
@@ -239,7 +239,7 @@ test("canonical候補が0件または複数ならfail-closed", () => {
 test("明示databaseはローカル候補より優先される", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "owner-resolve-"));
   const explicit = path.join(dir, "explicit.sqlite");
-  makeCandidate(dir, "canonical.sqlite", "2026-07-20-canonical-1");
+  makeCandidate(dir, "canonical.sqlite", "2026-08-24-observability-1");
   assert.equal(resolveDatabasePath({ explicit, rootDir: dir }), explicit);
   fs.rmSync(dir, { recursive: true, force: true });
 });

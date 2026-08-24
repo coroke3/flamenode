@@ -1,13 +1,18 @@
 .section {
   background-color: var(--bg-surface);
   border: 1px solid var(--hairline, var(--border-subtle));
-  border-radius: 0;
+  border-radius: var(--r-card, var(--radius-md));
   padding: 16px 18px 18px;
   overflow: hidden;
 }
 
 .permissionSectionLocked {
   border-color: color-mix(in srgb, var(--border-subtle) 80%, var(--text-muted));
+}
+
+.permissionSectionLocked:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--text-muted) 22%, transparent);
+  outline-offset: 2px;
 }
 
 .header {
@@ -33,19 +38,10 @@
   gap: 8px;
 }
 
-.lockBanner {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.lockIcon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--text-muted);
-}
-
 .content {
   min-width: 0;
+}
+
+.section[data-permission-state="locked"] .content {
+  margin-top: 14px;
 }

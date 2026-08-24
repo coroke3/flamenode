@@ -7,7 +7,6 @@ import { fetchPublicAnnouncements } from "@/lib/db/announcementQueries";
 import {
   countablePublicVideoCondition,
   eventPublicVideoLinkCondition,
-  excludePvsfSummaryVideos,
 } from "@/lib/db/queries";
 import {
   eventStaff,
@@ -468,15 +467,15 @@ export async function fetchDegradedEventDetailPayload(
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
-    .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
     .where(
       and(
-        eq(videoEvents.event_id, eventId),
-        eq(videos.visibility_status, "public"),
-        excludePvsfSummaryVideos(),
+        countablePublicVideoCondition,
+        eventPublicVideoLinkCondition(eventId),
       )!,
     )
-    .orderBy(desc(videos.scheduled_time))
+    .orderBy(
+      sql`${videos.scheduled_time} IS NULL ASC, ${videos.scheduled_time} ASC, ${videos.id} ASC`,
+    )
     .limit(50);
 
   noteQuery();
@@ -536,6 +535,20 @@ export async function fetchDegradedVideoDetailPayload(
   if (!video || video.visibility_status !== "public") return null;
 
   noteQuery();
+  const linkedPublicEvent = exists(
+    db
+      .select({ one: sql`1` })
+      .from(videoEvents)
+      .where(
+        and(
+          eq(videoEvents.video_id, video.id),
+          eq(videoEvents.event_id, events.id),
+        )!,
+      ),
+  );
+  const primaryPublicEvent = video.primary_event_id
+    ? eq(events.id, video.primary_event_id)
+    : sql`0`;
   const publicEvents = await db
     .select({
       id: events.id,
@@ -549,11 +562,10 @@ export async function fetchDegradedVideoDetailPayload(
       visibility_status: events.visibility_status,
     })
     .from(events)
-    .innerJoin(videoEvents, eq(videoEvents.event_id, events.id))
     .where(
       and(
-        eq(videoEvents.video_id, video.id),
         eq(events.visibility_status, "public"),
+        or(linkedPublicEvent, primaryPublicEvent),
       )!,
     )
     .limit(10);

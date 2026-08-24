@@ -1,5 +1,6 @@
 export const EVENT_PLAYLIST_SCHEMA_VERSION = 1;
 export const EVENT_PLAYLIST_MAX_ITEMS = 500;
+export const EVENT_PLAYLIST_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 
 export type StaticEventPlaylistItem = {
   id: string;

@@ -23,12 +23,15 @@ interface VideoCardProps {
   video: VideoCardData;
   size?: "default" | "compact" | "list";
   href?: string;
+  /** Optional page-specific metadata (for example an event's publish time). */
+  secondaryMeta?: React.ReactNode;
 }
 
 export function VideoCard({
   video,
   size = "default",
   href,
+  secondaryMeta,
 }: VideoCardProps): React.ReactElement {
   const link = href ?? `/${video.youtube_video_id?.trim() || video.id}`;
   const thumb = youtubeThumbUrl(video.youtube_video_id, "mqdefault");
@@ -100,6 +103,9 @@ export function VideoCard({
             </span>
             <span>{video.display_name}</span>
           </div>
+          {secondaryMeta ? (
+            <div className={styles.secondaryMeta}>{secondaryMeta}</div>
+          ) : null}
         </div>
       </div>
     </Link>

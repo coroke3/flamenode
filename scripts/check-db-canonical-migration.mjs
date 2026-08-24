@@ -8,6 +8,7 @@ const root = process.cwd();
 const migrationsDir = path.join(root, "migrations");
 const migrationName = "0043_db_canonical_migration.sql";
 const canonicalVersion = "2026-07-20-canonical-1";
+const runtimeVersion = "2026-08-24-observability-1";
 const legacyVersion = "2026-07-11-baseline-1";
 const migrationSql = fs.readFileSync(path.join(migrationsDir, migrationName), "utf8");
 const activeMigrations = fs
@@ -122,8 +123,8 @@ function assertCanonicalShape(db) {
     .all()
     .map((row) => String(row.name));
   const columnCount = tables.reduce((total, tableName) => total + columns(db, tableName).length, 0);
-  assert.equal(tables.length, 44, "canonical table count");
-  assert.equal(columnCount, 444, "canonical column count");
+  assert.equal(tables.length, 46, "canonical table count");
+  assert.equal(columnCount, 473, "canonical column count");
   for (const tableName of removedTables) assert.equal(tableExists(db, tableName), false, tableName);
   for (const [tableName, columnName] of deletedColumns) {
     assert.equal(
@@ -138,7 +139,7 @@ function assertCanonicalShape(db) {
   assert.equal(columns(db, "video_members").some((column) => column.name === "edit_granted_by_auth_user_id"), true);
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   assert.equal(db.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
-  assert.equal(schemaVersion(db), canonicalVersion);
+  assert.equal(schemaVersion(db), runtimeVersion);
 }
 
 function seedLegacyFixture(db) {

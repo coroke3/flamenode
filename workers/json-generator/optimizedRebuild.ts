@@ -4,7 +4,10 @@ import {
   staticArtifactContentHash,
   type ArtifactHashCache,
 } from "./r2Dedup.ts";
-import { enqueueComposerFollowUps } from "./followUpEnqueue.ts";
+import {
+  enqueueComposerFollowUps,
+  enqueuePerTargetComposerFollowUp,
+} from "./followUpEnqueue.ts";
 import { rebuildTarget } from "./rebuild.ts";
 import { rebuildUsersIndexV2FromLegacyArtifact } from "./usersIndexV2Artifacts.ts";
 import {
@@ -23,6 +26,7 @@ import {
 } from "../../src/lib/publicData/staticRecommendCore.ts";
 import {
   EVENT_PLAYLIST_MAX_ITEMS,
+  EVENT_PLAYLIST_MAX_OBJECT_BYTES,
   EVENT_PLAYLIST_SCHEMA_VERSION,
   eventPlaylistObjectKey,
 } from "../../src/lib/publicData/staticEventPlaylistCore.ts";
@@ -180,6 +184,7 @@ async function recordArtifact(
   objectKey: string,
   serialized: string,
   signal?: AbortSignal,
+  sourceUpdatedAt?: number | null,
 ): Promise<void> {
   throwIfAborted(signal);
   const contentHash = await staticArtifactContentHash(serialized);
@@ -189,10 +194,11 @@ async function recordArtifact(
     `INSERT INTO static_artifacts
        (id, target_type, target_id, object_key, content_hash, schema_version,
         source_updated_at, generated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
      ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
        content_hash = excluded.content_hash,
        schema_version = excluded.schema_version,
+       source_updated_at = excluded.source_updated_at,
        generated_at = excluded.generated_at,
        deleted_at = NULL`,
   )
@@ -203,6 +209,7 @@ async function recordArtifact(
       objectKey,
       contentHash,
       STATIC_ARTIFACT_SCHEMA_VERSION,
+      sourceUpdatedAt ?? null,
       now,
     )
     .run();
@@ -217,6 +224,7 @@ async function putTrackedJson(
   targetType: string,
   targetId = "global",
   signal?: AbortSignal,
+  sourceUpdatedAt?: number | null,
 ): Promise<void> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
@@ -244,6 +252,7 @@ async function putTrackedJson(
     objectKey,
     serialized,
     signal,
+    sourceUpdatedAt,
   );
 }
 
@@ -480,10 +489,10 @@ async function syncEventPlaylistArtifact(
   throwIfAborted(signal);
   const objectKey = eventPlaylistObjectKey(eventId);
   const event = await env.DB.prepare(
-    `SELECT visibility_status FROM events WHERE id = ? LIMIT 1`,
+    `SELECT visibility_status, updated_at FROM events WHERE id = ? LIMIT 1`,
   )
     .bind(eventId)
-    .first<{ visibility_status?: string }>();
+    .first<{ visibility_status?: string; updated_at?: number }>();
   throwIfAborted(signal);
   if (event?.visibility_status !== "public") {
     await markEventPlaylistDeleted(env, eventId, objectKey);
@@ -498,13 +507,19 @@ async function syncEventPlaylistArtifact(
        COALESCE(NULLIF(TRIM(v.creator_display_name), ''), v.creator_x_user_id) AS display_name,
        v.scheduled_time
      FROM videos AS v
-     INNER JOIN video_events AS ve ON ve.video_id = v.id
-     WHERE ve.event_id = ?
-       AND v.visibility_status = 'public'
-     ORDER BY v.scheduled_time ASC
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+       AND (
+         EXISTS (
+           SELECT 1 FROM video_events AS event_video_links
+           WHERE event_video_links.video_id = v.id
+             AND event_video_links.event_id = ?
+         )
+         OR v.primary_event_id = ?
+       )
+     ORDER BY v.scheduled_time IS NULL ASC, v.scheduled_time ASC, v.id ASC
      LIMIT ?`,
   )
-    .bind(eventId, EVENT_PLAYLIST_MAX_ITEMS + 1)
+    .bind(eventId, eventId, EVENT_PLAYLIST_MAX_ITEMS + 1)
     .all<Record<string, unknown>>();
   throwIfAborted(signal);
   const rows = result.results ?? [];
@@ -520,20 +535,29 @@ async function syncEventPlaylistArtifact(
   if (items.some((item) => !item.id || !item.title || !item.display_name)) {
     throw new Error("event_playlist_contains_invalid_public_video");
   }
+  const playlistPayload = {
+    schema_version: EVENT_PLAYLIST_SCHEMA_VERSION,
+    generated_at: Math.floor(Date.now() / 1000),
+    event_id: eventId,
+    complete,
+    items,
+  };
+  const serializedPlaylist = JSON.stringify(playlistPayload);
+  if (
+    new TextEncoder().encode(serializedPlaylist).byteLength >
+    EVENT_PLAYLIST_MAX_OBJECT_BYTES
+  ) {
+    throw new Error("event_playlist_object_too_large");
+  }
   await putTrackedJson(
     env,
     objectKey,
-    {
-      schema_version: EVENT_PLAYLIST_SCHEMA_VERSION,
-      generated_at: Math.floor(Date.now() / 1000),
-      event_id: eventId,
-      complete,
-      items,
-    },
+    playlistPayload,
     staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.eventDetail),
     "event_playlist",
     eventId,
     signal,
+    Number(event?.updated_at ?? 0) || null,
   );
 }
 
@@ -566,6 +590,21 @@ export async function optimizedRebuildTarget(
   }
   if (targetType === "event_base") {
     await syncEventPlaylistArtifact(env, targetId, signal);
+    // rebuildTarget enqueues the event composer before this optimized
+    // playlist projection runs.  A concurrent queue consumer can therefore
+    // finish the composer while event_playlist is still stale, leaving a
+    // release_pending visibility fence stranded.  Bump/insert the composer
+    // after the playlist write as a bounded, idempotent follow-up; the unique
+    // pending/processing target index coalesces the usual non-racing case.
+    const composerFollowUpPending = await enqueuePerTargetComposerFollowUp(
+      env,
+      "event_base",
+      targetId,
+    );
+    return {
+      ...result,
+      followUpPending: result.followUpPending || composerFollowUpPending,
+    };
   }
   return result;
 }

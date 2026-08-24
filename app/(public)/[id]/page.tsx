@@ -80,6 +80,9 @@ import {
   resolveProjectedIcon,
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
+import { loadPublicEventYoutubePlaylistIdR2Only } from "@/lib/publicData/r2EventPlaylist";
+import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
+import { isLiveApiEnabled } from "@/lib/operationMode/policy";
 
 export const dynamic = "force-dynamic";
 
@@ -132,6 +135,15 @@ export default async function VideoDetailPage({
   const staticProbe = await loadStaticVideoDetail(rawId);
   if (staticProbe.data) {
     const detail = await filterBlockedVideoEvents(staticProbe.data);
+    const primaryEventForPlaylist = detail.publicEvents.find(
+      (event) => event.id === detail.video.primary_event_id,
+    );
+    const youtubePlaylistId =
+      detail.video.scheduled_time != null &&
+      detail.video.scheduled_time > Math.floor(Date.now() / 1000) &&
+      primaryEventForPlaylist
+        ? await loadPublicEventYoutubePlaylistIdR2Only(primaryEventForPlaylist.id)
+        : null;
     const overlay = await fetchVideoViewerOverlay({
       rawId,
       videoId: detail.video.id,
@@ -221,6 +233,7 @@ export default async function VideoDetailPage({
         rawId={rawId}
         playlist={playlist}
         overlay={overlay}
+        youtubePlaylistId={youtubePlaylistId}
         relatedSharedStatus={relatedSharedStatus}
         relatedBlockedIds={blocklist.value.blockedIds}
         relatedFallbackPool={relatedFallbackPool}
@@ -304,6 +317,14 @@ async function fetchVideoViewerOverlay({
     playlistLabel: "再生リスト",
     playlistItems: [],
   };
+
+  // Resolve this before Auth.js as well as before withDatabase.  A
+  // static_only/maintenance request must not spend an auth adapter or D1 read
+  // merely because a signed-in cookie or an event playlist query is present.
+  const operationMode = await resolvePublicOperationMode({ allowD1: false });
+  if (!isLiveApiEnabled(operationMode)) {
+    return { ...emptyOverlay };
+  }
 
   let viewerUser: Awaited<ReturnType<typeof getCurrentUser>> = null;
   let authUnavailable = false;
@@ -499,6 +520,7 @@ async function fetchVideoViewerOverlay({
 function StaticVideoDetailView({
   detail,
   rawId,
+  youtubePlaylistId = null,
   playlist = "",
   overlay,
   relatedSharedStatus = "unavailable",
@@ -508,6 +530,7 @@ function StaticVideoDetailView({
 }: {
   detail: StaticVideoDetail;
   rawId: string;
+  youtubePlaylistId?: string | null;
   playlist?: string;
   overlay?: VideoViewerOverlay | null;
   relatedSharedStatus?: "fresh" | "stale" | "unavailable";
@@ -547,6 +570,9 @@ function StaticVideoDetailView({
   const youtubeVideoId = video.youtube_video_id?.trim() || null;
   const youtubeId = extractYoutubeId(youtubeVideoId);
   const primaryEvent = vm.primaryEvent;
+  const youtubePlaylistHref = youtubePlaylistId
+    ? `https://www.youtube.com/playlist?list=${encodeURIComponent(youtubePlaylistId)}`
+    : null;
   const primaryEventStatus = primaryEvent ? computeEventStatus(primaryEvent) : null;
   const accentVar = primaryEvent?.accent_color
     ? buildAccentVars(primaryEvent.accent_color, "dark")
@@ -793,6 +819,16 @@ function StaticVideoDetailView({
                   ) : null}
                   {isAcceptingEntries(primaryEvent) ? (
                     <span className="fn-badge fn-badge-soft">受付中</span>
+                  ) : null}
+                  {youtubePlaylistHref ? (
+                    <a
+                      href={youtubePlaylistHref}
+                      className={styles.eventBoxPlaylist}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      YouTube再生リスト
+                    </a>
                   ) : null}
                 </div>
               ) : null}

@@ -9,6 +9,7 @@ import {
   sortXIdEntries,
   type XIdEntry,
 } from "@/lib/xid/entries";
+import { resolveAccountMenuDisplayName } from "@/lib/account/accountMenuDisplay";
 import { useActiveXSwitcher } from "./useActiveXSwitcher";
 
 export interface AccountMenuUser {
@@ -22,6 +23,7 @@ export interface AccountMenuUser {
     manageableEventCount?: number;
   };
   xIds: XIdEntry[];
+  degraded?: true;
 }
 
 interface AccountMenuProps {
@@ -83,7 +85,11 @@ export function AccountMenu({
   }, [open, setOpen]);
 
   const triggerIcon = activeEntry?.icon_url ?? user.image;
-  const triggerName = activeEntry?.x_name ?? (user.name?.trim() || "guest");
+  const triggerName = resolveAccountMenuDisplayName({
+    accountName: user.name,
+    activeEntry,
+    degraded: user.degraded === true,
+  });
   const publicProfileHref =
     activeEntry?.approval_status === "approved"
       ? `/user/${encodeURIComponent(activeEntry.x_user_id)}`

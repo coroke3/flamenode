@@ -56,6 +56,7 @@ test("cleanupはsystem_settings.audit_*だけを設定正本として使う", as
   assert.doesNotMatch(sql, /priority_reclaim_until/);
   assert.match(sql, /DELETE FROM notification_outbox/);
   assert.match(sql, /DELETE FROM spreadsheet_import_runs/);
+  assert.match(sql, /DELETE FROM event_youtube_playlist_sync_runs/);
   assert.match(sql, /DELETE FROM audit_logs/);
   const compact = recorder.find((entry) =>
     entry.sql.includes("before_json = NULL"),
@@ -108,8 +109,8 @@ test("設定読取の一時エラーは既定値へフォールバックしclean
 });
 
 test("cleanup changes sum", async () => {
-  const { env } = makeEnv({ changes: [1, 2, 3, 5, 8, 13] });
-  assert.equal(await runCleanup(env), 32);
+  const { env } = makeEnv({ changes: [1, 2, 3, 5, 7, 8, 13, 21] });
+  assert.equal(await runCleanup(env), 60);
 });
 
 test("cleanup retries once and reports metrics", async () => {
@@ -132,7 +133,7 @@ test("cleanup retries once and reports metrics", async () => {
     },
   };
   assert.deepEqual(await runCleanupWithRetry(env), {
-    processed: 1, failed: 0, d1_changes: 24, retry_count: 1,
+    processed: 1, failed: 0, d1_changes: 32, retry_count: 1,
     external_api_calls: 0, quota_stopped: false,
   });
 });

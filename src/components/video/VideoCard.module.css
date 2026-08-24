@@ -66,6 +66,13 @@
   color: var(--overlay-ink);
 }
 
+.secondaryMeta {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .list {
   display: flex;
   gap: 10px;

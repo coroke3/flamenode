@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { requireSession } from "@/lib/auth/guard";
 import {
@@ -13,7 +13,10 @@ import {
 } from "@/lib/auth/manageAuthorization";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
 import {
+  eventYoutubePlaylistItems,
   eventYoutubePlaylistSync,
+  videoEvents,
+  videos as videosTable,
 } from "@/lib/db/schema";
 import {
   queueEventYoutubePlaylistSync,
@@ -22,6 +25,10 @@ import {
 import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { formatUnix } from "@/lib/utils/format";
+import {
+  derivePlaylistSyncHealth,
+  type PlaylistSyncHealthLevel,
+} from "@/lib/youtube/playlistSyncHealth";
 
 export const metadata: Metadata = { title: "YouTube再生リスト同期" };
 export const dynamic = "force-dynamic";
@@ -75,6 +82,21 @@ function statusClass(status: string | null | undefined): string {
   return "fn-badge-soft";
 }
 
+function healthClass(level: PlaylistSyncHealthLevel): string {
+  if (level === "critical") return "fn-badge-danger";
+  if (level === "warn" || level === "running") return "fn-badge-warning";
+  if (level === "ok") return "fn-badge-accent";
+  return "fn-badge-soft";
+}
+
+function healthLabel(level: PlaylistSyncHealthLevel): string {
+  if (level === "critical") return "要対応";
+  if (level === "warn") return "注意";
+  if (level === "running") return "実行中";
+  if (level === "ok") return "正常";
+  return "未確認";
+}
+
 export default async function EventYoutubePlaylistPage({
   params,
   searchParams,
@@ -105,13 +127,60 @@ export default async function EventYoutubePlaylistPage({
     id,
     "event.publish",
   );
-  const config = (
-    await db
+  const [configRows, countRows] = await Promise.all([
+    db
       .select()
       .from(eventYoutubePlaylistSync)
       .where(eq(eventYoutubePlaylistSync.event_id, id))
-      .limit(1)
-  )[0];
+      .limit(1),
+    db
+      .select({
+        linked_count: sql<number>`COUNT(DISTINCT CASE
+          WHEN ${videosTable.id} IS NOT NULL
+           AND ${videosTable.visibility_status} <> 'voided'
+          THEN ${videosTable.id} END)`,
+        eligible_count: sql<number>`COUNT(DISTINCT CASE
+          WHEN ${videosTable.visibility_status} = 'public'
+           AND ${videosTable.youtube_video_id} IS NOT NULL
+           AND ${videosTable.youtube_video_id} <> ''
+          THEN ${videosTable.id} END)`,
+        synced_count: sql<number>`COUNT(DISTINCT CASE
+          WHEN ${eventYoutubePlaylistItems.playlist_item_id} IS NOT NULL
+           AND ${videosTable.visibility_status} = 'public'
+          THEN ${videosTable.id} END)`,
+      })
+      .from(videoEvents)
+      .leftJoin(videosTable, eq(videosTable.id, videoEvents.video_id))
+      .leftJoin(
+        eventYoutubePlaylistItems,
+        and(
+          eq(eventYoutubePlaylistItems.event_id, videoEvents.event_id),
+          eq(
+            eventYoutubePlaylistItems.youtube_video_id,
+            videosTable.youtube_video_id,
+          ),
+        ),
+      )
+      .where(eq(videoEvents.event_id, id)),
+  ]);
+  const config = configRows[0];
+  const counts = {
+    linked: Number(countRows[0]?.linked_count ?? 0),
+    eligible: Number(countRows[0]?.eligible_count ?? 0),
+    synced: Number(countRows[0]?.synced_count ?? 0),
+  };
+  const syncHealth = derivePlaylistSyncHealth({
+    enabled: config?.enabled ?? 0,
+    syncStatus: config?.sync_status ?? "disabled",
+    nextSyncAt: config?.next_sync_at ?? null,
+    lastSyncedAt: config?.last_synced_at ?? null,
+    lastFullScanAt: config?.last_full_scan_at ?? null,
+    lastError: config?.last_error ?? null,
+    eligibleCount: counts.eligible,
+    syncedCount: counts.synced,
+    linkedCount: counts.linked,
+    now: Math.floor(Date.now() / 1000),
+  });
   const isAdmin = guard.user.role === "admin";
   const playlistId = config?.playlist_id ?? "";
   const mode = config?.sync_mode ?? "off";
@@ -223,17 +292,30 @@ export default async function EventYoutubePlaylistPage({
       <section className="manage-section">
         <div className="manage-youtube-status-head">
           <h2 className="fn-console-eyebrow">同期状態</h2>
-          <span className={`fn-badge ${statusClass(config?.sync_status)}`}>
-            {STATUS_LABELS[config?.sync_status ?? "disabled"] ?? config?.sync_status}
-          </span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span
+              className={`fn-badge ${healthClass(syncHealth.level)}`}
+              title={`health: ${syncHealth.reason}`}
+            >
+              {healthLabel(syncHealth.level)}
+            </span>
+            <span className={`fn-badge ${statusClass(config?.sync_status)}`}>
+              {STATUS_LABELS[config?.sync_status ?? "disabled"] ?? config?.sync_status}
+            </span>
+          </div>
         </div>
         <dl className="manage-youtube-status-grid">
+          <dt className="fn-muted">作品同期</dt>
+          <dd>
+            同期済み {counts.synced} / 対象 {counts.eligible}
+            <span className="fn-muted"> （紐付き {counts.linked}）</span>
+          </dd>
           <dt className="fn-muted">最終同期</dt>
-          <dd>{config?.last_synced_at ? formatUnix(config.last_synced_at) : "未実行"}</dd>
+          <dd>{config?.last_synced_at == null ? "未実行" : formatUnix(config.last_synced_at)}</dd>
           <dt className="fn-muted">最終全件確認</dt>
-          <dd>{config?.last_full_scan_at ? formatUnix(config.last_full_scan_at) : "未実行"}</dd>
+          <dd>{config?.last_full_scan_at == null ? "未実行" : formatUnix(config.last_full_scan_at)}</dd>
           <dt className="fn-muted">次回予定</dt>
-          <dd>{config?.next_sync_at ? formatUnix(config.next_sync_at) : "なし"}</dd>
+          <dd>{config?.next_sync_at == null ? "なし" : formatUnix(config.next_sync_at)}</dd>
           <dt className="fn-muted">状態詳細</dt>
           <dd title={config?.last_error ?? undefined}>{syncDetailLabel(config?.last_error)}</dd>
         </dl>

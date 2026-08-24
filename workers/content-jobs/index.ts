@@ -48,6 +48,7 @@ import {
   isD1BudgetExhausted,
   type D1Budget,
 } from "../shared/d1Budget.ts";
+import { safeErrorSummary } from "../shared/safeLog.ts";
 import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
 import {
@@ -243,7 +244,7 @@ export async function runContentJobsRecovery(
               );
             } catch (error) {
               console.error("[content-jobs] X ID slot bind recovery failed", {
-                error: error instanceof Error ? error.message : String(error),
+                error: safeErrorSummary(error),
               });
             }
           }
@@ -262,7 +263,7 @@ export async function runContentJobsRecovery(
               );
             } catch (error) {
               console.error("[content-jobs] event playlist projection repair failed", {
-                error: error instanceof Error ? error.message : String(error),
+                error: safeErrorSummary(error),
               });
             }
           }
@@ -276,7 +277,7 @@ export async function runContentJobsRecovery(
               );
             } catch (error) {
               console.error("[content-jobs] daily top nostalgic enqueue failed", {
-                error: error instanceof Error ? error.message : String(error),
+                error: safeErrorSummary(error),
               });
             }
           }

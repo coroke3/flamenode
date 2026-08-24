@@ -1,4 +1,7 @@
 .note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--border-subtle);
@@ -7,6 +10,17 @@
   font-size: 12px;
   line-height: 1.55;
   color: var(--text-primary);
+}
+
+.icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.copy {
+  min-width: 0;
 }
 
 .reason {

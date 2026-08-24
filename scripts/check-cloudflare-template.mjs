@@ -73,6 +73,7 @@ const expectedWorkers = new Map([
       queueProducers: [
         { queue: "flamenode-youtube-sync-wake", binding: "YOUTUBE_SYNC_WAKE_QUEUE" },
         { queue: "flamenode-static-rebuild-wake", binding: "STATIC_REBUILD_WAKE_QUEUE" },
+        { queue: "flamenode-notification-wake", binding: "NOTIFICATION_WAKE_QUEUE" },
       ],
       queueConsumer: {
         queue: "flamenode-youtube-sync-wake",

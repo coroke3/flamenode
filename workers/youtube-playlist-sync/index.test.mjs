@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   PLAYLIST_MAX_REMOTE_ITEMS,
   PLAYLIST_STALE_DELETE_BATCH_SIZE,
+  abortPlaylistSyncRun,
   calculateSyncDiff,
   cleanupStaleScanItems,
   isYoutubeApiQuotaResponse,
@@ -19,6 +20,73 @@ const remote = [
 
 test("worker module loads in Node strip-only mode", () => {
   assert.equal(typeof calculateSyncDiff, "function");
+  assert.equal(typeof abortPlaylistSyncRun, "function");
+});
+
+test("lease takeover reconciles old running history rows", () => {
+  assert.match(source, /status = 'skipped',[\s\S]*detail_code = 'lease_expired'/);
+  assert.match(source, /event_youtube_playlist_sync_runs[\s\S]*run_lease_token = \?4/);
+});
+
+test("playlist failure state stores an allow-listed code instead of raw exception text", () => {
+  assert.match(source, /youtube_network_transient/);
+  assert.match(source, /youtube_playlist_sync_failed/);
+  assert.doesNotMatch(source, /if \(error instanceof Error\) return error\.message\.slice/);
+});
+
+test("incident transitions create one channel outbox row and expose a wake counter", () => {
+  assert.match(source, /INSERT OR IGNORE INTO notification_outbox/);
+  assert.match(source, /ops_youtube_playlist_sync_failed/);
+  assert.match(source, /ops_youtube_playlist_sync_recovered/);
+  assert.match(source, /ops_youtube_quota_deferred/);
+  assert.match(source, /notification_wake_count/);
+  assert.match(source, /allowed_mentions: \{ parse: \[\] \}/);
+  assert.match(
+    source,
+    /INSERT OR IGNORE INTO notification_outbox[\s\S]*?run_lease_token = \?14[\s\S]*?run_lease_expires_at > \?5/,
+  );
+});
+
+test("aborted run closes history and releases only its own lease", async () => {
+  const calls = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            calls.push({ sql, args });
+            return this;
+          },
+        };
+      },
+      async batch(statements) {
+        assert.equal(statements.length, 2);
+        return statements.map(() => ({ meta: { changes: 1 } }));
+      },
+    },
+  };
+  await abortPlaylistSyncRun(env, {
+    event_id: "event-1",
+    playlist_id: "playlist-1",
+    sync_mode: "append_only",
+    sync_interval_minutes: 60,
+    sync_status: "scanning",
+    next_sync_at: 0,
+    last_synced_at: null,
+    last_full_scan_at: null,
+    scan_started_at: null,
+    scan_page_token: null,
+    last_error: null,
+    pending_trigger: null,
+    run_id: "run-1",
+    run_lease_expires_at: 2000,
+    claimed_trigger: "scheduled",
+    dispatch_source: "cron",
+    run_started_ms: Date.now() - 1000,
+  }, 1000);
+  assert.match(calls[0].sql, /status = 'skipped'/);
+  assert.match(calls[1].sql, /run_lease_token = \?6/);
+  assert.deepEqual(calls[1].args.slice(-2), ["run-1", 2000]);
 });
 
 test("playlist API quota reasonはmetadata同期と同じ集合をdeferred扱いにする", () => {
@@ -45,6 +113,12 @@ test("playlist API error reasonはmalformed本文でstatus mappingを壊さな�
     "resource_exhausted",
   );
   assert.equal(parseYoutubeApiErrorReason(null), "request_failed");
+  assert.equal(
+    parseYoutubeApiErrorReason({
+      error: { errors: [{ reason: "refresh_token=TOPSECRET" }] },
+    }),
+    "request_failed",
+  );
 });
 
 test("OAuth secretが空白だけなら外部APIを呼ばずskipする", async () => {
@@ -167,11 +241,19 @@ function staleCleanupEnv(deleteChanges, onDelete = () => {}) {
   };
 }
 
+const cleanupConfig = {
+  event_id: "event-1",
+  playlist_id: "playlist-1",
+  sync_mode: "append_only",
+  run_id: "run-1",
+  run_lease_expires_at: 9_999_999_999,
+};
+
 test("stale削除が上限到達時はcleanup cursorで再開待ちにする", async () => {
   const env = staleCleanupEnv(PLAYLIST_STALE_DELETE_BATCH_SIZE);
   const completed = await cleanupStaleScanItems(
     env,
-    { event_id: "event-1", playlist_id: "playlist-1" },
+    cleanupConfig,
     123,
     456,
   );
@@ -179,12 +261,16 @@ test("stale削除が上限到達時はcleanup cursorで再開待ちにする", a
   const deleteCall = env.calls.find(({ sql }) =>
     sql.includes("DELETE FROM event_youtube_playlist_items"),
   );
-  assert.deepEqual(deleteCall.args, [
+  assert.deepEqual(deleteCall.args.slice(0, 7), [
     "event-1",
     123,
     PLAYLIST_STALE_DELETE_BATCH_SIZE,
     "playlist-1",
+    "append_only",
+    "run-1",
+    9_999_999_999,
   ]);
+  assert.equal(typeof deleteCall.args[7], "number");
   assert.ok(env.calls.some(({ args }) => args.includes("__flamenode_stale_cleanup__")));
 });
 
@@ -192,7 +278,7 @@ test("stale削除が上限未満ならscanを完了する", async () => {
   const env = staleCleanupEnv(3);
   const completed = await cleanupStaleScanItems(
     env,
-    { event_id: "event-1", playlist_id: "playlist-1" },
+    cleanupConfig,
     123,
     456,
   );
@@ -205,7 +291,7 @@ test("stale削除のchangesが得られない場合は完了扱いにしない",
   await assert.rejects(
     () => cleanupStaleScanItems(
       env,
-      { event_id: "event-1", playlist_id: "playlist-1" },
+      cleanupConfig,
       123,
       456,
     ),
@@ -224,7 +310,7 @@ test("stale削除中のdeadline中断後は状態更新を続けない", async (
   await assert.rejects(
     () => cleanupStaleScanItems(
       env,
-      { event_id: "event-1", playlist_id: "playlist-1" },
+      cleanupConfig,
       123,
       456,
       controller.signal,
@@ -276,6 +362,13 @@ function playlistAbortEnv() {
           },
         };
       },
+      async batch(statements) {
+        writes.push(`batch:${statements.length}`);
+        return [
+          { meta: { changes: 1 }, results: [{ pending_trigger: "scheduled" }] },
+          { meta: { changes: 1 } },
+        ];
+      },
     },
   };
 }
@@ -302,5 +395,5 @@ test("OAuth fetch中のdeadline中断を失敗記録として飲み込まない"
     (error) => error === deadline,
   );
   assert.equal(fetchCalls, 1);
-  assert.deepEqual(env.writes, []);
+  assert.ok(env.writes.some((entry) => entry.startsWith("batch:")));
 });

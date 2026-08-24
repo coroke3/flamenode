@@ -106,10 +106,10 @@ test("再生リスト手動予約はD1 commit後にQueue wakeし52分Cronをfall
   assert.match(playlistActionSource, /sendYoutubePlaylistSyncWakeBestEffort\("manage"\)/);
   assert.match(playlistActionSource, /next_sync_at:\s*now/);
   assert.match(source, /wake\?\.kind === "youtube_playlist_sync"/);
-  assert.match(source, /syncEventPlaylists\(env\)/);
+  assert.match(source, /syncEventPlaylists\(env, undefined, fetch,/);
   assert.match(source, /ackAll\(playlistMessages\)/);
   assert.match(source, /retryAll\(playlistMessages\)/);
-  assert.match(source, /syncEventPlaylists\(budgetEnv, signal\)/);
+  assert.match(source, /syncEventPlaylists\(budgetEnv, signal, fetch,/);
 });
 
 test("playlist backlogはindexed due判定後に1件だけcontinuation wakeする", () => {
@@ -164,7 +164,7 @@ test("metadataとplaylistのQueueメッセージは種類別にack/retryする",
 });
 
 test("Cron deadline signalをmetadata同期とplaylist同期へ渡す", () => {
-  assert.match(source, /syncEventPlaylists\(budgetEnv, signal\)/);
+  assert.match(source, /syncEventPlaylists\(budgetEnv, signal, fetch,/);
   assert.match(source, /syncBatch\(budgetEnv, undefined, signal,/);
   assert.match(source, /mode:\s*"scheduled_only"/);
 });
@@ -188,7 +188,7 @@ test("Cron全体とQueue consumerは同じD1 hard-limit guardを使う", () => {
   const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
   assert.match(cronBlock, /const budgetEnv = withD1Budget\(env\)/);
   assert.match(cronBlock, /withCronLease\(\s*budgetEnv,/);
-  assert.match(cronBlock, /syncEventPlaylists\(budgetEnv, signal\)/);
+  assert.match(cronBlock, /syncEventPlaylists\(budgetEnv, signal, fetch,/);
   assert.match(cronBlock, /syncGa4Trending\(budgetEnv, signal\)/);
   assert.match(cronBlock, /syncBatch\(budgetEnv, undefined, signal,/);
   assert.match(cronBlock, /runYoutubeSyncPostCommit\(budgetEnv, youtube,/);
@@ -240,4 +240,11 @@ test("pending recovery probeはsoft limitに余裕がある時だけCOUNTを実�
   const guardBlock = cronBlock.slice(Math.max(0, wakeIndex - 260), wakeIndex + 80);
   assert.match(guardBlock, /queueFlags\.youtubeSyncEnabled/);
   assert.match(guardBlock, /hasSoftD1Budget\(budgetEnv\.d1Budget, 1\)/);
+});
+
+test("Queue playlist notification wake callback result is defined", () => {
+  assert.match(source, /let playlistCounters: PlaylistSyncBatchResult \| null = null/);
+  assert.match(source, /playlistCounters = result/);
+  assert.match(source, /playlistCounters\?\.notification_wake_count/);
+  assert.doesNotMatch(source, /playlistReturned && playlistCounters\.notification_wake_count/);
 });

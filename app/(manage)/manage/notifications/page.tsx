@@ -167,7 +167,9 @@ export default async function ManageNotificationsPage({
   if (rows.length > 0) {
     recipientMap = await lookupNotificationRecipients(
       db,
-      rows.map((row) => row.recipient_user_id),
+      rows
+        .map((row) => row.recipient_user_id)
+        .filter((recipientId): recipientId is string => recipientId != null),
     );
   }
 
@@ -272,7 +274,9 @@ export default async function ManageNotificationsPage({
                   <NotificationOutboxSummary
                     row={notification}
                     recipient={
-                      recipientMap.get(notification.recipient_user_id) ?? null
+                      notification.recipient_user_id == null
+                        ? null
+                        : (recipientMap.get(notification.recipient_user_id) ?? null)
                     }
                   />
                 </td>

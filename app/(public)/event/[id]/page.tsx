@@ -31,11 +31,12 @@ import { EventRecruitCard } from "@/components/layout/EventRecruitCard";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { UserAvatar } from "@/components/user/UserAvatar";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
-import { formatCount } from "@/lib/utils/format";
+import { formatCount, formatPublicationDateTime } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { buildAccentVars } from "@/lib/theme/accent";
 import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 import { parseEventPartsJson } from "@/lib/video/parseEventIds";
+import { extractYoutubePlaylistId } from "@/lib/youtube/playlist";
 import {
   canFallbackToDatabase,
   loadStaticEventDetail,
@@ -140,6 +141,7 @@ export default async function EventDetailPage({
 
 function EventDetailView({
   event,
+  youtubePlaylistId = null,
   eventVideos,
   eventVideoTotal,
   creatorTotal,
@@ -147,6 +149,7 @@ function EventDetailView({
   staffRows,
 }: {
   event: EventRow;
+  youtubePlaylistId?: string | null;
   eventVideos: EventVideo[];
   eventVideoTotal: number;
   creatorTotal: number;
@@ -182,6 +185,10 @@ function EventDetailView({
     now < event.start_time;
   const dayMetric = getDayMetric(event, now);
   const eventImage = event.img_url ?? event.icon_url;
+  const safeYoutubePlaylistId = extractYoutubePlaylistId(youtubePlaylistId ?? "");
+  const youtubePlaylistHref = safeYoutubePlaylistId
+    ? `https://www.youtube.com/playlist?list=${encodeURIComponent(safeYoutubePlaylistId)}`
+    : null;
   const eventJsonLd = {
     "@context": "https://schema.org",
     "@type": "Event",
@@ -225,6 +232,16 @@ function EventDetailView({
             <Link href="/entry" className={styles.reserveButton}>
               作品を提出する <Icon name="chevron-right" size={14} aria-hidden />
             </Link>
+          ) : null}
+          {youtubePlaylistHref ? (
+            <a
+              href={youtubePlaylistHref}
+              className={styles.guideLink}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              YouTube再生リスト <Icon name="external" size={13} aria-hidden />
+            </a>
           ) : null}
           <Link href="/rules" className={styles.guideLink}>ガイドライン</Link>
         </div>
@@ -312,7 +329,12 @@ function EventDetailView({
         </section>
       ) : null}
 
-      <VideoSection eventId={event.id} videos={eventVideos} total={eventVideoTotal} />
+      <VideoSection
+        eventId={event.id}
+        videos={eventVideos}
+        total={eventVideoTotal}
+        showPublicationTime={status === "scheduled" || status === "active"}
+      />
     </div>
   );
 }
@@ -389,6 +411,7 @@ function StaticEventDetailView({
   return (
     <EventDetailView
       event={eventRow}
+      youtubePlaylistId={event.youtube_playlist_id}
       eventVideos={videosForCard as EventVideo[]}
       eventVideoTotal={detail.videoTotal}
       creatorTotal={detail.creatorCount}
@@ -414,7 +437,17 @@ function StaticEventDetailView({
   );
 }
 
-function VideoSection({ eventId, videos: rows, total }: { eventId: string; videos: EventVideo[]; total: number }): React.ReactElement {
+function VideoSection({
+  eventId,
+  videos: rows,
+  total,
+  showPublicationTime,
+}: {
+  eventId: string;
+  videos: EventVideo[];
+  total: number;
+  showPublicationTime: boolean;
+}): React.ReactElement {
   return (
     <section className={styles.section}>
       <SectionHeader
@@ -440,6 +473,11 @@ function VideoSection({ eventId, videos: rows, total }: { eventId: string; video
                 key={video.id}
                 video={video}
                 href={`/${target}?playlist=${encodeURIComponent(eventId)}`}
+                secondaryMeta={
+                  showPublicationTime
+                    ? formatPublicationDateTime(video.scheduled_time)
+                    : undefined
+                }
               />
             );
           })}

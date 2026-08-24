@@ -58,6 +58,7 @@ export interface Env {
   BUILD_COMMIT_SHA?: string;
   YOUTUBE_SYNC_WAKE_QUEUE?: WorkerQueueSendBinding;
   STATIC_REBUILD_WAKE_QUEUE?: WorkerQueueSendBinding;
+  NOTIFICATION_WAKE_QUEUE?: WorkerQueueSendBinding;
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
   QUEUE_YOUTUBE_SYNC_ENABLED?: string;
@@ -387,14 +388,20 @@ export async function handleYoutubeSyncWakeQueue(
 
   if (playlistMessages.length > 0) {
     let playlistReturned = false;
+    let playlistCounters: PlaylistSyncBatchResult | null = null;
     try {
       const playlistJob = await runJob(
         "sync-jobs",
         "youtube-playlist-sync",
-        async () => {
+        async (jobContext) => {
           const result = normalizePlaylistQuotaStop(
-            await syncEventPlaylists(env),
+            await syncEventPlaylists(env, undefined, fetch, {
+              runId: jobContext.runId,
+              trigger: "scheduled",
+              dispatchSource: "queue",
+            }),
           );
+          playlistCounters = result;
           playlistReturned = true;
           return result;
         },
@@ -409,6 +416,15 @@ export async function handleYoutubeSyncWakeQueue(
       if (playlistJob.succeeded && !playlistJob.quota_stopped) {
         const playlistContinued = await maybeContinueYoutubePlaylistSync(env);
         continued ||= playlistContinued;
+      }
+      if (playlistReturned && (playlistCounters?.notification_wake_count ?? 0) > 0) {
+        await sendWorkerQueueWakeBestEffort({
+          queue: env.NOTIFICATION_WAKE_QUEUE,
+          kind: "notification_available",
+          source: "sync",
+          envFlags: env,
+          kv: env.KV,
+        });
       }
       ackAll(playlistMessages);
       processed += playlistJob.processed;
@@ -452,7 +468,7 @@ export async function runSyncJobs(
   await runJob(
     "sync-jobs",
     "cron",
-    async () => {
+    async (cronContext) => {
       const leased = await withCronLease(
         budgetEnv,
         {
@@ -467,10 +483,14 @@ export async function runSyncJobs(
             const playlist = await runJob(
               "sync-jobs",
               "youtube-playlist-sync",
-              async () => {
+              async (jobContext) => {
                 signal?.throwIfAborted();
                 const result = normalizePlaylistQuotaStop(
-                  await syncEventPlaylists(budgetEnv, signal),
+                  await syncEventPlaylists(budgetEnv, signal, fetch, {
+                    runId: jobContext.runId,
+                    trigger: "scheduled",
+                    dispatchSource: "cron",
+                  }),
                 );
                 signal?.throwIfAborted();
                 return result;
@@ -484,6 +504,15 @@ export async function runSyncJobs(
             );
             if (!playlistCounters.quota_stopped) {
               await maybeContinueYoutubePlaylistSync(budgetEnv, signal);
+            }
+            if (playlistCounters.notification_wake_count > 0) {
+              await sendWorkerQueueWakeBestEffort({
+                queue: budgetEnv.NOTIFICATION_WAKE_QUEUE,
+                kind: "notification_available",
+                source: "sync",
+                envFlags: budgetEnv,
+                kv: budgetEnv.KV,
+              });
             }
             return playlistCounters;
           }

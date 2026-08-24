@@ -144,7 +144,7 @@ R2 hit時の degraded circuit は、通常の公開リクエストごとにKVを
 
 コード deploy（`BUILD_COMMIT_SHA` 変化）時は、Recovery Cron が `list_recent`、`list_popular`、`search_index`、`users_index`、`top_recommended`、`top_latest`、`top_nostalgic`、`top_events`、`top_announcements`、`top_stats`、`top_slot_stats`、`recommend_core`、`events_index`、`youtube_related_blocklist`、`random_video_pool` の global target を `deploy_generator_change` / high で enqueue する。各 top section producer 成功後は follow-up で `top` composer が enqueue される。`recommend_core` 成功後も follow-up で `recommend` composer が enqueue される。KV `static:last_generator_commit` で同一 commit の重複 enqueue を抑止する。
 
-Admin Spreadsheetのうち `videos`、`video_youtube_metadata`、`video_events`、`video_members`、`video_chapters`、`x_users` の変更は、対象の動画詳細・関連動画共有JSON・クリエイター投影をplannerで導出し、data mutation・preview nonce消費・監査・`static_rebuild_queue`を同じD1 atomic batchへ入れる。1回のapplyは11行までとし、plannerは最大16 target（`SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT`）、queue helperは最大4 statementに収める。いずれかを超える場合はデータを書かず、行を分割して再実行する。
+Admin Spreadsheetのうち `videos`、`video_youtube_metadata`、`video_events`、`video_members`、`video_chapters`、`x_users` の変更は、対象の動画詳細・関連動画共有JSON・クリエイター投影をplannerで導出し、data mutation・preview nonce消費・監査・`static_rebuild_queue`を同じD1 atomic batchへ入れる。1回のapplyは7行までとし、plannerは最大256 target（`SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT`）、queue helperは最大4 statementに収める。いずれかを超える場合はデータを書かず、行を分割して再実行する。
 
 Spreadsheet planner（`src/lib/admin/spreadsheet/staticRebuildPlan.ts`）は mutation の before/after だけから target を導出し、同一 apply 内では `Map` で `targetType:targetId` を dedupe する。`videos` の CREATE または `visibility_status` 変更では、動画詳細 `video` に加え `random_video_pool:global`、`youtube_related_blocklist:global`、`list_recent:global`、`list_popular:global`、`search_index:global` へ fan-out する（public 作品 CREATE の例: 上記6 target）。タイトルや intro だけの UPDATE は `video` だけ。1 apply で public 作品を3行 CREATE すると 18 target となり 16 上限を超えるため、行の分割が必要になる。
 
@@ -158,9 +158,9 @@ users v2 の stale artifact cleanup は R2 bulk delete と JSON1 UPDATE を 1 in
 
 `top.json` は section producer が R2 に書いた `top/sections/*.v1.json` と `top/slot-stats.v1.json`、`users/pickup-creators.v1.json` を composer（`top:global`）が読み込んで合成する。新着最大100件と、公開から3年以上経過した作品を最大200件プールする懐かし棚は `top_nostalgic` producer が担当する。懐かし棚は YouTube API 同期済みで `public` / `unlisted` と確認された作品だけを `nostalgic_pool` に入れ、JST 日次境界で ID 抽選し `nostalgic` 最大20件を保持する（KV `static:top_nostalgic_shuffle_day` は新日付の抽選成功時のみ更新）。同日中は selected IDs を維持し title/icon/youtube/visibility を再評価する。トップ表示時は `nostalgic` をそのまま使い、リクエストごとの再シャッフルはしない。hero 用 `slot_stats` は `top_slot_stats` producer が `top/slot-stats.v1.json` に書き、composer が `top.json` へ合成する。枠の reserve/release 等では `top_slot_stats` のみを更新し follow-up で `top` composer を enqueue する。公開 loader は `generated_at` が新しい方の `slot_stats` を採用する（欠損・破損時は `top.json.slot_stats` へ fallback）。YouTube 公開可否の変化時は必要な top section と `youtube_related_blocklist` / `random_video_pool` を同時に再生成予約する。
 
-`events/{id}.json` は `event_base` / `event_slots` producer が R2 に書いた `events/{id}/base.v1.json` と `events/{id}/slots.v1.json` を composer（`event:{id}`）が読み込んで合成する。composer は required section 欠損時に throw し旧 JSON を保持する。枠変更では `event_slots` と `top_slot_stats` のみを更新し、イベント metadata 変更では `event_base`（必要なら `top_events`）を更新する。公開 loader は `events/{id}/slots.v1.json` が `events/{id}.json` より新しいとき slots / slots_summary を overlay する。
+`events/{id}.json` は `event_base` / `event_slots` producer が R2 に書いた `events/{id}/base.v1.json` と `events/{id}/slots.v1.json` を composer（`event:{id}`）が読み込んで合成する。composer は required section 欠損時に throw し旧 JSON を保持する。`event_base` の正常再構築後は、同じ公開作品集合を `scheduled_time ASC, id ASC` の上映順で `events/{id}/playlist.v1.json` にも投影し、作品詳細の再生リストはこの artifact を優先して欠損・破損時だけ同条件の D1 読取へ fallback する。枠変更では `event_slots` と `top_slot_stats` のみを更新し、イベント metadata 変更では `event_base`（必要なら `top_events`）を更新する。公開 loader は `events/{id}/slots.v1.json` が `events/{id}.json` より新しいとき slots / slots_summary を overlay する。
 
-PVSF互換の公開Release一覧は `event_release:{id}` が `events/{id}/release.v1.json` を生成する。イベント・公開作品・公開メンバーの変更は同targetをfan-outし、動画は最大500件、公開メンバーは作品ごとに最大100件でboundedにする。Release artifactも通常のevent visibility fence・rename cleanup・R2追跡の対象とし、公開対象外の行は生成・配信しない。イベントを再公開する場合のfence解除は `event_base`・`event_slots`・`event_release` の3 producerが現行イベントの `updated_at` 以降に追跡済みであることを確認してから行う。
+PVSF互換の公開Release一覧は `event_release:{id}` が `events/{id}/release.v1.json` を生成する。イベント・公開作品・公開メンバーの変更は同targetをfan-outし、動画は最大500件、公開メンバーは作品ごとに最大100件でboundedにする。Release artifactも通常のevent visibility fence・rename cleanup・R2追跡の対象とし、公開対象外の行は生成・配信しない。イベントを再公開する場合のfence解除は `event_base`・`event_slots`・`event_release`・`event_playlist` の4 producerが現行イベントの `updated_at` 以降に追跡済みであることを確認してから行う。
 
 Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象videoの `video_events` と `primary_event_id` を80件以下のIDチャンクで解決し、関連する全 `event_release` をfan-outする。イベント所属変更を同じbatchで行う場合は `video_events` mutationのbefore/after event IDも別途対象に含める。
 
@@ -187,6 +187,7 @@ Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象v
 | 検索索引 | `search-index-lite.json` | `search_index` |
 | イベント一覧 | `events/index.json` | `events_index` |
 | イベント詳細 base | `events/{id}/base.v1.json` | `event_base` |
+| イベント上映順 | `events/{id}/playlist.v1.json` | `event_playlist`（`event_base` 後続投影） |
 | イベント詳細 slots | `events/{id}/slots.v1.json` | `event_slots` |
 | イベント公開Release | `events/{id}/release.v1.json` | `event_release` |
 | イベント詳細（composer） | `events/{id}.json` | `event` |

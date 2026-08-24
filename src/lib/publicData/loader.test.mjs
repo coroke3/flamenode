@@ -158,6 +158,12 @@ test("visibility manifest failure is unavailable only in enforce mode", () => {
   assert.match(loaderSource, /public_visibility_manifest_unavailable/);
 });
 
+test("degraded R2-miss payloads pass through the same visibility fence", () => {
+  assert.match(loaderSource, /visibilityContext\?: PublicArtifactVisibilityContext/);
+  assert.match(loaderSource, /filterPublicArtifactPayload\(\s*options\.targetType,\s*degraded/);
+  assert.match(loaderSource, /visibilityContext: visibility\.artifactContext/);
+});
+
 test("events index, top, and recommend loaders wire empty collection semantic miss", () => {
   const eventsIndexBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticEventsIndex"),

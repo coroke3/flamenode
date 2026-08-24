@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { ModerationCaseType } from "@/lib/admin/moderationCaseInput";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -123,7 +123,27 @@ export async function planVoidModerationCaseOpen(
     resolved_at: null,
   };
   return {
-    statements: [db.insert(videoModerationCases).values(caseAfter)],
+    statements: [db.run(sql`
+      INSERT INTO video_moderation_cases (
+        id, video_id, case_type, status, public_reason, private_note,
+        due_at, locked_until, attempt_count, related_x_user_id,
+        created_by_user_id, resolved_by_user_id, created_at, resolved_at
+      )
+      SELECT
+        ${caseAfter.id}, ${caseAfter.video_id}, ${caseAfter.case_type},
+        ${caseAfter.status}, ${caseAfter.public_reason}, ${caseAfter.private_note},
+        ${caseAfter.due_at}, ${caseAfter.locked_until}, ${caseAfter.attempt_count},
+        ${caseAfter.related_x_user_id}, ${caseAfter.created_by_user_id},
+        ${caseAfter.resolved_by_user_id}, ${caseAfter.created_at},
+        ${caseAfter.resolved_at}
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM video_moderation_cases
+        WHERE video_id = ${input.videoId}
+          AND case_type = ${input.caseType}
+          AND status = 'open'
+      )
+    `)],
     expectedChanges: [1],
     audits: [
       {

@@ -30,7 +30,7 @@ type SyncRow = {
   pending?: CountValue;
   stale?: CountValue;
   failed?: CountValue;
-  oldest_synced_at?: CountValue;
+  oldest_pending_at?: CountValue;
 };
 
 type ScoreRow = {
@@ -96,7 +96,7 @@ export type WorkerMonitoringSnapshot = {
     pending: number;
     stale: number;
     failed: number;
-    oldestSyncedAt: number | null;
+    oldestPendingAt: number | null;
   };
   scores: { eligible: number; stale: number; oldestUpdatedAt: number | null };
   artifacts: { targetType: string; generatedAt: number | null }[];
@@ -134,6 +134,21 @@ const QUEUE_WAKE_LAST_FAILURE_KV_KEYS = Object.freeze(
     ]),
   ) as Record<QueueWakeKind, string>,
 );
+
+const MONITOR_LEVEL_SORT_ORDER: Record<MonitorLevel, number> = {
+  critical: 0,
+  warn: 1,
+  running: 2,
+  unknown: 3,
+  ok: 4,
+};
+
+function compareMonitorLevel(
+  left: { level: MonitorLevel },
+  right: { level: MonitorLevel },
+): number {
+  return MONITOR_LEVEL_SORT_ORDER[left.level] - MONITOR_LEVEL_SORT_ORDER[right.level];
+}
 
 export const PLATFORM_LIMITS = [
   { label: "Workers CPU", value: "10ms / invocation" },
@@ -342,7 +357,9 @@ export async function loadWorkerMonitoring(
              )
            )) AS stale,
        (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'failed') AS failed,
-       (SELECT MIN(synced_at) FROM video_youtube_metadata) AS oldest_synced_at`,
+       (SELECT MIN(updated_at)
+          FROM video_youtube_metadata
+         WHERE sync_status = 'pending') AS oldest_pending_at`,
   ).bind(now).first<SyncRow>();
 
   const scoreRow = await db.prepare(
@@ -366,7 +383,9 @@ export async function loadWorkerMonitoring(
   ).all<ArtifactRow>();
 
   const leases = new Map((leaseRows.results ?? []).map((row) => [row.job_name, row]));
-  const jobs = JOBS.map((job) => jobStatus(job, leases.get(job.jobName), now));
+  const jobs = JOBS
+    .map((job) => jobStatus(job, leases.get(job.jobName), now))
+    .sort(compareMonitorLevel);
   const notifications = queueSnapshot(notificationRow);
   const staticRebuilds = queueSnapshot(staticRow);
   const youtube = {
@@ -374,7 +393,7 @@ export async function loadWorkerMonitoring(
     pending: numberValue(youtubeRow?.pending),
     stale: numberValue(youtubeRow?.stale),
     failed: numberValue(youtubeRow?.failed),
-    oldestSyncedAt: nullableNumber(youtubeRow?.oldest_synced_at),
+    oldestPendingAt: nullableNumber(youtubeRow?.oldest_pending_at),
   };
   const scores = {
     eligible: numberValue(scoreRow?.eligible),
@@ -451,6 +470,7 @@ export async function loadWorkerMonitoring(
       detailHref: "/admin/static-builds",
     },
   ];
+  pipelines.sort(compareMonitorLevel);
 
   const critical = jobs.some((job) => job.level === "critical") || pipelines.some((pipeline) => pipeline.level === "critical");
   const warning = jobs.some((job) => job.level === "warn" || job.level === "unknown") || pipelines.some((pipeline) => pipeline.level === "warn");

@@ -1,6 +1,6 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-const ACTIVE_SCHEMA_VERSION = "2026-07-20-canonical-1";
+const ACTIVE_SCHEMA_VERSION = "2026-08-24-observability-1";
 
 type LocalD1Statement = {
   first: <T = unknown>() => Promise<T | null>;

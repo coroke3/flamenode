@@ -186,9 +186,40 @@ export function formatVideoFieldPermissionReason(
 }
 
 export type PermissionBadge = {
-  kind: "editable" | "owner-denied" | "event" | "admin" | "locked";
+  kind:
+    | "editable"
+    | "mixed"
+    | "owner-denied"
+    | "event"
+    | "admin"
+    | "locked";
   text: string;
 };
+
+export type VideoPermissionGroupState = "editable" | "mixed" | "locked";
+
+export function resolveVideoPermissionGroupState(
+  permissions: readonly VideoFieldPermission[],
+): VideoPermissionGroupState {
+  const editableCount = permissions.filter((permission) => permission.editable).length;
+  if (permissions.length > 0 && editableCount === permissions.length) return "editable";
+  if (editableCount > 0) return "mixed";
+  return "locked";
+}
+
+export function formatPermissionGroupBadge(
+  permissions: readonly VideoFieldPermission[],
+): PermissionBadge {
+  switch (resolveVideoPermissionGroupState(permissions)) {
+    case "editable":
+      return { kind: "editable", text: "編集可能" };
+    case "mixed":
+      return { kind: "mixed", text: "一部のみ編集可能" };
+    case "locked":
+    default:
+      return { kind: "locked", text: "編集不可" };
+  }
+}
 
 export function formatPermissionBadge(
   permission: VideoFieldPermission,
@@ -239,6 +270,23 @@ export function buildPermissionSummaryLists(
   }
 
   return { editableLabels, lockedLabels };
+}
+
+export function buildEditableEventSourceLabels(
+  vm: VideoEditPermissionViewModel,
+): string[] {
+  return Array.from(
+    new Set(
+      VIEW_MODEL_SECTION_KEYS.map((key) => vm[key])
+        .filter(
+          (field) =>
+            field.editable &&
+            field.source === "event_staff" &&
+            Boolean(field.eventTitle?.trim()),
+        )
+        .map((field) => field.eventTitle!.trim()),
+    ),
+  );
 }
 
 export type BuildVideoEditPermissionViewModelArgs = {

@@ -194,7 +194,7 @@ function MonitoringContent({ snapshot }: { snapshot: WorkerMonitoringSnapshot })
               <tr>
                 <td style={{ fontWeight: 700 }}>YouTubeメタデータ同期</td>
                 <td>{formatCount(snapshot.youtube.pending)}</td>
-                <td>{formatUnix(snapshot.youtube.oldestSyncedAt)}</td>
+                <TimeCell value={snapshot.youtube.oldestPendingAt} />
                 <td>{formatCount(snapshot.youtube.failed)}</td>
                 <td>—</td>
                 <td>—</td>

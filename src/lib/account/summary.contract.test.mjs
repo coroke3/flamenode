@@ -38,6 +38,13 @@ test("account summary APIはprivate no-storeで最小DTOだけを返す", () => 
   assert.doesNotMatch(route, /id: headerUser\.id/);
 });
 
+test("degraded synthetic X entry does not replace the account display name", () => {
+  assert.match(route, /degraded: true/);
+  assert.match(route, /x_name: `@\$\{sessionUser\.active_x_user_id\}`/);
+  assert.match(accountMenu, /resolveAccountMenuDisplayName/);
+  assert.match(accountMenu, /degraded: user\.degraded === true/);
+});
+
 test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.doesNotMatch(publicLayout, /getCurrentUser/);
   assert.doesNotMatch(publicLayout, /buildHeaderUser/);

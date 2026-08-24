@@ -252,7 +252,7 @@ test("public static JSON queries exclude private event relations", () => {
   );
   assert.match(
     source,
-    /SELECT e\.id, e\.title[\s\S]*FROM video_events AS ve[\s\S]*INNER JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
+    /SELECT e\.id, e\.title[\s\S]*FROM events AS e[\s\S]*e\.visibility_status = 'public'[\s\S]*EXISTS \([\s\S]*FROM video_events AS ve[\s\S]*OR e\.id = \?/,
   );
   assert.match(source, /software_labels/);
   assert.match(source, /public_chapters/);
@@ -1241,13 +1241,23 @@ test("再公開 artifact 完成後だけ release_pending fence を token CAS で
   assert.match(source, /writeWorkerVisibilityBlockedEntitiesManifest/);
 });
 
+test("event cleanup explicitly removes the playlist artifact and tracking rows", () => {
+  const cleanupFn = source.match(
+    /async function removeAllEventArtifacts\([\s\S]*?(?=\nfunction eventBaseObjectKey)/,
+  )?.[0];
+  assert.ok(cleanupFn);
+  assert.match(cleanupFn, /removeTrackedArtifacts\(env, "event_playlist"/);
+  assert.match(cleanupFn, /eventPlaylistObjectKey\(eventId\)/);
+});
+
 test("event release is required before an event promotion fence is released", () => {
   const releaseFn = source.match(
     /async function releaseVisibilityFenceAfterRebuild\([\s\S]*?(?=\nasync function )/,
   )?.[0];
   assert.ok(releaseFn);
-  assert.match(releaseFn, /target_type IN \('event_base', 'event_slots', 'event_release'\)/);
+  assert.match(releaseFn, /target_type IN \('event_base', 'event_slots', 'event_release', 'event_playlist'\)/);
   assert.match(releaseFn, /sourceByTarget\.get\("event_release"\)/);
+  assert.match(releaseFn, /sourceByTarget\.get\("event_playlist"\)/);
   const eventReleaseFn = source.match(
     /async function rebuildEventRelease\([\s\S]*?(?=\nfunction stripEventPublicVideoScore)/,
   )?.[0];

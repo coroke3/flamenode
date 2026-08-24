@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { VideoFieldPermission } from "@/lib/video/videoEditPermissionView";
 import { formatVideoFieldPermissionReason } from "@/lib/video/videoEditPermissionView";
+import { PermissionLockIcon } from "./PermissionBadge";
 import styles from "./FieldLockNote.module.css";
 
 export interface FieldLockNoteProps {
@@ -27,16 +28,16 @@ export function FieldLockNote({
 
   const reason = formatVideoFieldPermissionReason(permission);
   const hint = unlockHint ? formatUnlockHint(unlockHint) : null;
-  const sourceLabel =
-    permission.eventTitle?.trim()
-      ? `権限元: ${permission.eventTitle.trim()}`
-      : null;
 
   return (
-    <div id={id} role="status" className={styles.note}>
-      {reason ? <p className={styles.reason}>{reason}</p> : null}
-      {sourceLabel ? <p className={styles.hint}>{sourceLabel}</p> : null}
-      {hint ? <p className={styles.hint}>{hint}</p> : null}
+    <div id={id} className={styles.note}>
+      <span className={styles.icon}>
+        <PermissionLockIcon size={14} />
+      </span>
+      <div className={styles.copy}>
+        {reason ? <p className={styles.reason}>{reason}</p> : null}
+        {hint ? <p className={styles.hint}>{hint}</p> : null}
+      </div>
     </div>
   );
 }

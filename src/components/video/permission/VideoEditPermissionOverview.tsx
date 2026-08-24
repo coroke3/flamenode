@@ -1,6 +1,9 @@
 import * as React from "react";
 import type { VideoEditPermissionViewModel } from "@/lib/video/videoEditPermissionView";
-import { buildPermissionSummaryLists } from "@/lib/video/videoEditPermissionView";
+import {
+  buildEditableEventSourceLabels,
+  buildPermissionSummaryLists,
+} from "@/lib/video/videoEditPermissionView";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import styles from "./VideoEditPermissionOverview.module.css";
@@ -19,9 +22,10 @@ function PermissionList({
   labels: string[];
   emptyText: string;
 }): React.ReactElement {
+  const titleId = React.useId();
   return (
-    <div className={styles.listBlock}>
-      <p className={styles.listTitle}>{title}</p>
+    <section className={styles.listBlock} aria-labelledby={titleId}>
+      <h3 id={titleId} className={styles.listTitle}>{title}</h3>
       {labels.length > 0 ? (
         <ul className={styles.list}>
           {labels.map((label) => (
@@ -31,27 +35,26 @@ function PermissionList({
       ) : (
         <p className={styles.emptyList}>{emptyText}</p>
       )}
-    </div>
+    </section>
   );
 }
 
 export function VideoEditPermissionOverview({
   viewModel,
-  eventTitleForMode,
 }: VideoEditPermissionOverviewProps): React.ReactElement {
   const { privilegeMode } = viewModel;
+  const headingId = React.useId();
 
   if (privilegeMode === "admin") {
     return (
       <section
-        role="status"
         className={cn(styles.panel, styles.admin, "fn-privilege-banner", "fn-privilege-banner--admin")}
-        aria-label="管理者権限での編集"
+        aria-labelledby={headingId}
       >
-        <p className={styles.heading}>
+        <h2 id={headingId} className={styles.heading}>
           <Icon name="alert" size={12} aria-hidden />
           管理者権限で編集中
-        </p>
+        </h2>
         <p className={styles.lead}>
           提出主体や所属イベントなど、通常では変更できない項目も編集できます。
         </p>
@@ -64,41 +67,25 @@ export function VideoEditPermissionOverview({
 
   if (privilegeMode === "event") {
     const { editableLabels, lockedLabels } = buildPermissionSummaryLists(viewModel);
-    const sourceLabels = Array.from(
-      new Set(
-        [
-          viewModel.identity,
-          viewModel.basics,
-          viewModel.youtube,
-          viewModel.credits,
-          viewModel.descriptions,
-          viewModel.members,
-          viewModel.memberChapters,
-          viewModel.primaryEvent,
-          viewModel.visibility,
-          viewModel.permissions,
-        ]
-          .filter((field) => field.editable && field.eventTitle)
-          .map((field) => field.eventTitle as string),
-      ),
-    );
+    const sourceLabels = buildEditableEventSourceLabels(viewModel);
 
     return (
       <section
-        role="status"
         className={cn(styles.panel, styles.event, "fn-privilege-banner", "fn-privilege-banner--event")}
-        aria-label="イベント運営権限での編集"
+        aria-labelledby={headingId}
       >
-        <p className={styles.heading}>
+        <h2 id={headingId} className={styles.heading}>
           <Icon name="users" size={12} aria-hidden />
           イベント運営権限で編集中
-        </p>
-        {eventTitleForMode ? (
-          <p className={styles.eventName}>権限元イベント: {eventTitleForMode}</p>
+        </h2>
+        {sourceLabels.length > 0 ? (
+          <p className={styles.eventName}>
+            権限元イベント: {sourceLabels.join(" / ")}
+          </p>
         ) : null}
         {sourceLabels.length > 1 ? (
           <p className={styles.lead}>
-            項目ごとの権限元: {sourceLabels.join(" / ")}
+            項目ごとに異なるイベントの運営権限が適用されています。
           </p>
         ) : (
           <p className={styles.lead}>
@@ -125,16 +112,21 @@ export function VideoEditPermissionOverview({
 
   return (
     <section
-      role="status"
       className={cn(styles.panel, styles.normal, "fn-privilege-banner", "fn-privilege-banner--normal")}
-      aria-label="現在の編集権限"
+      aria-labelledby={headingId}
     >
-      <p className={styles.heading}>
+      <h2 id={headingId} className={styles.heading}>
         <Icon name="info" size={11} aria-hidden />
         現在の編集権限
-      </p>
+      </h2>
       <p className={styles.lead}>
-        所有者向け一般作品権限が適用されています。編集できる項目とできない項目は以下のとおりです。
+        {viewModel.ownership.isOwner
+          ? "所有者向け一般作品権限が適用されています。編集できる項目とできない項目は以下のとおりです。"
+          : viewModel.canOfferEventMode
+            ? "通常モードでは編集できません。上部からイベント運営権限へ切り替えると、許可された項目を編集できます。"
+            : viewModel.canOfferAdminMode
+              ? "通常モードでは編集できません。上部から管理者権限へ明示的に切り替えてください。"
+              : "現在の通常モードで編集できる項目とできない項目は以下のとおりです。"}
       </p>
       <div className={styles.lists}>
         <PermissionList

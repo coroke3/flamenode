@@ -42,12 +42,12 @@ test("Queue wake成功時はCronでDiscord dispatchを二重実行しない", ()
 
 test("Cron fallbackは外部送信後のD1完了処理と残件probeまで収まる件数へ縮める", () => {
   assert.equal(notificationFallbackLimitForD1Budget(0), 6);
-  assert.equal(notificationFallbackLimitForD1Budget(14), 5);
-  assert.equal(notificationFallbackLimitForD1Budget(15), 5);
+  assert.equal(notificationFallbackLimitForD1Budget(14), 4);
+  assert.equal(notificationFallbackLimitForD1Budget(15), 4);
   assert.equal(notificationFallbackLimitForD1Budget(39), 0);
   assert.equal(notificationFallbackLimitForD1Budget(40), 0);
   assert.equal(notificationFallbackLimitForD1Budget(49), 0);
-  assert.match(source, /NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 5/);
+  assert.match(source, /NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 6/);
   assert.match(source, /NOTIFICATION_FALLBACK_POST_DRAIN_PROBE_D1_STATEMENTS = 1/);
   assert.match(source, /FAST_JOBS_OUTER_LEASE_D1_RESERVE = 4/);
   assert.match(source, /if \(fallbackLimit <= 0\)/);

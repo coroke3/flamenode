@@ -199,12 +199,47 @@
 }
 
 .mergeRoute {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
   font-size: 14px;
   font-weight: 700;
+}
+
+.mergeParty {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+}
+
+.mergePartySource {
+  border-color: color-mix(in srgb, var(--accent-danger) 38%, var(--border-subtle));
+}
+
+.mergePartyTarget {
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--border-subtle));
+}
+
+.mergePartyLabel {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.mergePartyNote {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mergeSource,
@@ -225,10 +260,31 @@
 
 .mergeChanges {
   margin: 0;
-  padding-left: 18px;
+  padding-left: 22px;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.65;
+}
+
+.mergeChanges li + li {
+  margin-top: 4px;
+}
+
+.mergeOutcome {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-primary) 6%, var(--bg-surface));
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.mergeOutcomeTitle {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .mergeHint {
@@ -277,6 +333,17 @@
 .iconModeButton:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+@media (max-width: 520px) {
+  .mergeRoute {
+    grid-template-columns: 1fr;
+  }
+
+  .mergeRoute > svg {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
 }
 
 .iconModeButtonActive {

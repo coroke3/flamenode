@@ -37,10 +37,12 @@ test("admin system_settings reads are request-cached and do not use TTL/KV", () 
   assert.doesNotMatch(settingsHelper, /readOperationModeKvMirror|cacheTtl|setTimeout/);
 });
 
-test("admin/manage lists preserve canonical icons without video fallback reads", () => {
+test("admin XID list uses the public R2 icon projection without per-row icon reads", () => {
   assert.match(usersPage, /usersTable\.image/);
-  assert.match(usersPage, /xUsersTable\.icon_url/);
-  assert.match(usersPage, /resolveManageXIconUrl/);
+  assert.match(usersPage, /loadPublicXIconMapOptional/);
+  assert.match(usersPage, /resolveProjectedIcon/);
+  assert.doesNotMatch(usersPage, /xUsersTable\.icon_url/);
+  assert.doesNotMatch(usersPage, /resolveManageXIconUrl/);
   assert.match(usersPage, /<ManageXIcon/);
   assert.doesNotMatch(usersPage, /src=\{x\.icon_url\}/);
   assert.doesNotMatch(usersPage, /active_x_icon_url/);
@@ -54,4 +56,9 @@ test("admin/manage lists preserve canonical icons without video fallback reads",
   assert.match(usersPage, /active_x_user_id/);
   assert.match(auditPage, /x_name: xUsersTable\.x_name/);
   assert.match(audiencePage, /x_name: xUsersTable\.x_name/);
+});
+
+test("admin XID preview accepts only public-listable projection statuses", () => {
+  assert.match(usersPage, /PUBLIC_LISTABLE_X_APPROVAL_STATUSES\.includes/);
+  assert.doesNotMatch(usersPage, /row\.approval_status === "approved"/);
 });

@@ -125,7 +125,7 @@ test("writeGuard does not import runtime budget modules", async () => {
   }
 });
 
-test("only cost-guard Server Action writes operation_mode in actions/", async () => {
+test("only cost-guard Server Action writes CostGuard settings in actions/", async () => {
   const actionsRoot = path.join(repoRoot, "src/lib/actions");
   const files = (await readdir(actionsRoot, { recursive: true }))
     .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
@@ -152,7 +152,7 @@ test("writeGuard reads operation_mode for gating but does not mutate it", async 
   assert.doesNotMatch(writeGuard, /UPDATE\s+system_settings/i);
 });
 
-test("spreadsheet import is the intentional admin path for disabled_features_json", async () => {
+test("disabled_features_json is read-only in Spreadsheet and controlled by CostGuard action", async () => {
   const { resolveSpreadsheetTableDef, isSpreadsheetColumnEditable, SPREADSHEET_COST_GUARD_READONLY_COLUMNS } =
     await import("../admin/spreadsheet/registry.ts");
   const registry = await readFile(
@@ -166,7 +166,13 @@ test("spreadsheet import is the intentional admin path for disabled_features_jso
     assert.equal(isSpreadsheetColumnEditable(def, column), false, column);
   }
   assert.equal(isSpreadsheetColumnEditable(def, "operation_mode"), false);
-  assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), true);
+  assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), false);
+  const costGuard = await readFile(
+    path.join(repoRoot, "src/lib/actions/cost-guard.ts"),
+    "utf8",
+  );
+  assert.match(costGuard, /export async function setDisabledFeatures/);
+  assert.match(costGuard, /disabled_features_json/);
 });
 
 test("spreadsheet query does not mutate operation_mode outside cost-guard", async () => {

@@ -69,6 +69,67 @@ test("video detail filter removes private related rows and events", () => {
   assert.equal(payload.related_videos.length, 2);
 });
 
+test("enforced x-user fences remove member rows and their chapter projections", () => {
+  const context = buildPublicArtifactVisibilityContext({
+    schema_version: 1,
+    revision: 1,
+    generated_at: 1,
+    entities: [
+      {
+        entity_type: "x_user",
+        entity_id: "BlockedUser",
+        fence_token: "x-token",
+        blocked_at: 1,
+      },
+    ],
+  });
+  const payload = {
+    video: { id: "v1", title: "Video", visibility_status: "public" },
+    public_members: [
+      { id: "member-blocked", x_user_id: "blockeduser", display_name: "Hidden" },
+      { id: "member-internal", display_name: "No X identity", x_user_id: null },
+    ],
+    member_chapters: [
+      { id: "chapter-blocked", video_member_id: "member-blocked" },
+      { id: "chapter-internal", video_member_id: "member-internal" },
+    ],
+  };
+  const filtered = filterPublicArtifactPayload("video", payload, context);
+  assert.deepEqual(filtered?.public_members, [payload.public_members[1]]);
+  assert.deepEqual(filtered?.member_chapters, [payload.member_chapters[1]]);
+  assert.equal(payload.public_members.length, 2);
+});
+
+test("enforced x-user fences remove public event staff without treating row ids as X ids", () => {
+  const context = buildPublicArtifactVisibilityContext({
+    schema_version: 1,
+    revision: 1,
+    generated_at: 1,
+    entities: [
+      {
+        entity_type: "x_user",
+        entity_id: "blocked",
+        fence_token: "x-token",
+        blocked_at: 1,
+      },
+    ],
+  });
+  const filtered = filterPublicArtifactPayload(
+    "event",
+    {
+      event: { id: "e1", title: "Event", visibility_status: "public" },
+      public_staff: [
+        { id: "blocked", x_user_id: "other", display_name: "Visible" },
+        { id: "row-2", x_user_id: "blocked", display_name: "Hidden" },
+      ],
+    },
+    context,
+  );
+  assert.deepEqual(filtered?.public_staff, [
+    { id: "blocked", x_user_id: "other", display_name: "Visible" },
+  ]);
+});
+
 test("event release filter removes fenced videos and adjusts the public count", () => {
   const filtered = filterPublicArtifactPayload(
     "event_release",

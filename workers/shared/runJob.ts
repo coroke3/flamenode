@@ -36,6 +36,19 @@ export interface RunJobOptions {
   commitSha?: string;
 }
 
+/**
+ * Request-local identity shared by the worker log and the task callback.
+ *
+ * A task may ignore the argument (the pre-context callback shape remains
+ * source-compatible), but jobs that persist history must use this runId
+ * instead of creating a second UUID.
+ */
+export type JobRunContext = {
+  runId: string;
+  startedAtMs: number;
+  startedAt: string;
+};
+
 class JobCountersError extends Error {
   readonly counters: NormalizedJobCounters;
   readonly logError = "job reported failed operations";
@@ -184,7 +197,7 @@ function failedCounters(): NormalizedJobCounters {
 export async function runJob(
   worker: string,
   job: string,
-  task: () => Promise<unknown>,
+  task: (context: JobRunContext) => Promise<unknown>,
   options: RunJobOptions = {},
 ): Promise<JobRunResult> {
   const startedMs = Date.now();
@@ -208,7 +221,9 @@ export async function runJob(
 
   let counters: NormalizedJobCounters;
   try {
-    counters = normalizeJobCounters(await task());
+    counters = normalizeJobCounters(
+      await task({ runId, startedAtMs: startedMs, startedAt }),
+    );
   } catch (error) {
     const measuredFailure =
       error instanceof JobCountersError || error instanceof JobFailureWithCounters;

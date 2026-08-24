@@ -18,6 +18,7 @@ if (runTestWithTsx(import.meta.url)) {
         start_time: 200,
         slot_part_gap_minutes: 15,
         slot_visibility_mode: "public_name",
+        youtube_playlist_id: "PLabc123",
       },
       public_staff: [
         {
@@ -53,6 +54,7 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(detail.generatedAt, 100);
     assert.equal(detail.event.id, "event1");
     assert.equal(detail.event.slot_part_gap_minutes, 15);
+    assert.equal(detail.event.youtube_playlist_id, "PLabc123");
     assert.equal(detail.publicStaff.length, 1);
     assert.equal(detail.slotSummary[1].count, 3);
     assert.equal(detail.slots.length, 2);

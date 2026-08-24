@@ -43,6 +43,7 @@ if (!runningDispatchTests) {
     MAX_DISCORD_DM_KV_WRITES_PER_RUN,
     MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN,
     MAX_NOTIFICATION_BATCH,
+    deadLetterOrphanPendingNotifications,
     processNotificationQueue,
     recoverNotificationOutboxExpiredLeases,
   } = await import("./dispatch.ts");
@@ -52,6 +53,14 @@ function okJson(value = {}, headers = {}) {
     status: 200,
     headers: { "content-type": "application/json", ...headers },
   });
+}
+
+function isActiveClaimProbe(sql) {
+  return (
+    sql.includes("status = 'processing'") &&
+    sql.includes("lease_token = ?2") &&
+    sql.includes("lease_expires_at > ?3")
+  );
 }
 
 test("notification dispatcher uses recipient_user_id and bounded lease-aware selection", async () => {
@@ -88,7 +97,9 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
   assert.match(sql, /recipient_user_id/);
   assert.match(sql, /LEFT JOIN "user"/);
   assert.match(sql, /u\.id IS NULL/);
-  assert.match(sql, /INNER JOIN "user"/);
+  assert.match(sql, /n\.delivery_route/);
+  assert.match(sql, /CASE WHEN n\.type = 'discord_webhook' THEN 'channel' ELSE 'dm' END/);
+  assert.doesNotMatch(sql, /INNER JOIN "user"/);
   assert.match(sql, /lease_expires_at/);
   assert.match(sql, /dead_letter/);
   assert.match(sql, /COALESCE\(attempt_count, 0\)/);
@@ -98,6 +109,161 @@ test("notification dispatcher uses recipient_user_id and bounded lease-aware sel
   assert.equal(MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN, 12);
   assert.equal(MAX_DISCORD_DM_KV_WRITES_PER_RUN, 2);
   assert.equal(MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN, 2);
+});
+
+test("orphan cleanup: DMだけをdead-letterにしlegacy webhookはchannel扱いにする", async () => {
+  let cleanupSql = "";
+  const env = {
+    DB: {
+      prepare(sql) {
+        cleanupSql = sql;
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            return { meta: { changes: 2 } };
+          },
+        };
+      },
+    },
+  };
+
+  assert.equal(await deadLetterOrphanPendingNotifications(env, 100, MAX_NOTIFICATION_BATCH), 2);
+  assert.match(cleanupSql, /LEFT JOIN "user" u ON u\.id = n\.recipient_user_id/);
+  assert.match(cleanupSql, /n\.delivery_route/);
+  assert.match(cleanupSql, /CASE WHEN n\.type = 'discord_webhook' THEN 'channel' ELSE 'dm' END/);
+  assert.match(cleanupSql, /= 'dm'/);
+});
+
+test("processNotificationQueue: canonical channelはrecipient NULLでも配送する", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const statements = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(null, { status: 204 });
+  };
+  const env = {
+    DISCORD_WEBHOOK_URL_FORUM_EVENT: "https://example.test/forum-route-channel",
+    DB: {
+      prepare(sql) {
+        statements.push(sql);
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            if (sql.includes("SET status = 'processing'")) {
+              return { meta: { changes: 1 } };
+            }
+            if (sql.includes("SET status = 'sent'")) {
+              return { meta: { changes: 1 } };
+            }
+            return { meta: { changes: 0 } };
+          },
+          async all() {
+            if (isActiveClaimProbe(sql)) {
+              return { results: [{ id: "channel-null-recipient" }] };
+            }
+            if (sql.includes("ORDER BY n.created_at")) {
+              return {
+                results: [
+                  {
+                    id: "channel-null-recipient",
+                    recipient_user_id: null,
+                    discord_id: null,
+                    delivery_route: "channel",
+                    type: "event_operation_completed",
+                    payload_json: JSON.stringify({
+                      content: "channel route",
+                      webhook_target: "event",
+                    }),
+                    attempt_count: 0,
+                  },
+                ],
+              };
+            }
+            return { results: [] };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    const result = await processNotificationQueue(env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.processed, 1);
+    assert.equal(result.failed, 0);
+    assert.deepEqual(calls, ["https://example.test/forum-route-channel"]);
+    assert.match(statements.join("\n"), /LEFT JOIN "user"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("processNotificationQueue: pre-send guard込みの成功6件はD1予算内に収まる", async () => {
+  const originalFetch = globalThis.fetch;
+  let statementCount = 0;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  const rows = Array.from({ length: MAX_NOTIFICATION_BATCH }, (_, index) => ({
+    id: `budget-channel-${index}`,
+    recipient_user_id: null,
+    discord_id: null,
+    delivery_route: "channel",
+    type: "event_operation_completed",
+    payload_json: JSON.stringify({ content: `row-${index}` }),
+    attempt_count: 0,
+  }));
+  const env = {
+    DISCORD_WEBHOOK_URL: "https://example.test/d1-budget-channel",
+    DB: {
+      prepare(sql) {
+        statementCount += 1;
+        return {
+          bind() {
+            return this;
+          },
+          async run() {
+            if (
+              sql.includes("SET status = 'processing'") ||
+              sql.includes("SET status = 'sent'")
+            ) {
+              return { meta: { changes: 1 } };
+            }
+            return { meta: { changes: 0 } };
+          },
+          async all() {
+            if (isActiveClaimProbe(sql)) {
+              return { results: [{ id: "active-budget-claim" }] };
+            }
+            return sql.includes("ORDER BY n.created_at") ? { results: rows } : { results: [] };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    const result = await processNotificationQueue(env, {
+      limit: MAX_NOTIFICATION_BATCH,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.processed, MAX_NOTIFICATION_BATCH);
+    assert.equal(fetchCalls, MAX_NOTIFICATION_BATCH);
+    // orphan cleanup + selection + (claim + pre-send guard + markSent) / row。
+    assert.equal(statementCount, 2 + MAX_NOTIFICATION_BATCH * 3);
+    assert.ok(statementCount <= 2 + MAX_NOTIFICATION_BATCH * 6);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("deliver: generic notification types use Discord DM when bot token exists", async () => {
@@ -121,10 +287,7 @@ test("deliver: generic notification types use Discord DM when bot token exists",
     );
     assert.equal(ok, true);
     assert.equal(calls.length, 2);
-    assert.equal(
-      JSON.parse(String(calls[0].init.body)).recipient_id,
-      "123456789012345678",
-    );
+    assert.equal(JSON.parse(String(calls[0].init.body)).recipient_id, "123456789012345678");
     assert.match(calls[1].url, /\/channels\/dm_channel\/messages$/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -155,14 +318,9 @@ test("deliver: 共有cooldownのglobal KV読取は1 invocationで重複しない
       { KV: kv, DISCORD_BOT_TOKEN: "bot-token" },
     );
     assert.equal(ok, true);
-    const cooldownGets = kvGets.filter((key) =>
-      key.startsWith("external-api:discord:cooldown:"),
-    );
+    const cooldownGets = kvGets.filter((key) => key.startsWith("external-api:discord:cooldown:"));
     assert.equal(cooldownGets.length, 3);
-    assert.equal(
-      cooldownGets.filter((key) => key.endsWith(":global")).length,
-      1,
-    );
+    assert.equal(cooldownGets.filter((key) => key.endsWith(":global")).length, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -310,13 +468,106 @@ test("deliver: discord_webhook uses webhook URL when configured", async () => {
   }
 });
 
+test("deliver: canonical channelはtypeに依存せずForum Webhookを使う", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        delivery_route: "channel",
+        type: "event_operation_completed",
+        payload_json: JSON.stringify({
+          content: "semantic channel",
+          webhook_target: "event",
+        }),
+        discord_id: "",
+      },
+      {
+        DISCORD_WEBHOOK_URL_FORUM_EVENT: "https://example.test/canonical-channel",
+        DISCORD_BOT_TOKEN: "bot-token",
+      },
+    );
+    assert.equal(ok, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://example.test/canonical-channel");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deliver: canonical dmはlegacy discord_webhook typeより優先される", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith("/users/@me/channels")) {
+      return okJson({ id: "canonical_dm_channel" });
+    }
+    return okJson();
+  };
+  try {
+    const ok = await deliver(
+      {
+        delivery_route: "dm",
+        type: "discord_webhook",
+        payload_json: JSON.stringify({ content: "canonical dm" }),
+        discord_id: "623456789012345678",
+      },
+      {
+        DISCORD_WEBHOOK_URL: "https://example.test/must-not-use-webhook",
+        DISCORD_BOT_TOKEN: "bot-token",
+      },
+    );
+    assert.equal(ok, true);
+    assert.equal(calls.length, 2);
+    assert.match(calls[0].url, /\/users\/@me\/channels$/);
+    assert.match(calls[1].url, /\/channels\/canonical_dm_channel\/messages$/);
+    assert.equal(
+      calls.some((call) => call.url === "https://example.test/must-not-use-webhook"),
+      false,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("deliver: unknown canonical routeはlegacy fallbackせず永久失敗にする", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return okJson();
+  };
+  try {
+    assert.equal(
+      await deliver(
+        {
+          delivery_route: "unknown",
+          type: "discord_webhook",
+          payload_json: JSON.stringify({ content: "must not send" }),
+          discord_id: "723456789012345678",
+        },
+        {
+          DISCORD_WEBHOOK_URL: "https://example.test/must-not-send",
+          DISCORD_BOT_TOKEN: "bot-token",
+        },
+      ),
+      false,
+    );
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Discord route cooldownはglobal cooldownも横断確認する", async () => {
   const source = await readFile(new URL("./dispatch.ts", import.meta.url), "utf8");
   assert.match(source, /DISCORD_GLOBAL_COOLDOWN_KEY = "discord:global"/);
-  assert.match(
-    source,
-    /activeCooldownUntil\(DISCORD_GLOBAL_COOLDOWN_KEY, now\)/,
-  );
+  assert.match(source, /activeCooldownUntil\(DISCORD_GLOBAL_COOLDOWN_KEY, now\)/);
   assert.match(source, /x-ratelimit-global/);
   assert.match(source, /x-ratelimit-scope/);
   assert.match(source, /body\.global === true/);
@@ -387,6 +638,7 @@ function pendingWebhookRow(id) {
     id,
     recipient_user_id: `user-${id}`,
     discord_id: `discord-${id}`,
+    delivery_route: null,
     type: "discord_webhook",
     payload_json: JSON.stringify({ content: id }),
     attempt_count: 0,
@@ -450,7 +702,10 @@ test("D1 selection中のabortはitem claimとDiscord送信を開始しない", a
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
+      processNotificationQueue(env, {
+        signal: controller.signal,
+        skipLeaseRecovery: true,
+      }),
       (error) => error === reason,
     );
     assert.equal(claimWrites, 0);
@@ -487,6 +742,9 @@ test("claim D1 write中のabortはDiscord送信とfailure更新へ進まない",
             return { meta: { changes: 0 } };
           },
           async all() {
+            if (isActiveClaimProbe(sql)) {
+              return { results: [{ id: "fetch" }] };
+            }
             return sql.includes("FROM notification_outbox n")
               ? { results: [pendingWebhookRow("claim")] }
               : { results: [] };
@@ -498,11 +756,98 @@ test("claim D1 write中のabortはDiscord送信とfailure更新へ進まない",
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
+      processNotificationQueue(env, {
+        signal: controller.signal,
+        skipLeaseRecovery: true,
+      }),
       (error) => error === reason,
     );
     assert.equal(fetchCalls, 0);
     assert.equal(failureWrites, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("claim直後にcancelledへ変わった行はpre-send guardで配送しない", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  let completionWrites = 0;
+  const state = {
+    status: "pending",
+    lease_token: null,
+    lease_expires_at: null,
+  };
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response(null, { status: 204 });
+  };
+  const env = {
+    DISCORD_WEBHOOK_URL: "https://example.test/cancel-race",
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...args) {
+            return {
+              async run() {
+                if (sql.includes("SET status = 'processing'")) {
+                  state.status = "processing";
+                  state.lease_token = args[1];
+                  state.lease_expires_at = args[2];
+                  // 管理cancelがclaim直後にcommitした競合を再現する。
+                  state.status = "cancelled";
+                  state.lease_token = null;
+                  state.lease_expires_at = null;
+                  return { meta: { changes: 1 } };
+                }
+                if (sql.includes("SET status = 'sent'") || sql.includes("SET attempt_count")) {
+                  completionWrites += 1;
+                }
+                return { meta: { changes: 0 } };
+              },
+              async all() {
+                if (isActiveClaimProbe(sql)) {
+                  return state.status === "processing" && state.lease_token === args[1]
+                    ? { results: [{ id: "cancel-race" }] }
+                    : { results: [] };
+                }
+                if (sql.includes("ORDER BY n.created_at")) {
+                  return {
+                    results: [
+                      {
+                        id: "cancel-race",
+                        recipient_user_id: null,
+                        discord_id: null,
+                        delivery_route: "channel",
+                        type: "event_operation_completed",
+                        payload_json: JSON.stringify({
+                          content: "cancel me",
+                        }),
+                        attempt_count: 0,
+                      },
+                    ],
+                  };
+                }
+                return { results: [] };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    const result = await processNotificationQueue(env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.processed, 0);
+    assert.equal(result.failed, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(fetchCalls, 0);
+    assert.equal(completionWrites, 0);
+    assert.equal(state.status, "cancelled");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -539,6 +884,9 @@ test("Discord fetch中のAbortErrorを再送出しretry/dead-letterへ変換し�
             };
           },
           async all() {
+            if (isActiveClaimProbe(sql)) {
+              return { results: [{ id: "item-1" }] };
+            }
             return sql.includes("FROM notification_outbox n")
               ? { results: [pendingWebhookRow("fetch")] }
               : { results: [] };
@@ -550,7 +898,10 @@ test("Discord fetch中のAbortErrorを再送出しretry/dead-letterへ変換し�
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
+      processNotificationQueue(env, {
+        signal: controller.signal,
+        skipLeaseRecovery: true,
+      }),
       (error) => error === reason,
     );
     assert.equal(fetchCalls, 1);
@@ -595,12 +946,12 @@ test("item完了D1境界でabortしたら次itemをclaimしない", async () => 
             return { meta: { changes: 0 } };
           },
           async all() {
+            if (isActiveClaimProbe(sql)) {
+              return { results: [{ id: "first" }] };
+            }
             return sql.includes("FROM notification_outbox n")
               ? {
-                  results: [
-                    pendingWebhookRow("first"),
-                    pendingWebhookRow("second"),
-                  ],
+                  results: [pendingWebhookRow("first"), pendingWebhookRow("second")],
                 }
               : { results: [] };
           },
@@ -611,7 +962,10 @@ test("item完了D1境界でabortしたら次itemをclaimしない", async () => 
 
   try {
     await assert.rejects(
-      processNotificationQueue(env, { signal: controller.signal, skipLeaseRecovery: true }),
+      processNotificationQueue(env, {
+        signal: controller.signal,
+        skipLeaseRecovery: true,
+      }),
       (error) => error === reason,
     );
     assert.equal(claimWrites, 1);
@@ -667,7 +1021,16 @@ function notificationQueueEnv(row, handlers = {}) {
                     return { meta: { changes: 1 } };
                   }
                   markSentAttempts += 1;
-                  if (handlers.markSentFailCount != null && markSentAttempts <= handlers.markSentFailCount) {
+                  if (
+                    handlers.markSentThrowCount != null &&
+                    markSentAttempts <= handlers.markSentThrowCount
+                  ) {
+                    throw new Error("SQLITE_BUSY: mark sent temporarily failed");
+                  }
+                  if (
+                    handlers.markSentFailCount != null &&
+                    markSentAttempts <= handlers.markSentFailCount
+                  ) {
                     return { meta: { changes: 0 } };
                   }
                   if (state.status !== "processing") return { meta: { changes: 0 } };
@@ -683,12 +1046,20 @@ function notificationQueueEnv(row, handlers = {}) {
                   state.lease_expires_at = args[1];
                   return { meta: { changes: 1 } };
                 }
-                if (sql.includes("SET status = 'pending'") && sql.includes("delivery lease expired")) {
+                if (
+                  sql.includes("SET status = 'pending'") &&
+                  sql.includes("delivery lease expired")
+                ) {
                   return { meta: { changes: 0 } };
                 }
                 return { meta: { changes: 0 } };
               },
               async all() {
+                if (isActiveClaimProbe(sql)) {
+                  return state.status === "processing"
+                    ? { results: [{ id: state.id ?? "row-1" }] }
+                    : { results: [] };
+                }
                 if (sql.includes("FROM notification_outbox n")) {
                   return state.status === "pending"
                     ? {
@@ -698,7 +1069,9 @@ function notificationQueueEnv(row, handlers = {}) {
                             recipient_user_id: "user-1",
                             discord_id: "discord-1",
                             type: "discord_webhook",
-                            payload_json: JSON.stringify({ content: "hello" }),
+                            payload_json: JSON.stringify({
+                              content: "hello",
+                            }),
                             attempt_count: state.attempt_count ?? 0,
                           },
                         ],
@@ -745,6 +1118,26 @@ test("配送成功後にmarkSentが1回失敗してもretryでsentへ進む", as
   }
 });
 
+test("配送成功後にmarkSentが一時例外でも外部再送せずsentへ進む", async () => {
+  const harness = notificationQueueEnv(
+    { id: "retry-sent-after-throw" },
+    { markSentThrowCount: 1 },
+  );
+  try {
+    const result = await processNotificationQueue(harness.env, {
+      limit: 1,
+      skipLeaseRecovery: true,
+    });
+    assert.equal(result.processed, 1);
+    assert.equal(result.skipped, 0);
+    assert.equal(harness.fetchCalls, 1);
+    assert.equal(harness.markSentAttempts, 2);
+    assert.equal(harness.state.status, "sent");
+  } finally {
+    harness.restore();
+  }
+});
+
 test("配送成功後にmarkSentが常に失敗してもlease回復で再配送しない", async () => {
   const harness = notificationQueueEnv(
     { id: "suppress-redelivery", lease_expires_at: 50 },
@@ -771,16 +1164,13 @@ test("配送成功後にmarkSentが常に失敗してもlease回復で再配送�
 });
 
 test("sent marker rows beyond the recovery limit are not requeued", async () => {
-  const markerRows = Array.from(
-    { length: MAX_NOTIFICATION_BATCH + 1 },
-    (_, index) => ({
-      id: `marker-${index}`,
-      status: "processing",
-      attempt_count: 0,
-      last_error: DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
-      lease_expires_at: 1,
-    }),
-  );
+  const markerRows = Array.from({ length: MAX_NOTIFICATION_BATCH + 1 }, (_, index) => ({
+    id: `marker-${index}`,
+    status: "processing",
+    attempt_count: 0,
+    last_error: DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
+    lease_expires_at: 1,
+  }));
   const env = {
     DB: {
       prepare(sql) {
@@ -788,10 +1178,7 @@ test("sent marker rows beyond the recovery limit are not requeued", async () => 
           bind(...args) {
             return {
               async run() {
-                if (
-                  sql.includes("SET status = 'sent'") &&
-                  sql.includes("last_error = ?2")
-                ) {
+                if (sql.includes("SET status = 'sent'") && sql.includes("last_error = ?2")) {
                   const recoverable = markerRows
                     .filter((row) => row.status === "processing")
                     .slice(0, Number(args[2]));
@@ -805,10 +1192,7 @@ test("sent marker rows beyond the recovery limit are not requeued", async () => 
                   sql.includes("SET status = 'pending'") ||
                   sql.includes("SET status = 'dead_letter'")
                 ) {
-                  assert.match(
-                    sql,
-                    /last_error IS NULL\s+OR last_error <> \?4/,
-                  );
+                  assert.match(sql, /last_error IS NULL\s+OR last_error <> \?4/);
                   assert.equal(args[3], DELIVERY_SUCCEEDED_AWAITING_SENT_MARK);
                   return { meta: { changes: 0 } };
                 }
@@ -825,14 +1209,8 @@ test("sent marker rows beyond the recovery limit are not requeued", async () => 
     limit: MAX_NOTIFICATION_BATCH,
   });
   assert.equal(recovered, MAX_NOTIFICATION_BATCH);
-  assert.equal(
-    markerRows.filter((row) => row.status === "sent").length,
-    MAX_NOTIFICATION_BATCH,
-  );
-  assert.equal(
-    markerRows.filter((row) => row.status === "processing").length,
-    1,
-  );
+  assert.equal(markerRows.filter((row) => row.status === "sent").length, MAX_NOTIFICATION_BATCH);
+  assert.equal(markerRows.filter((row) => row.status === "processing").length, 1);
 });
 
 test("deliver: missing discord_id does not call Discord API", async () => {
@@ -999,7 +1377,7 @@ function deadLetterQueueHarness(row, envExtras = {}) {
           bind(...args) {
             return {
               async run() {
-                if (sql.includes("INSERT INTO notification_outbox")) {
+                if (sql.includes("INSERT") && sql.includes("INTO notification_outbox")) {
                   inserts.push({ sql, args });
                   return { meta: { changes: 1 } };
                 }
@@ -1018,14 +1396,22 @@ function deadLetterQueueHarness(row, envExtras = {}) {
                 return { meta: { changes: 0 } };
               },
               async all() {
-                if (sql.includes("FROM notification_outbox n") && sql.includes("INNER JOIN")) {
+                if (isActiveClaimProbe(sql)) {
+                  return state.status === "processing"
+                    ? { results: [{ id: row.id }] }
+                    : { results: [] };
+                }
+                if (sql.includes("ORDER BY n.created_at")) {
                   return state.status === "pending"
                     ? {
                         results: [
                           {
                             id: row.id,
-                            recipient_user_id: row.recipient_user_id ?? "user-1",
+                            recipient_user_id: Object.hasOwn(row, "recipient_user_id")
+                              ? row.recipient_user_id
+                              : "user-1",
                             discord_id: row.discord_id ?? "",
+                            delivery_route: row.delivery_route ?? null,
                             type: row.type,
                             payload_json: row.payload_json,
                             attempt_count: state.attempt_count,
@@ -1033,9 +1419,6 @@ function deadLetterQueueHarness(row, envExtras = {}) {
                         ],
                       }
                     : { results: [] };
-                }
-                if (sql.includes("WHERE dedupe_key = ?1")) {
-                  return { results: [] };
                 }
                 return { results: [] };
               },
@@ -1083,8 +1466,8 @@ test("processNotificationQueue: DM 最終失敗で SYSTEM forum alert を enqueu
     assert.equal(harness.state.status, "dead_letter");
     assert.equal(harness.inserts.length, 1);
     const insert = harness.inserts[0];
-    assert.match(insert.sql, /INSERT INTO notification_outbox/);
-    assert.match(insert.sql, /'discord_webhook'/);
+    assert.match(insert.sql, /INSERT OR IGNORE INTO notification_outbox/);
+    assert.match(insert.sql, /'channel', 'discord_webhook'/);
     const payload = JSON.parse(insert.args[2]);
     assert.equal(payload.webhook_target, "system");
     assert.match(payload.thread_name, /^\[通知エラー\]/);
@@ -1148,11 +1531,12 @@ test("processNotificationQueue: forum_webhook_unconfigured は初回で dead_let
   }
 });
 
-test("processNotificationQueue: discord_webhook dead_letter は SYSTEM alert を再帰 enqueue しない", async () => {
+test("processNotificationQueue: canonical channel dead_letter は SYSTEM alert を再帰 enqueue しない", async () => {
   const harness = deadLetterQueueHarness(
     {
       id: "webhook-recursion-guard",
-      type: "discord_webhook",
+      delivery_route: "channel",
+      type: "event_operation_completed",
       payload_json: JSON.stringify({
         content: "hello",
         webhook_target: "event",

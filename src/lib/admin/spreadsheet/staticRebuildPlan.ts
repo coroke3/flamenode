@@ -8,12 +8,15 @@ export type SpreadsheetStaticRebuildMutation = {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   actorUserId: string;
-  /** Existing event links for video_members rows, loaded by the mutation caller. */
+  /** Existing linked event IDs for video/video_members rows, loaded by the mutation caller. */
   eventReleaseEventIds?: readonly string[];
 };
 
 /** buildStaticRebuildQueueBatch() の入力上限と同じ。超過時はapply前に分割を要求する。 */
-export const SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT = 16;
+// Must stay aligned with MAX_STATIC_REBUILD_BATCH_TARGETS in the queue
+// builder; the spreadsheet import's D1 budget separately caps the JSON1
+// statements at four.
+export const SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT = 256;
 export const SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED =
   "静的再生成対象が多すぎます。行を分割してください。";
 
@@ -32,6 +35,11 @@ const YOUTUBE_RELATED_STATUS_FIELDS = [
   "youtube_privacy_status",
   "youtube_availability_status",
 ] as const;
+
+// This synthetic event is deliberately excluded by COUNTABLE_PUBLIC_VIDEO_SQL.
+// A video_events link to it changes global list/search/ranking projections even
+// though there is no public event artifact to rebuild for the synthetic ID.
+const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 
 function valueFromMutation(
   mutation: SpreadsheetStaticRebuildMutation,
@@ -216,6 +224,23 @@ export function planSpreadsheetStaticRebuildTargets(
         });
         for (const eventId of valuesFromMutation(mutation, "primary_event_id")) {
           add(mutation, {
+            targetType: "event_base",
+            targetId: eventId,
+            priority: "high",
+          });
+          add(mutation, {
+            targetType: "event_release",
+            targetId: eventId,
+            priority: "high",
+          });
+        }
+        for (const eventId of mutation.eventReleaseEventIds ?? []) {
+          add(mutation, {
+            targetType: "event_base",
+            targetId: eventId,
+            priority: "high",
+          });
+          add(mutation, {
             targetType: "event_release",
             targetId: eventId,
             priority: "high",
@@ -284,12 +309,35 @@ export function planSpreadsheetStaticRebuildTargets(
             priority: "high",
           });
         }
-        for (const eventId of valuesFromMutation(mutation, "event_id")) {
+        const eventIds = valuesFromMutation(mutation, "event_id");
+        for (const eventId of eventIds) {
+          add(mutation, {
+            targetType: "event_base",
+            targetId: eventId,
+            priority: "high",
+          });
           add(mutation, {
             targetType: "event_release",
             targetId: eventId,
             priority: "high",
           });
+        }
+        for (const eventId of mutation.eventReleaseEventIds ?? []) {
+          add(mutation, {
+            targetType: "event_base",
+            targetId: eventId,
+            priority: "high",
+          });
+          add(mutation, {
+            targetType: "event_release",
+            targetId: eventId,
+            priority: "high",
+          });
+        }
+        if (eventIds.includes(PVSF_SUMMARY_EVENT_ID)) {
+          // Adding/removing the synthetic summary link changes whether the
+          // video is countable in every global public projection.
+          addVideoCardGlobalTargets(mutation, add);
         }
         add(mutation, {
           targetType: "random_video_pool",

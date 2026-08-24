@@ -46,6 +46,7 @@ export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy
 
 /** system_settings の CostGuard 正本列。スプレッドシートからは編集不可（D1/KV 不整合防止）。 */
 export const SPREADSHEET_COST_GUARD_READONLY_COLUMNS = new Set([
+  "disabled_features_json",
   "operation_mode",
   "cost_guard_reason",
   "cost_guard_updated_by_user_id",
@@ -67,6 +68,7 @@ export const SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS = new Set([
 /** イベント／作品は物理削除せず、専用の非公開・voided 操作を利用する。 */
 export const SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES = new Set([
   "events",
+  "system_settings",
   "videos",
 ]);
 

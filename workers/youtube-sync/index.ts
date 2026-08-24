@@ -25,6 +25,7 @@ import {
   mergeScheduledSyncCandidates,
   type ScheduledSyncCandidate,
 } from "./scheduledSelection.ts";
+import { safeErrorSummary } from "../shared/safeLog.ts";
 
 export interface Env extends YoutubeQuotaEnv {
   KV: KVNamespace;
@@ -1298,7 +1299,7 @@ export async function syncBatch(
       // Preserve an existing metadata/API failure (or an AbortError), but
       // turn a refund failure on the otherwise-successful path into a job
       // failure so the caller retries the idempotent sync work.
-      console.error("[youtube-sync] quota refund failed", refundError);
+      console.error("[youtube-sync] quota refund failed", safeErrorSummary(refundError));
       if (reportedResult && !reportedFailure && !signal?.aborted) {
         reportedFailure = jobFailureWithCounters(refundError, {
           failed: 1,

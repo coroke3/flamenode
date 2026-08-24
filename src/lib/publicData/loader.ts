@@ -234,6 +234,7 @@ export type PublicJsonLoadOptions<TPayload = unknown> = {
 
 type ResolvePublicJsonMissOptions = {
   skipStaticMissRecord?: boolean;
+  visibilityContext?: PublicArtifactVisibilityContext;
 };
 
 export type PublicJsonLoadResult<T> = {
@@ -501,6 +502,29 @@ async function resolvePublicJsonMiss<T = never>(
     });
   }
 
+  // A semantic normalize miss can call this helper outside the initial
+  // loadPublicJson branch. Re-resolve the enforce-only artifact context so a
+  // degraded D1 payload cannot bypass the same X-user fence as an R2 hit.
+  let visibilityContext = missOptions?.visibilityContext;
+  if (
+    !visibilityContext &&
+    resolvePublicVisibilityGuardModeFromEnv() === "enforce"
+  ) {
+    try {
+      visibilityContext = buildPublicArtifactVisibilityContext(
+        await loadPublicVisibilityBlockedEntitiesManifest(),
+      );
+    } catch (error) {
+      warnPublicVisibilityManifestFailure("enforce", error);
+      return buildMissResult<T>({
+        data: null,
+        mode: "unavailable",
+        strategy,
+        enqueued: false,
+      });
+    }
+  }
+
   let enqueued = false;
   let rebuildState: RebuildRequestState = "not_needed";
   let probe: PublicStaticTargetProbe | null = null;
@@ -569,8 +593,23 @@ async function resolvePublicJsonMiss<T = never>(
       try {
         const degraded = await options.degradedFetcher();
         if (degraded != null) {
+          const visibleDegraded = filterPublicArtifactPayload(
+            options.targetType,
+            degraded,
+            visibilityContext,
+          );
+          if (visibleDegraded == null) {
+            return buildMissResult<T>({
+              data: null,
+              mode: "unavailable",
+              strategy,
+              enqueued,
+              probe,
+              rebuildState,
+            });
+          }
           return buildMissResult({
-            data: degraded,
+            data: visibleDegraded,
             mode: "degraded_d1",
             strategy,
             enqueued,
@@ -763,7 +802,9 @@ export async function loadPublicJson<T>(
       }
     }
   }
-  return resolvePublicJsonMiss(options);
+  return resolvePublicJsonMiss(options, {
+    visibilityContext: visibility.artifactContext,
+  });
 }
 
 function isEmptyItemsCollection(payload: unknown): boolean {

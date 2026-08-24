@@ -1,5 +1,6 @@
 import { canAutoBindUnassignedReservation } from "../../src/lib/slots/reservationBindIdentityCore.ts";
 import { normalizeXId } from "../../src/lib/utils/xid.ts";
+import { safeErrorSummary } from "../shared/safeLog.ts";
 import {
   D1_QUERY_SOFT_LIMIT,
   isD1BudgetExhausted,
@@ -682,7 +683,7 @@ export async function reconcilePendingXIdSlotBinds(
       } catch (error) {
         console.error("[content-jobs] legacy X ID slot bind promotion failed", {
           request_id: candidate.id,
-          error: error instanceof Error ? error.message : String(error),
+          error: safeErrorSummary(error),
         });
       }
     }
@@ -704,7 +705,7 @@ export async function reconcilePendingXIdSlotBinds(
       failed += 1;
       console.error("[content-jobs] X ID slot bind recovery failed", {
         request_id: request.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: safeErrorSummary(error),
       });
     }
   }

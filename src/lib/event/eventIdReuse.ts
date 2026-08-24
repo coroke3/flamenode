@@ -14,6 +14,7 @@ import {
   eventSlotsObjectKey,
   eventReleaseObjectKey,
 } from "@/lib/publicData/staticEventDetailCore";
+import { eventPlaylistObjectKey } from "@/lib/publicData/staticEventPlaylistCore";
 import {
   readPublicVisibilityBlockedEntitiesManifest,
   writePublicVisibilityBlockedEntitiesManifest,
@@ -108,7 +109,7 @@ export async function preCommitEventIdReuse(input: {
     .from(staticArtifacts)
     .where(
       and(
-        inArray(staticArtifacts.target_type, ["event", "event_base", "event_slots", "event_release"]),
+        inArray(staticArtifacts.target_type, ["event", "event_base", "event_slots", "event_release", "event_playlist"]),
         eq(staticArtifacts.target_id, input.eventId),
         isNull(staticArtifacts.deleted_at),
       )!,
@@ -127,6 +128,7 @@ export async function preCommitEventIdReuse(input: {
         eventBaseObjectKey(input.eventId),
         eventSlotsObjectKey(input.eventId),
         eventReleaseObjectKey(input.eventId),
+        eventPlaylistObjectKey(input.eventId),
       ].map((key) => bucket.get(key)),
     );
     if (objects.some(Boolean)) {

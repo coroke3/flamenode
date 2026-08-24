@@ -8,10 +8,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   formatUnix,
+  formatPublicationDateTime,
   formatRelative,
   formatDuration,
   formatCount,
 } from "./format.ts";
+
+test("formatPublicationDateTime: JST date/time and unset label", () => {
+  assert.equal(formatPublicationDateTime(1700000000), "11月15日 07:13 公開");
+  assert.equal(formatPublicationDateTime(null), "公開日時未設定");
+  assert.equal(formatPublicationDateTime(Number.NaN), "公開日時未設定");
+});
 
 test("formatUnix: null/undefined はハイフン", () => {
   assert.equal(formatUnix(null), "-");

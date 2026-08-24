@@ -47,6 +47,9 @@ const TYPE_LABELS: Record<string, string> = {
   terms_reaccept_required: "利用規約の再同意が必要です",
   welcome_account: "アカウント作成のお知らせ",
   discord_webhook: "運営チャンネル（Webhook）",
+  ops_youtube_playlist_sync_failed: "YouTube再生リスト同期の失敗",
+  ops_youtube_playlist_sync_recovered: "YouTube再生リスト同期の復旧",
+  ops_youtube_quota_deferred: "YouTube再生リスト同期のquota延期",
 };
 
 const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {
@@ -67,6 +70,9 @@ const SEVERITY_BY_TYPE: Record<string, NotificationSeverity> = {
   terms_reaccept_required: "info",
   welcome_account: "info",
   video_pending: "silent",
+  ops_youtube_playlist_sync_failed: "critical",
+  ops_youtube_playlist_sync_recovered: "info",
+  ops_youtube_quota_deferred: "warning",
 };
 
 export function categorizeNotificationType(type: string): NotificationCategory {
@@ -78,6 +84,7 @@ export function categorizeNotificationType(type: string): NotificationCategory {
   if (t.startsWith("chapter_")) return "chapter";
   if (t.startsWith("moderation_")) return "moderation";
   if (t.startsWith("announcement_")) return "announcement";
+  if (t.startsWith("ops_")) return "system";
   if (t.startsWith("event_")) return "event";
   if (t === "discord_webhook" || t === "welcome_account") return "system";
   return "unknown";

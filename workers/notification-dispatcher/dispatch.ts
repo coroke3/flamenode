@@ -34,8 +34,7 @@ const MARK_SENT_RETRY_ATTEMPTS = 3;
 const MARK_SENT_RETRY_DELAY_MS = 50;
 const RETRY_BACKOFF_SEC = [60, 300, 900] as const;
 /** Discord配送成功後に sent 更新だけ失敗した行。再配送せず lease 回復で sent へ進める。 */
-export const DELIVERY_SUCCEEDED_AWAITING_SENT_MARK =
-  "delivery_succeeded_awaiting_sent_mark";
+export const DELIVERY_SUCCEEDED_AWAITING_SENT_MARK = "delivery_succeeded_awaiting_sent_mark";
 export const ORPHAN_RECIPIENT_ERROR = "recipient_user_not_found";
 const DISCORD_FETCH_TIMEOUT_MS = 5_000;
 const DISCORD_MAX_RETRY_AFTER_MS = 15 * 60 * 1_000;
@@ -55,14 +54,36 @@ export const MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN = 2;
  */
 export const MAX_NOTIFICATION_BATCH = 6;
 
+export type NotificationDeliveryRoute = "dm" | "channel";
+
 type OutboxRow = {
   id: string;
-  recipient_user_id: string;
+  recipient_user_id: string | null;
   discord_id: string | null;
+  delivery_route: string | null;
   type: string;
   payload_json: string;
   attempt_count: number;
 };
+
+/**
+ * PR3以降はdelivery_routeが正本。既存行だけtypeから従来経路を復元する。
+ * 空文字・未知値をlegacy扱いにすると設定誤りを誤配送するため無効値として扱う。
+ */
+function resolveOutboxDeliveryRoute(
+  row: Pick<OutboxRow, "delivery_route" | "type">,
+): NotificationDeliveryRoute | null {
+  if (row.delivery_route === "dm" || row.delivery_route === "channel") {
+    return row.delivery_route;
+  }
+  if (row.delivery_route != null) return null;
+  return row.type === "discord_webhook" ? "channel" : "dm";
+}
+
+const EFFECTIVE_DELIVERY_ROUTE_SQL = `COALESCE(
+  n.delivery_route,
+  CASE WHEN n.type = 'discord_webhook' THEN 'channel' ELSE 'dm' END
+)`;
 
 type DeliveryOutcome = {
   ok: boolean;
@@ -72,8 +93,7 @@ type DeliveryOutcome = {
 };
 
 type DiscordRequestResult =
-  | { response: Response; deferred?: never }
-  | { response?: never; deferred: DeliveryOutcome };
+  { response: Response; deferred?: never } | { response?: never; deferred: DeliveryOutcome };
 
 type DmChannelCacheEntry = {
   channelId: string;
@@ -86,16 +106,13 @@ const globalState = globalThis as typeof globalThis & {
 };
 const dmChannelCache =
   globalState.__flamenodeDiscordDmChannels ?? new Map<string, DmChannelCacheEntry>();
-const discordCooldowns =
-  globalState.__flamenodeDiscordCooldowns ?? new Map<string, number>();
+const discordCooldowns = globalState.__flamenodeDiscordCooldowns ?? new Map<string, number>();
 globalState.__flamenodeDiscordDmChannels = dmChannelCache;
 globalState.__flamenodeDiscordCooldowns = discordCooldowns;
 
 function abortReason(signal: AbortSignal, fallback = "notification queue aborted"): Error {
   if (signal.reason instanceof Error) return signal.reason;
-  const error = new Error(
-    signal.reason === undefined ? fallback : String(signal.reason),
-  );
+  const error = new Error(signal.reason === undefined ? fallback : String(signal.reason));
   error.name = "AbortError";
   return error;
 }
@@ -245,10 +262,7 @@ async function cooldownKvKey(routeKey: string): Promise<string> {
   if (routeKey === DISCORD_GLOBAL_COOLDOWN_KEY) {
     return `${DISCORD_COOLDOWN_KV_PREFIX}global`;
   }
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(routeKey),
-  );
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(routeKey));
   const hash = [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -394,13 +408,7 @@ async function discordRequest(
       await cancelResponseBody(response);
       throw abortReason(signal);
     }
-    await recordDiscordRateHeaders(
-      env,
-      routeKey,
-      response,
-      cooldownKvWriteBudget,
-      signal,
-    );
+    await recordDiscordRateHeaders(env, routeKey, response, cooldownKvWriteBudget, signal);
     return { response };
   } catch (error) {
     rethrowAbort(error, signal);
@@ -440,10 +448,7 @@ async function discordFailure(
       globalLimit ||= body.global === true;
       const seconds = Number(body.retry_after);
       if (Number.isFinite(seconds) && seconds >= 0) {
-        retryAfterMs = Math.min(
-          DISCORD_MAX_RETRY_AFTER_MS,
-          Math.ceil(seconds * 1_000),
-        );
+        retryAfterMs = Math.min(DISCORD_MAX_RETRY_AFTER_MS, Math.ceil(seconds * 1_000));
       }
       throwIfAborted(signal);
     } catch (error) {
@@ -497,7 +502,9 @@ async function recoverDeliveredAwaitingSentMark(
         AND lease_expires_at <= ?1
         AND last_error = ?2
       LIMIT ?3`,
-  ).bind(now, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK, limit).run();
+  )
+    .bind(now, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK, limit)
+    .run();
   throwIfAborted(signal);
   return Math.max(0, Number(result.meta?.changes ?? 0));
 }
@@ -523,7 +530,9 @@ async function recoverExpiredLeases(
         AND COALESCE(attempt_count, 0) < ?2
         AND (last_error IS NULL OR last_error <> ?4)
       LIMIT ?3`,
-  ).bind(now, MAX_RETRIES, limit, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK).run();
+  )
+    .bind(now, MAX_RETRIES, limit, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK)
+    .run();
   throwIfAborted(signal);
 
   throwIfAborted(signal);
@@ -538,7 +547,9 @@ async function recoverExpiredLeases(
         AND COALESCE(attempt_count, 0) >= ?2
         AND (last_error IS NULL OR last_error <> ?4)
       LIMIT ?3`,
-  ).bind(now, MAX_RETRIES, limit, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK).run();
+  )
+    .bind(now, MAX_RETRIES, limit, DELIVERY_SUCCEEDED_AWAITING_SENT_MARK)
+    .run();
   throwIfAborted(signal);
   return (
     deliveredRecovery +
@@ -562,9 +573,40 @@ async function claimOutboxRow(
       WHERE id = ?4 AND status = 'pending'
         AND COALESCE(attempt_count, 0) < ?5
         AND (next_attempt_at IS NULL OR next_attempt_at <= ?1)`,
-  ).bind(now, token, now + PROCESSING_LEASE_SEC, row.id, MAX_RETRIES).run();
+  )
+    .bind(now, token, now + PROCESSING_LEASE_SEC, row.id, MAX_RETRIES)
+    .run();
   throwIfAborted(signal);
   return (result.meta?.changes ?? 0) === 1;
+}
+
+async function hasActiveOutboxClaim(
+  env: Env,
+  rowId: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<{ active: boolean; discordId: string | null }> {
+  throwIfAborted(signal);
+  const now = Math.floor(Date.now() / 1_000);
+  const result = await env.DB.prepare(
+    `SELECT n.id, u.discord_id
+       FROM notification_outbox n
+       LEFT JOIN "user" u ON u.id = n.recipient_user_id
+      WHERE n.id = ?1
+        AND n.status = 'processing'
+        AND n.lease_token = ?2
+        AND n.lease_expires_at IS NOT NULL
+        AND n.lease_expires_at > ?3
+      LIMIT 1`,
+  )
+    .bind(rowId, token, now)
+    .all<{ id: string; discord_id: string | null }>();
+  throwIfAborted(signal);
+  const current = result.results?.[0];
+  return {
+    active: Boolean(current),
+    discordId: current?.discord_id ?? null,
+  };
 }
 
 async function markSent(
@@ -581,7 +623,9 @@ async function markSent(
             lease_token = NULL, lease_expires_at = NULL,
             next_attempt_at = NULL, last_error = NULL, processed_at = ?1
       WHERE id = ?2 AND status = 'processing' AND lease_token = ?3`,
-  ).bind(now, rowId, token).run();
+  )
+    .bind(now, rowId, token)
+    .run();
   throwIfAborted(signal);
   return (result.meta?.changes ?? 0) === 1;
 }
@@ -594,7 +638,12 @@ async function markSentWithRetries(
   signal?: AbortSignal,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < MARK_SENT_RETRY_ATTEMPTS; attempt += 1) {
-    if (await markSent(env, rowId, token, now, signal)) return true;
+    try {
+      if (await markSent(env, rowId, token, now, signal)) return true;
+    } catch (error) {
+      rethrowAbort(error, signal);
+      // Discord配送後の一時的D1障害。外部送信は繰り返さずsent更新だけ再試行する。
+    }
     if (attempt < MARK_SENT_RETRY_ATTEMPTS - 1) {
       await sleepMs(MARK_SENT_RETRY_DELAY_MS, signal);
     }
@@ -614,12 +663,9 @@ async function markSentOrSuppressRedelivery(
     `UPDATE notification_outbox
         SET last_error = ?1, lease_expires_at = ?2
       WHERE id = ?3 AND status = 'processing' AND lease_token = ?4`,
-  ).bind(
-    DELIVERY_SUCCEEDED_AWAITING_SENT_MARK,
-    now + PROCESSING_LEASE_SEC,
-    rowId,
-    token,
-  ).run();
+  )
+    .bind(DELIVERY_SUCCEEDED_AWAITING_SENT_MARK, now + PROCESSING_LEASE_SEC, rowId, token)
+    .run();
   throwIfAborted(signal);
   return (result.meta?.changes ?? 0) === 1;
 }
@@ -644,14 +690,16 @@ async function markDeliveryFailure(
             processing_started_at = NULL, lease_token = NULL,
             lease_expires_at = NULL, next_attempt_at = ?3, last_error = ?4
       WHERE id = ?5 AND status = 'processing' AND lease_token = ?6`,
-  ).bind(
-    attempts,
-    deadLetter ? "dead_letter" : "pending",
-    deadLetter ? null : now + delaySeconds,
-    (outcome.errorCode ?? "notification transport unavailable").slice(0, 240),
-    row.id,
-    token,
-  ).run();
+  )
+    .bind(
+      attempts,
+      deadLetter ? "dead_letter" : "pending",
+      deadLetter ? null : now + delaySeconds,
+      (outcome.errorCode ?? "notification transport unavailable").slice(0, 240),
+      row.id,
+      token,
+    )
+    .run();
   throwIfAborted(signal);
   const changes = Math.max(0, Number(result.meta?.changes ?? 0));
   if (deadLetter && changes > 0) {
@@ -676,31 +724,19 @@ async function enqueueDeadLetterOpsAlert(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  if (row.type === "discord_webhook") return;
+  // channel配送の失敗から別channel通知を作ると再帰するため、DM失敗だけを通知する。
+  if (resolveOutboxDeliveryRoute(row) === "channel") return;
   const webhookResolution = resolveForumWebhookUrl(env, "system");
   if ("error" in webhookResolution) return;
   const dedupeKey = `delivery_failed_alert:${row.id}`;
-  const existing = await env.DB.prepare(
-    `SELECT id FROM notification_outbox
-      WHERE dedupe_key = ?1
-        AND status IN ('pending', 'processing', 'sent')
-      LIMIT 1`,
-  )
-    .bind(dedupeKey)
-    .all<{ id: string }>();
-  throwIfAborted(signal);
-  if ((existing.results?.length ?? 0) > 0) return;
 
-  const { buildDeliveryFailureOpsNotification } = await import(
-    "../../src/lib/notifications/templates/errors.ts"
-  );
-  const { sanitizeDiscordThreadName } = await import(
-    "../../src/lib/notifications/forum.ts"
-  );
+  const { buildDeliveryFailureOpsNotification } =
+    await import("../../src/lib/notifications/templates/errors.ts");
+  const { sanitizeDiscordThreadName } = await import("../../src/lib/notifications/forum.ts");
   const basePayload = buildDeliveryFailureOpsNotification({
     outboxId: row.id,
     notificationType: row.type,
-    recipientUserId: row.recipient_user_id,
+    recipientUserId: row.recipient_user_id ?? "未設定",
     discordId: row.discord_id,
     attemptCount,
     lastError,
@@ -708,28 +744,19 @@ async function enqueueDeadLetterOpsAlert(
   const payload = {
     ...basePayload,
     webhook_target: "system" as OpsWebhookTarget,
-    thread_name: sanitizeDiscordThreadName(
-      `[通知エラー] ${row.type}`,
-      "[通知エラー] system",
-    ),
+    thread_name: sanitizeDiscordThreadName(`[通知エラー] ${row.type}`, "[通知エラー] system"),
   };
   await env.DB.prepare(
-    `INSERT INTO notification_outbox (
-      id, recipient_user_id, type, payload_json, status, attempt_count,
+    `INSERT OR IGNORE INTO notification_outbox (
+      id, recipient_user_id, delivery_route, type, payload_json, status, attempt_count,
       processing_started_at, lease_token, lease_expires_at, next_attempt_at,
       last_error, event_id, dedupe_key, created_at
     ) VALUES (
-      ?1, ?2, 'discord_webhook', ?3, 'pending', 0,
+      ?1, ?2, 'channel', 'discord_webhook', ?3, 'pending', 0,
       NULL, NULL, NULL, NULL, NULL, NULL, ?4, ?5
     )`,
   )
-    .bind(
-      crypto.randomUUID(),
-      row.recipient_user_id,
-      JSON.stringify(payload),
-      dedupeKey,
-      now,
-    )
+    .bind(crypto.randomUUID(), row.recipient_user_id, JSON.stringify(payload), dedupeKey, now)
     .run();
   throwIfAborted(signal);
 }
@@ -771,7 +798,12 @@ function parseWebhookTarget(payloadJson: string): OpsWebhookTarget | null {
 }
 
 async function deliverWithOutcome(
-  row: { type: string; payload_json: string; discord_id: string },
+  row: {
+    delivery_route?: string | null;
+    type: string;
+    payload_json: string;
+    discord_id: string;
+  },
   env: Pick<
     Env,
     | "KV"
@@ -789,11 +821,22 @@ async function deliverWithOutcome(
   signal?: AbortSignal,
 ): Promise<DeliveryOutcome> {
   throwIfAborted(signal);
+  const deliveryRoute = resolveOutboxDeliveryRoute({
+    delivery_route: row.delivery_route ?? null,
+    type: row.type,
+  });
+  if (!deliveryRoute) {
+    return {
+      ok: false,
+      errorCode: "notification_delivery_route_invalid",
+      permanent: true,
+    };
+  }
   const apiBody = discordApiBodyJson(row.payload_json);
   if (!apiBody) {
     return { ok: false, errorCode: "discord_payload_invalid", permanent: true };
   }
-  if (row.type === "discord_webhook") {
+  if (deliveryRoute === "channel") {
     const webhookTarget = parseWebhookTarget(row.payload_json);
     const resolved = resolveForumWebhookUrl(env, webhookTarget);
     if ("error" in resolved) {
@@ -839,7 +882,11 @@ async function deliverWithOutcome(
 
   throwIfAborted(signal);
   if (!row.discord_id) {
-    return { ok: false, errorCode: "discord_recipient_missing", permanent: true };
+    return {
+      ok: false,
+      errorCode: "discord_recipient_missing",
+      permanent: true,
+    };
   }
   if (!env.DISCORD_BOT_TOKEN) {
     return {
@@ -890,10 +937,18 @@ async function deliverWithOutcome(
       channelId = typeof channel.id === "string" ? channel.id : null;
     } catch (error) {
       rethrowAbort(error, signal);
-      return { ok: false, errorCode: "discord_dm_open_invalid_json", retryAfterSeconds: 300 };
+      return {
+        ok: false,
+        errorCode: "discord_dm_open_invalid_json",
+        retryAfterSeconds: 300,
+      };
     }
     if (!channelId) {
-      return { ok: false, errorCode: "discord_dm_channel_missing", retryAfterSeconds: 300 };
+      return {
+        ok: false,
+        errorCode: "discord_dm_channel_missing",
+        retryAfterSeconds: 300,
+      };
     }
     await storeDmChannel(env, row.discord_id, channelId, kvWriteBudget, signal);
     throwIfAborted(signal);
@@ -979,6 +1034,7 @@ export async function deadLetterOrphanPendingNotifications(
           FROM notification_outbox n
           LEFT JOIN "user" u ON u.id = n.recipient_user_id
          WHERE n.status = 'pending'
+           AND ${EFFECTIVE_DELIVERY_ROUTE_SQL} = 'dm'
            AND u.id IS NULL
          LIMIT ?3
       )`,
@@ -989,16 +1045,12 @@ export async function deadLetterOrphanPendingNotifications(
   return Math.max(0, Number(result.meta?.changes ?? 0));
 }
 
-export async function hasDuePendingNotifications(
-  env: Env,
-  signal?: AbortSignal,
-): Promise<boolean> {
+export async function hasDuePendingNotifications(env: Env, signal?: AbortSignal): Promise<boolean> {
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
   const result = await env.DB.prepare(
     `SELECT n.id
        FROM notification_outbox n
-       INNER JOIN "user" u ON u.id = n.recipient_user_id
       WHERE n.status = 'pending'
         AND COALESCE(n.attempt_count, 0) < ?1
         AND (n.next_attempt_at IS NULL OR n.next_attempt_at <= ?2)
@@ -1034,23 +1086,25 @@ export async function processNotificationQueue(
   d1Changes += await deadLetterOrphanPendingNotifications(env, now, limit, signal);
   throwIfAborted(signal);
   const result = await env.DB.prepare(
-    `SELECT n.id, n.recipient_user_id, u.discord_id, n.type, n.payload_json,
+    `SELECT n.id, n.recipient_user_id, u.discord_id, n.delivery_route,
+            n.type, n.payload_json,
             COALESCE(n.attempt_count, 0) AS attempt_count
        FROM notification_outbox n
-       INNER JOIN "user" u ON u.id = n.recipient_user_id
+       LEFT JOIN "user" u ON u.id = n.recipient_user_id
       WHERE n.status = 'pending'
         AND COALESCE(n.attempt_count, 0) < ?1
         AND (n.next_attempt_at IS NULL OR n.next_attempt_at <= ?2)
+        AND (${EFFECTIVE_DELIVERY_ROUTE_SQL} <> 'dm' OR u.id IS NOT NULL)
       ORDER BY n.created_at ASC, n.id ASC
       LIMIT ?3`,
-  ).bind(MAX_RETRIES, now, limit).all<OutboxRow>();
+  )
+    .bind(MAX_RETRIES, now, limit)
+    .all<OutboxRow>();
   throwIfAborted(signal);
 
   const budget = new ExternalRequestBudget(MAX_DISCORD_EXTERNAL_REQUESTS_PER_RUN);
   const kvWriteBudget = new ExternalRequestBudget(MAX_DISCORD_DM_KV_WRITES_PER_RUN);
-  const cooldownKvWriteBudget = new ExternalRequestBudget(
-    MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN,
-  );
+  const cooldownKvWriteBudget = new ExternalRequestBudget(MAX_DISCORD_COOLDOWN_KV_WRITES_PER_RUN);
   // global/routeごとの共有cooldownは1 invocation内で一度だけ読む。
   const cooldownReadCache = new Map<string, number>();
   let processed = 0;
@@ -1065,11 +1119,21 @@ export async function processNotificationQueue(
     }
     d1Changes += 1;
     throwIfAborted(signal);
+    // 管理キャンセル等でclaimが失効していれば外部副作用を開始しない。
+    const activeClaim = await hasActiveOutboxClaim(env, row.id, token, signal);
+    if (!activeClaim.active) {
+      skipped += 1;
+      continue;
+    }
+    throwIfAborted(signal);
     const outcome = await deliverWithOutcome(
       {
+        delivery_route: row.delivery_route,
         type: row.type,
         payload_json: row.payload_json,
-        discord_id: row.discord_id ?? "",
+        // The post-claim join is authoritative. If the account was unlinked
+        // after selection, NULL must not fall back to the stale snapshot.
+        discord_id: activeClaim.discordId ?? "",
       },
       env,
       budget,
@@ -1110,7 +1174,12 @@ export async function processNotificationQueue(
 
 /** 既存テスト・呼出し互換用。詳細なrate limit情報はdispatcher内部で扱う。 */
 export async function deliver(
-  row: { type: string; payload_json: string; discord_id: string },
+  row: {
+    delivery_route?: string | null;
+    type: string;
+    payload_json: string;
+    discord_id: string;
+  },
   env: Pick<
     Env,
     | "KV"

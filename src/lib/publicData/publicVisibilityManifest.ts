@@ -207,7 +207,19 @@ export async function writePublicVisibilityBlockedEntitiesManifest(
 
 export const loadPublicVisibilityBlockedEntitiesManifest = cache(
   async (): Promise<PublicVisibilityBlockedEntitiesManifest> => {
-    const { manifest } = await readPublicVisibilityBlockedEntitiesManifest();
+    const { manifest, etag } =
+      await readPublicVisibilityBlockedEntitiesManifest();
+    // The low-level reader intentionally preserves the empty-manifest result
+    // for first-producer CAS/bootstrap flows. Public reads in enforce mode
+    // have a stricter contract: without a committed R2 object there is no
+    // visibility snapshot to trust, so callers must fail closed instead of
+    // serving stale R2/Cache or degraded D1 data against an empty snapshot.
+    if (
+      resolvePublicVisibilityGuardModeFromEnv() === "enforce" &&
+      !etag?.trim()
+    ) {
+      throw new Error("public_visibility_manifest_missing");
+    }
     return manifest;
   },
 );

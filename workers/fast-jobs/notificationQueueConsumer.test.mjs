@@ -33,7 +33,7 @@ test("consumer: duplicate wake を1回の drain にまとめる", async () => {
             return { meta: { changes: 0 } };
           },
           async all() {
-            if (sql.includes("LIMIT 1") && sql.includes("INNER JOIN")) {
+            if (sql.includes("LIMIT 1")) {
               return { results: [] };
             }
             if (sql.includes("recipient_user_not_found")) {
@@ -85,7 +85,7 @@ test("consumer: due pending が残ると continuation wake を送る", async () 
             return { meta: { changes: 0 } };
           },
           async all() {
-            if (sql.includes("LIMIT 1") && sql.includes("INNER JOIN")) {
+            if (sql.includes("LIMIT 1")) {
               return { results: [{ id: "pending-1" }] };
             }
             return { results: [] };

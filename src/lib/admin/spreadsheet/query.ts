@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
-import { mutateWithAudit } from "@/lib/audit/mutate";
+import { mutateWithAudit, planD1AuditMutationBudget } from "@/lib/audit/mutate";
 import { spreadsheetImportRuns, videoEvents, videos } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import type { SpreadsheetImportPreviewClaims } from "./importPreviewToken";
@@ -46,6 +46,7 @@ import {
 } from "./validation";
 import {
   planSpreadsheetStaticRebuildTargets,
+  SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT,
   SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED,
 } from "./staticRebuildPlan";
 
@@ -226,6 +227,7 @@ type SpreadsheetMutation = {
     before: Record<string, unknown> | null;
     after: Record<string, unknown> | null;
     actor_user_id: string;
+    actor_x_user_id?: string | null;
     retention_class: "long_audit";
     strict: true;
     context: "admin_spreadsheet";
@@ -246,9 +248,20 @@ async function loadSpreadsheetVideoReleaseEvents(
   const videoIds = [
     ...new Set(
       mutations
-        .filter((mutation) => mutation.audit.table_name === "video_members")
+        .filter((mutation) =>
+          mutation.audit.table_name === "video_members" ||
+          mutation.audit.table_name === "video_events" ||
+          mutation.audit.table_name === "videos",
+        )
         .flatMap((mutation) =>
-          [mutation.audit.before?.video_id, mutation.audit.after?.video_id]
+          [
+            mutation.audit.before?.[
+          mutation.audit.table_name === "videos" ? "id" : "video_id"
+            ],
+            mutation.audit.after?.[
+              mutation.audit.table_name === "videos" ? "id" : "video_id"
+            ],
+          ]
             .map((value) => (value == null ? null : String(value).trim()))
             .filter((value): value is string => Boolean(value)),
         ),
@@ -258,6 +271,7 @@ async function loadSpreadsheetVideoReleaseEvents(
   if (videoIds.length === 0) return new Map();
 
   const db = spreadsheetDb();
+  const linkedEventIds = new Set<string>();
   for (
     let offset = 0;
     offset < videoIds.length;
@@ -275,14 +289,28 @@ async function loadSpreadsheetVideoReleaseEvents(
       })
       .from(videos)
       .leftJoin(videoEvents, eq(videoEvents.video_id, videos.id))
-      .where(inArray(videos.id, chunk));
+      .where(inArray(videos.id, chunk))
+      // Do not materialize an unbounded junction for a spreadsheet mutation.
+      // The planner can only reject after this read; cap each lookup and fail
+      // closed when the cap is reached so a pathological video cannot consume
+      // the Worker memory/rows budget before the atomic batch is built.
+      .limit(SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT + 1);
+    if (rows.length > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+      throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+    }
     for (const row of rows) {
       const videoId = String(row.videoId ?? "").trim();
       if (!videoId) continue;
       const eventIds = eventIdsByVideo.get(videoId) ?? new Set<string>();
       for (const eventId of [row.eventId, row.primaryEventId]) {
         const normalized = String(eventId ?? "").trim();
-        if (normalized) eventIds.add(normalized);
+        if (normalized) {
+          eventIds.add(normalized);
+          linkedEventIds.add(normalized);
+        }
+      }
+      if (linkedEventIds.size > SPREADSHEET_STATIC_REBUILD_TARGET_LIMIT) {
+        throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
       }
       eventIdsByVideo.set(videoId, eventIds);
     }
@@ -542,10 +570,19 @@ async function executeSpreadsheetMutations(
       after: mutation.audit.after,
       actorUserId: mutation.audit.actor_user_id,
       eventReleaseEventIds:
-        mutation.audit.table_name === "video_members"
+                  mutation.audit.table_name === "video_members" ||
+                  mutation.audit.table_name === "video_events" ||
+                  mutation.audit.table_name === "videos"
           ? [
               ...new Set(
-                [mutation.audit.before?.video_id, mutation.audit.after?.video_id]
+                [
+                  mutation.audit.before?.[
+                    mutation.audit.table_name === "videos" ? "id" : "video_id"
+                  ],
+                  mutation.audit.after?.[
+                    mutation.audit.table_name === "videos" ? "id" : "video_id"
+                  ],
+                ]
                   .map((value) => (value == null ? null : String(value).trim()))
                   .filter((value): value is string => Boolean(value))
                   .flatMap((videoId) => videoReleaseEvents.get(videoId) ?? []),
@@ -560,6 +597,23 @@ async function executeSpreadsheetMutations(
     SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS
   ) {
     throw new Error(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED);
+  }
+  const budget = planD1AuditMutationBudget({
+    mutationStatementCount: allMutations.length + queue.statements.length,
+    mutationAssertionCount: allMutations.length + queue.expectedChanges.length,
+    auditEntryCount: allMutations.length,
+    postAuditStatementCount: 0,
+    distinctActorCount: new Set(
+      allMutations.map((mutation) => mutation.audit.actor_user_id),
+    ).size,
+    actorXValidationQueryCount: allMutations.some((mutation) =>
+      Boolean(mutation.audit.actor_x_user_id?.trim()),
+    )
+      ? 1
+      : 0,
+  });
+  if (!budget.withinLimit) {
+    throw new Error("batch_too_large");
   }
   await mutateWithAudit(db, {
     mutationStatements: [

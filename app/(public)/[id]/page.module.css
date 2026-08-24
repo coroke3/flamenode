@@ -311,6 +311,20 @@
   color: var(--event-accent, var(--accent-primary));
 }
 
+.eventBoxPlaylist {
+  margin-left: auto;
+  color: var(--event-accent, var(--accent-primary));
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.eventBoxPlaylist:hover,
+.eventBoxPlaylist:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .section {
   margin-top: 34px;
 }

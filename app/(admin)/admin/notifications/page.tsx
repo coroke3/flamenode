@@ -2,7 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, desc, eq, inArray, like, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, lte, or, sql, type SQL } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
 import { getCurrentUser } from "@/lib/auth/currentUser";
 import { notificationOutbox } from "@/lib/db/schema";
@@ -127,7 +127,7 @@ export default async function AdminNotificationsPage({
     failed: 0,
   };
   let deadLetterCount = 0;
-  let expiredLeaseCount = 0;
+  let unhealthyLeaseCount = 0;
   let error: string | null = null;
 
   if (db) {
@@ -151,7 +151,7 @@ export default async function AdminNotificationsPage({
             : and(...conditions);
       const now = Math.floor(Date.now() / 1000);
 
-      const [list, operationalCounts, expiredLeases] = await Promise.all([
+      const [list, operationalCounts, unhealthyLeases] = await Promise.all([
         where
           ? db
               .select()
@@ -190,7 +190,10 @@ export default async function AdminNotificationsPage({
           .where(
             and(
               eq(notificationOutbox.status, "processing"),
-              lte(notificationOutbox.lease_expires_at, now),
+              or(
+                isNull(notificationOutbox.lease_expires_at),
+                lte(notificationOutbox.lease_expires_at, now),
+              ),
             ),
           ),
       ]);
@@ -207,7 +210,7 @@ export default async function AdminNotificationsPage({
         failed,
       };
       deadLetterCount = deadLetter;
-      expiredLeaseCount = Number(expiredLeases[0]?.count ?? 0);
+      unhealthyLeaseCount = Number(unhealthyLeases[0]?.count ?? 0);
     } catch (cause) {
       error = String(cause);
     }
@@ -219,7 +222,9 @@ export default async function AdminNotificationsPage({
   if (db && rows.length > 0) {
     recipientMap = await lookupNotificationRecipients(
       db,
-      rows.map((row) => row.recipient_user_id),
+      rows
+        .map((row) => row.recipient_user_id)
+        .filter((recipientId): recipientId is string => recipientId != null),
     );
   }
 
@@ -242,10 +247,10 @@ export default async function AdminNotificationsPage({
         </Link>
       </p>
 
-      {expiredLeaseCount > 0 ? (
+      {unhealthyLeaseCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger" style={{ marginTop: 14 }}>
-          <strong>配送リース期限超過 {expiredLeaseCount} 件</strong>
-          {" "}— 毎時 Recovery Cron で自動回収されます。10分以上続く場合はWorkerとD1を確認してください。
+          <strong>配送リース期限超過・欠損 {unhealthyLeaseCount} 件</strong>
+          {" "}— 期限超過は毎時 Recovery Cron の回収対象です。欠損行または10分以上続く場合はWorkerとD1を確認してください。
         </div>
       ) : counts.failed > 0 || deadLetterCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger" style={{ marginTop: 14 }}>
@@ -418,7 +423,11 @@ export default async function AdminNotificationsPage({
                       <td>
                         <NotificationOutboxSummary
                           row={row}
-                          recipient={recipientMap.get(row.recipient_user_id) ?? null}
+                          recipient={
+                            row.recipient_user_id == null
+                              ? null
+                              : (recipientMap.get(row.recipient_user_id) ?? null)
+                          }
                           showTechnicalType
                         />
                       </td>

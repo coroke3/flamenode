@@ -31,6 +31,38 @@ import { normalizeXId } from "@/lib/utils/xid";
 
 export const X_ID_MERGE_REVERT_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
+/**
+ * X ID統合後に「統合元が現行参照として残っていない」ことを同じD1
+ * mutation内で確認するためのSQL条件。履歴 (x_identity_requests) と
+ * alias_x_id は差し戻し・正規化のため意図的に統合元文字列を保持するので、
+ * 現行参照だけを対象にする。
+ *
+ * canonical migration後も予約スナップショットなどには @、大文字、空白を
+ * 含む旧表記が残り得るため、各参照は normalizeXId と同じSQLite式で検査する。
+ */
+function normalizedXIdSql(column: string, xUserId: string) {
+  return sql`lower(trim(ltrim(trim(${sql.raw(column)}), '@'))) = lower(${xUserId})`;
+}
+
+function noActiveSourceReferencesSql(sourceXUserId: string) {
+  return sql`
+    NOT EXISTS (SELECT 1 FROM "user" WHERE ${normalizedXIdSql("active_x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM videos WHERE ${normalizedXIdSql("creator_x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM video_members WHERE ${normalizedXIdSql("x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM video_chapters WHERE ${normalizedXIdSql("x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM slots WHERE
+      ${normalizedXIdSql("x_user_id", sourceXUserId)}
+      OR ${normalizedXIdSql("reserved_x_id_snapshot", sourceXUserId)}
+    )
+    AND NOT EXISTS (SELECT 1 FROM slot_reservation_groups WHERE ${normalizedXIdSql("x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM video_moderation_cases WHERE ${normalizedXIdSql("related_x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM video_interactions WHERE ${normalizedXIdSql("x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM event_staff WHERE ${normalizedXIdSql("x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM x_user_account_links WHERE ${normalizedXIdSql("x_user_id", sourceXUserId)})
+    AND NOT EXISTS (SELECT 1 FROM x_user_aliases WHERE ${normalizedXIdSql("x_user_id", sourceXUserId)})
+  `;
+}
+
 export type XIdMergeRestoreSnapshot = {
   version: 2;
   source_x_user_id: string;
@@ -231,7 +263,13 @@ function assertMergeRequest(request: MergeRequestRow): {
   if (!request.source_x_user_id || !request.target_x_user_id) {
     throw new Error("統合元または統合先のX名義がありません。");
   }
-  if (request.source_x_user_id === request.target_x_user_id) {
+  // Legacy requests can retain presentation differences such as `@`, case,
+  // or surrounding whitespace. Treat those as the same logical identity so
+  // a malformed request can never merge an X user into itself.
+  if (
+    normalizeXId(request.source_x_user_id) ===
+    normalizeXId(request.target_x_user_id)
+  ) {
     throw new Error("統合元と統合先が同一です。");
   }
   return { source: request.source_x_user_id, target: request.target_x_user_id };
@@ -516,6 +554,7 @@ export async function executeApprovedXIdMergeRequest(
         AND request_type = 'merge'
         AND status = 'approved'
         AND updated_at = ${input.request.updated_at}
+        AND ${noActiveSourceReferencesSql(source)}
     `),
   ];
 

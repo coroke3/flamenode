@@ -40,12 +40,18 @@ import {
   MAX_ATOMIC_VIDEO_EVENTS,
   MAX_ATOMIC_VIDEO_SOFTWARES,
 } from "@/lib/video/atomicLimits";
-import type { VideoEditPermissionViewModel } from "@/lib/video/videoEditPermissionView";
+import {
+  resolveVideoPermissionGroupState,
+  type VideoEditPermissionViewModel,
+} from "@/lib/video/videoEditPermissionView";
 import {
   hasAnyEditableVideoFormSection,
   resolvePermissionUnlockHint,
 } from "@/lib/video/permissionUnlockHint";
-import { PermissionBadge } from "@/components/video/permission/PermissionBadge";
+import {
+  PermissionBadge,
+  PermissionGroupBadge,
+} from "@/components/video/permission/PermissionBadge";
 import { FieldLockNote } from "@/components/video/permission/FieldLockNote";
 import { PermissionFieldLabel } from "@/components/video/permission/PermissionFieldLabel";
 import { YoutubeDescriptionPreview } from "@/components/forms/YoutubeDescriptionPreview";
@@ -908,6 +914,29 @@ export function VideoForm({
   // edit モードでは admin のみ変更可。
   const isActiveXFixed = mode === "free" || mode === "slot";
   const showPermissionUi = mode === "edit" && Boolean(permissionView);
+  const videoSectionPermissions = permissionView
+    ? [
+        permissionView.basics,
+        permissionView.youtube,
+        permissionView.credits,
+        ...(eventOptions.length > 0 ? [permissionView.primaryEvent] : []),
+      ]
+    : [];
+  const membersSectionPermissions = permissionView
+    ? [permissionView.members, permissionView.memberChapters]
+    : [];
+  const videoPermissionState = resolveVideoPermissionGroupState(
+    videoSectionPermissions,
+  );
+  const membersPermissionState = resolveVideoPermissionGroupState(
+    membersSectionPermissions,
+  );
+  const identityPermissionState = permissionView?.identity.editable
+    ? "editable"
+    : "locked";
+  const descriptionsPermissionState = permissionView?.descriptions.editable
+    ? "editable"
+    : "locked";
   const noEditableFormSections =
     showPermissionUi &&
     permissionView != null &&
@@ -1005,7 +1034,7 @@ export function VideoForm({
   const membersListDisabled =
     membersSectionDisabled || isFieldDisabled(disabledFields, "members");
   const isCollabFieldDisabled =
-    membersSectionDisabled || isFieldDisabled(disabledFields, "members.is_collab");
+    membersListDisabled || isFieldDisabled(disabledFields, "members.is_collab");
   const chaptersFieldDisabled = isFieldDisabled(disabledFields, "chapters");
   const fieldDisabled = (key: string) =>
     isFieldDisabled(disabledFields, key) ||
@@ -1495,8 +1524,18 @@ export function VideoForm({
           submitterDisabled && styles.sectionDisabled,
         )}
         data-disabled={submitterDisabled || undefined}
+        data-permission-state={
+          showPermissionUi ? identityPermissionState : undefined
+        }
+        aria-labelledby="video-form-section-identity-title"
+        aria-describedby={
+          submitterDisabled ? videoFormLockNoteId("section-identity") : undefined
+        }
+        tabIndex={
+          showPermissionUi && identityPermissionState === "locked" ? 0 : undefined
+        }
       >
-        <h2 className={styles.sectionTitle}>
+        <h2 id="video-form-section-identity-title" className={styles.sectionTitle}>
           <Icon name="user" size={14} aria-hidden /> 提出者情報
           {showPermissionUi && permissionView ? (
             <PermissionBadge
@@ -1567,7 +1606,6 @@ export function VideoForm({
                     className="fn-input"
                     aria-readonly="true"
                     disabled={fieldDisabled("submitter.creator_x_user_id")}
-                    style={{ opacity: 0.75, cursor: "default" }}
                   />
                   <p className={styles.help} style={{ marginTop: 4 }}>
                     提出主体は現在の Active X ID に固定されます。変更する場合は上部バーから X ID を切り替えてください。
@@ -1594,6 +1632,11 @@ export function VideoForm({
                 disabled={fieldDisabled("submitter.creator_x_user_id")}
                 sectionDisabled={isSectionDisabled(disabledSections, "submitter")}
                 canChangeSubmitter={canChangeSubmitter}
+                lockNoteId={
+                  submitterDisabled
+                    ? videoFormLockNoteId("section-identity")
+                    : undefined
+                }
               />
             ) : null}
           </div>
@@ -1624,12 +1667,20 @@ export function VideoForm({
               )}
               readOnly={fieldDisabled("submitter.display_name")}
               aria-readonly={fieldDisabled("submitter.display_name") || undefined}
-              style={fieldDisabled("submitter.display_name") ? { opacity: 0.65, cursor: "default" } : undefined}
             />
           </div>
         </div>
-        <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label}>作品アイコン</label>
+        <div
+          className={cx(styles.field, styles.editableField)}
+          role="group"
+          aria-labelledby="video-form-icon-label"
+          aria-describedby={
+            submitterDisabled
+              ? videoFormLockNoteId("section-identity")
+              : undefined
+          }
+        >
+          <span id="video-form-icon-label" className={styles.label}>作品アイコン</span>
           <p className={styles.help}>
             この作品で表示するアイコンを選択します。X ID 既定アイコンは変更されません。
           </p>
@@ -1668,15 +1719,24 @@ export function VideoForm({
             maxLength={1000}
             readOnly={fieldDisabled("submitter.profile_text")}
             aria-readonly={fieldDisabled("submitter.profile_text") || undefined}
-            style={
-              fieldDisabled("submitter.profile_text")
-                ? { opacity: 0.65, cursor: "default" }
+            aria-describedby={
+              submitterDisabled
+                ? videoFormLockNoteId("section-identity")
                 : undefined
             }
           />
         </div>
-        <div className={cx(styles.field, styles.editableField)}>
-          <span className={styles.label}>YouTube チャンネル</span>
+        <div
+          className={cx(styles.field, styles.editableField)}
+          role="group"
+          aria-labelledby="video-form-channel-label"
+          aria-describedby={
+            submitterDisabled
+              ? videoFormLockNoteId("section-identity")
+              : undefined
+          }
+        >
+          <span id="video-form-channel-label" className={styles.label}>YouTube チャンネル</span>
           <YoutubeChannelPicker
             key={`youtube-channel-${submitterFieldsKey}`}
             defaultValue={submitterYoutubeChannel || null}
@@ -1688,7 +1748,16 @@ export function VideoForm({
             }}
           />
         </div>
-        <div className={cx(styles.field, styles.editableField)}>
+        <div
+          className={cx(styles.field, styles.editableField)}
+          role="group"
+          aria-label="その他のSNSリンク"
+          aria-describedby={
+            submitterDisabled
+              ? videoFormLockNoteId("section-identity")
+              : undefined
+          }
+        >
           <SocialLinksEditor
             key={`social-links-${submitterFieldsKey}`}
             initialValue={submitterSocialLinks || null}
@@ -1715,12 +1784,40 @@ export function VideoForm({
           videoSectionDisabled && styles.sectionDisabled,
         )}
         data-disabled={videoSectionDisabled || undefined}
+        data-permission-state={showPermissionUi ? videoPermissionState : undefined}
+        aria-labelledby="video-form-section-video-title"
+        aria-describedby={
+          showPermissionUi && permissionView
+            ? mergeDescribedBy(
+                !permissionView.basics.editable
+                  ? videoFormLockNoteId("basics")
+                  : undefined,
+                !permissionView.youtube.editable
+                  ? videoFormLockNoteId("youtube")
+                  : undefined,
+                !permissionView.credits.editable
+                  ? videoFormLockNoteId("credits-music")
+                  : undefined,
+                !permissionView.credits.editable
+                  ? videoFormLockNoteId("credits-credit")
+                  : undefined,
+                eventOptions.length > 0 && !permissionView.primaryEvent.editable
+                  ? videoFormLockNoteId("primaryEvent")
+                  : undefined,
+              )
+            : videoSectionDisabled
+              ? videoFormLockNoteId("section-video")
+              : undefined
+        }
+        tabIndex={
+          showPermissionUi && videoPermissionState === "locked" ? 0 : undefined
+        }
       >
-        <h2 className={styles.sectionTitle}>
+        <h2 id="video-form-section-video-title" className={styles.sectionTitle}>
           <Icon name="youtube" size={14} aria-hidden /> 動画と基本情報
           {showPermissionUi && permissionView ? (
-            <PermissionBadge
-              permission={permissionView.basics}
+            <PermissionGroupBadge
+              permissions={videoSectionPermissions}
               className={styles.sectionPermissionBadge}
             />
           ) : videoSectionDisabled ? (
@@ -1729,29 +1826,19 @@ export function VideoForm({
             </span>
           ) : null}
         </h2>
-        {showPermissionUi && permissionView && videoSectionDisabled ? (
-          <FieldLockNote
-            id={videoFormLockNoteId("section-video")}
-            permission={permissionView.basics}
-            unlockHint={resolvePermissionUnlockHint(
-              permissionView.basics,
-              permissionView,
-            )}
-          />
-        ) : videoSectionDisabled && mode === "edit" ? (
+        {!showPermissionUi && videoSectionDisabled && mode === "edit" ? (
           <p className={styles.help} role="status" id={videoFormLockNoteId("section-video")}>
             この項目は、現在の一般作品権限では編集できません。
           </p>
         ) : null}
 
         <div className={cx(styles.field, styles.editableField)}>
-          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+          {showPermissionUi && permissionView ? (
             <PermissionFieldLabel
               label="作品タイトル"
               htmlFor="title"
               permission={permissionView.basics}
               required
-              noteId={videoFormLockNoteId("basics")}
             />
           ) : (
             <label className={`${styles.label} ${styles.required}`} htmlFor="title">
@@ -1778,19 +1865,17 @@ export function VideoForm({
                   : undefined,
                 showPermissionUi &&
                   permissionView &&
-                  !videoSectionDisabled &&
                   !permissionView.basics.editable
                   ? videoFormLockNoteId("basics")
                   : undefined,
-                videoSectionDisabled
+                !showPermissionUi && videoSectionDisabled
                   ? videoFormLockNoteId("section-video")
                   : undefined,
               )}
             readOnly={fieldDisabled("video.title")}
             aria-readonly={fieldDisabled("video.title") || undefined}
-            style={fieldDisabled("video.title") ? { opacity: 0.65, cursor: "default" } : undefined}
           />
-          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+          {showPermissionUi && permissionView ? (
             <FieldLockNote
               id={videoFormLockNoteId("basics")}
               permission={permissionView.basics}
@@ -1822,13 +1907,12 @@ export function VideoForm({
 
         {!isWizard ? (
         <div className={cx(styles.field, styles.editableField)}>
-          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+          {showPermissionUi && permissionView ? (
             <PermissionFieldLabel
               label="YouTube URL"
               htmlFor="youtube_url"
               permission={permissionView.youtube}
               required={isYoutubeUrlRequired}
-              noteId={videoFormLockNoteId("youtube")}
             />
           ) : (
             <label
@@ -1850,17 +1934,15 @@ export function VideoForm({
             required={isYoutubeUrlRequired}
             readOnly={isYoutubeFieldDisabled}
             aria-readonly={isYoutubeFieldDisabled || undefined}
-            style={isYoutubeFieldDisabled ? { opacity: 0.65, cursor: "default" } : undefined}
             aria-describedby={mergeDescribedBy(
               showPermissionUi &&
                 permissionView &&
-                !videoSectionDisabled &&
                 !permissionView.youtube.editable
                 ? videoFormLockNoteId("youtube")
                 : undefined,
             )}
           />
-          {showPermissionUi && permissionView && !videoSectionDisabled ? (
+          {showPermissionUi && permissionView ? (
             <FieldLockNote
               id={videoFormLockNoteId("youtube")}
               permission={permissionView.youtube}
@@ -1907,12 +1989,11 @@ export function VideoForm({
 
         <div className={`${styles.row} ${styles.cols2}`}>
           <div className={cx(styles.field, styles.editableField)}>
-            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            {showPermissionUi && permissionView ? (
               <PermissionFieldLabel
                 label="使用楽曲"
                 htmlFor="music"
                 permission={permissionView.credits}
-                noteId={videoFormLockNoteId("credits-music")}
               />
             ) : (
               <label className={styles.label} htmlFor="music">
@@ -1927,12 +2008,11 @@ export function VideoForm({
               className="fn-input"
               placeholder="アーティスト名 - 曲名"
               maxLength={200}
-               disabled={fieldDisabled("video.music")}
+              disabled={fieldDisabled("video.music")}
               aria-describedby={mergeDescribedBy(
-                showPermissionUi &&
-                  permissionView &&
-                  !videoSectionDisabled &&
-                  !permissionView.credits.editable
+                  showPermissionUi &&
+                    permissionView &&
+                    !permissionView.credits.editable
                   ? videoFormLockNoteId("credits-music")
                   : undefined,
               )}
@@ -1945,10 +2025,17 @@ export function VideoForm({
               className="fn-input"
               placeholder="楽曲リンク URL (任意, https://...)"
               maxLength={500}
-               disabled={fieldDisabled("video.music_reference_url")}
+              disabled={fieldDisabled("video.music_reference_url")}
               style={{ marginTop: 6 }}
+              aria-describedby={
+                showPermissionUi &&
+                permissionView &&
+                !permissionView.credits.editable
+                  ? videoFormLockNoteId("credits-music")
+                  : undefined
+              }
             />
-            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            {showPermissionUi && permissionView ? (
               <FieldLockNote
                 id={videoFormLockNoteId("credits-music")}
                 permission={permissionView.credits}
@@ -1963,12 +2050,11 @@ export function VideoForm({
             </p>
           </div>
           <div className={cx(styles.field, styles.editableField)}>
-            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            {showPermissionUi && permissionView ? (
               <PermissionFieldLabel
                 label="クレジット"
                 htmlFor="credit"
                 permission={permissionView.credits}
-                noteId={videoFormLockNoteId("credits-credit")}
               />
             ) : (
               <label className={styles.label} htmlFor="credit">
@@ -1985,15 +2071,14 @@ export function VideoForm({
               maxLength={200}
               disabled={fieldDisabled("video.credit")}
               aria-describedby={mergeDescribedBy(
-                showPermissionUi &&
-                  permissionView &&
-                  !videoSectionDisabled &&
-                  !permissionView.credits.editable
+                  showPermissionUi &&
+                    permissionView &&
+                    !permissionView.credits.editable
                   ? videoFormLockNoteId("credits-credit")
                   : undefined,
               )}
             />
-            {showPermissionUi && permissionView && !videoSectionDisabled ? (
+            {showPermissionUi && permissionView ? (
               <FieldLockNote
                 id={videoFormLockNoteId("credits-credit")}
                 permission={permissionView.credits}
@@ -2011,11 +2096,13 @@ export function VideoForm({
             {showPermissionUi && permissionView ? (
               <PermissionFieldLabel
                 label="所属イベント"
+                id="video-form-primary-event-label"
                 permission={permissionView.primaryEvent}
-                noteId={videoFormLockNoteId("primaryEvent")}
               />
             ) : (
-              <label className={styles.label}>所属イベント</label>
+              <span id="video-form-primary-event-label" className={styles.label}>
+                所属イベント
+              </span>
             )}
             {showPermissionUi && permissionView ? (
               <FieldLockNote
@@ -2040,7 +2127,18 @@ export function VideoForm({
               name="event_ids"
               value={selectedEventIds.join(",")}
             />
-            <div className={styles.eventOptionGrid}>
+            <div
+              className={styles.eventOptionGrid}
+              role="group"
+              aria-labelledby="video-form-primary-event-label"
+              aria-describedby={
+                showPermissionUi &&
+                permissionView &&
+                !permissionView.primaryEvent.editable
+                  ? videoFormLockNoteId("primaryEvent")
+                  : undefined
+              }
+            >
               {eventOptions.map((ev) => {
                 const checked = selectedEventIds.includes(ev.id);
                 const atEventLimit =
@@ -2122,6 +2220,13 @@ export function VideoForm({
                 setDirty(true);
               }}
               disabled={fieldDisabled("video.part")}
+              aria-describedby={
+                showPermissionUi &&
+                permissionView &&
+                !permissionView.basics.editable
+                  ? videoFormLockNoteId("basics")
+                  : undefined
+              }
             >
               <option value="">(未設定)</option>
               {availableParts.map((part) => (
@@ -2152,8 +2257,22 @@ export function VideoForm({
           descriptionsDisabled && styles.sectionDisabled,
         )}
         data-disabled={descriptionsDisabled || undefined}
+        data-permission-state={
+          showPermissionUi ? descriptionsPermissionState : undefined
+        }
+        aria-labelledby="video-form-section-descriptions-title"
+        aria-describedby={
+          descriptionsDisabled
+            ? videoFormLockNoteId("section-descriptions")
+            : undefined
+        }
+        tabIndex={
+          showPermissionUi && descriptionsPermissionState === "locked"
+            ? 0
+            : undefined
+        }
       >
-        <h2 className={styles.sectionTitle}>
+        <h2 id="video-form-section-descriptions-title" className={styles.sectionTitle}>
           <Icon name="edit" size={14} aria-hidden /> 紹介文
           {showPermissionUi && permissionView ? (
             <PermissionBadge
@@ -2203,11 +2322,6 @@ export function VideoForm({
             placeholder="作品の見どころを 1〜2 行で。"
             readOnly={fieldDisabled("descriptions.intro_comment")}
             aria-readonly={fieldDisabled("descriptions.intro_comment") || undefined}
-            style={
-              fieldDisabled("descriptions.intro_comment")
-                ? { opacity: 0.65, cursor: "default" }
-                : undefined
-            }
             aria-describedby={
               descriptionsDisabled
                 ? videoFormLockNoteId("section-descriptions")
@@ -2229,9 +2343,9 @@ export function VideoForm({
             maxLength={1000}
             readOnly={fieldDisabled("descriptions.highlights")}
             aria-readonly={fieldDisabled("descriptions.highlights") || undefined}
-            style={
-              fieldDisabled("descriptions.highlights")
-                ? { opacity: 0.65, cursor: "default" }
+            aria-describedby={
+              descriptionsDisabled
+                ? videoFormLockNoteId("section-descriptions")
                 : undefined
             }
           />
@@ -2250,9 +2364,9 @@ export function VideoForm({
             maxLength={1000}
             readOnly={fieldDisabled("descriptions.production_story")}
             aria-readonly={fieldDisabled("descriptions.production_story") || undefined}
-            style={
-              fieldDisabled("descriptions.production_story")
-                ? { opacity: 0.65, cursor: "default" }
+            aria-describedby={
+              descriptionsDisabled
+                ? videoFormLockNoteId("section-descriptions")
                 : undefined
             }
           />
@@ -2272,6 +2386,11 @@ export function VideoForm({
             placeholder="AviUtl, After Effects, Vegas など"
             list="used-software-suggestions"
             disabled={fieldDisabled("descriptions.used_software")}
+            aria-describedby={
+              descriptionsDisabled
+                ? videoFormLockNoteId("section-descriptions")
+                : undefined
+            }
           />
           <p className={styles.help}>
             カンマ区切りで最大{MAX_ATOMIC_VIDEO_SOFTWARES}件まで入力できます。
@@ -2326,17 +2445,15 @@ export function VideoForm({
                 aria-readonly={
                   fieldDisabled("descriptions.stage_permission") || undefined
                 }
-                style={
-                  fieldDisabled("descriptions.stage_permission")
-                    ? { opacity: 0.65, cursor: "default" }
-                    : undefined
-                }
                 aria-invalid={stepError?.fieldId === fieldId || undefined}
-                aria-describedby={
+                aria-describedby={mergeDescribedBy(
                   stepError?.fieldId === fieldId
                     ? "wizard-validation-error"
-                    : undefined
-                }
+                    : undefined,
+                  descriptionsDisabled
+                    ? videoFormLockNoteId("section-descriptions")
+                    : undefined,
+                )}
               />
             </div>
           );
@@ -2355,10 +2472,14 @@ export function VideoForm({
                 ? 200
                 : 1000;
           const disabled = fieldDisabled("descriptions.custom_answers");
-          const describedBy =
+          const describedBy = mergeDescribedBy(
             stepError?.fieldId === fieldId
               ? "wizard-validation-error"
-              : undefined;
+              : undefined,
+            descriptionsDisabled
+              ? videoFormLockNoteId("section-descriptions")
+              : undefined,
+          );
           const updateAnswer = (next: string | string[]) => {
             setCustomAnswers((current) => ({ ...current, [answerKey]: next }));
             setDirty(true);
@@ -2504,9 +2625,9 @@ export function VideoForm({
             maxLength={500}
             readOnly={fieldDisabled("descriptions.closing_comment")}
             aria-readonly={fieldDisabled("descriptions.closing_comment") || undefined}
-            style={
-              fieldDisabled("descriptions.closing_comment")
-                ? { opacity: 0.65, cursor: "default" }
+            aria-describedby={
+              descriptionsDisabled
+                ? videoFormLockNoteId("section-descriptions")
                 : undefined
             }
           />
@@ -2519,12 +2640,29 @@ export function VideoForm({
           membersSectionDisabled && styles.sectionDisabled,
         )}
         data-disabled={membersSectionDisabled || undefined}
+        data-permission-state={showPermissionUi ? membersPermissionState : undefined}
+        aria-labelledby="video-form-section-members-title"
+        aria-describedby={
+          showPermissionUi && permissionView
+            ? mergeDescribedBy(
+                !permissionView.members.editable
+                  ? videoFormLockNoteId("members")
+                  : undefined,
+                !permissionView.memberChapters.editable
+                  ? videoFormLockNoteId("memberChapters")
+                  : undefined,
+              )
+            : undefined
+        }
+        tabIndex={
+          showPermissionUi && membersPermissionState === "locked" ? 0 : undefined
+        }
       >
-        <h2 className={styles.sectionTitle}>
+        <h2 id="video-form-section-members-title" className={styles.sectionTitle}>
           <Icon name="users" size={14} aria-hidden /> 合作メンバー
           {showPermissionUi && permissionView ? (
-            <PermissionBadge
-              permission={permissionView.members}
+            <PermissionGroupBadge
+              permissions={membersSectionPermissions}
               className={styles.sectionPermissionBadge}
             />
           ) : membersSectionDisabled ? (
@@ -2533,15 +2671,25 @@ export function VideoForm({
             </span>
           ) : null}
         </h2>
-        {showPermissionUi && permissionView && membersSectionDisabled ? (
-          <FieldLockNote
-            id={videoFormLockNoteId("section-members")}
-            permission={permissionView.members}
-            unlockHint={resolvePermissionUnlockHint(
-              permissionView.members,
-              permissionView,
-            )}
-          />
+        {showPermissionUi && permissionView && membersPermissionState !== "editable" ? (
+          <div className={styles.permissionNoteStack}>
+            <FieldLockNote
+              id={videoFormLockNoteId("members")}
+              permission={permissionView.members}
+              unlockHint={resolvePermissionUnlockHint(
+                permissionView.members,
+                permissionView,
+              )}
+            />
+            <FieldLockNote
+              id={videoFormLockNoteId("memberChapters")}
+              permission={permissionView.memberChapters}
+              unlockHint={resolvePermissionUnlockHint(
+                permissionView.memberChapters,
+                permissionView,
+              )}
+            />
+          </div>
         ) : membersSectionDisabled && mode === "edit" ? (
           <p className={styles.help} role="status" id={videoFormLockNoteId("section-members")}>
             この項目は、現在の一般作品権限では編集できません。
@@ -2570,8 +2718,10 @@ export function VideoForm({
                 disabled
                 aria-readonly
                 aria-describedby={
-                  membersSectionDisabled
-                    ? videoFormLockNoteId("section-members")
+                  showPermissionUi && permissionView && !permissionView.members.editable
+                    ? videoFormLockNoteId("members")
+                    : membersSectionDisabled
+                      ? videoFormLockNoteId("section-members")
                     : undefined
                 }
               />
@@ -2591,7 +2741,23 @@ export function VideoForm({
           合作作品として登録する
         </label>
         {isCollab ? (
-          <div style={{ marginTop: 12 }}>
+          <div
+            style={{ marginTop: 12 }}
+            role="group"
+            aria-label="合作メンバーとチャプター"
+            aria-describedby={
+              showPermissionUi && permissionView
+                ? mergeDescribedBy(
+                    !permissionView.members.editable
+                      ? videoFormLockNoteId("members")
+                      : undefined,
+                    !permissionView.memberChapters.editable
+                      ? videoFormLockNoteId("memberChapters")
+                      : undefined,
+                  )
+                : undefined
+            }
+          >
             <VideoMembersField
               key={`video-members-${membersFieldsKey}`}
               initialMembers={members}
@@ -2645,11 +2811,6 @@ export function VideoForm({
                   required={mode !== "slot"}
                   readOnly={isYoutubeFieldDisabled}
                   aria-readonly={isYoutubeFieldDisabled || undefined}
-                  style={
-                    isYoutubeFieldDisabled
-                      ? { opacity: 0.65, cursor: "default" }
-                      : undefined
-                  }
                   aria-invalid={stepError?.fieldId === "youtube_url" || undefined}
                   aria-describedby={
                     stepError?.fieldId === "youtube_url"
@@ -3115,6 +3276,7 @@ function EditSubmitterField({
   disabled,
   sectionDisabled,
   canChangeSubmitter,
+  lockNoteId,
 }: {
   initialXId: string;
   xIdOptions: readonly XIdOption[];
@@ -3123,6 +3285,7 @@ function EditSubmitterField({
   disabled: boolean;
   sectionDisabled: boolean;
   canChangeSubmitter: boolean;
+  lockNoteId?: string;
 }): React.ReactElement {
   const [unlocked, setUnlocked] = React.useState(false);
   const [selectedXId, setSelectedXId] = React.useState(selectedDefault);
@@ -3157,7 +3320,7 @@ function EditSubmitterField({
           readOnly
           aria-readonly="true"
           disabled={sectionDisabled}
-          style={{ opacity: 0.75, cursor: "default" }}
+          aria-describedby={lockNoteId}
         />
         {canChangeSubmitter && hasSelectableXIds ? (
           <label

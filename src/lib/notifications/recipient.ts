@@ -44,7 +44,7 @@ export async function lookupNotificationRecipients(
 }
 
 export function formatRecipientDisplay(
-  userId: string,
+  userId: string | null,
   lookup?: RecipientLookup | null,
 ): string {
   if (lookup?.userName) {
@@ -52,5 +52,5 @@ export function formatRecipientDisplay(
       ? `${lookup.userName} (${lookup.discordId})`
       : lookup.userName;
   }
-  return lookup?.discordId ?? userId;
+  return lookup?.discordId ?? userId ?? "運営チャンネル";
 }

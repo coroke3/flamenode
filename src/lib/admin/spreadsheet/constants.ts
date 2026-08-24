@@ -10,7 +10,10 @@ export const SPREADSHEET_PAGE_SIZE_CAP = 5000;
 export const SPREADSHEET_IMPORT_MAX_ROWS = 500;
 
 export const SPREADSHEET_D1_BATCH_STATEMENT_LIMIT = 50;
-export const SPREADSHEET_D1_BATCH_STATEMENT_RESERVE = 10;
+// Keep the same caller headroom as mutateWithAudit.  The previous value (10)
+// allowed the spreadsheet preflight to accept batches that mutateWithAudit
+// then rejected after building the queue/audit statements.
+export const SPREADSHEET_D1_BATCH_STATEMENT_RESERVE = 18;
 /** 16 targetをbulk化するqueue helperが返し得る最大statement数。 */
 export const SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS = 4;
 
@@ -39,7 +42,7 @@ export function estimateSpreadsheetImportD1Statements(
 }
 
 /** nonce guard + queue最大4 statements込みで50 queryに収めるfail-closed上限。 */
-export const SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 11;
+export const SPREADSHEET_IMPORT_MAX_BATCH_ROWS = 7;
 
 export function isSpreadsheetImportBatchSizeAllowed(rowCount: number): boolean {
   return (

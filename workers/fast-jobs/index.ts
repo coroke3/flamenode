@@ -58,7 +58,7 @@ const NOTIFICATION_FALLBACK_BASE_D1_STATEMENTS = 2;
 /** direct drain後、Queue有効時に残件確認するSELECT 1本。 */
 const NOTIFICATION_FALLBACK_POST_DRAIN_PROBE_D1_STATEMENTS = 1;
 /** claim + markSent最大3回 + suppress-redelivery。failure/dead-letter経路もこれ以下。 */
-const NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 5;
+const NOTIFICATION_FALLBACK_MAX_D1_STATEMENTS_PER_ROW = 6;
 /** outer lease成功/解放2本 + 3分deadline中に発生し得るheartbeat最大2本を残す。 */
 const FAST_JOBS_OUTER_LEASE_D1_RESERVE = 4;
 

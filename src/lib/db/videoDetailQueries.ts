@@ -30,13 +30,19 @@ import { approvedXIdsWhere } from "@/lib/auth/approvedX";
 import { getEnv } from "@/lib/cloudflare";
 import {
   eventPlaylistObjectKey,
+  EVENT_PLAYLIST_MAX_OBJECT_BYTES,
   normalizeStaticEventPlaylist,
   type StaticEventPlaylistPayload,
 } from "@/lib/publicData/staticEventPlaylistCore";
 import {
-  isPublicEntityVisibilityBlocked,
+  readPublicVisibilityBlockedEntitiesManifest,
   resolvePublicVisibilityGuardModeFromEnv,
 } from "@/lib/publicData/publicVisibilityManifest";
+import { isEntityBlockedInManifest } from "@/lib/publicData/publicVisibilityManifestCore";
+import {
+  countablePublicVideoCondition,
+  eventPublicVideoLinkCondition,
+} from "./queries";
 import {
   clampRelatedLimit,
   enforceDiversity,
@@ -595,14 +601,22 @@ export async function fetchEventPlaylistVideos(
   // During a public re-publish, D1 visibility can become public before the
   // event playlist artifact has been rebuilt. The public visibility fence is
   // the authoritative fail-closed guard for that window; never serve the old
-  // R2 playlist while the event is still blocked/release-pending.
+  // R2 playlist while the event or one of its videos is still blocked.
+  const visibilityGuardMode = resolvePublicVisibilityGuardModeFromEnv();
+  let visibilityManifest: Awaited<
+    ReturnType<typeof readPublicVisibilityBlockedEntitiesManifest>
+  >["manifest"] | null = null;
+  let visibilityManifestEtag: string | null = null;
   try {
+    if (visibilityGuardMode !== "off") {
+      const visibility = await readPublicVisibilityBlockedEntitiesManifest();
+      visibilityManifest = visibility.manifest;
+      visibilityManifestEtag = visibility.etag;
+    }
     if (
-      await isPublicEntityVisibilityBlocked({
-        entityType: "event",
-        entityId: eventId,
-        guardMode: resolvePublicVisibilityGuardModeFromEnv(),
-      })
+      visibilityGuardMode === "enforce" &&
+      visibilityManifest &&
+      isEntityBlockedInManifest(visibilityManifest, "event", eventId)
     ) {
       return [];
     }
@@ -611,6 +625,9 @@ export async function fetchEventPlaylistVideos(
     // public projection rather than risk serving stale R2 content.
     return [];
   }
+  const visibilityManifestUnavailable =
+    visibilityGuardMode === "enforce" &&
+    (visibilityManifest === null || visibilityManifestEtag === null);
 
   const logPlaylistFallback = (reason: "r2_missing" | "r2_invalid" | "r2_incomplete" | "r2_error") => {
     console.warn(JSON.stringify({
@@ -630,6 +647,15 @@ export async function fetchEventPlaylistVideos(
   }
 
   if (object) {
+    if (
+      typeof object.size === "number" &&
+      object.size > EVENT_PLAYLIST_MAX_OBJECT_BYTES
+    ) {
+      logPlaylistFallback("r2_invalid");
+      object = null;
+    }
+  }
+  if (object) {
     let raw: string | null = null;
     try {
       raw = await object.text();
@@ -640,8 +666,54 @@ export async function fetchEventPlaylistVideos(
       try {
         const payload = JSON.parse(raw) as StaticEventPlaylistPayload;
         const normalized = normalizeStaticEventPlaylist(payload, eventId);
-        if (normalized && (normalized.complete || normalized.items.length >= limit)) {
-          return uniqueBy(normalized.items.slice(0, limit), (row) => row.id);
+        const containsBlockedVideo = Boolean(
+          visibilityGuardMode === "enforce" &&
+          visibilityManifest &&
+          normalized?.items.some((row) =>
+            isEntityBlockedInManifest(visibilityManifest!, "video", row.id),
+          ),
+        );
+        if (
+          normalized &&
+          visibilityGuardMode === "enforce" &&
+          containsBlockedVideo
+        ) {
+          return [];
+        }
+        if (
+          normalized &&
+          !containsBlockedVideo &&
+          !visibilityManifestUnavailable &&
+          (normalized.complete || normalized.items.length >= limit)
+        ) {
+          if (visibilityGuardMode === "enforce") {
+            try {
+              const afterVisibility =
+                await readPublicVisibilityBlockedEntitiesManifest();
+              const afterContainsBlockedVideo = afterVisibility.manifest.entities.some(
+                (entry) =>
+                  entry.entity_type === "video" &&
+                  normalized.items.some((row) => row.id === entry.entity_id),
+              );
+              if (
+                isEntityBlockedInManifest(
+                  afterVisibility.manifest,
+                  "event",
+                  eventId,
+                ) ||
+                afterContainsBlockedVideo ||
+                afterVisibility.etag !== visibilityManifestEtag
+              ) {
+                return [];
+              } else {
+                return uniqueBy(normalized.items.slice(0, limit), (row) => row.id);
+              }
+            } catch {
+              return [];
+            }
+          } else {
+            return uniqueBy(normalized.items.slice(0, limit), (row) => row.id);
+          }
         }
         logPlaylistFallback(normalized ? "r2_incomplete" : "r2_invalid");
       } catch {
@@ -650,6 +722,14 @@ export async function fetchEventPlaylistVideos(
     }
   } else if (!readError) {
     logPlaylistFallback("r2_missing");
+  }
+
+  // A malformed/incomplete/missing R2 artifact must not turn the D1 fallback
+  // into a visibility-fence bypass.  In enforce mode the manifest is the
+  // authoritative pre-commit block, so an unavailable manifest fails closed
+  // and a valid manifest is rechecked around the fallback query as well.
+  if (visibilityGuardMode === "enforce" && visibilityManifestUnavailable) {
+    return [];
   }
 
   const rows = await db
@@ -661,16 +741,50 @@ export async function fetchEventPlaylistVideos(
       scheduled_time: videos.scheduled_time,
     })
     .from(videos)
-    .innerJoin(videoEvents, eq(videos.id, videoEvents.video_id))
-    .innerJoin(events, eq(videoEvents.event_id, events.id))
-    .where(
+    .innerJoin(
+      events,
       and(
-        eq(videoEvents.event_id, eventId),
+        eq(events.id, eventId),
         eq(events.visibility_status, "public"),
-        eq(videos.visibility_status, "public"),
       )!,
     )
-    .orderBy(asc(videos.scheduled_time))
+    .where(
+      and(
+        countablePublicVideoCondition,
+        eventPublicVideoLinkCondition(eventId),
+      )!,
+    )
+    .orderBy(
+      sql`${videos.scheduled_time} IS NULL ASC, ${videos.scheduled_time} ASC, ${videos.id} ASC`,
+    )
     .limit(limit);
-  return uniqueBy(rows, (row) => row.id);
+
+  if (visibilityGuardMode !== "enforce") {
+    return uniqueBy(rows, (row) => row.id);
+  }
+
+  try {
+    const afterVisibility = await readPublicVisibilityBlockedEntitiesManifest();
+    if (
+      !afterVisibility.manifest ||
+      afterVisibility.etag === null ||
+      afterVisibility.etag !== visibilityManifestEtag ||
+      isEntityBlockedInManifest(afterVisibility.manifest, "event", eventId)
+    ) {
+      return [];
+    }
+    return uniqueBy(
+      rows.filter(
+        (row) =>
+          !isEntityBlockedInManifest(
+            afterVisibility.manifest!,
+            "video",
+            row.id,
+          ),
+      ),
+      (row) => row.id,
+    );
+  } catch {
+    return [];
+  }
 }

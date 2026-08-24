@@ -1,5 +1,5 @@
 .page { padding-block: 32px 72px; }
-.header { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .header h1 { margin: 4px 0 0; }
 .lead, .summary, .meta { color: var(--text-muted, #84908a); }
 .lead { margin: 8px 0 0; }
@@ -16,7 +16,7 @@
 .compactCard { padding: 14px; }
 .list { display: grid; gap: 12px; padding: 0; margin: 0; list-style: none; }
 .card { padding: 18px; border: 1px solid var(--border-subtle, #2d332d); border-radius: var(--r-card, 12px); background: var(--bg-surface, #151915); }
-.cardHead { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.cardHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .titleBlock { min-width: 0; }
 .creatorRow { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .creatorRow :global(img), .creatorRow :global(span) { flex: 0 0 auto; }
@@ -32,7 +32,7 @@
 .members small { color: var(--text-muted, #84908a); }
 @media (max-width: 640px) {
   .page { padding-block: 24px 56px; }
-  .header { align-items: start; flex-direction: column; }
+  .header { align-items: flex-start; flex-direction: column; }
   .cardHead { flex-direction: column; }
   .cardActions { justify-content: flex-start; }
   .viewControls { width: 100%; }

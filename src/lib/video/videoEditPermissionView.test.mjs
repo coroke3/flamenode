@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   VIDEO_VIEW_SECTION_LABELS,
+  buildEditableEventSourceLabels,
   buildPermissionSummaryLists,
   buildVideoEditPermissionViewModel,
   buildVideoFieldPermission,
   formatPermissionBadge,
+  formatPermissionGroupBadge,
   formatVideoFieldPermissionReason,
+  resolveVideoPermissionGroupState,
 } from "./videoEditPermissionView.ts";
 
 const owner = {
@@ -284,6 +287,58 @@ test("buildPermissionSummaryLists: editable / locked ラベルを分類", () => 
     "公開状態",
     "共同編集権限",
   ]);
+});
+
+test("permission group: editable / mixed / locked を表示専用に集約", () => {
+  const editable = {
+    editable: true,
+    source: "owner_general",
+    reason: "allowed",
+    label: "基本情報",
+  };
+  const locked = {
+    editable: false,
+    source: "none",
+    reason: "owner_policy_denied",
+    label: "YouTube URL",
+  };
+
+  assert.equal(resolveVideoPermissionGroupState([editable]), "editable");
+  assert.equal(resolveVideoPermissionGroupState([editable, locked]), "mixed");
+  assert.equal(resolveVideoPermissionGroupState([locked]), "locked");
+  assert.deepEqual(formatPermissionGroupBadge([editable, locked]), {
+    kind: "mixed",
+    text: "一部のみ編集可能",
+  });
+});
+
+test("event 権限元表示は実際に編集可能な event_staff 項目だけを使う", () => {
+  const vm = buildVideoEditPermissionViewModel({
+    privilegeMode: "event",
+    ownership: outsider,
+    canOfferAdminMode: false,
+    canOfferEventMode: false,
+    eventTitle: "Primary Event",
+    sectionEventSources: {
+      basics: { eventTitle: "Event A" },
+      youtube: { eventTitle: "Event B" },
+      credits: { eventTitle: "Denied Event" },
+    },
+    sections: {
+      identity: false,
+      basics: true,
+      youtube: true,
+      credits: false,
+      descriptions: false,
+      members: false,
+      memberChapters: false,
+      primaryEvent: false,
+      visibility: false,
+      permissions: false,
+    },
+  });
+
+  assert.deepEqual(buildEditableEventSourceLabels(vm), ["Event A", "Event B"]);
 });
 
 test("buildVideoEditPermissionViewModel: 一般作品権限で拒否された可変項目は owner_policy_denied", () => {

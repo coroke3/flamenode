@@ -18,6 +18,12 @@ import { FnTable } from "@/components/ui/FnTable";
 import { Icon } from "@/components/ui/Icon";
 import { formatUnix } from "@/lib/utils/format";
 import {
+  derivePlaylistSyncHealth,
+  type PlaylistSyncHealth,
+  type PlaylistSyncHealthLevel,
+  type PlaylistSyncHealthReason,
+} from "@/lib/youtube/playlistSyncHealth";
+import {
   firstSearchParamValue,
   type SearchParamValue,
 } from "#utils/next";
@@ -62,13 +68,37 @@ type PlaylistSyncAdminRow = {
   linked_count: number;
   eligible_count: number;
   synced_count: number;
+  health: PlaylistSyncHealth;
 };
 
-function statusBadgeClass(status: string): string {
-  if (status === "failed") return "fn-badge-danger";
-  if (status === "deferred" || status === "scanning") return "fn-badge-warning";
-  if (status === "synced") return "fn-badge-accent";
+const HEALTH_REASON_LABELS: Record<PlaylistSyncHealthReason, string> = {
+  disabled: "無効",
+  failed: "同期失敗",
+  deferred: "繰り越し",
+  scanning: "同期中",
+  overdue: "予定時刻超過",
+  missing_schedule: "次回予定なし",
+  never_synced: "未同期",
+  never_full_scan: "全件確認未実行",
+  out_of_sync: "未反映あり",
+  last_error: "直近エラーあり",
+  healthy: "正常",
+  unknown_status: "不明な状態",
+};
+
+function healthBadgeClass(level: PlaylistSyncHealthLevel): string {
+  if (level === "critical") return "fn-badge-danger";
+  if (level === "warn" || level === "running") return "fn-badge-warning";
+  if (level === "ok") return "fn-badge-accent";
   return "fn-badge-soft";
+}
+
+function healthLevelLabel(level: PlaylistSyncHealthLevel): string {
+  if (level === "critical") return "要対応";
+  if (level === "warn") return "注意";
+  if (level === "running") return "実行中";
+  if (level === "ok") return "正常";
+  return "未確認";
 }
 
 function intervalLabel(minutes: number): string {
@@ -88,6 +118,7 @@ export default async function AdminYoutubePlaylistSyncPage({
   const enabledFilter = firstSearchParamValue(sp.enabled);
   const statusFilter = firstSearchParamValue(sp.status);
   const db = getDatabase();
+  const now = Math.floor(Date.now() / 1000);
   let rows: PlaylistSyncAdminRow[] = [];
   let hasMore = false;
 
@@ -189,14 +220,37 @@ export default async function AdminYoutubePlaylistSyncPage({
         ]),
       );
 
-      rows = visibleConfigs.map((row) => ({
+      const countedRows = visibleConfigs.map((row) => ({
         ...row,
         ...(countsByEventId.get(row.event_id) ?? {
           linked_count: 0,
           eligible_count: 0,
           synced_count: 0,
         }),
-      })) as PlaylistSyncAdminRow[];
+      })) as Omit<PlaylistSyncAdminRow, "health">[];
+      rows = countedRows
+        .map((row, originalIndex) => ({
+          row,
+          originalIndex,
+          health: derivePlaylistSyncHealth({
+            enabled: row.enabled,
+            syncStatus: row.sync_status,
+            nextSyncAt: row.next_sync_at,
+            lastSyncedAt: row.last_synced_at,
+            lastFullScanAt: row.last_full_scan_at,
+            lastError: row.last_error,
+            eligibleCount: row.eligible_count,
+            syncedCount: row.synced_count,
+            linkedCount: row.linked_count,
+            now,
+          }),
+        }))
+        .sort(
+          (left, right) =>
+            left.health.priority - right.health.priority ||
+            left.originalIndex - right.originalIndex,
+        )
+        .map(({ row, health }) => ({ ...row, health }));
     } else {
       rows = [];
     }
@@ -259,7 +313,9 @@ export default async function AdminYoutubePlaylistSyncPage({
 
       <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--text-muted)" }}>
         {rows.length} 件表示中（最大 {LIMIT} 件）
-        {hasMore ? "。条件に一致する設定がさらにあります。" : ""}
+        {hasMore
+          ? "。条件に一致する設定がさらにあります。健全性順は表示中の100件内です。"
+          : ""}
       </p>
 
       <div style={{ marginTop: 10, overflowX: "auto" }}>
@@ -315,9 +371,15 @@ export default async function AdminYoutubePlaylistSyncPage({
                       </div>
                     </td>
                     <td>
-                      <span className={`fn-badge ${statusBadgeClass(row.sync_status)}`}>
-                        {row.sync_status}
-                      </span>
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <span className={`fn-badge ${healthBadgeClass(row.health.level)}`}>
+                          {healthLevelLabel(row.health.level)}
+                        </span>
+                        <span className="fn-muted fn-text-xs">
+                          {HEALTH_REASON_LABELS[row.health.reason]}
+                        </span>
+                        <code className="fn-muted fn-text-xs">{row.sync_status}</code>
+                      </div>
                     </td>
                     <td className="fn-text-xs">
                       <div>最終: {formatUnix(row.last_synced_at)}</div>

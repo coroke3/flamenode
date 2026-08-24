@@ -12,7 +12,9 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
 import { createTraceId } from "@/lib/observability/flowTrace";
-import { buildKnownRecipientNotificationBatch } from "@/lib/notifications/enqueue";
+import {
+  buildNotificationOutboxStatement,
+} from "@/lib/notifications/enqueue";
 import {
   isTerminalNotificationFailure,
   TERMINAL_NOTIFICATION_FAILURE_STATUSES,
@@ -171,6 +173,15 @@ export async function cancelNotification(
     return { ok: true, message: `既に${row.status}です。` };
   }
 
+  if (row.status === "processing") {
+    // A dispatcher can be between lease claim and the Discord request. Do
+    // not report cancelled while that in-flight delivery can still succeed.
+    return {
+      ok: false,
+      message: "配送中の通知はキャンセルできません。配送完了後に再度お試しください。",
+    };
+  }
+
   const result = await updateRows(db, [row], guard.user.id, "cancel", reason);
   if (result.ok) await revalidateNotificationPagesBestEffort();
   return result.ok ? { ok: true, message: "通知をキャンセルしました。" } : result;
@@ -198,29 +209,33 @@ export async function forceResendNotification(
     return { ok: false, message: "payloadを解析できません。" };
   }
 
-  const batch = await buildKnownRecipientNotificationBatch(db, [
-    {
-      recipientUserId: source.recipient_user_id,
-      type: source.type,
-      payload,
-      eventId: source.event_id,
-      dedupeKey: `${source.dedupe_key || source.id}:force:${crypto.randomUUID()}`,
-    },
-  ]);
-  if (batch.rows.length !== 1) {
+  const deliveryRoute =
+    source.delivery_route ??
+    (source.type === "discord_webhook" ? "channel" : "dm");
+  const forceStatement = await buildNotificationOutboxStatement(db, {
+    recipientUserId: source.recipient_user_id,
+    type: source.type,
+    payload,
+    deliveryRoute: deliveryRoute === "channel" ? "channel" : "dm",
+    correlationId: source.correlation_id,
+    eventId: source.event_id,
+    dedupeKey: `${source.dedupe_key || source.id}:force:${crypto.randomUUID()}`,
+    force: true,
+  });
+  if (!forceStatement) {
     return { ok: false, message: "宛先の通知設定がOFF、または再送通知を構築できません。" };
   }
 
   try {
     await mutateWithAudit(db, {
-      mutationStatements: batch.statements,
-      expectedMutationChanges: batch.expectedChanges,
+      mutationStatements: [forceStatement.statement],
+      expectedMutationChanges: [null],
       audits: [
         {
           table_name: "notification_outbox",
-          target_id: batch.rows[0].id,
+          target_id: forceStatement.row.id,
           operation: "CREATE",
-          after: { ...batch.rows[0] },
+          after: { ...forceStatement.row },
           actor_user_id: guard.user.id,
           context: "admin_notification_force_resend",
           reason: `通知${source.id}を強制再送`,

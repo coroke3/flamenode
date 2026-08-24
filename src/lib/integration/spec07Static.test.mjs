@@ -86,7 +86,7 @@ test("local development shares Wrangler bindings and persistence with migration 
 
   assert.match(instrumentation, /getCloudflareContext\(\{ async:\s*true \}\)/);
   assert.match(instrumentation, /await assertLocalSchemaVersion\(env\.DB\)/);
-  assert.match(instrumentation, /2026-07-20-canonical-1/);
+  assert.match(instrumentation, /2026-08-24-observability-1/);
   assert.doesNotMatch(instrumentation, /getPlatformProxy|__FLAMENODE_LOCAL_PLATFORM/);
 
   assert.match(grantAdmin, /getPlatformProxy/);

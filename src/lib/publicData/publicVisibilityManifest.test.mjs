@@ -86,6 +86,32 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("low-level missing-object read stays bootstrap-compatible", async () => {
+    const previous = process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+    process.env.PUBLIC_VISIBILITY_GUARD_MODE = "enforce";
+    try {
+      const result = await readPublicVisibilityBlockedEntitiesManifest({
+        async get() {
+          return null;
+        },
+      });
+      assert.equal(result.etag, null);
+      assert.deepEqual(result.manifest.entities, []);
+    } finally {
+      if (previous === undefined) delete process.env.PUBLIC_VISIBILITY_GUARD_MODE;
+      else process.env.PUBLIC_VISIBILITY_GUARD_MODE = previous;
+    }
+  });
+
+  test("enforce loader requires a committed manifest ETag", async () => {
+    const source = await import("node:fs/promises").then((fs) =>
+      fs.readFile(new URL("./publicVisibilityManifest.ts", import.meta.url), "utf8"),
+    );
+    assert.match(source, /public_visibility_manifest_missing/);
+    assert.match(source, /resolvePublicVisibilityGuardModeFromEnv\(\) === "enforce"/);
+    assert.match(source, /!etag\?\.trim\(\)/);
+  });
+
   test("conditional manifest conflict re-reads and reapplies the mutator", async () => {
     let current = {
       etag: "newer-etag",

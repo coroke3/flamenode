@@ -25,6 +25,16 @@ import {
   publicJsonResponse,
 } from "@/lib/api/publicApi";
 import { assertNoForbiddenKeys } from "@/lib/api/publicDto";
+import { safeErrorSummary } from "../../../../workers/shared/safeLog.ts";
+
+function safeEventExportErrorSummary(error: unknown): string {
+  return safeErrorSummary(error)
+    .replace(/https?:\/\/\S+/gi, "[REDACTED_URL]")
+    .replace(
+      /\b(?:select|insert|update|delete|pragma|from|where)\b[\s\S]*/gi,
+      "[REDACTED_SQL]",
+    );
+}
 
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
 const EVENT_EXPORT_CACHE_METADATA_MARKER = "public-export-validated-v1";
@@ -159,7 +169,7 @@ async function readCachedPayload(
       eventId,
       cacheKey,
       format,
-      error,
+      error: safeEventExportErrorSummary(error),
     });
     return null;
   }
@@ -192,7 +202,7 @@ async function readCachedPayload(
       eventId,
       cacheKey,
       format,
-      error,
+      error: safeEventExportErrorSummary(error),
     });
     try {
       await kv.delete(cacheKey);
@@ -308,7 +318,7 @@ export async function GET(
   } catch (error) {
     console.error("[event-export-api] event lookup failed", {
       eventId,
-      error,
+      error: safeEventExportErrorSummary(error),
     });
     return publicJsonResponse(
       req,
@@ -338,7 +348,7 @@ export async function GET(
   } catch (error) {
     console.error("[event-export-api] snapshot query failed", {
       eventId,
-      error,
+      error: safeEventExportErrorSummary(error),
     });
     return publicJsonResponse(
       req,
@@ -361,7 +371,7 @@ export async function GET(
       console.error("[event-export-api] public payload boundary failed", {
         eventId,
         format,
-        error,
+        error: safeEventExportErrorSummary(error),
       });
       return publicJsonResponse(
         req,
@@ -388,7 +398,7 @@ export async function GET(
         eventId,
         format,
         refreshMinutes,
-        error,
+        error: safeEventExportErrorSummary(error),
       });
     }
   }

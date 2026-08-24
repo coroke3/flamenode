@@ -53,7 +53,7 @@ export const DEPLOY_TARGETS = Object.freeze([
     source: "workers/sync-jobs/wrangler.toml",
     output: "sync-jobs.toml",
     configEnv: "CF_SYNC_JOBS_CONFIG",
-    bindings: ["DB", "R2", "KV", "YOUTUBE_SYNC_WAKE_QUEUE", "STATIC_REBUILD_WAKE_QUEUE"],
+    bindings: ["DB", "R2", "KV", "YOUTUBE_SYNC_WAKE_QUEUE", "STATIC_REBUILD_WAKE_QUEUE", "NOTIFICATION_WAKE_QUEUE"],
     requiresR2: true,
   },
 ]);
@@ -759,6 +759,15 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
     ) {
       errors.push(
         "sync-jobs must produce to flamenode-static-rebuild-wake for score-driven rebuilds",
+      );
+    }
+    if (
+      !/\[\[queues\.producers\]\][\s\S]*?queue\s*=\s*"flamenode-notification-wake"[\s\S]*?binding\s*=\s*"NOTIFICATION_WAKE_QUEUE"/m.test(
+        content,
+      )
+    ) {
+      errors.push(
+        "sync-jobs must produce to flamenode-notification-wake for operational notifications",
       );
     }
     validateCronSchedule(content, errors, ["7 * * * *", "52 * * * *"]);

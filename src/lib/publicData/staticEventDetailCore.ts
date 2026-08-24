@@ -46,6 +46,7 @@ export interface StaticEventDetailEvent {
   end_time: number | null;
   entry_start_time: number | null;
   entry_end_time: number | null;
+  youtube_playlist_id: string | null;
   visibility_status: "public";
 }
 
@@ -196,6 +197,7 @@ function normalizeEvent(value: unknown): StaticEventDetailEvent | null {
     end_time: normalizeUnix(row.end_time),
     entry_start_time: normalizeUnix(row.entry_start_time),
     entry_end_time: normalizeUnix(row.entry_end_time),
+    youtube_playlist_id: normalizeNullableString(row.youtube_playlist_id),
     visibility_status: visibility,
   };
 }

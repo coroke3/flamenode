@@ -766,6 +766,17 @@ test("旧形式applyは作品スナップショット列をvideosへ書き込む
   assert.doesNotMatch(apply, /UPDATE x_users[\s\S]*creator_profile_text/);
 });
 
+test("legacy importで新規X IDを作成したstepはusers_indexを同じatomic writeへ予約する", () => {
+  const root = path.resolve(import.meta.dirname, "../../../..");
+  const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");
+  const start = apply.indexOf("async function ensureXUserGroup(");
+  const end = apply.indexOf("\nfunction plannedSoftwareCatalogRows", start);
+  const section = apply.slice(start, end);
+  assert.match(section, /targetType: "users_index"/);
+  assert.match(section, /rebuildQueue\.statement/);
+  assert.match(section, /rebuildQueue\.expectedChanges/);
+});
+
 test("legacy import visibility changes use the public visibility fence", () => {
   const root = path.resolve(import.meta.dirname, "../../../..");
   const apply = fs.readFileSync(path.join(root, "src/lib/import/legacy/apply.ts"), "utf8");

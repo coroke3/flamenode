@@ -854,11 +854,16 @@ export const notificationOutbox = sqliteTable(
   {
     id: text("id").primaryKey(),
     /** 配送先のAuth.js内部ユーザーID。送信時だけusers.discord_idへ解決する。 */
-    recipient_user_id: text("recipient_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    recipient_user_id: text("recipient_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     type: text("type").notNull(),
     payload_json: text("payload_json").notNull(),
+    /** NULL is the rolling-deploy compatibility value; legacy type decides the route. */
+    delivery_route: text("delivery_route", {
+      enum: ["dm", "channel"],
+    }),
+    correlation_id: text("correlation_id"),
     status: text("status", {
       enum: [
         "pending",
@@ -886,6 +891,10 @@ export const notificationOutbox = sqliteTable(
   },
   (t) => ({
     // Worker が status='pending' を 5 分ごとに引く + /admin/notifications の絞り込み高速化
+    deliveryRouteCheck: check(
+      "notification_outbox_delivery_route_ck",
+      sql`delivery_route IS NULL OR (delivery_route IN ('dm', 'channel') AND (delivery_route = 'channel' OR recipient_user_id IS NOT NULL))`,
+    ),
     byStatusCreated: index("notification_outbox_status_created_idx").on(
       t.status,
       t.created_at,
@@ -902,6 +911,11 @@ export const notificationOutbox = sqliteTable(
     ),
     // /manage/events/[id] が event_id で絞り込むため
     byEvent: index("notification_outbox_event_idx").on(t.event_id),
+    byRouteStatus: index("notification_outbox_route_status_idx").on(
+      t.delivery_route,
+      t.status,
+      t.created_at,
+    ),
     byDedupe: index("notification_outbox_dedupe_idx").on(t.dedupe_key),
     byStatusDedupe: index("notification_outbox_status_dedupe_idx").on(
       t.status,

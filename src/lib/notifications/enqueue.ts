@@ -18,6 +18,9 @@ export interface EnqueueNotificationInput {
   xUserId?: string | null;
   type: string;
   payload: Record<string, unknown>;
+  /** PR3 route-aware compatibility; semantic channel producers remain off. */
+  deliveryRoute?: "dm" | "channel";
+  correlationId?: string | null;
   eventId?: string | null;
   dedupeKey?: string | null;
   force?: boolean;
@@ -43,6 +46,8 @@ type NotificationOutboxBatch = {
  */
 export type NotificationOutboxStatement = Readonly<{
   statement: BatchItem<"sqlite">;
+  /** The exact row inserted by the statement, for audit correlation. */
+  row: typeof notificationOutbox.$inferSelect;
 }>;
 
 type PreparedNotification = {
@@ -50,12 +55,14 @@ type PreparedNotification = {
   payloadJson: string;
   eventId: string | null;
   dedupeKey: string | null;
+  deliveryRoute: "dm" | "channel";
+  correlationId: string | null;
 };
 
 function prepareNotification(
   input: Pick<
     EnqueueNotificationInput,
-    "type" | "payload" | "eventId" | "dedupeKey"
+    "type" | "payload" | "eventId" | "dedupeKey" | "deliveryRoute" | "correlationId"
   >,
 ): PreparedNotification {
   const check = validateNotificationPayload(input.type, input.payload);
@@ -67,12 +74,18 @@ function prepareNotification(
     payloadJson: JSON.stringify(input.payload),
     eventId: input.eventId ?? null,
     dedupeKey: input.dedupeKey?.trim() || null,
+    deliveryRoute:
+      input.deliveryRoute ?? (input.type === "discord_webhook" ? "channel" : "dm"),
+    correlationId:
+      typeof input.correlationId === "string" && input.correlationId.trim()
+        ? input.correlationId.trim().slice(0, 160)
+        : null,
   };
 }
 
 function buildNotificationRow(
   prepared: PreparedNotification,
-  recipientUserId: string,
+  recipientUserId: string | null,
   now: number,
 ): typeof notificationOutbox.$inferSelect {
   return {
@@ -80,6 +93,8 @@ function buildNotificationRow(
     recipient_user_id: recipientUserId,
     type: prepared.type,
     payload_json: prepared.payloadJson,
+    delivery_route: prepared.deliveryRoute,
+    correlation_id: prepared.correlationId,
     status: "pending",
     attempt_count: 0,
     processing_started_at: null,
@@ -243,6 +258,8 @@ export async function buildKnownRecipientNotificationBulkBatch(
       recipient_user_id,
       type,
       payload_json,
+      delivery_route,
+      correlation_id,
       status,
       attempt_count,
       processing_started_at,
@@ -260,6 +277,8 @@ export async function buildKnownRecipientNotificationBulkBatch(
       json_extract(value, '$.recipient_user_id'),
       json_extract(value, '$.type'),
       json_extract(value, '$.payload_json'),
+      json_extract(value, '$.delivery_route'),
+      json_extract(value, '$.correlation_id'),
       json_extract(value, '$.status'),
       json_extract(value, '$.attempt_count'),
       json_extract(value, '$.processing_started_at'),
@@ -359,16 +378,16 @@ export async function buildNotificationOutboxStatement(
     input,
     input.force ?? false,
   );
-  if (!recipientUserId) return null;
+  if (prepared.deliveryRoute === "dm" && !recipientUserId) return null;
+
+  const row = buildNotificationRow(
+    prepared,
+    recipientUserId,
+    Math.floor(Date.now() / 1000),
+  );
 
   return {
-    statement: insertNotificationStatement(
-      db,
-      buildNotificationRow(
-        prepared,
-        recipientUserId,
-        Math.floor(Date.now() / 1000),
-      ),
-    ),
+    statement: insertNotificationStatement(db, row),
+    row,
   };
 }

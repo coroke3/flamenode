@@ -8,7 +8,7 @@ const overrideUi = await readFile(new URL("../../components/admin/CostGuardOverr
 const contentJobs = await readFile(new URL("../../../workers/content-jobs/index.ts", import.meta.url), "utf8");
 
 test("all manual CostGuard control writes use the dedicated control guard and atomic full audit", () => {
-  for (const name of ["setCostGuardMode", "setMaintenanceMode"]) {
+  for (const name of ["setCostGuardMode", "setMaintenanceMode", "setDisabledFeatures"]) {
     assert.match(action, new RegExp(`export async function ${name}`));
   }
   assert.ok((action.match(/requireCostGuardControlAdmin\(\)/g) ?? []).length >= 4);
@@ -28,6 +28,11 @@ test("all manual CostGuard control writes use the dedicated control guard and at
     "mode と maintenance の両方でKV複製失敗を現行フォームのmessageへ表示する",
   );
   assert.doesNotMatch(normalUi, /\["maintenance", "メンテナンス"\]/);
+  assert.match(action, /context: "cost_guard_disabled_features"/);
+  assert.match(action, /WRITE_FEATURE_KEYS\.filter/);
+  assert.match(action, /expected_disabled_features_json/);
+  assert.match(action, /JSON\.parse\(expectedDisabledFeatures\)/);
+  assert.match(action, /設定が別の管理者によって変更されています/);
 });
 
 test("override is a separate, short, confirmed and allowlisted emergency operation", () => {
@@ -49,6 +54,23 @@ test("override is a separate, short, confirmed and allowlisted emergency operati
     /setFeatures\(\(current\)\s*=>\s*event\.currentTarget/,
     "checkbox onChange は setState updater 内で SyntheticEvent を読まない",
   );
+});
+
+test("disabled feature UI surfaces malformed configuration without auto-repair", async () => {
+  const ui = await readFile(
+    new URL("../../components/admin/CostGuardDisabledFeaturesForm.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(ui, /malformed/);
+  assert.match(ui, /安全のため書込み機能は停止中/);
+  assert.match(ui, /setDisabledFeatures/);
+  assert.match(ui, /expected_disabled_features_json/);
+  assert.match(ui, /useEffect\(\(\) => \{\s*setFeatures\(initial\.features\)/);
+  assert.match(ui, /new Set\(parsed as string\[\]\)/);
+  const syncEffect = ui.match(
+    /React\.useEffect\([\s\S]*?\n\s*\}, \[initial\.features\]\);/,
+  )?.[0] ?? "";
+  assert.doesNotMatch(syncEffect, /setDisabledFeatures/);
 });
 
 test("control guard skips Active X lookup while keeping identity checks", async () => {

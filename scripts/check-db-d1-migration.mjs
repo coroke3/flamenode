@@ -10,7 +10,7 @@ import { buildD1CompatibleMigration } from "./d1-migration-compat.mjs";
 
 const root = process.cwd();
 const migrationName = "0043_db_canonical_migration.sql";
-const canonicalVersion = "2026-07-20-canonical-1";
+const canonicalVersion = "2026-08-24-observability-1";
 const migrationsDir = path.join(root, "migrations");
 const fixturePath = path.join(root, "scripts/fixtures/db-canonical-legacy.sql");
 const wranglerBin = path.join(root, "node_modules", "wrangler", "bin", "wrangler.js");
@@ -97,13 +97,13 @@ function assertCanonicalD1(context, expectedCounts = null) {
       const escaped = tableName.replaceAll('"', '""');
       return sum + db.prepare(`PRAGMA table_info("${escaped}")`).all().length;
     }, 0);
-    assert.equal(tables.length, 44, "D1 canonical table count");
+    assert.equal(tables.length, 46, "D1 canonical table count");
     // Keep this baseline in sync with the additive migrations. 0057 adds the
     // three slot-bind recovery columns, 0058 adds the event description
     // template column, and 0059 adds two reservation guidance columns. A
     // stale count makes every empty-D1 preflight fail even though the
     // migrated schema is valid.
-    assert.equal(columnCount, 444, "D1 canonical column count");
+    assert.equal(columnCount, 473, "D1 canonical column count");
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
     assert.equal(db.prepare("PRAGMA quick_check").get()?.quick_check, "ok");
     assert.equal(

@@ -185,13 +185,25 @@ function MergePreviewPanel({ row }: { row: MergeRow }): React.ReactElement {
           <h2 id={`merge-preview-${row.id}`} style={{ margin: 0, fontSize: 16 }}>
             統合前の確認: @{row.source_x_user_id ?? "?"} → @{row.target_x_user_id ?? "?"}
           </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8, marginTop: 10 }}>
+            <div style={{ padding: "9px 10px", border: "1px solid color-mix(in srgb, var(--accent-danger) 38%, var(--border-subtle))", borderRadius: "var(--radius-sm)" }}>
+              <strong style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>統合元（実行後は無効化）</strong>
+              <span style={{ display: "block", marginTop: 3 }}>@{row.source_x_user_id ?? "?"}</span>
+              <span className="fn-muted" style={{ display: "block", marginTop: 2, fontSize: 11 }}>{row.source_name ?? "名称未設定"}</span>
+            </div>
+            <div style={{ padding: "9px 10px", border: "1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-subtle))", borderRadius: "var(--radius-sm)" }}>
+              <strong style={{ display: "block", fontSize: 11, color: "var(--text-muted)" }}>統合先（実行後も利用）</strong>
+              <span style={{ display: "block", marginTop: 3 }}>@{row.target_x_user_id ?? "?"}</span>
+              <span className="fn-muted" style={{ display: "block", marginTop: 2, fontSize: 11 }}>{row.target_name ?? "名称未設定"}</span>
+            </div>
+          </div>
           <p className="fn-muted" style={{ margin: "6px 0 0", fontSize: 12, lineHeight: 1.6 }}>
             実行時に統合元の参照を統合先へ付け替え、統合元は通常の選択対象から外れる無効状態にします。
             作品レコードは削除せず、作品投稿者・合作メンバー・チャプター・予約枠・審査案件の参照を更新します。
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 12 }}>
-          <span className="fn-badge fn-badge-danger">統合元: 無効化（復元期限内は内部保持）</span>
+          <span className="fn-badge fn-badge-danger">統合元: 無効化（alias・監査・差し戻し用に内部保持）</span>
           <span className="fn-badge fn-badge-accent">統合先: 継続利用</span>
           <span className="fn-badge fn-badge-neutral">作品一覧: {visibleRows.length}{hasMore ? "+" : ""}件</span>
         </div>
@@ -209,7 +221,7 @@ function MergePreviewPanel({ row }: { row: MergeRow }): React.ReactElement {
             <table className="fn-table" style={{ minWidth: 680 }}>
               <thead>
                 <tr>
-                  <th>作品</th>
+                  <th>対象作品（先頭50件）</th>
                   <th>統合元の対象</th>
                   <th>公開状態</th>
                   <th>実行後</th>

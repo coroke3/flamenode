@@ -17,8 +17,8 @@ export interface Env {
 
 type CleanupMetrics = { d1Changes: number };
 
-/** settings SELECT + 6 bounded UPDATE/DELETE statements. */
-export const CLEANUP_D1_STATEMENTS_PER_ATTEMPT = 7;
+/** settings SELECT + 8 bounded UPDATE/DELETE statements. */
+export const CLEANUP_D1_STATEMENTS_PER_ATTEMPT = 9;
 /** 同一invocation内でretryを全て使い切った場合の最大D1 statement数。 */
 export const CLEANUP_D1_MAX_STATEMENTS =
   CLEANUP_D1_STATEMENTS_PER_ATTEMPT * CLEANUP_MAX_RETRIES;
@@ -200,6 +200,32 @@ export async function runCleanup(
     .bind(now, AUDIT_CLEANUP_BATCH_LIMIT)
     .run();
   d1Changes += recordD1Changes(importsResult, metrics);
+
+  throwIfAborted(signal, "cleanup aborted");
+  const stalePlaylistRunsResult = await env.DB.prepare(
+    `UPDATE event_youtube_playlist_sync_runs
+        SET status = 'skipped',
+            finished_at = ?1,
+            duration_ms = MAX(0, (?1 - started_at) * 1000),
+            detail_code = 'lease_expired'
+      WHERE status = 'running'
+        AND started_at < ?2
+      LIMIT ?3`,
+  )
+    .bind(now, now - 15 * 60, AUDIT_CLEANUP_BATCH_LIMIT)
+    .run();
+  d1Changes += recordD1Changes(stalePlaylistRunsResult, metrics);
+
+  throwIfAborted(signal, "cleanup aborted");
+  const playlistRunsResult = await env.DB.prepare(
+    `DELETE FROM event_youtube_playlist_sync_runs
+     WHERE finished_at IS NOT NULL
+       AND created_at < ?1
+     LIMIT ?2`,
+  )
+    .bind(now - 30 * 86400, AUDIT_CLEANUP_BATCH_LIMIT)
+    .run();
+  d1Changes += recordD1Changes(playlistRunsResult, metrics);
 
   throwIfAborted(signal, "cleanup aborted");
   const restoreResult = await env.DB.prepare(

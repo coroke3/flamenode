@@ -15,6 +15,7 @@ type SystemSettingsRow = typeof systemSettings.$inferSelect;
 
 export type AdminSystemSettings = {
   operation_mode: SystemSettingsRow["operation_mode"];
+  disabled_features_json: SystemSettingsRow["disabled_features_json"];
   cost_guard_reason: SystemSettingsRow["cost_guard_reason"];
   cost_guard_updated_at: SystemSettingsRow["cost_guard_updated_at"];
   cost_guard_exception_until: SystemSettingsRow["cost_guard_exception_until"];
@@ -28,6 +29,7 @@ export const readAdminSystemSettings = cache(
     const rows = await db
       .select({
         operation_mode: systemSettings.operation_mode,
+        disabled_features_json: systemSettings.disabled_features_json,
         cost_guard_reason: systemSettings.cost_guard_reason,
         cost_guard_updated_at: systemSettings.cost_guard_updated_at,
         cost_guard_exception_until: systemSettings.cost_guard_exception_until,

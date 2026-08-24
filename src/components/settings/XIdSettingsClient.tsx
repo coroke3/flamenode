@@ -165,17 +165,30 @@ export function XIdMergeForm({
       </p>
       <div className={styles.mergePreview} aria-live="polite">
         <div className={styles.mergeRoute}>
-          <span className={styles.mergeSource}>@{effectiveSourceId || "統合元"}</span>
-          <Icon name="chevron-right" size={14} aria-hidden />
-          <span className={styles.mergeTarget}>@{effectiveTargetId || "統合先"}</span>
+          <div className={`${styles.mergeParty} ${styles.mergePartySource}`}>
+            <span className={styles.mergePartyLabel}>統合元（無効化）</span>
+            <strong className={styles.mergeSource}>@{effectiveSourceId || "統合元"}</strong>
+            <span className={styles.mergePartyNote}>現在の作品・メンバー参照を移行</span>
+          </div>
+          <Icon name="chevron-right" size={16} aria-hidden />
+          <div className={`${styles.mergeParty} ${styles.mergePartyTarget}`}>
+            <span className={styles.mergePartyLabel}>統合先（継続利用）</span>
+            <strong className={styles.mergeTarget}>@{effectiveTargetId || "統合先"}</strong>
+            <span className={styles.mergePartyNote}>移行後の表示・投稿先</span>
+          </div>
         </div>
-        <ul className={styles.mergeChanges}>
-          <li>統合元が投稿者・合作メンバー・チャプターになっている作品を統合先へ付け替えます。</li>
-          <li>予約枠・連続枠・イベントスタッフ・認証ユーザー・審査案件の紐付けも統合先へ揃えます。</li>
-          <li>作品データは削除せず、統合元は無効化します。差し戻し期限中のみ復元用に内部保持します。</li>
-        </ul>
+        <ol className={styles.mergeChanges}>
+          <li><strong>作品</strong>は削除せず、投稿者・合作メンバー・チャプター欄のX IDだけを統合先へ変更します。</li>
+          <li><strong>予約枠・連続枠・スタッフ・認証リンク・審査案件</strong>も統合先へ揃えます。</li>
+          <li><strong>統合元</strong>は通常の選択対象から外れます。監査・差し戻しのため内部履歴とaliasは保持します。</li>
+        </ol>
+        <div className={styles.mergeOutcome}>
+          <span className={styles.mergeOutcomeTitle}>実行後の見え方</span>
+          <span><strong>@{effectiveTargetId || "統合先"}</strong> のみが現在の名義として表示されます。</span>
+          <span>対象作品の動画ID・公開状態・内容は変わりません。</span>
+        </div>
         <p className={styles.mergeHint}>
-          具体的な対象作品と件数は、申請後に運営の確認画面へ一覧表示されます。実行時にも再確認し、競合があれば統合全体を中止します。
+          申請後、運営の確認画面に対象作品名・公開状態・変更される欄・件数が一覧表示されます。実行時にも再取得し、競合や不整合があれば統合全体を中止します。
         </p>
       </div>
       <label className={styles.compactLabel}>

@@ -120,3 +120,28 @@ test("event-youtube-playlist queue sync uses post-commit revalidate", async () =
   );
   assert.match(source, /queue sync failed/);
 });
+
+test("playlist settings atomically enqueue event_base and wake only after commit", async () => {
+  const source = await read("./event-youtube-playlist.ts");
+  assert.match(source, /buildStaticRebuildQueueBatch\(guard\.db/);
+  assert.match(
+    source,
+    /mutationStatements:\s*\[\.\.\.mutationStatements, \.\.\.projectionQueue\.statements\]/,
+  );
+  assert.match(
+    source,
+    /expectedMutationChanges:\s*\[[\s\S]*\.\.\.projectionQueue\.expectedChanges/,
+  );
+  assert.match(source, /staticRebuildWakeSource:/);
+  assert.doesNotMatch(source, /enqueueEventBaseProjectionBestEffort/);
+});
+
+test("playlist settings and manual wake keep the lease CAS at commit time", async () => {
+  const source = await read("./event-youtube-playlist.ts");
+  assert.match(source, /onConflictDoUpdate\(\{[\s\S]*?where:\s*sql`[\s\S]*?run_lease_token IS NULL/);
+  assert.match(source, /pending_trigger: "manual" as const/);
+  assert.match(
+    source,
+    /\.where\(\s*and\(\s*eq\(eventYoutubePlaylistSync\.event_id, eventId\),[\s\S]*?run_lease_expires_at <= \$\{now\}/,
+  );
+});

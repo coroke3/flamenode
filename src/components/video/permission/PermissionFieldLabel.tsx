@@ -6,31 +6,41 @@ import styles from "./PermissionFieldLabel.module.css";
 
 export interface PermissionFieldLabelProps {
   label: string;
+  id?: string;
   htmlFor?: string;
   permission: VideoFieldPermission;
   required?: boolean;
-  noteId?: string;
+  showEditableBadge?: boolean;
 }
 
 export function PermissionFieldLabel({
   label,
+  id,
   htmlFor,
   permission,
   required = false,
-  noteId,
+  showEditableBadge = false,
 }: PermissionFieldLabelProps): React.ReactElement {
-  const describedBy = !permission.editable && noteId ? noteId : undefined;
+  const showBadge =
+    showEditableBadge ||
+    !permission.editable ||
+    permission.source !== "owner_general";
+  const labelClassName = cn(styles.label, required && styles.required);
 
   return (
     <div className={styles.labelRow}>
-      <label
-        htmlFor={htmlFor}
-        className={cn(styles.label, required && styles.required)}
-        aria-describedby={describedBy}
-      >
-        {label}
-      </label>
-      <PermissionBadge permission={permission} className={styles.badge} />
+      {htmlFor ? (
+        <label id={id} htmlFor={htmlFor} className={labelClassName}>
+          {label}
+        </label>
+      ) : (
+        <span id={id} className={labelClassName}>
+          {label}
+        </span>
+      )}
+      {showBadge ? (
+        <PermissionBadge permission={permission} className={styles.badge} />
+      ) : null}
     </div>
   );
 }

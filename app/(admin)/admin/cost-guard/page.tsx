@@ -8,6 +8,7 @@ import { getDatabase } from "@/lib/cloudflare";
 import { auditLogs } from "@/lib/db/schema";
 import { CostGuardForm } from "@/components/admin/CostGuardForm";
 import { CostGuardOverrideForm } from "@/components/admin/CostGuardOverrideForm";
+import { CostGuardDisabledFeaturesForm } from "@/components/admin/CostGuardDisabledFeaturesForm";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { parseAuditDiff } from "@/lib/audit/diff";
@@ -64,6 +65,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
   let updatedAt: number | null = null;
   let exceptionUntil: number | null = null;
   let exceptionFeaturesJson: string | null = null;
+  let disabledFeaturesJson: string | null = null;
   let history: (typeof auditLogs.$inferSelect)[] = [];
   if (db) {
     try {
@@ -75,6 +77,7 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
         updatedAt = settings.cost_guard_updated_at ?? null;
         exceptionUntil = settings.cost_guard_exception_until ?? null;
         exceptionFeaturesJson = settings.cost_guard_exception_features_json;
+        disabledFeaturesJson = settings.disabled_features_json;
       }
       history = await db
         .select()
@@ -158,6 +161,9 @@ export default async function AdminCostGuardPage(): Promise<React.ReactElement> 
           <CostGuardOverrideForm
             exceptionUntil={exceptionUntil}
             exceptionFeaturesJson={exceptionFeaturesJson}
+          />
+          <CostGuardDisabledFeaturesForm
+            disabledFeaturesJson={disabledFeaturesJson}
           />
         </div>
         <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>

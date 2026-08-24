@@ -748,6 +748,14 @@ export const eventYoutubePlaylistSync = sqliteTable(
     scan_started_at: integer("scan_started_at"),
     scan_page_token: text("scan_page_token"),
     last_error: text("last_error"),
+    last_attempt_at: integer("last_attempt_at"),
+    last_run_id: text("last_run_id"),
+    last_duration_ms: integer("last_duration_ms"),
+    run_lease_token: text("run_lease_token"),
+    run_lease_expires_at: integer("run_lease_expires_at"),
+    pending_trigger: text("pending_trigger", {
+      enum: ["manual", "settings_change", "continuation", "scheduled"],
+    }),
     created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
     updated_at: integer("updated_at").notNull().default(sql`(unixepoch())`),
   },
@@ -760,6 +768,68 @@ export const eventYoutubePlaylistSync = sqliteTable(
     playlistUnique: uniqueIndex("event_youtube_playlist_sync_playlist_uniq")
       .on(t.playlist_id)
       .where(sql`playlist_id IS NOT NULL AND playlist_id <> ''`),
+  }),
+);
+
+export const eventYoutubePlaylistSyncRuns = sqliteTable(
+  "event_youtube_playlist_sync_runs",
+  {
+    run_id: text("run_id").primaryKey(),
+    event_id: text("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    playlist_id: text("playlist_id").notNull(),
+    trigger: text("trigger", {
+      enum: ["manual", "settings_change", "continuation", "scheduled"],
+    }).notNull(),
+    dispatch_source: text("dispatch_source").notNull(),
+    status: text("status", {
+      enum: ["running", "succeeded", "failed", "deferred", "skipped"],
+    }).notNull(),
+    started_at: integer("started_at").notNull(),
+    finished_at: integer("finished_at"),
+    duration_ms: integer("duration_ms"),
+    detail_code: text("detail_code"),
+    created_at: integer("created_at").notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    byEventStarted: index("event_youtube_playlist_sync_runs_event_started_idx").on(
+      t.event_id,
+      t.started_at,
+      t.run_id,
+    ),
+    byCreated: index("event_youtube_playlist_sync_runs_created_idx").on(
+      t.created_at,
+      t.run_id,
+    ),
+  }),
+);
+
+export const opsIncidentState = sqliteTable(
+  "ops_incident_state",
+  {
+    incident_key: text("incident_key").primaryKey(),
+    state: text("state", { enum: ["open", "resolved"] }).notNull(),
+    severity: text("severity", {
+      enum: ["warning", "critical"],
+    }).notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    opened_at: integer("opened_at").notNull(),
+    last_seen_at: integer("last_seen_at").notNull(),
+    occurrence_count: integer("occurrence_count").notNull().default(1),
+    last_notified_at: integer("last_notified_at"),
+    last_correlation_id: text("last_correlation_id"),
+    resolved_at: integer("resolved_at"),
+  },
+  (t) => ({
+    byStateSeen: index("ops_incident_state_state_seen_idx").on(
+      t.state,
+      t.last_seen_at,
+      t.incident_key,
+    ),
+    byFingerprint: index("ops_incident_state_fingerprint_idx").on(
+      t.fingerprint,
+    ),
   }),
 );
 

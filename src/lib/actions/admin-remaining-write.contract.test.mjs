@@ -42,7 +42,9 @@ test("CAS snapshots and same-batch side effects remain explicit", () => {
   }
   assert.match(sources["admin.ts"], /planVideoVisibilityTransition/);
   assert.match(sources["admin.ts"], /buildVideoStatusChangeNotificationBatch|planVideoVisibilityTransition/);
-  assert.match(sources["notification-admin.ts"], /buildKnownRecipientNotificationBatch/);
+  // Force-resend must use the route-aware builder so channel notifications can
+  // retain a nullable recipient while DM rows still resolve a recipient.
+  assert.match(sources["notification-admin.ts"], /buildNotificationOutboxStatement/);
   assert.match(sources["static-rebuild-admin.ts"], /buildStaticRebuildQueueBatch/);
 });
 

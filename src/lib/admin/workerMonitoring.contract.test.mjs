@@ -26,7 +26,27 @@ test("YouTube監視は sync_status=pending 件数を返す", async () => {
     /SELECT COUNT\(\*\) FROM video_youtube_metadata WHERE sync_status = 'pending'\) AS pending/,
   );
   assert.match(text, /pending: numberValue\(youtubeRow\?\.pending\)/);
+  assert.match(
+    text,
+    /SELECT MIN\(updated_at\)[\s\S]*WHERE sync_status = 'pending'\) AS oldest_pending_at/,
+  );
+  assert.match(
+    text,
+    /oldestPendingAt: nullableNumber\(youtubeRow\?\.oldest_pending_at\)/,
+  );
+  assert.doesNotMatch(text, /oldestSyncedAt|oldest_synced_at/);
   assert.doesNotMatch(text, /ym\.youtube_video_id/);
+});
+
+test("Workerとpipelineは異常度順で安定ソートする", async () => {
+  const text = await source("src/lib/admin/workerMonitoring.ts");
+
+  assert.match(
+    text,
+    /MONITOR_LEVEL_SORT_ORDER[\s\S]*critical: 0[\s\S]*warn: 1[\s\S]*running: 2[\s\S]*unknown: 3[\s\S]*ok: 4/,
+  );
+  assert.match(text, /\.map\(\(job\) => jobStatus[\s\S]*\.sort\(compareMonitorLevel\)/);
+  assert.match(text, /pipelines\.sort\(compareMonitorLevel\)/);
 });
 
 test("YouTube stale candidates are metadata-first and use event existence checks", async () => {

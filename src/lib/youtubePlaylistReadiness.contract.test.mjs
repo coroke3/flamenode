@@ -30,9 +30,9 @@ test("YouTube再生リスト同期は現行sync-jobsの52分Recovery枠と必要
   assert.match(wrangler, /binding\s*=\s*"YOUTUBE_SYNC_WAKE_QUEUE"/);
   assert.match(wrangler, /binding\s*=\s*"STATIC_REBUILD_WAKE_QUEUE"/);
   assert.match(worker, /return now\.getUTCMinutes\(\) === 52/);
-  assert.match(worker, /syncEventPlaylists\(budgetEnv, signal\)/);
+  assert.match(worker, /syncEventPlaylists\(budgetEnv, signal, fetch,/);
   assert.match(worker, /wake\?\.kind === "youtube_playlist_sync"/);
-  assert.match(worker, /syncEventPlaylists\(env\)/);
+  assert.match(worker, /syncEventPlaylists\(env, undefined, fetch,/);
 });
 
 test("production deploy契約はplaylist同期に必要なsecret名をfail-closed検査する", async () => {

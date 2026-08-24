@@ -120,6 +120,22 @@ function isPublicUserRow(
   return true;
 }
 
+/**
+ * A member/staff projection may carry an internal `id` alongside the public
+ * X identity.  Only x_user_id/x_id participate in the X visibility fence;
+ * treating the internal row id as an X id would hide unrelated rows.
+ */
+function isPublicXReferenceRow(
+  value: unknown,
+  context?: PublicArtifactVisibilityContext,
+): boolean {
+  const row = asRecord(value);
+  if (!row || !context) return true;
+  const raw = row.x_user_id ?? row.x_id;
+  if (typeof raw !== "string" || !raw.trim()) return true;
+  return !context.blockedUserIds.has(raw.trim().toLowerCase());
+}
+
 function filterRows(
   value: unknown,
   predicate: RowPredicate,
@@ -209,15 +225,44 @@ export function filterPublicArtifactPayload<T>(
         ["related_videos", "related_reserve", "related_random_reserve"],
         (row) => isPublicVideoRow(row, context),
       );
+      const originalMembers = next.public_members;
+      const filteredMembers = filterRows(originalMembers, (row) =>
+        isPublicXReferenceRow(row, context),
+      );
+      if (filteredMembers.changed) {
+        next = { ...next, public_members: filteredMembers.value };
+        const removedMemberIds = new Set(
+          (Array.isArray(originalMembers) ? originalMembers : [])
+            .filter((row) => !isPublicXReferenceRow(row, context))
+            .map((row) => {
+              const record = asRecord(row);
+              return typeof record?.id === "string" ? record.id : null;
+            })
+            .filter((id): id is string => Boolean(id)),
+        );
+        if (removedMemberIds.size > 0) {
+          next = withFilteredRows(next, ["member_chapters"], (row) => {
+            const record = asRecord(row);
+            return !(
+              typeof record?.video_member_id === "string" &&
+              removedMemberIds.has(record.video_member_id)
+            );
+          });
+        }
+      }
       return next as T;
     }
     case "event":
     case "event_base": {
       const event = root.event;
       if (event != null && !isPublicEventRow(event, context)) return null;
-      return withFilteredRows(root, ["public_videos"], (row) =>
+      let next = withFilteredRows(root, ["public_videos"], (row) =>
         isPublicVideoRow(row, context),
-      ) as T;
+      );
+      next = withFilteredRows(next, ["public_staff"], (row) =>
+        isPublicXReferenceRow(row, context),
+      );
+      return next as T;
     }
     case "event_release": {
       const event = root.event;

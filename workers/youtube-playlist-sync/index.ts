@@ -19,6 +19,18 @@ export interface PlaylistSyncEnv extends YoutubeQuotaEnv {
 
 export type PlaylistSyncMode = "append_only" | "mirror";
 
+export type PlaylistSyncTrigger =
+  | "manual"
+  | "settings_change"
+  | "continuation"
+  | "scheduled";
+
+export interface PlaylistSyncRunContext {
+  runId: string;
+  trigger: PlaylistSyncTrigger;
+  dispatchSource: string;
+}
+
 interface SyncConfigRow {
   event_id: string;
   playlist_id: string;
@@ -31,6 +43,15 @@ interface SyncConfigRow {
   scan_started_at: number | null;
   scan_page_token: string | null;
   last_error: string | null;
+  pending_trigger: PlaylistSyncTrigger | null;
+}
+
+export interface ClaimedSyncConfig extends SyncConfigRow {
+  run_id: string;
+  run_lease_expires_at: number;
+  claimed_trigger: PlaylistSyncTrigger;
+  dispatch_source: string;
+  run_started_ms: number;
 }
 
 interface RemoteItemRow {
@@ -79,7 +100,29 @@ export interface PlaylistSyncBatchResult {
   retry_count: number;
   quota_stopped: boolean;
   quota_stop_reason: string | null;
+  /** outbox に運営通知を作成したため、commit後にwakeを送る必要がある件数。 */
+  notification_wake_count: number;
 }
+
+export type PlaylistSyncRunStatus =
+  | "succeeded"
+  | "failed"
+  | "deferred"
+  | "skipped";
+
+export type PlaylistSyncRunOutcome = {
+  status: PlaylistSyncRunStatus;
+  detailCode: string | null;
+};
+
+export type PlaylistSyncIncidentTransition =
+  | {
+      action: "open";
+      severity: "warning" | "critical";
+      fingerprint: string;
+    }
+  | { action: "resolve" }
+  | { action: "none" };
 
 const MAX_EVENTS_PER_RUN = 1;
 const MAX_SCAN_PAGES_PER_EVENT = 3;
@@ -89,7 +132,8 @@ const MAX_ORDER_REPAIRS_PER_RUN = 2;
 const MAX_SOURCE_VIDEOS = 5000;
 export const PLAYLIST_MAX_REMOTE_ITEMS = 5000;
 export const PLAYLIST_STALE_DELETE_BATCH_SIZE = 100;
-const SCAN_UPSERT_CHUNK_SIZE = 20;
+/** D1の1 statement 100 bind上限へ余白を残す。実際は共通5 + 2/item。 */
+export const PLAYLIST_SCAN_UPSERT_CHUNK_SIZE = 14;
 const STALE_CLEANUP_CURSOR = "__flamenode_stale_cleanup__";
 const FULL_SCAN_INTERVAL_SEC = 24 * 60 * 60;
 const RETRY_DELAY_SEC = 60 * 60;
@@ -98,6 +142,10 @@ const API_TIMEOUT_MS = 10_000;
 /** OAuth / scan / bounded order check / mutationを同一invocationで12 subrequest以内に閉じる。 */
 const MAX_EXTERNAL_REQUESTS_PER_RUN = 12;
 const OAUTH_TOKEN_SAFETY_MS = 60_000;
+const PLAYLIST_RUN_LEASE_SEC = 15 * 60;
+const PLAYLIST_MUTATION_LEASE_SAFETY_SEC =
+  Math.ceil(API_TIMEOUT_MS / 1_000) + 5;
+const HISTORY_DETAIL_CODE_MAX_LENGTH = 160;
 
 class QuotaDeferredError extends Error {
   constructor() {
@@ -120,6 +168,52 @@ class YouTubeApiError extends Error {
 
 function unixNow(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+function normalizedRunId(value: string | undefined): string {
+  const runId = value?.trim();
+  return runId && runId.length <= 128 ? runId : crypto.randomUUID();
+}
+
+function normalizedDispatchSource(value: string | undefined): string {
+  const source = value?.trim();
+  return source ? source.slice(0, 80) : "direct";
+}
+
+function boundedDetailCode(value: string | null): string | null {
+  const detail = value?.trim();
+  return detail ? detail.slice(0, HISTORY_DETAIL_CODE_MAX_LENGTH) : null;
+}
+
+function safeNotificationText(value: string | null | undefined, max = 180): string {
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/@/g, "@\u200b")
+    .replace(/[<>`]/g, "")
+    .trim()
+    .slice(0, max);
+}
+
+export function derivePlaylistIncidentTransition(
+  outcome: PlaylistSyncRunOutcome,
+): PlaylistSyncIncidentTransition {
+  const detail = boundedDetailCode(outcome.detailCode) ?? "none";
+  if (outcome.status === "failed") {
+    return {
+      action: "open",
+      severity: "critical",
+      fingerprint: `youtube_playlist_sync:failed:${detail}`,
+    };
+  }
+  if (outcome.status === "deferred") {
+    return {
+      action: "open",
+      severity: "warning",
+      fingerprint: `youtube_playlist_sync:deferred:${detail}`,
+    };
+  }
+  if (outcome.status === "succeeded") return { action: "resolve" };
+  return { action: "none" };
 }
 
 class DailyQuotaBudget {
@@ -334,6 +428,13 @@ const YOUTUBE_QUOTA_REASONS = new Set([
   "userRateLimitExceeded",
 ]);
 
+const SAFE_YOUTUBE_API_REASON = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+
+function normalizeYoutubeApiReason(value: unknown): string {
+  const reason = typeof value === "string" ? value.trim() : "";
+  return SAFE_YOUTUBE_API_REASON.test(reason) ? reason : "request_failed";
+}
+
 /** API本文からログへ保存してよい短いreasonだけを取り出す。 */
 export function parseYoutubeApiErrorReason(body: unknown): string {
   if (!body || typeof body !== "object") return "request_failed";
@@ -345,10 +446,14 @@ export function parseYoutubeApiErrorReason(body: unknown): string {
   const reason = first && typeof first === "object"
     ? (first as Record<string, unknown>).reason
     : undefined;
-  if (typeof reason === "string" && reason.trim()) return reason.trim();
+  if (typeof reason === "string" && reason.trim()) {
+    return normalizeYoutubeApiReason(reason);
+  }
 
   const status = (error as Record<string, unknown>).status;
-  if (typeof status === "string" && status.trim()) return status.trim().toLowerCase();
+  if (typeof status === "string" && status.trim()) {
+    return normalizeYoutubeApiReason(status.toLowerCase());
+  }
   return "request_failed";
 }
 
@@ -674,13 +779,18 @@ async function loadDueConfigs(
   const result = await env.DB.prepare(
     `SELECT event_id, playlist_id, sync_mode, sync_interval_minutes,
             sync_status, next_sync_at, last_synced_at, last_full_scan_at,
-            scan_started_at, scan_page_token, last_error
+            scan_started_at, scan_page_token, last_error, pending_trigger
      FROM event_youtube_playlist_sync
      WHERE enabled = 1
        AND playlist_id IS NOT NULL
        AND playlist_id <> ''
        AND sync_mode IN ('append_only', 'mirror')
        AND COALESCE(next_sync_at, 0) <= ?1
+       AND (
+         run_lease_token IS NULL
+         OR run_lease_expires_at IS NULL
+         OR run_lease_expires_at <= ?1
+       )
      ORDER BY CASE WHEN scan_started_at IS NULL THEN 1 ELSE 0 END,
               COALESCE(next_sync_at, 0), event_id
      LIMIT ?2`,
@@ -689,6 +799,464 @@ async function loadDueConfigs(
     .all<SyncConfigRow>();
   signal?.throwIfAborted();
   return result.results ?? [];
+}
+
+const CONTINUATION_DETAIL_CODES = new Set([
+  "playlist_scan_continuing",
+  "playlist_stale_cleanup_continuing",
+  "playlist_mutation_batch_continuing",
+  "playlist_order_repair_continuing",
+  "playlist_order_repair_request_budget",
+]);
+
+function nextPendingTrigger(
+  outcome: PlaylistSyncRunOutcome,
+): PlaylistSyncTrigger | null {
+  return outcome.status === "deferred" &&
+      outcome.detailCode != null &&
+      CONTINUATION_DETAIL_CODES.has(outcome.detailCode)
+    ? "continuation"
+    : null;
+}
+
+export async function claimPlaylistSyncConfig(
+  env: PlaylistSyncEnv,
+  config: SyncConfigRow,
+  context: PlaylistSyncRunContext,
+  now: number,
+  startedMs = Date.now(),
+): Promise<ClaimedSyncConfig | null> {
+  const runId = normalizedRunId(context.runId);
+  const fallbackTrigger = context.trigger;
+  const leaseExpiresAt = now + PLAYLIST_RUN_LEASE_SEC;
+  const results = await env.DB.batch([
+    env.DB.prepare(
+    `UPDATE event_youtube_playlist_sync
+        SET run_lease_token = ?1,
+            run_lease_expires_at = ?2,
+            last_attempt_at = ?3,
+            last_run_id = ?1,
+            pending_trigger = COALESCE(pending_trigger, ?4),
+            updated_at = ?3
+      WHERE event_id = ?5
+        AND playlist_id = ?6
+        AND enabled = 1
+        AND sync_mode = ?7
+        AND COALESCE(next_sync_at, 0) <= ?3
+        AND (
+          run_lease_token IS NULL
+          OR run_lease_expires_at IS NULL
+          OR run_lease_expires_at <= ?3
+        )
+      RETURNING pending_trigger`,
+    ).bind(
+      runId,
+      leaseExpiresAt,
+      now,
+      fallbackTrigger,
+      config.event_id,
+      config.playlist_id,
+      config.sync_mode,
+    ),
+    // A lease takeover is the recovery boundary for a crashed/aborted run.
+    // Close any history row that can no longer finish under the old lease so
+    // retention and observability do not retain an eternal `running` row.
+    env.DB.prepare(
+      `UPDATE event_youtube_playlist_sync_runs
+          SET status = 'skipped', finished_at = ?1,
+              duration_ms = MAX(0, (?1 - started_at) * 1000),
+              detail_code = 'lease_expired'
+        WHERE event_id = ?2
+          AND playlist_id = ?3
+          AND status = 'running'
+          AND EXISTS (
+            SELECT 1 FROM event_youtube_playlist_sync
+             WHERE event_id = ?2
+               AND playlist_id = ?3
+               AND run_lease_token = ?4
+               AND run_lease_expires_at = ?5
+          )`,
+    ).bind(
+      now,
+      config.event_id,
+      config.playlist_id,
+      runId,
+      leaseExpiresAt,
+    ),
+  ]);
+  const claim = results[0] as D1Result<{ pending_trigger: PlaylistSyncTrigger }>;
+  const changes = Number(claim.meta?.changes ?? 0);
+  const row = claim.results?.[0];
+  if (changes === 0 && !row) return null;
+  if (changes !== 1 || !row) {
+    throw new Error("youtube_playlist_run_claim_inconsistent");
+  }
+  return {
+    ...config,
+    pending_trigger: row.pending_trigger,
+    run_id: runId,
+    run_lease_expires_at: leaseExpiresAt,
+    claimed_trigger: row.pending_trigger,
+    dispatch_source: normalizedDispatchSource(context.dispatchSource),
+    run_started_ms: startedMs,
+  };
+}
+
+/**
+ * Finish a run that was interrupted after its history row was created.
+ * This deliberately ignores the caller's AbortSignal and uses only the
+ * run_id/lease identity, so a deadline cannot strand a lease or history row.
+ */
+export async function abortPlaylistSyncRun(
+  env: PlaylistSyncEnv,
+  config: ClaimedSyncConfig,
+  now: number,
+  detailCode = "aborted",
+): Promise<void> {
+  const durationMs = Math.max(0, Date.now() - config.run_started_ms);
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE event_youtube_playlist_sync_runs
+          SET status = 'skipped', finished_at = ?1, duration_ms = ?2,
+              detail_code = ?3
+        WHERE run_id = ?4 AND status = 'running'`,
+    ).bind(now, durationMs, boundedDetailCode(detailCode), config.run_id),
+    env.DB.prepare(
+      `UPDATE event_youtube_playlist_sync
+          SET sync_status = 'failed', next_sync_at = ?1,
+              last_error = ?2, last_duration_ms = ?3,
+              run_lease_token = NULL, run_lease_expires_at = NULL,
+              updated_at = MAX(updated_at, ?1)
+        WHERE event_id = ?4 AND playlist_id = ?5
+          AND run_lease_token = ?6
+          AND run_lease_expires_at = ?7`,
+    ).bind(
+      now + FAILURE_RETRY_SEC,
+      boundedDetailCode(detailCode),
+      durationMs,
+      config.event_id,
+      config.playlist_id,
+      config.run_id,
+      config.run_lease_expires_at,
+    ),
+  ]);
+}
+
+export async function beginPlaylistSyncRun(
+  env: PlaylistSyncEnv,
+  config: ClaimedSyncConfig,
+  now: number,
+): Promise<void> {
+  const results = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE event_youtube_playlist_sync
+          SET pending_trigger = NULL
+        WHERE event_id = ?1
+          AND playlist_id = ?2
+          AND enabled = 1
+          AND sync_mode = ?3
+          AND run_lease_token = ?4
+          AND run_lease_expires_at = ?5
+          AND run_lease_expires_at > ?6
+          AND pending_trigger = ?7`,
+    ).bind(
+      config.event_id,
+      config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
+      now,
+      config.claimed_trigger,
+    ),
+    env.DB.prepare(
+      `INSERT INTO event_youtube_playlist_sync_runs (
+         run_id, event_id, playlist_id, trigger, dispatch_source,
+         status, started_at, created_at
+       )
+       SELECT ?1, ?2, ?3, ?4, ?5, 'running', ?6, ?6
+       WHERE EXISTS (
+         SELECT 1 FROM event_youtube_playlist_sync
+          WHERE event_id = ?2 AND playlist_id = ?3
+            AND enabled = 1 AND sync_mode = ?8
+            AND run_lease_token = ?1
+            AND run_lease_expires_at = ?7
+            AND run_lease_expires_at > ?6
+            AND pending_trigger IS NULL
+       )`,
+    ).bind(
+      config.run_id,
+      config.event_id,
+      config.playlist_id,
+      config.claimed_trigger,
+      config.dispatch_source,
+      now,
+      config.run_lease_expires_at,
+      config.sync_mode,
+    ),
+  ]);
+  if (
+    Number(results[0]?.meta?.changes ?? 0) !== 1 ||
+    Number(results[1]?.meta?.changes ?? 0) !== 1
+  ) {
+    throw new Error("youtube_playlist_run_start_failed");
+  }
+}
+
+function buildIncidentStatement(
+  env: PlaylistSyncEnv,
+  config: ClaimedSyncConfig,
+  outcome: PlaylistSyncRunOutcome,
+  now: number,
+): D1PreparedStatement | null {
+  const transition = derivePlaylistIncidentTransition(outcome);
+  const incidentKey = `youtube_playlist_sync:${config.event_id}`;
+  if (transition.action === "none") return null;
+  if (transition.action === "resolve") {
+    return env.DB.prepare(
+      `UPDATE ops_incident_state
+           SET state = 'resolved', last_seen_at = ?1,
+               last_correlation_id = ?2, resolved_at = ?1,
+               last_notified_at = ?1
+        WHERE incident_key = ?3 AND state = 'open'
+          AND EXISTS (
+            SELECT 1 FROM event_youtube_playlist_sync
+             WHERE event_id = ?4 AND playlist_id = ?5
+               AND enabled = 1 AND sync_mode = ?7
+               AND run_lease_token = ?2
+               AND run_lease_expires_at = ?6
+               AND run_lease_expires_at > ?1
+          )`,
+    ).bind(
+      now,
+      config.run_id,
+      incidentKey,
+      config.event_id,
+      config.playlist_id,
+      config.run_lease_expires_at,
+      config.sync_mode,
+    );
+  }
+  return env.DB.prepare(
+    `INSERT INTO ops_incident_state (
+       incident_key, state, severity, fingerprint, opened_at, last_seen_at,
+       occurrence_count, last_notified_at, last_correlation_id, resolved_at
+     )
+      SELECT ?1, 'open', ?2, ?3, ?4, ?4, 1, ?10, ?5, NULL
+     WHERE EXISTS (
+       SELECT 1 FROM event_youtube_playlist_sync
+       WHERE event_id = ?6 AND playlist_id = ?7
+          AND enabled = 1 AND sync_mode = ?9
+          AND run_lease_token = ?5
+          AND run_lease_expires_at = ?8
+          AND run_lease_expires_at > ?4
+     )
+     ON CONFLICT(incident_key) DO UPDATE SET
+       state = 'open',
+       severity = excluded.severity,
+       fingerprint = excluded.fingerprint,
+       opened_at = CASE
+         WHEN ops_incident_state.state = 'resolved'
+           OR ops_incident_state.fingerprint <> excluded.fingerprint
+         THEN excluded.opened_at ELSE ops_incident_state.opened_at END,
+       last_seen_at = excluded.last_seen_at,
+       occurrence_count = CASE
+         WHEN ops_incident_state.state = 'resolved'
+           OR ops_incident_state.fingerprint <> excluded.fingerprint
+         THEN 1 ELSE ops_incident_state.occurrence_count + 1 END,
+        last_notified_at = CASE
+          WHEN ops_incident_state.state = 'resolved'
+            OR ops_incident_state.fingerprint <> excluded.fingerprint
+          THEN ?10 ELSE ops_incident_state.last_notified_at END,
+       last_correlation_id = excluded.last_correlation_id,
+       resolved_at = NULL`,
+  ).bind(
+    incidentKey,
+    transition.severity,
+    transition.fingerprint,
+    now,
+    config.run_id,
+    config.event_id,
+    config.playlist_id,
+    config.run_lease_expires_at,
+    config.sync_mode,
+    now,
+  );
+}
+
+/**
+ * Incident state と同じ finish batch に入れる運営 Forum 通知。
+ * D1 が正本で、Queue は commit 後の doorbell に過ぎない。INSERT OR IGNORE と
+ * transition 条件で、同じ run の再配送や同一 fingerprint の継続失敗を抑止する。
+ */
+function buildIncidentNotificationStatement(
+  env: PlaylistSyncEnv,
+  config: ClaimedSyncConfig,
+  outcome: PlaylistSyncRunOutcome,
+  now: number,
+): D1PreparedStatement | null {
+  const transition = derivePlaylistIncidentTransition(outcome);
+  if (transition.action === "none") return null;
+  const incidentKey = `youtube_playlist_sync:${config.event_id}`;
+  const isResolve = transition.action === "resolve";
+  const notificationType = isResolve
+    ? "ops_youtube_playlist_sync_recovered"
+    : outcome.status === "deferred"
+      ? "ops_youtube_quota_deferred"
+      : "ops_youtube_playlist_sync_failed";
+  const fingerprint = isResolve ? "resolved" : transition.fingerprint;
+  const dedupeKey = `${incidentKey}:${transition.action}:${fingerprint}:${config.run_id}`.slice(
+    0,
+    240,
+  );
+  const eventText = safeNotificationText(config.event_id, 96);
+  const detailText = safeNotificationText(outcome.detailCode, 160) || "none";
+  const statusText = safeNotificationText(outcome.status, 32);
+  const runText = safeNotificationText(config.run_id, 128);
+  const payload = JSON.stringify({
+    content: [
+      `[YouTube playlist] ${isResolve ? "recovered" : statusText}`,
+      `event_id: ${eventText}`,
+      `detail: ${detailText}`,
+      `run_id: ${runText}`,
+    ].join("\n"),
+    allowed_mentions: { parse: [] },
+    webhook_target: "system",
+    thread_name: `youtube-playlist:${eventText}`.slice(0, 100),
+    event_id: config.event_id,
+  });
+  const transitionPredicate = isResolve
+    ? `EXISTS (
+         SELECT 1 FROM ops_incident_state
+          WHERE incident_key = ?8 AND state = 'open'
+       )`
+    : `NOT EXISTS (
+         SELECT 1 FROM ops_incident_state
+          WHERE incident_key = ?8 AND state = 'open' AND fingerprint = ?9
+       )`;
+  return env.DB.prepare(
+    `INSERT OR IGNORE INTO notification_outbox (
+       id, recipient_user_id, type, payload_json, delivery_route,
+       correlation_id, status, attempt_count, processing_started_at,
+       lease_token, lease_expires_at, next_attempt_at, last_error,
+       processed_at, event_id, dedupe_key, created_at
+     )
+     SELECT ?1, NULL, ?2, ?3, 'channel', ?4, 'pending', 0, NULL,
+            NULL, NULL, ?5, NULL, NULL, ?6, ?7, ?5
+      WHERE ${transitionPredicate}
+       AND EXISTS (
+         SELECT 1 FROM event_youtube_playlist_sync
+          WHERE event_id = ?10 AND playlist_id = ?11
+            AND enabled = 1 AND sync_mode = ?12
+            AND run_lease_token = ?14
+            AND run_lease_expires_at = ?13
+            AND run_lease_expires_at > ?5
+       )`,
+  ).bind(
+    crypto.randomUUID(),
+    notificationType,
+    payload,
+    config.run_id,
+    now,
+    config.event_id,
+    dedupeKey,
+    incidentKey,
+    fingerprint,
+    config.event_id,
+    config.playlist_id,
+    config.sync_mode,
+    config.run_lease_expires_at,
+    config.run_id,
+  );
+}
+
+export async function finishPlaylistSyncRun(
+  env: PlaylistSyncEnv,
+  config: ClaimedSyncConfig,
+  outcome: PlaylistSyncRunOutcome,
+  now: number,
+): Promise<boolean> {
+  const durationMs = Math.max(0, Date.now() - config.run_started_ms);
+  const pendingTrigger = nextPendingTrigger(outcome);
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare(
+      `UPDATE event_youtube_playlist_sync_runs
+          SET status = ?1, finished_at = ?2, duration_ms = ?3,
+              detail_code = ?4
+        WHERE run_id = ?5 AND status = 'running'
+          AND EXISTS (
+            SELECT 1 FROM event_youtube_playlist_sync
+             WHERE event_id = ?6 AND playlist_id = ?7
+               AND enabled = 1 AND sync_mode = ?9
+               AND run_lease_token = ?5
+               AND run_lease_expires_at = ?8
+               AND run_lease_expires_at > ?2
+          )`,
+    ).bind(
+      outcome.status,
+      now,
+      durationMs,
+      boundedDetailCode(outcome.detailCode),
+      config.run_id,
+      config.event_id,
+      config.playlist_id,
+      config.run_lease_expires_at,
+      config.sync_mode,
+    ),
+  ];
+  const notificationStatement = buildIncidentNotificationStatement(
+    env,
+    config,
+    outcome,
+    now,
+  );
+  if (notificationStatement) statements.push(notificationStatement);
+  const incidentStatement = buildIncidentStatement(env, config, outcome, now);
+  if (incidentStatement) statements.push(incidentStatement);
+  statements.push(
+    env.DB.prepare(
+      `UPDATE event_youtube_playlist_sync
+          SET last_duration_ms = ?1,
+              pending_trigger = CASE
+                WHEN pending_trigger IS NOT NULL THEN pending_trigger ELSE ?2 END,
+              next_sync_at = CASE
+                WHEN pending_trigger IS NOT NULL OR ?2 IS NOT NULL
+                THEN MIN(COALESCE(next_sync_at, ?3), ?3)
+                ELSE next_sync_at END,
+              run_lease_token = NULL,
+              run_lease_expires_at = NULL,
+              updated_at = MAX(updated_at, ?3)
+        WHERE event_id = ?4
+          AND playlist_id = ?5
+          AND enabled = 1
+          AND sync_mode = ?8
+          AND run_lease_token = ?6
+          AND run_lease_expires_at = ?7
+          AND run_lease_expires_at > ?3`,
+    ).bind(
+      durationMs,
+      pendingTrigger,
+      now,
+      config.event_id,
+      config.playlist_id,
+      config.run_id,
+      config.run_lease_expires_at,
+      config.sync_mode,
+    ),
+  );
+  const results = await env.DB.batch(statements);
+  if (
+    Number(results[0]?.meta?.changes ?? 0) !== 1 ||
+    (incidentStatement &&
+      derivePlaylistIncidentTransition(outcome).action === "open" &&
+      Number(results[notificationStatement ? 2 : 1]?.meta?.changes ?? 0) !== 1) ||
+    Number(results[(notificationStatement ? 1 : 0) + (incidentStatement ? 2 : 1)]?.meta?.changes ?? 0) !== 1
+  ) {
+    throw new Error("youtube_playlist_run_finish_failed");
+  }
+  return Boolean(
+    notificationStatement &&
+      Number(results[1]?.meta?.changes ?? 0) === 1,
+  );
 }
 
 async function loadSourceVideoIds(
@@ -759,37 +1327,53 @@ async function loadRemoteItems(
   return rows;
 }
 
-async function upsertScannedItems(
+export async function upsertScannedItems(
   env: PlaylistSyncEnv,
-  eventId: string,
-  playlistId: string,
+  config: ClaimedSyncConfig,
   items: PlaylistPageItem[],
   seenAt: number,
   signal?: AbortSignal,
 ): Promise<void> {
   signal?.throwIfAborted();
   const statements: D1PreparedStatement[] = [];
-  for (let offset = 0; offset < items.length; offset += SCAN_UPSERT_CHUNK_SIZE) {
+  for (
+    let offset = 0;
+    offset < items.length;
+    offset += PLAYLIST_SCAN_UPSERT_CHUNK_SIZE
+  ) {
     signal?.throwIfAborted();
-    const chunk = items.slice(offset, offset + SCAN_UPSERT_CHUNK_SIZE);
+    const chunk = items.slice(offset, offset + PLAYLIST_SCAN_UPSERT_CHUNK_SIZE);
     // Guard every scan write by the playlist identity. An in-flight worker
     // must not attach the old playlist's remote items after an admin changes
     // the event configuration.
     const selects = chunk
-      .map(
-        () =>
-          "SELECT ?, ?, ?, ?, 0, ? WHERE EXISTS (SELECT 1 FROM event_youtube_playlist_sync WHERE event_id = ? AND playlist_id = ? AND enabled = 1)",
-      )
+      .map((_, index) => {
+        const itemParam = 8 + index * 2;
+        return `SELECT ?1, ?${itemParam}, ?${itemParam + 1}, ?2, 0, ?2
+          WHERE EXISTS (
+            SELECT 1 FROM event_youtube_playlist_sync
+             WHERE event_id = ?1 AND playlist_id = ?3
+               AND enabled = 1 AND sync_mode = ?4
+               AND run_lease_token = ?5
+               AND run_lease_expires_at = ?6
+               AND run_lease_expires_at > ?7
+               AND (pending_trigger IS NULL OR pending_trigger = 'continuation')
+          )`;
+      })
       .join(" UNION ALL ");
-    const values = chunk.flatMap((item) => [
-      eventId,
-      item.playlistItemId,
-      item.videoId,
+    const values = [
       seenAt,
-      seenAt,
-      eventId,
-      playlistId,
-    ]);
+      config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
+      unixNow(),
+      ...chunk.flatMap((item) => [item.playlistItemId, item.videoId]),
+    ];
+    values.unshift(config.event_id);
+    if (values.length > 100) {
+      throw new Error("youtube_playlist_scan_bind_budget_exceeded");
+    }
     statements.push(
       env.DB.prepare(
         `INSERT INTO event_youtube_playlist_items (
@@ -818,8 +1402,7 @@ async function upsertScannedItems(
 
 async function markScanStarted(
   env: PlaylistSyncEnv,
-  eventId: string,
-  playlistId: string,
+  config: ClaimedSyncConfig,
   scanStartedAt: number,
   now: number,
   signal?: AbortSignal,
@@ -828,10 +1411,23 @@ async function markScanStarted(
   await env.DB.prepare(
     `UPDATE event_youtube_playlist_sync
      SET sync_status = 'scanning', scan_started_at = ?1,
-         scan_page_token = NULL, last_error = NULL, updated_at = ?2
-     WHERE event_id = ?3 AND playlist_id = ?4`,
+          scan_page_token = NULL, last_error = NULL, updated_at = ?2
+     WHERE event_id = ?3 AND playlist_id = ?4
+       AND enabled = 1 AND sync_mode = ?5
+       AND run_lease_token = ?6
+       AND run_lease_expires_at = ?7
+       AND run_lease_expires_at > ?2
+       AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
   )
-    .bind(scanStartedAt, now, eventId, playlistId)
+    .bind(
+      scanStartedAt,
+      now,
+      config.event_id,
+      config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
+    )
     .run()
     .then((result) => {
       if (Number(result.meta?.changes ?? 0) !== 1) {
@@ -844,7 +1440,7 @@ async function markScanStarted(
 
 export async function cleanupStaleScanItems(
   env: PlaylistSyncEnv,
-  config: SyncConfigRow,
+  config: ClaimedSyncConfig,
   scanStartedAt: number,
   now: number,
   signal?: AbortSignal,
@@ -855,7 +1451,11 @@ export async function cleanupStaleScanItems(
      WHERE event_id = ?1
        AND EXISTS (
          SELECT 1 FROM event_youtube_playlist_sync
-         WHERE event_id = ?1 AND playlist_id = ?4 AND enabled = 1
+          WHERE event_id = ?1 AND playlist_id = ?4 AND enabled = 1
+            AND sync_mode = ?5 AND run_lease_token = ?6
+            AND run_lease_expires_at = ?7
+            AND run_lease_expires_at > ?8
+            AND (pending_trigger IS NULL OR pending_trigger = 'continuation')
        )
        AND playlist_item_id IN (
          SELECT playlist_item_id
@@ -870,6 +1470,10 @@ export async function cleanupStaleScanItems(
       scanStartedAt,
       PLAYLIST_STALE_DELETE_BATCH_SIZE,
       config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
+      unixNow(),
     )
     .run();
   signal?.throwIfAborted();
@@ -882,9 +1486,15 @@ export async function cleanupStaleScanItems(
     await env.DB.prepare(
       `UPDATE event_youtube_playlist_sync
        SET sync_status = 'scanning', scan_started_at = ?1,
-           scan_page_token = ?2, next_sync_at = ?3,
-           last_error = 'playlist_stale_cleanup_continuing', updated_at = ?4
-       WHERE event_id = ?5 AND playlist_id = ?6`,
+            scan_page_token = ?2, next_sync_at = ?3,
+            last_error = 'playlist_stale_cleanup_continuing',
+            pending_trigger = 'continuation', updated_at = ?4
+       WHERE event_id = ?5 AND playlist_id = ?6
+         AND enabled = 1 AND sync_mode = ?7
+         AND run_lease_token = ?8
+         AND run_lease_expires_at = ?9
+         AND run_lease_expires_at > ?4
+         AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
     )
       .bind(
         scanStartedAt,
@@ -893,6 +1503,9 @@ export async function cleanupStaleScanItems(
         now,
         config.event_id,
         config.playlist_id,
+        config.sync_mode,
+        config.run_id,
+        config.run_lease_expires_at,
       )
       .run()
       .then((update) => {
@@ -908,11 +1521,23 @@ export async function cleanupStaleScanItems(
   await env.DB.prepare(
     `UPDATE event_youtube_playlist_sync
      SET sync_status = 'idle', last_full_scan_at = ?1,
-         scan_started_at = NULL, scan_page_token = NULL,
-         next_sync_at = ?1, last_error = NULL, updated_at = ?1
-       WHERE event_id = ?2 AND playlist_id = ?3`,
+          scan_started_at = NULL, scan_page_token = NULL,
+          next_sync_at = ?1, last_error = NULL, updated_at = ?1
+       WHERE event_id = ?2 AND playlist_id = ?3
+         AND enabled = 1 AND sync_mode = ?4
+         AND run_lease_token = ?5
+         AND run_lease_expires_at = ?6
+         AND run_lease_expires_at > ?1
+         AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
   )
-    .bind(now, config.event_id, config.playlist_id)
+    .bind(
+      now,
+      config.event_id,
+      config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
+    )
     .run()
     .then((result) => {
       if (Number(result.meta?.changes ?? 0) !== 1) {
@@ -926,26 +1551,35 @@ export async function cleanupStaleScanItems(
 
 async function scanPlaylist(
   env: PlaylistSyncEnv,
-  config: SyncConfigRow,
+  config: ClaimedSyncConfig,
   accessToken: string,
   quota: DailyQuotaBudget,
   requestBudget: ExternalRequestBudget,
   now: number,
   signal?: AbortSignal,
   fetchImpl: FetchLike = fetch,
-): Promise<boolean> {
+): Promise<{ complete: boolean; detailCode: string | null }> {
   signal?.throwIfAborted();
   const scanStartedAt =
     config.scan_started_at ?? Math.max(now, (config.last_full_scan_at ?? 0) + 1);
   if (config.scan_page_token === STALE_CLEANUP_CURSOR) {
-    return cleanupStaleScanItems(env, config, scanStartedAt, now, signal);
+    const complete = await cleanupStaleScanItems(
+      env,
+      config,
+      scanStartedAt,
+      now,
+      signal,
+    );
+    return {
+      complete,
+      detailCode: complete ? null : "playlist_stale_cleanup_continuing",
+    };
   }
   let pageToken = config.scan_started_at ? config.scan_page_token : null;
   if (config.scan_started_at == null) {
     await markScanStarted(
       env,
-      config.event_id,
-      config.playlist_id,
+      config,
       scanStartedAt,
       now,
       signal,
@@ -966,8 +1600,7 @@ async function scanPlaylist(
     signal?.throwIfAborted();
     await upsertScannedItems(
       env,
-      config.event_id,
-      config.playlist_id,
+      config,
       result.items,
       scanStartedAt,
       signal,
@@ -978,9 +1611,15 @@ async function scanPlaylist(
       await env.DB.prepare(
         `UPDATE event_youtube_playlist_sync
          SET sync_status = 'scanning', scan_started_at = ?1,
-             scan_page_token = ?2,
-             last_error = 'playlist_stale_cleanup_continuing', updated_at = ?3
-         WHERE event_id = ?4 AND playlist_id = ?5`,
+              scan_page_token = ?2,
+              last_error = 'playlist_stale_cleanup_continuing',
+              pending_trigger = 'continuation', updated_at = ?3
+          WHERE event_id = ?4 AND playlist_id = ?5
+            AND enabled = 1 AND sync_mode = ?6
+            AND run_lease_token = ?7
+            AND run_lease_expires_at = ?8
+            AND run_lease_expires_at > ?3
+            AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
       )
         .bind(
           scanStartedAt,
@@ -988,6 +1627,9 @@ async function scanPlaylist(
           now,
           config.event_id,
           config.playlist_id,
+          config.sync_mode,
+          config.run_id,
+          config.run_lease_expires_at,
         )
         .run()
         .then((update) => {
@@ -997,7 +1639,17 @@ async function scanPlaylist(
           return update;
         });
       signal?.throwIfAborted();
-      return cleanupStaleScanItems(env, config, scanStartedAt, now, signal);
+      const complete = await cleanupStaleScanItems(
+        env,
+        config,
+        scanStartedAt,
+        now,
+        signal,
+      );
+      return {
+        complete,
+        detailCode: complete ? null : "playlist_stale_cleanup_continuing",
+      };
     }
   }
 
@@ -1005,9 +1657,15 @@ async function scanPlaylist(
   await env.DB.prepare(
     `UPDATE event_youtube_playlist_sync
      SET sync_status = 'scanning', scan_started_at = ?1,
-         scan_page_token = ?2, next_sync_at = ?3,
-         last_error = 'playlist_scan_continuing', updated_at = ?4
-     WHERE event_id = ?5 AND playlist_id = ?6`,
+          scan_page_token = ?2, next_sync_at = ?3,
+          last_error = 'playlist_scan_continuing',
+          pending_trigger = 'continuation', updated_at = ?4
+     WHERE event_id = ?5 AND playlist_id = ?6
+       AND enabled = 1 AND sync_mode = ?7
+       AND run_lease_token = ?8
+       AND run_lease_expires_at = ?9
+       AND run_lease_expires_at > ?4
+       AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
   )
     .bind(
       scanStartedAt,
@@ -1016,6 +1674,9 @@ async function scanPlaylist(
       now,
       config.event_id,
       config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
     )
     .run()
     .then((update) => {
@@ -1025,7 +1686,7 @@ async function scanPlaylist(
       return update;
     });
   signal?.throwIfAborted();
-  return false;
+  return { complete: false, detailCode: "playlist_scan_continuing" };
 }
 
 export function calculateSyncDiff(
@@ -1054,9 +1715,19 @@ export function calculateSyncDiff(
 function errorCode(error: unknown): string {
   if (error instanceof QuotaDeferredError) return "youtube_quota_budget_deferred";
   if (error instanceof YouTubeApiError) {
-    return `youtube_api_${error.status}_${error.reason}`.slice(0, 160);
+    return `youtube_api_${error.status}_${normalizeYoutubeApiReason(error.reason)}`;
   }
-  if (error instanceof Error) return error.message.slice(0, 160);
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    // Persist only an allow-listed operational code.  Provider/network
+    // exceptions may contain URLs, headers, OAuth values, or D1 text.
+    if (/^(?:youtube|playlist|oauth|d1)_[a-z0-9_.:-]{1,140}$/i.test(message)) {
+      return message;
+    }
+    if (/(?:network connection lost|connection reset|timed? out|fetch failed)/i.test(message)) {
+      return "youtube_network_transient";
+    }
+  }
   return "youtube_playlist_sync_failed";
 }
 
@@ -1078,7 +1749,7 @@ function trimmedSecret(value: string | undefined): string {
 
 async function markEventError(
   env: PlaylistSyncEnv,
-  config: SyncConfigRow,
+  config: ClaimedSyncConfig,
   error: unknown,
   now: number,
   signal?: AbortSignal,
@@ -1090,7 +1761,12 @@ async function markEventError(
      SET sync_status = ?1, next_sync_at = ?2,
          last_error = ?3, last_full_scan_at = NULL,
          scan_started_at = NULL, scan_page_token = NULL, updated_at = ?4
-     WHERE event_id = ?5 AND playlist_id = ?6`,
+     WHERE event_id = ?5 AND playlist_id = ?6
+       AND enabled = 1 AND sync_mode = ?7
+       AND run_lease_token = ?8
+       AND run_lease_expires_at = ?9
+       AND run_lease_expires_at > ?4
+       AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
   )
     .bind(
       deferred ? "deferred" : "failed",
@@ -1099,6 +1775,9 @@ async function markEventError(
       now,
       config.event_id,
       config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
     )
     .run()
     .then((update) => {
@@ -1110,10 +1789,46 @@ async function markEventError(
   signal?.throwIfAborted();
 }
 
+async function armPlaylistMutationRecovery(
+  env: PlaylistSyncEnv,
+  config: ClaimedSyncConfig,
+  now: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const minimumLeaseExpiry = now + PLAYLIST_MUTATION_LEASE_SAFETY_SEC;
+  const armed = await env.DB.prepare(
+    `UPDATE event_youtube_playlist_sync
+        SET last_full_scan_at = NULL,
+            pending_trigger = COALESCE(pending_trigger, 'continuation'),
+            next_sync_at = MIN(COALESCE(next_sync_at, ?1), ?1),
+            updated_at = MAX(updated_at, ?1)
+      WHERE event_id = ?2 AND playlist_id = ?3
+        AND enabled = 1 AND sync_mode = ?4
+        AND run_lease_token = ?5
+        AND run_lease_expires_at = ?6
+        AND run_lease_expires_at > ?7
+        AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
+  )
+    .bind(
+      now,
+      config.event_id,
+      config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
+      minimumLeaseExpiry,
+    )
+    .run();
+  if (Number(armed.meta?.changes ?? 0) !== 1) {
+    throw new Error("youtube_playlist_config_changed");
+  }
+  signal?.throwIfAborted();
+}
+
 async function insertLocalItem(
   env: PlaylistSyncEnv,
-  eventId: string,
-  playlistId: string,
+  config: ClaimedSyncConfig,
   playlistItemId: string,
   videoId: string,
   now: number,
@@ -1128,14 +1843,28 @@ async function insertLocalItem(
      SELECT ?1, ?2, ?3, ?4, 1, ?4
      WHERE EXISTS (
        SELECT 1 FROM event_youtube_playlist_sync
-       WHERE event_id = ?1 AND playlist_id = ?5 AND enabled = 1
+       WHERE event_id = ?1 AND playlist_id = ?5
+         AND enabled = 1 AND sync_mode = ?6
+         AND run_lease_token = ?7
+         AND run_lease_expires_at = ?8
+         AND run_lease_expires_at > ?4
+         AND (pending_trigger IS NULL OR pending_trigger = 'continuation')
      )
      ON CONFLICT(event_id, playlist_item_id) DO UPDATE SET
        youtube_video_id = excluded.youtube_video_id,
        seen_at = excluded.seen_at,
        managed_by_flamenode = 1`,
   )
-    .bind(eventId, playlistItemId, videoId, now, playlistId)
+    .bind(
+      config.event_id,
+      playlistItemId,
+      videoId,
+      now,
+      config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
+    )
     .run()
     .then((result) => {
       if (Number(result.meta?.changes ?? 0) !== 1) {
@@ -1148,7 +1877,7 @@ async function insertLocalItem(
 
 async function syncOneEvent(
   env: PlaylistSyncEnv,
-  config: SyncConfigRow,
+  config: ClaimedSyncConfig,
   accessToken: string,
   quota: DailyQuotaBudget,
   requestBudget: ExternalRequestBudget,
@@ -1156,7 +1885,7 @@ async function syncOneEvent(
   now: number,
   signal?: AbortSignal,
   fetchImpl: FetchLike = fetch,
-): Promise<void> {
+): Promise<PlaylistSyncRunOutcome> {
   signal?.throwIfAborted();
   const sourceVideoIds = await loadSourceVideoIds(
     env,
@@ -1169,7 +1898,7 @@ async function syncOneEvent(
     now - config.last_full_scan_at >= FULL_SCAN_INTERVAL_SEC;
 
   if (scanRequired) {
-    const scanComplete = await scanPlaylist(
+    const scan = await scanPlaylist(
       env,
       config,
       accessToken,
@@ -1179,7 +1908,9 @@ async function syncOneEvent(
       signal,
       fetchImpl,
     );
-    if (!scanComplete) return;
+    if (!scan.complete) {
+      return { status: "deferred", detailCode: scan.detailCode };
+    }
   }
 
   signal?.throwIfAborted();
@@ -1208,6 +1939,7 @@ async function syncOneEvent(
     ) {
       break;
     }
+    await armPlaylistMutationRecovery(env, config, unixNow(), signal);
     const position = sourcePositions.get(videoId) ?? 0;
     const inserted = await insertPlaylistItem(
       config.playlist_id,
@@ -1224,8 +1956,7 @@ async function syncOneEvent(
     orderFallback ||= !inserted.ordered;
     await insertLocalItem(
       env,
-      config.event_id,
-      config.playlist_id,
+      config,
       inserted.id,
       videoId,
       now,
@@ -1243,6 +1974,7 @@ async function syncOneEvent(
     ) {
       break;
     }
+    await armPlaylistMutationRecovery(env, config, unixNow(), signal);
     await deletePlaylistItem(
       item.playlist_item_id,
       accessToken,
@@ -1258,10 +1990,23 @@ async function syncOneEvent(
        WHERE event_id = ?1 AND playlist_item_id = ?2
          AND EXISTS (
            SELECT 1 FROM event_youtube_playlist_sync
-           WHERE event_id = ?1 AND playlist_id = ?3 AND enabled = 1
+           WHERE event_id = ?1 AND playlist_id = ?3
+             AND enabled = 1 AND sync_mode = ?4
+             AND run_lease_token = ?5
+             AND run_lease_expires_at = ?6
+             AND run_lease_expires_at > ?7
+             AND (pending_trigger IS NULL OR pending_trigger = 'continuation')
          )`,
     )
-      .bind(config.event_id, item.playlist_item_id, config.playlist_id)
+      .bind(
+        config.event_id,
+        item.playlist_item_id,
+        config.playlist_id,
+        config.sync_mode,
+        config.run_id,
+        config.run_lease_expires_at,
+        unixNow(),
+      )
       .run()
       .then((result) => {
         if (Number(result.meta?.changes ?? 0) !== 1) {
@@ -1323,6 +2068,7 @@ async function syncOneEvent(
           orderRepairWarning = "playlist_order_repair_request_budget";
           break;
         }
+        await armPlaylistMutationRecovery(env, config, unixNow(), signal);
         const moved = await updatePlaylistItemPosition(
           config.playlist_id,
           { playlistItemId: plan.playlistItemId, videoId: plan.videoId },
@@ -1364,8 +2110,14 @@ async function syncOneEvent(
   await env.DB.prepare(
     `UPDATE event_youtube_playlist_sync
      SET sync_status = ?1, next_sync_at = ?2,
-         last_synced_at = ?3, last_error = ?4, updated_at = ?5
-     WHERE event_id = ?6 AND playlist_id = ?7`,
+         last_synced_at = ?3, last_error = ?4,
+         pending_trigger = ?5, last_full_scan_at = ?6, updated_at = ?7
+     WHERE event_id = ?8 AND playlist_id = ?9
+       AND enabled = 1 AND sync_mode = ?10
+       AND run_lease_token = ?11
+       AND run_lease_expires_at = ?12
+       AND run_lease_expires_at > ?7
+       AND (pending_trigger IS NULL OR pending_trigger = 'continuation')`,
   )
     .bind(
       hasRemaining ? "deferred" : "synced",
@@ -1374,9 +2126,14 @@ async function syncOneEvent(
         : now + Math.max(60, config.sync_interval_minutes) * 60,
       hasRemaining ? config.last_synced_at : now,
       lastError,
+      hasRemaining ? "continuation" : null,
+      scanRequired ? now : config.last_full_scan_at,
       now,
       config.event_id,
       config.playlist_id,
+      config.sync_mode,
+      config.run_id,
+      config.run_lease_expires_at,
     )
     .run()
     .then((update) => {
@@ -1386,42 +2143,42 @@ async function syncOneEvent(
       return update;
     });
   signal?.throwIfAborted();
-  return;
+  return {
+    status: hasRemaining ? "deferred" : "succeeded",
+    detailCode: lastError,
+  };
 }
 
-async function markOAuthFailure(
+async function releasePlaylistSyncClaim(
   env: PlaylistSyncEnv,
-  configs: readonly SyncConfigRow[],
-  error: unknown,
-  now: number,
+  config: ClaimedSyncConfig,
   signal?: AbortSignal,
 ): Promise<void> {
   signal?.throwIfAborted();
-  const code = errorCode(error);
-  for (const config of configs) {
-    signal?.throwIfAborted();
-    await env.DB.prepare(
-      `UPDATE event_youtube_playlist_sync
-       SET sync_status = 'failed', next_sync_at = ?1,
-           last_error = ?2, updated_at = ?3
-       WHERE event_id = ?4 AND playlist_id = ?5`,
-    )
-      .bind(now + FAILURE_RETRY_SEC, code, now, config.event_id, config.playlist_id)
-      .run()
-      .then((result) => {
-        if (Number(result.meta?.changes ?? 0) !== 1) {
-          throw new Error("youtube_playlist_config_changed");
-        }
-        return result;
-      });
-    signal?.throwIfAborted();
-  }
+  await env.DB.prepare(
+    `UPDATE event_youtube_playlist_sync
+        SET run_lease_token = NULL,
+            run_lease_expires_at = NULL,
+            updated_at = MAX(updated_at, ?1)
+      WHERE event_id = ?2
+        AND playlist_id = ?3
+        AND run_lease_token = ?4
+        AND run_lease_expires_at = ?5`,
+  )
+    .bind(unixNow(), config.event_id, config.playlist_id, config.run_id, config.run_lease_expires_at)
+    .run();
+  signal?.throwIfAborted();
 }
 
 export async function syncEventPlaylists(
   env: PlaylistSyncEnv,
   signal?: AbortSignal,
   fetchImpl: FetchLike = fetch,
+  context: PlaylistSyncRunContext = {
+    runId: crypto.randomUUID(),
+    trigger: "scheduled",
+    dispatchSource: "direct",
+  },
 ): Promise<PlaylistSyncBatchResult> {
   signal?.throwIfAborted();
   const result = (
@@ -1433,6 +2190,7 @@ export async function syncEventPlaylists(
     retry_count: 0,
     quota_stopped: false,
     quota_stop_reason: null,
+    notification_wake_count: 0,
     ...base,
     ...extra,
   });
@@ -1495,38 +2253,43 @@ export async function syncEventPlaylists(
     return result({ processed: 0, skipped: 1, failed: 0 });
   }
 
-  const quota = await DailyQuotaBudget.load(trackedEnv, now, signal);
   const requestBudget = new ExternalRequestBudget(MAX_EXTERNAL_REQUESTS_PER_RUN);
-  let accessToken: string;
-  try {
-    accessToken = await refreshAccessToken(
-      trackedEnv,
-      requestBudget,
-      signal,
-      fetchImpl,
-    );
-  } catch (error) {
-    signal?.throwIfAborted();
-    await markOAuthFailure(trackedEnv, configs, error, now, signal);
-    return result(
-      { processed: 0, skipped: 0, failed: configs.length },
-      {
-        external_api_calls: requestBudget.used,
-        d1_changes: changes.value,
-      },
-    );
-  }
-
   let processed = 0;
+  let skipped = 0;
   let failed = 0;
   let quotaStopped = false;
+  let quotaD1Changes = 0;
+  let notificationWakeCount = 0;
   const mutationBudget = { remaining: MAX_MUTATIONS_PER_RUN };
-  for (const config of configs) {
+  for (const config of configs.slice(0, MAX_EVENTS_PER_RUN)) {
     signal?.throwIfAborted();
+    const claimed = await claimPlaylistSyncConfig(
+      trackedEnv,
+      config,
+      context,
+      now,
+    );
+    if (!claimed) {
+      skipped += 1;
+      continue;
+    }
+    let started = false;
     try {
-      await syncOneEvent(
+      await beginPlaylistSyncRun(trackedEnv, claimed, now);
+      started = true;
+      // Claim/history start precedes OAuth refresh so provider failures are
+      // observable under the same run_id and always release their lease.
+      const quota = await DailyQuotaBudget.load(trackedEnv, now, signal);
+      quotaD1Changes += quota.d1Changes;
+      const accessToken = await refreshAccessToken(
         trackedEnv,
-        config,
+        requestBudget,
+        signal,
+        fetchImpl,
+      );
+      const outcome = await syncOneEvent(
+        trackedEnv,
+        claimed,
         accessToken,
         quota,
         requestBudget,
@@ -1535,11 +2298,47 @@ export async function syncEventPlaylists(
         signal,
         fetchImpl,
       );
+      if (await finishPlaylistSyncRun(trackedEnv, claimed, outcome, unixNow())) {
+        notificationWakeCount += 1;
+      }
       processed += 1;
     } catch (error) {
-      signal?.throwIfAborted();
-      await markEventError(trackedEnv, config, error, now, signal);
+      const aborted = signal?.aborted === true ||
+        (error instanceof DOMException && error.name === "AbortError");
+      if (started) {
+        if (aborted) {
+          // Deadline/abort must not strand the lease or a running history row.
+          // The cleanup is identity-fenced and intentionally does not receive
+          // the already-aborted signal.
+          await abortPlaylistSyncRun(trackedEnv, claimed, unixNow(), "aborted");
+        } else {
+          const deferred = isQuotaError(error);
+          try {
+            await markEventError(trackedEnv, claimed, error, unixNow(), signal);
+            if (await finishPlaylistSyncRun(
+              trackedEnv,
+              claimed,
+              {
+                status: deferred ? "deferred" : "failed",
+                detailCode: errorCode(error),
+              },
+              unixNow(),
+            )) {
+              notificationWakeCount += 1;
+            }
+          } catch (finalizationError) {
+            // A settings/manual/rename CAS can invalidate the run between the
+            // error write and finish. Close its history by run_id instead of
+            // allowing a permanent `running` row.
+            await abortPlaylistSyncRun(trackedEnv, claimed, unixNow(), "superseded");
+            throw finalizationError;
+          }
+        }
+      } else {
+        await releasePlaylistSyncClaim(trackedEnv, claimed, aborted ? undefined : signal);
+      }
       failed += 1;
+      if (aborted) throw error;
       if (isQuotaError(error)) {
         quotaStopped = true;
         break;
@@ -1549,12 +2348,13 @@ export async function syncEventPlaylists(
 
   signal?.throwIfAborted();
   return result(
-    { processed, skipped: 0, failed },
+    { processed, skipped, failed },
     {
       external_api_calls: requestBudget.used,
-      d1_changes: changes.value + quota.d1Changes,
+      d1_changes: changes.value + quotaD1Changes,
       quota_stopped: quotaStopped,
       quota_stop_reason: quotaStopped ? "youtube_quota_deferred" : null,
+      notification_wake_count: notificationWakeCount,
     },
   );
 }

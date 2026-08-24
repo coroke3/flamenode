@@ -1,4 +1,14 @@
 import type { FlameNodeEnv } from "@/lib/cloudflare";
+import { safeErrorSummary } from "../../../workers/shared/safeLog.ts";
+
+function safePublicErrorSummary(error: unknown): string {
+  return safeErrorSummary(error)
+    .replace(/https?:\/\/\S+/gi, "[REDACTED_URL]")
+    .replace(
+      /\b(?:select|insert|update|delete|pragma|from|where)\b[\s\S]*/gi,
+      "[REDACTED_SQL]",
+    );
+}
 
 export const MAX_PUBLIC_MEDIA_BYTES = 5 * 1024 * 1024;
 /** 公開entityのACLは動的に再評価するため、長期immutable cacheは使わない。 */
@@ -132,7 +142,10 @@ export async function servePublicMedia(
       .bind(rawKey, namespace, publicUrl)
       .first<{ allowed: number }>();
   } catch (error) {
-    console.error("[public-media] D1 access check failed", error);
+    console.error(
+      "[public-media] D1 access check failed",
+      safePublicErrorSummary(error),
+    );
     return mediaUnavailableResponse("Media access check unavailable");
   }
   if (allowed?.allowed !== 1) return new Response("Not found", { status: 404 });
@@ -141,7 +154,10 @@ export async function servePublicMedia(
   try {
     obj = await env.BUCKET.get(rawKey);
   } catch (error) {
-    console.error("[public-media] R2 read failed", error);
+    console.error(
+      "[public-media] R2 read failed",
+      safePublicErrorSummary(error),
+    );
     return mediaUnavailableResponse("Media storage unavailable");
   }
   if (!obj) return new Response("Not found", { status: 404 });

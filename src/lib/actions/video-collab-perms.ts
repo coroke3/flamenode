@@ -910,6 +910,15 @@ async function applyPermissionIntentsToVideo(
 
   const queue = await buildStaticRebuildQueueBatch(db, [
     memberSuggestionsTarget("video_permissions_batch"),
+    ...(newXUsers.length > 0
+      ? [{
+          targetType: "users_index" as const,
+          targetId: "global",
+          reason: "video_permissions_new_x_user",
+          priority: "low" as const,
+          requestedByUserId: actor.id,
+        }]
+      : []),
     ...(video.visibility_status === "public"
       ? rebuildEvents.eventIds.map((eventId) => ({
           targetType: "event_release" as const,

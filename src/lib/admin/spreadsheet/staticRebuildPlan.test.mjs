@@ -186,6 +186,7 @@ test("YouTube status・event・member・chapterのmappingをdedupeする", () =>
     "video:video-1",
     "youtube_related_blocklist:global",
     "random_video_pool:global",
+      "event_base:event-1",
       "event_release:event-1",
       "users_index:global",
     "video:video-2",
@@ -226,7 +227,9 @@ test("video_eventsの付け替えは旧・新videoとrandom poolをすべて再�
   assert.deepEqual(keys(targets), [
     "video:video-old",
     "video:video-new",
+    "event_base:event-old",
     "event_release:event-old",
+    "event_base:event-new",
     "event_release:event-new",
     "random_video_pool:global",
   ]);
@@ -270,11 +273,33 @@ test("video_members can include all linked event release targets", () => {
   ]);
 });
 
-test("16 targetを超えるplanner入力はapplyせず分割を要求する", () => {
+test("videos can include all linked event base and release targets", () => {
+  const targets = planSpreadsheetStaticRebuildTargets([
+    {
+      ...mutation("videos", "UPDATE", { id: "video-1", title: "old" }, { id: "video-1", title: "new" }),
+      eventReleaseEventIds: ["event-linked"],
+    },
+  ]);
+  assert.deepEqual(keys(targets), [
+    "video:video-1",
+    "event_base:event-linked",
+    "event_release:event-linked",
+    "random_video_pool:global",
+    "list_recent:global",
+    "list_popular:global",
+    "search_index:global",
+    "top_recommended:global",
+    "top_latest:global",
+    "top_nostalgic:global",
+    "recommend_core:global",
+  ]);
+});
+
+test("256 targetを超えるplanner入力はapplyせず分割を要求する", () => {
   assert.throws(
     () =>
       planSpreadsheetStaticRebuildTargets(
-        Array.from({ length: 17 }, (_, index) =>
+        Array.from({ length: 257 }, (_, index) =>
           mutation("video_members", "CREATE", null, {
             id: `member-${index}`,
             video_id: `video-${index}`,
@@ -287,4 +312,33 @@ test("16 targetを超えるplanner入力はapplyせず分割を要求する", ()
     spreadsheetHttpStatus(SPREADSHEET_STATIC_REBUILD_SPLIT_REQUIRED),
     400,
   );
+});
+
+test("PVSFSummary link changes fan out linked event artifacts and global projections", () => {
+  const targets = planSpreadsheetStaticRebuildTargets([
+    {
+      ...mutation(
+        "video_events",
+        "DELETE",
+        { video_id: "video-1", event_id: "PVSFSummary" },
+        null,
+      ),
+      eventReleaseEventIds: ["event-linked"],
+    },
+  ]);
+  assert.deepEqual(keys(targets), [
+    "video:video-1",
+    "event_base:PVSFSummary",
+    "event_release:PVSFSummary",
+    "event_base:event-linked",
+    "event_release:event-linked",
+    "random_video_pool:global",
+    "list_recent:global",
+    "list_popular:global",
+    "search_index:global",
+    "top_recommended:global",
+    "top_latest:global",
+    "top_nostalgic:global",
+    "recommend_core:global",
+  ]);
 });

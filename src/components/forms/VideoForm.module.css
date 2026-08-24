@@ -24,13 +24,18 @@
   transition: border-color 160ms ease;
 }
 
-.section:hover {
+.section:not([data-permission-state="locked"]):hover {
   border-color: color-mix(in srgb, var(--accent-primary) 26%, var(--hairline, var(--border-subtle)));
 }
 
 .section:focus-within {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
+.section[data-permission-state="locked"]:focus-within {
+  border-color: color-mix(in srgb, var(--text-muted) 42%, var(--border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 12%, transparent);
 }
 
 .sectionTitle {
@@ -524,6 +529,12 @@
   vertical-align: middle;
 }
 
+.permissionNoteStack {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
 .sectionDisabled .editableField input[readonly],
 .sectionDisabled .editableField textarea[readonly],
 .sectionDisabled .editableField input[disabled],
@@ -534,17 +545,22 @@
   cursor: not-allowed;
 }
 
+.sectionDisabled .editableField input[readonly],
+.sectionDisabled .editableField textarea[readonly] {
+  cursor: text;
+}
+
 /* ---- editable field hover hint ---- */
 
-.editableField input:not([disabled]):hover,
-.editableField textarea:not([disabled]):hover,
+.editableField input:not([disabled]):not([readonly]):hover,
+.editableField textarea:not([disabled]):not([readonly]):hover,
 .editableField select:not([disabled]):hover {
   border-color: var(--accent-primary);
   outline: none;
 }
 
-.editableField input:not([disabled]):focus,
-.editableField textarea:not([disabled]):focus,
+.editableField input:not([disabled]):not([readonly]):focus,
+.editableField textarea:not([disabled]):not([readonly]):focus,
 .editableField select:not([disabled]):focus {
   border-color: var(--accent-primary);
   box-shadow: none;
@@ -560,11 +576,35 @@
     box-shadow 140ms ease;
 }
 
-.form :global(.fn-input:not(:disabled)):hover,
+.form :global(.fn-input:not(:disabled):not([readonly])):hover,
 .form :global(.fn-select:not(:disabled)):hover,
 .form :global(.fn-textarea:not(:disabled)):hover {
   border-color: color-mix(in srgb, var(--accent-primary) 38%, var(--border-subtle));
   background-color: var(--bg-surface);
+}
+
+.form :global(.fn-input[readonly]),
+.form :global(.fn-textarea[readonly]) {
+  background-color: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: text;
+  opacity: 1;
+}
+
+.form :global(.fn-input:disabled),
+.form :global(.fn-select:disabled),
+.form :global(.fn-textarea:disabled) {
+  background-color: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.form :global(.fn-input[readonly]:focus-visible),
+.form :global(.fn-textarea[readonly]:focus-visible) {
+  border-color: color-mix(in srgb, var(--text-muted) 58%, var(--border-subtle));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 12%, transparent);
+  background-color: var(--bg-elevated);
 }
 
 .form :global(.fn-input:focus-visible),
@@ -675,8 +715,8 @@
     background-color 140ms ease;
 }
 
-.eventOption:hover,
-.eventOption:focus-within {
+.eventOption:not(.eventOptionLocked):hover,
+.eventOption:not(.eventOptionLocked):focus-within {
   border-color: var(--accent-primary);
   background: color-mix(in srgb, var(--accent-primary-soft) 58%, transparent);
 }
@@ -687,7 +727,9 @@
 
 .eventOptionLocked {
   cursor: not-allowed;
-  opacity: 0.55;
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
 }
 
 /* ---- step wizard (slot / free post) ---- */

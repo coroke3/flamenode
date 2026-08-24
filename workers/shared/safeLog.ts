@@ -8,7 +8,7 @@ const MAX_ERROR_SUMMARY_LENGTH = 320;
 const REDACTION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]"],
   [
-    /\b(authorization|token|secret|api[_-]?key|password|cookie|set-cookie|session(?:[_-]?id)?|private[_-]?key)\s*([:=])\s*[^\s,;)}\]]+/gi,
+    /\b((?:(?:refresh|access|id|client|oauth|bot)[_-]?(?:token|secret|key|id)|authorization|token|secret|api[_-]?key|password|cookie|set-cookie|session(?:[_-]?id)?|private[_-]?key|webhook(?:[_-]?url)?))\s*([:=])\s*[^\s,;)}\]]+/gi,
     "$1$2[REDACTED]",
   ],
   [/AIza[0-9A-Za-z_-]{20,}/g, "[REDACTED_API_KEY]"],
@@ -17,6 +17,10 @@ const REDACTION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
     "$1[REDACTED]",
   ],
   [/https?:\/\/[^\s/@]+:[^@\s]+@/gi, "https://[REDACTED]@"],
+  // Error messages from fetch/R2/D1 adapters may include a full endpoint,
+  // including opaque path or query values.  Keep the summary useful without
+  // allowing an unrecognised URL parameter to become a log exfiltration path.
+  [/https?:\/\/[^\s]+/gi, "[REDACTED_URL]"],
 ];
 
 export function redactWorkerLogValue(value: string): string {

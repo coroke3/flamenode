@@ -147,3 +147,14 @@ test("runJob logs normalized metrics and only a valid lowercase commit SHA", asy
   assert.equal(valid.quota_stopped, false);
   assert.equal("commit_sha" in JSON.parse(lines[1]), false);
 });
+
+test("runJob passes its single run_id to the task context and preserves callback result shape", async () => {
+  let context;
+  const result = await runJob("worker", "context", async (value) => {
+    context = value;
+    return { processed: 1 };
+  });
+  assert.equal(result.succeeded, true);
+  assert.match(context.runId, /^[0-9a-f-]{36}$/i);
+  assert.equal(context.startedAtMs, Date.parse(context.startedAt));
+});

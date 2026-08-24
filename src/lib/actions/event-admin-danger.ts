@@ -1,11 +1,12 @@
 "use server";
 
-import { and, eq, exists, or, sql } from "drizzle-orm";
+import { and, eq, exists, gt, isNotNull, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import {
   events,
+  eventYoutubePlaylistSync,
   publicVisibilityFences,
   videoEvents,
   videos,
@@ -123,6 +124,31 @@ export async function renameEventId(
     return { ok: false, message: `ID「${newId}」は既に存在します。` };
   }
 
+  const now = Math.max(
+    Math.floor(Date.now() / 1000),
+    before.updated_at + 1,
+  );
+  const activePlaylistRun = (
+    await db
+      .select({ event_id: eventYoutubePlaylistSync.event_id })
+      .from(eventYoutubePlaylistSync)
+      .where(
+        and(
+          eq(eventYoutubePlaylistSync.event_id, oldId),
+          isNotNull(eventYoutubePlaylistSync.run_lease_token),
+          gt(eventYoutubePlaylistSync.run_lease_expires_at, now),
+        )!,
+      )
+      .limit(1)
+  )[0];
+  if (activePlaylistRun) {
+    return {
+      ok: false,
+      message:
+        "YouTube再生リスト同期が実行中のため、完了後にイベントIDを変更してください。",
+    };
+  }
+
   // Renamed-away IDs keep a temporary old-URL tombstone. Reuse is evaluated
   // after the cleanup queue is planned and only succeeds once all old public
   // artifacts have been removed.
@@ -173,10 +199,6 @@ export async function renameEventId(
   }
 
   const actorUserId = guard.user.id;
-  const now = Math.max(
-    Math.floor(Date.now() / 1000),
-    before.updated_at + 1,
-  );
   const after = { ...before, id: newId, updated_at: now };
 
   // A video detail artifact embeds both `event_ids` and `public_events`.
@@ -356,6 +378,7 @@ export async function renameEventId(
     db.run(sql`UPDATE slot_reservation_groups SET event_id = ${newId} WHERE event_id = ${oldId}`),
     db.run(sql`UPDATE slots SET event_id = ${newId} WHERE event_id = ${oldId}`),
     db.run(sql`UPDATE event_youtube_playlist_sync SET event_id = ${newId} WHERE event_id = ${oldId}`),
+    db.run(sql`UPDATE event_youtube_playlist_sync_runs SET event_id = ${newId} WHERE event_id = ${oldId}`),
     db.run(sql`UPDATE event_youtube_playlist_items SET event_id = ${newId} WHERE event_id = ${oldId}`),
     db.run(sql`UPDATE video_events SET event_id = ${newId} WHERE event_id = ${oldId}`),
     db.run(sql`UPDATE event_custom_questions SET event_id = ${newId} WHERE event_id = ${oldId}`),
@@ -431,7 +454,18 @@ export async function renameEventId(
       db
         .update(events)
         .set({ id: newId, updated_at: now })
-        .where(and(eq(events.id, oldId), eq(events.updated_at, before.updated_at))),
+        .where(
+          and(
+            eq(events.id, oldId),
+            eq(events.updated_at, before.updated_at),
+            sql`NOT EXISTS (
+              SELECT 1 FROM event_youtube_playlist_sync
+               WHERE event_id = ${oldId}
+                 AND run_lease_token IS NOT NULL
+                 AND run_lease_expires_at > ${now}
+            )`,
+          ),
+        ),
       ...referenceUpdates,
       renameTombstoneStatement,
       ...oldQueue.statements,

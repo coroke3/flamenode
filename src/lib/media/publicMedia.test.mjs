@@ -200,7 +200,9 @@ test("R2読み取り障害は公開mediaを503へfail-closedする", async () =>
       },
       BUCKET: {
         async get() {
-          throw new Error("R2 unavailable");
+          throw new Error(
+            "Network connection lost token=super-secret https://user:pass@example.test/api?sql=private",
+          );
         },
       },
     },
@@ -209,4 +211,39 @@ test("R2読み取り障害は公開mediaを503へfail-closedする", async () =>
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("retry-after"), "30");
+});
+
+test("public media障害ログは秘密情報とスタックを含めない", async () => {
+  const originalError = console.error;
+  const logLines = [];
+  console.error = (...args) => logLines.push(args.map(String).join(" "));
+  try {
+    await servePublicMedia(
+      {
+        DB: {
+          prepare() {
+            return {
+              bind() {
+                return { async first() { return { allowed: 1 }; } };
+              },
+            };
+          },
+        },
+        BUCKET: {
+          async get() {
+            throw new Error(
+              "token=super-secret https://user:pass@example.test/api?sql=private",
+            );
+          },
+        },
+      },
+      "event-icons/event/log-test.png",
+    );
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(logLines.length, 1);
+  assert.doesNotMatch(logLines[0], /super-secret|user:pass|private/);
+  assert.doesNotMatch(logLines[0], /Error:|at servePublicMedia/);
+  assert.match(logLines[0], /REDACTED/);
 });

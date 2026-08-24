@@ -51,6 +51,12 @@ function runStaticCheck() {
     errors,
   );
   requirePattern(
+    "app/api/public/events/[id]/staff/route.ts",
+    /normalizePublicEventStaffArtifact[\s\S]*assertNoForbiddenKeys\(payload\)/,
+    "PVSF staff APIが専用公開DTOと禁止key検査を通っていません。",
+    errors,
+  );
+  requirePattern(
     "app/api/software/suggestions/route.ts",
     /parseBoundedPositiveInt\([\s\S]*MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT[\s\S]*activeSoftware\s*=\s*eq\(softwareCatalog\.is_active,\s*1\)[\s\S]*\.where\(activeSoftware\)[\s\S]*\.where\(and\(activeSoftware,\s*inArray\([\s\S]*\.where\([\s\S]*and\(activeSoftware,[\s\S]*toPublicSoftwareSuggestionDto[\s\S]*assertNoForbiddenKeys\(payload\)/,
     "software候補が正数上限、active限定、公開DTO、禁止key検査を通っていません。",

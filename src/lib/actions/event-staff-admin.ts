@@ -101,6 +101,7 @@ async function revalidateEventStaffPathsBestEffort(args: {
   eventId: string;
   actorUserId: string;
   reason: string;
+  includeUsersIndex?: boolean;
 }): Promise<void> {
   await runPostCommitBestEffort(
     { flow: "event_staff", traceId: createTraceId() },
@@ -145,6 +146,15 @@ async function revalidateEventStaffPathsBestEffort(args: {
                 reason: args.reason,
                 priority: "low",
               },
+              ...(args.includeUsersIndex
+                ? [{
+                    targetType: "users_index" as const,
+                    targetId: "global",
+                    reason: args.reason,
+                    priority: "low" as const,
+                    requestedByUserId: args.actorUserId,
+                  }]
+                : []),
             ],
             { wakeSource: "web" },
           );
@@ -420,6 +430,7 @@ export async function upsertEventStaffMember(
     eventId: data.event_id,
     actorUserId: guard.userId,
     reason: data.reason,
+    includeUsersIndex: atomicExtras != null,
   });
   return markPendingPublicReflection({ ok: true }, true);
 }
@@ -652,6 +663,7 @@ export async function bulkUpsertEventStaffFromCsv(
     eventId: data.eventId,
     actorUserId: guard.userId,
     reason: data.reason,
+    includeUsersIndex: newXRows.length > 0,
   });
   return markPendingPublicReflection({ ok: true }, true);
 }

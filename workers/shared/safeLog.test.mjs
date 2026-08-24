@@ -11,6 +11,24 @@ test("safeErrorSummary redacts credentials from worker logs", () => {
   assert.match(summary, /Authorization:\[REDACTED\]/);
 });
 
+test("safeErrorSummary redacts compound OAuth credential keys", () => {
+  const summary = safeErrorSummary(
+    "refresh_token=TOPSECRET client_secret=SECONDSECRET access_token=THIRDSECRET",
+  );
+  assert.doesNotMatch(summary, /TOPSECRET|SECONDSECRET|THIRDSECRET/);
+  assert.match(summary, /refresh_token=\[REDACTED\]/);
+  assert.match(summary, /client_secret=\[REDACTED\]/);
+  assert.match(summary, /access_token=\[REDACTED\]/);
+});
+
+test("safeErrorSummary redacts complete URLs, including opaque query values", () => {
+  const summary = safeErrorSummary(
+    "request failed https://storage.example/private/path?opaque=TOPSECRET",
+  );
+  assert.doesNotMatch(summary, /storage\.example|TOPSECRET|opaque/);
+  assert.match(summary, /\[REDACTED_URL\]/);
+});
+
 test("normalizes quota reasons to the internal vocabulary", () => {
   assert.equal(normalizeQuotaStopReason("DAILY_LIMIT"), "daily_limit");
   assert.equal(normalizeQuotaStopReason("https://secret.example/id"), "unknown");

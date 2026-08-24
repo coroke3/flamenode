@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -13,6 +13,7 @@ import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { sendYoutubePlaylistSyncWakeBestEffort } from "@/lib/queues/youtubePlaylistSyncWake";
+import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   extractYoutubePlaylistId,
   parsePlaylistSyncInterval,
@@ -105,6 +106,16 @@ export async function saveEventYoutubePlaylistSettings(
       .limit(1)
   )[0];
   const now = Math.floor(Date.now() / 1000);
+  if (
+    before?.run_lease_token &&
+    Number(before.run_lease_expires_at ?? 0) > now
+  ) {
+    redirect(
+      settingsHref(eventId, {
+        error: "再生リスト同期が実行中です。完了後にもう一度お試しください。",
+      }),
+    );
+  }
   const enabled = mode === "off" ? 0 : 1;
   const playlistChanged = (before?.playlist_id ?? null) !== playlistId;
 
@@ -121,6 +132,12 @@ export async function saveEventYoutubePlaylistSettings(
     scan_started_at: null,
     scan_page_token: null,
     last_error: null,
+    pending_trigger: enabled ? ("settings_change" as const) : null,
+    // Settings changes fence any in-flight sync before the post-commit wake.
+    // The old worker keeps running, but every D1/external mutation is guarded
+    // by this lease identity and therefore becomes a no-op after the change.
+    run_lease_token: null,
+    run_lease_expires_at: null,
     created_at: before?.created_at ?? now,
     updated_at: now,
   } satisfies typeof eventYoutubePlaylistSync.$inferInsert;
@@ -141,6 +158,14 @@ export async function saveEventYoutubePlaylistSettings(
     .values(after)
     .onConflictDoUpdate({
       target: eventYoutubePlaylistSync.event_id,
+      // The preflight check above is only a user-facing fast path.  Keep the
+      // lease predicate on the actual UPSERT so a worker claiming the row
+      // between the read and this batch cannot be overwritten by settings.
+      where: sql`
+        run_lease_token IS NULL
+        OR run_lease_expires_at IS NULL
+        OR run_lease_expires_at <= ${now}
+      `,
       set: {
         playlist_id: after.playlist_id,
         enabled: after.enabled,
@@ -153,6 +178,9 @@ export async function saveEventYoutubePlaylistSettings(
         scan_started_at: after.scan_started_at,
         scan_page_token: after.scan_page_token,
         last_error: after.last_error,
+        pending_trigger: after.pending_trigger,
+        run_lease_token: after.run_lease_token,
+        run_lease_expires_at: after.run_lease_expires_at,
         updated_at: after.updated_at,
       },
     });
@@ -166,9 +194,25 @@ export async function saveEventYoutubePlaylistSettings(
     playlistChanged && itemCount > 0 ? [1, itemCount] : [1];
 
   try {
+    // The projection invalidation is part of the same D1 batch as the
+    // settings/audit mutation. Only the queue wake is post-commit; if queue
+    // planning or its UPSERT fails, the settings change must roll back rather
+    // than leaving the public CTA indefinitely stale.
+    const projectionQueue = await buildStaticRebuildQueueBatch(guard.db, [
+      {
+        targetType: "event_base",
+        targetId: eventId,
+        reason: "event_youtube_playlist_settings",
+        priority: "high",
+        requestedByUserId: guard.user.id,
+      },
+    ]);
     await mutateWithAudit(guard.db, {
-      mutationStatements,
-      expectedMutationChanges,
+      mutationStatements: [...mutationStatements, ...projectionQueue.statements],
+      expectedMutationChanges: [
+        ...expectedMutationChanges,
+        ...projectionQueue.expectedChanges,
+      ],
       audits: [
         {
           table_name: "event_youtube_playlist_sync",
@@ -183,6 +227,8 @@ export async function saveEventYoutubePlaylistSettings(
           strict: true,
         },
       ],
+      staticRebuildWakeSource:
+        projectionQueue.statements.length > 0 ? "web" : undefined,
     });
   } catch (error) {
     unstable_rethrow(error);
@@ -236,6 +282,16 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
   }
 
   const now = Math.floor(Date.now() / 1000);
+  if (
+    before.run_lease_token &&
+    Number(before.run_lease_expires_at ?? 0) > now
+  ) {
+    redirect(
+      settingsHref(eventId, {
+        error: "再生リスト同期が実行中です。完了後にもう一度お試しください。",
+      }),
+    );
+  }
   const after = {
     ...before,
     sync_status: "idle" as const,
@@ -245,6 +301,9 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
     scan_started_at: null,
     scan_page_token: null,
     last_error: null,
+    pending_trigger: "manual" as const,
+    run_lease_token: null,
+    run_lease_expires_at: null,
     updated_at: now,
   };
   try {
@@ -259,9 +318,23 @@ export async function queueEventYoutubePlaylistSync(formData: FormData): Promise
             scan_started_at: after.scan_started_at,
             scan_page_token: after.scan_page_token,
             last_error: after.last_error,
+            pending_trigger: "manual",
+            run_lease_token: after.run_lease_token,
+            run_lease_expires_at: after.run_lease_expires_at,
             updated_at: after.updated_at,
           })
-          .where(eq(eventYoutubePlaylistSync.event_id, eventId)),
+          .where(
+            and(
+              eq(eventYoutubePlaylistSync.event_id, eventId),
+              sql`
+                (
+                  run_lease_token IS NULL
+                  OR run_lease_expires_at IS NULL
+                  OR run_lease_expires_at <= ${now}
+                )
+              `,
+            ),
+          ),
       ],
       expectedMutationChanges: 1,
       audits: [

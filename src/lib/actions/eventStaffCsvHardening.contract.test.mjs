@@ -66,6 +66,13 @@ test("staff preparation reads fail closed instead of leaking a D1 exception", ()
   assert.match(removeSource, /return staffPreparationError\(error\);/);
 });
 
+test("新規X IDを伴うスタッフ変更はusers_indexを再生成する", () => {
+  assert.match(source, /includeUsersIndex\?: boolean/);
+  assert.match(source, /targetType: "users_index"/);
+  assert.match(source, /includeUsersIndex: atomicExtras != null/);
+  assert.match(source, /includeUsersIndex: newXRows\.length > 0/);
+});
+
 test("staff CSV matches legacy X spellings without rewriting stored rows", () => {
   assert.match(source, /const requestedXIdSet = new Set\(requestedXIds\)/);
   assert.match(source, /const normalized = parseCanonicalXId\(row\.x_user_id\)/);

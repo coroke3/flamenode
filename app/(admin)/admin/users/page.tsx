@@ -5,7 +5,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { and, desc, eq, isNotNull, isNull, like, or, sql, inArray } from "drizzle-orm";
-import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { getDatabase } from "@/lib/cloudflare";
 import {
   users as usersTable,
   xUserAccountLinks,
@@ -23,7 +23,12 @@ import { clampPaging, escapeLike, totalPagesFor } from "@/lib/utils/sql";
 import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { readAdminSystemSettings } from "@/lib/admin/adminSystemSettings";
 import { ManageXIcon } from "@/components/manage/ManageXIcon";
-import { resolveManageXIconUrl } from "@/lib/media/manageXIcon";
+import {
+  publicXIconEntriesToMap,
+  resolveProjectedIcon,
+} from "@/lib/publicData/publicIconProjection";
+import { loadPublicXIconMapOptional } from "@/lib/publicData/staticSharedInputsLoader";
+import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "@/lib/utils/publicXUser";
 
 const USERS_PAGE_SIZE = 50;
 
@@ -139,7 +144,6 @@ export default async function AdminUsersPage({
           .select({
             id: xUsersTable.id,
             x_name: xUsersTable.x_name,
-            icon_url: xUsersTable.icon_url,
             approval_status: xUsersTable.approval_status,
           })
           .from(xUsersTable)
@@ -159,29 +163,28 @@ export default async function AdminUsersPage({
           db,
           baseRows.map((row) => row.id),
         );
-        let authSecret: string | undefined;
-        try {
-          authSecret = getEnv().AUTH_SECRET;
-        } catch {
-          // Manage icon signing is fail-closed when the runtime env is unavailable.
-          authSecret = undefined;
-        }
-        xRows = await Promise.all(
-          baseRows.map(async (row) => ({
+        const iconMap = publicXIconEntriesToMap(
+          await loadPublicXIconMapOptional(baseRows.map((row) => row.id)),
+        );
+        xRows = baseRows.map((row) => ({
             ...row,
-            icon_url: await resolveManageXIconUrl({
-              iconUrl: row.icon_url,
-              approvalStatus: row.approval_status,
-              authSecret,
-            }),
+            icon_url:
+              PUBLIC_LISTABLE_X_APPROVAL_STATUSES.includes(
+                row.approval_status as (typeof PUBLIC_LISTABLE_X_APPROVAL_STATUSES)[number],
+              )
+                ? resolveProjectedIcon({
+                    xUserId: row.id,
+                    iconMap,
+                    legacyIconUrl: null,
+                  })
+                : null,
             ...(enrichment.get(row.id) ?? {
               primary_auth_user_id: null,
               primary_auth_user_name: null,
               linked_auth_user_count: 0,
               active_holder_count: 0,
             }),
-          })),
-        );
+          }));
       } else {
         // DiscordタブはDiscordログイン済みだけ。X情報は表示対象ユーザーの
         // linked rowsを後段で一括取得し、一覧の行ごとのJOINを避ける。

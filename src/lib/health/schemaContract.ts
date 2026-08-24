@@ -6,7 +6,7 @@
  * migration is applied. Only the guarded additive index-only path may apply
  * a migration before the strict read-only preflight runs.
  */
-export const REQUIRED_SCHEMA_VERSION = "2026-07-20-canonical-1";
+export const REQUIRED_SCHEMA_VERSION = "2026-08-24-observability-1";
 
 export const RUNTIME_CRITICAL_TABLES = Object.freeze([
   "account",
@@ -21,10 +21,12 @@ export const RUNTIME_CRITICAL_TABLES = Object.freeze([
   "event_templates",
   "event_youtube_playlist_items",
   "event_youtube_playlist_sync",
+  "event_youtube_playlist_sync_runs",
   "events",
   "external_api_quota_usage",
   "flamenode_schema_meta",
   "notification_outbox",
+  "ops_incident_state",
   "public_visibility_fences",
   "session",
   "slots",

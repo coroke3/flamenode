@@ -3,7 +3,8 @@
 /**
  * 手動 CostGuard Server Actions。
  * `operation_mode` の D1 書き込み正本はここ（KV ミラー同期付き）。
- * `disabled_features_json` は admin spreadsheet import のみ（cost-guard UI では編集しない）。
+ * `disabled_features_json` はこの専用 Cost Guard action だけが変更し、
+ * Spreadsheet import からは編集できない。すべての変更は同じ full-row CAS + strict audit を通す。
  * Cloudflare 使用量に基づく自動昇格・自動降格は行わない。
  */
 
@@ -18,6 +19,7 @@ import {
 } from "@/lib/auth/writeGuard";
 import {
   isWriteFeatureKey,
+  WRITE_FEATURE_KEYS,
   type WriteFeatureKey,
 } from "@/lib/auth/writeGuardCore";
 import { expectedRowCondition } from "@/lib/audit/adapters";
@@ -32,6 +34,7 @@ export interface CostGuardResult { ok: boolean; message?: string; warning?: stri
 
 const OVERRIDE_DURATION_SEC = 15 * 60;
 const MAX_OVERRIDE_FEATURES = 8;
+const MAX_DISABLED_FEATURES = 100;
 const modeSchema = z.object({
   mode: z.enum(["normal", "economy", "read_only", "static_only"]),
   reason: z.string().trim().min(1).max(500),
@@ -178,6 +181,81 @@ export async function setCostGuardOverride(formData: FormData): Promise<CostGuar
     [{ name: "revalidate", run: async () => { revalidatePath("/admin/cost-guard"); } }],
   );
   return { ok: true, message: "15分間の例外を有効化しました。" };
+}
+
+/**
+ * Cost Guard の恒久的な disabled feature set を管理する専用経路。
+ * Spreadsheet から system_settings を直接更新させず、未知キー・重複・順序揺れを拒否する。
+ */
+export async function setDisabledFeatures(formData: FormData): Promise<CostGuardResult> {
+  const guard = await requireCostGuardControlAdmin();
+  if (!guard.ok) return { ok: false, message: guard.message };
+  const reason = String(formData.get("reason") ?? "").trim();
+  const confirm = String(formData.get("confirm") ?? "").trim();
+  const candidates = formData.getAll("features").map((value) => String(value).trim());
+  if (!reason || reason.length > 500) {
+    return { ok: false, message: "reason は1〜500文字で指定してください。" };
+  }
+  if (confirm !== "APPLY") {
+    return { ok: false, message: "確認文字列 APPLY が一致しません。" };
+  }
+  if (candidates.length > MAX_DISABLED_FEATURES || new Set(candidates).size !== candidates.length) {
+    return { ok: false, message: "機能キーが重複しているか、件数上限を超えています。" };
+  }
+  if (!candidates.every(isWriteFeatureKey)) {
+    return { ok: false, message: "未許可の機能キーが含まれています。" };
+  }
+  const selected = new Set(candidates as WriteFeatureKey[]);
+  const features = WRITE_FEATURE_KEYS.filter((feature) => selected.has(feature));
+  const db = getDatabase();
+  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const before = await loadSettings(db);
+  if (!before) return { ok: false, message: "system_settings が見つかりません。" };
+  const expectedDisabledFeatures = formData.get("expected_disabled_features_json");
+  if (typeof expectedDisabledFeatures !== "string") {
+    return { ok: false, message: "設定の取得時点を確認できません。ページを再読み込みしてください。" };
+  }
+  let expectedDisabledFeaturesValue: string | null;
+  try {
+    const decoded = JSON.parse(expectedDisabledFeatures) as unknown;
+    if (decoded !== null && typeof decoded !== "string") {
+      return { ok: false, message: "設定の取得時点を確認できません。ページを再読み込みしてください。" };
+    }
+    expectedDisabledFeaturesValue = decoded;
+  } catch {
+    return { ok: false, message: "設定の取得時点を確認できません。ページを再読み込みしてください。" };
+  }
+  if (expectedDisabledFeaturesValue !== (before.disabled_features_json ?? null)) {
+    return { ok: false, message: "設定が別の管理者によって変更されています。ページを再読み込みしてください。" };
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const result = await mutateSettings({
+    db,
+    before,
+    actorUserId: guard.user.id,
+    reason,
+    context: "cost_guard_disabled_features",
+    patch: {
+      disabled_features_json: JSON.stringify(features),
+      cost_guard_reason: `[disabled features] ${reason}`,
+      cost_guard_updated_by_user_id: guard.user.id,
+      cost_guard_updated_at: now,
+    },
+  });
+  if (!result.ok) return result;
+  await runPostCommitBestEffort(
+    { flow: "cost_guard_disabled_features", traceId: createTraceId() },
+    [
+      {
+        name: "revalidate",
+        run: async () => {
+          revalidatePath("/admin/cost-guard");
+          revalidatePath("/admin");
+        },
+      },
+    ],
+  );
+  return { ok: true, message: "Cost Guard の無効化機能を更新しました。" };
 }
 
 export async function clearCostGuardOverride(formData: FormData): Promise<CostGuardResult> {

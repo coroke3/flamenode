@@ -92,7 +92,7 @@ test("system_settings CostGuard canonical columns are spreadsheet-readonly", () 
     assert.equal(isSpreadsheetColumnEditable(def, column), false, column);
   }
   assert.equal(isSpreadsheetColumnEditable(def, "operation_mode"), false);
-  assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), true);
+  assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), false);
 });
 
 test("event/video visibility status is controlled by the dedicated transition actions", () => {
@@ -105,9 +105,14 @@ test("event/video visibility status is controlled by the dedicated transition ac
   assert.equal(SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has("events.visibility_status"), true);
 });
 
-test("event/video physical deletes are blocked from the generic spreadsheet route", () => {
+test("public entities and system settings cannot be physically deleted through the generic spreadsheet route", () => {
   assert.equal(isSpreadsheetPhysicalDeleteBlocked("events"), true);
   assert.equal(isSpreadsheetPhysicalDeleteBlocked("videos"), true);
+  assert.equal(isSpreadsheetPhysicalDeleteBlocked("system_settings"), true);
   assert.equal(isSpreadsheetPhysicalDeleteBlocked("event_groups"), false);
   assert.equal(SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES.has("videos"), true);
+  assert.equal(
+    SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES.has("system_settings"),
+    true,
+  );
 });

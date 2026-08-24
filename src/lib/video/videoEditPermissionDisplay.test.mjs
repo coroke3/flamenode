@@ -117,6 +117,33 @@ test("a11y: バッジは色以外のテキストを持つ", () => {
   }
 });
 
+test("a11y: 静的なロック説明は live region にせず control から参照する", () => {
+  const noteSource = readFileSync(
+    new URL("../../components/video/permission/FieldLockNote.tsx", import.meta.url),
+    "utf8",
+  );
+  const formSource = readFileSync(
+    new URL("../../components/forms/VideoForm.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(noteSource, /role="status"/);
+  assert.match(formSource, /aria-describedby=\{lockNoteId\}/);
+  assert.match(formSource, /videoFormLockNoteId\("memberChapters"\)/);
+});
+
+test("表示: 複合 section は個別 permission の集約 badge を使う", () => {
+  const formSource = readFileSync(
+    new URL("../../components/forms/VideoForm.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(formSource, /permissions=\{videoSectionPermissions\}/);
+  assert.match(formSource, /permissions=\{membersSectionPermissions\}/);
+  assert.match(
+    formSource,
+    /membersListDisabled \|\| isFieldDisabled\(disabledFields, "members\.is_collab"\)/,
+  );
+});
+
 test("保存経路: updateVideo は未送信値を setDefault で現在値維持する", () => {
   const source = readFileSync(
     new URL("../actions/video/updateVideo.ts", import.meta.url),

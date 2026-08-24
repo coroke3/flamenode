@@ -636,6 +636,18 @@ async function ensureXUserGroup(
   const missing = rows.filter((row) => !existing.has(row.id));
   if (missing.length > 0) {
     const payload = JSON.stringify(missing);
+    const now = Math.floor(Date.now() / 1000);
+    const rebuildQueue = legacyRebuildQueueMutation(
+      db,
+      [{
+        targetType: "users_index",
+        targetId: "global",
+        priority: "low",
+        reason: "legacy_import_x_users",
+      }],
+      options,
+      now,
+    );
     await mutateWithAudit(db, {
       mutationStatements: [
         db.run(sql`
@@ -655,8 +667,9 @@ async function ensureXUserGroup(
             'imported'
           FROM json_each(${payload})
         `),
+        rebuildQueue.statement,
       ],
-      expectedMutationChanges: [missing.length],
+      expectedMutationChanges: [missing.length, rebuildQueue.expectedChanges],
       audits: [
         {
           table_name: "x_users_import_batch",

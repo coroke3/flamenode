@@ -115,7 +115,7 @@ function createBaseEnv(now, overrides = {}) {
     DB: {
       prepare: () => ({
         first: async () => ({
-          version: "2026-07-20-canonical-1",
+          version: "2026-08-24-observability-1",
           required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
           public_video_detail_count: 0,
           tracked_video_detail_count: 0,
@@ -158,7 +158,7 @@ test("deep health performs read-only D1, KV and R2 probes", async () => {
         calls.push(["d1", query]);
         return {
           first: async () => ({
-            version: "2026-07-20-canonical-1",
+            version: "2026-08-24-observability-1",
             required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
             public_video_detail_count: 0,
             tracked_video_detail_count: 0,
@@ -308,7 +308,7 @@ test("deep health fails closed when any runtime table is missing", async () => {
     DB: {
       prepare: () => ({
         first: async () => ({
-          version: "2026-07-20-canonical-1",
+            version: "2026-08-24-observability-1",
           required_table_count: REQUIRED_RUNTIME_TABLE_COUNT - 1,
         }),
       }),

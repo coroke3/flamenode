@@ -20,6 +20,14 @@ const timeOnlyFormatter = new Intl.DateTimeFormat("ja-JP", {
   minute: "2-digit",
 });
 
+const publicationDateTimeFormatter = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  month: "numeric",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 function toValidUnixSec(value: unknown): number | null {
   if (value == null) return null;
   if (value instanceof Date) {
@@ -47,6 +55,18 @@ export function formatUnix(
   if (opts.dateOnly) return dateOnlyFormatter.format(date);
   if (opts.timeOnly) return timeOnlyFormatter.format(date);
   return fullFormatter.format(date);
+}
+
+/** Event cards use a compact, explicit JST publication label. */
+export function formatPublicationDateTime(unixSec: unknown): string {
+  const validUnixSec = toValidUnixSec(unixSec);
+  if (validUnixSec == null) return "公開日時未設定";
+  const date = new Date(validUnixSec * 1000);
+  if (Number.isNaN(date.getTime())) return "公開日時未設定";
+  const parts = publicationDateTimeFormatter.formatToParts(date);
+  const valueFor = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${valueFor("month")}月${valueFor("day")}日 ${valueFor("hour")}:${valueFor("minute")} 公開`;
 }
 
 export function formatRelative(unixSec: unknown): string {
