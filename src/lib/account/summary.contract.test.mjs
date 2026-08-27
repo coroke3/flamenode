@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [route, island, publicLayout, accountMenu, signOutButton] = await Promise.all([
+const [route, island, publicHeader, publicLayout, accountMenu, signOutButton] = await Promise.all([
   readFile(
     new URL("../../../app/api/account/summary/route.ts", import.meta.url),
     "utf8",
   ),
   readFile(
     new URL("../../components/layout/PublicAccountIsland.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../../components/layout/PublicHeader.tsx", import.meta.url),
     "utf8",
   ),
   readFile(
@@ -48,7 +52,7 @@ test("degraded synthetic X entry does not replace the account display name", () 
 test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.doesNotMatch(publicLayout, /getCurrentUser/);
   assert.doesNotMatch(publicLayout, /buildHeaderUser/);
-  assert.match(publicLayout, /CostGuardBanner/);
+  assert.doesNotMatch(publicLayout, /CostGuardBanner/);
   assert.doesNotMatch(publicLayout, /source=["']admin["']/);
   assert.match(island, /\/api\/account\/summary/);
   assert.match(island, /cache: "no-store"/);
@@ -62,12 +66,23 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
 });
 
+test("公開headerはaccount summaryをidleへ遅延し操作時は即時取得できる", () => {
+  assert.match(publicHeader, /deferPublicAccountUntilIdle/);
+  assert.match(publicHeader, /serverUser === undefined && !hydrateAccount/);
+  assert.match(publicHeader, /deferPublicAccountUntilIdle,\s*\)/);
+  assert.match(island, /deferUntilIdle = false/);
+  assert.match(island, /requestIdleCallback/);
+  assert.match(island, /PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS/);
+  assert.match(island, /PUBLIC_ACCOUNT_FALLBACK_DELAY_MS/);
+  assert.match(island, /deferUntilIdle && !idleReady && !open/);
+  assert.match(island, /if \(open\) \{\s*setIdleReady\(true\)/);
+  assert.match(island, /inFlightRef/);
+});
+
 test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得する", () => {
   assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /setRefreshNonce/);
-  assert.match(island, /\[enabled, preserveLoggedInOnFailure, lazy, open, refreshNonce\]/);
-  assert.match(island, /lazy && !open/);
   assert.match(island, /fetchedOnceRef/);
   assert.match(island, /nonLazyAttemptedRef/);
   assert.match(island, /!lazy && nonLazyAttemptedRef\.current/);

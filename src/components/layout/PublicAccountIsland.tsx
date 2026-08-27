@@ -12,6 +12,17 @@ import type { PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
 import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "./publicNavigation";
 
+const PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS = 1200;
+const PUBLIC_ACCOUNT_FALLBACK_DELAY_MS = 350;
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (
+    callback: IdleRequestCallback,
+    options?: IdleRequestOptions,
+  ) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
 function mapSummaryToHeaderUser(
   summary: Extract<AccountSummaryResponse, { loggedIn: true }>,
 ): PublicHeaderUser & { degraded?: true } {
@@ -35,6 +46,7 @@ export function usePublicAccountSummary(
   preserveLoggedInOnFailure = false,
   lazy = false,
   open = false,
+  deferUntilIdle = false,
 ): {
   user: PublicHeaderUser | null;
   loading: boolean;
@@ -44,10 +56,11 @@ export function usePublicAccountSummary(
   const [loading, setLoading] = React.useState(enabled && (!lazy || open));
   const [unavailable, setUnavailable] = React.useState(false);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  const [idleReady, setIdleReady] = React.useState(!deferUntilIdle);
   const fetchedOnceRef = React.useRef(false);
-  // Public header (lazy=false) already fetches on mount. Menu open/close must
-  // not turn that one request into a request per interaction, including when
-  // the first attempt ended in a temporary 503/network failure.
+  // Public header (lazy=false) fetches once after the initial hydration/idle
+  // window. Menu open/close must not turn that one request into a request per
+  // interaction, including when the first attempt ended in a temporary failure.
   const nonLazyAttemptedRef = React.useRef(false);
   const refreshRequestedRef = React.useRef(!lazy);
   const mountedRef = React.useRef(false);
@@ -78,6 +91,29 @@ export function usePublicAccountSummary(
   }, []);
 
   React.useEffect(() => {
+    if (!enabled || lazy || !deferUntilIdle || idleReady) return;
+    if (open) {
+      setIdleReady(true);
+      return;
+    }
+
+    const idleWindow = window as IdleWindow;
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(
+        () => setIdleReady(true),
+        { timeout: PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS },
+      );
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+
+    const handle = window.setTimeout(
+      () => setIdleReady(true),
+      PUBLIC_ACCOUNT_FALLBACK_DELAY_MS,
+    );
+    return () => window.clearTimeout(handle);
+  }, [enabled, lazy, open, deferUntilIdle, idleReady]);
+
+  React.useEffect(() => {
     if (!enabled) return;
     const onActiveXChanged = () => {
       refreshGenerationRef.current += 1;
@@ -101,6 +137,12 @@ export function usePublicAccountSummary(
       setLoading(false);
       return;
     }
+    // 公開ページは初期SSR/RSCとaccount summaryを競合させない。ユーザーが先に
+    // メニューを開いた場合だけidle待ちを飛ばして即時取得する。
+    if (deferUntilIdle && !idleReady && !open) {
+      setLoading(true);
+      return;
+    }
     if (!lazy && nonLazyAttemptedRef.current && !refreshRequestedRef.current) {
       setLoading(false);
       return;
@@ -113,8 +155,6 @@ export function usePublicAccountSummary(
     const generation = refreshGenerationRef.current;
     const inFlight = inFlightRef.current;
     if (inFlight) {
-      // StrictMode の effect 再実行や同一取得中のイベントでは同じ Promise を再利用し、
-      // 新しい世代だけを完了後に一度だけ再取得する。
       if (inFlight.generation !== generation) {
         inFlight.pendingGeneration = generation;
       }
@@ -158,9 +198,6 @@ export function usePublicAccountSummary(
 
     void request.promise.then((result) => {
       if (!mountedRef.current || !enabledRef.current) return;
-
-      // ACTIVE_X_CHANGED_EVENT が取得中に発火した場合、古い summary は表示せず、
-      // 完了後に最新世代を一度だけ取り直す。
       if (request.generation !== refreshGenerationRef.current) return;
 
       if (result.kind === "summary") {
@@ -200,7 +237,15 @@ export function usePublicAccountSummary(
         setLoading(false);
       }
     });
-  }, [enabled, preserveLoggedInOnFailure, lazy, open, refreshNonce]);
+  }, [
+    enabled,
+    preserveLoggedInOnFailure,
+    lazy,
+    open,
+    deferUntilIdle,
+    idleReady,
+    refreshNonce,
+  ]);
 
   return { user, loading, unavailable };
 }
@@ -253,6 +298,7 @@ export function PublicAccountIsland({
             href="/entry"
             className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn}`}
             data-variant="accent"
+            prefetch={false}
           >
             <Icon name="edit" size={13} aria-hidden />
             <span>投稿する</span>
@@ -273,6 +319,7 @@ export function PublicAccountIsland({
         href={entryHref}
         className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn}`}
         data-variant="accent"
+        prefetch={false}
       >
         <Icon name="edit" size={13} aria-hidden />
         <span>参加する</span>
@@ -307,6 +354,7 @@ export function PublicAccountIsland({
           href="/entry"
           className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
           onClick={onClosePanels}
+          prefetch={false}
         >
           <Icon name="edit" size={16} aria-hidden /> 投稿する
         </Link>
@@ -318,6 +366,7 @@ export function PublicAccountIsland({
         href={entryHref}
         className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
         onClick={onClosePanels}
+        prefetch={false}
       >
         <Icon name="edit" size={16} aria-hidden /> 参加する
       </Link>
@@ -338,6 +387,7 @@ export function PublicAccountIsland({
               }`}
               onClick={onClosePanels}
               aria-current={active ? "page" : undefined}
+              prefetch={false}
             >
               <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
             </Link>
@@ -361,6 +411,7 @@ export function PublicAccountIsland({
               }`}
               onClick={onClosePanels}
               aria-current={active ? "page" : undefined}
+              prefetch={false}
             >
               <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
             </Link>
@@ -414,30 +465,19 @@ export function PublicAccountIsland({
               }`}
               onClick={onClosePanels}
               aria-current={active ? "page" : undefined}
+              prefetch={false}
             >
               <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
             </Link>
           );
         })}
-        <Link
-          href="/dashboard"
-          className={styles.mobileLink}
-          onClick={onClosePanels}
-        >
+        <Link href="/dashboard" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
           <Icon name="grid" size={16} aria-hidden /> マイページ
         </Link>
-        <Link
-          href="/dashboard/library"
-          className={styles.mobileLink}
-          onClick={onClosePanels}
-        >
+        <Link href="/dashboard/library" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
           <Icon name="bookmark" size={16} aria-hidden /> ライブラリ
         </Link>
-        <Link
-          href="/dashboard/settings"
-          className={styles.mobileLink}
-          onClick={onClosePanels}
-        >
+        <Link href="/dashboard/settings" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
           <Icon name="settings" size={16} aria-hidden /> 設定
         </Link>
       </div>
@@ -447,20 +487,12 @@ export function PublicAccountIsland({
           <div className={styles.mobileDivider} />
           <div className={styles.mobileSection}>
             {user.management.canAccessManage ? (
-              <Link
-                href="/manage"
-                className={styles.mobileLink}
-                onClick={onClosePanels}
-              >
+              <Link href="/manage" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
                 <Icon name="users" size={16} aria-hidden /> 運営
               </Link>
             ) : null}
             {user.management.canAccessAdmin ? (
-              <Link
-                href="/admin"
-                className={styles.mobileLink}
-                onClick={onClosePanels}
-              >
+              <Link href="/admin" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
                 <Icon name="settings" size={16} aria-hidden /> 管理
               </Link>
             ) : null}

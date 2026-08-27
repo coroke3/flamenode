@@ -38,40 +38,36 @@ export function PublicHeader({
 }: PublicHeaderProps): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
-  const [accountOpen, setAccountOpen] =
-    React.useState(false);
+  const [accountOpen, setAccountOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const searchPanelRef = React.useRef<HTMLDivElement>(null);
-  const mobileHeaderRef =
-    React.useRef<HTMLElement>(null);
-  const mobileHeaderHeightRef =
-    React.useRef<number | null>(null);
-  const menuButtonRef =
-    React.useRef<HTMLButtonElement>(null);
-  const mobileScrollRef =
-    React.useRef<HTMLDivElement>(null);
-  const mobilePanelRef =
-    React.useRef<HTMLElement>(null);
-  const searchButtonRef =
-    React.useRef<HTMLButtonElement>(null);
+  const mobileHeaderRef = React.useRef<HTMLElement>(null);
+  const mobileHeaderHeightRef = React.useRef<number | null>(null);
+  const menuButtonRef = React.useRef<HTMLButtonElement>(null);
+  const mobileScrollRef = React.useRef<HTMLDivElement>(null);
+  const mobilePanelRef = React.useRef<HTMLElement>(null);
+  const searchButtonRef = React.useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const fetchAccount = serverUser === undefined || hydrateAccount;
   const preserveLoggedInOnFailure = hydrateAccount && serverUser != null;
   // admin/manage/auth のSSRヘッダーは最小情報を持っているため、詳細summaryは
   // アカウントメニュー（またはモバイルナビ）を開いた時だけ補完する。
   const hydrateOnOpen = hydrateAccount && serverUser != null;
+  // 公開ページは初期SSR/RSCとAuth.js summaryを競合させず、idle時に補完する。
+  // ユーザーが先にmobile/account UIを開いた場合はhook側が即時取得へ切り替える。
+  const deferPublicAccountUntilIdle = serverUser === undefined && !hydrateAccount;
   const accountHydrationOpen = accountOpen || mobileOpen;
   const {
     user: fetchedUser,
     loading: accountLoading,
     unavailable: accountUnavailable,
-  } =
-    usePublicAccountSummary(
-      fetchAccount,
-      preserveLoggedInOnFailure,
-      hydrateOnOpen,
-      accountHydrationOpen,
-    );
+  } = usePublicAccountSummary(
+    fetchAccount,
+    preserveLoggedInOnFailure,
+    hydrateOnOpen,
+    accountHydrationOpen,
+    deferPublicAccountUntilIdle,
+  );
   const showAccountLoading =
     fetchAccount && accountLoading && !preserveLoggedInOnFailure;
   const showAccountUnavailable =
@@ -88,7 +84,6 @@ export function PublicHeader({
             image: fetchedUser.image ?? serverUser.image,
             role: fetchedUser.role || serverUser.role,
             xIds: fetchedUser.xIds.length > 0 ? fetchedUser.xIds : serverUser.xIds,
-            // degraded 応答の canAccessManage=false で SSR 権限を潰さない。
             management:
               "degraded" in fetchedUser && fetchedUser.degraded
                 ? {
@@ -122,10 +117,7 @@ export function PublicHeader({
 
   useDismissablePanel({
     open: mobileOpen,
-    onClose: React.useCallback(
-      () => setMobileOpen(false),
-      [],
-    ),
+    onClose: React.useCallback(() => setMobileOpen(false), []),
     panelRef: mobilePanelRef,
     triggerRef: menuButtonRef,
     routeKey: pathname ?? "",
@@ -135,10 +127,7 @@ export function PublicHeader({
 
   useDismissablePanel({
     open: searchOpen,
-    onClose: React.useCallback(
-      () => setSearchOpen(false),
-      [],
-    ),
+    onClose: React.useCallback(() => setSearchOpen(false), []),
     panelRef: searchPanelRef,
     triggerRef: searchButtonRef,
     routeKey: pathname ?? "",
@@ -169,174 +158,191 @@ export function PublicHeader({
           mobileOpen ? styles.headerMenuOpen : ""
         }`}
       >
-      <div className={`fn-public-container fn-header-inner ${styles.bar}`}>
-        <Link
-          href="/"
-          className={`fn-logo ${styles.logoLink}`}
-          aria-label="FlameNode トップへ"
-        >
-          <Logo />
-        </Link>
-
-        <nav
-          className={`fn-nav ${styles.desktopNav}`}
-          aria-label="メインナビゲーション"
-        >
-          {PUBLIC_NAV_ITEMS.map((item) => {
-            const active = isPublicNavItemActive(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`fn-nav-item fn-nav-ja ${styles.desktopNavLink} ${
-                  active ? `is-active ${styles.desktopNavLinkActive}` : ""
-                }`}
-                aria-current={active ? "page" : undefined}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className={`fn-header-right ${styles.right}`}>
-          <div className={`${styles.themeButton}`}>
-            <ThemeToggle />
-          </div>
-
-          <button
-            type="button"
-            ref={searchButtonRef}
-            className={`${styles.searchToggle}`}
-            aria-label="作品を検索"
-            aria-expanded={searchOpen}
-            aria-controls="header-search-panel"
-            onClick={() => {
-              setSearchOpen((open) => !open);
-              setMobileOpen(false);
-              setAccountOpen(false);
-            }}
+        <div className={`fn-public-container fn-header-inner ${styles.bar}`}>
+          <Link
+            href="/"
+            className={`fn-logo ${styles.logoLink}`}
+            aria-label="FlameNode トップへ"
+            prefetch={false}
           >
-            <Icon name="search" size={18} aria-hidden />
-          </button>
+            <Logo />
+          </Link>
 
-          <PublicAccountIsland
-            user={accountUser}
-            loading={showAccountLoading}
-            unavailable={showAccountUnavailable}
-            entryHref={entryHref}
-            accountOpen={accountOpen}
-            onAccountOpenChange={(open) => {
-              setAccountOpen(open);
-              if (open) {
+          <nav
+            className={`fn-nav ${styles.desktopNav}`}
+            aria-label="メインナビゲーション"
+          >
+            {PUBLIC_NAV_ITEMS.map((item) => {
+              const active = isPublicNavItemActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`fn-nav-item fn-nav-ja ${styles.desktopNavLink} ${
+                    active ? `is-active ${styles.desktopNavLinkActive}` : ""
+                  }`}
+                  aria-current={active ? "page" : undefined}
+                  prefetch={false}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className={`fn-header-right ${styles.right}`}>
+            <div className={`${styles.themeButton}`}>
+              <ThemeToggle />
+            </div>
+
+            <button
+              type="button"
+              ref={searchButtonRef}
+              className={`${styles.searchToggle}`}
+              aria-label="作品を検索"
+              aria-expanded={searchOpen}
+              aria-controls="header-search-panel"
+              onClick={() => {
+                setSearchOpen((open) => !open);
                 setMobileOpen(false);
-                setSearchOpen(false);
-              }
-            }}
-            onClosePanels={closeMobilePanels}
-            pathname={pathname}
-            variant="desktop"
-          />
-
-          <button
-            type="button"
-            ref={menuButtonRef}
-            className={styles.menuToggle}
-            aria-label={mobileOpen ? "メニューを閉じる" : "メニューを開く"}
-            aria-expanded={mobileOpen}
-            aria-controls="mobile-navigation-panel"
-            onClick={() => {
-              if (!mobileOpen) {
-                mobileHeaderHeightRef.current =
-                  mobileHeaderRef.current?.getBoundingClientRect().height ?? null;
-              }
-              setMobileOpen((open) => !open);
-              setSearchOpen(false);
-              setAccountOpen(false);
-            }}
-          >
-            <Icon name={mobileOpen ? "close" : "menu"} size={18} />
-          </button>
-        </div>
-      </div>
-
-      <div
-        id="header-search-panel"
-        ref={searchPanelRef}
-        className={`${styles.searchPanel} ${
-          searchOpen ? styles.searchPanelOpen : ""
-        }`}
-        hidden={!searchOpen}
-      >
-        <ImeSafeGetForm
-          action="/list"
-          method="get"
-          className={`fn-public-container ${styles.searchPanelForm}`}
-          role="search"
-          aria-label="作品検索"
-          onNavigated={() => setSearchOpen(false)}
-        >
-          <label htmlFor="header-search-input" className="fn-sr-only">
-            作品を検索
-          </label>
-          <input
-            id="header-search-input"
-            ref={searchInputRef}
-            type="search"
-            name="q"
-            placeholder="作品を検索"
-            autoComplete="off"
-          />
-          <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
-            検索
-          </button>
-          <button
-            type="button"
-            className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.searchClose}`}
-            aria-label="検索を閉じる"
-            onClick={() => setSearchOpen(false)}
-          >
-            <Icon name="close" size={14} aria-hidden />
-          </button>
-        </ImeSafeGetForm>
-      </div>
-
-      <div
-        ref={mobileScrollRef}
-        className={`${styles.mobile} ${mobileOpen ? styles.mobileOpen : ""}`}
-      >
-        <nav
-          id="mobile-navigation-panel"
-          ref={mobilePanelRef}
-          role="dialog"
-          aria-modal="true"
-          tabIndex={-1}
-          className={`fn-public-container ${styles.mobileNav}`}
-          aria-label="モバイルナビゲーション"
-          aria-hidden={!mobileOpen}
-          inert={!mobileOpen}
-        >
-          <div className={styles.mobileSection}>
-            <ImeSafeGetForm
-              action="/list"
-              method="get"
-              className={styles.mobileSearch}
-              role="search"
-              aria-label="作品検索"
-              onNavigated={() => closeMobilePanels()}
+                setAccountOpen(false);
+              }}
             >
-              <Icon name="search" size={16} aria-hidden />
-              <label htmlFor="mobile-header-search-input" className="fn-sr-only">
-                作品を検索
-              </label>
-              <input
-                id="mobile-header-search-input"
-                type="search"
-                name="q"
-                placeholder="作品を検索"
-                autoComplete="off"
+              <Icon name="search" size={18} aria-hidden />
+            </button>
+
+            <PublicAccountIsland
+              user={accountUser}
+              loading={showAccountLoading}
+              unavailable={showAccountUnavailable}
+              entryHref={entryHref}
+              accountOpen={accountOpen}
+              onAccountOpenChange={(open) => {
+                setAccountOpen(open);
+                if (open) {
+                  setMobileOpen(false);
+                  setSearchOpen(false);
+                }
+              }}
+              onClosePanels={closeMobilePanels}
+              pathname={pathname}
+              variant="desktop"
+            />
+
+            <button
+              type="button"
+              ref={menuButtonRef}
+              className={styles.menuToggle}
+              aria-label={mobileOpen ? "メニューを閉じる" : "メニューを開く"}
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-navigation-panel"
+              onClick={() => {
+                if (!mobileOpen) {
+                  mobileHeaderHeightRef.current =
+                    mobileHeaderRef.current?.getBoundingClientRect().height ?? null;
+                }
+                setMobileOpen((open) => !open);
+                setSearchOpen(false);
+                setAccountOpen(false);
+              }}
+            >
+              <Icon name={mobileOpen ? "close" : "menu"} size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div
+          id="header-search-panel"
+          ref={searchPanelRef}
+          className={`${styles.searchPanel} ${
+            searchOpen ? styles.searchPanelOpen : ""
+          }`}
+          hidden={!searchOpen}
+        >
+          <ImeSafeGetForm
+            action="/list"
+            method="get"
+            className={`fn-public-container ${styles.searchPanelForm}`}
+            role="search"
+            aria-label="作品検索"
+            onNavigated={() => setSearchOpen(false)}
+          >
+            <label htmlFor="header-search-input" className="fn-sr-only">
+              作品を検索
+            </label>
+            <input
+              id="header-search-input"
+              ref={searchInputRef}
+              type="search"
+              name="q"
+              placeholder="作品を検索"
+              autoComplete="off"
+            />
+            <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">
+              検索
+            </button>
+            <button
+              type="button"
+              className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.searchClose}`}
+              aria-label="検索を閉じる"
+              onClick={() => setSearchOpen(false)}
+            >
+              <Icon name="close" size={14} aria-hidden />
+            </button>
+          </ImeSafeGetForm>
+        </div>
+
+        <div
+          ref={mobileScrollRef}
+          className={`${styles.mobile} ${mobileOpen ? styles.mobileOpen : ""}`}
+        >
+          <nav
+            id="mobile-navigation-panel"
+            ref={mobilePanelRef}
+            role="dialog"
+            aria-modal="true"
+            tabIndex={-1}
+            className={`fn-public-container ${styles.mobileNav}`}
+            aria-label="モバイルナビゲーション"
+            aria-hidden={!mobileOpen}
+            inert={!mobileOpen}
+          >
+            <div className={styles.mobileSection}>
+              <ImeSafeGetForm
+                action="/list"
+                method="get"
+                className={styles.mobileSearch}
+                role="search"
+                aria-label="作品検索"
+                onNavigated={() => closeMobilePanels()}
+              >
+                <Icon name="search" size={16} aria-hidden />
+                <label htmlFor="mobile-header-search-input" className="fn-sr-only">
+                  作品を検索
+                </label>
+                <input
+                  id="mobile-header-search-input"
+                  type="search"
+                  name="q"
+                  placeholder="作品を検索"
+                  autoComplete="off"
+                />
+              </ImeSafeGetForm>
+              <PublicAccountIsland
+                user={accountUser}
+                loading={showAccountLoading}
+                unavailable={showAccountUnavailable}
+                entryHref={entryHref}
+                accountOpen={accountOpen}
+                onAccountOpenChange={setAccountOpen}
+                onClosePanels={closeMobilePanels}
+                pathname={pathname}
+                variant="mobile-cta"
               />
-            </ImeSafeGetForm>
+            </div>
+
+            <div className={styles.mobileDivider} />
+
             <PublicAccountIsland
               user={accountUser}
               loading={showAccountLoading}
@@ -346,25 +352,10 @@ export function PublicHeader({
               onAccountOpenChange={setAccountOpen}
               onClosePanels={closeMobilePanels}
               pathname={pathname}
-              variant="mobile-cta"
+              variant="mobile-nav"
             />
-          </div>
-
-          <div className={styles.mobileDivider} />
-
-          <PublicAccountIsland
-            user={accountUser}
-            loading={showAccountLoading}
-            unavailable={showAccountUnavailable}
-            entryHref={entryHref}
-            accountOpen={accountOpen}
-            onAccountOpenChange={setAccountOpen}
-            onClosePanels={closeMobilePanels}
-            pathname={pathname}
-            variant="mobile-nav"
-          />
-        </nav>
-      </div>
+          </nav>
+        </div>
       </header>
     </>
   );
