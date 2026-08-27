@@ -14,8 +14,7 @@ const SLOT_ID_RE =
   /^slot_[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const PUBLIC_CACHE_CONTROL = PUBLIC_MEDIA_CACHE_CONTROL;
-const PRIVATE_CACHE_CONTROL =
-  "private, no-store, no-cache, must-revalidate";
+const PRIVATE_CACHE_CONTROL = "private, no-store, no-cache, must-revalidate";
 const MEDIA_UNAVAILABLE_HEADERS = {
   "cache-control": "no-store",
   "retry-after": "30",
@@ -87,7 +86,6 @@ export function resolveSlotSubmissionIconAccess(
 
   if (!viewer) return { allowed: false };
 
-  // Active X 切替で account_other になっても、確保した auth user 本人なら private 表示を許可
   const isReservationOwner = row.reserved_by_user_id === viewer.id;
   if (!isReservationOwner) {
     const relation = resolveSlotViewerRelation({
@@ -106,6 +104,46 @@ export function resolveSlotSubmissionIconAccess(
   };
 }
 
+export type SlotSubmissionIconProbe =
+  | { kind: "not_found" }
+  | { kind: "unavailable" }
+  | { kind: "public"; row: SlotSubmissionIconLookupRow }
+  | { kind: "viewer_required"; row: SlotSubmissionIconLookupRow };
+
+/**
+ * Auth.jsより先に1回のD1 lookupだけで公開可否を判定する。
+ * public_nameならviewer不要。private/anonymousだけroute側がAuth.jsを解決する。
+ */
+export async function probeSlotSubmissionIcon(
+  env: Pick<FlameNodeEnv, "DB">,
+  slotId: string,
+): Promise<SlotSubmissionIconProbe> {
+  if (!isValidSlotSubmissionIconSlotId(slotId)) return { kind: "not_found" };
+  if (!env.DB) return { kind: "unavailable" };
+
+  let row: SlotSubmissionIconLookupRow | null;
+  try {
+    row = await env.DB.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL)
+      .bind(slotId)
+      .first<SlotSubmissionIconLookupRow>();
+  } catch (error) {
+    console.error("[slot-submission-icon] D1 lookup failed", error);
+    return { kind: "unavailable" };
+  }
+
+  if (!row) return { kind: "not_found" };
+  if (
+    row.slot_status !== "submitted" ||
+    row.event_visibility_status !== "public" ||
+    !row.creator_icon_url?.trim()
+  ) {
+    return { kind: "not_found" };
+  }
+  return row.slot_visibility_mode === "public_name"
+    ? { kind: "public", row }
+    : { kind: "viewer_required", row };
+}
+
 function extractR2KeyFromMediaUrl(iconUrl: string): string | null {
   const prefix = "/api/media/";
   if (!iconUrl.startsWith(prefix)) return null;
@@ -115,36 +153,16 @@ function extractR2KeyFromMediaUrl(iconUrl: string): string | null {
   return key;
 }
 
-export async function serveSlotSubmissionIcon(
-  env: Pick<FlameNodeEnv, "DB" | "BUCKET">,
-  slotId: string,
+export async function serveSlotSubmissionIconRow(
+  env: Pick<FlameNodeEnv, "BUCKET">,
+  row: SlotSubmissionIconLookupRow,
   viewer: { id: string; active_x_user_id: string | null } | null,
 ): Promise<Response> {
-  if (!isValidSlotSubmissionIconSlotId(slotId)) {
-    return new Response("Not found", { status: 404 });
-  }
-  if (!env.DB) {
-    return mediaUnavailableResponse("Media access check unavailable");
-  }
-
-  let row: SlotSubmissionIconLookupRow | null = null;
-  try {
-    row = await env.DB.prepare(SLOT_SUBMISSION_ICON_LOOKUP_SQL)
-      .bind(slotId)
-      .first<SlotSubmissionIconLookupRow>();
-  } catch (error) {
-    console.error("[slot-submission-icon] D1 lookup failed", error);
-    return mediaUnavailableResponse("Media access check unavailable");
-  }
-
   const access = resolveSlotSubmissionIconAccess(row, viewer);
   if (!access.allowed) return new Response("Not found", { status: 404 });
 
   const { iconUrl, cacheControl } = access;
   if (iconUrl.startsWith("https://")) {
-    // Keep the ACL-derived cache policy on redirects as well as R2 responses.
-    // A private slot must not leave its external icon URL in an intermediary
-    // cache that could serve it after the viewer authorization has changed.
     return new Response(null, {
       status: 302,
       headers: {
@@ -187,4 +205,20 @@ export async function serveSlotSubmissionIcon(
   headers.set("cache-control", cacheControl);
   headers.set("x-content-type-options", "nosniff");
   return new Response(obj.body, { headers });
+}
+
+/** Backward-compatible helper for tests/internal callers. */
+export async function serveSlotSubmissionIcon(
+  env: Pick<FlameNodeEnv, "DB" | "BUCKET">,
+  slotId: string,
+  viewer: { id: string; active_x_user_id: string | null } | null,
+): Promise<Response> {
+  const probe = await probeSlotSubmissionIcon(env, slotId);
+  if (probe.kind === "unavailable") {
+    return mediaUnavailableResponse("Media access check unavailable");
+  }
+  if (probe.kind === "not_found") {
+    return new Response("Not found", { status: 404 });
+  }
+  return serveSlotSubmissionIconRow(env, probe.row, viewer);
 }
