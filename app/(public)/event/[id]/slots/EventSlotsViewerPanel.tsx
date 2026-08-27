@@ -145,6 +145,7 @@ export function EventSlotsViewerPanel({
   const [overlay, setOverlay] = React.useState<SlotViewerOverlayDto>(EMPTY_OVERLAY);
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  const previousBaseSlotsRef = React.useRef(baseSlots);
 
   React.useEffect(() => {
     let active = true;
@@ -189,6 +190,15 @@ export function EventSlotsViewerPanel({
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
   }, []);
+
+  // SlotGridのmutation成功後はrouter.refresh()でpublic slotsが更新される。
+  // Client Component stateはRSC refreshで保持されるため、base配列の更新を検知して
+  // viewer ownershipも取り直し、解放済み枠を本人枠として残さない。
+  React.useEffect(() => {
+    if (previousBaseSlotsRef.current === baseSlots) return;
+    previousBaseSlotsRef.current = baseSlots;
+    setRefreshNonce((value) => value + 1);
+  }, [baseSlots]);
 
   const slots = React.useMemo(
     () => mergeViewerSlots(baseSlots, overlay),
@@ -278,9 +288,6 @@ export function EventSlotsViewerPanel({
             slotIntervalSec={slotIntervalSec}
             slotPartGapSec={slotPartGapSec}
             parts={parts}
-            onMutationCommitted={() =>
-              setRefreshNonce((value) => value + 1)
-            }
           />
         </div>
         <aside className={styles.aside}>
