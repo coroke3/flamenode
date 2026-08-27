@@ -6,6 +6,7 @@ import { getEnv } from "@/lib/cloudflare";
 import { searchMemberSuggestions } from "@/lib/video/memberSuggestionSearch";
 import { loadMemberSuggestionsIndexFromBucket } from "@/lib/video/memberSuggestionsLoader";
 import { loadMemberSuggestionsCandidatesV2FromBucket } from "@/lib/video/memberSuggestionsV2Loader";
+import type { MemberSuggestionItem } from "@/lib/video/memberSuggestionsCore";
 
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 20;
@@ -42,16 +43,74 @@ async function withIndexTimeout<T>(promise: Promise<T>): Promise<T> {
   }
 }
 
+function refineQueryResponse(args: {
+  query: string;
+  limit: number;
+  offset: number;
+}): Response {
+  return NextResponse.json(
+    {
+      items: [],
+      query: args.query,
+      limit: args.limit,
+      offset: args.offset,
+      nextOffset: null,
+      hasMore: true,
+      hint: "候補が多いため、名前またはX IDを追加で入力してください。",
+      source: "v2",
+    },
+    { headers: PRIVATE_HEADERS },
+  );
+}
+
+function searchResponse(args: {
+  items: MemberSuggestionItem[];
+  query: string;
+  limit: number;
+  offset: number;
+  onlyApproved: boolean;
+  source: "v2" | "v1";
+}): { response: Response; result: ReturnType<typeof searchMemberSuggestions> } {
+  const result = searchMemberSuggestions(args.items, {
+    query: args.query,
+    limit: args.limit,
+    offset: args.offset,
+    onlyApproved: args.onlyApproved,
+  });
+  return {
+    result,
+    response: NextResponse.json(
+      {
+        items: result.items.map((item) => ({
+          id: item.x_user_id,
+          x_name: item.name,
+          score: item.score,
+          matchedBy: item.matchedBy,
+        })),
+        query: args.query,
+        limit: args.limit,
+        offset: args.offset,
+        nextOffset: result.nextOffset,
+        hasMore: result.hasMore,
+        hint: result.hasMore
+          ? "候補が多いため、名前またはX IDを追加で入力してください。"
+          : null,
+        source: args.source,
+      },
+      { headers: PRIVATE_HEADERS },
+    ),
+  };
+}
+
 /**
  * 合作メンバーX ID候補検索。
  *
  * D1はrequest pathで読まない。通常はquery gramに対応するV2 postingだけを読み、
  * V2が未生成/破損/世代不一致の移行期間だけcanonical V1 indexへfallbackする。
- * V2の明示的query budget超過時はV1全件scanへ戻らず、入力追加を促して1102を防ぐ。
+ * V2が候補を切り詰める必要がある広いqueryではpartial順位を返さず入力追加を促す。
+ * 3文字以上のfuzzy検索は、V2だけで従来順位を保証できない場合にV1へfallbackする。
  */
-export async function GET(
-  request: Request,
-): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const userGuard = await requireRouteUser();
   if (!userGuard.ok) {
     return NextResponse.json(
@@ -61,7 +120,9 @@ export async function GET(
   }
 
   const url = new URL(request.url);
-  const rawQuery = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_QUERY_LENGTH);
+  const rawQuery = (url.searchParams.get("q") ?? "")
+    .trim()
+    .slice(0, MAX_QUERY_LENGTH);
   const onlyApproved = url.searchParams.get("onlyApproved") === "1";
 
   const limitValue = Number(url.searchParams.get("limit") ?? "");
@@ -81,6 +142,9 @@ export async function GET(
     .toLowerCase()
     .trim()
     .replace(/^[^\p{L}\p{N}_]+/u, "");
+  const compactQueryLength = compactSearchChars(
+    normalizedQueryForMinLength,
+  ).length;
 
   if (!rawQuery) {
     return NextResponse.json(
@@ -97,7 +161,7 @@ export async function GET(
     );
   }
 
-  if (compactSearchChars(normalizedQueryForMinLength).length < MIN_SEARCH_CHARS) {
+  if (compactQueryLength < MIN_SEARCH_CHARS) {
     return NextResponse.json(
       {
         items: [],
@@ -130,72 +194,58 @@ export async function GET(
       loadMemberSuggestionsCandidatesV2FromBucket(bucket, rawQuery),
     );
 
-    let searchItems;
-    let sourceTruncated = false;
-    let source: "v2" | "v1" = "v2";
-
     if (v2.ok) {
-      searchItems = v2.items;
-      sourceTruncated = v2.truncated;
-    } else if (v2.reason === "query_budget_exceeded") {
-      return NextResponse.json(
-        {
-          items: [],
-          query: rawQuery,
-          limit,
-          offset,
-          nextOffset: null,
-          hasMore: true,
-          hint: "候補が多いため、名前またはX IDを追加で入力してください。",
-        },
-        { headers: PRIVATE_HEADERS },
-      );
-    } else {
-      source = "v1";
-      const loaded = await withIndexTimeout(
-        loadMemberSuggestionsIndexFromBucket(bucket),
-      );
-      if (!loaded.ok) {
-        console.warn("[x-users-search] suggestions unavailable", {
-          v2_reason: v2.reason,
-          v1_reason: loaded.reason,
-        });
-        return NextResponse.json(
-          { error: "suggestions_unavailable" },
-          { status: 503, headers: UNAVAILABLE_HEADERS },
-        );
+      // 切り詰めた候補集合をrankすると上位候補そのものが欠落し得るため、
+      // partial resultは返さない。V1全件scanにも戻らずqueryの絞り込みを促す。
+      if (v2.truncated) {
+        return refineQueryResponse({ query: rawQuery, limit, offset });
       }
-      searchItems = loaded.items;
+
+      const searched = searchResponse({
+        items: v2.items,
+        query: rawQuery,
+        limit,
+        offset,
+        onlyApproved,
+        source: "v2",
+      });
+
+      // 2文字queryではrankerのfuzzy分岐が無効なのでposting集合が完全。
+      // 3文字以上では、現在ページが強いexact/prefix/contains候補だけで満杯なら
+      // postings外のfuzzy候補は順位を逆転できない。そうでない場合だけV1で従来互換を保つ。
+      const v2PageIsComplete =
+        compactQueryLength <= 2 ||
+        (searched.result.items.length === limit &&
+          searched.result.items.every(
+            (item) => !item.matchedBy.startsWith("fuzzy_"),
+          ));
+      if (v2PageIsComplete) return searched.response;
+    } else if (v2.reason === "query_budget_exceeded") {
+      return refineQueryResponse({ query: rawQuery, limit, offset });
     }
 
-    const result = searchMemberSuggestions(searchItems, {
+    const loaded = await withIndexTimeout(
+      loadMemberSuggestionsIndexFromBucket(bucket),
+    );
+    if (!loaded.ok) {
+      console.warn("[x-users-search] suggestions unavailable", {
+        v2_reason: v2.ok ? "compatibility_fallback" : v2.reason,
+        v1_reason: loaded.reason,
+      });
+      return NextResponse.json(
+        { error: "suggestions_unavailable" },
+        { status: 503, headers: UNAVAILABLE_HEADERS },
+      );
+    }
+
+    return searchResponse({
+      items: loaded.items,
       query: rawQuery,
       limit,
       offset,
       onlyApproved,
-    });
-    const hasMore = result.hasMore || sourceTruncated;
-
-    return NextResponse.json(
-      {
-        items: result.items.map((item) => ({
-          id: item.x_user_id,
-          x_name: item.name,
-          score: item.score,
-          matchedBy: item.matchedBy,
-        })),
-        query: rawQuery,
-        limit,
-        offset,
-        nextOffset: result.nextOffset,
-        hasMore,
-        hint: hasMore
-          ? "候補が多いため、名前またはX IDを追加で入力してください。"
-          : null,
-        source,
-      },
-      { headers: PRIVATE_HEADERS },
-    );
+      source: "v1",
+    }).response;
   } catch (error) {
     console.error("[x-users-search] suggestion lookup failed", error);
     return NextResponse.json(
