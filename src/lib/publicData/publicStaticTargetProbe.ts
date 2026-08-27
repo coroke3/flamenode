@@ -98,13 +98,3 @@ export async function probePublicStaticTarget(
     };
   }
 }
-
-/** @deprecated Use probePublicStaticTarget. */
-export async function publicStaticTargetExists(
-  db: DB,
-  targetType: StaticRebuildTargetType,
-  targetId: string,
-): Promise<boolean> {
-  const probe = await probePublicStaticTarget(db, targetType, targetId);
-  return probe.state === "public";
-}
