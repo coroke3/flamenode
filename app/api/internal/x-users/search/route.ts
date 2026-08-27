@@ -5,6 +5,7 @@ import { requireRouteUser } from "@/lib/auth/routeGuard";
 import { getEnv } from "@/lib/cloudflare";
 import { searchMemberSuggestions } from "@/lib/video/memberSuggestionSearch";
 import { loadMemberSuggestionsIndexFromBucket } from "@/lib/video/memberSuggestionsLoader";
+import { loadMemberSuggestionsCandidatesV2FromBucket } from "@/lib/video/memberSuggestionsV2Loader";
 
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 20;
@@ -26,12 +27,27 @@ function compactSearchChars(value: string): string {
   return value.replace(/[^\p{L}\p{N}_]/gu, "");
 }
 
+async function withIndexTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error("suggestions_index_timeout")),
+      INDEX_LOAD_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+}
+
 /**
  * 合作メンバーX ID候補検索。
  *
- * データソースはstatic rebuildが生成するR2 indexのみ。request pathでD1を
- * 一切読まない（fallbackも存在しない）。R2 miss / 不正artifact時は安定した
- * error codeを返し、利用者は手入力で合作メンバーを入力できる。
+ * D1はrequest pathで読まない。通常はquery gramに対応するV2 postingだけを読み、
+ * V2が未生成/破損/世代不一致の移行期間だけcanonical V1 indexへfallbackする。
+ * V2の明示的query budget超過時はV1全件scanへ戻らず、入力追加を促して1102を防ぐ。
  */
 export async function GET(
   request: Request,
@@ -46,7 +62,6 @@ export async function GET(
 
   const url = new URL(request.url);
   const rawQuery = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_QUERY_LENGTH);
-
   const onlyApproved = url.searchParams.get("onlyApproved") === "1";
 
   const limitValue = Number(url.searchParams.get("limit") ?? "");
@@ -67,7 +82,6 @@ export async function GET(
     .trim()
     .replace(/^[^\p{L}\p{N}_]+/u, "");
 
-  // 空queryはR2にもD1にも触れない。
   if (!rawQuery) {
     return NextResponse.json(
       {
@@ -83,8 +97,6 @@ export async function GET(
     );
   }
 
-  // Short input is handled by the already loaded client-side candidates. Keep
-  // this before binding/R2 access so typing does not wake the Worker per key.
   if (compactSearchChars(normalizedQueryForMinLength).length < MIN_SEARCH_CHARS) {
     return NextResponse.json(
       {
@@ -113,36 +125,19 @@ export async function GET(
         { status: 503, headers: UNAVAILABLE_HEADERS },
       );
     }
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error("suggestions_index_timeout")),
-        INDEX_LOAD_TIMEOUT_MS,
-      );
-    });
-    let loaded: Awaited<ReturnType<typeof loadMemberSuggestionsIndexFromBucket>>;
-    try {
-      loaded = await Promise.race([
-        loadMemberSuggestionsIndexFromBucket(bucket),
-        timeout,
-      ]);
-    } finally {
-      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-    }
-    if (!loaded.ok) {
-      console.warn("[x-users-search] suggestions unavailable", { reason: loaded.reason });
-      return NextResponse.json(
-        { error: "suggestions_unavailable" },
-        { status: 503, headers: UNAVAILABLE_HEADERS },
-      );
-    }
 
-    const normalizedQueryForLength = rawQuery
-      .normalize("NFKC")
-      .toLowerCase()
-      .trim()
-      .replace(/^[＠@]+/, "");
-    if (compactSearchChars(normalizedQueryForLength).length < 1) {
+    const v2 = await withIndexTimeout(
+      loadMemberSuggestionsCandidatesV2FromBucket(bucket, rawQuery),
+    );
+
+    let searchItems;
+    let sourceTruncated = false;
+    let source: "v2" | "v1" = "v2";
+
+    if (v2.ok) {
+      searchItems = v2.items;
+      sourceTruncated = v2.truncated;
+    } else if (v2.reason === "query_budget_exceeded") {
       return NextResponse.json(
         {
           items: [],
@@ -150,24 +145,39 @@ export async function GET(
           limit,
           offset,
           nextOffset: null,
-          hasMore: false,
-          hint: "search_too_short",
+          hasMore: true,
+          hint: "候補が多いため、名前またはX IDを追加で入力してください。",
         },
         { headers: PRIVATE_HEADERS },
       );
+    } else {
+      source = "v1";
+      const loaded = await withIndexTimeout(
+        loadMemberSuggestionsIndexFromBucket(bucket),
+      );
+      if (!loaded.ok) {
+        console.warn("[x-users-search] suggestions unavailable", {
+          v2_reason: v2.reason,
+          v1_reason: loaded.reason,
+        });
+        return NextResponse.json(
+          { error: "suggestions_unavailable" },
+          { status: 503, headers: UNAVAILABLE_HEADERS },
+        );
+      }
+      searchItems = loaded.items;
     }
 
-    const result = searchMemberSuggestions(loaded.items, {
+    const result = searchMemberSuggestions(searchItems, {
       query: rawQuery,
       limit,
       offset,
       onlyApproved,
     });
-    const hasMore = result.hasMore;
+    const hasMore = result.hasMore || sourceTruncated;
 
     return NextResponse.json(
       {
-        // 既存のVideoMembersFieldが利用する内部API DTOを維持する。
         items: result.items.map((item) => ({
           id: item.x_user_id,
           x_name: item.name,
@@ -182,6 +192,7 @@ export async function GET(
         hint: hasMore
           ? "候補が多いため、名前またはX IDを追加で入力してください。"
           : null,
+        source,
       },
       { headers: PRIVATE_HEADERS },
     );
