@@ -19,8 +19,6 @@ export {
   resolveGeneralEditableScope,
   sectionAllowedByGeneralFields,
   disabledFieldKeysFromGeneralFields,
-  normalModeAlwaysDisabledFieldKeys,
-  NORMAL_MODE_ALWAYS_DISABLED_FIELD_KEYS,
   parseGeneralEditablePolicyV2,
   resolveGeneralEditableFieldsFromPolicy,
   VIDEO_SYSTEM_ONLY_PARAMETER_KEYS,
