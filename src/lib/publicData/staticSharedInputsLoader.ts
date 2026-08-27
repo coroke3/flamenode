@@ -36,6 +36,13 @@ import {
   type PublicXIconMapPayload,
 } from "./publicIconProjection";
 import {
+  normalizePublicXIconV2Manifest,
+  normalizePublicXIconV2Shard,
+  PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+  publicXIconV2ShardForXId,
+  publicXIconV2ShardObjectKey,
+} from "./publicIconProjectionV2";
+import {
   normalizeStaticTopSlotStats,
   TOP_SLOT_STATS_OBJECT_KEY,
   type StaticTopSlotStats,
@@ -206,63 +213,123 @@ function buildRequiredXIdsCacheKey(
   return ids.join(",");
 }
 
+async function loadPublicXIconMapV1(
+  requiredXUserIds: readonly string[],
+): Promise<PublicXIconMapPayload | null> {
+  const result = await loadStaticJsonFreshStaleUnavailable({
+    key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
+    normalize: normalizePublicXIconMap,
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
+  });
+  const requiredIds = new Set(requiredXUserIds);
+  const primary = result.value;
+  const needsIndexFallback =
+    !primary ||
+    Array.from(requiredIds).some((xId) => {
+      const entry = primary.entries[xId];
+      if (!entry) return true;
+      return entry.source === "video";
+    });
+
+  if (!needsIndexFallback) return primary;
+
+  const indexResult = await loadStaticJsonFreshStaleUnavailable({
+    key: "users/index.json",
+    normalize: (value) =>
+      normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
+  });
+  if (!indexResult.value) return primary;
+
+  const entries = { ...(primary?.entries ?? {}) };
+  for (const user of indexResult.value.items) {
+    const xId = normalizeXId(user.x_id);
+    if (!xId) continue;
+    if (requiredIds.size > 0 && !requiredIds.has(xId)) continue;
+    const existing = entries[xId];
+    if (existing?.source === "registered" || existing?.source === "none") {
+      continue;
+    }
+    entries[xId] = {
+      icon_url: user.icon_url ?? existing?.icon_url ?? null,
+      source: user.icon_url ? "registered" : "none",
+    };
+  }
+
+  return {
+    schema_version: 1,
+    generated_at: primary?.generated_at ?? indexResult.value.generatedAt ?? 0,
+    entries,
+  };
+}
+
+async function loadPublicXIconMapV2(
+  requiredXUserIds: readonly string[],
+): Promise<PublicXIconMapPayload | null> {
+  if (requiredXUserIds.length === 0) return null;
+  const manifestResult = await loadStaticJsonFreshStaleUnavailable({
+    key: PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+    normalize: normalizePublicXIconV2Manifest,
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: 60,
+  });
+  const manifest = manifestResult.value;
+  if (!manifest) return null;
+
+  const requiredShards = [
+    ...new Set(requiredXUserIds.map(publicXIconV2ShardForXId)),
+  ].filter((shard) => manifest.shards.includes(shard));
+  if (requiredShards.length === 0) {
+    return {
+      schema_version: 1,
+      generated_at: manifest.generated_at,
+      entries: {},
+    };
+  }
+
+  const results = await Promise.all(
+    requiredShards.map(async (shard) =>
+      loadStaticJsonFreshStaleUnavailable({
+        key: publicXIconV2ShardObjectKey(manifest.generation, shard),
+        normalize: (value) =>
+          normalizePublicXIconV2Shard(value, {
+            generation: manifest.generation,
+            shard,
+          }),
+        maxStaleAgeSec: 24 * 60 * 60,
+        cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
+      }),
+    ),
+  );
+  if (results.some((result) => !result.value)) return null;
+
+  const requiredIds = new Set(requiredXUserIds);
+  const entries: PublicXIconMapPayload["entries"] = {};
+  for (const result of results) {
+    for (const [xId, entry] of Object.entries(result.value?.entries ?? {})) {
+      if (requiredIds.has(xId)) entries[xId] = entry;
+    }
+  }
+  return {
+    schema_version: 1,
+    generated_at: manifest.generated_at,
+    entries,
+  };
+}
+
 /**
- * 公開アイコンは共有mapを正本とし、必要なIDが欠ける場合だけ
- * R2上の users/index.json で補完する。どちらも利用できない場合もD1へは降りない。
+ * 公開アイコンはV2の必要shardだけを優先する。V2 rollout中のmanifest/shard欠損は
+ * canonical V1へfail-safeし、request pathでD1へは降りない。
  */
 const loadPublicXIconMapOptionalImpl = cache(
   async (requiredIdsKey: string): Promise<PublicXIconMapPayload | null> => {
     const requiredXUserIds =
       requiredIdsKey.length === 0 ? [] : requiredIdsKey.split(",");
-    const result = await loadStaticJsonFreshStaleUnavailable({
-      key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
-      normalize: normalizePublicXIconMap,
-      maxStaleAgeSec: 24 * 60 * 60,
-      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
-    });
-    const requiredIds = new Set(requiredXUserIds);
-    const primary = result.value;
-    const needsIndexFallback =
-      !primary ||
-      Array.from(requiredIds).some((xId) => {
-        const entry = primary.entries[xId];
-        // registered / none は正本済み。欠損と video（未昇格）だけ index へ降りる。
-        if (!entry) return true;
-        return entry.source === "video";
-      });
-
-    if (!needsIndexFallback) return primary;
-
-    const indexResult = await loadStaticJsonFreshStaleUnavailable({
-      key: "users/index.json",
-      normalize: (value) =>
-        normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
-      maxStaleAgeSec: 24 * 60 * 60,
-      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
-    });
-    if (!indexResult.value) return primary;
-
-    const entries = { ...(primary?.entries ?? {}) };
-    for (const user of indexResult.value.items) {
-      const xId = normalizeXId(user.x_id);
-      if (!xId) continue;
-      if (requiredIds.size > 0 && !requiredIds.has(xId)) continue;
-      const existing = entries[xId];
-      if (existing?.source === "registered" || existing?.source === "none") {
-        continue;
-      }
-      entries[xId] = {
-        icon_url: user.icon_url ?? existing?.icon_url ?? null,
-        source: user.icon_url ? "registered" : "none",
-      };
-    }
-
-    return {
-      schema_version: 1,
-      generated_at:
-        primary?.generated_at ?? indexResult.value.generatedAt ?? 0,
-      entries,
-    };
+    const v2 = await loadPublicXIconMapV2(requiredXUserIds);
+    if (v2) return v2;
+    return loadPublicXIconMapV1(requiredXUserIds);
   },
 );
 
