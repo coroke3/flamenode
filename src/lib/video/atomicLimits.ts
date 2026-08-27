@@ -1,7 +1,4 @@
-import {
-  MAX_SLOTS_PER_VIDEO,
-  MAX_STAGE_PERMISSION_QUESTIONS,
-} from "../event/eventLimits.ts";
+import { MAX_STAGE_PERMISSION_QUESTIONS } from "../event/eventLimits.ts";
 
 /**
  * 画面・ドメイン上の公開メンバー最大件数。
