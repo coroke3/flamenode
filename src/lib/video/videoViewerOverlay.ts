@@ -15,35 +15,15 @@ import {
   videoInteractionsAuth,
   videos as videosTable,
 } from "@/lib/db/schema";
-import {
-  fetchAuthorizedPrivateVideoChapters,
-  type AuthorizedPrivateVideoChapter,
-} from "@/lib/db/videoDetailQueries";
+import { fetchAuthorizedPrivateVideoChapters } from "@/lib/db/videoDetailQueries";
 import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { loadPublicEventPlaylistR2Only } from "@/lib/publicData/r2EventPlaylist";
 import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 import { isLiveApiEnabled } from "@/lib/operationMode/policy";
-
-export type VideoViewerOverlayPlaylistItem = {
-  id: string;
-  title: string;
-  youtube_video_id: string | null;
-  display_name: string;
-};
-
-export type VideoViewerOverlayDto = {
-  loggedIn: boolean;
-  authUnavailable: boolean;
-  isTosAccepted: boolean;
-  termsReacceptRequired: boolean;
-  activeXId: string | null;
-  likeActive: boolean;
-  bookmarkActive: boolean;
-  viewerXApproved: boolean;
-  privateChapters: AuthorizedPrivateVideoChapter[];
-  playlistLabel: string;
-  playlistItems: VideoViewerOverlayPlaylistItem[];
-};
+import type {
+  VideoViewerOverlayDto,
+  VideoViewerOverlayPlaylistItem,
+} from "./videoViewerOverlayCore";
 
 function emptyOverlay(args?: {
   playlistLabel?: string;
