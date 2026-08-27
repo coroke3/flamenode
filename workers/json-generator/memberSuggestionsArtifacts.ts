@@ -4,6 +4,7 @@ import {
   staticArtifactContentHash,
   type ArtifactHashCache,
 } from "./r2Dedup.ts";
+import { publishMemberSuggestionsV2BestEffort } from "./memberSuggestionsV2Artifacts.ts";
 import {
   assertMemberSuggestionsRowLimit,
   buildMemberSuggestionArtifacts,
@@ -28,7 +29,7 @@ const MEMBER_SUGGESTIONS_CLEANUP_LIMIT = 100;
  * 全source readに明示的な上限を設ける。上限超過時はpartial indexを静かに
  * publishせず、generation build自体を失敗させて旧世代（旧manifest）を維持する。
  */
-const SOURCE_LIMIT_X_USERS = 20_001; // MAX_ROWS + 1（超過検出用）
+const SOURCE_LIMIT_X_USERS = 20_001;
 const SOURCE_LIMIT_ALIASES = 50_000;
 const SOURCE_LIMIT_VIDEO_HISTORY = 20_000;
 
@@ -39,13 +40,14 @@ type Env = {
 };
 
 type RebuildSignal = AbortSignal | undefined;
-
 type TrackedArtifactRow = { object_key: string };
 
 function throwIfAborted(signal: RebuildSignal): void {
   if (!signal?.aborted) return;
   if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(signal.reason === undefined ? "static rebuild aborted" : String(signal.reason));
+  throw new Error(
+    signal.reason === undefined ? "static rebuild aborted" : String(signal.reason),
+  );
 }
 
 function assertArtifactSize(key: string, value: unknown, maxBytes: number): void {
@@ -67,7 +69,6 @@ async function loadSourceEntries(
 ): Promise<MemberSuggestionSourceEntry[]> {
   throwIfAborted(signal);
 
-  // 1. x_users の現在プロフィール（表示名の正本・approval status）。
   const profileResult = await env.DB.prepare(
     `SELECT id, x_name, approval_status
        FROM x_users
@@ -82,7 +83,6 @@ async function loadSourceEntries(
     throw new Error("member_suggestions_x_users_limit_exceeded");
   }
 
-  // 2. x_user_aliases。
   const aliasResult = await env.DB.prepare(
     `SELECT x_user_id, alias_x_id
        FROM x_user_aliases
@@ -97,7 +97,6 @@ async function loadSourceEntries(
     throw new Error("member_suggestions_alias_limit_exceeded");
   }
 
-  // 3. 動画クリエイター履歴（新しい順）。
   const creatorResult = await env.DB.prepare(
     `SELECT creator_x_user_id, creator_display_name, updated_at
        FROM videos
@@ -117,7 +116,6 @@ async function loadSourceEntries(
     throw new Error("member_suggestions_video_history_limit_exceeded");
   }
 
-  // 4. メンバー履歴（動画更新日の新しい順）。
   const memberResult = await env.DB.prepare(
     `SELECT video_members.x_user_id AS x_user_id,
             video_members.name AS name,
@@ -217,14 +215,13 @@ async function recordArtifacts(
   }
 }
 
-/** stale generation cleanupはbounded。manifestが指す現行keyは必ずlive扱い。 */
+/** stale generation cleanupはbounded。D1更新はjson_each 1文に集約する。 */
 async function reconcileTrackedArtifacts(
   env: Env,
   liveKeys: readonly string[],
   signal: RebuildSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
   const rows = await env.DB.prepare(
     `SELECT object_key
        FROM static_artifacts
@@ -239,25 +236,36 @@ async function reconcileTrackedArtifacts(
     )
     .all<TrackedArtifactRow>();
   throwIfAborted(signal);
+
   const live = new Set(liveKeys);
   const staleKeys = (rows.results ?? [])
     .map((row) => row.object_key)
     .filter((key) => !live.has(key));
   if (staleKeys.length === 0) return;
+
   await env.R2.delete(staleKeys);
   throwIfAborted(signal);
-  for (const key of staleKeys) {
-    await env.DB.prepare(
-      `UPDATE static_artifacts
-          SET deleted_at = ?
-        WHERE target_type = ? AND target_id = ? AND object_key = ?
-          AND deleted_at IS NULL`,
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.prepare(
+    `UPDATE static_artifacts
+        SET deleted_at = ?
+      WHERE target_type = ?
+        AND target_id = ?
+        AND deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM json_each(?) AS stale_keys
+          WHERE CAST(stale_keys.value AS TEXT) = static_artifacts.object_key
+        )`,
+  )
+    .bind(
+      now,
+      MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
+      MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
+      JSON.stringify(staleKeys),
     )
-      .bind(now, MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE, MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID, key)
-      .run();
-    env.artifactHashCache?.set(key, null);
-    throwIfAborted(signal);
-  }
+    .run();
+  for (const key of staleKeys) env.artifactHashCache?.set(key, null);
+  throwIfAborted(signal);
 }
 
 type MemberSuggestionsTrackedArtifact = {
@@ -397,8 +405,8 @@ export type MemberSuggestionsRebuildResult = {
 };
 
 /**
- * member_suggestions targetの本体。generation-specific indexを書いてから
- * manifest（唯一のcommit point）を最後に書く。途中失敗しても旧manifestは壊れない。
+ * member_suggestions targetの本体。V1をcanonicalとしてcommitした後、同じitemsから
+ * bounded V2 postingsをbest-effortで生成する。V2障害はV1成功を巻き戻さない。
  */
 export async function rebuildMemberSuggestions(
   env: Env,
@@ -411,7 +419,6 @@ export async function rebuildMemberSuggestions(
   throwIfAborted(signal);
 
   const generatedAt = Math.floor(Date.now() / 1000);
-  // generation hashは内容依存（generated_atを除いた本文）。同一内容なら同一世代。
   const generation = safeGeneration(
     await staticArtifactContentHash(memberSuggestionsGenerationMaterial(items)),
   );
@@ -423,13 +430,13 @@ export async function rebuildMemberSuggestions(
   });
 
   const indexKey = memberSuggestionsIndexObjectKey(generation);
-  // 全size guardをR2 PUT前に評価する。guard失敗で半端な新世代を作らない。
   assertArtifactSize(indexKey, index, MEMBER_SUGGESTIONS_MAX_INDEX_BYTES);
-  assertArtifactSize(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, manifest, MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES);
+  assertArtifactSize(
+    MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+    manifest,
+    MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES,
+  );
 
-  // indexを追跡してからmanifest（唯一のcommit point）を最後に書く。
-  // trackingまたは後続のmanifest準備に失敗した場合は、今回実際にPUTした
-  // generation-specific keyだけをbest-effort削除し、旧manifestを維持する。
   const committed: MemberSuggestionsTrackedArtifact[] = [];
   let previousManifest: PreviousManifestBody | undefined;
   let manifestArtifact: MemberSuggestionsTrackedArtifact | undefined;
@@ -463,6 +470,25 @@ export async function rebuildMemberSuggestions(
       await restorePreviousManifest(env, previousManifest);
     }
     throw error;
+  }
+
+  try {
+    await publishMemberSuggestionsV2BestEffort({
+      bucket: env.R2,
+      items,
+      generatedAt,
+      generation,
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn(
+      JSON.stringify({
+        service: "member-suggestions-v2",
+        result: "v1_fallback_publish_error",
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
   }
 
   const liveKeys = committed.map((artifact) => artifact.objectKey);
