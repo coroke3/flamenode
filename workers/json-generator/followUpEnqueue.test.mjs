@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { enqueueComposerFollowUps, enqueueTopRecommendAfterUsersIndex } from "./followUpEnqueue.ts";
+import { enqueueComposerFollowUps } from "./followUpEnqueue.ts";
 
 const FOLLOW_UP_REASON = "users_index_follow_up";
 const FOLLOW_UP_SOURCE = readFileSync(
@@ -145,29 +145,6 @@ test("enqueueComposerFollowUps は未知 producer で false", async () => {
   assert.equal(changed, false);
 });
 
-test("enqueueTopRecommendAfterUsersIndex は top/recommend 欠損時に INSERT する", async (t) => {
-  const harness = createHarness(t);
-
-  const changed = await enqueueTopRecommendAfterUsersIndex(harness.env);
-
-  assert.equal(changed, true);
-  assert.equal(harness.countRows(), 2);
-
-  const rows = harness.readActiveRows();
-  assert.equal(rows.length, 2);
-  assert.deepEqual(
-    rows.map((row) => row.target_type),
-    ["recommend", "top"],
-  );
-  for (const row of rows) {
-    assert.equal(row.target_id, "global");
-    assert.equal(row.reason, FOLLOW_UP_REASON);
-    assert.equal(row.priority, "high");
-    assert.equal(row.status, "pending");
-    assert.match(row.id, /^srb:(top|recommend):/);
-  }
-});
-
 test("enqueueComposerTargets は composer follow-up を high priority で INSERT する", () => {
   const enqueueFn = FOLLOW_UP_SOURCE.match(
     /async function enqueueComposerTargets\([\s\S]*?(?=\/\*\*|export async function |async function )/,
@@ -180,7 +157,7 @@ test("enqueueComposerTargets は composer follow-up を high priority で INSERT
   );
 });
 
-test("enqueueTopRecommendAfterUsersIndex は pending/processing 既存時に priority を high に昇格する", async (t) => {
+test("enqueueComposerFollowUps(users_index) は pending/processing 既存時に priority を high に昇格する", async (t) => {
   const harness = createHarness(t);
   harness.insertRow({
     id: "srb:top:existing",
@@ -199,7 +176,7 @@ test("enqueueTopRecommendAfterUsersIndex は pending/processing 既存時に pri
     updatedAt: 200,
   });
 
-  const changed = await enqueueTopRecommendAfterUsersIndex(harness.env);
+  const changed = await enqueueComposerFollowUps(harness.env, "users_index");
 
   assert.equal(changed, true);
   const rows = harness.readActiveRows();
@@ -208,7 +185,7 @@ test("enqueueTopRecommendAfterUsersIndex は pending/processing 既存時に pri
   }
 });
 
-test("enqueueTopRecommendAfterUsersIndex は pending/processing 既存時に UPDATE し INSERT しない", async (t) => {
+test("enqueueComposerFollowUps(users_index) は pending/processing 既存時に UPDATE し INSERT しない", async (t) => {
   const harness = createHarness(t);
   harness.insertRow({
     id: "srb:top:existing",
@@ -225,7 +202,7 @@ test("enqueueTopRecommendAfterUsersIndex は pending/processing 既存時に UPD
     updatedAt: 200,
   });
 
-  const changed = await enqueueTopRecommendAfterUsersIndex(harness.env);
+  const changed = await enqueueComposerFollowUps(harness.env, "users_index");
 
   assert.equal(changed, true);
   assert.equal(harness.countRows(), 2);
@@ -259,14 +236,14 @@ test("enqueueTopRecommendAfterUsersIndex は pending/processing 既存時に UPD
   assert.ok(recommendRow.updated_at > 200);
 });
 
-test("enqueueTopRecommendAfterUsersIndex の戻り値は変更がないとき false", async () => {
-  const changed = await enqueueTopRecommendAfterUsersIndex(createNoChangeEnv());
+test("enqueueComposerFollowUps(users_index) の戻り値は変更がないとき false", async () => {
+  const changed = await enqueueComposerFollowUps(createNoChangeEnv(), "users_index");
   assert.equal(changed, false);
 });
 
-test("enqueueTopRecommendAfterUsersIndex の戻り値は INSERT/UPDATE 時 true", async (t) => {
+test("enqueueComposerFollowUps(users_index) の戻り値は INSERT/UPDATE 時 true", async (t) => {
   const harness = createHarness(t);
 
-  assert.equal(await enqueueTopRecommendAfterUsersIndex(harness.env), true);
-  assert.equal(await enqueueTopRecommendAfterUsersIndex(harness.env), true);
+  assert.equal(await enqueueComposerFollowUps(harness.env, "users_index"), true);
+  assert.equal(await enqueueComposerFollowUps(harness.env, "users_index"), true);
 });
