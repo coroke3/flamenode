@@ -79,6 +79,7 @@ export function Pagination({
           href={buildHref(currentPage - 1)}
           className="fn-btn fn-btn-ghost fn-btn-sm"
           aria-label="前のページ"
+          prefetch={false}
         >
           <Icon name="chevron-left" size={12} aria-hidden />
           前へ
@@ -107,6 +108,7 @@ export function Pagination({
             }`}
             aria-current={p === currentPage ? "page" : undefined}
             style={{ minWidth: 30, justifyContent: "center" }}
+            prefetch={false}
           >
             {p}
           </Link>
@@ -118,6 +120,7 @@ export function Pagination({
           href={buildHref(currentPage + 1)}
           className="fn-btn fn-btn-ghost fn-btn-sm"
           aria-label="次のページ"
+          prefetch={false}
         >
           次へ
           <Icon name="chevron-right" size={12} aria-hidden />

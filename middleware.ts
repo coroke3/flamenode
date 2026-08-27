@@ -19,7 +19,9 @@ export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
 
-async function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
+let configuredSiteOriginPromise: Promise<string | undefined> | null = null;
+
+async function loadConfiguredSiteOrigin(): Promise<string | undefined> {
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const env = getCloudflareContext().env as {
@@ -38,6 +40,11 @@ async function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
   );
 }
 
+function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
+  configuredSiteOriginPromise ??= loadConfiguredSiteOrigin();
+  return configuredSiteOriginPromise;
+}
+
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const canonicalRedirect = resolveCanonicalHostRedirect({
     configuredOrigin: await resolveConfiguredSiteOrigin(),
@@ -50,16 +57,8 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(canonicalRedirect, 308);
   }
 
-  const requestHeaders = new Headers(req.headers);
-  requestHeaders.set("x-pathname", req.nextUrl.pathname);
-  const search = req.nextUrl.searchParams.toString();
-  if (search) requestHeaders.set("x-search", search);
-
-  const passThrough = () =>
-    NextResponse.next({ request: { headers: requestHeaders } });
-
   const isMaintenance = await resolveMiddlewareMaintenance();
-  if (!isMaintenance) return passThrough();
+  if (!isMaintenance) return NextResponse.next();
 
   const url = req.nextUrl;
   if (
@@ -68,7 +67,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     url.pathname.startsWith("/api/auth") ||
     url.pathname.startsWith("/api/health")
   ) {
-    return passThrough();
+    return NextResponse.next();
   }
 
   return NextResponse.redirect(new URL("/maintenance", url));
