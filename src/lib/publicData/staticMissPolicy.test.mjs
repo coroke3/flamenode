@@ -6,7 +6,7 @@ import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
 if (runTestWithTsx(import.meta.url)) {
   const { DatabaseSync } = await import("node:sqlite");
   const { drizzle } = await import("drizzle-orm/sqlite-proxy");
-  const { publicStaticTargetExists } = await import("./staticMissPolicy.ts");
+  const { publicStaticTargetExists } = await import("./publicStaticTargetProbe.ts");
 
   function createHarness() {
     const sqlite = new DatabaseSync(":memory:");
