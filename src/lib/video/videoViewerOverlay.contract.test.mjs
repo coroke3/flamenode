@@ -1,0 +1,60 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const [page, route, client, interaction, aboutPage, slotIconRoute] = await Promise.all([
+  readFile(new URL("../../../app/(public)/[id]/page.tsx", import.meta.url), "utf8"),
+  readFile(
+    new URL("../../../app/api/videos/[id]/viewer-overlay/route.ts", import.meta.url),
+    "utf8",
+  ),
+  readFile(new URL("./videoViewerOverlayClient.ts", import.meta.url), "utf8"),
+  readFile(
+    new URL("../../components/video/InteractionButton.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(new URL("../../../app/(public)/about/page.tsx", import.meta.url), "utf8"),
+  readFile(
+    new URL("../../../app/api/media/slot-submission-icon/[slotId]/route.ts", import.meta.url),
+    "utf8",
+  ),
+]);
+
+test("公開動画SSRはviewer Auth/D1を実行せずclient overlayへ分離する", () => {
+  assert.doesNotMatch(page, /getCurrentUser/);
+  assert.doesNotMatch(page, /withDatabase/);
+  assert.doesNotMatch(page, /fetchVideoViewerOverlay/);
+  assert.doesNotMatch(page, /videoInteractionsAuth/);
+  assert.match(page, /VideoInteractionActions/);
+  assert.match(page, /VideoViewerUtilityDock/);
+});
+
+test("viewer overlay APIはprivate no-storeで公開動画だけを対象にする", () => {
+  assert.match(route, /loadStaticVideoDetail/);
+  assert.match(route, /visibility_status !== "public"/);
+  assert.match(route, /"Cache-Control": "private, no-store, no-cache, must-revalidate"/);
+  assert.match(route, /loadVideoViewerOverlay/);
+});
+
+test("viewer overlay clientは同一requestを共有しRSC refreshを要求しない", () => {
+  assert.match(client, /existing\?\.promise/);
+  assert.match(client, /cache: "no-store"/);
+  assert.match(client, /playlistReady/);
+  assert.match(client, /ACTIVE_X_CHANGED_EVENT/);
+  assert.doesNotMatch(interaction, /router\.refresh\(\)/);
+  assert.doesNotMatch(interaction, /useRouter/);
+});
+
+test("about本文はstaticでstatsだけclientへ分離する", () => {
+  assert.doesNotMatch(aboutPage, /loadStaticTopPage/);
+  assert.doesNotMatch(aboutPage, /export const dynamic\s*=\s*["']force-dynamic["']/);
+  assert.match(aboutPage, /<AboutStats \/>/);
+});
+
+test("public_name slot iconはAuth.jsより先に公開判定する", () => {
+  const probeIndex = slotIconRoute.indexOf("probeSlotSubmissionIcon");
+  const authIndex = slotIconRoute.indexOf("getCurrentUser()");
+  assert.ok(probeIndex >= 0 && authIndex >= 0 && probeIndex < authIndex);
+  assert.match(slotIconRoute, /probe\.kind === "public"/);
+  assert.match(slotIconRoute, /serveSlotSubmissionIconRow\(env, probe\.row, null\)/);
+});
