@@ -33,8 +33,7 @@ function emptyOverlay(authUnavailable = false): VideoViewerOverlayDto {
 }
 
 function stringOrNull(value: unknown): string | null {
-  if (value == null) return null;
-  if (typeof value !== "string") return null;
+  if (value == null || typeof value !== "string") return null;
   return value;
 }
 
@@ -148,7 +147,9 @@ async function fetchOverlay(
   ) {
     return existing.value;
   }
-  if (!force && existing?.promise) return existing.promise;
+  // force refresh時も同一keyの既存in-flightは共有する。Active X変更イベントを
+  // 複数componentが同時に受けてもAPI requestを重複させない。
+  if (existing?.promise) return existing.promise;
 
   const params = new URLSearchParams();
   if (playlist) params.set("playlist", playlist);
@@ -173,17 +174,7 @@ async function fetchOverlay(
     });
 
   cache.set(key, { ...existing, promise });
-  try {
-    return await promise;
-  } finally {
-    const current = cache.get(key);
-    if (current?.promise === promise) {
-      cache.set(key, {
-        ...(current.value ? { value: current.value } : {}),
-        ...(current.fetchedAt != null ? { fetchedAt: current.fetchedAt } : {}),
-      });
-    }
-  }
+  return promise;
 }
 
 export function invalidateVideoViewerOverlay(videoId?: string): void {
@@ -200,15 +191,18 @@ export function useVideoViewerOverlay(
   videoId: string,
   explicitPlaylist?: string,
 ): { overlay: VideoViewerOverlayDto; loading: boolean; refresh: () => void } {
+  const explicit = explicitPlaylist !== undefined;
   const [playlist, setPlaylist] = React.useState(
-    explicitPlaylist === undefined ? "" : resolvePlaylist(explicitPlaylist),
+    explicit ? explicitPlaylist.trim().slice(0, 128) : "",
   );
+  const [playlistReady, setPlaylistReady] = React.useState(explicit);
   const [overlay, setOverlay] = React.useState<VideoViewerOverlayDto>(() => emptyOverlay());
   const [loading, setLoading] = React.useState(true);
   const [nonce, setNonce] = React.useState(0);
 
   React.useEffect(() => {
     setPlaylist(resolvePlaylist(explicitPlaylist));
+    setPlaylistReady(true);
   }, [explicitPlaylist]);
 
   React.useEffect(() => {
@@ -221,6 +215,7 @@ export function useVideoViewerOverlay(
   }, [videoId]);
 
   React.useEffect(() => {
+    if (!playlistReady) return;
     let active = true;
     setLoading(true);
     void fetchOverlay(videoId, playlist, nonce > 0).then((value) => {
@@ -231,7 +226,7 @@ export function useVideoViewerOverlay(
     return () => {
       active = false;
     };
-  }, [videoId, playlist, nonce]);
+  }, [videoId, playlist, playlistReady, nonce]);
 
   return {
     overlay,
