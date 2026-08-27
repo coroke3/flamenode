@@ -13,7 +13,13 @@ import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { parsePublicVideoSort } from "@/lib/db/listQueries";
-import { loadStaticRecentVideosPage, loadStaticPopularVideosPage, loadStaticSearchVideosPage, loadPublicEventVideosPage, setPublicRequestRoute } from "@/lib/publicData/loader";
+import {
+  loadStaticRecentVideosPage,
+  loadStaticPopularVideosPage,
+  loadStaticSearchVideosPage,
+  loadPublicEventVideosPage,
+  setPublicRequestRoute,
+} from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "作品一覧",
@@ -33,6 +39,15 @@ interface SearchParams {
 
 const PAGE_SIZE = 24;
 const LIST_HREF = "/list";
+const MAX_SEARCH_LENGTH = 100;
+const MIN_SEARCH_CHARS = 2;
+
+function compactSearchChars(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}_]/gu, "");
+}
 
 export default async function ListPage({
   searchParams,
@@ -50,20 +65,24 @@ export default async function ListPage({
     rawView === "index" ? "index" : rawView === "compact" ? "compact" : "grid";
   const parsedSort = parsePublicVideoSort(sort);
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const boundedQuery = q.trim().slice(0, MAX_SEARCH_LENGTH);
+  const hasQuery = boundedQuery.length > 0;
+  const searchTooShort =
+    hasQuery && compactSearchChars(boundedQuery).length < MIN_SEARCH_CHARS;
 
   setPublicRequestRoute("/list");
 
   const staticRecentLoad =
-    !q.trim() && parsedSort === "new" && !event
+    !hasQuery && parsedSort === "new" && !event
       ? await loadStaticRecentVideosPage({
           page: pageNum,
           pageSize: PAGE_SIZE,
-          q,
+          q: boundedQuery,
           sort: "new",
         })
       : null;
   const staticOldLoad =
-    !q.trim() && parsedSort === "old" && !event
+    !hasQuery && parsedSort === "old" && !event
       ? await loadStaticRecentVideosPage({
           page: pageNum,
           pageSize: PAGE_SIZE,
@@ -71,26 +90,26 @@ export default async function ListPage({
         })
       : null;
   const staticPopularLoad =
-    !q.trim() && parsedSort === "score" && !event
+    !hasQuery && parsedSort === "score" && !event
       ? await loadStaticPopularVideosPage({ page: pageNum, pageSize: PAGE_SIZE })
       : null;
   const staticSearchLoad =
-    q.trim() && !event
+    hasQuery && !searchTooShort && !event
       ? await loadStaticSearchVideosPage({
-          q,
+          q: boundedQuery,
           sort: parsedSort,
           page: pageNum,
           pageSize: PAGE_SIZE,
         })
       : null;
   const eventListLoad =
-    event.trim()
+    event.trim() && !searchTooShort
       ? await loadPublicEventVideosPage({
           eventId: event.trim(),
           sort: parsedSort,
           page: pageNum,
           pageSize: PAGE_SIZE,
-          q,
+          q: boundedQuery,
         })
       : null;
   const staticLoad =
@@ -112,7 +131,7 @@ export default async function ListPage({
           total: staticLoad.page.total,
           eventInfo: null,
         }
-      : { videos: [] as VideoCardData[], total: 0, eventInfo: null };
+      : { videos: [], total: 0, eventInfo: null };
 
   const { videos = [], total = 0, eventInfo = null } = data ?? {};
   const listUnavailable =
@@ -131,120 +150,141 @@ export default async function ListPage({
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     return p.toString();
   };
-  const activeFilterCount = [q.trim(), sort !== "new" ? sort : "", event].filter(Boolean).length;
+  const activeFilterCount = [
+    boundedQuery,
+    sort !== "new" ? sort : "",
+    event,
+  ].filter(Boolean).length;
 
   return (
     <div className={`fn-public-container fn-page ${styles.page}`}>
-        <header className="fn-page-head fn-page-head--split">
-          <div className="fn-page-head-main">
-            <span className="fn-eyebrow">ARCHIVE</span>
-            <h1 className="fn-display fn-page-title">作品一覧</h1>
-            <p className="fn-page-lead">{`${total.toLocaleString()} works`}</p>
+      <header className="fn-page-head fn-page-head--split">
+        <div className="fn-page-head-main">
+          <span className="fn-eyebrow">ARCHIVE</span>
+          <h1 className="fn-display fn-page-title">作品一覧</h1>
+          <p className="fn-page-lead">{`${total.toLocaleString()} works`}</p>
+        </div>
+        <div className="fn-cr-controls" aria-label="表示形式">
+          <div className="fn-cr-segment fn-cr-segment--icon-only">
+            <Link
+              href={`/list?${params({ view: "grid", page: "1" })}`}
+              className={`fn-cr-seg-btn ${view === "grid" ? "is-active" : ""}`}
+              aria-current={view === "grid" ? "page" : undefined}
+              aria-label="タイル表示"
+              title="タイル表示"
+              prefetch={false}
+            >
+              <Icon name="grid" size={14} aria-hidden />
+              <span className={styles.viewLabel}>タイル</span>
+            </Link>
+            <Link
+              href={`/list?${params({ view: "compact", page: "1" })}`}
+              className={`fn-cr-seg-btn ${view === "compact" ? "is-active" : ""}`}
+              aria-current={view === "compact" ? "page" : undefined}
+              aria-label="コンパクト表示"
+              title="コンパクト表示"
+              prefetch={false}
+            >
+              <Icon name="compact" size={14} aria-hidden />
+              <span className={styles.viewLabel}>コンパクト</span>
+            </Link>
+            <Link
+              href={`/list?${params({ view: "index", page: "1" })}`}
+              className={`fn-cr-seg-btn ${view === "index" ? "is-active" : ""}`}
+              aria-current={view === "index" ? "page" : undefined}
+              aria-label="一覧表示"
+              title="一覧表示"
+              prefetch={false}
+            >
+              <Icon name="list" size={14} aria-hidden />
+              <span className={styles.viewLabel}>一覧</span>
+            </Link>
           </div>
-          <div className="fn-cr-controls" aria-label="表示形式">
-            <div className="fn-cr-segment fn-cr-segment--icon-only">
-              <Link
-                href={`/list?${params({ view: "grid", page: "1" })}`}
-                className={`fn-cr-seg-btn ${view === "grid" ? "is-active" : ""}`}
-                aria-current={view === "grid" ? "page" : undefined}
-                aria-label="タイル表示"
-                title="タイル表示"
-              >
-                <Icon name="grid" size={14} aria-hidden />
-                <span className={styles.viewLabel}>
-                  タイル
-                </span>
-              </Link>
-              <Link
-                href={`/list?${params({ view: "compact", page: "1" })}`}
-                className={`fn-cr-seg-btn ${view === "compact" ? "is-active" : ""}`}
-                aria-current={view === "compact" ? "page" : undefined}
-                aria-label="コンパクト表示"
-                title="コンパクト表示"
-              >
-                <Icon name="compact" size={14} aria-hidden />
-                <span className={styles.viewLabel}>
-                  コンパクト
-                </span>
-              </Link>
-              <Link
-                href={`/list?${params({ view: "index", page: "1" })}`}
-                className={`fn-cr-seg-btn ${view === "index" ? "is-active" : ""}`}
-                aria-current={view === "index" ? "page" : undefined}
-                aria-label="一覧表示"
-                title="一覧表示"
-              >
-                <Icon name="list" size={14} aria-hidden />
-                <span className={styles.viewLabel}>
-                  一覧
-                </span>
-              </Link>
-            </div>
+        </div>
+      </header>
+
+      <details className={styles.mobileFilterPanel} open>
+        <summary>
+          <span>絞り込み</span>
+          <span className={styles.filterSummaryMeta}>
+            {activeFilterCount > 0 ? `${activeFilterCount}件適用中` : "条件なし"}
+          </span>
+        </summary>
+        <ImeSafeGetForm className="fn-list-toolbar" method="get">
+          <label className="fn-list-search">
+            <Icon name="search" size={14} aria-hidden />
+            <span className="fn-sr-only">検索キーワード</span>
+            <input
+              type="search"
+              name="q"
+              defaultValue={q}
+              placeholder="作品を検索（2文字以上）"
+              autoComplete="off"
+              maxLength={MAX_SEARCH_LENGTH}
+            />
+          </label>
+          <input type="hidden" name="view" value={view} />
+          <div className={styles.controlsGroup}>
+            <span className="fn-list-toolbar-label">並び替え</span>
+            <AutoSubmitSelect className="fn-select" name="sort" defaultValue={sort}>
+              <option value="new">新着順</option>
+              <option value="old">古い順</option>
+              <option value="score">おすすめ順</option>
+            </AutoSubmitSelect>
           </div>
-        </header>
+          {event ? <input type="hidden" name="event" value={event} /> : null}
+          {activeFilterCount > 0 ? (
+            <Link href={LIST_HREF} className="fn-btn fn-btn-ghost" prefetch={false}>
+              リセット
+            </Link>
+          ) : null}
+        </ImeSafeGetForm>
+      </details>
 
-        <details className={styles.mobileFilterPanel} open>
-          <summary>
-            <span>絞り込み</span>
-            <span className={styles.filterSummaryMeta}>
-              {activeFilterCount > 0 ? `${activeFilterCount}件適用中` : "条件なし"}
-            </span>
-          </summary>
-          <ImeSafeGetForm className="fn-list-toolbar" method="get">
-            <label className="fn-list-search">
-              <Icon name="search" size={14} aria-hidden />
-              <span className="fn-sr-only">検索キーワード</span>
-              <input
-                type="search"
-                name="q"
-                defaultValue={q}
-                placeholder="作品を検索"
-                autoComplete="off"
-              />
-            </label>
-            <input type="hidden" name="view" value={view} />
-            <div className={styles.controlsGroup}>
-              <span className="fn-list-toolbar-label">並び替え</span>
-              <AutoSubmitSelect className="fn-select" name="sort" defaultValue={sort}>
-                <option value="new">新着順</option>
-                <option value="old">古い順</option>
-                <option value="score">おすすめ順</option>
-              </AutoSubmitSelect>
-            </div>
-            {event ? <input type="hidden" name="event" value={event} /> : null}
-            {activeFilterCount > 0 ? (
-              <Link href={LIST_HREF} className="fn-btn fn-btn-ghost">
-                リセット
-              </Link>
-            ) : null}
-          </ImeSafeGetForm>
-        </details>
+      {activeFilterCount > 0 ? (
+        <div className={styles.activeFilters} aria-label="適用中のフィルター">
+          <span className={styles.activeFiltersLabel}>適用中</span>
+          {boundedQuery ? (
+            <Link
+              className={styles.activeChip}
+              href={`/list?${params({ q: "", page: "1" })}`}
+              prefetch={false}
+            >
+              検索: {boundedQuery}
+              <span aria-hidden>×</span>
+            </Link>
+          ) : null}
+          {sort !== "new" ? (
+            <Link
+              className={styles.activeChip}
+              href={`/list?${params({ sort: "new", page: "1" })}`}
+              prefetch={false}
+            >
+              並び順: {sort === "old" ? "古い順" : "おすすめ順"}
+              <span aria-hidden>×</span>
+            </Link>
+          ) : null}
+          {event ? (
+            <Link
+              className={styles.activeChip}
+              href={`/list?${params({ event: "", page: "1" })}`}
+              prefetch={false}
+            >
+              イベント: {eventInfo?.title ?? event}
+              <span aria-hidden>×</span>
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
 
-        {activeFilterCount > 0 ? (
-          <div className={styles.activeFilters} aria-label="適用中のフィルター">
-            <span className={styles.activeFiltersLabel}>適用中</span>
-            {q.trim() ? (
-              <Link className={styles.activeChip} href={`/list?${params({ q: "", page: "1" })}`}>
-                検索: {q.trim()}
-                <span aria-hidden>×</span>
-              </Link>
-            ) : null}
-            {sort !== "new" ? (
-              <Link className={styles.activeChip} href={`/list?${params({ sort: "new", page: "1" })}`}>
-                並び順: {sort === "old" ? "古い順" : "おすすめ順"}
-                <span aria-hidden>×</span>
-              </Link>
-            ) : null}
-            {event ? (
-              <Link className={styles.activeChip} href={`/list?${params({ event: "", page: "1" })}`}>
-                イベント: {eventInfo?.title ?? event}
-                <span aria-hidden>×</span>
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
-
-        {videos.length === 0 ? (
+      {searchTooShort ? (
+        <div className="fn-empty">
+          <Icon name="info" size={24} aria-hidden />
+          <p className="fn-empty-message">
+            検索は文字・数字を2文字以上入力してください。
+          </p>
+        </div>
+      ) : videos.length === 0 ? (
         <div className="fn-empty">
           <Icon name="info" size={24} aria-hidden />
           <p className="fn-empty-message">
@@ -319,16 +359,14 @@ export default async function ListPage({
                         <td className={styles.eventCell}>
                           {v.primary_event_id ? (
                             <Link
-                              href={`/event/${encodeURIComponent(
-                                v.primary_event_id,
-                              )}`}
+                              href={`/event/${encodeURIComponent(v.primary_event_id)}`}
+                              prefetch={false}
                             >
-                              {(v as { primary_event_title?: string | null }).primary_event_title ?? "イベント"}
+                              {(v as { primary_event_title?: string | null })
+                                .primary_event_title ?? "イベント"}
                             </Link>
                           ) : (
-                            <span aria-label="イベントなし">
-                              —
-                            </span>
+                            <span aria-label="イベントなし">—</span>
                           )}
                         </td>
                         <td className={styles.codeCell}>
@@ -354,7 +392,7 @@ export default async function ListPage({
             buildHref={(nextPage) => `/list?${params({ page: String(nextPage) })}`}
           />
         </>
-        )}
+      )}
     </div>
   );
 }
