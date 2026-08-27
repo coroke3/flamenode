@@ -45,17 +45,35 @@ test("favicon contains dedicated 16, 32 and 48 pixel PNG frames", async () => {
   ]);
 });
 
-test("manifest and root metadata reference the generated brand assets", async () => {
-  const [manifest, layout, generator] = await Promise.all([
-    readFile(new URL("../../app/manifest.ts", import.meta.url), "utf8"),
+test("static webmanifest and root metadata reference the generated brand assets", async () => {
+  const [manifestText, layout, generator, seo] = await Promise.all([
+    readFile(new URL("../../public/manifest.webmanifest", import.meta.url), "utf8"),
     readFile(new URL("../../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../../scripts/generate-brand-seo-assets.mjs", import.meta.url), "utf8"),
+    readFile(new URL("./seo.ts", import.meta.url), "utf8"),
   ]);
+  const manifest = JSON.parse(manifestText);
 
-  assert.match(manifest, /flamenode-icon-192\.png/);
-  assert.match(manifest, /flamenode-icon-maskable-512\.png/);
+  assert.equal(manifest.name, "FlameNode");
+  assert.equal(manifest.short_name, "FlameNode");
+  assert.equal(
+    manifest.description,
+    "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。",
+  );
+  assert.ok(manifest.icons.some((icon) => icon.src === "/brand/flamenode-icon-192.png"));
+  assert.ok(
+    manifest.icons.some(
+      (icon) => icon.src === "/brand/flamenode-icon-maskable-512.png",
+    ),
+  );
+  assert.match(layout, /manifest:\s*["']\/manifest\.webmanifest["']/);
   assert.match(layout, /BRAND_SOCIAL_IMAGE/);
   assert.match(layout, /flamenode-site-structured-data/);
+  assert.match(seo, /process\.env\.NEXT_PUBLIC_SITE_NAME\?\.trim\(\) \|\| "FlameNode"/);
+  assert.match(
+    seo,
+    /映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。/,
+  );
   assert.match(generator, /flamenode-mark\.svg/);
   assert.match(generator, /flamenode-wordmark\.svg/);
 });

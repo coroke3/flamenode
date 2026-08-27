@@ -94,6 +94,7 @@ export function checkOpenNextOutput({
   const workerPath = path.join(outputRoot, "worker.js");
   const assetsPath = path.join(outputRoot, "assets");
   const manifestPath = path.join(outputRoot, MANIFEST_NAME);
+  const webmanifestPath = path.join(assetsPath, "manifest.webmanifest");
   const serverConfigPath = path.join(
     outputRoot,
     "server-functions",
@@ -105,6 +106,9 @@ export function checkOpenNextOutput({
     errors.push("worker.js is missing or empty");
   }
   if (!nonEmptyDirectory(assetsPath)) errors.push("assets directory is missing or empty");
+  if (!fs.existsSync(webmanifestPath) || !fs.statSync(webmanifestPath).isFile()) {
+    errors.push("assets/manifest.webmanifest is missing; it must be served as a Static Asset");
+  }
   if (!fs.existsSync(serverConfigPath) || !fs.statSync(serverConfigPath).isFile()) {
     errors.push("default server OpenNext config is missing");
   } else {
@@ -179,7 +183,7 @@ if (isMain()) {
     checkOpenNextOutput();
     console.log("[check-open-next-output] OK");
   } catch (error) {
-    console.error(`[check-open-next-output] FAILED\n${error.message}`);
+    console.error(`[check-open-next-output] FAILED\n- ${error.message}`);
     process.exitCode = 1;
   }
 }

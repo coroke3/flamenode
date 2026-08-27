@@ -1,0 +1,31 @@
+{
+  "name": "FlameNode",
+  "short_name": "FlameNode",
+  "description": "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f2ea",
+  "theme_color": "#c8f21f",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "/brand/flamenode-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/flamenode-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/flamenode-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
