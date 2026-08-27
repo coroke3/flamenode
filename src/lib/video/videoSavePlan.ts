@@ -546,16 +546,11 @@ export async function applyVideoUpdatePlan(
       requestedByUserId: plan.operatorUserId,
       priority: "low",
     });
-    const chainsTopRecommendViaUsersIndex =
-      creatorAggregationChanged ||
-      (plan.rebuildFlags.identityChanged &&
-        Boolean(plan.target.creator_x_user_id || payload.creator_x_user_id));
     queueItems.push(
       ...buildVideoCardChangeFanOutTargets({
         reason: "video_card_changed",
         requestedByUserId: plan.operatorUserId,
         priority: "low",
-        skipTopRecommend: chainsTopRecommendViaUsersIndex,
       }),
     );
   }
