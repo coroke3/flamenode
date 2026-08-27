@@ -457,14 +457,6 @@ export function sectionAllowedByGeneralFields(
   }
 }
 
-/** @deprecated permission registryで stage_permission を判定する。 */
-export const NORMAL_MODE_ALWAYS_DISABLED_FIELD_KEYS = [] as const;
-
-/** 一般編集モードでは常に UI 無効化するフィールド (一般作品権限の対象外)。 */
-export function normalModeAlwaysDisabledFieldKeys(): string[] {
-  return [];
-}
-
 export function disabledFieldKeysFromGeneralFields(
   fields: ReadonlySet<GeneralEditableFieldKey>,
 ): string[] {
