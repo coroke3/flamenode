@@ -18,15 +18,11 @@ function katakanaToHiragana(value: string): string {
   return value.replace(
     /[\u30A1-\u30F6]/g,
     (character) =>
-      String.fromCharCode(
-        character.charCodeAt(0) - 0x60,
-      ),
+      String.fromCharCode(character.charCodeAt(0) - 0x60),
   );
 }
 
-export function normalizeMemberSearchText(
-  value: string,
-): string {
+export function normalizeMemberSearchText(value: string): string {
   return katakanaToHiragana(
     value
       .normalize("NFKC")
@@ -38,30 +34,29 @@ export function normalizeMemberSearchText(
 }
 
 function compactSearchText(value: string): string {
-  return normalizeMemberSearchText(value).replace(
-    /[^\p{L}\p{N}_]+/gu,
-    "",
-  );
+  return normalizeMemberSearchText(value).replace(/[^\p{L}\p{N}_]+/gu, "");
 }
 
 /**
  * R2 index全件へrankerを走らせる前の軽量プリフィルタ。
  *
  * - 部分一致候補はhaystack包含で残す
- * - fuzzy(distance<=2)の理論下限として長さ差<=2の候補も残す
- * - 空queryは何も残さない（呼び出し側の空query早期returnと重ねて安全側）
+ * - fuzzy(distance<=2)を実行する3文字以上だけ長さ差<=2の候補を残す
+ * - 1〜2文字ではranker自体がfuzzyを実行しないため、長さ差だけの候補を残さない
+ * - 空queryは何も残さない
  *
  * rankerが0点を付ける候補しか除外しないため、最終順位・結果は変わらない。
  */
-export function prefilterMemberSuggestionCandidates<T extends MemberSuggestionCandidate>(
-  candidates: readonly T[],
-  query: string,
-): T[] {
+export function prefilterMemberSuggestionCandidates<
+  T extends MemberSuggestionCandidate,
+>(candidates: readonly T[], query: string): T[] {
   const normalizedQuery = normalizeMemberSearchText(query);
   if (!normalizedQuery) return [];
   const compactQuery = normalizedQuery.replace(/[^\p{L}\p{N}_]+/gu, "");
   const queryLength = compactQuery.length;
+  const allowFuzzy = queryLength >= 3;
   const out: T[] = [];
+
   for (const candidate of candidates) {
     const targets = [
       candidate.x_user_id,
@@ -71,18 +66,26 @@ export function prefilterMemberSuggestionCandidates<T extends MemberSuggestionCa
     ];
     let matched = false;
     let lengthDeltaOk = false;
+
     for (const target of targets) {
       if (!target) continue;
       const normalizedTarget = normalizeMemberSearchText(target);
       if (!matched && normalizedTarget.includes(normalizedQuery)) matched = true;
-      const compactLength = normalizedTarget.replace(
-        /[^\p{L}\p{N}_]+/gu,
-        "",
-      ).length;
-      if (Math.abs(compactLength - queryLength) <= 2) lengthDeltaOk = true;
-      if (matched && lengthDeltaOk) break;
+
+      if (allowFuzzy && !lengthDeltaOk) {
+        const compactLength = normalizedTarget.replace(
+          /[^\p{L}\p{N}_]+/gu,
+          "",
+        ).length;
+        if (Math.abs(compactLength - queryLength) <= 2) {
+          lengthDeltaOk = true;
+        }
+      }
+
+      if (matched && (!allowFuzzy || lengthDeltaOk)) break;
     }
-    if (matched || lengthDeltaOk) out.push(candidate);
+
+    if (matched || (allowFuzzy && lengthDeltaOk)) out.push(candidate);
   }
   return out;
 }
@@ -92,36 +95,18 @@ function limitedLevenshtein(
   right: string,
   maxDistance: number,
 ): number {
-  if (
-    Math.abs(left.length - right.length) >
-    maxDistance
-  ) {
+  if (Math.abs(left.length - right.length) > maxDistance) {
     return maxDistance + 1;
   }
 
-  let previous = Array.from(
-    { length: right.length + 1 },
-    (_, index) => index,
-  );
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
 
-  for (
-    let leftIndex = 1;
-    leftIndex <= left.length;
-    leftIndex += 1
-  ) {
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
     const current = [leftIndex];
     let rowMinimum = current[0];
 
-    for (
-      let rightIndex = 1;
-      rightIndex <= right.length;
-      rightIndex += 1
-    ) {
-      const cost =
-        left[leftIndex - 1] ===
-        right[rightIndex - 1]
-          ? 0
-          : 1;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
 
       const value = Math.min(
         previous[rightIndex] + 1,
@@ -130,10 +115,7 @@ function limitedLevenshtein(
       );
 
       current.push(value);
-      rowMinimum = Math.min(
-        rowMinimum,
-        value,
-      );
+      rowMinimum = Math.min(rowMinimum, value);
     }
 
     if (rowMinimum > maxDistance) {
@@ -150,25 +132,15 @@ function matchScore(
   query: string,
   candidate: MemberSuggestionCandidate,
 ): { score: number; matchedBy: string } {
-  const normalizedQuery =
-    normalizeMemberSearchText(query);
-  const compactQuery =
-    compactSearchText(query);
+  const normalizedQuery = normalizeMemberSearchText(query);
+  const compactQuery = compactSearchText(query);
 
-  const id = normalizeMemberSearchText(
-    candidate.x_user_id,
-  );
-  const name = normalizeMemberSearchText(
-    candidate.name,
-  );
+  const id = normalizeMemberSearchText(candidate.x_user_id);
+  const name = normalizeMemberSearchText(candidate.name);
 
-  const xAliases = (
-    candidate.xAliases ?? []
-  ).map(normalizeMemberSearchText);
+  const xAliases = (candidate.xAliases ?? []).map(normalizeMemberSearchText);
 
-  const nameAliases = (
-    candidate.nameAliases ?? []
-  ).map(normalizeMemberSearchText);
+  const nameAliases = (candidate.nameAliases ?? []).map(normalizeMemberSearchText);
 
   const matches: Array<{
     score: number;
@@ -176,103 +148,49 @@ function matchScore(
   }> = [];
 
   if (id === normalizedQuery) {
-    matches.push({
-      score: 1000,
-      matchedBy: "xid_exact",
-    });
+    matches.push({ score: 1000, matchedBy: "xid_exact" });
   }
 
-  if (
-    xAliases.some(
-      (alias) => alias === normalizedQuery,
-    )
-  ) {
-    matches.push({
-      score: 960,
-      matchedBy: "xid_alias_exact",
-    });
+  if (xAliases.some((alias) => alias === normalizedQuery)) {
+    matches.push({ score: 960, matchedBy: "xid_alias_exact" });
   }
 
-  if (
-    normalizedQuery &&
-    id.startsWith(normalizedQuery)
-  ) {
-    matches.push({
-      score: 900,
-      matchedBy: "xid_prefix",
-    });
+  if (normalizedQuery && id.startsWith(normalizedQuery)) {
+    matches.push({ score: 900, matchedBy: "xid_prefix" });
   }
 
   if (name === normalizedQuery) {
-    matches.push({
-      score: 880,
-      matchedBy: "name_exact",
-    });
+    matches.push({ score: 880, matchedBy: "name_exact" });
   }
 
-  if (
-    nameAliases.some(
-      (alias) => alias === normalizedQuery,
-    )
-  ) {
-    matches.push({
-      score: 840,
-      matchedBy: "name_alias_exact",
-    });
+  if (nameAliases.some((alias) => alias === normalizedQuery)) {
+    matches.push({ score: 840, matchedBy: "name_alias_exact" });
   }
 
-  if (
-    normalizedQuery &&
-    name.startsWith(normalizedQuery)
-  ) {
-    matches.push({
-      score: 760,
-      matchedBy: "name_prefix",
-    });
+  if (normalizedQuery && name.startsWith(normalizedQuery)) {
+    matches.push({ score: 760, matchedBy: "name_prefix" });
+  }
+
+  if (normalizedQuery && id.includes(normalizedQuery)) {
+    matches.push({ score: 700, matchedBy: "xid_contains" });
   }
 
   if (
     normalizedQuery &&
-    id.includes(normalizedQuery)
+    xAliases.some((alias) => alias.includes(normalizedQuery))
   ) {
-    matches.push({
-      score: 700,
-      matchedBy: "xid_contains",
-    });
+    matches.push({ score: 680, matchedBy: "xid_alias_contains" });
+  }
+
+  if (normalizedQuery && name.includes(normalizedQuery)) {
+    matches.push({ score: 620, matchedBy: "name_contains" });
   }
 
   if (
     normalizedQuery &&
-    xAliases.some((alias) =>
-      alias.includes(normalizedQuery),
-    )
+    nameAliases.some((alias) => alias.includes(normalizedQuery))
   ) {
-    matches.push({
-      score: 680,
-      matchedBy: "xid_alias_contains",
-    });
-  }
-
-  if (
-    normalizedQuery &&
-    name.includes(normalizedQuery)
-  ) {
-    matches.push({
-      score: 620,
-      matchedBy: "name_contains",
-    });
-  }
-
-  if (
-    normalizedQuery &&
-    nameAliases.some((alias) =>
-      alias.includes(normalizedQuery),
-    )
-  ) {
-    matches.push({
-      score: 600,
-      matchedBy: "name_alias_contains",
-    });
+    matches.push({ score: 600, matchedBy: "name_alias_contains" });
   }
 
   if (compactQuery.length >= 3) {
@@ -285,39 +203,22 @@ function matchScore(
 
     const minimumDistance = Math.min(
       ...targets.map((target) =>
-        limitedLevenshtein(
-          compactQuery,
-          target,
-          2,
-        ),
+        limitedLevenshtein(compactQuery, target, 2),
       ),
     );
 
     if (minimumDistance === 1) {
-      matches.push({
-        score: 500,
-        matchedBy: "fuzzy_1",
-      });
+      matches.push({ score: 500, matchedBy: "fuzzy_1" });
     } else if (minimumDistance === 2) {
-      matches.push({
-        score: 400,
-        matchedBy: "fuzzy_2",
-      });
+      matches.push({ score: 400, matchedBy: "fuzzy_2" });
     }
   }
 
   if (matches.length === 0) {
-    return {
-      score: 0,
-      matchedBy: "none",
-    };
+    return { score: 0, matchedBy: "none" };
   }
 
-  matches.sort(
-    (left, right) =>
-      right.score - left.score,
-  );
-
+  matches.sort((left, right) => right.score - left.score);
   return matches[0];
 }
 
@@ -328,92 +229,40 @@ export function rankMemberSuggestionCandidates(
 ): RankedMemberSuggestion[] {
   const ranked = candidates
     .map((candidate) => {
-      const match = matchScore(
-        query,
-        candidate,
-      );
+      const match = matchScore(query, candidate);
 
       if (match.score <= 0) return null;
 
       const occurrenceBonus = Math.min(
         50,
-        Math.round(
-          Math.log2(
-            (candidate.occurrenceCount ?? 0) +
-              1,
-          ) * 10,
-        ),
+        Math.round(Math.log2((candidate.occurrenceCount ?? 0) + 1) * 10),
       );
 
       const lastSeen = candidate.lastSeenAt;
       const ageDays =
         typeof lastSeen === "number"
-          ? Math.max(
-              0,
-              (nowSec - lastSeen) / 86400,
-            )
+          ? Math.max(0, (nowSec - lastSeen) / 86400)
           : Number.POSITIVE_INFINITY;
 
-      const recencyBonus = Number.isFinite(
-        ageDays,
-      )
-        ? Math.max(
-            0,
-            Math.round(
-              20 * (1 - ageDays / 365),
-            ),
-          )
+      const recencyBonus = Number.isFinite(ageDays)
+        ? Math.max(0, Math.round(30 - Math.min(ageDays, 30)))
         : 0;
 
       return {
         x_user_id: candidate.x_user_id,
         name: candidate.name,
-        score:
-          match.score +
-          occurrenceBonus +
-          recencyBonus,
+        score: match.score + occurrenceBonus + recencyBonus,
         matchedBy: match.matchedBy,
       };
     })
-    .filter(
-      (
-        item,
-      ): item is RankedMemberSuggestion =>
-        item !== null,
-    );
+    .filter((value): value is RankedMemberSuggestion => value !== null);
 
-  ranked.sort(
-    (left, right) =>
-      right.score - left.score ||
-      left.name.localeCompare(
-        right.name,
-        "ja",
-      ) ||
-      left.x_user_id.localeCompare(
-        right.x_user_id,
-      ),
-  );
+  ranked.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    const byName = left.name.localeCompare(right.name, "ja");
+    if (byName !== 0) return byName;
+    return left.x_user_id.localeCompare(right.x_user_id, "en");
+  });
 
   return ranked;
-}
-
-export function scoreSimpleMemberSuggestion(
-  query: string,
-  suggestion: {
-    name: string;
-    x_user_id: string;
-  },
-): number {
-  return (
-    rankMemberSuggestionCandidates(
-      [
-        {
-          name: suggestion.name,
-          x_user_id:
-            suggestion.x_user_id,
-        },
-      ],
-      query,
-    )[0]?.score ?? 0
-  );
 }
