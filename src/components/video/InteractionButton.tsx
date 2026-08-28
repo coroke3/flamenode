@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { toggleVideoInteraction } from "@/lib/actions/video";
-import { invalidateVideoViewerOverlay } from "@/lib/video/videoViewerOverlayClient";
+import { notifyVideoViewerOverlayChanged } from "@/lib/video/videoViewerOverlayClient";
 import { cn } from "@/lib/utils/cn";
 
 interface InteractionButtonProps {
@@ -28,7 +28,12 @@ const LABELS: Record<
   InteractionButtonProps["kind"],
   { on: string; off: string; icon: IconName; iconOn: IconName }
 > = {
-  like: { on: "いいね済", off: "いいね", icon: "heart", iconOn: "heart-filled" },
+  like: {
+    on: "いいね済",
+    off: "いいね",
+    icon: "heart",
+    iconOn: "heart-filled",
+  },
   bookmark: {
     on: "セーブ済",
     off: "セーブ",
@@ -48,8 +53,8 @@ function inferActionLabel(href: string | undefined): string {
 
 /**
  * いいね・ブックマークのトグルボタン。
- * 成功後にrouter.refresh()を行わず、server actionの結果でローカル状態だけを更新する。
- * 公開動画ページ全体のRSC再実行を避け、Cloudflare Worker CPUを増幅させない。
+ * 成功後にrouter.refresh()を行わず、server action結果でローカル状態を更新する。
+ * viewer overlayは狭いAPIだけを共有再取得し、library playlist等も同期する。
  */
 export function InteractionButton({
   videoId,
@@ -88,7 +93,9 @@ export function InteractionButton({
     const optimisticActive = !previousActive;
     setActive(optimisticActive);
     if (kind === "like" && typeof previousCount === "number") {
-      setDisplayCount(Math.max(0, previousCount + (optimisticActive ? 1 : -1)));
+      setDisplayCount(
+        Math.max(0, previousCount + (optimisticActive ? 1 : -1)),
+      );
     }
 
     startTransition(async () => {
@@ -113,9 +120,7 @@ export function InteractionButton({
         }
       }
 
-      // overlayは30秒キャッシュされるため、書込成功時に破棄しないと
-      // 戻る/再マウント時に直前のいいね・セーブ状態へ巻き戻って見える。
-      invalidateVideoViewerOverlay(videoId);
+      notifyVideoViewerOverlayChanged(videoId);
     });
   };
 
@@ -163,6 +168,7 @@ export function InteractionButton({
                 fontWeight: 600,
                 textDecoration: "underline",
               }}
+              prefetch={false}
             >
               {label}
             </Link>
