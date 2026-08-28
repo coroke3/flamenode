@@ -6,16 +6,10 @@ import { normalizePresentString as normalizeString } from "./normalize.ts";
  * contain that gram; it never parses the complete search corpus.
  */
 export const STATIC_SEARCH_POSTINGS_SCHEMA_VERSION = 1 as const;
-// Sixteen buckets keep the directory/page object count below the Workers
-// Free subrequest budget for small generations while still bounding a hot
-// gram to paginated posting pages.
 export const STATIC_SEARCH_POSTINGS_BUCKET_COUNT = 16;
 export const STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS = 256;
 export const STATIC_SEARCH_POSTINGS_MAX_GRAM_LENGTH = 3;
 export const STATIC_SEARCH_POSTINGS_MAX_PAGES_PER_GRAM = 512;
-// A public request must not turn a common one-character gram into an
-// unbounded sequence of R2 subrequests.  Callers fail over to the existing
-// safe path when a gram needs more pages than this explicit budget.
 export const STATIC_SEARCH_POSTINGS_MAX_QUERY_PAGES = 32;
 export const STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS = 100_000;
 
@@ -81,7 +75,8 @@ export function staticSearchPostingBucket(gram: string): number {
 }
 
 export function normalizeStaticSearchQuery(value: string): string {
-  return value.trim().toLocaleLowerCase();
+  // Artifact generation and edge lookup must not depend on the host locale.
+  return value.trim().toLowerCase();
 }
 
 /** Return the longest (up to 3-character) grams used for candidate lookup. */
@@ -122,6 +117,42 @@ function gramsForText(value: string, minGramLength: number): string[] {
   return [...grams];
 }
 
+function safeGenerationForObjectKey(generation: string): string {
+  const normalized = generation.trim();
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(normalized)) {
+    throw new Error("invalid static search posting generation");
+  }
+  return normalized;
+}
+
+function safeBucketForObjectKey(bucket: number): number {
+  if (
+    !Number.isSafeInteger(bucket) ||
+    bucket < 0 ||
+    bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT
+  ) {
+    throw new Error("invalid static search posting bucket");
+  }
+  return bucket;
+}
+
+function safePageForObjectKey(page: number): number {
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new Error("invalid static search posting page");
+  }
+  return page;
+}
+
+function isCanonicalGram(value: string): boolean {
+  const normalized = normalizeStaticSearchQuery(value);
+  const length = [...normalized].length;
+  return (
+    value === normalized &&
+    length >= 1 &&
+    length <= STATIC_SEARCH_POSTINGS_MAX_GRAM_LENGTH
+  );
+}
+
 export function buildStaticSearchPostingArtifacts<T>(args: {
   items: readonly T[];
   generatedAt: number;
@@ -131,6 +162,14 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
   /** Default 1 for existing public search callers. */
   minGramLength?: number;
 }): StaticSearchPostingArtifacts<T> {
+  const generation = safeGenerationForObjectKey(args.generation);
+  if (
+    !Number.isSafeInteger(args.generatedAt) ||
+    args.generatedAt < 0 ||
+    args.items.length > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS
+  ) {
+    throw new Error("invalid static search posting build input");
+  }
   const minGramLength = normalizeMinGramLength(args.minGramLength);
   const byGram = new Map<string, Map<string, T>>();
   for (const item of args.items) {
@@ -206,7 +245,7 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
     for (let index = 0; index < records.length; index += 1) {
       const page = {
         schema_version: STATIC_SEARCH_POSTINGS_SCHEMA_VERSION,
-        generation: args.generation,
+        generation,
         bucket,
         page: index + 1,
         records: records[index],
@@ -221,7 +260,7 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
       bucket,
       directory: {
         schema_version: STATIC_SEARCH_POSTINGS_SCHEMA_VERSION,
-        generation: args.generation,
+        generation,
         bucket,
         grams,
       },
@@ -231,7 +270,7 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
   return {
     manifest: {
       schema_version: STATIC_SEARCH_POSTINGS_SCHEMA_VERSION,
-      generation: args.generation,
+      generation,
       generated_at: args.generatedAt,
       total: args.items.length,
       bucket_count: STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
@@ -262,18 +301,20 @@ export function normalizeStaticSearchPostingManifest(
   const row = asRecord(value);
   if (
     !row ||
-    Number(row.schema_version) !== 1 ||
+    row.schema_version !== STATIC_SEARCH_POSTINGS_SCHEMA_VERSION ||
     row.backend !== "postings-v1"
   )
     return null;
   const generation = normalizeGeneration(row.generation);
-  const generatedAt = Number(row.generated_at);
-  const total = Number(row.total);
-  const bucketCount = Number(row.bucket_count);
+  const generatedAt = row.generated_at;
+  const total = row.total;
+  const bucketCount = row.bucket_count;
   if (
     !generation ||
-    !Number.isFinite(generatedAt) ||
+    typeof generatedAt !== "number" ||
+    !Number.isSafeInteger(generatedAt) ||
     generatedAt < 0 ||
+    typeof total !== "number" ||
     !Number.isSafeInteger(total) ||
     total < 0 ||
     total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS ||
@@ -283,26 +324,29 @@ export function normalizeStaticSearchPostingManifest(
   let buckets: number[] | undefined;
   if (row.buckets !== undefined) {
     if (!Array.isArray(row.buckets)) return null;
-    buckets = row.buckets.map(Number);
-    if (
-      !buckets.every(
-        (bucket) =>
-          Number.isSafeInteger(bucket) &&
-          bucket >= 0 &&
-          bucket < STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
-      ) ||
-      new Set(buckets).size !== buckets.length
-    ) {
-      return null;
+    buckets = [];
+    const seen = new Set<number>();
+    for (const rawBucket of row.buckets) {
+      if (
+        typeof rawBucket !== "number" ||
+        !Number.isSafeInteger(rawBucket) ||
+        rawBucket < 0 ||
+        rawBucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT ||
+        seen.has(rawBucket)
+      ) {
+        return null;
+      }
+      seen.add(rawBucket);
+      buckets.push(rawBucket);
     }
     buckets.sort((a, b) => a - b);
   }
   return {
-    schema_version: 1,
+    schema_version: STATIC_SEARCH_POSTINGS_SCHEMA_VERSION,
     generation,
-    generated_at: Math.floor(generatedAt),
+    generated_at: generatedAt,
     total,
-    bucket_count: bucketCount,
+    bucket_count: STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
     backend: "postings-v1",
     ...(buckets === undefined ? {} : { buckets }),
   };
@@ -312,11 +356,12 @@ export function normalizeStaticSearchPostingDirectory(
   value: unknown,
 ): StaticSearchPostingDirectory | null {
   const row = asRecord(value);
-  if (!row || Number(row.schema_version) !== 1) return null;
+  if (!row || row.schema_version !== STATIC_SEARCH_POSTINGS_SCHEMA_VERSION) return null;
   const generation = normalizeGeneration(row.generation);
-  const bucket = Number(row.bucket);
+  const bucket = row.bucket;
   if (
     !generation ||
+    typeof bucket !== "number" ||
     !Number.isSafeInteger(bucket) ||
     bucket < 0 ||
     bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT ||
@@ -332,23 +377,37 @@ export function normalizeStaticSearchPostingDirectory(
     const entry = asRecord(raw);
     if (
       !entry ||
+      !isCanonicalGram(gram) ||
       !Array.isArray(entry.pages) ||
       entry.pages.length > STATIC_SEARCH_POSTINGS_MAX_PAGES_PER_GRAM
     )
       return null;
-    const pages = entry.pages.map(Number);
-    const total = Number(entry.total);
+    const pages: number[] = [];
+    const seenPages = new Set<number>();
+    for (const rawPage of entry.pages) {
+      if (
+        typeof rawPage !== "number" ||
+        !Number.isSafeInteger(rawPage) ||
+        rawPage < 1 ||
+        seenPages.has(rawPage)
+      ) {
+        return null;
+      }
+      seenPages.add(rawPage);
+      pages.push(rawPage);
+    }
+    const total = entry.total;
     if (
-      !gram ||
-      !pages.every((page) => Number.isSafeInteger(page) && page > 0) ||
+      typeof total !== "number" ||
       !Number.isSafeInteger(total) ||
       total < 0 ||
-      total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS
+      total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS ||
+      (total === 0) !== (pages.length === 0)
     )
       return null;
     grams[gram] = { pages, total };
   }
-  return { schema_version: 1, generation, bucket, grams };
+  return { schema_version: STATIC_SEARCH_POSTINGS_SCHEMA_VERSION, generation, bucket, grams };
 }
 
 export function normalizeStaticSearchPostingPage<T>(
@@ -356,15 +415,17 @@ export function normalizeStaticSearchPostingPage<T>(
   normalizeItem: (value: unknown) => T | null,
 ): StaticSearchPostingPage<T> | null {
   const row = asRecord(value);
-  if (!row || Number(row.schema_version) !== 1) return null;
+  if (!row || row.schema_version !== STATIC_SEARCH_POSTINGS_SCHEMA_VERSION) return null;
   const generation = normalizeGeneration(row.generation);
-  const bucket = Number(row.bucket);
-  const page = Number(row.page);
+  const bucket = row.bucket;
+  const page = row.page;
   if (
     !generation ||
+    typeof bucket !== "number" ||
     !Number.isSafeInteger(bucket) ||
     bucket < 0 ||
     bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT ||
+    typeof page !== "number" ||
     !Number.isSafeInteger(page) ||
     page < 1 ||
     !Array.isArray(row.records)
@@ -373,27 +434,33 @@ export function normalizeStaticSearchPostingPage<T>(
   const records: StaticSearchPostingPage<T>["records"] = [];
   if (row.records.length > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS) return null;
   let pageItemCount = 0;
+  const seenGrams = new Set<string>();
   for (const raw of row.records) {
     const record = asRecord(raw);
     if (
       !record ||
       typeof record.gram !== "string" ||
+      !isCanonicalGram(record.gram) ||
+      seenGrams.has(record.gram) ||
       !Array.isArray(record.items)
     )
       return null;
+    seenGrams.add(record.gram);
     const items: T[] = [];
     for (const item of record.items) {
       const normalized = normalizeItem(item);
       if (normalized == null) return null;
       items.push(normalized);
     }
-    const part = Number(record.part);
-    const total = Number(record.total);
+    const part = record.part;
+    const total = record.total;
     pageItemCount += items.length;
     if (
       pageItemCount > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS ||
+      typeof part !== "number" ||
       !Number.isSafeInteger(part) ||
       part < 0 ||
+      typeof total !== "number" ||
       !Number.isSafeInteger(total) ||
       total < items.length ||
       total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS
@@ -401,20 +468,20 @@ export function normalizeStaticSearchPostingPage<T>(
       return null;
     records.push({ gram: record.gram, part, total, items });
   }
-  return { schema_version: 1, generation, bucket, page, records };
+  return { schema_version: STATIC_SEARCH_POSTINGS_SCHEMA_VERSION, generation, bucket, page, records };
 }
 
 export function staticSearchPostingManifestObjectKey(
   generation: string,
 ): string {
-  return `search-postings.v1/${generation}/manifest.json`;
+  return `search-postings.v1/${safeGenerationForObjectKey(generation)}/manifest.json`;
 }
 
 export function staticSearchPostingDirectoryObjectKey(
   generation: string,
   bucket: number,
 ): string {
-  return `search-postings.v1/${generation}/directory/${bucket}.json`;
+  return `search-postings.v1/${safeGenerationForObjectKey(generation)}/directory/${safeBucketForObjectKey(bucket)}.json`;
 }
 
 export function staticSearchPostingPageObjectKey(
@@ -422,5 +489,5 @@ export function staticSearchPostingPageObjectKey(
   bucket: number,
   page: number,
 ): string {
-  return `search-postings.v1/${generation}/bucket/${bucket}/${page}.json`;
+  return `search-postings.v1/${safeGenerationForObjectKey(generation)}/bucket/${safeBucketForObjectKey(bucket)}/${safePageForObjectKey(page)}.json`;
 }
