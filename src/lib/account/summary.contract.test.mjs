@@ -97,17 +97,23 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
 });
 
-test("公開headerはaccount summaryをidleへ遅延し操作時は即時取得できる", () => {
-  assert.match(publicHeader, /deferPublicAccountUntilIdle/);
-  assert.match(publicHeader, /serverUser === undefined && !hydrateAccount/);
-  assert.match(publicHeader, /deferPublicAccountUntilIdle,\s*\)/);
-  assert.match(island, /deferUntilIdle = false/);
-  assert.match(island, /requestIdleCallback/);
-  assert.match(island, /PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS/);
-  assert.match(island, /PUBLIC_ACCOUNT_FALLBACK_DELAY_MS/);
-  assert.match(island, /deferUntilIdle && !idleReady && !open/);
-  assert.match(island, /if \(open\) \{\s*setIdleReady\(true\)/);
-  assert.match(island, /inFlightRef/);
+test("公開headerはaccount summaryを操作時だけ取得し匿名pageviewのAuth fan-outを作らない", () => {
+  assert.match(publicHeader, /const publicClientAccount =\s*serverUser === undefined && !hydrateAccount/);
+  assert.match(
+    publicHeader,
+    /const hydrateOnOpen =\s*\(hydrateAccount && serverUser != null\) \|\| publicClientAccount/,
+  );
+  assert.match(publicHeader, /const accountHydrationOpen = accountOpen \|\| mobileOpen/);
+  assert.match(
+    publicHeader,
+    /usePublicAccountSummary\([\s\S]*hydrateOnOpen,[\s\S]*accountHydrationOpen,[\s\S]*false,[\s\S]*\)/,
+  );
+  assert.doesNotMatch(publicHeader, /deferPublicAccountUntilIdle/);
+  assert.match(publicHeader, /const accountUnknown =/);
+  assert.match(publicHeader, /const openAccountProbe = \(\) => \{/);
+  assert.match(publicHeader, /aria-label="アカウントを確認"/);
+  assert.match(publicHeader, /onClick=\{openAccountProbe\}/);
+  assert.match(island, /if \(lazy && !open\) \{/);
 });
 
 test("account summaryのin-flight requestは無期限にloadingを維持しない", () => {
