@@ -30,17 +30,21 @@ function safeGeneration(value: string): string {
 }
 
 function safeBucket(bucket: number): number {
-  const value = Math.floor(bucket);
-  if (value < 0 || value >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT) {
+  if (
+    !Number.isSafeInteger(bucket) ||
+    bucket < 0 ||
+    bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT
+  ) {
     throw new Error("invalid member suggestions v2 bucket");
   }
-  return value;
+  return bucket;
 }
 
 function safePage(page: number): number {
-  const value = Math.floor(page);
-  if (value < 1) throw new Error("invalid member suggestions v2 page");
-  return value;
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new Error("invalid member suggestions v2 page");
+  }
+  return page;
 }
 
 export function memberSuggestionsV2DirectoryObjectKey(
