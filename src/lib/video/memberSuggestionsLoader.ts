@@ -16,13 +16,14 @@ export type MemberSuggestionsManifestLoadResult =
 
 /**
  * index payloadの短命プロセス内キャッシュ。
- * autocompleteは短時間に多数発行されるため、同一世代のR2 GET/JSON parseを
- * 減らす。TTLは静的rebuildの反映遅延より十分短く、失敗時は即破棄する。
+ * autocompleteは短時間に多数発行されるため、同一世代のindex R2 GET/JSON parseを
+ * 減らす。manifestだけはcommit pointとして毎回確認し、世代更新後に旧itemsを返さない。
  */
 const CACHE_TTL_SEC = 30;
 type SuggestionsBucket = Pick<R2Bucket, "get">;
 let cache: {
   bucket: SuggestionsBucket;
+  generation: string;
   items: MemberSuggestionItem[];
   fetchedAt: number;
 } | null = null;
@@ -33,10 +34,11 @@ let inFlight: {
 
 function readCache(
   bucket: SuggestionsBucket,
+  generation: string,
   nowSec: number,
 ): MemberSuggestionItem[] | null {
   if (!cache) return null;
-  if (cache.bucket !== bucket) return null;
+  if (cache.bucket !== bucket || cache.generation !== generation) return null;
   if (nowSec - cache.fetchedAt > CACHE_TTL_SEC) {
     cache = null;
     return null;
@@ -86,14 +88,14 @@ export async function loadMemberSuggestionsIndexFromBucket(
   if (inFlight?.bucket === bucket) return inFlight.promise;
 
   const promise = (async (): Promise<MemberSuggestionsLoadResult> => {
+    const manifestResult = await loadMemberSuggestionsManifestFromBucket(bucket);
+    if (!manifestResult.ok) return manifestResult;
+
     const nowSec = Math.floor(Date.now() / 1000);
-    const cachedItems = readCache(bucket, nowSec);
+    const cachedItems = readCache(bucket, manifestResult.generation, nowSec);
     if (cachedItems) {
       return { ok: true, items: cachedItems };
     }
-
-    const manifestResult = await loadMemberSuggestionsManifestFromBucket(bucket);
-    if (!manifestResult.ok) return manifestResult;
 
     const indexObject = await bucket.get(
       memberSuggestionsIndexObjectKey(manifestResult.generation),
@@ -115,7 +117,12 @@ export async function loadMemberSuggestionsIndexFromBucket(
       return { ok: false, reason: "index_total_mismatch" };
     }
 
-    cache = { bucket, items, fetchedAt: nowSec };
+    cache = {
+      bucket,
+      generation: manifestResult.generation,
+      items,
+      fetchedAt: nowSec,
+    };
     return { ok: true, items };
   })();
 
