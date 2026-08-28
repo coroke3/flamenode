@@ -12,6 +12,7 @@ const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 20;
 const MAX_OFFSET = 5000;
 const MAX_QUERY_LENGTH = 64;
+const MAX_NUMERIC_PARAM_LENGTH = 8;
 const MIN_SEARCH_CHARS = 2;
 const INDEX_LOAD_TIMEOUT_MS = 2500;
 const PRIVATE_HEADERS = {
@@ -26,6 +27,18 @@ const UNAVAILABLE_HEADERS = {
 
 function compactSearchChars(value: string): string {
   return value.replace(/[^\p{L}\p{N}_]/gu, "");
+}
+
+function parseBoundedDecimalParam(
+  value: string | null,
+  fallback: number,
+  max: number,
+): number {
+  const raw = (value ?? "").trim().slice(0, MAX_NUMERIC_PARAM_LENGTH);
+  if (!/^\d+$/.test(raw)) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, max);
 }
 
 async function withIndexTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -124,18 +137,19 @@ export async function GET(request: Request): Promise<Response> {
     .trim()
     .slice(0, MAX_QUERY_LENGTH);
   const onlyApproved = url.searchParams.get("onlyApproved") === "1";
-
-  const limitValue = Number(url.searchParams.get("limit") ?? "");
-  const limit =
-    Number.isFinite(limitValue) && limitValue > 0
-      ? Math.min(Math.floor(limitValue), MAX_LIMIT)
-      : DEFAULT_LIMIT;
-
-  const offsetValue = Number(url.searchParams.get("offset") ?? "");
-  const offset =
-    Number.isFinite(offsetValue) && offsetValue > 0
-      ? Math.min(Math.floor(offsetValue), MAX_OFFSET)
-      : 0;
+  const limit = Math.max(
+    1,
+    parseBoundedDecimalParam(
+      url.searchParams.get("limit"),
+      DEFAULT_LIMIT,
+      MAX_LIMIT,
+    ),
+  );
+  const offset = parseBoundedDecimalParam(
+    url.searchParams.get("offset"),
+    0,
+    MAX_OFFSET,
+  );
 
   const normalizedQueryForMinLength = rawQuery
     .normalize("NFKC")
