@@ -2,15 +2,34 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [page, route, client, interaction, aboutPage, slotIconRoute] = await Promise.all([
+const [
+  page,
+  route,
+  serverOverlay,
+  client,
+  interaction,
+  interactionActions,
+  utilityDock,
+  aboutPage,
+  slotIconRoute,
+] = await Promise.all([
   readFile(new URL("../../../app/(public)/[id]/page.tsx", import.meta.url), "utf8"),
   readFile(
     new URL("../../../app/api/videos/[id]/viewer-overlay/route.ts", import.meta.url),
     "utf8",
   ),
+  readFile(new URL("./videoViewerOverlay.ts", import.meta.url), "utf8"),
   readFile(new URL("./videoViewerOverlayClient.ts", import.meta.url), "utf8"),
   readFile(
     new URL("../../components/video/InteractionButton.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../../components/video/VideoInteractionActions.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../../components/video/VideoViewerUtilityDock.tsx", import.meta.url),
     "utf8",
   ),
   readFile(new URL("../../../app/(public)/about/page.tsx", import.meta.url), "utf8"),
@@ -43,6 +62,14 @@ test("viewer overlay clientは同一requestを共有しRSC refreshを要求し�
   assert.match(client, /ACTIVE_X_CHANGED_EVENT/);
   assert.doesNotMatch(interaction, /router\.refresh\(\)/);
   assert.doesNotMatch(interaction, /useRouter/);
+});
+
+test("BAN viewerはprivate overlay/write UIをfail-closedにする", () => {
+  assert.match(serverOverlay, /viewer\.is_banned === 1/);
+  assert.match(serverOverlay, /isBanned: true/);
+  assert.match(client, /typeof row\.isBanned !== "boolean"/);
+  assert.match(interactionActions, /!overlay\.isBanned/);
+  assert.match(utilityDock, /!overlay\.isBanned/);
 });
 
 test("about本文はstaticでstatsだけclientへ分離する", () => {
