@@ -18,6 +18,14 @@ test("public icon v2 shard is deterministic and bounded to 16", () => {
   assert.equal(PUBLIC_X_ICON_V2_SHARD_COUNT, 16);
 });
 
+test("public icon v2 shard key rejects non-integer and non-finite values", () => {
+  assert.throws(() => publicXIconV2ShardObjectKey("gen-1", Number.NaN));
+  assert.throws(() => publicXIconV2ShardObjectKey("gen-1", Number.POSITIVE_INFINITY));
+  assert.throws(() => publicXIconV2ShardObjectKey("gen-1", 1.5));
+  assert.throws(() => publicXIconV2ShardObjectKey("gen-1", -1));
+  assert.throws(() => publicXIconV2ShardObjectKey("gen-1", PUBLIC_X_ICON_V2_SHARD_COUNT));
+});
+
 test("public icon v2 generation material is independent of entry insertion order", () => {
   const a = {
     schema_version: 1,
