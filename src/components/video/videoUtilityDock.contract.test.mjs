@@ -58,6 +58,18 @@ test("ChapterCommentPanel preserves composer flow and mirrors TOS guard", () => 
   );
 });
 
+test("チャプター投稿成功後はprivate viewer overlay cacheを即時無効化する", () => {
+  const body = read("ChapterCommentPanel.tsx");
+  assert.match(body, /notifyVideoViewerOverlayChanged/);
+  const successIndex = body.indexOf("const handleSuccess");
+  const invalidateIndex = body.indexOf("notifyVideoViewerOverlayChanged(videoId)", successIndex);
+  const submittedIndex = body.indexOf("setSubmittedChapter(chapter)", successIndex);
+  assert.ok(
+    successIndex >= 0 && invalidateIndex > successIndex && submittedIndex > invalidateIndex,
+  );
+  assert.match(body, /\[videoId\]/);
+});
+
 test("usePlayerTime delegates to subscribePlayerTime cleanup", () => {
   const body = read("usePlayerTime.ts");
   assert.match(body, /return subscribePlayerTime/);
