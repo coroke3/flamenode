@@ -7,6 +7,7 @@ import {
   getCurrentUser,
 } from "@/lib/auth/currentUser";
 import {
+  isValidSlotSubmissionIconSlotId,
   probeSlotSubmissionIcon,
   serveSlotSubmissionIconRow,
 } from "@/lib/media/slotSubmissionIcon";
@@ -24,6 +25,16 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ slotId: string }> },
 ): Promise<Response> {
+  const { slotId } = await params;
+  // 明らかに不正なIDはCloudflare binding/D1/Auth.jsを起動する前に拒否する。
+  // binding障害時でもinvalid inputを503へ誤分類せず、probe系botの固定費も抑える。
+  if (!isValidSlotSubmissionIconSlotId(slotId)) {
+    return new Response("Not found", {
+      status: 404,
+      headers: NOT_FOUND_HEADERS,
+    });
+  }
+
   let env: ReturnType<typeof getEnv>;
   try {
     env = getEnv();
@@ -37,7 +48,6 @@ export async function GET(
       headers: UNAVAILABLE_HEADERS,
     });
   }
-  const { slotId } = await params;
 
   try {
     const probe = await probeSlotSubmissionIcon(env, slotId);
