@@ -4,6 +4,7 @@ import {
   normalizeMemberSearchText,
   prefilterMemberSuggestionCandidates,
   rankMemberSuggestionCandidates,
+  scoreSimpleMemberSuggestion,
 } from "./memberSuggestionRank.ts";
 
 describe("normalizeMemberSearchText", () => {
@@ -91,5 +92,44 @@ describe("rankMemberSuggestionCandidates", () => {
 
     assert.equal(ranked[0]?.x_user_id, "alice");
     assert.equal(ranked[0]?.matchedBy, "fuzzy_1");
+  });
+
+  it("keeps the original 20-point recency bonus over a 365-day window", () => {
+    const nowSec = 365 * 86400;
+    const ranked = rankMemberSuggestionCandidates(
+      [
+        {
+          x_user_id: "alice_old",
+          name: "Alice",
+          occurrenceCount: 0,
+          lastSeenAt: 0,
+        },
+        {
+          x_user_id: "alice_new",
+          name: "Alice",
+          occurrenceCount: 0,
+          lastSeenAt: nowSec,
+        },
+      ],
+      "alice",
+      nowSec,
+    );
+
+    const newest = ranked.find((item) => item.x_user_id === "alice_new");
+    const oldest = ranked.find((item) => item.x_user_id === "alice_old");
+    assert.ok(newest && oldest);
+    assert.equal(newest.score - oldest.score, 20);
+  });
+});
+
+describe("scoreSimpleMemberSuggestion", () => {
+  it("keeps the client preload compatibility API", () => {
+    assert.equal(
+      scoreSimpleMemberSuggestion("alice", {
+        x_user_id: "alice",
+        name: "Alice",
+      }),
+      1000,
+    );
   });
 });
