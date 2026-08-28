@@ -80,17 +80,17 @@ requireAll("src/components/event/SlotGrid.tsx", [
   [/styles\.submittedIcon/, "submittedIcon CSS class がありません。"],
 ]);
 requireMatch(
-  "app/(public)/event/[id]/slots/page.tsx",
-  /canTakeSlot=\{[\s\S]*onboarding\.canReserveSlot[\s\S]*operatorOverrideAllowed/,
+  "app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx",
+  /const canTakeSlot\s*=\s*[\s\S]*viewerOverlay\.canReserveSlot[\s\S]*\(accepting\s*\|\|\s*viewerOverlay\.operatorOverrideAllowed\)/,
   "canTakeSlot は canReserveSlot ベースであり、event.slots の運営例外だけを追加する。",
 );
 requireMatch(
-  "app/(public)/event/[id]/slots/page.tsx",
-  /canUseSlotOperatorOverride\(event, now\)/,
+  "src/lib/slots/slotViewerOverlay.ts",
+  /canUseSlotOperatorOverride\(eventRow, now\)/,
   "募集開始前の運営例外は共有境界ヘルパーで判定する。",
 );
 forbidMatch(
-  "app/(public)/event/[id]/slots/page.tsx",
+  "app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx",
   /canTakeSlot=\{[^}]*viewerXId\s*!=\s*null/,
   "canTakeSlot が viewerXId 必須になっています。",
 );
@@ -375,18 +375,8 @@ requireMatch(
 );
 forbidMatch(
   "app/(public)/layout.tsx",
-  /getCurrentUser|buildHeaderUser|await auth\(/,
-  "公開layoutにserver authが残っています。",
-);
-requireMatch(
-  "app/(public)/layout.tsx",
-  /CostGuardBanner/,
-  "公開layoutにKV/envベースのCostGuardBannerがありません。",
-);
-forbidMatch(
-  "app/(public)/layout.tsx",
-  /source=["']admin["']/,
-  "公開layoutのCostGuardBannerがadmin(D1正本)になっています。",
+  /getCurrentUser|buildHeaderUser|await auth\(|CostGuardBanner/,
+  "公開layoutにserver authやCostGuardBannerを置かず、静的シェルを維持します。",
 );
 requireMatch(
   "src/components/layout/PublicHeader.module.css",
@@ -550,9 +540,9 @@ requireMatch(
 
 const videoDetailPage = read("app/(public)/[id]/page.tsx");
 if (videoDetailPage) {
-  if (!/VideoUtilityDock/.test(videoDetailPage)) {
+  if (!/VideoViewerUtilityDock/.test(videoDetailPage)) {
     errors.push(
-      "app/(public)/[id]/page.tsx: VideoUtilityDock の import がありません。",
+      "app/(public)/[id]/page.tsx: VideoViewerUtilityDock の import がありません。",
     );
   }
   if (/from "@\/components\/video\/ChapterTabs"/.test(videoDetailPage)) {
