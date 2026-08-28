@@ -113,7 +113,10 @@ test("公開headerはaccount summaryを操作時だけ取得し匿名pageviewの
   assert.match(publicHeader, /const openAccountProbe = \(\) => \{/);
   assert.match(publicHeader, /aria-label="アカウントを確認"/);
   assert.match(publicHeader, /onClick=\{openAccountProbe\}/);
-  assert.match(island, /if \(lazy && !open\) \{/);
+  assert.match(
+    island,
+    /if \(lazy && !open && !refreshRequestedRef\.current\) \{/,
+  );
 });
 
 test("account summaryのin-flight requestは無期限にloadingを維持しない", () => {
@@ -146,6 +149,10 @@ test("account summary一時失敗は自動loopせず明示的に再試行でき�
   assert.match(island, /removeEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
   assert.match(island, /onClick=\{requestPublicAccountRetry\}/);
   assert.match(island, /refreshRequestedRef\.current = true/);
+  assert.match(
+    island,
+    /!lazyRef\.current \|\| openRef\.current \|\| refreshRequestedRef\.current/,
+  );
 });
 
 test("ログアウトはSignOutButton経由でhard navigateする", () => {
