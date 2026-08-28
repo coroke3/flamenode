@@ -5,11 +5,13 @@ import {
   buildMemberSuggestionArtifacts,
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
   MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES,
+  MEMBER_SUGGESTIONS_MAX_X_ALIASES,
 } from "./memberSuggestionsCore.ts";
 import {
   buildMemberSuggestionsV2Artifacts,
   memberSuggestionsV2DirectoryObjectKey,
   memberSuggestionsV2PageObjectKey,
+  normalizeMemberSuggestionPostingItem,
   MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
 } from "./memberSuggestionsPostingsV2.ts";
 import {
@@ -84,6 +86,41 @@ test("V2 object key helperはNaN/小数/無限値を受け付けない", () => {
     memberSuggestionsV2PageObjectKey("gen", 0, Number.POSITIVE_INFINITY),
   );
   assert.throws(() => memberSuggestionsV2PageObjectKey("gen", 0, 1.25));
+});
+
+test("V2 posting itemもwriterのalias/整数境界を超える破損payloadを拒否する", () => {
+  const base = {
+    x_user_id: "alice_mv",
+    name: "Alice",
+    xAliases: [],
+    nameAliases: [],
+    occurrenceCount: 1,
+    lastSeenAt: 1_700_000_000,
+    approvalStatus: "approved",
+  };
+  assert.ok(normalizeMemberSuggestionPostingItem(base));
+  assert.equal(
+    normalizeMemberSuggestionPostingItem({
+      ...base,
+      xAliases: Array.from(
+        { length: MEMBER_SUGGESTIONS_MAX_X_ALIASES + 1 },
+        (_, i) => `alias${i}`,
+      ),
+    }),
+    null,
+  );
+  assert.equal(
+    normalizeMemberSuggestionPostingItem({ ...base, xAliases: ["BAD-ALIAS"] }),
+    null,
+  );
+  assert.equal(
+    normalizeMemberSuggestionPostingItem({ ...base, occurrenceCount: 1.5 }),
+    null,
+  );
+  assert.equal(
+    normalizeMemberSuggestionPostingItem({ ...base, lastSeenAt: 1.5 }),
+    null,
+  );
 });
 
 test("V2 loaderはqueryに必要なpostingだけで候補を返しV1 indexを読まない", async () => {
