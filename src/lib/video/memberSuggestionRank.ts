@@ -32,18 +32,16 @@ export function normalizeMemberSearchText(value: string): string {
   );
 }
 
+function compactNormalizedSearchText(value: string): string {
+  return value.replace(/[^\p{L}\p{N}_]+/gu, "");
+}
+
 function compactSearchText(value: string): string {
-  return normalizeMemberSearchText(value).replace(/[^\p{L}\p{N}_]+/gu, "");
+  return compactNormalizedSearchText(normalizeMemberSearchText(value));
 }
 
 /**
  * R2 index全件へrankerを走らせる前の軽量プリフィルタ。
- *
- * - 部分一致候補はhaystack包含で残す
- * - fuzzy(distance<=2)を実行する3文字以上だけ長さ差<=2の候補を残す
- * - 1〜2文字ではranker自体がfuzzyを実行しないため、長さ差だけの候補を残さない
- * - 空queryは何も残さない
- *
  * rankerが0点を付ける候補しか除外しないため、最終順位・結果は変わらない。
  */
 export function prefilterMemberSuggestionCandidates<
@@ -51,7 +49,7 @@ export function prefilterMemberSuggestionCandidates<
 >(candidates: readonly T[], query: string): T[] {
   const normalizedQuery = normalizeMemberSearchText(query);
   if (!normalizedQuery) return [];
-  const compactQuery = normalizedQuery.replace(/[^\p{L}\p{N}_]+/gu, "");
+  const compactQuery = compactNormalizedSearchText(normalizedQuery);
   const queryLength = compactQuery.length;
   const allowFuzzy = queryLength >= 3;
   const out: T[] = [];
@@ -72,10 +70,7 @@ export function prefilterMemberSuggestionCandidates<
       if (!matched && normalizedTarget.includes(normalizedQuery)) matched = true;
 
       if (allowFuzzy && !lengthDeltaOk) {
-        const compactLength = normalizedTarget.replace(
-          /[^\p{L}\p{N}_]+/gu,
-          "",
-        ).length;
+        const compactLength = compactNormalizedSearchText(normalizedTarget).length;
         if (Math.abs(compactLength - queryLength) <= 2) {
           lengthDeltaOk = true;
         }
@@ -128,15 +123,12 @@ function limitedLevenshtein(
 }
 
 function matchScore(
-  query: string,
+  normalizedQuery: string,
+  compactQuery: string,
   candidate: MemberSuggestionCandidate,
 ): { score: number; matchedBy: string } {
-  const normalizedQuery = normalizeMemberSearchText(query);
-  const compactQuery = compactSearchText(query);
-
   const id = normalizeMemberSearchText(candidate.x_user_id);
   const name = normalizeMemberSearchText(candidate.name);
-
   const xAliases = (candidate.xAliases ?? []).map(normalizeMemberSearchText);
   const nameAliases = (candidate.nameAliases ?? []).map(normalizeMemberSearchText);
 
@@ -148,42 +140,33 @@ function matchScore(
   if (id === normalizedQuery) {
     matches.push({ score: 1000, matchedBy: "xid_exact" });
   }
-
   if (xAliases.some((alias) => alias === normalizedQuery)) {
     matches.push({ score: 960, matchedBy: "xid_alias_exact" });
   }
-
   if (normalizedQuery && id.startsWith(normalizedQuery)) {
     matches.push({ score: 900, matchedBy: "xid_prefix" });
   }
-
   if (name === normalizedQuery) {
     matches.push({ score: 880, matchedBy: "name_exact" });
   }
-
   if (nameAliases.some((alias) => alias === normalizedQuery)) {
     matches.push({ score: 840, matchedBy: "name_alias_exact" });
   }
-
   if (normalizedQuery && name.startsWith(normalizedQuery)) {
     matches.push({ score: 760, matchedBy: "name_prefix" });
   }
-
   if (normalizedQuery && id.includes(normalizedQuery)) {
     matches.push({ score: 700, matchedBy: "xid_contains" });
   }
-
   if (
     normalizedQuery &&
     xAliases.some((alias) => alias.includes(normalizedQuery))
   ) {
     matches.push({ score: 680, matchedBy: "xid_alias_contains" });
   }
-
   if (normalizedQuery && name.includes(normalizedQuery)) {
     matches.push({ score: 620, matchedBy: "name_contains" });
   }
-
   if (
     normalizedQuery &&
     nameAliases.some((alias) => alias.includes(normalizedQuery))
@@ -193,17 +176,18 @@ function matchScore(
 
   if (compactQuery.length >= 3) {
     const targets = [
-      compactSearchText(candidate.x_user_id),
-      compactSearchText(candidate.name),
-      ...xAliases.map(compactSearchText),
-      ...nameAliases.map(compactSearchText),
+      compactNormalizedSearchText(id),
+      compactNormalizedSearchText(name),
+      ...xAliases.map(compactNormalizedSearchText),
+      ...nameAliases.map(compactNormalizedSearchText),
     ].filter(Boolean);
 
-    const minimumDistance = Math.min(
-      ...targets.map((target) =>
-        limitedLevenshtein(compactQuery, target, 2),
-      ),
-    );
+    let minimumDistance = 3;
+    for (const target of targets) {
+      const distance = limitedLevenshtein(compactQuery, target, 2);
+      if (distance < minimumDistance) minimumDistance = distance;
+      if (minimumDistance === 0) break;
+    }
 
     if (minimumDistance === 1) {
       matches.push({ score: 500, matchedBy: "fuzzy_1" });
@@ -225,9 +209,12 @@ export function rankMemberSuggestionCandidates(
   query: string,
   nowSec = Math.floor(Date.now() / 1000),
 ): RankedMemberSuggestion[] {
+  const normalizedQuery = normalizeMemberSearchText(query);
+  const compactQuery = compactNormalizedSearchText(normalizedQuery);
+
   const ranked = candidates
     .map((candidate) => {
-      const match = matchScore(query, candidate);
+      const match = matchScore(normalizedQuery, compactQuery, candidate);
 
       if (match.score <= 0) return null;
 
