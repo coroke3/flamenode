@@ -22,6 +22,7 @@ function emptyOverlay(authUnavailable = false): VideoViewerOverlayDto {
   return {
     loggedIn: false,
     authUnavailable,
+    isBanned: false,
     isTosAccepted: false,
     termsReacceptRequired: false,
     activeXId: null,
@@ -45,6 +46,7 @@ function normalizeOverlay(value: unknown): VideoViewerOverlayDto | null {
   if (
     typeof row.loggedIn !== "boolean" ||
     typeof row.authUnavailable !== "boolean" ||
+    typeof row.isBanned !== "boolean" ||
     typeof row.isTosAccepted !== "boolean" ||
     typeof row.termsReacceptRequired !== "boolean" ||
     typeof row.likeActive !== "boolean" ||
@@ -106,6 +108,7 @@ function normalizeOverlay(value: unknown): VideoViewerOverlayDto | null {
   return {
     loggedIn: row.loggedIn,
     authUnavailable: row.authUnavailable,
+    isBanned: row.isBanned,
     isTosAccepted: row.isTosAccepted,
     termsReacceptRequired: row.termsReacceptRequired,
     activeXId: stringOrNull(row.activeXId),
