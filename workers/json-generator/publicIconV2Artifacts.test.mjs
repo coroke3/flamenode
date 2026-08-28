@@ -3,15 +3,21 @@ import { test } from "node:test";
 
 import {
   PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+  PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES,
   normalizePublicXIconV2Manifest,
   publicXIconV2ShardObjectKey,
 } from "../../src/lib/publicData/publicIconProjectionV2.ts";
-import { PUBLIC_X_ICON_MAP_OBJECT_KEY } from "../../src/lib/publicData/publicIconProjection.ts";
+import {
+  PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES,
+  PUBLIC_X_ICON_MAP_OBJECT_KEY,
+} from "../../src/lib/publicData/publicIconProjection.ts";
 import { rebuildPublicIconV2FromLegacyArtifact } from "./publicIconV2Artifacts.ts";
 
 function jsonObject(value) {
   const body = structuredClone(value);
+  const serialized = JSON.stringify(body);
   return {
+    size: new TextEncoder().encode(serialized).byteLength,
     async json() {
       return structuredClone(body);
     },
@@ -132,4 +138,56 @@ test("ambiguous real-manifest PUT failure never deletes possibly referenced shar
       `manifest referenced shard ${shard} must be preserved`,
     );
   }
+});
+
+test("oversized canonical V1 icon map is rejected before JSON parse", async () => {
+  let parsed = false;
+  const bucket = {
+    async get(key) {
+      if (key !== PUBLIC_X_ICON_MAP_OBJECT_KEY) return null;
+      return {
+        size: PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES + 1,
+        async json() {
+          parsed = true;
+          return legacyPayload();
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    rebuildPublicIconV2FromLegacyArtifact({ R2: bucket }),
+    /public_icon_v2_v1_too_large/,
+  );
+  assert.equal(parsed, false);
+});
+
+test("oversized current V2 manifest is ignored before JSON parse", async () => {
+  let parsed = false;
+  const legacy = legacyPayload();
+  const bucket = {
+    async get(key) {
+      if (key === PUBLIC_X_ICON_MAP_OBJECT_KEY) return jsonObject(legacy);
+      if (key === PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY) {
+        return {
+          size: PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES + 1,
+          async json() {
+            parsed = true;
+            return {};
+          },
+        };
+      }
+      return null;
+    },
+    async head() {
+      return null;
+    },
+    async put() {
+      return {};
+    },
+    async delete() {},
+  };
+
+  await rebuildPublicIconV2FromLegacyArtifact({ R2: bucket });
+  assert.equal(parsed, false);
 });
