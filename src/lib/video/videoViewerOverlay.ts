@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, notLike, sql } from "drizzle-orm";
 import {
   CurrentUserUnavailableError,
   getCurrentUserContext,
@@ -10,19 +10,22 @@ import {
   resolveAdminOrEventVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
 import { withDatabase } from "@/lib/cloudflare";
+import type { DB } from "@/lib/db/client";
 import {
+  videoChapters,
   videoInteractionsAuth,
   videos as videosTable,
+  xUsers,
 } from "@/lib/db/schema";
-import { fetchAuthorizedPrivateVideoChapters } from "@/lib/db/videoDetailQueries";
 import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { loadPublicEventPlaylistR2Only } from "@/lib/publicData/r2EventPlaylist";
 import { EVENT_PLAYLIST_MAX_ITEMS } from "@/lib/publicData/staticEventPlaylistCore";
 import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 import { isLiveApiEnabled } from "@/lib/operationMode/policy";
-import type {
-  VideoViewerOverlayDto,
-  VideoViewerOverlayPlaylistItem,
+import {
+  VIDEO_VIEWER_OVERLAY_MAX_PRIVATE_CHAPTERS,
+  type VideoViewerOverlayDto,
+  type VideoViewerOverlayPlaylistItem,
 } from "./videoViewerOverlayCore";
 
 function emptyOverlay(args?: {
@@ -43,6 +46,60 @@ function emptyOverlay(args?: {
     playlistLabel: args?.playlistLabel ?? "再生リスト",
     playlistItems: args?.playlistItems ?? [],
   };
+}
+
+/**
+ * viewer overlay専用のprivate chapter read。
+ * 旧helperと同じ認可条件を保ちつつ、clientが受理する最大件数でD1 query自体を止める。
+ * 全件取得後のsliceではWorkers CPU/JSON化コストを削減できないためserver側でboundedにする。
+ */
+async function fetchBoundedPrivateChapters(
+  db: DB,
+  videoId: string,
+  viewer: {
+    role: string | null;
+    approvedXIds: string[];
+    canEditChapters: boolean;
+  },
+): Promise<VideoViewerOverlayDto["privateChapters"]> {
+  const canSeeAllPrivate =
+    viewer.role === "admin" || viewer.canEditChapters === true;
+  if (!canSeeAllPrivate && viewer.approvedXIds.length === 0) return [];
+
+  const ownerCondition = canSeeAllPrivate
+    ? eq(videoChapters.visibility, "private")
+    : and(
+        eq(videoChapters.visibility, "private"),
+        sql`${videoChapters.x_user_id} IN (
+          SELECT CAST(value AS TEXT)
+          FROM json_each(${JSON.stringify(viewer.approvedXIds)})
+        )`,
+        // linked X read後にapprovalが変化しても同じstatementでfail-closed。
+        eq(xUsers.approval_status, "approved"),
+      )!;
+
+  return db
+    .select({
+      id: videoChapters.id,
+      chapter_time: videoChapters.chapter_time,
+      chapter_label: videoChapters.chapter_label,
+      visibility: sql<"private">`'private'`,
+      note: videoChapters.note,
+      author_name: xUsers.x_name,
+      author_icon: xUsers.icon_url,
+    })
+    .from(videoChapters)
+    .leftJoin(xUsers, eq(xUsers.id, videoChapters.x_user_id))
+    .where(
+      and(
+        eq(videoChapters.video_id, videoId),
+        ownerCondition,
+        notLike(videoChapters.id, "%:member:%"),
+        notLike(videoChapters.id, "%:legacy:%"),
+      )!,
+    )
+    .orderBy(asc(videoChapters.chapter_time), asc(videoChapters.id))
+    .limit(VIDEO_VIEWER_OVERLAY_MAX_PRIVATE_CHAPTERS);
 }
 
 async function loadStaticEventPlaylistOverlay(
@@ -142,8 +199,7 @@ export async function loadVideoViewerOverlay(args: {
 
       const privateChapters =
         viewerCanEditChapters || approvedXIds.length > 0
-          ? await fetchAuthorizedPrivateVideoChapters(db, args.videoId, {
-              id: viewer.id,
+          ? await fetchBoundedPrivateChapters(db, args.videoId, {
               role: viewer.role ?? null,
               approvedXIds,
               canEditChapters: viewerCanEditChapters,
