@@ -2,6 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
+import { cancelR2BodyBestEffort } from "@/lib/r2Body";
 import {
   logPublicRequestMetrics,
   recordPublicFallbackReason,
@@ -180,6 +181,8 @@ import {
   filterPublicArtifactPayload,
   type PublicArtifactVisibilityContext,
 } from "./publicArtifactVisibility";
+
+export const PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
 
 export type PublicJsonCacheMode =
   | "default"
@@ -408,6 +411,7 @@ function warnPublicStaticJson(
   key: string,
   result:
     | "invalid_json"
+    | "object_too_large"
     | "read_failed"
     | "target_probe_failed"
     | "enqueue_failed"
@@ -431,6 +435,16 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
     recordPublicR2Get();
     const object = await bucket.get(key);
     if (!object) return null;
+    if (
+      typeof object.size === "number" &&
+      (!Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
+        object.size > PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES)
+    ) {
+      await cancelR2BodyBestEffort(object);
+      warnPublicStaticJson(key, "object_too_large");
+      return null;
+    }
     try {
       return (await object.json()) as T;
     } catch (error) {
