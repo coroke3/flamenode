@@ -23,9 +23,11 @@ interface VideoUtilityDockProps {
 
   isLoggedIn: boolean;
   authUnavailable: boolean;
+  needsTermsAcceptance: boolean;
   canPost: boolean;
 
   loginHref: string;
+  rulesHref: string;
   settingsHref: string;
   activeXId?: string | null;
 }
@@ -42,8 +44,10 @@ export function VideoUtilityDock({
   chapters,
   isLoggedIn,
   authUnavailable,
+  needsTermsAcceptance,
   canPost,
   loginHref,
+  rulesHref,
   settingsHref,
   activeXId,
 }: VideoUtilityDockProps): React.ReactElement {
@@ -249,8 +253,10 @@ export function VideoUtilityDock({
               chapters={chapters}
               isLoggedIn={isLoggedIn}
               authUnavailable={authUnavailable}
+              needsTermsAcceptance={needsTermsAcceptance}
               canPost={canPost}
               loginHref={loginHref}
+              rulesHref={rulesHref}
               settingsHref={settingsHref}
               activeXId={activeXId}
             />
