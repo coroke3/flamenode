@@ -5,6 +5,7 @@ import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
 import type { VideoViewerOverlayDto } from "./videoViewerOverlayCore";
 
 const CACHE_TTL_MS = 30_000;
+const MAX_CACHE_ENTRIES = 64;
 const MAX_PRIVATE_CHAPTERS = 500;
 const MAX_PLAYLIST_ITEMS = 500;
 const VIDEO_VIEWER_OVERLAY_CHANGED_EVENT =
@@ -28,6 +29,18 @@ type ResolvedPlaylistState = {
 };
 
 const cache = new Map<string, CacheEntry>();
+
+function setCacheEntry(key: string, entry: CacheEntry): void {
+  // delete+setで最近利用したentryを末尾へ移し、private viewer dataを含む
+  // SPA session cacheが未再訪keyで無制限に増え続けないよう上限化する。
+  cache.delete(key);
+  cache.set(key, entry);
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (typeof oldestKey !== "string") break;
+    cache.delete(oldestKey);
+  }
+}
 
 function emptyOverlay(authUnavailable = false): VideoViewerOverlayDto {
   return {
@@ -171,9 +184,16 @@ async function fetchOverlay(
     existing.fetchedAt != null &&
     now - existing.fetchedAt <= CACHE_TTL_MS
   ) {
+    setCacheEntry(key, existing);
     return existing.value;
   }
-  if (existing?.promise) return existing.promise;
+  if (existing?.promise) {
+    setCacheEntry(key, existing);
+    return existing.promise;
+  }
+
+  // 期限切れentryは新requestの前に破棄し、古いprivate payloadを保持し続けない。
+  if (existing) cache.delete(key);
 
   const params = new URLSearchParams();
   if (playlist) params.set("playlist", playlist);
@@ -197,12 +217,12 @@ async function fetchOverlay(
     .catch(() => emptyOverlay(true))
     .then((value) => {
       if (cache.get(key)?.requestToken === requestToken) {
-        cache.set(key, { value, fetchedAt: Date.now() });
+        setCacheEntry(key, { value, fetchedAt: Date.now() });
       }
       return value;
     });
 
-  cache.set(key, { promise, requestToken });
+  setCacheEntry(key, { promise, requestToken });
   return promise;
 }
 
