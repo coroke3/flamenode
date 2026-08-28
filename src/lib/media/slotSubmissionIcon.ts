@@ -19,11 +19,22 @@ const MEDIA_UNAVAILABLE_HEADERS = {
   "cache-control": "no-store",
   "retry-after": "30",
 };
+const MEDIA_NOT_FOUND_HEADERS = {
+  "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
+};
 
 function mediaUnavailableResponse(message: string): Response {
   return new Response(message, {
     status: 503,
     headers: MEDIA_UNAVAILABLE_HEADERS,
+  });
+}
+
+function mediaNotFoundResponse(): Response {
+  return new Response("Not found", {
+    status: 404,
+    headers: MEDIA_NOT_FOUND_HEADERS,
   });
 }
 
@@ -159,7 +170,7 @@ export async function serveSlotSubmissionIconRow(
   viewer: { id: string; active_x_user_id: string | null } | null,
 ): Promise<Response> {
   const access = resolveSlotSubmissionIconAccess(row, viewer);
-  if (!access.allowed) return new Response("Not found", { status: 404 });
+  if (!access.allowed) return mediaNotFoundResponse();
 
   const { iconUrl, cacheControl } = access;
   if (iconUrl.startsWith("https://")) {
@@ -173,14 +184,14 @@ export async function serveSlotSubmissionIconRow(
     });
   }
   if (iconUrl.startsWith("http://")) {
-    return new Response("Not found", { status: 404 });
+    return mediaNotFoundResponse();
   }
 
   const r2Key = extractR2KeyFromMediaUrl(iconUrl);
-  if (!r2Key) return new Response("Not found", { status: 404 });
+  if (!r2Key) return mediaNotFoundResponse();
 
   const namespace = getPublicMediaNamespace(r2Key);
-  if (!namespace) return new Response("Not found", { status: 404 });
+  if (!namespace) return mediaNotFoundResponse();
   if (!env.BUCKET) {
     return mediaUnavailableResponse("Media storage unavailable");
   }
@@ -192,11 +203,11 @@ export async function serveSlotSubmissionIconRow(
     console.error("[slot-submission-icon] R2 read failed", error);
     return mediaUnavailableResponse("Media storage unavailable");
   }
-  if (!obj) return new Response("Not found", { status: 404 });
+  if (!obj) return mediaNotFoundResponse();
 
   const contentType = normalizePublicMediaContentType(obj.httpMetadata?.contentType);
   if (!contentType || !isPublicMediaObjectSafe({ size: obj.size, contentType })) {
-    return new Response("Not found", { status: 404 });
+    return mediaNotFoundResponse();
   }
 
   const headers = new Headers();
@@ -218,7 +229,7 @@ export async function serveSlotSubmissionIcon(
     return mediaUnavailableResponse("Media access check unavailable");
   }
   if (probe.kind === "not_found") {
-    return new Response("Not found", { status: 404 });
+    return mediaNotFoundResponse();
   }
   return serveSlotSubmissionIconRow(env, probe.row, viewer);
 }
