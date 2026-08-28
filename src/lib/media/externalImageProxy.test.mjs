@@ -35,7 +35,10 @@ test("cache hit responseは画像buffer全体のsliceコピーを作らない", 
   const responseStart = source.indexOf("function imageResponse(");
   const responseEnd = source.indexOf("function fallbackResponse(", responseStart);
   const responseSource = source.slice(responseStart, responseEnd);
-  assert.match(responseSource, /new Response\(entry\.bytes, \{ headers \}\)/);
+  assert.match(
+    responseSource,
+    /new Response\(entry\.bytes\.buffer as ArrayBuffer, \{ headers \}\)/,
+  );
   assert.doesNotMatch(responseSource, /entry\.bytes\.slice\(\)/);
 });
 

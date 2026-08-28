@@ -53,7 +53,7 @@ function inferActionLabel(href: string | undefined): string {
 
 /**
  * いいね・ブックマークのトグルボタン。
- * 成功後にrouter.refresh()を行わず、server action結果でローカル状態を更新する。
+ * 成功後に全体のRSC再取得を行わず、server action結果でローカル状態を更新する。
  * viewer overlayは狭いAPIだけを共有再取得し、library playlist等も同期する。
  */
 export function InteractionButton({

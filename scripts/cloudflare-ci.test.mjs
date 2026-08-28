@@ -704,6 +704,11 @@ test("OpenNext output requires on-demand routes, worker, assets, matching manife
     fs.writeFileSync(path.join(outputRoot, "worker.js"), "export default {};\n", "utf8");
     fs.writeFileSync(path.join(outputRoot, "assets", "app.js"), "console.log('asset');\n", "utf8");
     fs.writeFileSync(
+      path.join(outputRoot, "assets", "manifest.webmanifest"),
+      "{}\n",
+      "utf8",
+    );
+    fs.writeFileSync(
       serverConfigPath,
       'export default { default: { routePreloadingBehavior: "none" } };\n',
       "utf8",

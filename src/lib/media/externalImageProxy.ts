@@ -156,8 +156,10 @@ function imageResponse(
   if (entry.etag) headers.set("etag", entry.etag);
   // Cached bytes are immutable after insertion. Avoid an explicit full-buffer
   // slice here; large image hits can otherwise allocate another multi-MiB
-  // Uint8Array before Response performs its own BodyInit handling.
-  return new Response(entry.bytes, { headers });
+  // Uint8Array before Response performs its own BodyInit handling. The reader
+  // below always creates an exact, zero-offset Uint8Array, so its ArrayBuffer
+  // is the equivalent no-copy BodyInit accepted by the repository's DOM types.
+  return new Response(entry.bytes.buffer as ArrayBuffer, { headers });
 }
 
 function fallbackResponse(

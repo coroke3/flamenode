@@ -11,6 +11,10 @@ const gridSource = await readFile(
   new URL("../../components/event/SlotGrid.tsx", import.meta.url),
   "utf8",
 );
+const overlaySource = await readFile(
+  new URL("../slots/slotViewerOverlay.ts", import.meta.url),
+  "utf8",
+);
 
 function actionBlock(name) {
   const start = actionSource.indexOf(`export async function ${name}`);
@@ -30,14 +34,15 @@ test("運営例外は event.slots を Server Action 内で再認証する", () =
 });
 
 test("運営例外の公開UIは権限投影と受付期間を両方確認する", () => {
-  assert.match(pageSource, /getManageAuthorizationSnapshot/);
+  assert.match(pageSource, /EventSlotsViewerPanel/);
+  assert.match(overlaySource, /getManageAuthorizationSnapshot/);
   assert.match(
-    pageSource,
-    /viewer\.role === "admin" \|\| onboarding\.xIdentityStatus === "approved"/,
+    overlaySource,
+    /viewer\.role === "admin"\s*\|\|\s*onboarding\.xIdentityStatus === "approved"/,
   );
-  assert.match(pageSource, /canEditEventFromSnapshot\(authorization, event\.id, "event\.slots"\)/);
-  assert.match(pageSource, /canUseSlotOperatorOverride\(event, now\)/);
-  assert.match(pageSource, /operatorOverrideAllowed/);
+  assert.match(overlaySource, /canEditEventFromSnapshot\(authorization, eventId, "event\.slots"\)/);
+  assert.match(overlaySource, /canUseSlotOperatorOverride\(eventRow, now\)/);
+  assert.match(overlaySource, /operatorOverrideAllowed/);
 });
 
 test("例外予約は絶対上限を超えず、操作警告を表示する", () => {

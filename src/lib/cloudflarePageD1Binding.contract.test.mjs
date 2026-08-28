@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [libraryPage, videoDetailPage, managePage] = await Promise.all([
+const [libraryPage, videoDetailPage, managePage, videoOverlay] = await Promise.all([
   readFile(
     new URL("../../app/(auth)/dashboard/library/page.tsx", import.meta.url),
     "utf8",
@@ -15,6 +15,7 @@ const [libraryPage, videoDetailPage, managePage] = await Promise.all([
     new URL("../../app/(manage)/manage/page.tsx", import.meta.url),
     "utf8",
   ),
+  readFile(new URL("./video/videoViewerOverlay.ts", import.meta.url), "utf8"),
 ]);
 
 test("ライブラリ一覧はinteraction IDをINへ展開せず動画へ直接JOINする", () => {
@@ -31,17 +32,17 @@ test("ライブラリ一覧はinteraction IDをINへ展開せず動画へ直接J
 
 test("動画詳細のライブラリplaylistも直接JOINし、overlay障害を認証済み利用者の未承認扱いにしない", () => {
   assert.match(
-    videoDetailPage,
+    videoOverlay,
     /\.from\(videoInteractionsAuth\)[\s\S]*?\.innerJoin\([\s\S]*?videosTable,[\s\S]*?eq\(videosTable\.id, videoInteractionsAuth\.video_id\)/,
   );
   assert.match(
-    videoDetailPage,
-    /eq\(\s*videoInteractionsAuth\.auth_user_id,\s*authenticatedViewer\.id,\s*\)[\s\S]*?eq\(videoInteractionsAuth\.interaction_type, kind\)[\s\S]*?eq\(videosTable\.visibility_status, "public"\)/,
+    videoOverlay,
+    /eq\(videoInteractionsAuth\.auth_user_id, viewer\.id\)[\s\S]*?eq\(videoInteractionsAuth\.interaction_type, kind\)[\s\S]*?eq\(videosTable\.visibility_status, "public"\)/,
   );
-  assert.doesNotMatch(videoDetailPage, /inArray\(videosTable\.id/);
+  assert.doesNotMatch(videoOverlay, /inArray\(videosTable\.id/);
   assert.match(
-    videoDetailPage,
-    /authUnavailable:\s*authUnavailable \|\| Boolean\(authenticatedViewer\)/,
+    videoOverlay,
+    /authUnavailable:\s*true/,
   );
 });
 

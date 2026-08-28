@@ -8,7 +8,9 @@ const source = await readFile(
 );
 
 test("degraded circuitはWorkers isolate globalへKV binding/Promise tailを保持しない", () => {
-  assert.doesNotMatch(source, /type MissAccumulator = \{[\s\S]*?kv:\s*KVNamespace/);
+  const accumulator = source.match(/type MissAccumulator = \{[\s\S]*?\n\};/)?.[0];
+  assert.ok(accumulator, "MissAccumulator type");
+  assert.doesNotMatch(accumulator, /kv:\s*KVNamespace/);
   assert.doesNotMatch(source, /missFlushTail/);
   assert.match(source, /let missFlushInFlight = false/);
   assert.match(source, /flushPendingMissesIfReady\(\s*kv: KVNamespace,/);

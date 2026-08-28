@@ -111,7 +111,11 @@ function gramsForText(value: string, minGramLength: number): string[] {
     length += 1
   ) {
     for (let index = 0; index + length <= chars.length; index += 1) {
-      grams.add(chars.slice(index, index + length).join(""));
+      const gram = chars.slice(index, index + length).join("");
+      // Whitespace-only grams cannot be produced by a trimmed query and only
+      // create unreachable posting shards. Keep internal/boundary whitespace
+      // (for phrase queries), but omit these empty search tokens.
+      if (/\S/u.test(gram)) grams.add(gram);
     }
   }
   return [...grams];
@@ -144,12 +148,17 @@ function safePageForObjectKey(page: number): number {
 }
 
 function isCanonicalGram(value: string): boolean {
-  const normalized = normalizeStaticSearchQuery(value);
-  const length = [...normalized].length;
+  // Posting grams are substrings of normalized source text. Unlike a complete
+  // query they may legitimately begin/end with whitespace (e.g. "or "), so
+  // validation must not trim them away. The builder emits lower-case grams;
+  // keep the same invariant while rejecting empty/whitespace-only tokens.
+  const normalized = value.toLowerCase();
+  const length = [...value].length;
   return (
     value === normalized &&
     length >= 1 &&
-    length <= STATIC_SEARCH_POSTINGS_MAX_GRAM_LENGTH
+    length <= STATIC_SEARCH_POSTINGS_MAX_GRAM_LENGTH &&
+    /\S/u.test(value)
   );
 }
 

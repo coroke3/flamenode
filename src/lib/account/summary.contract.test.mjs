@@ -71,7 +71,7 @@ test("正常なloggedOut summaryはSSRの古いログイン表示を破棄する
   assert.match(island, /setConfirmedLoggedOut\(false\)/);
   assert.match(
     island,
-    /else \{\s*\/\/ 503\/通信失敗とは違い,[\s\S]*setUser\(null\);\s*setConfirmedLoggedOut\(true\);\s*setUnavailable\(false\);/,
+    /else \{[\s\S]*?setUser\(null\);\s*setConfirmedLoggedOut\(true\);\s*setUnavailable\(false\);/,
   );
   assert.match(
     publicHeader,

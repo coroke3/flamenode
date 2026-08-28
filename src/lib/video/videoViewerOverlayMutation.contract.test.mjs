@@ -24,7 +24,7 @@ test("mount済みviewer overlay hookはmutation eventを受けてcacheを破棄�
 });
 
 test("invalidate前の遅いrequestは新しいviewer cacheを上書きしない", () => {
-  assert.match(client, /requestToken: symbol/);
+  assert.match(client, /requestToken\?: symbol/);
   assert.match(client, /const requestToken = Symbol\(key\)/);
   assert.match(
     client,
