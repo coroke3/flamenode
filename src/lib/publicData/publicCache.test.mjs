@@ -27,14 +27,19 @@ test("public cache は JSON parse 前にstreamを16MiBで制限する", () => {
   assert.doesNotMatch(source, /response\.arrayBuffer\(\)/);
 });
 
-test("public cache write もUTF-8 byte上限を超えるentryを作らない", () => {
+test("public cache write は非JSON値とUTF-8 byte上限超過entryを作らない", () => {
   const fnStart = source.indexOf("export function writePublicJsonCacheBestEffort");
+  const stringGuardIndex = source.indexOf(
+    'typeof serialized !== "string"',
+    fnStart,
+  );
   const byteGuardIndex = source.indexOf(
     "utf8ByteLengthExceeds(serialized, PUBLIC_JSON_CACHE_MAX_BYTES)",
     fnStart,
   );
   const putIndex = source.indexOf(".default.put(", fnStart);
-  assert.ok(fnStart >= 0 && byteGuardIndex > fnStart);
+  assert.ok(fnStart >= 0 && stringGuardIndex > fnStart);
+  assert.ok(byteGuardIndex > stringGuardIndex);
   assert.ok(putIndex > byteGuardIndex);
   assert.match(source, /function utf8ByteLengthExceeds/);
 });
