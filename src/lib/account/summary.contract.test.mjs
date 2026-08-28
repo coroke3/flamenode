@@ -82,6 +82,15 @@ test("公開headerはaccount summaryをidleへ遅延し操作時は即時取得�
   assert.match(island, /inFlightRef/);
 });
 
+test("account summaryのin-flight requestは無期限にloadingを維持しない", () => {
+  assert.match(island, /const PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS = 5_000/);
+  assert.match(island, /const controller = new AbortController\(\)/);
+  assert.match(island, /controller\.abort\(\)/);
+  assert.match(island, /signal: controller\.signal/);
+  assert.match(island, /window\.clearTimeout\(timeoutId\)/);
+  assert.match(island, /return \{ kind: "unavailable" as const \}/);
+});
+
 test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得する", () => {
   assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
