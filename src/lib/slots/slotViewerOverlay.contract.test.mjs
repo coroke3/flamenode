@@ -66,3 +66,12 @@ test("base slot/Active X変更時は旧viewer ownershipを即時無効化する"
   assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, baseSlots: null \}\)/);
   assert.match(panel, /ACTIVE_X_CHANGED_EVENT/);
 });
+
+test("TOS/BAN/auth unavailableでは本人枠のwrite ownershipだけを無効化する", () => {
+  assert.match(panel, /const canManageOwnSlots =/);
+  assert.match(panel, /!viewerOverlay\.needsTermsAcceptance/);
+  assert.match(panel, /!viewerOverlay\.isBanned/);
+  assert.match(panel, /!viewerOverlay\.authUnavailable/);
+  assert.match(panel, /is_owned_by_viewer: false/);
+  assert.match(panel, /canManageOwnSlots\s*\? mergedSlots/);
+});
