@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
-const read = (relative) => readFile(new URL(relative, import.meta.url), "utf8");
+const root = process.cwd();
+const read = (relative) => readFile(path.join(root, relative), "utf8");
 
 const [middlewareSource, reuseSource, trendingSource, aboutStatsSource, staffSource] =
   await Promise.all([
-    read("../../middleware.ts"),
-    read("./event/eventIdReuse.ts"),
-    read("./publicData/trendingLoader.ts"),
-    read("../../app/api/public/about-stats/route.ts"),
-    read("../../app/api/public/events/[id]/staff/route.ts"),
+    read("middleware.ts"),
+    read("src/lib/event/eventIdReuse.ts"),
+    read("src/lib/publicData/trendingLoader.ts"),
+    read("app/api/public/about-stats/route.ts"),
+    read("app/api/public/events/[id]/staff/route.ts"),
   ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
