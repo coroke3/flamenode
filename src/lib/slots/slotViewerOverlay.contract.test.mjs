@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [loader, route, panel] = await Promise.all([
+const [loader, route, panel, core] = await Promise.all([
   readFile(new URL("./slotViewerOverlay.ts", import.meta.url), "utf8"),
   readFile(
     new URL(
@@ -18,6 +18,7 @@ const [loader, route, panel] = await Promise.all([
     ),
     "utf8",
   ),
+  readFile(new URL("./slotViewerOverlayCore.ts", import.meta.url), "utf8"),
 ]);
 
 test("slot viewer overlayは公開event確認をAuth/slot readより先に行う", () => {
@@ -44,21 +45,42 @@ test("BAN viewerはslot read前にfail-closedできる", () => {
   assert.match(loader, /isBanned: true/);
 });
 
-test("ログインviewerのslot queryはそのauth userの予約行だけを読む", () => {
-  const slotRead = loader.indexOf(".from(slotsTable)");
-  const slotMap = loader.indexOf("const slots = slotRows.map", slotRead);
-  assert.ok(slotRead >= 0 && slotMap > slotRead);
-  const query = loader.slice(slotRead, slotMap);
-  assert.match(query, /eq\(slotsTable\.event_id, eventId\)/);
-  assert.match(query, /eq\(slotsTable\.reserved_by_user_id, viewer\.id\)/);
-});
-
-test("public_nameのgroup keyは公開base snapshotを正本にする", () => {
+test("ログインviewerはprivate行と軽量canonical statusを分離して読む", () => {
+  assert.match(loader, /const \[onboarding, slotRows, slotStates\] = await Promise\.all/);
   assert.match(
     loader,
-    /isOwnedByViewer && eventRow\.slot_visibility_mode !== "public_name"/,
+    /eq\(slotsTable\.event_id, eventId\),\s*eq\(slotsTable\.reserved_by_user_id, viewer\.id\)/s,
   );
-  assert.match(panel, /group_key: patch\.group_key \?\? slot\.group_key/);
+  assert.match(
+    loader,
+    /\.select\(\{ id: slotsTable\.id, status: slotsTable\.status \}\)\s*\.from\(slotsTable\)\s*\.where\(eq\(slotsTable\.event_id, eventId\)\)/s,
+  );
+  assert.match(loader, /slotStates,/);
+  assert.match(core, /slotStates: SlotViewerOverlayState\[\]/);
+});
+
+test("viewer groupはDB idを出さずpublic baseがあるときはbaseを優先する", () => {
+  assert.match(loader, /`viewer-group-\$\{groupKeys\.size \+ 1\}`/);
+  assert.doesNotMatch(loader, /group_key:\s*slot\.reservation_group_id/);
+  assert.match(panel, /group_key: currentSlot\.group_key \?\? patch\.group_key/);
+});
+
+test("R2反映待ちでもcanonical statusを重ねstale identityを持ち越さない", () => {
+  assert.match(panel, /const stateById = new Map/);
+  assert.match(panel, /const canonicalStatus = stateById\.get\(slot\.id\)/);
+  assert.match(panel, /canonicalStatus !== slot\.status/);
+  assert.match(panel, /status: canonicalStatus/);
+  assert.match(panel, /display_name: null/);
+  assert.match(panel, /reserved_x_id: null/);
+  assert.match(panel, /submitted_icon_url: null/);
+  assert.match(panel, /group_key: null/);
+  assert.match(panel, /x_user_id: null/);
+});
+
+test("slot state payloadが壊れている場合はpartial状態を採用しない", () => {
+  assert.match(panel, /!Array\.isArray\(row\.slotStates\)/);
+  assert.match(panel, /const normalizedSlotStates = row\.slotStates\.map\(normalizeSlotState\)/);
+  assert.match(panel, /normalizedSlotStates\.some\(\(state\) => state === null\)/);
 });
 
 test("slot viewer routeはnot-foundとruntime unavailableを分離する", () => {
