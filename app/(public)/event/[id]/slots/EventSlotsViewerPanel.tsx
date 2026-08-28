@@ -213,9 +213,27 @@ export function EventSlotsViewerPanel({
     return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
   }, []);
 
-  const slots = React.useMemo(
+  const mergedSlots = React.useMemo(
     () => mergeViewerSlots(baseSlots, viewerOverlay),
     [baseSlots, viewerOverlay],
+  );
+  const canManageOwnSlots =
+    !viewerLoading &&
+    viewerOverlay.loggedIn &&
+    !viewerOverlay.authUnavailable &&
+    !viewerOverlay.isBanned &&
+    !viewerOverlay.needsTermsAcceptance;
+  const slots = React.useMemo(
+    () =>
+      canManageOwnSlots
+        ? mergedSlots
+        : mergedSlots.map((slot) => ({
+            ...slot,
+            // display_name / reserved_x_idは本人向け表示として維持するが、
+            // SlotGridが編集・解放・拡張・結合に使うownershipだけを無効化する。
+            is_owned_by_viewer: false,
+          })),
+    [mergedSlots, canManageOwnSlots],
   );
   const currentPath = `/event/${eventId}/slots`;
   const canTakeSlot =
@@ -301,7 +319,8 @@ export function EventSlotsViewerPanel({
             isAuthenticated={
               viewerOverlay.loggedIn &&
               !viewerOverlay.authUnavailable &&
-              !viewerOverlay.isBanned
+              !viewerOverlay.isBanned &&
+              !viewerOverlay.needsTermsAcceptance
             }
             canReserve={accepting}
             canTakeSlot={canTakeSlot}
