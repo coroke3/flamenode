@@ -37,6 +37,20 @@ test("viewer overlayのnon-OK responseは未ログイン扱いにせずfail-clos
   assert.match(client, /if \(!response\.ok\) return emptyOverlay\(true\)/);
 });
 
+test("viewer overlay一時障害は正常cacheより短く保持する", () => {
+  assert.match(client, /const CACHE_TTL_MS = 30_000/);
+  assert.match(client, /const FAILURE_CACHE_TTL_MS = 3_000/);
+  assert.match(client, /ttlMs\?: number/);
+  assert.match(
+    client,
+    /now - existing\.fetchedAt <= \(existing\.ttlMs \?\? CACHE_TTL_MS\)/,
+  );
+  assert.match(
+    client,
+    /ttlMs: value\.authUnavailable \? FAILURE_CACHE_TTL_MS : CACHE_TTL_MS/,
+  );
+});
+
 test("viewer overlay cacheはprivate payloadを無制限保持しない", () => {
   assert.match(client, /const MAX_CACHE_ENTRIES = 64/);
   assert.match(client, /function setCacheEntry/);
