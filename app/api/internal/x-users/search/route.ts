@@ -211,11 +211,14 @@ export async function GET(request: Request): Promise<Response> {
       });
 
       // 2文字queryではrankerのfuzzy分岐が無効なのでposting集合が完全。
-      // 3文字以上では、現在ページが強いexact/prefix/contains候補だけで満杯なら
-      // postings外のfuzzy候補は順位を逆転できない。そうでない場合だけV1で従来互換を保つ。
+      // 3文字以上では、現在ページが強いexact/prefix/contains候補だけで満杯かつ
+      // V2集合内にも次ページがある場合だけ、そのページとhasMoreを確定できる。
+      // ちょうどlimit件でV2 hasMore=falseの場合、posting外のfuzzy候補が次ページに
+      // 存在し得るためV1へfallbackし、paginationを途中で切らない。
       const v2PageIsComplete =
         compactQueryLength <= 2 ||
         (searched.result.items.length === limit &&
+          searched.result.hasMore &&
           searched.result.items.every(
             (item) => !item.matchedBy.startsWith("fuzzy_"),
           ));
