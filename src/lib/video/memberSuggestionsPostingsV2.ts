@@ -11,7 +11,11 @@ import {
   type StaticSearchPostingPage,
 } from "../publicData/staticSearchPostingsCore.ts";
 import { normalizeMemberSearchText } from "./memberSuggestionRank.ts";
-import type { MemberSuggestionItem } from "./memberSuggestionsCore.ts";
+import {
+  MEMBER_SUGGESTIONS_MAX_NAME_ALIASES,
+  MEMBER_SUGGESTIONS_MAX_X_ALIASES,
+  type MemberSuggestionItem,
+} from "./memberSuggestionsCore.ts";
 
 export const MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY =
   "internal/member-suggestions/v2/manifest.json";
@@ -101,11 +105,15 @@ export function normalizeMemberSuggestionsV2Directory(
   return normalizeStaticSearchPostingDirectory(value);
 }
 
-function normalizeStringArray(value: unknown): string[] | null {
-  if (!Array.isArray(value)) return null;
+function normalizeStringArray(
+  value: unknown,
+  maxLength: number,
+  validate: (entry: string) => boolean,
+): string[] | null {
+  if (!Array.isArray(value) || value.length > maxLength) return null;
   const output: string[] = [];
   for (const entry of value) {
-    if (typeof entry !== "string") return null;
+    if (typeof entry !== "string" || !validate(entry)) return null;
     output.push(entry);
   }
   return output;
@@ -120,16 +128,24 @@ export function normalizeMemberSuggestionPostingItem(
     return null;
   }
   if (typeof row.name !== "string" || !row.name.trim()) return null;
-  const xAliases = normalizeStringArray(row.xAliases);
-  const nameAliases = normalizeStringArray(row.nameAliases);
+  const xAliases = normalizeStringArray(
+    row.xAliases,
+    MEMBER_SUGGESTIONS_MAX_X_ALIASES,
+    (entry) => /^[a-z0-9_]{1,64}$/.test(entry) && entry !== row.x_user_id,
+  );
+  const nameAliases = normalizeStringArray(
+    row.nameAliases,
+    MEMBER_SUGGESTIONS_MAX_NAME_ALIASES,
+    (entry) => entry.trim().length > 0,
+  );
   if (!xAliases || !nameAliases) return null;
   const occurrenceCount = Number(row.occurrenceCount ?? 0);
-  if (!Number.isFinite(occurrenceCount) || occurrenceCount < 0) return null;
+  if (!Number.isSafeInteger(occurrenceCount) || occurrenceCount < 0) return null;
   let lastSeenAt: number | null = null;
   if (row.lastSeenAt != null) {
-    const value = Number(row.lastSeenAt);
-    if (!Number.isFinite(value)) return null;
-    lastSeenAt = Math.floor(value);
+    const lastSeen = Number(row.lastSeenAt);
+    if (!Number.isSafeInteger(lastSeen)) return null;
+    lastSeenAt = lastSeen;
   }
   const approvalStatus = row.approvalStatus;
   if (approvalStatus != null && typeof approvalStatus !== "string") return null;
@@ -138,7 +154,7 @@ export function normalizeMemberSuggestionPostingItem(
     name: row.name,
     xAliases,
     nameAliases,
-    occurrenceCount: Math.floor(occurrenceCount),
+    occurrenceCount,
     lastSeenAt,
     approvalStatus: approvalStatus ?? null,
   };
