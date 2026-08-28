@@ -84,6 +84,14 @@ test("video/playlist遷移中は旧viewer overlayを表示・操作しない", (
   assert.match(interactionActions, /const canInteract =\s*!loading &&/s);
 });
 
+test("重複playlist queryでもutility dockへ配列を流さない", () => {
+  assert.match(utilityDock, /function normalizeRuntimePlaylistId\(value: unknown\)/);
+  assert.match(utilityDock, /Array\.isArray\(value\)/);
+  assert.match(utilityDock, /const safePlaylistId = normalizeRuntimePlaylistId\(playlistId\)/);
+  assert.match(utilityDock, /useVideoViewerOverlay\(videoId, safePlaylistId\)/);
+  assert.match(utilityDock, /playlistId=\{safePlaylistId\}/);
+});
+
 test("viewer overlayはcurrentUserContextのlinked X行を再利用する", () => {
   assert.match(serverOverlay, /context\.linkedXUsers/);
   assert.match(serverOverlay, /entry\.approval_status === "approved"/);
