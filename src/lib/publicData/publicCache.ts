@@ -78,10 +78,70 @@ async function cancelResponseBodyBestEffort(response: Response): Promise<void> {
   }
 }
 
+function utf8ByteLengthExceeds(value: string, limit: number): boolean {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        // TextEncoder replaces an unpaired surrogate with U+FFFD (3 bytes).
+        bytes += 3;
+      }
+    } else {
+      // BMP characters and lone low surrogates both encode to at most 3 bytes.
+      bytes += 3;
+    }
+    if (bytes > limit) return true;
+  }
+  return false;
+}
+
+async function readResponseBodyBounded(
+  response: Response,
+  maxBytes: number,
+): Promise<Uint8Array | null> {
+  const body = response.body;
+  if (!body) return null;
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 /**
  * Cache API entry はアプリが書いたJSONだが、古い/破損entryを無制限に
  * `Response.json()` すると巨大objectのparseでWorker CPU/heapを消費し得る。
- * Content-Length が使える場合はbuffer前に拒否し、最終的にもbyteLengthで上限を固定する。
+ * Content-Length が使える場合はstream前に拒否し、欠けていてもmax+1 byteを
+ * 読んだ時点で中断するため、巨大entry全体をbufferしない。
  */
 async function readBoundedJsonResponse<T>(response: Response): Promise<T | null> {
   const declaredBytes = contentLengthBytes(response);
@@ -89,8 +149,8 @@ async function readBoundedJsonResponse<T>(response: Response): Promise<T | null>
     await cancelResponseBodyBestEffort(response);
     return null;
   }
-  const bytes = await response.arrayBuffer();
-  if (bytes.byteLength > PUBLIC_JSON_CACHE_MAX_BYTES) return null;
+  const bytes = await readResponseBodyBounded(response, PUBLIC_JSON_CACHE_MAX_BYTES);
+  if (!bytes) return null;
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as T;
   } catch {
@@ -124,11 +184,9 @@ export function writePublicJsonCacheBestEffort(
 
     const safeTtl = Math.max(1, Math.floor(ttlSeconds));
     const serialized = JSON.stringify(payload);
-    // Cache miss/R2 hit時だけ通るbackground write。UTF-8 byte数でreaderと同じ上限を
-    // 適用し、multi-byte payloadがoversized entryを作らないようにする。
-    if (new TextEncoder().encode(serialized).byteLength > PUBLIC_JSON_CACHE_MAX_BYTES) {
-      return;
-    }
+    // Cache miss/R2 hit時だけ通るbackground write。readerと同じUTF-8 byte上限を
+    // allocation-freeに数え、巨大entryをCache APIへ渡さない。
+    if (utf8ByteLengthExceeds(serialized, PUBLIC_JSON_CACHE_MAX_BYTES)) return;
     const putPromise = (caches as unknown as { default: Cache }).default.put(
       publicJsonCacheKey(r2Key),
       new Response(serialized, {
