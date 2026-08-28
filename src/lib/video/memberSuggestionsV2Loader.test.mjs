@@ -9,10 +9,13 @@ import {
 } from "./memberSuggestionsCore.ts";
 import {
   buildMemberSuggestionsV2Artifacts,
+  memberSuggestionPostingBucket,
+  memberSuggestionQueryGrams,
   memberSuggestionsV2DirectoryObjectKey,
   memberSuggestionsV2PageObjectKey,
   normalizeMemberSuggestionPostingItem,
   MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
+  MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES,
 } from "./memberSuggestionsPostingsV2.ts";
 import {
   loadMemberSuggestionsCandidatesV2FromBucket,
@@ -25,6 +28,16 @@ function jsonObject(value) {
     size: new TextEncoder().encode(serialized).byteLength,
     async json() {
       return JSON.parse(serialized);
+    },
+  };
+}
+
+function bucketFromObjects(objects, gets = null) {
+  return {
+    async get(key) {
+      gets?.push(key);
+      const value = objects.get(key);
+      return value === undefined ? null : jsonObject(value);
     },
   };
 }
@@ -79,6 +92,71 @@ function fixture() {
   return { objects, generation };
 }
 
+function boundaryFixture(count) {
+  const generation = `boundary-${count}`;
+  const gram = "aa";
+  const bucketId = memberSuggestionPostingBucket(gram);
+  const pages = Array.from({ length: Math.ceil(count / 256) }, (_, i) => i + 1);
+  const objects = new Map([
+    [
+      MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+      {
+        schema_version: 1,
+        generation,
+        generated_at: 1,
+        total: count,
+      },
+    ],
+    [
+      MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
+      {
+        schema_version: 1,
+        generation,
+        generated_at: 1,
+        total: count,
+        bucket_count: 16,
+        backend: "postings-v1",
+        buckets: [bucketId],
+      },
+    ],
+    [
+      memberSuggestionsV2DirectoryObjectKey(generation, bucketId),
+      {
+        schema_version: 1,
+        generation,
+        bucket: bucketId,
+        grams: { [gram]: { pages, total: count } },
+      },
+    ],
+  ]);
+
+  for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
+    const start = pageIndex * 256;
+    const end = Math.min(count, start + 256);
+    const items = Array.from({ length: end - start }, (_, offset) => {
+      const index = start + offset;
+      return {
+        x_user_id: `aa${index.toString(36).padStart(4, "0")}`,
+        name: `Member ${index}`,
+        xAliases: [],
+        nameAliases: [],
+        occurrenceCount: 1,
+        lastSeenAt: null,
+        approvalStatus: "approved",
+      };
+    });
+    const pageNumber = pages[pageIndex];
+    objects.set(memberSuggestionsV2PageObjectKey(generation, bucketId, pageNumber), {
+      schema_version: 1,
+      generation,
+      bucket: bucketId,
+      page: pageNumber,
+      records: [{ gram, part: pageIndex, total: count, items }],
+    });
+  }
+  return objects;
+}
+
 test("V2 object key helperはNaN/小数/無限値を受け付けない", () => {
   assert.throws(() => memberSuggestionsV2DirectoryObjectKey("gen", Number.NaN));
   assert.throws(() => memberSuggestionsV2DirectoryObjectKey("gen", 1.5));
@@ -127,15 +205,10 @@ test("V2 loaderはqueryに必要なpostingだけで候補を返しV1 indexを読
   resetMemberSuggestionsV2CacheForTest();
   const { objects, generation } = fixture();
   const gets = [];
-  const bucket = {
-    async get(key) {
-      gets.push(key);
-      const value = objects.get(key);
-      return value === undefined ? null : jsonObject(value);
-    },
-  };
-
-  const result = await loadMemberSuggestionsCandidatesV2FromBucket(bucket, "alice");
+  const result = await loadMemberSuggestionsCandidatesV2FromBucket(
+    bucketFromObjects(objects, gets),
+    "alice",
+  );
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.generation, generation);
@@ -143,6 +216,73 @@ test("V2 loaderはqueryに必要なpostingだけで候補を返しV1 indexを読
   assert.ok(result.items.some((item) => item.x_user_id === "alice_mv"));
   assert.ok(!gets.some((key) => key.endsWith("/index.json")));
   assert.ok(gets.length < 10, `unexpected R2 GET fan-out: ${gets.length}`);
+});
+
+test("V2 loaderはR2 keyとpage payloadのbucket/page不一致を拒否する", async () => {
+  resetMemberSuggestionsV2CacheForTest();
+  const { objects, generation } = fixture();
+  const gram = memberSuggestionQueryGrams("alice")[0];
+  const bucketId = memberSuggestionPostingBucket(gram);
+  const directory = objects.get(
+    memberSuggestionsV2DirectoryObjectKey(generation, bucketId),
+  );
+  const pageNumber = directory.grams[gram].pages[0];
+  const pageKey = memberSuggestionsV2PageObjectKey(generation, bucketId, pageNumber);
+  const page = objects.get(pageKey);
+  objects.set(pageKey, { ...page, page: pageNumber + 100 });
+
+  const result = await loadMemberSuggestionsCandidatesV2FromBucket(
+    bucketFromObjects(objects),
+    "alice",
+  );
+  assert.deepEqual(result, { ok: false, reason: "page_invalid" });
+});
+
+test("V2 loaderはdirectoryが要求したgram record欠落を完全結果として扱わない", async () => {
+  resetMemberSuggestionsV2CacheForTest();
+  const { objects, generation } = fixture();
+  const gram = memberSuggestionQueryGrams("alice")[0];
+  const bucketId = memberSuggestionPostingBucket(gram);
+  const directory = objects.get(
+    memberSuggestionsV2DirectoryObjectKey(generation, bucketId),
+  );
+  const pageNumber = directory.grams[gram].pages[0];
+  const pageKey = memberSuggestionsV2PageObjectKey(generation, bucketId, pageNumber);
+  const page = objects.get(pageKey);
+  objects.set(pageKey, {
+    ...page,
+    records: page.records.filter((record) => record.gram !== gram),
+  });
+
+  const result = await loadMemberSuggestionsCandidatesV2FromBucket(
+    bucketFromObjects(objects),
+    "alice",
+  );
+  assert.deepEqual(result, { ok: false, reason: "page_invalid" });
+});
+
+test("候補上限ちょうどはcomplete、1件超過で初めてtruncatedになる", async () => {
+  resetMemberSuggestionsV2CacheForTest();
+  const exact = await loadMemberSuggestionsCandidatesV2FromBucket(
+    bucketFromObjects(boundaryFixture(MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES)),
+    "aa",
+  );
+  assert.equal(exact.ok, true);
+  if (exact.ok) {
+    assert.equal(exact.items.length, MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES);
+    assert.equal(exact.truncated, false);
+  }
+
+  resetMemberSuggestionsV2CacheForTest();
+  const overflow = await loadMemberSuggestionsCandidatesV2FromBucket(
+    bucketFromObjects(boundaryFixture(MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES + 1)),
+    "aa",
+  );
+  assert.equal(overflow.ok, true);
+  if (overflow.ok) {
+    assert.equal(overflow.items.length, MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES);
+    assert.equal(overflow.truncated, true);
+  }
 });
 
 test("V1とV2のgenerationが不一致ならstale V2を使用しない", async () => {
@@ -153,14 +293,10 @@ test("V1とV2のgenerationが不一致ならstale V2を使用しない", async (
     ...stale,
     generation: "stale-generation",
   });
-  const bucket = {
-    async get(key) {
-      const value = objects.get(key);
-      return value === undefined ? null : jsonObject(value);
-    },
-  };
-
-  const result = await loadMemberSuggestionsCandidatesV2FromBucket(bucket, "alice");
+  const result = await loadMemberSuggestionsCandidatesV2FromBucket(
+    bucketFromObjects(objects),
+    "alice",
+  );
   assert.deepEqual(result, { ok: false, reason: "generation_mismatch" });
 });
 
@@ -168,13 +304,7 @@ test("V2 manifest撤去後は同generationでもcached manifestを再利用し�
   resetMemberSuggestionsV2CacheForTest();
   const { objects } = fixture();
   const gets = [];
-  const bucket = {
-    async get(key) {
-      gets.push(key);
-      const value = objects.get(key);
-      return value === undefined ? null : jsonObject(value);
-    },
-  };
+  const bucket = bucketFromObjects(objects, gets);
 
   const first = await loadMemberSuggestionsCandidatesV2FromBucket(bucket, "alice");
   assert.equal(first.ok, true);
