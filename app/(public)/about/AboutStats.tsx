@@ -9,6 +9,14 @@ type AboutStatsValue = {
   events: number;
 };
 
+type IdleWindow = Window & {
+  requestIdleCallback?: (
+    callback: IdleRequestCallback,
+    options?: IdleRequestOptions,
+  ) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
 function normalizeStats(value: unknown): AboutStatsValue | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
@@ -39,12 +47,16 @@ export function AboutStats(): React.ReactElement | null {
     let cancelled = false;
     let timeoutId: number | null = null;
     let idleId: number | null = null;
+    const controller = new AbortController();
+    const idleWindow = window as IdleWindow;
 
     const load = () => {
+      if (cancelled) return;
       void fetch("/api/public/about-stats", {
         cache: "default",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
+        signal: controller.signal,
       })
         .then(async (response) => {
           if (!response.ok) return null;
@@ -54,20 +66,24 @@ export function AboutStats(): React.ReactElement | null {
         .then((value) => {
           if (!cancelled && value) setStats(value);
         })
-        .catch(() => undefined);
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          console.warn("[about-stats] client fetch failed", {
+            error: error instanceof Error ? error.name : "unknown",
+          });
+        });
     };
 
-    if ("requestIdleCallback" in window) {
-      idleId = window.requestIdleCallback(load, { timeout: 1500 });
+    if (idleWindow.requestIdleCallback) {
+      idleId = idleWindow.requestIdleCallback(load, { timeout: 1500 });
     } else {
       timeoutId = window.setTimeout(load, 500);
     }
 
     return () => {
       cancelled = true;
-      if (idleId != null && "cancelIdleCallback" in window) {
-        window.cancelIdleCallback(idleId);
-      }
+      controller.abort();
+      if (idleId != null) idleWindow.cancelIdleCallback?.(idleId);
       if (timeoutId != null) window.clearTimeout(timeoutId);
     };
   }, []);
