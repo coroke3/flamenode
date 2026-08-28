@@ -20,21 +20,13 @@ test("16 bucket postingsを実質無効化しないbounded publish budgetを持�
   );
 });
 
-test("2文字未満の到達不能postingをV2 publish対象から除外する", () => {
+test("2文字未満の到達不能postingをbuilder段階から生成しない", () => {
   assert.match(postings, /MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH = 2/);
-  assert.match(postings, /function removeUnqueriedShortGrams/);
   assert.match(
     postings,
-    /memberSuggestionGramLength\(record\.gram\)\s*>=\s*MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH/s,
+    /minGramLength: MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH/,
   );
-  assert.match(
-    postings,
-    /memberSuggestionGramLength\(gram\)\s*>=\s*MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH/s,
-  );
-  assert.match(
-    postings,
-    /buckets: directories\.map\(\(\{ bucket \}\) => bucket\)/,
-  );
+  assert.doesNotMatch(postings, /removeUnqueriedShortGrams/);
 });
 
 test("partial publish失敗時はmanifest撤去成功後だけgeneration objectを削除する", () => {
