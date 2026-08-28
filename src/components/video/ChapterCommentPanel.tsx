@@ -15,8 +15,10 @@ interface ChapterCommentPanelProps {
   chapters: ChapterEntry[];
   isLoggedIn: boolean;
   authUnavailable: boolean;
+  needsTermsAcceptance: boolean;
   canPost: boolean;
   loginHref: string;
+  rulesHref: string;
   settingsHref: string;
   activeXId?: string | null;
 }
@@ -27,8 +29,10 @@ export function ChapterCommentPanel({
   chapters,
   isLoggedIn,
   authUnavailable,
+  needsTermsAcceptance,
   canPost,
   loginHref,
+  rulesHref,
   settingsHref,
   activeXId,
 }: ChapterCommentPanelProps): React.ReactElement {
@@ -171,8 +175,32 @@ export function ChapterCommentPanel({
           <section className={styles.notice}>
             <p>コメントを投稿するにはログインしてください。</p>
 
-            <Link href={loginHref} className="fn-btn fn-btn-primary">
+            <Link
+              href={loginHref}
+              className="fn-btn fn-btn-primary"
+              prefetch={false}
+            >
               ログイン
+            </Link>
+
+            <button
+              type="button"
+              className="fn-btn fn-btn-ghost"
+              onClick={closeComposer}
+            >
+              閉じる
+            </button>
+          </section>
+        ) : needsTermsAcceptance ? (
+          <section className={styles.notice}>
+            <p>コメントを投稿するには利用規約への同意が必要です。</p>
+
+            <Link
+              href={rulesHref}
+              className="fn-btn fn-btn-primary"
+              prefetch={false}
+            >
+              利用規約へ
             </Link>
 
             <button
@@ -187,7 +215,11 @@ export function ChapterCommentPanel({
           <section className={styles.notice}>
             <p>コメント投稿には承認済みX IDが必要です。</p>
 
-            <Link href={settingsHref} className="fn-btn fn-btn-primary">
+            <Link
+              href={settingsHref}
+              className="fn-btn fn-btn-primary"
+              prefetch={false}
+            >
               X ID設定へ
             </Link>
 
