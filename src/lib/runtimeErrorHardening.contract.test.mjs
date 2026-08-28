@@ -18,6 +18,7 @@ const [
   pickupCreatorsSource,
   publicCacheSource,
   scoreThrottleSource,
+  usersIndexV2ArtifactsSource,
 ] = await Promise.all([
   read("middleware.ts"),
   read("src/lib/event/eventIdReuse.ts"),
@@ -30,6 +31,7 @@ const [
   read("workers/json-generator/pickupCreatorsR2.ts"),
   read("src/lib/publicData/publicCache.ts"),
   read("workers/sync-jobs/scoreRankingRebuildThrottle.ts"),
+  read("workers/json-generator/usersIndexV2Artifacts.ts"),
 ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
@@ -96,4 +98,23 @@ test("score rankingのevents indexはbounded readし、abortをfallbackへ握り
       scoreThrottleSource.indexOf("object.json()"),
   );
   assert.ok(scoreThrottleSource.split("signal?.throwIfAborted();").length - 1 >= 9);
+});
+
+test("users index v2 workerはmanifest/legacy正本をbounded readする", () => {
+  assert.match(usersIndexV2ArtifactsSource, /USERS_INDEX_V2_MAX_MANIFEST_BYTES/);
+  assert.match(usersIndexV2ArtifactsSource, /USERS_INDEX_MAX_OBJECT_BYTES/);
+  assert.match(usersIndexV2ArtifactsSource, /cancelR2BodyBestEffort/);
+  const manifestSize = usersIndexV2ArtifactsSource.indexOf(
+    "object.size > USERS_INDEX_V2_MAX_MANIFEST_BYTES",
+  );
+  const manifestParse = usersIndexV2ArtifactsSource.indexOf(
+    "object.json<unknown>()",
+    manifestSize,
+  );
+  assert.ok(manifestSize >= 0 && manifestParse > manifestSize);
+  const legacySize = usersIndexV2ArtifactsSource.indexOf(
+    "object.size > USERS_INDEX_MAX_OBJECT_BYTES",
+  );
+  const legacyParse = usersIndexV2ArtifactsSource.indexOf("object.json()", legacySize);
+  assert.ok(legacySize >= 0 && legacyParse > legacySize);
 });
