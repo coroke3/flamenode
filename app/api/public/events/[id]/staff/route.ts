@@ -17,6 +17,7 @@ import {
 } from "@/lib/publicData/publicArtifactVisibility";
 import { readPublicVisibilityBlockedEntitiesManifest } from "@/lib/publicData/publicVisibilityManifest";
 import { isEntityBlockedInManifest } from "@/lib/publicData/publicVisibilityManifestCore";
+import { cancelR2BodyBestEffort } from "@/lib/r2Body";
 
 export const dynamic = "force-dynamic";
 
@@ -180,6 +181,7 @@ export async function GET(
       object.size < 0 ||
       object.size > PUBLIC_EVENT_STAFF_OBJECT_MAX_BYTES
     ) {
+      await cancelR2BodyBestEffort(object);
       return unavailable(request, "public_data_unavailable");
     }
     rawArtifact = await object.json();
