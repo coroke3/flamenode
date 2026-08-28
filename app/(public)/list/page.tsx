@@ -29,13 +29,23 @@ export const metadata: Metadata = buildPageMetadata({
 
 export const dynamic = "force-dynamic";
 
+type SearchParamValue = string | string[] | undefined;
+
 interface SearchParams {
-  q?: string;
-  sort?: string;
-  page?: string;
-  event?: string;
-  view?: string;
+  q?: SearchParamValue;
+  sort?: SearchParamValue;
+  page?: SearchParamValue;
+  event?: SearchParamValue;
+  view?: SearchParamValue;
 }
+
+type NormalizedSearchParams = {
+  q: string;
+  sort: string;
+  page: string;
+  event: string;
+  view: string;
+};
 
 const PAGE_SIZE = 24;
 const LIST_HREF = "/list";
@@ -43,6 +53,15 @@ const MAX_SEARCH_LENGTH = 100;
 const MAX_EVENT_ID_LENGTH = 128;
 const MAX_PAGE = 100_000;
 const MIN_SEARCH_CHARS = 2;
+
+function firstSearchParam(value: SearchParamValue, fallback = ""): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const first = value.find((entry) => typeof entry === "string");
+    return first ?? fallback;
+  }
+  return fallback;
+}
 
 function compactSearchChars(value: string): string {
   return value
@@ -53,8 +72,10 @@ function compactSearchChars(value: string): string {
 
 function parseBoundedPage(value: string): number {
   // URL由来の巨大な数値文字列をparseIntへそのまま渡さない。
-  // Infinity/過大offsetがdegraded D1へ流れることも防ぐ。
-  const parsed = Number.parseInt(value.trim().slice(0, 12), 10);
+  // duplicate/不正値は1へ戻し、Infinity/過大offsetがdegraded D1へ流れることも防ぐ。
+  const raw = value.trim().slice(0, 12);
+  if (!/^\d+$/.test(raw)) return 1;
+  const parsed = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1) return 1;
   return Math.min(parsed, MAX_PAGE);
 }
@@ -64,13 +85,12 @@ export default async function ListPage({
 }: {
   searchParams: Promise<SearchParams>;
 }): Promise<React.ReactElement> {
-  const {
-    q = "",
-    sort: rawSort = "new",
-    page: rawPage = "1",
-    event: rawEvent = "",
-    view: rawView = "grid",
-  } = await searchParams;
+  const raw = await searchParams;
+  const q = firstSearchParam(raw.q);
+  const rawSort = firstSearchParam(raw.sort, "new");
+  const rawPage = firstSearchParam(raw.page, "1");
+  const rawEvent = firstSearchParam(raw.event);
+  const rawView = firstSearchParam(raw.view, "grid");
   const view =
     rawView === "index" ? "index" : rawView === "compact" ? "compact" : "grid";
   const sort = parsePublicVideoSort(rawSort.slice(0, 16));
@@ -152,9 +172,9 @@ export default async function ListPage({
     eventListLoad.mode === "unavailable";
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const params = (override: Partial<SearchParams> = {}) => {
+  const params = (override: Partial<NormalizedSearchParams> = {}) => {
     const p = new URLSearchParams();
-    const merged = {
+    const merged: NormalizedSearchParams = {
       q: boundedQuery,
       sort,
       page,
