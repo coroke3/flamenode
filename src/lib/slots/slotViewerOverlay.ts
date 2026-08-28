@@ -182,16 +182,14 @@ export async function loadSlotViewerOverlay(
           viewerRelation === "unassigned" ||
           viewerRelation === "account_other" ||
           eventRow.slot_visibility_mode === "public_name";
-        // public_nameのgroup keyは公開base snapshotを正本にする。overlay queryは
-        // viewer rowだけへ絞るため、ここで再採番すると公開側group-Nを上書きして
-        // 同一画面内でgroup番号が食い違う。
-        const exposeGroupKey =
-          isOwnedByViewer && eventRow.slot_visibility_mode !== "public_name";
+        // 実reservation_group_idはclientへ出さずviewer専用namespaceへ置換する。
+        // 公開baseにgroup_keyがある場合はclient側でbaseを優先し、R2反映待ちで
+        // baseにgroupがまだ無いときだけこのkeyを使う。
         let groupKey: string | null = null;
-        if (exposeGroupKey && slot.reservation_group_id) {
+        if (isOwnedByViewer && slot.reservation_group_id) {
           groupKey = groupKeys.get(slot.reservation_group_id) ?? null;
           if (!groupKey) {
-            groupKey = `group-${groupKeys.size + 1}`;
+            groupKey = `viewer-group-${groupKeys.size + 1}`;
             groupKeys.set(slot.reservation_group_id, groupKey);
           }
         }
