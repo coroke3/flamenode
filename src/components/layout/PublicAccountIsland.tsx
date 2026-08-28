@@ -14,6 +14,7 @@ import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "./publicNavigation";
 
 const PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS = 1200;
 const PUBLIC_ACCOUNT_FALLBACK_DELAY_MS = 350;
+const PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS = 5_000;
 const PUBLIC_ACCOUNT_RETRY_EVENT = "flamenode:public-account-summary-retry";
 
 type IdleWindow = Window & {
@@ -187,10 +188,16 @@ export function usePublicAccountSummary(
       promise: Promise.resolve({ kind: "unavailable" }),
     };
     request.promise = (async () => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => controller.abort(),
+        PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS,
+      );
       try {
         const response = await fetch("/api/account/summary", {
           credentials: "same-origin",
           cache: "no-store",
+          signal: controller.signal,
         });
         if (response.status === 503 || !response.ok) {
           return { kind: "unavailable" as const };
@@ -201,51 +208,56 @@ export function usePublicAccountSummary(
         };
       } catch {
         return { kind: "unavailable" as const };
+      } finally {
+        window.clearTimeout(timeoutId);
       }
     })();
     inFlightRef.current = request;
 
-    void request.promise.then((result) => {
-      if (!mountedRef.current || !enabledRef.current) return;
-      if (request.generation !== refreshGenerationRef.current) return;
+    void request.promise
+      .then((result) => {
+        if (!mountedRef.current || !enabledRef.current) return;
+        if (request.generation !== refreshGenerationRef.current) return;
 
-      if (result.kind === "summary") {
-        const summary = result.summary;
-        fetchedOnceRef.current = true;
-        if (summary.loggedIn) {
-          setUser(mapSummaryToHeaderUser(summary));
-          setUnavailable(false);
-        } else if (summary.unavailable) {
-          setUnavailable(true);
+        if (result.kind === "summary") {
+          const summary = result.summary;
+          fetchedOnceRef.current = true;
+          if (summary.loggedIn) {
+            setUser(mapSummaryToHeaderUser(summary));
+            setUnavailable(false);
+          } else if (summary.unavailable) {
+            setUnavailable(true);
+          } else {
+            if (!preserveLoggedInOnFailureRef.current) setUser(null);
+            setUnavailable(false);
+          }
         } else {
+          setUnavailable(true);
           if (!preserveLoggedInOnFailureRef.current) setUser(null);
-          setUnavailable(false);
         }
-      } else {
+      })
+      .catch(() => {
+        if (!mountedRef.current || !enabledRef.current) return;
         setUnavailable(true);
         if (!preserveLoggedInOnFailureRef.current) setUser(null);
-      }
-    }).catch(() => {
-      if (!mountedRef.current || !enabledRef.current) return;
-      setUnavailable(true);
-      if (!preserveLoggedInOnFailureRef.current) setUser(null);
-    }).finally(() => {
-      if (inFlightRef.current !== request) return;
-      inFlightRef.current = null;
-      if (!lazyRef.current) nonLazyAttemptedRef.current = true;
-      if (!mountedRef.current || !enabledRef.current) return;
+      })
+      .finally(() => {
+        if (inFlightRef.current !== request) return;
+        inFlightRef.current = null;
+        if (!lazyRef.current) nonLazyAttemptedRef.current = true;
+        if (!mountedRef.current || !enabledRef.current) return;
 
-      const needsRefresh =
-        refreshRequestedRef.current &&
-        (request.pendingGeneration !== null ||
-          request.generation !== refreshGenerationRef.current);
-      const canFetchNow = !lazyRef.current || openRef.current;
-      if (needsRefresh && canFetchNow) {
-        setRefreshNonce((current) => current + 1);
-      } else {
-        setLoading(false);
-      }
-    });
+        const needsRefresh =
+          refreshRequestedRef.current &&
+          (request.pendingGeneration !== null ||
+            request.generation !== refreshGenerationRef.current);
+        const canFetchNow = !lazyRef.current || openRef.current;
+        if (needsRefresh && canFetchNow) {
+          setRefreshNonce((current) => current + 1);
+        } else {
+          setLoading(false);
+        }
+      });
   }, [
     enabled,
     preserveLoggedInOnFailure,
@@ -486,13 +498,28 @@ export function PublicAccountIsland({
             </Link>
           );
         })}
-        <Link href="/dashboard" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
+        <Link
+          href="/dashboard"
+          className={styles.mobileLink}
+          onClick={onClosePanels}
+          prefetch={false}
+        >
           <Icon name="grid" size={16} aria-hidden /> マイページ
         </Link>
-        <Link href="/dashboard/library" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
+        <Link
+          href="/dashboard/library"
+          className={styles.mobileLink}
+          onClick={onClosePanels}
+          prefetch={false}
+        >
           <Icon name="bookmark" size={16} aria-hidden /> ライブラリ
         </Link>
-        <Link href="/dashboard/settings" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
+        <Link
+          href="/dashboard/settings"
+          className={styles.mobileLink}
+          onClick={onClosePanels}
+          prefetch={false}
+        >
           <Icon name="settings" size={16} aria-hidden /> 設定
         </Link>
       </div>
@@ -502,12 +529,22 @@ export function PublicAccountIsland({
           <div className={styles.mobileDivider} />
           <div className={styles.mobileSection}>
             {user.management.canAccessManage ? (
-              <Link href="/manage" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
+              <Link
+                href="/manage"
+                className={styles.mobileLink}
+                onClick={onClosePanels}
+                prefetch={false}
+              >
                 <Icon name="users" size={16} aria-hidden /> 運営
               </Link>
             ) : null}
             {user.management.canAccessAdmin ? (
-              <Link href="/admin" className={styles.mobileLink} onClick={onClosePanels} prefetch={false}>
+              <Link
+                href="/admin"
+                className={styles.mobileLink}
+                onClick={onClosePanels}
+                prefetch={false}
+              >
                 <Icon name="settings" size={16} aria-hidden /> 管理
               </Link>
             ) : null}
