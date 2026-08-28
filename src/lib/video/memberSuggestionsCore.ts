@@ -300,9 +300,8 @@ export function parseMemberSuggestionsManifest(payload: unknown):
   ) {
     return null;
   }
-  if (record.object_key !== memberSuggestionsIndexObjectKey(generation)) {
-    return null;
-  }
+  // readerはgenerationからobject keyを再生成するため、旧artifactのobject_key欠落や
+  // 互換field差分は読み取り可否に使わない。CPU/件数に影響する境界だけfail-closedにする。
   return { generation, total };
 }
 
