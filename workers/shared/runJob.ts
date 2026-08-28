@@ -30,7 +30,7 @@ export interface JobRunResult {
 }
 
 export interface RunJobOptions {
-  /** true の場合、例外または failed>0 をログ後に上位へ伝播する。 */
+  /** true の場合、通常例外または failed>0 をログ後に上位へ伝播する。制御用cancelは常に伝播する。 */
   rethrow?: boolean;
   /** 40桁hexのコミット識別子（ログには小文字で出力） */
   commitSha?: string;
@@ -142,6 +142,24 @@ export function jobFailureWithCounters(
   return new JobFailureWithCounters(error, counters);
 }
 
+/**
+ * `rethrow:false` は独立jobの通常障害を隔離するためのもの。Cron deadline / lease
+ * loss / AbortError まで成功経路へ戻すと、中断後に別jobや外部APIを続行してしまう。
+ */
+export function isWorkerCancellation(error: unknown): boolean {
+  let cause = error;
+  while (cause instanceof JobFailureWithCounters) {
+    cause = cause.originalError;
+  }
+  if (!(cause instanceof Error)) return false;
+  if (cause.name === "AbortError") return true;
+  return (
+    cause.message.startsWith("cron wall-clock deadline exceeded:") ||
+    cause.message.startsWith("cron task aborted:") ||
+    cause.message.startsWith("cron lease lost")
+  );
+}
+
 /** 複数の子ジョブ結果を同じ規則で合算する。 */
 export function combineJobCounters(...values: unknown[]): NormalizedJobCounters {
   const total = {
@@ -212,7 +230,7 @@ export async function runJob(
     d1_changes: value.d1_changes ?? 0,
     d1_statements: value.d1_statements ?? 0,
     d1_rows_read: value.d1_rows_read ?? 0,
-    d1_rows_written: value.d1_rows_written ?? 0,
+    d1_rows_written: value.d1_rowsWritten ?? 0,
     retry_count: value.retry_count ?? 0,
     quota_stopped: value.quota_stopped ?? false,
     ...(value.quota_stop_reason ? { quota_stop_reason: value.quota_stop_reason } : {}),
@@ -243,7 +261,7 @@ export async function runJob(
           ? error.logError
           : safeErrorSummary(error),
     });
-    if (options.rethrow) throw error;
+    if (options.rethrow || isWorkerCancellation(error)) throw error;
     return { succeeded: false, ...counters };
   }
 
