@@ -16,7 +16,7 @@ const [writer, postings] = await Promise.all([
 test("16 bucket postingsを実質無効化しないbounded publish budgetを持つ", () => {
   assert.match(
     writer,
-    /MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 40/,
+    /MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 256/,
   );
 });
 
