@@ -28,6 +28,18 @@ test("partial publish失敗時はmanifest撤去成功後だけgeneration object�
   );
 });
 
+test("旧generation manifestはsize上限超過ならJSON parseしない", () => {
+  assert.match(
+    writer,
+    /object\.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES/,
+  );
+  const sizeGuard = writer.indexOf(
+    "object.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES",
+  );
+  const jsonRead = writer.indexOf("await object.json<unknown>()", sizeGuard);
+  assert.ok(sizeGuard >= 0 && jsonRead > sizeGuard);
+});
+
 test("旧generation cleanupは1000 objectで明示的にboundedされる", () => {
   assert.match(
     writer,
