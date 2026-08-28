@@ -37,13 +37,8 @@ function userNeedsTermsAcceptance(user: {
 
 /**
  * 枠ページのviewer依存情報だけを取得するprivate overlay。
- *
- * まず公開イベントの存在だけを狭いD1 queryで確認する。これにより
- * - 非公開/存在しないeventでAuth.jsやslot queryを実行しない
- * - 匿名viewerではslot queryを実行しない
- * - event_not_found と auth/database unavailable を混同しない
- *
- * 公開slot一覧自体はこの関数に依存させない。
+ * 公開baseは現在のpage SSRがD1正本から取得するため、このoverlayでは
+ * viewer所有権・本人向け表示・運営権限に必要な行だけ追加取得する。
  */
 export async function loadSlotViewerOverlay(
   eventId: string,
@@ -85,8 +80,6 @@ export async function loadSlotViewerOverlay(
 
   if (!viewer) return emptySlotViewerOverlay(false);
   if (viewer.is_banned === 1) {
-    // writeGuardと同じBAN境界でfail-closed。本人枠・X ID・運営権限などの
-    // viewer固有情報も返さず、追加slot queryを避ける。
     return {
       ...emptySlotViewerOverlay(false),
       loggedIn: true,
@@ -104,7 +97,7 @@ export async function loadSlotViewerOverlay(
 
   try {
     const loaded = await withDatabase(async (db) => {
-      const [onboarding, slotRows, slotStates] = await Promise.all([
+      const [onboarding, slotRows] = await Promise.all([
         getOnboardingState(db, viewer),
         db
           .select({
@@ -119,19 +112,12 @@ export async function loadSlotViewerOverlay(
           })
           .from(slotsTable)
           .leftJoin(videosTable, eq(slotsTable.video_id, videosTable.id))
-          // viewer固有の名前・X ID・group情報はそのauth userの予約行だけ読む。
           .where(
             and(
               eq(slotsTable.event_id, eventId),
               eq(slotsTable.reserved_by_user_id, viewer.id),
             )!,
           ),
-        // 公開R2 snapshotは書込直後に遅延反映されるため、認証済みviewerだけ
-        // id+statusの最小列をD1正本から重ねる。匿名public pageはこのqueryを通らない。
-        db
-          .select({ id: slotsTable.id, status: slotsTable.status })
-          .from(slotsTable)
-          .where(eq(slotsTable.event_id, eventId)),
       ]);
 
       const now = Math.floor(Date.now() / 1000);
@@ -182,11 +168,12 @@ export async function loadSlotViewerOverlay(
           viewerRelation === "unassigned" ||
           viewerRelation === "account_other" ||
           eventRow.slot_visibility_mode === "public_name";
-        // 実reservation_group_idはclientへ出さずviewer専用namespaceへ置換する。
-        // 公開baseにgroup_keyがある場合はclient側でbaseを優先し、R2反映待ちで
-        // baseにgroupがまだ無いときだけこのkeyを使う。
+        // public_nameではpage SSRのbase groupを正本にする。
+        // anonymous/hiddenでは本人操作用にopaqueなgroup keyだけ補完する。
+        const exposeViewerGroup =
+          isOwnedByViewer && eventRow.slot_visibility_mode !== "public_name";
         let groupKey: string | null = null;
-        if (isOwnedByViewer && slot.reservation_group_id) {
+        if (exposeViewerGroup && slot.reservation_group_id) {
           groupKey = groupKeys.get(slot.reservation_group_id) ?? null;
           if (!groupKey) {
             groupKey = `viewer-group-${groupKeys.size + 1}`;
@@ -225,7 +212,6 @@ export async function loadSlotViewerOverlay(
         operatorOverrideAllowed,
         viewerXId,
         viewerXIdNotice,
-        slotStates,
         slots,
       } satisfies SlotViewerOverlayDto;
     });
