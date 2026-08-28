@@ -17,8 +17,7 @@ export interface RankedMemberSuggestion {
 function katakanaToHiragana(value: string): string {
   return value.replace(
     /[\u30A1-\u30F6]/g,
-    (character) =>
-      String.fromCharCode(character.charCodeAt(0) - 0x60),
+    (character) => String.fromCharCode(character.charCodeAt(0) - 0x60),
   );
 }
 
@@ -139,7 +138,6 @@ function matchScore(
   const name = normalizeMemberSearchText(candidate.name);
 
   const xAliases = (candidate.xAliases ?? []).map(normalizeMemberSearchText);
-
   const nameAliases = (candidate.nameAliases ?? []).map(normalizeMemberSearchText);
 
   const matches: Array<{
@@ -245,7 +243,7 @@ export function rankMemberSuggestionCandidates(
           : Number.POSITIVE_INFINITY;
 
       const recencyBonus = Number.isFinite(ageDays)
-        ? Math.max(0, Math.round(30 - Math.min(ageDays, 30)))
+        ? Math.max(0, Math.round(20 * (1 - ageDays / 365)))
         : 0;
 
       return {
@@ -257,12 +255,36 @@ export function rankMemberSuggestionCandidates(
     })
     .filter((value): value is RankedMemberSuggestion => value !== null);
 
-  ranked.sort((left, right) => {
-    if (right.score !== left.score) return right.score - left.score;
-    const byName = left.name.localeCompare(right.name, "ja");
-    if (byName !== 0) return byName;
-    return left.x_user_id.localeCompare(right.x_user_id, "en");
-  });
+  ranked.sort(
+    (left, right) =>
+      right.score - left.score ||
+      left.name.localeCompare(right.name, "ja") ||
+      left.x_user_id.localeCompare(right.x_user_id),
+  );
 
   return ranked;
+}
+
+/**
+ * Client-side preload候補の既存互換API。
+ * Remote検索でserver-side scoreがない候補だけ、同じrankerで単体scoreを算出する。
+ */
+export function scoreSimpleMemberSuggestion(
+  query: string,
+  suggestion: {
+    name: string;
+    x_user_id: string;
+  },
+): number {
+  return (
+    rankMemberSuggestionCandidates(
+      [
+        {
+          name: suggestion.name,
+          x_user_id: suggestion.x_user_id,
+        },
+      ],
+      query,
+    )[0]?.score ?? 0
+  );
 }
