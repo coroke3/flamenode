@@ -230,7 +230,7 @@ export async function runJob(
     d1_changes: value.d1_changes ?? 0,
     d1_statements: value.d1_statements ?? 0,
     d1_rows_read: value.d1_rows_read ?? 0,
-    d1_rows_written: value.d1_rowsWritten ?? 0,
+    d1_rows_written: value.d1_rows_written ?? 0,
     retry_count: value.retry_count ?? 0,
     quota_stopped: value.quota_stopped ?? false,
     ...(value.quota_stop_reason ? { quota_stop_reason: value.quota_stop_reason } : {}),
