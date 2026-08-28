@@ -14,6 +14,7 @@ type CacheEntry = {
   value?: VideoViewerOverlayDto;
   fetchedAt?: number;
   promise?: Promise<VideoViewerOverlayDto>;
+  requestToken?: symbol;
 };
 
 const cache = new Map<string, CacheEntry>();
@@ -159,6 +160,7 @@ async function fetchOverlay(
   const params = new URLSearchParams();
   if (playlist) params.set("playlist", playlist);
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  const requestToken = Symbol(key);
   const promise = fetch(
     `/api/videos/${encodeURIComponent(videoId)}/viewer-overlay${suffix}`,
     {
@@ -174,11 +176,17 @@ async function fetchOverlay(
     })
     .catch(() => emptyOverlay(true))
     .then((value) => {
-      cache.set(key, { value, fetchedAt: Date.now() });
+      // invalidate後に古いrequestが遅れて完了しても、新しいrequest/cacheを
+      // 上書きしない。Active X切替・mutation直後のviewer巻き戻りを防ぐ。
+      if (cache.get(key)?.requestToken === requestToken) {
+        cache.set(key, { value, fetchedAt: Date.now() });
+      }
       return value;
     });
 
-  cache.set(key, { ...existing, promise });
+  // force refresh開始時は古いvalueを保持しない。別hookが同時に参照しても
+  // stale valueではなくこのin-flight Promiseを共有する。
+  cache.set(key, { promise, requestToken });
   return promise;
 }
 
