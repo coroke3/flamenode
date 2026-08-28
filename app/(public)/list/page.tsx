@@ -40,6 +40,8 @@ interface SearchParams {
 const PAGE_SIZE = 24;
 const LIST_HREF = "/list";
 const MAX_SEARCH_LENGTH = 100;
+const MAX_EVENT_ID_LENGTH = 128;
+const MAX_PAGE = 100_000;
 const MIN_SEARCH_CHARS = 2;
 
 function compactSearchChars(value: string): string {
@@ -49,6 +51,14 @@ function compactSearchChars(value: string): string {
     .replace(/[^\p{L}\p{N}_]/gu, "");
 }
 
+function parseBoundedPage(value: string): number {
+  // URL由来の巨大な数値文字列をparseIntへそのまま渡さない。
+  // Infinity/過大offsetがdegraded D1へ流れることも防ぐ。
+  const parsed = Number.parseInt(value.trim().slice(0, 12), 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) return 1;
+  return Math.min(parsed, MAX_PAGE);
+}
+
 export default async function ListPage({
   searchParams,
 }: {
@@ -56,15 +66,17 @@ export default async function ListPage({
 }): Promise<React.ReactElement> {
   const {
     q = "",
-    sort = "new",
-    page = "1",
-    event = "",
+    sort: rawSort = "new",
+    page: rawPage = "1",
+    event: rawEvent = "",
     view: rawView = "grid",
   } = await searchParams;
   const view =
     rawView === "index" ? "index" : rawView === "compact" ? "compact" : "grid";
-  const parsedSort = parsePublicVideoSort(sort);
-  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const sort = parsePublicVideoSort(rawSort.slice(0, 16));
+  const pageNum = parseBoundedPage(rawPage);
+  const page = String(pageNum);
+  const event = rawEvent.trim().slice(0, MAX_EVENT_ID_LENGTH);
   const boundedQuery = q.trim().slice(0, MAX_SEARCH_LENGTH);
   const hasQuery = boundedQuery.length > 0;
   const searchTooShort =
@@ -73,7 +85,7 @@ export default async function ListPage({
   setPublicRequestRoute("/list");
 
   const staticRecentLoad =
-    !hasQuery && parsedSort === "new" && !event
+    !hasQuery && sort === "new" && !event
       ? await loadStaticRecentVideosPage({
           page: pageNum,
           pageSize: PAGE_SIZE,
@@ -82,7 +94,7 @@ export default async function ListPage({
         })
       : null;
   const staticOldLoad =
-    !hasQuery && parsedSort === "old" && !event
+    !hasQuery && sort === "old" && !event
       ? await loadStaticRecentVideosPage({
           page: pageNum,
           pageSize: PAGE_SIZE,
@@ -90,23 +102,23 @@ export default async function ListPage({
         })
       : null;
   const staticPopularLoad =
-    !hasQuery && parsedSort === "score" && !event
+    !hasQuery && sort === "score" && !event
       ? await loadStaticPopularVideosPage({ page: pageNum, pageSize: PAGE_SIZE })
       : null;
   const staticSearchLoad =
     hasQuery && !searchTooShort && !event
       ? await loadStaticSearchVideosPage({
           q: boundedQuery,
-          sort: parsedSort,
+          sort,
           page: pageNum,
           pageSize: PAGE_SIZE,
         })
       : null;
   const eventListLoad =
-    event.trim() && !searchTooShort
+    event && !searchTooShort
       ? await loadPublicEventVideosPage({
-          eventId: event.trim(),
-          sort: parsedSort,
+          eventId: event,
+          sort,
           page: pageNum,
           pageSize: PAGE_SIZE,
           q: boundedQuery,
@@ -135,14 +147,21 @@ export default async function ListPage({
 
   const { videos = [], total = 0, eventInfo = null } = data ?? {};
   const listUnavailable =
-    event.trim() &&
+    Boolean(event) &&
     eventListLoad != null &&
     eventListLoad.mode === "unavailable";
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const params = (override: Partial<SearchParams> = {}) => {
     const p = new URLSearchParams();
-    const merged = { q, sort, page, event, view, ...override };
+    const merged = {
+      q: boundedQuery,
+      sort,
+      page,
+      event,
+      view,
+      ...override,
+    };
     if (merged.q) p.set("q", merged.q);
     if (merged.sort && merged.sort !== "new") p.set("sort", merged.sort);
     if (merged.event) p.set("event", merged.event);
@@ -217,7 +236,7 @@ export default async function ListPage({
             <input
               type="search"
               name="q"
-              defaultValue={q}
+              defaultValue={boundedQuery}
               placeholder="作品を検索（2文字以上）"
               autoComplete="off"
               maxLength={MAX_SEARCH_LENGTH}
