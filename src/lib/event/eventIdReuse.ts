@@ -122,6 +122,8 @@ export async function preCommitEventIdReuse(input: {
   let bucket: R2Bucket;
   try {
     bucket = getEnv().BUCKET;
+    // 存在確認だけなのでGETでbodyを開かない。5 objectを並列GETして未消費bodyを
+    // 残すとrequestの接続資源を圧迫し得るためHEADを使う。
     const objects = await Promise.all(
       [
         eventComposedObjectKey(input.eventId),
@@ -129,7 +131,7 @@ export async function preCommitEventIdReuse(input: {
         eventSlotsObjectKey(input.eventId),
         eventReleaseObjectKey(input.eventId),
         eventPlaylistObjectKey(input.eventId),
-      ].map((key) => bucket.get(key)),
+      ].map((key) => bucket.head(key)),
     );
     if (objects.some(Boolean)) {
       return notReady("event_id_reuse_r2_cleanup_pending");
