@@ -49,6 +49,14 @@ function resolveRuntime(): {
   return null;
 }
 
+async function cancelR2BodyBestEffort(object: R2ObjectBody): Promise<void> {
+  try {
+    await object.body.cancel();
+  } catch {
+    // The artifact is already rejected; cancellation is only resource cleanup.
+  }
+}
+
 async function readVisibleEventArtifact<T>(args: {
   eventId: string;
   maxBytes: number;
@@ -79,7 +87,9 @@ async function readVisibleEventArtifact<T>(args: {
     }
 
     const object = await bucket.get(args.objectKey(normalizedId));
-    if (!object || (typeof object.size === "number" && object.size > args.maxBytes)) {
+    if (!object) return null;
+    if (typeof object.size === "number" && object.size > args.maxBytes) {
+      await cancelR2BodyBestEffort(object as R2ObjectBody);
       return null;
     }
     const normalized = args.normalize(await object.json<unknown>(), normalizedId);
