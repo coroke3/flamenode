@@ -38,6 +38,46 @@ function legacyPayload() {
   };
 }
 
+function persistentBucket() {
+  const objects = new Map([[PUBLIC_X_ICON_MAP_OBJECT_KEY, legacyPayload()]]);
+  const metadata = new Map();
+  let shardPuts = 0;
+  const bucket = {
+    async get(key) {
+      const value = objects.get(key);
+      return value === undefined ? null : jsonObject(value);
+    },
+    async head(key) {
+      const value = objects.get(key);
+      if (value === undefined) return null;
+      const serialized = JSON.stringify(value);
+      return {
+        size: new TextEncoder().encode(serialized).byteLength,
+        customMetadata: metadata.get(key) ?? {},
+      };
+    },
+    async put(key, body, options = {}) {
+      const parsed = JSON.parse(String(body));
+      objects.set(key, parsed);
+      metadata.set(key, structuredClone(options.customMetadata ?? {}));
+      if (key !== PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY) shardPuts += 1;
+      return {};
+    },
+    async delete(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        objects.delete(key);
+        metadata.delete(key);
+      }
+    },
+  };
+  return {
+    bucket,
+    objects,
+    metadata,
+    getShardPuts: () => shardPuts,
+  };
+}
+
 test("partial V2 publish failure leaves a valid empty manifest that forces V1 fallback", async () => {
   const objects = new Map([[PUBLIC_X_ICON_MAP_OBJECT_KEY, legacyPayload()]]);
   let generationShardPuts = 0;
@@ -101,11 +141,9 @@ test("ambiguous real-manifest PUT failure never deletes possibly referenced shar
           return {};
         }
         if (manifestPuts === 2) {
-          // R2側ではcommit済みだがclientにはtransport errorとして見える境界。
           objects.set(key, parsed);
           throw new Error("ambiguous_manifest_commit");
         }
-        // fallback restoreも失敗し、実manifestが残っている可能性を再現する。
         throw new Error("fallback_restore_failed");
       }
       objects.set(key, parsed);
@@ -138,6 +176,39 @@ test("ambiguous real-manifest PUT failure never deletes possibly referenced shar
       `manifest referenced shard ${shard} must be preserved`,
     );
   }
+});
+
+test("same generation is skipped only when every shard has matching metadata", async () => {
+  const state = persistentBucket();
+  const first = await rebuildPublicIconV2FromLegacyArtifact({ R2: state.bucket });
+  assert.equal(first.skipped, false);
+  const putsAfterFirst = state.getShardPuts();
+  assert.ok(putsAfterFirst > 0);
+
+  const second = await rebuildPublicIconV2FromLegacyArtifact({ R2: state.bucket });
+  assert.equal(second.skipped, true);
+  assert.equal(state.getShardPuts(), putsAfterFirst);
+
+  const manifest = normalizePublicXIconV2Manifest(
+    state.objects.get(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY),
+  );
+  assert.ok(manifest && manifest.shards.length > 0);
+  const damagedKey = publicXIconV2ShardObjectKey(
+    manifest.generation,
+    manifest.shards[0],
+  );
+  state.metadata.set(damagedKey, {});
+
+  const repaired = await rebuildPublicIconV2FromLegacyArtifact({ R2: state.bucket });
+  assert.equal(repaired.skipped, false);
+  assert.ok(state.getShardPuts() > putsAfterFirst);
+  const repairedMetadata = state.metadata.get(damagedKey);
+  assert.equal(repairedMetadata?.flamenode_schema, "public-icon-v2");
+  assert.equal(repairedMetadata?.flamenode_generation, manifest.generation);
+  assert.equal(
+    repairedMetadata?.flamenode_shard,
+    String(manifest.shards[0]),
+  );
 });
 
 test("oversized canonical V1 icon map is rejected before JSON parse", async () => {
