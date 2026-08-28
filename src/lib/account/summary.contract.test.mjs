@@ -50,6 +50,11 @@ test("degraded summaryはDB正本のlinked Xとapproval statusを維持する", 
   assert.doesNotMatch(route, /approval_status: "approved" as const/);
   assert.match(accountMenu, /resolveAccountMenuDisplayName/);
   assert.match(accountMenu, /degraded: user\.degraded === true/);
+  assert.match(publicHeader, /canAccessAdmin: fetchedUser\.management\.canAccessAdmin/);
+  assert.doesNotMatch(
+    publicHeader,
+    /canAccessAdmin:\s*fetchedUser\.management\.canAccessAdmin\s*\|\|\s*serverUser\.management\.canAccessAdmin/,
+  );
 });
 
 test("summaryのlinked X空配列も正本としてSSRの古いActive Xを残さない", () => {
