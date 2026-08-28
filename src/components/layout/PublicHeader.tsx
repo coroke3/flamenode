@@ -61,6 +61,7 @@ export function PublicHeader({
     user: fetchedUser,
     loading: accountLoading,
     unavailable: accountUnavailable,
+    confirmedLoggedOut: accountConfirmedLoggedOut,
   } = usePublicAccountSummary(
     fetchAccount,
     preserveLoggedInOnFailure,
@@ -72,8 +73,9 @@ export function PublicHeader({
     fetchAccount && accountLoading && !preserveLoggedInOnFailure;
   const showAccountUnavailable =
     fetchAccount && accountUnavailable && !preserveLoggedInOnFailure;
-  const accountUser =
-    serverUser === undefined
+  const accountUser = accountConfirmedLoggedOut
+    ? null
+    : serverUser === undefined
       ? fetchedUser
       : fetchedUser
         ? serverUser
