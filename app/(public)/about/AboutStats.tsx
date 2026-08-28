@@ -17,6 +17,8 @@ type IdleWindow = Window & {
   cancelIdleCallback?: (handle: number) => void;
 };
 
+const ABOUT_STATS_FETCH_TIMEOUT_MS = 5_000;
+
 function normalizeStats(value: unknown): AboutStatsValue | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
@@ -45,13 +47,18 @@ export function AboutStats(): React.ReactElement | null {
 
   React.useEffect(() => {
     let cancelled = false;
-    let timeoutId: number | null = null;
+    let delayTimeoutId: number | null = null;
+    let fetchTimeoutId: number | null = null;
     let idleId: number | null = null;
     const controller = new AbortController();
     const idleWindow = window as IdleWindow;
 
     const load = () => {
       if (cancelled) return;
+      fetchTimeoutId = window.setTimeout(
+        () => controller.abort(),
+        ABOUT_STATS_FETCH_TIMEOUT_MS,
+      );
       void fetch("/api/public/about-stats", {
         cache: "default",
         credentials: "same-origin",
@@ -71,20 +78,27 @@ export function AboutStats(): React.ReactElement | null {
           console.warn("[about-stats] client fetch failed", {
             error: error instanceof Error ? error.name : "unknown",
           });
+        })
+        .finally(() => {
+          if (fetchTimeoutId != null) {
+            window.clearTimeout(fetchTimeoutId);
+            fetchTimeoutId = null;
+          }
         });
     };
 
     if (idleWindow.requestIdleCallback) {
       idleId = idleWindow.requestIdleCallback(load, { timeout: 1500 });
     } else {
-      timeoutId = window.setTimeout(load, 500);
+      delayTimeoutId = window.setTimeout(load, 500);
     }
 
     return () => {
       cancelled = true;
       controller.abort();
       if (idleId != null) idleWindow.cancelIdleCallback?.(idleId);
-      if (timeoutId != null) window.clearTimeout(timeoutId);
+      if (delayTimeoutId != null) window.clearTimeout(delayTimeoutId);
+      if (fetchTimeoutId != null) window.clearTimeout(fetchTimeoutId);
     };
   }, []);
 
