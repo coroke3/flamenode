@@ -16,6 +16,8 @@ const [
   suggestionsV2Source,
   visibilityManifestSource,
   pickupCreatorsSource,
+  publicCacheSource,
+  scoreThrottleSource,
 ] = await Promise.all([
   read("middleware.ts"),
   read("src/lib/event/eventIdReuse.ts"),
@@ -26,6 +28,8 @@ const [
   read("src/lib/video/memberSuggestionsV2Loader.ts"),
   read("src/lib/publicData/publicVisibilityManifest.ts"),
   read("workers/json-generator/pickupCreatorsR2.ts"),
+  read("src/lib/publicData/publicCache.ts"),
+  read("workers/sync-jobs/scoreRankingRebuildThrottle.ts"),
 ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
@@ -70,4 +74,24 @@ test("pickup creators workerは既存1MiB上限をparse前に適用する", () =
     pickupCreatorsSource.indexOf("object.size > PICKUP_CREATORS_MAX_OBJECT_BYTES") <
       pickupCreatorsSource.indexOf("object.json()"),
   );
+});
+
+test("public Cache APIは巨大JSONをparseせずread/write両側でbyte上限を持つ", () => {
+  assert.match(publicCacheSource, /PUBLIC_JSON_CACHE_MAX_BYTES/);
+  assert.match(publicCacheSource, /contentLengthBytes\(response\)/);
+  assert.match(publicCacheSource, /bytes\.byteLength > PUBLIC_JSON_CACHE_MAX_BYTES/);
+  assert.match(publicCacheSource, /new TextEncoder\(\)\.encode\(serialized\)\.byteLength/);
+  assert.doesNotMatch(publicCacheSource, /await matched\.json\(\)/);
+});
+
+test("score rankingのevents indexはbounded readし、abortをfallbackへ握り潰さない", () => {
+  assert.match(scoreThrottleSource, /EVENTS_INDEX_MAX_OBJECT_BYTES/);
+  assert.match(scoreThrottleSource, /object\.size > EVENTS_INDEX_MAX_OBJECT_BYTES/);
+  assert.match(scoreThrottleSource, /cancelR2BodyBestEffort\(object\)/);
+  assert.ok(
+    scoreThrottleSource.indexOf("object.size > EVENTS_INDEX_MAX_OBJECT_BYTES") <
+      scoreThrottleSource.indexOf("object.json()"),
+  );
+  const catchBlocks = scoreThrottleSource.match(/catch \{[\s\S]{0,180}?signal\?\.throwIfAborted\(\)/g) ?? [];
+  assert.ok(catchBlocks.length >= 3);
 });
