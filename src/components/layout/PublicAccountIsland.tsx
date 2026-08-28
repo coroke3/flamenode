@@ -14,6 +14,7 @@ import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "./publicNavigation";
 
 const PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS = 1200;
 const PUBLIC_ACCOUNT_FALLBACK_DELAY_MS = 350;
+const PUBLIC_ACCOUNT_RETRY_EVENT = "flamenode:public-account-summary-retry";
 
 type IdleWindow = Window & {
   requestIdleCallback?: (
@@ -39,6 +40,10 @@ function mapSummaryToHeaderUser(
     },
     ...(summary.degraded ? { degraded: true as const } : {}),
   };
+}
+
+function requestPublicAccountRetry(): void {
+  window.dispatchEvent(new Event(PUBLIC_ACCOUNT_RETRY_EVENT));
 }
 
 export function usePublicAccountSummary(
@@ -115,14 +120,18 @@ export function usePublicAccountSummary(
 
   React.useEffect(() => {
     if (!enabled) return;
-    const onActiveXChanged = () => {
+    const requestRefresh = () => {
       refreshGenerationRef.current += 1;
       refreshRequestedRef.current = true;
+      setUnavailable(false);
       setRefreshNonce((current) => current + 1);
     };
-    window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
-    return () =>
-      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
+    window.addEventListener(ACTIVE_X_CHANGED_EVENT, requestRefresh);
+    window.addEventListener(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh);
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, requestRefresh);
+      window.removeEventListener(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh);
+    };
   }, [enabled]);
 
   React.useEffect(() => {
@@ -285,9 +294,14 @@ export function PublicAccountIsland({
 
     if (unavailable) {
       return (
-        <span className={styles.accountUnavailable} role="status">
-          ログイン状態を一時的に確認できません
-        </span>
+        <button
+          type="button"
+          className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.accountUnavailable}`}
+          onClick={requestPublicAccountRetry}
+          title="ログイン状態をもう一度確認します"
+        >
+          ログイン状態を再確認
+        </button>
       );
     }
 
@@ -339,12 +353,13 @@ export function PublicAccountIsland({
 
     if (unavailable) {
       return (
-        <span
+        <button
+          type="button"
           className={`${styles.mobileLink} ${styles.mobileAccountUnavailable}`}
-          role="status"
+          onClick={requestPublicAccountRetry}
         >
-          ログイン状態を一時的に確認できません
-        </span>
+          ログイン状態を再確認
+        </button>
       );
     }
 
