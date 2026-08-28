@@ -3,6 +3,7 @@
  * Deep health and check:artifact-slo share this contract.
  */
 
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import {
   normalizePublicVisibilityBlockedEntitiesManifest,
   PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
@@ -22,6 +23,8 @@ import {
 
 export const STATIC_ARTIFACT_SLO_MAX_AGE_SEC = 90 * 24 * 3600;
 export const TOP_NOSTALGIC_SHUFFLE_SLO_MAX_AGE_SEC = 2 * 24 * 3600;
+/** Health diagnostics must fail fast on corrupt/oversized artifacts instead of parsing unbounded JSON. */
+export const ARTIFACT_SLO_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
 
 /**
  * Deep-health freshness ceilings. Keep inventory probes at the static default
@@ -289,8 +292,14 @@ function assertArtifactShape(
   }
 }
 
+type ArtifactSloR2Object = {
+  text: () => Promise<string>;
+  size?: number;
+  body?: unknown;
+};
+
 export async function assertArtifactSloFresh(
-  bucket: { get: (key: string) => Promise<{ text: () => Promise<string> } | null> },
+  bucket: { get: (key: string) => Promise<ArtifactSloR2Object | null> },
   nowSec: number,
   probes: readonly ArtifactSloProbe[] = ARTIFACT_SLO_PROBES,
 ): Promise<void> {
@@ -299,6 +308,15 @@ export async function assertArtifactSloFresh(
     if (!object) {
       if (probe.allowMissing) continue;
       throw new Error(`static artifact missing: ${probe.key}`);
+    }
+    if (
+      typeof object.size === "number" &&
+      (!Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
+        object.size > ARTIFACT_SLO_MAX_OBJECT_BYTES)
+    ) {
+      await cancelR2BodyBestEffort(object);
+      throw new Error(`static artifact too large: ${probe.key}`);
     }
     let payload: Record<string, unknown>;
     try {
