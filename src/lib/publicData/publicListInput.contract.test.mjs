@@ -16,13 +16,15 @@ test("公開作品一覧は重複searchParamsを文字列へscalar化する", ()
   assert.doesNotMatch(page, /const \{\s*q = ""/s);
 });
 
-test("公開作品一覧はpageを有限・上限付きの完全な10進整数へ正規化する", () => {
-  assert.match(page, /const MAX_PAGE = 100_000/);
+test("公開作品一覧はpageを有限・projection上限付きの完全な10進整数へ正規化する", () => {
+  assert.match(page, /const MAX_PAGE = Math\.ceil\(5_000 \/ PAGE_SIZE\)/);
+  assert.match(page, /multi-million-row OFFSET scans/);
   assert.match(page, /const raw = value\.trim\(\)\.slice\(0, 12\)/);
   assert.match(page, /if \(!\/\^\\d\+\$\/\.test\(raw\)\) return 1/);
   assert.match(page, /Number\.parseInt\(raw, 10\)/);
   assert.match(page, /Number\.isSafeInteger\(parsed\)/);
   assert.match(page, /Math\.min\(parsed, MAX_PAGE\)/);
+  assert.doesNotMatch(page, /const MAX_PAGE = 100_000/);
 });
 
 test("公開作品一覧はquery入力をloaderと再生成URLの両方でbounded値に統一する", () => {
