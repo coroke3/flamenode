@@ -27,3 +27,11 @@ test("event playlist R2 readerはvisibility manifestをenforce時だけ読む", 
     /const afterVisibility = await readPublicVisibilityBlockedEntitiesManifest/,
   );
 });
+
+test("oversized R2 event artifactはJSON parse前にbodyをcancelしてfail-closedする", () => {
+  const sizeGuard = source.indexOf("object.size > args.maxBytes");
+  const cancel = source.indexOf("await cancelR2BodyBestEffort", sizeGuard);
+  const parse = source.indexOf("await object.json<unknown>()", sizeGuard);
+  assert.ok(sizeGuard >= 0 && cancel > sizeGuard && parse > cancel);
+  assert.match(source, /await object\.body\.cancel\(\)/);
+});
