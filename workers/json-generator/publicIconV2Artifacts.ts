@@ -82,6 +82,22 @@ async function deleteGenerationBestEffort(
   }
 }
 
+async function deleteManifestBestEffort(env: Env): Promise<boolean> {
+  try {
+    await env.R2.delete(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY);
+    return true;
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "public-icon-v2",
+        result: "manifest_cleanup_failed",
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+    return false;
+  }
+}
+
 async function putManifest(
   env: Env,
   manifest: PublicXIconV2Manifest,
@@ -178,8 +194,14 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
   };
 
   // V1 canonical更新後に旧V2を見せ続けないため、実shard PUTより先に
-  // fallback markerをcommitする。以降の失敗時もこのmanifestを維持する。
-  await putManifest(env, fallbackManifest);
+  // fallback markerをcommitする。PUT自体が失敗した場合は旧manifestの削除も
+  // best-effortで試し、可能な限りcanonical V1へ戻す。
+  try {
+    await putManifest(env, fallbackManifest);
+  } catch (error) {
+    await deleteManifestBestEffort(env);
+    throw error;
+  }
   throwIfAborted(signal);
 
   const writtenKeys: string[] = [];
@@ -201,10 +223,14 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
     // 唯一の高速化commit point。ここで初めて実shardをreaderへ公開する。
     await putManifest(env, artifacts.manifest);
   } catch (error) {
-    // manifestをfallback markerへ戻す。これが成功すればpartial shardは不可視。
-    // marker再PUT自体が失敗しても、最初に置いたmarkerが通常は残っている。
+    // PUTがtransport上失敗しても、実際にはreal manifestがcommit済みの可能性がある。
+    // fallback markerへ戻せた、またはmanifest自体を撤去できた場合に限って
+    // written shardを削除する。どちらも失敗した場合はimmutable shardを残し、
+    // manifestが参照している可能性のあるobjectを壊さない。
+    let manifestSafeForShardCleanup = false;
     try {
       await putManifest(env, fallbackManifest);
+      manifestSafeForShardCleanup = true;
     } catch (manifestError) {
       console.warn(
         JSON.stringify({
@@ -215,13 +241,14 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
             manifestError instanceof Error ? manifestError.name : "UnknownError",
         }),
       );
+      manifestSafeForShardCleanup = await deleteManifestBestEffort(env);
     }
 
-    if (writtenKeys.length > 0) {
+    if (manifestSafeForShardCleanup && writtenKeys.length > 0) {
       try {
         await env.R2.delete(writtenKeys);
       } catch {
-        // fallback manifestから到達不能なimmutable orphanなので安全。
+        // fallback manifest / manifest撤去後は到達不能なimmutable orphanなので安全。
       }
     }
     throw error;
