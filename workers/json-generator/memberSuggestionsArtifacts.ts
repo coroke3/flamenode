@@ -28,10 +28,11 @@ const MEMBER_SUGGESTIONS_CLEANUP_LIMIT = 100;
 /**
  * 全source readに明示的な上限を設ける。上限超過時はpartial indexを静かに
  * publishせず、generation build自体を失敗させて旧世代（旧manifest）を維持する。
+ * LIMIT値は許容最大+1件のsentinel。ちょうど上限件数を誤って超過扱いしない。
  */
 const SOURCE_LIMIT_X_USERS = 20_001;
-const SOURCE_LIMIT_ALIASES = 50_000;
-const SOURCE_LIMIT_VIDEO_HISTORY = 20_000;
+const SOURCE_LIMIT_ALIASES = 50_001;
+const SOURCE_LIMIT_VIDEO_HISTORY = 20_001;
 
 type Env = {
   DB: D1Database;
@@ -371,6 +372,12 @@ async function readPreviousManifest(
   throwIfAborted(signal);
   const object = await env.R2.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
   if (!object) return null;
+  if (
+    typeof object.size === "number" &&
+    object.size > MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES
+  ) {
+    return null;
+  }
   const body = await object.text();
   throwIfAborted(signal);
   return body;
