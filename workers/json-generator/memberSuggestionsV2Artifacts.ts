@@ -72,12 +72,24 @@ async function readPreviousGeneration(
   }
 }
 
-async function deleteManifestBestEffort(bucket: V2Bucket): Promise<void> {
+/**
+ * generation object を消す前提になるため、manifest撤去の成否を返す。
+ * false時はmanifestがまだgenerationを参照している可能性があるので、
+ * callerはimmutable objectを削除してはいけない。
+ */
+async function deleteManifestBestEffort(bucket: V2Bucket): Promise<boolean> {
   try {
     await bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
-  } catch {
-    // V1 is canonical. A transient cleanup failure is logged by the caller's
-    // outcome path, and the next rebuild retries manifest removal first.
+    return true;
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "member-suggestions-v2",
+        result: "manifest_cleanup_failed",
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+    return false;
   }
 }
 
@@ -222,10 +234,13 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
     );
     return { published: true, objectCount };
   } catch (error) {
-    // abortがmanifest PUT直後に発生する境界でも、manifestを先に撤去してから
-    // generation objectを消す。逆順だと壊れたmanifestが削除済みobjectを指し得る。
-    await deleteManifestBestEffort(bucket);
-    await deleteKeysBestEffort(bucket, writtenKeys);
+    // abortがmanifest PUT直後に発生する境界でも、manifestを先に撤去する。
+    // ただしmanifest撤去に失敗した場合は、参照先を壊さないためwrittenKeysを残す。
+    // immutable orphanを残す方がbroken manifestより安全で、次回rebuildで回収できる。
+    const manifestRemoved = await deleteManifestBestEffort(bucket);
+    if (manifestRemoved) {
+      await deleteKeysBestEffort(bucket, writtenKeys);
+    }
     if (signal?.aborted) throw error;
 
     console.warn(
