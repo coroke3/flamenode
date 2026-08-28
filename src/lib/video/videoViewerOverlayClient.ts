@@ -7,6 +7,8 @@ import type { VideoViewerOverlayDto } from "./videoViewerOverlayCore";
 const CACHE_TTL_MS = 30_000;
 const MAX_PRIVATE_CHAPTERS = 500;
 const MAX_PLAYLIST_ITEMS = 500;
+const VIDEO_VIEWER_OVERLAY_CHANGED_EVENT =
+  "flamenode:video-viewer-overlay-changed";
 
 type CacheEntry = {
   value?: VideoViewerOverlayDto;
@@ -147,8 +149,8 @@ async function fetchOverlay(
   ) {
     return existing.value;
   }
-  // force refresh時も同一keyの既存in-flightは共有する。Active X変更イベントを
-  // 複数componentが同時に受けてもAPI requestを重複させない。
+  // force refreshでも同一keyのin-flightは共有する。複数islandが同じ更新
+  // eventを受けてもviewer API requestを重複させない。
   if (existing?.promise) return existing.promise;
 
   const params = new URLSearchParams();
@@ -187,6 +189,19 @@ export function invalidateVideoViewerOverlay(videoId?: string): void {
   }
 }
 
+/**
+ * viewer依存の書込後に、同じページでmount中のinteraction / utility dockを同期する。
+ * full RSC refreshは行わず、各hookは同一in-flight overlay requestを共有する。
+ */
+export function notifyVideoViewerOverlayChanged(videoId: string): void {
+  invalidateVideoViewerOverlay(videoId);
+  window.dispatchEvent(
+    new CustomEvent(VIDEO_VIEWER_OVERLAY_CHANGED_EVENT, {
+      detail: { videoId },
+    }),
+  );
+}
+
 export function useVideoViewerOverlay(
   videoId: string,
   explicitPlaylist?: string,
@@ -206,12 +221,27 @@ export function useVideoViewerOverlay(
   }, [explicitPlaylist]);
 
   React.useEffect(() => {
-    const onActiveXChanged = () => {
+    const refresh = () => {
       invalidateVideoViewerOverlay(videoId);
       setNonce((value) => value + 1);
     };
-    window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
-    return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
+    const onOverlayChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ videoId?: string }>).detail;
+      if (detail?.videoId && detail.videoId !== videoId) return;
+      refresh();
+    };
+    window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+    window.addEventListener(
+      VIDEO_VIEWER_OVERLAY_CHANGED_EVENT,
+      onOverlayChanged,
+    );
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
+      window.removeEventListener(
+        VIDEO_VIEWER_OVERLAY_CHANGED_EVENT,
+        onOverlayChanged,
+      );
+    };
   }, [videoId]);
 
   React.useEffect(() => {
