@@ -62,12 +62,17 @@ async function readVisibleEventArtifact<T>(args: {
   const { bucket, guardMode } = runtime;
 
   try {
-    const visibility = await readPublicVisibilityBlockedEntitiesManifest(
-      bucket as R2Bucket,
-    );
-    if (guardMode === "enforce" && !visibility.etag) return null;
+    // observe/off はこのreader内でmanifest結果を表示可否に使わないため、
+    // 前後2回のR2 GET + JSON parseを実行しない。enforce時だけTOCTOU防止の
+    // double-checkを維持する。
+    const visibility =
+      guardMode === "enforce"
+        ? await readPublicVisibilityBlockedEntitiesManifest(bucket as R2Bucket)
+        : null;
+    if (guardMode === "enforce" && !visibility?.etag) return null;
     if (
       guardMode === "enforce" &&
+      visibility &&
       isEntityBlockedInManifest(visibility.manifest, "event", normalizedId)
     ) {
       return null;
@@ -80,29 +85,28 @@ async function readVisibleEventArtifact<T>(args: {
     const normalized = args.normalize(await object.json<unknown>(), normalizedId);
     if (!normalized) return null;
 
-    // Artifact readとvisibility transitionが競合しても、commit-point manifestの
-    // 再確認でprivate/release-pendingイベントを返さない。
-    const afterVisibility = await readPublicVisibilityBlockedEntitiesManifest(
-      bucket as R2Bucket,
-    );
-    if (guardMode === "enforce" && !afterVisibility.etag) return null;
-    if (
-      guardMode === "enforce" &&
-      isEntityBlockedInManifest(
-        afterVisibility.manifest,
-        "event",
-        normalizedId,
-      )
-    ) {
-      return null;
-    }
-    if (
-      guardMode === "enforce" &&
-      visibility.etag &&
-      afterVisibility.etag &&
-      visibility.etag !== afterVisibility.etag
-    ) {
-      return null;
+    if (guardMode === "enforce") {
+      // Artifact readとvisibility transitionが競合しても、commit-point manifestの
+      // 再確認でprivate/release-pendingイベントを返さない。
+      const afterVisibility = await readPublicVisibilityBlockedEntitiesManifest(
+        bucket as R2Bucket,
+      );
+      if (!afterVisibility.etag) return null;
+      if (
+        isEntityBlockedInManifest(
+          afterVisibility.manifest,
+          "event",
+          normalizedId,
+        )
+      ) {
+        return null;
+      }
+      if (
+        visibility?.etag &&
+        visibility.etag !== afterVisibility.etag
+      ) {
+        return null;
+      }
     }
     return normalized;
   } catch {
