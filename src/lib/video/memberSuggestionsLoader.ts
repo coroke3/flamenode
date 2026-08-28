@@ -1,5 +1,7 @@
 import {
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+  MEMBER_SUGGESTIONS_MAX_INDEX_BYTES,
+  MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES,
   memberSuggestionsIndexObjectKey,
   parseMemberSuggestionsIndex,
   parseMemberSuggestionsManifest,
@@ -20,6 +22,8 @@ export type MemberSuggestionsManifestLoadResult =
  * 減らす。manifestだけはcommit pointとして毎回確認し、世代更新後に旧itemsを返さない。
  */
 const CACHE_TTL_SEC = 30;
+/** route timeout(2.5s)後も未解決Promiseをisolate寿命中共有しない。 */
+const IN_FLIGHT_MAX_AGE_MS = 3_000;
 type SuggestionsBucket = Pick<R2Bucket, "get">;
 let cache: {
   bucket: SuggestionsBucket;
@@ -30,6 +34,7 @@ let cache: {
 let inFlight: {
   bucket: SuggestionsBucket;
   promise: Promise<MemberSuggestionsLoadResult>;
+  startedAt: number;
 } | null = null;
 
 function readCache(
@@ -62,6 +67,12 @@ export async function loadMemberSuggestionsManifestFromBucket(
 ): Promise<MemberSuggestionsManifestLoadResult> {
   const manifestObject = await bucket.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
   if (!manifestObject) return { ok: false, reason: "manifest_missing" };
+  if (
+    typeof manifestObject.size === "number" &&
+    manifestObject.size > MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES
+  ) {
+    return { ok: false, reason: "manifest_too_large" };
+  }
   let manifestPayload: unknown;
   try {
     manifestPayload = await manifestObject.json();
@@ -85,7 +96,14 @@ export async function loadMemberSuggestionsManifestFromBucket(
 export async function loadMemberSuggestionsIndexFromBucket(
   bucket: SuggestionsBucket,
 ): Promise<MemberSuggestionsLoadResult> {
-  if (inFlight?.bucket === bucket) return inFlight.promise;
+  const startedAt = Date.now();
+  if (
+    inFlight?.bucket === bucket &&
+    startedAt - inFlight.startedAt >= 0 &&
+    startedAt - inFlight.startedAt <= IN_FLIGHT_MAX_AGE_MS
+  ) {
+    return inFlight.promise;
+  }
 
   const promise = (async (): Promise<MemberSuggestionsLoadResult> => {
     const manifestResult = await loadMemberSuggestionsManifestFromBucket(bucket);
@@ -101,6 +119,12 @@ export async function loadMemberSuggestionsIndexFromBucket(
       memberSuggestionsIndexObjectKey(manifestResult.generation),
     );
     if (!indexObject) return { ok: false, reason: "index_missing" };
+    if (
+      typeof indexObject.size === "number" &&
+      indexObject.size > MEMBER_SUGGESTIONS_MAX_INDEX_BYTES
+    ) {
+      return { ok: false, reason: "index_too_large" };
+    }
     let indexPayload: unknown;
     try {
       indexPayload = await indexObject.json();
@@ -126,7 +150,7 @@ export async function loadMemberSuggestionsIndexFromBucket(
     return { ok: true, items };
   })();
 
-  inFlight = { bucket, promise };
+  inFlight = { bucket, promise, startedAt };
   try {
     return await promise;
   } finally {
