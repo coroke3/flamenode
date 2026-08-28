@@ -154,7 +154,10 @@ function imageResponse(
     "x-fn-media-cache": cacheState,
   });
   if (entry.etag) headers.set("etag", entry.etag);
-  return new Response(entry.bytes.slice(), { headers });
+  // Cached bytes are immutable after insertion. Avoid an explicit full-buffer
+  // slice here; large image hits can otherwise allocate another multi-MiB
+  // Uint8Array before Response performs its own BodyInit handling.
+  return new Response(entry.bytes, { headers });
 }
 
 function fallbackResponse(
