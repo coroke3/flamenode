@@ -18,7 +18,10 @@ export function VideoInteractionActions({
     overlay.loggedIn &&
     (!overlay.isTosAccepted || overlay.termsReacceptRequired);
   const canInteract =
-    overlay.loggedIn && !needsTermsAcceptance && !overlay.authUnavailable;
+    overlay.loggedIn &&
+    !overlay.isBanned &&
+    !needsTermsAcceptance &&
+    !overlay.authUnavailable;
 
   const loginHref = `/entry?next=${encodeURIComponent(currentPath)}`;
   const rulesHref = `/rules?next=${encodeURIComponent(currentPath)}`;
@@ -33,6 +36,8 @@ export function VideoInteractionActions({
   } else if (!overlay.loggedIn) {
     disabledReason = "ログインするといいね、セーブができます。";
     actionHref = loginHref;
+  } else if (overlay.isBanned) {
+    disabledReason = "現在、このアカウントは利用停止中です。";
   } else if (needsTermsAcceptance) {
     disabledReason = "利用規約に同意するといいね、セーブができます。";
     actionHref = rulesHref;
