@@ -7,6 +7,7 @@ import { ChapterComposer } from "./ChapterComposer";
 import { usePlayerTime } from "./usePlayerTime";
 import { Icon } from "@/components/ui/Icon";
 import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
+import { notifyVideoViewerOverlayChanged } from "@/lib/video/videoViewerOverlayClient";
 import styles from "./ChapterCommentPanel.module.css";
 
 interface ChapterCommentPanelProps {
@@ -64,11 +65,15 @@ export function ChapterCommentPanel({
       label: string;
       pendingPublicReflection?: boolean;
     }) => {
+      // Public video SSRはviewer D1を読まないためrouter.refresh()だけでは
+      // 30秒のprivate overlay cacheが残る。書込直後に狭いviewer APIだけ再取得し、
+      // private chapterを即時反映する。public chapterはR2反映待ちnoticeを維持する。
+      notifyVideoViewerOverlayChanged(videoId);
       setSubmittedChapter(chapter);
       setReflectionNotice(chapter.pendingPublicReflection === true);
       setComposerOpen(false);
     },
-    [],
+    [videoId],
   );
 
   React.useEffect(() => {
