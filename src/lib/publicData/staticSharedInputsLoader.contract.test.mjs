@@ -83,6 +83,18 @@ test("公開アイコン補完はrequest内で正規化キーをcacheする", ()
   );
 });
 
+test("公開アイコンV2の固定manifestはstale cacheを復活させない", () => {
+  assert.match(source, /const loadPublicXIconV2Manifest = cache\(async \(\) =>/);
+  const manifestLoader = source.match(
+    /const loadPublicXIconV2Manifest = cache\(async \(\) =>[\s\S]*?\n\);/,
+  )?.[0] ?? "";
+  assert.match(manifestLoader, /PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY/);
+  assert.match(manifestLoader, /maxStaleAgeSec: 0/);
+  assert.match(manifestLoader, /cacheTtlSeconds: 0/);
+  assert.match(manifestLoader, /cacheMode: "bypass"/);
+  assert.match(source, /const manifestResult = await loadPublicXIconV2Manifest\(\)/);
+});
+
 test("公開アイコン補完は共有mapからR2 users indexへ降りD1を使わない", () => {
   const iconLoader = source.match(
     /const loadPublicXIconMapOptionalImpl = cache\([\s\S]*?\n\);/,
