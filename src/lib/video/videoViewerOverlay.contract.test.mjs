@@ -98,6 +98,11 @@ test("viewer overlayはcurrentUserContextのlinked X行を再利用する", () =
   assert.doesNotMatch(serverOverlay, /getApprovedXIds/);
 });
 
+test("viewer library playlistはserver query自体を最大件数でboundedにする", () => {
+  assert.match(serverOverlay, /EVENT_PLAYLIST_MAX_ITEMS/);
+  assert.match(serverOverlay, /\.orderBy\(desc\(videosTable\.scheduled_time\)\)\s*\.limit\(EVENT_PLAYLIST_MAX_ITEMS\)/s);
+});
+
 test("BAN viewerはprivate overlay/write UIをfail-closedにする", () => {
   assert.match(serverOverlay, /viewer\.is_banned === 1/);
   assert.match(serverOverlay, /isBanned: true/);
