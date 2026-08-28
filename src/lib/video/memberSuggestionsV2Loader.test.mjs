@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildMemberSuggestionArtifacts,
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+  MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES,
 } from "./memberSuggestionsCore.ts";
 import {
   buildMemberSuggestionsV2Artifacts,
@@ -144,4 +145,25 @@ test("V2 manifest撤去後は同generationでもcached manifestを再利用し�
     (key) => key === MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
   ).length;
   assert.equal(afterSecond, beforeSecond + 1, "manifest must be read from R2 again");
+});
+
+test("V2 pathもoversized V1 canonical manifestをparse前に拒否する", async () => {
+  resetMemberSuggestionsV2CacheForTest();
+  let parsed = false;
+  const bucket = {
+    async get(key) {
+      if (key !== MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY) return null;
+      return {
+        size: MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES + 1,
+        async json() {
+          parsed = true;
+          return {};
+        },
+      };
+    },
+  };
+
+  const result = await loadMemberSuggestionsCandidatesV2FromBucket(bucket, "alice");
+  assert.deepEqual(result, { ok: false, reason: "artifact_too_large" });
+  assert.equal(parsed, false);
 });
