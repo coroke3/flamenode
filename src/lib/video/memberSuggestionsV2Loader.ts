@@ -75,9 +75,14 @@ function rememberJson(
 async function readJson(
   bucket: SuggestionsBucket,
   key: string,
-): Promise<{ ok: true; value: unknown } | { ok: false; reason: "missing" | "invalid" | "too_large" }> {
+  options: { cache?: boolean } = {},
+): Promise<
+  | { ok: true; value: unknown }
+  | { ok: false; reason: "missing" | "invalid" | "too_large" }
+> {
+  const useCache = options.cache !== false;
   const nowSec = Math.floor(Date.now() / 1000);
-  const cached = jsonCache.get(cacheKey(key));
+  const cached = useCache ? jsonCache.get(cacheKey(key)) : undefined;
   if (
     cached &&
     cached.bucket === bucket &&
@@ -99,7 +104,7 @@ async function readJson(
   }
   try {
     const value = await object.json<unknown>();
-    rememberJson(bucket, key, value, nowSec);
+    if (useCache) rememberJson(bucket, key, value, nowSec);
     return { ok: true, value };
   } catch {
     return { ok: false, reason: "invalid" };
@@ -117,6 +122,8 @@ function selectLookupGrams(query: string): string[] {
 /**
  * Queryに必要な2つ以下のgramだけを読む。V1 manifestとのgeneration一致を必須にし、
  * stale V2 manifestが残っていても古い候補を返さない。
+ * V2 manifestはwriterの唯一のcommit pointなのでcross-request cacheを使わず、
+ * 削除/fallback markerを次requestで必ず観測する。generation固有objectだけをcacheする。
  */
 export async function loadMemberSuggestionsCandidatesV2FromBucket(
   bucket: SuggestionsBucket,
@@ -138,7 +145,11 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
   const v1Manifest = parseMemberSuggestionsManifest(v1Payload);
   if (!v1Manifest) return { ok: false, reason: "v1_manifest_invalid" };
 
-  const manifestRead = await readJson(bucket, MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+  const manifestRead = await readJson(
+    bucket,
+    MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
+    { cache: false },
+  );
   if (!manifestRead.ok) {
     return {
       ok: false,
@@ -159,7 +170,10 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
     return { ok: false, reason: "generation_mismatch" };
   }
 
-  const directories = new Map<number, ReturnType<typeof normalizeMemberSuggestionsV2Directory>>();
+  const directories = new Map<
+    number,
+    ReturnType<typeof normalizeMemberSuggestionsV2Directory>
+  >();
   const pageKeys = new Set<string>();
   for (const gram of grams) {
     const bucketId = memberSuggestionPostingBucket(gram);
