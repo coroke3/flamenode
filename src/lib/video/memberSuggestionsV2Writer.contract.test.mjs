@@ -2,18 +2,38 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const writer = await readFile(
-  new URL(
-    "../../../workers/json-generator/memberSuggestionsV2Artifacts.ts",
-    import.meta.url,
+const [writer, postings] = await Promise.all([
+  readFile(
+    new URL(
+      "../../../workers/json-generator/memberSuggestionsV2Artifacts.ts",
+      import.meta.url,
+    ),
+    "utf8",
   ),
-  "utf8",
-);
+  readFile(new URL("./memberSuggestionsPostingsV2.ts", import.meta.url), "utf8"),
+]);
 
 test("16 bucket postingsを実質無効化しないbounded publish budgetを持つ", () => {
   assert.match(
     writer,
     /MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 40/,
+  );
+});
+
+test("2文字未満の到達不能postingをV2 publish対象から除外する", () => {
+  assert.match(postings, /MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH = 2/);
+  assert.match(postings, /function removeUnqueriedShortGrams/);
+  assert.match(
+    postings,
+    /memberSuggestionGramLength\(record\.gram\)\s*>=\s*MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH/s,
+  );
+  assert.match(
+    postings,
+    /memberSuggestionGramLength\(gram\)\s*>=\s*MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH/s,
+  );
+  assert.match(
+    postings,
+    /buckets: directories\.map\(\(\{ bucket \}\) => bucket\)/,
   );
 });
 
