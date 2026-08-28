@@ -10,7 +10,6 @@ import { formatUnix } from "@/lib/utils/format";
 import type {
   SlotViewerOverlayDto,
   SlotViewerOverlaySlot,
-  SlotViewerOverlayState,
 } from "@/lib/slots/slotViewerOverlayCore";
 import styles from "./page.module.css";
 
@@ -25,13 +24,12 @@ const EMPTY_OVERLAY: SlotViewerOverlayDto = {
   operatorOverrideAllowed: false,
   viewerXId: null,
   viewerXIdNotice: null,
-  slotStates: [],
   slots: [],
 };
 
 type ViewerOverlayState = {
   value: SlotViewerOverlayDto;
-  /** このviewer情報と同時に表示してよいpublic slot snapshot。 */
+  /** このviewer情報と同時に表示してよいpublic slot base。 */
   baseSlots: readonly SlotRow[] | null;
 };
 
@@ -65,20 +63,6 @@ function normalizeSlotPatch(value: unknown): SlotViewerOverlaySlot | null {
   };
 }
 
-function normalizeSlotState(value: unknown): SlotViewerOverlayState | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
-  if (typeof row.id !== "string" || row.id.length === 0) return null;
-  if (
-    row.status !== "available" &&
-    row.status !== "reserved" &&
-    row.status !== "submitted"
-  ) {
-    return null;
-  }
-  return { id: row.id, status: row.status };
-}
-
 function normalizeOverlay(value: unknown): SlotViewerOverlayDto | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
@@ -90,13 +74,10 @@ function normalizeOverlay(value: unknown): SlotViewerOverlayDto | null {
     typeof row.canReserveSlot !== "boolean" ||
     typeof row.canPost !== "boolean" ||
     typeof row.operatorOverrideAllowed !== "boolean" ||
-    !Array.isArray(row.slotStates) ||
     !Array.isArray(row.slots)
   ) {
     return null;
   }
-  const normalizedSlotStates = row.slotStates.map(normalizeSlotState);
-  if (normalizedSlotStates.some((state) => state === null)) return null;
   const slots = row.slots
     .map(normalizeSlotPatch)
     .filter((slot): slot is SlotViewerOverlaySlot => slot !== null);
@@ -110,7 +91,6 @@ function normalizeOverlay(value: unknown): SlotViewerOverlayDto | null {
     operatorOverrideAllowed: row.operatorOverrideAllowed,
     viewerXId: nullableString(row.viewerXId),
     viewerXIdNotice: nullableString(row.viewerXIdNotice),
-    slotStates: normalizedSlotStates as SlotViewerOverlayState[],
     slots,
   };
 }
@@ -119,51 +99,29 @@ function mergeViewerSlots(
   baseSlots: readonly SlotRow[],
   overlay: SlotViewerOverlayDto,
 ): SlotRow[] {
-  const stateById = new Map(
-    overlay.slotStates.map((state) => [state.id, state.status] as const),
-  );
   const byId = new Map(overlay.slots.map((slot) => [slot.id, slot] as const));
   return baseSlots.map((slot) => {
-    const canonicalStatus = stateById.get(slot.id);
-    // 書込直後はR2 public snapshotの再生成が遅れる。statusがD1正本と異なる場合、
-    // staleな予約者名/group/iconを別状態へ持ち越さず一旦消してからviewer patchを重ねる。
-    const currentSlot: SlotRow =
-      canonicalStatus && canonicalStatus !== slot.status
-        ? {
-            ...slot,
-            status: canonicalStatus,
-            display_name: null,
-            reserved_x_id: null,
-            profile_x_user_id: null,
-            submitted_icon_url: null,
-            is_owned_by_viewer: false,
-            viewer_relation: "none",
-            group_key: null,
-            x_user_id: null,
-          }
-        : slot;
     const patch = byId.get(slot.id);
     if (!patch) {
       return {
-        ...currentSlot,
+        ...slot,
         is_owned_by_viewer: false,
         viewer_relation: "none" as const,
         x_user_id: null,
       };
     }
     return {
-      ...currentSlot,
-      display_name: patch.display_name ?? currentSlot.display_name,
-      reserved_x_id: patch.reserved_x_id ?? currentSlot.reserved_x_id,
-      profile_x_user_id:
-        patch.profile_x_user_id ?? currentSlot.profile_x_user_id ?? null,
+      ...slot,
+      display_name: patch.display_name ?? slot.display_name,
+      reserved_x_id: patch.reserved_x_id ?? slot.reserved_x_id,
+      profile_x_user_id: patch.profile_x_user_id ?? slot.profile_x_user_id ?? null,
       submitted_icon_url:
-        patch.submitted_icon_url ?? currentSlot.submitted_icon_url ?? null,
+        patch.submitted_icon_url ?? slot.submitted_icon_url ?? null,
       is_owned_by_viewer: patch.is_owned_by_viewer,
       viewer_relation: patch.viewer_relation,
-      // R2側の公開groupが既にあるならそれを維持する。反映待ちで無い場合だけ
-      // viewer専用groupを使い、実reservation_group_idはclientへ出さない。
-      group_key: currentSlot.group_key ?? patch.group_key,
+      // public_nameではpage SSRのbase groupを正本にする。hidden/anonymousでは
+      // base groupがnullなのでviewer専用opaque groupを補完する。
+      group_key: slot.group_key ?? patch.group_key,
       x_user_id: patch.x_user_id,
     };
   });
@@ -227,15 +185,12 @@ export function EventSlotsViewerPanel({
     )
       .then(async (response) => {
         if (!response.ok) {
-          // page SSR後にeventが非公開/削除されたraceも未ログイン扱いにしない。
           return { ...EMPTY_OVERLAY, authUnavailable: true };
         }
         const normalized = normalizeOverlay(await response.json());
         return normalized ?? { ...EMPTY_OVERLAY, authUnavailable: true };
       })
       .catch((error) => {
-        // cleanupによるabortはstateを触らない。timeout abortはactiveのままなので
-        // 一時利用不可へ遷移させ、永遠に「確認中」になるのを防ぐ。
         if (!active) return null;
         console.warn("[event-slots] viewer overlay unavailable", {
           error: error instanceof Error ? error.name : "unknown",
@@ -284,8 +239,7 @@ export function EventSlotsViewerPanel({
         ? mergedSlots
         : mergedSlots.map((slot) => ({
             ...slot,
-            // display_name / reserved_x_idは本人向け表示として維持するが、
-            // SlotGridが編集・解放・拡張・結合に使うownershipだけを無効化する。
+            // 表示情報は維持してもwrite ownershipだけはfail-closed。
             is_owned_by_viewer: false,
           })),
     [mergedSlots, canManageOwnSlots],
