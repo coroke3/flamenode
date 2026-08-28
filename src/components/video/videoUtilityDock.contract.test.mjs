@@ -25,6 +25,21 @@ test("VideoUtilityDock keeps both panels mounted and wires history", () => {
   assert.match(body, /Escape/);
 });
 
+test("VideoUtilityDockはNextのhistory stateを保持しリンク遷移前にsynthetic entryを消費する", () => {
+  const body = read("VideoUtilityDock.tsx");
+  assert.match(body, /const baseState =/);
+  assert.match(
+    body,
+    /\{ \.\.\.baseState, \[HISTORY_STATE_KEY\]: true \}/,
+  );
+  assert.match(body, /pendingNavigationRef/);
+  assert.match(body, /onClickCapture=\{handlePanelNavigationCapture\}/);
+  assert.match(body, /event\.preventDefault\(\)/);
+  assert.match(body, /pendingNavigationRef\.current = anchor\.href/);
+  assert.match(body, /window\.history\.back\(\)/);
+  assert.match(body, /router\.push/);
+});
+
 test("ChapterCommentPanel preserves composer flow and mirrors TOS guard", () => {
   const body = read("ChapterCommentPanel.tsx");
   assert.match(body, /presentation="responsive"/);
