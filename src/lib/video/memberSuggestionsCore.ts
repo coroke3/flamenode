@@ -293,8 +293,17 @@ export function parseMemberSuggestionsManifest(payload: unknown):
   if (typeof generation !== "string" || generation.length === 0) return null;
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(generation)) return null;
   const total = Number(record.total);
-  if (!Number.isFinite(total) || total < 0) return null;
-  return { generation, total: Math.floor(total) };
+  if (
+    !Number.isSafeInteger(total) ||
+    total < 0 ||
+    total > MEMBER_SUGGESTIONS_MAX_ROWS
+  ) {
+    return null;
+  }
+  if (record.object_key !== memberSuggestionsIndexObjectKey(generation)) {
+    return null;
+  }
+  return { generation, total };
 }
 
 /** index payload検証。generation不一致・schema不一致はnull（routeは503）。 */
@@ -305,31 +314,49 @@ export function parseMemberSuggestionsIndex(
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const record = payload as Record<string, unknown>;
   if (record.schema_version !== MEMBER_SUGGESTIONS_SCHEMA_VERSION) return null;
+  const generation = record.generation;
   if (
-    expectedGeneration != null &&
-    record.generation !== expectedGeneration
+    typeof generation !== "string" ||
+    !/^[A-Za-z0-9._-]{1,128}$/.test(generation) ||
+    (expectedGeneration != null && generation !== expectedGeneration)
   ) {
     return null;
   }
   const rawItems = record.items;
-  if (!Array.isArray(rawItems)) return null;
+  if (!Array.isArray(rawItems) || rawItems.length > MEMBER_SUGGESTIONS_MAX_ROWS) {
+    return null;
+  }
   const items: MemberSuggestionItem[] = [];
   for (const raw of rawItems) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
     const item = raw as Record<string, unknown>;
     const xUserId = item.x_user_id;
     const name = item.name;
-    if (typeof xUserId !== "string" || typeof name !== "string") return null;
+    if (
+      typeof xUserId !== "string" ||
+      typeof name !== "string" ||
+      !name.trim()
+    ) {
+      return null;
+    }
     if (!/^[a-z0-9_]{1,64}$/.test(xUserId)) return null;
-    const xAliases = stringArray(item.xAliases);
-    const nameAliases = stringArray(item.nameAliases);
+    const xAliases = stringArray(
+      item.xAliases,
+      MEMBER_SUGGESTIONS_MAX_X_ALIASES,
+      (entry) => /^[a-z0-9_]{1,64}$/.test(entry) && entry !== xUserId,
+    );
+    const nameAliases = stringArray(
+      item.nameAliases,
+      MEMBER_SUGGESTIONS_MAX_NAME_ALIASES,
+      (entry) => entry.trim().length > 0,
+    );
     if (xAliases == null || nameAliases == null) return null;
     const occurrenceCount = Number(item.occurrenceCount ?? 0);
-    if (!Number.isFinite(occurrenceCount) || occurrenceCount < 0) return null;
+    if (!Number.isSafeInteger(occurrenceCount) || occurrenceCount < 0) return null;
     const lastSeenRaw = item.lastSeenAt;
     let lastSeenAt: number | null = null;
-    if (typeof lastSeenRaw === "number" && Number.isFinite(lastSeenRaw)) {
-      lastSeenAt = Math.floor(lastSeenRaw);
+    if (typeof lastSeenRaw === "number" && Number.isSafeInteger(lastSeenRaw)) {
+      lastSeenAt = lastSeenRaw;
     } else if (lastSeenRaw != null) {
       return null;
     }
@@ -340,21 +367,24 @@ export function parseMemberSuggestionsIndex(
       name,
       xAliases,
       nameAliases,
-      occurrenceCount: Math.floor(occurrenceCount),
+      occurrenceCount,
       lastSeenAt,
       approvalStatus: approvalStatus ?? null,
     });
-    if (items.length > MEMBER_SUGGESTIONS_MAX_ROWS) return null;
   }
   return items;
 }
 
-function stringArray(value: unknown): string[] | null {
+function stringArray(
+  value: unknown,
+  maxLength: number,
+  validate: (entry: string) => boolean,
+): string[] | null {
   if (value == null) return [];
-  if (!Array.isArray(value)) return null;
+  if (!Array.isArray(value) || value.length > maxLength) return null;
   const out: string[] = [];
   for (const entry of value) {
-    if (typeof entry !== "string") return null;
+    if (typeof entry !== "string" || !validate(entry)) return null;
     out.push(entry);
   }
   return out;
