@@ -58,8 +58,21 @@ test("summaryのlinked X空配列も正本としてSSRの古いActive Xを残さ
     publicHeader,
     /fetchedUser\.xIds\.length > 0 \? fetchedUser\.xIds : serverUser\.xIds/,
   );
-  assert.match(publicHeader, /serverUser\s*\? \{/);
-  assert.match(publicHeader, /: fetchedUser\s*: serverUser/);
+});
+
+test("正常なloggedOut summaryはSSRの古いログイン表示を破棄する", () => {
+  assert.match(island, /confirmedLoggedOut: boolean/);
+  assert.match(island, /setConfirmedLoggedOut\(true\)/);
+  assert.match(island, /setConfirmedLoggedOut\(false\)/);
+  assert.match(
+    island,
+    /else \{\s*\/\/ 503\/通信失敗とは違い,[\s\S]*setUser\(null\);\s*setConfirmedLoggedOut\(true\);\s*setUnavailable\(false\);/,
+  );
+  assert.match(
+    publicHeader,
+    /confirmedLoggedOut: accountConfirmedLoggedOut/,
+  );
+  assert.match(publicHeader, /const accountUser = accountConfirmedLoggedOut\s*\? null/);
 });
 
 test("公開layoutとAccount Islandはserver authを呼ばない", () => {
