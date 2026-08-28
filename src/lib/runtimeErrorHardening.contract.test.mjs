@@ -21,6 +21,7 @@ const [
   usersIndexV2ArtifactsSource,
   artifactSloSource,
   deepHealthSource,
+  gaTrendingSyncSource,
 ] = await Promise.all([
   read("middleware.ts"),
   read("src/lib/event/eventIdReuse.ts"),
@@ -36,6 +37,7 @@ const [
   read("workers/json-generator/usersIndexV2Artifacts.ts"),
   read("src/lib/health/artifactSlo.ts"),
   read("src/lib/health/deepHealth.ts"),
+  read("workers/ga-analytics/sync.ts"),
 ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
@@ -135,4 +137,20 @@ test("health diagnosticsはoversize artifactを本文parse前に拒否してbody
   assert.match(deepHealthSource, /object\.size > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES/);
   assert.match(deepHealthSource, /reportDegraded\("manifest_too_large"\)/);
   assert.match(deepHealthSource, /cancelR2BodyBestEffort\(object\)/);
+});
+
+test("GA trending syncはrecent/existing trendingをbounded readしabort時にbodyを解放する", () => {
+  assert.match(gaTrendingSyncSource, /GA4_RECENT_LIST_MAX_OBJECT_BYTES = 8 \* 1024 \* 1024/);
+  assert.match(gaTrendingSyncSource, /GA4_TRENDING_MAX_OBJECT_BYTES = 1024 \* 1024/);
+  assert.match(gaTrendingSyncSource, /cancelR2BodyBestEffort\(object\)/);
+  assert.match(gaTrendingSyncSource, /ga4_recent_list_too_large/);
+  const recentGuard = gaTrendingSyncSource.indexOf(
+    "isOversizedR2Object(object, GA4_RECENT_LIST_MAX_OBJECT_BYTES)",
+  );
+  const recentRead = gaTrendingSyncSource.indexOf("const text = await object.text()", recentGuard);
+  assert.ok(recentGuard >= 0 && recentRead > recentGuard);
+  assert.match(
+    gaTrendingSyncSource,
+    /if \(signal\?\.aborted\) \{\s*await cancelR2BodyBestEffort\(object\);\s*signal\.throwIfAborted\(\);/,
+  );
 });
