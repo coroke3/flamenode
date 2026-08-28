@@ -15,6 +15,10 @@ const UNAVAILABLE_HEADERS = {
   "Cache-Control": "no-store",
   "Retry-After": "30",
 } as const;
+const NOT_FOUND_HEADERS = {
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+} as const;
 
 export async function GET(
   _req: Request,
@@ -44,7 +48,10 @@ export async function GET(
       });
     }
     if (probe.kind === "not_found") {
-      return new Response("Not found", { status: 404 });
+      return new Response("Not found", {
+        status: 404,
+        headers: NOT_FOUND_HEADERS,
+      });
     }
     if (probe.kind === "public") {
       // public_name はD1の公開判定だけで確定する。Auth.jsを起動しない。
