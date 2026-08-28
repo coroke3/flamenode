@@ -20,10 +20,12 @@ test("VideoUtilityDock keeps both panels mounted and wires history", () => {
   assert.match(body, /matchMedia/);
   assert.match(body, /playlistItems\.length === 0/);
   assert.match(body, /authUnavailable=\{authUnavailable\}/);
+  assert.match(body, /needsTermsAcceptance=\{needsTermsAcceptance\}/);
+  assert.match(body, /rulesHref=\{rulesHref\}/);
   assert.match(body, /Escape/);
 });
 
-test("ChapterCommentPanel preserves composer flow", () => {
+test("ChapterCommentPanel preserves composer flow and mirrors TOS guard", () => {
   const body = read("ChapterCommentPanel.tsx");
   assert.match(body, /presentation="responsive"/);
   assert.match(body, /現在位置にコメントする/);
@@ -32,6 +34,13 @@ test("ChapterCommentPanel preserves composer flow", () => {
   assert.match(body, /data-chapter-time/);
   assert.match(body, /authUnavailable \? \(/);
   assert.match(body, /ログイン状態を一時的に確認できません/);
+  assert.match(body, /needsTermsAcceptance \? \(/);
+  assert.match(body, /コメントを投稿するには利用規約への同意が必要です/);
+  assert.match(body, /href=\{rulesHref\}/);
+  assert.ok(
+    body.indexOf("needsTermsAcceptance ? (") < body.indexOf("!canPost ? ("),
+    "TOS guard must run before X ID approval messaging",
+  );
 });
 
 test("usePlayerTime delegates to subscribePlayerTime cleanup", () => {
