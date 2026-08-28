@@ -39,6 +39,8 @@ import {
   normalizePublicXIconV2Manifest,
   normalizePublicXIconV2Shard,
   PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+  PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES,
+  PUBLIC_X_ICON_V2_MAX_SHARD_BYTES,
   publicXIconV2ShardForXId,
   publicXIconV2ShardObjectKey,
 } from "./publicIconProjectionV2";
@@ -65,13 +67,34 @@ export type StaticJsonLoadResult<T> = {
   value: T;
 };
 
-async function readR2Json(key: string): Promise<unknown | null> {
+/**
+ * Shared public projectionの最終防衛線。個別artifactにより小さい上限がある場合は
+ * 呼び出し側でoverrideする。巨大/破損R2 objectを128MB Workers heapでJSON parseしない。
+ */
+const DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
+
+async function readR2Json(
+  key: string,
+  maxObjectBytes = DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES,
+): Promise<unknown | null> {
   try {
     const bucket = getEnv().BUCKET;
     if (!bucket) return null;
     recordPublicR2Get();
     const object = await bucket.get(key);
     if (!object) return null;
+    if (
+      !Number.isSafeInteger(maxObjectBytes) ||
+      maxObjectBytes <= 0 ||
+      (typeof object.size === "number" && object.size > maxObjectBytes)
+    ) {
+      try {
+        await object.body.cancel();
+      } catch {
+        // Oversized artifact is treated as unavailable regardless of cancel result.
+      }
+      return null;
+    }
     try {
       return await object.json();
     } catch {
@@ -91,6 +114,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   normalize: (value: unknown) => T | null;
   maxStaleAgeSec: number;
   cacheTtlSeconds?: number;
+  maxObjectBytes?: number;
   /** `r2_first` reads R2 first and permits bounded stale Cache fallback. */
   cacheMode?: StaticJsonCacheMode;
   nowSec?: number;
@@ -99,6 +123,8 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
 }): Promise<StaticJsonLoadResult<T | null>> {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const cacheTtl = args.cacheTtlSeconds ?? 300;
+  const maxObjectBytes =
+    args.maxObjectBytes ?? DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES;
   const finish = <T>(status: StaticJsonLoadStatus, value: T | null) => {
     notePublicArtifactMode(status);
     return { status, value } satisfies StaticJsonLoadResult<T | null>;
@@ -118,7 +144,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
       const normalized = args.normalize(freshCached.payload);
       if (normalized !== null) {
         if (args.getGeneratedAt) {
-          const r2Payload = await readR2Json(args.key);
+          const r2Payload = await readR2Json(args.key, maxObjectBytes);
           if (r2Payload !== null) {
             const r2Normalized = args.normalize(r2Payload);
             if (r2Normalized !== null) {
@@ -142,7 +168,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
     }
   }
 
-  const payload = await readR2Json(args.key);
+  const payload = await readR2Json(args.key, maxObjectBytes);
   if (payload !== null) {
     const normalized = args.normalize(payload);
     if (normalized !== null) {
@@ -275,6 +301,7 @@ const loadPublicXIconV2Manifest = cache(async () =>
     normalize: normalizePublicXIconV2Manifest,
     maxStaleAgeSec: 0,
     cacheTtlSeconds: 0,
+    maxObjectBytes: PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES,
     cacheMode: "bypass",
   }),
 );
@@ -309,6 +336,7 @@ async function loadPublicXIconMapV2(
           }),
         maxStaleAgeSec: 24 * 60 * 60,
         cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
+        maxObjectBytes: PUBLIC_X_ICON_V2_MAX_SHARD_BYTES,
       }),
     ),
   );
