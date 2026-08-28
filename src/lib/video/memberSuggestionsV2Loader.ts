@@ -17,7 +17,6 @@ import {
 type SuggestionsBucket = Pick<R2Bucket, "get">;
 
 type CachedJson = {
-  bucket: SuggestionsBucket;
   value: unknown;
   fetchedAt: number;
 };
@@ -36,6 +35,9 @@ type GramReadState = {
 
 const JSON_CACHE_TTL_SEC = 30;
 const JSON_CACHE_MAX_ENTRIES = 24;
+// Isolate-global cache contains completed, parsed JSON only. Never store an R2
+// binding or an I/O Promise here: Workers may reuse this isolate for unrelated
+// HTTP requests and request-scoped I/O objects cannot safely cross contexts.
 const jsonCache = new Map<string, CachedJson>();
 
 export type MemberSuggestionsV2LoadResult =
@@ -66,14 +68,13 @@ function cacheKey(key: string): string {
 }
 
 function rememberJson(
-  bucket: SuggestionsBucket,
   key: string,
   value: unknown,
   nowSec: number,
 ): void {
   const keyValue = cacheKey(key);
   if (jsonCache.has(keyValue)) jsonCache.delete(keyValue);
-  jsonCache.set(keyValue, { bucket, value, fetchedAt: nowSec });
+  jsonCache.set(keyValue, { value, fetchedAt: nowSec });
   while (jsonCache.size > JSON_CACHE_MAX_ENTRIES) {
     const oldest = jsonCache.keys().next().value as string | undefined;
     if (!oldest) break;
@@ -94,12 +95,12 @@ async function readJson(
   const cached = useCache ? jsonCache.get(cacheKey(key)) : undefined;
   if (
     cached &&
-    cached.bucket === bucket &&
     nowSec - cached.fetchedAt >= 0 &&
     nowSec - cached.fetchedAt <= JSON_CACHE_TTL_SEC
   ) {
-    // LRU refresh without reparsing JSON.
-    rememberJson(bucket, key, cached.value, nowSec);
+    // LRU refresh without reparsing JSON. The key is generation-specific, so
+    // completed JSON may be reused safely without retaining the current R2 binding.
+    rememberJson(key, cached.value, nowSec);
     return { ok: true, value: cached.value };
   }
 
@@ -113,7 +114,7 @@ async function readJson(
   }
   try {
     const value = await object.json<unknown>();
-    if (useCache) rememberJson(bucket, key, value, nowSec);
+    if (useCache) rememberJson(key, value, nowSec);
     return { ok: true, value };
   } catch {
     return { ok: false, reason: "invalid" };
