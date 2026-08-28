@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { toggleVideoInteraction } from "@/lib/actions/video";
+import { invalidateVideoViewerOverlay } from "@/lib/video/videoViewerOverlayClient";
 import { cn } from "@/lib/utils/cn";
 
 interface InteractionButtonProps {
@@ -111,6 +112,10 @@ export function InteractionButton({
           );
         }
       }
+
+      // overlayは30秒キャッシュされるため、書込成功時に破棄しないと
+      // 戻る/再マウント時に直前のいいね・セーブ状態へ巻き戻って見える。
+      invalidateVideoViewerOverlay(videoId);
     });
   };
 
