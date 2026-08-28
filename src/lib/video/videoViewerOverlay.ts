@@ -17,6 +17,7 @@ import {
 import { fetchAuthorizedPrivateVideoChapters } from "@/lib/db/videoDetailQueries";
 import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import { loadPublicEventPlaylistR2Only } from "@/lib/publicData/r2EventPlaylist";
+import { EVENT_PLAYLIST_MAX_ITEMS } from "@/lib/publicData/staticEventPlaylistCore";
 import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 import { isLiveApiEnabled } from "@/lib/operationMode/policy";
 import type {
@@ -178,7 +179,10 @@ export async function loadVideoViewerOverlay(args: {
               eq(videosTable.visibility_status, "public"),
             )!,
           )
-          .orderBy(desc(videosTable.scheduled_time));
+          .orderBy(desc(videosTable.scheduled_time))
+          // client側も同じ最大件数しか表示しない。serverで全件SELECTしてから
+          // truncateすると長期利用ユーザーほどD1/JSON CPUが増えるため、query自体をboundedにする。
+          .limit(EVENT_PLAYLIST_MAX_ITEMS);
         privatePlaylist = {
           playlistLabel:
             kind === "like" ? "いいねした作品" : "セーブした作品",
