@@ -8,6 +8,10 @@ const PRIVATE_HEADERS = {
   Pragma: "no-cache",
   Expires: "0",
 } as const;
+const UNAVAILABLE_HEADERS = {
+  ...PRIVATE_HEADERS,
+  "Retry-After": "3",
+} as const;
 
 export async function GET(
   _request: Request,
@@ -22,12 +26,23 @@ export async function GET(
     );
   }
 
-  const overlay = await loadSlotViewerOverlay(eventId);
-  if (!overlay) {
+  try {
+    const overlay = await loadSlotViewerOverlay(eventId);
+    if (!overlay) {
+      return NextResponse.json(
+        { error: "event_not_found" },
+        { status: 404, headers: PRIVATE_HEADERS },
+      );
+    }
+    return NextResponse.json(overlay, { headers: PRIVATE_HEADERS });
+  } catch (error) {
+    console.error("[slot-viewer-overlay] request failed", {
+      eventId,
+      error: error instanceof Error ? error.name : "unknown",
+    });
     return NextResponse.json(
-      { error: "event_not_found" },
-      { status: 404, headers: PRIVATE_HEADERS },
+      { error: "viewer_overlay_unavailable" },
+      { status: 503, headers: UNAVAILABLE_HEADERS },
     );
   }
-  return NextResponse.json(overlay, { headers: PRIVATE_HEADERS });
 }
