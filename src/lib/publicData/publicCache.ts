@@ -124,10 +124,11 @@ export function writePublicJsonCacheBestEffort(
 
     const safeTtl = Math.max(1, Math.floor(ttlSeconds));
     const serialized = JSON.stringify(payload);
-    // A malformed/corrupt producer must not seed an entry larger than readers accept.
-    // JS string length is a cheap lower bound for UTF-8 bytes; exact enforcement is
-    // performed by readBoundedJsonResponse before parsing.
-    if (serialized.length > PUBLIC_JSON_CACHE_MAX_BYTES) return;
+    // Cache miss/R2 hit時だけ通るbackground write。UTF-8 byte数でreaderと同じ上限を
+    // 適用し、multi-byte payloadがoversized entryを作らないようにする。
+    if (new TextEncoder().encode(serialized).byteLength > PUBLIC_JSON_CACHE_MAX_BYTES) {
+      return;
+    }
     const putPromise = (caches as unknown as { default: Cache }).default.put(
       publicJsonCacheKey(r2Key),
       new Response(serialized, {
