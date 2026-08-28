@@ -1,5 +1,8 @@
 import type { VideoChapterOverlayEntry } from "@/lib/publicData/privateVideoChapterOverlay";
 
+/** server query / client validation share the same bounded private chapter payload. */
+export const VIDEO_VIEWER_OVERLAY_MAX_PRIVATE_CHAPTERS = 500;
+
 export type VideoViewerOverlayPlaylistItem = {
   id: string;
   title: string;
