@@ -71,6 +71,7 @@ export function InteractionButton({
   const [displayCount, setDisplayCount] = React.useState(count);
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const actionInFlightRef = React.useRef(false);
 
   React.useEffect(() => {
     setActive(initialActive);
@@ -82,7 +83,9 @@ export function InteractionButton({
   const meta = LABELS[kind];
 
   const onClick = () => {
-    if (busy || !canInteract) return;
+    // transitionのbusy反映前にdouble clickされてもserver actionを二重送信しない。
+    if (actionInFlightRef.current || busy || !canInteract) return;
+    actionInFlightRef.current = true;
     setError(null);
     const fd = new FormData();
     fd.set("video_id", videoId);
@@ -99,28 +102,40 @@ export function InteractionButton({
     }
 
     startTransition(async () => {
-      const result = await toggleVideoInteraction(fd);
-      if (!result.ok) {
+      try {
+        const result = await toggleVideoInteraction(fd);
+        if (!result.ok) {
+          setActive(previousActive);
+          setDisplayCount(previousCount);
+          setError(result.message ?? "操作に失敗しました。");
+          return;
+        }
+
+        if (typeof result.active === "boolean") {
+          setActive(result.active);
+          if (
+            kind === "like" &&
+            typeof previousCount === "number" &&
+            result.active !== optimisticActive
+          ) {
+            setDisplayCount(
+              Math.max(0, previousCount + (result.active ? 1 : -1)),
+            );
+          }
+        }
+
+        notifyVideoViewerOverlayChanged(videoId);
+      } catch (writeError) {
         setActive(previousActive);
         setDisplayCount(previousCount);
-        setError(result.message ?? "操作に失敗しました。");
-        return;
+        setError("操作に失敗しました。通信状態を確認してもう一度お試しください。");
+        console.warn("[video-interaction] client write failed", {
+          kind,
+          error: writeError instanceof Error ? writeError.name : "unknown",
+        });
+      } finally {
+        actionInFlightRef.current = false;
       }
-
-      if (typeof result.active === "boolean") {
-        setActive(result.active);
-        if (
-          kind === "like" &&
-          typeof previousCount === "number" &&
-          result.active !== optimisticActive
-        ) {
-          setDisplayCount(
-            Math.max(0, previousCount + (result.active ? 1 : -1)),
-          );
-        }
-      }
-
-      notifyVideoViewerOverlayChanged(videoId);
     });
   };
 
