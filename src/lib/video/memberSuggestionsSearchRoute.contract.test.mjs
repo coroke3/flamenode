@@ -22,12 +22,21 @@ test("query budget超過はpartial順位を返さず絞り込みを要求する"
   assert.match(route, /return refineQueryResponse/);
 });
 
-test("limit/offsetは固定長の10進整数だけをbounded値として受ける", () => {
+test("limit/offsetは固定長の10進整数だけをbounded値として受け、limit=0は既定値へ戻す", () => {
   assert.match(route, /const MAX_NUMERIC_PARAM_LENGTH = 8/);
   assert.match(route, /\.trim\(\)\.slice\(0, MAX_NUMERIC_PARAM_LENGTH\)/);
   assert.match(route, /if \(!\/\^\\d\+\$\/\.test\(raw\)\) return fallback/);
   assert.match(route, /Number\.parseInt\(raw, 10\)/);
-  assert.match(route, /Number\.isSafeInteger\(parsed\)/);
+  assert.match(route, /Number\.isSafeInteger\(parsed\) \|\| parsed < min/);
+  assert.match(
+    route,
+    /url\.searchParams\.get\("limit"\),\s*DEFAULT_LIMIT,\s*1,\s*MAX_LIMIT/s,
+  );
+  assert.match(
+    route,
+    /url\.searchParams\.get\("offset"\),\s*0,\s*0,\s*MAX_OFFSET/s,
+  );
+  assert.doesNotMatch(route, /Math\.max\(\s*1,\s*parseBoundedDecimalParam/s);
   assert.doesNotMatch(route, /Number\(url\.searchParams\.get\("limit"\)/);
   assert.doesNotMatch(route, /Number\(url\.searchParams\.get\("offset"\)/);
 });
