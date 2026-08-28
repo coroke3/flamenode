@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { test } from "node:test";
+
+const writer = await readFile(
+  new URL(
+    "../../../workers/json-generator/memberSuggestionsV2Artifacts.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+test("16 bucket postingsを実質無効化しないbounded publish budgetを持つ", () => {
+  assert.match(
+    writer,
+    /MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 40/,
+  );
+});
+
+test("partial publish失敗時はmanifest撤去成功後だけgeneration objectを削除する", () => {
+  assert.match(
+    writer,
+    /const manifestRemoved = await deleteManifestBestEffort\(bucket\)/,
+  );
+  assert.match(
+    writer,
+    /if \(manifestRemoved\) \{\s*await deleteKeysBestEffort\(bucket, writtenKeys\)/s,
+  );
+});
+
+test("旧generation cleanupは1000 objectで明示的にboundedされる", () => {
+  assert.match(
+    writer,
+    /MEMBER_SUGGESTIONS_V2_CLEANUP_LIST_LIMIT = 1000/,
+  );
+  assert.match(writer, /listed\.truncated/);
+});
