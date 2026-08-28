@@ -31,3 +31,20 @@ test("invalidate前の遅いrequestは新しいviewer cacheを上書きしない
   );
   assert.match(client, /cache\.set\(key, \{ promise, requestToken \}\)/);
 });
+
+test("viewer overlayのnon-OK responseは未ログイン扱いにせずfail-closedにする", () => {
+  assert.match(client, /if \(!response\.ok\) return emptyOverlay\(true\)/);
+});
+
+test("interactionは二重送信とserver action rejectから復旧する", () => {
+  assert.match(interaction, /actionInFlightRef = React\.useRef\(false\)/);
+  assert.match(
+    interaction,
+    /if \(actionInFlightRef\.current \|\| busy \|\| !canInteract\) return/,
+  );
+  assert.match(interaction, /catch \(writeError\)/);
+  assert.match(interaction, /setActive\(previousActive\)/);
+  assert.match(interaction, /setDisplayCount\(previousCount\)/);
+  assert.match(interaction, /finally \{/);
+  assert.match(interaction, /actionInFlightRef\.current = false/);
+});
