@@ -5,6 +5,8 @@ import {
   buildMemberSuggestionArtifacts,
   buildMemberSuggestionItems,
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+  MEMBER_SUGGESTIONS_MAX_INDEX_BYTES,
+  MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES,
   memberSuggestionsIndexObjectKey,
 } from "./memberSuggestionsCore.ts";
 import {
@@ -149,6 +151,86 @@ test("同じR2 bucketへの同時ロードは読み込みを共有する", async
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
   assert.equal(getCount, 2);
+});
+
+test("3秒を超えて未解決のin-flightは共有せず新しいR2 readへ切り替える", async () => {
+  const objects = new Map();
+  publishValidIndex(objects);
+  const base = createBucket(objects);
+  let getCount = 0;
+  let releaseFirst;
+  const firstPending = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const bucket = {
+    async get(key) {
+      getCount += 1;
+      if (getCount === 1) return firstPending;
+      return base.get(key);
+    },
+  };
+
+  const originalNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  let first;
+  try {
+    first = loadMemberSuggestionsIndexFromBucket(bucket);
+    await Promise.resolve();
+    assert.equal(getCount, 1);
+
+    now += 3_001;
+    const second = await loadMemberSuggestionsIndexFromBucket(bucket);
+    assert.equal(second.ok, true);
+    assert.equal(getCount, 3);
+  } finally {
+    Date.now = originalNow;
+    releaseFirst?.(null);
+    if (first) await first;
+  }
+});
+
+test("manifest/indexは上限超過objectをJSON parse前に拒否する", async () => {
+  let manifestParsed = false;
+  const oversizedManifestBucket = {
+    async get() {
+      return {
+        size: MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES + 1,
+        async json() {
+          manifestParsed = true;
+          return {};
+        },
+      };
+    },
+  };
+  const manifestResult = await loadMemberSuggestionsIndexFromBucket(
+    oversizedManifestBucket,
+  );
+  assert.deepEqual(manifestResult, { ok: false, reason: "manifest_too_large" });
+  assert.equal(manifestParsed, false);
+
+  resetMemberSuggestionsCacheForTest();
+  const objects = new Map();
+  publishValidIndex(objects);
+  const manifestBody = objects.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
+  let indexParsed = false;
+  const oversizedIndexBucket = {
+    async get(key) {
+      if (key === MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY) {
+        return { size: manifestBody.length, async json() { return JSON.parse(manifestBody); } };
+      }
+      return {
+        size: MEMBER_SUGGESTIONS_MAX_INDEX_BYTES + 1,
+        async json() {
+          indexParsed = true;
+          return {};
+        },
+      };
+    },
+  };
+  const indexResult = await loadMemberSuggestionsIndexFromBucket(oversizedIndexBucket);
+  assert.deepEqual(indexResult, { ok: false, reason: "index_too_large" });
+  assert.equal(indexParsed, false);
 });
 
 test("30秒cache中でもcanonical manifest generation更新後は旧候補を返さない", async () => {
