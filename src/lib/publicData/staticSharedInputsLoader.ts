@@ -322,13 +322,20 @@ async function loadPublicXIconMapV2(
 /**
  * 公開アイコンはV2の必要shardだけを優先する。V2 rollout中のmanifest/shard欠損は
  * canonical V1へfail-safeし、request pathでD1へは降りない。
+ * V1でusers/index補完対象だった「欠損 / source=video」も同じ意味論を維持する。
  */
 const loadPublicXIconMapOptionalImpl = cache(
   async (requiredIdsKey: string): Promise<PublicXIconMapPayload | null> => {
     const requiredXUserIds =
       requiredIdsKey.length === 0 ? [] : requiredIdsKey.split(",");
     const v2 = await loadPublicXIconMapV2(requiredXUserIds);
-    if (v2) return v2;
+    if (v2) {
+      const needsCanonicalFallback = requiredXUserIds.some((xId) => {
+        const entry = v2.entries[xId];
+        return !entry || entry.source === "video";
+      });
+      if (!needsCanonicalFallback) return v2;
+    }
     return loadPublicXIconMapV1(requiredXUserIds);
   },
 );
