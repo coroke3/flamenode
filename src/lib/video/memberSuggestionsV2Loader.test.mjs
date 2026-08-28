@@ -68,7 +68,10 @@ function fixture() {
     objects.set(memberSuggestionsV2DirectoryObjectKey(generation, bucket), directory);
   }
   for (const { bucket, page } of v2.pages) {
-    objects.set(memberSuggestionsV2PageObjectKey(generation, bucket, page.page), page);
+    objects.set(
+      memberSuggestionsV2PageObjectKey(generation, bucket, page.page),
+      page,
+    );
   }
   return { objects, generation };
 }
@@ -112,4 +115,33 @@ test("V1とV2のgenerationが不一致ならstale V2を使用しない", async (
 
   const result = await loadMemberSuggestionsCandidatesV2FromBucket(bucket, "alice");
   assert.deepEqual(result, { ok: false, reason: "generation_mismatch" });
+});
+
+test("V2 manifest撤去後は同generationでもcached manifestを再利用しない", async () => {
+  resetMemberSuggestionsV2CacheForTest();
+  const { objects } = fixture();
+  const gets = [];
+  const bucket = {
+    async get(key) {
+      gets.push(key);
+      const value = objects.get(key);
+      return value === undefined ? null : jsonObject(value);
+    },
+  };
+
+  const first = await loadMemberSuggestionsCandidatesV2FromBucket(bucket, "alice");
+  assert.equal(first.ok, true);
+
+  // writerがV2 rebuild開始/失敗時にcommit pointを撤去した状態を再現する。
+  // generation固有directory/pageがcacheに残っていてもmanifest不在ならV1へfallbackする。
+  objects.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+  const beforeSecond = gets.filter(
+    (key) => key === MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
+  ).length;
+  const second = await loadMemberSuggestionsCandidatesV2FromBucket(bucket, "alice");
+  assert.deepEqual(second, { ok: false, reason: "manifest_missing" });
+  const afterSecond = gets.filter(
+    (key) => key === MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
+  ).length;
+  assert.equal(afterSecond, beforeSecond + 1, "manifest must be read from R2 again");
 });
