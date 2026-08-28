@@ -1,3 +1,5 @@
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
+
 export {
   PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
   PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES,
@@ -24,6 +26,7 @@ type R2BucketLike = {
     text(): Promise<string>;
     etag?: string;
     size?: number;
+    body?: unknown;
   } | null>;
   put(
     key: string,
@@ -53,16 +56,18 @@ export async function readWorkerVisibilityBlockedEntitiesManifest(
     };
   }
   // Reject by metadata before buffering an oversized R2 body in memory.
+  const hasKnownSize = typeof object.size === "number";
   if (
-    typeof object.size === "number" &&
+    hasKnownSize &&
     (!Number.isFinite(object.size) ||
-      object.size < 0 ||
-      object.size > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES)
+      object.size! < 0 ||
+      object.size! > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES)
   ) {
+    await cancelR2BodyBestEffort(object);
     throw new Error("public_visibility_manifest_too_large");
   }
   const text = await object.text();
-  if (utf8ByteLength(text) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
+  if (!hasKnownSize && utf8ByteLength(text) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
     throw new Error("public_visibility_manifest_too_large");
   }
   const parsed = normalizePublicVisibilityBlockedEntitiesManifest(
