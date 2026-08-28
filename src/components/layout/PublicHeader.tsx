@@ -9,7 +9,10 @@ import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import type { XIdEntry } from "@/lib/xid/entries";
 import type { HeaderUser } from "@/lib/auth/headerUser";
-import { PublicAccountIsland, usePublicAccountSummary } from "@/components/layout/PublicAccountIsland";
+import {
+  PublicAccountIsland,
+  usePublicAccountSummary,
+} from "@/components/layout/PublicAccountIsland";
 import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { sanitizeNextPath } from "#utils/next";
 import { useDismissablePanel } from "./useDismissablePanel";
@@ -23,7 +26,7 @@ export type PublicHeaderUser = Pick<
 };
 
 interface PublicHeaderProps {
-  /** 省略時はクライアントが /api/account/summary を取得する。 */
+  /** 省略時は必要になった時だけクライアントが /api/account/summary を取得する。 */
   user?: PublicHeaderUser | null;
   /**
    * SSRで最小ヘッダーを渡したまま、X ID一覧等を /api/account/summary で補完する。
@@ -50,12 +53,12 @@ export function PublicHeader({
   const pathname = usePathname();
   const fetchAccount = serverUser === undefined || hydrateAccount;
   const preserveLoggedInOnFailure = hydrateAccount && serverUser != null;
-  // admin/manage/auth のSSRヘッダーは最小情報を持っているため、詳細summaryは
-  // アカウントメニュー（またはモバイルナビ）を開いた時だけ補完する。
-  const hydrateOnOpen = hydrateAccount && serverUser != null;
-  // 公開ページは初期SSR/RSCとAuth.js summaryを競合させず、idle時に補完する。
-  // ユーザーが先にmobile/account UIを開いた場合はhook側が即時取得へ切り替える。
-  const deferPublicAccountUntilIdle = serverUser === undefined && !hydrateAccount;
+  const publicClientAccount = serverUser === undefined && !hydrateAccount;
+  // SSR最小ヘッダーと公開ヘッダーのどちらも、summaryはユーザーが
+  // アカウントUI/モバイルナビを開いた時だけ取得する。公開ページを読むだけの
+  // 匿名requestからAuth.js fan-outを完全に外す。
+  const hydrateOnOpen =
+    (hydrateAccount && serverUser != null) || publicClientAccount;
   const accountHydrationOpen = accountOpen || mobileOpen;
   const {
     user: fetchedUser,
@@ -67,10 +70,18 @@ export function PublicHeader({
     preserveLoggedInOnFailure,
     hydrateOnOpen,
     accountHydrationOpen,
-    deferPublicAccountUntilIdle,
+    false,
   );
+  const accountUnknown =
+    publicClientAccount &&
+    !accountConfirmedLoggedOut &&
+    fetchedUser == null &&
+    !accountUnavailable &&
+    !accountLoading;
   const showAccountLoading =
-    fetchAccount && accountLoading && !preserveLoggedInOnFailure;
+    fetchAccount &&
+    (accountLoading || (publicClientAccount && mobileOpen && accountUnknown)) &&
+    !preserveLoggedInOnFailure;
   const showAccountUnavailable =
     fetchAccount && accountUnavailable && !preserveLoggedInOnFailure;
   const accountUser = accountConfirmedLoggedOut
@@ -147,6 +158,12 @@ export function PublicHeader({
     setSearchOpen(false);
   };
 
+  const openAccountProbe = () => {
+    setAccountOpen(true);
+    setMobileOpen(false);
+    setSearchOpen(false);
+  };
+
   return (
     <>
       {mobileOpen ? (
@@ -219,23 +236,35 @@ export function PublicHeader({
               <Icon name="search" size={18} aria-hidden />
             </button>
 
-            <PublicAccountIsland
-              user={accountUser}
-              loading={showAccountLoading}
-              unavailable={showAccountUnavailable}
-              entryHref={entryHref}
-              accountOpen={accountOpen}
-              onAccountOpenChange={(open) => {
-                setAccountOpen(open);
-                if (open) {
-                  setMobileOpen(false);
-                  setSearchOpen(false);
-                }
-              }}
-              onClosePanels={closeMobilePanels}
-              pathname={pathname}
-              variant="desktop"
-            />
+            {accountUnknown ? (
+              <button
+                type="button"
+                className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.headerCta}`}
+                onClick={openAccountProbe}
+                aria-label="アカウントを確認"
+              >
+                <Icon name="user" size={13} aria-hidden />
+                <span>アカウント</span>
+              </button>
+            ) : (
+              <PublicAccountIsland
+                user={accountUser}
+                loading={showAccountLoading}
+                unavailable={showAccountUnavailable}
+                entryHref={entryHref}
+                accountOpen={accountOpen}
+                onAccountOpenChange={(open) => {
+                  setAccountOpen(open);
+                  if (open) {
+                    setMobileOpen(false);
+                    setSearchOpen(false);
+                  }
+                }}
+                onClosePanels={closeMobilePanels}
+                pathname={pathname}
+                variant="desktop"
+              />
+            )}
 
             <button
               type="button"
