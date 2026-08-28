@@ -114,6 +114,11 @@ test("viewer private chapterはserver query自体を最大件数でboundedにす
   assert.doesNotMatch(serverOverlay, /fetchAuthorizedPrivateVideoChapters/);
 });
 
+test("viewer interaction状態はlike/bookmarkだけをtype集約し最大2行にする", () => {
+  assert.match(serverOverlay, /inArray\(videoInteractionsAuth\.interaction_type, \["like", "bookmark"\]\)/);
+  assert.match(serverOverlay, /\.groupBy\(videoInteractionsAuth\.interaction_type\)\s*\.limit\(2\)/s);
+});
+
 test("viewer library playlistはserver query自体を最大件数でboundedにする", () => {
   assert.match(serverOverlay, /EVENT_PLAYLIST_MAX_ITEMS/);
   assert.match(serverOverlay, /\.orderBy\(desc\(videosTable\.scheduled_time\)\)\s*\.limit\(EVENT_PLAYLIST_MAX_ITEMS\)/s);
