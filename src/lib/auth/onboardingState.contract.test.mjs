@@ -21,6 +21,9 @@ const writeGuard = read("./writeGuard.ts");
 const videoDetailPage = read("../../../app/(public)/[id]/page.tsx");
 const libraryPage = read("../../../app/(auth)/dashboard/library/page.tsx");
 const interactionButton = read("../../components/video/InteractionButton.tsx");
+const videoInteractionActions = read(
+  "../../components/video/VideoInteractionActions.tsx",
+);
 
 test("OnboardingState は新仕様フィールドを持つ", () => {
   assert.match(onboarding, /XIdentityOnboardingStatus/);
@@ -176,15 +179,15 @@ test("いいね/セーブ は Auth user 単位で writeGuard を通し Active X 
 });
 
 test("作品詳細の canInteract はログインと規約同意を見る（Active X は不要）", () => {
-  assert.match(videoDetailPage, /viewerNeedsTermsAcceptance/);
-  assert.match(videoDetailPage, /!viewerNeedsTermsAcceptance/);
+  assert.match(videoDetailPage, /VideoInteractionActions/);
+  assert.match(videoInteractionActions, /const needsTermsAcceptance/);
   assert.match(
-    videoDetailPage,
-    /canInteract[\s\S]*viewerUser\?\.id[\s\S]*!viewerNeedsTermsAcceptance/,
+    videoInteractionActions,
+    /const canInteract =\s*!loading[\s\S]*overlay\.loggedIn[\s\S]*!needsTermsAcceptance/,
   );
   assert.doesNotMatch(
-    videoDetailPage,
-    /canInteract[\s\S]*viewerActiveX[\s\S]*viewerXApproved/,
+    videoInteractionActions,
+    /viewerActiveX|viewerXApproved/,
   );
 });
 

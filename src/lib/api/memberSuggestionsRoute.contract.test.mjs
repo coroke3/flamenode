@@ -18,7 +18,7 @@ test("short queries avoid R2 work and index reads have a timeout", () => {
   assert.match(routeSource, /MIN_SEARCH_CHARS\s*=\s*2/);
   assert.match(
     routeSource,
-    /compactSearchChars\(normalizedQueryForMinLength\)\.length\s*<\s*MIN_SEARCH_CHARS[\s\S]*?let bucket:/,
+    /const compactQueryLength\s*=\s*compactSearchChars\(\s*normalizedQueryForMinLength,?\s*\)[\s\S]*?if \(compactQueryLength\s*<\s*MIN_SEARCH_CHARS\)/,
   );
   assert.match(routeSource, /INDEX_LOAD_TIMEOUT_MS\s*=\s*2500/);
   assert.match(routeSource, /suggestions_index_timeout/);

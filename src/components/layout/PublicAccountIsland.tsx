@@ -12,6 +12,19 @@ import type { PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
 import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "./publicNavigation";
 
+const PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS = 1200;
+const PUBLIC_ACCOUNT_FALLBACK_DELAY_MS = 350;
+const PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS = 5_000;
+const PUBLIC_ACCOUNT_RETRY_EVENT = "flamenode:public-account-summary-retry";
+
+type IdleWindow = Window & {
+  requestIdleCallback?: (
+    callback: IdleRequestCallback,
+    options?: IdleRequestOptions,
+  ) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+
 function mapSummaryToHeaderUser(
   summary: Extract<AccountSummaryResponse, { loggedIn: true }>,
 ): PublicHeaderUser & { degraded?: true } {
@@ -30,24 +43,32 @@ function mapSummaryToHeaderUser(
   };
 }
 
+function requestPublicAccountRetry(): void {
+  window.dispatchEvent(new Event(PUBLIC_ACCOUNT_RETRY_EVENT));
+}
+
 export function usePublicAccountSummary(
   enabled: boolean,
   preserveLoggedInOnFailure = false,
   lazy = false,
   open = false,
+  deferUntilIdle = false,
 ): {
   user: PublicHeaderUser | null;
   loading: boolean;
   unavailable: boolean;
+  confirmedLoggedOut: boolean;
 } {
   const [user, setUser] = React.useState<PublicHeaderUser | null>(null);
   const [loading, setLoading] = React.useState(enabled && (!lazy || open));
   const [unavailable, setUnavailable] = React.useState(false);
+  const [confirmedLoggedOut, setConfirmedLoggedOut] = React.useState(false);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  const [idleReady, setIdleReady] = React.useState(!deferUntilIdle);
   const fetchedOnceRef = React.useRef(false);
-  // Public header (lazy=false) already fetches on mount. Menu open/close must
-  // not turn that one request into a request per interaction, including when
-  // the first attempt ended in a temporary 503/network failure.
+  // Public header (lazy=false) fetches once after the initial hydration/idle
+  // window. Menu open/close must not turn that one request into a request per
+  // interaction, including when the first attempt ended in a temporary failure.
   const nonLazyAttemptedRef = React.useRef(false);
   const refreshRequestedRef = React.useRef(!lazy);
   const mountedRef = React.useRef(false);
@@ -78,27 +99,62 @@ export function usePublicAccountSummary(
   }, []);
 
   React.useEffect(() => {
+    if (!enabled || lazy || !deferUntilIdle || idleReady) return;
+    if (open) {
+      setIdleReady(true);
+      return;
+    }
+
+    const idleWindow = window as IdleWindow;
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(
+        () => setIdleReady(true),
+        { timeout: PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS },
+      );
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+
+    const handle = window.setTimeout(
+      () => setIdleReady(true),
+      PUBLIC_ACCOUNT_FALLBACK_DELAY_MS,
+    );
+    return () => window.clearTimeout(handle);
+  }, [enabled, lazy, open, deferUntilIdle, idleReady]);
+
+  React.useEffect(() => {
     if (!enabled) return;
-    const onActiveXChanged = () => {
+    const requestRefresh = () => {
       refreshGenerationRef.current += 1;
       refreshRequestedRef.current = true;
+      setUnavailable(false);
       setRefreshNonce((current) => current + 1);
     };
-    window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
-    return () =>
-      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
+    window.addEventListener(ACTIVE_X_CHANGED_EVENT, requestRefresh);
+    window.addEventListener(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh);
+    return () => {
+      window.removeEventListener(ACTIVE_X_CHANGED_EVENT, requestRefresh);
+      window.removeEventListener(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh);
+    };
   }, [enabled]);
 
   React.useEffect(() => {
     if (!enabled) {
       setLoading(false);
       setUnavailable(false);
+      setConfirmedLoggedOut(false);
       return;
     }
 
-    // 管理画面などのSSR最小ヘッダーは、メニューを開くまでsummaryを読まない。
-    if (lazy && !open) {
+    // lazy headerは通常メニューを開くまでsummaryを読まない。ただし一時失敗後の
+    // 明示retry/Active X更新はrefreshRequestedRefで閉じた状態からでも1回だけ許可する。
+    if (lazy && !open && !refreshRequestedRef.current) {
       setLoading(false);
+      return;
+    }
+    // 公開ページは初期SSR/RSCとaccount summaryを競合させない。ユーザーが先に
+    // メニューを開いた場合だけidle待ちを飛ばして即時取得する。
+    if (deferUntilIdle && !idleReady && !open) {
+      setLoading(true);
       return;
     }
     if (!lazy && nonLazyAttemptedRef.current && !refreshRequestedRef.current) {
@@ -113,8 +169,6 @@ export function usePublicAccountSummary(
     const generation = refreshGenerationRef.current;
     const inFlight = inFlightRef.current;
     if (inFlight) {
-      // StrictMode の effect 再実行や同一取得中のイベントでは同じ Promise を再利用し、
-      // 新しい世代だけを完了後に一度だけ再取得する。
       if (inFlight.generation !== generation) {
         inFlight.pendingGeneration = generation;
       }
@@ -138,10 +192,16 @@ export function usePublicAccountSummary(
       promise: Promise.resolve({ kind: "unavailable" }),
     };
     request.promise = (async () => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => controller.abort(),
+        PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS,
+      );
       try {
         const response = await fetch("/api/account/summary", {
           credentials: "same-origin",
           cache: "no-store",
+          signal: controller.signal,
         });
         if (response.status === 503 || !response.ok) {
           return { kind: "unavailable" as const };
@@ -152,57 +212,72 @@ export function usePublicAccountSummary(
         };
       } catch {
         return { kind: "unavailable" as const };
+      } finally {
+        window.clearTimeout(timeoutId);
       }
     })();
     inFlightRef.current = request;
 
-    void request.promise.then((result) => {
-      if (!mountedRef.current || !enabledRef.current) return;
+    void request.promise
+      .then((result) => {
+        if (!mountedRef.current || !enabledRef.current) return;
+        if (request.generation !== refreshGenerationRef.current) return;
 
-      // ACTIVE_X_CHANGED_EVENT が取得中に発火した場合、古い summary は表示せず、
-      // 完了後に最新世代を一度だけ取り直す。
-      if (request.generation !== refreshGenerationRef.current) return;
-
-      if (result.kind === "summary") {
-        const summary = result.summary;
-        fetchedOnceRef.current = true;
-        if (summary.loggedIn) {
-          setUser(mapSummaryToHeaderUser(summary));
-          setUnavailable(false);
-        } else if (summary.unavailable) {
-          setUnavailable(true);
+        if (result.kind === "summary") {
+          const summary = result.summary;
+          fetchedOnceRef.current = true;
+          if (summary.loggedIn) {
+            setUser(mapSummaryToHeaderUser(summary));
+            setConfirmedLoggedOut(false);
+            setUnavailable(false);
+          } else if (summary.unavailable) {
+            setUnavailable(true);
+          } else {
+            // 503/通信失敗とは違い、200のloggedIn:falseはAuth/DBが正常に
+            // 「現在ログアウト済み」と確定した結果。SSRの古いログイン表示を維持しない。
+            setUser(null);
+            setConfirmedLoggedOut(true);
+            setUnavailable(false);
+          }
         } else {
+          setUnavailable(true);
           if (!preserveLoggedInOnFailureRef.current) setUser(null);
-          setUnavailable(false);
         }
-      } else {
+      })
+      .catch(() => {
+        if (!mountedRef.current || !enabledRef.current) return;
         setUnavailable(true);
         if (!preserveLoggedInOnFailureRef.current) setUser(null);
-      }
-    }).catch(() => {
-      if (!mountedRef.current || !enabledRef.current) return;
-      setUnavailable(true);
-      if (!preserveLoggedInOnFailureRef.current) setUser(null);
-    }).finally(() => {
-      if (inFlightRef.current !== request) return;
-      inFlightRef.current = null;
-      if (!lazyRef.current) nonLazyAttemptedRef.current = true;
-      if (!mountedRef.current || !enabledRef.current) return;
+      })
+      .finally(() => {
+        if (inFlightRef.current !== request) return;
+        inFlightRef.current = null;
+        if (!lazyRef.current) nonLazyAttemptedRef.current = true;
+        if (!mountedRef.current || !enabledRef.current) return;
 
-      const needsRefresh =
-        refreshRequestedRef.current &&
-        (request.pendingGeneration !== null ||
-          request.generation !== refreshGenerationRef.current);
-      const canFetchNow = !lazyRef.current || openRef.current;
-      if (needsRefresh && canFetchNow) {
-        setRefreshNonce((current) => current + 1);
-      } else {
-        setLoading(false);
-      }
-    });
-  }, [enabled, preserveLoggedInOnFailure, lazy, open, refreshNonce]);
+        const needsRefresh =
+          refreshRequestedRef.current &&
+          (request.pendingGeneration !== null ||
+            request.generation !== refreshGenerationRef.current);
+        const canFetchNow =
+          !lazyRef.current || openRef.current || refreshRequestedRef.current;
+        if (needsRefresh && canFetchNow) {
+          setRefreshNonce((current) => current + 1);
+        } else {
+          setLoading(false);
+        }
+      });
+  }, [
+    enabled,
+    preserveLoggedInOnFailure,
+    lazy,
+    open,
+    deferUntilIdle,
+    idleReady,
+    refreshNonce,
+  ]);
 
-  return { user, loading, unavailable };
+  return { user, loading, unavailable, confirmedLoggedOut };
 }
 
 type PublicAccountIslandProps = {
@@ -240,9 +315,14 @@ export function PublicAccountIsland({
 
     if (unavailable) {
       return (
-        <span className={styles.accountUnavailable} role="status">
-          ログイン状態を一時的に確認できません
-        </span>
+        <button
+          type="button"
+          className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.accountUnavailable}`}
+          onClick={requestPublicAccountRetry}
+          title="ログイン状態をもう一度確認します"
+        >
+          ログイン状態を再確認
+        </button>
       );
     }
 
@@ -253,6 +333,7 @@ export function PublicAccountIsland({
             href="/entry"
             className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.postBtn}`}
             data-variant="accent"
+            prefetch={false}
           >
             <Icon name="edit" size={13} aria-hidden />
             <span>投稿する</span>
@@ -273,6 +354,7 @@ export function PublicAccountIsland({
         href={entryHref}
         className={`fn-btn fn-header-submit ${styles.headerCta} ${styles.joinBtn}`}
         data-variant="accent"
+        prefetch={false}
       >
         <Icon name="edit" size={13} aria-hidden />
         <span>参加する</span>
@@ -292,12 +374,13 @@ export function PublicAccountIsland({
 
     if (unavailable) {
       return (
-        <span
+        <button
+          type="button"
           className={`${styles.mobileLink} ${styles.mobileAccountUnavailable}`}
-          role="status"
+          onClick={requestPublicAccountRetry}
         >
-          ログイン状態を一時的に確認できません
-        </span>
+          ログイン状態を再確認
+        </button>
       );
     }
 
@@ -307,6 +390,7 @@ export function PublicAccountIsland({
           href="/entry"
           className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
           onClick={onClosePanels}
+          prefetch={false}
         >
           <Icon name="edit" size={16} aria-hidden /> 投稿する
         </Link>
@@ -318,6 +402,7 @@ export function PublicAccountIsland({
         href={entryHref}
         className={`${styles.mobileLink} ${styles.mobileLinkAccent}`}
         onClick={onClosePanels}
+        prefetch={false}
       >
         <Icon name="edit" size={16} aria-hidden /> 参加する
       </Link>
@@ -338,6 +423,7 @@ export function PublicAccountIsland({
               }`}
               onClick={onClosePanels}
               aria-current={active ? "page" : undefined}
+              prefetch={false}
             >
               <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
             </Link>
@@ -361,6 +447,7 @@ export function PublicAccountIsland({
               }`}
               onClick={onClosePanels}
               aria-current={active ? "page" : undefined}
+              prefetch={false}
             >
               <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
             </Link>
@@ -414,6 +501,7 @@ export function PublicAccountIsland({
               }`}
               onClick={onClosePanels}
               aria-current={active ? "page" : undefined}
+              prefetch={false}
             >
               <Icon name={item.iconName} size={16} aria-hidden /> {item.label}
             </Link>
@@ -423,6 +511,7 @@ export function PublicAccountIsland({
           href="/dashboard"
           className={styles.mobileLink}
           onClick={onClosePanels}
+          prefetch={false}
         >
           <Icon name="grid" size={16} aria-hidden /> マイページ
         </Link>
@@ -430,6 +519,7 @@ export function PublicAccountIsland({
           href="/dashboard/library"
           className={styles.mobileLink}
           onClick={onClosePanels}
+          prefetch={false}
         >
           <Icon name="bookmark" size={16} aria-hidden /> ライブラリ
         </Link>
@@ -437,6 +527,7 @@ export function PublicAccountIsland({
           href="/dashboard/settings"
           className={styles.mobileLink}
           onClick={onClosePanels}
+          prefetch={false}
         >
           <Icon name="settings" size={16} aria-hidden /> 設定
         </Link>
@@ -451,6 +542,7 @@ export function PublicAccountIsland({
                 href="/manage"
                 className={styles.mobileLink}
                 onClick={onClosePanels}
+                prefetch={false}
               >
                 <Icon name="users" size={16} aria-hidden /> 運営
               </Link>
@@ -460,6 +552,7 @@ export function PublicAccountIsland({
                 href="/admin"
                 className={styles.mobileLink}
                 onClick={onClosePanels}
+                prefetch={false}
               >
                 <Icon name="settings" size={16} aria-hidden /> 管理
               </Link>

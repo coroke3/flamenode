@@ -12,9 +12,11 @@ type FailureCacheEntry = {
 };
 
 type ProxyStore = {
+  // Isolate-global cache is intentionally pure data only. Cloudflare Workers
+  // may reuse an isolate for unrelated requests, so request-scoped fetch
+  // Promises/streams must never be stored here.
   images: Map<string, ImageCacheEntry>;
   failures: Map<string, FailureCacheEntry>;
-  inFlight: Map<string, Promise<RefreshResult>>;
   totalBytes: number;
 };
 
@@ -48,7 +50,7 @@ const DEFAULT_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RETRY_AFTER_MS = 60 * 60 * 1_000;
 
 // The proxy is used by <img> tags, but the endpoint can also be opened
-// directly.  Do not reflect an upstream SVG (or an unlabelled body) as an
+// directly. Do not reflect an upstream SVG (or an unlabelled body) as an
 // image: an SVG can carry active content when it is navigated directly, and a
 // missing content type would otherwise make arbitrary bytes look like JPEG.
 const SAFE_EXTERNAL_IMAGE_CONTENT_TYPES = new Set([
@@ -72,7 +74,6 @@ function storeFor(namespace: string): ProxyStore {
   const created: ProxyStore = {
     images: new Map(),
     failures: new Map(),
-    inFlight: new Map(),
     totalBytes: 0,
   };
   stores.set(namespace, created);
@@ -143,7 +144,7 @@ function storeImage(
 
 function imageResponse(
   entry: ImageCacheEntry,
-  cacheState: "hit" | "miss" | "stale" | "coalesced",
+  cacheState: "hit" | "miss" | "stale",
 ): Response {
   const headers = new Headers({
     "cache-control":
@@ -153,7 +154,12 @@ function imageResponse(
     "x-fn-media-cache": cacheState,
   });
   if (entry.etag) headers.set("etag", entry.etag);
-  return new Response(entry.bytes.slice(), { headers });
+  // Cached bytes are immutable after insertion. Avoid an explicit full-buffer
+  // slice here; large image hits can otherwise allocate another multi-MiB
+  // Uint8Array before Response performs its own BodyInit handling. The reader
+  // below always creates an exact, zero-offset Uint8Array, so its ArrayBuffer
+  // is the equivalent no-copy BodyInit accepted by the repository's DOM types.
+  return new Response(entry.bytes.buffer as ArrayBuffer, { headers });
 }
 
 function fallbackResponse(
@@ -431,18 +437,13 @@ export async function proxyExternalImage(
   }
   if (failure) store.failures.delete(options.cacheKey);
 
-  const existing = store.inFlight.get(options.cacheKey);
-  const joined = Boolean(existing);
-  const pending =
-    existing ??
-    refreshImage(store, options, cached, now).finally(() => {
-      store.inFlight.delete(options.cacheKey);
-    });
-  if (!existing) store.inFlight.set(options.cacheKey, pending);
-
-  const result = await pending;
+  // Do not coalesce upstream fetch Promises across HTTP requests. Workers may
+  // reuse an isolate for unrelated requests, and awaiting I/O created by a
+  // different request can throw a cross-request I/O runtime error. The pure
+  // byte/negative caches above still avoid repeat fetches after completion.
+  const result = await refreshImage(store, options, cached, now);
   if (result.kind === "image") {
-    return imageResponse(result.entry, joined && result.state === "miss" ? "coalesced" : result.state);
+    return imageResponse(result.entry, result.state);
   }
   return fallbackResponse(options.fallbackSvg, result.status);
 }

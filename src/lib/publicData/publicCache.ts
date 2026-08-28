@@ -79,6 +79,13 @@ export function writePublicJsonCacheBestEffort(
   ttlSeconds: number,
 ): void {
   try {
+    // Cloudflare requires async work that outlives the response to be awaited
+    // or registered with waitUntil. Resolve the execution context before
+    // starting Cache API I/O so a missing/local shim never creates a floating
+    // cache.put Promise that can be dropped or leak across request lifetimes.
+    const waitUntil = resolveWaitUntil();
+    if (!waitUntil) return;
+
     const safeTtl = Math.max(1, Math.floor(ttlSeconds));
     const putPromise = (caches as unknown as { default: Cache }).default.put(
       publicJsonCacheKey(r2Key),
@@ -89,12 +96,7 @@ export function writePublicJsonCacheBestEffort(
         },
       }),
     );
-    const waitUntil = resolveWaitUntil();
-    if (waitUntil) {
-      waitUntil(putPromise.catch(() => undefined));
-      return;
-    }
-    void putPromise.catch(() => undefined);
+    waitUntil(putPromise.catch(() => undefined));
   } catch {
     // Cache API failure must not take down the page.
   }

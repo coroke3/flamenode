@@ -36,6 +36,15 @@ import {
   type PublicXIconMapPayload,
 } from "./publicIconProjection";
 import {
+  normalizePublicXIconV2Manifest,
+  normalizePublicXIconV2Shard,
+  PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+  PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES,
+  PUBLIC_X_ICON_V2_MAX_SHARD_BYTES,
+  publicXIconV2ShardForXId,
+  publicXIconV2ShardObjectKey,
+} from "./publicIconProjectionV2";
+import {
   normalizeStaticTopSlotStats,
   TOP_SLOT_STATS_OBJECT_KEY,
   type StaticTopSlotStats,
@@ -58,13 +67,34 @@ export type StaticJsonLoadResult<T> = {
   value: T;
 };
 
-async function readR2Json(key: string): Promise<unknown | null> {
+/**
+ * Shared public projectionの最終防衛線。個別artifactにより小さい上限がある場合は
+ * 呼び出し側でoverrideする。巨大/破損R2 objectを128MB Workers heapでJSON parseしない。
+ */
+const DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
+
+async function readR2Json(
+  key: string,
+  maxObjectBytes = DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES,
+): Promise<unknown | null> {
   try {
     const bucket = getEnv().BUCKET;
     if (!bucket) return null;
     recordPublicR2Get();
     const object = await bucket.get(key);
     if (!object) return null;
+    if (
+      !Number.isSafeInteger(maxObjectBytes) ||
+      maxObjectBytes <= 0 ||
+      (typeof object.size === "number" && object.size > maxObjectBytes)
+    ) {
+      try {
+        await object.body.cancel();
+      } catch {
+        // Oversized artifact is treated as unavailable regardless of cancel result.
+      }
+      return null;
+    }
     try {
       return await object.json();
     } catch {
@@ -84,6 +114,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   normalize: (value: unknown) => T | null;
   maxStaleAgeSec: number;
   cacheTtlSeconds?: number;
+  maxObjectBytes?: number;
   /** `r2_first` reads R2 first and permits bounded stale Cache fallback. */
   cacheMode?: StaticJsonCacheMode;
   nowSec?: number;
@@ -92,6 +123,8 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
 }): Promise<StaticJsonLoadResult<T | null>> {
   const now = args.nowSec ?? Math.floor(Date.now() / 1000);
   const cacheTtl = args.cacheTtlSeconds ?? 300;
+  const maxObjectBytes =
+    args.maxObjectBytes ?? DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES;
   const finish = <T>(status: StaticJsonLoadStatus, value: T | null) => {
     notePublicArtifactMode(status);
     return { status, value } satisfies StaticJsonLoadResult<T | null>;
@@ -111,7 +144,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
       const normalized = args.normalize(freshCached.payload);
       if (normalized !== null) {
         if (args.getGeneratedAt) {
-          const r2Payload = await readR2Json(args.key);
+          const r2Payload = await readR2Json(args.key, maxObjectBytes);
           if (r2Payload !== null) {
             const r2Normalized = args.normalize(r2Payload);
             if (r2Normalized !== null) {
@@ -135,7 +168,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
     }
   }
 
-  const payload = await readR2Json(args.key);
+  const payload = await readR2Json(args.key, maxObjectBytes);
   if (payload !== null) {
     const normalized = args.normalize(payload);
     if (normalized !== null) {
@@ -206,63 +239,141 @@ function buildRequiredXIdsCacheKey(
   return ids.join(",");
 }
 
+async function loadPublicXIconMapV1(
+  requiredXUserIds: readonly string[],
+): Promise<PublicXIconMapPayload | null> {
+  const result = await loadStaticJsonFreshStaleUnavailable({
+    key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
+    normalize: normalizePublicXIconMap,
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
+  });
+  const requiredIds = new Set(requiredXUserIds);
+  const primary = result.value;
+  const needsIndexFallback =
+    !primary ||
+    Array.from(requiredIds).some((xId) => {
+      const entry = primary.entries[xId];
+      if (!entry) return true;
+      return entry.source === "video";
+    });
+
+  if (!needsIndexFallback) return primary;
+
+  const indexResult = await loadStaticJsonFreshStaleUnavailable({
+    key: "users/index.json",
+    normalize: (value) =>
+      normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
+    maxStaleAgeSec: 24 * 60 * 60,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
+  });
+  if (!indexResult.value) return primary;
+
+  const entries = { ...(primary?.entries ?? {}) };
+  for (const user of indexResult.value.items) {
+    const xId = normalizeXId(user.x_id);
+    if (!xId) continue;
+    if (requiredIds.size > 0 && !requiredIds.has(xId)) continue;
+    const existing = entries[xId];
+    if (existing?.source === "registered" || existing?.source === "none") {
+      continue;
+    }
+    entries[xId] = {
+      icon_url: user.icon_url ?? existing?.icon_url ?? null,
+      source: user.icon_url ? "registered" : "none",
+    };
+  }
+
+  return {
+    schema_version: 1,
+    generated_at: primary?.generated_at ?? indexResult.value.generatedAt ?? 0,
+    entries,
+  };
+}
+
+// V2 manifest is the mutable commit point for generation visibility. Never revive
+// an older cached manifest after the writer publishes a fallback marker or removes
+// the manifest. React cache deduplicates this strict R2 read within one request;
+// generation-specific shard objects remain safe for cross-request caching below.
+const loadPublicXIconV2Manifest = cache(async () =>
+  loadStaticJsonFreshStaleUnavailable({
+    key: PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+    normalize: normalizePublicXIconV2Manifest,
+    maxStaleAgeSec: 0,
+    cacheTtlSeconds: 0,
+    maxObjectBytes: PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES,
+    cacheMode: "bypass",
+  }),
+);
+
+async function loadPublicXIconMapV2(
+  requiredXUserIds: readonly string[],
+): Promise<PublicXIconMapPayload | null> {
+  if (requiredXUserIds.length === 0) return null;
+  const manifestResult = await loadPublicXIconV2Manifest();
+  const manifest = manifestResult.value;
+  if (!manifest) return null;
+
+  const requiredShards = [
+    ...new Set(requiredXUserIds.map(publicXIconV2ShardForXId)),
+  ].filter((shard) => manifest.shards.includes(shard));
+  if (requiredShards.length === 0) {
+    return {
+      schema_version: 1,
+      generated_at: manifest.generated_at,
+      entries: {},
+    };
+  }
+
+  const results = await Promise.all(
+    requiredShards.map(async (shard) =>
+      loadStaticJsonFreshStaleUnavailable({
+        key: publicXIconV2ShardObjectKey(manifest.generation, shard),
+        normalize: (value) =>
+          normalizePublicXIconV2Shard(value, {
+            generation: manifest.generation,
+            shard,
+          }),
+        maxStaleAgeSec: 24 * 60 * 60,
+        cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
+        maxObjectBytes: PUBLIC_X_ICON_V2_MAX_SHARD_BYTES,
+      }),
+    ),
+  );
+  if (results.some((result) => !result.value)) return null;
+
+  const requiredIds = new Set(requiredXUserIds);
+  const entries: PublicXIconMapPayload["entries"] = {};
+  for (const result of results) {
+    for (const [xId, entry] of Object.entries(result.value?.entries ?? {})) {
+      if (requiredIds.has(xId)) entries[xId] = entry;
+    }
+  }
+  return {
+    schema_version: 1,
+    generated_at: manifest.generated_at,
+    entries,
+  };
+}
+
 /**
- * 公開アイコンは共有mapを正本とし、必要なIDが欠ける場合だけ
- * R2上の users/index.json で補完する。どちらも利用できない場合もD1へは降りない。
+ * 公開アイコンはV2の必要shardだけを優先する。V2 rollout中のmanifest/shard欠損は
+ * canonical V1へfail-safeし、request pathでD1へは降りない。
+ * V1でusers/index補完対象だった「欠損 / source=video」も同じ意味論を維持する。
  */
 const loadPublicXIconMapOptionalImpl = cache(
   async (requiredIdsKey: string): Promise<PublicXIconMapPayload | null> => {
     const requiredXUserIds =
       requiredIdsKey.length === 0 ? [] : requiredIdsKey.split(",");
-    const result = await loadStaticJsonFreshStaleUnavailable({
-      key: PUBLIC_X_ICON_MAP_OBJECT_KEY,
-      normalize: normalizePublicXIconMap,
-      maxStaleAgeSec: 24 * 60 * 60,
-      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.blocklistPool,
-    });
-    const requiredIds = new Set(requiredXUserIds);
-    const primary = result.value;
-    const needsIndexFallback =
-      !primary ||
-      Array.from(requiredIds).some((xId) => {
-        const entry = primary.entries[xId];
-        // registered / none は正本済み。欠損と video（未昇格）だけ index へ降りる。
-        if (!entry) return true;
-        return entry.source === "video";
+    const v2 = await loadPublicXIconMapV2(requiredXUserIds);
+    if (v2) {
+      const needsCanonicalFallback = requiredXUserIds.some((xId) => {
+        const entry = v2.entries[xId];
+        return !entry || entry.source === "video";
       });
-
-    if (!needsIndexFallback) return primary;
-
-    const indexResult = await loadStaticJsonFreshStaleUnavailable({
-      key: "users/index.json",
-      normalize: (value) =>
-        normalizeStaticUsersIndex(value as StaticUsersIndexPayload),
-      maxStaleAgeSec: 24 * 60 * 60,
-      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
-    });
-    if (!indexResult.value) return primary;
-
-    const entries = { ...(primary?.entries ?? {}) };
-    for (const user of indexResult.value.items) {
-      const xId = normalizeXId(user.x_id);
-      if (!xId) continue;
-      if (requiredIds.size > 0 && !requiredIds.has(xId)) continue;
-      const existing = entries[xId];
-      if (existing?.source === "registered" || existing?.source === "none") {
-        continue;
-      }
-      entries[xId] = {
-        icon_url: user.icon_url ?? existing?.icon_url ?? null,
-        source: user.icon_url ? "registered" : "none",
-      };
+      if (!needsCanonicalFallback) return v2;
     }
-
-    return {
-      schema_version: 1,
-      generated_at:
-        primary?.generated_at ?? indexResult.value.generatedAt ?? 0,
-      entries,
-    };
+    return loadPublicXIconMapV1(requiredXUserIds);
   },
 );
 

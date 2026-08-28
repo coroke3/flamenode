@@ -37,7 +37,10 @@ test("外部API処理は固定予算・timeout・provider cooldownを持つ", ()
   assert.match(discord, /MAX_DISCORD_DM_KV_WRITES_PER_RUN = 2/);
   assert.match(discord, /DISCORD_GLOBAL_COOLDOWN_KEY/);
   assert.match(discord, /next_attempt_at/);
-  assert.match(imageProxy, /inFlight/);
+  // Cross-request Promise coalescing is unsafe on Workers; only completed
+  // bytes/negative results may be retained by the isolate-global cache.
+  assert.doesNotMatch(imageProxy, /inFlight/);
+  assert.match(imageProxy, /Do not coalesce upstream fetch Promises/);
   assert.match(imageProxy, /if-none-match/);
   assert.match(imageProxy, /maxObjectBytes/);
 });

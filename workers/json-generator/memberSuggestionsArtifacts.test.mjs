@@ -6,6 +6,7 @@ import {
   memberSuggestionsIndexObjectKey,
   parseMemberSuggestionsManifest,
 } from "../../src/lib/video/memberSuggestionsCore.ts";
+import { MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY } from "../../src/lib/video/memberSuggestionsPostingsV2.ts";
 import { staticArtifactContentHash } from "./r2Dedup.ts";
 import { rebuildMemberSuggestions } from "./memberSuggestionsArtifacts.ts";
 
@@ -138,7 +139,10 @@ test("worker rebuildがmanifest-lastでartifactを公開する", async () => {
   assert.ok(parseMemberSuggestionsManifest(manifest));
 
   // manifestは必ず最後に書かれる。
-  assert.equal(env.r2.puts.at(-1)?.key, MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
+  assert.equal(env.r2.puts.at(-1)?.key, MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+  assert.ok(
+    env.r2.puts.findIndex((p) => p.key === MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY) >= 0,
+  );
   // generation objectはmanifestより先に書かれている。
   assert.ok(env.r2.puts.findIndex((p) => p.key === manifest.object_key) >= 0);
 
@@ -198,15 +202,27 @@ test("同一内容の再buildはR2 PUT dedupで省略される", async () => {
 
   await rebuildMemberSuggestions({ DB: dedupDb, R2: dedupR2 });
   // 同一内容ならPUTは一切発生しない（head確認のみ）。
-  assert.equal(dedupR2.puts.length, 0);
+  // V1のgeneration-specific index/manifestはdedupされる。一方、V2は
+  // canonical V1の成功後にbounded postingsを再公開するため、V2 PUTは残る。
+  assert.doesNotMatch(
+    dedupR2.puts.map(({ key }) => key).join("\n"),
+    new RegExp(`^${idxKey}$`, "m"),
+  );
+  assert.doesNotMatch(
+    dedupR2.puts.map(({ key }) => key).join("\n"),
+    new RegExp(`^${MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY}$`, "m"),
+  );
+  assert.ok(dedupR2.puts.length > 0);
 });
 
 test("static_artifacts tracking failure removes newly written suggestions artifacts", async () => {
   const env = createEnv({ ...BASIC_SOURCE, failTrackingAt: 2 });
   await assert.rejects(() => rebuildMemberSuggestions(env), /tracking_failed/);
-  assert.equal(env.r2.objects.size, 0);
+  // V1 generation-specific index is intentionally preserved for a retry or
+  // an existing manifest that may already reference it.
+  assert.equal(env.r2.objects.size, 1);
   assert.equal(env.r2.deletes.length, 1);
-  assert.equal(env.r2.deletes[0].length, 2);
+  assert.deepEqual(env.r2.deletes[0], [MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY]);
 });
 
 test("manifest tracking failure restores the previous manifest", async () => {

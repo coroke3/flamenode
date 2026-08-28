@@ -5,7 +5,7 @@ import styles from "./page.module.css";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Logo } from "@/components/ui/Logo";
 import { buildPageMetadata } from "@/lib/seo";
-import { loadStaticTopPage } from "@/lib/publicData/loader";
+import { AboutStats } from "./AboutStats";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/about",
@@ -14,18 +14,7 @@ export const metadata: Metadata = buildPageMetadata({
     "FlameNode は、個人制作映像のアーカイブとイベント参加・投稿・運営の記録をつなぐサイトです。",
 });
 
-type AboutStats = {
-  publicVideos: number;
-  creators: number;
-  events: number;
-};
-
-const HERO_POINTS = [
-  "作品",
-  "作者名義",
-  "イベント",
-  "投稿枠",
-] as const;
+const HERO_POINTS = ["作品", "作者名義", "イベント", "投稿枠"] as const;
 
 const FLOW_STEPS: Array<{
   label: string;
@@ -116,42 +105,7 @@ const ENTRY_POINTS: Array<{
   },
 ];
 
-function formatCount(value: number): string {
-  return value.toLocaleString("ja-JP");
-}
-
-export default async function AboutPage(): Promise<React.ReactElement> {
-  const staticTop = await loadStaticTopPage();
-  const stats: AboutStats | null = staticTop.top
-    ? {
-        publicVideos: staticTop.top.stats.publicVideos,
-        creators: staticTop.top.stats.creators,
-        events: staticTop.top.stats.publicEvents ?? staticTop.top.stats.activeEvents,
-      }
-    : null;
-  const statItems = stats
-    ? [
-        {
-          label: "公開作品",
-          value: formatCount(stats.publicVideos),
-          unit: "件",
-          note: "動画ページ・作品棚・イベントから閲覧できます。",
-        },
-        {
-          label: "クリエイター名義",
-          value: formatCount(stats.creators),
-          unit: "件",
-          note: "X ID を公開名義として作品と紐づけます。",
-        },
-        {
-          label: "イベント",
-          value: formatCount(stats.events),
-          unit: "件",
-          note: "募集・公開・アーカイブの記録を扱います。",
-        },
-      ]
-    : [];
-
+export default function AboutPage(): React.ReactElement {
   return (
     <div className={styles.page}>
       <section className={styles.hero}>
@@ -172,11 +126,19 @@ export default async function AboutPage(): Promise<React.ReactElement> {
               ))}
             </div>
             <div className={styles.actions}>
-              <Link href="/list" className="fn-btn fn-btn-primary fn-btn-lg">
+              <Link
+                href="/list"
+                className="fn-btn fn-btn-primary fn-btn-lg"
+                prefetch={false}
+              >
                 <Icon name="play" size={15} aria-hidden />
                 作品を見る
               </Link>
-              <Link href="/event" className="fn-btn fn-btn-ghost fn-btn-lg">
+              <Link
+                href="/event"
+                className="fn-btn fn-btn-ghost fn-btn-lg"
+                prefetch={false}
+              >
                 <Icon name="calendar" size={15} aria-hidden />
                 イベントを見る
               </Link>
@@ -200,22 +162,7 @@ export default async function AboutPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
-      {statItems.length > 0 ? (
-        <section className={`fn-public-container ${styles.statsBand}`} aria-label="FlameNode の現在">
-          <dl className={styles.statsGrid}>
-            {statItems.map((item) => (
-              <div key={item.label} className={styles.statItem}>
-                <dt>{item.label}</dt>
-                <dd>
-                  <strong>{item.value}</strong>
-                  <span>{item.unit}</span>
-                </dd>
-                <p>{item.note}</p>
-              </div>
-            ))}
-          </dl>
-        </section>
-      ) : null}
+      <AboutStats />
 
       <section className={`fn-public-container fn-page-section ${styles.pathways}`}>
         <header className={styles.sectionHead}>
@@ -322,7 +269,12 @@ export default async function AboutPage(): Promise<React.ReactElement> {
         </header>
         <div className={styles.linkList}>
           {ENTRY_POINTS.map((item) => (
-            <Link key={item.href} href={item.href} className={styles.linkItem}>
+            <Link
+              key={item.href}
+              href={item.href}
+              className={styles.linkItem}
+              prefetch={false}
+            >
               <span className={styles.itemIcon}>
                 <Icon name={item.icon} size={18} aria-hidden />
               </span>
@@ -333,7 +285,7 @@ export default async function AboutPage(): Promise<React.ReactElement> {
               <Icon name="chevron-right" size={16} aria-hidden />
             </Link>
           ))}
-          </div>
+        </div>
       </section>
     </div>
   );

@@ -23,6 +23,10 @@ const targets = await Promise.all([
   ),
   readFile(new URL("../video/internalId.ts", import.meta.url), "utf8"),
 ]);
+const viewerOverlay = await readFile(
+  new URL("../video/videoViewerOverlay.ts", import.meta.url),
+  "utf8",
+);
 
 test("動画 ID 参照は OR 結合を使わず二段 lookup へ集約する", () => {
   for (const source of targets) {
@@ -44,7 +48,9 @@ test("公開経路は videoIdLookup を参照する", () => {
   assert.match(targets[1], /fetchVideoRowByIdOrYoutube/);
   assert.match(targets[2], /resolveVideoPrimaryKey/);
   assert.match(targets[3], /fetchVideoRowByIdOrYoutube/);
-  assert.match(targets[4], /fetchVideoRowByIdOrYoutube/);
+  assert.match(targets[4], /loadStaticVideoDetail/);
+  assert.doesNotMatch(targets[4], /withDatabase|fetchVideoRowByIdOrYoutube/);
+  assert.match(viewerOverlay, /fetchVideoRowByIdOrYoutube/);
   assert.match(targets[5], /fetchVideoRowForRebuild/);
   assert.match(targets[5], /isConfirmedInternalVideoId/);
   assert.match(targets[6], /isConfirmedInternalVideoId/);

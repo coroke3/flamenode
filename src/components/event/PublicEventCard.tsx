@@ -67,7 +67,12 @@ export function PublicEventCard({
   } as React.CSSProperties;
 
   return (
-    <Link href={`/event/${event.id}`} className="fn-evcard" data-kind={status}>
+    <Link
+      href={`/event/${event.id}`}
+      className="fn-evcard"
+      data-kind={status}
+      prefetch={false}
+    >
       <div className="fn-evcard-poster" style={posterStyle}>
         <div className="fn-evcard-poster-grid" aria-hidden />
       </div>

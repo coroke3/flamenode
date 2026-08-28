@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { toggleVideoInteraction } from "@/lib/actions/video";
+import { notifyVideoViewerOverlayChanged } from "@/lib/video/videoViewerOverlayClient";
 import { cn } from "@/lib/utils/cn";
 
 interface InteractionButtonProps {
@@ -18,22 +18,22 @@ interface InteractionButtonProps {
    * 未ログイン / 規約未同意のときは false。
    */
   canInteract?: boolean;
-  /**
-   * 押せない理由文。`canInteract = false` のときボタン下に出る (未指定なら出さない)。
-   */
   disabledReason?: string;
-  /**
-   * 押せないときの CTA リンク先。未ログインなら `/entry?next=...`、規約未同意なら
-   * `/rules?next=...`、Active X 未選択なら `/onboarding?next=...` 等を渡す想定。
-   */
   actionHref?: string;
-  /** CTA リンクのラベル (省略時は actionHref から自動推定)。 */
   actionLabel?: string;
   className?: string;
 }
 
-const LABELS: Record<InteractionButtonProps["kind"], { on: string; off: string; icon: IconName; iconOn: IconName }> = {
-  like: { on: "いいね済", off: "いいね", icon: "heart", iconOn: "heart-filled" },
+const LABELS: Record<
+  InteractionButtonProps["kind"],
+  { on: string; off: string; icon: IconName; iconOn: IconName }
+> = {
+  like: {
+    on: "いいね済",
+    off: "いいね",
+    icon: "heart",
+    iconOn: "heart-filled",
+  },
   bookmark: {
     on: "セーブ済",
     off: "セーブ",
@@ -53,7 +53,8 @@ function inferActionLabel(href: string | undefined): string {
 
 /**
  * いいね・ブックマークのトグルボタン。
- * `canInteract = false` のときはボタンを disabled にし、必要に応じて CTA リンクを出す。
+ * 成功後に全体のRSC再取得を行わず、server action結果でローカル状態を更新する。
+ * viewer overlayは狭いAPIだけを共有再取得し、library playlist等も同期する。
  */
 export function InteractionButton({
   videoId,
@@ -66,30 +67,81 @@ export function InteractionButton({
   actionLabel,
   className,
 }: InteractionButtonProps): React.ReactElement {
-  const router = useRouter();
   const [active, setActive] = React.useState(initialActive);
+  const [displayCount, setDisplayCount] = React.useState(count);
   const [busy, startTransition] = React.useTransition();
   const [error, setError] = React.useState<string | null>(null);
+  const actionInFlightRef = React.useRef(false);
+
+  React.useEffect(() => {
+    setActive(initialActive);
+  }, [initialActive]);
+  React.useEffect(() => {
+    setDisplayCount(count);
+  }, [count]);
 
   const meta = LABELS[kind];
 
   const onClick = () => {
-    if (busy) return;
-    if (!canInteract) return;
+    // transitionのbusy反映前にdouble clickされてもserver actionを二重送信しない。
+    if (actionInFlightRef.current || busy || !canInteract) return;
+    actionInFlightRef.current = true;
     setError(null);
     const fd = new FormData();
     fd.set("video_id", videoId);
     fd.set("kind", kind);
-    const previous = active;
-    setActive((a) => !a);
+
+    const previousActive = active;
+    const previousCount = displayCount;
+    const optimisticActive = !previousActive;
+    setActive(optimisticActive);
+    if (kind === "like" && typeof previousCount === "number") {
+      setDisplayCount(
+        Math.max(0, previousCount + (optimisticActive ? 1 : -1)),
+      );
+    }
+
     startTransition(async () => {
-      const r = await toggleVideoInteraction(fd);
-      if (!r.ok) {
-        setActive(previous);
-        setError(r.message ?? "操作に失敗しました。");
-      } else {
-        if (typeof r.active === "boolean") setActive(r.active);
-        router.refresh();
+      try {
+        const result = await toggleVideoInteraction(fd);
+        if (!result.ok) {
+          setActive(previousActive);
+          setDisplayCount(previousCount);
+          setError(result.message ?? "操作に失敗しました。");
+          return;
+        }
+
+        if (typeof result.active === "boolean") {
+          setActive(result.active);
+          if (
+            kind === "like" &&
+            typeof previousCount === "number" &&
+            result.active !== optimisticActive
+          ) {
+            // server確定状態と操作前状態の差分だけを件数へ反映する。
+            // 例: 操作前ON→楽観OFF→server ONなら元件数へ戻す（+1しない）。
+            setDisplayCount(
+              Math.max(
+                0,
+                previousCount +
+                  (result.active ? 1 : 0) -
+                  (previousActive ? 1 : 0),
+              ),
+            );
+          }
+        }
+
+        notifyVideoViewerOverlayChanged(videoId);
+      } catch (writeError) {
+        setActive(previousActive);
+        setDisplayCount(previousCount);
+        setError("操作に失敗しました。通信状態を確認してもう一度お試しください。");
+        console.warn("[video-interaction] client write failed", {
+          kind,
+          error: writeError instanceof Error ? writeError.name : "unknown",
+        });
+      } finally {
+        actionInFlightRef.current = false;
       }
     });
   };
@@ -114,8 +166,8 @@ export function InteractionButton({
       >
         <Icon name={active ? meta.iconOn : meta.icon} size={13} aria-hidden />
         {active ? meta.on : meta.off}
-        {typeof count === "number" ? (
-          <span style={{ marginLeft: 4, opacity: 0.7 }}>{count}</span>
+        {typeof displayCount === "number" ? (
+          <span style={{ marginLeft: 4, opacity: 0.7 }}>{displayCount}</span>
         ) : null}
       </button>
       {!canInteract && (disabledReason || actionHref) ? (
@@ -138,6 +190,7 @@ export function InteractionButton({
                 fontWeight: 600,
                 textDecoration: "underline",
               }}
+              prefetch={false}
             >
               {label}
             </Link>
@@ -147,10 +200,7 @@ export function InteractionButton({
       {error ? (
         <span
           role="alert"
-          style={{
-            fontSize: 11,
-            color: "var(--accent-danger)",
-          }}
+          style={{ fontSize: 11, color: "var(--accent-danger)" }}
         >
           {error}
         </span>

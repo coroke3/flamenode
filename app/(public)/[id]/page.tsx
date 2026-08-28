@@ -1,40 +1,17 @@
 import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { notFound, unstable_rethrow } from "next/navigation";
-import { and, desc, eq } from "drizzle-orm";
+import { notFound } from "next/navigation";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
-import {
-  CurrentUserUnavailableError,
-  getCurrentUser,
-} from "@/lib/auth/currentUser";
-import {
-  canEditVideo,
-  getApprovedXIds,
-  resolveAdminOrEventVideoPrivilegeMode,
-} from "@/lib/auth/ownership";
-import { withDatabase } from "@/lib/cloudflare";
-import {
-  videoInteractionsAuth,
-  videos as videosTable,
-  xUsers,
-} from "@/lib/db/schema";
-import {
-  fetchAuthorizedPrivateVideoChapters,
-  fetchEventPlaylistVideos,
-  type AuthorizedPrivateVideoChapter,
-} from "@/lib/db/videoDetailQueries";
-import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
-import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
 import { VideoViewTracker } from "@/components/video/VideoViewTracker";
 import { FixedVideoPlayerFrame } from "@/components/video/FixedVideoPlayerFrame";
 import fixedPlayerStyles from "@/components/video/FixedVideoPlayerFrame.module.css";
 import { IntroCommentBlock } from "@/components/video/IntroCommentBlock";
-import { VideoUtilityDock } from "@/components/video/VideoUtilityDock";
-import { InteractionButton } from "@/components/video/InteractionButton";
+import { VideoInteractionActions } from "@/components/video/VideoInteractionActions";
+import { VideoViewerUtilityDock } from "@/components/video/VideoViewerUtilityDock";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { MemberSection } from "@/components/video/MemberSection";
 import { Icon } from "@/components/ui/Icon";
@@ -73,7 +50,7 @@ import {
 } from "@/lib/publicData/staticSharedInputsLoader";
 import { RELATED_MIN_LIMIT } from "@/lib/publicData/relatedVideoProjection";
 import type { StaticRelatedVideo } from "@/lib/publicData/staticVideoDetailCore";
-import { mergeVideoChapterOverlay } from "@/lib/publicData/privateVideoChapterOverlay";
+import type { VideoChapterOverlayEntry } from "@/lib/publicData/privateVideoChapterOverlay";
 import {
   hasProjectedPublicProfile,
   publicXIconEntriesToMap,
@@ -81,8 +58,6 @@ import {
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
 import { loadPublicEventYoutubePlaylistIdR2Only } from "@/lib/publicData/r2EventPlaylist";
-import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
-import { isLiveApiEnabled } from "@/lib/operationMode/policy";
 
 export const dynamic = "force-dynamic";
 
@@ -95,30 +70,30 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const staticLoaded = await loadStaticVideoDetail(id);
   if (staticLoaded.data) {
-      const { video } = staticLoaded.data;
-      const youtubeVideoId = video.youtube_video_id?.trim() || null;
-      const videoPath = `/${youtubeVideoId ?? video.id}`;
-      const description = compactText(
-        video.intro_comment ||
-          video.highlights ||
-          [
-            video.music ? `使用楽曲: ${video.music}` : null,
-            video.credit ? `クレジット: ${video.credit}` : null,
-          ]
-            .filter(Boolean)
-            .join(" / "),
-      );
-      const metadataYoutubeId = extractYoutubeId(youtubeVideoId);
-      return buildPageMetadata({
-        title: `${video.title} - ${video.creator_display_name ?? "unknown"}`,
-        description,
-        path: videoPath,
-        image: metadataYoutubeId
-          ? youtubeThumbUrl(metadataYoutubeId, "maxresdefault")
-          : video.creator_icon_url,
-        noIndex: video.visibility_status !== "public",
-        ogType: "video.other",
-      });
+    const { video } = staticLoaded.data;
+    const youtubeVideoId = video.youtube_video_id?.trim() || null;
+    const videoPath = `/${youtubeVideoId ?? video.id}`;
+    const description = compactText(
+      video.intro_comment ||
+        video.highlights ||
+        [
+          video.music ? `使用楽曲: ${video.music}` : null,
+          video.credit ? `クレジット: ${video.credit}` : null,
+        ]
+          .filter(Boolean)
+          .join(" / "),
+    );
+    const metadataYoutubeId = extractYoutubeId(youtubeVideoId);
+    return buildPageMetadata({
+      title: `${video.title} - ${video.creator_display_name ?? "unknown"}`,
+      description,
+      path: videoPath,
+      image: metadataYoutubeId
+        ? youtubeThumbUrl(metadataYoutubeId, "maxresdefault")
+        : video.creator_icon_url,
+      noIndex: video.visibility_status !== "public",
+      ogType: "video.other",
+    });
   }
   return { title: id };
 }
@@ -144,14 +119,7 @@ export default async function VideoDetailPage({
       primaryEventForPlaylist
         ? await loadPublicEventYoutubePlaylistIdR2Only(primaryEventForPlaylist.id)
         : null;
-    const overlay = await fetchVideoViewerOverlay({
-      rawId,
-      videoId: detail.video.id,
-      playlist,
-      playlistEventTitle:
-        detail.publicEvents.find((event) => event.id === playlist)
-          ?.title ?? null,
-    });
+
     const relatedIconCandidates = [
       ...detail.relatedVideos,
       ...detail.relatedReserve,
@@ -214,7 +182,6 @@ export default async function VideoDetailPage({
     const extraFallbackIconXIds = fallbackIconXIds.filter(
       (xId) => !staticIconIdSet.has(xId),
     );
-    // 先読み結果を使い、fallback で新規 X ID が増えたときだけ再読込する。
     let iconMapPayload = iconMapPromise ? await iconMapPromise : null;
     if (extraFallbackIconXIds.length > 0) {
       iconMapPayload = await loadPublicXIconMapOptional([
@@ -232,7 +199,6 @@ export default async function VideoDetailPage({
         detail={detail}
         rawId={rawId}
         playlist={playlist}
-        overlay={overlay}
         youtubePlaylistId={youtubePlaylistId}
         relatedSharedStatus={relatedSharedStatus}
         relatedBlockedIds={blocklist.value.blockedIds}
@@ -278,251 +244,11 @@ async function filterBlockedVideoEvents(
   return filterPublicVideoDetailEvents(detail, blockedEventIds);
 }
 
-type VideoViewerOverlay = {
-  viewerUser: Awaited<ReturnType<typeof getCurrentUser>>;
-  authUnavailable: boolean;
-  likeActive: boolean;
-  bookmarkActive: boolean;
-  viewerXApproved: boolean;
-  viewerCanEditChapters: boolean;
-  privateChapters: AuthorizedPrivateVideoChapter[];
-  playlistLabel: string;
-  playlistItems: {
-    id: string;
-    title: string;
-    youtube_video_id: string | null;
-    display_name: string;
-  }[];
-};
-
-async function fetchVideoViewerOverlay({
-  rawId,
-  videoId,
-  playlist,
-  playlistEventTitle,
-}: {
-  rawId: string;
-  videoId: string;
-  playlist: string;
-  playlistEventTitle?: string | null;
-}): Promise<VideoViewerOverlay> {
-  const emptyOverlay: VideoViewerOverlay = {
-    viewerUser: null,
-    authUnavailable: false,
-    likeActive: false,
-    bookmarkActive: false,
-    viewerXApproved: false,
-    viewerCanEditChapters: false,
-    privateChapters: [],
-    playlistLabel: "再生リスト",
-    playlistItems: [],
-  };
-
-  // Resolve this before Auth.js as well as before withDatabase.  A
-  // static_only/maintenance request must not spend an auth adapter or D1 read
-  // merely because a signed-in cookie or an event playlist query is present.
-  const operationMode = await resolvePublicOperationMode({ allowD1: false });
-  if (!isLiveApiEnabled(operationMode)) {
-    return { ...emptyOverlay };
-  }
-
-  let viewerUser: Awaited<ReturnType<typeof getCurrentUser>> = null;
-  let authUnavailable = false;
-  try {
-    viewerUser = await getCurrentUser();
-  } catch (error) {
-    unstable_rethrow(error);
-    if (error instanceof CurrentUserUnavailableError) {
-      authUnavailable = true;
-    } else {
-      throw error;
-    }
-  }
-
-  const authenticatedViewer = viewerUser;
-  const viewerActiveX = authenticatedViewer?.active_x_user_id ?? null;
-  const eventPlaylistRequested =
-    Boolean(playlist) && playlist !== "lib-like" && playlist !== "lib-bookmark";
-  const needsDatabaseOverlay = Boolean(
-    authenticatedViewer || eventPlaylistRequested,
-  );
-
-  if (!needsDatabaseOverlay) {
-    return { ...emptyOverlay, viewerUser, authUnavailable };
-  }
-
-  try {
-    const overlay = await withDatabase(async (db) => {
-      let viewerCanEditChapters = false;
-      let approvedXIds: string[] = [];
-      let privateChapters: AuthorizedPrivateVideoChapter[] = [];
-      if (authenticatedViewer) {
-        if (authenticatedViewer.role !== "admin") {
-          approvedXIds = await getApprovedXIds(db, authenticatedViewer.id);
-        }
-        const probe = await fetchVideoRowByIdOrYoutube(db, rawId);
-        if (probe) {
-          viewerCanEditChapters = await canEditVideo({
-            db,
-            user: {
-              id: authenticatedViewer.id,
-              role: authenticatedViewer.role ?? null,
-            },
-            video: probe,
-            requiredKey: "video.chapter_admin",
-            privilegeMode: resolveAdminOrEventVideoPrivilegeMode(
-              authenticatedViewer.role,
-            ),
-            approvedXUserIds: approvedXIds,
-          });
-        }
-
-        if (viewerCanEditChapters || approvedXIds.length > 0) {
-          privateChapters = await fetchAuthorizedPrivateVideoChapters(
-            db,
-            videoId,
-            {
-              id: authenticatedViewer.id,
-              role: authenticatedViewer.role ?? null,
-              approvedXIds,
-              canEditChapters: viewerCanEditChapters,
-            },
-          );
-        }
-      }
-
-      let likeActive = false;
-      let bookmarkActive = false;
-      let viewerXApproved = false;
-      if (authenticatedViewer?.id) {
-        const interactions = await db
-          .select()
-          .from(videoInteractionsAuth)
-          .where(
-            and(
-              eq(videoInteractionsAuth.auth_user_id, authenticatedViewer.id),
-              eq(videoInteractionsAuth.video_id, videoId),
-            )!,
-          );
-        likeActive = interactions.some((i) => i.interaction_type === "like");
-        bookmarkActive = interactions.some(
-          (i) => i.interaction_type === "bookmark",
-        );
-      }
-      if (viewerActiveX) {
-        // Keep the existing comment-posting semantics (global approval),
-        // while private chapter visibility below remains linked+approved-only.
-        const xRow = (
-          await db
-            .select({ approval_status: xUsers.approval_status })
-            .from(xUsers)
-            .where(eq(xUsers.id, viewerActiveX))
-            .limit(1)
-        )[0];
-        viewerXApproved = xRow?.approval_status === "approved";
-      }
-
-      let playlistLabel = "再生リスト";
-      let playlistItems: VideoViewerOverlay["playlistItems"] = [];
-
-      if (playlist) {
-        if (playlist === "lib-like" || playlist === "lib-bookmark") {
-          if (authenticatedViewer?.id) {
-            const kind = playlist === "lib-like" ? "like" : "bookmark";
-            // interaction IDを無制限のINへ展開せず、relationから直接JOINする。
-            // これによりライブラリ件数に関係なくD1の100 bind上限内に収まる。
-            const rows = await db
-              .select({
-                id: videosTable.id,
-                title: videosTable.title,
-                youtube_video_id: videosTable.youtube_video_id,
-                display_name: videosTable.creator_display_name,
-              })
-              .from(videoInteractionsAuth)
-              .innerJoin(
-                videosTable,
-                eq(videosTable.id, videoInteractionsAuth.video_id),
-              )
-              .where(
-                and(
-                  eq(
-                    videoInteractionsAuth.auth_user_id,
-                    authenticatedViewer.id,
-                  ),
-                  eq(videoInteractionsAuth.interaction_type, kind),
-                  eq(videosTable.visibility_status, "public"),
-                )!,
-              )
-              .orderBy(desc(videosTable.scheduled_time));
-            if (rows.length > 0) {
-              playlistLabel =
-                kind === "like" ? "いいねした作品" : "セーブした作品";
-              playlistItems = rows.map((v) => ({
-                id: v.id,
-                title: v.title,
-                youtube_video_id: v.youtube_video_id,
-                display_name: v.display_name,
-              }));
-            }
-          }
-        } else {
-          const evVideos = await fetchEventPlaylistVideos(db, playlist);
-          if (evVideos.length > 1) {
-            playlistLabel = `${playlistEventTitle ?? "イベント"} 上映順`;
-            playlistItems = evVideos.map((v) => ({
-              id: v.id,
-              title: v.title,
-              youtube_video_id: v.youtube_video_id,
-              display_name: v.display_name,
-            }));
-          }
-        }
-      }
-
-      return {
-        likeActive,
-        bookmarkActive,
-        viewerXApproved,
-        viewerCanEditChapters,
-        privateChapters,
-        playlistLabel,
-        playlistItems,
-      };
-    });
-
-    if (!overlay) {
-      return { ...emptyOverlay, viewerUser, authUnavailable };
-    }
-
-    return {
-      viewerUser,
-      authUnavailable,
-      likeActive: overlay.likeActive,
-      bookmarkActive: overlay.bookmarkActive,
-      viewerXApproved: overlay.viewerXApproved,
-      viewerCanEditChapters: overlay.viewerCanEditChapters,
-      privateChapters: overlay.privateChapters,
-      playlistLabel: overlay.playlistLabel,
-      playlistItems: overlay.playlistItems,
-    };
-  } catch (error) {
-    unstable_rethrow(error);
-    // 認証済み利用者のoverlay DB障害を「未ログイン」や「未承認X ID」へ変換しない。
-    // 匿名のイベント再生リスト取得失敗は認証障害ではないため従来表示を維持する。
-    return {
-      ...emptyOverlay,
-      viewerUser,
-      authUnavailable: authUnavailable || Boolean(authenticatedViewer),
-    };
-  }
-}
-
 function StaticVideoDetailView({
   detail,
   rawId,
   youtubePlaylistId = null,
   playlist = "",
-  overlay,
   relatedSharedStatus = "unavailable",
   relatedBlockedIds,
   relatedFallbackPool,
@@ -532,7 +258,6 @@ function StaticVideoDetailView({
   rawId: string;
   youtubePlaylistId?: string | null;
   playlist?: string;
-  overlay?: VideoViewerOverlay | null;
   relatedSharedStatus?: "fresh" | "stale" | "unavailable";
   relatedBlockedIds?: ReadonlySet<string>;
   relatedFallbackPool?: readonly StaticRelatedVideo[];
@@ -548,19 +273,11 @@ function StaticVideoDetailView({
   if (video.visibility_status !== "public") {
     notFound();
   }
-  const viewerUser = overlay?.viewerUser ?? null;
-  const authUnavailable = overlay?.authUnavailable ?? false;
-  const viewerActiveX = viewerUser?.active_x_user_id ?? null;
-  const likeActive = overlay?.likeActive ?? false;
-  const bookmarkActive = overlay?.bookmarkActive ?? false;
-  const viewerXApproved = overlay?.viewerXApproved ?? false;
+
   const creatorYoutubeChannelUrl = video.creator_youtube_channel_url ?? null;
-  const playlistLabel = overlay?.playlistLabel ?? "再生リスト";
-  const playlistItems = overlay?.playlistItems ?? [];
   const creatorId = video.creator_x_user_id ?? "anonymous";
   const creatorIcon = video.creator_icon_url ?? null;
-  const creatorName =
-    video.creator_display_name?.trim() || "作者未設定";
+  const creatorName = video.creator_display_name?.trim() || "作者未設定";
   const creatorHref =
     creatorId !== "anonymous" &&
     ((video.creator_has_public_profile ?? false) ||
@@ -636,6 +353,7 @@ function StaticVideoDetailView({
         className="fn-icon-btn"
         aria-label="FlameNode のプロフィールを開く"
         title="FlameNode のプロフィール"
+        prefetch={false}
       >
         <Icon name="user" size={13} aria-hidden />
       </Link>,
@@ -677,23 +395,12 @@ function StaticVideoDetailView({
         {authorIconLinks}
       </div>
     ) : null;
+
   const currentPath = `/${rawId}`;
-  const viewerNeedsTermsAcceptance = viewerUser
-    ? viewerUser.is_tos_accepted !== 1 || viewerUser.terms_reaccept_required === 1
-    : false;
-  const canInteract = !!(
-    viewerUser?.id &&
-    !viewerNeedsTermsAcceptance
-  );
-
   const loginHref = `/entry?next=${encodeURIComponent(currentPath)}`;
-  const rulesHref = `/rules?next=${encodeURIComponent(currentPath)}`;
-  const onboardingHref = `/onboarding?next=${encodeURIComponent(currentPath)}`;
-  const settingsHref =
-    `/dashboard/settings?next=${encodeURIComponent(currentPath)}`;
-
-  const chapterEntries = mergeVideoChapterOverlay(
-    vm.publicChapters.map((chapter) => ({
+  const settingsHref = `/dashboard/settings?next=${encodeURIComponent(currentPath)}`;
+  const publicChapters: VideoChapterOverlayEntry[] = vm.publicChapters.map(
+    (chapter) => ({
       id: chapter.id,
       chapter_time: chapter.chapter_time,
       chapter_label: chapter.chapter_label,
@@ -701,12 +408,8 @@ function StaticVideoDetailView({
       note: chapter.note,
       author_name: chapter.author_name,
       author_icon: chapter.author_icon,
-    })),
-    overlay?.privateChapters ?? [],
-  ).map((chapter) => ({
-    ...chapter,
-    marker_kind: "comment" as const,
-  }));
+    }),
+  );
 
   return (
     <div
@@ -741,51 +444,20 @@ function StaticVideoDetailView({
             <div className={styles.infoPane}>
               <h1 className={styles.title}>{video.title}</h1>
               <div className={styles.author}>
-                {creatorHref ? <Link href={creatorHref}>{authorBlock}</Link> : authorBlock}
+                {creatorHref ? (
+                  <Link href={creatorHref} prefetch={false}>
+                    {authorBlock}
+                  </Link>
+                ) : (
+                  authorBlock
+                )}
                 {authorLinkGroup}
                 <div className={styles.authorActions}>
-                  <InteractionButton
+                  <VideoInteractionActions
                     videoId={video.id}
-                    kind="like"
-                    initialActive={likeActive}
-                    count={vm.appLikeCount}
-                    canInteract={canInteract}
+                    currentPath={currentPath}
+                    likeCount={vm.appLikeCount}
                   />
-                  <InteractionButton
-                    videoId={video.id}
-                    kind="bookmark"
-                    initialActive={bookmarkActive}
-                    canInteract={canInteract}
-                  />
-                  {!canInteract ? (
-                    <span className={styles.interactionHint}>
-                      {authUnavailable ? (
-                        <>
-                          ログイン状態を一時的に確認できません。時間をおいて再読み込みしてください。
-                        </>
-                      ) : !viewerUser?.id ? (
-                        <>
-                          ログインするといいね、セーブができます。
-                          <Link
-                            href={loginHref}
-                            className={styles.interactionHintLink}
-                          >
-                            ログイン
-                          </Link>
-                        </>
-                      ) : viewerNeedsTermsAcceptance ? (
-                        <>
-                          利用規約に同意するといいね、セーブができます。
-                          <Link
-                            href={rulesHref}
-                            className={styles.interactionHintLink}
-                          >
-                            利用規約へ
-                          </Link>
-                        </>
-                      ) : null}
-                    </span>
-                  ) : null}
                 </div>
               </div>
 
@@ -807,7 +479,11 @@ function StaticVideoDetailView({
                       className={styles.eventBoxIcon}
                     />
                   ) : null}
-                  <Link href={`/event/${primaryEvent.id}`} className={styles.eventBoxTitle}>
+                  <Link
+                    href={`/event/${primaryEvent.id}`}
+                    className={styles.eventBoxTitle}
+                    prefetch={false}
+                  >
                     {primaryEvent.title}
                   </Link>
                   {primaryEventStatus ? (
@@ -843,6 +519,7 @@ function StaticVideoDetailView({
                         key={event.id}
                         href={`/event/${event.id}`}
                         className="fn-badge fn-badge-soft"
+                        prefetch={false}
                       >
                         {event.title}
                       </Link>
@@ -954,19 +631,13 @@ function StaticVideoDetailView({
         </article>
 
         <aside className={styles.sideRail} aria-label="動画補助情報">
-          <VideoUtilityDock
+          <VideoViewerUtilityDock
             videoId={video.id}
             currentId={rawId}
             playlistId={playlist || undefined}
-            playlistLabel={playlistLabel}
-            playlistItems={playlistItems}
-            chapters={chapterEntries}
-            isLoggedIn={Boolean(viewerUser?.id)}
-            authUnavailable={authUnavailable}
-            canPost={viewerXApproved}
+            publicChapters={publicChapters}
             loginHref={loginHref}
             settingsHref={settingsHref}
-            activeXId={viewerActiveX}
           />
 
           <section
@@ -1005,9 +676,7 @@ function RelatedList({
           関連動画用の共有データを一時的に利用できません。時間をおいて再読み込みしてください。
         </p>
       ) : videos.length === 0 ? (
-        <p className="fn-empty-message">
-          関連動画はまだありません。
-        </p>
+        <p className="fn-empty-message">関連動画はまだありません。</p>
       ) : (
         <>
           {videos.slice(0, firstCount).map((v) => (

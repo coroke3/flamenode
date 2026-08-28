@@ -19,7 +19,10 @@ export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
 
-async function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
+let configuredSiteOrigin: string | undefined;
+let configuredSiteOriginPromise: Promise<string | undefined> | null = null;
+
+async function loadConfiguredSiteOrigin(): Promise<string | undefined> {
   try {
     const { getCloudflareContext } = await import("@opennextjs/cloudflare");
     const env = getCloudflareContext().env as {
@@ -38,6 +41,31 @@ async function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
   );
 }
 
+function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
+  if (configuredSiteOrigin) return Promise.resolve(configuredSiteOrigin);
+  if (configuredSiteOriginPromise) return configuredSiteOriginPromise;
+
+  const request = loadConfiguredSiteOrigin()
+    .then((value) => {
+      // 正常に得られた設定だけをisolate内で保持する。初回context取得失敗や
+      // 一時的な未設定(undefined)を永続cacheすると、そのisolateだけcanonical
+      // redirectが以後ずっと無効になるため、undefinedは次requestで再試行する。
+      if (value) configuredSiteOrigin = value;
+      return value;
+    })
+    .finally(() => {
+      if (configuredSiteOriginPromise === request) {
+        configuredSiteOriginPromise = null;
+      }
+    });
+  configuredSiteOriginPromise = request;
+  return request;
+}
+
+function matchesPathSegmentPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const canonicalRedirect = resolveCanonicalHostRedirect({
     configuredOrigin: await resolveConfiguredSiteOrigin(),
@@ -50,25 +78,17 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(canonicalRedirect, 308);
   }
 
-  const requestHeaders = new Headers(req.headers);
-  requestHeaders.set("x-pathname", req.nextUrl.pathname);
-  const search = req.nextUrl.searchParams.toString();
-  if (search) requestHeaders.set("x-search", search);
-
-  const passThrough = () =>
-    NextResponse.next({ request: { headers: requestHeaders } });
-
   const isMaintenance = await resolveMiddlewareMaintenance();
-  if (!isMaintenance) return passThrough();
+  if (!isMaintenance) return NextResponse.next();
 
   const url = req.nextUrl;
   if (
-    url.pathname.startsWith("/maintenance") ||
-    url.pathname.startsWith("/admin") ||
-    url.pathname.startsWith("/api/auth") ||
-    url.pathname.startsWith("/api/health")
+    matchesPathSegmentPrefix(url.pathname, "/maintenance") ||
+    matchesPathSegmentPrefix(url.pathname, "/admin") ||
+    matchesPathSegmentPrefix(url.pathname, "/api/auth") ||
+    matchesPathSegmentPrefix(url.pathname, "/api/health")
   ) {
-    return passThrough();
+    return NextResponse.next();
   }
 
   return NextResponse.redirect(new URL("/maintenance", url));
