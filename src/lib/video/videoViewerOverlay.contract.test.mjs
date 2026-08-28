@@ -11,6 +11,7 @@ const [
   interactionActions,
   utilityDock,
   aboutPage,
+  aboutStatsRoute,
   slotIconRoute,
 ] = await Promise.all([
   readFile(new URL("../../../app/(public)/[id]/page.tsx", import.meta.url), "utf8"),
@@ -34,6 +35,10 @@ const [
   ),
   readFile(new URL("../../../app/(public)/about/page.tsx", import.meta.url), "utf8"),
   readFile(
+    new URL("../../../app/api/public/about-stats/route.ts", import.meta.url),
+    "utf8",
+  ),
+  readFile(
     new URL("../../../app/api/media/slot-submission-icon/[slotId]/route.ts", import.meta.url),
     "utf8",
   ),
@@ -48,10 +53,13 @@ test("公開動画SSRはviewer Auth/D1を実行せずclient overlayへ分離す�
   assert.match(page, /VideoViewerUtilityDock/);
 });
 
-test("viewer overlay APIはprivate no-storeで公開動画だけを対象にする", () => {
+test("viewer overlay APIはprivate no-storeで404と一時障害を分離する", () => {
   assert.match(route, /loadStaticVideoDetail/);
   assert.match(route, /visibility_status !== "public"/);
   assert.match(route, /"Cache-Control": "private, no-store, no-cache, must-revalidate"/);
+  assert.match(route, /detail\.state === "unavailable"/);
+  assert.match(route, /status: unavailable \? 503 : 404/);
+  assert.match(route, /"Retry-After": "3"/);
   assert.match(route, /loadVideoViewerOverlay/);
 });
 
@@ -64,6 +72,21 @@ test("viewer overlay clientは同一requestを共有しRSC refreshを要求し�
   assert.doesNotMatch(interaction, /useRouter/);
 });
 
+test("video/playlist遷移中は旧viewer overlayを表示・操作しない", () => {
+  assert.match(client, /type OverlayState/);
+  assert.match(client, /currentRequestKey/);
+  assert.match(client, /overlayIsCurrent/);
+  assert.match(client, /overlay: overlayIsCurrent \? overlayState\.value : emptyOverlay\(\)/);
+  assert.match(client, /\[explicitPlaylist, videoId\]/);
+  assert.match(interactionActions, /const canInteract =\s*!loading &&/s);
+});
+
+test("viewer overlayはcurrentUserContextのlinked X行を再利用する", () => {
+  assert.match(serverOverlay, /context\.linkedXUsers/);
+  assert.match(serverOverlay, /entry\.approval_status === "approved"/);
+  assert.doesNotMatch(serverOverlay, /getApprovedXIds/);
+});
+
 test("BAN viewerはprivate overlay/write UIをfail-closedにする", () => {
   assert.match(serverOverlay, /viewer\.is_banned === 1/);
   assert.match(serverOverlay, /isBanned: true/);
@@ -72,10 +95,15 @@ test("BAN viewerはprivate overlay/write UIをfail-closedにする", () => {
   assert.match(utilityDock, /!overlay\.isBanned/);
 });
 
-test("about本文はstaticでstatsだけclientへ分離する", () => {
+test("about本文はstaticでstats APIも小型artifactだけを読む", () => {
   assert.doesNotMatch(aboutPage, /loadStaticTopPage/);
   assert.doesNotMatch(aboutPage, /export const dynamic\s*=\s*["']force-dynamic["']/);
   assert.match(aboutPage, /<AboutStats \/>/);
+  assert.match(aboutStatsRoute, /TOP_STATS_OBJECT_KEY/);
+  assert.match(aboutStatsRoute, /normalizeTopStatsSection/);
+  assert.match(aboutStatsRoute, /MAX_STATS_BYTES = 64 \* 1024/);
+  assert.doesNotMatch(aboutStatsRoute, /top\.json/);
+  assert.doesNotMatch(aboutStatsRoute, /normalizeStaticTop/);
 });
 
 test("public_name slot iconはAuth.jsより先に公開判定する", () => {
