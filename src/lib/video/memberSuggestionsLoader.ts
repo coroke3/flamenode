@@ -17,44 +17,36 @@ export type MemberSuggestionsManifestLoadResult =
   | { ok: false; reason: string };
 
 /**
- * index payloadの短命プロセス内キャッシュ。
- * autocompleteは短時間に多数発行されるため、同一世代のindex R2 GET/JSON parseを
- * 減らす。manifestだけはcommit pointとして毎回確認し、世代更新後に旧itemsを返さない。
+ * index payloadの短命isolate内キャッシュ。
+ * 完了済みのpure JSON dataだけを保持し、R2 GETなどrequest-scoped I/O Promiseは
+ * module scopeへ保存しない。manifestはcommit pointとして毎request確認する。
  */
 const CACHE_TTL_SEC = 30;
-/** route timeout(2.5s)後も未解決Promiseをisolate寿命中共有しない。 */
-const IN_FLIGHT_MAX_AGE_MS = 3_000;
 type SuggestionsBucket = Pick<R2Bucket, "get">;
 let cache: {
-  bucket: SuggestionsBucket;
   generation: string;
   items: MemberSuggestionItem[];
   fetchedAt: number;
 } | null = null;
-let inFlight: {
-  bucket: SuggestionsBucket;
-  promise: Promise<MemberSuggestionsLoadResult>;
-  startedAt: number;
-} | null = null;
 
 function readCache(
-  bucket: SuggestionsBucket,
   generation: string,
   nowSec: number,
 ): MemberSuggestionItem[] | null {
-  if (!cache) return null;
-  if (cache.bucket !== bucket || cache.generation !== generation) return null;
-  if (nowSec - cache.fetchedAt > CACHE_TTL_SEC) {
+  if (!cache || cache.generation !== generation) return null;
+  if (
+    nowSec - cache.fetchedAt < 0 ||
+    nowSec - cache.fetchedAt > CACHE_TTL_SEC
+  ) {
     cache = null;
     return null;
   }
   return cache.items;
 }
 
-/** 主にテスト用。プロセス内キャッシュを破棄する。 */
+/** 主にテスト用。isolate内の完了済みJSONキャッシュを破棄する。 */
 export function resetMemberSuggestionsCacheForTest(): void {
   cache = null;
-  inFlight = null;
 }
 
 /**
@@ -96,64 +88,45 @@ export async function loadMemberSuggestionsManifestFromBucket(
 export async function loadMemberSuggestionsIndexFromBucket(
   bucket: SuggestionsBucket,
 ): Promise<MemberSuggestionsLoadResult> {
-  const startedAt = Date.now();
+  const manifestResult = await loadMemberSuggestionsManifestFromBucket(bucket);
+  if (!manifestResult.ok) return manifestResult;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cachedItems = readCache(manifestResult.generation, nowSec);
+  if (cachedItems) {
+    return { ok: true, items: cachedItems };
+  }
+
+  const indexObject = await bucket.get(
+    memberSuggestionsIndexObjectKey(manifestResult.generation),
+  );
+  if (!indexObject) return { ok: false, reason: "index_missing" };
   if (
-    inFlight?.bucket === bucket &&
-    startedAt - inFlight.startedAt >= 0 &&
-    startedAt - inFlight.startedAt <= IN_FLIGHT_MAX_AGE_MS
+    typeof indexObject.size === "number" &&
+    indexObject.size > MEMBER_SUGGESTIONS_MAX_INDEX_BYTES
   ) {
-    return inFlight.promise;
+    return { ok: false, reason: "index_too_large" };
   }
-
-  const promise = (async (): Promise<MemberSuggestionsLoadResult> => {
-    const manifestResult = await loadMemberSuggestionsManifestFromBucket(bucket);
-    if (!manifestResult.ok) return manifestResult;
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    const cachedItems = readCache(bucket, manifestResult.generation, nowSec);
-    if (cachedItems) {
-      return { ok: true, items: cachedItems };
-    }
-
-    const indexObject = await bucket.get(
-      memberSuggestionsIndexObjectKey(manifestResult.generation),
-    );
-    if (!indexObject) return { ok: false, reason: "index_missing" };
-    if (
-      typeof indexObject.size === "number" &&
-      indexObject.size > MEMBER_SUGGESTIONS_MAX_INDEX_BYTES
-    ) {
-      return { ok: false, reason: "index_too_large" };
-    }
-    let indexPayload: unknown;
-    try {
-      indexPayload = await indexObject.json();
-    } catch {
-      return { ok: false, reason: "index_invalid_json" };
-    }
-    // schema/generation一致を確認してから候補として使う。
-    const items = parseMemberSuggestionsIndex(
-      indexPayload,
-      manifestResult.generation,
-    );
-    if (!items) return { ok: false, reason: "index_invalid" };
-    if (items.length !== manifestResult.total) {
-      return { ok: false, reason: "index_total_mismatch" };
-    }
-
-    cache = {
-      bucket,
-      generation: manifestResult.generation,
-      items,
-      fetchedAt: nowSec,
-    };
-    return { ok: true, items };
-  })();
-
-  inFlight = { bucket, promise, startedAt };
+  let indexPayload: unknown;
   try {
-    return await promise;
-  } finally {
-    if (inFlight?.promise === promise) inFlight = null;
+    indexPayload = await indexObject.json();
+  } catch {
+    return { ok: false, reason: "index_invalid_json" };
   }
+  // schema/generation一致を確認してから候補として使う。
+  const items = parseMemberSuggestionsIndex(
+    indexPayload,
+    manifestResult.generation,
+  );
+  if (!items) return { ok: false, reason: "index_invalid" };
+  if (items.length !== manifestResult.total) {
+    return { ok: false, reason: "index_total_mismatch" };
+  }
+
+  cache = {
+    generation: manifestResult.generation,
+    items,
+    fetchedAt: nowSec,
+  };
+  return { ok: true, items };
 }
