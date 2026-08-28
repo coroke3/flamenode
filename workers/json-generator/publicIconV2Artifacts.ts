@@ -6,6 +6,7 @@ import {
 } from "../shared/staticR2CacheControl.ts";
 import {
   normalizePublicXIconMap,
+  PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES,
   PUBLIC_X_ICON_MAP_OBJECT_KEY,
 } from "../../src/lib/publicData/publicIconProjection.ts";
 import {
@@ -33,7 +34,13 @@ async function readCurrentManifest(
 ): Promise<ReturnType<typeof normalizePublicXIconV2Manifest>> {
   try {
     const object = await env.R2.get(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY);
-    if (!object) return null;
+    if (
+      !object ||
+      (typeof object.size === "number" &&
+        object.size > PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES)
+    ) {
+      return null;
+    }
     return normalizePublicXIconV2Manifest(await object.json());
   } catch {
     return null;
@@ -137,6 +144,12 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
   const legacyObject = await env.R2.get(PUBLIC_X_ICON_MAP_OBJECT_KEY);
   throwIfAborted(signal);
   if (!legacyObject) throw new Error("public_icon_v2_requires_v1_artifact");
+  if (
+    typeof legacyObject.size === "number" &&
+    legacyObject.size > PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES
+  ) {
+    throw new Error("public_icon_v2_v1_too_large");
+  }
 
   let legacyPayload: unknown;
   try {
