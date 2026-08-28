@@ -44,9 +44,10 @@ export async function loadPickupCreatorsFromR2(
       return { ok: false, reason: "missing" };
     }
     if (
-      !Number.isSafeInteger(object.size) ||
-      object.size < 0 ||
-      object.size > PICKUP_CREATORS_MAX_OBJECT_BYTES
+      typeof object.size === "number" &&
+      (!Number.isFinite(object.size) ||
+        object.size < 0 ||
+        object.size > PICKUP_CREATORS_MAX_OBJECT_BYTES)
     ) {
       await cancelR2BodyBestEffort(object);
       logPickupCreatorsR2("corrupt", {
