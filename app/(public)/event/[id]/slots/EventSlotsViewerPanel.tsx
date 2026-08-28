@@ -149,6 +149,9 @@ export function EventSlotsViewerPanel({
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const previousBaseSlotsRef = React.useRef(baseSlots);
+  const baseSlotsChanged = previousBaseSlotsRef.current !== baseSlots;
+  const viewerOverlay = baseSlotsChanged ? EMPTY_OVERLAY : overlay;
+  const viewerLoading = loading || baseSlotsChanged;
 
   React.useEffect(() => {
     let active = true;
@@ -165,7 +168,8 @@ export function EventSlotsViewerPanel({
     )
       .then(async (response) => {
         if (!response.ok) {
-          return { ...EMPTY_OVERLAY, authUnavailable: response.status >= 500 };
+          // page SSR後にeventが非公開/削除されたraceも未ログイン扱いにしない。
+          return { ...EMPTY_OVERLAY, authUnavailable: true };
         }
         const normalized = normalizeOverlay(await response.json());
         return normalized ?? { ...EMPTY_OVERLAY, authUnavailable: true };
@@ -189,34 +193,41 @@ export function EventSlotsViewerPanel({
   }, [eventId, refreshNonce]);
 
   React.useEffect(() => {
-    const refresh = () => setRefreshNonce((value) => value + 1);
+    const refresh = () => {
+      // Active X切替直後に旧Xの本人枠・表示名を残さない。
+      setOverlay(EMPTY_OVERLAY);
+      setLoading(true);
+      setRefreshNonce((value) => value + 1);
+    };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
   }, []);
 
   // SlotGridのmutation成功後はrouter.refresh()でpublic slotsが更新される。
-  // Client Component stateはRSC refreshで保持されるため、base配列の更新を検知して
-  // viewer ownershipも取り直し、解放済み枠を本人枠として残さない。
+  // Client Component stateはRSC refreshで保持されるため、新baseを受け取ったrenderから
+  // 旧viewer overlayを無効化し、ownershipの再取得完了までfail-closedにする。
   React.useEffect(() => {
-    if (previousBaseSlotsRef.current === baseSlots) return;
+    if (!baseSlotsChanged) return;
     previousBaseSlotsRef.current = baseSlots;
+    setOverlay(EMPTY_OVERLAY);
+    setLoading(true);
     setRefreshNonce((value) => value + 1);
-  }, [baseSlots]);
+  }, [baseSlots, baseSlotsChanged]);
 
   const slots = React.useMemo(
-    () => mergeViewerSlots(baseSlots, overlay),
-    [baseSlots, overlay],
+    () => mergeViewerSlots(baseSlots, viewerOverlay),
+    [baseSlots, viewerOverlay],
   );
   const currentPath = `/event/${eventId}/slots`;
   const canTakeSlot =
-    !loading &&
-    !overlay.authUnavailable &&
-    !overlay.isBanned &&
-    overlay.canReserveSlot &&
-    (accepting || overlay.operatorOverrideAllowed);
+    !viewerLoading &&
+    !viewerOverlay.authUnavailable &&
+    !viewerOverlay.isBanned &&
+    viewerOverlay.canReserveSlot &&
+    (accepting || viewerOverlay.operatorOverrideAllowed);
 
   let notice: React.ReactNode = null;
-  if (!accepting && !overlay.operatorOverrideAllowed) {
+  if (!accepting && !viewerOverlay.operatorOverrideAllowed) {
     notice = (
       <>
         <Icon name="info" size={13} aria-hidden />
@@ -227,20 +238,20 @@ export function EventSlotsViewerPanel({
             : "現在は受付停止中です。"}
       </>
     );
-  } else if (loading) {
+  } else if (viewerLoading) {
     notice = (
       <>
         <Icon name="info" size={13} aria-hidden /> ログイン状態を確認しています。
       </>
     );
-  } else if (overlay.authUnavailable) {
+  } else if (viewerOverlay.authUnavailable) {
     notice = (
       <>
         <Icon name="warning" size={13} aria-hidden />
         ログイン状態を一時的に確認できません。時間をおいて再読み込みしてください。
       </>
     );
-  } else if (!overlay.loggedIn) {
+  } else if (!viewerOverlay.loggedIn) {
     notice = (
       <>
         <Icon name="info" size={13} aria-hidden /> 確保には
@@ -248,14 +259,14 @@ export function EventSlotsViewerPanel({
         が必要です。
       </>
     );
-  } else if (overlay.isBanned) {
+  } else if (viewerOverlay.isBanned) {
     notice = (
       <>
         <Icon name="warning" size={13} aria-hidden />
         現在、このアカウントは利用停止中です。
       </>
     );
-  } else if (overlay.needsTermsAcceptance) {
+  } else if (viewerOverlay.needsTermsAcceptance) {
     notice = (
       <>
         <Icon name="info" size={13} aria-hidden /> 確保には
@@ -265,7 +276,7 @@ export function EventSlotsViewerPanel({
         が必要です。
       </>
     );
-  } else if (!accepting && overlay.operatorOverrideAllowed) {
+  } else if (!accepting && viewerOverlay.operatorOverrideAllowed) {
     notice = (
       <>
         <Icon name="warning" size={13} aria-hidden />
@@ -277,9 +288,9 @@ export function EventSlotsViewerPanel({
   return (
     <>
       {notice ? <p className={styles.notice}>{notice}</p> : null}
-      {overlay.viewerXIdNotice ? (
+      {viewerOverlay.viewerXIdNotice ? (
         <p className={styles.notice}>
-          <Icon name="info" size={13} aria-hidden /> {overlay.viewerXIdNotice}
+          <Icon name="info" size={13} aria-hidden /> {viewerOverlay.viewerXIdNotice}
         </p>
       ) : null}
 
@@ -287,14 +298,16 @@ export function EventSlotsViewerPanel({
         <div className={styles.main}>
           <SlotGrid
             slots={slots}
-            viewerXId={overlay.viewerXId}
+            viewerXId={viewerOverlay.viewerXId}
             isAuthenticated={
-              overlay.loggedIn && !overlay.authUnavailable && !overlay.isBanned
+              viewerOverlay.loggedIn &&
+              !viewerOverlay.authUnavailable &&
+              !viewerOverlay.isBanned
             }
             canReserve={accepting}
             canTakeSlot={canTakeSlot}
-            operatorOverrideAllowed={overlay.operatorOverrideAllowed}
-            canPost={overlay.canPost && !overlay.isBanned}
+            operatorOverrideAllowed={viewerOverlay.operatorOverrideAllowed}
+            canPost={viewerOverlay.canPost && !viewerOverlay.isBanned}
             slotType={slotType}
             maxSlotsPerVideo={maxSlotsPerVideo}
             maxSlotReservationsPerXId={maxSlotReservationsPerXId}
