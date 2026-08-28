@@ -20,7 +20,7 @@ const [loader, route, panel] = await Promise.all([
   ),
 ]);
 
-test("slot viewer overlayは公開event確認をAuth/slot全件readより先に行う", () => {
+test("slot viewer overlayは公開event確認をAuth/slot readより先に行う", () => {
   const publicEventGuard = loader.indexOf('eq(eventsTable.visibility_status, "public")');
   const authRead = loader.indexOf("getCurrentUser()");
   const slotRead = loader.indexOf(".from(slotsTable)");
@@ -29,7 +29,7 @@ test("slot viewer overlayは公開event確認をAuth/slot全件readより先に�
   assert.ok(slotRead > authRead);
 });
 
-test("匿名viewerはslot全件read前にempty overlayへ早期returnできる", () => {
+test("匿名viewerはslot read前にempty overlayへ早期returnできる", () => {
   const anonymousReturn = loader.indexOf(
     "if (!viewer) return emptySlotViewerOverlay(false);",
   );
@@ -37,11 +37,28 @@ test("匿名viewerはslot全件read前にempty overlayへ早期returnできる",
   assert.ok(anonymousReturn >= 0 && slotRead > anonymousReturn);
 });
 
-test("BAN viewerはslot全件read前にfail-closedできる", () => {
+test("BAN viewerはslot read前にfail-closedできる", () => {
   const bannedReturn = loader.indexOf("if (viewer.is_banned === 1)");
   const slotRead = loader.indexOf(".from(slotsTable)");
   assert.ok(bannedReturn >= 0 && slotRead > bannedReturn);
   assert.match(loader, /isBanned: true/);
+});
+
+test("ログインviewerのslot queryはそのauth userの予約行だけを読む", () => {
+  const slotRead = loader.indexOf(".from(slotsTable)");
+  const slotMap = loader.indexOf("const slots = slotRows.map", slotRead);
+  assert.ok(slotRead >= 0 && slotMap > slotRead);
+  const query = loader.slice(slotRead, slotMap);
+  assert.match(query, /eq\(slotsTable\.event_id, eventId\)/);
+  assert.match(query, /eq\(slotsTable\.reserved_by_user_id, viewer\.id\)/);
+});
+
+test("public_nameのgroup keyは公開base snapshotを正本にする", () => {
+  assert.match(
+    loader,
+    /isOwnedByViewer && eventRow\.slot_visibility_mode !== "public_name"/,
+  );
+  assert.match(panel, /group_key: patch\.group_key \?\? slot\.group_key/);
 });
 
 test("slot viewer routeはnot-foundとruntime unavailableを分離する", () => {
