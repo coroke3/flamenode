@@ -98,6 +98,14 @@ test("viewer overlayはcurrentUserContextのlinked X行を再利用する", () =
   assert.doesNotMatch(serverOverlay, /getApprovedXIds/);
 });
 
+test("viewer chapter編集権限はstatic videoIdとD1解決結果が一致する場合だけ使う", () => {
+  assert.match(serverOverlay, /const probe = await fetchVideoRowByIdOrYoutube\(db, args\.rawId\)/);
+  assert.match(serverOverlay, /if \(probe\?\.id === args\.videoId\) \{/);
+  const idGuard = serverOverlay.indexOf("if (probe?.id === args.videoId)");
+  const authCall = serverOverlay.indexOf("viewerCanEditChapters = await canEditVideo", idGuard);
+  assert.ok(idGuard >= 0 && authCall > idGuard);
+});
+
 test("viewer private chapterはserver query自体を最大件数でboundedにする", () => {
   assert.match(serverOverlay, /VIDEO_VIEWER_OVERLAY_MAX_PRIVATE_CHAPTERS/);
   assert.match(serverOverlay, /async function fetchBoundedPrivateChapters/);
