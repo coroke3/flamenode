@@ -71,6 +71,15 @@ async function readPreviousGeneration(
   }
 }
 
+async function deleteManifestBestEffort(bucket: V2Bucket): Promise<void> {
+  try {
+    await bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+  } catch {
+    // V1 is canonical. A transient cleanup failure is logged by the caller's
+    // outcome path, and the next rebuild retries manifest removal first.
+  }
+}
+
 async function deleteKeysBestEffort(
   bucket: V2Bucket,
   keys: readonly string[],
@@ -212,16 +221,12 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
     );
     return { published: true, objectCount };
   } catch (error) {
-    if (signal?.aborted) {
-      await deleteKeysBestEffort(bucket, writtenKeys);
-      throw error;
-    }
-    try {
-      await bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
-    } catch {
-      // V1 remains canonical even if this best-effort cleanup itself fails.
-    }
+    // abortがmanifest PUT直後に発生する境界でも、manifestを先に撤去してから
+    // generation objectを消す。逆順だと壊れたmanifestが削除済みobjectを指し得る。
+    await deleteManifestBestEffort(bucket);
     await deleteKeysBestEffort(bucket, writtenKeys);
+    if (signal?.aborted) throw error;
+
     console.warn(
       JSON.stringify({
         service: "member-suggestions-v2",
