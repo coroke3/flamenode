@@ -15,6 +15,7 @@ const [
   suggestionsSource,
   suggestionsV2Source,
   visibilityManifestSource,
+  pickupCreatorsSource,
 ] = await Promise.all([
   read("middleware.ts"),
   read("src/lib/event/eventIdReuse.ts"),
@@ -24,6 +25,7 @@ const [
   read("src/lib/video/memberSuggestionsLoader.ts"),
   read("src/lib/video/memberSuggestionsV2Loader.ts"),
   read("src/lib/publicData/publicVisibilityManifest.ts"),
+  read("workers/json-generator/pickupCreatorsR2.ts"),
 ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
@@ -58,4 +60,14 @@ test("visibility manifestは既知R2 sizeなら本文を再encodeしない", () 
   assert.match(visibilityManifestSource, /const hasKnownSize = typeof object\.size === "number"/);
   assert.match(visibilityManifestSource, /!hasKnownSize && utf8ByteLength\(text\)/);
   assert.match(visibilityManifestSource, /cancelR2BodyBestEffort\(object\)/);
+});
+
+test("pickup creators workerは既存1MiB上限をparse前に適用する", () => {
+  assert.match(pickupCreatorsSource, /PICKUP_CREATORS_MAX_OBJECT_BYTES/);
+  assert.match(pickupCreatorsSource, /object\.size > PICKUP_CREATORS_MAX_OBJECT_BYTES/);
+  assert.match(pickupCreatorsSource, /cancelR2BodyBestEffort\(object\)/);
+  assert.ok(
+    pickupCreatorsSource.indexOf("object.size > PICKUP_CREATORS_MAX_OBJECT_BYTES") <
+      pickupCreatorsSource.indexOf("object.json()"),
+  );
 });
