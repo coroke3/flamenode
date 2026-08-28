@@ -265,16 +265,25 @@ async function loadPublicXIconMapV1(
   };
 }
 
+// V2 manifest is the mutable commit point for generation visibility. Never revive
+// an older cached manifest after the writer publishes a fallback marker or removes
+// the manifest. React cache deduplicates this strict R2 read within one request;
+// generation-specific shard objects remain safe for cross-request caching below.
+const loadPublicXIconV2Manifest = cache(async () =>
+  loadStaticJsonFreshStaleUnavailable({
+    key: PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+    normalize: normalizePublicXIconV2Manifest,
+    maxStaleAgeSec: 0,
+    cacheTtlSeconds: 0,
+    cacheMode: "bypass",
+  }),
+);
+
 async function loadPublicXIconMapV2(
   requiredXUserIds: readonly string[],
 ): Promise<PublicXIconMapPayload | null> {
   if (requiredXUserIds.length === 0) return null;
-  const manifestResult = await loadStaticJsonFreshStaleUnavailable({
-    key: PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
-    normalize: normalizePublicXIconV2Manifest,
-    maxStaleAgeSec: 24 * 60 * 60,
-    cacheTtlSeconds: 60,
-  });
+  const manifestResult = await loadPublicXIconV2Manifest();
   const manifest = manifestResult.value;
   if (!manifest) return null;
 
