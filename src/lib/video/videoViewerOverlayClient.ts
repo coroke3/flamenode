@@ -6,6 +6,7 @@ import type { VideoViewerOverlayDto } from "./videoViewerOverlayCore";
 
 const CACHE_TTL_MS = 30_000;
 const FAILURE_CACHE_TTL_MS = 3_000;
+const FETCH_TIMEOUT_MS = 5_000;
 const MAX_CACHE_ENTRIES = 64;
 const MAX_PRIVATE_CHAPTERS = 500;
 const MAX_PLAYLIST_ITEMS = 500;
@@ -201,12 +202,15 @@ async function fetchOverlay(
   if (playlist) params.set("playlist", playlist);
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   const requestToken = Symbol(key);
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   const promise = fetch(
     `/api/videos/${encodeURIComponent(videoId)}/viewer-overlay${suffix}`,
     {
       credentials: "same-origin",
       cache: "no-store",
       headers: { Accept: "application/json" },
+      signal: controller.signal,
     },
   )
     .then(async (response) => {
@@ -228,6 +232,9 @@ async function fetchOverlay(
         });
       }
       return value;
+    })
+    .finally(() => {
+      window.clearTimeout(timeoutId);
     });
 
   setCacheEntry(key, { promise, requestToken });
