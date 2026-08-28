@@ -22,6 +22,11 @@ type OverlayState = {
   value: VideoViewerOverlayDto;
 };
 
+type ResolvedPlaylistState = {
+  sourceKey: string | null;
+  value: string;
+};
+
 const cache = new Map<string, CacheEntry>();
 
 function emptyOverlay(authUnavailable = false): VideoViewerOverlayDto {
@@ -127,15 +132,27 @@ function normalizeOverlay(value: unknown): VideoViewerOverlayDto | null {
   };
 }
 
+function normalizePlaylistValue(value: string): string {
+  return value.trim().slice(0, 128);
+}
+
 function resolvePlaylist(explicitPlaylist?: string): string {
-  if (explicitPlaylist !== undefined) return explicitPlaylist.trim().slice(0, 128);
+  if (explicitPlaylist !== undefined) {
+    return normalizePlaylistValue(explicitPlaylist);
+  }
   try {
-    return (new URLSearchParams(window.location.search).get("playlist") ?? "")
-      .trim()
-      .slice(0, 128);
+    return normalizePlaylistValue(
+      new URLSearchParams(window.location.search).get("playlist") ?? "",
+    );
   } catch {
     return "";
   }
+}
+
+function playlistSourceKey(videoId: string, explicitPlaylist?: string): string {
+  return explicitPlaylist === undefined
+    ? `implicit:${videoId}`
+    : `explicit:${normalizePlaylistValue(explicitPlaylist)}`;
 }
 
 function overlayKey(videoId: string, playlist: string): string {
@@ -177,8 +194,6 @@ async function fetchOverlay(
     })
     .catch(() => emptyOverlay(true))
     .then((value) => {
-      // invalidate後に古いrequestが遅れて完了しても、新しいrequest/cacheを
-      // 上書きしない。Active X切替・mutation直後のviewer巻き戻りを防ぐ。
       if (cache.get(key)?.requestToken === requestToken) {
         cache.set(key, { value, fetchedAt: Date.now() });
       }
@@ -216,11 +231,16 @@ export function useVideoViewerOverlay(
   videoId: string,
   explicitPlaylist?: string,
 ): { overlay: VideoViewerOverlayDto; loading: boolean; refresh: () => void } {
-  const explicit = explicitPlaylist !== undefined;
-  const [playlist, setPlaylist] = React.useState(
-    explicit ? explicitPlaylist.trim().slice(0, 128) : "",
+  const sourceKey = playlistSourceKey(videoId, explicitPlaylist);
+  const [playlistState, setPlaylistState] = React.useState<ResolvedPlaylistState>(
+    () =>
+      explicitPlaylist === undefined
+        ? { sourceKey: null, value: "" }
+        : {
+            sourceKey,
+            value: normalizePlaylistValue(explicitPlaylist),
+          },
   );
-  const [playlistReady, setPlaylistReady] = React.useState(explicit);
   const [overlayState, setOverlayState] = React.useState<OverlayState>(() => ({
     requestKey: null,
     value: emptyOverlay(),
@@ -229,9 +249,11 @@ export function useVideoViewerOverlay(
   const [nonce, setNonce] = React.useState(0);
 
   React.useEffect(() => {
-    setPlaylist(resolvePlaylist(explicitPlaylist));
-    setPlaylistReady(true);
-  }, [explicitPlaylist, videoId]);
+    setPlaylistState({
+      sourceKey,
+      value: resolvePlaylist(explicitPlaylist),
+    });
+  }, [explicitPlaylist, sourceKey]);
 
   React.useEffect(() => {
     const refresh = () => {
@@ -257,14 +279,16 @@ export function useVideoViewerOverlay(
     };
   }, [videoId]);
 
+  const playlistReady = playlistState.sourceKey === sourceKey;
+  const playlist = playlistReady ? playlistState.value : "";
   const currentRequestKey = playlistReady
-    ? `${overlayKey(videoId, playlist)}\n${nonce}`
+    ? `${overlayKey(videoId, playlist)}\n${sourceKey}\n${nonce}`
     : null;
 
   React.useEffect(() => {
     if (!playlistReady) return;
     let active = true;
-    const requestKey = `${overlayKey(videoId, playlist)}\n${nonce}`;
+    const requestKey = `${overlayKey(videoId, playlist)}\n${sourceKey}\n${nonce}`;
     setLoading(true);
     void fetchOverlay(videoId, playlist).then((value) => {
       if (!active) return;
@@ -274,14 +298,14 @@ export function useVideoViewerOverlay(
     return () => {
       active = false;
     };
-  }, [videoId, playlist, playlistReady, nonce]);
+  }, [videoId, playlist, playlistReady, sourceKey, nonce]);
 
   const overlayIsCurrent =
     currentRequestKey !== null && overlayState.requestKey === currentRequestKey;
 
   return {
-    // App RouterでClient Componentが再利用されても、旧video/playlistのviewer情報を
-    // 新しい画面へ一瞬表示しない。特にprivate chapterとlibrary playlistをfail-closedにする。
+    // video/playlist/sourceが切り替わったrenderでは旧viewer情報を返さない。
+    // private chapter / library playlist / interaction stateをfail-closedにする。
     overlay: overlayIsCurrent ? overlayState.value : emptyOverlay(),
     loading: loading || !overlayIsCurrent,
     refresh: () => {
