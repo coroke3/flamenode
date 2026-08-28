@@ -151,12 +151,17 @@ export function isWorkerCancellation(error: unknown): boolean {
   while (cause instanceof JobFailureWithCounters) {
     cause = cause.originalError;
   }
-  if (!(cause instanceof Error)) return false;
-  if (cause.name === "AbortError") return true;
+  if (!cause || (typeof cause !== "object" && typeof cause !== "function")) {
+    return false;
+  }
+  const record = cause as { name?: unknown; message?: unknown };
+  const name = typeof record.name === "string" ? record.name : "";
+  const message = typeof record.message === "string" ? record.message : "";
+  if (name === "AbortError") return true;
   return (
-    cause.message.startsWith("cron wall-clock deadline exceeded:") ||
-    cause.message.startsWith("cron task aborted:") ||
-    cause.message.startsWith("cron lease lost")
+    message.startsWith("cron wall-clock deadline exceeded:") ||
+    message.startsWith("cron task aborted:") ||
+    message.startsWith("cron lease lost")
   );
 }
 
