@@ -7,7 +7,6 @@ import {
 } from "@/lib/auth/currentUser";
 import {
   canEditVideo,
-  getApprovedXIds,
   resolveAdminOrEventVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
 import { withDatabase } from "@/lib/cloudflare";
@@ -106,8 +105,6 @@ export async function loadVideoViewerOverlay(args: {
   const activeXId = viewer.active_x_user_id ?? null;
   const isBanned = viewer.is_banned === 1;
   if (isBanned) {
-    // writeGuardと同じBAN境界でfail-closed。private chapter / library等の
-    // viewer固有D1 overlayも読まず、公開情報だけを返す。
     return {
       ...emptyOverlay(publicPlaylist),
       loggedIn: true,
@@ -118,21 +115,17 @@ export async function loadVideoViewerOverlay(args: {
     };
   }
 
+  // getCurrentUserContext()が同一request内でDB正本から取得済みのlink行を再利用する。
+  // getApprovedXIds()を再実行せず、認可境界ではapproval_statusを明示的に再確認する。
+  const approvedXIds = context.linkedXUsers
+    .filter((entry) => entry.approval_status === "approved")
+    .map((entry) => entry.x_user_id);
   const viewerXApproved = Boolean(
-    activeXId &&
-      context.linkedXUsers.some(
-        (entry) =>
-          entry.x_user_id === activeXId && entry.approval_status === "approved",
-      ),
+    activeXId && approvedXIds.includes(activeXId),
   );
 
   try {
     const dbOverlay = await withDatabase(async (db) => {
-      let approvedXIds: string[] = [];
-      if (viewer.role !== "admin") {
-        approvedXIds = await getApprovedXIds(db, viewer.id);
-      }
-
       let viewerCanEditChapters = false;
       const probe = await fetchVideoRowByIdOrYoutube(db, args.rawId);
       if (probe) {
@@ -142,7 +135,7 @@ export async function loadVideoViewerOverlay(args: {
           video: probe,
           requiredKey: "video.chapter_admin",
           privilegeMode: resolveAdminOrEventVideoPrivilegeMode(viewer.role),
-          approvedXUserIds: approvedXIds,
+          approvedXUserIds: viewer.role === "admin" ? [] : approvedXIds,
         });
       }
 
