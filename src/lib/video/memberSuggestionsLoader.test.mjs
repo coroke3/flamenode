@@ -150,3 +150,36 @@ test("同じR2 bucketへの同時ロードは読み込みを共有する", async
   assert.equal(second.ok, true);
   assert.equal(getCount, 2);
 });
+
+test("30秒cache中でもcanonical manifest generation更新後は旧候補を返さない", async () => {
+  const objects = new Map();
+  publishValidIndex(objects, "gen1");
+  const bucket = createBucket(objects);
+
+  const first = await loadMemberSuggestionsIndexFromBucket(bucket);
+  assert.equal(first.ok, true);
+  assert.ok(first.ok && first.items.some((item) => item.x_user_id === "mochi"));
+
+  const nextItems = buildMemberSuggestionItems([
+    {
+      x_user_id: "new_creator",
+      name: "New Creator",
+      isProfileName: true,
+      approvalStatus: "approved",
+    },
+  ]);
+  const { manifest, index } = buildMemberSuggestionArtifacts({
+    items: nextItems,
+    generatedAt: 1001,
+    generation: "gen2",
+  });
+  objects.set(memberSuggestionsIndexObjectKey("gen2"), JSON.stringify(index));
+  objects.set(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, JSON.stringify(manifest));
+
+  const second = await loadMemberSuggestionsIndexFromBucket(bucket);
+  assert.equal(second.ok, true);
+  assert.deepEqual(
+    second.ok ? second.items.map((item) => item.x_user_id) : [],
+    ["new_creator"],
+  );
+});
