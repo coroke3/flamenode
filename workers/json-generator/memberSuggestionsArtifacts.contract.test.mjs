@@ -28,3 +28,21 @@ test("member suggestionsはmanifestをindex書込前に退避する", () => {
   assert.ok(previousManifestRead >= 0);
   assert.ok(indexPut > previousManifestRead);
 });
+
+test("source row上限は許容最大+1件をsentinelとして読む", () => {
+  assert.match(source, /SOURCE_LIMIT_X_USERS = 20_001/);
+  assert.match(source, /SOURCE_LIMIT_ALIASES = 50_001/);
+  assert.match(source, /SOURCE_LIMIT_VIDEO_HISTORY = 20_001/);
+  assert.match(source, /profileRows\.length >= SOURCE_LIMIT_X_USERS/);
+  assert.match(source, /aliasRows\.length >= SOURCE_LIMIT_ALIASES/);
+  assert.match(source, /creatorRows\.length >= SOURCE_LIMIT_VIDEO_HISTORY/);
+  assert.match(source, /memberRows\.length >= SOURCE_LIMIT_VIDEO_HISTORY/);
+});
+
+test("rollback用の旧manifestもsize上限を超えたらbodyを読まない", () => {
+  const sizeGuard = source.indexOf(
+    'object.size > MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES',
+  );
+  const textRead = source.indexOf('const body = await object.text()', sizeGuard);
+  assert.ok(sizeGuard >= 0 && textRead > sizeGuard);
+});
