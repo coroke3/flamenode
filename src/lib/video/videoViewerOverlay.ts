@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, desc, eq, notLike, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, notLike, sql } from "drizzle-orm";
 import {
   CurrentUserUnavailableError,
   getCurrentUserContext,
@@ -173,8 +173,6 @@ export async function loadVideoViewerOverlay(args: {
     };
   }
 
-  // getCurrentUserContext()が同一request内でDB正本から取得済みのlink行を再利用する。
-  // getApprovedXIds()を再実行せず、認可境界ではapproval_statusを明示的に再確認する。
   const approvedXIds = context.linkedXUsers
     .filter((entry) => entry.approval_status === "approved")
     .map((entry) => entry.x_user_id);
@@ -209,6 +207,8 @@ export async function loadVideoViewerOverlay(args: {
             })
           : [];
 
+      // Overlayに必要なのはlike/bookmarkの有無だけ。重複/移行残骸があっても
+      // D1から大量行をserializeしないようtype単位に集約し最大2行へboundedにする。
       const interactions = await db
         .select({ interaction_type: videoInteractionsAuth.interaction_type })
         .from(videoInteractionsAuth)
@@ -216,8 +216,11 @@ export async function loadVideoViewerOverlay(args: {
           and(
             eq(videoInteractionsAuth.auth_user_id, viewer.id),
             eq(videoInteractionsAuth.video_id, args.videoId),
+            inArray(videoInteractionsAuth.interaction_type, ["like", "bookmark"]),
           )!,
-        );
+        )
+        .groupBy(videoInteractionsAuth.interaction_type)
+        .limit(2);
 
       let privatePlaylist = publicPlaylist;
       if (args.playlist === "lib-like" || args.playlist === "lib-bookmark") {
@@ -239,8 +242,6 @@ export async function loadVideoViewerOverlay(args: {
             )!,
           )
           .orderBy(desc(videosTable.scheduled_time))
-          // client側も同じ最大件数しか表示しない。serverで全件SELECTしてから
-          // truncateすると長期利用ユーザーほどD1/JSON CPUが増えるため、query自体をboundedにする。
           .limit(EVENT_PLAYLIST_MAX_ITEMS);
         privatePlaylist = {
           playlistLabel:
