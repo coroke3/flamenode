@@ -16,6 +16,59 @@ test("posting index は1/2/3文字queryを同じ生成規則でgram化する", (
   assert.deepEqual(staticSearchQueryGrams("東京動画"), ["東京動", "京動画"]);
 });
 
+test("posting builderは既存caller向けに1文字gramを既定維持する", () => {
+  const artifacts = buildStaticSearchPostingArtifacts({
+    items: [{ id: "one", text: "abc" }],
+    generatedAt: 1,
+    generation: "default-min-gram",
+    keyOf: (item) => item.id,
+    textOf: (item) => [item.text],
+  });
+  const grams = new Set(
+    artifacts.pages.flatMap(({ page }) =>
+      page.records.map((record) => record.gram),
+    ),
+  );
+  assert.ok(grams.has("a"));
+  assert.ok(grams.has("ab"));
+  assert.ok(grams.has("abc"));
+});
+
+test("minGramLength=2は1文字gramを構築段階から省く", () => {
+  const artifacts = buildStaticSearchPostingArtifacts({
+    items: [{ id: "one", text: "abc" }],
+    generatedAt: 1,
+    generation: "min-gram-2",
+    minGramLength: 2,
+    keyOf: (item) => item.id,
+    textOf: (item) => [item.text],
+  });
+  const grams = new Set(
+    artifacts.pages.flatMap(({ page }) =>
+      page.records.map((record) => record.gram),
+    ),
+  );
+  assert.equal(grams.has("a"), false);
+  assert.equal(grams.has("b"), false);
+  assert.equal(grams.has("c"), false);
+  assert.ok(grams.has("ab"));
+  assert.ok(grams.has("bc"));
+  assert.ok(grams.has("abc"));
+});
+
+test("不正なminGramLengthはsilentに空index化せず失敗する", () => {
+  assert.throws(() =>
+    buildStaticSearchPostingArtifacts({
+      items: [{ id: "one", text: "abc" }],
+      generatedAt: 1,
+      generation: "invalid-min-gram",
+      minGramLength: Number.NaN,
+      keyOf: (item) => item.id,
+      textOf: (item) => [item.text],
+    }),
+  );
+});
+
 test("壊れたpostingのページ数・page item数はfail-closedで上限を超えない", () => {
   const tooManyPages = normalizeStaticSearchPostingDirectory({
     schema_version: 1,
