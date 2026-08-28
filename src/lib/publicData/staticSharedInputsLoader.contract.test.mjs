@@ -22,6 +22,16 @@ test("共有JSONローダーはrequest外へR2 Promiseを保持しない", () =>
   assert.match(source, /writePublicJsonCacheBestEffort/);
 });
 
+test("共有R2 JSONはparse前にobject sizeをboundedにする", () => {
+  assert.match(source, /const DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES = 16 \* 1024 \* 1024/);
+  assert.match(source, /maxObjectBytes\?: number/);
+  assert.match(source, /object\.size > maxObjectBytes/);
+  assert.match(source, /await object\.body\.cancel\(\)/);
+  assert.match(source, /readR2Json\(args\.key, maxObjectBytes\)/);
+  assert.match(source, /PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES/);
+  assert.match(source, /PUBLIC_X_ICON_V2_MAX_SHARD_BYTES/);
+});
+
 test("random poolもfresh stale unavailableを保持する", () => {
   assert.match(
     source,
@@ -91,6 +101,7 @@ test("公開アイコンV2の固定manifestはstale cacheを復活させない",
   assert.match(manifestLoader, /PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY/);
   assert.match(manifestLoader, /maxStaleAgeSec: 0/);
   assert.match(manifestLoader, /cacheTtlSeconds: 0/);
+  assert.match(manifestLoader, /maxObjectBytes: PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES/);
   assert.match(manifestLoader, /cacheMode: "bypass"/);
   assert.match(source, /const manifestResult = await loadPublicXIconV2Manifest\(\)/);
 });
