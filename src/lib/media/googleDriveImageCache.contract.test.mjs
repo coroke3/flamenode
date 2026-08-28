@@ -31,9 +31,11 @@ test("画像cacheは件数・総bytes・単一object bytesを制限する", () =
 });
 
 test("同一画像の同時missを集約しETagで304再検証する", () => {
-  assert.match(helperSource, /inFlight: Map/);
-  assert.match(helperSource, /store\.inFlight\.get/);
+  // Workers may reuse an isolate across requests, so request-scoped fetch
+  // Promises are deliberately not coalesced in the global cache.
+  assert.doesNotMatch(helperSource, /inFlight/);
+  assert.match(helperSource, /Do not coalesce upstream fetch Promises/);
   assert.match(helperSource, /if-none-match/);
   assert.match(helperSource, /upstream\.status === 304/);
-  assert.match(helperSource, /"coalesced"/);
+  assert.doesNotMatch(helperSource, /"coalesced"/);
 });

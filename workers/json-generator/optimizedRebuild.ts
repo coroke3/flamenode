@@ -10,6 +10,7 @@ import {
 } from "./followUpEnqueue.ts";
 import { rebuildTarget } from "./rebuild.ts";
 import { rebuildUsersIndexV2FromLegacyArtifact } from "./usersIndexV2Artifacts.ts";
+import { rebuildPublicIconV2FromLegacyArtifact } from "./publicIconV2Artifacts.ts";
 import {
   staticR2CacheControl,
   STATIC_R2_MAX_AGE_SEC,
@@ -586,6 +587,18 @@ export async function optimizedRebuildTarget(
           reason.includes("visibility") ||
           reason.includes("deploy_generator_change")),
     });
+    try {
+      await rebuildPublicIconV2FromLegacyArtifact(env, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      console.warn(
+        JSON.stringify({
+          service: "public-icon-v2",
+          result: "v1_fallback",
+          error_name: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+    }
     if (v2.hasMore) return { followUpPending: true };
   }
   if (targetType === "event_base") {

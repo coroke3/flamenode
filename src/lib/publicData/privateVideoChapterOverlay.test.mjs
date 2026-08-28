@@ -86,17 +86,22 @@ if (runTestWithTsx(import.meta.url)) {
   });
 
   test("Scenario 7: public page keeps static body on overlay/D1 failure", async () => {
-    const [page, dbQueries, ownership, generator, degraded] = await Promise.all([
+    const [page, dbQueries, ownership, generator, degraded, overlay, utilityDock] = await Promise.all([
       readFile(new URL("../../../app/(public)/[id]/page.tsx", import.meta.url), "utf8"),
       readFile(new URL("../db/videoDetailQueries.ts", import.meta.url), "utf8"),
       readFile(new URL("../auth/ownership.ts", import.meta.url), "utf8"),
       readFile(new URL("../../../workers/json-generator/rebuild.ts", import.meta.url), "utf8"),
       readFile(new URL("./degradedQueries.ts", import.meta.url), "utf8"),
+      readFile(new URL("../video/videoViewerOverlay.ts", import.meta.url), "utf8"),
+      readFile(new URL("../../components/video/VideoViewerUtilityDock.tsx", import.meta.url), "utf8"),
     ]);
 
-    assert.match(page, /fetchAuthorizedPrivateVideoChapters/);
-    assert.match(page, /mergeVideoChapterOverlay/);
-    assert.match(page, /authUnavailable: authUnavailable \|\| Boolean\(authenticatedViewer\)/);
+    assert.doesNotMatch(page, /fetchAuthorizedPrivateVideoChapters/);
+    assert.doesNotMatch(page, /mergeVideoChapterOverlay/);
+    assert.match(page, /VideoViewerUtilityDock/);
+    assert.match(overlay, /fetchBoundedPrivateChapters/);
+    assert.match(overlay, /authUnavailable: true/);
+    assert.match(utilityDock, /mergeVideoChapterOverlay/);
     assert.match(dbQueries, /if \(!viewer\?\.id\) return \[\];/);
     assert.match(dbQueries, /eq\(videoChapters\.visibility, "private"\)/);
     assert.match(dbQueries, /viewer\.role === "admin" \|\| viewer\.canEditChapters === true/);

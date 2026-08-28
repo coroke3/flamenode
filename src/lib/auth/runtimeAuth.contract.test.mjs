@@ -61,8 +61,6 @@ test("DBから消失したsession userをsession内roleへfallbackしない", ()
   assert.match(currentUser, /getAuthSession/);
   assert.match(session, /export const getAuthSession = cache\(loadAuthSession\)/);
   assert.match(layoutHeaderUser, /export const getLayoutHeaderUser = cache/);
-  // currentUser は linked X 行を同一 request の context として返すため、
-  // DB user 消失時も user=null の形を維持した空 context を返す。
   assert.match(
     currentUser,
     /if \(loaded\.kind === "missing"\) return \{ user: null, linkedXUsers: \[\] \}/,
@@ -83,7 +81,7 @@ test("公開layoutはserver authを呼ばず静的シェルとして描画する
   assert.doesNotMatch(publicLayout, /await auth\(/);
   assert.doesNotMatch(publicLayout, /buildHeaderUser/);
   assert.doesNotMatch(publicLayout, /userNeedsXIdOnboarding/);
-  assert.match(publicLayout, /CostGuardBanner/);
+  assert.doesNotMatch(publicLayout, /CostGuardBanner/);
   assert.doesNotMatch(publicLayout, /source=["']admin["']/);
   assert.match(publicLayout, /<PublicHeader\s*\/>/);
 });

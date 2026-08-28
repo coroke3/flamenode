@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [eventPage, videoPage, videoQueries] = await Promise.all([
+const [eventPage, videoPage, videoQueries, videoOverlay] = await Promise.all([
   readFile(
     new URL("../../../app/(public)/event/[id]/page.tsx", import.meta.url),
     "utf8",
@@ -12,6 +12,7 @@ const [eventPage, videoPage, videoQueries] = await Promise.all([
     "utf8",
   ),
   readFile(new URL("./videoDetailQueries.ts", import.meta.url), "utf8"),
+  readFile(new URL("../video/videoViewerOverlay.ts", import.meta.url), "utf8"),
 ]);
 
 test("event cards preserve the public event playlist", () => {
@@ -30,25 +31,25 @@ test("anonymous video overlays may load only public event playlists", () => {
     videoQueries.indexOf("export async function fetchEventPlaylistVideos("),
   );
 
-  assert.doesNotMatch(videoPage, /if \(!viewerUser\) return emptyOverlay/);
-  assert.match(videoPage, /const eventPlaylistRequested =/);
-  assert.match(videoPage, /fetchEventPlaylistVideos\(db, playlist\)/);
-  assert.match(videoPage, /resolvePublicOperationMode\(\{ allowD1: false \}\)/);
-  assert.match(videoPage, /if \(!isLiveApiEnabled\(operationMode\)\)/);
+  assert.match(videoPage, /VideoViewerUtilityDock/);
+  assert.match(videoOverlay, /const publicPlaylist = await loadStaticEventPlaylistOverlay/);
+  assert.match(videoOverlay, /loadPublicEventPlaylistR2Only\(playlist\)/);
+  assert.doesNotMatch(videoOverlay, /fetchEventPlaylistVideos\(db, playlist\)/);
+  assert.match(videoOverlay, /resolvePublicOperationMode\(\{ allowD1: false \}\)/);
+  assert.match(videoOverlay, /if \(!isLiveApiEnabled\(operationMode\)\)/);
   assert.match(
-    videoPage,
-    /const operationMode = await resolvePublicOperationMode[\s\S]*?if \(!isLiveApiEnabled\(operationMode\)\)[\s\S]*?let viewerUser/,
+    videoOverlay,
+    /const operationMode = await resolvePublicOperationMode[\s\S]*?if \(!isLiveApiEnabled\(operationMode\)\)[\s\S]*?let context/,
   );
-  assert.match(videoPage, /error instanceof CurrentUserUnavailableError/);
+  assert.match(videoOverlay, /error instanceof CurrentUserUnavailableError/);
   assert.match(
-    videoPage,
-    /return \{ \.\.\.emptyOverlay, viewerUser, authUnavailable \}/,
+    videoOverlay,
+    /return emptyOverlay\(publicPlaylist\);/,
   );
   assert.doesNotMatch(
-    videoPage,
-    /return \{ \.\.\.emptyOverlay, viewerUser, authUnavailable: true \}/,
+    videoOverlay,
+    /fetchEventPlaylistVideos/,
   );
-  assert.match(videoPage, /if \(viewerActiveX\)/);
 
   assert.match(playlistQuery, /\.innerJoin\(\s*events,/);
   assert.match(playlistQuery, /eq\(events\.visibility_status, "public"\)/);

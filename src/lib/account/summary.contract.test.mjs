@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [route, island, publicLayout, accountMenu, signOutButton] = await Promise.all([
+const [route, island, publicHeader, publicLayout, accountMenu, signOutButton] = await Promise.all([
   readFile(
     new URL("../../../app/api/account/summary/route.ts", import.meta.url),
     "utf8",
   ),
   readFile(
     new URL("../../components/layout/PublicAccountIsland.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../../components/layout/PublicHeader.tsx", import.meta.url),
     "utf8",
   ),
   readFile(
@@ -38,17 +42,48 @@ test("account summary APIはprivate no-storeで最小DTOだけを返す", () => 
   assert.doesNotMatch(route, /id: headerUser\.id/);
 });
 
-test("degraded synthetic X entry does not replace the account display name", () => {
+test("degraded summaryはDB正本のlinked Xとapproval statusを維持する", () => {
   assert.match(route, /degraded: true/);
-  assert.match(route, /x_name: `@\$\{sessionUser\.active_x_user_id\}`/);
+  assert.match(route, /currentContext\.linkedXUsers\.map/);
+  assert.match(route, /normalizeXIdApprovalStatus\(entry\.approval_status\)/);
+  assert.match(route, /is_active: entry\.x_user_id === sessionUser\.active_x_user_id/);
+  assert.doesNotMatch(route, /approval_status: "approved" as const/);
   assert.match(accountMenu, /resolveAccountMenuDisplayName/);
   assert.match(accountMenu, /degraded: user\.degraded === true/);
+  assert.match(publicHeader, /canAccessAdmin: fetchedUser\.management\.canAccessAdmin/);
+  assert.doesNotMatch(
+    publicHeader,
+    /canAccessAdmin:\s*fetchedUser\.management\.canAccessAdmin\s*\|\|\s*serverUser\.management\.canAccessAdmin/,
+  );
+});
+
+test("summaryのlinked X空配列も正本としてSSRの古いActive Xを残さない", () => {
+  assert.match(publicHeader, /xIds: fetchedUser\.xIds/);
+  assert.doesNotMatch(
+    publicHeader,
+    /fetchedUser\.xIds\.length > 0 \? fetchedUser\.xIds : serverUser\.xIds/,
+  );
+});
+
+test("正常なloggedOut summaryはSSRの古いログイン表示を破棄する", () => {
+  assert.match(island, /confirmedLoggedOut: boolean/);
+  assert.match(island, /setConfirmedLoggedOut\(true\)/);
+  assert.match(island, /setConfirmedLoggedOut\(false\)/);
+  assert.match(
+    island,
+    /else \{[\s\S]*?setUser\(null\);\s*setConfirmedLoggedOut\(true\);\s*setUnavailable\(false\);/,
+  );
+  assert.match(
+    publicHeader,
+    /confirmedLoggedOut: accountConfirmedLoggedOut/,
+  );
+  assert.match(publicHeader, /const accountUser = accountConfirmedLoggedOut\s*\? null/);
 });
 
 test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.doesNotMatch(publicLayout, /getCurrentUser/);
   assert.doesNotMatch(publicLayout, /buildHeaderUser/);
-  assert.match(publicLayout, /CostGuardBanner/);
+  assert.doesNotMatch(publicLayout, /CostGuardBanner/);
   assert.doesNotMatch(publicLayout, /source=["']admin["']/);
   assert.match(island, /\/api\/account\/summary/);
   assert.match(island, /cache: "no-store"/);
@@ -56,18 +91,47 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /response\.status === 503 \|\| !response\.ok/);
   assert.match(island, /setUnavailable\(true\)/);
   assert.match(island, /summary\.unavailable/);
-  assert.match(island, /ログイン状態を一時的に確認できません/);
+  assert.match(island, /ログイン状態を再確認/);
   assert.match(island, /if \(unavailable \|\| !user\) \{/);
   assert.match(island, /kind: "unavailable"/);
   assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
+});
+
+test("公開headerはaccount summaryを操作時だけ取得し匿名pageviewのAuth fan-outを作らない", () => {
+  assert.match(publicHeader, /const publicClientAccount =\s*serverUser === undefined && !hydrateAccount/);
+  assert.match(
+    publicHeader,
+    /const hydrateOnOpen =\s*\(hydrateAccount && serverUser != null\) \|\| publicClientAccount/,
+  );
+  assert.match(publicHeader, /const accountHydrationOpen = accountOpen \|\| mobileOpen/);
+  assert.match(
+    publicHeader,
+    /usePublicAccountSummary\([\s\S]*hydrateOnOpen,[\s\S]*accountHydrationOpen,[\s\S]*false,[\s\S]*\)/,
+  );
+  assert.doesNotMatch(publicHeader, /deferPublicAccountUntilIdle/);
+  assert.match(publicHeader, /const accountUnknown =/);
+  assert.match(publicHeader, /const openAccountProbe = \(\) => \{/);
+  assert.match(publicHeader, /aria-label="アカウントを確認"/);
+  assert.match(publicHeader, /onClick=\{openAccountProbe\}/);
+  assert.match(
+    island,
+    /if \(lazy && !open && !refreshRequestedRef\.current\) \{/,
+  );
+});
+
+test("account summaryのin-flight requestは無期限にloadingを維持しない", () => {
+  assert.match(island, /const PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS = 5_000/);
+  assert.match(island, /const controller = new AbortController\(\)/);
+  assert.match(island, /controller\.abort\(\)/);
+  assert.match(island, /signal: controller\.signal/);
+  assert.match(island, /window\.clearTimeout\(timeoutId\)/);
+  assert.match(island, /return \{ kind: "unavailable" as const \}/);
 });
 
 test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得する", () => {
   assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /setRefreshNonce/);
-  assert.match(island, /\[enabled, preserveLoggedInOnFailure, lazy, open, refreshNonce\]/);
-  assert.match(island, /lazy && !open/);
   assert.match(island, /fetchedOnceRef/);
   assert.match(island, /nonLazyAttemptedRef/);
   assert.match(island, /!lazy && nonLazyAttemptedRef\.current/);
@@ -75,6 +139,20 @@ test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得す
   assert.match(island, /if \(inFlight\)/);
   assert.match(island, /refreshGenerationRef/);
   assert.match(island, /request\.generation !== refreshGenerationRef\.current/);
+});
+
+test("account summary一時失敗は自動loopせず明示的に再試行できる", () => {
+  assert.match(island, /PUBLIC_ACCOUNT_RETRY_EVENT/);
+  assert.match(island, /requestPublicAccountRetry/);
+  assert.match(island, /dispatchEvent\(new Event\(PUBLIC_ACCOUNT_RETRY_EVENT\)\)/);
+  assert.match(island, /addEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
+  assert.match(island, /removeEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
+  assert.match(island, /onClick=\{requestPublicAccountRetry\}/);
+  assert.match(island, /refreshRequestedRef\.current = true/);
+  assert.match(
+    island,
+    /!lazyRef\.current \|\| openRef\.current \|\| refreshRequestedRef\.current/,
+  );
 });
 
 test("ログアウトはSignOutButton経由でhard navigateする", () => {

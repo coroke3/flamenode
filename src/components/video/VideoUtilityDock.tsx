@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { PlaylistRail, type PlaylistEntry } from "./PlaylistRail";
 import { ChapterCommentPanel } from "./ChapterCommentPanel";
 import type { ChapterEntry } from "./ChapterTabs";
@@ -23,9 +23,11 @@ interface VideoUtilityDockProps {
 
   isLoggedIn: boolean;
   authUnavailable: boolean;
+  needsTermsAcceptance: boolean;
   canPost: boolean;
 
   loginHref: string;
+  rulesHref: string;
   settingsHref: string;
   activeXId?: string | null;
 }
@@ -42,17 +44,21 @@ export function VideoUtilityDock({
   chapters,
   isLoggedIn,
   authUnavailable,
+  needsTermsAcceptance,
   canPost,
   loginHref,
+  rulesHref,
   settingsHref,
   activeXId,
 }: VideoUtilityDockProps): React.ReactElement {
   const pathname = usePathname();
+  const router = useRouter();
   const dockRef = React.useRef<HTMLElement>(null);
   const closeButtonRef = React.useRef<HTMLButtonElement>(null);
   const previousTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const historyOwnedRef = React.useRef(false);
   const closingViaProgramRef = React.useRef(false);
+  const pendingNavigationRef = React.useRef<string | null>(null);
 
   const [activePanel, setActivePanel] =
     React.useState<ActivePanel>(null);
@@ -72,6 +78,7 @@ export function VideoUtilityDock({
 
     if (!currentState?.[HISTORY_STATE_KEY]) {
       closingViaProgramRef.current = false;
+      pendingNavigationRef.current = null;
       return;
     }
 
@@ -102,11 +109,22 @@ export function VideoUtilityDock({
   React.useEffect(() => {
     setActivePanel(null);
     historyOwnedRef.current = false;
+    pendingNavigationRef.current = null;
   }, [pathname]);
 
   React.useEffect(() => {
     if (!isMobile || !isOpen || historyOwnedRef.current) return;
-    window.history.pushState({ [HISTORY_STATE_KEY]: true }, "");
+    const currentState = window.history.state;
+    const baseState =
+      currentState && typeof currentState === "object"
+        ? (currentState as Record<string, unknown>)
+        : {};
+    // Next App Routerの__NA/tree等を上書きするとback/forwardが壊れるため、
+    // 既存history stateを保持したままdock所有markerだけを追加する。
+    window.history.pushState(
+      { ...baseState, [HISTORY_STATE_KEY]: true },
+      "",
+    );
     historyOwnedRef.current = true;
   }, [isMobile, isOpen]);
 
@@ -114,15 +132,26 @@ export function VideoUtilityDock({
     const onPopState = () => {
       if (closingViaProgramRef.current) {
         closingViaProgramRef.current = false;
+        const pendingNavigation = pendingNavigationRef.current;
+        pendingNavigationRef.current = null;
+        if (pendingNavigation) {
+          const nextUrl = new URL(pendingNavigation, window.location.href);
+          if (nextUrl.origin === window.location.origin) {
+            router.push(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+          } else {
+            window.location.assign(nextUrl.href);
+          }
+        }
         return;
       }
       setActivePanel(null);
       historyOwnedRef.current = false;
+      pendingNavigationRef.current = null;
     };
 
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [router]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -142,6 +171,7 @@ export function VideoUtilityDock({
   }, [isOpen]);
 
   const closePanel = React.useCallback(() => {
+    pendingNavigationRef.current = null;
     setActivePanel(null);
     releaseHistoryEntry();
 
@@ -183,12 +213,46 @@ export function VideoUtilityDock({
     [activePanel, closePanel],
   );
 
+  const handlePanelNavigationCapture = React.useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      if (!isOpen || !historyOwnedRef.current) return;
+      if (
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      if (anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+
+      const currentState = window.history.state as
+        | Record<string, unknown>
+        | null;
+      if (!currentState?.[HISTORY_STATE_KEY]) return;
+
+      // synthetic dock entryを残したままNext Linkがpushすると、戻る時に同じ動画URLを
+      // 2回踏む。リンク遷移は一度synthetic entryをbackで消費し、popstate後に実行する。
+      event.preventDefault();
+      pendingNavigationRef.current = anchor.href;
+      setActivePanel(null);
+      releaseHistoryEntry();
+    },
+    [isOpen, releaseHistoryEntry],
+  );
+
   return (
     <aside
       ref={dockRef}
       className={styles.dock}
       data-open={isOpen}
       aria-label="動画補助機能"
+      onClickCapture={handlePanelNavigationCapture}
     >
       <div className={styles.sheet}>
         <header className={styles.sheetHeader}>
@@ -249,8 +313,10 @@ export function VideoUtilityDock({
               chapters={chapters}
               isLoggedIn={isLoggedIn}
               authUnavailable={authUnavailable}
+              needsTermsAcceptance={needsTermsAcceptance}
               canPost={canPost}
               loginHref={loginHref}
+              rulesHref={rulesHref}
               settingsHref={settingsHref}
               activeXId={activeXId}
             />
