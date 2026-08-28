@@ -62,7 +62,13 @@ async function readPreviousGeneration(
 ): Promise<string | null> {
   try {
     const object = await bucket.get(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
-    if (!object) return null;
+    if (
+      !object ||
+      (typeof object.size === "number" &&
+        object.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES)
+    ) {
+      return null;
+    }
     const manifest = normalizeMemberSuggestionsV2Manifest(
       await object.json<unknown>(),
     );
