@@ -79,3 +79,14 @@ test("interactionは二重送信とserver action rejectから復旧する", () =
   assert.match(interaction, /finally \{/);
   assert.match(interaction, /actionInFlightRef\.current = false/);
 });
+
+test("server確定activeが楽観状態と違う場合もいいね件数を二重補正しない", () => {
+  assert.match(
+    interaction,
+    /previousCount \+\s*\(result\.active \? 1 : 0\) -\s*\(previousActive \? 1 : 0\)/s,
+  );
+  assert.doesNotMatch(
+    interaction,
+    /previousCount \+ \(result\.active \? 1 : -1\)/,
+  );
+});
