@@ -92,9 +92,11 @@ export function PublicHeader({
               management:
                 "degraded" in fetchedUser && fetchedUser.degraded
                   ? {
-                      canAccessAdmin:
-                        fetchedUser.management.canAccessAdmin ||
-                        serverUser.management.canAccessAdmin,
+                      // degraded summaryでもrole自体はcurrentUserのDB正本。
+                      // SSR時の古いadmin=trueをORして、降格後に管理リンクを復活させない。
+                      canAccessAdmin: fetchedUser.management.canAccessAdmin,
+                      // event staff権限だけは補助query失敗時に不明なのでSSR結果を維持する。
+                      // 実際の/manage認可はserver-side gateで再検証される。
                       canAccessManage:
                         fetchedUser.management.canAccessManage ||
                         serverUser.management.canAccessManage,
