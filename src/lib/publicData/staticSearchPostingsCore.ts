@@ -84,7 +84,7 @@ export function normalizeStaticSearchQuery(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
-/** Return the 1/2/3-character grams used for candidate lookup. */
+/** Return the longest (up to 3-character) grams used for candidate lookup. */
 export function staticSearchQueryGrams(query: string): string[] {
   const chars = [...normalizeStaticSearchQuery(query)];
   if (chars.length === 0) return [];
@@ -96,10 +96,25 @@ export function staticSearchQueryGrams(query: string): string[] {
   return [...grams];
 }
 
-function gramsForText(value: string): string[] {
+function normalizeMinGramLength(value: number | undefined): number {
+  if (value === undefined) return 1;
+  if (!Number.isSafeInteger(value)) {
+    throw new Error("invalid static search minimum gram length");
+  }
+  return Math.min(
+    STATIC_SEARCH_POSTINGS_MAX_GRAM_LENGTH,
+    Math.max(1, value),
+  );
+}
+
+function gramsForText(value: string, minGramLength: number): string[] {
   const chars = [...normalizeStaticSearchQuery(value)];
   const grams = new Set<string>();
-  for (let length = 1; length <= STATIC_SEARCH_POSTINGS_MAX_GRAM_LENGTH; length += 1) {
+  for (
+    let length = minGramLength;
+    length <= STATIC_SEARCH_POSTINGS_MAX_GRAM_LENGTH;
+    length += 1
+  ) {
     for (let index = 0; index + length <= chars.length; index += 1) {
       grams.add(chars.slice(index, index + length).join(""));
     }
@@ -113,12 +128,17 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
   generation: string;
   textOf: (item: T) => readonly string[];
   keyOf: (item: T) => string;
+  /** Default 1 for existing public search callers. */
+  minGramLength?: number;
 }): StaticSearchPostingArtifacts<T> {
+  const minGramLength = normalizeMinGramLength(args.minGramLength);
   const byGram = new Map<string, Map<string, T>>();
   for (const item of args.items) {
     const key = normalizeString(args.keyOf(item));
     if (!key) continue;
-    const grams = new Set(args.textOf(item).flatMap(gramsForText));
+    const grams = new Set(
+      args.textOf(item).flatMap((value) => gramsForText(value, minGramLength)),
+    );
     for (const gram of grams) {
       const entries = byGram.get(gram) ?? new Map<string, T>();
       entries.set(key, item);
@@ -140,12 +160,26 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
     const values = [...(byGram.get(gram)?.values() ?? [])];
     const pages: number[] = [];
     const total = values.length;
-    for (let offset = 0, part = 0; offset < values.length; offset += STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS, part += 1) {
+    for (
+      let offset = 0, part = 0;
+      offset < values.length;
+      offset += STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS, part += 1
+    ) {
       const pageRecords = bucketRecords[bucket];
-      const items = values.slice(offset, offset + STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS);
+      const items = values.slice(
+        offset,
+        offset + STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS,
+      );
       let currentPage = pageRecords.at(-1);
-      const currentSize = currentPage?.reduce((count, record) => count + record.items.length, 0) ?? 0;
-      if (!currentPage || currentSize + items.length > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS) {
+      const currentSize =
+        currentPage?.reduce(
+          (count, record) => count + record.items.length,
+          0,
+        ) ?? 0;
+      if (
+        !currentPage ||
+        currentSize + items.length > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS
+      ) {
         currentPage = [];
         pageRecords.push(currentPage);
       }
@@ -162,7 +196,11 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
 
   const pages: StaticSearchPostingArtifacts<T>["pages"] = [];
   const directories: StaticSearchPostingArtifacts<T>["directories"] = [];
-  for (let bucket = 0; bucket < STATIC_SEARCH_POSTINGS_BUCKET_COUNT; bucket += 1) {
+  for (
+    let bucket = 0;
+    bucket < STATIC_SEARCH_POSTINGS_BUCKET_COUNT;
+    bucket += 1
+  ) {
     const records = bucketRecords[bucket];
     if (records.length === 0) continue;
     for (let index = 0; index < records.length; index += 1) {
@@ -222,12 +260,26 @@ export function normalizeStaticSearchPostingManifest(
   value: unknown,
 ): StaticSearchPostingManifest | null {
   const row = asRecord(value);
-  if (!row || Number(row.schema_version) !== 1 || row.backend !== "postings-v1") return null;
+  if (
+    !row ||
+    Number(row.schema_version) !== 1 ||
+    row.backend !== "postings-v1"
+  )
+    return null;
   const generation = normalizeGeneration(row.generation);
   const generatedAt = Number(row.generated_at);
   const total = Number(row.total);
   const bucketCount = Number(row.bucket_count);
-  if (!generation || !Number.isFinite(generatedAt) || generatedAt < 0 || !Number.isSafeInteger(total) || total < 0 || total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS || bucketCount !== STATIC_SEARCH_POSTINGS_BUCKET_COUNT) return null;
+  if (
+    !generation ||
+    !Number.isFinite(generatedAt) ||
+    generatedAt < 0 ||
+    !Number.isSafeInteger(total) ||
+    total < 0 ||
+    total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS ||
+    bucketCount !== STATIC_SEARCH_POSTINGS_BUCKET_COUNT
+  )
+    return null;
   let buckets: number[] | undefined;
   if (row.buckets !== undefined) {
     if (!Array.isArray(row.buckets)) return null;
@@ -263,14 +315,37 @@ export function normalizeStaticSearchPostingDirectory(
   if (!row || Number(row.schema_version) !== 1) return null;
   const generation = normalizeGeneration(row.generation);
   const bucket = Number(row.bucket);
-  if (!generation || !Number.isSafeInteger(bucket) || bucket < 0 || bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT || !row.grams || typeof row.grams !== "object" || Array.isArray(row.grams)) return null;
+  if (
+    !generation ||
+    !Number.isSafeInteger(bucket) ||
+    bucket < 0 ||
+    bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT ||
+    !row.grams ||
+    typeof row.grams !== "object" ||
+    Array.isArray(row.grams)
+  )
+    return null;
   const grams: Record<string, StaticSearchPostingDirectoryEntry> = {};
-  for (const [gram, raw] of Object.entries(row.grams as Record<string, unknown>)) {
+  for (const [gram, raw] of Object.entries(
+    row.grams as Record<string, unknown>,
+  )) {
     const entry = asRecord(raw);
-    if (!entry || !Array.isArray(entry.pages) || entry.pages.length > STATIC_SEARCH_POSTINGS_MAX_PAGES_PER_GRAM) return null;
+    if (
+      !entry ||
+      !Array.isArray(entry.pages) ||
+      entry.pages.length > STATIC_SEARCH_POSTINGS_MAX_PAGES_PER_GRAM
+    )
+      return null;
     const pages = entry.pages.map(Number);
     const total = Number(entry.total);
-    if (!gram || !pages.every((page) => Number.isSafeInteger(page) && page > 0) || !Number.isSafeInteger(total) || total < 0 || total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS) return null;
+    if (
+      !gram ||
+      !pages.every((page) => Number.isSafeInteger(page) && page > 0) ||
+      !Number.isSafeInteger(total) ||
+      total < 0 ||
+      total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS
+    )
+      return null;
     grams[gram] = { pages, total };
   }
   return { schema_version: 1, generation, bucket, grams };
@@ -285,13 +360,27 @@ export function normalizeStaticSearchPostingPage<T>(
   const generation = normalizeGeneration(row.generation);
   const bucket = Number(row.bucket);
   const page = Number(row.page);
-  if (!generation || !Number.isSafeInteger(bucket) || bucket < 0 || bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT || !Number.isSafeInteger(page) || page < 1 || !Array.isArray(row.records)) return null;
+  if (
+    !generation ||
+    !Number.isSafeInteger(bucket) ||
+    bucket < 0 ||
+    bucket >= STATIC_SEARCH_POSTINGS_BUCKET_COUNT ||
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    !Array.isArray(row.records)
+  )
+    return null;
   const records: StaticSearchPostingPage<T>["records"] = [];
   if (row.records.length > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS) return null;
   let pageItemCount = 0;
   for (const raw of row.records) {
     const record = asRecord(raw);
-    if (!record || typeof record.gram !== "string" || !Array.isArray(record.items)) return null;
+    if (
+      !record ||
+      typeof record.gram !== "string" ||
+      !Array.isArray(record.items)
+    )
+      return null;
     const items: T[] = [];
     for (const item of record.items) {
       const normalized = normalizeItem(item);
@@ -301,20 +390,37 @@ export function normalizeStaticSearchPostingPage<T>(
     const part = Number(record.part);
     const total = Number(record.total);
     pageItemCount += items.length;
-    if (pageItemCount > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS || !Number.isSafeInteger(part) || part < 0 || !Number.isSafeInteger(total) || total < items.length || total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS) return null;
+    if (
+      pageItemCount > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS ||
+      !Number.isSafeInteger(part) ||
+      part < 0 ||
+      !Number.isSafeInteger(total) ||
+      total < items.length ||
+      total > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS
+    )
+      return null;
     records.push({ gram: record.gram, part, total, items });
   }
   return { schema_version: 1, generation, bucket, page, records };
 }
 
-export function staticSearchPostingManifestObjectKey(generation: string): string {
+export function staticSearchPostingManifestObjectKey(
+  generation: string,
+): string {
   return `search-postings.v1/${generation}/manifest.json`;
 }
 
-export function staticSearchPostingDirectoryObjectKey(generation: string, bucket: number): string {
+export function staticSearchPostingDirectoryObjectKey(
+  generation: string,
+  bucket: number,
+): string {
   return `search-postings.v1/${generation}/directory/${bucket}.json`;
 }
 
-export function staticSearchPostingPageObjectKey(generation: string, bucket: number, page: number): string {
+export function staticSearchPostingPageObjectKey(
+  generation: string,
+  bucket: number,
+  page: number,
+): string {
   return `search-postings.v1/${generation}/bucket/${bucket}/${page}.json`;
 }
