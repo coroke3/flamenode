@@ -184,6 +184,7 @@ export function writePublicJsonCacheBestEffort(
 
     const safeTtl = Math.max(1, Math.floor(ttlSeconds));
     const serialized = JSON.stringify(payload);
+    if (typeof serialized !== "string") return;
     // Cache miss/R2 hit時だけ通るbackground write。readerと同じUTF-8 byte上限を
     // allocation-freeに数え、巨大entryをCache APIへ渡さない。
     if (utf8ByteLengthExceeds(serialized, PUBLIC_JSON_CACHE_MAX_BYTES)) return;
