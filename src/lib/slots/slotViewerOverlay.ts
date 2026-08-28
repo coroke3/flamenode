@@ -37,11 +37,41 @@ function userNeedsTermsAcceptance(user: {
 
 /**
  * 枠ページのviewer依存情報だけを取得するprivate overlay。
- * 公開slot一覧はこの関数に依存させず、匿名SSRでAuth.jsや所有権判定を実行しない。
+ *
+ * まず公開イベントの存在だけを狭いD1 queryで確認する。これにより
+ * - 非公開/存在しないeventでAuth.jsやslot全件queryを実行しない
+ * - 匿名viewerではslot全件queryを実行しない
+ * - event_not_found と auth/database unavailable を混同しない
+ *
+ * 公開slot一覧自体はこの関数に依存させない。
  */
 export async function loadSlotViewerOverlay(
   eventId: string,
 ): Promise<SlotViewerOverlayDto | null> {
+  const eventRow = await withDatabase(async (db) =>
+    (
+      await db
+        .select({
+          id: eventsTable.id,
+          start_time: eventsTable.start_time,
+          end_time: eventsTable.end_time,
+          entry_start_time: eventsTable.entry_start_time,
+          entry_end_time: eventsTable.entry_end_time,
+          slot_visibility_mode: eventsTable.slot_visibility_mode,
+        })
+        .from(eventsTable)
+        .where(
+          and(
+            eq(eventsTable.id, eventId),
+            eq(eventsTable.visibility_status, "public"),
+          )!,
+        )
+        .limit(1)
+    )[0] ?? null,
+  );
+
+  if (!eventRow) return null;
+
   let viewer: Awaited<ReturnType<typeof getCurrentUser>> = null;
   try {
     viewer = await getCurrentUser();
@@ -63,25 +93,7 @@ export async function loadSlotViewerOverlay(
 
   try {
     const loaded = await withDatabase(async (db) => {
-      const [event, onboarding, slotRows] = await Promise.all([
-        db
-          .select({
-            id: eventsTable.id,
-            visibility_status: eventsTable.visibility_status,
-            start_time: eventsTable.start_time,
-            end_time: eventsTable.end_time,
-            entry_start_time: eventsTable.entry_start_time,
-            entry_end_time: eventsTable.entry_end_time,
-            slot_visibility_mode: eventsTable.slot_visibility_mode,
-          })
-          .from(eventsTable)
-          .where(
-            and(
-              eq(eventsTable.id, eventId),
-              eq(eventsTable.visibility_status, "public"),
-            )!,
-          )
-          .limit(1),
+      const [onboarding, slotRows] = await Promise.all([
         getOnboardingState(db, viewer),
         db
           .select({
@@ -98,9 +110,6 @@ export async function loadSlotViewerOverlay(
           .leftJoin(videosTable, eq(slotsTable.video_id, videosTable.id))
           .where(eq(slotsTable.event_id, eventId)),
       ]);
-
-      const eventRow = event[0];
-      if (!eventRow) return null;
 
       const now = Math.floor(Date.now() / 1000);
       let operatorOverrideAllowed = false;
@@ -198,7 +207,7 @@ export async function loadSlotViewerOverlay(
     return loaded ?? unavailableForViewer();
   } catch (error) {
     unstable_rethrow(error);
-    console.error("[slot-viewer-overlay] load failed", {
+    console.error("[slot-viewer-overlay] viewer load failed", {
       eventId,
       error: error instanceof Error ? error.name : "unknown",
     });
