@@ -26,7 +26,7 @@ export const MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES = 1536;
 export const MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES = 1024 * 1024;
 /**
  * 内部候補APIは2文字未満をR2検索へ流さないため、1文字postingは到達不能。
- * 生成対象から除外してR2 object数・generator CPU・40-object budget消費を抑える。
+ * builder段階から生成せず、generator CPU・メモリ・R2 object数を抑える。
  */
 export const MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH = 2;
 
@@ -71,75 +71,16 @@ export function memberSuggestionsV2PageObjectKey(
   return `${MEMBER_SUGGESTIONS_V2_GENERATION_PREFIX}/${safeGeneration(generation)}/bucket/${safeBucket(bucket)}/${safePage(page)}.json`;
 }
 
-function memberSuggestionGramLength(gram: string): number {
-  return [...gram].length;
-}
-
-/**
- * 共通posting builderは1/2/3文字gramを生成するが、このAPIは2文字未満を
- * request pathで拒否する。到達不能な1文字record/directory/pageをpublish前に落とす。
- * page番号はgeneration固有object keyなので詰め直さず、directoryが参照する番号を維持する。
- */
-function removeUnqueriedShortGrams(
-  artifacts: ReturnType<typeof buildStaticSearchPostingArtifacts<MemberSuggestionItem>>,
-): ReturnType<typeof buildStaticSearchPostingArtifacts<MemberSuggestionItem>> {
-  const pages = artifacts.pages
-    .map(({ bucket, page }) => {
-      const records = page.records.filter(
-        (record) =>
-          memberSuggestionGramLength(record.gram) >=
-          MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH,
-      );
-      if (records.length === 0) return null;
-      return { bucket, page: { ...page, records } };
-    })
-    .filter(
-      (
-        entry,
-      ): entry is ReturnType<
-        typeof buildStaticSearchPostingArtifacts<MemberSuggestionItem>
-      >["pages"][number] => entry !== null,
-    );
-
-  const directories = artifacts.directories
-    .map(({ bucket, directory }) => {
-      const grams = Object.fromEntries(
-        Object.entries(directory.grams).filter(
-          ([gram]) =>
-            memberSuggestionGramLength(gram) >=
-            MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH,
-        ),
-      );
-      if (Object.keys(grams).length === 0) return null;
-      return { bucket, directory: { ...directory, grams } };
-    })
-    .filter(
-      (
-        entry,
-      ): entry is ReturnType<
-        typeof buildStaticSearchPostingArtifacts<MemberSuggestionItem>
-      >["directories"][number] => entry !== null,
-    );
-
-  return {
-    manifest: {
-      ...artifacts.manifest,
-      buckets: directories.map(({ bucket }) => bucket),
-    },
-    directories,
-    pages,
-  };
-}
-
 export function buildMemberSuggestionsV2Artifacts(args: {
   items: readonly MemberSuggestionItem[];
   generatedAt: number;
   generation: string;
 }) {
-  const artifacts = buildStaticSearchPostingArtifacts({
+  return buildStaticSearchPostingArtifacts({
     items: args.items,
     generatedAt: args.generatedAt,
     generation: args.generation,
+    minGramLength: MEMBER_SUGGESTIONS_V2_MIN_GRAM_LENGTH,
     keyOf: (item) => item.x_user_id,
     textOf: (item) => [
       item.x_user_id,
@@ -148,7 +89,6 @@ export function buildMemberSuggestionsV2Artifacts(args: {
       ...item.nameAliases,
     ].map(normalizeMemberSearchText),
   });
-  return removeUnqueriedShortGrams(artifacts);
 }
 
 export function memberSuggestionQueryGrams(query: string): string[] {
