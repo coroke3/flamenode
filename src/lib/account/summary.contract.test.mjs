@@ -52,6 +52,16 @@ test("degraded summaryはDB正本のlinked Xとapproval statusを維持する", 
   assert.match(accountMenu, /degraded: user\.degraded === true/);
 });
 
+test("summaryのlinked X空配列も正本としてSSRの古いActive Xを残さない", () => {
+  assert.match(publicHeader, /xIds: fetchedUser\.xIds/);
+  assert.doesNotMatch(
+    publicHeader,
+    /fetchedUser\.xIds\.length > 0 \? fetchedUser\.xIds : serverUser\.xIds/,
+  );
+  assert.match(publicHeader, /serverUser\s*\? \{/);
+  assert.match(publicHeader, /: fetchedUser\s*: serverUser/);
+});
+
 test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.doesNotMatch(publicLayout, /getCurrentUser/);
   assert.doesNotMatch(publicLayout, /buildHeaderUser/);
