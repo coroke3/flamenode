@@ -63,7 +63,7 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /response\.status === 503 \|\| !response\.ok/);
   assert.match(island, /setUnavailable\(true\)/);
   assert.match(island, /summary\.unavailable/);
-  assert.match(island, /ログイン状態を一時的に確認できません/);
+  assert.match(island, /ログイン状態を再確認/);
   assert.match(island, /if \(unavailable \|\| !user\) \{/);
   assert.match(island, /kind: "unavailable"/);
   assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
@@ -93,6 +93,16 @@ test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得す
   assert.match(island, /if \(inFlight\)/);
   assert.match(island, /refreshGenerationRef/);
   assert.match(island, /request\.generation !== refreshGenerationRef\.current/);
+});
+
+test("account summary一時失敗は自動loopせず明示的に再試行できる", () => {
+  assert.match(island, /PUBLIC_ACCOUNT_RETRY_EVENT/);
+  assert.match(island, /requestPublicAccountRetry/);
+  assert.match(island, /dispatchEvent\(new Event\(PUBLIC_ACCOUNT_RETRY_EVENT\)\)/);
+  assert.match(island, /addEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
+  assert.match(island, /removeEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
+  assert.match(island, /onClick=\{requestPublicAccountRetry\}/);
+  assert.match(island, /refreshRequestedRef\.current = true/);
 });
 
 test("ログアウトはSignOutButton経由でhard navigateする", () => {
