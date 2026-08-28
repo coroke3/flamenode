@@ -96,9 +96,10 @@ test("公開アイコンV2の固定manifestはstale cacheを復活させない",
 });
 
 test("公開アイコン補完は共有mapからR2 users indexへ降りD1を使わない", () => {
-  const iconLoader = source.match(
-    /const loadPublicXIconMapOptionalImpl = cache\([\s\S]*?\n\);/,
-  )?.[0] ?? "";
+  const v1Start = source.indexOf("async function loadPublicXIconMapV1(");
+  const v1End = source.indexOf("const loadPublicXIconV2Manifest", v1Start);
+  assert.ok(v1Start >= 0 && v1End > v1Start);
+  const iconLoader = source.slice(v1Start, v1End);
 
   assert.match(iconLoader, /PUBLIC_X_ICON_MAP_OBJECT_KEY/);
   assert.match(iconLoader, /key: "users\/index\.json"/);
