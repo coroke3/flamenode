@@ -5,6 +5,7 @@ import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
 import type { VideoViewerOverlayDto } from "./videoViewerOverlayCore";
 
 const CACHE_TTL_MS = 30_000;
+const FAILURE_CACHE_TTL_MS = 3_000;
 const MAX_CACHE_ENTRIES = 64;
 const MAX_PRIVATE_CHAPTERS = 500;
 const MAX_PLAYLIST_ITEMS = 500;
@@ -14,6 +15,7 @@ const VIDEO_VIEWER_OVERLAY_CHANGED_EVENT =
 type CacheEntry = {
   value?: VideoViewerOverlayDto;
   fetchedAt?: number;
+  ttlMs?: number;
   promise?: Promise<VideoViewerOverlayDto>;
   requestToken?: symbol;
 };
@@ -182,7 +184,7 @@ async function fetchOverlay(
   if (
     existing?.value &&
     existing.fetchedAt != null &&
-    now - existing.fetchedAt <= CACHE_TTL_MS
+    now - existing.fetchedAt <= (existing.ttlMs ?? CACHE_TTL_MS)
   ) {
     setCacheEntry(key, existing);
     return existing.value;
@@ -217,7 +219,13 @@ async function fetchOverlay(
     .catch(() => emptyOverlay(true))
     .then((value) => {
       if (cache.get(key)?.requestToken === requestToken) {
-        setCacheEntry(key, { value, fetchedAt: Date.now() });
+        setCacheEntry(key, {
+          value,
+          fetchedAt: Date.now(),
+          // 一時障害だけはAPIのRetry-After(3s)と同程度で再試行可能にする。
+          // 正常viewer情報と同じ30秒保持すると、復旧後も失敗状態を再利用してしまう。
+          ttlMs: value.authUnavailable ? FAILURE_CACHE_TTL_MS : CACHE_TTL_MS,
+        });
       }
       return value;
     });
