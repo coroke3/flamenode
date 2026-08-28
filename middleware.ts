@@ -19,6 +19,7 @@ export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
 
+let configuredSiteOrigin: string | undefined;
 let configuredSiteOriginPromise: Promise<string | undefined> | null = null;
 
 async function loadConfiguredSiteOrigin(): Promise<string | undefined> {
@@ -41,8 +42,24 @@ async function loadConfiguredSiteOrigin(): Promise<string | undefined> {
 }
 
 function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
-  configuredSiteOriginPromise ??= loadConfiguredSiteOrigin();
-  return configuredSiteOriginPromise;
+  if (configuredSiteOrigin) return Promise.resolve(configuredSiteOrigin);
+  if (configuredSiteOriginPromise) return configuredSiteOriginPromise;
+
+  const request = loadConfiguredSiteOrigin()
+    .then((value) => {
+      // 正常に得られた設定だけをisolate内で保持する。初回context取得失敗や
+      // 一時的な未設定(undefined)を永続cacheすると、そのisolateだけcanonical
+      // redirectが以後ずっと無効になるため、undefinedは次requestで再試行する。
+      if (value) configuredSiteOrigin = value;
+      return value;
+    })
+    .finally(() => {
+      if (configuredSiteOriginPromise === request) {
+        configuredSiteOriginPromise = null;
+      }
+    });
+  configuredSiteOriginPromise = request;
+  return request;
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
