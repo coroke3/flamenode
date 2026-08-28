@@ -51,7 +51,10 @@ const PAGE_SIZE = 24;
 const LIST_HREF = "/list";
 const MAX_SEARCH_LENGTH = 100;
 const MAX_EVENT_ID_LENGTH = 128;
-const MAX_PAGE = 100_000;
+// static list projection is bounded to 5,000 items. Keep degraded D1 fallback
+// within the same observable range so arbitrary ?page= values cannot create
+// multi-million-row OFFSET scans when an artifact is missing.
+const MAX_PAGE = Math.ceil(5_000 / PAGE_SIZE);
 const MIN_SEARCH_CHARS = 2;
 
 function firstSearchParam(value: SearchParamValue, fallback = ""): string {
