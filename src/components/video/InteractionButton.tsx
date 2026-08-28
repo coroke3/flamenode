@@ -118,8 +118,15 @@ export function InteractionButton({
             typeof previousCount === "number" &&
             result.active !== optimisticActive
           ) {
+            // server確定状態と操作前状態の差分だけを件数へ反映する。
+            // 例: 操作前ON→楽観OFF→server ONなら元件数へ戻す（+1しない）。
             setDisplayCount(
-              Math.max(0, previousCount + (result.active ? 1 : -1)),
+              Math.max(
+                0,
+                previousCount +
+                  (result.active ? 1 : 0) -
+                  (previousActive ? 1 : 0),
+              ),
             );
           }
         }
