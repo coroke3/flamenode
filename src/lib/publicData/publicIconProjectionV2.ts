@@ -57,11 +57,14 @@ export function publicXIconV2ShardObjectKey(
   generation: string,
   shard: number,
 ): string {
-  const safeShard = Math.floor(shard);
-  if (safeShard < 0 || safeShard >= PUBLIC_X_ICON_V2_SHARD_COUNT) {
+  if (
+    !Number.isSafeInteger(shard) ||
+    shard < 0 ||
+    shard >= PUBLIC_X_ICON_V2_SHARD_COUNT
+  ) {
     throw new Error("invalid public icon v2 shard");
   }
-  return `${PUBLIC_X_ICON_V2_GENERATION_PREFIX}/${safeGeneration(generation)}/${safeShard
+  return `${PUBLIC_X_ICON_V2_GENERATION_PREFIX}/${safeGeneration(generation)}/${shard
     .toString(16)
     .padStart(2, "0")}.json`;
 }
