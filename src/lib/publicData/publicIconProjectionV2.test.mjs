@@ -85,6 +85,37 @@ test("public icon v2 normalizers fail closed on generation/shard mismatch", () =
   assert.ok(manifest);
   assert.deepEqual(manifest.shards, [0, 2]);
 
+  assert.equal(
+    normalizePublicXIconV2Manifest({
+      schema_version: 2,
+      generation: "gen-1",
+      generated_at: 123,
+      shard_count: "16",
+      shards: [0],
+    }),
+    null,
+  );
+  assert.equal(
+    normalizePublicXIconV2Manifest({
+      schema_version: 2,
+      generation: "gen-1",
+      generated_at: "123",
+      shard_count: 16,
+      shards: [0],
+    }),
+    null,
+  );
+  assert.equal(
+    normalizePublicXIconV2Manifest({
+      schema_version: 2,
+      generation: "gen-1",
+      generated_at: 123,
+      shard_count: 16,
+      shards: ["0"],
+    }),
+    null,
+  );
+
   const xid = "alpha";
   const shard = publicXIconV2ShardForXId(xid);
   const key = publicXIconV2ShardObjectKey("gen-1", shard);
@@ -112,6 +143,26 @@ test("public icon v2 normalizers fail closed on generation/shard mismatch", () =
       generation: "gen-1",
       shard: (shard + 1) % 16,
     }),
+    null,
+  );
+  assert.equal(
+    normalizePublicXIconV2Shard({ ...valid, shard: String(shard) }, { generation: "gen-1", shard }),
+    null,
+  );
+  assert.equal(
+    normalizePublicXIconV2Shard({ ...valid, generated_at: "123" }, { generation: "gen-1", shard }),
+    null,
+  );
+  assert.equal(
+    normalizePublicXIconV2Shard(
+      {
+        ...valid,
+        entries: {
+          [`@${xid}`]: { icon_url: null, source: "none" },
+        },
+      },
+      { generation: "gen-1", shard },
+    ),
     null,
   );
 });
