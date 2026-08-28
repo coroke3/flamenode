@@ -10,6 +10,8 @@ import {
   parseMemberSuggestionsManifest,
   assertMemberSuggestionsRowLimit,
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+  MEMBER_SUGGESTIONS_MAX_ROWS,
+  MEMBER_SUGGESTIONS_MAX_X_ALIASES,
 } from "./memberSuggestionsCore.ts";
 
 test("Foo / foo / FOO は正規化X ID foo の1件へ統合される", () => {
@@ -138,6 +140,14 @@ test("manifest / index payload検証は不正をnullで拒否する", () => {
   assert.ok(parseMemberSuggestionsManifest(manifest));
   assert.equal(parseMemberSuggestionsManifest({ ...manifest, schema_version: 99 }), null);
   assert.equal(parseMemberSuggestionsManifest({ ...manifest, generation: "../x" }), null);
+  assert.equal(
+    parseMemberSuggestionsManifest({ ...manifest, object_key: "wrong/index.json" }),
+    null,
+  );
+  assert.equal(
+    parseMemberSuggestionsManifest({ ...manifest, total: MEMBER_SUGGESTIONS_MAX_ROWS + 1 }),
+    null,
+  );
   assert.equal(parseMemberSuggestionsManifest(null), null);
   assert.ok(parseMemberSuggestionsIndex(index, "gen1"));
   // generation不一致は拒否。
@@ -152,6 +162,38 @@ test("manifest / index payload検証は不正をnullで拒否する", () => {
   assert.equal(
     parseMemberSuggestionsIndex(
       { ...index, items: [{ ...index.items[0], x_user_id: "MOCHI" }] },
+      "gen1",
+    ),
+    null,
+  );
+  assert.equal(
+    parseMemberSuggestionsIndex(
+      {
+        ...index,
+        items: [
+          {
+            ...index.items[0],
+            xAliases: Array.from(
+              { length: MEMBER_SUGGESTIONS_MAX_X_ALIASES + 1 },
+              (_, i) => `alias${i}`,
+            ),
+          },
+        ],
+      },
+      "gen1",
+    ),
+    null,
+  );
+  assert.equal(
+    parseMemberSuggestionsIndex(
+      { ...index, items: [{ ...index.items[0], xAliases: ["INVALID-ALIAS"] }] },
+      "gen1",
+    ),
+    null,
+  );
+  assert.equal(
+    parseMemberSuggestionsIndex(
+      { ...index, items: [{ ...index.items[0], occurrenceCount: 1.5 }] },
       "gen1",
     ),
     null,
