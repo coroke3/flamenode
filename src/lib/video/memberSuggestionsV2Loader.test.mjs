@@ -77,6 +77,15 @@ function fixture() {
   return { objects, generation };
 }
 
+test("V2 object key helperはNaN/小数/無限値を受け付けない", () => {
+  assert.throws(() => memberSuggestionsV2DirectoryObjectKey("gen", Number.NaN));
+  assert.throws(() => memberSuggestionsV2DirectoryObjectKey("gen", 1.5));
+  assert.throws(() =>
+    memberSuggestionsV2PageObjectKey("gen", 0, Number.POSITIVE_INFINITY),
+  );
+  assert.throws(() => memberSuggestionsV2PageObjectKey("gen", 0, 1.25));
+});
+
 test("V2 loaderはqueryに必要なpostingだけで候補を返しV1 indexを読まない", async () => {
   resetMemberSuggestionsV2CacheForTest();
   const { objects, generation } = fixture();
