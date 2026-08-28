@@ -19,7 +19,8 @@ test("mount済みviewer overlay hookはmutation eventを受けてcacheを破棄�
   assert.match(client, /VIDEO_VIEWER_OVERLAY_CHANGED_EVENT/);
   assert.match(client, /invalidateVideoViewerOverlay\(videoId\)/);
   assert.match(client, /setNonce\(\(value\) => value \+ 1\)/);
-  assert.match(client, /if \(existing\?\.promise\) return existing\.promise/);
+  assert.match(client, /if \(existing\?\.promise\) \{/);
+  assert.match(client, /return existing\.promise/);
 });
 
 test("invalidate前の遅いrequestは新しいviewer cacheを上書きしない", () => {
@@ -29,11 +30,19 @@ test("invalidate前の遅いrequestは新しいviewer cacheを上書きしない
     client,
     /cache\.get\(key\)\?\.requestToken === requestToken/,
   );
-  assert.match(client, /cache\.set\(key, \{ promise, requestToken \}\)/);
+  assert.match(client, /setCacheEntry\(key, \{ promise, requestToken \}\)/);
 });
 
 test("viewer overlayのnon-OK responseは未ログイン扱いにせずfail-closedにする", () => {
   assert.match(client, /if \(!response\.ok\) return emptyOverlay\(true\)/);
+});
+
+test("viewer overlay cacheはprivate payloadを無制限保持しない", () => {
+  assert.match(client, /const MAX_CACHE_ENTRIES = 64/);
+  assert.match(client, /function setCacheEntry/);
+  assert.match(client, /while \(cache\.size > MAX_CACHE_ENTRIES\)/);
+  assert.match(client, /cache\.delete\(oldestKey\)/);
+  assert.match(client, /if \(existing\) cache\.delete\(key\)/);
 });
 
 test("interactionは二重送信とserver action rejectから復旧する", () => {
