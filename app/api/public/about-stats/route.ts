@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { getEnv } from "@/lib/cloudflare";
 import {
-  normalizeStaticTop,
-  type StaticTopPayload,
-} from "@/lib/publicData/staticTopCore";
+  normalizeTopStatsSection,
+  TOP_STATS_OBJECT_KEY,
+} from "@/lib/publicData/staticTopSectionsCore";
 
-const TOP_OBJECT_KEY = "top.json";
-const MAX_TOP_BYTES = 8 * 1024 * 1024;
+const MAX_STATS_BYTES = 64 * 1024;
 const HEADERS = {
   "Cache-Control": "public, max-age=300, stale-while-revalidate=1800",
   "X-Content-Type-Options": "nosniff",
@@ -27,25 +26,24 @@ function unavailable(): Response {
 export async function GET(): Promise<Response> {
   try {
     const bucket = getEnv().BUCKET;
-    const object = await bucket.get(TOP_OBJECT_KEY);
-    if (!object || object.size > MAX_TOP_BYTES) return unavailable();
+    const object = await bucket.get(TOP_STATS_OBJECT_KEY);
+    if (!object || object.size > MAX_STATS_BYTES) return unavailable();
 
-    const payload = await object.json<StaticTopPayload>();
-    const top = normalizeStaticTop(payload);
-    if (!top) return unavailable();
+    const stats = normalizeTopStatsSection(await object.json<unknown>());
+    if (!stats) return unavailable();
 
     return NextResponse.json(
       {
         stats: {
-          publicVideos: top.stats.publicVideos,
-          creators: top.stats.creators,
-          events: top.stats.publicEvents ?? top.stats.activeEvents,
+          publicVideos: stats.stats.public_videos,
+          creators: stats.stats.creators,
+          events: stats.stats.public_events,
         },
       },
       { headers: HEADERS },
     );
   } catch (error) {
-    console.warn("[about-stats] R2 read failed", {
+    console.warn("[about-stats] compact R2 stats read failed", {
       error: error instanceof Error ? error.name : "unknown",
     });
     return unavailable();
