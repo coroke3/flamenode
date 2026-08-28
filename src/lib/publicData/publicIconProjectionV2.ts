@@ -53,6 +53,14 @@ function safeGeneration(value: string): string {
   return generation;
 }
 
+function normalizeGeneratedAt(value: unknown): number | null {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+    ? value
+    : null;
+}
+
 export function publicXIconV2ShardObjectKey(
   generation: string,
   shard: number,
@@ -142,29 +150,38 @@ export function normalizePublicXIconV2Manifest(
   const row = value as Record<string, unknown>;
   if (row.schema_version !== PUBLIC_X_ICON_V2_SCHEMA_VERSION) return null;
   const generation = normalizeGeneration(row.generation);
-  if (!generation || Number(row.shard_count) !== PUBLIC_X_ICON_V2_SHARD_COUNT) {
-    return null;
-  }
-  if (!Array.isArray(row.shards)) return null;
-  const shards = [...new Set(row.shards.map(Number))];
   if (
-    shards.some(
-      (shard) =>
-        !Number.isInteger(shard) ||
-        shard < 0 ||
-        shard >= PUBLIC_X_ICON_V2_SHARD_COUNT,
-    )
+    !generation ||
+    row.shard_count !== PUBLIC_X_ICON_V2_SHARD_COUNT ||
+    !Array.isArray(row.shards)
   ) {
     return null;
   }
-  const generatedAt = Number(row.generated_at);
+
+  const shards: number[] = [];
+  const seen = new Set<number>();
+  for (const rawShard of row.shards) {
+    if (
+      typeof rawShard !== "number" ||
+      !Number.isSafeInteger(rawShard) ||
+      rawShard < 0 ||
+      rawShard >= PUBLIC_X_ICON_V2_SHARD_COUNT
+    ) {
+      return null;
+    }
+    if (!seen.has(rawShard)) {
+      seen.add(rawShard);
+      shards.push(rawShard);
+    }
+  }
+
+  const generatedAt = normalizeGeneratedAt(row.generated_at);
+  if (generatedAt === null) return null;
+
   return {
     schema_version: PUBLIC_X_ICON_V2_SCHEMA_VERSION,
     generation,
-    generated_at:
-      Number.isFinite(generatedAt) && generatedAt >= 0
-        ? Math.floor(generatedAt)
-        : 0,
+    generated_at: generatedAt,
     shard_count: PUBLIC_X_ICON_V2_SHARD_COUNT,
     shards: shards.sort((a, b) => a - b),
   };
@@ -174,10 +191,22 @@ export function normalizePublicXIconV2Shard(
   value: unknown,
   expected: { generation: string; shard: number },
 ): PublicXIconV2Shard | null {
+  if (
+    !Number.isSafeInteger(expected.shard) ||
+    expected.shard < 0 ||
+    expected.shard >= PUBLIC_X_ICON_V2_SHARD_COUNT
+  ) {
+    return null;
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   if (row.schema_version !== PUBLIC_X_ICON_V2_SCHEMA_VERSION) return null;
-  if (row.generation !== expected.generation || Number(row.shard) !== expected.shard) {
+  if (
+    row.generation !== expected.generation ||
+    typeof row.shard !== "number" ||
+    !Number.isSafeInteger(row.shard) ||
+    row.shard !== expected.shard
+  ) {
     return null;
   }
   if (!row.entries || typeof row.entries !== "object" || Array.isArray(row.entries)) {
@@ -189,7 +218,13 @@ export function normalizePublicXIconV2Shard(
     row.entries as Record<string, unknown>,
   )) {
     const xId = normalizeXId(rawXId);
-    if (!xId || publicXIconV2ShardForXId(xId) !== expected.shard) return null;
+    if (
+      !xId ||
+      rawXId !== xId ||
+      publicXIconV2ShardForXId(xId) !== expected.shard
+    ) {
+      return null;
+    }
     if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
       return null;
     }
@@ -207,14 +242,13 @@ export function normalizePublicXIconV2Shard(
     };
   }
 
-  const generatedAt = Number(row.generated_at);
+  const generatedAt = normalizeGeneratedAt(row.generated_at);
+  if (generatedAt === null) return null;
+
   return {
     schema_version: PUBLIC_X_ICON_V2_SCHEMA_VERSION,
     generation: expected.generation,
-    generated_at:
-      Number.isFinite(generatedAt) && generatedAt >= 0
-        ? Math.floor(generatedAt)
-        : 0,
+    generated_at: generatedAt,
     shard: expected.shard,
     entries,
   };
