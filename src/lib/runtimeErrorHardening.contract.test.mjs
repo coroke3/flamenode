@@ -76,12 +76,15 @@ test("pickup creators workerは既存1MiB上限をparse前に適用する", () =
   );
 });
 
-test("public Cache APIは巨大JSONをparseせずread/write両側でbyte上限を持つ", () => {
+test("public Cache APIは巨大JSONを全bufferせずread/write両側でbyte上限を持つ", () => {
   assert.match(publicCacheSource, /PUBLIC_JSON_CACHE_MAX_BYTES/);
   assert.match(publicCacheSource, /contentLengthBytes\(response\)/);
-  assert.match(publicCacheSource, /bytes\.byteLength > PUBLIC_JSON_CACHE_MAX_BYTES/);
-  assert.match(publicCacheSource, /new TextEncoder\(\)\.encode\(serialized\)\.byteLength/);
+  assert.match(publicCacheSource, /const reader = body\.getReader\(\)/);
+  assert.match(publicCacheSource, /if \(total > maxBytes\)/);
+  assert.match(publicCacheSource, /reader\.cancel\(\)/);
+  assert.match(publicCacheSource, /utf8ByteLengthExceeds\(serialized, PUBLIC_JSON_CACHE_MAX_BYTES\)/);
   assert.doesNotMatch(publicCacheSource, /await matched\.json\(\)/);
+  assert.doesNotMatch(publicCacheSource, /response\.arrayBuffer\(\)/);
 });
 
 test("score rankingのevents indexはbounded readし、abortをfallbackへ握り潰さない", () => {
@@ -92,6 +95,5 @@ test("score rankingのevents indexはbounded readし、abortをfallbackへ握り
     scoreThrottleSource.indexOf("object.size > EVENTS_INDEX_MAX_OBJECT_BYTES") <
       scoreThrottleSource.indexOf("object.json()"),
   );
-  const catchBlocks = scoreThrottleSource.match(/catch \{[\s\S]{0,180}?signal\?\.throwIfAborted\(\)/g) ?? [];
-  assert.ok(catchBlocks.length >= 3);
+  assert.ok(scoreThrottleSource.split("signal?.throwIfAborted();").length - 1 >= 9);
 });
