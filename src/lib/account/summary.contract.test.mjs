@@ -42,9 +42,12 @@ test("account summary APIはprivate no-storeで最小DTOだけを返す", () => 
   assert.doesNotMatch(route, /id: headerUser\.id/);
 });
 
-test("degraded synthetic X entry does not replace the account display name", () => {
+test("degraded summaryはDB正本のlinked Xとapproval statusを維持する", () => {
   assert.match(route, /degraded: true/);
-  assert.match(route, /x_name: `@\$\{sessionUser\.active_x_user_id\}`/);
+  assert.match(route, /currentContext\.linkedXUsers\.map/);
+  assert.match(route, /normalizeXIdApprovalStatus\(entry\.approval_status\)/);
+  assert.match(route, /is_active: entry\.x_user_id === sessionUser\.active_x_user_id/);
+  assert.doesNotMatch(route, /approval_status: "approved" as const/);
   assert.match(accountMenu, /resolveAccountMenuDisplayName/);
   assert.match(accountMenu, /degraded: user\.degraded === true/);
 });
