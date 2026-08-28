@@ -32,6 +32,7 @@ function emptyOverlay(args?: {
   return {
     loggedIn: false,
     authUnavailable: false,
+    isBanned: false,
     isTosAccepted: false,
     termsReacceptRequired: false,
     activeXId: null,
@@ -103,6 +104,20 @@ export async function loadVideoViewerOverlay(args: {
   if (!viewer) return emptyOverlay(publicPlaylist);
 
   const activeXId = viewer.active_x_user_id ?? null;
+  const isBanned = viewer.is_banned === 1;
+  if (isBanned) {
+    // writeGuardと同じBAN境界でfail-closed。private chapter / library等の
+    // viewer固有D1 overlayも読まず、公開情報だけを返す。
+    return {
+      ...emptyOverlay(publicPlaylist),
+      loggedIn: true,
+      isBanned: true,
+      isTosAccepted: viewer.is_tos_accepted === 1,
+      termsReacceptRequired: viewer.terms_reaccept_required === 1,
+      activeXId,
+    };
+  }
+
   const viewerXApproved = Boolean(
     activeXId &&
       context.linkedXUsers.some(
@@ -200,6 +215,7 @@ export async function loadVideoViewerOverlay(args: {
         ...emptyOverlay(publicPlaylist),
         loggedIn: true,
         authUnavailable: true,
+        isBanned: false,
         isTosAccepted: viewer.is_tos_accepted === 1,
         termsReacceptRequired: viewer.terms_reaccept_required === 1,
         activeXId,
@@ -210,6 +226,7 @@ export async function loadVideoViewerOverlay(args: {
     return {
       loggedIn: true,
       authUnavailable: false,
+      isBanned: false,
       isTosAccepted: viewer.is_tos_accepted === 1,
       termsReacceptRequired: viewer.terms_reaccept_required === 1,
       activeXId,
@@ -225,6 +242,7 @@ export async function loadVideoViewerOverlay(args: {
       ...emptyOverlay(publicPlaylist),
       loggedIn: true,
       authUnavailable: true,
+      isBanned: false,
       isTosAccepted: viewer.is_tos_accepted === 1,
       termsReacceptRequired: viewer.terms_reaccept_required === 1,
       activeXId,
