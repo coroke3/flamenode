@@ -9,8 +9,8 @@ const [middlewareSource, reuseSource, trendingSource, aboutStatsSource, staffSou
     read("../../middleware.ts"),
     read("./event/eventIdReuse.ts"),
     read("./publicData/trendingLoader.ts"),
-    read("../app/api/public/about-stats/route.ts").catch(() => ""),
-    read("../app/api/public/events/[id]/staff/route.ts").catch(() => ""),
+    read("../../app/api/public/about-stats/route.ts"),
+    read("../../app/api/public/events/[id]/staff/route.ts"),
   ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
