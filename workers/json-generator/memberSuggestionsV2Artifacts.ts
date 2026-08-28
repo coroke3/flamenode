@@ -12,10 +12,11 @@ import type { MemberSuggestionItem } from "../../src/lib/video/memberSuggestions
 
 /**
  * member_suggestions の canonical V1 rebuild と同じ invocation で公開するため、
- * V2 は R2 subrequest を厳格に上限化する。上限を超える世代は V2 manifest を
- * 公開せず、request path は V1 index へ fail-safe する。
+ * V2 は R2 subrequest を厳格に上限化する。16 bucketではdirectory+page+manifestの
+ * 最小構成だけでも最大33 objectになり得るため20では実質無効化される。
+ * V1側のR2操作とcleanup分の余白を残し、保守的に40 objectで打ち切る。
  */
-const MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 20;
+const MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 40;
 const MEMBER_SUGGESTIONS_V2_CLEANUP_LIST_LIMIT = 1000;
 const PRIVATE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
@@ -101,7 +102,7 @@ async function deleteKeysBestEffort(
 
 /**
  * manifest commit後に旧generationをbounded cleanupする。
- * 現行writerは1世代20 object以下に制限しているため通常1 pageで収まるが、
+ * 現行writerは1世代40 object以下に制限しているため通常1 pageで収まるが、
  * 過去の実装/partial objectにも耐えるよう1000件まで削除し、truncatedなら
  * 次回以降に残す。cleanup失敗で新manifestを巻き戻さない。
  */
