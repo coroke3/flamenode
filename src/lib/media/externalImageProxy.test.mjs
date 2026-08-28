@@ -24,6 +24,13 @@ test("外部画像はinline retryせずnegative cacheとstaleを優先する", (
   assert.doesNotMatch(source, /for \(let attempt/);
 });
 
+test("Workers isolate globalへrequest-scoped fetch Promiseを保存しない", () => {
+  assert.doesNotMatch(source, /inFlight:/);
+  assert.doesNotMatch(source, /store\.inFlight/);
+  assert.doesNotMatch(source, /Map<string, Promise<RefreshResult>>/);
+  assert.match(source, /await refreshImage\(store, options, cached, now\)/);
+});
+
 test("外部画像はSVG・未指定MIMEを受け付けずnosniffで返す", async () => {
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;
