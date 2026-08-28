@@ -238,23 +238,31 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
       itemCount: 0,
       itemIds: new Set<string>(),
     });
-    entry.pages.forEach((pageNumber, part) => {
+    for (let part = 0; part < entry.pages.length; part += 1) {
+      const pageNumber = entry.pages[part]!;
       const key = memberSuggestionsV2PageObjectKey(
         manifest.generation,
         bucketId,
         pageNumber,
       );
-      const expected = pageExpectations.get(key) ?? {
+      const existing = pageExpectations.get(key);
+      if (
+        existing &&
+        (existing.bucket !== bucketId || existing.page !== pageNumber)
+      ) {
+        return { ok: false, reason: "directory_invalid" };
+      }
+      const expected = existing ?? {
         bucket: bucketId,
         page: pageNumber,
         records: new Map<string, { part: number; total: number }>(),
       };
-      if (expected.bucket !== bucketId || expected.page !== pageNumber) {
-        return;
+      if (expected.records.has(gram)) {
+        return { ok: false, reason: "directory_invalid" };
       }
       expected.records.set(gram, { part, total: entry.total });
       pageExpectations.set(key, expected);
-    });
+    }
   }
 
   if (pageExpectations.size > MEMBER_SUGGESTIONS_V2_MAX_QUERY_PAGES) {
@@ -315,11 +323,13 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
         gramState.itemCount += 1;
 
         if (!candidates.has(item.x_user_id)) {
-          candidates.set(item.x_user_id, item);
+          // 1,536件までは完全な候補集合として許容し、1,537件目を検出した時だけ
+          // partial rankingを避けるためtruncatedへ落とす。
           if (candidates.size >= MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES) {
             truncated = true;
             break;
           }
+          candidates.set(item.x_user_id, item);
         }
       }
       if (truncated) break;
