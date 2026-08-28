@@ -25,8 +25,21 @@ type Env = {
   R2: R2Bucket;
 };
 
+const SHARD_METADATA_SCHEMA = "public-icon-v2";
+const SHARD_METADATA_SCHEMA_KEY = "flamenode_schema";
+const SHARD_METADATA_GENERATION_KEY = "flamenode_generation";
+const SHARD_METADATA_SHARD_KEY = "flamenode_shard";
+
 function throwIfAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
+}
+
+async function cancelObjectBodyBestEffort(object: R2ObjectBody): Promise<void> {
+  try {
+    await object.body.cancel();
+  } catch {
+    // Rejected artifact is not consumed further.
+  }
 }
 
 async function readCurrentManifest(
@@ -34,17 +47,26 @@ async function readCurrentManifest(
 ): Promise<ReturnType<typeof normalizePublicXIconV2Manifest>> {
   try {
     const object = await env.R2.get(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY);
+    if (!object) return null;
     if (
-      !object ||
-      (typeof object.size === "number" &&
-        object.size > PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES)
+      typeof object.size === "number" &&
+      object.size > PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES
     ) {
+      await cancelObjectBodyBestEffort(object);
       return null;
     }
     return normalizePublicXIconV2Manifest(await object.json());
   } catch {
     return null;
   }
+}
+
+function expectedShardMetadata(generation: string, shard: number): Record<string, string> {
+  return {
+    [SHARD_METADATA_SCHEMA_KEY]: SHARD_METADATA_SCHEMA,
+    [SHARD_METADATA_GENERATION_KEY]: generation,
+    [SHARD_METADATA_SHARD_KEY]: String(shard),
+  };
 }
 
 async function generationIsComplete(
@@ -56,7 +78,25 @@ async function generationIsComplete(
   for (const shard of shards) {
     throwIfAborted(signal);
     try {
-      if (!(await env.R2.head(publicXIconV2ShardObjectKey(generation, shard)))) {
+      const object = await env.R2.head(
+        publicXIconV2ShardObjectKey(generation, shard),
+      );
+      if (!object) return false;
+      if (
+        typeof object.size !== "number" ||
+        object.size <= 0 ||
+        object.size > PUBLIC_X_ICON_V2_MAX_SHARD_BYTES
+      ) {
+        return false;
+      }
+      const metadata = object.customMetadata ?? {};
+      const expected = expectedShardMetadata(generation, shard);
+      if (
+        metadata[SHARD_METADATA_SCHEMA_KEY] !== expected[SHARD_METADATA_SCHEMA_KEY] ||
+        metadata[SHARD_METADATA_GENERATION_KEY] !==
+          expected[SHARD_METADATA_GENERATION_KEY] ||
+        metadata[SHARD_METADATA_SHARD_KEY] !== expected[SHARD_METADATA_SHARD_KEY]
+      ) {
         return false;
       }
     } catch {
@@ -148,6 +188,7 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
     typeof legacyObject.size === "number" &&
     legacyObject.size > PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES
   ) {
+    await cancelObjectBodyBestEffort(legacyObject);
     throw new Error("public_icon_v2_v1_too_large");
   }
 
@@ -206,9 +247,6 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
     shards: [],
   };
 
-  // V1 canonical更新後に旧V2を見せ続けないため、実shard PUTより先に
-  // fallback markerをcommitする。PUT自体が失敗した場合は旧manifestの削除も
-  // best-effortで試し、可能な限りcanonical V1へ戻す。
   try {
     await putManifest(env, fallbackManifest);
   } catch (error) {
@@ -228,18 +266,14 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
           contentType: "application/json; charset=utf-8",
           cacheControl: staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.usersIndex),
         },
+        customMetadata: expectedShardMetadata(generation, shard.shard),
       });
       writtenKeys.push(key);
     }
 
     throwIfAborted(signal);
-    // 唯一の高速化commit point。ここで初めて実shardをreaderへ公開する。
     await putManifest(env, artifacts.manifest);
   } catch (error) {
-    // PUTがtransport上失敗しても、実際にはreal manifestがcommit済みの可能性がある。
-    // fallback markerへ戻せた、またはmanifest自体を撤去できた場合に限って
-    // written shardを削除する。どちらも失敗した場合はimmutable shardを残し、
-    // manifestが参照している可能性のあるobjectを壊さない。
     let manifestSafeForShardCleanup = false;
     try {
       await putManifest(env, fallbackManifest);
