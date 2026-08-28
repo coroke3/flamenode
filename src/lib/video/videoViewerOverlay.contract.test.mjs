@@ -98,6 +98,14 @@ test("viewer overlayはcurrentUserContextのlinked X行を再利用する", () =
   assert.doesNotMatch(serverOverlay, /getApprovedXIds/);
 });
 
+test("viewer private chapterはserver query自体を最大件数でboundedにする", () => {
+  assert.match(serverOverlay, /VIDEO_VIEWER_OVERLAY_MAX_PRIVATE_CHAPTERS/);
+  assert.match(serverOverlay, /async function fetchBoundedPrivateChapters/);
+  assert.match(serverOverlay, /\.orderBy\(asc\(videoChapters\.chapter_time\), asc\(videoChapters\.id\)\)\s*\.limit\(VIDEO_VIEWER_OVERLAY_MAX_PRIVATE_CHAPTERS\)/s);
+  assert.match(serverOverlay, /eq\(xUsers\.approval_status, "approved"\)/);
+  assert.doesNotMatch(serverOverlay, /fetchAuthorizedPrivateVideoChapters/);
+});
+
 test("viewer library playlistはserver query自体を最大件数でboundedにする", () => {
   assert.match(serverOverlay, /EVENT_PLAYLIST_MAX_ITEMS/);
   assert.match(serverOverlay, /\.orderBy\(desc\(videosTable\.scheduled_time\)\)\s*\.limit\(EVENT_PLAYLIST_MAX_ITEMS\)/s);
