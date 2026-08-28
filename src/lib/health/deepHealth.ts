@@ -10,9 +10,11 @@ import {
   type TrackedDetailArtifactSloRow,
 } from "./artifactSlo.ts";
 import { evaluateDeepHealthQueueConfiguration } from "./queueEmergency.ts";
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import {
   normalizePublicVisibilityBlockedEntitiesManifest,
   PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
+  PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES,
   resolvePublicVisibilityGuardMode,
   type PublicVisibilityGuardMode,
 } from "../publicData/publicVisibilityManifestCore.ts";
@@ -23,6 +25,12 @@ const COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
 const PROBE_KEY = "__flamenode_read_only_health_probe__";
 
 type DeepHealthCheckStatus = "ok" | "degraded";
+
+type DeepHealthR2Object = {
+  text: () => Promise<string>;
+  size?: number;
+  body?: unknown;
+};
 
 export interface DeepHealthEnv {
   DB: {
@@ -35,7 +43,7 @@ export interface DeepHealthEnv {
   };
   BUCKET: {
     head(key: string): Promise<unknown>;
-    get(key: string): Promise<{ text: () => Promise<string> } | null>;
+    get(key: string): Promise<DeepHealthR2Object | null>;
   };
   BUILD_COMMIT_SHA?: string;
   WORKER_ADMIN_TOKEN?: string;
@@ -138,6 +146,15 @@ async function checkPublicVisibilityManifestHealth(
     const object = await bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY);
     if (!object) {
       return reportDegraded("manifest_missing");
+    }
+    if (
+      typeof object.size === "number" &&
+      (!Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
+        object.size > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES)
+    ) {
+      await cancelR2BodyBestEffort(object);
+      return reportDegraded("manifest_too_large");
     }
     let payload: unknown;
     try {
