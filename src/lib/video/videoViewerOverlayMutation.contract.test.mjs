@@ -51,6 +51,14 @@ test("viewer overlay一時障害は正常cacheより短く保持する", () => {
   );
 });
 
+test("viewer overlayのin-flight requestは無期限にcacheされない", () => {
+  assert.match(client, /const FETCH_TIMEOUT_MS = 5_000/);
+  assert.match(client, /const controller = new AbortController\(\)/);
+  assert.match(client, /controller\.abort\(\)/);
+  assert.match(client, /signal: controller\.signal/);
+  assert.match(client, /window\.clearTimeout\(timeoutId\)/);
+});
+
 test("viewer overlay cacheはprivate payloadを無制限保持しない", () => {
   assert.match(client, /const MAX_CACHE_ENTRIES = 64/);
   assert.match(client, /function setCacheEntry/);
