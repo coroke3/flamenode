@@ -2,24 +2,45 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   normalizeMemberSearchText,
+  prefilterMemberSuggestionCandidates,
   rankMemberSuggestionCandidates,
 } from "./memberSuggestionRank.ts";
 
 describe("normalizeMemberSearchText", () => {
   it("normalizes full-width characters and leading at signs", () => {
-    assert.equal(
-      normalizeMemberSearchText(
-        "＠Ａｌｉｃｅ ",
-      ),
-      "alice",
-    );
+    assert.equal(normalizeMemberSearchText("＠Ａｌｉｃｅ "), "alice");
   });
 
   it("normalizes katakana to hiragana", () => {
-    assert.equal(
-      normalizeMemberSearchText("モチ"),
-      "もち",
+    assert.equal(normalizeMemberSearchText("モチ"), "もち");
+  });
+});
+
+describe("prefilterMemberSuggestionCandidates", () => {
+  it("does not keep short-query candidates only because their length is close", () => {
+    const filtered = prefilterMemberSuggestionCandidates(
+      [
+        { x_user_id: "ab_creator", name: "AB Creator" },
+        { x_user_id: "zz", name: "ZZ" },
+        { x_user_id: "xy", name: "XY" },
+      ],
+      "ab",
     );
+    assert.deepEqual(
+      filtered.map((item) => item.x_user_id),
+      ["ab_creator"],
+    );
+  });
+
+  it("keeps the fuzzy length window for queries of at least three characters", () => {
+    const filtered = prefilterMemberSuggestionCandidates(
+      [
+        { x_user_id: "alice", name: "Alice" },
+        { x_user_id: "zzzzz", name: "ZZZZZ" },
+      ],
+      "alixe",
+    );
+    assert.ok(filtered.some((item) => item.x_user_id === "alice"));
   });
 });
 
@@ -45,70 +66,30 @@ describe("rankMemberSuggestionCandidates", () => {
   ];
 
   it("keeps an exact X ID above popular partial matches", () => {
-    const ranked =
-      rankMemberSuggestionCandidates(
-        candidates,
-        "alice",
-      );
+    const ranked = rankMemberSuggestionCandidates(candidates, "alice");
 
-    assert.equal(
-      ranked[0]?.x_user_id,
-      "alice",
-    );
-    assert.equal(
-      ranked[0]?.matchedBy,
-      "xid_exact",
-    );
+    assert.equal(ranked[0]?.x_user_id, "alice");
+    assert.equal(ranked[0]?.matchedBy, "xid_exact");
   });
 
   it("matches an old X ID alias", () => {
-    const ranked =
-      rankMemberSuggestionCandidates(
-        candidates,
-        "mochi_old",
-      );
+    const ranked = rankMemberSuggestionCandidates(candidates, "mochi_old");
 
-    assert.equal(
-      ranked[0]?.x_user_id,
-      "mochi_new",
-    );
-    assert.equal(
-      ranked[0]?.matchedBy,
-      "xid_alias_exact",
-    );
+    assert.equal(ranked[0]?.x_user_id, "mochi_new");
+    assert.equal(ranked[0]?.matchedBy, "xid_alias_exact");
   });
 
   it("matches historical display names", () => {
-    const ranked =
-      rankMemberSuggestionCandidates(
-        candidates,
-        "旧名義",
-      );
+    const ranked = rankMemberSuggestionCandidates(candidates, "旧名義");
 
-    assert.equal(
-      ranked[0]?.x_user_id,
-      "mochi_new",
-    );
-    assert.equal(
-      ranked[0]?.matchedBy,
-      "name_alias_exact",
-    );
+    assert.equal(ranked[0]?.x_user_id, "mochi_new");
+    assert.equal(ranked[0]?.matchedBy, "name_alias_exact");
   });
 
   it("handles a one-character typo", () => {
-    const ranked =
-      rankMemberSuggestionCandidates(
-        candidates,
-        "alicee",
-      );
+    const ranked = rankMemberSuggestionCandidates(candidates, "alicee");
 
-    assert.equal(
-      ranked[0]?.x_user_id,
-      "alice",
-    );
-    assert.equal(
-      ranked[0]?.matchedBy,
-      "fuzzy_1",
-    );
+    assert.equal(ranked[0]?.x_user_id, "alice");
+    assert.equal(ranked[0]?.matchedBy, "fuzzy_1");
   });
 });
