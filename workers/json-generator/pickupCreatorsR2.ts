@@ -2,9 +2,11 @@ import {
   buildPickupCreatorsFromProjection,
   loadPublicCreatorProjectionSources,
   normalizePickupCreatorsArtifact,
+  PICKUP_CREATORS_MAX_OBJECT_BYTES,
   PICKUP_CREATORS_OBJECT_KEY,
   type PublicPickupCreatorRow,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 
 export type PickupCreatorsLoadFailureReason =
   | "missing"
@@ -40,6 +42,18 @@ export async function loadPickupCreatorsFromR2(
     if (!object) {
       logPickupCreatorsR2("missing", { key: PICKUP_CREATORS_OBJECT_KEY });
       return { ok: false, reason: "missing" };
+    }
+    if (
+      !Number.isSafeInteger(object.size) ||
+      object.size < 0 ||
+      object.size > PICKUP_CREATORS_MAX_OBJECT_BYTES
+    ) {
+      await cancelR2BodyBestEffort(object);
+      logPickupCreatorsR2("corrupt", {
+        key: PICKUP_CREATORS_OBJECT_KEY,
+        reason: "object_too_large",
+      });
+      return { ok: false, reason: "corrupt" };
     }
 
     const raw = await object.json();
