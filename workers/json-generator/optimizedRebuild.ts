@@ -515,7 +515,7 @@ async function markEventPlaylistDeleted(
   await env.R2.delete(objectKey);
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare(
-    `UPDATE static_rebuild_queue
+    `UPDATE static_artifacts
      SET deleted_at = ?
      WHERE target_type = 'event_playlist'
        AND target_id = ?
