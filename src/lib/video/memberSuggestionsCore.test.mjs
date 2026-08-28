@@ -140,10 +140,8 @@ test("manifest / index payload検証は不正をnullで拒否する", () => {
   assert.ok(parseMemberSuggestionsManifest(manifest));
   assert.equal(parseMemberSuggestionsManifest({ ...manifest, schema_version: 99 }), null);
   assert.equal(parseMemberSuggestionsManifest({ ...manifest, generation: "../x" }), null);
-  assert.equal(
-    parseMemberSuggestionsManifest({ ...manifest, object_key: "wrong/index.json" }),
-    null,
-  );
+  // object_keyはreaderがgenerationから再生成するためlegacy欠落/差分を許容する。
+  assert.ok(parseMemberSuggestionsManifest({ ...manifest, object_key: "wrong/index.json" }));
   assert.equal(
     parseMemberSuggestionsManifest({ ...manifest, total: MEMBER_SUGGESTIONS_MAX_ROWS + 1 }),
     null,
