@@ -145,8 +145,9 @@ export function usePublicAccountSummary(
       return;
     }
 
-    // 管理画面などのSSR最小ヘッダーは、メニューを開くまでsummaryを読まない。
-    if (lazy && !open) {
+    // lazy headerは通常メニューを開くまでsummaryを読まない。ただし一時失敗後の
+    // 明示retry/Active X更新はrefreshRequestedRefで閉じた状態からでも1回だけ許可する。
+    if (lazy && !open && !refreshRequestedRef.current) {
       setLoading(false);
       return;
     }
@@ -258,7 +259,8 @@ export function usePublicAccountSummary(
           refreshRequestedRef.current &&
           (request.pendingGeneration !== null ||
             request.generation !== refreshGenerationRef.current);
-        const canFetchNow = !lazyRef.current || openRef.current;
+        const canFetchNow =
+          !lazyRef.current || openRef.current || refreshRequestedRef.current;
         if (needsRefresh && canFetchNow) {
           setRefreshNonce((current) => current + 1);
         } else {
