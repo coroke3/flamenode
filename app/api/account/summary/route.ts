@@ -5,6 +5,7 @@ import {
   getCurrentUserContext,
 } from "@/lib/auth/currentUser";
 import type { AccountSummaryResponse } from "@/lib/account/summary";
+import { normalizeXIdApprovalStatus } from "@/lib/xid/entries";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,19 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
       authoritativeLinkedXRows: currentContext.linkedXUsers,
     });
   } catch {
-    // X ID一覧・管理イベント取得失敗でもログイン済み要約は返す。
+    // X ID一覧は getCurrentUserContext() がDB正本から取得済みなので、
+    // buildHeaderUser の管理イベント等の補助queryだけが失敗してもその正本を使う。
+    // Active Xを無条件でapproved扱いすると、承認取消直後などにUIだけ権限ありに
+    // 見えるため、approval_statusもlinked rowから正規化する。
+    const xIds = currentContext.linkedXUsers.map((entry) => ({
+      x_user_id: entry.x_user_id,
+      x_name: entry.x_name?.trim() || `@${entry.x_user_id}`,
+      icon_url: entry.icon_url,
+      approval_status: normalizeXIdApprovalStatus(entry.approval_status),
+      is_active: entry.x_user_id === sessionUser.active_x_user_id,
+    }));
+
+    // 管理権限の補助取得失敗でもログイン済み要約は返す。
     return NextResponse.json(
       {
         loggedIn: true,
@@ -58,17 +71,7 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
         icon: sessionUser.image,
         role: sessionUser.role,
         activeXId: sessionUser.active_x_user_id,
-        xIds: sessionUser.active_x_user_id
-          ? [
-              {
-                x_user_id: sessionUser.active_x_user_id,
-                x_name: `@${sessionUser.active_x_user_id}`,
-                icon_url: sessionUser.image,
-                approval_status: "approved" as const,
-                is_active: true,
-              },
-            ]
-          : [],
+        xIds,
         canAccessAdmin: sessionUser.role === "admin",
         // staff の manage 可否は不明。false で上書きしないよう degraded を付ける。
         canAccessManage: sessionUser.role === "admin",
