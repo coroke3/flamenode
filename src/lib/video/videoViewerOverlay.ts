@@ -186,7 +186,10 @@ export async function loadVideoViewerOverlay(args: {
     const dbOverlay = await withDatabase(async (db) => {
       let viewerCanEditChapters = false;
       const probe = await fetchVideoRowByIdOrYoutube(db, args.rawId);
-      if (probe) {
+      // static artifactとD1のID解決が一時的にずれた場合、別動画の編集権限を
+      // 現在表示中のvideoIdへ転用しない。stale artifact / YouTube ID変更raceは
+      // 権限なしとしてfail-closedし、次のrebuild後に自然復旧させる。
+      if (probe?.id === args.videoId) {
         viewerCanEditChapters = await canEditVideo({
           db,
           user: { id: viewer.id, role: viewer.role ?? null },
