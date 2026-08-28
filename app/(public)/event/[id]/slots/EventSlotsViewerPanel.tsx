@@ -16,6 +16,7 @@ import styles from "./page.module.css";
 const EMPTY_OVERLAY: SlotViewerOverlayDto = {
   loggedIn: false,
   authUnavailable: false,
+  isBanned: false,
   needsTermsAcceptance: false,
   canReserveSlot: false,
   canPost: false,
@@ -61,6 +62,7 @@ function normalizeOverlay(value: unknown): SlotViewerOverlayDto | null {
   if (
     typeof row.loggedIn !== "boolean" ||
     typeof row.authUnavailable !== "boolean" ||
+    typeof row.isBanned !== "boolean" ||
     typeof row.needsTermsAcceptance !== "boolean" ||
     typeof row.canReserveSlot !== "boolean" ||
     typeof row.canPost !== "boolean" ||
@@ -75,6 +77,7 @@ function normalizeOverlay(value: unknown): SlotViewerOverlayDto | null {
   return {
     loggedIn: row.loggedIn,
     authUnavailable: row.authUnavailable,
+    isBanned: row.isBanned,
     needsTermsAcceptance: row.needsTermsAcceptance,
     canReserveSlot: row.canReserveSlot,
     canPost: row.canPost,
@@ -208,6 +211,7 @@ export function EventSlotsViewerPanel({
   const canTakeSlot =
     !loading &&
     !overlay.authUnavailable &&
+    !overlay.isBanned &&
     overlay.canReserveSlot &&
     (accepting || overlay.operatorOverrideAllowed);
 
@@ -244,6 +248,13 @@ export function EventSlotsViewerPanel({
         が必要です。
       </>
     );
+  } else if (overlay.isBanned) {
+    notice = (
+      <>
+        <Icon name="warning" size={13} aria-hidden />
+        現在、このアカウントは利用停止中です。
+      </>
+    );
   } else if (overlay.needsTermsAcceptance) {
     notice = (
       <>
@@ -277,11 +288,13 @@ export function EventSlotsViewerPanel({
           <SlotGrid
             slots={slots}
             viewerXId={overlay.viewerXId}
-            isAuthenticated={overlay.loggedIn && !overlay.authUnavailable}
+            isAuthenticated={
+              overlay.loggedIn && !overlay.authUnavailable && !overlay.isBanned
+            }
             canReserve={accepting}
             canTakeSlot={canTakeSlot}
             operatorOverrideAllowed={overlay.operatorOverrideAllowed}
-            canPost={overlay.canPost}
+            canPost={overlay.canPost && !overlay.isBanned}
             slotType={slotType}
             maxSlotsPerVideo={maxSlotsPerVideo}
             maxSlotReservationsPerXId={maxSlotReservationsPerXId}
