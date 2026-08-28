@@ -16,6 +16,7 @@ export type SlotViewerOverlaySlot = {
 export type SlotViewerOverlayDto = {
   loggedIn: boolean;
   authUnavailable: boolean;
+  isBanned: boolean;
   needsTermsAcceptance: boolean;
   canReserveSlot: boolean;
   canPost: boolean;
@@ -31,6 +32,7 @@ export function emptySlotViewerOverlay(
   return {
     loggedIn: false,
     authUnavailable,
+    isBanned: false,
     needsTermsAcceptance: false,
     canReserveSlot: false,
     canPost: false,
