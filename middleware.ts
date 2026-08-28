@@ -62,6 +62,10 @@ function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
   return request;
 }
 
+function matchesPathSegmentPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const canonicalRedirect = resolveCanonicalHostRedirect({
     configuredOrigin: await resolveConfiguredSiteOrigin(),
@@ -79,10 +83,10 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 
   const url = req.nextUrl;
   if (
-    url.pathname.startsWith("/maintenance") ||
-    url.pathname.startsWith("/admin") ||
-    url.pathname.startsWith("/api/auth") ||
-    url.pathname.startsWith("/api/health")
+    matchesPathSegmentPrefix(url.pathname, "/maintenance") ||
+    matchesPathSegmentPrefix(url.pathname, "/admin") ||
+    matchesPathSegmentPrefix(url.pathname, "/api/auth") ||
+    matchesPathSegmentPrefix(url.pathname, "/api/health")
   ) {
     return NextResponse.next();
   }
