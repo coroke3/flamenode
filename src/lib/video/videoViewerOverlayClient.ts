@@ -188,7 +188,9 @@ async function fetchOverlay(
     },
   )
     .then(async (response) => {
-      if (!response.ok) return emptyOverlay(response.status >= 500);
+      // 404もSSR後の非公開化/削除raceを含む。未ログイン扱いへ落とすと
+      // 操作可能に見える誤表示になるため、全non-OKをfail-closedにする。
+      if (!response.ok) return emptyOverlay(true);
       const normalized = normalizeOverlay(await response.json());
       return normalized ?? emptyOverlay(true);
     })
