@@ -57,8 +57,12 @@ test("slot viewer routeはnot-foundとruntime unavailableを分離する", () =>
 });
 
 test("base slot/Active X変更時は旧viewer ownershipを即時無効化する", () => {
-  assert.match(panel, /const baseSlotsChanged =/);
-  assert.match(panel, /baseSlotsChanged \? EMPTY_OVERLAY : overlay/);
-  assert.match(panel, /setOverlay\(EMPTY_OVERLAY\)/);
+  assert.match(panel, /type ViewerOverlayState/);
+  assert.match(panel, /overlayState\.baseSlots === baseSlots/);
+  assert.match(panel, /overlayIsCurrent \? overlayState\.value : EMPTY_OVERLAY/);
+  assert.match(panel, /const requestBaseSlots = baseSlots/);
+  assert.match(panel, /setOverlayState\(\{ value, baseSlots: requestBaseSlots \}\)/);
+  assert.match(panel, /\[eventId, refreshNonce, baseSlots\]/);
+  assert.match(panel, /setOverlayState\(\{ value: EMPTY_OVERLAY, baseSlots: null \}\)/);
   assert.match(panel, /ACTIVE_X_CHANGED_EVENT/);
 });
