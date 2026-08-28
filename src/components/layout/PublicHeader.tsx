@@ -75,29 +75,33 @@ export function PublicHeader({
   const accountUser =
     serverUser === undefined
       ? fetchedUser
-      : fetchedUser && serverUser
-        ? {
-            ...serverUser,
-            ...fetchedUser,
-            id: serverUser.id || fetchedUser.id,
-            name: fetchedUser.name || serverUser.name,
-            image: fetchedUser.image ?? serverUser.image,
-            role: fetchedUser.role || serverUser.role,
-            xIds: fetchedUser.xIds.length > 0 ? fetchedUser.xIds : serverUser.xIds,
-            management:
-              "degraded" in fetchedUser && fetchedUser.degraded
-                ? {
-                    canAccessAdmin:
-                      fetchedUser.management.canAccessAdmin ||
-                      serverUser.management.canAccessAdmin,
-                    canAccessManage:
-                      fetchedUser.management.canAccessManage ||
-                      serverUser.management.canAccessManage,
-                    manageableEventCount:
-                      serverUser.management.manageableEventCount ?? 0,
-                  }
-                : fetchedUser.management ?? serverUser.management,
-          }
+      : fetchedUser
+        ? serverUser
+          ? {
+              ...serverUser,
+              ...fetchedUser,
+              id: serverUser.id || fetchedUser.id,
+              name: fetchedUser.name || serverUser.name,
+              image: fetchedUser.image ?? serverUser.image,
+              role: fetchedUser.role || serverUser.role,
+              // 正常/degraded summaryのlinked X rowsはどちらもDB正本。
+              // 空配列も「現在リンクなし」という有効な結果なのでSSRの古いActive Xへ戻さない。
+              xIds: fetchedUser.xIds,
+              management:
+                "degraded" in fetchedUser && fetchedUser.degraded
+                  ? {
+                      canAccessAdmin:
+                        fetchedUser.management.canAccessAdmin ||
+                        serverUser.management.canAccessAdmin,
+                      canAccessManage:
+                        fetchedUser.management.canAccessManage ||
+                        serverUser.management.canAccessManage,
+                      manageableEventCount:
+                        serverUser.management.manageableEventCount ?? 0,
+                    }
+                  : fetchedUser.management ?? serverUser.management,
+            }
+          : fetchedUser
         : serverUser;
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
   const entryHref =
