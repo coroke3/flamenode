@@ -1,8 +1,5 @@
-import {
-  MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
-  parseMemberSuggestionsManifest,
-  type MemberSuggestionItem,
-} from "./memberSuggestionsCore.ts";
+import type { MemberSuggestionItem } from "./memberSuggestionsCore.ts";
+import { loadMemberSuggestionsManifestFromBucket } from "./memberSuggestionsLoader.ts";
 import {
   memberSuggestionPostingBucket,
   memberSuggestionQueryGrams,
@@ -134,16 +131,20 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
     return { ok: true, items: [], truncated: false, generation: "empty" };
   }
 
-  const v1ManifestObject = await bucket.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
-  if (!v1ManifestObject) return { ok: false, reason: "v1_manifest_missing" };
-  let v1Payload: unknown;
-  try {
-    v1Payload = await v1ManifestObject.json<unknown>();
-  } catch {
-    return { ok: false, reason: "v1_manifest_invalid" };
+  // V1 manifestはcanonical commit point。V1 loaderと同じsize/schema guardを使い、
+  // oversized/corrupt manifestをV2 pathだけ無制限parseする分岐を作らない。
+  const v1Manifest = await loadMemberSuggestionsManifestFromBucket(bucket);
+  if (!v1Manifest.ok) {
+    return {
+      ok: false,
+      reason:
+        v1Manifest.reason === "manifest_too_large"
+          ? "artifact_too_large"
+          : v1Manifest.reason === "manifest_missing"
+            ? "v1_manifest_missing"
+            : "v1_manifest_invalid",
+    };
   }
-  const v1Manifest = parseMemberSuggestionsManifest(v1Payload);
-  if (!v1Manifest) return { ok: false, reason: "v1_manifest_invalid" };
 
   const manifestRead = await readJson(
     bucket,
