@@ -34,7 +34,10 @@ function throwIfAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
 }
 
-async function cancelObjectBodyBestEffort(object: R2ObjectBody): Promise<void> {
+async function cancelObjectBodyBestEffort(
+  object: R2ObjectBody | null | undefined,
+): Promise<void> {
+  if (!object) return;
   try {
     await object.body.cancel();
   } catch {
@@ -81,6 +84,7 @@ async function generationIsComplete(
       const object = await env.R2.head(
         publicXIconV2ShardObjectKey(generation, shard),
       );
+      throwIfAborted(signal);
       if (!object) return false;
       if (
         typeof object.size !== "number" ||
@@ -100,6 +104,7 @@ async function generationIsComplete(
         return false;
       }
     } catch {
+      throwIfAborted(signal);
       return false;
     }
   }
@@ -182,7 +187,10 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
 ): Promise<{ generation: string; objectCount: number; skipped: boolean }> {
   throwIfAborted(signal);
   const legacyObject = await env.R2.get(PUBLIC_X_ICON_MAP_OBJECT_KEY);
-  throwIfAborted(signal);
+  if (signal?.aborted) {
+    await cancelObjectBodyBestEffort(legacyObject);
+    throwIfAborted(signal);
+  }
   if (!legacyObject) throw new Error("public_icon_v2_requires_v1_artifact");
   if (
     typeof legacyObject.size === "number" &&
@@ -198,6 +206,7 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
   } catch {
     throw new Error("public_icon_v2_v1_invalid_json");
   }
+  throwIfAborted(signal);
   const legacy = normalizePublicXIconMap(legacyPayload);
   if (!legacy) throw new Error("public_icon_v2_v1_invalid");
 
