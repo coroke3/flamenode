@@ -21,3 +21,13 @@ test("mount済みviewer overlay hookはmutation eventを受けてcacheを破棄�
   assert.match(client, /setNonce\(\(value\) => value \+ 1\)/);
   assert.match(client, /if \(existing\?\.promise\) return existing\.promise/);
 });
+
+test("invalidate前の遅いrequestは新しいviewer cacheを上書きしない", () => {
+  assert.match(client, /requestToken: symbol/);
+  assert.match(client, /const requestToken = Symbol\(key\)/);
+  assert.match(
+    client,
+    /cache\.get\(key\)\?\.requestToken === requestToken/,
+  );
+  assert.match(client, /cache\.set\(key, \{ promise, requestToken \}\)/);
+});
