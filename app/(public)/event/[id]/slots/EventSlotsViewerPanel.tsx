@@ -26,6 +26,12 @@ const EMPTY_OVERLAY: SlotViewerOverlayDto = {
   slots: [],
 };
 
+type ViewerOverlayState = {
+  value: SlotViewerOverlayDto;
+  /** このviewer情報と同時に表示してよいpublic slot snapshot。 */
+  baseSlots: readonly SlotRow[] | null;
+};
+
 function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -145,17 +151,21 @@ export function EventSlotsViewerPanel({
   parts: string[];
   entryEndTime: number | null;
 }): React.ReactElement {
-  const [overlay, setOverlay] = React.useState<SlotViewerOverlayDto>(EMPTY_OVERLAY);
+  const [overlayState, setOverlayState] = React.useState<ViewerOverlayState>({
+    value: EMPTY_OVERLAY,
+    baseSlots: null,
+  });
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
-  const previousBaseSlotsRef = React.useRef(baseSlots);
-  const baseSlotsChanged = previousBaseSlotsRef.current !== baseSlots;
-  const viewerOverlay = baseSlotsChanged ? EMPTY_OVERLAY : overlay;
-  const viewerLoading = loading || baseSlotsChanged;
+
+  const overlayIsCurrent = overlayState.baseSlots === baseSlots;
+  const viewerOverlay = overlayIsCurrent ? overlayState.value : EMPTY_OVERLAY;
+  const viewerLoading = loading || !overlayIsCurrent;
 
   React.useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    const requestBaseSlots = baseSlots;
     setLoading(true);
     void fetch(
       `/api/events/${encodeURIComponent(eventId)}/slots/viewer-overlay`,
@@ -183,36 +193,25 @@ export function EventSlotsViewerPanel({
       })
       .then((value) => {
         if (!active || !value) return;
-        setOverlay(value);
+        setOverlayState({ value, baseSlots: requestBaseSlots });
         setLoading(false);
       });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [eventId, refreshNonce]);
+  }, [eventId, refreshNonce, baseSlots]);
 
   React.useEffect(() => {
     const refresh = () => {
       // Active X切替直後に旧Xの本人枠・表示名を残さない。
-      setOverlay(EMPTY_OVERLAY);
+      setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null });
       setLoading(true);
       setRefreshNonce((value) => value + 1);
     };
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
     return () => window.removeEventListener(ACTIVE_X_CHANGED_EVENT, refresh);
   }, []);
-
-  // SlotGridのmutation成功後はrouter.refresh()でpublic slotsが更新される。
-  // Client Component stateはRSC refreshで保持されるため、新baseを受け取ったrenderから
-  // 旧viewer overlayを無効化し、ownershipの再取得完了までfail-closedにする。
-  React.useEffect(() => {
-    if (!baseSlotsChanged) return;
-    previousBaseSlotsRef.current = baseSlots;
-    setOverlay(EMPTY_OVERLAY);
-    setLoading(true);
-    setRefreshNonce((value) => value + 1);
-  }, [baseSlots, baseSlotsChanged]);
 
   const slots = React.useMemo(
     () => mergeViewerSlots(baseSlots, viewerOverlay),
