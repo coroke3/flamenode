@@ -10,6 +10,7 @@ export type VideoViewerOverlayPlaylistItem = {
 export type VideoViewerOverlayDto = {
   loggedIn: boolean;
   authUnavailable: boolean;
+  isBanned: boolean;
   isTosAccepted: boolean;
   termsReacceptRequired: boolean;
   activeXId: string | null;
