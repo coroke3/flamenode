@@ -18,6 +18,7 @@ export function VideoInteractionActions({
     overlay.loggedIn &&
     (!overlay.isTosAccepted || overlay.termsReacceptRequired);
   const canInteract =
+    !loading &&
     overlay.loggedIn &&
     !overlay.isBanned &&
     !needsTermsAcceptance &&
