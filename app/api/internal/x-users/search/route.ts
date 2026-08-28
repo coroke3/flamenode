@@ -32,12 +32,13 @@ function compactSearchChars(value: string): string {
 function parseBoundedDecimalParam(
   value: string | null,
   fallback: number,
+  min: number,
   max: number,
 ): number {
   const raw = (value ?? "").trim().slice(0, MAX_NUMERIC_PARAM_LENGTH);
   if (!/^\d+$/.test(raw)) return fallback;
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) return fallback;
+  if (!Number.isSafeInteger(parsed) || parsed < min) return fallback;
   return Math.min(parsed, max);
 }
 
@@ -137,16 +138,15 @@ export async function GET(request: Request): Promise<Response> {
     .trim()
     .slice(0, MAX_QUERY_LENGTH);
   const onlyApproved = url.searchParams.get("onlyApproved") === "1";
-  const limit = Math.max(
+  const limit = parseBoundedDecimalParam(
+    url.searchParams.get("limit"),
+    DEFAULT_LIMIT,
     1,
-    parseBoundedDecimalParam(
-      url.searchParams.get("limit"),
-      DEFAULT_LIMIT,
-      MAX_LIMIT,
-    ),
+    MAX_LIMIT,
   );
   const offset = parseBoundedDecimalParam(
     url.searchParams.get("offset"),
+    0,
     0,
     MAX_OFFSET,
   );
