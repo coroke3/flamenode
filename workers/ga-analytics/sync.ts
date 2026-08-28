@@ -2,6 +2,7 @@
  * GA4 trending 同期: list/recent.json → GA4 report → rank → analytics/trending.json。
  * 失敗時は R2 put しない（fail-closed）。D1 は使わない。
  */
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { ExternalRequestBudget } from "../shared/externalApi.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 import {
@@ -16,6 +17,8 @@ export const GA4_RECENT_LIST_KEY = "list/recent.json";
 export const GA4_TRENDING_OUTPUT_KEY = "analytics/trending.json";
 export const GA4_TRENDING_CACHE_CONTROL =
   "public, max-age=300, stale-while-revalidate=3600";
+export const GA4_RECENT_LIST_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
+export const GA4_TRENDING_MAX_OBJECT_BYTES = 1024 * 1024;
 export const TRENDING_SCHEMA_VERSION = 1;
 export const TRENDING_RANKING_RULE = [
   "views_2d_desc",
@@ -129,14 +132,31 @@ function logGa4TrendingEvent(
   console.log(JSON.stringify(event));
 }
 
+function isOversizedR2Object(
+  object: { size?: number },
+  maxBytes: number,
+): boolean {
+  return (
+    typeof object.size === "number" &&
+    (!Number.isSafeInteger(object.size) || object.size < 0 || object.size > maxBytes)
+  );
+}
+
 async function loadRecentListPayload(
   env: Ga4TrendingSyncEnv,
   signal?: AbortSignal,
 ): Promise<RecentListPayload> {
   signal?.throwIfAborted();
   const object = await env.R2.get(GA4_RECENT_LIST_KEY);
-  signal?.throwIfAborted();
+  if (signal?.aborted) {
+    await cancelR2BodyBestEffort(object);
+    signal.throwIfAborted();
+  }
   if (!object) throw new Error("ga4_recent_list_missing");
+  if (isOversizedR2Object(object, GA4_RECENT_LIST_MAX_OBJECT_BYTES)) {
+    await cancelR2BodyBestEffort(object);
+    throw new Error("ga4_recent_list_too_large");
+  }
   const text = await object.text();
   signal?.throwIfAborted();
   try {
@@ -152,8 +172,15 @@ async function loadExistingTrendingItemCount(
 ): Promise<number> {
   signal?.throwIfAborted();
   const object = await env.R2.get(GA4_TRENDING_OUTPUT_KEY);
-  signal?.throwIfAborted();
+  if (signal?.aborted) {
+    await cancelR2BodyBestEffort(object);
+    signal.throwIfAborted();
+  }
   if (!object) return 0;
+  if (isOversizedR2Object(object, GA4_TRENDING_MAX_OBJECT_BYTES)) {
+    await cancelR2BodyBestEffort(object);
+    return 0;
+  }
   const text = await object.text();
   signal?.throwIfAborted();
   try {
