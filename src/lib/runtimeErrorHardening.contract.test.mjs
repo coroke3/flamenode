@@ -19,6 +19,8 @@ const [
   publicCacheSource,
   scoreThrottleSource,
   usersIndexV2ArtifactsSource,
+  artifactSloSource,
+  deepHealthSource,
 ] = await Promise.all([
   read("middleware.ts"),
   read("src/lib/event/eventIdReuse.ts"),
@@ -32,6 +34,8 @@ const [
   read("src/lib/publicData/publicCache.ts"),
   read("workers/sync-jobs/scoreRankingRebuildThrottle.ts"),
   read("workers/json-generator/usersIndexV2Artifacts.ts"),
+  read("src/lib/health/artifactSlo.ts"),
+  read("src/lib/health/deepHealth.ts"),
 ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
@@ -117,4 +121,18 @@ test("users index v2 workerはmanifest/legacy正本をbounded readする", () =>
   );
   const legacyParse = usersIndexV2ArtifactsSource.indexOf("object.json()", legacySize);
   assert.ok(legacySize >= 0 && legacyParse > legacySize);
+});
+
+test("health diagnosticsはoversize artifactを本文parse前に拒否してbodyを解放する", () => {
+  assert.match(artifactSloSource, /ARTIFACT_SLO_MAX_OBJECT_BYTES = 16 \* 1024 \* 1024/);
+  assert.match(artifactSloSource, /object\.size > ARTIFACT_SLO_MAX_OBJECT_BYTES/);
+  assert.match(artifactSloSource, /cancelR2BodyBestEffort\(object\)/);
+  assert.ok(
+    artifactSloSource.indexOf("object.size > ARTIFACT_SLO_MAX_OBJECT_BYTES") <
+      artifactSloSource.indexOf("JSON.parse(await object.text())"),
+  );
+  assert.match(deepHealthSource, /PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES/);
+  assert.match(deepHealthSource, /object\.size > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES/);
+  assert.match(deepHealthSource, /reportDegraded\("manifest_too_large"\)/);
+  assert.match(deepHealthSource, /cancelR2BodyBestEffort\(object\)/);
 });
