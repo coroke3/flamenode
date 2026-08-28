@@ -84,6 +84,15 @@ test("base slot/Active X変更時は旧viewer ownershipを即時無効化する"
   assert.match(panel, /ACTIVE_X_CHANGED_EVENT/);
 });
 
+test("slot viewer overlayの通信が止まっても確認中のまま固まらない", () => {
+  assert.match(panel, /const SLOT_VIEWER_OVERLAY_TIMEOUT_MS = 5_000/);
+  assert.match(panel, /const controller = new AbortController\(\)/);
+  assert.match(panel, /controller\.abort\(\)/);
+  assert.match(panel, /if \(!active\) return null/);
+  assert.match(panel, /authUnavailable: true/);
+  assert.match(panel, /window\.clearTimeout\(timeoutId\)/);
+});
+
 test("TOS/BAN/auth unavailableでは本人枠のwrite ownershipだけを無効化する", () => {
   assert.match(panel, /const canManageOwnSlots =/);
   assert.match(panel, /!viewerOverlay\.needsTermsAcceptance/);
