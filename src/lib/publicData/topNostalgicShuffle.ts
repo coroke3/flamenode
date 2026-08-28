@@ -14,9 +14,4 @@ export function pickNostalgicDisplay<T>(
   return shuffledCopy(pool).slice(0, limit);
 }
 
-/** @deprecated Use jstDayKey from topNostalgicDaily.ts */
-export function utcDayKey(unixSec: number): string {
-  return jstDayKey(unixSec);
-}
-
 export { jstDayKey, needsNostalgicDailyReshuffle };

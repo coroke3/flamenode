@@ -50,12 +50,9 @@ test("動画作成は常にtop section producerをenqueueし、creatorありな�
   const creatorBranch = createFn.indexOf("if (opts.creatorXUserId)");
   assert.ok(topIdx >= 0 && creatorBranch > topIdx, "top section は creator 分岐より前");
 });
-test("buildVideoCardChangeFanOutTargetsはskipTopRecommendでもsection producerをenqueueする", () => {
+test("buildVideoCardChangeFanOutTargetsは常にsection producerをenqueueする", () => {
   assert.match(hooks, /export function buildVideoCardChangeFanOutTargets[\s\S]*topVideoCardTargets\(opts\.reason/);
-  assert.doesNotMatch(
-    hooks,
-    /buildVideoCardChangeFanOutTargets[\s\S]*if \(opts\.skipTopRecommend\)/,
-  );
+  assert.doesNotMatch(hooks, /skipTopRecommend/);
 });
 test("枠変更はevent_slotsとtop_slot_statsを同一batchでenqueueする", () => {
   assert.match(hooks, /export function buildSlotChangeQueueBatch/);

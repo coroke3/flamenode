@@ -130,10 +130,3 @@ export async function enqueuePerTargetComposerFollowUp(
     spec.reason,
   );
 }
-/** @deprecated Use enqueueComposerFollowUps(env, "users_index") */
-
-export async function enqueueTopRecommendAfterUsersIndex(
-  env: FollowUpEnv,
-): Promise<boolean> {
-  return enqueueComposerFollowUps(env, "users_index");
-}

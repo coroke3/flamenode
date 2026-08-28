@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   GENERAL_EDITABLE_FIELD_KEYS,
   disabledFieldKeysFromGeneralFields,
-  normalModeAlwaysDisabledFieldKeys,
   normalizeGeneralEditableFields,
   parseGeneralEditableFields,
   parseGeneralEditablePolicyV2,
@@ -196,9 +195,7 @@ test("disabledFieldKeysFromGeneralFields: music key maps to video.music (covers 
   assert.ok(disabled.includes("video.music"));
 });
 
-test("normalModeAlwaysDisabledFieldKeys: field-level policy controls stage permission", () => {
-  const keys = normalModeAlwaysDisabledFieldKeys();
-  assert.deepEqual(keys, []);
+test("field-level policy controls stage permission", () => {
   assert.ok(
     disabledFieldKeysFromGeneralFields(new Set(["stage_permission"])).every(
       (field) => field !== "descriptions.stage_permission",

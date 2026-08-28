@@ -1,8 +1,3 @@
-import {
-  MAX_SLOTS_PER_VIDEO,
-  MAX_STAGE_PERMISSION_QUESTIONS,
-} from "../event/eventLimits.ts";
-
 /**
  * 画面・ドメイン上の公開メンバー最大件数。
  *
@@ -28,6 +23,4 @@ export const MAX_COLLABORATOR_PERMISSION_BATCH = 100;
 export const MAX_ATOMIC_VIDEO_SOFTWARES = 4;
 export const MAX_ATOMIC_VIDEO_EVENTS = 4;
 export const MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS = 4;
-/** @deprecated 業務上限ではない。提出のグループ上限は `MAX_SLOTS_PER_VIDEO`。残置は互換用。 */
-export const MAX_ATOMIC_SUBMITTED_SLOTS = 3;
 export { MAX_STAGE_PERMISSION_QUESTIONS } from "../event/eventLimits.ts";

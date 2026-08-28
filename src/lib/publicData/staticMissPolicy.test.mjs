@@ -6,7 +6,9 @@ import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
 if (runTestWithTsx(import.meta.url)) {
   const { DatabaseSync } = await import("node:sqlite");
   const { drizzle } = await import("drizzle-orm/sqlite-proxy");
-  const { publicStaticTargetExists } = await import("./staticMissPolicy.ts");
+  const { probePublicStaticTarget } = await import("./publicStaticTargetProbe.ts");
+  const isPublicTarget = async (db, targetType, targetId) =>
+    (await probePublicStaticTarget(db, targetType, targetId)).state === "public";
 
   function createHarness() {
     const sqlite = new DatabaseSync(":memory:");
@@ -60,7 +62,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("固定global artifactはDB照会なしで再生成対象にできる", async () => {
     const harness = createHarness();
     assert.equal(
-      await publicStaticTargetExists(harness.db, "top", "global"),
+      await isPublicTarget(harness.db, "top", "global"),
       true,
     );
     assert.equal(harness.getQueryCount(), 0);
@@ -70,15 +72,15 @@ if (runTestWithTsx(import.meta.url)) {
   test("公開eventだけがpublic miss enqueue対象になる", async () => {
     const harness = createHarness();
     assert.equal(
-      await publicStaticTargetExists(harness.db, "event", "event-public"),
+      await isPublicTarget(harness.db, "event", "event-public"),
       true,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "event", "event-private"),
+      await isPublicTarget(harness.db, "event", "event-private"),
       false,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "event", "missing-event"),
+      await isPublicTarget(harness.db, "event", "missing-event"),
       false,
     );
     harness.sqlite.close();
@@ -87,19 +89,19 @@ if (runTestWithTsx(import.meta.url)) {
   test("公開videoは内部IDとYouTube IDの両方で照合する", async () => {
     const harness = createHarness();
     assert.equal(
-      await publicStaticTargetExists(harness.db, "video", "video-public"),
+      await isPublicTarget(harness.db, "video", "video-public"),
       true,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "video", "dQw4w9WgXcQ"),
+      await isPublicTarget(harness.db, "video", "dQw4w9WgXcQ"),
       true,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "video", "video-private"),
+      await isPublicTarget(harness.db, "video", "video-private"),
       false,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "video", "missing-video"),
+      await isPublicTarget(harness.db, "video", "missing-video"),
       false,
     );
     harness.sqlite.close();
@@ -112,27 +114,27 @@ if (runTestWithTsx(import.meta.url)) {
       VALUES ('MixedCase', 'Mixed', 'approved');
     `);
     assert.equal(
-      await publicStaticTargetExists(harness.db, "user", "ALICE"),
+      await isPublicTarget(harness.db, "user", "ALICE"),
       true,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "user", "mixedcase"),
+      await isPublicTarget(harness.db, "user", "mixedcase"),
       true,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "user", "pending-user"),
+      await isPublicTarget(harness.db, "user", "pending-user"),
       true,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "user", "imported-user"),
+      await isPublicTarget(harness.db, "user", "imported-user"),
       true,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "user", "rejected-user"),
+      await isPublicTarget(harness.db, "user", "rejected-user"),
       false,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "user", "missing-user"),
+      await isPublicTarget(harness.db, "user", "missing-user"),
       false,
     );
     harness.sqlite.close();
@@ -141,11 +143,11 @@ if (runTestWithTsx(import.meta.url)) {
   test("空IDと過長IDはDB照会前に拒否する", async () => {
     const harness = createHarness();
     assert.equal(
-      await publicStaticTargetExists(harness.db, "video", "   "),
+      await isPublicTarget(harness.db, "video", "   "),
       false,
     );
     assert.equal(
-      await publicStaticTargetExists(harness.db, "event", "x".repeat(129)),
+      await isPublicTarget(harness.db, "event", "x".repeat(129)),
       false,
     );
     assert.equal(harness.getQueryCount(), 0);

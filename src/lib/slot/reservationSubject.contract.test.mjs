@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { MAX_SLOTS_PER_VIDEO } from "../slots/limits.ts";
 import { MAX_STAGE_PERMISSION_QUESTIONS } from "../event/eventLimits.ts";
 import { MAX_ATOMIC_SLOT_ROWS } from "../slots/atomicLimits.ts";
-import { MAX_ATOMIC_SUBMITTED_SLOTS } from "../video/atomicLimits.ts";
 
 const slotSource = await readFile(
   new URL("../actions/slot.ts", import.meta.url),
@@ -25,7 +24,6 @@ const eventFormSchema = await readFile(
 
 test("atomic slot limitsは内部chunkと業務上限を分離", () => {
   assert.equal(MAX_ATOMIC_SLOT_ROWS, 3);
-  assert.equal(MAX_ATOMIC_SUBMITTED_SLOTS, 3);
   assert.equal(MAX_SLOTS_PER_VIDEO, 20);
 });
 

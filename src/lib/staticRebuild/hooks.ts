@@ -164,16 +164,13 @@ export function topAnnouncementTarget(
 ): EnqueueStaticRebuildInput {
   return { targetType: "top_announcements", targetId: "global", reason, priority };
 }
-/** 公開カード変更時に list / search / top section / recommend_core へ波及するターゲット。
- * skipTopRecommend は call-site 互換のため残す。section producer は常に enqueue する。 */
+/** 公開カード変更時に list / search / top section / recommend_core へ波及するターゲット。 */
 
 export function buildVideoCardChangeFanOutTargets(opts: {
   reason: string;
   requestedByUserId?: string | null;
   priority?: StaticRebuildPriority;
-  skipTopRecommend?: boolean;
 }): EnqueueStaticRebuildInput[] {
-  void opts.skipTopRecommend;
   return withMeta(topVideoCardTargets(opts.reason, opts.priority), opts);
 }
 
@@ -319,7 +316,6 @@ export async function enqueueAfterVideoUpdate(
       requestedByUserId: opts.requestedByUserId,
     },
   ];
-  let chainsTopRecommendViaUsersIndex = false;
   if (opts.creatorXUserId && opts.identityChanged) {
     items.push(
       {
@@ -337,7 +333,6 @@ export async function enqueueAfterVideoUpdate(
     );
     // クリエイター表示名・X IDの変更はmember suggestionsのname/occurrenceに響く。
     items.push(memberSuggestionsTarget("video_identity_update"));
-    chainsTopRecommendViaUsersIndex = true;
   }
   const listAffecting =
     opts.visibilityChanged || opts.eventMembershipChanged || opts.identityChanged;
@@ -365,7 +360,6 @@ export async function enqueueAfterVideoUpdate(
         reason: "video_card_update",
         requestedByUserId: opts.requestedByUserId,
         priority: "low",
-        skipTopRecommend: chainsTopRecommendViaUsersIndex,
       }),
     );
   }

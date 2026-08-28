@@ -403,9 +403,6 @@ export async function runContentJobsRecovery(
   );
 }
 
-/** @deprecated use runContentJobsRecovery */
-export const runContentJobs = runContentJobsRecovery;
-
 export async function handleContentJobsFetch(
   req: Request,
   env: Env,

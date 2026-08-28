@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveVisibleRelatedVideos } from "./visibleRelatedVideos.ts";
+import { resolveVisibleRelatedVideos } from "./relatedVideoProjection.ts";
 
 const base = (id) => ({
   id,

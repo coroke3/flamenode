@@ -6,7 +6,7 @@ const targets = await Promise.all([
   readFile(new URL("./listQueries.ts", import.meta.url), "utf8"),
   readFile(new URL("./videoDetailQueries.ts", import.meta.url), "utf8"),
   readFile(
-    new URL("../publicData/staticMissPolicy.ts", import.meta.url),
+    new URL("../publicData/publicStaticTargetProbe.ts", import.meta.url),
     "utf8",
   ),
   readFile(
