@@ -22,6 +22,18 @@ type CachedJson = {
   fetchedAt: number;
 };
 
+type PageExpectation = {
+  bucket: number;
+  page: number;
+  records: Map<string, { part: number; total: number }>;
+};
+
+type GramReadState = {
+  total: number;
+  itemCount: number;
+  itemIds: Set<string>;
+};
+
 const JSON_CACHE_TTL_SEC = 30;
 const JSON_CACHE_MAX_ENTRIES = 24;
 const jsonCache = new Map<string, CachedJson>();
@@ -175,7 +187,9 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
     number,
     ReturnType<typeof normalizeMemberSuggestionsV2Directory>
   >();
-  const pageKeys = new Set<string>();
+  const pageExpectations = new Map<string, PageExpectation>();
+  const gramStates = new Map<string, GramReadState>();
+
   for (const gram of grams) {
     const bucketId = memberSuggestionPostingBucket(gram);
     let directory = directories.get(bucketId) ?? null;
@@ -196,7 +210,11 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
         };
       }
       directory = normalizeMemberSuggestionsV2Directory(directoryRead.value);
-      if (!directory || directory.generation !== manifest.generation) {
+      if (
+        !directory ||
+        directory.generation !== manifest.generation ||
+        directory.bucket !== bucketId
+      ) {
         return { ok: false, reason: "directory_invalid" };
       }
       directories.set(bucketId, directory);
@@ -204,23 +222,48 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
 
     const entry = directory?.grams[gram];
     if (!entry) continue;
+    if (
+      entry.total <= 0 ||
+      entry.pages.length === 0 ||
+      new Set(entry.pages).size !== entry.pages.length
+    ) {
+      return { ok: false, reason: "directory_invalid" };
+    }
     if (entry.pages.length > MEMBER_SUGGESTIONS_V2_MAX_QUERY_PAGES) {
       return { ok: false, reason: "query_budget_exceeded" };
     }
-    for (const page of entry.pages) {
-      pageKeys.add(
-        memberSuggestionsV2PageObjectKey(manifest.generation, bucketId, page),
+
+    gramStates.set(gram, {
+      total: entry.total,
+      itemCount: 0,
+      itemIds: new Set<string>(),
+    });
+    entry.pages.forEach((pageNumber, part) => {
+      const key = memberSuggestionsV2PageObjectKey(
+        manifest.generation,
+        bucketId,
+        pageNumber,
       );
-    }
+      const expected = pageExpectations.get(key) ?? {
+        bucket: bucketId,
+        page: pageNumber,
+        records: new Map<string, { part: number; total: number }>(),
+      };
+      if (expected.bucket !== bucketId || expected.page !== pageNumber) {
+        return;
+      }
+      expected.records.set(gram, { part, total: entry.total });
+      pageExpectations.set(key, expected);
+    });
   }
 
-  if (pageKeys.size > MEMBER_SUGGESTIONS_V2_MAX_QUERY_PAGES) {
+  if (pageExpectations.size > MEMBER_SUGGESTIONS_V2_MAX_QUERY_PAGES) {
     return { ok: false, reason: "query_budget_exceeded" };
   }
 
   const candidates = new Map<string, MemberSuggestionItem>();
   let truncated = false;
-  for (const key of pageKeys) {
+  for (const [key, expectedPage] of pageExpectations) {
     const pageRead = await readJson(bucket, key);
     if (!pageRead.ok) {
       return {
@@ -234,12 +277,43 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
       };
     }
     const page = normalizeMemberSuggestionsV2Page(pageRead.value);
-    if (!page || page.generation !== manifest.generation) {
+    if (
+      !page ||
+      page.generation !== manifest.generation ||
+      page.bucket !== expectedPage.bucket ||
+      page.page !== expectedPage.page
+    ) {
       return { ok: false, reason: "page_invalid" };
     }
+
+    const seenExpectedRecords = new Set<string>();
     for (const record of page.records) {
-      if (!grams.includes(record.gram)) continue;
+      const expectation = expectedPage.records.get(record.gram);
+      if (!expectation) {
+        // 選択したgramがdirectoryにないpageへ紛れ込んでいる場合もcorrupt。
+        if (gramStates.has(record.gram)) {
+          return { ok: false, reason: "page_invalid" };
+        }
+        continue;
+      }
+      if (
+        seenExpectedRecords.has(record.gram) ||
+        record.part !== expectation.part ||
+        record.total !== expectation.total
+      ) {
+        return { ok: false, reason: "page_invalid" };
+      }
+      seenExpectedRecords.add(record.gram);
+
+      const gramState = gramStates.get(record.gram);
+      if (!gramState) return { ok: false, reason: "page_invalid" };
       for (const item of record.items) {
+        if (gramState.itemIds.has(item.x_user_id)) {
+          return { ok: false, reason: "page_invalid" };
+        }
+        gramState.itemIds.add(item.x_user_id);
+        gramState.itemCount += 1;
+
         if (!candidates.has(item.x_user_id)) {
           candidates.set(item.x_user_id, item);
           if (candidates.size >= MEMBER_SUGGESTIONS_V2_MAX_CANDIDATES) {
@@ -251,6 +325,17 @@ export async function loadMemberSuggestionsCandidatesV2FromBucket(
       if (truncated) break;
     }
     if (truncated) break;
+    if (seenExpectedRecords.size !== expectedPage.records.size) {
+      return { ok: false, reason: "page_invalid" };
+    }
+  }
+
+  if (!truncated) {
+    for (const state of gramStates.values()) {
+      if (state.itemCount !== state.total || state.itemIds.size !== state.total) {
+        return { ok: false, reason: "page_invalid" };
+      }
+    }
   }
 
   return {
