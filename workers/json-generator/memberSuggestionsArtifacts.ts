@@ -277,11 +277,15 @@ type MemberSuggestionsTrackedArtifact = {
 async function cleanupWrittenArtifacts(
   env: Env,
   artifacts: readonly MemberSuggestionsTrackedArtifact[],
+  preserveObjectKeys: ReadonlySet<string> = new Set<string>(),
 ): Promise<void> {
   const keys = [
     ...new Set(
       artifacts
-        .filter((artifact) => artifact.wrote)
+        .filter(
+          (artifact) =>
+            artifact.wrote && !preserveObjectKeys.has(artifact.objectKey),
+        )
         .map((artifact) => artifact.objectKey),
     ),
   ];
@@ -442,13 +446,17 @@ export async function rebuildMemberSuggestions(
   let manifestArtifact: MemberSuggestionsTrackedArtifact | undefined;
   let manifestPutCompleted = false;
   try {
+    // manifestはcommit point。generation-specific indexは公開前のimmutable準備成果物なので、
+    // rollback時にも削除しない。既存manifestが同世代indexを参照している修復ケースや、
+    // 次回同世代retryの再利用を壊さず、不要な孤立indexは後続reconcileで回収する。
+    previousManifest = await readPreviousManifest(env, signal);
+
     const indexArtifact = await putTrackedJson(env, indexKey, index, signal, {
       deduplicate: true,
     });
     committed.push(indexArtifact);
     await recordArtifacts(env, [indexArtifact], generatedAt, signal);
 
-    previousManifest = await readPreviousManifest(env, signal);
     manifestArtifact = await putTrackedJson(
       env,
       MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
@@ -460,7 +468,7 @@ export async function rebuildMemberSuggestions(
     committed.push(manifestArtifact);
     await recordArtifacts(env, [manifestArtifact], generatedAt, signal);
   } catch (error) {
-    await cleanupWrittenArtifacts(env, committed);
+    await cleanupWrittenArtifacts(env, committed, new Set([indexKey]));
     if (
       previousManifest !== undefined &&
       (previousManifest !== null
