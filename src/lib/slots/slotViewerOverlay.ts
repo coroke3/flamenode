@@ -84,10 +84,21 @@ export async function loadSlotViewerOverlay(
   }
 
   if (!viewer) return emptySlotViewerOverlay(false);
+  if (viewer.is_banned === 1) {
+    // writeGuardと同じBAN境界でfail-closed。本人枠・X ID・運営権限などの
+    // viewer固有情報も返さず、追加slot queryを避ける。
+    return {
+      ...emptySlotViewerOverlay(false),
+      loggedIn: true,
+      isBanned: true,
+      needsTermsAcceptance: userNeedsTermsAcceptance(viewer),
+    };
+  }
 
   const unavailableForViewer = (): SlotViewerOverlayDto => ({
     ...emptySlotViewerOverlay(true),
     loggedIn: true,
+    isBanned: false,
     needsTermsAcceptance: userNeedsTermsAcceptance(viewer),
   });
 
@@ -194,6 +205,7 @@ export async function loadSlotViewerOverlay(
       return {
         loggedIn: true,
         authUnavailable: false,
+        isBanned: false,
         needsTermsAcceptance: onboarding.needsTermsAcceptance,
         canReserveSlot: onboarding.canReserveSlot,
         canPost: onboarding.canPost,
