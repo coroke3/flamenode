@@ -74,10 +74,13 @@ test("viewer overlay clientは同一requestを共有しRSC refreshを要求し�
 
 test("video/playlist遷移中は旧viewer overlayを表示・操作しない", () => {
   assert.match(client, /type OverlayState/);
+  assert.match(client, /type ResolvedPlaylistState/);
+  assert.match(client, /playlistSourceKey/);
+  assert.match(client, /playlistState\.sourceKey === sourceKey/);
   assert.match(client, /currentRequestKey/);
   assert.match(client, /overlayIsCurrent/);
   assert.match(client, /overlay: overlayIsCurrent \? overlayState\.value : emptyOverlay\(\)/);
-  assert.match(client, /\[explicitPlaylist, videoId\]/);
+  assert.match(client, /\[videoId, playlist, playlistReady, sourceKey, nonce\]/);
   assert.match(interactionActions, /const canInteract =\s*!loading &&/s);
 });
 
