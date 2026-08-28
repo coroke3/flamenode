@@ -57,10 +57,12 @@ export function usePublicAccountSummary(
   user: PublicHeaderUser | null;
   loading: boolean;
   unavailable: boolean;
+  confirmedLoggedOut: boolean;
 } {
   const [user, setUser] = React.useState<PublicHeaderUser | null>(null);
   const [loading, setLoading] = React.useState(enabled && (!lazy || open));
   const [unavailable, setUnavailable] = React.useState(false);
+  const [confirmedLoggedOut, setConfirmedLoggedOut] = React.useState(false);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [idleReady, setIdleReady] = React.useState(!deferUntilIdle);
   const fetchedOnceRef = React.useRef(false);
@@ -139,6 +141,7 @@ export function usePublicAccountSummary(
     if (!enabled) {
       setLoading(false);
       setUnavailable(false);
+      setConfirmedLoggedOut(false);
       return;
     }
 
@@ -224,11 +227,15 @@ export function usePublicAccountSummary(
           fetchedOnceRef.current = true;
           if (summary.loggedIn) {
             setUser(mapSummaryToHeaderUser(summary));
+            setConfirmedLoggedOut(false);
             setUnavailable(false);
           } else if (summary.unavailable) {
             setUnavailable(true);
           } else {
-            if (!preserveLoggedInOnFailureRef.current) setUser(null);
+            // 503/通信失敗とは違い、200のloggedIn:falseはAuth/DBが正常に
+            // 「現在ログアウト済み」と確定した結果。SSRの古いログイン表示を維持しない。
+            setUser(null);
+            setConfirmedLoggedOut(true);
             setUnavailable(false);
           }
         } else {
@@ -268,7 +275,7 @@ export function usePublicAccountSummary(
     refreshNonce,
   ]);
 
-  return { user, loading, unavailable };
+  return { user, loading, unavailable, confirmedLoggedOut };
 }
 
 type PublicAccountIslandProps = {
