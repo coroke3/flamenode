@@ -1,3 +1,4 @@
+import { cancelR2BodyBestEffort } from "@/lib/r2Body";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize";
 
 // v4はCloudflare CPU hard cap適用後のplanだけを許可する。
@@ -339,6 +340,22 @@ function serializedBytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
+async function readStoredPreviewObject(object: R2ObjectBody): Promise<StoredPreview> {
+  if (
+    typeof object.size === "number" &&
+    (!Number.isSafeInteger(object.size) ||
+      object.size < 0 ||
+      object.size > MAX_STORED_PLAN_BYTES)
+  ) {
+    await cancelR2BodyBestEffort(object);
+    throw new LegacyImportPreviewError(
+      "保存済みpreview planが大きすぎます。再度プレビューしてください。",
+      "plan_too_large",
+    );
+  }
+  return parseStoredPreview(await object.text());
+}
+
 export function estimateLegacyImportStoredPlanBytes(input: {
   authUserId: string;
   strategy: LegacyImportStrategy;
@@ -495,7 +512,7 @@ export async function claimLegacyImportPreview(
       "not_found",
     );
   }
-  const record = parseStoredPreview(await object.text());
+  const record = await readStoredPreviewObject(object);
   const now = options.now ?? nowSeconds();
   if (record.expiresAt <= now) {
     throw new LegacyImportPreviewError(
@@ -587,7 +604,7 @@ export async function claimLegacyImportPreview(
   async function currentClaim(): Promise<{ object: R2ObjectBody; record: StoredPreview } | null> {
     const current = await safeBucket.get(key);
     if (!current) return null;
-    const currentRecord = parseStoredPreview(await current.text());
+    const currentRecord = await readStoredPreviewObject(current);
     if (currentRecord.claimId !== claimId || currentRecord.status !== "claimed") return null;
     const currentNow = claimClock();
     if (currentRecord.expiresAt <= currentNow || (currentRecord.claimExpiresAt ?? 0) <= currentNow) {
