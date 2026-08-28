@@ -42,7 +42,12 @@ export function VideoViewerUtilityDock({
       chapters={chapters}
       isLoggedIn={overlay.loggedIn}
       authUnavailable={overlay.authUnavailable || loading}
-      canPost={overlay.viewerXApproved && !loading && !overlay.authUnavailable}
+      canPost={
+        overlay.viewerXApproved &&
+        !overlay.isBanned &&
+        !loading &&
+        !overlay.authUnavailable
+      }
       loginHref={loginHref}
       settingsHref={settingsHref}
       activeXId={overlay.activeXId}
