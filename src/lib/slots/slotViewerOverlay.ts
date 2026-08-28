@@ -39,8 +39,8 @@ function userNeedsTermsAcceptance(user: {
  * 枠ページのviewer依存情報だけを取得するprivate overlay。
  *
  * まず公開イベントの存在だけを狭いD1 queryで確認する。これにより
- * - 非公開/存在しないeventでAuth.jsやslot全件queryを実行しない
- * - 匿名viewerではslot全件queryを実行しない
+ * - 非公開/存在しないeventでAuth.jsやslot queryを実行しない
+ * - 匿名viewerではslot queryを実行しない
  * - event_not_found と auth/database unavailable を混同しない
  *
  * 公開slot一覧自体はこの関数に依存させない。
@@ -119,7 +119,15 @@ export async function loadSlotViewerOverlay(
           })
           .from(slotsTable)
           .leftJoin(videosTable, eq(slotsTable.video_id, videosTable.id))
-          .where(eq(slotsTable.event_id, eventId)),
+          // resolveSlotViewerRelation は reserved_by_user_id がviewerと一致しない
+          // rowを必ず none にする。公開slot一覧はbase snapshot側にあるため、
+          // viewer overlayではこのauth userのrowだけ読めば意味論を維持できる。
+          .where(
+            and(
+              eq(slotsTable.event_id, eventId),
+              eq(slotsTable.reserved_by_user_id, viewer.id),
+            )!,
+          ),
       ]);
 
       const now = Math.floor(Date.now() / 1000);
@@ -170,8 +178,11 @@ export async function loadSlotViewerOverlay(
           viewerRelation === "unassigned" ||
           viewerRelation === "account_other" ||
           eventRow.slot_visibility_mode === "public_name";
+        // public_nameのgroup keyは公開base snapshotを正本にする。overlay queryは
+        // viewer rowだけへ絞るため、ここで再採番すると公開側group-Nを上書きして
+        // 同一画面内でgroup番号が食い違う。
         const exposeGroupKey =
-          isOwnedByViewer || eventRow.slot_visibility_mode === "public_name";
+          isOwnedByViewer && eventRow.slot_visibility_mode !== "public_name";
         let groupKey: string | null = null;
         if (exposeGroupKey && slot.reservation_group_id) {
           groupKey = groupKeys.get(slot.reservation_group_id) ?? null;
