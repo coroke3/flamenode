@@ -13,6 +13,11 @@ export type SlotViewerOverlaySlot = {
   x_user_id: string | null;
 };
 
+export type SlotViewerOverlayState = {
+  id: string;
+  status: "available" | "reserved" | "submitted";
+};
+
 export type SlotViewerOverlayDto = {
   loggedIn: boolean;
   authUnavailable: boolean;
@@ -23,6 +28,11 @@ export type SlotViewerOverlayDto = {
   operatorOverrideAllowed: boolean;
   viewerXId: string | null;
   viewerXIdNotice: string | null;
+  /**
+   * 認証済みviewer向けの軽量なcanonical状態。
+   * public R2 snapshotの再生成待ち中でも予約/解放直後のstatusだけはD1正本へ合わせる。
+   */
+  slotStates: SlotViewerOverlayState[];
   slots: SlotViewerOverlaySlot[];
 };
 
@@ -39,6 +49,7 @@ export function emptySlotViewerOverlay(
     operatorOverrideAllowed: false,
     viewerXId: null,
     viewerXIdNotice: null,
+    slotStates: [],
     slots: [],
   };
 }
