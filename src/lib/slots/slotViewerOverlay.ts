@@ -104,7 +104,7 @@ export async function loadSlotViewerOverlay(
 
   try {
     const loaded = await withDatabase(async (db) => {
-      const [onboarding, slotRows] = await Promise.all([
+      const [onboarding, slotRows, slotStates] = await Promise.all([
         getOnboardingState(db, viewer),
         db
           .select({
@@ -119,15 +119,19 @@ export async function loadSlotViewerOverlay(
           })
           .from(slotsTable)
           .leftJoin(videosTable, eq(slotsTable.video_id, videosTable.id))
-          // resolveSlotViewerRelation は reserved_by_user_id がviewerと一致しない
-          // rowを必ず none にする。公開slot一覧はbase snapshot側にあるため、
-          // viewer overlayではこのauth userのrowだけ読めば意味論を維持できる。
+          // viewer固有の名前・X ID・group情報はそのauth userの予約行だけ読む。
           .where(
             and(
               eq(slotsTable.event_id, eventId),
               eq(slotsTable.reserved_by_user_id, viewer.id),
             )!,
           ),
+        // 公開R2 snapshotは書込直後に遅延反映されるため、認証済みviewerだけ
+        // id+statusの最小列をD1正本から重ねる。匿名public pageはこのqueryを通らない。
+        db
+          .select({ id: slotsTable.id, status: slotsTable.status })
+          .from(slotsTable)
+          .where(eq(slotsTable.event_id, eventId)),
       ]);
 
       const now = Math.floor(Date.now() / 1000);
@@ -223,6 +227,7 @@ export async function loadSlotViewerOverlay(
         operatorOverrideAllowed,
         viewerXId,
         viewerXIdNotice,
+        slotStates,
         slots,
       } satisfies SlotViewerOverlayDto;
     });
