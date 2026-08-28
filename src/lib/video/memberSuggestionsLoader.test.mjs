@@ -104,8 +104,6 @@ test("manifest total and index item count must agree", async () => {
 
 test("indexのgenerationがmanifestと不一致ならindex_invalid", async () => {
   const objects = new Map();
-  // 内部generationがgenAのindexを実物としてgenA/genB両keyに置き、
-  // manifestだけgenBへ向ける。schema/generation一致確認で拒否される。
   const items = buildMemberSuggestionItems([
     { x_user_id: "mochi", name: "Mochi", isProfileName: true, approvalStatus: "approved" },
   ]);
@@ -131,29 +129,7 @@ test("indexのgenerationがmanifestと不一致ならindex_invalid", async () =>
   assert.equal(result.reason, "index_invalid");
 });
 
-test("同じR2 bucketへの同時ロードは読み込みを共有する", async () => {
-  const objects = new Map();
-  publishValidIndex(objects);
-  const base = createBucket(objects);
-  let getCount = 0;
-  const bucket = {
-    async get(key) {
-      getCount += 1;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      return base.get(key);
-    },
-  };
-
-  const [first, second] = await Promise.all([
-    loadMemberSuggestionsIndexFromBucket(bucket),
-    loadMemberSuggestionsIndexFromBucket(bucket),
-  ]);
-  assert.equal(first.ok, true);
-  assert.equal(second.ok, true);
-  assert.equal(getCount, 2);
-});
-
-test("3秒を超えて未解決のin-flightは共有せず新しいR2 readへ切り替える", async () => {
+test("未解決のR2 I/O Promiseは別request相当のロードへ共有しない", async () => {
   const objects = new Map();
   publishValidIndex(objects);
   const base = createBucket(objects);
@@ -170,24 +146,39 @@ test("3秒を超えて未解決のin-flightは共有せず新しいR2 readへ切
     },
   };
 
-  const originalNow = Date.now;
-  let now = 1_000_000;
-  Date.now = () => now;
-  let first;
-  try {
-    first = loadMemberSuggestionsIndexFromBucket(bucket);
-    await Promise.resolve();
-    assert.equal(getCount, 1);
+  const first = loadMemberSuggestionsIndexFromBucket(bucket);
+  await Promise.resolve();
+  assert.equal(getCount, 1);
 
-    now += 3_001;
-    const second = await loadMemberSuggestionsIndexFromBucket(bucket);
-    assert.equal(second.ok, true);
-    assert.equal(getCount, 3);
-  } finally {
-    Date.now = originalNow;
-    releaseFirst?.(null);
-    if (first) await first;
-  }
+  const second = await loadMemberSuggestionsIndexFromBucket(bucket);
+  assert.equal(second.ok, true);
+  assert.equal(getCount, 3, "second load must start its own manifest/index I/O");
+
+  releaseFirst?.(await base.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY));
+  const firstResult = await first;
+  assert.equal(firstResult.ok, true);
+  assert.equal(getCount, 3, "completed JSON cache may be reused after the manifest check");
+});
+
+test("完了済みindex cacheでもcanonical manifestは毎request再確認する", async () => {
+  const objects = new Map();
+  publishValidIndex(objects);
+  const base = createBucket(objects);
+  let getCount = 0;
+  const bucket = {
+    async get(key) {
+      getCount += 1;
+      return base.get(key);
+    },
+  };
+
+  const first = await loadMemberSuggestionsIndexFromBucket(bucket);
+  assert.equal(first.ok, true);
+  assert.equal(getCount, 2);
+
+  const second = await loadMemberSuggestionsIndexFromBucket(bucket);
+  assert.equal(second.ok, true);
+  assert.equal(getCount, 3, "second load should read only canonical manifest");
 });
 
 test("manifest/indexは上限超過objectをJSON parse前に拒否する", async () => {
