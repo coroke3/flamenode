@@ -1,3 +1,4 @@
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import type { MemberSuggestionItem } from "./memberSuggestionsCore.ts";
 import { loadMemberSuggestionsManifestFromBucket } from "./memberSuggestionsLoader.ts";
 import {
@@ -110,6 +111,7 @@ async function readJson(
     typeof object.size === "number" &&
     object.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES
   ) {
+    await cancelR2BodyBestEffort(object);
     return { ok: false, reason: "too_large" };
   }
   try {
