@@ -17,6 +17,11 @@ type CacheEntry = {
   requestToken?: symbol;
 };
 
+type OverlayState = {
+  requestKey: string | null;
+  value: VideoViewerOverlayDto;
+};
+
 const cache = new Map<string, CacheEntry>();
 
 function emptyOverlay(authUnavailable = false): VideoViewerOverlayDto {
@@ -140,21 +145,17 @@ function overlayKey(videoId: string, playlist: string): string {
 async function fetchOverlay(
   videoId: string,
   playlist: string,
-  force = false,
 ): Promise<VideoViewerOverlayDto> {
   const key = overlayKey(videoId, playlist);
   const now = Date.now();
   const existing = cache.get(key);
   if (
-    !force &&
     existing?.value &&
     existing.fetchedAt != null &&
     now - existing.fetchedAt <= CACHE_TTL_MS
   ) {
     return existing.value;
   }
-  // force refreshでも同一keyのin-flightは共有する。複数islandが同じ更新
-  // eventを受けてもviewer API requestを重複させない。
   if (existing?.promise) return existing.promise;
 
   const params = new URLSearchParams();
@@ -184,8 +185,6 @@ async function fetchOverlay(
       return value;
     });
 
-  // force refresh開始時は古いvalueを保持しない。別hookが同時に参照しても
-  // stale valueではなくこのin-flight Promiseを共有する。
   cache.set(key, { promise, requestToken });
   return promise;
 }
@@ -222,14 +221,17 @@ export function useVideoViewerOverlay(
     explicit ? explicitPlaylist.trim().slice(0, 128) : "",
   );
   const [playlistReady, setPlaylistReady] = React.useState(explicit);
-  const [overlay, setOverlay] = React.useState<VideoViewerOverlayDto>(() => emptyOverlay());
+  const [overlayState, setOverlayState] = React.useState<OverlayState>(() => ({
+    requestKey: null,
+    value: emptyOverlay(),
+  }));
   const [loading, setLoading] = React.useState(true);
   const [nonce, setNonce] = React.useState(0);
 
   React.useEffect(() => {
     setPlaylist(resolvePlaylist(explicitPlaylist));
     setPlaylistReady(true);
-  }, [explicitPlaylist]);
+  }, [explicitPlaylist, videoId]);
 
   React.useEffect(() => {
     const refresh = () => {
@@ -255,13 +257,18 @@ export function useVideoViewerOverlay(
     };
   }, [videoId]);
 
+  const currentRequestKey = playlistReady
+    ? `${overlayKey(videoId, playlist)}\n${nonce}`
+    : null;
+
   React.useEffect(() => {
     if (!playlistReady) return;
     let active = true;
+    const requestKey = `${overlayKey(videoId, playlist)}\n${nonce}`;
     setLoading(true);
-    void fetchOverlay(videoId, playlist, nonce > 0).then((value) => {
+    void fetchOverlay(videoId, playlist).then((value) => {
       if (!active) return;
-      setOverlay(value);
+      setOverlayState({ requestKey, value });
       setLoading(false);
     });
     return () => {
@@ -269,9 +276,14 @@ export function useVideoViewerOverlay(
     };
   }, [videoId, playlist, playlistReady, nonce]);
 
+  const overlayIsCurrent =
+    currentRequestKey !== null && overlayState.requestKey === currentRequestKey;
+
   return {
-    overlay,
-    loading,
+    // App RouterでClient Componentが再利用されても、旧video/playlistのviewer情報を
+    // 新しい画面へ一瞬表示しない。特にprivate chapterとlibrary playlistをfail-closedにする。
+    overlay: overlayIsCurrent ? overlayState.value : emptyOverlay(),
+    loading: loading || !overlayIsCurrent,
     refresh: () => {
       invalidateVideoViewerOverlay(videoId);
       setNonce((value) => value + 1);
