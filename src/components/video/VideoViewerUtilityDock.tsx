@@ -36,6 +36,10 @@ export function VideoViewerUtilityDock({
   // Server Component側の型注釈だけを信用せず、client境界でもscalar化する。
   const safePlaylistId = normalizeRuntimePlaylistId(playlistId);
   const { overlay, loading } = useVideoViewerOverlay(videoId, safePlaylistId);
+  const needsTermsAcceptance =
+    overlay.loggedIn &&
+    (!overlay.isTosAccepted || overlay.termsReacceptRequired);
+  const rulesHref = `/rules?next=${encodeURIComponent(`/${currentId}`)}`;
   const chapters = React.useMemo(
     () =>
       mergeVideoChapterOverlay(publicChapters, overlay.privateChapters).map(
@@ -57,13 +61,16 @@ export function VideoViewerUtilityDock({
       chapters={chapters}
       isLoggedIn={overlay.loggedIn}
       authUnavailable={overlay.authUnavailable || loading}
+      needsTermsAcceptance={needsTermsAcceptance}
       canPost={
         overlay.viewerXApproved &&
         !overlay.isBanned &&
+        !needsTermsAcceptance &&
         !loading &&
         !overlay.authUnavailable
       }
       loginHref={loginHref}
+      rulesHref={rulesHref}
       settingsHref={settingsHref}
       activeXId={overlay.activeXId}
     />
