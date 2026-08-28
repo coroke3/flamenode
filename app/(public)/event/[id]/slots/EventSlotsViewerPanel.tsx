@@ -13,6 +13,7 @@ import type {
 } from "@/lib/slots/slotViewerOverlayCore";
 import styles from "./page.module.css";
 
+const SLOT_VIEWER_OVERLAY_TIMEOUT_MS = 5_000;
 const EMPTY_OVERLAY: SlotViewerOverlayDto = {
   loggedIn: false,
   authUnavailable: false,
@@ -165,6 +166,10 @@ export function EventSlotsViewerPanel({
   React.useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      SLOT_VIEWER_OVERLAY_TIMEOUT_MS,
+    );
     const requestBaseSlots = baseSlots;
     setLoading(true);
     void fetch(
@@ -185,7 +190,9 @@ export function EventSlotsViewerPanel({
         return normalized ?? { ...EMPTY_OVERLAY, authUnavailable: true };
       })
       .catch((error) => {
-        if (controller.signal.aborted) return null;
+        // cleanupによるabortはstateを触らない。timeout abortはactiveのままなので
+        // 一時利用不可へ遷移させ、永遠に「確認中」になるのを防ぐ。
+        if (!active) return null;
         console.warn("[event-slots] viewer overlay unavailable", {
           error: error instanceof Error ? error.name : "unknown",
         });
@@ -195,9 +202,13 @@ export function EventSlotsViewerPanel({
         if (!active || !value) return;
         setOverlayState({ value, baseSlots: requestBaseSlots });
         setLoading(false);
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId);
       });
     return () => {
       active = false;
+      window.clearTimeout(timeoutId);
       controller.abort();
     };
   }, [eventId, refreshNonce, baseSlots]);
