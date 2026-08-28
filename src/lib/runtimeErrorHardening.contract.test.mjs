@@ -6,14 +6,25 @@ import test from "node:test";
 const root = process.cwd();
 const read = (relative) => readFile(path.join(root, relative), "utf8");
 
-const [middlewareSource, reuseSource, trendingSource, aboutStatsSource, staffSource] =
-  await Promise.all([
-    read("middleware.ts"),
-    read("src/lib/event/eventIdReuse.ts"),
-    read("src/lib/publicData/trendingLoader.ts"),
-    read("app/api/public/about-stats/route.ts"),
-    read("app/api/public/events/[id]/staff/route.ts"),
-  ]);
+const [
+  middlewareSource,
+  reuseSource,
+  trendingSource,
+  aboutStatsSource,
+  staffSource,
+  suggestionsSource,
+  suggestionsV2Source,
+  visibilityManifestSource,
+] = await Promise.all([
+  read("middleware.ts"),
+  read("src/lib/event/eventIdReuse.ts"),
+  read("src/lib/publicData/trendingLoader.ts"),
+  read("app/api/public/about-stats/route.ts"),
+  read("app/api/public/events/[id]/staff/route.ts"),
+  read("src/lib/video/memberSuggestionsLoader.ts"),
+  read("src/lib/video/memberSuggestionsV2Loader.ts"),
+  read("src/lib/publicData/publicVisibilityManifest.ts"),
+]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
   assert.doesNotMatch(middlewareSource, /configuredSiteOriginPromise/);
@@ -35,7 +46,16 @@ test("trending artifactはJSON parse前にbyte上限を検査する", () => {
   );
 });
 
-test("small public R2 routesもoversize bodyを解放してからreturnする", () => {
+test("oversize R2 early returnはpublic/media/autocompleteでbodyを解放する", () => {
   assert.match(aboutStatsSource, /cancelR2BodyBestEffort\(object\)/);
   assert.match(staffSource, /cancelR2BodyBestEffort\(object\)/);
+  assert.match(suggestionsSource, /cancelR2BodyBestEffort\(manifestObject\)/);
+  assert.match(suggestionsSource, /cancelR2BodyBestEffort\(indexObject\)/);
+  assert.match(suggestionsV2Source, /cancelR2BodyBestEffort\(object\)/);
+});
+
+test("visibility manifestは既知R2 sizeなら本文を再encodeしない", () => {
+  assert.match(visibilityManifestSource, /const hasKnownSize = typeof object\.size === "number"/);
+  assert.match(visibilityManifestSource, /!hasKnownSize && utf8ByteLength\(text\)/);
+  assert.match(visibilityManifestSource, /cancelR2BodyBestEffort\(object\)/);
 });
