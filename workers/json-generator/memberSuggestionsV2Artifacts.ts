@@ -3,6 +3,8 @@ import {
   memberSuggestionsV2ArtifactByteLength,
   memberSuggestionsV2DirectoryObjectKey,
   memberSuggestionsV2PageObjectKey,
+  normalizeMemberSuggestionsV2Manifest,
+  MEMBER_SUGGESTIONS_V2_GENERATION_PREFIX,
   MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
   MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES,
 } from "../../src/lib/video/memberSuggestionsPostingsV2.ts";
@@ -14,9 +16,10 @@ import type { MemberSuggestionItem } from "../../src/lib/video/memberSuggestions
  * 公開せず、request path は V1 index へ fail-safe する。
  */
 const MEMBER_SUGGESTIONS_V2_MAX_PUBLISH_OBJECTS = 20;
+const MEMBER_SUGGESTIONS_V2_CLEANUP_LIST_LIMIT = 1000;
 const PRIVATE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
-type V2Bucket = Pick<R2Bucket, "put" | "delete">;
+type V2Bucket = Pick<R2Bucket, "get" | "put" | "delete" | "list">;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
@@ -53,6 +56,82 @@ async function putJson(
   throwIfAborted(signal);
 }
 
+async function readPreviousGeneration(
+  bucket: V2Bucket,
+): Promise<string | null> {
+  try {
+    const object = await bucket.get(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+    if (!object) return null;
+    const manifest = normalizeMemberSuggestionsV2Manifest(
+      await object.json<unknown>(),
+    );
+    return manifest?.generation ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteKeysBestEffort(
+  bucket: V2Bucket,
+  keys: readonly string[],
+): Promise<void> {
+  if (keys.length === 0) return;
+  try {
+    await bucket.delete([...keys]);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "member-suggestions-v2",
+        result: "orphan_cleanup_failed",
+        object_count: keys.length,
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+  }
+}
+
+/**
+ * manifest commit後に旧generationをbounded cleanupする。
+ * 現行writerは1世代20 object以下に制限しているため通常1 pageで収まるが、
+ * 過去の実装/partial objectにも耐えるよう1000件まで削除し、truncatedなら
+ * 次回以降に残す。cleanup失敗で新manifestを巻き戻さない。
+ */
+async function cleanupPreviousGenerationBestEffort(
+  bucket: V2Bucket,
+  previousGeneration: string | null,
+  currentGeneration: string,
+): Promise<void> {
+  if (!previousGeneration || previousGeneration === currentGeneration) return;
+  try {
+    const prefix = `${MEMBER_SUGGESTIONS_V2_GENERATION_PREFIX}/${previousGeneration}/`;
+    const listed = await bucket.list({
+      prefix,
+      limit: MEMBER_SUGGESTIONS_V2_CLEANUP_LIST_LIMIT,
+    });
+    const keys = listed.objects.map((object) => object.key);
+    if (keys.length > 0) await bucket.delete(keys);
+    if (listed.truncated) {
+      console.warn(
+        JSON.stringify({
+          service: "member-suggestions-v2",
+          result: "previous_generation_cleanup_truncated",
+          generation: previousGeneration,
+          deleted_count: keys.length,
+        }),
+      );
+    }
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service: "member-suggestions-v2",
+        result: "previous_generation_cleanup_failed",
+        generation: previousGeneration,
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      }),
+    );
+  }
+}
+
 /**
  * V2 postings は純粋な高速化成果物。V1 正本の成功を V2 障害で失敗扱いにしない。
  * manifest を唯一の commit point とし、generation-specific object を先に書く。
@@ -67,10 +146,14 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
   const { bucket, items, generatedAt, generation, signal } = args;
   throwIfAborted(signal);
 
+  const previousGeneration = await readPreviousGeneration(bucket);
+  throwIfAborted(signal);
+
   // 古い V2 を読み続けるより canonical V1 へ戻す方が安全。
   await bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
   throwIfAborted(signal);
 
+  const writtenKeys: string[] = [];
   try {
     const artifacts = buildMemberSuggestionsV2Artifacts({
       items,
@@ -112,6 +195,7 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
 
     for (const entry of entries) {
       await putJson(bucket, entry.key, entry.value, signal);
+      writtenKeys.push(entry.key);
     }
     // 唯一の commit point。これより前の generation-specific object は不可視。
     await putJson(
@@ -121,14 +205,23 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
       signal,
     );
 
+    await cleanupPreviousGenerationBestEffort(
+      bucket,
+      previousGeneration,
+      generation,
+    );
     return { published: true, objectCount };
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted) {
+      await deleteKeysBestEffort(bucket, writtenKeys);
+      throw error;
+    }
     try {
       await bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
     } catch {
       // V1 remains canonical even if this best-effort cleanup itself fails.
     }
+    await deleteKeysBestEffort(bucket, writtenKeys);
     console.warn(
       JSON.stringify({
         service: "member-suggestions-v2",
