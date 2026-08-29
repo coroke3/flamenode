@@ -1,4 +1,5 @@
 import type { FlameNodeEnv } from "@/lib/cloudflare";
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import { safeErrorSummary } from "../../../workers/shared/safeLog.ts";
 
 function safePublicErrorSummary(error: unknown): string {
@@ -164,6 +165,7 @@ export async function servePublicMedia(
 
   const contentType = normalizePublicMediaContentType(obj.httpMetadata?.contentType);
   if (!contentType || !isPublicMediaObjectSafe({ size: obj.size, contentType })) {
+    await cancelR2BodyBestEffort(obj);
     return new Response("Not found", { status: 404 });
   }
 
@@ -181,6 +183,8 @@ export async function servePublicMedia(
     })
   ) {
     // ACL・MIME・サイズ検証の後にだけ304を返す。非公開化後のcache bypassを防ぐ。
+    // 304ではR2 bodyをResponseへ渡さないため、明示的に接続資源を解放する。
+    await cancelR2BodyBestEffort(obj);
     return new Response(null, { status: 304, headers });
   }
   return new Response(obj.body, { headers });

@@ -8,7 +8,7 @@ test("submitSlotVideo は ID 単独取得後に relation と snapshot を先に�
   const fnStart = source.indexOf("async function submitSlotVideoCore");
   const fnBody = source.slice(fnStart);
   const slotLoad = fnBody.indexOf('eq(slots.id, slotId)');
-  const relationCheck = fnBody.indexOf("const slotRelation = resolveSlotViewerRelation");
+  const relationCheck = fnBody.indexOf("const slotRelation = resolveSlotSubmissionRelation");
   const snapshotCheck = fnBody.indexOf("validateActiveXSnapshot");
   const parseForm = fnBody.indexOf("parseVideoForm");
   const iconResolve = fnBody.indexOf("resolveVideoCreatorIcon");
@@ -22,16 +22,17 @@ test("submitSlotVideo は ID 単独取得後に relation と snapshot を先に�
 
 test("submitSlotVideo は group を SQL フィルタせず identity で拒否する", () => {
   assert.match(source, /resolveSlotGroupIdentity/);
-  assert.match(source, /canActAsSlotActor/);
+  assert.match(source, /canActAsSlotSubmitter/);
+  assert.match(source, /allowAuthMismatchWhenXIdMatches: true/);
   assert.doesNotMatch(source, /isNull\(slots\.x_user_id\)/);
   assert.match(source, /x_user_id: after\.x_user_id/);
   assert.match(source, /groupIdentity\.adoptNullRows/);
 });
 
-test("submitSlotVideo は account_other/none を漏洩しない一般メッセージで拒否する", () => {
+test("submitSlotVideo は X ID 不一致を漏洩しない一般メッセージで拒否する", () => {
   assert.match(
     source,
-    /slotRelation === "account_other" \|\| slotRelation === "none"[\s\S]*?SLOT_SUBMIT_REJECT_MESSAGE/,
+    /resolveSlotSubmissionRelation[\s\S]*?canActAsSlotSubmitter\(slotRelation\)[\s\S]*?SLOT_SUBMIT_REJECT_MESSAGE/,
   );
 });
 

@@ -2,6 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { getEnv } from "@/lib/cloudflare";
+import { cancelR2BodyBestEffort } from "@/lib/r2Body";
 import {
   emptyPublicVisibilityBlockedEntitiesManifest,
   isEntityBlockedInManifest,
@@ -25,6 +26,7 @@ type R2BucketLike = {
     text(): Promise<string>;
     etag?: string;
     size?: number;
+    body?: unknown;
   } | null>;
   put: R2Bucket["put"];
 };
@@ -76,18 +78,23 @@ export async function readPublicVisibilityBlockedEntitiesManifest(
       etag: null,
     };
   }
-  // R2 exposes the object size before the body is read. Reject oversized
+  // R2 exposes the exact object size before the body is read. Reject oversized
   // manifests before text() can allocate a large string in the Worker.
+  const hasKnownSize = typeof object.size === "number";
   if (
-    typeof object.size === "number" &&
+    hasKnownSize &&
     (!Number.isFinite(object.size) ||
-      object.size < 0 ||
-      object.size > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES)
+      object.size! < 0 ||
+      object.size! > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES)
   ) {
+    await cancelR2BodyBestEffort(object);
     throw new Error("public_visibility_manifest_too_large");
   }
   const text = await object.text();
-  if (utf8ByteLength(text) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
+  // Real R2 reads already supplied an exact byte size above. Avoid a second
+  // full TextEncoder pass on every public request; retain the body check for
+  // tests/custom bucket doubles that omit size.
+  if (!hasKnownSize && utf8ByteLength(text) > PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES) {
     throw new Error("public_visibility_manifest_too_large");
   }
   const parsed = normalizePublicVisibilityBlockedEntitiesManifest(

@@ -121,20 +121,31 @@ function isoFromUnix(value: number | null): string | null {
 }
 
 /**
- * `answer_json` is currently written only for checkbox questions, where the
- * value is a JSON array of strings.  Do not deserialize an arbitrary object
- * from a legacy/corrupted row into a public payload: custom answers are user
+ * `answer_json` is currently written for checkbox questions, where the value
+ * is a JSON array of strings.  Accept the primitive forms used by older
+ * imports as well, but never deserialize an arbitrary object from a
+ * legacy/corrupted row into a public payload: custom answers are user
  * controlled and an object could carry an internal key such as `user_id`.
  */
-function parsePublicAnswerJson(value: string | null): string[] | null {
+type PublicAnswerValue = string | string[] | number | boolean | null;
+
+function parsePublicAnswerJson(value: string | null): PublicAnswerValue {
   if (!value?.trim()) return null;
   try {
     const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    return parsed
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => item.trim())
-      .filter(Boolean);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (typeof parsed === "string") {
+      const trimmed = parsed.trim();
+      return trimmed || null;
+    }
+    if (typeof parsed === "number" && Number.isFinite(parsed)) return parsed;
+    if (typeof parsed === "boolean") return parsed;
+    return null;
   } catch {
     return null;
   }
@@ -176,19 +187,108 @@ function legacyPublicJsonText(value: string | null): string {
 }
 
 function answerValue(answer: EventExportAnswerSnapshot): unknown {
-  return answer.answer_json
-    ? parsePublicAnswerJson(answer.answer_json)
-    : answer.answer_text;
+  if (answer.answer_json?.trim()) {
+    const parsed = parsePublicAnswerJson(answer.answer_json);
+    // A malformed/object JSON value must not hide a valid text answer stored
+    // alongside it.  Preserve an intentionally empty checkbox array when no
+    // text fallback exists.
+    if (parsed !== null) {
+      if (Array.isArray(parsed) && parsed.length === 0 && answer.answer_text?.trim()) {
+        return answer.answer_text;
+      }
+      return parsed;
+    }
+  }
+  return answer.answer_text;
 }
 
-function answerText(video: EventExportVideoSnapshot, key: string): string {
-  const answer = video.answers.find((candidate) => candidate.key === key);
-  if (!answer) return "";
+function answerTextValue(answer: EventExportAnswerSnapshot): string {
   const value = answerValue(answer);
   if (value == null) return "";
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.join(",");
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
   return "";
+}
+
+function answerText(video: EventExportVideoSnapshot, key: string): string {
+  const answer = video.answers.find(
+    (candidate) =>
+      candidate.key === key || candidate.key.startsWith(`${key}_`),
+  );
+  if (!answer) return "";
+  return answerTextValue(answer);
+}
+
+function answerTextByLabel(
+  video: EventExportVideoSnapshot,
+  pattern: RegExp,
+): string {
+  const answer = video.answers.find((candidate) => pattern.test(candidate.label));
+  if (!answer) return "";
+  return answerTextValue(answer);
+}
+
+interface EventExportCustomAnswer {
+  key: string;
+  label: string;
+  value: unknown;
+  order: number;
+}
+
+function buildCustomAnswers(
+  video: EventExportVideoSnapshot,
+): EventExportCustomAnswer[] {
+  return video.answers.map((answer) => ({
+    key: answer.key,
+    label: answer.label,
+    value: answerValue(answer),
+    order: answer.sort_order,
+  }));
+}
+
+function buildCustomAnswersByKey(
+  answers: readonly EventExportCustomAnswer[],
+): Record<string, unknown> {
+  return Object.fromEntries(
+    answers
+      .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
+      .map((answer) => [answer.key, answer.value]),
+  );
+}
+
+/** Legacy rows are flat: never let a question key replace compatibility data. */
+const LEGACY_RESERVED_KEYS: ReadonlySet<string> = new Set([
+  "id", "eventid", "timestamp", "type1", "type2", "type", "creator",
+  "yomi", "movieyear", "tlink", "ychlink", "icon", "member", "memberid",
+  "memberchapter", "data", "time", "title", "music", "credit", "ymulink",
+  "up", "othersns", "righttype", "comment", "ylink", "", "beforecomment",
+  "aftercomment", "soft", "toudan", "hitokoto", "starts", "ends", "startm",
+  "endm", "ycomment", "status", "small", "largeThumbnail", "link", "fu",
+  "custom_answers", "custom_answers_by_key", "__proto__", "constructor", "prototype",
+]);
+
+function isSafeLegacyCustomAnswerKey(key: string): boolean {
+  return (
+    key.length > 0 &&
+    key.length <= 64 &&
+    /^[A-Za-z0-9_-]+$/.test(key) &&
+    !FORBIDDEN_PUBLIC_KEYS.has(key) &&
+    !LEGACY_RESERVED_KEYS.has(key)
+  );
+}
+
+function buildLegacyCustomAnswerFields(
+  answers: readonly EventExportCustomAnswer[],
+): Record<string, unknown> {
+  const fields = Object.create(null) as Record<string, unknown>;
+  for (const answer of answers) {
+    if (!isSafeLegacyCustomAnswerKey(answer.key)) continue;
+    fields[answer.key] = answer.value;
+  }
+  return fields;
 }
 
 function legacyDateParts(value: number | null): { date: string; time: string } {
@@ -297,6 +397,8 @@ export function buildLegacyEventExportPayload(
     const schedule = legacyDateParts(video.scheduled_time);
     const isCollaboration =
       video.collaboration_type === "collab" || video.members.length > 1;
+    const customAnswers = buildCustomAnswers(video);
+    const customAnswersByKey = buildCustomAnswersByKey(customAnswers);
     const starts = legacyStarts(video);
     const emptyMemberAligned = video.members.map(() => "").join(",");
     const importedNotes = parseLegacyImportedNotes(video);
@@ -306,15 +408,18 @@ export function buildLegacyEventExportPayload(
       "";
     const stagePermission =
       answerText(video, "stage_permission") ||
+      answerTextByLabel(video, /(?:stage|ステージ|上映|権利|利用)/i) ||
       importedNotes.get("ステージ利用") ||
       "";
     const stageParticipation =
       answerText(video, "stage_participation") ||
+      answerTextByLabel(video, /(?:登壇|参加|発表|speaker)/i) ||
       importedNotes.get("登壇") ||
       "";
     const legacyGeneralComment = importedNotes.get("コメント") || video.intro_comment || "";
 
     return {
+      ...buildLegacyCustomAnswerFields(customAnswers),
       id: video.id,
       eventid: snapshot.event.id,
       timestamp:
@@ -362,6 +467,8 @@ export function buildLegacyEventExportPayload(
       largeThumbnail: youtubeThumbnail(video.youtube_video_id, "large") ?? "",
       link: xProfileUrl(video.creator_x_user_id) ?? "",
       fu: video.part ?? "",
+      custom_answers: customAnswers,
+      custom_answers_by_key: customAnswersByKey,
     };
   });
 }
@@ -409,17 +516,8 @@ export function buildEventExportPayload(
       })),
     },
     videos: snapshot.videos.map((video) => {
-      const customAnswers = video.answers.map((answer) => ({
-        key: answer.key,
-        label: answer.label,
-        value: answerValue(answer),
-        order: answer.sort_order,
-      }));
-      const customAnswersByKey = Object.fromEntries(
-        customAnswers
-          .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
-          .map((answer) => [answer.key, answer.value]),
-      );
+      const customAnswers = buildCustomAnswers(video);
+      const customAnswersByKey = buildCustomAnswersByKey(customAnswers);
       return {
         id: video.id,
         title: video.title,

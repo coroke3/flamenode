@@ -197,6 +197,25 @@ if (process.env.FLAMENODE_RESOLVE_VIDEO_ICON_EXECUTION !== "1") {
     assert.deepEqual(currentHarness.dbAccess, []);
   });
 
+  test("mode=existing + 旧Google Drive cache URL は候補チェックなしで ok", async () => {
+    currentHarness = createHarness();
+    const iconUrl = "/api/google-drive-image/legacy_file_id";
+
+    const result = await resolveVideoCreatorIcon({
+      ...baseArgs(currentHarness, {
+        parsed: { icon_mode: "existing", icon_url: iconUrl },
+      }),
+    });
+
+    assert.deepEqual(result, {
+      ok: true,
+      value: { iconUrl, uploadedKey: null },
+    });
+    assert.deepEqual(currentHarness.getCandidatesCalls, []);
+    assert.deepEqual(currentHarness.puts, []);
+    assert.deepEqual(currentHarness.dbAccess, []);
+  });
+
   test("mode=existing + /api/media/ が候補外なら拒否", async () => {
     currentHarness = createHarness({ candidates: [] });
     const iconUrl = "/api/media/xicons/x-user-1/other.webp";

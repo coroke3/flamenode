@@ -1233,6 +1233,15 @@ export function VideoForm({
     return null;
   };
 
+  const validateWizardSubmission = (): WizardValidationError | null => {
+    for (const step of wizardSteps) {
+      if (step.key === "confirm") continue;
+      const error = validateWizardStep(step.key);
+      if (error) return error;
+    }
+    return null;
+  };
+
   const goToWizardStep = (index: number) => {
     if (!isWizard || index > maxReachedStep || index === currentStep) return;
     setStepError(null);
@@ -1262,6 +1271,11 @@ export function VideoForm({
     if (!isWizard || !isWizardLastStep || pending || !canSubmit) return;
     const form = formRef.current;
     if (!form) return;
+    const validationError = validateWizardSubmission();
+    if (validationError) {
+      setStepError(validationError);
+      return;
+    }
     wizardConfirmSubmitRequestedRef.current = true;
     try {
       submitFormCompat(form);
@@ -1429,6 +1443,12 @@ export function VideoForm({
       ]
         .filter(Boolean)
         .join(" ")}
+      // Hidden wizard steps intentionally remain mounted so their values are
+      // included in the final FormData. Native validation would nevertheless
+      // stop requestSubmit() on an off-screen required control before React
+      // can move the user to that step, so the wizard performs the complete
+      // validation above and delegates the final result to the server action.
+      noValidate={isWizard}
       onSubmit={handleSubmit}
       onChange={(event) => {
         if (!dirty) setDirty(true);

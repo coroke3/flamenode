@@ -54,3 +54,25 @@ test("submitFormCompat dispatches a cancelable submit event for valid legacy for
   assert.equal(event?.bubbles, true);
   assert.equal(event?.cancelable, true);
 });
+
+test("submitFormCompat skips native validation when the form opts out", () => {
+  const calls = [];
+  const form = {
+    noValidate: true,
+    checkValidity() {
+      calls.push("check");
+      return false;
+    },
+    reportValidity() {
+      calls.push("report");
+    },
+    dispatchEvent() {
+      calls.push("dispatch");
+      return true;
+    },
+  };
+
+  submitFormCompat(form);
+
+  assert.deepEqual(calls, ["dispatch"]);
+});

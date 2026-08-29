@@ -1,3 +1,4 @@
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import {
   buildMemberSuggestionsV2Artifacts,
   memberSuggestionsV2ArtifactByteLength,
@@ -60,21 +61,32 @@ async function putJson(
 
 async function readPreviousGeneration(
   bucket: V2Bucket,
+  signal?: AbortSignal,
 ): Promise<string | null> {
+  throwIfAborted(signal);
   try {
     const object = await bucket.get(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+    if (signal?.aborted) {
+      await cancelR2BodyBestEffort(object);
+      throwIfAborted(signal);
+    }
+    if (!object) return null;
     if (
-      !object ||
-      (typeof object.size === "number" &&
+      typeof object.size === "number" &&
+      (!Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
         object.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES)
     ) {
+      await cancelR2BodyBestEffort(object);
       return null;
     }
     const manifest = normalizeMemberSuggestionsV2Manifest(
       await object.json<unknown>(),
     );
+    throwIfAborted(signal);
     return manifest?.generation ?? null;
   } catch {
+    throwIfAborted(signal);
     return null;
   }
 }
@@ -175,7 +187,7 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
   const { bucket, items, generatedAt, generation, signal } = args;
   throwIfAborted(signal);
 
-  const previousGeneration = await readPreviousGeneration(bucket);
+  const previousGeneration = await readPreviousGeneration(bucket, signal);
   throwIfAborted(signal);
 
   // 古い V2 を読み続けるより canonical V1 へ戻す方が安全。

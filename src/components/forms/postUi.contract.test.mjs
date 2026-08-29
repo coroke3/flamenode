@@ -200,6 +200,17 @@ test("wizard advances to confirmation and only its explicit button can submit", 
   );
 });
 
+test("wizard confirmation validates hidden steps in React instead of native blocking", async () => {
+  const [source, submitCompat] = await Promise.all([
+    read("src/components/forms/VideoForm.tsx"),
+    read("src/lib/forms/submitFormCompat.ts"),
+  ]);
+  assert.match(source, /const validateWizardSubmission = \(\): WizardValidationError \| null/);
+  assert.match(source, /const validationError = validateWizardSubmission\(\)/);
+  assert.match(source, /noValidate=\{isWizard\}/);
+  assert.match(submitCompat, /!form\.noValidate/);
+});
+
 test("YouTube policy permission remains visible in the edit UI", async () => {
   const source = await read("app/(auth)/dashboard/edit/[id]/page.tsx");
   assert.match(source, /const canEditYoutube = canEditYoutubeByPolicy \|\| allowInitialYoutubeAttach/);
