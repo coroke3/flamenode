@@ -185,3 +185,15 @@
 .managePreviewCollapsible > :not(summary) {
   padding: 0 16px 16px;
 }
+
+.customQuestionsHeading {
+  margin: 8px 0 6px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.customQuestionsHeading + .customQuestionsHeading,
+.customQuestionsHeading:not(:first-child) {
+  margin-top: 18px;
+}

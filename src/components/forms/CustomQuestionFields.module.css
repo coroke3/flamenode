@@ -1,0 +1,47 @@
+.customChoiceGroup {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  min-inline-size: 0;
+}
+
+.customChoiceOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--fn-control-h);
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+
+.customChoiceOption:has(input:checked) {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+}
+
+.customChoiceOption:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+.customChoiceOption input {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .customChoiceOption {
+    min-height: var(--fn-control-h-touch);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .customChoiceOption {
+    transition: none;
+  }
+}

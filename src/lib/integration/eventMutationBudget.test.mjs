@@ -84,6 +84,9 @@ test("event question同期はbounded read、完全per-row snapshot、CASを持�
     source,
     /fitsD1AtomicBatchBudget\(mutationStatements\.length, audits\.length\)/,
   );
+  assert.match(source, /not\(stagePermissionQuestionKeyCondition\(\)\)/);
+  assert.match(source, /plannedGeneralQuestionsFromDrafts/);
+  assert.match(source, /event-update:custom-question/);
 });
 
 test("manage statusは共通queue lease semanticsとcaller予約内のbounded readを使う", () => {

@@ -10,6 +10,7 @@ import {
   type CustomQuestionRow,
   rowToQuestion,
 } from "./customQuestions";
+import { customQuestionToDraft, type EventGeneralCustomQuestionDraft } from "@/lib/event/generalCustomQuestionDraft";
 import { stagePermissionQuestionKeyCondition } from "./stagePermissionAnswers";
 import {
   compositeAuditTargetId,
@@ -209,4 +210,28 @@ export async function fetchActiveCustomQuestionsForEvents(
     out.set(row.event_id, list);
   }
   return out;
+}
+
+export async function loadGeneralCustomQuestionsForEvent(
+  db: DB,
+  eventId: string,
+): Promise<EventGeneralCustomQuestionDraft[]> {
+  const rows = await db
+    .select()
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        eq(eventCustomQuestions.event_id, eventId),
+        not(stagePermissionQuestionKeyCondition()),
+      )!,
+    )
+    .orderBy(
+      asc(eventCustomQuestions.sort_order),
+      asc(eventCustomQuestions.id),
+    )
+    .limit(MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1);
+  if (rows.length > MAX_VIDEO_CUSTOM_QUESTIONS_READ) {
+    throw new Error("video_custom_question_read_limit_exceeded");
+  }
+  return rows.map((row) => customQuestionToDraft(rowToQuestion(row)));
 }
