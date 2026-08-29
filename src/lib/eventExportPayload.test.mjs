@@ -374,5 +374,61 @@ test("scheduled KV cacheはv5とlegacyで衝突せず無効化時に両方消す
     /eventExportPayloadCacheKey\(\s*eventId,\s*format,\s*refreshMinutes/,
   );
   assert.match(cacheSource, /\["v5", "legacy"\] as const/);
-  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 7/);
+  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 8/);
+});
+
+test("custom answer valueはanswer_textを優先してJSON形式も安全に復元する", () => {
+  const valueSnapshot = {
+    ...snapshot,
+    event: { ...snapshot.event },
+    videos: [
+      {
+        ...snapshot.videos[0],
+        answers: [
+          {
+            key: "text_fallback",
+            label: "本文",
+            answer_text: "保存済み本文",
+            answer_json: "{\"internal\":true}",
+            sort_order: 0,
+          },
+          {
+            key: "checkbox_value",
+            label: "選択",
+            answer_text: null,
+            answer_json: JSON.stringify(["A", "", 1]),
+            sort_order: 1,
+          },
+          {
+            key: "numeric_value",
+            label: "数値",
+            answer_text: null,
+            answer_json: "42",
+            sort_order: 2,
+          },
+          {
+            key: "empty_json_fallback",
+            label: "空JSON",
+            answer_text: "空JSON時の本文",
+            answer_json: "[]",
+            sort_order: 3,
+          },
+        ],
+      },
+    ],
+  };
+
+  const v5Video = buildEventExportPayload(valueSnapshot).videos[0];
+  assert.deepEqual(v5Video.custom_answers, [
+    { key: "text_fallback", label: "本文", value: "保存済み本文", order: 0 },
+    { key: "checkbox_value", label: "選択", value: ["A"], order: 1 },
+    { key: "numeric_value", label: "数値", value: 42, order: 2 },
+    { key: "empty_json_fallback", label: "空JSON", value: "空JSON時の本文", order: 3 },
+  ]);
+
+  const legacyVideo = buildLegacyEventExportPayload(valueSnapshot)[0];
+  assert.equal(legacyVideo.text_fallback, "保存済み本文");
+  assert.deepEqual(legacyVideo.checkbox_value, ["A"]);
+  assert.equal(legacyVideo.numeric_value, 42);
+  assert.equal(legacyVideo.empty_json_fallback, "空JSON時の本文");
 });

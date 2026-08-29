@@ -3,7 +3,9 @@ import "server-only";
 import { getEnv } from "@/lib/cloudflare";
 
 // Payload shape changed to include custom answers in both formats.
-const EVENT_EXPORT_CACHE_VERSION = 7;
+// Bump whenever the payload or snapshot selection changes so an older KV
+// entry cannot keep serving a response built without custom answer values.
+const EVENT_EXPORT_CACHE_VERSION = 8;
 export const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
 
 export type EventExportCacheFormat = "v5" | "legacy";

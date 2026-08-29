@@ -121,20 +121,31 @@ function isoFromUnix(value: number | null): string | null {
 }
 
 /**
- * `answer_json` is currently written only for checkbox questions, where the
- * value is a JSON array of strings.  Do not deserialize an arbitrary object
- * from a legacy/corrupted row into a public payload: custom answers are user
+ * `answer_json` is currently written for checkbox questions, where the value
+ * is a JSON array of strings.  Accept the primitive forms used by older
+ * imports as well, but never deserialize an arbitrary object from a
+ * legacy/corrupted row into a public payload: custom answers are user
  * controlled and an object could carry an internal key such as `user_id`.
  */
-function parsePublicAnswerJson(value: string | null): string[] | null {
+type PublicAnswerValue = string | string[] | number | boolean | null;
+
+function parsePublicAnswerJson(value: string | null): PublicAnswerValue {
   if (!value?.trim()) return null;
   try {
     const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    return parsed
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => item.trim())
-      .filter(Boolean);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (typeof parsed === "string") {
+      const trimmed = parsed.trim();
+      return trimmed || null;
+    }
+    if (typeof parsed === "number" && Number.isFinite(parsed)) return parsed;
+    if (typeof parsed === "boolean") return parsed;
+    return null;
   } catch {
     return null;
   }
@@ -176,9 +187,19 @@ function legacyPublicJsonText(value: string | null): string {
 }
 
 function answerValue(answer: EventExportAnswerSnapshot): unknown {
-  return answer.answer_json
-    ? parsePublicAnswerJson(answer.answer_json)
-    : answer.answer_text;
+  if (answer.answer_json?.trim()) {
+    const parsed = parsePublicAnswerJson(answer.answer_json);
+    // A malformed/object JSON value must not hide a valid text answer stored
+    // alongside it.  Preserve an intentionally empty checkbox array when no
+    // text fallback exists.
+    if (parsed !== null) {
+      if (Array.isArray(parsed) && parsed.length === 0 && answer.answer_text?.trim()) {
+        return answer.answer_text;
+      }
+      return parsed;
+    }
+  }
+  return answer.answer_text;
 }
 
 function answerText(video: EventExportVideoSnapshot, key: string): string {
@@ -188,6 +209,9 @@ function answerText(video: EventExportVideoSnapshot, key: string): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.join(",");
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
   return "";
 }
 

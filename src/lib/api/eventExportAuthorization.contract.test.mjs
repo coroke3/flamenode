@@ -76,3 +76,14 @@ test("公開exportの不正なpath/D1障害はfail-closed応答にする", () =>
   assert.match(route, /\{ error: "database_unavailable" \}[\s\S]*?"no-store"[\s\S]*?503/);
   assert.match(route, /assertNoForbiddenKeys\(payload\)/);
 });
+
+test("公開APIは公開イベントのreview回答も出力しprivate回答は除外する", () => {
+  assert.match(
+    eventExportData,
+    /inArray\(eventCustomQuestions\.visibility, \["public", "review"\]\)/,
+  );
+  assert.doesNotMatch(
+    eventExportData,
+    /eq\(eventCustomQuestions\.visibility, "public"\)/,
+  );
+});

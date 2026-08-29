@@ -292,7 +292,10 @@ export async function loadEventExportSnapshot(
               eq(videoCustomAnswers.event_id, eventId),
               videoAnswerPredicate,
               eq(eventCustomQuestions.is_active, 1),
-              eq(eventCustomQuestions.visibility, "public"),
+              // The event-level public_api_enabled flag is the export opt-in.
+              // Review answers are part of the public event export once that
+              // flag is enabled; private questions remain excluded.
+              inArray(eventCustomQuestions.visibility, ["public", "review"]),
             ),
           )
           .orderBy(
