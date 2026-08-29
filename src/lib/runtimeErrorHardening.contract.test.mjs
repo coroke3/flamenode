@@ -66,12 +66,11 @@ test("event ID再利用のR2存在確認はGETではなくHEADを使う", () => 
 
 test("trending artifactはJSON parse前にbyte上限を検査する", () => {
   assert.match(trendingSource, /TRENDING_MAX_OBJECT_BYTES/);
-  assert.match(trendingSource, /object\.size > TRENDING_MAX_OBJECT_BYTES/);
-  assert.match(trendingSource, /cancelR2BodyBestEffort\(object\)/);
-  assert.ok(
-    trendingSource.indexOf("object.size > TRENDING_MAX_OBJECT_BYTES") <
-      trendingSource.indexOf("object.json()"),
+  assert.match(
+    trendingSource,
+    /maxObjectBytes:\s*TRENDING_MAX_OBJECT_BYTES/,
   );
+  assert.match(trendingSource, /loadStaticJsonFreshStaleUnavailable/);
 });
 
 test("oversize R2 early returnはpublic/media/autocompleteでbodyを解放する", () => {
