@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
@@ -37,18 +36,16 @@ export default async function EventReleasePage({ params }: Props) {
   }
   const { event, videos, truncated } = loaded.data;
   return (
-    <main className={`fn-public-container fn-page ${styles.page}`}>
+    <div className={styles.page}>
       <header className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>投稿予定のご案内</h1>
-        <Link className={styles.eventTitleLink} href={`/event/${encodeURIComponent(event.id)}`}>
-          {event.title}
-        </Link>
-        <Link className={styles.eventDetailLink} href={`/event/${encodeURIComponent(event.id)}`}>
-          イベント詳細へ
-        </Link>
       </header>
-      {truncated ? <p className={styles.truncatedNote}>先頭500作品を表示</p> : null}
-      <ReleaseView videos={videos} />
-    </main>
+      <ReleaseView
+        videos={videos}
+        eventId={event.id}
+        eventTitle={event.title}
+        truncated={truncated}
+      />
+    </div>
   );
 }

@@ -64,7 +64,7 @@ function ViewToggle({ mode, onChange }: { mode: ViewMode; onChange: (next: ViewM
         aria-pressed={mode === "list"}
         onClick={() => onChange("list")}
       >
-        <Icon name="list" size={24} aria-hidden />
+        <Icon name="menu" size={24} aria-hidden />
       </button>
       <button
         type="button"
@@ -406,7 +406,14 @@ function CreatorView({ videos }: { videos: StaticEventReleaseVideo[] }) {
   );
 }
 
-export default function ReleaseView({ videos }: { videos: StaticEventReleaseVideo[] }) {
+type ReleaseViewProps = {
+  videos: StaticEventReleaseVideo[];
+  eventId: string;
+  eventTitle: string;
+  truncated: boolean;
+};
+
+export default function ReleaseView({ videos, eventId, eventTitle, truncated }: ReleaseViewProps) {
   const [mode, setMode] = useState<ViewMode>(resolveInitialMode);
 
   useEffect(() => {
@@ -434,6 +441,10 @@ export default function ReleaseView({ videos }: { videos: StaticEventReleaseVide
   return (
     <>
       <ViewToggle mode={mode} onChange={changeMode} />
+      <Link className={styles.eventTitleLink} href={`/event/${encodeURIComponent(eventId)}`}>
+        {eventTitle}
+      </Link>
+      {truncated ? <p className={styles.truncatedNote}>先頭500作品を表示</p> : null}
       {videos.length === 0 ? (
         <div className={styles.releaseState}>公開中の作品はありません。</div>
       ) : mode === "creator" ? (

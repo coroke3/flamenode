@@ -32,11 +32,17 @@ test("Release view exposes the public creator and member fields without private 
 
 test("Release page follows PVSF copy and avoids fn-btn controls", () => {
   assert.match(releasePageSource, /投稿予定のご案内/);
+  assert.match(releasePageSource, /<div className=\{styles\.page\}>/);
+  assert.doesNotMatch(releasePageSource, /fn-public-container/);
+  assert.doesNotMatch(releasePageSource, /fn-page/);
   assert.doesNotMatch(releasePageSource, /fn-btn/);
   assert.doesNotMatch(releasePageSource, /RELEASE/);
+  assert.doesNotMatch(releasePageSource, /イベント詳細へ/);
 });
 
 test("Release view uses PVSF list/grid/creator structure and youtubeThumbUrl", () => {
+  assert.match(releaseViewSource, /name="menu"/);
+  assert.doesNotMatch(releaseViewSource, /name="list"/);
   assert.match(releaseViewSource, /youtubeThumbUrl/);
   assert.match(releaseViewSource, /個人参加/);
   assert.match(releaseViewSource, /グループ参加/);

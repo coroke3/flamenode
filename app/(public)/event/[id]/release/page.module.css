@@ -1,5 +1,7 @@
 .page {
-  padding-block: 32px 72px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 32px 40px 72px;
   color: #fff;
   background: #000;
 }
@@ -17,7 +19,7 @@
 
 .eventTitleLink {
   display: block;
-  margin-top: 8px;
+  margin: 0 0 16px;
   color: rgba(255, 255, 255, 0.72);
   font-size: 0.95rem;
   text-decoration: none;
@@ -25,19 +27,6 @@
 
 .eventTitleLink:hover {
   color: #fff;
-}
-
-.eventDetailLink {
-  display: inline-block;
-  margin-top: 12px;
-  color: #6dcaff;
-  font-size: 0.85rem;
-  text-decoration: none;
-}
-
-.eventDetailLink:hover {
-  color: #0077ff;
-  text-decoration: underline;
 }
 
 .truncatedNote {
@@ -78,7 +67,6 @@
 .listActions a:focus-visible,
 .socialLink:focus-visible,
 .groupXLink:focus-visible,
-.eventDetailLink:focus-visible,
 .eventTitleLink:focus-visible,
 .members a:focus-visible,
 .r71 a:focus-visible,
@@ -732,6 +720,6 @@
 
 @media (max-width: 640px) {
   .page {
-    padding-block: 24px 56px;
+    padding: 24px 16px 56px;
   }
 }
