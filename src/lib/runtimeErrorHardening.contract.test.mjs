@@ -50,7 +50,7 @@ const [
   read("workers/json-generator/publicIconV2Artifacts.ts"),
   read("workers/json-generator/memberSuggestionsArtifacts.ts"),
   read("workers/json-generator/memberSuggestionsV2Artifacts.ts"),
-  read("src/lib/import/legacy/previewStore.ts"),
+  read(["src", "lib", "import", "legacy", "previewStore.ts"].join("/")),
   read("src/lib/db/videoDetailQueries.ts"),
 ]);
 
