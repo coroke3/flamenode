@@ -35,20 +35,19 @@ export default async function EventReleasePage({ params }: Props) {
     if (loaded.state === "reflecting") return <PublicReflectionPendingNotice />;
     return <PublicDataUnavailableNotice />;
   }
-  const { event, videos, total, truncated } = loaded.data;
+  const { event, videos, truncated } = loaded.data;
   return (
     <main className={`fn-public-container fn-page ${styles.page}`}>
-      <header className={styles.header}>
-        <div>
-          <p className="fn-eyebrow">RELEASE</p>
-          <h1>{event.title}</h1>
-          <p className={styles.lead}>公開作品一覧</p>
-        </div>
-        <Link className="fn-btn fn-btn-ghost fn-btn-sm" href={`/event/${encodeURIComponent(event.id)}`}>
+      <header className={styles.pageHeader}>
+        <h1 className={styles.pageTitle}>投稿予定のご案内</h1>
+        <Link className={styles.eventTitleLink} href={`/event/${encodeURIComponent(event.id)}`}>
+          {event.title}
+        </Link>
+        <Link className={styles.eventDetailLink} href={`/event/${encodeURIComponent(event.id)}`}>
           イベント詳細へ
         </Link>
       </header>
-      <p className={styles.summary}>{total}作品{truncated ? "（先頭500作品を表示）" : ""}</p>
+      {truncated ? <p className={styles.truncatedNote}>先頭500作品を表示</p> : null}
       <ReleaseView videos={videos} />
     </main>
   );
