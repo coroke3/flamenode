@@ -91,6 +91,16 @@
 - 展開結果は読み取り専用テキストエリアと `概要欄をコピー` ボタンで表示し、保存前の入力値も反映する。未知の変数は空欄化して警告する。
 - テンプレートは公開API DTOへ含めず、イベントにテンプレートがない場合は既存の動画編集画面を維持する。
 
+## イベント公開Release（`/event/[id]/release`）
+
+- 見出しは「投稿予定のご案内」。イベント名はその下の小さなリンク（`/event/{id}`）。`fn-btn` は使わない。
+- 表示切替はアイコン3つ（リスト / カード / 作者別）。`aria-pressed` と `aria-label`（リスト表示・カード表示・作者別表示）を維持する。
+- URL hash は `#list` / `#grid` / `#creator`（未指定は list）。`history.replaceState` で同期する。
+- リスト表示は PVSF 互換の日付グループ・時刻・種別バッジ（複数人 / 個人）・作者・タイトル・視聴/詳細リンク。コメントとメンバーは横スクロール帯（overflow 時は 3 秒後 marquee、`prefers-reduced-motion` では停止）。
+- カード表示は 320×180 タイル（690px 以下は幅 100%）。YouTube サムネは `youtubeThumbUrl` 経由。hover / focus-within で視聴/詳細が出る。
+- 作者別表示は「個人参加」（非 collab）と「グループ参加」（collab）の2セクション。カードクリックで作品詳細へ（Enter/Space 対応）。
+- 空配列時は「公開中の作品はありません。」。truncated のときだけ「先頭500作品を表示」。
+
 ## 自動検査
 
 `npm run check:ui-acceptance` は上記機能を支える実装契約と、この幅一覧の欠落を検出します。実ブラウザでの最終確認は、production secretを使わないOpenNext / `wrangler dev`ローカルpreviewで行います。
