@@ -37,6 +37,7 @@ import {
   ACTIVE_X_BEFORE_SWITCH_EVENT,
 } from "@/lib/client/activeXSwitchEvents";
 import {
+  MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS,
   MAX_ATOMIC_VIDEO_EVENTS,
   MAX_ATOMIC_VIDEO_SOFTWARES,
 } from "@/lib/video/atomicLimits";
@@ -59,7 +60,11 @@ import {
   formatYoutubeDescriptionMembers,
   type YoutubeDescriptionContext,
 } from "@/lib/event/youtubeDescriptionTemplate";
-import type { CustomQuestion } from "@/lib/video/customQuestions";
+import {
+  questionTypeNeedsOptions,
+  type CustomQuestion,
+} from "@/lib/video/customQuestions";
+import { CustomQuestionFields } from "@/components/forms/CustomQuestionFields";
 import {
   buildFormDraftStorageKey,
   draftMetadataMatches,
@@ -156,6 +161,15 @@ function customQuestionFieldId(eventId: string, questionKey: string): string {
 function customAnswerValues(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) return value.map((item) => item.trim()).filter(Boolean);
   return value?.trim() ? [value.trim()] : [];
+}
+
+function acceptedCustomAnswerValues(
+  question: CustomQuestion,
+  value: string | string[] | undefined,
+): string[] {
+  const values = customAnswerValues(value);
+  if (!questionTypeNeedsOptions(question.type)) return values;
+  return values.filter((item) => question.options.includes(item));
 }
 
 function draftText(formData: FormData, name: string): string {
@@ -1068,6 +1082,14 @@ export function VideoForm({
   const incompleteRequiredStageQuestionCount = selectedStagePermissionFields.filter(
     (question) => question.required && !stageAnswers[question.id]?.trim(),
   ).length;
+  const incompleteRequiredCustomQuestionCount = selectedCustomQuestions.filter(
+    ({ event, question }) =>
+      question.required &&
+      acceptedCustomAnswerValues(
+        question,
+        customAnswers[customAnswerKey(event.id, question.question_key)],
+      ).length === 0,
+  ).length;
   const memberCount = members.filter(
     (member) => member.name.trim() || member.x_user_id.trim(),
   ).length;
@@ -1103,7 +1125,11 @@ export function VideoForm({
     for (const { event, question } of selectedCustomQuestions) {
       if (!question.required) continue;
       const key = customAnswerKey(event.id, question.question_key);
-      if (customAnswerValues(customAnswers[key]).length > 0) continue;
+      if (
+        acceptedCustomAnswerValues(question, customAnswers[key]).length > 0
+      ) {
+        continue;
+      }
       return {
         step: "work",
         fieldId: customQuestionFieldId(event.id, question.question_key),
@@ -1111,6 +1137,22 @@ export function VideoForm({
       };
     }
     return null;
+  };
+
+  const validateCustomAnswerLimit = (): WizardValidationError | null => {
+    if (fieldDisabled("descriptions.custom_answers")) return null;
+    const filled = selectedCustomQuestions.filter(
+      ({ event, question }) =>
+        acceptedCustomAnswerValues(
+          question,
+          customAnswers[customAnswerKey(event.id, question.question_key)],
+        ).length > 0,
+    ).length;
+    if (filled <= MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) return null;
+    return {
+      step: "work",
+      message: `カスタム質問の回答は最大${MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS}件まで保存できます。`,
+    };
   };
 
   const validateWizardStep = (
@@ -1165,7 +1207,7 @@ export function VideoForm({
       }
       const customQuestionError = validateRequiredCustomQuestions();
       if (customQuestionError) return customQuestionError;
-      return null;
+      return validateCustomAnswerLimit();
     }
 
     if (stepKey === "youtube") {
@@ -1313,13 +1355,12 @@ export function VideoForm({
       }
       wizardConfirmSubmitRequestedRef.current = false;
     }
-    if (mode === "edit") {
-      const customQuestionError = validateRequiredCustomQuestions();
-      if (customQuestionError) {
-        setStepError(customQuestionError);
-        setResult({ ok: false, message: customQuestionError.message });
-        return;
-      }
+    const customQuestionError =
+      validateRequiredCustomQuestions() ?? validateCustomAnswerLimit();
+    if (customQuestionError) {
+      setStepError(customQuestionError);
+      setResult({ ok: false, message: customQuestionError.message });
+      return;
     }
     if (mode === "edit") {
       const allowChange =
@@ -2483,8 +2524,10 @@ export function VideoForm({
           const answerKey = customAnswerKey(event.id, question.question_key);
           const fieldId = customQuestionFieldId(event.id, question.question_key);
           const name = `custom_answer:${event.id}:${question.question_key}`;
-          const values = customAnswerValues(customAnswers[answerKey]);
-          const textValue = values[0] ?? "";
+          const values = acceptedCustomAnswerValues(
+            question,
+            customAnswers[answerKey],
+          );
           const maxLength =
             question.max_length != null && question.max_length > 0
               ? question.max_length
@@ -2523,111 +2566,20 @@ export function VideoForm({
               {question.description ? (
                 <p className={styles.help}>{question.description}</p>
               ) : null}
-              {question.type === "textarea" ? (
-                <textarea
-                  id={fieldId}
-                  name={name}
-                  value={textValue}
-                  onChange={(event) => updateAnswer(event.target.value)}
-                  className="fn-input"
-                  rows={3}
-                  maxLength={maxLength}
-                  required={question.required}
-                  placeholder={question.placeholder ?? undefined}
-                  disabled={disabled}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  aria-describedby={describedBy}
-                />
-              ) : question.type === "select" && question.options.length > 0 ? (
-                <select
-                  id={fieldId}
-                  name={name}
-                  value={textValue}
-                  onChange={(event) => updateAnswer(event.target.value)}
-                  className="fn-select"
-                  required={question.required}
-                  disabled={disabled}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  aria-describedby={describedBy}
-                >
-                  <option value="">選択してください</option>
-                  {question.options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              ) : question.type === "radio" && question.options.length > 0 ? (
-                <div
-                  id={`${fieldId}_group`}
-                  role="radiogroup"
-                  aria-describedby={describedBy}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  style={{ display: "grid", gap: 6 }}
-                >
-                  {question.options.map((option, optionIndex) => (
-                    <label key={option} style={{ display: "flex", gap: 8 }}>
-                      <input
-                        id={optionIndex === 0 ? fieldId : `${fieldId}_${optionIndex}`}
-                        type="radio"
-                        name={name}
-                        value={option}
-                        checked={textValue === option}
-                        onChange={(event) => updateAnswer(event.target.value)}
-                        required={question.required}
-                        disabled={disabled}
-                      />
-                      <span>{option}</span>
-                    </label>
-                  ))}
-                </div>
-              ) : question.type === "checkbox" && question.options.length > 0 ? (
-                <div
-                  id={`${fieldId}_group`}
-                  role="group"
-                  aria-describedby={describedBy}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  style={{ display: "grid", gap: 6 }}
-                >
-                  {question.options.map((option, optionIndex) => (
-                    <label key={option} style={{ display: "flex", gap: 8 }}>
-                      <input
-                        id={optionIndex === 0 ? fieldId : `${fieldId}_${optionIndex}`}
-                        type="checkbox"
-                        name={name}
-                        value={option}
-                        checked={values.includes(option)}
-                        onChange={(event) => {
-                          const next = event.target.checked
-                            ? Array.from(new Set([...values, option]))
-                            : values.filter((value) => value !== option);
-                          updateAnswer(next);
-                        }}
-                        // checkbox の required を各選択肢へ付けると全選択必須になるため、
-                        // 必須判定は validateRequiredCustomQuestions で行う。
-                        required={false}
-                        disabled={disabled}
-                      />
-                      <span>{option}</span>
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <input
-                  id={fieldId}
-                  name={name}
-                  type="text"
-                  value={textValue}
-                  onChange={(event) => updateAnswer(event.target.value)}
-                  className="fn-input"
-                  maxLength={maxLength}
-                  required={question.required}
-                  placeholder={question.placeholder ?? undefined}
-                  disabled={disabled}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  aria-describedby={describedBy}
-                />
-              )}
+              <CustomQuestionFields
+                id={fieldId}
+                name={name}
+                type={question.type}
+                options={question.options}
+                values={values}
+                placeholder={question.placeholder}
+                maxLength={maxLength}
+                required={question.required}
+                disabled={disabled}
+                describedBy={describedBy}
+                invalid={stepError?.fieldId === fieldId}
+                onChange={updateAnswer}
+              />
             </div>
           );
         })}
@@ -2970,6 +2922,29 @@ export function VideoForm({
                             : "入力済み"}
                         </dd>
                       </div>
+                      {selectedCustomQuestions.map(({ event, question }) => {
+                        const values = acceptedCustomAnswerValues(
+                          question,
+                          customAnswers[
+                            customAnswerKey(event.id, question.question_key)
+                          ],
+                        );
+                        const label =
+                          selectedEventIds.length > 1
+                            ? `${event.title}: ${question.label}`
+                            : question.label;
+                        return (
+                          <div key={`${event.id}:${question.id}`}>
+                            <dt>
+                              {label}
+                              {question.required ? " *" : ""}
+                            </dt>
+                            <dd>
+                              {values.length > 0 ? values.join("、") : "未入力"}
+                            </dd>
+                          </div>
+                        );
+                      })}
                     </dl>
                   </section>
 
@@ -3133,6 +3108,17 @@ export function VideoForm({
             }
             pending={incompleteRequiredStageQuestionCount > 0}
           />
+          {selectedCustomQuestions.length > 0 ? (
+            <PreviewCheck
+              ok={incompleteRequiredCustomQuestionCount === 0}
+              label={
+                incompleteRequiredCustomQuestionCount > 0
+                  ? `カスタム質問 ${incompleteRequiredCustomQuestionCount} 件は入力必須`
+                  : `カスタム質問 ${selectedCustomQuestions.length} 件`
+              }
+              pending={incompleteRequiredCustomQuestionCount > 0}
+            />
+          ) : null}
           <PreviewCheck
             ok={!isCollab || memberCount > 0}
             label={

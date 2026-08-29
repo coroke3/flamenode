@@ -2,11 +2,14 @@ import type { events } from "@/lib/db/schema";
 import type { EventFormInitial } from "@/components/admin/EventForm";
 import {
   normalizeQuestionKey,
+  parseOptionsJson,
   parseQuestionType,
   parseVisibility,
   type CustomQuestionType,
   type CustomQuestionVisibility,
 } from "../video/customQuestions.ts";
+import { isStagePermissionQuestionKey } from "../video/formSettings.ts";
+import type { EventGeneralCustomQuestionDraft } from "../event/generalCustomQuestionDraft.ts";
 import {
   MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
   normalizeYoutubeDescriptionTemplate,
@@ -366,5 +369,20 @@ export function snapshotToFormInitial(
     parts_json: snapshot.parts_json,
     editable_fields: snapshot.editable_fields,
     review_settings: snapshot.review_settings,
+    custom_questions: snapshot.custom_question_definitions
+      .filter((definition) => !isStagePermissionQuestionKey(definition.question_key))
+      .map(
+        (definition): EventGeneralCustomQuestionDraft => ({
+          clientId: definition.question_key,
+          question_key: definition.question_key,
+          label: definition.label,
+          description: definition.description ?? "",
+          type: definition.type,
+          required: definition.required,
+          options: parseOptionsJson(definition.options_json),
+          placeholder: definition.placeholder ?? "",
+          enabled: definition.is_active,
+        }),
+      ),
   };
 }

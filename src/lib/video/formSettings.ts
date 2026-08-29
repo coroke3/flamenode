@@ -1,4 +1,12 @@
 export const DEFAULT_STAGE_PERMISSION_QUESTION_KEY = "stage_permission";
+const STAGE_PERMISSION_KEY_PREFIX = `${DEFAULT_STAGE_PERMISSION_QUESTION_KEY}_`;
+
+export function isStagePermissionQuestionKey(questionKey: string): boolean {
+  return (
+    questionKey === DEFAULT_STAGE_PERMISSION_QUESTION_KEY ||
+    questionKey.startsWith(STAGE_PERMISSION_KEY_PREFIX)
+  );
+}
 
 export interface StagePermissionFieldSettings {
   id: string;

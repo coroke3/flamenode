@@ -19,7 +19,20 @@ import {
   parseVideoFormSettings,
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
-import { MAX_STAGE_PERMISSION_QUESTIONS } from "@/lib/event/eventLimits";
+import { EventCustomQuestionsEditor } from "@/components/admin/EventCustomQuestionsEditor";
+import {
+  MAX_GENERAL_CUSTOM_QUESTIONS,
+  MAX_STAGE_PERMISSION_QUESTIONS,
+} from "@/lib/event/eventLimits";
+import {
+  generalCustomQuestionsPresent,
+  readGeneralCustomQuestionsFromFormData,
+  type EventGeneralCustomQuestionDraft,
+} from "@/lib/event/generalCustomQuestionDraft";
+import {
+  normalizeOptionList,
+  questionTypeNeedsOptions,
+} from "@/lib/video/customQuestions";
 import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
 import {
   normalizeEventVisibility,
@@ -65,6 +78,7 @@ export interface EventFormInitial {
   parts_json?: string | null;
   editable_fields?: string | null;
   review_settings?: string | null;
+  custom_questions?: EventGeneralCustomQuestionDraft[];
 }
 
 interface EventFormProps {
@@ -223,6 +237,7 @@ function initialPreview(initial: EventFormInitial): EventSettingsPreviewValue {
     parts_json: initial.parts_json,
     editable_fields: initial.editable_fields,
     review_settings: initial.review_settings,
+    general_custom_questions: initial.custom_questions ?? [],
   };
 }
 
@@ -265,6 +280,7 @@ function formPreview(
     parts_text: textValue(formData, "parts_text"),
     editable_fields: initial.editable_fields,
     review_settings: initial.review_settings,
+    general_custom_questions: readGeneralCustomQuestionsFromFormData(formData),
   };
 }
 
@@ -371,6 +387,13 @@ export function EventForm({
       return filterImplicitEmptyStagePermissionQuestions(current);
     },
   );
+  const [generalQuestions, setGeneralQuestions] = React.useState<
+    EventGeneralCustomQuestionDraft[]
+  >(() => initial.custom_questions ?? []);
+  const generalQuestionCap = Math.max(
+    MAX_GENERAL_CUSTOM_QUESTIONS,
+    initial.custom_questions?.length ?? 0,
+  );
 
   const canBasic = mode === "create" || editableSections?.basic !== false;
   const canPublish = mode === "create" || editableSections?.publish !== false;
@@ -381,12 +404,12 @@ export function EventForm({
     ? buildFormDraftStorageKey({
         authUserId: draftAuthUserId.trim(),
         formId: `event-${mode}-${initial.id ?? templateId ?? "new"}`,
-        schemaVersion: "event-form-v2",
+        schemaVersion: "event-form-v3",
       })
     : "";
   const draftMetadata = React.useMemo<DraftMetadata>(
     () => ({
-      schemaVersion: "event-form-v2",
+      schemaVersion: "event-form-v3",
       authUserId: draftAuthUserId?.trim() ?? null,
       mode,
       eventId: initial.id ?? null,
@@ -403,11 +426,20 @@ export function EventForm({
     const form = formRef.current;
     if (!form) return;
     const restored = draftValueToFormData(draft);
+    const pendingValues = new Map<string, string[]>();
+    const takeValues = (fieldName: string): string[] => {
+      let values = pendingValues.get(fieldName);
+      if (!values) {
+        values = restored.getAll(fieldName).map(String);
+        pendingValues.set(fieldName, values);
+      }
+      return values;
+    };
     for (const element of Array.from(form.elements)) {
       if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) continue;
       const name = element.name;
       if (!name) continue;
-      const values = restored.getAll(name).map(String);
+      const values = takeValues(name);
       if (element instanceof HTMLInputElement && element.type === "checkbox") {
         element.checked = values.includes("1");
       } else if (values.length > 0) {
@@ -423,17 +455,21 @@ export function EventForm({
     setQuestions(
       filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
     );
+    if (generalCustomQuestionsPresent(restored)) {
+      setGeneralQuestions(readGeneralCustomQuestionsFromFormData(restored));
+    }
     setPreview(formPreview(restored, initial));
     setDirty(true);
   }, [initial]);
   const draftSnapshot = React.useMemo(() => {
     void preview;
     void questions;
+    void generalQuestions;
     void youtubeDescriptionTemplate;
     return formRef.current
       ? formDataToDraftValue(new FormData(formRef.current))
       : {};
-  }, [preview, questions, youtubeDescriptionTemplate]);
+  }, [preview, questions, generalQuestions, youtubeDescriptionTemplate]);
   const { clearDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
@@ -451,9 +487,30 @@ export function EventForm({
     }));
   }, [questions]);
 
+  React.useEffect(() => {
+    setPreview((current) => ({
+      ...current,
+      general_custom_questions: generalQuestions,
+    }));
+  }, [generalQuestions]);
+
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy || submitInFlightRef.current) return;
+    if (canQuestions) {
+      const invalidChoice = generalQuestions.find(
+        (question) =>
+          questionTypeNeedsOptions(question.type) &&
+          normalizeOptionList(question.options).length === 0,
+      );
+      if (invalidChoice) {
+        setError(
+          `${invalidChoice.label.trim() || "カスタム質問"}の選択肢を1件以上入力してください。`,
+        );
+        setSuccess(null);
+        return;
+      }
+    }
     submitInFlightRef.current = true;
     setError(null);
     setSuccess(null);
@@ -719,6 +776,10 @@ export function EventForm({
           disabled={!canQuestions}
         />
         <input type="hidden" name="custom_questions_present" value="1" />
+        <h3 className={styles.customQuestionsHeading}>ステージ・権利確認</h3>
+        <p className="fn-hint">
+          ステージ・素材・権利まわりの確認は長文入力です。チェックボックスや選択ボタンは下のカスタム質問で指定します。
+        </p>
         <div style={{ display: "grid", gap: 10 }}>
           {questions.map((question, index) => (
             <article
@@ -814,6 +875,16 @@ export function EventForm({
         {questions.length >= MAX_STAGE_PERMISSION_QUESTIONS ? (
           <p className="fn-hint">ステージ・権利確認質問は最大{MAX_STAGE_PERMISSION_QUESTIONS}件です</p>
         ) : null}
+        <h3 className={styles.customQuestionsHeading}>カスタム質問</h3>
+        <EventCustomQuestionsEditor
+          questions={generalQuestions}
+          disabled={!canQuestions}
+          maxQuestions={generalQuestionCap}
+          onChange={(next) => {
+            setDirty(true);
+            setGeneralQuestions(next);
+          }}
+        />
       </FormSection>
 
       <FormSection title="枠" allowed={canSlots} sectionId="section-slots">

@@ -48,6 +48,12 @@ test("一般カスタム質問は event/question key 付きの FormData 名で�
   assert.match(source, /custom_answer:\$\{event\.id\}:\$\{question\.question_key\}/);
   assert.match(source, /selectedCustomQuestions/);
   assert.match(source, /question\.required/);
+  assert.match(source, /CustomQuestionFields/);
+  assert.match(source, /questionTypeNeedsOptions\(question\.type\)/);
+  assert.match(source, /acceptedCustomAnswerValues/);
+  assert.match(source, /incompleteRequiredCustomQuestionCount/);
+  assert.match(source, /validateCustomAnswerLimit/);
+  assert.match(source, /MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS/);
 });
 
 test("編集画面は一般カスタム質問の既存回答を全件復元する", async () => {

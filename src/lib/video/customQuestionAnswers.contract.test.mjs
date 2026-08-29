@@ -20,4 +20,22 @@ if (runTestWithTsx(import.meta.url)) {
       /for \(const chunk of chunkEventIds\(ids, D1_CUSTOM_QUESTION_EVENT_ID_CHUNK_SIZE\)\)/,
     );
   });
+
+  test("編集画面用の一般質問読取は stage キーを除外する", () => {
+    assert.match(source, /export async function loadGeneralCustomQuestionsForEvent/);
+    assert.match(source, /not\(stagePermissionQuestionKeyCondition\(\)\)/);
+    assert.match(source, /customQuestionToDraft\(rowToQuestion\(row\)\)/);
+  });
+
+  test("投稿前の回答検証は原子上限を超える下書きを拒否する", async () => {
+    const validationSource = await readFile(
+      new URL("./submissionValidation.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(validationSource, /MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS/);
+    assert.match(
+      validationSource,
+      /customAnswerRead\.drafts\.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS/,
+    );
+  });
 }
