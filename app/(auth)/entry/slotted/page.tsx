@@ -48,12 +48,19 @@ export default async function SlottedPostPage({
   if (!slotId) redirect("/entry");
   const activeXId = user.active_x_user_id ?? null;
   const slotOwnerWhere = activeXId
-    ? and(
+    ? or(
         // x_user_id is the reservation's identity snapshot, not its owner.
-        // Keep the authenticated reservation owner check in both branches so
-        // another account linked to the same X ID cannot open this form.
-        eq(slotsTable.reserved_by_user_id, user.id),
-        or(eq(slotsTable.x_user_id, activeXId), isNull(slotsTable.x_user_id))!,
+        // The reservation owner can continue the flow, and a different
+        // Discord account may open an unsubmitted slot only when its active
+        // X ID matches the reservation snapshot.
+        and(
+          eq(slotsTable.reserved_by_user_id, user.id),
+          or(eq(slotsTable.x_user_id, activeXId), isNull(slotsTable.x_user_id))!,
+        )!,
+        and(
+          eq(slotsTable.status, "reserved"),
+          eq(slotsTable.x_user_id, activeXId),
+        )!,
       )!
     : eq(slotsTable.reserved_by_user_id, user.id);
   const rows = await db

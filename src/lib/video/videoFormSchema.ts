@@ -4,6 +4,12 @@ import { validateSocialLinksJson } from "@/lib/socialLinks";
 import { normalizeSoftwareLabels } from "@/lib/utils/softwareLabels";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@/lib/video/atomicLimits";
 import { extractYoutubeId } from "@/lib/youtube/id";
+import {
+  extractGoogleDriveImageId,
+  googleDriveImageCacheUrl,
+} from "@/lib/media/googleImages";
+
+const GOOGLE_DRIVE_IMAGE_PATH_PREFIX = "/api/google-drive-image/";
 
 export function normalizeIconUrl(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
@@ -11,6 +17,19 @@ export function normalizeIconUrl(raw: unknown): string | null {
   if (!s) return null;
   if (s.length > 500) return null;
   if (s.startsWith("/api/media/")) return s;
+
+  // Legacy imports stored Google Drive images behind the local proxy route.
+  // Keep accepting that persisted form and normalize old absolute Drive URLs
+  // to the same proxy so existing entries remain submit-able.
+  if (s.startsWith(GOOGLE_DRIVE_IMAGE_PATH_PREFIX)) {
+    const cacheUrl = googleDriveImageCacheUrl(
+      s.slice(GOOGLE_DRIVE_IMAGE_PATH_PREFIX.length),
+    );
+    return cacheUrl || null;
+  }
+  const googleDriveId = extractGoogleDriveImageId(s);
+  if (googleDriveId) return googleDriveImageCacheUrl(googleDriveId) || null;
+
   return normalizeHttpUrl(s, { maxLength: 500 });
 }
 
