@@ -1,6 +1,12 @@
 import "server-only";
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import {
+  deletePublicJsonIsolateCache,
+  PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
+  readPublicJsonIsolateCache,
+  writePublicJsonIsolateCache,
+} from "./publicCacheIsolate";
 
 const CACHE_ORIGIN = "https://flamenode.internal/public-json/";
 
@@ -63,11 +69,19 @@ function resolveWaitUntil(): ((promise: Promise<unknown>) => void) | null {
 }
 
 export async function readPublicJsonCache<T>(r2Key: string): Promise<T | null> {
+  const isolated = readPublicJsonIsolateCache(r2Key);
+  if (isolated != null) return isolated as T;
   try {
     const cache = (caches as unknown as { default: Cache }).default;
     const matched = await cache.match(publicJsonCacheKey(r2Key));
     if (!matched) return null;
-    return (await matched.json()) as T;
+    const parsed = (await matched.json()) as T;
+    writePublicJsonIsolateCache(
+      r2Key,
+      parsed,
+      PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
+    );
+    return parsed;
   } catch {
     return null;
   }
@@ -78,6 +92,7 @@ export function writePublicJsonCacheBestEffort(
   payload: unknown,
   ttlSeconds: number,
 ): void {
+  writePublicJsonIsolateCache(r2Key, payload, ttlSeconds);
   try {
     // Cloudflare requires async work that outlives the response to be awaited
     // or registered with waitUntil. Resolve the execution context before
@@ -103,6 +118,7 @@ export function writePublicJsonCacheBestEffort(
 }
 
 export async function deletePublicJsonCache(r2Key: string): Promise<void> {
+  deletePublicJsonIsolateCache(r2Key);
   try {
     await (caches as unknown as { default: Cache }).default.delete(
       publicJsonCacheKey(r2Key),

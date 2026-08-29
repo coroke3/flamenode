@@ -15,4 +15,6 @@ export const PUBLIC_JSON_CACHE_TTL_SEC = {
   recommend: 600,
   rules: 3600,
   blocklistPool: 600,
+  // GA4 `analytics/trending.json` の R2 max-age=300 と揃える。
+  trending: 300,
 } as const;

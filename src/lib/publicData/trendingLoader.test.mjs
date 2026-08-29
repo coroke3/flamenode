@@ -20,10 +20,12 @@ test("trendingLoader: D1 / static_rebuild_queue を参照しない", () => {
   assert.doesNotMatch(loaderSource, /resolvePublicOperationMode/);
 });
 
-test("trendingLoader: R2 analytics/trending.json のみを読む", () => {
-  assert.match(loaderSource, /analytics\/trending\.json/);
-  assert.match(loaderSource, /getEnv\(\)\.BUCKET/);
-  assert.match(loaderSource, /bucket\.get/);
+test("trendingLoader: R2 analytics/trending.json を Cache API 経由で読む", () => {
+  assert.match(loaderSource, /TRENDING_OBJECT_KEY/);
+  assert.match(loaderSource, /loadStaticJsonFreshStaleUnavailable/);
+  assert.match(loaderSource, /PUBLIC_JSON_CACHE_TTL_SEC\.trending/);
+  assert.match(loaderSource, /cacheMode: "cache_first"/);
+  assert.doesNotMatch(loaderSource, /getGeneratedAt/);
   assert.match(loaderSource, /normalizeStaticTrending/);
   assert.match(loaderSource, /resolveStaticTrendingStaleMeta/);
 });

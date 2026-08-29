@@ -57,11 +57,13 @@ import {
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 interface Props {
   params: Promise<{ id: string }>;
 }
+
+const EVENT_VIDEO_DISPLAY_LIMIT = 8;
 
 type EventRow = typeof eventsTable.$inferSelect;
 type SlotRow = typeof slotsTable.$inferSelect;
@@ -348,7 +350,9 @@ function StaticEventDetailView({
 }): React.ReactElement {
   const { event } = detail;
   if (!isPublicEventVisible(event)) notFound();
-  const videosForCard = detail.publicVideos.map((video) => ({
+  const videosForCard = detail.publicVideos
+    .slice(0, EVENT_VIDEO_DISPLAY_LIMIT)
+    .map((video) => ({
     id: video.id,
     title: video.title,
     youtube_video_id: video.youtube_video_id,

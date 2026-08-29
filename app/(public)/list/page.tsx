@@ -27,7 +27,7 @@ export const metadata: Metadata = buildPageMetadata({
   path: "/list",
 });
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 type SearchParamValue = string | string[] | undefined;
 

@@ -23,7 +23,11 @@ export function normalizeNullableUnix(value: unknown): number | null {
   if (value == null || value === "") return null;
 
   const normalized = Number(value);
-  return Number.isFinite(normalized) ? Math.floor(normalized) : null;
+  if (!Number.isFinite(normalized)) return null;
+  const unix = Math.floor(normalized);
+  const ms = unix * 1000;
+  if (!Number.isFinite(ms) || Math.abs(unix) > 8.64e12) return null;
+  return unix;
 }
 
 export function normalizeNumericUnix(value: unknown): number | null {

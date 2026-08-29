@@ -10,8 +10,10 @@ import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import {
   coercePublicJsonCacheEnvelope,
   readPublicJsonCache,
+  unwrapPublicJsonCachePayload,
   writePublicJsonCacheBestEffort,
 } from "./publicCache";
+import { readPublicJsonIsolateCache } from "./publicCacheIsolate";
 import {
   EMPTY_YOUTUBE_RELATED_BLOCKLIST,
   YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
@@ -106,7 +108,8 @@ async function readR2Json(
 }
 
 /**
- * fresh Cache → R2 → stale Cache（最大maxStaleAgeSec）→ unavailable。
+ * cache_first: fresh Cache → R2 → stale Cache。
+ * r2_first: isolate → R2 → stale Cache（最大maxStaleAgeSec）→ unavailable。
  * blocklistは空フォールバック禁止。icon mapは欠損時nullでよい。
  */
 export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
@@ -115,7 +118,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   maxStaleAgeSec: number;
   cacheTtlSeconds?: number;
   maxObjectBytes?: number;
-  /** `r2_first` reads R2 first and permits bounded stale Cache fallback. */
+  /** `r2_first` は isolate を先に見て、miss 時は R2 → bounded stale Cache。 */
   cacheMode?: StaticJsonCacheMode;
   nowSec?: number;
   /** fresh Cache hit 時も R2 を読み、generated_at が新しければ R2 を採用する。 */
@@ -163,6 +166,18 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
             }
           }
         }
+        return finish("fresh", normalized);
+      }
+    }
+  }
+
+  if (cacheMode === "r2_first") {
+    const isolatedPayload = unwrapPublicJsonCachePayload(
+      readPublicJsonIsolateCache(args.key),
+    );
+    if (isolatedPayload != null) {
+      const normalized = args.normalize(isolatedPayload);
+      if (normalized !== null) {
         return finish("fresh", normalized);
       }
     }

@@ -1,7 +1,7 @@
 # Incident Response
 
 > Status: Active
-> Last verified: 2026-07-21
+> Last verified: 2026-08-29
 > Verified against commit: `47e6cee`
 > Source of truth: `scripts/cloudflare-*.mjs`, `src/lib/cloudflare.ts`, `src/lib/health/`, `wrangler.toml`, `workers/*/wrangler.toml`
 
@@ -56,7 +56,13 @@ OpenNext artifactの`assets`、wranglerの`ASSETS`、`run_worker_first = false`�
 
 ### `exceededCpu` / Error 1102
 
-Worker別CPU時間とInvocation Statusを確認する。Cronはbatch上限を下げ、不要な全件走査、重複処理、過剰JSON parseを確認する。WebのAuth/SSRはWorkers Freeの10msを継続的に超える可能性があるため、実測超過が続く場合は安定保証せずPaidへ移行する。公式正本: https://developers.cloudflare.com/workers/platform/limits/
+Error 1102 は Worker exceeded resource limits。ログ `Worker exceeded CPU time limit` は invocation outcome `exceededCpu` を示す。公式正本: https://developers.cloudflare.com/workers/platform/limits/
+
+1. Cloudflare Metrics で Worker 別の Exceeded CPU / invocation status `exceededCpu` を確認する。
+2. 公開パス（`flamenode-web`）では `public_request_metrics` で R2 hit か degraded D1 fallback かを切り分ける。R2 JSON ヒットでも SSR のため Worker は動く。Worker をスキップするのは Static Assets の一致ファイル（`run_worker_first = false`）だけである。
+3. Cron は batch 上限を下げ、不要な全件走査・重複処理・過剰 JSON parse を確認する。
+4. コード最適化（SSR カード枚数、isolate 解析キャッシュ、巨大 JSON parse 削減、alias の canonical R2 再試行、degraded D1 経路の bounded 化）を行う。公開GET初回はトップ棚8件・関連12件・ユーザー公開ページの icon manifest 省略が前提。
+5. Paid Standard では `wrangler.toml` の `[limits] cpu_ms = 30_000`（上限 30s を明示済み。5 分へは上げない）を確認する。Free では wrangler の `cpu_ms` は HTTP 10ms を上げない。Workers Caching（`[cache] enabled = true`）は Static Assets 課金のため使わない。
 
 ### D1無料枠 / rows read・written増加
 

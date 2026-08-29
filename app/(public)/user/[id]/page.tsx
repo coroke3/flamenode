@@ -35,21 +35,64 @@ import {
   shouldPublicPageShowUnavailable,
 } from "@/lib/publicData/loader";
 import type { StaticUserProfile, StaticUserVideoPage } from "@/lib/publicData/loader";
-import { STATIC_USER_MAX_PAGES } from "@/lib/publicData/staticUserProfileCore";
 import {
-  loadPublicXIconMapOptional,
-} from "@/lib/publicData/staticSharedInputsLoader";
+  STATIC_USER_COLLABS_PAGE_SIZE,
+  STATIC_USER_MAX_PAGES,
+  STATIC_USER_WORKS_PAGE_SIZE,
+} from "@/lib/publicData/staticUserProfileCore";
 import {
-  publicXIconEntriesToMap,
   normalizePublicIconUrl,
   resolveProjectedIcon,
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
-const WORKS_PAGE_SIZE = 24;
-const COLLAB_PAGE_SIZE = 24;
+const WORKS_PAGE_SIZE = 8;
+const COLLAB_PAGE_SIZE = 8;
+const USER_STATIC_DISPLAY_MAX_PAGES =
+  STATIC_USER_MAX_PAGES * (STATIC_USER_WORKS_PAGE_SIZE / WORKS_PAGE_SIZE);
+
+function artifactPageForDisplay(
+  displayPage: number,
+  displayPageSize: number,
+  artifactPageSize: number,
+): number {
+  return Math.max(
+    1,
+    Math.ceil((displayPage * displayPageSize) / artifactPageSize),
+  );
+}
+
+function sliceDisplayItems<T>(
+  items: readonly T[],
+  displayPage: number,
+  displayPageSize: number,
+  artifactPageSize: number,
+): T[] {
+  const artifactPage = artifactPageForDisplay(
+    displayPage,
+    displayPageSize,
+    artifactPageSize,
+  );
+  const localStart =
+    (displayPage - 1) * displayPageSize -
+    (artifactPage - 1) * artifactPageSize;
+  return items.slice(localStart, localStart + displayPageSize);
+}
+
+function clampDisplayPage(
+  requestedPage: number,
+  totalItems: number,
+  displayPageSize: number,
+  maxPages: number,
+): number {
+  const totalPages = Math.min(
+    totalPagesFor(totalItems, displayPageSize),
+    maxPages,
+  );
+  return Math.min(Math.max(1, requestedPage), Math.max(1, totalPages));
+}
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -72,16 +115,16 @@ interface ProfileUser {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const id = normalizeXId((await params).id);
-  const [staticLoaded, iconMapPayload] = await Promise.all([
-    loadStaticUserProfile(id),
-    loadPublicXIconMapOptional([id]),
-  ]);
+  const staticLoaded = await loadStaticUserProfile(id);
   if (staticLoaded.data) {
     const { user } = staticLoaded.data;
-    const iconMap = publicXIconEntriesToMap(iconMapPayload);
     const metadataIcon =
       normalizePublicIconUrl(user.icon_url) ??
-      resolveProjectedIcon({ xUserId: user.id, iconMap, legacyIconUrl: null });
+      resolveProjectedIcon({
+        xUserId: user.id,
+        iconMap: new Map(),
+        legacyIconUrl: null,
+      });
     return buildPageMetadata({
       title: `${user.x_name} - クリエイター`,
       description:
@@ -114,13 +157,23 @@ export default async function UserPage({
       defaultPageSize: COLLAB_PAGE_SIZE,
       maxPageSize: COLLAB_PAGE_SIZE,
     });
+    const worksArtifactPage = artifactPageForDisplay(
+      worksPaging.page,
+      WORKS_PAGE_SIZE,
+      STATIC_USER_WORKS_PAGE_SIZE,
+    );
+    const collabArtifactPage = artifactPageForDisplay(
+      collabPaging.page,
+      COLLAB_PAGE_SIZE,
+      STATIC_USER_COLLABS_PAGE_SIZE,
+    );
     const staticLoaded = await loadStaticUserProfile(id);
     if (staticLoaded.data) {
       const [worksLoaded, collabsLoaded] = await Promise.all([
-        worksPaging.page > 1
+        worksArtifactPage > 1
           ? loadStaticUserWorksPage({
               userId: id,
-              page: worksPaging.page,
+              page: worksArtifactPage,
               profile: staticLoaded.data,
               strategy: staticLoaded.strategy,
             })
@@ -134,10 +187,10 @@ export default async function UserPage({
               } satisfies StaticUserVideoPage,
               state: "ready" as const,
             }),
-        collabPaging.page > 1
+        collabArtifactPage > 1
           ? loadStaticUserCollabsPage({
               userId: id,
-              page: collabPaging.page,
+              page: collabArtifactPage,
               profile: staticLoaded.data,
               strategy: staticLoaded.strategy,
             })
@@ -153,15 +206,15 @@ export default async function UserPage({
             }),
       ]);
       const beyondStaticPages =
-      worksPaging.page > STATIC_USER_MAX_PAGES ||
-      collabPaging.page > STATIC_USER_MAX_PAGES;
+      worksArtifactPage > STATIC_USER_MAX_PAGES ||
+      collabArtifactPage > STATIC_USER_MAX_PAGES;
     const missingPagedSection =
-      (worksPaging.page > 1 && !worksLoaded.page) ||
-      (collabPaging.page > 1 && !collabsLoaded.page);
+      (worksArtifactPage > 1 && !worksLoaded.page) ||
+      (collabArtifactPage > 1 && !collabsLoaded.page);
     const unavailablePagedSection =
-      (worksPaging.page > 1 &&
+      (worksArtifactPage > 1 &&
         (worksLoaded.state === "unavailable" || worksLoaded.state === "reflecting")) ||
-      (collabPaging.page > 1 &&
+      (collabArtifactPage > 1 &&
         (collabsLoaded.state === "unavailable" || collabsLoaded.state === "reflecting"));
     if (unavailablePagedSection) {
       return worksLoaded.state === "reflecting" || collabsLoaded.state === "reflecting"
@@ -171,7 +224,21 @@ export default async function UserPage({
     if (beyondStaticPages || missingPagedSection) {
       notFound();
     }
-    const worksPage =
+    const worksTotalPages = Math.min(
+      totalPagesFor(staticLoaded.data.works.total, WORKS_PAGE_SIZE),
+      USER_STATIC_DISPLAY_MAX_PAGES,
+    );
+    const collabTotalPages = Math.min(
+      totalPagesFor(staticLoaded.data.collabs.total, COLLAB_PAGE_SIZE),
+      USER_STATIC_DISPLAY_MAX_PAGES,
+    );
+    if (
+      worksPaging.page > worksTotalPages ||
+      collabPaging.page > collabTotalPages
+    ) {
+      notFound();
+    }
+    const worksPageRaw =
           worksLoaded.page ??
           ({
             page: 1,
@@ -180,7 +247,7 @@ export default async function UserPage({
             pageSize: staticLoaded.data.works.pageSize,
             generatedAt: staticLoaded.data.generatedAt,
           } satisfies StaticUserVideoPage);
-        const collabPage =
+        const collabPageRaw =
           collabsLoaded.page ??
           ({
             page: 1,
@@ -189,29 +256,36 @@ export default async function UserPage({
             pageSize: staticLoaded.data.collabs.pageSize,
             generatedAt: staticLoaded.data.generatedAt,
           } satisfies StaticUserVideoPage);
+        const worksPage = {
+          ...worksPageRaw,
+          items: sliceDisplayItems(
+            worksPageRaw.items,
+            worksPaging.page,
+            WORKS_PAGE_SIZE,
+            STATIC_USER_WORKS_PAGE_SIZE,
+          ),
+          pageSize: WORKS_PAGE_SIZE,
+        };
+        const collabPage = {
+          ...collabPageRaw,
+          items: sliceDisplayItems(
+            collabPageRaw.items,
+            collabPaging.page,
+            COLLAB_PAGE_SIZE,
+            STATIC_USER_COLLABS_PAGE_SIZE,
+          ),
+          pageSize: COLLAB_PAGE_SIZE,
+        };
 
-        const visibleVideoCards = [
-          ...worksPage.items,
-          ...collabPage.items,
-        ];
-        const iconXIds = [
-          staticLoaded.data.user.id,
-          ...visibleVideoCards.map((video) => video.creator_x_user_id),
-        ].filter((xId): xId is string => Boolean(xId));
-        const needsIconMap = iconXIds.length > 0;
-        const iconMapPayload = needsIconMap
-          ? await loadPublicXIconMapOptional(iconXIds)
-          : null;
-        const iconMap =
-          publicXIconEntriesToMap(iconMapPayload);
+        const iconMap = new Map<string, PublicXIconEntry>();
 
         const view = (
           <StaticUserProfileView
             profile={staticLoaded.data}
             worksPage={worksPage}
             collabPage={collabPage}
-            worksPageNum={Math.min(worksPaging.page, STATIC_USER_MAX_PAGES)}
-            collabPageNum={Math.min(collabPaging.page, STATIC_USER_MAX_PAGES)}
+            worksPageNum={Math.min(worksPaging.page, USER_STATIC_DISPLAY_MAX_PAGES)}
+            collabPageNum={Math.min(collabPaging.page, USER_STATIC_DISPLAY_MAX_PAGES)}
             iconMap={iconMap}
           />
         );
@@ -258,11 +332,11 @@ function StaticUserProfileView({
   const collabTotal = collabPage?.total ?? profile.collabs.total;
   const ownTotalPages = Math.min(
     totalPagesFor(ownTotal, WORKS_PAGE_SIZE),
-    STATIC_USER_MAX_PAGES,
+    USER_STATIC_DISPLAY_MAX_PAGES,
   );
   const collabTotalPages = Math.min(
     totalPagesFor(collabTotal, COLLAB_PAGE_SIZE),
-    STATIC_USER_MAX_PAGES,
+    USER_STATIC_DISPLAY_MAX_PAGES,
   );
   const pageNum = Math.min(
     Math.max(1, Math.floor(worksPageNum)),

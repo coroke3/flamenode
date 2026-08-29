@@ -5,6 +5,10 @@
 import { ExternalRequestBudget } from "../shared/externalApi.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 import {
+  STATIC_R2_MAX_AGE_SEC,
+  staticR2CacheControl,
+} from "../shared/staticR2CacheControl.ts";
+import {
   fetchVideoViewPeriods,
   formatGa4QuotaLogFields,
 } from "./dataApi.ts";
@@ -14,8 +18,10 @@ import type { RecentListPayload, TrendingItem } from "./ranking.ts";
 
 export const GA4_RECENT_LIST_KEY = "list/recent.json";
 export const GA4_TRENDING_OUTPUT_KEY = "analytics/trending.json";
-export const GA4_TRENDING_CACHE_CONTROL =
-  "public, max-age=300, stale-while-revalidate=3600";
+export const GA4_TRENDING_CACHE_CONTROL = staticR2CacheControl(
+  STATIC_R2_MAX_AGE_SEC.trending,
+  3600,
+);
 export const TRENDING_SCHEMA_VERSION = 1;
 export const TRENDING_RANKING_RULE = [
   "views_2d_desc",

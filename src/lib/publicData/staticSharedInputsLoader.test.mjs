@@ -98,6 +98,17 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
       async readPublicJsonCache(key) {
         return cacheStore.get(key) ?? null;
       },
+      unwrapPublicJsonCachePayload(value) {
+        if (value == null) return null;
+        if (
+          typeof value === "object" &&
+          "payload" in value &&
+          typeof value.stored_at === "number"
+        ) {
+          return value.payload;
+        }
+        return value;
+      },
       writePublicJsonCacheBestEffort(key, payload, ttl) {
         cacheWrites.push({ key, payload, ttl });
         cacheStore.set(key, payload);
@@ -112,6 +123,9 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     TOP_SLOT_STATS_OBJECT_KEY,
     normalizeStaticTopSlotStats,
   } = await import("./staticTopSlotStatsCore.ts");
+  const { resetPublicJsonIsolateCacheForTests } = await import(
+    "./publicCacheIsolate.ts"
+  );
 
   function slotStatsPayload(generatedAt) {
     return {
@@ -125,6 +139,7 @@ if (process.env.FLAMENODE_STATIC_SHARED_INPUTS_EXECUTION !== "1") {
     r2Objects = new Map();
     cacheStore.clear();
     cacheWrites.length = 0;
+    resetPublicJsonIsolateCacheForTests();
   }
 
   test("loadStaticJsonFreshStaleUnavailable prefers newer R2 over fresh cache", async () => {

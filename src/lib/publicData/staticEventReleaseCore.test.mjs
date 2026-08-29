@@ -40,6 +40,23 @@ test("event release payloadはschema/event visibility不一致を拒否する", 
     null,
   );
 });
+test("event release は Date 範囲外の scheduled_time を null に落とす", () => {
+  const result = normalizeStaticEventRelease({
+    schema_version: 1,
+    event: { id: "event-1", title: "public", visibility_status: "public" },
+    videos: [
+      {
+        id: "video-1",
+        title: "public",
+        visibility_status: "public",
+        scheduled_time: Number.MAX_SAFE_INTEGER,
+        members: [],
+      },
+    ],
+  });
+  assert.equal(result?.videos[0].scheduled_time, null);
+});
+
 test("event release normalizer does not expose stale counts for filtered videos", () => {
   const result = normalizeStaticEventRelease({
     schema_version: 1,

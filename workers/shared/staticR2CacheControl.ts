@@ -21,6 +21,7 @@ export const STATIC_R2_MAX_AGE_SEC = {
   recommend: 600,
   rules: 3600,
   blocklistPool: 600,
+  trending: 300,
   videoDetail: 180,
   eventDetail: 120,
   userDetail: 60,

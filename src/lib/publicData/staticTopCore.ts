@@ -58,9 +58,9 @@ export function normalizeStaticTop(payload: StaticTopPayload): StaticTopData | n
     : payload.items;
   const latestSource = Array.isArray(payload.latest) ? payload.latest : payload.items;
 
-  const recommended = normalizeVideoList(recommendedSource).slice(0, 30);
-  const latest = normalizeVideoList(latestSource).slice(0, 100);
-  const nostalgic = normalizeVideoList(payload.nostalgic).slice(0, 20);
+  const recommended = normalizeVideoList(sliceUnknownList(recommendedSource, 16));
+  const latest = normalizeVideoList(sliceUnknownList(latestSource, 16));
+  const nostalgic = normalizeVideoList(sliceUnknownList(payload.nostalgic, 16));
   const activeEvents = normalizeEventList(payload.active_events);
   const latestEvents = normalizeEventList(payload.latest_events).slice(0, 4);
   const creators = normalizeCreatorList(payload.creators).slice(0, 30);
@@ -98,6 +98,10 @@ export function normalizeStaticTop(payload: StaticTopPayload): StaticTopData | n
     topSlotStats,
     stats,
   };
+}
+
+function sliceUnknownList(value: unknown, limit: number): unknown {
+  return Array.isArray(value) ? value.slice(0, limit) : value;
 }
 
 function normalizeVideoList(value: unknown): VideoCardData[] {

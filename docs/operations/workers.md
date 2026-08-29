@@ -1,7 +1,7 @@
 # Worker 運用
 
 > Status: Active
-> Last verified: 2026-08-24
+> Last verified: 2026-08-29
 > Verified against commit: `304f54e8`
 > Source of truth: `wrangler.toml`、`workers/*/wrangler.toml`、`scripts/cloudflare-*.mjs`、`/admin/workers`、`/admin/youtube-quota`
 
@@ -9,7 +9,7 @@
 
 Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`flamenode-fast-jobs`、`flamenode-content-jobs`、`flamenode-sync-jobs`の3本とする。Git連携は`flamenode-web`のWorkers Buildsだけに置き、1回のBuildからweb→fast→content→sync→smokeの順でdeployする。Cron Workerを個別にGit連携しない。
 
-静的アセットは`run_worker_first = false`でWorkerより先に配信し、不要なWeb invocationを発生させない。Workers FreeのHTTP/Cron CPU上限は各invocation 10msで、Cloudflare公式も認証・SSR等を10〜20msになり得る処理としている。admin SSR（一覧クエリの相関サブクエリやヘッダ用X ID読取など）はFree 10msを超えやすいため、一覧は`LIMIT`付きの単純クエリへ寄せ、`public/logo.png`や`favicon.ico`など静的favicon/logoをWorkerへ落とさない。FreeでWebの安定動作を保証せず、実測で`exceededCpu`が継続する場合は最適化後も無理にFreeへ留めずPaidへ移行する。Cronは長時間jobを作らず固定batchへ分割する。
+静的アセットは`run_worker_first = false`でWorkerより先に配信し、不要なWeb invocationを発生させない。Workers FreeのHTTP/Cron CPU上限は各invocation 10msで、wranglerの`[limits] cpu_ms`では上げられない。Workers Paid Standardはデフォルト30s（`limits.cpu_ms`最大300_000ms）で、I/O（fetch/KV/D1/R2）はCPUに含まれない。`flamenode-web`の`wrangler.toml`にはPaid Standardデフォルト相当の`[limits] cpu_ms = 30_000`を明示する（Bundled由来の50ms自動付与を避け、暴走課金防止のため5分へは上げない）。Cloudflare公式も認証・SSR等を10〜20msになり得る処理としている。公開GETは isolate 内の解析済みJSONキャッシュ（最大24件・TTL 30s、Promise/bindingは持たない）、トップ棚・レール・イベント詳細のSSR枚数上限8、動画関連のSSR 12件、動画詳細の巨大共有JSON（blocklist/random pool）をrequest時に読まないこと、公開HTMLの`revalidate = 30`で Free 10ms に収める。Workers Caching（`[cache] enabled = true`）は Static Assets まで課金対象になるため使わない。admin SSR（一覧クエリの相関サブクエリやヘッダ用X ID読取など）はFree 10msを超えやすいため、一覧は`LIMIT`付きの単純クエリへ寄せ、`public/logo.png`や`favicon.ico`など静的favicon/logoをWorkerへ落とさない。公開HTMLはOpenNext SSRのため Worker が走る。CPU超過の主因はSSR・大きなJSON parse・alias miss後の degraded D1 になり得る。R2 JSON ヒットは D1 fallback を省略するだけで Worker 自体は省略しない。Static Assets の一致ファイルだけが `run_worker_first = false` で Worker をスキップする。D1正本・R2公開キャッシュの関係は変えない。公開ホットパスは上記で Free 運用を狙うが、cold start・admin SSR・巨大一覧はなお超え得る。Cronは長時間jobを作らず固定batchへ分割する。
 
 公式制限: https://developers.cloudflare.com/workers/platform/limits/
 
@@ -188,7 +188,7 @@ YouTube metadata同期だけの理論最大は、sync-jobs 1回あたり通常4 
 - CPU時間、`exceededCpu`、D1日次使用量はCloudflare Dashboardを正本とする。
 - WebのSSR/Authと各CronのCPU時間をWorker別に確認し、4 Workerのcommit世代が一致することを確認する。
 
-Cloudflare Dashboardで`exceededCpu`、D1 rows read/written、Worker requests、queue滞留を確認する。CronのCPU超過が継続する場合はYouTubeの1回batch数を4から下げる。WebのAuth/SSRまたはCronが10msを継続的に超える場合、Free枠で安定運用できるとは扱わずPaid移行を判断する。D1の現行料金・無料枠は https://developers.cloudflare.com/d1/platform/pricing/ を正本とし、数値をこの文書へ重複固定しない。
+Cloudflare Dashboardで`exceededCpu`、D1 rows read/written、Worker requests、queue滞留を確認する。CronのCPU超過が継続する場合はYouTubeの1回batch数を4から下げる。WebはFree 10ms / Paid 30s default（`wrangler.toml`で`cpu_ms = 30_000`を明示済み）を前提にWorker別CPUを見る。公開ホットパス（`/`・動画・ユーザー・一覧・おすすめ・イベント）は isolate 解析キャッシュと SSR 枚数上限で Free 10ms を狙う。cold start や admin SSR が10msを継続的に超える、またはPaidでも最適化後に`exceededCpu`が続く場合は Paid 移行またはさらなる最適化を判断する。D1の現行料金・無料枠は https://developers.cloudflare.com/d1/platform/pricing/ を正本とし、数値をこの文書へ重複固定しない。
 
 ランキング静的再構築は、滞留したpending行の取得をboundedにし、同一generationの完了CAS更新をD1 batchへまとめる。通常のtarget単位の処理順とCAS条件は維持し、滞留時のrows_readとD1 round-tripだけを抑える。
 

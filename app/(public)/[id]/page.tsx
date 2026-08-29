@@ -34,7 +34,10 @@ import {
   shouldPublicPageShowUnavailable,
   type StaticVideoDetail,
 } from "@/lib/publicData/loader";
-import { isPublicEntityVisibilityBlocked } from "@/lib/publicData/publicVisibilityManifest";
+import {
+  isPublicEntityVisibilityBlocked,
+  resolvePublicVisibilityGuardModeFromEnv,
+} from "@/lib/publicData/publicVisibilityManifest";
 import {
   logPublicRequestMetrics,
   setPublicRequestRoute,
@@ -45,11 +48,7 @@ import {
 } from "@/lib/publicData/publicVideoDetailViewModel";
 import {
   loadPublicXIconMapOptional,
-  loadRandomVideoPool,
-  loadYoutubeRelatedBlocklist,
 } from "@/lib/publicData/staticSharedInputsLoader";
-import { RELATED_MIN_LIMIT } from "@/lib/publicData/relatedVideoProjection";
-import type { StaticRelatedVideo } from "@/lib/publicData/staticVideoDetailCore";
 import type { VideoChapterOverlayEntry } from "@/lib/publicData/privateVideoChapterOverlay";
 import {
   hasProjectedPublicProfile,
@@ -58,8 +57,12 @@ import {
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
 import { loadPublicEventYoutubePlaylistIdR2Only } from "@/lib/publicData/r2EventPlaylist";
+import type { StaticRelatedVideo } from "@/lib/publicData/staticVideoDetailCore";
 
-export const dynamic = "force-dynamic";
+const EMPTY_RELATED_BLOCKED_IDS: ReadonlySet<string> = new Set();
+const EMPTY_RELATED_FALLBACK: readonly StaticRelatedVideo[] = [];
+
+export const revalidate = 30;
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -120,16 +123,9 @@ export default async function VideoDetailPage({
         ? await loadPublicEventYoutubePlaylistIdR2Only(primaryEventForPlaylist.id)
         : null;
 
-    const relatedIconCandidates = [
-      ...detail.relatedVideos,
-      ...detail.relatedReserve,
-      ...detail.relatedRandomReserve,
-    ];
-
     const staticIconXIds = [
       detail.video.creator_x_user_id,
       ...detail.publicMembers.map((member) => member.x_user_id),
-      ...relatedIconCandidates.map((video) => video.creator_x_user_id),
     ].filter((xId): xId is string => Boolean(xId));
     const needsIconMap = staticIconXIds.length > 0;
 
@@ -137,60 +133,7 @@ export default async function VideoDetailPage({
       ? loadPublicXIconMapOptional(staticIconXIds)
       : null;
 
-    const blocklist = await loadYoutubeRelatedBlocklist();
-
-    let relatedFallbackPool: StaticRelatedVideo[] = [];
-    let relatedSharedStatus = blocklist.status;
-
-    if (blocklist.status !== "unavailable") {
-      const embeddedIds = new Set<string>();
-
-      for (const candidate of [
-        ...detail.relatedVideos,
-        ...detail.relatedReserve,
-        ...detail.relatedRandomReserve,
-      ]) {
-        if (
-          candidate.id === detail.video.id ||
-          blocklist.value.blockedIds.has(candidate.id)
-        ) {
-          continue;
-        }
-        embeddedIds.add(candidate.id);
-      }
-
-      if (
-        detail.schemaVersion === 1 ||
-        embeddedIds.size < RELATED_MIN_LIMIT
-      ) {
-        const randomPool = await loadRandomVideoPool();
-        if (randomPool.status === "unavailable") {
-          relatedSharedStatus = "unavailable";
-        } else {
-          if (randomPool.status === "stale") {
-            relatedSharedStatus = "stale";
-          }
-          relatedFallbackPool = randomPool.value.items;
-        }
-      }
-    }
-
-    const staticIconIdSet = new Set(staticIconXIds);
-    const fallbackIconXIds = relatedFallbackPool
-      .map((video) => video.creator_x_user_id)
-      .filter((xId): xId is string => Boolean(xId));
-    const extraFallbackIconXIds = fallbackIconXIds.filter(
-      (xId) => !staticIconIdSet.has(xId),
-    );
-    let iconMapPayload = iconMapPromise ? await iconMapPromise : null;
-    if (extraFallbackIconXIds.length > 0) {
-      iconMapPayload = await loadPublicXIconMapOptional([
-        ...staticIconXIds,
-        ...extraFallbackIconXIds,
-      ]);
-    } else if (!iconMapPayload && fallbackIconXIds.length > 0) {
-      iconMapPayload = await loadPublicXIconMapOptional(fallbackIconXIds);
-    }
+    const iconMapPayload = iconMapPromise ? await iconMapPromise : null;
 
     logPublicRequestMetrics();
 
@@ -200,9 +143,9 @@ export default async function VideoDetailPage({
         rawId={rawId}
         playlist={playlist}
         youtubePlaylistId={youtubePlaylistId}
-        relatedSharedStatus={relatedSharedStatus}
-        relatedBlockedIds={blocklist.value.blockedIds}
-        relatedFallbackPool={relatedFallbackPool}
+        relatedSharedStatus="fresh"
+        relatedBlockedIds={EMPTY_RELATED_BLOCKED_IDS}
+        relatedFallbackPool={EMPTY_RELATED_FALLBACK}
         iconMap={publicXIconEntriesToMap(iconMapPayload)}
       />
     );
@@ -222,6 +165,9 @@ export default async function VideoDetailPage({
 async function filterBlockedVideoEvents(
   detail: StaticVideoDetail,
 ): Promise<StaticVideoDetail> {
+  if (resolvePublicVisibilityGuardModeFromEnv() !== "enforce") {
+    return detail;
+  }
   const eventIds = new Set([
     ...detail.eventIds,
     ...detail.publicEvents.map((event) => event.id),
@@ -650,7 +596,7 @@ function StaticVideoDetailView({
 
             <RelatedList
               videos={vm.relatedVideos}
-              firstCount={18}
+              firstCount={12}
               unavailable={relatedSharedStatus === "unavailable"}
             />
           </section>
@@ -678,25 +624,9 @@ function RelatedList({
       ) : videos.length === 0 ? (
         <p className="fn-empty-message">関連動画はまだありません。</p>
       ) : (
-        <>
-          {videos.slice(0, firstCount).map((v) => (
-            <VideoCard key={`${v.id}-related-${firstCount}`} video={v} size="list" />
-          ))}
-          {videos.length > firstCount ? (
-            <details className={styles.relatedMore}>
-              <summary>さらに表示</summary>
-              <div className={styles.relatedList}>
-                {videos.slice(firstCount, 30).map((v) => (
-                  <VideoCard
-                    key={`${v.id}-related-more-${firstCount}`}
-                    video={v}
-                    size="list"
-                  />
-                ))}
-              </div>
-            </details>
-          ) : null}
-        </>
+        videos.slice(0, firstCount).map((v) => (
+          <VideoCard key={`${v.id}-related-${firstCount}`} video={v} size="list" />
+        ))
       )}
     </div>
   );

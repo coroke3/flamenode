@@ -7,12 +7,11 @@ import type {
   StaticVideoDetail,
   StaticVideoMember,
 } from "./staticVideoDetailCore";
-import {
-  RELATED_DEFAULT_LIMIT,
-  RELATED_MIN_LIMIT,
-  resolveVisibleRelatedVideos,
-} from "./relatedVideoProjection";
+import { resolveVisibleRelatedVideos } from "./relatedVideoProjection";
 import type { PublicXIconEntry } from "./publicIconProjection";
+
+/** 公開動画ページが SSR する関連件数。Workers Free の HTTP 10ms に収める。 */
+export const PUBLIC_RELATED_SSR_LIMIT = 12;
 
 export interface PublicVideoDetailViewModel {
   generatedAt: number | null;
@@ -86,8 +85,8 @@ export function buildPublicVideoViewModelFromStatic(
         blockedIds: options?.relatedBlockedIds,
         currentVideoId: detail.video.id,
         seed: detail.relatedRandomSeed || detail.video.id,
-        minTarget: RELATED_MIN_LIMIT,
-        maxTarget: RELATED_DEFAULT_LIMIT,
+        minTarget: PUBLIC_RELATED_SSR_LIMIT,
+        maxTarget: PUBLIC_RELATED_SSR_LIMIT,
       }).map((video) => toVideoCardData(video));
 
   return {

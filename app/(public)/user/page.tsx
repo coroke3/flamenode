@@ -29,7 +29,7 @@ export const metadata: Metadata = buildPageMetadata({
     "FlameNodeで作品を公開している映像クリエイターと参加作品を探せます。",
 });
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 interface SearchParams {
   q?: string;

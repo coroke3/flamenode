@@ -26,7 +26,7 @@ import { resolveSlotIntervalSec } from "@/lib/slots/slotGuidance";
 import { loadStaticEventDetail } from "@/lib/publicData/loader";
 import { EventSlotsViewerPanel } from "./EventSlotsViewerPanel";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 interface Props {
   params: Promise<{ id: string }>;

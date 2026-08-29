@@ -13,6 +13,8 @@ const releasePageSource = await readFile(
 
 test("Release view keeps list/grid/creator modes synchronized with the URL hash", () => {
   assert.match(releaseViewSource, /type ViewMode = "list" \| "grid" \| "creator"/);
+  assert.match(releaseViewSource, /useState<ViewMode>\("list"\)/);
+  assert.match(releaseViewSource, /syncModeHash/);
   assert.match(releaseViewSource, /window\.location\.hash/);
   assert.match(releaseViewSource, /window\.history\.replaceState/);
   assert.match(releaseViewSource, /mode === "list"/);
@@ -20,6 +22,14 @@ test("Release view keeps list/grid/creator modes synchronized with the URL hash"
   assert.match(releaseViewSource, /aria-label="作者別表示"/);
   assert.match(releaseViewSource, /aria-label="リスト表示"/);
   assert.match(releaseViewSource, /aria-label="カード表示"/);
+});
+
+test("Release view does not throw on invalid dates, YouTube ids, or DOM clones", () => {
+  assert.match(releaseViewSource, /unixToDate/);
+  assert.match(releaseViewSource, /ja-JP-u-ca-gregory/);
+  assert.match(releaseViewSource, /extractYoutubeId/);
+  assert.match(releaseViewSource, /video\.members \?\? \[\]/);
+  assert.doesNotMatch(releaseViewSource, /cloneNode/);
 });
 
 test("Release view exposes the public creator and member fields without private DTOs", () => {
