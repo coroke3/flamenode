@@ -19,13 +19,14 @@ function resolveInitialMode(): ViewMode {
 
 function formatDateKey(timestamp: number | null): string {
   if (timestamp == null || !Number.isFinite(timestamp)) return "日時未定";
-  const parts = new Intl.DateTimeFormat("en-GB", {
+  const parts = new Intl.DateTimeFormat("ja-JP", {
     timeZone: "Asia/Tokyo",
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).formatToParts(new Date(timestamp * 1000));
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${get("month")}/${get("day")}`;
+  return `${get("year")}/${get("month")}/${get("day")}`;
 }
 
 function formatTime(timestamp: number | null): string {
@@ -95,7 +96,8 @@ function ListScrollBand({ video }: { video: StaticEventReleaseVideo }) {
   const cloneRef = useRef<HTMLDivElement | null>(null);
   const [shouldScroll, setShouldScroll] = useState(false);
   const hasComment = Boolean(video.intro_comment?.trim());
-  const hasMembers = video.members.length > 0;
+  const members = video.members ?? [];
+  const hasMembers = (video.members?.length ?? 0) > 0;
   const enabled = hasComment || hasMembers;
 
   useEffect(() => {
@@ -146,7 +148,7 @@ function ListScrollBand({ video }: { video: StaticEventReleaseVideo }) {
         {hasMembers ? (
           <span className={styles.members}>
             メンバー:{" "}
-            {video.members.map((member, index) => (
+            {members.map((member, index) => (
               <span key={`${video.id}:${member.order_index}:${member.name}`}>
                 {member.x_user_id ? (
                   <a
@@ -161,7 +163,7 @@ function ListScrollBand({ video }: { video: StaticEventReleaseVideo }) {
                 )}
                 {member.role ? ` (${member.role})` : ""}
                 {member.comment ? ` — ${member.comment}` : ""}
-                {index < video.members.length - 1 ? " / " : ""}
+                {index < members.length - 1 ? " / " : ""}
               </span>
             ))}
           </span>
@@ -372,9 +374,9 @@ function CreatorView({ videos }: { videos: StaticEventReleaseVideo[] }) {
                         </a>
                       ) : null}
                     </div>
-                    {video.members.length > 0 ? (
+                    {(video.members?.length ?? 0) > 0 ? (
                       <div className={styles.groupMembers}>
-                        {video.members.map((member) => (
+                        {(video.members ?? []).map((member) => (
                           <span
                             className={styles.memberItem}
                             key={`${video.id}:${member.order_index}:${member.name}`}
@@ -408,15 +410,14 @@ function CreatorView({ videos }: { videos: StaticEventReleaseVideo[] }) {
 
 type ReleaseViewProps = {
   videos: StaticEventReleaseVideo[];
-  eventId: string;
-  eventTitle: string;
   truncated: boolean;
 };
 
-export default function ReleaseView({ videos, eventId, eventTitle, truncated }: ReleaseViewProps) {
-  const [mode, setMode] = useState<ViewMode>(resolveInitialMode);
+export default function ReleaseView({ videos, truncated }: ReleaseViewProps) {
+  const [mode, setMode] = useState<ViewMode>("list");
 
   useEffect(() => {
+    setMode(resolveInitialMode());
     const onHashChange = () => setMode(resolveInitialMode());
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -441,9 +442,6 @@ export default function ReleaseView({ videos, eventId, eventTitle, truncated }: 
   return (
     <>
       <ViewToggle mode={mode} onChange={changeMode} />
-      <Link className={styles.eventTitleLink} href={`/event/${encodeURIComponent(eventId)}`}>
-        {eventTitle}
-      </Link>
       {truncated ? <p className={styles.truncatedNote}>先頭500作品を表示</p> : null}
       {videos.length === 0 ? (
         <div className={styles.releaseState}>公開中の作品はありません。</div>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import {
@@ -39,13 +40,11 @@ export default async function EventReleasePage({ params }: Props) {
     <div className={styles.page}>
       <header className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>投稿予定のご案内</h1>
+        <Link className={styles.eventTitleLink} href={`/event/${encodeURIComponent(event.id)}`}>
+          {event.title}
+        </Link>
       </header>
-      <ReleaseView
-        videos={videos}
-        eventId={event.id}
-        eventTitle={event.title}
-        truncated={truncated}
-      />
+      <ReleaseView videos={videos} truncated={truncated} />
     </div>
   );
 }
