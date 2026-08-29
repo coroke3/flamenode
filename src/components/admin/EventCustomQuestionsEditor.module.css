@@ -1,0 +1,82 @@
+.questionList {
+  display: grid;
+  gap: 10px;
+}
+
+.questionCard {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.questionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.questionControls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.typePicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.typeButton[aria-pressed="true"] {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
+}
+
+.optionsEditor {
+  display: grid;
+  gap: 8px;
+}
+
+.optionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.optionRowControls {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.preview {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.questionCard :global(textarea.fn-input) {
+  min-height: 72px;
+}
+
+@media (max-width: 640px) {
+  .optionRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .optionRow :global(.fn-btn),
+  .optionRowControls :global(.fn-btn),
+  .questionControls :global(.fn-btn) {
+    min-height: var(--fn-control-h-touch);
+    justify-content: center;
+  }
+}

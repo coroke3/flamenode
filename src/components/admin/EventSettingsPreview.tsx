@@ -5,6 +5,10 @@ import {
 } from "@/lib/video/formSettings";
 import { formatRequiredVideoFieldSummary } from "@/lib/video/requiredVideoFields";
 import { buildAccentVars } from "@/lib/theme/accent";
+import {
+  GENERAL_CUSTOM_QUESTION_TYPE_LABELS,
+  type EventGeneralCustomQuestionDraft,
+} from "@/lib/event/generalCustomQuestionDraft";
 
 export interface EventSettingsPreviewValue {
   title?: string | null;
@@ -34,6 +38,7 @@ export interface EventSettingsPreviewValue {
   editable_fields?: string | null;
   review_settings?: string | null;
   required_video_fields_json?: string | null;
+  general_custom_questions?: EventGeneralCustomQuestionDraft[];
 }
 
 function toBool(value: number | string | boolean | null | undefined): boolean {
@@ -137,6 +142,9 @@ export function EventSettingsPreview({
     : undefined;
   const formSettings = parseVideoFormSettings(event.video_form_settings_json);
   const stageQuestions = resolveStagePermissionFields([formSettings]);
+  const generalQuestions = (event.general_custom_questions ?? []).filter(
+    (question) => question.label.trim() || question.question_key,
+  );
   const parts = parseParts(event);
   const slotType = event.slot_type ?? "time";
   const visibility = visibilityLabel(event);
@@ -238,18 +246,49 @@ export function EventSettingsPreview({
       >
         <article className="fn-card" style={{ padding: 12 }}>
           <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>投稿フォーム項目</h3>
-          {stageQuestions.length > 0 ? (
-            <div style={{ display: "grid", gap: 10 }}>
-              {stageQuestions.map((question, index) => (
-                <div key={question.id} style={{ display: "grid", gap: 6 }}>
-                  <span className={`fn-badge ${question.required ? "fn-badge-warning" : "fn-badge-soft"}`} style={{ justifySelf: "start" }}>
-                    質問 {index + 1} / {question.required ? "必須" : "任意"}
-                  </span>
-                  <Field label="ラベル" value={question.label} />
-                  <Field label="説明" value={question.description} />
-                  <Field label="プレースホルダー" value={question.placeholder} />
+          {stageQuestions.length > 0 || generalQuestions.length > 0 ? (
+            <div style={{ display: "grid", gap: 12 }}>
+              {stageQuestions.length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <strong style={{ fontSize: 12 }}>ステージ・権利確認</strong>
+                  {stageQuestions.map((question, index) => (
+                    <div key={question.id} style={{ display: "grid", gap: 6 }}>
+                      <span className={`fn-badge ${question.required ? "fn-badge-warning" : "fn-badge-soft"}`} style={{ justifySelf: "start" }}>
+                        質問 {index + 1} / {question.required ? "必須" : "任意"}
+                      </span>
+                      <Field label="ラベル" value={question.label} />
+                      <Field label="説明" value={question.description} />
+                      <Field label="プレースホルダー" value={question.placeholder} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : null}
+              {generalQuestions.length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <strong style={{ fontSize: 12 }}>カスタム質問</strong>
+                  {generalQuestions.map((question, index) => (
+                    <div key={question.clientId || question.question_key} style={{ display: "grid", gap: 6 }}>
+                      <span className={`fn-badge ${question.required ? "fn-badge-warning" : "fn-badge-soft"}`} style={{ justifySelf: "start" }}>
+                        質問 {index + 1} / {question.required ? "必須" : "任意"} / {GENERAL_CUSTOM_QUESTION_TYPE_LABELS[question.type]}
+                      </span>
+                      <Field label="ラベル" value={question.label} />
+                      <Field
+                        label="形式"
+                        value={GENERAL_CUSTOM_QUESTION_TYPE_LABELS[question.type]}
+                      />
+                      {question.options.some((option) => option.trim()) ? (
+                        <Field
+                          label="選択肢"
+                          value={question.options
+                            .map((option) => option.trim())
+                            .filter(Boolean)
+                            .join(" / ")}
+                        />
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>追加質問は表示されません。</p>

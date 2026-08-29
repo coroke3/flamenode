@@ -37,8 +37,26 @@ const VALID_VISIBILITY: ReadonlySet<string> = new Set([
   "review", "private", "public",
 ]);
 const KEY_MAX_LEN = 64;
-const MAX_OPTIONS = 50;
-const OPTION_MAX_LEN = 200;
+export const MAX_QUESTION_OPTIONS = 50;
+export const OPTION_MAX_LEN = 200;
+const MAX_OPTIONS = MAX_QUESTION_OPTIONS;
+
+export function questionTypeNeedsOptions(type: CustomQuestionType): boolean {
+  return type === "select" || type === "radio" || type === "checkbox";
+}
+
+export function normalizeOptionList(
+  options: readonly string[] | null | undefined,
+): string[] {
+  return parseOptionsJson(JSON.stringify(options ?? []));
+}
+
+export function serializeOptionsJson(
+  options: readonly string[] | null | undefined,
+): string | null {
+  const normalized = normalizeOptionList(options);
+  return normalized.length > 0 ? JSON.stringify(normalized) : null;
+}
 
 export function normalizeQuestionKey(raw: unknown): string {
   if (typeof raw !== "string") return "";
@@ -139,7 +157,7 @@ export function validateAnswerInput(
 
   if (question.type === "select" || question.type === "radio") {
     const value = filtered[0];
-    if (question.options.length > 0 && !question.options.includes(value)) {
+    if (!question.options.includes(value)) {
       return { ok: false, message: `${question.label}は選択肢から選んでください。` };
     }
     return {
@@ -156,7 +174,7 @@ export function validateAnswerInput(
 
   if (question.type === "checkbox") {
     for (const v of filtered) {
-      if (question.options.length > 0 && !question.options.includes(v)) {
+      if (!question.options.includes(v)) {
         return { ok: false, message: `${question.label}は選択肢から選んでください。` };
       }
     }

@@ -750,6 +750,60 @@ requireAll("app/(public)/about/page.tsx", [
   [/制作クレジット/, "About に制作クレジット見出しがありません。"],
 ]);
 
+requireAll("src/components/admin/EventCustomQuestionsEditor.tsx", [
+  [/general_custom_question_type/, "カスタム質問エディタに type 欄がありません。"],
+  [/general_custom_question_options/, "カスタム質問エディタに options 編集がありません。"],
+  [/GENERAL_CUSTOM_QUESTION_TYPE_LABELS/, "カスタム質問 type ラベルがありません。"],
+  [/styles\.typePicker/, "カスタム質問の入力形式ボタン群がありません。"],
+  [/CustomQuestionFields/, "カスタム質問エディタに投稿プレビューがありません。"],
+  [/moveQuestion/, "カスタム質問の並び替えがありません。"],
+  [/duplicateQuestion/, "カスタム質問の複製がありません。"],
+  [/moveOption/, "選択肢の並び替えがありません。"],
+]);
+requireAll("src/components/admin/EventForm.tsx", [
+  [/EventCustomQuestionsEditor/, "EventForm がカスタム質問エディタを使っていません。"],
+  [/generalQuestions/, "EventForm に generalQuestions state がありません。"],
+  [/event-form-v3/, "EventForm の draft schemaVersion が event-form-v3 ではありません。"],
+  [/ステージ・権利確認/, "ステージ質問見出しがありません。"],
+]);
+requireAll("src/components/forms/VideoForm.tsx", [
+  [/CustomQuestionFields/, "投稿フォームが CustomQuestionFields を使っていません。"],
+  [/custom_answer:\$\{event\.id\}:\$\{question\.question_key\}/, "投稿フォームの custom_answer 名がありません。"],
+  [/acceptedCustomAnswerValues/, "確認画面用のカスタム質問回答整形がありません。"],
+  [/incompleteRequiredCustomQuestionCount/, "カスタム質問の必須未入力カウントがありません。"],
+  [/validateCustomAnswerLimit/, "カスタム質問の回答件数上限チェックがありません。"],
+]);
+requireAll("src/components/forms/CustomQuestionFields.tsx", [
+  [/styles\.customChoiceGroup/, "投稿フォームの選択グループ class がありません。"],
+  [/styles\.customChoiceOption/, "投稿フォームの選択ボタン class がありません。"],
+]);
+requireAll("docs/operations/ui-acceptance.md", [
+  [/カスタム質問（Googleフォーム風/, "ui-acceptance にカスタム質問節がありません。"],
+]);
+requireAll("app/(public)/event/[id]/release/page.tsx", [
+  [/投稿予定のご案内/, "Release ページ見出しがありません。"],
+]);
+forbidMatch(
+  "app/(public)/event/[id]/release/page.tsx",
+  /fn-btn/,
+  "Release ページで fn-btn を使っています。",
+);
+requireAll("app/(public)/event/[id]/release/ReleaseView.tsx", [
+  [/aria-label="リスト表示"/, "Release リスト表示の aria-label がありません。"],
+  [/aria-label="カード表示"/, "Release カード表示の aria-label がありません。"],
+  [/aria-label="作者別表示"/, "Release 作者別表示の aria-label がありません。"],
+  [/window\.history\.replaceState/, "Release hash 同期 (replaceState) がありません。"],
+  [/youtubeThumbUrl/, "Release カード表示の youtubeThumbUrl がありません。"],
+  [/個人参加/, "Release 個人参加セクションがありません。"],
+  [/グループ参加/, "Release グループ参加セクションがありません。"],
+  [/複数人/, "Release 複数人バッジがありません。"],
+]);
+forbidMatch(
+  "app/(public)/event/[id]/release/ReleaseView.tsx",
+  /fn-btn/,
+  "ReleaseView で fn-btn を使っています。",
+);
+
 const requiredWidths = [360, 390, 430, 640, 768, 1024, 1280, 1440, 1920];
 const acceptanceDoc = read("docs/operations/ui-acceptance.md");
 for (const width of requiredWidths) {

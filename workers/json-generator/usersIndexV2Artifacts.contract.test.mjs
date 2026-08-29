@@ -77,6 +77,26 @@ test("stale generation cleanup はR2 bulk deleteとD1単一UPDATEへまとめる
   assert.doesNotMatch(source, /for \(const row of staleRows\)[\s\S]*env\.R2\.delete/);
 });
 
+test("users index v2 reader はmanifest/legacy正本をsize guard後にだけparseする", () => {
+  assert.match(source, /cancelR2BodyBestEffort/);
+  assert.match(source, /object\.size > USERS_INDEX_V2_MAX_MANIFEST_BYTES/);
+  assert.match(source, /object\.size > USERS_INDEX_MAX_OBJECT_BYTES/);
+  const manifestSize = source.indexOf("object.size > USERS_INDEX_V2_MAX_MANIFEST_BYTES");
+  const manifestParse = source.indexOf("object.json<unknown>()", manifestSize);
+  assert.ok(manifestSize >= 0 && manifestParse > manifestSize);
+  const legacySize = source.indexOf("object.size > USERS_INDEX_MAX_OBJECT_BYTES");
+  const legacyParse = source.indexOf("object.json()", legacySize);
+  assert.ok(legacySize >= 0 && legacyParse > legacySize);
+});
+
+test("R2 HEAD/GET中のabortをcleanup/rebuild継続へ握り潰さない", () => {
+  assert.match(source, /catch \{\s*throwIfAborted\(signal\);\s*return false;/);
+  assert.match(
+    source,
+    /if \(signal\?\.aborted\) \{\s*await cancelR2BodyBestEffort\(object\);\s*throwIfAborted\(signal\);/,
+  );
+});
+
 test("v2生成失敗はmanifest無効化に成功した場合だけlegacy fallback成功扱いにする", () => {
   assert.match(source, /invalidateUsersIndexV2Manifest/);
   assert.match(source, /env\.R2\.delete\(USERS_INDEX_V2_MANIFEST_OBJECT_KEY\)/);

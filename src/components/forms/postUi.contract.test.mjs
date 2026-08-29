@@ -48,6 +48,12 @@ test("一般カスタム質問は event/question key 付きの FormData 名で�
   assert.match(source, /custom_answer:\$\{event\.id\}:\$\{question\.question_key\}/);
   assert.match(source, /selectedCustomQuestions/);
   assert.match(source, /question\.required/);
+  assert.match(source, /CustomQuestionFields/);
+  assert.match(source, /questionTypeNeedsOptions\(question\.type\)/);
+  assert.match(source, /acceptedCustomAnswerValues/);
+  assert.match(source, /incompleteRequiredCustomQuestionCount/);
+  assert.match(source, /validateCustomAnswerLimit/);
+  assert.match(source, /MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS/);
 });
 
 test("編集画面は一般カスタム質問の既存回答を全件復元する", async () => {
@@ -196,6 +202,17 @@ test("wizard advances to confirmation and only its explicit button can submit", 
     source,
     /\{isWizardLastStep \?[\s\S]*type="button"[\s\S]*onClick=\{submitWizardFromConfirmation\}[\s\S]*: \([\s\S]*type="button"[\s\S]*onClick=\{goWizardNext\}/,
   );
+});
+
+test("wizard confirmation validates hidden steps in React instead of native blocking", async () => {
+  const [source, submitCompat] = await Promise.all([
+    read("src/components/forms/VideoForm.tsx"),
+    read("src/lib/forms/submitFormCompat.ts"),
+  ]);
+  assert.match(source, /const validateWizardSubmission = \(\): WizardValidationError \| null/);
+  assert.match(source, /const validationError = validateWizardSubmission\(\)/);
+  assert.match(source, /noValidate=\{isWizard\}/);
+  assert.match(submitCompat, /!form\.noValidate/);
 });
 
 test("YouTube policy permission remains visible in the edit UI", async () => {

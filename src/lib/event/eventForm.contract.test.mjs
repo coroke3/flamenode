@@ -30,3 +30,12 @@ test("manage event edit carries the rendered revision and rejects stale saves", 
   assert.match(actionSource, /formData\.get\("revision"\)/);
   assert.match(actionSource, /submittedRevision !== before\.updated_at/);
 });
+
+test("event create and update persist general custom question form fields", () => {
+  const actionSource = readRepoFile("src/lib/actions/event-admin.ts");
+  const formSource = readRepoFile("src/lib/event/eventForm.ts");
+  assert.match(actionSource, /generalCustomQuestionsPresent/);
+  assert.match(actionSource, /readGeneralCustomQuestionsFromFormData/);
+  assert.match(actionSource, /isStagePermissionQuestionKey/);
+  assert.doesNotMatch(formSource, /general_custom_question_/);
+});

@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth/manageAuthorization";
 import { events as eventsTable } from "@/lib/db/schema";
 import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
+import { loadGeneralCustomQuestionsForEvent } from "@/lib/video/customQuestionAnswers";
 import { EventForm } from "@/components/admin/EventForm";
 import { DeleteEventForm } from "@/components/admin/DeleteEventForm";
 import { RenameEventIdForm } from "@/components/admin/RenameEventIdForm";
@@ -46,6 +47,7 @@ export default async function ManageEventEditPage({
   if (!event) notFound();
 
   const videoFormSettingsJson = await loadStagePermissionFormSettingsJson(db, id);
+  const customQuestions = await loadGeneralCustomQuestionsForEvent(db, id);
   const authorization = await getManageAuthorizationSnapshot(
     user.id,
     user.role ?? null,
@@ -133,6 +135,7 @@ export default async function ManageEventEditPage({
             user_video_edit_permission_keys_json:
               event.user_video_edit_permission_keys_json,
             video_form_settings_json: videoFormSettingsJson,
+            custom_questions: customQuestions,
             max_slots_per_video: event.max_slots_per_video,
             max_slot_reservation_groups_per_xid:
               event.max_slot_reservation_groups_per_xid,

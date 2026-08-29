@@ -15,6 +15,7 @@ import {
   staticR2CacheControl,
   STATIC_R2_MAX_AGE_SEC,
 } from "../shared/staticR2CacheControl.ts";
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { COUNTABLE_PUBLIC_VIDEO_SQL } from "../../src/lib/publicData/countablePublicVideoSql.ts";
 import {
   TOP_LATEST_OBJECT_KEY,
@@ -42,6 +43,8 @@ export type OptimizedRebuildEnv = {
 const STATIC_ARTIFACT_SCHEMA_VERSION = 1;
 const RANKING_POOL_MAX_ITEMS = 5000;
 const STATIC_LIST_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
+/** Legacy rebuild readers must never parse an unbounded R2 JSON object. */
+export const LEGACY_REBUILD_R2_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
 
 const RANKING_TARGETS = [
   "list_recent",
@@ -85,6 +88,47 @@ function throwIfAborted(signal?: AbortSignal): void {
       ? "optimized static rebuild aborted"
       : String(signal.reason),
   );
+}
+
+/**
+ * `rebuild.ts` is a large compatibility surface. Keep it unchanged and wrap
+ * only its R2 access here: oversized/corrupt static JSON becomes an ordinary
+ * miss, while an abort immediately after GET releases the unread body before
+ * propagating cancellation. Other R2 methods are rebound to the original
+ * bucket so Cloudflare's internal receiver is preserved.
+ */
+function withBoundedAbortSafeR2(
+  env: OptimizedRebuildEnv,
+  signal?: AbortSignal,
+): OptimizedRebuildEnv {
+  const r2 = new Proxy(env.R2, {
+    get(target, property) {
+      if (property === "get") {
+        return async (key: string, options?: R2GetOptions) => {
+          throwIfAborted(signal);
+          const object = await target.get(key, options);
+          if (signal?.aborted) {
+            await cancelR2BodyBestEffort(object);
+            throwIfAborted(signal);
+          }
+          if (
+            object &&
+            typeof object.size === "number" &&
+            (!Number.isSafeInteger(object.size) ||
+              object.size < 0 ||
+              object.size > LEGACY_REBUILD_R2_MAX_OBJECT_BYTES)
+          ) {
+            await cancelR2BodyBestEffort(object);
+            return null;
+          }
+          return object;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as R2Bucket;
+  return { ...env, R2: r2 };
 }
 
 function presentString(value: unknown): string | null {
@@ -577,7 +621,14 @@ export async function optimizedRebuildTarget(
     if (bundled) return bundled;
   }
 
-  const result = await rebuildTarget(env, targetType, targetId, signal, reason);
+  const legacyEnv = withBoundedAbortSafeR2(env, signal);
+  const result = await rebuildTarget(
+    legacyEnv,
+    targetType,
+    targetId,
+    signal,
+    reason,
+  );
   if (targetType === "users_index") {
     const v2 = await rebuildUsersIndexV2FromLegacyArtifact(env, signal, {
       forceRepair:

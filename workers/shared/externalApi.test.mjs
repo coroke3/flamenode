@@ -82,22 +82,52 @@ test("fetchWithTimeoutは呼出し前に予算を消費する", async () => {
   assert.deepEqual(calls, ["https://example.test/one"]);
 });
 
-test("fetchWithTimeoutは呼出し元の中断を共通signalへ伝播する", async () => {
+test("fetchWithTimeoutは呼出し元AbortSignalのreasonをそのまま伝播する", async () => {
   const caller = new AbortController();
+  const budget = new ExternalRequestBudget(1);
   const request = fetchWithTimeout(
     "https://example.test/caller-abort",
     { signal: caller.signal },
     {
       timeoutMs: 1_000,
-      budget: new ExternalRequestBudget(1),
+      budget,
       budgetErrorCode: "budget",
       timeoutErrorCode: "timeout",
       networkErrorCode: "network",
     },
     abortableFetch,
   );
-  caller.abort();
-  await assert.rejects(request, /network/);
+  caller.abort(new Error("caller_cancelled"));
+  await assert.rejects(request, /caller_cancelled/);
+  assert.equal(budget.used, 1);
+});
+
+test("fetchWithTimeoutは事前abort済みならfetchも予算消費もしない", async () => {
+  const caller = new AbortController();
+  caller.abort(new Error("already_cancelled"));
+  const budget = new ExternalRequestBudget(1);
+  let called = false;
+
+  await assert.rejects(
+    fetchWithTimeout(
+      "https://example.test/pre-aborted",
+      { signal: caller.signal },
+      {
+        timeoutMs: 1_000,
+        budget,
+        budgetErrorCode: "budget",
+        timeoutErrorCode: "timeout",
+        networkErrorCode: "network",
+      },
+      async () => {
+        called = true;
+        return new Response("unexpected");
+      },
+    ),
+    /already_cancelled/,
+  );
+  assert.equal(called, false);
+  assert.equal(budget.used, 0);
 });
 
 test("fetchWithTimeoutは内部タイマーによる中断だけをtimeoutとして扱う", async () => {

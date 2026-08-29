@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   canActAsSlotActor,
+  canActAsSlotSubmitter,
   resolveSlotGroupIdentity,
+  resolveSlotSubmissionRelation,
   resolveSlotViewerRelation,
 } from "./slotIdentityCore.ts";
 
@@ -108,6 +110,40 @@ test("canActAsSlotActor: active と unassigned のみ true", () => {
   assert.equal(canActAsSlotActor("none"), false);
 });
 
+test("resolveSlotSubmissionRelation: Discord が違っても同じ X ID なら x_id_only", () => {
+  const relation = resolveSlotSubmissionRelation({
+    reservedByUserId: OTHER_AUTH,
+    slotXUserId: "@Creator_A",
+    authUserId: AUTH,
+    activeXId: X_A,
+  });
+  assert.equal(relation, "x_id_only");
+  assert.equal(canActAsSlotSubmitter(relation), true);
+});
+
+test("resolveSlotSubmissionRelation: X ID 不一致・未割当は別 Discord から拒否", () => {
+  assert.equal(
+    resolveSlotSubmissionRelation({
+      reservedByUserId: OTHER_AUTH,
+      slotXUserId: X_B,
+      authUserId: AUTH,
+      activeXId: X_A,
+    }),
+    "none",
+  );
+  assert.equal(
+    resolveSlotSubmissionRelation({
+      reservedByUserId: null,
+      slotXUserId: X_A,
+      authUserId: AUTH,
+      activeXId: X_A,
+    }),
+    "none",
+  );
+  assert.equal(canActAsSlotSubmitter("x_id_only"), true);
+  assert.equal(canActAsSlotSubmitter("none"), false);
+});
+
 test("resolveSlotGroupIdentity: reserved_by 混在は mixed_auth_user", () => {
   assert.deepEqual(
     resolveSlotGroupIdentity({
@@ -136,6 +172,38 @@ test("resolveSlotGroupIdentity: reserved_by が auth と不一致は mixed_auth_
       slotXUserIds: [null],
       authUserId: AUTH,
       activeXId: X_A,
+    }),
+    { ok: false, reason: "mixed_auth_user" },
+  );
+});
+
+test("resolveSlotGroupIdentity: 提出時だけ同じ X ID の別 Discord を許可", () => {
+  assert.deepEqual(
+    resolveSlotGroupIdentity({
+      reservedByUserIds: [OTHER_AUTH, OTHER_AUTH],
+      slotXUserIds: [X_A, X_A],
+      authUserId: AUTH,
+      activeXId: X_A,
+      allowAuthMismatchWhenXIdMatches: true,
+    }),
+    { ok: true, targetXId: X_A, adoptNullRows: false },
+  );
+  assert.deepEqual(
+    resolveSlotGroupIdentity({
+      reservedByUserIds: [OTHER_AUTH, OTHER_AUTH],
+      slotXUserIds: [X_A, X_A],
+      authUserId: AUTH,
+      activeXId: X_A,
+    }),
+    { ok: false, reason: "mixed_auth_user" },
+  );
+  assert.deepEqual(
+    resolveSlotGroupIdentity({
+      reservedByUserIds: [OTHER_AUTH, OTHER_AUTH],
+      slotXUserIds: [X_A, null],
+      authUserId: AUTH,
+      activeXId: X_A,
+      allowAuthMismatchWhenXIdMatches: true,
     }),
     { ok: false, reason: "mixed_auth_user" },
   );

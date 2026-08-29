@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, not, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireAdminWrite, writeGuard } from "@/lib/auth/writeGuard";
 import {
@@ -22,7 +22,10 @@ import {
   type EventTemplateSnapshot,
 } from "@/lib/admin/eventTemplateSettings";
 import { generateId } from "@/lib/utils/id";
-import { resolveStagePermissionFieldsFromJson } from "@/lib/video/formSettings";
+import {
+  isStagePermissionQuestionKey,
+  resolveStagePermissionFieldsFromJson,
+} from "@/lib/video/formSettings";
 import { stagePermissionQuestionKeyCondition } from "@/lib/video/stagePermissionAnswers";
 import { buildEventChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import {
@@ -52,6 +55,14 @@ import {
   resolveSubmittedEventVisibility,
 } from "@/lib/event/eventForm";
 import { MAX_STAGE_PERMISSION_QUESTIONS } from "@/lib/event/eventLimits";
+import {
+  generalCustomQuestionsPresent,
+  readGeneralCustomQuestionsFromFormData,
+} from "@/lib/event/generalCustomQuestionDraft";
+import {
+  plannedGeneralQuestionsFromDrafts,
+  resolveGeneralCustomQuestionCap,
+} from "@/lib/event/generalCustomQuestionPlan";
 import { buildEventUpdatePayload, parseDateInput } from "@/lib/event/eventPayload";
 import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
 import {
@@ -152,6 +163,34 @@ function stageQuestionRows(
       updated_at: now,
     }),
   );
+}
+
+function templateGeneralQuestionRows(
+  eventId: string,
+  snapshot: EventTemplateSnapshot | null,
+  now: number,
+): PlannedQuestion[] {
+  return (snapshot?.custom_question_definitions ?? [])
+    .filter((definition) => !isStagePermissionQuestionKey(definition.question_key))
+    .map(
+      (definition): PlannedQuestion => ({
+        id: generateId("ecq"),
+        event_id: eventId,
+        question_key: definition.question_key,
+        label: definition.label,
+        description: definition.description,
+        type: definition.type,
+        required: definition.required ? 1 : 0,
+        options_json: definition.options_json,
+        placeholder: definition.placeholder,
+        max_length: definition.max_length,
+        sort_order: definition.sort_order,
+        is_active: definition.is_active ? 1 : 0,
+        visibility: definition.visibility,
+        created_at: now,
+        updated_at: now,
+      }),
+    );
 }
 
 export interface EventActionResult extends PendingPublicReflection {
@@ -307,27 +346,32 @@ export async function createEvent(
     updated_at: now,
   } satisfies typeof eventStaff.$inferInsert;
 
-  const templateQuestions: PlannedQuestion[] = (
-    templateSnapshot?.custom_question_definitions ?? []
-  ).map(
-    (definition): PlannedQuestion => ({
-      id: generateId("ecq"),
-      event_id: id,
-      question_key: definition.question_key,
-      label: definition.label,
-      description: definition.description,
-      type: definition.type,
-      required: definition.required ? 1 : 0,
-      options_json: definition.options_json,
-      placeholder: definition.placeholder,
-      max_length: definition.max_length,
-      sort_order: definition.sort_order,
-      is_active: definition.is_active ? 1 : 0,
-      visibility: definition.visibility,
-      created_at: now,
-      updated_at: now,
-    }),
+  const templateGeneralQuestions = templateGeneralQuestionRows(
+    id,
+    templateSnapshot,
+    now,
   );
+  const formGeneralPresent = generalCustomQuestionsPresent(formData);
+  let generalQuestions: PlannedQuestion[] = templateGeneralQuestions;
+  if (formGeneralPresent) {
+    const planned = plannedGeneralQuestionsFromDrafts({
+      eventId: id,
+      drafts: readGeneralCustomQuestionsFromFormData(formData),
+      now,
+    });
+    if (!planned.ok) return planned;
+    const cap = resolveGeneralCustomQuestionCap({
+      existingCount: 0,
+      templateCount: templateGeneralQuestions.length,
+    });
+    if (planned.rows.length > cap) {
+      return {
+        ok: false,
+        message: `カスタム質問は最大${cap}件です。`,
+      };
+    }
+    generalQuestions = planned.rows;
+  }
   const stageQuestions = stageQuestionRows(id, videoFormSettingsJson, now);
   if (stageQuestions.length > MAX_STAGE_PERMISSION_QUESTIONS) {
     return {
@@ -335,7 +379,7 @@ export async function createEvent(
       message: `ステージ・権利確認質問は最大${MAX_STAGE_PERMISSION_QUESTIONS}件です。`,
     };
   }
-  const questions = [...templateQuestions, ...stageQuestions];
+  const questions = [...generalQuestions, ...stageQuestions];
   if (questions.length > MAX_EVENT_CUSTOM_QUESTIONS) {
     return {
       ok: false,
@@ -735,6 +779,195 @@ export async function updateEvent(
           after: row,
           actor_user_id: actorUserId,
           context: "event-update:stage-question",
+          retention_class: "normal" as const,
+          strict: true,
+        })),
+      );
+    }
+  }
+
+  if (permissions.questions && generalCustomQuestionsPresent(formData)) {
+    const existingGeneral = await db
+      .select()
+      .from(eventCustomQuestions)
+      .where(
+        and(
+          eq(eventCustomQuestions.event_id, data.id),
+          not(stagePermissionQuestionKeyCondition()),
+        ),
+      )
+      .limit(MAX_EVENT_CUSTOM_QUESTIONS + 1);
+    if (existingGeneral.length > MAX_EVENT_CUSTOM_QUESTIONS) {
+      return {
+        ok: false,
+        message: "既存のカスタム質問数が上限を超えているため更新できません。",
+      };
+    }
+    const plannedGeneral = plannedGeneralQuestionsFromDrafts({
+      eventId: data.id,
+      drafts: readGeneralCustomQuestionsFromFormData(formData),
+      now,
+    });
+    if (!plannedGeneral.ok) return plannedGeneral;
+    const generalCap = resolveGeneralCustomQuestionCap({
+      existingCount: existingGeneral.length,
+      templateCount: 0,
+    });
+    if (plannedGeneral.rows.length > generalCap) {
+      return {
+        ok: false,
+        message: `カスタム質問は最大${generalCap}件です。`,
+      };
+    }
+    if (
+      plannedGeneral.rows.length + MAX_STAGE_PERMISSION_QUESTIONS >
+      MAX_EVENT_CUSTOM_QUESTIONS
+    ) {
+      return {
+        ok: false,
+        message: `カスタム質問はステージ質問を含めて最大${MAX_EVENT_CUSTOM_QUESTIONS}件です。`,
+      };
+    }
+    const nextGeneralByKey = new Map(
+      plannedGeneral.rows.map((row) => [row.question_key, row]),
+    );
+    const obsoleteGeneral = existingGeneral.filter(
+      (row) => !nextGeneralByKey.has(row.question_key),
+    );
+    const obsoleteGeneralIds = obsoleteGeneral.map((row) => row.id);
+    const deletedGeneralAnswers =
+      obsoleteGeneralIds.length > 0
+        ? await db
+            .select()
+            .from(videoCustomAnswers)
+            .where(inArray(videoCustomAnswers.question_id, obsoleteGeneralIds))
+            .limit(MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS + 1)
+        : [];
+    if (deletedGeneralAnswers.length > MAX_EVENT_CUSTOM_ANSWER_DELETE_ROWS) {
+      return {
+        ok: false,
+        message: "削除対象の回答数が上限を超えているため更新できません。",
+      };
+    }
+    if (deletedGeneralAnswers.length > 0) {
+      mutations.push(
+        db.delete(videoCustomAnswers).where(
+          or(
+            ...deletedGeneralAnswers.map((answer) =>
+              and(
+                eq(videoCustomAnswers.video_id, answer.video_id),
+                eq(videoCustomAnswers.event_id, answer.event_id),
+                eq(videoCustomAnswers.question_id, answer.question_id),
+                eq(videoCustomAnswers.updated_at, answer.updated_at),
+              ),
+            ),
+          ),
+        ),
+      );
+      expected.push(deletedGeneralAnswers.length);
+      audits.push(
+        ...deletedGeneralAnswers.map((answer) => ({
+          table_name: "video_custom_answers",
+          target_id: `${answer.video_id}:${answer.event_id}:${answer.question_id}`,
+          operation: "DELETE" as const,
+          before: answer,
+          after: null,
+          actor_user_id: actorUserId,
+          context: "event-update:removed-custom-question-answer",
+          retention_class: "normal" as const,
+          strict: true,
+        })),
+      );
+    }
+    if (obsoleteGeneralIds.length > 0) {
+      mutations.push(
+        db.delete(eventCustomQuestions).where(
+          or(
+            ...obsoleteGeneral.map((row) =>
+              and(
+                eq(eventCustomQuestions.id, row.id),
+                eq(eventCustomQuestions.updated_at, row.updated_at),
+              ),
+            ),
+          ),
+        ),
+      );
+      expected.push(obsoleteGeneralIds.length);
+      audits.push(
+        ...obsoleteGeneral.map((row) => ({
+          table_name: "event_custom_questions",
+          target_id: row.id,
+          operation: "DELETE" as const,
+          before: row,
+          after: null,
+          actor_user_id: actorUserId,
+          context: "event-update:removed-custom-question",
+          retention_class: "normal" as const,
+          strict: true,
+        })),
+      );
+    }
+
+    for (const row of existingGeneral) {
+      const replacement = nextGeneralByKey.get(row.question_key);
+      if (!replacement) continue;
+      nextGeneralByKey.delete(row.question_key);
+      if (sameQuestionDefinition(row, replacement)) continue;
+      const {
+        id: _generalId,
+        event_id: _generalEventId,
+        created_at: _generalCreatedAt,
+        ...updateValues
+      } = replacement;
+      const updated = {
+        ...row,
+        ...replacement,
+        id: row.id,
+        created_at: row.created_at,
+      };
+      mutations.push(
+        db
+          .update(eventCustomQuestions)
+          .set(updateValues)
+          .where(
+            and(
+              eq(eventCustomQuestions.id, row.id),
+              eq(eventCustomQuestions.updated_at, row.updated_at),
+            ),
+          ),
+      );
+      expected.push(1);
+      audits.push({
+        table_name: "event_custom_questions",
+        target_id: row.id,
+        operation: "UPDATE",
+        before: row,
+        after: updated,
+        actor_user_id: actorUserId,
+        context: "event-update:custom-question",
+        retention_class: "normal",
+        strict: true,
+      });
+    }
+
+    const insertedGeneralQuestions = [...nextGeneralByKey.values()];
+    if (insertedGeneralQuestions.length > 0) {
+      const insertChunks = questionInsertChunks(insertedGeneralQuestions);
+      mutations.push(
+        ...insertChunks.map((chunk) =>
+          db.insert(eventCustomQuestions).values(chunk),
+        ),
+      );
+      expected.push(...insertChunks.map((chunk) => chunk.length));
+      audits.push(
+        ...insertedGeneralQuestions.map((row) => ({
+          table_name: "event_custom_questions",
+          target_id: row.id,
+          operation: "CREATE" as const,
+          before: null,
+          after: row,
+          actor_user_id: actorUserId,
+          context: "event-update:custom-question",
           retention_class: "normal" as const,
           strict: true,
         })),

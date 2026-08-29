@@ -1,4 +1,5 @@
 import type { DB } from "@/lib/db/client";
+import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { readCustomAnswersFromFormData } from "@/lib/video/customQuestions";
 import {
@@ -53,6 +54,12 @@ export async function validateCustomAnswersForEvents(
   );
   if (customAnswerRead.errors.length > 0) {
     return { ok: false, message: customAnswerRead.errors[0] };
+  }
+  if (customAnswerRead.drafts.length > MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) {
+    return {
+      ok: false,
+      message: `カスタム質問の回答は最大${MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS}件まで保存できます。`,
+    };
   }
   return { ok: true, drafts: customAnswerRead.drafts };
 }

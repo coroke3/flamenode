@@ -1,3 +1,4 @@
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   resolveIdenticalJsonArtifactPut,
@@ -12,7 +13,10 @@ import {
   normalizeStaticUsersIndex,
   type StaticUsersIndexPayload,
 } from "../../src/lib/publicData/staticUsersIndexCore.ts";
-import { USERS_INDEX_OBJECT_KEY } from "../../src/lib/publicData/publicCreatorProjection.ts";
+import {
+  USERS_INDEX_MAX_OBJECT_BYTES,
+  USERS_INDEX_OBJECT_KEY,
+} from "../../src/lib/publicData/publicCreatorProjection.ts";
 import {
   buildUsersIndexV2Artifacts,
   normalizeUsersIndexV2Manifest,
@@ -202,6 +206,15 @@ async function readCurrentManifestGeneration(
   try {
     const object = await env.R2.get(USERS_INDEX_V2_MANIFEST_OBJECT_KEY);
     if (!object) return { kind: "absent" };
+    if (
+      typeof object.size === "number" &&
+      (!Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
+        object.size > USERS_INDEX_V2_MAX_MANIFEST_BYTES)
+    ) {
+      await cancelR2BodyBestEffort(object);
+      return { kind: "unknown" };
+    }
     const payload = await object.json<unknown>();
     const manifest = normalizeUsersIndexV2Manifest(payload);
     return manifest
@@ -275,6 +288,7 @@ async function canSkipSameGeneration(
     try {
       if (!(await env.R2.head(key))) return false;
     } catch {
+      throwIfAborted(signal);
       return false;
     }
   }
@@ -784,8 +798,20 @@ async function rebuildUsersIndexV2FromLegacyArtifactStrict(
 ): Promise<{ liveKeys: string[]; objectCount: number; hasMore: boolean; skipped: boolean }> {
   throwIfAborted(signal);
   const object = await env.R2.get(USERS_INDEX_OBJECT_KEY);
-  throwIfAborted(signal);
+  if (signal?.aborted) {
+    await cancelR2BodyBestEffort(object);
+    throwIfAborted(signal);
+  }
   if (!object) throw new Error("users_index_v2_requires_legacy_artifact");
+  if (
+    typeof object.size === "number" &&
+    (!Number.isSafeInteger(object.size) ||
+      object.size < 0 ||
+      object.size > USERS_INDEX_MAX_OBJECT_BYTES)
+  ) {
+    await cancelR2BodyBestEffort(object);
+    throw new Error("users_index_v2_legacy_artifact_too_large");
+  }
 
   let payload: unknown;
   try {

@@ -12,6 +12,12 @@ import { getGa4AccessToken, type Ga4AuthEnv } from "./auth.ts";
 export const GA4_VIDEO_VIEW_EVENT = "flamenode_video_view";
 export const GA4_DATA_API_FETCH_TIMEOUT_MS = 12_000;
 export const GA4_REPORT_PAGE_SIZE = 10_000;
+/**
+ * Recent-list candidates are capped at 5,000 videos. Four named ranges should
+ * therefore normally stay well below 50,000 expanded rows. Fail closed before
+ * an anomalous property can consume the whole Worker invocation paging GA4.
+ */
+export const GA4_REPORT_MAX_PAGES = 5;
 
 export const GA4_DATE_RANGE_NAMES = [
   "last_2_days",
@@ -284,14 +290,16 @@ async function runGa4ReportPage(
     await cancelResponseBody(response);
     throw new Error(`ga4_report_http_${response.status}`);
   }
+  let body: Ga4RunReportResponse;
   try {
-    const body = (await response.json()) as Ga4RunReportResponse;
-    signal?.throwIfAborted();
-    return body;
+    body = (await response.json()) as Ga4RunReportResponse;
   } catch {
+    signal?.throwIfAborted();
     await cancelResponseBody(response);
     throw new Error("ga4_report_invalid_json");
   }
+  signal?.throwIfAborted();
+  return body;
 }
 
 export interface FetchVideoViewPeriodsResult {
@@ -310,16 +318,21 @@ export async function fetchVideoViewPeriods(
   if (!propertyId) throw new Error("ga4_property_id_missing");
 
   const accessToken = await getGa4AccessToken(env, budget, fetchImpl, signal);
+  signal?.throwIfAborted();
   const collectedRows: Ga4ReportRow[] = [];
   let dimensionIndices: { dateRange: number; videoId: number } | null = null;
   let latestQuota: Ga4PropertyQuota | null = null;
   let offset = 0;
+  let pageCount = 0;
 
   // Multiple named dateRanges make GA4 append a synthetic `dateRange` dimension.
   // In that shape, `rowCount` is often the unique primary-dimension cardinality
   // (e.g. distinct video_id), while `rows` expands to video_id × dateRange.
   // Paginate by page fullness only — never treat rowCount as rows.length.
   while (true) {
+    if (pageCount >= GA4_REPORT_MAX_PAGES) {
+      throw new Error("ga4_report_too_large");
+    }
     const page = await runGa4ReportPage(
       env,
       propertyId,
@@ -329,17 +342,23 @@ export async function fetchVideoViewPeriods(
       fetchImpl,
       signal,
     );
+    signal?.throwIfAborted();
+    pageCount += 1;
     const pageQuota = extractGa4PropertyQuota(page);
     if (pageQuota) latestQuota = pageQuota;
     if (!dimensionIndices) {
       dimensionIndices = resolveDimensionIndices(page.dimensionHeaders ?? []);
     }
     const rows = page.rows ?? [];
+    if (rows.length > GA4_REPORT_PAGE_SIZE) {
+      throw new Error("ga4_report_page_too_large");
+    }
     collectedRows.push(...rows);
     if (rows.length < GA4_REPORT_PAGE_SIZE) break;
     offset += rows.length;
   }
 
+  signal?.throwIfAborted();
   if (!dimensionIndices) {
     throw new Error("ga4_report_dimension_header_missing");
   }

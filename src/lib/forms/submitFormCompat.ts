@@ -12,7 +12,11 @@ export function submitFormCompat(form: HTMLFormElement): void {
     return;
   }
 
-  if (typeof form.checkValidity === "function" && !form.checkValidity()) {
+  if (
+    !form.noValidate &&
+    typeof form.checkValidity === "function" &&
+    !form.checkValidity()
+  ) {
     form.reportValidity?.();
     return;
   }
