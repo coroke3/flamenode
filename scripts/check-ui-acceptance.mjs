@@ -708,6 +708,30 @@ requireAll("app/(public)/about/page.tsx", [
   [/制作クレジット/, "About に制作クレジット見出しがありません。"],
 ]);
 
+requireAll("app/(public)/event/[id]/release/page.tsx", [
+  [/投稿予定のご案内/, "Release ページ見出しがありません。"],
+]);
+forbidMatch(
+  "app/(public)/event/[id]/release/page.tsx",
+  /fn-btn/,
+  "Release ページで fn-btn を使っています。",
+);
+requireAll("app/(public)/event/[id]/release/ReleaseView.tsx", [
+  [/aria-label="リスト表示"/, "Release リスト表示の aria-label がありません。"],
+  [/aria-label="カード表示"/, "Release カード表示の aria-label がありません。"],
+  [/aria-label="作者別表示"/, "Release 作者別表示の aria-label がありません。"],
+  [/window\.history\.replaceState/, "Release hash 同期 (replaceState) がありません。"],
+  [/youtubeThumbUrl/, "Release カード表示の youtubeThumbUrl がありません。"],
+  [/個人参加/, "Release 個人参加セクションがありません。"],
+  [/グループ参加/, "Release グループ参加セクションがありません。"],
+  [/複数人/, "Release 複数人バッジがありません。"],
+]);
+forbidMatch(
+  "app/(public)/event/[id]/release/ReleaseView.tsx",
+  /fn-btn/,
+  "ReleaseView で fn-btn を使っています。",
+);
+
 const requiredWidths = [360, 390, 430, 640, 768, 1024, 1280, 1440, 1920];
 const acceptanceDoc = read("docs/operations/ui-acceptance.md");
 for (const width of requiredWidths) {
