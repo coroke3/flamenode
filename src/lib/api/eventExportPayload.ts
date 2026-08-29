@@ -191,6 +191,66 @@ function answerText(video: EventExportVideoSnapshot, key: string): string {
   return "";
 }
 
+interface EventExportCustomAnswer {
+  key: string;
+  label: string;
+  value: unknown;
+  order: number;
+}
+
+function buildCustomAnswers(
+  video: EventExportVideoSnapshot,
+): EventExportCustomAnswer[] {
+  return video.answers.map((answer) => ({
+    key: answer.key,
+    label: answer.label,
+    value: answerValue(answer),
+    order: answer.sort_order,
+  }));
+}
+
+function buildCustomAnswersByKey(
+  answers: readonly EventExportCustomAnswer[],
+): Record<string, unknown> {
+  return Object.fromEntries(
+    answers
+      .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
+      .map((answer) => [answer.key, answer.value]),
+  );
+}
+
+/** Legacy rows are flat: never let a question key replace compatibility data. */
+const LEGACY_RESERVED_KEYS: ReadonlySet<string> = new Set([
+  "id", "eventid", "timestamp", "type1", "type2", "type", "creator",
+  "yomi", "movieyear", "tlink", "ychlink", "icon", "member", "memberid",
+  "memberchapter", "data", "time", "title", "music", "credit", "ymulink",
+  "up", "othersns", "righttype", "comment", "ylink", "", "beforecomment",
+  "aftercomment", "soft", "toudan", "hitokoto", "starts", "ends", "startm",
+  "endm", "ycomment", "status", "small", "largeThumbnail", "link", "fu",
+  "custom_answers", "custom_answers_by_key", "__proto__", "constructor", "prototype",
+]);
+
+function isSafeLegacyCustomAnswerKey(key: string): boolean {
+  return (
+    key.length > 0 &&
+    key.length <= 64 &&
+    /^[A-Za-z0-9_-]+$/.test(key) &&
+    !FORBIDDEN_PUBLIC_KEYS.has(key) &&
+    !LEGACY_RESERVED_KEYS.has(key)
+  );
+}
+
+function buildLegacyCustomAnswerFields(
+  answers: readonly EventExportCustomAnswer[],
+): Record<string, unknown> {
+  const fields = Object.create(null) as Record<string, unknown>;
+  for (const answer of answers) {
+    if (!isSafeLegacyCustomAnswerKey(answer.key)) continue;
+    fields[answer.key] = answer.value;
+  }
+  return fields;
+}
+
 function legacyDateParts(value: number | null): { date: string; time: string } {
   if (value == null || !Number.isFinite(value)) return { date: "", time: "" };
   const date = new Date((value + 9 * 60 * 60) * 1000);
@@ -297,6 +357,8 @@ export function buildLegacyEventExportPayload(
     const schedule = legacyDateParts(video.scheduled_time);
     const isCollaboration =
       video.collaboration_type === "collab" || video.members.length > 1;
+    const customAnswers = buildCustomAnswers(video);
+    const customAnswersByKey = buildCustomAnswersByKey(customAnswers);
     const starts = legacyStarts(video);
     const emptyMemberAligned = video.members.map(() => "").join(",");
     const importedNotes = parseLegacyImportedNotes(video);
@@ -315,6 +377,7 @@ export function buildLegacyEventExportPayload(
     const legacyGeneralComment = importedNotes.get("コメント") || video.intro_comment || "";
 
     return {
+      ...buildLegacyCustomAnswerFields(customAnswers),
       id: video.id,
       eventid: snapshot.event.id,
       timestamp:
@@ -362,6 +425,8 @@ export function buildLegacyEventExportPayload(
       largeThumbnail: youtubeThumbnail(video.youtube_video_id, "large") ?? "",
       link: xProfileUrl(video.creator_x_user_id) ?? "",
       fu: video.part ?? "",
+      custom_answers: customAnswers,
+      custom_answers_by_key: customAnswersByKey,
     };
   });
 }
@@ -409,17 +474,8 @@ export function buildEventExportPayload(
       })),
     },
     videos: snapshot.videos.map((video) => {
-      const customAnswers = video.answers.map((answer) => ({
-        key: answer.key,
-        label: answer.label,
-        value: answerValue(answer),
-        order: answer.sort_order,
-      }));
-      const customAnswersByKey = Object.fromEntries(
-        customAnswers
-          .filter((answer) => !FORBIDDEN_PUBLIC_KEYS.has(answer.key))
-          .map((answer) => [answer.key, answer.value]),
-      );
+      const customAnswers = buildCustomAnswers(video);
+      const customAnswersByKey = buildCustomAnswersByKey(customAnswers);
       return {
         id: video.id,
         title: video.title,

@@ -96,6 +96,20 @@ const snapshot = {
           answer_json: null,
           sort_order: 0,
         },
+        {
+          key: "director_note",
+          label: "制作者コメント",
+          answer_text: "公開用コメント",
+          answer_json: null,
+          sort_order: 1,
+        },
+        {
+          key: "audience_tags",
+          label: "対象タグ",
+          answer_text: null,
+          answer_json: JSON.stringify(["MV", "AI"]),
+          sort_order: 2,
+        },
       ],
     },
   ],
@@ -143,6 +157,15 @@ test("イベント公開API v5はDB正本の構造を維持する", () => {
     ),
     false,
   );
+  assert.deepEqual(video.custom_answers, [
+    { key: "stage_permission", label: "上映可否", value: "可", order: 0 },
+    { key: "director_note", label: "制作者コメント", value: "公開用コメント", order: 1 },
+    { key: "audience_tags", label: "対象タグ", value: ["MV", "AI"], order: 2 },
+  ]);
+  assert.deepEqual(video.custom_answers_by_key, {
+    director_note: "公開用コメント",
+    audience_tags: ["MV", "AI"],
+  });
   assert.deepEqual(video.creator.other_social_links, {
     portfolio: "https://example.com",
   });
@@ -190,12 +213,55 @@ test("旧形式互換はcanonical snapshotから旧EventArchives列を再構成�
   assert.equal(video.aftercomment, "後書き");
   assert.equal(video.soft, "AE");
   assert.equal(video.righttype, "可");
+  assert.equal(video.director_note, "公開用コメント");
+  assert.deepEqual(video.audience_tags, ["MV", "AI"]);
+  assert.deepEqual(video.custom_answers, [
+    { key: "stage_permission", label: "上映可否", value: "可", order: 0 },
+    { key: "director_note", label: "制作者コメント", value: "公開用コメント", order: 1 },
+    { key: "audience_tags", label: "対象タグ", value: ["MV", "AI"], order: 2 },
+  ]);
+  assert.deepEqual(video.custom_answers_by_key, {
+    director_note: "公開用コメント",
+    audience_tags: ["MV", "AI"],
+  });
   assert.equal(video.starts, "45");
   assert.equal(video.ends, "");
   assert.equal(video.startm, "");
   assert.equal(video.endm, "");
   assert.match(String(video.ylink), /youtube\.com\/watch\?v=abcdefghijk/);
   assert.match(String(video.largeThumbnail), /maxresdefault\.jpg$/);
+  assert.deepEqual(findForbiddenPublicKeys(payload), []);
+});
+
+test("旧形式のカスタム回答は互換列を上書きせずprototypeキーも追加しない", () => {
+  const payload = buildLegacyEventExportPayload({
+    ...snapshot,
+    videos: [
+      {
+        ...snapshot.videos[0],
+        answers: [
+          {
+            key: "title",
+            label: "表示名を狙う質問",
+            answer_text: "互換列を上書きしてはいけない",
+            answer_json: null,
+            sort_order: 0,
+          },
+          {
+            key: "__proto__",
+            label: "prototypeキー",
+            answer_text: "追加しない",
+            answer_json: null,
+            sort_order: 1,
+          },
+        ],
+      },
+    ],
+  });
+  const row = payload[0];
+  assert.equal(row.title, "テスト作品");
+  assert.equal(row.custom_answers_by_key.title, "互換列を上書きしてはいけない");
+  assert.equal(Object.prototype.hasOwnProperty.call(row, "__proto__"), false);
   assert.deepEqual(findForbiddenPublicKeys(payload), []);
 });
 
@@ -308,5 +374,5 @@ test("scheduled KV cacheはv5とlegacyで衝突せず無効化時に両方消す
     /eventExportPayloadCacheKey\(\s*eventId,\s*format,\s*refreshMinutes/,
   );
   assert.match(cacheSource, /\["v5", "legacy"\] as const/);
-  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 6/);
+  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 7/);
 });

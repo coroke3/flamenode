@@ -2,7 +2,8 @@ import "server-only";
 
 import { getEnv } from "@/lib/cloudflare";
 
-const EVENT_EXPORT_CACHE_VERSION = 6;
+// Payload shape changed to include custom answers in both formats.
+const EVENT_EXPORT_CACHE_VERSION = 7;
 export const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
 
 export type EventExportCacheFormat = "v5" | "legacy";
