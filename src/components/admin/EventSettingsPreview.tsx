@@ -3,6 +3,7 @@ import {
   parseVideoFormSettings,
   resolveStagePermissionFields,
 } from "@/lib/video/formSettings";
+import { formatRequiredVideoFieldSummary } from "@/lib/video/requiredVideoFields";
 import { buildAccentVars } from "@/lib/theme/accent";
 import {
   GENERAL_CUSTOM_QUESTION_TYPE_LABELS,
@@ -36,6 +37,7 @@ export interface EventSettingsPreviewValue {
   parts_text?: string | null;
   editable_fields?: string | null;
   review_settings?: string | null;
+  required_video_fields_json?: string | null;
   general_custom_questions?: EventGeneralCustomQuestionDraft[];
 }
 
@@ -291,6 +293,10 @@ export function EventSettingsPreview({
           ) : (
             <p className="fn-muted" style={{ margin: 0, fontSize: 12 }}>追加質問は表示されません。</p>
           )}
+          <Field
+            label="投稿必須項目"
+            value={formatRequiredVideoFieldSummary(event.required_video_fields_json)}
+          />
         </article>
 
         <article className="fn-card" style={{ padding: 12 }}>

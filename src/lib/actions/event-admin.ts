@@ -64,6 +64,7 @@ import {
   resolveGeneralCustomQuestionCap,
 } from "@/lib/event/generalCustomQuestionPlan";
 import { buildEventUpdatePayload, parseDateInput } from "@/lib/event/eventPayload";
+import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
 import {
   hasAnyEventEditPermission,
   resolveEventEditPermissions,
@@ -296,6 +297,12 @@ export async function createEvent(
     event_type: data.event_type,
     explanation: data.explanation ?? null,
     youtube_description_template: data.youtube_description_template ?? null,
+    required_video_fields_json: (() => {
+      const fromForm = serializeRequiredVideoFieldsFromForm(formData);
+      return fromForm !== undefined
+        ? fromForm
+        : templateSnapshot?.required_video_fields_json ?? null;
+    })(),
     icon_url: data.icon_url ?? null,
     img_url: data.img_url ?? null,
     accent_color: data.accent_color ?? null,

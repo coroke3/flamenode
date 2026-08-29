@@ -31,6 +31,8 @@ import {
   resolveCanonicalXUserId,
 } from "@/lib/auth/xIdentity";
 import {
+  buildXIdentityDecisionFields,
+  isRevertDeadlineOpen,
   validateXIdentityRequestShape,
   type XIdentityRequestType,
 } from "@/lib/auth/xIdentityRequestCore";
@@ -47,7 +49,6 @@ import { buildAfterXUserPublicUpdateQueueBatch } from "@/lib/staticRebuild/hooks
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { maybeMarkOnboardingComplete } from "@/lib/auth/onboarding";
-import { buildXIdentityDecisionFields } from "@/lib/auth/xIdentityRequestCore";
 import {
   assessXLinkDeletion,
   xLinkDeletionAllowedSql,
@@ -534,7 +535,7 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   return { ok: false, message: "申請を保存できませんでした。" };
 }
 
-/** 本人の pending 申請を取り消す（連携・統合・別名）。 */
+/** 本人の pending 申請を取り消す（連携・統合・統合取消・別名）。 */
 export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActionResult> {
   const context = await getXIdWriteContext();
   if (!context.ok) return context.result;
@@ -565,7 +566,8 @@ export async function cancelXIdLinkRequest(formData: FormData): Promise<XIdActio
     request.request_type !== "new_link" &&
     request.request_type !== "existing_link" &&
     request.request_type !== "alias" &&
-    request.request_type !== "merge"
+    request.request_type !== "merge" &&
+    request.request_type !== "revert_merge"
   ) {
     return { ok: false, message: "この申請は取り下げできません。" };
   }
@@ -731,7 +733,10 @@ export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActi
     return { ok: false, message: "差し戻し可能な統合申請が見つかりません。" };
   }
   const now = nowUnix();
-  if (!parent.restore_snapshot_json || !parent.revert_deadline_at || parent.revert_deadline_at < now) {
+  if (
+    !parent.restore_snapshot_json ||
+    !isRevertDeadlineOpen(parent.revert_deadline_at, now)
+  ) {
     return { ok: false, message: "統合の差し戻し期限を過ぎています。" };
   }
   if (!parent.target_x_user_id || !(await isAuthUserLinkedToXUser(db, authUserId, parent.target_x_user_id))) {
@@ -739,18 +744,26 @@ export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActi
   }
   const existing = (
     await db
-      .select({ id: xIdentityRequests.id })
+      .select({ id: xIdentityRequests.id, status: xIdentityRequests.status })
       .from(xIdentityRequests)
       .where(
         and(
           eq(xIdentityRequests.request_type, "revert_merge"),
           eq(xIdentityRequests.parent_request_id, parentRequestId),
-          eq(xIdentityRequests.status, "pending"),
+          inArray(xIdentityRequests.status, ["pending", "approved", "done"]),
         )!,
       )
       .limit(1)
   )[0];
-  if (existing) return { ok: true, message: "差し戻し申請はすでに承認待ちです。" };
+  if (existing?.status === "done") {
+    return { ok: false, message: "この統合はすでに差し戻されています。" };
+  }
+  if (existing?.status === "pending") {
+    return { ok: true, message: "差し戻し申請はすでに承認待ちです。" };
+  }
+  if (existing?.status === "approved") {
+    return { ok: true, message: "差し戻し申請は処理中です。" };
+  }
 
   const id = generateId("xrevert");
   const afterRequest = {
@@ -767,22 +780,30 @@ export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActi
     requested_at: now,
     updated_at: now,
   };
-  await mutateWithAudit(db, {
-    mutationStatements: [db.insert(xIdentityRequests).values(afterRequest)],
-    expectedMutationChanges: [1],
-    audits: [
-      {
-        table_name: "x_identity_requests",
-        target_id: id,
-        operation: "CREATE",
-        before: null,
-        after: { ...afterRequest },
-        actor_user_id: authUserId,
-        actor_x_user_id: actorXUserId,
-        retention_class: "long_audit",
-      },
-    ],
-  });
+  try {
+    await mutateWithAudit(db, {
+      mutationStatements: [db.insert(xIdentityRequests).values(afterRequest)],
+      expectedMutationChanges: [1],
+      audits: [
+        {
+          table_name: "x_identity_requests",
+          target_id: id,
+          operation: "CREATE",
+          before: null,
+          after: { ...afterRequest },
+          actor_user_id: authUserId,
+          actor_x_user_id: actorXUserId,
+          retention_class: "long_audit",
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("[requestXIdMergeRevert] mutation failed", error);
+    return {
+      ok: false,
+      message: "差し戻し申請を保存できませんでした。時間をおいて再試行してください。",
+    };
+  }
   revalidateXIdentityPaths(parent.target_x_user_id ?? undefined);
   revalidatePath("/admin/x-id-merges");
   return { ok: true, message: "統合の差し戻し申請を受け付けました。" };

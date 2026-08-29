@@ -41,6 +41,7 @@ export function snapshotEventSection(
         allow_user_video_edits: row.allow_user_video_edits,
         user_video_edit_permission_keys_json:
           row.user_video_edit_permission_keys_json,
+        required_video_fields_json: row.required_video_fields_json,
         editable_fields: row.editable_fields,
         review_settings: row.review_settings,
       };

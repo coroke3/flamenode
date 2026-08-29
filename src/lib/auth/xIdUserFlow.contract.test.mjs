@@ -69,6 +69,28 @@ test("本人はpendingのX ID申請を取り下げできる", () => {
   assert.match(history, /cancelXIdLinkRequest/);
   assert.match(history, /取り下げる/);
   assert.match(history, /row\.status === "pending"/);
+  assert.match(action, /request.request_type !== "revert_merge"/);
+  assert.match(history, /"revert_merge"/);
+});
+
+test("完了した統合は期限内に差し戻し申請できる", () => {
+  const action = read("../actions/xid.ts");
+  const history = read("../../components/settings/XIdLinkedList.tsx");
+  const settings = read("../../../app/(auth)/dashboard/settings/page.tsx");
+
+  assert.match(action, /export async function requestXIdMergeRevert/);
+  assert.match(action, /formData.get\("parent_request_id"\)/);
+  assert.match(action, /isRevertDeadlineOpen\(parent\.revert_deadline_at, now\)/);
+  assert.match(action, /inArray\(xIdentityRequests\.status, \["pending", "approved", "done"\]\)/);
+  assert.match(action, /差し戻し申請は処理中です/);
+  assert.match(action, /\[requestXIdMergeRevert\] mutation failed/);
+  assert.match(action, /この統合はすでに差し戻されています/);
+  assert.match(history, /requestXIdMergeRevert/);
+  assert.match(history, /統合を取り消す申請/);
+  assert.match(history, /fd.set\("parent_request_id"/);
+  assert.match(history, /blockedRevertParents/);
+  assert.match(settings, /parent_request_id: linkReqTable.parent_request_id/);
+  assert.match(settings, /revert_deadline_at: linkReqTable.revert_deadline_at/);
 });
 
 test("再生リスト同期状況は一般ダッシュボードへ公開せず運営・管理画面に限定する", () => {

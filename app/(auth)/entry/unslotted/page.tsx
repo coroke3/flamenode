@@ -81,6 +81,7 @@ export default async function UnslottedPostPage({
           allow_unslotted_posts: events.allow_unslotted_posts,
           parts_json: events.parts_json,
           youtube_description_template: events.youtube_description_template,
+          required_video_fields_json: events.required_video_fields_json,
         })
         .from(events)
         .where(
@@ -109,6 +110,7 @@ export default async function UnslottedPostPage({
     title: event.title,
     parts_json: event.parts_json,
     youtube_description_template: event.youtube_description_template,
+    required_video_fields_json: event.required_video_fields_json,
     youtube_description_event_url: absoluteUrl(
       `/event/${encodeURIComponent(event.id)}`,
     ),

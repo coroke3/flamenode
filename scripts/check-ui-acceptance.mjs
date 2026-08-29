@@ -141,6 +141,48 @@ requireAll("src/components/forms/VideoForm.tsx", [
   [/aria-current=\{index === currentStep \? "step"/, "現在ステップのアクセシビリティ表現がありません。"],
   [/scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/, "入力エラー箇所への移動がありません。"],
   [/setDirty\(true\)/, "未保存変更の追跡がありません。"],
+  [/unionRequiredVideoFields/, "イベント必須項目の和集合がありません。"],
+  [/validateSelectedRequiredVideoFields/, "編集・確認提出の必須項目横断検証がありません。"],
+  [
+    /for \(const stepKey of \["submitter", "work", "youtube"\][\s\S]*validateWizardStep\(stepKey\)/,
+    "ウィザード提出前の全ステップ再検証がありません。",
+  ],
+]);
+
+requireAll("src/components/admin/EventForm.tsx", [
+  [/section-required/, "EventForm に投稿必須項目セクションがありません。"],
+  [/required_video_fields_json/, "EventForm に required_video_fields_json がありません。"],
+]);
+
+requireAll("src/components/admin/EventForm.module.css", [
+  [/\.manageSectionNav\s*\{[^}]*position:\s*sticky/s, "EventForm のセクションナビが sticky ではありません。"],
+]);
+
+requireAll("src/components/settings/XIdLinkedList.tsx", [
+  [/requestXIdMergeRevert/, "完了した統合の差し戻し申請導線がありません。"],
+  [/統合を取り消す申請/, "差し戻し申請ボタンがありません。"],
+  [/parent_request_id/, "差し戻し申請の parent_request_id がありません。"],
+]);
+
+requireAll("app/(auth)/dashboard/settings/page.tsx", [
+  [/parent_request_id: linkReqTable.parent_request_id/, "申請履歴に parent_request_id がありません。"],
+  [/revert_deadline_at: linkReqTable.revert_deadline_at/, "申請履歴に revert_deadline_at がありません。"],
+]);
+
+requireAll("app/(manage)/manage/events/[id]/page.tsx", [
+  [/投稿の必須項目/, "イベント概要に投稿必須項目カードがありません。"],
+  [/section-required/, "投稿必須項目カードのリンク先アンカーがありません。"],
+]);
+
+requireAll("src/styles/admin-manage.css", [
+  [
+    /\[data-manage-shell\] \.manage-event-action-rail[\s\S]*@media\s*\(max-width:\s*760px\)[\s\S]*manage-event-action-rail[\s\S]*repeat\(2/s,
+    "運営ショートカットの 760px 2列がありません。",
+  ],
+  [
+    /@media\s*\(max-width:\s*430px\)[\s\S]*manage-event-action-rail[\s\S]*grid-template-columns:\s*1fr/s,
+    "運営ショートカットの 430px 1列がありません。",
+  ],
 ]);
 
 requireAll("src/components/forms/VideoMembersField.tsx", [

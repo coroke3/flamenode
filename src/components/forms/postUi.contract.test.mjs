@@ -168,7 +168,11 @@ test("admin/event privilege can clear an existing YouTube ID from the edit form"
   assert.match(source, /youtube\.editable === true/);
   assert.match(
     source,
-    /mode === "edit" && hasInitialYoutube && !privilegedYoutubeEdit/,
+    /const privilegedYoutubeEdit\s*=\s*[\s\S]*?mode\s*===\s*"edit"[\s\S]*?hasInitialYoutube[\s\S]*?permissionView\?\.\s*privilegeMode\s*!==\s*"normal"[\s\S]*?permissionView\?\.\s*youtube\.editable\s*===\s*true/,
+  );
+  assert.match(
+    source,
+    /const isYoutubeUrlRequired =\s*!privilegedYoutubeEdit/,
   );
 });
 

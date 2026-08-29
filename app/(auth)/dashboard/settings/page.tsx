@@ -100,6 +100,8 @@ export default async function SettingsPage({
           requested_x_id: linkReqTable.requested_x_id,
           source_x_user_id: linkReqTable.source_x_user_id,
           target_x_user_id: linkReqTable.target_x_user_id,
+          parent_request_id: linkReqTable.parent_request_id,
+          revert_deadline_at: linkReqTable.revert_deadline_at,
           status: linkReqTable.status,
           requested_at: linkReqTable.requested_at,
           updated_at: linkReqTable.updated_at,

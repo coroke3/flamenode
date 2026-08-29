@@ -10,6 +10,7 @@ import {
   resolveSubmittedEventVisibility,
   type EventFormData,
 } from "@/lib/event/eventForm";
+import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
 
 export type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 
@@ -75,10 +76,15 @@ export function buildEventUpdatePayload(args: {
 
   if (permissions.questions) {
     videoFormSettingsJson = buildVideoFormSettingsJson(formData);
+    const requiredVideoFieldsJson = serializeRequiredVideoFieldsFromForm(formData);
     Object.assign(updatePayload, {
       allow_user_video_edits: data.allow_user_video_edits,
       user_video_edit_permission_keys_json:
         data.user_video_edit_permission_keys_json ?? null,
+      required_video_fields_json:
+        requiredVideoFieldsJson === undefined
+          ? before.required_video_fields_json
+          : requiredVideoFieldsJson,
       editable_fields: data.editable_fields ?? before.editable_fields,
       review_settings: data.review_settings ?? before.review_settings,
     });

@@ -243,6 +243,7 @@ export default async function EditVideoPage({
       title: eventsTable.title,
       parts_json: eventsTable.parts_json,
       youtube_description_template: eventsTable.youtube_description_template,
+      required_video_fields_json: eventsTable.required_video_fields_json,
     })
     .from(eventsTable)
     .where(acceptingEventWhere);
@@ -254,6 +255,7 @@ export default async function EditVideoPage({
             title: eventsTable.title,
             parts_json: eventsTable.parts_json,
             youtube_description_template: eventsTable.youtube_description_template,
+            required_video_fields_json: eventsTable.required_video_fields_json,
           })
           .from(eventsTable)
           .where(inArray(eventsTable.id, currentEventIds))
@@ -266,6 +268,7 @@ export default async function EditVideoPage({
       video_form_settings_json?: string | null;
       parts_json?: string | null;
       youtube_description_template?: string | null;
+      required_video_fields_json?: string | null;
       youtube_description_event_url?: string | null;
     }
   >();
@@ -277,6 +280,7 @@ export default async function EditVideoPage({
       title: ev.title,
       parts_json: ev.parts_json,
       youtube_description_template: ev.youtube_description_template,
+      required_video_fields_json: ev.required_video_fields_json,
       youtube_description_event_url: absoluteUrl(
         `/event/${encodeURIComponent(ev.id)}`,
       ),
@@ -289,6 +293,7 @@ export default async function EditVideoPage({
       title: ev.title,
       parts_json: ev.parts_json,
       youtube_description_template: ev.youtube_description_template,
+      required_video_fields_json: ev.required_video_fields_json,
       youtube_description_event_url: absoluteUrl(
         `/event/${encodeURIComponent(ev.id)}`,
       ),

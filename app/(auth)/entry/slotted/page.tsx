@@ -146,6 +146,7 @@ export default async function SlottedPostPage({
       title: eventsTable.title,
       parts_json: eventsTable.parts_json,
       youtube_description_template: eventsTable.youtube_description_template,
+      required_video_fields_json: eventsTable.required_video_fields_json,
     })
     .from(eventsTable)
     .where(
@@ -159,6 +160,7 @@ export default async function SlottedPostPage({
     title: ev.title,
     parts_json: ev.parts_json,
     youtube_description_template: ev.youtube_description_template,
+    required_video_fields_json: ev.required_video_fields_json,
   };
   const rawEventOptions = acceptingEvents.some((o) => o.id === ev.id)
     ? acceptingEvents

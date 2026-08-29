@@ -120,6 +120,7 @@ export default async function ManageEventEditPage({
               | "other",
             explanation: event.explanation,
             youtube_description_template: event.youtube_description_template,
+            required_video_fields_json: event.required_video_fields_json,
             icon_url: event.icon_url,
             img_url: event.img_url,
             accent_color: event.accent_color,

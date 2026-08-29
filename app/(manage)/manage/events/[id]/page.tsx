@@ -417,6 +417,20 @@ export default async function ManageEventPage({
           </span>
           <Icon name="chevron-right" size={17} />
         </Link>
+
+        <Link
+          href={`/manage/events/${eventHrefId}/edit#section-required`}
+          className="manage-event-action-card"
+        >
+          <span className="manage-event-action-icon" aria-hidden="true">
+            <Icon name="settings" size={17} />
+          </span>
+          <span className="manage-event-action-copy">
+            <span className="manage-event-action-title">投稿の必須項目</span>
+            <span className="manage-event-action-meta">作品フォームの必須設定</span>
+          </span>
+          <Icon name="chevron-right" size={17} />
+        </Link>
       </nav>
 
       {isAdmin ? (

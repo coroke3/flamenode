@@ -37,9 +37,10 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0058_event_youtube_description_template.sql",
     "0059_event_slot_reservation_limits.sql",
     "0060_youtube_sync_notification_observability.sql",
+    "0061_event_required_video_fields.sql",
   ]);
   assert.equal(result.tableCount, 46);
-  assert.equal(result.columnCount, 473);
+  assert.equal(result.columnCount, 474);
   assert.ok(result.indexCount > 78);
   assert.ok(result.foreignKeyCount > 20);
   assert.ok(result.checkCount > 20);

@@ -35,6 +35,7 @@ export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy
   "events.editable_fields": { json: true, maxLength: 100_000 },
   "events.repeat_rules": { json: true, maxLength: 100_000 },
   "events.parts_json": { json: true, maxLength: 100_000 },
+  "events.required_video_fields_json": { json: true, maxLength: 2_000 },
   "videos.music_reference_url": { url: true, maxLength: 2048 },
   "x_users.icon_url": { url: true, maxLength: 2048 },
   "x_users.youtube_channel_url": { url: true, maxLength: 2048 },

@@ -80,3 +80,21 @@ test("submitSlotVideo はステージ項目の読取失敗を保存前に返す"
     /try\s*\{\s*stageFields = await getStagePermissionFieldsForEvents\(db, syncedEventIds\)[\s\S]*?stage permission fields read rejected/,
   );
 });
+
+test("submitSlotVideo は parseVideoForm の youtubeRequired: false とイベント必須項目検証を維持する", () => {
+  assert.match(source, /parseVideoForm\(Object\.fromEntries\(formData\), \{ youtubeRequired: false \}\)/);
+  assert.match(source, /loadUnionRequiredVideoFields\(db, syncedEventIds\)/);
+  assert.match(source, /firstMissingRequiredVideoField/);
+  assert.match(
+    source,
+    /if \(missingRequired\) \{[\s\S]*?return \{ ok: false, message: missingRequiredVideoFieldMessage\(missingRequired\) \}/,
+  );
+
+  const fnStart = source.indexOf("async function submitSlotVideoCore");
+  const fnBody = source.slice(fnStart);
+  const syncIndex = fnBody.indexOf("syncedEventIds = await resolveVideoEventSyncTargetIds");
+  const missingIndex = fnBody.indexOf("const missingRequired = firstMissingRequiredVideoField");
+  const eventConfigIndex = fnBody.indexOf("const eventConfig =");
+  assert.ok(syncIndex >= 0 && missingIndex > syncIndex, "必須項目検証は syncedEventIds 決定の後");
+  assert.ok(eventConfigIndex > missingIndex, "必須項目検証は保存前");
+});
