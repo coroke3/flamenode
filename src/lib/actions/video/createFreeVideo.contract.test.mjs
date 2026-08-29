@@ -44,3 +44,25 @@ test("createFreeVideo rejects a non-empty invalid scheduled_time instead of usin
   assert.match(source, /if \(!scheduledParsed\.ok\)/);
   assert.match(source, /scheduledParsed\.value \?\? now/);
 });
+
+test("createFreeVideo は eventIds 決定後・保存前にイベント必須項目を検証する", () => {
+  assert.match(source, /loadUnionRequiredVideoFields/);
+  assert.match(source, /firstMissingRequiredVideoField/);
+  assert.match(source, /missingRequiredVideoFieldMessage/);
+
+  const fnStart = source.indexOf("export async function createFreeVideo");
+  const fnBody = source.slice(fnStart);
+  const eventIdsIndex = fnBody.indexOf("const eventIds = eventId ? [eventId] : []");
+  const missingRequiredIndex = fnBody.indexOf("firstMissingRequiredVideoField");
+  const generateIdIndex = fnBody.indexOf('generateId("v")');
+  const insertIndex = fnBody.indexOf("db.insert(videos)");
+
+  assert.ok(eventIdsIndex >= 0);
+  assert.ok(missingRequiredIndex > eventIdsIndex, "必須項目検証は eventIds 決定の後");
+  assert.ok(generateIdIndex > missingRequiredIndex, "generateId は必須項目検証の後");
+  assert.ok(insertIndex > missingRequiredIndex, "insert は必須項目検証の後");
+  assert.match(
+    fnBody.slice(missingRequiredIndex, missingRequiredIndex + 300),
+    /loadUnionRequiredVideoFields\(db, eventIds\)/,
+  );
+});

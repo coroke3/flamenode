@@ -28,6 +28,7 @@ import { uniqueBy } from "@/lib/utils/unique";
 import { normalizeXId } from "@/lib/utils/xid";
 import { approvedXIdsWhere } from "@/lib/auth/approvedX";
 import { getEnv } from "@/lib/cloudflare";
+import { cancelR2BodyBestEffort } from "@/lib/r2Body";
 import {
   eventPlaylistObjectKey,
   EVENT_PLAYLIST_MAX_OBJECT_BYTES,
@@ -649,8 +650,11 @@ export async function fetchEventPlaylistVideos(
   if (object) {
     if (
       typeof object.size === "number" &&
-      object.size > EVENT_PLAYLIST_MAX_OBJECT_BYTES
+      (!Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
+        object.size > EVENT_PLAYLIST_MAX_OBJECT_BYTES)
     ) {
+      await cancelR2BodyBestEffort(object);
       logPlaylistFallback("r2_invalid");
       object = null;
     }

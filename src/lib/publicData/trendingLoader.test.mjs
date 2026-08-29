@@ -24,6 +24,7 @@ test("trendingLoader: R2 analytics/trending.json を Cache API 経由で読む",
   assert.match(loaderSource, /TRENDING_OBJECT_KEY/);
   assert.match(loaderSource, /loadStaticJsonFreshStaleUnavailable/);
   assert.match(loaderSource, /PUBLIC_JSON_CACHE_TTL_SEC\.trending/);
+  assert.match(loaderSource, /maxObjectBytes: TRENDING_MAX_OBJECT_BYTES/);
   assert.match(loaderSource, /cacheMode: "cache_first"/);
   assert.doesNotMatch(loaderSource, /getGeneratedAt/);
   assert.match(loaderSource, /normalizeStaticTrending/);

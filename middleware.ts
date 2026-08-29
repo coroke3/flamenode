@@ -19,8 +19,9 @@ export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
 
+// isolateを跨いで保持してよいのは解決済みのpure stringだけにする。
+// request contextを参照するPromiseは別requestからawaitしない。
 let configuredSiteOrigin: string | undefined;
-let configuredSiteOriginPromise: Promise<string | undefined> | null = null;
 
 async function loadConfiguredSiteOrigin(): Promise<string | undefined> {
   try {
@@ -41,25 +42,14 @@ async function loadConfiguredSiteOrigin(): Promise<string | undefined> {
   );
 }
 
-function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
-  if (configuredSiteOrigin) return Promise.resolve(configuredSiteOrigin);
-  if (configuredSiteOriginPromise) return configuredSiteOriginPromise;
-
-  const request = loadConfiguredSiteOrigin()
-    .then((value) => {
-      // 正常に得られた設定だけをisolate内で保持する。初回context取得失敗や
-      // 一時的な未設定(undefined)を永続cacheすると、そのisolateだけcanonical
-      // redirectが以後ずっと無効になるため、undefinedは次requestで再試行する。
-      if (value) configuredSiteOrigin = value;
-      return value;
-    })
-    .finally(() => {
-      if (configuredSiteOriginPromise === request) {
-        configuredSiteOriginPromise = null;
-      }
-    });
-  configuredSiteOriginPromise = request;
-  return request;
+async function resolveConfiguredSiteOrigin(): Promise<string | undefined> {
+  if (configuredSiteOrigin) return configuredSiteOrigin;
+  const value = await loadConfiguredSiteOrigin();
+  // 正常に得られた設定だけをisolate内で保持する。初回context取得失敗や
+  // 一時的な未設定(undefined)を永続cacheすると、そのisolateだけcanonical
+  // redirectが以後ずっと無効になるため、undefinedは次requestで再試行する。
+  if (value) configuredSiteOrigin = value;
+  return value;
 }
 
 function matchesPathSegmentPrefix(pathname: string, prefix: string): boolean {

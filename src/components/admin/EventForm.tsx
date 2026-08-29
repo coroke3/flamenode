@@ -19,7 +19,20 @@ import {
   parseVideoFormSettings,
   type StagePermissionFieldSettings,
 } from "@/lib/video/formSettings";
-import { MAX_STAGE_PERMISSION_QUESTIONS } from "@/lib/event/eventLimits";
+import { EventCustomQuestionsEditor } from "@/components/admin/EventCustomQuestionsEditor";
+import {
+  MAX_GENERAL_CUSTOM_QUESTIONS,
+  MAX_STAGE_PERMISSION_QUESTIONS,
+} from "@/lib/event/eventLimits";
+import {
+  generalCustomQuestionsPresent,
+  readGeneralCustomQuestionsFromFormData,
+  type EventGeneralCustomQuestionDraft,
+} from "@/lib/event/generalCustomQuestionDraft";
+import {
+  normalizeOptionList,
+  questionTypeNeedsOptions,
+} from "@/lib/video/customQuestions";
 import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
 import {
   normalizeEventVisibility,
@@ -35,6 +48,14 @@ import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
 } from "@/lib/slots/limits";
+import {
+  OPTIONAL_REQUIRED_VIDEO_FIELDS,
+  parseRequiredVideoFields,
+  REQUIRED_VIDEO_FIELD_GROUPS,
+  REQUIRED_VIDEO_FIELD_LABELS,
+  serializeRequiredVideoFields,
+  type OptionalRequiredVideoField,
+} from "@/lib/video/requiredVideoFields";
 
 export interface EventFormInitial {
   id?: string;
@@ -43,6 +64,7 @@ export interface EventFormInitial {
   event_type?: "event" | "collabo" | "type" | "other";
   explanation?: string | null;
   youtube_description_template?: string | null;
+  required_video_fields_json?: string | null;
   icon_url?: string | null;
   img_url?: string | null;
   accent_color?: string | null;
@@ -65,6 +87,7 @@ export interface EventFormInitial {
   parts_json?: string | null;
   editable_fields?: string | null;
   review_settings?: string | null;
+  custom_questions?: EventGeneralCustomQuestionDraft[];
 }
 
 interface EventFormProps {
@@ -86,6 +109,7 @@ const MANAGE_SECTION_NAV = [
   { id: "section-basic", label: "基本情報" },
   { id: "section-publish", label: "公開・受付" },
   { id: "section-questions", label: "投稿・権限" },
+  { id: "section-required", label: "必須項目" },
   { id: "section-slots", label: "枠" },
 ] as const;
 
@@ -223,6 +247,8 @@ function initialPreview(initial: EventFormInitial): EventSettingsPreviewValue {
     parts_json: initial.parts_json,
     editable_fields: initial.editable_fields,
     review_settings: initial.review_settings,
+    required_video_fields_json: initial.required_video_fields_json ?? null,
+    general_custom_questions: initial.custom_questions ?? [],
   };
 }
 
@@ -265,6 +291,9 @@ function formPreview(
     parts_text: textValue(formData, "parts_text"),
     editable_fields: initial.editable_fields,
     review_settings: initial.review_settings,
+    required_video_fields_json:
+      textValue(formData, "required_video_fields_json") || null,
+    general_custom_questions: readGeneralCustomQuestionsFromFormData(formData),
   };
 }
 
@@ -371,6 +400,20 @@ export function EventForm({
       return filterImplicitEmptyStagePermissionQuestions(current);
     },
   );
+  const [requiredOptionalFields, setRequiredOptionalFields] = React.useState<
+    OptionalRequiredVideoField[]
+  >(() => parseRequiredVideoFields(initial.required_video_fields_json));
+  const requiredVideoFieldsJson = React.useMemo(
+    () => serializeRequiredVideoFields(requiredOptionalFields) ?? "[]",
+    [requiredOptionalFields],
+  );
+  const [generalQuestions, setGeneralQuestions] = React.useState<
+    EventGeneralCustomQuestionDraft[]
+  >(() => initial.custom_questions ?? []);
+  const generalQuestionCap = Math.max(
+    MAX_GENERAL_CUSTOM_QUESTIONS,
+    initial.custom_questions?.length ?? 0,
+  );
 
   const canBasic = mode === "create" || editableSections?.basic !== false;
   const canPublish = mode === "create" || editableSections?.publish !== false;
@@ -381,12 +424,12 @@ export function EventForm({
     ? buildFormDraftStorageKey({
         authUserId: draftAuthUserId.trim(),
         formId: `event-${mode}-${initial.id ?? templateId ?? "new"}`,
-        schemaVersion: "event-form-v2",
+        schemaVersion: "event-form-v3",
       })
     : "";
   const draftMetadata = React.useMemo<DraftMetadata>(
     () => ({
-      schemaVersion: "event-form-v2",
+      schemaVersion: "event-form-v3",
       authUserId: draftAuthUserId?.trim() ?? null,
       mode,
       eventId: initial.id ?? null,
@@ -403,11 +446,20 @@ export function EventForm({
     const form = formRef.current;
     if (!form) return;
     const restored = draftValueToFormData(draft);
+    const pendingValues = new Map<string, string[]>();
+    const takeValues = (fieldName: string): string[] => {
+      let values = pendingValues.get(fieldName);
+      if (!values) {
+        values = restored.getAll(fieldName).map(String);
+        pendingValues.set(fieldName, values);
+      }
+      return values;
+    };
     for (const element of Array.from(form.elements)) {
       if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) continue;
       const name = element.name;
       if (!name) continue;
-      const values = restored.getAll(name).map(String);
+      const values = takeValues(name);
       if (element instanceof HTMLInputElement && element.type === "checkbox") {
         element.checked = values.includes("1");
       } else if (values.length > 0) {
@@ -423,17 +475,32 @@ export function EventForm({
     setQuestions(
       filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
     );
+    const restoredRequiredJson = textValue(restored, "required_video_fields_json");
+    if (String(restored.get("required_video_fields_present") ?? "") === "1") {
+      setRequiredOptionalFields(parseRequiredVideoFields(restoredRequiredJson));
+    }
+    if (generalCustomQuestionsPresent(restored)) {
+      setGeneralQuestions(readGeneralCustomQuestionsFromFormData(restored));
+    }
     setPreview(formPreview(restored, initial));
     setDirty(true);
   }, [initial]);
   const draftSnapshot = React.useMemo(() => {
     void preview;
     void questions;
+    void generalQuestions;
     void youtubeDescriptionTemplate;
+    void requiredOptionalFields;
     return formRef.current
       ? formDataToDraftValue(new FormData(formRef.current))
       : {};
-  }, [preview, questions, youtubeDescriptionTemplate]);
+  }, [
+    preview,
+    questions,
+    generalQuestions,
+    requiredOptionalFields,
+    youtubeDescriptionTemplate,
+  ]);
   const { clearDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
@@ -451,9 +518,47 @@ export function EventForm({
     }));
   }, [questions]);
 
+  React.useEffect(() => {
+    setPreview((current) => ({
+      ...current,
+      required_video_fields_json:
+        requiredVideoFieldsJson === "[]" ? null : requiredVideoFieldsJson,
+    }));
+  }, [requiredVideoFieldsJson]);
+
+  const toggleRequiredOptionalField = (field: OptionalRequiredVideoField) => {
+    setRequiredOptionalFields((current) => {
+      const next = new Set(current);
+      if (next.has(field)) next.delete(field);
+      else next.add(field);
+      return OPTIONAL_REQUIRED_VIDEO_FIELDS.filter((item) => next.has(item));
+    });
+    setDirty(true);
+  };
+  React.useEffect(() => {
+    setPreview((current) => ({
+      ...current,
+      general_custom_questions: generalQuestions,
+    }));
+  }, [generalQuestions]);
+
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy || submitInFlightRef.current) return;
+    if (canQuestions) {
+      const invalidChoice = generalQuestions.find(
+        (question) =>
+          questionTypeNeedsOptions(question.type) &&
+          normalizeOptionList(question.options).length === 0,
+      );
+      if (invalidChoice) {
+        setError(
+          `${invalidChoice.label.trim() || "カスタム質問"}の選択肢を1件以上入力してください。`,
+        );
+        setSuccess(null);
+        return;
+      }
+    }
     submitInFlightRef.current = true;
     setError(null);
     setSuccess(null);
@@ -499,9 +604,9 @@ export function EventForm({
           setPreview(formPreview(new FormData(event.currentTarget), initial));
         })()
       }
-      className={`${styles.eventForm}${isManage ? ` ${styles.eventFormManage}` : ""}`}
+      className={`${styles.eventForm}${isManage || mode === "create" ? ` ${styles.eventFormManage}` : ""}`}
     >
-      {isManage && mode === "edit" ? (
+      {isManage || mode === "create" ? (
         <nav className={styles.manageSectionNav} aria-label="設定セクション">
           {MANAGE_SECTION_NAV.map((item) => (
             <a key={item.id} href={`#${item.id}`}>
@@ -719,6 +824,10 @@ export function EventForm({
           disabled={!canQuestions}
         />
         <input type="hidden" name="custom_questions_present" value="1" />
+        <h3 className={styles.customQuestionsHeading}>ステージ・権利確認</h3>
+        <p className="fn-hint">
+          ステージ・素材・権利まわりの確認は長文入力です。チェックボックスや選択ボタンは下のカスタム質問で指定します。
+        </p>
         <div style={{ display: "grid", gap: 10 }}>
           {questions.map((question, index) => (
             <article
@@ -814,6 +923,59 @@ export function EventForm({
         {questions.length >= MAX_STAGE_PERMISSION_QUESTIONS ? (
           <p className="fn-hint">ステージ・権利確認質問は最大{MAX_STAGE_PERMISSION_QUESTIONS}件です</p>
         ) : null}
+        <h3 className={styles.customQuestionsHeading}>カスタム質問</h3>
+        <EventCustomQuestionsEditor
+          questions={generalQuestions}
+          disabled={!canQuestions}
+          maxQuestions={generalQuestionCap}
+          onChange={(next) => {
+            setDirty(true);
+            setGeneralQuestions(next);
+          }}
+        />
+      </FormSection>
+
+      <FormSection
+        title="投稿の必須項目"
+        allowed={canQuestions}
+        sectionId="section-required"
+      >
+        <input type="hidden" name="required_video_fields_present" value="1" />
+        <input
+          type="hidden"
+          name="required_video_fields_json"
+          value={requiredVideoFieldsJson}
+        />
+        <p className="fn-text-muted-sm">
+          表示名と作品タイトルは常に必須です。ここで選んだ項目は、このイベントへの投稿・枠提出・作品編集でも必須になります。
+        </p>
+        {REQUIRED_VIDEO_FIELD_GROUPS.map((group) => (
+          <article key={group.id} className={styles.requiredFieldsCard}>
+            <h3>{group.label}</h3>
+            <div className={styles.requiredFieldsChecks}>
+              {group.always.map((field) => (
+                <label key={field} className={styles.requiredFieldsCheck}>
+                  <input type="checkbox" checked disabled readOnly />
+                  <span>
+                    {REQUIRED_VIDEO_FIELD_LABELS[field]}
+                    <span className="fn-muted">（常に必須）</span>
+                  </span>
+                </label>
+              ))}
+              {group.optional.map((field) => (
+                <label key={field} className={styles.requiredFieldsCheck}>
+                  <input
+                    type="checkbox"
+                    checked={requiredOptionalFields.includes(field)}
+                    disabled={!canQuestions}
+                    onChange={() => toggleRequiredOptionalField(field)}
+                  />
+                  <span>{REQUIRED_VIDEO_FIELD_LABELS[field]}</span>
+                </label>
+              ))}
+            </div>
+          </article>
+        ))}
       </FormSection>
 
       <FormSection title="枠" allowed={canSlots} sectionId="section-slots">

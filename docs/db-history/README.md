@@ -19,6 +19,7 @@
 | Active | `migrations/0042_event_youtube_playlist_sync.sql` | イベント別YouTube再生リスト差分同期 |
 | Active | `migrations/0053_slot_reserved_x_id_snapshot.sql` | 枠確保時 X ID スナップショット列 |
 | Active | `migrations/0059_event_slot_reservation_limits.sql` | イベント別X ID予約枠上限と論理予約ガード |
+| Active | `migrations/0061_event_required_video_fields.sql` | イベント別の投稿必須項目 allow-list |
 | Active | [`database/change-log.md`](../database/change-log.md) | active migrationに対応する現行DB変更履歴 |
 | Active | `docs/implementation-backlog.md` | Open、Blocked、Recently completedの現在状態 |
 | Historical | `migrations/historical/` | 旧migration本文の保存。現行runtimeでは参照・適用しない |

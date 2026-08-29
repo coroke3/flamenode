@@ -31,12 +31,22 @@ import {
   getStagePermissionAnswerValue,
   resolveStagePermissionFieldsFromJson,
 } from "@/lib/video/formSettings";
+import {
+  isRequiredVideoFieldFilled,
+  missingRequiredVideoFieldMessage,
+  REQUIRED_VIDEO_FIELD_WIZARD_STEP,
+  unionRequiredVideoFields,
+  type OptionalRequiredVideoField,
+  type RequiredVideoField,
+  type RequiredVideoFieldValues,
+} from "@/lib/video/requiredVideoFields";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
 import { submitFormCompat } from "@/lib/forms/submitFormCompat";
 import {
   ACTIVE_X_BEFORE_SWITCH_EVENT,
 } from "@/lib/client/activeXSwitchEvents";
 import {
+  MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS,
   MAX_ATOMIC_VIDEO_EVENTS,
   MAX_ATOMIC_VIDEO_SOFTWARES,
 } from "@/lib/video/atomicLimits";
@@ -59,7 +69,11 @@ import {
   formatYoutubeDescriptionMembers,
   type YoutubeDescriptionContext,
 } from "@/lib/event/youtubeDescriptionTemplate";
-import type { CustomQuestion } from "@/lib/video/customQuestions";
+import {
+  questionTypeNeedsOptions,
+  type CustomQuestion,
+} from "@/lib/video/customQuestions";
+import { CustomQuestionFields } from "@/components/forms/CustomQuestionFields";
 import {
   buildFormDraftStorageKey,
   draftMetadataMatches,
@@ -132,6 +146,8 @@ export interface EventOption {
   parts_json?: string | null;
   /** イベントに設定された一般カスタム質問。 */
   custom_questions?: CustomQuestion[];
+  /** イベントが指定する任意必須 VideoForm 項目 (JSON 配列文字列)。 */
+  required_video_fields_json?: string | null;
 }
 
 function parsePartsJson(value: string | null | undefined): string[] {
@@ -156,6 +172,15 @@ function customQuestionFieldId(eventId: string, questionKey: string): string {
 function customAnswerValues(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) return value.map((item) => item.trim()).filter(Boolean);
   return value?.trim() ? [value.trim()] : [];
+}
+
+function acceptedCustomAnswerValues(
+  question: CustomQuestion,
+  value: string | string[] | undefined,
+): string[] {
+  const values = customAnswerValues(value);
+  if (!questionTypeNeedsOptions(question.type)) return values;
+  return values.filter((item) => question.options.includes(item));
 }
 
 function draftText(formData: FormData, name: string): string {
@@ -183,6 +208,49 @@ const WIZARD_STEPS_SLOT: { key: WizardStepKey; label: string }[] = [
 ];
 
 const WIZARD_STEPS_FREE = WIZARD_STEPS_SLOT;
+
+const REQUIRED_VIDEO_FIELD_PERMISSION_KEY: Record<
+  OptionalRequiredVideoField,
+  string
+> = {
+  icon_url: "submitter.icon_url",
+  profile_text: "submitter.profile_text",
+  youtube_channel_url: "submitter.youtube_channel_url",
+  other_social_links: "submitter.other_social_links",
+  music: "video.music",
+  music_reference_url: "video.music_reference_url",
+  credit: "video.credit",
+  intro_comment: "descriptions.intro_comment",
+  highlights: "descriptions.highlights",
+  production_story: "descriptions.production_story",
+  used_software: "descriptions.used_software",
+  closing_comment: "descriptions.closing_comment",
+  part: "video.part",
+  youtube_url: "video.youtube_url",
+};
+
+const REQUIRED_VIDEO_FIELD_DOM_ID: Record<RequiredVideoField, string> = {
+  display_name: "display_name",
+  title: "title",
+  icon_url: "video-form-icon-label",
+  profile_text: "profile_text",
+  youtube_channel_url: "video-form-channel-label",
+  other_social_links: "social-type-0",
+  music: "music",
+  music_reference_url: "music_reference_url",
+  credit: "credit",
+  intro_comment: "intro_comment",
+  highlights: "highlights",
+  production_story: "production_story",
+  used_software: "used_software",
+  closing_comment: "closing_comment",
+  part: "part",
+  youtube_url: "youtube_url",
+};
+
+function isFilledRequiredText(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
 
 interface VideoFormProps {
   mode: "free" | "slot" | "edit";
@@ -528,6 +596,15 @@ export function VideoForm({
               question,
             }))
           : [],
+      ),
+    [eventOptions, selectedEventIds],
+  );
+  const selectedRequired = React.useMemo(
+    () =>
+      unionRequiredVideoFields(
+        eventOptions
+          .filter((event) => selectedEventIds.includes(event.id))
+          .map((event) => event.required_video_fields_json),
       ),
     [eventOptions, selectedEventIds],
   );
@@ -1053,20 +1130,31 @@ export function VideoForm({
     permissionView?.privilegeMode !== "normal" &&
     permissionView?.youtube.editable === true;
   const isYoutubeUrlRequired =
-    mode === "free" ||
-    (mode === "edit" && hasInitialYoutube && !privilegedYoutubeEdit);
+    !privilegedYoutubeEdit &&
+    (mode === "free" ||
+      (mode === "edit" && hasInitialYoutube) ||
+      selectedRequired.includes("youtube_url"));
   const isYoutubeFieldDisabled = fieldDisabled("video.youtube_url");
   const showYoutubeAddBlockedHint =
     mode === "edit" &&
     !hasInitialYoutube &&
     !youtubeUrl.trim() &&
     isFieldDisabled(disabledFields, "video.youtube_url");
-  const youtubePreviewOptional = mode === "slot" && !youtubeUrl.trim();
+  const youtubePreviewOptional =
+    mode === "slot" && !isYoutubeUrlRequired && !youtubeUrl.trim();
   const youtubePreviewOk = Boolean(youtubeId) || youtubePreviewOptional;
   const youtubePreviewPending =
     !youtubePreviewOk && (mode === "free" || Boolean(youtubeUrl.trim()));
   const incompleteRequiredStageQuestionCount = selectedStagePermissionFields.filter(
     (question) => question.required && !stageAnswers[question.id]?.trim(),
+  ).length;
+  const incompleteRequiredCustomQuestionCount = selectedCustomQuestions.filter(
+    ({ event, question }) =>
+      question.required &&
+      acceptedCustomAnswerValues(
+        question,
+        customAnswers[customAnswerKey(event.id, question.question_key)],
+      ).length === 0,
   ).length;
   const memberCount = members.filter(
     (member) => member.name.trim() || member.x_user_id.trim(),
@@ -1103,7 +1191,11 @@ export function VideoForm({
     for (const { event, question } of selectedCustomQuestions) {
       if (!question.required) continue;
       const key = customAnswerKey(event.id, question.question_key);
-      if (customAnswerValues(customAnswers[key]).length > 0) continue;
+      if (
+        acceptedCustomAnswerValues(question, customAnswers[key]).length > 0
+      ) {
+        continue;
+      }
       return {
         step: "work",
         fieldId: customQuestionFieldId(event.id, question.question_key),
@@ -1113,11 +1205,124 @@ export function VideoForm({
     return null;
   };
 
+  const isOptionalFieldRequired = (field: OptionalRequiredVideoField): boolean =>
+    selectedRequired.includes(field);
+
+  const isRequiredVideoFieldEditable = (field: RequiredVideoField): boolean => {
+    if (field === "display_name") {
+      return !fieldDisabled("submitter.display_name") && !submitterDisabled;
+    }
+    if (field === "title") {
+      return !fieldDisabled("video.title") && !videoSectionDisabled;
+    }
+    return !fieldDisabled(
+      REQUIRED_VIDEO_FIELD_PERMISSION_KEY[field as OptionalRequiredVideoField],
+    );
+  };
+
+  const buildRequiredVideoFieldValues = (): RequiredVideoFieldValues => {
+    const form = formRef.current;
+    const readNamedValue = (name: string): string | undefined => {
+      const element = form?.elements.namedItem(name);
+      return element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement
+        ? element.value
+        : undefined;
+    };
+    const iconModeElement = form?.elements.namedItem("icon_mode");
+    return {
+      display_name: submitterDisplayName,
+      title: readNamedValue("title") ?? titlePreview,
+      icon_mode:
+        iconModeElement instanceof HTMLInputElement
+          ? iconModeElement.value
+          : undefined,
+      icon_url: submitterIconUrl,
+      profile_text: submitterProfileText,
+      youtube_channel_url: submitterYoutubeChannel,
+      other_social_links: submitterSocialLinks,
+      music: readNamedValue("music"),
+      music_reference_url: readNamedValue("music_reference_url"),
+      credit: readNamedValue("credit"),
+      intro_comment: readNamedValue("intro_comment"),
+      highlights: readNamedValue("highlights"),
+      production_story: readNamedValue("production_story"),
+      used_software: readNamedValue("used_software"),
+      closing_comment: readNamedValue("closing_comment"),
+      part: selectedPart,
+      youtube_url: youtubeUrl,
+    };
+  };
+
+  const validateRequiredVideoFieldsForStep = (
+    stepKey: WizardStepKey,
+  ): WizardValidationError | null => {
+    const fieldsToCheck: RequiredVideoField[] = [];
+    if (stepKey === "submitter") fieldsToCheck.push("display_name");
+    if (stepKey === "work") fieldsToCheck.push("title");
+    for (const field of selectedRequired) {
+      if (REQUIRED_VIDEO_FIELD_WIZARD_STEP[field] === stepKey) {
+        fieldsToCheck.push(field);
+      }
+    }
+    const values = buildRequiredVideoFieldValues();
+    for (const field of fieldsToCheck) {
+      if (!isRequiredVideoFieldEditable(field)) continue;
+      if (field === "youtube_url" && !isYoutubeUrlRequired) continue;
+      const filled =
+        field === "display_name" || field === "title"
+          ? isFilledRequiredText(values[field])
+          : isRequiredVideoFieldFilled(field, values);
+      if (!filled) {
+        return {
+          step: stepKey,
+          fieldId: REQUIRED_VIDEO_FIELD_DOM_ID[field],
+          message: missingRequiredVideoFieldMessage(field),
+        };
+      }
+    }
+    if (stepKey === "youtube" && isYoutubeUrlRequired) {
+      const trimmed = values.youtube_url?.trim() ?? "";
+      if (trimmed && !extractYoutubeId(trimmed)) {
+        return {
+          step: "youtube",
+          fieldId: "youtube_url",
+          message: "有効な YouTube URL または動画 ID を入力してください。",
+        };
+      }
+    }
+    return null;
+  };
+
+  const validateSelectedRequiredVideoFields =
+    (): WizardValidationError | null => {
+      for (const step of ["submitter", "work", "youtube"] as const) {
+        const err = validateRequiredVideoFieldsForStep(step);
+        if (err) return err;
+      }
+      return null;
+    };
+
+  const validateCustomAnswerLimit = (): WizardValidationError | null => {
+    if (fieldDisabled("descriptions.custom_answers")) return null;
+    const filled = selectedCustomQuestions.filter(
+      ({ event, question }) =>
+        acceptedCustomAnswerValues(
+          question,
+          customAnswers[customAnswerKey(event.id, question.question_key)],
+        ).length > 0,
+    ).length;
+    if (filled <= MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS) return null;
+    return {
+      step: "work",
+      message: `カスタム質問の回答は最大${MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS}件まで保存できます。`,
+    };
+    };
+
   const validateWizardStep = (
     stepKey: WizardStepKey,
   ): WizardValidationError | null => {
-    const form = formRef.current;
-
     if (stepKey === "submitter") {
       if (isActiveXFixed && !normalizedActiveXId) {
         return {
@@ -1126,30 +1331,14 @@ export function VideoForm({
           message: "承認済み X ID がありません。設定画面から連携してください。",
         };
       }
-      const displayName = form?.elements.namedItem("display_name");
-      const displayValue =
-        displayName instanceof HTMLInputElement ? displayName.value.trim() : "";
-      if (!displayValue) {
-        return {
-          step: "submitter",
-          fieldId: "display_name",
-          message: "表示名 / 活動名 / 団体名を入力してください。",
-        };
-      }
+      const requiredFieldError = validateRequiredVideoFieldsForStep("submitter");
+      if (requiredFieldError) return requiredFieldError;
       return null;
     }
 
     if (stepKey === "work") {
-      const titleEl = form?.elements.namedItem("title");
-      const titleValue =
-        titleEl instanceof HTMLInputElement ? titleEl.value.trim() : "";
-      if (!titleValue) {
-        return {
-          step: "work",
-          fieldId: "title",
-          message: "作品タイトルを入力してください。",
-        };
-      }
+      const requiredFieldError = validateRequiredVideoFieldsForStep("work");
+      if (requiredFieldError) return requiredFieldError;
 
       for (const question of selectedStagePermissionFields) {
         if (!question.required) continue;
@@ -1165,17 +1354,17 @@ export function VideoForm({
       }
       const customQuestionError = validateRequiredCustomQuestions();
       if (customQuestionError) return customQuestionError;
-      return null;
+      return validateCustomAnswerLimit();
     }
 
     if (stepKey === "youtube") {
       const trimmed = youtubeUrl.trim();
       if (!trimmed) {
-        if (mode === "slot") return null;
+        if (!isYoutubeUrlRequired) return null;
         return {
           step: "youtube",
           fieldId: "youtube_url",
-          message: "YouTube URL を入力してください。",
+          message: missingRequiredVideoFieldMessage("youtube_url"),
         };
       }
       if (!extractYoutubeId(trimmed)) {
@@ -1188,6 +1377,15 @@ export function VideoForm({
       return null;
     }
 
+    return null;
+  };
+
+  const validateWizardSubmission = (): WizardValidationError | null => {
+    for (const step of wizardSteps) {
+      if (step.key === "confirm") continue;
+      const error = validateWizardStep(step.key);
+      if (error) return error;
+    }
     return null;
   };
 
@@ -1220,6 +1418,11 @@ export function VideoForm({
     if (!isWizard || !isWizardLastStep || pending || !canSubmit) return;
     const form = formRef.current;
     if (!form) return;
+    const validationError = validateWizardSubmission();
+    if (validationError) {
+      setStepError(validationError);
+      return;
+    }
     wizardConfirmSubmitRequestedRef.current = true;
     try {
       submitFormCompat(form);
@@ -1299,8 +1502,26 @@ export function VideoForm({
       }
       wizardConfirmSubmitRequestedRef.current = false;
     }
-    if (mode === "edit") {
-      const customQuestionError = validateRequiredCustomQuestions();
+    if (isWizard) {
+      for (const stepKey of ["submitter", "work", "youtube"] as const) {
+        const wizardStepError = validateWizardStep(stepKey);
+        if (wizardStepError) {
+          setStepError(wizardStepError);
+          setResult({ ok: false, message: wizardStepError.message });
+          return;
+        }
+      }
+    } else {
+      if (mode === "edit") {
+        const requiredFieldError = validateSelectedRequiredVideoFields();
+        if (requiredFieldError) {
+          setStepError(requiredFieldError);
+          setResult({ ok: false, message: requiredFieldError.message });
+          return;
+        }
+      }
+      const customQuestionError =
+        validateRequiredCustomQuestions() ?? validateCustomAnswerLimit();
       if (customQuestionError) {
         setStepError(customQuestionError);
         setResult({ ok: false, message: customQuestionError.message });
@@ -1388,6 +1609,12 @@ export function VideoForm({
       ]
         .filter(Boolean)
         .join(" ")}
+      // Hidden wizard steps intentionally remain mounted so their values are
+      // included in the final FormData. Native validation would nevertheless
+      // stop requestSubmit() on an off-screen required control before React
+      // can move the user to that step, so the wizard performs the complete
+      // validation above and delegates the final result to the server action.
+      noValidate={isWizard}
       onSubmit={handleSubmit}
       onChange={(event) => {
         if (!dirty) setDirty(true);
@@ -1680,7 +1907,12 @@ export function VideoForm({
               : undefined
           }
         >
-          <span id="video-form-icon-label" className={styles.label}>作品アイコン</span>
+          <span
+            id="video-form-icon-label"
+            className={`${styles.label}${isOptionalFieldRequired("icon_url") ? ` ${styles.required}` : ""}`}
+          >
+            作品アイコン
+          </span>
           <p className={styles.help}>
             この作品で表示するアイコンを選択します。X ID 既定アイコンは変更されません。
           </p>
@@ -1703,7 +1935,10 @@ export function VideoForm({
           />
         </div>
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="profile_text">
+          <label
+            className={`${styles.label}${isOptionalFieldRequired("profile_text") ? ` ${styles.required}` : ""}`}
+            htmlFor="profile_text"
+          >
             自分・団体の概要
           </label>
           <textarea
@@ -1736,7 +1971,12 @@ export function VideoForm({
               : undefined
           }
         >
-          <span id="video-form-channel-label" className={styles.label}>YouTube チャンネル</span>
+          <span
+            id="video-form-channel-label"
+            className={`${styles.label}${isOptionalFieldRequired("youtube_channel_url") ? ` ${styles.required}` : ""}`}
+          >
+            YouTube チャンネル
+          </span>
           <YoutubeChannelPicker
             key={`youtube-channel-${submitterFieldsKey}`}
             defaultValue={submitterYoutubeChannel || null}
@@ -1758,6 +1998,11 @@ export function VideoForm({
               : undefined
           }
         >
+          {isOptionalFieldRequired("other_social_links") ? (
+            <span className={`${styles.label} ${styles.required}`}>
+              その他のSNSリンク
+            </span>
+          ) : null}
           <SocialLinksEditor
             key={`social-links-${submitterFieldsKey}`}
             initialValue={submitterSocialLinks || null}
@@ -1994,9 +2239,21 @@ export function VideoForm({
                 label="使用楽曲"
                 htmlFor="music"
                 permission={permissionView.credits}
+                required={
+                  isOptionalFieldRequired("music") ||
+                  isOptionalFieldRequired("music_reference_url")
+                }
               />
             ) : (
-              <label className={styles.label} htmlFor="music">
+              <label
+                className={`${styles.label}${
+                  isOptionalFieldRequired("music") ||
+                  isOptionalFieldRequired("music_reference_url")
+                    ? ` ${styles.required}`
+                    : ""
+                }`}
+                htmlFor="music"
+              >
                 使用楽曲
               </label>
             )}
@@ -2055,9 +2312,13 @@ export function VideoForm({
                 label="クレジット"
                 htmlFor="credit"
                 permission={permissionView.credits}
+                required={isOptionalFieldRequired("credit")}
               />
             ) : (
-              <label className={styles.label} htmlFor="credit">
+              <label
+                className={`${styles.label}${isOptionalFieldRequired("credit") ? ` ${styles.required}` : ""}`}
+                htmlFor="credit"
+              >
                 クレジット
               </label>
             )}
@@ -2203,12 +2464,17 @@ export function VideoForm({
           </div>
         ) : availableParts.length > 0 ? (
           <div className={cx(styles.field, styles.editableField)}>
-            <label className={styles.label} htmlFor="part">
+            <label
+              className={`${styles.label}${isOptionalFieldRequired("part") ? ` ${styles.required}` : ""}`}
+              htmlFor="part"
+            >
               部
             </label>
             <p className={styles.help}>
               所属イベントで設定された「部」(セクション/カテゴリ) から 1 つ選択します。
-              未選択でも投稿できます。
+              {isOptionalFieldRequired("part")
+                ? "イベント設定により必須です。"
+                : "未選択でも投稿できます。"}
             </p>
             <select
               id="part"
@@ -2306,9 +2572,13 @@ export function VideoForm({
               label="紹介コメント"
               htmlFor="intro_comment"
               permission={permissionView.descriptions}
+              required={isOptionalFieldRequired("intro_comment")}
             />
           ) : (
-            <label className={styles.label} htmlFor="intro_comment">
+            <label
+              className={`${styles.label}${isOptionalFieldRequired("intro_comment") ? ` ${styles.required}` : ""}`}
+              htmlFor="intro_comment"
+            >
               紹介コメント
             </label>
           )}
@@ -2331,7 +2601,10 @@ export function VideoForm({
         </div>
 
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="highlights">
+          <label
+            className={`${styles.label}${isOptionalFieldRequired("highlights") ? ` ${styles.required}` : ""}`}
+            htmlFor="highlights"
+          >
             みどころ
           </label>
           <textarea
@@ -2352,7 +2625,10 @@ export function VideoForm({
         </div>
 
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="production_story">
+          <label
+            className={`${styles.label}${isOptionalFieldRequired("production_story") ? ` ${styles.required}` : ""}`}
+            htmlFor="production_story"
+          >
             制作エピソード
           </label>
           <textarea
@@ -2373,7 +2649,10 @@ export function VideoForm({
         </div>
 
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="used_software">
+          <label
+            className={`${styles.label}${isOptionalFieldRequired("used_software") ? ` ${styles.required}` : ""}`}
+            htmlFor="used_software"
+          >
             使用ソフト
           </label>
           <input
@@ -2463,8 +2742,10 @@ export function VideoForm({
           const answerKey = customAnswerKey(event.id, question.question_key);
           const fieldId = customQuestionFieldId(event.id, question.question_key);
           const name = `custom_answer:${event.id}:${question.question_key}`;
-          const values = customAnswerValues(customAnswers[answerKey]);
-          const textValue = values[0] ?? "";
+          const values = acceptedCustomAnswerValues(
+            question,
+            customAnswers[answerKey],
+          );
           const maxLength =
             question.max_length != null && question.max_length > 0
               ? question.max_length
@@ -2503,117 +2784,29 @@ export function VideoForm({
               {question.description ? (
                 <p className={styles.help}>{question.description}</p>
               ) : null}
-              {question.type === "textarea" ? (
-                <textarea
-                  id={fieldId}
-                  name={name}
-                  value={textValue}
-                  onChange={(event) => updateAnswer(event.target.value)}
-                  className="fn-input"
-                  rows={3}
-                  maxLength={maxLength}
-                  required={question.required}
-                  placeholder={question.placeholder ?? undefined}
-                  disabled={disabled}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  aria-describedby={describedBy}
-                />
-              ) : question.type === "select" && question.options.length > 0 ? (
-                <select
-                  id={fieldId}
-                  name={name}
-                  value={textValue}
-                  onChange={(event) => updateAnswer(event.target.value)}
-                  className="fn-select"
-                  required={question.required}
-                  disabled={disabled}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  aria-describedby={describedBy}
-                >
-                  <option value="">選択してください</option>
-                  {question.options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              ) : question.type === "radio" && question.options.length > 0 ? (
-                <div
-                  id={`${fieldId}_group`}
-                  role="radiogroup"
-                  aria-describedby={describedBy}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  style={{ display: "grid", gap: 6 }}
-                >
-                  {question.options.map((option, optionIndex) => (
-                    <label key={option} style={{ display: "flex", gap: 8 }}>
-                      <input
-                        id={optionIndex === 0 ? fieldId : `${fieldId}_${optionIndex}`}
-                        type="radio"
-                        name={name}
-                        value={option}
-                        checked={textValue === option}
-                        onChange={(event) => updateAnswer(event.target.value)}
-                        required={question.required}
-                        disabled={disabled}
-                      />
-                      <span>{option}</span>
-                    </label>
-                  ))}
-                </div>
-              ) : question.type === "checkbox" && question.options.length > 0 ? (
-                <div
-                  id={`${fieldId}_group`}
-                  role="group"
-                  aria-describedby={describedBy}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  style={{ display: "grid", gap: 6 }}
-                >
-                  {question.options.map((option, optionIndex) => (
-                    <label key={option} style={{ display: "flex", gap: 8 }}>
-                      <input
-                        id={optionIndex === 0 ? fieldId : `${fieldId}_${optionIndex}`}
-                        type="checkbox"
-                        name={name}
-                        value={option}
-                        checked={values.includes(option)}
-                        onChange={(event) => {
-                          const next = event.target.checked
-                            ? Array.from(new Set([...values, option]))
-                            : values.filter((value) => value !== option);
-                          updateAnswer(next);
-                        }}
-                        // checkbox の required を各選択肢へ付けると全選択必須になるため、
-                        // 必須判定は validateRequiredCustomQuestions で行う。
-                        required={false}
-                        disabled={disabled}
-                      />
-                      <span>{option}</span>
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <input
-                  id={fieldId}
-                  name={name}
-                  type="text"
-                  value={textValue}
-                  onChange={(event) => updateAnswer(event.target.value)}
-                  className="fn-input"
-                  maxLength={maxLength}
-                  required={question.required}
-                  placeholder={question.placeholder ?? undefined}
-                  disabled={disabled}
-                  aria-invalid={stepError?.fieldId === fieldId || undefined}
-                  aria-describedby={describedBy}
-                />
-              )}
+              <CustomQuestionFields
+                id={fieldId}
+                name={name}
+                type={question.type}
+                options={question.options}
+                values={values}
+                placeholder={question.placeholder}
+                maxLength={maxLength}
+                required={question.required}
+                disabled={disabled}
+                describedBy={describedBy}
+                invalid={stepError?.fieldId === fieldId}
+                onChange={updateAnswer}
+              />
             </div>
           );
         })}
 
         <div className={cx(styles.field, styles.editableField)}>
-          <label className={styles.label} htmlFor="closing_comment">
+          <label
+            className={`${styles.label}${isOptionalFieldRequired("closing_comment") ? ` ${styles.required}` : ""}`}
+            htmlFor="closing_comment"
+          >
             あとがき
           </label>
           <textarea
@@ -2791,7 +2984,7 @@ export function VideoForm({
             <div className={styles.youtubeStepSection}>
               <div className={cx(styles.field, styles.editableField)}>
                 <label
-                  className={`${styles.label} ${mode !== "slot" ? styles.required : ""}`}
+                  className={`${styles.label}${isYoutubeUrlRequired ? ` ${styles.required}` : ""}`}
                   htmlFor="youtube_url"
                 >
                   YouTube URL
@@ -2808,7 +3001,7 @@ export function VideoForm({
                   }}
                   className="fn-input"
                   placeholder="https://www.youtube.com/watch?v=..."
-                  required={mode !== "slot"}
+                  required={isYoutubeUrlRequired}
                   readOnly={isYoutubeFieldDisabled}
                   aria-readonly={isYoutubeFieldDisabled || undefined}
                   aria-invalid={stepError?.fieldId === "youtube_url" || undefined}
@@ -2819,9 +3012,11 @@ export function VideoForm({
                   }
                 />
                 <p className={styles.help}>
-                  {mode === "slot"
-                    ? "任意。後から編集で追加できます。入力すると下にサムネイルが表示されます。"
-                    : "限定公開でも登録可能です。URL を入力すると下にサムネイルが表示されます。"}
+                  {isYoutubeUrlRequired
+                    ? "イベント設定により必須です。限定公開でも登録可能です。"
+                    : mode === "slot"
+                      ? "任意。後から編集で追加できます。入力すると下にサムネイルが表示されます。"
+                      : "限定公開でも登録可能です。URL を入力すると下にサムネイルが表示されます。"}
                 </p>
               </div>
               {youtubeId ? (
@@ -2844,7 +3039,7 @@ export function VideoForm({
                     </a>
                   </div>
                 </div>
-              ) : mode === "slot" ? (
+              ) : mode === "slot" && !isYoutubeUrlRequired ? (
                 <p className={styles.help}>
                   未入力のまま次へ進めます。後から編集で追加できます。
                 </p>
@@ -2950,6 +3145,29 @@ export function VideoForm({
                             : "入力済み"}
                         </dd>
                       </div>
+                      {selectedCustomQuestions.map(({ event, question }) => {
+                        const values = acceptedCustomAnswerValues(
+                          question,
+                          customAnswers[
+                            customAnswerKey(event.id, question.question_key)
+                          ],
+                        );
+                        const label =
+                          selectedEventIds.length > 1
+                            ? `${event.title}: ${question.label}`
+                            : question.label;
+                        return (
+                          <div key={`${event.id}:${question.id}`}>
+                            <dt>
+                              {label}
+                              {question.required ? " *" : ""}
+                            </dt>
+                            <dd>
+                              {values.length > 0 ? values.join("、") : "未入力"}
+                            </dd>
+                          </div>
+                        );
+                      })}
                     </dl>
                   </section>
 
@@ -3113,6 +3331,17 @@ export function VideoForm({
             }
             pending={incompleteRequiredStageQuestionCount > 0}
           />
+          {selectedCustomQuestions.length > 0 ? (
+            <PreviewCheck
+              ok={incompleteRequiredCustomQuestionCount === 0}
+              label={
+                incompleteRequiredCustomQuestionCount > 0
+                  ? `カスタム質問 ${incompleteRequiredCustomQuestionCount} 件は入力必須`
+                  : `カスタム質問 ${selectedCustomQuestions.length} 件`
+              }
+              pending={incompleteRequiredCustomQuestionCount > 0}
+            />
+          ) : null}
           <PreviewCheck
             ok={!isCollab || memberCount > 0}
             label={

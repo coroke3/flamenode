@@ -24,6 +24,10 @@ function normalizeTrendingPayload(value: unknown): StaticTrendingData | null {
   return normalizeStaticTrending(value as StaticTrendingPayload);
 }
 
+// Writer側は最大200件。通常生成物を十分に上回る余裕を持たせつつ、
+// 壊れた巨大artifactをpublic requestでJSON parseしない。
+const TRENDING_MAX_OBJECT_BYTES = 1024 * 1024;
+
 /** R2 `analytics/trending.json` のみ読み取る。D1 fallback なし。 */
 export async function loadStaticTrending(
   nowSec = Math.floor(Date.now() / 1000),
@@ -33,6 +37,7 @@ export async function loadStaticTrending(
     normalize: normalizeTrendingPayload,
     maxStaleAgeSec: TRENDING_STALE_MAX_AGE_SEC,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.trending,
+    maxObjectBytes: TRENDING_MAX_OBJECT_BYTES,
     cacheMode: "cache_first",
     nowSec,
   });

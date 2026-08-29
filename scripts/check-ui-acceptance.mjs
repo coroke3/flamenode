@@ -141,6 +141,48 @@ requireAll("src/components/forms/VideoForm.tsx", [
   [/aria-current=\{index === currentStep \? "step"/, "現在ステップのアクセシビリティ表現がありません。"],
   [/scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/, "入力エラー箇所への移動がありません。"],
   [/setDirty\(true\)/, "未保存変更の追跡がありません。"],
+  [/unionRequiredVideoFields/, "イベント必須項目の和集合がありません。"],
+  [/validateSelectedRequiredVideoFields/, "編集・確認提出の必須項目横断検証がありません。"],
+  [
+    /for \(const stepKey of \["submitter", "work", "youtube"\][\s\S]*validateWizardStep\(stepKey\)/,
+    "ウィザード提出前の全ステップ再検証がありません。",
+  ],
+]);
+
+requireAll("src/components/admin/EventForm.tsx", [
+  [/section-required/, "EventForm に投稿必須項目セクションがありません。"],
+  [/required_video_fields_json/, "EventForm に required_video_fields_json がありません。"],
+]);
+
+requireAll("src/components/admin/EventForm.module.css", [
+  [/\.manageSectionNav\s*\{[^}]*position:\s*sticky/s, "EventForm のセクションナビが sticky ではありません。"],
+]);
+
+requireAll("src/components/settings/XIdLinkedList.tsx", [
+  [/requestXIdMergeRevert/, "完了した統合の差し戻し申請導線がありません。"],
+  [/統合を取り消す申請/, "差し戻し申請ボタンがありません。"],
+  [/parent_request_id/, "差し戻し申請の parent_request_id がありません。"],
+]);
+
+requireAll("app/(auth)/dashboard/settings/page.tsx", [
+  [/parent_request_id: linkReqTable.parent_request_id/, "申請履歴に parent_request_id がありません。"],
+  [/revert_deadline_at: linkReqTable.revert_deadline_at/, "申請履歴に revert_deadline_at がありません。"],
+]);
+
+requireAll("app/(manage)/manage/events/[id]/page.tsx", [
+  [/投稿の必須項目/, "イベント概要に投稿必須項目カードがありません。"],
+  [/section-required/, "投稿必須項目カードのリンク先アンカーがありません。"],
+]);
+
+requireAll("src/styles/admin-manage.css", [
+  [
+    /\[data-manage-shell\] \.manage-event-action-rail[\s\S]*@media\s*\(max-width:\s*760px\)[\s\S]*manage-event-action-rail[\s\S]*repeat\(2/s,
+    "運営ショートカットの 760px 2列がありません。",
+  ],
+  [
+    /@media\s*\(max-width:\s*430px\)[\s\S]*manage-event-action-rail[\s\S]*grid-template-columns:\s*1fr/s,
+    "運営ショートカットの 430px 1列がありません。",
+  ],
 ]);
 
 requireAll("src/components/forms/VideoMembersField.tsx", [
@@ -708,6 +750,36 @@ requireAll("app/(public)/about/page.tsx", [
   [/制作クレジット/, "About に制作クレジット見出しがありません。"],
 ]);
 
+requireAll("src/components/admin/EventCustomQuestionsEditor.tsx", [
+  [/general_custom_question_type/, "カスタム質問エディタに type 欄がありません。"],
+  [/general_custom_question_options/, "カスタム質問エディタに options 編集がありません。"],
+  [/GENERAL_CUSTOM_QUESTION_TYPE_LABELS/, "カスタム質問 type ラベルがありません。"],
+  [/styles\.typePicker/, "カスタム質問の入力形式ボタン群がありません。"],
+  [/CustomQuestionFields/, "カスタム質問エディタに投稿プレビューがありません。"],
+  [/moveQuestion/, "カスタム質問の並び替えがありません。"],
+  [/duplicateQuestion/, "カスタム質問の複製がありません。"],
+  [/moveOption/, "選択肢の並び替えがありません。"],
+]);
+requireAll("src/components/admin/EventForm.tsx", [
+  [/EventCustomQuestionsEditor/, "EventForm がカスタム質問エディタを使っていません。"],
+  [/generalQuestions/, "EventForm に generalQuestions state がありません。"],
+  [/event-form-v3/, "EventForm の draft schemaVersion が event-form-v3 ではありません。"],
+  [/ステージ・権利確認/, "ステージ質問見出しがありません。"],
+]);
+requireAll("src/components/forms/VideoForm.tsx", [
+  [/CustomQuestionFields/, "投稿フォームが CustomQuestionFields を使っていません。"],
+  [/custom_answer:\$\{event\.id\}:\$\{question\.question_key\}/, "投稿フォームの custom_answer 名がありません。"],
+  [/acceptedCustomAnswerValues/, "確認画面用のカスタム質問回答整形がありません。"],
+  [/incompleteRequiredCustomQuestionCount/, "カスタム質問の必須未入力カウントがありません。"],
+  [/validateCustomAnswerLimit/, "カスタム質問の回答件数上限チェックがありません。"],
+]);
+requireAll("src/components/forms/CustomQuestionFields.tsx", [
+  [/styles\.customChoiceGroup/, "投稿フォームの選択グループ class がありません。"],
+  [/styles\.customChoiceOption/, "投稿フォームの選択ボタン class がありません。"],
+]);
+requireAll("docs/operations/ui-acceptance.md", [
+  [/カスタム質問（Googleフォーム風/, "ui-acceptance にカスタム質問節がありません。"],
+]);
 requireAll("app/(public)/event/[id]/release/page.tsx", [
   [/投稿予定のご案内/, "Release ページ見出しがありません。"],
 ]);

@@ -185,6 +185,8 @@ export const events = sqliteTable(
     explanation: text("explanation"),
     /** YouTube概要欄のイベント共通テンプレート（plain text / 任意） */
     youtube_description_template: text("youtube_description_template"),
+    /** 投稿フォームで追加必須にする任意項目キーの JSON 配列。null は追加必須なし */
+    required_video_fields_json: text("required_video_fields_json"),
     icon_url: text("icon_url"),
     img_url: text("img_url"),
     accent_color: text("accent_color"),

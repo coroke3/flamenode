@@ -3,7 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-import { cancelXIdLinkRequest } from "@/lib/actions/xid";
+import {
+  cancelXIdLinkRequest,
+  requestXIdMergeRevert,
+} from "@/lib/actions/xid";
 import { formatUnix } from "@/lib/utils/format";
 import type {
   XIdentityRequestStatus,
@@ -30,6 +33,8 @@ export type XIdentityRequestHistoryRow = {
   requested_x_id: string | null;
   source_x_user_id: string | null;
   target_x_user_id: string | null;
+  parent_request_id: string | null;
+  revert_deadline_at: number | null;
   status: XIdentityRequestStatus;
   requested_at: number;
   updated_at: number;
@@ -56,6 +61,7 @@ const WITHDRAWABLE_TYPES = new Set<XIdentityRequestType>([
   "existing_link",
   "alias",
   "merge",
+  "revert_merge",
 ]);
 
 function requestTarget(row: XIdentityRequestHistoryRow): string {
@@ -71,7 +77,11 @@ function requestTarget(row: XIdentityRequestHistoryRow): string {
         ? `@${row.requested_x_id}`
         : "旧別名申請";
   }
-  if (row.request_type === "revert_merge") return "統合取消申請";
+  if (row.request_type === "revert_merge") {
+    return row.source_x_user_id && row.target_x_user_id
+      ? `@${row.target_x_user_id} → @${row.source_x_user_id} の取消`
+      : "統合取消申請";
+  }
   return row.requested_x_id ? `@${row.requested_x_id}` : "X ID連携";
 }
 
@@ -94,6 +104,20 @@ export function XIdentityRequestHistoryList({
 
   if (rows.length === 0) return null;
 
+  const now = Math.floor(Date.now() / 1000);
+  const blockedRevertParents = new Set(
+    rows
+      .filter(
+        (row) =>
+          row.request_type === "revert_merge" &&
+          (row.status === "pending" ||
+            row.status === "approved" ||
+            row.status === "done") &&
+          row.parent_request_id,
+      )
+      .map((row) => row.parent_request_id as string),
+  );
+
   const withdraw = (requestId: string) => {
     if (!window.confirm("この申請を取り下げますか？")) return;
     setMessage(null);
@@ -104,6 +128,34 @@ export function XIdentityRequestHistoryList({
       try {
         const result = await cancelXIdLinkRequest(fd);
         setMessage(result.message ?? (result.ok ? "申請を取り下げました。" : "取り下げに失敗しました。"));
+        if (result.ok) router.refresh();
+      } catch {
+        setMessage("通信または処理中に問題が発生しました。再読み込みしてお試しください。");
+      } finally {
+        setPendingId(null);
+      }
+    })();
+  };
+
+  const requestRevert = (parentRequestId: string) => {
+    if (
+      !window.confirm(
+        "統合の取り消しを申請します。運営が承認すると、統合前の名義へ戻ります。よろしいですか？",
+      )
+    ) {
+      return;
+    }
+    setMessage(null);
+    setPendingId(parentRequestId);
+    const fd = new FormData();
+    fd.set("parent_request_id", parentRequestId);
+    void (async () => {
+      try {
+        const result = await requestXIdMergeRevert(fd);
+        setMessage(
+          result.message ??
+            (result.ok ? "統合の差し戻し申請を受け付けました。" : "申請に失敗しました。"),
+        );
         if (result.ok) router.refresh();
       } catch {
         setMessage("通信または処理中に問題が発生しました。再読み込みしてお試しください。");
@@ -124,6 +176,19 @@ export function XIdentityRequestHistoryList({
         {rows.map((row) => {
           const canWithdraw =
             row.status === "pending" && WITHDRAWABLE_TYPES.has(row.request_type);
+          const revertBlocked = blockedRevertParents.has(row.id);
+          const canRequestRevert =
+            row.request_type === "merge" &&
+            row.status === "done" &&
+            typeof row.revert_deadline_at === "number" &&
+            row.revert_deadline_at >= now &&
+            !revertBlocked;
+          const revertDeadlinePassed =
+            row.request_type === "merge" &&
+            row.status === "done" &&
+            !revertBlocked &&
+            typeof row.revert_deadline_at === "number" &&
+            row.revert_deadline_at < now;
           return (
             <li key={row.id} className={pageStyles.row}>
               <div className={pageStyles.rowHead}>
@@ -148,6 +213,18 @@ export function XIdentityRequestHistoryList({
                       作品・合作メンバー・チャプター・予約枠・審査案件を統合先へ付け替え、統合元を無効化
                     </span>
                   ) : null}
+                  {canRequestRevert && row.revert_deadline_at != null ? (
+                    <span className={pageStyles.rowDate}>
+                      {formatUnix(row.revert_deadline_at, { dateOnly: true })}{" "}
+                      {formatUnix(row.revert_deadline_at, { timeOnly: true })} まで取り消し申請できます
+                    </span>
+                  ) : null}
+                  {revertBlocked && row.request_type === "merge" ? (
+                    <span className={pageStyles.rowDate}>差し戻し済み、または申請中です</span>
+                  ) : null}
+                  {revertDeadlinePassed ? (
+                    <span className={pageStyles.rowDate}>差し戻し期限を過ぎています</span>
+                  ) : null}
                 </div>
                 <div className={pageStyles.rowBadges}>
                   <span className={statusClass(row.status)}>
@@ -155,17 +232,30 @@ export function XIdentityRequestHistoryList({
                   </span>
                 </div>
               </div>
-              {canWithdraw ? (
+              {canWithdraw || canRequestRevert ? (
                 <div className={pageStyles.rowOps}>
-                  <button
-                    type="button"
-                    className="fn-btn fn-btn-ghost fn-btn-sm"
-                    disabled={pendingId !== null}
-                    aria-busy={pendingId === row.id}
-                    onClick={() => withdraw(row.id)}
-                  >
-                    {pendingId === row.id ? "取下げ中…" : "取り下げる"}
-                  </button>
+                  {canRequestRevert ? (
+                    <button
+                      type="button"
+                      className="fn-btn fn-btn-ghost fn-btn-sm"
+                      disabled={pendingId !== null}
+                      aria-busy={pendingId === row.id}
+                      onClick={() => requestRevert(row.id)}
+                    >
+                      {pendingId === row.id ? "申請中…" : "統合を取り消す申請"}
+                    </button>
+                  ) : null}
+                  {canWithdraw ? (
+                    <button
+                      type="button"
+                      className="fn-btn fn-btn-ghost fn-btn-sm"
+                      disabled={pendingId !== null}
+                      aria-busy={pendingId === row.id}
+                      onClick={() => withdraw(row.id)}
+                    >
+                      {pendingId === row.id ? "取下げ中…" : "取り下げる"}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
             </li>

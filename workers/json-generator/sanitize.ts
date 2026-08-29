@@ -16,6 +16,7 @@ const FORBIDDEN = new Set([
   "is_archived",
   "custom_questions",
   "stage_permission",
+  "required_video_fields_json",
 ]);
 
 export function assertNoForbiddenPublicKeys(value: unknown, path = "root"): void {

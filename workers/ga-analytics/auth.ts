@@ -141,11 +141,12 @@ async function exchangeJwtForAccessToken(
   let body: { access_token?: unknown; expires_in?: unknown };
   try {
     body = (await response.json()) as typeof body;
-    signal?.throwIfAborted();
   } catch {
+    signal?.throwIfAborted();
     await cancelResponseBody(response);
     throw new Error("ga4_oauth_invalid_json");
   }
+  signal?.throwIfAborted();
   if (typeof body.access_token !== "string" || !body.access_token) {
     throw new Error("ga4_oauth_access_token_missing");
   }
@@ -190,7 +191,9 @@ export async function getGa4AccessToken(
     privateKey,
     GA4_ANALYTICS_SCOPE,
   );
+  signal?.throwIfAborted();
   const token = await exchangeJwtForAccessToken(jwt, budget, fetchImpl, signal);
+  signal?.throwIfAborted();
   const expiresAt = now + token.expires_in;
   const ttl = Math.min(
     GA4_TOKEN_CACHE_MAX_TTL_SEC,
@@ -206,7 +209,9 @@ export async function getGa4AccessToken(
       { expirationTtl: ttl },
     );
   } catch {
+    signal?.throwIfAborted();
     // KV 障害で token 取得自体は成功しているため継続する。
   }
+  signal?.throwIfAborted();
   return token.access_token;
 }

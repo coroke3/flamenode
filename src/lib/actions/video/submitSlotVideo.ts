@@ -27,9 +27,9 @@ import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWa
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
 import { generateId } from "@/lib/utils/id";
 import {
-  canActAsSlotActor,
+  canActAsSlotSubmitter,
   resolveSlotGroupIdentity,
-  resolveSlotViewerRelation,
+  resolveSlotSubmissionRelation,
 } from "@/lib/slots/slotIdentityCore";
 import { extractYoutubeId } from "@/lib/youtube/id";
 import { resolveSlotReservationSubject } from "@/lib/slot/reservationGroupsCore";
@@ -63,6 +63,11 @@ import {
 } from "@/lib/video/slotPart";
 import type { VideoActionResult } from "@/lib/video/types";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
+import {
+  firstMissingRequiredVideoField,
+  loadUnionRequiredVideoFields,
+  missingRequiredVideoFieldMessage,
+} from "@/lib/video/requiredVideoFields";
 import {
   resolveVideoCreatorIcon,
   rollbackUploadedVideoIcon,
@@ -105,13 +110,16 @@ async function submitSlotVideoCore(
   )[0];
   if (!slotRow) return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
 
-  const slotRelation = resolveSlotViewerRelation({
+  // Submission is keyed by the approved Active X ID. A linked Discord
+  // account may submit the reservation when that X ID matches, while other
+  // slot operations remain bound to the reserving Discord account.
+  const slotRelation = resolveSlotSubmissionRelation({
     reservedByUserId: slotRow.reserved_by_user_id,
     slotXUserId: slotRow.x_user_id,
     authUserId: userId,
     activeXId: guard.activeXId,
   });
-  if (slotRelation === "account_other" || slotRelation === "none") {
+  if (!canActAsSlotSubmitter(slotRelation)) {
     return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
   }
 
@@ -183,6 +191,16 @@ async function submitSlotVideoCore(
   if (!stageResult.ok) return stageResult;
   const customValidation = await validateCustomAnswersForEvents(db, formData, syncedEventIds);
   if (!customValidation.ok) return customValidation;
+  const missingRequired = firstMissingRequiredVideoField(
+    await loadUnionRequiredVideoFields(db, syncedEventIds),
+    {
+      ...parsed.data,
+      icon_mode: String(formData.get("icon_mode") ?? parsed.data.icon_mode ?? ""),
+    },
+  );
+  if (missingRequired) {
+    return { ok: false, message: missingRequiredVideoFieldMessage(missingRequired) };
+  }
 
   const eventConfig = (
     await db
@@ -239,7 +257,13 @@ async function submitSlotVideoCore(
       };
     }
     const subject = subjectResult.subject;
-    if (userId !== subject.reservedByUserId) {
+    const subjectRelation = resolveSlotSubmissionRelation({
+      reservedByUserId: subject.reservedByUserId,
+      slotXUserId: subject.xUserId,
+      authUserId: userId,
+      activeXId: activeX,
+    });
+    if (!canActAsSlotSubmitter(subjectRelation)) {
       return { ok: false, message: "枠が見つかりません。" };
     }
     if (subject.xUserId) {
@@ -289,6 +313,7 @@ async function submitSlotVideoCore(
     slotXUserIds: submittedSlots.map((row) => row.x_user_id),
     authUserId: userId,
     activeXId: guard.activeXId,
+    allowAuthMismatchWhenXIdMatches: true,
   });
   if (!groupIdentity.ok) {
     if (
@@ -300,13 +325,13 @@ async function submitSlotVideoCore(
     return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
   }
   for (const row of submittedSlots) {
-    const relation = resolveSlotViewerRelation({
+    const relation = resolveSlotSubmissionRelation({
       reservedByUserId: row.reserved_by_user_id,
       slotXUserId: row.x_user_id,
       authUserId: userId,
       activeXId: guard.activeXId,
     });
-    if (!canActAsSlotActor(relation)) {
+    if (!canActAsSlotSubmitter(relation)) {
       return { ok: false, message: SLOT_SUBMIT_REJECT_MESSAGE };
     }
   }

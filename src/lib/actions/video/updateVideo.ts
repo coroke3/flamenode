@@ -18,6 +18,11 @@ import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
 import { normalizeSocialLinksForStorage } from "@/lib/socialLinks";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
 import {
+  firstMissingRequiredVideoField,
+  loadUnionRequiredVideoFields,
+  missingRequiredVideoFieldMessage,
+} from "@/lib/video/requiredVideoFields";
+import {
   resolveVideoCreatorIcon,
   rollbackUploadedVideoIcon,
 } from "@/lib/video/resolveVideoCreatorIcon";
@@ -213,6 +218,29 @@ async function updateVideoCore(
     );
     if (!nextStagePermissionResult.ok) return nextStagePermissionResult;
     nextStagePermission = nextStagePermissionResult.value;
+  }
+
+  let requiredEventIds = stageEventIds;
+  if (!formData.has("event_ids")) {
+    const linkedRows = await db
+      .select({ event_id: videoEvents.event_id })
+      .from(videoEvents)
+      .where(eq(videoEvents.video_id, videoId))
+      .limit(MAX_ATOMIC_VIDEO_EVENTS + 1);
+    requiredEventIds = Array.from(
+      new Set([
+        ...stageEventIds,
+        ...linkedRows.map((row) => row.event_id),
+      ]),
+    );
+  }
+  const missingRequired = firstMissingRequiredVideoField(
+    await loadUnionRequiredVideoFields(db, requiredEventIds),
+    { ...parsed.data, icon_mode: rawIconMode },
+    privilegeMode === "normal" ? generalFields : undefined,
+  );
+  if (missingRequired) {
+    return { ok: false, message: missingRequiredVideoFieldMessage(missingRequired) };
   }
 
   const rawYoutubeUrl = parsed.data.youtube_url.trim();

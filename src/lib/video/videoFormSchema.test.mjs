@@ -64,6 +64,36 @@ test("parseVideoForm accepts valid youtube_url by default", () => {
   assert.equal(result.ok, true);
 });
 
+test("parseVideoForm accepts legacy Google Drive cache icon URLs", () => {
+  const result = parseVideoForm(
+    {
+      ...base,
+      youtube_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      icon_url: "/api/google-drive-image/legacy_file_id",
+    },
+    { youtubeRequired: false },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.data.icon_url, "/api/google-drive-image/legacy_file_id");
+  }
+});
+
+test("parseVideoForm normalizes old Google Drive icon links to the cache route", () => {
+  const result = parseVideoForm(
+    {
+      ...base,
+      youtube_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      icon_url: "https://drive.google.com/file/d/legacy_file_id/view?usp=sharing",
+    },
+    { youtubeRequired: false },
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.data.icon_url, "/api/google-drive-image/legacy_file_id");
+  }
+});
+
 test("parseVideoForm forces icon_url null when icon_mode is none", () => {
   const result = parseVideoForm(
     {
