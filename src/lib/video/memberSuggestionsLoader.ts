@@ -1,3 +1,4 @@
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import {
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
   MEMBER_SUGGESTIONS_MAX_INDEX_BYTES,
@@ -63,6 +64,7 @@ export async function loadMemberSuggestionsManifestFromBucket(
     typeof manifestObject.size === "number" &&
     manifestObject.size > MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES
   ) {
+    await cancelR2BodyBestEffort(manifestObject);
     return { ok: false, reason: "manifest_too_large" };
   }
   let manifestPayload: unknown;
@@ -105,6 +107,7 @@ export async function loadMemberSuggestionsIndexFromBucket(
     typeof indexObject.size === "number" &&
     indexObject.size > MEMBER_SUGGESTIONS_MAX_INDEX_BYTES
   ) {
+    await cancelR2BodyBestEffort(indexObject);
     return { ok: false, reason: "index_too_large" };
   }
   let indexPayload: unknown;

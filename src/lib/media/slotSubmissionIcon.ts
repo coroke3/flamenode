@@ -1,4 +1,5 @@
 import type { FlameNodeEnv } from "../cloudflare.ts";
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import {
   canActAsSlotActor,
   resolveSlotViewerRelation,
@@ -207,6 +208,7 @@ export async function serveSlotSubmissionIconRow(
 
   const contentType = normalizePublicMediaContentType(obj.httpMetadata?.contentType);
   if (!contentType || !isPublicMediaObjectSafe({ size: obj.size, contentType })) {
+    await cancelR2BodyBestEffort(obj);
     return mediaNotFoundResponse();
   }
 

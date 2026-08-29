@@ -1,4 +1,5 @@
 import type { FlameNodeEnv } from "../cloudflare";
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import {
   isPublicMediaObjectSafe,
   MAX_PUBLIC_MEDIA_BYTES,
@@ -319,6 +320,7 @@ export async function serveManageXIcon(
     !isPublicMediaObjectSafe({ size: object.size, contentType }) ||
     object.size > MAX_PUBLIC_MEDIA_BYTES
   ) {
+    await cancelR2BodyBestEffort(object);
     return new Response("Not found", { status: 404 });
   }
 
@@ -329,6 +331,7 @@ export async function serveManageXIcon(
   headers.set("cache-control", `${CACHE_CONTROL_PREFIX}${maxAge}, must-revalidate`);
   headers.set("x-content-type-options", "nosniff");
   if (isIfNoneMatch(request, object.httpEtag)) {
+    await cancelR2BodyBestEffort(object);
     return new Response(null, { status: 304, headers });
   }
   return new Response(object.body as BodyInit, { headers });

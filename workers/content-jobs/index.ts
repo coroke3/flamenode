@@ -243,6 +243,7 @@ export async function runContentJobsRecovery(
                 rebuildEnv.d1Budget,
               );
             } catch (error) {
+              signal.throwIfAborted();
               console.error("[content-jobs] X ID slot bind recovery failed", {
                 error: safeErrorSummary(error),
               });
@@ -262,6 +263,7 @@ export async function runContentJobsRecovery(
                 signal,
               );
             } catch (error) {
+              signal.throwIfAborted();
               console.error("[content-jobs] event playlist projection repair failed", {
                 error: safeErrorSummary(error),
               });
@@ -276,12 +278,14 @@ export async function runContentJobsRecovery(
                 signal,
               );
             } catch (error) {
+              signal.throwIfAborted();
               console.error("[content-jobs] daily top nostalgic enqueue failed", {
                 error: safeErrorSummary(error),
               });
             }
           }
 
+          signal.throwIfAborted();
           if (
             deployGlobalRebuilds > 0 ||
             missingYoutubeSharedInputs > 0 ||

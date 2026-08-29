@@ -1,3 +1,4 @@
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   resolveIdenticalJsonArtifactPut,
@@ -371,11 +372,18 @@ async function readPreviousManifest(
 ): Promise<PreviousManifestBody> {
   throwIfAborted(signal);
   const object = await env.R2.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
+  if (signal?.aborted) {
+    await cancelR2BodyBestEffort(object);
+    throwIfAborted(signal);
+  }
   if (!object) return null;
   if (
     typeof object.size === "number" &&
-    object.size > MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES
+    (!Number.isSafeInteger(object.size) ||
+      object.size < 0 ||
+      object.size > MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES)
   ) {
+    await cancelR2BodyBestEffort(object);
     return null;
   }
   const body = await object.text();

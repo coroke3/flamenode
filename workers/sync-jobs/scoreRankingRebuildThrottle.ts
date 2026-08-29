@@ -1,3 +1,4 @@
+import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { normalizeStaticEventsIndex } from "../../src/lib/publicData/staticEventsIndexCore.ts";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "../../src/lib/publicData/publicJsonCacheTtl.ts";
 import {
@@ -9,6 +10,7 @@ export const RANKING_LAST_SCORE_REBUILD_KV_KEY = "ranking:last-score-rebuild";
 export const SCORE_REBUILD_ACTIVE_INTERVAL_SEC = 3600;
 export const SCORE_REBUILD_INACTIVE_INTERVAL_SEC = 10800;
 export const EVENTS_INDEX_R2_KEY = "events/index.json";
+export const EVENTS_INDEX_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 export const EVENTS_INDEX_STALE_MAX_AGE_SEC =
   PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex * 2;
 /** processing の in-flight 判定は lease_expires_at > now（queue.ts PROCESSING_LEASE_SEC = 5分 と整合）。 */
@@ -140,8 +142,20 @@ async function resolveHasActiveOngoingEventFromR2(
   signal?.throwIfAborted();
   try {
     const object = await env.R2.get(EVENTS_INDEX_R2_KEY);
-    signal?.throwIfAborted();
     if (!object) return null;
+    if (signal?.aborted) {
+      await cancelR2BodyBestEffort(object);
+      signal.throwIfAborted();
+    }
+    if (
+      typeof object.size === "number" &&
+      (!Number.isSafeInteger(object.size) ||
+        object.size < 0 ||
+        object.size > EVENTS_INDEX_MAX_OBJECT_BYTES)
+    ) {
+      await cancelR2BodyBestEffort(object);
+      return null;
+    }
     const payload = await object.json();
     signal?.throwIfAborted();
     if (isEventsIndexPayloadStale(parseEventsIndexGeneratedAt(payload), nowUnix)) {
@@ -154,6 +168,9 @@ async function resolveHasActiveOngoingEventFromR2(
       source: "r2",
     };
   } catch {
+    // Cancellation is control flow, not an R2 failure. Never turn it into a D1
+    // fallback/safe-default path that keeps the scheduled job running.
+    signal?.throwIfAborted();
     return null;
   }
 }
@@ -187,6 +204,7 @@ async function resolveHasActiveOngoingEventFromD1(
       source: "d1_fallback",
     };
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
 }
@@ -212,6 +230,7 @@ export async function shouldThrottleScoreDependentRebuild(
   signal?: AbortSignal,
 ): Promise<boolean> {
   const lastMarker = await readLastScoreRebuildMarker(env.KV);
+  signal?.throwIfAborted();
   if (lastMarker == null) return false;
 
   const resolution = await resolveHasActiveOngoingEvent(env, nowUnix, signal);
@@ -249,6 +268,7 @@ async function isUsersIndexRebuildInFlight(
     signal?.throwIfAborted();
     return row?.active === 1;
   } catch {
+    signal?.throwIfAborted();
     return false;
   }
 }
@@ -278,6 +298,7 @@ export async function enqueueScoreDependentRebuilds(
     };
   }
 
+  signal?.throwIfAborted();
   const usersIndexInFlight = await isUsersIndexRebuildInFlight(env, now, signal);
   const targets = resolveScoreRebuildTargets(usersIndexInFlight);
   if (targets.length === 0) {
@@ -316,6 +337,7 @@ export async function enqueueScoreDependentRebuilds(
 
   if (processed > 0 && !usersIndexInFlight) {
     await writeLastScoreRebuildMarker(env.KV, now);
+    signal?.throwIfAborted();
   }
 
   return processed > 0
