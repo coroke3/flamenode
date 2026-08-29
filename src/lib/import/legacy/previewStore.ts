@@ -1,4 +1,4 @@
-import { cancelR2BodyBestEffort } from "@/lib/r2Body";
+import { cancelR2BodyBestEffort } from "../../r2Body.ts";
 import type { CanonicalLegacyPlan, LegacyImportStrategy } from "./normalize";
 
 // v4はCloudflare CPU hard cap適用後のplanだけを許可する。

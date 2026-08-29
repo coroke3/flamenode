@@ -1,5 +1,5 @@
 import type { FlameNodeEnv } from "@/lib/cloudflare";
-import { cancelR2BodyBestEffort } from "@/lib/r2Body";
+import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import { safeErrorSummary } from "../../../workers/shared/safeLog.ts";
 
 function safePublicErrorSummary(error: unknown): string {
