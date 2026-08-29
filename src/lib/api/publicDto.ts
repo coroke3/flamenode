@@ -141,6 +141,7 @@ export const FORBIDDEN_PUBLIC_KEYS: ReadonlySet<string> = new Set([
   "is_archived",
   "custom_questions",
   "stage_permission",
+  "required_video_fields_json",
 ]);
 
 export const MAX_PUBLIC_LIST_LIMIT = 48;

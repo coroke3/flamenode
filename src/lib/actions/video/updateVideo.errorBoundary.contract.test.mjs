@@ -18,3 +18,17 @@ test("updateVideo reuses the request-local D1 and exposes an action error bounda
   assert.match(source, /UPDATE_VIDEO_UNEXPECTED_ERROR_MESSAGE/);
   assert.match(source, /console\.warn\("\[updateVideo\] preflight rejected"/);
 });
+
+test("updateVideo は privilegeMode に応じてイベント必須項目を検証する", () => {
+  assert.match(source, /loadUnionRequiredVideoFields/);
+  assert.match(source, /firstMissingRequiredVideoField/);
+  assert.match(source, /missingRequiredVideoFieldMessage/);
+  assert.match(
+    source,
+    /firstMissingRequiredVideoField\([\s\S]*?loadUnionRequiredVideoFields\(db, requiredEventIds\)[\s\S]*?privilegeMode === "normal" \? generalFields : undefined/,
+  );
+  assert.match(
+    source,
+    /if \(missingRequired\) \{[\s\S]*?return \{ ok: false, message: missingRequiredVideoFieldMessage\(missingRequired\) \}/,
+  );
+});

@@ -35,6 +35,14 @@ import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
 } from "@/lib/slots/limits";
+import {
+  OPTIONAL_REQUIRED_VIDEO_FIELDS,
+  parseRequiredVideoFields,
+  REQUIRED_VIDEO_FIELD_GROUPS,
+  REQUIRED_VIDEO_FIELD_LABELS,
+  serializeRequiredVideoFields,
+  type OptionalRequiredVideoField,
+} from "@/lib/video/requiredVideoFields";
 
 export interface EventFormInitial {
   id?: string;
@@ -43,6 +51,7 @@ export interface EventFormInitial {
   event_type?: "event" | "collabo" | "type" | "other";
   explanation?: string | null;
   youtube_description_template?: string | null;
+  required_video_fields_json?: string | null;
   icon_url?: string | null;
   img_url?: string | null;
   accent_color?: string | null;
@@ -86,6 +95,7 @@ const MANAGE_SECTION_NAV = [
   { id: "section-basic", label: "基本情報" },
   { id: "section-publish", label: "公開・受付" },
   { id: "section-questions", label: "投稿・権限" },
+  { id: "section-required", label: "必須項目" },
   { id: "section-slots", label: "枠" },
 ] as const;
 
@@ -223,6 +233,7 @@ function initialPreview(initial: EventFormInitial): EventSettingsPreviewValue {
     parts_json: initial.parts_json,
     editable_fields: initial.editable_fields,
     review_settings: initial.review_settings,
+    required_video_fields_json: initial.required_video_fields_json ?? null,
   };
 }
 
@@ -265,6 +276,8 @@ function formPreview(
     parts_text: textValue(formData, "parts_text"),
     editable_fields: initial.editable_fields,
     review_settings: initial.review_settings,
+    required_video_fields_json:
+      textValue(formData, "required_video_fields_json") || null,
   };
 }
 
@@ -371,6 +384,13 @@ export function EventForm({
       return filterImplicitEmptyStagePermissionQuestions(current);
     },
   );
+  const [requiredOptionalFields, setRequiredOptionalFields] = React.useState<
+    OptionalRequiredVideoField[]
+  >(() => parseRequiredVideoFields(initial.required_video_fields_json));
+  const requiredVideoFieldsJson = React.useMemo(
+    () => serializeRequiredVideoFields(requiredOptionalFields) ?? "[]",
+    [requiredOptionalFields],
+  );
 
   const canBasic = mode === "create" || editableSections?.basic !== false;
   const canPublish = mode === "create" || editableSections?.publish !== false;
@@ -423,6 +443,10 @@ export function EventForm({
     setQuestions(
       filterImplicitEmptyStagePermissionQuestions(readQuestions(restored)),
     );
+    const restoredRequiredJson = textValue(restored, "required_video_fields_json");
+    if (String(restored.get("required_video_fields_present") ?? "") === "1") {
+      setRequiredOptionalFields(parseRequiredVideoFields(restoredRequiredJson));
+    }
     setPreview(formPreview(restored, initial));
     setDirty(true);
   }, [initial]);
@@ -430,10 +454,11 @@ export function EventForm({
     void preview;
     void questions;
     void youtubeDescriptionTemplate;
+    void requiredOptionalFields;
     return formRef.current
       ? formDataToDraftValue(new FormData(formRef.current))
       : {};
-  }, [preview, questions, youtubeDescriptionTemplate]);
+  }, [preview, questions, requiredOptionalFields, youtubeDescriptionTemplate]);
   const { clearDraft } = useFormDraft<EventFormDraftValue>({
     storageKey: draftStorageKey || "fn:draft:disabled:event-form-v1",
     value: draftSnapshot,
@@ -450,6 +475,24 @@ export function EventForm({
       video_form_settings_json: buildVideoFormSettingsFromQuestions(questions),
     }));
   }, [questions]);
+
+  React.useEffect(() => {
+    setPreview((current) => ({
+      ...current,
+      required_video_fields_json:
+        requiredVideoFieldsJson === "[]" ? null : requiredVideoFieldsJson,
+    }));
+  }, [requiredVideoFieldsJson]);
+
+  const toggleRequiredOptionalField = (field: OptionalRequiredVideoField) => {
+    setRequiredOptionalFields((current) => {
+      const next = new Set(current);
+      if (next.has(field)) next.delete(field);
+      else next.add(field);
+      return OPTIONAL_REQUIRED_VIDEO_FIELDS.filter((item) => next.has(item));
+    });
+    setDirty(true);
+  };
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -499,9 +542,9 @@ export function EventForm({
           setPreview(formPreview(new FormData(event.currentTarget), initial));
         })()
       }
-      className={`${styles.eventForm}${isManage ? ` ${styles.eventFormManage}` : ""}`}
+      className={`${styles.eventForm}${isManage || mode === "create" ? ` ${styles.eventFormManage}` : ""}`}
     >
-      {isManage && mode === "edit" ? (
+      {isManage || mode === "create" ? (
         <nav className={styles.manageSectionNav} aria-label="設定セクション">
           {MANAGE_SECTION_NAV.map((item) => (
             <a key={item.id} href={`#${item.id}`}>
@@ -814,6 +857,49 @@ export function EventForm({
         {questions.length >= MAX_STAGE_PERMISSION_QUESTIONS ? (
           <p className="fn-hint">ステージ・権利確認質問は最大{MAX_STAGE_PERMISSION_QUESTIONS}件です</p>
         ) : null}
+      </FormSection>
+
+      <FormSection
+        title="投稿の必須項目"
+        allowed={canQuestions}
+        sectionId="section-required"
+      >
+        <input type="hidden" name="required_video_fields_present" value="1" />
+        <input
+          type="hidden"
+          name="required_video_fields_json"
+          value={requiredVideoFieldsJson}
+        />
+        <p className="fn-text-muted-sm">
+          表示名と作品タイトルは常に必須です。ここで選んだ項目は、このイベントへの投稿・枠提出・作品編集でも必須になります。
+        </p>
+        {REQUIRED_VIDEO_FIELD_GROUPS.map((group) => (
+          <article key={group.id} className={styles.requiredFieldsCard}>
+            <h3>{group.label}</h3>
+            <div className={styles.requiredFieldsChecks}>
+              {group.always.map((field) => (
+                <label key={field} className={styles.requiredFieldsCheck}>
+                  <input type="checkbox" checked disabled readOnly />
+                  <span>
+                    {REQUIRED_VIDEO_FIELD_LABELS[field]}
+                    <span className="fn-muted">（常に必須）</span>
+                  </span>
+                </label>
+              ))}
+              {group.optional.map((field) => (
+                <label key={field} className={styles.requiredFieldsCheck}>
+                  <input
+                    type="checkbox"
+                    checked={requiredOptionalFields.includes(field)}
+                    disabled={!canQuestions}
+                    onChange={() => toggleRequiredOptionalField(field)}
+                  />
+                  <span>{REQUIRED_VIDEO_FIELD_LABELS[field]}</span>
+                </label>
+              ))}
+            </div>
+          </article>
+        ))}
       </FormSection>
 
       <FormSection title="枠" allowed={canSlots} sectionId="section-slots">

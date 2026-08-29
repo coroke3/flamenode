@@ -17,6 +17,7 @@
   padding: 20px 0 0;
   border: 0;
   border-top: 1px solid var(--border-subtle);
+  scroll-margin-top: 56px;
 }
 
 .formSectionDisabled {
@@ -89,12 +90,6 @@
     gap: 14px;
     padding-top: 16px;
   }
-
-  .manageSectionNav {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
-  }
 }
 
 .eventFormManage {
@@ -102,6 +97,9 @@
 }
 
 .manageSectionNav {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -109,7 +107,44 @@
   padding: 6px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.requiredFieldsCard {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.requiredFieldsCard h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.requiredFieldsChecks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+}
+
+.requiredFieldsCheck {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.requiredFieldsCheck input:disabled {
+  cursor: not-allowed;
 }
 
 .manageSectionNav a {
@@ -127,6 +162,14 @@
 .manageSectionNav a:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
+}
+
+@media (max-width: 640px) {
+  .manageSectionNav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
 }
 
 .manageSaveBar {

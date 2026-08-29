@@ -11,6 +11,7 @@ import {
   MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
   normalizeYoutubeDescriptionTemplate,
 } from "../event/youtubeDescriptionTemplate.ts";
+import { serializeRequiredVideoFields } from "../video/requiredVideoFields.ts";
 
 export type EventRow = typeof events.$inferSelect;
 export type EventTemplateQuestionRow = {
@@ -46,6 +47,7 @@ export interface EventTemplateSnapshot {
   event_type: "event" | "collabo" | "type" | "other";
   explanation: string | null;
   youtube_description_template: string | null;
+  required_video_fields_json: string | null;
   icon_url: string | null;
   img_url: string | null;
   accent_color: string | null;
@@ -215,6 +217,7 @@ export function snapshotFromEvent(
     event_type: (event.event_type ?? "event") as EventTemplateSnapshot["event_type"],
     explanation: event.explanation,
     youtube_description_template: event.youtube_description_template,
+    required_video_fields_json: event.required_video_fields_json ?? null,
     icon_url: event.icon_url,
     img_url: event.img_url,
     accent_color: event.accent_color,
@@ -274,6 +277,9 @@ export function parseEventTemplateSnapshot(
           ? normalized
           : null;
       })(),
+      required_video_fields_json: serializeRequiredVideoFields(
+        parsed.required_video_fields_json,
+      ),
       icon_url: nullableSnapshotString(parsed.icon_url),
       img_url: nullableSnapshotString(parsed.img_url),
       accent_color: nullableSnapshotString(parsed.accent_color),
@@ -342,6 +348,7 @@ export function snapshotToFormInitial(
     event_type: snapshot.event_type,
     explanation: snapshot.explanation,
     youtube_description_template: snapshot.youtube_description_template,
+    required_video_fields_json: snapshot.required_video_fields_json,
     icon_url: snapshot.icon_url,
     img_url: snapshot.img_url,
     accent_color: snapshot.accent_color,

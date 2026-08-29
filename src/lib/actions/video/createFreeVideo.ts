@@ -43,6 +43,11 @@ import { checkYoutubeVideoDuplicate } from "@/lib/video/slotPart";
 import type { VideoActionResult } from "@/lib/video/types";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
 import {
+  firstMissingRequiredVideoField,
+  loadUnionRequiredVideoFields,
+  missingRequiredVideoFieldMessage,
+} from "@/lib/video/requiredVideoFields";
+import {
   resolveVideoCreatorIcon,
   rollbackUploadedVideoIcon,
 } from "@/lib/video/resolveVideoCreatorIcon";
@@ -108,6 +113,13 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
     };
   }
   const eventIds = eventId ? [eventId] : [];
+  const missingRequired = firstMissingRequiredVideoField(
+    await loadUnionRequiredVideoFields(db, eventIds),
+    parsed.data,
+  );
+  if (missingRequired) {
+    return { ok: false, message: missingRequiredVideoFieldMessage(missingRequired) };
+  }
 
   let youtubeDuplicate = false;
   try {

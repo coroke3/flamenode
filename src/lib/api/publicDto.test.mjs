@@ -104,6 +104,7 @@ test("FORBIDDEN_PUBLIC_KEYS: 主要な禁止キーが含まれている", () => 
     "role",
     "is_banned",
     "internal_note",
+    "required_video_fields_json",
   ]) {
     assert.equal(FORBIDDEN_PUBLIC_KEYS.has(k), true, `${k} should be forbidden`);
   }

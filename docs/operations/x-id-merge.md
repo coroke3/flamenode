@@ -21,7 +21,9 @@ X ID統合は、`x_identity_requests.request_type = 'merge'` の申請を `/admi
 - interaction、event staff、aliasの一意制約衝突を解消する。
 - 統合元の `x_user_account_links` を統合先へ移す。ownerとmanagerが衝突した場合はownerを維持する。
 - 統合元X IDを統合先のaliasとして登録する。
+- 統合元の `x_users` 行は削除せず `approval_status = 'rejected'` にする。旧ID文字列は再利用できず、alias解決と期限内差し戻しに使う。
 - 完了した申請を `done` にし、復元JSONと差し戻し期限を同じ申請行へ保存する。
+- 完了SQLは、統合元の現行参照が残っていないことを同じbatchで確認してから通す。履歴 (`x_identity_requests`) と `alias_x_id` は意図的に旧ID文字列を残す。
 
 ## 差し戻し
 
@@ -31,7 +33,7 @@ X ID統合は、`x_identity_requests.request_type = 'merge'` の申請を `/admi
 - `restore_snapshot_json`: merge実行前の復元情報
 - `revert_deadline_at`: 差し戻し可能期限
 
-管理者は期限内のみ確認文字列 `REVERT` で差し戻せる。期限超過、復元JSON欠落、親申請不整合はfail-closedで拒否する。
+利用者は `/dashboard/settings` の申請履歴から、完了した統合について期限内に「統合を取り消す申請」を送る。pending の差し戻しは本人が取り下げできる。管理者は期限内のみ確認文字列 `REVERT` で差し戻せる。期限超過、復元JSON欠落、親申請不整合はfail-closedで拒否する。差し戻しは旧 `x_users` 行の承認状態をsnapshotの値へ戻し、付け替えた現行参照を統合前の名義へ戻す。
 
 ## 運用上の注意
 

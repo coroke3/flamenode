@@ -64,6 +64,11 @@ import {
 import type { VideoActionResult } from "@/lib/video/types";
 import { parseVideoForm } from "@/lib/video/videoFormSchema";
 import {
+  firstMissingRequiredVideoField,
+  loadUnionRequiredVideoFields,
+  missingRequiredVideoFieldMessage,
+} from "@/lib/video/requiredVideoFields";
+import {
   resolveVideoCreatorIcon,
   rollbackUploadedVideoIcon,
 } from "@/lib/video/resolveVideoCreatorIcon";
@@ -183,6 +188,16 @@ async function submitSlotVideoCore(
   if (!stageResult.ok) return stageResult;
   const customValidation = await validateCustomAnswersForEvents(db, formData, syncedEventIds);
   if (!customValidation.ok) return customValidation;
+  const missingRequired = firstMissingRequiredVideoField(
+    await loadUnionRequiredVideoFields(db, syncedEventIds),
+    {
+      ...parsed.data,
+      icon_mode: String(formData.get("icon_mode") ?? parsed.data.icon_mode ?? ""),
+    },
+  );
+  if (missingRequired) {
+    return { ok: false, message: missingRequiredVideoFieldMessage(missingRequired) };
+  }
 
   const eventConfig = (
     await db
