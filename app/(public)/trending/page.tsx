@@ -18,7 +18,7 @@ export const metadata: Metadata = buildPageMetadata({
     "FlameNode内で最近よく視聴されている作品のランキングです。",
 });
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 const TRENDING_PAGE_LIMIT = 30;
 

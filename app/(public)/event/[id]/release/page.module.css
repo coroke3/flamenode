@@ -256,7 +256,14 @@
 }
 
 .scrollContent {
-  display: inline-block;
+  display: flex;
+  flex-wrap: nowrap;
+  width: max-content;
+  white-space: nowrap;
+}
+
+.scrollInner {
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -323,7 +330,8 @@
   box-sizing: border-box;
 }
 
-.releases2:hover {
+.releases2:hover,
+.releases2:focus-within {
   background-color: #0000004d;
 }
 

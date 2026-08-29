@@ -31,6 +31,7 @@ test("user profile returns notFound when paged static JSON is missing", () => {
   assert.match(page, /missingPagedSection/);
   assert.match(page, /beyondStaticPages/);
   assert.match(page, /STATIC_USER_MAX_PAGES/);
+  assert.match(page, /worksPaging\.page > worksTotalPages/);
 });
 
 test("user profile metadata avoids full D1 when static is unavailable", () => {
@@ -39,7 +40,7 @@ test("user profile metadata avoids full D1 when static is unavailable", () => {
 });
 
 test("user profile metadata and visible avatar use the shared R2 icon projection", () => {
-  assert.match(page, /loadPublicXIconMapOptional\(\[id\]\)/);
+  assert.doesNotMatch(page, /loadPublicXIconMapOptional/);
   assert.match(page, /const metadataIcon[\s\S]{0,500}resolveProjectedIcon\(\{/);
   assert.match(page, /image: cachedGoogleImageUrl\(metadataIcon\)/);
   assert.match(page, /const profileIcon = cachedGoogleImageUrl/);

@@ -1,12 +1,12 @@
 import "server-only";
 
-import { getEnv } from "@/lib/cloudflare";
-import { recordPublicR2Get } from "@/lib/observability/publicRequestMetrics";
-import { cancelR2BodyBestEffort } from "@/lib/r2Body";
+import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
+import { loadStaticJsonFreshStaleUnavailable } from "./staticSharedInputsLoader";
 import {
   normalizeStaticTrending,
   resolveStaticTrendingStaleMeta,
   TRENDING_OBJECT_KEY,
+  TRENDING_STALE_MAX_AGE_SEC,
   type StaticTrendingData,
   type StaticTrendingPayload,
 } from "./staticTrendingCore";
@@ -19,41 +19,29 @@ export interface StaticTrendingLoadResult {
   state: "ready" | "empty" | "stale" | "unavailable";
 }
 
+function normalizeTrendingPayload(value: unknown): StaticTrendingData | null {
+  if (!value || typeof value !== "object") return null;
+  return normalizeStaticTrending(value as StaticTrendingPayload);
+}
+
 // Writer側は最大200件。通常生成物を十分に上回る余裕を持たせつつ、
 // 壊れた巨大artifactをpublic requestでJSON parseしない。
 const TRENDING_MAX_OBJECT_BYTES = 1024 * 1024;
-
-async function readTrendingJsonFromR2(): Promise<StaticTrendingPayload | null> {
-  try {
-    const bucket = getEnv().BUCKET;
-    if (!bucket) return null;
-    recordPublicR2Get();
-    const object = await bucket.get(TRENDING_OBJECT_KEY);
-    if (!object) return null;
-    if (
-      !Number.isSafeInteger(object.size) ||
-      object.size < 0 ||
-      object.size > TRENDING_MAX_OBJECT_BYTES
-    ) {
-      await cancelR2BodyBestEffort(object);
-      return null;
-    }
-    try {
-      return (await object.json()) as StaticTrendingPayload;
-    } catch {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-}
 
 /** R2 `analytics/trending.json` のみ読み取る。D1 fallback なし。 */
 export async function loadStaticTrending(
   nowSec = Math.floor(Date.now() / 1000),
 ): Promise<StaticTrendingLoadResult> {
-  const payload = await readTrendingJsonFromR2();
-  const data = payload ? normalizeStaticTrending(payload) : null;
+  const loaded = await loadStaticJsonFreshStaleUnavailable<StaticTrendingData>({
+    key: TRENDING_OBJECT_KEY,
+    normalize: normalizeTrendingPayload,
+    maxStaleAgeSec: TRENDING_STALE_MAX_AGE_SEC,
+    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.trending,
+    maxObjectBytes: TRENDING_MAX_OBJECT_BYTES,
+    cacheMode: "cache_first",
+    nowSec,
+  });
+  const data = loaded.value;
   const staleMeta = resolveStaticTrendingStaleMeta(
     data?.generatedAt ?? null,
     nowSec,

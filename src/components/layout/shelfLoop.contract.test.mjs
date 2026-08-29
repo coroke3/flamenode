@@ -113,14 +113,18 @@ test("右方向loopはfill完了時にrotateBackwardで初期位置をシード�
 });
 
 test("トップ4棚はTopLoopShelfで左右交互のloopを使う", () => {
-  assert.match(home, /const TOP_LATEST_LOOP_DISPLAY_LIMIT = 40/);
-  assert.match(home, /const randomizedLatest = shuffledCopy\(latest\.slice\(0, 100\)\)/);
+  assert.match(home, /const TOP_SHELF_DISPLAY_LIMIT = 8/);
+  assert.match(home, /const TOP_LATEST_LOOP_DISPLAY_LIMIT = TOP_SHELF_DISPLAY_LIMIT/);
   assert.match(
     home,
-    /const latestLoopItems = randomizedLatest\.slice\(0, TOP_LATEST_LOOP_DISPLAY_LIMIT\)/,
+    /const latestLoopItems = shuffledCopy\(\s*latest\.slice\(0, TOP_LATEST_LOOP_DISPLAY_LIMIT\),\s*\)/,
+  );
+  assert.match(
+    home,
+    /const randomizedRecommended = shuffledCopy\(\s*recommended\.slice\(0, TOP_SHELF_DISPLAY_LIMIT\),\s*\)/,
   );
   assert.match(home, /latestLoopItems\.map\(/);
-  assert.match(home, /nostalgic\.map\(/);
+  assert.match(home, /nostalgicLoopItems\.map\(/);
   assert.doesNotMatch(home, /shuffledCopy\(nostalgic\)/);
   assert.match(home, /title="懐かしの映像"/);
   const directions = [

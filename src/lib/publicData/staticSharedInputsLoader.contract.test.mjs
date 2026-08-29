@@ -13,6 +13,19 @@ const [source, videoPage] = await Promise.all([
   ),
 ]);
 
+test("loadStaticJsonFreshStaleUnavailable は r2_first で R2 より先に isolate を読む", () => {
+  const fn = source.slice(
+    source.indexOf("export async function loadStaticJsonFreshStaleUnavailable"),
+    source.indexOf("export async function loadYoutubeRelatedBlocklist"),
+  );
+  const r2FirstStart = fn.indexOf('if (cacheMode === "r2_first")');
+  const mainR2Start = fn.indexOf("const payload = await readR2Json");
+  const preMainR2 = fn.slice(r2FirstStart, mainR2Start);
+  assert.ok(r2FirstStart >= 0, "r2_first block is present");
+  assert.ok(mainR2Start > r2FirstStart, "main R2 read follows r2_first block");
+  assert.match(preMainR2, /readPublicJsonIsolateCache/);
+});
+
 test("共有JSONローダーはrequest外へR2 Promiseを保持しない", () => {
   assert.doesNotMatch(source, /const inFlight = new Map/);
   assert.doesNotMatch(source, /inFlight\.(?:get|set|delete)/);
@@ -65,20 +78,12 @@ test("pickup creators / top slot-stats もfresh stale unavailableを保持する
 
 test("動画詳細は共有R2読込後にrequest metricsを記録する", () => {
   const logIndex = videoPage.indexOf("logPublicRequestMetrics();");
-  const blocklistIndex = videoPage.indexOf(
-    "const blocklist = await loadYoutubeRelatedBlocklist();",
-  );
-  const randomPoolIndex = videoPage.indexOf(
-    "const randomPool = await loadRandomVideoPool();",
-  );
-  const iconMapIndex = videoPage.indexOf("let iconMapPayload =");
+  const iconMapIndex = videoPage.indexOf("const iconMapPayload =");
 
-  assert.ok(blocklistIndex >= 0);
-  assert.ok(randomPoolIndex >= 0);
   assert.ok(iconMapIndex >= 0);
-  assert.ok(logIndex > blocklistIndex);
-  assert.ok(logIndex > randomPoolIndex);
   assert.ok(logIndex > iconMapIndex);
+  assert.doesNotMatch(videoPage, /loadYoutubeRelatedBlocklist/);
+  assert.doesNotMatch(videoPage, /loadRandomVideoPool/);
 });
 
 test("公開アイコン補完はrequest内で正規化キーをcacheする", () => {
@@ -139,23 +144,31 @@ test("動画詳細の作者表示は作品スナップショットのアイコ�
 
 test("動画詳細はメンバーを含む必要なX IDをR2アイコンローダーへ渡す", () => {
   assert.match(videoPage, /detail\.publicMembers\.map/);
+  assert.doesNotMatch(videoPage, /relatedIconCandidates/);
   assert.match(videoPage, /loadPublicXIconMapOptional\(staticIconXIds\)/);
-  assert.match(videoPage, /extraFallbackIconXIds/);
+  assert.doesNotMatch(videoPage, /extraFallbackIconXIds/);
   assert.match(videoPage, /hasProjectedPublicProfile/);
 });
 
 test("動画詳細は候補0件でも共有JSON障害を正常な空表示へ変換しない", () => {
-  assert.match(videoPage, /const blocklist = await loadYoutubeRelatedBlocklist\(\)/);
+  assert.doesNotMatch(videoPage, /loadYoutubeRelatedBlocklist/);
+  assert.doesNotMatch(videoPage, /loadRandomVideoPool/);
   assert.doesNotMatch(videoPage, /const needsBlocklist/);
-  assert.match(videoPage, /const randomPool = await loadRandomVideoPool\(\)/);
-  assert.match(
-    videoPage,
-    /randomPool\.status === "unavailable"[\s\S]*relatedSharedStatus = "unavailable"/,
-  );
+  assert.doesNotMatch(videoPage, /detail\.schemaVersion === 1 \|\|/);
+  assert.match(videoPage, /relatedSharedStatus="fresh"/);
   assert.match(
     videoPage,
     /unavailable=\{relatedSharedStatus === "unavailable"\}/,
   );
   assert.match(videoPage, /関連動画用の共有データを一時的に利用できません/);
   assert.match(videoPage, /関連動画はまだありません/);
+});
+
+test("動画詳細のイベントフェンスは enforce のときだけ manifest を読む", () => {
+  assert.match(
+    videoPage,
+    /resolvePublicVisibilityGuardModeFromEnv\(\) !== "enforce"/,
+  );
+  assert.match(videoPage, /filterBlockedVideoEvents/);
+  assert.match(videoPage, /isPublicEntityVisibilityBlocked/);
 });

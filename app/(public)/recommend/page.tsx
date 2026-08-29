@@ -23,9 +23,10 @@ export const metadata: Metadata = buildPageMetadata({
   description:
     "FlameNodeの注目作品、新着作品、見つけてほしい映像をまとめて紹介します。",
 });
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 const LIST_HREF = "/list";
+const RAIL_DISPLAY_LIMIT = 8;
 
 interface FilterChip {
   href: string;
@@ -91,7 +92,11 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
         more: [] as VideoCardData[],
       };
 
-  const visibleFresh = isDegraded ? fresh.slice(0, 12) : fresh;
+  const visibleHot = hot.slice(0, RAIL_DISPLAY_LIMIT);
+  const visibleUnderrated = underrated.slice(0, RAIL_DISPLAY_LIMIT);
+  const visibleEventsRail = eventsRail.slice(0, RAIL_DISPLAY_LIMIT);
+  const visibleMore = more.slice(0, RAIL_DISPLAY_LIMIT);
+  const visibleFresh = fresh.slice(0, RAIL_DISPLAY_LIMIT);
 
   return (
     <div className={`fn-public-container fn-page ${styles.page}`}>
@@ -135,26 +140,26 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
           <Rail
             id="rail-hot"
             title="人気作品"
-            items={hot}
+            items={visibleHot}
             ariaLabel="人気作品"
           />
           <Rail
             id="rail-underrated"
             title="見落としがち"
-            items={underrated}
+            items={visibleUnderrated}
             ariaLabel="見落としがちな作品"
           />
           <Rail
             id="rail-events"
             title="イベントから見る"
-            items={eventsRail}
+            items={visibleEventsRail}
             ariaLabel="イベントごとの作品"
             moreHref="/event"
           />
           <Rail
             id="rail-more"
             title="まとめて見る"
-            items={more}
+            items={visibleMore}
             ariaLabel="さらに探す作品"
             moreHref="/list"
           />

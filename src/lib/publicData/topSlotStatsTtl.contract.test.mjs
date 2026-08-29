@@ -9,5 +9,6 @@ test("top slot stats stay fresh without shortening the whole top artifact", () =
   for (const source of [web, worker]) {
     assert.match(source, /top: 600/);
     assert.match(source, /topSlotStats: 30/);
+    assert.match(source, /trending: 300/);
   }
 });

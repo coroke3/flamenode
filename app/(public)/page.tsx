@@ -38,9 +38,10 @@ import {
 import { shuffledCopy } from "@/lib/utils/shuffle";
 import { loadStaticTrending } from "@/lib/publicData/trendingLoader";
 
-/** 新着 loop 棚に載せる最大枚数。シャッフル元プールは100件のまま。 */
-const TOP_LATEST_LOOP_DISPLAY_LIMIT = 40;
-const TOP_TRENDING_DISPLAY_LIMIT = 12;
+/** 各棚の SSR 枚数。Workers Free の HTTP 10ms に収める。 */
+const TOP_SHELF_DISPLAY_LIMIT = 8;
+const TOP_LATEST_LOOP_DISPLAY_LIMIT = TOP_SHELF_DISPLAY_LIMIT;
+const TOP_TRENDING_DISPLAY_LIMIT = TOP_SHELF_DISPLAY_LIMIT;
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/",
@@ -48,7 +49,7 @@ export const metadata: Metadata = buildPageMetadata({
   description: SITE_DESCRIPTION,
 });
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 export default async function TopPage(): Promise<React.ReactElement> {
   setPublicRequestRoute("/");
@@ -85,10 +86,15 @@ export default async function TopPage(): Promise<React.ReactElement> {
       creators: creators.length,
     },
   } = data ?? {};
-  // top.json 自体の内容・順序は変えず、このrequestの表示順だけを入れ替える。
-  const randomizedRecommended = shuffledCopy(recommended);
-  const randomizedLatest = shuffledCopy(latest.slice(0, 100));
-  const latestLoopItems = randomizedLatest.slice(0, TOP_LATEST_LOOP_DISPLAY_LIMIT);
+  // top.json 自体の内容・順序は変えず、HTML キャッシュ寿命内の表示順だけを入れ替える。
+  const randomizedRecommended = shuffledCopy(
+    recommended.slice(0, TOP_SHELF_DISPLAY_LIMIT),
+  );
+  const latestLoopItems = shuffledCopy(
+    latest.slice(0, TOP_LATEST_LOOP_DISPLAY_LIMIT),
+  );
+  const nostalgicLoopItems = nostalgic.slice(0, TOP_SHELF_DISPLAY_LIMIT);
+  const latestEventItems = latestEvents.slice(0, TOP_SHELF_DISPLAY_LIMIT);
 
   const heroEvents = pickHeroEvents(activeEvents);
   const primaryHeroEvent = heroEvents[0] ?? null;
@@ -237,14 +243,14 @@ export default async function TopPage(): Promise<React.ReactElement> {
             moreLabel="過去の作品を見る"
           />
           <div className={styles.shelfBox}>
-            {nostalgic.length === 0 ? (
+            {nostalgicLoopItems.length === 0 ? (
               <EmptyShelf message="対象になる作品がまだありません。" />
             ) : (
               <TopLoopShelf
                 ariaLabel="懐かしの映像"
                 autoScrollDirection="right"
               >
-                {nostalgic.map((video, index) => (
+                {nostalgicLoopItems.map((video, index) => (
                   <VideoCard key={`${video.id}-nostalgic-${index}`} video={video} />
                 ))}
               </TopLoopShelf>
@@ -262,10 +268,10 @@ export default async function TopPage(): Promise<React.ReactElement> {
             moreLabel="イベント一覧"
           />
           <div className="fn-evlist-grid">
-            {latestEvents.length === 0 ? (
+            {latestEventItems.length === 0 ? (
               <EmptyShelf message="公開中のイベントがまだありません。" />
             ) : (
-              latestEvents.map((event) => (
+              latestEventItems.map((event) => (
                 <PublicEventCard
                   key={event.id}
                   event={event}

@@ -351,7 +351,7 @@ requireAll("app/(public)/page.tsx", [
     "トップの急上昇棚が RankedVideoCard を使っていません。",
   ],
   [
-    /shuffledCopy\(recommended\)/,
+    /shuffledCopy\(\s*recommended\.slice\(0, TOP_SHELF_DISPLAY_LIMIT\),\s*\)/,
     "今週のピックアップを表示直前にランダム順へ変換していません。",
   ],
   [
@@ -359,11 +359,11 @@ requireAll("app/(public)/page.tsx", [
     "今週のピックアップがランダム順の配列を描画していません。",
   ],
   [
-    /shuffledCopy\(latest\.slice\(0, 100\)\)/,
-    "新着100件を表示直前にランダム順へ変換していません。",
+    /shuffledCopy\(\s*latest\.slice\(0, TOP_LATEST_LOOP_DISPLAY_LIMIT\),\s*\)/,
+    "新着を表示直前にランダム順へ変換していません。",
   ],
   [
-    /title="懐かしの映像"[\s\S]*?nostalgic\.map/,
+    /title="懐かしの映像"[\s\S]*?nostalgicLoopItems\.map/,
     "3年以上前の作品を表示する懐かしの映像棚がありません。",
   ],
   [

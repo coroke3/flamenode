@@ -16,4 +16,5 @@ test("STATIC_R2_MAX_AGE_SEC aligns video and list recent targets", () => {
   assert.equal(STATIC_R2_MAX_AGE_SEC.videoDetail, 180);
   assert.equal(STATIC_R2_MAX_AGE_SEC.listRecent, 180);
   assert.equal(STATIC_R2_MAX_AGE_SEC.rules, 3600);
+  assert.equal(STATIC_R2_MAX_AGE_SEC.trending, 300);
 });

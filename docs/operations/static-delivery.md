@@ -60,7 +60,7 @@ The command refuses to overwrite an existing or malformed manifest; it only
 creates the canonical empty schema when the object is absent.
 
 > Status: Active
-> Last verified: 2026-07-31
+> Last verified: 2026-08-29
 > Verified against: `src/lib/publicData/`, `src/lib/admin/staticSharedInputDiagnostics.ts`, `app/(public)/`, `app/(admin)/admin/static-builds/`, `workers/json-generator/`, `wrangler.toml`
 
 **AI:** 公開静的 JSON / degraded D1 / Cache の仕様。正本コードは `src/lib/publicData/loader.ts`。軽量モデルは調査・文書修正まで。loader・権限・公開 DTO 変更は中位以上。
@@ -71,17 +71,22 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 
 公開ローダー (`src/lib/publicData/loader.ts`) は次の順で試す。
 
-1. **Cache API**（isolate 内・TTL は loader ごと）
-2. **R2** の静的 JSON（ヒット時は D1 / enqueue を呼ばない）
-3. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ）
-4. **Unavailable**（空表示・メッセージ。`maintenance` / `static_json_only` / kill switch 無効時は D1 に進まない）
+1. **isolate 解析キャッシュ**（最大24件・TTL 30s。parsed object のみ。Promise / binding は持たない）
+2. **Cache API**（TTL は loader ごと）
+3. **R2** の静的 JSON（ヒット時は D1 / enqueue を呼ばない）
+4. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ）
+5. **Unavailable**（空表示・メッセージ。`maintenance` / `static_json_only` / kill switch 無効時は D1 に進まない）
 
-R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しない。各呼び出しは、そのrequestのCloudflare bindingだけで完結させる。重複読み込みの抑制とstale復旧はCache APIで行い、metadataと本文が同一Server Component request内で同じ詳細JSONを要求する場合はReactのrequest-local cacheで重複取得を抑える。top.jsonが正規化できないmissではslot-statsを追加取得せず、slot統計の障害をtop本体のmiss処理へ混ぜない。
+R2 miss 後の `resolvePublicJsonMiss` では、D1 probe が `public` を返し、要求 ID が canonical ID と異なる（YouTube alias や大文字小文字違い）場合、degraded D1 の重い projection を走らせる前に canonical ID 用の R2 キーを読む。video は `videos/{canonical}.json`、user は `users/{canonical}.json` または `users/{canonical}/...` を試し、ヒットすれば static として返す。alias 側の欠落を直すため rebuild enqueue は従来どおり行い、Cache API には canonical キーと要求キーの両方へ書き込む（TTL 設定時のみ）。canonical キー書換は `/`・`\`・`..`・制御文字・空白付き ID、および `..` や空セグメントを含む R2 キーを拒否し、isolate 解析キャッシュは `server-only` で client 混入を防ぐ。
+
+R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しない。各呼び出しは、そのrequestのCloudflare bindingだけで完結させる。重複読み込みの抑制とstale復旧はCache APIで行い、metadataと本文が同一Server Component request内で同じ詳細JSONを要求する場合はReactのrequest-local cacheで重複取得を抑える。top.jsonが正規化できないmissではslot-statsを追加取得せず、slot統計の障害をtop本体のmiss処理へ混ぜない。`top/slot-stats.v1.json` は `applyTopSlotStatsOverride` で `generated_at` が新しい方だけを採用する（欠損・古い artifact は `top.json.slot_stats` を維持）。公開トップの動画配列は正規化時点で16件までに切り、SSR は棚あたり8件にする。トップの急上昇棚（`analytics/trending.json`）も D1 に降りず、共有 helper の Cache API → R2 → bounded stale で読む。
 
 `static_json_with_live_overlay` では、R2の一覧JSONが空でもD1へ公開作品が追加済みの可能性があるため、空のcollectionをsemantic missとして扱い degraded D1 へ進める。`static_json_only` と `maintenance` では、空の静的JSONをそのまま利用するか、D1 fallback しない。
 
 Detail/event/user/rules loaders opt into `cacheMode: "r2_first"` when a
-freshness-sensitive projection is required. They read R2 before Cache API and
+freshness-sensitive projection is required. They still consult the isolate
+parsed-object cache first (max 30s) so a warm Worker can skip `JSON.parse`.
+On isolate miss they read R2 before Cache API and
 may use only a bounded-age Cache envelope when R2 is unavailable; raw legacy
 Cache payloads without `stored_at` are not accepted as stale fallback. The
 existing visibility fence guard still runs first, and an enforce-mode manifest
@@ -121,7 +126,8 @@ rows and does not replace usable public static detail.
 | 新着一覧 | 180 | 3分以内 |
 | 検索インデックス | 300 | 5分以内 |
 | ランキング / top | 600 | 10分以内 |
-| top slot-stats | 600 | 10分以内（`top.json` と同値） |
+| top slot-stats | 30 | 30秒以内（`top.json` 本体は10分のまま） |
+| 急上昇 / trending | 300 | GA4 同期（hourly）。R2 `max-age=300` と揃える |
 | users/index | 600 | — |
 | 利用規約 | 3600 | — |
 | blocklist / random pool | 600 | — |
@@ -164,7 +170,7 @@ PVSF互換の公開Release一覧は `event_release:{id}` が `events/{id}/releas
 
 Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象videoの `video_events` と `primary_event_id` を80件以下のIDチャンクで解決し、関連する全 `event_release` をfan-outする。イベント所属変更を同じbatchで行う場合は `video_events` mutationのbefore/after event IDも別途対象に含める。
 
-関連動画の非公開除外は `youtube/related-blocklist.v1.json`、補完候補は `videos/random-pool.v1.json` を用いる。どちらも読み込みは fresh Cache → R2 → stale Cache（最大24h）→ unavailable とし、状態を捨てない。必要な共有JSONがunavailableのときは関連動画セクションを障害表示へ分離し、空blocklist・正常な0件へ倒さない。
+関連動画の非公開除外は `youtube/related-blocklist.v1.json`、補完候補は `videos/random-pool.v1.json` を用いる。どちらも json-generator / admin 診断の読み込みは fresh Cache → R2 → stale Cache（最大24h）→ unavailable とし、状態を捨てない。公開動画ページのSSRは `videos/{id}.json` に埋め込まれた related だけを描画し、request 時に両 object を JSON.parse しない（Workers Free の HTTP 10ms）。必要な共有JSONがunavailableのときは admin 診断と再生成で回復し、公開GET側で空blocklist・正常な0件へ倒さない。
 
 `/admin/static-builds` は両objectについて、R2 `head` による実体の有無、公開ローダーの `fresh` / `stale` / `unavailable`、`generated_at`、blocklist件数またはrandom pool件数を表示する。binding欠損・`head`失敗は「確認不可」とし、管理者write guardを通る個別再生成キューに加え、両方まとめて投入する操作を提供する。R2 object が欠けている場合は `content-jobs` Recovery Cron が high 優先度で両 target を自動 enqueue する。YouTube 関連の `youtube_related_blocklist` / `random_video_pool` に加え、`users/index.json` / `users/public-x-icon-map.v1.json` / `users/pickup-creators.v1.json` のいずれかが欠けているときは `users_index:global` を high で enqueue する（`rebuildUsersIndex` が3つを再生成する）。`top/slot-stats.v1.json` が欠けているときは `top_slot_stats:global` を high で enqueue する（`rebuildTopSlotStats` が artifact を再生成する）。
 

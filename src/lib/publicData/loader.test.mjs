@@ -116,6 +116,10 @@ test("loadPublicJson applies empty collection semantic miss on cache and R2 hits
   assert.match(loaderSource, /isEmptyCollection/);
   assert.match(
     loaderSource,
+    /if \(options\.isEmptyCollection\?\.\(isolatedPayload\)\)/,
+  );
+  assert.match(
+    loaderSource,
     /if \(options\.isEmptyCollection\?\.\(cached\)\)/,
   );
   assert.match(
@@ -218,10 +222,46 @@ test("resolvePublicJsonMiss は公開 miss を high 優先度で enqueue する"
 });
 
 test("video alias miss は probe の canonical ID で rebuild queue を共有する", () => {
-  assert.match(loaderSource, /const canonicalTargetId = probe\.canonicalTargetId/);
+  assert.match(loaderSource, /canonicalTargetId = probe\.canonicalTargetId/);
   assert.match(
     loaderSource,
     /targetType: missTargetType,[\s\S]*targetId: canonicalTargetId/,
+  );
+});
+
+test("alias miss は canonical R2 を degraded D1 より先に試す", () => {
+  assert.match(loaderSource, /from "\.\/rewriteCanonicalR2Key"/);
+  assert.match(loaderSource, /rewriteCanonicalR2Key\(/);
+
+  const missBlock = loaderSource.slice(
+    loaderSource.indexOf("async function resolvePublicJsonMiss"),
+    loaderSource.indexOf("export function createPublicJsonLoader"),
+  );
+  const canonicalRetryIndex = missBlock.indexOf("rewriteCanonicalR2Key");
+  const degradedIndex = missBlock.indexOf("options.degradedFetcher");
+  assert.ok(
+    canonicalRetryIndex >= 0 && degradedIndex > canonicalRetryIndex,
+    "canonical R2 retry precedes degraded D1",
+  );
+  const canonicalReadIndex = missBlock.indexOf(
+    "await readStaticJson<T>(canonicalR2Key)",
+  );
+  assert.ok(
+    canonicalReadIndex >= 0 && degradedIndex > canonicalReadIndex,
+    "readStaticJson for canonical key precedes degradedFetcher",
+  );
+  assert.match(
+    missBlock,
+    /canonicalTargetId !== options\.targetId/,
+  );
+  assert.match(missBlock, /buildStaticHitResult\(\s*canonicalPayload/);
+  assert.match(
+    missBlock,
+    /writePublicJsonCacheBestEffort\(\s*canonicalR2Key/,
+  );
+  assert.match(
+    missBlock,
+    /writePublicJsonCacheBestEffort\(\s*options\.r2Key/,
   );
 });
 
@@ -368,4 +408,34 @@ test("mapTargetTypeToFenceEntity は event_base を event フェンスにマッ�
     loaderSource,
     /targetType === "event"[\s\S]*targetType === "event_base"[\s\S]*targetType === "event_release"[\s\S]*return "event"/,
   );
+});
+
+test("loadPublicEventVideosPage tryCachedOrR2 は R2 より先に isolate 解析キャッシュを読む", () => {
+  const eventListBlock = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicEventVideosPage"),
+    loaderSource.indexOf("export async function loadStaticRulesPage"),
+  );
+  const tryCachedOrR2Block = eventListBlock.slice(
+    eventListBlock.indexOf("const tryCachedOrR2"),
+    eventListBlock.indexOf("const baseResult = await tryCachedOrR2"),
+  );
+  const isolateIndex = tryCachedOrR2Block.indexOf("readPublicJsonIsolateCache");
+  const r2Index = tryCachedOrR2Block.indexOf("readStaticJson");
+  assert.ok(isolateIndex >= 0, "isolate cache read is present in tryCachedOrR2");
+  assert.ok(r2Index > isolateIndex, "R2 follows isolate in tryCachedOrR2");
+  assert.match(tryCachedOrR2Block, /missOptions\.cacheMode !== "bypass"/);
+});
+
+test("loadPublicJson は Cache/R2 の JSON.parse より先に isolate 解析キャッシュを読む", () => {
+  const fn = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicJson"),
+    loaderSource.indexOf("function isEmptyItemsCollection"),
+  );
+  const isolateIndex = fn.indexOf("readPublicJsonIsolateCache");
+  const cacheIndex = fn.indexOf("readPublicJsonCache");
+  const r2Index = fn.indexOf("readStaticJson");
+  assert.ok(isolateIndex >= 0, "isolate cache read is present");
+  assert.ok(cacheIndex > isolateIndex, "Cache API follows isolate");
+  assert.ok(r2Index > isolateIndex, "R2 follows isolate");
+  assert.match(fn, /cacheMode !== "bypass"/);
 });

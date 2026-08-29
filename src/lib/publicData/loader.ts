@@ -171,6 +171,7 @@ import {
   unwrapPublicJsonCachePayload,
   writePublicJsonCacheBestEffort,
 } from "./publicCache";
+import { readPublicJsonIsolateCache } from "./publicCacheIsolate";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
 import {
   toPublicJsonLegacySource,
@@ -181,6 +182,7 @@ import {
   filterPublicArtifactPayload,
   type PublicArtifactVisibilityContext,
 } from "./publicArtifactVisibility";
+import { rewriteCanonicalR2Key } from "./rewriteCanonicalR2Key";
 
 export const PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
 
@@ -542,6 +544,7 @@ async function resolvePublicJsonMiss<T = never>(
   let enqueued = false;
   let rebuildState: RebuildRequestState = "not_needed";
   let probe: PublicStaticTargetProbe | null = null;
+  let canonicalTargetId: string | undefined;
   if (db) {
     try {
       probe = await probePublicStaticTarget(
@@ -571,7 +574,7 @@ async function resolvePublicJsonMiss<T = never>(
       // visibility fences.  Keeping the raw alias here creates a second
       // `video:<youtube-id>` queue row and can leave the canonical projection
       // stale when the alias path is the first miss after a publish.
-      const canonicalTargetId = probe.canonicalTargetId;
+      canonicalTargetId = probe.canonicalTargetId;
       const missTargets = options.missRebuildTargetTypes ?? [options.targetType];
       for (const missTargetType of missTargets) {
         const enqueueResult = await directEnqueueStaticRebuild(
@@ -598,6 +601,55 @@ async function resolvePublicJsonMiss<T = never>(
             new Error(enqueueResult.message),
           );
         }
+      }
+    }
+  }
+
+  if (
+    probe?.state === "public" &&
+    canonicalTargetId &&
+    canonicalTargetId !== options.targetId
+  ) {
+    const canonicalR2Key = rewriteCanonicalR2Key(
+      options.r2Key,
+      options.targetId,
+      canonicalTargetId,
+    );
+    if (canonicalR2Key) {
+      const canonicalPayload = filterPublicArtifactPayload(
+        options.targetType,
+        await readStaticJson<T>(canonicalR2Key),
+        visibilityContext,
+      );
+      if (
+        canonicalPayload !== null &&
+        !options.isEmptyCollection?.(canonicalPayload)
+      ) {
+        recordDegradedCircuitR2HitBestEffort();
+        recordPublicStaticHit();
+        const cacheMode = options.cacheMode ?? "cache_first";
+        if (cacheMode !== "bypass" && options.cacheTtlSeconds) {
+          const envelope = {
+            payload: canonicalPayload,
+            stored_at: Math.floor(Date.now() / 1000),
+          };
+          writePublicJsonCacheBestEffort(
+            canonicalR2Key,
+            envelope,
+            options.cacheTtlSeconds,
+          );
+          writePublicJsonCacheBestEffort(
+            options.r2Key,
+            envelope,
+            options.cacheTtlSeconds,
+          );
+        }
+        const operationMode = await resolvePublicOperationMode({ allowD1: false });
+        return buildStaticHitResult(
+          canonicalPayload,
+          "static",
+          getPublicDataStrategy(operationMode),
+        );
       }
     }
   }
@@ -738,6 +790,27 @@ export async function loadPublicJson<T>(
   const cacheMode = options.cacheMode ?? "cache_first";
   const cacheFirst = cacheMode === "default" || cacheMode === "cache_first";
   const r2First = cacheMode === "r2_first";
+  if (cacheMode !== "bypass") {
+    const isolatedPayload = filterPublicArtifactPayload<T>(
+      options.targetType,
+      unwrapPublicJsonCachePayload<T>(
+        readPublicJsonIsolateCache(options.r2Key),
+      ),
+      visibility.artifactContext,
+    );
+    if (isolatedPayload !== null) {
+      if (options.isEmptyCollection?.(isolatedPayload)) {
+        return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
+      }
+      recordPublicStaticHit();
+      const isolateMode = await resolvePublicOperationMode({ allowD1: false });
+      return buildStaticHitResult(
+        isolatedPayload,
+        "cached_static",
+        getPublicDataStrategy(isolateMode),
+      );
+    }
+  }
   let cachedEnvelope: ReturnType<typeof coercePublicJsonCacheEnvelope> = null;
   const cached = cacheFirst
     ? filterPublicArtifactPayload<T>(
@@ -1430,6 +1503,25 @@ export async function loadPublicEventVideosPage(params: {
 
   const tryCachedOrR2 = async (key: string) => {
     const r2First = missOptions.cacheMode === "r2_first";
+    if (missOptions.cacheMode !== "bypass") {
+      const isolated = filterPublicArtifactPayload<StaticEventDetailPayload>(
+        "event_base",
+        unwrapPublicJsonCachePayload<StaticEventDetailPayload>(
+          readPublicJsonIsolateCache(key),
+        ),
+        visibility.artifactContext,
+      );
+      if (isolated !== null) {
+        const strategy = getPublicDataStrategy(
+          await resolvePublicOperationMode({ allowD1: false }),
+        );
+        const hit = tryStaticEventList(isolated, "cached_static", strategy);
+        if (hit) {
+          recordPublicStaticHit();
+          return { hit, payload: isolated };
+        }
+      }
+    }
     const cached =
       r2First || missOptions.cacheMode === "bypass"
         ? null
@@ -1679,16 +1771,16 @@ export async function loadStaticTopPage(): Promise<
   if (!normalized) {
     return { ...result, data: null, top: null };
   }
+  let normalizedWithSlotStats = normalized;
   const slotStatsResult = await loadStaticJsonFreshStaleUnavailable({
     key: TOP_SLOT_STATS_OBJECT_KEY,
     normalize: normalizeStaticTopSlotStats,
     maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats * 2,
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.topSlotStats,
   });
-  const slotStatsArtifact = slotStatsResult.value;
-  const normalizedWithSlotStats = applyTopSlotStatsOverride(
+  normalizedWithSlotStats = applyTopSlotStatsOverride(
     normalized,
-    slotStatsArtifact,
+    slotStatsResult.value,
   );
   const top =
     normalizedWithSlotStats &&

@@ -85,7 +85,7 @@ test("normalizeStaticTop: top payload をトップページ用 DTO に整形す�
   });
 });
 
-test("normalizeStaticTop: 新着100件と懐かしの映像20件を上限にする", () => {
+test("normalizeStaticTop: 公開 SSR 向けに新着・懐かしの映像を16件へ上限する", () => {
   const top = normalizeStaticTop({
     latest: Array.from({ length: 120 }, (_, index) => ({
       id: `latest-${index}`,
@@ -100,8 +100,8 @@ test("normalizeStaticTop: 新着100件と懐かしの映像20件を上限にす�
   });
 
   assert.ok(top);
-  assert.equal(top.latest.length, 100);
-  assert.equal(top.nostalgic.length, 20);
+  assert.equal(top.latest.length, 16);
+  assert.equal(top.nostalgic.length, 16);
 });
 
 test("normalizeStaticTop: legacy items だけでも表示可能にする", () => {

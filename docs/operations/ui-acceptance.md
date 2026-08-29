@@ -49,7 +49,7 @@
 - モバイル公開メニューはページ途中から開いてもヘッダー直下の先頭から表示し、再度開いた場合もメニュー内部のスクロール位置を引き継がない。
 - 900px以下の固定ヘッダーは境界線込み50pxとし、動画playerなどの固定要素も共通の`--header-h`へ追従する。
 - トップの「今週のピックアップ」は`top.json`を正本として維持し、JSONを変更せずrequestごとの表示順だけをランダム化する。
-- トップの「FlameNodeで注目」は R2 `analytics/trending.json` を正本とし、上位12件を順位順で `TopLoopShelf` 表示する（他のトップ棚と同じ full-bleed 幅・自動スクロール。向きは注目→left / ピックアップ→right / 新着→left / 懐かし→right）。24時間超のデータは非表示。degraded D1 でも R2 が正常なら表示する。
+- トップの「FlameNodeで注目」は R2 `analytics/trending.json` を正本とし、上位8件を順位順で `TopLoopShelf` 表示する（他のトップ棚と同じ full-bleed 幅・自動スクロール。向きは注目→left / ピックアップ→right / 新着→left / 懐かし→right）。24時間超のデータは非表示。degraded D1 でも R2 が正常なら表示する。トップのピックアップ・新着・懐かしも各8件に抑える（Workers Free の HTTP 10ms）。
 - `/trending` は急上昇ランキング（上位30件・直近2日間の視聴急増で順位・各作品に1週間の視聴回数（views_7d）のみ表示・JST最終更新）を表示し、データ欠損や stale でも404/500にしない。2日/5日/30日の期間別視聴数は出さない。
 - `/recommend` の「人気作品」レール（旧「伸びている」）は表示名のみ変更し、算出は `recommend.json` のまま維持する。
 - Shelfはhover、focus、pointer、touch、wheel操作中に停止し、reduced motion、viewport外、非表示tabでは自動送りしない。
@@ -97,8 +97,8 @@
 
 - 見出しは「投稿予定のご案内」。イベント名はその下の小さなリンク（`/event/{id}`）。`fn-btn` は使わない。
 - 表示切替はアイコン3つ（リスト / カード / 作者別）。`aria-pressed` と `aria-label`（リスト表示・カード表示・作者別表示）を維持する。
-- URL hash は `#list` / `#grid` / `#creator`（未指定は list）。`history.replaceState` で同期する。
-- リスト表示は PVSF 互換の日付グループ・時刻・種別バッジ（複数人 / 個人）・作者・タイトル・視聴/詳細リンク。コメントとメンバーは横スクロール帯（overflow 時は 3 秒後 marquee、`prefers-reduced-motion` では停止）。
+- URL hash は `#list` / `#grid` / `#creator`（未指定は list）。初期表示は SSR/CSR とも list で、hash は mount 後にだけ読む。切替後と初期同期は `history.replaceState` で行う。
+- リスト表示は PVSF 互換の日付グループ・時刻・種別バッジ（複数人 / 個人）・作者・タイトル・視聴/詳細リンク。日付グループの key と見出しは Asia/Tokyo の `YYYY/MM/DD`（年が違う同月日は分けて表示）。`日時未定` は最後。不正な `scheduled_time` はページを落とさず「日時未定」にする。視聴リンクは `extractYoutubeId` が成功したときだけ出す。コメントとメンバーは横スクロール帯（overflow 時は 3 秒後 marquee、`prefers-reduced-motion` では停止。DOM の `cloneNode` は使わない）。
 - カード表示は 320×180 タイル（690px 以下は幅 100%）。YouTube サムネは `youtubeThumbUrl` 経由。hover / focus-within で視聴/詳細が出る。
 - 作者別表示は「個人参加」（非 collab）と「グループ参加」（collab）の2セクション。カードクリックで作品詳細へ（Enter/Space 対応）。
 - 空配列時は「公開中の作品はありません。」。truncated のときだけ「先頭500作品を表示」。
