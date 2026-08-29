@@ -22,7 +22,7 @@ test("content cron propagates its deadline signal through queue and cleanup", as
   assert.match(optimizedRebuild, /throwIfAborted\(signal/);
   assert.match(
     optimizedRebuild,
-    /rebuildTarget\(env, targetType, targetId, signal(?:, reason)?\)/,
+    /rebuildTarget\(\s*(?:env|legacyEnv)\s*,\s*targetType\s*,\s*targetId\s*,\s*signal(?:\s*,\s*reason)?\s*,?\s*\)/,
   );
   assert.match(queue, /markRetryOrFailed\(env, row, token, error, now, metrics\)/);
   assert.match(cleanup, /runCleanup\(env, signal, metrics\)/);
