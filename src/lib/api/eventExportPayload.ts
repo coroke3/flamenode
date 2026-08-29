@@ -202,9 +202,7 @@ function answerValue(answer: EventExportAnswerSnapshot): unknown {
   return answer.answer_text;
 }
 
-function answerText(video: EventExportVideoSnapshot, key: string): string {
-  const answer = video.answers.find((candidate) => candidate.key === key);
-  if (!answer) return "";
+function answerTextValue(answer: EventExportAnswerSnapshot): string {
   const value = answerValue(answer);
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -213,6 +211,24 @@ function answerText(video: EventExportVideoSnapshot, key: string): string {
     return String(value);
   }
   return "";
+}
+
+function answerText(video: EventExportVideoSnapshot, key: string): string {
+  const answer = video.answers.find(
+    (candidate) =>
+      candidate.key === key || candidate.key.startsWith(`${key}_`),
+  );
+  if (!answer) return "";
+  return answerTextValue(answer);
+}
+
+function answerTextByLabel(
+  video: EventExportVideoSnapshot,
+  pattern: RegExp,
+): string {
+  const answer = video.answers.find((candidate) => pattern.test(candidate.label));
+  if (!answer) return "";
+  return answerTextValue(answer);
 }
 
 interface EventExportCustomAnswer {
@@ -392,10 +408,12 @@ export function buildLegacyEventExportPayload(
       "";
     const stagePermission =
       answerText(video, "stage_permission") ||
+      answerTextByLabel(video, /(?:stage|ステージ|上映|権利|利用)/i) ||
       importedNotes.get("ステージ利用") ||
       "";
     const stageParticipation =
       answerText(video, "stage_participation") ||
+      answerTextByLabel(video, /(?:登壇|参加|発表|speaker)/i) ||
       importedNotes.get("登壇") ||
       "";
     const legacyGeneralComment = importedNotes.get("コメント") || video.intro_comment || "";

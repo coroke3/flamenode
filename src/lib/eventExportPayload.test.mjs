@@ -374,7 +374,7 @@ test("scheduled KV cacheはv5とlegacyで衝突せず無効化時に両方消す
     /eventExportPayloadCacheKey\(\s*eventId,\s*format,\s*refreshMinutes/,
   );
   assert.match(cacheSource, /\["v5", "legacy"\] as const/);
-  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 8/);
+  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 9/);
 });
 
 test("custom answer valueはanswer_textを優先してJSON形式も安全に復元する", () => {
@@ -431,4 +431,36 @@ test("custom answer valueはanswer_textを優先してJSON形式も安全に復�
   assert.deepEqual(legacyVideo.checkbox_value, ["A"]);
   assert.equal(legacyVideo.numeric_value, 42);
   assert.equal(legacyVideo.empty_json_fallback, "空JSON時の本文");
+});
+
+test("legacy固定列は動的stage質問の回答をラベルから補完する", () => {
+  const dynamicStageSnapshot = {
+    ...snapshot,
+    event: { ...snapshot.event },
+    videos: [
+      {
+        ...snapshot.videos[0],
+        answers: [
+          {
+            key: "stage_permission_mtaty4rb",
+            label: "振り返り上映での開始タイミング",
+            answer_text: "0:00",
+            answer_json: null,
+            sort_order: 0,
+          },
+          {
+            key: "stage_permission_mtatz240",
+            label: "登壇しますか？",
+            answer_text: "しません。",
+            answer_json: null,
+            sort_order: 1,
+          },
+        ],
+      },
+    ],
+  };
+
+  const row = buildLegacyEventExportPayload(dynamicStageSnapshot)[0];
+  assert.equal(row.righttype, "0:00");
+  assert.equal(row.toudan, "しません。");
 });
