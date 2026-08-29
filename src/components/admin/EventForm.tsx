@@ -34,6 +34,7 @@ import {
   questionTypeNeedsOptions,
 } from "@/lib/video/customQuestions";
 import { formatJstDatetimeLocal } from "@/lib/utils/dateInput";
+import { generateId } from "@/lib/utils/id";
 import {
   normalizeEventVisibility,
   type EventVisibilityStatus,
@@ -908,7 +909,7 @@ export function EventForm({
               ...current,
               {
                 ...DEFAULT_STAGE_PERMISSION_FIELD,
-                id: `stage_permission_${Date.now().toString(36)}`,
+                id: `stage_permission_${generateId()}`,
                 enabled: true,
                 required: false,
                 label: `追加質問 ${current.length + 1}`,

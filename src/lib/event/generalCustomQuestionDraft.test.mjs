@@ -17,6 +17,8 @@ const limitsSource = await readFile(
 
 test("empty draft factory avoids stage_permission keys and defaults to textarea", () => {
   assert.match(draftSource, /question_key: `q_\$\{suffix\}`/);
+  assert.match(draftSource, /generateId\(\)/);
+  assert.doesNotMatch(draftSource, /Math\.random/);
   assert.match(draftSource, /type: "textarea"/);
   assert.doesNotMatch(draftSource, /question_key: `stage_permission/);
 });

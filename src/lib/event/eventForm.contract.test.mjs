@@ -31,6 +31,12 @@ test("manage event edit carries the rendered revision and rejects stale saves", 
   assert.match(actionSource, /submittedRevision !== before\.updated_at/);
 });
 
+test("stage permission question IDs stay unique during rapid additions", () => {
+  const formSource = readRepoFile("src/components/admin/EventForm.tsx");
+  assert.match(formSource, /id: `stage_permission_\$\{generateId\(\)\}`/);
+  assert.doesNotMatch(formSource, /stage_permission_\$\{Date\.now\(\)/);
+});
+
 test("event create and update persist general custom question form fields", () => {
   const actionSource = readRepoFile("src/lib/actions/event-admin.ts");
   const formSource = readRepoFile("src/lib/event/eventForm.ts");

@@ -5,6 +5,7 @@ import {
   type CustomQuestionType,
 } from "@/lib/video/customQuestions";
 import { isStagePermissionQuestionKey } from "@/lib/video/formSettings";
+import { generateId } from "@/lib/utils/id";
 
 export type EventGeneralCustomQuestionDraft = {
   clientId: string;
@@ -30,7 +31,7 @@ export const GENERAL_CUSTOM_QUESTION_TYPE_LABELS: Record<
 };
 
 function createQuestionKeySuffix(): string {
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return generateId();
 }
 
 export function createEmptyGeneralCustomQuestion(
