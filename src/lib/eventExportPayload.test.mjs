@@ -464,3 +464,70 @@ test("legacy固定列は動的stage質問の回答をラベルから補完する
   assert.equal(row.righttype, "0:00");
   assert.equal(row.toudan, "しません。");
 });
+
+test("legacy固定列は接頭辞が先に並んでも完全一致した質問キーを優先する", () => {
+  const collisionSnapshot = {
+    ...snapshot,
+    event: { ...snapshot.event },
+    videos: [
+      {
+        ...snapshot.videos[0],
+        answers: [
+          {
+            key: "stage_permission_note",
+            label: "上映に関する補足",
+            answer_text: "補足回答",
+            answer_json: null,
+            sort_order: 0,
+          },
+          {
+            key: "stage_permission",
+            label: "上映可否",
+            answer_text: "許可する",
+            answer_json: null,
+            sort_order: 1,
+          },
+        ],
+      },
+    ],
+  };
+
+  const row = buildLegacyEventExportPayload(collisionSnapshot)[0];
+  assert.equal(row.righttype, "許可する");
+});
+
+test("イベント公開APIは範囲外Unix時刻をnullまたは空文字へ閉じて例外化しない", () => {
+  const outOfRange = Number.MAX_VALUE;
+  const invalidTimeSnapshot = {
+    ...snapshot,
+    event: {
+      ...snapshot.event,
+      start_time: outOfRange,
+      end_time: outOfRange,
+      entry_start_time: outOfRange,
+      entry_end_time: outOfRange,
+      updated_at: outOfRange,
+    },
+    videos: [
+      {
+        ...snapshot.videos[0],
+        scheduled_time: outOfRange,
+        created_at: outOfRange,
+        updated_at: outOfRange,
+      },
+    ],
+  };
+
+  const v5 = buildEventExportPayload(invalidTimeSnapshot, outOfRange);
+  assert.equal(v5.generated_at, null);
+  assert.equal(v5.event.start_at, null);
+  assert.equal(v5.event.end_at, null);
+  assert.equal(v5.videos[0].scheduled_at, null);
+  assert.equal(v5.videos[0].created_at, null);
+  assert.equal(v5.videos[0].updated_at, null);
+
+  const legacy = buildLegacyEventExportPayload(invalidTimeSnapshot)[0];
+  assert.equal(legacy.timestamp, "");
+  assert.equal(legacy.data, "");
+  assert.equal(legacy.time, "");
+});

@@ -121,6 +121,8 @@ export type RequiredVideoFieldValues = {
   title?: string | null;
   icon_mode?: string | null;
   icon_url?: string | null;
+  /** Current/persisted icon used only when icon_mode is keep. */
+  existing_icon_url: string | null;
   profile_text?: string | null;
   youtube_channel_url?: string | null;
   other_social_links?: string | null;
@@ -227,7 +229,12 @@ export function isRequiredVideoFieldFilled(
   values: RequiredVideoFieldValues,
 ): boolean {
   if (field === "icon_url") {
-    if (values.icon_mode === "keep") return true;
+    // Upload presence and image validity are verified by
+    // resolveVideoCreatorIcon after the required-field check.
+    if (values.icon_mode === "upload") return true;
+    if (values.icon_mode === "keep") {
+      return isFilledText(values.existing_icon_url);
+    }
     if (values.icon_mode === "none") return false;
     return isFilledText(values.icon_url);
   }

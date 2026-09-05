@@ -70,6 +70,7 @@ test("未入力の必須項目だけを欠けとして返す", () => {
     youtube_url: "",
     icon_mode: "keep",
     icon_url: null,
+    existing_icon_url: "/api/media/video-icons/x-user-1/existing.png",
     other_social_links: "[]",
   };
   assert.equal(
@@ -78,6 +79,20 @@ test("未入力の必須項目だけを欠けとして返す", () => {
   );
   assert.equal(
     firstMissingRequiredVideoField(["icon_url"], values),
+    null,
+  );
+  assert.equal(
+    firstMissingRequiredVideoField(
+      ["icon_url"],
+      { ...values, icon_mode: "keep", existing_icon_url: null },
+    ),
+    "icon_url",
+  );
+  assert.equal(
+    firstMissingRequiredVideoField(
+      ["icon_url"],
+      { ...values, icon_mode: "upload", icon_url: null, existing_icon_url: null },
+    ),
     null,
   );
   assert.equal(

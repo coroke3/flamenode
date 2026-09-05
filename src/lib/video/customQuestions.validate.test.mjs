@@ -57,6 +57,19 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(rejected.ok, false);
   });
 
+  test("checkbox answers are trimmed and deduplicated at the validator boundary", () => {
+    const result = validateAnswerInput(
+      question({ type: "checkbox", options: ["red", "blue"] }),
+      [" red ", "red", "blue", " blue "],
+    );
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.drafts.length, 1);
+      assert.deepEqual(JSON.parse(result.drafts[0].answer_json), ["red", "blue"]);
+    }
+  });
+
   test("optional empty choice answers stay empty drafts", () => {
     const result = validateAnswerInput(question({ options: [] }), [""]);
     assert.equal(result.ok, true);

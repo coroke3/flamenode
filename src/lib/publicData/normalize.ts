@@ -30,6 +30,13 @@ export function normalizeNullableUnix(value: unknown): number | null {
   return unix;
 }
 
+export function normalizeUnixDate(value: unknown): Date | null {
+  const unix = normalizeNullableUnix(value);
+  if (unix == null) return null;
+  const date = new Date(unix * 1000);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
 export function normalizeNumericUnix(value: unknown): number | null {
   const normalized =
     typeof value === "number" ? value : Number(value);

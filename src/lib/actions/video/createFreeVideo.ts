@@ -115,7 +115,7 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
   const eventIds = eventId ? [eventId] : [];
   const missingRequired = firstMissingRequiredVideoField(
     await loadUnionRequiredVideoFields(db, eventIds),
-    parsed.data,
+    { ...parsed.data, existing_icon_url: null },
   );
   if (missingRequired) {
     return { ok: false, message: missingRequiredVideoFieldMessage(missingRequired) };

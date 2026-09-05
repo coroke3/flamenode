@@ -1239,6 +1239,7 @@ export function VideoForm({
           ? iconModeElement.value
           : undefined,
       icon_url: submitterIconUrl,
+      existing_icon_url: submitterIconUrl,
       profile_text: submitterProfileText,
       youtube_channel_url: submitterYoutubeChannel,
       other_social_links: submitterSocialLinks,

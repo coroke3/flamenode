@@ -124,7 +124,9 @@ export function validateAnswerInput(
   question: CustomQuestion,
   values: string[],
 ): AnswerValidationResult {
-  const filtered = values.filter((v) => v.trim());
+  const filtered = Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean)),
+  );
 
   if (question.required && filtered.length === 0) {
     return { ok: false, message: `${question.label}を入力してください。` };

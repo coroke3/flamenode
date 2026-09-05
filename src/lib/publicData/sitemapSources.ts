@@ -12,11 +12,12 @@ import {
   normalizeStaticSearchIndexPayload,
   type StaticSearchIndexPayload,
 } from "./staticSearchIndexCore";
+import { normalizeUnixDate } from "./normalize";
 
 type SitemapEntry = MetadataRoute.Sitemap[number];
 
 function unixDate(value: number | null | undefined): Date | undefined {
-  return value == null ? undefined : new Date(Number(value) * 1000);
+  return normalizeUnixDate(value) ?? undefined;
 }
 
 function entry(

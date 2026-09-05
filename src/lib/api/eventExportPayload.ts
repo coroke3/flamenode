@@ -115,9 +115,14 @@ function xProfileUrl(xId: string | null): string | null {
   return xId ? `https://x.com/${encodeURIComponent(xId)}` : null;
 }
 
-function isoFromUnix(value: number | null): string | null {
+function dateFromUnix(value: number | null): Date | null {
   if (value == null || !Number.isFinite(value)) return null;
-  return new Date(value * 1000).toISOString();
+  const date = new Date(value * 1000);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function isoFromUnix(value: number | null): string | null {
+  return dateFromUnix(value)?.toISOString() ?? null;
 }
 
 /**
@@ -214,10 +219,9 @@ function answerTextValue(answer: EventExportAnswerSnapshot): string {
 }
 
 function answerText(video: EventExportVideoSnapshot, key: string): string {
-  const answer = video.answers.find(
-    (candidate) =>
-      candidate.key === key || candidate.key.startsWith(`${key}_`),
-  );
+  const answer =
+    video.answers.find((candidate) => candidate.key === key) ??
+    video.answers.find((candidate) => candidate.key.startsWith(`${key}_`));
   if (!answer) return "";
   return answerTextValue(answer);
 }
@@ -292,8 +296,8 @@ function buildLegacyCustomAnswerFields(
 }
 
 function legacyDateParts(value: number | null): { date: string; time: string } {
-  if (value == null || !Number.isFinite(value)) return { date: "", time: "" };
-  const date = new Date((value + 9 * 60 * 60) * 1000);
+  const date = dateFromUnix(value == null ? null : value + 9 * 60 * 60);
+  if (!date) return { date: "", time: "" };
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   const hour = String(date.getUTCHours()).padStart(2, "0");

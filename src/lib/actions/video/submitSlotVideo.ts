@@ -196,6 +196,7 @@ async function submitSlotVideoCore(
     {
       ...parsed.data,
       icon_mode: String(formData.get("icon_mode") ?? parsed.data.icon_mode ?? ""),
+      existing_icon_url: existingVideo?.creator_icon_url ?? null,
     },
   );
   if (missingRequired) {

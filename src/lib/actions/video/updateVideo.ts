@@ -236,7 +236,11 @@ async function updateVideoCore(
   }
   const missingRequired = firstMissingRequiredVideoField(
     await loadUnionRequiredVideoFields(db, requiredEventIds),
-    { ...parsed.data, icon_mode: rawIconMode },
+    {
+      ...parsed.data,
+      icon_mode: rawIconMode,
+      existing_icon_url: target.creator_icon_url,
+    },
     privilegeMode === "normal" ? generalFields : undefined,
   );
   if (missingRequired) {
