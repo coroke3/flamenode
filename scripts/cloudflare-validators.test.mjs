@@ -165,9 +165,6 @@ function writeValidTemplate(root) {
       "[build]",
       'command = "node scripts/workers-ci-wrangler-guard.mjs"',
       "",
-      "[limits]",
-      "cpu_ms = 30_000",
-      "",
       "[assets]",
       'directory = ".open-next/assets"',
       'binding = "ASSETS"',
@@ -227,6 +224,20 @@ test("OpenNext web Worker and exactly three Cron Worker templates pass", () =>
   withFixture((root) => {
     writeValidTemplate(root);
     assert.deepEqual(checkCloudflareTemplate({ root }), []);
+  }));
+
+test("Workers Free web template rejects an explicit CPU limit", () =>
+  withFixture((root) => {
+    writeValidTemplate(root);
+    write(
+      root,
+      "wrangler.toml",
+      fs
+        .readFileSync(path.join(root, "wrangler.toml"), "utf8")
+        .replace("[assets]", "[limits]\ncpu_ms = 30_000\n\n[assets]"),
+    );
+    const errors = checkCloudflareTemplate({ root }).join("\n");
+    assert.match(errors, /Workers Free must not define \[limits\] or limits\.cpu_ms/);
   }));
 
 test("tracked production ID, Pages script, and multiple cron expressions fail closed", () =>

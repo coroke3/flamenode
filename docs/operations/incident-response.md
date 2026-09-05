@@ -62,7 +62,7 @@ Error 1102 は Worker exceeded resource limits。ログ `Worker exceeded CPU tim
 2. 公開パス（`flamenode-web`）では `public_request_metrics` で R2 hit か degraded D1 fallback かを切り分ける。R2 JSON ヒットでも SSR のため Worker は動く。Worker をスキップするのは Static Assets の一致ファイル（`run_worker_first = false`）だけである。
 3. Cron は batch 上限を下げ、不要な全件走査・重複処理・過剰 JSON parse を確認する。
 4. コード最適化（SSR カード枚数、isolate 解析キャッシュ、巨大 JSON parse 削減、alias の canonical R2 再試行、degraded D1 経路の bounded 化）を行う。公開GET初回はトップ棚8件・関連12件・ユーザー公開ページの icon manifest 省略が前提。
-5. Paid Standard では `wrangler.toml` の `[limits] cpu_ms = 30_000`（上限 30s を明示済み。5 分へは上げない）を確認する。Free では wrangler の `cpu_ms` は HTTP 10ms を上げない。Workers Caching（`[cache] enabled = true`）は Static Assets 課金のため使わない。
+5. Paid Standard へ移行した場合だけ `wrangler.toml` の `[limits] cpu_ms` を検討し、5分へは上げない。Freeでは`cpu_ms`はHTTP 10msを上げず、設定するとuploadが拒否されるため`[limits]`を置かない。Workers Caching（`[cache] enabled = true`）は Static Assets 課金のため使わない。
 
 ### D1無料枠 / rows read・written増加
 

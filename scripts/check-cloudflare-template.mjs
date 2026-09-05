@@ -254,13 +254,12 @@ export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   requirePattern(errors, rootToml, "wrangler.toml", /\[assets\][\s\S]*?directory\s*=\s*"\.open-next\/assets"/m, "assets directory must be .open-next/assets");
   requirePattern(errors, rootToml, "wrangler.toml", /\[assets\][\s\S]*?binding\s*=\s*"ASSETS"/m, "assets binding ASSETS is required");
   requirePattern(errors, rootToml, "wrangler.toml", /\[assets\][\s\S]*?run_worker_first\s*=\s*false/m, "assets.run_worker_first must be false");
-  requirePattern(errors, rootToml, "wrangler.toml", /^\[limits\]\s*$/m, "[limits] section is required");
-  requirePattern(
+  rejectPattern(
     errors,
     rootToml,
     "wrangler.toml",
-    /^\s*cpu_ms\s*=\s*(?:30_000|30000)\s*$/m,
-    "limits.cpu_ms must be 30000 (Paid Standard default)",
+    /^\[limits\]\s*$|^\s*cpu_ms\s*=/m,
+    "Workers Free must not define [limits] or limits.cpu_ms",
   );
   requirePattern(errors, rootToml, "wrangler.toml", /\[\[services\]\][\s\S]*?binding\s*=\s*"WORKER_SELF_REFERENCE"/m, "OpenNext self-service binding is required");
   requirePattern(errors, rootToml, "wrangler.toml", /\[\[services\]\][\s\S]*?service\s*=\s*"flamenode-web"/m, "OpenNext self-service target must be flamenode-web");

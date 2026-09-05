@@ -16,11 +16,9 @@ command = "node scripts/workers-ci-wrangler-guard.mjs"
 [observability]
 enabled = true
 
-# Paid Standard: explicit CPU budget for OpenNext SSR.
-# Free plan still hard-caps HTTP at 10ms; this does not raise Free.
+# Workers Free rejects an explicit CPU limit during upload.
+# Keep [limits] absent and use the plan's platform-enforced CPU budget.
 # Official: https://developers.cloudflare.com/workers/platform/limits/
-[limits]
-cpu_ms = 30_000
 
 # Dynamic requests are D1/R2/API heavy. Smart Placement lets Cloudflare run
 # fetch handlers closer to the dominant backend only when that is faster.
