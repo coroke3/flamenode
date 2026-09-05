@@ -119,7 +119,7 @@ function assertStatus(response, expected, label) {
   }
 }
 
-/** Degraded D1 banner may clear shortly after deploy; retry before failing smoke. */
+/** Public HTML cache or a degraded D1 banner may clear shortly after deploy; retry before failing smoke. */
 const DEFAULT_DEGRADED_ATTEMPTS = 3;
 const DEFAULT_DEGRADED_RETRY_DELAY_MS = 3_000;
 
@@ -145,29 +145,31 @@ function degradedRetryOptions(env = process.env, requestOptions = {}) {
   };
 }
 
-function isDegradedD1Banner(html) {
-  return html.includes("簡易表示:");
-}
-
-async function fetchHtmlWithDegradedRetry(
+async function fetchHtmlWithValidationRetry(
   get,
   url,
   label,
+  validate,
   { attempts = DEFAULT_DEGRADED_ATTEMPTS, retryDelayMs = DEFAULT_DEGRADED_RETRY_DELAY_MS } = {},
 ) {
-  let lastHtml = "";
+  let lastError = new Error(`${label}: no HTML response was received.`);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const response = await get(url, {}, label);
-    assertStatus(response, [200], label);
-    lastHtml = await response.text();
-    if (!isDegradedD1Banner(lastHtml)) {
-      return lastHtml;
+    try {
+      const response = await get(url, {}, label);
+      assertStatus(response, [200], label);
+      const html = await response.text();
+      validate(html, label);
+      return html;
+    } catch (error) {
+      lastError = error instanceof Error
+        ? error
+        : new Error(`${label}: HTML validation failed.`);
     }
     if (attempt < attempts) {
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
   }
-  throw new Error(`${label}: degraded D1 banner detected.`);
+  throw lastError;
 }
 
 /** R2 直読が無い smoke 向け。空一覧でも骨格が壊れていない・degraded だけでないことを弱く確認する。 */
@@ -365,8 +367,13 @@ export async function runSmoke({ env = process.env, repoRoot = process.cwd(), ex
 
   await waitForProductionHealthConvergence(fetchImpl, settings, propagationOptions);
 
-  const topHtml = await fetchHtmlWithDegradedRetry(get, settings.web, "top page", degradedOptions);
-  assertWeakTopPublicShell(topHtml, "top page");
+  const topHtml = await fetchHtmlWithValidationRetry(
+    get,
+    settings.web,
+    "top page",
+    assertWeakTopPublicShell,
+    degradedOptions,
+  );
   const assetPath = topHtml.match(/(?:src|href)=["']([^"']*\/_next\/static\/[^"']+)["']/i)?.[1];
   if (!assetPath) throw new Error("top page: no Next.js static asset was found.");
   const assetUrl = new URL(assetPath, `${settings.web}/`);
@@ -374,8 +381,13 @@ export async function runSmoke({ env = process.env, repoRoot = process.cwd(), ex
   const asset = await get(assetUrl.href, {}, "static asset");
   assertStatus(asset, [200], "static asset");
 
-  const listHtml = await fetchHtmlWithDegradedRetry(get, `${settings.web}/list`, "list page", degradedOptions);
-  assertWeakPublicListShell(listHtml, "list page");
+  const listHtml = await fetchHtmlWithValidationRetry(
+    get,
+    `${settings.web}/list`,
+    "list page",
+    assertWeakPublicListShell,
+    degradedOptions,
+  );
 
   const legacyImport = await get(`${settings.web}/api/admin/import/legacy`, { method: "POST", headers: { Origin: new URL(settings.web).origin } }, "legacy import unauthenticated rejection");
   assertStatus(legacyImport, [401, 403], "legacy import unauthenticated rejection");

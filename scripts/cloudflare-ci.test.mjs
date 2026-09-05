@@ -1124,8 +1124,9 @@ function jsonResponse(value, status = 200) {
   });
 }
 
-function smokeFetch(commit, { mismatchService, staleCommitResponses = {} } = {}) {
+function smokeFetch(commit, { mismatchService, staleCommitResponses = {}, staleTopResponses = 0 } = {}) {
   const staleRemaining = new Map(Object.entries(staleCommitResponses));
+  let staleTopRemaining = staleTopResponses;
   const responseCommit = (service) => {
     if (service === mismatchService) return "f".repeat(40);
     const remaining = staleRemaining.get(service) ?? 0;
@@ -1139,6 +1140,12 @@ function smokeFetch(commit, { mismatchService, staleCommitResponses = {} } = {})
     const url = new URL(input);
     const method = init.method ?? "GET";
     if (url.hostname === "flamenode.example.com" && url.pathname === "/" && method === "GET") {
+      if (staleTopRemaining > 0) {
+        staleTopRemaining -= 1;
+        return new Response('<script src="/_next/static/old-app.js"></script><main>old cached shell</main>', {
+          status: 200,
+        });
+      }
       return new Response(
         '<script src="/_next/static/app.js"></script><section aria-labelledby="sec-latest"><h2 id="sec-latest">新着アップロード</h2><div class="fn-shelf"></div></section>',
         { status: 200 },
@@ -1232,13 +1239,14 @@ test("smoke requires every URL and verifies web/cron SHA, admin rejection, deep 
   );
 });
 
-test("smoke waits for stale 200 health responses until every deployment commit converges", async () => {
+test("smoke waits for stale health and cached top HTML until deployment converges", async () => {
   const env = productionEnv();
   await assert.doesNotReject(() =>
     runSmoke({
       env,
       expectedCommit: COMMIT,
       fetchImpl: smokeFetch(COMMIT, {
+        staleTopResponses: 1,
         staleCommitResponses: {
           "flamenode-web": 1,
           "flamenode-fast-jobs": 1,
