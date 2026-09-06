@@ -5,9 +5,9 @@ import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { getDatabase } from "@/lib/cloudflare";
+import type { DB } from "@/lib/db/client";
 import { assertCanEditEvent } from "@/lib/auth/ownership";
-import { writeGuard } from "@/lib/auth/writeGuard";
+import { writeGuard, type WriteGuardSuccess } from "@/lib/auth/writeGuard";
 import { slots } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
@@ -35,7 +35,6 @@ export interface SlotActionResult extends PendingPublicReflection {
   created?: number;
 }
 
-type DB = NonNullable<ReturnType<typeof getDatabase>>;
 type SlotRow = typeof slots.$inferSelect;
 
 const batchSchema = z.object({
@@ -109,6 +108,16 @@ async function ensureCanEditSlots(
   if (!guard.ok) {
     return { ok: false, result: { ok: false, message: guard.message } };
   }
+  return ensureCanEditSlotsWithGuard(eventId, guard);
+}
+
+async function ensureCanEditSlotsWithGuard(
+  eventId: string,
+  guard: WriteGuardSuccess,
+): Promise<
+  | { ok: true; userId: string; db: DB }
+  | { ok: false; result: SlotActionResult }
+> {
   // writeGuard already resolved and validated the request-local D1 binding.
   // Re-resolving it here can fail independently in a Worker invocation and
   // would make the authorization read and mutation use different handles.
@@ -458,12 +467,11 @@ export async function releaseSlot(
 ): Promise<SlotActionResult> {
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
-  let db: DB;
+  const identity = await writeGuard({ feature: "manage_slot_update" });
+  if (!identity.ok) return { ok: false, message: identity.message };
+  const db = identity.db;
   let row: SlotRow | undefined;
   try {
-    const resolvedDb = getDatabase();
-    if (!resolvedDb) return { ok: false, message: "DB に接続できません。" };
-    db = resolvedDb;
     row = (
       await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
     )[0];
@@ -471,7 +479,7 @@ export async function releaseSlot(
     return slotReadError(error);
   }
   if (!row) return { ok: false, message: "枠が見つかりません。" };
-  const guard = await ensureCanEditSlots(row.event_id, "manage_slot_update");
+  const guard = await ensureCanEditSlotsWithGuard(row.event_id, identity);
   if (!guard.ok) return guard.result;
   if (row.status !== "reserved") {
     return { ok: false, message: "予約中の枠だけ解放できます。" };
@@ -609,12 +617,11 @@ export async function deleteSlot(
 ): Promise<SlotActionResult> {
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
-  let db: DB;
+  const identity = await writeGuard({ feature: "manage_slot_delete" });
+  if (!identity.ok) return { ok: false, message: identity.message };
+  const db = identity.db;
   let row: SlotRow | undefined;
   try {
-    const resolvedDb = getDatabase();
-    if (!resolvedDb) return { ok: false, message: "DB に接続できません。" };
-    db = resolvedDb;
     row = (
       await db.select().from(slots).where(eq(slots.id, slotId)).limit(1)
     )[0];
@@ -625,7 +632,7 @@ export async function deleteSlot(
   if (row.status !== "available") {
     return { ok: false, message: "予約済み・投稿済みの枠は削除できません。" };
   }
-  const guard = await ensureCanEditSlots(row.event_id, "manage_slot_delete");
+  const guard = await ensureCanEditSlotsWithGuard(row.event_id, identity);
   if (!guard.ok) return guard.result;
   return deleteRows(guard.db, row.event_id, [row], guard.userId, "slot_admin_delete");
 }

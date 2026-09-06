@@ -18,40 +18,102 @@
 
 export const MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH = 10_000;
 
+export const YOUTUBE_DESCRIPTION_VARIABLE_GROUPS = [
+  "イベント",
+  "作品",
+  "投稿者",
+  "共同制作者",
+  "コメント・作品情報",
+  "追加質問",
+] as const;
+
+export type YoutubeDescriptionVariableGroup =
+  (typeof YOUTUBE_DESCRIPTION_VARIABLE_GROUPS)[number];
+
 export const YOUTUBE_DESCRIPTION_VARIABLES = [
-  { key: "event_title", label: "イベント名" },
-  { key: "event_id", label: "イベントID" },
-  { key: "event_url", label: "イベントURL" },
-  { key: "video_id", label: "作品ID" },
-  { key: "title", label: "作品タイトル" },
-  { key: "youtube_video_id", label: "YouTube動画ID" },
-  { key: "youtube_url", label: "YouTube URL" },
-  { key: "creator_name", label: "投稿者名" },
-  { key: "creator_x_id", label: "投稿者X ID" },
-  { key: "creator_channel_url", label: "投稿者YouTubeチャンネル" },
-  { key: "creator_profile", label: "投稿者プロフィール" },
-  { key: "creator_social_links", label: "投稿者SNSリンク" },
-  { key: "members", label: "共同制作者" },
-  { key: "member_names", label: "共同制作者名" },
-  { key: "member_x_ids", label: "共同制作者X ID" },
-  { key: "member_roles", label: "共同制作者の役割" },
-  { key: "member_comments", label: "共同制作者コメント" },
-  { key: "part", label: "部" },
-  { key: "music", label: "楽曲" },
-  { key: "credit", label: "クレジット" },
-  { key: "intro_comment", label: "作品紹介" },
-  { key: "highlights", label: "見どころ" },
-  { key: "production_story", label: "制作エピソード" },
-  { key: "used_software", label: "使用ソフト" },
-  { key: "closing_comment", label: "あとがき" },
+  { key: "event_title", label: "イベント名", group: "イベント" },
+  { key: "event_id", label: "イベントID", group: "イベント" },
+  { key: "event_url", label: "イベントURL", group: "イベント" },
+  { key: "part", label: "部", group: "イベント" },
+  { key: "video_id", label: "作品ID", group: "作品" },
+  { key: "title", label: "作品タイトル", group: "作品" },
+  { key: "youtube_video_id", label: "YouTube動画ID", group: "作品" },
+  { key: "youtube_url", label: "YouTube URL", group: "作品" },
+  { key: "collaboration_type", label: "作品形式（個人・合作）", group: "作品" },
+  { key: "music", label: "楽曲", group: "作品" },
+  { key: "music_reference_url", label: "楽曲参照URL", group: "作品" },
+  { key: "credit", label: "クレジット", group: "作品" },
+  { key: "used_software", label: "使用ソフト", group: "作品" },
+  { key: "creator_name", label: "投稿者名", group: "投稿者" },
+  { key: "creator_x_id", label: "投稿者X ID", group: "投稿者" },
+  { key: "creator_icon_url", label: "投稿者アイコンURL", group: "投稿者" },
+  { key: "creator_channel_url", label: "投稿者YouTubeチャンネル", group: "投稿者" },
+  { key: "creator_profile", label: "投稿者プロフィール", group: "投稿者" },
+  { key: "creator_social_links", label: "投稿者SNSリンク", group: "投稿者" },
+  { key: "members", label: "共同制作者", group: "共同制作者" },
+  { key: "member_names", label: "共同制作者名", group: "共同制作者" },
+  { key: "member_x_ids", label: "共同制作者X ID", group: "共同制作者" },
+  { key: "member_roles", label: "共同制作者の役割", group: "共同制作者" },
+  { key: "member_comments", label: "共同制作者コメント", group: "共同制作者" },
+  { key: "intro_comment", label: "作品紹介", group: "コメント・作品情報" },
+  { key: "highlights", label: "見どころ", group: "コメント・作品情報" },
+  { key: "production_story", label: "制作エピソード", group: "コメント・作品情報" },
+  { key: "closing_comment", label: "あとがき", group: "コメント・作品情報" },
+  { key: "stage_permissions", label: "ステージ・権利回答（全項目）", group: "追加質問" },
+  { key: "custom_answers", label: "カスタム質問回答（全項目）", group: "追加質問" },
 ] as const;
 
 export type YoutubeDescriptionVariableKey =
   (typeof YOUTUBE_DESCRIPTION_VARIABLES)[number]["key"];
 
+export type YoutubeDescriptionDynamicVariableKey =
+  | `stage_permission:${string}`
+  | `custom_answer:${string}`;
+
+export type YoutubeDescriptionContextKey =
+  | YoutubeDescriptionVariableKey
+  | YoutubeDescriptionDynamicVariableKey;
+
 export type YoutubeDescriptionContext = Partial<
-  Record<YoutubeDescriptionVariableKey, string | number | null | undefined>
+  Record<YoutubeDescriptionContextKey, string | number | null | undefined>
 >;
+
+export interface YoutubeDescriptionDynamicVariableDefinition {
+  key: YoutubeDescriptionDynamicVariableKey;
+  label: string;
+  sampleValue: string;
+}
+
+const DYNAMIC_VARIABLE_SUFFIX_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function isYoutubeDescriptionDynamicVariableKey(
+  rawKey: string,
+): rawKey is YoutubeDescriptionDynamicVariableKey {
+  for (const prefix of ["stage_permission:", "custom_answer:"] as const) {
+    if (rawKey.startsWith(prefix)) {
+      return DYNAMIC_VARIABLE_SUFFIX_RE.test(rawKey.slice(prefix.length));
+    }
+  }
+  return false;
+}
+
+export function youtubeDescriptionStagePermissionVariableKey(
+  questionId: string | null | undefined,
+): YoutubeDescriptionDynamicVariableKey | null {
+  const suffix = questionId?.trim() ?? "";
+  return DYNAMIC_VARIABLE_SUFFIX_RE.test(suffix)
+    ? `stage_permission:${suffix}`
+    : null;
+}
+
+export function youtubeDescriptionCustomAnswerVariableKey(
+  questionKey: string | null | undefined,
+): YoutubeDescriptionDynamicVariableKey | null {
+  const suffix = questionKey?.trim() ?? "";
+  return DYNAMIC_VARIABLE_SUFFIX_RE.test(suffix)
+    ? `custom_answer:${suffix}`
+    : null;
+}
 
 export interface YoutubeDescriptionMember {
   name?: string | null;
@@ -179,7 +241,7 @@ export function normalizeYoutubeDescriptionTemplate(
 export interface RenderedYoutubeDescription {
   text: string;
   unknownVariables: string[];
-  usedVariables: YoutubeDescriptionVariableKey[];
+  usedVariables: YoutubeDescriptionContextKey[];
   /** 壊れたloop構文などを安全に除去した際の人間向け警告。raw tokenは含まれない。 */
   templateWarnings: string[];
 }
@@ -254,15 +316,23 @@ export function renderYoutubeDescriptionTemplate(
   }
 
   const unknownVariables = new Set<string>();
-  const usedVariables = new Set<YoutubeDescriptionVariableKey>();
+  const usedVariables = new Set<YoutubeDescriptionContextKey>();
   const templateWarnings: string[] = [];
 
   const renderScalar = (rawKey: string): string => {
-    if (!ALLOWED_VARIABLES.has(rawKey as YoutubeDescriptionVariableKey)) {
+    const staticKey = ALLOWED_VARIABLES.has(rawKey as YoutubeDescriptionVariableKey)
+      ? (rawKey as YoutubeDescriptionVariableKey)
+      : null;
+    const dynamicKey =
+      isYoutubeDescriptionDynamicVariableKey(rawKey) &&
+      Object.prototype.hasOwnProperty.call(context, rawKey)
+        ? rawKey
+        : null;
+    const key = staticKey ?? dynamicKey;
+    if (!key) {
       unknownVariables.add(rawKey);
       return "";
     }
-    const key = rawKey as YoutubeDescriptionVariableKey;
     usedVariables.add(key);
     const value = context[key];
     return value == null ? "" : String(value);

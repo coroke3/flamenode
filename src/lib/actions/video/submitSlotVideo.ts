@@ -195,6 +195,9 @@ async function submitSlotVideoCore(
     await loadUnionRequiredVideoFields(db, syncedEventIds),
     {
       ...parsed.data,
+      // 枠投稿の部は利用者入力ではなく枠構成から確定する。hidden input が空でも
+      // 正本値で必須判定し、保存できるデータを検証段階だけで拒否しない。
+      part: slotPart,
       icon_mode: String(formData.get("icon_mode") ?? parsed.data.icon_mode ?? ""),
       existing_icon_url: existingVideo?.creator_icon_url ?? null,
     },

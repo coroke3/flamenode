@@ -12,6 +12,7 @@ test("all manual CostGuard control writes use the dedicated control guard and at
     assert.match(action, new RegExp(`export async function ${name}`));
   }
   assert.ok((action.match(/requireCostGuardControlAdmin\(\)/g) ?? []).length >= 4);
+  assert.equal((action.match(/const db = guard\.db;/g) ?? []).length, 5);
   assert.match(action, /mutateWithAudit\(input\.db/);
   assert.match(action, /expectedRowCondition/);
   assert.match(action, /before: \{ \.\.\.input\.before \}/);

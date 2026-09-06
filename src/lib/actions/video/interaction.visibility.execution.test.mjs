@@ -44,6 +44,7 @@ if (!runningWithTsx) {
           ok: true,
           user: { id: "user-1", role: "user" },
           activeXId: null,
+          db: currentHarness.db,
         };
       },
     },

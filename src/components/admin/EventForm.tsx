@@ -57,6 +57,11 @@ import {
   serializeRequiredVideoFields,
   type OptionalRequiredVideoField,
 } from "@/lib/video/requiredVideoFields";
+import {
+  youtubeDescriptionCustomAnswerVariableKey,
+  youtubeDescriptionStagePermissionVariableKey,
+  type YoutubeDescriptionDynamicVariableDefinition,
+} from "@/lib/event/youtubeDescriptionTemplate";
 
 export interface EventFormInitial {
   id?: string;
@@ -415,6 +420,33 @@ export function EventForm({
     MAX_GENERAL_CUSTOM_QUESTIONS,
     initial.custom_questions?.length ?? 0,
   );
+  const youtubeDescriptionDynamicVariables = React.useMemo<
+    YoutubeDescriptionDynamicVariableDefinition[]
+  >(() => [
+    ...questions.flatMap((question) => {
+      if (!question.enabled) return [];
+      const key = youtubeDescriptionStagePermissionVariableKey(question.id);
+      if (!key) return [];
+      return [{
+        key,
+        label: `ステージ・権利確認: ${question.label}`,
+        sampleValue: question.placeholder.trim() || "確認済み",
+      }];
+    }),
+    ...generalQuestions.flatMap((question) => {
+      if (!question.enabled) return [];
+      const key = youtubeDescriptionCustomAnswerVariableKey(question.question_key);
+      if (!key) return [];
+      return [{
+        key,
+        label: `カスタム質問: ${question.label}`,
+        sampleValue:
+          question.options.find((option) => option.trim())?.trim() ||
+          question.placeholder.trim() ||
+          "回答サンプル",
+      }];
+    }),
+  ], [generalQuestions, questions]);
 
   const canBasic = mode === "create" || editableSections?.basic !== false;
   const canPublish = mode === "create" || editableSections?.publish !== false;
@@ -683,6 +715,7 @@ export function EventForm({
             setDirty(true);
           }}
           eventTitle={preview.title}
+          dynamicVariables={youtubeDescriptionDynamicVariables}
           disabled={!canBasic}
         />
         <div className={styles.formGrid2}>

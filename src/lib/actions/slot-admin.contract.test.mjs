@@ -130,6 +130,21 @@ test("releaseSlotはdomain上限、batch group queryはatomic chunk上限で打�
   assert.match(source, /versionedSlotWhere/);
 });
 
+test("単一枠の運営操作は認証後に同じrequest-local D1で対象を読む", () => {
+  for (const [start, end, feature] of [
+    ["export async function releaseSlot", "async function releaseRows", "manage_slot_update"],
+    ["export async function deleteSlot", "export async function batchDeleteAvailableSlots", "manage_slot_delete"],
+  ]) {
+    const block = source.slice(source.indexOf(start), source.indexOf(end));
+    const guardIndex = block.indexOf(`writeGuard({ feature: "${feature}" })`);
+    const dbIndex = block.indexOf("const db = identity.db");
+    const readIndex = block.indexOf("await db.select().from(slots)");
+    assert.ok(guardIndex >= 0 && dbIndex > guardIndex && readIndex > dbIndex);
+    assert.match(block, /ensureCanEditSlotsWithGuard\(row\.event_id, identity\)/);
+  }
+  assert.doesNotMatch(source, /getDatabase\(\)/);
+});
+
 test("legacy reservation group whitespace is queried by its persisted value", () => {
   const releaseSlotBlock =
     source.match(

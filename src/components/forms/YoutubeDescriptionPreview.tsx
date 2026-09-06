@@ -6,8 +6,9 @@ import {
   YOUTUBE_DESCRIPTION_VARIABLES,
   renderYoutubeDescriptionTemplate,
   type YoutubeDescriptionContext,
+  type YoutubeDescriptionContextKey,
+  type YoutubeDescriptionDynamicVariableDefinition,
   type YoutubeDescriptionLoopMember,
-  type YoutubeDescriptionVariableKey,
 } from "@/lib/event/youtubeDescriptionTemplate";
 
 export interface YoutubeDescriptionPreviewProps {
@@ -16,14 +17,19 @@ export interface YoutubeDescriptionPreviewProps {
   context: YoutubeDescriptionContext;
   /** {{#members}} ループ用の生メンバー行。未指定時はループが空で出力される。 */
   members?: readonly YoutubeDescriptionLoopMember[];
+  /** 現在のイベントに存在する質問別変数。警告を日本語ラベルで表示する。 */
+  dynamicVariables?: readonly YoutubeDescriptionDynamicVariableDefinition[];
 }
 
-const VARIABLE_LABELS = new Map<YoutubeDescriptionVariableKey, string>(
+const VARIABLE_LABELS = new Map<YoutubeDescriptionContextKey, string>(
   YOUTUBE_DESCRIPTION_VARIABLES.map((variable) => [variable.key, variable.label]),
 );
 
-function variableLabel(key: YoutubeDescriptionVariableKey): string {
-  return VARIABLE_LABELS.get(key) ?? key;
+function variableLabel(
+  key: YoutubeDescriptionContextKey,
+  dynamicLabels: ReadonlyMap<YoutubeDescriptionContextKey, string>,
+): string {
+  return VARIABLE_LABELS.get(key) ?? dynamicLabels.get(key) ?? key;
 }
 
 function hasValue(value: unknown): boolean {
@@ -50,11 +56,18 @@ export function YoutubeDescriptionPreview({
   eventTitle,
   context,
   members,
+  dynamicVariables = [],
 }: YoutubeDescriptionPreviewProps): React.ReactElement {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const manualBaseTextRef = React.useRef("");
   const [copyState, setCopyState] = React.useState<"idle" | "copied" | "error">("idle");
   const [draftMode, setDraftMode] = React.useState<"auto" | "manual">("auto");
+  const dynamicLabels = React.useMemo(
+    () => new Map<YoutubeDescriptionContextKey, string>(
+      dynamicVariables.map((variable) => [variable.key, variable.label]),
+    ),
+    [dynamicVariables],
+  );
   const rendered = React.useMemo(
     () => renderYoutubeDescriptionTemplate(template, context, { members }),
     [context, members, template],
@@ -147,7 +160,7 @@ export function YoutubeDescriptionPreview({
           <strong>テンプレートで使う情報に未入力があります。</strong>
           <ul className={styles.warningList}>
             {missingVariables.map((key) => (
-              <li key={key}>{variableLabel(key)}が未入力です。</li>
+              <li key={key}>{variableLabel(key, dynamicLabels)}が未入力です。</li>
             ))}
           </ul>
         </div>

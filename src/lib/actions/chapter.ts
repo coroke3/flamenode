@@ -7,7 +7,7 @@ import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { getDatabase } from "@/lib/cloudflare";
+import type { DB } from "@/lib/db/client";
 import { canEditVideo, resolveAdminOrEventVideoPrivilegeMode } from "@/lib/auth/ownership";
 
 import { writeGuard } from "@/lib/auth/writeGuard";
@@ -38,7 +38,7 @@ const createSchema = z.object({
 });
 
 async function loadVideoDurationSeconds(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+  db: DB,
   videoId: string,
 ): Promise<number | null> {
   const row = (
@@ -89,8 +89,7 @@ export async function createChapter(
   });
   if (!snapshotCheck.ok) return { ok: false, message: snapshotCheck.message };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const parsed = createSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -206,7 +205,7 @@ async function revalidateChapterPath(
 }
 
 async function canManageChapter(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+  db: DB,
   user: { id: string; role: string | null },
   activeXId: string,
   chapter: typeof videoChapters.$inferSelect,
@@ -241,8 +240,7 @@ export async function updateChapter(
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const existing = (
     await db.select().from(videoChapters).where(eq(videoChapters.id, parsed.data.chapter_id)).limit(1)
@@ -335,8 +333,7 @@ export async function deleteChapter(
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const existing = (
     await db.select().from(videoChapters).where(eq(videoChapters.id, parsed.data.chapter_id)).limit(1)
@@ -443,8 +440,7 @@ export async function createChaptersBulk(
   });
   if (!snapshotCheck.ok) return { ok: false, message: snapshotCheck.message };
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const parsed = bulkSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {

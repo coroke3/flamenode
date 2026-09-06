@@ -4,66 +4,27 @@ import * as React from "react";
 import styles from "./YoutubeDescriptionTemplateEditor.module.css";
 import {
   MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  YOUTUBE_DESCRIPTION_LOOP_VARIABLES,
+  YOUTUBE_DESCRIPTION_VARIABLE_GROUPS,
   YOUTUBE_DESCRIPTION_VARIABLES,
   renderYoutubeDescriptionTemplate,
   type YoutubeDescriptionContext,
+  type YoutubeDescriptionContextKey,
+  type YoutubeDescriptionDynamicVariableDefinition,
   type YoutubeDescriptionLoopMember,
-  type YoutubeDescriptionVariableKey,
 } from "@/lib/event/youtubeDescriptionTemplate";
 import { writeTextToClipboard } from "@/lib/utils/clipboard";
 
-const VARIABLE_GROUPS: ReadonlyArray<{
-  label: string;
-  keys: readonly YoutubeDescriptionVariableKey[];
-}> = [
-  {
-    label: "イベント",
-    keys: ["event_title", "event_id", "event_url", "part"],
-  },
-  {
-    label: "作品",
-    keys: [
-      "video_id",
-      "title",
-      "youtube_video_id",
-      "youtube_url",
-      "music",
-      "credit",
-      "used_software",
-    ],
-  },
-  {
-    label: "投稿者",
-    keys: [
-      "creator_name",
-      "creator_x_id",
-      "creator_channel_url",
-      "creator_profile",
-      "creator_social_links",
-    ],
-  },
-  {
-    label: "共同制作者",
-    keys: [
-      "members",
-      "member_names",
-      "member_x_ids",
-      "member_roles",
-      "member_comments",
-    ],
-  },
-  {
-    label: "コメント・作品情報",
-    keys: [
-      "intro_comment",
-      "highlights",
-      "production_story",
-      "closing_comment",
-    ],
-  },
-];
+// 変数定義を正本にしてグループを組み立てる。キーの追加時にEditorだけ
+// 更新し忘れて「使えるのにボタンがない」状態を作らない。
+const VARIABLE_GROUPS = YOUTUBE_DESCRIPTION_VARIABLE_GROUPS.map((label) => ({
+  label,
+  variables: YOUTUBE_DESCRIPTION_VARIABLES.filter(
+    (variable) => variable.group === label,
+  ),
+})).filter((group) => group.variables.length > 0);
 
-const VARIABLE_LABELS = new Map(
+const VARIABLE_LABELS = new Map<YoutubeDescriptionContextKey, string>(
   YOUTUBE_DESCRIPTION_VARIABLES.map((variable) => [variable.key, variable.label]),
 );
 
@@ -78,6 +39,7 @@ const SAMPLE_CONTEXT: YoutubeDescriptionContext = {
   creator_name: "Flame Creator",
   // 実フォームと同じく scalar のX IDは @ なし。必要ならテンプレート側で @ を付ける。
   creator_x_id: "sample_creator",
+  creator_icon_url: "https://flamenode.net/sample-icon.png",
   creator_channel_url: "https://www.youtube.com/@sample_creator",
   creator_profile: "映像制作をしています。",
   creator_social_links: "X: @sample_creator",
@@ -87,13 +49,17 @@ const SAMPLE_CONTEXT: YoutubeDescriptionContext = {
   member_roles: "映像 / デザイン",
   member_comments: "共同制作コメント",
   part: "第1部",
+  collaboration_type: "合作",
   music: "Sample Music",
+  music_reference_url: "https://example.com/sample-music",
   credit: "Music: Sample Artist",
   intro_comment: "作品紹介のサンプルです。",
   highlights: "見どころのサンプルです。",
   production_story: "制作エピソードのサンプルです。",
   used_software: "After Effects / Blender",
   closing_comment: "ご視聴ありがとうございました。",
+  stage_permissions: "素材利用: 規約確認済み",
+  custom_answers: "好きな演出: カメラワーク",
 };
 
 const MEMBERS_LOOP_SAMPLE = `{{#members}}
@@ -146,11 +112,13 @@ export function YoutubeDescriptionTemplateEditor({
   value,
   onChange,
   eventTitle,
+  dynamicVariables = [],
   disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   eventTitle?: string | null;
+  dynamicVariables?: readonly YoutubeDescriptionDynamicVariableDefinition[];
   disabled?: boolean;
 }): React.ReactElement {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -163,8 +131,34 @@ export function YoutubeDescriptionTemplateEditor({
     () => ({
       ...SAMPLE_CONTEXT,
       event_title: eventTitle?.trim() || SAMPLE_CONTEXT.event_title,
+      ...Object.fromEntries(
+        dynamicVariables.map((variable) => [variable.key, variable.sampleValue]),
+      ),
     }),
-    [eventTitle],
+    [dynamicVariables, eventTitle],
+  );
+  const dynamicVariableLabels = React.useMemo(
+    () => new Map<YoutubeDescriptionContextKey, string>(
+      dynamicVariables.map((variable) => [variable.key, variable.label]),
+    ),
+    [dynamicVariables],
+  );
+  const dynamicVariableGroups = React.useMemo(
+    () => [
+      {
+        label: "ステージ・権利確認（質問別）",
+        variables: dynamicVariables.filter((variable) =>
+          variable.key.startsWith("stage_permission:"),
+        ),
+      },
+      {
+        label: "カスタム質問（質問別）",
+        variables: dynamicVariables.filter((variable) =>
+          variable.key.startsWith("custom_answer:"),
+        ),
+      },
+    ].filter((group) => group.variables.length > 0),
+    [dynamicVariables],
   );
   const rendered = React.useMemo(
     () =>
@@ -220,7 +214,7 @@ export function YoutubeDescriptionTemplateEditor({
     setTextareaValue(next, start + prefix.length + snippet.length);
   };
 
-  const insertVariable = (key: YoutubeDescriptionVariableKey) => {
+  const insertVariable = (key: YoutubeDescriptionContextKey) => {
     if (disabled) return;
     insertAtCursor(`{{${key}}}`);
   };
@@ -358,17 +352,37 @@ export function YoutubeDescriptionTemplateEditor({
               <section key={group.label} className={styles.variableGroup}>
                 <strong className={styles.variableGroupTitle}>{group.label}</strong>
                 <div className={styles.variableButtons}>
-                  {group.keys.map((key) => (
+                  {group.variables.map((variable) => (
                     <button
-                      key={key}
+                      key={variable.key}
                       type="button"
                       className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.variableButton}`}
                       disabled={disabled}
-                      onClick={() => insertVariable(key)}
-                      title={`{{${key}}}`}
+                      onClick={() => insertVariable(variable.key)}
+                      title={`{{${variable.key}}}`}
                     >
-                      <span>{VARIABLE_LABELS.get(key) ?? key}</span>
-                      <span className={styles.variableToken}>{`{{${key}}}`}</span>
+                      <span>{variable.label}</span>
+                      <span className={styles.variableToken}>{`{{${variable.key}}}`}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+            {dynamicVariableGroups.map((group) => (
+              <section key={group.label} className={styles.variableGroup}>
+                <strong className={styles.variableGroupTitle}>{group.label}</strong>
+                <div className={styles.variableButtons}>
+                  {group.variables.map((variable) => (
+                    <button
+                      key={variable.key}
+                      type="button"
+                      className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.variableButton}`}
+                      disabled={disabled}
+                      onClick={() => insertVariable(variable.key)}
+                      title={`{{${variable.key}}}`}
+                    >
+                      <span>{variable.label}</span>
+                      <span className={styles.variableToken}>{`{{${variable.key}}}`}</span>
                     </button>
                   ))}
                 </div>
@@ -386,19 +400,21 @@ export function YoutubeDescriptionTemplateEditor({
             <p className="fn-text-muted-sm">
               ブロック内は合作メンバーの人数だけ繰り返し出力されます。0人ならブロックごと消え、ネストはできません。
             </p>
-            <ul className="fn-text-muted-sm" style={{ paddingLeft: 18 }}>
-              {[
-                "member_index — メンバー番号（1始まり）",
-                "member_name — 表示名",
-                "member_x_id — X ID（@なし）",
-                "member_chapter — 最初のチャプター時刻",
-                "member_chapters — 全チャプター時刻",
-                "member_role — 役職",
-                "member_comment — コメント",
-              ].map((label) => (
-                <li key={label}>{label}</li>
+            <div className={styles.variableButtons}>
+              {YOUTUBE_DESCRIPTION_LOOP_VARIABLES.map((variable) => (
+                <button
+                  key={variable.key}
+                  type="button"
+                  className={`fn-btn fn-btn-ghost fn-btn-sm ${styles.variableButton}`}
+                  disabled={disabled}
+                  onClick={() => insertAtCursor(`{{${variable.key}}}`)}
+                  title="メンバー繰り返しブロック内へ挿入してください"
+                >
+                  <span>{variable.label}</span>
+                  <span className={styles.variableToken}>{`{{${variable.key}}}`}</span>
+                </button>
               ))}
-            </ul>
+            </div>
           </section>
         </div>
 
@@ -425,7 +441,7 @@ export function YoutubeDescriptionTemplateEditor({
             </pre>
             {rendered.usedVariables.length > 0 ? (
               <p className="fn-text-muted-sm">
-                使用中: {rendered.usedVariables.map((key) => VARIABLE_LABELS.get(key) ?? key).join("、")}
+                使用中: {rendered.usedVariables.map((key) => VARIABLE_LABELS.get(key) ?? dynamicVariableLabels.get(key) ?? key).join("、")}
               </p>
             ) : null}
           </section>

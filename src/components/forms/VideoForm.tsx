@@ -67,7 +67,10 @@ import { PermissionFieldLabel } from "@/components/video/permission/PermissionFi
 import { YoutubeDescriptionPreview } from "@/components/forms/YoutubeDescriptionPreview";
 import {
   formatYoutubeDescriptionMembers,
+  youtubeDescriptionCustomAnswerVariableKey,
+  youtubeDescriptionStagePermissionVariableKey,
   type YoutubeDescriptionContext,
+  type YoutubeDescriptionDynamicVariableDefinition,
 } from "@/lib/event/youtubeDescriptionTemplate";
 import {
   questionTypeNeedsOptions,
@@ -1053,6 +1056,55 @@ export function VideoForm({
       descriptionFormValues[name] ?? fallback ?? "",
     [descriptionFormValues],
   );
+  const youtubeDescriptionQuestionValues = React.useMemo(() => {
+    const context: YoutubeDescriptionContext = {
+      stage_permissions: "",
+      custom_answers: "",
+    };
+    const dynamicVariables: YoutubeDescriptionDynamicVariableDefinition[] = [];
+    if (!selectedDescriptionEvent) return { context, dynamicVariables };
+
+    const stageLines: string[] = [];
+    const stageFields = resolveStagePermissionFieldsFromJson([
+      selectedDescriptionEvent.video_form_settings_json,
+    ]);
+    for (const question of stageFields) {
+      const key = youtubeDescriptionStagePermissionVariableKey(question.id);
+      if (!key) continue;
+      const value = stageAnswers[question.id]?.trim() ?? "";
+      context[key] = value;
+      dynamicVariables.push({
+        key,
+        label: `ステージ・権利確認: ${question.label}`,
+        sampleValue: value,
+      });
+      if (value) stageLines.push(`${question.label}: ${value}`);
+    }
+
+    const customLines: string[] = [];
+    for (const question of selectedDescriptionEvent.custom_questions ?? []) {
+      if (!question.is_active) continue;
+      const key = youtubeDescriptionCustomAnswerVariableKey(question.question_key);
+      if (!key) continue;
+      const value = acceptedCustomAnswerValues(
+        question,
+        customAnswers[
+          customAnswerKey(selectedDescriptionEvent.id, question.question_key)
+        ],
+      ).join(" / ");
+      context[key] = value;
+      dynamicVariables.push({
+        key,
+        label: `カスタム質問: ${question.label}`,
+        sampleValue: value,
+      });
+      if (value) customLines.push(`${question.label}: ${value}`);
+    }
+
+    context.stage_permissions = stageLines.join("\n");
+    context.custom_answers = customLines.join("\n");
+    return { context, dynamicVariables };
+  }, [customAnswers, selectedDescriptionEvent, stageAnswers]);
   const youtubeDescriptionRenderContext = React.useMemo<YoutubeDescriptionContext>(() => {
     const youtubeUrlValue = readDescriptionValue("youtube_url", initial.youtube_url);
     const memberDescriptionValues = formatYoutubeDescriptionMembers(members);
@@ -1070,12 +1122,18 @@ export function VideoForm({
       youtube_video_id: extractYoutubeId(youtubeUrlValue) ?? "",
       creator_name: submitterDisplayName,
       creator_x_id: readDescriptionValue("creator_x_user_id", initial.creator_x_user_id),
+      creator_icon_url: submitterIconUrl,
       creator_channel_url: submitterYoutubeChannel,
       creator_profile: submitterProfileText,
       creator_social_links: submitterSocialLinks,
       ...memberDescriptionValues,
       part: selectedPart,
+      collaboration_type: isCollab ? "合作" : "個人",
       music: readDescriptionValue("music", initial.music),
+      music_reference_url: readDescriptionValue(
+        "music_reference_url",
+        initial.music_reference_url,
+      ),
       credit: readDescriptionValue("credit", initial.credit),
       intro_comment: readDescriptionValue("intro_comment", initial.intro_comment),
       highlights: readDescriptionValue("highlights", initial.highlights),
@@ -1085,18 +1143,22 @@ export function VideoForm({
       ),
       used_software: readDescriptionValue("used_software", initial.used_software),
       closing_comment: readDescriptionValue("closing_comment", initial.closing_comment),
+      ...youtubeDescriptionQuestionValues.context,
     };
   }, [
     initial,
+    isCollab,
     members,
     readDescriptionValue,
     selectedDescriptionEvent,
     selectedPart,
     submitterDisplayName,
+    submitterIconUrl,
     submitterProfileText,
     submitterSocialLinks,
     submitterYoutubeChannel,
     youtubeDescriptionContext,
+    youtubeDescriptionQuestionValues.context,
   ]);
   const sidePreviewTitle = titlePreview.trim() || "作品タイトル未入力";
   const sidePreviewName =
@@ -1239,7 +1301,9 @@ export function VideoForm({
           ? iconModeElement.value
           : undefined,
       icon_url: submitterIconUrl,
-      existing_icon_url: submitterIconUrl,
+      // keep は編集開始時に保存済みだった値だけを採用する。現在の選択値を
+      // 入れると、picker state がずれた際に未保存URLを既存値と誤認する。
+      existing_icon_url: initial.icon_url ?? null,
       profile_text: submitterProfileText,
       youtube_channel_url: submitterYoutubeChannel,
       other_social_links: submitterSocialLinks,
@@ -2515,6 +2579,7 @@ export function VideoForm({
           eventTitle={selectedDescriptionEvent.title}
           context={youtubeDescriptionRenderContext}
           members={members}
+          dynamicVariables={youtubeDescriptionQuestionValues.dynamicVariables}
         />
       ) : null}
 

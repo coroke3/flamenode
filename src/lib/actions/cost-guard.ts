@@ -12,7 +12,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
-import { getDatabase } from "@/lib/cloudflare";
+import type { DB } from "@/lib/db/client";
 import { systemSettings } from "@/lib/db/schema";
 import {
   requireCostGuardControlAdmin,
@@ -82,13 +82,13 @@ async function syncOperationModeKvMirrorBestEffort(input: {
 }
 
 async function loadSettings(
-  db: NonNullable<ReturnType<typeof getDatabase>>,
+  db: DB,
 ): Promise<SettingsRow | null> {
   return (await db.select().from(systemSettings).where(eq(systemSettings.id, "default")).limit(1))[0] ?? null;
 }
 
 async function mutateSettings(input: {
-  db: NonNullable<ReturnType<typeof getDatabase>>;
+  db: DB;
   before: SettingsRow;
   patch: SettingsPatch;
   actorUserId: string;
@@ -127,8 +127,7 @@ export async function setCostGuardMode(formData: FormData): Promise<CostGuardRes
   const parsed = modeSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   const { mode, reason } = parsed.data;
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
@@ -145,8 +144,7 @@ export async function setMaintenanceMode(formData: FormData): Promise<CostGuardR
   const reason = String(formData.get("reason") ?? "").trim();
   if (next !== 0 && next !== 1) return { ok: false, message: "値が不正です。" };
   if (!reason || reason.length > 500) return { ok: false, message: "500文字以内の理由が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const currentMode = resolveOperationMode(before);
@@ -169,8 +167,7 @@ export async function setCostGuardOverride(formData: FormData): Promise<CostGuar
   if (candidates.length === 0 || candidates.length > MAX_OVERRIDE_FEATURES || new Set(candidates).size !== candidates.length) return { ok: false, message: `対象機能は重複なしで1〜${MAX_OVERRIDE_FEATURES}件指定してください。` };
   if (!candidates.every(isWriteFeatureKey)) return { ok: false, message: "未知の機能キーが含まれています。" };
   const features = candidates as WriteFeatureKey[];
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);
@@ -207,8 +204,7 @@ export async function setDisabledFeatures(formData: FormData): Promise<CostGuard
   }
   const selected = new Set(candidates as WriteFeatureKey[]);
   const features = WRITE_FEATURE_KEYS.filter((feature) => selected.has(feature));
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settings が見つかりません。" };
   const expectedDisabledFeatures = formData.get("expected_disabled_features_json");
@@ -265,8 +261,7 @@ export async function clearCostGuardOverride(formData: FormData): Promise<CostGu
   const confirm = String(formData.get("confirm") ?? "").trim();
   if (!reason || reason.length > 500) return { ok: false, message: "500文字以内の解除理由が必要です。" };
   if (confirm !== "CLEAR") return { ok: false, message: "確認文字列CLEARが一致しません。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DBに接続できません。" };
+  const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
   const now = Math.floor(Date.now() / 1000);

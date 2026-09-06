@@ -98,3 +98,19 @@ test("submitSlotVideo は parseVideoForm の youtubeRequired: false とイベン
   assert.ok(syncIndex >= 0 && missingIndex > syncIndex, "必須項目検証は syncedEventIds 決定の後");
   assert.ok(eventConfigIndex > missingIndex, "必須項目検証は保存前");
 });
+
+test("submitSlotVideo は枠から確定した部で必須項目を検証して保存する", () => {
+  const fnStart = source.indexOf("async function submitSlotVideoCore");
+  const fnBody = source.slice(fnStart);
+  const resolveIndex = fnBody.indexOf("const slotPart = await resolvePartFromSlot(db, slotRow)");
+  const requiredIndex = fnBody.indexOf("const missingRequired = firstMissingRequiredVideoField");
+  const storedIndexes = [...fnBody.matchAll(/part: slotPart/g)].map((match) => match.index ?? -1);
+
+  assert.ok(resolveIndex >= 0);
+  assert.ok(requiredIndex > resolveIndex);
+  assert.match(
+    fnBody.slice(requiredIndex, requiredIndex + 700),
+    /\.\.\.parsed\.data,[\s\S]*part: slotPart,[\s\S]*icon_mode:/,
+  );
+  assert.ok(storedIndexes.length >= 3, "必須判定・更新・新規保存が同じ枠由来の部を使う");
+});

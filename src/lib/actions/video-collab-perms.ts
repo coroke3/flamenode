@@ -959,16 +959,6 @@ async function applyPermissionIntentsToVideo(
   };
 }
 
-function getDatabaseForPermissionAction(): DB | null {
-  try {
-    return getDatabase();
-  } catch (error) {
-    unstable_rethrow(error);
-    console.error("[video-collab-perms] database binding unavailable", error);
-    return null;
-  }
-}
-
 export async function upsertVideoCollaborator(
   formData: FormData,
 ): Promise<VideoCollabResult> {
@@ -980,8 +970,10 @@ export async function upsertVideoCollaborator(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
 
-  const db = getDatabaseForPermissionAction();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  // writeGuard が解決済みの同一 request context / D1 binding を使う。
+  // OpenNext 上でDBを再解決すると、認証通過後だけ binding 解決に
+  // 失敗して権限設定できない状態になり得る。
+  const db = guard.db;
 
   try {
     const video = await loadEditableVideoForPermissions(
@@ -1037,8 +1029,7 @@ export async function deleteVideoCollaborator(
     return { ok: false, message: "video_id と有効な X ID が必要です。" };
   }
 
-  const db = getDatabaseForPermissionAction();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   try {
     const video = await loadEditableVideoForPermissions(
@@ -1084,8 +1075,7 @@ export async function applyVideoCollaboratorPermissionsBatch(
     return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
   }
 
-  const db = getDatabaseForPermissionAction();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   try {
     const video = await loadEditableVideoForPermissions(

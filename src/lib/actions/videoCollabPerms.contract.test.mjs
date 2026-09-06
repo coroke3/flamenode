@@ -33,16 +33,15 @@ test("single/batchすべてのactionがwriteGuardを通過する", () => {
   }
 });
 
-test("D1 binding unavailableは共通helperでUI向け失敗へ収束する", () => {
-  assert.match(source, /function getDatabaseForPermissionAction\(\)/);
-  assert.match(source, /database binding unavailable/);
-  assert.match(source, /unstable_rethrow\(error\)/);
+test("single/batchすべてのactionがwriteGuardと同じD1 bindingを使う", () => {
+  assert.doesNotMatch(source, /function getDatabaseForPermissionAction\(\)/);
   for (const name of [
     "upsertVideoCollaborator",
     "deleteVideoCollaborator",
     "applyVideoCollaboratorPermissionsBatch",
   ]) {
-    assert.match(actionBody(name), /getDatabaseForPermissionAction\(\)/);
+    assert.match(actionBody(name), /const db = guard\.db/);
+    assert.doesNotMatch(actionBody(name), /getDatabase\(\)/);
   }
 });
 

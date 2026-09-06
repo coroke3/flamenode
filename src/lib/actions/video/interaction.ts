@@ -7,7 +7,6 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
-import { getDatabase } from "@/lib/cloudflare";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { videos, videoInteractionsAuth } from "@/lib/db/schema";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
@@ -73,8 +72,7 @@ async function mutateVideoInteraction(
   }
   const kind: InteractionKind = rawKind;
 
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const target = (
     await db.select().from(videos).where(eq(videos.id, videoId)).limit(1)

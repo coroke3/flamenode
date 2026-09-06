@@ -153,6 +153,18 @@ test("枠付き作品の編集画面は部を読み取り専用にする", async
   assert.match(pageSource, /schedulingType=\{video\.scheduling_type\}/);
 });
 
+test("枠投稿画面は枠から解決した部を必須判定用の初期値へ渡す", async () => {
+  const source = await read("app/(auth)/entry/slotted/page.tsx");
+  assert.match(source, /const slotPart = await resolvePartFromSlot\(db, slot\)/);
+  assert.match(source, /initial=\{\{[\s\S]*part: slotPart,[\s\S]*\}\}/);
+});
+
+test("アイコン必須判定のkeep値は編集開始時の保存済みURLだけを使う", async () => {
+  const source = await read("src/components/forms/VideoForm.tsx");
+  assert.match(source, /existing_icon_url: initial\.icon_url \?\? null/);
+  assert.doesNotMatch(source, /existing_icon_url: submitterIconUrl/);
+});
+
 test("member suggestion pagination aborts stale requests and ignores late responses", async () => {
   const source = await read("src/components/forms/VideoMembersField.tsx");
   assert.match(source, /suggestionRequestIdRef\s*=\s*React\.useRef\(0\)/);

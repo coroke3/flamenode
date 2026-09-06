@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  YOUTUBE_DESCRIPTION_LOOP_VARIABLES,
+  YOUTUBE_DESCRIPTION_VARIABLES,
   formatYoutubeDescriptionMembers,
   normalizeYoutubeDescriptionTemplate,
   renderYoutubeDescriptionTemplate,
+  youtubeDescriptionCustomAnswerVariableKey,
+  youtubeDescriptionStagePermissionVariableKey,
 } from "./youtubeDescriptionTemplate.ts";
 
 test("renders known variables and normalizes line endings", () => {
@@ -34,6 +38,63 @@ test("unknown variables are removed and reported", () => {
 
   assert.equal(rendered.text, "title=作品 typo= invalid=");
   assert.deepEqual(rendered.unknownVariables, ["bad-key", "titlle"]);
+});
+
+test("固定変数は実フォームの全項目と追加質問の集約値を公開する", () => {
+  const keys = new Set(YOUTUBE_DESCRIPTION_VARIABLES.map((variable) => variable.key));
+  for (const key of [
+    "creator_icon_url",
+    "collaboration_type",
+    "music_reference_url",
+    "stage_permissions",
+    "custom_answers",
+  ]) {
+    assert.ok(keys.has(key), `${key} が変数一覧に含まれる`);
+  }
+  assert.ok(YOUTUBE_DESCRIPTION_VARIABLES.every((variable) => variable.group));
+  assert.deepEqual(
+    YOUTUBE_DESCRIPTION_LOOP_VARIABLES.map((variable) => variable.key),
+    [
+      "member_index",
+      "member_name",
+      "member_x_id",
+      "member_chapter",
+      "member_chapters",
+      "member_role",
+      "member_comment",
+    ],
+  );
+});
+
+test("現在のイベントに存在する質問別変数は回答内容を出力する", () => {
+  const stageKey = youtubeDescriptionStagePermissionVariableKey("stage_rights");
+  const customKey = youtubeDescriptionCustomAnswerVariableKey("favorite_cut");
+  assert.equal(stageKey, "stage_permission:stage_rights");
+  assert.equal(customKey, "custom_answer:favorite_cut");
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{stage_permission:stage_rights}} / {{custom_answer:favorite_cut}}",
+    {
+      [stageKey]: "規約確認済み",
+      [customKey]: "カメラワーク",
+    },
+  );
+  assert.equal(rendered.text, "規約確認済み / カメラワーク");
+  assert.deepEqual(rendered.unknownVariables, []);
+  assert.deepEqual(rendered.usedVariables, [stageKey, customKey]);
+});
+
+test("削除済み・不正な質問別変数は許可せず空欄と警告にする", () => {
+  assert.equal(youtubeDescriptionCustomAnswerVariableKey("bad:key"), null);
+  assert.equal(youtubeDescriptionStagePermissionVariableKey(""), null);
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{custom_answer:removed}}|{{stage_permission:bad.key}}",
+    {},
+  );
+  assert.equal(rendered.text, "|");
+  assert.deepEqual(rendered.unknownVariables, [
+    "custom_answer:removed",
+    "stage_permission:bad.key",
+  ]);
 });
 
 test("missing values become empty strings without throwing", () => {

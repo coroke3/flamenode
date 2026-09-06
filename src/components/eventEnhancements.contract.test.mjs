@@ -78,9 +78,34 @@ test("概要欄管理Editorはプリセット・出力例コピー・レスポ�
   assert.match(editor, /@\{\{creator_x_id\}\}/);
   assert.match(editor, /className=\{styles\.workspace\}/);
   assert.match(editor, /className=\{styles\.previewColumn\}/);
+  assert.match(editor, /YOUTUBE_DESCRIPTION_VARIABLE_GROUPS\.map/);
+  assert.match(editor, /YOUTUBE_DESCRIPTION_LOOP_VARIABLES\.map/);
+  assert.match(editor, /dynamicVariables\.filter/);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 1\.25fr\) minmax\(300px, 0\.75fr\)/);
   assert.match(css, /position:\s*sticky/);
   assert.match(css, /@media \(max-width: 980px\)[\s\S]*grid-template-columns:\s*1fr/);
+});
+
+test("概要欄は実フォーム値とイベント固有の質問回答を出力する", async () => {
+  const [form, eventForm, preview] = await Promise.all([
+    readFromRoot("src/components/forms/VideoForm.tsx"),
+    readFromRoot("src/components/admin/EventForm.tsx"),
+    readFromRoot("src/components/forms/YoutubeDescriptionPreview.tsx"),
+  ]);
+  for (const value of [
+    "creator_icon_url: submitterIconUrl",
+    'collaboration_type: isCollab ? "合作" : "個人"',
+    'music_reference_url: readDescriptionValue(',
+    'context.stage_permissions = stageLines.join("\\n")',
+    'context.custom_answers = customLines.join("\\n")',
+  ]) {
+    assert.ok(form.includes(value), `${value} を概要欄contextへ渡す`);
+  }
+  assert.match(form, /youtubeDescriptionStagePermissionVariableKey/);
+  assert.match(form, /youtubeDescriptionCustomAnswerVariableKey/);
+  assert.match(form, /dynamicVariables=\{youtubeDescriptionQuestionValues\.dynamicVariables\}/);
+  assert.match(eventForm, /dynamicVariables=\{youtubeDescriptionDynamicVariables\}/);
+  assert.match(preview, /dynamicLabels/);
 });
 
 test("投稿者向け概要欄は同じイベントの手動編集を保持しイベント切替時だけリセットする", async () => {

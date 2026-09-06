@@ -20,6 +20,7 @@ import { getYoutubeChannelCandidates } from "@/lib/db/youtubeChannelCandidates";
 import { acceptingEntriesWhere } from "@/lib/utils/eventStatus";
 import { loadStagePermissionFormSettingsJsonByEvents } from "@/lib/video/stagePermissionQuestions";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
+import { resolvePartFromSlot } from "@/lib/video/slotPart";
 import { AppShell } from "@/components/ui/AppShell";
 import { StatusPanel } from "@/components/ui/StatusPanel";
 import { absoluteUrl } from "@/lib/seo";
@@ -182,6 +183,9 @@ export default async function SlottedPostPage({
     ),
   }));
   const initialEventIds = [ev.id];
+  // 枠投稿では部を選ばせないため、クライアント側の必須判定にも枠の正本値を渡す。
+  // 保存時は Server Action 側でも再計算し、改ざんされた hidden 値は採用しない。
+  const slotPart = await resolvePartFromSlot(db, slot);
 
   // 投稿は writeGuard で active_x_user_id が approved であることを要求するため、
   // フォーム送信前に同じ条件を判定して「押せるけど失敗する」状態を防ぐ。
@@ -288,6 +292,7 @@ export default async function SlottedPostPage({
           creator_x_user_id: activeX ?? undefined,
           ...initialProfile,
           event_ids: initialEventIds,
+          part: slotPart,
         }}
         defaultProfile={initialProfile}
         softwareSuggestions={softwareSuggestions}

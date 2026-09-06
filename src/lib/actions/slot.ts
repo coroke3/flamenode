@@ -12,7 +12,7 @@ import {
   writeGuard,
   type WriteGuardDenyReason,
 } from "@/lib/auth/writeGuard";
-import { getDatabase } from "@/lib/cloudflare";
+import type { DB } from "@/lib/db/client";
 import { events, slots } from "@/lib/db/schema";
 import {
   MAX_SLOTS_PER_VIDEO,
@@ -83,7 +83,6 @@ function slotMutationOk(
   );
 }
 
-type DB = NonNullable<ReturnType<typeof getDatabase>>;
 type SlotRow = typeof slots.$inferSelect;
 type EventRow = typeof events.$inferSelect;
 type SlotPatch = Partial<typeof slots.$inferInsert>;
@@ -647,8 +646,7 @@ export async function reserveSlot(
       message: parsed.error.issues[0]?.message ?? "入力エラー",
     };
   }
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   const identity = await resolveReservationXIdentity(db, guard);
   if ("error" in identity) {
@@ -860,8 +858,7 @@ export async function releaseOwnSlot(
   }
   const slotId = String(formData.get("slot_id") ?? "").trim();
   if (!slotId) return { ok: false, message: "slot_id が必要です。" };
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   try {
     const anchor = await loadSlot(db, slotId);
@@ -917,8 +914,7 @@ export async function extendOwnSlotGroup(
       message: parsed.error.issues[0]?.message ?? "入力エラー",
     };
   }
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   try {
     const anchor = await loadSlot(db, parsed.data.slot_id);
@@ -1056,8 +1052,7 @@ export async function mergeOwnSlotGroups(
       message: parsed.error.issues[0]?.message ?? "入力エラー",
     };
   }
-  const db = getDatabase();
-  if (!db) return { ok: false, message: "DB に接続できません。" };
+  const db = guard.db;
 
   try {
     const gap = await loadSlot(db, parsed.data.gap_slot_id);
