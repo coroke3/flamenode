@@ -8,6 +8,8 @@ import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import { announcements } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildAnnouncementChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
 import { parseJstDatetimeLocalStrict } from "@/lib/utils/dateInput";
@@ -37,6 +39,21 @@ function announcementMutationError(error: unknown): AnnouncementResult {
     ok: false,
     message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
   };
+}
+
+async function revalidateAnnouncementPathsBestEffort(
+  flow: string,
+  paths: readonly string[],
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    paths.map((path, index) => ({
+      name: `revalidate_path_${index + 1}`,
+      run: async () => {
+        revalidatePath(path);
+      },
+    })),
+  );
 }
 
 function parseAnnouncementDates(
@@ -142,7 +159,9 @@ export async function createAnnouncement(
   } catch (error) {
     return announcementMutationError(error);
   }
-  revalidatePath("/admin/announcements");
+  await revalidateAnnouncementPathsBestEffort("announcement.create", [
+    "/admin/announcements",
+  ]);
   return { ok: true, id };
 }
 
@@ -228,8 +247,10 @@ export async function updateAnnouncement(
   } catch (error) {
     return announcementMutationError(error);
   }
-  revalidatePath("/admin/announcements");
-  revalidatePath(`/admin/announcements/${id}/edit`);
+  await revalidateAnnouncementPathsBestEffort("announcement.update", [
+    "/admin/announcements",
+    `/admin/announcements/${id}/edit`,
+  ]);
   return { ok: true, id };
 }
 
@@ -282,6 +303,8 @@ export async function deleteAnnouncement(
   } catch (error) {
     return announcementMutationError(error);
   }
-  revalidatePath("/admin/announcements");
+  await revalidateAnnouncementPathsBestEffort("announcement.delete", [
+    "/admin/announcements",
+  ]);
   return { ok: true };
 }

@@ -8,6 +8,7 @@ import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import { eventGroupEvents, eventGroups, events } from "@/lib/db/schema";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { planD1AuditMutationBudget } from "@/lib/audit/mutateBudget";
 import { buildEventGroupChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import {
@@ -15,6 +16,7 @@ import {
   type EventGroupEventOptionsPage,
 } from "@/lib/admin/eventGroupEventOptions";
 import { generateId } from "@/lib/utils/id";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import {
   compensateEventGroupVisibilityOnD1Failure,
   planEventGroupVisibilityFenceTransition,
@@ -73,6 +75,21 @@ function eventGroupMutationError(error: unknown): EventGroupActionResult {
     ok: false,
     message: "保存に失敗しました。再読み込みして、もう一度お試しください。",
   };
+}
+
+async function revalidateEventGroupPathsBestEffort(
+  flow: string,
+  paths: readonly string[],
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    paths.map((path, index) => ({
+      name: `revalidate_path_${index + 1}`,
+      run: async () => {
+        revalidatePath(path);
+      },
+    })),
+  );
 }
 
 const EVENT_GROUP_ADD_MAX = 80;
@@ -320,8 +337,10 @@ export async function createEventGroup(
     return eventGroupMutationError(error);
   }
 
-  revalidatePath("/admin/event-groups");
-  revalidatePath("/event");
+  await revalidateEventGroupPathsBestEffort("event_group.create", [
+    "/admin/event-groups",
+    "/event",
+  ]);
   return markPendingPublicReflection({ ok: true, id }, staticRebuildEnqueued);
 }
 
@@ -431,9 +450,11 @@ export async function updateEventGroup(
     return eventGroupMutationError(error);
   }
 
-  revalidatePath("/admin/event-groups");
-  revalidatePath(`/admin/event-groups/${id}/edit`);
-  revalidatePath("/event");
+  await revalidateEventGroupPathsBestEffort("event_group.update", [
+    "/admin/event-groups",
+    `/admin/event-groups/${id}/edit`,
+    "/event",
+  ]);
   return markPendingPublicReflection({ ok: true, id }, staticRebuildEnqueued);
 }
 
@@ -520,8 +541,10 @@ export async function deleteEventGroup(
   } catch (error) {
     return eventGroupMutationError(error);
   }
-  revalidatePath("/admin/event-groups");
-  revalidatePath("/event");
+  await revalidateEventGroupPathsBestEffort("event_group.delete", [
+    "/admin/event-groups",
+    "/event",
+  ]);
   return { ok: true };
 }
 
@@ -626,8 +649,10 @@ export async function addEventsToGroup(input: {
     return eventGroupMutationError(error);
   }
 
-  revalidatePath(`/admin/event-groups/${groupId}/edit`);
-  revalidatePath("/event");
+  await revalidateEventGroupPathsBestEffort("event_group.add_events", [
+    `/admin/event-groups/${groupId}/edit`,
+    "/event",
+  ]);
   return { ok: true, id: groupId, added: toAdd.length };
 }
 
@@ -709,7 +734,9 @@ export async function removeEventFromGroup(input: {
     return eventGroupMutationError(error);
   }
 
-  revalidatePath(`/admin/event-groups/${groupId}/edit`);
-  revalidatePath("/event");
+  await revalidateEventGroupPathsBestEffort("event_group.remove_event", [
+    `/admin/event-groups/${groupId}/edit`,
+    "/event",
+  ]);
   return { ok: true, id: groupId };
 }

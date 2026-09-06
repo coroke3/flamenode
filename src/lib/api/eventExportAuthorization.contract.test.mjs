@@ -30,7 +30,7 @@ test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を�
 test("イベントprivate化後は全payload cacheを無効化する", () => {
   assert.match(
     eventAction,
-    /if \(visibilityTransition\.fenceToken \|\| after\.visibility_status !== "public"\) \{[\s\S]*?await invalidateEventExportCache\(data\.id\)/,
+    /if \(visibilityTransition\.fenceToken \|\| after\.visibility_status !== "public"\) \{[\s\S]*?await invalidateEventExportCache\(committedEventId\)/,
   );
   assert.match(eventAction, /await invalidateEventExportCache\(eventId\)/);
   assert.doesNotMatch(cache, /eventExportAccessCacheKey/);
