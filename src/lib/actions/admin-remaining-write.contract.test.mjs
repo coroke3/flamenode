@@ -65,7 +65,7 @@ test("バックフィル成功redirectをcatchしない", () => {
   );
   assert.match(
     source,
-    /revalidatePath\("\/admin\/static-builds"\);\s*redirect\(redirectTarget\);/,
+    /await revalidateStaticBuildsBestEffort\("static_backfill\.enqueue_batch"\);\s*redirect\(redirectTarget\);/,
   );
 
   const tryBlock =

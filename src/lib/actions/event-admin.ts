@@ -18,6 +18,10 @@ import {
   planD1AuditMutationBudget,
 } from "@/lib/audit/mutate";
 import {
+  runPostCommitBestEffort,
+  type PostCommitTask,
+} from "@/lib/audit/postCommit";
+import {
   parseEventTemplateSnapshot,
   type EventTemplateSnapshot,
 } from "@/lib/admin/eventTemplateSettings";
@@ -71,21 +75,38 @@ import {
 } from "@/lib/event/eventEditPermissions";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
-function revalidateEventPaths(eventId: string): void {
-  revalidatePath("/admin/events");
-  revalidatePath(`/admin/events/${eventId}`);
-  revalidatePath("/manage");
-  revalidatePath(`/manage/events/${eventId}`);
-  revalidatePath(`/manage/events/${eventId}/edit`);
-  revalidatePath("/event");
-  revalidatePath(`/event/${eventId}`);
+function eventRevalidationTasks(
+  eventId?: string,
+): PostCommitTask[] {
+  const paths = eventId
+    ? [
+        "/admin/events",
+        `/admin/events/${eventId}`,
+        "/manage",
+        `/manage/events/${eventId}`,
+        `/manage/events/${eventId}/edit`,
+        "/event",
+        `/event/${eventId}`,
+      ]
+    : ["/admin/events", "/manage", "/event"];
+  return paths.map((path, index) => ({
+    name: `revalidate_path_${index + 1}`,
+    run: async () => {
+      revalidatePath(path);
+    },
+  }));
 }
 
-function revalidateEventListPaths(): void {
-  revalidatePath("/admin/events");
-  revalidatePath("/manage");
-  revalidatePath("/event");
+async function runEventPostCommitBestEffort(
+  flow: string,
+  tasks: readonly PostCommitTask[],
+): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    tasks,
+  );
 }
 
 type PlannedQuestion = typeof eventCustomQuestions.$inferInsert;
@@ -522,8 +543,10 @@ export async function createEvent(
     throw error;
   }
 
-  revalidateEventListPaths();
-  revalidateEventPaths(id);
+  await runEventPostCommitBestEffort("event.create", [
+    ...eventRevalidationTasks(),
+    ...eventRevalidationTasks(id),
+  ]);
   return markPendingPublicReflection({ ok: true, eventId: id }, queue.statements.length > 0);
 }
 
@@ -1031,28 +1054,41 @@ export async function updateEvent(
     return { ok: false, message: "イベント更新に失敗しました。状態を再取得してもう一度お試しください。" };
   }
 
+  const committedEventId = data.id;
+  const postCommitTasks: PostCommitTask[] = [];
   if (
     visibilityTransition.fenceToken ||
     built.updatedSections.includes("basic")
   ) {
-    await deletePublicJsonCaches([
-      eventComposedObjectKey(data.id),
-      eventBaseObjectKey(data.id),
-      eventSlotsObjectKey(data.id),
-      eventReleaseObjectKey(data.id),
-      "events/index.json",
-      "list/recent.json",
-      "list/popular.json",
-      "top/sections/events.v1.json",
-      "top.json",
-    ]);
+    postCommitTasks.push({
+      name: "delete_public_json_caches",
+      run: async () => {
+        await deletePublicJsonCaches([
+          eventComposedObjectKey(committedEventId),
+          eventBaseObjectKey(committedEventId),
+          eventSlotsObjectKey(committedEventId),
+          eventReleaseObjectKey(committedEventId),
+          "events/index.json",
+          "list/recent.json",
+          "list/popular.json",
+          "top/sections/events.v1.json",
+          "top.json",
+        ]);
+      },
+    });
   }
   if (visibilityTransition.fenceToken || after.visibility_status !== "public") {
-    await invalidateEventExportCache(data.id);
+    postCommitTasks.push({
+      name: "invalidate_event_export_cache",
+      run: async () => {
+        await invalidateEventExportCache(committedEventId);
+      },
+    });
   }
-  revalidateEventPaths(data.id);
+  postCommitTasks.push(...eventRevalidationTasks(committedEventId));
+  await runEventPostCommitBestEffort("event.update", postCommitTasks);
   return markPendingPublicReflection(
-    { ok: true, eventId: data.id },
+    { ok: true, eventId: committedEventId },
     queue.statements.length > 0,
   );
 }
@@ -1171,18 +1207,30 @@ export async function deleteEvent(
     return { ok: false, message: "イベント非公開化に失敗しました。状態を再取得してもう一度お試しください。" };
   }
 
-  await deletePublicJsonCaches([
-    eventComposedObjectKey(eventId),
-    eventBaseObjectKey(eventId),
-    eventSlotsObjectKey(eventId),
-    eventReleaseObjectKey(eventId),
-    "events/index.json",
-    "list/recent.json",
-    "list/popular.json",
-    "top/sections/events.v1.json",
-    "top.json",
+  await runEventPostCommitBestEffort("event.archive", [
+    {
+      name: "delete_public_json_caches",
+      run: async () => {
+        await deletePublicJsonCaches([
+          eventComposedObjectKey(eventId),
+          eventBaseObjectKey(eventId),
+          eventSlotsObjectKey(eventId),
+          eventReleaseObjectKey(eventId),
+          "events/index.json",
+          "list/recent.json",
+          "list/popular.json",
+          "top/sections/events.v1.json",
+          "top.json",
+        ]);
+      },
+    },
+    {
+      name: "invalidate_event_export_cache",
+      run: async () => {
+        await invalidateEventExportCache(eventId);
+      },
+    },
+    ...eventRevalidationTasks(eventId),
   ]);
-  await invalidateEventExportCache(eventId);
-  revalidateEventPaths(eventId);
   return markPendingPublicReflection({ ok: true }, queue.statements.length > 0);
 }

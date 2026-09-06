@@ -10,7 +10,9 @@ import { events, staticRebuildQueue, videos, xUsers } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
+import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import type { WriteAuditLogInput } from "@/lib/audit/types";
+import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import {
   isStaticRebuildTargetType,
@@ -34,6 +36,20 @@ import {
 const BULK_RETRY_MAX = 8;
 const BACKFILL_BATCH_SIZE = 12;
 type Row = typeof staticRebuildQueue.$inferSelect;
+
+async function revalidateStaticBuildsBestEffort(flow: string): Promise<void> {
+  await runPostCommitBestEffort(
+    { flow, traceId: createTraceId() },
+    [
+      {
+        name: "revalidate_static_builds",
+        run: async () => {
+          revalidatePath("/admin/static-builds");
+        },
+      },
+    ],
+  );
+}
 
 function parseCursor(value: FormDataEntryValue | null): string {
   const cursor = String(value ?? "").trim();
@@ -464,7 +480,7 @@ export async function enqueueStaticBackfillBatch(
       `/admin/static-builds?${params.toString()}`;
   }
 
-  revalidatePath("/admin/static-builds");
+  await revalidateStaticBuildsBestEffort("static_backfill.enqueue_batch");
   redirect(redirectTarget);
 }
 
@@ -531,7 +547,7 @@ export async function retryFailedStaticRebuild(
   )[0];
   if (!row || row.status !== "failed") return;
   await retryRows(db, [row], guard.user.id);
-  revalidatePath("/admin/static-builds");
+  await revalidateStaticBuildsBestEffort("static_rebuild.retry_failed");
 }
 
 export async function enqueueStaticRebuildAdmin(
@@ -586,7 +602,7 @@ export async function enqueueStaticRebuildAdmin(
     ],
     staticRebuildWakeSource: "admin",
   });
-  revalidatePath("/admin/static-builds");
+  await revalidateStaticBuildsBestEffort("static_rebuild.enqueue_manual");
 }
 
 export async function enqueueSharedRelatedInputsRebuildAdmin(): Promise<void> {
@@ -637,7 +653,9 @@ export async function enqueueSharedRelatedInputsRebuildAdmin(): Promise<void> {
     ],
     staticRebuildWakeSource: "admin",
   });
-  revalidatePath("/admin/static-builds");
+  await revalidateStaticBuildsBestEffort(
+    "static_rebuild.enqueue_shared_inputs",
+  );
 }
 
 export async function retryAllFailedStaticRebuild(): Promise<void> {
@@ -653,5 +671,5 @@ export async function retryAllFailedStaticRebuild(): Promise<void> {
   const targets = rows.slice(0, BULK_RETRY_MAX);
   if (targets.length === 0) return;
   await retryRows(db, targets, guard.user.id);
-  revalidatePath("/admin/static-builds");
+  await revalidateStaticBuildsBestEffort("static_rebuild.retry_all_failed");
 }

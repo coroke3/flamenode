@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import {
+  runPostCommitBestEffort,
+  type PostCommitTask,
+} from "@/lib/audit/postCommit";
+import {
   events,
   eventYoutubePlaylistSync,
   publicVisibilityFences,
@@ -44,6 +48,7 @@ import {
   type PendingPublicReflection,
 } from "@/lib/staticRebuild/publicReflectionNotice";
 import { generateId } from "@/lib/utils/id";
+import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface RenameEventIdResult extends PendingPublicReflection {
   ok: boolean;
@@ -59,19 +64,28 @@ export interface RenameEventIdResult extends PendingPublicReflection {
 const MAX_RENAME_VIDEO_REBUILD_TARGETS = 70;
 const RENAME_VIDEO_REBUILD_CHUNK_SIZE = 10;
 
-function revalidateRenamedEventPaths(oldId: string, newId: string): void {
-  revalidatePath("/admin/events");
-  revalidatePath("/manage");
-  revalidatePath("/event");
+function renamedEventRevalidationTasks(
+  oldId: string,
+  newId: string,
+): PostCommitTask[] {
+  const paths = ["/admin/events", "/manage", "/event"];
   for (const eventId of [oldId, newId]) {
-    revalidatePath(`/admin/events/${eventId}`);
-    revalidatePath(`/admin/events/${eventId}/slots`);
-    revalidatePath(`/manage/events/${eventId}`);
-    revalidatePath(`/manage/events/${eventId}/edit`);
-    revalidatePath(`/manage/events/${eventId}/slots`);
-    revalidatePath(`/event/${eventId}`);
-    revalidatePath(`/event/${eventId}/slots`);
+    paths.push(
+      `/admin/events/${eventId}`,
+      `/admin/events/${eventId}/slots`,
+      `/manage/events/${eventId}`,
+      `/manage/events/${eventId}/edit`,
+      `/manage/events/${eventId}/slots`,
+      `/event/${eventId}`,
+      `/event/${eventId}/slots`,
+    );
   }
+  return paths.map((path, index) => ({
+    name: `revalidate_path_${index + 1}`,
+    run: async () => {
+      revalidatePath(path);
+    },
+  }));
 }
 
 /**
@@ -565,36 +579,54 @@ export async function renameEventId(
     };
   }
 
-  await Promise.all([
-    invalidateEventExportCache(oldId),
-    invalidateEventExportCache(newId),
-    deletePublicJsonCaches([
-      eventComposedObjectKey(oldId),
-      eventBaseObjectKey(oldId),
-      eventSlotsObjectKey(oldId),
-      eventReleaseObjectKey(oldId),
-      eventComposedObjectKey(newId),
-      eventBaseObjectKey(newId),
-      eventSlotsObjectKey(newId),
-      eventReleaseObjectKey(newId),
-      // Event IDs are embedded in the global event/top projections too.  The
-      // queue rebuild will refresh R2, but the Cache API can otherwise serve
-      // the old ID until its normal TTL expires.
-      "events/index.json",
-      "list/recent.json",
-      "list/popular.json",
-      "top/sections/events.v1.json",
-      "top.json",
-      ...linkedVideoRows.flatMap((video) => {
-        const keys = new Set<string>([`videos/${video.id}.json`]);
-        if (video.youtube_video_id) {
-          keys.add(`videos/${video.youtube_video_id}.json`);
-        }
-        return [...keys];
-      }),
-    ]),
-  ]);
-  revalidateRenamedEventPaths(oldId, newId);
+  await runPostCommitBestEffort(
+    { flow: "event.rename_id", traceId: createTraceId() },
+    [
+      {
+        name: "invalidate_old_event_export_cache",
+        run: async () => {
+          await invalidateEventExportCache(oldId);
+        },
+      },
+      {
+        name: "invalidate_new_event_export_cache",
+        run: async () => {
+          await invalidateEventExportCache(newId);
+        },
+      },
+      {
+        name: "delete_public_json_caches",
+        run: async () => {
+          await deletePublicJsonCaches([
+            eventComposedObjectKey(oldId),
+            eventBaseObjectKey(oldId),
+            eventSlotsObjectKey(oldId),
+            eventReleaseObjectKey(oldId),
+            eventComposedObjectKey(newId),
+            eventBaseObjectKey(newId),
+            eventSlotsObjectKey(newId),
+            eventReleaseObjectKey(newId),
+            // Event IDs are embedded in the global event/top projections too.  The
+            // queue rebuild will refresh R2, but the Cache API can otherwise serve
+            // the old ID until its normal TTL expires.
+            "events/index.json",
+            "list/recent.json",
+            "list/popular.json",
+            "top/sections/events.v1.json",
+            "top.json",
+            ...linkedVideoRows.flatMap((video) => {
+              const keys = new Set<string>([`videos/${video.id}.json`]);
+              if (video.youtube_video_id) {
+                keys.add(`videos/${video.youtube_video_id}.json`);
+              }
+              return [...keys];
+            }),
+          ]);
+        },
+      },
+      ...renamedEventRevalidationTasks(oldId, newId),
+    ],
+  );
 
   return markPendingPublicReflection(
     {
