@@ -1,5 +1,8 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
-import { staticArtifactContentHash } from "./r2Dedup.ts";
+import {
+  staticArtifactContentHash,
+  staticArtifactCustomMetadata,
+} from "./r2Dedup.ts";
 import {
   staticR2CacheControl,
   STATIC_R2_MAX_AGE_SEC,
@@ -161,14 +164,17 @@ async function putManifest(
   ) {
     throw new Error("public_icon_v2_manifest_too_large");
   }
+  const serialized = JSON.stringify(manifest);
+  const contentHash = await staticArtifactContentHash(serialized);
   await env.R2.put(
     PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
-    JSON.stringify(manifest),
+    serialized,
     {
       httpMetadata: {
         contentType: "application/json; charset=utf-8",
         cacheControl: "public, max-age=60, stale-while-revalidate=300",
       },
+      customMetadata: staticArtifactCustomMetadata(serialized, contentHash, 2),
     },
   );
 }
@@ -270,12 +276,17 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
       throwIfAborted(signal);
       assertNoForbiddenPublicKeys(shard);
       const key = publicXIconV2ShardObjectKey(generation, shard.shard);
-      await env.R2.put(key, JSON.stringify(shard), {
+      const serialized = JSON.stringify(shard);
+      const contentHash = await staticArtifactContentHash(serialized);
+      await env.R2.put(key, serialized, {
         httpMetadata: {
           contentType: "application/json; charset=utf-8",
           cacheControl: staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.usersIndex),
         },
-        customMetadata: expectedShardMetadata(generation, shard.shard),
+        customMetadata: {
+          ...expectedShardMetadata(generation, shard.shard),
+          ...staticArtifactCustomMetadata(serialized, contentHash, 2),
+        },
       });
       writtenKeys.push(key);
     }

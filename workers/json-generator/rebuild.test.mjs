@@ -33,10 +33,11 @@ test("通常putJsonはR2 dedupe後もstatic_artifacts追跡を更新する", () 
   const body = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.match(body, /const identical = await resolveIdenticalJsonArtifactPut/);
-  assert.match(body, /if \(!identical\) \{[\s\S]*await env\.R2\.put/);
+  assert.match(body, /if \(!identical\?\.skipPut\) \{[\s\S]*await env\.R2\.put/);
+  assert.match(body, /customMetadata: staticArtifactCustomMetadata/);
   assert.match(body, /if \(target\) await recordArtifact/);
   assert.ok(
-    body.indexOf("await recordArtifact") > body.indexOf("if (!identical)"),
+    body.indexOf("await recordArtifact") > body.indexOf("if (!identical?.skipPut)"),
     "artifact tracking must run after the optional R2 PUT",
   );
   assert.doesNotMatch(body, /if \(await resolveIdenticalJsonArtifactPut[\s\S]*\) \{\s*return;/);
@@ -128,6 +129,7 @@ function videoEnv({ visibility = "public", youtubeId = "new-youtube" } = {}) {
 
         return null;
       },
+      async head() { return null; },
       async put(key) { puts.push(key); },
       async delete(key) { deletes.push(key); },
     },
@@ -151,6 +153,7 @@ function eventEnv({ visibility = "public" } = {}) {
     deletes,
     DB: { prepare: (sql) => statement(sql, state) },
     R2: {
+      async head() { return null; },
       async put(key) { puts.push(key); },
       async delete(key) { deletes.push(key); },
     },
@@ -230,7 +233,7 @@ test("static JSON queryはcanonical列だけを使う", () => {
   assert.doesNotMatch(source, /other_social_links, updated_at/);
   assert.doesNotMatch(source, /xu\.(updated_at|created_at)/);
   assert.doesNotMatch(source, /x_users\.(updated_at|created_at)/);
-  assert.match(source, /staticArtifactContentHash\(body\)/);
+  assert.match(source, /staticArtifactContentHash\(serialized\)/);
 });
 
 test("public static JSON queries exclude private event relations", () => {
@@ -843,6 +846,7 @@ test("rebuildTop composerはslot-stats artifactをtop.jsonへ合成する", asyn
         if (!payload) return null;
         return { async json() { return payload; } };
       },
+      async head() { return null; },
       async put(key, body) {
         puts.push({ key, body: JSON.parse(String(body)) });
       },
@@ -922,6 +926,7 @@ test("rebuildTopSlotStatsはヒーローイベントのslot_statsだけをartifa
       prepare: (sql) => statement(sql, state),
     },
     R2: {
+      async head() { return null; },
       async put(key, body) {
         puts.push({ key, body: JSON.parse(String(body)) });
       },
@@ -965,6 +970,7 @@ test("rebuildTopStatsはpublicEventCount由来のstats.public_eventsを返す", 
   const env = {
     DB: { prepare: (sql) => statement(sql, state) },
     R2: {
+      async head() { return null; },
       async put(key, body) {
         puts.push({ key, body: JSON.parse(String(body)) });
       },
@@ -1043,7 +1049,7 @@ test("200イベントの公開運営取得はD1 bind上限未満にchunkする",
   };
   const env = {
     DB: { prepare: (sql) => statement(sql, state) },
-    R2: { put: async () => ({}), delete: async () => {} },
+    R2: { head: async () => null, put: async () => ({}), delete: async () => {} },
     KV: { put: async () => {} },
   };
 

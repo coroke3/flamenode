@@ -18,6 +18,7 @@ import {
 import { withCronLease } from "../shared/cronLease.ts";
 import {
   D1_QUERY_SOFT_LIMIT,
+  isD1BudgetExhausted,
   withD1Budget,
   type D1Budget,
 } from "../shared/d1Budget.ts";
@@ -87,6 +88,7 @@ function hasSoftD1Budget(budget: D1Budget, requiredStatements: number): boolean 
   return (
     Number.isInteger(requiredStatements) &&
     requiredStatements >= 0 &&
+    !isD1BudgetExhausted(budget) &&
     budget.statements + requiredStatements <= D1_QUERY_SOFT_LIMIT
   );
 }
@@ -160,6 +162,7 @@ export async function runYoutubeSyncPostCommit(
       "youtube_related_eligibility_changed",
       "high",
       signal,
+      youtube.related_eligibility_changed_video_ids,
     );
     await wakeStaticRebuildAfterScoreEnqueue(env, enqueued);
   }

@@ -44,6 +44,8 @@ import {
   throwIfJobFailed,
 } from "../shared/runJob.ts";
 import {
+  D1_ROWS_READ_CONTINUATION_DELAY_SEC,
+  D1_ROWS_READ_SOFT_LIMIT,
   D1_QUERY_SOFT_LIMIT,
   isD1BudgetExhausted,
   type D1Budget,
@@ -86,6 +88,7 @@ function hasSoftD1Budget(budget: D1Budget, requiredStatements: number): boolean 
   return (
     Number.isInteger(requiredStatements) &&
     requiredStatements >= 0 &&
+    !isD1BudgetExhausted(budget) &&
     budget.statements + requiredStatements <= D1_QUERY_SOFT_LIMIT
   );
 }
@@ -300,6 +303,9 @@ export async function runContentJobsRecovery(
               queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
               kind: "static_rebuild_available",
               source: "recovery",
+              ...(rebuildEnv.d1Budget.rowsRead >= D1_ROWS_READ_SOFT_LIMIT
+                ? { delaySeconds: D1_ROWS_READ_CONTINUATION_DELAY_SEC }
+                : {}),
               envFlags: env,
               kv: env.KV,
               sentKinds: wakeSentKinds,
@@ -387,6 +393,9 @@ export async function runContentJobsRecovery(
               queue: env.STATIC_REBUILD_WAKE_QUEUE ?? null,
               kind: "static_rebuild_available",
               source: "recovery",
+              ...(rebuildEnv.d1Budget.rowsRead >= D1_ROWS_READ_SOFT_LIMIT
+                ? { delaySeconds: D1_ROWS_READ_CONTINUATION_DELAY_SEC }
+                : {}),
               envFlags: env,
               kv: env.KV,
               sentKinds: wakeSentKinds,

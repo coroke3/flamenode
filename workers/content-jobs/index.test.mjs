@@ -120,6 +120,10 @@ test("Queue wake成功時はCronでstatic rebuildを直接実行しない", () =
   assert.match(source, /skipped: 1,[\s\S]*?hasMore: true/);
   assert.match(source, /: await runJob\([\s\S]*?processStaticRebuildQueue/);
   assert.match(source, /if \(!delegatedToQueue && staticRebuildHasMore\)/);
+  assert.match(
+    source,
+    /if \(!delegatedToQueue && staticRebuildHasMore\)[\s\S]*?d1Budget\.rowsRead >= D1_ROWS_READ_SOFT_LIMIT[\s\S]*?delaySeconds: D1_ROWS_READ_CONTINUATION_DELAY_SEC/,
+  );
   assert.doesNotMatch(source, /Queue consumerの長いCPU枠/);
 });
 

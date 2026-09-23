@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import {
+  publicJsonCacheFreshness,
+  publicJsonCacheRetentionTtl,
+} from "./publicCachePolicy.ts";
 
 const source = await readFile(new URL("./publicCache.ts", import.meta.url), "utf8");
 
@@ -42,4 +46,18 @@ test("public cache write は非JSON値とUTF-8 byte上限超過entryを作らな
   assert.ok(byteGuardIndex > stringGuardIndex);
   assert.ok(putIndex > byteGuardIndex);
   assert.match(source, /function utf8ByteLengthExceeds/);
+});
+
+test("stale envelope はfresh TTLを超えた時だけ bounded stale として扱う", () => {
+  const envelope = { stored_at: 100 };
+  assert.equal(publicJsonCacheFreshness(envelope, 110, 30, 120), "fresh");
+  assert.equal(publicJsonCacheFreshness(envelope, 131, 30, 120), "stale");
+  assert.equal(publicJsonCacheFreshness(envelope, 221, 30, 120), "expired");
+  assert.equal(publicJsonCacheFreshness(envelope, 99, 30, 120), "expired");
+});
+
+test("Cache API retention covers the entire configured stale window", () => {
+  assert.equal(publicJsonCacheRetentionTtl(60, 600), 600);
+  assert.equal(publicJsonCacheRetentionTtl(600, 60), 600);
+  assert.equal(publicJsonCacheRetentionTtl(0, 0), 1);
 });

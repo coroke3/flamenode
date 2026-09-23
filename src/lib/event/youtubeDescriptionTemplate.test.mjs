@@ -260,6 +260,32 @@ test("nested members loops are rejected and the whole block removed", () => {
   assert.ok(!rendered.text.includes("{{"));
 });
 
+test("deeply nested members loops remove the entire outer block", () => {
+  for (const depth of [3, 4, 100]) {
+    const nested = "{{#members}}".repeat(depth) +
+      "inner" + "{{/members}}tail".repeat(depth - 1) + "{{/members}}";
+    const rendered = renderYoutubeDescriptionTemplate(
+      `before${nested}after {{title}}`,
+      { title: "作品" },
+      { members: [{ name: "Alice" }] },
+    );
+    assert.equal(rendered.text, "beforeafter 作品", `depth=${depth}`);
+    assert.equal(rendered.templateWarnings.length, 1);
+    assert.match(rendered.templateWarnings[0], /ネスト/);
+  }
+});
+
+test("rejecting a deeply nested block preserves a following valid loop", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}A{{#members}}B{{#members}}C{{/members}}D{{/members}}E{{/members}}" +
+      "{{#members}}{{member_index}}:{{member_name}};{{/members}}",
+    {},
+    { members: LOOP_MEMBERS },
+  );
+  assert.equal(rendered.text, "1:Alice;2:Bob;");
+  assert.equal(rendered.templateWarnings.length, 1);
+});
+
 test("stray close tag is removed with a warning", () => {
   const rendered = renderYoutubeDescriptionTemplate("A\n{{/members}}\nB", {});
   assert.equal(rendered.text, "A\n\nB");

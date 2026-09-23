@@ -6,6 +6,7 @@ import { Icon } from "@/components/ui/Icon";
 import {
   applyVideoCollaboratorPermissionsBatch,
   upsertVideoCollaborator,
+  type VideoCollabResult,
 } from "@/lib/actions/video-collab-perms";
 import { buildVideoEditPermissionGrantedNotification } from "@/lib/notifications/templates/video";
 import { parseCanonicalXId } from "@/lib/utils/xid";
@@ -214,6 +215,7 @@ export function VideoCollabPermsManager({
 }: Props): React.ReactElement {
   const router = useRouter();
   const [pending, startTransition] = React.useTransition();
+  const permissionInFlightRef = React.useRef(false);
   const [message, setMessage] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [grantDialog, setGrantDialog] = React.useState<GrantDialogState | null>(null);
@@ -242,6 +244,44 @@ export function VideoCollabPermsManager({
     return !already;
   });
 
+  const runPermissionChange = (
+    action: () => Promise<VideoCollabResult>,
+    successMessage: string,
+    failureMessage: string,
+  ) => {
+    // pending の描画前に確認ボタンが再度押されても、付与・解除を重複送信しない。
+    if (pending || permissionInFlightRef.current) return;
+    permissionInFlightRef.current = true;
+    setError(null);
+    setMessage(null);
+    startTransition(async () => {
+      try {
+        let result: VideoCollabResult;
+        try {
+          result = await action();
+        } catch {
+          // 通信が途切れた場合は未保存と断定せず、再送前に現在の権限を確認させる。
+          setError("編集権限の処理結果を確認できませんでした。通信状態と最新の権限を確認してから再試行してください。");
+          return;
+        }
+        if (!result.ok) {
+          setError(result.message ?? failureMessage);
+          return;
+        }
+        const savedMessage = result.message ?? successMessage;
+        setMessage(savedMessage);
+        try {
+          router.refresh();
+        } catch {
+          // 保存後の表示更新失敗で、成功した権限変更を失敗へ戻さない。
+          setMessage(`${savedMessage} 一覧を更新できなかったため、ページを再読み込みして確認してください。`);
+        }
+      } finally {
+        permissionInFlightRef.current = false;
+      }
+    });
+  };
+
   const submitUpsert = (
     draft: VideoCollabSubject | NewSubjectDraft,
     options: { notify: boolean },
@@ -251,8 +291,6 @@ export function VideoCollabPermsManager({
       setError("X ID は英数字とアンダースコア20文字以内で入力してください。");
       return;
     }
-    setError(null);
-    setMessage(null);
     const fd = new FormData();
     fd.set("video_id", videoId);
     fd.set("x_user_id", xUserId);
@@ -260,15 +298,11 @@ export function VideoCollabPermsManager({
     fd.set("can_edit", "1");
     fd.set("notify", options.notify ? "1" : "0");
     appendPrivilegeMode(fd);
-    startTransition(async () => {
-      const r = await upsertVideoCollaborator(fd);
-      if (!r.ok) {
-        setError(r.message ?? "更新に失敗しました。");
-        return;
-      }
-      setMessage(r.message ?? "更新しました。");
-      router.refresh();
-    });
+    runPermissionChange(
+      () => upsertVideoCollaborator(fd),
+      "更新しました。",
+      "更新に失敗しました。",
+    );
   };
 
   const submitRevoke = (subject: VideoCollabSubject) => {
@@ -277,10 +311,8 @@ export function VideoCollabPermsManager({
       setError("編集権限を解除するには有効な X ID が必要です。");
       return;
     }
-    setError(null);
-    setMessage(null);
-    startTransition(async () => {
-      const r = await applyVideoCollaboratorPermissionsBatch({
+    runPermissionChange(
+      () => applyVideoCollaboratorPermissionsBatch({
         video_id: videoId,
         ...(editPrivilegeMode !== "normal"
           ? { edit_privilege_mode: editPrivilegeMode }
@@ -293,14 +325,10 @@ export function VideoCollabPermsManager({
             intent: "off",
           },
         ],
-      });
-      if (!r.ok) {
-        setError(r.message ?? "解除に失敗しました。");
-        return;
-      }
-      setMessage(r.message ?? "解除しました。");
-      router.refresh();
-    });
+      }),
+      "解除しました。",
+      "解除に失敗しました。",
+    );
   };
 
   const openGrantDialog = (

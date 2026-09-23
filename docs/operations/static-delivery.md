@@ -60,8 +60,8 @@ The command refuses to overwrite an existing or malformed manifest; it only
 creates the canonical empty schema when the object is absent.
 
 > Status: Active
-> Last verified: 2026-08-29
-> Verified against: `src/lib/publicData/`, `src/lib/admin/staticSharedInputDiagnostics.ts`, `app/(public)/`, `app/(admin)/admin/static-builds/`, `workers/json-generator/`, `wrangler.toml`
+> Last verified: 2026-09-24
+> Verified against: `src/lib/publicData/`, `src/lib/admin/staticSharedInputDiagnostics.ts`, `app/(public)/`, `app/(admin)/admin/static-builds/`, `workers/json-generator/videoMaterializedSource.ts`, `workers/json-generator/optimizedRebuild.ts`, `wrangler.toml`
 
 **AI:** 公開静的 JSON / degraded D1 / Cache の仕様。正本コードは `src/lib/publicData/loader.ts`。軽量モデルは調査・文書修正まで。loader・権限・公開 DTO 変更は中位以上。
 
@@ -69,13 +69,17 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 
 ## 公開データの取得順
 
-公開ローダー (`src/lib/publicData/loader.ts`) は次の順で試す。
+公開ローダー (`src/lib/publicData/loader.ts`) は loader policy に従う。
+`cache_first` は isolate → Cache API → R2、鮮度優先の `r2_first` は
+isolate / Cache API（fresh TTL内のみ）→ R2 → bounded stale Cache の順とする。
+staleを許可しない経路は、そのまま degraded D1 / unavailable へ進む。
 
 1. **isolate 解析キャッシュ**（最大24件・TTL 30s。parsed object のみ。Promise / binding は持たない）
-2. **Cache API**（TTL は loader ごと）
+2. **fresh Cache API**（TTL は loader ごと）
 3. **R2** の静的 JSON（ヒット時は D1 / enqueue を呼ばない）
-4. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ）
-5. **Unavailable**（空表示・メッセージ。`maintenance` / `static_json_only` / kill switch 無効時は D1 に進まない）
+4. **bounded stale Cache**（R2 miss時のみ。visibility fenceとstored_at/max-ageを検証）
+5. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ）
+6. **Unavailable**（空表示・メッセージ。`maintenance` / `static_json_only` / kill switch 無効時は D1 に進まない）
 
 R2 miss 後の `resolvePublicJsonMiss` では、D1 probe が `public` を返し、要求 ID が canonical ID と異なる（YouTube alias や大文字小文字違い）場合、degraded D1 の重い projection を走らせる前に canonical ID 用の R2 キーを読む。video は `videos/{canonical}.json`、user は `users/{canonical}.json` または `users/{canonical}/...` を試し、ヒットすれば static として返す。alias 側の欠落を直すため rebuild enqueue は従来どおり行い、Cache API には canonical キーと要求キーの両方へ書き込む（TTL 設定時のみ）。canonical キー書換は `/`・`\`・`..`・制御文字・空白付き ID、および `..` や空セグメントを含む R2 キーを拒否し、isolate 解析キャッシュは `server-only` で client 混入を防ぐ。
 
@@ -86,9 +90,14 @@ R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しな
 Detail/event/user/rules loaders opt into `cacheMode: "r2_first"` when a
 freshness-sensitive projection is required. They still consult the isolate
 parsed-object cache first (max 30s) so a warm Worker can skip `JSON.parse`.
-On isolate miss they read R2 before Cache API and
-may use only a bounded-age Cache envelope when R2 is unavailable; raw legacy
-Cache payloads without `stored_at` are not accepted as stale fallback. The
+The isolate and Cache API are accepted as fresh only while the envelope age is
+inside that loader's configured Cache TTL. On a Cache miss/expired entry they
+read R2, then may use only a bounded-age Cache envelope when R2 is unavailable;
+the Cache API retention is extended to cover that configured stale window. Raw
+legacy Cache payloads without `stored_at` may serve the `cache_first`
+compatibility path while the Cache API entry remains live; `r2_first` rejects
+them because their age cannot be verified, then checks R2 and does not use them
+as stale fallback. The
 existing visibility fence guard still runs first, and an enforce-mode manifest
 read failure is reported as `unavailable`. `cacheMode: "bypass"` remains
 available for strict callers and skips both Cache API reads and writes. All
@@ -211,6 +220,23 @@ Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象v
 `/list?event=` は専用 R2 key を持たず、degraded D1 の bounded 一覧（`fetchDegradedEventListPage`、LIMIT 24 + ページング）で補う。
 
 ## スコア再計算とランキング再生成
+
+Video global projections share the internal materialized source at
+`internal/materialized/video-cards/v1/manifest.json`. The manifest points to a
+content-addressed generation and is committed with an R2 ETag/If-None-Match
+CAS; the immutable generation is written first. A normal `video` queue target
+patches/removes that ID, while ranking/search/random rebuilds share one source
+sync per invocation and absorb up to 50 pending global projection targets with
+an `updated_at` completion CAS after their outputs succeed. Ranking rebuilds
+also absorb pending/processing video targets before publishing. Missing/corrupt/schema-mismatched sources
+bootstrap from the bounded D1 snapshot; a public corpus above 5,000 rows never
+publishes a truncated source and keeps the existing D1 fallback. Score changes
+patch only rows at/after the source watermark (inclusive for same-second safety)
+without writing per-score dirty rows. `search_index` and `random_video_pool`
+reuse this source when valid; random-pool privacy/availability fields remain
+inside the source, so that artifact does not become dependent on the related
+blocklist. Event titles are re-read from D1 by the source's bounded event-ID set
+when the ranking bundle is composed, preventing a video-wide patch on rename.
 
 `sync-jobs` の score-recalc は毎時最大 150 件を 1 SQL で更新する。metadata / video の dirty は即時優先し、それ以外は **72 時間**（`SCORE_FORCE_REFRESH_SEC`）以上 `score_updated_at` が古い公開作品を age-only で強制 refresh する。
 

@@ -11,6 +11,10 @@ const ASYNC_STATEMENT_METHODS = new Set<PropertyKey>([
 
 /** D1 Free の 50 statements/invocation 手前で通常処理を安全停止する。 */
 export const D1_QUERY_SOFT_LIMIT = 40;
+/** 1 targetの完了後に後続の重い処理を止める invocation 内の rows-read soft limit。 */
+export const D1_ROWS_READ_SOFT_LIMIT = 25_000;
+/** rows-read budget直後の重いstatic rebuild continuationをcoalesceするQueue delay。 */
+export const D1_ROWS_READ_CONTINUATION_DELAY_SEC = 30;
 /** Cloudflare D1 Free の 1 Worker invocation あたり hard limit。 */
 export const D1_QUERY_HARD_LIMIT = 50;
 
@@ -42,7 +46,10 @@ export function createD1Budget(): D1Budget {
 }
 
 export function isD1BudgetExhausted(budget: D1Budget): boolean {
-  return budget.statements >= D1_QUERY_SOFT_LIMIT;
+  return (
+    budget.statements >= D1_QUERY_SOFT_LIMIT ||
+    budget.rowsRead >= D1_ROWS_READ_SOFT_LIMIT
+  );
 }
 
 export type EnvWithD1Budget<Env extends SerializedEnv> = Env & {

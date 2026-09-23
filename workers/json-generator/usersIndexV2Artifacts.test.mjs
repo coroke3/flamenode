@@ -121,12 +121,12 @@ test("users index v2 tracks all generation objects within a bounded D1 statement
   // keys skip per-page D1 hash probes, and rows are upserted through bounded
   // JSON1 statements.
   assert.ok(result.objectCount > 35);
-  assert.equal(env.calls.first, 1);
+  assert.equal(env.calls.first, 0);
   // All page/search rows fit in one JSON1 upsert for this fixture; the
   // manifest is recorded immediately after its R2 PUT.
   assert.ok(env.calls.run >= 2);
   assert.equal(env.calls.all, 2);
-  assert.equal(env.calls.first + env.calls.run + env.calls.all, env.calls.run + 3);
+  assert.equal(env.calls.first + env.calls.run + env.calls.all, env.calls.run + 2);
   const trackingSqls = env.queries.filter((sql) =>
     sql.includes("INSERT INTO static_artifacts"),
   );
@@ -147,10 +147,10 @@ test("large users index keeps tracking below the Worker D1 statement budget", as
   // posting shards, and a manifest. Tracking remains chunked rather than one
   // D1 statement per generated object.
   assert.ok(result.objectCount > 503);
-  assert.equal(env.calls.first, 1);
+  assert.equal(env.calls.first, 0);
   assert.ok(env.calls.run < 10);
   assert.equal(env.calls.all, 2);
-  assert.equal(env.calls.first + env.calls.run + env.calls.all, env.calls.run + 3);
+  assert.equal(env.calls.first + env.calls.run + env.calls.all, env.calls.run + 2);
   assert.equal(trackedKeysFromBindings(env).size, result.objectCount);
 });
 
@@ -164,9 +164,9 @@ test("rebuild環境はimmutable page/searchのdeduplicate falseを二重probeし
     1_700_000_000,
   );
 
-  // Only the manifest is content-deduplicated. Generation-specific pages and
-  // search use immutable keys and must not trigger implicit D1 hash probes.
-  assert.equal(env.calls.first, 1);
+  // Immutable pages/search skip D1 probes. The absent manifest is detected by
+  // R2 HEAD, so the legacy D1 hash fallback must not run either.
+  assert.equal(env.calls.first, 0);
 });
 
 test("manifest R2 failure leaves every successful page/search PUT tracked", async () => {

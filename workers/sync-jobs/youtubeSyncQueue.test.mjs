@@ -147,7 +147,7 @@ test("Queue consumer は metadata commit と post-commit を分離する", () =>
   assert.doesNotMatch(consumerBlock, /combineJobCounters\(youtube, score/);
 });
 
-test("YouTube公開可否変更はblocklistとrandom poolを同時更新する", () => {
+test("YouTube公開可否変更は依存するblocklist/random pool/nostalgicだけを更新する", () => {
   assert.match(
     projectionSource,
     /YOUTUBE_RELATED_PROJECTION_TARGETS/,
@@ -160,13 +160,10 @@ test("YouTube公開可否変更はblocklistとrandom poolを同時更新する",
     projectionSource,
     /"random_video_pool"/,
   );
-  assert.match(
+  assert.match(projectionSource, /"top_nostalgic"/);
+  assert.doesNotMatch(
     projectionSource,
-    /"top_recommended"/,
-  );
-  assert.match(
-    projectionSource,
-    /"recommend_core"/,
+    /"top_recommended"|"top_latest"|"top_stats"|"recommend_core"/,
   );
   assert.match(
     source,

@@ -194,6 +194,10 @@ Cloudflare Dashboardで`exceededCpu`、D1 rows read/written、Worker requests、
 
 ランキング静的再構築は、滞留したpending行の取得をboundedにし、同一generationの完了CAS更新をD1 batchへまとめる。通常のtarget単位の処理順とCAS条件は維持し、滞留時のrows_readとD1 round-tripだけを抑える。
 
+静的再構築の invocation budget は D1 statement soft limit 40 に加え、`meta.rows_read` が 25,000 行へ達した後は次の heavy operation を開始しない。処理中 target の再生成と完了CASは成功扱いのままにし、残りは `hasMore` で次回へ継続する。rows-read budget到達後のQueue continuationは30秒遅延して更新をcoalesceし、budget stopをretry/failureとして扱わない。queue/job構造化ログの `d1_rows_read` とCloudflare DashboardのD1日次使用量を併用して観測する。
+
+public global collection は R2 miss 後に degraded D1へ進む前に、R2現行artifactと最大2×TTLのCache last-known-goodを確認する。stale collectionはvisibility manifestをenforce modeで取得できた場合だけ返し、動画・user・eventのvisibility fenceでfilterする。イベント名だけの変更はvideo search indexをenqueueしないが、動画countabilityを変える `PVSFSummary` は例外として再生成対象に残す。
+
 - `users_index_v2` の page/search artifact tracking は、D1 の bind 数と round-trip を抑えるため、500 行以内の JSON1 bulk UPSERT として記録する。R2 PUT 後に D1 記録できなかった世代は、その chunk の orphan object を削除してから retry/fallback する。
 
 Queue wake の失敗テレメトリは best-effort とする。同じ `kind` の書込みは isolate 内の短い期間でまとめ、reason が変わった場合も同一キーの1秒レート制限を過ぎてから記録する。Queue の retry 挙動は変更せず、KV の書込み制限だけを守る。

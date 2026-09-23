@@ -167,8 +167,9 @@ import {
 } from "./degradedQueries";
 import {
   coercePublicJsonCacheEnvelope,
+  publicJsonCacheFreshness,
+  publicJsonCacheRetentionTtl,
   readPublicJsonCache,
-  unwrapPublicJsonCachePayload,
   writePublicJsonCacheBestEffort,
 } from "./publicCache";
 import { readPublicJsonIsolateCache } from "./publicCacheIsolate";
@@ -230,6 +231,8 @@ export type PublicJsonLoadOptions<TPayload = unknown> = {
   staleCacheMaxAgeSec?: number;
   /** Rules/current deliberately disables stale fallback. */
   allowStaleCacheFallback?: boolean;
+  /** Global collections may use stale cache only when a visibility manifest was loaded. */
+  requireVisibilityManifestForStale?: boolean;
   degradedFetcher?: () => Promise<TPayload | null>;
   /** overlay 時に空コレクションを semantic miss として扱う */
   isEmptyCollection?: (payload: TPayload) => boolean;
@@ -263,6 +266,7 @@ type PublicJsonLoaderConfig<TPayload, TResult> = {
   cacheMode?: PublicJsonCacheMode;
   staleCacheMaxAgeSec?: number;
   allowStaleCacheFallback?: boolean;
+  requireVisibilityManifestForStale?: boolean;
   normalize: (payload: TPayload) => TResult | null;
   degradedFetcher?: (id: string) => Promise<TPayload | null>;
 };
@@ -636,12 +640,22 @@ async function resolvePublicJsonMiss<T = never>(
           writePublicJsonCacheBestEffort(
             canonicalR2Key,
             envelope,
-            options.cacheTtlSeconds,
+            publicJsonCacheRetentionTtl(
+              options.cacheTtlSeconds,
+              options.allowStaleCacheFallback === false
+                ? 0
+                : options.staleCacheMaxAgeSec ?? 0,
+            ),
           );
           writePublicJsonCacheBestEffort(
             options.r2Key,
             envelope,
-            options.cacheTtlSeconds,
+            publicJsonCacheRetentionTtl(
+              options.cacheTtlSeconds,
+              options.allowStaleCacheFallback === false
+                ? 0
+                : options.staleCacheMaxAgeSec ?? 0,
+            ),
           );
         }
         const operationMode = await resolvePublicOperationMode({ allowD1: false });
@@ -709,6 +723,7 @@ export function createPublicJsonLoader<TPayload, TResult>({
   cacheMode,
   staleCacheMaxAgeSec,
   allowStaleCacheFallback,
+  requireVisibilityManifestForStale,
   normalize,
   degradedFetcher,
 }: PublicJsonLoaderConfig<TPayload, TResult>) {
@@ -727,6 +742,7 @@ export function createPublicJsonLoader<TPayload, TResult>({
       cacheMode,
       staleCacheMaxAgeSec,
       allowStaleCacheFallback,
+      requireVisibilityManifestForStale,
       degradedFetcher: degradedFetcher
         ? () => degradedFetcher(id)
         : undefined,
@@ -790,45 +806,83 @@ export async function loadPublicJson<T>(
   const cacheMode = options.cacheMode ?? "cache_first";
   const cacheFirst = cacheMode === "default" || cacheMode === "cache_first";
   const r2First = cacheMode === "r2_first";
-  if (cacheMode !== "bypass") {
-    const isolatedPayload = filterPublicArtifactPayload<T>(
-      options.targetType,
-      unwrapPublicJsonCachePayload<T>(
-        readPublicJsonIsolateCache(options.r2Key),
-      ),
-      visibility.artifactContext,
-    );
-    if (isolatedPayload !== null) {
-      if (options.isEmptyCollection?.(isolatedPayload)) {
-        return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
-      }
-      recordPublicStaticHit();
-      const isolateMode = await resolvePublicOperationMode({ allowD1: false });
-      return buildStaticHitResult(
-        isolatedPayload,
-        "cached_static",
-        getPublicDataStrategy(isolateMode),
-      );
-    }
-  }
+  const now = Math.floor(Date.now() / 1000);
+  const freshTtl = options.cacheTtlSeconds ?? Number.POSITIVE_INFINITY;
+  const staleMaxAge =
+    options.allowStaleCacheFallback === false
+      ? 0
+      : options.staleCacheMaxAgeSec ?? 0;
+  const isolatedEnvelope =
+    cacheMode === "bypass"
+      ? null
+      : coercePublicJsonCacheEnvelope(
+          readPublicJsonIsolateCache(options.r2Key),
+          now,
+          { requireStoredAt: r2First },
+        );
   let cachedEnvelope: ReturnType<typeof coercePublicJsonCacheEnvelope> = null;
-  const cached = cacheFirst
-    ? filterPublicArtifactPayload<T>(
+  if (cacheMode !== "bypass") {
+    if (
+      isolatedEnvelope &&
+      publicJsonCacheFreshness(
+        isolatedEnvelope,
+        now,
+        freshTtl,
+        staleMaxAge,
+      ) === "fresh"
+    ) {
+      const isolatedPayload = filterPublicArtifactPayload<T>(
         options.targetType,
-        unwrapPublicJsonCachePayload<T>(
-          await readPublicJsonCache<unknown>(options.r2Key),
-        ),
+        isolatedEnvelope.payload as T,
         visibility.artifactContext,
-      )
-    : null;
-  if (cached !== null) {
-    if (options.isEmptyCollection?.(cached)) {
-      return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
+      );
+      if (isolatedPayload !== null) {
+        if (options.isEmptyCollection?.(isolatedPayload)) {
+          return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
+        }
+        recordPublicStaticHit();
+        const isolateMode = await resolvePublicOperationMode({ allowD1: false });
+        return buildStaticHitResult(
+          isolatedPayload,
+          "cached_static",
+          getPublicDataStrategy(isolateMode),
+        );
+      }
     }
-    recordPublicStaticHit();
-    const operationMode = await resolvePublicOperationMode({ allowD1: false });
-    const strategy = getPublicDataStrategy(operationMode);
-    return buildStaticHitResult(cached, "cached_static", strategy);
+
+    // r2_first callers may use Cache API only while its envelope is inside the
+    // normal freshness window. Older entries remain available below as bounded
+    // last-known-good data, but must not hide a newer R2 generation.
+    const cacheValue = await readPublicJsonCache<unknown>(options.r2Key, {
+      bypassIsolate: true,
+    });
+    cachedEnvelope = coercePublicJsonCacheEnvelope(cacheValue, now, {
+      requireStoredAt: r2First,
+    });
+    const cacheFresh =
+      cachedEnvelope !== null &&
+      publicJsonCacheFreshness(
+        cachedEnvelope,
+        now,
+        freshTtl,
+        staleMaxAge,
+      ) === "fresh";
+    if ((cacheFirst || r2First) && cacheFresh && cachedEnvelope) {
+      const cached = filterPublicArtifactPayload<T>(
+        options.targetType,
+        cachedEnvelope.payload as T,
+        visibility.artifactContext,
+      );
+      if (cached !== null) {
+        if (options.isEmptyCollection?.(cached)) {
+          return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
+        }
+        recordPublicStaticHit();
+        const operationMode = await resolvePublicOperationMode({ allowD1: false });
+        const strategy = getPublicDataStrategy(operationMode);
+        return buildStaticHitResult(cached, "cached_static", strategy);
+      }
+    }
   }
 
   const payload = filterPublicArtifactPayload(
@@ -851,7 +905,12 @@ export async function loadPublicJson<T>(
           payload,
           stored_at: Math.floor(Date.now() / 1000),
         },
-        options.cacheTtlSeconds,
+        publicJsonCacheRetentionTtl(
+          options.cacheTtlSeconds,
+          options.allowStaleCacheFallback === false
+            ? 0
+            : options.staleCacheMaxAgeSec ?? 0,
+        ),
       );
     }
     return buildStaticHitResult(payload, "static", strategy);
@@ -861,31 +920,33 @@ export async function loadPublicJson<T>(
   if (
     r2First &&
     options.allowStaleCacheFallback !== false &&
+    (!options.requireVisibilityManifestForStale ||
+      visibility.artifactContext !== undefined) &&
     (options.staleCacheMaxAgeSec ?? 0) > 0
   ) {
-    const now = Math.floor(Date.now() / 1000);
-    cachedEnvelope = coercePublicJsonCacheEnvelope(
-      await readPublicJsonCache<unknown>(options.r2Key),
-      now,
-      { requireStoredAt: true },
-    );
-    if (cachedEnvelope) {
-      const age = now - cachedEnvelope.stored_at;
-      if (age >= 0 && age <= (options.staleCacheMaxAgeSec ?? 0)) {
-        const stale = filterPublicArtifactPayload<T>(
-          options.targetType,
-          cachedEnvelope.payload as T,
-          visibility.artifactContext,
+    const staleCandidate = cachedEnvelope ?? isolatedEnvelope;
+    if (
+      staleCandidate &&
+      publicJsonCacheFreshness(
+        staleCandidate,
+        now,
+        freshTtl,
+        staleMaxAge,
+      ) === "stale"
+    ) {
+      const stale = filterPublicArtifactPayload<T>(
+        options.targetType,
+        staleCandidate.payload as T,
+        visibility.artifactContext,
+      );
+      if (stale !== null && !options.isEmptyCollection?.(stale)) {
+        recordPublicStaticHit();
+        const operationMode = await resolvePublicOperationMode({ allowD1: false });
+        return buildStaticHitResult(
+          stale,
+          "cached_static",
+          getPublicDataStrategy(operationMode),
         );
-        if (stale !== null && !options.isEmptyCollection?.(stale)) {
-          recordPublicStaticHit();
-          const operationMode = await resolvePublicOperationMode({ allowD1: false });
-          return buildStaticHitResult(
-            stale,
-            "cached_static",
-            getPublicDataStrategy(operationMode),
-          );
-        }
       }
     }
   }
@@ -1028,6 +1089,9 @@ export async function loadStaticEventsIndex(): Promise<{
     targetId: "global",
     reason: "public_events_index_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex * 2,
+    requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -1067,6 +1131,9 @@ export async function loadStaticRecentVideosPage(params: {
     targetId: "global",
     reason: "public_list_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.listRecent,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.listRecent * 2,
+    requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -1135,6 +1202,9 @@ export async function loadStaticPopularVideosPage(params: {
     targetId: "global",
     reason: "public_list_popular_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.listPopular,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.listPopular * 2,
+    requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -1340,6 +1410,9 @@ export async function loadStaticSearchVideosPage(params: {
     targetId: "global",
     reason: "public_list_search_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.searchIndex,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.searchIndex * 2,
+    requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptySearchIndexCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -1503,43 +1576,76 @@ export async function loadPublicEventVideosPage(params: {
 
   const tryCachedOrR2 = async (key: string) => {
     const r2First = missOptions.cacheMode === "r2_first";
+    const now = Math.floor(Date.now() / 1000);
+    const cacheTtl = missOptions.cacheTtlSeconds ?? 0;
+    const staleMaxAge =
+      missOptions.allowStaleCacheFallback === false
+        ? 0
+        : missOptions.staleCacheMaxAgeSec ?? 0;
+    const isolatedEnvelope =
+      missOptions.cacheMode === "bypass"
+        ? null
+        : coercePublicJsonCacheEnvelope(
+            readPublicJsonIsolateCache(key),
+            now,
+            { requireStoredAt: r2First },
+          );
+    let cachedEnvelope: ReturnType<typeof coercePublicJsonCacheEnvelope> = null;
     if (missOptions.cacheMode !== "bypass") {
-      const isolated = filterPublicArtifactPayload<StaticEventDetailPayload>(
-        "event_base",
-        unwrapPublicJsonCachePayload<StaticEventDetailPayload>(
-          readPublicJsonIsolateCache(key),
-        ),
-        visibility.artifactContext,
-      );
-      if (isolated !== null) {
-        const strategy = getPublicDataStrategy(
-          await resolvePublicOperationMode({ allowD1: false }),
+      if (
+        isolatedEnvelope &&
+        publicJsonCacheFreshness(
+          isolatedEnvelope,
+          now,
+          cacheTtl,
+          staleMaxAge,
+        ) === "fresh"
+      ) {
+        const isolated = filterPublicArtifactPayload<StaticEventDetailPayload>(
+          "event_base",
+          isolatedEnvelope.payload as StaticEventDetailPayload,
+          visibility.artifactContext,
         );
-        const hit = tryStaticEventList(isolated, "cached_static", strategy);
-        if (hit) {
-          recordPublicStaticHit();
-          return { hit, payload: isolated };
+        if (isolated !== null) {
+          const strategy = getPublicDataStrategy(
+            await resolvePublicOperationMode({ allowD1: false }),
+          );
+          const hit = tryStaticEventList(isolated, "cached_static", strategy);
+          if (hit) {
+            recordPublicStaticHit();
+            return { hit, payload: isolated };
+          }
         }
       }
-    }
-    const cached =
-      r2First || missOptions.cacheMode === "bypass"
-        ? null
-        : filterPublicArtifactPayload<StaticEventDetailPayload>(
-            "event_base",
-            unwrapPublicJsonCachePayload<StaticEventDetailPayload>(
-              await readPublicJsonCache<unknown>(key),
-            ),
-            visibility.artifactContext,
-          );
-    if (cached !== null) {
-      const strategy = getPublicDataStrategy(
-        await resolvePublicOperationMode({ allowD1: false }),
+      cachedEnvelope = coercePublicJsonCacheEnvelope(
+        await readPublicJsonCache<unknown>(key, { bypassIsolate: true }),
+        now,
+        { requireStoredAt: r2First },
       );
-      const hit = tryStaticEventList(cached, "cached_static", strategy);
-      if (hit) {
-        recordPublicStaticHit();
-        return { hit, payload: cached as StaticEventDetailPayload | null };
+      if (
+        cachedEnvelope &&
+        publicJsonCacheFreshness(
+          cachedEnvelope,
+          now,
+          cacheTtl,
+          staleMaxAge,
+        ) === "fresh"
+      ) {
+        const cached = filterPublicArtifactPayload<StaticEventDetailPayload>(
+          "event_base",
+          cachedEnvelope.payload as StaticEventDetailPayload,
+          visibility.artifactContext,
+        );
+        if (cached !== null) {
+          const strategy = getPublicDataStrategy(
+            await resolvePublicOperationMode({ allowD1: false }),
+          );
+          const hit = tryStaticEventList(cached, "cached_static", strategy);
+          if (hit) {
+            recordPublicStaticHit();
+            return { hit, payload: cached };
+          }
+        }
       }
     }
 
@@ -1557,7 +1663,10 @@ export async function loadPublicEventVideosPage(params: {
         writePublicJsonCacheBestEffort(
           key,
           { payload, stored_at: Math.floor(Date.now() / 1000) },
-          PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+          publicJsonCacheRetentionTtl(
+            cacheTtl,
+            missOptions.allowStaleCacheFallback === false ? 0 : staleMaxAge,
+          ),
         );
       }
       const hit = tryStaticEventList(payload, "static", strategy);
@@ -1568,29 +1677,29 @@ export async function loadPublicEventVideosPage(params: {
       return { hit: null, payload };
     }
     if (r2First && (missOptions.staleCacheMaxAgeSec ?? 0) > 0) {
-      const now = Math.floor(Date.now() / 1000);
-      const staleEnvelope = coercePublicJsonCacheEnvelope(
-        await readPublicJsonCache<unknown>(key),
-        now,
-        { requireStoredAt: true },
-      );
-      if (staleEnvelope) {
-        const age = now - staleEnvelope.stored_at;
-        if (age >= 0 && age <= (missOptions.staleCacheMaxAgeSec ?? 0)) {
-          const stale = filterPublicArtifactPayload<StaticEventDetailPayload>(
-            "event_base",
-            staleEnvelope.payload as StaticEventDetailPayload,
-            visibility.artifactContext,
+      const staleEnvelope = cachedEnvelope ?? isolatedEnvelope;
+      if (
+        staleEnvelope &&
+        publicJsonCacheFreshness(
+          staleEnvelope,
+          now,
+          cacheTtl,
+          staleMaxAge,
+        ) === "stale"
+      ) {
+        const stale = filterPublicArtifactPayload<StaticEventDetailPayload>(
+          "event_base",
+          staleEnvelope.payload as StaticEventDetailPayload,
+          visibility.artifactContext,
+        );
+        if (stale !== null) {
+          const strategy = getPublicDataStrategy(
+            await resolvePublicOperationMode({ allowD1: false }),
           );
-          if (stale !== null) {
-            const strategy = getPublicDataStrategy(
-              await resolvePublicOperationMode({ allowD1: false }),
-            );
-            const hit = tryStaticEventList(stale, "cached_static", strategy);
-            if (hit) {
-              recordPublicStaticHit();
-              return { hit, payload: stale };
-            }
+          const hit = tryStaticEventList(stale, "cached_static", strategy);
+          if (hit) {
+            recordPublicStaticHit();
+            return { hit, payload: stale };
           }
         }
       }
@@ -1760,6 +1869,9 @@ export async function loadStaticTopPage(): Promise<
       "recommend_core",
     ],
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.top,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.top * 2,
+    requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyTopCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -1806,6 +1918,9 @@ export async function loadStaticUsersIndex(params?: {
     targetId: "global",
     reason: "public_users_index_miss",
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex * 2,
+    requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
     degradedFetcher: async () => {
       const db = getDatabase();
@@ -1839,6 +1954,9 @@ export async function loadStaticRecommendPage(): Promise<
     reason: "public_recommend_miss",
     missRebuildTargetTypes: ["recommend_core"],
     cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.recommend,
+    cacheMode: "r2_first",
+    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.recommend * 2,
+    requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyRecommendCollection,
     degradedFetcher: async () => {
       const db = getDatabase();

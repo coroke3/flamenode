@@ -28,7 +28,10 @@ export {
 export type { QueueWakeKind, QueueWakeMessage, QueueWakeSource };
 
 export type WorkerQueueSendBinding = {
-  send: (body: unknown) => Promise<void>;
+  send: (
+    body: unknown,
+    options?: { delaySeconds?: number },
+  ) => Promise<unknown>;
 };
 
 export type QueueConsumerResult = {
@@ -71,6 +74,8 @@ export async function sendWorkerQueueWakeBestEffort(input: {
   source: QueueWakeSource;
   envFlags?: Record<string, string | undefined> | null;
   requireYoutubeFlag?: boolean;
+  /** Queue backpressure; Cloudflare Queues accepts integer delays from 0 to 86400 seconds. */
+  delaySeconds?: number;
   /** 同一処理内の重複防止用。呼び出し側が Set を共有する。 */
   sentKinds?: Set<QueueWakeKind>;
   kv?: KVNamespace | null;
@@ -82,6 +87,14 @@ export async function sendWorkerQueueWakeBestEffort(input: {
   }
   if (input.requireYoutubeFlag && !flags.youtubeSyncEnabled) return false;
   if (input.sentKinds?.has(input.kind)) return false;
+  if (
+    input.delaySeconds !== undefined &&
+    (!Number.isInteger(input.delaySeconds) ||
+      input.delaySeconds < 0 ||
+      input.delaySeconds > 86_400)
+  ) {
+    return false;
+  }
   if (!input.queue) {
     warnOnce(`worker_wake_missing:${input.kind}`, {
       service: "queue-wake-worker",
@@ -109,7 +122,11 @@ export async function sendWorkerQueueWakeBestEffort(input: {
   input.sentKinds?.add(input.kind);
 
   try {
-    await input.queue.send(message);
+    if (input.delaySeconds === undefined) {
+      await input.queue.send(message);
+    } else {
+      await input.queue.send(message, { delaySeconds: input.delaySeconds });
+    }
     return true;
   } catch (error) {
     input.sentKinds?.delete(input.kind);

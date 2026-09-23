@@ -1,5 +1,9 @@
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import {
+  staticArtifactContentHash,
+  staticArtifactCustomMetadata,
+} from "./r2Dedup.ts";
+import {
   buildMemberSuggestionsV2Artifacts,
   memberSuggestionsV2ArtifactByteLength,
   memberSuggestionsV2DirectoryObjectKey,
@@ -50,11 +54,15 @@ async function putJson(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  await bucket.put(key, JSON.stringify(value), {
+  const serialized = JSON.stringify(value);
+  const contentHash = await staticArtifactContentHash(serialized);
+  throwIfAborted(signal);
+  await bucket.put(key, serialized, {
     httpMetadata: {
       contentType: "application/json; charset=utf-8",
       cacheControl: PRIVATE_CACHE_CONTROL,
     },
+    customMetadata: staticArtifactCustomMetadata(serialized, contentHash, 2),
   });
   throwIfAborted(signal);
 }

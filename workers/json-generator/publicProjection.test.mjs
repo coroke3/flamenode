@@ -136,6 +136,7 @@ function fixture() {
           },
         };
       },
+      async head() { return null; },
       async put(key, body) {
         objects.set(key, JSON.parse(String(body)));
       },
@@ -228,6 +229,71 @@ test("public static artifacts exclude private event identifiers and titles", asy
     assert.ok(top);
     assert.equal(typeof top.stats.public_events, "number");
     assertNoForbiddenPublicKeys(top);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("materialized source powers search/random without a videos table scan and keeps random privacy filtering", async () => {
+  const { sqlite, objects, env } = fixture();
+  try {
+    env.videoSourceRows = [
+      {
+        id: "source-public",
+        title: "Source Public",
+        youtube_video_id: "source-yt-public",
+        display_name: "Creator",
+        creator_display_name: "Creator",
+        creator_x_user_id: "creator",
+        icon_url: null,
+        creator_icon_url: null,
+        primary_event_id: null,
+        primary_event_title: null,
+        scheduled_time: 100,
+        status: "public",
+        part: null,
+        score: 3,
+        score_updated_at: 10,
+        updated_at: 300,
+        youtube_privacy_status: "public",
+        youtube_availability_status: "playable",
+      },
+      {
+        id: "source-private",
+        title: "Source Private",
+        youtube_video_id: "source-yt-private",
+        display_name: "Creator",
+        creator_display_name: "Creator",
+        creator_x_user_id: "creator",
+        icon_url: null,
+        creator_icon_url: null,
+        primary_event_id: null,
+        primary_event_title: null,
+        scheduled_time: 200,
+        status: "public",
+        part: null,
+        score: 1,
+        score_updated_at: 10,
+        updated_at: 200,
+        youtube_privacy_status: "private",
+        youtube_availability_status: "private",
+      },
+    ];
+    const prepare = env.DB.prepare.bind(env.DB);
+    env.DB.prepare = (sql) => {
+      if (/FROM\s+videos\s+AS\s+v/i.test(sql)) {
+        throw new Error("materialized source path must not scan videos");
+      }
+      return prepare(sql);
+    };
+
+    await rebuildTarget(env, "random_video_pool", "global");
+    const randomPool = objects.get("videos/random-pool.v1.json");
+    assert.deepEqual(randomPool.items.map((item) => item.id), ["source-public"]);
+
+    await rebuildTarget(env, "search_index", "global");
+    const search = objects.get("search-index-lite.json");
+    assert.deepEqual(search.videos.map((item) => item.id), ["source-public", "source-private"]);
   } finally {
     sqlite.close();
   }

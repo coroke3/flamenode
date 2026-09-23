@@ -202,7 +202,7 @@ test("legacy rebuildは共通R2 wrapperでoversizeとGET直後abortを遮断す�
   );
   assert.match(
     optimizedRebuildSource,
-    /const legacyEnv = withBoundedAbortSafeR2\(env, signal\);/,
+    /const legacyEnv = withBoundedAbortSafeR2\(rebuildEnv, signal\);/,
   );
   assert.match(
     optimizedRebuildSource,

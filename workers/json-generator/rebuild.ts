@@ -3,7 +3,11 @@ import {
   cacheControlForFreshness,
   resolveEventFreshness,
 } from "./freshness.ts";
-import { staticArtifactContentHash, resolveIdenticalJsonArtifactPut } from "./r2Dedup.ts";
+import {
+  staticArtifactContentHash,
+  staticArtifactCustomMetadata,
+  resolveIdenticalJsonArtifactPut,
+} from "./r2Dedup.ts";
 import { staticRebuildArtifactTargetId } from "./staticGlobalRebuildTargets.ts";
 import {
   staticR2CacheControl,
@@ -147,12 +151,14 @@ const STATIC_USER_MAX_STATIC_ITEMS =
   STATIC_USER_WORKS_PAGE_SIZE * STATIC_USER_MAX_PAGES;
 
 import type { ArtifactHashCache } from "./r2Dedup.ts";
+import type { VideoMaterializedRow } from "./videoMaterializedSource.ts";
 
 type Env = {
   DB: D1Database;
   R2: R2Bucket;
   KV: KVNamespace;
   artifactHashCache?: ArtifactHashCache;
+  videoSourceRows?: readonly VideoMaterializedRow[];
 };
 type RebuildSignal = AbortSignal | undefined;
 type ArtifactTarget = { targetType: string; targetId: string; sourceUpdatedAt?: number | null };
@@ -491,17 +497,19 @@ async function putJson(
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
   throwIfAborted(signal);
-  const identical = await resolveIdenticalJsonArtifactPut(env, key, serialized);
-  if (!identical) {
+  const contentHash = await staticArtifactContentHash(serialized);
+  const identical = await resolveIdenticalJsonArtifactPut(env, key, serialized, contentHash);
+  if (!identical?.skipPut) {
     await env.R2.put(key, serialized, {
       httpMetadata: {
         contentType: "application/json; charset=utf-8",
         cacheControl,
       },
+      customMetadata: staticArtifactCustomMetadata(serialized, contentHash),
     });
   }
   throwIfAborted(signal);
-  if (target) await recordArtifact(env, target, key, serialized, signal);
+  if (target) await recordArtifact(env, target, key, contentHash, signal);
 }
 
 type PendingStaticArtifact = { objectKey: string; contentHash: string };
@@ -516,17 +524,16 @@ async function putJsonUntracked(
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
+  const contentHash = await staticArtifactContentHash(serialized);
   await env.R2.put(key, serialized, {
     httpMetadata: {
       contentType: "application/json; charset=utf-8",
       cacheControl,
     },
+    customMetadata: staticArtifactCustomMetadata(serialized, contentHash),
   });
   throwIfAborted(signal);
-  return {
-    objectKey: key,
-    contentHash: await staticArtifactContentHash(serialized),
-  };
+  return { objectKey: key, contentHash };
 }
 
 async function recordArtifactsBatch(
@@ -581,11 +588,9 @@ async function recordArtifact(
   env: Env,
   target: ArtifactTarget,
   objectKey: string,
-  body: string,
+  contentHash: string,
   signal?: RebuildSignal,
 ): Promise<void> {
-  throwIfAborted(signal);
-  const contentHash = await staticArtifactContentHash(body);
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
   const id = `sta:${target.targetType}:${target.targetId}:${objectKey}`;
@@ -1557,15 +1562,30 @@ function latestEventStart(events: readonly Record<string, unknown>[]): number | 
 
 async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
-  const videos = await env.DB.prepare(
-    `SELECT id, title, creator_display_name, creator_x_user_id, youtube_video_id
-     FROM videos AS v
-     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-     ORDER BY v.updated_at DESC
-     LIMIT ?`,
-  )
-    .bind(SEARCH_INDEX_VIDEO_LIMIT)
-    .all();
+  const videos = env.videoSourceRows
+    ? {
+        results: [...env.videoSourceRows]
+          .sort((left, right) =>
+            right.updated_at - left.updated_at || left.id.localeCompare(right.id),
+          )
+          .slice(0, SEARCH_INDEX_VIDEO_LIMIT)
+          .map((row) => ({
+            id: row.id,
+            title: row.title,
+            creator_display_name: row.creator_display_name,
+            creator_x_user_id: row.creator_x_user_id,
+            youtube_video_id: row.youtube_video_id,
+          })),
+      }
+    : await env.DB.prepare(
+        `SELECT id, title, creator_display_name, creator_x_user_id, youtube_video_id
+         FROM videos AS v
+         WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+         ORDER BY v.updated_at DESC
+         LIMIT ?`,
+      )
+        .bind(SEARCH_INDEX_VIDEO_LIMIT)
+        .all();
   const users = await env.DB.prepare(
     `SELECT id, x_name FROM x_users
      WHERE approval_status = 'approved'
@@ -3370,7 +3390,16 @@ async function rebuildRandomVideoPool(
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
 
-  const result = await env.DB.prepare(
+  const result = env.videoSourceRows
+    ? {
+        results: env.videoSourceRows.filter(
+          (row) =>
+            row.youtube_privacy_status !== "private" &&
+            row.youtube_availability_status !== "private" &&
+            row.youtube_availability_status !== "missing_or_private",
+        ),
+      }
+    : await env.DB.prepare(
     `SELECT v.id, v.title, v.youtube_video_id,
             v.creator_display_name AS display_name,
             v.creator_icon_url AS icon_url,

@@ -51,10 +51,14 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
   );
   assert.match(loadPublicJsonFn, /resolvePublicOperationMode\(\{ allowD1: true \}\)/);
   assert.match(loadPublicJsonFn, /maintenanceStrategy === "maintenance"/);
-  assert.match(loadPublicJsonFn, /unwrapPublicJsonCachePayload/);
+  assert.match(loadPublicJsonFn, /coercePublicJsonCacheEnvelope/);
   assert.match(loadPublicJsonFn, /readPublicJsonCache/);
   const r2Index = loadPublicJsonFn.indexOf("readStaticJson");
   const missIndex = loadPublicJsonFn.lastIndexOf("return resolvePublicJsonMiss");
+  const staleIndex = loadPublicJsonFn.indexOf('=== "stale"');
+  const cacheFreshIndex = loadPublicJsonFn.indexOf("readPublicJsonCache");
+  assert.ok(cacheFreshIndex >= 0 && r2Index > cacheFreshIndex, "fresh Cache check precedes R2");
+  assert.ok(staleIndex > r2Index, "stale Cache is accepted only after R2 miss");
   assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
@@ -196,6 +200,55 @@ test("events index, top, and recommend loaders wire empty collection semantic mi
     recommendBlock,
     /missRebuildTargetTypes:\s*\[\s*"recommend_core"\s*\]/,
   );
+});
+
+test("R2-first loaders reject legacy Cache payloads without stored_at", () => {
+  const loadPublicJsonFn = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicJson"),
+    loaderSource.indexOf("export async function loadStaticEventDetail"),
+  );
+  const eventMissFn = loaderSource.slice(
+    loaderSource.indexOf("const tryCachedOrR2 = async (key: string) =>"),
+    loaderSource.indexOf("const fallbackToDatabase", loaderSource.indexOf("const tryCachedOrR2 = async (key: string) =>")),
+  );
+
+  assert.match(loadPublicJsonFn, /coercePublicJsonCacheEnvelope\([\s\S]*?readPublicJsonIsolateCache\(options\.r2Key\)[\s\S]*?\{ requireStoredAt: r2First \}/);
+  assert.match(loadPublicJsonFn, /coercePublicJsonCacheEnvelope\(cacheValue, now, \{\s*requireStoredAt: r2First/);
+  assert.match(eventMissFn, /coercePublicJsonCacheEnvelope\([\s\S]*?readPublicJsonIsolateCache\(key\)[\s\S]*?\{ requireStoredAt: r2First \}/);
+  assert.match(eventMissFn, /readPublicJsonCache<unknown>\(key, \{ bypassIsolate: true \}\)[\s\S]*?\{ requireStoredAt: r2First \}/);
+});
+
+test("global collections prefer R2 and visibility-fenced stale cache before degraded D1", () => {
+  const staleStart = loaderSource.indexOf("r2First &&");
+  const missRecovery = loaderSource.indexOf(
+    "return resolvePublicJsonMiss(options, {",
+    staleStart,
+  );
+  const staleBranch = loaderSource.slice(
+    staleStart,
+    missRecovery,
+  );
+  assert.match(staleBranch, /visibility\.artifactContext !== undefined/);
+  assert.match(staleBranch, /filterPublicArtifactPayload<T>\(\s*options\.targetType,\s*staleCandidate\.payload as T/);
+  assert.ok(
+    staleBranch.indexOf("return buildStaticHitResult") >= 0 &&
+      missRecovery > staleStart + staleBranch.indexOf("return buildStaticHitResult"),
+    "bounded stale artifact must return before enqueue/probe/degraded D1 recovery",
+  );
+  for (const [start, end] of [
+    ["export async function loadStaticEventsIndex", "export async function loadStaticRecentVideosPage"],
+    ["export async function loadStaticRecentVideosPage", "export async function loadStaticPopularVideosPage"],
+    ["export async function loadStaticPopularVideosPage", "async function loadStaticVideoPostingPage"],
+    ["export async function loadStaticSearchVideosPage", "export async function loadPublicEventVideosPage"],
+    ["export async function loadStaticTopPage", "export async function loadStaticUsersIndex"],
+    ["export async function loadStaticUsersIndex", "export async function loadStaticRecommendPage"],
+    ["export async function loadStaticRecommendPage", "export const loadStaticUserProfile"],
+  ]) {
+    const block = loaderSource.slice(loaderSource.indexOf(start), loaderSource.indexOf(end));
+    assert.match(block, /cacheMode: "r2_first"/);
+    assert.match(block, /staleCacheMaxAgeSec:/);
+    assert.match(block, /requireVisibilityManifestForStale: true/);
+  }
 });
 
 test("popular list loader wires degraded fallback", () => {

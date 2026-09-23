@@ -68,6 +68,7 @@ function createFakeDb(options = {}) {
 
 function createFakeR2() {
   const objects = new Map();
+  const customMetadata = new Map();
   const puts = [];
   const heads = [];
   const deletes = [];
@@ -76,9 +77,12 @@ function createFakeR2() {
     puts,
     heads,
     deletes,
-    async put(key, value) {
+    async put(key, value, options = {}) {
       puts.push({ key, value });
       objects.set(key, value);
+      if (options.customMetadata) {
+        customMetadata.set(key, options.customMetadata);
+      }
       return { key };
     },
   async get(key) {
@@ -92,7 +96,9 @@ function createFakeR2() {
     },
     async head(key) {
       heads.push(key);
-      return objects.has(key) ? { key } : null;
+      return objects.has(key)
+        ? { key, ...(customMetadata.has(key) ? { customMetadata: customMetadata.get(key) } : {}) }
+        : null;
     },
     async delete(keys) {
       const normalized = Array.isArray(keys) ? keys : [keys];
@@ -180,7 +186,7 @@ test("内容が変わらない限りgenerationは不変", async () => {
   );
 });
 
-test("同一内容の再buildはR2 PUT dedupで省略される", async () => {
+test("legacy artifactをmetadata付きへ移行した後は同一内容のR2 PUTを省略する", async () => {
   // 先行buildでtracking済みの状態を作る。
   const initial = createEnv(BASIC_SOURCE);
   const built = await rebuildMemberSuggestions(initial);
@@ -201,18 +207,30 @@ test("同一内容の再buildはR2 PUT dedupで省略される", async () => {
   dedupR2.objects.set(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, storedManifestBody);
 
   await rebuildMemberSuggestions({ DB: dedupDb, R2: dedupR2 });
-  // 同一内容ならPUTは一切発生しない（head確認のみ）。
-  // V1のgeneration-specific index/manifestはdedupされる。一方、V2は
-  // canonical V1の成功後にbounded postingsを再公開するため、V2 PUTは残る。
-  assert.doesNotMatch(
+  // legacy V1 objects lack R2 content-hash metadata, so their matching D1
+  // hashes trigger one metadata-upgrade PUT. V2 postings are still published.
+  assert.match(
     dedupR2.puts.map(({ key }) => key).join("\n"),
     new RegExp(`^${idxKey}$`, "m"),
   );
-  assert.doesNotMatch(
+  assert.match(
     dedupR2.puts.map(({ key }) => key).join("\n"),
     new RegExp(`^${MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY}$`, "m"),
   );
   assert.ok(dedupR2.puts.length > 0);
+
+  dedupR2.puts.length = 0;
+  await rebuildMemberSuggestions({
+    DB: createFakeDb({ ...BASIC_SOURCE, knownHashes }),
+    R2: dedupR2,
+  });
+  const secondBuildKeys = dedupR2.puts.map(({ key }) => key).join("\n");
+  assert.doesNotMatch(secondBuildKeys, new RegExp(`^${idxKey}$`, "m"));
+  assert.doesNotMatch(
+    secondBuildKeys,
+    new RegExp(`^${MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY}$`, "m"),
+  );
+  assert.ok(dedupR2.puts.length > 0, "bounded V2 postings are still refreshed");
 });
 
 test("static_artifacts tracking failure removes newly written suggestions artifacts", async () => {

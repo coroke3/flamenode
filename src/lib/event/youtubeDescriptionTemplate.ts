@@ -445,39 +445,24 @@ type LoopCloseResult =
  */
 function findLoopClose(template: string, from: number): LoopCloseResult {
   let cursor = from;
+  let depth = 1;
   let sawNestedOpen = false;
   for (;;) {
     const token = nextToken(template, cursor);
     if (!token) return { kind: "unclosed" };
     if (token.key === MEMBERS_LOOP_OPEN) {
-      const innerCloseEnd = findLoopCloseAllowingNothing(template, token.end);
-      if (innerCloseEnd == null) {
-        // 内部ブロックが閉じていない場合は閉じ不能として扱う。
-        return { kind: "unclosed" };
-      }
-      cursor = innerCloseEnd;
+      depth += 1;
       sawNestedOpen = true;
-      continue;
+    } else if (token.key === MEMBERS_LOOP_CLOSE) {
+      depth -= 1;
+      // 深いネストも最外側の閉じ位置まで読む。途中で打ち切ると
+      // 無効ブロックの末尾が通常の本文として出力されてしまう。
+      if (depth === 0) {
+        return sawNestedOpen
+          ? { kind: "nested", end: token.end }
+          : { kind: "closed", bodyEnd: token.start, end: token.end };
+      }
     }
-    if (token.key === MEMBERS_LOOP_CLOSE) {
-      return sawNestedOpen
-        ? { kind: "nested", end: token.end }
-        : { kind: "closed", bodyEnd: token.start, end: token.end };
-    }
-    cursor = token.end;
-  }
-}
-
-/** nested検出時の内部ブロック閉じ位置だけを見つけるヘルパー。 */
-function findLoopCloseAllowingNothing(
-  template: string,
-  from: number,
-): number | null {
-  let cursor = from;
-  for (;;) {
-    const token = nextToken(template, cursor);
-    if (!token) return null;
-    if (token.key === MEMBERS_LOOP_CLOSE) return token.end;
     cursor = token.end;
   }
 }

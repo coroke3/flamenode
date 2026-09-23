@@ -3,6 +3,7 @@ import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   resolveIdenticalJsonArtifactPut,
   staticArtifactContentHash,
+  staticArtifactCustomMetadata,
   type ArtifactHashCache,
 } from "./r2Dedup.ts";
 import {
@@ -123,19 +124,23 @@ async function putTrackedJson(
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
   const serialized = JSON.stringify(body);
+  const contentHash = await staticArtifactContentHash(serialized);
   const identical = options?.deduplicate === false
     ? null
-    : await resolveIdenticalJsonArtifactPut(env, key, serialized);
-  if (!identical) {
+    : await resolveIdenticalJsonArtifactPut(env, key, serialized, contentHash);
+  if (!identical?.skipPut) {
     await env.R2.put(key, serialized, {
       httpMetadata: {
         contentType: "application/json; charset=utf-8",
         cacheControl: staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.usersIndex),
       },
+      customMetadata: staticArtifactCustomMetadata(
+        serialized,
+        contentHash,
+        USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION,
+      ),
     });
   }
-  throwIfAborted(signal);
-  const contentHash = await staticArtifactContentHash(serialized);
   throwIfAborted(signal);
   return { objectKey: key, contentHash };
 }

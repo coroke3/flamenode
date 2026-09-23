@@ -7,6 +7,13 @@ type DedupEnv = {
 type R2PutArgs = Parameters<R2Bucket["put"]>;
 type R2PutResult = Awaited<ReturnType<R2Bucket["put"]>>;
 
+export type JsonArtifactPutResolution = {
+  object: R2Object;
+  contentHash: string;
+  /** false for a legacy object so the next write upgrades it with hash metadata. */
+  skipPut: boolean;
+};
+
 const MAX_PRELOAD_ARTIFACT_HASHES = 100;
 
 export class ArtifactHashCache {
@@ -83,20 +90,75 @@ export async function staticArtifactContentHash(value: string): Promise<string> 
   return sha256Hex(meaningfulJsonBody(value));
 }
 
-/** R2 dedup と putJson が共有する「同一内容なら PUT / UPSERT 省略」判定。head ありならそのオブジェクトを返す。 */
+/** R2 metadata is a fast dedupe hint; static_artifacts remains the tracking source. */
+export function staticArtifactCustomMetadata(
+  serialized: string,
+  contentHash: string,
+  defaultSchemaVersion = 1,
+): Record<string, string> {
+  let schemaVersion = String(defaultSchemaVersion);
+  let sourceGeneration = contentHash;
+  try {
+    const parsed = JSON.parse(serialized) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const row = parsed as Record<string, unknown>;
+      const rawSchema = row.schema_version;
+      if (
+        (typeof rawSchema === "string" || typeof rawSchema === "number") &&
+        String(rawSchema).trim()
+      ) {
+        schemaVersion = String(rawSchema).trim().slice(0, 32);
+      }
+      const rawGeneration =
+        row.source_generation ?? row.generation ?? row.generation_key;
+      if (
+        (typeof rawGeneration === "string" ||
+          typeof rawGeneration === "number") &&
+        String(rawGeneration).trim()
+      ) {
+        const normalized = String(rawGeneration).trim();
+        if (normalized.length <= 128) sourceGeneration = normalized;
+      }
+    }
+  } catch {
+    // Non-JSON string bodies retain a deterministic content-based generation.
+  }
+  return {
+    content_hash: contentHash,
+    schema_version: schemaVersion,
+    source_generation: sourceGeneration,
+  };
+}
+
+/** R2 metadata is checked first; legacy objects use D1 once and are rewritten with metadata. */
 export async function resolveIdenticalJsonArtifactPut(
   env: DedupEnv,
   objectKey: string,
   serialized: string,
-): Promise<R2Object | null> {
-  const nextHash = await staticArtifactContentHash(serialized);
+  knownContentHash?: string,
+): Promise<JsonArtifactPutResolution | null> {
+  const nextHash = knownContentHash ?? await staticArtifactContentHash(serialized);
+  const object = await env.R2.head(objectKey);
+  if (!object) return null;
+
+  const metadataHash = object.customMetadata?.content_hash;
+  if (metadataHash) {
+    return metadataHash === nextHash
+      ? { object, contentHash: nextHash, skipPut: true }
+      : null;
+  }
+
   const storedHash = await currentArtifactHash(
     env.DB,
     objectKey,
     env.artifactHashCache,
   );
-  if (storedHash !== nextHash) return null;
-  return (await env.R2.head(objectKey)) ?? null;
+  // Rewriting even a matching legacy object upgrades its metadata, avoiding a
+  // permanent D1 lookup on every future rebuild. The comparison also preserves
+  // the tracking-table fallback contract for pre-metadata objects.
+  return storedHash === nextHash
+    ? { object, contentHash: nextHash, skipPut: false }
+    : null;
 }
 
 async function currentArtifactHash(
@@ -134,12 +196,24 @@ export function withDeduplicatingR2<Env extends DedupEnv>(env: Env): Env {
         return async (...args: R2PutArgs): Promise<R2PutResult> => {
           const [key, value] = args;
           if (typeof value === "string") {
+            const contentHash = await staticArtifactContentHash(value);
             const existing = await resolveIdenticalJsonArtifactPut(
               env,
               key,
               value,
+              contentHash,
             );
-            if (existing) return existing;
+            if (existing?.skipPut) return existing.object;
+            const putArgs = [...args] as R2PutArgs;
+            const options = args[2] ?? {};
+            putArgs[2] = {
+              ...options,
+              customMetadata: {
+                ...options.customMetadata,
+                ...staticArtifactCustomMetadata(value, contentHash),
+              },
+            };
+            return bucket.put(...putArgs);
           }
           return bucket.put(...args);
         };

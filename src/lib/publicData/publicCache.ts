@@ -7,6 +7,12 @@ import {
   readPublicJsonIsolateCache,
   writePublicJsonIsolateCache,
 } from "./publicCacheIsolate";
+import {
+  publicJsonCacheFreshness,
+  publicJsonCacheRetentionTtl,
+} from "./publicCachePolicy";
+
+export { publicJsonCacheFreshness, publicJsonCacheRetentionTtl } from "./publicCachePolicy";
 
 const CACHE_ORIGIN = "https://flamenode.internal/public-json/";
 export const PUBLIC_JSON_CACHE_MAX_BYTES = 16 * 1024 * 1024;
@@ -164,8 +170,13 @@ async function readBoundedJsonResponse<T>(response: Response): Promise<T | null>
   }
 }
 
-export async function readPublicJsonCache<T>(r2Key: string): Promise<T | null> {
-  const isolated = readPublicJsonIsolateCache(r2Key);
+export async function readPublicJsonCache<T>(
+  r2Key: string,
+  options?: { bypassIsolate?: boolean },
+): Promise<T | null> {
+  const isolated = options?.bypassIsolate
+    ? null
+    : readPublicJsonIsolateCache(r2Key);
   if (isolated != null) return isolated as T;
   try {
     const cache = (caches as unknown as { default: Cache }).default;

@@ -1,5 +1,6 @@
 import "server-only";
 import type { DB } from "@/lib/db/client";
+import { PVSF_SUMMARY_EVENT_ID } from "@/lib/publicData/countablePublicVideoSql";
 import { buildStaticRebuildQueueBatch, enqueueStaticRebuildMany, type StaticRebuildQueueBatch } from "./enqueue";
 import type { EnqueueStaticRebuildInput, StaticRebuildPriority } from "./types";
 type HookBase = {
@@ -554,18 +555,23 @@ export function buildEventChangeQueueBatch(
       priority: "low",
       requestedByUserId: opts.requestedByUserId,
     },
-    {
-      targetType: "search_index",
-      targetId: "global",
-      reason: opts.reason,
-      priority: "low",
-      requestedByUserId: opts.requestedByUserId,
-    },
     ...topEventChangeTargets(opts.reason, priority).map((target) => ({
       ...target,
       requestedByUserId: opts.requestedByUserId,
     })),
   ];
+  // Search indexes video fields, not event titles. The synthetic PVSF event is
+  // the exception: COUNTABLE_PUBLIC_VIDEO_SQL uses its membership to decide
+  // whether a video belongs in public global projections.
+  if (opts.eventId === PVSF_SUMMARY_EVENT_ID) {
+    targets.push({
+      targetType: "search_index",
+      targetId: "global",
+      reason: opts.reason,
+      priority: "low",
+      requestedByUserId: opts.requestedByUserId,
+    });
+  }
   if (opts.includeComposedCleanup) {
     targets.unshift({
       targetType: "event",

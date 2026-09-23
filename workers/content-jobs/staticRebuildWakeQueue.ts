@@ -8,6 +8,10 @@ import {
 import { logQueueConsumerFailure } from "../shared/safeLog.ts";
 import { processStaticRebuildQueue } from "../json-generator/queue.ts";
 import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
+import {
+  D1_ROWS_READ_CONTINUATION_DELAY_SEC,
+  D1_ROWS_READ_SOFT_LIMIT,
+} from "../shared/d1Budget.ts";
 import type { Env } from "./index.ts";
 
 /**
@@ -56,6 +60,9 @@ export async function handleStaticRebuildWakeQueue(
         queue: env.STATIC_REBUILD_WAKE_QUEUE,
         kind: "static_rebuild_available",
         source: "continuation",
+        ...(job.d1_rows_read >= D1_ROWS_READ_SOFT_LIMIT
+          ? { delaySeconds: D1_ROWS_READ_CONTINUATION_DELAY_SEC }
+          : {}),
         envFlags: env as Record<string, string | undefined>,
         kv: env.KV,
       });

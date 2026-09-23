@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   staticArtifactContentHash,
+  staticArtifactCustomMetadata,
   resolveIdenticalJsonArtifactPut,
   withDeduplicatingR2,
   ArtifactHashCache,
@@ -15,16 +16,23 @@ async function hash(value) {
   return Buffer.from(digest).toString("hex");
 }
 
-function createEnv({ storedHash, hasObject = true }) {
-  const calls = { head: 0, put: 0 };
-  const object = { key: "top.json", etag: "etag", version: "v1", size: 1 };
+function createEnv({ storedHash, metadataHash, hasObject = true }) {
+  const calls = { head: 0, put: 0, select: 0, putOptions: null };
+  const object = {
+    key: "top.json",
+    etag: "etag",
+    version: "v1",
+    size: 1,
+    ...(metadataHash ? { customMetadata: { content_hash: metadataHash } } : {}),
+  };
   const R2 = {
     async head() {
       calls.head += 1;
       return hasObject ? object : null;
     },
-    async put() {
+    async put(_key, _value, options) {
       calls.put += 1;
+      calls.putOptions = options;
       return object;
     },
   };
@@ -34,6 +42,7 @@ function createEnv({ storedHash, hasObject = true }) {
         bind() {
           return {
             async first() {
+              calls.select += 1;
               return storedHash ? { content_hash: storedHash } : null;
             },
           };
@@ -44,14 +53,31 @@ function createEnv({ storedHash, hasObject = true }) {
   return { env: { DB, R2 }, calls, object };
 }
 
-test("DB hashとR2実体が一致する場合はPUTを省略する", async () => {
+test("R2 content_hashが一致する場合はD1を読まずPUTを省略する", async () => {
   const body = JSON.stringify({ ok: true });
-  const fixture = createEnv({ storedHash: await hash(body) });
+  const contentHash = await staticArtifactContentHash(body);
+  const fixture = createEnv({ storedHash: await hash(body), metadataHash: contentHash });
   const wrapped = withDeduplicatingR2(fixture.env);
   const result = await wrapped.R2.put("top.json", body);
   assert.equal(result, fixture.object);
   assert.equal(fixture.calls.head, 1);
   assert.equal(fixture.calls.put, 0);
+  assert.equal(fixture.calls.select, 0);
+});
+
+test("legacy R2 object uses one D1 fallback and is rewritten with metadata", async () => {
+  const body = JSON.stringify({ schema_version: 4, generation: "gen-a", ok: true });
+  const fixture = createEnv({ storedHash: await staticArtifactContentHash(body) });
+  const wrapped = withDeduplicatingR2(fixture.env);
+  await wrapped.R2.put("top.json", body);
+  assert.equal(fixture.calls.head, 1);
+  assert.equal(fixture.calls.select, 1);
+  assert.equal(fixture.calls.put, 1);
+  assert.deepEqual(fixture.calls.putOptions.customMetadata, {
+    content_hash: await staticArtifactContentHash(body),
+    schema_version: "4",
+    source_generation: "gen-a",
+  });
 });
 
 test("DB hashが一致してもR2実体が欠落していればPUTする", async () => {
@@ -64,6 +90,7 @@ test("DB hashが一致してもR2実体が欠落していればPUTする", async
   await wrapped.R2.put("top.json", body);
   assert.equal(fixture.calls.head, 1);
   assert.equal(fixture.calls.put, 1);
+  assert.equal(fixture.calls.select, 0);
 });
 
 test("非文字列bodyは比較せず通常PUTする", async () => {
@@ -74,16 +101,19 @@ test("非文字列bodyは比較せず通常PUTする", async () => {
   assert.equal(fixture.calls.put, 1);
 });
 
-test("generated_atだけが変わったJSONはR2 PUTを省略する", async () => {
+test("generated_atだけが変わったJSONでも同一hash metadataならR2 PUTを省略する", async () => {
   const previous = JSON.stringify({ generated_at: 100, items: [{ id: "v1" }] });
   const next = JSON.stringify({ generated_at: 200, items: [{ id: "v1" }] });
+  const contentHash = await staticArtifactContentHash(previous);
   const fixture = createEnv({
-    storedHash: await staticArtifactContentHash(previous),
+    storedHash: contentHash,
+    metadataHash: contentHash,
   });
   const wrapped = withDeduplicatingR2(fixture.env);
   await wrapped.R2.put("top.json", next);
   assert.equal(fixture.calls.head, 1);
   assert.equal(fixture.calls.put, 0);
+  assert.equal(fixture.calls.select, 0);
 });
 
 test("意味内容が変わったJSONはR2 PUTする", async () => {
@@ -91,14 +121,15 @@ test("意味内容が変わったJSONはR2 PUTする", async () => {
   const next = JSON.stringify({ generated_at: 200, items: [{ id: "v2" }] });
   const fixture = createEnv({
     storedHash: await staticArtifactContentHash(previous),
+    metadataHash: await staticArtifactContentHash(previous),
   });
   const wrapped = withDeduplicatingR2(fixture.env);
   await wrapped.R2.put("top.json", next);
-  assert.equal(fixture.calls.head, 0);
+  assert.equal(fixture.calls.head, 1);
   assert.equal(fixture.calls.put, 1);
 });
 
-test("artifactHashCache を preload すると PUT 前の個別 SELECT を省略する", async () => {
+test("artifactHashCache を preload したlegacy fallbackはhash照会を省きmetadata付きで更新する", async () => {
   const body = JSON.stringify({ ok: true });
   const storedHash = await hash(body);
   let selectCount = 0;
@@ -130,7 +161,7 @@ test("artifactHashCache を preload すると PUT 前の個別 SELECT を省略�
       return { key: "top.json" };
     },
     async put() {
-      throw new Error("unexpected put");
+      return { key: "top.json" };
     },
   };
   await cache.preload(DB, "top", "global");
@@ -139,16 +170,30 @@ test("artifactHashCache を preload すると PUT 前の個別 SELECT を省略�
   assert.equal(selectCount, 0);
 });
 
-test("resolveIdenticalJsonArtifactPut は hash 一致かつ R2 実体ありで head を返す", async () => {
+test("resolveIdenticalJsonArtifactPut はR2 metadata一致ならhash付きheadを返す", async () => {
   const body = JSON.stringify({ generated_at: 100, items: [{ id: "v1" }] });
   const storedHash = await staticArtifactContentHash(body);
-  const fixture = createEnv({ storedHash });
-  const head = await resolveIdenticalJsonArtifactPut(
+  const fixture = createEnv({ storedHash, metadataHash: storedHash });
+  const result = await resolveIdenticalJsonArtifactPut(
     fixture.env,
     "top.json",
     body,
   );
-  assert.ok(head);
+  assert.ok(result);
+  assert.equal(result.skipPut, true);
+  assert.equal(result.object, fixture.object);
   assert.equal(fixture.calls.head, 1);
+  assert.equal(fixture.calls.select, 0);
   assert.equal(fixture.calls.put, 0);
+});
+
+test("metadata builder records hash, schema, and a bounded generation", async () => {
+  assert.deepEqual(
+    staticArtifactCustomMetadata(
+      JSON.stringify({ schema_version: 2, generation_key: "g-2" }),
+      "abc",
+      1,
+    ),
+    { content_hash: "abc", schema_version: "2", source_generation: "g-2" },
+  );
 });

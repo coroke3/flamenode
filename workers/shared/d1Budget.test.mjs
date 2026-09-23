@@ -5,6 +5,7 @@ import {
   D1BudgetExceededError,
   D1_QUERY_HARD_LIMIT,
   D1_QUERY_SOFT_LIMIT,
+  D1_ROWS_READ_SOFT_LIMIT,
   isD1BudgetExhausted,
   withD1Budget,
 } from "./d1Budget.ts";
@@ -70,6 +71,14 @@ test("withD1Budget は statement 数と rows read/write を集計する", async 
 test("D1_QUERY_SOFT_LIMIT 到達で isD1BudgetExhausted が true になる", () => {
   const budget = createD1Budget();
   budget.statements = D1_QUERY_SOFT_LIMIT;
+  assert.equal(isD1BudgetExhausted(budget), true);
+});
+
+test("rows-read soft limit後は後続operationをbudget exhaustedとして止める", () => {
+  const budget = createD1Budget();
+  budget.rowsRead = D1_ROWS_READ_SOFT_LIMIT - 1;
+  assert.equal(isD1BudgetExhausted(budget), false);
+  budget.rowsRead += 1;
   assert.equal(isD1BudgetExhausted(budget), true);
 });
 

@@ -3,6 +3,7 @@ import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   resolveIdenticalJsonArtifactPut,
   staticArtifactContentHash,
+  staticArtifactCustomMetadata,
   type ArtifactHashCache,
 } from "./r2Dedup.ts";
 import { publishMemberSuggestionsV2BestEffort } from "./memberSuggestionsV2Artifacts.ts";
@@ -352,16 +353,21 @@ async function putTrackedJson(
   const identical =
     options?.deduplicate === false
       ? null
-      : await resolveIdenticalJsonArtifactPut(env, key, serialized);
-  if (!identical) {
+      : await resolveIdenticalJsonArtifactPut(env, key, serialized, contentHash);
+  if (!identical?.skipPut) {
     await env.R2.put(key, serialized, {
       httpMetadata: {
         contentType: "application/json; charset=utf-8",
         cacheControl: "private, max-age=0, must-revalidate",
       },
+      customMetadata: staticArtifactCustomMetadata(
+        serialized,
+        contentHash,
+        MEMBER_SUGGESTIONS_STATIC_ARTIFACT_SCHEMA_VERSION,
+      ),
     });
   }
-  return { objectKey: key, contentHash, wrote: !identical };
+  return { objectKey: key, contentHash, wrote: !identical?.skipPut };
 }
 
 type PreviousManifestBody = string | null;
@@ -405,6 +411,11 @@ async function restorePreviousManifest(
         contentType: "application/json; charset=utf-8",
         cacheControl: "private, max-age=0, must-revalidate",
       },
+      customMetadata: staticArtifactCustomMetadata(
+        body,
+        await staticArtifactContentHash(body),
+        MEMBER_SUGGESTIONS_STATIC_ARTIFACT_SCHEMA_VERSION,
+      ),
     });
   } catch (error) {
     console.warn(
