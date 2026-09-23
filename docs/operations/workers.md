@@ -11,6 +11,8 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 
 静的アセットは`run_worker_first = false`でWorkerより先に配信し、不要なWeb invocationを発生させない。Workers FreeのHTTP/Cron CPU上限は各invocation 10msで、wranglerの`[limits] cpu_ms`では上げられず、明示するとFreeプランのupload自体が拒否されるため、`flamenode-web`の`wrangler.toml`には`[limits]`を置かない。Workers Paid Standardはデフォルト30s（`limits.cpu_ms`最大300_000ms）で、I/O（fetch/KV/D1/R2）はCPUに含まれない。Cloudflare公式も認証・SSR等を10〜20msになり得る処理としている。公開GETは isolate 内の解析済みJSONキャッシュ（最大24件・TTL 30s、Promise/bindingは持たない）、トップ棚・レール・イベント詳細のSSR枚数上限8、動画関連のSSR 12件、動画詳細の巨大共有JSON（blocklist/random pool）をrequest時に読まないこと、公開HTMLの`revalidate = 30`で Free 10ms に収める。Workers Caching（`[cache] enabled = true`）は Static Assets まで課金対象になるため使わない。admin SSR（一覧クエリの相関サブクエリやヘッダ用X ID読取など）はFree 10msを超えやすいため、一覧は`LIMIT`付きの単純クエリへ寄せ、`public/logo.png`や`favicon.ico`など静的favicon/logoをWorkerへ落とさない。公開HTMLはOpenNext SSRのため Worker が走る。CPU超過の主因はSSR・大きなJSON parse・alias miss後の degraded D1 になり得る。R2 JSON ヒットは D1 fallback を省略するだけで Worker 自体は省略しない。Static Assets の一致ファイルだけが `run_worker_first = false` で Worker をスキップする。D1正本・R2公開キャッシュの関係は変えない。公開ホットパスは上記で Free 運用を狙うが、cold start・admin SSR・巨大一覧はなお超え得る。Cronは長時間jobを作らず固定batchへ分割する。
 
+`app/layout.tsx`のCloudflareビルドは外部Google Fonts取得に依存させない。`next/font/google`はフォントCSS/ファイルをビルド時に取得するため、利用可能なローカルfont assetがある場合は`next/font/local`へ含め、その他はsystem font stackを使う。現在はFlameNodeブランドfontのみを同梱し、本文・display・monoは端末標準fontへfallbackする。
+
 公式制限: https://developers.cloudflare.com/workers/platform/limits/
 
 - `/admin/workers` の YouTube stale 集計は `video_youtube_metadata` 起点の `EXISTS` 判定を使い、既存の `(sync_status, synced_at)` index で候補を先に絞り込む。pending・active・default の候補は1つの集計条件へまとめ、active判定は1時間から24時間の差分帯だけに限定する。イベントの存在確認は候補動画ごとに bounded に行い、イベント結合による重複展開を避ける。

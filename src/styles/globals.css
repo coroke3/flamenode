@@ -73,6 +73,11 @@
 
   --shelf-fade-color: rgba(244, 242, 234, 0.95);
 
+  /* Keep Cloudflare builds offline-safe; the brand font is bundled locally. */
+  --font-jost: system-ui;
+  --font-manrope: system-ui;
+  --font-noto-jp: "Hiragino Sans", "Yu Gothic UI", Meiryo, "Noto Sans JP";
+  --font-jetbrains: ui-monospace;
   --font-display: var(--font-jost), "Jost", var(--font-manrope), "Manrope",
     var(--font-noto-jp), "Noto Sans JP", system-ui, sans-serif;
   --font-body: var(--font-manrope), "Manrope", var(--font-noto-jp), "Noto Sans JP", system-ui,
