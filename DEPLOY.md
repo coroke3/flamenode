@@ -170,7 +170,7 @@ Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効
 
 詳細は [`docs/operations/google-analytics.md`](./docs/operations/google-analytics.md) を参照してください。
 
-deploy preflightはremoteに登録されたsecretの**名前だけ**を検査します。Build環境からRuntime Secret値を再投入・比較しません。不足時は対象Worker名と不足名だけを表示して停止します。secret値、token、Webhook URL、cookie、ユーザーデータをlogへ出しません。続けて Cron Worker 3本（`fast-jobs` / `content-jobs` / `sync-jobs`）へ `wrangler deploy --dry-run` を実行し、アップロードサイズが 2.9MiB 以上ならデプロイを停止、2.7MiB 以上なら警告します。
+deploy preflightはremoteに登録されたsecretの**名前だけ**を検査します。Build環境からRuntime Secret値を再投入・比較しません。不足時は対象Worker名と不足名だけを表示して停止します。secret値、token、Webhook URL、cookie、ユーザーデータをlogへ出しません。続けて全4 Worker（Web + Cron 3本）へ `wrangler deploy --dry-run` を実行し、Wranglerの`Total Upload`（未圧縮サイズ）を検査します。48 MiB以上で警告し、Cloudflareの64 MiB上限以上で停止します。gzip値は参考値として表示されますが、上限判定には使いません（[Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)）。
 
 ### Bindings
 
@@ -282,7 +282,7 @@ Deploy commandは次を行います。
 1. Build Variables、URL、実resource ID、commit SHAをfail-closedで検査する。
 2. production一時configを生成・検査する。
 3. remote secret名を検査する。
-4. Cron Worker 3本のupload sizeをdry-run検査する。
+4. 全4 Workerの未圧縮upload sizeをdry-run検査する。
 5. Remote D1の適用済みmigrationをread-onlyで確認し、安全なindex-only pendingだけをguarded auto-applyする。
 6. 適用後を含めRemote D1のstrict read-only schema preflightを行う。
 7. web→fast→content→syncの順でdeployする（Webを先に、Cron Workerを順に更新）。

@@ -990,21 +990,31 @@ test("remote Worker secret preflight checks names only and never accepts a missi
   );
 });
 
-test("wrangler dry-run upload size parser enforces warn and fail thresholds", () => {
+test("wrangler dry-run parser gates on uncompressed upload size and enforces Cloudflare limit", () => {
   assert.equal(
     parseWranglerTotalUploadBytes("Total Upload: 76.81 KiB / gzip: 18.92 KiB"),
-    Math.round(18.92 * 1024),
+    Math.round(76.81 * 1024),
   );
   assert.equal(
     parseWranglerTotalUploadBytes("Total Upload: 76.81 KiB"),
     Math.round(76.81 * 1024),
   );
-  assert.throws(
-    () => assertWorkerUploadSizeWithinLimit(3 * 1024 * 1024, "flamenode-fast-jobs"),
-    /exceeds fail limit/,
+  assert.equal(
+    parseWranglerTotalUploadBytes("Total Upload: 12452.42 KiB / gzip: 2739.55 KiB"),
+    Math.round(12452.42 * 1024),
   );
   assert.doesNotThrow(() =>
-    assertWorkerUploadSizeWithinLimit(100 * 1024, "flamenode-fast-jobs"),
+    assertWorkerUploadSizeWithinLimit(
+      parseWranglerTotalUploadBytes("Total Upload: 12452.42 KiB / gzip: 2739.55 KiB"),
+      "flamenode-web",
+    ),
+  );
+  assert.throws(
+    () => assertWorkerUploadSizeWithinLimit(64 * 1024 * 1024, "flamenode-fast-jobs"),
+    /Cloudflare's 64 MiB size limit/,
+  );
+  assert.doesNotThrow(() =>
+    assertWorkerUploadSizeWithinLimit(64 * 1024 * 1024 - 1, "flamenode-fast-jobs"),
   );
 });
 

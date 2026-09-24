@@ -1157,8 +1157,8 @@ export function runRemoteSecretPreflight({
   }
 }
 
-export const WORKER_UPLOAD_SIZE_WARN_BYTES = Math.floor(2.7 * 1024 * 1024);
-export const WORKER_UPLOAD_SIZE_FAIL_BYTES = Math.floor(2.9 * 1024 * 1024);
+export const WORKER_UPLOAD_SIZE_WARN_BYTES = 48 * 1024 * 1024;
+export const WORKER_UPLOAD_SIZE_FAIL_BYTES = 64 * 1024 * 1024;
 
 const UPLOAD_UNIT_BYTES = {
   b: 1,
@@ -1169,14 +1169,9 @@ const UPLOAD_UNIT_BYTES = {
 
 export function parseWranglerTotalUploadBytes(output) {
   const text = String(output ?? "");
-  // Cloudflare's Worker script limit is evaluated after gzip compression.
-  // Prefer the gzip figure from the same dry-run line; keep a total-upload
-  // fallback for older Wrangler output that omitted gzip.
-  const match =
-    text.match(
-      /Total Upload:\s+[\d.]+\s+(?:B|KiB|MiB|GiB)\s*\/\s*gzip:\s*([\d.]+)\s+(B|KiB|MiB|GiB)\b/i,
-    ) ??
-    text.match(/Total Upload:\s+([\d.]+)\s+(B|KiB|MiB|GiB)\b/i);
+  // Cloudflare's current Worker-size limit applies to the uncompressed bundle;
+  // Wrangler's gzip value is informational and must not gate a deployment.
+  const match = text.match(/Total Upload:\s+([\d.]+)\s+(B|KiB|MiB|GiB)\b/i);
   if (!match) return null;
   const amount = Number(match[1]);
   const unit = match[2].toLowerCase();
@@ -1192,12 +1187,12 @@ export function assertWorkerUploadSizeWithinLimit(bytes, service) {
   }
   if (bytes >= WORKER_UPLOAD_SIZE_FAIL_BYTES) {
     throw new Error(
-      `${service}: Worker upload ${(bytes / (1024 * 1024)).toFixed(2)} MiB exceeds fail limit ${(WORKER_UPLOAD_SIZE_FAIL_BYTES / (1024 * 1024)).toFixed(1)} MiB.`,
+      `${service}: uncompressed Worker upload ${(bytes / (1024 * 1024)).toFixed(2)} MiB reaches Cloudflare's 64 MiB size limit.`,
     );
   }
   if (bytes >= WORKER_UPLOAD_SIZE_WARN_BYTES) {
     console.warn(
-      `[cloudflare-deploy] ${service}: Worker upload ${(bytes / (1024 * 1024)).toFixed(2)} MiB exceeds warn limit ${(WORKER_UPLOAD_SIZE_WARN_BYTES / (1024 * 1024)).toFixed(1)} MiB.`,
+      `[cloudflare-deploy] ${service}: uncompressed Worker upload ${(bytes / (1024 * 1024)).toFixed(2)} MiB is approaching Cloudflare's 64 MiB size limit (48 MiB warning threshold).`,
     );
   }
 }
