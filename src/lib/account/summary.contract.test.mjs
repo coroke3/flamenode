@@ -97,22 +97,18 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
 });
 
-test("公開headerはaccount summaryを操作時だけ取得し匿名pageviewのAuth fan-outを作らない", () => {
-  assert.match(publicHeader, /const publicClientAccount =\s*serverUser === undefined && !hydrateAccount/);
+test("公開headerはaccount summaryをidle時に自動取得しクリックせずともログイン状態を表示する", () => {
   assert.match(
     publicHeader,
-    /const hydrateOnOpen =\s*\(hydrateAccount && serverUser != null\) \|\| publicClientAccount/,
+    /const deferPublicAccountUntilIdle =\s*serverUser === undefined && !hydrateAccount/,
   );
   assert.match(publicHeader, /const accountHydrationOpen = accountOpen \|\| mobileOpen/);
   assert.match(
     publicHeader,
-    /usePublicAccountSummary\([\s\S]*hydrateOnOpen,[\s\S]*accountHydrationOpen,[\s\S]*false,[\s\S]*\)/,
+    /usePublicAccountSummary\([\s\S]*hydrateOnOpen,[\s\S]*accountHydrationOpen,[\s\S]*deferPublicAccountUntilIdle,[\s\S]*\)/,
   );
-  assert.doesNotMatch(publicHeader, /deferPublicAccountUntilIdle/);
-  assert.match(publicHeader, /const accountUnknown =/);
-  assert.match(publicHeader, /const openAccountProbe = \(\) => \{/);
-  assert.match(publicHeader, /aria-label="アカウントを確認"/);
-  assert.match(publicHeader, /onClick=\{openAccountProbe\}/);
+  assert.doesNotMatch(publicHeader, /const accountUnknown =/);
+  assert.doesNotMatch(publicHeader, /openAccountProbe/);
   assert.match(
     island,
     /if \(lazy && !open && !refreshRequestedRef\.current\) \{/,

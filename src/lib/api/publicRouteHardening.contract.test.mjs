@@ -41,6 +41,11 @@ test("公開一覧APIは静的専用モードでD1へfallbackせず503にする"
     sources.videos,
     /publicServiceUnavailableResponse\("database_unavailable"\)/,
   );
+  assert.match(
+    sources.videos,
+    /withDatabaseRead\(\(db\)\s*=>\s*fetchPublicVideosPage\(db, params\)/,
+  );
+  assert.doesNotMatch(sources.videos, /getDatabase\(/);
 });
 
 test("公開詳細/候補APIは不正pathとD1障害をfail-closedにする", () => {

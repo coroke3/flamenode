@@ -57,6 +57,12 @@ function matchesPathSegmentPrefix(pathname: string, prefix: string): boolean {
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
+  // Health probes are exempt from both canonical-host redirects and
+  // maintenance redirects, so avoid loading runtime context/KV for them.
+  if (matchesPathSegmentPrefix(req.nextUrl.pathname, "/api/health")) {
+    return NextResponse.next();
+  }
+
   const canonicalRedirect = resolveCanonicalHostRedirect({
     configuredOrigin: await resolveConfiguredSiteOrigin(),
     forwardedHost: req.headers.get("x-forwarded-host"),

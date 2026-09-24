@@ -197,6 +197,27 @@ export async function serveSlotSubmissionIconRow(
     return mediaUnavailableResponse("Media storage unavailable");
   }
 
+  const cache =
+    cacheControl === PUBLIC_CACHE_CONTROL &&
+    typeof caches !== "undefined" &&
+    "default" in caches
+      ? (caches as unknown as { default: Cache }).default
+      : null;
+  const cacheKey = cache
+    ? new Request(`https://flamenode.internal/slot-icon/${r2Key}`, {
+        method: "GET",
+      })
+    : null;
+
+  if (cache && cacheKey) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch {
+      // cache match failed (best effort)
+    }
+  }
+
   let obj: R2ObjectBody | null;
   try {
     obj = await env.BUCKET.get(r2Key);
@@ -217,7 +238,15 @@ export async function serveSlotSubmissionIconRow(
   headers.set("etag", obj.httpEtag);
   headers.set("cache-control", cacheControl);
   headers.set("x-content-type-options", "nosniff");
-  return new Response(obj.body, { headers });
+  const response = new Response(obj.body, { headers });
+  if (cache && cacheKey) {
+    try {
+      void cache.put(cacheKey, response.clone()).catch(() => {});
+    } catch {
+      // cache put failed (best effort)
+    }
+  }
+  return response;
 }
 
 /** Backward-compatible helper for tests/internal callers. */

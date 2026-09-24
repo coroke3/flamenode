@@ -201,7 +201,33 @@ async function readBodyUpToLimit(
   response: Response,
   maxObjectBytes: number,
   timeoutMs: number,
+  knownContentLength?: number,
 ): Promise<ReadBodyResult> {
+  if (
+    typeof knownContentLength === "number" &&
+    Number.isFinite(knownContentLength) &&
+    knownContentLength > 0 &&
+    knownContentLength <= maxObjectBytes
+  ) {
+    const timeout = Math.max(1, Math.floor(timeoutMs));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const buffer = await Promise.race([
+      response.arrayBuffer(),
+      new Promise<ArrayBuffer>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("external_image_body_timeout")),
+          timeout,
+        );
+      }),
+    ]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
+    if (buffer.byteLength > maxObjectBytes) {
+      return { bytes: null, tooLarge: true };
+    }
+    return { bytes: new Uint8Array(buffer), tooLarge: false };
+  }
+
   const body = response.body;
   if (!body) {
     const timeout = Math.max(1, Math.floor(timeoutMs));
@@ -332,7 +358,11 @@ async function refreshImage(
     const contentType = normalizeExternalImageContentType(
       upstream.headers.get("content-type"),
     );
-    const contentLength = Number(upstream.headers.get("content-length"));
+    const rawContentLength = upstream.headers.get("content-length");
+    const contentLength =
+      rawContentLength !== null && rawContentLength.trim() !== ""
+        ? Number(rawContentLength)
+        : NaN;
     if (
       !upstream.ok ||
       !contentType ||
@@ -363,6 +393,7 @@ async function refreshImage(
       upstream,
       options.maxObjectBytes,
       options.fetchTimeoutMs,
+      Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined,
     );
     if (body.tooLarge) {
       store.failures.set(options.cacheKey, {

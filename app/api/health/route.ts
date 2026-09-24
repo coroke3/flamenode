@@ -1,11 +1,16 @@
-import { getEnv } from "@/lib/cloudflare";
-import { buildPublicHealthResponse } from "@/lib/health/publicHealth";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import {
+  buildPublicHealthResponse,
+  readPublicHealthCommit,
+} from "@/lib/health/publicHealth";
 
 export const dynamic = "force-dynamic";
 
 export function GET(): Response {
   try {
-    return buildPublicHealthResponse(getEnv().BUILD_COMMIT_SHA);
+    return buildPublicHealthResponse(
+      readPublicHealthCommit(getCloudflareContext().env),
+    );
   } catch {
     return buildPublicHealthResponse(undefined);
   }

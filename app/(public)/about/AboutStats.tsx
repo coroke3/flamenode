@@ -1,7 +1,8 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import styles from "./page.module.css";
+import { Icon, type IconName } from "@/components/ui/Icon";
 
 type AboutStatsValue = {
   publicVideos: number;
@@ -104,24 +105,33 @@ export function AboutStats(): React.ReactElement | null {
 
   if (!stats) return null;
 
-  const items = [
+  const items: Array<{
+    label: string;
+    value: string;
+    unit: string;
+    note: string;
+    icon: IconName;
+  }> = [
     {
       label: "公開作品",
       value: formatCount(stats.publicVideos),
       unit: "件",
       note: "動画ページ・作品棚・イベントから閲覧できます。",
+      icon: "play",
     },
     {
       label: "クリエイター名義",
       value: formatCount(stats.creators),
       unit: "件",
       note: "X ID を公開名義として作品と紐づけます。",
+      icon: "user",
     },
     {
       label: "イベント",
       value: formatCount(stats.events),
       unit: "件",
       note: "募集・公開・アーカイブの記録を扱います。",
+      icon: "calendar",
     },
   ];
 
@@ -132,13 +142,18 @@ export function AboutStats(): React.ReactElement | null {
     >
       <dl className={styles.statsGrid}>
         {items.map((item) => (
-          <div key={item.label} className={styles.statItem}>
-            <dt>{item.label}</dt>
-            <dd>
+          <div key={item.label} className={styles.statCard}>
+            <div className={styles.statCardHeader}>
+              <span className={styles.statIcon}>
+                <Icon name={item.icon} size={15} aria-hidden />
+              </span>
+              <dt className={styles.statLabel}>{item.label}</dt>
+            </div>
+            <dd className={styles.statNumber}>
               <strong>{item.value}</strong>
               <span>{item.unit}</span>
             </dd>
-            <p>{item.note}</p>
+            <p className={styles.statNote}>{item.note}</p>
           </div>
         ))}
       </dl>

@@ -19,6 +19,24 @@ test("middleware KV failure remains fail-open and cached briefly", () => {
   assert.match(source, /KV outage must not turn the middleware into a 500/);
 });
 
+test("health probes bypass canonical-origin and maintenance KV work", () => {
+  const bypassIndex = middleware.indexOf(
+    'if (matchesPathSegmentPrefix(req.nextUrl.pathname, "/api/health"))',
+  );
+  const originLookupIndex = middleware.indexOf(
+    "resolveConfiguredSiteOrigin()",
+    bypassIndex,
+  );
+  const maintenanceLookupIndex = middleware.indexOf(
+    "resolveMiddlewareMaintenance()",
+    bypassIndex,
+  );
+
+  assert.ok(bypassIndex >= 0);
+  assert.ok(originLookupIndex > bypassIndex);
+  assert.ok(maintenanceLookupIndex > bypassIndex);
+});
+
 test("maintenance bypassはprefix文字列ではなくpath segment単位で判定する", () => {
   assert.match(middleware, /function matchesPathSegmentPrefix/);
   assert.match(

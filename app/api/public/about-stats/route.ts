@@ -24,7 +24,24 @@ function unavailable(): Response {
   );
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
+  const cache =
+    typeof caches !== "undefined" && "default" in caches
+      ? (caches as unknown as { default?: Cache }).default ?? null
+      : null;
+  const cacheKey = cache ? new Request(req.url, { method: "GET" }) : null;
+
+  if (cache && cacheKey) {
+    try {
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    } catch {
+      // Cache match failure is non-fatal
+    }
+  }
+
   try {
     const bucket = getEnv().BUCKET;
     const object = await bucket.get(TOP_STATS_OBJECT_KEY);
@@ -41,7 +58,7 @@ export async function GET(): Promise<Response> {
     const stats = normalizeTopStatsSection(await object.json<unknown>());
     if (!stats) return unavailable();
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         stats: {
           publicVideos: stats.stats.public_videos,
@@ -51,6 +68,14 @@ export async function GET(): Promise<Response> {
       },
       { headers: HEADERS },
     );
+
+    if (cache && cacheKey) {
+      void cache.put(cacheKey, response.clone()).catch(() => {
+        // Cache put failure is non-fatal
+      });
+    }
+
+    return response;
   } catch (error) {
     console.warn("[about-stats] compact R2 stats read failed", {
       error: error instanceof Error ? error.name : "unknown",

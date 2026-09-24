@@ -1,5 +1,4 @@
-
-import {
+﻿import {
   CloudflareBindingsUnavailableError,
   getEnv,
 } from "@/lib/cloudflare";
@@ -10,10 +9,56 @@ const UNAVAILABLE_HEADERS = {
   "Retry-After": "30",
 } as const;
 
+function getEdgeCache(): Cache | null {
+  try {
+    if (typeof caches !== "undefined" && "default" in caches) {
+      return (caches as unknown as { default: Cache }).default ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ key?: string[] }> },
 ): Promise<Response> {
+  const { key } = await params;
+  const rawKey = key?.join("/") ?? "";
+
+  const cache = getEdgeCache();
+  if (cache && request) {
+    try {
+      const url = new URL(request.url);
+      const cacheKey = new Request(`${url.origin}/api/media/${rawKey}`, { method: "GET" });
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        const ifNoneMatch = request.headers.get("If-None-Match");
+        const cachedEtag = cached.headers.get("etag");
+        if (
+          ifNoneMatch &&
+          cachedEtag &&
+          ifNoneMatch.split(",").some((candidate) => {
+            const normalized = candidate.trim();
+            return (
+              normalized === "*" ||
+              normalized.replace(/^W\//, "") === cachedEtag.replace(/^W\//, "")
+            );
+          })
+        ) {
+          return new Response(null, {
+            status: 304,
+            headers: new Headers(cached.headers),
+          });
+        }
+        return cached;
+      }
+    } catch {
+      // cache miss / lookup error, continue to origin
+    }
+  }
+
   let env: ReturnType<typeof getEnv>;
   try {
     env = getEnv();
@@ -33,7 +78,5 @@ export async function GET(
       headers: UNAVAILABLE_HEADERS,
     });
   }
-  const { key } = await params;
-  const rawKey = key?.join("/") ?? "";
   return servePublicMedia(env, rawKey, request);
 }

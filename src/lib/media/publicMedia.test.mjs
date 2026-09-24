@@ -247,3 +247,50 @@ test("public media障害ログは秘密情報とスタックを含めない", as
   assert.doesNotMatch(logLines[0], /Error:|at servePublicMedia/);
   assert.match(logLines[0], /REDACTED/);
 });
+
+test("Cache APIが存在する場合、2回目以降はD1/R2へアクセスせずCacheから直接返す", async () => {
+  const store = new Map();
+  const mockCache = {
+    async match(req) {
+      const entry = store.get(req.url);
+      if (!entry) return null;
+      return new Response(entry.body, { headers: new Headers(entry.headers) });
+    },
+    async put(req, res) {
+      const body = await res.arrayBuffer();
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      store.set(req.url, { body, headers });
+    },
+  };
+  globalThis.caches = { default: mockCache };
+
+  try {
+    const key = "event-icons/event/cached-icon.png";
+    const req = new Request(`https://example.test/api/media/${key}`);
+    const first = await requestMedia({ key, allowed: true, request: req });
+    assert.equal(first.response.status, 200);
+    assert.equal(first.state.prepares, 1);
+    assert.equal(first.state.gets, 1);
+
+    // 2回目はキャッシュから取得され、D1とR2の回数は0
+    const second = await requestMedia({ key, allowed: true, request: req });
+    assert.equal(second.response.status, 200);
+    assert.equal(second.state.prepares, 0);
+    assert.equal(second.state.gets, 0);
+    assert.equal(second.response.headers.get("etag"), '"etag"');
+
+    // 3回目: If-None-Matchが一致する場合はCacheから304を返す (D1/R2は0)
+    const reqWithEtag = new Request(`https://example.test/api/media/${key}`, {
+      headers: { "If-None-Match": '"etag"' },
+    });
+    const third = await requestMedia({ key, allowed: true, request: reqWithEtag });
+    assert.equal(third.response.status, 304);
+    assert.equal(third.state.prepares, 0);
+    assert.equal(third.state.gets, 0);
+  } finally {
+    delete globalThis.caches;
+  }
+});

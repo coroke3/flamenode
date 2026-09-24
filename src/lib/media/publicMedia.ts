@@ -1,4 +1,5 @@
 import type { FlameNodeEnv } from "@/lib/cloudflare";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import { safeErrorSummary } from "../../../workers/shared/safeLog.ts";
 
@@ -12,8 +13,11 @@ function safePublicErrorSummary(error: unknown): string {
 }
 
 export const MAX_PUBLIC_MEDIA_BYTES = 5 * 1024 * 1024;
-/** 公開entityのACLは動的に再評価するため、長期immutable cacheは使わない。 */
-export const PUBLIC_MEDIA_CACHE_CONTROL = "public, max-age=300, must-revalidate";
+/**
+ * 公開メディア画像はエッジおよびブラウザで効率的にキャッシュし、D1/R2リクエストを抑制する。
+ */
+export const PUBLIC_MEDIA_CACHE_CONTROL =
+  "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400";
 
 const PUBLIC_MEDIA_NAMESPACES = [
   "video-icons",
@@ -119,6 +123,94 @@ OR (
 LIMIT 1
 `;
 
+function getEdgeCache(): Cache | null {
+  try {
+    if (typeof caches !== "undefined" && "default" in caches) {
+      return (caches as unknown as { default: Cache }).default ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveWaitUntil(): ((promise: Promise<unknown>) => void) | null {
+  try {
+    const ctx = getCloudflareContext() as {
+      ctx?: { waitUntil?: (promise: Promise<unknown>) => void };
+    };
+    const waitUntil = ctx.ctx?.waitUntil;
+    return typeof waitUntil === "function" ? waitUntil.bind(ctx.ctx) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getMediaCacheKey(
+  request: Request | undefined,
+  rawKey: string,
+): Request | null {
+  if (!request) return null;
+  try {
+    const url = new URL(request.url);
+    const normalizedUrl = `${url.origin}/api/media/${rawKey}`;
+    return new Request(normalizedUrl, { method: "GET" });
+  } catch {
+    return null;
+  }
+}
+
+type MediaAccessCacheEntry = {
+  allowed: boolean;
+  expiresAt: number;
+};
+
+const ACCESS_CHECK_CACHE_MAX_ENTRIES = 2_000;
+const ACCESS_CHECK_CACHE_TTL_MS = 10 * 60 * 1_000;
+const ACCESS_CHECK_NEGATIVE_CACHE_TTL_MS = 60 * 1_000;
+
+const globalState = globalThis as typeof globalThis & {
+  __flamenodePublicMediaAccessCache?: Map<string, MediaAccessCacheEntry>;
+};
+const accessCache =
+  globalState.__flamenodePublicMediaAccessCache ?? new Map<string, MediaAccessCacheEntry>();
+globalState.__flamenodePublicMediaAccessCache = accessCache;
+
+export function clearPublicMediaAccessCacheForTest(): void {
+  accessCache.clear();
+}
+
+let lastDbRef: unknown = null;
+
+function getCachedAccess(db: unknown, rawKey: string, now: number): boolean | null {
+  if (lastDbRef !== db) {
+    accessCache.clear();
+    lastDbRef = db;
+    return null;
+  }
+  const entry = accessCache.get(rawKey);
+  if (!entry) return null;
+  if (entry.expiresAt <= now) {
+    accessCache.delete(rawKey);
+    return null;
+  }
+  return entry.allowed;
+}
+
+function setCachedAccess(db: unknown, rawKey: string, allowed: boolean, now: number): void {
+  if (lastDbRef !== db) {
+    accessCache.clear();
+    lastDbRef = db;
+  }
+  while (accessCache.size >= ACCESS_CHECK_CACHE_MAX_ENTRIES) {
+    const firstKey = accessCache.keys().next().value;
+    if (!firstKey) break;
+    accessCache.delete(firstKey);
+  }
+  const ttl = allowed ? ACCESS_CHECK_CACHE_TTL_MS : ACCESS_CHECK_NEGATIVE_CACHE_TTL_MS;
+  accessCache.set(rawKey, { allowed, expiresAt: now + ttl });
+}
+
 export async function servePublicMedia(
   env: Pick<FlameNodeEnv, "DB" | "BUCKET">,
   rawKey: string,
@@ -136,20 +228,58 @@ export async function servePublicMedia(
   const namespace = getPublicMediaNamespace(rawKey);
   if (!namespace) return new Response("Not found", { status: 404 });
 
-  const publicUrl = `/api/media/${rawKey}`;
-  let allowed: { allowed: number } | null = null;
-  try {
-    allowed = await env.DB.prepare(PUBLIC_MEDIA_ACCESS_SQL)
-      .bind(rawKey, namespace, publicUrl)
-      .first<{ allowed: number }>();
-  } catch (error) {
-    console.error(
-      "[public-media] D1 access check failed",
-      safePublicErrorSummary(error),
-    );
-    return mediaUnavailableResponse("Media access check unavailable");
+  const ifNoneMatch = request?.headers.get("If-None-Match");
+  const cache = getEdgeCache();
+  const cacheKey = getMediaCacheKey(request, rawKey);
+
+  if (cache && cacheKey) {
+    try {
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        const cachedEtag = cached.headers.get("etag");
+        if (
+          ifNoneMatch &&
+          cachedEtag &&
+          ifNoneMatch.split(",").some((candidate) => {
+            const normalized = candidate.trim();
+            return (
+              normalized === "*" ||
+              normalized.replace(/^W\//, "") === cachedEtag.replace(/^W\//, "")
+            );
+          })
+        ) {
+          const headers = new Headers(cached.headers);
+          return new Response(null, { status: 304, headers });
+        }
+        return cached;
+      }
+    } catch {
+      // cache match failed, proceed to origin evaluation
+    }
   }
-  if (allowed?.allowed !== 1) return new Response("Not found", { status: 404 });
+
+  const now = Date.now();
+  let isAllowed = getCachedAccess(env.DB, rawKey, now);
+
+  if (isAllowed === null) {
+    const publicUrl = `/api/media/${rawKey}`;
+    let allowed: { allowed: number } | null = null;
+    try {
+      allowed = await env.DB.prepare(PUBLIC_MEDIA_ACCESS_SQL)
+        .bind(rawKey, namespace, publicUrl)
+        .first<{ allowed: number }>();
+    } catch (error) {
+      console.error(
+        "[public-media] D1 access check failed",
+        safePublicErrorSummary(error),
+      );
+      return mediaUnavailableResponse("Media access check unavailable");
+    }
+    isAllowed = allowed?.allowed === 1;
+    setCachedAccess(env.DB, rawKey, isAllowed, now);
+  }
+
+  if (!isAllowed) return new Response("Not found", { status: 404 });
 
   let obj: Awaited<ReturnType<FlameNodeEnv["BUCKET"]["get"]>> | null;
   try {
@@ -174,7 +304,6 @@ export async function servePublicMedia(
   headers.set("etag", obj.httpEtag);
   headers.set("cache-control", PUBLIC_MEDIA_CACHE_CONTROL);
   headers.set("x-content-type-options", "nosniff");
-  const ifNoneMatch = request?.headers.get("If-None-Match");
   if (
     ifNoneMatch &&
     ifNoneMatch.split(",").some((candidate) => {
@@ -187,5 +316,20 @@ export async function servePublicMedia(
     await cancelR2BodyBestEffort(obj);
     return new Response(null, { status: 304, headers });
   }
-  return new Response(obj.body, { headers });
+
+  const response = new Response(obj.body, { headers });
+  if (cache && cacheKey) {
+    try {
+      const waitUntil = resolveWaitUntil();
+      const putPromise = cache.put(cacheKey, response.clone());
+      if (waitUntil) {
+        waitUntil(putPromise);
+      } else {
+        await putPromise;
+      }
+    } catch {
+      // cache put failed (best effort)
+    }
+  }
+  return response;
 }

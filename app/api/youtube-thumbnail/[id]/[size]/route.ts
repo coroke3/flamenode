@@ -1,3 +1,4 @@
+﻿import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { proxyExternalImage } from "@/lib/media/externalImageProxy";
 import {
   YOUTUBE_THUMB_SIZES,
@@ -9,6 +10,29 @@ export const dynamic = "force-dynamic";
 const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
 const FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="サムネイルを取得できません"><rect width="640" height="360" fill="#15181d"/><path d="M278 228V132l92 48-92 48Z" fill="#c9ff00"/><text x="320" y="284" text-anchor="middle" fill="#f4f7ef" font-family="Arial, sans-serif" font-size="24" font-weight="700">サムネイルを取得できません</text></svg>`;
+
+function getEdgeCache(): Cache | null {
+  try {
+    if (typeof caches !== "undefined" && "default" in caches) {
+      return (caches as unknown as { default: Cache }).default ?? null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveWaitUntil(): ((promise: Promise<unknown>) => void) | null {
+  try {
+    const ctx = getCloudflareContext() as {
+      ctx?: { waitUntil?: (promise: Promise<unknown>) => void };
+    };
+    const waitUntil = ctx.ctx?.waitUntil;
+    return typeof waitUntil === "function" ? waitUntil.bind(ctx.ctx) : null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeSize(raw: string | undefined): YoutubeThumbSize | null {
   const value = (raw ?? "").replace(/\.jpg$/i, "");
@@ -26,7 +50,7 @@ function decodePathSegment(raw: string | undefined): string | null {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id?: string; size?: string }> },
 ): Promise<Response> {
   const { id: rawId, size: rawSize } = await params;
@@ -36,11 +60,39 @@ export async function GET(
     return new Response("Not found", { status: 404 });
   }
 
-  return await proxyExternalImage({
+  const cache = getEdgeCache();
+  const cacheKey = req ? new Request(req.url, { method: "GET" }) : null;
+
+  if (cache && cacheKey) {
+    try {
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+    } catch {
+      // cache match failed
+    }
+  }
+
+  const response = await proxyExternalImage({
     namespace: "youtube-thumbnail",
     cacheKey: `${id}:${size}`,
     upstreamUrl: `https://i.ytimg.com/vi/${id}/${size}.jpg`,
     fallbackSvg: FALLBACK_SVG,
     maxObjectBytes: MAX_OBJECT_BYTES,
   });
+
+  if (cache && cacheKey && response.ok) {
+    try {
+      const waitUntil = resolveWaitUntil();
+      const putPromise = cache.put(cacheKey, response.clone());
+      if (waitUntil) {
+        waitUntil(putPromise);
+      } else {
+        await putPromise;
+      }
+    } catch {
+      // cache put failed (best effort)
+    }
+  }
+
+  return response;
 }

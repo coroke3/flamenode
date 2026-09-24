@@ -13,6 +13,8 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 
 `app/layout.tsx`のCloudflareビルドは外部Google Fonts取得に依存させない。`next/font/google`はフォントCSS/ファイルをビルド時に取得するため、利用可能なローカルfont assetがある場合は`next/font/local`へ含め、その他はsystem font stackを使う。現在はFlameNodeブランドfontのみを同梱し、本文・display・monoは端末標準fontへfallbackする。
 
+health probe (`/api/health` とその配下) は既存仕様どおり canonical redirect / maintenance redirect の対象外とし、middleware の runtime-origin / KV 判定も省略する。health route は `BUILD_COMMIT_SHA` だけを読み、他の binding 正規化で Free の CPU 予算を消費しない。公開動画一覧APIのD1 readは `withDatabaseRead` の bounded retryを使い、quota / CPU超過は再試行せず一時的な接続断だけを回復する。
+
 公式制限: https://developers.cloudflare.com/workers/platform/limits/
 
 - `/admin/workers` の YouTube stale 集計は `video_youtube_metadata` 起点の `EXISTS` 判定を使い、既存の `(sync_status, synced_at)` index で候補を先に絞り込む。pending・active・default の候補は1つの集計条件へまとめ、active判定は1時間から24時間の差分帯だけに限定する。イベントの存在確認は候補動画ごとに bounded に行い、イベント結合による重複展開を避ける。
