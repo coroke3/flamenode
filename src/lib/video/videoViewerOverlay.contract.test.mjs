@@ -148,5 +148,8 @@ test("public_name slot iconはAuth.jsより先に公開判定する", () => {
   const authIndex = slotIconRoute.indexOf("getCurrentUser()");
   assert.ok(probeIndex >= 0 && authIndex >= 0 && probeIndex < authIndex);
   assert.match(slotIconRoute, /probe\.kind === "public"/);
-  assert.match(slotIconRoute, /serveSlotSubmissionIconRow\(env, probe\.row, null\)/);
+  assert.match(
+    slotIconRoute,
+    /serveSlotSubmissionIconRow\(env, probe\.row, null, request\)/,
+  );
 });

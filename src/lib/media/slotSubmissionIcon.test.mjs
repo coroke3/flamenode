@@ -162,7 +162,12 @@ async function requestIcon({ slotId, row, viewer, bucket = true, db = true }) {
         }
       : null,
   };
-  const response = await serveSlotSubmissionIcon(env, slotId, viewer);
+  const response = await serveSlotSubmissionIcon(
+    env,
+    slotId,
+    viewer,
+    new Request(`https://example.test/api/media/slot-submission-icon/${slotId}`),
+  );
   return { response, state };
 }
 
@@ -248,6 +253,57 @@ test("R2 iconはACL通過後に安全objectだけ返す", async () => {
   assert.equal(state.gets, 1);
   assert.equal(response.headers.get("content-type"), "image/webp");
   assert.match(response.headers.get("cache-control") ?? "", /^public,/);
+});
+
+test("public slot iconはD1 ACLを再確認した後にR2 Cache hitを使う", async () => {
+  const store = new Map();
+  globalThis.caches = {
+    default: {
+      async match(request) {
+        const entry = store.get(request.url);
+        return entry
+          ? new Response(entry.body, { headers: new Headers(entry.headers) })
+          : null;
+      },
+      async put(request, response) {
+        const body = await response.arrayBuffer();
+        const headers = {};
+        response.headers.forEach((value, name) => {
+          headers[name] = value;
+        });
+        store.set(request.url, { body, headers });
+      },
+    },
+  };
+
+  try {
+    const options = {
+      slotId: VALID_SLOT_ID,
+      row: {
+        slot_status: "submitted",
+        reserved_by_user_id: "user-1",
+        slot_x_user_id: "x",
+        slot_visibility_mode: "public_name",
+        event_visibility_status: "public",
+        creator_icon_url: "/api/media/video-icons/x/icon.webp",
+      },
+      viewer: null,
+    };
+    const first = await requestIcon(options);
+    const second = await requestIcon(options);
+    assert.equal(first.response.status, 200);
+    assert.equal(first.state.prepares, 1);
+    assert.equal(first.state.gets, 1);
+    assert.equal(second.response.status, 200);
+    assert.equal(second.state.prepares, 1);
+    assert.equal(second.state.gets, 0);
+    assert.deepEqual(
+      [...store.keys()],
+      ["https://example.test/slot-icon/video-icons/x/icon.webp"],
+    );
+  } finally {
+    delete globalThis.caches;
+  }
 });
 
 test("R2読み取り障害はslot iconを503へfail-closedする", async () => {

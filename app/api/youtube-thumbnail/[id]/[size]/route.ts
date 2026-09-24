@@ -8,7 +8,15 @@ import {
 export const dynamic = "force-dynamic";
 
 const YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
-const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
+// Keep small thumbnail tiers from buffering unexpectedly large upstream bodies,
+// while allowing the larger documented image variants enough room.
+const MAX_OBJECT_BYTES_BY_SIZE: Record<YoutubeThumbSize, number> = {
+  default: 96 * 1024,
+  mqdefault: 160 * 1024,
+  hqdefault: 256 * 1024,
+  sddefault: 512 * 1024,
+  maxresdefault: 1024 * 1024,
+};
 const FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" role="img" aria-label="サムネイルを取得できません"><rect width="640" height="360" fill="#15181d"/><path d="M278 228V132l92 48-92 48Z" fill="#c9ff00"/><text x="320" y="284" text-anchor="middle" fill="#f4f7ef" font-family="Arial, sans-serif" font-size="24" font-weight="700">サムネイルを取得できません</text></svg>`;
 
 function getEdgeCache(): Cache | null {
@@ -61,7 +69,12 @@ export async function GET(
   }
 
   const cache = getEdgeCache();
-  const cacheKey = req ? new Request(req.url, { method: "GET" }) : null;
+  const cacheKey = req
+    ? new Request(
+        `${new URL(req.url).origin}/api/youtube-thumbnail/${id}/${size}`,
+        { method: "GET" },
+      )
+    : null;
 
   if (cache && cacheKey) {
     try {
@@ -77,13 +90,13 @@ export async function GET(
     cacheKey: `${id}:${size}`,
     upstreamUrl: `https://i.ytimg.com/vi/${id}/${size}.jpg`,
     fallbackSvg: FALLBACK_SVG,
-    maxObjectBytes: MAX_OBJECT_BYTES,
+    maxObjectBytes: MAX_OBJECT_BYTES_BY_SIZE[size],
   });
 
   if (cache && cacheKey && response.ok) {
     try {
       const waitUntil = resolveWaitUntil();
-      const putPromise = cache.put(cacheKey, response.clone());
+      const putPromise = cache.put(cacheKey, response.clone()).catch(() => undefined);
       if (waitUntil) {
         waitUntil(putPromise);
       } else {

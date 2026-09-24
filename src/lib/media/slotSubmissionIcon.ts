@@ -1,3 +1,4 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import type { FlameNodeEnv } from "../cloudflare.ts";
 import { cancelR2BodyBestEffort } from "../r2Body.ts";
 import {
@@ -24,6 +25,26 @@ const MEDIA_NOT_FOUND_HEADERS = {
   "cache-control": "no-store",
   "x-content-type-options": "nosniff",
 };
+
+async function cachePublicResponse(
+  cache: Cache,
+  key: Request,
+  response: Response,
+): Promise<void> {
+  const write = cache.put(key, response).catch(() => undefined);
+  try {
+    const context = getCloudflareContext() as {
+      ctx?: { waitUntil?: (promise: Promise<unknown>) => void };
+    };
+    if (typeof context.ctx?.waitUntil === "function") {
+      context.ctx.waitUntil(write);
+      return;
+    }
+  } catch {
+    // Local runtimes do not expose the Workers execution context.
+  }
+  await write;
+}
 
 function mediaUnavailableResponse(message: string): Response {
   return new Response(message, {
@@ -169,6 +190,7 @@ export async function serveSlotSubmissionIconRow(
   env: Pick<FlameNodeEnv, "BUCKET">,
   row: SlotSubmissionIconLookupRow,
   viewer: { id: string; active_x_user_id: string | null } | null,
+  request?: Request,
 ): Promise<Response> {
   const access = resolveSlotSubmissionIconAccess(row, viewer);
   if (!access.allowed) return mediaNotFoundResponse();
@@ -203,8 +225,9 @@ export async function serveSlotSubmissionIconRow(
     "default" in caches
       ? (caches as unknown as { default: Cache }).default
       : null;
-  const cacheKey = cache
-    ? new Request(`https://flamenode.internal/slot-icon/${r2Key}`, {
+  const encodedR2Key = r2Key.split("/").map(encodeURIComponent).join("/");
+  const cacheKey = cache && request
+    ? new Request(`${new URL(request.url).origin}/slot-icon/${encodedR2Key}`, {
         method: "GET",
       })
     : null;
@@ -241,7 +264,7 @@ export async function serveSlotSubmissionIconRow(
   const response = new Response(obj.body, { headers });
   if (cache && cacheKey) {
     try {
-      void cache.put(cacheKey, response.clone()).catch(() => {});
+      await cachePublicResponse(cache, cacheKey, response.clone());
     } catch {
       // cache put failed (best effort)
     }
@@ -254,6 +277,7 @@ export async function serveSlotSubmissionIcon(
   env: Pick<FlameNodeEnv, "DB" | "BUCKET">,
   slotId: string,
   viewer: { id: string; active_x_user_id: string | null } | null,
+  request?: Request,
 ): Promise<Response> {
   const probe = await probeSlotSubmissionIcon(env, slotId);
   if (probe.kind === "unavailable") {
@@ -262,5 +286,5 @@ export async function serveSlotSubmissionIcon(
   if (probe.kind === "not_found") {
     return mediaNotFoundResponse();
   }
-  return serveSlotSubmissionIconRow(env, probe.row, viewer);
+  return serveSlotSubmissionIconRow(env, probe.row, viewer, request);
 }

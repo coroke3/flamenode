@@ -60,7 +60,7 @@ The command refuses to overwrite an existing or malformed manifest; it only
 creates the canonical empty schema when the object is absent.
 
 > Status: Active
-> Last verified: 2026-09-24
+> Last verified: 2026-09-25
 > Verified against: `src/lib/publicData/`, `src/lib/admin/staticSharedInputDiagnostics.ts`, `app/(public)/`, `app/(admin)/admin/static-builds/`, `workers/json-generator/videoMaterializedSource.ts`, `workers/json-generator/optimizedRebuild.ts`, `wrangler.toml`
 
 **AI:** 公開静的 JSON / degraded D1 / Cache の仕様。正本コードは `src/lib/publicData/loader.ts`。軽量モデルは調査・文書修正まで。loader・権限・公開 DTO 変更は中位以上。
@@ -143,13 +143,40 @@ rows and does not replace usable public static detail.
 
 正本定数: `src/lib/publicData/publicJsonCacheTtl.ts`（web）、`workers/shared/staticR2CacheControl.ts`（R2 PUT）。
 
+公開メディア (`/api/media/{key}`) はkeyを検証してからCache APIを確認し、hitならCloudflare
+binding取得・D1 ACL照合・R2読取へ進まず返す。miss時だけD1の公開ACLを確認し、安全なMIME /
+サイズのR2 objectを返す。成功レスポンスのCache API keyは実際のzone hostとcanonical path
+（query stringを除外）を使い、既存の `max-age=86400` / `s-maxage=604800` を維持する。
+Workers Cache API はPoP単位で、`stale-while-revalidate` 指令を `cache.put` / `cache.match`
+では処理しない。isolate内ACL cacheはbooleanと期限だけを保持し、D1 bindingやPromiseを持たない。
+positive 10分 / negative 1分を維持し、D1 quota errorはretryせず503でfail-closedする。
+日次Free row-read quota到達後はUTC 00:00のresetまでD1 query自体が失敗するため、retryでは
+回復しない。Web・Cron横断のrow-read量はD1 Dashboard/Analyticsで確認し、`meta.rows_read`と
+併せて大きいquery/full scanを特定する（上限・usage計測は[Cloudflare D1 pricing]
+(https://developers.cloudflare.com/d1/platform/pricing/)と[limits]
+(https://developers.cloudflare.com/d1/platform/limits/)を正本とする）。公開解除後に以前の公開画像が
+共有cacheに最大7日残る既存性質は変えない。公開枠アイコンは各リクエストでslot / event ACLを
+再確認した後にR2 Cache APIを使う。about statsもqueryを除いたcanonical keyでR2結果を5分保存する。
+
+YouTube thumbnail proxyはR2を使わない。Worker FreeのCPU上限を抑えるため、IDとsizeを
+allowlist検証後にCache APIを参照し、upstream bodyはsize別に96KiB〜1MiBで制限する。
+Cache APIの内容は
+作成された拠点だけに存在するため、初回・他拠点のmissではupstream fetchが発生する。
+
+OpenNextのincremental cacheはR2を正本とし、`withRegionalCache(..., { mode: "short-lived" })`
+で各拠点の再利用期間を最大1分に制限する。これは同一拠点のISR再読込を抑え、長期staleや
+global KVへの置換を避ける設定。`memoryQueue`の重複排除はWorker isolate内だけであり、
+複数isolate間の単一実行を保証しない。ISR失敗が続く場合はWorker Logsで原因を確認し、
+`revalidate`を安易に短縮しない。公開Headerのログインsummaryはidle時に一度だけ取得し、
+権限・session情報は共有Cacheへ保存しない。
+
 ミス時のみ `operation_mode` を解決（`FORCE_STATIC_ONLY` > isolate 短時間キャッシュ > KV 複製 > D1）。解決不能時は `normal` を維持し、`static_only` へ自動遷移しない。KV/D1 の一時的な binding 障害で公開の live overlay や degraded fallback まで機能制限されないようにするためである。`static_only` / `maintenance` への変更は CostGuard の明示操作だけが行い、書き込み側は従来どおり D1 正本の write guard で停止する。cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない。Edge middleware の maintenance redirect は別の5秒isolate cacheとKVの30秒 `cacheTtl` を使い、KV障害時は短時間だけ fail-open して500化を防ぐ。これは認可境界ではなく運用停止リダイレクトのためのbounded-staleである。
 
 ## 観測と UI
 
 公開 layout の `CostGuardBanner` は `source` 省略（= public）で、D1 の `system_settings` を読まず env / isolate / KV のみ参照する。公開側のKVミラーはisolate内で30秒だけ共有し、modeとreason取得の重複readを抑える。admin layout は `source="admin"` で D1 正本を読む。
 
-R2 hit時の degraded circuit は、通常の公開リクエストごとにKVを読むのではなく、isolate内の30秒probeを使う。openを確認したisolateだけが3 hit到達時にKVを再確認してcloseする。R2 miss時のopen判定とmiss counter更新は従来どおり行い、KV障害は公開配信を停止させない。
+R2 hit時の degraded circuit は、通常の公開リクエストごとにKVを読むのではなく、isolate内の30秒probeを使う。degraded D1へ進む前のopen判定も、直近30秒以内に閉状態を確認していればKV readを省く。したがって別isolateからのopen marker伝播は最大30秒遅れる。openを確認したisolateだけが3 hit到達時にKVを再確認してcloseする。R2 miss時のmiss counter更新は従来どおり行い、KV障害は公開配信を停止させない。
 
 公開主要ページは `PublicMetricsShell` 内で `runWithPublicRequestMetrics` を使い、構造化ログ（`public_request_metrics`）を出す。D1 への永続化はしない。`degraded_d1` 時は同じ ALS スコープ内の `PublicDegradedBanner`（`role="status"`）が簡易表示を知らせる。
 

@@ -56,6 +56,16 @@ export function getPublicMediaNamespace(key: string): PublicMediaNamespace | nul
     : null;
 }
 
+export function isValidPublicMediaKey(rawKey: string): boolean {
+  return Boolean(
+    rawKey &&
+      !rawKey.includes("..") &&
+      !rawKey.includes("\\") &&
+      !/[\x00-\x1F\x7F]/.test(rawKey) &&
+      getPublicMediaNamespace(rawKey),
+  );
+}
+
 export function normalizePublicMediaContentType(
   contentType: string | null | undefined,
 ): string | null {
@@ -153,7 +163,9 @@ function getMediaCacheKey(
   if (!request) return null;
   try {
     const url = new URL(request.url);
-    const normalizedUrl = `${url.origin}/api/media/${rawKey}`;
+    // Keep the request's real zone hostname, but drop cache-buster query strings.
+    const encodedKey = rawKey.split("/").map(encodeURIComponent).join("/");
+    const normalizedUrl = `${url.origin}/api/media/${encodedKey}`;
     return new Request(normalizedUrl, { method: "GET" });
   } catch {
     return null;
@@ -180,14 +192,7 @@ export function clearPublicMediaAccessCacheForTest(): void {
   accessCache.clear();
 }
 
-let lastDbRef: unknown = null;
-
-function getCachedAccess(db: unknown, rawKey: string, now: number): boolean | null {
-  if (lastDbRef !== db) {
-    accessCache.clear();
-    lastDbRef = db;
-    return null;
-  }
+function getCachedAccess(rawKey: string, now: number): boolean | null {
   const entry = accessCache.get(rawKey);
   if (!entry) return null;
   if (entry.expiresAt <= now) {
@@ -197,11 +202,7 @@ function getCachedAccess(db: unknown, rawKey: string, now: number): boolean | nu
   return entry.allowed;
 }
 
-function setCachedAccess(db: unknown, rawKey: string, allowed: boolean, now: number): void {
-  if (lastDbRef !== db) {
-    accessCache.clear();
-    lastDbRef = db;
-  }
+function setCachedAccess(rawKey: string, allowed: boolean, now: number): void {
   while (accessCache.size >= ACCESS_CHECK_CACHE_MAX_ENTRIES) {
     const firstKey = accessCache.keys().next().value;
     if (!firstKey) break;
@@ -211,55 +212,65 @@ function setCachedAccess(db: unknown, rawKey: string, allowed: boolean, now: num
   accessCache.set(rawKey, { allowed, expiresAt: now + ttl });
 }
 
+/** Cache API hitはCloudflare binding取得やD1/R2照合より前に返す。 */
+export async function getCachedPublicMediaResponse(
+  request: Request,
+  rawKey: string,
+): Promise<Response | null> {
+  if (!isValidPublicMediaKey(rawKey)) return null;
+  const cache = getEdgeCache();
+  const cacheKey = getMediaCacheKey(request, rawKey);
+  if (!cache || !cacheKey) return null;
+
+  try {
+    const cached = await cache.match(cacheKey);
+    if (!cached) return null;
+    const ifNoneMatch = request.headers.get("If-None-Match");
+    const cachedEtag = cached.headers.get("etag");
+    if (
+      ifNoneMatch &&
+      cachedEtag &&
+      ifNoneMatch.split(",").some((candidate) => {
+        const normalized = candidate.trim();
+        return (
+          normalized === "*" ||
+          normalized.replace(/^W\//, "") === cachedEtag.replace(/^W\//, "")
+        );
+      })
+    ) {
+      return new Response(null, {
+        status: 304,
+        headers: new Headers(cached.headers),
+      });
+    }
+    return cached;
+  } catch {
+    // Cache miss / lookup error, continue to D1/R2 on the origin path.
+    return null;
+  }
+}
+
 export async function servePublicMedia(
   env: Pick<FlameNodeEnv, "DB" | "BUCKET">,
   rawKey: string,
   request?: Request,
+  options?: { skipEdgeCacheLookup?: boolean },
 ): Promise<Response> {
-  if (
-    !rawKey ||
-    rawKey.includes("..") ||
-    rawKey.includes("\\") ||
-    /[\x00-\x1F\x7F]/.test(rawKey)
-  ) {
-    return new Response("Not found", { status: 404 });
-  }
+  if (!isValidPublicMediaKey(rawKey)) return new Response("Not found", { status: 404 });
 
-  const namespace = getPublicMediaNamespace(rawKey);
-  if (!namespace) return new Response("Not found", { status: 404 });
+  const namespace = getPublicMediaNamespace(rawKey)!;
 
   const ifNoneMatch = request?.headers.get("If-None-Match");
   const cache = getEdgeCache();
   const cacheKey = getMediaCacheKey(request, rawKey);
 
-  if (cache && cacheKey) {
-    try {
-      const cached = await cache.match(cacheKey);
-      if (cached) {
-        const cachedEtag = cached.headers.get("etag");
-        if (
-          ifNoneMatch &&
-          cachedEtag &&
-          ifNoneMatch.split(",").some((candidate) => {
-            const normalized = candidate.trim();
-            return (
-              normalized === "*" ||
-              normalized.replace(/^W\//, "") === cachedEtag.replace(/^W\//, "")
-            );
-          })
-        ) {
-          const headers = new Headers(cached.headers);
-          return new Response(null, { status: 304, headers });
-        }
-        return cached;
-      }
-    } catch {
-      // cache match failed, proceed to origin evaluation
-    }
+  if (request && !options?.skipEdgeCacheLookup) {
+    const cached = await getCachedPublicMediaResponse(request, rawKey);
+    if (cached) return cached;
   }
 
   const now = Date.now();
-  let isAllowed = getCachedAccess(env.DB, rawKey, now);
+  let isAllowed = getCachedAccess(rawKey, now);
 
   if (isAllowed === null) {
     const publicUrl = `/api/media/${rawKey}`;
@@ -276,7 +287,7 @@ export async function servePublicMedia(
       return mediaUnavailableResponse("Media access check unavailable");
     }
     isAllowed = allowed?.allowed === 1;
-    setCachedAccess(env.DB, rawKey, isAllowed, now);
+    setCachedAccess(rawKey, isAllowed, now);
   }
 
   if (!isAllowed) return new Response("Not found", { status: 404 });
@@ -321,7 +332,7 @@ export async function servePublicMedia(
   if (cache && cacheKey) {
     try {
       const waitUntil = resolveWaitUntil();
-      const putPromise = cache.put(cacheKey, response.clone());
+      const putPromise = cache.put(cacheKey, response.clone()).catch(() => undefined);
       if (waitUntil) {
         waitUntil(putPromise);
       } else {

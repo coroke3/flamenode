@@ -6,6 +6,7 @@ import { getDatabaseAsync, getEnvAsync } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
+import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
   logFlowTrace,
@@ -59,6 +60,8 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
   } as never);
   const baseConfig: NextAuthConfig = {
     secret: authSecret,
+    // Adapter/Drizzle failure stacks can include sessionToken bind values.
+    logger: { error: logSafeAuthError },
     // Auth.jsのHost検査は通すが、redirect先は検証済み設定originだけを使う。
     trustHost: true,
     session: { strategy: "database" },

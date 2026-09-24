@@ -22,7 +22,7 @@ const NOT_FOUND_HEADERS = {
 } as const;
 
 export async function GET(
-  _req: Request,
+  request: Request,
   { params }: { params: Promise<{ slotId: string }> },
 ): Promise<Response> {
   const { slotId } = await params;
@@ -65,7 +65,7 @@ export async function GET(
     }
     if (probe.kind === "public") {
       // public_name はD1の公開判定だけで確定する。Auth.jsを起動しない。
-      return await serveSlotSubmissionIconRow(env, probe.row, null);
+      return await serveSlotSubmissionIconRow(env, probe.row, null, request);
     }
 
     let viewer: { id: string; active_x_user_id: string | null } | null = null;
@@ -84,7 +84,7 @@ export async function GET(
       throw error;
     }
 
-    return await serveSlotSubmissionIconRow(env, probe.row, viewer);
+    return await serveSlotSubmissionIconRow(env, probe.row, viewer, request);
   } catch (error) {
     console.error("[slot-submission-icon] media read failed", {
       slotId,

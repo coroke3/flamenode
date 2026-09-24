@@ -5,6 +5,7 @@ import { getOperationModeKv } from "@/lib/operationMode/kvMirror";
 import {
   currentDegradedCircuitMinuteBucket,
   DEGRADED_CIRCUIT_CLOSE_HIT_STREAK,
+  DEGRADED_CIRCUIT_LOCAL_PROBE_MS,
   DEGRADED_CIRCUIT_MISS_THRESHOLD,
   DEGRADED_CIRCUIT_MISS_WINDOW_SEC,
   DEGRADED_CIRCUIT_OPEN_TTL_SEC,
@@ -13,9 +14,9 @@ import {
   degradedCircuitOpenKey,
   shouldCloseDegradedCircuit,
   shouldOpenDegradedCircuit,
+  shouldSkipDegradedCircuitKvProbe,
 } from "./degradedCircuitBreakerCore";
 
-const DEGRADED_CIRCUIT_LOCAL_PROBE_MS = 30_000;
 const DEGRADED_CIRCUIT_MISS_LOCAL_FLUSH_MS = 1_000;
 const DEGRADED_CIRCUIT_KV_WRITE_INTERVAL_MS = 1_000;
 
@@ -252,6 +253,12 @@ export async function isDegradedD1CircuitOpen(): Promise<boolean> {
   const now = Date.now();
   if (localCircuitState.open && now < localCircuitState.openUntil) {
     return true;
+  }
+  if (
+    !localCircuitState.open &&
+    shouldSkipDegradedCircuitKvProbe(localCircuitState.lastKvProbeAt, now)
+  ) {
+    return false;
   }
   try {
     const open = await kv.get(degradedCircuitOpenKey());

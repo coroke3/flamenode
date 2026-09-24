@@ -1,3 +1,4 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { getEnv } from "@/lib/cloudflare";
 import { cancelR2BodyBestEffort } from "@/lib/r2Body";
@@ -24,12 +25,36 @@ function unavailable(): Response {
   );
 }
 
+async function cachePublicResponse(
+  cache: Cache,
+  key: Request,
+  response: Response,
+): Promise<void> {
+  const write = cache.put(key, response).catch(() => undefined);
+  try {
+    const context = getCloudflareContext() as {
+      ctx?: { waitUntil?: (promise: Promise<unknown>) => void };
+    };
+    if (typeof context.ctx?.waitUntil === "function") {
+      context.ctx.waitUntil(write);
+      return;
+    }
+  } catch {
+    // Local runtimes do not expose the Workers execution context.
+  }
+  await write;
+}
+
 export async function GET(req: Request): Promise<Response> {
   const cache =
     typeof caches !== "undefined" && "default" in caches
       ? (caches as unknown as { default?: Cache }).default ?? null
       : null;
-  const cacheKey = cache ? new Request(req.url, { method: "GET" }) : null;
+  const cacheKey = cache
+    ? new Request(`${new URL(req.url).origin}/api/public/about-stats`, {
+        method: "GET",
+      })
+    : null;
 
   if (cache && cacheKey) {
     try {
@@ -70,9 +95,7 @@ export async function GET(req: Request): Promise<Response> {
     );
 
     if (cache && cacheKey) {
-      void cache.put(cacheKey, response.clone()).catch(() => {
-        // Cache put failure is non-fatal
-      });
+      await cachePublicResponse(cache, cacheKey, response.clone());
     }
 
     return response;

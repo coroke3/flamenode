@@ -9,6 +9,9 @@ export const DEGRADED_CIRCUIT_OPEN_TTL_SEC = 90;
 /** open 中に R2 が連続ヒットしたら自動解除する。 */
 export const DEGRADED_CIRCUIT_CLOSE_HIT_STREAK = 3;
 
+/** isolate内の閉状態キャッシュ。KV open marker の伝播遅延上限でもある。 */
+export const DEGRADED_CIRCUIT_LOCAL_PROBE_MS = 30_000;
+
 export const DEGRADED_CIRCUIT_KV_PREFIX = "public:degraded_circuit:";
 
 export function degradedCircuitMissKey(minuteBucket: number): string {
@@ -33,4 +36,13 @@ export function shouldOpenDegradedCircuit(missCount: number): boolean {
 
 export function shouldCloseDegradedCircuit(hitStreak: number): boolean {
   return hitStreak >= DEGRADED_CIRCUIT_CLOSE_HIT_STREAK;
+}
+
+export function shouldSkipDegradedCircuitKvProbe(
+  lastProbeAtMs: number,
+  nowMs: number,
+): boolean {
+  if (!Number.isFinite(lastProbeAtMs) || !Number.isFinite(nowMs)) return false;
+  const elapsedMs = nowMs - lastProbeAtMs;
+  return elapsedMs >= 0 && elapsedMs < DEGRADED_CIRCUIT_LOCAL_PROBE_MS;
 }

@@ -28,3 +28,8 @@ test("best-effort bookkeepingはwaitUntil無しでdetached I/Oを開始しない
     /scheduleCircuitBookkeeping\(\(\) => recordDegradedCircuitR2Hit\(\)\)/,
   );
 });
+
+test("degraded D1 circuit check reuses a bounded isolate-local KV probe", () => {
+  assert.match(source, /shouldSkipDegradedCircuitKvProbe\(localCircuitState\.lastKvProbeAt, now\)/);
+  assert.match(source, /DEGRADED_CIRCUIT_LOCAL_PROBE_MS/);
+});

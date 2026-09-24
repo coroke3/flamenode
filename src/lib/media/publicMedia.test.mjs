@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import {
   getPublicMediaNamespace,
+  isValidPublicMediaKey,
   isPublicMediaObjectSafe,
   MAX_PUBLIC_MEDIA_BYTES,
   normalizePublicMediaContentType,
   PUBLIC_MEDIA_ACCESS_SQL,
   PUBLIC_MEDIA_CACHE_CONTROL,
+  clearPublicMediaAccessCacheForTest,
   servePublicMedia,
 } from "./publicMedia.ts";
+
+beforeEach(() => clearPublicMediaAccessCacheForTest());
 
 test("public media namespaceは固定prefixと空でないkeyだけを許可する", () => {
   assert.equal(getPublicMediaNamespace("video-icons/user/icon.webp"), "video-icons");
@@ -17,6 +21,9 @@ test("public media namespaceは固定prefixと空でないkeyだけを許可す�
   assert.equal(getPublicMediaNamespace("event-banners/event/banner.jpg"), "event-banners");
   assert.equal(getPublicMediaNamespace("private/user/icon.png"), null);
   assert.equal(getPublicMediaNamespace("video-icons/"), null);
+  assert.equal(isValidPublicMediaKey("video-icons/user/icon.webp"), true);
+  assert.equal(isValidPublicMediaKey("video-icons/../private/icon.webp"), false);
+  assert.equal(isValidPublicMediaKey("video-icons/user\\icon.webp"), false);
 });
 
 test("public media objectはMIMEと5MiB上限をfail-closedで検査する", () => {
@@ -28,6 +35,13 @@ test("public media objectはMIMEと5MiB上限をfail-closedで検査する", () 
   );
   assert.equal(isPublicMediaObjectSafe({ size: 100, contentType: "image/svg+xml" }), false);
   assert.equal(isPublicMediaObjectSafe({ size: 100, contentType: null }), false);
+});
+
+test("公開メディアの従来の長期共有キャッシュTTLを維持する", () => {
+  assert.equal(
+    PUBLIC_MEDIA_CACHE_CONTROL,
+    "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400",
+  );
 });
 
 test("public media access queryはartifactとentity visibilityを1 statementで照合する", () => {
@@ -166,6 +180,15 @@ test("public mediaはACL拒否時にIf-None-Match一致でも304を返さない"
   assert.equal(result.state.gets, 0);
 });
 
+test("isolate ACL cacheはD1 bindingを保持せず短時間の判定を再利用する", async () => {
+  const key = "event-icons/event/acl-cache.png";
+  const first = await requestMedia({ key, allowed: true });
+  const second = await requestMedia({ key, allowed: false });
+  assert.equal(first.state.prepares, 1);
+  assert.equal(second.state.prepares, 0);
+  assert.equal(second.response.status, 200);
+});
+
 test("公開entityでも危険MIMEまたは上限超過objectは404", async () => {
     const svg = await requestMedia({
       key: "event-icons/event/a.svg",
@@ -269,21 +292,29 @@ test("Cache APIが存在する場合、2回目以降はD1/R2へアクセスせ�
 
   try {
     const key = "event-icons/event/cached-icon.png";
-    const req = new Request(`https://example.test/api/media/${key}`);
+    const req = new Request(`https://example.test/api/media/${key}?cache-buster=one`);
     const first = await requestMedia({ key, allowed: true, request: req });
     assert.equal(first.response.status, 200);
     assert.equal(first.state.prepares, 1);
     assert.equal(first.state.gets, 1);
+    assert.deepEqual(
+      [...store.keys()],
+      [`https://example.test/api/media/${key}`],
+    );
 
     // 2回目はキャッシュから取得され、D1とR2の回数は0
-    const second = await requestMedia({ key, allowed: true, request: req });
+    const second = await requestMedia({
+      key,
+      allowed: true,
+      request: new Request(`https://example.test/api/media/${key}?cache-buster=two`),
+    });
     assert.equal(second.response.status, 200);
     assert.equal(second.state.prepares, 0);
     assert.equal(second.state.gets, 0);
     assert.equal(second.response.headers.get("etag"), '"etag"');
 
     // 3回目: If-None-Matchが一致する場合はCacheから304を返す (D1/R2は0)
-    const reqWithEtag = new Request(`https://example.test/api/media/${key}`, {
+    const reqWithEtag = new Request(`https://example.test/api/media/${key}?cache-buster=three`, {
       headers: { "If-None-Match": '"etag"' },
     });
     const third = await requestMedia({ key, allowed: true, request: reqWithEtag });

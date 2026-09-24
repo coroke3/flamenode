@@ -5,6 +5,7 @@ import {
   DEGRADED_CIRCUIT_MISS_THRESHOLD,
   shouldCloseDegradedCircuit,
   shouldOpenDegradedCircuit,
+  shouldSkipDegradedCircuitKvProbe,
 } from "./degradedCircuitBreakerCore.ts";
 
 test("degraded circuit opens at miss threshold", () => {
@@ -21,4 +22,11 @@ test("minute bucket aligns to 60 second windows", () => {
   assert.equal(currentDegradedCircuitMinuteBucket(0), 0);
   assert.equal(currentDegradedCircuitMinuteBucket(59_999), 0);
   assert.equal(currentDegradedCircuitMinuteBucket(60_000), 1);
+});
+
+test("recent closed-circuit probe skips KV reads for 30 seconds only", () => {
+  assert.equal(shouldSkipDegradedCircuitKvProbe(1_000, 30_999), true);
+  assert.equal(shouldSkipDegradedCircuitKvProbe(1_000, 31_000), false);
+  assert.equal(shouldSkipDegradedCircuitKvProbe(2_000, 1_000), false);
+  assert.equal(shouldSkipDegradedCircuitKvProbe(Number.NaN, 2_000), false);
 });
