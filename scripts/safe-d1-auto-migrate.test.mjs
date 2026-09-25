@@ -88,6 +88,17 @@ test("0054 media reference indexes are eligible for the guarded production auto-
   });
 });
 
+test("0062 static artifact cleanup index is eligible for the guarded production auto-apply path", () => {
+  const body = fs.readFileSync(
+    path.join(root, "migrations", "0062_static_artifact_cleanup_index.sql"),
+    "utf8",
+  );
+  assert.deepEqual(classifyAutoDeployMigration(body), {
+    safe: true,
+    reason: null,
+  });
+});
+
 test("migration probe payload normalization ignores sql suffix differences", () => {
   const applied = parseAppliedMigrationNames([
     {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
   EVENTS_INDEX_MAX_ROWS,
@@ -11,6 +12,7 @@ import {
   PUBLIC_STAFF_MAX_PER_EVENT,
   RECENT_LIST_LIMIT,
   SEARCH_INDEX_VIDEO_LIMIT,
+  STATIC_ARTIFACT_RECONCILIATION_SQL,
   STATIC_LIST_MAX_ITEMS,
   STATIC_LIST_MAX_OBJECT_BYTES,
   capStaticListTotal,
@@ -26,6 +28,150 @@ const projectionSource = await readFile(
   new URL("../../src/lib/publicData/publicCreatorProjection.ts", import.meta.url),
   "utf8",
 );
+
+test("static artifact reconciliation は旧結果を保ち、非相関json_eachとcleanup indexでboundedに排水する", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(`
+    CREATE TABLE static_artifacts (
+      id TEXT PRIMARY KEY,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      object_key TEXT NOT NULL,
+      generated_at INTEGER NOT NULL,
+      deleted_at INTEGER
+    );
+    CREATE UNIQUE INDEX static_artifacts_target_key_uniq
+      ON static_artifacts (target_type, target_id, object_key);
+    CREATE UNIQUE INDEX static_artifacts_live_key_uniq
+      ON static_artifacts (object_key) WHERE deleted_at IS NULL;
+    CREATE INDEX static_artifacts_target_idx
+      ON static_artifacts (target_type, target_id, deleted_at);
+  `);
+  const insert = sqlite.prepare(
+    `INSERT INTO static_artifacts (id, target_type, target_id, object_key, generated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  const generatedAtByKey = new Map();
+  const add = (id, targetType, targetId, objectKey, generatedAt, deletedAt = null) => {
+    insert.run(id, targetType, targetId, objectKey, generatedAt, deletedAt);
+    generatedAtByKey.set(objectKey, generatedAt);
+  };
+  add("live-a", "video", "video-1", "videos/live-a.json", 1);
+  add("live-b", "video", "video-1", "videos/live-b.json", 2);
+  // Equal timestamps remain intentionally unordered, as in the prior query.
+  add("stale-tie-a", "video", "video-1", "videos/stale-tie-a.json", 3);
+  add("stale-tie-b", "video", "video-1", "videos/stale-tie-b.json", 3);
+  for (let index = 0; index < 2_000; index += 1) {
+    add(`old-${index}`, "video", "video-1", `videos/old-${index}.json`, 100 + index);
+  }
+  add("deleted", "video", "video-1", "videos/deleted.json", 4, 7);
+  add("other-video", "video", "video-2", "videos/other-video.json", 5);
+  add("other-type", "event", "video-1", "events/other-type.json", 6);
+
+  const oldSql = `
+    SELECT object_key FROM static_artifacts
+     WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(?) AS live_keys
+          WHERE CAST(live_keys.value AS TEXT) = static_artifacts.object_key
+       )
+     ORDER BY generated_at ASC
+     LIMIT ?`;
+  const explain = (query, ...values) => sqlite
+    .prepare(`EXPLAIN QUERY PLAN ${query}`)
+    .all(...values)
+    .map((row) => row.detail);
+  const liveJson = JSON.stringify(["videos/live-a.json", "videos/live-b.json"]);
+  const oldPlan = explain(oldSql, "video", "video-1", liveJson, 20).join("\n");
+  assert.match(oldPlan, /CORRELATED SCALAR SUBQUERY/);
+  assert.match(oldPlan, /USE TEMP B-TREE FOR ORDER BY/);
+  assert.match(oldPlan, /SCAN (?:live_keys|json_each) VIRTUAL TABLE/);
+
+  sqlite.exec(`
+    CREATE INDEX static_artifacts_live_cleanup_idx
+      ON static_artifacts (target_type, target_id, generated_at, object_key)
+      WHERE deleted_at IS NULL;
+  `);
+  const newPlan = explain(
+    STATIC_ARTIFACT_RECONCILIATION_SQL,
+    "video",
+    "video-1",
+    liveJson,
+    20,
+  ).join("\n");
+  assert.match(newPlan, /static_artifacts_live_cleanup_idx/);
+  assert.match(newPlan, /LIST SUBQUERY/);
+  assert.match(newPlan, /SCAN json_each/);
+  assert.doesNotMatch(newPlan, /CORRELATED|USE TEMP B-TREE FOR ORDER BY/);
+
+  const oldQuery = sqlite.prepare(oldSql);
+  const newQuery = sqlite.prepare(STATIC_ARTIFACT_RECONCILIATION_SQL);
+  const canonicalize = (rows) => rows
+    .map(({ object_key }) => object_key)
+    .sort((left, right) =>
+      generatedAtByKey.get(left) - generatedAtByKey.get(right) || left.localeCompare(right));
+  const allActiveTargetKeys = sqlite
+    .prepare(`SELECT object_key FROM static_artifacts
+               WHERE target_type = 'video' AND target_id = 'video-1' AND deleted_at IS NULL`)
+    .all()
+    .map((row) => row.object_key);
+  const resultCases = [
+    ["通常", "video", "video-1", ["videos/live-a.json", "videos/live-b.json"], 2_100],
+    ["liveKeys空", "video", "video-1", [], 2_100],
+    ["liveKeys単一", "video", "video-1", ["videos/live-a.json"], 2_100],
+    ["liveKeys重複", "video", "video-1", ["videos/live-a.json", "videos/live-a.json", "videos/live-b.json"], 2_100],
+    ["staleなし", "video", "video-1", allActiveTargetKeys, 2_100],
+    ["limit超過", "video", "video-1", ["videos/live-a.json", "videos/live-b.json"], 20],
+    ["limit未満", "video", "video-2", [], 20],
+    ["複数target別type", "event", "video-1", [], 20],
+  ];
+  for (const [name, targetType, targetId, liveKeys, limit] of resultCases) {
+    const json = JSON.stringify(liveKeys);
+    const oldRows = oldQuery.all(targetType, targetId, json, limit);
+    const newRows = newQuery.all(targetType, targetId, json, limit);
+    assert.deepEqual(canonicalize(newRows), canonicalize(oldRows), name);
+  }
+
+  // A NULL element is ignored defensively, so it cannot poison NOT IN and
+  // non-NULL live keys still protect their matching artifacts.
+  const nullCase = newQuery
+    .all("video", "video-1", JSON.stringify([null, "videos/live-a.json"]), 2_100)
+    .map((row) => row.object_key);
+  assert.ok(!nullCase.includes("videos/live-a.json"));
+  assert.ok(nullCase.includes("videos/live-b.json"));
+
+  const bounded = newQuery.all("video", "video-1", liveJson, 20);
+  assert.equal(bounded.length, 20);
+  const boundedTimes = bounded.map((row) => generatedAtByKey.get(row.object_key));
+  assert.deepEqual(boundedTimes, [...boundedTimes].sort((a, b) => a - b));
+
+  // Repeated bounded calls drain all and only stale rows; the live, deleted,
+  // and other-target fixtures remain untouched.
+  const drained = [];
+  const markDeleted = sqlite.prepare(
+    `UPDATE static_artifacts SET deleted_at = 100_000
+      WHERE target_type = ? AND target_id = ? AND object_key = ? AND deleted_at IS NULL`,
+  );
+  for (;;) {
+    const batch = newQuery.all("video", "video-1", liveJson, 20);
+    if (batch.length === 0) break;
+    assert.ok(batch.length <= 20);
+    drained.push(...batch.map((row) => row.object_key));
+    for (const row of batch) markDeleted.run("video", "video-1", row.object_key);
+  }
+  assert.equal(drained.length, 2_002);
+  assert.ok(!drained.includes("videos/live-a.json"));
+  assert.ok(!drained.includes("videos/live-b.json"));
+  assert.equal(
+    sqlite.prepare("SELECT deleted_at FROM static_artifacts WHERE object_key = ?").get("videos/deleted.json").deleted_at,
+    7,
+  );
+  assert.equal(
+    sqlite.prepare("SELECT deleted_at FROM static_artifacts WHERE object_key = ?").get("videos/other-video.json").deleted_at,
+    null,
+  );
+  sqlite.close();
+});
 
 test("通常putJsonはR2 dedupe後もstatic_artifacts追跡を更新する", () => {
   const start = source.indexOf("async function putJson(");

@@ -18,6 +18,11 @@ test("member suggestions rollbackはgeneration-specific indexを削除しない"
   );
 });
 
+test("artifact trackingのD1 membership UPDATEは非相関JSON集合を使う", () => {
+  assert.match(source, /object_key IN \([\s\S]*FROM json_each\(\?\)[\s\S]*WHERE value IS NOT NULL/);
+  assert.doesNotMatch(source, /CAST\([^\n]+ AS TEXT\) = static_artifacts\.object_key/);
+});
+
 test("member suggestionsはmanifestをindex書込前に退避する", () => {
   const previousManifestRead = source.indexOf(
     "previousManifest = await readPreviousManifest(env, signal)",

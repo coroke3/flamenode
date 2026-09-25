@@ -1147,6 +1147,9 @@ export const staticArtifacts = sqliteTable(
       t.target_id,
       t.deleted_at,
     ),
+    liveCleanupIdx: index("static_artifacts_live_cleanup_idx")
+      .on(t.target_type, t.target_id, t.generated_at, t.object_key)
+      .where(sql`${t.deleted_at} IS NULL`),
   }),
 );
 

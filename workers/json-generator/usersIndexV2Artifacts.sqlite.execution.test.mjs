@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { rebuildUsersIndexV2Artifacts } from "./usersIndexV2Artifacts.ts";
+import {
+  purgeDeletedArtifacts,
+  rebuildUsersIndexV2Artifacts,
+  reconcileTrackedArtifacts,
+} from "./usersIndexV2Artifacts.ts";
 
 function source(index) {
   return {
@@ -32,12 +36,21 @@ function createSqliteEnv() {
     );
     CREATE UNIQUE INDEX static_artifacts_target_key_uniq
       ON static_artifacts (target_type, target_id, object_key);
+    CREATE UNIQUE INDEX static_artifacts_live_key_uniq
+      ON static_artifacts (object_key) WHERE deleted_at IS NULL;
+    CREATE INDEX static_artifacts_target_idx
+      ON static_artifacts (target_type, target_id, deleted_at);
+    CREATE INDEX static_artifacts_live_cleanup_idx
+      ON static_artifacts (target_type, target_id, generated_at, object_key)
+      WHERE deleted_at IS NULL;
   `);
 
+  const statements = [];
   const DB = {
     prepare(sql) {
       return {
         bind(...values) {
+          statements.push({ sql, values });
           const statement = sqlite.prepare(sql);
           return {
             async first() {
@@ -57,6 +70,7 @@ function createSqliteEnv() {
   };
 
   const objects = new Map();
+  const deletes = [];
   let putCount = 0;
   const R2 = {
     async head(key) {
@@ -73,11 +87,21 @@ function createSqliteEnv() {
       return { json: async () => JSON.parse(value) };
     },
     async delete(keys) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+      const normalized = Array.isArray(keys) ? [...keys] : [keys];
+      deletes.push(normalized);
+      for (const key of normalized) objects.delete(key);
     },
   };
 
-  return { DB, R2, sqlite, objects, get putCount() { return putCount; } };
+  return { DB, R2, sqlite, objects, statements, deletes, get putCount() { return putCount; } };
+}
+
+function explain(env, { sql, values }) {
+  return env.sqlite
+    .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+    .all(...values)
+    .map((row) => row.detail)
+    .join("\n");
 }
 
 test("users index v2 JSON1 tracking SQL runs against SQLite and upserts all artifacts", async () => {
@@ -113,6 +137,14 @@ test("同一generationでtrackingが揃っている通常rebuildはimmutable R2 
   assert.equal(second.hasMore, false);
   assert.equal(env.putCount, putsAfterFirst);
   assert.equal(second.objectCount, first.objectCount);
+  const membershipCount = env.statements.findLast(({ sql }) =>
+    /SELECT COUNT\(\*\) AS count/.test(sql) && /object_key IN/.test(sql),
+  );
+  assert.ok(membershipCount);
+  const plan = explain(env, membershipCount);
+  assert.match(plan, /LIST SUBQUERY/);
+  assert.match(plan, /SCAN json_each/);
+  assert.doesNotMatch(plan, /CORRELATED/);
   env.sqlite.close();
 });
 
@@ -187,5 +219,120 @@ test("users v2 GCは500件超のstale backlogをhasMoreで次回へ継続する"
   assert.equal(Number(remainingAfterFirst), 1);
   const second = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
   assert.equal(second.hasMore, false);
+  env.sqlite.close();
+});
+
+test("users v2 cleanup/purgeはmanifest世代とlive keyを保護し、staleだけをboundedに処理する", async () => {
+  const env = createSqliteEnv();
+  const items = Array.from({ length: 20 }, (_, index) => source(index));
+  await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
+  const manifest = JSON.parse(env.objects.get("users/index.v2/manifest.json"));
+  const generationAKey = `users/index.v2/g/${manifest.generation}/score/recovery.json`;
+  const generationBKey = "users/index.v2/g/generation-b/score/1.json";
+  const oldKey = "users/index.v2/g/old-generation/score/1.json";
+  const insert = env.sqlite.prepare(
+    `INSERT INTO static_artifacts
+      (id, target_type, target_id, object_key, content_hash, schema_version,
+       source_updated_at, generated_at, deleted_at)
+     VALUES (?, 'users_index_v2', 'global', ?, 'fixture', 2, NULL, ?, ?)` ,
+  );
+  insert.run("generation-a", generationAKey, 1, null);
+  insert.run("generation-b", generationBKey, 2, null);
+  insert.run("old-generation", oldKey, 3, null);
+  env.objects.set(generationAKey, "{}");
+  env.objects.set(generationBKey, "{}");
+  env.objects.set(oldKey, "{}");
+
+  const reconcileStart = env.statements.length;
+  const reconcile = await reconcileTrackedArtifacts(env, [generationBKey]);
+  assert.deepEqual(reconcile, { deleted: 1, hasMore: false });
+  const reconcileStatements = env.statements.slice(reconcileStart);
+  const reconcileSelect = reconcileStatements.find(({ sql }) =>
+    /SELECT object_key\s+FROM static_artifacts/.test(sql),
+  );
+  const reconcileUpdate = reconcileStatements.find(({ sql }) =>
+    /UPDATE static_artifacts/.test(sql),
+  );
+  assert.ok(reconcileSelect);
+  assert.ok(reconcileUpdate);
+  const selectPlan = explain(env, reconcileSelect);
+  assert.match(selectPlan, /static_artifacts_live_cleanup_idx/);
+  assert.match(selectPlan, /LIST SUBQUERY/);
+  assert.match(selectPlan, /SCAN json_each/);
+  assert.doesNotMatch(selectPlan, /CORRELATED|USE TEMP B-TREE FOR ORDER BY/);
+  const updatePlan = explain(env, reconcileUpdate);
+  assert.match(updatePlan, /LIST SUBQUERY/);
+  assert.match(updatePlan, /SCAN json_each/);
+  assert.doesNotMatch(updatePlan, /CORRELATED/);
+  assert.deepEqual(env.deletes, [[oldKey]]);
+
+  const tracked = (key) => env.sqlite.prepare(
+    `SELECT deleted_at FROM static_artifacts WHERE object_key = ?`,
+  ).get(key);
+  assert.equal(tracked(generationAKey).deleted_at, null);
+  assert.equal(tracked(generationBKey).deleted_at, null);
+  assert.ok(tracked(oldKey).deleted_at !== null);
+  assert.equal(env.objects.has(generationAKey), true);
+  assert.equal(env.objects.has(generationBKey), true);
+  assert.equal(env.objects.has(oldKey), false);
+  assert.ok(tracked("users/index.v2/manifest.json"));
+
+  // Purge has its own D1-only physical-delete stage: expired current-generation,
+  // live, and manifest rows must remain protected even when marked deleted.
+  const expiredGenerationA = `${generationAKey}.expired`;
+  const expiredGenerationB = `${generationBKey}.expired`;
+  const expiredOld = `${oldKey}.expired`;
+  insert.run("expired-a", expiredGenerationA, 1, 1);
+  insert.run("expired-b", expiredGenerationB, 2, 1);
+  insert.run("expired-old", expiredOld, 3, 1);
+  env.sqlite.prepare(
+    `UPDATE static_artifacts SET deleted_at = 1 WHERE object_key = ?`,
+  ).run("users/index.v2/manifest.json");
+  const purgeStart = env.statements.length;
+  const purge = await purgeDeletedArtifacts(env, [expiredGenerationB]);
+  assert.deepEqual(purge, { deleted: 1, hasMore: false });
+  const purgeStatements = env.statements.slice(purgeStart);
+  const purgeSelect = purgeStatements.find(({ sql }) =>
+    /SELECT object_key\s+FROM static_artifacts/.test(sql),
+  );
+  const purgeDelete = purgeStatements.find(({ sql }) =>
+    /DELETE FROM static_artifacts/.test(sql),
+  );
+  assert.ok(purgeSelect);
+  assert.ok(purgeDelete);
+  assert.doesNotMatch(explain(env, purgeSelect), /CORRELATED/);
+  assert.doesNotMatch(explain(env, purgeDelete), /CORRELATED/);
+  assert.equal(tracked(expiredGenerationA).deleted_at, 1);
+  assert.equal(tracked(expiredGenerationB).deleted_at, 1);
+  assert.equal(tracked(expiredOld), undefined);
+  assert.equal(tracked("users/index.v2/manifest.json").deleted_at, 1);
+  env.sqlite.close();
+});
+
+test("users v2 manifest read unknown時はreconcile/purgeをfail-safeで停止する", async () => {
+  const env = createSqliteEnv();
+  const insert = env.sqlite.prepare(
+    `INSERT INTO static_artifacts
+      (id, target_type, target_id, object_key, content_hash, schema_version,
+       source_updated_at, generated_at, deleted_at)
+     VALUES (?, 'users_index_v2', 'global', ?, 'fixture', 2, NULL, 1, ?)` ,
+  );
+  insert.run("live-stale", "users/index.v2/old/live.json", null);
+  insert.run("expired-stale", "users/index.v2/old/expired.json", 1);
+  env.R2.get = async () => { throw new Error("manifest_unavailable"); };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.deepEqual(await reconcileTrackedArtifacts(env, []), { deleted: 0, hasMore: true });
+    assert.deepEqual(await purgeDeletedArtifacts(env, []), { deleted: 0, hasMore: true });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(env.statements.length, 0);
+  assert.deepEqual(env.deletes, []);
+  assert.equal(
+    env.sqlite.prepare("SELECT COUNT(*) AS count FROM static_artifacts").get().count,
+    2,
+  );
   env.sqlite.close();
 });

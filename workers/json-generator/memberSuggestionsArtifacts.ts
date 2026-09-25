@@ -219,6 +219,19 @@ async function recordArtifacts(
 }
 
 /** stale generation cleanupはbounded。D1更新はjson_each 1文に集約する。 */
+export const MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL = `
+  UPDATE static_artifacts
+     SET deleted_at = ?
+   WHERE target_type = ?
+     AND target_id = ?
+     AND deleted_at IS NULL
+     AND object_key IN (
+       SELECT CAST(value AS TEXT)
+       FROM json_each(?)
+       WHERE value IS NOT NULL
+     )
+`;
+
 async function reconcileTrackedArtifacts(
   env: Env,
   liveKeys: readonly string[],
@@ -249,17 +262,7 @@ async function reconcileTrackedArtifacts(
   await env.R2.delete(staleKeys);
   throwIfAborted(signal);
   const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    `UPDATE static_artifacts
-        SET deleted_at = ?
-      WHERE target_type = ?
-        AND target_id = ?
-        AND deleted_at IS NULL
-        AND EXISTS (
-          SELECT 1 FROM json_each(?) AS stale_keys
-          WHERE CAST(stale_keys.value AS TEXT) = static_artifacts.object_key
-        )`,
-  )
+  await env.DB.prepare(MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL)
     .bind(
       now,
       MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
@@ -308,16 +311,7 @@ async function cleanupWrittenArtifacts(
   }
   try {
     const now = Math.floor(Date.now() / 1000);
-    await env.DB.prepare(
-      `UPDATE static_artifacts
-          SET deleted_at = ?
-        WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
-          AND EXISTS (
-            SELECT 1
-              FROM json_each(?) AS removed_keys
-             WHERE CAST(removed_keys.value AS TEXT) = static_artifacts.object_key
-          )`,
-    )
+    await env.DB.prepare(MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL)
       .bind(
         now,
         MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,

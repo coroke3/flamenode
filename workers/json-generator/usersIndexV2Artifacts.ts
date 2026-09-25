@@ -268,10 +268,10 @@ async function canSkipSameGeneration(
       WHERE target_type = ?
         AND target_id = ?
         AND deleted_at IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM json_each(?) AS live_keys
-          WHERE CAST(live_keys.value AS TEXT) = static_artifacts.object_key
+        AND object_key IN (
+          SELECT CAST(value AS TEXT)
+          FROM json_each(?)
+          WHERE value IS NOT NULL
         )`,
   )
     .bind(
@@ -329,7 +329,7 @@ async function cleanupFailedArtifactChunk(
   }
 }
 
-async function reconcileTrackedArtifacts(
+export async function reconcileTrackedArtifacts(
   env: Env,
   liveKeys: readonly string[],
   signal?: RebuildSignal,
@@ -360,10 +360,10 @@ async function reconcileTrackedArtifacts(
     `SELECT object_key
        FROM static_artifacts
       WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
-        AND NOT EXISTS (
-          SELECT 1
-          FROM json_each(?) AS live_keys
-          WHERE CAST(live_keys.value AS TEXT) = static_artifacts.object_key
+        AND object_key NOT IN (
+          SELECT CAST(value AS TEXT)
+          FROM json_each(?)
+          WHERE value IS NOT NULL
         )
       ${protectionSql}
       ORDER BY generated_at ASC
@@ -404,10 +404,10 @@ async function reconcileTrackedArtifacts(
       WHERE target_type = ?
         AND target_id = ?
         AND deleted_at IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM json_each(?) AS stale_keys
-          WHERE CAST(stale_keys.value AS TEXT) = static_artifacts.object_key
+        AND object_key IN (
+          SELECT CAST(value AS TEXT)
+          FROM json_each(?)
+          WHERE value IS NOT NULL
         )
       ${protectionSql}`,
   )
@@ -433,7 +433,7 @@ async function reconcileTrackedArtifacts(
   };
 }
 
-async function purgeDeletedArtifacts(
+export async function purgeDeletedArtifacts(
   env: Env,
   liveKeys: readonly string[],
   signal?: RebuildSignal,
@@ -465,10 +465,10 @@ async function purgeDeletedArtifacts(
         AND target_id = ?
         AND deleted_at IS NOT NULL
         AND deleted_at < ?
-        AND NOT EXISTS (
-          SELECT 1
-          FROM json_each(?) AS live_keys
-          WHERE CAST(live_keys.value AS TEXT) = static_artifacts.object_key
+        AND object_key NOT IN (
+          SELECT CAST(value AS TEXT)
+          FROM json_each(?)
+          WHERE value IS NOT NULL
         )
       ${protectionSql}
       ORDER BY deleted_at ASC
@@ -501,10 +501,10 @@ async function purgeDeletedArtifacts(
     `DELETE FROM static_artifacts
       WHERE target_type = ?
         AND target_id = ?
-        AND EXISTS (
-          SELECT 1
-          FROM json_each(?) AS purge_keys
-          WHERE CAST(purge_keys.value AS TEXT) = static_artifacts.object_key
+        AND object_key IN (
+          SELECT CAST(value AS TEXT)
+          FROM json_each(?)
+          WHERE value IS NOT NULL
         )
         AND deleted_at IS NOT NULL
         AND deleted_at < ?

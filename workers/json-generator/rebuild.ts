@@ -647,6 +647,20 @@ export async function removeTrackedArtifacts(
   return rows.results?.length ?? 0;
 }
 
+// Keep the existing cleanup order and bounded batch size. The partial cleanup
+// index covers this ordering, while the JSON1 live-key list is non-correlated.
+export const STATIC_ARTIFACT_RECONCILIATION_SQL = `
+  SELECT object_key FROM static_artifacts
+  WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+    AND object_key NOT IN (
+      SELECT CAST(value AS TEXT)
+      FROM json_each(?)
+      WHERE value IS NOT NULL
+    )
+  ORDER BY generated_at ASC
+  LIMIT ?
+`;
+
 async function reconcileTrackedArtifacts(
   env: Env,
   target: ArtifactTarget,
@@ -655,16 +669,7 @@ async function reconcileTrackedArtifacts(
   signal?: RebuildSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  const rows = await env.DB.prepare(
-    `SELECT object_key FROM static_artifacts
-      WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
-        AND NOT EXISTS (
-          SELECT 1
-          FROM json_each(?) AS live_keys
-          WHERE CAST(live_keys.value AS TEXT) = static_artifacts.object_key
-        )
-      ORDER BY generated_at ASC LIMIT ?`,
-  ).bind(
+  const rows = await env.DB.prepare(STATIC_ARTIFACT_RECONCILIATION_SQL).bind(
     target.targetType,
     target.targetId,
     JSON.stringify(liveKeys),

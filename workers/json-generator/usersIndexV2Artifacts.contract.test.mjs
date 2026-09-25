@@ -70,7 +70,8 @@ test("generation hash はcontentだけでなくlayout versionも含める", () =
 
 test("stale generation cleanup はR2 bulk deleteとD1単一UPDATEへまとめる", () => {
   assert.match(source, /await env\.R2\.delete\(staleKeys\)/);
-  assert.match(source, /FROM json_each\(\?\) AS stale_keys/);
+  assert.match(source, /object_key IN \([\s\S]*FROM json_each\(\?\)[\s\S]*WHERE value IS NOT NULL/);
+  assert.doesNotMatch(source, /CAST\([^\n]+ AS TEXT\) = static_artifacts\.object_key/);
   assert.match(source, /JSON\.stringify\(staleKeys\)/);
   assert.match(source, /purgeDeletedArtifacts/);
   assert.match(source, /gc_has_more/);
