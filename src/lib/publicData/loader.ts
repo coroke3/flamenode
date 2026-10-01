@@ -141,11 +141,7 @@ import {
   pageEventBaseVideos,
   shouldEnqueueEventBaseListHeal,
 } from "./staticEventListCore";
-import {
-  canFallbackToDatabase,
-  isMaintenanceStrategy,
-  shouldUseStaticCollection,
-} from "./loaderPolicy";
+import { shouldUseStaticCollection } from "./loaderPolicy";
 import { canAttemptDegradedD1 } from "./degradedPolicy";
 import {
   isDegradedD1CircuitOpen,
@@ -174,10 +170,7 @@ import {
 } from "./publicCache";
 import { readPublicJsonIsolateCache } from "./publicCacheIsolate";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "./publicJsonCacheTtl";
-import {
-  toPublicJsonLegacySource,
-  type PublicDataMode,
-} from "./publicDataMode";
+import type { PublicDataMode } from "./publicDataMode";
 import {
   buildPublicArtifactVisibilityContext,
   filterPublicArtifactPayload,
@@ -187,14 +180,8 @@ import { rewriteCanonicalR2Key } from "./rewriteCanonicalR2Key";
 
 export const PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
 
-export type PublicJsonCacheMode =
-  | "default"
-  | "cache_first"
-  | "r2_first"
-  /** Backward-compatible strict mode for internal callers/tests. */
-  | "bypass";
+export type PublicJsonCacheMode = "cache_first" | "r2_first";
 
-export { canFallbackToDatabase, isMaintenanceStrategy };
 export {
   logPublicRequestMetrics,
   recordPublicFallbackReason,
@@ -250,8 +237,6 @@ export type PublicJsonLoadResult<T> = {
   mode: PublicDataMode;
   state: PublicDataState;
   rebuildState: RebuildRequestState;
-  /** @deprecated Use `mode`. */
-  source: "static" | "miss";
   strategy: PublicDataStrategy;
   enqueued: boolean;
   probe?: PublicStaticTargetProbe | null;
@@ -370,7 +355,6 @@ function buildStaticHitResult<T>(
     mode,
     state: "ready",
     rebuildState: "not_needed",
-    source: toPublicJsonLegacySource(mode),
     strategy,
     enqueued: false,
   };
@@ -406,7 +390,6 @@ function buildMissResult<T>(args: {
       enqueued: args.enqueued,
       rebuildState: args.rebuildState,
     }),
-    source: toPublicJsonLegacySource(args.mode),
     strategy: args.strategy,
     enqueued: args.enqueued,
     probe: args.probe,
@@ -461,6 +444,17 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
     warnPublicStaticJson(key, "read_failed", error);
     return null;
   }
+}
+
+function resolveStaleCacheMaxAge(
+  options: Pick<
+    PublicJsonLoadOptions,
+    "allowStaleCacheFallback" | "staleCacheMaxAgeSec"
+  >,
+): number {
+  return options.allowStaleCacheFallback === false
+    ? 0
+    : options.staleCacheMaxAgeSec ?? 0;
 }
 
 const PUBLIC_MISS_HIGH_PRIORITY_TARGET_TYPES = new Set<StaticRebuildTargetType>([
@@ -631,32 +625,17 @@ async function resolvePublicJsonMiss<T = never>(
       ) {
         recordDegradedCircuitR2HitBestEffort();
         recordPublicStaticHit();
-        const cacheMode = options.cacheMode ?? "cache_first";
-        if (cacheMode !== "bypass" && options.cacheTtlSeconds) {
+        if (options.cacheTtlSeconds) {
           const envelope = {
             payload: canonicalPayload,
             stored_at: Math.floor(Date.now() / 1000),
           };
-          writePublicJsonCacheBestEffort(
-            canonicalR2Key,
-            envelope,
-            publicJsonCacheRetentionTtl(
-              options.cacheTtlSeconds,
-              options.allowStaleCacheFallback === false
-                ? 0
-                : options.staleCacheMaxAgeSec ?? 0,
-            ),
+          const retentionTtl = publicJsonCacheRetentionTtl(
+            options.cacheTtlSeconds,
+            resolveStaleCacheMaxAge(options),
           );
-          writePublicJsonCacheBestEffort(
-            options.r2Key,
-            envelope,
-            publicJsonCacheRetentionTtl(
-              options.cacheTtlSeconds,
-              options.allowStaleCacheFallback === false
-                ? 0
-                : options.staleCacheMaxAgeSec ?? 0,
-            ),
-          );
+          writePublicJsonCacheBestEffort(canonicalR2Key, envelope, retentionTtl);
+          writePublicJsonCacheBestEffort(options.r2Key, envelope, retentionTtl);
         }
         const operationMode = await resolvePublicOperationMode({ allowD1: false });
         return buildStaticHitResult(
@@ -803,85 +782,74 @@ export async function loadPublicJson<T>(
     });
   }
 
-  const cacheMode = options.cacheMode ?? "cache_first";
-  const cacheFirst = cacheMode === "default" || cacheMode === "cache_first";
-  const r2First = cacheMode === "r2_first";
+  const r2First = options.cacheMode === "r2_first";
   const now = Math.floor(Date.now() / 1000);
   const freshTtl = options.cacheTtlSeconds ?? Number.POSITIVE_INFINITY;
-  const staleMaxAge =
-    options.allowStaleCacheFallback === false
-      ? 0
-      : options.staleCacheMaxAgeSec ?? 0;
-  const isolatedEnvelope =
-    cacheMode === "bypass"
-      ? null
-      : coercePublicJsonCacheEnvelope(
-          readPublicJsonIsolateCache(options.r2Key),
-          now,
-          { requireStoredAt: r2First },
-        );
-  let cachedEnvelope: ReturnType<typeof coercePublicJsonCacheEnvelope> = null;
-  if (cacheMode !== "bypass") {
-    if (
-      isolatedEnvelope &&
-      publicJsonCacheFreshness(
-        isolatedEnvelope,
-        now,
-        freshTtl,
-        staleMaxAge,
-      ) === "fresh"
-    ) {
-      const isolatedPayload = filterPublicArtifactPayload<T>(
-        options.targetType,
-        isolatedEnvelope.payload as T,
-        visibility.artifactContext,
-      );
-      if (isolatedPayload !== null) {
-        if (options.isEmptyCollection?.(isolatedPayload)) {
-          return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
-        }
-        recordPublicStaticHit();
-        const isolateMode = await resolvePublicOperationMode({ allowD1: false });
-        return buildStaticHitResult(
-          isolatedPayload,
-          "cached_static",
-          getPublicDataStrategy(isolateMode),
-        );
+  const staleMaxAge = resolveStaleCacheMaxAge(options);
+  const isolatedEnvelope = coercePublicJsonCacheEnvelope(
+    readPublicJsonIsolateCache(options.r2Key),
+    now,
+    { requireStoredAt: r2First },
+  );
+  if (
+    isolatedEnvelope &&
+    publicJsonCacheFreshness(
+      isolatedEnvelope,
+      now,
+      freshTtl,
+      staleMaxAge,
+    ) === "fresh"
+  ) {
+    const isolatedPayload = filterPublicArtifactPayload<T>(
+      options.targetType,
+      isolatedEnvelope.payload as T,
+      visibility.artifactContext,
+    );
+    if (isolatedPayload !== null) {
+      if (options.isEmptyCollection?.(isolatedPayload)) {
+        return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
       }
+      recordPublicStaticHit();
+      const isolateMode = await resolvePublicOperationMode({ allowD1: false });
+      return buildStaticHitResult(
+        isolatedPayload,
+        "cached_static",
+        getPublicDataStrategy(isolateMode),
+      );
     }
+  }
 
-    // r2_first callers may use Cache API only while its envelope is inside the
-    // normal freshness window. Older entries remain available below as bounded
-    // last-known-good data, but must not hide a newer R2 generation.
-    const cacheValue = await readPublicJsonCache<unknown>(options.r2Key, {
-      bypassIsolate: true,
-    });
-    cachedEnvelope = coercePublicJsonCacheEnvelope(cacheValue, now, {
-      requireStoredAt: r2First,
-    });
-    const cacheFresh =
-      cachedEnvelope !== null &&
-      publicJsonCacheFreshness(
-        cachedEnvelope,
-        now,
-        freshTtl,
-        staleMaxAge,
-      ) === "fresh";
-    if ((cacheFirst || r2First) && cacheFresh && cachedEnvelope) {
-      const cached = filterPublicArtifactPayload<T>(
-        options.targetType,
-        cachedEnvelope.payload as T,
-        visibility.artifactContext,
-      );
-      if (cached !== null) {
-        if (options.isEmptyCollection?.(cached)) {
-          return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
-        }
-        recordPublicStaticHit();
-        const operationMode = await resolvePublicOperationMode({ allowD1: false });
-        const strategy = getPublicDataStrategy(operationMode);
-        return buildStaticHitResult(cached, "cached_static", strategy);
+  // r2_first callers may use Cache API only while its envelope is inside the
+  // normal freshness window. Older entries remain available below as bounded
+  // last-known-good data, but must not hide a newer R2 generation.
+  const cacheValue = await readPublicJsonCache<unknown>(options.r2Key, {
+    bypassIsolate: true,
+  });
+  const cachedEnvelope = coercePublicJsonCacheEnvelope(cacheValue, now, {
+    requireStoredAt: r2First,
+  });
+  if (
+    cachedEnvelope &&
+    publicJsonCacheFreshness(
+      cachedEnvelope,
+      now,
+      freshTtl,
+      staleMaxAge,
+    ) === "fresh"
+  ) {
+    const cached = filterPublicArtifactPayload<T>(
+      options.targetType,
+      cachedEnvelope.payload as T,
+      visibility.artifactContext,
+    );
+    if (cached !== null) {
+      if (options.isEmptyCollection?.(cached)) {
+        return resolvePublicJsonMiss(options, { skipStaticMissRecord: true });
       }
+      recordPublicStaticHit();
+      const operationMode = await resolvePublicOperationMode({ allowD1: false });
+      const strategy = getPublicDataStrategy(operationMode);
+      return buildStaticHitResult(cached, "cached_static", strategy);
     }
   }
 
@@ -898,19 +866,14 @@ export async function loadPublicJson<T>(
     recordPublicStaticHit();
     const operationMode = await resolvePublicOperationMode({ allowD1: false });
     const strategy = getPublicDataStrategy(operationMode);
-    if (cacheMode !== "bypass" && options.cacheTtlSeconds) {
+    if (options.cacheTtlSeconds) {
       writePublicJsonCacheBestEffort(
         options.r2Key,
         {
           payload,
           stored_at: Math.floor(Date.now() / 1000),
         },
-        publicJsonCacheRetentionTtl(
-          options.cacheTtlSeconds,
-          options.allowStaleCacheFallback === false
-            ? 0
-            : options.staleCacheMaxAgeSec ?? 0,
-        ),
+        publicJsonCacheRetentionTtl(options.cacheTtlSeconds, staleMaxAge),
       );
     }
     return buildStaticHitResult(payload, "static", strategy);
@@ -919,10 +882,9 @@ export async function loadPublicJson<T>(
   recordDegradedCircuitR2MissBestEffort();
   if (
     r2First &&
-    options.allowStaleCacheFallback !== false &&
+    staleMaxAge > 0 &&
     (!options.requireVisibilityManifestForStale ||
-      visibility.artifactContext !== undefined) &&
-    (options.staleCacheMaxAgeSec ?? 0) > 0
+      visibility.artifactContext !== undefined)
   ) {
     const staleCandidate = cachedEnvelope ?? isolatedEnvelope;
     if (
@@ -1575,76 +1537,68 @@ export async function loadPublicEventVideosPage(params: {
   };
 
   const tryCachedOrR2 = async (key: string) => {
-    const r2First = missOptions.cacheMode === "r2_first";
+    // missOptions is always r2_first: Cache API envelopes need stored_at and
+    // only fresh ones may short-circuit R2.
     const now = Math.floor(Date.now() / 1000);
     const cacheTtl = missOptions.cacheTtlSeconds ?? 0;
-    const staleMaxAge =
-      missOptions.allowStaleCacheFallback === false
-        ? 0
-        : missOptions.staleCacheMaxAgeSec ?? 0;
-    const isolatedEnvelope =
-      missOptions.cacheMode === "bypass"
-        ? null
-        : coercePublicJsonCacheEnvelope(
-            readPublicJsonIsolateCache(key),
-            now,
-            { requireStoredAt: r2First },
-          );
-    let cachedEnvelope: ReturnType<typeof coercePublicJsonCacheEnvelope> = null;
-    if (missOptions.cacheMode !== "bypass") {
-      if (
-        isolatedEnvelope &&
-        publicJsonCacheFreshness(
-          isolatedEnvelope,
-          now,
-          cacheTtl,
-          staleMaxAge,
-        ) === "fresh"
-      ) {
-        const isolated = filterPublicArtifactPayload<StaticEventDetailPayload>(
-          "event_base",
-          isolatedEnvelope.payload as StaticEventDetailPayload,
-          visibility.artifactContext,
+    const staleMaxAge = resolveStaleCacheMaxAge(missOptions);
+    const isolatedEnvelope = coercePublicJsonCacheEnvelope(
+      readPublicJsonIsolateCache(key),
+      now,
+      { requireStoredAt: true },
+    );
+    if (
+      isolatedEnvelope &&
+      publicJsonCacheFreshness(
+        isolatedEnvelope,
+        now,
+        cacheTtl,
+        staleMaxAge,
+      ) === "fresh"
+    ) {
+      const isolated = filterPublicArtifactPayload<StaticEventDetailPayload>(
+        "event_base",
+        isolatedEnvelope.payload as StaticEventDetailPayload,
+        visibility.artifactContext,
+      );
+      if (isolated !== null) {
+        const strategy = getPublicDataStrategy(
+          await resolvePublicOperationMode({ allowD1: false }),
         );
-        if (isolated !== null) {
-          const strategy = getPublicDataStrategy(
-            await resolvePublicOperationMode({ allowD1: false }),
-          );
-          const hit = tryStaticEventList(isolated, "cached_static", strategy);
-          if (hit) {
-            recordPublicStaticHit();
-            return { hit, payload: isolated };
-          }
+        const hit = tryStaticEventList(isolated, "cached_static", strategy);
+        if (hit) {
+          recordPublicStaticHit();
+          return { hit, payload: isolated };
         }
       }
-      cachedEnvelope = coercePublicJsonCacheEnvelope(
-        await readPublicJsonCache<unknown>(key, { bypassIsolate: true }),
+    }
+    const cachedEnvelope = coercePublicJsonCacheEnvelope(
+      await readPublicJsonCache<unknown>(key, { bypassIsolate: true }),
+      now,
+      { requireStoredAt: true },
+    );
+    if (
+      cachedEnvelope &&
+      publicJsonCacheFreshness(
+        cachedEnvelope,
         now,
-        { requireStoredAt: r2First },
+        cacheTtl,
+        staleMaxAge,
+      ) === "fresh"
+    ) {
+      const cached = filterPublicArtifactPayload<StaticEventDetailPayload>(
+        "event_base",
+        cachedEnvelope.payload as StaticEventDetailPayload,
+        visibility.artifactContext,
       );
-      if (
-        cachedEnvelope &&
-        publicJsonCacheFreshness(
-          cachedEnvelope,
-          now,
-          cacheTtl,
-          staleMaxAge,
-        ) === "fresh"
-      ) {
-        const cached = filterPublicArtifactPayload<StaticEventDetailPayload>(
-          "event_base",
-          cachedEnvelope.payload as StaticEventDetailPayload,
-          visibility.artifactContext,
+      if (cached !== null) {
+        const strategy = getPublicDataStrategy(
+          await resolvePublicOperationMode({ allowD1: false }),
         );
-        if (cached !== null) {
-          const strategy = getPublicDataStrategy(
-            await resolvePublicOperationMode({ allowD1: false }),
-          );
-          const hit = tryStaticEventList(cached, "cached_static", strategy);
-          if (hit) {
-            recordPublicStaticHit();
-            return { hit, payload: cached };
-          }
+        const hit = tryStaticEventList(cached, "cached_static", strategy);
+        if (hit) {
+          recordPublicStaticHit();
+          return { hit, payload: cached };
         }
       }
     }
@@ -1659,16 +1613,11 @@ export async function loadPublicEventVideosPage(params: {
       const strategy = getPublicDataStrategy(
         await resolvePublicOperationMode({ allowD1: false }),
       );
-      if (missOptions.cacheMode !== "bypass") {
-        writePublicJsonCacheBestEffort(
-          key,
-          { payload, stored_at: Math.floor(Date.now() / 1000) },
-          publicJsonCacheRetentionTtl(
-            cacheTtl,
-            missOptions.allowStaleCacheFallback === false ? 0 : staleMaxAge,
-          ),
-        );
-      }
+      writePublicJsonCacheBestEffort(
+        key,
+        { payload, stored_at: Math.floor(Date.now() / 1000) },
+        publicJsonCacheRetentionTtl(cacheTtl, staleMaxAge),
+      );
       const hit = tryStaticEventList(payload, "static", strategy);
       if (hit) {
         recordPublicStaticHit();
@@ -1676,7 +1625,7 @@ export async function loadPublicEventVideosPage(params: {
       }
       return { hit: null, payload };
     }
-    if (r2First && (missOptions.staleCacheMaxAgeSec ?? 0) > 0) {
+    if (staleMaxAge > 0) {
       const staleEnvelope = cachedEnvelope ?? isolatedEnvelope;
       if (
         staleEnvelope &&
@@ -1714,7 +1663,7 @@ export async function loadPublicEventVideosPage(params: {
 
   const needsHeal = shouldEnqueueEventBaseListHeal(baseResult.payload, params.sort);
 
-  // base 螳悟・ miss: composed 繧・D1 / degraded 繧医ｊ蜈医↓隧ｦ縺・
+  // base 完全 miss: composed を D1 / degraded より先に試す
   if (baseResult.payload === null) {
     const composedResult = await tryCachedOrR2(composedKey);
     if (composedResult.hit) {
@@ -1749,8 +1698,8 @@ export async function loadPublicEventVideosPage(params: {
     };
   }
 
-  // 遘ｻ陦御ｸｭ: composed events/{id}.json 縺後≠繧後・ D1 繧帝∩縺代※荳隕ｧ縺吶ｋ・・core 谺關ｽ譎ゅ・髱槫ｯｾ蠢懶ｼ・
-  // incomplete base heal 蠕・■縺ｮ stale base 縺ｯ legacy composed 縺ｸ騾・′縺輔↑縺・
+  // 移行中: composed events/{id}.json があれば D1 を避けて一覧する（core 欠落時は非対応）
+  // incomplete base heal 待ちの stale base は legacy composed へ逃がさない
   if (!needsHeal) {
     const composedResult = await tryCachedOrR2(composedKey);
     if (composedResult.hit) {

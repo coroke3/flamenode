@@ -4,9 +4,6 @@ type DedupEnv = {
   artifactHashCache?: ArtifactHashCache;
 };
 
-type R2PutArgs = Parameters<R2Bucket["put"]>;
-type R2PutResult = Awaited<ReturnType<R2Bucket["put"]>>;
-
 export type JsonArtifactPutResolution = {
   object: R2Object;
   contentHash: string;
@@ -182,45 +179,4 @@ async function currentArtifactHash(
   const hash = row?.content_hash ?? null;
   cache?.set(objectKey, hash);
   return hash;
-}
-
-/**
- * JSON generatorが渡すstring bodyだけを対象に、同一hashのR2 PUTを省略する。
- * DBにhashが残っていてもR2実体が欠落している場合は通常PUTへフォールバックする。
- */
-export function withDeduplicatingR2<Env extends DedupEnv>(env: Env): Env {
-  const bucket = env.R2;
-  const wrapped = new Proxy(bucket, {
-    get(target, property, receiver) {
-      if (property === "put") {
-        return async (...args: R2PutArgs): Promise<R2PutResult> => {
-          const [key, value] = args;
-          if (typeof value === "string") {
-            const contentHash = await staticArtifactContentHash(value);
-            const existing = await resolveIdenticalJsonArtifactPut(
-              env,
-              key,
-              value,
-              contentHash,
-            );
-            if (existing?.skipPut) return existing.object;
-            const putArgs = [...args] as R2PutArgs;
-            const options = args[2] ?? {};
-            putArgs[2] = {
-              ...options,
-              customMetadata: {
-                ...options.customMetadata,
-                ...staticArtifactCustomMetadata(value, contentHash),
-              },
-            };
-            return bucket.put(...putArgs);
-          }
-          return bucket.put(...args);
-        };
-      }
-      const value = Reflect.get(target, property, receiver);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  }) as R2Bucket;
-  return { ...env, R2: wrapped };
 }

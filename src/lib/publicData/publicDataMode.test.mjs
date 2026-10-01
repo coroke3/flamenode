@@ -11,7 +11,6 @@ import {
   isDegradedD1Mode,
   isPublicDataUnavailable,
   mergePublicDataMode,
-  toPublicJsonLegacySource,
 } from "./publicDataMode.ts";
 import {
   buildDegradedUsersPageSql,
@@ -23,13 +22,6 @@ const degradedPolicySource = await readFile(
   new URL("./degradedPolicy.ts", import.meta.url),
   "utf8",
 );
-
-test("PublicDataMode legacy source mapping", () => {
-  assert.equal(toPublicJsonLegacySource("static"), "static");
-  assert.equal(toPublicJsonLegacySource("cached_static"), "static");
-  assert.equal(toPublicJsonLegacySource("degraded_d1"), "miss");
-  assert.equal(toPublicJsonLegacySource("unavailable"), "miss");
-});
 
 test("mergePublicDataMode keeps the strongest mode", () => {
   assert.equal(mergePublicDataMode("static", "cached_static"), "cached_static");

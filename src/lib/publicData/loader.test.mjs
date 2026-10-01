@@ -9,7 +9,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   canFallbackToDatabase,
-  isMaintenanceStrategy,
   shouldUseStaticCollection,
 } from "./loaderPolicy.ts";
 
@@ -19,11 +18,6 @@ test("canFallbackToDatabase: overlay のみ DB fallback 可", () => {
   assert.equal(canFallbackToDatabase("static_json_with_live_overlay"), true);
   assert.equal(canFallbackToDatabase("static_json_only"), false);
   assert.equal(canFallbackToDatabase("maintenance"), false);
-});
-
-test("isMaintenanceStrategy", () => {
-  assert.equal(isMaintenanceStrategy("maintenance"), true);
-  assert.equal(isMaintenanceStrategy("static_json_only"), false);
 });
 
 test("overlay treats an empty static collection as a DB fallback miss", () => {
@@ -134,15 +128,14 @@ test("loadPublicJson applies empty collection semantic miss on cache and R2 hits
 
 test("detail/event/user/rules loaders use R2-first freshness with bounded stale fallback", () => {
   assert.match(loaderSource, /cacheMode\?: PublicJsonCacheMode/);
-  assert.match(loaderSource, /cacheMode === "bypass"/);
-  assert.match(loaderSource, /cacheMode !== "bypass" && options\.cacheTtlSeconds/);
+  assert.match(loaderSource, /export type PublicJsonCacheMode = "cache_first" \| "r2_first";/);
+  assert.doesNotMatch(loaderSource, /"bypass"/);
   assert.match(loaderSource, /staleCacheMaxAgeSec/);
   const detailBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticEventDetail"),
     loaderSource.indexOf("export async function loadStaticEventsIndex"),
   );
   assert.match(detailBlock, /cacheMode: "r2_first"/);
-  assert.match(loaderSource, /missOptions\.cacheMode !== "bypass"/);
   const rulesBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticRulesPage"),
     loaderSource.indexOf("export async function loadStaticTopPage"),
@@ -214,8 +207,8 @@ test("R2-first loaders reject legacy Cache payloads without stored_at", () => {
 
   assert.match(loadPublicJsonFn, /coercePublicJsonCacheEnvelope\([\s\S]*?readPublicJsonIsolateCache\(options\.r2Key\)[\s\S]*?\{ requireStoredAt: r2First \}/);
   assert.match(loadPublicJsonFn, /coercePublicJsonCacheEnvelope\(cacheValue, now, \{\s*requireStoredAt: r2First/);
-  assert.match(eventMissFn, /coercePublicJsonCacheEnvelope\([\s\S]*?readPublicJsonIsolateCache\(key\)[\s\S]*?\{ requireStoredAt: r2First \}/);
-  assert.match(eventMissFn, /readPublicJsonCache<unknown>\(key, \{ bypassIsolate: true \}\)[\s\S]*?\{ requireStoredAt: r2First \}/);
+  assert.match(eventMissFn, /coercePublicJsonCacheEnvelope\([\s\S]*?readPublicJsonIsolateCache\(key\)[\s\S]*?\{ requireStoredAt: true \}/);
+  assert.match(eventMissFn, /readPublicJsonCache<unknown>\(key, \{ bypassIsolate: true \}\)[\s\S]*?\{ requireStoredAt: true \}/);
 });
 
 test("global collections prefer R2 and visibility-fenced stale cache before degraded D1", () => {
@@ -476,7 +469,7 @@ test("loadPublicEventVideosPage tryCachedOrR2 は R2 より先に isolate 解析
   const r2Index = tryCachedOrR2Block.indexOf("readStaticJson");
   assert.ok(isolateIndex >= 0, "isolate cache read is present in tryCachedOrR2");
   assert.ok(r2Index > isolateIndex, "R2 follows isolate in tryCachedOrR2");
-  assert.match(tryCachedOrR2Block, /missOptions\.cacheMode !== "bypass"/);
+  assert.match(tryCachedOrR2Block, /requireStoredAt: true/);
 });
 
 test("loadPublicJson は Cache/R2 の JSON.parse より先に isolate 解析キャッシュを読む", () => {
@@ -490,5 +483,4 @@ test("loadPublicJson は Cache/R2 の JSON.parse より先に isolate 解析キ�
   assert.ok(isolateIndex >= 0, "isolate cache read is present");
   assert.ok(cacheIndex > isolateIndex, "Cache API follows isolate");
   assert.ok(r2Index > isolateIndex, "R2 follows isolate");
-  assert.match(fn, /cacheMode !== "bypass"/);
 });

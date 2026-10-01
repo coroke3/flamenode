@@ -4,15 +4,6 @@ export type PublicDataMode =
   | "degraded_d1"
   | "unavailable";
 
-/** @deprecated Use `mode` on PublicJsonLoadResult. */
-export type PublicJsonLegacySource = "static" | "miss";
-
-export function toPublicJsonLegacySource(
-  mode: PublicDataMode,
-): PublicJsonLegacySource {
-  return mode === "static" || mode === "cached_static" ? "static" : "miss";
-}
-
 export function isDegradedD1Mode(mode: PublicDataMode): boolean {
   return mode === "degraded_d1";
 }

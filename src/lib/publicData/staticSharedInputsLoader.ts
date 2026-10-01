@@ -58,11 +58,7 @@ import {
 import { normalizeXId } from "../utils/xid";
 
 export type StaticJsonLoadStatus = "fresh" | "stale" | "unavailable";
-export type StaticJsonCacheMode =
-  | "default"
-  | "cache_first"
-  | "r2_first"
-  | "bypass";
+export type StaticJsonCacheMode = "cache_first" | "r2_first" | "bypass";
 
 export type StaticJsonLoadResult<T> = {
   status: StaticJsonLoadStatus;
@@ -134,7 +130,7 @@ export async function loadStaticJsonFreshStaleUnavailable<T>(args: {
   };
 
   const cacheMode = args.cacheMode ?? "cache_first";
-  const cacheFirst = cacheMode === "default" || cacheMode === "cache_first";
+  const cacheFirst = cacheMode === "cache_first";
   const freshCached = cacheFirst
     ? coercePublicJsonCacheEnvelope(
         await readPublicJsonCache<unknown>(args.key),

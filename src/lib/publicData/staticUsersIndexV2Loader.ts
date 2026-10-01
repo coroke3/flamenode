@@ -199,8 +199,8 @@ async function shouldFallbackForVisibilityFence(): Promise<boolean> {
     const manifest = await loadPublicVisibilityBlockedEntitiesManifest();
     return manifest.entities.some((entry) => entry.entity_type === "x_user");
   } catch (error) {
-    // v2縺ｯ莉ｻ諢城ｫ倬溷喧謌先棡迚ｩ縲Ｗisibility manifest髫懷ｮｳ譎ゅ↓v2繧定ｿ斐☆縺ｨfail-open縺ｫ縺ｪ繧九◆繧√・
-    // legacy loader縺ｸ謌ｻ縺励※譌｢蟄倥・fail-closed unavailable蛻､螳壹∈蟋斐・繧九・
+    // v2は任意高速化成果物。visibility manifest障害時にv2を返すとfail-openになるため、
+    // legacy loaderへ戻して既存のfail-closed unavailable判定へ委ねる。
     console.warn(
       JSON.stringify({
         service: "users-index-v2",
@@ -213,10 +213,10 @@ async function shouldFallbackForVisibilityFence(): Promise<boolean> {
 }
 
 /**
- * /user 蟆ら畑縺ｮ莉ｻ諢竣2 loader縲・
- * v2谺謳肴凾縺ｯD1 probe/degraded fallback/rebuild enqueue縺ｸ騾ｲ縺ｾ縺壹∝叉legacy縺ｸ謌ｻ縺吶・
- * manifest縺ｯ蜚ｯ荳縺ｮcommit point縺ｪ縺ｮ縺ｧCache API繧剃ｽｿ繧上★R2繧堤峩謗･豁｣譛ｬ縺ｨ縺励※隱ｭ繧縲・
- * generation蝗ｺ譛英age/search縺ｯimmutable縺ｪ縺ｮ縺ｧCache API縺ｮbounded stale fallback繧定ｨｱ蜿ｯ縺吶ｋ縲・
+ * /user 専用の任意v2 loader。
+ * v2欠損時はD1 probe/degraded fallback/rebuild enqueueへ進まず、即legacyへ戻す。
+ * manifestは唯一のcommit pointなのでCache APIを使わずR2を直接正本として読む。
+ * generation固有page/searchはimmutableなのでCache APIのbounded stale fallbackを許可する。
  */
 export async function loadStaticUsersIndexV2Page(params: {
   page: number;
@@ -235,8 +235,8 @@ export async function loadStaticUsersIndexV2Page(params: {
   if (!manifest || !manifest.sorts.includes(params.sort)) return null;
   notePublicPathMode("v2");
 
-  // shard蜊倅ｽ阪〒縺ｯ蛻･page縺ｮblocked X user繧稚otal縺九ｉ髯､螟悶〒縺阪↑縺・◆繧√・
-  // enforce荳ｭ縺ｫX user fence縺後≠繧九√∪縺溘・manifest繧貞ｮ牙・縺ｫ隱ｭ繧√↑縺・ｴ蜷医・legacy縺ｸ謌ｻ縺吶・
+  // shard単位では別pageのblocked X userをtotalから除外できないため、
+  // enforce中にX user fenceがある、またはmanifestを安全に読めない場合はlegacyへ戻す。
   if (await shouldFallbackForVisibilityFence()) return null;
 
   const query = params.q?.trim() ?? "";

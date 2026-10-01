@@ -4,7 +4,6 @@ import {
   staticArtifactContentHash,
   staticArtifactCustomMetadata,
   resolveIdenticalJsonArtifactPut,
-  withDeduplicatingR2,
   ArtifactHashCache,
 } from "./r2Dedup.ts";
 
@@ -17,7 +16,7 @@ async function hash(value) {
 }
 
 function createEnv({ storedHash, metadataHash, hasObject = true }) {
-  const calls = { head: 0, put: 0, select: 0, putOptions: null };
+  const calls = { head: 0, select: 0 };
   const object = {
     key: "top.json",
     etag: "etag",
@@ -29,11 +28,6 @@ function createEnv({ storedHash, metadataHash, hasObject = true }) {
     async head() {
       calls.head += 1;
       return hasObject ? object : null;
-    },
-    async put(_key, _value, options) {
-      calls.put += 1;
-      calls.putOptions = options;
-      return object;
     },
   };
   const DB = {
@@ -57,48 +51,45 @@ test("R2 content_hashが一致する場合はD1を読まずPUTを省略する", 
   const body = JSON.stringify({ ok: true });
   const contentHash = await staticArtifactContentHash(body);
   const fixture = createEnv({ storedHash: await hash(body), metadataHash: contentHash });
-  const wrapped = withDeduplicatingR2(fixture.env);
-  const result = await wrapped.R2.put("top.json", body);
-  assert.equal(result, fixture.object);
+  const result = await resolveIdenticalJsonArtifactPut(fixture.env, "top.json", body, contentHash);
+  assert.ok(result);
+  assert.equal(result.skipPut, true);
+  assert.equal(result.object, fixture.object);
   assert.equal(fixture.calls.head, 1);
-  assert.equal(fixture.calls.put, 0);
   assert.equal(fixture.calls.select, 0);
 });
 
 test("legacy R2 object uses one D1 fallback and is rewritten with metadata", async () => {
   const body = JSON.stringify({ schema_version: 4, generation: "gen-a", ok: true });
-  const fixture = createEnv({ storedHash: await staticArtifactContentHash(body) });
-  const wrapped = withDeduplicatingR2(fixture.env);
-  await wrapped.R2.put("top.json", body);
+  const contentHash = await staticArtifactContentHash(body);
+  const fixture = createEnv({ storedHash: contentHash });
+  const result = await resolveIdenticalJsonArtifactPut(fixture.env, "top.json", body, contentHash);
+  assert.ok(result);
+  assert.equal(result.skipPut, false);
   assert.equal(fixture.calls.head, 1);
   assert.equal(fixture.calls.select, 1);
-  assert.equal(fixture.calls.put, 1);
-  assert.deepEqual(fixture.calls.putOptions.customMetadata, {
-    content_hash: await staticArtifactContentHash(body),
+  assert.deepEqual(staticArtifactCustomMetadata(body, contentHash), {
+    content_hash: contentHash,
     schema_version: "4",
     source_generation: "gen-a",
   });
 });
 
-test("DB hashが一致してもR2実体が欠落していればPUTする", async () => {
+test("DB hashが一致してもR2実体が欠落していればPUTへフォールバックする", async () => {
   const body = JSON.stringify({ ok: true });
   const fixture = createEnv({
     storedHash: await hash(body),
     hasObject: false,
   });
-  const wrapped = withDeduplicatingR2(fixture.env);
-  await wrapped.R2.put("top.json", body);
+  const result = await resolveIdenticalJsonArtifactPut(
+    fixture.env,
+    "top.json",
+    body,
+    await staticArtifactContentHash(body),
+  );
+  assert.equal(result, null);
   assert.equal(fixture.calls.head, 1);
-  assert.equal(fixture.calls.put, 1);
   assert.equal(fixture.calls.select, 0);
-});
-
-test("非文字列bodyは比較せず通常PUTする", async () => {
-  const fixture = createEnv({ storedHash: null });
-  const wrapped = withDeduplicatingR2(fixture.env);
-  await wrapped.R2.put("binary.bin", new Uint8Array([1, 2, 3]));
-  assert.equal(fixture.calls.head, 0);
-  assert.equal(fixture.calls.put, 1);
 });
 
 test("generated_atだけが変わったJSONでも同一hash metadataならR2 PUTを省略する", async () => {
@@ -109,10 +100,15 @@ test("generated_atだけが変わったJSONでも同一hash metadataならR2 PUT
     storedHash: contentHash,
     metadataHash: contentHash,
   });
-  const wrapped = withDeduplicatingR2(fixture.env);
-  await wrapped.R2.put("top.json", next);
+  const result = await resolveIdenticalJsonArtifactPut(
+    fixture.env,
+    "top.json",
+    next,
+    await staticArtifactContentHash(next),
+  );
+  assert.ok(result);
+  assert.equal(result.skipPut, true);
   assert.equal(fixture.calls.head, 1);
-  assert.equal(fixture.calls.put, 0);
   assert.equal(fixture.calls.select, 0);
 });
 
@@ -123,10 +119,14 @@ test("意味内容が変わったJSONはR2 PUTする", async () => {
     storedHash: await staticArtifactContentHash(previous),
     metadataHash: await staticArtifactContentHash(previous),
   });
-  const wrapped = withDeduplicatingR2(fixture.env);
-  await wrapped.R2.put("top.json", next);
+  const result = await resolveIdenticalJsonArtifactPut(
+    fixture.env,
+    "top.json",
+    next,
+    await staticArtifactContentHash(next),
+  );
+  assert.equal(result, null);
   assert.equal(fixture.calls.head, 1);
-  assert.equal(fixture.calls.put, 1);
 });
 
 test("artifactHashCache を preload したlegacy fallbackはhash照会を省きmetadata付きで更新する", async () => {
@@ -160,13 +160,16 @@ test("artifactHashCache を preload したlegacy fallbackはhash照会を省きm
     async head() {
       return { key: "top.json" };
     },
-    async put() {
-      return { key: "top.json" };
-    },
   };
   await cache.preload(DB, "top", "global");
-  const wrapped = withDeduplicatingR2({ DB, R2, artifactHashCache: cache });
-  await wrapped.R2.put("top.json", body);
+  const result = await resolveIdenticalJsonArtifactPut(
+    { DB, R2, artifactHashCache: cache },
+    "top.json",
+    body,
+    await staticArtifactContentHash(body),
+  );
+  assert.ok(result);
+  assert.equal(result.skipPut, false);
   assert.equal(selectCount, 0);
 });
 
@@ -184,7 +187,6 @@ test("resolveIdenticalJsonArtifactPut はR2 metadata一致ならhash付きhead�
   assert.equal(result.object, fixture.object);
   assert.equal(fixture.calls.head, 1);
   assert.equal(fixture.calls.select, 0);
-  assert.equal(fixture.calls.put, 0);
 });
 
 test("metadata builder records hash, schema, and a bounded generation", async () => {

@@ -16,7 +16,3 @@ export function shouldUseStaticCollection(
 ): boolean {
   return itemCount > 0 || !canFallbackToDatabase(strategy);
 }
-
-export function isMaintenanceStrategy(strategy: PublicDataStrategy): boolean {
-  return strategy === "maintenance";
-}

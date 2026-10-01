@@ -106,8 +106,9 @@ compatibility path while the Cache API entry remains live; `r2_first` rejects
 them because their age cannot be verified, then checks R2 and does not use them
 as stale fallback. The
 existing visibility fence guard still runs first, and an enforce-mode manifest
-read failure is reported as `unavailable`. `cacheMode: "bypass"` remains
-available for strict callers and skips both Cache API reads and writes. All
+read failure is reported as `unavailable`. Strict manifest readers use
+`loadStaticJsonFreshStaleUnavailable` with `cacheMode: "bypass"`, which skips
+both Cache API reads and writes. All
 public artifact reads also pass through a pure target-type visibility filter
 before normalization, so explicit private rows in stale artifacts cannot be
 rendered. X-user rows use the canonical public-listable approval set

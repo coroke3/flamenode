@@ -6,7 +6,6 @@ import {
   approvedXIdsNotWhere,
   approvedXIdsWhere,
 } from "@/lib/auth/approvedX";
-import { getApprovedXIds } from "@/lib/auth/ownership";
 import styles from "./page.module.css";
 import { getDatabase } from "@/lib/cloudflare";
 import {
@@ -77,7 +76,14 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
         .innerJoin(xUsersTable, eq(xUsersTable.id, xUserAccountLinks.x_user_id))
         .where(eq(xUserAccountLinks.auth_user_id, user.id));
 
-      approvedXIds = await getApprovedXIds(db, user.id);
+      // getApprovedXIds と同じ link × x_users 条件なので、追加 query せず絞り込む。
+      approvedXIds = Array.from(
+        new Set(
+          xIds
+            .filter((x) => x.approval_status === "approved")
+            .map((x) => x.id),
+        ),
+      );
 
       if (approvedXIds.length > 0) {
         if (onboarding.activeApprovedXId) {

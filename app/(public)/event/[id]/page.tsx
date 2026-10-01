@@ -38,7 +38,6 @@ import { buildSlotParts, formatSlotPartLabel } from "@/lib/utils/slotGrouping";
 import { parseEventPartsJson } from "@/lib/video/parseEventIds";
 import { extractYoutubePlaylistId } from "@/lib/youtube/playlist";
 import {
-  canFallbackToDatabase,
   loadStaticEventDetail,
   PublicDataUnavailableNotice,
   PublicReflectionPendingNotice,
