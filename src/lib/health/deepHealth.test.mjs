@@ -389,6 +389,118 @@ test("deep health reports malformed or unavailable visibility manifests as degra
   }
 });
 
+test("deep health reports an old manifest-only fence as a repairable stuck candidate", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const baseBucket = createBucket(now);
+  const schemaRow = {
+    version: "2026-08-24-observability-1",
+    required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
+    public_video_detail_count: 0,
+    tracked_video_detail_count: 0,
+    oldest_video_detail_generated_at: null,
+    public_event_detail_count: 0,
+    tracked_event_detail_count: 0,
+    oldest_event_detail_generated_at: null,
+  };
+  const env = createBaseEnv(now, {
+    DB: {
+      prepare(query) {
+        if (query.includes("WITH candidates AS")) {
+          assert.match(query, /fence\.state IN \('blocked', 'release_pending'\)/);
+          return {
+            bind: (payload) => {
+              const candidates = JSON.parse(String(payload));
+              assert.equal(candidates.length, 1);
+              assert.equal(candidates[0].entity_type, "x_user");
+              return { first: async () => ({ count: 1 }) };
+            },
+            first: async () => ({ count: 1 }),
+          };
+        }
+        return { first: async () => schemaRow };
+      },
+    },
+    BUCKET: {
+      head: baseBucket.head,
+      get: async (key) =>
+        key === "visibility/blocked-entities.v1.json"
+          ? {
+              text: async () =>
+                JSON.stringify({
+                  schema_version: 1,
+                  revision: 1,
+                  generated_at: now - 60,
+                  entities: [{
+                    entity_type: "x_user",
+                    entity_id: "creator",
+                    fence_token: "vf_stuck",
+                    blocked_at: now - 301,
+                    reason: "fixture",
+                  }],
+                }),
+            }
+          : baseBucket.get(key),
+    },
+  });
+  const result = await runDeepHealthChecks(env);
+  assert.equal(result.status, "ok");
+  assert.equal(result.checks.public_visibility, "degraded");
+  assert.equal(result.public_visibility_stuck_fence_candidates, 1);
+});
+
+test("deep health makes an old manifest-only fence blocking in enforce mode", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const baseBucket = createBucket(now);
+  const schemaRow = {
+    version: "2026-08-24-observability-1",
+    required_table_count: REQUIRED_RUNTIME_TABLE_COUNT,
+    public_video_detail_count: 0,
+    tracked_video_detail_count: 0,
+    oldest_video_detail_generated_at: null,
+    public_event_detail_count: 0,
+    tracked_event_detail_count: 0,
+    oldest_event_detail_generated_at: null,
+  };
+  const env = createBaseEnv(now, {
+    PUBLIC_VISIBILITY_GUARD_MODE: "enforce",
+    DB: {
+      prepare(query) {
+        if (query.includes("WITH candidates AS")) {
+          return {
+            bind: () => ({ first: async () => ({ count: 1 }) }),
+            first: async () => ({ count: 1 }),
+          };
+        }
+        return { first: async () => schemaRow };
+      },
+    },
+    BUCKET: {
+      head: baseBucket.head,
+      get: async (key) =>
+        key === "visibility/blocked-entities.v1.json"
+          ? {
+              text: async () =>
+                JSON.stringify({
+                  schema_version: 1,
+                  revision: 1,
+                  generated_at: now - 60,
+                  entities: [{
+                    entity_type: "event",
+                    entity_id: "event-1",
+                    fence_token: "vf_stuck",
+                    blocked_at: now - 301,
+                  }],
+                }),
+            }
+          : baseBucket.get(key),
+    },
+  });
+  const result = await runDeepHealthChecks(env);
+  assert.equal(result.status, "degraded");
+  assert.equal(result.ok, false);
+  assert.equal(result.public_visibility_stuck_fence_candidates, 1);
+});
+
 test("deep health skips the visibility manifest read when guard mode is off", async () => {
   const now = Math.floor(Date.now() / 1000);
   const visibilityReads = [];

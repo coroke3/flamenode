@@ -28,7 +28,7 @@ import type { NotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import {
   getLinkedXUserForAuthUser,
   isAuthUserLinkedToXUser,
-  resolveCanonicalXUserId,
+  resolveCanonicalXUserResolutions,
 } from "@/lib/auth/xIdentity";
 import {
   buildXIdentityDecisionFields,
@@ -37,7 +37,10 @@ import {
   type XIdentityRequestType,
 } from "@/lib/auth/xIdentityRequestCore";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
-import { buildPendingXIdRequestInsert } from "@/lib/actions/xidPendingInsert";
+import {
+  buildPendingXIdMergeRevertInsert,
+  buildPendingXIdRequestInsert,
+} from "@/lib/actions/xidPendingInsert";
 import {
   X_ID_LINK_REQUEST_TYPES,
   isRetryableXIdMutationError,
@@ -318,11 +321,16 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
 
   let existingXUser: typeof xUsers.$inferSelect | undefined;
   let canonicalXUserId: string | null;
+  let resolutionReason: string | undefined;
   try {
     existingXUser = (
       await db.select().from(xUsers).where(xUserIdMatches(requestedXUserId)).limit(1)
     )[0];
-    canonicalXUserId = await resolveCanonicalXUserId(db, requestedXUserId);
+    const resolution = (
+      await resolveCanonicalXUserResolutions(db, [requestedXUserId])
+    ).get(requestedXUserId);
+    canonicalXUserId = resolution?.value ?? null;
+    resolutionReason = resolution?.reason;
   } catch (error) {
     console.error("[requestXIdLink] identity lookup failed", error);
     return {
@@ -334,6 +342,17 @@ export async function requestXIdLink(formData: FormData): Promise<XIdActionResul
   let requestType: XIdentityRequestType;
   let sourceXUserId: string | null = null;
   let requestedXId: string | null = requestedXUserId;
+
+  if (
+    resolutionReason === "invalid_alias_target" ||
+    resolutionReason === "ambiguous_alias" ||
+    resolutionReason === "canonical_alias_collision"
+  ) {
+    return {
+      ok: false,
+      message: "この X ID のaliasまたは正本が不整合のため、申請を作成できません。",
+    };
+  }
 
   if (parsedKind.data === "merge") {
     requestType = "merge";
@@ -733,9 +752,11 @@ export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActi
     return { ok: false, message: "差し戻し可能な統合申請が見つかりません。" };
   }
   const now = nowUnix();
+  const revertDeadlineAt = parent.revert_deadline_at;
   if (
     !parent.restore_snapshot_json ||
-    !isRevertDeadlineOpen(parent.revert_deadline_at, now)
+    revertDeadlineAt === null ||
+    !isRevertDeadlineOpen(revertDeadlineAt, now)
   ) {
     return { ok: false, message: "統合の差し戻し期限を過ぎています。" };
   }
@@ -774,15 +795,22 @@ export async function requestXIdMergeRevert(formData: FormData): Promise<XIdActi
     source_x_user_id: parent.source_x_user_id,
     target_x_user_id: parent.target_x_user_id,
     parent_request_id: parent.id,
-    restore_snapshot_json: parent.restore_snapshot_json,
-    revert_deadline_at: parent.revert_deadline_at,
+    // Parent merge request is the one immutable snapshot source. Do not
+    // duplicate up to 1MB of JSON into each pending revert child or audit row.
+    restore_snapshot_json: null,
+    revert_deadline_at: revertDeadlineAt,
     status: "pending" as const,
     requested_at: now,
     updated_at: now,
   };
   try {
     await mutateWithAudit(db, {
-      mutationStatements: [db.insert(xIdentityRequests).values(afterRequest)],
+      mutationStatements: [
+        db.run(buildPendingXIdMergeRevertInsert({
+          row: afterRequest,
+          parentUpdatedAt: parent.updated_at,
+        })),
+      ],
       expectedMutationChanges: [1],
       audits: [
         {

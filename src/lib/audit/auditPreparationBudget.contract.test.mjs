@@ -37,8 +37,11 @@ test("VideoAtomicWritePlanのpreflightもactor X検証1queryを同じ式で数�
 });
 
 test("監査INSERTは21列bindを4entry以下へchunkする", () => {
-  assert.match(budgetSource, /AUDIT_COLUMN_BIND_COUNT = 21/);
-  assert.match(budgetSource, /D1_MAX_BIND_PARAMETERS \/ AUDIT_COLUMN_BIND_COUNT/);
+  assert.match(budgetSource, /AUDIT_INSERT_BIND_COUNT_PER_ENTRY = 21/);
+  assert.match(
+    budgetSource,
+    /Math\.floor\(D1_MAX_BIND_PARAMETERS \/ AUDIT_INSERT_BIND_COUNT_PER_ENTRY\)/,
+  );
 });
 
 test("上限超過監査は巨大snapshotへchangedKeys/inversePatchを再計算しない", () => {

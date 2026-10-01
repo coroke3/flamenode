@@ -9,13 +9,17 @@ import {
 } from "./logger";
 import {
   AUDIT_INSERT_CHUNK_SIZE,
+  AUDIT_INSERT_BIND_COUNT_PER_ENTRY,
+  D1_MAX_BIND_PARAMETERS,
   planD1AuditMutationBudget,
+  type D1AuditMutationBudget,
 } from "./mutateBudget";
 
 export {
   AUDIT_INSERT_CHUNK_SIZE,
   D1_MAX_BATCH_QUERIES,
   D1_MAX_BIND_PARAMETERS,
+  AUDIT_INSERT_BIND_COUNT_PER_ENTRY,
   D1_RESERVED_CALLER_QUERIES,
   planD1AuditMutationBudget,
 } from "./mutateBudget";
@@ -48,6 +52,19 @@ export type AtomicAuditMutationInput = {
    * statement を表す。UPDATE/DELETE や置換系 DML は必ず数値を指定する。
    */
   expectedMutationChanges: number | readonly (number | null)[];
+  /**
+   * mutation 前に同じ D1 batch で確認する集合/CAS不変条件。失敗時は本体DMLより
+   * 前に batch 全体を中断する。複合フローでは個別 changes() assertion の代わりに
+   * snapshot 全体の整合性をここで確認できる。
+   */
+  preMutationAssertions?: readonly BatchItem<"sqlite">[];
+  /**
+   * mutation 後、audit INSERT 前に確認する集合/CAS不変条件。`null` の
+   * expectedMutationChanges を使う複合フローは必ず対応する事後条件を持つ。
+   */
+  postMutationAssertions?: readonly BatchItem<"sqlite">[];
+  /** mutateWithAudit 呼び出し前にこの invocation が消費した logical D1 query 数。 */
+  callerQueryCount?: number;
   /** mutation ごとの完全 before/after snapshot。 */
   audits: readonly WriteAuditLogInput[];
   /**
@@ -76,6 +93,55 @@ export function assertChanges(expectedChanges: number): SQL {
       ELSE json_extract('not-valid-json', '$')
     END
   `;
+}
+
+/** 条件が偽なら SQLite error にして同じ D1 batch を rollback する。 */
+export function assertCondition(condition: SQL): SQL {
+  return sql`
+    SELECT CASE
+      WHEN (${condition}) THEN 1
+      ELSE json_extract('not-valid-json', '$')
+    END
+  `;
+}
+
+/**
+ * mutateWithAudit と複合フローの事前検査が共有する実行計画。個別DMLの
+ * changes() assertion と、snapshot/CAS assertion の双方をD1 budgetに含める。
+ */
+export function planAtomicAuditMutationBudget(
+  input: Pick<
+    AtomicAuditMutationInput,
+    | "mutationStatements"
+    | "expectedMutationChanges"
+    | "preMutationAssertions"
+    | "postMutationAssertions"
+    | "audits"
+    | "postAuditStatements"
+    | "callerQueryCount"
+  >,
+): D1AuditMutationBudget {
+  const mutationAssertionCount = Array.isArray(input.expectedMutationChanges)
+    ? input.expectedMutationChanges.filter((expected) => expected !== null).length
+    : 1;
+  const actorXValidationQueryCount = input.audits.some((audit) =>
+    Boolean(audit.actor_x_user_id?.trim()),
+  )
+    ? 1
+    : 0;
+  return planD1AuditMutationBudget({
+    mutationStatementCount: input.mutationStatements.length,
+    mutationAssertionCount,
+    preMutationAssertionCount: input.preMutationAssertions?.length ?? 0,
+    postMutationAssertionCount: input.postMutationAssertions?.length ?? 0,
+    auditEntryCount: input.audits.length,
+    postAuditStatementCount: input.postAuditStatements?.length ?? 0,
+    distinctActorCount: new Set(
+      input.audits.map((audit) => audit.actor_user_id),
+    ).size,
+    actorXValidationQueryCount,
+    callerQueryCount: input.callerQueryCount,
+  });
 }
 
 function auditSelect(
@@ -142,7 +208,11 @@ function isDbRunBatchItem(statement: unknown): boolean {
   return typeof config?.action === "string" && config.table === undefined;
 }
 
-function hasPrepare(value: unknown): value is BatchItem<"sqlite"> {
+type PreparedBatchItem = BatchItem<"sqlite"> & {
+  _prepare: () => { getQuery: () => { params: unknown[] } };
+};
+
+function hasPrepare(value: unknown): value is PreparedBatchItem {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -166,6 +236,77 @@ type D1BatchRuntime = DB & {
     prepare?: (query: string) => { bind: (...params: unknown[]) => unknown };
   };
 };
+
+function getStatementBindCount(
+  db: DB,
+  statement: BatchItem<"sqlite">,
+): number {
+  const candidate: unknown = statement;
+  const runtimeDb = db as D1BatchRuntime;
+  if (hasGetSQL(candidate)) {
+    const query = runtimeDb.dialect?.sqlToQuery?.(candidate.getSQL());
+    if (query) return query.params.length;
+  }
+  if (hasPrepare(candidate)) {
+    const query = candidate._prepare().getQuery();
+    return query.params.length;
+  }
+  // Use the same conversion path as batch execution. This does not execute SQL;
+  // it only asks Drizzle/D1 to compile the prepared statement.
+  const runnable = asBatchRunnable(db, statement);
+  if (hasPrepare(runnable)) return runnable._prepare().getQuery().params.length;
+  throw new AuditMutationError("D1 bind数を事前検査できない statement です。");
+}
+
+/**
+ * Compile every non-audit statement before an external pre-commit side effect.
+ * Audit chunks have a fixed 21-column shape and are checked by their worst-case
+ * size below, so a caller can run this without first reading audit settings.
+ */
+export function assertAtomicAuditMutationBindLimits(
+  db: DB,
+  input: Pick<
+    AtomicAuditMutationInput,
+    | "mutationStatements"
+    | "expectedMutationChanges"
+    | "preMutationAssertions"
+    | "postMutationAssertions"
+    | "postAuditStatements"
+    | "audits"
+  >,
+): void {
+  const expected = typeof input.expectedMutationChanges === "number"
+    ? [input.expectedMutationChanges]
+    : input.expectedMutationChanges.filter((value) => value !== null);
+  const statements = [
+    ...(input.preMutationAssertions ?? []),
+    ...input.mutationStatements,
+    ...expected.map((value) => db.run(assertChanges(value))),
+    ...(input.postMutationAssertions ?? []),
+    ...(input.postAuditStatements ?? []),
+  ];
+  for (const [index, statement] of statements.entries()) {
+    const bindCount = getStatementBindCount(db, statement);
+    if (bindCount > D1_MAX_BIND_PARAMETERS) {
+      throw new AuditMutationError(
+        `D1 statement ${index + 1} のbind数 ${bindCount} が上限 ${D1_MAX_BIND_PARAMETERS} を超えます。`,
+      );
+    }
+  }
+
+  if (input.audits.length > 0) {
+    const auditInsertBindCount =
+      AUDIT_INSERT_CHUNK_SIZE * AUDIT_INSERT_BIND_COUNT_PER_ENTRY;
+    // assertionSql() binds one id per entry plus the expected count.
+    const auditAssertionBindCount = AUDIT_INSERT_CHUNK_SIZE + 1;
+    if (
+      auditInsertBindCount > D1_MAX_BIND_PARAMETERS ||
+      auditAssertionBindCount > D1_MAX_BIND_PARAMETERS
+    ) {
+      throw new AuditMutationError("監査INSERTのD1 bind上限設定が不正です。");
+    }
+  }
+}
 
 /** Convert Drizzle SQL wrappers into statements accepted by D1Session.batch(). */
 export function asBatchRunnable(
@@ -244,29 +385,13 @@ export async function mutateWithAudit(
     );
   }
 
-  const mutationAssertionCount = perStatementExpectedChanges
-    ? perStatementExpectedChanges.filter((expected) => expected !== null).length
-    : 1;
-  const actorXValidationQueryCount = input.audits.some((audit) =>
-    Boolean(audit.actor_x_user_id?.trim()),
-  )
-    ? 1
-    : 0;
-  const budget = planD1AuditMutationBudget({
-    mutationStatementCount: input.mutationStatements.length,
-    mutationAssertionCount,
-    auditEntryCount: input.audits.length,
-    postAuditStatementCount: input.postAuditStatements?.length ?? 0,
-    distinctActorCount: new Set(
-      input.audits.map((audit) => audit.actor_user_id),
-    ).size,
-    actorXValidationQueryCount,
-  });
+  const budget = planAtomicAuditMutationBudget(input);
   if (!budget.withinLimit) {
     throw new AuditMutationError(
-      `監査前処理と D1 batch の query 数が上限を超えるため拒否しました（前処理${budget.preparationQueryCount} + batch${budget.batchQueryCount} + 予約${budget.reservedCallerQueryCount}/${budget.limit}）。`,
+      `監査前処理と D1 batch の query 数が上限を超えるため拒否しました（caller${budget.callerQueryCount} + 前処理${budget.preparationQueryCount} + batch${budget.batchQueryCount}/${budget.limit}）。`,
     );
   }
+  assertAtomicAuditMutationBindLimits(db, input);
 
   const preparedEntries = await prepareAuditLogEntries(
     db,
@@ -283,7 +408,13 @@ export async function mutateWithAudit(
 
   const condition = sql`1 = 1`;
   const auditChunks = chunkEntries(entries);
+  const preMutationAssertions = (input.preMutationAssertions ?? []).map((statement) =>
+    asBatchRunnable(db, statement),
+  );
   const mutationStatements = input.mutationStatements.map((statement) =>
+    asBatchRunnable(db, statement),
+  );
+  const postMutationAssertions = (input.postMutationAssertions ?? []).map((statement) =>
     asBatchRunnable(db, statement),
   );
   const postAuditStatements = (input.postAuditStatements ?? []).map((statement) =>
@@ -302,7 +433,9 @@ export async function mutateWithAudit(
       ];
 
   const batchItems: BatchItem<"sqlite">[] = [
+    ...preMutationAssertions,
     ...mutationBatchItems,
+    ...postMutationAssertions,
     ...auditChunks.flatMap((chunk) => [
       db.run(auditInsertSql(chunk, condition)),
       db.run(assertionSql(chunk)),

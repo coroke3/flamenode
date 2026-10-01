@@ -48,6 +48,13 @@ malformed state as a non-blocking degraded check in `observe`, and makes it a
 blocking degraded result in `enforce`. The tracked default remains `observe`;
 switching to `enforce` is a separate configuration deployment after the
 strict remote check and bootstrap verification.
+If compensation cannot remove its own R2 token after three CAS attempts, the
+transition emits a structured `stuck_fence_candidate` warning and deliberately
+keeps the block (fail closed). Deep health reports an old manifest entry with
+no matching active (`blocked` / `release_pending`) D1 fence after a five-minute
+grace period. `/admin/static-builds` provides an admin-only repair form, but it
+removes only the supplied exact token after proving that D1 has no current
+fence; token conflicts and live D1 fences are never released by this repair.
 In `enforce`, a missing `BUCKET` binding is a binding-unavailable failure, not
 an empty manifest; an existing bucket with no manifest object remains the
 bootstrap/empty-manifest case described below.

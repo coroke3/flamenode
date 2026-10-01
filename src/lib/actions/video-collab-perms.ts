@@ -19,7 +19,6 @@ import {
   videoMembers,
   videos,
   xUserAccountLinks,
-  xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
 import {
@@ -42,6 +41,7 @@ import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusActio
 import {
   getLinkedXUserIdsForAuthUser,
   resolveCanonicalXUserId,
+  resolveCanonicalXUserResolutions,
 } from "@/lib/auth/xIdentity";
 
 export interface VideoCollabResult {
@@ -238,7 +238,17 @@ async function resolveSubjectXUserId(
   authUserId: string | null,
 ): Promise<{ ok: true; xUserId: string } | { ok: false; message: string }> {
   if (xUserId) {
-    const canonical = (await resolveCanonicalXUserId(db, xUserId)) ?? xUserId;
+    // A caller-supplied identity is a write target.  Do not turn an
+    // unresolved/corrupt alias into a new raw identifier here: that would
+    // bypass the common fail-closed alias policy and could create a dangling
+    // permission row.
+    const canonical = await resolveCanonicalXUserId(db, xUserId);
+    if (!canonical) {
+      return {
+        ok: false,
+        message: "指定した X ID を一意な正本として解決できません。",
+      };
+    }
     if (authUserId) {
       const approvedLinks = await getLinkedXUserIdsForAuthUser(db, authUserId, {
         approvedOnly: true,
@@ -282,38 +292,24 @@ async function canonicalizePermissionIntents(
   );
   if (candidates.length === 0) return normalized;
 
-  const aliases = await db
-    .select({
-      alias_x_id: xUserAliases.alias_x_id,
-      x_user_id: xUserAliases.x_user_id,
-    })
-    .from(xUserAliases)
-    .where(sql`lower(${xUserAliases.alias_x_id}) IN (
-      SELECT lower(CAST(value AS TEXT))
-      FROM json_each(${JSON.stringify(candidates)})
-    )`);
-
-  const targetsByAlias = new Map<string, Set<string>>();
-  for (const row of aliases) {
-    const alias = normalizeXId(row.alias_x_id);
-    const target = normalizeXId(row.x_user_id);
-    if (!alias || !target || !isCanonicalXId(target)) {
-      throw new Error(`invalid_x_user_alias_target:${alias || "unknown"}`);
-    }
-    const targets = targetsByAlias.get(alias) ?? new Set<string>();
-    targets.add(target);
-    targetsByAlias.set(alias, targets);
-  }
-  for (const [alias, targets] of targetsByAlias) {
-    if (targets.size > 1) {
-      throw new Error(`ambiguous_x_user_alias:${alias}`);
-    }
-  }
+  // Permission writes must use the same fail-closed identity policy as X ID
+  // lifecycle actions.  In particular, never turn a dangling/rejected or
+  // ambiguous historical alias into a new permission row.
+  const resolutions = await resolveCanonicalXUserResolutions(db, candidates);
 
   return normalized.map((item) => {
-    const target = targetsByAlias.get(item.x_user_id);
-    const canonical = target ? Array.from(target)[0] : undefined;
-    return canonical ? { ...item, x_user_id: canonical } : item;
+    const resolution = resolutions.get(item.x_user_id);
+    if (
+      resolution?.reason === "invalid_alias_target" ||
+      resolution?.reason === "ambiguous_alias" ||
+      resolution?.reason === "canonical_alias_collision" ||
+      resolution?.reason === "rejected_or_invalid"
+    ) {
+      throw new Error(`video_permission_x_user_resolution_invalid:${item.x_user_id}`);
+    }
+    return resolution?.value
+      ? { ...item, x_user_id: resolution.value }
+      : item;
   });
 }
 

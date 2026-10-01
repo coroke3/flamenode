@@ -19,6 +19,8 @@ test("イベントの非公開化は D1 更新前に event fence を block す�
   assert.match(transitionSource, /entity_type:\s*"event"/);
   assert.match(transitionSource, /upsertBlockedEntityInManifest/);
   assert.match(transitionSource, /preCommitEventVisibilityTransition/);
+  assert.match(transitionSource, /logStuckPublicVisibilityFenceCandidate/);
+  assert.match(transitionSource, /event_visibility/);
   assert.match(actionSource, /preCommitEventVisibilityTransition/);
   assert.match(actionSource, /compensateEventVisibilityFenceOnD1Failure/);
 });

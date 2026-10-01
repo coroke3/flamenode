@@ -5,10 +5,12 @@ import type { DB } from "@/lib/db/client";
 import {
   xIdentityRequests,
   xUserAccountLinks,
-  xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
+import { resolveCanonicalXUserResolutions } from "./xIdentityResolutionDb";
+
+export { resolveCanonicalXUserResolutions } from "./xIdentityResolutionDb";
 
 export type AuthUserId = string;
 export type XUserId = string;
@@ -30,33 +32,15 @@ export type LinkedXUser = {
   request_requested_at: number | null;
 };
 
-/**
- * 入力X IDを現在の正本X名義へ解決する。
- * 統合済み旧IDはx_user_aliasesを優先し、無効化された旧x_users行を再利用しない。
- */
+/** Input X IDを現在の正本X名義へfail-closedで解決する。 */
 export async function resolveCanonicalXUserId(
   db: DB,
   candidateXUserId: string | null | undefined,
 ): Promise<XUserId | null> {
   const normalized = normalizeXId(candidateXUserId);
   if (!normalized) return null;
-  const alias = (
-    await db
-      .select({ x_user_id: xUserAliases.x_user_id })
-      .from(xUserAliases)
-      .where(eq(xUserAliases.alias_x_id, normalized))
-      .limit(1)
-  )[0];
-  if (alias?.x_user_id) return alias.x_user_id;
-  const exact = (
-    await db
-      .select({ id: xUsers.id, approval_status: xUsers.approval_status })
-      .from(xUsers)
-      .where(eq(xUsers.id, normalized))
-      .limit(1)
-  )[0];
-  if (!exact || exact.approval_status === "rejected") return null;
-  return exact.id;
+  return (await resolveCanonicalXUserResolutions(db, [normalized])).get(normalized)
+    ?.value ?? null;
 }
 
 export async function getLinkedXUsersForAuthUser(
@@ -167,8 +151,9 @@ export async function filterLinkedXUserIdsForAuthUser(
   authUserId: AuthUserId,
   candidateXUserIds: readonly string[],
 ): Promise<XUserId[]> {
-  const canonicalIds = await Promise.all(
-    candidateXUserIds.map((candidate) => resolveCanonicalXUserId(db, candidate)),
+  const resolutions = await resolveCanonicalXUserResolutions(db, candidateXUserIds);
+  const canonicalIds = candidateXUserIds.map((candidate) =>
+    resolutions.get(normalizeXId(candidate) ?? "")?.value ?? null,
   );
   const normalized = Array.from(
     new Set(canonicalIds.filter((value): value is string => Boolean(value))),

@@ -13,6 +13,7 @@ import {
   upsertBlockedEntityInManifest,
 } from "@/lib/publicData/publicVisibilityManifestCore";
 import { getPublicVisibilityFence } from "@/lib/publicData/publicVisibilityFenceStore";
+import { logStuckPublicVisibilityFenceCandidate } from "@/lib/publicData/visibilityCompensation";
 import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "@/lib/utils/publicXUser";
 
 type XUserApprovalStatus = typeof xUsers.$inferSelect["approval_status"];
@@ -191,33 +192,53 @@ export async function compensateXUserVisibilityOnD1Failure(input: {
   fenceToken: string;
 }): Promise<void> {
   const xUserId = input.xUserId.toLowerCase();
-  const fence = await getPublicVisibilityFence(input.db, "x_user", xUserId);
-  if (fence?.fence_token === input.fenceToken) return;
+  try {
+    const fence = await getPublicVisibilityFence(input.db, "x_user", xUserId);
+    if (fence?.fence_token === input.fenceToken) return;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { manifest, etag } =
-      await readPublicVisibilityBlockedEntitiesManifest();
-    const entry = manifest.entities.find(
-      (row) =>
-        row.entity_type === "x_user" &&
-        row.entity_id.toLowerCase() === xUserId,
-    );
-    if (!entry || entry.fence_token !== input.fenceToken) return;
-    const released = releaseBlockedEntityInManifest(
-      manifest,
-      "x_user",
-      xUserId,
-      input.fenceToken,
-      Math.floor(Date.now() / 1000),
-    );
-    if (!released) return;
-    try {
-      await writePublicVisibilityBlockedEntitiesManifest(released, {
-        ifMatchEtag: etag,
-      });
-      return;
-    } catch {
-      if (attempt === 2) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { manifest, etag } =
+        await readPublicVisibilityBlockedEntitiesManifest();
+      const entry = manifest.entities.find(
+        (row) =>
+          row.entity_type === "x_user" &&
+          row.entity_id.toLowerCase() === xUserId,
+      );
+      // A newer transition owns a different token. Never remove it.
+      if (!entry || entry.fence_token !== input.fenceToken) return;
+      const released = releaseBlockedEntityInManifest(
+        manifest,
+        "x_user",
+        xUserId,
+        input.fenceToken,
+        Math.floor(Date.now() / 1000),
+      );
+      if (!released) return;
+      try {
+        await writePublicVisibilityBlockedEntitiesManifest(released, {
+          ifMatchEtag: etag,
+        });
+        return;
+      } catch (error) {
+        if (attempt === 2) {
+          logStuckPublicVisibilityFenceCandidate({
+            flow: "x_user_visibility",
+            entityType: "x_user",
+            entityId: xUserId,
+            fenceToken: input.fenceToken,
+            error,
+          });
+          return;
+        }
+      }
     }
+  } catch (error) {
+    logStuckPublicVisibilityFenceCandidate({
+      flow: "x_user_visibility",
+      entityType: "x_user",
+      entityId: xUserId,
+      fenceToken: input.fenceToken,
+      error,
+    });
   }
 }

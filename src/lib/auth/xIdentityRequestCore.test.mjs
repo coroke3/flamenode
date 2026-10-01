@@ -43,16 +43,23 @@ test("request_typeごとの必須項目を検証する", () => {
   );
   assert.match(
     validateXIdentityRequestShape({
+      requestType: "merge",
+      sourceXUserId: " @Same ",
+      targetXUserId: "same",
+    }),
+    /別の X ID/,
+  );
+  assert.match(
+    validateXIdentityRequestShape({
       requestType: "revert_merge",
       parentRequestId: "merge_1",
     }),
-    /restore_snapshot_json/,
+    /revert_deadline_at/,
   );
   assert.equal(
     validateXIdentityRequestShape({
       requestType: "revert_merge",
       parentRequestId: "merge_1",
-      restoreSnapshotJson: "{}",
       revertDeadlineAt: 200,
     }),
     null,

@@ -1,5 +1,6 @@
 import { canAutoBindUnassignedReservation } from "../../src/lib/slots/reservationBindIdentityCore.ts";
 import { normalizeXId } from "../../src/lib/utils/xid.ts";
+import { decideCanonicalXUserResolution } from "../../src/lib/auth/xIdentityResolutionCore.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
 import {
   D1_QUERY_SOFT_LIMIT,
@@ -74,38 +75,63 @@ async function resolveCanonicalXUserId(
   env: RecoveryEnv,
   candidate: string | null | undefined,
 ): Promise<CanonicalResolution> {
-  let current = normalizeXId(candidate);
-  const seen = new Set<string>();
-  for (let depth = 0; current && depth < 8; depth += 1) {
-    if (seen.has(current)) return { value: null, budgetExhausted: false };
-    seen.add(current);
-    if (!hasD1Capacity(env)) {
-      return { value: null, budgetExhausted: true };
-    }
-    const alias = await env.DB
-      .prepare("SELECT x_user_id FROM x_user_aliases WHERE alias_x_id = ?1 LIMIT 1")
-      .bind(current)
-      .first<{ x_user_id: string }>();
-    if (alias?.x_user_id) {
-      current = normalizeXId(alias.x_user_id);
-      continue;
-    }
-    if (!hasD1Capacity(env)) {
-      return { value: null, budgetExhausted: true };
-    }
-    const row = await env.DB
-      .prepare("SELECT id, approval_status FROM x_users WHERE id = ?1 LIMIT 1")
-      .bind(current)
-      .first<{ id: string; approval_status: string | null }>();
-    // Slot bind is a public-facing identity side effect.  A pending/imported
-    // x_users row may be linked for review, but it is not a safe bind target
-    // until an admin has promoted it to approved.
-    if (!row || row.approval_status !== "approved") {
-      return { value: null, budgetExhausted: false };
-    }
-    return { value: row.id, budgetExhausted: false };
+  const current = normalizeXId(candidate);
+  if (!current) return { value: null, budgetExhausted: false };
+  if (!hasD1Capacity(env, 2)) {
+    return { value: null, budgetExhausted: true };
   }
-  return { value: null, budgetExhausted: false };
+  // Resolve every matching alias and its target before choosing a value. The
+  // old LIMIT 1 query could select an arbitrary malformed target.
+  const aliases = await env.DB
+    .prepare(`
+      SELECT
+        a.alias_x_id,
+        target.id AS target_x_user_id,
+        target.approval_status AS target_approval_status
+      FROM x_user_aliases AS a
+      LEFT JOIN x_users AS target
+        ON lower(trim(ltrim(trim(target.id), '@')))
+         = lower(trim(ltrim(trim(a.x_user_id), '@')))
+      WHERE lower(trim(ltrim(trim(a.alias_x_id), '@'))) = ?1
+    `)
+    .bind(current)
+    .all<{
+      alias_x_id: string | null;
+      target_x_user_id: string | null;
+      target_approval_status: string | null;
+    }>();
+  const direct = await env.DB
+    .prepare(`
+      SELECT id, approval_status
+      FROM x_users
+      WHERE lower(trim(ltrim(trim(id), '@'))) = ?1
+    `)
+    .bind(current)
+    .all<{ id: string; approval_status: string | null }>();
+  const resolution = decideCanonicalXUserResolution({
+    candidate: current,
+    aliases: aliases.results ?? [],
+    directRows: direct.results ?? [],
+  });
+  // Slot bind is a public-facing identity side effect. A pending/imported
+  // x_users row may be linked for review, but it is not a safe bind target
+  // until an admin has promoted it to approved.
+  if (resolution.value === null) {
+    return { value: null, budgetExhausted: false };
+  }
+  const directTarget = (direct.results ?? []).find(
+    (row) => normalizeXId(row.id) === resolution.value,
+  );
+  const aliasTarget = (aliases.results ?? []).find(
+    (row) => normalizeXId(row.target_x_user_id) === resolution.value,
+  );
+  return {
+    value: directTarget?.approval_status === "approved" ||
+      aliasTarget?.target_approval_status === "approved"
+      ? resolution.value
+      : null,
+    budgetExhausted: false,
+  };
 }
 
 async function canonicalizeCandidates(

@@ -286,6 +286,9 @@ export async function approveXIdMergeRevert(formData: FormData): Promise<XIdMerg
       .limit(1)
   )[0];
   if (!parentRequest) return { ok: false, message: "親統合申請が見つかりません。" };
+  if (!parentRequest.restore_snapshot_json) {
+    return { ok: false, message: "親統合申請に差し戻し用snapshotがありません。" };
+  }
 
   try {
     const counts = await restoreApprovedXIdMergeRevertRequest(guard.db, {

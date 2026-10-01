@@ -20,6 +20,7 @@ test("x_user listability changes block stale profiles and release after both art
   assert.match(transition, /PUBLIC_LISTABLE_X_APPROVAL_STATUSES/);
   assert.match(transition, /preCommitXUserVisibilityTransition/);
   assert.match(transition, /compensateXUserVisibilityOnD1Failure/);
+  assert.match(transition, /logStuckPublicVisibilityFenceCandidate/);
   assert.match(merge, /planXUserVisibilityFenceTransition/);
   assert.match(merge, /buildStaticRebuildQueueBatch/);
   assert.match(merge, /preCommitXUserVisibilityTransition/);

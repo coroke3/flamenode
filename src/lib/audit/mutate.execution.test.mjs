@@ -158,7 +158,7 @@ if (!runningWithTsx) {
     assert.ok(stringParams.some((value) => value.includes(longAfter.slice(0, 100))));
   });
 
-  test("builder は db.run せずそのまま batch へ渡す", async () => {
+  test("builder は実行せずbind数だけcompileしてからそのまま batch へ渡す", async () => {
     const { db, state } = makeDb();
     let prepareCalled = false;
     const builder = {
@@ -177,8 +177,34 @@ if (!runningWithTsx) {
       expectedMutationChanges: 1,
       audits: [makeAudit(0)],
     });
-    assert.equal(prepareCalled, false);
+    // R2 precommitより前のbind上限検査は実際のDrizzle builderをcompileする。
+    // _prepare() はSQL実行ではなくquery shapeの取得だけである。
+    assert.equal(prepareCalled, true);
     assert.equal(state.batches[0][0], builder);
+  });
+
+  test("101 bindのDMLは監査前処理・batchより前にfail-closedする", async () => {
+    const { db, state } = makeDb();
+    const overLimitMutation = {
+      _prepare: () => ({
+        getQuery: () => ({
+          sql: "UPDATE videos SET title = ?",
+          params: Array.from({ length: 101 }, (_, index) => `value-${index}`),
+        }),
+        stmt: { bind: () => ({}) },
+      }),
+    };
+
+    await assert.rejects(
+      mutateWithAudit(db, {
+        mutationStatements: [overLimitMutation],
+        expectedMutationChanges: 1,
+        audits: [makeAudit(0)],
+      }),
+      /bind数 101 が上限 100 を超えます/,
+    );
+    assert.equal(state.gets, 0);
+    assert.equal(state.batches.length, 0);
   });
 
   test("bind パラメータ付き db.run はinlineせずbatchまで保持する", async () => {
@@ -291,7 +317,7 @@ if (!runningWithTsx) {
         expectedMutationChanges: 1,
         audits,
       }),
-      /前処理41.*batch22.*予約18\/50/,
+      /caller18.*前処理41.*batch22\/50/,
     );
     assert.equal(state.gets, 0);
     assert.equal(state.batches.length, 0);
@@ -305,7 +331,7 @@ if (!runningWithTsx) {
         expectedMutationChanges: 1,
         audits: Array.from({ length: 100 }, (_, index) => makeAudit(index)),
       }),
-      /batch52.*予約18\/50/,
+      /caller18.*batch52\/50/,
     );
     assert.equal(state.batches.length, 0);
   });

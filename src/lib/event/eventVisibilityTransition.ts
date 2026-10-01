@@ -16,6 +16,7 @@ import {
   type PublicVisibilityBlockedEntity,
 } from "@/lib/publicData/publicVisibilityManifestCore";
 import { getPublicVisibilityFence } from "@/lib/publicData/publicVisibilityFenceStore";
+import { logStuckPublicVisibilityFenceCandidate } from "@/lib/publicData/visibilityCompensation";
 
 type EventVisibilityStatus = typeof events.$inferSelect["visibility_status"];
 
@@ -44,6 +45,21 @@ export type EventVisibilityRenameTombstonePrecommit = {
   fenceToken: string;
   previousEntry: PublicVisibilityBlockedEntity | null;
 };
+
+function logEventVisibilityCompensationFailure(
+  flow: string,
+  eventId: string,
+  fenceToken: string,
+  error: unknown,
+): void {
+  logStuckPublicVisibilityFenceCandidate({
+    flow,
+    entityType: "event",
+    entityId: eventId,
+    fenceToken,
+    error,
+  });
+}
 
 function buildEventFenceUpsertStatement(
   db: DB,
@@ -411,8 +427,16 @@ export async function compensateEventVisibilityFenceRenameOnD1Failure(
         ifMatchEtag: etag,
       });
       return;
-    } catch {
-      if (attempt === 2) return;
+    } catch (error) {
+      if (attempt === 2) {
+        logEventVisibilityCompensationFailure(
+          "event_visibility_fence_rename",
+          input.newEventId,
+          input.fenceToken,
+          error,
+        );
+        return;
+      }
     }
   }
 }
@@ -456,8 +480,16 @@ export async function compensateEventVisibilityRenameTombstoneOnD1Failure(
         ifMatchEtag: etag,
       });
       return;
-    } catch {
-      if (attempt === 2) return;
+    } catch (error) {
+      if (attempt === 2) {
+        logEventVisibilityCompensationFailure(
+          "event_visibility_rename_tombstone",
+          input.eventId,
+          input.fenceToken,
+          error,
+        );
+        return;
+      }
     }
   }
 }
@@ -514,8 +546,16 @@ export async function compensateEventVisibilityFenceOnD1Failure(
         ifMatchEtag: etag,
       });
       return;
-    } catch {
-      if (attempt === 2) return;
+    } catch (error) {
+      if (attempt === 2) {
+        logEventVisibilityCompensationFailure(
+          "event_visibility",
+          input.eventId,
+          input.fenceToken,
+          error,
+        );
+        return;
+      }
     }
   }
 }

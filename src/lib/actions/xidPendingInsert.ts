@@ -72,3 +72,51 @@ export function buildPendingXIdRequestInsert(row: PendingXIdRequestRow): SQL {
     ) < ${X_ID_PENDING_REQUEST_LIMIT}
   `.inlineParams();
 }
+
+/**
+ * Parent merge のimmutable snapshotをchildへ複製せず、同じ親に対するactive
+ * revertを1件だけ許すprepared INSERT。read-then-insert raceを防ぐため、
+ * parent CAS とactive child不存在を同じstatementで検査する。
+ */
+export function buildPendingXIdMergeRevertInsert(input: {
+  row: PendingXIdRequestRow & {
+    request_type: "revert_merge";
+    parent_request_id: string;
+    restore_snapshot_json: null;
+    revert_deadline_at: number;
+  };
+  parentUpdatedAt: number;
+}): SQL {
+  const { row } = input;
+  return sql`
+    INSERT INTO x_identity_requests (
+      id, request_type, requested_by_auth_user_id, requested_x_id,
+      source_x_user_id, target_x_user_id, parent_request_id,
+      restore_snapshot_json, revert_deadline_at, status, requested_at, updated_at
+    )
+    SELECT
+      ${row.id}, ${row.request_type}, ${row.requested_by_auth_user_id}, ${row.requested_x_id},
+      ${row.source_x_user_id}, ${row.target_x_user_id}, ${row.parent_request_id},
+      NULL, ${row.revert_deadline_at}, ${row.status}, ${row.requested_at}, ${row.updated_at}
+    WHERE EXISTS (
+      SELECT 1 FROM x_identity_requests AS parent
+      WHERE parent.id = ${row.parent_request_id}
+        AND parent.request_type = 'merge'
+        AND parent.status = 'done'
+        AND parent.restore_snapshot_json IS NOT NULL
+        AND parent.revert_deadline_at = ${row.revert_deadline_at}
+        AND parent.updated_at = ${input.parentUpdatedAt}
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM x_identity_requests AS existing
+      WHERE existing.request_type = 'revert_merge'
+        AND existing.parent_request_id = ${row.parent_request_id}
+        AND existing.status IN ('pending', 'approved', 'done')
+    )
+    AND (
+      SELECT COUNT(*) FROM x_identity_requests
+      WHERE requested_by_auth_user_id = ${row.requested_by_auth_user_id}
+        AND status = 'pending'
+    ) < ${X_ID_PENDING_REQUEST_LIMIT}
+  `;
+}

@@ -349,4 +349,47 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(rows[0].is_public_member, 1);
     sqlite.close();
   });
+
+  test("canonical入力でも競合する旧aliasからhidden編集権限を引き継がない", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    createSchema(sqlite);
+    sqlite.prepare(
+      `INSERT INTO x_users (id, x_name, approval_status) VALUES ('current_x', 'Current', 'approved')`,
+    ).run();
+    sqlite.prepare(
+      `INSERT INTO x_users (id, x_name, approval_status) VALUES ('other_x', 'Other', 'approved')`,
+    ).run();
+    sqlite.prepare(
+      `INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('current_x', 'old_x')`,
+    ).run();
+    sqlite.prepare(
+      `INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('other_x', 'old_x')`,
+    ).run();
+    sqlite.prepare(
+      `INSERT INTO video_members
+       (id, video_id, x_user_id, name, role, comment, order_index,
+        can_edit, is_public_member, edit_granted_by_auth_user_id,
+        edit_granted_at, edit_updated_at)
+       VALUES ('hidden-old-alias', 'video-1', 'old_x', 'Old', NULL, NULL, 9999,
+        1, 0, 'grant-user', 100, 101)`,
+    ).run();
+
+    const db = makeDb(sqlite);
+    await assert.rejects(
+      buildReplaceVideoMembersPlan(db, {
+        videoId: "video-1",
+        members: [{
+          name: "Current public",
+          x_user_id: "current_x",
+          role: "映像",
+          comment: "",
+          chapters: [],
+        }],
+        chaptersByIndex: new Map([[0, []]]),
+        actorUserId: "operator-1",
+      }),
+      /video_member_alias_resolution_invalid/,
+    );
+    sqlite.close();
+  });
 }

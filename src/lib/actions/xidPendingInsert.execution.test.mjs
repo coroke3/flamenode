@@ -6,7 +6,11 @@ import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
 
 if (runTestWithTsx(import.meta.url)) {
   const { drizzle } = await import("drizzle-orm/sqlite-proxy");
-  const { buildPendingXIdRequestInsert } = await import("./xidPendingInsert.ts");
+  const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+  const {
+    buildPendingXIdMergeRevertInsert,
+    buildPendingXIdRequestInsert,
+  } = await import("./xidPendingInsert.ts");
 
   function row(id) {
     return {
@@ -34,6 +38,10 @@ if (runTestWithTsx(import.meta.url)) {
     await db.run(buildPendingXIdRequestInsert(rowValue));
     assert.ok(captured?.[0]);
     return captured[0];
+  }
+
+  function compilePrepared(statement) {
+    return new SQLiteSyncDialect().sqlToQuery(statement);
   }
 
   function makeDatabase() {
@@ -79,6 +87,58 @@ if (runTestWithTsx(import.meta.url)) {
         "SELECT COUNT(*) AS count FROM x_identity_requests WHERE requested_by_auth_user_id = 'auth-user-1' AND status = 'pending'",
       ).get().count,
       5,
+    );
+    sqlite.close();
+  });
+
+  test("revert childの条件付きINSERTは巨大snapshotを複製せず同一親へ1件だけ作る", () => {
+    const sqlite = makeDatabase();
+    sqlite.prepare(`
+      INSERT INTO x_identity_requests (
+        id, request_type, requested_by_auth_user_id, requested_x_id,
+        source_x_user_id, target_x_user_id, parent_request_id,
+        restore_snapshot_json, revert_deadline_at, status, requested_at, updated_at
+      ) VALUES (?, 'merge', ?, NULL, ?, ?, NULL, ?, ?, 'done', ?, ?)
+    `).run(
+      "merge-parent",
+      "auth-user-1",
+      "old_name",
+      "current_name",
+      JSON.stringify({ payload: "x".repeat(100_000) }),
+      500,
+      100,
+      100,
+    );
+    const revertRow = {
+      ...row("revert-1"),
+      request_type: "revert_merge",
+      requested_x_id: null,
+      source_x_user_id: "old_name",
+      target_x_user_id: "current_name",
+      parent_request_id: "merge-parent",
+      restore_snapshot_json: null,
+      revert_deadline_at: 500,
+    };
+    const first = compilePrepared(buildPendingXIdMergeRevertInsert({
+      row: revertRow,
+      parentUpdatedAt: 100,
+    }));
+    const second = compilePrepared(buildPendingXIdMergeRevertInsert({
+      row: { ...revertRow, id: "revert-2" },
+      parentUpdatedAt: 100,
+    }));
+    assert.ok(new TextEncoder().encode(first.sql).byteLength < 10_000);
+    assert.equal(first.params.includes("x".repeat(100_000)), false);
+    assert.equal(sqlite.prepare(first.sql).run(...first.params).changes, 1);
+    assert.equal(sqlite.prepare(second.sql).run(...second.params).changes, 0);
+    assert.equal(
+      sqlite.prepare(`
+        SELECT COUNT(*) AS count FROM x_identity_requests
+        WHERE parent_request_id = 'merge-parent'
+          AND request_type = 'revert_merge'
+          AND status IN ('pending', 'approved', 'done')
+      `).get().count,
+      1,
     );
     sqlite.close();
   });

@@ -1,3 +1,5 @@
+import { normalizeXId } from "../utils/xid.ts";
+
 export const X_IDENTITY_REQUEST_TYPES = [
   "new_link",
   "existing_link",
@@ -75,16 +77,20 @@ export function validateXIdentityRequestShape(
       if (!hasText(input.sourceXUserId) || !hasText(input.targetXUserId)) {
         return "merge には source_x_user_id と target_x_user_id が必要です。";
       }
-      return input.sourceXUserId === input.targetXUserId
+      // 申請作成時点でも、後段の統合実行と同じ正規化規則を使う。
+      // @Foo / foo / " foo " を別アカウントとして通すと、承認前の
+      // 表示や監査と実行時の拒否理由が食い違うため、ここで止める。
+      return normalizeXId(input.sourceXUserId) ===
+          normalizeXId(input.targetXUserId)
         ? "merge の source と target は別の X ID にしてください。"
         : null;
     case "revert_merge":
       if (!hasText(input.parentRequestId)) {
         return "revert_merge には parent_request_id が必要です。";
       }
-      if (!hasText(input.restoreSnapshotJson)) {
-        return "revert_merge には restore_snapshot_json が必要です。";
-      }
+      // 復元snapshotの唯一の正本は完了済み親merge request。childへコピー
+      // すると2MB row/string上限、監査payload、TOCTOU面を無駄に広げる。
+      // 既存childの互換読込は許容するが、新規childはnullである。
       return Number.isInteger(input.revertDeadlineAt) &&
         Number(input.revertDeadlineAt) > 0
         ? null

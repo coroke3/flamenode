@@ -80,7 +80,9 @@ test("完了した統合は期限内に差し戻し申請できる", () => {
 
   assert.match(action, /export async function requestXIdMergeRevert/);
   assert.match(action, /formData.get\("parent_request_id"\)/);
-  assert.match(action, /isRevertDeadlineOpen\(parent\.revert_deadline_at, now\)/);
+  assert.match(action, /isRevertDeadlineOpen\(revertDeadlineAt, now\)/);
+  assert.match(action, /buildPendingXIdMergeRevertInsert/);
+  assert.match(action, /restore_snapshot_json: null/);
   assert.match(action, /inArray\(xIdentityRequests\.status, \["pending", "approved", "done"\]\)/);
   assert.match(action, /差し戻し申請は処理中です/);
   assert.match(action, /\[requestXIdMergeRevert\] mutation failed/);

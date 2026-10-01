@@ -1,6 +1,8 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { videoChapters, videoMembers, xUserAliases, xUsers } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
+import { resolveCanonicalXUserResolutions } from "@/lib/auth/xIdentityResolutionDb";
+import type { CanonicalXUserResolution } from "@/lib/auth/xIdentityResolutionCore";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "#utils/xid";
 import type { MemberInput, ParsedMemberChapter } from "@/lib/video/memberInputs";
@@ -214,6 +216,17 @@ type CanonicalizedMemberInputs = {
   lookupXIds: string[];
 };
 
+function isUnsafeXUserResolution(
+  resolution: CanonicalXUserResolution | undefined,
+): boolean {
+  return (
+    resolution?.reason === "invalid_alias_target" ||
+    resolution?.reason === "ambiguous_alias" ||
+    resolution?.reason === "canonical_alias_collision" ||
+    resolution?.reason === "rejected_or_invalid"
+  );
+}
+
 /**
  * 入力X IDと、その正本X IDに紐づく既存aliasを1 queryで読み、
  * public/hidden既存行も同一identityとして扱えるlookupを作る。
@@ -229,6 +242,12 @@ async function canonicalizeMemberInputs(
   const candidates = Array.from(
     new Set(normalized.map((member) => member.x_user_id).filter(Boolean)),
   );
+  // Use the lifecycle resolver for every submitted handle.  The inverse alias
+  // lookup below is retained only to find legacy member rows that should carry
+  // permissions forward; it is never used to select a write target.
+  const resolutions = candidates.length === 0
+    ? new Map()
+    : await resolveCanonicalXUserResolutions(db, candidates);
   const aliases = candidates.length === 0
     ? []
     : await db
@@ -238,19 +257,42 @@ async function canonicalizeMemberInputs(
         })
         .from(xUserAliases)
         .where(sql`
-          lower(${xUserAliases.alias_x_id}) IN (
-            SELECT lower(CAST(value AS TEXT))
+           lower(trim(ltrim(trim(${xUserAliases.alias_x_id}), '@'))) IN (
+             SELECT lower(trim(ltrim(trim(CAST(value AS TEXT)), '@')))
             FROM json_each(${JSON.stringify(candidates)})
           )
-          OR lower(${xUserAliases.x_user_id}) IN (
-            SELECT lower(CAST(value AS TEXT))
+           OR lower(trim(ltrim(trim(${xUserAliases.x_user_id}), '@'))) IN (
+             SELECT lower(trim(ltrim(trim(CAST(value AS TEXT)), '@')))
             FROM json_each(${JSON.stringify(candidates)})
           )
         `);
 
-  const targetsByAlias = new Map<string, Set<string>>();
+  // The inverse lookup is only for carrying an existing member's permission
+  // forward.  It must nevertheless use the very same resolver before it is
+  // allowed to associate a legacy member row with a submitted canonical ID:
+  // otherwise an ambiguous old alias could silently inherit edit rights.
+  const inverseAliasCandidates = Array.from(
+    new Set(
+      aliases
+        .map((row) => normalizeXId(row.alias_x_id))
+        .filter((alias): alias is string => Boolean(alias))
+        .filter((alias) => !resolutions.has(alias)),
+    ),
+  );
+  const inverseAliasResolutions = inverseAliasCandidates.length === 0
+    ? new Map()
+    : await resolveCanonicalXUserResolutions(db, inverseAliasCandidates);
+
   const canonicalByXId = new Map<string, string>();
-  for (const candidate of candidates) canonicalByXId.set(candidate, candidate);
+  for (const candidate of candidates) {
+    const resolution = resolutions.get(candidate);
+    if (isUnsafeXUserResolution(resolution)) {
+      throw new Error("video_member_x_user_resolution_invalid");
+    }
+    const canonical = resolution?.value ?? candidate;
+    canonicalByXId.set(candidate, canonical);
+    canonicalByXId.set(canonical, canonical);
+  }
 
   for (const row of aliases) {
     const alias = normalizeXId(row.alias_x_id);
@@ -258,14 +300,16 @@ async function canonicalizeMemberInputs(
     if (!alias || !target || !isCanonicalXId(target)) {
       throw new Error("video_member_alias_target_invalid");
     }
-    const targets = targetsByAlias.get(alias) ?? new Set<string>();
-    targets.add(target);
-    targetsByAlias.set(alias, targets);
-    canonicalByXId.set(target, target);
-  }
-  for (const [alias, targets] of targetsByAlias) {
-    if (targets.size > 1) throw new Error("video_member_ambiguous_x_user_alias");
-    canonicalByXId.set(alias, Array.from(targets)[0]!);
+    const resolution = resolutions.get(alias) ?? inverseAliasResolutions.get(alias);
+    if (
+      isUnsafeXUserResolution(resolution) ||
+      resolution?.reason !== "resolved_alias" ||
+      !resolution.value ||
+      resolution.value !== target
+    ) {
+      throw new Error("video_member_alias_resolution_invalid");
+    }
+    canonicalByXId.set(alias, resolution.value);
   }
 
   const canonical = normalized.map((member) => {

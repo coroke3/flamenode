@@ -64,13 +64,22 @@ export const SPREADSHEET_COST_GUARD_READONLY_COLUMNS = new Set([
 export const SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS = new Set([
   "events.visibility_status",
   "videos.visibility_status",
+  "event_groups.visibility_status",
+  // approved/imported と rejected の切替はR2 visibility fenceを先に block する
+  // X ID lifecycle actionだけで行う。generic CRUDのqueue投入だけでは足りない。
+  "x_users.approval_status",
 ]);
 
-/** イベント／作品は物理削除せず、専用の非公開・voided 操作を利用する。 */
+/**
+ * 公開正本は物理削除せず専用 lifecycle actionを利用する。event_groups / x_users
+ * はrelation cascadeやR2 fenceを伴うためgeneric DELETEからも除外する。
+ */
 export const SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES = new Set([
   "events",
+  "event_groups",
   "system_settings",
   "videos",
+  "x_users",
 ]);
 
 export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
@@ -114,7 +123,8 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
     },
 
     x_users: { label: "X ID", group: "X ID", mode: "editable" },
-    x_user_aliases: { label: "X ID エイリアス", group: "X ID", mode: "editable" },
+    // aliasの一意性・target検証・member_suggestions再生成は専用X ID actionが担う。
+    x_user_aliases: { label: "X ID エイリアス", group: "X ID", mode: "readonly" },
     x_identity_requests: {
       label: "X ID申請",
       group: "X ID",

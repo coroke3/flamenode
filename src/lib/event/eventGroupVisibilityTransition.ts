@@ -14,6 +14,7 @@ import {
   upsertBlockedEntityInManifest,
 } from "@/lib/publicData/publicVisibilityManifestCore";
 import { getPublicVisibilityFence } from "@/lib/publicData/publicVisibilityFenceStore";
+import { logStuckPublicVisibilityFenceCandidate } from "@/lib/publicData/visibilityCompensation";
 
 type EventGroupVisibilityStatus = typeof eventGroups.$inferSelect["visibility_status"];
 
@@ -199,37 +200,58 @@ export async function compensateEventGroupVisibilityOnD1Failure(input: {
   groupId: string;
   fenceToken: string;
 }): Promise<void> {
-  const fence = await getPublicVisibilityFence(
-    input.db,
-    "event_group",
-    input.groupId,
-  );
-  if (fence?.fence_token === input.fenceToken) return;
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const { manifest, etag } =
-      await readPublicVisibilityBlockedEntitiesManifest();
-    const entry = manifest.entities.find(
-      (row) =>
-        row.entity_type === "event_group" &&
-        row.entity_id === input.groupId,
-    );
-    if (!entry || entry.fence_token !== input.fenceToken) return;
-    const released = releaseBlockedEntityInManifest(
-      manifest,
+  try {
+    const fence = await getPublicVisibilityFence(
+      input.db,
       "event_group",
       input.groupId,
-      input.fenceToken,
-      Math.floor(Date.now() / 1000),
     );
-    if (!released) return;
-    try {
-      await writePublicVisibilityBlockedEntitiesManifest(released, {
-        ifMatchEtag: etag,
-      });
-      return;
-    } catch {
-      if (attempt === 2) return;
+    if (fence?.fence_token === input.fenceToken) return;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { manifest, etag } =
+        await readPublicVisibilityBlockedEntitiesManifest();
+      const entry = manifest.entities.find(
+        (row) =>
+          row.entity_type === "event_group" &&
+          row.entity_id === input.groupId,
+      );
+      // A token mismatch belongs to a newer transition and is intentionally
+      // left untouched.
+      if (!entry || entry.fence_token !== input.fenceToken) return;
+      const released = releaseBlockedEntityInManifest(
+        manifest,
+        "event_group",
+        input.groupId,
+        input.fenceToken,
+        Math.floor(Date.now() / 1000),
+      );
+      if (!released) return;
+      try {
+        await writePublicVisibilityBlockedEntitiesManifest(released, {
+          ifMatchEtag: etag,
+        });
+        return;
+      } catch (error) {
+        if (attempt === 2) {
+          logStuckPublicVisibilityFenceCandidate({
+            flow: "event_group_visibility",
+            entityType: "event_group",
+            entityId: input.groupId,
+            fenceToken: input.fenceToken,
+            error,
+          });
+          return;
+        }
+      }
     }
+  } catch (error) {
+    logStuckPublicVisibilityFenceCandidate({
+      flow: "event_group_visibility",
+      entityType: "event_group",
+      entityId: input.groupId,
+      fenceToken: input.fenceToken,
+      error,
+    });
   }
 }

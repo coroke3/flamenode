@@ -16,6 +16,7 @@ import {
   enqueueStaticBackfillBatch,
   retryAllFailedStaticRebuild,
 } from "@/lib/actions/static-rebuild-admin";
+import { repairDanglingPublicVisibilityManifestEntry } from "@/lib/actions/public-visibility-repair";
 import { StaticRebuildQueuePanel } from "@/components/admin/StaticRebuildQueuePanel";
 import {
   staticRebuildStatusLabel,
@@ -64,6 +65,7 @@ export default async function AdminStaticBuildsPage({
   const backfillError = String(params.backfill_error ?? "");
   const backfillStatePersisted =
     String(params.backfill_state_persisted ?? "") !== "0";
+  const visibilityRepairResult = String(params.visibility_repair ?? "");
   const [backfillState, sharedInputDiagnostics] = await Promise.all([
     readStaticBackfillState(),
     loadStaticSharedInputDiagnostics(),
@@ -373,6 +375,54 @@ export default async function AdminStaticBuildsPage({
         </p>
       </section>
 
+      <section
+        className="fn-card"
+        style={{ marginBottom: 24, padding: "14px 16px" }}
+      >
+        <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+          Visibility fence の手動修復
+        </h2>
+        <p className="fn-muted fn-text-sm" style={{ margin: "0 0 10px" }}>
+          deep health または read-only の fence 検査で、D1 に同一 token の fence がなく、
+          R2 manifest だけに残った候補を確認した場合だけ使用します。D1 に現行 fence がある場合や
+          token が変わった場合は解除しません。
+        </p>
+        {visibilityRepairResult ? (
+          <p
+            role="status"
+            className="fn-text-sm"
+            style={{ margin: "0 0 10px" }}
+          >
+            {visibilityRepairResultLabel(visibilityRepairResult)}
+          </p>
+        ) : null}
+        <form
+          action={repairDanglingPublicVisibilityManifestEntry}
+          className="fn-form-grid"
+        >
+          <label className="fn-label">
+            entity type
+            <select name="entity_type" className="fn-select" defaultValue="event">
+              <option value="event">event</option>
+              <option value="video">video</option>
+              <option value="x_user">x_user</option>
+              <option value="event_group">event_group</option>
+            </select>
+          </label>
+          <label className="fn-label">
+            entity ID
+            <input name="entity_id" className="fn-input" required maxLength={128} />
+          </label>
+          <label className="fn-label">
+            fence token
+            <input name="fence_token" className="fn-input" required maxLength={160} />
+          </label>
+          <button type="submit" className="fn-btn fn-btn-ghost">
+            D1 不在を再確認して R2 候補を解除
+          </button>
+        </form>
+      </section>
+
       <section style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
           段階的バックフィル（12件ずつ）
@@ -636,6 +686,23 @@ function backfillStatusLabel(
   if (status === "completed") return "完了";
   if (status === "failed") return "失敗";
   return "未実行";
+}
+
+function visibilityRepairResultLabel(result: string): string {
+  switch (result) {
+    case "repaired":
+      return "R2 manifest のdangling fence候補を解除しました。";
+    case "d1_fence_present":
+      return "D1 に現行 fence があるため解除しませんでした。";
+    case "manifest_token_not_found":
+      return "R2 manifest に一致する token がないため変更しませんでした。";
+    case "invalid_input":
+      return "修復対象の入力が不正です。";
+    case "forbidden":
+      return "この修復操作を実行する権限がありません。";
+    default:
+      return "修復操作に失敗しました。ログとdeep healthを確認してください。";
+  }
 }
 
 function sharedInputObjectStateLabel(

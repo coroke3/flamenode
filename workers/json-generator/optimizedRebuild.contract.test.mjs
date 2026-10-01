@@ -112,7 +112,9 @@ test("ranking/search/randomは共有R2 materialized sourceを使いqueue source 
   const bundleStart = source.indexOf("async function rebuildRankingBundle(");
   const bundleEnd = source.indexOf("\nasync function markEventPlaylistDeleted", bundleStart);
   const bundle = source.slice(bundleStart, bundleEnd);
-  assert.equal((bundle.match(/signal,\n\s+sourceUpdatedAt,/g) ?? []).length, 5);
+  // Repository checkouts on Windows retain CRLF.  Match the call shape, not
+  // a platform-specific newline spelling.
+  assert.equal((bundle.match(/signal,\r?\n\s+sourceUpdatedAt,/g) ?? []).length, 5);
 });
 
 test("event_base成功後に厳密playlist projectionも同期する", () => {

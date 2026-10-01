@@ -49,9 +49,13 @@ test("member X IDはServer write境界でもcanonical形式と重複を検証す
   assert.match(source, /同じ X ID（@\$\{xid\}）が複数/);
 });
 
-test("member置換はaliasを1クエリでcanonicalizeし変換後重複を拒否する", async () => {
+test("member置換は共通fail-closed resolverでcanonicalizeし変換後重複を拒否する", async () => {
   const source = await read("src/lib/video/replaceVideoMembers.ts");
   assert.match(source, /canonicalizeMemberInputs/);
+  assert.match(source, /resolveCanonicalXUserResolutions\(db, candidates\)/);
+  assert.match(source, /invalid_alias_target/);
+  assert.match(source, /ambiguous_alias/);
+  assert.match(source, /canonical_alias_collision/);
   assert.match(source, /xUserAliases/);
   assert.match(source, /FROM json_each\(\$\{JSON\.stringify\(candidates\)\}\)/);
   assert.match(source, /video_member_duplicate_x_user_id/);

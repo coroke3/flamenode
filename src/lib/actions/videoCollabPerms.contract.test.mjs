@@ -71,13 +71,14 @@ test("permission inputは最大100件かつcanonical X handle形式だけ許可�
   assert.match(source, /z\.enum\(\["normal", "admin", "event"\]\)/);
 });
 
-test("bulk intentはx_user_aliasesをJSON1 1クエリで現行X IDへ解決する", () => {
+test("bulk intentは共通のfail-closed resolverで現行X IDへ解決する", () => {
   const canonicalize = functionBody("canonicalizePermissionIntents");
   const mutation = functionBody("applyPermissionIntentsToVideo");
-  assert.match(canonicalize, /xUserAliases\.alias_x_id/);
-  assert.match(canonicalize, /json_each\(\$\{JSON\.stringify\(candidates\)\}\)/);
-  assert.match(canonicalize, /ambiguous_x_user_alias/);
-  assert.match(canonicalize, /invalid_x_user_alias_target/);
+  assert.match(canonicalize, /resolveCanonicalXUserResolutions\(db, candidates\)/);
+  assert.match(canonicalize, /invalid_alias_target/);
+  assert.match(canonicalize, /ambiguous_alias/);
+  assert.match(canonicalize, /canonical_alias_collision/);
+  assert.match(canonicalize, /rejected_or_invalid/);
   assert.match(mutation, /await canonicalizePermissionIntents\(db, args\.intents\)/);
 });
 

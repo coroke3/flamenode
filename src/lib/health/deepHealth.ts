@@ -16,6 +16,7 @@ import {
   PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
   PUBLIC_VISIBILITY_MANIFEST_MAX_BYTES,
   resolvePublicVisibilityGuardMode,
+  type PublicVisibilityBlockedEntitiesManifest,
   type PublicVisibilityGuardMode,
 } from "../publicData/publicVisibilityManifestCore.ts";
 
@@ -23,6 +24,10 @@ export { REQUIRED_SCHEMA_VERSION } from "./schemaContract.ts";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
 const PROBE_KEY = "__flamenode_read_only_health_probe__";
+/** Avoid reporting the normal R2-precommit → D1-commit window as stuck. */
+export const PUBLIC_VISIBILITY_STUCK_FENCE_GRACE_SECONDS = 5 * 60;
+/** Keep the health JSON1 join bounded even if an invalid manifest grows large. */
+export const PUBLIC_VISIBILITY_STUCK_FENCE_MAX_CANDIDATES = 200;
 
 type DeepHealthCheckStatus = "ok" | "degraded";
 
@@ -36,6 +41,9 @@ export interface DeepHealthEnv {
   DB: {
     prepare(query: string): {
       first<T = unknown>(): Promise<T | null>;
+      bind?: (...params: unknown[]) => {
+        first<T = unknown>(): Promise<T | null>;
+      };
     };
   };
   KV: {
@@ -77,6 +85,8 @@ export type DeepHealthResult = {
   commit: string;
   checks: DeepHealthChecks;
   public_visibility_guard_mode?: PublicVisibilityGuardMode;
+  /** R2 entryがD1の同一token fenceを持たないままgraceを超えた件数。 */
+  public_visibility_stuck_fence_candidates?: number;
 };
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -114,18 +124,85 @@ export function authorizeDeepHealth(
 type PublicVisibilityHealth = {
   status: DeepHealthCheckStatus;
   blocksOverallHealth: boolean;
+  stuckFenceCandidateCount: number;
 };
 
+type VisibilityFenceMismatchRow = {
+  count?: number | null;
+};
+
+/**
+ * R2 is precommitted before D1 by design.  A manifest-only entry is therefore
+ * expected briefly, but after the grace period it is evidence that a failed
+ * compensation left public delivery permanently blocked.  Compare exact
+ * entity/token pairs in one bounded, read-only JSON1 query.
+ */
+type StuckFenceCandidateResult = {
+  count: number;
+  scanLimitExceeded: boolean;
+};
+
+async function countStuckVisibilityFenceCandidates(
+  db: DeepHealthEnv["DB"],
+  manifest: PublicVisibilityBlockedEntitiesManifest,
+  nowSec: number,
+): Promise<StuckFenceCandidateResult> {
+  const candidates = manifest.entities.filter(
+    (entry) => nowSec - entry.blocked_at >= PUBLIC_VISIBILITY_STUCK_FENCE_GRACE_SECONDS,
+  );
+  if (candidates.length === 0) return { count: 0, scanLimitExceeded: false };
+  if (candidates.length > PUBLIC_VISIBILITY_STUCK_FENCE_MAX_CANDIDATES) {
+    return { count: candidates.length, scanLimitExceeded: true };
+  }
+
+  const statement = db.prepare(`
+    WITH candidates AS (
+      SELECT
+        json_extract(value, '$.entity_type') AS entity_type,
+        CASE json_extract(value, '$.entity_type')
+          WHEN 'x_user' THEN lower(json_extract(value, '$.entity_id'))
+          ELSE json_extract(value, '$.entity_id')
+        END AS entity_id,
+        json_extract(value, '$.fence_token') AS fence_token
+      FROM json_each(?1)
+    )
+    SELECT COUNT(*) AS count
+    FROM candidates AS candidate
+    LEFT JOIN public_visibility_fences AS fence
+      ON fence.entity_type = candidate.entity_type
+     AND fence.entity_id = candidate.entity_id
+     AND fence.fence_token = candidate.fence_token
+     AND fence.state IN ('blocked', 'release_pending')
+    WHERE fence.entity_type IS NULL
+  `);
+  // Production D1 provides bind(). Keep test doubles that only model the
+  // schema probe backwards-compatible rather than turning a local test helper
+  // limitation into a health failure.
+  if (!statement.bind) return { count: 0, scanLimitExceeded: false };
+  const row = await statement
+    .bind(JSON.stringify(candidates))
+    .first<VisibilityFenceMismatchRow>();
+  return {
+    count: Math.max(0, Number(row?.count ?? 0) || 0),
+    scanLimitExceeded: false,
+  };
+}
+
 async function checkPublicVisibilityManifestHealth(
+  db: DeepHealthEnv["DB"],
   bucket: DeepHealthEnv["BUCKET"],
   nowSec: number,
   guardMode: PublicVisibilityGuardMode,
 ): Promise<PublicVisibilityHealth> {
   if (guardMode === "off") {
-    return { status: "ok", blocksOverallHealth: false };
+    return { status: "ok", blocksOverallHealth: false, stuckFenceCandidateCount: 0 };
   }
 
-  const reportDegraded = (reason: string, error?: unknown) => {
+  const reportDegraded = (
+    reason: string,
+    error?: unknown,
+    stuckFenceCandidateCount = 0,
+  ) => {
     console.warn(
       JSON.stringify({
         service: "deep-health",
@@ -133,12 +210,14 @@ async function checkPublicVisibilityManifestHealth(
         mode: guardMode,
         status: "degraded",
         reason,
+        stuck_fence_candidate_count: stuckFenceCandidateCount || undefined,
         error: error instanceof Error ? error.message : undefined,
       }),
     );
     return {
       status: "degraded" as const,
       blocksOverallHealth: guardMode === "enforce",
+      stuckFenceCandidateCount,
     };
   };
 
@@ -173,7 +252,26 @@ async function checkPublicVisibilityManifestHealth(
     if (generatedAt > nowSec + 60) {
       return reportDegraded("manifest_generated_at_in_future");
     }
-    return { status: "ok", blocksOverallHealth: false };
+    const stuckFenceCandidates = await countStuckVisibilityFenceCandidates(
+      db,
+      normalized,
+      nowSec,
+    );
+    if (stuckFenceCandidates.scanLimitExceeded) {
+      return reportDegraded(
+        "stuck_fence_candidate_scan_limit",
+        undefined,
+        stuckFenceCandidates.count,
+      );
+    }
+    if (stuckFenceCandidates.count > 0) {
+      return reportDegraded(
+        "stuck_fence_candidate",
+        undefined,
+        stuckFenceCandidates.count,
+      );
+    }
+    return { status: "ok", blocksOverallHealth: false, stuckFenceCandidateCount: 0 };
   } catch (error) {
     return reportDegraded("manifest_unavailable", error);
   }
@@ -237,6 +335,7 @@ export async function runDeepHealthChecks(
   assertTrackedDetailArtifactSloFresh(schema, nowSec);
   await assertArtifactSloFresh(env.BUCKET, nowSec, artifactSloProbes);
   const visibilityHealth = await checkPublicVisibilityManifestHealth(
+    env.DB,
     env.BUCKET,
     nowSec,
     guardMode,
@@ -261,5 +360,11 @@ export async function runDeepHealthChecks(
     commit: commit.toLowerCase(),
     checks,
     public_visibility_guard_mode: guardMode,
+    ...(visibilityHealth.stuckFenceCandidateCount > 0
+      ? {
+          public_visibility_stuck_fence_candidates:
+            visibilityHealth.stuckFenceCandidateCount,
+        }
+      : {}),
   };
 }

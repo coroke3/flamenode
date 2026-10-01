@@ -19,6 +19,9 @@
 - tokenは一回限り。期限切れ、別実行者、table/mode/payload/schema変更、二重applyを拒否する。
 - D1 query/bind安全枠、nonce guard、最大4件の静的再生成queue statementを含め、1回のapplyは最大7行。previewは最大500行で、分割applyする。
 - 静的再生成plannerは1回につき最大16 targetとし、超過時は本体を書き込まず行の分割を要求する。
+- 公開状態を専用visibility transitionへ通すため、generic Spreadsheetは`events.visibility_status`、`videos.visibility_status`、`event_groups.visibility_status`、`x_users.approval_status`をreadonlyにする。これらは専用actionだけが変更する。
+- generic physical deleteは`events`、`videos`、`event_groups`、`x_users`、`system_settings`で禁止する。特にevent groupのrelation cascadeやX IDのlink/alias/canonical relationをgeneric deleteで発生させない。
+- `x_user_aliases`はreadonlyにし、alias追加は専用X ID承認actionだけが行う。同actionは`member_suggestions:global`を同じatomic queue batchへ入れ、commit後にstatic rebuild wakeを送る。
 
 ## cleanup
 

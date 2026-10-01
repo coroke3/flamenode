@@ -22,7 +22,7 @@ test("既存X名義へのnew_link承認は再申請を要求せず既存連携�
     admin,
     /同一X IDの重複pending申請を取り消す/,
   );
-  assert.match(action, /resolveCanonicalXUserId/);
+  assert.match(action, /resolveCanonicalXUserResolutions/);
   assert.match(
     action,
     /canonicalXUserId \|\| existingXUser \? "existing_link" : "new_link"/,

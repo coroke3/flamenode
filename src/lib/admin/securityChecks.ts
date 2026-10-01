@@ -33,10 +33,10 @@ const LABELS = {
   accessTokenNotNull: "accounts.access_token が null でない行",
   rejectedXIdActive: "rejected X ID が active_x_user_id に設定されている",
   unapprovedCreatorVideos: "未承認 X ID の creator_x_user_id を持つ作品",
-  bannedUserVideos: "BAN ユーザーが owner の作品",
-  tosNotAcceptedUserVideos: "TOS 未同意ユーザーが owner の作品",
+  bannedUserVideos: "BANされた投稿者が登録した作品",
+  tosNotAcceptedUserVideos: "TOS未同意の投稿者が登録した作品",
   customPageDangerousHtml: "custom_pages/custom_themes disabled",
-  bannedUserChapters: "BAN ユーザーが投稿したチャプターコメント",
+  bannedUserChapters: "BANユーザーにも紐づくX IDのチャプターコメント",
   orphanApprovedXId: "approved な X ID で認証ユーザー紐付けがない",
 } as const;
 
@@ -138,12 +138,12 @@ async function checkUnapprovedCreatorVideos(
   };
 }
 
-/** BAN ユーザーの書き込み */
+/** BANされた投稿者が登録した作品（所有権ではなく submitted_by_user_id の診断）。 */
 async function checkBannedUserVideos(db: AnyDb): Promise<SecurityCheckResult> {
   const rows = await db
     .select({
       id: videosTable.id,
-      owner: videosTable.submitted_by_user_id,
+      submitted_by_user_id: videosTable.submitted_by_user_id,
       total_count: sql<number>`COUNT(*) OVER()`,
     })
     .from(videosTable)
@@ -159,18 +159,18 @@ async function checkBannedUserVideos(db: AnyDb): Promise<SecurityCheckResult> {
     label: LABELS.bannedUserVideos,
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => `video:${r.id} owner:${r.owner}`),
+    samples: rows.slice(0, 5).map((r) => `video:${r.id} submitter:${r.submitted_by_user_id}`),
   };
 }
 
-/** TOS 未同意ユーザーの書き込み */
+/** TOS未同意の投稿者が登録した作品（所有権ではなく submitted_by_user_id の診断）。 */
 async function checkTosNotAcceptedUserVideos(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
   const rows = await db
     .select({
       id: videosTable.id,
-      owner: videosTable.submitted_by_user_id,
+      submitted_by_user_id: videosTable.submitted_by_user_id,
       total_count: sql<number>`COUNT(*) OVER()`,
     })
     .from(videosTable)
@@ -186,7 +186,7 @@ async function checkTosNotAcceptedUserVideos(
     label: LABELS.tosNotAcceptedUserVideos,
     status: count === 0 ? "ok" : "warn",
     count,
-    samples: rows.slice(0, 5).map((r) => `video:${r.id} owner:${r.owner}`),
+    samples: rows.slice(0, 5).map((r) => `video:${r.id} submitter:${r.submitted_by_user_id}`),
   };
 }
 
@@ -215,7 +215,10 @@ function checkNotificationTableMismatch(): SecurityCheckResult {
   };
 }
 
-/** banned ユーザーがチャプターコメントを投稿していないか (BAN 後の投稿検出) */
+/**
+ * chapterに実投稿auth userはないため、BANユーザーと紐づくX IDだけを診断する。
+ * これは投稿者断定やwrite guard漏れの証拠ではない。
+ */
 async function checkBannedUserChapters(
   db: AnyDb,
 ): Promise<SecurityCheckResult> {
@@ -243,7 +246,7 @@ async function checkBannedUserChapters(
     samples: rows.slice(0, 5).map((r) => `chapter:${r.id} x:${r.x_user_id}`),
     note:
       count > 0
-        ? "BAN 後にチャプターコメントが残存しています。writeGuard 漏れの可能性。"
+        ? "紐づくX IDにBANユーザーが存在します。実際の投稿者を特定できる列はありません。"
         : undefined,
   };
 }

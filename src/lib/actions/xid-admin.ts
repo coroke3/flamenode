@@ -22,7 +22,6 @@ import {
   users,
   xIdentityRequests,
   xUserAccountLinks,
-  xUserAliases,
   xUsers,
 } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
@@ -37,6 +36,7 @@ import {
   isAuthUserLinkedToXUser,
   getLinkedXUserIdsForAuthUser,
   resolveCanonicalXUserId,
+  resolveCanonicalXUserResolutions,
 } from "@/lib/auth/xIdentity";
 import { isApprovedLinkedXUser } from "@/lib/auth/approvedX";
 import { validateXIdentityRequestShape, buildXIdentityDecisionFields } from "@/lib/auth/xIdentityRequestCore";
@@ -72,8 +72,6 @@ const RESERVED_SLOT_BIND_CAP = 30;
 /** 1回のWeb Action/retryで読むbind page数。残件はpendingのままrecoveryへ渡す。 */
 const MAX_SLOT_BIND_PAGES_PER_REQUEST = 2;
 const SLOT_BIND_REQUEST_TYPES = ["new_link", "existing_link", "alias"] as const;
-/** D1のbind parameter上限に余裕を残したcandidate lookupの分割幅。 */
-const RESERVATION_BIND_CANONICALIZE_CHUNK = 80;
 
 async function getXIdLinkOperator(): Promise<XIdLinkOperatorResult> {
   try {
@@ -229,63 +227,16 @@ async function canonicalizeReservationBindCandidates(
   ];
   if (normalizedValues.length === 0) return [];
 
-  // resolveCanonicalXUserId は候補ごとに alias/exact の最大2 queryを発行
-  // していた。承認直後はリンク・pending申請が多いユーザーもいるため、
-  // ここをboundedな2段階IN lookupへまとめ、D1 statement budget超過を防ぐ。
-  const aliasByInput = new Map<string, string>();
-  for (
-    let offset = 0;
-    offset < normalizedValues.length;
-    offset += RESERVATION_BIND_CANONICALIZE_CHUNK
-  ) {
-    const chunk = normalizedValues.slice(
-      offset,
-      offset + RESERVATION_BIND_CANONICALIZE_CHUNK,
-    );
-    const rows = await db
-      .select({
-        alias_x_id: xUserAliases.alias_x_id,
-        x_user_id: xUserAliases.x_user_id,
-      })
-      .from(xUserAliases)
-      .where(inArray(xUserAliases.alias_x_id, chunk));
-    for (const row of rows) {
-      // Preserve the resolver's first-row behavior for malformed duplicate
-      // aliases while keeping the normalized input order below.
-      if (!aliasByInput.has(row.alias_x_id)) {
-        aliasByInput.set(row.alias_x_id, row.x_user_id);
-      }
-    }
-  }
-
-  const directIds = normalizedValues.filter((value) => !aliasByInput.has(value));
-  const directById = new Map<string, { id: string; approval_status: string | null }>();
-  for (
-    let offset = 0;
-    offset < directIds.length;
-    offset += RESERVATION_BIND_CANONICALIZE_CHUNK
-  ) {
-    const chunk = directIds.slice(
-      offset,
-      offset + RESERVATION_BIND_CANONICALIZE_CHUNK,
-    );
-    const rows = await db
-      .select({ id: xUsers.id, approval_status: xUsers.approval_status })
-      .from(xUsers)
-      .where(inArray(xUsers.id, chunk));
-    for (const row of rows) directById.set(row.id, row);
-  }
-
+  const resolutions = await resolveCanonicalXUserResolutions(
+    db,
+    normalizedValues,
+  );
   return [
     ...new Set(
       normalizedValues.map((value) => {
-        const alias = aliasByInput.get(value);
-        if (alias) return alias;
-        const direct = directById.get(value);
-        // Match the existing helper's fail-closed fallback: unresolved or
-        // rejected rows remain as the submitted normalized value so a pending
-        // identity can still prevent unsafe NULL-snapshot auto-binding.
-        return direct && direct.approval_status !== "rejected" ? direct.id : value;
+        // Unresolved/malformed identities remain as submitted values so a
+        // pending request still prevents unsafe NULL-snapshot auto-binding.
+        return resolutions.get(value)?.value ?? value;
       }),
     ),
   ];
@@ -826,6 +777,7 @@ async function approveXIdLinkRequestOnce(
   let notificationXUserId: string | null = null;
   let bindTargetXUserId: string | null = null;
   let publicVisibilityChanged = false;
+  let staticRebuildQueued = false;
   let requesterPostApprovalActiveX: {
     activeXId: string;
     activeXName: string | null;
@@ -843,43 +795,69 @@ async function approveXIdLinkRequestOnce(
     if (!(await isApprovedLinkedXUser(db, requestedAuthUserId, targetXUserId))) {
       return { ok: false, message: "申請者は追加先 X ID に紐づいていません。" };
     }
-    const existingCanonical = await resolveCanonicalXUserId(db, submittedXUserId);
-    if (existingCanonical) {
-      return { ok: false, message: `@${submittedXUserId} はすでに @${existingCanonical} として登録されています。` };
+    const existingResolution = (
+      await resolveCanonicalXUserResolutions(db, [submittedXUserId])
+    ).get(submittedXUserId);
+    if (existingResolution?.reason !== "not_found") {
+      const existingCanonical = existingResolution?.value;
+      return {
+        ok: false,
+        message: existingCanonical
+          ? `@${submittedXUserId} はすでに @${existingCanonical} として登録されています。`
+          : `@${submittedXUserId} の既存aliasまたは正本が不整合のため、別名を安全に追加できません。`,
+      };
     }
-    const existingAlias = (
-      await db
-        .select()
-        .from(xUserAliases)
-        .where(
-          and(
-            eq(xUserAliases.x_user_id, targetXUserId),
-            eq(xUserAliases.alias_x_id, submittedXUserId),
-          )!,
-        )
-        .limit(1)
-    )[0];
-    if (!existingAlias) {
-      const alias = { x_user_id: targetXUserId, alias_x_id: submittedXUserId };
-      statements.push(db.insert(xUserAliases).values(alias));
-      expected.push(1);
-      audits.push({
-        table_name: "x_user_aliases",
-        target_id: `${targetXUserId}:${submittedXUserId}`,
-        operation: "CREATE",
-        before: null,
-        after: alias,
-        actor_user_id: operatorAuthUserId,
-        actor_x_user_id: operatorActorXUserId,
-        reason: "X名義の別名申請を承認",
-        context: "x-identity-request",
-        retention_class: "long_audit",
-      });
-    }
+    const alias = { x_user_id: targetXUserId, alias_x_id: submittedXUserId };
+    // The read above is advisory only. This conditional INSERT is the actual
+    // race-safe integrity gate: a new canonical row or any normalized alias
+    // inserted concurrently makes changes()=0 and rolls back the whole batch.
+    statements.push(db.run(sql`
+      INSERT INTO x_user_aliases (x_user_id, alias_x_id)
+      SELECT ${targetXUserId}, ${submittedXUserId}
+      WHERE EXISTS (
+        SELECT 1 FROM x_users
+        WHERE id = ${targetXUserId}
+          AND approval_status = 'approved'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM x_users
+        WHERE lower(trim(ltrim(trim(id), '@'))) = lower(${submittedXUserId})
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM x_user_aliases
+        WHERE lower(trim(ltrim(trim(alias_x_id), '@'))) = lower(${submittedXUserId})
+      )
+    `));
+    expected.push(1);
+    audits.push({
+      table_name: "x_user_aliases",
+      target_id: `${targetXUserId}:${submittedXUserId}`,
+      operation: "CREATE",
+      before: null,
+      after: alias,
+      actor_user_id: operatorAuthUserId,
+      actor_x_user_id: operatorActorXUserId,
+      reason: "X名義の別名申請を承認",
+      context: "x-identity-request",
+      retention_class: "long_audit",
+    });
     notificationXUserId = targetXUserId;
   } else {
     if (!submittedXUserId) return { ok: false, message: "申請 X ID がありません。" };
-    const canonicalXUserId = await resolveCanonicalXUserId(db, submittedXUserId);
+    const resolution = (
+      await resolveCanonicalXUserResolutions(db, [submittedXUserId])
+    ).get(submittedXUserId);
+    if (
+      resolution?.reason === "invalid_alias_target" ||
+      resolution?.reason === "ambiguous_alias" ||
+      resolution?.reason === "canonical_alias_collision"
+    ) {
+      return {
+        ok: false,
+        message: "申請 X ID のaliasまたは正本が不整合のため、安全に承認できません。",
+      };
+    }
+    const canonicalXUserId = resolution?.value ?? null;
     const effectiveXUserId = canonicalXUserId ?? submittedXUserId;
     bindTargetXUserId = effectiveXUserId;
     // rejected行はcanonical resolverでは無効扱いだが、再申請の承認時には
@@ -1193,6 +1171,7 @@ async function approveXIdLinkRequestOnce(
     ]);
     statements.push(...queue.statements);
     expected.push(...queue.expectedChanges);
+    staticRebuildQueued = queue.statements.length > 0;
   }
 
   // 別名（alias）追加・pending x_users作成は公開可否変化と無関係に
@@ -1208,6 +1187,7 @@ async function approveXIdLinkRequestOnce(
     ]);
     statements.push(...suggestionsQueue.statements);
     expected.push(...suggestionsQueue.expectedChanges);
+    staticRebuildQueued ||= suggestionsQueue.statements.length > 0;
   }
 
   await mutateWithAudit(db, {
@@ -1216,8 +1196,7 @@ async function approveXIdLinkRequestOnce(
     audits,
     notificationWakeSource:
       notification || channelNotification ? "admin" : undefined,
-    staticRebuildWakeSource:
-      publicVisibilityChanged && notificationXUserId ? "admin" : undefined,
+    staticRebuildWakeSource: staticRebuildQueued ? "admin" : undefined,
   });
 
   let slotBindEventIds: string[] = [];

@@ -1,7 +1,11 @@
 import "server-only";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getDb, type DB } from "./db/client";
-import { isTransientDbError } from "./db/transientDbErrorCore";
+import {
+  LOCAL_DATABASE_READ_CALLBACK_ATTEMPTS,
+  runDatabaseReadCallback,
+  WORKER_DATABASE_READ_CALLBACK_ATTEMPTS,
+} from "./db/databaseReadRetryCore";
 
 declare global {
   interface CloudflareEnv {
@@ -69,29 +73,22 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * 読み取り専用処理向け。瞬断時だけ Drizzle instance を作り直して再試行する。
- * 書き込み処理を渡してはいけない。再実行により二重書き込みになるため。
+ * 読み取り専用処理向け。Worker本番ではD1のquery-level retryへ委ね、callback
+ * 全体を再実行しない。ローカルMiniflareだけは瞬断時にDrizzle instanceを作り
+ * 直して限定的に再試行する。書き込み処理を渡してはいけない。
  */
 export async function withDatabaseRead<T>(
   fn: (db: DB) => Promise<T>,
 ): Promise<T | null> {
-  const maxAttempts = 4;
-  let lastError: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const resolved = resolveDatabaseSync();
-    if (!resolved) return null;
-    try {
-      return await fn(resolved.db);
-    } catch (error) {
-      lastError = error;
-      if (!isTransientDbError(error) || attempt >= maxAttempts - 1) {
-        throw error;
-      }
-      clearDatabaseMemo(resolved.binding);
-      await sleep(30 * 2 ** attempt);
-    }
-  }
-  throw lastError;
+  return runDatabaseReadCallback({
+    resolve: resolveDatabaseSync,
+    run: ({ db }) => fn(db),
+    maxAttempts: isLocalOrBuildPhase()
+      ? LOCAL_DATABASE_READ_CALLBACK_ATTEMPTS
+      : WORKER_DATABASE_READ_CALLBACK_ATTEMPTS,
+    onRetry: ({ binding }) => clearDatabaseMemo(binding),
+    wait: sleep,
+  });
 }
 
 /**

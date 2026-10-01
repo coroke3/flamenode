@@ -43,6 +43,10 @@ test("event_staff cannot be edited directly", () => {
   assert.equal(resolveSpreadsheetTableDef("event_staff", true).mode, "readonly");
 });
 
+test("x_user_aliases is changed only through the dedicated X ID approval flow", () => {
+  assert.equal(resolveSpreadsheetTableDef("x_user_aliases", true).mode, "readonly");
+});
+
 test("editable canonical enum columns come from schema metadata", () => {
   const expected = {
     event_groups: {
@@ -95,21 +99,29 @@ test("system_settings CostGuard canonical columns are spreadsheet-readonly", () 
   assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), false);
 });
 
-test("event/video visibility status is controlled by the dedicated transition actions", () => {
+test("all public visibility state is controlled by dedicated transition actions", () => {
   const eventDef = resolveSpreadsheetTableDef("events", true);
   const videoDef = resolveSpreadsheetTableDef("videos", true);
+  const eventGroupDef = resolveSpreadsheetTableDef("event_groups", true);
+  const xUserDef = resolveSpreadsheetTableDef("x_users", true);
   assert.equal(isSpreadsheetColumnEditable(eventDef, "visibility_status"), false);
   assert.equal(isSpreadsheetColumnEditable(videoDef, "visibility_status"), false);
+  assert.equal(isSpreadsheetColumnEditable(eventGroupDef, "visibility_status"), false);
+  assert.equal(isSpreadsheetColumnEditable(xUserDef, "approval_status"), false);
   assert.equal(isSpreadsheetColumnEditable(eventDef, "title"), true);
   assert.equal(isSpreadsheetColumnEditable(videoDef, "title"), true);
   assert.equal(SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has("events.visibility_status"), true);
+  assert.equal(SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has("videos.visibility_status"), true);
+  assert.equal(SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has("event_groups.visibility_status"), true);
+  assert.equal(SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has("x_users.approval_status"), true);
 });
 
 test("public entities and system settings cannot be physically deleted through the generic spreadsheet route", () => {
   assert.equal(isSpreadsheetPhysicalDeleteBlocked("events"), true);
   assert.equal(isSpreadsheetPhysicalDeleteBlocked("videos"), true);
   assert.equal(isSpreadsheetPhysicalDeleteBlocked("system_settings"), true);
-  assert.equal(isSpreadsheetPhysicalDeleteBlocked("event_groups"), false);
+  assert.equal(isSpreadsheetPhysicalDeleteBlocked("event_groups"), true);
+  assert.equal(isSpreadsheetPhysicalDeleteBlocked("x_users"), true);
   assert.equal(SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES.has("videos"), true);
   assert.equal(
     SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES.has("system_settings"),

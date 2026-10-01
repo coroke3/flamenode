@@ -88,7 +88,8 @@ test("alias approval/recovery requires an approved X ID bind target", () => {
   assert.match(admin, /resolveApprovedCanonicalXUserId/);
   assert.match(admin, /isApprovedLinkedXUser/);
   assert.match(admin, /approval_status === "approved"/);
-  assert.match(recovery, /row\.approval_status !== "approved"/);
+  assert.match(recovery, /target_approval_status === "approved"/);
+  assert.match(recovery, /decideCanonicalXUserResolution/);
 
   const targetSection = admin.slice(
     admin.indexOf("async function resolveApprovedSlotBindTarget"),
@@ -105,13 +106,26 @@ test("alias approval/recovery requires an approved X ID bind target", () => {
   );
 });
 
-test("reservation bind candidate canonicalization uses bounded IN lookups", () => {
+test("alias approval atomically queues and wakes member suggestions rebuild", () => {
+  const admin = read("../actions/xid-admin.ts");
+  const approvalSection = admin.slice(
+    admin.indexOf("async function approveXIdLinkRequestOnce"),
+    admin.indexOf("export async function approveXIdLinkRequest"),
+  );
+  assert.match(approvalSection, /targetType: "member_suggestions"/);
+  assert.match(approvalSection, /reason: "x_id_approved"/);
+  assert.match(approvalSection, /staticRebuildQueued \|\|= suggestionsQueue\.statements\.length > 0/);
+  assert.match(approvalSection, /staticRebuildWakeSource: staticRebuildQueued \? "admin" : undefined/);
+});
+
+test("reservation bind candidate canonicalization uses the shared bounded resolver", () => {
   const admin = read("../actions/xid-admin.ts");
   const section = admin.slice(
     admin.indexOf("async function canonicalizeReservationBindCandidates"),
     admin.indexOf("/** 承認直後の正本"),
   );
-  assert.match(section, /inArray\(xUserAliases\.alias_x_id, chunk\)/);
-  assert.match(section, /inArray\(xUsers\.id, chunk\)/);
+  assert.match(section, /resolveCanonicalXUserResolutions/);
+  assert.doesNotMatch(section, /inArray\(xUserAliases\.alias_x_id, chunk\)/);
+  assert.doesNotMatch(section, /inArray\(xUsers\.id, chunk\)/);
   assert.doesNotMatch(section, /values\.map\(async/);
 });

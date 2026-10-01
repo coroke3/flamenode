@@ -13,7 +13,7 @@ Webは`flamenode-web`（OpenNext + Workers Static Assets）、背景処理は`fl
 
 `app/layout.tsx`のCloudflareビルドは外部Google Fonts取得に依存させない。`next/font/google`はフォントCSS/ファイルをビルド時に取得するため、利用可能なローカルfont assetがある場合は`next/font/local`へ含め、その他はsystem font stackを使う。現在はFlameNodeブランドfontのみを同梱し、本文・display・monoは端末標準fontへfallbackする。
 
-health probe (`/api/health` とその配下) は既存仕様どおり canonical redirect / maintenance redirect の対象外とし、middleware の runtime-origin / KV 判定も省略する。health route は `BUILD_COMMIT_SHA` だけを読み、他の binding 正規化で Free の CPU 予算を消費しない。公開動画一覧APIのD1 readは `withDatabaseRead` の bounded retryを使い、quota / CPU超過は再試行せず一時的な接続断だけを回復する。
+health probe (`/api/health` とその配下) は既存仕様どおり canonical redirect / maintenance redirect の対象外とし、middleware の runtime-origin / KV 判定も省略する。health route は `BUILD_COMMIT_SHA` だけを読み、他の binding 正規化で Free の CPU 予算を消費しない。本番の`withDatabaseRead`はD1のread-only query-level retryへ委ね、複数query callback全体を再実行しない。ローカルMiniflareだけは瞬断時に最大4回の再接続retryを行う。quota / CPU / overloadは再試行しない。
 
 公式制限: https://developers.cloudflare.com/workers/platform/limits/
 
