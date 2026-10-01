@@ -37,6 +37,7 @@ import {
   YOUTUBE_RELATED_REBUILD_MAX_D1_STATEMENTS,
 } from "../json-generator/youtubeRelatedSharedInputsEnqueue.ts";
 import { runCleanupWithRetry } from "../cleanup/index.ts";
+import { cleanupIncrementalCache } from "../cleanup/incrementalCache.ts";
 import { withCronLease } from "../shared/cronLease.ts";
 import {
   combineJobCounters,
@@ -50,7 +51,7 @@ import {
   isD1BudgetExhausted,
   type D1Budget,
 } from "../shared/d1Budget.ts";
-import { safeErrorSummary } from "../shared/safeLog.ts";
+import { logWorkerJob, safeErrorSummary } from "../shared/safeLog.ts";
 import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 import { rejectUnauthorizedWorkerRequest } from "../shared/workerAdminAuth.ts";
 import {
@@ -121,6 +122,42 @@ export async function runContentJobsRecovery(
         },
         async (signal) => {
           const wakeSentKinds = new Set<QueueWakeKind>();
+          // R2/KV only: at most one list, one bulk delete and one checkpoint.
+          // Its failure must not block user-visible static artifact repairs.
+          const cacheCleanupStarted = Date.now();
+          try {
+            const cacheCleanup = await cleanupIncrementalCache(rebuildEnv, signal);
+            if (!cacheCleanup.skipped) {
+              logWorkerJob({
+                worker: "content-jobs",
+                job: "incremental-cache-cleanup",
+                run_id: crypto.randomUUID(),
+                started_at: new Date(cacheCleanupStarted).toISOString(),
+                duration_ms: Date.now() - cacheCleanupStarted,
+                processed: cacheCleanup.deleted,
+                skipped: cacheCleanup.scanned - cacheCleanup.deleted,
+                failed: 0,
+                result: "ok",
+                r2_scanned: cacheCleanup.scanned,
+                r2_deleted: cacheCleanup.deleted,
+                r2_bytes_deleted: cacheCleanup.bytesDeleted,
+              });
+            }
+          } catch (error) {
+            signal?.throwIfAborted();
+            logWorkerJob({
+              worker: "content-jobs",
+              job: "incremental-cache-cleanup",
+              run_id: crypto.randomUUID(),
+              started_at: new Date(cacheCleanupStarted).toISOString(),
+              duration_ms: Date.now() - cacheCleanupStarted,
+              processed: 0,
+              skipped: 0,
+              failed: 1,
+              result: "failed",
+              error: safeErrorSummary(error),
+            });
+          }
           // 日次cleanupを先に処理する。cleanup後の通常処理はsoft limit 40で止まるため、
           // cleanup retryとlease lifecycleを含めてもhard limit 50を同じguardで共有する。
           const cleanupLease = await withCronLease(

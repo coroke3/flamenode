@@ -10,7 +10,7 @@ import {
   withD1Budget,
 } from "./d1Budget.ts";
 
-function createFakeDb() {
+function createFakeDb({ results = [], rowsRead = 10 } = {}) {
   const calls = { statements: 0, batches: 0, execs: 0, sessions: 0 };
   const db = {
     prepare(query) {
@@ -20,7 +20,7 @@ function createFakeDb() {
         },
         async all() {
           calls.statements += 1;
-          return { results: [], meta: { rows_read: 10, rows_written: 0 } };
+          return { results, meta: { rows_read: rowsRead, rows_written: 0 } };
         },
         async first() {
           calls.statements += 1;
@@ -72,6 +72,26 @@ test("D1_QUERY_SOFT_LIMIT 到達で isD1BudgetExhausted が true になる", () 
   const budget = createD1Budget();
   budget.statements = D1_QUERY_SOFT_LIMIT;
   assert.equal(isD1BudgetExhausted(budget), true);
+});
+
+test("first() counts scanned rows once and preserves row, column, NULL and missing-column behavior", async () => {
+  const fake = createFakeDb({ results: [{ total: 7, empty: null }], rowsRead: D1_ROWS_READ_SOFT_LIMIT });
+  const env = withD1Budget({ DB: fake.db });
+  assert.deepEqual(await env.DB.prepare("SELECT COUNT(*) AS total, NULL AS empty FROM sample").first(), { total: 7, empty: null });
+  assert.equal(env.d1Budget.statements, 1);
+  assert.equal(env.d1Budget.rowsRead, D1_ROWS_READ_SOFT_LIMIT);
+  assert.equal(fake.calls.statements, 1);
+  assert.equal(isD1BudgetExhausted(env.d1Budget), true);
+  assert.equal(await env.DB.prepare("SELECT 7 AS total").first("total"), 7);
+  assert.equal(await env.DB.prepare("SELECT NULL AS empty").first("empty"), null);
+  await assert.rejects(env.DB.prepare("SELECT 7 AS total").first("missing"), /D1_ERROR: Column not found/);
+  assert.equal(env.d1Budget.statements, 4);
+  assert.equal(fake.calls.statements, 4);
+
+  const empty = withD1Budget({ DB: createFakeDb().db });
+  assert.equal(await empty.DB.prepare("SELECT 1 WHERE false").first(), null);
+  assert.equal(await empty.DB.prepare("SELECT 1 WHERE false").first("missing"), null);
+  assert.equal(empty.d1Budget.rowsRead, 20);
 });
 
 test("rows-read soft limit後は後続operationをbudget exhaustedとして止める", () => {
@@ -164,4 +184,17 @@ test("withSessionもbudget proxyを迂回するため拒否する", () => {
     /d1_session_disallowed_in_budgeted_worker/,
   );
   assert.equal(fake.calls.sessions, 0);
+});
+
+test("raw()はrows_readを計測できないためbudgeted workerで拒否する", async () => {
+  const fake = createFakeDb();
+  const env = withD1Budget({ DB: fake.db });
+
+  await assert.rejects(
+    env.DB.prepare("SELECT 1").raw(),
+    /d1_raw_disallowed_in_budgeted_worker/,
+  );
+  assert.equal(env.d1Budget.statements, 0);
+  assert.equal(env.d1Budget.rowsRead, 0);
+  assert.equal(fake.calls.statements, 0);
 });

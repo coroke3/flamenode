@@ -26,7 +26,7 @@ export type PublicHeaderUser = Pick<
 };
 
 interface PublicHeaderProps {
-  /** 省略時は必要になった時だけクライアントが /api/account/summary を取得する。 */
+  /** 省略時は表示直後にクライアントが /api/account/summary を一度取得する。 */
   user?: PublicHeaderUser | null;
   /**
    * SSRで最小ヘッダーを渡したまま、X ID一覧等を /api/account/summary で補完する。
@@ -52,14 +52,8 @@ export function PublicHeader({
   const searchButtonRef = React.useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const fetchAccount = serverUser === undefined || hydrateAccount;
-  const preserveLoggedInOnFailure = hydrateAccount && serverUser != null;
-  // SSR最小ヘッダーの管理権限等は、詳細summaryを
-  // アカウントメニュー（またはモバイルナビ）を開いた時だけ補完する。
-  const hydrateOnOpen = hydrateAccount && serverUser != null;
-  // 公開ページは初期SSR/RSCと競合させず、idle時にログイン状態を自動判別する。
-  // ユーザーが先にmobile/account UIを開いた場合はhook側が即時取得へ切り替える。
-  const deferPublicAccountUntilIdle = serverUser === undefined && !hydrateAccount;
-  const accountHydrationOpen = accountOpen || mobileOpen;
+  // 初回hydrationで一度取得し、メニュー開閉やページ内遷移では再取得しない。
+  // Active X切替中・一時的な通信失敗でも取得済みのアカウント表示を維持する。
   const {
     user: fetchedUser,
     loading: accountLoading,
@@ -67,15 +61,8 @@ export function PublicHeader({
     confirmedLoggedOut: accountConfirmedLoggedOut,
   } = usePublicAccountSummary(
     fetchAccount,
-    preserveLoggedInOnFailure,
-    hydrateOnOpen,
-    accountHydrationOpen,
-    deferPublicAccountUntilIdle,
+    true,
   );
-  const showAccountLoading =
-    fetchAccount && accountLoading && !preserveLoggedInOnFailure;
-  const showAccountUnavailable =
-    fetchAccount && accountUnavailable && !preserveLoggedInOnFailure;
   const accountUser = accountConfirmedLoggedOut
     ? null
     : serverUser === undefined
@@ -110,6 +97,8 @@ export function PublicHeader({
             }
           : fetchedUser
         : serverUser;
+  const showAccountLoading = fetchAccount && accountLoading && !accountUser;
+  const showAccountUnavailable = fetchAccount && accountUnavailable && !accountUser;
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
   const entryHref =
     entryNext === "/entry"

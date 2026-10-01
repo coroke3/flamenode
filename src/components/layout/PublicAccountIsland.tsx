@@ -12,18 +12,8 @@ import type { PublicHeaderUser } from "@/components/layout/PublicHeader";
 import { ACTIVE_X_CHANGED_EVENT } from "@/lib/client/activeXSwitchEvents";
 import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "./publicNavigation";
 
-const PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS = 1200;
-const PUBLIC_ACCOUNT_FALLBACK_DELAY_MS = 350;
 const PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS = 5_000;
 const PUBLIC_ACCOUNT_RETRY_EVENT = "flamenode:public-account-summary-retry";
-
-type IdleWindow = Window & {
-  requestIdleCallback?: (
-    callback: IdleRequestCallback,
-    options?: IdleRequestOptions,
-  ) => number;
-  cancelIdleCallback?: (handle: number) => void;
-};
 
 function mapSummaryToHeaderUser(
   summary: Extract<AccountSummaryResponse, { loggedIn: true }>,
@@ -50,9 +40,6 @@ function requestPublicAccountRetry(): void {
 export function usePublicAccountSummary(
   enabled: boolean,
   preserveLoggedInOnFailure = false,
-  lazy = false,
-  open = false,
-  deferUntilIdle = false,
 ): {
   user: PublicHeaderUser | null;
   loading: boolean;
@@ -60,17 +47,12 @@ export function usePublicAccountSummary(
   confirmedLoggedOut: boolean;
 } {
   const [user, setUser] = React.useState<PublicHeaderUser | null>(null);
-  const [loading, setLoading] = React.useState(enabled && (!lazy || open));
+  const [loading, setLoading] = React.useState(enabled);
   const [unavailable, setUnavailable] = React.useState(false);
   const [confirmedLoggedOut, setConfirmedLoggedOut] = React.useState(false);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
-  const [idleReady, setIdleReady] = React.useState(!deferUntilIdle);
-  const fetchedOnceRef = React.useRef(false);
-  // Public header (lazy=false) fetches once after the initial hydration/idle
-  // window. Menu open/close must not turn that one request into a request per
-  // interaction, including when the first attempt ended in a temporary failure.
-  const nonLazyAttemptedRef = React.useRef(false);
-  const refreshRequestedRef = React.useRef(!lazy);
+  const attemptedRef = React.useRef(false);
+  const refreshRequestedRef = React.useRef(true);
   const mountedRef = React.useRef(false);
   const inFlightRef = React.useRef<{
     generation: number;
@@ -83,13 +65,9 @@ export function usePublicAccountSummary(
   const refreshGenerationRef = React.useRef(0);
   const enabledRef = React.useRef(enabled);
   const preserveLoggedInOnFailureRef = React.useRef(preserveLoggedInOnFailure);
-  const lazyRef = React.useRef(lazy);
-  const openRef = React.useRef(open);
 
   enabledRef.current = enabled;
   preserveLoggedInOnFailureRef.current = preserveLoggedInOnFailure;
-  lazyRef.current = lazy;
-  openRef.current = open;
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -97,29 +75,6 @@ export function usePublicAccountSummary(
       mountedRef.current = false;
     };
   }, []);
-
-  React.useEffect(() => {
-    if (!enabled || lazy || !deferUntilIdle || idleReady) return;
-    if (open) {
-      setIdleReady(true);
-      return;
-    }
-
-    const idleWindow = window as IdleWindow;
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(
-        () => setIdleReady(true),
-        { timeout: PUBLIC_ACCOUNT_IDLE_TIMEOUT_MS },
-      );
-      return () => idleWindow.cancelIdleCallback?.(handle);
-    }
-
-    const handle = window.setTimeout(
-      () => setIdleReady(true),
-      PUBLIC_ACCOUNT_FALLBACK_DELAY_MS,
-    );
-    return () => window.clearTimeout(handle);
-  }, [enabled, lazy, open, deferUntilIdle, idleReady]);
 
   React.useEffect(() => {
     if (!enabled) return;
@@ -145,23 +100,7 @@ export function usePublicAccountSummary(
       return;
     }
 
-    // lazy headerは通常メニューを開くまでsummaryを読まない。ただし一時失敗後の
-    // 明示retry/Active X更新はrefreshRequestedRefで閉じた状態からでも1回だけ許可する。
-    if (lazy && !open && !refreshRequestedRef.current) {
-      setLoading(false);
-      return;
-    }
-    // 公開ページは初期SSR/RSCとaccount summaryを競合させない。ユーザーが先に
-    // メニューを開いた場合だけidle待ちを飛ばして即時取得する。
-    if (deferUntilIdle && !idleReady && !open) {
-      setLoading(true);
-      return;
-    }
-    if (!lazy && nonLazyAttemptedRef.current && !refreshRequestedRef.current) {
-      setLoading(false);
-      return;
-    }
-    if (lazy && fetchedOnceRef.current && !refreshRequestedRef.current) {
+    if (attemptedRef.current && !refreshRequestedRef.current) {
       setLoading(false);
       return;
     }
@@ -225,7 +164,6 @@ export function usePublicAccountSummary(
 
         if (result.kind === "summary") {
           const summary = result.summary;
-          fetchedOnceRef.current = true;
           if (summary.loggedIn) {
             setUser(mapSummaryToHeaderUser(summary));
             setConfirmedLoggedOut(false);
@@ -246,22 +184,21 @@ export function usePublicAccountSummary(
       })
       .catch(() => {
         if (!mountedRef.current || !enabledRef.current) return;
+        if (request.generation !== refreshGenerationRef.current) return;
         setUnavailable(true);
         if (!preserveLoggedInOnFailureRef.current) setUser(null);
       })
       .finally(() => {
         if (inFlightRef.current !== request) return;
         inFlightRef.current = null;
-        if (!lazyRef.current) nonLazyAttemptedRef.current = true;
+        attemptedRef.current = true;
         if (!mountedRef.current || !enabledRef.current) return;
 
         const needsRefresh =
           refreshRequestedRef.current &&
           (request.pendingGeneration !== null ||
             request.generation !== refreshGenerationRef.current);
-        const canFetchNow =
-          !lazyRef.current || openRef.current || refreshRequestedRef.current;
-        if (needsRefresh && canFetchNow) {
+        if (needsRefresh) {
           setRefreshNonce((current) => current + 1);
         } else {
           setLoading(false);
@@ -270,10 +207,6 @@ export function usePublicAccountSummary(
   }, [
     enabled,
     preserveLoggedInOnFailure,
-    lazy,
-    open,
-    deferUntilIdle,
-    idleReady,
     refreshNonce,
   ]);
 
@@ -308,8 +241,11 @@ export function PublicAccountIsland({
       return (
         <div
           className={`${styles.actionNav} ${styles.accountPlaceholder}`}
-          aria-hidden
-        />
+          role="status"
+          aria-label="ログイン状態を確認中"
+        >
+          <Icon name="user" size={18} aria-hidden />
+        </div>
       );
     }
 

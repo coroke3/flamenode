@@ -67,7 +67,7 @@ The command refuses to overwrite an existing or malformed manifest; it only
 creates the canonical empty schema when the object is absent.
 
 > Status: Active
-> Last verified: 2026-09-25
+> Last verified: 2026-09-30
 > Verified against: `src/lib/publicData/`, `src/lib/admin/staticSharedInputDiagnostics.ts`, `app/(public)/`, `app/(admin)/admin/static-builds/`, `workers/json-generator/videoMaterializedSource.ts`, `workers/json-generator/optimizedRebuild.ts`, `wrangler.toml`
 
 **AI:** 公開静的 JSON / degraded D1 / Cache の仕様。正本コードは `src/lib/publicData/loader.ts`。軽量モデルは調査・文書修正まで。loader・権限・公開 DTO 変更は中位以上。
@@ -174,8 +174,108 @@ OpenNextのincremental cacheはR2を正本とし、`withRegionalCache(..., { mod
 で各拠点の再利用期間を最大1分に制限する。これは同一拠点のISR再読込を抑え、長期staleや
 global KVへの置換を避ける設定。`memoryQueue`の重複排除はWorker isolate内だけであり、
 複数isolate間の単一実行を保証しない。ISR失敗が続く場合はWorker Logsで原因を確認し、
-`revalidate`を安易に短縮しない。公開Headerのログインsummaryはidle時に一度だけ取得し、
-権限・session情報は共有Cacheへ保存しない。
+`revalidate`を安易に短縮しない。公開HeaderとSSR最小headerのログインsummaryはhydration直後に
+一度取得する。クリック・idleを待たず、スマホ・タブレットでもアカウント名とアイコンを
+ヘッダーに表示する。メニュー開閉や公開layout内のページ遷移では再取得せず、Active X変更・
+明示retryだけで更新する。更新中・一時障害では取得済み表示を維持し、正常なloggedOut応答では
+破棄する。権限・session情報は共有Cache・localStorageへ保存しない。APIはprivate/no-store、
+操作時の認可は従来どおりサーバー側D1で再検証する。
+
+### Free枠の使用量と保持期間
+
+2026-09-30確認の公式枠は [R2 Standard](https://developers.cloudflare.com/r2/pricing/) が
+10 GB-month/月・Class A 100万回/月・Class B 1000万回/月、
+[D1 Free](https://developers.cloudflare.com/d1/platform/pricing/) が500万rows read/日・
+10万rows written/日・保存合計5GB。R2の月間無料保存量は5GBではない。枠はアカウント内の
+他アプリの利用分とも合算される。容量だけでなく操作数とD1走査行数を確認する。
+
+OpenNextは `incremental-cache/{buildId}/{hash}.cache|fetch` に再生成可能なキャッシュを保存し、
+buildIdの変更だけでは旧世代を削除しない。`workers/cleanup/incrementalCache.ts` は
+content-jobs Recovery Cronから、**最終書込みから30日を超えた既知形式のキャッシュのみ**を
+整理する。1 invocationは最大200 objectのLISTと1回のbulk DELETEに限定し、KVのcursorで
+次のCronに継続する。scan完了後は24時間空ける。DB読取・object本文のダウンロードは行わず、
+画像・公開JSON・内部projection・未知形式のkeyは削除しない。delete失敗時はcursorを進めない。
+古い現行buildのキャッシュも対象になり得るが、次回アクセスは通常のOpenNext cache missとして
+再生成される。2026-09-30のローカルOpenNext previewでは、populateした `/about` のR2キャッシュを
+1件除去して200応答と同一keyへの再生成を確認した。本番での欠損・再生成は未検証。
+`incremental-cache-cleanup` ログの `r2_scanned` / `r2_deleted` / `r2_bytes_deleted` が整理量を示す。
+別の `NEXT_INC_CACHE_R2_PREFIX` を運用で指定した環境は、この既定prefixの整理対象外となる。
+
+アカウントsummaryの管理権限検索は `event_staff_x_event_idx`（migration 0063）でX IDを
+起点に検索する。承認済みX IDが80件を超えたmembershipも、JSON1を外側行ごとに走査する
+相関EXISTSから非相関IN/NOT INへ変更し、単一bind・NULL除外・既存認可結果を維持する。
+`first()` は結果からmetaが失われるため、WorkerのD1 budget wrapperでは同じSQLを `all()` で
+一度実行して行数を加算し、先頭行/指定列だけを従来と同じ形で返す。rows-read soft limitは
+単一invocationの後続処理を抑制するもので、アカウント全体の日次上限の保証ではない。
+
+実利用のボトルネックはR2 prefix別使用量とD1 Query Insightsで判定する。ローカルの
+query plan・fixture・単体テストを、本番の容量削減量・日次使用量の実測として扱わない。
+
+`top` / `recommend` のpickup artifact欠損時は、登録プロフィールだけを表示する既存仕様に
+合わせ、D1 fallbackから未使用の動画snapshot window queryを省く（3 query → 2 query）。
+`users_index` 再生成は名前・アイコンの補完が必要なため、従来どおり3 queryを使う。
+R2読取中のabortは本文を解放して伝播し、中断後のD1 fallbackを起動しない。
+
+2026-09-30のローカルMiniflare比較では、登録100人・動画5,000件・参加者15,000行のfixtureで
+同一pickupカードを返し、fallbackの `meta.rows_read` は77,863 → 43,332（約44%減）だった。
+これは当該fallback 1回の比較であり、本番の日次読取量全体の削減率ではない。
+
+#### 読み取り専用の実測（2026-09-30）
+
+既存Wrangler認証で `d1 insights flamenode_db --time-period 7d --sort-type sum --sort-by reads`
+とR2 metadata LISTを実施した。Remote SQL・migration適用・本番DELETE・deployは行っていない。
+Query Insightsの観測SQLにおける期間集計であり、アカウント全体の日次請求量ではない。
+
+| D1の主な観測SQL | 過去7日のrows read | 平均rows read/実行 | 実行回数 |
+| --- | ---: | ---: | ---: |
+| 旧 `static_artifacts` 整理（相関 `NOT EXISTS json_each`） | 7,272,373 | 161,608 | 45 |
+| YouTube同期候補・関連イベント判定 | 521,403 | 3,218 | 162 |
+| YouTube同期候補・primary event判定 | 238,061 | 1,712 | 139 |
+| スコア再計算 | 125,985 | 1,999 | 63 |
+| Creator動画snapshot window query | 49,704 | 6,213 | 8 |
+| Creator作品・参加者の全体集計 | 35,364 | 5,894 | 6 |
+
+最多の旧整理SQLは現行差分の非相関集合比較・migration 0062のindexに対応する。
+7,272,373行は**7日合計**であり、500万/日をこのSQLだけで超過した証拠ではない。
+改善後の本番削減率・日次上限超過の解消は反映後の再計測が必要。
+
+R2 `flamenode-storage` はbucket info表示1.34GB・34,222 objects。全metadataを35ページで
+列挙した合計は1,331,904,789 bytes（列挙中の更新に対するatomic snapshotではない）。
+
+| prefix | objects | bytes |
+| --- | ---: | ---: |
+| `search-postings.v1/` | 27,646 | 1,227,286,665 |
+| `incremental-cache/` | 961 | 35,993,747 |
+| `users/` | 3,594 | 28,143,934 |
+| `videos/` | 1,398 | 18,341,515 |
+| `internal/` | 462 | 17,227,470 |
+
+検索postingsが容量の約92%を占め、OpenNext cacheは約2.7%。30日超の既知形式cacheは
+871 objects・29,227,031 bytesだったが、これは候補量の読み取りであり削除実績ではない。
+cache整理だけでは主要な容量増加は解消しない。
+
+検索prefixを別途metadata LISTし、公開検索manifestを読むと、動画側は58世代・20,206 objects・
+985,534,769 bytes。このうち現行manifest参照は387 objects・19,050,622 bytes、参照外の
+旧世代は19,819 objects・966,484,147 bytesだった。`rebuildSearchIndexLite` は新世代を全件生成し、
+最後の旧artifact整理を1回20件に限定する。新規objectsが整理量を上回り得るうえ、GC専用の
+継続処理がないため、旧世代の排水が次の最優先課題。現行・生成中・利用可能なstale世代と
+D1 trackingを保護する専用bounded GCを検証してから、整理を反映する。
+users側は62世代・7,440 objects・241,751,896 bytesだが、`users/index.v2/manifest.json` の
+GETは404だった。manifest欠落だけを根拠に全世代を削除せず、再生成の失敗・追跡状態・
+利用中世代を確認してから修復・整理する。
+
+コード上に残る負荷候補（上記以外の本番順位・削減量は未計測）:
+
+- `users_index` 再生成は `loadPublicCreatorProjectionSources` で公開クリエイター全体を読み、
+  videos / video_members の集計と動画snapshotのwindow queryを実行する。3つのset-level queryに
+  集約済みだが、変更人数に比例した差分更新ではないため、作品数と再生成頻度に依存する。
+- 静的JSONが欠損・不完全なときのdegraded一覧・詳細、初回ログイン確認はD1に依存する。
+  LIMITは返却件数の上限であって走査行数の上限ではない。権限確認を省略したり、一覧を
+  不完全なまま返したりせず、Query Insightsの上位SQLとartifact欠損頻度を先に確認する。
+- `memoryQueue` はisolateを跨ぐISR重複を排除しない。Durable Objectsの導入判断には実際の
+  同時再生成数・追加コストの比較が必要であり、この変更では既存構成を維持する。
+- 検索索引の全世代生成と旧世代GCの排水不足が、確認済みのR2主要負荷。検索機能の削除・
+  結果の切捨てではなく、現行世代を保護した整理と同世代再生成抑制が必要。
 
 ミス時のみ `operation_mode` を解決（`FORCE_STATIC_ONLY` > isolate 短時間キャッシュ > KV 複製 > D1）。解決不能時は `normal` を維持し、`static_only` へ自動遷移しない。KV/D1 の一時的な binding 障害で公開の live overlay や degraded fallback まで機能制限されないようにするためである。`static_only` / `maintenance` への変更は CostGuard の明示操作だけが行い、書き込み側は従来どおり D1 正本の write guard で停止する。cost-guard で mode 変更時は D1 成功後に KV 複製を更新し、KV 失敗は成功扱いにしない。Edge middleware の maintenance redirect は別の5秒isolate cacheとKVの30秒 `cacheTtl` を使い、KV障害時は短時間だけ fail-open して500化を防ぐ。これは認可境界ではなく運用停止リダイレクトのためのbounded-staleである。
 
@@ -203,7 +303,9 @@ Creator Projection（`workers/json-generator`）は公開用カード・詳細 J
 公開 `/user?q=` と `/list?q=` は generation 固有の `postings-v1` R2 索引を優先する。query の 1/2/3 文字 gram から最小 posting を選び、directory が指す bounded page だけを読むため、検索 corpus 全体の JSON parse/filter/sort は request time に行わない。1文字などの高頻度 gram が明示したページ上限を超える場合はページを途中で切らず、旧 `search-lite.v1.json` / `search-index-lite.json` または degraded 経路へ安全に fallback する。旧 artifact は索引欠損・世代不一致時の互換 fallback として残し、欠損 posting を部分結果として返さない。users v2 の同一 generation で tracking rows と対象 R2 object の存在確認が揃っている通常 rebuild は immutable objects の PUT を省略し、repair/miss/visibility/deploy 系 reason では強制再生成する。対象 object 数が大きく R2 の全件確認を安全な subrequest 範囲で完了できない場合も skip せず、通常 rebuild で自己修復する。
 
 posting manifest は空の bucket directory を生成せず、非空 bucket の一覧を持つ。これにより小規模 generation の R2 object 数と同世代検証の subrequest を抑えつつ、未知・欠損 shard は従来どおり全体検索へ部分結果を返さず fallback する。
-users v2 の stale artifact cleanup は R2 bulk delete と JSON1 UPDATE を 1 invocation 500行以内に制限し、`hasMore` を既存 static rebuild wake に返して排水を継続する。`deleted_at` の physical purge は24時間の安全期間後、live manifest/object key を除外して bounded に実施する。current manifest generation は cleanup/purge の対象外である。
+users v2 の stale artifact cleanup は R2 bulk delete と JSON1 UPDATE を 1 invocation 500行以内に制限し、`hasMore` を既存 static rebuild wake の継続判定へ返す。これはGC対象そのものの再enqueueを保証せず、専用排水処理は残課題。`deleted_at` の physical purge は24時間の安全期間後、live manifest/object key を除外して bounded に実施する。current manifest generation は cleanup/purge の対象外である。
+
+`static_artifacts` GCのmembership判定で、外側行ごとに `json_each()` を走査する相関subqueryを使わない。live key比較は `value IS NOT NULL` を含む非相関の集合比較とし、cleanupは `generated_at ASC` と既存のbounded `LIMIT` を維持して `static_artifacts_live_cleanup_idx` を利用できる形にする。D1 rows-read soft budgetはquery完了後にしか加算されないため、単一cleanup query自体をindex利用・boundedに保つ。
 
 `static_artifacts` GCのmembership判定で、外側行ごとに `json_each()` を走査する相関subqueryを使わない。live key比較は `value IS NOT NULL` を含む非相関の集合比較とし、cleanupは `generated_at ASC` と既存のbounded `LIMIT` を維持して `static_artifacts_live_cleanup_idx` を利用できる形にする。D1 rows-read soft budgetはquery完了後にしか加算されないため、単一cleanup query自体をindex利用・boundedに保つ。
 
@@ -253,7 +355,9 @@ Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象v
 
 `list/recent.json` と `list/popular.json` は COUNTABLE 公開作品を最大 5000 件（`STATIC_LIST_MAX_ITEMS`）まで `items` に載せる。`total` は DB の全件数と `items.length` の小さい方とし、ページングが `items` を超えない。`search-index-lite.json` の `videos` も同上限。put 前に `STATIC_LIST_MAX_OBJECT_BYTES`（8MiB）でサイズガードする。users 側の 500 件上限は現状維持。
 
-`/list?event=` は専用 R2 key を持たず、degraded D1 の bounded 一覧（`fetchDegradedEventListPage`、LIMIT 24 + ページング）で補う。
+`/list?event=` は `events/{id}/base.v1.json` と条件に応じて composed `events/{id}.json` を先に試す。
+要求した並び順・ページを完全に提供できる静的artifactがない場合にのみ、degraded D1 の
+bounded 一覧（`fetchDegradedEventListPage`、LIMIT 24 + ページング）で補う。
 
 ## スコア再計算とランキング再生成
 

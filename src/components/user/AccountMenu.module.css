@@ -93,6 +93,33 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+}
+
+@media (max-width: 1180px) {
+  .trigger {
+    min-height: 44px;
+    padding-inline: 4px;
+  }
+
+  .triggerName {
+    max-width: 88px;
+  }
+
+  .popover {
+    position: fixed;
+    top: calc(var(--header-h, 50px) + 8px);
+    right: 12px;
+    width: min(310px, calc(100vw - 24px));
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 380px) {
+  .triggerName {
+    max-width: 44px;
+  }
 }
 
 .section {

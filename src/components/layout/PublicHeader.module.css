@@ -192,9 +192,10 @@
 }
 
 .accountPlaceholder {
-  min-width: 88px;
+  min-width: 44px;
   min-height: var(--header-action-h);
-  visibility: hidden;
+  justify-content: center;
+  color: var(--text-muted);
 }
 
 .accountUnavailable {
@@ -510,10 +511,9 @@
     display: none;
   }
 
-  /* タブレットではホームと同じ一つのモバイルメニューに集約する。 */
+  /* アカウントは常時表示し、公開ナビゲーションをメニューに集約する。 */
   .searchToggle,
-  .headerCta,
-  .actionNav {
+  .headerCta {
     display: none;
   }
 
@@ -603,10 +603,12 @@
   }
 
   .searchToggle,
-  .headerCta,
-  .actionNav,
-  .accountUnavailable {
+  .headerCta {
     display: none;
+  }
+
+  .accountUnavailable {
+    max-width: 112px;
   }
 
   .menuToggle {

@@ -22,13 +22,14 @@ test("public header menus share one navigation source", () => {
   );
 });
 
-test("tablet header exposes one menu entry point", () => {
+test("tablet header keeps the account visible beside the navigation menu", () => {
   const css = read("src/components/layout/PublicHeader.module.css");
   const tablet = css.match(
     /@media \(min-width: 641px\) and \(max-width: 1180px\) \{([\s\S]*?)\n\}/,
   )?.[1] ?? "";
 
-  assert.match(tablet, /\.searchToggle,\s*\n\s*\.headerCta,\s*\n\s*\.actionNav/);
+  assert.match(tablet, /\.searchToggle,\s*\n\s*\.headerCta/);
+  assert.doesNotMatch(tablet, /\.actionNav/);
   assert.match(tablet, /display:\s*none/);
   assert.match(tablet, /\.menuToggle[\s\S]*?display:\s*inline-flex/);
 });

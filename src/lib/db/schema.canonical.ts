@@ -283,6 +283,7 @@ export const eventStaff = sqliteTable(
       t.x_user_id,
     ),
     byEvent: index("event_staff_event_idx").on(t.event_id),
+    byXUser: index("event_staff_x_event_idx").on(t.x_user_id, t.event_id),
     ownerLookup: index("event_staff_event_preset_idx").on(
       t.event_id,
       t.permission_preset,

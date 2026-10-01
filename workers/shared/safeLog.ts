@@ -59,6 +59,9 @@ export interface WorkerJobLog {
   d1_statements?: number;
   d1_rows_read?: number;
   d1_rows_written?: number;
+  r2_scanned?: number;
+  r2_deleted?: number;
+  r2_bytes_deleted?: number;
   retry_count?: number;
   quota_stopped?: boolean;
   quota_stop_reason?: string;

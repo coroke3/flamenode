@@ -38,6 +38,9 @@ export async function loadPickupCreatorsFromR2(
   signal?.throwIfAborted();
   try {
     const object = await env.R2.get(PICKUP_CREATORS_OBJECT_KEY);
+    if (signal?.aborted) {
+      await cancelR2BodyBestEffort(object);
+    }
     signal?.throwIfAborted();
     if (!object) {
       logPickupCreatorsR2("missing", { key: PICKUP_CREATORS_OBJECT_KEY });
@@ -80,6 +83,7 @@ export async function loadPickupCreatorsFromR2(
 
     return { ok: true, creators: artifact.creators };
   } catch (error) {
+    signal?.throwIfAborted();
     logPickupCreatorsR2("get_error", {
       key: PICKUP_CREATORS_OBJECT_KEY,
       error: error instanceof Error ? error.message : String(error),
@@ -104,7 +108,12 @@ export async function resolvePickupCreatorsWithFallback(
     limit,
   });
   const now = Math.floor(Date.now() / 1000);
-  const sources = await loadPublicCreatorProjectionSources(env.DB, now);
+  signal?.throwIfAborted();
+  // Pickup cards use registered x_users name/icon only; loading historical
+  // video snapshots here adds a full window query whose result is discarded.
+  const sources = await loadPublicCreatorProjectionSources(env.DB, now, {
+    includeProfileFallback: false,
+  });
   signal?.throwIfAborted();
   return buildPickupCreatorsFromProjection(sources, limit);
 }

@@ -97,22 +97,16 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
 });
 
-test("公開headerはaccount summaryをidle時に自動取得しクリックせずともログイン状態を表示する", () => {
+test("公開・SSR補完headerは表示直後にsummaryを一度取得しクリックを待たない", () => {
   assert.match(
     publicHeader,
-    /const deferPublicAccountUntilIdle =\s*serverUser === undefined && !hydrateAccount/,
+    /usePublicAccountSummary\(\s*fetchAccount,\s*true,\s*\)/,
   );
-  assert.match(publicHeader, /const accountHydrationOpen = accountOpen \|\| mobileOpen/);
-  assert.match(
-    publicHeader,
-    /usePublicAccountSummary\([\s\S]*hydrateOnOpen,[\s\S]*accountHydrationOpen,[\s\S]*deferPublicAccountUntilIdle,[\s\S]*\)/,
-  );
-  assert.doesNotMatch(publicHeader, /const accountUnknown =/);
-  assert.doesNotMatch(publicHeader, /openAccountProbe/);
-  assert.match(
-    island,
-    /if \(lazy && !open && !refreshRequestedRef\.current\) \{/,
-  );
+  assert.doesNotMatch(publicHeader, /hydrateOnOpen|deferPublicAccountUntilIdle/);
+  assert.doesNotMatch(island, /requestIdleCallback|deferUntilIdle|lazyRef/);
+  assert.match(island, /attemptedRef\.current && !refreshRequestedRef\.current/);
+  assert.match(publicHeader, /accountLoading && !accountUser/);
+  assert.match(publicHeader, /accountUnavailable && !accountUser/);
 });
 
 test("account summaryのin-flight requestは無期限にloadingを維持しない", () => {
@@ -128,9 +122,7 @@ test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得す
   assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /setRefreshNonce/);
-  assert.match(island, /fetchedOnceRef/);
-  assert.match(island, /nonLazyAttemptedRef/);
-  assert.match(island, /!lazy && nonLazyAttemptedRef\.current/);
+  assert.match(island, /attemptedRef/);
   assert.match(island, /inFlightRef/);
   assert.match(island, /if \(inFlight\)/);
   assert.match(island, /refreshGenerationRef/);
@@ -145,10 +137,7 @@ test("account summary一時失敗は自動loopせず明示的に再試行でき�
   assert.match(island, /removeEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
   assert.match(island, /onClick=\{requestPublicAccountRetry\}/);
   assert.match(island, /refreshRequestedRef\.current = true/);
-  assert.match(
-    island,
-    /!lazyRef\.current \|\| openRef\.current \|\| refreshRequestedRef\.current/,
-  );
+  assert.match(island, /if \(needsRefresh\)/);
 });
 
 test("ログアウトはSignOutButton経由でhard navigateする", () => {

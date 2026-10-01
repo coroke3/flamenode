@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
+  buildPickupCreatorsFromProjection,
   buildPublicUsersIndexItems,
   loadPublicCreatorProjectionSources,
 } from "./publicCreatorProjection.ts";
@@ -241,4 +242,39 @@ test("creator projection は8 query相当を3 queryへ統合し既存意味論�
   } finally {
     sqlite.close();
   }
+});
+
+test("pickup-only projection skips snapshot ranking without changing creator cards", async () => {
+  const { sqlite, d1, getPrepareCount } = createDb();
+  try {
+    for (const [id, name, approval] of [
+      ["registered", "Registered", "approved"],
+      ["collab-only", null, "approved"],
+      ["rejected", "Rejected", "rejected"],
+    ]) {
+      sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)")
+        .run(id, name, approval);
+    }
+    insertVideo(sqlite, { id: "own", creator: "registered", icon: "https://example.com/historical.png" });
+    insertVideo(sqlite, { id: "orphan", creator: "orphan" });
+    insertVideo(sqlite, { id: "private", creator: "registered", visibility: "private" });
+    insertVideo(sqlite, { id: "summary", creator: "registered", event: "PVSFSummary" });
+    insertVideo(sqlite, { id: "rejected", creator: "rejected" });
+    for (const videoId of ["own", "orphan", "private", "summary"]) {
+      sqlite.prepare("INSERT INTO video_members (id, video_id, x_user_id) VALUES (?, ?, ?)")
+        .run(`member-${videoId}`, videoId, "collab-only");
+    }
+    const full = await loadPublicCreatorProjectionSources(d1, 100);
+    assert.equal(getPrepareCount(), 3);
+    const lean = await loadPublicCreatorProjectionSources(d1, 100, { includeProfileFallback: false });
+    assert.equal(getPrepareCount(), 5, "pickup-only load must add exactly two queries");
+    for (const limit of [0, 1, 30, 60]) {
+      assert.deepEqual(buildPickupCreatorsFromProjection(lean, limit), buildPickupCreatorsFromProjection(full, limit));
+    }
+    assert.equal(lean.displayNames.size, 0);
+    assert.equal(lean.iconUrls.size, 0);
+    assert.ok(full.iconUrls.size > 0, "fixture must exercise historical icons");
+    assert.deepEqual(buildPickupCreatorsFromProjection(lean, 60).map(row => row.id), ["collab-only", "registered"]);
+    assert.equal(buildPickupCreatorsFromProjection(lean, 60)[1].icon_url, null, "pickup must not adopt historical icons");
+  } finally { sqlite.close(); }
 });

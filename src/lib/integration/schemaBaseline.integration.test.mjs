@@ -39,6 +39,7 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0060_youtube_sync_notification_observability.sql",
     "0061_event_required_video_fields.sql",
     "0062_static_artifact_cleanup_index.sql",
+    "0063_event_staff_account_lookup_index.sql",
   ]);
   assert.equal(result.tableCount, 46);
   assert.equal(result.columnCount, 474);

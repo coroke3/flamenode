@@ -36,9 +36,10 @@ function applyActiveMigrations(sqlite) {
   sqlite.exec("PRAGMA foreign_keys = ON");
 }
 
-function d1FromSqlite(sqlite) {
+function d1FromSqlite(sqlite, queries = []) {
   return {
     prepare(sql) {
+      queries.push(sql);
       let params = [];
       const statement = {
         bind(...values) {
@@ -193,10 +194,11 @@ test("resolvePickupCreatorsWithFallback は missing 時に D1 fallback する", 
         123,
       );
 
+    const queries = [];
     const creators = await resolvePickupCreatorsWithFallback(
       {
         R2: { async get() { return null; } },
-        DB: d1FromSqlite(sqlite),
+        DB: d1FromSqlite(sqlite, queries),
       },
       60,
       "test",
@@ -204,7 +206,23 @@ test("resolvePickupCreatorsWithFallback は missing 時に D1 fallback する", 
     assert.equal(creators.length, 1);
     assert.equal(creators[0].id, "creator");
     assert.equal(creators[0].video_count, 1);
+    assert.equal(queries.length, 2);
+    assert.doesNotMatch(queries.join("\n"), /ROW_NUMBER|WITH ranked/);
   } finally {
     sqlite.close();
   }
+});
+
+test("aborted pickup load releases the R2 body and never starts a D1 fallback", async () => {
+  const controller = new AbortController();
+  let cancelled = false;
+  const env = {
+    R2: { async get() {
+      controller.abort(new Error("cancelled"));
+      return { body: { async cancel() { cancelled = true; } } };
+    } },
+    DB: { prepare() { assert.fail("aborted load must not query D1"); } },
+  };
+  await assert.rejects(resolvePickupCreatorsWithFallback(env, 30, "test", controller.signal), /cancelled/);
+  assert.equal(cancelled, true);
 });

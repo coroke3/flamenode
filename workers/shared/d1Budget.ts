@@ -1,12 +1,11 @@
 type SerializedEnv = { DB: D1Database };
 
-type AsyncStatementMethod = "all" | "first" | "run" | "raw";
+type AsyncStatementMethod = "all" | "first" | "run";
 
 const ASYNC_STATEMENT_METHODS = new Set<PropertyKey>([
   "all",
   "first",
   "run",
-  "raw",
 ] satisfies AsyncStatementMethod[]);
 
 /** D1 Free の 50 statements/invocation 手前で通常処理を安全停止する。 */
@@ -103,6 +102,30 @@ export function withD1Budget<Env extends SerializedEnv>(
         if (property === "bind") {
           return (...values: unknown[]) =>
             wrapStatement(statement.bind(...values));
+        }
+        if (property === "first") {
+          return async (columnName?: string) => {
+            reserveD1Statements(budget, 1);
+            // Native first() discards meta (and does not add LIMIT 1). Execute
+            // the identical query once with all() so COUNT/EXISTS scans count
+            // towards the rows-read budget, then preserve first()'s shape.
+            const result = await statement.all<Record<string, unknown>>();
+            recordD1ResultMetrics(budget, result);
+            const first = result.results[0] ?? null;
+            if (first === null || columnName === undefined) return first;
+            if (!Object.prototype.hasOwnProperty.call(first, columnName)) {
+              throw new Error(`D1_ERROR: Column not found (${columnName})`);
+            }
+            return first[columnName];
+          };
+        }
+        if (property === "raw") {
+          // D1 raw() returns rows without metadata, so rows_read cannot be
+          // accounted for. Fail closed instead of letting it bypass the
+          // invocation rows-read budget.
+          return async () => {
+            throw new Error("d1_raw_disallowed_in_budgeted_worker");
+          };
         }
         if (ASYNC_STATEMENT_METHODS.has(property)) {
           const method = Reflect.get(target, property, target);

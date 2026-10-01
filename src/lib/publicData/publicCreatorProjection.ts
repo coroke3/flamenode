@@ -108,11 +108,12 @@ function resolveRegisteredIcon(
 }
 
 /**
- * 公開クリエイター projection のD1入力を3 set-level queryで構築する。
+ * 公開クリエイター projection のD1入力を最大3 set-level queryで構築する。
  *
  * 1. 公開対象 x_users
  * 2. personal/collab/total/updated_at と x_users 存在判定を1集計
  * 3. 動画snapshot由来の表示名/icon fallbackを1 window query
+ *    pickup棚は登録プロフィールだけを表示するので、このqueryを省略できる。
  *
  * orphan は従来どおり「x_users自体に存在しない primary creator」のみを対象にし、
  * collab参加は orphan の件数・updated_at に加えない。
@@ -120,6 +121,7 @@ function resolveRegisteredIcon(
 export async function loadPublicCreatorProjectionSources(
   db: D1Queryable,
   now: number,
+  options: { includeProfileFallback?: boolean } = {},
 ): Promise<PublicCreatorProjectionSources> {
   const [registeredUsersResult, aggregateResult, profileFallbackResult] = await Promise.all([
     db
@@ -178,7 +180,9 @@ export async function loadPublicCreatorProjectionSources(
          LEFT JOIN x_users AS xu ON xu.id = ca.x_id`,
       )
       .all<CreatorAggregateRow>(),
-    db
+    options.includeProfileFallback === false
+      ? Promise.resolve({ results: [] as Record<string, unknown>[] })
+      : db
       .prepare(
         `WITH ranked AS (
            SELECT
