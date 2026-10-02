@@ -483,6 +483,9 @@ export async function runSyncJobs(
         async (signal) => {
           signal?.throwIfAborted();
           if (isPlaylistSyncSlot(new Date(execution.scheduledTime))) {
+            // runJob/throwIfJobFailed normalize counters and drop
+            // notification_wake_count, so keep it from the raw result.
+            let notificationWakeCount = 0;
             const playlist = await runJob(
               "sync-jobs",
               "youtube-playlist-sync",
@@ -495,6 +498,7 @@ export async function runSyncJobs(
                     dispatchSource: "cron",
                   }),
                 );
+                notificationWakeCount = result.notification_wake_count;
                 signal?.throwIfAborted();
                 return result;
               },
@@ -508,7 +512,7 @@ export async function runSyncJobs(
             if (!playlistCounters.quota_stopped) {
               await maybeContinueYoutubePlaylistSync(budgetEnv, signal);
             }
-            if (playlistCounters.notification_wake_count > 0) {
+            if (notificationWakeCount > 0) {
               await sendWorkerQueueWakeBestEffort({
                 queue: budgetEnv.NOTIFICATION_WAKE_QUEUE,
                 kind: "notification_available",
