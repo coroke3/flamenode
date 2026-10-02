@@ -280,7 +280,6 @@ export async function runContentJobsRecovery(
               xIdSlotBindRecovery = await reconcilePendingXIdSlotBinds(
                 rebuildEnv,
                 signal,
-                rebuildEnv.d1Budget,
               );
             } catch (error) {
               signal.throwIfAborted();

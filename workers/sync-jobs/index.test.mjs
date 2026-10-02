@@ -248,3 +248,12 @@ test("Queue playlist notification wake callback result is defined", () => {
   assert.match(source, /playlistCounters\?\.notification_wake_count/);
   assert.doesNotMatch(source, /playlistReturned && playlistCounters\.notification_wake_count/);
 });
+
+test("Cron playlist notification wake uses the raw result, not normalized counters", () => {
+  const cronBlock = source.slice(source.indexOf("export async function runSyncJobs"));
+  // normalizeJobCounters drops notification_wake_count; reading it from
+  // throwIfJobFailed's result made the cron wake unreachable.
+  assert.match(cronBlock, /notificationWakeCount = result\.notification_wake_count/);
+  assert.match(cronBlock, /if \(notificationWakeCount > 0\)/);
+  assert.doesNotMatch(cronBlock, /playlistCounters\.notification_wake_count/);
+});

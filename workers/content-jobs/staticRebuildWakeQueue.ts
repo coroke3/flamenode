@@ -63,7 +63,7 @@ export async function handleStaticRebuildWakeQueue(
         ...(job.d1_rows_read >= D1_ROWS_READ_SOFT_LIMIT
           ? { delaySeconds: D1_ROWS_READ_CONTINUATION_DELAY_SEC }
           : {}),
-        envFlags: env as Record<string, string | undefined>,
+        envFlags: env,
         kv: env.KV,
       });
     }

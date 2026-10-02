@@ -36,6 +36,7 @@ type QueueRow = {
   priority: string;
   attempt_count: number;
   updated_at: number;
+  reason: string | null;
 };
 
 type QueueOutcome = "processed" | "failed" | "skipped";
@@ -206,7 +207,7 @@ async function processStaticRebuildQueueImpl(
   throwIfAborted(signal, "static rebuild queue aborted");
 
   let query = `
-    SELECT id, target_type, target_id, priority, attempt_count, updated_at
+    SELECT id, target_type, target_id, priority, attempt_count, updated_at, reason
     FROM static_rebuild_queue
     WHERE status = 'pending'
       AND (next_retry_at IS NULL OR next_retry_at <= ?)

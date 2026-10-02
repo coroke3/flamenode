@@ -2,7 +2,10 @@ import "server-only";
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getEnv } from "@/lib/cloudflare";
-import { resolveQueueFeatureFlags } from "./featureFlags";
+import {
+  resolveQueueFeatureFlags,
+  type QueueFeatureFlagEnv,
+} from "./featureFlags";
 import {
   kindToBindingName,
   type QueueWakeKind,
@@ -26,7 +29,7 @@ type SendQueueWakeOptions = {
   waitUntil?: (promise: Promise<unknown>) => void;
   /** 同一処理内の重複防止用。呼び出し側が Map を共有する。 */
   sentKinds?: Set<QueueWakeKind>;
-  envFlags?: Record<string, string | undefined> | null;
+  envFlags?: QueueFeatureFlagEnv | null;
   /** youtube sync だけ別フラグで止められる */
   requireYoutubeFlag?: boolean;
   /** last-failure 記録用。未指定時は getEnv().KV を使う。 */
@@ -109,7 +112,7 @@ export async function sendQueueWakeBestEffort(
     options.envFlags ??
       (() => {
         try {
-          return getEnv() as unknown as Record<string, string | undefined>;
+          return getEnv();
         } catch {
           return null;
         }

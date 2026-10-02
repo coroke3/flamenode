@@ -223,7 +223,7 @@ function abortError(signal: AbortSignal, fallback: string): Error {
 export async function withCronLease<T>(
   env: CronLeaseEnv,
   options: CronLeaseOptions,
-  task: (signal?: AbortSignal) => Promise<T>,
+  task: (signal: AbortSignal) => Promise<T>,
 ): Promise<{ acquired: boolean; value?: T }> {
   if (options.signal?.aborted) {
     throw abortError(options.signal, `cron task aborted: ${options.jobName}`);

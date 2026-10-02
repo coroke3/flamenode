@@ -606,3 +606,13 @@ test("successful rebuild markers beyond the recovery limit are not requeued", as
   assert.equal(rows.filter((row) => row.status === "done").length, recoveryLimit);
   assert.equal(rows.filter((row) => row.status === "processing").length, 1);
 });
+
+test("queue claim selects reason so optimizedRebuildTarget receives it", () => {
+  // users_index forceRepair depends on the queued reason; without the column
+  // row.reason is always undefined.
+  assert.match(
+    queueSource,
+    /SELECT id, target_type, target_id, priority, attempt_count, updated_at, reason\s+FROM static_rebuild_queue/,
+  );
+  assert.match(queueSource, /reason: string \| null;/);
+});

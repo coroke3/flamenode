@@ -1,6 +1,7 @@
 import "server-only";
 
 import { sendQueueWakeBestEffort, type QueueSendBinding } from "./sendQueueWakeBestEffort";
+import type { QueueFeatureFlagEnv } from "./featureFlags";
 import type { QueueWakeKind, QueueWakeSource } from "./wakeBudget";
 
 const STATIC_REBUILD_WAKE_KIND: QueueWakeKind = "static_rebuild_available";
@@ -14,7 +15,7 @@ export async function wakeStaticRebuildQueueAfterCommit(
   options?: {
     sentKinds?: Set<QueueWakeKind>;
     queue?: QueueSendBinding | null;
-    envFlags?: Record<string, string | undefined> | null;
+    envFlags?: QueueFeatureFlagEnv | null;
   },
 ): Promise<{ sent: boolean; reason?: string }> {
   return sendQueueWakeBestEffort({

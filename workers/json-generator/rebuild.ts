@@ -323,7 +323,6 @@ export async function rebuildTarget(
   targetType: string,
   targetId: string,
   signal?: AbortSignal,
-  reason?: string | null,
 ): Promise<{ followUpPending: boolean }> {
   throwIfAborted(signal);
   let followUpPending = false;
@@ -402,10 +401,10 @@ export async function rebuildTarget(
       await rebuildEventRelease(env, targetId, signal);
       break;
     case "event":
-      await rebuildEvent(env, targetId, signal, reason);
+      await rebuildEvent(env, targetId, signal);
       break;
     case "video":
-      await rebuildVideo(env, targetId, signal, reason);
+      await rebuildVideo(env, targetId, signal);
       break;
     case "user":
       await rebuildUser(env, targetId, signal);
@@ -2394,7 +2393,6 @@ async function rebuildEvent(
   env: Env,
   eventId: string,
   signal?: RebuildSignal,
-  reason?: string | null,
 ): Promise<void> {
   throwIfAborted(signal);
   const ev = await loadEventVisibilityRow(env, eventId, signal);
@@ -2966,7 +2964,6 @@ async function rebuildVideo(
   env: Env,
   videoId: string,
   signal?: RebuildSignal,
-  reason?: string | null,
 ): Promise<void> {
   throwIfAborted(signal);
   const row = await fetchVideoRowForRebuild(env, videoId, signal);

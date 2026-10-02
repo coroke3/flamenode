@@ -962,7 +962,6 @@ export async function optimizedRebuildTarget(
     targetType,
     targetId,
     signal,
-    reason,
   );
   if (targetType === "users_index") {
     const v2 = await rebuildUsersIndexV2FromLegacyArtifact(env, signal, {

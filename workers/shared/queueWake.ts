@@ -14,7 +14,10 @@ import {
   createQueueWakeMessage,
   parseQueueWakeMessage,
 } from "../../src/lib/queues/wakeMessage.ts";
-import { resolveQueueFeatureFlags } from "../../src/lib/queues/featureFlags.ts";
+import {
+  resolveQueueFeatureFlags,
+  type QueueFeatureFlagEnv,
+} from "../../src/lib/queues/featureFlags.ts";
 import { recordQueueWakeFailureBestEffort } from "./queueWakeFailure.ts";
 
 export {
@@ -72,7 +75,7 @@ export async function sendWorkerQueueWakeBestEffort(input: {
   queue: WorkerQueueSendBinding | null | undefined;
   kind: QueueWakeKind;
   source: QueueWakeSource;
-  envFlags?: Record<string, string | undefined> | null;
+  envFlags?: QueueFeatureFlagEnv | null;
   requireYoutubeFlag?: boolean;
   /** Queue backpressure; Cloudflare Queues accepts integer delays from 0 to 86400 seconds. */
   delaySeconds?: number;
