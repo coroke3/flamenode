@@ -277,7 +277,7 @@ function videoEnv({ visibility = "public", youtubeId = "new-youtube" } = {}) {
       },
       async head() { return null; },
       async put(key) { puts.push(key); },
-      async delete(key) { deletes.push(key); },
+      async delete(keys) { deletes.push(...[keys].flat()); },
     },
     KV: { put: async () => {} },
   };
@@ -301,7 +301,7 @@ function eventEnv({ visibility = "public" } = {}) {
     R2: {
       async head() { return null; },
       async put(key) { puts.push(key); },
-      async delete(key) { deletes.push(key); },
+      async delete(keys) { deletes.push(...[keys].flat()); },
     },
     KV: { put: async () => {} },
   };

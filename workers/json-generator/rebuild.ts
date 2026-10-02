@@ -632,19 +632,41 @@ export async function removeTrackedArtifacts(
      WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
      ORDER BY generated_at ASC LIMIT ?`,
   ).bind(targetType, targetId, limit).all<ArtifactRow>();
+  const objectKeys = (rows.results ?? []).map((row) => row.object_key);
+  await deleteTrackedArtifactObjects(env, { targetType, targetId }, objectKeys, signal);
+  return objectKeys.length;
+}
+
+/**
+ * R2 bulk delete (max 1000 keys) and one JSON1 UPDATE instead of 2 subrequests
+ * per row. deleted_at is set only after R2 delete succeeds, so a failed delete
+ * leaves every row live for the next retry.
+ */
+async function deleteTrackedArtifactObjects(
+  env: Env,
+  target: Pick<ArtifactTarget, "targetType" | "targetId">,
+  objectKeys: readonly string[],
+  signal?: RebuildSignal,
+): Promise<void> {
   throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  for (const row of rows.results ?? []) {
-    throwIfAborted(signal);
-    await env.R2.delete(row.object_key);
-    throwIfAborted(signal);
-    await env.DB.prepare(
-      `UPDATE static_artifacts SET deleted_at = ?
-       WHERE target_type = ? AND target_id = ? AND object_key = ? AND deleted_at IS NULL`,
-    ).bind(now, targetType, targetId, row.object_key).run();
-    throwIfAborted(signal);
-  }
-  return rows.results?.length ?? 0;
+  if (objectKeys.length === 0) return;
+  await env.R2.delete([...objectKeys]);
+  throwIfAborted(signal);
+  await env.DB.prepare(
+    `UPDATE static_artifacts SET deleted_at = ?
+     WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+       AND object_key IN (
+         SELECT CAST(value AS TEXT)
+         FROM json_each(?)
+         WHERE value IS NOT NULL
+       )`,
+  ).bind(
+    Math.floor(Date.now() / 1000),
+    target.targetType,
+    target.targetId,
+    JSON.stringify(objectKeys),
+  ).run();
+  throwIfAborted(signal);
 }
 
 // Keep the existing cleanup order and bounded batch size. The partial cleanup
@@ -675,18 +697,12 @@ async function reconcileTrackedArtifacts(
     JSON.stringify(liveKeys),
     limit,
   ).all<ArtifactRow>();
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  for (const row of rows.results ?? []) {
-    throwIfAborted(signal);
-    await env.R2.delete(row.object_key);
-    throwIfAborted(signal);
-    await env.DB.prepare(
-      `UPDATE static_artifacts SET deleted_at = ?
-       WHERE target_type = ? AND target_id = ? AND object_key = ? AND deleted_at IS NULL`,
-    ).bind(now, target.targetType, target.targetId, row.object_key).run();
-    throwIfAborted(signal);
-  }
+  await deleteTrackedArtifactObjects(
+    env,
+    target,
+    (rows.results ?? []).map((row) => row.object_key),
+    signal,
+  );
 }
 
 async function loadActivePublicEventItemsForTopHero(
