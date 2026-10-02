@@ -8,7 +8,6 @@ import {
 } from "./schema";
 import { coalescedVideoScoreDesc } from "./videoScoreSql";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
-import { resolveMissingIcons } from "./iconResolution";
 import {
   countablePublicVideoCondition,
   eventPublicVideoLinkCondition,
@@ -157,7 +156,7 @@ export async function fetchPublicVideos(db: DB, params: ListVideoParams) {
     .orderBy(publicVideoOrderBy(sort))
     .limit(limit)
     .offset(offset);
-  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+  return uniqueBy(rows, (row) => row.id);
 }
 
 /**
@@ -189,7 +188,7 @@ export async function fetchPublicVideosPage(
         : 0;
   const rows = pageRows.map(({ total_count: _totalCount, ...row }) => row);
   return {
-    items: await resolveMissingIcons(db, uniqueBy(rows, (row) => row.id)),
+    items: uniqueBy(rows, (row) => row.id),
     total,
   };
 }
@@ -215,7 +214,7 @@ export async function fetchPublicVideoByIdOrYoutube(
       )!,
     )
     .limit(1);
-  return (await resolveMissingIcons(db, rows))[0] ?? null;
+  return rows[0] ?? null;
 }
 
 /** 公開作品の総数。範囲外ページと一覧以外の呼び出し向け。 */

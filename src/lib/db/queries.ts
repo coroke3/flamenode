@@ -6,7 +6,6 @@ import {
   xUsers,
 } from "./schema";
 import { creatorIconExpr, creatorNameExpr } from "./displayExpr";
-import { resolveMissingIcons } from "./iconResolution";
 import { resolveMemberIcons } from "./xIconResolution";
 import type { DB } from "./client";
 import { uniqueBy } from "@/lib/utils/unique";
@@ -104,7 +103,7 @@ export async function fetchRecommendedVideos(db: DB, limit = 40) {
     .where(publicVideoCondition)
     .orderBy(coalescedVideoScoreDesc, desc(videos.scheduled_time))
     .limit(limit);
-  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+  return uniqueBy(rows, (row) => row.id);
 }
 
 /**
@@ -126,7 +125,7 @@ export async function fetchUnderratedVideos(db: DB, limit = 60) {
     .where(publicVideoCondition)
     .orderBy(coalescedVideoScoreAsc, desc(videos.scheduled_time))
     .limit(limit);
-  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+  return uniqueBy(rows, (row) => row.id);
 }
 
 /** 最新作品 (scheduled_time 降順)。 */
@@ -137,7 +136,7 @@ export async function fetchLatestVideos(db: DB, limit = 30) {
     .where(publicVideoCondition)
     .orderBy(desc(videos.scheduled_time))
     .limit(limit);
-  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+  return uniqueBy(rows, (row) => row.id);
 }
 
 /** 直近 N 件のイベント。 */
@@ -157,7 +156,7 @@ export async function fetchAllPublicVideosForEvent(db: DB, eventId: string) {
     .from(videos)
     .where(publicEventVideoCondition(eventId))
     .orderBy(asc(videos.scheduled_time), asc(videos.id));
-  return resolveMissingIcons(db, uniqueBy(rows, (row) => row.id));
+  return uniqueBy(rows, (row) => row.id);
 }
 
 export async function countVideosForEvent(

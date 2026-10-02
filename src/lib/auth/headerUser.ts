@@ -4,7 +4,6 @@ import { and, eq } from "drizzle-orm";
 import { getDatabase, withDatabase } from "@/lib/cloudflare";
 import type { DB } from "@/lib/db/client";
 import { xIdentityRequests, users } from "@/lib/db/schema";
-import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "./resolveActiveXId";
 import { getEditableEventIds } from "./ownership";
@@ -148,14 +147,7 @@ async function fetchHeaderXIdEntries(
   }
 
   const entries = Array.from(byNormalizedXId.values());
-  const withIconFallback = await resolveMissingIcons(
-    db,
-    entries.map((entry) => ({ creator_x_user_id: entry.x_user_id, icon_url: entry.icon_url })),
-  );
-  return entries.map((entry, index) => ({
-    ...entry,
-    icon_url: withIconFallback[index]?.icon_url ?? entry.icon_url,
-  }));
+  return entries;
 }
 
 async function resolveAuthoritativeUserSnapshot(

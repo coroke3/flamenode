@@ -10,7 +10,6 @@ import {
 } from "@/lib/db/schema";
 import { requireSession } from "@/lib/auth/guard";
 import { creatorIconExpr, creatorNameExpr } from "@/lib/db/displayExpr";
-import { resolveMissingIcons } from "@/lib/db/iconResolution";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 
@@ -76,7 +75,7 @@ export default async function DashboardLibraryPage({
         )!,
       )
       .orderBy(desc(videosTable.scheduled_time));
-    videos = (await resolveMissingIcons(db, rows)) as VideoCardData[];
+    videos = rows as VideoCardData[];
   }
 
   const playlistId = tab === "like" ? "lib-like" : "lib-bookmark";
