@@ -91,19 +91,40 @@ function createEnv() {
     },
   };
   const objects = new Map();
+  const log = { puts: [], deletes: [], failPostingPutAfter: null, postingPuts: 0 };
   const R2 = {
     async head(key) {
       return objects.has(key) ? {} : null;
     },
+    async get(key) {
+      if (!objects.has(key)) return null;
+      const body = objects.get(key);
+      return {
+        size: body.length,
+        async json() {
+          return JSON.parse(body);
+        },
+      };
+    },
     async put(key, value) {
+      if (key.startsWith("search-postings.v1/")) {
+        log.postingPuts += 1;
+        if (log.failPostingPutAfter !== null && log.postingPuts > log.failPostingPutAfter) {
+          throw new Error("injected_put_failure");
+        }
+      }
+      log.puts.push(key);
       objects.set(key, String(value));
       return {};
     },
     async delete(keys) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        log.deletes.push(key);
+        objects.delete(key);
+      }
     },
   };
-  return { DB, R2, KV: {}, objects, sqlite };
+  return { DB, R2, KV: {}, objects, sqlite, log };
 }
 
 test("search-index posting rebuild tracks bounded shards and keeps them after target cleanup", async () => {
@@ -128,5 +149,117 @@ test("search-index posting rebuild tracks bounded shards and keeps them after ta
   for (const key of ["search-index-lite.json", "search-index-postings.v1/manifest.json", ...postingKeys]) {
     assert.ok(tracked.includes(key), `missing tracking row for ${key}`);
   }
+  env.sqlite.close();
+});
+
+const MANIFEST_KEY = "search-index-postings.v1/manifest.json";
+const isPostingKey = (key) => key.startsWith("search-postings.v1/");
+
+function resetLog(env) {
+  env.log.puts.length = 0;
+  env.log.deletes.length = 0;
+  env.log.failPostingPutAfter = null;
+  env.log.postingPuts = 0;
+}
+
+function untrackFirstPostingKey(env, key) {
+  env.sqlite
+    .prepare(
+      `UPDATE static_artifacts SET deleted_at = 1
+       WHERE target_type = 'search_index' AND target_id = 'global' AND object_key = ?`,
+    )
+    .run(key);
+}
+
+test("same generation with complete tracking skips posting and manifest PUTs", async () => {
+  const env = createEnv();
+  await rebuildTarget(env, "search_index", "global");
+  const postingKeys = [...env.objects.keys()].filter(isPostingKey).sort();
+  assert.ok(postingKeys.length > 0);
+  resetLog(env);
+
+  await rebuildTarget(env, "search_index", "global");
+
+  assert.deepEqual(env.log.puts.filter((key) => isPostingKey(key) || key === MANIFEST_KEY), []);
+  assert.deepEqual(env.log.deletes, []);
+  assert.deepEqual([...env.objects.keys()].filter(isPostingKey).sort(), postingKeys);
+  env.sqlite.close();
+});
+
+test("same generation with incomplete tracking falls back to the full PUT path", async () => {
+  const env = createEnv();
+  await rebuildTarget(env, "search_index", "global");
+  const postingKeys = [...env.objects.keys()].filter(isPostingKey);
+  untrackFirstPostingKey(env, postingKeys[0]);
+  resetLog(env);
+
+  await rebuildTarget(env, "search_index", "global");
+
+  assert.equal(new Set(env.log.puts.filter(isPostingKey)).size, postingKeys.length);
+  assert.ok(env.log.puts.includes(MANIFEST_KEY));
+  const live = env.sqlite
+    .prepare(
+      `SELECT COUNT(*) AS c FROM static_artifacts
+       WHERE target_type = 'search_index' AND target_id = 'global'
+         AND deleted_at IS NULL AND object_key = ?`,
+    )
+    .get(postingKeys[0]);
+  assert.equal(live.c, 1);
+  env.sqlite.close();
+});
+
+test("same-generation PUT failure never deletes keys of the live generation", async () => {
+  const env = createEnv();
+  await rebuildTarget(env, "search_index", "global");
+  const postingKeys = [...env.objects.keys()].filter(isPostingKey);
+  untrackFirstPostingKey(env, postingKeys[0]);
+  resetLog(env);
+  env.log.failPostingPutAfter = 2;
+
+  await assert.rejects(rebuildTarget(env, "search_index", "global"), /injected_put_failure/);
+
+  assert.deepEqual(env.log.deletes, []);
+  for (const key of postingKeys) assert.ok(env.objects.has(key), `live key deleted: ${key}`);
+  env.sqlite.close();
+});
+
+test("same-generation tracking failure never deletes keys of the live generation", async () => {
+  const env = createEnv();
+  await rebuildTarget(env, "search_index", "global");
+  const postingKeys = [...env.objects.keys()].filter(isPostingKey);
+  untrackFirstPostingKey(env, postingKeys[0]);
+  resetLog(env);
+  env.sqlite.exec(
+    `CREATE TRIGGER fail_static_artifacts_insert BEFORE INSERT ON static_artifacts
+     BEGIN SELECT RAISE(ABORT, 'injected_tracking_failure'); END;`,
+  );
+  env.sqlite.exec(
+    `CREATE TRIGGER fail_static_artifacts_update BEFORE UPDATE ON static_artifacts
+     BEGIN SELECT RAISE(ABORT, 'injected_tracking_failure'); END;`,
+  );
+
+  await assert.rejects(rebuildTarget(env, "search_index", "global"), /injected_tracking_failure/);
+
+  assert.deepEqual(env.log.deletes, []);
+  for (const key of postingKeys) assert.ok(env.objects.has(key), `live key deleted: ${key}`);
+  env.sqlite.close();
+});
+
+test("different-generation PUT failure deletes only the pending new keys", async () => {
+  const env = createEnv();
+  await rebuildTarget(env, "search_index", "global");
+  const liveKeys = [...env.objects.keys()].filter(isPostingKey);
+  env.sqlite.prepare(`UPDATE videos SET title = 'Changed title' WHERE id = 'video-0'`).run();
+  resetLog(env);
+  env.log.failPostingPutAfter = 2;
+
+  await assert.rejects(rebuildTarget(env, "search_index", "global"), /injected_put_failure/);
+
+  assert.equal(env.log.deletes.length, 2);
+  for (const key of env.log.deletes) {
+    assert.ok(isPostingKey(key));
+    assert.ok(!liveKeys.includes(key), `live key deleted: ${key}`);
+  }
+  for (const key of liveKeys) assert.ok(env.objects.has(key), `live key deleted: ${key}`);
   env.sqlite.close();
 });

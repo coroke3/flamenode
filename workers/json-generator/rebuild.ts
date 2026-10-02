@@ -129,6 +129,7 @@ import { rebuildMemberSuggestions } from "./memberSuggestionsArtifacts.ts";
 import {
   buildStaticVideoSearchPostingArtifacts,
   normalizeSearchVideo,
+  normalizeStaticVideoSearchPostingManifest,
   staticVideoSearchPostingDirectoryObjectKey,
   staticVideoSearchPostingManifestObjectKey,
   staticVideoSearchPostingPageObjectKey,
@@ -1652,48 +1653,87 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     signal,
   );
 
-  const liveKeys = ["search-index-lite.json"];
+  const postingDirectoryEntries = postings.directories.map(({ bucket, directory }) => ({
+    key: staticVideoSearchPostingDirectoryObjectKey(generation, bucket),
+    body: directory,
+  }));
+  const postingPageEntries = postings.pages.map(({ bucket, page }) => ({
+    key: staticVideoSearchPostingPageObjectKey(generation, bucket, page.page),
+    body: page,
+  }));
+  const manifestKey = staticVideoSearchPostingManifestObjectKey(generation);
+  const liveKeys = [
+    "search-index-lite.json",
+    ...postingDirectoryEntries.map((entry) => entry.key),
+    ...postingPageEntries.map((entry) => entry.key),
+  ];
+  for (const entry of [...postingDirectoryEntries, ...postingPageEntries]) {
+    assertStaticListObjectSize(entry.key, entry.body);
+  }
+  assertStaticListObjectSize(manifestKey, postings.manifest);
+
+  // Posting keys embed the content-hash generation, so a same-generation
+  // rebuild would rewrite byte-identical immutable objects (Class A each).
+  // Skip when the live manifest already points at this generation and D1
+  // tracking proves every expected key was written. Stale generations are
+  // still reconciled below.
+  const currentManifest = await readCurrentSearchPostingManifestGeneration(env, signal);
+  if (
+    currentManifest.kind === "known" &&
+    currentManifest.generation === postings.manifest.generation &&
+    (await hasCompleteSearchPostingTracking(env, [...liveKeys.slice(1), manifestKey], signal))
+  ) {
+    liveKeys.push(manifestKey);
+    console.info(
+      JSON.stringify({
+        service: "search-index",
+        result: "generation_same_skip",
+        generation,
+      }),
+    );
+    await reconcileTrackedArtifacts(
+      env,
+      { targetType: "search_index", targetId: "global" },
+      liveKeys,
+      20,
+      signal,
+    );
+    return;
+  }
+
+  // The keys written below may be byte-identical to the live generation's
+  // keys (same generation retry); deleting them on failure would break the
+  // currently published manifest. Delete only when the live manifest is
+  // known not to reference this generation.
+  const mayDeletePendingOnFailure =
+    currentManifest.kind === "absent" ||
+    (currentManifest.kind === "known" && currentManifest.generation !== postings.manifest.generation);
   const pendingPostingArtifacts: PendingStaticArtifact[] = [];
   try {
-    for (const { bucket, directory } of postings.directories) {
-      const key = staticVideoSearchPostingDirectoryObjectKey(generation, bucket);
-      assertStaticListObjectSize(key, directory);
+    for (const { key, body } of [...postingDirectoryEntries, ...postingPageEntries]) {
       pendingPostingArtifacts.push(
         await putJsonUntracked(
           env,
           key,
-          directory,
+          body,
           staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex),
           signal,
         ),
       );
-      liveKeys.push(key);
-    }
-    for (const { bucket, page } of postings.pages) {
-      const key = staticVideoSearchPostingPageObjectKey(generation, bucket, page.page);
-      assertStaticListObjectSize(key, page);
-      pendingPostingArtifacts.push(
-        await putJsonUntracked(
-          env,
-          key,
-          page,
-          staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.searchIndex),
-          signal,
-        ),
-      );
-      liveKeys.push(key);
     }
   } catch (error) {
-    try {
-      await env.R2.delete(pendingPostingArtifacts.map((artifact) => artifact.objectKey));
-    } catch (cleanupError) {
-      console.warn(
-        JSON.stringify({
-          service: "search-index",
-          result: "posting_put_cleanup_failed",
-          error_name: cleanupError instanceof Error ? cleanupError.name : "UnknownError",
-        }),
-      );
+    if (mayDeletePendingOnFailure) {
+      try {
+        await env.R2.delete(pendingPostingArtifacts.map((artifact) => artifact.objectKey));
+      } catch (cleanupError) {
+        console.warn(
+          JSON.stringify({
+            service: "search-index",
+            result: "posting_put_cleanup_failed",
+            error_name: cleanupError instanceof Error ? cleanupError.name : "UnknownError",
+          }),
+        );
+      }
     }
     throw error;
   }
@@ -1705,21 +1745,21 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
       signal,
     );
   } catch (error) {
-    try {
-      await env.R2.delete(pendingPostingArtifacts.map((artifact) => artifact.objectKey));
-    } catch (cleanupError) {
-      console.warn(
-        JSON.stringify({
-          service: "search-index",
-          result: "posting_orphan_cleanup_failed",
-          error_name: cleanupError instanceof Error ? cleanupError.name : "UnknownError",
-        }),
-      );
+    if (mayDeletePendingOnFailure) {
+      try {
+        await env.R2.delete(pendingPostingArtifacts.map((artifact) => artifact.objectKey));
+      } catch (cleanupError) {
+        console.warn(
+          JSON.stringify({
+            service: "search-index",
+            result: "posting_orphan_cleanup_failed",
+            error_name: cleanupError instanceof Error ? cleanupError.name : "UnknownError",
+          }),
+        );
+      }
     }
     throw error;
   }
-  const manifestKey = staticVideoSearchPostingManifestObjectKey(generation);
-  assertStaticListObjectSize(manifestKey, postings.manifest);
   await putJson(
     env,
     manifestKey,
@@ -1736,6 +1776,66 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     20,
     signal,
   );
+}
+
+type SearchPostingManifestState =
+  | { kind: "absent" }
+  | { kind: "known"; generation: string }
+  | { kind: "unknown" };
+
+async function readCurrentSearchPostingManifestGeneration(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<SearchPostingManifestState> {
+  throwIfAborted(signal);
+  try {
+    if (typeof env.R2.get !== "function") return { kind: "unknown" };
+    const object = await env.R2.get(staticVideoSearchPostingManifestObjectKey(""));
+    throwIfAborted(signal);
+    if (!object) return { kind: "absent" };
+    const manifest = normalizeStaticVideoSearchPostingManifest(await object.json());
+    throwIfAborted(signal);
+    return manifest ? { kind: "known", generation: manifest.generation } : { kind: "unknown" };
+  } catch {
+    throwIfAborted(signal);
+    return { kind: "unknown" };
+  }
+}
+
+/**
+ * One D1 COUNT (no per-object R2 HEAD, to stay inside subrequest limits):
+ * true only when every expected posting key already has a live tracking row.
+ */
+async function hasCompleteSearchPostingTracking(
+  env: Env,
+  expectedKeys: readonly string[],
+  signal?: RebuildSignal,
+): Promise<boolean> {
+  throwIfAborted(signal);
+  const keys = [...new Set(expectedKeys)];
+  if (keys.length === 0) return false;
+  try {
+    const result = await env.DB.prepare(
+      `SELECT COUNT(*) AS count
+         FROM static_artifacts
+        WHERE target_type = 'search_index'
+          AND target_id = 'global'
+          AND deleted_at IS NULL
+          AND object_key IN (
+            SELECT CAST(value AS TEXT)
+            FROM json_each(?)
+            WHERE value IS NOT NULL
+          )`,
+    )
+      .bind(JSON.stringify(keys))
+      .first<{ count: number | string }>();
+    throwIfAborted(signal);
+    const count = Number(result?.count ?? 0);
+    return Number.isSafeInteger(count) && count === keys.length;
+  } catch {
+    throwIfAborted(signal);
+    return false;
+  }
 }
 
 /**
