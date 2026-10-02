@@ -10,6 +10,12 @@
 
 未設定・短すぎる場合、dry-runとapplyは`preview_unavailable`でfail-closedになる。
 
+## ページ取得
+
+- Spreadsheetのページ取得は`LIMIT limit+1`の1 queryだけで、レスポンスは総件数ではなく`hasMore`を返す。全件`SELECT COUNT(*)`はD1 rows readを表サイズ分消費するため行わない。
+- UIは「ページ N」と「次へ」（`hasMore`時のみ有効）を表示し、総件数・総ページ数は出さない。範囲外ページは空ページを返す（再queryや補正はしない）。
+- exportも`LIMIT limit+1`で`truncated`を判定する。
+
 ## preview / apply
 
 - Spreadsheet APIはUTF-8の`application/json`だけを受け付け、`Content-Length`と実受信bytesの両方を8 MiB上限で検査する。

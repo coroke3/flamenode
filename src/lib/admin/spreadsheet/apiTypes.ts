@@ -24,7 +24,7 @@ export type SpreadsheetPageData = {
   columns: SpreadsheetColumnMeta[];
   primaryKeys: string[];
   rows: Record<string, unknown>[];
-  total: number;
+  hasMore: boolean;
   page: number;
   limit: number;
 };

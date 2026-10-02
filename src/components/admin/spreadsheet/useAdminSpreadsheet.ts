@@ -175,10 +175,13 @@ export function useAdminSpreadsheet(initialTable?: string) {
     try {
       const json = await fetchSpreadsheetPage(activeTable, page, abort.signal);
       if (abort.signal.aborted || seq !== loadPageSeqRef.current) return;
-      setData(json);
-      if (typeof json.page === "number" && json.page >= 1 && json.page !== page) {
-        setPage(json.page);
+      // Without a total count, an emptied trailing page steps back one page
+      // (e.g. after deleting its last rows) instead of staying blank.
+      if (json.rows.length === 0 && page > 1) {
+        setPage(page - 1);
+        return;
       }
+      setData(json);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (seq !== loadPageSeqRef.current) return;
@@ -192,12 +195,6 @@ export function useAdminSpreadsheet(initialTable?: string) {
   React.useEffect(() => {
     void loadPage();
   }, [loadPage]);
-
-  React.useEffect(() => {
-    if (!data) return;
-    const maxPage = Math.max(1, Math.ceil(data.total / Math.max(1, data.limit)));
-    if (page > maxPage) setPage(maxPage);
-  }, [data, page]);
 
   React.useEffect(() => {
     resetHistory();
@@ -505,9 +502,6 @@ export function useAdminSpreadsheet(initialTable?: string) {
     await loadPage();
   }, [addDraft, data, loadPage, requirePrimaryKeyFromRow, resetHistory]);
 
-  const totalPages = data
-    ? Math.max(1, Math.ceil(data.total / Math.max(1, data.limit)))
-    : 1;
   const editable = data?.def.mode === "editable";
   const canUndo = history.undo.length > 0 && !historyBusy;
   const canRedo = history.redo.length > 0 && !historyBusy;
@@ -544,7 +538,6 @@ export function useAdminSpreadsheet(initialTable?: string) {
     undo,
     redo,
     resetHistory,
-    totalPages,
     editable,
     canUndo,
     canRedo,

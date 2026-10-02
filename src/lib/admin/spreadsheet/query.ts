@@ -58,7 +58,7 @@ export interface SpreadsheetPageResult {
   columns: SpreadsheetColumnMeta[];
   primaryKeys: string[];
   rows: Record<string, unknown>[];
-  total: number;
+  hasMore: boolean;
   page: number;
   limit: number;
 }
@@ -182,11 +182,11 @@ async function queryTableRows(
   ctx: SpreadsheetTableContext,
   limit: number,
   offset?: number,
-): Promise<{ total: number; rawRows: Record<string, unknown>[] }> {
+): Promise<{ hasMore: boolean; rawRows: Record<string, unknown>[] }> {
   const db = await getSpreadsheetD1();
-  const countStmt = db.prepare(
-    `SELECT COUNT(*) AS c FROM ${ctx.quotedTable}`,
-  );
+  // 全件 COUNT は表全体を走査してD1 rows readを消費するため行わない。
+  // limit + 1 件取得し、超過分の有無だけで次ページの存在を判定する。
+  const fetchLimit = limit + 1;
   const dataStmt =
     offset != null
       ? db.prepare(
@@ -196,16 +196,15 @@ async function queryTableRows(
           `SELECT * FROM ${ctx.quotedTable} ORDER BY ${ctx.orderColumn} LIMIT ?`,
         );
 
-  const [countRow, data] = await Promise.all([
-    countStmt.first<{ c: number }>(),
+  const data =
     offset != null
-      ? dataStmt.bind(limit, offset).all<Record<string, unknown>>()
-      : dataStmt.bind(limit).all<Record<string, unknown>>(),
-  ]);
+      ? await dataStmt.bind(fetchLimit, offset).all<Record<string, unknown>>()
+      : await dataStmt.bind(fetchLimit).all<Record<string, unknown>>();
 
+  const rows = data.results ?? [];
   return {
-    total: Number(countRow?.c ?? 0),
-    rawRows: data.results ?? [],
+    hasMore: rows.length > limit,
+    rawRows: rows.slice(0, limit),
   };
 }
 
@@ -675,22 +674,13 @@ export async function fetchSpreadsheetPage(opts: {
 }): Promise<SpreadsheetPageResult> {
   const ctx = await resolveSpreadsheetTableContext(opts.table);
   const limit = clampSpreadsheetPageLimit(opts.limit);
-  let page = normalizeSpreadsheetPage(opts.page);
+  const page = normalizeSpreadsheetPage(opts.page);
 
-  let { total, rawRows } = await queryTableRows(
+  const { hasMore, rawRows } = await queryTableRows(
     ctx,
     limit,
     (page - 1) * limit,
   );
-  const maxPage = Math.max(1, Math.ceil(total / Math.max(1, limit)));
-  if (page > maxPage) {
-    page = maxPage;
-    ({ total, rawRows } = await queryTableRows(
-      ctx,
-      limit,
-      (page - 1) * limit,
-    ));
-  }
 
   const columns = enrichSpreadsheetColumns(ctx.def, ctx.columns);
 
@@ -699,7 +689,7 @@ export async function fetchSpreadsheetPage(opts: {
     columns,
     primaryKeys: ctx.primaryKeys,
     rows: rawRows.map((r) => serializeRow(r, columns)),
-    total,
+    hasMore,
     page,
     limit,
   };
@@ -812,7 +802,7 @@ export async function fetchSpreadsheetExport(
 ): Promise<SpreadsheetExportResult> {
   const ctx = await resolveSpreadsheetTableContext(table);
   const limit = Math.min(Math.max(1, maxRows), SPREADSHEET_EXPORT_MAX_ROWS);
-  const { total, rawRows } = await queryTableRows(ctx, limit);
+  const { hasMore, rawRows } = await queryTableRows(ctx, limit);
 
   const columns = enrichSpreadsheetColumns(ctx.def, ctx.columns);
 
@@ -821,7 +811,7 @@ export async function fetchSpreadsheetExport(
     columns,
     primaryKeys: ctx.primaryKeys,
     rows: rawRows.map((r) => serializeRow(r, columns)),
-    truncated: total > limit,
+    truncated: hasMore,
   };
 }
 

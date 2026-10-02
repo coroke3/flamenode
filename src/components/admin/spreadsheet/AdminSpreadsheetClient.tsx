@@ -67,7 +67,7 @@ export function AdminSpreadsheetClient({
               <>
                 <strong>{ss.data.def.label}</strong>
                 <span> ({ss.data.def.table})</span>
-                <span> · {ss.data.total.toLocaleString()} 行</span>
+                <span> · ページ {ss.data.page}</span>
                 <span> · {ss.data.limit} 件/ページ</span>
                 <span>
                   {" "}
@@ -191,12 +191,12 @@ export function AdminSpreadsheetClient({
               前へ
             </button>
             <span>
-              {ss.page} / {ss.totalPages}
+              ページ {ss.page}
             </span>
             <button
               type="button"
               className="fn-btn fn-btn-ghost fn-btn-sm"
-              disabled={ss.page >= ss.totalPages || ss.loading}
+              disabled={!ss.data.hasMore || ss.loading}
               onClick={() => ss.setPage((p) => p + 1)}
             >
               次へ
