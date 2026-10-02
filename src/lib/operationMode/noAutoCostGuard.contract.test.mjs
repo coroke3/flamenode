@@ -153,16 +153,25 @@ test("writeGuard reads operation_mode for gating but does not mutate it", async 
 });
 
 test("disabled_features_json is read-only in Spreadsheet and controlled by CostGuard action", async () => {
-  const { resolveSpreadsheetTableDef, isSpreadsheetColumnEditable, SPREADSHEET_COST_GUARD_READONLY_COLUMNS } =
+  const { resolveSpreadsheetTableDef, isSpreadsheetColumnEditable } =
     await import("../admin/spreadsheet/registry.ts");
   const registry = await readFile(
     path.join(repoRoot, "src/lib/admin/spreadsheet/registry.ts"),
     "utf8",
   );
-  assert.match(registry, /system_settings\.disabled_features_json/);
-  assert.match(registry, /SPREADSHEET_COST_GUARD_READONLY_COLUMNS/);
+  assert.doesNotMatch(registry, /SPREADSHEET_SYSTEM_SETTINGS_EDITABLE_COLUMNS/);
+  assert.doesNotMatch(registry, /SPREADSHEET_COST_GUARD_READONLY_COLUMNS/);
   const def = resolveSpreadsheetTableDef("system_settings", true);
-  for (const column of SPREADSHEET_COST_GUARD_READONLY_COLUMNS) {
+  assert.equal(def.mode, "readonly");
+  for (const column of [
+    "disabled_features_json",
+    "operation_mode",
+    "cost_guard_reason",
+    "cost_guard_updated_by_user_id",
+    "cost_guard_updated_at",
+    "cost_guard_exception_until",
+    "cost_guard_exception_features_json",
+  ]) {
     assert.equal(isSpreadsheetColumnEditable(def, column), false, column);
   }
   assert.equal(isSpreadsheetColumnEditable(def, "operation_mode"), false);

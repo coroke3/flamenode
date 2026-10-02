@@ -10,8 +10,8 @@ import {
   isSpreadsheetSecretColumn,
   isSpreadsheetTableBlocklisted,
   SPREADSHEET_COLUMN_POLICIES,
-  SPREADSHEET_COST_GUARD_READONLY_COLUMNS,
   SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES,
+  SPREADSHEET_TABLE_OVERRIDES,
   SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS,
   isSpreadsheetPhysicalDeleteBlocked,
   primaryKeysFromColumns,
@@ -86,17 +86,78 @@ test("secret columns and readonly tables remain protected", () => {
   assert.equal(isSpreadsheetColumnEditable(user, "api_secret"), false);
   assert.equal(isSpreadsheetSecretColumn("lease_token"), true);
   assert.equal(isSpreadsheetSecretColumn("display_name"), false);
-  assert.equal(isSpreadsheetColumnEditable(user, "display_name"), true);
+  assert.equal(isSpreadsheetColumnEditable(user, "display_name"), false);
   assert.equal(resolveSpreadsheetTableDef("account", true).mode, "readonly");
 });
 
-test("system_settings CostGuard canonical columns are spreadsheet-readonly", () => {
+test("user and terms_versions have dedicated admin UI and are spreadsheet-readonly", () => {
+  const user = resolveSpreadsheetTableDef("user", true);
+  const terms = resolveSpreadsheetTableDef("terms_versions", true);
+  assert.equal(user.mode, "readonly");
+  assert.equal(terms.mode, "readonly");
+  for (const column of ["role", "is_banned", "can_create_events", "is_notification_enabled"]) {
+    assert.equal(isSpreadsheetColumnEditable(user, column), false, column);
+  }
+  assert.equal(isSpreadsheetColumnEditable(terms, "body_markdown"), false);
+});
+
+test("system_settings is spreadsheet-readonly; settings are edited from dedicated admin UIs", () => {
   const def = resolveSpreadsheetTableDef("system_settings", true);
-  for (const column of SPREADSHEET_COST_GUARD_READONLY_COLUMNS) {
+  assert.equal(def.mode, "readonly");
+  for (const column of [
+    "id",
+    "operation_mode",
+    "disabled_features_json",
+    "cost_guard_reason",
+    "cost_guard_updated_by_user_id",
+    "cost_guard_updated_at",
+    "cost_guard_exception_until",
+    "cost_guard_exception_features_json",
+    "default_editable_fields",
+    "upcoming_editable_fields",
+    "audit_normal_retention_days",
+    "audit_updated_by_auth_user_id",
+  ]) {
     assert.equal(isSpreadsheetColumnEditable(def, column), false, column);
   }
-  assert.equal(isSpreadsheetColumnEditable(def, "operation_mode"), false);
-  assert.equal(isSpreadsheetColumnEditable(def, "disabled_features_json"), false);
+});
+
+test("auth / identity / permission / system tables are all readonly with no exceptions", () => {
+  const protectedTables = [
+    "user",
+    "account",
+    "session",
+    "verificationToken",
+    "x_user_aliases",
+    "x_identity_requests",
+    "x_user_account_links",
+    "event_staff",
+    "user_tos_consents",
+    "terms_versions",
+    "notification_outbox",
+    "audit_logs",
+    "system_settings",
+  ];
+  for (const table of protectedTables) {
+    const def = resolveSpreadsheetTableDef(table, true);
+    assert.equal(def.mode, "readonly", table);
+    for (const column of ["id", "name", "role", "status", "created_at"]) {
+      assert.equal(isSpreadsheetColumnEditable(def, column), false, `${table}.${column}`);
+    }
+  }
+  // group ラベルが「認証」「システム」のテーブルは例外なくすべて readonly。
+  for (const [table, override] of Object.entries(SPREADSHEET_TABLE_OVERRIDES)) {
+    if (override.group !== "認証" && override.group !== "システム") continue;
+    assert.equal(override.mode, "readonly", table);
+  }
+  assert.equal(resolveSpreadsheetTableDef("system_settings", true).group, "システム");
+});
+
+test("column policies are defined only for editable tables", () => {
+  for (const key of Object.keys(SPREADSHEET_COLUMN_POLICIES)) {
+    const table = key.slice(0, key.indexOf("."));
+    assert.equal(resolveSpreadsheetTableDef(table, true).mode, "editable", key);
+  }
 });
 
 test("all public visibility state is controlled by dedicated transition actions", () => {

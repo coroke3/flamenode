@@ -145,7 +145,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - `normal` へ戻す
 - `economy` / `read_only` / `static_only` へ手動変更する
 - 専用操作で `maintenance` へ移行・解除する
-- admin spreadsheet import で `disabled_features_json` を更新する（cost-guard UI では編集しない）
+- `disabled_features_json`（停止機能リスト）を `/admin/cost-guard` で更新する（admin spreadsheet からは編集不可）
 - 許可リスト内の機能を1〜8件選び、15分だけ一時的に許可する
 
 モード変更、メンテナンス変更、一時許可、例外解除は理由入力と確認文字列を要求し、完全な before / after を監査ログへ残す。一時許可は設定時刻から厳密に15分で終了し、任意時間への変更や自動延長は行わない。

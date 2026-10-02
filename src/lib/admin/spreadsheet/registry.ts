@@ -23,12 +23,10 @@ export type SpreadsheetColumnPolicy = {
 };
 
 export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy> = {
-  "user.role": { maxLength: 32 },
   "event_groups.icon_url": { url: true, maxLength: 2048 },
   "event_groups.img_url": { url: true, maxLength: 2048 },
   "event_groups.group_type": { maxLength: 32 },
   "event_groups.visibility_status": { maxLength: 32 },
-  "event_group_events.relation_type": { maxLength: 32 },
   "events.icon_url": { url: true, maxLength: 2048 },
   "events.img_url": { url: true, maxLength: 2048 },
   "events.review_settings": { json: true, maxLength: 100_000 },
@@ -39,22 +37,9 @@ export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy
   "videos.music_reference_url": { url: true, maxLength: 2048 },
   "x_users.icon_url": { url: true, maxLength: 2048 },
   "x_users.youtube_channel_url": { url: true, maxLength: 2048 },
-  "system_settings.disabled_features_json": { json: true, maxLength: 100_000 },
   "events.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
   "announcements.body": { maxLength: 200_000 },
-  "terms_versions.body_markdown": { maxLength: 200_000 },
 };
-
-/** system_settings の CostGuard 正本列。スプレッドシートからは編集不可（D1/KV 不整合防止）。 */
-export const SPREADSHEET_COST_GUARD_READONLY_COLUMNS = new Set([
-  "disabled_features_json",
-  "operation_mode",
-  "cost_guard_reason",
-  "cost_guard_updated_by_user_id",
-  "cost_guard_updated_at",
-  "cost_guard_exception_until",
-  "cost_guard_exception_features_json",
-]);
 
 /**
  * 公開状態の変更は、R2 の可視性フェンス・静的再生成・Cache API 無効化を
@@ -113,7 +98,8 @@ export type SpreadsheetTableOverride = {
 /** 表示名・グループ・編集可否の手動上書き（任意） */
 export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverride> =
   {
-    user: { label: "ユーザー", group: "認証", mode: "editable" },
+    // role/ban/通知/イベント作成権限は専用 admin action（user-admin.ts）が担う。
+    user: { label: "ユーザー", group: "認証", mode: "readonly" },
     account: { label: "OAuth アカウント", group: "認証", mode: "readonly" },
     session: { label: "セッション", group: "認証", mode: "readonly" },
     verificationToken: {
@@ -164,7 +150,8 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
     software_aliases: { label: "ソフト別名", group: "マスタ", mode: "editable" },
 
     announcements: { label: "お知らせ", group: "公開", mode: "editable" },
-    terms_versions: { label: "利用規約", group: "公開", mode: "editable" },
+    // 規約の公開・版管理は専用 action（rules.ts）が担う。
+    terms_versions: { label: "利用規約", group: "公開", mode: "readonly" },
     user_tos_consents: { label: "規約同意", group: "公開", mode: "readonly" },
 
     notification_outbox: {
@@ -173,7 +160,9 @@ export const SPREADSHEET_TABLE_OVERRIDES: Record<string, SpreadsheetTableOverrid
       mode: "readonly",
     },
     audit_logs: { label: "監査ログ", group: "システム", mode: "readonly" },
-    system_settings: { label: "システム設定", group: "システム", mode: "editable" },
+    // 設定値は専用 admin UI が正本。CostGuard は /admin/cost-guard、編集可能項目は /admin/users、
+    // 監査保持は /admin/audit/settings。スプレッドシートでは閲覧のみ。
+    system_settings: { label: "システム設定", group: "システム", mode: "readonly" },
   };
 
 /** スプレッドシートから除外するシステムテーブル */
@@ -293,12 +282,6 @@ export function isSpreadsheetColumnEditable(
   if (def.mode === "readonly") return false;
   if (isSpreadsheetSecretColumn(column)) return false;
   if (SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS.has(`${def.table}.${column}`)) {
-    return false;
-  }
-  if (
-    def.table === "system_settings" &&
-    SPREADSHEET_COST_GUARD_READONLY_COLUMNS.has(column)
-  ) {
     return false;
   }
   return true;

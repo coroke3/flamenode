@@ -21,6 +21,7 @@
 - 静的再生成plannerは1回につき最大16 targetとし、超過時は本体を書き込まず行の分割を要求する。
 - 公開状態を専用visibility transitionへ通すため、generic Spreadsheetは`events.visibility_status`、`videos.visibility_status`、`event_groups.visibility_status`、`x_users.approval_status`をreadonlyにする。これらは専用actionだけが変更する。
 - generic physical deleteは`events`、`videos`、`event_groups`、`x_users`、`system_settings`で禁止する。特にevent groupのrelation cascadeやX IDのlink/alias/canonical relationをgeneric deleteで発生させない。
+- 認証・権限・システム系tableはreadonlyにする。`user`（role/ban/通知/イベント作成権限は`user-admin.ts`）、`terms_versions`（`rules.ts`）、`account`、`session`、`verificationToken`、`x_identity_requests`、`x_user_account_links`、`event_staff`、`user_tos_consents`、`notification_outbox`、`audit_logs`が対象。`system_settings`も読み取り専用で、CostGuard系列（`operation_mode`、`disabled_features_json`等）は`/admin/cost-guard`、編集可能項目（`default_editable_fields`等）は`/admin/users`の`GlobalEditableFieldsPanel`（`permissions-admin.ts`）、監査保持（`audit_*`）は`/admin/audit/settings`（`audit-admin.ts`）だけが変更する。PKを含め全列が編集不可のため、新規行のINSERT/import（insert・upsert）もできない。
 - `x_user_aliases`はreadonlyにし、alias追加は専用X ID承認actionだけが行う。同actionは`member_suggestions:global`を同じatomic queue batchへ入れ、commit後にstatic rebuild wakeを送る。
 
 ## cleanup

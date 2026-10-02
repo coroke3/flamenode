@@ -14,8 +14,6 @@ import {
   SPREADSHEET_DEFAULT_MAX_CELL_CHARS,
   isSpreadsheetPhysicalDeleteBlocked,
 } from "./registry";
-import { validateSpreadsheetDisabledFeaturesJson } from "./disabledFeaturesCore";
-export { validateSpreadsheetDisabledFeaturesJson } from "./disabledFeaturesCore";
 import {
   isSpreadsheetImportBatchSizeAllowed,
   SPREADSHEET_IMPORT_MAX_STATIC_REBUILD_QUEUE_STATEMENTS,
@@ -372,13 +370,6 @@ function validateSpreadsheetInputValues(
     }
     if (policy?.json && value != null) {
       try { JSON.parse(String(value)); } catch { throw new Error("invalid_json_value"); }
-    }
-    if (
-      ctx.def.table === "system_settings" &&
-      key === "disabled_features_json" &&
-      value != null
-    ) {
-      validateSpreadsheetDisabledFeaturesJson(String(value));
     }
     if (policy?.url && value != null) {
       try {
