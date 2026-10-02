@@ -45,10 +45,9 @@ const COMPOSER_FOLLOW_UP_BY_PRODUCER: Readonly<
     targets: [TOP_COMPOSER_TARGET],
     reason: "top_stats_follow_up",
   },
-  top_slot_stats: {
-    targets: [TOP_COMPOSER_TARGET],
-    reason: "top_slot_stats_follow_up",
-  },
+  // top_slot_stats has no composer follow-up: the public top loader overlays
+  // top/slot-stats.v1.json whenever it is newer than top.json, so recomposing
+  // top.json on every slot change would only add R2 reads/PUT and queue rows.
 };
 
 const PER_TARGET_COMPOSER_FOLLOW_UP_BY_PRODUCER: Readonly<

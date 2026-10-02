@@ -45,7 +45,7 @@ test("applyTopSlotStatsOverride: artifact 有効時は topSlotStats を置換す
   assert.equal(merged.latest[0].id, "v1");
 });
 
-test("applyTopSlotStatsOverride: artifact.generated_at < top.generated_at なら top.json を維持", () => {
+test("applyTopSlotStatsOverride: artifact.generated_at < top.generated_at でも artifact を採用", () => {
   const top = normalizeStaticTop({
     generated_at: 100,
     latest: [{ id: "v1", title: "Video", display_name: "Creator" }],
@@ -58,7 +58,7 @@ test("applyTopSlotStatsOverride: artifact.generated_at < top.generated_at なら
     items: [{ event_id: "event-1", available: 9, total: 10 }],
   });
   const merged = applyTopSlotStatsOverride(top, artifact);
-  assert.deepEqual(merged.topSlotStats.get("event-1"), { available: 1, total: 10 });
+  assert.deepEqual(merged.topSlotStats.get("event-1"), { available: 9, total: 10 });
 });
 
 test("applyTopSlotStatsOverride: artifact が新しいときは artifact を採用", () => {

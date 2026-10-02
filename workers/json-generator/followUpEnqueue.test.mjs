@@ -247,3 +247,10 @@ test("enqueueComposerFollowUps(users_index) の戻り値は INSERT/UPDATE 時 tr
   assert.equal(await enqueueComposerFollowUps(harness.env, "users_index"), true);
   assert.equal(await enqueueComposerFollowUps(harness.env, "users_index"), true);
 });
+
+test("top_slot_stats は top composer を follow-up しない（公開loaderがslot statsをoverlay）", async () => {
+  let prepared = 0;
+  const env = { DB: { prepare() { prepared += 1; throw new Error("unexpected D1 write"); } } };
+  assert.equal(await enqueueComposerFollowUps(env, "top_slot_stats"), false);
+  assert.equal(prepared, 0);
+});

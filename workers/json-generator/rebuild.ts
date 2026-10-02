@@ -363,8 +363,8 @@ export async function rebuildTarget(
       followUpPending = await enqueueComposerFollowUps(env, "top_stats");
       break;
     case "top_slot_stats":
+      // No top composer follow-up; see COMPOSER_FOLLOW_UP_BY_PRODUCER.
       await rebuildTopSlotStats(env, signal);
-      followUpPending = await enqueueComposerFollowUps(env, "top_slot_stats");
       break;
     case "list_recent":
       await rebuildListRecent(env, signal);

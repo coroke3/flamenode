@@ -49,14 +49,17 @@ export function normalizeStaticTopSlotStats(value: unknown): StaticTopSlotStats 
   };
 }
 
-/** 補助 artifact が有効かつ top.json より新しいとき topSlotStats を置換する。 */
+/**
+ * 補助 artifact が有効なら常に topSlotStats を置換する。
+ * top composer が埋め込む slot-stats は composer が読んだ R2 artifact そのものなので、
+ * 埋め込み側が R2 より新しいことはない。generated_at の比較を入れると、slot-stats PUT と
+ * 並行して開始した composer が新しい artifact を隠してしまう（枠変更ごとの再合成は行わない）。
+ */
 export function applyTopSlotStatsOverride(
   top: StaticTopData,
   artifact: StaticTopSlotStats | null,
 ): StaticTopData {
   if (!artifact) return top;
-  const topGeneratedAt = top.generatedAt ?? 0;
-  if (artifact.generatedAt < topGeneratedAt) return top;
   return { ...top, topSlotStats: artifact.items };
 }
 

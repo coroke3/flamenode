@@ -791,9 +791,10 @@ async function rebuildRankingBundle(
     ]);
 
     throwIfAborted(signal);
+    // top_recommended and top_latest share the single top composer row; one
+    // follow-up covers both instead of two concurrent writes to that row.
     const followUps = await Promise.all([
       enqueueComposerFollowUps(env, "top_recommended"),
-      enqueueComposerFollowUps(env, "top_latest"),
       enqueueComposerFollowUps(env, "recommend_core"),
     ]);
     followUpPending = followUps.some(Boolean);
