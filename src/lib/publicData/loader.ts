@@ -223,6 +223,12 @@ export type PublicJsonLoadOptions<TPayload = unknown> = {
 
 type ResolvePublicJsonMissOptions = {
   skipStaticMissRecord?: boolean;
+  /**
+   * The caller observed a genuine R2 artifact miss. The degraded-circuit miss
+   * counter is only incremented when the probe confirms the target is public,
+   * so random / non-public IDs never cost KV writes.
+   */
+  recordCircuitMiss?: boolean;
   visibilityContext?: PublicArtifactVisibilityContext;
 };
 
@@ -555,6 +561,11 @@ async function resolvePublicJsonMiss<T = never>(
     }
 
     if (probe.state === "public") {
+      // Only targets that SHOULD have an artifact count toward the degraded
+      // circuit. Missing / not_public IDs (random crawls) must not write KV.
+      if (missOptions?.recordCircuitMiss) {
+        recordDegradedCircuitR2MissBestEffort();
+      }
       const priority = resolvePublicMissEnqueuePriority(
         strategy,
         options.targetType,
@@ -641,7 +652,17 @@ async function resolvePublicJsonMiss<T = never>(
     }
   }
 
-  if (options.degradedFetcher && canAttemptDegradedD1(strategy) && db) {
+  // A probe that proved the target is missing or not public means D1 holds
+  // nothing to serve; skip the degraded fetch so random IDs cost no extra
+  // D1 scan. `public` and `unknown` (probe error) keep the D1 fallback.
+  const degradedTargetExcluded =
+    probe?.state === "missing" || probe?.state === "not_public";
+  if (
+    options.degradedFetcher &&
+    canAttemptDegradedD1(strategy) &&
+    db &&
+    !degradedTargetExcluded
+  ) {
     if (!(await isDegradedD1CircuitOpen())) {
       try {
         const degraded = await options.degradedFetcher();
@@ -873,7 +894,6 @@ export async function loadPublicJson<T>(
     return buildStaticHitResult(payload, "static", strategy);
   }
 
-  recordDegradedCircuitR2MissBestEffort();
   if (
     r2First &&
     staleMaxAge > 0 &&
@@ -908,6 +928,7 @@ export async function loadPublicJson<T>(
   }
   return resolvePublicJsonMiss(options, {
     visibilityContext: visibility.artifactContext,
+    recordCircuitMiss: true,
   });
 }
 
@@ -1587,10 +1608,9 @@ export async function loadPublicEventVideosPage(params: {
   };
 
   if (needsHeal) {
-    if (baseResult.payload === null) {
-      recordDegradedCircuitR2MissBestEffort();
-    }
-    const miss = await resolvePublicJsonMiss(missOptions);
+    const miss = await resolvePublicJsonMiss(missOptions, {
+      recordCircuitMiss: baseResult.payload === null,
+    });
     missMeta = {
       enqueued: miss.enqueued,
       rebuildState: miss.rebuildState,

@@ -185,6 +185,8 @@ export function assertIndexDefinition(expected, actual) {
   }
 }
 
+const EXPRESSION_INDEX_COLUMN = "<expr>";
+
 function readSchemaManifest(schemaText) {
   const tableMatches = [
     ...schemaText.matchAll(
@@ -276,10 +278,17 @@ function readSchemaManifest(schemaText) {
     tableColumns.set(tableName, columnManifest);
 
     for (const indexMatch of segment.matchAll(
-      /\b(uniqueIndex|index)\s*\(\s*["']([A-Za-z0-9_]+)["']\s*\)\s*\.on\s*\(([\s\S]*?)\)/g,
+      /\b(uniqueIndex|index)\s*\(\s*["']([A-Za-z0-9_]+)["']\s*\)\s*\.on\s*\(((?:sql`[^`]*`|[^)])*?)\)/g,
     )) {
-      const indexColumns = [...indexMatch[3].matchAll(/\bt\.([A-Za-z_$][\w$]*)/g)]
-        .map((columnMatch) => propertyColumns.get(columnMatch[1]));
+      // sql`...` arguments are expression index terms. SQLite reports them with
+      // a NULL column name in PRAGMA index_info, so they are compared as <expr>.
+      const indexColumns = [
+        ...indexMatch[3].matchAll(/sql`[^`]*`|\bt\.([A-Za-z_$][\w$]*)/g),
+      ].map((columnMatch) =>
+        columnMatch[1] === undefined
+          ? EXPRESSION_INDEX_COLUMN
+          : propertyColumns.get(columnMatch[1]),
+      );
       if (indexColumns.some((column) => !column)) {
         throw new Error(`${tableName}のindex ${indexMatch[2]} 列を解決できません。`);
       }
@@ -444,7 +453,7 @@ export function validateDbSchema(root = process.cwd()) {
         .prepare(`PRAGMA index_info("${indexEscaped}")`)
         .all()
         .sort((left, right) => Number(left.seqno) - Number(right.seqno))
-        .map((row) => String(row.name));
+        .map((row) => (row.name === null ? EXPRESSION_INDEX_COLUMN : String(row.name)));
       assertIndexDefinition(expectedIndex, { unique: indexRow.unique, columns });
     }
 

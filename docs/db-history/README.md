@@ -22,6 +22,7 @@
 | Active | `migrations/0061_event_required_video_fields.sql` | イベント別の投稿必須項目 allow-list |
 | Active | `migrations/0062_static_artifact_cleanup_index.sql` | live static artifact bounded cleanup 用 partial index |
 | Active | `migrations/0063_event_staff_account_lookup_index.sql` | アカウントのX ID起点運営権限検索用index |
+| Active | `migrations/0064_x_users_lower_id_index.sql` | `lower(x_users.id)` 照合用の式index |
 | Active | [`database/change-log.md`](../database/change-log.md) | active migrationに対応する現行DB変更履歴 |
 | Active | `docs/implementation-backlog.md` | Open、Blocked、Recently completedの現在状態 |
 | Historical | `migrations/historical/` | 旧migration本文の保存。現行runtimeでは参照・適用しない |

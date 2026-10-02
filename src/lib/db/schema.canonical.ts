@@ -25,7 +25,11 @@ export const xUsers = sqliteTable("x_users", {
   approval_status: text("approval_status", {
     enum: ["pending", "approved", "rejected", "imported"],
   }).default("pending"),
-});
+},
+(t) => ({
+  lowerIdIdx: index("x_users_lower_id_idx").on(sql`lower(${t.id})`),
+}),
+);
 
 export const xIdentityRequests = sqliteTable(
   "x_identity_requests",

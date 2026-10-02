@@ -501,3 +501,53 @@ test("loadPublicEventVideosPage reads D1 only for events over the R2 pool limit"
   assert.ok(gate < block.indexOf("getDatabase()"));
   assert.ok(gate < block.indexOf("fetchDegradedEventListPage"));
 });
+
+test("resolvePublicJsonMiss は missing / not_public probe で degraded D1 fetch を行わない", () => {
+  const missBlock = loaderSource.slice(
+    loaderSource.indexOf("async function resolvePublicJsonMiss"),
+    loaderSource.indexOf("export function createPublicJsonLoader"),
+  );
+  assert.match(
+    missBlock,
+    /degradedTargetExcluded\s*=\s*probe\?\.state === "missing" \|\| probe\?\.state === "not_public"/,
+  );
+  const guard = missBlock.indexOf("!degradedTargetExcluded");
+  const fetch = missBlock.indexOf("await options.degradedFetcher()");
+  assert.ok(guard >= 0 && fetch > guard, "probe exclusion gates the degraded fetch");
+  // public / unknown (probe error) must keep the D1 fallback.
+  assert.doesNotMatch(missBlock, /probe\?\.state === "(?:public|unknown)"\s*\)\s*\{\s*return buildMissResult/);
+});
+
+test("degraded circuit の miss は public probe の対象だけを数え、loader から無条件に記録しない", () => {
+  const recordCalls = loaderSource.match(/recordDegradedCircuitR2MissBestEffort\(\)/g) ?? [];
+  assert.equal(recordCalls.length, 1, "the only call site lives inside resolvePublicJsonMiss");
+  const missBlock = loaderSource.slice(
+    loaderSource.indexOf("async function resolvePublicJsonMiss"),
+    loaderSource.indexOf("export function createPublicJsonLoader"),
+  );
+  const probeIndex = missBlock.indexOf("await probePublicStaticTarget(");
+  const publicIndex = missBlock.indexOf('if (probe.state === "public")');
+  const optionIndex = missBlock.indexOf("missOptions?.recordCircuitMiss");
+  const recordIndex = missBlock.indexOf("recordDegradedCircuitR2MissBestEffort()");
+  assert.ok(probeIndex >= 0 && publicIndex > probeIndex);
+  assert.ok(optionIndex > publicIndex && recordIndex > optionIndex);
+  // the single call is inside the public-probe branch, before the next top-level block
+  assert.ok(recordIndex < missBlock.indexOf("canonicalTargetId = probe.canonicalTargetId"));
+
+  const loadFn = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicJson"),
+    loaderSource.indexOf("export async function loadStaticEventDetail"),
+  );
+  assert.match(
+    loadFn,
+    /resolvePublicJsonMiss\(options, \{\s*visibilityContext: visibility\.artifactContext,\s*recordCircuitMiss: true,\s*\}\)/,
+  );
+  assert.doesNotMatch(loadFn, /recordDegradedCircuitR2MissBestEffort\(\)/);
+});
+
+test("event videos page は base 完全 miss のときだけ resolvePublicJsonMiss 経由で miss を数える", () => {
+  assert.match(
+    loaderSource,
+    /resolvePublicJsonMiss\(missOptions, \{\s*recordCircuitMiss: baseResult\.payload === null,\s*\}\)/,
+  );
+});

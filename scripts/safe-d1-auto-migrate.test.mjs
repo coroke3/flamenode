@@ -99,6 +99,17 @@ test("0062 static artifact cleanup index is eligible for the guarded production 
   });
 });
 
+test("0064 x_users lower(id) index is eligible for the guarded production auto-apply path", () => {
+  const body = fs.readFileSync(
+    path.join(root, "migrations", "0064_x_users_lower_id_index.sql"),
+    "utf8",
+  );
+  assert.deepEqual(classifyAutoDeployMigration(body), {
+    safe: true,
+    reason: null,
+  });
+});
+
 test("migration probe payload normalization ignores sql suffix differences", () => {
   const applied = parseAppliedMigrationNames([
     {
