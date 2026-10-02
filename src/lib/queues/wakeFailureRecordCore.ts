@@ -24,3 +24,77 @@ export function serializeQueueWakeLastFailure(reason: string): string {
     reason,
   });
 }
+
+type FailureWriteState = {
+  kv: KVNamespace;
+  reason: string;
+  attemptedAt: number;
+};
+
+// QueueWakeKind is a fixed, bounded set, so this map cannot grow with input.
+const recentFailureWrites = new Map<string, FailureWriteState>();
+
+/**
+ * last-failure 記録の共有実装（best-effort）。
+ * server 側と worker 側の wrapper から service 名だけ変えて呼ばれる。
+ */
+export async function recordQueueWakeFailureBestEffortCore(
+  service: string,
+  input: {
+    kind: QueueWakeKind;
+    reason: string;
+    kv: KVNamespace | null;
+  },
+): Promise<void> {
+  const kv = input.kv;
+
+  if (!kv || typeof kv.put !== "function") {
+    console.warn(
+      JSON.stringify({
+        service,
+        result: "last_failure_record_skipped",
+        kind: input.kind,
+        reason: input.reason,
+      }),
+    );
+    return;
+  }
+
+  const now = Date.now();
+  const previous = recentFailureWrites.get(input.kind);
+  if (
+    previous &&
+    previous.kv === kv &&
+    now - previous.attemptedAt <
+      (previous.reason === input.reason
+        ? QUEUE_WAKE_LAST_FAILURE_COALESCE_MS
+        : QUEUE_WAKE_LAST_FAILURE_REASON_COALESCE_MS)
+  ) {
+    return;
+  }
+  recentFailureWrites.set(input.kind, {
+    kv,
+    reason: input.reason,
+    attemptedAt: now,
+  });
+
+  try {
+    await kv.put(queueWakeLastFailureKvKey(input.kind), serializeQueueWakeLastFailure(input.reason), {
+      expirationTtl: QUEUE_WAKE_LAST_FAILURE_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        service,
+        result: "last_failure_record_failed",
+        kind: input.kind,
+        reason: input.reason,
+        error_name: error instanceof Error ? error.name : undefined,
+      }),
+    );
+  }
+}
+
+export function resetQueueWakeFailureRecordStateForTests(): void {
+  recentFailureWrites.clear();
+}
