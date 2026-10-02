@@ -198,6 +198,19 @@ export async function publishMemberSuggestionsV2BestEffort(args: {
   const previousGeneration = await readPreviousGeneration(bucket, signal);
   throwIfAborted(signal);
 
+  // Posting key と body は content-hash の generation を埋め込むため、
+  // live manifest が現在の generation を指す場合は全 object が byte-identic。
+  // manifest は唯一の commit point（全 object 書き込み後に PUT）なので、
+  // 現在の generation の object が揃っていることを保証できる。
+  // search postings / publicIconV2 と同じく再 PUT / cleanup をスキップする。
+  if (previousGeneration === generation) {
+    return {
+      published: true,
+      objectCount: 0,
+      reason: "generation_same_skip",
+    };
+  }
+
   // 古い V2 を読み続けるより canonical V1 へ戻す方が安全。
   await bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
   throwIfAborted(signal);

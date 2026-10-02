@@ -230,7 +230,13 @@ test("legacy artifactをmetadata付きへ移行した後は同一内容のR2 PUT
     secondBuildKeys,
     new RegExp(`^${MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY}$`, "m"),
   );
-  assert.ok(dedupR2.puts.length > 0, "bounded V2 postings are still refreshed");
+  // V1はR2 metadataのfast pathでskip。V2はlive manifestが同じcontent-hash
+  // generationを指すため全objectがbyte-identicで、再publish自体がskipされる。
+  assert.equal(
+    dedupR2.puts.length,
+    0,
+    "same-generation rebuildはV1/V2両方ともR2 PUTを出さない",
+  );
 });
 
 test("static_artifacts tracking failure removes newly written suggestions artifacts", async () => {
