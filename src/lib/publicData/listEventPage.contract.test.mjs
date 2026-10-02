@@ -7,7 +7,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { buildDegradedEventListPageSql } from "./degradedEventListPageSql.ts";
 
 const listPageSource = await readFile(
   new URL("../../../app/(public)/list/page.tsx", import.meta.url),
@@ -30,21 +29,26 @@ test("event 指定時は event_base 優先と degraded fallback を呼ぶ", () =
   assert.match(loaderSource, /canAttemptDegradedD1/);
 });
 
-test("degraded event list SQL は COUNTABLE 条件と LIMIT を含む", () => {
-  const sql = buildDegradedEventListPageSql("new");
-  assert.match(sql, /COUNTABLE|visibility_status = 'public'/);
-  assert.match(sql, /LIMIT \? OFFSET \?/);
-  assert.doesNotMatch(sql, /COUNT\(\*\) OVER/i);
-  assert.match(sql, /v\.creator_display_name/);
-  assert.match(sql, /v\.creator_icon_url/);
-  assert.match(sql, /LEFT JOIN events AS pe[\s\S]*pe\.visibility_status = 'public'/);
-  assert.doesNotMatch(sql, /x_users|xu\.x_name|xu\.icon_url/i);
-  const scoreSql = buildDegradedEventListPageSql("score");
-  assert.match(scoreSql, /COALESCE\(v\.score, 0\) DESC/);
-  assert.match(degradedSource, /fetchDegradedEventListPage/);
+test("oversized event list D1 page は bounded で作品スナップショットのみを返す", () => {
+  const fn = degradedSource.slice(
+    degradedSource.indexOf("export async function fetchDegradedEventListPage"),
+    degradedSource.indexOf("export async function fetchDegradedEventDetailPayload"),
+  );
+  assert.match(fn, /countablePublicVideoCondition/);
+  assert.match(fn, /display_name: creatorNameExpr/);
+  assert.match(fn, /icon_url: creatorIconExpr/);
+  assert.doesNotMatch(fn, /xUsers/);
   assert.match(degradedSource, /\.limit\(fetchLimit\)/);
   assert.match(
     degradedSource,
     /leftJoin\(\s*events,[\s\S]*visibility_status,\s*\"public\"/,
   );
+});
+
+test("/list は artifact miss を 0件ではなく反映中・一時不可として表示する", () => {
+  assert.match(listPageSource, /const activeLoad = eventListLoad \?\? staticLoad;/);
+  assert.match(listPageSource, /listEmptyMessage\(activeLoad\?\.state, Boolean\(event\)\)/);
+  assert.match(listPageSource, /shouldPublicPageShowReflection\(state\)/);
+  assert.match(listPageSource, /shouldPublicPageShowUnavailable\(state\)/);
+  assert.match(listPageSource, /作品一覧への反映を準備しています/);
 });

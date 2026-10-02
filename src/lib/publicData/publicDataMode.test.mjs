@@ -12,10 +12,6 @@ import {
   isPublicDataUnavailable,
   mergePublicDataMode,
 } from "./publicDataMode.ts";
-import {
-  buildDegradedUsersPageSql,
-  DEGRADED_USERS_PAGE_SIZE,
-} from "./degradedUsersPageSql.ts";
 
 const loaderSource = await readFile(new URL("./loader.ts", import.meta.url), "utf8");
 const degradedPolicySource = await readFile(
@@ -47,14 +43,6 @@ test("degraded D1 circuit breaker blocks fallback when KV reports open", () => {
   assert.match(loaderSource, /recordDegradedCircuitR2MissBestEffort/);
   assert.match(loaderSource, /recordDegradedCircuitR2HitBestEffort/);
   assert.doesNotMatch(loaderSource, /void\s+recordDegradedCircuitR2(?:Miss|Hit)\(/);
-});
-
-test("degraded users SQL has no correlated subquery and LIMIT 48", () => {
-  const sql = buildDegradedUsersPageSql();
-  assert.match(sql, /LIMIT \? OFFSET \?/);
-  assert.doesNotMatch(sql, /SELECT COUNT\(/i);
-  assert.doesNotMatch(sql, /WHERE[\s\S]*SELECT[\s\S]*FROM videos AS v[\s\S]*WHERE v\.creator_x_user_id =/i);
-  assert.equal(DEGRADED_USERS_PAGE_SIZE, 48);
 });
 
 test("loader uses Cache API before R2 and degraded fetcher hook", () => {

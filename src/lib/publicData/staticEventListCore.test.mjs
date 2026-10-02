@@ -4,6 +4,7 @@ import {
   EVENT_LIST_POOL_MAX,
   eventListPayloadSupportsSort,
   isCompleteEventBasePool,
+  isOversizedEventBasePool,
   pageEventBaseVideos,
   shouldEnqueueEventBaseListHeal,
 } from "./staticEventListCore.ts";
@@ -161,4 +162,17 @@ test("pageEventBaseVideos: new / old / score と検索を R2 pool 上で処理�
   });
   assert.equal(searchPage?.total, 1);
   assert.equal(searchPage?.videos[0]?.id, "v2");
+});
+
+test("isOversizedEventBasePool only marks capped pools over the limit", () => {
+  const capped = Array.from({ length: EVENT_LIST_POOL_MAX }, (_, i) => ({ id: `v${i}` }));
+  assert.equal(isOversizedEventBasePool(null), false);
+  assert.equal(isOversizedEventBasePool(basePayload(capped)), false);
+  assert.equal(isOversizedEventBasePool(basePayload(capped, EVENT_LIST_POOL_MAX + 1)), true);
+  assert.equal(isOversizedEventBasePool(basePayload([], 3)), false);
+});
+
+test("shouldEnqueueEventBaseListHeal heals complete pools without event info", () => {
+  const payload = { ...basePayload([]), event: { id: "evt-1", title: "" } };
+  assert.equal(shouldEnqueueEventBaseListHeal(payload, "new"), true);
 });

@@ -138,6 +138,7 @@ import {
   extractEventListInfo,
   eventListPayloadSupportsSort,
   isCompleteEventBasePool,
+  isOversizedEventBasePool,
   pageEventBaseVideos,
   shouldEnqueueEventBaseListHeal,
 } from "./staticEventListCore";
@@ -151,7 +152,6 @@ import {
 import {
   fetchDegradedEventDetailPayload,
   fetchDegradedEventListPage,
-  fetchDegradedRecommendPayload,
   fetchDegradedRulesPayload,
   fetchDegradedUserProfilePayload,
   fetchDegradedVideoDetailPayload,
@@ -199,7 +199,6 @@ export {
   PublicDataUnavailableNotice,
   PublicReflectionPendingNotice,
 } from "./publicPageNotices";
-export { isDegradedD1Mode, isPublicDataUnavailable } from "./publicDataMode";
 
 export type PublicJsonLoadOptions<TPayload = unknown> = {
   r2Key: string;
@@ -1053,8 +1052,7 @@ export async function loadStaticEventsIndex(): Promise<{
   const normalized = result.data ? normalizeStaticEventsIndex(result.data) : null;
   const index =
     normalized &&
-    (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, normalized.events.length))
+    shouldUseStaticCollection(result.strategy, normalized.events.length)
       ? normalized
       : null;
   return {
@@ -1063,6 +1061,19 @@ export async function loadStaticEventsIndex(): Promise<{
     mode: result.mode,
     enqueued: result.enqueued,
   };
+}
+
+/**
+ * Global list targets have no D1 projection: an empty overlay collection is a
+ * semantic miss that only enqueues a rebuild (reflecting) and renders no page.
+ */
+async function resolveEmptyListMiss<TPayload>(
+  options: PublicJsonLoadOptions<TPayload>,
+) {
+  const miss = await resolvePublicJsonMiss(options, {
+    skipStaticMissRecord: true,
+  });
+  return { ...miss, data: null, page: null };
 }
 
 export async function loadStaticRecentVideosPage(params: {
@@ -1087,7 +1098,7 @@ export async function loadStaticRecentVideosPage(params: {
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
   };
-  let result = await loadPublicJson<StaticRecentVideosPayload>(loadOptions);
+  const result = await loadPublicJson<StaticRecentVideosPayload>(loadOptions);
   const poolSize = Array.isArray(result.data?.items) ? result.data.items.length : 0;
   const payloadForNormalize =
     result.data && sort === "old"
@@ -1100,30 +1111,11 @@ export async function loadStaticRecentVideosPage(params: {
         params.pageSize,
       )
     : null;
-  if (
-    normalizedPage &&
-    result.mode !== "degraded_d1" &&
-    !shouldUseStaticCollection(result.strategy, poolSize)
-  ) {
-    result = await resolvePublicJsonMiss(loadOptions, {
-      skipStaticMissRecord: true,
-    });
-    const degradedPayload = result.data
-      ? sortRecentPayloadForList(result.data, sort)
-      : null;
-    const degradedPage = degradedPayload
-      ? normalizeStaticRecentVideoPage(
-          degradedPayload,
-          params.page,
-          params.pageSize,
-        )
-      : null;
-    return { ...result, data: degradedPage, page: degradedPage };
+  if (normalizedPage && !shouldUseStaticCollection(result.strategy, poolSize)) {
+    return resolveEmptyListMiss(loadOptions);
   }
   const page =
-    normalizedPage &&
-    (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, poolSize))
+    normalizedPage && shouldUseStaticCollection(result.strategy, poolSize)
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -1148,32 +1140,16 @@ export async function loadStaticPopularVideosPage(params: {
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
   };
-  let result = await loadPublicJson<StaticPopularVideosPayload>(loadOptions);
+  const result = await loadPublicJson<StaticPopularVideosPayload>(loadOptions);
   const poolSize = Array.isArray(result.data?.items) ? result.data.items.length : 0;
   const normalizedPage = result.data
     ? normalizeStaticPopularVideoPage(result.data, params.page, params.pageSize)
     : null;
-  if (
-    normalizedPage &&
-    result.mode !== "degraded_d1" &&
-    !shouldUseStaticCollection(result.strategy, poolSize)
-  ) {
-    result = await resolvePublicJsonMiss(loadOptions, {
-      skipStaticMissRecord: true,
-    });
-    const degradedPage = result.data
-      ? normalizeStaticPopularVideoPage(
-          result.data,
-          params.page,
-          params.pageSize,
-        )
-      : null;
-    return { ...result, data: degradedPage, page: degradedPage };
+  if (normalizedPage && !shouldUseStaticCollection(result.strategy, poolSize)) {
+    return resolveEmptyListMiss(loadOptions);
   }
   const page =
-    normalizedPage &&
-    (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, poolSize))
+    normalizedPage && shouldUseStaticCollection(result.strategy, poolSize)
       ? normalizedPage
       : null;
   return { ...result, data: page, page };
@@ -1348,19 +1324,7 @@ export async function loadStaticSearchVideosPage(params: {
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptySearchIndexCollection,
   };
-  let result = await loadPublicJson<StaticSearchIndexPayload>(loadOptions);
-  if (result.mode === "degraded_d1" && result.data) {
-    const degradedPayload = sortRecentPayloadForList(
-      result.data as unknown as StaticRecentVideosPayload,
-      params.sort,
-    );
-    const degradedPage = normalizeStaticRecentVideoPage(
-      degradedPayload,
-      params.page,
-      params.pageSize,
-    );
-    return { ...result, data: degradedPage, page: degradedPage };
-  }
+  const result = await loadPublicJson<StaticSearchIndexPayload>(loadOptions);
   const payload = result.data ? normalizeStaticSearchIndexPayload(result.data) : null;
   const poolSize = Array.isArray(payload?.videos) ? payload.videos.length : 0;
   const normalizedPage = payload
@@ -1372,35 +1336,10 @@ export async function loadStaticSearchVideosPage(params: {
         pageSize: params.pageSize,
       })
     : null;
-  if (
-    normalizedPage &&
-    result.mode !== "degraded_d1" &&
-    !shouldUseStaticCollection(result.strategy, poolSize)
-  ) {
-    result = await resolvePublicJsonMiss(loadOptions, {
-      skipStaticMissRecord: true,
-    });
-    if (result.mode === "degraded_d1" && result.data) {
-      const degradedPayload = sortRecentPayloadForList(
-        result.data as unknown as StaticRecentVideosPayload,
-        params.sort,
-      );
-      const degradedPage = normalizeStaticRecentVideoPage(
-        degradedPayload,
-        params.page,
-        params.pageSize,
-      );
-      return { ...result, data: degradedPage, page: degradedPage };
-    }
-    return { ...result, data: null, page: null };
+  if (normalizedPage && !shouldUseStaticCollection(result.strategy, poolSize)) {
+    return resolveEmptyListMiss(loadOptions);
   }
-  const page =
-    normalizedPage &&
-    (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, poolSize))
-      ? normalizedPage
-      : null;
-  return { ...result, data: page, page };
+  return { ...result, data: normalizedPage, page: normalizedPage };
 }
 
 export async function loadPublicEventVideosPage(params: {
@@ -1673,6 +1612,12 @@ export async function loadPublicEventVideosPage(params: {
     }
   }
 
+  // pool 上限以内のイベントは R2 base が一覧の正本。欠損・heal 中は D1 を読まず、
+  // bounded stale（tryCachedOrR2）→ 反映中＋再生成（missMeta）で応答する。
+  if (!isOversizedEventBasePool(baseResult.payload)) {
+    return unavailable(maintenanceStrategy, missMeta);
+  }
+
   let db: ReturnType<typeof getDatabase> = null;
   try {
     db = getDatabase();
@@ -1801,22 +1746,15 @@ export async function loadStaticTopPage(): Promise<
   );
   const top =
     normalizedWithSlotStats &&
-    (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, countStaticTopItems(normalizedWithSlotStats)))
+    shouldUseStaticCollection(result.strategy, countStaticTopItems(normalizedWithSlotStats))
       ? normalizedWithSlotStats
       : null;
   return { ...result, data: top, top };
 }
 
-export async function loadStaticUsersIndex(params?: {
-  page?: number;
-  pageSize?: number;
-  q?: string;
-}): Promise<
+export async function loadStaticUsersIndex(): Promise<
   PublicJsonLoadResult<StaticUsersIndex> & { index: StaticUsersIndex | null }
 > {
-  const page = Math.max(1, Math.floor(params?.page ?? 1));
-  const pageSize = Math.max(1, Math.floor(params?.pageSize ?? 48));
   const result = await loadPublicJson<StaticUsersIndexPayload>({
     r2Key: "users/index.json",
     targetType: "users_index",
@@ -1831,8 +1769,7 @@ export async function loadStaticUsersIndex(params?: {
   const normalized = result.data ? normalizeStaticUsersIndex(result.data) : null;
   const index =
     normalized &&
-    (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(result.strategy, normalized.items.length))
+    shouldUseStaticCollection(result.strategy, normalized.items.length)
       ? normalized
       : null;
   return { ...result, data: index, index };
@@ -1854,23 +1791,17 @@ export async function loadStaticRecommendPage(): Promise<
     staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.recommend * 2,
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyRecommendCollection,
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedRecommendPayload(db);
-    },
   });
   const normalized = result.data ? normalizeStaticRecommend(result.data) : null;
   const recommend =
     normalized &&
-    (result.mode === "degraded_d1" ||
-      shouldUseStaticCollection(
-        result.strategy,
-        normalized.recommended.length +
-          normalized.latest.length +
-          normalized.underrated.length +
-          normalized.creators.length,
-      ))
+    shouldUseStaticCollection(
+      result.strategy,
+      normalized.recommended.length +
+        normalized.latest.length +
+        normalized.underrated.length +
+        normalized.creators.length,
+    )
       ? normalized
       : null;
   return { ...result, data: recommend, recommend };

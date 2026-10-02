@@ -46,12 +46,13 @@ test("migration 0046 がプロフィール列とバックフィルを含む", ()
   assert.match(sql, /profile_text/);
 });
 
-test("degraded event list SQL は作品スナップショットのみを返す", () => {
-  const source = read("src/lib/publicData/degradedEventListPageSql.ts");
-  assert.match(source, /creator_display_name/);
-  assert.match(source, /creator_icon_url/);
-  assert.match(source, /creator_x_user_id/);
-  assert.doesNotMatch(source, /x_users|xu\.x_name|xu\.icon_url/i);
+test("degraded event list query は作品スナップショットのみを返す", () => {
+  const source = read("src/lib/db/displayExpr.ts");
+  const nameExpr = source.slice(source.indexOf("export const creatorNameExpr"));
+  assert.match(nameExpr, /creator_display_name/);
+  assert.match(nameExpr, /creator_x_user_id/);
+  assert.match(source, /export const creatorIconExpr = sql<string \| null>`\$\{videos\.creator_icon_url\}`/);
+  assert.doesNotMatch(source, /xUsers/);
 });
 
 test("submitSlotVideo は既存作品更新で profile/SNS/YouTube を existingVideo から復活させない", () => {

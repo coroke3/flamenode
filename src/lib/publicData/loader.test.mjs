@@ -490,3 +490,14 @@ test("loadPublicJson は Cache/R2 の JSON.parse より先に isolate 解析キ�
   assert.ok(cacheIndex > isolateIndex, "Cache API follows isolate");
   assert.ok(r2Index > isolateIndex, "R2 follows isolate");
 });
+
+test("loadPublicEventVideosPage reads D1 only for events over the R2 pool limit", () => {
+  const block = loaderSource.slice(
+    loaderSource.indexOf("export async function loadPublicEventVideosPage"),
+    loaderSource.indexOf("export async function loadStaticRulesPage"),
+  );
+  const gate = block.indexOf("if (!isOversizedEventBasePool(baseResult.payload))");
+  assert.ok(gate > 0);
+  assert.ok(gate < block.indexOf("getDatabase()"));
+  assert.ok(gate < block.indexOf("fetchDegradedEventListPage"));
+});

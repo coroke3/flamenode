@@ -3,7 +3,6 @@ import "server-only";
 import { and, asc, desc, eq, exists, or, sql } from "drizzle-orm";
 import type { VideoCardData } from "@/components/video/VideoCard";
 import type { DB } from "@/lib/db/client";
-import { fetchPublicAnnouncements } from "@/lib/db/announcementQueries";
 import {
   countablePublicVideoCondition,
   eventPublicVideoLinkCondition,
@@ -24,27 +23,12 @@ import { parsePublicVideoSort } from "@/lib/db/listQueries";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { recordPublicD1Query } from "@/lib/observability/publicRequestMetrics";
 import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
-import { activeEventWhere } from "@/lib/utils/eventStatus";
 import { MAX_VIDEO_MEMBERS } from "@/lib/video/atomicLimits";
-import { pickHeroEvents } from "@/lib/utils/pickHeroEvents";
-import { buildDegradedUsersPageSql, DEGRADED_USERS_PAGE_SIZE } from "./degradedUsersPageSql";
-import { buildHeroEventSlotStatsSql } from "./heroEventSlotStatsSql";
 import { fetchVideoRowByIdOrYoutube } from "@/lib/db/videoIdLookup";
 import type { StaticEventDetailPayload } from "./staticEventDetailCore";
-import type { StaticEventsIndexPayload } from "./staticEventsIndexCore";
-import type { StaticPopularVideosPayload } from "./staticPopularVideoCore";
-import type { StaticRecentVideosPayload } from "./staticRecentVideoCore";
 import type { StaticRulesPayload } from "./staticRulesCore";
-import type { StaticTopPayload } from "./staticTopCore";
 import type { StaticUserProfilePayload } from "./staticUserProfileCore";
-import type { StaticUsersIndexPayload } from "./staticUsersIndexCore";
 import type { StaticVideoDetailPayload } from "./staticVideoDetailCore";
-
-type D1Queryable = Pick<D1Database, "prepare">;
-
-function asD1Queryable(db: DB): D1Queryable {
-  return db.$client;
-}
 
 export const DEGRADED_LIST_PAGE_SIZE = 24;
 export const DEGRADED_USER_WORKS_LIMIT = 12;
@@ -56,36 +40,6 @@ function escapeLikeTerm(value: string): string {
 
 function noteQuery(): void {
   recordPublicD1Query();
-}
-
-export async function fetchDegradedRecommendPayload(
-  db: DB,
-): Promise<{ generated_at: null; recommended: []; latest: VideoCardData[]; underrated: []; creators: [] }> {
-  noteQuery();
-  const latest = await db
-    .select({
-      id: videos.id,
-      title: videos.title,
-      youtube_video_id: videos.youtube_video_id,
-      display_name: creatorNameExpr,
-      icon_url: creatorIconExpr,
-      creator_x_user_id: videos.creator_x_user_id,
-      primary_event_id: videos.primary_event_id,
-      scheduled_time: videos.scheduled_time,
-      part: videos.part,
-    })
-    .from(videos)
-    .where(countablePublicVideoCondition)
-    .orderBy(desc(videos.scheduled_time))
-    .limit(12);
-
-  return {
-    generated_at: null,
-    recommended: [],
-    latest,
-    underrated: [],
-    creators: [],
-  };
 }
 
 export type DegradedEventListPageResult = {

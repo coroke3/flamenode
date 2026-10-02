@@ -22,6 +22,19 @@ interface EventBaseListVideo {
   part: string | null;
 }
 
+/**
+ * 公開作品が pool 上限を超えるイベントは base artifact に全件が載らないため、
+ * D1 bounded page が唯一の一覧経路になる。上限以内なら R2 base が一覧の正本。
+ */
+export function isOversizedEventBasePool(
+  payload: StaticEventDetailPayload | null,
+): boolean {
+  if (!payload || !Array.isArray(payload.public_videos)) return false;
+  const videoTotal =
+    normalizeCount(payload.video_total) ?? payload.public_videos.length;
+  return videoTotal > EVENT_LIST_POOL_MAX;
+}
+
 /** video_total と pool 件数が一致し、上限以内なら R2 pool を完全とみなす。 */
 export function isCompleteEventBasePool(
   payload: StaticEventDetailPayload,
@@ -63,11 +76,12 @@ export function shouldEnqueueEventBaseListHeal(
   sort: "new" | "old" | "score",
 ): boolean {
   if (payload === null) return true;
-  const videos = Array.isArray(payload.public_videos) ? payload.public_videos : null;
-  if (!videos) return true;
-  const videoTotal = normalizeCount(payload.video_total) ?? videos.length;
-  if (videoTotal > EVENT_LIST_POOL_MAX) return false;
+  if (!Array.isArray(payload.public_videos)) return true;
+  if (isOversizedEventBasePool(payload)) return false;
   if (!isCompleteEventBasePool(payload)) return true;
+  // 上限以内の base は一覧の正本で D1 へ降りないため、event 情報が欠けた
+  // artifact も heal しないと恒久的に表示できなくなる。
+  if (!extractEventListInfo(payload)) return true;
   return !eventListPayloadSupportsSort(payload, sort);
 }
 

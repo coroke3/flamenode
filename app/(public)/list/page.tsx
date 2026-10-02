@@ -19,6 +19,9 @@ import {
   loadStaticSearchVideosPage,
   loadPublicEventVideosPage,
   setPublicRequestRoute,
+  shouldPublicPageShowReflection,
+  type PublicDataState,
+  shouldPublicPageShowUnavailable,
 } from "@/lib/publicData/loader";
 
 export const metadata: Metadata = buildPageMetadata({
@@ -51,9 +54,9 @@ const PAGE_SIZE = 24;
 const LIST_HREF = "/list";
 const MAX_SEARCH_LENGTH = 100;
 const MAX_EVENT_ID_LENGTH = 128;
-// static list projection is bounded to 5,000 items. Keep degraded D1 fallback
-// within the same observable range so arbitrary ?page= values cannot create
-// multi-million-row OFFSET scans when an artifact is missing.
+// static list projection is bounded to 5,000 items. Keep the oversized-event
+// D1 page within the same observable range so arbitrary ?page= values cannot
+// create multi-million-row OFFSET scans.
 const MAX_PAGE = Math.ceil(5_000 / PAGE_SIZE);
 const MIN_SEARCH_CHARS = 2;
 
@@ -71,6 +74,21 @@ function compactSearchChars(value: string): string {
     .normalize("NFKC")
     .toLocaleLowerCase()
     .replace(/[^\p{L}\p{N}_]/gu, "");
+}
+
+function listEmptyMessage(
+  state: PublicDataState | undefined,
+  isEventList: boolean,
+): string {
+  if (state && shouldPublicPageShowReflection(state)) {
+    return "作品一覧への反映を準備しています。しばらくしてから再読み込みしてください。";
+  }
+  if (state && shouldPublicPageShowUnavailable(state)) {
+    return isEventList
+      ? "このイベントの作品一覧を一時的に表示できません。"
+      : "作品一覧を一時的に表示できません。";
+  }
+  return "条件に合う作品が見つかりませんでした。条件を変えてお試しください。";
 }
 
 function parseBoundedPage(value: string): number {
@@ -169,10 +187,10 @@ export default async function ListPage({
       : { videos: [], total: 0, eventInfo: null };
 
   const { videos = [], total = 0, eventInfo = null } = data ?? {};
-  const listUnavailable =
-    Boolean(event) &&
-    eventListLoad != null &&
-    eventListLoad.mode === "unavailable";
+  // List/search loaders have no D1 projection: a missing artifact is reported
+  // as reflecting (rebuild enqueued) or unavailable instead of "no results".
+  const activeLoad = eventListLoad ?? staticLoad;
+  const emptyMessage = listEmptyMessage(activeLoad?.state, Boolean(event));
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const params = (override: Partial<NormalizedSearchParams> = {}) => {
@@ -330,9 +348,7 @@ export default async function ListPage({
         <div className="fn-empty">
           <Icon name="info" size={24} aria-hidden />
           <p className="fn-empty-message">
-            {listUnavailable
-              ? "このイベントの作品一覧を一時的に表示できません。"
-              : "条件に合う作品が見つかりませんでした。条件を変えてお試しください。"}
+            {emptyMessage}
           </p>
         </div>
       ) : (

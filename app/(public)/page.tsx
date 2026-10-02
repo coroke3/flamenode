@@ -18,7 +18,6 @@ import { RankedVideoCard } from "@/components/video/RankedVideoCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { type HomeStats } from "@/components/layout/homeVisuals";
 import {
-  isDegradedD1Mode,
   loadStaticTopPage,
   logPublicRequestMetrics,
   PublicDataUnavailableNotice,
@@ -63,7 +62,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
   if (shouldPublicPageShowUnavailable(staticLoaded.state)) {
     return <PublicDataUnavailableNotice />;
   }
-  const isDegraded = isDegradedD1Mode(staticLoaded.mode);
   const trendingItems =
     trendingLoaded.data && !trendingLoaded.tooOldForHome
       ? trendingLoaded.data.items.slice(0, TOP_TRENDING_DISPLAY_LIMIT)
@@ -182,7 +180,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
         </section>
       ) : null}
 
-      {!isDegraded ? (
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-recommend">
         <SectionHeader
           eyebrow="PICKS"
@@ -205,7 +202,6 @@ export default async function TopPage(): Promise<React.ReactElement> {
           )}
         </div>
       </section>
-      ) : null}
 
       <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-latest">
         <SectionHeader
@@ -230,59 +226,55 @@ export default async function TopPage(): Promise<React.ReactElement> {
         </div>
       </section>
 
-      {!isDegraded ? (
-        <section
-          className={`fn-public-container fn-section ${styles.section}`}
-          aria-label="懐かしの映像"
-        >
-          <SectionHeader
-            eyebrow="ARCHIVE"
-            title="懐かしの映像"
-            description="公開から3年以上たった作品を、アーカイブから再発見。"
-            moreHref="/list?sort=old"
-            moreLabel="過去の作品を見る"
-          />
-          <div className={styles.shelfBox}>
-            {nostalgicLoopItems.length === 0 ? (
-              <EmptyShelf message="対象になる作品がまだありません。" />
-            ) : (
-              <TopLoopShelf
-                ariaLabel="懐かしの映像"
-                autoScrollDirection="right"
-              >
-                {nostalgicLoopItems.map((video, index) => (
-                  <VideoCard key={`${video.id}-nostalgic-${index}`} video={video} />
-                ))}
-              </TopLoopShelf>
-            )}
-          </div>
-        </section>
-      ) : null}
+      <section
+        className={`fn-public-container fn-section ${styles.section}`}
+        aria-label="懐かしの映像"
+      >
+        <SectionHeader
+          eyebrow="ARCHIVE"
+          title="懐かしの映像"
+          description="公開から3年以上たった作品を、アーカイブから再発見。"
+          moreHref="/list?sort=old"
+          moreLabel="過去の作品を見る"
+        />
+        <div className={styles.shelfBox}>
+          {nostalgicLoopItems.length === 0 ? (
+            <EmptyShelf message="対象になる作品がまだありません。" />
+          ) : (
+            <TopLoopShelf
+              ariaLabel="懐かしの映像"
+              autoScrollDirection="right"
+            >
+              {nostalgicLoopItems.map((video, index) => (
+                <VideoCard key={`${video.id}-nostalgic-${index}`} video={video} />
+              ))}
+            </TopLoopShelf>
+          )}
+        </div>
+      </section>
 
-      {!isDegraded ? (
-        <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-events">
-          <SectionHeader
-            eyebrow="EVENTS"
-            title="最近のイベント"
-            moreHref="/event"
-            moreLabel="イベント一覧"
-          />
-          <div className="fn-evlist-grid">
-            {latestEventItems.length === 0 ? (
-              <EmptyShelf message="公開中のイベントがまだありません。" />
-            ) : (
-              latestEventItems.map((event) => (
-                <PublicEventCard
-                  key={event.id}
-                  event={event}
-                  category={categorizePublicEvent(event)}
-                  videoCount={eventVideoCounts[event.id] ?? 0}
-                />
-              ))
-            )}
-          </div>
-        </section>
-      ) : null}
+      <section className={`fn-public-container fn-section ${styles.section}`} aria-labelledby="sec-events">
+        <SectionHeader
+          eyebrow="EVENTS"
+          title="最近のイベント"
+          moreHref="/event"
+          moreLabel="イベント一覧"
+        />
+        <div className="fn-evlist-grid">
+          {latestEventItems.length === 0 ? (
+            <EmptyShelf message="公開中のイベントがまだありません。" />
+          ) : (
+            latestEventItems.map((event) => (
+              <PublicEventCard
+                key={event.id}
+                event={event}
+                category={categorizePublicEvent(event)}
+                videoCount={eventVideoCounts[event.id] ?? 0}
+              />
+            ))
+          )}
+        </div>
+      </section>
 
       <HomeClosingCta />
     </div>

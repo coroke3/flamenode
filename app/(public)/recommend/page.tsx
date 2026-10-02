@@ -7,7 +7,6 @@ import { Icon } from "@/components/ui/Icon";
 import styles from "./page.module.css";
 import { buildPageMetadata } from "@/lib/seo";
 import {
-  isDegradedD1Mode,
   loadStaticRecommendPage,
   PublicDataUnavailableNotice,
   PublicReflectionPendingNotice,
@@ -71,7 +70,6 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
   if (shouldPublicPageShowUnavailable(staticLoaded.state)) {
     return <PublicDataUnavailableNotice />;
   }
-  const isDegraded = isDegradedD1Mode(staticLoaded.mode);
   const pools = staticLoaded.recommend;
 
   const {
@@ -105,22 +103,20 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
         <h1 className="fn-display fn-page-title">次に見る作品を探す</h1>
       </header>
 
-      {!isDegraded ? (
-        <nav className={`fn-chip-scroll ${styles.chips}`} aria-label="表示カテゴリ">
-          {FILTER_CHIPS.map((chip) => (
-            <a
-              key={chip.href}
-              href={chip.href}
-              className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
-            >
-              {chip.icon}
-              {chip.label}
-            </a>
-          ))}
-        </nav>
-      ) : null}
+      <nav className={`fn-chip-scroll ${styles.chips}`} aria-label="表示カテゴリ">
+        {FILTER_CHIPS.map((chip) => (
+          <a
+            key={chip.href}
+            href={chip.href}
+            className="fn-btn fn-btn-ghost fn-btn-soft-outline fn-btn-sm"
+          >
+            {chip.icon}
+            {chip.label}
+          </a>
+        ))}
+      </nav>
 
-      {!isDegraded && hero ? (
+      {hero ? (
         <section className={`fn-recommend-hero ${styles.hero}`} aria-labelledby="hero-rec">
           <p className="fn-muted fn-text-xs fn-bold" id="hero-rec">
             いま見るなら
@@ -129,46 +125,42 @@ export default async function RecommendPage(): Promise<React.ReactElement> {
             <VideoCard video={hero} />
           </div>
         </section>
-      ) : !isDegraded ? (
+      ) : (
         <p className={styles.empty}>
           まだおすすめできる作品がありません。
         </p>
-      ) : null}
+      )}
 
-      {!isDegraded ? (
-        <>
-          <Rail
-            id="rail-hot"
-            title="人気作品"
-            items={visibleHot}
-            ariaLabel="人気作品"
-          />
-          <Rail
-            id="rail-underrated"
-            title="見落としがち"
-            items={visibleUnderrated}
-            ariaLabel="見落としがちな作品"
-          />
-          <Rail
-            id="rail-events"
-            title="イベントから見る"
-            items={visibleEventsRail}
-            ariaLabel="イベントごとの作品"
-            moreHref="/event"
-          />
-          <Rail
-            id="rail-more"
-            title="まとめて見る"
-            items={visibleMore}
-            ariaLabel="さらに探す作品"
-            moreHref="/list"
-          />
-        </>
-      ) : null}
+      <Rail
+        id="rail-hot"
+        title="人気作品"
+        items={visibleHot}
+        ariaLabel="人気作品"
+      />
+      <Rail
+        id="rail-underrated"
+        title="見落としがち"
+        items={visibleUnderrated}
+        ariaLabel="見落としがちな作品"
+      />
+      <Rail
+        id="rail-events"
+        title="イベントから見る"
+        items={visibleEventsRail}
+        ariaLabel="イベントごとの作品"
+        moreHref="/event"
+      />
+      <Rail
+        id="rail-more"
+        title="まとめて見る"
+        items={visibleMore}
+        ariaLabel="さらに探す作品"
+        moreHref="/list"
+      />
 
       <Rail
         id="rail-fresh"
-        title={isDegraded ? "新着" : "新着だけど良さそう"}
+        title="新着だけど良さそう"
         items={visibleFresh}
         ariaLabel="新着作品"
         moreHref="/list?sort=new"

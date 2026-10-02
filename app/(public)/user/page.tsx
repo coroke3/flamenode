@@ -9,7 +9,6 @@ import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { buildPageMetadata } from "@/lib/seo";
 import {
-  isDegradedD1Mode,
   loadStaticUsersIndex,
   setPublicRequestRoute,
   type StaticUsersIndexEntry,
@@ -99,11 +98,10 @@ export default async function UserListPage({
   let totalPages: number;
   let safePage: number;
   let current: CreatorRow[];
-  let isDegraded = false;
   let unavailable = false;
   let effectivePageSize = PAGE_SIZE;
 
-  if (v2Loaded && !isDegradedD1Mode(v2Loaded.mode)) {
+  if (v2Loaded) {
     creators = v2Loaded.items.map(mapIndexEntry);
     total = v2Loaded.total;
     totalPages = v2Loaded.totalPages;
@@ -112,41 +110,16 @@ export default async function UserListPage({
     effectivePageSize = v2Loaded.pageSize;
   } else {
     // v2 is optional during rollout and whenever a generation/visibility check
-    // fails. The legacy artifact remains the compatibility and degraded path.
-    const staticLoaded = await loadStaticUsersIndex({
-      page: pageNum,
-      pageSize: PAGE_SIZE,
-      q: q.trim() || undefined,
-    });
-    isDegraded = isDegradedD1Mode(staticLoaded.mode);
+    // fails. The legacy artifact remains the compatibility path.
+    const staticLoaded = await loadStaticUsersIndex();
     unavailable = staticLoaded.mode === "unavailable";
+    creators = staticLoaded.index
+      ? prepareUsersIndexItems(staticLoaded.index.items, q, sortKey).map(
+          mapIndexEntry,
+        )
+      : [];
 
-    if (staticLoaded.index && !isDegraded) {
-      creators = prepareUsersIndexItems(staticLoaded.index.items, q, sortKey).map(
-        mapIndexEntry,
-      );
-    } else if (staticLoaded.index && isDegraded) {
-      creators = staticLoaded.index.items.map(mapIndexEntry);
-      if (q.trim()) {
-        const keyword = q.trim().toLocaleLowerCase();
-        creators = creators.filter(
-          (creator) =>
-            creator.x_name.toLocaleLowerCase().includes(keyword) ||
-            creator.id.toLocaleLowerCase().includes(keyword),
-        );
-      }
-      if (sortKey === "name") {
-        creators.sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
-      }
-    } else {
-      creators = [];
-    }
-
-    const paged = paginateUsersIndexItems(
-      creators,
-      isDegraded ? 1 : pageNum,
-      PAGE_SIZE,
-    );
+    const paged = paginateUsersIndexItems(creators, pageNum, PAGE_SIZE);
     total = paged.total;
     totalPages = paged.totalPages;
     safePage = paged.safePage;
@@ -207,12 +180,6 @@ export default async function UserListPage({
         ) : null}
       </ImeSafeGetForm>
 
-      {isDegraded ? (
-        <p className="fn-muted fn-text-sm" role="status">
-          簡易表示のため、作品数の集計や高度な並べ替えは利用できません。
-        </p>
-      ) : null}
-
       {current.length === 0 ? (
         <div className="fn-empty">
           <Icon name="info" size={24} aria-hidden />
@@ -225,7 +192,7 @@ export default async function UserListPage({
       ) : (
         <>
           <div className={styles.meta}>
-            {isDegraded ? `${current.length} 件（簡易表示）` : `${total} 件`}
+            {total} 件
           </div>
           <div className={styles.grid}>
             {current.map((creator, index) => (
@@ -254,27 +221,23 @@ export default async function UserListPage({
                     <span className={styles.handle}>@{creator.id}</span>
                   </span>
                 </span>
-                {!isDegraded ? (
-                  <span className={styles.counts}>
-                    {creator.total_count} 作品
-                    <small>
-                      主催 {creator.own_count} / 参加 {creator.collab_count}
-                    </small>
-                  </span>
-                ) : null}
+                <span className={styles.counts}>
+                  {creator.total_count} 作品
+                  <small>
+                    主催 {creator.own_count} / 参加 {creator.collab_count}
+                  </small>
+                </span>
               </Link>
             ))}
           </div>
 
-          {!isDegraded ? (
-            <Pagination
-              currentPage={safePage}
-              totalPages={totalPages}
-              total={total}
-              pageSize={effectivePageSize}
-              buildHref={(nextPage) => `/user?${params({ page: String(nextPage) })}`}
-            />
-          ) : null}
+          <Pagination
+            currentPage={safePage}
+            totalPages={totalPages}
+            total={total}
+            pageSize={effectivePageSize}
+            buildHref={(nextPage) => `/user?${params({ page: String(nextPage) })}`}
+          />
         </>
       )}
     </div>

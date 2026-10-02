@@ -85,7 +85,7 @@ staleを許可しない経路は、そのまま degraded D1 / unavailable へ進
 2. **fresh Cache API**（TTL は loader ごと）
 3. **R2** の静的 JSON（ヒット時は D1 / enqueue を呼ばない）
 4. **bounded stale Cache**（R2 miss時のみ。visibility fenceとstored_at/max-ageを検証）
-5. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ。**詳細ページ（event / video / user detail）と recommend / rules のみ**。一覧・検索・トップ・イベント一覧・ユーザー一覧は D1 projection を走らせず、miss は rebuild enqueue（反映中＋再生成）へ）
+5. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ。**詳細ページ（event / video / user detail）と rules のみ**。一覧・検索・トップ・recommend・イベント一覧・ユーザー一覧は D1 projection を走らせず、miss は rebuild enqueue（反映中＋再生成）へ。`/list?event=` は公開作品が base pool 上限（500件）を超えるイベントだけ D1 bounded page を一覧経路として使う）
 6. **Unavailable**（空表示・メッセージ。`maintenance` / `static_json_only` / kill switch 無効時は D1 に進まない）
 
 R2 miss 後の `resolvePublicJsonMiss` では、D1 probe が `public` を返し、要求 ID が canonical ID と異なる（YouTube alias や大文字小文字違い）場合、degraded D1 の重い projection を走らせる前に canonical ID 用の R2 キーを読む。video は `videos/{canonical}.json`、user は `users/{canonical}.json` または `users/{canonical}/...` を試し、ヒットすれば static として返す。alias 側の欠落を直すため rebuild enqueue は従来どおり行い、Cache API には canonical キーと要求キーの両方へ書き込む（TTL 設定時のみ）。canonical キー書換は `/`・`\`・`..`・制御文字・空白付き ID、および `..` や空セグメントを含む R2 キーを拒否し、isolate 解析キャッシュは `server-only` で client 混入を防ぐ。
@@ -301,7 +301,7 @@ Spreadsheet planner（`src/lib/admin/spreadsheet/staticRebuildPlan.ts`）は mut
 Creator Projection（`workers/json-generator`）は公開用カード・詳細 JSON を R2 に書き、一覧は `list/recent.json` / `list/popular.json`、検索は `search-index-lite.json`、クリエイター索引は `users/index.json` を正本とする。`users_index` 再生成時に `users/public-x-icon-map.v1.json`（entries形式）と `users/pickup-creators.v1.json`（top/recommend の Creator 棚用、最大60件）も同時出力する。`users_index` の v2 page/search の `static_artifacts` 追跡は、D1 の100 bind制限を超えないよう12行（84 bind）単位のmulti-row UPSERTにまとめる。`top` / `recommend` の Creator 棚は通常時この pickup artifact を読み、欠損・破損時のみ D1 projection へ fallback する。登録ユーザーは icon 欠損時も `source: none` とし、historical icon は表示用に保持する。公開ページのXアイコン補完は fresh/stale Cacheを含む共有icon map → R2 `users/index.json` → 詳細JSON埋め込み値の順で解決し、entry 欠損や `source: video` のときだけ index で `registered` / `none` へ昇格を試みる。この補完経路からD1へは降りない。`users/index.json` 補完ではアイコンなしの公開プロフィールも `source: none` として保持し、古い動画詳細JSONでもプロフィールリンクを復元しつつ、画像欠損時は共通デフォルトアイコンへ切り替える。
 `member_suggestions` は履歴クエリに主キーのタイブレークを付けて同時刻行の順序を固定する。R2 の index/manifest を公開する前に各オブジェクトを `static_artifacts` へ追跡し、追跡失敗時は今回生成した未公開キーだけを削除して旧世代を壊さない。loader は manifest の `total` と index 件数が一致しない世代を無効として扱う。
 内部候補検索はこのR2 indexだけを読み、bucket単位の短命isolate cache（30秒）を使う。検索前の包含一致／fuzzy長さ窓フィルタでrank計算をboundedにし、APIの既存DTO（`id` / `x_name`）は変更しない。cacheは別bucketへ跨がず、manifest/indexの件数検証後だけ投入する。
-公開 `/user?q=` と `/list?q=` は generation 固有の `postings-v1` R2 索引を優先する。query の 1/2/3 文字 gram から最小 posting を選び、directory が指す bounded page だけを読むため、検索 corpus 全体の JSON parse/filter/sort は request time に行わない。1文字などの高頻度 gram が明示したページ上限を超える場合はページを途中で切らず、旧 `search-lite.v1.json` / `search-index-lite.json` または degraded 経路へ安全に fallback する。旧 artifact は索引欠損・世代不一致時の互換 fallback として残し、欠損 posting を部分結果として返さない。users v2 の同一 generation で tracking rows と対象 R2 object の存在確認が揃っている通常 rebuild は immutable objects の PUT を省略し、repair/miss/visibility/deploy 系 reason では強制再生成する。対象 object 数が大きく R2 の全件確認を安全な subrequest 範囲で完了できない場合も skip せず、通常 rebuild で自己修復する。
+公開 `/user?q=` と `/list?q=` は generation 固有の `postings-v1` R2 索引を優先する。query の 1/2/3 文字 gram から最小 posting を選び、directory が指す bounded page だけを読むため、検索 corpus 全体の JSON parse/filter/sort は request time に行わない。1文字などの高頻度 gram が明示したページ上限を超える場合はページを途中で切らず、旧 `search-lite.v1.json` / `search-index-lite.json` へ安全に fallback し、それも欠損していれば反映中＋再生成を返す。旧 artifact は索引欠損・世代不一致時の互換 fallback として残し、欠損 posting を部分結果として返さない。users v2 の同一 generation で tracking rows と対象 R2 object の存在確認が揃っている通常 rebuild は immutable objects の PUT を省略し、repair/miss/visibility/deploy 系 reason では強制再生成する。対象 object 数が大きく R2 の全件確認を安全な subrequest 範囲で完了できない場合も skip せず、通常 rebuild で自己修復する。
 
 posting manifest は空の bucket directory を生成せず、非空 bucket の一覧を持つ。これにより小規模 generation の R2 object 数と同世代検証の subrequest を抑えつつ、未知・欠損 shard は従来どおり全体検索へ部分結果を返さず fallback する。
 users v2 の stale artifact cleanup は R2 bulk delete と JSON1 UPDATE を 1 invocation 500行以内に制限し、`hasMore` を既存 static rebuild wake の継続判定へ返す。これはGC対象そのものの再enqueueを保証せず、専用排水処理は残課題。`deleted_at` の physical purge は24時間の安全期間後、live manifest/object key を除外して bounded に実施する。current manifest generation は cleanup/purge の対象外である。
@@ -357,8 +357,12 @@ Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象v
 `list/recent.json` と `list/popular.json` は COUNTABLE 公開作品を最大 5000 件（`STATIC_LIST_MAX_ITEMS`）まで `items` に載せる。`total` は DB の全件数と `items.length` の小さい方とし、ページングが `items` を超えない。`search-index-lite.json` の `videos` も同上限。put 前に `STATIC_LIST_MAX_OBJECT_BYTES`（8MiB）でサイズガードする。users 側の 500 件上限は現状維持。
 
 `/list?event=` は `events/{id}/base.v1.json` と条件に応じて composed `events/{id}.json` を先に試す。
-要求した並び順・ページを完全に提供できる静的artifactがない場合にのみ、degraded D1 の
-bounded 一覧（`fetchDegradedEventListPage`、LIMIT 24 + ページング）で補う。
+base pool 上限（500件）以内のイベントは R2 base が一覧の正本で、欠損・heal 中は bounded stale
+または反映中＋再生成を返し D1 を読まない。上限を超えるイベントは base に全件が載らないため、
+D1 の bounded 一覧（`fetchDegradedEventListPage`、LIMIT 24 + ページング）を一覧経路として使う。
+base 自体が欠損していると件数を判定できないため、上限超えイベントも heal 完了までは反映中を返す。
+`/list` の全体一覧・検索・イベント指定は、artifact 欠損で rebuild を enqueue した場合に「反映中」、
+enqueue できない場合に「一時的に表示できません」を表示し、0件表示と区別する。
 
 ## スコア再計算とランキング再生成
 
