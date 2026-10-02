@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import {
+  DEPLOY_GLOBAL_REBUILD_RETRY_REASON,
   DEPLOY_GLOBAL_REBUILD_TARGETS,
   ensureDeployGlobalRebuilds,
   STATIC_LAST_GENERATOR_COMMIT_KV_KEY,
@@ -41,14 +42,16 @@ test("deploy 共有 global target 定数と enqueue 契約", () => {
   assert.match(source, /env\.KV\.get/);
   assert.match(source, /env\.KV\.put/);
   assert.match(source, /FROM json_each\(\?\)/);
-  assert.match(source, /const statements = \[activeUpdate, insert\]/);
+  assert.match(source, /return \[activeUpdate, insert\]/);
+  assert.equal(DEPLOY_GLOBAL_REBUILD_RETRY_REASON, "deploy_generator_change_retry");
+  assert.match(source, /deploy_generator_change_retried/);
 });
 
 function createFakeEnv({
   storedCommit = null,
   batchChanges = 1,
   pendingCount = null,
-  failedCount = 0,
+  failedTargets = [],
   allTargetsCovered = null,
 } = {}) {
   const kvStore = new Map();
@@ -83,6 +86,14 @@ function createFakeEnv({
           async run() {
             return { meta: { changes: batchChanges } };
           },
+          async all() {
+            if (sql.includes("SELECT DISTINCT target_type")) {
+              return {
+                results: failedTargets.map((target_type) => ({ target_type })),
+              };
+            }
+            return { results: [] };
+          },
           async first() {
             if (sql.includes("COUNT(DISTINCT target_type)")) {
               return {
@@ -90,9 +101,6 @@ function createFakeEnv({
                   ? DEPLOY_GLOBAL_REBUILD_TARGETS.length
                   : Math.min(effectivePending, DEPLOY_GLOBAL_REBUILD_TARGETS.length - 1),
               };
-            }
-            if (sql.includes("status = 'failed'")) {
-              return { count: failedCount };
             }
             if (sql.includes("COUNT(*)")) {
               return { count: effectivePending };
@@ -143,16 +151,37 @@ test("同一 commit で failed がなければ enqueue せず 0 を返す", asyn
   assert.equal(getBatchCalls(), 0);
 });
 
-test("同一 commit でも deploy reason の failed があれば再 enqueue する", async () => {
+test("同一 commit でも deploy reason の failed があれば failed target だけを retry reason で再 enqueue する", async () => {
   const { env, kvStore, getBatchCalls } = createFakeEnv({
     storedCommit: VALID_SHA,
     batchChanges: 1,
-    failedCount: 2,
+    failedTargets: ["list_recent", "top_stats"],
     pendingCount: DEPLOY_GLOBAL_REBUILD_TARGETS.length,
   });
+  let batched = null;
+  const originalBatch = env.DB.batch;
+  env.DB.batch = async (statements) => {
+    batched = statements;
+    return originalBatch(statements);
+  };
   const count = await ensureDeployGlobalRebuilds(env, { commitSha: VALID_SHA });
   assert.equal(getBatchCalls(), 1);
+  // failed 行 UPDATE + activeUpdate + insert の3 statement（changes は enqueue 件数に含めない）。
+  assert.equal(batched.length, 3);
   assert.equal(count, 2);
+  assert.match(batched[0].sql, /SET reason = \?/);
+  assert.deepEqual(batched[0].args, [
+    "deploy_generator_change_retried",
+    "list_recent",
+    "top_stats",
+    "deploy_generator_change",
+  ]);
+  assert.equal(batched[1].args[0], DEPLOY_GLOBAL_REBUILD_RETRY_REASON);
+  const targetJson = JSON.parse(batched[2].args[4]);
+  assert.deepEqual(
+    targetJson.map((row) => row.target_type),
+    ["list_recent", "top_stats"],
+  );
   assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), VALID_SHA);
 });
 

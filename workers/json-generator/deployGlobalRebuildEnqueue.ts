@@ -22,10 +22,19 @@ export const STATIC_LAST_GENERATOR_COMMIT_KV_KEY =
 
 const DEPLOY_GLOBAL_REBUILD_REASON = "deploy_generator_change";
 /**
- * 同commit時はfailed COUNT 1 + JSON1 enqueue 2 + coverage COUNT 2 = 最大5。
- * commit変更直後は4だが、Recovery側はworst-case 5を予約する。
+ * 同commitで failed 行を1回だけ再試行する enqueue の reason。
+ * failed 検出クエリは DEPLOY_GLOBAL_REBUILD_REASON のみを数えるため、
+ * この reason の行が再度 failed になっても自動再 enqueue はされない（無限ループ防止）。
  */
-export const DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS = 5;
+export const DEPLOY_GLOBAL_REBUILD_RETRY_REASON =
+  "deploy_generator_change_retry";
+/** 再試行へ移した failed 行の reason。以後 failed 検出クエリの対象外になる。 */
+const DEPLOY_GLOBAL_REBUILD_RETRIED_REASON = "deploy_generator_change_retried";
+/**
+ * 同commit時は failed DISTINCT SELECT 1 + batch(failed行reason退避 1 + JSON1 enqueue 2)
+ * + coverage COUNT 2 = 最大6。commit変更直後は4だが、Recovery側はworst-case 6を予約する。
+ */
+export const DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS = 6;
 
 type EnqueueEnv = { DB: D1Database; KV: KVNamespace };
 
@@ -37,20 +46,19 @@ function normalizeCommitSha(commitSha: string | undefined): string | null {
   return trimmed.toLowerCase();
 }
 
-async function enqueueDeployGlobalRebuildTargets(
+function buildDeployGlobalRebuildEnqueueStatements(
   env: EnqueueEnv,
+  targets: readonly string[],
   reason: string,
   priority: "high" | "low",
-  signal?: AbortSignal,
-): Promise<number> {
-  signal?.throwIfAborted();
+): D1PreparedStatement[] {
 
   const now = Math.floor(Date.now() / 1000);
   // The target list is fixed and small, but expanding it into one UPDATE and
   // one INSERT per target consumes 2*N D1 statements during a deploy. Keep
   // the batch atomic while using JSON1 for the target set so recovery still
   // has room for its bounded reads and the first rebuild.
-  const targetRows = DEPLOY_GLOBAL_REBUILD_TARGETS.map((targetType) => ({
+  const targetRows = targets.map((targetType) => ({
     id: `srb:${targetType}:${crypto.randomUUID()}`,
     target_type: targetType,
   }));
@@ -83,21 +91,46 @@ async function enqueueDeployGlobalRebuildTargets(
      FROM json_each(?)`,
   ).bind(reason, priority, now, now, targetJson);
 
-  const statements = [activeUpdate, insert];
+  return [activeUpdate, insert];
+}
+
+async function enqueueDeployGlobalRebuildTargets(
+  env: EnqueueEnv,
+  targets: readonly string[],
+  reason: string,
+  priority: "high" | "low",
+  signal?: AbortSignal,
+  /** enqueue と同一 batch で先に実行する statement（failed 行の reason 退避など）。 */
+  leadingStatements: D1PreparedStatement[] = [],
+): Promise<number> {
+  signal?.throwIfAborted();
+
+  const enqueueStatements = buildDeployGlobalRebuildEnqueueStatements(
+    env,
+    targets,
+    reason,
+    priority,
+  );
+  const statements = [...leadingStatements, ...enqueueStatements];
 
   const results = await env.DB.batch(statements);
   signal?.throwIfAborted();
 
-  return results.reduce(
-    (sum, result) => sum + Math.max(0, Number(result.meta?.changes ?? 0)),
-    0,
-  );
+  // leading statement の changes は enqueue 件数に含めない。
+  return results
+    .slice(leadingStatements.length)
+    .reduce(
+      (sum, result) => sum + Math.max(0, Number(result.meta?.changes ?? 0)),
+      0,
+    );
 }
 
-async function countFailedDeployGlobals(env: EnqueueEnv): Promise<number> {
+async function listFailedDeployGlobalTargets(
+  env: EnqueueEnv,
+): Promise<string[]> {
   const placeholders = DEPLOY_GLOBAL_REBUILD_TARGETS.map(() => "?").join(", ");
-  const row = await env.DB.prepare(
-    `SELECT COUNT(*) AS count
+  const result = await env.DB.prepare(
+    `SELECT DISTINCT target_type
        FROM static_rebuild_queue
       WHERE target_id = 'global'
         AND target_type IN (${placeholders})
@@ -105,9 +138,13 @@ async function countFailedDeployGlobals(env: EnqueueEnv): Promise<number> {
         AND status = 'failed'`,
   )
     .bind(...DEPLOY_GLOBAL_REBUILD_TARGETS, DEPLOY_GLOBAL_REBUILD_REASON)
-    .first<{ count: number }>();
+    .all<{ target_type: string }>();
 
-  return Math.max(0, Number(row?.count ?? 0));
+  const failed = new Set(
+    (result.results ?? []).map((row) => String(row.target_type)),
+  );
+  // 固定 target 定義の順序を保ち、想定外の値は enqueue しない。
+  return DEPLOY_GLOBAL_REBUILD_TARGETS.filter((target) => failed.has(target));
 }
 
 async function countPendingDeployGlobalsWithReason(env: EnqueueEnv): Promise<number> {
@@ -157,18 +194,43 @@ export async function ensureDeployGlobalRebuilds(
   options.signal?.throwIfAborted();
 
   const stored = await env.KV.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY);
+  let targets: readonly string[] = DEPLOY_GLOBAL_REBUILD_TARGETS;
+  let reason = DEPLOY_GLOBAL_REBUILD_REASON;
+  let leadingStatements: D1PreparedStatement[] = [];
   if (stored === commitSha) {
-    const failed = await countFailedDeployGlobals(env);
-    if (failed === 0) {
+    // 同一 commit: 永続 failed になった target だけを1回だけ再試行する。
+    // failed 行は reason を退避して二度と数えず、再試行行は別 reason にして
+    // 再度 failed になっても自動再 enqueue しない（hourly cron の暴走防止）。
+    const failedTargets = await listFailedDeployGlobalTargets(env);
+    if (failedTargets.length === 0) {
       return 0;
     }
+    targets = failedTargets;
+    reason = DEPLOY_GLOBAL_REBUILD_RETRY_REASON;
+    const targetPlaceholders = failedTargets.map(() => "?").join(", ");
+    leadingStatements = [
+      env.DB.prepare(
+        `UPDATE static_rebuild_queue
+            SET reason = ?
+          WHERE target_id = 'global'
+            AND target_type IN (${targetPlaceholders})
+            AND reason = ?
+            AND status = 'failed'`,
+      ).bind(
+        DEPLOY_GLOBAL_REBUILD_RETRIED_REASON,
+        ...failedTargets,
+        DEPLOY_GLOBAL_REBUILD_REASON,
+      ),
+    ];
   }
 
   const enqueued = await enqueueDeployGlobalRebuildTargets(
     env,
-    DEPLOY_GLOBAL_REBUILD_REASON,
+    targets,
+    reason,
     "high",
     options.signal,
+    leadingStatements,
   );
 
   const allCovered = await allDeployTargetsPendingOrProcessing(env);

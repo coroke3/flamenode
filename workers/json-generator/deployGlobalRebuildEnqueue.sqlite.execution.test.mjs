@@ -30,6 +30,9 @@ function createSqliteEnv() {
       return {
         bind(...values) {
           return {
+            async all() {
+              return { results: sqlite.prepare(sql).all(...values) };
+            },
             async first() {
               return sqlite.prepare(sql).get(...values) ?? null;
             },
@@ -117,6 +120,79 @@ test("deploy global enqueue uses two atomic JSON1 statements for all targets", a
         "SELECT COUNT(*) AS count FROM static_rebuild_queue WHERE target_id = 'global' AND status = 'pending'",
       )
       .get().count,
+    DEPLOY_GLOBAL_REBUILD_TARGETS.length,
+  );
+});
+
+function countRows(sqlite, where) {
+  return sqlite
+    .prepare(`SELECT COUNT(*) AS count FROM static_rebuild_queue WHERE ${where}`)
+    .get().count;
+}
+
+test("同一commitのfailed deploy行は該当targetだけを1回retryし、ループしない", async () => {
+  const { env, sqlite } = createSqliteEnv();
+  const commitSha = "c".repeat(40);
+  const first = await ensureDeployGlobalRebuilds(env, { commitSha });
+  assert.equal(first, DEPLOY_GLOBAL_REBUILD_TARGETS.length);
+
+  // 全件完了させ、1件だけ永続failedにする。
+  sqlite.exec("UPDATE static_rebuild_queue SET status = 'done'");
+  sqlite
+    .prepare(
+      "UPDATE static_rebuild_queue SET status = 'failed', attempt_count = 4 WHERE target_type = 'search_index'",
+    )
+    .run();
+
+  // (a) failed target だけがretry reasonで再enqueueされ、failed行はretried化される。
+  const retry = await ensureDeployGlobalRebuilds(env, { commitSha });
+  assert.equal(retry, 1);
+  assert.deepEqual(
+    sqlite
+      .prepare(
+        "SELECT target_type, reason, priority, status FROM static_rebuild_queue WHERE status = 'pending'",
+      )
+      .all()
+      .map((row) => ({ ...row })),
+    [
+      {
+        target_type: "search_index",
+        reason: "deploy_generator_change_retry",
+        priority: "high",
+        status: "pending",
+      },
+    ],
+  );
+  assert.equal(
+    countRows(
+      sqlite,
+      "status = 'failed' AND reason = 'deploy_generator_change_retried' AND target_type = 'search_index'",
+    ),
+    1,
+  );
+  assert.equal(countRows(sqlite, "status = 'failed' AND reason = 'deploy_generator_change'"), 0);
+
+  // (b) retry行がpending中に再実行しても追加enqueueされない（count>0はwake用の既存契約ではなく
+  // failed検出が0件であることを確認する）。
+  const rowsBefore = countRows(sqlite, "1 = 1");
+  assert.equal(await ensureDeployGlobalRebuilds(env, { commitSha }), 0);
+  assert.equal(countRows(sqlite, "1 = 1"), rowsBefore);
+
+  // (c) retry行も失敗しても自動再enqueueしない。
+  sqlite
+    .prepare(
+      "UPDATE static_rebuild_queue SET status = 'failed', attempt_count = 4 WHERE reason = 'deploy_generator_change_retry'",
+    )
+    .run();
+  assert.equal(await ensureDeployGlobalRebuilds(env, { commitSha }), 0);
+  assert.equal(countRows(sqlite, "status = 'pending'"), 0);
+  assert.equal(countRows(sqlite, "1 = 1"), rowsBefore);
+
+  // (d) 新commit（deploy）では従来どおり全targetを通常reasonでenqueueする。
+  const next = await ensureDeployGlobalRebuilds(env, { commitSha: "d".repeat(40) });
+  assert.equal(next, DEPLOY_GLOBAL_REBUILD_TARGETS.length);
+  assert.equal(
+    countRows(sqlite, "status = 'pending' AND reason = 'deploy_generator_change'"),
     DEPLOY_GLOBAL_REBUILD_TARGETS.length,
   );
 });
