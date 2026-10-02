@@ -244,8 +244,14 @@ test("global collections prefer R2 and visibility-fenced stale cache before degr
   }
 });
 
-test("popular list loader wires degraded fallback", () => {
-  assert.match(loaderSource, /fetchDegradedPopularListPayload/);
+test("list/search/top loaders no longer read a D1 projection on miss", () => {
+  // D1 projections were removed from the list/search/top paths; a miss now
+  // enqueues a rebuild and exposes the bounded stale/reflecting result.
+  assert.doesNotMatch(loaderSource, /fetchDegradedRecentListPayload/);
+  assert.doesNotMatch(loaderSource, /fetchDegradedPopularListPayload/);
+  assert.doesNotMatch(loaderSource, /fetchDegradedTopPayload/);
+  assert.doesNotMatch(loaderSource, /fetchDegradedUsersIndexPayload/);
+  assert.doesNotMatch(loaderSource, /fetchDegradedEventsIndexPayload/);
 });
 
 test("list loaders support old sort via recent payload ordering", () => {

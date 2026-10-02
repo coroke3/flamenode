@@ -151,14 +151,9 @@ import {
 import {
   fetchDegradedEventDetailPayload,
   fetchDegradedEventListPage,
-  fetchDegradedEventsIndexPayload,
-  fetchDegradedRecentListPayload,
   fetchDegradedRecommendPayload,
-  fetchDegradedPopularListPayload,
   fetchDegradedRulesPayload,
-  fetchDegradedTopPayload,
   fetchDegradedUserProfilePayload,
-  fetchDegradedUsersIndexPayload,
   fetchDegradedVideoDetailPayload,
 } from "./degradedQueries";
 import {
@@ -983,7 +978,6 @@ function sortRecentPayloadForList(
   return { ...payload, items };
 }
 
-
 export async function loadStaticEventDetail(
   eventId: string,
 ): Promise<PublicJsonLoadResult<StaticEventDetail>> {
@@ -1055,11 +1049,6 @@ export async function loadStaticEventsIndex(): Promise<{
     staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventsIndex * 2,
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedEventsIndexPayload(db);
-    },
   });
   const normalized = result.data ? normalizeStaticEventsIndex(result.data) : null;
   const index =
@@ -1097,16 +1086,6 @@ export async function loadStaticRecentVideosPage(params: {
     staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.listRecent * 2,
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedRecentListPayload(db, {
-        page: params.page,
-        pageSize: params.pageSize,
-        q: params.q,
-        sort,
-      });
-    },
   };
   let result = await loadPublicJson<StaticRecentVideosPayload>(loadOptions);
   const poolSize = Array.isArray(result.data?.items) ? result.data.items.length : 0;
@@ -1168,14 +1147,6 @@ export async function loadStaticPopularVideosPage(params: {
     staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.listPopular * 2,
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedPopularListPayload(db, {
-        page: params.page,
-        pageSize: params.pageSize,
-      });
-    },
   };
   let result = await loadPublicJson<StaticPopularVideosPayload>(loadOptions);
   const poolSize = Array.isArray(result.data?.items) ? result.data.items.length : 0;
@@ -1376,16 +1347,6 @@ export async function loadStaticSearchVideosPage(params: {
     staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.searchIndex * 2,
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptySearchIndexCollection,
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedRecentListPayload(db, {
-        page: params.page,
-        pageSize: params.pageSize,
-        q: params.q,
-        sort: params.sort,
-      });
-    },
   };
   let result = await loadPublicJson<StaticSearchIndexPayload>(loadOptions);
   if (result.mode === "degraded_d1" && result.data) {
@@ -1822,11 +1783,6 @@ export async function loadStaticTopPage(): Promise<
     staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.top * 2,
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyTopCollection,
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedTopPayload(db);
-    },
   });
   const normalized = result.data ? normalizeStaticTop(result.data) : null;
   if (!normalized) {
@@ -1871,15 +1827,6 @@ export async function loadStaticUsersIndex(params?: {
     staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.usersIndex * 2,
     requireVisibilityManifestForStale: true,
     isEmptyCollection: isEmptyItemsCollection,
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedUsersIndexPayload(db, {
-        page,
-        pageSize,
-        q: params?.q,
-      });
-    },
   });
   const normalized = result.data ? normalizeStaticUsersIndex(result.data) : null;
   const index =

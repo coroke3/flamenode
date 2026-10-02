@@ -67,7 +67,7 @@ The command refuses to overwrite an existing or malformed manifest; it only
 creates the canonical empty schema when the object is absent.
 
 > Status: Active
-> Last verified: 2026-09-30
+> Last verified: 2026-10-02
 > Verified against: `src/lib/publicData/`, `src/lib/admin/staticSharedInputDiagnostics.ts`, `app/(public)/`, `app/(admin)/admin/static-builds/`, `workers/json-generator/videoMaterializedSource.ts`, `workers/json-generator/optimizedRebuild.ts`, `wrangler.toml`
 
 **AI:** 公開静的 JSON / degraded D1 / Cache の仕様。正本コードは `src/lib/publicData/loader.ts`。軽量モデルは調査・文書修正まで。loader・権限・公開 DTO 変更は中位以上。
@@ -85,14 +85,14 @@ staleを許可しない経路は、そのまま degraded D1 / unavailable へ進
 2. **fresh Cache API**（TTL は loader ごと）
 3. **R2** の静的 JSON（ヒット時は D1 / enqueue を呼ばない）
 4. **bounded stale Cache**（R2 miss時のみ。visibility fenceとstored_at/max-ageを検証）
-5. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ）
+5. **degraded D1**（`static_json_with_live_overlay` かつ kill switch 有効時のみ。**詳細ページ（event / video / user detail）と recommend / rules のみ**。一覧・検索・トップ・イベント一覧・ユーザー一覧は D1 projection を走らせず、miss は rebuild enqueue（反映中＋再生成）へ）
 6. **Unavailable**（空表示・メッセージ。`maintenance` / `static_json_only` / kill switch 無効時は D1 に進まない）
 
 R2 miss 後の `resolvePublicJsonMiss` では、D1 probe が `public` を返し、要求 ID が canonical ID と異なる（YouTube alias や大文字小文字違い）場合、degraded D1 の重い projection を走らせる前に canonical ID 用の R2 キーを読む。video は `videos/{canonical}.json`、user は `users/{canonical}.json` または `users/{canonical}/...` を試し、ヒットすれば static として返す。alias 側の欠落を直すため rebuild enqueue は従来どおり行い、Cache API には canonical キーと要求キーの両方へ書き込む（TTL 設定時のみ）。canonical キー書換は `/`・`\`・`..`・制御文字・空白付き ID、および `..` や空セグメントを含む R2 キーを拒否し、isolate 解析キャッシュは `server-only` で client 混入を防ぐ。
 
 R2の読み込みPromiseはrequestをまたぐmodule-global状態へ保存しない。各呼び出しは、そのrequestのCloudflare bindingだけで完結させる。重複読み込みの抑制とstale復旧はCache APIで行い、metadataと本文が同一Server Component request内で同じ詳細JSONを要求する場合はReactのrequest-local cacheで重複取得を抑える。top.jsonが正規化できないmissではslot-statsを追加取得せず、slot統計の障害をtop本体のmiss処理へ混ぜない。`top/slot-stats.v1.json` は `applyTopSlotStatsOverride` で `generated_at` が新しい方だけを採用する（欠損・古い artifact は `top.json.slot_stats` を維持）。公開トップの動画配列は正規化時点で16件までに切り、SSR は棚あたり8件にする。トップの急上昇棚（`analytics/trending.json`）も D1 に降りず、共有 helper の Cache API → R2 → bounded stale で読む。
 
-`static_json_with_live_overlay` では、R2の一覧JSONが空でもD1へ公開作品が追加済みの可能性があるため、空のcollectionをsemantic missとして扱い degraded D1 へ進める。`static_json_only` と `maintenance` では、空の静的JSONをそのまま利用するか、D1 fallback しない。
+`static_json_with_live_overlay` では、R2の一覧JSONが空でもD1へ公開作品が追加済みの可能性があるため、空のcollectionをsemantic missとして扱い rebuild をenqueueする（一覧・検索・トップは D1 projection を走らせない）。`static_json_only` と `maintenance` では、空の静的JSONをそのまま利用するか、D1 fallback しない。
 
 Detail/event/user/rules loaders opt into `cacheMode: "r2_first"` when a
 freshness-sensitive projection is required. They still consult the isolate
