@@ -1325,13 +1325,17 @@ test("smoke requires every URL and verifies web/cron SHA, admin rejection, deep 
 });
 
 test("smoke waits for stale health and cached top HTML until deployment converges", async () => {
-  const env = productionEnv();
+  const env = {
+    ...productionEnv(),
+    SMOKE_DEGRADED_ATTEMPTS: "5",
+    SMOKE_DEGRADED_DELAY_MS: "0",
+  };
   await assert.doesNotReject(() =>
     runSmoke({
       env,
       expectedCommit: COMMIT,
       fetchImpl: smokeFetch(COMMIT, {
-        staleTopResponses: 1,
+        staleTopResponses: 4,
         staleCommitResponses: {
           "flamenode-web": 1,
           "flamenode-fast-jobs": 1,
@@ -1340,7 +1344,6 @@ test("smoke waits for stale health and cached top HTML until deployment converge
           "flamenode-web-deep": 1,
         },
       }),
-      requestOptions: { attempts: 2, retryDelayMs: 0 },
     }),
   );
 });

@@ -120,8 +120,8 @@ function assertStatus(response, expected, label) {
 }
 
 /** Public HTML cache or a degraded D1 banner may clear shortly after deploy; retry before failing smoke. */
-const DEFAULT_DEGRADED_ATTEMPTS = 3;
-const DEFAULT_DEGRADED_RETRY_DELAY_MS = 3_000;
+const DEFAULT_DEGRADED_ATTEMPTS = 60;
+const DEFAULT_DEGRADED_RETRY_DELAY_MS = 2_000;
 
 function degradedRetryOptions(env = process.env, requestOptions = {}) {
   const attemptsRaw = env.SMOKE_DEGRADED_ATTEMPTS?.trim();
