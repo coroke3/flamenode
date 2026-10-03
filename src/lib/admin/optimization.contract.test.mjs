@@ -126,7 +126,9 @@ test("権限整合性検査は独立読取を並列化し総件数を保持す�
 test("ライブAPIはイベント存在確認を各データ読取へ統合する", () => {
   assert.doesNotMatch(liveApi, /eventExists/);
   assert.ok((liveApi.match(/\.from\(events\)/g) ?? []).length >= 3);
-  assert.ok((liveApi.match(/SELECT COUNT\(\*\)/g) ?? []).length >= 3);
+  // summaryのslots集計はcorrelated COUNT(*) 3回スキャンを1回の条件集計へ統合済み。
+  assert.doesNotMatch(liveApi, /SELECT COUNT\(\*\)/);
+  assert.ok((liveApi.match(/COUNT\(CASE WHEN/g) ?? []).length >= 3);
   assert.doesNotMatch(liveApi, /pending_review/);
   assert.match(liveApi, /\.leftJoin\(slots, eq\(slots\.event_id, events\.id\)\)/);
   assert.ok(
@@ -168,13 +170,11 @@ test("イベント出力APIは404とキャッシュヒット応答を共通化�
   assert.match(eventExportRoute, /function notFoundResponse/);
   assert.match(eventExportRoute, /const cachedResponse = async/);
   assert.ok((eventExportRoute.match(/return notFoundResponse\(req\)/g) ?? []).length >= 3);
-  assert.equal(
-    (eventExportRoute.match(
-      /readCachedPayload\(\s*kv,\s*payloadCacheKey,\s*eventId,\s*format,\s*refreshMinutes\s*\*\s*60,\s*\)/g,
-    ) ?? []).length,
-    1,
+  assert.match(
+    eventExportRoute,
+    /readCachedPayload\(\s*payloadCacheKey,\s*eventId,\s*format,\s*refreshMinutes\s*\*\s*60,\s*\)/,
   );
-  assert.match(eventExportRoute, /kv\.getWithMetadata\(cacheKey,\s*\{\s*type:\s*"text",\s*cacheTtl:/);
+  assert.match(eventExportRoute, /readPublicJsonCache<unknown>\(cacheKey/);
 });
 
 test("メンバーCSV/TSV解析は区切り文字共通実装へ直接集約する", () => {

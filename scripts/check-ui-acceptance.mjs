@@ -331,8 +331,8 @@ requireAll("app/(public)/page.tsx", [
     "トップページが trending の鮮度判定に tooOldForHome を参照していません。",
   ],
   [
-    /title="FlameNodeで注目"[\s\S]*?\{!isDegraded/,
-    "FlameNodeで注目 セクションが isDegraded ブロックの外にありません。",
+    /\{trendingItems\.length > 0 \?[\s\S]*?title="FlameNodeで注目"/,
+    "FlameNodeで注目 セクションが有効なtrendingデータに接続されていません。",
   ],
   [
     /Promise\.all\(\[[\s\S]*?loadStaticTopPage\(\)[\s\S]*?loadStaticTrending\(\)/,

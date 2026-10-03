@@ -40,21 +40,6 @@ export async function getLiveEventSummary(db: DB, eventId: string) {
       visibility_status: events.visibility_status,
       start_time: events.start_time,
       end_time: events.end_time,
-      open_slots: sql<number>`(
-        SELECT COUNT(*) FROM slots AS live_slots
-        WHERE live_slots.event_id = ${events.id}
-          AND live_slots.status = 'available'
-      )`,
-      reserved_slots: sql<number>`(
-        SELECT COUNT(*) FROM slots AS live_slots
-        WHERE live_slots.event_id = ${events.id}
-          AND live_slots.status = 'reserved'
-      )`,
-      submitted: sql<number>`(
-        SELECT COUNT(*) FROM slots AS live_slots
-        WHERE live_slots.event_id = ${events.id}
-          AND live_slots.status = 'submitted'
-      )`,
     })
     .from(events)
     .where(and(eq(events.id, id), eq(events.visibility_status, "public")))
@@ -62,13 +47,29 @@ export async function getLiveEventSummary(db: DB, eventId: string) {
   const event = rows[0];
   if (!event) return null;
 
+  // 旧実装は同一 event_id を3回range scanするcorrelated COUNTサブクエリを
+  // 埋め込んでいた。slotsを1回だけ走査し、status別の集計を1 passで行う
+  // （3N→N rows_read、5秒ポーリングのホットパス）。
+  // statusはavailable/reserved/submittedの3値で網羅済みのため、
+  // 3列の合計は该eventのslots件数と一致する（COUNT(CASE ...) はNULLを数えない）。
+  const counts = await db
+    .select({
+      open_slots: sql<number>`COUNT(CASE WHEN ${slots.status} = 'available' THEN 1 END)`,
+      reserved_slots: sql<number>`COUNT(CASE WHEN ${slots.status} = 'reserved' THEN 1 END)`,
+      submitted: sql<number>`COUNT(CASE WHEN ${slots.status} = 'submitted' THEN 1 END)`,
+    })
+    .from(slots)
+    .where(eq(slots.event_id, id))
+    .limit(1);
+  const countRow = counts[0];
+
   const now = Math.floor(Date.now() / 1000);
   return {
     event_id: id,
     freshness: resolveEventFreshness(event, now),
-    open_slots: Number(event.open_slots ?? 0),
-    reserved_slots: Number(event.reserved_slots ?? 0),
-    submitted: Number(event.submitted ?? 0),
+    open_slots: Number(countRow?.open_slots ?? 0),
+    reserved_slots: Number(countRow?.reserved_slots ?? 0),
+    submitted: Number(countRow?.submitted ?? 0),
     generated_at: now,
   };
 }
@@ -135,23 +136,23 @@ export async function getLiveEventSubmissions(db: DB, eventId: string) {
       updated_at: videos.updated_at,
     })
     .from(events)
+    .leftJoin(videoEvents, eq(videoEvents.event_id, events.id))
     .leftJoin(
-      videoEvents,
+      videos,
       and(
-        eq(videoEvents.event_id, events.id),
-        sql`EXISTS (
-          SELECT 1 FROM videos AS public_videos
-          WHERE public_videos.id = ${videoEvents.video_id}
-            AND public_videos.visibility_status = 'public'
-        )`,
-      )!,
+        eq(videos.id, videoEvents.video_id),
+        eq(videos.visibility_status, "public"),
+      ),
     )
-    .leftJoin(videos, eq(videos.id, videoEvents.video_id))
     .where(and(eq(events.id, id), eq(events.visibility_status, "public")))
     .orderBy(sql`${videos.updated_at} DESC`)
     .limit(50);
   if (rows.length === 0) return null;
 
+  // public 以外の提出・孤児 video は video_id がnullのまま残り、ここで落とす。
+  // events行はpublicイベントが存在すれば必ず返るため、提出0件でも200＋空配列を保持する。
+  // ORDER BY DESC ではSQLiteのNULLが最後になるため、LIMIT 50は常に最新の
+  // public提出50件に収束する（旧実装と同一の選択）。
   const submissions = rows.flatMap((row) =>
     row.video_id == null
       ? []
@@ -159,7 +160,7 @@ export async function getLiveEventSubmissions(db: DB, eventId: string) {
           {
             video_id: row.video_id,
             title: row.title!,
-            creator_display_name: row.creator_display_name,
+            creator_display_name: row.creator_display_name!,
             updated_at: row.updated_at!,
           },
         ],

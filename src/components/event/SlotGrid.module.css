@@ -225,6 +225,14 @@
   background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 14%, transparent);
 }
 
+.rowGroupStart > td {
+  border-top: 2px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 55%, transparent);
+}
+
+.rowGroupEnd > td {
+  border-bottom: 2px solid color-mix(in srgb, var(--event-accent, var(--accent-primary)) 55%, transparent);
+}
+
 .breakRow {
   background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
 }
@@ -264,12 +272,39 @@
 }
 
 .cellTime {
+  position: relative;
   width: 68px;
   padding: 12px !important;
   text-align: center !important;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-elevated) 64%, transparent);
+}
+
+.currentTimeMarkerTime,
+.currentTimeMarkerSlot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  height: 0;
+  pointer-events: none;
+}
+
+.currentTimeMarkerTime {
+  z-index: 11;
+}
+
+.currentTimeDot {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--bg-surface);
+  border-radius: 50%;
+  background: var(--event-accent, var(--accent-primary));
+  transform: translateY(-50%);
 }
 
 .timeStack {
@@ -291,8 +326,17 @@
 }
 
 .cellSlot {
+  position: relative;
   min-width: 0;
   padding: 0 !important;
+}
+
+.currentTimeLine {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--event-accent, var(--accent-primary));
+  opacity: 0.9;
 }
 
 .slotTaken {

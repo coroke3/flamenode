@@ -162,6 +162,16 @@ function ReservedXId({
   }
   return <span className={styles.slotReservedX}>@{reservedXId}</span>;
 }
+function useCurrentTimestamp(): number {
+  const [now, setNow] = React.useState<number>(() => Math.floor(Date.now() / 1000));
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Math.floor(Date.now() / 1000));
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
 
 function SubmittedIcon({
   url,
@@ -201,6 +211,7 @@ export function SlotGrid({
   operatorOverrideAllowed = false,
   parts = [],
 }: SlotGridProps): React.ReactElement {
+  const currentTimestamp = useCurrentTimestamp();
   const router = useRouter();
   const pathname = usePathname();
   const [busy, startTransition] = React.useTransition();
@@ -269,6 +280,32 @@ export function SlotGrid({
     () => annotateReservationGroups(slots as SlotBase[]),
     [slots],
   );
+  const currentTimeMarker = React.useMemo(() => {
+    if (
+      slotType !== "time" ||
+      slotIntervalSec == null ||
+      !Number.isFinite(slotIntervalSec) ||
+      slotIntervalSec <= 0
+    ) {
+      return null;
+    }
+
+    const slot = displayRows.find(
+      (row) =>
+        row.start_time != null &&
+        currentTimestamp >= row.start_time &&
+        currentTimestamp < row.start_time + slotIntervalSec,
+    );
+    if (!slot || slot.start_time == null) return null;
+
+    return {
+      slotId: slot.id,
+      progress: Math.min(
+        Math.max((currentTimestamp - slot.start_time) / slotIntervalSec, 0),
+        1,
+      ),
+    };
+  }, [currentTimestamp, displayRows, slotIntervalSec, slotType]);
 
   const releaseTargetSlot = React.useMemo(
     () => displayRows.find((slot) => slot.id === confirmReleaseId) ?? null,
@@ -839,6 +876,9 @@ export function SlotGrid({
                     slot.status === "reserved" &&
                     !hasIntegrityError &&
                     !isAccountOther;
+                  const isCurrentTimeRow = currentTimeMarker?.slotId === slot.id;
+                  const isBigSchedule = slot.is_group && slot.group_size > 1;
+
                   return (
                     <tr
                       key={slot.id}
@@ -846,6 +886,11 @@ export function SlotGrid({
                         styles.row,
                         filled && styles.rowFilled,
                         isMine && styles.rowMine,
+                        isBigSchedule ? styles.rowBigSchedule : styles.rowSmallSchedule,
+                        isBigSchedule && slot.group_position === 1 && styles.rowGroupStart,
+                        isBigSchedule &&
+                          slot.group_position === slot.group_size &&
+                          styles.rowGroupEnd,
                       )}
                       onPointerEnter={() => previewSlot(slot.id)}
                       onMouseEnter={() => previewSlot(slot.id)}
@@ -862,8 +907,30 @@ export function SlotGrid({
                         ) : (
                           (slot.slot_label ?? `#${slot.sort_order ?? "?"}`)
                         )}
+                        {isCurrentTimeRow ? (
+                          <div
+                            className={styles.currentTimeMarkerTime}
+                            style={{
+                              top: `${(currentTimeMarker?.progress ?? 0) * 100}%`,
+                            }}
+                            aria-hidden
+                          >
+                            <span className={styles.currentTimeDot} />
+                          </div>
+                        ) : null}
                       </td>
                       <td className={styles.cellSlot}>
+                        {isCurrentTimeRow ? (
+                          <div
+                            className={styles.currentTimeMarkerSlot}
+                            style={{
+                              top: `${(currentTimeMarker?.progress ?? 0) * 100}%`,
+                            }}
+                            aria-hidden
+                          >
+                            <span className={styles.currentTimeLine} />
+                          </div>
+                        ) : null}
                         {filled ? (
                           <div className={styles.slotTaken}>
                             <div className={styles.slotIdentity}>

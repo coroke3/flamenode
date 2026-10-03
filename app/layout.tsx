@@ -75,6 +75,10 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
+      {
+        url: "/brand/flamenode-favicon.svg",
+        type: "image/svg+xml",
+      },
       { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
       {
         url: "/brand/flamenode-icon-32.png",

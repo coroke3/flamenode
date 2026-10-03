@@ -199,8 +199,13 @@ export function writePublicJsonCacheBestEffort(
   r2Key: string,
   payload: unknown,
   ttlSeconds: number,
+  options?: { bypassIsolate?: boolean },
 ): void {
-  writePublicJsonIsolateCache(r2Key, payload, ttlSeconds);
+  // bypassIsolate: 大きい body や、isolate 内で窓/無効化を厳密に扱いたい entry は
+  // 共有の isolate LRU（最大24件）を汚さず Cache API だけへ書く。
+  if (!options?.bypassIsolate) {
+    writePublicJsonIsolateCache(r2Key, payload, ttlSeconds);
+  }
   try {
     // Cloudflare requires async work that outlives the response to be awaited
     // or registered with waitUntil. Resolve the execution context before

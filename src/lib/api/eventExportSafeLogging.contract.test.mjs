@@ -12,7 +12,7 @@ test("event export logs summarize errors without raw Error/stack payloads", () =
   assert.match(route, /function safeEventExportErrorSummary\(error: unknown\)/);
   assert.equal(
     (route.match(/safeEventExportErrorSummary\(error\)/g) ?? []).length,
-    6,
+    4,
     "all storage/query error logs should use the redacting helper",
   );
   assert.doesNotMatch(

@@ -15,7 +15,6 @@ import {
 import {
   EVENT_EXPORT_REFRESH_MINUTES,
   eventExportPayloadCacheKey,
-  getEventExportKv,
   isEventExportRefreshMinutes,
   type EventExportRefreshMinutes,
 } from "@/lib/api/eventExportCache";
@@ -29,6 +28,12 @@ import {
   publicJsonResponse,
 } from "@/lib/api/publicApi";
 import { assertNoForbiddenKeys } from "@/lib/api/publicDto";
+import {
+  coercePublicJsonCacheEnvelope,
+  deletePublicJsonCaches,
+  readPublicJsonCache,
+  writePublicJsonCacheBestEffort,
+} from "@/lib/publicData/publicCache";
 import { safeErrorSummary } from "../../../../workers/shared/safeLog.ts";
 
 function safeEventExportErrorSummary(error: unknown): string {
@@ -152,36 +157,48 @@ async function exportResponse(
   return response;
 }
 
+type EventExportCachedPayload = {
+  body: string;
+  metadata?: unknown;
+};
+
+function isEventExportCachedPayload(
+  value: unknown,
+): value is EventExportCachedPayload {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { body?: unknown }).body === "string"
+  );
+}
+
+/**
+ * scheduled snapshot は colo ごとの Cache API（KV write なし）から読む。
+ * isolate 層は bypass し、`stored_at` が refresh 窓を超えた entry は miss にする。
+ */
 async function readCachedPayload(
-  kv: KVNamespace,
   cacheKey: string,
   eventId: string,
   format: EventExportFormat,
   cacheTtlSeconds: number,
 ): Promise<string | null> {
-  let cached: string | null;
-  let metadata: unknown = null;
-  try {
-    const result = await kv.getWithMetadata(cacheKey, {
-      type: "text",
-      cacheTtl: cacheTtlSeconds,
-    });
-    cached = typeof result.value === "string" ? result.value : null;
-    metadata = result.metadata;
-  } catch (error) {
-    console.warn("[event-export-api] KV payload read failed", {
-      eventId,
-      cacheKey,
-      format,
-      error: safeEventExportErrorSummary(error),
-    });
-    return null;
-  }
+  const envelope = coercePublicJsonCacheEnvelope(
+    await readPublicJsonCache<unknown>(cacheKey, { bypassIsolate: true }),
+    0,
+    { requireStoredAt: true },
+  );
+  if (!envelope || !isEventExportCachedPayload(envelope.payload)) return null;
+
+  const ageSeconds = Math.floor(Date.now() / 1000) - envelope.stored_at;
+  if (ageSeconds < 0 || ageSeconds >= cacheTtlSeconds) return null;
+
+  const cached = envelope.payload.body;
+  const metadata = envelope.payload.metadata;
   if (!cached) return null;
 
   // New cache entries are validated before write and carry an immutable format
-  // marker in KV metadata. Avoid JSON.parse + recursive leak scanning on every
-  // hot cache hit; legacy entries without metadata still take the safe fallback.
+  // marker in the envelope. Avoid JSON.parse + recursive leak scanning on every
+  // hot cache hit; entries without the marker still take the safe fallback.
   if (isTrustedCacheMetadata(metadata, format)) return cached;
 
   try {
@@ -202,17 +219,14 @@ async function readCachedPayload(
     assertNoForbiddenKeys(parsed);
     return cached;
   } catch (error) {
-    console.warn("[event-export-api] invalid KV payload evicted", {
+    console.warn("[event-export-api] invalid cached payload evicted", {
       eventId,
       cacheKey,
       format,
       error: safeEventExportErrorSummary(error),
     });
-    try {
-      await kv.delete(cacheKey);
-    } catch {
-      // D1からの再生成を優先する。
-    }
+    // D1からの再生成を優先する（deletePublicJsonCaches は失敗を握りつぶす）。
+    await deletePublicJsonCaches([cacheKey]);
     return null;
   }
 }
@@ -263,10 +277,8 @@ export async function GET(
   }
 
   let db: ReturnType<typeof getDatabase>;
-  let kv: KVNamespace | null;
   try {
     db = getDatabase();
-    kv = updateMode === "scheduled" ? getEventExportKv() : null;
   } catch (error) {
     if (!(error instanceof CloudflareBindingsUnavailableError)) throw error;
     console.error("[event-export-api] runtime bindings unavailable", {
@@ -294,10 +306,10 @@ export async function GET(
     format,
     refreshMinutes,
   );
+  const usePayloadCache = updateMode === "scheduled";
   const cachedResponse = async (): Promise<Response | null> => {
-    if (!kv) return null;
+    if (!usePayloadCache) return null;
     const cached = await readCachedPayload(
-      kv,
       payloadCacheKey,
       eventId,
       format,
@@ -315,7 +327,7 @@ export async function GET(
         );
   };
 
-  // KVのpositive cacheを公開認可の正本にしない。payload HIT前にも必ずD1を確認する。
+  // Cache APIのpositive cacheを公開認可の正本にしない。payload HIT前にも必ずD1を確認する。
   let prefetchedEvent: EventExportEventRow | null;
   try {
     prefetchedEvent = await loadEventExportEvent(db, eventId);
@@ -336,7 +348,7 @@ export async function GET(
     return notFoundResponse(req);
   }
 
-  if (kv) {
+  if (usePayloadCache) {
     const response = await cachedResponse();
     if (response) return response;
   }
@@ -411,20 +423,18 @@ export async function GET(
     return notFoundResponse(req);
   }
 
-  if (kv) {
-    try {
-      await kv.put(payloadCacheKey, body, {
-        expirationTtl: refreshMinutes * 60,
-        metadata: cacheMetadataForFormat(format),
-      });
-    } catch (error) {
-      console.warn("[event-export-api] KV write failed", {
-        eventId,
-        format,
-        refreshMinutes,
-        error: safeEventExportErrorSummary(error),
-      });
-    }
+  if (usePayloadCache) {
+    // best-effort（waitUntil）。失敗しても応答は D1 由来の body を返す。KV は使わない。
+    const cachedPayload: EventExportCachedPayload = {
+      body,
+      metadata: cacheMetadataForFormat(format),
+    };
+    writePublicJsonCacheBestEffort(
+      payloadCacheKey,
+      { payload: cachedPayload, stored_at: generatedAt },
+      refreshMinutes * 60,
+      { bypassIsolate: true },
+    );
   }
 
   if (microCacheKey) isolateMicroCacheSet(microCacheKey, body);

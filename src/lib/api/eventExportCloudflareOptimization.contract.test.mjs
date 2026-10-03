@@ -11,9 +11,11 @@ const wrangler = await readFile(
   "utf8",
 );
 
-test("event exportのKV HITは検証済みmetadataを使い毎回巨大JSONを再parseしない", () => {
+test("event exportのCache API HITは検証済みmetadataを使い毎回巨大JSONを再parseしない", () => {
   assert.match(route, /EVENT_EXPORT_CACHE_METADATA_MARKER/);
-  assert.match(route, /getWithMetadata\(cacheKey/);
+  assert.match(route, /readPublicJsonCache<unknown>\(cacheKey, \{ bypassIsolate: true \}\)/);
+  assert.match(route, /coercePublicJsonCacheEnvelope\(/);
+  assert.match(route, /requireStoredAt: true/);
   assert.match(route, /isTrustedCacheMetadata\(metadata, format\)/);
   assert.match(route, /if \(isTrustedCacheMetadata\(metadata, format\)\) return cached/);
   assert.match(route, /metadata:\s*cacheMetadataForFormat\(format\)/);
@@ -24,7 +26,7 @@ test("event exportのKV HITは検証済みmetadataを使い毎回巨大JSONを�
   assert.match(route.slice(parseIndex), /assertNoForbiddenKeys\(parsed\)/);
 });
 
-test("scheduled exportはKV HITでもD1公開可否確認を先に維持する", () => {
+test("scheduled exportはCache API HITでもD1公開可否確認を先に維持する", () => {
   const authIndex = route.indexOf("prefetchedEvent = await loadEventExportEvent");
   const cacheIndex = route.indexOf("const response = await cachedResponse()");
   assert.ok(authIndex >= 0 && cacheIndex > authIndex);

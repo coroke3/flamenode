@@ -1,9 +1,9 @@
 import "server-only";
 
-import { getEnv } from "@/lib/cloudflare";
+import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
 
 // Payload shape changed to include custom answers in both formats.
-// Bump whenever the payload or snapshot selection changes so an older KV
+// Bump whenever the payload or snapshot selection changes so an older Cache API
 // entry cannot keep serving a response built without custom answer values.
 const EVENT_EXPORT_CACHE_VERSION = 9;
 export const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
@@ -34,33 +34,19 @@ export function eventExportPayloadCacheKey(
   ].join(":");
 }
 
-export function getEventExportKv(): KVNamespace | null {
-  return getEnv().KV ?? null;
-}
-
+/**
+ * scheduled snapshot は colo ごとの Cache API にだけ保存する（KV の書込/削除は使わない）。
+ * 無効化は実行 colo のローカル best-effort。他 colo の entry は refresh 窓の終わり
+ * （entry の stored_at 判定）まで残り得る。公開可否は毎 request の D1 で確認する。
+ */
 export async function invalidateEventExportCache(
   eventId: string,
 ): Promise<void> {
-  const kv = getEventExportKv();
-  if (!kv) return;
-
   const keys = (["v5", "legacy"] as const).flatMap((format) =>
     EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
       eventExportPayloadCacheKey(eventId, format, refreshMinutes),
     ),
   );
-
-  let failed = 0;
-  for (let offset = 0; offset < keys.length; offset += 6) {
-    const results = await Promise.allSettled(
-      keys.slice(offset, offset + 6).map((key) => kv.delete(key)),
-    );
-    failed += results.filter((result) => result.status === "rejected").length;
-  }
-  if (failed > 0) {
-    console.warn("[event-export-api] cache invalidation partially failed", {
-      eventId,
-      failed,
-    });
-  }
+  // deletePublicJsonCaches は Cache API 失敗を握りつぶす（mutation path を落とさない）。
+  await deletePublicJsonCaches(keys);
 }
