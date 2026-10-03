@@ -315,6 +315,8 @@ export async function enqueueScoreDependentRebuilds(
 
   // 固定3 targetを1 INSERT/SELECTへまとめる。旧実装は3 prepared statementsを
   // batchしていたため、YouTube同期後のD1 invocation budgetを余計に消費していた。
+  // score由来の再生成は人気順の定期鮮度更新なので low。dispatch無効時のRecovery Cronは
+  // 毎時3件しか処理しないため、highだとユーザー変更由来の再生成を毎時押し出してしまう。
   const targetRows = targets.map((targetType) => ({
     id: `srb:${targetType}:${crypto.randomUUID()}`,
     target_type: targetType,
@@ -328,7 +330,7 @@ export async function enqueueScoreDependentRebuilds(
      SELECT
        CAST(json_extract(value, '$.id') AS TEXT),
        CAST(json_extract(value, '$.target_type') AS TEXT),
-       'global', 'score_recalc', 'high', 'pending', 0, ?, ?
+       'global', 'score_recalc', 'low', 'pending', 0, ?, ?
      FROM json_each(?)`,
   ).bind(now, now, targetJson);
   const result = await insert.run();

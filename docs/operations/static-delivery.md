@@ -391,7 +391,7 @@ when the ranking bundle is composed, preventing a video-wide patch on rename.
 
 `sync-jobs` の score-recalc は毎時最大 150 件を 1 SQL で更新する。metadata / video の dirty は即時優先し、それ以外は **72 時間**（`SCORE_FORCE_REFRESH_SEC`）以上 `score_updated_at` が古い公開作品を age-only で強制 refresh する。
 
-score 更新が 1 件以上あった invocation だけ、`ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend_core` の global target を `score_recalc` / normal で enqueue する。KV `ranking:last-score-rebuild` で throttle する。
+score 更新が 1 件以上あった invocation だけ、`ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend_core` の global target を `score_recalc` / low で enqueue する（Recovery Cron は毎時3件しか処理しないため、定期鮮度更新がユーザー変更由来の再生成を押し出さないようにする）。KV `ranking:last-score-rebuild` で throttle する。
 
 | 開催中イベント | throttle 間隔 |
 | --- | ---: |

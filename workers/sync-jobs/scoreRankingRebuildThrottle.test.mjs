@@ -234,7 +234,7 @@ test("score rebuild targets are inserted by one JSON1 D1 statement", async () =>
   assert.equal(fake.runCalls(), 1);
   assert.equal(fake.batchCalls(), 0);
   assert.match(fake.lastRunSql(), /FROM json_each\(\?\)/);
-  assert.match(fake.lastRunSql(), /'score_recalc', 'high', 'pending'/);
+  assert.match(fake.lastRunSql(), /'score_recalc', 'low', 'pending'/);
   const payload = JSON.parse(String(fake.lastRunArgs().at(-1)));
   assert.deepEqual(
     payload.map((row) => row.target_type).sort(),
