@@ -83,6 +83,8 @@ D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを
 isolate / Cache API（fresh TTL内のみ）→ R2 → bounded stale Cache の順とする。
 staleを許可しない経路は、そのまま degraded D1 / unavailable へ進む。
 
+Cache API 書込みの `JSON.stringify` とbyte上限確認は `waitUntil` 登録前に同期実行される。UTF-8 byte数の厳密な走査は維持しつつ、文字列長が上限の1/3以下ならUTF-16 code unitあたり最大3 byteという上界で上限内を証明し、全走査を省略する。上界を超える文字列は従来どおりUTF-8 byte数を正確に確認してから書き込む。
+
 1. **isolate 解析キャッシュ**（最大24件・TTL 30s。parsed object のみ。Promise / binding は持たない）
 2. **fresh Cache API**（TTL は loader ごと）
 3. **R2** の静的 JSON（ヒット時は D1 / enqueue を呼ばない）

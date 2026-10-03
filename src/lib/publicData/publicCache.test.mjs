@@ -46,6 +46,25 @@ test("public cache write は非JSON値とUTF-8 byte上限超過entryを作らな
   assert.ok(byteGuardIndex > stringGuardIndex);
   assert.ok(putIndex > byteGuardIndex);
   assert.match(source, /function utf8ByteLengthExceeds/);
+  assert.match(
+    source,
+    /function utf8ByteLengthExceeds\(value: string, limit: number\): boolean \{[\s\S]*?if \(value\.length <= Math\.floor\(limit \/ 3\)\) return false;[\s\S]*?let bytes = 0;/,
+  );
+});
+
+test("UTF-16 code unit の3倍をbyte上限の安全な上界として扱える", () => {
+  const limit = 60;
+  const maxCodeUnits = Math.floor(limit / 3);
+  const values = [
+    "x".repeat(maxCodeUnits),
+    "漢".repeat(maxCodeUnits),
+    "😀".repeat(maxCodeUnits / 2),
+    "\uD800".repeat(maxCodeUnits),
+  ];
+  for (const value of values) {
+    assert.ok(value.length <= maxCodeUnits);
+    assert.ok(new TextEncoder().encode(value).byteLength <= limit);
+  }
 });
 
 test("stale envelope はfresh TTLを超えた時だけ bounded stale として扱う", () => {
