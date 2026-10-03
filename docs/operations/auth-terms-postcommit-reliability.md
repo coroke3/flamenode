@@ -1,8 +1,8 @@
 # Auth / Terms / Post-commit 信頼性修正 — 運用メモ
 
 > Status: Active
-> Last verified: 2026-09-25
-> Source of truth: `src/lib/auth/`, `src/lib/actions/terms.ts`, `src/lib/audit/postCommit.ts`, workers
+> Last verified: 2026-10-04
+> Source of truth: `src/lib/auth/currentUser.ts`, `src/lib/auth/`, `src/lib/actions/terms.ts`, `src/lib/audit/postCommit.ts`, workers
 > Video collaborator permission actions catch D1 binding and preparation failures before mutation and return a UI-facing failure result.
 
 ## 変更概要
@@ -16,6 +16,15 @@
 - Notification: Discord 送信成功後の `markSent` 失敗は再送せず lease 回復で `sent` 化
 - Static rebuild: R2 成功後の `markDone` 失敗は再生成せず回復
 - Legacy import: D1 成功・R2 progress 失敗は `committed_progress_pending`
+
+## 公開ヘッダー account summary の負荷境界
+
+- 公開 layout は引き続き server auth を呼ばない。hydration 直後に `GET /api/account/summary?view=presence` を一度だけ取得し、ログイン表示に必要な名前・icon だけを表示する。
+- `Cookie` header が空の場合だけ presence route は Auth.js より前に logged-out を返す。Cookie が1つでもあれば、名前を推測せず Auth.js の database session を検証する。cookie 値・presence DTO は認可根拠ではなく、role / management 権限はDTOへ含めない。
+- full summary は従来どおり既定の `GET /api/account/summary` で返し、desktop account menu または mobile menu の初回表示、Active X変更、明示再試行で取得する。同一layout lifetime内は完了結果をメモリで保持し、同じfull requestを重複させない。account summary専用contextはterms再同意判定を実行せず、protected routeの標準contextは引き続き判定する。
+- approved X IDのある一般ユーザーのfull pathは、コード経路上5 read statements: Auth.js session+user join 1、account user 1、linked X 1、pending X 1、manageable event staff 1。manage可否は全event IDをmaterializeせず、permission preset/custom JSONを同じ意味で評価する `LIMIT 1` queryにし、返却行を最大1件に抑える。admin、またはapproved X IDなしでは最後のmanagement queryが省略される。Auth.js は `updateAge` 経過時にsession更新writeを1件追加し得る。presence はCookieなしなら0件、検証済みsessionがある場合はjoin read 1件と条件付き更新write。これはコードから数えたstatement/返却行上限であり、実行ごとのD1 rows-scanned/CPU計測値ではない。メニューを開くPVでは後からfull pathが加わるため、初回landingが軽くなる一方、同じPVの総statement数が必ず減るとは限らない。
+- presence/detail とも `private, no-store` を維持する。公開 layout をdynamic化せず、protected route の標準 `getCurrentUserContext` / terms enforcement とserver-side permission gatesは変えない。detail未取得・取得失敗中はActive X未連携やmanage/admin可否を断定表示しない。
+- Cloudflare Workers GraphQL `workersInvocationsAdaptive` はWorker単位のrequest/CPU quantilesを返すが、route path、D1 rows、R2/KV readsやmiddleware/route内のCPU splitは返さない。したがってこの集計だけからPV単位・route単位のCPUやD1 rowsを推定しない。実リクエスト相関を取れるpath-level traceが利用できない環境ではsource-derived fan-outとして明示する。
 
 ## Cloudflare 手動確認手順
 
@@ -40,6 +49,7 @@
 - manage/admin: `enrichmentFailed` 時は誤 `/dashboard` ではなく一時障害扱い
 - admin layout: banned を `getLayoutAuthSurface` で弾く
 - account summary: 503/`unavailable`、degraded 時に SSR ログイン・権限を潰さない
+- 公開ヘッダー account summary は hydration 直後の private/no-store presence と、メニュー操作時の authoritative detail に分割する。presence は Cookie header 自体が空の場合に限り Auth.js 起動前に logged-out と判定し、Cookie が1つでもあれば必ず Auth.js で検証する。cookie 名を固定せず、role / management 権限を presence DTO に含めない。protected route の `getCurrentUserContext` と terms enforcement は変更しない。
 - moderation 作成フォーム: 失敗を UI 表示
 - rules broadcast: terms touch 失敗を `warning` で明示
 - admin/slot/user/youtube/permissions/collab/cost-guard/api-endpoints/submitSlotVideo: `unstable_rethrow` + post-commit

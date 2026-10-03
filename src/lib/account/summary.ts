@@ -22,3 +22,17 @@ export type AccountSummaryLoggedIn = {
 export type AccountSummaryResponse =
   | AccountSummaryLoggedOut
   | AccountSummaryLoggedIn;
+
+/** Public header hydration only. This is identity display data, never authorization input. */
+export type AccountPresenceResponse =
+  | {
+      view: "presence";
+      loggedIn: false;
+      unavailable?: true;
+    }
+  | {
+      view: "presence";
+      loggedIn: true;
+      displayName: string;
+      icon: string | null;
+    };

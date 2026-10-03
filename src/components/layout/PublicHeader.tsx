@@ -23,13 +23,28 @@ export type PublicHeaderUser = Pick<
   "id" | "name" | "image" | "role" | "management"
 > & {
   xIds: XIdEntry[];
+  /** False until the authoritative full account summary has been loaded. */
+  accountDetailsLoaded?: boolean;
 };
 
+function toPresenceOnlyUser(user: PublicHeaderUser): PublicHeaderUser {
+  return {
+    ...user,
+    role: "user",
+    xIds: [],
+    management: {
+      canAccessAdmin: false,
+      canAccessManage: false,
+    },
+    accountDetailsLoaded: false,
+  };
+}
+
 interface PublicHeaderProps {
-  /** 省略時は表示直後にクライアントが /api/account/summary を一度取得する。 */
+  /** 省略時は表示直後にpresenceを取得し、詳細はメニューを開いた時に取得する。 */
   user?: PublicHeaderUser | null;
   /**
-   * SSRで最小ヘッダーを渡したまま、X ID一覧等を /api/account/summary で補完する。
+   * SSRで最小ヘッダーを渡したまま、presenceを即時補完し、詳細は操作時に取得する。
    * 取得失敗でも serverUser のログイン表示は維持する。
    */
   hydrateAccount?: boolean;
@@ -52,19 +67,32 @@ export function PublicHeader({
   const searchButtonRef = React.useRef<HTMLButtonElement>(null);
   const pathname = usePathname();
   const fetchAccount = serverUser === undefined || hydrateAccount;
-  // 初回hydrationで一度取得し、メニュー開閉やページ内遷移では再取得しない。
-  // Active X切替中・一時的な通信失敗でも取得済みのアカウント表示を維持する。
+  // presenceは初回hydration直後に取得する。full detailはアカウント/モバイル
+  // メニューを開いた時だけ読み、Active X変更後はDB正本を再取得する。
   const {
     user: fetchedUser,
     loading: accountLoading,
     unavailable: accountUnavailable,
+    detailsReady: fetchedDetailsReady,
+    detailsLoading,
+    detailsUnavailable,
     confirmedLoggedOut: accountConfirmedLoggedOut,
+    retryDetails,
   } = usePublicAccountSummary(
     fetchAccount,
+    accountOpen || mobileOpen,
     true,
+  );
+  const serverPresenceUser = React.useMemo(
+    () => (serverUser ? toPresenceOnlyUser(serverUser) : null),
+    [serverUser],
   );
   const accountUser = accountConfirmedLoggedOut
     ? null
+    : fetchedUser?.accountDetailsLoaded === false
+      ? fetchedUser
+      : fetchAccount && !fetchedUser && serverPresenceUser
+        ? serverPresenceUser
     : serverUser === undefined
       ? fetchedUser
       : fetchedUser
@@ -76,27 +104,22 @@ export function PublicHeader({
               name: fetchedUser.name || serverUser.name,
               image: fetchedUser.image ?? serverUser.image,
               role: fetchedUser.role || serverUser.role,
-              // 正常/degraded summaryのlinked X rowsはどちらもDB正本。
+              // summaryのlinked X rowsはDB正本。
               // 空配列も「現在リンクなし」という有効な結果なのでSSRの古いActive Xへ戻さない。
               xIds: fetchedUser.xIds,
-              management:
-                "degraded" in fetchedUser && fetchedUser.degraded
-                  ? {
-                      // degraded summaryでもrole自体はcurrentUserのDB正本。
-                      // SSR時の古いadmin=trueをORして、降格後に管理リンクを復活させない。
-                      canAccessAdmin: fetchedUser.management.canAccessAdmin,
-                      // event staff権限だけは補助query失敗時に不明なのでSSR結果を維持する。
-                      // 実際の/manage認可はserver-side gateで再検証される。
-                      canAccessManage:
-                        fetchedUser.management.canAccessManage ||
-                        serverUser.management.canAccessManage,
-                      manageableEventCount:
-                        serverUser.management.manageableEventCount ?? 0,
-                    }
-                  : fetchedUser.management ?? serverUser.management,
+              // degraded時もSSRの古いadmin/manage権限を復活させず、DB正本の結果だけを表示する。
+              management: fetchedUser.management,
             }
           : fetchedUser
         : serverUser;
+  const accountDetailsReady = accountUser
+    ? accountUser.accountDetailsLoaded !== false
+    : fetchedDetailsReady;
+  const accountDetailsLoading =
+    detailsLoading || (Boolean(serverUser) && accountLoading && !fetchedUser);
+  const accountDetailsUnavailable =
+    detailsUnavailable ||
+    (Boolean(serverUser) && accountUnavailable && !fetchedUser);
   const showAccountLoading = fetchAccount && accountLoading && !accountUser;
   const showAccountUnavailable = fetchAccount && accountUnavailable && !accountUser;
   const entryNext = sanitizeNextPath(pathname ?? "/", "/");
@@ -215,6 +238,10 @@ export function PublicHeader({
               user={accountUser}
               loading={showAccountLoading}
               unavailable={showAccountUnavailable}
+              detailsReady={accountDetailsReady}
+              detailsLoading={accountDetailsLoading}
+              detailsUnavailable={accountDetailsUnavailable}
+              onRetryDetails={retryDetails}
               entryHref={entryHref}
               accountOpen={accountOpen}
               onAccountOpenChange={(open) => {
@@ -332,6 +359,10 @@ export function PublicHeader({
                 user={accountUser}
                 loading={showAccountLoading}
                 unavailable={showAccountUnavailable}
+                detailsReady={accountDetailsReady}
+                detailsLoading={accountDetailsLoading}
+                detailsUnavailable={accountDetailsUnavailable}
+                onRetryDetails={retryDetails}
                 entryHref={entryHref}
                 accountOpen={accountOpen}
                 onAccountOpenChange={setAccountOpen}
@@ -347,6 +378,10 @@ export function PublicHeader({
               user={accountUser}
               loading={showAccountLoading}
               unavailable={showAccountUnavailable}
+              detailsReady={accountDetailsReady}
+              detailsLoading={accountDetailsLoading}
+              detailsUnavailable={accountDetailsUnavailable}
+              onRetryDetails={retryDetails}
               entryHref={entryHref}
               accountOpen={accountOpen}
               onAccountOpenChange={setAccountOpen}

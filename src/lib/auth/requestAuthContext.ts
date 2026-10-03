@@ -60,7 +60,6 @@ function defaultManagement(
   return {
     canAccessAdmin: user.role === "admin",
     canAccessManage: user.role === "admin",
-    manageableEventCount: 0,
   };
 }
 
@@ -73,7 +72,6 @@ async function loadManagementAccess(
   return {
     canAccessAdmin: snapshot.canAccessAdmin,
     canAccessManage: snapshot.canAccessManage,
-    manageableEventCount: 0,
   };
 }
 
