@@ -91,6 +91,11 @@ async function cancelResponseBodyBestEffort(response: Response): Promise<void> {
 }
 
 function utf8ByteLengthExceeds(value: string, limit: number): boolean {
+  // A UTF-16 code unit needs at most three UTF-8 bytes (a valid surrogate
+  // pair needs four bytes for two code units). Skip the full scan when even
+  // that worst-case bound is within the Cache API limit.
+  if (value.length <= Math.floor(limit / 3)) return false;
+
   let bytes = 0;
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
