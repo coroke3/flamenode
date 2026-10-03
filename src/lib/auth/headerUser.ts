@@ -6,8 +6,8 @@ import type { DB } from "@/lib/db/client";
 import { xIdentityRequests, users } from "@/lib/db/schema";
 import { normalizeXId } from "@/lib/utils/xid";
 import { resolveActiveXUserId } from "./resolveActiveXId";
-import { getEditableEventIds } from "./ownership";
-import { getEditableEventIdsByApprovedXIds } from "./editableEventIdsByXIds";
+import { getApprovedXIds } from "./ownership";
+import { hasEditableEventByApprovedXIds } from "./editableEventIdsByXIds";
 import {
   getHeaderLinkedXUsersForAuthUser,
   type HeaderLinkedXUser,
@@ -27,7 +27,6 @@ export type HeaderUser = {
   management: {
     canAccessAdmin: boolean;
     canAccessManage: boolean;
-    manageableEventCount: number;
   };
 };
 
@@ -59,14 +58,13 @@ type SessionUserLike = {
 };
 
 function adminManagement(): HeaderUser["management"] {
-  return { canAccessAdmin: true, canAccessManage: true, manageableEventCount: 0 };
+  return { canAccessAdmin: true, canAccessManage: true };
 }
 
-function userManagement(manageableEventCount: number): HeaderUser["management"] {
+function userManagement(canAccessManage: boolean): HeaderUser["management"] {
   return {
     canAccessAdmin: false,
-    canAccessManage: manageableEventCount > 0,
-    manageableEventCount,
+    canAccessManage,
   };
 }
 
@@ -76,9 +74,13 @@ async function getManagementAccess(user: {
 }): Promise<HeaderUser["management"]> {
   if (user.role === "admin") return adminManagement();
   const db = getDatabase();
-  if (!db) return userManagement(0);
-  const manageableEventCount = (await getEditableEventIds(db, user.id)).length;
-  return userManagement(manageableEventCount);
+  if (!db) return userManagement(false);
+  const approvedXUserIds = await getApprovedXIds(db, user.id);
+  const canAccessManage = await hasEditableEventByApprovedXIds(
+    db,
+    approvedXUserIds,
+  );
+  return userManagement(canAccessManage);
 }
 
 async function getManagementAccessFromApprovedXIds(
@@ -87,10 +89,11 @@ async function getManagementAccessFromApprovedXIds(
   approvedXUserIds: readonly string[],
 ): Promise<HeaderUser["management"]> {
   if (role === "admin") return adminManagement();
-  const manageableEventCount = (
-    await getEditableEventIdsByApprovedXIds(db, approvedXUserIds)
-  ).length;
-  return userManagement(manageableEventCount);
+  const canAccessManage = await hasEditableEventByApprovedXIds(
+    db,
+    approvedXUserIds,
+  );
+  return userManagement(canAccessManage);
 }
 
 function normalizeRole(role: string | null | undefined): HeaderUser["role"] {

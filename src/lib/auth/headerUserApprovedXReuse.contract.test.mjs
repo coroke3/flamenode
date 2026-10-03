@@ -21,7 +21,21 @@ test("buildHeaderUser は同一requestで取得済みapproved X IDsを管理権�
   assert.match(headerSource, /approval_status === "approved"/);
   assert.match(headerSource, /approvedXUserIds/);
   assert.match(headerSource, /getManagementAccessFromApprovedXIds/);
-  assert.match(headerSource, /getEditableEventIdsByApprovedXIds\(db, approvedXUserIds\)/);
+  assert.match(
+    headerSource,
+    /hasEditableEventByApprovedXIds\(\s*db,\s*approvedXUserIds/,
+  );
+});
+
+test("header manage可否は権限preset/JSONを保ってbounded existence queryを使う", () => {
+  assert.match(headerSource, /hasEditableEventByApprovedXIds/);
+  assert.doesNotMatch(headerSource, /getEditableEventIds/);
+  assert.match(helperSource, /export async function hasEditableEventByApprovedXIds/);
+  assert.match(helperSource, /PRESETS_WITH_PERMISSIONS/);
+  assert.match(helperSource, /PERMISSION_KEY_INPUTS/);
+  assert.match(helperSource, /json_each\(/);
+  assert.match(helperSource, /json_valid\(/);
+  assert.match(helperSource, /\.limit\(1\)/);
 });
 
 test("header X一覧は表示に必要な最小列だけを読み汎用profile JOINを使わない", () => {
@@ -36,7 +50,19 @@ test("header X一覧は表示に必要な最小列だけを読み汎用profile J
 });
 
 test("current user context はactive X解決で読んだlinked rowsをrequest内に保持する", () => {
-  assert.match(currentUserSource, /getCurrentUserContext = cache\(loadCurrentUserContext\)/);
+  assert.match(currentUserSource, /getCachedCurrentUserContext = cache\(loadCurrentUserContext\)/);
+  assert.match(
+    currentUserSource,
+    /getCurrentUserContext = \(\): Promise<CurrentUserContext> =>\s*getCachedCurrentUserContext\(true\)/,
+  );
+  assert.match(
+    currentUserSource,
+    /getAccountSummaryCurrentUserContext[\s\S]*?getCachedCurrentUserContext\(false\)/,
+  );
+  assert.match(
+    currentUserSource,
+    /const requiredMajor = await getLatestPublishedMajorTerms\(db\)/,
+  );
   assert.match(currentUserSource, /getHeaderLinkedXUsersForAuthUser\(db, userId\)/);
   assert.match(
     currentUserSource,
@@ -46,12 +72,18 @@ test("current user context はactive X解決で読んだlinked rowsをrequest内
 });
 
 test("account summary は current-user DB正本snapshotとlinked X rowsを再利用する", () => {
-  assert.match(accountSummarySource, /getCurrentUserContext/);
+  const detailRouteSource = accountSummarySource.slice(
+    accountSummarySource.indexOf("async function getDetails"),
+    accountSummarySource.indexOf("export async function GET"),
+  );
+  assert.match(accountSummarySource, /getAccountSummaryCurrentUserContext/);
+  assert.doesNotMatch(detailRouteSource, /getLatestPublishedMajorTerms|termsReacceptRequiredValue/);
   assert.match(accountSummarySource, /authoritativeUserSnapshot/);
   assert.match(accountSummarySource, /authoritativeLinkedXRows: currentContext\.linkedXUsers/);
   assert.match(accountSummarySource, /role: sessionUser\.role/);
   assert.match(accountSummarySource, /active_x_user_id: sessionUser\.active_x_user_id/);
-  assert.doesNotMatch(accountSummarySource, /getAuthSession/);
+  assert.match(accountSummarySource, /async function getPresence[\s\S]*?getAuthSession/);
+  assert.doesNotMatch(detailRouteSource, /getAuthSession/);
   assert.match(headerSource, /resolveAuthoritativeUserSnapshot/);
   assert.match(headerSource, /authoritativeLinkedXRows/);
 });

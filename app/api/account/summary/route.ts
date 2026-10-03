@@ -1,10 +1,15 @@
+import { unstable_rethrow } from "next/navigation";
 import { NextResponse } from "next/server";
 import { buildHeaderUser } from "@/lib/auth/headerUser";
 import {
+  getAccountSummaryCurrentUserContext,
   CurrentUserUnavailableError,
-  getCurrentUserContext,
 } from "@/lib/auth/currentUser";
-import type { AccountSummaryResponse } from "@/lib/account/summary";
+import { getAuthSession } from "@/lib/auth/session";
+import type {
+  AccountPresenceResponse,
+  AccountSummaryResponse,
+} from "@/lib/account/summary";
 import { normalizeXIdApprovalStatus } from "@/lib/xid/entries";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +24,58 @@ function loggedOut(): NextResponse<AccountSummaryResponse> {
   return NextResponse.json({ loggedIn: false }, { headers: PRIVATE_HEADERS });
 }
 
-export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
+function presenceLoggedOut(): NextResponse<AccountPresenceResponse> {
+  return NextResponse.json(
+    { view: "presence", loggedIn: false },
+    { headers: PRIVATE_HEADERS },
+  );
+}
+
+async function getPresence(
+  request: Request,
+): Promise<NextResponse<AccountPresenceResponse>> {
+  // A missing/empty Cookie header proves there is no Auth.js session cookie,
+  // regardless of the configured cookie name or HTTPS prefix. Any non-empty
+  // Cookie header still goes through Auth.js; cookie contents never authorize.
+  if (!request.headers.get("cookie")?.trim()) return presenceLoggedOut();
+
+  try {
+    const session = await getAuthSession();
+    const sessionUser = session?.user as
+      | {
+          id?: string | null;
+          name?: string | null;
+          image?: string | null;
+          is_banned?: number | null;
+        }
+      | undefined;
+
+    if (!sessionUser?.id || sessionUser.is_banned === 1) {
+      return presenceLoggedOut();
+    }
+
+    return NextResponse.json(
+      {
+        view: "presence",
+        loggedIn: true,
+        displayName: sessionUser.name?.trim() || "guest",
+        icon: sessionUser.image ?? null,
+      },
+      { headers: PRIVATE_HEADERS },
+    );
+  } catch (error) {
+    unstable_rethrow(error);
+    return NextResponse.json(
+      { view: "presence", loggedIn: false, unavailable: true },
+      { status: 503, headers: PRIVATE_HEADERS },
+    );
+  }
+}
+
+async function getDetails(): Promise<NextResponse<AccountSummaryResponse>> {
   let currentContext;
   try {
-    currentContext = await getCurrentUserContext();
+    currentContext = await getAccountSummaryCurrentUserContext();
   } catch (error) {
     if (error instanceof CurrentUserUnavailableError) {
       return NextResponse.json(
@@ -40,7 +93,7 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
 
   let headerUser;
   try {
-    // getCurrentUserContext() が同一requestでDB正本から解決済みの
+    // account summary context が同一requestでDB正本から解決済みの
     // role / active X / linked X rowsを再利用し、Auth.js sessionを認可根拠にしない。
     headerUser = await buildHeaderUser(sessionUser, {
       authoritativeUserSnapshot: {
@@ -50,7 +103,7 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
       authoritativeLinkedXRows: currentContext.linkedXUsers,
     });
   } catch {
-    // X ID一覧は getCurrentUserContext() がDB正本から取得済みなので、
+    // X ID一覧は account summary context がDB正本から取得済みなので、
     // buildHeaderUser の管理イベント等の補助queryだけが失敗してもその正本を使う。
     // Active Xを無条件でapproved扱いすると、承認取消直後などにUIだけ権限ありに
     // 見えるため、approval_statusもlinked rowから正規化する。
@@ -97,4 +150,13 @@ export async function GET(): Promise<NextResponse<AccountSummaryResponse>> {
   };
 
   return NextResponse.json(body, { headers: PRIVATE_HEADERS });
+}
+
+export async function GET(
+  request: Request,
+): Promise<NextResponse<AccountSummaryResponse | AccountPresenceResponse>> {
+  if (new URL(request.url).searchParams.get("view") === "presence") {
+    return getPresence(request);
+  }
+  return getDetails();
 }

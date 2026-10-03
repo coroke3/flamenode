@@ -42,6 +42,17 @@ export type CurrentUserContext = {
   linkedXUsers: HeaderLinkedXUser[];
 };
 
+/** Account-menu identity projection. Terms are enforced by protected-route callers, not header hydration. */
+export type AccountSummaryCurrentUser = Pick<
+  CurrentUser,
+  "id" | "name" | "email" | "image" | "role" | "is_banned" | "active_x_user_id"
+>;
+
+export type AccountSummaryCurrentUserContext = {
+  user: AccountSummaryCurrentUser | null;
+  linkedXUsers: HeaderLinkedXUser[];
+};
+
 export type CurrentUserUnavailableCode =
   | "auth_temporarily_unavailable"
   | "database_unavailable";
@@ -56,7 +67,9 @@ export class CurrentUserUnavailableError extends Error {
   }
 }
 
-async function loadCurrentUserContext(): Promise<CurrentUserContext> {
+async function loadCurrentUserContext(
+  includeTerms: boolean,
+): Promise<CurrentUserContext | AccountSummaryCurrentUserContext> {
   let session: Session | null;
   try {
     session = await getAuthSession();
@@ -104,25 +117,44 @@ async function loadCurrentUserContext(): Promise<CurrentUserContext> {
   const loaded = await (async () => {
     try {
       return await withDatabaseRead(async (db) => {
-        const requiredMajor = await getLatestPublishedMajorTerms(db);
-        const userRow = (
-          await db
-            .select({
-              id: users.id,
-              name: users.name,
-              email: users.email,
-              image: users.image,
-              role: users.role,
-              is_banned: users.is_banned,
-              active_x_user_id: users.active_x_user_id,
-              is_tos_accepted: users.is_tos_accepted,
-              accepted_terms_version_id: users.accepted_terms_version_id,
-              terms_reaccept_required: termsReacceptRequiredValue(requiredMajor),
-            })
-            .from(users)
-            .where(eq(users.id, userId))
-            .limit(1)
-        )[0];
+        const userRow = includeTerms
+          ? await (async () => {
+              const requiredMajor = await getLatestPublishedMajorTerms(db);
+              return (
+                await db
+                  .select({
+                    id: users.id,
+                    name: users.name,
+                    email: users.email,
+                    image: users.image,
+                    role: users.role,
+                    is_banned: users.is_banned,
+                    active_x_user_id: users.active_x_user_id,
+                    is_tos_accepted: users.is_tos_accepted,
+                    accepted_terms_version_id: users.accepted_terms_version_id,
+                    terms_reaccept_required:
+                      termsReacceptRequiredValue(requiredMajor),
+                  })
+                  .from(users)
+                  .where(eq(users.id, userId))
+                  .limit(1)
+              )[0];
+            })()
+          : (
+              await db
+                .select({
+                  id: users.id,
+                  name: users.name,
+                  email: users.email,
+                  image: users.image,
+                  role: users.role,
+                  is_banned: users.is_banned,
+                  active_x_user_id: users.active_x_user_id,
+                })
+                .from(users)
+                .where(eq(users.id, userId))
+                .limit(1)
+            )[0];
 
         if (!userRow) return { kind: "missing" as const };
 
@@ -135,9 +167,36 @@ async function loadCurrentUserContext(): Promise<CurrentUserContext> {
           normalizeXId(userRow.active_x_user_id) || null,
           linkedXUsers,
         );
+        const accountUser: AccountSummaryCurrentUser = {
+          id: userRow.id,
+          name: userRow.name ?? fallback.name,
+          email: userRow.email ?? fallback.email,
+          image: userRow.image ?? fallback.image,
+          role:
+            userRow.role === "admin" || userRow.role === "moderator"
+              ? userRow.role
+              : "user",
+          is_banned: userRow.is_banned ?? 0,
+          active_x_user_id: resolvedActive,
+        };
+        const termsUserRow = userRow as typeof userRow & {
+          is_tos_accepted?: number | null;
+          accepted_terms_version_id?: string | null;
+          terms_reaccept_required?: number | null;
+        };
+        const currentUser: CurrentUser | AccountSummaryCurrentUser = includeTerms
+          ? {
+              ...accountUser,
+              is_tos_accepted: termsUserRow.is_tos_accepted ?? 0,
+              accepted_terms_version_id:
+                termsUserRow.accepted_terms_version_id ?? null,
+              terms_reaccept_required:
+                termsUserRow.terms_reaccept_required === 1 ? 1 : 0,
+            }
+          : accountUser;
         return {
           kind: "found" as const,
-          userRow,
+          user: currentUser,
           resolvedActive,
           linkedXUsers,
         };
@@ -154,29 +213,22 @@ async function loadCurrentUserContext(): Promise<CurrentUserContext> {
   // Auth.js側に古いsessionが残っていても、消失したDB userのroleを復活させない。
   if (loaded.kind === "missing") return { user: null, linkedXUsers: [] };
 
-  const { userRow, resolvedActive, linkedXUsers } = loaded;
   return {
-    user: {
-      id: userRow.id,
-      name: userRow.name ?? fallback.name,
-      email: userRow.email ?? fallback.email,
-      image: userRow.image ?? fallback.image,
-      role:
-        userRow.role === "admin" || userRow.role === "moderator"
-          ? userRow.role
-          : "user",
-      is_banned: userRow.is_banned ?? 0,
-      active_x_user_id: resolvedActive,
-      is_tos_accepted: userRow.is_tos_accepted ?? 0,
-      accepted_terms_version_id: userRow.accepted_terms_version_id ?? null,
-      terms_reaccept_required: userRow.terms_reaccept_required === 1 ? 1 : 0,
-    },
-    linkedXUsers,
+    user: loaded.user,
+    linkedXUsers: loaded.linkedXUsers,
   };
 }
 
-/** 同一Server Component request内のauth/DB/X-ID解決を1回にまとめる。 */
-export const getCurrentUserContext = cache(loadCurrentUserContext);
+const getCachedCurrentUserContext = cache(loadCurrentUserContext);
+
+/** 同一Server Component request内でterms付きDB正本contextを1回にまとめる。 */
+export const getCurrentUserContext = (): Promise<CurrentUserContext> =>
+  getCachedCurrentUserContext(true) as Promise<CurrentUserContext>;
+
+/** Account summary専用projection。TOS判定を避けつつuser/linked-X正本は維持する。 */
+export const getAccountSummaryCurrentUserContext =
+  (): Promise<AccountSummaryCurrentUserContext> =>
+    getCachedCurrentUserContext(false) as Promise<AccountSummaryCurrentUserContext>;
 
 /** 既存callers向け。context cacheを共有するため追加D1 readは発生しない。 */
 export const getCurrentUser = cache(

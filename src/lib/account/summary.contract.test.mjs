@@ -42,6 +42,24 @@ test("account summary APIはprivate no-storeで最小DTOだけを返す", () => 
   assert.doesNotMatch(route, /id: headerUser\.id/);
 });
 
+test("presenceはcookie名を推測せず、cookie headerが無い時だけAuth.jsを省略する", () => {
+  const presenceRoute = route.slice(
+    route.indexOf("async function getPresence"),
+    route.indexOf("async function getDetails"),
+  );
+  assert.match(
+    presenceRoute,
+    /if \(!request\.headers\.get\("cookie"\)\?\.trim\(\)\) return presenceLoggedOut\(\);/,
+  );
+  assert.match(presenceRoute, /await getAuthSession\(\)/);
+  assert.doesNotMatch(presenceRoute, /authjs\.session-token|__Secure-/i);
+  assert.doesNotMatch(presenceRoute, /getCurrentUserContext|buildHeaderUser/);
+  assert.ok(
+    presenceRoute.indexOf('request.headers.get("cookie")') <
+      presenceRoute.indexOf("await getAuthSession()"),
+  );
+});
+
 test("degraded summaryはDB正本のlinked Xとapproval statusを維持する", () => {
   assert.match(route, /degraded: true/);
   assert.match(route, /currentContext\.linkedXUsers\.map/);
@@ -50,10 +68,14 @@ test("degraded summaryはDB正本のlinked Xとapproval statusを維持する", 
   assert.doesNotMatch(route, /approval_status: "approved" as const/);
   assert.match(accountMenu, /resolveAccountMenuDisplayName/);
   assert.match(accountMenu, /degraded: user\.degraded === true/);
-  assert.match(publicHeader, /canAccessAdmin: fetchedUser\.management\.canAccessAdmin/);
+  assert.match(publicHeader, /management: fetchedUser\.management/);
   assert.doesNotMatch(
     publicHeader,
     /canAccessAdmin:\s*fetchedUser\.management\.canAccessAdmin\s*\|\|\s*serverUser\.management\.canAccessAdmin/,
+  );
+  assert.doesNotMatch(
+    publicHeader,
+    /fetchedUser\.management\.canAccessManage\s*\|\|\s*serverUser\.management\.canAccessManage/,
   );
 });
 
@@ -71,7 +93,7 @@ test("正常なloggedOut summaryはSSRの古いログイン表示を破棄する
   assert.match(island, /setConfirmedLoggedOut\(false\)/);
   assert.match(
     island,
-    /else \{[\s\S]*?setUser\(null\);\s*setConfirmedLoggedOut\(true\);\s*setUnavailable\(false\);/,
+    /presenceUserRef\.current = null;\s*setUser\(null\);\s*setConfirmedLoggedOut\(true\);/,
   );
   assert.match(
     publicHeader,
@@ -93,51 +115,80 @@ test("公開layoutとAccount Islandはserver authを呼ばない", () => {
   assert.match(island, /summary\.unavailable/);
   assert.match(island, /ログイン状態を再確認/);
   assert.match(island, /if \(unavailable \|\| !user\) \{/);
-  assert.match(island, /kind: "unavailable"/);
-  assert.match(island, /if \(!preserveLoggedInOnFailureRef\.current\) setUser\(null\)/);
+  assert.match(island, /detailsUnavailable/);
+  assert.match(
+    island,
+    /if \(!preserveLoggedInOnFailureRef\.current\) \{\s*presenceUserRef\.current = null;\s*setUser\(null\);/,
+  );
 });
 
-test("公開・SSR補完headerは表示直後にsummaryを一度取得しクリックを待たない", () => {
+test("公開headerはpresenceをhydration直後に取得し、詳細はメニュー操作まで遅延する", () => {
   assert.match(
     publicHeader,
-    /usePublicAccountSummary\(\s*fetchAccount,\s*true,\s*\)/,
+    /usePublicAccountSummary\(\s*fetchAccount,\s*accountOpen\s*\|\|\s*mobileOpen,\s*true,\s*\)/,
   );
   assert.doesNotMatch(publicHeader, /hydrateOnOpen|deferPublicAccountUntilIdle/);
   assert.doesNotMatch(island, /requestIdleCallback|deferUntilIdle|lazyRef/);
-  assert.match(island, /attemptedRef\.current && !refreshRequestedRef\.current/);
+  assert.match(island, /fetch\("\/api\/account\/summary\?view=presence"/);
+  assert.match(island, /fetch\("\/api\/account\/summary"/);
+  assert.match(island, /presenceStartedRef\.current/);
+  assert.match(island, /detailsStartedRef\.current/);
+  assert.match(island, /detailsRequested/);
   assert.match(publicHeader, /accountLoading && !accountUser/);
   assert.match(publicHeader, /accountUnavailable && !accountUser/);
+  assert.match(publicHeader, /fetchAccount && !fetchedUser && serverPresenceUser/);
+  assert.match(publicHeader, /function toPresenceOnlyUser/);
+  assert.match(publicHeader, /accountDetailsLoaded: false/);
 });
 
-test("account summaryのin-flight requestは無期限にloadingを維持しない", () => {
+test("presenceとfull detail requestにはtimeoutと同一layout内dedupeを適用する", () => {
   assert.match(island, /const PUBLIC_ACCOUNT_FETCH_TIMEOUT_MS = 5_000/);
   assert.match(island, /const controller = new AbortController\(\)/);
   assert.match(island, /controller\.abort\(\)/);
   assert.match(island, /signal: controller\.signal/);
   assert.match(island, /window\.clearTimeout\(timeoutId\)/);
-  assert.match(island, /return \{ kind: "unavailable" as const \}/);
+  assert.match(island, /presenceStartedRef\.current = true/);
+  assert.match(island, /detailsStartedRef\.current = true/);
+  assert.doesNotMatch(island, /localStorage/);
+});
+
+test("full detail未取得中にX IDなし/管理リンクを確定表示しない", () => {
+  assert.match(accountMenu, /!detailsReady\s*\?/);
+  assert.match(accountMenu, /X ID と管理メニューは、最新のアカウント情報を確認してから表示します/);
+  assert.match(
+    accountMenu,
+    /detailsReady &&\s*\(user\.management\.canAccessAdmin \|\| user\.management\.canAccessManage\)/,
+  );
+  assert.match(island, /detailsReady &&/);
+});
+
+test("Active X変更後はfull detailを再検証し、障害時はprivileged detailを隠す", () => {
+  assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
+  assert.match(island, /window\.addEventListener\(ACTIVE_X_CHANGED_EVENT, requestDetailsRetry\)/);
+  assert.match(island, /setUser\(presenceUserRef\.current\)/);
+  assert.match(island, /detailsUnavailable/);
+  assert.match(island, /onRetryDetails/);
 });
 
 test("PublicAccountIsland は ACTIVE_X_CHANGED_EVENT で summary を再取得する", () => {
   assert.match(island, /ACTIVE_X_CHANGED_EVENT/);
   assert.match(island, /addEventListener\(ACTIVE_X_CHANGED_EVENT/);
-  assert.match(island, /setRefreshNonce/);
-  assert.match(island, /attemptedRef/);
-  assert.match(island, /inFlightRef/);
-  assert.match(island, /if \(inFlight\)/);
-  assert.match(island, /refreshGenerationRef/);
-  assert.match(island, /request\.generation !== refreshGenerationRef\.current/);
+  assert.match(island, /detailsRequested/);
+  assert.match(island, /detailsStartedRef/);
 });
 
 test("account summary一時失敗は自動loopせず明示的に再試行できる", () => {
   assert.match(island, /PUBLIC_ACCOUNT_RETRY_EVENT/);
   assert.match(island, /requestPublicAccountRetry/);
   assert.match(island, /dispatchEvent\(new Event\(PUBLIC_ACCOUNT_RETRY_EVENT\)\)/);
-  assert.match(island, /addEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
-  assert.match(island, /removeEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestRefresh\)/);
+  assert.match(island, /addEventListener\(PUBLIC_ACCOUNT_RETRY_EVENT, requestPresenceRetry\)/);
+  assert.match(island, /removeEventListener\([\s\S]*?PUBLIC_ACCOUNT_RETRY_EVENT,[\s\S]*?requestPresenceRetry/);
   assert.match(island, /onClick=\{requestPublicAccountRetry\}/);
-  assert.match(island, /refreshRequestedRef\.current = true/);
-  assert.match(island, /if \(needsRefresh\)/);
+  assert.match(island, /presenceStartedRef\.current = false/);
+  assert.match(island, /setPresenceRetryNonce\(\(current\) => current \+ 1\)/);
+  assert.match(island, /presenceRetryNonce, preserveLoggedInOnFailure/);
+  assert.match(island, /detailsStartedRef\.current = false/);
+  assert.match(island, /PUBLIC_ACCOUNT_DETAILS_RETRY_EVENT/);
 });
 
 test("ログアウトはSignOutButton経由でhard navigateする", () => {

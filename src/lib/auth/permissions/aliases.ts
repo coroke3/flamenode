@@ -11,6 +11,8 @@ const LEGACY_TO_CANONICAL: Record<string, PermissionKey> = {
   "videos.youtube_id": "video.youtube_id",
 };
 
+export const LEGACY_PERMISSION_KEY_ALIASES = Object.keys(LEGACY_TO_CANONICAL);
+
 export function canonicalizePermissionKey(
   key: string,
 ): PermissionKey | null {

@@ -20,7 +20,6 @@ export interface AccountMenuUser {
   management: {
     canAccessAdmin: boolean;
     canAccessManage: boolean;
-    manageableEventCount?: number;
   };
   xIds: XIdEntry[];
   degraded?: true;
@@ -28,6 +27,10 @@ export interface AccountMenuUser {
 
 interface AccountMenuProps {
   user: AccountMenuUser;
+  detailsReady?: boolean;
+  detailsLoading?: boolean;
+  detailsUnavailable?: boolean;
+  onRetryDetails?: () => void;
   onSwitch?: (xUserId: string) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -35,6 +38,10 @@ interface AccountMenuProps {
 
 export function AccountMenu({
   user,
+  detailsReady = true,
+  detailsLoading = false,
+  detailsUnavailable = false,
+  onRetryDetails,
   onSwitch,
   open: controlledOpen,
   onOpenChange,
@@ -182,7 +189,32 @@ export function AccountMenu({
               <div className={styles.headerInfo}>{headerInfo}</div>
             )}
 
-            {!activeEntry ? (
+            {!detailsReady ? (
+              <div
+                className={`${styles.statusNotice} ${styles.noticeWarning}`}
+                role="status"
+                aria-busy={detailsLoading}
+              >
+                <strong>
+                  {detailsUnavailable
+                    ? "アカウント情報を取得できません"
+                    : "アカウント情報を確認中"}
+                </strong>
+                <p style={{ marginTop: 4, color: "var(--text-secondary)" }}>
+                  X ID と管理メニューは、最新のアカウント情報を確認してから表示します。
+                </p>
+                {detailsUnavailable && onRetryDetails ? (
+                  <button
+                    type="button"
+                    className="fn-btn fn-btn-secondary fn-btn-sm"
+                    onClick={onRetryDetails}
+                    style={{ width: "100%", justifyContent: "center" }}
+                  >
+                    再試行
+                  </button>
+                ) : null}
+              </div>
+            ) : !activeEntry ? (
               xIds.length === 0 ? (
                 <div
                   className={`${styles.statusNotice} ${styles.noticeWarning}`}
@@ -389,7 +421,8 @@ export function AccountMenu({
             </Link>
           </div>
 
-          {user.management.canAccessAdmin || user.management.canAccessManage ? (
+          {detailsReady &&
+          (user.management.canAccessAdmin || user.management.canAccessManage) ? (
             <>
               <div className={styles.divider} />
               <div className={styles.section}>
