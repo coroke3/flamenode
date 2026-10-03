@@ -30,6 +30,8 @@ import { buildAccentVars } from "@/lib/theme/accent";
 export const metadata: Metadata = { title: "ダッシュボード" };
 export const dynamic = "force-dynamic";
 
+const DASHBOARD_PREVIEW_LIMIT = 8;
+
 type LinkedXRow = {
   id: string;
   x_name: string;
@@ -48,7 +50,9 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
   let xIds: LinkedXRow[] = [];
   let approvedXIds: string[] = [];
   let myVideos: VideoCardData[] = [];
+  let hasMoreMyVideos = false;
   let collabVideos: VideoCardData[] = [];
+  let hasMoreCollabVideos = false;
   let mySlot: typeof slotsTable.$inferSelect | null = null;
   let mySlotEvent: typeof eventsTable.$inferSelect | null = null;
   let myChapters: Array<{
@@ -61,6 +65,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
     visibility: "private" | "public" | null;
     created_at: number;
   }> = [];
+  let hasMoreMyChapters = false;
   let stats = { likes: 0, views: 0, video_count: 0, event_count: 0 };
 
   if (db) {
@@ -87,7 +92,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
 
       if (approvedXIds.length > 0) {
         if (onboarding.activeApprovedXId) {
-          myVideos = (await db
+          const rows = await db
             .select({
               id: videosTable.id,
               title: videosTable.title,
@@ -106,11 +111,14 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
                 ne(videosTable.visibility_status, "voided"),
               )!,
             )
-            .orderBy(desc(videosTable.created_at))) as VideoCardData[];
+            .orderBy(desc(videosTable.created_at), desc(videosTable.id))
+            .limit(DASHBOARD_PREVIEW_LIMIT + 1);
+          hasMoreMyVideos = rows.length > DASHBOARD_PREVIEW_LIMIT;
+          myVideos = rows.slice(0, DASHBOARD_PREVIEW_LIMIT) as VideoCardData[];
         }
 
-        collabVideos = (await db
-          .select({
+        const collabRows = await db
+          .selectDistinct({
             id: videosTable.id,
             title: videosTable.title,
             youtube_video_id: videosTable.youtube_video_id,
@@ -135,11 +143,12 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
               )!,
             )!,
           )
-          .orderBy(desc(videosTable.created_at))) as VideoCardData[];
-        const collabById = new Map(collabVideos.map((video) => [video.id, video]));
-        collabVideos = Array.from(collabById.values());
+          .orderBy(desc(videosTable.created_at), desc(videosTable.id))
+          .limit(DASHBOARD_PREVIEW_LIMIT + 1);
+        hasMoreCollabVideos = collabRows.length > DASHBOARD_PREVIEW_LIMIT;
+        collabVideos = collabRows.slice(0, DASHBOARD_PREVIEW_LIMIT) as VideoCardData[];
 
-        myChapters = await db
+        const chapterRows = await db
           .select({
             id: videoChaptersTable.id,
             video_id: videoChaptersTable.video_id,
@@ -153,8 +162,10 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           .from(videoChaptersTable)
           .leftJoin(videosTable, eq(videosTable.id, videoChaptersTable.video_id))
           .where(approvedXIdsWhere(videoChaptersTable.x_user_id, approvedXIds))
-          .orderBy(desc(videoChaptersTable.created_at))
-          .limit(80);
+          .orderBy(desc(videoChaptersTable.created_at), desc(videoChaptersTable.id))
+          .limit(DASHBOARD_PREVIEW_LIMIT + 1);
+        hasMoreMyChapters = chapterRows.length > DASHBOARD_PREVIEW_LIMIT;
+        myChapters = chapterRows.slice(0, DASHBOARD_PREVIEW_LIMIT);
       }
 
       const slotOwnerWhere = activeX
@@ -203,36 +214,46 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
           ne(videosTable.visibility_status, "voided"),
           excludePvsfSummaryVideos(),
         )!;
-        const aggRows = await db
-          .select({
-            likes: sql<number>`COALESCE(SUM(${videosTable.app_like_count}),0)`,
-            views: sql<number>`COALESCE(SUM(${videoYoutubeMetadata.view_count}),0)`,
-            c: sql<number>`COUNT(*)`,
-          })
-          .from(videosTable)
-          .leftJoin(
-            videoYoutubeMetadata,
-            eq(videoYoutubeMetadata.video_id, videosTable.id),
-          )
-          .where(statsVideoWhere);
-        const eventRows = await db
-          .selectDistinct({
-            primary_event_id: videosTable.primary_event_id,
-            linked_event_id: videoEvents.event_id,
-          })
-          .from(videosTable)
-          .leftJoin(videoEvents, eq(videoEvents.video_id, videosTable.id))
-          .where(statsVideoWhere);
-        const participatingEventIds = new Set<string>();
-        for (const row of eventRows) {
-          if (row.primary_event_id) participatingEventIds.add(row.primary_event_id);
-          if (row.linked_event_id) participatingEventIds.add(row.linked_event_id);
-        }
+        const [aggRows, eventCountRows] = await Promise.all([
+          db
+            .select({
+              likes: sql<number>`COALESCE(SUM(${videosTable.app_like_count}),0)`,
+              views: sql<number>`COALESCE(SUM(${videoYoutubeMetadata.view_count}),0)`,
+              c: sql<number>`COUNT(*)`,
+            })
+            .from(videosTable)
+            .leftJoin(
+              videoYoutubeMetadata,
+              eq(videoYoutubeMetadata.video_id, videosTable.id),
+            )
+            .where(statsVideoWhere),
+          db.all(sql`
+            SELECT COUNT(*) AS event_count
+            FROM (
+              SELECT ${videosTable.primary_event_id} AS event_id
+              FROM ${videosTable}
+              WHERE ${statsVideoWhere}
+                AND ${videosTable.primary_event_id} IS NOT NULL
+                AND ${videosTable.primary_event_id} <> ''
+              UNION
+              SELECT ${videoEvents.event_id} AS event_id
+              FROM ${videoEvents}
+              INNER JOIN ${videosTable}
+                ON ${videosTable.id} = ${videoEvents.video_id}
+              WHERE ${statsVideoWhere}
+                AND ${videoEvents.event_id} IS NOT NULL
+                AND ${videoEvents.event_id} <> ''
+            ) AS dashboard_event_ids
+          `),
+        ]);
+        const eventCountRow = eventCountRows[0] as
+          | { event_count?: unknown }
+          | undefined;
         stats = {
           likes: Number(aggRows[0]?.likes ?? 0),
           views: Number(aggRows[0]?.views ?? 0),
           video_count: Number(aggRows[0]?.c ?? 0),
-          event_count: participatingEventIds.size,
+          event_count: Number(eventCountRow?.event_count ?? 0),
         };
       }
     } catch (error) {
@@ -455,7 +476,14 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={`fn-dash-section ${styles.section}`}>
-        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>自分の作品</h2>
+        <div className={styles.sectionHeader}>
+          <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>自分の作品</h2>
+          {hasMoreMyVideos ? (
+            <Link href="/dashboard/library?tab=mine" className="fn-btn fn-btn-ghost fn-btn-sm">
+              すべて見る
+            </Link>
+          ) : null}
+        </div>
         {myVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="grid" size={20} aria-hidden />
@@ -481,9 +509,16 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={`fn-dash-section ${styles.section}`}>
-        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>
-          共同編集できる作品
-        </h2>
+        <div className={styles.sectionHeader}>
+          <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>
+            共同編集できる作品
+          </h2>
+          {hasMoreCollabVideos ? (
+            <Link href="/dashboard/library?tab=collab" className="fn-btn fn-btn-ghost fn-btn-sm">
+              すべて見る
+            </Link>
+          ) : null}
+        </div>
         {collabVideos.length === 0 ? (
           <div className="fn-empty">
             <Icon name="users" size={20} aria-hidden />
@@ -503,9 +538,16 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
       </section>
 
       <section className={`fn-dash-section ${styles.section}`}>
-        <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>
-          自分のチャプターコメント
-        </h2>
+        <div className={styles.sectionHeader}>
+          <h2 className={`fn-dash-section-title ${styles.sectionTitle}`}>
+            自分のチャプターコメント
+          </h2>
+          {hasMoreMyChapters ? (
+            <Link href="/dashboard/library?tab=chapters" className="fn-btn fn-btn-ghost fn-btn-sm">
+              すべて見る
+            </Link>
+          ) : null}
+        </div>
         {myChapters.length === 0 ? (
           <div className="fn-empty">
             <Icon name="chapter" size={20} aria-hidden />
