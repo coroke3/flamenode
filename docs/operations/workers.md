@@ -141,7 +141,7 @@ Google Cloud Consoleの日次quotaが標準10,000以外の場合は、`workers/s
 - blocked動画の再確認と`youtube_related_blocklist`の日次整合は、毎時CronのうちUTC 03:07の1回だけ実行する。
 - スコアは1 SQLで最大150件更新し、作品ごとのUPDATE loopを禁止する。72時間以上未更新の公開作品は age-only で強制 refresh する（`SCORE_FORCE_REFRESH_SEC`）。
 - score 更新後は `ranking-rebuild-enqueue` が `top` / `list_popular` / `recommend_core` を throttle 付きで enqueue する（開催中イベントあり 1h / なし 3h。KV `ranking:last-score-rebuild`）。
-- 静的生成は1 invocationで1 targetだけ処理する。deploy 後の `BUILD_COMMIT_SHA` 変化時は Recovery Cron が共有 global target を high enqueue する（`static:last_generator_commit` で重複抑制）。
+- 静的生成は1 invocationで1 targetだけ処理する。deploy 後は、静的 rebuild 経路の generator source hash（`STATIC_GENERATOR_HASH`、content-jobs のみへ注入）が変化したときだけ Recovery Cron が共有 global target を high enqueue する（`static:last_generator_commit` に hash を保存して重複抑制。hash 変数が無い場合は `BUILD_COMMIT_SHA` へ fallback。UI・docs だけの commit では enqueue しない）。
 - JSON生成対象は必ずSQL側の`LIMIT`を持ち、無制限全件取得を行わない。
 - 初回backlog処理中も通知を独立Workerで維持する。
 

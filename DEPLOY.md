@@ -141,7 +141,7 @@ Workers Buildsのsystem変数、Build/Deploy分離、branch設定は次を正本
 | --- | --- |
 | `flamenode-web` | `NEXT_PUBLIC_SITE_URL`、`AUTH_URL`、`AUTH_DISCORD_ID`、公開site metadata、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED`、`PUBLIC_VISIBILITY_GUARD_MODE`（任意・未設定時 template `observe`） |
 | `flamenode-fast-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
-| `flamenode-content-jobs` | `BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
+| `flamenode-content-jobs` | `BUILD_COMMIT_SHA`、`STATIC_GENERATOR_HASH`（`scripts/static-generator-hash.mjs` が config 生成時に自動注入。手動設定不要）、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
 | `flamenode-sync-jobs` | `YOUTUBE_DAILY_QUOTA_LIMIT`、`BUILD_COMMIT_SHA`、`QUEUE_DISPATCH_ENABLED`、`QUEUE_CONTINUATION_ENABLED`、`QUEUE_YOUTUBE_SYNC_ENABLED` |
 
 Queue feature flagはwrangler templateどおり**デフォルト`"0"`**（無効）とする。本番で有効化する正本は次の2段。

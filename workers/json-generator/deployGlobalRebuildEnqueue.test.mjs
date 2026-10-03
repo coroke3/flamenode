@@ -236,6 +236,98 @@ test("batch changes が 0 でも全10件 pending なら KV を更新し wake 用
   assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), VALID_SHA);
 });
 
+const HASH_A = "1".repeat(64);
+const HASH_B = "2".repeat(64);
+
+test("同一 generator hash なら commit が変わっても enqueue せず KV も更新しない", async () => {
+  const { env, kvStore, getBatchCalls } = createFakeEnv({ storedCommit: HASH_A });
+  const count = await ensureDeployGlobalRebuilds(env, {
+    commitSha: VALID_SHA,
+    generatorHash: HASH_A,
+  });
+  assert.equal(count, 0);
+  assert.equal(getBatchCalls(), 0);
+  assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), HASH_A);
+});
+
+test("同一 generator hash でも failed があれば failed target だけを1回再試行する", async () => {
+  const { env, kvStore } = createFakeEnv({
+    storedCommit: HASH_A,
+    failedTargets: ["list_recent"],
+    pendingCount: DEPLOY_GLOBAL_REBUILD_TARGETS.length,
+  });
+  let batched = null;
+  const originalBatch = env.DB.batch;
+  env.DB.batch = async (statements) => {
+    batched = statements;
+    return originalBatch(statements);
+  };
+  const count = await ensureDeployGlobalRebuilds(env, {
+    commitSha: "c".repeat(40),
+    generatorHash: HASH_A,
+  });
+  assert.equal(batched.length, 3);
+  assert.equal(batched[1].args[0], DEPLOY_GLOBAL_REBUILD_RETRY_REASON);
+  assert.equal(count, 2);
+  assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), HASH_A);
+});
+
+test("generator hash が変わると 16 target を enqueue し KV に hash を保存する", async () => {
+  const { env, kvStore, getBatchCalls } = createFakeEnv({
+    storedCommit: HASH_A,
+    batchChanges: 1,
+    pendingCount: DEPLOY_GLOBAL_REBUILD_TARGETS.length,
+  });
+  let batched = null;
+  const originalBatch = env.DB.batch;
+  env.DB.batch = async (statements) => {
+    batched = statements;
+    return originalBatch(statements);
+  };
+  await ensureDeployGlobalRebuilds(env, {
+    commitSha: VALID_SHA,
+    generatorHash: HASH_B.toUpperCase(),
+  });
+  assert.equal(getBatchCalls(), 1);
+  assert.equal(DEPLOY_GLOBAL_REBUILD_TARGETS.length, 16);
+  assert.equal(JSON.parse(batched[1].args[4]).length, 16);
+  assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), HASH_B);
+});
+
+test("旧 commit 値が KV に残っていても hash 初回 deploy は1回だけ enqueue する", async () => {
+  const { env, kvStore, getBatchCalls } = createFakeEnv({
+    storedCommit: VALID_SHA,
+    batchChanges: 1,
+    pendingCount: DEPLOY_GLOBAL_REBUILD_TARGETS.length,
+  });
+  await ensureDeployGlobalRebuilds(env, {
+    commitSha: VALID_SHA,
+    generatorHash: HASH_A,
+  });
+  assert.equal(getBatchCalls(), 1);
+  assert.equal(kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), HASH_A);
+});
+
+test("generator hash が未設定/不正なら commit SHA 判定へ fall back する", async () => {
+  for (const generatorHash of [undefined, "", "unknown", "g".repeat(64), "a".repeat(63)]) {
+    const same = createFakeEnv({ storedCommit: VALID_SHA });
+    assert.equal(
+      await ensureDeployGlobalRebuilds(same.env, { commitSha: VALID_SHA, generatorHash }),
+      0,
+    );
+    assert.equal(same.getBatchCalls(), 0);
+
+    const changed = createFakeEnv({
+      storedCommit: "b".repeat(40),
+      batchChanges: 1,
+      pendingCount: DEPLOY_GLOBAL_REBUILD_TARGETS.length,
+    });
+    await ensureDeployGlobalRebuilds(changed.env, { commitSha: VALID_SHA, generatorHash });
+    assert.equal(changed.getBatchCalls(), 1);
+    assert.equal(changed.kvStore.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY), VALID_SHA);
+  }
+});
+
 test("AbortSignal を尊重する", async () => {
   const controller = new AbortController();
   controller.abort();

@@ -16,6 +16,7 @@ test("content-jobs は Queue consumer と Recovery Cron を公開する", () => 
   assert.match(source, /runContentJobsRecovery/);
   assert.match(source, /reconcileStaleQueue/);
   assert.match(source, /ensureDeployGlobalRebuilds/);
+  assert.match(source, /generatorHash:\s*env\.STATIC_GENERATOR_HASH/);
   assert.match(source, /ensureDailyTopNostalgicShuffle/);
   assert.match(source, /ensureEventPlaylistBackfill/);
   assert.match(source, /eventPlaylistBackfill > 0/);

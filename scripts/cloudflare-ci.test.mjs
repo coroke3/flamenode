@@ -45,6 +45,10 @@ import {
 } from "./check-open-next-output.mjs";
 import { runSmoke, smokeEnvironment } from "./smoke-cloudflare.mjs";
 import {
+  computeStaticGeneratorHash,
+  STATIC_GENERATOR_ROOTS,
+} from "./static-generator-hash.mjs";
+import {
   isWorkersCi,
   rejectBareWorkersCiWranglerDeploy,
 } from "./cloudflare-production.mjs";
@@ -119,6 +123,12 @@ function writeFixtureTemplates(repoRoot) {
       "$1$2minify = true\n",
     );
     fs.writeFileSync(filePath, fixtureContent, "utf8");
+  }
+  // content-jobs の STATIC_GENERATOR_HASH 算出用に generator root を最小 fixture として置く。
+  for (const relative of STATIC_GENERATOR_ROOTS) {
+    const filePath = path.join(repoRoot, relative);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, `export const root = "${relative}";\n`, "utf8");
   }
 }
 
@@ -423,6 +433,71 @@ test("tracked placeholder configs produce four private production configs withou
     assert.match(fast, /NEXT_PUBLIC_SITE_URL = "https:\/\/flamenode\.example\.com"/);
     assert.match(fast, /main = "\.\.\/\.\.\/workers\/fast-jobs\/index\.ts"/);
     assert.match(fast, /^minify = true$/m);
+  }));
+
+test("STATIC_GENERATOR_HASH は content-jobs だけへ inject され、UI/docs だけの変更では変わらない", () =>
+  withTempDirectory("flamenode-production-static-generator-hash-", (repoRoot) => {
+    writeFixtureTemplates(repoRoot);
+    const env = productionEnv();
+    const expected = computeStaticGeneratorHash(repoRoot);
+    const configs = materializeProductionConfigs({ env, repoRoot, commit: COMMIT });
+    const content = fs.readFileSync(configs["content-jobs"], "utf8");
+    assert.match(content, new RegExp(`^STATIC_GENERATOR_HASH = "${expected}"\r?$`, "m"));
+    assert.match(content, new RegExp(`BUILD_COMMIT_SHA = "${COMMIT}"`));
+    for (const key of ["web", "fast-jobs", "sync-jobs"]) {
+      assert.doesNotMatch(fs.readFileSync(configs[key], "utf8"), /STATIC_GENERATOR_HASH/);
+    }
+
+    // commit だけが違い generator ソースが同一なら同じ hash が inject される。
+    fs.mkdirSync(path.join(repoRoot, "app"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "app/page.tsx"), "export default null;\n", "utf8");
+    const otherCommit = "f".repeat(40);
+    const next = materializeProductionConfigs({
+      env: productionEnv({ WORKERS_CI_COMMIT_SHA: otherCommit }),
+      repoRoot,
+      commit: otherCommit,
+    });
+    const nextContent = fs.readFileSync(next["content-jobs"], "utf8");
+    assert.match(nextContent, new RegExp(`^STATIC_GENERATOR_HASH = "${expected}"\r?$`, "m"));
+    assert.match(nextContent, new RegExp(`BUILD_COMMIT_SHA = "${otherCommit}"`));
+
+    // generator root が変わると hash が変わって inject される。
+    fs.appendFileSync(path.join(repoRoot, STATIC_GENERATOR_ROOTS[0]), "// changed\n", "utf8");
+    const changed = materializeProductionConfigs({ env, repoRoot, commit: COMMIT });
+    const changedContent = fs.readFileSync(changed["content-jobs"], "utf8");
+    assert.doesNotMatch(changedContent, new RegExp(expected));
+    assert.match(changedContent, /^STATIC_GENERATOR_HASH = "[0-9a-f]{64}"/m);
+  }));
+
+test("content-jobs の STATIC_GENERATOR_HASH が欠落した生成済み config と不正 hash は拒否する", () =>
+  withTempDirectory("flamenode-production-static-generator-hash-verify-", (repoRoot) => {
+    writeFixtureTemplates(repoRoot);
+    const env = productionEnv();
+    const configs = materializeProductionConfigs({ env, repoRoot, commit: COMMIT });
+    const contentPath = configs["content-jobs"];
+    const stripped = fs
+      .readFileSync(contentPath, "utf8")
+      .replace(/^STATIC_GENERATOR_HASH = .*\r?\n/m, "");
+    fs.writeFileSync(contentPath, stripped, "utf8");
+    assert.throws(
+      () =>
+        materializeProductionConfigs({
+          env: { ...env, CF_CONTENT_JOBS_CONFIG: contentPath },
+          repoRoot,
+          commit: COMMIT,
+        }),
+      /static generator hash variable is missing/,
+    );
+    assert.throws(
+      () =>
+        materializeProductionConfigs({
+          env,
+          repoRoot,
+          commit: COMMIT,
+          staticGeneratorHash: "not-a-hash",
+        }),
+      /64-character hexadecimal static generator hash/,
+    );
   }));
 
 test("GA4_SYNC_ENABLED=1 injects sync-jobs feature flag from Build env", () =>

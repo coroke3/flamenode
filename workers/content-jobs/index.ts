@@ -70,6 +70,8 @@ export interface Env {
   };
   WORKER_ADMIN_TOKEN?: string;
   BUILD_COMMIT_SHA?: string;
+  /** 静的 rebuild 経路ソースの推移 hash（deploy 時に generated config へ注入。未設定は commit SHA で判定）。 */
+  STATIC_GENERATOR_HASH?: string;
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
   QUEUE_YOUTUBE_SYNC_ENABLED?: string;
@@ -200,6 +202,7 @@ export async function runContentJobsRecovery(
               rebuildEnv,
               {
                 commitSha: env.BUILD_COMMIT_SHA,
+                generatorHash: env.STATIC_GENERATOR_HASH,
                 signal,
               },
             );

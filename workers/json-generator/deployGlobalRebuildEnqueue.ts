@@ -17,6 +17,11 @@ export const DEPLOY_GLOBAL_REBUILD_TARGETS = [
   "member_suggestions",
 ] as const;
 
+/**
+ * 前回 deploy 時の generator 識別子を保持する KV key。
+ * key 名は互換のため "commit" のままだが、値は STATIC_GENERATOR_HASH（64桁 hex）が
+ * 有効ならそのハッシュ、無効/未設定なら正規化済み commit SHA（40桁 hex）。
+ */
 export const STATIC_LAST_GENERATOR_COMMIT_KV_KEY =
   "static:last_generator_commit";
 
@@ -44,6 +49,11 @@ function normalizeCommitSha(commitSha: string | undefined): string | null {
     return null;
   }
   return trimmed.toLowerCase();
+}
+
+function normalizeGeneratorHash(generatorHash: string | undefined): string | null {
+  const trimmed = generatorHash?.trim() ?? "";
+  return /^[0-9a-f]{64}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
 }
 
 function buildDeployGlobalRebuildEnqueueStatements(
@@ -178,11 +188,16 @@ async function allDeployTargetsPendingOrProcessing(env: EnqueueEnv): Promise<boo
   return Number(row?.count ?? 0) >= DEPLOY_GLOBAL_REBUILD_TARGETS.length;
 }
 
-/** deploy 後の generator 変更時に共有 global target を high で enqueue する。 */
+/**
+ * deploy 後の generator 変更時に共有 global target を high で enqueue する。
+ * 変更判定は generatorHash（静的 rebuild 経路ソースの推移 hash）が有効ならそれで、
+ * 無効/未設定なら commit SHA で行う。docs/UI だけの deploy で全 global を再生成しない。
+ */
 export async function ensureDeployGlobalRebuilds(
   env: EnqueueEnv,
   options: {
     commitSha?: string;
+    generatorHash?: string;
     signal?: AbortSignal;
   },
 ): Promise<number> {
@@ -190,6 +205,7 @@ export async function ensureDeployGlobalRebuilds(
   if (!commitSha) {
     return 0;
   }
+  const generatorKey = normalizeGeneratorHash(options.generatorHash) ?? commitSha;
 
   options.signal?.throwIfAborted();
 
@@ -197,8 +213,8 @@ export async function ensureDeployGlobalRebuilds(
   let targets: readonly string[] = DEPLOY_GLOBAL_REBUILD_TARGETS;
   let reason = DEPLOY_GLOBAL_REBUILD_REASON;
   let leadingStatements: D1PreparedStatement[] = [];
-  if (stored === commitSha) {
-    // 同一 commit: 永続 failed になった target だけを1回だけ再試行する。
+  if (stored === generatorKey) {
+    // 同一 generator: 永続 failed になった target だけを1回だけ再試行する。
     // failed 行は reason を退避して二度と数えず、再試行行は別 reason にして
     // 再度 failed になっても自動再 enqueue しない（hourly cron の暴走防止）。
     const failedTargets = await listFailedDeployGlobalTargets(env);
@@ -241,7 +257,7 @@ export async function ensureDeployGlobalRebuilds(
   }
 
   if (enqueued > 0 || allCovered) {
-    await env.KV.put(STATIC_LAST_GENERATOR_COMMIT_KV_KEY, commitSha);
+    await env.KV.put(STATIC_LAST_GENERATOR_COMMIT_KV_KEY, generatorKey);
     options.signal?.throwIfAborted();
   }
 

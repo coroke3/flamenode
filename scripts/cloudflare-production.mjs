@@ -6,6 +6,7 @@ import {
   REQUIRED_SCHEMA_VERSION,
   RUNTIME_CRITICAL_TABLES,
 } from "../src/lib/health/schemaContract.ts";
+import { computeStaticGeneratorHash } from "./static-generator-hash.mjs";
 
 export { REQUIRED_SCHEMA_VERSION, RUNTIME_CRITICAL_TABLES };
 
@@ -129,6 +130,7 @@ export const SENSITIVE_ENV_NAMES = Object.freeze([
 ]);
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
+const STATIC_GENERATOR_HASH_PATTERN = /^[0-9a-f]{64}$/;
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HEX_ID_PATTERN = /^[0-9a-f]{32}$/i;
@@ -680,7 +682,7 @@ function validateCronSchedule(content, errors, expectedCrons) {
   }
 }
 
-function validateProductionConfig(content, target, env, commit, relativePath) {
+function validateProductionConfig(content, target, env, commit, relativePath, staticGeneratorHash) {
   const errors = [];
   if (/FLAMENODE_LOCAL_PREVIEW/.test(content)) {
     errors.push("local preview allowance is forbidden in production config");
@@ -743,6 +745,10 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
       retryDelay: 60,
     });
     validateCronSchedule(content, errors, ["15 * * * *"]);
+    // deploy 時 global rebuild の比較キー。generator ソースが変わらない deploy では再 enqueue しない。
+    if (!content.includes(`STATIC_GENERATOR_HASH = "${staticGeneratorHash}"`)) {
+      errors.push("static generator hash variable is missing");
+    }
   }
   if (target.key === "sync-jobs") {
     validateQueueFeatureFlags(content, errors, env);
@@ -791,7 +797,7 @@ function validateProductionConfig(content, target, env, commit, relativePath) {
   if (errors.length > 0) throw new Error(`${relativePath}: ${errors.join("; ")}`);
 }
 
-function buildProductionConfig(template, target, env, commit, sourcePath) {
+function buildProductionConfig(template, target, env, commit, sourcePath, staticGeneratorHash) {
   let output = stripTrackedBuildSection(template);
   output = replaceRequired(
     output,
@@ -869,6 +875,7 @@ function buildProductionConfig(template, target, env, commit, sourcePath) {
       "content-jobs main",
       sourcePath,
     );
+    output = injectStringVariable(output, "STATIC_GENERATOR_HASH", staticGeneratorHash);
   }
   if (target.key === "sync-jobs") {
     output = replaceRequired(
@@ -891,8 +898,12 @@ export function materializeProductionConfigs({
   repoRoot = process.cwd(),
   outputDir = path.join(repoRoot, ".cloudflare", "generated"),
   commit = value(env, "WORKERS_CI_COMMIT_SHA").toLowerCase(),
+  staticGeneratorHash = computeStaticGeneratorHash(repoRoot),
 } = {}) {
   if (!SHA_PATTERN.test(commit)) throw new Error("A verified production commit SHA is required.");
+  if (!STATIC_GENERATOR_HASH_PATTERN.test(staticGeneratorHash)) {
+    throw new Error("A 64-character hexadecimal static generator hash is required.");
+  }
   const queueErrors = productionQueueConfigurationErrors(env);
   if (queueErrors.length > 0) {
     throw new Error(`Invalid production Queue configuration: ${queueErrors.join("; ")}`);
@@ -912,11 +923,25 @@ export function materializeProductionConfigs({
       const sourcePath = path.resolve(repoRoot, target.source);
       if (!fs.existsSync(sourcePath)) throw new Error(`${target.source}: tracked template is missing.`);
       const template = fs.readFileSync(sourcePath, "utf8");
-      const generated = buildProductionConfig(template, target, env, commit, target.source);
+      const generated = buildProductionConfig(
+        template,
+        target,
+        env,
+        commit,
+        target.source,
+        staticGeneratorHash,
+      );
       fs.writeFileSync(configPath, generated, { encoding: "utf8", mode: 0o600 });
     }
     const content = fs.readFileSync(configPath, "utf8");
-    validateProductionConfig(content, target, env, commit, path.relative(repoRoot, configPath));
+    validateProductionConfig(
+      content,
+      target,
+      env,
+      commit,
+      path.relative(repoRoot, configPath),
+      staticGeneratorHash,
+    );
     configs[target.key] = configPath;
   }
   return configs;
