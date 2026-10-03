@@ -133,6 +133,10 @@ rows and does not replace usable public static detail.
 - `FORCE_STATIC_ONLY` または運用モードが `static_json_only` のときは degraded D1 に進まず、Unavailable または静的 JSON のみ。
 - R2 miss が 1 分あたり 20 件以上（`degradedCircuitBreakerCore.ts`）のとき、KV サーキットが open になり degraded D1 を一時停止する。Cache API の stale エントリは引き続き返す。R2 ヒットが 3 回連続すると自動解除する。miss counter が数えるのは、R2 artifact が欠落している **public な対象**（probe が `public`。一覧・top などの global target は常に `public` 扱い）だけである。存在しない ID・非公開 ID（`/user/<ランダム文字列>` のクロールなど）は probe が `missing` / `not_public` になり、KV へ miss を書かず、degraded D1 も実行しない。`resolvePublicJsonMiss` は probe が `missing` / `not_public` のとき degraded fetch を省略し、`public` と `unknown`（probe 失敗）のときだけ D1 fallback を試す。user probe の `lower(x_users.id) = ?` は migration 0064 の式 index `x_users_lower_id_idx` で index-backed になる（旧 mixed-case ID の大文字小文字を区別しない照合は維持）。これは静的配信の fail-closed 安全装置であり、Cloudflare 使用量に基づく CostGuard の自動 `operation_mode` 変更ではない。
 
+### 公開 polling API の isolate coalescing
+
+`/api/event-endpoints/[id]`（realtime）と `/api/live/events/[id]/{slots,summary,submissions}` は、同一 isolate 内で組み立て済みの body 文字列を 15 秒間だけ再利用する（5 秒間隔の単独 polling でも 1 窓 1 snapshot に合流させるため）（`src/lib/api/isolateMicroCache.ts`。最大 64 件・最古から追い出し・値は解決済み string のみ・Promise や binding は保持しない）。認可は毎 request で確認する。event-endpoints は 1 行の `loadEventExportEvent` による公開可否判定を cache 参照前に必ず実行し、key に `events.updated_at` を含める。live API は `resolvePublicOperationMode`（env / isolate 30 秒 / KV 複製、いずれも無いときだけ D1）で `isLiveApiEnabled` を毎 request 判定する。realtime の `Cache-Control: no-store` / `X-FlameNode-Cache: BYPASS` と live API の `liveApiCacheControl()` は変えない。not_found・エラー・null は cache しない。event-endpoints の非公開化は即時に 404 になり、動画追加などの内容反映と live API の `load` 内の判定は最大 15 秒遅れ得る。より低頻度でよい利用者は scheduled モード（KV、15 分以上）を使う。
+
 ### Cache TTL（Cache API / R2 max-age）
 
 | データ | Cache API TTL（秒） | 反映目標 |

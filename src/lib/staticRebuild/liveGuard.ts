@@ -1,11 +1,13 @@
 import "server-only";
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { getDatabase } from "@/lib/cloudflare";
+import {
+  isolateMicroCacheGet,
+  isolateMicroCacheSet,
+} from "@/lib/api/isolateMicroCache";
 import type { DB } from "@/lib/db/client";
-import { systemSettings } from "@/lib/db/schema";
 import { isLiveApiEnabled } from "@/lib/operationMode/policy";
-import { resolveOperationMode } from "@/lib/operationMode/resolve";
+import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" } as const;
 
@@ -23,6 +25,7 @@ function jsonErrorResponse(
 export async function handleLiveApiGet<T>(
   eventId: string,
   load: (db: DB, eventId: string) => Promise<T | null>,
+  routeName: string,
 ): Promise<Response> {
   const id = eventId.trim();
   if (!id || id.length > 128) {
@@ -66,16 +69,27 @@ export async function handleLiveApiGet<T>(
       );
     }
 
-    const payload = await load(db, id);
-    if (!payload) {
-      return jsonErrorResponse(
-        { error: "not_found", message: "イベントが見つかりません。" },
-        404,
-      );
+    // 許可判定は毎request行い、通過後だけ同一isolate内5秒のbody(string)を再利用する。
+    // 成功した非nullの結果だけを保持し、not_found / errorはcacheしない。
+    const microCacheKey = `live:${routeName}:${id}`;
+    let body = isolateMicroCacheGet(microCacheKey);
+    if (body === null) {
+      const payload = await load(db, id);
+      if (!payload) {
+        return jsonErrorResponse(
+          { error: "not_found", message: "イベントが見つかりません。" },
+          404,
+        );
+      }
+      body = JSON.stringify(payload);
+      isolateMicroCacheSet(microCacheKey, body);
     }
 
-    return NextResponse.json(payload, {
-      headers: { "Cache-Control": liveApiCacheControl() },
+    return new NextResponse(body, {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": liveApiCacheControl(),
+      },
     });
   } catch (err) {
     console.error("[live-api] GET failed", { eventId: id, err });
@@ -90,16 +104,11 @@ export async function handleLiveApiGet<T>(
 }
 
 export async function liveApiAllowed(db: DB): Promise<boolean> {
-  const row = (
-    await db
-      .select({
-        operation_mode: systemSettings.operation_mode,
-      })
-      .from(systemSettings)
-      .where(eq(systemSettings.id, "default"))
-      .limit(1)
-  )[0];
-  return isLiveApiEnabled(resolveOperationMode(row));
+  // env / isolate(30s) / KV複製を優先し、どちらも無いときだけD1を1回読む。
+  // 以後はisolate cacheに載るため、polling毎のsystem_settings読取りは発生しない。
+  return isLiveApiEnabled(
+    await resolvePublicOperationMode({ allowD1: true, db }),
+  );
 }
 
 export function liveApiCacheControl(): string {

@@ -87,3 +87,35 @@ test("公開APIは公開イベントのreview回答も出力しprivate回答は�
     /eq\(eventCustomQuestions\.visibility, "public"\)/,
   );
 });
+
+test("realtimeのisolate micro-cacheはD1公開判定の後にだけ読み、ヘッダ契約を変えない", () => {
+  const d1Gate = route.indexOf("await loadEventExportEvent(db, eventId)");
+  const publicCheck = route.indexOf("const allowed = isPublicExportEvent(prefetchedEvent)");
+  const cacheRead = route.indexOf("isolateMicroCacheGet(microCacheKey)");
+  const snapshot = route.indexOf("await loadEventExportSnapshot(");
+  const cacheWrite = route.indexOf("isolateMicroCacheSet(microCacheKey, body)");
+  assert.ok(d1Gate >= 0 && publicCheck > d1Gate);
+  assert.ok(cacheRead > publicCheck && cacheRead < snapshot);
+  assert.ok(cacheWrite > snapshot);
+
+  assert.match(
+    route,
+    /updateMode === "realtime"\s*\? `export:\$\{eventId\}:\$\{format\}:\$\{prefetchedEvent\?\.updated_at \?\? ""\}`\s*: null/,
+  );
+  // HIT/MISSどちらもexportResponse経由・BYPASS・no-storeのまま。
+  assert.match(
+    route,
+    /coalesced,\s*format,\s*updateMode,\s*refreshMinutes,\s*"BYPASS"/,
+  );
+  assert.match(
+    route,
+    /updateMode === "scheduled" \? "MISS" : "BYPASS"/,
+  );
+  assert.match(
+    route,
+    /updateMode === "realtime"\s*\? "no-store"/,
+  );
+  // not_foundとエラーはcacheしない: setはbody確定後の1箇所だけ。
+  assert.equal((route.match(/isolateMicroCacheSet\(/g) ?? []).length, 1);
+  assert.ok(cacheWrite > route.indexOf("if (body === null)"));
+});

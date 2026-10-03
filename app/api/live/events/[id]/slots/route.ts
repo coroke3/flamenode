@@ -9,5 +9,5 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await ctx.params;
-  return handleLiveApiGet(id, getLiveEventSlots);
+  return handleLiveApiGet(id, getLiveEventSlots, "slots");
 }

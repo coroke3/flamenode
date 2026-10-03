@@ -20,6 +20,10 @@ import {
   type EventExportRefreshMinutes,
 } from "@/lib/api/eventExportCache";
 import {
+  isolateMicroCacheGet,
+  isolateMicroCacheSet,
+} from "@/lib/api/isolateMicroCache";
+import {
   checkPublicApiRateLimit,
   publicJsonBodyResponse,
   publicJsonResponse,
@@ -337,6 +341,26 @@ export async function GET(
     if (response) return response;
   }
 
+  // realtimeはD1公開判定を毎request行った後に限り、同一isolate内の5秒間だけ
+  // 直前に組み立て済みのbody(string)を再利用する。Cache-Control/BYPASSは不変。
+  const microCacheKey =
+    updateMode === "realtime"
+      ? `export:${eventId}:${format}:${prefetchedEvent?.updated_at ?? ""}`
+      : null;
+  if (microCacheKey) {
+    const coalesced = isolateMicroCacheGet(microCacheKey);
+    if (coalesced !== null) {
+      return exportResponse(
+        req,
+        coalesced,
+        format,
+        updateMode,
+        refreshMinutes,
+        "BYPASS",
+      );
+    }
+  }
+
   const generatedAt = Math.floor(Date.now() / 1000);
   let snapshot: Awaited<ReturnType<typeof loadEventExportSnapshot>>;
   try {
@@ -402,6 +426,8 @@ export async function GET(
       });
     }
   }
+
+  if (microCacheKey) isolateMicroCacheSet(microCacheKey, body);
 
   return exportResponse(
     req,
