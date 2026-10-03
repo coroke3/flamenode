@@ -18,7 +18,9 @@ export const metadata: Metadata = buildPageMetadata({
     "FlameNode内で最近よく視聴されている作品のランキングです。",
 });
 
-export const revalidate = 30;
+// Each ISR regeneration PUTs the page to the R2 incremental cache (Class A).
+// GA4 trending is synced hourly, so a 5-minute ISR window loses no freshness.
+export const revalidate = 300;
 
 const TRENDING_PAGE_LIMIT = 30;
 

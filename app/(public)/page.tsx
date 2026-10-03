@@ -48,7 +48,9 @@ export const metadata: Metadata = buildPageMetadata({
   description: SITE_DESCRIPTION,
 });
 
-export const revalidate = 30;
+// Each ISR regeneration PUTs the page to the R2 incremental cache (Class A).
+// top.json changes on content updates / hourly ranking; 120s keeps new uploads prompt.
+export const revalidate = 120;
 
 export default async function TopPage(): Promise<React.ReactElement> {
   setPublicRequestRoute("/");

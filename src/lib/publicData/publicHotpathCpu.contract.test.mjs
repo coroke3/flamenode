@@ -45,9 +45,19 @@ const files = {
   ),
 };
 
-test("公開 GET は force-dynamic せず ISR 30s にする", () => {
+// ISR regenerations PUT to the R2 incremental cache (Class A). Hourly-cadence
+// pages use longer windows; reservation-facing slots stay at 30s.
+const EXPECTED_REVALIDATE = {
+  home: 120,
+  recommend: 300,
+  trending: 300,
+  eventDetail: 60,
+};
+
+test("公開 GET は force-dynamic せず ISR にする（ページ別の再検証間隔）", () => {
   for (const [label, source] of Object.entries(files)) {
-    assert.match(source, /export const revalidate = 30/, label);
+    const seconds = EXPECTED_REVALIDATE[label] ?? 30;
+    assert.match(source, new RegExp(`export const revalidate = ${seconds};`), label);
     assert.doesNotMatch(
       source,
       /export const dynamic = "force-dynamic"/,

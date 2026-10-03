@@ -22,7 +22,9 @@ export const metadata: Metadata = buildPageMetadata({
   description:
     "FlameNodeの注目作品、新着作品、見つけてほしい映像をまとめて紹介します。",
 });
-export const revalidate = 30;
+// Each ISR regeneration PUTs the page to the R2 incremental cache (Class A).
+// recommend pools change on ranking rebuilds (hourly at most).
+export const revalidate = 300;
 
 const LIST_HREF = "/list";
 const RAIL_DISPLAY_LIMIT = 8;

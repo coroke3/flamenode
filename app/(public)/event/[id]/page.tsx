@@ -56,7 +56,9 @@ import {
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
 
-export const revalidate = 30;
+// Each ISR regeneration PUTs the page to the R2 incremental cache (Class A).
+// Reservations happen on /event/[id]/slots (kept at 30s); detail shows a summary.
+export const revalidate = 60;
 
 interface Props {
   params: Promise<{ id: string }>;
