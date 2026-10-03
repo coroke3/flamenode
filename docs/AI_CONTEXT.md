@@ -23,7 +23,7 @@
 | 一般実装・不具合 | 対象ファイル | 関連 test、`package.json` |
 | DB・migration | `docs/database/README.md`、`docs/operations/migrations.md` | `src/lib/db/schema.ts`、`migrations/`、`docs/database/change-log.md` |
 | DB正本移行・旧データ変換 | `docs/database/canonical-migration-plan.md` | `migrations/0043_db_canonical_migration.sql`、fixture、検証 script |
-| 認証・権限・owner | 関連 Active（必要時） | `src/lib/auth/`、権限判定、integration test |
+| 認証・権限・owner | 関連 Active（必要時） | `src/lib/auth/`、`app/(auth)/dashboard/`、権限判定、認証・dashboard contract test |
 | 公開API・DTO | — | Route Handler、`src/lib/api/publicDto.ts`、契約 test |
 | Worker・Cron・Queue | `docs/operations/workers.md` | `workers/`、`src/lib/queues/wakeBudget.ts`、各 `wrangler.toml`、worker test |
 | YouTube同期 | `docs/operations/youtube-playlist-sync.md` | 同期 Worker、quota コード |

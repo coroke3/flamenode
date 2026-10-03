@@ -74,6 +74,8 @@ creates the canonical empty schema when the object is absent.
 
 D1が正本で、R2 JSONは公開配信キャッシュです。`public`だけを一覧・検索・R2・公開APIへ出し、`limited`は直接詳細だけ、その他は権限者以外へ出さない。YouTube作品はURL未設定でも`public`にでき、タイトル・作者・イベント・コメント等の作品情報を公開する（YouTubeプレイヤーと同期依存の棚だけは未設定のまま除外する）。artifactのkey、hash、version、source更新時刻を追跡し、非公開化やYouTube ID変更時は旧keyを削除する。
 
+認証済み `/dashboard` は公開 artifact / public JSON loader と別の D1 経路を使う。トップ画面は作品・共同編集・チャプターを各8件まで表示し、残りは `/dashboard/library` の認証済み・24件ページで取得する。これらの私有行を公開 loader、Cache API、R2 に移さない。`public_request_metrics` は公開リクエストの計測であり、認証済み dashboard の CPU / D1 計測根拠には使わない。
+
 ## 公開データの取得順
 
 公開ローダー (`src/lib/publicData/loader.ts`) は loader policy に従う。

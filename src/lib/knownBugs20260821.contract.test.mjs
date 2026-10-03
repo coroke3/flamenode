@@ -13,8 +13,12 @@ test("dashboardはActive X表示・イベント重複排除・DB側の枠順序�
     source,
     /eq\(videosTable\.creator_x_user_id,\s*onboarding\.activeApprovedXId\)/,
   );
-  assert.match(source, /\.selectDistinct\(\{[\s\S]*?linked_event_id:\s*videoEvents\.event_id/);
-  assert.match(source, /event_count:\s*participatingEventIds\.size/);
+  assert.match(
+    source,
+    /db\.all\(sql[\s\S]*?SELECT COUNT\(\*\) AS event_count[\s\S]*?UNION[\s\S]*?videoEvents\.event_id/,
+  );
+  assert.match(source, /event_count:\s*Number\(eventCountRow\?\.event_count/);
+  assert.doesNotMatch(source, /participatingEventIds/);
   assert.match(
     source,
     /CASE WHEN \$\{slotsTable\.start_time\} IS NULL THEN 1 ELSE 0 END/,
