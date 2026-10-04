@@ -1655,11 +1655,6 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     ...postingDirectoryEntries.map((entry) => entry.key),
     ...postingPageEntries.map((entry) => entry.key),
   ];
-  for (const entry of [...postingDirectoryEntries, ...postingPageEntries]) {
-    assertStaticListObjectSize(entry.key, entry.body);
-  }
-  assertStaticListObjectSize(manifestKey, postings.manifest);
-
   // Posting keys embed the content-hash generation, so a same-generation
   // rebuild would rewrite byte-identical immutable objects (Class A each).
   // Skip when the live manifest already points at this generation and D1
@@ -1688,6 +1683,13 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     );
     return;
   }
+
+  // Check sizes only when the postings will be written: the skip above
+  // writes nothing, and serializing every posting object costs ~100ms CPU.
+  for (const entry of [...postingDirectoryEntries, ...postingPageEntries]) {
+    assertStaticListObjectSize(entry.key, entry.body);
+  }
+  assertStaticListObjectSize(manifestKey, postings.manifest);
 
   // The keys written below may be byte-identical to the live generation's
   // keys (same generation retry); deleting them on failure would break the

@@ -1467,3 +1467,16 @@ test("static related near-date lookup avoids an ABS full scan", () => {
   assert.match(relatedFn, /v\.scheduled_time > \?/);
   assert.match(relatedFn, /nearDateCandidateLimit/);
 });
+
+test("検索postingのサイズ検査は、同一generationのskip後、書き込み直前に行う", () => {
+  const start = source.indexOf("async function rebuildSearchIndexLite(");
+  const body = source.slice(start, source.indexOf("\nasync function ", start + 1));
+  const skip = body.indexOf('result: "generation_same_skip"');
+  const postingCheck = body.indexOf("assertStaticListObjectSize(entry.key, entry.body)");
+  const firstPostingPut = body.indexOf("await putJsonUntracked(");
+  assert.ok(skip > 0 && postingCheck > skip, "size checks must not run when nothing is written");
+  assert.ok(postingCheck < firstPostingPut, "every posting is checked before the first write");
+  assert.ok(
+    body.indexOf("assertStaticListObjectSize(manifestKey, postings.manifest)") < firstPostingPut,
+  );
+});
