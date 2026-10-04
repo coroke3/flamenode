@@ -16,11 +16,12 @@ const rebuild = fs.readFileSync(
 );
 
 test("x_user listability changes block stale profiles and release after both artifacts", () => {
-  assert.match(transition, /entity_type: "x_user"/);
+  // fence の lifecycle 本体は publicVisibilityFenceTransition の実行 test が検査する。
+  assert.match(transition, /entityType: "x_user"/);
   assert.match(transition, /PUBLIC_LISTABLE_X_APPROVAL_STATUSES/);
   assert.match(transition, /preCommitXUserVisibilityTransition/);
   assert.match(transition, /compensateXUserVisibilityOnD1Failure/);
-  assert.match(transition, /logStuckPublicVisibilityFenceCandidate/);
+  assert.match(transition, /flow: "x_user_visibility"/);
   assert.match(merge, /planXUserVisibilityFenceTransition/);
   assert.match(merge, /buildStaticRebuildQueueBatch/);
   assert.match(merge, /preCommitXUserVisibilityTransition/);

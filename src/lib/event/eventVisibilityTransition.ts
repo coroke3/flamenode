@@ -3,7 +3,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
-import { events, publicVisibilityFences } from "@/lib/db/schema";
+import { events } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
 import {
   readPublicVisibilityBlockedEntitiesManifest,
@@ -16,6 +16,7 @@ import {
   type PublicVisibilityBlockedEntity,
 } from "@/lib/publicData/publicVisibilityManifestCore";
 import { getPublicVisibilityFence } from "@/lib/publicData/publicVisibilityFenceStore";
+import { buildPublicVisibilityFenceUpsertStatement } from "@/lib/publicData/publicVisibilityFenceTransition";
 import { logStuckPublicVisibilityFenceCandidate } from "@/lib/publicData/visibilityCompensation";
 
 type EventVisibilityStatus = typeof events.$inferSelect["visibility_status"];
@@ -61,48 +62,6 @@ function logEventVisibilityCompensationFailure(
   });
 }
 
-function buildEventFenceUpsertStatement(
-  db: DB,
-  input: {
-    eventId: string;
-    fenceToken: string;
-    state: "blocked" | "release_pending";
-    reason?: string | null;
-    actorUserId: string;
-    now: number;
-  },
-): BatchItem<"sqlite"> {
-  return db
-    .insert(publicVisibilityFences)
-    .values({
-      entity_type: "event",
-      entity_id: input.eventId,
-      fence_token: input.fenceToken,
-      state: input.state,
-      reason: input.reason ?? null,
-      requirements_json: null,
-      blocked_at: input.state === "blocked" ? input.now : null,
-      release_requested_at:
-        input.state === "release_pending" ? input.now : null,
-      requested_by_auth_user_id: input.actorUserId,
-      updated_at: input.now,
-    })
-    .onConflictDoUpdate({
-      target: [publicVisibilityFences.entity_type, publicVisibilityFences.entity_id],
-      set: {
-        fence_token: input.fenceToken,
-        state: input.state,
-        reason: input.reason ?? null,
-        requirements_json: null,
-        blocked_at: input.state === "blocked" ? input.now : null,
-        release_requested_at:
-          input.state === "release_pending" ? input.now : null,
-        requested_by_auth_user_id: input.actorUserId,
-        updated_at: input.now,
-      },
-    });
-}
-
 /**
  * イベントの公開状態変更に伴うフェンス行を、イベント本体と同じ D1 batch
  * に追加する。再公開時も一度 blocked として manifest に載せ、event artifact
@@ -132,8 +91,9 @@ export function planEventVisibilityTransition(input: {
 
   return {
     mutationStatements: [
-      buildEventFenceUpsertStatement(input.db, {
-        eventId: input.eventId,
+      buildPublicVisibilityFenceUpsertStatement(input.db, {
+        entityType: "event",
+        entityId: input.eventId,
         fenceToken,
         state,
         reason: input.reason,
