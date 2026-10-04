@@ -8,6 +8,9 @@ function createDb(groups = [], onGroupsRead) {
   return {
     statements,
     boundValues,
+    async batch(prepared) {
+      return Promise.all(prepared.map((statement) => statement.run()));
+    },
     prepare(sql) {
       statements.push(sql);
       let values = [];

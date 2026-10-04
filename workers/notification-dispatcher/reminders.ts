@@ -83,17 +83,13 @@ function boundedLimit(limit: number): number {
   return Math.min(REMINDER_LIMIT, Math.max(1, Math.floor(limit)));
 }
 
-/** Maximum fifty user-scoped reminders per invocation. */
-export async function enqueueSlotDeadlineReminders(
-  env: ReminderEnv,
-  limit = REMINDER_LIMIT,
-  signal?: AbortSignal,
-): Promise<number> {
-  signal?.throwIfAborted();
-  const origin = requireReminderOrigin(env.NEXT_PUBLIC_SITE_URL);
-  const now = Math.floor(Date.now() / 1000);
-  const groupsResult = await env.DB.prepare(
-    `SELECT s.event_id,
+/**
+ * Groups that already hold an active outbox row are excluded before LIMIT.
+ * The status list mirrors notification_outbox_active_dedupe_uniq, so a
+ * failed/dead_letter reminder stays retryable exactly as the unique index
+ * allows, while already-enqueued groups no longer starve later deadlines.
+ */
+export const REMINDER_GROUPS_SQL = `SELECT s.event_id,
             s.reserved_by_user_id AS recipient_user_id,
             e.title AS event_title,
             e.entry_end_time,
@@ -110,50 +106,62 @@ export async function enqueueSlotDeadlineReminders(
         AND e.entry_end_time > ?1
         AND e.entry_end_time <= ?2
         AND COALESCE(u.is_notification_enabled, 1) = 1
+        AND NOT EXISTS (
+          SELECT 1
+            FROM notification_outbox o
+           WHERE o.dedupe_key = 'slot_deadline_reminder:' || s.event_id || ':' || s.reserved_by_user_id || ':24h'
+             AND o.status IN ('pending', 'processing', 'sent')
+        )
       GROUP BY s.event_id, s.reserved_by_user_id
       ORDER BY e.entry_end_time ASC, s.event_id ASC
-      LIMIT ?3`,
-  )
-    .bind(now, now + REMINDER_WINDOW_SEC, boundedLimit(limit))
-    .all<ReminderGroup>();
-  signal?.throwIfAborted();
+      LIMIT ?3`;
 
-  let enqueued = 0;
-  for (const group of groupsResult.results ?? []) {
-    signal?.throwIfAborted();
-    const dedupeKey = `slot_deadline_reminder:${group.event_id}:${group.recipient_user_id}:24h`;
-    const payload = JSON.stringify({
-      content: buildReminderContent(origin, group),
-      event_id: group.event_id,
-      event_title: group.event_title,
-      deadline_at: group.entry_end_time,
-      slot_count: group.slot_count,
-    });
-    try {
-      await env.DB.prepare(
-        `INSERT INTO notification_outbox (
+/** A concurrent enqueue of the same group is absorbed by the active dedupe unique index. */
+export const REMINDER_INSERT_SQL = `INSERT INTO notification_outbox (
           id, recipient_user_id, type, payload_json, status, attempt_count,
           processing_started_at, lease_token, lease_expires_at, next_attempt_at,
           last_error, event_id, dedupe_key, created_at
         ) VALUES (
           ?1, ?2, 'slot_deadline_reminder', ?3, 'pending', 0,
           NULL, NULL, NULL, NULL, NULL, ?4, ?5, ?6
-        )`,
-      )
-        .bind(
-          crypto.randomUUID(),
-          group.recipient_user_id,
-          payload,
-          group.event_id,
-          dedupeKey,
-          now,
         )
-        .run();
-      signal?.throwIfAborted();
-      enqueued += 1;
-    } catch (error) {
-      if (!/unique|constraint/i.test(String(error))) throw error;
-    }
-  }
-  return enqueued;
+        ON CONFLICT DO NOTHING`;
+
+/** Maximum fifty user-scoped reminders per invocation. */
+export async function enqueueSlotDeadlineReminders(
+  env: ReminderEnv,
+  limit = REMINDER_LIMIT,
+  signal?: AbortSignal,
+): Promise<number> {
+  signal?.throwIfAborted();
+  const origin = requireReminderOrigin(env.NEXT_PUBLIC_SITE_URL);
+  const now = Math.floor(Date.now() / 1000);
+  const groupsResult = await env.DB.prepare(REMINDER_GROUPS_SQL)
+    .bind(now, now + REMINDER_WINDOW_SEC, boundedLimit(limit))
+    .all<ReminderGroup>();
+  signal?.throwIfAborted();
+
+  const inserts = (groupsResult.results ?? []).map((group) =>
+    env.DB.prepare(REMINDER_INSERT_SQL).bind(
+      crypto.randomUUID(),
+      group.recipient_user_id,
+      JSON.stringify({
+        content: buildReminderContent(origin, group),
+        event_id: group.event_id,
+        event_title: group.event_title,
+        deadline_at: group.entry_end_time,
+        slot_count: group.slot_count,
+      }),
+      group.event_id,
+      // Must stay identical to the NOT EXISTS key in REMINDER_GROUPS_SQL.
+      `slot_deadline_reminder:${group.event_id}:${group.recipient_user_id}:24h`,
+      now,
+    ),
+  );
+  if (inserts.length === 0) return 0;
+  const results = await env.DB.batch(inserts);
+  return results.reduce(
+    (enqueued, result) => enqueued + Number(result.meta?.changes ?? 0),
+    0,
+  );
 }
