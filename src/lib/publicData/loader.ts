@@ -32,6 +32,7 @@ import {
 import {
   rebuildStateFromEnqueue,
   resolvePublicDataState,
+  shouldAttemptDegradedD1AfterPublicMiss,
   type PublicDataState,
 } from "./publicDataState";
 import {
@@ -534,6 +535,7 @@ async function resolvePublicJsonMiss<T = never>(
   }
 
   let enqueued = false;
+  let degradedFallbackClaimed = false;
   let rebuildState: RebuildRequestState = "not_needed";
   let probe: PublicStaticTargetProbe | null = null;
   let canonicalTargetId: string | undefined;
@@ -585,6 +587,8 @@ async function resolvePublicJsonMiss<T = never>(
           { kind: "public_miss", cooldownSeconds: 300 },
         );
         recordPublicD1Query();
+        degradedFallbackClaimed ||=
+          enqueueResult.ok && enqueueResult.action === "inserted";
         rebuildState = enqueueResult.rebuildState;
         if (enqueueResult.ok) {
           enqueued =
@@ -646,16 +650,17 @@ async function resolvePublicJsonMiss<T = never>(
     }
   }
 
-  // A probe that proved the target is missing or not public means D1 holds
-  // nothing to serve; skip the degraded fetch so random IDs cost no extra
-  // D1 scan. `public` and `unknown` (probe error) keep the D1 fallback.
-  const degradedTargetExcluded =
-    probe?.state === "missing" || probe?.state === "not_public";
+  // Only the request that inserted the coalesced rebuild row may take the
+  // expensive D1 fallback. Duplicate misses, existing active rows, cooldowns,
+  // and failed/unknown probes fail small instead of multiplying D1 reads.
   if (
     options.degradedFetcher &&
     canAttemptDegradedD1(strategy) &&
     db &&
-    !degradedTargetExcluded
+    shouldAttemptDegradedD1AfterPublicMiss({
+      probe,
+      rebuildClaimed: degradedFallbackClaimed,
+    })
   ) {
     if (!(await isDegradedD1CircuitOpen())) {
       try {

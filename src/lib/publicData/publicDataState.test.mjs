@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   resolvePublicDataState,
+  shouldAttemptDegradedD1AfterPublicMiss,
   shouldPublicPageNotFound,
   shouldPublicPageShowReflection,
 } from "./publicDataState.ts";
@@ -48,6 +49,38 @@ test("probe 失敗は unavailable", () => {
       mode: "unavailable",
     }),
     "unavailable",
+  );
+});
+
+test("public miss degraded D1 fallback is admitted only to the rebuild claimant", () => {
+  const publicProbe = { state: "public", canonicalTargetId: "video-1" };
+  assert.equal(
+    shouldAttemptDegradedD1AfterPublicMiss({
+      probe: publicProbe,
+      rebuildClaimed: true,
+    }),
+    true,
+  );
+  for (const state of ["unknown", "missing", "not_public"]) {
+    assert.equal(
+      shouldAttemptDegradedD1AfterPublicMiss({
+        probe:
+          state === "unknown"
+            ? { state, errorCode: "D1Error" }
+            : state === "missing"
+              ? { state }
+              : { state, canonicalTargetId: "video-1" },
+        rebuildClaimed: true,
+      }),
+      false,
+    );
+  }
+  assert.equal(
+    shouldAttemptDegradedD1AfterPublicMiss({
+      probe: publicProbe,
+      rebuildClaimed: false,
+    }),
+    false,
   );
 });
 

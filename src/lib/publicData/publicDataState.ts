@@ -10,6 +10,14 @@ export type PublicDataState =
   | "unavailable"
   | "not_found";
 
+/** Only the request that creates the coalesced rebuild row may use D1 as a miss fallback. */
+export function shouldAttemptDegradedD1AfterPublicMiss(args: {
+  probe?: PublicStaticTargetProbe | null;
+  rebuildClaimed: boolean;
+}): boolean {
+  return args.probe?.state === "public" && args.rebuildClaimed;
+}
+
 export function resolvePublicDataState(args: {
   hasRenderableData: boolean;
   isEmptyCollection?: boolean;
