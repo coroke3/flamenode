@@ -29,7 +29,7 @@ test("loadStaticJsonFreshStaleUnavailable は r2_first で R2 より先に isola
 test("共有JSONローダーはrequest外へR2 Promiseを保持しない", () => {
   assert.doesNotMatch(source, /const inFlight = new Map/);
   assert.doesNotMatch(source, /inFlight\.(?:get|set|delete)/);
-  assert.match(source, /const object = await bucket\.get\(key\)/);
+  assert.match(source, /await readBoundedR2Json\(bucket, key, maxObjectBytes\)/);
   assert.match(source, /readPublicJsonCache/);
   assert.match(source, /coercePublicJsonCacheEnvelope/);
   assert.match(source, /writePublicJsonCacheBestEffort/);
@@ -38,8 +38,7 @@ test("共有JSONローダーはrequest外へR2 Promiseを保持しない", () =>
 test("共有R2 JSONはparse前にobject sizeをboundedにする", () => {
   assert.match(source, /const DEFAULT_PUBLIC_JSON_MAX_OBJECT_BYTES = 16 \* 1024 \* 1024/);
   assert.match(source, /maxObjectBytes\?: number/);
-  assert.match(source, /object\.size > maxObjectBytes/);
-  assert.match(source, /await object\.body\.cancel\(\)/);
+  assert.match(source, /readBoundedR2Json\(bucket, key, maxObjectBytes\)/);
   assert.match(source, /readR2Json\(args\.key, maxObjectBytes\)/);
   assert.match(source, /PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES/);
   assert.match(source, /PUBLIC_X_ICON_V2_MAX_SHARD_BYTES/);

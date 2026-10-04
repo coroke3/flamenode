@@ -15,6 +15,7 @@ import {
   readPublicVisibilityBlockedEntitiesManifest,
   resolvePublicVisibilityGuardModeFromEnv,
 } from "./publicVisibilityManifest.ts";
+import { readBoundedR2Json } from "@/lib/r2Body";
 import { extractYoutubePlaylistId } from "@/lib/youtube/playlist";
 
 const MAX_EVENT_BASE_BYTES = 8 * 1024 * 1024;
@@ -49,14 +50,6 @@ function resolveRuntime(): {
   return null;
 }
 
-async function cancelR2BodyBestEffort(object: R2ObjectBody): Promise<void> {
-  try {
-    await object.body.cancel();
-  } catch {
-    // The artifact is already rejected; cancellation is only resource cleanup.
-  }
-}
-
 async function readVisibleEventArtifact<T>(args: {
   eventId: string;
   maxBytes: number;
@@ -86,13 +79,13 @@ async function readVisibleEventArtifact<T>(args: {
       return null;
     }
 
-    const object = await bucket.get(args.objectKey(normalizedId));
-    if (!object) return null;
-    if (typeof object.size === "number" && object.size > args.maxBytes) {
-      await cancelR2BodyBestEffort(object as R2ObjectBody);
-      return null;
-    }
-    const normalized = args.normalize(await object.json<unknown>(), normalizedId);
+    const artifact = await readBoundedR2Json(
+      bucket,
+      args.objectKey(normalizedId),
+      args.maxBytes,
+    );
+    if (!artifact.ok) return null;
+    const normalized = args.normalize(artifact.value, normalizedId);
     if (!normalized) return null;
 
     if (guardMode === "enforce") {

@@ -1,4 +1,4 @@
-import { cancelR2BodyBestEffort } from "../r2Body.ts";
+import { readBoundedR2Json } from "../r2Body.ts";
 import {
   MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
   MEMBER_SUGGESTIONS_MAX_INDEX_BYTES,
@@ -58,22 +58,15 @@ export function resetMemberSuggestionsCacheForTest(): void {
 export async function loadMemberSuggestionsManifestFromBucket(
   bucket: SuggestionsBucket,
 ): Promise<MemberSuggestionsManifestLoadResult> {
-  const manifestObject = await bucket.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
-  if (!manifestObject) return { ok: false, reason: "manifest_missing" };
-  if (
-    typeof manifestObject.size === "number" &&
-    manifestObject.size > MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES
-  ) {
-    await cancelR2BodyBestEffort(manifestObject);
-    return { ok: false, reason: "manifest_too_large" };
+  const manifestRead = await readBoundedR2Json(
+    bucket,
+    MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,
+    MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES,
+  );
+  if (!manifestRead.ok) {
+    return { ok: false, reason: `manifest_${manifestRead.reason}` };
   }
-  let manifestPayload: unknown;
-  try {
-    manifestPayload = await manifestObject.json();
-  } catch {
-    return { ok: false, reason: "manifest_invalid_json" };
-  }
-  const manifest = parseMemberSuggestionsManifest(manifestPayload);
+  const manifest = parseMemberSuggestionsManifest(manifestRead.value);
   if (!manifest) return { ok: false, reason: "manifest_invalid" };
   return {
     ok: true,
@@ -99,26 +92,15 @@ export async function loadMemberSuggestionsIndexFromBucket(
     return { ok: true, items: cachedItems };
   }
 
-  const indexObject = await bucket.get(
+  const indexRead = await readBoundedR2Json(
+    bucket,
     memberSuggestionsIndexObjectKey(manifestResult.generation),
+    MEMBER_SUGGESTIONS_MAX_INDEX_BYTES,
   );
-  if (!indexObject) return { ok: false, reason: "index_missing" };
-  if (
-    typeof indexObject.size === "number" &&
-    indexObject.size > MEMBER_SUGGESTIONS_MAX_INDEX_BYTES
-  ) {
-    await cancelR2BodyBestEffort(indexObject);
-    return { ok: false, reason: "index_too_large" };
-  }
-  let indexPayload: unknown;
-  try {
-    indexPayload = await indexObject.json();
-  } catch {
-    return { ok: false, reason: "index_invalid_json" };
-  }
+  if (!indexRead.ok) return { ok: false, reason: `index_${indexRead.reason}` };
   // schema/generation一致を確認してから候補として使う。
   const items = parseMemberSuggestionsIndex(
-    indexPayload,
+    indexRead.value,
     manifestResult.generation,
   );
   if (!items) return { ok: false, reason: "index_invalid" };

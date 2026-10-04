@@ -14,7 +14,7 @@ test("event playlist R2 readerはvisibility manifestをenforce時だけ読む", 
   );
 
   const artifactRead = source.indexOf(
-    "const object = await bucket.get(args.objectKey(normalizedId));",
+    "const artifact = await readBoundedR2Json(",
   );
   assert.ok(artifactRead >= 0);
   const postGuard = source.indexOf(
@@ -29,9 +29,10 @@ test("event playlist R2 readerはvisibility manifestをenforce時だけ読む", 
 });
 
 test("oversized R2 event artifactはJSON parse前にbodyをcancelしてfail-closedする", () => {
-  const sizeGuard = source.indexOf("object.size > args.maxBytes");
-  const cancel = source.indexOf("await cancelR2BodyBestEffort", sizeGuard);
-  const parse = source.indexOf("await object.json<unknown>()", sizeGuard);
-  assert.ok(sizeGuard >= 0 && cancel > sizeGuard && parse > cancel);
-  assert.match(source, /await object\.body\.cancel\(\)/);
+  // size guard・cancel・parse の順序は readBoundedR2Json の実行 test が検査する。
+  assert.match(
+    source,
+    /readBoundedR2Json\(\s*bucket,\s*args\.objectKey\(normalizedId\),\s*args\.maxBytes,\s*\)/,
+  );
+  assert.match(source, /if \(!artifact\.ok\) return null;/);
 });

@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { getDatabase, getEnv } from "@/lib/cloudflare";
-import { cancelR2BodyBestEffort } from "@/lib/r2Body";
+import { readBoundedR2Json } from "@/lib/r2Body";
 import {
   logPublicRequestMetrics,
   recordPublicFallbackReason,
@@ -422,24 +422,18 @@ async function readStaticJson<T>(key: string): Promise<T | null> {
     const bucket = getEnv().BUCKET;
     if (!bucket) return null;
     recordPublicR2Get();
-    const object = await bucket.get(key);
-    if (!object) return null;
-    if (
-      typeof object.size === "number" &&
-      (!Number.isSafeInteger(object.size) ||
-        object.size < 0 ||
-        object.size > PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES)
-    ) {
-      await cancelR2BodyBestEffort(object);
+    const result = await readBoundedR2Json(
+      bucket,
+      key,
+      PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES,
+    );
+    if (result.ok) return result.value as T;
+    if (result.reason === "too_large") {
       warnPublicStaticJson(key, "object_too_large");
-      return null;
+    } else if (result.reason === "invalid_json") {
+      warnPublicStaticJson(key, "invalid_json", result.error);
     }
-    try {
-      return (await object.json()) as T;
-    } catch (error) {
-      warnPublicStaticJson(key, "invalid_json", error);
-      return null;
-    }
+    return null;
   } catch (error) {
     warnPublicStaticJson(key, "read_failed", error);
     return null;
