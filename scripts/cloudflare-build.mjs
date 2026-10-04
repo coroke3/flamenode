@@ -47,12 +47,39 @@ export function resolveManagedBuildOutput({
   return outputRoot;
 }
 
+// ISR routes are prerendered at build time, where Cloudflare bindings are
+// unavailable, so their cached HTML carries the "取得できません" notice.
+// `opennextjs-cloudflare deploy` uploads this cache to R2 with the deploy time
+// as its age, which would serve that notice to every visitor for the route's
+// whole revalidate window after each deploy. Dropping the entries makes the
+// first runtime request render with bindings instead.
+export function dropBuildTimeIsrCache({ repoRoot, outputRoot }) {
+  const nextDir = path.join(repoRoot, ".next");
+  const buildId = fs.readFileSync(path.join(nextDir, "BUILD_ID"), "utf8").trim();
+  const { routes } = JSON.parse(
+    fs.readFileSync(path.join(nextDir, "prerender-manifest.json"), "utf8"),
+  );
+  const cacheDir = path.join(outputRoot, "cache", buildId);
+  const dropped = [];
+  for (const [route, { initialRevalidateSeconds }] of Object.entries(routes)) {
+    if (typeof initialRevalidateSeconds !== "number") continue;
+    const file = path.join(cacheDir, `${route === "/" ? "index" : route.slice(1)}.cache`);
+    if (!fs.existsSync(file)) {
+      throw new Error(`Build-time ISR cache entry for ${route} is missing; the OpenNext cache layout changed.`);
+    }
+    fs.rmSync(file);
+    dropped.push(route);
+  }
+  return dropped;
+}
+
 export function runCloudflareBuild({
   env = process.env,
   repoRoot = process.cwd(),
   verifyCommit = assertCommitSha,
   run = runProcess,
   check = checkOpenNextOutput,
+  dropIsrCache = dropBuildTimeIsrCache,
 } = {}) {
   const commit = verifyCommit(env, repoRoot);
   const cli = resolveTool(
@@ -82,6 +109,8 @@ export function runCloudflareBuild({
   if (stdout) console.log(stdout);
   if (stderr) console.error(stderr);
 
+  const dropped = dropIsrCache({ repoRoot, outputRoot });
+  console.log(`[cloudflare-build] dropped build-time ISR cache: ${dropped.join(", ") || "none"}`);
   writeBuildManifest({ outputRoot, commit });
   check({ env, repoRoot, outputRoot, commit });
   console.log("[cloudflare-build] OpenNext artifact verified (single build)");

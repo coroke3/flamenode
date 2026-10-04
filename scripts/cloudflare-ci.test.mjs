@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  dropBuildTimeIsrCache,
   resolveManagedBuildOutput,
   runCloudflareBuild,
 } from "./cloudflare-build.mjs";
@@ -857,6 +858,10 @@ test("Cloudflare build invokes OpenNext build exactly once and checks the result
       repoRoot,
       verifyCommit: () => COMMIT,
       run: (request) => calls.push(request),
+      dropIsrCache: () => {
+        assert.equal(checked, false);
+        return [];
+      },
       check: ({ outputRoot, commit }) => {
         checked = true;
         assert.equal(commit, COMMIT);
@@ -866,6 +871,37 @@ test("Cloudflare build invokes OpenNext build exactly once and checks the result
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].args, [fakeCli, "build"]);
     assert.equal(checked, true);
+  }));
+
+test("Cloudflare build drops build-time ISR cache entries and keeps static ones", () =>
+  withTempDirectory("flamenode-cloudflare-isr-cache-", (repoRoot) => {
+    const outputRoot = path.join(repoRoot, ".open-next");
+    const cacheDir = path.join(outputRoot, "cache", "build-1");
+    fs.mkdirSync(path.join(repoRoot, ".next"), { recursive: true });
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, ".next", "BUILD_ID"), "build-1\n", "utf8");
+    const routes = {
+      "/": { initialRevalidateSeconds: 120 },
+      "/list": { initialRevalidateSeconds: 30 },
+      "/sitemap.xml": { initialRevalidateSeconds: 3600 },
+      "/about": { initialRevalidateSeconds: false },
+    };
+    fs.writeFileSync(
+      path.join(repoRoot, ".next", "prerender-manifest.json"),
+      JSON.stringify({ routes }),
+      "utf8",
+    );
+    for (const name of ["index", "list", "sitemap.xml", "about"]) {
+      fs.writeFileSync(path.join(cacheDir, `${name}.cache`), "{}", "utf8");
+    }
+    assert.deepEqual(dropBuildTimeIsrCache({ repoRoot, outputRoot }), ["/", "/list", "/sitemap.xml"]);
+    assert.deepEqual(fs.readdirSync(cacheDir), ["about.cache"]);
+    // A layout change must fail the build instead of silently shipping the
+    // degraded build-time HTML again.
+    assert.throws(
+      () => dropBuildTimeIsrCache({ repoRoot, outputRoot }),
+      /ISR cache entry for \/ is missing/,
+    );
   }));
 
 test("Cloudflare build output is fixed inside the repo and rejects overrides or symlinks", () =>
