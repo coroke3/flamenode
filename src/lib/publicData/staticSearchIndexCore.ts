@@ -70,19 +70,21 @@ function matchesQuery(
   userNames: Map<string, string>,
   query: string,
 ): boolean {
-  const haystacks = [
-    video.title,
-    video.display_name,
-    video.creator_x_user_id ?? "",
-    video.youtube_video_id ?? "",
-    video.id,
-  ];
-  const creatorId = video.creator_x_user_id?.toLowerCase();
-  if (creatorId && userNames.has(creatorId)) {
-    haystacks.push(userNames.get(creatorId)!);
+  if (
+    video.title.toLowerCase().includes(query) ||
+    video.display_name.toLowerCase().includes(query) ||
+    (video.creator_x_user_id ?? "").toLowerCase().includes(query) ||
+    (video.youtube_video_id ?? "").toLowerCase().includes(query) ||
+    video.id.toLowerCase().includes(query)
+  ) {
+    return true;
   }
-  if (video.creator_x_user_name) haystacks.push(video.creator_x_user_name);
-  return haystacks.some((value) => value.toLowerCase().includes(query));
+  const creatorId = video.creator_x_user_id?.toLowerCase();
+  if (creatorId) {
+    const userName = userNames.get(creatorId);
+    if (userName?.toLowerCase().includes(query)) return true;
+  }
+  return video.creator_x_user_name?.toLowerCase().includes(query) ?? false;
 }
 
 export function staticSearchVideoMatchesQuery(
@@ -120,23 +122,20 @@ export function searchStaticIndexVideos(params: {
   if (!query) return null;
 
   const userNames = normalizeUserNameMap(params.payload.users);
-  const videos = params.payload.videos
-    .map(normalizeSearchVideo)
-    .filter((row): row is StaticSearchIndexVideo => row !== null)
-    .filter((video) => matchesQuery(video, userNames, query));
-
-  const ordered =
-    params.sort === "old"
-      ? [...videos].reverse()
-      : videos;
+  const videos: StaticSearchIndexVideo[] = [];
+  for (const row of params.payload.videos) {
+    const video = normalizeSearchVideo(row);
+    if (video && matchesQuery(video, userNames, query)) videos.push(video);
+  }
+  if (params.sort === "old") videos.reverse();
 
   const pageNum = Math.max(1, Math.floor(params.page));
   const size = Math.max(1, Math.floor(params.pageSize));
   const offset = (pageNum - 1) * size;
 
   return {
-    videos: ordered.slice(offset, offset + size).map(toListVideo),
-    total: ordered.length,
+    videos: videos.slice(offset, offset + size).map(toListVideo),
+    total: videos.length,
     generatedAt: normalizeUnix(params.payload.generated_at),
   };
 }
