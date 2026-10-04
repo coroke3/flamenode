@@ -31,17 +31,40 @@ export type BoundedR2JsonResult =
   | { ok: false; reason: "missing" | "too_large" }
   | { ok: false; reason: "invalid_json"; error: unknown };
 
+type BoundedR2JsonBucket = {
+  get(key: string): Promise<BoundedR2JsonObject | null>;
+};
+
 /**
  * 上限付きで R2 の JSON object を読む。size が分かる object は body を読む前に
  * 上限を確かめ、超過時は body を解放してから返す。上限が不正なら読まない
  * （fail closed）。GET 自体の失敗は呼び出し側へ投げる。
+ *
+ * signal を渡すと、GET 中に abort されたとき body を解放して `aborted` を返す。
+ * 呼び出し側は直後に自分の abort 判定で投げる（エラーの種類を呼び出し側に残す）。
  */
-export async function readBoundedR2Json(
-  bucket: { get(key: string): Promise<BoundedR2JsonObject | null> },
+export function readBoundedR2Json(
+  bucket: BoundedR2JsonBucket,
   key: string,
   maxBytes: number,
-): Promise<BoundedR2JsonResult> {
+): Promise<BoundedR2JsonResult>;
+export function readBoundedR2Json(
+  bucket: BoundedR2JsonBucket,
+  key: string,
+  maxBytes: number,
+  signal: AbortSignal | undefined,
+): Promise<BoundedR2JsonResult | { ok: false; reason: "aborted" }>;
+export async function readBoundedR2Json(
+  bucket: BoundedR2JsonBucket,
+  key: string,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<BoundedR2JsonResult | { ok: false; reason: "aborted" }> {
   const object = await bucket.get(key);
+  if (signal?.aborted) {
+    await cancelR2BodyBestEffort(object);
+    return { ok: false, reason: "aborted" };
+  }
   if (!object) return { ok: false, reason: "missing" };
   if (
     !Number.isSafeInteger(maxBytes) ||

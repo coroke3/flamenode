@@ -41,15 +41,11 @@ test("partial publish失敗時はmanifest撤去成功後だけgeneration object�
 });
 
 test("旧generation manifestはsize上限超過ならJSON parseしない", () => {
+  // size guard と parse の順序は readBoundedR2Json の実行 test（src/lib/r2Body.test.mjs）が検査する。
   assert.match(
     writer,
-    /object\.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES/,
+    /readBoundedR2Json\(\s*bucket,\s*MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,\s*MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES,/,
   );
-  const sizeGuard = writer.indexOf(
-    "object.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES",
-  );
-  const jsonRead = writer.indexOf("await object.json<unknown>()", sizeGuard);
-  assert.ok(sizeGuard >= 0 && jsonRead > sizeGuard);
 });
 
 test("旧generation cleanupは1000 objectで明示的にboundedされる", () => {

@@ -6,7 +6,7 @@ import {
   PICKUP_CREATORS_OBJECT_KEY,
   type PublicPickupCreatorRow,
 } from "../../src/lib/publicData/publicCreatorProjection.ts";
-import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
+import { readBoundedR2Json } from "../../src/lib/r2Body.ts";
 
 export type PickupCreatorsLoadFailureReason =
   | "missing"
@@ -37,31 +37,26 @@ export async function loadPickupCreatorsFromR2(
 ): Promise<PickupCreatorsLoadResult> {
   signal?.throwIfAborted();
   try {
-    const object = await env.R2.get(PICKUP_CREATORS_OBJECT_KEY);
-    if (signal?.aborted) {
-      await cancelR2BodyBestEffort(object);
-    }
+    const read = await readBoundedR2Json(
+      env.R2,
+      PICKUP_CREATORS_OBJECT_KEY,
+      PICKUP_CREATORS_MAX_OBJECT_BYTES,
+      signal,
+    );
     signal?.throwIfAborted();
-    if (!object) {
+    if (!read.ok) {
+      if (read.reason === "invalid_json") throw read.error;
+      if (read.reason === "too_large") {
+        logPickupCreatorsR2("corrupt", {
+          key: PICKUP_CREATORS_OBJECT_KEY,
+          reason: "object_too_large",
+        });
+        return { ok: false, reason: "corrupt" };
+      }
       logPickupCreatorsR2("missing", { key: PICKUP_CREATORS_OBJECT_KEY });
       return { ok: false, reason: "missing" };
     }
-    if (
-      typeof object.size === "number" &&
-      (!Number.isFinite(object.size) ||
-        object.size < 0 ||
-        object.size > PICKUP_CREATORS_MAX_OBJECT_BYTES)
-    ) {
-      await cancelR2BodyBestEffort(object);
-      logPickupCreatorsR2("corrupt", {
-        key: PICKUP_CREATORS_OBJECT_KEY,
-        reason: "object_too_large",
-      });
-      return { ok: false, reason: "corrupt" };
-    }
-
-    const raw = await object.json();
-    signal?.throwIfAborted();
+    const raw = read.value;
 
     const schemaVersion = (raw as { schema_version?: unknown })?.schema_version;
     if (

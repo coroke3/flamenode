@@ -1,4 +1,4 @@
-import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
+import { cancelR2BodyBestEffort, readBoundedR2Json } from "../../src/lib/r2Body.ts";
 import { jsonContentHash } from "./r2Dedup.ts";
 
 export const VIDEO_MATERIALIZED_SOURCE_SCHEMA_VERSION = 1;
@@ -197,20 +197,8 @@ async function readJsonObject<T>(
   key: string,
   maxBytes: number,
 ): Promise<T | null> {
-  const object = await bucket.get(key);
-  if (!object) return null;
-  if (
-    typeof object.size === "number" &&
-    (!Number.isSafeInteger(object.size) || object.size < 0 || object.size > maxBytes)
-  ) {
-    await cancelR2BodyBestEffort(object);
-    return null;
-  }
-  try {
-    return await object.json<T>();
-  } catch {
-    return null;
-  }
+  const read = await readBoundedR2Json(bucket, key, maxBytes);
+  return read.ok ? (read.value as T) : null;
 }
 
 /** Manifest is the sole commit point. Retry once when a concurrent GC removed a prior source. */

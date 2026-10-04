@@ -1,4 +1,4 @@
-import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
+import { readBoundedR2Json } from "../../src/lib/r2Body.ts";
 import { putJsonArtifact } from "./r2Dedup.ts";
 import {
   buildMemberSuggestionsV2Artifacts,
@@ -58,26 +58,15 @@ async function readPreviousGeneration(
 ): Promise<string | null> {
   throwIfAborted(signal);
   try {
-    const object = await bucket.get(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
-    if (signal?.aborted) {
-      await cancelR2BodyBestEffort(object);
-      throwIfAborted(signal);
-    }
-    if (!object) return null;
-    if (
-      typeof object.size === "number" &&
-      (!Number.isSafeInteger(object.size) ||
-        object.size < 0 ||
-        object.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES)
-    ) {
-      await cancelR2BodyBestEffort(object);
-      return null;
-    }
-    const manifest = normalizeMemberSuggestionsV2Manifest(
-      await object.json<unknown>(),
+    const read = await readBoundedR2Json(
+      bucket,
+      MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
+      MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES,
+      signal,
     );
     throwIfAborted(signal);
-    return manifest?.generation ?? null;
+    if (!read.ok) return null;
+    return normalizeMemberSuggestionsV2Manifest(read.value)?.generation ?? null;
   } catch {
     throwIfAborted(signal);
     return null;

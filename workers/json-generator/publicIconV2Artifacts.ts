@@ -1,3 +1,4 @@
+import { readBoundedR2Json } from "../../src/lib/r2Body.ts";
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   putJsonArtifact,
@@ -37,31 +38,16 @@ function throwIfAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
 }
 
-async function cancelObjectBodyBestEffort(
-  object: R2ObjectBody | null | undefined,
-): Promise<void> {
-  if (!object) return;
-  try {
-    await object.body.cancel();
-  } catch {
-    // Rejected artifact is not consumed further.
-  }
-}
-
 async function readCurrentManifest(
   env: Env,
 ): Promise<ReturnType<typeof normalizePublicXIconV2Manifest>> {
   try {
-    const object = await env.R2.get(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY);
-    if (!object) return null;
-    if (
-      typeof object.size === "number" &&
-      object.size > PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES
-    ) {
-      await cancelObjectBodyBestEffort(object);
-      return null;
-    }
-    return normalizePublicXIconV2Manifest(await object.json());
+    const read = await readBoundedR2Json(
+      env.R2,
+      PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
+      PUBLIC_X_ICON_V2_MAX_MANIFEST_BYTES,
+    );
+    return read.ok ? normalizePublicXIconV2Manifest(read.value) : null;
   } catch {
     return null;
   }
@@ -184,28 +170,23 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
   signal?: AbortSignal,
 ): Promise<{ generation: string; objectCount: number; skipped: boolean }> {
   throwIfAborted(signal);
-  const legacyObject = await env.R2.get(PUBLIC_X_ICON_MAP_OBJECT_KEY);
-  if (signal?.aborted) {
-    await cancelObjectBodyBestEffort(legacyObject);
-    throwIfAborted(signal);
-  }
-  if (!legacyObject) throw new Error("public_icon_v2_requires_v1_artifact");
-  if (
-    typeof legacyObject.size === "number" &&
-    legacyObject.size > PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES
-  ) {
-    await cancelObjectBodyBestEffort(legacyObject);
-    throw new Error("public_icon_v2_v1_too_large");
-  }
-
-  let legacyPayload: unknown;
-  try {
-    legacyPayload = await legacyObject.json();
-  } catch {
-    throw new Error("public_icon_v2_v1_invalid_json");
-  }
+  const legacyRead = await readBoundedR2Json(
+    env.R2,
+    PUBLIC_X_ICON_MAP_OBJECT_KEY,
+    PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES,
+    signal,
+  );
   throwIfAborted(signal);
-  const legacy = normalizePublicXIconMap(legacyPayload);
+  if (!legacyRead.ok) {
+    throw new Error(
+      legacyRead.reason === "missing"
+        ? "public_icon_v2_requires_v1_artifact"
+        : legacyRead.reason === "too_large"
+          ? "public_icon_v2_v1_too_large"
+          : "public_icon_v2_v1_invalid_json",
+    );
+  }
+  const legacy = normalizePublicXIconMap(legacyRead.value);
   if (!legacy) throw new Error("public_icon_v2_v1_invalid");
 
   const generation = await staticArtifactContentHash(
