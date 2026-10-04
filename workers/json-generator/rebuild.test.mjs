@@ -175,13 +175,13 @@ test("static artifact reconciliation は旧結果を保ち、非相関json_each�
 
 test("通常putJsonはR2 dedupe後もstatic_artifacts追跡を更新する", () => {
   const start = source.indexOf("async function putJson(");
-  const end = source.indexOf("\nasync function recordArtifact(", start);
+  const end = source.indexOf("\ntype PendingStaticArtifact", start);
   const body = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.match(body, /await putJsonArtifact\(env, key, body, \{[\s\S]*?deduplicate: true/);
-  assert.match(body, /if \(target\) await recordArtifact/);
+  assert.match(body, /if \(target\) \{\s*await recordStaticArtifacts/);
   assert.ok(
-    body.indexOf("await recordArtifact") > body.indexOf("await putJsonArtifact("),
+    body.indexOf("await recordStaticArtifacts") > body.indexOf("await putJsonArtifact("),
     "artifact tracking must run after the optional R2 PUT",
   );
   assert.doesNotMatch(body, /if \(await resolveIdenticalJsonArtifactPut[\s\S]*\) \{\s*return;/);
@@ -510,8 +510,7 @@ test("search-indexはgeneration固定のbounded posting shardも生成する", (
   assert.match(source, /staticVideoSearchPostingManifestObjectKey/);
   assert.match(source, /staticVideoSearchPostingDirectoryObjectKey/);
   assert.match(source, /staticVideoSearchPostingPageObjectKey/);
-  assert.match(source, /recordArtifactsBatch/);
-  assert.match(source, /FROM json_each\(\?\)/);
+  assert.match(source, /await recordStaticArtifacts\(\s*env,\s*\{\s*targetType: "search_index"[\s\S]*?pendingPostingArtifacts/);
   assert.match(source, /await reconcileTrackedArtifacts\(/);
 });
 
@@ -583,11 +582,11 @@ test("rebuildEvent composerはR2 base/slotsのみでevents/{id}.jsonを書く", 
 
 test("putJson は同一 hash のとき R2 PUT と static_artifacts UPSERT を省略する", () => {
   const putJsonFn = source.match(
-    /async function putJson\([\s\S]*?(?=async function recordArtifact)/,
+    /async function putJson\([\s\S]*?(?=type PendingStaticArtifact)/,
   )?.[0];
   assert.ok(putJsonFn);
   assert.match(putJsonFn, /deduplicate: true/);
-  assert.match(putJsonFn, /if \(target\) await recordArtifact/);
+  assert.match(putJsonFn, /if \(target\) \{\s*await recordStaticArtifacts/);
 });
 
 test("rebuildUsersIndexはCreator Projectionを使い3 artifactを書く", () => {

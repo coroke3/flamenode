@@ -56,7 +56,7 @@ test("users index v2 は3 sortのgeneration固有page/search完了後にmanifest
   assert.match(source, /searchPostingEntries/);
   assert.match(source, /canSkipSameGeneration/);
   assert.match(source, /forceRepair/);
-  assert.match(source, /json_each\(\?1\)/);
+  assert.match(source, /recordStaticArtifacts\(\s*env,\s*\{\s*targetType: "users_index_v2"/);
   assert.match(source, /USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE = 500/);
   assert.match(loaderSource, /page\.generation !== manifest\.generation/);
   assert.match(loaderSource, /page\.sort !== params\.sort/);

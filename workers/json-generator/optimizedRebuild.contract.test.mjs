@@ -77,7 +77,7 @@ test("dedupeされたR2 artifactでもstatic_artifacts鮮度を更新する", ()
   const putTrackedEnd = source.indexOf("\nfunction listPayloadFits", putTrackedStart);
   const body = source.slice(putTrackedStart, putTrackedEnd);
   const conditionalPut = body.indexOf("await putJsonArtifact(");
-  const trackingWrite = body.indexOf("await recordArtifact(");
+  const trackingWrite = body.indexOf("await recordStaticArtifacts(");
 
   assert.ok(putTrackedStart >= 0);
   assert.ok(conditionalPut >= 0);

@@ -21,6 +21,7 @@ import {
   type MemberSuggestionSourceEntry,
 } from "../../src/lib/video/memberSuggestionsCore.ts";
 import { abortGuard } from "../shared/abort.ts";
+import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
 
 const MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE = "member_suggestions";
 const MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID = "global";
@@ -184,33 +185,17 @@ async function recordArtifacts(
   generatedAt: number,
   signal: RebuildSignal,
 ): Promise<void> {
-  throwIfAborted(signal);
-  for (const artifact of artifacts) {
-    await env.DB.prepare(
-      `INSERT INTO static_artifacts
-         (id, target_type, target_id, object_key, content_hash, schema_version,
-          source_updated_at, generated_at, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL)
-       ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
-         content_hash = excluded.content_hash,
-         schema_version = excluded.schema_version,
-         source_updated_at = NULL,
-         generated_at = excluded.generated_at,
-         deleted_at = NULL`,
-    )
-      .bind(
-        `${MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE}:${MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID}:${artifact.objectKey}`,
-        MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
-        MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
-        artifact.objectKey,
-        artifact.contentHash,
-        MEMBER_SUGGESTIONS_STATIC_ARTIFACT_SCHEMA_VERSION,
-        generatedAt,
-      )
-      .run();
-    env.artifactHashCache?.set(artifact.objectKey, artifact.contentHash);
-    throwIfAborted(signal);
-  }
+  await recordStaticArtifacts(
+    env,
+    {
+      targetType: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
+      targetId: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
+      schemaVersion: MEMBER_SUGGESTIONS_STATIC_ARTIFACT_SCHEMA_VERSION,
+      generatedAt,
+    },
+    artifacts,
+    signal,
+  );
 }
 
 /** stale generation cleanupはbounded。D1更新はjson_each 1文に集約する。 */

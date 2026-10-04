@@ -37,6 +37,7 @@ import {
   eventPlaylistObjectKey,
 } from "../../src/lib/publicData/staticEventPlaylistCore.ts";
 import { abortGuard } from "../shared/abort.ts";
+import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
 
 export type OptimizedRebuildEnv = {
   DB: D1Database;
@@ -222,44 +223,6 @@ function topProjection(row: RankingPoolRow): Record<string, unknown> {
   };
 }
 
-async function recordArtifact(
-  env: OptimizedRebuildEnv,
-  targetType: string,
-  targetId: string,
-  objectKey: string,
-  serialized: string,
-  contentHash: string,
-  signal?: AbortSignal,
-  sourceUpdatedAt?: number | null,
-): Promise<void> {
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    `INSERT INTO static_artifacts
-       (id, target_type, target_id, object_key, content_hash, schema_version,
-        source_updated_at, generated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-     ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
-       content_hash = excluded.content_hash,
-       schema_version = excluded.schema_version,
-       source_updated_at = excluded.source_updated_at,
-       generated_at = excluded.generated_at,
-       deleted_at = NULL`,
-  )
-    .bind(
-      `sta:${targetType}:${targetId}:${objectKey}`,
-      targetType,
-      targetId,
-      objectKey,
-      contentHash,
-      STATIC_ARTIFACT_SCHEMA_VERSION,
-      sourceUpdatedAt ?? null,
-      now,
-    )
-    .run();
-  env.artifactHashCache?.set(objectKey, contentHash);
-}
-
 async function putTrackedJson(
   env: OptimizedRebuildEnv,
   objectKey: string,
@@ -272,21 +235,22 @@ async function putTrackedJson(
 ): Promise<void> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
-  const { serialized, contentHash } = await putJsonArtifact(env, objectKey, body, {
+  const { contentHash } = await putJsonArtifact(env, objectKey, body, {
     cacheControl,
     deduplicate: true,
   });
   // R2 PUTをdedupeしても「このgenerationで正常に再構築できた」事実は更新する。
   // これを省くとdeep health / artifact SLOが同一内容のartifactを古いと誤判定する。
-  await recordArtifact(
+  await recordStaticArtifacts(
     env,
-    targetType,
-    targetId,
-    objectKey,
-    serialized,
-    contentHash,
+    {
+      targetType,
+      targetId,
+      schemaVersion: STATIC_ARTIFACT_SCHEMA_VERSION,
+      sourceUpdatedAt,
+    },
+    [{ objectKey, contentHash }],
     signal,
-    sourceUpdatedAt,
   );
 }
 
