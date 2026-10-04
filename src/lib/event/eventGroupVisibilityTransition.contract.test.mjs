@@ -16,8 +16,9 @@ const rebuild = fs.readFileSync(
 );
 
 test("event group visibility uses the existing event_group fence lifecycle", () => {
-  assert.match(transition, /entity_type: "event_group"/);
-  assert.match(transition, /getPublicVisibilityFence\(/);
+  // fence の lifecycle 本体は publicVisibilityFenceTransition の実行 test が検査する。
+  assert.match(transition, /entityType: "event_group"/);
+  assert.match(transition, /planPublicVisibilityFenceTransition\(/);
   assert.match(transition, /preCommitEventGroupVisibilityTransition/);
   assert.match(transition, /compensateEventGroupVisibilityOnD1Failure/);
   assert.match(action, /visibilityFence/);
