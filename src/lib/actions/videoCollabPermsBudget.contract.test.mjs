@@ -19,7 +19,7 @@ test("100人permission batchは人数分のmutation/auditを生成しない", ()
   assert.match(actionSource, /MAX_COLLABORATOR_PERMISSION_BATCH/);
   assert.match(actionSource, /buildPermissionSetGuardSql/);
   assert.match(actionSource, /buildMemberPermissionBulkUpdateSql/);
-  assert.match(actionSource, /buildHiddenMemberBulkInsertSql/);
+  assert.match(actionSource, /buildVideoMemberBulkInsertSql\(insertHiddenRows/);
   assert.match(actionSource, /buildHiddenMemberBulkDeleteSql/);
   assert.match(actionSource, /table_name: "video_member_permissions_batch"/);
   assert.doesNotMatch(
