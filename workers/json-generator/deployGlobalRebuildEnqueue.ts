@@ -1,3 +1,9 @@
+import {
+  d1Changes,
+  globalTargets,
+  prepareStaticRebuildEnqueue,
+} from "./staticRebuildEnqueue.ts";
+
 export const DEPLOY_GLOBAL_REBUILD_TARGETS = [
   "list_recent",
   "list_popular",
@@ -36,10 +42,10 @@ export const DEPLOY_GLOBAL_REBUILD_RETRY_REASON =
 /** 再試行へ移した failed 行の reason。以後 failed 検出クエリの対象外になる。 */
 const DEPLOY_GLOBAL_REBUILD_RETRIED_REASON = "deploy_generator_change_retried";
 /**
- * 同commit時は failed DISTINCT SELECT 1 + batch(failed行reason退避 1 + JSON1 enqueue 2)
- * + coverage COUNT 2 = 最大6。commit変更直後は4だが、Recovery側はworst-case 6を予約する。
+ * 同commit時は failed DISTINCT SELECT 1 + batch(failed行reason退避 1 + JSON1 upsert 1)
+ * + coverage COUNT 2 = 最大5。commit変更直後は3だが、Recovery側はworst-case 5を予約する。
  */
-export const DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS = 6;
+export const DEPLOY_GLOBAL_REBUILD_MAX_D1_STATEMENTS = 5;
 
 type EnqueueEnv = { DB: D1Database; KV: KVNamespace };
 
@@ -56,83 +62,30 @@ function normalizeGeneratorHash(generatorHash: string | undefined): string | nul
   return /^[0-9a-f]{64}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
 }
 
-function buildDeployGlobalRebuildEnqueueStatements(
-  env: EnqueueEnv,
-  targets: readonly string[],
-  reason: string,
-  priority: "high" | "low",
-): D1PreparedStatement[] {
-
-  const now = Math.floor(Date.now() / 1000);
-  // The target list is fixed and small, but expanding it into one UPDATE and
-  // one INSERT per target consumes 2*N D1 statements during a deploy. Keep
-  // the batch atomic while using JSON1 for the target set so recovery still
-  // has room for its bounded reads and the first rebuild.
-  const targetRows = targets.map((targetType) => ({
-    id: `srb:${targetType}:${crypto.randomUUID()}`,
-    target_type: targetType,
-  }));
-  const targetJson = JSON.stringify(targetRows);
-  const activeUpdate = env.DB.prepare(
-    `UPDATE static_rebuild_queue
-        SET reason = ?,
-            priority = CASE
-              WHEN priority = 'high' OR ? = 'high' THEN 'high'
-              ELSE priority
-            END,
-            updated_at = MAX(updated_at + 1, ?)
-      WHERE target_id = 'global'
-        AND status IN ('pending', 'processing')
-        AND target_type IN (
-          SELECT CAST(json_extract(value, '$.target_type') AS TEXT)
-          FROM json_each(?)
-        )`,
-  ).bind(reason, priority, now, targetJson);
-
-  const insert = env.DB.prepare(
-    `INSERT OR IGNORE INTO static_rebuild_queue (
-       id, target_type, target_id, reason, priority, status,
-       attempt_count, created_at, updated_at
-     )
-     SELECT
-       CAST(json_extract(value, '$.id') AS TEXT),
-       CAST(json_extract(value, '$.target_type') AS TEXT),
-       'global', ?, ?, 'pending', 0, ?, ?
-     FROM json_each(?)`,
-  ).bind(reason, priority, now, now, targetJson);
-
-  return [activeUpdate, insert];
-}
-
 async function enqueueDeployGlobalRebuildTargets(
   env: EnqueueEnv,
   targets: readonly string[],
   reason: string,
-  priority: "high" | "low",
   signal?: AbortSignal,
   /** enqueue と同一 batch で先に実行する statement（failed 行の reason 退避など）。 */
-  leadingStatements: D1PreparedStatement[] = [],
+  leadingStatement?: D1PreparedStatement,
 ): Promise<number> {
   signal?.throwIfAborted();
-
-  const enqueueStatements = buildDeployGlobalRebuildEnqueueStatements(
-    env,
-    targets,
+  const enqueue = prepareStaticRebuildEnqueue(
+    env.DB,
+    globalTargets(targets),
     reason,
-    priority,
+    "high",
   );
-  const statements = [...leadingStatements, ...enqueueStatements];
-
-  const results = await env.DB.batch(statements);
+  if (!enqueue) return 0;
+  // 固定 target 群を JSON1 upsert 1 statement にまとめ、Recovery の bounded read と
+  // 最初の rebuild に D1 statement 予算を残す。
+  const results = leadingStatement
+    ? await env.DB.batch([leadingStatement, enqueue])
+    : [await enqueue.run()];
   signal?.throwIfAborted();
-
   // leading statement の changes は enqueue 件数に含めない。
-  return results
-    .slice(leadingStatements.length)
-    .reduce(
-      (sum, result) => sum + Math.max(0, Number(result.meta?.changes ?? 0)),
-      0,
-    );
+  return d1Changes(results[results.length - 1]);
 }
 
 async function listFailedDeployGlobalTargets(
@@ -212,7 +165,7 @@ export async function ensureDeployGlobalRebuilds(
   const stored = await env.KV.get(STATIC_LAST_GENERATOR_COMMIT_KV_KEY);
   let targets: readonly string[] = DEPLOY_GLOBAL_REBUILD_TARGETS;
   let reason = DEPLOY_GLOBAL_REBUILD_REASON;
-  let leadingStatements: D1PreparedStatement[] = [];
+  let leadingStatement: D1PreparedStatement | undefined;
   if (stored === generatorKey) {
     // 同一 generator: 永続 failed になった target だけを1回だけ再試行する。
     // failed 行は reason を退避して二度と数えず、再試行行は別 reason にして
@@ -224,29 +177,26 @@ export async function ensureDeployGlobalRebuilds(
     targets = failedTargets;
     reason = DEPLOY_GLOBAL_REBUILD_RETRY_REASON;
     const targetPlaceholders = failedTargets.map(() => "?").join(", ");
-    leadingStatements = [
-      env.DB.prepare(
-        `UPDATE static_rebuild_queue
-            SET reason = ?
-          WHERE target_id = 'global'
-            AND target_type IN (${targetPlaceholders})
-            AND reason = ?
-            AND status = 'failed'`,
-      ).bind(
-        DEPLOY_GLOBAL_REBUILD_RETRIED_REASON,
-        ...failedTargets,
-        DEPLOY_GLOBAL_REBUILD_REASON,
-      ),
-    ];
+    leadingStatement = env.DB.prepare(
+      `UPDATE static_rebuild_queue
+          SET reason = ?
+        WHERE target_id = 'global'
+          AND target_type IN (${targetPlaceholders})
+          AND reason = ?
+          AND status = 'failed'`,
+    ).bind(
+      DEPLOY_GLOBAL_REBUILD_RETRIED_REASON,
+      ...failedTargets,
+      DEPLOY_GLOBAL_REBUILD_REASON,
+    );
   }
 
   const enqueued = await enqueueDeployGlobalRebuildTargets(
     env,
     targets,
     reason,
-    "high",
     options.signal,
-    leadingStatements,
+    leadingStatement,
   );
 
   const allCovered = await allDeployTargetsPendingOrProcessing(env);

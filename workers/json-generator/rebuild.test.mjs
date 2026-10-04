@@ -909,19 +909,20 @@ test("ensureDailyTopNostalgicShuffleはJST日次でtop_nostalgic再生成をキ�
 
 test("日次シャッフルのenqueue成功だけでは完了マーカーを保存しない", async () => {
   const kvPuts = [];
-  const batches = [];
+  const runs = [];
   const env = {
     DB: {
       prepare(sql) {
         return {
           bind(...args) {
-            return { sql, args };
+            return {
+              async run() {
+                runs.push({ sql, args });
+                return { meta: { changes: 1 } };
+              },
+            };
           },
         };
-      },
-      async batch(statements) {
-        batches.push(statements);
-        return [{ meta: { changes: 0 } }, { meta: { changes: 1 } }];
       },
     },
     KV: {
@@ -935,7 +936,7 @@ test("日次シャッフルのenqueue成功だけでは完了マーカーを保�
   };
 
   assert.equal(await ensureDailyTopNostalgicShuffle(env), 1);
-  assert.equal(batches.length, 1);
+  assert.equal(runs.length, 1);
   assert.deepEqual(kvPuts, []);
 });
 
