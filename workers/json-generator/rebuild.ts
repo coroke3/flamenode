@@ -142,6 +142,7 @@ import {
   writeWorkerVisibilityBlockedEntitiesManifest,
   type PublicVisibilityFenceEntityType,
 } from "../shared/publicVisibilityManifest.ts";
+import { abortGuard } from "../shared/abort.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
@@ -316,11 +317,7 @@ const NON_POINT_EVENT_PERIOD_SQL = `(
   OR (start_time IS NOT NULL AND end_time IS NOT NULL)
 )`;
 
-function throwIfAborted(signal: RebuildSignal): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(signal.reason === undefined ? "static rebuild aborted" : String(signal.reason));
-}
+const throwIfAborted = abortGuard("static rebuild aborted");
 
 export async function rebuildTarget(
   env: Env,

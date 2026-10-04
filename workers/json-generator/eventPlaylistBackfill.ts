@@ -1,3 +1,5 @@
+import { abortGuard } from "../shared/abort.ts";
+
 type BackfillEnv = {
   DB: D1Database;
   KV: KVNamespace;
@@ -12,15 +14,7 @@ export const EVENT_PLAYLIST_BACKFILL_BATCH_SIZE = 10;
 export const EVENT_PLAYLIST_BACKFILL_MAX_STATEMENTS =
   1 + EVENT_PLAYLIST_BACKFILL_BATCH_SIZE * 2;
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(
-    signal.reason === undefined
-      ? "event playlist projection repair aborted"
-      : String(signal.reason),
-  );
-}
+const throwIfAborted = abortGuard("event playlist projection repair aborted");
 
 function enqueueEventBaseStatement(
   env: BackfillEnv,

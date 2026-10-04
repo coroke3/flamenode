@@ -10,6 +10,7 @@ import {
   type AuditCleanupSettings,
 } from "./retention.ts";
 import { logWorkerJob, safeErrorSummary } from "../shared/safeLog.ts";
+import { throwIfAborted } from "../shared/abort.ts";
 
 export interface Env {
   DB: D1Database;
@@ -103,12 +104,6 @@ export async function runCleanupWithRetry(
     external_api_calls: 0,
     quota_stopped: false,
   };
-}
-
-function throwIfAborted(signal: AbortSignal | undefined, fallback: string): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(signal.reason === undefined ? fallback : String(signal.reason));
 }
 
 function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {

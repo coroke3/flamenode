@@ -36,6 +36,7 @@ import {
   type UsersIndexV2SourceEntry,
 } from "../../src/lib/publicData/staticUsersIndexV2Core.ts";
 import { STATIC_SEARCH_POSTINGS_BUCKET_COUNT } from "../../src/lib/publicData/staticSearchPostingsCore.ts";
+import { abortGuard } from "../shared/abort.ts";
 
 const USERS_INDEX_V2_ARTIFACT_TARGET_TYPE = "users_index_v2";
 const USERS_INDEX_V2_ARTIFACT_TARGET_ID = "global";
@@ -77,11 +78,7 @@ type PendingArtifact = {
   contentHash: string;
 };
 
-function throwIfAborted(signal: RebuildSignal): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(signal.reason === undefined ? "static rebuild aborted" : String(signal.reason));
-}
+const throwIfAborted = abortGuard("static rebuild aborted");
 
 function assertArtifactSize(key: string, value: unknown, maxBytes: number): void {
   const byteLength = usersIndexV2ArtifactByteLength(value);

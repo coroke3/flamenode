@@ -1,4 +1,5 @@
 import { safeErrorSummary } from "./safeLog.ts";
+import { abortError } from "./abort.ts";
 
 /**
  * D1 を正本にした Cron lease。
@@ -212,12 +213,6 @@ async function assertPromiseSucceeded(
 ): Promise<void> {
   const outcome = await outcomePromise;
   if (!outcome.succeeded) throw outcome.error;
-}
-
-function abortError(signal: AbortSignal, fallback: string): Error {
-  if (signal.reason instanceof Error) return signal.reason;
-  if (signal.reason !== undefined) return new Error(String(signal.reason));
-  return new Error(fallback);
 }
 
 export async function withCronLease<T>(
