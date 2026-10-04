@@ -48,9 +48,14 @@ const manifest = fs.readFileSync(
   path.join(root, "src/lib/publicData/publicVisibilityManifest.ts"),
   "utf8",
 );
-assert.match(manifest, /MANIFEST_PUT_MAX_RETRIES = 3/);
-assert.match(manifest, /cacheControl: "no-store"/);
 assert.match(manifest, /resolvePublicVisibilityGuardModeFromEnv/);
+
+const manifestR2 = fs.readFileSync(
+  path.join(root, "src/lib/publicData/publicVisibilityManifestR2.ts"),
+  "utf8",
+);
+assert.match(manifestR2, /MANIFEST_PUT_MAX_RETRIES = 3/);
+assert.match(manifestR2, /cacheControl: "no-store"/);
 
 const transition = fs.readFileSync(
   path.join(root, "src/lib/video/videoVisibilityTransition.ts"),

@@ -38,7 +38,7 @@ const [
   read("app/api/public/events/[id]/staff/route.ts"),
   read("src/lib/video/memberSuggestionsLoader.ts"),
   read("src/lib/video/memberSuggestionsV2Loader.ts"),
-  read("src/lib/publicData/publicVisibilityManifest.ts"),
+  read("src/lib/publicData/publicVisibilityManifestR2.ts"),
   read("workers/json-generator/pickupCreatorsR2.ts"),
   read("src/lib/publicData/publicCache.ts"),
   read("workers/sync-jobs/scoreRankingRebuildThrottle.ts"),
