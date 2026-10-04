@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const [profilePage, portfolioPage] = await Promise.all([
-  readFile(new URL("../../../app/(public)/user/[id]/page.tsx", import.meta.url), "utf8"),
+  readFile(new URL("../../../app/(public)/user/[id]/UserProfilePage.tsx", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(public)/user/[id]/portfolio/page.tsx", import.meta.url), "utf8"),
 ]);
 

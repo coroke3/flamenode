@@ -6,7 +6,7 @@ const [videoPage, userPage, eventPage, adminLayout, manageLayout, robots, ctaCss
   await Promise.all([
     readFile(new URL("../../app/(public)/[id]/page.tsx", import.meta.url), "utf8"),
     readFile(
-      new URL("../../app/(public)/user/[id]/page.tsx", import.meta.url),
+      new URL("../../app/(public)/user/[id]/UserProfilePage.tsx", import.meta.url),
       "utf8",
     ),
     readFile(

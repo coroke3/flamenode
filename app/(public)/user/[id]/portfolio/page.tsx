@@ -28,7 +28,12 @@ import {
   type PublicXIconEntry,
 } from "@/lib/publicData/publicIconProjection";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
+
+// On-demand ISR: see app/(public)/event/[id]/page.tsx.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
 
 const WORK_LIMIT = 36;
 
