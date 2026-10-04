@@ -1,5 +1,5 @@
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
-import { serializeJsonArtifact } from "./r2Dedup.ts";
+import { putJsonArtifact } from "./r2Dedup.ts";
 import {
   buildMemberSuggestionsV2Artifacts,
   memberSuggestionsV2ArtifactByteLength,
@@ -44,14 +44,10 @@ async function putJson(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  const { serialized, customMetadata } = await serializeJsonArtifact(value, 2);
-  throwIfAborted(signal);
-  await bucket.put(key, serialized, {
-    httpMetadata: {
-      contentType: "application/json; charset=utf-8",
-      cacheControl: PRIVATE_CACHE_CONTROL,
-    },
-    customMetadata,
+  await putJsonArtifact({ R2: bucket }, key, value, {
+    cacheControl: PRIVATE_CACHE_CONTROL,
+    schemaVersion: 2,
+    deduplicate: false,
   });
   throwIfAborted(signal);
 }

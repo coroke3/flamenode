@@ -243,6 +243,55 @@ export async function serializeJsonArtifact(
   };
 }
 
+type JsonArtifactPutOptions = {
+  cacheControl: string;
+  schemaVersion?: number;
+  /** Written under the artifact's own content-hash metadata. */
+  customMetadata?: Record<string, string>;
+};
+
+/**
+ * Serialize `body` and PUT it as a JSON artifact. With `deduplicate`, an
+ * object whose stored content hash already matches is not rewritten.
+ */
+export async function putJsonArtifact(
+  env: DedupEnv,
+  key: string,
+  body: unknown,
+  options: JsonArtifactPutOptions & { deduplicate: boolean },
+): Promise<SerializedJsonArtifact & { wrote: boolean }>;
+export async function putJsonArtifact(
+  env: { R2: Pick<R2Bucket, "put"> },
+  key: string,
+  body: unknown,
+  options: JsonArtifactPutOptions & { deduplicate: false },
+): Promise<SerializedJsonArtifact & { wrote: boolean }>;
+export async function putJsonArtifact(
+  env: DedupEnv | { R2: Pick<R2Bucket, "put"> },
+  key: string,
+  body: unknown,
+  options: JsonArtifactPutOptions & { deduplicate: boolean },
+): Promise<SerializedJsonArtifact & { wrote: boolean }> {
+  const artifact = await serializeJsonArtifact(body, options.schemaVersion);
+  const identical = options.deduplicate
+    ? await resolveIdenticalJsonArtifactPut(
+        env as DedupEnv,
+        key,
+        artifact.serialized,
+        artifact.contentHash,
+      )
+    : null;
+  if (identical?.skipPut) return { ...artifact, wrote: false };
+  await env.R2.put(key, artifact.serialized, {
+    httpMetadata: {
+      contentType: "application/json; charset=utf-8",
+      cacheControl: options.cacheControl,
+    },
+    customMetadata: { ...options.customMetadata, ...artifact.customMetadata },
+  });
+  return { ...artifact, wrote: true };
+}
+
 /** R2 metadata is checked first; legacy objects use D1 once and are rewritten with metadata. */
 export async function resolveIdenticalJsonArtifactPut(
   env: DedupEnv,

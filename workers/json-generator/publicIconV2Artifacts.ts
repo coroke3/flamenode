@@ -1,6 +1,6 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
-  serializeJsonArtifact,
+  putJsonArtifact,
   staticArtifactContentHash,
 } from "./r2Dedup.ts";
 import {
@@ -164,18 +164,11 @@ async function putManifest(
   ) {
     throw new Error("public_icon_v2_manifest_too_large");
   }
-  const { serialized, customMetadata } = await serializeJsonArtifact(manifest, 2);
-  await env.R2.put(
-    PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
-    serialized,
-    {
-      httpMetadata: {
-        contentType: "application/json; charset=utf-8",
-        cacheControl: "public, max-age=60, stale-while-revalidate=300",
-      },
-      customMetadata,
-    },
-  );
+  await putJsonArtifact(env, PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY, manifest, {
+    cacheControl: "public, max-age=60, stale-while-revalidate=300",
+    schemaVersion: 2,
+    deduplicate: false,
+  });
 }
 
 /**
@@ -275,16 +268,11 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
       throwIfAborted(signal);
       assertNoForbiddenPublicKeys(shard);
       const key = publicXIconV2ShardObjectKey(generation, shard.shard);
-      const { serialized, customMetadata } = await serializeJsonArtifact(shard, 2);
-      await env.R2.put(key, serialized, {
-        httpMetadata: {
-          contentType: "application/json; charset=utf-8",
-          cacheControl: staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.usersIndex),
-        },
-        customMetadata: {
-          ...expectedShardMetadata(generation, shard.shard),
-          ...customMetadata,
-        },
+      await putJsonArtifact(env, key, shard, {
+        cacheControl: staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.usersIndex),
+        schemaVersion: 2,
+        customMetadata: expectedShardMetadata(generation, shard.shard),
+        deduplicate: false,
       });
       writtenKeys.push(key);
     }
