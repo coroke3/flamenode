@@ -285,3 +285,40 @@ test("assertNoForbiddenPublicKeys は従来と同じpathで最初の禁止keyを
     { message: "Forbidden key payload.discord_id" },
   );
 });
+
+test("jsonContentHash / serializeJsonArtifact は再parseした従来のhashと一致する", async () => {
+  const { jsonContentHash, serializeJsonArtifact, staticArtifactContentHash } =
+    await import("./r2Dedup.ts");
+  const rows = Array.from({ length: 50 }, (_, index) => ({
+    id: `v${index}`,
+    title: index % 7 === 0 ? "é 🔥 \"quoted\" \\  " : `作品${index}`,
+    score: index % 3 === 0 ? -0 : index / 3,
+    missing: undefined,
+    when: new Date(Date.UTC(2026, 0, 1 + index)),
+  }));
+  const bodies = [
+    { generated_at: 1791116000, items: rows, total: 50 },
+    { generated_at: "2026-10-04", items: rows },
+    { generated_at: 1791116000 },
+    { generated_at: 1791116000, skipped: undefined },
+    { items: rows, generated_at: 1791116000 },
+    { 10: "integer key first", generated_at: 1, items: rows },
+    { generated_at: Number.NaN, items: rows },
+    { generated_at: null, items: rows },
+    { generated_at: { nested: true }, items: rows },
+    { schema_version: 2, generation: "g", rows },
+    [rows[0], rows[1]],
+    { toJSON: () => ({ generated_at: 5, items: [] }) },
+    "plain string",
+  ];
+  for (const body of bodies) {
+    const legacy = await staticArtifactContentHash(JSON.stringify(body));
+    assert.equal(await jsonContentHash(body), legacy, JSON.stringify(body).slice(0, 60));
+    assert.equal((await serializeJsonArtifact(body)).contentHash, legacy);
+  }
+  // generated_at differs, content equal → same hash (dedupe contract).
+  assert.equal(
+    await jsonContentHash({ generated_at: 1, items: rows }),
+    await jsonContentHash({ generated_at: 2, items: rows }),
+  );
+});

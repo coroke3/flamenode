@@ -1,5 +1,5 @@
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
-import { staticArtifactContentHash } from "./r2Dedup.ts";
+import { jsonContentHash } from "./r2Dedup.ts";
 
 export const VIDEO_MATERIALIZED_SOURCE_SCHEMA_VERSION = 1;
 export const VIDEO_MATERIALIZED_SOURCE_MAX_ROWS = 5000;
@@ -260,12 +260,12 @@ export async function loadVideoMaterializedSource(
     );
     const source = parseSource(rawSource);
     const sourceHash = source
-      ? await staticArtifactContentHash(JSON.stringify({
+      ? await jsonContentHash({
           schema_version: source.schema_version,
           score_watermark: source.score_watermark,
           source_updated_at: source.source_updated_at,
           rows: source.rows,
-        }))
+        })
       : null;
     if (
       source &&
@@ -314,7 +314,7 @@ export async function publishVideoMaterializedSource(
     source_updated_at: options.sourceUpdatedAt,
     rows: normalizedRows as VideoMaterializedRow[],
   };
-  const generation = await staticArtifactContentHash(JSON.stringify(sourceMaterial));
+  const generation = await jsonContentHash(sourceMaterial);
   const source: VideoMaterializedSource = { ...sourceMaterial, generation };
   const serializedSource = JSON.stringify(source);
   const sourceBytes = new TextEncoder().encode(serializedSource).byteLength;
