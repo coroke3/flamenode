@@ -47,6 +47,25 @@ export function stagePermissionQuestionKeyCondition() {
   return sql`(${eventCustomQuestions.question_key} = ${DEFAULT_STAGE_PERMISSION_QUESTION_KEY} OR substr(${eventCustomQuestions.question_key}, 1, ${STAGE_PERMISSION_KEY_PREFIX.length}) = ${STAGE_PERMISSION_KEY_PREFIX})`;
 }
 
+function selectStagePermissionQuestions(db: DB, eventIds: string[]) {
+  return db
+    .select({
+      id: eventCustomQuestions.id,
+      event_id: eventCustomQuestions.event_id,
+      question_key: eventCustomQuestions.question_key,
+      label: eventCustomQuestions.label,
+      sort_order: eventCustomQuestions.sort_order,
+      is_active: eventCustomQuestions.is_active,
+    })
+    .from(eventCustomQuestions)
+    .where(
+      and(
+        inArray(eventCustomQuestions.event_id, eventIds),
+        stagePermissionQuestionKeyCondition(),
+      )!,
+    );
+}
+
 export async function readStagePermissionCustomAnswers(
   db: DB,
   args: {
@@ -65,23 +84,10 @@ export async function readStagePermissionCustomAnswers(
     eventIds,
     D1_STAGE_EVENT_ID_CHUNK_SIZE,
   )) {
-    const chunkQuestions = await db
-      .select({
-        id: eventCustomQuestions.id,
-        event_id: eventCustomQuestions.event_id,
-        question_key: eventCustomQuestions.question_key,
-        label: eventCustomQuestions.label,
-        sort_order: eventCustomQuestions.sort_order,
-        is_active: eventCustomQuestions.is_active,
-      })
-      .from(eventCustomQuestions)
-      .where(
-        and(
-          inArray(eventCustomQuestions.event_id, eventIdChunk),
-          stagePermissionQuestionKeyCondition(),
-        )!,
-      )
-      .limit(MAX_STAGE_PERMISSION_QUESTIONS + 1);
+    const chunkQuestions = await selectStagePermissionQuestions(
+      db,
+      eventIdChunk,
+    ).limit(MAX_STAGE_PERMISSION_QUESTIONS + 1);
     questions.push(...chunkQuestions);
     if (questions.length > MAX_STAGE_PERMISSION_QUESTIONS) {
       throw new Error("video_stage_answer_read_limit_exceeded");
@@ -181,22 +187,7 @@ export async function batchReadStagePermissionCustomAnswers(
     eventIds,
     D1_STAGE_EVENT_ID_CHUNK_SIZE,
   )) {
-    const chunkQuestions = await db
-      .select({
-        id: eventCustomQuestions.id,
-        event_id: eventCustomQuestions.event_id,
-        question_key: eventCustomQuestions.question_key,
-        label: eventCustomQuestions.label,
-        sort_order: eventCustomQuestions.sort_order,
-        is_active: eventCustomQuestions.is_active,
-      })
-      .from(eventCustomQuestions)
-      .where(
-        and(
-          inArray(eventCustomQuestions.event_id, eventIdChunk),
-          stagePermissionQuestionKeyCondition(),
-        )!,
-      );
+    const chunkQuestions = await selectStagePermissionQuestions(db, eventIdChunk);
     questions.push(...chunkQuestions);
   }
 
@@ -211,7 +202,7 @@ export async function batchReadStagePermissionCustomAnswers(
   // answers IN-list. Besides preserving the existing read-limit error, this
   // prevents a malformed event with many stage questions from pushing the
   // subsequent D1 statement over its bind budget.
-  for (const item of items) {
+  const scopes = items.map((item) => {
     const scopedEventIds = Array.from(new Set(item.eventIds.filter(Boolean)));
     const scopedQuestions = scopedEventIds.flatMap(
       (eventId) => questionsByEvent.get(eventId) ?? [],
@@ -219,7 +210,8 @@ export async function batchReadStagePermissionCustomAnswers(
     if (scopedQuestions.length > 4) {
       throw new Error("video_stage_answer_read_limit_exceeded");
     }
-  }
+    return { videoId: item.videoId, scopedEventIds, scopedQuestions };
+  });
 
   const answersByVideo = new Map<string, Map<string, string>>();
   type AnswerScope = {
@@ -228,12 +220,7 @@ export async function batchReadStagePermissionCustomAnswers(
     questionIds: string[];
   };
   const answerScopes: AnswerScope[] = [];
-  for (const item of items) {
-    const scopedEventIds = Array.from(new Set(item.eventIds.filter(Boolean)))
-      .filter((eventId) => (questionsByEvent.get(eventId)?.length ?? 0) > 0);
-    const scopedQuestions = scopedEventIds.flatMap(
-      (eventId) => questionsByEvent.get(eventId) ?? [],
-    );
+  for (const { videoId, scopedEventIds, scopedQuestions } of scopes) {
     if (scopedQuestions.length === 0) continue;
     const questionIds = Array.from(
       new Set(scopedQuestions.map((question) => question.id)),
@@ -242,11 +229,13 @@ export async function batchReadStagePermissionCustomAnswers(
     // event limit. Split that scope before the grouping pass as well; without
     // this, an otherwise empty group could still issue one 200-event IN query.
     for (const eventIdChunk of chunkStringIds(
-      scopedEventIds,
+      scopedEventIds.filter(
+        (eventId) => (questionsByEvent.get(eventId)?.length ?? 0) > 0,
+      ),
       D1_STAGE_EVENT_ID_CHUNK_SIZE,
     )) {
       answerScopes.push({
-        videoId: item.videoId,
+        videoId,
         eventIds: eventIdChunk,
         questionIds,
       });
@@ -308,21 +297,14 @@ export async function batchReadStagePermissionCustomAnswers(
   }
   await flushAnswerScopes();
 
-  for (const item of items) {
-    const scopedEventIds = Array.from(new Set(item.eventIds.filter(Boolean)));
-    const scopedQuestions = scopedEventIds.flatMap(
-      (eventId) => questionsByEvent.get(eventId) ?? [],
-    );
+  for (const { videoId, scopedEventIds, scopedQuestions } of scopes) {
     if (scopedQuestions.length === 0) {
-      out.set(item.videoId, null);
+      out.set(videoId, null);
       continue;
     }
-    if (scopedQuestions.length > 4) {
-      throw new Error("video_stage_answer_read_limit_exceeded");
-    }
-    const answerByQuestionId = answersByVideo.get(item.videoId) ?? new Map();
+    const answerByQuestionId = answersByVideo.get(videoId) ?? new Map();
     out.set(
-      item.videoId,
+      videoId,
       serializeStagePermissionFromRows(
         scopedEventIds,
         scopedQuestions,
