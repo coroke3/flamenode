@@ -145,3 +145,12 @@ test("event playlistはevent_baseと同じ公開集合を安定した上映順�
   );
   assert.doesNotMatch(playlist, /INNER JOIN video_events/);
 });
+
+test("list artifactは作者名・アイコンを1回だけ持ち、公開判定のstatusは残す", () => {
+  const start = source.indexOf("function listProjection(");
+  const body = source.slice(start, source.indexOf("\n}\n", start));
+  assert.match(body, /display_name: row\.display_name/);
+  assert.match(body, /icon_url: row\.icon_url/);
+  assert.match(body, /status: row\.status/);
+  assert.doesNotMatch(body, /creator_display_name|creator_icon_url/);
+});

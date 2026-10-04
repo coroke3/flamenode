@@ -362,7 +362,7 @@ Spreadsheetの `video_members` 更新は、同一atomic batchの前段で対象v
 | 公開非表示マニフェスト | `visibility/blocked-entities.v1.json` | 初回非公開化まで欠落可（deep health / artifact SLO は bootstrap-ok）。存在時は shape・鮮度を検査 |
 | サイトマップ | 上記索引から動的生成 | — |
 
-`list/recent.json` と `list/popular.json` は COUNTABLE 公開作品を最大 5000 件（`STATIC_LIST_MAX_ITEMS`）まで `items` に載せる。`total` は DB の全件数と `items.length` の小さい方とし、ページングが `items` を超えない。`search-index-lite.json` の `videos` も同上限。put 前に `STATIC_LIST_MAX_OBJECT_BYTES`（8MiB）でサイズガードする。users 側の 500 件上限は現状維持。
+`list/recent.json` と `list/popular.json` は COUNTABLE 公開作品を最大 5000 件（`STATIC_LIST_MAX_ITEMS`）まで `items` に載せる。`total` は DB の全件数と `items.length` の小さい方とし、ページングが `items` を超えない。`search-index-lite.json` の `videos` も同上限。put 前に `STATIC_LIST_MAX_OBJECT_BYTES`（8MiB）でサイズガードする。各 item は作者名・アイコンを `display_name` / `icon_url` の1回だけ持ち、同値の `creator_display_name` / `creator_icon_url` は載せない（isolate cache miss ごとの parse CPU を約25%減らすため。reader は旧 artifact 用に `creator_*` へ fallback する）。公開判定に使う `status` は残す。users 側の 500 件上限は現状維持。
 
 `/list?event=` は `events/{id}/base.v1.json` と条件に応じて composed `events/{id}.json` を先に試す。
 base pool 上限（500件）以内のイベントは R2 base が一覧の正本で、欠損・heal 中は bounded stale

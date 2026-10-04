@@ -242,13 +242,14 @@ function assertStaticListObjectSize(key: string, body: unknown): void {
   }
 }
 
+// list/recent.json and list/popular.json omit creator_display_name /
+// creator_icon_url (same values as display_name / icon_url) to keep the
+// 5,000-row artifacts cheap to parse; see listProjection in optimizedRebuild.ts.
 const STATIC_LIST_VIDEO_SELECT = `
   v.id, v.title, v.youtube_video_id,
   v.creator_display_name AS display_name,
-  v.creator_display_name,
   v.creator_x_user_id,
   v.creator_icon_url AS icon_url,
-  v.creator_icon_url,
   e.id AS primary_event_id,
   e.title AS primary_event_title,
   v.scheduled_time,
@@ -1271,22 +1272,11 @@ export async function ensureDailyTopNostalgicShuffle(
 async function rebuildListRecent(env: Env, signal?: RebuildSignal): Promise<void> {
   throwIfAborted(signal);
   const rows = await env.DB.prepare(
-    `SELECT v.id, v.title, v.youtube_video_id,
-            v.creator_display_name AS display_name,
-            v.creator_display_name,
-            v.creator_x_user_id,
-            v.creator_icon_url AS icon_url,
-            v.creator_icon_url,
-            e.id AS primary_event_id,
-            e.title AS primary_event_title,
-            v.scheduled_time,
-            v.visibility_status AS status
-   FROM videos v
-   LEFT JOIN events e
-     ON e.id = v.primary_event_id AND e.visibility_status = 'public'
-   WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
-   ORDER BY v.scheduled_time DESC
-   LIMIT ?`,
+    `SELECT ${STATIC_LIST_VIDEO_SELECT}
+     ${STATIC_LIST_VIDEO_FROM}
+     WHERE ${COUNTABLE_PUBLIC_VIDEO_SQL}
+     ORDER BY v.scheduled_time DESC
+     LIMIT ?`,
   )
     .bind(RECENT_LIST_LIMIT)
     .all();
