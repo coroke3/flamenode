@@ -117,7 +117,7 @@ npm run preview
 unset WORKERS_CI_COMMIT_SHA
 ```
 
-`cf:build`はNext.jsをOpenNextで1回だけbuildし、`.open-next/worker.js`、Static Assets、commit manifest、機密値混入を検査します。`preview`は同じ成果物を`wrangler dev`でD1/R2/KVのローカルbindingとともに`http://localhost:3000`で起動し、公開health用commit SHAとローカルpreview専用のloopback許可を自動注入します。この許可はproduction環境・生成configでは拒否されます。
+`cf:build`はNext.jsをOpenNextで1回だけbuildし、bindingなしでprerenderされたISRページのcacheを捨て、`.open-next/worker.js`、Static Assets、commit manifest、機密値混入を検査します。`preview`は同じ成果物を`wrangler dev`でD1/R2/KVのローカルbindingとともに`http://localhost:3000`で起動し、公開health用commit SHAとローカルpreview専用のloopback許可を自動注入します。この許可はproduction環境・生成configでは拒否されます。
 
 別ポートを使う場合は`FLAMENODE_PREVIEW_PORT`、`.dev.vars`の`AUTH_URL`と`NEXT_PUBLIC_SITE_URL`、Discord redirectの3箇所を同じportへ変更します。
 

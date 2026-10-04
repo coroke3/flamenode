@@ -142,4 +142,7 @@ test("sitemap builds from static R2 indexes without D1", async () => {
   assert.match(source, /buildStaticSitemapEntries/);
   assert.doesNotMatch(source, /withDatabase/);
   assert.doesNotMatch(source, /portfolio/);
+  // Without revalidate the build (no bindings) freezes the sitemap with the
+  // static pages only.
+  assert.match(source, /export const revalidate = 3600;/);
 });
