@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL } from "./memberSuggestionsArtifacts.ts";
+import { STATIC_ARTIFACT_MARK_DELETED_SQL } from "./staticArtifactTracking.ts";
 
 const oldSql = `
   UPDATE static_artifacts
@@ -60,7 +60,7 @@ test("member suggestionsの非相関membership UPDATEは旧結果を保ちNULL�
     .map((row) => row.detail)
     .join("\n");
   const newPlan = newPlanDb
-    .prepare(`EXPLAIN QUERY PLAN ${MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL}`)
+    .prepare(`EXPLAIN QUERY PLAN ${STATIC_ARTIFACT_MARK_DELETED_SQL}`)
     .all(...values)
     .map((row) => row.detail)
     .join("\n");
@@ -82,7 +82,7 @@ test("member suggestionsの非相関membership UPDATEは旧結果を保ちNULL�
     const optimized = createDb();
     const bindings = [1_700_000_000, "member_suggestions", "global", JSON.stringify(keys)];
     legacy.prepare(oldSql).run(...bindings);
-    optimized.prepare(MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL).run(...bindings);
+    optimized.prepare(STATIC_ARTIFACT_MARK_DELETED_SQL).run(...bindings);
     assert.deepEqual(rows(optimized), rows(legacy), name);
     assert.equal(
       optimized.prepare("SELECT deleted_at FROM static_artifacts WHERE id = 'other-target'").get().deleted_at,

@@ -21,7 +21,11 @@ import {
   type MemberSuggestionSourceEntry,
 } from "../../src/lib/video/memberSuggestionsCore.ts";
 import { abortGuard } from "../shared/abort.ts";
-import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
+import {
+  deleteStaticArtifacts,
+  recordStaticArtifacts,
+  STATIC_ARTIFACT_MARK_DELETED_SQL,
+} from "./staticArtifactTracking.ts";
 
 const MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE = "member_suggestions";
 const MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID = "global";
@@ -199,19 +203,6 @@ async function recordArtifacts(
 }
 
 /** stale generation cleanupはbounded。D1更新はjson_each 1文に集約する。 */
-export const MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL = `
-  UPDATE static_artifacts
-     SET deleted_at = ?
-   WHERE target_type = ?
-     AND target_id = ?
-     AND deleted_at IS NULL
-     AND object_key IN (
-       SELECT CAST(value AS TEXT)
-       FROM json_each(?)
-       WHERE value IS NOT NULL
-     )
-`;
-
 async function reconcileTrackedArtifacts(
   env: Env,
   liveKeys: readonly string[],
@@ -237,21 +228,15 @@ async function reconcileTrackedArtifacts(
   const staleKeys = (rows.results ?? [])
     .map((row) => row.object_key)
     .filter((key) => !live.has(key));
-  if (staleKeys.length === 0) return;
-
-  await env.R2.delete(staleKeys);
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL)
-    .bind(
-      now,
-      MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
-      MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
-      JSON.stringify(staleKeys),
-    )
-    .run();
-  for (const key of staleKeys) env.artifactHashCache?.set(key, null);
-  throwIfAborted(signal);
+  await deleteStaticArtifacts(
+    env,
+    {
+      targetType: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
+      targetId: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
+    },
+    staleKeys,
+    signal,
+  );
 }
 
 type MemberSuggestionsTrackedArtifact = {
@@ -291,7 +276,7 @@ async function cleanupWrittenArtifacts(
   }
   try {
     const now = Math.floor(Date.now() / 1000);
-    await env.DB.prepare(MEMBER_SUGGESTIONS_ARTIFACT_KEYS_MARK_DELETED_SQL)
+    await env.DB.prepare(STATIC_ARTIFACT_MARK_DELETED_SQL)
       .bind(
         now,
         MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,

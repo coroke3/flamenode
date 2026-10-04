@@ -65,3 +65,48 @@ export async function recordStaticArtifacts(
   }
   throwIfAborted(signal, "static rebuild aborted");
 }
+
+/** Marks the listed live rows deleted; one statement for any number of keys. */
+export const STATIC_ARTIFACT_MARK_DELETED_SQL = `
+  UPDATE static_artifacts
+     SET deleted_at = ?
+   WHERE target_type = ?
+     AND target_id = ?
+     AND deleted_at IS NULL
+     AND object_key IN (
+       SELECT CAST(value AS TEXT)
+       FROM json_each(?)
+       WHERE value IS NOT NULL
+     )
+`;
+
+/**
+ * R2 bulk delete (max 1000 keys) and one JSON1 UPDATE instead of 2 subrequests
+ * per object. deleted_at is set only after the R2 delete succeeds, so a failed
+ * delete leaves every row live for the next retry.
+ */
+export async function deleteStaticArtifacts(
+  env: {
+    DB: D1Database;
+    R2: Pick<R2Bucket, "delete">;
+    artifactHashCache?: ArtifactHashCache;
+  },
+  target: Pick<StaticArtifactTrackingTarget, "targetType" | "targetId">,
+  objectKeys: readonly string[],
+  signal?: AbortSignal,
+): Promise<void> {
+  throwIfAborted(signal, "static rebuild aborted");
+  if (objectKeys.length === 0) return;
+  await env.R2.delete([...objectKeys]);
+  throwIfAborted(signal, "static rebuild aborted");
+  await env.DB.prepare(STATIC_ARTIFACT_MARK_DELETED_SQL)
+    .bind(
+      Math.floor(Date.now() / 1000),
+      target.targetType,
+      target.targetId,
+      JSON.stringify(objectKeys),
+    )
+    .run();
+  for (const key of objectKeys) env.artifactHashCache?.set(key, null);
+  throwIfAborted(signal, "static rebuild aborted");
+}

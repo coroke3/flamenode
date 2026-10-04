@@ -145,7 +145,7 @@ import {
   type PublicVisibilityFenceEntityType,
 } from "../shared/publicVisibilityManifest.ts";
 import { abortGuard } from "../shared/abort.ts";
-import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
+import { deleteStaticArtifacts, recordStaticArtifacts } from "./staticArtifactTracking.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
@@ -547,40 +547,8 @@ export async function removeTrackedArtifacts(
      ORDER BY generated_at ASC LIMIT ?`,
   ).bind(targetType, targetId, limit).all<ArtifactRow>();
   const objectKeys = (rows.results ?? []).map((row) => row.object_key);
-  await deleteTrackedArtifactObjects(env, { targetType, targetId }, objectKeys, signal);
+  await deleteStaticArtifacts(env, { targetType, targetId }, objectKeys, signal);
   return objectKeys.length;
-}
-
-/**
- * R2 bulk delete (max 1000 keys) and one JSON1 UPDATE instead of 2 subrequests
- * per row. deleted_at is set only after R2 delete succeeds, so a failed delete
- * leaves every row live for the next retry.
- */
-async function deleteTrackedArtifactObjects(
-  env: Env,
-  target: Pick<ArtifactTarget, "targetType" | "targetId">,
-  objectKeys: readonly string[],
-  signal?: RebuildSignal,
-): Promise<void> {
-  throwIfAborted(signal);
-  if (objectKeys.length === 0) return;
-  await env.R2.delete([...objectKeys]);
-  throwIfAborted(signal);
-  await env.DB.prepare(
-    `UPDATE static_artifacts SET deleted_at = ?
-     WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
-       AND object_key IN (
-         SELECT CAST(value AS TEXT)
-         FROM json_each(?)
-         WHERE value IS NOT NULL
-       )`,
-  ).bind(
-    Math.floor(Date.now() / 1000),
-    target.targetType,
-    target.targetId,
-    JSON.stringify(objectKeys),
-  ).run();
-  throwIfAborted(signal);
 }
 
 // Keep the existing cleanup order and bounded batch size. The partial cleanup
@@ -611,7 +579,7 @@ async function reconcileTrackedArtifacts(
     JSON.stringify(liveKeys),
     limit,
   ).all<ArtifactRow>();
-  await deleteTrackedArtifactObjects(
+  await deleteStaticArtifacts(
     env,
     target,
     (rows.results ?? []).map((row) => row.object_key),

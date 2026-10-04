@@ -36,7 +36,7 @@ import {
 } from "../../src/lib/publicData/staticUsersIndexV2Core.ts";
 import { STATIC_SEARCH_POSTINGS_BUCKET_COUNT } from "../../src/lib/publicData/staticSearchPostingsCore.ts";
 import { abortGuard } from "../shared/abort.ts";
-import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
+import { deleteStaticArtifacts, recordStaticArtifacts } from "./staticArtifactTracking.ts";
 
 const USERS_INDEX_V2_ARTIFACT_TARGET_TYPE = "users_index_v2";
 const USERS_INDEX_V2_ARTIFACT_TARGET_ID = "global";
@@ -482,27 +482,15 @@ async function invalidateUsersIndexV2Manifest(
   env: Env,
   signal?: RebuildSignal,
 ): Promise<void> {
-  throwIfAborted(signal);
-  await env.R2.delete(USERS_INDEX_V2_MANIFEST_OBJECT_KEY);
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    `UPDATE static_artifacts
-        SET deleted_at = ?
-      WHERE target_type = ?
-        AND target_id = ?
-        AND object_key = ?
-        AND deleted_at IS NULL`,
-  )
-    .bind(
-      now,
-      USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
-      USERS_INDEX_V2_ARTIFACT_TARGET_ID,
-      USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-    )
-    .run();
-  env.artifactHashCache?.set(USERS_INDEX_V2_MANIFEST_OBJECT_KEY, null);
-  throwIfAborted(signal);
+  await deleteStaticArtifacts(
+    env,
+    {
+      targetType: USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
+      targetId: USERS_INDEX_V2_ARTIFACT_TARGET_ID,
+    },
+    [USERS_INDEX_V2_MANIFEST_OBJECT_KEY],
+    signal,
+  );
 }
 
 function pageEntries(

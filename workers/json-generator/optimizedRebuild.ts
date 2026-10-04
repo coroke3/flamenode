@@ -37,7 +37,7 @@ import {
   eventPlaylistObjectKey,
 } from "../../src/lib/publicData/staticEventPlaylistCore.ts";
 import { abortGuard } from "../shared/abort.ts";
-import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
+import { deleteStaticArtifacts, recordStaticArtifacts } from "./staticArtifactTracking.ts";
 
 export type OptimizedRebuildEnv = {
   DB: D1Database;
@@ -772,18 +772,11 @@ async function markEventPlaylistDeleted(
   eventId: string,
   objectKey: string,
 ): Promise<void> {
-  await env.R2.delete(objectKey);
-  const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    `UPDATE static_artifacts
-     SET deleted_at = ?
-     WHERE target_type = 'event_playlist'
-       AND target_id = ?
-       AND object_key = ?
-       AND deleted_at IS NULL`,
-  )
-    .bind(now, eventId, objectKey)
-    .run();
+  await deleteStaticArtifacts(
+    env,
+    { targetType: "event_playlist", targetId: eventId },
+    [objectKey],
+  );
 }
 
 async function syncEventPlaylistArtifact(
