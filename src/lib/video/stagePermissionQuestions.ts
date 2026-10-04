@@ -110,36 +110,11 @@ export async function loadStagePermissionFormSettingsJson(
   db: DB,
   eventId: string,
 ): Promise<string | null> {
-  const rows = await db
-    .select({
-      question_key: eventCustomQuestions.question_key,
-      label: eventCustomQuestions.label,
-      description: eventCustomQuestions.description,
-      placeholder: eventCustomQuestions.placeholder,
-      required: eventCustomQuestions.required,
-      is_active: eventCustomQuestions.is_active,
-      sort_order: eventCustomQuestions.sort_order,
-    })
-    .from(eventCustomQuestions)
-    .where(
-      and(
-        eq(eventCustomQuestions.event_id, eventId),
-        stagePermissionQuestionKeyCondition(),
-      )!,
-    )
-    .orderBy(eventCustomQuestions.sort_order);
-
-  if (rows.length === 0) return null;
-  return JSON.stringify({
-    stage_permissions: rows.map((row) => ({
-      id: row.question_key,
-      enabled: row.is_active === 1,
-      required: row.required === 1,
-      label: row.label,
-      description: row.description ?? "",
-      placeholder: row.placeholder ?? "",
-    })),
-  });
+  return (
+    (await loadStagePermissionFormSettingsJsonByEvents(db, [eventId])).get(
+      eventId,
+    ) ?? null
+  );
 }
 
 export async function loadStagePermissionFormSettingsJsonByEvents(
