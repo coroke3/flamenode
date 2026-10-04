@@ -4,8 +4,8 @@ import {
   resolveEventFreshness,
 } from "./freshness.ts";
 import {
+  serializeJsonArtifact,
   staticArtifactContentHash,
-  staticArtifactCustomMetadata,
   resolveIdenticalJsonArtifactPut,
 } from "./r2Dedup.ts";
 import { staticRebuildArtifactTargetId } from "./staticGlobalRebuildTargets.ts";
@@ -495,9 +495,8 @@ async function putJson(
 ): Promise<void> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
-  const serialized = JSON.stringify(body);
+  const { serialized, contentHash, customMetadata } = await serializeJsonArtifact(body);
   throwIfAborted(signal);
-  const contentHash = await staticArtifactContentHash(serialized);
   const identical = await resolveIdenticalJsonArtifactPut(env, key, serialized, contentHash);
   if (!identical?.skipPut) {
     await env.R2.put(key, serialized, {
@@ -505,7 +504,7 @@ async function putJson(
         contentType: "application/json; charset=utf-8",
         cacheControl,
       },
-      customMetadata: staticArtifactCustomMetadata(serialized, contentHash),
+      customMetadata,
     });
   }
   throwIfAborted(signal);
@@ -523,14 +522,13 @@ async function putJsonUntracked(
 ): Promise<PendingStaticArtifact> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
-  const serialized = JSON.stringify(body);
-  const contentHash = await staticArtifactContentHash(serialized);
+  const { serialized, contentHash, customMetadata } = await serializeJsonArtifact(body);
   await env.R2.put(key, serialized, {
     httpMetadata: {
       contentType: "application/json; charset=utf-8",
       cacheControl,
     },
-    customMetadata: staticArtifactCustomMetadata(serialized, contentHash),
+    customMetadata,
   });
   throwIfAborted(signal);
   return { objectKey: key, contentHash };

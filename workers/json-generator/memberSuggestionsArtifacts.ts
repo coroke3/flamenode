@@ -2,6 +2,7 @@ import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   resolveIdenticalJsonArtifactPut,
+  serializeJsonArtifact,
   staticArtifactContentHash,
   staticArtifactCustomMetadata,
   type ArtifactHashCache,
@@ -341,8 +342,10 @@ async function putTrackedJson(
 ): Promise<MemberSuggestionsTrackedArtifact> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
-  const serialized = JSON.stringify(body);
-  const contentHash = await staticArtifactContentHash(serialized);
+  const { serialized, contentHash, customMetadata } = await serializeJsonArtifact(
+    body,
+    MEMBER_SUGGESTIONS_STATIC_ARTIFACT_SCHEMA_VERSION,
+  );
   throwIfAborted(signal);
   const identical =
     options?.deduplicate === false
@@ -354,11 +357,7 @@ async function putTrackedJson(
         contentType: "application/json; charset=utf-8",
         cacheControl: "private, max-age=0, must-revalidate",
       },
-      customMetadata: staticArtifactCustomMetadata(
-        serialized,
-        contentHash,
-        MEMBER_SUGGESTIONS_STATIC_ARTIFACT_SCHEMA_VERSION,
-      ),
+      customMetadata,
     });
   }
   return { objectKey: key, contentHash, wrote: !identical?.skipPut };

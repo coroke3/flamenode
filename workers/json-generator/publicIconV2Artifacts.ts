@@ -1,7 +1,7 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
+  serializeJsonArtifact,
   staticArtifactContentHash,
-  staticArtifactCustomMetadata,
 } from "./r2Dedup.ts";
 import {
   staticR2CacheControl,
@@ -164,8 +164,7 @@ async function putManifest(
   ) {
     throw new Error("public_icon_v2_manifest_too_large");
   }
-  const serialized = JSON.stringify(manifest);
-  const contentHash = await staticArtifactContentHash(serialized);
+  const { serialized, customMetadata } = await serializeJsonArtifact(manifest, 2);
   await env.R2.put(
     PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY,
     serialized,
@@ -174,7 +173,7 @@ async function putManifest(
         contentType: "application/json; charset=utf-8",
         cacheControl: "public, max-age=60, stale-while-revalidate=300",
       },
-      customMetadata: staticArtifactCustomMetadata(serialized, contentHash, 2),
+      customMetadata,
     },
   );
 }
@@ -276,8 +275,7 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
       throwIfAborted(signal);
       assertNoForbiddenPublicKeys(shard);
       const key = publicXIconV2ShardObjectKey(generation, shard.shard);
-      const serialized = JSON.stringify(shard);
-      const contentHash = await staticArtifactContentHash(serialized);
+      const { serialized, customMetadata } = await serializeJsonArtifact(shard, 2);
       await env.R2.put(key, serialized, {
         httpMetadata: {
           contentType: "application/json; charset=utf-8",
@@ -285,7 +283,7 @@ export async function rebuildPublicIconV2FromLegacyArtifact(
         },
         customMetadata: {
           ...expectedShardMetadata(generation, shard.shard),
-          ...staticArtifactCustomMetadata(serialized, contentHash, 2),
+          ...customMetadata,
         },
       });
       writtenKeys.push(key);

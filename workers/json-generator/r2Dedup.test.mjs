@@ -5,7 +5,9 @@ import {
   staticArtifactCustomMetadata,
   resolveIdenticalJsonArtifactPut,
   ArtifactHashCache,
+  serializeJsonArtifact,
 } from "./r2Dedup.ts";
+import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 
 async function hash(value) {
   const digest = await crypto.subtle.digest(
@@ -197,5 +199,89 @@ test("metadata builder records hash, schema, and a bounded generation", async ()
       1,
     ),
     { content_hash: "abc", schema_version: "2", source_generation: "g-2" },
+  );
+});
+
+// 変更前の staticArtifactContentHash / staticArtifactCustomMetadata をそのまま写した同値性oracle。
+async function legacyContentHash(value) {
+  let text = value;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const { generated_at: _g, ...meaningful } = parsed;
+      text = JSON.stringify(meaningful);
+    }
+  } catch {}
+  return hash(text);
+}
+
+function legacyMetadata(serialized, contentHash, defaultSchemaVersion = 1) {
+  let schemaVersion = String(defaultSchemaVersion);
+  let sourceGeneration = contentHash;
+  try {
+    const row = JSON.parse(serialized);
+    if (row && typeof row === "object" && !Array.isArray(row)) {
+      const rawSchema = row.schema_version;
+      if ((typeof rawSchema === "string" || typeof rawSchema === "number") && String(rawSchema).trim()) {
+        schemaVersion = String(rawSchema).trim().slice(0, 32);
+      }
+      const rawGeneration = row.source_generation ?? row.generation ?? row.generation_key;
+      if ((typeof rawGeneration === "string" || typeof rawGeneration === "number") && String(rawGeneration).trim()) {
+        const normalized = String(rawGeneration).trim();
+        if (normalized.length <= 128) sourceGeneration = normalized;
+      }
+    }
+  } catch {}
+  return { content_hash: contentHash, schema_version: schemaVersion, source_generation: sourceGeneration };
+}
+
+test("serializeJsonArtifact は変更前の再parse方式と同じ serialized / hash / metadata を返す", async () => {
+  const nullProto = Object.assign(Object.create(null), { generated_at: 1, a: 1 });
+  const bodies = [
+    { generated_at: 100, items: [{ id: "v1" }], schema_version: 3 },
+    { items: [], generation: " gen-a ", generation_key: "ignored" },
+    { generated_at: 5, 2: "b", 1: "a", z: undefined, f: () => 1, n: Number.NaN },
+    { source_generation: null, generation: "fallback", schema_version: "  " },
+    { source_generation: Number.POSITIVE_INFINITY, generation: "after-null" },
+    { source_generation: undefined, generation: () => "x", generation_key: "k" },
+    { schema_version: "x".repeat(40), generation: "g".repeat(129) },
+    { generated_at: { toJSON: () => "d" }, schema_version: new Date(0) },
+    { toJSON: () => ({ generated_at: 1, generation: "from-toJSON" }) },
+    nullProto,
+    [{ generated_at: 1 }],
+    "plain-string",
+    42,
+    null,
+  ];
+  for (const body of bodies) {
+    for (const schema of [1, 2]) {
+      const serialized = JSON.stringify(body);
+      const expectedHash = await legacyContentHash(serialized);
+      const result = await serializeJsonArtifact(body, schema);
+      assert.equal(result.serialized, serialized);
+      assert.equal(result.contentHash, expectedHash);
+      assert.equal(await staticArtifactContentHash(serialized), expectedHash);
+      assert.deepEqual(result.customMetadata, legacyMetadata(serialized, expectedHash, schema));
+      assert.deepEqual(
+        staticArtifactCustomMetadata(serialized, expectedHash, schema),
+        legacyMetadata(serialized, expectedHash, schema),
+      );
+    }
+  }
+});
+
+test("assertNoForbiddenPublicKeys は従来と同じpathで最初の禁止keyを報告する", () => {
+  assert.doesNotThrow(() => assertNoForbiddenPublicKeys({ items: [{ id: 1 }, null, [2]] }));
+  assert.throws(
+    () => assertNoForbiddenPublicKeys({ items: [{ id: 1 }, { nested: { user_id: "u" } }] }),
+    { message: "Forbidden key root.items[1].nested.user_id" },
+  );
+  assert.throws(
+    () => assertNoForbiddenPublicKeys([{ ok: 1 }, { access_token: "t", user_id: "u" }]),
+    { message: "Forbidden key root[1].access_token" },
+  );
+  assert.throws(
+    () => assertNoForbiddenPublicKeys({ discord_id: { user_id: "u" } }, "payload"),
+    { message: "Forbidden key payload.discord_id" },
   );
 });

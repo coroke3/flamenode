@@ -19,17 +19,27 @@ const FORBIDDEN = new Set([
   "required_video_fields_json",
 ]);
 
-export function assertNoForbiddenPublicKeys(value: unknown, path = "root"): void {
-  if (value === null || value === undefined) return;
+/** 最初の禁止keyまでのpath（`[0].user_id` 形式）。通常の全走査ではpath文字列を作らない。 */
+function forbiddenKeyPath(value: unknown): string | null {
+  if (value === null || typeof value !== "object") return null;
   if (Array.isArray(value)) {
-    value.forEach((v, i) => assertNoForbiddenPublicKeys(v, `${path}[${i}]`));
-    return;
-  }
-  if (typeof value !== "object") return;
-  for (const [k, child] of Object.entries(value as Record<string, unknown>)) {
-    if (FORBIDDEN.has(k)) {
-      throw new Error(`Forbidden key ${path}.${k}`);
+    for (let i = 0; i < value.length; i++) {
+      if (!(i in value)) continue;
+      const found = forbiddenKeyPath(value[i]);
+      if (found !== null) return `[${i}]${found}`;
     }
-    assertNoForbiddenPublicKeys(child, `${path}.${k}`);
+    return null;
   }
+  const row = value as Record<string, unknown>;
+  for (const k of Object.keys(row)) {
+    if (FORBIDDEN.has(k)) return `.${k}`;
+    const found = forbiddenKeyPath(row[k]);
+    if (found !== null) return `.${k}${found}`;
+  }
+  return null;
+}
+
+export function assertNoForbiddenPublicKeys(value: unknown, path = "root"): void {
+  const found = forbiddenKeyPath(value);
+  if (found !== null) throw new Error(`Forbidden key ${path}${found}`);
 }
