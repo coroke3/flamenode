@@ -2,8 +2,8 @@ import {
   normalizeCount,
   normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeNullableString,
-  normalizePresentString as normalizeString,
 } from "./normalize.ts";
+import { normalizeStaticVideoCardBase } from "./staticVideoCardCore.ts";
 import type { StaticRecentVideo, StaticRecentVideoPage } from "./staticRecentVideoCore";
 
 export interface StaticPopularVideosPayload {
@@ -34,25 +34,12 @@ export function normalizeStaticPopularVideoPage(
 }
 
 function normalizeStaticPopularVideoRow(value: unknown): StaticRecentVideo | null {
-  if (!value || typeof value !== "object") return null;
+  const base = normalizeStaticVideoCardBase(value);
+  if (!base) return null;
   const row = value as Record<string, unknown>;
-  const id = normalizeString(row.id);
-  const title = normalizeString(row.title);
-  if (!id || !title) return null;
   return {
-    id,
-    title,
-    youtube_video_id: normalizeNullableString(row.youtube_video_id),
-    display_name:
-      normalizeString(row.display_name) ??
-      normalizeString(row.creator_display_name) ??
-      "unknown",
-    icon_url:
-      normalizeNullableString(row.icon_url) ??
-      normalizeNullableString(row.creator_icon_url),
-    primary_event_id: normalizeNullableString(row.primary_event_id),
+    ...base,
     primary_event_title: normalizeNullableString(row.primary_event_title),
-    scheduled_time: normalizeUnix(row.scheduled_time),
     status: "public",
     part: null,
   };

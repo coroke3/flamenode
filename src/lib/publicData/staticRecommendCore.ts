@@ -5,7 +5,7 @@ import {
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
-import { isPublicVideoListable } from "./visibility.ts";
+import { normalizePublicVideoCardList } from "./staticVideoCardCore.ts";
 
 export const RECOMMEND_CORE_OBJECT_KEY = "recommend/core.v1.json";
 export const RECOMMEND_CORE_SCHEMA_VERSION = 1 as const;
@@ -35,9 +35,9 @@ export function normalizeRecommendCore(value: unknown): StaticRecommendCoreData 
   if (generatedAt == null || generatedAt <= 0) return null;
   return {
     generatedAt,
-    recommended: normalizeVideoList(payload.recommended),
-    latest: normalizeVideoList(payload.latest),
-    underrated: normalizeVideoList(payload.underrated),
+    recommended: normalizePublicVideoCardList(payload.recommended),
+    latest: normalizePublicVideoCardList(payload.latest),
+    underrated: normalizePublicVideoCardList(payload.underrated),
   };
 }
 
@@ -78,9 +78,9 @@ export interface StaticRecommendViewModel {
 export function normalizeStaticRecommend(
   payload: StaticRecommendPayload,
 ): StaticRecommendPools | null {
-  const recommended = normalizeVideoList(payload.recommended);
-  const latest = normalizeVideoList(payload.latest);
-  const underrated = normalizeVideoList(payload.underrated);
+  const recommended = normalizePublicVideoCardList(payload.recommended);
+  const latest = normalizePublicVideoCardList(payload.latest);
+  const underrated = normalizePublicVideoCardList(payload.underrated);
   const creators = normalizeCreatorList(payload.creators);
   if (
     recommended.length === 0 &&
@@ -265,41 +265,6 @@ function buildRail(
     target,
     ...options,
   });
-}
-
-function normalizeVideoList(value: unknown): VideoCardData[] {
-  return Array.isArray(value)
-    ? value
-        .map(normalizeVideo)
-        .filter((row): row is VideoCardData => row !== null)
-    : [];
-}
-
-function normalizeVideo(value: unknown): VideoCardData | null {
-  if (!value || typeof value !== "object") return null;
-  const row = value as Record<string, unknown>;
-  const id = normalizeString(row.id);
-  const title = normalizeString(row.title);
-  if (!id || !title || !isPublicVideoListable(row.status ?? row.visibility_status)) {
-    return null;
-  }
-  return {
-    id,
-    title,
-    youtube_video_id: normalizeNullableString(row.youtube_video_id),
-    display_name:
-      normalizeString(row.display_name) ??
-      normalizeString(row.creator_display_name) ??
-      "unknown",
-    icon_url:
-      normalizeNullableString(row.icon_url) ??
-      normalizeNullableString(row.creator_icon_url),
-    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
-    primary_event_id: normalizeNullableString(row.primary_event_id),
-    scheduled_time: normalizeUnix(row.scheduled_time),
-    status: "public",
-    part: normalizeNullableString(row.part),
-  };
 }
 
 function normalizeCreatorList(value: unknown): StaticRecommendCreator[] {

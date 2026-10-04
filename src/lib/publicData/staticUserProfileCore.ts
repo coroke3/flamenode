@@ -1,11 +1,11 @@
 import type { VideoCardData } from "@/components/video/VideoCard";
-import { isPublicVideoListable } from "./visibility.ts";
 import {
   normalizeCount,
   normalizeNumericUnix as normalizeUnix,
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
+import { normalizePublicVideoCardList } from "./staticVideoCardCore.ts";
 
 export const STATIC_USER_WORKS_PAGE_SIZE = 24;
 export const STATIC_USER_COLLABS_PAGE_SIZE = 24;
@@ -146,43 +146,10 @@ function normalizeVideoSection(
 }
 
 function normalizeVideoList(value: unknown): VideoCardData[] {
-  if (!Array.isArray(value)) return [];
-
-  const normalized = value
-    .map(normalizeVideo)
-    .filter((video): video is VideoCardData => video !== null);
-
   const seen = new Set<string>();
-  return normalized.filter((video) => {
+  return normalizePublicVideoCardList(value).filter((video) => {
     if (seen.has(video.id)) return false;
     seen.add(video.id);
     return true;
   });
-}
-
-function normalizeVideo(value: unknown): VideoCardData | null {
-  if (!value || typeof value !== "object") return null;
-  const row = value as Record<string, unknown>;
-  const id = normalizeString(row.id);
-  const title = normalizeString(row.title);
-  if (!id || !title || !isPublicVideoListable(row.status ?? row.visibility_status)) {
-    return null;
-  }
-  return {
-    id,
-    title,
-    youtube_video_id: normalizeNullableString(row.youtube_video_id),
-    display_name:
-      normalizeString(row.display_name) ??
-      normalizeString(row.creator_display_name) ??
-      "unknown",
-    icon_url:
-      normalizeNullableString(row.icon_url) ??
-      normalizeNullableString(row.creator_icon_url),
-    creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
-    primary_event_id: normalizeNullableString(row.primary_event_id),
-    scheduled_time: normalizeUnix(row.scheduled_time),
-    status: "public",
-    part: normalizeNullableString(row.part),
-  };
 }
