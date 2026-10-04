@@ -18,7 +18,7 @@ const queueSource = await readFile(new URL("./queue.ts", import.meta.url), "utf8
 test("processStaticRebuildQueue は既定で reconcile し Recovery option のみ抑止する", () => {
   assert.match(queueSource, /staleQueueAlreadyReconciled\?: boolean/);
   assert.match(queueSource, /!options\.staleQueueAlreadyReconciled/);
-  assert.match(queueSource, /processStaticRebuildQueueImpl\(env, signal, options\)/);
+  assert.doesNotMatch(queueSource, /processStaticRebuildQueueImpl/);
 });
 
 test("static rebuild queue keeps one-at-a-time processing without Promise.all", () => {

@@ -148,26 +148,6 @@ export async function processStaticRebuildQueue(
   quota_stopped: boolean;
   hasMore: boolean;
 }> {
-  return processStaticRebuildQueueImpl(env, signal, options);
-}
-
-async function processStaticRebuildQueueImpl(
-  env: Env,
-  signal?: AbortSignal,
-  options: ProcessStaticRebuildQueueOptions = {},
-): Promise<{
-  processed: number;
-  failed: number;
-  skipped: number;
-  external_api_calls: number;
-  d1_changes: number;
-  d1_statements: number;
-  d1_rows_read: number;
-  d1_rows_written: number;
-  retry_count: number;
-  quota_stopped: boolean;
-  hasMore: boolean;
-}> {
   throwIfAborted(signal, "static rebuild queue aborted");
   const mode = await getOperationMode(env);
   throwIfAborted(signal, "static rebuild queue aborted");
