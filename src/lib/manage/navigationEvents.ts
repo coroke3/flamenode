@@ -110,29 +110,49 @@ function compareSidebarRows(
   return rightId < leftId ? -1 : rightId > leftId ? 1 : 0;
 }
 
+function pendingCountQuery(db: NonNullable<ReturnType<typeof getDatabase>>) {
+  return db
+    .select({
+      event_id: videoEvents.event_id,
+      c: sql<number>`COUNT(*)`,
+    })
+    .from(videos)
+    .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id));
+}
+
 async function loadPendingByEvent(
   db: NonNullable<ReturnType<typeof getDatabase>>,
   eventIds: readonly string[],
+  isAdmin: boolean,
 ): Promise<Map<string, number>> {
   const pendingByEvent = new Map<string, number>();
-  for (const chunk of chunkEventIds(eventIds)) {
-    const rows = await db
-      .select({
-        event_id: videoEvents.event_id,
-        c: sql<number>`COUNT(*)`,
-      })
-      .from(videos)
-      .innerJoin(videoEvents, eq(videoEvents.video_id, videos.id))
-      .where(
-        and(
-          inArray(videoEvents.event_id, chunk),
-          eq(videos.visibility_status, "pending"),
-        )!,
-      )
-      .groupBy(videoEvents.event_id);
+  const collect = (rows: { event_id: string; c: number }[]) => {
     for (const row of rows) {
       pendingByEvent.set(row.event_id, Number(row.c ?? 0));
     }
+  };
+  if (isAdmin) {
+    // Adminは全eventが対象なので event_id 条件は不要。pending videosから
+    // video_events PKを引く計画になり、全video_events走査（event毎の
+    // covering index scan + videos PK lookup）を避ける。
+    collect(
+      await pendingCountQuery(db)
+        .where(eq(videos.visibility_status, "pending"))
+        .groupBy(videoEvents.event_id),
+    );
+    return pendingByEvent;
+  }
+  for (const chunk of chunkEventIds(eventIds)) {
+    collect(
+      await pendingCountQuery(db)
+        .where(
+          and(
+            inArray(videoEvents.event_id, chunk),
+            eq(videos.visibility_status, "pending"),
+          )!,
+        )
+        .groupBy(videoEvents.event_id),
+    );
   }
   return pendingByEvent;
 }
@@ -158,7 +178,11 @@ async function loadManageNavigationSnapshot(
   const sidebarRows = [...rows].sort(compareSidebarRows);
   const dashboardRows = [...sidebarRows].sort(compareEventsByUpcomingPriority);
   const eventIds = sidebarRows.map((row) => row.id);
-  const pendingByEvent = await loadPendingByEvent(db, eventIds);
+  const pendingByEvent = await loadPendingByEvent(
+    db,
+    eventIds,
+    authorization.isAdmin,
+  );
   const toNavigationEvent = (row: ManageNavigationEventRow): ManageNavigationEvent => {
     // Do not expose created_at: it is only an ordering implementation detail.
     const { created_at: _createdAt, ...event } = row;
