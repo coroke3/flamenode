@@ -103,7 +103,7 @@ test("permission mutationは集合CAS guardとJSON1 bulk DMLを使う", () => {
   assert.match(body, /buildHiddenEditorCountGuardSql/);
   assert.match(body, /buildXUsersBulkInsertSql/);
   assert.match(body, /buildMemberPermissionBulkUpdateSql/);
-  assert.match(body, /buildHiddenMemberBulkInsertSql/);
+  assert.match(body, /buildVideoMemberBulkInsertSql\(insertHiddenRows\.map\(toVideoMemberSnapshotRow\)\)/);
   assert.match(body, /buildHiddenMemberBulkDeleteSql/);
   assert.match(body, /mutateWithAudit\(db, \{/);
 });

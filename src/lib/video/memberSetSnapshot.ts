@@ -125,17 +125,8 @@ export function parseVideoMemberSetSnapshot(
   return { id: value.id, rows: sortRows(rows) };
 }
 
-export function buildVideoMemberSetGuardSql(
-  videoId: string,
-  expectedRows: readonly VideoMemberSnapshotRow[],
-): SQL {
-  const expectedJson = JSON.stringify(sortRows(expectedRows));
-  return sql`
-    SELECT CASE
-      WHEN (
-        SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
-        FROM (
-          SELECT json_object(
+/** video_members 1 行を VideoMemberSnapshotRow と同じ key の JSON にする SQL 式。 */
+export const VIDEO_MEMBER_ROW_JSON_SQL = sql.raw(`json_object(
             'id', id,
             'video_id', video_id,
             'x_user_id', x_user_id,
@@ -148,7 +139,19 @@ export function buildVideoMemberSetGuardSql(
             'edit_granted_by_auth_user_id', edit_granted_by_auth_user_id,
             'edit_granted_at', edit_granted_at,
             'edit_updated_at', edit_updated_at
-          ) AS row_json
+          )`);
+
+export function buildVideoMemberSetGuardSql(
+  videoId: string,
+  expectedRows: readonly VideoMemberSnapshotRow[],
+): SQL {
+  const expectedJson = JSON.stringify(sortRows(expectedRows));
+  return sql`
+    SELECT CASE
+      WHEN (
+        SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
+        FROM (
+          SELECT ${VIDEO_MEMBER_ROW_JSON_SQL} AS row_json
           FROM video_members
           WHERE video_id = ${videoId}
             AND is_public_member = 1

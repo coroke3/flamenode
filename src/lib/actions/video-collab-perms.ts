@@ -26,7 +26,12 @@ import {
   MAX_VIDEO_HIDDEN_EDITORS,
   MAX_VIDEO_MEMBERS,
 } from "@/lib/video/atomicLimits";
-import { compareSqliteBinaryText } from "@/lib/video/memberSetSnapshot";
+import {
+  buildVideoMemberBulkInsertSql,
+  compareSqliteBinaryText,
+  toVideoMemberSnapshotRow,
+  VIDEO_MEMBER_ROW_JSON_SQL,
+} from "@/lib/video/memberSetSnapshot";
 import { generateId } from "@/lib/utils/id";
 import { isCanonicalXId, normalizeXId } from "@/lib/utils/xid";
 import { buildKnownRecipientNotificationBulkBatch } from "@/lib/notifications/enqueue";
@@ -313,23 +318,6 @@ async function canonicalizePermissionIntents(
   });
 }
 
-function permissionSnapshotRow(row: VideoMemberRow) {
-  return {
-    id: row.id,
-    video_id: row.video_id,
-    x_user_id: row.x_user_id,
-    name: row.name,
-    role: row.role,
-    comment: row.comment,
-    order_index: row.order_index,
-    can_edit: row.can_edit,
-    is_public_member: row.is_public_member,
-    edit_granted_by_auth_user_id: row.edit_granted_by_auth_user_id,
-    edit_granted_at: row.edit_granted_at,
-    edit_updated_at: row.edit_updated_at,
-  };
-}
-
 function sortPermissionRows(rows: readonly VideoMemberRow[]): VideoMemberRow[] {
   return [...rows].sort((left, right) => compareSqliteBinaryText(left.id, right.id));
 }
@@ -341,27 +329,14 @@ function buildPermissionSetGuardSql(
 ) {
   const xidsPayload = JSON.stringify([...xids].sort());
   const expectedPayload = JSON.stringify(
-    sortPermissionRows(expectedRows).map(permissionSnapshotRow),
+    sortPermissionRows(expectedRows).map(toVideoMemberSnapshotRow),
   );
   return sql`
     SELECT CASE
       WHEN (
         SELECT COALESCE(json_group_array(json(row_json)), json('[]'))
         FROM (
-          SELECT json_object(
-            'id', id,
-            'video_id', video_id,
-            'x_user_id', x_user_id,
-            'name', name,
-            'role', role,
-            'comment', comment,
-            'order_index', order_index,
-            'can_edit', can_edit,
-            'is_public_member', is_public_member,
-            'edit_granted_by_auth_user_id', edit_granted_by_auth_user_id,
-            'edit_granted_at', edit_granted_at,
-            'edit_updated_at', edit_updated_at
-          ) AS row_json
+          SELECT ${VIDEO_MEMBER_ROW_JSON_SQL} AS row_json
           FROM video_members
           WHERE video_id = ${videoId}
             AND x_user_id IS NOT NULL
@@ -423,7 +398,7 @@ function buildXUsersBulkInsertSql(rows: readonly (typeof xUsers.$inferInsert)[])
 }
 
 function buildMemberPermissionBulkUpdateSql(rows: readonly VideoMemberRow[]) {
-  const payload = JSON.stringify(rows.map(permissionSnapshotRow));
+  const payload = JSON.stringify(rows.map(toVideoMemberSnapshotRow));
   return sql`
     WITH patches AS (
       SELECT
@@ -447,40 +422,6 @@ function buildMemberPermissionBulkUpdateSql(rows: readonly VideoMemberRow[]) {
         SELECT edit_updated_at FROM patches WHERE patches.id = video_members.id
       )
     WHERE id IN (SELECT id FROM patches)
-  `;
-}
-
-function buildHiddenMemberBulkInsertSql(rows: readonly VideoMemberRow[]) {
-  const payload = JSON.stringify(rows.map(permissionSnapshotRow));
-  return sql`
-    INSERT INTO video_members (
-      id,
-      video_id,
-      x_user_id,
-      name,
-      role,
-      comment,
-      order_index,
-      can_edit,
-      is_public_member,
-      edit_granted_by_auth_user_id,
-      edit_granted_at,
-      edit_updated_at
-    )
-    SELECT
-      json_extract(value, '$.id'),
-      json_extract(value, '$.video_id'),
-      json_extract(value, '$.x_user_id'),
-      json_extract(value, '$.name'),
-      json_extract(value, '$.role'),
-      json_extract(value, '$.comment'),
-      json_extract(value, '$.order_index'),
-      json_extract(value, '$.can_edit'),
-      json_extract(value, '$.is_public_member'),
-      json_extract(value, '$.edit_granted_by_auth_user_id'),
-      json_extract(value, '$.edit_granted_at'),
-      json_extract(value, '$.edit_updated_at')
-    FROM json_each(${payload})
   `;
 }
 
@@ -825,7 +766,7 @@ async function applyPermissionIntentsToVideo(
     expected.push(updateRows.length);
   }
   if (insertHiddenRows.length > 0) {
-    statements.push(db.run(buildHiddenMemberBulkInsertSql(insertHiddenRows)));
+    statements.push(db.run(buildVideoMemberBulkInsertSql(insertHiddenRows.map(toVideoMemberSnapshotRow))));
     expected.push(insertHiddenRows.length);
   }
   if (deleteHiddenIds.length > 0) {
@@ -843,11 +784,11 @@ async function applyPermissionIntentsToVideo(
     operation: "MERGE",
     before: {
       id: video.id,
-      rows: sortPermissionRows(existingRows).map(permissionSnapshotRow),
+      rows: sortPermissionRows(existingRows).map(toVideoMemberSnapshotRow),
     },
     after: {
       id: video.id,
-      rows: sortPermissionRows([...afterById.values()]).map(permissionSnapshotRow),
+      rows: sortPermissionRows([...afterById.values()]).map(toVideoMemberSnapshotRow),
     },
     actor_user_id: actor.id,
     context: "video_collab_permissions",
