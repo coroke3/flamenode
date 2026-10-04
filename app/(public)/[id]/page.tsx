@@ -64,9 +64,15 @@ const EMPTY_RELATED_FALLBACK: readonly StaticRelatedVideo[] = [];
 
 export const revalidate = 30;
 
+// On-demand ISR: see app/(public)/event/[id]/page.tsx. The `?playlist=` query
+// only drives the viewer dock, which reads it in the browser, so the cached
+// HTML is the same for every query string.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
+
 interface Props {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ playlist?: string }>;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -103,10 +109,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function VideoDetailPage({
   params,
-  searchParams,
 }: Props): Promise<React.ReactElement> {
   const { id: rawId } = await params;
-  const { playlist = "" } = (await searchParams) ?? {};
 
   setPublicRequestRoute(`/${rawId}`);
 
@@ -141,7 +145,6 @@ export default async function VideoDetailPage({
       <StaticVideoDetailView
         detail={detail}
         rawId={rawId}
-        playlist={playlist}
         youtubePlaylistId={youtubePlaylistId}
         relatedSharedStatus="fresh"
         relatedBlockedIds={EMPTY_RELATED_BLOCKED_IDS}
@@ -194,7 +197,6 @@ function StaticVideoDetailView({
   detail,
   rawId,
   youtubePlaylistId = null,
-  playlist = "",
   relatedSharedStatus = "unavailable",
   relatedBlockedIds,
   relatedFallbackPool,
@@ -203,7 +205,6 @@ function StaticVideoDetailView({
   detail: StaticVideoDetail;
   rawId: string;
   youtubePlaylistId?: string | null;
-  playlist?: string;
   relatedSharedStatus?: "fresh" | "stale" | "unavailable";
   relatedBlockedIds?: ReadonlySet<string>;
   relatedFallbackPool?: readonly StaticRelatedVideo[];
@@ -580,7 +581,6 @@ function StaticVideoDetailView({
           <VideoViewerUtilityDock
             videoId={video.id}
             currentId={rawId}
-            playlistId={playlist || undefined}
             publicChapters={publicChapters}
             loginHref={loginHref}
             settingsHref={settingsHref}

@@ -267,7 +267,12 @@ export function notifyVideoViewerOverlayChanged(videoId: string): void {
 export function useVideoViewerOverlay(
   videoId: string,
   explicitPlaylist?: string,
-): { overlay: VideoViewerOverlayDto; loading: boolean; refresh: () => void } {
+): {
+  overlay: VideoViewerOverlayDto;
+  loading: boolean;
+  playlist: string;
+  refresh: () => void;
+} {
   const sourceKey = playlistSourceKey(videoId, explicitPlaylist);
   const [playlistState, setPlaylistState] = React.useState<ResolvedPlaylistState>(
     () =>
@@ -345,6 +350,7 @@ export function useVideoViewerOverlay(
     // private chapter / library playlist / interaction stateをfail-closedにする。
     overlay: overlayIsCurrent ? overlayState.value : emptyOverlay(),
     loading: loading || !overlayIsCurrent,
+    playlist,
     refresh: () => {
       invalidateVideoViewerOverlay(videoId);
       setNonce((value) => value + 1);

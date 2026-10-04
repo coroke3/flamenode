@@ -8,34 +8,22 @@ import {
 } from "@/lib/publicData/privateVideoChapterOverlay";
 import { useVideoViewerOverlay } from "@/lib/video/videoViewerOverlayClient";
 
-function normalizeRuntimePlaylistId(value: unknown): string | undefined {
-  const candidate = Array.isArray(value)
-    ? value.find((entry): entry is string => typeof entry === "string")
-    : value;
-  if (typeof candidate !== "string") return undefined;
-  const normalized = candidate.trim().slice(0, 128);
-  return normalized || undefined;
-}
-
 export function VideoViewerUtilityDock({
   videoId,
   currentId,
-  playlistId,
   publicChapters,
   loginHref,
   settingsHref,
 }: {
   videoId: string;
   currentId: string;
-  playlistId?: string;
   publicChapters: VideoChapterOverlayEntry[];
   loginHref: string;
   settingsHref: string;
 }): React.ReactElement {
-  // App Router searchParamsは重複queryで実行時にstring[]になり得る。
-  // Server Component側の型注釈だけを信用せず、client境界でもscalar化する。
-  const safePlaylistId = normalizeRuntimePlaylistId(playlistId);
-  const { overlay, loading } = useVideoViewerOverlay(videoId, safePlaylistId);
+  // The page is served from the ISR cache, so `?playlist=` is read in the
+  // browser (first value only) by the overlay hook rather than passed down.
+  const { overlay, loading, playlist } = useVideoViewerOverlay(videoId);
   const needsTermsAcceptance =
     overlay.loggedIn &&
     (!overlay.isTosAccepted || overlay.termsReacceptRequired);
@@ -55,7 +43,7 @@ export function VideoViewerUtilityDock({
     <VideoUtilityDock
       videoId={videoId}
       currentId={currentId}
-      playlistId={safePlaylistId}
+      playlistId={playlist || undefined}
       playlistLabel={overlay.playlistLabel}
       playlistItems={overlay.playlistItems}
       chapters={chapters}

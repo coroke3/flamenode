@@ -41,3 +41,11 @@ test("YoutubePlayer: iframe id・eager load・ready 後ポーリングを使う"
     /onVisibilityChange[\s\S]*?startYoutubePlayerListening[\s\S]*?requestYoutubeCurrentTime/,
   );
 });
+
+test("YoutubePlayer: originはmount後に読みhydrationをserver HTMLと一致させる", () => {
+  assert.match(
+    playerSource,
+    /React\.useState<string \| null>\(null\);\s*React\.useEffect\(\(\) => \{\s*setEmbedOrigin\(window\.location\.origin\);\s*\}, \[\]\);/,
+  );
+  assert.doesNotMatch(playerSource, /typeof window !== "undefined" \? window\.location\.origin/);
+});
