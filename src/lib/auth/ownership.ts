@@ -13,11 +13,11 @@ import type {
   VideoEditSectionKey,
 } from "./videoEditSections";
 import {
-  VIDEO_PERMISSION_ALIASES,
   decideCanEditVideo,
   resolveVideoOwnershipSync,
   decideCanEditVideoFromAccessContext,
   canUseEventPrivilegeFromAccessContext,
+  eventStaffCandidatePermissionKeys,
   resolveEventPermissionFromAccessContext,
   type VideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
@@ -438,12 +438,7 @@ export async function resolveVideoEditAccessContext(args: {
       );
     for (const row of rows) {
       const keys = eventPermissionKeysByEvent.get(row.event_id) ?? new Set<string>();
-      for (const key of resolveStaffPermissionKeys(row)) {
-        keys.add(key);
-        for (const [section, aliases] of Object.entries(VIDEO_PERMISSION_ALIASES)) {
-          if (aliases.includes(key)) keys.add(section);
-        }
-      }
+      for (const key of resolveStaffPermissionKeys(row)) keys.add(key);
       eventPermissionKeysByEvent.set(row.event_id, keys);
     }
   }
@@ -483,13 +478,7 @@ export async function resolveEventStaffVideoPermissionGrant(args: {
   const eventIds = await loadVideoEventIdsForAccessContext(args.db, args.video);
   if (eventIds.length === 0) return { allowed: false };
 
-  const aliases = VIDEO_PERMISSION_ALIASES[args.requiredKey] ?? [
-    args.requiredKey,
-  ];
-  const candidateKeys = new Set<string>();
-  for (const alias of aliases) {
-    for (const key of expandPermissionAliases(alias)) candidateKeys.add(key);
-  }
+  const candidateKeys = eventStaffCandidatePermissionKeys(args.requiredKey);
   if (candidateKeys.size === 0) return { allowed: false };
 
   const rows = await args.db
