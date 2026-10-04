@@ -230,7 +230,10 @@ export function capStaticListTotal(counted: number, items: readonly unknown[]): 
 }
 
 function assertStaticListObjectSize(key: string, body: unknown): void {
-  const byteLength = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+  const serialized = JSON.stringify(body);
+  // UTF-8 uses at most 3 bytes per UTF-16 code unit, so small bodies need no encode.
+  if (serialized.length * 3 <= STATIC_LIST_MAX_OBJECT_BYTES) return;
+  const byteLength = new TextEncoder().encode(serialized).byteLength;
   if (byteLength > STATIC_LIST_MAX_OBJECT_BYTES) {
     throw new Error(
       `${key} exceeds size limit (${byteLength} > ${STATIC_LIST_MAX_OBJECT_BYTES} bytes)`,

@@ -104,6 +104,8 @@ function normalizeMinGramLength(value: number | undefined): number {
 
 function gramsForText(value: string, minGramLength: number): string[] {
   const chars = [...normalizeStaticSearchQuery(value)];
+  // A gram is whitespace-only exactly when every code point in it is.
+  const hasText = chars.map((char) => /\S/u.test(char));
   const grams = new Set<string>();
   for (
     let length = minGramLength;
@@ -111,11 +113,16 @@ function gramsForText(value: string, minGramLength: number): string[] {
     length += 1
   ) {
     for (let index = 0; index + length <= chars.length; index += 1) {
-      const gram = chars.slice(index, index + length).join("");
       // Whitespace-only grams cannot be produced by a trimmed query and only
       // create unreachable posting shards. Keep internal/boundary whitespace
       // (for phrase queries), but omit these empty search tokens.
-      if (/\S/u.test(gram)) grams.add(gram);
+      let gram = "";
+      let text = false;
+      for (let offset = index; offset < index + length; offset += 1) {
+        gram += chars[offset];
+        text ||= hasText[offset];
+      }
+      if (text) grams.add(gram);
     }
   }
   return [...grams];
@@ -202,6 +209,10 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
     { length: STATIC_SEARCH_POSTINGS_BUCKET_COUNT },
     () => new Map<string, StaticSearchPostingDirectoryEntry>(),
   );
+  /** Item count of each bucket's last page, kept instead of re-summing it per gram. */
+  const lastPageItemCounts = new Array<number>(
+    STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
+  ).fill(0);
 
   for (const gram of [...byGram.keys()].sort((a, b) => a.localeCompare(b))) {
     const bucket = staticSearchPostingBucket(gram);
@@ -219,18 +230,16 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
         offset + STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS,
       );
       let currentPage = pageRecords.at(-1);
-      const currentSize =
-        currentPage?.reduce(
-          (count, record) => count + record.items.length,
-          0,
-        ) ?? 0;
       if (
         !currentPage ||
-        currentSize + items.length > STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS
+        lastPageItemCounts[bucket] + items.length >
+          STATIC_SEARCH_POSTINGS_MAX_PAGE_ITEMS
       ) {
         currentPage = [];
         pageRecords.push(currentPage);
+        lastPageItemCounts[bucket] = 0;
       }
+      lastPageItemCounts[bucket] += items.length;
       currentPage.push({
         gram,
         part,
