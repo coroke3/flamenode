@@ -63,3 +63,9 @@ test("anonymous and hidden slots keep viewer-only fields opaque until overlay", 
   assert.match(hiddenBranch, /x_user_id: null/);
   assert.match(page, /EventSlotsViewerPanel/);
 });
+
+test("slot grid reads the clock only after mount so cached (ISR) HTML hydrates cleanly", () => {
+  assert.match(grid, /function useCurrentTimestamp\(\): number \| null \{\s*const \[now, setNow\] = React\.useState<number \| null>\(null\);/);
+  assert.doesNotMatch(grid, /useState<number>\(\(\) => Math\.floor\(Date\.now\(\)/);
+  assert.match(grid, /currentTimestamp == null \|\|/);
+});

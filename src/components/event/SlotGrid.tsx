@@ -162,12 +162,16 @@ function ReservedXId({
   }
   return <span className={styles.slotReservedX}>@{reservedXId}</span>;
 }
-function useCurrentTimestamp(): number {
-  const [now, setNow] = React.useState<number>(() => Math.floor(Date.now() / 1000));
+// The public slots page is served from the ISR cache, so its HTML can be
+// rendered well before the viewer's clock. Read the clock only after mount so
+// hydration never compares two different "now" values; the live marker
+// appears right after hydration.
+function useCurrentTimestamp(): number | null {
+  const [now, setNow] = React.useState<number | null>(null);
   React.useEffect(() => {
-    const timer = setInterval(() => {
-      setNow(Math.floor(Date.now() / 1000));
-    }, 30000);
+    const tick = () => setNow(Math.floor(Date.now() / 1000));
+    tick();
+    const timer = setInterval(tick, 30000);
     return () => clearInterval(timer);
   }, []);
   return now;
@@ -282,6 +286,7 @@ export function SlotGrid({
   );
   const currentTimeMarker = React.useMemo(() => {
     if (
+      currentTimestamp == null ||
       slotType !== "time" ||
       slotIntervalSec == null ||
       !Number.isFinite(slotIntervalSec) ||
