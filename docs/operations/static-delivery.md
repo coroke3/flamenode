@@ -374,6 +374,8 @@ enqueue できない場合に「一時的に表示できません」を表示し
 
 公開 `GET /api/videos`（`q` / `sort` / `event` / `page` / `limit`≤48）は `/list` と同じ loader（event 指定は `loadPublicEventVideosPage`、`q` は `loadStaticSearchVideosPage`、`sort=score` は `loadStaticPopularVideosPage`、それ以外は `loadStaticRecentVideosPage`）だけを読み、D1 を直接読まない。レスポンスは従来どおり `{ items, total, page, limit }`（明示 DTO）。`q` は trim 後100文字、文字・数字2文字未満は投影を読まず `items: []` / `total: 0` の200、`page` は 5000 件投影上限（`ceil(5000 / limit)`）に丸める。投影欠損・再構築中・loader 例外は空配列200ではなく 503（`static_list_unavailable` / `database_unavailable`）。検索は postings-v1 / `search-index-lite.json` の部分一致（title・表示名・creator X ID/名・YouTube ID・作品 ID）で、旧 D1 `LIKE`（楽曲・クレジット・コメント・章・メンバー等）より対象列が狭い。
 
+postings-v1 の候補走査では検索語を trim/lower した値と空の creator-name map を再利用し、候補ごとの正規化・Map生成を避ける。部分一致の対象列と検索結果は変えない。
+
 ## スコア再計算とランキング再生成
 
 Video global projections share the internal materialized source at

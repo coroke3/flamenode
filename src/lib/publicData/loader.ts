@@ -84,7 +84,7 @@ import {
   normalizeStaticVideoSearchPostingDirectory,
   normalizeStaticVideoSearchPostingManifest,
   normalizeStaticVideoSearchPostingPage,
-  staticSearchVideoMatchesQuery,
+  staticSearchVideoMatchesNormalizedQuery,
   staticVideoSearchPostingManifestObjectKey,
   staticVideoSearchPostingDirectoryObjectKey,
   staticVideoSearchPostingPageObjectKey,
@@ -1201,7 +1201,7 @@ async function loadStaticVideoPostingPage(params: {
   }
   notePublicSearchBackend("postings-v1");
 
-  const query = params.q.trim().toLocaleLowerCase();
+  const query = params.q.trim().toLowerCase();
   const grams = staticSearchQueryGrams(query);
   if (grams.length === 0) return null;
   const directories = new Map<number, StaticSearchPostingDirectory>();
@@ -1297,7 +1297,7 @@ async function loadStaticVideoPostingPage(params: {
   }
   recordPublicSearchCandidates(candidates.size);
   const filtered = [...candidates.values()].filter((video) =>
-    staticSearchVideoMatchesQuery(video, query),
+    staticSearchVideoMatchesNormalizedQuery(video, query),
   );
   const ordered = params.sort === "old" ? [...filtered].reverse() : filtered;
   const total = ordered.length;

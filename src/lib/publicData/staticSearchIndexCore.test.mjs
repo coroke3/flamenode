@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { searchStaticIndexVideos } from "./staticSearchIndexCore.ts";
+import {
+  normalizeSearchVideo,
+  searchStaticIndexVideos,
+  staticSearchVideoMatchesNormalizedQuery,
+  staticSearchVideoMatchesQuery,
+} from "./staticSearchIndexCore.ts";
 import {
   buildStaticVideoSearchPostingArtifacts,
   normalizeStaticVideoSearchPostingManifest,
@@ -90,6 +95,44 @@ test("legacy search checks every public video field and registered creator name"
     assert.equal(page?.total, 1, `query should match: ${query}`);
     assert.equal(page?.videos[0]?.id, "video_unique");
   }
+});
+
+test("normalized posting matcher keeps the same field matching semantics", () => {
+  const video = normalizeSearchVideo({
+    id: "video_unique",
+    title: "Ordinary title",
+    creator_display_name: "Display Unique",
+    creator_x_user_id: "Creator_Handle",
+    creator_x_user_name: "Embedded Alias",
+    youtube_video_id: "YTUnique",
+  });
+  assert.ok(video);
+  const userNames = new Map([["creator_handle", "Registered Alias"]]);
+  for (const query of [
+    "ORDINARY",
+    "display unique",
+    "CREATOR_HANDLE",
+    "YTUNIQUE",
+    "VIDEO_UNIQUE",
+    "registered alias",
+    "EMBEDDED ALIAS",
+  ]) {
+    const expected = staticSearchVideoMatchesQuery(video, query, userNames);
+    assert.equal(
+      staticSearchVideoMatchesNormalizedQuery(
+        video,
+        query.trim().toLowerCase(),
+        userNames,
+      ),
+      expected,
+      `normalized matcher should preserve query: ${query}`,
+    );
+  }
+  assert.equal(
+    staticSearchVideoMatchesNormalizedQuery(video, "embedded alias"),
+    true,
+    "the shared default empty map still checks embedded creator aliases",
+  );
 });
 
 test("video search posting はタイトル・X ID・日本語名を候補化し、世代を固定する", () => {

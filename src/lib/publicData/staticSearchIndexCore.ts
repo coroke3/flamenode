@@ -65,9 +65,11 @@ function normalizeUserNameMap(value: unknown): Map<string, string> {
   return result;
 }
 
+const EMPTY_SEARCH_USER_NAMES: ReadonlyMap<string, string> = new Map();
+
 function matchesQuery(
   video: StaticSearchIndexVideo,
-  userNames: Map<string, string>,
+  userNames: ReadonlyMap<string, string>,
   query: string,
 ): boolean {
   if (
@@ -90,9 +92,22 @@ function matchesQuery(
 export function staticSearchVideoMatchesQuery(
   video: StaticSearchIndexVideo,
   query: string,
-  userNames = new Map<string, string>(),
+  userNames: ReadonlyMap<string, string> = EMPTY_SEARCH_USER_NAMES,
 ): boolean {
-  return matchesQuery(video, userNames, query.trim().toLowerCase());
+  return staticSearchVideoMatchesNormalizedQuery(
+    video,
+    query.trim().toLowerCase(),
+    userNames,
+  );
+}
+
+/** Match against a query already normalized with trim().toLowerCase(). */
+export function staticSearchVideoMatchesNormalizedQuery(
+  video: StaticSearchIndexVideo,
+  normalizedQuery: string,
+  userNames: ReadonlyMap<string, string> = EMPTY_SEARCH_USER_NAMES,
+): boolean {
+  return matchesQuery(video, userNames, normalizedQuery);
 }
 
 export function toListVideo(video: StaticSearchIndexVideo): StaticRecentVideo {

@@ -254,6 +254,19 @@ test("list/search/top loaders no longer read a D1 projection on miss", () => {
   assert.doesNotMatch(loaderSource, /fetchDegradedEventsIndexPayload/);
 });
 
+test("posting search reuses the normalized query for candidate matching", () => {
+  const postingBlock = loaderSource.slice(
+    loaderSource.indexOf("async function loadStaticVideoPostingPage"),
+    loaderSource.indexOf("export async function loadStaticSearchVideosPage"),
+  );
+  assert.match(postingBlock, /const query = params\.q\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(
+    postingBlock,
+    /staticSearchVideoMatchesNormalizedQuery\(video, query\)/,
+  );
+  assert.doesNotMatch(postingBlock, /staticSearchVideoMatchesQuery\(/);
+});
+
 test("list loaders support old sort via recent payload ordering", () => {
   assert.match(loaderSource, /sortRecentPayloadForList/);
   assert.match(loaderSource, /sort\?: "new" \| "old" \| "score"/);
