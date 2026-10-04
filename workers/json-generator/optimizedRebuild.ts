@@ -188,16 +188,17 @@ function scoreAsc(left: RankingPoolRow, right: RankingPoolRow): number {
   return left.score - right.score || scheduledDesc(left, right);
 }
 
+// The list artifacts hold up to 5,000 rows and are parsed on every isolate
+// cache miss, so they omit `creator_display_name` / `creator_icon_url`: both
+// equal `display_name` / `icon_url`, and every reader falls back to them.
 function listProjection(row: RankingPoolRow): Record<string, unknown> {
   return {
     id: row.id,
     title: row.title,
     youtube_video_id: row.youtube_video_id,
     display_name: row.display_name,
-    creator_display_name: row.creator_display_name,
     creator_x_user_id: row.creator_x_user_id,
     icon_url: row.icon_url,
-    creator_icon_url: row.creator_icon_url,
     primary_event_id: row.primary_event_id,
     primary_event_title: row.primary_event_title,
     scheduled_time: row.scheduled_time,

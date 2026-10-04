@@ -398,7 +398,12 @@ test("public static JSON queries exclude private event relations", () => {
   );
   assert.match(
     source,
-    /e\.id AS primary_event_id[\s\S]*LEFT JOIN events e[\s\S]*e\.visibility_status = 'public'/,
+    /e\.id AS primary_event_id[\s\S]*LEFT JOIN events AS e[\s\S]*e\.visibility_status = 'public'/,
+  );
+  // Recent and popular share the public-event-only join.
+  assert.equal(
+    (source.match(/\$\{STATIC_LIST_VIDEO_FROM\}/g) ?? []).length,
+    2,
   );
   assert.match(
     source,

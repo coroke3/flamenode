@@ -180,12 +180,18 @@ test("public static artifacts exclude private event identifiers and titles", asy
     const recent = objects.get("list/recent.json").items[0];
     assert.equal(recent.primary_event_id, null);
     assert.equal(recent.primary_event_title, null);
+    // The 5,000-row list artifacts carry each creator field once.
+    assert.equal(recent.display_name, "Creator");
+    assert.equal("creator_display_name" in recent, false);
+    assert.equal("creator_icon_url" in recent, false);
 
     await rebuildTarget(env, "list_popular", "global");
     const popular = objects.get("list/popular.json");
     assert.equal(popular.total, 1);
     assert.equal(popular.items[0].creator_x_user_id, "creator");
     assert.equal(popular.items[0].status, "public");
+    assert.equal("creator_display_name" in popular.items[0], false);
+    assert.equal("creator_icon_url" in popular.items[0], false);
     assert.equal(popular.items[0].primary_event_id, null);
 
     await rebuildTarget(env, "event_base", "public-event");
