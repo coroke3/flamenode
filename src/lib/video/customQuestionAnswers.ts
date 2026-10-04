@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, not, or } from "drizzle-orm";
+import { and, asc, eq, inArray, not } from "drizzle-orm";
 import type { getDatabase } from "@/lib/cloudflare";
 import {
   eventCustomQuestions,
@@ -13,11 +13,10 @@ import {
 import { customQuestionToDraft, type EventGeneralCustomQuestionDraft } from "@/lib/event/generalCustomQuestionDraft";
 import { stagePermissionQuestionKeyCondition } from "./stagePermissionAnswers";
 import {
-  compositeAuditTargetId,
   emptyVideoAtomicWritePlan,
   type VideoAtomicWritePlan,
 } from "@/lib/video/atomicWritePlan";
-import { expectedRowCondition } from "@/lib/audit/adapters";
+import { buildVideoCustomAnswerReplacePlan } from "./customAnswerReplacePlan";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
 /** イベントごとの業務上限。複数イベントをまとめて読むためグローバル上限にしない。 */
 export const MAX_VIDEO_CUSTOM_QUESTIONS_READ = 18;
@@ -131,43 +130,12 @@ export async function buildReplaceGeneralCustomAnswersPlan(
       updated_at: args.now,
     });
   }
-  const plan = emptyVideoAtomicWritePlan();
-  if (existing.length > 0) {
-    plan.statements.push(db.delete(videoCustomAnswers).where(or(...existing.map((row) => and(
-      eq(videoCustomAnswers.video_id, row.video_id),
-      eq(videoCustomAnswers.event_id, row.event_id),
-      eq(videoCustomAnswers.question_id, row.question_id),
-      expectedRowCondition({ expectedCurrent: row }),
-    )!))!));
-    plan.expectedChanges.push(existing.length);
-    plan.audits.push(...existing.map((row) => ({
-      table_name: "video_custom_answers",
-      target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
-      operation: "DELETE" as const,
-      before: { ...row },
-      after: null,
-      actor_user_id: args.actorUserId,
-      context: "video-save:custom-answers",
-      retention_class: "normal" as const,
-      strict: true,
-    })));
-  }
-  if (next.length > 0) {
-    plan.statements.push(db.insert(videoCustomAnswers).values(next));
-    plan.expectedChanges.push(next.length);
-    plan.audits.push(...next.map((row) => ({
-      table_name: "video_custom_answers",
-      target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
-      operation: "CREATE" as const,
-      before: null,
-      after: { ...row },
-      actor_user_id: args.actorUserId,
-      context: "video-save:custom-answers",
-      retention_class: "normal" as const,
-      strict: true,
-    })));
-  }
-  return plan;
+  return buildVideoCustomAnswerReplacePlan(db, {
+    existing,
+    inserted: next,
+    actorUserId: args.actorUserId,
+    context: "video-save:custom-answers",
+  });
 }
 
 export async function fetchActiveCustomQuestionsForEvents(
