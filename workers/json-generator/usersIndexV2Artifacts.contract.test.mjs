@@ -100,7 +100,7 @@ test("R2 HEAD/GET中のabortをcleanup/rebuild継続へ握り潰さない", () =
 
 test("v2生成失敗はmanifest無効化に成功した場合だけlegacy fallback成功扱いにする", () => {
   assert.match(source, /invalidateUsersIndexV2Manifest/);
-  assert.match(source, /env\.R2\.delete\(USERS_INDEX_V2_MANIFEST_OBJECT_KEY\)/);
+  assert.match(source, /deleteStaticArtifacts\([\s\S]*?\[USERS_INDEX_V2_MANIFEST_OBJECT_KEY\]/);
   assert.match(source, /result: "legacy_fallback"/);
   assert.match(source, /result: "manifest_invalidation_failed"/);
   assert.match(source, /throw error/);

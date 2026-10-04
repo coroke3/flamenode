@@ -29,6 +29,7 @@ const [
   memberSuggestionsV2ArtifactsSource,
   legacyPreviewStoreSource,
   videoDetailQueriesSource,
+  staticArtifactTrackingSource,
 ] = await Promise.all([
   read("middleware.ts"),
   read("src/lib/event/eventIdReuse.ts"),
@@ -52,6 +53,7 @@ const [
   read("workers/json-generator/memberSuggestionsV2Artifacts.ts"),
   read(["src", "lib", "import", "legacy", "previewStore.ts"].join("/")),
   read("src/lib/db/videoDetailQueries.ts"),
+  read("workers/json-generator/staticArtifactTracking.ts"),
 ]);
 
 test("middlewareはrequest context由来Promiseをisolate globalへ保持しない", () => {
@@ -210,6 +212,10 @@ test("legacy rebuildは共通R2 wrapperでoversizeとGET直後abortを遮断す�
   );
   assert.match(
     optimizedRebuildSource,
+    /deleteStaticArtifacts\(\s*env,\s*\{ targetType: "event_playlist", targetId: eventId \}/,
+  );
+  assert.match(
+    staticArtifactTrackingSource,
     /UPDATE static_artifacts\s+SET deleted_at = \?/,
   );
 });
