@@ -36,6 +36,7 @@ import {
 } from "../../src/lib/publicData/staticUsersIndexV2Core.ts";
 import { STATIC_SEARCH_POSTINGS_BUCKET_COUNT } from "../../src/lib/publicData/staticSearchPostingsCore.ts";
 import { abortGuard } from "../shared/abort.ts";
+import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
 
 const USERS_INDEX_V2_ARTIFACT_TARGET_TYPE = "users_index_v2";
 const USERS_INDEX_V2_ARTIFACT_TARGET_ID = "global";
@@ -133,54 +134,16 @@ async function recordArtifacts(
   artifacts: readonly PendingArtifact[],
   signal?: RebuildSignal,
 ): Promise<void> {
-  const now = Math.floor(Date.now() / 1000);
-  for (
-    let offset = 0;
-    offset < artifacts.length;
-    offset += USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE
-  ) {
-    throwIfAborted(signal);
-    const chunk = artifacts.slice(
-      offset,
-      offset + USERS_INDEX_V2_ARTIFACT_RECORD_CHUNK_SIZE,
-    );
-    const artifactJson = JSON.stringify(chunk);
-    await env.DB.prepare(
-      `WITH artifacts AS (
-         SELECT
-           json_extract(value, '$.objectKey') AS object_key,
-           json_extract(value, '$.contentHash') AS content_hash
-         FROM json_each(?1)
-       )
-       INSERT INTO static_artifacts
-         (id, target_type, target_id, object_key, content_hash, schema_version,
-          source_updated_at, generated_at, deleted_at)
-       SELECT
-         'sta:users_index_v2:global:' || artifacts.object_key,
-         'users_index_v2',
-         'global',
-         artifacts.object_key,
-         artifacts.content_hash,
-         ${USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION},
-         NULL,
-         ?2,
-         NULL
-       FROM artifacts
-       WHERE artifacts.object_key IS NOT NULL
-       ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
-         content_hash = excluded.content_hash,
-         schema_version = excluded.schema_version,
-         source_updated_at = NULL,
-         generated_at = excluded.generated_at,
-         deleted_at = NULL`,
-    )
-      .bind(artifactJson, now)
-      .run();
-    for (const artifact of chunk) {
-      env.artifactHashCache?.set(artifact.objectKey, artifact.contentHash);
-    }
-    throwIfAborted(signal);
-  }
+  await recordStaticArtifacts(
+    env,
+    {
+      targetType: "users_index_v2",
+      targetId: "global",
+      schemaVersion: USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION,
+    },
+    artifacts,
+    signal,
+  );
 }
 
 type ManifestGenerationState =

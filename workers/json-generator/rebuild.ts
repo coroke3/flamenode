@@ -145,6 +145,7 @@ import {
   type PublicVisibilityFenceEntityType,
 } from "../shared/publicVisibilityManifest.ts";
 import { abortGuard } from "../shared/abort.ts";
+import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
@@ -503,7 +504,14 @@ async function putJson(
     deduplicate: true,
   });
   throwIfAborted(signal);
-  if (target) await recordArtifact(env, target, key, contentHash, signal);
+  if (target) {
+    await recordStaticArtifacts(
+      env,
+      { ...target, schemaVersion: STATIC_ARTIFACT_SCHEMA_VERSION },
+      [{ objectKey: key, contentHash }],
+      signal,
+    );
+  }
 }
 
 type PendingStaticArtifact = { objectKey: string; contentHash: string };
@@ -523,89 +531,6 @@ async function putJsonUntracked(
   });
   throwIfAborted(signal);
   return { objectKey: key, contentHash };
-}
-
-async function recordArtifactsBatch(
-  env: Env,
-  target: ArtifactTarget,
-  artifacts: readonly PendingStaticArtifact[],
-  signal?: RebuildSignal,
-): Promise<void> {
-  const chunkSize = 500;
-  const now = Math.floor(Date.now() / 1000);
-  for (let offset = 0; offset < artifacts.length; offset += chunkSize) {
-    throwIfAborted(signal);
-    const chunk = artifacts.slice(offset, offset + chunkSize);
-    await env.DB.prepare(
-      `WITH artifacts AS (
-         SELECT
-           json_extract(value, '$.objectKey') AS object_key,
-           json_extract(value, '$.contentHash') AS content_hash
-         FROM json_each(?)
-       )
-       INSERT INTO static_artifacts
-         (id, target_type, target_id, object_key, content_hash, schema_version,
-          source_updated_at, generated_at, deleted_at)
-       SELECT
-         'sta:' || ? || ':' || ? || ':' || artifacts.object_key,
-         ?, ?, artifacts.object_key, artifacts.content_hash, ?, ?, ?, NULL
-       FROM artifacts
-       WHERE artifacts.object_key IS NOT NULL
-       ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
-         content_hash = excluded.content_hash,
-         schema_version = excluded.schema_version,
-         source_updated_at = excluded.source_updated_at,
-         generated_at = excluded.generated_at,
-         deleted_at = NULL`,
-    )
-      .bind(
-        JSON.stringify(chunk),
-        target.targetType,
-        target.targetId,
-        target.targetType,
-        target.targetId,
-        STATIC_ARTIFACT_SCHEMA_VERSION,
-        target.sourceUpdatedAt ?? null,
-        now,
-      )
-      .run();
-    throwIfAborted(signal);
-  }
-}
-
-async function recordArtifact(
-  env: Env,
-  target: ArtifactTarget,
-  objectKey: string,
-  contentHash: string,
-  signal?: RebuildSignal,
-): Promise<void> {
-  throwIfAborted(signal);
-  const now = Math.floor(Date.now() / 1000);
-  const id = `sta:${target.targetType}:${target.targetId}:${objectKey}`;
-  await env.DB.prepare(
-    `INSERT INTO static_artifacts
-       (id, target_type, target_id, object_key, content_hash, schema_version,
-        source_updated_at, generated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-     ON CONFLICT(target_type, target_id, object_key) DO UPDATE SET
-       content_hash = excluded.content_hash,
-       schema_version = excluded.schema_version,
-       source_updated_at = excluded.source_updated_at,
-       generated_at = excluded.generated_at,
-       deleted_at = NULL`,
-  ).bind(
-    id,
-    target.targetType,
-    target.targetId,
-    objectKey,
-    contentHash,
-    STATIC_ARTIFACT_SCHEMA_VERSION,
-    target.sourceUpdatedAt ?? null,
-    now,
-  ).run();
-  env.artifactHashCache?.set(objectKey, contentHash);
-  throwIfAborted(signal);
 }
 
 export async function removeTrackedArtifacts(
@@ -1736,9 +1661,13 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     throw error;
   }
   try {
-    await recordArtifactsBatch(
+    await recordStaticArtifacts(
       env,
-      { targetType: "search_index", targetId: "global" },
+      {
+        targetType: "search_index",
+        targetId: "global",
+        schemaVersion: STATIC_ARTIFACT_SCHEMA_VERSION,
+      },
       pendingPostingArtifacts,
       signal,
     );
