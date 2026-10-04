@@ -145,7 +145,11 @@ import {
   type PublicVisibilityFenceEntityType,
 } from "../shared/publicVisibilityManifest.ts";
 import { abortGuard } from "../shared/abort.ts";
-import { deleteStaticArtifacts, recordStaticArtifacts } from "./staticArtifactTracking.ts";
+import {
+  deleteStaticArtifacts,
+  recordStaticArtifacts,
+  reconcileStaticArtifacts,
+} from "./staticArtifactTracking.ts";
 
 export const TOP_NOSTALGIC_SHUFFLE_DAY_KV_KEY = "static:top_nostalgic_shuffle_day";
 
@@ -478,7 +482,7 @@ export async function rebuildTarget(
       random_video_pool: RANDOM_VIDEO_POOL_OBJECT_KEY,
     };
     const objectKeys = keys[targetType];
-    await reconcileTrackedArtifacts(
+    await reconcileStaticArtifacts(
       env,
       { targetType, targetId: "global" },
       Array.isArray(objectKeys) ? objectKeys : [objectKeys],
@@ -549,42 +553,6 @@ export async function removeTrackedArtifacts(
   const objectKeys = (rows.results ?? []).map((row) => row.object_key);
   await deleteStaticArtifacts(env, { targetType, targetId }, objectKeys, signal);
   return objectKeys.length;
-}
-
-// Keep the existing cleanup order and bounded batch size. The partial cleanup
-// index covers this ordering, while the JSON1 live-key list is non-correlated.
-export const STATIC_ARTIFACT_RECONCILIATION_SQL = `
-  SELECT object_key FROM static_artifacts
-  WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
-    AND object_key NOT IN (
-      SELECT CAST(value AS TEXT)
-      FROM json_each(?)
-      WHERE value IS NOT NULL
-    )
-  ORDER BY generated_at ASC
-  LIMIT ?
-`;
-
-async function reconcileTrackedArtifacts(
-  env: Env,
-  target: ArtifactTarget,
-  liveKeys: readonly string[],
-  limit = 20,
-  signal?: RebuildSignal,
-): Promise<void> {
-  throwIfAborted(signal);
-  const rows = await env.DB.prepare(STATIC_ARTIFACT_RECONCILIATION_SQL).bind(
-    target.targetType,
-    target.targetId,
-    JSON.stringify(liveKeys),
-    limit,
-  ).all<ArtifactRow>();
-  await deleteStaticArtifacts(
-    env,
-    target,
-    (rows.results ?? []).map((row) => row.object_key),
-    signal,
-  );
 }
 
 async function loadActivePublicEventItemsForTopHero(
@@ -1556,7 +1524,7 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
       const manifestSettled =
         Math.floor(Date.now() / 1000) - currentManifest.generatedAt >
         2 * PUBLIC_JSON_CACHE_TTL_SEC.searchIndex;
-      await reconcileTrackedArtifacts(
+      await reconcileStaticArtifacts(
         env,
         { targetType: "search_index", targetId: "global" },
         liveKeys,
@@ -1664,7 +1632,7 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     signal,
   );
   liveKeys.push(manifestKey);
-  await reconcileTrackedArtifacts(
+  await reconcileStaticArtifacts(
     env,
     { targetType: "search_index", targetId: "global" },
     liveKeys,
@@ -2173,7 +2141,7 @@ async function rebuildEventBase(
     },
     signal,
   );
-  await reconcileTrackedArtifacts(
+  await reconcileStaticArtifacts(
     env,
     { targetType: "event_base", targetId: eventId },
     [objectKey],
@@ -2226,7 +2194,7 @@ async function rebuildEventSlots(
     },
     signal,
   );
-  await reconcileTrackedArtifacts(
+  await reconcileStaticArtifacts(
     env,
     { targetType: "event_slots", targetId: eventId },
     [objectKey],
@@ -2367,7 +2335,7 @@ async function rebuildEventRelease(
     },
     signal,
   );
-  await reconcileTrackedArtifacts(
+  await reconcileStaticArtifacts(
     env,
     { targetType: "event_release", targetId: eventId },
     [eventReleaseObjectKey(eventId)],
@@ -2468,7 +2436,7 @@ async function rebuildEvent(
     },
     signal,
   );
-  await reconcileTrackedArtifacts(
+  await reconcileStaticArtifacts(
     env,
     { targetType: "event", targetId: eventId },
     [`events/${eventId}.json`],
@@ -3236,7 +3204,7 @@ async function rebuildVideo(
       signal,
     );
   }
-  await reconcileTrackedArtifacts(env, videoTarget, [
+  await reconcileStaticArtifacts(env, videoTarget, [
     `videos/${internalVideoId}.json`,
     ...(youtubeVideoId && youtubeVideoId !== internalVideoId ? [`videos/${youtubeVideoId}.json`] : []),
   ], 20, signal);
@@ -3778,7 +3746,7 @@ async function rebuildUser(env: Env, xId: string, signal?: RebuildSignal): Promi
     );
   }
 
-  await reconcileTrackedArtifacts(env, userTarget, liveKeys, 20, signal);
+  await reconcileStaticArtifacts(env, userTarget, liveKeys, 20, signal);
   await releaseVisibilityFenceAfterRebuild(
     env,
     "x_user",

@@ -23,7 +23,9 @@ test("member suggestions rollbackはgeneration-specific indexを削除しない"
 });
 
 test("artifact trackingのD1 membership UPDATEは非相関JSON集合を使う", () => {
-  assert.match(source, /deleteStaticArtifacts\(/);
+  assert.match(source, /reconcileStaticArtifacts\(/);
+  assert.match(trackingSource, /object_key NOT IN \([\s\S]*?FROM json_each\(\?\)/);
+  assert.match(trackingSource, /await deleteStaticArtifacts\(/);
   assert.match(source, /env\.DB\.prepare\(STATIC_ARTIFACT_MARK_DELETED_SQL\)/);
   assert.match(trackingSource, /object_key IN \([\s\S]*FROM json_each\(\?\)[\s\S]*WHERE value IS NOT NULL/);
   for (const text of [source, trackingSource]) {

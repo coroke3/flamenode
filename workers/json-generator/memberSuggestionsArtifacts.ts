@@ -22,7 +22,7 @@ import {
 } from "../../src/lib/video/memberSuggestionsCore.ts";
 import { abortGuard } from "../shared/abort.ts";
 import {
-  deleteStaticArtifacts,
+  reconcileStaticArtifacts,
   recordStaticArtifacts,
   STATIC_ARTIFACT_MARK_DELETED_SQL,
 } from "./staticArtifactTracking.ts";
@@ -49,7 +49,6 @@ type Env = {
 };
 
 type RebuildSignal = AbortSignal | undefined;
-type TrackedArtifactRow = { object_key: string };
 
 const throwIfAborted = abortGuard("static rebuild aborted");
 
@@ -198,43 +197,6 @@ async function recordArtifacts(
       generatedAt,
     },
     artifacts,
-    signal,
-  );
-}
-
-/** stale generation cleanupはbounded。D1更新はjson_each 1文に集約する。 */
-async function reconcileTrackedArtifacts(
-  env: Env,
-  liveKeys: readonly string[],
-  signal: RebuildSignal,
-): Promise<void> {
-  throwIfAborted(signal);
-  const rows = await env.DB.prepare(
-    `SELECT object_key
-       FROM static_artifacts
-      WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
-      ORDER BY generated_at ASC
-      LIMIT ?`,
-  )
-    .bind(
-      MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
-      MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
-      MEMBER_SUGGESTIONS_CLEANUP_LIMIT,
-    )
-    .all<TrackedArtifactRow>();
-  throwIfAborted(signal);
-
-  const live = new Set(liveKeys);
-  const staleKeys = (rows.results ?? [])
-    .map((row) => row.object_key)
-    .filter((key) => !live.has(key));
-  await deleteStaticArtifacts(
-    env,
-    {
-      targetType: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
-      targetId: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
-    },
-    staleKeys,
     signal,
   );
 }
@@ -470,7 +432,17 @@ export async function rebuildMemberSuggestions(
   }
 
   const liveKeys = committed.map((artifact) => artifact.objectKey);
-  await reconcileTrackedArtifacts(env, liveKeys, signal);
+  // stale generation cleanupはbounded。live keyはSQL側で除外する。
+  await reconcileStaticArtifacts(
+    env,
+    {
+      targetType: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE,
+      targetId: MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID,
+    },
+    liveKeys,
+    MEMBER_SUGGESTIONS_CLEANUP_LIMIT,
+    signal,
+  );
   return { generation, itemCount: items.length, liveKeys };
 }
 
