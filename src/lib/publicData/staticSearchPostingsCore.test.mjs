@@ -253,3 +253,61 @@ test("posting index はdirectoryの対象ページだけを指し、ページを
     firstPage.page,
   );
 });
+
+// 変更前の gram 生成（slice+join と gram 単位の /\S/u 判定）を写した oracle。
+function legacyGrams(value, minGramLength) {
+  const chars = [...value.trim().toLowerCase()];
+  const grams = new Set();
+  for (let length = minGramLength; length <= 3; length += 1) {
+    for (let index = 0; index + length <= chars.length; index += 1) {
+      const gram = chars.slice(index, index + length).join("");
+      if (/\S/u.test(gram)) grams.add(gram);
+    }
+  }
+  return [...grams];
+}
+
+test("posting builderのgram集合・page分割は変更前の生成規則と一致する", () => {
+  const texts = [
+    "Fire  Festival 2026",
+    "  夏祭り　合作 MAD ",
+    "😀🔥 emoji\tTAB\nline",
+    "a b  c   d",
+    "  nbsp",
+    "İstanbul ΣΑΣ",
+  ];
+  for (const minGramLength of [1, 2, 3]) {
+    const items = Array.from({ length: 700 }, (_, index) => ({
+      id: `item-${index}`,
+      text: `${texts[index % texts.length]} ${index % 3 === 0 ? "shared" : ""}`,
+    }));
+    const artifacts = buildStaticSearchPostingArtifacts({
+      items,
+      generatedAt: 1,
+      generation: `oracle-${minGramLength}`,
+      keyOf: (item) => item.id,
+      textOf: (item) => [item.text],
+      minGramLength,
+    });
+    const expected = new Map();
+    for (const item of items) {
+      for (const gram of legacyGrams(item.text, minGramLength)) {
+        expected.set(gram, (expected.get(gram) ?? 0) + 1);
+      }
+    }
+    const actual = new Map();
+    for (const { page } of artifacts.pages) {
+      assert.ok(
+        page.records.reduce((count, record) => count + record.items.length, 0) <= 256,
+      );
+      for (const record of page.records) {
+        actual.set(record.gram, (actual.get(record.gram) ?? 0) + record.items.length);
+        assert.equal(record.total, expected.get(record.gram));
+      }
+    }
+    assert.deepEqual(
+      [...actual.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+      [...expected.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    );
+  }
+});
