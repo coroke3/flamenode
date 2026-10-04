@@ -200,7 +200,7 @@ Cloudflare Dashboardで`exceededCpu`、D1 rows read/written、Worker requests、
 
 public global collection は R2 miss 後に degraded D1へ進む前に、R2現行artifactと最大2×TTLのCache last-known-goodを確認する。stale collectionはvisibility manifestをenforce modeで取得できた場合だけ返し、動画・user・eventのvisibility fenceでfilterする。イベント名だけの変更はvideo search indexをenqueueしないが、動画countabilityを変える `PVSFSummary` は例外として再生成対象に残す。
 
-- `users_index_v2` の page/search artifact tracking は、D1 の bind 数と round-trip を抑えるため、500 行以内の JSON1 bulk UPSERT として記録する。R2 PUT 後に D1 記録できなかった世代は、その chunk の orphan object を削除してから retry/fallback する。
+- `users_index_v2` の page/search artifact tracking は、D1 の bind 数と round-trip を抑えるため、500 行以内の JSON1 bulk UPSERT として記録する。R2 PUT 後に D1 記録できなかった世代は、その chunk の orphan object を削除してから retry/fallback する。GC continuation は manifest を確認できない場合、その invocation で purge を再試行せず停止し、次の通常 rebuild に委ねる。
 
 Queue wake の失敗テレメトリは best-effort とする。同じ `kind` の書込みは isolate 内の短い期間でまとめ、reason が変わった場合も同一キーの1秒レート制限を過ぎてから記録する。Queue の retry 挙動は変更せず、KV の書込み制限だけを守る。
 

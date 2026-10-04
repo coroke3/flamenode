@@ -392,7 +392,11 @@ test("users v2 manifest read unknown時はreconcile/purgeをfail-safeで停止�
   );
   insert.run("live-stale", "users/index.v2/old/live.json", null);
   insert.run("expired-stale", "users/index.v2/old/expired.json", 1);
-  env.R2.get = async () => { throw new Error("manifest_unavailable"); };
+  let manifestReads = 0;
+  env.R2.get = async () => {
+    manifestReads += 1;
+    throw new Error("manifest_unavailable");
+  };
   const originalWarn = console.warn;
   console.warn = () => {};
   try {
@@ -406,10 +410,12 @@ test("users v2 manifest read unknown時はreconcile/purgeをfail-safeで停止�
       hasMore: false,
       blocked: true,
     });
+    const readsBeforeContinuation = manifestReads;
     assert.deepEqual(await continueUsersIndexV2ArtifactCleanup(env), {
       hasMore: false,
       blocked: true,
     });
+    assert.equal(manifestReads - readsBeforeContinuation, 1);
   } finally {
     console.warn = originalWarn;
   }

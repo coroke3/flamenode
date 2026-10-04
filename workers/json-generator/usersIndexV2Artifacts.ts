@@ -589,13 +589,15 @@ export async function continueUsersIndexV2ArtifactCleanup(
   const cleanup = await reconcileTrackedArtifacts(env, [], signal, {
     requireKnownManifest: true,
   });
+  if (cleanup.blocked) {
+    return { hasMore: false, blocked: true };
+  }
   const purge = await purgeDeletedArtifacts(env, [], signal, {
     requireKnownManifest: true,
   });
-  const blocked = Boolean(cleanup.blocked || purge.blocked);
   return {
-    hasMore: !blocked && (cleanup.hasMore || purge.hasMore),
-    blocked,
+    hasMore: !purge.blocked && (cleanup.hasMore || purge.hasMore),
+    blocked: Boolean(purge.blocked),
   };
 }
 
