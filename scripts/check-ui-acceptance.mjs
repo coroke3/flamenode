@@ -122,13 +122,13 @@ forbidMatch(
 requireAll("src/components/layout/PublicHeader.tsx", [
   [/ImeSafeGetForm/, "公開ヘッダー検索は ImeSafeGetForm を使う必要があります。"],
 ]);
-requireAll("app/(public)/list/page.tsx", [
+requireAll("app/(public)/list/ListIndexView.tsx", [
   [/ImeSafeGetForm/, "作品一覧は ImeSafeGetForm を使う必要があります。"],
 ]);
-requireAll("app/(public)/event/page.tsx", [
+requireAll("app/(public)/event/EventIndexView.tsx", [
   [/ImeSafeGetForm/, "イベント一覧は ImeSafeGetForm を使う必要があります。"],
 ]);
-requireAll("app/(public)/user/page.tsx", [
+requireAll("app/(public)/user/UserIndexView.tsx", [
   [/ImeSafeGetForm/, "ユーザー一覧は ImeSafeGetForm を使う必要があります。"],
 ]);
 
@@ -240,7 +240,7 @@ requireAll("src/styles/globals.css", [
   [/gap:\s*clamp\(18px,\s*2\.4vw,\s*28px\)/, "entry共通stackのgap tokenがありません。"],
 ]);
 
-requireAll("app/(public)/event/page.tsx", [
+requireAll("app/(public)/event/EventIndexView.tsx", [
   [/name="q"/, "イベント検索queryがありません。"],
   [/name="status"/, "イベント状態filterがありません。"],
   [/name="sort"/, "イベント並び替えがありません。"],
@@ -248,7 +248,7 @@ requireAll("app/(public)/event/page.tsx", [
   [/staticLoaded\.mode === "unavailable"/, "unavailable 表示分岐がありません。"],
 ]);
 
-requireAll("app/(public)/list/page.tsx", [
+requireAll("app/(public)/list/ListIndexView.tsx", [
   [/rawView === "index".*rawView === "compact"/s, "grid/compact/index表示切替がありません。"],
   [/PAGE_SIZE = 24/, "一覧のbounded paginationがありません。"],
   [/loadStaticRecentVideosPage/, "静的作品一覧の読込がありません。"],

@@ -53,6 +53,21 @@ const files = {
   ),
 };
 
+// Index pages render their body in a shared view used by the ISR page and the
+// `~query` twin route.
+const listView = await readFile(
+  new URL("../../../app/(public)/list/ListIndexView.tsx", import.meta.url),
+  "utf8",
+);
+const userIndexView = await readFile(
+  new URL("../../../app/(public)/user/UserIndexView.tsx", import.meta.url),
+  "utf8",
+);
+const eventsView = await readFile(
+  new URL("../../../app/(public)/event/EventIndexView.tsx", import.meta.url),
+  "utf8",
+);
+
 // The user profile body is shared by the ISR route and its paged twin.
 const userView = await readFile(
   new URL("../../../app/(public)/user/[id]/UserProfilePage.tsx", import.meta.url),
@@ -137,8 +152,27 @@ test("ユーザーページは query 付きだけ動的な paged route へ rewri
   assert.match(files.user, /return UserProfilePage\(\{ params \}\);/);
   assert.match(userPaged, /return UserProfilePage\(props\);/);
   assert.doesNotMatch(userPaged, /generateStaticParams|export const revalidate/);
-  assert.match(nextConfig, /\["worksPage", "collabPage"\]\.map\(\(key\) => \(\{/);
-  assert.match(nextConfig, /source: "\/user\/:id",[\s\S]*?has: \[\{ type: "query", key, value: "\.\+" \}\],\s*destination: "\/user\/:id\/paged",/);
+  assert.match(
+    nextConfig,
+    /\{ source: "\/user\/:id", destination: "\/user\/:id\/paged", keys: \["worksPage", "collabPage"\] \}/,
+  );
   // Page 1 links go to the bare (cached) URL.
   assert.equal(userView.match(/if \(p <= 1\) return basePath;/g)?.length, 2);
+});
+
+test("一覧ページは query なしをISR、query 付きだけ ~query の動的 route へ rewrite する", () => {
+  for (const [label, view, fn] of [
+    ["list", "ListIndexView", "ListPage"],
+    ["userIndex", "UserIndexView", "UserListPage"],
+    ["events", "EventIndexView", "EventListPage"],
+  ]) {
+    assert.doesNotMatch(files[label], /searchParams: Promise<|await searchParams/, label);
+    assert.match(files[label], new RegExp(`return ${fn}\\(\\{ searchParams: Promise\\.resolve\\(\\{\\}\\) \\}\\);`), label);
+    assert.match(files[label], new RegExp(`from "\\./${view}";`), label);
+  }
+  assert.match(nextConfig, /\{ source: "\/list", destination: "\/list\/~query", keys: \["q", "sort", "page", "event", "view"\] \}/);
+  assert.match(nextConfig, /\{ source: "\/user", destination: "\/user\/~query", keys: \["q", "sort", "page"\] \}/);
+  assert.match(nextConfig, /\{ source: "\/event", destination: "\/event\/~query", keys: \["q", "status", "sort"\] \}/);
+  // A value-less `has` query matches every request in OpenNext.
+  assert.match(nextConfig, /has: \[\{ type: "query", key, value: "\.\+" \}\]/);
 });
