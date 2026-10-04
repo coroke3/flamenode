@@ -54,7 +54,6 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
   assert.ok(cacheFreshIndex >= 0 && r2Index > cacheFreshIndex, "fresh Cache check precedes R2");
   assert.ok(staleIndex > r2Index, "stale Cache is accepted only after R2 miss");
   assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
-  assert.ok(r2Index >= 0 && missIndex > r2Index, "R2 read precedes miss");
   assert.match(loaderSource, /async function resolvePublicJsonMiss/);
   assert.match(
     loaderSource,
