@@ -339,7 +339,7 @@ allowlist (許可される定義/参照ファイル):
 純粋関数の単体テストは Node 標準 `node:test` で実行する。Node 22+ の `--experimental-strip-types` で TS をそのまま読み込む。
 
 ```sh
-npm run test:unit        # 全テスト (cleanup retention / notif format / youtube / xid / slot grouping / format)
+npm run test:unit        # src・scripts・app の全テスト（integration と Worker は別 script）
 npm run test:workers     # Worker 関連のみ
 npm run test:notif       # notification format のみ
 npm run test:youtube     # youtube/id ユーティリティのみ
