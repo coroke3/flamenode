@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  VIDEO_PERMISSION_ALIASES,
   canUseEventPrivilegeFromAccessContext,
   decideCanEditVideoFromAccessContext,
   resolveEventPermissionFromAccessContext,
 } from "./ownershipCore.ts";
+import {
+  GENERAL_EDITABLE_FIELD_KEYS,
+  sectionAllowedByGeneralFields,
+} from "../video/generalEditPermissionsCore.ts";
 
 function context(overrides = {}) {
   return {
@@ -66,4 +71,27 @@ test("context ownership prevents a non-owner from using the owner policy", () =>
     }),
     false,
   );
+});
+
+test("normal owner の section 判定は canEditVideo と同じ一般 field 対応表を使う", () => {
+  const collaborator = { isCreatorOwner: false, isCollaboratorOwner: true, isOwner: true };
+  const fieldSets = [
+    new Set(),
+    new Set(GENERAL_EDITABLE_FIELD_KEYS),
+    ...GENERAL_EDITABLE_FIELD_KEYS.map((key) => new Set([key])),
+  ];
+  for (const requiredKey of Object.keys(VIDEO_PERMISSION_ALIASES)) {
+    for (const fields of fieldSets) {
+      assert.equal(
+        decideCanEditVideoFromAccessContext({
+          context: context({ ownership: collaborator, ownerEditableFields: fields }),
+          userRole: null,
+          requiredKey,
+          privilegeMode: "normal",
+        }),
+        sectionAllowedByGeneralFields(requiredKey, fields),
+        `${requiredKey}: ${[...fields].join(",")}`,
+      );
+    }
+  }
 });

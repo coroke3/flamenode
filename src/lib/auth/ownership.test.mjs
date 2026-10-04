@@ -299,14 +299,16 @@ test("ownership.ts: normal モードは非所有者を早期拒否する", () =>
   assert.match(normalBlock, /if \(!ownership\.isOwner\) return false/);
 });
 
-test("ownership.ts: loadPrimaryEventOwnerPolicy は primary_event 正本のみ", () => {
+test("ownership.ts: loadEffectiveOwnerEditableFieldSet は primary_event 正本のみ", () => {
   const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
   const loadBody = source.match(
-    /async function loadPrimaryEventOwnerPolicy[\s\S]*?^}/m,
+    /export async function loadEffectiveOwnerEditableFieldSet[\s\S]*?^}/m,
   )?.[0];
-  assert.ok(loadBody, "loadPrimaryEventOwnerPolicy not found");
+  assert.ok(loadBody, "loadEffectiveOwnerEditableFieldSet not found");
   assert.doesNotMatch(loadBody, /videoEvents/);
   assert.match(loadBody, /primaryEventId/);
+  // 一般 field の正本は field key だけ。旧 section key の既定集合を field 集合として扱わない。
+  assert.doesNotMatch(loadBody, /resolveOwnerGeneralPolicyKeys/);
 });
 
 test("privilegeMode: admin/event 併用入口はロールごとに単一モードへ分離する", () => {
