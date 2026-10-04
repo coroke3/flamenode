@@ -149,7 +149,7 @@ test("100人stress testは実canonicalのstatic_rebuild_queue shapeを持つ", a
 });
 
 test("user詳細の作品カードは作品snapshot iconをcurrent X iconより優先する", async () => {
-  const source = await read("app/(public)/user/[id]/page.tsx");
+  const source = await read("app/(public)/user/[id]/UserProfilePage.tsx");
   const projection = source.match(
     /function projectVideoCardIcons\([\s\S]*?\n}/,
   )?.[0];

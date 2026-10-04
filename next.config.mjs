@@ -34,6 +34,20 @@ const nextConfig = {
       bodySizeLimit: "8mb",
     },
   },
+  // Public pages that read the query string cannot be cached, so only the
+  // query-bearing URLs go to a per-request twin route and the bare URL stays
+  // on-demand ISR (Workers Free 10ms CPU). Public URLs do not change.
+  async rewrites() {
+    return {
+      beforeFiles: ["worksPage", "collabPage"].map((key) => ({
+        source: "/user/:id",
+        // `value` is required: OpenNext tests a value-less query condition
+        // against "" when the key is absent, which would match every request.
+        has: [{ type: "query", key, value: ".+" }],
+        destination: "/user/:id/paged",
+      })),
+    };
+  },
 };
 
 export default nextConfig;

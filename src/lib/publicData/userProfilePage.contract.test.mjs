@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 const [page, portfolioPage, userAvatar] = await Promise.all([
   readFile(
-    new URL("../../../app/(public)/user/[id]/page.tsx", import.meta.url),
+    new URL("../../../app/(public)/user/[id]/UserProfilePage.tsx", import.meta.url),
     "utf8",
   ),
   readFile(
