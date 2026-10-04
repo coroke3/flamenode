@@ -12,5 +12,6 @@ test("top slot-stats artifact は TOP_SLOT_STATS_OBJECT_KEY の head で欠損�
   assert.match(source, /TOP_SLOT_STATS_OBJECT_KEY/);
   assert.match(source, /ensureTopSlotStatsOnR2/);
   assert.match(source, /env\.R2\.head/);
-  assert.match(source, /target_id = 'global'/);
+  assert.match(source, /globalTargets\(\["top_slot_stats"\]\)/);
+  assert.match(source, /TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS = 1/);
 });

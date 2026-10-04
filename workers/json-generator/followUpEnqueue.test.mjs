@@ -145,16 +145,12 @@ test("enqueueComposerFollowUps は未知 producer で false", async () => {
   assert.equal(changed, false);
 });
 
-test("enqueueComposerTargets は composer follow-up を high priority で INSERT する", () => {
+test("enqueueComposerTargets は composer follow-up を high priority の共通 upsert で登録する", () => {
   const enqueueFn = FOLLOW_UP_SOURCE.match(
     /async function enqueueComposerTargets\([\s\S]*?(?=\/\*\*|export async function |async function )/,
   )?.[0];
   assert.ok(enqueueFn);
-  assert.match(enqueueFn, /VALUES \(.*'high', 'pending'/);
-  assert.match(
-    enqueueFn,
-    /priority = CASE WHEN priority = 'high' OR \? = 'high' THEN 'high' ELSE priority END/,
-  );
+  assert.match(enqueueFn, /enqueueStaticRebuildTargets\(env, targets, reason, "high"\)/);
 });
 
 test("enqueueComposerFollowUps(users_index) は pending/processing 既存時に priority を high に昇格する", async (t) => {

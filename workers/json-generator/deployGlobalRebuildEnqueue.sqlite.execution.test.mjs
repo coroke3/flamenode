@@ -89,7 +89,7 @@ function createSqliteEnv() {
   };
 }
 
-test("deploy global enqueue uses two atomic JSON1 statements for all targets", async () => {
+test("deploy global enqueue uses one JSON1 upsert statement for all targets", async () => {
   const { env, sqlite } = createSqliteEnv();
   const first = await ensureDeployGlobalRebuilds(env, {
     commitSha: "a".repeat(40),

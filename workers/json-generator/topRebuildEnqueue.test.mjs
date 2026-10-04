@@ -4,13 +4,7 @@ import { test } from "node:test";
 
 const source = await readFile(new URL("./topRebuildEnqueue.ts", import.meta.url), "utf8");
 
-test("enqueueTopSectionRebuild は任意 global target を pending へ登録する", () => {
+test("enqueueTopSectionRebuild は任意 global target を共通 upsert で登録する", () => {
   assert.match(source, /export async function enqueueTopSectionRebuild/);
-  assert.match(source, /WHERE target_type = \?/);
-  assert.match(source, /target_id = 'global'/);
-  assert.match(source, /INSERT OR IGNORE INTO static_rebuild_queue/);
-});
-
-test("enqueueTopRebuild は top composer 向けラッパー", () => {
-  assert.match(source, /enqueueTopSectionRebuild\(env, "top"/);
+  assert.match(source, /enqueueStaticRebuildTargets\(\s*env,\s*globalTargets\(\[targetType\]\)/);
 });

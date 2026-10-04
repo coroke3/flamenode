@@ -15,5 +15,6 @@ test("users 共有JSONは canonical index / icon map / pickup artifact の head 
   assert.doesNotMatch(source, /USERS_INDEX_V2_MANIFEST_OBJECT_KEY/);
   assert.match(source, /ensureUsersSharedInputsOnR2/);
   assert.match(source, /env\.R2\.head/);
-  assert.match(source, /target_id = 'global'/);
+  assert.match(source, /globalTargets\(\["users_index"\]\)/);
+  assert.match(source, /USERS_SHARED_REPAIR_MAX_D1_STATEMENTS = 1/);
 });

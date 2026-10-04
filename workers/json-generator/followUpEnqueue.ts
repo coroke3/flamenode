@@ -1,3 +1,5 @@
+import { enqueueStaticRebuildTargets } from "./staticRebuildEnqueue.ts";
+
 type FollowUpEnv = { DB: D1Database };
 type ComposerFollowUpTarget = {
   targetType: string;
@@ -68,42 +70,9 @@ async function enqueueComposerTargets(
   targets: readonly ComposerFollowUpTarget[],
   reason: string,
 ): Promise<boolean> {
-  const now = Math.floor(Date.now() / 1000);
-  let changed = false;
-  for (const target of targets) {
-    const bumped = await env.DB.prepare(
-      `UPDATE static_rebuild_queue
-       SET reason = ?,
-           priority = CASE WHEN priority = 'high' OR ? = 'high' THEN 'high' ELSE priority END,
-           updated_at = MAX(updated_at + 1, ?)
-       WHERE target_type = ? AND target_id = ?
-         AND status IN ('pending', 'processing')`,
-    )
-      .bind(reason, "high", now, target.targetType, target.targetId)
-      .run();
-    if ((bumped.meta?.changes ?? 0) > 0) {
-      changed = true;
-      continue;
-    }
-    const inserted = await env.DB.prepare(
-      `INSERT OR IGNORE INTO static_rebuild_queue (
-         id, target_type, target_id, reason, priority, status,
-         attempt_count, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, 'high', 'pending', 0, ?, ?)`,
-    )
-      .bind(
-        `srb:${target.targetType}:${crypto.randomUUID()}`,
-        target.targetType,
-        target.targetId,
-        reason,
-        now,
-        now,
-      )
-      .run();
-    if ((inserted.meta?.changes ?? 0) > 0) changed = true;
-  }
-  return changed;
+  return (await enqueueStaticRebuildTargets(env, targets, reason, "high")) > 0;
 }
+
 /** producer 成功後に composer target を冪等 enqueue。挿入・更新があれば true。 */
 
 export async function enqueueComposerFollowUps(
