@@ -19,7 +19,8 @@ export interface Env {
 }
 
 const STALE_QUEUE_RECONCILE_LIMIT = 20;
-const PROCESSING_LEASE_SEC = 5 * 60;
+/** Cloudflare Queue/Cron invocations stop at 15m; leave one minute before recovery may reclaim a row. */
+export const STATIC_REBUILD_PROCESSING_LEASE_SEC = 16 * 60;
 /** global target は重いため常に1件ずつ。個別 target も MAX_QUEUE_ITEMS_PER_RUN=1 で直列。 */
 const PROCESSING_CONCURRENCY = 1;
 const MAX_ATTEMPTS = 4;
@@ -312,7 +313,7 @@ export async function markProcessing(
          lease_token = ?, lease_expires_at = ?, updated_at = ?
      WHERE id = ? AND status = 'pending'`,
   )
-    .bind(now, token, now + PROCESSING_LEASE_SEC, now, id)
+    .bind(now, token, now + STATIC_REBUILD_PROCESSING_LEASE_SEC, now, id)
     .run();
   recordD1Changes(metrics, result);
   return (result.meta?.changes ?? 0) === 1 ? token : null;
@@ -410,7 +411,7 @@ export async function markDoneOrSuppressRedelivery(
      SET error = ?, lease_expires_at = ?, updated_at = ?
      WHERE id = ? AND status = 'processing' AND lease_token = ?`,
   )
-    .bind(REBUILD_SUCCEEDED_AWAITING_DONE_MARK, now + PROCESSING_LEASE_SEC, now, id, token)
+    .bind(REBUILD_SUCCEEDED_AWAITING_DONE_MARK, now + STATIC_REBUILD_PROCESSING_LEASE_SEC, now, id, token)
     .run();
   recordD1Changes(metrics, result);
   throwIfAborted(signal, "static rebuild queue aborted");
