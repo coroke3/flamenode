@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import {
@@ -49,7 +50,17 @@ function fakeDb(row) {
             sql.includes("processed_at = CASE") &&
             sql.includes("lease_token = ?")
           ) {
-            const [processedAt, updatedAt, id, token] = query.args;
+            const [
+              forceFollowUp,
+              ,
+              processedAt,
+              ,
+              completedUpdatedAt,
+              ,
+              followUpReason,
+              id,
+              token,
+            ] = query.args;
             if (row.id !== id || row.status !== "processing" || row.lease_token !== token) {
               return { meta: { changes: 0 } };
             }
@@ -58,10 +69,19 @@ function fakeDb(row) {
               row.processing_started_at ?? row.updated_at ?? 0,
             );
             const wasRequeued = sourceUpdatedAt > processingStartedAt;
+            const forcedFollowUp = Number(forceFollowUp) === 1;
             Object.assign(row, {
-              status: wasRequeued ? "pending" : "done",
-              processed_at: wasRequeued ? null : processedAt,
-              updated_at: wasRequeued ? sourceUpdatedAt : updatedAt,
+              status: wasRequeued || forcedFollowUp ? "pending" : "done",
+              processed_at: wasRequeued || forcedFollowUp ? null : processedAt,
+              updated_at: wasRequeued
+                ? sourceUpdatedAt
+                : forcedFollowUp
+                  ? Math.max(sourceUpdatedAt, processingStartedAt) + 1
+                  : completedUpdatedAt,
+              reason:
+                forcedFollowUp && !wasRequeued
+                  ? followUpReason
+                  : row.reason,
               attempt_count: 0,
               error: null,
               processing_started_at: null,
@@ -235,6 +255,119 @@ test("processing中の再enqueueは完了時にpendingへ戻す", async () => {
   assert.equal(row.processed_at, null);
   assert.equal(row.attempt_count, 0);
   assert.equal(row.lease_token, null);
+});
+
+test("users_index cleanup continuationは完了時にbounded follow-up理由でpendingへ戻す", async () => {
+  const row = { id: "srb-users-index-gc", status: "pending", reason: "users_index_rebuild" };
+  const env = envFor(row);
+  const token = await markProcessing(env, row.id, 100);
+  const processingStartedAt = row.processing_started_at;
+  const result = await markDoneWithRetries(
+    env,
+    row.id,
+    token,
+    110,
+    undefined,
+    undefined,
+    { followUpReason: "users_index_v2_gc_continuation:1" },
+  );
+
+  assert.equal(result, "requeued");
+  assert.equal(row.status, "pending");
+  assert.equal(row.reason, "users_index_v2_gc_continuation:1");
+  assert.ok(row.updated_at > processingStartedAt);
+  assert.equal(row.attempt_count, 0);
+  assert.equal(row.lease_token, null);
+});
+
+test("users_index continuationの完了CAS SQLはSQLite上でreasonとleaseを正しく更新する", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(`
+    CREATE TABLE static_rebuild_queue (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      processing_started_at INTEGER,
+      lease_token TEXT,
+      updated_at INTEGER NOT NULL,
+      processed_at INTEGER,
+      reason TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      lease_expires_at INTEGER,
+      next_retry_at INTEGER
+    );
+  `);
+  sqlite.prepare(
+    `INSERT INTO static_rebuild_queue
+      (id, status, processing_started_at, lease_token, updated_at, reason, attempt_count)
+     VALUES (?, 'processing', ?, ?, ?, ?, 3)`,
+  ).run("srb-users-index-gc-sql", 100, "lease-token", 100, "users_index_rebuild");
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...values) {
+            return {
+              async all() {
+                const results = sqlite.prepare(sql).all(...values);
+                return { meta: { changes: results.length }, results };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+
+  try {
+    assert.equal(
+      await markDoneWithRetries(
+        env,
+        "srb-users-index-gc-sql",
+        "lease-token",
+        110,
+        undefined,
+        undefined,
+        { followUpReason: "users_index_v2_gc_continuation:1" },
+      ),
+      "requeued",
+    );
+    const row = sqlite
+      .prepare("SELECT * FROM static_rebuild_queue WHERE id = ?")
+      .get("srb-users-index-gc-sql");
+    assert.equal(row.status, "pending");
+    assert.equal(row.reason, "users_index_v2_gc_continuation:1");
+    assert.equal(row.updated_at, 101);
+    assert.equal(row.attempt_count, 0);
+    assert.equal(row.processing_started_at, null);
+    assert.equal(row.lease_token, null);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("users_index cleanup continuationは処理中に再enqueueされた理由を上書きしない", async () => {
+  const row = { id: "srb-users-index-gc-race", status: "pending", reason: "users_index_rebuild" };
+  const env = envFor(row);
+  const token = await markProcessing(env, row.id, 100);
+  row.updated_at = 105;
+  row.reason = "visibility_change";
+
+  assert.equal(
+    await markDoneWithRetries(
+      env,
+      row.id,
+      token,
+      110,
+      undefined,
+      undefined,
+      { followUpReason: "users_index_v2_gc_continuation:1" },
+    ),
+    "requeued",
+  );
+  assert.equal(row.status, "pending");
+  assert.equal(row.updated_at, 105);
+  assert.equal(row.reason, "visibility_change");
 });
 
 test("retry wait removes its abort listener after the timer completes", async () => {

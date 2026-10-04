@@ -23,6 +23,18 @@ const MAX_MUTATION_TARGETS = Number(
   enqueueSource.match(/MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*(\d+)/)?.[1],
 );
 assert.ok(Number.isInteger(MAX_MUTATION_TARGETS) && MAX_MUTATION_TARGETS > 0);
+const usersIndexV2Source = fs.readFileSync(
+  new URL("../workers/json-generator/usersIndexV2Artifacts.ts", import.meta.url),
+  "utf8",
+);
+const MAX_USERS_INDEX_GC_CONTINUATIONS = Number(
+  usersIndexV2Source.match(/USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS\s*=\s*(\d+)/)?.[1],
+);
+assert.ok(
+  Number.isInteger(MAX_USERS_INDEX_GC_CONTINUATIONS) &&
+    MAX_USERS_INDEX_GC_CONTINUATIONS >= 0 &&
+    MAX_USERS_INDEX_GC_CONTINUATIONS <= 10,
+);
 
 function estimate({
   label,
@@ -68,8 +80,9 @@ const models = [
     retriesPerDay: 40,
   }),
   estimate({
-    label: `最大${MAX_MUTATION_TARGETS}-target mutation（continuation enabled）`,
+    label: `最大${MAX_MUTATION_TARGETS}-target mutation + users_index GC continuation最大${MAX_USERS_INDEX_GC_CONTINUATIONS}回`,
     wakesPerDay: MAX_MUTATION_TARGETS,
+    continuationsPerDay: MAX_USERS_INDEX_GC_CONTINUATIONS,
   }),
   estimate({
     label: "failure day（通常2,000 messages + 150件が各3 retries）",

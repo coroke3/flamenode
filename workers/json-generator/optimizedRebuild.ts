@@ -10,7 +10,13 @@ import {
   enqueuePerTargetComposerFollowUp,
 } from "./followUpEnqueue.ts";
 import { rebuildTarget } from "./rebuild.ts";
-import { rebuildUsersIndexV2FromLegacyArtifact } from "./usersIndexV2Artifacts.ts";
+import {
+  continueUsersIndexV2ArtifactCleanup,
+  parseUsersIndexV2CleanupContinuationCount,
+  rebuildUsersIndexV2FromLegacyArtifact,
+  USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS,
+  usersIndexV2CleanupContinuationReason,
+} from "./usersIndexV2Artifacts.ts";
 import { rebuildPublicIconV2FromLegacyArtifact } from "./publicIconV2Artifacts.ts";
 import {
   mutateVideoMaterializedSource,
@@ -931,8 +937,52 @@ export async function optimizedRebuildTarget(
   sourceUpdatedAt: number,
   signal?: AbortSignal,
   reason?: string | null,
-): Promise<{ followUpPending: boolean }> {
+): Promise<{
+  followUpPending: boolean;
+  requeueCurrentTarget?: boolean;
+  requeueReason?: string;
+}> {
   throwIfAborted(signal);
+
+  const usersIndexCleanupContinuation =
+    targetType === "users_index"
+      ? parseUsersIndexV2CleanupContinuationCount(reason)
+      : null;
+  if (usersIndexCleanupContinuation !== null) {
+    const cleanup = await continueUsersIndexV2ArtifactCleanup(env, signal);
+    if (
+      cleanup.hasMore &&
+      usersIndexCleanupContinuation < USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS
+    ) {
+      return {
+        followUpPending: true,
+        requeueCurrentTarget: true,
+        requeueReason: usersIndexV2CleanupContinuationReason(
+          usersIndexCleanupContinuation + 1,
+        ),
+      };
+    }
+    if (
+      cleanup.hasMore &&
+      usersIndexCleanupContinuation >= USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS
+    ) {
+      console.warn(
+        JSON.stringify({
+          service: "users-index-v2",
+          result: "gc_continuation_limit_deferred",
+          continuation_count: usersIndexCleanupContinuation,
+        }),
+      );
+    } else if (cleanup.blocked) {
+      console.warn(
+        JSON.stringify({
+          service: "users-index-v2",
+          result: "gc_continuation_blocked",
+        }),
+      );
+    }
+    return { followUpPending: false };
+  }
 
   const videoProjectionBundleAttempted =
     VIDEO_SOURCE_PROJECTION_TARGET_SET.has(targetType);
@@ -985,7 +1035,13 @@ export async function optimizedRebuildTarget(
         }),
       );
     }
-    if (v2.hasMore) return { followUpPending: true };
+    if (v2.hasMore) {
+      return {
+        followUpPending: true,
+        requeueCurrentTarget: true,
+        requeueReason: usersIndexV2CleanupContinuationReason(1),
+      };
+    }
   }
   if (targetType === "event_base") {
     await syncEventPlaylistArtifact(env, targetId, signal);

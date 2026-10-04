@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
+  continueUsersIndexV2ArtifactCleanup,
   purgeDeletedArtifacts,
   rebuildUsersIndexV2Artifacts,
   reconcileTrackedArtifacts,
+  usersIndexV2CleanupContinuationReason,
 } from "./usersIndexV2Artifacts.ts";
+import { optimizedRebuildTarget } from "./optimizedRebuild.ts";
 
 function source(index) {
   return {
@@ -193,7 +196,7 @@ test("current manifest generation keys are never removed as stale GC", async () 
   env.sqlite.close();
 });
 
-test("users v2 GCは500件超のstale backlogをhasMoreで次回へ継続する", async () => {
+test("users v2 GCは500件ごとにcleanup-onlyで継続し、ページを再生成しない", async () => {
   const env = createSqliteEnv();
   const items = Array.from({ length: 20 }, (_, index) => source(index));
   await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
@@ -217,8 +220,78 @@ test("users v2 GCは500件超のstale backlogをhasMoreで次回へ継続する"
     )
     .get().count;
   assert.equal(Number(remainingAfterFirst), 1);
-  const second = await rebuildUsersIndexV2Artifacts(env, items, 1_700_000_000);
-  assert.equal(second.hasMore, false);
+  const putsBeforeCleanupOnly = env.putCount;
+  const second = await continueUsersIndexV2ArtifactCleanup(env);
+  assert.deepEqual(second, { hasMore: false, blocked: false });
+  assert.equal(env.putCount, putsBeforeCleanupOnly);
+  const remainingAfterSecond = env.sqlite
+    .prepare(
+      `SELECT COUNT(*) AS count FROM static_artifacts
+       WHERE target_type = 'users_index_v2' AND target_id = 'global'
+         AND object_key LIKE 'users/index.v2/old/%' AND deleted_at IS NULL`,
+    )
+    .get().count;
+  assert.equal(Number(remainingAfterSecond), 0);
+  env.sqlite.close();
+});
+
+test("queue users_index continuationはcleanupだけ行い10回目で残件を延期する", async () => {
+  const env = createSqliteEnv();
+  await rebuildUsersIndexV2Artifacts(
+    env,
+    Array.from({ length: 20 }, (_, index) => source(index)),
+    1_700_000_000,
+  );
+  const insert = env.sqlite.prepare(
+    `INSERT INTO static_artifacts
+      (id, target_type, target_id, object_key, content_hash, schema_version,
+       source_updated_at, generated_at, deleted_at)
+     VALUES (?, 'users_index_v2', 'global', ?, 'stale', 2, NULL, 1, NULL)`,
+  );
+  for (let index = 0; index < 1_100; index += 1) {
+    insert.run(`gc-chain-${index}`, `users/index.v2/old/gc-${index}.json`);
+  }
+
+  const putsBefore = env.putCount;
+  const next = await optimizedRebuildTarget(
+    env,
+    "users_index",
+    "global",
+    1_700_000_000,
+    undefined,
+    usersIndexV2CleanupContinuationReason(1),
+  );
+  assert.deepEqual(next, {
+    followUpPending: true,
+    requeueCurrentTarget: true,
+    requeueReason: usersIndexV2CleanupContinuationReason(2),
+  });
+  assert.equal(env.putCount, putsBefore);
+
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const capped = await optimizedRebuildTarget(
+      env,
+      "users_index",
+      "global",
+      1_700_000_000,
+      undefined,
+      usersIndexV2CleanupContinuationReason(10),
+    );
+    assert.deepEqual(capped, { followUpPending: false });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(env.putCount, putsBefore);
+  const staleAfterCap = env.sqlite
+    .prepare(
+      `SELECT COUNT(*) AS count FROM static_artifacts
+       WHERE target_type = 'users_index_v2' AND target_id = 'global'
+         AND object_key LIKE 'users/index.v2/old/gc-%' AND deleted_at IS NULL`,
+    )
+    .get().count;
+  assert.equal(Number(staleAfterCap), 100);
   env.sqlite.close();
 });
 
@@ -323,8 +396,20 @@ test("users v2 manifest read unknown時はreconcile/purgeをfail-safeで停止�
   const originalWarn = console.warn;
   console.warn = () => {};
   try {
-    assert.deepEqual(await reconcileTrackedArtifacts(env, []), { deleted: 0, hasMore: true });
-    assert.deepEqual(await purgeDeletedArtifacts(env, []), { deleted: 0, hasMore: true });
+    assert.deepEqual(await reconcileTrackedArtifacts(env, []), {
+      deleted: 0,
+      hasMore: false,
+      blocked: true,
+    });
+    assert.deepEqual(await purgeDeletedArtifacts(env, []), {
+      deleted: 0,
+      hasMore: false,
+      blocked: true,
+    });
+    assert.deepEqual(await continueUsersIndexV2ArtifactCleanup(env), {
+      hasMore: false,
+      blocked: true,
+    });
   } finally {
     console.warn = originalWarn;
   }

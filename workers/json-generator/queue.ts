@@ -101,8 +101,17 @@ async function completeQueueRow(
   now: number,
   signal: AbortSignal | undefined,
   metrics: QueueMetrics | undefined,
+  followUpReason?: string,
 ): Promise<{ outcome: QueueOutcome; followUpPending: boolean }> {
-  const markResult = await markDoneWithRetries(env, row.id, token, now, metrics, signal);
+  const markResult = await markDoneWithRetries(
+    env,
+    row.id,
+    token,
+    now,
+    metrics,
+    signal,
+    followUpReason === undefined ? undefined : { followUpReason },
+  );
   if (markResult === "done") {
     return { outcome: "processed", followUpPending: false };
   }
@@ -288,7 +297,17 @@ async function processQueueRow(
       row.reason,
     );
     throwIfAborted(signal, "static rebuild queue aborted");
-    const completion = await completeQueueRow(env, row, token, now, signal, metrics);
+    const completion = await completeQueueRow(
+      env,
+      row,
+      token,
+      now,
+      signal,
+      metrics,
+      rebuildResult.requeueCurrentTarget
+        ? rebuildResult.requeueReason
+        : undefined,
+    );
     return {
       outcome: completion.outcome,
       followUpPending: rebuildResult.followUpPending || completion.followUpPending,
@@ -344,23 +363,33 @@ async function markDoneAttempt(
   token: string,
   now: number,
   metrics?: QueueMetrics,
+  options?: { followUpReason: string },
 ): Promise<MarkDoneAttemptResult> {
+  const forceFollowUp = options?.followUpReason === undefined ? 0 : 1;
   const result = await env.DB.prepare(
     `UPDATE static_rebuild_queue
      SET status = CASE
-           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+           WHEN ? = 1 OR updated_at > COALESCE(processing_started_at, updated_at)
              THEN 'pending'
            ELSE 'done'
          END,
          processed_at = CASE
-           WHEN updated_at > COALESCE(processing_started_at, updated_at)
+           WHEN ? = 1 OR updated_at > COALESCE(processing_started_at, updated_at)
              THEN NULL
            ELSE ?
          END,
          updated_at = CASE
            WHEN updated_at > COALESCE(processing_started_at, updated_at)
              THEN updated_at
+           WHEN ? = 1
+             THEN MAX(updated_at, COALESCE(processing_started_at, updated_at)) + 1
            ELSE ?
+         END,
+         reason = CASE
+           WHEN ? = 1
+             AND updated_at <= COALESCE(processing_started_at, updated_at)
+             THEN ?
+           ELSE reason
          END,
          attempt_count = 0,
          error = NULL,
@@ -371,7 +400,17 @@ async function markDoneAttempt(
      WHERE id = ? AND status = 'processing' AND lease_token = ?
      RETURNING status`,
   )
-    .bind(now, now, id, token)
+    .bind(
+      forceFollowUp,
+      forceFollowUp,
+      now,
+      forceFollowUp,
+      now,
+      forceFollowUp,
+      options?.followUpReason ?? null,
+      id,
+      token,
+    )
     .all<{ status: string }>();
   recordD1Changes(metrics, result);
   const row = result.results?.[0];
@@ -386,9 +425,10 @@ export async function markDoneWithRetries(
   now: number,
   metrics?: QueueMetrics,
   signal?: AbortSignal,
+  options?: { followUpReason: string },
 ): Promise<MarkDoneAttemptResult> {
   for (let attempt = 0; attempt < MARK_DONE_RETRY_ATTEMPTS; attempt += 1) {
-    const result = await markDoneAttempt(env, id, token, now, metrics);
+    const result = await markDoneAttempt(env, id, token, now, metrics, options);
     if (result !== null) return result;
     if (attempt < MARK_DONE_RETRY_ATTEMPTS - 1) {
       await sleepMs(MARK_DONE_RETRY_DELAY_MS, signal);

@@ -21,6 +21,7 @@ const OFFICIAL_FREE_LIMITS = Object.freeze({
   d1StatementsPerInvocation: 50,
   queueOperationsPerDay: 10_000,
 });
+const MAX_USERS_INDEX_GC_CONTINUATIONS = 10;
 
 function readWorkerConfigs() {
   const workersRoot = path.join(REPO_ROOT, "workers");
@@ -110,12 +111,26 @@ const maxMutationTargets = Number(
 const d1TargetsPerUpsert = Number(
   staticRebuildSource.match(/STATIC_REBUILD_BULK_UPSERT_ROWS\s*=\s*(\d+)/)?.[1],
 );
+const usersIndexV2Source = fs.readFileSync(
+  path.join(REPO_ROOT, "workers/json-generator/usersIndexV2Artifacts.ts"),
+  "utf8",
+);
+const maxUsersIndexCleanupContinuations = Number(
+  usersIndexV2Source.match(/USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS\s*=\s*(\d+)/)?.[1],
+);
 assert.ok(Number.isInteger(maxMutationTargets) && maxMutationTargets <= 256);
 assert.ok(Number.isInteger(d1TargetsPerUpsert) && d1TargetsPerUpsert > 0);
+assert.ok(
+  Number.isInteger(maxUsersIndexCleanupContinuations) &&
+    maxUsersIndexCleanupContinuations >= 0 &&
+    maxUsersIndexCleanupContinuations <= MAX_USERS_INDEX_GC_CONTINUATIONS,
+);
 assert.equal(QUEUE_FREE_TIER_BUDGET.staticRebuildTargetsPerInvocation, 1);
 assert.equal(QUEUE_FREE_TIER_BUDGET.maxContinuationPerInvocation, 1);
 const maxD1QueueUpsertStatements = Math.ceil(maxMutationTargets / d1TargetsPerUpsert);
-const maxMutationQueueOperations = maxMutationTargets * 3;
+const maxMutationQueueDeliveries =
+  maxMutationTargets + maxUsersIndexCleanupContinuations;
+const maxMutationQueueOperations = maxMutationQueueDeliveries * 3;
 assert.ok(maxD1QueueUpsertStatements <= 3);
 assert.ok(maxMutationQueueOperations <= OFFICIAL_FREE_LIMITS.queueOperationsPerDay);
 
@@ -132,8 +147,10 @@ console.log(
         reservedOperationsPerDay: reservedOperations,
         retriesPerMessageMax: 3,
         maxTargetsFromOneMutation: maxMutationTargets,
+        maxUsersIndexGcContinuationDeliveries: maxUsersIndexCleanupContinuations,
+        maxQueueDeliveriesForOneMutationIncludingUsersIndexGc: maxMutationQueueDeliveries,
         d1QueueUpsertStatementsAtMaxFanout: maxD1QueueUpsertStatements,
-        maxQueueOperationsForOneMutationWithContinuations: maxMutationQueueOperations,
+        maxQueueOperationsForOneMutationIncludingBoundedUsersIndexGc: maxMutationQueueOperations,
       },
       d1StatementsPerInvocation: {
         soft: D1_QUERY_SOFT_LIMIT,

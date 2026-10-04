@@ -44,6 +44,11 @@ const USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION = 2;
 const USERS_INDEX_V2_GENERATION_LAYOUT_VERSION = 2;
 /** R2 bulk delete は1000 keys/callまで。1回のrebuild cleanupはさらに小さく抑える。 */
 const USERS_INDEX_V2_CLEANUP_LIMIT = 500;
+const USERS_INDEX_V2_CLEANUP_FETCH_LIMIT = USERS_INDEX_V2_CLEANUP_LIMIT + 1;
+/** 一連のrebuildから自動実行するGC追加delivery数。残りは次回rebuildへ延期する。 */
+export const USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS = 10;
+export const USERS_INDEX_V2_CLEANUP_CONTINUATION_PREFIX =
+  "users_index_v2_gc_continuation:";
 const USERS_INDEX_V2_PURGE_SAFETY_SEC = 24 * 60 * 60;
 // A same-generation skip is only safe when every immutable object can be
 // checked.  Keep the verification below the Workers subrequest budget; large
@@ -76,6 +81,31 @@ type PendingArtifact = {
   objectKey: string;
   contentHash: string;
 };
+
+type ArtifactGcResult = {
+  deleted: number;
+  hasMore: boolean;
+  blocked?: boolean;
+};
+
+export function parseUsersIndexV2CleanupContinuationCount(
+  reason: string | null | undefined,
+): number | null {
+  if (!reason?.startsWith(USERS_INDEX_V2_CLEANUP_CONTINUATION_PREFIX)) {
+    return null;
+  }
+  const suffix = reason.slice(USERS_INDEX_V2_CLEANUP_CONTINUATION_PREFIX.length);
+  if (!/^\d+$/.test(suffix)) return null;
+  const count = Number(suffix);
+  return Number.isSafeInteger(count) && count > 0 ? count : null;
+}
+
+export function usersIndexV2CleanupContinuationReason(count: number): string {
+  if (!Number.isSafeInteger(count) || count <= 0) {
+    throw new Error("invalid_users_index_v2_cleanup_continuation_count");
+  }
+  return `${USERS_INDEX_V2_CLEANUP_CONTINUATION_PREFIX}${count}`;
+}
 
 function throwIfAborted(signal: RebuildSignal): void {
   if (!signal?.aborted) return;
@@ -333,14 +363,18 @@ export async function reconcileTrackedArtifacts(
   env: Env,
   liveKeys: readonly string[],
   signal?: RebuildSignal,
-): Promise<{ deleted: number; hasMore: boolean }> {
+  options?: { requireKnownManifest?: boolean },
+): Promise<ArtifactGcResult> {
   throwIfAborted(signal);
   const currentManifest = await readCurrentManifestGeneration(env);
-  // A transient manifest read failure cannot prove which generation is live.
-  // Keep the rows for the next bounded continuation rather than deleting a
-  // key that the published manifest may still reference.
+  // A manifest read failure cannot prove which generation is live. Keep the
+  // rows for a later ordinary rebuild rather than risking deletion or an
+  // automatic continuation loop against a persistent R2 failure.
   if (currentManifest.kind === "unknown") {
-    return { deleted: 0, hasMore: true };
+    return { deleted: 0, hasMore: false, blocked: true };
+  }
+  if (options?.requireKnownManifest && currentManifest.kind !== "known") {
+    return { deleted: 0, hasMore: false, blocked: true };
   }
   const protectedGeneration =
     currentManifest.kind === "known" ? currentManifest.generation : null;
@@ -378,18 +412,20 @@ export async function reconcileTrackedArtifacts(
             USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
             protectedPagePrefix!,
             protectedPostingPrefix!,
-            USERS_INDEX_V2_CLEANUP_LIMIT,
+            USERS_INDEX_V2_CLEANUP_FETCH_LIMIT,
           ]
-        : [USERS_INDEX_V2_CLEANUP_LIMIT]),
+        : [USERS_INDEX_V2_CLEANUP_FETCH_LIMIT]),
     )
     .all<TrackedArtifactRow>();
   throwIfAborted(signal);
 
-  const staleKeys = (rows.results ?? []).map((row) => row.object_key);
+  const staleKeys = (rows.results ?? [])
+    .slice(0, USERS_INDEX_V2_CLEANUP_LIMIT)
+    .map((row) => row.object_key);
   if (staleKeys.length === 0) {
     return {
       deleted: 0,
-      hasMore: (rows.results ?? []).length >= USERS_INDEX_V2_CLEANUP_LIMIT,
+      hasMore: false,
     };
   }
 
@@ -429,7 +465,7 @@ export async function reconcileTrackedArtifacts(
   throwIfAborted(signal);
   return {
     deleted: staleKeys.length,
-    hasMore: (rows.results ?? []).length >= USERS_INDEX_V2_CLEANUP_LIMIT,
+    hasMore: (rows.results ?? []).length > USERS_INDEX_V2_CLEANUP_LIMIT,
   };
 }
 
@@ -437,11 +473,15 @@ export async function purgeDeletedArtifacts(
   env: Env,
   liveKeys: readonly string[],
   signal?: RebuildSignal,
-): Promise<{ deleted: number; hasMore: boolean }> {
+  options?: { requireKnownManifest?: boolean },
+): Promise<ArtifactGcResult> {
   throwIfAborted(signal);
   const currentManifest = await readCurrentManifestGeneration(env);
-  if (currentManifest.kind === "unknown") {
-    return { deleted: 0, hasMore: true };
+  if (
+    currentManifest.kind === "unknown" ||
+    (options?.requireKnownManifest && currentManifest.kind !== "known")
+  ) {
+    return { deleted: 0, hasMore: false, blocked: true };
   }
   const cutoff = Math.floor(Date.now() / 1000) - USERS_INDEX_V2_PURGE_SAFETY_SEC;
   const protectedGeneration =
@@ -484,17 +524,21 @@ export async function purgeDeletedArtifacts(
             USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
             protectedPagePrefix!,
             protectedPostingPrefix!,
-            USERS_INDEX_V2_CLEANUP_LIMIT,
+            USERS_INDEX_V2_CLEANUP_FETCH_LIMIT,
           ]
-        : [USERS_INDEX_V2_CLEANUP_LIMIT]),
+        : [USERS_INDEX_V2_CLEANUP_FETCH_LIMIT]),
     )
     .all<TrackedArtifactRow>();
   throwIfAborted(signal);
-  const keys = (rows.results ?? []).map((row) => row.object_key).filter(Boolean);
+  const page = rows.results ?? [];
+  const keys = page
+    .slice(0, USERS_INDEX_V2_CLEANUP_LIMIT)
+    .map((row) => row.object_key)
+    .filter(Boolean);
   if (keys.length === 0) {
     return {
       deleted: 0,
-      hasMore: (rows.results ?? []).length >= USERS_INDEX_V2_CLEANUP_LIMIT,
+      hasMore: false,
     };
   }
   await env.DB.prepare(
@@ -528,7 +572,30 @@ export async function purgeDeletedArtifacts(
   for (const key of keys) env.artifactHashCache?.set(key, null);
   return {
     deleted: keys.length,
-    hasMore: (rows.results ?? []).length >= USERS_INDEX_V2_CLEANUP_LIMIT,
+    hasMore: page.length > USERS_INDEX_V2_CLEANUP_LIMIT,
+  };
+}
+
+/**
+ * Continue only the bounded stale-object GC for the currently published users
+ * generation. Never rebuild pages or delete anything when its manifest cannot
+ * be read or is absent; another normal rebuild can retry the maintenance later.
+ */
+export async function continueUsersIndexV2ArtifactCleanup(
+  env: Env,
+  signal?: RebuildSignal,
+): Promise<{ hasMore: boolean; blocked: boolean }> {
+  throwIfAborted(signal);
+  const cleanup = await reconcileTrackedArtifacts(env, [], signal, {
+    requireKnownManifest: true,
+  });
+  const purge = await purgeDeletedArtifacts(env, [], signal, {
+    requireKnownManifest: true,
+  });
+  const blocked = Boolean(cleanup.blocked || purge.blocked);
+  return {
+    hasMore: !blocked && (cleanup.hasMore || purge.hasMore),
+    blocked,
   };
 }
 
@@ -653,19 +720,22 @@ export async function rebuildUsersIndexV2Artifacts(
   ) {
     const cleanup = await reconcileTrackedArtifacts(env, expectedLiveKeys, signal);
     const purge = await purgeDeletedArtifacts(env, expectedLiveKeys, signal);
+    const gcBlocked = Boolean(cleanup.blocked || purge.blocked);
+    const gcHasMore = !gcBlocked && (cleanup.hasMore || purge.hasMore);
     console.info(
       JSON.stringify({
         service: "users-index-v2",
         result: "generation_same_skip",
         generation,
         gc_deleted: cleanup.deleted + purge.deleted,
-        gc_has_more: cleanup.hasMore || purge.hasMore,
+        gc_has_more: gcHasMore,
+        gc_blocked: gcBlocked,
       }),
     );
     return {
       liveKeys: expectedLiveKeys,
       objectCount: expectedLiveKeys.length,
-      hasMore: cleanup.hasMore || purge.hasMore,
+      hasMore: gcHasMore,
       skipped: true,
     };
   }
@@ -788,10 +858,11 @@ export async function rebuildUsersIndexV2Artifacts(
   await recordArtifacts(env, [manifestArtifact], signal);
   const cleanup = await reconcileTrackedArtifacts(env, liveKeys, signal);
   const purge = await purgeDeletedArtifacts(env, liveKeys, signal);
+  const gcBlocked = Boolean(cleanup.blocked || purge.blocked);
   return {
     liveKeys,
     objectCount: liveKeys.length,
-    hasMore: cleanup.hasMore || purge.hasMore,
+    hasMore: !gcBlocked && (cleanup.hasMore || purge.hasMore),
     skipped: false,
   };
 }

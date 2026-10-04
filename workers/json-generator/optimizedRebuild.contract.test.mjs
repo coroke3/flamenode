@@ -145,3 +145,25 @@ test("event playlistはevent_baseと同じ公開集合を安定した上映順�
   );
   assert.doesNotMatch(playlist, /INNER JOIN video_events/);
 });
+
+test("users_index GC continuationはcleanup-onlyで最大10回だけ再queueする", () => {
+  const continuationStart = source.indexOf("const usersIndexCleanupContinuation =");
+  const continuationEnd = source.indexOf(
+    "const videoProjectionBundleAttempted =",
+    continuationStart,
+  );
+  const continuation = source.slice(continuationStart, continuationEnd);
+
+  assert.ok(continuationStart >= 0);
+  assert.match(continuation, /continueUsersIndexV2ArtifactCleanup\(env, signal\)/);
+  assert.match(
+    continuation,
+    /usersIndexCleanupContinuation < USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS/,
+  );
+  assert.match(continuation, /requeueReason: usersIndexV2CleanupContinuationReason/);
+  assert.doesNotMatch(continuation, /rebuildTarget\(|rebuildUsersIndexV2FromLegacyArtifact\(/);
+  assert.match(
+    source,
+    /if \(v2\.hasMore\) \{[\s\S]*requeueCurrentTarget: true[\s\S]*usersIndexV2CleanupContinuationReason\(1\)/,
+  );
+});

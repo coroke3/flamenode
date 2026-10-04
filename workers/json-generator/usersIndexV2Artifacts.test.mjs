@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  parseUsersIndexV2CleanupContinuationCount,
   rebuildUsersIndexV2Artifacts,
   rebuildUsersIndexV2FromLegacyArtifact,
+  USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS,
+  usersIndexV2CleanupContinuationReason,
 } from "./usersIndexV2Artifacts.ts";
 import { rebuildEnvironment } from "../shared/rebuildEnvironment.ts";
 
@@ -17,6 +20,27 @@ function source(index) {
     sort_score: 3,
   };
 }
+
+test("users v2 GC continuation reasonはbounded chain countを正しく保持する", () => {
+  assert.equal(USERS_INDEX_V2_MAX_CLEANUP_CONTINUATIONS, 10);
+  assert.equal(
+    parseUsersIndexV2CleanupContinuationCount(
+      usersIndexV2CleanupContinuationReason(1),
+    ),
+    1,
+  );
+  assert.equal(
+    parseUsersIndexV2CleanupContinuationCount(
+      usersIndexV2CleanupContinuationReason(10),
+    ),
+    10,
+  );
+  assert.equal(
+    parseUsersIndexV2CleanupContinuationCount("users_index_v2_gc_continuation:bad"),
+    null,
+  );
+  assert.equal(parseUsersIndexV2CleanupContinuationCount("visibility_change"), null);
+});
 
 function createEnv({
   failPutKey,
