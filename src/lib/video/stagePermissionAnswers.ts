@@ -1,4 +1,4 @@
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { getDatabase } from "../cloudflare.ts";
 import {
   eventCustomQuestions,
@@ -12,11 +12,10 @@ import {
 import { MAX_STAGE_PERMISSION_QUESTIONS } from "./atomicLimits.ts";
 import { computeStagePermissionAnswerDeleteEventIds } from "./eventSync.ts";
 import {
-  compositeAuditTargetId,
   emptyVideoAtomicWritePlan,
   type VideoAtomicWritePlan,
 } from "./atomicWritePlanCore.ts";
-import { expectedRowCondition } from "../audit/expectedRowCondition.ts";
+import { buildVideoCustomAnswerReplacePlan } from "./customAnswerReplacePlan.ts";
 
 type DB = NonNullable<ReturnType<typeof getDatabase>>;
 
@@ -369,63 +368,34 @@ export async function buildReplaceStagePermissionAnswersPlan(
       answer.value,
     ]),
   );
-  const plan = emptyVideoAtomicWritePlan();
-  if (existing.length > 0) {
-    plan.statements.push(db.delete(videoCustomAnswers).where(or(...existing.map((row) => and(
-      eq(videoCustomAnswers.video_id, row.video_id),
-      eq(videoCustomAnswers.event_id, row.event_id),
-      eq(videoCustomAnswers.question_id, row.question_id),
-      expectedRowCondition({ expectedCurrent: row }),
-    )!))!));
-    plan.expectedChanges.push(existing.length);
-    plan.audits.push(...existing.map((row) => ({
-      table_name: "video_custom_answers",
-      target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
-      operation: "DELETE" as const,
-      before: { ...row },
-      after: null,
-      actor_user_id: args.actorUserId,
-      context: "video-save:stage-permission",
-      retention_class: "normal" as const,
-      strict: true,
-    })));
-  }
-  if (eventIds.length === 0 || submitted.size === 0) return plan;
-
   const eventIdSet = new Set(eventIds);
-  const values = stageQuestions
-    .filter(
-      (question) =>
-        eventIdSet.has(question.event_id) && question.is_active === 1,
-    )
-    .map((question) => {
-      const value = submitted.get(question.question_key)?.trim();
-      if (!value) return null;
-      return {
-        video_id: args.videoId,
-        event_id: question.event_id,
-        question_id: question.id,
-        answer_text: value,
-        answer_json: null,
-        created_at: args.now,
-        updated_at: args.now,
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => item !== null);
+  const values =
+    eventIds.length === 0 || submitted.size === 0
+      ? []
+      : stageQuestions
+        .filter(
+          (question) =>
+            eventIdSet.has(question.event_id) && question.is_active === 1,
+        )
+        .map((question) => {
+          const value = submitted.get(question.question_key)?.trim();
+          if (!value) return null;
+          return {
+            video_id: args.videoId,
+            event_id: question.event_id,
+            question_id: question.id,
+            answer_text: value,
+            answer_json: null,
+            created_at: args.now,
+            updated_at: args.now,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => item !== null);
 
-  if (values.length === 0) return plan;
-  plan.statements.push(db.insert(videoCustomAnswers).values(values));
-  plan.expectedChanges.push(values.length);
-  plan.audits.push(...values.map((row) => ({
-    table_name: "video_custom_answers",
-    target_id: compositeAuditTargetId(row.video_id, row.event_id, row.question_id),
-    operation: "CREATE" as const,
-    before: null,
-    after: { ...row },
-    actor_user_id: args.actorUserId,
+  return buildVideoCustomAnswerReplacePlan(db, {
+    existing,
+    inserted: values,
+    actorUserId: args.actorUserId,
     context: "video-save:stage-permission",
-    retention_class: "normal" as const,
-    strict: true,
-  })));
-  return plan;
+  });
 }
