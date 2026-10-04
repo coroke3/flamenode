@@ -48,7 +48,7 @@ test("public cache write は非JSON値とUTF-8 byte上限超過entryを作らな
   assert.match(source, /function utf8ByteLengthExceeds/);
   assert.match(
     source,
-    /function utf8ByteLengthExceeds\(value: string, limit: number\): boolean \{[\s\S]*?if \(value\.length <= Math\.floor\(limit \/ 3\)\) return false;[\s\S]*?let bytes = 0;/,
+    /function utf8ByteLengthUpTo\(value: string, limit: number\): number \| null \{[\s\S]*?if \(value\.length <= Math\.floor\(limit \/ 3\)\) return value\.length \* 3;[\s\S]*?let bytes = 0;/,
   );
 });
 
