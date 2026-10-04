@@ -136,6 +136,7 @@ import {
   staticVideoSearchPostingPageObjectKey,
   type StaticSearchIndexVideo,
 } from "../../src/lib/publicData/staticSearchIndexCore.ts";
+import { PUBLIC_JSON_CACHE_TTL_SEC } from "../../src/lib/publicData/publicJsonCacheTtl.ts";
 import {
   readWorkerVisibilityBlockedEntitiesManifest,
   releaseBlockedEntityInManifest,
@@ -1654,11 +1655,19 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
           generation,
         }),
       );
+      // A generation is ~1,400 objects for 3,000 videos, so removing 20 per
+      // rebuild lets old generations pile up in R2. Readers keep the manifest
+      // for at most PUBLIC_JSON_CACHE_TTL_SEC.searchIndex (no stale fallback),
+      // so once the live manifest is well past that, no reader can follow an
+      // older generation and its objects go in one R2 batch delete (max 1,000).
+      const manifestSettled =
+        Math.floor(Date.now() / 1000) - currentManifest.generatedAt >
+        2 * PUBLIC_JSON_CACHE_TTL_SEC.searchIndex;
       await reconcileTrackedArtifacts(
         env,
         { targetType: "search_index", targetId: "global" },
         liveKeys,
-        20,
+        manifestSettled ? 1000 : 20,
         signal,
       );
       return;
@@ -1769,7 +1778,7 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
 
 type SearchPostingManifestState =
   | { kind: "absent" }
-  | { kind: "known"; generation: string; pageCounts?: number[] }
+  | { kind: "known"; generation: string; generatedAt: number; pageCounts?: number[] }
   | { kind: "unknown" };
 
 async function readCurrentSearchPostingManifest(
@@ -1785,7 +1794,12 @@ async function readCurrentSearchPostingManifest(
     const manifest = normalizeStaticVideoSearchPostingManifest(await object.json());
     throwIfAborted(signal);
     return manifest
-      ? { kind: "known", generation: manifest.generation, pageCounts: manifest.page_counts }
+      ? {
+          kind: "known",
+          generation: manifest.generation,
+          generatedAt: manifest.generated_at,
+          pageCounts: manifest.page_counts,
+        }
       : { kind: "unknown" };
   } catch {
     throwIfAborted(signal);
