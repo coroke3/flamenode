@@ -4,7 +4,10 @@
  */
 
 import type { VideoEditSectionKey } from "./videoEditSections";
-import type { GeneralEditableFieldKey } from "../video/generalEditPermissionsCore.ts";
+import {
+  sectionAllowedByGeneralFields,
+  type GeneralEditableFieldKey,
+} from "../video/generalEditPermissionsCore.ts";
 
 export type SessionUserLike = {
   id: string;
@@ -30,40 +33,6 @@ export type VideoEditAccessContext = {
   ownerEditableFields: ReadonlySet<GeneralEditableFieldKey>;
   eventPermissionKeysByEvent: ReadonlyMap<string, ReadonlySet<string>>;
 };
-
-function ownerFieldAllowsSection(
-  sectionKey: VideoEditSectionKey,
-  fields: ReadonlySet<GeneralEditableFieldKey>,
-): boolean {
-  switch (sectionKey) {
-    case "video.basics":
-    case "videos.title":
-      return fields.has("title") || fields.has("part");
-    case "video.identity":
-      return ["display_name", "icon_url", "profile_text", "youtube_channel_url", "other_social_links"]
-        .some((key) => fields.has(key as GeneralEditableFieldKey));
-    case "video.credits":
-    case "videos.music_credit":
-      return fields.has("music") || fields.has("music_reference_url") || fields.has("credit");
-    case "video.descriptions":
-    case "videos.review_data":
-      return ["intro_comment", "used_software", "highlights", "production_story", "closing_comment", "custom_answers", "stage_permission"]
-        .some((key) => fields.has(key as GeneralEditableFieldKey));
-    case "video.members":
-    case "videos.members":
-      return fields.has("members") || fields.has("is_collab");
-    case "video.member_chapters":
-      return fields.has("chapters");
-    case "video.youtube_id":
-    case "videos.youtube_id":
-      return fields.has("youtube_url");
-    case "video.primary_event":
-    case "videos.primary_event":
-      return fields.has("event_ids");
-    default:
-      return false;
-  }
-}
 
 /**
  * admin と event の両方を許可する画面・操作でも、一度の判定では権限源を混ぜない。
@@ -274,7 +243,7 @@ export function decideCanEditVideoFromAccessContext(args: {
   if (privilegeMode === "normal") {
     if (!context.ownership.isOwner) return false;
     if (creatorOwnerCanManagePermissions(context.ownership, requiredKey)) return true;
-    return ownerFieldAllowsSection(requiredKey, context.ownerEditableFields);
+    return sectionAllowedByGeneralFields(requiredKey, context.ownerEditableFields);
   }
   return Boolean(resolveEventPermissionFromAccessContext(context, requiredKey));
 }

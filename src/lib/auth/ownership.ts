@@ -15,7 +15,6 @@ import type {
 import {
   VIDEO_PERMISSION_ALIASES,
   decideCanEditVideo,
-  resolveOwnerGeneralPolicyKeys,
   resolveVideoOwnershipSync,
   decideCanEditVideoFromAccessContext,
   canUseEventPrivilegeFromAccessContext,
@@ -536,16 +535,14 @@ export async function eventStaffHasExactVideoPermission(args: {
   return grant.allowed;
 }
 
-async function loadPrimaryEventOwnerPolicy(
+/** normal owner の最終 field set。イベント個別設定が有効な場合だけ完全上書きし、
+ * それ以外は system_settings の公開状態別グローバル設定を使う。 */
+export async function loadEffectiveOwnerEditableFieldSet(
   db: DB,
-  primaryEventId: string | null | undefined,
-  video?: Pick<VideoRow, "visibility_status">,
+  video: Pick<VideoRow, "primary_event_id" | "visibility_status">,
 ): Promise<Set<GeneralEditableFieldKey>> {
-  if (!primaryEventId) {
-    return video
-      ? loadGeneralEditableFieldSet(db, video)
-      : (resolveOwnerGeneralPolicyKeys({ primaryEvent: null }) as Set<GeneralEditableFieldKey>);
-  }
+  const primaryEventId = video.primary_event_id;
+  if (!primaryEventId) return loadGeneralEditableFieldSet(db, video);
   const row = (
     await db
       .select({
@@ -571,9 +568,7 @@ async function loadPrimaryEventOwnerPolicy(
       return parseGeneralEditableFields(policyJson);
     }
     if (parseGeneralEditablePolicyV2(policyJson)) {
-      const globalFields = video
-        ? await loadGeneralEditableFieldSet(db, video)
-        : new Set<GeneralEditableFieldKey>();
+      const globalFields = await loadGeneralEditableFieldSet(db, video);
       return resolveGeneralEditableFieldsFromPolicy({
         allowUserVideoEdits: row.allow_user_video_edits,
         policyJson,
@@ -583,18 +578,7 @@ async function loadPrimaryEventOwnerPolicy(
     // A malformed/unknown policy must not fall back to the global policy.
     return new Set();
   }
-  return video
-    ? loadGeneralEditableFieldSet(db, video)
-    : (resolveOwnerGeneralPolicyKeys({ primaryEvent: null }) as Set<GeneralEditableFieldKey>);
-}
-
-/** normal owner の最終 field set。イベント個別設定が有効な場合だけ完全上書きし、
- * それ以外は system_settings の公開状態別グローバル設定を使う。 */
-export async function loadEffectiveOwnerEditableFieldSet(
-  db: DB,
-  video: Pick<VideoRow, "primary_event_id" | "visibility_status">,
-): Promise<Set<GeneralEditableFieldKey>> {
-  return loadPrimaryEventOwnerPolicy(db, video.primary_event_id, video);
+  return loadGeneralEditableFieldSet(db, video);
 }
 
 /**
@@ -664,7 +648,7 @@ export async function canEditVideo(args: {
     }
 
     const fields =
-      generalFields ?? (await loadPrimaryEventOwnerPolicy(db, video.primary_event_id, video));
+      generalFields ?? (await loadEffectiveOwnerEditableFieldSet(db, video));
     return sectionAllowedByGeneralFields(requiredKey, fields);
   }
 
