@@ -21,8 +21,6 @@ export interface Env {
 const STALE_QUEUE_RECONCILE_LIMIT = 20;
 /** Cloudflare Queue/Cron invocations stop at 15m; leave one minute before recovery may reclaim a row. */
 export const STATIC_REBUILD_PROCESSING_LEASE_SEC = 16 * 60;
-/** global target は重いため常に1件ずつ。個別 target も MAX_QUEUE_ITEMS_PER_RUN=1 で直列。 */
-const PROCESSING_CONCURRENCY = 1;
 const MAX_ATTEMPTS = 4;
 const MARK_DONE_RETRY_ATTEMPTS = 3;
 const MARK_DONE_RETRY_DELAY_MS = 50;
@@ -238,24 +236,16 @@ async function processStaticRebuildQueueImpl(
   const summary = { processed: 0, failed: 0, skipped: 0 };
   let followUpPending = false;
 
-  for (
-    let offset = 0;
-    offset < rows.length;
-    offset += PROCESSING_CONCURRENCY
-  ) {
+  // Rebuild targets are CPU-heavy; process each bounded row serially.
+  for (const row of rows) {
     throwIfAborted(signal, "static rebuild queue aborted");
     if (isEnvD1BudgetExhausted(env)) {
       followUpPending = true;
       break;
     }
-    const chunk = rows.slice(offset, offset + PROCESSING_CONCURRENCY);
-    const outcomes = await Promise.all(
-      chunk.map((row) => processQueueRow(env, mode, row, now, signal, metrics)),
-    );
-    for (const outcome of outcomes) {
-      summary[outcome.outcome] += 1;
-      if (outcome.followUpPending) followUpPending = true;
-    }
+    const outcome = await processQueueRow(env, mode, row, now, signal, metrics);
+    summary[outcome.outcome] += 1;
+    if (outcome.followUpPending) followUpPending = true;
   }
 
   return {

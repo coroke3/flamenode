@@ -21,6 +21,16 @@ test("processStaticRebuildQueue は既定で reconcile し Recovery option の�
   assert.match(queueSource, /processStaticRebuildQueueImpl\(env, signal, options\)/);
 });
 
+test("static rebuild queue keeps one-at-a-time processing without Promise.all", () => {
+  assert.doesNotMatch(queueSource, /PROCESSING_CONCURRENCY/);
+  const processingLoop = queueSource.slice(
+    queueSource.indexOf("for (const row of rows)"),
+    queueSource.indexOf("\n\n  return {\n    ...summary"),
+  );
+  assert.match(processingLoop, /await processQueueRow\(/);
+  assert.doesNotMatch(processingLoop, /Promise\.all/);
+});
+
 function fakeDb(row) {
   const queries = [];
   return {
