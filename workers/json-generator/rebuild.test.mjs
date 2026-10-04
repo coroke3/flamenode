@@ -1479,4 +1479,8 @@ test("検索postingのサイズ検査は、同一generationのskip後、書き�
   assert.ok(
     body.indexOf("assertStaticListObjectSize(manifestKey, postings.manifest)") < firstPostingPut,
   );
+  assert.ok(
+    body.indexOf("buildStaticVideoSearchPostingArtifacts(") > skip,
+    "the n-gram index is built only when the skip does not apply",
+  );
 });

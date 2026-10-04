@@ -148,6 +148,11 @@ export function normalizeStaticSearchIndexPayload(
   return payload;
 }
 
+/** Generation stored in video posting objects for a content hash. */
+export function staticVideoSearchPostingGeneration(generation: string): string {
+  return `videos-${generation}`;
+}
+
 export function buildStaticVideoSearchPostingArtifacts(args: {
   items: readonly StaticSearchIndexVideo[];
   generatedAt: number;
@@ -155,7 +160,7 @@ export function buildStaticVideoSearchPostingArtifacts(args: {
 }): StaticSearchPostingArtifacts<StaticSearchIndexVideo> {
   return buildStaticSearchPostingArtifacts({
     ...args,
-    generation: `videos-${args.generation}`,
+    generation: staticVideoSearchPostingGeneration(args.generation),
     textOf: (video) => [
       video.id,
       video.title,
@@ -195,7 +200,10 @@ export function staticVideoSearchPostingDirectoryObjectKey(
   generation: string,
   bucket: number,
 ): string {
-  return staticSearchPostingDirectoryObjectKey(`videos-${generation}`, bucket);
+  return staticSearchPostingDirectoryObjectKey(
+    staticVideoSearchPostingGeneration(generation),
+    bucket,
+  );
 }
 
 export function staticVideoSearchPostingPageObjectKey(
@@ -203,5 +211,25 @@ export function staticVideoSearchPostingPageObjectKey(
   bucket: number,
   page: number,
 ): string {
-  return staticSearchPostingPageObjectKey(`videos-${generation}`, bucket, page);
+  return staticSearchPostingPageObjectKey(
+    staticVideoSearchPostingGeneration(generation),
+    bucket,
+    page,
+  );
+}
+
+/** Directory and page keys of a generation, listed from manifest page counts. */
+export function staticVideoSearchPostingObjectKeys(
+  generation: string,
+  pageCounts: readonly number[],
+): string[] {
+  const keys: string[] = [];
+  pageCounts.forEach((count, bucket) => {
+    if (count === 0) return;
+    keys.push(staticVideoSearchPostingDirectoryObjectKey(generation, bucket));
+    for (let page = 1; page <= count; page += 1) {
+      keys.push(staticVideoSearchPostingPageObjectKey(generation, bucket, page));
+    }
+  });
+  return keys;
 }

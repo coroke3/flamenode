@@ -5,6 +5,9 @@ import {
   buildStaticVideoSearchPostingArtifacts,
   normalizeStaticVideoSearchPostingManifest,
   normalizeStaticVideoSearchPostingPage,
+  staticVideoSearchPostingDirectoryObjectKey,
+  staticVideoSearchPostingObjectKeys,
+  staticVideoSearchPostingPageObjectKey,
 } from "./staticSearchIndexCore.ts";
 
 test("searchStaticIndexVideos matches title and creator fields", () => {
@@ -79,5 +82,37 @@ test("video search posting はタイトル・X ID・日本語名を候補化し�
   assert.deepEqual(
     normalizeStaticVideoSearchPostingPage(page),
     page,
+  );
+});
+
+test("manifest のページ数から、生成した directory・page の key を index を作らずに列挙できる", () => {
+  const items = Array.from({ length: 400 }, (_, index) => ({
+    id: `v${index}`,
+    title: `東京の作品 ${index}`,
+    youtube_video_id: null,
+    display_name: `Creator ${index % 7}`,
+    creator_x_user_id: `user_${index % 5}`,
+    creator_x_user_name: null,
+  }));
+  const artifacts = buildStaticVideoSearchPostingArtifacts({
+    generation: "g-keys",
+    generatedAt: 100,
+    items,
+  });
+  const built = [
+    ...artifacts.directories.map(({ bucket }) =>
+      staticVideoSearchPostingDirectoryObjectKey("g-keys", bucket),
+    ),
+    ...artifacts.pages.map(({ bucket, page }) =>
+      staticVideoSearchPostingPageObjectKey("g-keys", bucket, page.page),
+    ),
+  ];
+  const manifest = normalizeStaticVideoSearchPostingManifest(
+    JSON.parse(JSON.stringify(artifacts.manifest)),
+  );
+  assert.ok(manifest?.page_counts);
+  assert.deepEqual(
+    staticVideoSearchPostingObjectKeys("g-keys", manifest.page_counts).sort(),
+    built.sort(),
   );
 });
