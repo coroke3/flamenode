@@ -78,12 +78,36 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
   return null;
 }
 
+/**
+ * `JSON.stringify(row)` が最上位 generated_at（数値・文字列）で始まるとき、
+ * その項目を除いた直列化を文字列の切り出しで返す。残りの項目は同じ順序・同じ
+ * 値で直列化されるので `JSON.stringify(rest)` と一致する。合わなければ null。
+ */
+function sliceLeadingGeneratedAt(
+  row: Record<string, unknown>,
+  serializedRow: string,
+): string | null {
+  const value = row.generated_at;
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (Object.keys(row)[0] !== "generated_at") return null;
+  const prefix = `{"generated_at":${JSON.stringify(value)}`;
+  if (!serializedRow.startsWith(prefix)) return null;
+  if (serializedRow.length === prefix.length + 1) return "{}";
+  if (serializedRow[prefix.length] !== ",") return null;
+  return `{${serializedRow.slice(prefix.length + 1)}`;
+}
+
 /** 最上位generated_atを除いた直列化。row自身の直列化を渡すと再直列化を省ける。 */
 function meaningfulJsonText(
   row: Record<string, unknown>,
   serializedRow?: string,
 ): string {
   if (Object.hasOwn(row, "generated_at")) {
+    const sliced =
+      serializedRow === undefined
+        ? null
+        : sliceLeadingGeneratedAt(row, serializedRow);
+    if (sliced !== null) return sliced;
     const { generated_at: _generatedAt, ...meaningful } = row;
     return JSON.stringify(meaningful);
   }
@@ -180,6 +204,17 @@ function topLevelJsonView(body: unknown): Record<string, unknown> | null {
  * staticArtifactContentHash / staticArtifactCustomMetadata(JSON.stringify(body)) と同値で、
  * plain object では直列化済み文字列の再parseを省く。
  */
+/**
+ * `staticArtifactContentHash(JSON.stringify(body))` と同値。plain object では
+ * 直列化した文字列の再parse・再直列化を省く（5,000行の生成素材で各10ms前後）。
+ */
+export async function jsonContentHash(body: unknown): Promise<string> {
+  const serialized = JSON.stringify(body);
+  return topLevelJsonView(body)
+    ? sha256Hex(meaningfulJsonText(body as Record<string, unknown>, serialized))
+    : staticArtifactContentHash(serialized);
+}
+
 export async function serializeJsonArtifact(
   body: unknown,
   defaultSchemaVersion = 1,

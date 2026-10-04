@@ -4,8 +4,8 @@ import {
   resolveEventFreshness,
 } from "./freshness.ts";
 import {
+  jsonContentHash,
   serializeJsonArtifact,
-  staticArtifactContentHash,
   resolveIdenticalJsonArtifactPut,
 } from "./r2Dedup.ts";
 import { staticRebuildArtifactTargetId } from "./staticGlobalRebuildTargets.ts";
@@ -1623,9 +1623,10 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     videos: videos.results ?? [],
     users: users.results ?? [],
   };
-  const generation = await staticArtifactContentHash(
-    JSON.stringify({ videos: postingItems, users: users.results ?? [] }),
-  );
+  const generation = await jsonContentHash({
+    videos: postingItems,
+    users: users.results ?? [],
+  });
   const postings = buildStaticVideoSearchPostingArtifacts({
     items: postingItems,
     generatedAt,
