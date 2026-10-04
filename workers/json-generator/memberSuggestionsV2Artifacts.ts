@@ -11,6 +11,7 @@ import {
   MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES,
 } from "../../src/lib/video/memberSuggestionsPostingsV2.ts";
 import type { MemberSuggestionItem } from "../../src/lib/video/memberSuggestionsCore.ts";
+import { abortGuard } from "../shared/abort.ts";
 
 /**
  * member_suggestions の canonical V1 rebuild と同じ invocation で公開するため、
@@ -25,15 +26,7 @@ const PRIVATE_CACHE_CONTROL = "private, max-age=0, must-revalidate";
 
 type V2Bucket = Pick<R2Bucket, "get" | "put" | "delete" | "list">;
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(
-    signal.reason === undefined
-      ? "member suggestions v2 rebuild aborted"
-      : String(signal.reason),
-  );
-}
+const throwIfAborted = abortGuard("member suggestions v2 rebuild aborted");
 
 function assertArtifactFits(key: string, value: unknown): void {
   const bytes = memberSuggestionsV2ArtifactByteLength(value);

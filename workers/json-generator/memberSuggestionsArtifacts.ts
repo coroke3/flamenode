@@ -21,6 +21,7 @@ import {
   type MemberSuggestionItem,
   type MemberSuggestionSourceEntry,
 } from "../../src/lib/video/memberSuggestionsCore.ts";
+import { abortGuard } from "../shared/abort.ts";
 
 const MEMBER_SUGGESTIONS_ARTIFACT_TARGET_TYPE = "member_suggestions";
 const MEMBER_SUGGESTIONS_ARTIFACT_TARGET_ID = "global";
@@ -46,13 +47,7 @@ type Env = {
 type RebuildSignal = AbortSignal | undefined;
 type TrackedArtifactRow = { object_key: string };
 
-function throwIfAborted(signal: RebuildSignal): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(
-    signal.reason === undefined ? "static rebuild aborted" : String(signal.reason),
-  );
-}
+const throwIfAborted = abortGuard("static rebuild aborted");
 
 function assertArtifactSize(key: string, value: unknown, maxBytes: number): void {
   const byteLength = new TextEncoder().encode(JSON.stringify(value)).byteLength;

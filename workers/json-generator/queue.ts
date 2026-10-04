@@ -10,6 +10,7 @@ import {
 import { nextAttemptNumber } from "../shared/queue.ts";
 import { isD1BudgetExhausted, type D1Budget } from "../shared/d1Budget.ts";
 import { safeErrorSummary } from "../shared/safeLog.ts";
+import { throwIfAborted } from "../shared/abort.ts";
 
 export interface Env {
   DB: D1Database;
@@ -63,12 +64,6 @@ function d1BudgetMetrics(env: Env): {
     d1_rows_read: env.d1Budget?.rowsRead ?? 0,
     d1_rows_written: env.d1Budget?.rowsWritten ?? 0,
   };
-}
-
-function throwIfAborted(signal: AbortSignal | undefined, fallback: string): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(signal.reason === undefined ? fallback : String(signal.reason));
 }
 
 async function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {

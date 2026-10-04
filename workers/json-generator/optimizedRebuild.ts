@@ -37,6 +37,7 @@ import {
   EVENT_PLAYLIST_SCHEMA_VERSION,
   eventPlaylistObjectKey,
 } from "../../src/lib/publicData/staticEventPlaylistCore.ts";
+import { abortGuard } from "../shared/abort.ts";
 
 export type OptimizedRebuildEnv = {
   DB: D1Database;
@@ -81,15 +82,7 @@ type PendingRankingQueueRow = {
   updated_at: number;
 };
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(
-    signal.reason === undefined
-      ? "optimized static rebuild aborted"
-      : String(signal.reason),
-  );
-}
+const throwIfAborted = abortGuard("optimized static rebuild aborted");
 
 /**
  * `rebuild.ts` is a large compatibility surface. Keep it unchanged and wrap

@@ -1,6 +1,7 @@
 /** sync-jobs から利用する bounded score 再計算モジュール。 */
 
 import { safeErrorSummary } from "../shared/safeLog.ts";
+import { abortGuard } from "../shared/abort.ts";
 
 export interface Env {
   DB: D1Database;
@@ -18,11 +19,7 @@ export interface ScoreBatchResult {
   quota_stop_reason: string | null;
 }
 
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
-  if (signal.reason instanceof Error) throw signal.reason;
-  throw new Error(signal.reason === undefined ? "score recalculation aborted" : String(signal.reason));
-}
+const throwIfAborted = abortGuard("score recalculation aborted");
 
 /**
  * D1 Freeの100,000 rows written/dayにはtable rowだけでなくindex entryも含まれる。
