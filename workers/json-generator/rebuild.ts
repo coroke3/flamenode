@@ -138,10 +138,10 @@ import {
 } from "../../src/lib/publicData/staticSearchIndexCore.ts";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "../../src/lib/publicData/publicJsonCacheTtl.ts";
 import {
-  readWorkerVisibilityBlockedEntitiesManifest,
+  putVisibilityManifestWithCas,
+  readVisibilityManifestObject,
   releaseBlockedEntityInManifest,
   upsertBlockedEntityInManifest,
-  writeWorkerVisibilityBlockedEntitiesManifest,
   type PublicVisibilityFenceEntityType,
 } from "../shared/publicVisibilityManifest.ts";
 import { abortGuard } from "../shared/abort.ts";
@@ -1914,7 +1914,7 @@ async function releaseVisibilityFenceAfterRebuild(
     for (let attempt = 0; attempt < 3; attempt += 1) {
       throwIfAborted(signal);
       const { manifest, etag } =
-        await readWorkerVisibilityBlockedEntitiesManifest(env.R2);
+        await readVisibilityManifestObject(env.R2);
       const currentEntry = manifest.entities.find(
         (row) =>
           row.entity_type === entityType &&
@@ -1936,7 +1936,7 @@ async function releaseVisibilityFenceAfterRebuild(
         now,
       );
       try {
-        await writeWorkerVisibilityBlockedEntitiesManifest(
+        await putVisibilityManifestWithCas(
           env.R2,
           restored,
           etag,
@@ -1951,7 +1951,7 @@ async function releaseVisibilityFenceAfterRebuild(
   for (let attempt = 0; attempt < 3; attempt += 1) {
     throwIfAborted(signal);
     const { manifest, etag } =
-      await readWorkerVisibilityBlockedEntitiesManifest(env.R2);
+      await readVisibilityManifestObject(env.R2);
     const entry = manifest.entities.find(
       (row) =>
         row.entity_type === entityType &&
@@ -1979,7 +1979,7 @@ async function releaseVisibilityFenceAfterRebuild(
     );
     if (!released) return;
     try {
-      await writeWorkerVisibilityBlockedEntitiesManifest(env.R2, released, etag);
+      await putVisibilityManifestWithCas(env.R2, released, etag);
     } catch (error) {
       if (attempt === 2) throw error;
       continue;

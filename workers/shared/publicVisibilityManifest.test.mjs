@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  readWorkerVisibilityBlockedEntitiesManifest,
-  writeWorkerVisibilityBlockedEntitiesManifest,
+  readVisibilityManifestObject,
+  putVisibilityManifestWithCas,
 } from "./publicVisibilityManifest.ts";
 
 const manifest = {
@@ -36,7 +36,7 @@ test("worker manifest size guard uses UTF-8 bytes", async () => {
   };
 
   await assert.rejects(
-    () => readWorkerVisibilityBlockedEntitiesManifest(bucket),
+    () => readVisibilityManifestObject(bucket),
     /public_visibility_manifest_too_large/,
   );
 });
@@ -56,7 +56,7 @@ test("worker rejects oversized R2 metadata before text buffering", async () => {
   };
 
   await assert.rejects(
-    () => readWorkerVisibilityBlockedEntitiesManifest(bucket),
+    () => readVisibilityManifestObject(bucket),
     /public_visibility_manifest_too_large/,
   );
   assert.equal(textCalls, 0);
@@ -73,7 +73,7 @@ test("conditional manifest PUT treats R2 null as a CAS failure", async () => {
 
   await assert.rejects(
     () =>
-      writeWorkerVisibilityBlockedEntitiesManifest(
+      putVisibilityManifestWithCas(
         bucket,
         manifest,
         "etag-1",
@@ -92,7 +92,7 @@ test("manifest PUT succeeds when R2 returns an object result", async () => {
     },
   };
 
-  await writeWorkerVisibilityBlockedEntitiesManifest(bucket, manifest, null);
+  await putVisibilityManifestWithCas(bucket, manifest, null);
   assert.equal(calls, 1);
 });
 
@@ -140,7 +140,7 @@ test("concurrent first upserts merge both blocked entities after create CAS loss
     },
   };
 
-  await writeWorkerVisibilityBlockedEntitiesManifest(
+  await putVisibilityManifestWithCas(
     bucket,
     {
       ...manifest,

@@ -1393,7 +1393,7 @@ test("再公開 artifact 完成後だけ release_pending fence を token CAS で
   assert.match(source, /entry\.fence_token !== fenceToken/);
   assert.match(source, /result\.meta\?\.changes/);
   assert.match(source, /state = 'released'/);
-  assert.match(source, /writeWorkerVisibilityBlockedEntitiesManifest/);
+  assert.match(source, /putVisibilityManifestWithCas/);
 });
 
 test("event cleanup explicitly removes the playlist artifact and tracking rows", () => {
