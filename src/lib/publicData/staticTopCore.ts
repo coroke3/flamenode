@@ -10,6 +10,7 @@ import {
   normalizePresentString as normalizeNullableString,
   normalizePresentString as normalizeString,
 } from "./normalize.ts";
+import { normalizeStaticVideoCardBase } from "./staticVideoCardCore.ts";
 import { normalizePublicEventVisibility } from "./visibility.ts";
 import { isPointEvent } from "../utils/eventStatusCore.ts";
 
@@ -111,25 +112,12 @@ function normalizeVideoList(value: unknown): VideoCardData[] {
 }
 
 function normalizeVideo(value: unknown): VideoCardData | null {
-  if (!value || typeof value !== "object") return null;
+  const base = normalizeStaticVideoCardBase(value);
+  if (!base) return null;
   const row = value as Record<string, unknown>;
-  const id = normalizeString(row.id);
-  const title = normalizeString(row.title);
-  if (!id || !title) return null;
   return {
-    id,
-    title,
-    youtube_video_id: normalizeNullableString(row.youtube_video_id),
-    display_name:
-      normalizeString(row.display_name) ??
-      normalizeString(row.creator_display_name) ??
-      "unknown",
-    icon_url:
-      normalizeNullableString(row.icon_url) ??
-      normalizeNullableString(row.creator_icon_url),
+    ...base,
     creator_x_user_id: normalizeNullableString(row.creator_x_user_id),
-    primary_event_id: normalizeNullableString(row.primary_event_id),
-    scheduled_time: normalizeUnix(row.scheduled_time),
     status: normalizeNullableString(row.status) ?? "public",
     part: normalizeNullableString(row.part),
   };
