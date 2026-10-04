@@ -66,25 +66,58 @@ async function sha256Hex(value: string): Promise<string> {
   ).join("");
 }
 
-function meaningfulJsonBody(value: string): string {
+function parseJsonObject(value: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(value) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const { generated_at: _generatedAt, ...meaningful } = parsed as Record<
-        string,
-        unknown
-      >;
-      return JSON.stringify(meaningful);
+      return parsed as Record<string, unknown>;
     }
   } catch {
     // JSONでない文字列はbytes相当の元文字列をhash対象にする。
   }
-  return value;
+  return null;
+}
+
+/** 最上位generated_atを除いた直列化。row自身の直列化を渡すと再直列化を省ける。 */
+function meaningfulJsonText(
+  row: Record<string, unknown>,
+  serializedRow?: string,
+): string {
+  if (Object.hasOwn(row, "generated_at")) {
+    const { generated_at: _generatedAt, ...meaningful } = row;
+    return JSON.stringify(meaningful);
+  }
+  return serializedRow ?? JSON.stringify(row);
 }
 
 /** 最上位generated_atだけを除外し、公開内容が同一なら同じhashを返す。 */
 export async function staticArtifactContentHash(value: string): Promise<string> {
-  return sha256Hex(meaningfulJsonBody(value));
+  const row = parseJsonObject(value);
+  return sha256Hex(row ? meaningfulJsonText(row) : value);
+}
+
+function metadataScalar(value: unknown): string | null {
+  return (typeof value === "string" || typeof value === "number") &&
+    String(value).trim()
+    ? String(value).trim()
+    : null;
+}
+
+function customMetadataFromRow(
+  row: Record<string, unknown> | null,
+  contentHash: string,
+  defaultSchemaVersion: number,
+): Record<string, string> {
+  const schemaVersion = metadataScalar(row?.schema_version);
+  const generation = metadataScalar(
+    row?.source_generation ?? row?.generation ?? row?.generation_key,
+  );
+  return {
+    content_hash: contentHash,
+    schema_version: schemaVersion?.slice(0, 32) ?? String(defaultSchemaVersion),
+    source_generation:
+      generation !== null && generation.length <= 128 ? generation : contentHash,
+  };
 }
 
 /** R2 metadata is a fast dedupe hint; static_artifacts remains the tracking source. */
@@ -93,37 +126,85 @@ export function staticArtifactCustomMetadata(
   contentHash: string,
   defaultSchemaVersion = 1,
 ): Record<string, string> {
-  let schemaVersion = String(defaultSchemaVersion);
-  let sourceGeneration = contentHash;
-  try {
-    const parsed = JSON.parse(serialized) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const row = parsed as Record<string, unknown>;
-      const rawSchema = row.schema_version;
-      if (
-        (typeof rawSchema === "string" || typeof rawSchema === "number") &&
-        String(rawSchema).trim()
-      ) {
-        schemaVersion = String(rawSchema).trim().slice(0, 32);
-      }
-      const rawGeneration =
-        row.source_generation ?? row.generation ?? row.generation_key;
-      if (
-        (typeof rawGeneration === "string" ||
-          typeof rawGeneration === "number") &&
-        String(rawGeneration).trim()
-      ) {
-        const normalized = String(rawGeneration).trim();
-        if (normalized.length <= 128) sourceGeneration = normalized;
-      }
+  return customMetadataFromRow(
+    parseJsonObject(serialized),
+    contentHash,
+    defaultSchemaVersion,
+  );
+}
+
+export type SerializedJsonArtifact = {
+  serialized: string;
+  contentHash: string;
+  customMetadata: Record<string, string>;
+};
+
+/**
+ * Plain object body の最上位値を JSON round-trip 後と同じ形で返す。
+ * object値は toJSON 等で round-trip 結果が変わりうるため null（再parse）にする。
+ */
+function topLevelJsonView(body: unknown): Record<string, unknown> | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const proto = Object.getPrototypeOf(body);
+  if (proto !== Object.prototype && proto !== null) return null;
+  const row = body as Record<string, unknown>;
+  if (typeof row.toJSON === "function") return null;
+  const view: Record<string, unknown> = {};
+  for (const key of [
+    "generated_at",
+    "schema_version",
+    "source_generation",
+    "generation",
+    "generation_key",
+  ]) {
+    if (!Object.hasOwn(row, key)) continue;
+    const value = row[key];
+    if (value !== null && (typeof value === "object" || typeof value === "bigint")) {
+      return null;
     }
-  } catch {
-    // Non-JSON string bodies retain a deterministic content-based generation.
+    if (typeof value === "number") {
+      view[key] = Number.isFinite(value) ? value : null;
+    } else if (
+      typeof value === "string" ||
+      typeof value === "boolean" ||
+      value === null
+    ) {
+      view[key] = value;
+    }
   }
+  return view;
+}
+
+/**
+ * 公開JSON artifactを1回だけ直列化し、content hashとR2 metadataを返す。
+ * staticArtifactContentHash / staticArtifactCustomMetadata(JSON.stringify(body)) と同値で、
+ * plain object では直列化済み文字列の再parseを省く。
+ */
+export async function serializeJsonArtifact(
+  body: unknown,
+  defaultSchemaVersion = 1,
+): Promise<SerializedJsonArtifact> {
+  const serialized = JSON.stringify(body);
+  const view = topLevelJsonView(body);
+  if (!view) {
+    const contentHash = await staticArtifactContentHash(serialized);
+    return {
+      serialized,
+      contentHash,
+      customMetadata: staticArtifactCustomMetadata(
+        serialized,
+        contentHash,
+        defaultSchemaVersion,
+      ),
+    };
+  }
+  const contentHash = await sha256Hex(
+    meaningfulJsonText(body as Record<string, unknown>, serialized),
+  );
   return {
-    content_hash: contentHash,
-    schema_version: schemaVersion,
-    source_generation: sourceGeneration,
+    serialized,
+    contentHash,
+    customMetadata: customMetadataFromRow(view, contentHash, defaultSchemaVersion),
   };
 }
 

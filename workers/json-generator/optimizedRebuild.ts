@@ -1,8 +1,7 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   resolveIdenticalJsonArtifactPut,
-  staticArtifactContentHash,
-  staticArtifactCustomMetadata,
+  serializeJsonArtifact,
   type ArtifactHashCache,
 } from "./r2Dedup.ts";
 import {
@@ -280,8 +279,7 @@ async function putTrackedJson(
 ): Promise<void> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
-  const serialized = JSON.stringify(body);
-  const contentHash = await staticArtifactContentHash(serialized);
+  const { serialized, contentHash, customMetadata } = await serializeJsonArtifact(body);
   const identical = await resolveIdenticalJsonArtifactPut(
     env,
     objectKey,
@@ -295,7 +293,7 @@ async function putTrackedJson(
         contentType: "application/json; charset=utf-8",
         cacheControl,
       },
-      customMetadata: staticArtifactCustomMetadata(serialized, contentHash),
+      customMetadata,
     });
   }
   // R2 PUTをdedupeしても「このgenerationで正常に再構築できた」事実は更新する。

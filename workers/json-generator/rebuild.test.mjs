@@ -180,7 +180,8 @@ test("通常putJsonはR2 dedupe後もstatic_artifacts追跡を更新する", () 
   assert.ok(start >= 0 && end > start);
   assert.match(body, /const identical = await resolveIdenticalJsonArtifactPut/);
   assert.match(body, /if \(!identical\?\.skipPut\) \{[\s\S]*await env\.R2\.put/);
-  assert.match(body, /customMetadata: staticArtifactCustomMetadata/);
+  assert.match(body, /await serializeJsonArtifact\(body\)/);
+  assert.match(body, /await env\.R2\.put\(key, serialized, \{[\s\S]*customMetadata,/);
   assert.match(body, /if \(target\) await recordArtifact/);
   assert.ok(
     body.indexOf("await recordArtifact") > body.indexOf("if (!identical?.skipPut)"),
@@ -379,7 +380,7 @@ test("static JSON queryはcanonical列だけを使う", () => {
   assert.doesNotMatch(source, /other_social_links, updated_at/);
   assert.doesNotMatch(source, /xu\.(updated_at|created_at)/);
   assert.doesNotMatch(source, /x_users\.(updated_at|created_at)/);
-  assert.match(source, /staticArtifactContentHash\(serialized\)/);
+  assert.match(source, /serializeJsonArtifact\(body\)/);
 });
 
 test("public static JSON queries exclude private event relations", () => {
