@@ -34,9 +34,14 @@ test("イベント付きfree投稿はevent baseとslotsを同じqueue batchへ�
   assert.match(eventBranch, /targetType: "event_slots"/);
 });
 
-test("createFreeVideo は buildOpsChannelWebhookStatement を event target で呼ぶ", () => {
-  assert.match(source, /buildOpsChannelWebhookStatement/);
-  assert.match(source, /target:\s*"event"/);
+test("createFreeVideo は作品登録の運営チャンネル通知を event target で積む", async () => {
+  assert.match(source, /buildVideoRegisteredChannelStatement\(db, \{/);
+  const channelSource = await readFile(
+    new URL("../../notifications/videoRegisteredChannel.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(channelSource, /buildOpsChannelWebhookStatement\(db, \{/);
+  assert.match(channelSource, /target:\s*"event"/);
 });
 
 test("createFreeVideo rejects a non-empty invalid scheduled_time instead of using now", () => {

@@ -577,35 +577,18 @@ async function submitSlotVideoCore(
         plan.expectedChanges.push(null);
         notificationWakeSource = "web";
       }
-      const { buildChannelVideoRegisteredNotification } = await import(
-        "@/lib/notifications/templates/video"
+      const { buildVideoRegisteredChannelStatement } = await import(
+        "@/lib/notifications/videoRegisteredChannel"
       );
-      const { buildVideoRegisteredOpsThreadName } = await import(
-        "@/lib/notifications/templates/video"
-      );
-      const { resolveNotificationActor } = await import(
-        "@/lib/notifications/actor"
-      );
-      const { buildOpsChannelWebhookStatement } = await import(
-        "@/lib/notifications/opsWebhook"
-      );
-      const actor = await resolveNotificationActor(db, userId);
-      const channelNotification = await buildOpsChannelWebhookStatement(db, {
-        target: "event",
-        threadName: buildVideoRegisteredOpsThreadName(parsed.data.title, actor),
+      const channelNotification = await buildVideoRegisteredChannelStatement(db, {
         actorUserId: userId,
-        payload: buildChannelVideoRegisteredNotification({
-          videoId,
-          videoTitle: parsed.data.title,
-          youtubeVideoId: submittedYoutubeId,
-          registrationKind: "slot",
-          eventId: slotRow.event_id,
-          eventTitle: eventConfig.title ?? "イベント",
-          actor,
-          creatorDisplayName: displayName,
-        }),
-        dedupeKey: `channel_video_registered:${videoId}`,
+        videoId,
+        videoTitle: parsed.data.title,
+        youtubeVideoId: submittedYoutubeId,
+        registrationKind: "slot",
         eventId: slotRow.event_id,
+        eventTitle: eventConfig.title ?? "イベント",
+        creatorDisplayName: displayName,
       });
       if (channelNotification) {
         plan.statements.push(channelNotification.statement);

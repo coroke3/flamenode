@@ -46,6 +46,38 @@ export async function findOpenModerationCaseById(
   return row;
 }
 
+/**
+ * open case の INSERT。同じ video・種別の open case があれば 0 行になるので、
+ * 呼び出し側は changes() が 1 であることを batch で検査する（pending partial
+ * unique index が未適用でも重複を防ぐ）。
+ */
+export function buildInsertOpenModerationCaseStatement(
+  db: DB,
+  caseAfter: ModerationCaseRow,
+): BatchItem<"sqlite"> {
+  return db.run(sql`
+    INSERT INTO video_moderation_cases (
+      id, video_id, case_type, status, public_reason, private_note,
+      due_at, locked_until, attempt_count, related_x_user_id,
+      created_by_user_id, resolved_by_user_id, created_at, resolved_at
+    )
+    SELECT
+      ${caseAfter.id}, ${caseAfter.video_id}, ${caseAfter.case_type},
+      ${caseAfter.status}, ${caseAfter.public_reason}, ${caseAfter.private_note},
+      ${caseAfter.due_at}, ${caseAfter.locked_until}, ${caseAfter.attempt_count},
+      ${caseAfter.related_x_user_id}, ${caseAfter.created_by_user_id},
+      ${caseAfter.resolved_by_user_id}, ${caseAfter.created_at},
+      ${caseAfter.resolved_at}
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM video_moderation_cases
+      WHERE video_id = ${caseAfter.video_id}
+        AND case_type = ${caseAfter.case_type}
+        AND status = 'open'
+    )
+  `);
+}
+
 export type VoidModerationCasePlan = {
   statements: BatchItem<"sqlite">[];
   expectedChanges: (number | null)[];
@@ -123,27 +155,7 @@ export async function planVoidModerationCaseOpen(
     resolved_at: null,
   };
   return {
-    statements: [db.run(sql`
-      INSERT INTO video_moderation_cases (
-        id, video_id, case_type, status, public_reason, private_note,
-        due_at, locked_until, attempt_count, related_x_user_id,
-        created_by_user_id, resolved_by_user_id, created_at, resolved_at
-      )
-      SELECT
-        ${caseAfter.id}, ${caseAfter.video_id}, ${caseAfter.case_type},
-        ${caseAfter.status}, ${caseAfter.public_reason}, ${caseAfter.private_note},
-        ${caseAfter.due_at}, ${caseAfter.locked_until}, ${caseAfter.attempt_count},
-        ${caseAfter.related_x_user_id}, ${caseAfter.created_by_user_id},
-        ${caseAfter.resolved_by_user_id}, ${caseAfter.created_at},
-        ${caseAfter.resolved_at}
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM video_moderation_cases
-        WHERE video_id = ${input.videoId}
-          AND case_type = ${input.caseType}
-          AND status = 'open'
-      )
-    `)],
+    statements: [buildInsertOpenModerationCaseStatement(db, caseAfter)],
     expectedChanges: [1],
     audits: [
       {
