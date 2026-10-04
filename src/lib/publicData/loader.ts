@@ -998,9 +998,11 @@ function sortRecentPayloadForList(
   return { ...payload, items };
 }
 
-export async function loadStaticEventDetail(
+// generateMetadata と page が同一requestで呼ぶため、R2 read・JSON parse・
+// slots override をrequest内で1回にする（createPublicJsonLoader と同じ方針）。
+export const loadStaticEventDetail = cache(async (
   eventId: string,
-): Promise<PublicJsonLoadResult<StaticEventDetail>> {
+): Promise<PublicJsonLoadResult<StaticEventDetail>> => {
   const options: PublicJsonLoadOptions<StaticEventDetailPayload> = {
     r2Key: `events/${eventId}.json`,
     targetType: "event",
@@ -1037,21 +1039,21 @@ export async function loadStaticEventDetail(
   });
   const detail = applyEventSlotsOverride(normalized, slotsResult.value);
   return { ...result, data: detail };
-}
+});
 
-export async function loadStaticEventRelease(
-  eventId: string,
-): Promise<PublicJsonLoadResult<StaticEventRelease>> {
-  return createPublicJsonLoader<StaticEventReleasePayload, StaticEventRelease>({
-    r2Key: eventReleaseObjectKey,
-    targetType: "event_release",
-    reason: "public_event_release_miss",
-    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
-    cacheMode: "r2_first",
-    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
-    normalize: normalizeStaticEventRelease,
-  })(eventId);
-}
+// module levelで1度だけ生成し、request-local cacheを metadata/page 間で共有する。
+export const loadStaticEventRelease = createPublicJsonLoader<
+  StaticEventReleasePayload,
+  StaticEventRelease
+>({
+  r2Key: eventReleaseObjectKey,
+  targetType: "event_release",
+  reason: "public_event_release_miss",
+  cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+  cacheMode: "r2_first",
+  staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
+  normalize: normalizeStaticEventRelease,
+});
 
 export async function loadStaticEventsIndex(): Promise<{
   index: StaticEventsIndex | null;
