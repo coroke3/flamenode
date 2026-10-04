@@ -535,7 +535,8 @@ export async function eventStaffHasExactVideoPermission(args: {
   return grant.allowed;
 }
 
-/** normal owner の最終 field set。イベント個別設定が有効な場合だけ完全上書きし、
+/** normal owner の最終 field set。primary_event の個別設定が有効ならそれを使い
+ * （旧配列・CSV は完全上書き、v2 はグローバル設定を継承できる）、
  * それ以外は system_settings の公開状態別グローバル設定を使う。 */
 export async function loadEffectiveOwnerEditableFieldSet(
   db: DB,

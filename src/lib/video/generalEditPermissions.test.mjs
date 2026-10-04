@@ -182,6 +182,45 @@ test("sectionAllowedByGeneralFields: section mapping", () => {
   assert.equal(sectionAllowedByGeneralFields("video.chapter_admin", any), false);
 });
 
+test("sectionAllowedByGeneralFields: section ごとに許可する field の一覧", () => {
+  // canEditVideo と access context の両経路がこの対応表を使う。値で固定する。
+  const descriptions = [
+    "intro_comment", "used_software", "highlights", "production_story",
+    "closing_comment", "custom_answers", "stage_permission",
+  ];
+  const expected = {
+    "video.basics": ["title", "part"],
+    "videos.title": ["title", "part"],
+    "video.identity": ["display_name", "icon_url", "profile_text", "youtube_channel_url", "other_social_links"],
+    "video.credits": ["music", "music_reference_url", "credit"],
+    "videos.music_credit": ["music", "music_reference_url", "credit"],
+    "video.descriptions": descriptions,
+    "videos.review_data": descriptions,
+    "video.members": ["members", "is_collab"],
+    "videos.members": ["members", "is_collab"],
+    "video.member_chapters": ["chapters"],
+    "video.youtube_id": ["youtube_url"],
+    "videos.youtube_id": ["youtube_url"],
+    "video.primary_event": ["event_ids"],
+    "videos.primary_event": ["event_ids"],
+    "video.status": [],
+    "video.chapter_admin": [],
+    "video.permissions": [],
+  };
+  for (const [section, fields] of Object.entries(expected)) {
+    const granting = GENERAL_EDITABLE_FIELD_KEYS.filter((key) =>
+      sectionAllowedByGeneralFields(section, new Set([key])),
+    );
+    assert.deepEqual([...granting].sort(), [...fields].sort(), section);
+    assert.equal(sectionAllowedByGeneralFields(section, new Set()), false, section);
+  }
+  // 全 field を許可しても、公開状態・チャプター一括登録・権限管理は一般 field では開かない。
+  const all = new Set(GENERAL_EDITABLE_FIELD_KEYS);
+  for (const section of ["video.status", "video.chapter_admin", "video.permissions"]) {
+    assert.equal(sectionAllowedByGeneralFields(section, all), false, section);
+  }
+});
+
 test("disabledFieldKeysFromGeneralFields: maps missing keys to UI paths", () => {
   const disabled = disabledFieldKeysFromGeneralFields(new Set(["title"]));
   assert.ok(disabled.includes("submitter.display_name"));
