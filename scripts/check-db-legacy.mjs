@@ -19,6 +19,7 @@ const LEGACY_IMPORT_BOUNDARY_FILES = new Set([
 ]);
 const LEGACY_INPUT_RULE_IDS = new Set([
   "legacy-import-runtime",
+  "legacy-import-route-reference",
   "legacy-event-flags",
   "legacy-permission-mask",
   "legacy-event-staff-permissions-table",
@@ -42,9 +43,15 @@ const LEGACY_INPUT_RULE_IDS = new Set([
 const RULES = [
   {
     id: "legacy-import-runtime",
-    label: "専用境界外の旧形式インポート参照",
+    label: "専用境界外の旧形式インポート実行参照",
     pattern:
-      /src\/lib\/import\/legacy|@\/lib\/import\/legacy|\/admin\/import\b|\/api\/admin\/import\/legacy\b|ENABLE_LEGACY_IMPORT_TOOL|LEGACY_IMPORT_PREVIEW_SECRET/g,
+      /src\/lib\/import\/legacy|@\/lib\/import\/legacy|ENABLE_LEGACY_IMPORT_TOOL|LEGACY_IMPORT_PREVIEW_SECRET/g,
+  },
+  {
+    id: "legacy-import-route-reference",
+    label: "専用境界外の旧形式インポート経路参照",
+    pattern: /\/admin\/import\b|\/api\/admin\/import\/legacy\b/g,
+    allowFiles: new Set(["app/(redesign)/dev/redesign/_catalog.ts"]),
   },
   {
     id: "legacy-query-fallback",
