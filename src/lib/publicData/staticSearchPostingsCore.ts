@@ -47,6 +47,12 @@ export type StaticSearchPostingManifest = {
   backend: "postings-v1";
   /** Buckets with at least one posting. Older manifests may omit this field. */
   buckets?: number[];
+  /**
+   * Page count of every bucket (index = bucket, 0 = no postings). It lists the
+   * generation's object keys without rebuilding the index. Older manifests
+   * may omit this field.
+   */
+  page_counts?: number[];
 };
 
 export type StaticSearchPostingArtifacts<T> = {
@@ -294,6 +300,7 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
       bucket_count: STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
       backend: "postings-v1",
       buckets: directories.map(({ bucket }) => bucket),
+      page_counts: bucketRecords.map((records) => records.length),
     },
     directories,
     pages,
@@ -359,6 +366,26 @@ export function normalizeStaticSearchPostingManifest(
     }
     buckets.sort((a, b) => a - b);
   }
+  let pageCounts: number[] | undefined;
+  if (row.page_counts !== undefined) {
+    if (
+      !Array.isArray(row.page_counts) ||
+      row.page_counts.length !== STATIC_SEARCH_POSTINGS_BUCKET_COUNT
+    )
+      return null;
+    pageCounts = [];
+    for (const [bucket, count] of row.page_counts.entries()) {
+      if (
+        typeof count !== "number" ||
+        !Number.isSafeInteger(count) ||
+        count < 0 ||
+        count > STATIC_SEARCH_POSTINGS_MAX_TOTAL_ITEMS ||
+        (buckets !== undefined && (count > 0) !== buckets.includes(bucket))
+      )
+        return null;
+      pageCounts.push(count);
+    }
+  }
   return {
     schema_version: STATIC_SEARCH_POSTINGS_SCHEMA_VERSION,
     generation,
@@ -367,6 +394,7 @@ export function normalizeStaticSearchPostingManifest(
     bucket_count: STATIC_SEARCH_POSTINGS_BUCKET_COUNT,
     backend: "postings-v1",
     ...(buckets === undefined ? {} : { buckets }),
+    ...(pageCounts === undefined ? {} : { page_counts: pageCounts }),
   };
 }
 

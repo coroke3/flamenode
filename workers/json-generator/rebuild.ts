@@ -131,7 +131,9 @@ import {
   normalizeSearchVideo,
   normalizeStaticVideoSearchPostingManifest,
   staticVideoSearchPostingDirectoryObjectKey,
+  staticVideoSearchPostingGeneration,
   staticVideoSearchPostingManifestObjectKey,
+  staticVideoSearchPostingObjectKeys,
   staticVideoSearchPostingPageObjectKey,
   type StaticSearchIndexVideo,
 } from "../../src/lib/publicData/staticSearchIndexCore.ts";
@@ -1627,11 +1629,6 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     videos: postingItems,
     users: users.results ?? [],
   });
-  const postings = buildStaticVideoSearchPostingArtifacts({
-    items: postingItems,
-    generatedAt,
-    generation,
-  });
   assertStaticListObjectSize("search-index-lite.json", payload);
   await putJson(
     env,
@@ -1642,6 +1639,50 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     signal,
   );
 
+  const manifestKey = staticVideoSearchPostingManifestObjectKey(generation);
+  // Posting keys embed the content-hash generation, so a same-generation
+  // rebuild would rewrite byte-identical immutable objects (Class A each).
+  // Skip when the live manifest already points at this generation and D1
+  // tracking proves every key it lists was written. The manifest's page
+  // counts list those keys, so the n-gram index (~160ms CPU for 3,000
+  // videos) is not rebuilt. A builder change that keeps the same input
+  // therefore takes effect at the next content change. Stale generations
+  // are still reconciled.
+  const currentManifest = await readCurrentSearchPostingManifest(env, signal);
+  if (
+    currentManifest.kind === "known" &&
+    currentManifest.generation === staticVideoSearchPostingGeneration(generation) &&
+    currentManifest.pageCounts
+  ) {
+    const liveKeys = [
+      "search-index-lite.json",
+      ...staticVideoSearchPostingObjectKeys(generation, currentManifest.pageCounts),
+      manifestKey,
+    ];
+    if (await hasCompleteSearchPostingTracking(env, liveKeys.slice(1), signal)) {
+      console.info(
+        JSON.stringify({
+          service: "search-index",
+          result: "generation_same_skip",
+          generation,
+        }),
+      );
+      await reconcileTrackedArtifacts(
+        env,
+        { targetType: "search_index", targetId: "global" },
+        liveKeys,
+        20,
+        signal,
+      );
+      return;
+    }
+  }
+
+  const postings = buildStaticVideoSearchPostingArtifacts({
+    items: postingItems,
+    generatedAt,
+    generation,
+  });
   const postingDirectoryEntries = postings.directories.map(({ bucket, directory }) => ({
     key: staticVideoSearchPostingDirectoryObjectKey(generation, bucket),
     body: directory,
@@ -1650,41 +1691,11 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
     key: staticVideoSearchPostingPageObjectKey(generation, bucket, page.page),
     body: page,
   }));
-  const manifestKey = staticVideoSearchPostingManifestObjectKey(generation);
   const liveKeys = [
     "search-index-lite.json",
     ...postingDirectoryEntries.map((entry) => entry.key),
     ...postingPageEntries.map((entry) => entry.key),
   ];
-  // Posting keys embed the content-hash generation, so a same-generation
-  // rebuild would rewrite byte-identical immutable objects (Class A each).
-  // Skip when the live manifest already points at this generation and D1
-  // tracking proves every expected key was written. Stale generations are
-  // still reconciled below.
-  const currentManifest = await readCurrentSearchPostingManifestGeneration(env, signal);
-  if (
-    currentManifest.kind === "known" &&
-    currentManifest.generation === postings.manifest.generation &&
-    (await hasCompleteSearchPostingTracking(env, [...liveKeys.slice(1), manifestKey], signal))
-  ) {
-    liveKeys.push(manifestKey);
-    console.info(
-      JSON.stringify({
-        service: "search-index",
-        result: "generation_same_skip",
-        generation,
-      }),
-    );
-    await reconcileTrackedArtifacts(
-      env,
-      { targetType: "search_index", targetId: "global" },
-      liveKeys,
-      20,
-      signal,
-    );
-    return;
-  }
-
   // Check sizes only when the postings will be written: the skip above
   // writes nothing, and serializing every posting object costs ~100ms CPU.
   for (const entry of [...postingDirectoryEntries, ...postingPageEntries]) {
@@ -1771,10 +1782,10 @@ async function rebuildSearchIndexLite(env: Env, signal?: RebuildSignal): Promise
 
 type SearchPostingManifestState =
   | { kind: "absent" }
-  | { kind: "known"; generation: string }
+  | { kind: "known"; generation: string; pageCounts?: number[] }
   | { kind: "unknown" };
 
-async function readCurrentSearchPostingManifestGeneration(
+async function readCurrentSearchPostingManifest(
   env: Env,
   signal?: RebuildSignal,
 ): Promise<SearchPostingManifestState> {
@@ -1786,7 +1797,9 @@ async function readCurrentSearchPostingManifestGeneration(
     if (!object) return { kind: "absent" };
     const manifest = normalizeStaticVideoSearchPostingManifest(await object.json());
     throwIfAborted(signal);
-    return manifest ? { kind: "known", generation: manifest.generation } : { kind: "unknown" };
+    return manifest
+      ? { kind: "known", generation: manifest.generation, pageCounts: manifest.page_counts }
+      : { kind: "unknown" };
   } catch {
     throwIfAborted(signal);
     return { kind: "unknown" };

@@ -206,6 +206,41 @@ test("manifestの数値文字列や重複bucketはcorruptとして拒否する",
   );
 });
 
+test("manifestのpage_countsはbucket数の長さで、bucketsと一致するときだけ受け付ける", () => {
+  const pageCounts = Array.from({ length: 16 }, (_, bucket) => (bucket === 0 ? 2 : 0));
+  const valid = {
+    schema_version: 1,
+    generation: "g1",
+    generated_at: 1,
+    total: 1,
+    bucket_count: 16,
+    backend: "postings-v1",
+    buckets: [0],
+    page_counts: pageCounts,
+  };
+  assert.deepEqual(normalizeStaticSearchPostingManifest(valid)?.page_counts, pageCounts);
+  const { buckets: _buckets, ...withoutBuckets } = valid;
+  assert.deepEqual(
+    normalizeStaticSearchPostingManifest(withoutBuckets)?.page_counts,
+    pageCounts,
+  );
+  for (const page_counts of [
+    pageCounts.slice(1),
+    [...pageCounts.slice(0, 15), -1],
+    [...pageCounts.slice(0, 15), 1.5],
+    [...pageCounts.slice(0, 15), "1"],
+    [0, ...pageCounts.slice(1)],
+    [2, 1, ...pageCounts.slice(2)],
+    "2",
+  ]) {
+    assert.equal(
+      normalizeStaticSearchPostingManifest({ ...valid, page_counts }),
+      null,
+      JSON.stringify(page_counts),
+    );
+  }
+});
+
 test("posting index はdirectoryの対象ページだけを指し、ページをboundedに分割する", () => {
   const items = Array.from({ length: 300 }, (_, index) => ({
     id: `x-${index}`,
@@ -238,6 +273,14 @@ test("posting index はdirectoryの対象ページだけを指し、ページを
     normalizeStaticSearchPostingManifest(artifacts.manifest),
     artifacts.manifest,
   );
+  assert.equal(artifacts.manifest.page_counts.length, 16);
+  assert.equal(
+    artifacts.manifest.page_counts.reduce((sum, count) => sum + count, 0),
+    artifacts.pages.length,
+  );
+  for (const [bucket, count] of artifacts.manifest.page_counts.entries()) {
+    assert.equal(count, artifacts.pages.filter((entry) => entry.bucket === bucket).length);
+  }
   assert.deepEqual(
     normalizeStaticSearchPostingDirectory(directory.directory),
     directory.directory,

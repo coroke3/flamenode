@@ -263,3 +263,26 @@ test("different-generation PUT failure deletes only the pending new keys", async
   for (const key of liveKeys) assert.ok(env.objects.has(key), `live key deleted: ${key}`);
   env.sqlite.close();
 });
+
+test("page counts のない旧 manifest は同一 generation でも1回だけ全件書き直し、次回から skip する", async () => {
+  const env = createEnv();
+  await rebuildTarget(env, "search_index", "global");
+  const postingKeys = [...env.objects.keys()].filter(isPostingKey).sort();
+  const { page_counts: pageCounts, ...legacyManifest } = JSON.parse(env.objects.get(MANIFEST_KEY));
+  assert.ok(Array.isArray(pageCounts));
+  env.objects.set(MANIFEST_KEY, JSON.stringify(legacyManifest));
+  resetLog(env);
+
+  await rebuildTarget(env, "search_index", "global");
+
+  assert.equal(new Set(env.log.puts.filter(isPostingKey)).size, postingKeys.length);
+  assert.deepEqual(env.log.deletes, []);
+  assert.deepEqual(JSON.parse(env.objects.get(MANIFEST_KEY)).page_counts, pageCounts);
+  resetLog(env);
+
+  await rebuildTarget(env, "search_index", "global");
+
+  assert.deepEqual(env.log.puts.filter((key) => isPostingKey(key) || key === MANIFEST_KEY), []);
+  assert.deepEqual([...env.objects.keys()].filter(isPostingKey).sort(), postingKeys);
+  env.sqlite.close();
+});
