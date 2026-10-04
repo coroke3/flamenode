@@ -76,11 +76,12 @@ test("dedupeされたR2 artifactでもstatic_artifacts鮮度を更新する", ()
   const putTrackedStart = source.indexOf("async function putTrackedJson(");
   const putTrackedEnd = source.indexOf("\nfunction listPayloadFits", putTrackedStart);
   const body = source.slice(putTrackedStart, putTrackedEnd);
-  const conditionalPut = body.indexOf("if (!identical?.skipPut)");
+  const conditionalPut = body.indexOf("await putJsonArtifact(");
   const trackingWrite = body.indexOf("await recordArtifact(");
 
   assert.ok(putTrackedStart >= 0);
   assert.ok(conditionalPut >= 0);
+  assert.match(body, /deduplicate: true/);
   assert.ok(
     trackingWrite > conditionalPut,
     "artifact tracking must run after the optional R2 PUT instead of returning on dedupe",

@@ -178,13 +178,10 @@ test("通常putJsonはR2 dedupe後もstatic_artifacts追跡を更新する", () 
   const end = source.indexOf("\nasync function recordArtifact(", start);
   const body = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(body, /const identical = await resolveIdenticalJsonArtifactPut/);
-  assert.match(body, /if \(!identical\?\.skipPut\) \{[\s\S]*await env\.R2\.put/);
-  assert.match(body, /await serializeJsonArtifact\(body\)/);
-  assert.match(body, /await env\.R2\.put\(key, serialized, \{[\s\S]*customMetadata,/);
+  assert.match(body, /await putJsonArtifact\(env, key, body, \{[\s\S]*?deduplicate: true/);
   assert.match(body, /if \(target\) await recordArtifact/);
   assert.ok(
-    body.indexOf("await recordArtifact") > body.indexOf("if (!identical?.skipPut)"),
+    body.indexOf("await recordArtifact") > body.indexOf("await putJsonArtifact("),
     "artifact tracking must run after the optional R2 PUT",
   );
   assert.doesNotMatch(body, /if \(await resolveIdenticalJsonArtifactPut[\s\S]*\) \{\s*return;/);
@@ -380,7 +377,7 @@ test("static JSON queryはcanonical列だけを使う", () => {
   assert.doesNotMatch(source, /other_social_links, updated_at/);
   assert.doesNotMatch(source, /xu\.(updated_at|created_at)/);
   assert.doesNotMatch(source, /x_users\.(updated_at|created_at)/);
-  assert.match(source, /serializeJsonArtifact\(body\)/);
+  assert.match(source, /putJsonArtifact\(env, key, body/);
 });
 
 test("public static JSON queries exclude private event relations", () => {
@@ -589,7 +586,7 @@ test("putJson は同一 hash のとき R2 PUT と static_artifacts UPSERT を省
     /async function putJson\([\s\S]*?(?=async function recordArtifact)/,
   )?.[0];
   assert.ok(putJsonFn);
-  assert.match(putJsonFn, /resolveIdenticalJsonArtifactPut/);
+  assert.match(putJsonFn, /deduplicate: true/);
   assert.match(putJsonFn, /if \(target\) await recordArtifact/);
 });
 

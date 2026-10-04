@@ -6,6 +6,7 @@ import {
   resolveIdenticalJsonArtifactPut,
   ArtifactHashCache,
   serializeJsonArtifact,
+  putJsonArtifact,
 } from "./r2Dedup.ts";
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 
@@ -321,4 +322,45 @@ test("jsonContentHash / serializeJsonArtifact は再parseした従来のhashと�
     await jsonContentHash({ generated_at: 1, items: rows }),
     await jsonContentHash({ generated_at: 2, items: rows }),
   );
+});
+
+test("putJsonArtifact は同一 hash なら PUT せず、それ以外は JSON の content type と hash metadata で PUT する", async () => {
+  const body = { generated_at: 1, items: [1, 2] };
+  const expected = await serializeJsonArtifact(body, 2);
+  const fixture = createEnv({ metadataHash: expected.contentHash });
+  const puts = [];
+  fixture.env.R2.put = async (key, value, options) => {
+    puts.push({ key, value, options });
+  };
+
+  const skipped = await putJsonArtifact(fixture.env, "a.json", body, {
+    cacheControl: "public, max-age=60",
+    schemaVersion: 2,
+    deduplicate: true,
+  });
+  assert.equal(skipped.wrote, false);
+  assert.equal(skipped.contentHash, expected.contentHash);
+  assert.deepEqual(puts, []);
+
+  const written = await putJsonArtifact(fixture.env, "a.json", body, {
+    cacheControl: "public, max-age=60",
+    schemaVersion: 2,
+    customMetadata: { shard: "3", content_hash: "overridden" },
+    deduplicate: false,
+  });
+  assert.equal(written.wrote, true);
+  assert.equal(fixture.calls.head, 1, "deduplicate: false must not HEAD the object");
+  assert.deepEqual(puts, [
+    {
+      key: "a.json",
+      value: expected.serialized,
+      options: {
+        httpMetadata: {
+          contentType: "application/json; charset=utf-8",
+          cacheControl: "public, max-age=60",
+        },
+        customMetadata: { shard: "3", ...expected.customMetadata },
+      },
+    },
+  ]);
 });

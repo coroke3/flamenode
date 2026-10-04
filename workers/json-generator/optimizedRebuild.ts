@@ -1,8 +1,7 @@
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
-  resolveIdenticalJsonArtifactPut,
-  serializeJsonArtifact,
   type ArtifactHashCache,
+  putJsonArtifact,
 } from "./r2Dedup.ts";
 import {
   enqueueComposerFollowUps,
@@ -273,23 +272,10 @@ async function putTrackedJson(
 ): Promise<void> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
-  const { serialized, contentHash, customMetadata } = await serializeJsonArtifact(body);
-  const identical = await resolveIdenticalJsonArtifactPut(
-    env,
-    objectKey,
-    serialized,
-    contentHash,
-  );
-  throwIfAborted(signal);
-  if (!identical?.skipPut) {
-    await env.R2.put(objectKey, serialized, {
-      httpMetadata: {
-        contentType: "application/json; charset=utf-8",
-        cacheControl,
-      },
-      customMetadata,
-    });
-  }
+  const { serialized, contentHash } = await putJsonArtifact(env, objectKey, body, {
+    cacheControl,
+    deduplicate: true,
+  });
   // R2 PUTをdedupeしても「このgenerationで正常に再構築できた」事実は更新する。
   // これを省くとdeep health / artifact SLOが同一内容のartifactを古いと誤判定する。
   await recordArtifact(

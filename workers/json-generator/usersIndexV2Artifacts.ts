@@ -1,10 +1,9 @@
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
-  resolveIdenticalJsonArtifactPut,
-  serializeJsonArtifact,
-  staticArtifactContentHash,
   type ArtifactHashCache,
+  putJsonArtifact,
+  staticArtifactContentHash,
 } from "./r2Dedup.ts";
 import {
   staticR2CacheControl,
@@ -120,22 +119,11 @@ async function putTrackedJson(
 ): Promise<PendingArtifact> {
   throwIfAborted(signal);
   assertNoForbiddenPublicKeys(body);
-  const { serialized, contentHash, customMetadata } = await serializeJsonArtifact(
-    body,
-    USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION,
-  );
-  const identical = options?.deduplicate === false
-    ? null
-    : await resolveIdenticalJsonArtifactPut(env, key, serialized, contentHash);
-  if (!identical?.skipPut) {
-    await env.R2.put(key, serialized, {
-      httpMetadata: {
-        contentType: "application/json; charset=utf-8",
-        cacheControl: staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.usersIndex),
-      },
-      customMetadata,
-    });
-  }
+  const { contentHash } = await putJsonArtifact(env, key, body, {
+    cacheControl: staticR2CacheControl(STATIC_R2_MAX_AGE_SEC.usersIndex),
+    schemaVersion: USERS_INDEX_V2_STATIC_ARTIFACT_SCHEMA_VERSION,
+    deduplicate: options?.deduplicate !== false,
+  });
   throwIfAborted(signal);
   return { objectKey: key, contentHash };
 }
