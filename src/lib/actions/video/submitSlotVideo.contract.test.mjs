@@ -57,9 +57,14 @@ test("submitSlotVideo は rebuild enqueue の event 対象を上限件数に cap
   assert.match(source, /targetEventIds: syncedEventIds/);
 });
 
-test("submitSlotVideo は buildOpsChannelWebhookStatement を event target で呼ぶ", () => {
-  assert.match(source, /buildOpsChannelWebhookStatement/);
-  assert.match(source, /target:\s*"event"/);
+test("submitSlotVideo は作品登録の運営チャンネル通知を event target で積む", async () => {
+  assert.match(source, /buildVideoRegisteredChannelStatement\(db, \{/);
+  const channelSource = await readFile(
+    new URL("../../notifications/videoRegisteredChannel.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(channelSource, /buildOpsChannelWebhookStatement\(db, \{/);
+  assert.match(channelSource, /target:\s*"event"/);
 });
 
 test("submitSlotVideo は同期対象イベント全体のステージ回答項目を検証する", () => {

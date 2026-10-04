@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { videoEvents, videoModerationCases, videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -22,6 +22,7 @@ import {
   type PendingPublicReflection,
 } from "@/lib/staticRebuild/publicReflectionNotice";
 import { generateId } from "@/lib/utils/id";
+import { buildInsertOpenModerationCaseStatement } from "@/lib/moderation/openCases";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId, logFlowTrace } from "@/lib/observability/flowTrace";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
@@ -156,29 +157,9 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     related_x_user_id: relatedXUserId, created_by_user_id: guard.user.id,
     resolved_by_user_id: null, created_at: now, resolved_at: null,
   };
-  // pending partial unique index が未適用でも、同一D1 transaction内の
-  // NOT EXISTS + changes() assertionで同video/typeのopen重複を防ぐ。
-  const statements: BatchItem<"sqlite">[] = [db.run(sql`
-    INSERT INTO video_moderation_cases (
-      id, video_id, case_type, status, public_reason, private_note,
-      due_at, locked_until, attempt_count, related_x_user_id,
-      created_by_user_id, resolved_by_user_id, created_at, resolved_at
-    )
-    SELECT
-      ${caseAfter.id}, ${caseAfter.video_id}, ${caseAfter.case_type},
-      ${caseAfter.status}, ${caseAfter.public_reason}, ${caseAfter.private_note},
-      ${caseAfter.due_at}, ${caseAfter.locked_until}, ${caseAfter.attempt_count},
-      ${caseAfter.related_x_user_id}, ${caseAfter.created_by_user_id},
-      ${caseAfter.resolved_by_user_id}, ${caseAfter.created_at},
-      ${caseAfter.resolved_at}
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM video_moderation_cases
-      WHERE video_id = ${videoId}
-        AND case_type = ${caseType}
-        AND status = 'open'
-    )
-  `)];
+  const statements: BatchItem<"sqlite">[] = [
+    buildInsertOpenModerationCaseStatement(db, caseAfter),
+  ];
   const expected: (number | null)[] = [1];
   const audits: WriteAuditLogInput[] = [{ table_name: "video_moderation_cases", target_id: id, operation: "CREATE", after: snapshot(caseAfter), actor_user_id: guard.user.id, retention_class: "long_audit", context: "admin_moderation_create", reason: publicReason || "運営確認ケースの作成", strict: true }];
 

@@ -87,31 +87,18 @@ export async function enqueueSlotSubmitNotificationsPostCommit(
           }),
           eventId: input.eventId,
         });
-        const { buildChannelVideoRegisteredNotification, buildVideoRegisteredOpsThreadName } =
-          await import("@/lib/notifications/templates/video");
-        const { resolveNotificationActor } = await import(
-          "@/lib/notifications/actor"
+        const { buildVideoRegisteredChannelStatement } = await import(
+          "@/lib/notifications/videoRegisteredChannel"
         );
-        const { buildOpsChannelWebhookStatement } = await import(
-          "@/lib/notifications/opsWebhook"
-        );
-        const actor = await resolveNotificationActor(db, input.userId);
-        const channelNotification = await buildOpsChannelWebhookStatement(db, {
-          target: "event",
-          threadName: buildVideoRegisteredOpsThreadName(input.videoTitle, actor),
+        const channelNotification = await buildVideoRegisteredChannelStatement(db, {
           actorUserId: input.userId,
-          payload: buildChannelVideoRegisteredNotification({
-            videoId: input.videoId,
-            videoTitle: input.videoTitle,
-            youtubeVideoId: input.submittedYoutubeId,
-            registrationKind: "slot",
-            eventId: input.eventId,
-            eventTitle: input.eventTitle,
-            actor,
-            creatorDisplayName: input.creatorDisplayName,
-          }),
-          dedupeKey: `channel_video_registered:${input.videoId}`,
+          videoId: input.videoId,
+          videoTitle: input.videoTitle,
+          youtubeVideoId: input.submittedYoutubeId,
+          registrationKind: "slot",
           eventId: input.eventId,
+          eventTitle: input.eventTitle,
+          creatorDisplayName: input.creatorDisplayName,
         });
         const statements = [
           notification?.statement,

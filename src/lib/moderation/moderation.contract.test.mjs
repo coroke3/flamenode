@@ -12,6 +12,10 @@ const moderationAdminSource = readFileSync(
   fileURLToPath(new URL("../actions/moderation-admin.ts", import.meta.url)),
   "utf8",
 );
+const openCasesSource = readFileSync(
+  fileURLToPath(new URL("./openCases.ts", import.meta.url)),
+  "utf8",
+);
 
 test("resolveVoidModerationCaseType maps categories", () => {
   assert.equal(resolveVoidModerationCaseType("duplicate"), "duplicate");
@@ -20,9 +24,11 @@ test("resolveVoidModerationCaseType maps categories", () => {
 });
 
 test("moderation case creation rejects duplicate open video/type atomically", () => {
-  assert.match(moderationAdminSource, /WHERE NOT EXISTS\s*\([\s\S]*video_moderation_cases/);
-  assert.match(moderationAdminSource, /case_type = \$\{caseType\}/);
-  assert.match(moderationAdminSource, /status = 'open'/);
+  assert.match(moderationAdminSource, /buildInsertOpenModerationCaseStatement\(db, caseAfter\)/);
+  assert.match(openCasesSource, /WHERE NOT EXISTS\s*\([\s\S]*video_moderation_cases/);
+  assert.match(openCasesSource, /video_id = \$\{caseAfter\.video_id\}/);
+  assert.match(openCasesSource, /case_type = \$\{caseAfter\.case_type\}/);
+  assert.match(openCasesSource, /status = 'open'/);
   assert.match(moderationAdminSource, /expected:\s*\(number \| null\)\[\] = \[1\]/);
 });
 

@@ -296,17 +296,8 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       plan.expectedChanges.push(null);
       notificationWakeSource = "web";
     }
-    const { buildChannelVideoRegisteredNotification } = await import(
-      "@/lib/notifications/templates/video"
-    );
-    const { buildVideoRegisteredOpsThreadName } = await import(
-      "@/lib/notifications/templates/video"
-    );
-    const { resolveNotificationActor } = await import(
-      "@/lib/notifications/actor"
-    );
-    const { buildOpsChannelWebhookStatement } = await import(
-      "@/lib/notifications/opsWebhook"
+    const { buildVideoRegisteredChannelStatement } = await import(
+      "@/lib/notifications/videoRegisteredChannel"
     );
     const eventTitle = eventId
       ? (
@@ -317,23 +308,15 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
             .limit(1)
         )[0]?.title ?? null
       : null;
-    const actor = await resolveNotificationActor(db, userId);
-    const channelNotification = await buildOpsChannelWebhookStatement(db, {
-      target: "event",
-      threadName: buildVideoRegisteredOpsThreadName(parsed.data.title, actor),
+    const channelNotification = await buildVideoRegisteredChannelStatement(db, {
       actorUserId: userId,
-      payload: buildChannelVideoRegisteredNotification({
-        videoId,
-        videoTitle: parsed.data.title,
-        youtubeVideoId: youtubeId,
-        registrationKind: eventId ? "free" : "unaffiliated",
-        eventId,
-        eventTitle,
-        actor,
-        creatorDisplayName: parsed.data.display_name,
-      }),
-      dedupeKey: `channel_video_registered:${videoId}`,
+      videoId,
+      videoTitle: parsed.data.title,
+      youtubeVideoId: youtubeId,
+      registrationKind: eventId ? "free" : "unaffiliated",
       eventId,
+      eventTitle,
+      creatorDisplayName: parsed.data.display_name,
     });
     if (channelNotification) {
       plan.statements.push(channelNotification.statement);
