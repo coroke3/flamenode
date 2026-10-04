@@ -311,6 +311,22 @@ test("ownership.ts: loadEffectiveOwnerEditableFieldSet は primary_event 正本�
   assert.doesNotMatch(loadBody, /resolveOwnerGeneralPolicyKeys/);
 });
 
+test("ownership.ts: event staff 判定は DB 経路と context 経路で同じ候補キーを使う", () => {
+  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const grantBody = source.match(
+    /export async function resolveEventStaffVideoPermissionGrant[\s\S]*?\n}\r?\n/,
+  )?.[0];
+  assert.ok(grantBody, "resolveEventStaffVideoPermissionGrant not found");
+  assert.match(grantBody, /eventStaffCandidatePermissionKeys\(args\.requiredKey\)/);
+  const contextBody = source.match(
+    /export async function resolveVideoEditAccessContext[\s\S]*?\n}\r?\n/,
+  )?.[0];
+  assert.ok(contextBody, "resolveVideoEditAccessContext not found");
+  assert.match(contextBody, /resolveStaffPermissionKeys\(row\)/);
+  // section 名を逆引きで足すと DB 経路より広く許可してしまう。
+  assert.doesNotMatch(contextBody, /VIDEO_PERMISSION_ALIASES/);
+});
+
 test("privilegeMode: admin/event 併用入口はロールごとに単一モードへ分離する", () => {
   assert.equal(resolveAdminOrEventVideoPrivilegeMode("admin"), "admin");
   assert.equal(resolveAdminOrEventVideoPrivilegeMode("moderator"), "event");

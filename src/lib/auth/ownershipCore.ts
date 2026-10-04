@@ -4,6 +4,7 @@
  */
 
 import type { VideoEditSectionKey } from "./videoEditSections";
+import { expandPermissionAliases } from "./permissions/aliases.ts";
 import {
   sectionAllowedByGeneralFields,
   type GeneralEditableFieldKey,
@@ -31,6 +32,7 @@ export type VideoEditAccessContext = {
   ownership: VideoOwnership;
   currentEventIds: readonly string[];
   ownerEditableFields: ReadonlySet<GeneralEditableFieldKey>;
+  /** event ID ごとの event_staff 正規権限キー（resolveStaffPermissionKeys の和集合）。 */
   eventPermissionKeysByEvent: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
@@ -245,17 +247,31 @@ export function decideCanEditVideoFromAccessContext(args: {
     if (creatorOwnerCanManagePermissions(context.ownership, requiredKey)) return true;
     return sectionAllowedByGeneralFields(requiredKey, context.ownerEditableFields);
   }
-  return Boolean(resolveEventPermissionFromAccessContext(context, requiredKey));
+  return resolveEventPermissionFromAccessContext(context, requiredKey).allowed;
+}
+
+/**
+ * event_staff が requiredKey を満たすために持つべき正規権限キー。
+ * DB 経路（resolveEventStaffVideoPermissionGrant）と request-local context 経路で共有する。
+ */
+export function eventStaffCandidatePermissionKeys(
+  requiredKey: VideoEditSectionKey,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const alias of VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey]) {
+    for (const key of expandPermissionAliases(alias)) keys.add(key);
+  }
+  return keys;
 }
 
 export function resolveEventPermissionFromAccessContext(
   context: VideoEditAccessContext,
   requiredKey: VideoEditSectionKey,
 ): { allowed: true; eventId: string } | { allowed: false } {
-  const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
+  const candidateKeys = Array.from(eventStaffCandidatePermissionKeys(requiredKey));
   for (const eventId of context.currentEventIds) {
     const keys = context.eventPermissionKeysByEvent.get(eventId);
-    if (keys && aliases.some((alias) => keys.has(alias))) {
+    if (keys && candidateKeys.some((key) => keys.has(key))) {
       return { allowed: true, eventId };
     }
   }
