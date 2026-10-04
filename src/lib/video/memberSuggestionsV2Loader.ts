@@ -1,4 +1,4 @@
-import { cancelR2BodyBestEffort } from "../r2Body.ts";
+import { readBoundedR2Json } from "../r2Body.ts";
 import type { MemberSuggestionItem } from "./memberSuggestionsCore.ts";
 import { loadMemberSuggestionsManifestFromBucket } from "./memberSuggestionsLoader.ts";
 import {
@@ -105,22 +105,19 @@ async function readJson(
     return { ok: true, value: cached.value };
   }
 
-  const object = await bucket.get(key);
-  if (!object) return { ok: false, reason: "missing" };
-  if (
-    typeof object.size === "number" &&
-    object.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES
-  ) {
-    await cancelR2BodyBestEffort(object);
-    return { ok: false, reason: "too_large" };
+  const result = await readBoundedR2Json(
+    bucket,
+    key,
+    MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES,
+  );
+  if (!result.ok) {
+    return {
+      ok: false,
+      reason: result.reason === "invalid_json" ? "invalid" : result.reason,
+    };
   }
-  try {
-    const value = await object.json<unknown>();
-    if (useCache) rememberJson(key, value, nowSec);
-    return { ok: true, value };
-  } catch {
-    return { ok: false, reason: "invalid" };
-  }
+  if (useCache) rememberJson(key, result.value, nowSec);
+  return { ok: true, value: result.value };
 }
 
 function selectLookupGrams(query: string): string[] {

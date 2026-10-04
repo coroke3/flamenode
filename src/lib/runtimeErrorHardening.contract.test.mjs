@@ -78,9 +78,19 @@ test("trending artifactはJSON parse前にbyte上限を検査する", () => {
 test("oversize R2 early returnはpublic/media/autocompleteでbodyを解放する", () => {
   assert.match(aboutStatsSource, /cancelR2BodyBestEffort\(object\)/);
   assert.match(staffSource, /cancelR2BodyBestEffort\(object\)/);
-  assert.match(suggestionsSource, /cancelR2BodyBestEffort\(manifestObject\)/);
-  assert.match(suggestionsSource, /cancelR2BodyBestEffort\(indexObject\)/);
-  assert.match(suggestionsV2Source, /cancelR2BodyBestEffort\(object\)/);
+  // readBoundedR2Json は上限超過時に body を解放する（r2Body.test.mjs）。
+  assert.match(
+    suggestionsSource,
+    /readBoundedR2Json\(\s*bucket,\s*MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY,\s*MEMBER_SUGGESTIONS_MAX_MANIFEST_BYTES,/,
+  );
+  assert.match(
+    suggestionsSource,
+    /readBoundedR2Json\(\s*bucket,\s*memberSuggestionsIndexObjectKey\(manifestResult\.generation\),\s*MEMBER_SUGGESTIONS_MAX_INDEX_BYTES,/,
+  );
+  assert.match(
+    suggestionsV2Source,
+    /readBoundedR2Json\(\s*bucket,\s*key,\s*MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES,/,
+  );
 });
 
 test("visibility manifestは既知R2 sizeなら本文を再encodeしない", () => {
@@ -177,15 +187,9 @@ test("public共通loaderはR2 JSONを16MiBでbounded readする", () => {
   );
   assert.match(
     publicLoaderSource,
-    /object\.size > PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES/,
+    /readBoundedR2Json\(\s*bucket,\s*key,\s*PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES,\s*\)/,
   );
-  assert.match(publicLoaderSource, /cancelR2BodyBestEffort\(object\)/);
   assert.match(publicLoaderSource, /"object_too_large"/);
-  const guard = publicLoaderSource.indexOf(
-    "object.size > PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES",
-  );
-  const parse = publicLoaderSource.indexOf("object.json()", guard);
-  assert.ok(guard >= 0 && parse > guard);
 });
 
 test("legacy rebuildは共通R2 wrapperでoversizeとGET直後abortを遮断する", () => {

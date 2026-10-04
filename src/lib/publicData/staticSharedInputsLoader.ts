@@ -2,6 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { getEnv } from "@/lib/cloudflare";
+import { readBoundedR2Json } from "@/lib/r2Body";
 import {
   notePublicArtifactMode,
   recordPublicR2Get,
@@ -79,25 +80,8 @@ async function readR2Json(
     const bucket = getEnv().BUCKET;
     if (!bucket) return null;
     recordPublicR2Get();
-    const object = await bucket.get(key);
-    if (!object) return null;
-    if (
-      !Number.isSafeInteger(maxObjectBytes) ||
-      maxObjectBytes <= 0 ||
-      (typeof object.size === "number" && object.size > maxObjectBytes)
-    ) {
-      try {
-        await object.body.cancel();
-      } catch {
-        // Oversized artifact is treated as unavailable regardless of cancel result.
-      }
-      return null;
-    }
-    try {
-      return await object.json();
-    } catch {
-      return null;
-    }
+    const result = await readBoundedR2Json(bucket, key, maxObjectBytes);
+    return result.ok ? result.value : null;
   } catch {
     return null;
   }
