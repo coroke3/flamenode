@@ -3,21 +3,21 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   VIDEO_PERMISSION_ALIASES,
-  NORMAL_SAFE_VIDEO_EDIT_KEYS,
-  DANGEROUS_ADMIN_VIDEO_EDIT_KEYS,
-  COLLABORATOR_VIDEO_EDIT_KEYS,
-  USER_DELEGATABLE_KEYS,
-  DEFAULT_OWNER_GENERAL_POLICY_KEYS,
   shouldWarnManageActiveXMismatch,
-  isSafeNormalVideoEditKey,
-  isDangerousAdminVideoEditKey,
-  isUserDelegatableKey,
-  parseDelegatablePermissionKeys,
   resolveAdminOrEventVideoPrivilegeMode,
   resolveVideoOwnershipSync,
-  decideCanEditVideo,
   adminPolicyAllows,
 } from "./ownershipCore.ts";
+
+/** canEditVideo の DB 経路のうち、通常モード (所有者) の判定部分。 */
+function canEditVideoNormalBlock() {
+  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const normalBlock = source.match(
+    /export async function canEditVideo\([\s\S]*?if \(privilegeMode !== "normal"\) return false;([\s\S]*?)\n}\r?\n/,
+  )?.[1];
+  assert.ok(normalBlock, "normal privilege block not found");
+  return normalBlock;
+}
 
 // --- VIDEO_PERMISSION_ALIASES ---
 
@@ -75,90 +75,6 @@ test("VIDEO_PERMISSION_ALIASES: video.members ↔ videos.members 双方向", () 
   assert.ok(VIDEO_PERMISSION_ALIASES["videos.members"].includes("video.members"));
 });
 
-// --- NORMAL_SAFE_VIDEO_EDIT_KEYS ---
-
-test("NORMAL_SAFE_VIDEO_EDIT_KEYS に危険キーが含まれない", () => {
-  assert.ok(!NORMAL_SAFE_VIDEO_EDIT_KEYS.has("video.identity"));
-  assert.ok(!NORMAL_SAFE_VIDEO_EDIT_KEYS.has("video.youtube_id"));
-  assert.ok(!NORMAL_SAFE_VIDEO_EDIT_KEYS.has("video.primary_event"));
-  assert.ok(!NORMAL_SAFE_VIDEO_EDIT_KEYS.has("video.status"));
-  assert.ok(!NORMAL_SAFE_VIDEO_EDIT_KEYS.has("video.chapter_admin"));
-  assert.ok(!NORMAL_SAFE_VIDEO_EDIT_KEYS.has("videos.youtube_id"));
-  assert.ok(!NORMAL_SAFE_VIDEO_EDIT_KEYS.has("videos.primary_event"));
-});
-
-test("NORMAL_SAFE_VIDEO_EDIT_KEYS に合作関連キーが含まれる", () => {
-  assert.ok(isSafeNormalVideoEditKey("video.descriptions"));
-  assert.ok(isSafeNormalVideoEditKey("video.members"));
-  assert.ok(isSafeNormalVideoEditKey("video.credits"));
-  assert.ok(isSafeNormalVideoEditKey("video.member_chapters"));
-});
-
-// --- DANGEROUS_ADMIN_VIDEO_EDIT_KEYS ---
-
-test("DANGEROUS_ADMIN_VIDEO_EDIT_KEYS に危険キーが全て含まれる", () => {
-  assert.ok(isDangerousAdminVideoEditKey("video.identity"));
-  assert.ok(isDangerousAdminVideoEditKey("video.youtube_id"));
-  assert.ok(isDangerousAdminVideoEditKey("video.primary_event"));
-  assert.ok(isDangerousAdminVideoEditKey("video.status"));
-  assert.ok(isDangerousAdminVideoEditKey("video.chapter_admin"));
-  assert.ok(isDangerousAdminVideoEditKey("videos.youtube_id"));
-  assert.ok(isDangerousAdminVideoEditKey("videos.primary_event"));
-});
-
-test("DANGEROUS_ADMIN_VIDEO_EDIT_KEYS に合作キーが含まれない", () => {
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.descriptions") || !isDangerousAdminVideoEditKey("video.descriptions"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.members") || !isDangerousAdminVideoEditKey("video.members"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.credits") || !isDangerousAdminVideoEditKey("video.credits"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.member_chapters") || !isDangerousAdminVideoEditKey("video.member_chapters"));
-});
-
-// --- COLLABORATOR_VIDEO_EDIT_KEYS ---
-
-test("COLLABORATOR_VIDEO_EDIT_KEYS に危険キーが含まれない", () => {
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.identity"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.youtube_id"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.primary_event"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.status"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("video.chapter_admin"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("videos.youtube_id"));
-  assert.ok(!COLLABORATOR_VIDEO_EDIT_KEYS.has("videos.primary_event"));
-});
-
-test("COLLABORATOR_VIDEO_EDIT_KEYS に合作関連キーが含まれる", () => {
-  assert.ok(COLLABORATOR_VIDEO_EDIT_KEYS.has("video.descriptions"));
-  assert.ok(COLLABORATOR_VIDEO_EDIT_KEYS.has("video.members"));
-  assert.ok(COLLABORATOR_VIDEO_EDIT_KEYS.has("videos.review_data"));
-  assert.ok(COLLABORATOR_VIDEO_EDIT_KEYS.has("videos.members"));
-  assert.ok(COLLABORATOR_VIDEO_EDIT_KEYS.has("video.credits"));
-  assert.ok(COLLABORATOR_VIDEO_EDIT_KEYS.has("videos.music_credit"));
-});
-
-// --- USER_DELEGATABLE_KEYS ---
-
-test("USER_DELEGATABLE_KEYS に危険キーが含まれない", () => {
-  assert.ok(!isUserDelegatableKey("video.identity"));
-  assert.ok(!isUserDelegatableKey("video.youtube_id"));
-  assert.ok(!isUserDelegatableKey("video.primary_event"));
-  assert.ok(!isUserDelegatableKey("video.status"));
-  assert.ok(!isUserDelegatableKey("video.chapter_admin"));
-  assert.ok(!isUserDelegatableKey("videos.youtube_id"));
-  assert.ok(!isUserDelegatableKey("videos.primary_event"));
-});
-
-test("USER_DELEGATABLE_KEYS に videos.title が含まれる", () => {
-  assert.ok(isUserDelegatableKey("videos.title"));
-});
-
-test("USER_DELEGATABLE_KEYS に合作関連キーが含まれる", () => {
-  assert.ok(isUserDelegatableKey("video.descriptions"));
-  assert.ok(isUserDelegatableKey("video.members"));
-  assert.ok(isUserDelegatableKey("video.credits"));
-  assert.ok(isUserDelegatableKey("videos.music_credit"));
-  assert.ok(isUserDelegatableKey("videos.members"));
-  assert.ok(isUserDelegatableKey("videos.review_data"));
-});
-
 // --- shouldWarnManageActiveXMismatch ---
 
 test("shouldWarnManageActiveXMismatch: activeX が null なら false", () => {
@@ -186,86 +102,6 @@ test("shouldWarnManageActiveXMismatch: activeX が空白を含む場合は trim 
   assert.equal(shouldWarnManageActiveXMismatch(" x3 ", ["x1", "x2"]), true);
 });
 
-// --- parseDelegatablePermissionKeys ---
-
-test("parseDelegatablePermissionKeys: null → 空 Set", () => {
-  assert.equal(parseDelegatablePermissionKeys(null).size, 0);
-});
-
-test("parseDelegatablePermissionKeys: 不正 JSON → 空 Set", () => {
-  assert.equal(parseDelegatablePermissionKeys("{invalid").size, 0);
-});
-
-test("parseDelegatablePermissionKeys: 有効な delegatable キー → Set", () => {
-  const result = parseDelegatablePermissionKeys('["videos.title", "video.descriptions"]');
-  assert.ok(result.has("videos.title"));
-  assert.ok(result.has("video.descriptions"));
-});
-
-test("parseDelegatablePermissionKeys: 危険キーは除外される", () => {
-  const result = parseDelegatablePermissionKeys('["videos.youtube_id", "video.identity"]');
-  assert.equal(result.size, 0);
-});
-
-// --- privilegeMode の分離確認 ---
-
-test("privilegeMode: normal と dangerous キー集合は重複しない", () => {
-  const safeKeys = Array.from(NORMAL_SAFE_VIDEO_EDIT_KEYS);
-  const overlap = safeKeys.filter((k) => isDangerousAdminVideoEditKey(k));
-  assert.equal(overlap.length, 0, "safe と dangerous が重複していない");
-});
-
-test("privilegeMode: 合作所有者のデフォルト許可は一般作品権限 (危険キー除外)", () => {
-  const collabKeys = Array.from(COLLABORATOR_VIDEO_EDIT_KEYS);
-  const dangerousOverlap = collabKeys.filter((k) =>
-    isDangerousAdminVideoEditKey(k),
-  );
-  assert.equal(
-    dangerousOverlap.length,
-    0,
-    "collaborator 許可キーに危険キーが含まれない",
-  );
-  assert.deepEqual(COLLABORATOR_VIDEO_EDIT_KEYS, DEFAULT_OWNER_GENERAL_POLICY_KEYS);
-});
-
-test("privilegeMode: site admin でも normal モードでは admin 特権を使わない", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideCanEditVideo({
-      privilegeMode: "normal",
-      userRole: "admin",
-      ownership,
-      requiredKey: "video.status",
-      ownerPolicyKeys: DEFAULT_OWNER_GENERAL_POLICY_KEYS,
-      eventStaffAllows: false,
-    }),
-    false,
-  );
-});
-
-test("privilegeMode: 非所有者に一般作品権限は適用されない", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideCanEditVideo({
-      privilegeMode: "normal",
-      userRole: "user",
-      ownership,
-      requiredKey: "video.basics",
-      ownerPolicyKeys: DEFAULT_OWNER_GENERAL_POLICY_KEYS,
-      eventStaffAllows: false,
-    }),
-    false,
-  );
-});
-
 test("privilegeMode: can_edit 合作は所有者 (isCollaboratorOwner)", () => {
   const ownership = resolveVideoOwnershipSync({
     approvedXUserIds: ["x2"],
@@ -278,25 +114,15 @@ test("privilegeMode: can_edit 合作は所有者 (isCollaboratorOwner)", () => {
 });
 
 test("ownership.ts: normal モードで eventStaffHasExactVideoPermission を呼ばない", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
-  const normalBlock = source.match(
-    /export async function canEditVideo\([\s\S]*?if \(privilegeMode === "normal"\)[\s\S]*?\r?\n\s*let ownerPolicyKeys/,
-  )?.[0];
-  assert.ok(normalBlock, "normal privilege block not found");
   assert.doesNotMatch(
-    normalBlock,
+    canEditVideoNormalBlock(),
     /eventStaffHasExactVideoPermission/,
     "normal モードにイベントスタッフ経路が残っている",
   );
 });
 
 test("ownership.ts: normal モードは非所有者を早期拒否する", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
-  const normalBlock = source.match(
-    /export async function canEditVideo\([\s\S]*?if \(privilegeMode === "normal"\)[\s\S]*?\r?\n\s*let ownerPolicyKeys/,
-  )?.[0];
-  assert.ok(normalBlock, "normal privilege block not found");
-  assert.match(normalBlock, /if \(!ownership\.isOwner\) return false/);
+  assert.match(canEditVideoNormalBlock(), /if \(!ownership\.isOwner\) return false/);
 });
 
 test("ownership.ts: loadEffectiveOwnerEditableFieldSet は primary_event 正本のみ", () => {
@@ -314,9 +140,9 @@ test("ownership.ts: loadEffectiveOwnerEditableFieldSet は primary_event 正本�
 test("ownership.ts: event staff 判定は DB 経路と context 経路で同じ候補キーを使う", () => {
   const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
   const grantBody = source.match(
-    /export async function resolveEventStaffVideoPermissionGrant[\s\S]*?\n}\r?\n/,
+    /export async function eventStaffHasExactVideoPermission[\s\S]*?\n}\r?\n/,
   )?.[0];
-  assert.ok(grantBody, "resolveEventStaffVideoPermissionGrant not found");
+  assert.ok(grantBody, "eventStaffHasExactVideoPermission not found");
   assert.match(grantBody, /eventStaffCandidatePermissionKeys\(args\.requiredKey\)/);
   const contextBody = source.match(
     /export async function resolveVideoEditAccessContext[\s\S]*?\n}\r?\n/,
@@ -348,36 +174,6 @@ test("privilegeMode: adminPolicyAllows は admin ロールのみ既知キーを�
   assert.equal(adminPolicyAllows("moderator", "video.basics"), false);
 });
 
-test("privilegeMode: decideCanEditVideo admin モードは adminPolicyAllows に委譲", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x2",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideCanEditVideo({
-      privilegeMode: "admin",
-      userRole: "admin",
-      ownership,
-      requiredKey: "video.status",
-      ownerPolicyKeys: new Set(),
-      eventStaffAllows: false,
-    }),
-    true,
-  );
-  assert.equal(
-    decideCanEditVideo({
-      privilegeMode: "admin",
-      userRole: "user",
-      ownership,
-      requiredKey: "video.status",
-      ownerPolicyKeys: new Set(),
-      eventStaffAllows: false,
-    }),
-    false,
-  );
-});
-
 test("canEditVideo: normal モードで event staff バイパスを使わない", () => {
   const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /getEditableEventIds\(db, user\.id\)/);
@@ -388,19 +184,15 @@ test("canEditVideo: normal モードで event staff バイパスを使わない"
 test("canEditVideo: normal モードは general fields で section 判定", () => {
   const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
   assert.match(source, /loadGeneralEditableFieldSet/);
-  assert.match(source, /sectionAllowedByGeneralFields/);
+  assert.match(canEditVideoNormalBlock(), /loadEffectiveOwnerEditableFieldSet\(db, video\)/);
   assert.doesNotMatch(
     source,
     /approved\.includes\(video\.creator_x_user_id\)[\s\S]*return true/,
   );
 });
 
-test("canEditVideo: normal モードは youtube section を一般fieldから許可しない", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
-  const normalBlock = source.match(
-    /if \(privilegeMode === "normal"\)[\s\S]*?\n\s*let ownerPolicyKeys/,
-  )?.[0];
-  assert.ok(normalBlock, "normal privilege block not found");
-  assert.match(normalBlock, /sectionAllowedByGeneralFields/);
+test("canEditVideo: normal モードの youtube section も一般 field で判定する", () => {
+  const normalBlock = canEditVideoNormalBlock();
+  assert.match(normalBlock, /ownerPolicyAllows\(ownership, requiredKey, fields\)/);
   assert.doesNotMatch(normalBlock, /requiredKey === "video\.youtube_id"\) return false/);
 });

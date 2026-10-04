@@ -34,6 +34,9 @@ if (runTestWithTsx(import.meta.url)) {
     visibility_status: "public",
   };
 
+  /** 発行した SQL を記録し、権限源ごとに読む行を確かめる。 */
+  const queryLog = [];
+
   function makeDb(staffRows) {
     const sqlite = new DatabaseSync(":memory:");
     for (const name of readdirSync(new URL("../../../migrations", import.meta.url))
@@ -56,6 +59,7 @@ if (runTestWithTsx(import.meta.url)) {
       `).run(`staff-${index}`, row.eventId, row.xUserId, row.preset, row.customJson ?? null);
     });
     return drizzle(async (sql, params, method) => {
+      queryLog.push(sql);
       const statement = sqlite.prepare(sql);
       if (method === "run") {
         statement.run(...params);
@@ -71,8 +75,7 @@ if (runTestWithTsx(import.meta.url)) {
     const db = makeDb(staffRows);
     const accessContext = await resolveVideoEditAccessContext({ db, user, video, approvedXUserIds });
     const result = {
-      contextCanUseEvent: await canUseEventPrivilegeModeForVideo({ db, user, video, accessContext }),
-      dbCanUseEvent: await canUseEventPrivilegeModeForVideo({ db, user, video }),
+      contextCanUseEvent: await canUseEventPrivilegeModeForVideo({ user, video, accessContext }),
       context: {},
       db: {},
     };
@@ -84,6 +87,8 @@ if (runTestWithTsx(import.meta.url)) {
         db, user, video, requiredKey, privilegeMode: "event", approvedXUserIds,
       });
     }
+    // DB 経路で event モードの section が 1 つでも編集できるか。
+    result.dbCanUseEvent = SECTION_KEYS.some((requiredKey) => result.db[requiredKey]);
     return result;
   }
 
@@ -122,5 +127,28 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(membersOnly.context["video.member_chapters"], true);
     assert.equal(membersOnly.context["video.chapter_admin"], false);
     assert.equal(membersOnly.context["video.basics"], false);
+  });
+
+  test("canEditVideo の DB 経路は権限源ごとに必要な行だけを読む", async () => {
+    const db = makeDb([{ eventId: "event-1", xUserId: "attacker_x", preset: "owner" }]);
+    const readsFor = async (args) => {
+      queryLog.length = 0;
+      const allowed = await canEditVideo({ db, video, requiredKey: "video.basics", ...args });
+      return { allowed, sql: queryLog.join("\n") };
+    };
+    // admin はロールだけで決まり、行を読まない。
+    const admin = await readsFor({ user: { id: user.id, role: "admin" }, privilegeMode: "admin" });
+    assert.equal(admin.allowed, true);
+    assert.equal(queryLog.length, 0);
+    // event は event_staff だけで決まり、所有者 (video_members) や一般作品権限を読まない。
+    const event = await readsFor({ user, privilegeMode: "event", approvedXUserIds });
+    assert.equal(event.allowed, true);
+    assert.match(event.sql, /"event_staff"/);
+    assert.doesNotMatch(event.sql, /"video_members"|"events"|"system_settings"|"x_user_account_links"/);
+    // normal の非所有者は一般作品権限を読まずに拒否する。
+    const normal = await readsFor({ user, privilegeMode: "normal", approvedXUserIds });
+    assert.equal(normal.allowed, false);
+    assert.match(normal.sql, /"video_members"/);
+    assert.doesNotMatch(normal.sql, /"event_staff"|"events"|"system_settings"|"x_user_account_links"/);
   });
 }

@@ -159,7 +159,6 @@ async function updateVideoCore(
     privilegeMode = "admin";
   } else if (rawPrivilegeMode === "event") {
     const canUseEvent = await canUseEventPrivilegeModeForVideo({
-      db,
       user: { id: sessionUser.id, role: sessionUser.role ?? null },
       video: target,
       accessContext,
@@ -180,9 +179,6 @@ async function updateVideoCore(
     user: editUser,
     video: target,
     privilegeMode,
-    generalFields,
-    approvedXUserIds: guard.approvedXIds,
-    ownership,
     accessContext,
   });
   if (!hasAnyVideoEditSection(sections)) {

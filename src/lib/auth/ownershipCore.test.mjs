@@ -9,115 +9,58 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   VIDEO_PERMISSION_ALIASES,
-  NORMAL_SAFE_VIDEO_EDIT_KEYS,
-  DANGEROUS_ADMIN_VIDEO_EDIT_KEYS,
-  COLLABORATOR_VIDEO_EDIT_KEYS,
-  USER_DELEGATABLE_KEYS,
-  DEFAULT_OWNER_GENERAL_POLICY_KEYS,
-  OWNER_GENERAL_POLICY_WHITELIST,
-  isSafeNormalVideoEditKey,
-  isDangerousAdminVideoEditKey,
-  isUserDelegatableKey,
   shouldWarnManageActiveXMismatch,
-  parseDelegatablePermissionKeys,
   resolveVideoOwnershipSync,
   adminPolicyAllows,
-  ownerGeneralPolicyAllows,
   creatorOwnerCanManagePermissions,
-  decideCanEditVideo,
-  resolveOwnerGeneralPolicyKeys,
+  ownerPolicyAllows,
+  decideCanEditVideoFromAccessContext,
 } from "./ownershipCore.ts";
+import { ALL_PERMISSION_KEYS } from "./permissions/keys.ts";
+import { GENERAL_EDITABLE_FIELD_KEYS } from "../video/generalEditPermissionsCore.ts";
 
-/** decideCanEditVideo の normal モード呼び出し短縮 */
-function decideNormal(args) {
-  return decideCanEditVideo({
-    privilegeMode: "normal",
-    userRole: args.userRole ?? "user",
-    ownership: args.ownership,
-    requiredKey: args.requiredKey,
-    ownerPolicyKeys:
-      args.ownerPolicyKeys ?? DEFAULT_OWNER_GENERAL_POLICY_KEYS,
-    eventStaffAllows: args.eventStaffAllows ?? false,
+const SECTION_KEYS = Object.keys(VIDEO_PERMISSION_ALIASES);
+const ALL_FIELDS = new Set(GENERAL_EDITABLE_FIELD_KEYS);
+const creator = resolveVideoOwnershipSync({
+  approvedXUserIds: ["x1"],
+  creatorXUserId: "x1",
+  hasCollaboratorEdit: false,
+});
+const collaborator = resolveVideoOwnershipSync({
+  approvedXUserIds: ["x2"],
+  creatorXUserId: "x1",
+  hasCollaboratorEdit: true,
+});
+const stranger = resolveVideoOwnershipSync({
+  approvedXUserIds: ["x2"],
+  creatorXUserId: "x1",
+  hasCollaboratorEdit: false,
+});
+
+/** 作品のイベント event-1 で staffKeys を持つ利用者の request-local context。 */
+function decide(privilegeMode, requiredKey, {
+  userRole = "user",
+  ownership = stranger,
+  fields = new Set(),
+  staffKeys = [],
+} = {}) {
+  return decideCanEditVideoFromAccessContext({
+    context: {
+      userId: "user-1",
+      videoId: "video-1",
+      approvedXUserIds: ["x2"],
+      ownership,
+      currentEventIds: ["event-1"],
+      ownerEditableFields: fields,
+      eventPermissionKeysByEvent: staffKeys.length > 0
+        ? new Map([["event-1", new Set(staffKeys)]])
+        : new Map(),
+    },
+    userRole,
+    requiredKey,
+    privilegeMode,
   });
 }
-
-/** decideCanEditVideo の event モード呼び出し短縮 */
-function decideEvent(args) {
-  return decideCanEditVideo({
-    privilegeMode: "event",
-    userRole: args.userRole ?? "user",
-    ownership: args.ownership,
-    requiredKey: args.requiredKey,
-    ownerPolicyKeys: args.ownerPolicyKeys ?? new Set(),
-    eventStaffAllows: args.eventStaffAllows ?? false,
-  });
-}
-
-/** decideCanEditVideo の admin モード呼び出し短縮 */
-function decideAdmin(args) {
-  return decideCanEditVideo({
-    privilegeMode: "admin",
-    userRole: args.userRole ?? "admin",
-    ownership: args.ownership,
-    requiredKey: args.requiredKey,
-    ownerPolicyKeys: args.ownerPolicyKeys ?? new Set(),
-    eventStaffAllows: false,
-  });
-}
-
-// --- isSafeNormalVideoEditKey ---
-
-test("isSafeNormalVideoEditKey: safe キーは true", () => {
-  for (const k of NORMAL_SAFE_VIDEO_EDIT_KEYS) {
-    assert.equal(isSafeNormalVideoEditKey(k), true, `${k} should be safe`);
-  }
-});
-
-test("isSafeNormalVideoEditKey: dangerous キーは false", () => {
-  for (const k of DANGEROUS_ADMIN_VIDEO_EDIT_KEYS) {
-    assert.equal(isSafeNormalVideoEditKey(k), false, `${k} should NOT be safe`);
-  }
-});
-
-// --- isDangerousAdminVideoEditKey ---
-
-test("isDangerousAdminVideoEditKey: dangerous キーは true", () => {
-  for (const k of DANGEROUS_ADMIN_VIDEO_EDIT_KEYS) {
-    assert.equal(isDangerousAdminVideoEditKey(k), true, `${k} should be dangerous`);
-  }
-});
-
-test("isDangerousAdminVideoEditKey: safe キーは false", () => {
-  for (const k of NORMAL_SAFE_VIDEO_EDIT_KEYS) {
-    assert.equal(isDangerousAdminVideoEditKey(k), false, `${k} should NOT be dangerous`);
-  }
-});
-
-// --- セキュリティ: safe と dangerous が重複しない ---
-
-test("NORMAL_SAFE と DANGEROUS_ADMIN は重複しない", () => {
-  for (const k of NORMAL_SAFE_VIDEO_EDIT_KEYS) {
-    assert.equal(
-      DANGEROUS_ADMIN_VIDEO_EDIT_KEYS.has(k),
-      false,
-      `"${k}" is in both safe and dangerous sets`,
-    );
-  }
-});
-
-// --- isUserDelegatableKey ---
-
-test("isUserDelegatableKey: delegatable キーは true", () => {
-  for (const k of USER_DELEGATABLE_KEYS) {
-    assert.equal(isUserDelegatableKey(k), true, `${k} should be delegatable`);
-  }
-});
-
-test("isUserDelegatableKey: 危険キーは delegatable でない", () => {
-  for (const k of DANGEROUS_ADMIN_VIDEO_EDIT_KEYS) {
-    assert.equal(isUserDelegatableKey(k), false, `${k} should NOT be delegatable`);
-  }
-});
 
 // --- shouldWarnManageActiveXMismatch ---
 
@@ -148,51 +91,6 @@ test("shouldWarnManageActiveXMismatch: activeX が staff に含まれないな�
 test("shouldWarnManageActiveXMismatch: activeX が空白を含む場合は trim して判定", () => {
   assert.equal(shouldWarnManageActiveXMismatch(" x1 ", ["x1"]), false);
   assert.equal(shouldWarnManageActiveXMismatch(" x3 ", ["x1", "x2"]), true);
-});
-
-// --- parseDelegatablePermissionKeys ---
-
-test("parseDelegatablePermissionKeys: null なら空 Set", () => {
-  const result = parseDelegatablePermissionKeys(null);
-  assert.equal(result.size, 0);
-});
-
-test("parseDelegatablePermissionKeys: undefined なら空 Set", () => {
-  const result = parseDelegatablePermissionKeys(undefined);
-  assert.equal(result.size, 0);
-});
-
-test("parseDelegatablePermissionKeys: 空文字列なら空 Set", () => {
-  const result = parseDelegatablePermissionKeys("");
-  assert.equal(result.size, 0);
-});
-
-test("parseDelegatablePermissionKeys: 不正 JSON なら空 Set (fail-closed)", () => {
-  const result = parseDelegatablePermissionKeys("not json");
-  assert.equal(result.size, 0);
-});
-
-test("parseDelegatablePermissionKeys: 配列でない JSON なら空 Set", () => {
-  const result = parseDelegatablePermissionKeys('{"key": "value"}');
-  assert.equal(result.size, 0);
-});
-
-test("parseDelegatablePermissionKeys: delegatable キーのみ抽出", () => {
-  const result = parseDelegatablePermissionKeys(
-    JSON.stringify(["videos.title", "video.descriptions", "video.identity"]),
-  );
-  assert.equal(result.size, 2);
-  assert.ok(result.has("videos.title"));
-  assert.ok(result.has("video.descriptions"));
-  assert.ok(!result.has("video.identity")); // 危険キーは除外
-});
-
-test("parseDelegatablePermissionKeys: 非文字列要素は無視", () => {
-  const result = parseDelegatablePermissionKeys(
-    JSON.stringify([123, null, "videos.title"]),
-  );
-  assert.equal(result.size, 1);
-  assert.ok(result.has("videos.title"));
 });
 
 // --- VIDEO_PERMISSION_ALIASES の一貫性 ---
@@ -238,45 +136,6 @@ test("VIDEO_PERMISSION_ALIASES: video.chapter_admin は member_chapters へ互�
     "video.chapter_admin",
     "video.member_chapters",
   ]);
-});
-
-// --- セキュリティ: collaborator に危険キーが含まれない ---
-
-test("COLLABORATOR_VIDEO_EDIT_KEYS に危険キーが含まれない", () => {
-  for (const k of DANGEROUS_ADMIN_VIDEO_EDIT_KEYS) {
-    assert.equal(
-      COLLABORATOR_VIDEO_EDIT_KEYS.has(k),
-      false,
-      `Collaborator key "${k}" should NOT be in dangerous admin set`,
-    );
-  }
-});
-
-test("COLLABORATOR_VIDEO_EDIT_KEYS に identity/youtube_id/primary_event/status/chapter_admin が含まれない", () => {
-  const dangerousKeys = [
-    "video.identity", "video.youtube_id", "video.primary_event",
-    "video.status", "video.chapter_admin",
-    "videos.youtube_id", "videos.primary_event",
-  ];
-  for (const k of dangerousKeys) {
-    assert.equal(
-      COLLABORATOR_VIDEO_EDIT_KEYS.has(k),
-      false,
-      `"${k}" must NOT be collaborator-editable`,
-    );
-  }
-});
-
-// --- セキュリティ: USER_DELEGATABLE に危険キーが含まれない ---
-
-test("USER_DELEGATABLE_KEYS に危険キーが含まれない", () => {
-  for (const k of DANGEROUS_ADMIN_VIDEO_EDIT_KEYS) {
-    assert.equal(
-      USER_DELEGATABLE_KEYS.has(k),
-      false,
-      `Delegatable key "${k}" should NOT be dangerous`,
-    );
-  }
 });
 
 // --- resolveVideoOwnershipSync (所有者判定 1-6) ---
@@ -343,398 +202,100 @@ test("resolveVideoOwnershipSync: creatorXUserId の前後空白は trim して�
   assert.equal(o.isOwner, true);
 });
 
-// --- decideCanEditVideo normal (通常モード 7-11) ---
 
-test("decideCanEditVideo normal: 所有者はデフォルト一般作品権限の safe キーを許可", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideNormal({ ownership, requiredKey: "video.basics" }),
-    true,
-  );
-  assert.equal(
-    decideNormal({ ownership, requiredKey: "video.descriptions" }),
-    true,
-  );
+// --- 通常モード (所有者 + 一般作品権限) ---
+
+test("通常モード: 所有者は一般作品権限の field に対応する section だけ編集できる", () => {
+  const fields = new Set(["title"]);
+  assert.equal(decide("normal", "video.basics", { ownership: creator, fields }), true);
+  assert.equal(decide("normal", "videos.title", { ownership: collaborator, fields }), true);
+  assert.equal(decide("normal", "video.descriptions", { ownership: creator, fields }), false);
 });
 
-test("decideCanEditVideo normal: 所有者でもエイリアス無し危険キーは拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  const deniedWithoutAlias = [
-    "video.youtube_id",
-    "videos.youtube_id",
-    "video.primary_event",
-    "videos.primary_event",
-    "video.status",
-  ];
-  for (const k of deniedWithoutAlias) {
+test("通常モード: 所有者でも status と chapter_admin は全 field でも許可しない", () => {
+  for (const ownership of [creator, collaborator]) {
+    for (const requiredKey of ["video.status", "video.chapter_admin"]) {
+      assert.equal(decide("normal", requiredKey, { ownership, fields: ALL_FIELDS }), false, requiredKey);
+    }
+  }
+});
+
+test("通常モード: 非所有者は全 field と全 event_staff 権限があっても拒否する", () => {
+  for (const requiredKey of SECTION_KEYS) {
     assert.equal(
-      decideNormal({ ownership, requiredKey: k }),
+      decide("normal", requiredKey, { fields: ALL_FIELDS, staffKeys: ALL_PERMISSION_KEYS }),
       false,
-      `${k} must be denied in normal mode for owner`,
+      requiredKey,
     );
   }
 });
 
-test("decideCanEditVideo normal: video.identity は videos.title エイリアス経路でも拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
+test("通常モード: video.permissions は作者所有者だけに許可する", () => {
+  assert.equal(creatorOwnerCanManagePermissions(creator, "video.permissions"), true);
+  assert.equal(creatorOwnerCanManagePermissions(collaborator, "video.permissions"), false);
+  // 作者は一般作品権限が空でも管理でき、合作所有者は全 field でも管理できない。
+  assert.equal(decide("normal", "video.permissions", { ownership: creator }), true);
   assert.equal(
-    decideNormal({ ownership, requiredKey: "video.identity" }),
+    decide("normal", "video.permissions", { ownership: collaborator, fields: ALL_FIELDS }),
     false,
   );
 });
 
-test("decideCanEditVideo normal: 非所有者は safe キーでも拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideNormal({ ownership, requiredKey: "video.basics" }),
-    false,
-  );
-  assert.equal(
-    decideNormal({ ownership, requiredKey: "video.descriptions" }),
-    false,
-  );
+// --- イベント運営モード ---
+
+test("event モード: 対象イベントの event_staff 権限があれば非所有者も許可する", () => {
+  assert.equal(decide("event", "video.basics", { staffKeys: ["video.basics"] }), true);
+  // 危険 section も event_staff 権限で許可する。
+  assert.equal(decide("event", "video.identity", { staffKeys: ALL_PERMISSION_KEYS }), true);
+  assert.equal(decide("event", "video.status", { staffKeys: ALL_PERMISSION_KEYS }), true);
 });
 
-test("decideCanEditVideo normal: イベントスタッフ相当フラグは通常モードで無視 (拒否)", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideNormal({
-      ownership,
-      requiredKey: "video.basics",
-      eventStaffAllows: true,
-    }),
-    false,
-  );
+test("event モード: event_staff 権限が無ければ所有者・site admin でも拒否する", () => {
+  for (const requiredKey of SECTION_KEYS) {
+    assert.equal(
+      decide("event", requiredKey, { userRole: "admin", ownership: creator, fields: ALL_FIELDS }),
+      false,
+      requiredKey,
+    );
+  }
 });
 
-test("decideCanEditVideo normal: 限定一般作品権限はポリシー外キーを拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  const limited = new Set(["videos.title"]);
-  assert.equal(
-    decideNormal({
-      ownership,
-      requiredKey: "videos.title",
-      ownerPolicyKeys: limited,
-    }),
-    true,
-  );
-  assert.equal(
-    decideNormal({
-      ownership,
-      requiredKey: "video.descriptions",
-      ownerPolicyKeys: limited,
-    }),
-    false,
-  );
+// --- 管理者モード ---
+
+test("admin モード: site admin だけが既知 section を編集できる", () => {
+  for (const requiredKey of SECTION_KEYS) {
+    assert.equal(decide("admin", requiredKey, { userRole: "admin" }), true, requiredKey);
+    assert.equal(
+      decide("admin", requiredKey, {
+        ownership: creator,
+        fields: ALL_FIELDS,
+        staffKeys: ALL_PERMISSION_KEYS,
+      }),
+      false,
+      requiredKey,
+    );
+  }
 });
 
-// --- decideCanEditVideo event (イベント運営 12-16) ---
+// --- 権限源を混ぜない ---
 
-test("decideCanEditVideo event: eventStaffAllows true なら非所有者も許可", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideEvent({
-      ownership,
-      requiredKey: "video.basics",
-      eventStaffAllows: true,
-    }),
-    true,
-  );
-});
-
-test("decideCanEditVideo event: eventStaffAllows false なら所有者でも拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideEvent({
-      ownership,
-      requiredKey: "video.basics",
-      eventStaffAllows: false,
-    }),
-    false,
-  );
-});
-
-test("decideCanEditVideo event: 危険キーも eventStaffAllows で許可", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideEvent({
-      ownership,
-      requiredKey: "video.identity",
-      eventStaffAllows: true,
-    }),
-    true,
-  );
-  assert.equal(
-    decideEvent({
-      ownership,
-      requiredKey: "video.status",
-      eventStaffAllows: true,
-    }),
-    true,
-  );
-});
-
-test("decideCanEditVideo event: site admin ロールでも eventStaffAllows 必須", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideEvent({
-      ownership,
-      requiredKey: "video.status",
-      userRole: "admin",
-      eventStaffAllows: false,
-    }),
-    false,
-  );
-});
-
-test("decideCanEditVideo event: eventStaffAllows false で危険キーも拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideEvent({
-      ownership,
-      requiredKey: "video.youtube_id",
-      eventStaffAllows: false,
-    }),
-    false,
-  );
-});
-
-// --- decideCanEditVideo admin (管理者 17-19) ---
-
-test("decideCanEditVideo admin: site admin は admin モードで safe キーを許可", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: [],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideAdmin({ ownership, requiredKey: "video.basics" }),
-    true,
-  );
-});
-
-test("decideCanEditVideo admin: site admin は admin モードで危険キーも許可", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: [],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideAdmin({ ownership, requiredKey: "video.identity" }),
-    true,
-  );
-  assert.equal(
-    decideAdmin({ ownership, requiredKey: "video.permissions" }),
-    true,
-  );
-});
-
-test("decideCanEditVideo admin: site admin でも normal モードでは admin 特権なし", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideNormal({
-      ownership,
-      requiredKey: "video.status",
-      userRole: "admin",
-    }),
-    false,
-  );
-  assert.equal(
-    decideNormal({
-      ownership,
-      requiredKey: "video.youtube_id",
-      userRole: "admin",
-    }),
-    false,
-  );
-});
-
-test("decideCanEditVideo admin: 非 admin ロールは admin モードで拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: [],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideAdmin({
-      ownership,
-      requiredKey: "video.basics",
-      userRole: "user",
-    }),
-    false,
-  );
-});
-
-// --- creatorOwnerCanManagePermissions (共同編集 20-22) ---
-
-test("creatorOwnerCanManagePermissions: 作者所有者は video.permissions を許可", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    creatorOwnerCanManagePermissions(ownership, "video.permissions"),
-    true,
-  );
-  assert.equal(
-    decideNormal({ ownership, requiredKey: "video.permissions" }),
-    true,
-  );
-});
-
-test("creatorOwnerCanManagePermissions: 合作所有者のみは video.permissions を拒否", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x2"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: true,
-  });
-  assert.equal(ownership.isOwner, true);
-  assert.equal(ownership.isCreatorOwner, false);
-  assert.equal(
-    creatorOwnerCanManagePermissions(ownership, "video.permissions"),
-    false,
-  );
-  assert.equal(
-    decideNormal({ ownership, requiredKey: "video.permissions" }),
-    false,
-  );
-});
-
-test("creatorOwnerCanManagePermissions: 作者所有者は一般作品権限外でも permissions 許可", () => {
-  const ownership = resolveVideoOwnershipSync({
-    approvedXUserIds: ["x1"],
-    creatorXUserId: "x1",
-    hasCollaboratorEdit: false,
-  });
-  assert.equal(
-    decideNormal({
-      ownership,
-      requiredKey: "video.permissions",
-      ownerPolicyKeys: new Set(),
-    }),
-    true,
-  );
-});
-
-// --- resolveOwnerGeneralPolicyKeys (複数イベント 24-25 / policy fail-closed) ---
-
-test("resolveOwnerGeneralPolicyKeys: primary 無しまたは allow !== 1 はデフォルトポリシー", () => {
-  const noEvent = resolveOwnerGeneralPolicyKeys({ primaryEvent: null });
-  assert.deepEqual(noEvent, DEFAULT_OWNER_GENERAL_POLICY_KEYS);
-
-  const disallowed = resolveOwnerGeneralPolicyKeys({
-    primaryEvent: {
-      allow_user_video_edits: 0,
-      user_video_edit_permission_keys_json: JSON.stringify(["videos.title"]),
-    },
-  });
-  assert.deepEqual(disallowed, DEFAULT_OWNER_GENERAL_POLICY_KEYS);
-
-  const undefinedAllow = resolveOwnerGeneralPolicyKeys({
-    primaryEvent: {
-      allow_user_video_edits: null,
-      user_video_edit_permission_keys_json: null,
-    },
-  });
-  assert.deepEqual(undefinedAllow, DEFAULT_OWNER_GENERAL_POLICY_KEYS);
-});
-
-test("resolveOwnerGeneralPolicyKeys: allow=1 は JSON ホワイトリストのみ (primary 正本)", () => {
-  const keys = resolveOwnerGeneralPolicyKeys({
-    primaryEvent: {
-      allow_user_video_edits: 1,
-      user_video_edit_permission_keys_json: JSON.stringify([
-        "videos.title",
-        "video.descriptions",
-      ]),
-    },
-  });
-  assert.equal(keys.size, 2);
-  assert.ok(keys.has("videos.title"));
-  assert.ok(keys.has("video.descriptions"));
-  assert.ok(!keys.has("video.members"));
-});
-
-test("resolveOwnerGeneralPolicyKeys: allow=1 で空 JSON は何も許可しない (fail-closed)", () => {
-  const keys = resolveOwnerGeneralPolicyKeys({
-    primaryEvent: {
-      allow_user_video_edits: 1,
-      user_video_edit_permission_keys_json: "[]",
-    },
-  });
-  assert.equal(keys.size, 0);
-});
-
-test("resolveOwnerGeneralPolicyKeys: 危険キーと非ホワイトリストは JSON から除外", () => {
-  const keys = resolveOwnerGeneralPolicyKeys({
-    primaryEvent: {
-      allow_user_video_edits: 1,
-      user_video_edit_permission_keys_json: JSON.stringify([
-        "video.identity",
-        "videos.youtube_id",
-        "not.a.real.key",
-        "video.descriptions",
-      ]),
-    },
-  });
-  assert.equal(keys.size, 1);
-  assert.ok(keys.has("video.descriptions"));
-});
-
-test("ownerGeneralPolicyAllows: エイリアス経由で許可 (videos.title → video.basics)、危険キーは拒否", () => {
-  const policy = new Set(["videos.title"]);
-  assert.equal(ownerGeneralPolicyAllows(policy, "video.basics"), true);
-  assert.equal(ownerGeneralPolicyAllows(policy, "video.identity"), false);
-  assert.equal(ownerGeneralPolicyAllows(policy, "video.youtube_id"), false);
+test("各モードは自分の権限源だけで決まり、未知のモードは拒否する", () => {
+  for (const requiredKey of SECTION_KEYS) {
+    for (const userRole of ["admin", "user", null]) {
+      for (const ownership of [creator, collaborator, stranger]) {
+        for (const fields of [new Set(), ALL_FIELDS]) {
+          for (const staffKeys of [[], ALL_PERMISSION_KEYS]) {
+            const input = { userRole, ownership, fields, staffKeys };
+            const label = `${requiredKey} role=${userRole} owner=${JSON.stringify(ownership)} fields=${fields.size} staff=${staffKeys.length}`;
+            assert.equal(decide("admin", requiredKey, input), adminPolicyAllows(userRole, requiredKey), label);
+            assert.equal(decide("event", requiredKey, input), decide("event", requiredKey, { staffKeys }), label);
+            assert.equal(decide("normal", requiredKey, input), ownerPolicyAllows(ownership, requiredKey, fields), label);
+            assert.equal(decide("any", requiredKey, input), false, label);
+          }
+        }
+      }
+    }
+  }
 });
 
 test("adminPolicyAllows: admin 以外は拒否", () => {
@@ -745,15 +306,4 @@ test("adminPolicyAllows: admin 以外は拒否", () => {
 test("adminPolicyAllows: admin は既知キーを許可", () => {
   assert.equal(adminPolicyAllows("admin", "video.basics"), true);
   assert.equal(adminPolicyAllows("admin", "video.identity"), true);
-});
-
-test("OWNER_GENERAL_POLICY_WHITELIST に危険キーと permissions が含まれない", () => {
-  for (const k of DANGEROUS_ADMIN_VIDEO_EDIT_KEYS) {
-    assert.equal(
-      OWNER_GENERAL_POLICY_WHITELIST.has(k),
-      false,
-      `"${k}" must not be in owner general whitelist`,
-    );
-  }
-  assert.equal(OWNER_GENERAL_POLICY_WHITELIST.has("video.permissions"), false);
 });

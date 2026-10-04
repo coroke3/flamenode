@@ -2,14 +2,9 @@ import type { DB } from "@/lib/db/client";
 import type { videos } from "@/lib/db/schema";
 import {
   canEditVideo,
-  getApprovedXIds,
-  loadEffectiveOwnerEditableFieldSet,
-  resolveVideoOwnership,
   type VideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
-  type VideoOwnership,
 } from "@/lib/auth/ownership";
-import type { GeneralEditableFieldKey } from "@/lib/video/generalEditPermissions";
 import { canAttachInitialYoutubeToSlottedVideo } from "@/lib/video/youtubeAttachEligibility";
 
 export type VideoEditSectionKey =
@@ -49,32 +44,9 @@ export async function computeAllowedVideoEditSections(args: {
   user: { id: string; role?: string | null };
   video: typeof videos.$inferSelect;
   privilegeMode: CanEditVideoPrivilegeMode;
-  generalFields?: Set<GeneralEditableFieldKey>;
-  /** Reuse writeGuard's authoritative approved X snapshot when available. */
-  approvedXUserIds?: readonly string[];
-  /** Reuse the caller's request-local ownership result when available. */
-  ownership?: VideoOwnership;
-  /** Reuse one request-local authorization snapshot for every section. */
-  accessContext?: VideoEditAccessContext;
+  /** One request-local authorization snapshot for every section. */
+  accessContext: VideoEditAccessContext;
 }): Promise<AllowedVideoEditSections> {
-  const generalFields =
-    args.privilegeMode === "normal"
-      ? (args.generalFields ?? args.accessContext?.ownerEditableFields ??
-        (await loadEffectiveOwnerEditableFieldSet(args.db, args.video)))
-      : undefined;
-  const approvedXUserIds = args.approvedXUserIds
-    ? Array.from(args.approvedXUserIds)
-    : args.accessContext?.approvedXUserIds
-      ? Array.from(args.accessContext.approvedXUserIds)
-      : await getApprovedXIds(args.db, args.user.id);
-  const ownership =
-    args.ownership ?? args.accessContext?.ownership ??
-    (await resolveVideoOwnership({
-      db: args.db,
-      userId: args.user.id,
-      video: args.video,
-      approvedXUserIds,
-    }));
   const results = await Promise.all(
     SECTION_KEYS.map(async ({ section, key }) => ({
       section,
@@ -84,10 +56,7 @@ export async function computeAllowedVideoEditSections(args: {
         video: args.video,
         requiredKey: key,
         privilegeMode: args.privilegeMode,
-        approvedXUserIds,
-        ownership,
-        ...(generalFields !== undefined ? { generalFields } : {}),
-        ...(args.accessContext ? { accessContext: args.accessContext } : {}),
+        accessContext: args.accessContext,
       }),
     })),
   );
@@ -114,7 +83,7 @@ export async function computeAllowedVideoEditSections(args: {
       visibilityStatus: args.video.visibility_status,
       youtubeVideoId: args.video.youtube_video_id,
       privilegeMode: args.privilegeMode,
-      isCreatorOwner: ownership.isCreatorOwner,
+      isCreatorOwner: args.accessContext.ownership.isCreatorOwner,
     });
   return out;
 }

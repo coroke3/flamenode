@@ -222,7 +222,6 @@ export default async function EditVideoPage({
     currentEventIds,
   });
   const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
-    db,
     user: editUser,
     video,
     accessContext,

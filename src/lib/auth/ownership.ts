@@ -13,12 +13,12 @@ import type {
   VideoEditSectionKey,
 } from "./videoEditSections";
 import {
-  decideCanEditVideo,
+  adminPolicyAllows,
   resolveVideoOwnershipSync,
   decideCanEditVideoFromAccessContext,
   canUseEventPrivilegeFromAccessContext,
   eventStaffCandidatePermissionKeys,
-  resolveEventPermissionFromAccessContext,
+  ownerPolicyAllows,
   type VideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
   type VideoOwnership,
@@ -29,7 +29,6 @@ import {
   parseGeneralEditableFields,
   parseGeneralEditablePolicyV2,
   resolveGeneralEditableFieldsFromPolicy,
-  sectionAllowedByGeneralFields,
   type GeneralEditableFieldKey,
 } from "@/lib/video/generalEditPermissions";
 import { approvedXIdsWhere, getApprovedLinkedXUserIds } from "./approvedX";
@@ -49,16 +48,7 @@ export type {
   VideoEditAccessContext,
 };
 export {
-  isSafeNormalVideoEditKey,
-  isDangerousAdminVideoEditKey,
   resolveAdminOrEventVideoPrivilegeMode,
-  resolveVideoOwnershipSync,
-  decideCanEditVideo,
-  resolveOwnerGeneralPolicyKeys,
-  adminPolicyAllows,
-  ownerGeneralPolicyAllows,
-  decideCanEditVideoFromAccessContext,
-  canUseEventPrivilegeFromAccessContext,
   resolveEventPermissionFromAccessContext,
 } from "./ownershipCore";
 
@@ -463,56 +453,6 @@ export async function resolveVideoEditAccessContext(args: {
  * 作品に紐づくイベントのうち、対象 permission key を持つスタッフ行があるか。
  * site admin でも event_staff 行と具体キーが無ければ false (権限源を混ぜない)。
  */
-export async function resolveEventStaffVideoPermissionGrant(args: {
-  db: DB;
-  user: SessionUserLike;
-  video: Pick<VideoRow, "id" | "primary_event_id">;
-  requiredKey: VideoEditSectionKey;
-  approvedXUserIds?: readonly string[];
-}): Promise<{ allowed: boolean; eventId?: string }> {
-  const approved =
-    args.approvedXUserIds ??
-    (await getApprovedXIds(args.db, args.user.id));
-  if (approved.length === 0) return { allowed: false };
-
-  const eventIds = await loadVideoEventIdsForAccessContext(args.db, args.video);
-  if (eventIds.length === 0) return { allowed: false };
-
-  const candidateKeys = eventStaffCandidatePermissionKeys(args.requiredKey);
-  if (candidateKeys.size === 0) return { allowed: false };
-
-  const rows = await args.db
-    .select({
-      event_id: eventStaff.event_id,
-      ...staffPermissionSelect,
-    })
-    .from(eventStaff)
-    .where(
-      and(
-        inArray(eventStaff.event_id, eventIds),
-        approvedXIdsWhere(eventStaff.x_user_id, Array.from(approved)),
-      )!,
-    );
-
-  // primary_event を優先し、なければ最初にマッチしたイベントを権限元とする。
-  const orderedIds = [
-    ...(args.video.primary_event_id && eventIds.includes(args.video.primary_event_id)
-      ? [args.video.primary_event_id]
-      : []),
-    ...eventIds.filter((id) => id !== args.video.primary_event_id),
-  ];
-  for (const eventId of orderedIds) {
-    const eventRows = rows.filter((row) => row.event_id === eventId);
-    const allowed = eventRows.some((row) =>
-      Array.from(candidateKeys).some((key) =>
-        staffRowHasPermissionKey(row, key),
-      ),
-    );
-    if (allowed) return { allowed: true, eventId };
-  }
-  return { allowed: false };
-}
-
 export async function eventStaffHasExactVideoPermission(args: {
   db: DB;
   user: SessionUserLike;
@@ -520,8 +460,29 @@ export async function eventStaffHasExactVideoPermission(args: {
   requiredKey: VideoEditSectionKey;
   approvedXUserIds?: readonly string[];
 }): Promise<boolean> {
-  const grant = await resolveEventStaffVideoPermissionGrant(args);
-  return grant.allowed;
+  const approved =
+    args.approvedXUserIds ??
+    (await getApprovedXIds(args.db, args.user.id));
+  if (approved.length === 0) return false;
+
+  const eventIds = await loadVideoEventIdsForAccessContext(args.db, args.video);
+  if (eventIds.length === 0) return false;
+
+  const candidateKeys = Array.from(eventStaffCandidatePermissionKeys(args.requiredKey));
+  if (candidateKeys.length === 0) return false;
+
+  const rows = await args.db
+    .select(staffPermissionSelect)
+    .from(eventStaff)
+    .where(
+      and(
+        inArray(eventStaff.event_id, eventIds),
+        approvedXIdsWhere(eventStaff.x_user_id, Array.from(approved)),
+      )!,
+    );
+  return rows.some((row) =>
+    candidateKeys.some((key) => staffRowHasPermissionKey(row, key)),
+  );
 }
 
 /** normal owner の最終 field set。primary_event の個別設定が有効ならそれを使い
@@ -613,59 +574,32 @@ export async function canEditVideo(args: {
       privilegeMode: args.privilegeMode,
     });
   }
-  const { db, user, video, requiredKey, privilegeMode, generalFields } = args;
-  const approved =
-    args.approvedXUserIds ?? (await getApprovedXIds(db, user.id));
-  const ownership = args.ownership ?? await resolveVideoOwnership({
-      db,
-      userId: user.id,
-      video,
-      approvedXUserIds: approved,
-    });
-
-  if (privilegeMode === "normal") {
-    if (!ownership.isOwner) return false;
-
-    if (requiredKey === "video.permissions") {
-      return decideCanEditVideo({
-        privilegeMode,
-        userRole: user.role,
-        ownership,
-        requiredKey,
-        ownerPolicyKeys: new Set(),
-        eventStaffAllows: false,
-      });
-    }
-
-    const fields =
-      generalFields ?? (await loadEffectiveOwnerEditableFieldSet(db, video));
-    return sectionAllowedByGeneralFields(requiredKey, fields);
-  }
-
-  let ownerPolicyKeys: Set<string> = new Set();
-  let eventStaffAllows = false;
-
+  const { db, user, video, requiredKey, privilegeMode } = args;
+  // 権限源ごとに必要な行だけを読む。admin はロールだけで決まる。
+  if (privilegeMode === "admin") return adminPolicyAllows(user.role, requiredKey);
   if (privilegeMode === "event") {
-    eventStaffAllows = await eventStaffHasExactVideoPermission({
+    return eventStaffHasExactVideoPermission({
       db,
       user,
       video,
       requiredKey,
-      approvedXUserIds: approved,
+      approvedXUserIds: args.approvedXUserIds,
     });
   }
+  if (privilegeMode !== "normal") return false;
 
-  const allowed = decideCanEditVideo({
-    privilegeMode,
-    userRole: user.role,
-    ownership,
-    requiredKey,
-    ownerPolicyKeys,
-    eventStaffAllows,
+  const ownership = args.ownership ?? await resolveVideoOwnership({
+    db,
+    userId: user.id,
+    video,
+    approvedXUserIds: args.approvedXUserIds,
   });
-  if (!allowed) return false;
-
-  return true;
+  if (!ownership.isOwner) return false;
+  // 一般作品権限は video.permissions を許可しないので、その判定では field を読まない。
+  const fields = requiredKey === "video.permissions"
+    ? new Set<GeneralEditableFieldKey>()
+    : args.generalFields ?? (await loadEffectiveOwnerEditableFieldSet(db, video));
+  return ownerPolicyAllows(ownership, requiredKey, fields);
 }
 
 /**
@@ -674,48 +608,13 @@ export async function canEditVideo(args: {
  * event_staff 行の存在だけでは true にしない。
  */
 export async function canUseEventPrivilegeModeForVideo(args: {
-  db: DB;
   user: SessionUserLike;
-  video: Pick<
-    VideoRow,
-    | "creator_x_user_id"
-    | "primary_event_id"
-    | "id"
-    | "submitted_by_user_id"
-    | "visibility_status"
-  >;
-  accessContext?: VideoEditAccessContext;
+  video: Pick<VideoRow, "id">;
+  accessContext: VideoEditAccessContext;
 }): Promise<boolean> {
-  if (args.accessContext) {
-    if (
-      args.accessContext.userId !== args.user.id ||
-      args.accessContext.videoId !== args.video.id
-    ) return false;
-    return canUseEventPrivilegeFromAccessContext(args.accessContext);
-  }
-  const probeKeys: VideoEditSectionKey[] = [
-    "video.basics",
-    "video.descriptions",
-    "video.credits",
-    "video.members",
-    "video.member_chapters",
-    "video.status",
-    "video.permissions",
-    "video.identity",
-    "video.youtube_id",
-    "video.primary_event",
-    "video.chapter_admin",
-  ];
-  for (const key of probeKeys) {
-    if (
-      await canEditVideo({
-        ...args,
-        requiredKey: key,
-        privilegeMode: "event",
-      })
-    ) {
-      return true;
-    }
-  }
-  return false;
+  if (
+    args.accessContext.userId !== args.user.id ||
+    args.accessContext.videoId !== args.video.id
+  ) return false;
+  return canUseEventPrivilegeFromAccessContext(args.accessContext);
 }

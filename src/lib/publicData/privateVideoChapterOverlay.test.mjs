@@ -111,7 +111,8 @@ if (runTestWithTsx(import.meta.url)) {
     assert.match(dbQueries, /notLike\(videoChapters\.id, "%:legacy:%"\)/);
     assert.match(dbQueries, /orderBy\(asc\(videoChapters\.chapter_time\), asc\(videoChapters\.id\)\)/);
     assert.match(ownership, /approvedXUserIds\?: readonly string\[\]/);
-    assert.match(ownership, /args\.approvedXUserIds \?\? \(await getApprovedXIds\(db, user\.id\)\)/);
+    assert.match(ownership, /approvedXUserIds: args\.approvedXUserIds/);
+    assert.match(ownership, /args\.approvedXUserIds \?\?\s*\(await getApprovedXIds\(args\.db, args\.user\.id\)\)/);
     assert.match(generator, /vc\.visibility = 'public'/);
     assert.match(degraded, /eq\(videoChapters\.visibility, "public"\)/);
   });
