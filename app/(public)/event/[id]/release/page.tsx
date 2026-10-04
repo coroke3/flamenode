@@ -10,7 +10,12 @@ import { buildPageMetadata } from "@/lib/seo";
 import ReleaseView from "./ReleaseView";
 import styles from "./page.module.css";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
+
+// On-demand ISR: see app/(public)/event/[id]/page.tsx.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
 
 type Props = { params: Promise<{ id: string }> };
 

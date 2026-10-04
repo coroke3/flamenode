@@ -60,6 +60,13 @@ import {
 // Reservations happen on /event/[id]/slots (kept at 30s); detail shows a summary.
 export const revalidate = 60;
 
+// An empty list makes this dynamic segment on-demand ISR (rendered on the first
+// visit, then cached). Without it every request is SSR, which exceeds the
+// Workers Free 10ms CPU limit (Error 1102).
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
+
 interface Props {
   params: Promise<{ id: string }>;
 }

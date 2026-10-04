@@ -26,7 +26,15 @@ import { resolveSlotIntervalSec } from "@/lib/slots/slotGuidance";
 import { loadStaticEventDetail } from "@/lib/publicData/loader";
 import { EventSlotsViewerPanel } from "./EventSlotsViewerPanel";
 
+// Reservation is decided against D1 by the action, and the viewer's own slots
+// come from the no-store viewer-overlay API, so cached HTML only delays how
+// soon another user's reservation shows up here.
 export const revalidate = 30;
+
+// On-demand ISR: see app/(public)/event/[id]/page.tsx.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
 
 interface Props {
   params: Promise<{ id: string }>;

@@ -43,6 +43,10 @@ const files = {
     new URL("../../../app/(public)/event/[id]/slots/page.tsx", import.meta.url),
     "utf8",
   ),
+  eventRelease: await readFile(
+    new URL("../../../app/(public)/event/[id]/release/page.tsx", import.meta.url),
+    "utf8",
+  ),
 };
 
 // ISR regenerations PUT to the R2 incremental cache (Class A). Hourly-cadence
@@ -52,6 +56,7 @@ const EXPECTED_REVALIDATE = {
   recommend: 300,
   trending: 300,
   eventDetail: 60,
+  eventRelease: 60,
 };
 
 test("公開 GET は force-dynamic せず ISR にする（ページ別の再検証間隔）", () => {
@@ -61,6 +66,19 @@ test("公開 GET は force-dynamic せず ISR にする（ページ別の再検�
     assert.doesNotMatch(
       source,
       /export const dynamic = "force-dynamic"/,
+      label,
+    );
+  }
+});
+
+// `revalidate` alone does not cache a dynamic segment: without
+// generateStaticParams Next.js renders it on every request (build table "ƒ"),
+// which exceeds the Workers Free 10ms CPU limit.
+test("イベント系の動的ページは generateStaticParams で on-demand ISR にする", () => {
+  for (const label of ["eventDetail", "eventSlots", "eventRelease"]) {
+    assert.match(
+      files[label],
+      /export function generateStaticParams\(\): \{ id: string \}\[\] \{\s*return \[\];\s*\}/,
       label,
     );
   }
