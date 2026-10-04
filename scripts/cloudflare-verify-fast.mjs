@@ -13,12 +13,16 @@ export const FAST_VERIFY_STEPS = Object.freeze([
   "test:cloudflare-ci",
   "check:cloudflare-template",
   "check:public-api-leaks",
+  "estimate:queue-budget",
+  "check:free-tier-budget",
 ]);
 
 /** Workers Builds 向け。重い unit/lint は含めず deploy 契約検査だけにする。 */
 export const CLOUD_BUILD_VERIFY_STEPS = Object.freeze([
   "test:cloudflare-ci",
   "check:cloudflare-template",
+  "estimate:queue-budget",
+  "check:free-tier-budget",
 ]);
 
 export function resolveNpmInvocation({ env = process.env } = {}) {

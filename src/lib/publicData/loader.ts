@@ -32,6 +32,7 @@ import {
 import {
   rebuildStateFromEnqueue,
   resolvePublicDataState,
+  shouldAttemptDegradedD1AfterPublicMiss,
   type PublicDataState,
 } from "./publicDataState";
 import {
@@ -540,6 +541,7 @@ async function resolvePublicJsonMiss<T = never>(
   }
 
   let enqueued = false;
+  let degradedFallbackClaimed = false;
   let rebuildState: RebuildRequestState = "not_needed";
   let probe: PublicStaticTargetProbe | null = null;
   let canonicalTargetId: string | undefined;
@@ -591,6 +593,8 @@ async function resolvePublicJsonMiss<T = never>(
           { kind: "public_miss", cooldownSeconds: 300 },
         );
         recordPublicD1Query();
+        degradedFallbackClaimed ||=
+          enqueueResult.ok && enqueueResult.action === "inserted";
         rebuildState = enqueueResult.rebuildState;
         if (enqueueResult.ok) {
           enqueued =
@@ -652,16 +656,17 @@ async function resolvePublicJsonMiss<T = never>(
     }
   }
 
-  // A probe that proved the target is missing or not public means D1 holds
-  // nothing to serve; skip the degraded fetch so random IDs cost no extra
-  // D1 scan. `public` and `unknown` (probe error) keep the D1 fallback.
-  const degradedTargetExcluded =
-    probe?.state === "missing" || probe?.state === "not_public";
+  // Only the request that inserted the coalesced rebuild row may take the
+  // expensive D1 fallback. Duplicate misses, existing active rows, cooldowns,
+  // and failed/unknown probes fail small instead of multiplying D1 reads.
   if (
     options.degradedFetcher &&
     canAttemptDegradedD1(strategy) &&
     db &&
-    !degradedTargetExcluded
+    shouldAttemptDegradedD1AfterPublicMiss({
+      probe,
+      rebuildClaimed: degradedFallbackClaimed,
+    })
   ) {
     if (!(await isDegradedD1CircuitOpen())) {
       try {
@@ -1001,43 +1006,52 @@ function sortRecentPayloadForList(
 export async function loadStaticEventDetail(
   eventId: string,
 ): Promise<PublicJsonLoadResult<StaticEventDetail>> {
-  const options: PublicJsonLoadOptions<StaticEventDetailPayload> = {
-    r2Key: `events/${eventId}.json`,
-    targetType: "event",
-    targetId: eventId,
-    reason: "public_event_detail_miss",
-    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
-    cacheMode: "r2_first",
-    staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
-    missRebuildTargetTypes: ["event_base", "event_slots"],
-    degradedFetcher: async () => {
-      const db = getDatabase();
-      if (!db) return null;
-      return fetchDegradedEventDetailPayload(db, eventId);
-    },
-  };
-  const result = await loadPublicJson<StaticEventDetailPayload>(options);
-  if (result.data == null) {
-    return { ...result, data: null };
-  }
-  const normalized = normalizeStaticEventDetail(result.data);
-  if (normalized == null) {
-    return resolvePublicJsonMiss<StaticEventDetail>(
-      options as unknown as PublicJsonLoadOptions<StaticEventDetail>,
-      { skipStaticMissRecord: true },
-    );
-  }
-  const slotsResult = await loadStaticJsonFreshStaleUnavailable<StaticEventSlotsPayload>({
-    key: eventSlotsObjectKey(eventId),
-    normalize: (value) =>
-      value && typeof value === "object" ? (value as StaticEventSlotsPayload) : null,
-    maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
-    cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
-    cacheMode: "r2_first",
-  });
-  const detail = applyEventSlotsOverride(normalized, slotsResult.value);
-  return { ...result, data: detail };
+  return loadStaticEventDetailCached(eventId);
 }
+
+// Event metadata and page rendering are separate Server Component branches.
+// Reuse this composed payload only within the current React request so both
+// branches share the visibility check, event artifact, and slot artifact.
+const loadStaticEventDetailCached = cache(
+  async (eventId: string): Promise<PublicJsonLoadResult<StaticEventDetail>> => {
+    const options: PublicJsonLoadOptions<StaticEventDetailPayload> = {
+      r2Key: `events/${eventId}.json`,
+      targetType: "event",
+      targetId: eventId,
+      reason: "public_event_detail_miss",
+      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+      cacheMode: "r2_first",
+      staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
+      missRebuildTargetTypes: ["event_base", "event_slots"],
+      degradedFetcher: async () => {
+        const db = getDatabase();
+        if (!db) return null;
+        return fetchDegradedEventDetailPayload(db, eventId);
+      },
+    };
+    const result = await loadPublicJson<StaticEventDetailPayload>(options);
+    if (result.data == null) {
+      return { ...result, data: null };
+    }
+    const normalized = normalizeStaticEventDetail(result.data);
+    if (normalized == null) {
+      return resolvePublicJsonMiss<StaticEventDetail>(
+        options as unknown as PublicJsonLoadOptions<StaticEventDetail>,
+        { skipStaticMissRecord: true },
+      );
+    }
+    const slotsResult = await loadStaticJsonFreshStaleUnavailable<StaticEventSlotsPayload>({
+      key: eventSlotsObjectKey(eventId),
+      normalize: (value) =>
+        value && typeof value === "object" ? (value as StaticEventSlotsPayload) : null,
+      maxStaleAgeSec: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail * 2,
+      cacheTtlSeconds: PUBLIC_JSON_CACHE_TTL_SEC.eventDetail,
+      cacheMode: "r2_first",
+    });
+    const detail = applyEventSlotsOverride(normalized, slotsResult.value);
+    return { ...result, data: detail };
+  },
+);
 
 export async function loadStaticEventRelease(
   eventId: string,

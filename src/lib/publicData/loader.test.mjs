@@ -135,6 +135,8 @@ test("detail/event/user/rules loaders use R2-first freshness with bounded stale 
     loaderSource.indexOf("export async function loadStaticEventDetail"),
     loaderSource.indexOf("export async function loadStaticEventsIndex"),
   );
+  assert.match(detailBlock, /return loadStaticEventDetailCached\(eventId\)/);
+  assert.match(detailBlock, /loadStaticEventDetailCached = cache\(/);
   assert.match(detailBlock, /cacheMode: "r2_first"/);
   const rulesBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticRulesPage"),
@@ -502,20 +504,22 @@ test("loadPublicEventVideosPage reads D1 only for events over the R2 pool limit"
   assert.ok(gate < block.indexOf("fetchDegradedEventListPage"));
 });
 
-test("resolvePublicJsonMiss は missing / not_public probe で degraded D1 fetch を行わない", () => {
+test("resolvePublicJsonMiss はnew rebuild claimant以外にdegraded D1 fetchを許可しない", () => {
   const missBlock = loaderSource.slice(
     loaderSource.indexOf("async function resolvePublicJsonMiss"),
     loaderSource.indexOf("export function createPublicJsonLoader"),
   );
   assert.match(
     missBlock,
-    /degradedTargetExcluded\s*=\s*probe\?\.state === "missing" \|\| probe\?\.state === "not_public"/,
+    /degradedFallbackClaimed\s*\|\|=\s*enqueueResult\.ok && enqueueResult\.action === "inserted"/,
   );
-  const guard = missBlock.indexOf("!degradedTargetExcluded");
+  const guard = missBlock.indexOf("shouldAttemptDegradedD1AfterPublicMiss({");
   const fetch = missBlock.indexOf("await options.degradedFetcher()");
-  assert.ok(guard >= 0 && fetch > guard, "probe exclusion gates the degraded fetch");
-  // public / unknown (probe error) must keep the D1 fallback.
-  assert.doesNotMatch(missBlock, /probe\?\.state === "(?:public|unknown)"\s*\)\s*\{\s*return buildMissResult/);
+  assert.ok(guard >= 0 && fetch > guard, "queue claimant policy gates the degraded fetch");
+  assert.match(
+    missBlock,
+    /shouldAttemptDegradedD1AfterPublicMiss\(\{\s*probe,\s*rebuildClaimed: degradedFallbackClaimed,/,
+  );
 });
 
 test("degraded circuit の miss は public probe の対象だけを数え、loader から無条件に記録しない", () => {

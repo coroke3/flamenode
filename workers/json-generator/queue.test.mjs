@@ -9,6 +9,7 @@ import {
   markRetryOrFailed,
   reconcileStaleQueue,
   REBUILD_SUCCEEDED_AWAITING_DONE_MARK,
+  STATIC_REBUILD_PROCESSING_LEASE_SEC,
 } from "./queue.ts";
 
 const queueSource = await readFile(new URL("./queue.ts", import.meta.url), "utf8");
@@ -204,6 +205,15 @@ test("claim and normal completion use one lease token", async () => {
   assert.equal(await markDone(env, row.id, token, 110), true);
   assert.equal(row.status, "done");
   assert.equal(row.lease_token, null);
+});
+
+test("processing lease outlives the 15-minute Queue/Cron invocation bound", async () => {
+  const row = { id: "srb-max-runtime", status: "pending" };
+  const env = envFor(row);
+  await markProcessing(env, row.id, 100);
+  assert.equal(STATIC_REBUILD_PROCESSING_LEASE_SEC, 16 * 60);
+  assert.equal(row.lease_expires_at, 100 + STATIC_REBUILD_PROCESSING_LEASE_SEC);
+  assert.ok(STATIC_REBUILD_PROCESSING_LEASE_SEC > 15 * 60);
 });
 
 test("claim and completion metrics count only queue mutations", async () => {

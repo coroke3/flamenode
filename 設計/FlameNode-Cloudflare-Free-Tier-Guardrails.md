@@ -1,7 +1,7 @@
 # FlameNode Cloudflare 無料枠・課金抑制設計
 
 > Status: Active
-> Last verified: 2026-08-07
+> Last verified: 2026-10-04
 
 ## 1. 目的
 
@@ -9,17 +9,20 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 
 ## 2. 前提となる Cloudflare 無料枠
 
-2026-05-10 時点の Cloudflare 公式ドキュメントを基準にする。実装前には最新の公式値を再確認する。
+2026-10-04 に Cloudflare 公式値を再確認した。Free の値はプラットフォーム制限であり、FlameNode の内部目標とは区別する。
 
-| サービス | 無料枠・注意点 | FlameNodeでの扱い |
+| サービス | 公式 Free 枠 | 期間・補足 |
 | :--- | :--- | :--- |
-| Workers | Workers Free は 100,000 requests/day、CPU 10ms/invocation、Cron Triggers 5個/account。 | 動的処理を極力減らし、公開ページは静的生成・R2/KVキャッシュを優先する。 |
-| Workers Static Assets | 静的アセットリクエストは無料・無制限扱い。`run_worker_first`を全体へ適用せず、公開アセットをWorker invocationなしで配信する。 | `_next/static`などビルド時に固定できるファイルを `.open-next/assets` から配信する。 |
-| D1 | Free は rows read 5,000,000/day、rows written 100,000/day、storage 5GB total。 | フルスキャン禁止、インデックス必須、一覧は事前生成 JSON を優先する。 |
-| Durable Objects | Free でも SQLite backend の Durable Objects を利用できる。Requests 100,000/day、Duration 13,000 GB-s/day、SQLite rows read 5,000,000/day、rows written 100,000/day が目安。 | 閲覧数の短期集約先に使う。ただし1再生ごとに Worker/DO request は消費するため、バースト時はサンプリングまたは停止する。 |
-| R2 Standard | Free は storage 10GB-month、Class A 1,000,000/month、Class B 10,000,000/month、egress free。 | 動画本体は保存せず YouTube 埋め込み。R2 はアイコン画像、静的JSON、軽量エクスポートに限定する。 |
-| Workers KV | Free は reads 100,000/day、writes/deletes/list 1,000/day、storage 1GB。 | 高頻度更新には使わず、Worker cursor・機能フラグ・軽量キャッシュに限定する。 |
-| Queues | Free は 10,000 operations/day、メッセージ保持24時間。通常1メッセージの配送に write/read/delete の3操作がかかる。 | YouTube 同期や通知のキューに使う場合は1日約3,000件程度を安全圏にし、重い一括投入は避ける。 |
+| Workers | 100,000 requests、HTTP/Cron CPU 10ms/invocation、128MB memory、50 subrequests/request、Cron 5 triggers/account | request と CPU は別の制限。CPU超過はError 1102になり得る。 |
+| Workers Static Assets | 静的アセット requests は無料・無制限 | `run_worker_first=false` で対象アセットは Worker を迂回する。 |
+| D1 | rows read 5,000,000、rows written 100,000、5GB/account、500MB/database、50 queries/Worker invocation | rows は返却行でなく読み取り・書き込み対象行数。 |
+| R2 Standard | 10GB-month、Class A 1,000,000、Class B 10,000,000、internet egress 無料 | すべて月次。`DeleteObject` 等はFree operations。Infrequent Accessはこの無料枠の対象外。 |
+| Workers KV | reads 100,000、writes 1,000、deletes 1,000、list 1,000、storage 1GB | 操作は日次でUTC 00:00にリセット。存在しないkeyのreadも1 operation。 |
+| Queues | 10,000 operations、retention 24時間 | 日次。各64KB chunkのwrite/read/deleteが各1 operation。retryはread、DLQ移送はwriteを追加。 |
+| Workers Logs | 200,000 log events、retention 3日 | 日次。過剰なログを出さない。 |
+| Durable Objects | FlameNodeの現行Worker設定にbindingなし | 現行FlameNode使用量は0として扱い、過去のDO閲覧数集約案を運用実績として扱わない。 |
+
+出典: [Workers Limits](https://developers.cloudflare.com/workers/platform/limits/), [Workers Pricing](https://developers.cloudflare.com/workers/platform/pricing/), [Static Assets billing](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/), [D1 Pricing](https://developers.cloudflare.com/d1/platform/pricing/), [D1 Limits](https://developers.cloudflare.com/d1/platform/limits/), [R2 Pricing](https://developers.cloudflare.com/r2/pricing/), [KV Pricing](https://developers.cloudflare.com/kv/platform/pricing/), [Queues Pricing](https://developers.cloudflare.com/workers/platform/pricing/)。
 
 ## 3. 基本方針
 
@@ -30,28 +33,92 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 - **Cronを絞る**: Cron は最大5個の無料枠を意識し、JSON生成、スコア更新、YouTube同期、クリーンアップを3本の統合 Workerへまとめる。
 - **サードパーティ動画活用**: 動画再生は YouTube iframe を使い、FlameNode 側では再生開始イベントなど最小限の計測に留める。
 
-## 3-1. 無料枠に収まりそうかの評価
+## 3-1. FlameNode 内部の安全目標
 
-現在の設計は「小〜中規模のコミュニティイベントを静的配信中心で運用する」前提なら無料枠に収まる可能性が高い。ただし、動画詳細ページの再生開始イベント、検索、管理画面の一括インポート、YouTube 同期、R2 の静的JSON/アイコン配信が増えると無料枠を超えやすい。
+Cloudflare Dashboard のactual usageを運用者が確認する。アプリ内collector、自動しきい値判定、自動CostGuard遷移は作らない。**`economy` / `read_only`等は管理者が明示的に選ぶmodeであり、Cloudflare使用量を理由に自動変更しない。**
 
-安全圏の目安は以下とする。アプリが使用量やしきい値を収集・判定するものではなく、運用者が Cloudflare Dashboard を確認するときの判断材料とする。
+| 指標 | FlameNode内部目標（公式値ではない） |
+| :--- | :--- |
+| 日次quota | normalは概ね50〜60%以下、busy dayは70%前後以内を目標とし、残りをevent/deploy/failure用に残す。 |
+| CPU | 代表route/jobごとにcold/warmを分けて測定し、p99は8ms以下、実測maxは10ms未満を採用ゲートとする。上限引き上げはしない。 |
+| R2 monthly | 月次actual + 残日数予測でpressureを算出する。月次quotaを `quota / 30` のhard daily limitへ変換しない。 |
+| Queue | 現行設計のnormal target 6,000 operations/day（60%）、retry/DLQ reserve 4,000（40%）を維持する。 |
+| Cron | 現在4 triggers/account。5つ目の追加は既定で拒否し、既存Workerへの統合とCPU費用を先に検討する。 |
+| Cache / artifact | CacheはCPU節約だけで評価せず、R2/KV operationとmemory retentionも一緒に測る。公開JSON isolate cacheは24件、serialized payloadの保守的なUTF-8 byte上界合計1MiB、単一128KiB、TTL 30秒で制限し、read/write時に期限切れをpruneする。unbounded cache、giant JSON、全artifact再生成はしない。 |
 
-**§3-1 表の economy / read_only 列は、管理者が `/admin/cost-guard` で手動設定した mode の効果を記述する。** 使用量 collector や自動しきい値判定は存在せず、Cloudflare 使用量を理由に `operation_mode` が自動遷移することはない。Durable Object による閲覧数サンプリング（economy 時 50%、read_only 時停止）は設計意図であり、使用量収集 Worker から自動起動されるものではない。
+## 3-2. Free Tier Budget ledger（2026-10-04）
 
-| 指標 | 無料枠上の主なネック | 安全圏の運用目安 |
+実測期間は**完了済みUTC日 2026-10-01〜10-03の3日間**。requests、D1、KV、Queue、Workers Logsは日次actual、R2 A/Bはbucket実測を起点に月末まで外挿した参考値、R2 storageは10-03時点のsnapshot。これらはCloudflare側の一時分析であり、アプリへのusage collector / 永続保存は行っていない。
+
+| Resource | Free limit / period | Current actual | Projection / normalized pressure | Headroom / major consumers |
+| :--- | :--- | :--- | :--- | :--- |
+| Workers requests | 100,000/account/day | Account peak 4,573/day、FlameNode peak 4,459/day | 最近の最大日を据え置くと4.6% | 約95.4%。HTML/APIはWorker、`run_worker_first=false`対象の静的ファイルはWorkerを迂回。 |
+| Worker CPU | 10ms/HTTPまたはCron invocation | Web Worker p50 19.3ms、p95 891.9ms、p99 1,267.7ms、max 2,010ms | p99 pressure 12,677%、max 20,100%。Free採用条件未達 | headroomなし。最優先risk。実測runtimeの`usageModel`は`standard`で、契約planがFreeである証明にはならない。 |
+| Worker memory | 128MB/isolate | web p50 42.1MiB、p95 73.7MiB、p99 85.4MiB、max 93.4MiB | max 73.0% | max時約34.6MiB。CPU優先だが、大きなartifactやcacheを追加しない。 |
+| Worker subrequests | 50/request | Web 11,026 invocation中1,573、平均0.143/invocation | 最大値/route別分布は取得できず、pressure未算定 | 平均値はhard-limit headroomを示さない。R2/KV/D1/HTTP fetchのper-request maxを未計測。 |
+| D1 rows read | 5,000,000/account/day | `flamenode_db` peak 434,788/day | 最大日据え置き8.7% | 約91.3%。公開一覧・静的生成とYouTube同期候補選定がQuery Insights上位。 |
+| D1 rows written | 100,000/account/day | `flamenode_db` peak 9,731/day | 最大日据え置き9.7% | 約90.3%。投稿/編集、queue/artifact tracking、sync metadata。 |
+| D1 storage | 500MB/database、5GB/account | `flamenode_db` 50,585,600 bytes（約50.6MB） | DB単位約10.1% | 約449MB/database。残り3 DBは小容量。schema migrationなし。 |
+| R2 Class A | 1,000,000/account/month | `flamenode-storage` peak 814/day、MTD 1,951 | MTD + 28日×3日平均 = 約20,160（約2.0%） | bucket計算上約98%。他bucket operationsを含むaccount-wide actualは未取得。 |
+| R2 Class B | 10,000,000/account/month | `flamenode-storage` peak 7,962/day、MTD 18,939 | MTD + 28日×3日平均 = 約195,703（約2.0%） | bucket計算上約98%。他bucket operationsを含むaccount-wide actualは未取得。 |
+| R2 Standard storage | 10GB-month/account | 10-03 snapshotで全account約1.39GB、FlameNode約1.34GB | snapshotが月内一定なら約13.9% | snapshot上約8.61GB。月間GB-month actualは日平均storageで別途確認。 |
+| KV reads | 100,000/account/day | peak 5,251/day | 5.3% | 約94.7%。低頻度mode/cursor/cache用途。missもoperation。 |
+| KV writes | 1,000/account/day | peak 168/day | 16.8% | 約83.2%。日次quotaでは現状もっとも高いKV圧力。per-request counter/writeは禁止。 |
+| KV delete / list | 各1,000/account/day | peak delete 7/day、list 0/day | delete 0.7%、list 0% | headroom大。KV storage使用量は今回未取得。 |
+| Queue operations | 10,000/account/day | peak 544/day across six queues | 5.4% | 約94.6%。2,000 normal messages ×3 ops=6,000、retry/DLQ reserve=4,000。 |
+| Cron triggers | 5/account | 4 triggers（daily schedule countは計96 runs） | 80% of trigger slots | 1 trigger slot。CPU per Cron runは別計測が必要。 |
+| Workers Logs | 200,000/account/day、3-day retention | account peak 6,471 events/day | 3.2% | 約96.8%。route/job詳細を増やしすぎず必要な範囲でsampling。 |
+| Workers Static Assets | static requests free/unlimited | build output filesは静的assetsから配信 | quota pressureなし | `_next/static`等の固定ファイルに使用。Worker-firstへ戻さない。 |
+| Durable Objects | FlameNode bindingなし | usageなし | 0 | 現行FlameNodeの実リソースとして計上しない。 |
+
+R2 Class A/Bは3日だけのbucket実測からの短期外挿であり、月末予測の信頼性は低い。R2のfree quotaはaccount-wideだが他bucketのClass A/B使用量を含められていないので、表のheadroomはFlameNode bucketだけの参考値。KV storage・per-request subrequest max・Cron CPUも未計測として扱う。
+
+Cloudflare Observabilityのweb CPUログでは`/entry`の1 raw-URL group（73 invocation）でp95 1,344ms / max 1,652ms、event-detailの1 raw-URL group（13 invocation）でp95 1,412msを観測した。IDを含むraw URLは保存・共有せず、これらのpXXは全IDを統合したroute-wide percentileではない。cold/warm分離も未取得。3日間のWorker outcomeにWeb `exceededResources` 587件、content-jobs 4件があるが、これは全件をError 1102と断定できる分類ではない。`exceededCpu` outcomeも観測されており、CPU limitを含むresource failureは実在する。
+
+追加のread-only GraphQL測定（2026-10-03 01:30〜2026-10-04 01:30 UTC）では、`flamenode-web` に4,028 invocation、`exceededResources` 364（9.0%）、success 3,628、client-disconnected 36を観測。successのCPU p50/p95/p99は20.8 / 740.1 / 1,163.9ms。直近約5時間（2026-10-03 20:41〜2026-10-04 01:30 UTC）にも153 `exceededResources` / 868 invocationsを観測した。CPU制限超過ログは `/user/[id]`・動画詳細・`/list` など複数routeに分散し、単一routeだけを原因と断定できない。したがってFree CPU採用ゲートは未達で、本番反映・Free-ready判定を保留する。今回のrequest-local重複loader抑制は軽減仮説であり、反映後のcold/warm route別CPU再計測が必要。
+
+## 3-3. D1 Query Insights（3日分の頻度×rows_read）
+
+Cloudflare `d1QueriesAdaptiveGroups`でparameterを含まないSQL形状を集計した順位。Cloudflare billable daily analyticsは同じ3日でrows read 1,108,195 / rows written 24,711だった一方、Query Insightsの集計合計は1,327,072 / 18,582で一致しない。このためQuery Insightsは相対順位・候補抽出にだけ使い、quota pressureの分子にはbillable analyticsを使う。
+
+| 順位 | SQL形状/担当 | rows_read / 3日 | 実行 / 3日 | 平均read / 実行 |
+| :--- | :--- | ---: | ---: | ---: |
+| 1 | 公開video projection/list生成（`workers/json-generator/rebuild.ts`の候補） | 340,319 | 135 | 2,521 |
+| 2 | default YouTube sync eligibility（`workers/youtube-sync/index.ts`） | 269,356 | 100 | 2,694 |
+| 3 | 公開video projectionの別SQL形状（同 generator query family） | 188,210 | 199 | 946 |
+| 4 | active event YouTube sync eligibility（`workers/youtube-sync/index.ts`） | 152,590 | 88 | 1,734 |
+| 5 | score update subquery（`workers/sync-jobs` / `workers/score-recalc`） | 65,237 | 43 | 1,517 |
+
+順位1〜4が優先監査対象。今回、Remote D1や`EXPLAIN QUERY PLAN`は実行しておらず、schema/indexを変更していない。Read rowsは全体の8.7% peak/day、writes 9.7% peak/dayであるため、追加indexのwrite amplificationを正当化する具体的なquery-plan証拠が得られるまでindex追加は保留する。
+
+## 3-4. Route/job cost model と失敗伝播
+
+| route/job | Worker / D1 / R2 / KV / Queue model | 証拠と未計測 |
 | :--- | :--- | :--- |
-| 公開ページ閲覧 | Workers 100,000 requests/day | トップ、一覧、イベント詳細は静的アセットまたはR2 JSON配信に寄せ、Web Worker を呼ぶ閲覧を1日3万回未満に抑える。 |
-| 動画再生開始イベント | Workers request と Durable Object request の両方を消費 | 通常時も6時間セッション重複排除を行い、`economy` では50%サンプリング、`read_only` では新規計測停止。 |
-| D1 reads | 5,000,000 rows/day | 一覧・おすすめ・関連動画で D1 を直接集計しない。検索はインデックス必須、広範囲検索は `economy` で停止。 |
-| D1 writes | 100,000 rows/day | 再生ごとの直接書き込みは禁止。投稿、編集、いいね、コメント、CSVを `read_only` で止める。 |
-| Durable Objects | request 100,000/day、duration、SQLite rows | 集約オブジェクトを短時間で休眠可能にし、1再生1永続書き込みを避ける。未反映カウントは24時間だけ保持。 |
-| KV writes | 1,000 writes/day | Worker cursorや低頻度フラグに限定し、閲覧ログや逐次カウントに使わない。 |
-| R2 Class B | 10,000,000/month | 作品サムネイルは YouTube を使い、R2 はアイコンと静的JSONに限定。JSONはHTTP Cacheを長めにする。 |
-| R2 storage | 10GB-month | Cloudflareにアップロードする画像はアイコンのみ、元ファイル8MB、保存前に250x250 WebPへ圧縮。 |
-| Queues | 10,000 operations/day | 1メッセージ約3操作として、同期・通知キューは通常1日3,000件程度を上限目安にする。 |
-| Cron | 5 triggers/account | JSON生成、スコア更新、YouTube同期、クリーンアップを3本の統合 Workerへまとめ、Cron数を増やさない。 |
+| `/`, `/list`, `/search` | 動的HTML/APIは1 HTTP requestごとに最大1 Worker invocation。固定assetsは0 invocation。公開JSONはCache/R2-first、正常hitではdegraded D1を呼ばない。 | page view単位のbrowser API追加分との相関は未取得。route別のR2 B/KV/D1をledgerから分離できない。 |
+| `/event/[id]`, `/user/[id]`, `/{videoId}` | 1 HTML requestごとにWorker invocation。R2 static artifactがfreshならD1 fallbackなし。event detailのmetadata/page loaderを今回request内memoizeし、重複処理を避ける。 | icon/shardのR2 GET数、cold/warm CPU、route-wide pXXは未取得。 |
+| `/entry` | dynamic/auth route。session/onboarding確認に加えてactive event/available slot/reserved slotをD1照会。 | CPU group p95がFree limitを大幅に超える。Free-readyとは判定しない。 |
+| submit/edit/like/comment | mutationごとにWorker/D1 writes。Static rebuild targetはD1にcoalesceし、同一requestのqueue kind wakeは1回。1 mutationあたりtarget上限256、100-row bulk upsertなのでqueue登録は最大3 D1 statement。 | targetごとのgenerated artifact数、実PUT数、操作ごとのrows_writtenは未集計。 |
+| Static rebuild | 1 invocationで1 target、D1 40 statements/25k rows-read soft budget、Queue continuation最大1 wake/invocation。hash一致artifactはR2 PUTをskip。 | 256 target mutationの全完了では最大256 delivery / 768 Queue opsの保守model（continuation enabled）。各targetのR2 PUT数は固定でない。 |
+| deploy rebuild | generator hash unchangedならglobal enqueue/KV updateをskip。hash変更時はglobal 16 targets。 | object数/R2 PUT数はbuild内容に依存し、CIだけでは算出不可。 |
+| YouTube sync / score update | `sync-jobs`にCron 2本（45分間隔）; Sync candidate queriesがQuery Insightsの上位。Queue consumerはbatch 10、concurrency 1、max_retries 3、DLQ設定。 | Cron CPU、jobごとのD1/R2/Queue日次内訳は未取得。 |
+| notification | batch 10、concurrency 1、max_retries 3、DLQ。通常配送はsend/read/deleteの3 ops。 | 実運用のfailure率/DLQ移送数は未取得。 |
 
-無料枠で最も危ない順は、1. Workers requests、2. Durable Object requests、3. D1 rows written、4. KV writes、5. R2 Class B operations、6. Queues operations とする。D1 rows read はインデックスと静的JSONで抑えられるが、検索や管理画面の未制限一覧があると急増するため、全一覧に `limit` と cursor を必須にする。
+R2 public missのfailure pathは、Cache/R2 miss → visibility/public-target probe → public targetだけcooldown 300秒でtarget enqueue → mode許可時だけbounded D1 degraded fetch。event detail missの対象は`event_base`と`event_slots`の2 targetまで。missing/not-public random IDsはdegraded D1をskipし、KV circuit miss writeも行わない。これはfailure amplificationを抑える現行動作だが、burst時の実際のrequest/statement総数は未計測。
+
+通常の公開miss loaderでは、このrequestが新しいcoalesced static-rebuild rowをinsertした場合にだけdegraded D1 payload fetchを許可する。active/cooldown/unknown probeは反復payload fetchをしない。static rebuild rowのprocessing leaseは16分とし、Cloudflare Queue/Cron invocationの15分上限より長くする。Queue consumerはstale rowをreconcileせず、Recovery Cronだけが期限切れを回復する。Recovery Cronと手動HTTP endpointは共通のrenewable `content-jobs` Cron leaseを使うため、手動処理中にRecoveryが同じrowを再claimしない。hard termination後の再処理はRecoveryまで遅れるが、現行Worker経路では旧処理と新処理が同一targetを同時publishしない。
+
+Users index v2は `0, 1, 8, 9, 24, 25, 120, 121, 500` 件のscore/works/name各page列について、total・重複なし・欠落なし・generation一致をtestする。event base listも同じ件数で8件pageを横断し、順序とtotalを検証する。現行のuser/event pageはServer Componentのページ要求で取得するため、client-side progressive appendのrace/unmount状態は持たない。個別user profileのworks/collabsは別の静的artifact契約で最大120件（24件×5 artifact pages）に制限され、121件以上を全件表示する要件とは区別する。
+
+## 3-5. Traffic scenario projection
+
+| Scenario | Projection | 判定/残る根拠 |
+| :--- | :--- | :--- |
+| Normal day | 観測されたaccount Worker requestsは最大4,573/day、D1 read 434,788/day、write 9,731/day、KV write 168/day、Queue 544 ops/day。 | 日次quotaではheadroomがある。CPUは10ms基準を大幅超過し、Free plan steady stateの停止条件を満たさない。 |
+| Event day | 4,573 requests/dayを5〜10倍とする単純stressで22,865〜45,730/day（22.9〜45.7%）。全D1 workloadまで10倍ならpeak read 4.35M/day（87%）となる仮定上限。 | 日次集計であり1-hour burstではない。D1を実際に何倍するか未測定。CPU超過が先にfailする。 |
+| Deploy day | hash同一ならglobal rebuild enqueue 0。hash変更なら16 target。 | 3日actualからdeploy時R2 A/PUT/CPUを予測できない。Workers Buildsの順序/verify/smoke完了前にFree-readyと判定しない。 |
+| Failure day | 2,000 normal messages + 150 messageが各3 retryのqueue推計は6,900 operations/day（69%）。max retry 3で無限再試行なし、失敗はDLQ/failed状態へ収束。 | 2 operation/retryはFlameNode保守モデル。Cloudflare実usageのDLQ/retry分布は未測定。4,000 operations reserveを下回るfailure countで運用する。 |
+| Crawler burst | account daily requestsは直近最大4,573。random missing/unlisted IDではdegraded D1 fallbackとKV circuit writeをしない。 | 1-hour burst、R2/CPU/requests max、異常path率は不明。public miss/error load testを別に実施する。 |
 
 ## 4. 使用量ガードの段階
 
@@ -67,8 +134,8 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 | モード | 手動選択の運用目安 | 停止・制限する機能 |
 | :--- | :--- | :--- |
 | `normal` | 通常 | 全機能を通常運用する。 |
-| `economy` | 目安70%到達 | パーソナライズ推薦、詳細分析、即時スコア再計算、重い検索を抑制する。閲覧数計測は既定50%サンプリングにする。 |
-| `read_only` | 目安85%到達 | 新規投稿、CSVインポート、アイコン画像アップロード、コメント投稿、チャプター/チャプターマーカー作成、いいね、ブックマーク、閲覧数イベントの新規書き込みを停止する。閲覧は継続する。管理者の機能別一時許可は厳密に15分で自動終了する。 |
+| `economy` | 目安70%到達 | パーソナライズ推薦、詳細分析、即時スコア再計算、重い検索を抑制する。閲覧イベントは現行実装でCloudflare Worker/D1へ書き込まないため、Free枠の抑制対象として数えない。 |
+| `read_only` | 目安85%到達 | 新規投稿、CSVインポート、アイコン画像アップロード、コメント投稿、チャプター/チャプターマーカー作成、いいね、ブックマークを停止する。閲覧は継続する。現行のブラウザGAイベントは `operation_mode` で停止しない。管理者の機能別一時許可は厳密に15分で自動終了する。 |
 | `static_only` | 目安95%到達 | Worker を必要とする公開動的機能を停止し、R2/Workers Static Assets の静的JSONと静的ページ中心に切り替える。 |
 | `maintenance` | 管理者判断 | 管理者以外はメンテナンス画面を表示する。管理者は復旧操作のみ可能。通常モード変更とは別の専用操作で切り替える。 |
 
@@ -87,7 +154,6 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 - コメント投稿
 - 時間付きコメント投稿
 - チャプター/チャプターマーカー作成・編集
-- 閲覧数イベントの新規書き込み
 - いいね、ブックマーク
 - X ID 統合申請
 - アイコン画像アップロード
@@ -104,9 +170,7 @@ FlameNode を Cloudflare の無料枠を中心に運用し、従量課金が発�
 - 検索の広範囲スキャン
 - 管理ダッシュボードのリアルタイム統計
 - YouTube API / OGP 同期
-- 詳細な内部閲覧数計測
-
-Durable Object が危険水位に入った場合は即停止ではなく、閲覧数計測を10%サンプリングへ下げる（**管理者が economy mode を手動設定している場合の設計意図**）。`read_only` 以上では新規計測を止め、止めた閲覧数イベントは後から補完しない。サンプリング中の公開表示値は、通常時の推定に近づけるため補正値として表示する。
+閲覧トラッカーの現行実装は、プレイヤー再生時間が可視状態で10秒を超え、ブラウザのlocalStorage cooldownを満たしたときにGAイベントを送る。これはブラウザ側の計測であり、FlameNodeのWorker/D1書込みやDurable Object集約ではない。`operation_mode`によるGAイベントのsampling・停止は実装されていないため、Cloudflareのresource guardrailとして扱わない。
 
 ## 6. データ設計
 
@@ -190,8 +254,8 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - R2 の `ListObjects` は Class A 操作なので、一覧表示に使わない。必要な一覧はD1または事前生成JSONに持つ。
 - KV の `list` と大量 write は避ける。
 - KV書き込みが危険水位に入った場合、D1へ退避して二重に枯渇させるのではなく、即時ログや軽量フラグ更新をオンメモリまたは破棄へ切り替える。
-- 内部閲覧数は `POST /api/videos/[id]/view` から D1 を直接更新しない。Durable Object を正の短期集約先として動画ID・時間帯単位でプールし、Cron Worker が1時間ごとに D1 へバルク反映する。KV 時間帯バケットは主経路にせず、緊急時のフォールバックに留める。どの方式でも1再生1書き込みは禁止する。未反映カウントは24時間保持し、反映できないまま期限を迎える場合は管理者通知と監査ログに残す。
-- 内部閲覧数や推薦シグナルは全件保存せず、6時間セッション単位の重複排除とサンプリングを行う。`economy` 以上では既定50%サンプリングにし、`read_only` 以上では新規計測を書き込まない。`read_only` 中に止めた閲覧数イベントは後から補完しない。
+- 現行の閲覧トラッカーは `VideoViewTracker` からGAへイベントを送るブラウザ計測であり、`POST /api/videos/[id]/view`、Durable Object集約、CronからのD1反映は存在しない。新たな内部view counterを追加する場合は、Worker/D1/Queueの計測・quota budget・重複排除・失敗時の挙動を別途設計し、1再生1 D1 writeを避ける。
+- `VideoViewTracker` は可視状態での再生時間10秒、ブラウザlocalStorageの動画単位6時間cooldownを使う。これはGA計測のブラウザ側重複抑制で、Cloudflare resource guardrailや `operation_mode` によるsampling/停止ではない。
 - Cron は統合し、1回の処理で JSON 生成、古い一時ファイル削除をまとめる（使用量チェックや自動 mode 変更は含めない）。
 - 月間の D1 読み書き、または Workers 要求が無料枠の80%を常に超える状態が2か月続いた場合、有料化または構成見直しの判断ラインにする。
 
@@ -201,7 +265,7 @@ Cloudflare 使用量は Cloudflare Dashboard を運用者が確認する。ア�
 - Cloudflare Workers Pricing: https://developers.cloudflare.com/workers/platform/pricing/
 - Cloudflare Workers Static Assets Billing and limitations: https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/
 - Cloudflare D1 Pricing: https://developers.cloudflare.com/d1/platform/pricing/
-- Cloudflare Durable Objects Pricing: https://developers.cloudflare.com/durable-objects/platform/pricing/
 - Cloudflare R2 Pricing: https://developers.cloudflare.com/r2/pricing/
 - Cloudflare Workers KV Limits: https://developers.cloudflare.com/kv/platform/limits/
 - Cloudflare Queues Pricing: https://developers.cloudflare.com/queues/platform/pricing/
+- Cloudflare Cron Triggers: https://developers.cloudflare.com/workers/configuration/cron-triggers/
