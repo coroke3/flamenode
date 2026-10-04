@@ -257,15 +257,6 @@ export function inspectSupportedImageUpload(buffer: ArrayBuffer): ValidatedImage
   };
 }
 
-export function detectSupportedImageUpload(buffer: ArrayBuffer): SupportedImageUpload | null {
-  const image = inspectSupportedImageUpload(buffer);
-  if (!image) return null;
-  return {
-    contentType: image.contentType,
-    ext: image.ext,
-  };
-}
-
 function normalizeDeclaredContentType(
   declaredType: string | null | undefined,
 ): ValidatedImageUpload["contentType"] | null {

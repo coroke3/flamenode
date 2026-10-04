@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   detectImageFormat,
-  detectSupportedImageUpload,
   inspectSupportedImageUpload,
   validateIconImageUpload,
 } from "./imageUpload.ts";
@@ -148,27 +147,6 @@ function buildWebpWithBrokenChunkSize() {
   return wrapWebpRiff(body);
 }
 
-test("detectSupportedImageUpload detects PNG magic number", () => {
-  const bytes = buildPng({ width: 1, height: 1 });
-  assert.deepEqual(detectSupportedImageUpload(bytes.buffer), {
-    contentType: "image/png",
-    ext: "png",
-  });
-});
-
-test("detectSupportedImageUpload detects JPEG magic number", () => {
-  const bytes = buildJpeg({ width: 1, height: 1 });
-  assert.deepEqual(detectSupportedImageUpload(bytes.buffer), {
-    contentType: "image/jpeg",
-    ext: "jpg",
-  });
-});
-
-test("detectSupportedImageUpload rejects text pretending to be an image", () => {
-  const bytes = new TextEncoder().encode("<script>alert(1)</script>");
-  assert.equal(detectSupportedImageUpload(bytes.buffer), null);
-});
-
 test("inspectSupportedImageUpload returns dimensions for PNG/JPEG/WebP", () => {
   const png = buildPng({ width: 128, height: 96 });
   assert.deepEqual(inspectSupportedImageUpload(png.buffer), {
@@ -212,6 +190,9 @@ test("inspectSupportedImageUpload rejects GIF and SVG signatures", () => {
 
   const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
   assert.equal(inspectSupportedImageUpload(svg.buffer), null);
+
+  const script = new TextEncoder().encode("<script>alert(1)</script>");
+  assert.equal(inspectSupportedImageUpload(script.buffer), null);
 });
 
 test("inspectSupportedImageUpload rejects broken PNG without IHDR dimensions", () => {

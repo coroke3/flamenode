@@ -23,17 +23,6 @@ export function appendPublicReflectionDelayNotice(message: string): string {
   return `${trimmed}${separator}${PUBLIC_REFLECTION_DELAY_MESSAGE}`;
 }
 
-export function withPublicReflectionDelayMessage(
-  message: string,
-  enqueued: boolean,
-): { message: string; pendingPublicReflection?: boolean } {
-  if (!enqueued) return { message };
-  return {
-    message: appendPublicReflectionDelayNotice(message),
-    pendingPublicReflection: true,
-  };
-}
-
 export function spreadsheetSaveStatusMessage(
   base: string,
   pending?: boolean,

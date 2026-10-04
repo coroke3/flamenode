@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  parseChapterTime,
   validateChapterTime,
 } from "./chapterTime.ts";
 
@@ -36,8 +35,7 @@ test("validateChapterTime rejects malformed separators", () => {
   assert.equal(validateChapterTime("::").ok, false);
 });
 
-test("validateChapterTime accepts valid values and parseChapterTime wraps it", () => {
+test("validateChapterTime accepts valid values", () => {
   assert.deepEqual(validateChapterTime("1:05"), { ok: true, seconds: 65 });
-  assert.equal(parseChapterTime("1:05"), 65);
-  assert.equal(parseChapterTime("90"), 90);
+  assert.deepEqual(validateChapterTime("90"), { ok: true, seconds: 90 });
 });

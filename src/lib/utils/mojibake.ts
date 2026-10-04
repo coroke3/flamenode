@@ -38,15 +38,3 @@ export function looksLikeMojibake(s: string | null | undefined): boolean {
   }
   return false;
 }
-
-export function mojibakeHitCount(s: string | null | undefined): number {
-  if (!s) return 0;
-  return DETECTION_TOKENS.reduce((count, token) => {
-    let index = s.indexOf(token);
-    while (index !== -1) {
-      count++;
-      index = s.indexOf(token, index + token.length);
-    }
-    return count;
-  }, 0);
-}
