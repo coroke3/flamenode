@@ -1003,16 +1003,10 @@ function sortRecentPayloadForList(
   return { ...payload, items };
 }
 
-export async function loadStaticEventDetail(
-  eventId: string,
-): Promise<PublicJsonLoadResult<StaticEventDetail>> {
-  return loadStaticEventDetailCached(eventId);
-}
-
 // Event metadata and page rendering are separate Server Component branches.
 // Reuse this composed payload only within the current React request so both
 // branches share the visibility check, event artifact, and slot artifact.
-const loadStaticEventDetailCached = cache(
+export const loadStaticEventDetail = cache(
   async (eventId: string): Promise<PublicJsonLoadResult<StaticEventDetail>> => {
     const options: PublicJsonLoadOptions<StaticEventDetailPayload> = {
       r2Key: `events/${eventId}.json`,

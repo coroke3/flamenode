@@ -67,7 +67,7 @@ test("loader は Cache → R2 → degraded の順で公開 JSON を解決する"
 test("loader の R2 ヒット分岐は getDatabase を呼ばない", () => {
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
-    loaderSource.indexOf("export async function loadStaticEventDetail"),
+    loaderSource.indexOf("export const loadStaticEventDetail = cache("),
   );
   const hitBranch = loadPublicJsonFn.slice(
     loadPublicJsonFn.indexOf("if (payload !== null)"),
@@ -131,11 +131,11 @@ test("detail/event/user/rules loaders use R2-first freshness with bounded stale 
   assert.doesNotMatch(loaderSource, /"bypass"/);
   assert.match(loaderSource, /staleCacheMaxAgeSec/);
   const detailBlock = loaderSource.slice(
-    loaderSource.indexOf("export async function loadStaticEventDetail"),
+    loaderSource.indexOf("export const loadStaticEventDetail = cache("),
     loaderSource.indexOf("export async function loadStaticEventsIndex"),
   );
-  assert.match(detailBlock, /return loadStaticEventDetailCached\(eventId\)/);
-  assert.match(detailBlock, /loadStaticEventDetailCached = cache\(/);
+  assert.match(detailBlock, /export const loadStaticEventDetail = cache\(/);
+  assert.doesNotMatch(detailBlock, /loadStaticEventDetailCached/);
   assert.match(detailBlock, /cacheMode: "r2_first"/);
   const rulesBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticRulesPage"),
@@ -199,7 +199,7 @@ test("events index, top, and recommend loaders wire empty collection semantic mi
 test("R2-first loaders reject legacy Cache payloads without stored_at", () => {
   const loadPublicJsonFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
-    loaderSource.indexOf("export async function loadStaticEventDetail"),
+    loaderSource.indexOf("export const loadStaticEventDetail = cache("),
   );
   const eventMissFn = loaderSource.slice(
     loaderSource.indexOf("const tryCachedOrR2 = async (key: string) =>"),
@@ -539,7 +539,7 @@ test("degraded circuit の miss は public probe の対象だけを数え、load
 
   const loadFn = loaderSource.slice(
     loaderSource.indexOf("export async function loadPublicJson"),
-    loaderSource.indexOf("export async function loadStaticEventDetail"),
+    loaderSource.indexOf("export const loadStaticEventDetail = cache("),
   );
   assert.match(
     loadFn,
