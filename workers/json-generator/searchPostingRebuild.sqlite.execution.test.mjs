@@ -286,3 +286,68 @@ test("page counts のない旧 manifest は同一 generation でも1回だけ全
   assert.deepEqual([...env.objects.keys()].filter(isPostingKey).sort(), postingKeys);
   env.sqlite.close();
 });
+
+function stalePostingCount(env, liveKeys) {
+  return [...env.objects.keys()].filter((key) => isPostingKey(key) && !liveKeys.has(key)).length;
+}
+
+async function rebuildWithStaleGeneration() {
+  const env = createEnv();
+  const insertVideo = env.sqlite.prepare(
+    `INSERT INTO videos
+      (id, title, creator_display_name, creator_x_user_id, youtube_video_id,
+       visibility_status, primary_event_id, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'public', NULL, ?)`,
+  );
+  for (let index = 20; index < 400; index += 1) {
+    insertVideo.run(
+      `video-${index}`,
+      `作品タイトル ${index} ${String.fromCodePoint(0x3042 + (index % 80))}`,
+      `Creator ${index}`,
+      `creator-${index % 20}`,
+      `youtube-${index}`,
+      1_700_000_000 - index,
+    );
+  }
+  await rebuildTarget(env, "search_index", "global");
+  env.sqlite.prepare(`UPDATE videos SET title = 'Changed title' WHERE id = 'video-0'`).run();
+  await rebuildTarget(env, "search_index", "global");
+  const manifest = JSON.parse(env.objects.get(MANIFEST_KEY));
+  const liveKeys = new Set(
+    [...env.objects.keys()].filter((key) => key.includes(`/${manifest.generation}/`)),
+  );
+  return { env, manifest, liveKeys };
+}
+
+test("manifest 公開直後は古い世代を 1 回 20 件ずつ消す", async () => {
+  const { env, liveKeys } = await rebuildWithStaleGeneration();
+  const before = stalePostingCount(env, liveKeys);
+  assert.ok(before > 20, `fixture needs more than 20 stale objects, got ${before}`);
+  resetLog(env);
+
+  await rebuildTarget(env, "search_index", "global");
+
+  assert.equal(env.log.deletes.length, 20);
+  assert.equal(stalePostingCount(env, liveKeys), before - 20);
+  env.sqlite.close();
+});
+
+test("manifest が読み手の cache 期間を過ぎたら、古い世代を 1 回でまとめて消す", async () => {
+  const { env, manifest, liveKeys } = await rebuildWithStaleGeneration();
+  env.objects.set(MANIFEST_KEY, JSON.stringify({ ...manifest, generated_at: manifest.generated_at - 601 }));
+  resetLog(env);
+
+  await rebuildTarget(env, "search_index", "global");
+
+  assert.equal(stalePostingCount(env, liveKeys), 0);
+  for (const key of liveKeys) assert.ok(env.objects.has(key), `live key deleted: ${key}`);
+  const staleTracked = env.sqlite
+    .prepare(
+      `SELECT COUNT(*) AS c FROM static_artifacts
+       WHERE target_type = 'search_index' AND deleted_at IS NULL
+         AND object_key LIKE 'search-postings.v1/%' AND object_key NOT LIKE ?`,
+    )
+    .get(`search-postings.v1/${manifest.generation}/%`);
+  assert.equal(staleTracked.c, 0);
+  env.sqlite.close();
+});
