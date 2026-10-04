@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [topLoopShelf, topLoopCss, home] = await Promise.all([
+const [topLoopShelf, topLoopCss, home, uiAcceptance] = await Promise.all([
   readFile(new URL("./TopLoopShelf.tsx", import.meta.url), "utf8"),
   readFile(new URL("./TopLoopShelf.module.css", import.meta.url), "utf8"),
   readFile(
     new URL("../../../app/(public)/page.tsx", import.meta.url),
+    "utf8",
+  ),
+  readFile(
+    new URL("../../../docs/operations/ui-acceptance.md", import.meta.url),
     "utf8",
   ),
 ]);
@@ -86,6 +90,23 @@ test("TopLoopShelfはpause・pointer・wheel・reduced motionを持つ", () => {
   assert.match(topLoopShelf, /pauseOnWheel/);
   assert.match(topLoopShelf, /prefers-reduced-motion: reduce/);
   assert.match(topLoopShelf, /reducedMotion/);
+});
+
+test("TopLoopShelfはマウスhoverだけでは自動送りを止めない", () => {
+  const interactionHandlers = topLoopShelf.match(
+    /const interactionHandlers = \{([\s\S]*?)\n  \};/,
+  )?.[1];
+
+  assert.ok(interactionHandlers, "interactionHandlers が定義されている");
+  assert.doesNotMatch(interactionHandlers, /onMouseEnter|onMouseLeave|hover/);
+  assert.match(interactionHandlers, /onFocusCapture/);
+  assert.match(interactionHandlers, /onPointerDown/);
+  assert.match(interactionHandlers, /pauseAfterInteraction\(\)/);
+});
+
+test("UI受け入れ基準で汎用ShelfとTopLoopShelfのhover挙動を区別する", () => {
+  assert.match(uiAcceptance, /汎用`Shelf`はhover.*停止/);
+  assert.match(uiAcceptance, /`TopLoopShelf`はマウスhoverだけでは自動送りを止めず/);
 });
 
 test("TopLoopShelfはIntersectionObserverとvisibilitychangeを持つ", () => {

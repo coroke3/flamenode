@@ -53,8 +53,8 @@
 - トップの「FlameNodeで注目」は R2 `analytics/trending.json` を正本とし、上位8件を順位順で `TopLoopShelf` 表示する（他のトップ棚と同じ full-bleed 幅・自動スクロール。向きは注目→left / ピックアップ→right / 新着→left / 懐かし→right）。24時間超のデータは非表示。degraded D1 でも R2 が正常なら表示する。トップのピックアップ・新着・懐かしも各8件に抑える（Workers Free の HTTP 10ms）。
 - `/trending` は急上昇ランキング（上位30件・直近2日間の視聴急増で順位・各作品に1週間の視聴回数（views_7d）のみ表示・JST最終更新）を表示し、データ欠損や stale でも404/500にしない。2日/5日/30日の期間別視聴数は出さない。
 - `/recommend` の「人気作品」レール（旧「伸びている」）は表示名のみ変更し、算出は `recommend.json` のまま維持する。
-- Shelfはhover、focus、pointer、touch、wheel操作中に停止し、reduced motion、viewport外、非表示tabでは自動送りしない。
-- トップの4棚（注目・ピックアップ・新着・懐かし）は`TopLoopShelf`（3グループ複製 + scrollLeftテレポート）を使い、汎用`Shelf`のloop rotateとは分離する。`TopLoopShelf`もhover、focus、pointer、wheel、操作後一時停止、reduced motion、viewport外、非表示tabで自動送りを止める。
+- 汎用`Shelf`はhover、focus、pointer、touch、wheel操作中に停止し、reduced motion、viewport外、非表示tabでは自動送りしない。
+- トップの4棚（注目・ピックアップ・新着・懐かし）は`TopLoopShelf`（3グループ複製 + scrollLeftテレポート）を使い、汎用`Shelf`のloop rotateとは分離する。`TopLoopShelf`はマウスhoverだけでは自動送りを止めず、focus、pointer操作中と操作後の短い待機、reduced motion、viewport外、非表示tabで停止する。
 - `/admin`と`/manage`のナビ項目が混在しない。
 - 管理トップは「今日の対応状況」→「対応待ち」→「コストガード/診断ツール」→「イベント現場運営」の順に優先度を示し、対応待ちカードから該当キューへ移動できる。診断ツールはアイコン付きの2列グリッドで整理し、430px以下では1列に切り替える。
 - 管理サイドバーは現在地を視認でき、キーボードフォーカスを失わず、760px以下ではドロワー内または横スクロールで全項目へ到達できる。reduced motion／タッチ環境ではホバー移動を強制しない。
