@@ -84,12 +84,17 @@ test("video/playlist遷移中は旧viewer overlayを表示・操作しない", (
   assert.match(interactionActions, /const canInteract =\s*!loading &&/s);
 });
 
-test("重複playlist queryでもutility dockへ配列を流さない", () => {
-  assert.match(utilityDock, /function normalizeRuntimePlaylistId\(value: unknown\)/);
-  assert.match(utilityDock, /Array\.isArray\(value\)/);
-  assert.match(utilityDock, /const safePlaylistId = normalizeRuntimePlaylistId\(playlistId\)/);
-  assert.match(utilityDock, /useVideoViewerOverlay\(videoId, safePlaylistId\)/);
-  assert.match(utilityDock, /playlistId=\{safePlaylistId\}/);
+test("playlist queryはISRの公開動画ページではなくbrowserで1値だけ読む", () => {
+  // 公開動画ページはISRで全query共通のHTMLを返すため、serverはplaylistを読まない。
+  assert.doesNotMatch(page, /searchParams/);
+  assert.doesNotMatch(page, /playlistId=/);
+  assert.match(utilityDock, /const \{ overlay, loading, playlist \} = useVideoViewerOverlay\(videoId\);/);
+  assert.match(utilityDock, /playlistId=\{playlist \|\| undefined\}/);
+  // 重複queryでも URLSearchParams.get は先頭の文字列1つだけを返す。
+  assert.match(
+    client,
+    /new URLSearchParams\(window\.location\.search\)\.get\("playlist"\) \?\? ""/,
+  );
 });
 
 test("viewer overlayはcurrentUserContextのlinked X行を再利用する", () => {

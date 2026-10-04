@@ -74,8 +74,8 @@ test("公開 GET は force-dynamic せず ISR にする（ページ別の再検�
 // `revalidate` alone does not cache a dynamic segment: without
 // generateStaticParams Next.js renders it on every request (build table "ƒ"),
 // which exceeds the Workers Free 10ms CPU limit.
-test("イベント系の動的ページは generateStaticParams で on-demand ISR にする", () => {
-  for (const label of ["eventDetail", "eventSlots", "eventRelease"]) {
+test("ISR対象の動的ページは generateStaticParams で on-demand ISR にする", () => {
+  for (const label of ["video", "eventDetail", "eventSlots", "eventRelease"]) {
     assert.match(
       files[label],
       /export function generateStaticParams\(\): \{ id: string \}\[\] \{\s*return \[\];\s*\}/,

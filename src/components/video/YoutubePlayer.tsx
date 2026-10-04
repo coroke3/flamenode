@@ -33,9 +33,13 @@ export function YoutubePlayer({
   const readyRef = React.useRef(false);
   const pendingSeekRef = React.useRef<number | null>(null);
   const endedDispatchedRef = React.useRef(false);
-  const [embedOrigin] = React.useState<string | null>(() =>
-    typeof window !== "undefined" ? window.location.origin : null,
-  );
+  // The server has no origin, so it renders the thumbnail placeholder. Reading
+  // the origin only after mount keeps hydration matching that HTML; reading it
+  // in the initial state made React discard the server HTML (error #418).
+  const [embedOrigin, setEmbedOrigin] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setEmbedOrigin(window.location.origin);
+  }, []);
 
   React.useEffect(() => {
     readyRef.current = false;
