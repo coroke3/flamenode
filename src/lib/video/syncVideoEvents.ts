@@ -23,56 +23,34 @@ function eventAllowColumn(policy: VideoEventUserLinkPolicy) {
     : eventsTable.allow_user_video_event_links;
 }
 
-/** 新規作品 (video_events 未作成) の同期先イベント ID を事前計算する。 */
-export async function resolveEventSyncTargetForNewVideo(
+type YoutubeMetadataRow = typeof videoYoutubeMetadata.$inferSelect;
+
+async function loadYoutubeMetadataRow(
   db: DB,
-  args: {
-    requested: string[];
-    alwaysInclude?: string[];
-    user: { id: string; role?: string | null };
-    linkPolicy?: VideoEventUserLinkPolicy;
-  },
-): Promise<string[]> {
-  const requested = args.requested;
-  const alwaysInclude = args.alwaysInclude ?? [];
-  const user = args.user;
-  const linkPolicy = args.linkPolicy ?? "video_event_links";
-  const allowColumn = eventAllowColumn(linkPolicy);
-  const universe = Array.from(new Set([...requested, ...alwaysInclude]));
-  if (universe.length > MAX_ATOMIC_VIDEO_EVENTS) {
-    throw new Error("video_event_atomic_limit_exceeded");
-  }
+  videoId: string,
+): Promise<YoutubeMetadataRow | undefined> {
+  return (
+    await db
+      .select()
+      .from(videoYoutubeMetadata)
+      .where(eq(videoYoutubeMetadata.video_id, videoId))
+      .limit(1)
+  )[0];
+}
 
-  if (user.role === "admin") {
-    return computeVideoEventSyncTarget({
-      current: [],
-      requested,
-      alwaysInclude,
-      isAdmin: true,
-    });
-  }
-
-  const allowMap = new Map<string, number>();
-  if (universe.length > 0) {
-    const rows = await db
-      .select({
-        id: eventsTable.id,
-        allow: allowColumn,
-      })
-      .from(eventsTable)
-      .where(inArray(eventsTable.id, universe));
-    for (const r of rows) allowMap.set(r.id, r.allow);
-  }
-  const editableEventIds = new Set(await getEditableEventIds(db, user.id, universe));
-  const userCanModify = (id: string) =>
-    allowMap.get(id) === 1 || editableEventIds.has(id);
-  return computeVideoEventSyncTarget({
-    current: [],
-    requested,
-    alwaysInclude,
-    isAdmin: false,
-    modifiableEventIds: universe.filter(userCanModify),
-  });
+/** 同期前の初期状態。YouTube 由来の値を空にして次回同期を待つ。 */
+function pendingYoutubeMetadataRow(videoId: string, now: number): YoutubeMetadataRow {
+  return {
+    video_id: videoId,
+    youtube_privacy_status: null,
+    youtube_availability_status: null,
+    duration_seconds: null,
+    view_count: 0,
+    synced_at: null,
+    sync_status: "pending",
+    sync_error: null,
+    updated_at: now,
+  };
 }
 
 export async function buildVideoMetadataClearPlan(
@@ -83,38 +61,14 @@ export async function buildVideoMetadataClearPlan(
     actorUserId: string;
   },
 ): Promise<VideoAtomicWritePlan> {
-  const existing = (
-    await db
-      .select()
-      .from(videoYoutubeMetadata)
-      .where(eq(videoYoutubeMetadata.video_id, args.videoId))
-      .limit(1)
-  )[0];
+  const existing = await loadYoutubeMetadataRow(db, args.videoId);
   if (!existing) {
     return emptyVideoAtomicWritePlan();
   }
-  const after: typeof videoYoutubeMetadata.$inferSelect = {
-    video_id: args.videoId,
-    youtube_privacy_status: null,
-    youtube_availability_status: null,
-    duration_seconds: null,
-    view_count: 0,
-    synced_at: null,
-    sync_status: "pending",
-    sync_error: null,
-    updated_at: args.now,
-  };
+  const after = pendingYoutubeMetadataRow(args.videoId, args.now);
+  const { video_id: _videoId, ...reset } = after;
   return {
-    statements: [db.update(videoYoutubeMetadata).set({
-      youtube_privacy_status: null,
-      youtube_availability_status: null,
-      duration_seconds: null,
-      view_count: 0,
-      synced_at: null,
-      sync_status: "pending",
-      sync_error: null,
-      updated_at: args.now,
-    }).where(and(
+    statements: [db.update(videoYoutubeMetadata).set(reset).where(and(
       eq(videoYoutubeMetadata.video_id, args.videoId),
       expectedRowCondition({ expectedCurrent: existing }),
     )!)],
@@ -144,25 +98,9 @@ export async function buildVideoDerivedRowsPlan(
 ): Promise<VideoAtomicWritePlan> {
   // YouTube IDの唯一の正本はvideos.youtube_video_id。metadataへは保存しない。
   void args.youtubeVideoId;
-  const existing = (
-    await db
-      .select()
-      .from(videoYoutubeMetadata)
-      .where(eq(videoYoutubeMetadata.video_id, args.videoId))
-      .limit(1)
-  )[0];
+  const existing = await loadYoutubeMetadataRow(db, args.videoId);
   if (!existing) {
-    const after: typeof videoYoutubeMetadata.$inferSelect = {
-      video_id: args.videoId,
-      youtube_privacy_status: null,
-      youtube_availability_status: null,
-      duration_seconds: null,
-      view_count: 0,
-      synced_at: null,
-      sync_status: "pending",
-      sync_error: null,
-      updated_at: args.now,
-    };
+    const after = pendingYoutubeMetadataRow(args.videoId, args.now);
     return {
       statements: [db.insert(videoYoutubeMetadata).values(after)],
       expectedChanges: [1],
@@ -179,7 +117,7 @@ export async function buildVideoDerivedRowsPlan(
       }],
     };
   }
-  const after: typeof videoYoutubeMetadata.$inferSelect = {
+  const after: YoutubeMetadataRow = {
     ...existing,
     sync_status: "pending",
     updated_at: args.now,
