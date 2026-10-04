@@ -12,7 +12,6 @@ import {
   PUBLIC_STAFF_MAX_PER_EVENT,
   RECENT_LIST_LIMIT,
   SEARCH_INDEX_VIDEO_LIMIT,
-  STATIC_ARTIFACT_RECONCILIATION_SQL,
   STATIC_LIST_MAX_ITEMS,
   STATIC_LIST_MAX_OBJECT_BYTES,
   capStaticListTotal,
@@ -20,6 +19,7 @@ import {
   rebuildTarget,
   removeTrackedArtifacts,
 } from "./rebuild.ts";
+import { STATIC_ARTIFACT_RECONCILIATION_SQL } from "./staticArtifactTracking.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../src/lib/utils/publicXUser.ts";
 import { PICKUP_CREATORS_OBJECT_KEY } from "../../src/lib/publicData/publicCreatorProjection.ts";
 
@@ -511,13 +511,13 @@ test("search-indexはgeneration固定のbounded posting shardも生成する", (
   assert.match(source, /staticVideoSearchPostingDirectoryObjectKey/);
   assert.match(source, /staticVideoSearchPostingPageObjectKey/);
   assert.match(source, /await recordStaticArtifacts\(\s*env,\s*\{\s*targetType: "search_index"[\s\S]*?pendingPostingArtifacts/);
-  assert.match(source, /await reconcileTrackedArtifacts\(/);
+  assert.match(source, /await reconcileStaticArtifacts\(/);
 });
 
 test("search-indexのposting trackingは生成関数自身が完了するため共通cleanupで削除しない", () => {
   const rebuildTargetTail = source.slice(source.indexOf("export async function rebuildTarget"));
   const cleanupBlock = rebuildTargetTail.match(
-    /if \(\[\s*[\s\S]*?\]\.includes\(targetType\)\) \{[\s\S]*?await reconcileTrackedArtifacts\(/,
+    /if \(\[\s*[\s\S]*?\]\.includes\(targetType\)\) \{[\s\S]*?await reconcileStaticArtifacts\(/,
   )?.[0];
   assert.ok(cleanupBlock);
   assert.doesNotMatch(cleanupBlock, /"search_index"/);

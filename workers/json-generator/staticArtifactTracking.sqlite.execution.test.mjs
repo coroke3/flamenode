@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { recordStaticArtifacts } from "./staticArtifactTracking.ts";
+import {
+  reconcileStaticArtifacts,
+  recordStaticArtifacts,
+} from "./staticArtifactTracking.ts";
 
 function createDb() {
   const sqlite = new DatabaseSync(":memory:");
@@ -30,6 +33,10 @@ function createDb() {
               statements.push(sql);
               sqlite.prepare(sql).run(...values);
               return { meta: {} };
+            },
+            async all() {
+              statements.push(sql);
+              return { results: sqlite.prepare(sql).all(...values) };
             },
           };
         },
@@ -84,5 +91,45 @@ test("recordStaticArtifacts は 500 件ごとに1文で upsert し、削除済�
     },
   );
   assert.equal(cache.get("k-500"), "h-500");
+  sqlite.close();
+});
+
+test("reconcileStaticArtifacts は live key を SQL で除き、古い順に limit 件だけ消す", async () => {
+  const { sqlite, DB, statements } = createDb();
+  const insert = sqlite.prepare(
+    `INSERT INTO static_artifacts VALUES (?, ?, 'g', ?, 'h', 1, NULL, ?, ?)`,
+  );
+  // live key が最も古くても、stale の削除枠を食わない。
+  insert.run("a", "member_suggestions", "live-old", 1, null);
+  insert.run("b", "member_suggestions", "stale-1", 2, null);
+  insert.run("c", "member_suggestions", "stale-2", 3, null);
+  insert.run("d", "member_suggestions", "stale-3", 4, null);
+  insert.run("e", "member_suggestions", "already-deleted", 0, 5);
+  insert.run("f", "other", "stale-other", 0, null);
+  const deletedFromR2 = [];
+  const cache = new Map();
+
+  await reconcileStaticArtifacts(
+    {
+      DB,
+      R2: { delete: async (keys) => deletedFromR2.push(...keys) },
+      artifactHashCache: cache,
+    },
+    { targetType: "member_suggestions", targetId: "g" },
+    ["live-old"],
+    2,
+  );
+
+  assert.deepEqual(deletedFromR2, ["stale-1", "stale-2"]);
+  assert.equal(statements.length, 2);
+  const live = sqlite
+    .prepare(
+      `SELECT object_key FROM static_artifacts
+        WHERE deleted_at IS NULL ORDER BY object_key`,
+    )
+    .all()
+    .map((row) => row.object_key);
+  assert.deepEqual(live, ["live-old", "stale-3", "stale-other"]);
+  assert.equal(cache.get("stale-1"), null);
   sqlite.close();
 });

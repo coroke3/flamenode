@@ -272,6 +272,29 @@ async function cleanupFailedArtifactChunk(
   }
 }
 
+/**
+ * Cleanup must never touch the published manifest or the pages/postings of
+ * the generation it references. Without a manifest nothing is protected.
+ */
+function publishedGenerationProtection(
+  manifest: ManifestGenerationState,
+): { sql: string; params: string[] } {
+  if (manifest.kind !== "known" || !manifest.generation) {
+    return { sql: "", params: [] };
+  }
+  return {
+    sql: `
+        AND object_key <> ?
+        AND object_key NOT LIKE ?
+        AND object_key NOT LIKE ?`,
+    params: [
+      USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
+      `${USERS_INDEX_V2_GENERATION_PREFIX}/${manifest.generation}/%`,
+      `search-postings.v1/users-${manifest.generation}/%`,
+    ],
+  };
+}
+
 export async function reconcileTrackedArtifacts(
   env: Env,
   liveKeys: readonly string[],
@@ -285,20 +308,7 @@ export async function reconcileTrackedArtifacts(
   if (currentManifest.kind === "unknown") {
     return { deleted: 0, hasMore: true };
   }
-  const protectedGeneration =
-    currentManifest.kind === "known" ? currentManifest.generation : null;
-  const protectedPagePrefix = protectedGeneration
-    ? `${USERS_INDEX_V2_GENERATION_PREFIX}/${protectedGeneration}/%`
-    : null;
-  const protectedPostingPrefix = protectedGeneration
-    ? `search-postings.v1/users-${protectedGeneration}/%`
-    : null;
-  const protectionSql = protectedGeneration
-    ? `
-        AND object_key <> ?
-        AND object_key NOT LIKE ?
-        AND object_key NOT LIKE ?`
-    : "";
+  const protection = publishedGenerationProtection(currentManifest);
   const rows = await env.DB.prepare(
     `SELECT object_key
        FROM static_artifacts
@@ -308,7 +318,7 @@ export async function reconcileTrackedArtifacts(
           FROM json_each(?)
           WHERE value IS NOT NULL
         )
-      ${protectionSql}
+      ${protection.sql}
       ORDER BY generated_at ASC
       LIMIT ?`,
   )
@@ -316,14 +326,8 @@ export async function reconcileTrackedArtifacts(
       USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
       USERS_INDEX_V2_ARTIFACT_TARGET_ID,
       JSON.stringify(liveKeys),
-      ...(protectedGeneration
-        ? [
-            USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-            protectedPagePrefix!,
-            protectedPostingPrefix!,
-            USERS_INDEX_V2_CLEANUP_LIMIT,
-          ]
-        : [USERS_INDEX_V2_CLEANUP_LIMIT]),
+      ...protection.params,
+      USERS_INDEX_V2_CLEANUP_LIMIT,
     )
     .all<TrackedArtifactRow>();
   throwIfAborted(signal);
@@ -352,20 +356,14 @@ export async function reconcileTrackedArtifacts(
           FROM json_each(?)
           WHERE value IS NOT NULL
         )
-      ${protectionSql}`,
+      ${protection.sql}`,
   )
     .bind(
       now,
       USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
       USERS_INDEX_V2_ARTIFACT_TARGET_ID,
       JSON.stringify(staleKeys),
-      ...(protectedGeneration
-        ? [
-            USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-            protectedPagePrefix!,
-            protectedPostingPrefix!,
-          ]
-        : []),
+      ...protection.params,
     )
     .run();
   for (const key of staleKeys) env.artifactHashCache?.set(key, null);
@@ -387,20 +385,7 @@ export async function purgeDeletedArtifacts(
     return { deleted: 0, hasMore: true };
   }
   const cutoff = Math.floor(Date.now() / 1000) - USERS_INDEX_V2_PURGE_SAFETY_SEC;
-  const protectedGeneration =
-    currentManifest.kind === "known" ? currentManifest.generation : null;
-  const protectedPagePrefix = protectedGeneration
-    ? `${USERS_INDEX_V2_GENERATION_PREFIX}/${protectedGeneration}/%`
-    : null;
-  const protectedPostingPrefix = protectedGeneration
-    ? `search-postings.v1/users-${protectedGeneration}/%`
-    : null;
-  const protectionSql = protectedGeneration
-    ? `
-        AND object_key <> ?
-        AND object_key NOT LIKE ?
-        AND object_key NOT LIKE ?`
-    : "";
+  const protection = publishedGenerationProtection(currentManifest);
   const rows = await env.DB.prepare(
     `SELECT object_key
        FROM static_artifacts
@@ -413,7 +398,7 @@ export async function purgeDeletedArtifacts(
           FROM json_each(?)
           WHERE value IS NOT NULL
         )
-      ${protectionSql}
+      ${protection.sql}
       ORDER BY deleted_at ASC
       LIMIT ?`,
   )
@@ -422,14 +407,8 @@ export async function purgeDeletedArtifacts(
       USERS_INDEX_V2_ARTIFACT_TARGET_ID,
       cutoff,
       JSON.stringify(liveKeys),
-      ...(protectedGeneration
-        ? [
-            USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-            protectedPagePrefix!,
-            protectedPostingPrefix!,
-            USERS_INDEX_V2_CLEANUP_LIMIT,
-          ]
-        : [USERS_INDEX_V2_CLEANUP_LIMIT]),
+      ...protection.params,
+      USERS_INDEX_V2_CLEANUP_LIMIT,
     )
     .all<TrackedArtifactRow>();
   throwIfAborted(signal);
@@ -451,20 +430,14 @@ export async function purgeDeletedArtifacts(
         )
         AND deleted_at IS NOT NULL
         AND deleted_at < ?
-      ${protectionSql}`,
+      ${protection.sql}`,
   )
     .bind(
       USERS_INDEX_V2_ARTIFACT_TARGET_TYPE,
       USERS_INDEX_V2_ARTIFACT_TARGET_ID,
       JSON.stringify(keys),
       cutoff,
-      ...(protectedGeneration
-        ? [
-            USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
-            protectedPagePrefix!,
-            protectedPostingPrefix!,
-          ]
-        : []),
+      ...protection.params,
     )
     .run();
   throwIfAborted(signal);

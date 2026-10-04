@@ -110,3 +110,37 @@ export async function deleteStaticArtifacts(
   for (const key of objectKeys) env.artifactHashCache?.set(key, null);
   throwIfAborted(signal, "static rebuild aborted");
 }
+
+// Keep the existing cleanup order and bounded batch size. The partial cleanup
+// index covers this ordering, while the JSON1 live-key list is non-correlated.
+export const STATIC_ARTIFACT_RECONCILIATION_SQL = `
+  SELECT object_key FROM static_artifacts
+  WHERE target_type = ? AND target_id = ? AND deleted_at IS NULL
+    AND object_key NOT IN (
+      SELECT CAST(value AS TEXT)
+      FROM json_each(?)
+      WHERE value IS NOT NULL
+    )
+  ORDER BY generated_at ASC
+  LIMIT ?
+`;
+
+/** Delete up to `limit` of the target's oldest tracked artifacts that are not live. */
+export async function reconcileStaticArtifacts(
+  env: Parameters<typeof deleteStaticArtifacts>[0],
+  target: Pick<StaticArtifactTrackingTarget, "targetType" | "targetId">,
+  liveKeys: readonly string[],
+  limit: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  throwIfAborted(signal, "static rebuild aborted");
+  const rows = await env.DB.prepare(STATIC_ARTIFACT_RECONCILIATION_SQL)
+    .bind(target.targetType, target.targetId, JSON.stringify(liveKeys), limit)
+    .all<{ object_key: string }>();
+  await deleteStaticArtifacts(
+    env,
+    target,
+    (rows.results ?? []).map((row) => row.object_key),
+    signal,
+  );
+}
