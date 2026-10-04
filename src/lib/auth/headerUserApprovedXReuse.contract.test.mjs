@@ -90,6 +90,7 @@ test("account summary は current-user DB正本snapshotとlinked X rowsを再利
 
 test("preloaded approved X query は従来同様 permission を持つ event_staff だけを返す", () => {
   assert.match(helperSource, /approvedXIdsWhere\(eventStaff\.x_user_id, xIds\)/);
-  assert.match(helperSource, /resolveStaffPermissionKeys\(row\)\.size > 0/);
-  assert.match(helperSource, /editable_event_staff_read_limit_exceeded/);
+  // JS resolverとの判定一致は editableEventIdsByXIds.sqlite.execution.test.mjs で実行検証する。
+  assert.match(helperSource, /json_type\(/);
+  assert.doesNotMatch(helperSource, /getEditableEventIdsByApprovedXIds/);
 });
