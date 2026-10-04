@@ -101,11 +101,10 @@ test("visibility manifestは既知R2 sizeなら本文を再encodeしない", () 
 
 test("pickup creators workerは既存1MiB上限をparse前に適用する", () => {
   assert.match(pickupCreatorsSource, /PICKUP_CREATORS_MAX_OBJECT_BYTES/);
-  assert.match(pickupCreatorsSource, /object\.size > PICKUP_CREATORS_MAX_OBJECT_BYTES/);
-  assert.match(pickupCreatorsSource, /cancelR2BodyBestEffort\(object\)/);
-  assert.ok(
-    pickupCreatorsSource.indexOf("object.size > PICKUP_CREATORS_MAX_OBJECT_BYTES") <
-      pickupCreatorsSource.indexOf("object.json()"),
+  // size guard・cancel・parse の順序は readBoundedR2Json の実行 test が検査する。
+  assert.match(
+    pickupCreatorsSource,
+    /readBoundedR2Json\(\s*env\.R2,\s*PICKUP_CREATORS_OBJECT_KEY,\s*PICKUP_CREATORS_MAX_OBJECT_BYTES,\s*signal,\s*\);\s*signal\?\.throwIfAborted\(\);/,
   );
 });
 
@@ -122,11 +121,9 @@ test("public Cache APIは巨大JSONを全bufferせずread/write両側でbyte上�
 
 test("score rankingのevents indexはbounded readし、abortをfallbackへ握り潰さない", () => {
   assert.match(scoreThrottleSource, /EVENTS_INDEX_MAX_OBJECT_BYTES/);
-  assert.match(scoreThrottleSource, /object\.size > EVENTS_INDEX_MAX_OBJECT_BYTES/);
-  assert.match(scoreThrottleSource, /cancelR2BodyBestEffort\(object\)/);
-  assert.ok(
-    scoreThrottleSource.indexOf("object.size > EVENTS_INDEX_MAX_OBJECT_BYTES") <
-      scoreThrottleSource.indexOf("object.json()"),
+  assert.match(
+    scoreThrottleSource,
+    /readBoundedR2Json\(\s*env\.R2,\s*EVENTS_INDEX_R2_KEY,\s*EVENTS_INDEX_MAX_OBJECT_BYTES,\s*signal,\s*\);\s*signal\?\.throwIfAborted\(\);/,
   );
   assert.ok(scoreThrottleSource.split("signal?.throwIfAborted();").length - 1 >= 9);
 });
@@ -134,20 +131,14 @@ test("score rankingのevents indexはbounded readし、abortをfallbackへ握り
 test("users index v2 workerはmanifest/legacy正本をbounded readする", () => {
   assert.match(usersIndexV2ArtifactsSource, /USERS_INDEX_V2_MAX_MANIFEST_BYTES/);
   assert.match(usersIndexV2ArtifactsSource, /USERS_INDEX_MAX_OBJECT_BYTES/);
-  assert.match(usersIndexV2ArtifactsSource, /cancelR2BodyBestEffort/);
-  const manifestSize = usersIndexV2ArtifactsSource.indexOf(
-    "object.size > USERS_INDEX_V2_MAX_MANIFEST_BYTES",
+  assert.match(
+    usersIndexV2ArtifactsSource,
+    /readBoundedR2Json\(\s*env\.R2,\s*USERS_INDEX_V2_MANIFEST_OBJECT_KEY,\s*USERS_INDEX_V2_MAX_MANIFEST_BYTES,/,
   );
-  const manifestParse = usersIndexV2ArtifactsSource.indexOf(
-    "object.json<unknown>()",
-    manifestSize,
+  assert.match(
+    usersIndexV2ArtifactsSource,
+    /readBoundedR2Json\(\s*env\.R2,\s*USERS_INDEX_OBJECT_KEY,\s*USERS_INDEX_MAX_OBJECT_BYTES,\s*signal,/,
   );
-  assert.ok(manifestSize >= 0 && manifestParse > manifestSize);
-  const legacySize = usersIndexV2ArtifactsSource.indexOf(
-    "object.size > USERS_INDEX_MAX_OBJECT_BYTES",
-  );
-  const legacyParse = usersIndexV2ArtifactsSource.indexOf("object.json()", legacySize);
-  assert.ok(legacySize >= 0 && legacyParse > legacySize);
 });
 
 test("health diagnosticsはoversize artifactを本文parse前に拒否してbodyを解放する", () => {
@@ -225,7 +216,10 @@ test("legacy rebuildは共通R2 wrapperでoversizeとGET直後abortを遮断す�
 });
 
 test("public icon v2 rebuildはR2 GET/HEAD境界でabortを継続処理へ変換しない", () => {
-  assert.match(publicIconV2ArtifactsSource, /cancelObjectBodyBestEffort\(legacyObject\)/);
+  assert.match(
+    publicIconV2ArtifactsSource,
+    /PUBLIC_X_ICON_MAP_MAX_OBJECT_BYTES,\s*signal,\s*\);\s*throwIfAborted\(signal\);/,
+  );
   assert.match(
     publicIconV2ArtifactsSource,
     /const object = await env\.R2\.head[\s\S]*?throwIfAborted\(signal\);/,
@@ -247,7 +241,7 @@ test("member suggestions V1/V2 manifest readはsize guardとabort cleanupを持�
   );
   assert.match(
     memberSuggestionsV2ArtifactsSource,
-    /object\.size > MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES/,
+    /MEMBER_SUGGESTIONS_V2_MAX_ARTIFACT_BYTES,\s*signal,\s*\);\s*throwIfAborted\(signal\);/,
   );
   assert.match(
     memberSuggestionsV2ArtifactsSource,

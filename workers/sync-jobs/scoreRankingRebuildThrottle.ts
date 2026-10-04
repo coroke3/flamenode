@@ -1,4 +1,4 @@
-import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
+import { readBoundedR2Json } from "../../src/lib/r2Body.ts";
 import { normalizeStaticEventsIndex } from "../../src/lib/publicData/staticEventsIndexCore.ts";
 import { PUBLIC_JSON_CACHE_TTL_SEC } from "../../src/lib/publicData/publicJsonCacheTtl.ts";
 import {
@@ -141,23 +141,15 @@ async function resolveHasActiveOngoingEventFromR2(
 ): Promise<ActiveOngoingEventResolution | null> {
   signal?.throwIfAborted();
   try {
-    const object = await env.R2.get(EVENTS_INDEX_R2_KEY);
-    if (!object) return null;
-    if (signal?.aborted) {
-      await cancelR2BodyBestEffort(object);
-      signal.throwIfAborted();
-    }
-    if (
-      typeof object.size === "number" &&
-      (!Number.isSafeInteger(object.size) ||
-        object.size < 0 ||
-        object.size > EVENTS_INDEX_MAX_OBJECT_BYTES)
-    ) {
-      await cancelR2BodyBestEffort(object);
-      return null;
-    }
-    const payload = await object.json();
+    const read = await readBoundedR2Json(
+      env.R2,
+      EVENTS_INDEX_R2_KEY,
+      EVENTS_INDEX_MAX_OBJECT_BYTES,
+      signal,
+    );
     signal?.throwIfAborted();
+    if (!read.ok) return null;
+    const payload = read.value;
     if (isEventsIndexPayloadStale(parseEventsIndexGeneratedAt(payload), nowUnix)) {
       return null;
     }

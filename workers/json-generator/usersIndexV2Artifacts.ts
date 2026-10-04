@@ -1,4 +1,4 @@
-import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
+import { readBoundedR2Json } from "../../src/lib/r2Body.ts";
 import { assertNoForbiddenPublicKeys } from "./sanitize.ts";
 import {
   type ArtifactHashCache,
@@ -155,19 +155,16 @@ async function readCurrentManifestGeneration(
   env: Env,
 ): Promise<ManifestGenerationState> {
   try {
-    const object = await env.R2.get(USERS_INDEX_V2_MANIFEST_OBJECT_KEY);
-    if (!object) return { kind: "absent" };
-    if (
-      typeof object.size === "number" &&
-      (!Number.isSafeInteger(object.size) ||
-        object.size < 0 ||
-        object.size > USERS_INDEX_V2_MAX_MANIFEST_BYTES)
-    ) {
-      await cancelR2BodyBestEffort(object);
-      return { kind: "unknown" };
+    const read = await readBoundedR2Json(
+      env.R2,
+      USERS_INDEX_V2_MANIFEST_OBJECT_KEY,
+      USERS_INDEX_V2_MAX_MANIFEST_BYTES,
+    );
+    if (!read.ok) {
+      if (read.reason === "invalid_json") throw read.error;
+      return read.reason === "missing" ? { kind: "absent" } : { kind: "unknown" };
     }
-    const payload = await object.json<unknown>();
-    const manifest = normalizeUsersIndexV2Manifest(payload);
+    const manifest = normalizeUsersIndexV2Manifest(read.value);
     return manifest
       ? {
           kind: "known",
@@ -736,29 +733,23 @@ async function rebuildUsersIndexV2FromLegacyArtifactStrict(
   options?: { forceRepair?: boolean },
 ): Promise<{ liveKeys: string[]; objectCount: number; hasMore: boolean; skipped: boolean }> {
   throwIfAborted(signal);
-  const object = await env.R2.get(USERS_INDEX_OBJECT_KEY);
-  if (signal?.aborted) {
-    await cancelR2BodyBestEffort(object);
-    throwIfAborted(signal);
-  }
-  if (!object) throw new Error("users_index_v2_requires_legacy_artifact");
-  if (
-    typeof object.size === "number" &&
-    (!Number.isSafeInteger(object.size) ||
-      object.size < 0 ||
-      object.size > USERS_INDEX_MAX_OBJECT_BYTES)
-  ) {
-    await cancelR2BodyBestEffort(object);
-    throw new Error("users_index_v2_legacy_artifact_too_large");
-  }
-
-  let payload: unknown;
-  try {
-    payload = await object.json();
-  } catch {
-    throw new Error("users_index_v2_legacy_artifact_invalid_json");
-  }
+  const legacy = await readBoundedR2Json(
+    env.R2,
+    USERS_INDEX_OBJECT_KEY,
+    USERS_INDEX_MAX_OBJECT_BYTES,
+    signal,
+  );
   throwIfAborted(signal);
+  if (!legacy.ok) {
+    throw new Error(
+      legacy.reason === "missing"
+        ? "users_index_v2_requires_legacy_artifact"
+        : legacy.reason === "too_large"
+          ? "users_index_v2_legacy_artifact_too_large"
+          : "users_index_v2_legacy_artifact_invalid_json",
+    );
+  }
+  const payload = legacy.value;
 
   // normalizeStaticUsersIndex intentionally rejects empty collections for the
   // public legacy loader. Rebuild generation itself must still support a valid

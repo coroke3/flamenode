@@ -76,3 +76,31 @@ test("readBoundedR2Jsonはsize不明のobjectを読み、壊れたJSONをinvalid
   assert.equal(result.reason, "invalid_json");
   assert.ok(result.error instanceof SyntaxError);
 });
+
+test("readBoundedR2JsonはGET中にabortされたらbodyを解放してparseしない", async () => {
+  const controller = new AbortController();
+  const state = { cancelled: 0, parsed: 0 };
+  const bucket = {
+    async get() {
+      controller.abort(new Error("deadline"));
+      return {
+        size: 2,
+        body: {
+          cancel() {
+            state.cancelled += 1;
+          },
+        },
+        async json() {
+          state.parsed += 1;
+          return {};
+        },
+      };
+    },
+  };
+  assert.deepEqual(
+    await readBoundedR2Json(bucket, "k", 10, controller.signal),
+    { ok: false, reason: "aborted" },
+  );
+  assert.equal(state.cancelled, 1);
+  assert.equal(state.parsed, 0);
+});
