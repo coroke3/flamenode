@@ -197,9 +197,10 @@ export function buildStaticSearchPostingArtifacts<T>(args: {
   for (const item of args.items) {
     const key = normalizeString(args.keyOf(item));
     if (!key) continue;
-    const grams = new Set(
-      args.textOf(item).flatMap((value) => gramsForText(value, minGramLength)),
-    );
+    const grams = new Set<string>();
+    for (const value of args.textOf(item)) {
+      for (const gram of gramsForText(value, minGramLength)) grams.add(gram);
+    }
     for (const gram of grams) {
       const entries = byGram.get(gram) ?? new Map<string, T>();
       entries.set(key, item);
