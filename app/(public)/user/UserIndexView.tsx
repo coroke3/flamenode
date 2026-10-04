@@ -1,0 +1,247 @@
+import * as React from "react";
+import Link from "next/link";
+import type { Metadata } from "next";
+import styles from "./page.module.css";
+import { Icon } from "@/components/ui/Icon";
+import { Pagination } from "@/components/ui/Pagination";
+import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
+import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
+import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
+import { buildPageMetadata } from "@/lib/seo";
+import {
+  loadStaticUsersIndex,
+  setPublicRequestRoute,
+  type StaticUsersIndexEntry,
+} from "@/lib/publicData/loader";
+import {
+  paginateUsersIndexItems,
+  prepareUsersIndexItems,
+  type UsersIndexSort,
+} from "@/lib/publicData/staticUsersIndexCore";
+import { loadStaticUsersIndexV2Page } from "@/lib/publicData/staticUsersIndexV2Loader";
+import type { UsersIndexV2Entry } from "@/lib/publicData/staticUsersIndexV2Core";
+
+export const metadata: Metadata = buildPageMetadata({
+  path: "/user",
+  title: "クリエイターを見つける",
+  description:
+    "FlameNodeで作品を公開している映像クリエイターと参加作品を探せます。",
+});
+
+interface SearchParams {
+  q?: string;
+  sort?: string;
+  page?: string;
+}
+
+const PAGE_SIZE = 48;
+
+type CreatorRow = {
+  id: string;
+  x_name: string;
+  icon_url: string | null;
+  own_count: number;
+  collab_count: number;
+  total_count: number;
+};
+
+type CreatorIndexEntry = Pick<
+  StaticUsersIndexEntry | UsersIndexV2Entry,
+  | "x_id"
+  | "x_name"
+  | "icon_url"
+  | "personal_count"
+  | "collab_count"
+  | "total_works"
+>;
+
+function parseUsersIndexSort(value: string | undefined): UsersIndexSort {
+  return value === "name" || value === "works" ? value : "score";
+}
+
+function parsePageNumber(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "1", 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function mapIndexEntry(entry: CreatorIndexEntry): CreatorRow {
+  return {
+    id: entry.x_id,
+    x_name: entry.x_name,
+    icon_url: entry.icon_url,
+    own_count: entry.personal_count,
+    collab_count: entry.collab_count,
+    total_count: entry.total_works,
+  };
+}
+
+/**
+ * Shared by `page.tsx` (ISR, default view, no query) and `~query/page.tsx`
+ * (dynamic; query-bearing URLs are rewritten there in next.config.mjs).
+ */
+export async function UserListPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}): Promise<React.ReactElement> {
+  const { q = "", sort = "score", page = "1" } = await searchParams;
+  const pageNum = parsePageNumber(page);
+  const sortKey = parseUsersIndexSort(sort);
+  setPublicRequestRoute("/user");
+
+  const v2Loaded = await loadStaticUsersIndexV2Page({
+    page: pageNum,
+    sort: sortKey,
+    q: q.trim() || undefined,
+  });
+
+  let creators: CreatorRow[];
+  let total: number;
+  let totalPages: number;
+  let safePage: number;
+  let current: CreatorRow[];
+  let unavailable = false;
+  let effectivePageSize = PAGE_SIZE;
+
+  if (v2Loaded) {
+    creators = v2Loaded.items.map(mapIndexEntry);
+    total = v2Loaded.total;
+    totalPages = v2Loaded.totalPages;
+    safePage = v2Loaded.safePage;
+    current = creators;
+    effectivePageSize = v2Loaded.pageSize;
+  } else {
+    // v2 is optional during rollout and whenever a generation/visibility check
+    // fails. The legacy artifact remains the compatibility path.
+    const staticLoaded = await loadStaticUsersIndex();
+    unavailable = staticLoaded.mode === "unavailable";
+    creators = staticLoaded.index
+      ? prepareUsersIndexItems(staticLoaded.index.items, q, sortKey).map(
+          mapIndexEntry,
+        )
+      : [];
+
+    const paged = paginateUsersIndexItems(creators, pageNum, PAGE_SIZE);
+    total = paged.total;
+    totalPages = paged.totalPages;
+    safePage = paged.safePage;
+    current = paged.current;
+  }
+
+  const params = (override: Partial<SearchParams> = {}) => {
+    const p = new URLSearchParams();
+    const merged = {
+      q,
+      sort: sortKey,
+      page: String(safePage),
+      ...override,
+    };
+    if (merged.q) p.set("q", merged.q);
+    if (merged.sort && merged.sort !== "score") p.set("sort", merged.sort);
+    if (merged.page && merged.page !== "1") p.set("page", merged.page);
+    return p.toString();
+  };
+
+  return (
+    <div className={`fn-public-container fn-page ${styles.page}`}>
+      <header className="fn-page-head">
+        <div className="fn-page-head-main">
+          <span className="fn-eyebrow">CREATORS</span>
+          <h1 className="fn-display fn-page-title">クリエイターを見つける</h1>
+        </div>
+      </header>
+
+      <ImeSafeGetForm className={styles.controls} method="get">
+        <label className={styles.searchBox}>
+          <Icon name="search" size={14} aria-hidden />
+          <span className="fn-sr-only">クリエイター検索</span>
+          <input
+            type="search"
+            name="q"
+            defaultValue={q}
+            placeholder="名前 / X ID"
+            autoComplete="off"
+          />
+        </label>
+        <label className={styles.sortBox}>
+          <span>並び替え</span>
+          <AutoSubmitSelect
+            className="fn-select"
+            name="sort"
+            defaultValue={sortKey}
+          >
+            <option value="score">おすすめ順</option>
+            <option value="works">作品数順</option>
+            <option value="name">名前順</option>
+          </AutoSubmitSelect>
+        </label>
+        {q || sortKey !== "score" ? (
+          <Link href="/user" className="fn-btn fn-btn-ghost">
+            リセット
+          </Link>
+        ) : null}
+      </ImeSafeGetForm>
+
+      {current.length === 0 ? (
+        <div className="fn-empty">
+          <Icon name="info" size={24} aria-hidden />
+          <p className="fn-empty-message">
+            {unavailable
+              ? "公開クリエイター一覧を一時的に表示できません。"
+              : "条件に合うクリエイターが見つかりませんでした。"}
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className={styles.meta}>
+            {total} 件
+          </div>
+          <div className={styles.grid}>
+            {current.map((creator, index) => (
+              <Link
+                key={`${creator.id}-creator-${index}`}
+                href={`/user/${creator.id}`}
+                className={styles.card}
+                prefetch={false}
+              >
+                <span className={styles.profile}>
+                  {cachedGoogleImageUrl(creator.icon_url) ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={cachedGoogleImageUrl(creator.icon_url) ?? ""}
+                      alt=""
+                      className={styles.avatar}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className={styles.avatarFallback}>
+                      <Icon name="user" size={20} aria-hidden />
+                    </span>
+                  )}
+                  <span className={styles.identity}>
+                    <span className={styles.name}>{creator.x_name}</span>
+                    <span className={styles.handle}>@{creator.id}</span>
+                  </span>
+                </span>
+                <span className={styles.counts}>
+                  {creator.total_count} 作品
+                  <small>
+                    主催 {creator.own_count} / 参加 {creator.collab_count}
+                  </small>
+                </span>
+              </Link>
+            ))}
+          </div>
+
+          <Pagination
+            currentPage={safePage}
+            totalPages={totalPages}
+            total={total}
+            pageSize={effectivePageSize}
+            buildHref={(nextPage) => `/user?${params({ page: String(nextPage) })}`}
+          />
+        </>
+      )}
+    </div>
+  );
+}

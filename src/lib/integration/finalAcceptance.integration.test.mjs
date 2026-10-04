@@ -23,7 +23,7 @@ test("X ID統合はevent_staffを原子的に統合・復元し監査へ件数�
 
 test("イベント検索は公開運営者名を対象に含める", async () => {
   const text = await source(
-    "app/(public)/event/page.tsx",
+    "app/(public)/event/EventIndexView.tsx",
   );
 
   assert.match(text, /public_operator_names/);

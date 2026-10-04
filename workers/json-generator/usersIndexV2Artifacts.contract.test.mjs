@@ -15,7 +15,7 @@ const loaderSource = await readFile(
   "utf8",
 );
 const pageSource = await readFile(
-  new URL("../../app/(public)/user/page.tsx", import.meta.url),
+  new URL("../../app/(public)/user/UserIndexView.tsx", import.meta.url),
   "utf8",
 );
 

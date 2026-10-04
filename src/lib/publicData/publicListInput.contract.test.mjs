@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const page = await readFile(
-  new URL("../../../app/(public)/list/page.tsx", import.meta.url),
+  new URL("../../../app/(public)/list/ListIndexView.tsx", import.meta.url),
   "utf8",
 );
 
