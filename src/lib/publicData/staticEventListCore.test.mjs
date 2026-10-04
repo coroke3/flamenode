@@ -176,3 +176,36 @@ test("shouldEnqueueEventBaseListHeal heals complete pools without event info", (
   const payload = { ...basePayload([]), event: { id: "evt-1", title: "" } };
   assert.equal(shouldEnqueueEventBaseListHeal(payload, "new"), true);
 });
+
+test("event list pagination has no gaps or duplicates at display and pool boundaries", () => {
+  for (const count of [0, 1, 8, 9, 24, 25, 120, 121, 500]) {
+    const videos = Array.from({ length: count }, (_, index) => ({
+      id: `v${String(index + 1).padStart(3, "0")}`,
+      title: `Video ${index + 1}`,
+      creator_display_name: "Creator",
+      visibility_status: "public",
+      scheduled_time: index + 1,
+      score: index,
+    }));
+    const payload = basePayload(videos);
+    const pageCount = Math.max(1, Math.ceil(count / 8));
+    const pages = Array.from({ length: pageCount }, (_, index) =>
+      pageEventBaseVideos({
+        payload,
+        sort: "new",
+        page: index + 1,
+        pageSize: 8,
+      }),
+    );
+    const actualIds = pages.flatMap((page) => page?.videos.map((row) => row.id) ?? []);
+    const expectedIds = [...videos]
+      .sort((left, right) => right.scheduled_time - left.scheduled_time)
+      .map((row) => row.id);
+
+    assert.ok(pages.every((page) => page?.total === count));
+    assert.ok(pages.every((page) => page?.generatedAt === 100));
+    assert.equal(actualIds.length, count);
+    assert.equal(new Set(actualIds).size, count);
+    assert.deepEqual(actualIds, expectedIds, `event count=${count}`);
+  }
+});

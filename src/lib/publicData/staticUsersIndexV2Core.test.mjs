@@ -150,3 +150,47 @@ test("manifest/page/search は世代とsort情報を厳密に正規化する", (
     "users/index.v2/g/generation-a/score/1.json",
   );
 });
+
+test("users index v2 pagination preserves every entry and one generation at requested boundaries", () => {
+  for (const count of [0, 1, 8, 9, 24, 25, 120, 121, 500]) {
+    const artifacts = buildUsersIndexV2Artifacts({
+      items: Array.from({ length: count }, (_, index) =>
+        source(
+          `creator-${String(index + 1).padStart(3, "0")}`,
+          count - index,
+          index % 7,
+          `Creator ${String(index + 1).padStart(3, "0")}`,
+        ),
+      ),
+      generatedAt: 1_700_000_000 + count,
+      generation: `generation-${count}`,
+    });
+    const manifest = normalizeUsersIndexV2Manifest(artifacts.manifest);
+    assert.ok(manifest, `users manifest count=${count}`);
+    assert.equal(manifest.total, count);
+
+    for (const sort of manifest.sorts) {
+      const pages = artifacts[`${sort}Pages`];
+      assert.equal(pages.length, manifest.total_pages, `${sort} pages count=${count}`);
+      const collected = pages.flatMap((page, pageIndex) => {
+        const normalized = normalizeUsersIndexV2Page(page);
+        assert.ok(normalized, `${sort} page ${pageIndex + 1} count=${count}`);
+        assert.equal(normalized.generation, manifest.generation);
+        assert.equal(normalized.generated_at, manifest.generated_at);
+        assert.equal(normalized.total, count);
+        assert.equal(normalized.page, pageIndex + 1);
+        assert.equal(normalized.page_size, manifest.page_size);
+        return normalized.items.map((item) => item.x_id);
+      });
+
+      assert.equal(collected.length, count, `${sort} entries count=${count}`);
+      assert.equal(new Set(collected).size, count, `${sort} unique count=${count}`);
+      assert.deepEqual(
+        new Set(collected),
+        new Set(Array.from({ length: count }, (_, index) =>
+          `creator-${String(index + 1).padStart(3, "0")}`,
+        )),
+      );
+    }
+  }
+});
