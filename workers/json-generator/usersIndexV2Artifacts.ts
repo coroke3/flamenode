@@ -761,83 +761,42 @@ export async function rebuildUsersIndexV2Artifacts(
       }
     }
   };
+  const putPendingArtifact = async (
+    key: string,
+    value: unknown,
+  ): Promise<void> => {
+    try {
+      pendingArtifacts.push(
+        await putTrackedJson(env, key, value, signal, {
+          deduplicate: false,
+        }),
+      );
+    } catch (error) {
+      // A failed generation-specific PUT can leave itself and the current
+      // untracked chunk in R2. Remove both before allowing a retry.
+      const orphaned = pendingArtifacts.splice(0);
+      await cleanupFailedArtifactChunk(
+        env,
+        [...orphaned, { objectKey: key, contentHash: "" }],
+        generation,
+      );
+      throw error;
+    }
+    liveKeys.push(key);
+  };
 
   for (const entry of pages) {
     // Generation-specific keys are immutable by construction.  Avoid one D1
     // hash lookup per page; the tracking rows are persisted in bounded chunks
     // before the manifest write below.
-    try {
-      pendingArtifacts.push(
-        await putTrackedJson(env, entry.key, entry.page, signal, {
-          deduplicate: false,
-        }),
-      );
-    } catch (error) {
-      // A page failure can happen before the current bounded chunk reaches
-      // D1. Remove those successful-but-untracked R2 objects so a retry does
-      // not leave an orphaned generation behind.
-      if (pendingArtifacts.length > 0) {
-        const orphaned = pendingArtifacts.splice(0);
-        await cleanupFailedArtifactChunk(
-          env,
-          [...orphaned, { objectKey: entry.key, contentHash: "" }],
-          generation,
-        );
-      } else {
-        await cleanupFailedArtifactChunk(
-          env,
-          [{ objectKey: entry.key, contentHash: "" }],
-          generation,
-        );
-      }
-      throw error;
-    }
-    liveKeys.push(entry.key);
+    await putPendingArtifact(entry.key, entry.page);
     await flushPendingArtifacts();
   }
 
-  try {
-    pendingArtifacts.push(
-      await putTrackedJson(env, searchKey, artifacts.searchLite, signal, {
-        deduplicate: false,
-      }),
-    );
-  } catch (error) {
-    if (pendingArtifacts.length > 0) {
-      const orphaned = pendingArtifacts.splice(0);
-      await cleanupFailedArtifactChunk(
-        env,
-        [...orphaned, { objectKey: searchKey, contentHash: "" }],
-        generation,
-      );
-    } else {
-      await cleanupFailedArtifactChunk(
-        env,
-        [{ objectKey: searchKey, contentHash: "" }],
-        generation,
-      );
-    }
-    throw error;
-  }
-  liveKeys.push(searchKey);
+  await putPendingArtifact(searchKey, artifacts.searchLite);
 
   for (const entry of searchEntries) {
-    try {
-      pendingArtifacts.push(
-        await putTrackedJson(env, entry.key, entry.value, signal, {
-          deduplicate: false,
-        }),
-      );
-    } catch (error) {
-      const orphaned = pendingArtifacts.splice(0);
-      await cleanupFailedArtifactChunk(
-        env,
-        [...orphaned, { objectKey: entry.key, contentHash: "" }],
-        generation,
-      );
-      throw error;
-    }
-    liveKeys.push(entry.key);
+    await putPendingArtifact(entry.key, entry.value);
     await flushPendingArtifacts();
   }
 

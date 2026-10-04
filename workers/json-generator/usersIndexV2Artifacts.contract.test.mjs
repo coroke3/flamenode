@@ -20,12 +20,8 @@ const pageSource = await readFile(
 );
 
 test("users index v2 は3 sortのgeneration固有page/search完了後にmanifestをcommitする", () => {
-  const pagePut = source.search(
-    /await putTrackedJson\(\s*env,\s*entry\.key,\s*entry\.page,\s*signal/,
-  );
-  const searchPut = source.search(
-    /await putTrackedJson\(\s*env,\s*searchKey,\s*artifacts\.searchLite,\s*signal/,
-  );
+  const pendingPut = source.indexOf("const putPendingArtifact = async");
+  const finalChunkFlush = source.indexOf("await flushPendingArtifacts(true)");
   const manifestPut = source.search(
     /await putTrackedJson\(\s*env,\s*USERS_INDEX_V2_MANIFEST_OBJECT_KEY,\s*artifacts\.manifest/,
   );
@@ -34,18 +30,22 @@ test("users index v2 は3 sortのgeneration固有page/search完了後にmanifest
     /await recordArtifacts\(env,\s*\[manifestArtifact\],\s*signal\)/,
   );
 
-  assert.ok(pagePut >= 0);
-  assert.ok(searchPut > pagePut);
-  assert.ok(manifestPut > searchPut);
+  assert.ok(pendingPut >= 0);
+  assert.ok(finalChunkFlush > pendingPut);
+  assert.ok(manifestPut > finalChunkFlush);
   assert.ok(manifestRecord > manifestPut);
   assert.ok(reconcile > manifestRecord);
   assert.match(
     source,
-    /liveKeys\.push\(entry\.key\);\s*await flushPendingArtifacts\(\);/,
+    /const putPendingArtifact = async \([\s\S]*?await putTrackedJson\(env, key, value, signal,\s*\{\s*deduplicate: false,\s*\}\)[\s\S]*?liveKeys\.push\(key\);/,
   );
   assert.match(
     source,
-    /liveKeys\.push\(searchKey\);[\s\S]*?await flushPendingArtifacts\(true\);[\s\S]*?const manifestArtifact/,
+    /await putPendingArtifact\(entry\.key, entry\.page\);\s*await flushPendingArtifacts\(\);/,
+  );
+  assert.match(
+    source,
+    /await putPendingArtifact\(searchKey, artifacts\.searchLite\);[\s\S]*?await putPendingArtifact\(entry\.key, entry\.value\);\s*await flushPendingArtifacts\(\);/,
   );
   assert.match(source, /artifacts\.scorePages/);
   assert.match(source, /artifacts\.worksPages/);

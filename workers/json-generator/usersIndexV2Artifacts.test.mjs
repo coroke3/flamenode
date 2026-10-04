@@ -65,7 +65,10 @@ function createEnv({
       if (abortController && abortPutAt && putKeys.length === abortPutAt) {
         abortController.abort("test_abort_after_r2_put");
       }
-      if (key === failPutKey || (failPutAt && putKeys.length === failPutAt)) {
+      if (
+        (typeof failPutKey === "function" ? failPutKey(key) : key === failPutKey) ||
+        (failPutAt && putKeys.length === failPutAt)
+      ) {
         throw new Error(`r2_put_failed:${key}`);
       }
       writtenKeys.push(key);
@@ -222,6 +225,29 @@ test("page R2 failure cleans the successful but untracked chunk", async () => {
       1_700_000_000,
     ),
     /r2_put_failed:/,
+  );
+
+  const trackedKeys = trackedKeysFromBindings(env);
+  assert.equal(env.calls.run, 0);
+  assert.equal(trackedKeys.size, 0);
+  assert.deepEqual(
+    new Set(env.deleteKeys),
+    new Set([...env.writtenKeys, env.putKeys.at(-1)]),
+  );
+});
+
+test("search-lite R2 failure cleans the pending untracked page chunk", async () => {
+  const env = createEnv({
+    failPutKey: (key) => key.endsWith("/search-lite.v1.json"),
+  });
+
+  await assert.rejects(
+    rebuildUsersIndexV2Artifacts(
+      env,
+      Array.from({ length: 500 }, (_, index) => source(index)),
+      1_700_000_000,
+    ),
+    /r2_put_failed:.*search-lite\.v1\.json/,
   );
 
   const trackedKeys = trackedKeysFromBindings(env);
