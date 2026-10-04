@@ -53,7 +53,7 @@ Cloudflare Dashboard のactual usageを運用者が確認する。アプリ内co
 | Resource | Free limit / period | Current actual | Projection / normalized pressure | Headroom / major consumers |
 | :--- | :--- | :--- | :--- | :--- |
 | Workers requests | 100,000/account/day | Account peak 4,573/day、FlameNode peak 4,459/day | 最近の最大日を据え置くと4.6% | 約95.4%。HTML/APIはWorker、`run_worker_first=false`対象の静的ファイルはWorkerを迂回。 |
-| Worker CPU | 10ms/HTTPまたはCron invocation | Web Worker p50 19.3ms、p95 891.9ms、p99 1,267.7ms、max 2,010ms | p99 pressure 12,677%、max 20,100%。Free採用条件未達 | headroomなし。最優先risk。実測runtimeの`usageModel`は`standard`で、契約planがFreeである証明にはならない。 |
+| Worker CPU | 10ms/HTTPまたはCron invocation | 旧3日観測のp50 19.3ms、p95 891.9ms、p99 1,267.7ms、max 2,010ms（Observability生値） | pXXを10msで割ったpressureは無効。最新ログに`exceededCpu`があり、CPU安全ゲート未達 | 定量headroomは不明。実測runtimeの`usageModel`は`standard`で、契約planがFreeである証明にはならない。 |
 | Worker memory | 128MB/isolate | web p50 42.1MiB、p95 73.7MiB、p99 85.4MiB、max 93.4MiB | max 73.0% | max時約34.6MiB。CPU優先だが、大きなartifactやcacheを追加しない。 |
 | Worker subrequests | 50/request | Web 11,026 invocation中1,573、平均0.143/invocation | 最大値/route別分布は取得できず、pressure未算定 | 平均値はhard-limit headroomを示さない。R2/KV/D1/HTTP fetchのper-request maxを未計測。 |
 | D1 rows read | 5,000,000/account/day | `flamenode_db` peak 434,788/day | 最大日据え置き8.7% | 約91.3%。公開一覧・静的生成とYouTube同期候補選定がQuery Insights上位。 |
@@ -75,7 +75,56 @@ R2 Class A/Bは3日だけのbucket実測からの短期外挿であり、月末�
 
 Cloudflare Observabilityのweb CPUログでは`/entry`の1 raw-URL group（73 invocation）でp95 1,344ms / max 1,652ms、event-detailの1 raw-URL group（13 invocation）でp95 1,412msを観測した。IDを含むraw URLは保存・共有せず、これらのpXXは全IDを統合したroute-wide percentileではない。cold/warm分離も未取得。3日間のWorker outcomeにWeb `exceededResources` 587件、content-jobs 4件があるが、これは全件をError 1102と断定できる分類ではない。`exceededCpu` outcomeも観測されており、CPU limitを含むresource failureは実在する。
 
-追加のread-only GraphQL測定（2026-10-03 01:30〜2026-10-04 01:30 UTC）では、`flamenode-web` に4,028 invocation、`exceededResources` 364（9.0%）、success 3,628、client-disconnected 36を観測。successのCPU p50/p95/p99は20.8 / 740.1 / 1,163.9ms。直近約5時間（2026-10-03 20:41〜2026-10-04 01:30 UTC）にも153 `exceededResources` / 868 invocationsを観測した。CPU制限超過ログは `/user/[id]`・動画詳細・`/list` など複数routeに分散し、単一routeだけを原因と断定できない。したがってFree CPU採用ゲートは未達で、本番反映・Free-ready判定を保留する。今回のrequest-local重複loader抑制は軽減仮説であり、反映後のcold/warm route別CPU再計測が必要。
+追加のread-only GraphQL測定（2026-10-03 01:30〜2026-10-04 01:30 UTC）では、`flamenode-web` に4,028 invocation、`exceededResources` 364（9.0%）、success 3,628、client-disconnected 36を観測。successのCPU p50/p95/p99は20.8 / 740.1 / 1,163.9msだが、これらはFree invocation上限に正規化できるCPU比率ではない。直近約5時間（2026-10-03 20:41〜2026-10-04 01:30 UTC）にも153 `exceededResources` / 868 invocationsを観測した。CPU制限超過ログは `/user/[id]`・動画詳細・`/list` など複数routeに分散し、単一routeだけを原因と断定できない。したがってFree CPU採用ゲートは未達で、本番反映・Free-ready判定を保留する。今回のrequest-local重複loader抑制は軽減仮説であり、反映後のcold/warm route別CPU再計測が必要。
+
+### 2026-10-04 02:48 UTC rolling-window supplement
+
+以下はread-only Cloudflare telemetryの更新値であり、直前の3日ledgerを置換する最新確認点。Worker / D1 / R2 operationsはrolling 24h、KVは最新完了UTC日（10-03）、R2 storageは10-04 02:20〜02:40 UTCのaccount snapshot。R2 metadata sampling後に`ListObjects`をprefix・1件上限で12回実行し、R2 object GETを1回試みた（API bridgeはHTTP 200を返したがbinary応答を処理できず、payload CPU/parse計測は失敗）。このためClass A/Bには保守的にその12回・1回を加算している。5件の`DeleteObjects`は公式class表の分類を確認できず、Class A/Bへ含めていない。
+
+| Resource | Free limit / period | Current actual | Flat forecast / normalized pressure | Headroom / caveat |
+| :--- | :--- | :--- | :--- | :--- |
+| Worker requests | 100,000/account/day | Account 4,809/day、FlameNode 4,374/day | account flat 4,809/day = 4.81% | 95,191/day。HTML/API routeは各1 invocation、Static Assetsは0。1 page viewに付随するbrowser API requestsは未計測。 |
+| CPU | 10ms/HTTPまたはCron invocation | 最新24h route log sampleで`exceededCpu`を観測。validなroute-wide CPU pXXはunknown | pressure / quota forecastはunknown。CPU最優先risk、Free safety未達 | Worker ObservabilityのCPU分布はsampling/rolloverの影響を受け、raw p99÷10msをquota pressureにしない。 |
+| Worker memory | 128MiB/isolate | 最新24hはunknown。最後の3日rollupはp50 42.1、p95 73.7、p99 85.4、max 93.4MiB | 最新pressure unknown。旧max単純比73.0%は参考のみ | 最新headroom unknown。新しいglobal JSON/cacheは追加しない。 |
+| D1 rows read | 5,000,000/account/day | 327,045 rows/day | flat 6.54% | 4,672,955/day。Query Insightsの上位5 SQL形状は§3-3。 |
+| D1 rows written | 100,000/account/day | 7,534 rows/day | flat 7.53% | 92,466/day。日次totalは取得済みだがrouteごとの割当はunknown。 |
+| R2 Class A | 1,000,000/account/month | telemetry 726/24h + metadata sample 12 = conservative floor 738/day | flat ×30 = 22,140/month、2.21% | 少なくとも977,860/month。5 `DeleteObjects`は未分類。sampleの12 ListObjectsはexact/短prefix + `per_page=1`のみで、全bucket listingではない。 |
+| R2 Class B | 10,000,000/account/month | telemetry 6,854/24h + object GET attempt 1 = conservative floor 6,855/day | flat ×30 = 205,650/month、2.06% | 少なくとも9,794,350/month。GET payload/CPU benchmarkはbridge errorで未計測。 |
+| R2 Standard storage | 10GB-month/account | snapshot合計1,377,447,785 bytes（decimal約1.377GB、FlameNode bucket約1.325GB） | 現在水準が月内一定という仮定で1.377GB-month、13.8% | 仮定上約8.623GB-month。実際の月平均GB-monthはunknown。 |
+| KV reads | 100,000/account/day | 10-03完了日 4,870/day | 同じ日を再現なら4.87% | 95,130/day。missing key readもoperation。 |
+| KV writes | 1,000/account/day | 10-03完了日 67/day | 同じ日を再現なら6.70% | 933/day。KV delete/listは同日0/0（各1,000/day枠）。 |
+| Queue operations | 10,000/account/day | 415 operations/rolling 24h | flat 4.15% | 9,585/day。internal policyはnormal最大6,000 + retry/DLQ reserve 4,000。 |
+
+同じ時点のread-only Worker Logs route sample（rolling 24h query、IDは破棄、ログは528 eventを返し390にCPU fieldあり）を示す。`cpuTimeMs`集計は不均一sampleであり、正式なroute-wide percentile・cold/warm比較・10msとの比率ではない。`exceededCpu`件数はsample内の実際のfailure outcomeで、母数に対するfailure rateへ外挿しない。
+
+| Route | n | p50 | p95 | p99 | max | sample `exceededCpu` | cold/warm |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| `/` | 34 | 9 | 641 | 760 | 760 | 0 | unknown |
+| video detail `/{id}` | 135 | 34 | 850 | 1,308 | 1,376 | 23 | unknown |
+| `/event/[id]` | 4 | 67 | 85 | 85 | 85 | 0 | unknown |
+| `/user/[id]` | 85 | 32 | 772 | 1,186 | 1,186 | 13 | unknown |
+| `/list` | 4 | 13 | 681 | 681 | 681 | 2 | unknown |
+| `/search` | path-only telemetryでは独立routeに分離不可（`/list?q=`） | unknown | unknown | unknown | unknown | unknown | unknown |
+
+数値列はObservabilityの`cpuTimeMs` field値。CloudflareのCPU analyticsはsampling/rollover時に個別invocationのhard limitを超えるquantile表示があり得るため、これを10ms比較の実CPU値として誤用しない。現時点で断言できるCPU結論は「sampleに超過failureがあり、Free CPU採用ゲートは失敗」のみ。
+
+R2 metadataから、small / medium / sampled-largest artifactの実サイズを確認した。これはR2 object metadataのsizeで、object全走査はせず、各prefixで最大1件のみ取得。sample: video detail 9,583B、users index page 7,689B、public icon map 53,557B、search posting page 43,413B、legacy users index 173,092B、recommend core 184,073B、random-video pool 136,592B、`list/recent.json` 314,178B。したがってこのsample内では約9.6KB / 184KB / 314KBがsmall / medium / largestであり、system-wide最大objectと断定しない。API bridgeがbinary bodyを返せず、JSON.parse時間・Worker CPU・memory copyを測れなかったため、これをWorker benchmarkとは呼ばない。
+
+## 3-2-1. Resource exchange / static regression guard
+
+今回の差分はbudget CI assertionとこの文書の更新のみで、production runtime codeの挙動変更はない。したがってresource削減効果は主張しない。観測値の差分はbudget調査用metadata readのみ。
+
+| Resource | Before | After | Delta |
+| :--- | :--- | :--- | :--- |
+| Worker requests / CPU / memory | 上記最新24h測定 | production runtime未変更 | code由来0。CPU安全性は未達のまま。 |
+| D1 rows read / written | 327,045 / 7,534 per day | 同じ | 0 |
+| R2 Class A | telemetry 726 / rolling24h | conservative floor 738（+12 bounded metadata LIST） | +12 audit operation |
+| R2 Class B | telemetry 6,854 / rolling24h | conservative floor 6,855（+1 attempted GET） | +1 audit operation |
+| R2 storage | snapshot 1.377GB | 同じ | 0 |
+| KV reads / writes | 4,870 / 67（完了日） | 同じ | 0 |
+| Queue operations | 415 / rolling24h | 同じ | 0 |
+
+`check:free-tier-budget`は公式limit値、4/5 Cron、D1 statement 40/50、Queue normal 2,000 messages / 6,000 opsとretry/DLQ reserve 4,000を分離して検査する。Queue estimatorの通常traffic例は2,000 messages = 6,000 normal opsに50 retries = 100 reserve opsを加えた6,100 total（reserve 3,900残り）で、通常traffic本体は6,000を超えない。別failure dayは追加900 reserve ops、total 6,900 / reserve 3,100残り。さらに1 mutation最大256 target / 最大266 delivery / 798 Queue ops、video最大2 artifact key、user最大9、ranking最大5、既存のartifact byte capsをCIで検査する。same-content dedupは実PUTをさらに減らし得る。検査が守る現行byte capsはlist/user index/icon 8MiB、pickup creators 1MiB、users-index v2 page 256KiB、search-lite 2MiB、manifest 64KiB、video related subsection 96KiB、event playlist 8MiB。全video detail objectおよび個別user profile objectには全体byte capがなく、今回追加していない（freshness劣化と根拠のない拒否を避けるため）。
 
 ## 3-3. D1 Query Insights（3日分の頻度×rows_read）
 
@@ -116,11 +165,11 @@ Users index v2は `0, 1, 8, 9, 24, 25, 120, 121, 500` 件のscore/works/name各p
 
 | Scenario | Projection | 判定/残る根拠 |
 | :--- | :--- | :--- |
-| Normal day | 観測されたaccount Worker requestsは最大4,573/day、D1 read 434,788/day、write 9,731/day、KV write 168/day、Queue 544 ops/day。 | 日次quotaではheadroomがある。CPUは10ms基準を大幅超過し、Free plan steady stateの停止条件を満たさない。 |
-| Event day | 4,573 requests/dayを5〜10倍とする単純stressで22,865〜45,730/day（22.9〜45.7%）。全D1 workloadまで10倍ならpeak read 4.35M/day（87%）となる仮定上限。 | 日次集計であり1-hour burstではない。D1を実際に何倍するか未測定。CPU超過が先にfailする。 |
-| Deploy day | hash同一ならglobal rebuild enqueue 0。hash変更なら16 target。 | 3日actualからdeploy時R2 A/PUT/CPUを予測できない。Workers Buildsの順序/verify/smoke完了前にFree-readyと判定しない。 |
-| Failure day | 2,000 normal messages + 150 messageが各3 retryのqueue推計は6,900 operations/day（69%）。max retry 3で無限再試行なし、失敗はDLQ/failed状態へ収束。 | 2 operation/retryはFlameNode保守モデル。Cloudflare実usageのDLQ/retry分布は未測定。4,000 operations reserveを下回るfailure countで運用する。 |
-| Crawler burst | account daily requestsは直近最大4,573。random missing/unlisted IDではdegraded D1 fallbackとKV circuit writeをしない。 | 1-hour burst、R2/CPU/requests max、異常path率は不明。public miss/error load testを別に実施する。 |
+| Normal day | rolling24h: account Worker 4,809/day（FlameNode 4,374）、D1 read/write 327,045/7,534、KV read/write 4,870/67（10-03完了日）、Queue 415 ops。 | 日次quotaは低圧だが、sampleに`exceededCpu`がありCPU停止条件を満たさない。 |
+| Event day | 観測4,809 requests/dayの5〜10倍は24,045〜48,090/day。D1全体も線形に増える仮定ではread 1.64〜3.27M/day（32.7〜65.4%）、write 37,670〜75,340/day（37.7〜75.3%）。Queueは415×5〜10=2,075〜4,150 ops/day。 | 実measurementではなく単純stress。10x writeはinternal 70%目安を超える。minute burst・CPU/memoryは予測不能で、CPU超過が残る。 |
+| Deploy day | hash同一ならglobal rebuild enqueue 0、hash変更なら16 targets。video targetは最大2、user target最大9、ranking bundle最大5 artifact keys。 | deploy時PUT実数、CPU、同時build影響は未測定。Workers Buildsのweb→fast→content→sync→smoke順序とhealth gateを満たすまでFree-readyにしない。 |
+| Failure day | 2,000 normal messages = 6,000 ops。150 messagesが各3 retry、retryあたり保守的に2 opsなら追加900、合計6,900 ops（69%）でreserve 4,000のうち3,100を残す。 | Retry/DLQ実分布はunknown。per-invocation D1はsoft40/hard50、retry最大3。R2 missで全requestをD1へfallbackさせず、unknown/random public IDのdegraded D1/KV circuit writeを抑える。 |
+| Crawler burst | random missing/unlisted IDはdegraded D1 fallbackとKV circuit writeをしない。5〜10x daily requestの単純換算は24,045〜48,090 requests。 | 1-hour burst・R2 GET・CPU/memory max・実miss率はunknown。CPU error sampleがあるため負荷試験とroute別cold/warm再計測までは採用不可。 |
 
 ## 4. 使用量ガードの段階
 

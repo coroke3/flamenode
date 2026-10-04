@@ -43,9 +43,20 @@ function estimate({
   continuationsPerDay = 0,
 }) {
   const messages = wakesPerDay + continuationsPerDay;
-  const operations =
-    messages * OPS_PER_NORMAL_WAKE + retriesPerDay * OPS_PER_RETRY;
-  return { label, messages, operations, retriesPerDay, continuationsPerDay };
+  const normalOperations = messages * OPS_PER_NORMAL_WAKE;
+  const retryOperations = retriesPerDay * OPS_PER_RETRY;
+  const operations = normalOperations + retryOperations;
+  return {
+    label,
+    messages,
+    normalOperations,
+    retryOperations,
+    retryReserveRemaining:
+      QUEUE_FREE_TIER_BUDGET.reservedOperationsPerDay - retryOperations,
+    operations,
+    retriesPerDay,
+    continuationsPerDay,
+  };
 }
 
 const models = [
@@ -56,7 +67,7 @@ const models = [
     continuationsPerDay: 0,
   }),
   estimate({
-    label: "通常日モデル（通知400 + 静的800 + YouTube200 + cont600）",
+    label: "通常traffic（1,400 wake + 600 continuation + 50 retries）",
     wakesPerDay: 1_400,
     continuationsPerDay: 600,
     retriesPerDay: 50,
@@ -112,21 +123,26 @@ for (const model of models) {
       `${model.label}: messages ${model.messages} exceeds soft cap`,
     );
     assert.ok(
-      model.operations <=
-        QUEUE_FREE_TIER_BUDGET.maxNormalOperationsPerDay +
-          QUEUE_FREE_TIER_BUDGET.reservedOperationsPerDay,
-      `${model.label}: operations ${model.operations} exceeds hard pool`,
+      model.normalOperations <= QUEUE_FREE_TIER_BUDGET.maxNormalOperationsPerDay,
+      `${model.label}: normal operations ${model.normalOperations} exceed the normal budget`,
+    );
+    assert.ok(
+      model.retryOperations <= QUEUE_FREE_TIER_BUDGET.reservedOperationsPerDay,
+      `${model.label}: retry operations ${model.retryOperations} exceed the retry/DLQ reserve`,
     );
     assert.ok(
       model.operations <= MAX_BUSY_DAY_OPERATIONS,
       `${model.label}: operations ${model.operations} exceeds the internal busy-day target`,
     );
-    if (model.operations > QUEUE_FREE_TIER_BUDGET.maxNormalOperationsPerDay) {
+    if (model.retryOperations > 0) {
       console.warn(
         JSON.stringify({
           service: "estimate-queue-budget",
-          result: "uses_reserved_ops",
+          result: "uses_retry_reserve",
           label: model.label,
+          normalOperations: model.normalOperations,
+          retryOperations: model.retryOperations,
+          retryReserveRemaining: model.retryReserveRemaining,
           operations: model.operations,
         }),
       );
