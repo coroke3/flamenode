@@ -8,7 +8,7 @@
 > Feature parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
 >
 > Claude / Codex / Antigravityを含む全agentが共有する進捗正本。
-> chat historyではなく、このファイルの状態を次iterationへ引き継ぐ。
+> chat historyではなく、このファイルを次iterationへ引き継ぐ。
 
 ## Overall
 
@@ -32,13 +32,13 @@ Next after approval: MIG-0002
 - `DONE`: acceptance達成済み
 - `SKIPPED`: 理由付きで不要
 
-## Agent ownership
+## Multi-agent rules
 
 - 1 task = 1 owner。
 - owner例: `claude`, `codex`, `antigravity`, `chatgpt`, `human`。
-- 他agentは同じtask/file/domainを同時編集しない。
 - read-only review/auditは並列可。
-- owner交代時はこのファイルへhandoffを残す。
+- 同一task/file/domainの同時編集は禁止。
+- handoffは必ずrepoへ残す。chat historyのみのhandoffは禁止。
 
 ## Loop invariants
 
@@ -55,15 +55,13 @@ Next after approval: MIG-0002
 
 # Inventory coverage
 
-Phase 0では「存在が分かる」から「contractが監査済み」へ進める。
-
-| Surface | Baseline discovered | Detailed audited | Parity verified | Target for Phase 0 Gate |
-| --- | ---: | ---: | ---: | ---: |
-| UI/screens | 86 | 0 | 0 | 86 mapped to function IDs |
+| Surface | Baseline discovered | Detailed audited | Parity verified | Phase 0 target |
+| --- | ---: | ---: | ---: | --- |
+| UI/screens | 86 | 0 | 0 | 86 function-mapped |
 | Function IDs | 128 | 2 | 0 | all required CURRENT contracts audited |
 | Server Action files | 34+ | 0 exports | 0 | all exports + inline actions disposed |
-| API top-level areas | 14 | 0 endpoints/methods | 0 | all `route.ts` methods disposed |
-| CURRENT Worker scripts | 4 | 0 job-type inventories | 0 | bindings/routes/jobs fixed |
+| API top-level areas | 14 | 0 methods | 0 | all `route.ts` methods disposed |
+| CURRENT Worker scripts | 4 | 0 job types | 0 | bindings/routes/jobs fixed |
 | Redesign mock screens | 86 | 86 existence | 0 functional parity | all mapped to CURRENT functions |
 
 Current function-state summary:
@@ -76,7 +74,7 @@ REMOVAL_PROPOSED: 0
 REMOVED_APPROVED: 0
 ```
 
-`FUNCTION_INVENTORY.md` の未監査必須機能が残る限り、Phase 0 Gateは開けない。
+未監査必須機能が残る限りPhase 0 GateはCLOSED。
 
 ---
 
@@ -84,10 +82,10 @@ REMOVED_APPROVED: 0
 
 | Phase | Name | State | Gate | Notes |
 | --- | --- | --- | --- | --- |
-| 0 | Baseline | REVIEW | CLOSED | MIG-0001 PR review中 |
-| 1 | Repository boundaries | BLOCKED | CLOSED | Phase 0 Gate待ち |
+| 0 | Baseline / Inventory | REVIEW | CLOSED | MIG-0001 review中 |
+| 1 | Repository boundaries | BLOCKED | CLOSED | MIG-0012待ち |
 | 2 | Design System | BLOCKED | CLOSED | Phase 1 Gate待ち |
-| 3 | Domain extraction | BLOCKED | CLOSED | boundary/inventory後 |
+| 3 | Domain extraction | BLOCKED | CLOSED | baseline/boundary後 |
 | 4 | Public PoC | BLOCKED | CLOSED | boundary/design後 |
 | 5 | Public migration | BLOCKED | CLOSED | Phase 4 Gate待ち |
 | 6 | Hono API | BLOCKED | CLOSED | domain extraction後 |
@@ -97,33 +95,38 @@ REMOVED_APPROVED: 0
 
 ---
 
-# Phase 0 — Baseline
+# Phase 0 — Baseline / Inventory
 
-Goal: CURRENT productionをコード・設定・数値・機能contractで固定する。
+Goal: 移行前にCURRENTの画面・機能・server処理・Cloudflare・安全保証を明示的に固定する。
 
 | ID | Task | State | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| MIG-0001 | migration docs / multi-agent command / progress framework | REVIEW | — | common protocol、tool adapters、inventory、docs CI |
-| MIG-0002 | CURRENT route / Server Action / API / function inventoryを完全化 | BLOCKED | MIG-0001 | 86 screens・全actions・全route methods・function mapping |
-| MIG-0003 | Cloudflare Worker/domain/route/binding/job baseline | BLOCKED | MIG-0001 | repo configと実設定差分、4 Worker責務 |
-| MIG-0004 | CPU / 1102 / request baseline | BLOCKED | MIG-0003 | 実Cloudflare metrics |
-| MIG-0005 | static artifact / visibility baseline | BLOCKED | MIG-0001 | artifact types、aliases、fail-closed、repair/fallback |
-| MIG-0006 | Auth/session/permission baseline | BLOCKED | MIG-0001 | login/session/linking/owner/permission contract |
-| MIG-0007 | 86 redesign screens → CURRENT function mapping | BLOCKED | MIG-0002 | responsive/state/function coverage |
-| MIG-0008 | Phase 0 Gate | BLOCKED | MIG-0002..0007 | Lead review + rollback baseline固定 |
+| MIG-0001 | migration docs / multi-agent command / progress framework | REVIEW | — | common protocol、tool adapters、inventory、docs review |
+| MIG-0002 | 86 screen/page/route baseline | BLOCKED | MIG-0001 | CURRENT route一覧、roles、purpose、states、function候補 |
+| MIG-0003 | Server Action / inline action baseline | BLOCKED | MIG-0001 | 全exports/callers/input/permission/effects/tests |
+| MIG-0004 | Route Handler / API baseline | BLOCKED | MIG-0001 | 全`route.ts` method/contract/auth/effects/tests |
+| MIG-0005 | Cloudflare Worker/domain/route/binding baseline | BLOCKED | MIG-0001 | 4 Worker、Custom Domain、Routes、bindings、build topology |
+| MIG-0006 | CPU / 1102 / request baseline | BLOCKED | MIG-0005 | 実Cloudflare metrics、hot/cold paths |
+| MIG-0007 | static artifact / visibility baseline | BLOCKED | MIG-0001 | artifact types、aliases、fail-closed、repair/fallback |
+| MIG-0008 | Auth/session/permission baseline | BLOCKED | MIG-0001 | login/session/linking/owner/permission contract |
+| MIG-0009 | Queue/Cron/background job baseline | BLOCKED | MIG-0005 | job types、Queue/DLQ、retry/recovery/side effects |
+| MIG-0010 | 86 redesign screens → function IDs mapping | BLOCKED | MIG-0002,0003,0004 | every screen mapped、state coverage、responsive requirements |
+| MIG-0011 | function inventory consolidation / gap scan | BLOCKED | MIG-0003,0004,0007,0008,0009,0010 | unknown=0、duplicates merged、cross-cutting effects covered |
+| MIG-0012 | Phase 0 Gate | BLOCKED | MIG-0006,0011 | Lead review + rollback baseline fixed |
 
 ## Phase 0 Gate
 
-- [ ] route/page inventory complete
-- [ ] Server Action exports + inline actions complete
-- [ ] API route methods complete
+- [ ] all CURRENT page/routes inventoried
+- [ ] all Server Action exports + inline actions inventoried
+- [ ] all Route Handler methods inventoried
 - [ ] all required functions CURRENT_VERIFIED
 - [ ] all 86 screens mapped to function IDs
+- [ ] all background jobs/Queues/Cron inventoried
 - [ ] current Cloudflare topology fixed
 - [ ] CPU/1102 baseline fixed
-- [ ] visibility/static baseline fixed
-- [ ] auth/permission baseline fixed
-- [ ] production runtime unchanged by baseline work
+- [ ] visibility/static guarantees fixed
+- [ ] auth/permission guarantees fixed
+- [ ] production behavior unchanged by baseline work
 - [ ] rollback target commit/config fixed
 
 ---
@@ -132,7 +135,7 @@ Goal: CURRENT productionをコード・設定・数値・機能contractで固定
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0101 | workspace/boundary PoC設計 | BLOCKED | MIG-0008 |
+| MIG-0101 | workspace/boundary PoC design | BLOCKED | MIG-0012 |
 | MIG-0102 | `packages/ui` skeleton | BLOCKED | MIG-0101 |
 | MIG-0103 | `packages/contracts` skeleton | BLOCKED | MIG-0101 |
 | MIG-0104 | `packages/domain` skeleton | BLOCKED | MIG-0101 |
@@ -141,7 +144,7 @@ Goal: CURRENT productionをコード・設定・数値・機能contractで固定
 | MIG-0107 | `apps/api` Hono skeleton | BLOCKED | MIG-0101 |
 | MIG-0108 | Phase 1 Gate | BLOCKED | MIG-0102..0107 |
 
-Gate: CURRENT production build/behavior unchanged; target packages compile independently.
+Gate: CURRENT build/behavior unchanged; new boundaries compile independently.
 
 ---
 
@@ -164,7 +167,7 @@ Gate: 1440/1024/768/390 + accessibility + no functional deletion.
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0301 | extraction/DI pattern固定 | BLOCKED | MIG-0108 |
+| MIG-0301 | extraction/DI pattern | BLOCKED | MIG-0108 |
 | MIG-0302 | low-risk read domain | BLOCKED | MIG-0301 |
 | MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0302 |
 | MIG-0304 | video domain group | BLOCKED | MIG-0303 |
@@ -172,7 +175,7 @@ Gate: 1440/1024/768/390 + accessibility + no functional deletion.
 | MIG-0306 | user/X/admin domain group | BLOCKED | MIG-0303 |
 | MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..0306 |
 
-Exact server disposition is tracked in `API_MATRIX.md`.
+Exact server disposition: `API_MATRIX.md`。
 
 ---
 
@@ -182,13 +185,11 @@ Exact server disposition is tracked in `API_MATRIX.md`.
 | --- | --- | --- | --- |
 | MIG-0401 | Astro build-input PoC | BLOCKED | MIG-0105 |
 | MIG-0402 | shared React UI in Astro | BLOCKED | MIG-0206,0401 |
-| MIG-0403 | video/user/event representative SSG | BLOCKED | MIG-0402 |
+| MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402 |
 | MIG-0404 | route-map generator | BLOCKED | MIG-0403 |
 | MIG-0405 | visibility gateway | BLOCKED | MIG-0404 |
 | MIG-0406 | CPU/build benchmark | BLOCKED | MIG-0405 |
 | MIG-0407 | Phase 4 Gate | BLOCKED | MIG-0406 |
-
-Gate includes fail-closed visibility, no request-time SSR, p99 gateway CPU target, 1102=0, acceptable build time.
 
 ---
 
@@ -198,14 +199,14 @@ Gate includes fail-closed visibility, no request-time SSR, p99 gateway CPU targe
 | --- | --- | --- | --- |
 | MIG-0501 | fixed/static routes | BLOCKED | MIG-0407 |
 | MIG-0502 | event routes | BLOCKED | MIG-0501 |
-| MIG-0503 | groups routes | BLOCKED | MIG-0501 |
+| MIG-0503 | group routes | BLOCKED | MIG-0501 |
 | MIG-0504 | user routes | BLOCKED | MIG-0501 |
 | MIG-0505 | list/search/recommend/trending | BLOCKED | MIG-0501 |
 | MIG-0506 | root/top | BLOCKED | MIG-0505 |
 | MIG-0507 | `/:id` video catch-all | BLOCKED | MIG-0502..0506 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0507 |
 
-Exact route/function coverage is tracked in `ROUTE_MATRIX.md` + `FUNCTION_INVENTORY.md`.
+Exact route/function coverage: `ROUTE_MATRIX.md` + `FUNCTION_INVENTORY.md`。
 
 ---
 
@@ -234,7 +235,7 @@ Exact route/function coverage is tracked in `ROUTE_MATRIX.md` + `FUNCTION_INVENT
 | MIG-0705 | admin | BLOCKED | MIG-0605,0704 |
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0705 |
 
-Each screen requires associated function IDs to be `PARITY_VERIFIED` or explicitly approved for removal.
+Screen DONE requires associated function IDs `PARITY_VERIFIED` or `REMOVED_APPROVED`。
 
 ---
 
@@ -242,7 +243,7 @@ Each screen requires associated function IDs to be `PARITY_VERIFIED` or explicit
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0801 | Auth baseline fixtures/tests | BLOCKED | MIG-0006 |
+| MIG-0801 | Auth baseline fixtures/tests | BLOCKED | MIG-0008 |
 | MIG-0802 | Web Standard/Auth integration PoC | BLOCKED | MIG-0801,0607 |
 | MIG-0803 | Discord/account-linking parity | BLOCKED | MIG-0802 |
 | MIG-0804 | CPU/security review | BLOCKED | MIG-0803 |
@@ -277,11 +278,11 @@ PR: #232
 Production action required: no
 ```
 
-Implemented scope:
+Implemented:
 
 - universal `AGENTS.md`
 - shared `AGENT_PROTOCOL.md`
-- target `README.md`
+- architecture `README.md`
 - explicit `STATUS.md`
 - `FUNCTION_INVENTORY.md`
 - `ROUTE_MATRIX.md`
@@ -299,9 +300,16 @@ Acceptance:
 - [x] explicit Phase Gate stop
 - [x] existing-function inventory introduced
 - [x] redesign completion tied to function parity
+- [x] Phase 0 inventory split into loop-sized tasks
 - [x] no production runtime/config/Cloudflare mutation
-- [ ] `check:docs` / `check:project-docs` CI confirmation
+- [ ] docs checks executed in an environment with the repository available
 - [ ] Lead review / PR merge
+
+Validation note:
+
+- GitHub PR checks are not configured for this draft branch.
+- Local container could not resolve `github.com`, so repository scripts could not be executed here.
+- `scripts/check-docs.mjs` was inspected; new docs keep CURRENT OpenNext wording where required and do not intentionally introduce forbidden legacy claims.
 
 Rollback:
 
@@ -313,12 +321,12 @@ Rollback:
 ```text
 Agent: chatgpt
 Task: MIG-0001
-Result: multi-agent migration framework implemented; awaiting CI/review
-Affected functions: inventory framework only; no runtime function changed
-Validation: CI pending
+Result: multi-agent migration/inventory framework implemented; awaiting docs validation + Lead review
+Affected functions: inventory framework only; runtime behavior unchanged
+Validation: static review; executable docs checks pending
 PR: #232
 Rollback: revert PR #232
-Blockers: CI + Lead review
+Blockers: docs script execution + Lead review
 Next: MIG-0002 after MIG-0001 approval/merge
 ```
 
