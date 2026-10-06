@@ -1,372 +1,431 @@
 # FlameNode Migration Agent Protocol
 
-> Status: Active
-> Last verified: 2026-10-06
-> Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
-> Source of truth: `docs/migration/README.md`, `docs/migration/STATUS.md`, current code/test
->
-> Claude Code / OpenAI Codex / Google Antigravity 共通の移行実行契約。
-> ツール固有ファイルは薄いadapterとし、仕様を複製しない。
+> Status: Active / mandatory execution contract
+> Last verified: 2026-10-07
+> Applies to: Claude Code / OpenAI Codex / Google Antigravity / generic coding agents
 
-## 1. Invocation
+ツール固有command/skill/workflowは薄いadapterであり、この文書が共通実行契約。
+
+## Invocation
 
 ### Claude Code
 
-1 task:
-
 ```text
 /flamenode-migration
-```
-
-継続:
-
-```text
 /loop /flamenode-migration
 ```
 
-Adapter:
-
-- `.claude/commands/flamenode-migration.md`
-- `.claude/skills/flamenode-migration/SKILL.md`
-
 ### OpenAI Codex
 
-Repo skill:
-
-- `.codex/skills/flamenode-migration/SKILL.md`
-
-1 task:
-
-```text
-Use the flamenode-migration skill and execute exactly one READY MIG task.
-```
-
-継続はCodex Goalを使用してよい。
-
-```text
-/goal Continue the FlameNode migration using the flamenode-migration skill and repository migration protocol. Execute exactly one MIG task per iteration, persist STATUS/inventory changes after each task, and stop at any Phase Gate, blocker, or approval-required production action.
-```
-
-Goalよりrepositoryの`STATUS.md`を優先する。
+`.codex/skills/flamenode-migration/SKILL.md` を利用する。
+継続実行でもrepositoryの`STATUS.md`を進捗正本にする。
 
 ### Google Antigravity
-
-Slash command:
 
 ```text
 /flamenode-migration
 ```
 
-正本adapter:
-
-- `.agents/workflows/flamenode-migration.md`
-
-補助knowledge:
-
-- `.agents/skills/flamenode-migration/SKILL.md`
-- `.agents/rules/flamenode-project.md`
-
-Antigravityではworkflowが`/`コマンド、skillがオンデマンド知識を担当する。
-継続実行機能を使う場合も、1 iteration = 1 MIG taskと本書の停止条件を維持する。
+- slash workflow: `.agents/workflows/flamenode-migration.md`
+- reusable skill: `.agents/skills/flamenode-migration/SKILL.md`
+- always-on repo rule: `.agents/rules/flamenode-project.md`
 
 ### Generic agent
 
 ```text
-Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY task from docs/migration/STATUS.md.
+Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 ```
 
 ---
 
-## 2. Canonical read order
+# Mandatory read order
 
 毎iteration:
 
 1. `AGENTS.md`
-2. `docs/AI_CONTEXT.md` のmigration行
-3. `docs/migration/README.md`
-4. `docs/migration/STATUS.md`
-5. `docs/migration/FUNCTION_INVENTORY.md` のindex
-6. **対象domainだけ** `docs/migration/functions/*.md`
-7. 必要な `ROUTE_MATRIX.md` / `API_MATRIX.md`
-8. 対象コードと関連test
-9. 必要ならActive文書を追加1件
+2. `docs/AI_CONTEXT.md` のmigration entry
+3. `docs/migration/STATUS.md`
+4. `docs/migration/GIT_WORKFLOW.md`
+5. `docs/migration/README.md`
+6. `docs/migration/PRODUCT_REQUIREMENTS.md`
+7. `docs/migration/CODE_QUALITY.md`
+8. task scopeに応じて:
+   - route/UI/frontend → `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象`frontend/*.md`
+   - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`
+   - visual/UI design → `UI_REFERENCE.md`
+9. 必要な`ROUTE_MATRIX.md` / `API_MATRIX.md`
+10. 対象CURRENT code + tests + config
 
-禁止:
+正本の所在が不明な時だけ`DOC_MAP.md`を読む。
 
-- repo全体の無差別再読込
-- Historical/archiveの一括投入
-- 全function ledgerの毎回読込
-- 前iterationでrepoへ保存済みの事実を理由なく再調査
-- tool固有adapterを仕様正本にする
-- chat履歴だけをhandoffに使う
+## Context minimization
+
+- 全432 UX行を毎回読まない。
+- 全136 FN行を毎回読まない。
+- 対象domain ledgerだけ読む。
+- historical/archiveは必要な要件照合時のみ読む。
+- chat historyは進捗正本にしない。
 
 ---
 
-## 3. One iteration contract
+# Non-negotiable priorities
 
-**1 iteration = exactly 1 MIG task.**
+```text
+1. frontend usability / behavior / capability preservation
+2. permissions / privacy / data integrity / auditability
+3. async/external side-effect outcome preservation
+4. URL/query/history/session compatibility
+5. 1102 resistance / reliability / operational efficiency
+6. beautiful, explicit, maintainable implementation
+7. reuse / code reduction
+```
 
-### Start
+コード行数削減を目的にしない。
+結果的に短くなるのはよいが、意味を失う抽象化は禁止。
 
-`STATUS.md`から確認:
+---
 
-- Current Phase
-- Next Task
-- task dependencies
-- Phase Gate
-- blocker
-- owner
+# One iteration = one MIG task
 
-`READY` taskがなければ勝手に別taskを選ばない。
+`STATUS.md`のdependencyを満たした1 taskだけを進める。
 
-### Claim
+## Claim
 
-対象taskを`IN_PROGRESS`にしownerを記録する。
+開始前:
 
 ```text
 Task:
 Owner: claude | codex | antigravity | other
+State: READY -> IN_PROGRESS
 CURRENT:
 TARGET:
 Scope:
 Non-scope:
-Affected function IDs:
-Affected route/API IDs:
+Affected UX IDs:
+Affected FN IDs:
+Affected routes/APIs/jobs:
+Requirement sources:
 Rollback:
 Production action required: yes/no
 ```
 
-### Inventory guard
+同一MIG taskを別writerが所有している場合は新branchを作らない。
 
-実装前に:
+## Git rule
 
-1. `FUNCTION_INVENTORY.md`から対象function IDを特定
-2. 対象domain ledgerだけ読む
-3. CURRENT詳細が未監査なら実装前に必要範囲を棚卸し
-4. `DETAIL_AUDIT_REQUIRED` / unknown / unverifiedを移行済みにしない
-5. 画面リデザインでは画面上の全capabilityをscopeまたはexplicit non-scopeへ分類
+`GIT_WORKFLOW.md`を必ず守る。
+
+原則:
+
+```text
+1 MIG task = 1 short-lived branch = 1 PR = 1 squash merge
+```
+
+- main直push禁止
+- task branchをmainから切る
+- Draft PRを早期作成
+- one writer lane
+- 他agentはreview/audit laneにできる
+- code landingとproduction traffic切替は別操作
+- Remote D1 / secret / Worker Route / Custom Domain変更は明示承認なしに実行しない
+- auth/permission/visibility/schema/high-riskは独立review + Lead/user approvalを要求
+- rollbackをPRに記録
+
+---
+
+# Existing-function guard
+
+実装/設計前に:
+
+1. `CURRENT_ROUTES.md`で影響routeを確定。
+2. 対象`frontend/*.md`から関連`UX-*`を列挙。
+3. 対象`functions/*.md`から関連`FN-*`を列挙。
+4. CURRENT action/API/job/permission/side effectsをcode/testで確認。
+5. existing design intentが関係するなら`PRODUCT_REQUIREMENTS.md`に従って照合。
+6. 未監査項目を「不要」と推測しない。
+
+ユーザーが認識する以下も機能:
+
+- button/link/tab/menu
+- search/filter/sort/page
+- loading/empty/error/forbidden/degraded/pending/success
+- validation/confirm/retry
+- responsive/keyboard/focus
+- URL/query/deep-link/back-forward/reload
+- notification/external sync result
+- public/private visibility
+- async reflection delay
 
 **Visual completion is not functional completion.**
 
-### Implement
+---
 
-- 1 PR = 1 migration boundaryを原則とする
-- CURRENT contractをcode/testから先に固定
-- framework-neutral domain logicを優先
-- compatibility bridgeを明示
+# UI redesign contract
+
+`UI_REFERENCE.md`が正本。
+
+現在`PENDING_HTML`の間:
+
+- `docs/design-redesign`を参照しない
+- `app/(redesign)`をtarget designの正本にしない
+- agentが独自の新visual designを確定しない
+- CURRENT UX contractの棚卸し/維持は続ける
+
+後日HTML mockが登録されたら、mockをvisual/IA targetとしてroute/UXへmappingする。
+
+HTML mockに存在しないCURRENT機能を黙って消さない。
+permission/business/visibility/side-effect rulesはHTML mockだけでは変更しない。
+
+---
+
+# Existing design / requirement preservation
+
+`PRODUCT_REQUIREMENTS.md`に従う。
+
+- CURRENT code/test/config = 現在挙動の第一証拠
+- active設計文書 = product intentの証拠
+- historical docs = 背景
+- 矛盾は`CURRENT_DIVERGENCE`として記録
+- old designへ勝手に戻さない
+- CURRENT divergenceを黙って正当化もしない
+- improvement候補はUX影響付きで提示する
+
+frontend behavior変更は明示承認までCURRENT維持がdefault。
+
+---
+
+# Backend optimization contract
+
+CURRENT implementationを新frameworkへ機械翻訳しない。
+`BACKEND_OPTIMIZATION.md`に従って毎backend taskで評価する。
+
+```text
+Optimization review:
+- duplicated/current complexity observed:
+- candidate commonization:
+- commonization intentionally rejected and why:
+- framework coupling removed/retained:
+- HTTP CPU impact:
+- DB rows/read-write impact:
+- Queue/R2/KV impact:
+- transaction/audit/post-commit effects:
+- frontend UX impact: none | exact impact
+- affected UX IDs:
+- affected FN IDs:
+- recommendation:
+```
+
+共通化は義務ではない。
+permission / transaction / failure / audit / visibilityの意味が違うなら別実装を維持する。
+
+UX変更が必要な最適化は`UX_IMPACT_REVIEW_REQUIRED`で止める。
+
+---
+
+# Code quality contract
+
+すべてのimplementationは`CODE_QUALITY.md`に従う。
+
+要求:
+
+- experienced production engineerが読んで責務/命名/依存方向に違和感がない
+- domain vocabularyが正確
+- framework adapterは薄い
+- domain logicはframework-neutralを優先
+- transaction/permission/visibility/side effectsが明示的
+- clever magicよりpredictable control flow
+- typed contracts / boundary validation
+- generic mega-helper/flag-heavy CRUDを作らない
+- commentsはwhy/invariantを説明
+- testsはbehavior/invariantを固定
+- performance最適化は計測可能
+- temporary workaroundにはremoval condition/taskを付ける
+
+「美しいコード」は短いコードではなく、意味が明確で局所的に推論できるコード。
+
+---
+
+# Implementation rules
+
+- compatibility bridgeを明示する
 - 新経路導入と同時に旧経路を削除しない
 - Big Bang rewrite禁止
-- redesignでもfunction coverageを落とさない
-- target stackだからという理由だけで新技術を導入しない
+- DB migrationはexpand -> migrate -> contract
+- public requestにheavy generationを戻さない
+- authzをUIだけに置かない
+- public DTOをDB rowそのままにしない
+- fail-closed visibilityを弱めない
+- audit/retry/idempotencyを削らない
+- framework移行を理由にbusiness ruleを変えない
 
-### Validate
+---
+
+# Validation
 
 最低限:
 
-- task Acceptance
-- affected function Acceptance
-- relevant regression tests
-- 必要なCPU/build/UI/security checks
+```text
+[ ] MIG task acceptance
+[ ] affected UX contracts
+[ ] affected FN contracts
+[ ] permissions/privacy/visibility
+[ ] DB/audit/Queue/R2/KV/notification effects
+[ ] loading/error/empty/pending/degraded states where applicable
+[ ] URL/query/history/reload behavior where applicable
+[ ] relevant regression tests
+[ ] code quality review
+[ ] backend optimization review where applicable
+[ ] CPU/build/security checks where applicable
+[ ] rollback path
+```
 
-### Finish
+checker/testを実行できなかった場合、実行済みと書かず理由を明記する。
 
-必ず以下へ遷移:
+---
+
+# Progress persistence
+
+`STATUS.md`が唯一のtask進捗正本。
+
+終了時は必ず:
 
 - `DONE`
 - `REVIEW`
 - `BLOCKED`
 
-`IN_PROGRESS`のまま終わらない。
+のいずれかへ遷移し、`IN_PROGRESS`で放置しない。
 
-必要に応じて更新:
+必要に応じて同じPRで更新:
 
 - `STATUS.md`
-- affected `functions/*.md`
-- `FUNCTION_INVENTORY.md` totals/index
+- `CURRENT_ROUTES.md`
+- `FRONTEND_FEATURES.md` / `frontend/*.md`
+- `FUNCTION_INVENTORY.md` / `functions/*.md`
+- `PRODUCT_REQUIREMENTS.md`
+- `BACKEND_OPTIMIZATION.md`
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
-Last iteration:
+通常taskはtask DONE + next dependency-ready task READYまで同じPRへ記録してsquash mergeする。
+
+---
+
+# Multi-agent coordination
+
+repository/PRだけを共有状態の正本にする。
+
+- 1 task = 1 writer
+- Claude/Codex/Antigravityを同じtaskへ同時writerにしない
+- 他agentはreview/audit/test analysisへ回す
+- STATUS/同一ledger行/core permission/auth/schemaの同時編集を避ける
+
+Handoffはrepoへ残す:
 
 ```text
-Agent:
-Task:
-Result:
-Affected functions:
-Validation:
-PR/commit:
-Rollback:
-Blockers:
-Next:
+state / owner
+findings / evidence
+UX/FN impact
+requirement divergence
+optimization findings
+tests
+blockers
+next action
 ```
 
 ---
 
-## 4. Multi-agent coordination
-
-Claude / Codex / Antigravityを併用してよいが、**Git repositoryだけを共有状態の正本**にする。
-
-### Single writer
-
-1 taskは同時に1 agentだけが`IN_PROGRESS`にする。
-他agentはread-only review/auditに回せる。
-
-### Parallel-safe
-
-並列化しやすい:
-
-- read-only inventory
-- test audit
-- design comparison
-- security review
-- CPU/build analysis
-- PR review
-
-同時編集を避ける:
-
-- `STATUS.md`
-- 同じfunction ledger row
-- 同じroute/API matrix row
-- 同じdomain service
-- DB/auth/permission/visibility core
-
-### Handoff
-
-agent交代前にrepoへ残す:
-
-- state / owner
-- findings/evidence
-- tests
-- blocker
-- next action
-
-チャットだけのhandoffは無効。
-
----
-
-## 5. Continuous execution
-
-Product別の長期実行機構は違っても、論理loopは同じ。
+# `/loop` / continuous execution
 
 ```text
 LOOP:
   read STATUS
   select exactly one READY MIG task
+  obey Git workflow
   claim
-  execute
-  validate
-  persist STATUS + affected ledgers/matrices
+  inventory CURRENT route/UX/FN/requirements
+  implement or audit
+  optimize only within preservation contract
+  validate code quality + behavior
+  persist STATUS + ledgers/matrices
   evaluate stop conditions
 ```
 
-代表例:
+## Mandatory stop
 
-- Claude Code: `/loop /flamenode-migration`
-- Codex: `/goal ...` + `flamenode-migration` skill
-- Antigravity: `/flamenode-migration` workflowを反復実行、または利用可能な継続実行機能から同workflowを呼ぶ
-
-### Mandatory stop
-
-- Overall State = BLOCKED
+- Overall/Task State = BLOCKED
 - READY taskなし
-- Phase GateがREVIEW待ち
-- production actionに明示承認が必要
+- Phase Gate review待ち
+- production actionの明示承認待ち
 - Remote D1 / secret / Worker Route / Custom Domain変更が必要
-- auth/security/permission/visibility仕様が衝突
+- auth/security/permission/visibility requirement conflict未解決
+- required UX/FN inventoryが不明
+- optimizationがfrontend behavior変更を要求
+- UI visual taskだが`UI_REFERENCE.md = PENDING_HTML`
 - test failureがtask scopeを超える
 - rollback不能/未証明
-- required function inventory coverageが不明
 - 別agentが対象taskを所有中
 
-### Continuous-mode prohibitions
-
-- 複数MIG taskを1回のstate transitionでDONE
-- Phase Gate自動承認
-- BLOCKEDを飛ばして後Phaseへ進む
-- production deploy/routing/secret/Remote D1の自動変更
-- progress MD更新なしで次iterationへ進む
+Phase Gateをagentが自動承認しない。
 
 ---
 
-## 6. Redesign contract
+# MIG-0011 final blocker report
 
-UI redesignはmigrationの一部だが、機能削減ではない。
-
-Visual sources:
-
-1. `docs/design-redesign/DESIGN_PRINCIPLES.md`
-2. `docs/design-redesign/UX_AUDIT.md`
-3. `docs/design-redesign/NAVIGATION.md`
-4. `/dev/redesign`
-5. `docs/design-redesign/PAGE_COVERAGE.md`
-6. `docs/design-redesign/DECISIONS.md`
-
-Functional sources:
-
-- CURRENT code/tests
-- `FUNCTION_INVENTORY.md` + relevant function ledger
-- `ROUTE_MATRIX.md`
-- `API_MATRIX.md`
-
-### Screen completion
-
-画面DONE条件:
-
-- visual redesign complete
-- responsive states complete
-- loading/error/empty/permission states covered
-- 全required functionが`PARITY_VERIFIED`または`REMOVED_APPROVED`
-- permissionとserver side effects確認済み
-- route/API dependencyが移行済みまたは明示bridgeあり
-- current acceptance testまたはreplacement testあり
-- direct navigation/reload/history semantics確認済み
-
-見た目のみ完成は`UI_DONE_FUNCTIONS_PENDING`。
-
----
-
-## 7. Existing-function preservation invariant
-
-Final migrationでは以下を残さない。
+全棚卸し完了後、効率化の障害となる機能があれば必ず以下をユーザーへ提示する。
 
 ```text
-UNKNOWN required functions
-DETAIL_AUDIT_REQUIRED functions
-unverified migrated functions
-screens without complete function mapping
-legacy actions/routes without disposition
-background jobs without disposition
-permission rules without parity evidence
-side effects without parity evidence
+Optimization blocker: <name>
+Affected UX IDs:
+Affected FN IDs:
+Affected screens:
+CURRENT frontend behavior:
+Why it blocks simplification/efficiency:
+Option A — preserve exactly:
+  backend consequence:
+  frontend impact: none
+Option B — change behavior:
+  backend benefit:
+  exact frontend UX/function impact:
+Recommendation:
+Risk:
+Approval required: yes
 ```
 
-機能削除はmigrationに紛れ込ませない。
+障害がなければ:
 
-削除手順:
+```text
+Optimization blockers requiring frontend change: 0
+```
 
-1. ledger → `REMOVAL_PROPOSED`
-2. reason
-3. affected users/routes/data
-4. replacement if any
-5. explicit Lead/user approval
-6. approval後のみ`REMOVED_APPROVED`
+と明示する。
 
 ---
 
-## 8. Completion format
+# Completion format
 
 ```text
 MIG-XXXX: <task>
 Agent: <agent>
 State: DONE | REVIEW | BLOCKED
 
-Functions:
+Affected:
+- UX-...
 - FN-...
+- routes/APIs/jobs
 
 Changed:
 - ...
 
 Preserved:
+- ...
+
+Requirement reconciliation:
+- ...
+
+Optimization review:
+- ...
+
+Code quality review:
 - ...
 
 Validation:
@@ -376,9 +435,7 @@ Rollback:
 - ...
 
 Progress files updated:
-- STATUS.md
-- relevant functions/*.md
-- ROUTE_MATRIX.md / API_MATRIX.md
+- ...
 
 Next:
 - MIG-YYYY | Phase Gate review | BLOCKED(reason)

@@ -21,6 +21,8 @@ Platform保証は画面に現れにくいが、移行時の欠落が最も危険
 | FN-PLAT-008 | search index/shards | content-jobs/public search | bounded generation/query contract | DETAIL_AUDIT_REQUIRED |
 | FN-PLAT-009 | score/trending analytics | jobs/R2 analytics | scoring/order contract | DETAIL_AUDIT_REQUIRED |
 | FN-PLAT-010 | content build/rebuild admin visibility | admin static builds | state/retry visibility | DETAIL_AUDIT_REQUIRED |
+| FN-PLAT-011 | maintenance状態を全ユーザーへ案内 | `/maintenance` | operation modeに応じた正確な状態/次行動、admin例外 | DETAIL_AUDIT_REQUIRED |
+| FN-PLAT-012 | 既存UI surfaceを開発者が確認 | `/dev/ui-surfaces` | dev-only surface、production機能と混同しない | DETAIL_AUDIT_REQUIRED |
 
 ## API / media / external
 

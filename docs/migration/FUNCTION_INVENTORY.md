@@ -1,36 +1,53 @@
 # FlameNode Existing Function Inventory
 
-> Status: Active / Functional parity index
-> Last updated: 2026-10-06
-> Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
-> Architecture: [`README.md`](README.md)
+> Status: Active / backend/domain/platform functional parity index
+> Last updated: 2026-10-07
 > Progress: [`STATUS.md`](STATUS.md)
->
-> リデザイン + framework移行で既存機能が欠落しないための索引。
-> 詳細は対象domainのledgerだけを読む。
+> Frontend UX: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
+> Requirements: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)
+> Optimization: [`BACKEND_OPTIMIZATION.md`](BACKEND_OPTIMIZATION.md)
+
+`FN-*`はbackend/domain/platform側の機能・安全保証の索引。
+frontendでユーザーが認識する細かい操作/状態は`UX-*`として`FRONTEND_FEATURES.md`と`frontend/*.md`へ分離する。
+
+```text
+UX-* <-> FN-* は many-to-many
+```
+
+UI機能数とbackend function数を一致させない。
+
+## Mandatory companion rules
+
+`/flamenode-migration`の全iterationでこの索引を確認する。
+
+- frontend/UI/routeを触る: `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象frontend ledger
+- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`
+- product/design intentが関係する: `PRODUCT_REQUIREMENTS.md`
+- visual UIが関係する: `UI_REFERENCE.md`。`PENDING_HTML`中は新visual designを推測しない
+- 画面存在、UX capability、backend functionを同一視しない
 
 ## Completion invariant
 
-移行完了時:
-
 ```text
-UNKNOWN required functions = 0
+UNKNOWN required FN functions = 0
 DETAIL_AUDIT_REQUIRED = 0
-UNVERIFIED migrated functions = 0
-Screens without function mapping = 0
-Server actions/routes without disposition = 0
+UNVERIFIED migrated FN functions = 0
+UX capabilities without FN/backend disposition = 0
+Server Actions without disposition = 0
+Route Handler methods without disposition = 0
 Background jobs without disposition = 0
 Permission rules without parity evidence = 0
 Side effects without parity evidence = 0
+Optimization blockers without UX-impact disposition = 0
 ```
 
 機能削除は暗黙に行わない。
 
 ```text
-BASELINE_KNOWN
-→ REMOVAL_PROPOSED
-→ explicit approval
-→ REMOVED_APPROVED
+CURRENT/BASELINE
+-> REMOVAL_PROPOSED
+-> explicit approval
+-> REMOVED_APPROVED
 ```
 
 ## Function states
@@ -49,66 +66,78 @@ BASELINE_KNOWN
 
 | IDs | Domain | Detail ledger | Initial count |
 | --- | --- | --- | ---: |
-| `FN-PUB-*` | Public/discovery/playback | [`functions/PUBLIC.md`](functions/PUBLIC.md) | 22 |
-| `FN-AUTH-*`, `FN-PER-*`, `FN-ENT-*` | Auth/personal/entry | [`functions/AUTH_PERSONAL_ENTRY.md`](functions/AUTH_PERSONAL_ENTRY.md) | 22 |
+| `FN-PUB-*` | Public/discovery/playback | [`functions/PUBLIC.md`](functions/PUBLIC.md) | 27 |
+| `FN-AUTH-*`, `FN-PER-*`, `FN-ENT-*` | Auth/personal/entry | [`functions/AUTH_PERSONAL_ENTRY.md`](functions/AUTH_PERSONAL_ENTRY.md) | 23 |
 | `FN-MNG-*`, `FN-ADM-*` | Manage/admin | [`functions/MANAGE_ADMIN.md`](functions/MANAGE_ADMIN.md) | 43 |
-| `FN-PLAT-*`, `FN-API-*`, `FN-JOB-*`, `FN-X-*` | Platform/API/jobs/cross-cutting | [`functions/PLATFORM_API_JOBS.md`](functions/PLATFORM_API_JOBS.md) | 41 |
-|  | **Total initial IDs** |  | **128** |
+| `FN-PLAT-*`, `FN-API-*`, `FN-JOB-*`, `FN-X-*` | Platform/API/jobs/cross-cutting | [`functions/PLATFORM_API_JOBS.md`](functions/PLATFORM_API_JOBS.md) | 43 |
+|  | **Total initial IDs** |  | **136** |
 
-毎taskで全ledgerを読まない。対象機能を含むledgerだけを読む。
+初期backend/function IDsは136。
+初期frontend UX baselineは432で、別ledgerとして管理する。
+Phase 0中にどちらも増減し得るが、増減理由をSTATUS/PRへ記録する。
 
----
+## Baseline evidence surfaces
 
-# Baseline evidence surfaces
+### UI / routes
 
-## UI/screens
+CURRENT user-visible routeは`CURRENT_ROUTES.md`が正本。
 
-既存redesign inventoryで86画面を確認済み。
+```text
+Public   16
+Personal  6
+Entry     3
+Manage   12
+Admin    45
+System    4
+Total    86 USER_SCREEN
+```
 
-- Public 16
-- Personal 6
-- Entry 3
-- Manage 12
-- Admin 45
-- System 4
+`docs/design-redesign`や旧mockは正本にしない。
 
-正本:
+### Server Actions
 
-- `docs/design-redesign/ROUTE_INVENTORY.md`
-- `docs/design-redesign/PAGE_COVERAGE.md`
-- `app/(redesign)/dev/redesign/_catalog.ts`
+2026-10-06のbaseline探索では:
 
-`MIG-0010` で全86画面をfunction IDsへ紐付ける。
+```text
+src/lib/actions/* file-level "use server" modules: 34 files
+app/* inline "use server" pages:                  3 files
+```
 
-## Server Action seed surface
+inline確認済みseed:
 
-2026-10-06時点で少なくとも34ファイルの`"use server"` surfaceを確認済み。
-`MIG-0003` でexport/function/caller単位へ展開し、page内inline actionも探索する。
+```text
+app/(auth)/entry/page.tsx
+app/(admin)/admin/api-endpoints/page.tsx
+app/(admin)/admin/x-id-merges/page.tsx
+```
+
+これはfile countでありaction countではない。MIG-0003で全export/inline actionをcaller単位へ展開する。
 
 主な領域:
 
 ```text
 api-endpoints
-manage-video / video/*
-youtube-sync
-admin / audit / moderation / notification
-terms / rules
-permission
-xid / xid merge
+manage-video / video
+chapter
 slot
+event / event group / staff / template
+permissions
+xid / xid merge
+audit / restore
+moderation
+notification
+rules / terms
 announcement
 cost guard
-chapter
-event / event group / event staff / event template
+YouTube sync
 public visibility repair
 static rebuild
+admin operations
 ```
 
-`src/lib/actions/`だけを見て完了扱いにしない。
+### Route Handlers / API
 
-## API seed surface
-
-CURRENT `app/api/` top-level 14領域:
+CURRENT `app/api/` top-level seed 14領域:
 
 ```text
 account
@@ -127,9 +156,9 @@ videos
 youtube-thumbnail
 ```
 
-`MIG-0004` で全`route.ts`をHTTP method単位へ展開する。
+MIG-0004で全`route.ts`をHTTP method単位へ展開する。
 
-## Worker/background seed surface
+### Worker / background
 
 CURRENT Worker scripts:
 
@@ -140,86 +169,99 @@ flamenode-content-jobs
 flamenode-sync-jobs
 ```
 
-- `MIG-0005`: Worker/domain/route/binding/build topology
-- `MIG-0009`: Queue/Cron/job type/retry/recovery/side effects
+- MIG-0005: Worker/domain/route/binding/build topology
+- MIG-0009: Queue/Cron/job type/retry/recovery/side effects
 
----
+## Per-function required fields
 
-# Per-function required fields
-
-`CURRENT_VERIFIED`へ上げるには最低限以下を記録する。
+`CURRENT_VERIFIED`へ上げるには最低限:
 
 ```text
 Function ID
-Name
-Users/Roles
+Name / domain meaning
+Users/Roles affected
+Related UX IDs
 Current UI routes
-Current API/actions
-Inputs
-Outputs
-Auth
-Permissions
-DB reads
-DB writes
+Current API/actions/jobs
+Inputs / outputs
+Auth / permissions
+DB reads / writes
+Transaction boundary
 Audit effects
 Queue effects
 R2/KV effects
 Notification/external effects
 Visibility/privacy
-Loading/error/empty/permission states
-Current tests
+Retry/idempotency/partial failure
+User-visible loading/error/pending consequence
+Current tests/evidence
 Known edge cases
-Target owner
-Target UI/API
-Bridge
-Rollback
+Target owner / API / job
+Bridge / rollback
 Acceptance
 State
-Evidence
 ```
 
-詳細は対象domain ledgerに追記する。
+適用不要項目は`N/A + reason`。
 
----
+## UX/FN parity rule
 
-# Screen/function parity rule
+画面/機能移行前:
 
-画面移行前:
+1. `CURRENT_ROUTES.md`でrouteを確認。
+2. `FRONTEND_FEATURES.md`の対象ledgerから全`UX-*`を確認。
+3. `UX-*`が依存する`FN-*`/action/API/jobを確定。
+4. permission/visibility/audit/Queue/notificationを確認。
+5. target implementationで同じobservable resultを実現する。
+6. backend実装は必要なら再設計するが、UX contractを暗黙変更しない。
 
-1. `ROUTE_MATRIX.md` のscreen/routeを確認
-2. screenで利用できる全function IDを列挙
-3. primary/secondary/destructive actionsを含める
-4. permission-dependent controlを含める
-5. server side effectsを含める
+Screen DONEにはvisual完成だけでなく、required UXとFN/backend side-effect parityが必要。
 
-画面DONE条件:
+## Backend optimization rule
 
-- visual redesign complete
-- responsive complete
-- loading/error/empty/permission states complete
-- associated function IDs = `PARITY_VERIFIED` or `REMOVED_APPROVED`
-- permission / DB / audit / Queue / notifications parity confirmed
-- direct URL/reload/history behavior confirmed
+CURRENT実装を新frameworkへ機械翻訳しない。
+`BACKEND_OPTIMIZATION.md`と`CODE_QUALITY.md`に従い、以下を評価する。
 
-Visual completionだけなら `UI_DONE_FUNCTIONS_PENDING` として扱う。
+- framework concern / business rule separation
+- auth/permission context duplication
+- transaction/audit boundary
+- post-commit effects
+- Queue/R2/static projection fanout
+- revalidation/invalidation semantics
+- validation/error taxonomy
+- read-model/query duplication
+- notification/external sync
+- CPU/rows-read/serialization cost
+- observability/testability/rollback
 
----
+ただし共通化自体を目標にしない。意味・permission・failure semanticsが違うものは別実装を維持する。
 
-# Phase 0 inventory plan
+## Phase 0 inventory plan
 
-| Task | Inventory responsibility |
+| Task | Responsibility |
 | --- | --- |
-| `MIG-0002` | 86 screen/page/route CURRENT baseline |
-| `MIG-0003` | all Server Action exports + inline actions |
-| `MIG-0004` | all Route Handler HTTP methods |
+| `MIG-0002` | 86 CURRENT routes + 432 granular frontend UX baseline + migration quality/source rules |
+| `MIG-0003` | all Server Actions/inline actions -> FN/UX mapping + optimization observations |
+| `MIG-0004` | all Route Handler methods -> FN/UX mapping + API contract observations |
 | `MIG-0005` | Cloudflare topology/bindings/routes/build |
 | `MIG-0006` | CPU/1102/request baseline |
 | `MIG-0007` | static artifacts/visibility/aliases/repair/fallback |
 | `MIG-0008` | auth/session/permission/owner rules |
 | `MIG-0009` | Queue/Cron/background job types/effects |
-| `MIG-0010` | all 86 screens → function IDs |
-| `MIG-0011` | cross-source gap scan, merge duplicates, add missing IDs, UNKNOWN=0 |
+| `MIG-0010` | all 86 screens + cross-route shells -> UX/FN complete mapping |
+| `MIG-0011` | cross-source gap scan, requirement reconciliation, orphan=0, optimization/blocker assessment |
 | `MIG-0012` | Phase 0 Gate |
 
-Phase 0 Gateまでは初期128 IDが最終数とは限らない。
-棚卸しで新規機能が見つかったらIDを追加し、数値をSTATUSへ反映する。
+## MIG-0011 final assessment
+
+全棚卸し完了後のみ:
+
+- safely commonizable duplicate implementations
+- intentionally separate implementations
+- request-time CPU blockers
+- architecture exceptions
+- legacy compatibility costs
+- features preventing simplification
+- unresolved documented-vs-current divergence
+
+frontend behavior変更が必要な最適化は`BACKEND_OPTIMIZATION.md`のblocker formatで具体的影響を示し、承認まではCURRENT behavior維持をdefaultとする。

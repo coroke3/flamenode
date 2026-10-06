@@ -11,9 +11,19 @@ const required = [
   "docs/migration/GIT_WORKFLOW.md",
   "docs/migration/DOC_MAP.md",
   "docs/migration/STATUS.md",
+  "docs/migration/CURRENT_ROUTES.md",
+  "docs/migration/FRONTEND_FEATURES.md",
   "docs/migration/FUNCTION_INVENTORY.md",
+  "docs/migration/PRODUCT_REQUIREMENTS.md",
+  "docs/migration/CODE_QUALITY.md",
+  "docs/migration/UI_REFERENCE.md",
+  "docs/migration/BACKEND_OPTIMIZATION.md",
   "docs/migration/ROUTE_MATRIX.md",
   "docs/migration/API_MATRIX.md",
+  "docs/migration/frontend/CROSS_CUTTING.md",
+  "docs/migration/frontend/PUBLIC.md",
+  "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
+  "docs/migration/frontend/MANAGE_ADMIN.md",
   "docs/migration/functions/PUBLIC.md",
   "docs/migration/functions/AUTH_PERSONAL_ENTRY.md",
   "docs/migration/functions/MANAGE_ADMIN.md",
@@ -28,10 +38,27 @@ const required = [
   ".agents/rules/flamenode-project.md",
 ];
 
-const forbiddenDuplicates = [
+const forbidden = [
   "docs/migration/PROGRESS.md",
   "docs/migration/WORK_ITEMS.md",
   "docs/migration/FEATURE_INVENTORY.md",
+  "docs/migration/UI_FEATURE_INVENTORY.md",
+  "docs/migration/OPTIMIZATION_NOTES.md",
+  "docs/design-redesign",
+];
+
+const functionLedgers = [
+  "docs/migration/functions/PUBLIC.md",
+  "docs/migration/functions/AUTH_PERSONAL_ENTRY.md",
+  "docs/migration/functions/MANAGE_ADMIN.md",
+  "docs/migration/functions/PLATFORM_API_JOBS.md",
+];
+
+const uxLedgers = [
+  "docs/migration/frontend/CROSS_CUTTING.md",
+  "docs/migration/frontend/PUBLIC.md",
+  "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
+  "docs/migration/frontend/MANAGE_ADMIN.md",
 ];
 
 function file(relative) {
@@ -42,23 +69,42 @@ function read(relative) {
   return fs.readFileSync(file(relative), "utf8");
 }
 
+function duplicateIds(ids) {
+  const seen = new Set();
+  const dupes = new Set();
+  for (const id of ids) {
+    if (seen.has(id)) dupes.add(id);
+    seen.add(id);
+  }
+  return [...dupes];
+}
+
 for (const relative of required) {
   if (!fs.existsSync(file(relative))) errors.push(`missing required migration file: ${relative}`);
 }
-for (const relative of forbiddenDuplicates) {
-  if (fs.existsSync(file(relative))) errors.push(`duplicate migration source of truth is forbidden: ${relative}`);
+
+for (const relative of forbidden) {
+  if (fs.existsSync(file(relative))) errors.push(`forbidden/duplicate migration source exists: ${relative}`);
 }
 
 if (errors.length === 0) {
   const status = read("docs/migration/STATUS.md");
+  const architecture = read("docs/migration/README.md");
+  const protocol = read("docs/migration/AGENT_PROTOCOL.md");
   const inventory = read("docs/migration/FUNCTION_INVENTORY.md");
+  const frontend = read("docs/migration/FRONTEND_FEATURES.md");
+  const currentRoutes = read("docs/migration/CURRENT_ROUTES.md");
+  const requirements = read("docs/migration/PRODUCT_REQUIREMENTS.md");
+  const quality = read("docs/migration/CODE_QUALITY.md");
+  const uiReference = read("docs/migration/UI_REFERENCE.md");
+  const optimization = read("docs/migration/BACKEND_OPTIMIZATION.md");
   const routeMatrix = read("docs/migration/ROUTE_MATRIX.md");
   const apiMatrix = read("docs/migration/API_MATRIX.md");
   const docMap = read("docs/migration/DOC_MAP.md");
   const gitWorkflow = read("docs/migration/GIT_WORKFLOW.md");
 
+  // Progress/task integrity.
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
-  const nextAfterApproval = status.match(/Next after approval:\s*(MIG-\d{4})/i)?.[1];
   const currentOwner = status.match(/Current Owner:\s*([^\n]+)/i)?.[1]?.trim();
   const taskState = status.match(/Task State:\s*(READY|IN_PROGRESS|REVIEW|BLOCKED|DONE|SKIPPED)/i)?.[1];
 
@@ -68,25 +114,19 @@ if (errors.length === 0) {
 
   const taskRows = [...status.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)].map((m) => m[1]);
   const taskSet = new Set(taskRows);
-  if (taskSet.size !== taskRows.length) {
-    const seen = new Set();
-    const dupes = [...new Set(taskRows.filter((id) => seen.has(id) || !seen.add(id)))];
-    errors.push(`STATUS.md: duplicate MIG task rows: ${dupes.join(", ")}`);
-  }
-  if (currentTask && !taskSet.has(currentTask)) {
-    errors.push(`STATUS.md: Current Task ${currentTask} has no task-table row`);
-  }
-  if (nextAfterApproval && !taskSet.has(nextAfterApproval)) {
-    errors.push(`STATUS.md: Next after approval ${nextAfterApproval} has no task-table row`);
-  }
+  const taskDupes = duplicateIds(taskRows);
+  if (taskDupes.length) errors.push(`STATUS.md: duplicate MIG task rows: ${taskDupes.join(", ")}`);
+  if (currentTask && !taskSet.has(currentTask)) errors.push(`STATUS.md: Current Task ${currentTask} has no task-table row`);
 
-  const ledgerPaths = [
-    "docs/migration/functions/PUBLIC.md",
-    "docs/migration/functions/AUTH_PERSONAL_ENTRY.md",
-    "docs/migration/functions/MANAGE_ADMIN.md",
-    "docs/migration/functions/PLATFORM_API_JOBS.md",
-  ];
-  const functionRows = [];
+  // CURRENT route baseline must remain 86 user-visible screens.
+  const routeSectionCounts = [...currentRoutes.matchAll(/^##\s+(Public|Personal|Entry|Manage|Admin|System)\s+—\s+(\d+)\s*$/gm)]
+    .map((m) => Number(m[2]));
+  const routeBaselineTotal = routeSectionCounts.reduce((sum, count) => sum + count, 0);
+  if (routeSectionCounts.length !== 6) errors.push(`CURRENT_ROUTES.md: expected 6 USER_SCREEN section counts, found ${routeSectionCounts.length}`);
+  if (routeBaselineTotal !== 86) errors.push(`CURRENT_ROUTES.md: USER_SCREEN section total=${routeBaselineTotal}, expected=86`);
+  if (!/CURRENT USER_SCREEN routes\s*\|\s*86\s*\|/m.test(status)) errors.push("STATUS.md: CURRENT USER_SCREEN baseline must report 86");
+
+  // Backend/domain/platform FN ledgers.
   const validFunctionStates = new Set([
     "BASELINE_KNOWN",
     "DETAIL_AUDIT_REQUIRED",
@@ -98,31 +138,26 @@ if (errors.length === 0) {
     "REMOVED_APPROVED",
     "BLOCKED",
   ]);
+  const functionRows = [];
 
-  for (const ledgerPath of ledgerPaths) {
+  for (const ledgerPath of functionLedgers) {
     const text = read(ledgerPath);
     for (const match of text.matchAll(/^\|\s*(FN-[A-Z]+-\d{3})\s*\|.*\|\s*([A-Z_]+)\s*\|\s*$/gm)) {
-      functionRows.push({ id: match[1], state: match[2], ledgerPath });
-      if (!validFunctionStates.has(match[2])) {
-        errors.push(`${ledgerPath}: invalid function state ${match[2]} for ${match[1]}`);
-      }
+      const row = { id: match[1], state: match[2], ledgerPath };
+      functionRows.push(row);
+      if (!validFunctionStates.has(row.state)) errors.push(`${ledgerPath}: invalid function state ${row.state} for ${row.id}`);
     }
   }
 
   const functionIds = functionRows.map((row) => row.id);
   const functionSet = new Set(functionIds);
-  if (functionSet.size !== functionIds.length) {
-    const seen = new Set();
-    const dupes = [...new Set(functionIds.filter((id) => seen.has(id) || !seen.add(id)))];
-    errors.push(`function ledger: duplicate IDs: ${dupes.join(", ")}`);
-  }
+  const functionDupes = duplicateIds(functionIds);
+  if (functionDupes.length) errors.push(`function ledgers: duplicate IDs: ${functionDupes.join(", ")}`);
 
-  const declaredTotal = Number(inventory.match(/\*\*Total initial IDs\*\*\s*\|\s*\|\s*\*\*(\d+)\*\*/i)?.[1]);
-  if (!Number.isFinite(declaredTotal)) {
-    errors.push("FUNCTION_INVENTORY.md: Total initial IDs is missing");
-  } else if (declaredTotal !== functionRows.length) {
-    errors.push(`FUNCTION_INVENTORY.md: declared total=${declaredTotal}, ledger rows=${functionRows.length}`);
-  }
+  const declaredFunctionTotal = Number(inventory.match(/\*\*Total initial IDs\*\*\s*\|\s*\|\s*\*\*(\d+)\*\*/i)?.[1]);
+  if (!Number.isFinite(declaredFunctionTotal)) errors.push("FUNCTION_INVENTORY.md: Total initial IDs is missing");
+  else if (declaredFunctionTotal !== functionRows.length) errors.push(`FUNCTION_INVENTORY.md: declared total=${declaredFunctionTotal}, ledger rows=${functionRows.length}`);
+  if (functionRows.length !== 136) errors.push(`function ledgers: current baseline=${functionRows.length}, expected=136`);
 
   const stateCounts = functionRows.reduce((acc, row) => {
     acc[row.state] = (acc[row.state] ?? 0) + 1;
@@ -135,9 +170,86 @@ if (errors.length === 0) {
     else if (reported !== actual) errors.push(`STATUS.md: ${state} reported=${reported}, actual=${actual}`);
   }
 
+  // Frontend observable UX ledgers. UX and FN are intentionally many-to-many.
+  const validUxStates = new Set([
+    "CURRENT_OBSERVED",
+    "AUDIT_REQUIRED",
+    "CURRENT_VERIFIED",
+    "REQUIREMENT_ONLY",
+    "CURRENT_DIVERGENCE",
+    "PARITY_VERIFIED",
+    "REMOVAL_PROPOSED",
+    "REMOVED_APPROVED",
+    "BLOCKED",
+  ]);
+  const uxRows = [];
+
+  for (const ledgerPath of uxLedgers) {
+    const text = read(ledgerPath);
+    for (const line of text.split("\n")) {
+      const id = line.match(/^\|\s*(UX-[A-Z]+-\d{3})\s*\|/)?.[1];
+      if (!id) continue;
+
+      const cells = line.split("|").map((cell) => cell.trim()).filter(Boolean);
+      const state = cells.at(-1);
+      uxRows.push({ id, state, ledgerPath, line });
+      if (!validUxStates.has(state)) errors.push(`${ledgerPath}: invalid UX evidence/state ${state} for ${id}`);
+
+      const fnRefs = [...line.matchAll(/FN-[A-Z]+-\d{3}/g)].map((m) => m[0]);
+      for (const fnId of new Set(fnRefs)) {
+        if (!functionSet.has(fnId)) errors.push(`${ledgerPath}: ${id} references unknown function ${fnId}`);
+      }
+    }
+  }
+
+  const uxIds = uxRows.map((row) => row.id);
+  const uxDupes = duplicateIds(uxIds);
+  if (uxDupes.length) errors.push(`frontend UX ledgers: duplicate IDs: ${uxDupes.join(", ")}`);
+
+  const declaredUxTotal = Number(frontend.match(/\*\*Total baseline\*\*\s*\|\s*\|\s*\*\*(\d+)\*\*/i)?.[1]);
+  if (!Number.isFinite(declaredUxTotal)) errors.push("FRONTEND_FEATURES.md: Total baseline count is missing");
+  else if (declaredUxTotal !== uxRows.length) errors.push(`FRONTEND_FEATURES.md: declared total=${declaredUxTotal}, UX ledger rows=${uxRows.length}`);
+  if (uxRows.length !== 432) errors.push(`frontend UX ledgers: current baseline=${uxRows.length}, expected=432`);
+  if (!/Frontend `UX-\*` capabilities\s*\|\s*432\s*\|/m.test(status)) errors.push("STATUS.md: frontend UX baseline must report 432");
+
+  // Design source transition.
+  if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
+  if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
+
+  const obsoletePositiveRefs = [
+    "docs/design-redesign/ROUTE_INVENTORY.md",
+    "docs/design-redesign/PAGE_COVERAGE.md",
+    "docs/design-redesign/DESIGN_PRINCIPLES.md",
+    "docs/design-redesign/UX_AUDIT.md",
+    "docs/design-redesign/NAVIGATION.md",
+    "design-redesign/README.md",
+  ];
+  const authoritativeTexts = [architecture, protocol, inventory, frontend, docMap, read("AGENTS.md"), read("docs/AI_CONTEXT.md"), read("docs/README.md")];
+  for (const obsolete of obsoletePositiveRefs) {
+    if (authoritativeTexts.some((text) => text.includes(obsolete))) errors.push(`obsolete visual source reference remains: ${obsolete}`);
+  }
+
+  // Requirement, optimization and code quality policies.
+  for (const phrase of ["CURRENT_DIVERGENCE", "REQUIREMENT_ONLY", "CURRENT behavior"]) {
+    if (!requirements.includes(phrase)) errors.push(`PRODUCT_REQUIREMENTS.md: required policy phrase missing: ${phrase}`);
+  }
+
+  for (const phrase of ["experienced production engineer", "コード行数削減はKPIではない", "framework adapter", "Side effects"] ) {
+    if (!quality.includes(phrase)) errors.push(`CODE_QUALITY.md: required quality phrase missing: ${phrase}`);
+  }
+
+  for (const requiredPhrase of [
+    "frontend UX / functional parity / safety first",
+    "UX_IMPACT_REVIEW_REQUIRED",
+    "Optimization blockers requiring frontend change",
+  ]) {
+    if (!optimization.includes(requiredPhrase)) errors.push(`BACKEND_OPTIMIZATION.md: required policy phrase missing: ${requiredPhrase}`);
+  }
+
+  // Cross-document MIG references must point to tracked tasks.
   const knownMigs = new Set(taskRows);
-  const migrationDocs = [inventory, routeMatrix, apiMatrix];
-  const migrationNames = ["FUNCTION_INVENTORY.md", "ROUTE_MATRIX.md", "API_MATRIX.md"];
+  const migrationDocs = [architecture, inventory, routeMatrix, apiMatrix];
+  const migrationNames = ["README.md", "FUNCTION_INVENTORY.md", "ROUTE_MATRIX.md", "API_MATRIX.md"];
   migrationDocs.forEach((text, index) => {
     const refs = [...text.matchAll(/MIG-\d{4}/g)].map((m) => m[0]);
     for (const ref of new Set(refs)) {
@@ -145,22 +257,46 @@ if (errors.length === 0) {
     }
   });
 
-  if (/MIG-0007で\s*`?app\/\(redesign\)/.test(routeMatrix)) {
-    errors.push("ROUTE_MATRIX.md: redesign mapping still points to old MIG-0007; expected MIG-0010");
-  }
-
+  // Source map must contain every canonical migration source.
   for (const canonical of [
     "docs/migration/GIT_WORKFLOW.md",
     "docs/migration/STATUS.md",
+    "docs/migration/CURRENT_ROUTES.md",
+    "docs/migration/FRONTEND_FEATURES.md",
     "docs/migration/FUNCTION_INVENTORY.md",
+    "docs/migration/PRODUCT_REQUIREMENTS.md",
+    "docs/migration/CODE_QUALITY.md",
+    "docs/migration/UI_REFERENCE.md",
+    "docs/migration/BACKEND_OPTIMIZATION.md",
     "docs/migration/ROUTE_MATRIX.md",
     "docs/migration/API_MATRIX.md",
   ]) {
-    if (!docMap.includes(`\`${canonical}\``)) {
-      errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
-    }
+    if (!docMap.includes(`\`${canonical}\``)) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
+  // Shared protocol must force Git, requirements, quality and visual-source rules.
+  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md"]) {
+    if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
+  }
+
+  // Tool adapters must delegate to the shared protocol.
+  const adapters = [
+    ".claude/commands/flamenode-migration.md",
+    ".codex/skills/flamenode-migration/SKILL.md",
+    ".agents/workflows/flamenode-migration.md",
+    ".agents/skills/flamenode-migration/SKILL.md",
+    ".agents/rules/flamenode-project.md",
+  ];
+  for (const adapter of adapters) {
+    if (!read(adapter).includes("AGENT_PROTOCOL.md")) errors.push(`${adapter}: must delegate to AGENT_PROTOCOL.md`);
+  }
+
+  const antigravityRule = read(".agents/rules/flamenode-project.md");
+  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md"]) {
+    if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
+  }
+
+  // Git discipline remains non-negotiable.
   for (const phrase of [
     "1 MIG task = 1 branch = 1 PR = 1 merge unit",
     "squash merge",
@@ -176,4 +312,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: task state, function ledgers, adapters, Git workflow, source map, and migration references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, requirement/code-quality rules, agent adapters, Git workflow, UI source state, source map and task references are consistent.");

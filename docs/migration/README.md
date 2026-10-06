@@ -1,45 +1,117 @@
 # FlameNode Platform Migration
 
-> Status: Active / Migration specification
-> Last verified: 2026-10-06
-> Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
-> Source of truth: current code/test, `AGENTS.md`, this document
+> Status: Active / migration architecture source of truth
+> Last verified: 2026-10-07
 > Progress: [`STATUS.md`](STATUS.md)
-> Multi-agent execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
-> Existing-function parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
+> Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
+> Git workflow: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
+> Current routes: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
+> Frontend parity: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
+> Backend parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
+> Requirement reconciliation: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)
+> Code quality: [`CODE_QUALITY.md`](CODE_QUALITY.md)
+> UI visual input: [`UI_REFERENCE.md`](UI_REFERENCE.md)
 
 ## Purpose
 
-Next.js + OpenNext中心のCURRENT productionを、1102耐性・将来拡張性・AI実装性・UI/UXを改善しながら段階移行する。
+Next.js + OpenNext中心のCURRENT productionを、Cloudflare Workers FreeのCPU制約に耐え、既存機能を欠落させず、長期的に読みやすく保守しやすい構成へ段階移行する。
 
-変更自体を目的にしない。CURRENTを維持する方が安全な領域は維持する。
+UIは全面的に作り直すが、visual redesignを既存機能の削除理由にしない。
+新しいvisual targetは後日ユーザーが提供するHTML mockを入力とする。
 
 ## Goals
 
-- public閲覧からrequest-time SSRを排除する
+- public閲覧からrequest-time SSRを原則排除する
 - public→non-publicのfail-closed visibilityを維持する
-- UI/UX redesignをproductionへ移植する
-- 既存機能をfunction inventoryで100%追跡する
+- CURRENT 86 user-visible routes/screensを追跡する
+- 初期432 `UX-*` frontend observable capabilitiesを追跡し、後続監査で不足分を追加する
+- `FN-*` backend/domain/platform契約を別ledgerで追跡する
+- UX/FNをmany-to-manyで結び、画面存在=機能存在と誤認しない
+- existing design intentとCURRENT実装を照合し、矛盾を黙って消さない
 - business logicをframeworkから分離する
 - APIを明示的HTTP boundaryへ移す
-- D1/R2/Queueへの既存投資を再利用する
-- Claude / Codex / Antigravityのどれでも同じ進捗から継続可能にする
-- `flamenode.net` のURL体系を維持する
+- D1/R2/KV/Queueへの既存投資を再利用する
+- Claude / Codex / Antigravityのどれでも同じ状態から継続可能にする
+- `flamenode.net` のURL体系を原則維持する
 - route単位でcutover/rollback可能にする
+- experienced production engineerが見ても違和感のない、明確で可読性の高いコードを維持する
 
 ## Non-goals
 
-- D1/R2/Queueを移行のためだけに置換する
+- D1/R2/KV/Queueを移行のためだけに置換する
 - authをUI/frameworkと同時に全面刷新する
 - 独自SSG / Islands runtime / router / cache frameworkを作る
-- redesignを理由に既存機能を暗黙削除する
+- UI redesignを理由に既存機能を暗黙削除する
 - URL/SEO URLを不要に変更する
+- code line reductionをKPIにする
 - Big Bang rewrite
 - productionを一度に切り替える
 
 ---
 
-# 1. CURRENT
+# 1. Source-of-truth model
+
+```text
+CURRENT behavior
+  code / tests / config / schema / actual Cloudflare settings
+
+CURRENT user-visible routes
+  CURRENT_ROUTES.md
+
+Frontend observable behavior
+  FRONTEND_FEATURES.md
+  frontend/*.md
+  UX-* IDs
+
+Backend/domain/platform behavior
+  FUNCTION_INVENTORY.md
+  functions/*.md
+  FN-* IDs
+
+Existing design / product intent
+  PRODUCT_REQUIREMENTS.md
+
+New visual target
+  UI_REFERENCE.md
+  currently PENDING_HTML
+
+Progress
+  STATUS.md
+```
+
+`UX-*`と`FN-*`は1:1ではない。
+
+- 1 UX capabilityが複数FN/API/jobを利用してよい
+- 1 FNが複数UXを支えてよい
+
+これにより、backend単位の粗い一覧だけでfrontend機能漏れを見逃さない。
+
+## UI source rule
+
+`docs/design-redesign/`は廃止し、移行入力として使用しない。
+`app/(redesign)`もTARGET visual designの正本ではない。
+
+`UI_REFERENCE.md = PENDING_HTML`の間は:
+
+- CURRENT capability/route/permission/state棚卸しを継続する
+- visual designをagentが独自確定しない
+- Phase 2 visual completionを開かない
+
+HTML mock受領後:
+
+1. reference/version/hashを`UI_REFERENCE.md`へ登録
+2. mock surfaceを`CURRENT_ROUTES.md`へmapping
+3. required `UX-*`を各surfaceへmapping
+4. mockに見えないCURRENT機能も配置方針を決める
+5. loading/empty/error/forbidden/pending/degraded/destructive stateを補完
+6. responsive/a11y/history semanticsを補完
+7. product behavior差は別途承認する
+
+HTML mockだけではpermission/business/visibility/data/API/audit/notification/retry/URL semanticsを変更しない。
+
+---
+
+# 2. CURRENT
 
 ```text
 Browser
@@ -63,7 +135,8 @@ CURRENTは移行完了までrollback targetとして残す。
 
 - D1 canonical model
 - Drizzle schema / migrations
-- R2 public static projections
+- R2 public/static projections
+- KV cache/delivery state
 - static rebuild Queue / artifacts
 - visibility fence / repair
 - audit / restore
@@ -71,11 +144,11 @@ CURRENTは移行完了までrollback targetとして残す。
 - fast/content/sync Workers
 - current public DTO contracts
 - current Auth.js behavior until auth phase
-- redesign mock / route inventory
+- current URLs/query/deep-link semantics unless explicitly changed
 
 ---
 
-# 2. TARGET
+# 3. TARGET
 
 ```text
                          flamenode.net
@@ -94,7 +167,7 @@ CURRENTは移行完了までrollback targetとして残す。
              |                                 |
              +---------------+-----------------+
                              |
-                         D1 / R2
+                       D1 / R2 / KV
                              |
                            Queues
                              |
@@ -108,14 +181,14 @@ CURRENTは移行完了までrollback targetとして残す。
 - Astro static output / SSG
 - React integration
 - React Islands only for runtime interactivity
-- request-time SSRは禁止
-- HTML generationはbuild-timeのみ
+- request-time SSRは禁止をdefaultとする
+- HTML generationはbuild-time中心
 
 ## Private UI
 
 - React + Vite SPA
 - React Router
-- TanStack Queryは必要なserver stateのみ
+- TanStack Query等は必要なserver stateに限定
 - dashboard / entry / manage / adminはSSRしない
 
 ## API
@@ -123,18 +196,19 @@ CURRENTは移行完了までrollback targetとして残す。
 - Hono
 - shared Zod/contracts
 - bounded synchronous work
-- heavy generation/aggregation/syncはQueueへ
+- heavy generation/aggregation/syncはQueue/backgroundへ
 
 ## Data / jobs
 
 - D1 canonical
 - R2 projection/delivery
+- KV bounded cache/state where appropriate
 - Queue background processing
 - existing background Worker splitを原則維持
 
 ---
 
-# 3. Non-negotiable migration invariants
+# 4. Non-negotiable migration invariants
 
 - ownerを0人にしない
 - authzをUIだけに置かない
@@ -144,17 +218,75 @@ CURRENTは移行完了までrollback targetとして残す。
 - auditを失わない
 - Queue retry/idempotencyを弱めない
 - Remote D1 migrationを自動適用しない
-- current URL/canonicalを不用意に変えない
+- current URL/canonical/query semanticsを不用意に変えない
 - compatibility bridgeの削除条件を明記する
-- function inventoryに未監査必須機能がある状態で移行完了にしない
+- required UX/FN inventoryに未監査項目がある状態でmigration完了にしない
+- frontend behavior変更を最適化に紛れ込ませない
+- code qualityを「とりあえず動く」水準へ落とさない
 
 ---
 
-# 4. Same-domain routing / Strangler migration
+# 5. Existing design / product requirements
 
-Worker projectは分割してよいが、外部URLは同じ `flamenode.net` を維持する。
+`PRODUCT_REQUIREMENTS.md`に従う。
 
-移行中:
+CURRENTと既存設計の関係:
+
+```text
+CURRENT code/test/config
+  = 実際に何が動いているか
+
+active design/operations docs
+  = 何を意図していたか / 未実装要件がないか
+```
+
+矛盾時:
+
+- `CURRENT_DIVERGENCE`として記録
+- old designへ黙って戻さない
+- CURRENT divergenceも黙って正当化しない
+- UX/permission/data/side-effect impactを比較
+- improvement候補は明示する
+- frontend-visible changeは明示承認までCURRENT behavior維持
+
+---
+
+# 6. Code quality
+
+`CODE_QUALITY.md`は全migration implementationに必須。
+
+重要原則:
+
+```text
+correctness / parity
+> safety / integrity
+> operational reliability
+> readability / maintainability
+> reuse
+> code volume
+```
+
+要求:
+
+- domain vocabularyが明確
+- module responsibilityがcoherent
+- framework adapterが薄い
+- domain logicはframework-neutralを優先
+- permission/visibility/transaction/audit/post-commit effectsが読める
+- typed contracts + boundary validation
+- expected domain errorsとinfra errorsを分ける
+- mega helper / god service / flag-heavy generic CRUDを避ける
+- hidden side effectを作らない
+- behavior/invariantをtestsで固定する
+- CPU/I/O最適化は計測可能にする
+
+「美しいコード」は短いコードではなく、局所的に意味を理解でき、変更時の影響範囲が読めるコード。
+
+---
+
+# 7. Same-domain routing / Strangler migration
+
+外部URLは同じ `flamenode.net` を維持する。
 
 ```text
 flamenode.net
@@ -164,7 +296,7 @@ path-specific Worker Routes
   `-- no match       -> CURRENT flamenode-web Custom Domain
 ```
 
-最終ownershipの概念:
+最終ownership概念:
 
 ```text
 /api/*        -> flamenode-api
@@ -178,15 +310,16 @@ path-specific Worker Routes
 
 Rules:
 
-- route patternはcutover直前に実Cloudflare設定を再確認する
+- route patternはcutover直前に実Cloudflare設定を再確認
 - specific routeから移す
 - root-level `/:id` catch-allはPublic migration最後
-- Worker Routeを外せばCURRENTへ戻るrollbackを維持する
+- Worker Routeを外せばCURRENTへ戻るrollbackを維持
+- code landingとtraffic switchingを分離
 - production route変更は明示承認時のみ
 
 ---
 
-# 5. Public delivery
+# 8. Public delivery
 
 原則:
 
@@ -196,7 +329,7 @@ Dynamic by exception
 SSR never by default
 ```
 
-Public requestで禁止:
+Public requestで避ける:
 
 - React SSR/RSC generation
 - D1-heavy projection
@@ -208,33 +341,21 @@ Public requestで禁止:
 ## Visibility gateway
 
 Publicを完全Workerlessにはしない。
+古いstatic HTMLが残ってもpublic→privateを即時blockするCURRENT guaranteeを維持するため。
 
-理由: static HTMLが古くてもpublic→privateを即時blockするCURRENT guaranteeを維持するため。
-
-Gatewayの責務は最小化する。
+Gateway責務:
 
 1. pathname → entity identity解決
 2. visibility state確認
 3. blocked/unknownならfail closed
 4. allowedならStatic Asset配信
 
-HTML生成禁止。
+HTML生成は禁止。
 
 ## Route map
 
 Astro build時にalias→canonical entity mapを生成する。
-
-例:
-
-```json
-{
-  "/Fv78z0vhDh4": {"type":"video","id":"v_internal"},
-  "/v_internal": {"type":"video","id":"v_internal"},
-  "/event/PVSF2026S": {"type":"event","id":"PVSF2026S"}
-}
-```
-
-Gatewayでalias解決のためにD1 lookupを行わない。
+Gatewayでalias解決のために重いD1 lookupを行わない。
 
 PoC CPU target:
 
@@ -243,13 +364,13 @@ PoC CPU target:
 - p99 < 5ms
 - 1102 = 0
 
-閾値未達なら原因を分析し、都合よくgateを緩めない。
+閾値未達なら原因を分析し、gateを都合よく緩めない。
 
 ---
 
-# 6. Astro / React boundary
+# 9. Astro / React boundary
 
-Astroの責務:
+Astro責務:
 
 - route generation
 - SSG
@@ -260,7 +381,7 @@ Astroの責務:
 
 Astroへbusiness logicを置かない。
 
-SSGへ入れるstable public content:
+SSGへ入れるstable public content例:
 
 - title / creator / description
 - music / credit
@@ -269,9 +390,9 @@ SSGへ入れるstable public content:
 - stable public chapters/content
 - first paintに有効なinitial lists
 
-Island/APIへ残すdynamic content:
+Island/APIへ残すdynamic content例:
 
-- login state
+- login/session state
 - like/save
 - view tracking/count
 - viewer/private overlay
@@ -285,7 +406,7 @@ Island/APIへ残すdynamic content:
 
 ---
 
-# 7. Public build data
+# 10. Public build data
 
 Astro buildからD1 projectionを再実装しない。
 
@@ -303,28 +424,7 @@ private R2 build snapshot
 Astro build
 ```
 
-推奨build input bucket:
-
-```text
-flamenode-public-build
-```
-
-用途:
-
-```text
-videos/{id}.json
-users/{id}.json
-events/{id}.json
-global/*.json
-routes.v1.json
-build-meta.v1.json
-```
-
-build credentialはread-only / least privilege。
-
-## Rebuild coordination
-
-コンテンツ更新ごとにsite buildを起こさない。
+Build inputはread-only / least privilegeにする。
 
 Conceptual generation state:
 
@@ -341,21 +441,17 @@ last_error
 ```
 
 - change -> desired++
-- 30〜60秒coalesce
+- coalesce
 - snapshot ready -> site build trigger
-- build中の更新はdesiredへ蓄積
+- build中更新はdesiredへ蓄積
 - completion時 deployed < desiredなら再build
 
 Code BuildとContent Buildを分離する。
-
-- Code Build: code-related workers/apps + smoke
-- Content Build: site only + smoke
-
 content更新でfast/sync Workerを再deployしない。
 
 ---
 
-# 8. Private SPA / shared UI
+# 11. Private SPA / shared UI
 
 対象:
 
@@ -373,11 +469,7 @@ Rules:
 - private dataをpublic buildへ流さない
 - direct URL/reload/back-forwardをacceptanceに含める
 
-## Shared design system
-
-Public/PrivateでReact UIを二重実装しない。
-
-Target:
+Target shared UI:
 
 ```text
 packages/ui/
@@ -399,16 +491,14 @@ packages/ui/
 - Hono/Astro imports
 - direct D1/R2 access
 
-FlameNode Sans、theme、spacing、responsive behaviorをtoken化する。
-
-Design visual sourceは `docs/design-redesign/`。
-Functional parity sourceは `FUNCTION_INVENTORY.md` とCURRENT code/test。
+Visual tokens/componentsはHTML mock受領後に確定する。
+それ以前に旧redesign proposalを転用しない。
 
 ---
 
-# 9. API / domain migration
+# 12. API / domain migration
 
-Server ActionをHonoへcopyしない。
+Server ActionをHonoへ機械copyしない。
 
 ```text
 CURRENT Server Action / Route Handler
@@ -422,7 +512,7 @@ framework-neutral domain service
 legacy Next     Hono route
 ```
 
-`packages/domain`で禁止:
+`packages/domain`で原則禁止:
 
 - Next/Astro/Hono framework imports
 - `"use server"`
@@ -442,20 +532,20 @@ Mutation parityはDBだけで判断しない。
 
 - permission
 - DB writes
+- transaction boundary
 - audit
 - Queue
 - R2/KV
 - notifications/external effects
-- client refresh semantics
+- client-visible refresh/pending semantics
 
 Exact dispositionは `API_MATRIX.md`。
 
 ---
 
-# 10. Auth
+# 13. Auth
 
 Auth migrationは後段。
-
 それまではCURRENT Auth.js behaviorを維持する。
 
 必須parity:
@@ -474,7 +564,7 @@ Auth migrationは後段。
 
 ---
 
-# 11. Media / upload
+# 14. Media / upload
 
 - public requestで画像変換proxyを原則行わない
 - static/R2/direct deliveryを優先
@@ -484,16 +574,14 @@ Auth migrationは後段。
 
 ---
 
-# 12. Migration phases
+# 15. Migration phases
 
 進捗・task ID・ownerは `STATUS.md` が正本。
 
 ## Phase 0 — Baseline / inventory
 
-分割:
-
 - `MIG-0001` multi-agent migration framework
-- `MIG-0002` screen/route inventory
+- `MIG-0002` CURRENT route + frontend UX baseline
 - `MIG-0003` Server Action inventory
 - `MIG-0004` Route Handler/API inventory
 - `MIG-0005` Cloudflare topology/bindings/jobs
@@ -501,26 +589,29 @@ Auth migrationは後段。
 - `MIG-0007` static artifact/visibility baseline
 - `MIG-0008` auth/session/permission baseline
 - `MIG-0009` background Queue/Cron/job inventory
-- `MIG-0010` 86 redesign screens → function mapping
-- `MIG-0011` function inventory consolidation / gap scan
+- `MIG-0010` 86 CURRENT screens + cross-route shells → UX/FN mapping
+- `MIG-0011` inventory consolidation / gap scan / requirement reconciliation / optimization assessment
 - `MIG-0012` Phase 0 Gate
 
-Gate:
+Phase 0 Gate:
 
-- required CURRENT functions fully inventoried
-- all 86 screens mapped to function IDs
+- all required CURRENT UX/FN inventoried
+- all 86 CURRENT screens mapped to required UX/FN
 - all Server Actions/inline actions disposed
 - all Route Handler methods disposed
 - all background jobs disposed
 - Cloudflare baseline fixed
 - CPU/1102 baseline fixed
 - visibility/auth guarantees fixed
+- unresolved `CURRENT_DIVERGENCE` affecting migration = 0
+- `REQUIREMENT_ONLY` without disposition = 0
+- optimization blocker without frontend impact disposition = 0
 - rollback target fixed
-- production behavior unchanged
+- production behavior unchanged by baseline work
 
 ## Phase 1 — Repository boundaries
 
-Create only the boundaries required by the phase:
+Create only required boundaries:
 
 ```text
 apps/site
@@ -534,23 +625,38 @@ packages/public-data
 
 Do not move CURRENT tree wholesale.
 
-## Phase 2 — Design System
+## Phase 2 — Design system / HTML mock integration
 
-Convert redesign proposal into reusable React UI/tokens.
+Phase 2 visual work remains blocked while `UI_REFERENCE.md = PENDING_HTML`.
 
-Gate: responsive + accessibility + function preservation.
+After HTML mock registration:
+
+1. visual/IA extraction
+2. tokens
+3. primitives
+4. navigation/layout
+5. forms/feedback/data-display
+6. representative responsive screens
+7. UX capability coverage verification
+
+Gate:
+
+- HTML target mapped
+- responsive/a11y complete
+- required UX/FN coverage complete
+- no silent feature deletion
 
 ## Phase 3 — Domain extraction
 
 Extract framework-neutral business logic while CURRENT path still calls the same services.
 
-Gate: behavior / permission / DB / audit / Queue parity.
+Gate: behavior / permission / DB / transaction / audit / Queue parity + code-quality review.
 
 ## Phase 4 — Public PoC
 
 Representative:
 
-- static page
+- fixed/static page
 - video
 - user
 - event
@@ -558,7 +664,7 @@ Representative:
 - route map
 - visibility gateway
 
-Gate: no SSR, fail-closed, SEO/OGP parity, CPU/build targets.
+Gate: no request-time SSR by default, fail-closed, SEO/OGP parity, CPU/build targets, affected UX/FN parity.
 
 ## Phase 5 — Public migration
 
@@ -580,7 +686,7 @@ Order: low-risk reads → low-risk mutations → video → event/slot → user/X
 
 Order: dashboard reads → dashboard mutations → entry → manage → admin.
 
-Screen DONE requires associated function IDs parity verified.
+Screen DONE requires associated UX/FN parity verified.
 
 ## Phase 8 — Auth
 
@@ -601,7 +707,7 @@ Legacy removal is separate from migration implementation PRs.
 
 ---
 
-# 13. Acceptance gates
+# 16. Acceptance gates
 
 ## Public
 
@@ -636,18 +742,31 @@ Initial PoC targets:
 
 If exceeded, analyze input/page count/build strategy before inventing custom SSG.
 
-## UI
+## UI / UX
 
-- 86-screen coverage maintained
-- desktop/tablet/mobile
-- keyboard/focus
-- loading/error/empty/permission states
+- 86 CURRENT screen coverage maintained or explicitly dispositioned
+- all required `UX-*` mapped
+- desktop/tablet/mobile where applicable
+- keyboard/focus/a11y where applicable
+- loading/error/empty/forbidden/pending/degraded states
 - permission/server effects parity
+- URL/query/history/reload parity
 - no feature deletion without explicit approval
+
+## Code quality
+
+- responsibilities coherent
+- naming/domain vocabulary precise
+- dependency direction explicit
+- side effects/transaction boundaries visible
+- no framework leakage into domain layer without justification
+- no abstraction solely for LOC reduction
+- tests cover important invariants
+- performance implications understood
 
 ---
 
-# 14. Rollback
+# 17. Rollback
 
 Route migration:
 
@@ -671,17 +790,23 @@ Auth:
 
 ---
 
-# 15. Document ownership
+# 18. Document ownership
 
 | Document | Owns |
 | --- | --- |
-| `README.md` | architecture/invariants/phases/gates |
+| `README.md` | architecture / invariants / phases / gates |
 | `AGENT_PROTOCOL.md` | Claude/Codex/Antigravity execution/loop contract |
+| `GIT_WORKFLOW.md` | branch/PR/review/squash/merge rules |
 | `STATUS.md` | current task/owner/progress/blockers |
-| `FUNCTION_INVENTORY.md` | existing capability/parity/removal ledger |
-| `ROUTE_MATRIX.md` | route/screen migration disposition |
+| `CURRENT_ROUTES.md` | CURRENT user-visible route/screen inventory |
+| `FRONTEND_FEATURES.md` + `frontend/*.md` | frontend observable `UX-*` capabilities |
+| `FUNCTION_INVENTORY.md` + `functions/*.md` | backend/domain/platform `FN-*` contracts |
+| `PRODUCT_REQUIREMENTS.md` | CURRENT vs existing design/product intent reconciliation |
+| `CODE_QUALITY.md` | professional implementation standard |
+| `UI_REFERENCE.md` | user-provided HTML visual/IA source registration |
+| `BACKEND_OPTIMIZATION.md` | commonization/optimization/blocker decisions |
+| `ROUTE_MATRIX.md` | route migration disposition |
 | `API_MATRIX.md` | Server Action/Route Handler/API disposition |
-| `docs/design-redesign/*` | visual/information architecture proposal |
-| code/test/config | exact implementation truth |
+| code/test/config | exact CURRENT implementation truth |
 
 Do not duplicate rapidly changing implementation details across multiple Markdown files.
