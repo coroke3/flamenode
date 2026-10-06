@@ -1,12 +1,16 @@
 export const SOFTWARE_LABEL_MAX_ITEMS = 20;
 export const SOFTWARE_LABEL_MAX_LENGTH = 80;
 
-export function normalizeSoftwareKey(value: string): string {
+export function normalizeSoftwareCatalogName(value: string): string {
   return value
     .normalize("NFKC")
     .trim()
-    .replace(/\s+/g, "")
+    .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+export function normalizeSoftwareKey(value: string): string {
+  return normalizeSoftwareCatalogName(value).replace(/\s+/g, "");
 }
 
 export function normalizeSoftwareLabels(
