@@ -15,8 +15,8 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 ```text
 Current Phase: 0 — Baseline / Inventory
 Current Task: MIG-0005
-Current Owner: unassigned
-Task State: READY
+Current Owner: chatgpt
+Task State: IN_PROGRESS
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0004
@@ -113,7 +113,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0002 | CURRENT route + frontend observable capability baseline | DONE | MIG-0001 | 86 screens, 432 UX baseline, UX/FN split, HTML-input rule, Antigravity/Git/quality contract |
 | MIG-0003 | Server Action / inline action baseline | DONE | MIG-0001 | all exported/inline actions, callers, input, authz, effects, tests, affected UX/FN, optimization observations |
 | MIG-0004 | Route Handler / API baseline | DONE | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
-| MIG-0005 | Cloudflare Worker/domain/route/binding baseline | READY | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
+| MIG-0005 | Cloudflare Worker/domain/route/binding baseline | IN_PROGRESS | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
 | MIG-0006 | CPU / 1102 / request baseline | BLOCKED | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
 | MIG-0007 | static artifact / visibility baseline | READY | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
 | MIG-0008 | Auth/session/permission baseline | READY | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
@@ -318,8 +318,8 @@ For MIG-0005 the writer records before work:
 Task: MIG-0005
 Owner: claude | codex | antigravity | other
 State: READY -> IN_PROGRESS
-Branch:
-PR:
+Branch: migration/mig-0005-cloudflare-topology-baseline
+PR: pending
 Scope: Cloudflare Worker/domain/route/binding/build topology
 Affected UX IDs:
 Affected FN IDs:
