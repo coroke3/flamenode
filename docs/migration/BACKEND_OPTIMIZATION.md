@@ -1,7 +1,7 @@
 # FlameNode Backend Optimization Ledger
 
 > Status: Active / Migration optimization source of truth
-> Last updated: 2026-10-06
+> Last updated: 2026-10-07
 > Principle: frontend UX / functional parity / safety first; implementation elegance second; line count never a goal
 > Related: `FRONTEND_FEATURES.md`, `FUNCTION_INVENTORY.md`, `API_MATRIX.md`, `STATUS.md`
 
@@ -91,6 +91,15 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 | OPT-020 | Observability | Worker/job/admin healthが複数surfaceに存在 | request/job correlation ID、structured result、admin diagnosticsの共通契約を評価 | エラー調査・再試行判断 | CANDIDATE |
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
+
+## MIG-0003 evidence
+
+110 Server Action execution unitsの棚卸しから以下を確認した。
+
+- `writeGuard` / `requireAdminWrite`、`mutateWithAudit`、post-commit runner、video/slot plan系は既存の良い核としてtargetでも強化候補。
+- `revalidatePath` はtargetで SPA refetch / public projection dirty / site build dirty / navigation refresh へ意味分解する。
+- event ID rename、audit restore、submitted-slot destructive release、X merge、visibility repair、CostGuard CASはgeneric CRUD化しない。
+- Server Action transport廃止自体はfrontend変更を要求しない。frontend change必須のoptimization blocker最終判定はMIG-0011で行う。
 
 ---
 

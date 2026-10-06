@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0003
+Current Task: MIG-0004
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0002
-Last Task PR: #237
-Next: MIG-0003
+Last Completed Task: MIG-0003
+Last Task PR: #238
+Next: MIG-0004
 ```
 
 ## State definitions
@@ -55,7 +55,7 @@ Next: MIG-0003
 | Frontend `UX-*` capabilities | 432 | baseline evidence states only | 0 | orphan/unverified/disposition漏れ 0 |
 | CURRENT technical compatibility routes | 4 | purpose/query baseline | n/a | replacement evidence before removal |
 | Backend/domain/platform `FN-*` | 136 | 2 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
-| Server Action modules | 34+ + inline actions | 0 function-level | 0 | all exports/callers/effects disposed |
+| Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
 | API top-level areas | 14 | 0 method-level | 0 | all `route.ts` methods disposed |
 | CURRENT Worker scripts | 4 | 0 complete topology/job audit | 0 | bindings/routes/jobs fixed |
 | New UI visual source | HTML mock pending | n/a | n/a | registered in `UI_REFERENCE.md` before Phase 2 visual work |
@@ -111,7 +111,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | --- | --- | --- | --- | --- |
 | MIG-0001 | migration docs / multi-agent command / progress framework | DONE | — | shared protocol/adapters/inventory/checker established |
 | MIG-0002 | CURRENT route + frontend observable capability baseline | DONE | MIG-0001 | 86 screens, 432 UX baseline, UX/FN split, HTML-input rule, Antigravity/Git/quality contract |
-| MIG-0003 | Server Action / inline action baseline | READY | MIG-0001 | all exported/inline actions, callers, input, authz, effects, tests, affected UX/FN, optimization observations |
+| MIG-0003 | Server Action / inline action baseline | DONE | MIG-0001 | all exported/inline actions, callers, input, authz, effects, tests, affected UX/FN, optimization observations |
 | MIG-0004 | Route Handler / API baseline | READY | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
 | MIG-0005 | Cloudflare Worker/domain/route/binding baseline | READY | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
 | MIG-0006 | CPU / 1102 / request baseline | BLOCKED | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
@@ -135,7 +135,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [x] Claude / Codex / Antigravity shared protocol fixed
 - [x] migration Git/branch/PR/squash workflow is mandatory
 - [x] professional code-quality standard is mandatory
-- [ ] all Server Action exports + inline actions inventoried
+- [x] all Server Action exports + inline actions inventoried (110 execution units / unclassified 0)
 - [ ] all Route Handler methods inventoried
 - [ ] all required FN functions CURRENT_VERIFIED or explicitly dispositioned
 - [ ] all 86 screens mapped to required UX/FN IDs
@@ -270,55 +270,49 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0002 — CURRENT route + frontend observable capability baseline
+## MIG-0003 — Server Action / inline action baseline
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #237
+PR: #238
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- CURRENT 86 route/screen baseline moved to `CURRENT_ROUTES.md`
-- frontend feature inventory expanded from coarse FN-backed list to 432 granular `UX-*` capabilities
-- UX/FN many-to-many model introduced
-- `docs/design-redesign/` removed from the migration source model
-- `UI_REFERENCE.md = PENDING_HTML` established for the later user-provided HTML mock
-- existing design/product intent reconciliation established in `PRODUCT_REQUIREMENTS.md`
-- professional code standard established in `CODE_QUALITY.md`
-- `/flamenode-migration` shared protocol strengthened for Claude/Codex/Antigravity
-- Antigravity workflow/skill/rule aligned with the shared protocol
-- Git workflow made mandatory from `/flamenode-migration`
-- progress/checker/source-map updated
-- production runtime/Cloudflare/D1 behavior unchanged
+- 34 `"use server"` modules / 106 exported Server Actions / 4 inline actions = 110 execution units
+- unclassified Server Actions = 0
+- function-level caller/surface/input/auth/effect/FN/UX mapping
+- commonization candidates and intentional safety exceptions recorded
+- checker now detects Server Action inventory drift
+- shared protocol and Antigravity adapters require the ledger
+- no runtime/Cloudflare/D1 behavior change
 
-Validation expectation for PR #237:
+Validation evidence:
 
-- migration docs checker consistent with 86 CURRENT routes / 432 UX / 136 FN
-- obsolete `docs/design-redesign/` directory absent
-- required agent adapters and source-of-truth docs present
-- PR merge uses squash according to `GIT_WORKFLOW.md`
+- ledger rows 110 = module rows 106 + inline rows 4
+- checker JavaScript syntax parse OK
+- PR changed docs/agent/checker only
+- obsolete `docs/design-redesign` source not restored
+- author self-review recorded; no independent approval was represented
 
 Rollback:
 
-- revert PR #237 squash commit; no production traffic/data migration is involved
-
----
+- revert PR #238 squash commit
 
 # Next task claim template
 
-For MIG-0003 the writer records before work:
+For MIG-0004 the writer records before work:
 
 ```text
-Task: MIG-0003
+Task: MIG-0004
 Owner: claude | codex | antigravity | other
 State: READY -> IN_PROGRESS
 Branch:
 PR:
-Scope: Server Action modules + inline actions
+Scope: Route Handler / API methods
 Affected UX IDs:
 Affected FN IDs:
 Evidence sources:

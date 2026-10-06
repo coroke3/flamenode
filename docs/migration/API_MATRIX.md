@@ -1,7 +1,7 @@
 # FlameNode API / Server Migration Matrix
 
 > Status: Active / Server migration source of truth
-> Last updated: 2026-10-06
+> Last updated: 2026-10-07
 > Architecture: [`README.md`](README.md)
 > Progress: [`STATUS.md`](STATUS.md)
 > Function parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
@@ -15,6 +15,20 @@
 - `MIG-0011`: function inventoryと突合し、未分類server capabilityを0にする
 
 棚卸し前にHono endpointを先行量産しない。
+
+## MIG-0003 result — Server Actions
+
+CURRENT Server Actionsのfunction-level正本は [`server-actions/README.md`](server-actions/README.md)。
+
+```text
+34 "use server" modules
+106 exported actions
+4 inline actions
+110 total execution units
+unclassified = 0
+```
+
+TargetではServer ActionをHonoへcopyせず、framework-neutral domain serviceをlegacy adapterとHono adapterから共有する。
 
 ## Columns
 
