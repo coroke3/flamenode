@@ -8,6 +8,7 @@ const errors = [];
 const required = [
   "docs/migration/README.md",
   "docs/migration/AGENT_PROTOCOL.md",
+  "docs/migration/DOC_MAP.md",
   "docs/migration/STATUS.md",
   "docs/migration/FUNCTION_INVENTORY.md",
   "docs/migration/ROUTE_MATRIX.md",
@@ -17,10 +18,19 @@ const required = [
   "docs/migration/functions/MANAGE_ADMIN.md",
   "docs/migration/functions/PLATFORM_API_JOBS.md",
   ".claude/commands/flamenode-migration.md",
+  ".claude/loop.md",
   ".codex/skills/flamenode-migration/SKILL.md",
+  ".codex/skills/loop/SKILL.md",
   ".agents/workflows/flamenode-migration.md",
   ".agents/skills/flamenode-migration/SKILL.md",
+  ".agents/skills/loop/SKILL.md",
   ".agents/rules/flamenode-project.md",
+];
+
+const forbiddenDuplicates = [
+  "docs/migration/PROGRESS.md",
+  "docs/migration/WORK_ITEMS.md",
+  "docs/migration/FEATURE_INVENTORY.md",
 ];
 
 function file(relative) {
@@ -34,12 +44,16 @@ function read(relative) {
 for (const relative of required) {
   if (!fs.existsSync(file(relative))) errors.push(`missing required migration file: ${relative}`);
 }
+for (const relative of forbiddenDuplicates) {
+  if (fs.existsSync(file(relative))) errors.push(`duplicate migration source of truth is forbidden: ${relative}`);
+}
 
 if (errors.length === 0) {
   const status = read("docs/migration/STATUS.md");
   const inventory = read("docs/migration/FUNCTION_INVENTORY.md");
   const routeMatrix = read("docs/migration/ROUTE_MATRIX.md");
   const apiMatrix = read("docs/migration/API_MATRIX.md");
+  const docMap = read("docs/migration/DOC_MAP.md");
 
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
   const nextAfterApproval = status.match(/Next after approval:\s*(MIG-\d{4})/i)?.[1];
@@ -132,6 +146,17 @@ if (errors.length === 0) {
   if (/MIG-0007で\s*`?app\/\(redesign\)/.test(routeMatrix)) {
     errors.push("ROUTE_MATRIX.md: redesign mapping still points to old MIG-0007; expected MIG-0010");
   }
+
+  for (const canonical of [
+    "docs/migration/STATUS.md",
+    "docs/migration/FUNCTION_INVENTORY.md",
+    "docs/migration/ROUTE_MATRIX.md",
+    "docs/migration/API_MATRIX.md",
+  ]) {
+    if (!docMap.includes(`\`${canonical}\``)) {
+      errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
+    }
+  }
 }
 
 if (errors.length) {
@@ -139,4 +164,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: task state, function ledgers, adapters, and migration references are consistent.");
+console.log("[check:migration-docs] OK: task state, function ledgers, adapters, source map, and migration references are consistent.");
