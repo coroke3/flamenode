@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-10-06
-> Verified against baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
+> Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `package.json`, `wrangler.toml`
 
 ## 開始（これだけ）
