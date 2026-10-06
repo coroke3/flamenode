@@ -92,6 +92,19 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
 
+## MIG-0005 evidence
+
+Cloudflare実環境とtracked config/deploy pathを照合し、以下をCURRENTとして固定した。
+
+- production runtimeは `flamenode-web` + fast/content/sync job Workersの4本。4 Workerとも同一commitへ収束する単一production rolloutになっている。
+- GitHub `main` に直接連携するWorkers Builds triggerはwebのみ。webのcustom deploy commandが web -> fast -> content -> sync -> smoke を順次実行し、job Workersへ独立Git pipelineは持たない。
+- production ingressは `flamenode.net` / `www.flamenode.net` のCustom Domain 2件で、zone Worker Routesは0。workers.devは補助/bootstrapping surfaceとして有効。
+- D1/KVは4 Workerで共有する一方、R2、assets、self service binding、Queue consumer、secretはWorker責務に応じて限定されている。
+- tracked Wrangler templateのQueue/GA4 flags=`0` とproduction=`1`、Workers Builds metadataのbootstrap workers.dev originとdeployed custom-domain originの差は、production config生成時の明示的override/rewriteでありdriftではない。
+- topologyの共通化は「全Workerを同じconfigへ寄せる」のではなく、typed deploy manifest + capability-specific bindingsとして扱う。
+
+MIG-0005時点でfrontend behavior変更を必須とするoptimization blockerは0。Worker統合可否はMIG-0006のCPU実測とMIG-0009のjob semanticsを確認するまで確定しない。
+
 ## MIG-0004 evidence
 
 33 Route Handler methodsの棚卸しから以下を確認した。
