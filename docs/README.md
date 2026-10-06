@@ -15,6 +15,8 @@
 
 `../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/README.md` → `migration/STATUS.md` → `migration/FUNCTION_INVENTORY.md` → 対象ledger/matrix/code/test
 
+正本の重複判断が必要な場合だけ [`migration/DOC_MAP.md`](migration/DOC_MAP.md) を読む。
+
 Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 
 ## CURRENT / TARGET
@@ -32,6 +34,7 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 | **multi-agent migration protocol** | **[`migration/AGENT_PROTOCOL.md`](migration/AGENT_PROTOCOL.md)** |
 | **target migration architecture** | **[`migration/README.md`](migration/README.md)** |
 | **progress / next READY task** | **[`migration/STATUS.md`](migration/STATUS.md)** |
+| **documentation source map / dedupe rules** | **[`migration/DOC_MAP.md`](migration/DOC_MAP.md)** |
 | **existing-function parity inventory** | **[`migration/FUNCTION_INVENTORY.md`](migration/FUNCTION_INVENTORY.md)** |
 | route migration | [`migration/ROUTE_MATRIX.md`](migration/ROUTE_MATRIX.md) |
 | API/server migration | [`migration/API_MATRIX.md`](migration/API_MATRIX.md) |
@@ -53,13 +56,16 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 - CURRENT Cloudflare: wrangler + actual Cloudflare settings
 - TARGET architecture: `migration/README.md`
 - execution/loop semantics: `migration/AGENT_PROTOCOL.md`
-- progress/current owner/next READY: `migration/STATUS.md`
+- progress/current owner/next READY/dependencies: `migration/STATUS.md`
+- documentation truth ownership: `migration/DOC_MAP.md`
 - existing feature preservation: `migration/FUNCTION_INVENTORY.md` + `migration/functions/*.md`
 - route disposition: `migration/ROUTE_MATRIX.md`
 - server/API disposition: `migration/API_MATRIX.md`
 - visual/information architecture: `design-redesign/`
 
 `design-redesign/` is not the source of truth for permissions, DB/API behavior, side effects, or workflow semantics.
+
+`STATUS.md` is the only progress/work-item ledger. Do not add parallel `PROGRESS.md` or `WORK_ITEMS.md` files. `FUNCTION_INVENTORY.md` + domain ledgers are the only feature-parity ledger.
 
 ## Agent invocation
 
@@ -72,6 +78,8 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 /loop /flamenode-migration
 ```
 
+`.claude/loop.md` は反復時の短いwake-up contract。
+
 ### OpenAI Codex
 
 Repo-scoped `flamenode-migration` skillを使う。
@@ -80,7 +88,7 @@ Repo-scoped `flamenode-migration` skillを使う。
 Use the flamenode-migration skill and execute exactly one READY MIG task.
 ```
 
-長期実行はCodex `/goal` と組み合わせられる。正確なprompt/停止条件はprotocolを参照する。
+長期実行はCodex `/goal` を優先する。`.codex/skills/loop/SKILL.md` は`/loop`相当の手順互換であり、STATUSの1-task-per-cycle規則を変えない。
 
 ### Google Antigravity
 
@@ -89,7 +97,8 @@ Use the flamenode-migration skill and execute exactly one READY MIG task.
 ```
 
 - slash command: `.agents/workflows/flamenode-migration.md`
-- on-demand knowledge: `.agents/skills/flamenode-migration/SKILL.md`
+- migration knowledge: `.agents/skills/flamenode-migration/SKILL.md`
+- loop compatibility: `.agents/skills/loop/SKILL.md`
 - workspace rule: `.agents/rules/flamenode-project.md`
 
 全agentは同じrepository progress stateを使う。tool-local chat historyは正本ではない。
@@ -103,7 +112,7 @@ npm run check:docs
 npm run check:project-docs
 ```
 
-`check:project-docs` はmigration task/function/inventoryの整合確認を含む。
+`check:project-docs` はmigration task/function/inventory/source-map/adapterの整合確認を含む。
 
 ## Historical
 
