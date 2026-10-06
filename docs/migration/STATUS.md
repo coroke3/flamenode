@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0006
-Current Owner: chatgpt
-Task State: IN_PROGRESS
+Current Task: MIG-0007
+Current Owner: unassigned
+Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0005
-Last Task PR: #241
-Next: MIG-0006
+Last Completed Task: MIG-0006
+Last Task PR: #242
+Next: MIG-0007
 ```
 
 ## State definitions
@@ -57,7 +57,7 @@ Next: MIG-0006
 | Backend/domain/platform `FN-*` | 136 | 2 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
 | Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
 | Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
-| CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology / job semantics pending | 0 | bindings/routes/jobs fixed |
+| CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology + CPU/request measured / job semantics pending | 0 | bindings/routes/jobs fixed |
 | New UI visual source | HTML mock pending | n/a | n/a | registered in `UI_REFERENCE.md` before Phase 2 visual work |
 
 Current FN state summary:
@@ -114,7 +114,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0003 | Server Action / inline action baseline | DONE | MIG-0001 | all exported/inline actions, callers, input, authz, effects, tests, affected UX/FN, optimization observations |
 | MIG-0004 | Route Handler / API baseline | DONE | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
 | MIG-0005 | Cloudflare Worker/domain/route/binding baseline | DONE | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
-| MIG-0006 | CPU / 1102 / request baseline | IN_PROGRESS | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
+| MIG-0006 | CPU / 1102 / request baseline | DONE | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
 | MIG-0007 | static artifact / visibility baseline | READY | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
 | MIG-0008 | Auth/session/permission baseline | READY | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
 | MIG-0009 | Queue/Cron/background job baseline | READY | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
@@ -142,7 +142,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [ ] all required UX capabilities have route/permission/backend/state dispositions
 - [ ] all background jobs/Queues/Cron inventoried
 - [x] current Cloudflare topology fixed
-- [ ] CPU/1102 baseline fixed
+- [x] CPU/1102 baseline fixed
 - [ ] visibility/static guarantees fully fixed
 - [ ] auth/permission guarantees fully fixed
 - [ ] `REQUIREMENT_ONLY` / `CURRENT_DIVERGENCE` affecting migration resolved
@@ -270,68 +270,71 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0005 — Cloudflare Worker/domain/route/binding baseline
+## MIG-0006 — CPU / 1102 / request baseline
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #241
+PR: #242
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- Cloudflare accountの実環境とtracked Wrangler/deploy configをread-onlyで照合
-- FlameNode CURRENT Worker = web / fast / content / sync の4本
-- production ingress = `flamenode.net` + `www.flamenode.net` Custom Domains 2件
-- `flamenode.net` zone Worker Routes = 0
-- D1 / R2 / KV / Assets / service / Queue binding matrixを固定
-- wake + DLQ 3系統 / 6 Queuesとproducer/consumer関係を固定
-- Cron = fast 1 / content 1 / sync 2 を実環境とconfigで一致確認
-- Workers Builds trigger = web 1件、job Worker独立trigger = 0
-- GitHub main -> web Workers Build -> 4 Worker ordered deploy -> smoke のproduction topologyを固定
-- template defaultとproduction override/origin rewriteの意図的差分を明示
-- `cloudflare/TOPOLOGY.md` をshared protocol / Claude / Codex / Antigravity / checkerへ接続
-- no runtime/Cloudflare/D1/R2/KV/Queue/secret/deploy mutation
+- Workers Observabilityをread-only集計し、4 CURRENT WorkersのCPU/resource outcomeを測定
+- aggregateはABR sampling（主に `abr_level=10`, `sampleInterval ~= 10`）のためsampling-weighted estimateとして明記
+- web fetchはCPU median 15ms / p95 872ms / p99 1249msのCURRENT sampled distribution
+- web `exceededCpu` signalを確認し、個別eventでpublic video / user pathがCPU 10ms・HTTP 503で終了する実例を確認
+- content static-rebuild QueueでもCPU 50msの `exceededCpu` individual eventを確認
+- historical web versionに `exceededMemory` / HTTP 503を確認し、CPUだけでなくmemory/cancellationを別リスクとして固定
+- home/list/user/video/image proxy/account summary/entryなどのhot pathをcode/testsと実ログで照合
+- CURRENT ISR/card cap/static asset bypass/bounded degraded D1/image safety mitigationsをreplacement parityまで維持する方針を固定
+- TARGET budgetsを simple read p95<5ms / normal mutation<8ms / auth-heavy<9ms / visibility gateway p50<1.5ms p95<3ms p99<5ms / exceededCpu=0 として正本化
+- `cloudflare/PERFORMANCE_BASELINE.md` をshared protocol / Claude / Codex / Antigravity / checkerへ接続
+- account subscription APIはconnector権限上read不能だったためplan名を推測しない方針を明記
+- production Cloudflare/runtime mutation 0
 
 Validation evidence:
 
-- Cloudflare APIs: Workers/scripts/settings/schedules/deployments/secrets/domains/routes/Queues/D1/R2/Workers Buildsをread-only確認
-- all four deployed Workers were on the same inspected `BUILD_COMMIT_SHA`
-- repo compare: branch is based directly on MIG-0004 main and changes only docs/agent/checker files
+- Workers Observability invocation logs: CPU, wall time, outcome, event type, request path, HTTP status
+- Worker settings: invocation logs / persistence / head sampling rate=1
+- individual resource-failure events used in addition to sampled aggregate
+- repo compare: branch is behind main by 0 and changes only migration docs/agent/checker files
 - migration checker JavaScript syntax parse: OK
-- full local checker execution was not available because the isolated container could not resolve GitHub; no successful full-check execution is claimed
+- stable baseline markers present; volatile sampled counts are intentionally not checker constants
+- full local checker execution is not claimed because repository materialization/network is unavailable in the isolated runtime
 - author self-review only; independent approval is not represented
 
 Optimization conclusions:
 
-- single Git-triggered build + four ordered deploys gives commit convergence without four duplicated build pipelines
-- retain capability-specific binding/secret sets rather than a universal Worker config
-- preserve Custom Domain ingress; do not substitute zone Routes without a later approved cutover
-- frontend behavior change required for optimization: 0 in MIG-0005
-- Worker consolidation remains undecided until MIG-0006 CPU evidence + MIG-0009 job semantics
+- current public SSR/RSC execution materially overlaps with `exceededCpu`; TARGET public SSG + thin visibility gateway remains evidence-backed
+- private Next SSR tails support React/Vite SPA + bounded API direction
+- stable image delivery should avoid mandatory Worker proxy hits where safety/revocation semantics permit
+- background Workers retain separate budgets and must not be merged into the web request budget without MIG-0009 evidence
+- increasing CPU limit alone is not an acceptable migration strategy because memory/cancellation and unnecessary request-time generation also exist
+- frontend product-contract change required for optimization: 0
 
 Rollback:
 
-- revert PR #241 squash commit; no production topology rollback action is required because MIG-0005 performs documentation/checker changes only
+- revert PR #242 squash commit; no Cloudflare rollback is required because MIG-0006 is documentation/checker-only
 
 # Next task claim template
 
-For MIG-0006 the writer records before work:
+For MIG-0007 the writer records before work:
 
 ```text
-Task: MIG-0006
-Owner: chatgpt
-State: IN_PROGRESS
-Branch: migration/mig-0006-cpu-1102-request-baseline
+Task: MIG-0007
+Owner: claude | codex | antigravity | other
+State: READY -> IN_PROGRESS
+Branch: migration/mig-0007-static-visibility-baseline
 PR: pending
-Scope: Cloudflare CPU / 1102 / request baseline across the four CURRENT Workers
+Scope: static artifacts / aliases / visibility fail-closed / repair/fallback baseline
 Affected UX IDs:
 Affected FN IDs:
-Evidence sources: cloudflare/TOPOLOGY.md + current code/tests + read-only Cloudflare metrics
+Evidence sources: current code/tests + cloudflare/TOPOLOGY.md + cloudflare/PERFORMANCE_BASELINE.md
 Rollback:
 Production action required: no
 ```
 
-MIG-0009 is also dependency-ready after MIG-0005, but MIG-0006 is the default next task. At finish, persist measured evidence and do not change production limits/routing merely to make the baseline pass.
+MIG-0008 and MIG-0009 remain dependency-ready. MIG-0007 is the default next task.
