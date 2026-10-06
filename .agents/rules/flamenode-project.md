@@ -13,6 +13,7 @@ Mandatory sources include:
 - relevant `CURRENT_ROUTES.md` / `FRONTEND_FEATURES.md` / `frontend/*.md`
 - relevant `FUNCTION_INVENTORY.md` / `functions/*.md`
 - `BACKEND_OPTIMIZATION.md` for backend work
+- `docs/migration/server-actions/README.md` for Server Action migration/audit work
 - `UI_REFERENCE.md` for visual work
 
 Rules:
