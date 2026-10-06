@@ -14,9 +14,11 @@
 | task routing | `docs/AI_CONTEXT.md` |
 | migration architecture / invariants / phases | `docs/migration/README.md` |
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
-| **migration Git / branch / PR / merge policy** | **`docs/migration/GIT_WORKFLOW.md`** |
+| migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
 | current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
 | existing-function parity index | `docs/migration/FUNCTION_INVENTORY.md` |
+| **frontend-exposed capability / UX preservation** | **`docs/migration/FRONTEND_FEATURES.md`** |
+| **backend commonization / optimization / blocker assessment** | **`docs/migration/BACKEND_OPTIMIZATION.md`** |
 | detailed function contracts | `docs/migration/functions/*.md` |
 | route disposition | `docs/migration/ROUTE_MATRIX.md` |
 | Server Action / Route Handler / API disposition | `docs/migration/API_MATRIX.md` |
@@ -37,8 +39,11 @@
 - Historical/archive docs are evidence of past decisions, not current truth.
 - `Last verified` being old is not enough to rewrite a document; compare it with current code/tests/config first.
 - `STATUS.md` is the only progress/task-state source. Do not add a second `PROGRESS.md` or `WORK_ITEMS.md` ledger.
-- `FUNCTION_INVENTORY.md` + domain ledgers are the only feature-parity source. Do not add a second feature inventory.
+- `FUNCTION_INVENTORY.md` + domain ledgers are the only backend/side-effect feature-parity source.
+- `FRONTEND_FEATURES.md` is the only frontend-observable capability source. Do not create another UI capability ledger.
+- `BACKEND_OPTIMIZATION.md` is the only migration optimization/blocker ledger. Do not scatter optimization decisions across task docs.
 - `GIT_WORKFLOW.md` is the only migration branch/PR/merge policy source. Tool-specific skills/commands must link to it rather than duplicating Git rules.
+- Screen URL/purpose inventory remains in `docs/design-redesign/ROUTE_INVENTORY.md`; do not duplicate all 86 route rows into migration docs.
 
 ## Active-document classification
 
@@ -49,6 +54,8 @@ When migration touches an Active Markdown file, classify it mentally or in the t
 - `task-router`
 - `progress-ledger`
 - `function-ledger`
+- `frontend-capability-ledger`
+- `optimization-ledger`
 - `git-workflow`
 - `generated/inventory`
 - `historical`
