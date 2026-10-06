@@ -23,7 +23,8 @@
 | new UI visual source / HTML mock registration | `docs/migration/UI_REFERENCE.md` |
 | backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
 | route target/disposition | `docs/migration/ROUTE_MATRIX.md` |
-| Server Action / Route Handler / API disposition | `docs/migration/API_MATRIX.md` |
+| Server Action / Route Handler / API disposition | `docs/migration/server-actions/README.md` | CURRENT Server Action / inline action 110 execution-unit ledger | MIG-0003以降のaction/domain/API移行 |
+| `docs/migration/API_MATRIX.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
 | DB schema | `src/lib/db/schema.ts` + `migrations/` |
