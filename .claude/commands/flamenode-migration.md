@@ -9,7 +9,7 @@ FlameNodeの段階移行を1回につき1タスクだけ進める。
 3. `docs/migration/README.md`
 4. `docs/migration/STATUS.md`
 5. `docs/migration/FUNCTION_INVENTORY.md`
-6. 該当する `ROUTE_MATRIX.md` / `API_MATRIX.md`
+6. 該当する `ROUTE_MATRIX.md` / `API_MATRIX.md`; Cloudflare Worker/ingress/binding/build/CPU/job作業では `docs/migration/cloudflare/TOPOLOGY.md`
 7. 対象コードと関連test
 
 実行時は `STATUS.md` の次のREADY taskを **1つだけ** claimし、`Owner: claude` を記録する。

@@ -23,13 +23,13 @@
 | new UI visual source / HTML mock registration | `docs/migration/UI_REFERENCE.md` |
 | backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
 | route target/disposition | `docs/migration/ROUTE_MATRIX.md` |
-| Server Action / Route Handler / API disposition | `docs/migration/server-actions/README.md` | CURRENT Server Action / inline action 110 execution-unit ledger | MIG-0003以降のaction/domain/API移行 |
-| `docs/migration/route-handlers/README.md` | CURRENT Route Handler / API 28 files / 33 method ledger | MIG-0004以降のAPI/Hono移行 |
-| `docs/migration/API_MATRIX.md` |
+| Server Action disposition | `docs/migration/server-actions/README.md` |
+| Route Handler / API disposition | `docs/migration/route-handlers/README.md` + `docs/migration/API_MATRIX.md` |
+| CURRENT Cloudflare Worker/ingress/binding/build topology | `docs/migration/cloudflare/TOPOLOGY.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
 | DB schema | `src/lib/db/schema.ts` + `migrations/` |
-| CURRENT Worker/bindings | `wrangler.toml`, `workers/*/wrangler.toml`, actual Cloudflare settings |
+| CURRENT Worker config implementation evidence | `wrangler.toml`, `workers/*/wrangler.toml`, deploy scripts, actual Cloudflare settings |
 | deploy procedure | `DEPLOY.md` |
 
 ## UI source rule
@@ -48,6 +48,7 @@
 - `UX-*` and `FN-*` are intentionally many-to-many.
 - `PRODUCT_REQUIREMENTS.md` owns reconciliation between current implementation and existing design intent.
 - `BACKEND_OPTIMIZATION.md` owns optimization/blocker decisions.
+- `cloudflare/TOPOLOGY.md` owns the verified CURRENT four-Worker / ingress / binding / build-deploy topology; Wrangler and Cloudflare APIs are its evidence surfaces.
 - `CODE_QUALITY.md` owns implementation quality standards.
 - `STATUS.md` is the only progress/task-state source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`.
 - `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.

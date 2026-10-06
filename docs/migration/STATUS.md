@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0005
+Current Task: MIG-0006
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0004
-Last Task PR: #240
-Next: MIG-0005
+Last Completed Task: MIG-0005
+Last Task PR: #241
+Next: MIG-0006
 ```
 
 ## State definitions
@@ -57,7 +57,7 @@ Next: MIG-0005
 | Backend/domain/platform `FN-*` | 136 | 2 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
 | Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
 | Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
-| CURRENT Worker scripts | 4 | 0 complete topology/job audit | 0 | bindings/routes/jobs fixed |
+| CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology / job semantics pending | 0 | bindings/routes/jobs fixed |
 | New UI visual source | HTML mock pending | n/a | n/a | registered in `UI_REFERENCE.md` before Phase 2 visual work |
 
 Current FN state summary:
@@ -113,11 +113,11 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0002 | CURRENT route + frontend observable capability baseline | DONE | MIG-0001 | 86 screens, 432 UX baseline, UX/FN split, HTML-input rule, Antigravity/Git/quality contract |
 | MIG-0003 | Server Action / inline action baseline | DONE | MIG-0001 | all exported/inline actions, callers, input, authz, effects, tests, affected UX/FN, optimization observations |
 | MIG-0004 | Route Handler / API baseline | DONE | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
-| MIG-0005 | Cloudflare Worker/domain/route/binding baseline | READY | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
-| MIG-0006 | CPU / 1102 / request baseline | BLOCKED | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
+| MIG-0005 | Cloudflare Worker/domain/route/binding baseline | DONE | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
+| MIG-0006 | CPU / 1102 / request baseline | READY | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
 | MIG-0007 | static artifact / visibility baseline | READY | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
 | MIG-0008 | Auth/session/permission baseline | READY | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
-| MIG-0009 | Queue/Cron/background job baseline | BLOCKED | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
+| MIG-0009 | Queue/Cron/background job baseline | READY | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
 | MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | BLOCKED | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
 | MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | BLOCKED | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
 | MIG-0012 | Phase 0 Gate | BLOCKED | MIG-0006, MIG-0011 | independent review, rollback baseline, all Phase 0 invariants satisfied |
@@ -141,7 +141,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [ ] all 86 screens mapped to required UX/FN IDs
 - [ ] all required UX capabilities have route/permission/backend/state dispositions
 - [ ] all background jobs/Queues/Cron inventoried
-- [ ] current Cloudflare topology fixed
+- [x] current Cloudflare topology fixed
 - [ ] CPU/1102 baseline fixed
 - [ ] visibility/static guarantees fully fixed
 - [ ] auth/permission guarantees fully fixed
@@ -270,62 +270,68 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0004 — Route Handler / API baseline
+## MIG-0005 — Cloudflare Worker/domain/route/binding baseline
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #240
+PR: #241
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- 28 `app/api/**/route.ts` files / 33 HTTP method handlers
-- unclassified Route Handler methods = 0
-- method-level purpose/auth/permission/data/effect/cache/rate/FN/UX/test mapping
-- public/admin/internal/live/media/auth safety boundaries separated
-- commonizable API transport primitives and intentional exceptions recorded
-- checker now detects Route Handler inventory drift
-- shared protocol and Antigravity adapters require the Route Handler ledger
-- no runtime/Cloudflare/D1 behavior change
+- Cloudflare accountの実環境とtracked Wrangler/deploy configをread-onlyで照合
+- FlameNode CURRENT Worker = web / fast / content / sync の4本
+- production ingress = `flamenode.net` + `www.flamenode.net` Custom Domains 2件
+- `flamenode.net` zone Worker Routes = 0
+- D1 / R2 / KV / Assets / service / Queue binding matrixを固定
+- wake + DLQ 3系統 / 6 Queuesとproducer/consumer関係を固定
+- Cron = fast 1 / content 1 / sync 2 を実環境とconfigで一致確認
+- Workers Builds trigger = web 1件、job Worker独立trigger = 0
+- GitHub main -> web Workers Build -> 4 Worker ordered deploy -> smoke のproduction topologyを固定
+- template defaultとproduction override/origin rewriteの意図的差分を明示
+- `cloudflare/TOPOLOGY.md` をshared protocol / Claude / Codex / Antigravity / checkerへ接続
+- no runtime/Cloudflare/D1/R2/KV/Queue/secret/deploy mutation
 
 Validation evidence:
 
-- ledger rows 33 / unique method-route pairs 33
-- direct code audit found 28 route files / 33 method handlers
-- checker JavaScript syntax parse OK
-- PR changed docs/agent/checker only
-- no obsolete design source restored as an authoritative source
-- author self-review recorded; no independent approval is represented
+- Cloudflare APIs: Workers/scripts/settings/schedules/deployments/secrets/domains/routes/Queues/D1/R2/Workers Buildsをread-only確認
+- all four deployed Workers were on the same inspected `BUILD_COMMIT_SHA`
+- repo compare: branch is based directly on MIG-0004 main and changes only docs/agent/checker files
+- migration checker JavaScript syntax parse: OK
+- full local checker execution was not available because the isolated container could not resolve GitHub; no successful full-check execution is claimed
+- author self-review only; independent approval is not represented
 
 Optimization conclusions:
 
-- share public API envelope, admin write context, live GET adapter, media delivery primitives, static-first read helpers
-- keep Auth.js catch-all, legacy import, PVSF CORS staff API, deep health and distinct media security models explicit
-- frontend behavior change required for optimization: not established in MIG-0004; final blocker assessment remains MIG-0011
+- single Git-triggered build + four ordered deploys gives commit convergence without four duplicated build pipelines
+- retain capability-specific binding/secret sets rather than a universal Worker config
+- preserve Custom Domain ingress; do not substitute zone Routes without a later approved cutover
+- frontend behavior change required for optimization: 0 in MIG-0005
+- Worker consolidation remains undecided until MIG-0006 CPU evidence + MIG-0009 job semantics
 
 Rollback:
 
-- revert PR #240 squash commit
+- revert PR #241 squash commit; no production topology rollback action is required because MIG-0005 performs documentation/checker changes only
 
 # Next task claim template
 
-For MIG-0005 the writer records before work:
+For MIG-0006 the writer records before work:
 
 ```text
-Task: MIG-0005
+Task: MIG-0006
 Owner: claude | codex | antigravity | other
 State: READY -> IN_PROGRESS
-Branch:
-PR:
-Scope: Cloudflare Worker/domain/route/binding/build topology
+Branch: migration/mig-0006-cpu-1102-request-baseline
+PR: pending
+Scope: Cloudflare CPU / 1102 / request baseline across the four CURRENT Workers
 Affected UX IDs:
 Affected FN IDs:
-Evidence sources: wrangler configs + actual Cloudflare account state
+Evidence sources: cloudflare/TOPOLOGY.md + current code/tests + read-only Cloudflare metrics
 Rollback:
 Production action required: no
 ```
 
-At finish, update this file plus Cloudflare/topology ledgers and validation evidence before MIG-0006/MIG-0009 become dependency-ready.
+MIG-0009 is also dependency-ready after MIG-0005, but MIG-0006 is the default next task. At finish, persist measured evidence and do not change production limits/routing merely to make the baseline pass.

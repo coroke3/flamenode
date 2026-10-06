@@ -11,6 +11,7 @@
 > Requirement reconciliation: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)
 > Code quality: [`CODE_QUALITY.md`](CODE_QUALITY.md)
 > UI visual input: [`UI_REFERENCE.md`](UI_REFERENCE.md)
+> Cloudflare CURRENT topology: [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)
 
 ## Purpose
 
@@ -54,6 +55,9 @@ UIは全面的に作り直すが、visual redesignを既存機能の削除理由
 ```text
 CURRENT behavior
   code / tests / config / schema / actual Cloudflare settings
+
+CURRENT Cloudflare platform topology
+  cloudflare/TOPOLOGY.md
 
 CURRENT user-visible routes
   CURRENT_ROUTES.md
@@ -805,6 +809,7 @@ Auth:
 | `CODE_QUALITY.md` | professional implementation standard |
 | `UI_REFERENCE.md` | user-provided HTML visual/IA source registration |
 | `BACKEND_OPTIMIZATION.md` | commonization/optimization/blocker decisions |
+| `cloudflare/TOPOLOGY.md` | verified CURRENT Worker/ingress/binding/resource/build-deploy topology |
 | `ROUTE_MATRIX.md` | route migration disposition |
 | `API_MATRIX.md` | Server Action/Route Handler/API disposition |
 | code/test/config | exact CURRENT implementation truth |
