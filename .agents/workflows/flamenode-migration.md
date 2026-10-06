@@ -9,7 +9,7 @@ Antigravity adapter only. Do not invent a separate migration process.
 1. Read `AGENTS.md`.
 2. Read `docs/migration/AGENT_PROTOCOL.md` and follow it as the canonical execution contract.
 3. Read `docs/migration/STATUS.md`, `GIT_WORKFLOW.md`, `PRODUCT_REQUIREMENTS.md`, and `CODE_QUALITY.md`.
-4. Read only the route/UX/FN ledgers relevant to the selected task. Server Action work must also read `docs/migration/server-actions/README.md`.
+4. Read only the route/UX/FN ledgers relevant to the selected task. Server Action work must also read `docs/migration/server-actions/README.md`; Route Handler/API work must also read `docs/migration/route-handlers/README.md`.
 5. If visual UI work is involved, read `UI_REFERENCE.md`; stop visual implementation while it is `PENDING_HTML`.
 6. Execute exactly one dependency-ready MIG task.
 7. Use the required short-lived migration branch/PR; never push directly to main.
