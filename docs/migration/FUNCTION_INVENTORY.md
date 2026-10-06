@@ -21,7 +21,7 @@ UI機能数とbackend function数を一致させない。
 `/flamenode-migration`の全iterationでこの索引を確認する。
 
 - frontend/UI/routeを触る: `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象frontend ledger
-- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`
+- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`
 - product/design intentが関係する: `PRODUCT_REQUIREMENTS.md`
 - visual UIが関係する: `UI_REFERENCE.md`。`PENDING_HTML`中は新visual designを推測しない
 - 画面存在、UX capability、backend functionを同一視しない
@@ -96,44 +96,17 @@ Total    86 USER_SCREEN
 
 ### Server Actions
 
-2026-10-06のbaseline探索では:
+MIG-0003でfunction-levelまで検証済み。正本は [`server-actions/README.md`](server-actions/README.md)。
 
 ```text
-src/lib/actions/* file-level "use server" modules: 34 files
-app/* inline "use server" pages:                  3 files
+file-level "use server" modules: 34
+exported async Server Actions: 106
+inline actions: 4 across 3 pages
+total execution units: 110
+unclassified: 0
 ```
 
-inline確認済みseed:
-
-```text
-app/(auth)/entry/page.tsx
-app/(admin)/admin/api-endpoints/page.tsx
-app/(admin)/admin/x-id-merges/page.tsx
-```
-
-これはfile countでありaction countではない。MIG-0003で全export/inline actionをcaller単位へ展開する。
-
-主な領域:
-
-```text
-api-endpoints
-manage-video / video
-chapter
-slot
-event / event group / staff / template
-permissions
-xid / xid merge
-audit / restore
-moderation
-notification
-rules / terms
-announcement
-cost guard
-YouTube sync
-public visibility repair
-static rebuild
-admin operations
-```
+checkerは実コードのmodule exportとledgerを照合し、将来のaction追加漏れを検出する。
 
 ### Route Handlers / API
 
