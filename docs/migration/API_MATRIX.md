@@ -4,55 +4,77 @@
 > Last updated: 2026-10-06
 > Architecture: [`README.md`](README.md)
 > Progress: [`STATUS.md`](STATUS.md)
+> Function parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
 >
-> Server Action / Route Handler / server-only helperを、framework-neutral domain service + Hono APIへ移すための契約表。
+> Server Action / inline Server Action / Route Handler / server-only helperを、CURRENT contractを失わずframework-neutral domain service + Hono APIへ移すための契約表。
+
+## Baseline tasks
+
+- `MIG-0003`: 全Server Action export + page内inline actionを棚卸し
+- `MIG-0004`: 全`app/api/**/route.ts`をHTTP method単位で棚卸し
+- `MIG-0011`: function inventoryと突合し、未分類server capabilityを0にする
+
+棚卸し前にHono endpointを先行量産しない。
 
 ## Columns
 
 - `CURRENT`: 現在のServer Action / Route Handler / helper
+- `FUNCTION`: `FN-*` capability IDs
 - `DOMAIN`: 移行先domain service
 - `TARGET`: Hono endpointまたは継続job
 - `Permission`: 維持する認可契約
-- `Effects`: D1 / audit / Queue / R2等の副作用
-- `State`: NOT_INVENTORIED / READY / IN_PROGRESS / REVIEW / DONE / BLOCKED
+- `Effects`: D1 / audit / Queue / R2/KV / notification / external等
+- `State`: NOT_INVENTORIED / CURRENT_VERIFIED / MIGRATION_IN_PROGRESS / BRIDGED / PARITY_VERIFIED / BLOCKED
 - `Task`: `STATUS.md`のMIG task
 
 ## Domain summary
 
-> MIG-0002で現行コードを完全棚卸しする。以下は移行単位を固定するための初期分類。
+以下は移行単位の初期分類。exact export/endpointはMIG-0003/0004でこの表へ追加する。
 
-| Domain | CURRENT examples | TARGET | Key invariants | State | Task |
-| --- | --- | --- | --- | --- | --- |
-| video | manage-video Server Actions / video Route Handlers | `packages/domain/video/*` + Hono | ownership/event permission、audit、static rebuild | NOT_INVENTORIED | MIG-0304 / 0603 |
-| event | event/admin actions/routes | `packages/domain/event/*` + Hono | owner最低1人、visibility、audit | NOT_INVENTORIED | MIG-0305 / 0604 |
-| slot | slot actions/routes | `packages/domain/slot/*` + Hono | auth、枠状態、一意性、notification | NOT_INVENTORIED | MIG-0305 / 0604 |
-| user/X | X ID/user actions/routes | `packages/domain/user/*` + Hono | approval/public-listable、privacy | NOT_INVENTORIED | MIG-0306 / 0605 |
-| permissions | permission/admin actions | shared permission core + Hono boundary | existing access-context parity | NOT_INVENTORIED | MIG-0306 / 0605 |
-| admin | admin actions/routes | domain-specific Hono endpoints | admin auth、audit | NOT_INVENTORIED | MIG-0306 / 0605 |
-| YouTube sync | admin actions + jobs | Hono trigger + existing jobs | quota、dedupe、background processing | NOT_INVENTORIED | MIG-0306 / 0605 |
-| public reads | public Route Handlers/loaders | Astro/R2 or Hono | explicit DTO、visibility | NOT_INVENTORIED | MIG-050x / 0601 |
-| auth | NextAuth/Auth.js | later compatibility target | sessions/accounts/linking | NOT_INVENTORIED | MIG-080x |
+| Domain | CURRENT examples | FUNCTION ledger | TARGET | Key invariants | State | Migration task |
+| --- | --- | --- | --- | --- | --- | --- |
+| video | manage-video / video actions / video routes | FN-PER, FN-PUB, FN-ADM | `packages/domain/video/*` + Hono | ownership/event privilege、audit、static rebuild | NOT_INVENTORIED | MIG-0304 / 0603 |
+| event | event/admin/manage actions/routes | FN-MNG, FN-ADM | `packages/domain/event/*` + Hono | owner>=1、visibility、audit | NOT_INVENTORIED | MIG-0305 / 0604 |
+| slot | slot actions/routes | FN-ENT, FN-MNG, FN-ADM | `packages/domain/slot/*` + Hono | auth、capacity、uniqueness、notification | NOT_INVENTORIED | MIG-0305 / 0604 |
+| user/X | xid/user actions/routes | FN-AUTH, FN-PER, FN-ADM | `packages/domain/user/*` + Hono | approval/public-listable/privacy | NOT_INVENTORIED | MIG-0306 / 0605 |
+| permission | permission/admin/access-context | FN-X, FN-PER, FN-MNG, FN-ADM | shared permission core + Hono boundary | existing DB/access-context parity | NOT_INVENTORIED | MIG-0306 / 0605 |
+| admin | admin actions/routes | FN-ADM | domain-specific Hono endpoints | admin auth、audit、danger confirmation | NOT_INVENTORIED | MIG-0306 / 0605 |
+| YouTube sync | admin/manage actions + jobs | FN-ADM, FN-JOB | Hono trigger + existing jobs | quota、dedupe、background processing | NOT_INVENTORIED | MIG-0306 / 0605 |
+| public reads | public routes/loaders | FN-PUB, FN-API, FN-PLAT | Astro/R2 or Hono | explicit DTO、visibility | NOT_INVENTORIED | MIG-050x / 0601 |
+| auth | NextAuth/Auth.js | FN-AUTH | later compatibility target | sessions/accounts/linking | NOT_INVENTORIED | MIG-080x |
+| media proxy | thumbnail/Drive/media routes | FN-API | direct/static/background where possible | URL safety、visibility、CPU/streaming | NOT_INVENTORIED | MIG-060x |
 
-## Endpoint-level template
+## Baseline row template
 
-MIG-0002以降、各処理は以下を記録する。
+MIG-0003/0004で各export/HTTP methodに最低限以下を記録する。
 
 ```text
-ID:
+ID: SA-... | API-...
+Function IDs:
 Domain:
-Current file/export:
-Current invocation:
-Current request/input:
-Current response/result:
-Current permission/auth:
-Current DB reads:
-Current DB writes:
+Current file/export or route+method:
+Callers:
+Current input/request:
+Current output/response:
+Auth:
+Permissions:
+DB reads:
+DB writes:
 Audit side effect:
 Queue side effect:
 R2/KV side effect:
+Notification side effect:
 External side effect:
+Revalidation/redirect/client-refresh semantics:
 Current tests:
+Known edge cases:
+State: CURRENT_VERIFIED | ...
+Evidence:
+```
 
+Target migration追記:
+
+```text
 Target domain service:
 Target Hono route:
 Target contract:
@@ -60,8 +82,7 @@ Target tests:
 Compatibility bridge:
 Bridge removal condition:
 Rollback:
-Task:
-State:
+Migration task:
 ```
 
 ## Migration rule
@@ -70,26 +91,25 @@ State:
 
 ```text
 Server Action
-  -> copy business logic
+  -> business logicをcopy
   -> Hono
 ```
 
 必須:
 
 ```text
-Current Server Action
-      |
-      v
+CURRENT Server Action / Route Handler
+            |
+            v
 framework-neutral domain service
-      ^
-      |
- +----+-----+
- |          |
-legacy    Hono
-Next      route
+            ^
+            |
+      +-----+-----+
+      |           |
+legacy Next    Hono route
 ```
 
-legacyとHonoが同じdomain serviceを呼ぶ期間を作り、parityを固定する。
+legacy/newが同じdomain serviceを呼ぶ期間を作り、parity testを固定する。
 
 ## Domain service constraints
 
@@ -101,12 +121,10 @@ legacyとHonoが同じdomain serviceを呼ぶ期間を作り、parityを固定�
 - React Router imports
 - `revalidatePath`
 - `redirect`
-- `cookies()` 等framework request API
-- browser API
+- framework `cookies()` / request APIs
+- browser APIs
 
-request contextは明示dependencyとして渡す。
-
-例:
+request context/dependenciesは明示して渡す。
 
 ```ts
 updateVideo({
@@ -121,33 +139,37 @@ updateVideo({
 
 ## Permission rule
 
-- UI移行時にpermission modelを作り直さない。
-- Server Action経路とHono経路のpermission decisionを同一helper/domain coreへ寄せる。
-- access contextとDB direct経路の既存parity testを壊さない。
+- UI移行を理由にpermission modelを再設計しない。
+- CURRENTとHonoのpermission decisionを同一coreへ寄せる。
+- access-context / DB direct経路の既存parityを維持する。
 - owner=0を作らない。
 - admin-only処理をclient判定だけで開かない。
 
-## Side-effect rule
+## Side-effect parity
 
-mutation parityは「DBが同じ」だけで完了ではない。
+mutation parityはDB結果だけでは不十分。
 
 最低限確認:
 
 - D1 state
 - audit event
 - Queue enqueue/reason
-- R2/static rebuild dirty state
+- R2/static rebuild/visibility state
+- KV mirror/cache where applicable
 - notifications
-- external API calls
-- redirect/revalidationに依存していたclient refresh semantics
+- external APIs
+- redirect/revalidationに依存したclient refresh semantics
 
-Nextの`revalidatePath()`はHonoへコピーせず、SPA query invalidationまたはpublic build dirtyへ意味を分解する。
+`revalidatePath()`はHonoへ移植せず、意味を以下へ分解する。
+
+- SPA query invalidation/refetch
+- public projection dirty
+- public site build dirty
+- no-op if no longer required
 
 ## Error contract
 
-新APIはerrorをdomain単位で明示する。
-
-例:
+Target APIはdomain errorを明示する。
 
 ```text
 UNAUTHENTICATED
@@ -160,12 +182,12 @@ UNAVAILABLE
 INTERNAL
 ```
 
-HTTP status / public message / internal detailを分離する。
-既存clientが依存するerror behaviorはparityを確認する。
+HTTP status / user-safe message / internal diagnosticsを分離する。
+CURRENT clientが依存するerror behaviorは先にbaseline化する。
 
 ## CPU rule
 
-HTTP APIで避ける:
+HTTP pathで避ける:
 
 - large projection
 - HTML generation
