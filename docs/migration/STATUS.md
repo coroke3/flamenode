@@ -3,57 +3,46 @@
 > Status: Active / Progress source of truth
 > Last updated: 2026-10-06
 > Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
+> Migration bootstrap merged at: `001745e30e7801f8a5ffda93d6c2cfac2ed30466`
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Feature parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
->
-> Claude / Codex / Antigravityを含む全agentが共有する進捗正本。
-> chat historyではなく、このファイルを次iterationへ引き継ぐ。
+
+Claude / Codex / Antigravityを含む全agentが共有する進捗正本。chat historyではなく、このファイルを次iterationへ引き継ぐ。
 
 ## Overall
 
 ```text
 Current Phase: 0 — Baseline
-Current Task: MIG-0001
-Current Owner: chatgpt
-Task State: REVIEW
-Overall State: REVIEW
+Current Task: MIG-0002
+Current Owner: none
+Task State: READY
+Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Open PR: #232
-Next after approval: MIG-0002
+Last merged PR: #232
 ```
 
 ## State definitions
 
 - `READY`: dependencies解消済み
 - `IN_PROGRESS`: 1 agentがclaim中
-- `REVIEW`: 実装済み、CI/Lead確認待ち
+- `REVIEW`: 実装済み、検証/Lead確認待ち
 - `BLOCKED`: 明示blockerあり
 - `DONE`: acceptance達成済み
 - `SKIPPED`: 理由付きで不要
 
-## Multi-agent rules
+## Loop rules
 
-- 1 task = 1 owner。
-- owner例: `claude`, `codex`, `antigravity`, `chatgpt`, `human`。
-- read-only review/auditは並列可。
-- 同一task/file/domainの同時編集は禁止。
-- handoffは必ずrepoへ残す。chat historyのみのhandoffは禁止。
+- 1 iteration = exactly 1 MIG task
+- 1 task = 1 owner
+- `READY → IN_PROGRESS → DONE/REVIEW/BLOCKED`
+- `IN_PROGRESS`のまま次iterationへ進まない
+- 次taskは、依存taskが完了済みの`READY`から選ぶ
+- Phase Gateはagentが自動承認しない
+- STATUS + affected inventory/matrixを更新してから次へ進む
+- production deploy / Worker Route / Custom Domain / Remote D1 / secret変更は明示承認まで停止
 
-## Loop invariants
-
-- 1 iteration = 1 MIG task。
-- 開始時 `READY → IN_PROGRESS`。
-- 終了時 `DONE` / `REVIEW` / `BLOCKED`。
-- `IN_PROGRESS`のまま次iterationへ進まない。
-- Phase Gateをagentが自動承認しない。
-- `BLOCKED`を飛ばして後続高リスクtaskへ進まない。
-- production deploy / Worker Route / Custom Domain / Remote D1 / secret操作は明示承認まで停止。
-- STATUS + affected inventory/matrixを更新してから次taskへ進む。
-
----
-
-# Inventory coverage
+## Inventory coverage
 
 | Surface | Baseline discovered | Detailed audited | Parity verified | Phase 0 target |
 | --- | ---: | ---: | ---: | --- |
@@ -63,8 +52,6 @@ Next after approval: MIG-0002
 | API top-level areas | 14 | 0 methods | 0 | all `route.ts` methods disposed |
 | CURRENT Worker scripts | 4 | 0 job types | 0 | bindings/routes/jobs fixed |
 | Redesign mock screens | 86 | 86 existence | 0 functional parity | all mapped to CURRENT functions |
-
-Current function-state summary:
 
 ```text
 CURRENT_VERIFIED: 2
@@ -76,45 +63,41 @@ REMOVED_APPROVED: 0
 
 未監査必須機能が残る限りPhase 0 GateはCLOSED。
 
----
+## Phase summary
 
-# Phase summary
-
-| Phase | Name | State | Gate | Notes |
-| --- | --- | --- | --- | --- |
-| 0 | Baseline / Inventory | REVIEW | CLOSED | MIG-0001 review中 |
-| 1 | Repository boundaries | BLOCKED | CLOSED | MIG-0012待ち |
-| 2 | Design System | BLOCKED | CLOSED | Phase 1 Gate待ち |
-| 3 | Domain extraction | BLOCKED | CLOSED | baseline/boundary後 |
-| 4 | Public PoC | BLOCKED | CLOSED | boundary/design後 |
-| 5 | Public migration | BLOCKED | CLOSED | Phase 4 Gate待ち |
-| 6 | Hono API | BLOCKED | CLOSED | domain extraction後 |
-| 7 | Private SPA | BLOCKED | CLOSED | API/design/auth bridge必要 |
-| 8 | Auth | BLOCKED | CLOSED | compatibility PoCまで待機 |
-| 9 | Next/OpenNext retirement | BLOCKED | CLOSED | 全parity後のみ |
+| Phase | Name | State | Gate |
+| --- | --- | --- | --- |
+| 0 | Baseline / Inventory | IN_PROGRESS | CLOSED |
+| 1 | Repository boundaries | BLOCKED | CLOSED |
+| 2 | Design System | BLOCKED | CLOSED |
+| 3 | Domain extraction | BLOCKED | CLOSED |
+| 4 | Public PoC | BLOCKED | CLOSED |
+| 5 | Public migration | BLOCKED | CLOSED |
+| 6 | Hono API | BLOCKED | CLOSED |
+| 7 | Private SPA | BLOCKED | CLOSED |
+| 8 | Auth | BLOCKED | CLOSED |
+| 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
 ---
 
 # Phase 0 — Baseline / Inventory
 
-Goal: 移行前にCURRENTの画面・機能・server処理・Cloudflare・安全保証を明示的に固定する。
-
 | ID | Task | State | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
-| MIG-0001 | migration docs / multi-agent command / progress framework | REVIEW | — | common protocol、tool adapters、inventory、docs review |
-| MIG-0002 | 86 screen/page/route baseline | BLOCKED | MIG-0001 | CURRENT route一覧、roles、purpose、states、function候補 |
-| MIG-0003 | Server Action / inline action baseline | BLOCKED | MIG-0001 | 全exports/callers/input/permission/effects/tests |
-| MIG-0004 | Route Handler / API baseline | BLOCKED | MIG-0001 | 全`route.ts` method/contract/auth/effects/tests |
-| MIG-0005 | Cloudflare Worker/domain/route/binding baseline | BLOCKED | MIG-0001 | 4 Worker、Custom Domain、Routes、bindings、build topology |
+| MIG-0001 | migration docs / multi-agent command / progress framework | DONE | — | merged in #232; common protocol、tool adapters、inventory、docs checker |
+| MIG-0002 | 86 screen/page/route baseline | READY | MIG-0001 | CURRENT route一覧、roles、purpose、states、function候補 |
+| MIG-0003 | Server Action / inline action baseline | READY | MIG-0001 | 全exports/callers/input/permission/effects/tests |
+| MIG-0004 | Route Handler / API baseline | READY | MIG-0001 | 全`route.ts` method/contract/auth/effects/tests |
+| MIG-0005 | Cloudflare Worker/domain/route/binding baseline | READY | MIG-0001 | 4 Worker、Custom Domain、Routes、bindings、build topology |
 | MIG-0006 | CPU / 1102 / request baseline | BLOCKED | MIG-0005 | 実Cloudflare metrics、hot/cold paths |
-| MIG-0007 | static artifact / visibility baseline | BLOCKED | MIG-0001 | artifact types、aliases、fail-closed、repair/fallback |
-| MIG-0008 | Auth/session/permission baseline | BLOCKED | MIG-0001 | login/session/linking/owner/permission contract |
+| MIG-0007 | static artifact / visibility baseline | READY | MIG-0001 | artifact types、aliases、fail-closed、repair/fallback |
+| MIG-0008 | Auth/session/permission baseline | READY | MIG-0001 | login/session/linking/owner/permission contract |
 | MIG-0009 | Queue/Cron/background job baseline | BLOCKED | MIG-0005 | job types、Queue/DLQ、retry/recovery/side effects |
 | MIG-0010 | 86 redesign screens → function IDs mapping | BLOCKED | MIG-0002,0003,0004 | every screen mapped、state coverage、responsive requirements |
 | MIG-0011 | function inventory consolidation / gap scan | BLOCKED | MIG-0003,0004,0007,0008,0009,0010 | unknown=0、duplicates merged、cross-cutting effects covered |
 | MIG-0012 | Phase 0 Gate | BLOCKED | MIG-0006,0011 | Lead review + rollback baseline fixed |
 
-## Phase 0 Gate
+### Phase 0 Gate
 
 - [ ] all CURRENT page/routes inventoried
 - [ ] all Server Action exports + inline actions inventoried
@@ -144,10 +127,6 @@ Goal: 移行前にCURRENTの画面・機能・server処理・Cloudflare・安全
 | MIG-0107 | `apps/api` Hono skeleton | BLOCKED | MIG-0101 |
 | MIG-0108 | Phase 1 Gate | BLOCKED | MIG-0102..0107 |
 
-Gate: CURRENT build/behavior unchanged; new boundaries compile independently.
-
----
-
 # Phase 2 — Design System
 
 | ID | Task | State | Depends on |
@@ -158,10 +137,6 @@ Gate: CURRENT build/behavior unchanged; new boundaries compile independently.
 | MIG-0204 | forms/feedback/data-display | BLOCKED | MIG-0202 |
 | MIG-0205 | representative responsive screens | BLOCKED | MIG-0203,0204 |
 | MIG-0206 | Phase 2 Gate | BLOCKED | MIG-0205 |
-
-Gate: 1440/1024/768/390 + accessibility + no functional deletion.
-
----
 
 # Phase 3 — Domain extraction
 
@@ -175,10 +150,6 @@ Gate: 1440/1024/768/390 + accessibility + no functional deletion.
 | MIG-0306 | user/X/admin domain group | BLOCKED | MIG-0303 |
 | MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..0306 |
 
-Exact server disposition: `API_MATRIX.md`。
-
----
-
 # Phase 4 — Public PoC
 
 | ID | Task | State | Depends on |
@@ -190,8 +161,6 @@ Exact server disposition: `API_MATRIX.md`。
 | MIG-0405 | visibility gateway | BLOCKED | MIG-0404 |
 | MIG-0406 | CPU/build benchmark | BLOCKED | MIG-0405 |
 | MIG-0407 | Phase 4 Gate | BLOCKED | MIG-0406 |
-
----
 
 # Phase 5 — Public migration
 
@@ -206,10 +175,6 @@ Exact server disposition: `API_MATRIX.md`。
 | MIG-0507 | `/:id` video catch-all | BLOCKED | MIG-0502..0506 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0507 |
 
-Exact route/function coverage: `ROUTE_MATRIX.md` + `FUNCTION_INVENTORY.md`。
-
----
-
 # Phase 6 — Hono API
 
 | ID | Task | State | Depends on |
@@ -222,8 +187,6 @@ Exact route/function coverage: `ROUTE_MATRIX.md` + `FUNCTION_INVENTORY.md`。
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..0605 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
 
----
-
 # Phase 7 — Private SPA
 
 | ID | Task | State | Depends on |
@@ -234,10 +197,6 @@ Exact route/function coverage: `ROUTE_MATRIX.md` + `FUNCTION_INVENTORY.md`。
 | MIG-0704 | manage | BLOCKED | MIG-0604,0703 |
 | MIG-0705 | admin | BLOCKED | MIG-0605,0704 |
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0705 |
-
-Screen DONE requires associated function IDs `PARITY_VERIFIED` or `REMOVED_APPROVED`。
-
----
 
 # Phase 8 — Auth
 
@@ -251,8 +210,6 @@ Screen DONE requires associated function IDs `PARITY_VERIFIED` or `REMOVED_APPRO
 | MIG-0806 | Phase 8 Gate | BLOCKED | MIG-0805 |
 
 MIG-0805 requires explicit user approval before production action.
-
----
 
 # Phase 9 — Next/OpenNext retirement
 
@@ -269,74 +226,56 @@ MIG-0805 requires explicit user approval before production action.
 
 # Current task detail
 
-## MIG-0001 — migration docs / multi-agent execution / progress framework
+## MIG-0002 — 86 screen/page/route baseline
 
 ```text
-State: REVIEW
-Owner: chatgpt
-PR: #232
+State: READY
+Owner: none
 Production action required: no
 ```
 
-Implemented:
+Scope:
 
-- universal `AGENTS.md`
-- shared `AGENT_PROTOCOL.md`
-- architecture `README.md`
-- explicit `STATUS.md`
-- `FUNCTION_INVENTORY.md` + 4 domain ledgers
-- `ROUTE_MATRIX.md`
-- `API_MATRIX.md`
-- Claude `/flamenode-migration` command + skill adapter
-- Codex repo skill adapter + `/goal` continuous-execution guidance
-- Antigravity `/flamenode-migration` workspace workflow + skill + workspace rule
-- `scripts/check-migration-docs.mjs`
-- `check:project-docs` integration
-- README / AI_CONTEXT / CLAUDE navigation
+- CURRENT画面/routeをコードと既存redesign inventoryから固定
+- roles / purpose / happy/loading/empty/error/forbidden statesを記録
+- 初期function ID候補を紐付け
+- `ROUTE_MATRIX.md` と必要なfunction ledgerを更新
+
+Non-scope:
+
+- Astro実装
+- Hono実装
+- UI production化
+- auth変更
+- Cloudflare routing変更
 
 Acceptance:
 
-- [x] one canonical protocol for all agents
-- [x] exactly-one-task loop rule
-- [x] repository-persisted progress
-- [x] explicit Phase Gate stop
-- [x] existing-function inventory introduced
-- [x] redesign completion tied to function parity
-- [x] Phase 0 inventory split into loop-sized tasks
-- [x] Claude / Codex / Antigravity native entrypoints aligned
-- [x] migration docs consistency checker added
-- [x] no production runtime/config/Cloudflare mutation
-- [ ] docs checks executed in an environment with the repository available
-- [ ] Lead review / PR merge
-
-Validation note:
-
-- GitHub PR checks are not configured for this draft branch.
-- Local container cannot resolve `github.com`, so repository scripts could not be executed in this chat environment.
-- `scripts/check-docs.mjs` and `scripts/check-project-docs.mjs` were inspected; migration-specific consistency is additionally enforced by `scripts/check-migration-docs.mjs` after checkout.
-- Antigravity workspace workflow/skill/rule locations and Codex repo skill/Goal usage were rechecked against current official documentation before finalizing adapters.
+- CURRENT page/route inventoryに未分類routeが残らない
+- 86 redesign screensとの関係が追跡可能
+- routeごとのauth/visibility/SEO/state候補が明示される
+- runtime behavior unchanged
 
 Rollback:
 
-- revert PR #232
-- production runtime unaffected
+- docs-only changesをrevert
 
 ## Last iteration
 
 ```text
 Agent: chatgpt
 Task: MIG-0001
-Result: multi-agent migration/inventory framework implemented and adapter conventions corrected; awaiting executable docs validation + Lead review
-Affected functions: inventory/progress framework only; runtime behavior unchanged
-Validation: static repository review + official adapter convention verification; executable docs checks pending
-PR: #232
-Rollback: revert PR #232
-Blockers: docs script execution + Lead review
-Next: MIG-0002 after MIG-0001 approval/merge
+Result: #232 + #233の有効部分を統合しmainへsquash merge
+Affected functions: migration framework only; runtime behavior unchanged
+Validation: static review; migration consistency checker added; PR CI not configured
+PR/commit: #232 / 001745e30e7801f8a5ffda93d6c2cfac2ed30466
+Rollback: revert merge commit
+Blockers: none
+Next: MIG-0002
 ```
 
 ## Next READY
 
-```text
-none while MIG-0001 = REVIEW
-```
+Default next task: `MIG-0002`.
+
+`MIG-0003`, `MIG-0004`, `MIG-0005`, `MIG-0007`, `MIG-0008` are also dependency-ready and may be assigned to separate read-only/audit agents, but only one writer may own a given task and `STATUS.md` changes must be serialized.
