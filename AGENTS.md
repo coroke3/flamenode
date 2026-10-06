@@ -34,6 +34,7 @@ Migration work must distinguish **CURRENT** production from **TARGET** architect
 | current Cloudflare bindings | `wrangler.toml`, `workers/*/wrangler.toml`, actual Cloudflare config |
 | migration architecture | `docs/migration/README.md` |
 | multi-agent execution | `docs/migration/AGENT_PROTOCOL.md` |
+| **migration Git/PR workflow** | **`docs/migration/GIT_WORKFLOW.md`** |
 | migration progress | `docs/migration/STATUS.md` |
 | existing-function parity | `docs/migration/FUNCTION_INVENTORY.md` |
 | route migration | `docs/migration/ROUTE_MATRIX.md` |
@@ -55,6 +56,7 @@ Migration work must distinguish **CURRENT** production from **TARGET** architect
 - Preserve audit, retry safety, idempotency, atomicity, and rollback guarantees.
 - Remote D1 migration is read-only during preflight and never auto-applied.
 - main direct push is prohibited; use branch + PR + required review.
+- Migration branches/PRs/merges follow `docs/migration/GIT_WORKFLOW.md`.
 - Production deploy, Worker Route, Custom Domain, Remote D1, or secret changes require explicit user approval.
 
 ## CURRENT production
@@ -129,8 +131,12 @@ Do not move the entire current tree up-front. Add boundaries only when the activ
 
 - Fix the task scope and non-scope before editing.
 - Prefer the smallest change that advances the current gate.
+- For migration writes, use **1 MIG task = 1 short-lived branch = 1 PR = 1 squash merge** unless `GIT_WORKFLOW.md` explicitly allows an exception.
+- Open a draft PR early; the open task PR is the live lock preventing duplicate writers for the same MIG task.
+- Only one migration writer lane is active by default; other agents may review/audit in parallel.
 - Do not have multiple agents edit the same file/domain/task concurrently.
 - DB/auth/security/visibility/public API/Cloudflare routing decisions require Lead-level review.
+- Separate implementation landing from production traffic cutover/routing changes.
 - Keep compatibility bridges explicit and record their removal condition.
 - Do not invent a custom router, SSG, island runtime, auth protocol, or cache framework when a standard solution exists.
 - Do not rewrite existing D1/R2/Queue/Auth just because a migration is in progress.
