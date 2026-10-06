@@ -365,10 +365,8 @@ if (errors.length === 0) {
   ]) {
     if (!performanceBaseline.includes(phrase)) errors.push(`cloudflare/PERFORMANCE_BASELINE.md: required measured baseline marker missing: ${phrase}`);
   }
-  for (const name of expectedWorkers) {
-    if (!performanceBaseline.includes(name.replace("flamenode-", "")) && name !== "flamenode-web") {
-      errors.push(`cloudflare/PERFORMANCE_BASELINE.md: Worker role missing: ${name}`);
-    }
+  for (const role of ["web / fetch", "content / queue", "sync / scheduled", "fast / scheduled"]) {
+    if (!performanceBaseline.includes(role)) errors.push(`cloudflare/PERFORMANCE_BASELINE.md: Worker/event baseline missing: ${role}`);
   }
 
   // Design source transition.
