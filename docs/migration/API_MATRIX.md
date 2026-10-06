@@ -30,6 +30,18 @@ unclassified = 0
 
 TargetではServer ActionをHonoへcopyせず、framework-neutral domain serviceをlegacy adapterとHono adapterから共有する。
 
+## MIG-0004 result — Route Handlers
+
+CURRENT Route Handlerのmethod-level正本は [`route-handlers/README.md`](route-handlers/README.md)。
+
+```text
+app/api/**/route.ts files: 28
+HTTP method handlers: 33
+unclassified methods: 0
+```
+
+public/admin/internal/live/media/authを同じgeneric API層へ平坦化しない。HTTP envelopeは共通化しても、visibility・same-origin・operation-mode・media ACL/signature・Auth.js compatibilityの安全境界は明示的に維持する。
+
 ## Columns
 
 - `CURRENT`: 現在のServer Action / Route Handler / helper
