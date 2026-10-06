@@ -17,6 +17,12 @@
 
 Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 
+## CURRENT / TARGET
+
+**CURRENT production** は Cloudflare Workers + OpenNext + Workers Static Assets。正確な実装・bindingはコード / `wrangler.toml` / Cloudflare実設定を正本とする。
+
+**TARGET migration architecture** は `migration/README.md` を正本とする。移行完了まではCURRENTとTARGETが併存する。
+
 ## Active入口
 
 | 目的 | 文書 |
@@ -37,13 +43,18 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 | ローカル | [../LOCAL.md](../LOCAL.md) |
 | デプロイ | [../DEPLOY.md](../DEPLOY.md) |
 
-## 現行と移行後
+## 移行中の正本分担
 
-- 現行productionの実装・bindingはコード / wrangler / Cloudflare実設定を正本とする。
-- 移行後target architectureは `migration/README.md` を正本とする。
-- 移行進捗・次READY taskは `migration/STATUS.md` だけを正本とする。
-- `design-redesign/` は次期UI proposalであり、機能・権限・DB/API契約の正本ではない。
-- migration完了までNext/OpenNext文書と新構成文書が並存するため、CURRENT/TARGETを明示する。
+- 現行productionの挙動: code / test
+- DB: schema / migrations
+- Cloudflare CURRENT: wrangler / Cloudflare実設定
+- TARGET architecture: `migration/README.md`
+- 現在地・次READY task: `migration/STATUS.md`
+- route mapping: `migration/ROUTE_MATRIX.md`
+- server/API mapping: `migration/API_MATRIX.md`
+- UI proposal: `design-redesign/`
+
+`design-redesign/` は次期UI proposalであり、機能・権限・DB/API契約の正本ではない。
 
 ## 移行コマンド
 
