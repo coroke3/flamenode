@@ -2,41 +2,44 @@
 
 > Status: Active / Migration specification
 > Last verified: 2026-10-06
-> Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
-> Production domain: `flamenode.net`, `www.flamenode.net`
->
-> Purpose: Next.js + OpenNext中心の現行Webを、1102耐性・将来拡張性・AI実装性を改善しながら段階移行する。
->
-> This document is the migration source of truth.
-> DB schema、権限、現行behaviorはコード/testが上位。
+> Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
+> Source of truth: current code/test, `AGENTS.md`, this document
+> Progress: [`STATUS.md`](STATUS.md)
+> Multi-agent execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
+> Existing-function parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
 
-## 0. Goal / Non-goal
+## Purpose
 
-### Goal
+Next.js + OpenNext中心のCURRENT productionを、1102耐性・将来拡張性・AI実装性・UI/UXを改善しながら段階移行する。
 
-- Cloudflare Workers FreeのHTTP CPU 10ms制約に対し、public閲覧からrequest-time SSRを排除する。
-- public→private変更時のfail-closed visibilityを維持する。
-- UI/UX redesignをproductionへ移植する。
-- business logicをframeworkから分離する。
-- APIを明示的なHTTP boundaryへ移す。
-- public / private UI / API / background jobsを実行特性で分離する。
-- AI agentが一般的なAstro / React / Hono / Cloudflareパターンとして理解できる構成にする。
-- 同一 `flamenode.net` URL体系を維持する。
-- Big Bang rewriteを避け、route単位でrollback可能にする。
+変更自体を目的にしない。CURRENTを維持する方が安全な領域は維持する。
 
-### Non-goal
+## Goals
 
-- D1/R2/Queueを新技術へ置換すること
-- authを同時に全面刷新すること
-- 新しい独自SSG / Islands runtime / router / cache frameworkを作ること
-- redesignを理由に機能を削ること
-- URL変更・SEO URL再設計
-- productionを一度に全切替すること
-- 技術変更そのものを目的にすること
+- public閲覧からrequest-time SSRを排除する
+- public→non-publicのfail-closed visibilityを維持する
+- UI/UX redesignをproductionへ移植する
+- 既存機能をfunction inventoryで100%追跡する
+- business logicをframeworkから分離する
+- APIを明示的HTTP boundaryへ移す
+- D1/R2/Queueへの既存投資を再利用する
+- Claude / Codex / Antigravityのどれでも同じ進捗から継続可能にする
+- `flamenode.net` のURL体系を維持する
+- route単位でcutover/rollback可能にする
+
+## Non-goals
+
+- D1/R2/Queueを移行のためだけに置換する
+- authをUI/frameworkと同時に全面刷新する
+- 独自SSG / Islands runtime / router / cache frameworkを作る
+- redesignを理由に既存機能を暗黙削除する
+- URL/SEO URLを不要に変更する
+- Big Bang rewrite
+- productionを一度に切り替える
 
 ---
 
-# 1. CURRENT architecture
+# 1. CURRENT
 
 ```text
 Browser
@@ -44,7 +47,7 @@ Browser
 flamenode.net / www.flamenode.net
   |
 flamenode-web
-Next.js + OpenNext
+Next.js + OpenNext + Workers Static Assets
   |
 D1 / R2 / KV / Queue
 
@@ -54,29 +57,25 @@ Background:
 - flamenode-sync-jobs
 ```
 
-現行productionでは `flamenode-web` がCustom Domainを保持する。
+CURRENTは移行完了までrollback targetとして残す。
 
-維持する既存資産:
+原則維持する既存資産:
 
-- D1 authoritative model
+- D1 canonical model
 - Drizzle schema / migrations
-- R2 public static JSON projection
-- `static_rebuild_queue`
-- `static_artifacts`
-- visibility fence / blocked manifest
-- audit / restore model
+- R2 public static projections
+- static rebuild Queue / artifacts
+- visibility fence / repair
+- audit / restore
 - permission / owner model
 - fast/content/sync Workers
 - current public DTO contracts
-- current API behavior until explicitly migrated
-- redesign mock/inventory
-
-既存static rebuildは「Next.js buildとは別のpublic artifact generation」として成立している。
-新基盤はこれを置換せず利用する。
+- current Auth.js behavior until auth phase
+- redesign mock / route inventory
 
 ---
 
-# 2. TARGET architecture
+# 2. TARGET
 
 ```text
                          flamenode.net
@@ -85,11 +84,11 @@ Background:
                               |
              +----------------+----------------+
              |                                 |
-         Public Site                       Private / API
+          Public                          Private / API
              |                                 |
-       flamenode-site                     flamenode-app/api
+       flamenode-site                 flamenode-app / api
              |                                 |
- thin visibility gateway                React/Vite + Hono
+ thin visibility gateway             React/Vite + Hono
              |                                 |
       Astro Static Assets                     |
              |                                 |
@@ -104,67 +103,72 @@ Background:
         fast-jobs       content-jobs       sync-jobs
 ```
 
-## Target stack
+## Public
 
-### Public
-
-- Astro
-- static output / SSG
+- Astro static output / SSG
 - React integration
-- React Islands only where runtime interactivity is required
+- React Islands only for runtime interactivity
 - request-time SSRは禁止
 - HTML generationはbuild-timeのみ
 
-### Private UI
+## Private UI
 
-- React
-- Vite
-- SPA
+- React + Vite SPA
 - React Router
-- TanStack Queryはserver stateが必要な箇所のみ
-- dashboard/admin/manage/entryはSSRしない
+- TanStack Queryは必要なserver stateのみ
+- dashboard / entry / manage / adminはSSRしない
 
-### API
+## API
 
 - Hono
-- explicit HTTP routes
-- Zod/shared contracts
-- minimal synchronous CPU
-- heavy generation/aggregationはQueueへ
+- shared Zod/contracts
+- bounded synchronous work
+- heavy generation/aggregation/syncはQueueへ
 
-### Data / Jobs
+## Data / jobs
 
-- D1 authoritative
-- R2 projection
+- D1 canonical
+- R2 projection/delivery
 - Queue background processing
-- existing Worker splitを原則維持
+- existing background Worker splitを原則維持
 
 ---
 
-# 3. Same-domain Worker routing
+# 3. Non-negotiable migration invariants
 
-Workerプロジェクトは分割してよいがURLは維持する。
+- ownerを0人にしない
+- authzをUIだけに置かない
+- public APIはexplicit DTOのみ
+- private dataをpublic projection/build snapshotへ出さない
+- visibility fail-closedを弱めない
+- auditを失わない
+- Queue retry/idempotencyを弱めない
+- Remote D1 migrationを自動適用しない
+- current URL/canonicalを不用意に変えない
+- compatibility bridgeの削除条件を明記する
+- function inventoryに未監査必須機能がある状態で移行完了にしない
 
-## Migration period
+---
+
+# 4. Same-domain routing / Strangler migration
+
+Worker projectは分割してよいが、外部URLは同じ `flamenode.net` を維持する。
+
+移行中:
 
 ```text
 flamenode.net
   |
-Worker Routes
-  |-- selected migrated paths -> new Worker
-  |
-  `-- no match -> existing flamenode-web Custom Domain
+path-specific Worker Routes
+  |-- migrated path -> new Worker
+  `-- no match       -> CURRENT flamenode-web Custom Domain
 ```
 
-現行 `flamenode-web` をorigin/fallbackとして残す。
-
-## Final route ownership
-
-概念例:
+最終ownershipの概念:
 
 ```text
 /api/*        -> flamenode-api
-/auth/*       -> auth owner decided in auth phase
+/auth/*       -> auth phaseで確定
 /dashboard/*  -> flamenode-app
 /entry/*      -> flamenode-app
 /manage/*     -> flamenode-app
@@ -172,20 +176,19 @@ Worker Routes
 /*            -> flamenode-site
 ```
 
-実route patternはcutover直前にCloudflare実設定と競合確認後に確定する。
+Rules:
 
-Rule:
-
-- Routeを推測でproductionへ追加しない。
-- production route変更は明示依頼時のみ。
-- specific routeを先に移し、root-level `/:id` はPublic移行の最後。
-- rollbackはWorker Routeを外して旧 `flamenode-web` へ戻せる状態を維持する。
+- route patternはcutover直前に実Cloudflare設定を再確認する
+- specific routeから移す
+- root-level `/:id` catch-allはPublic migration最後
+- Worker Routeを外せばCURRENTへ戻るrollbackを維持する
+- production route変更は明示承認時のみ
 
 ---
 
-# 4. Public delivery
+# 5. Public delivery
 
-## 原則
+原則:
 
 ```text
 Static first
@@ -195,164 +198,135 @@ SSR never by default
 
 Public requestで禁止:
 
-- React SSR
-- RSC generation
+- React SSR/RSC generation
 - D1-heavy projection
-- large JSON transformation
+- large JSON transform
 - build/rebuild
 - image transformation proxy
-- aggregate generation
+- heavy aggregation
 
 ## Visibility gateway
 
-完全Workerレスにはしない。
+Publicを完全Workerlessにはしない。
 
-理由:
-現行FlameNodeはpublic→non-public変更時にvisibility fenceで古いartifactを即座にblockする。
-Pure Static Assetsだけでは次buildまで古いHTMLを公開し得る。
+理由: static HTMLが古くてもpublic→privateを即時blockするCURRENT guaranteeを維持するため。
 
-gatewayの責務:
+Gatewayの責務は最小化する。
 
-1. pathnameからpublic entityを特定
-2. visibility stateを確認
-3. blockedならfail closed
-4. allowedならStatic Assetを返す
+1. pathname → entity identity解決
+2. visibility state確認
+3. blocked/unknownならfail closed
+4. allowedならStatic Asset配信
 
-HTML生成は禁止。
+HTML生成禁止。
 
-### Route map
+## Route map
 
-Astro build時にroute/entity対応を生成する。
+Astro build時にalias→canonical entity mapを生成する。
+
+例:
 
 ```json
 {
   "/Fv78z0vhDh4": {"type":"video","id":"v_internal"},
   "/v_internal": {"type":"video","id":"v_internal"},
-  "/event/PVSF2026S": {"type":"event","id":"PVSF2026S"},
-  "/user/example": {"type":"x_user","id":"example"}
+  "/event/PVSF2026S": {"type":"event","id":"PVSF2026S"}
 }
 ```
 
-目的:
+Gatewayでalias解決のためにD1 lookupを行わない。
 
-- YouTube ID aliasとinternal IDを同じvisibility entityへ結び付ける。
-- gatewayでD1 alias lookupをしない。
-- route mapはbuild artifactとしてversion管理/検査する。
-
-### Fail closed
-
-以下ではpublic detailを返さない。
-
-- enforce modeでmanifest unavailable
-- malformed route map
-- blocked entity
-- visibility identityを安全に解決できない対象
-
-## CPU acceptance
-
-PoC gate:
+PoC CPU target:
 
 - p50 < 1.5ms
 - p95 < 3ms
 - p99 < 5ms
 - 1102 = 0
 
-実測が満たせない場合は設計を見直し、閾値を都合よく緩めない。
+閾値未達なら原因を分析し、都合よくgateを緩めない。
 
 ---
 
-# 5. Astro / React Islands
+# 6. Astro / React boundary
 
-Astroは以下だけを担当する。
+Astroの責務:
 
-- routing
+- route generation
 - SSG
-- HTML/head/SEO generation
-- framework component integration
-- Islands orchestration
+- HTML/head/SEO/OGP
 - asset bundling
+- React component integration
+- Islands orchestration
 
-Astroをbusiness logic layerにしない。
+Astroへbusiness logicを置かない。
 
-`packages/ui` のReact componentをAstroから利用する。
+SSGへ入れるstable public content:
 
-HTMLへ入れるもの:
-
-- title
-- creator
-- description
+- title / creator / description
 - music / credit
 - event metadata
-- thumbnail / canonical
-- SEO / OGP metadata
-- stable public chapters / public static content
-- initial list/shelf where SEO/first paintに有効
+- thumbnail / canonical / SEO / OGP
+- stable public chapters/content
+- first paintに有効なinitial lists
 
-Island / APIへ残すもの:
+Island/APIへ残すdynamic content:
 
 - login state
-- like / save
+- like/save
 - view tracking/count
 - viewer/private overlay
-- slot live count
-- realtime state
+- live slot count/state
 - high-frequency trending
 - authenticated/private data
 - mutations
 - polling/WebSocket candidate
 
-高頻度値が変わるだけでAstro buildを発火しない。
+高頻度値だけの変更でsite rebuildを起こさない。
 
 ---
 
-# 6. Build data source
+# 7. Public build data
 
-Astro buildからD1へ直接projection queryを書かない。
+Astro buildからD1 projectionを再実装しない。
 
 ```text
 D1
  |
-existing static rebuild queue
+existing static rebuild Queue
  |
 content-jobs
  |
-safe public projection
+safe public projections
  |
-R2 build snapshot
+private R2 build snapshot
  |
 Astro build
 ```
 
-public HTMLとR2 JSONでprojection logicを二重実装しない。
-
-専用のread-only build inputを持つ。
-
-推奨:
+推奨build input bucket:
 
 ```text
-flamenode-public-build (private R2)
+flamenode-public-build
 ```
 
-例:
+用途:
 
 ```text
 videos/{id}.json
 users/{id}.json
 events/{id}.json
-global/top.json
+global/*.json
 routes.v1.json
 build-meta.v1.json
 ```
 
-Build credentialはread-only / least privilege。
+build credentialはread-only / least privilege。
 
----
+## Rebuild coordination
 
-# 7. Content build coordination
+コンテンツ更新ごとにsite buildを起こさない。
 
-コンテンツ変更ごとにbuildしない。
-
-概念state:
+Conceptual generation state:
 
 ```text
 desired_generation
@@ -366,26 +340,22 @@ build_id
 last_error
 ```
 
-保存先は既存運用との整合を確認してphase内で決める。
+- change -> desired++
+- 30〜60秒coalesce
+- snapshot ready -> site build trigger
+- build中の更新はdesiredへ蓄積
+- completion時 deployed < desiredなら再build
 
-Coalescing:
+Code BuildとContent Buildを分離する。
 
-- content更新 -> desired_generation++
-- 30〜60秒 debounce
-- snapshot ready後にsite buildを1回trigger
-- build中の追加更新はdesiredへ積む
-- completion時 `deployed < desired` ならもう1回trigger
-
-Build種類:
-
-- Code Build: site + app/api + jobs + smoke
+- Code Build: code-related workers/apps + smoke
 - Content Build: site only + smoke
 
 content更新でfast/sync Workerを再deployしない。
 
 ---
 
-# 8. Private SPA
+# 8. Private SPA / shared UI
 
 対象:
 
@@ -393,38 +363,21 @@ content更新でfast/sync Workerを再deployしない。
 - `/entry`
 - `/manage`
 - `/admin`
-- private/system surfaces that do not require public SEO
+- SEO不要なprivate/system surfaces
 
-Rule:
+Rules:
 
-- React + Vite SPA
-- request-time SSR無し
-- UI routingはReact Router
-- API accessはHono
-- auth/permissionはAPI/server境界で必ず再検証
-- private dataをpublic R2 projectionへ混ぜない
+- Static SPA shell
+- Hono API経由でdata/mutation
+- server-side authz再検証
+- private dataをpublic buildへ流さない
+- direct URL/reload/back-forwardをacceptanceに含める
 
-Design source:
+## Shared design system
 
-1. `docs/design-redesign/DESIGN_PRINCIPLES.md`
-2. `docs/design-redesign/UX_AUDIT.md`
-3. `docs/design-redesign/NAVIGATION.md`
-4. `/dev/redesign`
-5. `docs/design-redesign/PAGE_COVERAGE.md`
-6. `docs/design-redesign/DECISIONS.md`
+Public/PrivateでReact UIを二重実装しない。
 
-Executable route inventory:
-
-`app/(redesign)/dev/redesign/_catalog.ts`
-
-redesign mockはUI仕様の参考。
-permission / auth / side effect / API / DB / validation / workflow semanticsは現行production code/testが正本。
-
----
-
-# 9. Shared UI / Design System
-
-推奨boundary:
+Target:
 
 ```text
 packages/ui/
@@ -439,145 +392,135 @@ packages/ui/
   user/
 ```
 
-`packages/ui` では原則禁止:
+`packages/ui`では原則禁止:
 
-- `next/link`
-- `next/navigation`
-- Server Action
-- Hono import
-- Astro-specific API
+- Next routing imports
+- Server Actions
+- Hono/Astro imports
 - direct D1/R2 access
 
-link/navigationはadapterまたはpropsで注入する。
+FlameNode Sans、theme、spacing、responsive behaviorをtoken化する。
 
-FlameNode Sans、theme、spacing、responsive behaviorはtoken化する。
+Design visual sourceは `docs/design-redesign/`。
+Functional parity sourceは `FUNCTION_INVENTORY.md` とCURRENT code/test。
 
 ---
 
-# 10. API / Domain migration
+# 9. API / domain migration
 
-Server Actionを直接Honoへ書き換えない。
+Server ActionをHonoへcopyしない。
 
 ```text
-Current Server Action
-      |
-      v
+CURRENT Server Action / Route Handler
+            |
+            v
 framework-neutral domain service
-      ^
-      |
- +----+-----+
- |          |
-legacy    Hono
-Next      route
+            ^
+            |
+     +------+------+
+     |             |
+legacy Next     Hono route
 ```
 
-`packages/domain` に含める:
+`packages/domain`で禁止:
 
-- business rule
-- permission decision core where framework-independent
-- mutation orchestration
-- explicit dependencies
-
-禁止:
-
+- Next/Astro/Hono framework imports
 - `"use server"`
 - `revalidatePath`
-- `next/navigation`
-- Astro
-- Hono Request/Context
-- browser API
+- framework request/cookie/navigation APIs
+- browser APIs
 
 `packages/contracts`:
 
-- Zod schemas
-- request DTO
-- response DTO
-- error contract
-- shared discriminated unions
+- Zod input/output
+- explicit error contracts
+- domain-scoped shared types
 
-巨大な単一RPC typeへ寄せずdomain単位で分割する。
+Mutation parityはDBだけで判断しない。
+
+確認対象:
+
+- permission
+- DB writes
+- audit
+- Queue
+- R2/KV
+- notifications/external effects
+- client refresh semantics
+
+Exact dispositionは `API_MATRIX.md`。
 
 ---
 
-# 11. Auth migration
+# 10. Auth
 
-Authは後段。
+Auth migrationは後段。
 
-既存Auth.js/NextAuthをproduction source of truthとして維持する。
+それまではCURRENT Auth.js behaviorを維持する。
 
-理由:
+必須parity:
 
 - Discord OAuth
-- database session
-- Drizzle adapter
+- existing users/accounts/sessions
 - custom account linking
-- banned/role/active-X handling
-- origin validation
-- callbacks
-- existing session compatibility
+- banned/role/active-X behavior
+- origin/callback behavior
+- logout/login
+- permission integration
+- CPU/security
+- rollback
 
-Auth PoC acceptance:
-
-- existing users/accounts/sessions compatibility
-- Discord account linking parity
-- cookie/session parity
-- banned/permission behavior parity
-- logout/login callback parity
-- Cloudflare Free CPU acceptance
-- rollback可能
-
-互換証明前にproduction authを置換しない。
-自前認証protocolを新規実装しない。
+自前auth protocolを新規実装しない。
 
 ---
 
-# 12. Images / Uploads
+# 11. Media / upload
 
-Public requestで画像変換proxyを原則行わない。
-
-- static/public imageはdirect/static/R2
-- remote thumbnailは可能な限り生成済みURLを利用
-- 変換が必要ならbackground generation + cached artifactを優先
-
-大容量bodyをAPI Worker経由でbufferしない。
-
-推奨:
-
-```text
-Browser
-  |
-API: permission + upload authorization
-  |
-direct upload to R2
-```
+- public requestで画像変換proxyを原則行わない
+- static/R2/direct deliveryを優先
+- transformationが必要ならbackground artifact化を優先
+- large upload bodyをAPI Workerでbufferしない
+- permission/authorization後にdirect-to-R2 uploadを優先
 
 ---
 
-# 13. Migration phases
+# 12. Migration phases
 
-## Phase 0 — Baseline
+進捗・task ID・ownerは `STATUS.md` が正本。
 
-記録:
+## Phase 0 — Baseline / inventory
 
-- current commit
-- current Worker/domain/routes
-- current bindings
-- CPU / 1102 baseline
-- static artifact health
-- visibility fence health
-- auth/session contract
-- route inventory
-- design coverage
+分割:
+
+- `MIG-0001` multi-agent migration framework
+- `MIG-0002` screen/route inventory
+- `MIG-0003` Server Action inventory
+- `MIG-0004` Route Handler/API inventory
+- `MIG-0005` Cloudflare topology/bindings/jobs
+- `MIG-0006` CPU/1102/request baseline
+- `MIG-0007` static artifact/visibility baseline
+- `MIG-0008` auth/session/permission baseline
+- `MIG-0009` background Queue/Cron/job inventory
+- `MIG-0010` 86 redesign screens → function mapping
+- `MIG-0011` function inventory consolidation / gap scan
+- `MIG-0012` Phase 0 Gate
 
 Gate:
 
-- baseline tests pass
-- rollback target固定
-- production route変更無し
+- required CURRENT functions fully inventoried
+- all 86 screens mapped to function IDs
+- all Server Actions/inline actions disposed
+- all Route Handler methods disposed
+- all background jobs disposed
+- Cloudflare baseline fixed
+- CPU/1102 baseline fixed
+- visibility/auth guarantees fixed
+- rollback target fixed
+- production behavior unchanged
 
 ## Phase 1 — Repository boundaries
 
-追加候補:
+Create only the boundaries required by the phase:
 
 ```text
 apps/site
@@ -589,288 +532,156 @@ packages/contracts
 packages/public-data
 ```
 
-既存Nextコードを大規模移動しない。
-
-Gate:
-
-- current production build unaffected
-- new packages compile independently
-- no behavior change
+Do not move CURRENT tree wholesale.
 
 ## Phase 2 — Design System
 
-`/dev/redesign`からshared React UIをproduction-ready componentへ移す。
+Convert redesign proposal into reusable React UI/tokens.
 
-Gate:
-
-- 1440 / 1024 / 768 / 390 acceptance
-- Light/Dark parity where required
-- accessibility baseline
-- no feature deletion
+Gate: responsive + accessibility + function preservation.
 
 ## Phase 3 — Domain extraction
 
-Server Action / Route Handlerのbusiness logicを順次framework-neutral化する。
+Extract framework-neutral business logic while CURRENT path still calls the same services.
 
-Gate:
-
-- legacy path uses same new domain service
-- behavior parity test
-- DB side-effect parity
-- audit parity
+Gate: behavior / permission / DB / audit / Queue parity.
 
 ## Phase 4 — Public PoC
 
-対象:
+Representative:
 
-- `/about`
-- `/rules`
-- video 1件
-- user 1件
-- event 1件
-
-実装:
-
-- Astro static build
+- static page
+- video
+- user
+- event
 - React Island
-- SEO/OGP
 - route map
 - visibility gateway
 
-Gate:
+Gate: no SSR, fail-closed, SEO/OGP parity, CPU/build targets.
 
-- static route parity
-- fail-closed visibility
-- no SSR
-- gateway p99 CPU < 5ms
-- 1102 = 0
-- build time acceptable
-- generated file count acceptable
+## Phase 5 — Public migration
 
-## Phase 5 — Public route migration
+Order:
 
-順序:
-
-1. fixed/static pages
-2. `/event/*`
-3. `/groups/*`
-4. `/user/*`
-5. list/search/recommend surfaces
+1. fixed/static
+2. events
+3. groups
+4. users
+5. list/search/recommend/trending
 6. root/top
-7. `/:id` video catch-all last
-
-RouteごとにWorker Routeでnew pathへ切替。
+7. `/:id` catch-all last
 
 ## Phase 6 — Hono API
 
-domainごとに移行:
-
-- low-risk reads
-- low-risk mutations
-- video
-- event
-- slot
-- user/X
-- admin
-- high-risk permission routes last
+Order: low-risk reads → low-risk mutations → video → event/slot → user/X/admin → benchmark/gate.
 
 ## Phase 7 — Private SPA
 
-順序:
+Order: dashboard reads → dashboard mutations → entry → manage → admin.
 
-1. dashboard read-only surfaces
-2. dashboard mutation surfaces
-3. entry
-4. manage
-5. admin
+Screen DONE requires associated function IDs parity verified.
 
 ## Phase 8 — Auth
 
-compatibility PoC後のみ切替。
+Compatibility PoC and explicit production cutover proposal only after previous boundaries are stable.
 
 ## Phase 9 — Next/OpenNext retirement
 
-削除条件:
+Only after:
 
-- all production routes mapped
-- no required Server Actions remain
+- all production routes disposed
+- no required legacy actions/routes remain
 - auth cutover complete
-- rollback window completed
-- no OpenNext-only scheduled/runtime dependency
-- production smoke stable
-- CPU/1102 metrics stable
-- docs updated
+- observation/rollback window complete
+- CPU/1102 stable
+- docs consolidated
 
-OpenNext/Next依存削除は独立PRで行う。
+Legacy removal is separate from migration implementation PRs.
+
+---
+
+# 13. Acceptance gates
+
+## Public
+
+- request-time SSR = 0 by default
+- fail-closed visibility
+- alias correctness
+- SEO/canonical/OGP parity
+- static HTML delivery
+- gateway CPU target met
+- 1102 = 0
+
+## API
+
+Initial CPU targets:
+
+- simple reads p95 < 5ms
+- normal mutations p95 < 8ms
+- auth-heavy p95 < 9ms
+- 1102 = 0
+
+Use real Cloudflare metrics for production gates.
+
+## Build
+
+Initial PoC targets:
+
+- full Astro build < 60s ideal
+- < 120s acceptable
+- public content reflection < 90s target
+- generation loss = 0
+- Static Assets count with Free-tier headroom
+
+If exceeded, analyze input/page count/build strategy before inventing custom SSG.
+
+## UI
+
+- 86-screen coverage maintained
+- desktop/tablet/mobile
+- keyboard/focus
+- loading/error/empty/permission states
+- permission/server effects parity
+- no feature deletion without explicit approval
 
 ---
 
 # 14. Rollback
 
-## Route migration
+Route migration:
 
-Worker Routeを外し、現行 `flamenode-web` Custom Domainへ戻す。
+- remove new Worker Route → CURRENT `flamenode-web`
 
-## API
+API:
 
-Hono cutover前はlegacy endpointを残す。
-client切替とserver削除を同一PRにしない。
+- keep legacy endpoint until client/new endpoint parity is stable
 
-## UI
+UI:
 
-new UI route failure時はold routeへ戻せる期間を確保する。
+- retain old route during migration window when practical
 
-## DB
+DB:
 
-移行だけを理由に破壊migrationを行わない。
-新旧経路共存期間中はschema compatibilityを維持する。
+- do not introduce destructive migration solely for framework migration
 
----
+Auth:
 
-# 15. Acceptance gates
-
-## Public
-
-- no request-time SSR
-- visibility fail-closed
-- route alias correctness
-- SEO / canonical / OGP
-- Static Asset served for HTML
-- gateway p99 CPU < 5ms target
-- 1102 = 0
-
-## API
-
-初期target:
-
-- simple reads p95 < 5ms
-- normal mutation p95 < 8ms
-- auth-heavy p95 < 9ms
-- 1102 = 0
-
-CPUは実Cloudflare metricsで判断する。
-ローカル値だけでproduction gateを通さない。
-
-## Build
-
-初期PoC target:
-
-- Astro full build < 60s ideal
-- < 120s acceptable
-- public content反映 < 90s target
-- generation loss = 0
-- Static Assets file countはFree制限に十分余裕を持つ
-
-閾値超過時はbuild input / page count / generation strategyを分析する。
-独自SSGへ即座に逃げない。
-
-## UI
-
-- redesign coverage維持
-- desktop/tablet/mobile
-- keyboard/focus
-- loading/error/empty/permission states
-- production semantics parity
+- CURRENT auth remains rollback path until compatibility is proven
 
 ---
 
-# 16. `/flamenode-migration` execution contract
+# 15. Document ownership
 
-標準入口は `.claude/commands/flamenode-migration.md`。
+| Document | Owns |
+| --- | --- |
+| `README.md` | architecture/invariants/phases/gates |
+| `AGENT_PROTOCOL.md` | Claude/Codex/Antigravity execution/loop contract |
+| `STATUS.md` | current task/owner/progress/blockers |
+| `FUNCTION_INVENTORY.md` | existing capability/parity/removal ledger |
+| `ROUTE_MATRIX.md` | route/screen migration disposition |
+| `API_MATRIX.md` | Server Action/Route Handler/API disposition |
+| `docs/design-redesign/*` | visual/information architecture proposal |
+| code/test/config | exact implementation truth |
 
-1 invocationで **1つのREADY taskだけ** 実行する。
-
-開始時:
-
-1. `AGENTS.md`
-2. `docs/AI_CONTEXT.md`
-3. この文書
-4. `docs/migration/STATUS.md`
-5. 現在タスクに必要なmatrix
-6. 対象コード/test
-
-終了時:
-
-- task state更新
-- validation結果更新
-- CURRENT/TARGET/BRIDGE/REMOVABLEの変化を記録
-- next READY taskを明示
-- BLOCKED理由を明示
-
-`/loop` と併用してもこの契約を変えない。
-
----
-
-# 17. Agent implementation rules
-
-必ずする:
-
-- currentとtargetを区別する
-- code/testを正本にする
-- phase内だけ変更する
-- new pathとlegacy pathのparity testを作る
-- rollback方法を書く
-- compatibility layerの削除条件を書く
-- Cloudflare binding/routeを実設定と照合する
-- framework-neutral business logicを優先する
-
-してはいけない:
-
-- 先に旧Nextを削除
-- authをついでに書き直す
-- UIだけ見てpermissionを再設計
-- Queue/R2を全面置換
-- 独自Island runtime
-- 独自SSG
-- public HTMLをrequest中に生成
-- public projectionへprivate fieldを追加
-- buildごとに全Workersを再deploy
-- mainへ直接push
-- production操作を無断実行
-
----
-
-# 18. Documentation ownership
-
-- `README.md`: architecture / invariants / phases / gates / rollback
-- `STATUS.md`: 現在地・明示進捗・次READY
-- `ROUTE_MATRIX.md`: route単位のmigration contract
-- `API_MATRIX.md`: server action/API単位のmigration contract
-- `docs/design-redesign/*`: UI/UX proposal / acceptance input
-- code/test/config: exact implementation truth
-
-Markdownへ固定してよい:
-
-- architecture boundary
-- invariants
-- phase order
-- acceptance gate
-- rollback policy
-- ownership rule
-
-コード/configを正本にする:
-
-- binding name
-- exact schema columns
-- exact route list
-- environment values
-- API field details
-- current counts
-
----
-
-# 19. Agent start checklist
-
-migration taskを受けたagentは実装前に以下を判定する。
-
-1. Current Phase
-2. Current Task ID
-3. CURRENT behavior
-4. TARGET behavior
-5. 触るroute/domain
-6. 維持すべきtest/contract
-7. visibility/auth/permission影響
-8. rollback
-9. production操作要否
-
-不明なら推測で実装範囲を広げず、STATUSをBLOCKEDにする。
+Do not duplicate rapidly changing implementation details across multiple Markdown files.
