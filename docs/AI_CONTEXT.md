@@ -3,117 +3,123 @@
 > Status: Active
 > Last verified: 2026-10-06
 > Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
-> Source of truth: `AGENTS.md`, current code/test, `src/lib/db/schema.ts`, `migrations/`
+> Source of truth: `AGENTS.md`、現行コード/test、`src/lib/db/schema.ts`、`migrations/`
+> Migration source of truth: `docs/migration/README.md`
 
-規範は [`AGENTS.md`](../AGENTS.md)。この文書は **タスク別に次に読むActive文書を選ぶ索引**。
+規範・優先順位・不変条件・モデル停止条件の正本は [`AGENTS.md`](../AGENTS.md)。
+この文書は **タスクごとに次に読むものを選ぶ索引** とする。
 
 ## 最小手順
 
-1. 依頼を1文で固定する。
+1. 依頼を1文で言い換える。
 2. 下表から該当行を1つ選ぶ。
-3. 対象コードと関連testを読む。
-4. migration taskでは共通protocolとSTATUSを使う。
-5. 推測でscopeを拡大しない。
+3. 対象コードと関連testを直接読む。
+4. migration taskだけ `docs/migration/AGENT_PROTOCOL.md` と `STATUS.md` を読む。
+5. 推測で埋めず、phase/task内の最小差分にする。
 
 禁止:
 
-- repo/Historical/archiveの一括読込
-- migrationと無関係な作業へmigration文書を大量投入
-- redesign mockをpermission/API/DB仕様の正本にする
+- source/archive/Historicalの一括読込
+- migrationと無関係な作業へmigration文書を持ち込む
+- redesign mockをproduction機能仕様そのものと誤認する
 
 ## タスク別読取表
 
-| Task | First read | Then verify |
+| タスク | 最初に読む | 次に確認する正本 |
 | --- | --- | --- |
-| 一般実装・不具合 | 対象file | related tests、`package.json` |
-| **platform/UI migration共通** | **`docs/migration/AGENT_PROTOCOL.md`** | `README.md` → `STATUS.md` →対象function ledger/matrix |
-| **Claude `/flamenode-migration` / loop** | **`.claude/commands/flamenode-migration.md`** | shared AGENT_PROTOCOL |
-| **Codex migration** | **`.codex/skills/flamenode-migration/SKILL.md`** | shared AGENT_PROTOCOL |
-| **Antigravity migration** | **`.agents/skills/flamenode-migration/SKILL.md`** | shared AGENT_PROTOCOL |
-| UI redesign production移植 | `docs/migration/AGENT_PROTOCOL.md` | `docs/design-redesign/README.md` review order + function ledger |
-| Public Astro/SSG/Island | `docs/migration/README.md` | `ROUTE_MATRIX.md`、static-delivery、function ledger |
-| Private SPA | `docs/migration/README.md` | current dashboard/entry/manage/admin + function ledger |
-| Hono/API/Server Action | `docs/migration/API_MATRIX.md` | current action/handler、function ledger、contract tests |
-| Worker Route / Custom Domain | `docs/migration/README.md` | actual Cloudflare config、wrangler、rollback gate |
-| Auth migration | `docs/migration/README.md` | `src/lib/auth/`、account linking、session/permission tests |
-| DB / migration | `docs/database/README.md`, `docs/operations/migrations.md` | schema、migrations、change-log |
-| DB canonical/legacy conversion | `docs/database/canonical-migration-plan.md` | migration、fixture、verification scripts |
-| Auth/permission/owner (non-migration) | relevant Active doc | `src/lib/auth/`、permission core、contract tests |
-| Public API/DTO | target Route Handler | `src/lib/api/publicDto.ts`、contract tests |
-| Worker/Cron/Queue | `docs/operations/workers.md` | `workers/`、wrangler、worker tests |
-| YouTube sync | `docs/operations/youtube-playlist-sync.md` | sync Worker、quota code |
-| UI/form (non-migration) | `docs/operations/ui-acceptance.md` | target component/CSS/tests |
-| Public static/degraded | `docs/operations/static-delivery.md` | publicData loader、visibility code |
-| Audit/restore | `docs/operations/audit-and-restore.md` | mutation、audit helper、restore tests |
-| Local | `LOCAL.md` | package scripts、`.dev.vars.example` |
-| Deploy | `DEPLOY.md` | `cf:*` scripts、Cloudflare scripts |
-| Historical investigation | `docs/historical/README.md` | one necessary document only |
+| 一般実装・不具合 | 対象ファイル | 関連test、`package.json` |
+| **新基盤移行 / UI再設計 / 継続実行** | **`docs/migration/AGENT_PROTOCOL.md` → `STATUS.md`** | `docs/migration/README.md`、対象function ledger / matrix / code/test |
+| **既存機能棚卸し** | **`docs/migration/FUNCTION_INVENTORY.md`** | 対象`functions/*.md`、現行route/action/API/job/test |
+| **Public Astro/SSG/Island移行** | **`docs/migration/AGENT_PROTOCOL.md`** | `ROUTE_MATRIX.md`、`docs/operations/static-delivery.md`、visibility関連 |
+| **Private SPA移行** | **`docs/migration/AGENT_PROTOCOL.md`** | `ROUTE_MATRIX.md`、現行dashboard/entry/manage/admin、auth/permission test |
+| **Hono API / Server Action移行** | **`docs/migration/AGENT_PROTOCOL.md`** | `API_MATRIX.md`、対象function ledger、現行Action/Route Handler/test |
+| **Worker Route / Custom Domain切替** | **`docs/migration/AGENT_PROTOCOL.md`** | Cloudflare実設定、wrangler、rollback gate |
+| **Auth移行** | **`docs/migration/AGENT_PROTOCOL.md`** | `src/lib/auth/`、account linking、session/permission test |
+| DB・migration | `docs/database/README.md`、`docs/operations/migrations.md` | `src/lib/db/schema.ts`、`migrations/`、change-log |
+| DB正本移行・旧データ変換 | `docs/database/canonical-migration-plan.md` | migration、fixture、検証script |
+| 認証・権限・owner（非移行） | 関連Active | `src/lib/auth/`、権限判定、contract test |
+| 公開API・DTO（非移行） | 対象Route Handler | `src/lib/api/publicDto.ts`、契約test |
+| Worker・Cron・Queue（非移行） | `docs/operations/workers.md` | `workers/`、各`wrangler.toml`、worker test |
+| YouTube同期 | `docs/operations/youtube-playlist-sync.md` | 同期Worker、quotaコード |
+| UI・フォーム（非移行） | `docs/operations/ui-acceptance.md` | 対象page/component、CSS、test |
+| 公開静的・degraded D1 | `docs/operations/static-delivery.md` | `src/lib/publicData/loader.ts`、visibility関連 |
+| 監査・復元 | `docs/operations/audit-and-restore.md` | mutation、audit helper、復元test |
+| ローカル起動 | `LOCAL.md` | `package.json`、`.dev.vars.example` |
+| デプロイ | `DEPLOY.md` | `package.json` の `cf:*`、`scripts/cloudflare-*.mjs` |
+| 過去仕様 | `docs/historical/README.md` | 必要資料1件だけ |
 
-旧形式importは通常runtime互換ではない。`/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/` に限定する。
+旧形式インポートは通常ランタイムの互換ではない。管理者専用境界 `/admin/import`、`/api/admin/import/legacy`、`src/lib/import/legacy/` に限定する。
 
-## Migration vocabulary
+## Migration taskの分類
 
-- `CURRENT`: productionで動作する現行経路
+- `CURRENT`: 現在productionで動く実装
 - `TARGET`: 移行後構成
-- `BRIDGE`: 共存期間の互換層
-- `REMOVABLE`: parity確認後のみ削除可能
+- `BRIDGE`: 移行期間のみ存在する互換層
+- `REMOVABLE`: parity確認後に削除する旧実装
 
-## Function preservation
+PR・TODO・STATUSでは必要に応じて明示する。
 
-migration/redesign taskでは `docs/migration/FUNCTION_INVENTORY.md` から対象domain ledgerだけを読む。
+## UI移行
 
-- 見た目の完成 != function parity
-- `DETAIL_AUDIT_REQUIRED` を移行済み扱いしない
-- 削除は `REMOVAL_PROPOSED` → explicit approval → `REMOVED_APPROVED`
-- screen DONEには関連function IDsのparityが必要
+デザインは `docs/design-redesign/` と `/dev/redesign` を参照する。
+productionの機能・権限・API・DB副作用は現行code/testと `FUNCTION_INVENTORY.md` を正本とする。
 
-## Framework migration
+画面の見た目だけ完成しても機能parity完了ではない。
 
-- `packages/domain` にNext/Astro/Hono/React Routerを入れない
-- `packages/contracts` をHTTP frameworkへ依存させない
+## Framework移行
+
+framework APIをbusiness logicへ侵入させない。
+
+- `packages/domain` から Next / Astro / Hono / React Router をimportしない
+- `packages/contracts` はHTTP frameworkへ依存しない
 - public projectionとprivate/auth dataを混ぜない
-- Server Action→Honoは、先にdomain service抽出
+- Next Server ActionをHonoへ移す前にdomain serviceを抽出する
 
 ## Continuous execution
 
-product固有commandは `docs/migration/AGENT_PROTOCOL.md` を正本とする。
+詳細は `docs/migration/AGENT_PROTOCOL.md`。
 
-共通:
+共通不変条件:
 
 - 1 iteration = 1 MIG task
-- task ownerをSTATUSへ記録
-- iteration終端でDONE/REVIEW/BLOCKED
-- STATUS/ledger/matrixをpersistしてから次へ
-- Phase Gate自動承認禁止
-- approval-required production actionで停止
+- 開始時にownerと`IN_PROGRESS`を記録
+- 終了時に`DONE` / `REVIEW` / `BLOCKED`
+- STATUS/inventory/matrix更新なしで次へ進まない
+- Phase Gateを自動承認しない
+- production操作が必要になったら停止する
+
+製品別の呼出方法はprotocolだけを正本にする。
 
 ## 変更手順
 
-1. CURRENT contract確認
-2. function IDs / route/API IDs確認
-3. STATUSのtask/owner確認
-4. scope/non-scope固定
-5. implementation
-6. parity/acceptance検証
-7. rollback確認
-8. progress Markdown更新
-9. legacy削除は後続task/PR
+1. MIG taskと対象route/functionを決める。
+2. 現行test/codeから維持契約を固定する。
+3. function inventoryの詳細度を確認する。
+4. framework-neutral層を先に作る。
+5. 新経路をshadow/parallelで実装する。
+6. parityを検査する。
+7. routeを限定切替する。
+8. rollback可能性を確認する。
+9. 旧経路削除は別task/PRにする。
+10. STATUSと該当inventory/matrixを更新する。
 
-## 検査
+## 検査の選び方
 
-| Change | Run |
+| 変更 | 実行 |
 | --- | --- |
-| Markdown only | `npm run check:docs`, `npm run check:project-docs` |
-| TS/UI | typecheck、lint、related tests、必要ならbuild |
-| Astro/Public | static build + SEO/route/visibility acceptance |
-| React SPA | navigation/auth/permission acceptance |
-| Hono API | contract/integration + CPU対象確認 |
-| Worker | `npm run test:workers` + related tests |
-| DB/permission/API | relevant checks/integration |
-| route cutover | smoke + rollback; production action only with approval |
-| release-wide | `verify:fast`、必要ならfull/build/Cloudflare checks |
+| Markdownのみ | `npm run check:docs`、`npm run check:project-docs` |
+| TypeScript / UI | typecheck、lint、関連test、必要ならbuild |
+| Astro/Public | 上記 + static build + SEO/route/visibility acceptance |
+| React SPA | 上記 + navigation/auth/permission acceptance |
+| Hono API | 上記 + contract/integration + CPU計測対象確認 |
+| Worker | 上記 + `npm run test:workers` |
+| DB / 権限 / API | 上記 + 関連check/integration |
+| route切替 | smoke + rollback確認 + production操作は明示依頼時のみ |
+| release影響 | `verify:fast`、必要ならfull/build/Cloudflare関連check |
+
+`npm run check:project-docs` はmigration進捗MDの整合チェックも含む。
 
 ## 完了判定
 
-新コードが動くだけでは完了しない。
-`STATUS.md` task Acceptance、affected function parity、Phase Gateを満たすこと。
+「新コードが動く」だけでは完了にしない。
+`STATUS.md` のtask acceptance、該当function parity、`README.md` のPhase Gateを満たした時だけ次へ進む。
