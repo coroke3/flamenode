@@ -92,6 +92,21 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
 
+## MIG-0007 evidence
+
+Static/public deliveryをcode/testsで追跡し、25 static rebuild targetとphysical artifact family、canonical alias、visibility fence、repair/fallbackをCURRENT_VERIFIED化した。
+
+- D1はcanonical source、R2/KV/Cache APIはprojection/delivery state。
+- public→privateはR2 deny manifest block/token確認をcanonical D1 mutationより先に行う。private→publicも deny-first のまま `release_pending` とし、必要artifactが現行D1より新しいことを確認してからR2 token CAS + D1 state/token CASで解除する。
+- release CAS競合時は新しいD1 tokenのblockを復元する。event renameは旧ID tombstoneを残すためgeneric CRUD化不可。
+- video YouTube ID / X ID casingはcanonical probe/rewriteを経由し、alias missはcanonical targetへenqueueする。
+- `enforce` でvisibility manifestが読めない場合はunavailable。degraded D1でも同じvisibility contextを再適用し、stale collectionも必要なmanifestなしでは返さない。
+- search/users v2 generationはimmutable objects -> manifest/commit-point。欠損shardを部分結果として返さず、complete fallbackかunavailableへ落とす。
+- artifact tracking/hash/dedupeはrepair/visibility/missを隠さない条件でのみPUT省略を許す。
+- commonizationはtyped artifact descriptor/publication protocol/fence lifecycle/fallback envelope/dependency graphを強化し、entity-specific release prerequisiteやrules no-stale、event rename、repairは明示的に残す。
+
+MIG-0007時点でfrontend product-contract変更を必須とするoptimization blockerは0。TARGETでは配信ownershipを変えても `ready/empty/stale/reflecting/unavailable/not_found`、alias、visibility、permission semanticsを維持する。
+
 ## MIG-0006 evidence
 
 Workers Observabilityをread-only集計し、CURRENT request CPU/resource failureを測定した。countはABR sampling（主に sampleInterval ~= 10）による推定値として扱い、individual invocationで resource failureの存在も確認した。
