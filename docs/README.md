@@ -13,7 +13,7 @@
 
 移行:
 
-`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/README.md` → `migration/STATUS.md` → `migration/FUNCTION_INVENTORY.md` → 対象matrix/code/test
+`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/README.md` → `migration/STATUS.md` → `migration/FUNCTION_INVENTORY.md` → 対象ledger/matrix/code/test
 
 Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 
@@ -54,7 +54,7 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 - TARGET architecture: `migration/README.md`
 - execution/loop semantics: `migration/AGENT_PROTOCOL.md`
 - progress/current owner/next READY: `migration/STATUS.md`
-- existing feature preservation: `migration/FUNCTION_INVENTORY.md`
+- existing feature preservation: `migration/FUNCTION_INVENTORY.md` + `migration/functions/*.md`
 - route disposition: `migration/ROUTE_MATRIX.md`
 - server/API disposition: `migration/API_MATRIX.md`
 - visual/information architecture: `design-redesign/`
@@ -62,6 +62,8 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 `design-redesign/` is not the source of truth for permissions, DB/API behavior, side effects, or workflow semantics.
 
 ## Agent invocation
+
+共通実行契約は [`migration/AGENT_PROTOCOL.md`](migration/AGENT_PROTOCOL.md)。下記は薄い入口だけ。
 
 ### Claude Code
 
@@ -72,11 +74,13 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 
 ### OpenAI Codex
 
-Use the repo-scoped `flamenode-migration` skill. Example:
+Repo-scoped `flamenode-migration` skillを使う。
 
 ```text
-Use the flamenode-migration skill and execute the next READY task.
+Use the flamenode-migration skill and execute exactly one READY MIG task.
 ```
+
+長期実行はCodex `/goal` と組み合わせられる。正確なprompt/停止条件はprotocolを参照する。
 
 ### Google Antigravity
 
@@ -84,9 +88,22 @@ Use the flamenode-migration skill and execute the next READY task.
 /flamenode-migration
 ```
 
-The workspace skill under `.agents/skills/` is the adapter. The workspace agent can also be selected via `/agents`.
+- slash command: `.agents/workflows/flamenode-migration.md`
+- on-demand knowledge: `.agents/skills/flamenode-migration/SKILL.md`
+- workspace rule: `.agents/rules/flamenode-project.md`
 
-All tools must use the same repository progress state; tool-local chat history is not authoritative.
+全agentは同じrepository progress stateを使う。tool-local chat historyは正本ではない。
+
+## Validation
+
+文書のみの変更:
+
+```sh
+npm run check:docs
+npm run check:project-docs
+```
+
+`check:project-docs` はmigration task/function/inventoryの整合確認を含む。
 
 ## Historical
 
@@ -94,6 +111,6 @@ All tools must use the same repository progress state; tool-local chat history i
 - [`db-history/README.md`](db-history/README.md)
 - `.claude/flamenode/`
 
-Read only the one historical document necessary for the task.
+必要なhistorical文書1件だけを読む。
 
-When implementation changes, update only the relevant Active docs. Do not duplicate exact schema columns, live IDs, or rapidly changing implementation values into Markdown unless they are part of a migration acceptance record.
+実装変更時は該当Activeだけ更新する。schema列・live ID・急速に変化する実装値をMarkdownへ重複させない。ただしmigration acceptance evidenceとして必要なsnapshot値は例外とする。
