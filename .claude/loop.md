@@ -1,0 +1,1 @@
+Advance FlameNode migration by one safe cycle using `/flamenode-migration`. Re-read `docs/migration/PROGRESS.md` before each wake, perform only the current/next ready bounded work item, verify it, persist evidence and next state, then stop that iteration. Obey every stop condition in `docs/migration/AGENT_PROTOCOL.md`.

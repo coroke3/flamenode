@@ -1,0 +1,1 @@
+Use the `flamenode-migration` project skill and execute exactly one safe migration cycle. Read `docs/migration/PROGRESS.md` and `docs/migration/WORK_ITEMS.md`, perform the current/next ready work item slice, verify it, and persist progress before returning. Do not perform production cutover, Remote D1, secret, or destructive operations without explicit approval.

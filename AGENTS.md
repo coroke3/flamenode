@@ -1,8 +1,8 @@
 # AGENTS.md
 
 > Status: Active
-> Last verified: 2026-07-25
-> Verified against commit: `dc46eefa`
+> Last verified: 2026-10-06
+> Verified against baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Source of truth: `src/lib/db/schema.ts`, `migrations/`, `package.json`, `wrangler.toml`
 
 ## 開始（これだけ）
@@ -13,20 +13,32 @@
 
 禁止: リポジトリ全体、`.claude/flamenode/source/`、`archive/`、完了済み phase、Historical の一括読込。
 
+## 長期 migration の例外
+
+ユーザーが `/flamenode-migration`、`flamenode-migration` skill、または `docs/migration/WORK_ITEMS.md` の item を明示した場合だけ、[`docs/migration/README.md`](docs/migration/README.md) を長期移行の正本として使う。
+
+- 下記「構成を維持」の現行 stack は **通常タスクの既定値 / migration の baseline**。承認済み migration item は target architecture に向けて段階変更してよい。
+- ただし各 cutover gate までは production の既存挙動を維持し、Strangler/rollback を保つ。
+- migration は `docs/migration/PROGRESS.md` と `WORK_ITEMS.md` に状態を永続化し、chat memory だけで進捗管理しない。
+- 86画面の route 正本は `docs/design-redesign/ROUTE_INVENTORY.md`。移行文書へ重複コピーしない。
+- production route切替、Remote D1、production secret、破壊的変更は migration 中でも明示依頼時だけ。
+
 ## 矛盾時の優先順位
 
 1. 現行コード・設定・test
 2. `src/lib/db/schema.ts` と `migrations/`
 3. Status が `Active` の文書（このファイルが規範）
-4. `設計/` の現行設計
-5. Historical / archive / 旧監査（経緯のみ。現行根拠にしない）
+4. 明示された migration task では `docs/migration/` の target/transition/progress
+5. `設計/` の現行設計
+6. Historical / archive / 旧監査（経緯のみ。現行根拠にしない）
 
 ## 正本リンク
 
 | 領域 | 正本 |
 | --- | --- |
 | DB構造 | `src/lib/db/schema.ts` |
-| migration | `migrations/` |
+| migration SQL | `migrations/` |
+| 長期architecture migration | `docs/migration/README.md`, `docs/migration/PROGRESS.md` |
 | DB履歴 | `docs/database/change-log.md` |
 | binding | `wrangler.toml`, `workers/*/wrangler.toml` |
 | ローカル | `LOCAL.md` |
@@ -44,17 +56,17 @@
 - `event_staff.permission_preset = 'owner'` が代表者正本。owner を 0 人にしない。
 - 権限は UI だけでなく Server Action または Route Handler で検証する。
 - 公開APIは明示 DTO だけを返す。
-- 構成を維持: Cloudflare Workers + OpenNext + Workers Static Assets、D1、R2、KV、Queue 6本（wake 3 + DLQ 3）、Recovery Cron Worker 3本。
-- production は Cloudflare Workers Builds の単一 Git 連携のみ。deploy 順は Web→fast→content→sync→smoke。
+- **通常タスクでは** 構成を維持: Cloudflare Workers + OpenNext + Workers Static Assets、D1、R2、KV、Queue 6本（wake 3 + DLQ 3）、Recovery Cron Worker 3本。migration task は上の例外に従う。
+- production は現行では Cloudflare Workers Builds の単一 Git 連携。migration が deploy pipeline を切り替えるまでは deploy 順 Web→fast→content→sync→smoke を維持する。
 - Remote D1 の deploy 前検査は read-only。migration の自動適用はしない。
 - 実 Cloudflare deploy、Remote D1、production secret 操作は **明示依頼時だけ**。
 
 ## 作業規則
 
 - 依頼を1文で固定し、対象と非対象を先に決める。
-- 読む文書は原則3件以内（この文書 + AI_CONTEXT 行 + Active 1件）。
+- 読む文書は原則3件以内（この文書 + AI_CONTEXT 行 + Active 1件）。migration skill は `PROGRESS.md` / `WORK_ITEMS.md` を状態正本として追加で読んでよいが、無関係な migration 文書を一括読込しない。
 - 同一情報を複数文書から集めない。同一ファイルを複数エージェントへ同時編集させない。
-- DB・認証・security・公開API・破壊的変更・共有型の最終判断は Lead。
+- DB・認証・security・公開API・visibility・破壊的変更・共有型の最終判断は Lead。
 - code と該当 Active 文書を同じ変更で更新する。Historical は書き換えない。
 - サブエージェントの差分と test 結果は Lead が再確認する。
 
@@ -64,19 +76,19 @@
 | --- | --- |
 | 軽量 | 検索、一覧、単純置換、限定的な文書修正、test 結果整理 |
 | 中位 | 境界が明確な通常実装、局所リファクタ |
-| 上位 | DB、権限、security、公開API、破壊的変更、仕様衝突、最終レビュー |
+| 上位 | DB、権限、security、公開API、visibility、破壊的変更、仕様衝突、最終レビュー |
 
 軽量モデルは次の場合 **実装を止めて上位へ上げる**。
 
 - 正本が一意に決まらない
 - 変更が3領域以上へ波及する
-- migration、権限緩和、データ削除、公開項目追加を含む
+- migration SQL、権限緩和、データ削除、公開項目追加を含む
 - 既存 test と依頼が衝突する
 - Cloudflare 実操作・Remote D1・production secret が必要
 
 ## 検査
 
-変更種別に必要なものだけ実行する。選び方は `docs/AI_CONTEXT.md` §7。未実行は理由を書く。
+変更種別に必要なものだけ実行する。選び方は `docs/AI_CONTEXT.md` §検査。未実行は理由を書く。
 
 ```sh
 npm run typecheck
