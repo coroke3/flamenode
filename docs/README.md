@@ -3,82 +3,97 @@
 > Status: Active
 > Last verified: 2026-10-06
 > Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
-> Source of truth: `AGENTS.md`、現行コード/test、DB schema/migrations
+> Source of truth: `AGENTS.md`, current code/test, `src/lib/db/schema.ts`, `migrations/`
 
-## AIの読取順
+## AI read order
 
 通常:
 
-`../AGENTS.md` → `AI_CONTEXT.md` の該当行 → 対象コード/test
+`../AGENTS.md` → `AI_CONTEXT.md`該当行 → 対象コード/test
 
 移行:
 
-`../AGENTS.md` → `AI_CONTEXT.md` の移行行 → `migration/README.md` → `migration/STATUS.md` → 対象matrix/code/test
+`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/README.md` → `migration/STATUS.md` → `migration/FUNCTION_INVENTORY.md` → 対象matrix/code/test
 
 Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 
 ## CURRENT / TARGET
 
-**CURRENT production** は Cloudflare Workers + OpenNext + Workers Static Assets。正確な実装・bindingはコード / `wrangler.toml` / Cloudflare実設定を正本とする。
+- **CURRENT production**: Cloudflare Workers + OpenNext + Workers Static Assets。正確な実装・bindingはcode/config/Cloudflare実設定が正本。
+- **TARGET migration**: [`migration/README.md`](migration/README.md) が正本。
+- CURRENTとTARGETは移行完了まで併存する。
 
-**TARGET migration architecture** は `migration/README.md` を正本とする。移行完了まではCURRENTとTARGETが併存する。
+## Active entry points
 
-## Active入口
-
-| 目的 | 文書 |
+| Purpose | Document |
 | --- | --- |
-| AI作業判断 | [AI_CONTEXT.md](AI_CONTEXT.md) |
-| **Next/OpenNextからの段階移行** | **[migration/README.md](migration/README.md)** |
-| **移行の現在地 / 次タスク** | **[migration/STATUS.md](migration/STATUS.md)** |
-| route移行契約 | [migration/ROUTE_MATRIX.md](migration/ROUTE_MATRIX.md) |
-| API/Server移行契約 | [migration/API_MATRIX.md](migration/API_MATRIX.md) |
-| UI/UX再設計proposal | [design-redesign/README.md](design-redesign/README.md) |
-| UI受入 | [operations/ui-acceptance.md](operations/ui-acceptance.md) |
-| 公開static/visibility | [operations/static-delivery.md](operations/static-delivery.md) |
-| Worker/Queue | [operations/workers.md](operations/workers.md) |
-| 運用タスク表 | [operations/README.md](operations/README.md) |
-| DB運用 | [database/README.md](database/README.md) |
-| DB変更履歴 | [database/change-log.md](database/change-log.md) |
-| 未完了 | [implementation-backlog.md](implementation-backlog.md) |
-| ローカル | [../LOCAL.md](../LOCAL.md) |
-| デプロイ | [../DEPLOY.md](../DEPLOY.md) |
+| universal agent rules | [`../AGENTS.md`](../AGENTS.md) |
+| task routing | [`AI_CONTEXT.md`](AI_CONTEXT.md) |
+| **multi-agent migration protocol** | **[`migration/AGENT_PROTOCOL.md`](migration/AGENT_PROTOCOL.md)** |
+| **target migration architecture** | **[`migration/README.md`](migration/README.md)** |
+| **progress / next READY task** | **[`migration/STATUS.md`](migration/STATUS.md)** |
+| **existing-function parity inventory** | **[`migration/FUNCTION_INVENTORY.md`](migration/FUNCTION_INVENTORY.md)** |
+| route migration | [`migration/ROUTE_MATRIX.md`](migration/ROUTE_MATRIX.md) |
+| API/server migration | [`migration/API_MATRIX.md`](migration/API_MATRIX.md) |
+| UI/UX redesign proposal | [`design-redesign/README.md`](design-redesign/README.md) |
+| UI acceptance | [`operations/ui-acceptance.md`](operations/ui-acceptance.md) |
+| static delivery / visibility | [`operations/static-delivery.md`](operations/static-delivery.md) |
+| Worker / Queue | [`operations/workers.md`](operations/workers.md) |
+| operations | [`operations/README.md`](operations/README.md) |
+| DB | [`database/README.md`](database/README.md) |
+| DB history | [`database/change-log.md`](database/change-log.md) |
+| non-migration backlog | [`implementation-backlog.md`](implementation-backlog.md) |
+| local | [`../LOCAL.md`](../LOCAL.md) |
+| deploy | [`../DEPLOY.md`](../DEPLOY.md) |
 
-## 移行中の正本分担
+## Migration source-of-truth split
 
-- 現行productionの挙動: code / test
-- DB: schema / migrations
-- Cloudflare CURRENT: wrangler / Cloudflare実設定
+- CURRENT behavior: code/test
+- DB: schema/migrations
+- CURRENT Cloudflare: wrangler + actual Cloudflare settings
 - TARGET architecture: `migration/README.md`
-- 現在地・次READY task: `migration/STATUS.md`
-- route mapping: `migration/ROUTE_MATRIX.md`
-- server/API mapping: `migration/API_MATRIX.md`
-- UI proposal: `design-redesign/`
+- execution/loop semantics: `migration/AGENT_PROTOCOL.md`
+- progress/current owner/next READY: `migration/STATUS.md`
+- existing feature preservation: `migration/FUNCTION_INVENTORY.md`
+- route disposition: `migration/ROUTE_MATRIX.md`
+- server/API disposition: `migration/API_MATRIX.md`
+- visual/information architecture: `design-redesign/`
 
-`design-redesign/` は次期UI proposalであり、機能・権限・DB/API契約の正本ではない。
+`design-redesign/` is not the source of truth for permissions, DB/API behavior, side effects, or workflow semantics.
 
-## 移行コマンド
+## Agent invocation
 
-標準入口:
+### Claude Code
+
+```text
+/flamenode-migration
+/loop /flamenode-migration
+```
+
+### OpenAI Codex
+
+Use the repo-scoped `flamenode-migration` skill. Example:
+
+```text
+Use the flamenode-migration skill and execute the next READY task.
+```
+
+### Google Antigravity
 
 ```text
 /flamenode-migration
 ```
 
-反復実行:
+The workspace skill under `.agents/skills/` is the adapter. The workspace agent can also be selected via `/agents`.
 
-```text
-/loop /flamenode-migration
-```
+All tools must use the same repository progress state; tool-local chat history is not authoritative.
 
-各iterationは `migration/STATUS.md` の1 MIG taskだけを進める。
-Phase Gate、production deploy、Worker Route/Custom Domain、Remote D1、secret変更は自動突破しない。
+## Historical
 
-## Historical（必要時のみ）
-
-- [historical/README.md](historical/README.md)
-- [db-history/README.md](db-history/README.md)
+- [`historical/README.md`](historical/README.md)
+- [`db-history/README.md`](db-history/README.md)
 - `.claude/flamenode/`
 
-必要な資料1件だけを読む。
+Read only the one historical document necessary for the task.
 
-実装変更時は該当Active文書だけ更新する。schema列・実装・設定値をMarkdownへ過剰複製しない。
+When implementation changes, update only the relevant Active docs. Do not duplicate exact schema columns, live IDs, or rapidly changing implementation values into Markdown unless they are part of a migration acceptance record.
