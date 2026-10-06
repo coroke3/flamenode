@@ -104,8 +104,23 @@ BASELINE_KNOWN
 
 ## Server Action seed surface
 
-2026-10-06時点で少なくとも34ファイルの`"use server"` surfaceを確認済み。
-`MIG-0003` でexport/function/caller単位へ展開し、page内inline actionも探索する。
+2026-10-06のGitHub code searchでCURRENTのServer Action surfaceを次の2系統として固定した。
+
+```text
+src/lib/actions/* の file-level `"use server"` modules: 34 files
+app/* の inline `"use server"` pages:                3 files
+```
+
+inline確認済み:
+
+```text
+app/(auth)/entry/page.tsx
+app/(admin)/admin/api-endpoints/page.tsx
+app/(admin)/admin/x-id-merges/page.tsx
+```
+
+これは**ファイル数のbaseline**であり、Action件数ではない。
+`MIG-0003` では34 moduleの全exported async functionと3 inline pageの全actionを関数/caller単位へ展開する。
 
 主な領域:
 
@@ -127,6 +142,7 @@ static rebuild
 ```
 
 `src/lib/actions/`だけを見て完了扱いにしない。
+また34+3というファイル数を、実際のaction function数と誤認しない。
 
 ## API seed surface
 
@@ -263,7 +279,7 @@ backend移行ではCURRENT実装を機械的にコピーしない。
 | Task | Inventory responsibility |
 | --- | --- |
 | `MIG-0002` | 86 screen/page/route CURRENT baseline + 89 frontend-exposed capability baseline |
-| `MIG-0003` | all Server Action exports + inline actions + optimization observations |
+| `MIG-0003` | 34 file-level Server Action modules + 3 inline-action pagesを全action function/callerへ展開 + optimization observations |
 | `MIG-0004` | all Route Handler HTTP methods + contract/duplication observations |
 | `MIG-0005` | Cloudflare topology/bindings/routes/build |
 | `MIG-0006` | CPU/1102/request baseline |
