@@ -15,6 +15,9 @@
 
 `../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/README.md` → `migration/STATUS.md` → `migration/FUNCTION_INVENTORY.md` → 対象ledger/matrix/code/test
 
+UI/frontendを触るmigration taskは `migration/FRONTEND_FEATURE_INVENTORY.md` の対象sectionを追加で読む。
+backend/action/API/jobを触るmigration taskは `migration/BACKEND_OPTIMIZATION_LEDGER.md` を確認し、改善候補を写経せず評価する。
+
 branch / PR / merge / handoffを伴う移行作業では [`migration/GIT_WORKFLOW.md`](migration/GIT_WORKFLOW.md) を正本とする。
 正本の重複判断が必要な場合だけ [`migration/DOC_MAP.md`](migration/DOC_MAP.md) を読む。
 
@@ -37,7 +40,9 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 | **target migration architecture** | **[`migration/README.md`](migration/README.md)** |
 | **progress / next READY task** | **[`migration/STATUS.md`](migration/STATUS.md)** |
 | **documentation source map / dedupe rules** | **[`migration/DOC_MAP.md`](migration/DOC_MAP.md)** |
-| **existing-function parity inventory** | **[`migration/FUNCTION_INVENTORY.md`](migration/FUNCTION_INVENTORY.md)** |
+| **existing-function implementation/parity inventory** | **[`migration/FUNCTION_INVENTORY.md`](migration/FUNCTION_INVENTORY.md)** |
+| **frontend-visible behavior / UX preservation** | **[`migration/FRONTEND_FEATURE_INVENTORY.md`](migration/FRONTEND_FEATURE_INVENTORY.md)** |
+| **backend optimization/commonization ledger** | **[`migration/BACKEND_OPTIMIZATION_LEDGER.md`](migration/BACKEND_OPTIMIZATION_LEDGER.md)** |
 | route migration | [`migration/ROUTE_MATRIX.md`](migration/ROUTE_MATRIX.md) |
 | API/server migration | [`migration/API_MATRIX.md`](migration/API_MATRIX.md) |
 | UI/UX redesign proposal | [`design-redesign/README.md`](design-redesign/README.md) |
@@ -61,14 +66,19 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 - Git/branch/PR/merge policy: `migration/GIT_WORKFLOW.md`
 - progress/current owner/next READY/dependencies: `migration/STATUS.md`
 - documentation truth ownership: `migration/DOC_MAP.md`
-- existing feature preservation: `migration/FUNCTION_INVENTORY.md` + `migration/functions/*.md`
+- implementation-level feature preservation: `migration/FUNCTION_INVENTORY.md` + `migration/functions/*.md`
+- frontend-visible behavior preservation: `migration/FRONTEND_FEATURE_INVENTORY.md`
+- backend improvement candidates/decisions: `migration/BACKEND_OPTIMIZATION_LEDGER.md`
 - route disposition: `migration/ROUTE_MATRIX.md`
 - server/API disposition: `migration/API_MATRIX.md`
 - visual/information architecture: `design-redesign/`
 
 `design-redesign/` is not the source of truth for permissions, DB/API behavior, side effects, or workflow semantics.
 
-`STATUS.md` is the only progress/work-item ledger. Do not add parallel `PROGRESS.md` or `WORK_ITEMS.md` files. `FUNCTION_INVENTORY.md` + domain ledgers are the only feature-parity ledger.
+`STATUS.md` is the only progress/work-item ledger. Do not add parallel `PROGRESS.md` or `WORK_ITEMS.md` files.
+`FUNCTION_INVENTORY.md` + domain ledgers are the implementation-level parity ledger.
+`FRONTEND_FEATURE_INVENTORY.md` is the frontend-visible behavior ledger.
+`BACKEND_OPTIMIZATION_LEDGER.md` is the optimization/refactor decision ledger.
 
 ## Agent invocation
 
