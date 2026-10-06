@@ -2,7 +2,10 @@
 import { withDatabase } from "@/lib/cloudflare";
 import { softwareCatalog, softwareAliases, videoSoftwares } from "@/lib/db/schema";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { normalizeSoftwareKey } from "@/lib/utils/softwareLabels";
+import {
+  normalizeSoftwareCatalogName,
+  normalizeSoftwareKey,
+} from "@/lib/utils/softwareLabels";
 import {
   MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT,
   type PublicSoftwareSuggestionDto,
@@ -14,7 +17,7 @@ import {
   parseBoundedPositiveInt,
   publicJsonResponse,
   publicServiceUnavailableResponse,
-} from "@/lib/api/publicApi";
+} from "@/lib/publicApi";
 
 const DEFAULT_SOFTWARE_SUGGESTION_LIMIT = 20;
 const MAX_QUERY_LENGTH = 64;
@@ -75,14 +78,15 @@ export async function GET(req: Request): Promise<Response> {
           .limit(limit);
       }
 
-      const normalized = normalizeSoftwareKey(q);
+      const aliasKey = normalizeSoftwareKey(q);
+      const catalogQuery = normalizeSoftwareCatalogName(q);
 
       const byAlias = await db
         .select({
           software_id: softwareAliases.software_id,
         })
         .from(softwareAliases)
-        .where(eq(softwareAliases.normalized_alias, normalized))
+        .where(eq(softwareAliases.normalized_alias, aliasKey))
         .limit(5);
 
       if (byAlias.length > 0) {
@@ -101,11 +105,11 @@ export async function GET(req: Request): Promise<Response> {
         .where(
           and(activeSoftware, sql`(
             ${softwareCatalog.name} LIKE ${"%" + q + "%"} OR
-            ${softwareCatalog.normalized_name} LIKE ${"%" + normalized + "%"}
+            ${softwareCatalog.normalized_name} LIKE ${"%" + catalogQuery + "%"}
           )`),
         )
         .orderBy(
-          sql`CASE WHEN ${softwareCatalog.normalized_name} LIKE ${normalized + "%"} THEN 0 WHEN ${softwareCatalog.normalized_name} LIKE ${"%" + normalized} THEN 1 ELSE 2 END`,
+          sql`CASE WHEN ${softwareCatalog.normalized_name} LIKE ${catalogQuery + "%"} THEN 0 WHEN ${softwareCatalog.normalized_name} LIKE ${"%" + catalogQuery} THEN 1 ELSE 2 END`,
           desc(softwareCatalog.is_verified),
           desc(actualUsageCount),
           softwareCatalog.name,
