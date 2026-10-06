@@ -4,7 +4,10 @@ import { and, asc, eq, inArray, or } from "drizzle-orm";
 import type { DB } from "./client";
 import { softwareAliases, softwareCatalog, videoSoftwares } from "./schema";
 import { generateId } from "@/lib/utils/id";
-import { normalizeSoftwareLabels } from "@/lib/utils/softwareLabels";
+import {
+  normalizeSoftwareKey,
+  normalizeSoftwareLabels,
+} from "@/lib/utils/softwareLabels";
 import {
   compositeAuditTargetId,
   emptyVideoAtomicWritePlan,
@@ -12,10 +15,6 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@/lib/video/atomicLimits";
-
-function normalizeSoftwareName(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
-}
 
 export function parseSoftwareLabels(raw: string | null | undefined): string[] {
   return normalizeSoftwareLabels(raw);
@@ -41,15 +40,43 @@ export async function buildReplaceVideoSoftwarePlan(
   if (existingLinks.length > MAX_ATOMIC_VIDEO_SOFTWARES) {
     throw new Error("video_software_existing_atomic_limit_exceeded");
   }
-  const normalized = labels.map(normalizeSoftwareName);
+
+  const normalized = labels.map(normalizeSoftwareKey);
   const aliases = normalized.length > 0
-    ? await db.select().from(softwareAliases).where(inArray(softwareAliases.normalized_alias, normalized))
+    ? await db
+        .select()
+        .from(softwareAliases)
+        .where(inArray(softwareAliases.normalized_alias, normalized))
     : [];
-  const catalogs = normalized.length > 0
-    ? await db.select().from(softwareCatalog).where(inArray(softwareCatalog.normalized_name, normalized))
+  const aliasTargetIds = [...new Set(aliases.map((row) => row.software_id))];
+  const catalogPredicates = [];
+  if (normalized.length > 0) {
+    catalogPredicates.push(inArray(softwareCatalog.normalized_name, normalized));
+  }
+  if (aliasTargetIds.length > 0) {
+    catalogPredicates.push(inArray(softwareCatalog.id, aliasTargetIds));
+  }
+  const catalogs = catalogPredicates.length > 0
+    ? await db
+        .select()
+        .from(softwareCatalog)
+        .where(
+          and(
+            eq(softwareCatalog.is_active, 1),
+            catalogPredicates.length === 1
+              ? catalogPredicates[0]
+              : or(...catalogPredicates),
+          ),
+        )
     : [];
-  const aliasByName = new Map(aliases.map((row) => [row.normalized_alias, row.software_id]));
+  const activeCatalogIds = new Set(catalogs.map((row) => row.id));
+  const aliasByName = new Map(
+    aliases
+      .filter((row) => activeCatalogIds.has(row.software_id))
+      .map((row) => [row.normalized_alias, row.software_id]),
+  );
   const catalogByName = new Map(catalogs.map((row) => [row.normalized_name, row.id]));
+
   const now = Math.floor(Date.now() / 1000);
   const newCatalogs: (typeof softwareCatalog.$inferSelect)[] = [];
   const nextLinks: (typeof videoSoftwares.$inferSelect)[] = [];
