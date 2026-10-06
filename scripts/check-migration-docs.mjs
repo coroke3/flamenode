@@ -22,6 +22,7 @@ const required = [
   "docs/migration/API_MATRIX.md",
   "docs/migration/server-actions/README.md",
   "docs/migration/route-handlers/README.md",
+  "docs/migration/cloudflare/TOPOLOGY.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
   "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
@@ -114,6 +115,7 @@ if (errors.length === 0) {
   const apiMatrix = read("docs/migration/API_MATRIX.md");
   const docMap = read("docs/migration/DOC_MAP.md");
   const gitWorkflow = read("docs/migration/GIT_WORKFLOW.md");
+  const cloudflareTopology = read("docs/migration/cloudflare/TOPOLOGY.md");
 
   // Progress/task integrity.
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
@@ -294,6 +296,54 @@ if (errors.length === 0) {
   const ledgerPairs = new Set(routeHandlerRows.map((r) => `${r.method} ${r.route}`));
   for (const pair of discoveredRouteHandlers) if (!ledgerPairs.has(pair)) errors.push(`route-handler ledger missing code handler: ${pair}`);
   for (const pair of ledgerPairs) if (!discoveredRouteHandlers.includes(pair)) errors.push(`route-handler ledger stale/unknown handler: ${pair}`);
+  // MIG-0005 Cloudflare CURRENT topology completeness.
+  const workerConfigPaths = [
+    "wrangler.toml",
+    "workers/fast-jobs/wrangler.toml",
+    "workers/content-jobs/wrangler.toml",
+    "workers/sync-jobs/wrangler.toml",
+  ];
+  const expectedWorkers = new Set([
+    "flamenode-web",
+    "flamenode-fast-jobs",
+    "flamenode-content-jobs",
+    "flamenode-sync-jobs",
+  ]);
+  const configuredWorkers = workerConfigPaths.map((relative) => {
+    const configured = read(relative).match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+    if (!configured) errors.push(`${relative}: Worker name is missing`);
+    return configured;
+  }).filter(Boolean);
+  if (configuredWorkers.length !== 4) errors.push(`Cloudflare Worker configs: actual=${configuredWorkers.length}, expected=4`);
+  for (const name of configuredWorkers) {
+    if (!expectedWorkers.has(name)) errors.push(`Cloudflare Worker configs: unexpected Worker ${name}`);
+    if (!cloudflareTopology.includes(`\`${name}\``)) errors.push(`cloudflare/TOPOLOGY.md: configured Worker missing: ${name}`);
+  }
+  for (const name of expectedWorkers) {
+    if (!configuredWorkers.includes(name)) errors.push(`Cloudflare Worker configs: expected Worker missing: ${name}`);
+  }
+
+  for (const phrase of [
+    "CURRENT Worker scripts: 4",
+    "Custom Domains: 2",
+    "Worker Routes: 0",
+    "Workers Builds triggers: 1",
+    "Independent job-worker build triggers: 0",
+    "`flamenode.net`",
+    "`www.flamenode.net`",
+    "`flamenode_db`",
+    "`flamenode-storage`",
+    "`flamenode-notification-wake`",
+    "`flamenode-notification-dlq`",
+    "`flamenode-static-rebuild-wake`",
+    "`flamenode-static-rebuild-dlq`",
+    "`flamenode-youtube-sync-wake`",
+    "`flamenode-youtube-sync-dlq`",
+    "Optimization blockers requiring frontend change: 0",
+  ]) {
+    if (!cloudflareTopology.includes(phrase)) errors.push(`cloudflare/TOPOLOGY.md: required CURRENT topology marker missing: ${phrase}`);
+  }
+
   // Design source transition.
   if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
@@ -374,12 +424,13 @@ if (errors.length === 0) {
     "docs/migration/API_MATRIX.md",
     "docs/migration/server-actions/README.md",
     "docs/migration/route-handlers/README.md",
+    "docs/migration/cloudflare/TOPOLOGY.md",
   ]) {
     if (!docMap.includes("`" + canonical + "`")) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
   // Shared protocol must force Git, requirements, quality and visual-source rules.
-  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md"]) {
+  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md"]) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
@@ -396,7 +447,7 @@ if (errors.length === 0) {
   }
 
   const antigravityRule = read(".agents/rules/flamenode-project.md");
-  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md"]) {
+  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md"]) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
 
@@ -416,4 +467,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, route/UI sources, quality/agent/Git rules and task references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");
