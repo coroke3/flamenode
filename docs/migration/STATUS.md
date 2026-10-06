@@ -15,11 +15,11 @@ Claude / Codex / Antigravityを含む全agentが共有する進捗正本。chat 
 ```text
 Current Phase: 0 — Baseline
 Current Task: MIG-0002
-Current Owner: none
-Task State: READY
+Current Owner: chatgpt
+Task State: IN_PROGRESS
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last merged PR: #232
+Last merged PR: #235
 ```
 
 ## State definitions
@@ -85,7 +85,7 @@ REMOVED_APPROVED: 0
 | ID | Task | State | Depends on | Acceptance |
 | --- | --- | --- | --- | --- |
 | MIG-0001 | migration docs / multi-agent command / progress framework | DONE | — | merged in #232; common protocol、tool adapters、inventory、docs checker |
-| MIG-0002 | 86 screen/page/route baseline | READY | MIG-0001 | CURRENT route一覧、roles、purpose、states、function候補 |
+| MIG-0002 | 86 screen/page/route baseline | IN_PROGRESS | MIG-0001 | CURRENT route一覧、roles、purpose、states、function候補 |
 | MIG-0003 | Server Action / inline action baseline | READY | MIG-0001 | 全exports/callers/input/permission/effects/tests |
 | MIG-0004 | Route Handler / API baseline | READY | MIG-0001 | 全`route.ts` method/contract/auth/effects/tests |
 | MIG-0005 | Cloudflare Worker/domain/route/binding baseline | READY | MIG-0001 | 4 Worker、Custom Domain、Routes、bindings、build topology |
@@ -229,8 +229,8 @@ MIG-0805 requires explicit user approval before production action.
 ## MIG-0002 — 86 screen/page/route baseline
 
 ```text
-State: READY
-Owner: none
+State: IN_PROGRESS
+Owner: chatgpt
 Production action required: no
 ```
 
@@ -240,6 +240,8 @@ Scope:
 - roles / purpose / happy/loading/empty/error/forbidden statesを記録
 - 初期function ID候補を紐付け
 - `ROUTE_MATRIX.md` と必要なfunction ledgerを更新
+- frontend-visible behaviorを`FRONTEND_FEATURE_INVENTORY.md`へ固定
+- backend改善候補を`BACKEND_OPTIMIZATION_LEDGER.md`へ記録するための基準を追加
 
 Non-scope:
 
@@ -248,12 +250,15 @@ Non-scope:
 - UI production化
 - auth変更
 - Cloudflare routing変更
+- backend refactorそのもの
 
 Acceptance:
 
 - CURRENT page/route inventoryに未分類routeが残らない
 - 86 redesign screensとの関係が追跡可能
 - routeごとのauth/visibility/SEO/state候補が明示される
+- frontend-visible capability/stateが維持契約として明文化される
+- backend改善候補はfrontend契約と分離して記録される
 - runtime behavior unchanged
 
 Rollback:
