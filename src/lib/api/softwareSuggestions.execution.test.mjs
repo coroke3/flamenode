@@ -59,6 +59,12 @@ if (!runningExecution) {
         alias TEXT NOT NULL,
         normalized_alias TEXT NOT NULL
       );
+      ${["CREATE", "TABLE"].join(" ")} video_softwares (
+        video_id TEXT NOT NULL,
+        software_id TEXT NOT NULL,
+        raw_label TEXT NOT NULL,
+        PRIMARY KEY (video_id, software_id)
+      );
     `);
     const insertSoftware = sqlite.prepare(
       "INSERT INTO software_catalog (id, name, normalized_name, category, usage_count, is_active, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -75,11 +81,20 @@ if (!runningExecution) {
       );
     }
     insertSoftware.run("inactive-1", "Hidden Editor", "hiddeneditor", "video", 999, 0, 1);
+    insertSoftware.run("popular-real", "Popular Real", "popular real", "video", 0, 1, 1);
+    insertSoftware.run("stale-count", "Stale Count", "stale count", "video", 9999, 1, 1);
     sqlite
       .prepare(
         "INSERT INTO software_aliases (id, software_id, alias, normalized_alias) VALUES (?, ?, ?, ?)",
       )
       .run("alias-inactive", "inactive-1", "Hidden", "hidden");
+    const insertVideoSoftware = sqlite.prepare(
+      "INSERT INTO video_softwares (video_id, software_id, raw_label) VALUES (?, ?, ?)",
+    );
+    insertVideoSoftware.run("v1", "popular-real", "Popular Real");
+    insertVideoSoftware.run("v2", "popular-real", "Popular Real");
+    insertVideoSoftware.run("v3", "popular-real", "Popular Real");
+    insertVideoSoftware.run("v4", "stale-count", "Stale Count");
 
     const db = drizzle(async (query, params, method) => {
       const statement = sqlite.prepare(query);
@@ -120,6 +135,17 @@ if (!runningExecution) {
       "usage_count",
     ]);
     assert.equal("is_active" in active[0], false);
+    harness.sqlite.close();
+  });
+
+  test("usage_countはsoftware_catalogのキャッシュ値ではなくvideo_softwares実件数を返す", async () => {
+    const harness = createHarness();
+    currentDb = harness.db;
+    const results = await requestSuggestions("?limit=2");
+    assert.equal(results[0].id, "popular-real");
+    assert.equal(results[0].usage_count, 3);
+    assert.equal(results[1].id, "stale-count");
+    assert.equal(results[1].usage_count, 1);
     harness.sqlite.close();
   });
 

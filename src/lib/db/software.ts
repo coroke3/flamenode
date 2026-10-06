@@ -4,7 +4,11 @@ import { and, asc, eq, inArray, or } from "drizzle-orm";
 import type { DB } from "./client";
 import { softwareAliases, softwareCatalog, videoSoftwares } from "./schema";
 import { generateId } from "@/lib/utils/id";
-import { normalizeSoftwareLabels } from "@/lib/utils/softwareLabels";
+import {
+  normalizeSoftwareCatalogName,
+  normalizeSoftwareKey,
+  normalizeSoftwareLabels,
+} from "@/lib/utils/softwareLabels";
 import {
   compositeAuditTargetId,
   emptyVideoAtomicWritePlan,
@@ -12,10 +16,6 @@ import {
 } from "@/lib/video/atomicWritePlan";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { MAX_ATOMIC_VIDEO_SOFTWARES } from "@/lib/video/atomicLimits";
-
-function normalizeSoftwareName(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
-}
 
 export function parseSoftwareLabels(raw: string | null | undefined): string[] {
   return normalizeSoftwareLabels(raw);
@@ -41,28 +41,68 @@ export async function buildReplaceVideoSoftwarePlan(
   if (existingLinks.length > MAX_ATOMIC_VIDEO_SOFTWARES) {
     throw new Error("video_software_existing_atomic_limit_exceeded");
   }
-  const normalized = labels.map(normalizeSoftwareName);
-  const aliases = normalized.length > 0
-    ? await db.select().from(softwareAliases).where(inArray(softwareAliases.normalized_alias, normalized))
+
+  const aliasKeys = labels.map(normalizeSoftwareKey);
+  const catalogNames = labels.map(normalizeSoftwareCatalogName);
+  const aliases = aliasKeys.length > 0
+    ? await db
+        .select()
+        .from(softwareAliases)
+        .where(inArray(softwareAliases.normalized_alias, aliasKeys))
     : [];
-  const catalogs = normalized.length > 0
-    ? await db.select().from(softwareCatalog).where(inArray(softwareCatalog.normalized_name, normalized))
+  const aliasTargetIds = [...new Set(aliases.map((row) => row.software_id))];
+  const catalogsByName = catalogNames.length > 0
+    ? await db
+        .select()
+        .from(softwareCatalog)
+        .where(
+          and(
+            eq(softwareCatalog.is_active, 1),
+            inArray(softwareCatalog.normalized_name, catalogNames),
+          ),
+        )
     : [];
-  const aliasByName = new Map(aliases.map((row) => [row.normalized_alias, row.software_id]));
-  const catalogByName = new Map(catalogs.map((row) => [row.normalized_name, row.id]));
+  const catalogsByAlias = aliasTargetIds.length > 0
+    ? await db
+        .select()
+        .from(softwareCatalog)
+        .where(
+          and(
+            eq(softwareCatalog.is_active, 1),
+            inArray(softwareCatalog.id, aliasTargetIds),
+          ),
+        )
+    : [];
+  const catalogs = [
+    ...catalogsByName,
+    ...catalogsByAlias.filter(
+      (row) => !catalogsByName.some((candidate) => candidate.id === row.id),
+    ),
+  ];
+  const activeCatalogIds = new Set(catalogs.map((row) => row.id));
+  const aliasByName = new Map(
+    aliases
+      .filter((row) => activeCatalogIds.has(row.software_id))
+      .map((row) => [row.normalized_alias, row.software_id]),
+  );
+  const catalogByName = new Map(
+    catalogs.map((row) => [row.normalized_name, row.id]),
+  );
+
   const now = Math.floor(Date.now() / 1000);
   const newCatalogs: (typeof softwareCatalog.$inferSelect)[] = [];
   const nextLinks: (typeof videoSoftwares.$inferSelect)[] = [];
   const seen = new Set<string>();
   for (const [index, label] of labels.entries()) {
-    const normalizedName = normalized[index];
-    let softwareId = aliasByName.get(normalizedName) ?? catalogByName.get(normalizedName);
+    const aliasKey = aliasKeys[index];
+    const catalogName = catalogNames[index];
+    let softwareId = aliasByName.get(aliasKey) ?? catalogByName.get(catalogName);
     if (!softwareId) {
       softwareId = generateId("sw");
       newCatalogs.push({
         id: softwareId,
         name: label,
-        normalized_name: normalizedName,
+        normalized_name: catalogName,
         category: null,
         usage_count: 0,
         is_active: 1,
