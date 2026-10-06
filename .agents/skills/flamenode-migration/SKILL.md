@@ -20,6 +20,7 @@ Mandatory concepts:
 - `route-handlers/README.md` = CURRENT Route Handler / API method-level evidence
 - `cloudflare/TOPOLOGY.md` = CURRENT Cloudflare four-Worker / ingress / binding / build-deploy evidence
 - `cloudflare/PERFORMANCE_BASELINE.md` = CURRENT measured CPU / 1102 / request evidence + representative TARGET budgets
+- `static-delivery/README.md` = CURRENT static artifact / alias / visibility fence / fallback / repair evidence
 - `PRODUCT_REQUIREMENTS.md` = existing-design/current reconciliation
 - `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
 - `CODE_QUALITY.md` = professional implementation standard
