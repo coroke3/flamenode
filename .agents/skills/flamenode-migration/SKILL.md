@@ -18,6 +18,7 @@ Mandatory concepts:
 - `FUNCTION_INVENTORY.md` + `functions/*.md` = `FN-*` backend contracts
 - `server-actions/README.md` = CURRENT Server Action / inline action execution-unit evidence
 - `route-handlers/README.md` = CURRENT Route Handler / API method-level evidence
+- `cloudflare/TOPOLOGY.md` = CURRENT Cloudflare four-Worker / ingress / binding / build-deploy evidence
 - `PRODUCT_REQUIREMENTS.md` = existing-design/current reconciliation
 - `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
 - `CODE_QUALITY.md` = professional implementation standard
