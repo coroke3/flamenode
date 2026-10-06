@@ -1,7 +1,7 @@
 # Auth / Personal / Entry Function Ledger
 
 > Status: Active / Function ledger
-> Last updated: 2026-10-06
+> Last updated: 2026-10-07
 > Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Index: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
 
@@ -19,7 +19,8 @@ AuthはPhase 8までproduction source of truthをCURRENT Auth.jsへ残す。Pers
 | FN-AUTH-006 | terms同意 | onboarding/terms action | version/user acceptance | DETAIL_AUDIT_REQUIRED |
 | FN-AUTH-007 | auth complete redirect | `/auth/complete` | safe redirect/canonical host | DETAIL_AUDIT_REQUIRED |
 | FN-AUTH-008 | logout/session終了 | Auth.js | cookie/session invalidation | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-009 | account API | `app/api/account` | authenticated private data | DETAIL_AUDIT_REQUIRED |
+| FN-AUTH-009 | account summary/private account API | public header/account UI, `app/api/account` | presence/details degraded state、authenticated private data、privileged link fail-closed | DETAIL_AUDIT_REQUIRED |
+| FN-AUTH-010 | Active X ID切替 | account menu / `useActiveXSwitcher` | approvedのみ切替、pending/error state、切替後summary再取得 | DETAIL_AUDIT_REQUIRED |
 
 ## Personal dashboard / owned videos
 
