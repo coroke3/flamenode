@@ -372,12 +372,14 @@ if (errors.length === 0) {
     "docs/migration/BACKEND_OPTIMIZATION.md",
     "docs/migration/ROUTE_MATRIX.md",
     "docs/migration/API_MATRIX.md",
+    "docs/migration/server-actions/README.md",
+    "docs/migration/route-handlers/README.md",
   ]) {
     if (!docMap.includes("`" + canonical + "`")) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
   // Shared protocol must force Git, requirements, quality and visual-source rules.
-  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md"]) {
+  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md"]) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
@@ -394,7 +396,7 @@ if (errors.length === 0) {
   }
 
   const antigravityRule = read(".agents/rules/flamenode-project.md");
-  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md"]) {
+  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md"]) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
 
