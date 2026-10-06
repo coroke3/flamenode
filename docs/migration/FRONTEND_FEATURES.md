@@ -1,7 +1,7 @@
 # FlameNode Frontend-Exposed Feature Inventory
 
 > Status: Active / Frontend capability source of truth
-> Last updated: 2026-10-06
+> Last updated: 2026-10-07
 > Scope: CURRENTでユーザー/運営者/管理者/開発者が画面・操作・状態変化として認識できる機能
 > Screen source: `docs/design-redesign/ROUTE_INVENTORY.md`
 > Detailed backend contracts: `FUNCTION_INVENTORY.md` + `functions/*.md`
@@ -72,7 +72,7 @@ Parity acceptance
 
 ---
 
-# Public / discovery / playback — 22
+# Public / discovery / playback — 27
 
 | ID | User-visible capability | Main surfaces | UX preservation contract |
 | --- | --- | --- | --- |
@@ -98,8 +98,13 @@ Parity acceptance
 | FN-PUB-020 | About閲覧 | `/about` | 内容到達性・主要導線 |
 | FN-PUB-021 | 現行ルール閲覧 | `/rules` | active version・長文探索 |
 | FN-PUB-022 | SEO/canonical/OGP | public pages | URL/metadata互換 |
+| FN-PUB-023 | 公開お知らせを見る | `/` | publish対象のみ、本文/順序/空状態 |
+| FN-PUB-024 | 公開統計・募集中イベント/空き枠概要を見る | `/` | publicVideos/creators/activeEvents、primary event/slot summary |
+| FN-PUB-025 | 全体公開ナビゲーション/モバイルメニューを使う | public layout | active state、dismiss/focus、responsive navigation |
+| FN-PUB-026 | 公開ヘッダーから作品検索する | public layout → `/list?q=` | IME-safe GET、query/deep-link、mobile/desktop parity |
+| FN-PUB-027 | ライト/ダークテーマを切り替える | global/public UI | localStorage永続化、system preference追従、accessible state |
 
-# Authentication / account — 9
+# Authentication / account — 10
 
 | ID | User-visible capability | Main surfaces | UX preservation contract |
 | --- | --- | --- | --- |
@@ -111,7 +116,8 @@ Parity acceptance
 | FN-AUTH-006 | terms同意 | onboarding | version/acceptance意味 |
 | FN-AUTH-007 | auth complete redirect | `/auth/complete` | safe redirect/open redirect禁止 |
 | FN-AUTH-008 | logout | account UI | session/cookie無効化 |
-| FN-AUTH-009 | account情報閲覧 | account UI/API | private data本人限定 |
+| FN-AUTH-009 | account presence/details閲覧 | public header/account API | loading/degraded/retry、privileged linkはfull summary確認後のみ |
+| FN-AUTH-010 | Active X IDを切り替える | account menu | approvedのみ、pending/error、切替後summary再取得 |
 
 # Personal — 7
 
@@ -203,21 +209,22 @@ Parity acceptance
 # Capability count
 
 ```text
-Public                   22
-Authentication/account    9
+Public                   27
+Authentication/account   10
 Personal                  7
 Entry                     6
 Manage                   12
 Admin                    31
 System/operational        2
 ---------------------------
-Total                    89
+Total                    95
 ```
 
-86 screensと89 capabilitiesは1:1ではない。
+86 screensと95 capabilitiesは1:1ではない。
 1機能が複数画面へ跨り、1画面が複数機能を持つ。
+公開layout/headerのようなcross-route機能もscreen countとは独立してcapabilityとして保持する。
 
-MIG-0010で**全86 screen → required capability IDs**を完全mappingする。
+MIG-0010で**全86 screen + cross-route layout → required capability IDs**を完全mappingする。
 
 ---
 
@@ -256,13 +263,13 @@ workflow変更が必要な最適化は`BACKEND_OPTIMIZATION.md`へUX impactを�
 
 # Audit progression
 
-- `MIG-0002`: 86 screen/page/route + 89 frontend capability baseline
+- `MIG-0002`: 86 screen/page/route + 95 frontend capability baseline
 - `MIG-0003`: Server Actions / inline actions
 - `MIG-0004`: Route Handlers/API
 - `MIG-0007`: static/visibility
 - `MIG-0008`: auth/permission
 - `MIG-0009`: background jobs
-- `MIG-0010`: 86 screens ↔ capability IDs complete mapping
+- `MIG-0010`: 86 screens + cross-route layout ↔ capability IDs complete mapping
 - `MIG-0011`: gap scan + backend optimization/blocker assessment
 
 **MIG-0011完了までは「全機能棚卸し完了」と宣言しない。**
