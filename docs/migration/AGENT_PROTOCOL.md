@@ -87,15 +87,21 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY task from do
 4. `docs/migration/STATUS.md`
 5. `docs/migration/FUNCTION_INVENTORY.md` のindex
 6. **対象domainだけ** `docs/migration/functions/*.md`
-7. 必要な `ROUTE_MATRIX.md` / `API_MATRIX.md`
-8. 対象コードと関連test
-9. 必要ならActive文書を追加1件
+7. UI/frontendに触るなら `docs/migration/FRONTEND_FEATURE_INVENTORY.md` の対象section
+8. backend/action/API/jobに触るなら `docs/migration/BACKEND_OPTIMIZATION_LEDGER.md` の対象candidate/原則
+9. 必要な `ROUTE_MATRIX.md` / `API_MATRIX.md`
+10. 対象コードと関連test
+11. 必要ならActive文書を追加1件
+
+正本の重複判断が必要な場合のみ `DOC_MAP.md` を読む。
+Git branch/PR/merge判断は `GIT_WORKFLOW.md` を読む。
 
 禁止:
 
 - repo全体の無差別再読込
 - Historical/archiveの一括投入
 - 全function ledgerの毎回読込
+- 全frontend/backend ledgerを対象外taskで毎回全文読込
 - 前iterationでrepoへ保存済みの事実を理由なく再調査
 - tool固有adapterを仕様正本にする
 - chat履歴だけをhandoffに使う
@@ -111,13 +117,15 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY task from do
 `STATUS.md`から確認:
 
 - Current Phase
-- Next Task
+- Current/Next Task
 - task dependencies
 - Phase Gate
 - blocker
 - owner
 
 `READY` taskがなければ勝手に別taskを選ばない。
+
+Git運用は `GIT_WORKFLOW.md` に従う。
 
 ### Claim
 
@@ -132,6 +140,8 @@ Scope:
 Non-scope:
 Affected function IDs:
 Affected route/API IDs:
+Frontend-visible contracts:
+Backend optimization candidates touched:
 Rollback:
 Production action required: yes/no
 ```
@@ -142,11 +152,51 @@ Production action required: yes/no
 
 1. `FUNCTION_INVENTORY.md`から対象function IDを特定
 2. 対象domain ledgerだけ読む
-3. CURRENT詳細が未監査なら実装前に必要範囲を棚卸し
-4. `DETAIL_AUDIT_REQUIRED` / unknown / unverifiedを移行済みにしない
-5. 画面リデザインでは画面上の全capabilityをscopeまたはexplicit non-scopeへ分類
+3. UI/frontend変更なら`FRONTEND_FEATURE_INVENTORY.md`でユーザー視点の維持契約を確認
+4. CURRENT詳細が未監査なら実装前に必要範囲を棚卸し
+5. `DETAIL_AUDIT_REQUIRED` / unknown / unverifiedを移行済みにしない
+6. 画面リデザインでは画面上の全capabilityをscopeまたはexplicit non-scopeへ分類
+7. backendを触る場合、既存構造をそのまま複製する前に共通化/責務分離/CPU/I/O改善余地を確認
+8. scope外の最適化候補は実装せず`BACKEND_OPTIMIZATION_LEDGER.md`へ記録
 
 **Visual completion is not functional completion.**
+
+### Frontend preservation priority
+
+backend frameworkや内部構造は変更可能だが、明示承認なしに以下を退化させない。
+
+- user-visible actions
+- permissions/availability
+- inputs/outputs
+- loading/empty/error/forbidden/partial-failure states
+- success/error feedback
+- URL/navigation/reload/history behavior
+- privacy/visibility
+- destructive confirmation
+- major mobile/keyboard operation reachability
+
+コード行数削減はfrontend behaviorを変える理由にならない。
+
+### Backend improvement obligation
+
+移行はCURRENT backendの写経ではない。
+
+対象コードを読む際に以下を探す:
+
+- duplicate validation / permission / audit
+- framework-business coupling
+- duplicate public projection
+- duplicate post-commit effects
+- Queue retry/idempotency inconsistency
+- external integration quota/error duplication
+- request-time CPU/I/O hotspots
+- common domain commands/queries
+- unnecessary buffering/serialization
+
+より良い設計が見つかった場合:
+
+- frontend contractを維持できる → `BACKEND_OPTIMIZATION_LEDGER.md`へ候補/evidenceを記録し、active MIG scope内で承認済みなら実装
+- frontend変更が必要 → `FRONTEND_DECISION_REQUIRED`として記録し、勝手に変更しない
 
 ### Implement
 
@@ -158,6 +208,8 @@ Production action required: yes/no
 - Big Bang rewrite禁止
 - redesignでもfunction coverageを落とさない
 - target stackだからという理由だけで新技術を導入しない
+- 行数削減そのものを目的に抽象化しない
+- security/permission/audit/idempotencyを「共通化」で見えなくしすぎない
 
 ### Validate
 
@@ -165,8 +217,10 @@ Production action required: yes/no
 
 - task Acceptance
 - affected function Acceptance
+- affected frontend-visible contract
 - relevant regression tests
 - 必要なCPU/build/UI/security checks
+- backend optimizationを主張する場合は、改善根拠とparity evidence
 
 ### Finish
 
@@ -183,6 +237,8 @@ Production action required: yes/no
 - `STATUS.md`
 - affected `functions/*.md`
 - `FUNCTION_INVENTORY.md` totals/index
+- `FRONTEND_FEATURE_INVENTORY.md`
+- `BACKEND_OPTIMIZATION_LEDGER.md`
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
@@ -193,6 +249,8 @@ Agent:
 Task:
 Result:
 Affected functions:
+Frontend contracts:
+Backend optimization findings:
 Validation:
 PR/commit:
 Rollback:
@@ -217,6 +275,8 @@ Claude / Codex / Antigravityを併用してよいが、**Git repositoryだけを
 
 - read-only inventory
 - test audit
+- frontend capability audit
+- backend duplication/commonization audit
 - design comparison
 - security review
 - CPU/build analysis
@@ -226,6 +286,8 @@ Claude / Codex / Antigravityを併用してよいが、**Git repositoryだけを
 
 - `STATUS.md`
 - 同じfunction ledger row
+- 同じfrontend contract row
+- 同じoptimization candidate
 - 同じroute/API matrix row
 - 同じdomain service
 - DB/auth/permission/visibility core
@@ -237,6 +299,8 @@ agent交代前にrepoへ残す:
 - state / owner
 - findings/evidence
 - tests
+- frontend behavior confirmed
+- optimization candidates found
 - blocker
 - next action
 
@@ -253,7 +317,9 @@ LOOP:
   read STATUS
   select exactly one READY MIG task
   claim
-  execute
+  execute inventory/implementation
+  preserve frontend contract
+  record backend optimization findings
   validate
   persist STATUS + affected ledgers/matrices
   evaluate stop conditions
@@ -277,6 +343,7 @@ LOOP:
 - rollback不能/未証明
 - required function inventory coverageが不明
 - 別agentが対象taskを所有中
+- backend最適化のためfrontend behavior変更が必要で、承認されていない
 
 ### Continuous-mode prohibitions
 
@@ -285,6 +352,7 @@ LOOP:
 - BLOCKEDを飛ばして後Phaseへ進む
 - production deploy/routing/secret/Remote D1の自動変更
 - progress MD更新なしで次iterationへ進む
+- frontend contract変更をbackend refactorへ紛れ込ませる
 
 ---
 
@@ -301,10 +369,11 @@ Visual sources:
 5. `docs/design-redesign/PAGE_COVERAGE.md`
 6. `docs/design-redesign/DECISIONS.md`
 
-Functional sources:
+Functional/behavior sources:
 
 - CURRENT code/tests
 - `FUNCTION_INVENTORY.md` + relevant function ledger
+- `FRONTEND_FEATURE_INVENTORY.md`
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
@@ -314,8 +383,9 @@ Functional sources:
 
 - visual redesign complete
 - responsive states complete
-- loading/error/empty/permission states covered
+- loading/error/empty/permission/partial-failure states covered
 - 全required functionが`PARITY_VERIFIED`または`REMOVED_APPROVED`
+- frontend-visible contract parity confirmed
 - permissionとserver side effects確認済み
 - route/API dependencyが移行済みまたは明示bridgeあり
 - current acceptance testまたはreplacement testあり
@@ -333,11 +403,13 @@ Final migrationでは以下を残さない。
 UNKNOWN required functions
 DETAIL_AUDIT_REQUIRED functions
 unverified migrated functions
+frontend-visible functions without behavior contract
 screens without complete function mapping
 legacy actions/routes without disposition
 background jobs without disposition
 permission rules without parity evidence
 side effects without parity evidence
+unreported frontend blockers to selected backend optimization
 ```
 
 機能削除はmigrationに紛れ込ませない。
@@ -347,13 +419,31 @@ side effects without parity evidence
 1. ledger → `REMOVAL_PROPOSED`
 2. reason
 3. affected users/routes/data
-4. replacement if any
-5. explicit Lead/user approval
-6. approval後のみ`REMOVED_APPROVED`
+4. exact frontend-visible impact
+5. replacement if any
+6. explicit Lead/user approval
+7. approval後のみ`REMOVED_APPROVED`
 
 ---
 
-## 8. Completion format
+## 8. Backend optimization decision rule
+
+Phase 0では候補を発見・証拠化する。原則として大規模refactorはしない。
+
+`MIG-0011`で全inventoryを横断し:
+
+1. 重複/複雑性/CPU/I/O候補を整理
+2. frontend contractを維持したまま改善できる候補を分類
+3. frontend contractが障害となる候補を`FRONTEND_DECISION_REQUIRED`へ分類
+4. frontend影響を明示してLead/userへ提示
+5. 承認済み候補だけPhase 1/3/6等へ持ち込む
+
+「変更すること」を目的にしない。
+CURRENT実装が十分単純/安全なら`DEFERRED`または`REJECTED`でよい。
+
+---
+
+## 9. Completion format
 
 ```text
 MIG-XXXX: <task>
@@ -362,6 +452,13 @@ State: DONE | REVIEW | BLOCKED
 
 Functions:
 - FN-...
+
+Frontend contracts:
+- preserved: ...
+- changed with approval: ...
+
+Backend optimization findings:
+- OPT-... | none
 
 Changed:
 - ...
@@ -378,6 +475,8 @@ Rollback:
 Progress files updated:
 - STATUS.md
 - relevant functions/*.md
+- FRONTEND_FEATURE_INVENTORY.md (if relevant)
+- BACKEND_OPTIMIZATION_LEDGER.md (if relevant)
 - ROUTE_MATRIX.md / API_MATRIX.md
 
 Next:
