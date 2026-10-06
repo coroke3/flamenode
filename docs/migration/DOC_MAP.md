@@ -1,8 +1,7 @@
 # FlameNode Migration Documentation Map
 
-> Status: Active / Source-of-truth map
-> Last verified: 2026-10-06
-> Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
+> Status: Active / source-of-truth map
+> Last verified: 2026-10-07
 
 移行で同じ仕様を複数Markdownへ複製しないための正本マップ。
 
@@ -15,51 +14,62 @@
 | migration architecture / invariants / phases | `docs/migration/README.md` |
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
+| migration code quality | `docs/migration/CODE_QUALITY.md` |
 | current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
-| existing-function parity index | `docs/migration/FUNCTION_INVENTORY.md` |
-| **frontend-exposed capability / UX preservation** | **`docs/migration/FRONTEND_FEATURES.md`** |
-| **backend commonization / optimization / blocker assessment** | **`docs/migration/BACKEND_OPTIMIZATION.md`** |
-| detailed function contracts | `docs/migration/functions/*.md` |
-| route disposition | `docs/migration/ROUTE_MATRIX.md` |
+| CURRENT user-visible routes | `docs/migration/CURRENT_ROUTES.md` |
+| frontend observable capabilities | `docs/migration/FRONTEND_FEATURES.md` + `docs/migration/frontend/*.md` |
+| backend/domain/platform function parity | `docs/migration/FUNCTION_INVENTORY.md` + `docs/migration/functions/*.md` |
+| existing design/product requirement reconciliation | `docs/migration/PRODUCT_REQUIREMENTS.md` |
+| new UI visual source / HTML mock registration | `docs/migration/UI_REFERENCE.md` |
+| backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
+| route target/disposition | `docs/migration/ROUTE_MATRIX.md` |
 | Server Action / Route Handler / API disposition | `docs/migration/API_MATRIX.md` |
-| all redesign screen URLs / mock ids | `docs/design-redesign/ROUTE_INVENTORY.md` + `app/(redesign)/dev/redesign/_catalog.ts` |
-| redesign principles / IA / visual acceptance | `docs/design-redesign/` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
-| CURRENT UI acceptance | `docs/operations/ui-acceptance.md` |
+| CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
 | DB schema | `src/lib/db/schema.ts` + `migrations/` |
 | CURRENT Worker/bindings | `wrangler.toml`, `workers/*/wrangler.toml`, actual Cloudflare settings |
 | deploy procedure | `DEPLOY.md` |
 
+## UI source rule
+
+- `docs/design-redesign/` is removed and is not a migration source.
+- `app/(redesign)` is not an authoritative target design.
+- New visual/information-architecture target remains `UI_REFERENCE.md = PENDING_HTML` until the user supplies an HTML mock.
+- HTML mock never overrides permission/business/visibility/side-effect contracts by itself.
+
 ## Rules
 
-- Migration docs describe **TARGET / transition / progress**. CURRENT behavior remains code/test/config driven until cutover.
-- Do not duplicate exact schema columns, route inventories, binding IDs, API fields, or long command/test lists across multiple docs.
-- Prefer a short pointer to the canonical source over maintaining two copies of the same prose.
-- If migration changes CURRENT production behavior, update the relevant Active CURRENT document in the same change before marking the MIG task done.
-- Historical/archive docs are evidence of past decisions, not current truth.
-- `Last verified` being old is not enough to rewrite a document; compare it with current code/tests/config first.
-- `STATUS.md` is the only progress/task-state source. Do not add a second `PROGRESS.md` or `WORK_ITEMS.md` ledger.
-- `FUNCTION_INVENTORY.md` + domain ledgers are the only backend/side-effect feature-parity source.
-- `FRONTEND_FEATURES.md` is the only frontend-observable capability source. Do not create another UI capability ledger.
-- `BACKEND_OPTIMIZATION.md` is the only migration optimization/blocker ledger. Do not scatter optimization decisions across task docs.
-- `GIT_WORKFLOW.md` is the only migration branch/PR/merge policy source. Tool-specific skills/commands must link to it rather than duplicating Git rules.
-- Screen URL/purpose inventory remains in `docs/design-redesign/ROUTE_INVENTORY.md`; do not duplicate all 86 route rows into migration docs.
+- Migration docs describe TARGET / transition / progress. CURRENT behavior remains code/test/config driven until cutover.
+- `CURRENT_ROUTES.md` owns the 86 USER_SCREEN route baseline.
+- `FRONTEND_FEATURES.md` + `frontend/*.md` own `UX-*` frontend observable behavior.
+- `FUNCTION_INVENTORY.md` + `functions/*.md` own `FN-*` backend/domain/platform functions.
+- `UX-*` and `FN-*` are intentionally many-to-many.
+- `PRODUCT_REQUIREMENTS.md` owns reconciliation between current implementation and existing design intent.
+- `BACKEND_OPTIMIZATION.md` owns optimization/blocker decisions.
+- `CODE_QUALITY.md` owns implementation quality standards.
+- `STATUS.md` is the only progress/task-state source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`.
+- `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.
+- Do not duplicate exact schema columns, binding IDs, API fields, or long command lists across docs.
+- If migration changes CURRENT production behavior, update the relevant Active CURRENT document in the same change before task DONE.
+- Historical/archive docs are evidence, not current truth.
+- Existing design documents can reveal missed requirements, but conflicts must be reconciled rather than silently applied.
 
 ## Active-document classification
 
-When migration touches an Active Markdown file, classify it mentally or in the task evidence as one of:
-
 - `canonical-current`
 - `canonical-target`
+- `requirement-reconciliation`
+- `ui-reference`
 - `task-router`
 - `progress-ledger`
+- `frontend-ux-ledger`
 - `function-ledger`
-- `frontend-capability-ledger`
 - `optimization-ledger`
+- `code-quality`
 - `git-workflow`
 - `generated/inventory`
 - `historical`
 - `duplicate -> <canonical path>`
 - `stale-needs-fix`
 
-Do not mass-rewrite Markdown for style. Optimize truth ownership, context size, and agent handoff first.
+Do not mass-rewrite docs for style. Optimize truth ownership, context size, verification, and agent handoff.
