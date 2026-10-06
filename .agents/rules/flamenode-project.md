@@ -14,6 +14,7 @@ Mandatory sources include:
 - relevant `FUNCTION_INVENTORY.md` / `functions/*.md`
 - `BACKEND_OPTIMIZATION.md` for backend work
 - `docs/migration/server-actions/README.md` for Server Action migration/audit work
+- `docs/migration/route-handlers/README.md` for Route Handler/API migration/audit work
 - `UI_REFERENCE.md` for visual work
 
 Rules:
