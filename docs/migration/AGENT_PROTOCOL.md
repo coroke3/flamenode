@@ -6,25 +6,25 @@
 > Source of truth: `docs/migration/README.md`, `docs/migration/STATUS.md`, current code/test
 >
 > Claude Code / OpenAI Codex / Google Antigravity 共通の移行実行契約。
-> tool固有adapterには仕様を複製せず、この文書を参照させる。
+> ツール固有ファイルは薄いadapterとし、仕様を複製しない。
 
 ## 1. Invocation
 
 ### Claude Code
 
-One task:
+1 task:
 
 ```text
 /flamenode-migration
 ```
 
-Repeated execution:
+継続:
 
 ```text
 /loop /flamenode-migration
 ```
 
-Adapters:
+Adapter:
 
 - `.claude/commands/flamenode-migration.md`
 - `.claude/skills/flamenode-migration/SKILL.md`
@@ -33,56 +33,43 @@ Adapters:
 
 Repo skill:
 
-```text
-flamenode-migration
-```
-
-Adapter:
-
 - `.codex/skills/flamenode-migration/SKILL.md`
 
-One task prompt:
+1 task:
 
 ```text
 Use the flamenode-migration skill and execute exactly one READY MIG task.
 ```
 
-Codex builds with Goals support may run the campaign as a persistent `/goal`:
+継続はCodex Goalを使用してよい。
 
 ```text
 /goal Continue the FlameNode migration using the flamenode-migration skill and repository migration protocol. Execute exactly one MIG task per iteration, persist STATUS/inventory changes after each task, and stop at any Phase Gate, blocker, or approval-required production action.
 ```
 
-The `/goal` does not override this protocol. Repository STATUS remains authoritative.
+Goalよりrepositoryの`STATUS.md`を優先する。
 
 ### Google Antigravity
 
-Workspace skill:
+Slash command:
 
 ```text
 /flamenode-migration
 ```
 
-Adapter:
+正本adapter:
+
+- `.agents/workflows/flamenode-migration.md`
+
+補助knowledge:
 
 - `.agents/skills/flamenode-migration/SKILL.md`
+- `.agents/rules/flamenode-project.md`
 
-Antigravity discovers workspace skills under `.agents/skills/` and exposes them as slash commands.
-
-For continuous execution:
-
-```text
-/goal Continue /flamenode-migration one MIG task at a time. Persist all progress to repository migration Markdown and stop on the AGENT_PROTOCOL stop conditions.
-```
-
-Optional custom agent:
-
-- `.agents/agents/flamenode-migration/agent.md`
-- select through `/agents` when useful
+Antigravityではworkflowが`/`コマンド、skillがオンデマンド知識を担当する。
+継続実行機能を使う場合も、1 iteration = 1 MIG taskと本書の停止条件を維持する。
 
 ### Generic agent
-
-Any agent that reads root `AGENTS.md` can use:
 
 ```text
 Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY task from docs/migration/STATUS.md.
@@ -92,27 +79,26 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY task from do
 
 ## 2. Canonical read order
 
-Every migration iteration:
+毎iteration:
 
 1. `AGENTS.md`
-2. matching migration row in `docs/AI_CONTEXT.md`
+2. `docs/AI_CONTEXT.md` のmigration行
 3. `docs/migration/README.md`
 4. `docs/migration/STATUS.md`
-5. `docs/migration/FUNCTION_INVENTORY.md` index
-6. **only the relevant** `docs/migration/functions/*.md` ledger
-7. relevant `ROUTE_MATRIX.md` / `API_MATRIX.md`
-8. target code and tests
-9. at most one additional Active document when required
+5. `docs/migration/FUNCTION_INVENTORY.md` のindex
+6. **対象domainだけ** `docs/migration/functions/*.md`
+7. 必要な `ROUTE_MATRIX.md` / `API_MATRIX.md`
+8. 対象コードと関連test
+9. 必要ならActive文書を追加1件
 
-Do **not** read every function ledger on every iteration.
+禁止:
 
-Forbidden:
-
-- indiscriminate repository rereads
-- bulk Historical/archive loading
-- repeating facts already persisted by previous iterations without reason
-- treating a tool-specific adapter as the specification source
-- using prior chat state as the only handoff
+- repo全体の無差別再読込
+- Historical/archiveの一括投入
+- 全function ledgerの毎回読込
+- 前iterationでrepoへ保存済みの事実を理由なく再調査
+- tool固有adapterを仕様正本にする
+- chat履歴だけをhandoffに使う
 
 ---
 
@@ -122,20 +108,20 @@ Forbidden:
 
 ### Start
 
-Read from `STATUS.md`:
+`STATUS.md`から確認:
 
 - Current Phase
-- Current/Next Task
-- dependencies
+- Next Task
+- task dependencies
 - Phase Gate
-- blockers
-- current owner
+- blocker
+- owner
 
-If no task is `READY`, do not pick another task opportunistically.
+`READY` taskがなければ勝手に別taskを選ばない。
 
 ### Claim
 
-Transition the selected task to `IN_PROGRESS` and record an owner.
+対象taskを`IN_PROGRESS`にしownerを記録する。
 
 ```text
 Task:
@@ -152,57 +138,55 @@ Production action required: yes/no
 
 ### Inventory guard
 
-Before implementation:
+実装前に:
 
-1. resolve affected function IDs from the inventory/index
-2. open only their relevant domain ledger(s)
-3. if the existing capability is not sufficiently audited, complete the necessary CURRENT audit first
-4. never mark `DETAIL_AUDIT_REQUIRED`, unknown, or unverified functionality as migrated
-5. for screen redesign, classify every available action/capability as migration scope or explicit non-scope
+1. `FUNCTION_INVENTORY.md`から対象function IDを特定
+2. 対象domain ledgerだけ読む
+3. CURRENT詳細が未監査なら実装前に必要範囲を棚卸し
+4. `DETAIL_AUDIT_REQUIRED` / unknown / unverifiedを移行済みにしない
+5. 画面リデザインでは画面上の全capabilityをscopeまたはexplicit non-scopeへ分類
 
-Visual completion is not functional completion.
+**Visual completion is not functional completion.**
 
 ### Implement
 
-Principles:
-
-- one PR = one migration boundary where practical
-- freeze CURRENT contract from code/tests first
-- prefer framework-neutral domain logic
-- make compatibility bridges explicit
-- do not delete the legacy path in the same step that first introduces the new path
-- no Big Bang rewrite
-- preserve function coverage during redesign
-- do not add technology solely because it is part of the target stack; use it only when the active task needs it
+- 1 PR = 1 migration boundaryを原則とする
+- CURRENT contractをcode/testから先に固定
+- framework-neutral domain logicを優先
+- compatibility bridgeを明示
+- 新経路導入と同時に旧経路を削除しない
+- Big Bang rewrite禁止
+- redesignでもfunction coverageを落とさない
+- target stackだからという理由だけで新技術を導入しない
 
 ### Validate
 
-Run:
+最低限:
 
 - task Acceptance
 - affected function Acceptance
-- relevant existing regression tests
-- migration-specific CPU/build/UI/security checks when required
+- relevant regression tests
+- 必要なCPU/build/UI/security checks
 
 ### Finish
 
-The task must transition to one of:
+必ず以下へ遷移:
 
 - `DONE`
 - `REVIEW`
 - `BLOCKED`
 
-Never end an iteration with a task left `IN_PROGRESS`.
+`IN_PROGRESS`のまま終わらない。
 
-Persist relevant updates to:
+必要に応じて更新:
 
 - `STATUS.md`
-- affected `functions/*.md` ledger(s)
-- `FUNCTION_INVENTORY.md` totals/index if counts change
+- affected `functions/*.md`
+- `FUNCTION_INVENTORY.md` totals/index
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
-Last iteration format:
+Last iteration:
 
 ```text
 Agent:
@@ -220,105 +204,93 @@ Next:
 
 ## 4. Multi-agent coordination
 
-Claude / Codex / Antigravity may all participate, but **the Git repository is the only shared state authority**.
+Claude / Codex / Antigravityを併用してよいが、**Git repositoryだけを共有状態の正本**にする。
 
-### Single writer per task
+### Single writer
 
-Only one agent may own an `IN_PROGRESS` task.
+1 taskは同時に1 agentだけが`IN_PROGRESS`にする。
+他agentはread-only review/auditに回せる。
 
-```text
-Owner: claude
-Owner: codex
-Owner: antigravity
-```
+### Parallel-safe
 
-Other agents may perform read-only review/audit, but must not silently mutate the same task state.
+並列化しやすい:
 
-### Safe parallel work
-
-Good parallel candidates:
-
-- read-only inventory exploration
-- independent test audit
+- read-only inventory
+- test audit
 - design comparison
 - security review
 - CPU/build analysis
-- reviewer-only validation of another agent's PR
+- PR review
 
-Avoid concurrent edits to:
+同時編集を避ける:
 
 - `STATUS.md`
-- the same function ledger row
-- the same route/API matrix row
-- the same domain service
+- 同じfunction ledger row
+- 同じroute/API matrix row
+- 同じdomain service
 - DB/auth/permission/visibility core
-
-The task owner integrates read-only findings.
 
 ### Handoff
 
-Before switching agents, persist:
+agent交代前にrepoへ残す:
 
-- task state
-- owner
+- state / owner
 - findings/evidence
-- tests run
+- tests
 - blocker
 - next action
 
-If the handoff exists only in a Claude/Codex/Antigravity conversation, it does not count.
+チャットだけのhandoffは無効。
 
 ---
 
-## 5. Continuous execution contract
+## 5. Continuous execution
 
-Different products have different long-running commands:
-
-- Claude Code: `/loop /flamenode-migration`
-- Codex: `/goal ...` around the `flamenode-migration` skill
-- Antigravity: `/goal ...` around `/flamenode-migration`; `/teamwork-preview` may be used for read-only large-scale investigation, but task ownership still follows STATUS
-
-All map to the same logical loop:
+Product別の長期実行機構は違っても、論理loopは同じ。
 
 ```text
 LOOP:
   read STATUS
   select exactly one READY MIG task
-  claim it
+  claim
   execute
   validate
   persist STATUS + affected ledgers/matrices
   evaluate stop conditions
 ```
 
-### Mandatory stop conditions
+代表例:
 
-Stop instead of continuing when:
+- Claude Code: `/loop /flamenode-migration`
+- Codex: `/goal ...` + `flamenode-migration` skill
+- Antigravity: `/flamenode-migration` workflowを反復実行、または利用可能な継続実行機能から同workflowを呼ぶ
+
+### Mandatory stop
 
 - Overall State = BLOCKED
-- no READY task exists
-- a Phase Gate is waiting for review
-- production action requires explicit approval
-- Remote D1 / secret / Worker Route / Custom Domain change is required
-- auth/security/permission/visibility specification conflicts
-- test failure root cause exceeds task scope
-- rollback is unavailable or unproven
-- required function inventory coverage is unknown
-- another agent already owns the target task
+- READY taskなし
+- Phase GateがREVIEW待ち
+- production actionに明示承認が必要
+- Remote D1 / secret / Worker Route / Custom Domain変更が必要
+- auth/security/permission/visibility仕様が衝突
+- test failureがtask scopeを超える
+- rollback不能/未証明
+- required function inventory coverageが不明
+- 別agentが対象taskを所有中
 
 ### Continuous-mode prohibitions
 
-- completing multiple MIG tasks as one status transition
-- auto-approving a Phase Gate
-- bypassing BLOCKED work to enter a later high-risk phase
-- automatic production deploy/routing/secret/Remote D1 mutation
-- continuing without persisting progress
+- 複数MIG taskを1回のstate transitionでDONE
+- Phase Gate自動承認
+- BLOCKEDを飛ばして後Phaseへ進む
+- production deploy/routing/secret/Remote D1の自動変更
+- progress MD更新なしで次iterationへ進む
 
 ---
 
 ## 6. Redesign contract
 
-UI redesign is part of migration, not permission to reduce product capability.
+UI redesignはmigrationの一部だが、機能削減ではない。
 
 Visual sources:
 
@@ -338,24 +310,24 @@ Functional sources:
 
 ### Screen completion
 
-A screen is `DONE` only when:
+画面DONE条件:
 
-- visual redesign is complete
-- target responsive states are complete
-- loading/error/empty/permission states are covered
-- every associated required function is `PARITY_VERIFIED` or explicitly `REMOVED_APPROVED`
-- permission checks and server-side side effects are verified
-- route/API dependencies are migrated or have an explicit bridge
-- current acceptance tests pass or equivalent replacement tests exist
-- direct navigation/reload/history semantics are verified where applicable
+- visual redesign complete
+- responsive states complete
+- loading/error/empty/permission states covered
+- 全required functionが`PARITY_VERIFIED`または`REMOVED_APPROVED`
+- permissionとserver side effects確認済み
+- route/API dependencyが移行済みまたは明示bridgeあり
+- current acceptance testまたはreplacement testあり
+- direct navigation/reload/history semantics確認済み
 
-A visually complete screen with incomplete functions is `UI_DONE_FUNCTIONS_PENDING`.
+見た目のみ完成は`UI_DONE_FUNCTIONS_PENDING`。
 
 ---
 
 ## 7. Existing-function preservation invariant
 
-Final migration cannot complete with:
+Final migrationでは以下を残さない。
 
 ```text
 UNKNOWN required functions
@@ -368,22 +340,20 @@ permission rules without parity evidence
 side effects without parity evidence
 ```
 
-### Removal workflow
+機能削除はmigrationに紛れ込ませない。
 
-Never hide feature removal inside migration/refactor work.
+削除手順:
 
-Required:
-
-1. ledger state → `REMOVAL_PROPOSED`
+1. ledger → `REMOVAL_PROPOSED`
 2. reason
 3. affected users/routes/data
-4. replacement, if any
-5. explicit user/Lead approval
-6. only then → `REMOVED_APPROVED`
+4. replacement if any
+5. explicit Lead/user approval
+6. approval後のみ`REMOVED_APPROVED`
 
 ---
 
-## 8. Tool-neutral completion format
+## 8. Completion format
 
 ```text
 MIG-XXXX: <task>
