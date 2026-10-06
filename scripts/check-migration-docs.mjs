@@ -342,7 +342,7 @@ if (errors.length === 0) {
     "docs/migration/ROUTE_MATRIX.md",
     "docs/migration/API_MATRIX.md",
   ]) {
-    if (!docMap.includes(``${canonical}``)) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
+    if (!docMap.includes("`" + canonical + "`")) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
   // Shared protocol must force Git, requirements, quality and visual-source rules.
