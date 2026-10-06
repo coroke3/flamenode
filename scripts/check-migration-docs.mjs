@@ -20,6 +20,7 @@ const required = [
   "docs/migration/BACKEND_OPTIMIZATION.md",
   "docs/migration/ROUTE_MATRIX.md",
   "docs/migration/API_MATRIX.md",
+  "docs/migration/server-actions/README.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
   "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
@@ -77,6 +78,16 @@ function duplicateIds(ids) {
     seen.add(id);
   }
   return [...dupes];
+}
+
+function walkFiles(dir, predicate, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walkFiles(full, predicate, out);
+    else if (predicate(full)) out.push(full);
+  }
+  return out;
 }
 
 for (const relative of required) {
@@ -212,6 +223,46 @@ if (errors.length === 0) {
   if (uxRows.length !== 432) errors.push(`frontend UX ledgers: current baseline=${uxRows.length}, expected=432`);
   if (!/Frontend `UX-\*` capabilities\s*\|\s*432\s*\|/m.test(status)) errors.push("STATUS.md: frontend UX baseline must report 432");
 
+
+  // MIG-0003 Server Action completeness: real code <-> ledger.
+  const serverActions = read("docs/migration/server-actions/README.md");
+  const ledgerRows = [...serverActions.matchAll(/^\|\s*(SA-\d{3})\s*\|\s*\x60([^\x60]+)\x60\s*\|/gm)]
+    .map((m) => ({ id: m[1], source: m[2] }));
+  if (ledgerRows.length !== 110) errors.push(\`server-actions ledger: rows=\${ledgerRows.length}, expected=110\`);
+
+  const actionFiles = walkFiles(file("src/lib/actions"), (p) =>
+    p.endsWith(".ts") && !p.includes(".test.") && !p.includes(".contract.") && !p.includes(".execution.")
+  );
+  const discoveredModuleActions = [];
+  let useServerModules = 0;
+  for (const abs of actionFiles) {
+    const sourceText = fs.readFileSync(abs, "utf8");
+    if (!/^\s*["']use server["'];/m.test(sourceText)) continue;
+    useServerModules++;
+    const rel = path.relative(root, abs).split(path.sep).join("/");
+    for (const match of sourceText.matchAll(/export\s+async\s+function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+      discoveredModuleActions.push(\`\${rel}#\${match[1]}\`);
+    }
+  }
+  if (useServerModules !== 34) errors.push(\`Server Action modules: actual=\${useServerModules}, expected=34\`);
+  if (discoveredModuleActions.length !== 106) errors.push(\`exported Server Actions: actual=\${discoveredModuleActions.length}, expected=106\`);
+
+  const ledgerModuleSources = new Set(ledgerRows.filter((r) => r.source.startsWith("src/lib/actions/")).map((r) => r.source));
+  for (const source of discoveredModuleActions) if (!ledgerModuleSources.has(source)) errors.push(\`server-actions ledger missing code export: \${source}\`);
+  for (const source of ledgerModuleSources) if (!discoveredModuleActions.includes(source)) errors.push(\`server-actions ledger stale/unknown export: \${source}\`);
+
+  const appFiles = walkFiles(file("app"), (p) => p.endsWith(".ts") || p.endsWith(".tsx"));
+  let inlineUseServer = 0;
+  for (const abs of appFiles) {
+    const sourceText = fs.readFileSync(abs, "utf8");
+    const moduleDirective = /^\s*["']use server["'];/m.test(sourceText);
+    const count = (sourceText.match(/["']use server["'];/g) ?? []).length;
+    inlineUseServer += moduleDirective ? Math.max(0, count - 1) : count;
+  }
+  const inlineLedgerCount = ledgerRows.filter((r) => r.source.startsWith("app/")).length;
+  if (inlineUseServer !== 4) errors.push(\`inline Server Actions: actual=\${inlineUseServer}, expected=4\`);
+  if (inlineLedgerCount !== inlineUseServer) errors.push(\`server-actions ledger inline rows=\${inlineLedgerCount}, code inline actions=\${inlineUseServer}\`);
+
   // Design source transition.
   if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
@@ -332,4 +383,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, route source, requirement/code-quality rules, agent adapters, Git workflow, UI source state, source map and task references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, route/UI sources, quality/agent/Git rules and task references are consistent.");
