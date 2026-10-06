@@ -21,7 +21,7 @@ UI機能数とbackend function数を一致させない。
 `/flamenode-migration`の全iterationでこの索引を確認する。
 
 - frontend/UI/routeを触る: `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象frontend ledger
-- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`; Route Handler/API対象なら `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/CPU/job対象なら `cloudflare/TOPOLOGY.md`
+- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`; Route Handler/API対象なら `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job対象なら `cloudflare/TOPOLOGY.md`; CPU/1102/request performance対象なら `cloudflare/PERFORMANCE_BASELINE.md`
 - product/design intentが関係する: `PRODUCT_REQUIREMENTS.md`
 - visual UIが関係する: `UI_REFERENCE.md`。`PENDING_HTML`中は新visual designを推測しない
 - 画面存在、UX capability、backend functionを同一視しない
@@ -122,7 +122,7 @@ checkerは実コードのroute file/method pairとledgerを照合し、将来の
 
 ### Worker / background
 
-MIG-0005でCloudflare platform topologyを実環境まで検証済み。正本は [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)。
+MIG-0005でCloudflare platform topologyを実環境まで検証済み。正本は [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)。MIG-0006でCPU/1102/request baselineをWorkers Observabilityから実測済み。正本は [`cloudflare/PERFORMANCE_BASELINE.md`](cloudflare/PERFORMANCE_BASELINE.md)。
 
 CURRENT Worker scripts:
 

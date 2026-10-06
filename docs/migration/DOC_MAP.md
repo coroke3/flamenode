@@ -26,6 +26,7 @@
 | Server Action disposition | `docs/migration/server-actions/README.md` |
 | Route Handler / API disposition | `docs/migration/route-handlers/README.md` + `docs/migration/API_MATRIX.md` |
 | CURRENT Cloudflare Worker/ingress/binding/build topology | `docs/migration/cloudflare/TOPOLOGY.md` |
+| CURRENT measured CPU / 1102 / request baseline | `docs/migration/cloudflare/PERFORMANCE_BASELINE.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
 | DB schema | `src/lib/db/schema.ts` + `migrations/` |
@@ -49,6 +50,7 @@
 - `PRODUCT_REQUIREMENTS.md` owns reconciliation between current implementation and existing design intent.
 - `BACKEND_OPTIMIZATION.md` owns optimization/blocker decisions.
 - `cloudflare/TOPOLOGY.md` owns the verified CURRENT four-Worker / ingress / binding / build-deploy topology; Wrangler and Cloudflare APIs are its evidence surfaces.
+- `cloudflare/PERFORMANCE_BASELINE.md` owns measured CURRENT CPU/resource-failure/request evidence and representative migration budgets.
 - `CODE_QUALITY.md` owns implementation quality standards.
 - `STATUS.md` is the only progress/task-state source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`.
 - `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.

@@ -92,6 +92,23 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
 
+## MIG-0006 evidence
+
+Workers Observabilityをread-only集計し、CURRENT request CPU/resource failureを測定した。countはABR sampling（主に sampleInterval ~= 10）による推定値として扱い、individual invocationで resource failureの存在も確認した。
+
+- `flamenode-web` fetchはCPU median 15ms、p95 872ms、p99 1249msのsampling-weighted分布。successful rolloverを含むためこれ自体をCPU entitlementとは扱わない。
+- web `exceededCpu` はsampling-weightedで約2,070件のsignalがあり、個別eventでは public video / user pathがCPU 10ms・HTTP 503で終了する例を確認した。
+- webにはhistorical versionで `exceededMemory` も存在し、長wall-time後にHTTP 503。CPUだけを引き上げる対策では不十分。
+- content queueにも `flamenode-static-rebuild-wake` の `exceededCpu` 実event（CPU 50ms）がある。background budgetはHTTP thin pathと分離して扱う。
+- hot pathは home/list/user/videoのSSR/RSC、Google Drive/YouTube image proxy、account summary、entryに分散している。
+- CURRENTのISR/card caps/icon-map削減/bounded degraded D1/static asset bypassは有効な防御なのでreplacement parityまで維持する。
+- TARGET public SSG + thin visibility gateway、private SPA + bounded API、heavy work Queue/backgroundの方向を実測が支持する。
+- representative TARGET budgetは simple read p95 < 5ms / normal mutation < 8ms / auth-heavy < 9ms / gateway p50 <1.5ms p95 <3ms p99 <5ms / exceededCpu=0。
+
+Account subscription APIはconnector権限上read不能だったため、plan名は推測しない。観測されたfailure boundaryと公式runtime semanticsを基準にする。
+
+MIG-0006でfrontend product-contract変更を必須とするoptimization blockerは0。レンダリングownershipは変えるがUX/URL/permission/visibility semanticsは維持する。
+
 ## MIG-0005 evidence
 
 Cloudflare実環境とtracked config/deploy pathを照合し、以下をCURRENTとして固定した。

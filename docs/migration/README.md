@@ -12,6 +12,7 @@
 > Code quality: [`CODE_QUALITY.md`](CODE_QUALITY.md)
 > UI visual input: [`UI_REFERENCE.md`](UI_REFERENCE.md)
 > Cloudflare CURRENT topology: [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)
+> Cloudflare CURRENT performance baseline: [`cloudflare/PERFORMANCE_BASELINE.md`](cloudflare/PERFORMANCE_BASELINE.md)
 
 ## Purpose
 
@@ -58,6 +59,9 @@ CURRENT behavior
 
 CURRENT Cloudflare platform topology
   cloudflare/TOPOLOGY.md
+
+CURRENT measured CPU / 1102 / request evidence
+  cloudflare/PERFORMANCE_BASELINE.md
 
 CURRENT user-visible routes
   CURRENT_ROUTES.md
@@ -810,6 +814,7 @@ Auth:
 | `UI_REFERENCE.md` | user-provided HTML visual/IA source registration |
 | `BACKEND_OPTIMIZATION.md` | commonization/optimization/blocker decisions |
 | `cloudflare/TOPOLOGY.md` | verified CURRENT Worker/ingress/binding/resource/build-deploy topology |
+| `cloudflare/PERFORMANCE_BASELINE.md` | measured CPU/resource-failure/request baseline + PoC budgets |
 | `ROUTE_MATRIX.md` | route migration disposition |
 | `API_MATRIX.md` | Server Action/Route Handler/API disposition |
 | code/test/config | exact CURRENT implementation truth |
