@@ -1,7 +1,7 @@
 # FlameNode Existing Function Inventory
 
 > Status: Active / Functional parity index
-> Last updated: 2026-10-06
+> Last updated: 2026-10-07
 > Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Architecture: [`README.md`](README.md)
 > Progress: [`STATUS.md`](STATUS.md)
@@ -64,13 +64,13 @@ BASELINE_KNOWN
 
 | IDs | Domain | Detail ledger | Initial count |
 | --- | --- | --- | ---: |
-| `FN-PUB-*` | Public/discovery/playback | [`functions/PUBLIC.md`](functions/PUBLIC.md) | 22 |
-| `FN-AUTH-*`, `FN-PER-*`, `FN-ENT-*` | Auth/personal/entry | [`functions/AUTH_PERSONAL_ENTRY.md`](functions/AUTH_PERSONAL_ENTRY.md) | 22 |
+| `FN-PUB-*` | Public/discovery/playback/global public UI | [`functions/PUBLIC.md`](functions/PUBLIC.md) | 27 |
+| `FN-AUTH-*`, `FN-PER-*`, `FN-ENT-*` | Auth/personal/entry | [`functions/AUTH_PERSONAL_ENTRY.md`](functions/AUTH_PERSONAL_ENTRY.md) | 23 |
 | `FN-MNG-*`, `FN-ADM-*` | Manage/admin | [`functions/MANAGE_ADMIN.md`](functions/MANAGE_ADMIN.md) | 43 |
 | `FN-PLAT-*`, `FN-API-*`, `FN-JOB-*`, `FN-X-*` | Platform/API/jobs/cross-cutting | [`functions/PLATFORM_API_JOBS.md`](functions/PLATFORM_API_JOBS.md) | 43 |
-|  | **Total initial IDs** |  | **130** |
+|  | **Total initial IDs** |  | **136** |
 
-初期frontend-exposed capabilityは89 IDs。
+初期frontend-exposed capabilityは95 IDs。
 詳細なユーザー観測契約は `FRONTEND_FEATURES.md` を正本とする。
 
 毎taskで全ledgerを読まない。対象機能を含むledgerだけを読む。
@@ -100,7 +100,7 @@ BASELINE_KNOWN
 
 - `docs/migration/FRONTEND_FEATURES.md`
 
-`MIG-0010` で全86画面をrequired capability IDsへ完全に紐付ける。
+`MIG-0010` で全86画面とcross-route layoutをrequired capability IDsへ完全に紐付ける。
 
 ## Server Action seed surface
 
@@ -230,10 +230,11 @@ Frontend observable behaviorは `FRONTEND_FEATURES.md` と矛盾させない。
 1. `ROUTE_MATRIX.md` のscreen/routeを確認
 2. `FRONTEND_FEATURES.md` のcapabilityを確認
 3. screenで利用できる全function IDを列挙
-4. primary/secondary/destructive actionsを含める
-5. permission-dependent controlを含める
-6. loading/error/empty/forbidden/pending stateを含める
-7. server side effectsを含める
+4. cross-route layout/header capabilityも列挙
+5. primary/secondary/destructive actionsを含める
+6. permission-dependent controlを含める
+7. loading/error/empty/forbidden/pending stateを含める
+8. server side effectsを含める
 
 画面DONE条件:
 
@@ -278,7 +279,7 @@ backend移行ではCURRENT実装を機械的にコピーしない。
 
 | Task | Inventory responsibility |
 | --- | --- |
-| `MIG-0002` | 86 screen/page/route CURRENT baseline + 89 frontend-exposed capability baseline |
+| `MIG-0002` | 86 screen/page/route CURRENT baseline + 95 frontend-exposed capability baseline |
 | `MIG-0003` | 34 file-level Server Action modules + 3 inline-action pagesを全action function/callerへ展開 + optimization observations |
 | `MIG-0004` | all Route Handler HTTP methods + contract/duplication observations |
 | `MIG-0005` | Cloudflare topology/bindings/routes/build |
@@ -286,7 +287,7 @@ backend移行ではCURRENT実装を機械的にコピーしない。
 | `MIG-0007` | static artifacts/visibility/aliases/repair/fallback |
 | `MIG-0008` | auth/session/permission/owner rules |
 | `MIG-0009` | Queue/Cron/background job types/effects |
-| `MIG-0010` | all 86 screens → frontend capability/function IDs |
+| `MIG-0010` | all 86 screens + cross-route layout → frontend capability/function IDs |
 | `MIG-0011` | cross-source gap scan, merge duplicates, add missing IDs, UNKNOWN=0, backend optimization/blocker assessment |
 | `MIG-0012` | Phase 0 Gate |
 
@@ -305,5 +306,5 @@ backend移行ではCURRENT実装を機械的にコピーしない。
 frontend behavior変更を伴う最適化は自動採用しない。
 ユーザー判断まではCURRENT behavior維持をdefaultとする。
 
-Phase 0 Gateまでは初期130 IDが最終数とは限らない。
+Phase 0 Gateまでは初期136 IDが最終数とは限らない。
 棚卸しで新規機能が見つかったらIDを追加し、数値をSTATUSへ反映する。
