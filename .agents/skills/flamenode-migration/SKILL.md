@@ -1,34 +1,30 @@
 ---
 name: flamenode-migration
-description: Continue the FlameNode platform/UI migration one safe task at a time with explicit progress tracking and feature-parity guards.
+description: Execute one FlameNode migration task with strict UX/FN parity, Git, quality, requirement-reconciliation, and progress guards.
 ---
 
-# FlameNode Migration — Antigravity Adapter
+# FlameNode Migration — Antigravity Skill
 
-This is a thin adapter. The shared execution contract is `docs/migration/AGENT_PROTOCOL.md`.
+This is a thin reusable adapter. Canonical execution contract:
 
-Read, in order:
+`docs/migration/AGENT_PROTOCOL.md`
 
-1. `AGENTS.md`
-2. `docs/migration/AGENT_PROTOCOL.md`
-3. `docs/migration/README.md`
-4. `docs/migration/STATUS.md`
-5. `docs/migration/FUNCTION_INVENTORY.md`
-6. the relevant route/API matrix and target code/tests
+Mandatory concepts:
 
-Run exactly one READY MIG task.
+- `STATUS.md` = progress source of truth
+- `GIT_WORKFLOW.md` = branch/PR/merge source of truth
+- `CURRENT_ROUTES.md` = CURRENT user-visible routes
+- `FRONTEND_FEATURES.md` + `frontend/*.md` = granular `UX-*` behavior
+- `FUNCTION_INVENTORY.md` + `functions/*.md` = `FN-*` backend contracts
+- `PRODUCT_REQUIREMENTS.md` = existing-design/current reconciliation
+- `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
+- `CODE_QUALITY.md` = professional implementation standard
+- `UI_REFERENCE.md` = future HTML visual source; stop visual redesign while `PENDING_HTML`
 
-At start:
+Execute exactly one READY MIG task. One writer only. Use the task branch/PR required by `GIT_WORKFLOW.md`.
 
-- set the task to `IN_PROGRESS`
-- record `Owner: antigravity`
+Do not remove or change user-visible behavior merely to simplify the backend. Do not optimize for line count. Prefer explicit, readable, framework-neutral domain code and well-defined permission/transaction/side-effect boundaries.
 
-At finish:
-
-- set `DONE`, `REVIEW`, or `BLOCKED`
-- update `STATUS.md`
-- update affected inventory/matrix rows
+Finish by persisting `DONE`, `REVIEW`, or `BLOCKED`, updating affected ledgers/matrices, validation evidence, and rollback information.
 
 Never auto-cross Phase Gates or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.
-
-For redesign tasks, verify all associated function IDs before treating a screen as migrated.
