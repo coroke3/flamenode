@@ -1,37 +1,38 @@
 # FlameNode Route Migration Matrix
 
 > Status: Active / Route progress source of truth
-> Last updated: 2026-10-06
+> Last updated: 2026-10-07
 > Architecture: [`README.md`](README.md)
 > Progress: [`STATUS.md`](STATUS.md)
+> CURRENT route source: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
 > Frontend capabilities: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
 >
 > 画面・URL単位の移行契約を管理する。
-> ユーザー向け86 screenのURL/目的/primary actionは `docs/design-redesign/ROUTE_INVENTORY.md` を正本とし、この文書では移行先・technical compatibility route・安全境界を管理する。
+> CURRENTの86 USER_SCREENのURL/role/purpose/primary actionは `CURRENT_ROUTES.md` を正本とし、この文書では移行先・technical compatibility route・安全境界・UX/FN mappingを管理する。
 
 ## Route inventory classes
 
 CURRENT routeは以下を区別する。
 
-1. **USER_SCREEN** — ユーザー/運営者/管理者/開発者が直接見る画面。86 redesign screensが正本。
+1. **USER_SCREEN** — ユーザー/運営者/管理者/開発者が直接見るCURRENT画面。86画面の正本は`CURRENT_ROUTES.md`。
 2. **TECH_COMPAT** — Next/OpenNext/Free CPU制約等を成立させる内部route。独立したユーザー機能ではないが、置換前に消してはいけない。
 3. **API_AUTH** — Route Handler/Auth endpoint。MIG-0004/0008で監査。
-4. **GLOBAL_SURFACE** — `error.tsx`, `global-error.tsx`, `not-found.tsx`, robots/sitemap等。機能IDというより全画面横断契約として扱う。
-5. **DEV_MOCK** — `/dev/redesign/*` 等のfixture/mock。production capabilityと混同しない。
+4. **GLOBAL_SURFACE** — `error.tsx`, `global-error.tsx`, `not-found.tsx`, robots/sitemap等。全画面横断のUX/安全契約として扱う。
+5. **LEGACY_DEV_SURFACE** — `/dev/ui-surfaces`, `/dev/redesign/*` 等のCURRENT開発用surface。production capabilityと混同せず、新UIのvisual sourceにも使用しない。
 
 ## USER_SCREEN baseline
 
-2026-10-06 current treeと既存inventoryを照合するbaseline:
+2026-10-07のCURRENT route treeを基準にしたbaseline:
 
-| Group | Screens | Canonical source | Initial frontend capabilities |
-| --- | ---: | --- | ---: |
-| Public | 16 | `docs/design-redesign/ROUTE_INVENTORY.md` | 22 + System public surfaces |
-| Personal | 6 | same | 7 |
-| Entry | 3 | same | 6 |
-| Manage | 12 | same | 12 |
-| Admin | 45 | same | 31 |
-| System | 4 | same | Auth/System capabilitiesへmapping |
-| **Total** | **86** |  | **89 capabilities total across all groups** |
+| Group | Screens | Canonical source | UX baseline relationship |
+| --- | ---: | --- | --- |
+| Public | 16 | `CURRENT_ROUTES.md` | `frontend/PUBLIC.md`を中心にmapping |
+| Personal | 6 | `CURRENT_ROUTES.md` | `frontend/AUTH_PERSONAL_ENTRY.md`を中心にmapping |
+| Entry | 3 | `CURRENT_ROUTES.md` | `frontend/AUTH_PERSONAL_ENTRY.md`を中心にmapping |
+| Manage | 12 | `CURRENT_ROUTES.md` | `frontend/MANAGE_ADMIN.md`を中心にmapping |
+| Admin | 45 | `CURRENT_ROUTES.md` | `frontend/MANAGE_ADMIN.md`を中心にmapping |
+| System | 4 | `CURRENT_ROUTES.md` | cross-cutting/auth/system UXへmapping |
+| **Total** | **86** | `CURRENT_ROUTES.md` | **432 UX capabilities baselineの部分集合/組合せ** |
 
 System routes:
 
@@ -40,7 +41,8 @@ System routes:
 - `/onboarding` → `FN-AUTH-005`
 - `/auth/complete` → `FN-AUTH-007`
 
-86 screenと89 capabilityは1:1ではない。
+86 screenと432 UX capabilityは1:1ではない。
+1 screenに複数UXがあり、cross-route UXは複数screenへまたがる。
 
 ## CURRENT technical compatibility routes
 
@@ -72,7 +74,7 @@ Evidence: `next.config.mjs` の `QUERY_RENDERED_PUBLIC_PAGES` と各shared view 
 | `robots.ts` | crawler policy | migration/canary/dev URLを意図せずindexさせない |
 | `sitemap.ts` | public URL discovery | canonical public entity coverageを維持 |
 
-これらはMIG-0010でscreen capability mappingとは別にcross-cutting acceptanceへ紐付ける。
+これらはMIG-0010でscreen-local mappingとは別にcross-cutting UX acceptanceへ紐付ける。
 
 ---
 
@@ -97,17 +99,18 @@ Evidence: `next.config.mjs` の `QUERY_RENDERED_PUBLIC_PAGES` と各shared view 
 | `/admin/*` | Next/OpenNext | React/Vite app | SPA | Hono→D1 | admin permission | BASELINED | MIG-0705 |
 | `/api/*` | Next Route Handler | Hono/api | API | D1/R2/Queue | endpoint contract | API_AUDIT_PENDING | MIG-0004/0601..0605 |
 | auth routes | NextAuth/Auth.js | later auth target | API | session DB | auth compatibility | AUTH_AUDIT_PENDING | MIG-0008/0801..0806 |
-| `/dev/ui-surfaces` | dev CURRENT UI catalog | migration/dev support | dev | local UI | dev-only | BASELINED | MIG-0201..0205 |
-| `/dev/redesign/*` | fixture-only Next mock | migration support only | dev | fixture | none | BASELINED | MIG-0201..0205 |
+| `/dev/ui-surfaces` | CURRENT UI inspection surface | migration/dev support | dev | local UI | dev-only | BASELINED | MIG-0201..0205 |
+| `/dev/redesign/*` | legacy fixture/mock implementation | no TARGET authority | dev | fixture | none | LEGACY_ONLY | remove/dispose only after replacement/reference decision |
 
 ## Route-level acceptance template
 
 ```text
 Route:
-Class: USER_SCREEN | TECH_COMPAT | API_AUTH | GLOBAL_SURFACE | DEV_MOCK
+Class: USER_SCREEN | TECH_COMPAT | API_AUTH | GLOBAL_SURFACE | LEGACY_DEV_SURFACE
 Current file:
 Current owner:
-Frontend capability IDs:
+Required UX IDs:
+Required FN IDs:
 Target owner:
 Render mode:
 Public/private:
@@ -118,7 +121,7 @@ Visibility fence:
 SEO/canonical/OGP:
 Dynamic states:
 Query/deep-link/history semantics:
-Current tests:
+Current tests/evidence:
 Target tests:
 Rollback:
 Migration task:
@@ -143,19 +146,26 @@ State:
 - direct URL/reload/browser back-forward/queryをacceptanceに含める。
 - private dataをpublic R2/build snapshotへ流さない。
 
-## Design migration mapping
+## CURRENT screen → UX/FN mapping
 
-MIG-0010で `app/(redesign)/dev/redesign/_catalog.ts` の86 screenと89 frontend capabilitiesを完全に紐付ける。
+MIG-0010で `CURRENT_ROUTES.md` の86 USER_SCREENとcross-route shell/global surfacesを、関連する432 baseline `UX-*` と136 baseline `FN-*` へ完全に紐付ける。
 
 ```text
-Mock ID
-Current route
-Frontend capability IDs
+Current route / surface
+Required UX IDs
+Required FN IDs
+Current evidence
+Permission/visibility contract
+URL/query/history contract
+Loading/error/empty/pending/degraded contract
+Responsive/a11y contract
 Target route
-Target layout
-Shared components
-Responsive states
-Loading/error/empty/permission/pending states
-MIG task
+Target UI reference (HTML mock受領後)
+Target layout/components
+Migration task
 State
 ```
+
+`UI_REFERENCE.md` が `PENDING_HTML` の間はTarget layout/componentsを確定しない。
+旧`app/(redesign)`や削除済み`docs/design-redesign`を新UIの根拠にしない。
+CURRENT UX/FN mappingはHTML mock受領を待たずに完了させる。
