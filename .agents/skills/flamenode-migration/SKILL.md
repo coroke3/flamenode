@@ -16,6 +16,7 @@ Mandatory concepts:
 - `CURRENT_ROUTES.md` = CURRENT user-visible routes
 - `FRONTEND_FEATURES.md` + `frontend/*.md` = granular `UX-*` behavior
 - `FUNCTION_INVENTORY.md` + `functions/*.md` = `FN-*` backend contracts
+- `server-actions/README.md` = CURRENT Server Action / inline action execution-unit evidence
 - `PRODUCT_REQUIREMENTS.md` = existing-design/current reconciliation
 - `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
 - `CODE_QUALITY.md` = professional implementation standard
