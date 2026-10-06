@@ -90,7 +90,7 @@ Tool adapters are intentionally thin:
 
 - Claude: `.claude/commands/flamenode-migration.md`, `.claude/skills/flamenode-migration/SKILL.md`
 - Codex: `.codex/skills/flamenode-migration/SKILL.md`
-- Antigravity: `.agents/skills/flamenode-migration/SKILL.md`, `.agents/agents/flamenode-migration/agent.md`
+- Antigravity: `.agents/workflows/flamenode-migration.md`, `.agents/skills/flamenode-migration/SKILL.md`, `.agents/rules/flamenode-project.md`
 
 The repository Markdown state is authoritative; chat history is not.
 
@@ -167,6 +167,8 @@ npm run check:db-schema
 npm run check:db-legacy
 npm run check:public-api-contract
 ```
+
+`npm run check:project-docs` also validates migration task/function/inventory consistency through `scripts/check-migration-docs.mjs`.
 
 Migration gates may require additional CPU/build/visibility/auth/UI measurements defined in `docs/migration/README.md`.
 
