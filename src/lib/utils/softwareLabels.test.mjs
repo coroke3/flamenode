@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  normalizeSoftwareCatalogName,
   normalizeSoftwareKey,
   normalizeSoftwareLabels,
   SOFTWARE_LABEL_MAX_LENGTH,
@@ -12,6 +13,14 @@ test("normalizeSoftwareLabels splits common separators and removes duplicates", 
     normalizeSoftwareLabels("After Effects\nBlender、 aftereffects;AviUtl，Blender"),
     ["After Effects", "Blender", "AviUtl"],
   );
+});
+
+test("normalizeSoftwareCatalogName keeps canonical spacing for existing catalog rows", () => {
+  assert.equal(
+    normalizeSoftwareCatalogName(" Ａｆｔｅｒ　 Ｅｆｆｅｃｔｓ "),
+    "after effects",
+  );
+  assert.equal(normalizeSoftwareCatalogName("AviUtl  2"), "aviutl 2");
 });
 
 test("normalizeSoftwareKey uses NFKC and ignores whitespace/case", () => {
