@@ -67,10 +67,10 @@ BASELINE_KNOWN
 | `FN-PUB-*` | Public/discovery/playback | [`functions/PUBLIC.md`](functions/PUBLIC.md) | 22 |
 | `FN-AUTH-*`, `FN-PER-*`, `FN-ENT-*` | Auth/personal/entry | [`functions/AUTH_PERSONAL_ENTRY.md`](functions/AUTH_PERSONAL_ENTRY.md) | 22 |
 | `FN-MNG-*`, `FN-ADM-*` | Manage/admin | [`functions/MANAGE_ADMIN.md`](functions/MANAGE_ADMIN.md) | 43 |
-| `FN-PLAT-*`, `FN-API-*`, `FN-JOB-*`, `FN-X-*` | Platform/API/jobs/cross-cutting | [`functions/PLATFORM_API_JOBS.md`](functions/PLATFORM_API_JOBS.md) | 41 |
-|  | **Total initial IDs** |  | **128** |
+| `FN-PLAT-*`, `FN-API-*`, `FN-JOB-*`, `FN-X-*` | Platform/API/jobs/cross-cutting | [`functions/PLATFORM_API_JOBS.md`](functions/PLATFORM_API_JOBS.md) | 43 |
+|  | **Total initial IDs** |  | **130** |
 
-初期frontend-exposed capabilityは87 IDs。
+初期frontend-exposed capabilityは89 IDs。
 詳細なユーザー観測契約は `FRONTEND_FEATURES.md` を正本とする。
 
 毎taskで全ledgerを読まない。対象機能を含むledgerだけを読む。
@@ -262,7 +262,7 @@ backend移行ではCURRENT実装を機械的にコピーしない。
 
 | Task | Inventory responsibility |
 | --- | --- |
-| `MIG-0002` | 86 screen/page/route CURRENT baseline + 87 frontend-exposed capability baseline |
+| `MIG-0002` | 86 screen/page/route CURRENT baseline + 89 frontend-exposed capability baseline |
 | `MIG-0003` | all Server Action exports + inline actions + optimization observations |
 | `MIG-0004` | all Route Handler HTTP methods + contract/duplication observations |
 | `MIG-0005` | Cloudflare topology/bindings/routes/build |
@@ -289,5 +289,5 @@ backend移行ではCURRENT実装を機械的にコピーしない。
 frontend behavior変更を伴う最適化は自動採用しない。
 ユーザー判断まではCURRENT behavior維持をdefaultとする。
 
-Phase 0 Gateまでは初期128 IDが最終数とは限らない。
+Phase 0 Gateまでは初期130 IDが最終数とは限らない。
 棚卸しで新規機能が見つかったらIDを追加し、数値をSTATUSへ反映する。
