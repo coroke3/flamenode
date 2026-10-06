@@ -11,10 +11,10 @@
 
 1. `AGENTS.md`
 2. `docs/AI_CONTEXT.md` の該当タスク行
-3. 対象コードと関連 test
-4. migration taskだけ `docs/migration/README.md` → `docs/migration/STATUS.md`
+3. 対象コードと関連test
+4. migration taskだけ `docs/migration/AGENT_PROTOCOL.md` → `docs/migration/STATUS.md`
 
-`.claude/flamenode/source/`、`archive/`、完了済み phase は、過去仕様調査を明示されたときだけ。
+`.claude/flamenode/source/`、`archive/`、完了済みphaseは、過去仕様調査を明示されたときだけ読む。
 
 ## 役割の選び方
 
@@ -26,22 +26,23 @@
 | **Next/OpenNextからの段階移行** | **`/flamenode-migration`** |
 | **移行を反復実行** | **`/loop /flamenode-migration`** |
 
-軽量モデルの停止条件は `AGENTS.md` §モデル選択と停止。
+軽量モデルの停止条件は `AGENTS.md` を正本とする。
 
 ## Migration loop
 
-`/flamenode-migration` は `docs/migration/STATUS.md` を進捗正本として、1回につき1つのMIG taskだけを進める。
+`/flamenode-migration` は1回につき `docs/migration/STATUS.md` のREADY taskを1つだけ進めるClaude adapter。
 
-`/loop` 併用時も以下を守る。
+共通実行契約の正本は [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md)。`.claude/commands/flamenode-migration.md` と `.claude/skills/flamenode-migration/SKILL.md` は薄いadapterであり、仕様正本ではない。
+
+`/loop`併用時も以下を守る。
 
 - 1 iteration = 1 MIG task
-- iteration終了時にSTATUSを必ず更新
-- `IN_PROGRESS` のまま次へ進まない
+- iteration開始/終了stateをSTATUSへ保存
+- `IN_PROGRESS`のまま次へ進まない
 - Phase Gateを自動承認しない
 - production deploy / Worker Route / Custom Domain / Remote D1 / secret操作は明示承認まで停止
 - BLOCKEDを無視して後続Phaseへ進まない
-
-実行契約は `.claude/commands/flamenode-migration.md` を正本とする。
+- redesign画面をfunction parity未確認のままDONEにしない
 
 ## 出力
 
@@ -53,6 +54,7 @@
 migration:
 
 - MIG task ID / state
+- affected function IDs
 - 変更
 - 維持したcontract
 - 検査
