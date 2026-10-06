@@ -3,176 +3,155 @@
 > Status: Active
 > Last verified: 2026-10-06
 > Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
-> Source of truth: 現行コード・test、`src/lib/db/schema.ts`、`migrations/`、`wrangler.toml`、`workers/*/wrangler.toml`
-> Migration source of truth: [`docs/migration/README.md`](docs/migration/README.md)
+> Source of truth: `src/lib/db/schema.ts`, `migrations/`, `wrangler.toml`, `workers/*/wrangler.toml`, current code/test
 
-## 開始（これだけ）
+## Start
 
-1. この文書を読む。
-2. [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md) の **該当タスク行だけ** を読む。
-3. 対象コードと関連 test を直接読む。
-4. **新基盤移行・UI再設計に関係する作業だけ** `docs/migration/README.md` を読む。
+1. Read this file.
+2. Read the matching row in [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md).
+3. Read target code and related tests.
+4. For platform/UI migration only, read [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md).
 
-禁止:
-- リポジトリ全体の一括読込
-- `.claude/flamenode/source/`、`archive/`、完了済み phase、Historical の一括読込
-- 移行と無関係な作業で migration 文書を持ち込むこと
-- 「移行後ターゲット」を「現在productionで稼働中の構成」と誤認すること
+Do not bulk-load the repository, Historical/archive material, completed phases, or old `.claude/flamenode/source/` documents.
 
-## 矛盾時の優先順位
+## Precedence
 
-1. 現行コード・設定・test
-2. `src/lib/db/schema.ts` と `migrations/`
-3. Status が `Active` の文書
-4. **移行対象についてのみ** `docs/migration/README.md`
-5. `設計/`、`docs/design-redesign/` の現行提案
-6. Historical / archive / 旧監査（経緯のみ。現行根拠にしない）
+1. Current code/config/tests
+2. `src/lib/db/schema.ts` and `migrations/`
+3. Active docs
+4. For migration tasks only: `docs/migration/*`
+5. `docs/design-redesign/*` / `設計/`
+6. Historical/archive material
 
-移行中は「現行production」と「target architecture」が同時に存在する。
-どちらを指しているか不明なまま実装しない。
+Migration work must distinguish **CURRENT** production from **TARGET** architecture.
 
-## 正本リンク
+## Sources of truth
 
-| 領域 | 正本 |
+| Area | Source |
 | --- | --- |
-| DB構造 | `src/lib/db/schema.ts` |
-| migration | `migrations/` |
-| DB履歴 | `docs/database/change-log.md` |
-| 現行binding | `wrangler.toml`, `workers/*/wrangler.toml` |
-| 移行仕様 | `docs/migration/README.md` |
-| 移行進捗 | `docs/migration/STATUS.md` |
-| UI再設計 | `docs/design-redesign/README.md` とその参照順 |
-| executable UI inventory | `app/(redesign)/dev/redesign/_catalog.ts` |
-| ローカル | `LOCAL.md` |
-| デプロイ | `DEPLOY.md` |
-| 運用入口 | `docs/operations/README.md` |
-| タスク導線 | `docs/AI_CONTEXT.md` |
-| 未完了 | `docs/implementation-backlog.md` |
+| DB | `src/lib/db/schema.ts` |
+| migrations | `migrations/` |
+| current Cloudflare bindings | `wrangler.toml`, `workers/*/wrangler.toml`, actual Cloudflare config |
+| migration architecture | `docs/migration/README.md` |
+| multi-agent execution | `docs/migration/AGENT_PROTOCOL.md` |
+| migration progress | `docs/migration/STATUS.md` |
+| existing-function parity | `docs/migration/FUNCTION_INVENTORY.md` |
+| route migration | `docs/migration/ROUTE_MATRIX.md` |
+| API/server migration | `docs/migration/API_MATRIX.md` |
+| redesign | `docs/design-redesign/README.md` and its review order |
+| executable redesign inventory | `app/(redesign)/dev/redesign/_catalog.ts` |
+| deploy | `DEPLOY.md` |
+| operations | `docs/operations/README.md` |
 
-## 不変条件
+## Global invariants
 
-### 全作業
+- Do not edit SQL text of already-applied migrations.
+- Do not reintroduce old-column fallback, runtime DDL, deprecated wrappers, or uncontrolled dual writes.
+- `event_staff.permission_preset = 'owner'` remains the representative source; never leave an event with zero owners.
+- Authorization must be enforced server-side, not only in UI.
+- Public APIs return explicit DTOs only.
+- D1 remains canonical; R2/KV remain projections/cache/delivery layers.
+- Public visibility must remain fail-closed where CURRENT requires it.
+- Preserve audit, retry safety, idempotency, atomicity, and rollback guarantees.
+- Remote D1 migration is read-only during preflight and never auto-applied.
+- main direct push is prohibited; use branch + PR + required review.
+- Production deploy, Worker Route, Custom Domain, Remote D1, or secret changes require explicit user approval.
 
-- 既適用 migration の SQL 本文を変更しない。
-- schema 列一覧を Markdown へ複製しない。
-- 旧列 fallback、二重書込み、runtime DDL、deprecated wrapper を Active code へ戻さない。
-- `event_staff.permission_preset = 'owner'` が代表者正本。owner を 0 人にしない。
-- 権限はUIだけでなくserver境界で検証する。
-- 公開APIは明示DTOだけを返す。
-- Remote D1 のdeploy前検査はread-only。migrationを自動適用しない。
-- 実Cloudflare deploy、Remote D1、production secret、Worker Route / Custom Domain変更は **明示依頼時だけ**。
-- main直pushは禁止。通常はbranch + PR + required reviewを維持する。
+## CURRENT production
 
-### 移行中に必ず維持するもの
+CURRENT is still Next.js + OpenNext + Cloudflare Workers Static Assets behind `flamenode-web`, plus existing fast/content/sync background Workers.
 
-- D1を正本とする。
-- 既存のR2 static artifact、Queue、visibility fence、audit、権限モデルを「書き直すためだけ」に置換しない。
-- public→non-public のvisibility fenceはfail-closedを維持する。
-- 公開停止の即時性を、SSG反映待ちへ退化させない。
-- 認証移行はUI/API移行と分離する。既存Auth.js/NextAuth互換が証明されるまでproduction authを置換しない。
-- 新Publicはrequest-time SSRを原則禁止する。
-- 重い生成・集計・index生成をHTTP requestへ戻さない。
-- 旧Next/OpenNextはroute parity・rollback・auth parityが確認されるまで削除しない。
-- UI再設計で機能・権限・API副作用を意図せず削減しない。
-- 「技術を変えること」を目的にしない。既存実装を残す方が安全なら残す。
+This CURRENT path remains a rollback target until migration parity is verified.
 
-## 現行productionとtarget architecture
+## TARGET migration
 
-### 現行production
+Target details live only in `docs/migration/README.md`.
 
-現時点のproductionは Next.js + OpenNext + Cloudflare Workers Static Assets を中心とする。
-`flamenode.net` / `www.flamenode.net` は現行 `flamenode-web` Custom Domainで稼働する。
-
-### Target
-
-移行後ターゲットは `docs/migration/README.md` を正本とする。
-
-要約:
+Summary:
 
 - Public: Astro SSG + React Islands
 - Public request: thin visibility gateway + Static Assets
 - Private UI: React + Vite SPA
 - API: Hono
-- Data: D1 authoritative / R2 projection / Queue generation
-- Jobs: 既存 fast/content/sync Workersを原則維持
-- Same domain: Worker Routesで責務別Workerへ分割
-- SSR: default禁止、必要性を証明した例外のみ
+- Data: D1 canonical / R2 projection / Queue generation
+- Existing background Workers retained unless a later task proves replacement is better
+- Same `flamenode.net` URL space via staged Worker Routes
+- request-time SSR disabled by default
 
-この要約を根拠に細部を推測しない。詳細はmigration文書を確認する。
+Do not infer details from this summary; read the migration docs.
 
-## 移行作業の基本順序
+## Multi-agent migration
 
-1. 現行挙動とtestを固定する。
-2. framework-neutralなdomain service / contractを抽出する。
-3. shared design systemを作る。
-4. 新Public / API / SPAをshadowまたは限定routeで実装する。
-5. parity / CPU / visibility / auth / UI acceptanceを検証する。
-6. Worker Routeで限定的に切り替える。
-7. 問題があればrouteを旧Nextへ戻す。
-8. 全routeのparity確認後にのみOpenNext依存を削除する。
+Claude Code, Codex, Antigravity, and other agents share one protocol:
 
-Big Bang rewriteは禁止。
+[`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md)
 
-## `/flamenode-migration` と `/loop`
+Tool adapters are intentionally thin:
 
-移行タスクの標準入口は `.claude/commands/flamenode-migration.md`。
+- Claude: `.claude/commands/flamenode-migration.md`, `.claude/skills/flamenode-migration/SKILL.md`
+- Codex: `.codex/skills/flamenode-migration/SKILL.md`
+- Antigravity: `.agents/skills/flamenode-migration/SKILL.md`, `.agents/agents/flamenode-migration/agent.md`
 
-- `/flamenode-migration` は `docs/migration/STATUS.md` から現在Phaseと次のREADYタスクを選び、**1タスクだけ**実装する。
-- `/loop` と併用する場合も1 iteration = 1 migration taskを守る。
-- 各iterationの最後に `docs/migration/STATUS.md` を更新し、完了タスク・検査・残課題・次READYを明示する。
-- STATUSが不整合、BLOCKED、または次READYが無い場合は実装を止め、進捗整理だけ行う。
-- `/loop` から複数Phaseを跨いで自動実装しない。Phase GateはLeadが確認する。
+The repository Markdown state is authoritative; chat history is not.
 
-## 作業規則
+One migration iteration equals exactly one `MIG-*` task. Update `STATUS.md` and affected inventories before starting another iteration.
 
-- 依頼を1文で固定し、対象と非対象を先に決める。
-- 読むActive文書は原則3件以内。
-- migration taskでは `AGENTS.md` + `docs/AI_CONTEXT.md`該当行 + `docs/migration/README.md` を基本セットとする。
-- 同一情報を複数文書から集めない。
-- 同一ファイルを複数エージェントへ同時編集させない。
-- DB・認証・security・visibility・公開API・破壊的変更・共有型・Cloudflare routingの最終判断はLead。
-- サブエージェントの差分とtest結果はLeadが再確認する。
-- 推測でroute、binding、schema、権限を作らない。コード/設定を確認する。
-- 移行中のcompatibility layerは期限と削除条件を明記する。
-- 新しい独自framework / router / cache / island runtimeを作らない。
+## Redesign / feature preservation
 
-## バイブコーディング向け境界
+UI redesign is part of migration but must not silently delete functionality.
 
-AIが迷わないよう責務を固定する。
+Before a screen is considered migrated:
 
-- `apps/site`: Public SSG / Astro / public React Islands
+- map it to existing function IDs in `FUNCTION_INVENTORY.md`
+- verify permission and side effects
+- verify loading/error/empty/permission states
+- verify responsive behavior
+- preserve or explicitly approve removal of every existing capability
+
+Visual completion alone is not functional completion.
+
+## Target boundaries
+
+As phases progress, use these boundaries:
+
+- `apps/site`: Astro public SSG/Islands
 - `apps/app`: authenticated/private React SPA
 - `apps/api`: Hono HTTP boundary
-- `packages/ui`: framework-neutral React UI
-- `packages/domain`: business logic。Next/Hono/Astro import禁止
-- `packages/contracts`: Zod / shared API contract
-- `packages/db`: schema / DB access
-- `packages/public-data`: public projection DTO / loader contract
-- `workers/*`: background / queue / scheduled jobs
+- `packages/ui`: reusable React UI without Next/Astro/Hono/data bindings
+- `packages/domain`: business logic without framework imports
+- `packages/contracts`: shared Zod/API contracts
+- `packages/public-data`: public projection contracts/loaders
+- `workers/*`: background/queue/scheduled jobs
 
-移行途中で実ディレクトリがまだ存在しない場合、勝手に全コードを移動しない。
-phaseごとの対象だけ追加する。
+Do not move the entire current tree up-front. Add boundaries only when the active phase requires them.
 
-## モデル選択と停止
+## Work rules
 
-| 帯 | 用途 |
-| --- | --- |
-| 軽量 | 検索、一覧、単純置換、限定的文書修正、fixture作業、test結果整理 |
-| 中位 | 境界が明確なUI/API移植、局所リファクタ、component実装 |
-| 上位 | architecture、DB、auth、security、visibility、Cloudflare routing、破壊的変更、移行gate、最終レビュー |
+- Fix the task scope and non-scope before editing.
+- Prefer the smallest change that advances the current gate.
+- Do not have multiple agents edit the same file/domain/task concurrently.
+- DB/auth/security/visibility/public API/Cloudflare routing decisions require Lead-level review.
+- Keep compatibility bridges explicit and record their removal condition.
+- Do not invent a custom router, SSG, island runtime, auth protocol, or cache framework when a standard solution exists.
+- Do not rewrite existing D1/R2/Queue/Auth just because a migration is in progress.
 
-軽量モデルは次の場合、実装せず上位へ上げる。
+## Model escalation
 
-- 現行productionかtargetか判断できない
-- 3領域以上へ波及する
-- migration、権限、visibility、auth、データ削除を含む
-- Worker Route / Custom Domain / production binding変更が必要
-- 既存testと移行仕様が衝突する
-- fallback / rollback条件が決められない
+Use lightweight models for search, inventories, simple docs, fixture work, and bounded mechanical edits.
+Use stronger reasoning for architecture, DB, auth, permissions, security, visibility, routing, destructive changes, gates, and final review.
 
-## 検査
+Stop/escalate when:
 
-変更種別に必要なものだけ実行する。未実行は理由を書く。
+- CURRENT/TARGET is ambiguous
+- the task crosses 3+ risk domains
+- auth/permission/visibility/database destruction is involved
+- production Cloudflare/Remote D1 changes are required
+- tests conflict with the requested migration behavior
+- rollback is unclear
+
+## Validation
+
+Run only checks relevant to the change; state what was not run and why.
 
 ```sh
 npm run typecheck
@@ -189,16 +168,16 @@ npm run check:db-legacy
 npm run check:public-api-contract
 ```
 
-移行用に新しい検査scriptを追加する場合は、migration文書のAcceptance Gatesと対応付ける。
+Migration gates may require additional CPU/build/visibility/auth/UI measurements defined in `docs/migration/README.md`.
 
-## 完了報告
+## Completion report
 
-以下だけを短く報告する。
+Report only:
 
-- 変更内容
-- 現行から維持した挙動
-- target architecture上の到達点
-- 実行した検査と結果
-- 未実行と理由
-- rollback可否
-- 残課題
+- changed
+- preserved
+- migration/task state
+- validations and results
+- not-run checks and reasons
+- rollback
+- blockers / next task
