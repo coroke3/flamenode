@@ -224,9 +224,29 @@ if (errors.length === 0) {
     "docs/design-redesign/NAVIGATION.md",
     "design-redesign/README.md",
   ];
-  const authoritativeTexts = [architecture, protocol, inventory, frontend, docMap, read("AGENTS.md"), read("docs/AI_CONTEXT.md"), read("docs/README.md")];
+  const authoritativeTexts = [
+    architecture,
+    protocol,
+    inventory,
+    frontend,
+    routeMatrix,
+    docMap,
+    read("AGENTS.md"),
+    read("docs/AI_CONTEXT.md"),
+    read("docs/README.md"),
+  ];
   for (const obsolete of obsoletePositiveRefs) {
     if (authoritativeTexts.some((text) => text.includes(obsolete))) errors.push(`obsolete visual source reference remains: ${obsolete}`);
+  }
+
+  if (!routeMatrix.includes("CURRENT_ROUTES.md")) errors.push("ROUTE_MATRIX.md: CURRENT route source must be CURRENT_ROUTES.md");
+  if (!routeMatrix.includes("432 baseline `UX-*`")) errors.push("ROUTE_MATRIX.md: 432 UX mapping contract is missing");
+  for (const stale of [
+    "89 frontend capabilities",
+    "89 capabilities total",
+    "app/(redesign)/dev/redesign/_catalog.ts",
+  ]) {
+    if (routeMatrix.includes(stale)) errors.push(`ROUTE_MATRIX.md: stale redesign/count reference remains: ${stale}`);
   }
 
   // Requirement, optimization and code quality policies.
@@ -234,7 +254,7 @@ if (errors.length === 0) {
     if (!requirements.includes(phrase)) errors.push(`PRODUCT_REQUIREMENTS.md: required policy phrase missing: ${phrase}`);
   }
 
-  for (const phrase of ["experienced production engineer", "コード行数削減はKPIではない", "framework adapter", "Side effects"] ) {
+  for (const phrase of ["experienced production engineer", "コード行数削減はKPIではない", "framework adapter", "Side effects"]) {
     if (!quality.includes(phrase)) errors.push(`CODE_QUALITY.md: required quality phrase missing: ${phrase}`);
   }
 
@@ -312,4 +332,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, requirement/code-quality rules, agent adapters, Git workflow, UI source state, source map and task references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, route source, requirement/code-quality rules, agent adapters, Git workflow, UI source state, source map and task references are consistent.");
