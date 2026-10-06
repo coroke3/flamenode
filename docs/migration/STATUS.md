@@ -284,12 +284,14 @@ Implemented:
 - shared `AGENT_PROTOCOL.md`
 - architecture `README.md`
 - explicit `STATUS.md`
-- `FUNCTION_INVENTORY.md`
+- `FUNCTION_INVENTORY.md` + 4 domain ledgers
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
-- Claude command + skill adapter
-- Codex repo skill adapter
-- Antigravity workspace skill + agent adapter
+- Claude `/flamenode-migration` command + skill adapter
+- Codex repo skill adapter + `/goal` continuous-execution guidance
+- Antigravity `/flamenode-migration` workspace workflow + skill + workspace rule
+- `scripts/check-migration-docs.mjs`
+- `check:project-docs` integration
 - README / AI_CONTEXT / CLAUDE navigation
 
 Acceptance:
@@ -301,6 +303,8 @@ Acceptance:
 - [x] existing-function inventory introduced
 - [x] redesign completion tied to function parity
 - [x] Phase 0 inventory split into loop-sized tasks
+- [x] Claude / Codex / Antigravity native entrypoints aligned
+- [x] migration docs consistency checker added
 - [x] no production runtime/config/Cloudflare mutation
 - [ ] docs checks executed in an environment with the repository available
 - [ ] Lead review / PR merge
@@ -308,8 +312,9 @@ Acceptance:
 Validation note:
 
 - GitHub PR checks are not configured for this draft branch.
-- Local container could not resolve `github.com`, so repository scripts could not be executed here.
-- `scripts/check-docs.mjs` was inspected; new docs keep CURRENT OpenNext wording where required and do not intentionally introduce forbidden legacy claims.
+- Local container cannot resolve `github.com`, so repository scripts could not be executed in this chat environment.
+- `scripts/check-docs.mjs` and `scripts/check-project-docs.mjs` were inspected; migration-specific consistency is additionally enforced by `scripts/check-migration-docs.mjs` after checkout.
+- Antigravity workspace workflow/skill/rule locations and Codex repo skill/Goal usage were rechecked against current official documentation before finalizing adapters.
 
 Rollback:
 
@@ -321,9 +326,9 @@ Rollback:
 ```text
 Agent: chatgpt
 Task: MIG-0001
-Result: multi-agent migration/inventory framework implemented; awaiting docs validation + Lead review
-Affected functions: inventory framework only; runtime behavior unchanged
-Validation: static review; executable docs checks pending
+Result: multi-agent migration/inventory framework implemented and adapter conventions corrected; awaiting executable docs validation + Lead review
+Affected functions: inventory/progress framework only; runtime behavior unchanged
+Validation: static repository review + official adapter convention verification; executable docs checks pending
 PR: #232
 Rollback: revert PR #232
 Blockers: docs script execution + Lead review
