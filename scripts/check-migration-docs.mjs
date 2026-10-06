@@ -8,6 +8,7 @@ const errors = [];
 const required = [
   "docs/migration/README.md",
   "docs/migration/AGENT_PROTOCOL.md",
+  "docs/migration/GIT_WORKFLOW.md",
   "docs/migration/DOC_MAP.md",
   "docs/migration/STATUS.md",
   "docs/migration/FUNCTION_INVENTORY.md",
@@ -54,6 +55,7 @@ if (errors.length === 0) {
   const routeMatrix = read("docs/migration/ROUTE_MATRIX.md");
   const apiMatrix = read("docs/migration/API_MATRIX.md");
   const docMap = read("docs/migration/DOC_MAP.md");
+  const gitWorkflow = read("docs/migration/GIT_WORKFLOW.md");
 
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
   const nextAfterApproval = status.match(/Next after approval:\s*(MIG-\d{4})/i)?.[1];
@@ -148,6 +150,7 @@ if (errors.length === 0) {
   }
 
   for (const canonical of [
+    "docs/migration/GIT_WORKFLOW.md",
     "docs/migration/STATUS.md",
     "docs/migration/FUNCTION_INVENTORY.md",
     "docs/migration/ROUTE_MATRIX.md",
@@ -157,6 +160,15 @@ if (errors.length === 0) {
       errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
     }
   }
+
+  for (const phrase of [
+    "1 MIG task = 1 branch = 1 PR = 1 merge unit",
+    "squash merge",
+    "Only one migration **writer lane** is active at a time",
+    "Code landing and traffic switching are separate operations",
+  ]) {
+    if (!gitWorkflow.includes(phrase)) errors.push(`GIT_WORKFLOW.md: required policy phrase missing: ${phrase}`);
+  }
 }
 
 if (errors.length) {
@@ -164,4 +176,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: task state, function ledgers, adapters, source map, and migration references are consistent.");
+console.log("[check:migration-docs] OK: task state, function ledgers, adapters, Git workflow, source map, and migration references are consistent.");

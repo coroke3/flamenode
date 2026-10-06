@@ -15,6 +15,7 @@
 
 `../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/README.md` → `migration/STATUS.md` → `migration/FUNCTION_INVENTORY.md` → 対象ledger/matrix/code/test
 
+branch / PR / merge / handoffを伴う移行作業では [`migration/GIT_WORKFLOW.md`](migration/GIT_WORKFLOW.md) を正本とする。
 正本の重複判断が必要な場合だけ [`migration/DOC_MAP.md`](migration/DOC_MAP.md) を読む。
 
 Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
@@ -32,6 +33,7 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 | universal agent rules | [`../AGENTS.md`](../AGENTS.md) |
 | task routing | [`AI_CONTEXT.md`](AI_CONTEXT.md) |
 | **multi-agent migration protocol** | **[`migration/AGENT_PROTOCOL.md`](migration/AGENT_PROTOCOL.md)** |
+| **migration Git / branch / PR / merge policy** | **[`migration/GIT_WORKFLOW.md`](migration/GIT_WORKFLOW.md)** |
 | **target migration architecture** | **[`migration/README.md`](migration/README.md)** |
 | **progress / next READY task** | **[`migration/STATUS.md`](migration/STATUS.md)** |
 | **documentation source map / dedupe rules** | **[`migration/DOC_MAP.md`](migration/DOC_MAP.md)** |
@@ -56,6 +58,7 @@ Historical / archive / 完了済みphaseは現行仕様の根拠にしない。
 - CURRENT Cloudflare: wrangler + actual Cloudflare settings
 - TARGET architecture: `migration/README.md`
 - execution/loop semantics: `migration/AGENT_PROTOCOL.md`
+- Git/branch/PR/merge policy: `migration/GIT_WORKFLOW.md`
 - progress/current owner/next READY/dependencies: `migration/STATUS.md`
 - documentation truth ownership: `migration/DOC_MAP.md`
 - existing feature preservation: `migration/FUNCTION_INVENTORY.md` + `migration/functions/*.md`
