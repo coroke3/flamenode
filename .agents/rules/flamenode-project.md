@@ -15,6 +15,7 @@ Mandatory sources include:
 - `BACKEND_OPTIMIZATION.md` for backend work
 - `docs/migration/server-actions/README.md` for Server Action migration/audit work
 - `docs/migration/route-handlers/README.md` for Route Handler/API migration/audit work
+- `docs/migration/cloudflare/TOPOLOGY.md` for Cloudflare Worker/ingress/binding/build/CPU/job migration/audit work
 - `UI_REFERENCE.md` for visual work
 
 Rules:
