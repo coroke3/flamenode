@@ -21,7 +21,7 @@ UI機能数とbackend function数を一致させない。
 `/flamenode-migration`の全iterationでこの索引を確認する。
 
 - frontend/UI/routeを触る: `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象frontend ledger
-- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`; Route Handler/API対象なら `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job対象なら `cloudflare/TOPOLOGY.md`; CPU/1102/request performance対象なら `cloudflare/PERFORMANCE_BASELINE.md`
+- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`; Route Handler/API対象なら `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job対象なら `cloudflare/TOPOLOGY.md`; CPU/1102/request performance対象なら `cloudflare/PERFORMANCE_BASELINE.md`; static artifact/alias/visibility/fallback/repair対象なら `static-delivery/README.md`
 - product/design intentが関係する: `PRODUCT_REQUIREMENTS.md`
 - visual UIが関係する: `UI_REFERENCE.md`。`PENDING_HTML`中は新visual designを推測しない
 - 画面存在、UX capability、backend functionを同一視しない
@@ -122,7 +122,7 @@ checkerは実コードのroute file/method pairとledgerを照合し、将来の
 
 ### Worker / background
 
-MIG-0005でCloudflare platform topologyを実環境まで検証済み。正本は [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)。MIG-0006でCPU/1102/request baselineをWorkers Observabilityから実測済み。正本は [`cloudflare/PERFORMANCE_BASELINE.md`](cloudflare/PERFORMANCE_BASELINE.md)。
+MIG-0005でCloudflare platform topologyを実環境まで検証済み。正本は [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)。MIG-0006でCPU/1102/request baselineをWorkers Observabilityから実測済み。正本は [`cloudflare/PERFORMANCE_BASELINE.md`](cloudflare/PERFORMANCE_BASELINE.md)。MIG-0007で25 static targets、artifact families、alias、visibility deny fence、fallback/repairを検証済み。正本は [`static-delivery/README.md`](static-delivery/README.md)。
 
 CURRENT Worker scripts:
 
@@ -209,7 +209,7 @@ CURRENT実装を新frameworkへ機械翻訳しない。
 | `MIG-0004` | all Route Handler methods -> FN/UX mapping + API contract observations |
 | `MIG-0005` | Cloudflare topology/bindings/routes/build |
 | `MIG-0006` | CPU/1102/request baseline |
-| `MIG-0007` | static artifacts/visibility/aliases/repair/fallback |
+| `MIG-0007` | DONE — 25 static targets / artifact families / visibility deny-first / aliases / repair / bounded fallback |
 | `MIG-0008` | auth/session/permission/owner rules |
 | `MIG-0009` | Queue/Cron/background job types/effects |
 | `MIG-0010` | all 86 screens + cross-route shells -> UX/FN complete mapping |
