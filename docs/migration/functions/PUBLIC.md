@@ -1,7 +1,7 @@
 # Public / Discovery / Playback Function Ledger
 
 > Status: Active / Function ledger
-> Last updated: 2026-10-06
+> Last updated: 2026-10-07
 > Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Index: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
 
@@ -31,6 +31,11 @@ MIG-0002 / MIG-0010 で画面との対応を確定し、関連API/actionはMIG-0
 | FN-PUB-020 | about | `/about` | static content | DETAIL_AUDIT_REQUIRED |
 | FN-PUB-021 | rules public閲覧 | `/rules` | active terms/version | DETAIL_AUDIT_REQUIRED |
 | FN-PUB-022 | SEO/canonical/OGP | public detail pages | URL/metadata parity | DETAIL_AUDIT_REQUIRED |
+| FN-PUB-023 | 公開お知らせ表示 | `/` | publish対象だけ表示、本文/順序/空状態 | DETAIL_AUDIT_REQUIRED |
+| FN-PUB-024 | 公開統計・募集中イベント/空き枠概要表示 | `/` | publicVideos/creators/activeEvents、primary event/slot summary | DETAIL_AUDIT_REQUIRED |
+| FN-PUB-025 | 全体公開ナビゲーション/モバイルメニュー | public layout | active state、dismiss/focus、responsive navigation | DETAIL_AUDIT_REQUIRED |
+| FN-PUB-026 | 公開ヘッダーから作品検索 | public layout → `/list?q=` | IME-safe GET、query/deep-link、mobile/desktop parity | DETAIL_AUDIT_REQUIRED |
+| FN-PUB-027 | ライト/ダークテーマ切替 | public/global UI | localStorage永続化、system preference追従、accessible state | DETAIL_AUDIT_REQUIRED |
 
 ## Audit expansion template
 
