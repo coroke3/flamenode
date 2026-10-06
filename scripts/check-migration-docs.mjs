@@ -12,6 +12,8 @@ const required = [
   "docs/migration/DOC_MAP.md",
   "docs/migration/STATUS.md",
   "docs/migration/FUNCTION_INVENTORY.md",
+  "docs/migration/FRONTEND_FEATURE_INVENTORY.md",
+  "docs/migration/BACKEND_OPTIMIZATION_LEDGER.md",
   "docs/migration/ROUTE_MATRIX.md",
   "docs/migration/API_MATRIX.md",
   "docs/migration/functions/PUBLIC.md",
@@ -32,6 +34,8 @@ const forbiddenDuplicates = [
   "docs/migration/PROGRESS.md",
   "docs/migration/WORK_ITEMS.md",
   "docs/migration/FEATURE_INVENTORY.md",
+  "docs/migration/FRONTEND_CAPABILITIES.md",
+  "docs/migration/REFACTOR_BACKLOG.md",
 ];
 
 function file(relative) {
@@ -52,10 +56,13 @@ for (const relative of forbiddenDuplicates) {
 if (errors.length === 0) {
   const status = read("docs/migration/STATUS.md");
   const inventory = read("docs/migration/FUNCTION_INVENTORY.md");
+  const frontendInventory = read("docs/migration/FRONTEND_FEATURE_INVENTORY.md");
+  const optimizationLedger = read("docs/migration/BACKEND_OPTIMIZATION_LEDGER.md");
   const routeMatrix = read("docs/migration/ROUTE_MATRIX.md");
   const apiMatrix = read("docs/migration/API_MATRIX.md");
   const docMap = read("docs/migration/DOC_MAP.md");
   const gitWorkflow = read("docs/migration/GIT_WORKFLOW.md");
+  const agentProtocol = read("docs/migration/AGENT_PROTOCOL.md");
 
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
   const nextAfterApproval = status.match(/Next after approval:\s*(MIG-\d{4})/i)?.[1];
@@ -80,12 +87,13 @@ if (errors.length === 0) {
     errors.push(`STATUS.md: Next after approval ${nextAfterApproval} has no task-table row`);
   }
 
-  const ledgerPaths = [
+  const frontendLedgerPaths = [
     "docs/migration/functions/PUBLIC.md",
     "docs/migration/functions/AUTH_PERSONAL_ENTRY.md",
     "docs/migration/functions/MANAGE_ADMIN.md",
-    "docs/migration/functions/PLATFORM_API_JOBS.md",
   ];
+  const platformLedgerPaths = ["docs/migration/functions/PLATFORM_API_JOBS.md"];
+  const ledgerPaths = [...frontendLedgerPaths, ...platformLedgerPaths];
   const functionRows = [];
   const validFunctionStates = new Set([
     "BASELINE_KNOWN",
@@ -135,9 +143,52 @@ if (errors.length === 0) {
     else if (reported !== actual) errors.push(`STATUS.md: ${state} reported=${reported}, actual=${actual}`);
   }
 
+  // Every frontend function seed must have a user-visible contract entry.
+  const frontendIds = [];
+  for (const ledgerPath of frontendLedgerPaths) {
+    const text = read(ledgerPath);
+    for (const match of text.matchAll(/^\|\s*(FN-[A-Z]+-\d{3})\s*\|/gm)) frontendIds.push(match[1]);
+  }
+  for (const id of frontendIds) {
+    if (!frontendInventory.includes(`\`${id}\``)) {
+      errors.push(`FRONTEND_FEATURE_INVENTORY.md: missing frontend contract for ${id}`);
+    }
+  }
+
+  const optimizationRows = [...optimizationLedger.matchAll(/^\|\s*`(OPT-\d{3})`\s*\|.*\|\s*([A-Z_]+)\s*\|\s*$/gm)].map((m) => ({ id: m[1], state: m[2] }));
+  const optimizationIds = optimizationRows.map((row) => row.id);
+  if (new Set(optimizationIds).size !== optimizationIds.length) {
+    errors.push("BACKEND_OPTIMIZATION_LEDGER.md: duplicate OPT IDs");
+  }
+  const validOptimizationStates = new Set([
+    "DISCOVERED",
+    "EVIDENCED",
+    "PROPOSED",
+    "APPROVED",
+    "IN_PROGRESS",
+    "VERIFIED",
+    "REJECTED",
+    "DEFERRED",
+    "FRONTEND_DECISION_REQUIRED",
+  ]);
+  for (const row of optimizationRows) {
+    if (!validOptimizationStates.has(row.state)) {
+      errors.push(`BACKEND_OPTIMIZATION_LEDGER.md: invalid state ${row.state} for ${row.id}`);
+    }
+  }
+  if (optimizationRows.length === 0) {
+    errors.push("BACKEND_OPTIMIZATION_LEDGER.md: no optimization candidates found");
+  }
+
   const knownMigs = new Set(taskRows);
-  const migrationDocs = [inventory, routeMatrix, apiMatrix];
-  const migrationNames = ["FUNCTION_INVENTORY.md", "ROUTE_MATRIX.md", "API_MATRIX.md"];
+  const migrationDocs = [inventory, frontendInventory, optimizationLedger, routeMatrix, apiMatrix];
+  const migrationNames = [
+    "FUNCTION_INVENTORY.md",
+    "FRONTEND_FEATURE_INVENTORY.md",
+    "BACKEND_OPTIMIZATION_LEDGER.md",
+    "ROUTE_MATRIX.md",
+    "API_MATRIX.md",
+  ];
   migrationDocs.forEach((text, index) => {
     const refs = [...text.matchAll(/MIG-\d{4}/g)].map((m) => m[0]);
     for (const ref of new Set(refs)) {
@@ -153,6 +204,8 @@ if (errors.length === 0) {
     "docs/migration/GIT_WORKFLOW.md",
     "docs/migration/STATUS.md",
     "docs/migration/FUNCTION_INVENTORY.md",
+    "docs/migration/FRONTEND_FEATURE_INVENTORY.md",
+    "docs/migration/BACKEND_OPTIMIZATION_LEDGER.md",
     "docs/migration/ROUTE_MATRIX.md",
     "docs/migration/API_MATRIX.md",
   ]) {
@@ -169,6 +222,10 @@ if (errors.length === 0) {
   ]) {
     if (!gitWorkflow.includes(phrase)) errors.push(`GIT_WORKFLOW.md: required policy phrase missing: ${phrase}`);
   }
+
+  for (const requiredRef of ["FRONTEND_FEATURE_INVENTORY.md", "BACKEND_OPTIMIZATION_LEDGER.md"]) {
+    if (!agentProtocol.includes(requiredRef)) errors.push(`AGENT_PROTOCOL.md: missing required ledger reference ${requiredRef}`);
+  }
 }
 
 if (errors.length) {
@@ -176,4 +233,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: task state, function ledgers, adapters, Git workflow, source map, and migration references are consistent.");
+console.log("[check:migration-docs] OK: task state, function/frontend/optimization ledgers, adapters, Git workflow, source map, and migration references are consistent.");
