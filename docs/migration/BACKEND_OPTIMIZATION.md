@@ -92,6 +92,19 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
 
+## MIG-0004 evidence
+
+33 Route Handler methodsの棚卸しから以下を確認した。
+
+- public API envelope（rate limit / explicit DTO / safe error / cache headers）は共通化価値が高いが、static fallback・visibility sourceはrouteごとに明示する。
+- Spreadsheetはsame-origin + admin write guard + bounded body + preview/atomicityを既に共有しており、targetでも専用bulk/data commandとして強化する。
+- Live APIの `handleLiveApiGet` は良い共通核。operation mode確認、5秒micro-cache、payload query分離を維持する。
+- Mediaはvalidation/R2 body/cache primitiveを共有できる一方、public D1 ACL / signed manage URL / viewer-conditional slot iconは異なるsecurity modelなので統合しない。
+- public events/videosはstatic-first化をさらに進められるが、maintenance/static_json_only時のfail-closed D1 fallback禁止を維持する。
+- Auth.js catch-all、legacy import、deep health、PVSF CORS staff APIは意図的なarchitecture exception候補。
+
+MIG-0004時点でfrontend behavior変更を必須とするoptimization blockerは確定していない。cache/freshness変更のUX影響はMIG-0011で最終評価する。
+
 ## MIG-0003 evidence
 
 110 Server Action execution unitsの棚卸しから以下を確認した。
