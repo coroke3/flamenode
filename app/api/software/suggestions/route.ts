@@ -17,7 +17,7 @@ import {
   parseBoundedPositiveInt,
   publicJsonResponse,
   publicServiceUnavailableResponse,
-} from "@/lib/publicApi";
+} from "@/lib/api/publicApi";
 
 const DEFAULT_SOFTWARE_SUGGESTION_LIMIT = 20;
 const MAX_QUERY_LENGTH = 64;
