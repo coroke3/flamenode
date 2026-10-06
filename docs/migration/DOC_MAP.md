@@ -14,6 +14,7 @@
 | task routing | `docs/AI_CONTEXT.md` |
 | migration architecture / invariants / phases | `docs/migration/README.md` |
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
+| **migration Git / branch / PR / merge policy** | **`docs/migration/GIT_WORKFLOW.md`** |
 | current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
 | existing-function parity index | `docs/migration/FUNCTION_INVENTORY.md` |
 | detailed function contracts | `docs/migration/functions/*.md` |
@@ -37,6 +38,7 @@
 - `Last verified` being old is not enough to rewrite a document; compare it with current code/tests/config first.
 - `STATUS.md` is the only progress/task-state source. Do not add a second `PROGRESS.md` or `WORK_ITEMS.md` ledger.
 - `FUNCTION_INVENTORY.md` + domain ledgers are the only feature-parity source. Do not add a second feature inventory.
+- `GIT_WORKFLOW.md` is the only migration branch/PR/merge policy source. Tool-specific skills/commands must link to it rather than duplicating Git rules.
 
 ## Active-document classification
 
@@ -47,6 +49,7 @@ When migration touches an Active Markdown file, classify it mentally or in the t
 - `task-router`
 - `progress-ledger`
 - `function-ledger`
+- `git-workflow`
 - `generated/inventory`
 - `historical`
 - `duplicate -> <canonical path>`
