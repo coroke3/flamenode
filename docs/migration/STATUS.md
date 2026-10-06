@@ -15,8 +15,8 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 ```text
 Current Phase: 0 — Baseline / Inventory
 Current Task: MIG-0007
-Current Owner: unassigned
-Task State: READY
+Current Owner: chatgpt
+Task State: IN_PROGRESS
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0006
@@ -115,7 +115,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0004 | Route Handler / API baseline | DONE | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
 | MIG-0005 | Cloudflare Worker/domain/route/binding baseline | DONE | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
 | MIG-0006 | CPU / 1102 / request baseline | DONE | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
-| MIG-0007 | static artifact / visibility baseline | READY | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
+| MIG-0007 | static artifact / visibility baseline | IN_PROGRESS | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
 | MIG-0008 | Auth/session/permission baseline | READY | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
 | MIG-0009 | Queue/Cron/background job baseline | READY | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
 | MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | BLOCKED | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
@@ -325,8 +325,8 @@ For MIG-0007 the writer records before work:
 
 ```text
 Task: MIG-0007
-Owner: claude | codex | antigravity | other
-State: READY -> IN_PROGRESS
+Owner: chatgpt
+State: IN_PROGRESS
 Branch: migration/mig-0007-static-visibility-baseline
 PR: pending
 Scope: static artifacts / aliases / visibility fail-closed / repair/fallback baseline
