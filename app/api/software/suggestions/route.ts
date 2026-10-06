@@ -1,7 +1,8 @@
 
 import { withDatabase } from "@/lib/cloudflare";
-import { softwareCatalog, softwareAliases } from "@/lib/db/schema";
+import { softwareCatalog, softwareAliases, videoSoftwares } from "@/lib/db/schema";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { normalizeSoftwareKey } from "@/lib/utils/softwareLabels";
 import {
   MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT,
   type PublicSoftwareSuggestionDto,
@@ -18,11 +19,17 @@ import {
 const DEFAULT_SOFTWARE_SUGGESTION_LIMIT = 20;
 const MAX_QUERY_LENGTH = 64;
 
+const actualUsageCount = sql<number>`(
+  SELECT COUNT(*)
+  FROM ${videoSoftwares}
+  WHERE ${videoSoftwares.software_id} = ${softwareCatalog.id}
+)`;
+
 const softwareSuggestionSelection = {
   id: softwareCatalog.id,
   name: softwareCatalog.name,
   category: softwareCatalog.category,
-  usage_count: softwareCatalog.usage_count,
+  usage_count: actualUsageCount,
   is_verified: softwareCatalog.is_verified,
   is_active: softwareCatalog.is_active,
 };
@@ -60,11 +67,15 @@ export async function GET(req: Request): Promise<Response> {
           .select(softwareSuggestionSelection)
           .from(softwareCatalog)
           .where(activeSoftware)
-          .orderBy(desc(softwareCatalog.is_verified), desc(softwareCatalog.usage_count), softwareCatalog.name)
+          .orderBy(
+            desc(softwareCatalog.is_verified),
+            desc(actualUsageCount),
+            softwareCatalog.name,
+          )
           .limit(limit);
       }
 
-      const normalized = q.toLowerCase().replace(/\s+/g, "");
+      const normalized = normalizeSoftwareKey(q);
 
       const byAlias = await db
         .select({
@@ -80,7 +91,7 @@ export async function GET(req: Request): Promise<Response> {
           .select(softwareSuggestionSelection)
           .from(softwareCatalog)
           .where(and(activeSoftware, inArray(softwareCatalog.id, ids)))
-          .orderBy(desc(softwareCatalog.is_verified), desc(softwareCatalog.usage_count))
+          .orderBy(desc(softwareCatalog.is_verified), desc(actualUsageCount))
           .limit(limit);
       }
 
@@ -96,7 +107,7 @@ export async function GET(req: Request): Promise<Response> {
         .orderBy(
           sql`CASE WHEN ${softwareCatalog.normalized_name} LIKE ${normalized + "%"} THEN 0 WHEN ${softwareCatalog.normalized_name} LIKE ${"%" + normalized} THEN 1 ELSE 2 END`,
           desc(softwareCatalog.is_verified),
-          desc(softwareCatalog.usage_count),
+          desc(actualUsageCount),
           softwareCatalog.name,
         )
         .limit(limit);
