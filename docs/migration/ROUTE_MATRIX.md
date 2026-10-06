@@ -84,7 +84,7 @@ State:
 
 ## Design migration mapping
 
-MIG-0007で `app/(redesign)/dev/redesign/_catalog.ts` の86 screenとこのmatrixを紐付ける。
+MIG-0010で `app/(redesign)/dev/redesign/_catalog.ts` の86 screenとこのmatrixを紐付ける。
 
 最低限:
 
