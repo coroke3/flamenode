@@ -2,15 +2,22 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  normalizeSoftwareKey,
   normalizeSoftwareLabels,
   SOFTWARE_LABEL_MAX_LENGTH,
 } from "./softwareLabels.ts";
 
 test("normalizeSoftwareLabels splits common separators and removes duplicates", () => {
   assert.deepEqual(
-    normalizeSoftwareLabels("After Effects\nBlender、 after effects;AviUtl，Blender"),
+    normalizeSoftwareLabels("After Effects\nBlender、 aftereffects;AviUtl，Blender"),
     ["After Effects", "Blender", "AviUtl"],
   );
+});
+
+test("normalizeSoftwareKey uses NFKC and ignores whitespace/case", () => {
+  assert.equal(normalizeSoftwareKey("Ａｆｔｅｒ　Ｅｆｆｅｃｔｓ"), "aftereffects");
+  assert.equal(normalizeSoftwareKey(" After   Effects "), "aftereffects");
+  assert.equal(normalizeSoftwareKey("AFTEREFFECTS"), "aftereffects");
 });
 
 test("normalizeSoftwareLabels caps item count and item length", () => {
