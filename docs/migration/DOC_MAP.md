@@ -24,6 +24,7 @@
 | backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
 | route target/disposition | `docs/migration/ROUTE_MATRIX.md` |
 | Server Action / Route Handler / API disposition | `docs/migration/server-actions/README.md` | CURRENT Server Action / inline action 110 execution-unit ledger | MIG-0003以降のaction/domain/API移行 |
+| `docs/migration/route-handlers/README.md` | CURRENT Route Handler / API 28 files / 33 method ledger | MIG-0004以降のAPI/Hono移行 |
 | `docs/migration/API_MATRIX.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
