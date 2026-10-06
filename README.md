@@ -10,7 +10,7 @@ YouTube埋め込みを使い、イベント参加、枠確保、投稿審査、�
 ## 最初に読む
 
 - AI作業: [`AGENTS.md`](AGENTS.md) → [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md)の該当タスク行
-- **プラットフォーム移行**: [`docs/migration/README.md`](docs/migration/README.md) → [`docs/migration/STATUS.md`](docs/migration/STATUS.md)
+- **プラットフォーム/UI移行**: [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md) → [`docs/migration/STATUS.md`](docs/migration/STATUS.md)
 - 文書索引: [`docs/README.md`](docs/README.md)
 - ローカル起動: [`LOCAL.md`](LOCAL.md)
 - デプロイ: [`DEPLOY.md`](DEPLOY.md)
@@ -48,17 +48,28 @@ YouTube埋め込みを使い、イベント参加、枠確保、投稿審査、�
 - URL: `flamenode.net` を維持し、Worker Routesで段階切替
 - Next/OpenNext: parity・rollback・auth確認後にのみ撤去
 
-移行タスクの標準入口:
+共通実行契約:
 
 ```text
-/flamenode-migration
+docs/migration/AGENT_PROTOCOL.md
 ```
 
-反復実行:
+代表的な呼出方法:
 
 ```text
-/loop /flamenode-migration
+Claude Code: /flamenode-migration
+Claude Code loop: /loop /flamenode-migration
+Codex: use repo skill flamenode-migration
+Antigravity: /flamenode-migration
 ```
+
+正確な製品別adapter・continuous execution・停止条件は `AGENT_PROTOCOL.md` を参照する。
+
+## 既存機能の保持
+
+リデザインとframework移行で機能欠落を起こさないため、[`docs/migration/FUNCTION_INVENTORY.md`](docs/migration/FUNCTION_INVENTORY.md) とdomain別ledgerで既存機能を追跡する。
+
+画面の見た目だけ完成しても移行完了ではない。permission / DB / audit / Queue / R2/KV / notification / error/empty/loading stateを含むparity確認を必要とする。
 
 ## 主要ディレクトリ
 
@@ -124,3 +135,12 @@ npm run dev
 ## 検査
 
 変更種別ごとの検査は[`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md)を使う。全検査一覧は[`AGENTS.md`](AGENTS.md)に集約する。
+
+文書系は:
+
+```sh
+npm run check:docs
+npm run check:project-docs
+```
+
+`check:project-docs` はmigration task/function/inventory整合も検証する。
