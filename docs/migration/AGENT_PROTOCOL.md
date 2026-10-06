@@ -51,7 +51,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 7. `docs/migration/CODE_QUALITY.md`
 8. task scopeに応じて:
    - route/UI/frontend → `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象`frontend/*.md`
-   - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`
+   - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`; Route Handler/APIを触る場合は `route-handlers/README.md`
    - visual/UI design → `UI_REFERENCE.md`
 9. 必要な`ROUTE_MATRIX.md` / `API_MATRIX.md`
 10. 対象CURRENT code + tests + config

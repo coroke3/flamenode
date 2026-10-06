@@ -21,7 +21,7 @@ UI機能数とbackend function数を一致させない。
 `/flamenode-migration`の全iterationでこの索引を確認する。
 
 - frontend/UI/routeを触る: `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象frontend ledger
-- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`
+- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`; Route Handler/API対象なら `route-handlers/README.md`
 - product/design intentが関係する: `PRODUCT_REQUIREMENTS.md`
 - visual UIが関係する: `UI_REFERENCE.md`。`PENDING_HTML`中は新visual designを推測しない
 - 画面存在、UX capability、backend functionを同一視しない
@@ -110,26 +110,15 @@ checkerは実コードのmodule exportとledgerを照合し、将来のaction追
 
 ### Route Handlers / API
 
-CURRENT `app/api/` top-level seed 14領域:
+MIG-0004でHTTP method-levelまで検証済み。正本は [`route-handlers/README.md`](route-handlers/README.md)。
 
 ```text
-account
-auth
-admin
-event-endpoints
-events
-google-drive-image
-health
-internal
-live
-media
-public
-software
-videos
-youtube-thumbnail
+app/api/**/route.ts files: 28
+HTTP method handlers: 33
+unclassified methods: 0
 ```
 
-MIG-0004で全`route.ts`をHTTP method単位へ展開する。
+checkerは実コードのroute file/method pairとledgerを照合し、将来のAPI追加漏れを検出する。
 
 ### Worker / background
 

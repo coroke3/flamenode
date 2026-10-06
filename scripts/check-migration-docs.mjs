@@ -21,6 +21,7 @@ const required = [
   "docs/migration/ROUTE_MATRIX.md",
   "docs/migration/API_MATRIX.md",
   "docs/migration/server-actions/README.md",
+  "docs/migration/route-handlers/README.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
   "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
@@ -263,6 +264,36 @@ if (errors.length === 0) {
   if (inlineUseServer !== 4) errors.push(`inline Server Actions: actual=${inlineUseServer}, expected=4`);
   if (inlineLedgerCount !== inlineUseServer) errors.push(`server-actions ledger inline rows=${inlineLedgerCount}, code inline actions=${inlineUseServer}`);
 
+  // MIG-0004 Route Handler completeness: real code <-> ledger.
+  const routeHandlers = read("docs/migration/route-handlers/README.md");
+  const routeHandlerRows = [...routeHandlers.matchAll(/^\|\s*(RH-\d{3})\s*\|\s*(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s*\|\s*([^|]+?)\s*\|/gm)]
+    .map((m) => ({ id: m[1], method: m[2], route: m[3].trim() }));
+  if (routeHandlerRows.length !== 33) errors.push(`route-handler ledger: rows=${routeHandlerRows.length}, expected=33`);
+
+  const routeFiles = walkFiles(file("app/api"), (p) => p.endsWith(path.sep + "route.ts"));
+  if (routeFiles.length !== 28) errors.push(`Route Handler files: actual=${routeFiles.length}, expected=28`);
+
+  const discoveredRouteHandlers = [];
+  for (const abs of routeFiles) {
+    const sourceText = fs.readFileSync(abs, "utf8");
+    const rel = path.relative(file("app"), abs).split(path.sep).join("/");
+    const route = "/" + rel.replace(/\/route\.ts$/, "");
+    const methods = new Set();
+    for (const match of sourceText.matchAll(/export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/g)) methods.add(match[1]);
+    for (const match of sourceText.matchAll(/export\s+const\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/g)) methods.add(match[1]);
+    for (const match of sourceText.matchAll(/export\s+const\s*\{([^}]+)\}/g)) {
+      for (const raw of match[1].split(",")) {
+        const name = raw.trim().split(/\s+as\s+/).at(-1);
+        if (/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/.test(name)) methods.add(name);
+      }
+    }
+    for (const method of methods) discoveredRouteHandlers.push(`${method} ${route}`);
+  }
+  if (discoveredRouteHandlers.length !== 33) errors.push(`HTTP method handlers: actual=${discoveredRouteHandlers.length}, expected=33`);
+
+  const ledgerPairs = new Set(routeHandlerRows.map((r) => `${r.method} ${r.route}`));
+  for (const pair of discoveredRouteHandlers) if (!ledgerPairs.has(pair)) errors.push(`route-handler ledger missing code handler: ${pair}`);
+  for (const pair of ledgerPairs) if (!discoveredRouteHandlers.includes(pair)) errors.push(`route-handler ledger stale/unknown handler: ${pair}`);
   // Design source transition.
   if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
@@ -341,12 +372,14 @@ if (errors.length === 0) {
     "docs/migration/BACKEND_OPTIMIZATION.md",
     "docs/migration/ROUTE_MATRIX.md",
     "docs/migration/API_MATRIX.md",
+    "docs/migration/server-actions/README.md",
+    "docs/migration/route-handlers/README.md",
   ]) {
     if (!docMap.includes("`" + canonical + "`")) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
   // Shared protocol must force Git, requirements, quality and visual-source rules.
-  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md"]) {
+  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md"]) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
@@ -363,7 +396,7 @@ if (errors.length === 0) {
   }
 
   const antigravityRule = read(".agents/rules/flamenode-project.md");
-  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md"]) {
+  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md"]) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
 
@@ -383,4 +416,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, route/UI sources, quality/agent/Git rules and task references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, route/UI sources, quality/agent/Git rules and task references are consistent.");

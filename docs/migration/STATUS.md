@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0004
+Current Task: MIG-0005
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0003
-Last Task PR: #238
-Next: MIG-0004
+Last Completed Task: MIG-0004
+Last Task PR: #240
+Next: MIG-0005
 ```
 
 ## State definitions
@@ -56,7 +56,7 @@ Next: MIG-0004
 | CURRENT technical compatibility routes | 4 | purpose/query baseline | n/a | replacement evidence before removal |
 | Backend/domain/platform `FN-*` | 136 | 2 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
 | Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
-| API top-level areas | 14 | 0 method-level | 0 | all `route.ts` methods disposed |
+| Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
 | CURRENT Worker scripts | 4 | 0 complete topology/job audit | 0 | bindings/routes/jobs fixed |
 | New UI visual source | HTML mock pending | n/a | n/a | registered in `UI_REFERENCE.md` before Phase 2 visual work |
 
@@ -112,7 +112,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0001 | migration docs / multi-agent command / progress framework | DONE | — | shared protocol/adapters/inventory/checker established |
 | MIG-0002 | CURRENT route + frontend observable capability baseline | DONE | MIG-0001 | 86 screens, 432 UX baseline, UX/FN split, HTML-input rule, Antigravity/Git/quality contract |
 | MIG-0003 | Server Action / inline action baseline | DONE | MIG-0001 | all exported/inline actions, callers, input, authz, effects, tests, affected UX/FN, optimization observations |
-| MIG-0004 | Route Handler / API baseline | READY | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
+| MIG-0004 | Route Handler / API baseline | DONE | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
 | MIG-0005 | Cloudflare Worker/domain/route/binding baseline | READY | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
 | MIG-0006 | CPU / 1102 / request baseline | BLOCKED | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
 | MIG-0007 | static artifact / visibility baseline | READY | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
@@ -136,7 +136,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [x] migration Git/branch/PR/squash workflow is mandatory
 - [x] professional code-quality standard is mandatory
 - [x] all Server Action exports + inline actions inventoried (110 execution units / unclassified 0)
-- [ ] all Route Handler methods inventoried
+- [x] all Route Handler methods inventoried (28 route files / 33 methods / unclassified 0)
 - [ ] all required FN functions CURRENT_VERIFIED or explicitly dispositioned
 - [ ] all 86 screens mapped to required UX/FN IDs
 - [ ] all required UX capabilities have route/permission/backend/state dispositions
@@ -270,54 +270,62 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0003 — Server Action / inline action baseline
+## MIG-0004 — Route Handler / API baseline
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #238
+PR: #240
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- 34 `"use server"` modules / 106 exported Server Actions / 4 inline actions = 110 execution units
-- unclassified Server Actions = 0
-- function-level caller/surface/input/auth/effect/FN/UX mapping
-- commonization candidates and intentional safety exceptions recorded
-- checker now detects Server Action inventory drift
-- shared protocol and Antigravity adapters require the ledger
+- 28 `app/api/**/route.ts` files / 33 HTTP method handlers
+- unclassified Route Handler methods = 0
+- method-level purpose/auth/permission/data/effect/cache/rate/FN/UX/test mapping
+- public/admin/internal/live/media/auth safety boundaries separated
+- commonizable API transport primitives and intentional exceptions recorded
+- checker now detects Route Handler inventory drift
+- shared protocol and Antigravity adapters require the Route Handler ledger
 - no runtime/Cloudflare/D1 behavior change
 
 Validation evidence:
 
-- ledger rows 110 = module rows 106 + inline rows 4
+- ledger rows 33 / unique method-route pairs 33
+- direct code audit found 28 route files / 33 method handlers
 - checker JavaScript syntax parse OK
 - PR changed docs/agent/checker only
-- obsolete `docs/design-redesign` source not restored
-- author self-review recorded; no independent approval was represented
+- no obsolete design source restored as an authoritative source
+- author self-review recorded; no independent approval is represented
+
+Optimization conclusions:
+
+- share public API envelope, admin write context, live GET adapter, media delivery primitives, static-first read helpers
+- keep Auth.js catch-all, legacy import, PVSF CORS staff API, deep health and distinct media security models explicit
+- frontend behavior change required for optimization: not established in MIG-0004; final blocker assessment remains MIG-0011
 
 Rollback:
 
-- revert PR #238 squash commit
+- revert PR #240 squash commit
 
 # Next task claim template
 
-For MIG-0004 the writer records before work:
+For MIG-0005 the writer records before work:
 
 ```text
-Task: MIG-0004
+Task: MIG-0005
 Owner: claude | codex | antigravity | other
 State: READY -> IN_PROGRESS
 Branch:
 PR:
-Scope: Route Handler / API methods
+Scope: Cloudflare Worker/domain/route/binding/build topology
 Affected UX IDs:
 Affected FN IDs:
-Evidence sources:
+Evidence sources: wrangler configs + actual Cloudflare account state
 Rollback:
 Production action required: no
 ```
 
-At finish, update this file plus `API_MATRIX.md`, affected FN/UX ledgers, and validation evidence before the next task becomes current.
+At finish, update this file plus Cloudflare/topology ledgers and validation evidence before MIG-0006/MIG-0009 become dependency-ready.
