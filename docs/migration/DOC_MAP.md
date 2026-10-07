@@ -28,6 +28,7 @@
 | CURRENT Cloudflare Worker/ingress/binding/build topology | `docs/migration/cloudflare/TOPOLOGY.md` |
 | CURRENT measured CPU / 1102 / request baseline | `docs/migration/cloudflare/PERFORMANCE_BASELINE.md` |
 | CURRENT static artifact / alias / visibility / fallback baseline | `docs/migration/static-delivery/README.md` |
+| CURRENT auth / session / identity / permission baseline | `docs/migration/auth/README.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
 | DB schema | `src/lib/db/schema.ts` + `migrations/` |
@@ -53,6 +54,7 @@
 - `cloudflare/TOPOLOGY.md` owns the verified CURRENT four-Worker / ingress / binding / build-deploy topology; Wrangler and Cloudflare APIs are its evidence surfaces.
 - `cloudflare/PERFORMANCE_BASELINE.md` owns measured CURRENT CPU/resource-failure/request evidence and representative migration budgets.
 - `static-delivery/README.md` owns CURRENT artifact families/commit-points, canonical alias rules, visibility fence ordering, fail-closed reads, degraded fallback and repair semantics.
+- `auth/README.md` owns CURRENT Auth.js/session/linking/terms/Active X/event-video authorization/owner-invariant semantics.
 - `CODE_QUALITY.md` owns implementation quality standards.
 - `STATUS.md` is the only progress/task-state source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`.
 - `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.
