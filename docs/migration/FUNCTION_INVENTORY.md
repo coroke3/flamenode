@@ -99,17 +99,17 @@ Phase 0中にどちらも増減し得るが、増減理由をSTATUS/PRへ記録�
 
 ### UI / routes
 
-CURRENT user-visible routeは`CURRENT_ROUTES.md`が正本。
+CURRENT page route実装・分類は `CURRENT_ROUTES.md` が正本。
 
 ```text
-Public   16
-Personal  6
-Entry     3
-Manage   12
-Admin    45
-System    4
-Total    86 USER_SCREEN
+app/**/page.tsx routes = 92
+VISUAL_SCREEN = 74
+COMPAT_REDIRECT = 9
+DEV_ONLY = 3
+SYSTEM_SURFACE = 6
 ```
+
+route数とUX/FN数は1:1ではない。compat/dev/systemも、URL・運用・認証等のcontractとして移行時に追跡する。
 
 `docs/design-redesign`や旧mockは正本にしない。
 
@@ -227,7 +227,7 @@ CURRENT実装を新frameworkへ機械翻訳しない。
 
 | Task | Responsibility |
 | --- | --- |
-| `MIG-0002` | 86 CURRENT routes + 432 granular frontend UX baseline + migration quality/source rules |
+| `MIG-0002` | 当時の86 USER_SCREEN baseline + 432 granular frontend UX baseline + migration quality/source rules |
 | `MIG-0003` | all Server Actions/inline actions -> FN/UX mapping + optimization observations |
 | `MIG-0004` | all Route Handler methods -> FN/UX mapping + API contract observations |
 | `MIG-0005` | Cloudflare topology/bindings/routes/build |
@@ -235,7 +235,7 @@ CURRENT実装を新frameworkへ機械翻訳しない。
 | `MIG-0007` | DONE — 25 static targets / artifact families / visibility deny-first / aliases / repair / bounded fallback |
 | `MIG-0008` | DONE — auth/session/linking/terms/Active X/owner/permission trust boundaries CURRENT_VERIFIED |
 | `MIG-0009` | Queue/Cron/background job types/effects |
-| `MIG-0010` | all 86 screens + cross-route shells -> UX/FN complete mapping |
+| `MIG-0010` | 当時の86 screen分類 + cross-route shells -> UX/FN complete mapping |
 | `MIG-0011` | cross-source gap scan, requirement reconciliation, orphan=0, optimization/blocker assessment |
 | `MIG-0012` | Phase 0 Gate |
 
