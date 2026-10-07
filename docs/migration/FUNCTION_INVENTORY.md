@@ -66,6 +66,19 @@ CURRENT/BASELINE
 - `REMOVED_APPROVED`: 明示承認済み削除
 - `BLOCKED`: parity判断不能
 
+## TARGET identity priority
+
+MIG-0011以降のTARGETでは、Xに紐づくdomain identityを次の順序で扱う。
+
+- Auth User = authentication/account/security principal。
+- Active X = default X-scoped domain principal。acting/content/interaction identityもActive X。
+- X-scoped permission = Active X first。D1上でActive Xが当該Auth Userのapproved linkであることを毎回server-sideで検証する。
+- approved linked X一覧 = link validation / switch candidate / 明示されたaccount-wide discovery用。inactive Xの権限をActive Xへ暗黙に貸さない。
+- 権限が別のlinked Xにしかない場合は、TARGETでは原則として明示的なActive X切替を要求する。admin/systemまたは明示されたaccount-wide flowだけを例外にする。
+- banned/terms/site role/Discord delivery/account linking等のaccount/security責務はAuth Userのまま。anonymous view telemetryもActive X化しない。
+
+`auth/README.md` はMIG-0008で検証したCURRENT正本なので、このTARGET定義のために過去事実を書き換えない。CURRENTのall-approved-linked-X permission behaviorとTARGETのActive-X-first behaviorの差は移行時に明示的に解消する。
+
 ## Domain ledgers
 
 | IDs | Domain | Detail ledger | Initial count |
