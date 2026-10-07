@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0008
-Current Owner: chatgpt
-Task State: IN_PROGRESS
+Current Task: MIG-0009
+Current Owner: unassigned
+Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0007
-Last Task PR: #243
-Next: MIG-0008
+Last Completed Task: MIG-0008
+Last Task PR: #244
+Next: MIG-0009
 ```
 
 ## State definitions
@@ -54,7 +54,7 @@ Next: MIG-0008
 | CURRENT USER_SCREEN routes | 86 | 86 route/role/purpose baseline | 0 | all required UX/FN mapped |
 | Frontend `UX-*` capabilities | 432 | baseline evidence states only | 0 | orphan/unverified/disposition漏れ 0 |
 | CURRENT technical compatibility routes | 4 | purpose/query baseline | n/a | replacement evidence before removal |
-| Backend/domain/platform `FN-*` | 136 | 2 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
+| Backend/domain/platform `FN-*` | 136 | 23 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
 | Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
 | Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
 | CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology + CPU/request measured / job semantics pending | 0 | bindings/routes/jobs fixed |
@@ -63,8 +63,8 @@ Next: MIG-0008
 Current FN state summary:
 
 ```text
-CURRENT_VERIFIED: 11
-DETAIL_AUDIT_REQUIRED: 125
+CURRENT_VERIFIED: 23
+DETAIL_AUDIT_REQUIRED: 113
 PARITY_VERIFIED: 0
 REMOVAL_PROPOSED: 0
 REMOVED_APPROVED: 0
@@ -116,7 +116,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0005 | Cloudflare Worker/domain/route/binding baseline | DONE | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
 | MIG-0006 | CPU / 1102 / request baseline | DONE | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
 | MIG-0007 | static artifact / visibility baseline | DONE | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
-| MIG-0008 | Auth/session/permission baseline | IN_PROGRESS | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
+| MIG-0008 | Auth/session/permission baseline | DONE | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
 | MIG-0009 | Queue/Cron/background job baseline | READY | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
 | MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | BLOCKED | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
 | MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | BLOCKED | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
@@ -143,8 +143,8 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [ ] all background jobs/Queues/Cron inventoried
 - [x] current Cloudflare topology fixed
 - [x] CPU/1102 baseline fixed
-- [ ] visibility/static guarantees fully fixed
-- [ ] auth/permission guarantees fully fixed
+- [x] visibility/static guarantees fully fixed
+- [x] auth/permission guarantees fully fixed
 - [ ] `REQUIREMENT_ONLY` / `CURRENT_DIVERGENCE` affecting migration resolved
 - [ ] backend optimization candidates intentionally validated/rejected
 - [ ] every optimization blocker has concrete frontend-impact disposition
@@ -270,74 +270,79 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0007 — static artifact / visibility baseline
+## MIG-0008 — Auth/session/permission baseline
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #243
+PR: #244
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- CURRENT static rebuild target 25種類を code dispatcher/types で照合
-- home/list/video/user/events/recommend/rules/search/shared-input/internal artifact familyをcommit-point/fallback/visibility付きで台帳化
-- video internal ID / YouTube alias の canonical enqueue・canonical R2 retry・alias object互換を固定
-- x_user case-insensitive canonical visibility identityを固定
-- unsafe canonical R2 rewrite拒否を固定
-- visibility entity 4種（video/event/x_user/event_group）と blocked/release_pending/released state machineを固定
-- public→private と private→public の双方で R2 deny-first orderingを確認
-- event promotion releaseは event_base/event_slots/event_release/event_playlist freshness完了まで解除しないことを確認
-- release CAS競合時の deny block restore を確認
-- event ID rename/reuse old-ID tombstone をgeneric CRUD化しないことを固定
-- enforce mode manifest failureは unavailable/fail-closed、degraded D1も同じvisibility contextを通すことを固定
-- maintenance/static_json_only/live-overlay のfallback matrixと ready/empty/stale/reflecting/unavailable/not_found stateを固定
-- static_artifacts tracking/hash/dedupe/generation commit/GC invariantsを固定
-- dangling visibility repairは admin-only + exact token + CAS の明示例外として固定
-- FN-PLAT-002..008、FN-X-004、FN-X-010 を CURRENT_VERIFIEDへ更新
-- shared protocol / Claude / Codex / Antigravity / checkerへ `static-delivery/README.md` を接続
-- production mutation 0
+- Discord/Auth.js OAuth、database session、configured-origin redirect contractを固定
+- Discord account linkingのprovider/discord_id conflict、token非永続化、CAS/idempotency、post-commit通知境界を固定
+- Auth.js sessionはAuth User ID識別、role/banned/Active X/terms/linked XはD1正本を再読するtrust hierarchyを固定
+- auth failure / DB failureをfalse logoutへ変換しない unavailable semanticsを固定
+- banned/terms/CostGuard/role/Active-X write guard順序とfail-closed behaviorを固定
+- /auth/complete のbounded retry、安全なnext、loop/open-redirect拒否を固定
+- logoutをCSRF取得 + Auth.js POST + hard-navigation成功後のみと固定
+- onboarding_completed_atを認可に使わず、slot予約と作品投稿のprerequisite差を固定
+- latest terms consentをCAS/audit付きatomic mutationとして固定
+- Auth User / linked X / approved X / Active Xを別概念として固定
+- Active X切替はlinked+approvedのみ、CAS+audit、client optimistic rollback + authoritative summary refreshを固定
+- account summary/presenceはprivate no-storeで、presence DTOを認可入力にしないことを固定
+- canonical permission keys / one-way legacy aliases / adminOnly filtering / malformed custom permission fail-closedを固定
+- event authorizationは全approved linked X IDを対象とし、Active Xは認可成立後のactor preferenceに留めることを固定
+- event owner = owner preset + approved X + owner-role account link、最後のoperable ownerをSQL/CASでも守ることを固定
+- video ownership = approved creator X または approved can_edit collaborator、submitted_by/Active Xではないことを固定
+- video privilege mode normal/event/adminの混在・自動fallbackを禁止
+- FN-AUTH-001..010、FN-X-001、FN-X-002 を CURRENT_VERIFIEDへ更新
+- FN actual count = CURRENT_VERIFIED 23 / DETAIL_AUDIT_REQUIRED 113 / total 136
+- `auth/README.md` をshared architecture / Claude / Codex / Antigravity / checkerへ接続
+- production Auth.js/D1/session/user/X/event_staff/runtime mutation 0
 
 Validation evidence:
 
-- `src/lib/staticRebuild/types.ts` target setと `workers/json-generator/rebuild.ts` dispatcher
-- visibility transition/compensation/release CAS implementation
-- public loader/probe/degraded policy/data state implementation
-- static delivery / visibility / rebuild contract tests
+- auth/account-link/current-user/write-guard/redirect/logout/onboarding/terms/Active-X source
+- permission registry/resolver + event ownership + video ownership/access context source
+- auth/account/permission/owner contract & execution tests
 - migration checker JavaScript syntax parse: OK
-- FN ledger actual count: CURRENT_VERIFIED=11 / DETAIL_AUDIT_REQUIRED=125
+- stable auth baseline markers checked without freezing framework-internal volatile details
 - branch behind main=0 at final review
+- GitHub status checks: none
 - author self-review only; independent approval is not represented
 
 Optimization conclusions:
 
-- typed artifact descriptor + bounded publication protocol + visibility fence coreは共通化候補
-- event rename/reuse, dangling repair, rules no-stale, search generation completenessは明示例外のまま維持
-- generic R2 repository化はvisibility/freshness/commit semanticsを隠すため採用しない
+- typed request-scoped AuthContext、write prerequisite policy、canonical permission resolver、request-local authz snapshotsは強化/共通化候補
+- Discord linking、auth-complete retry、terms CAS、Active X switch、owner transfer/self-removal、creator-only delegationは明示的なsecurity flowとして維持
+- session/header/account-summary/client stateをauthz sourceにしない
+- normal/event/admin privilegeを一つのrole hierarchyへ潰さない
 - frontend product-contract change required for optimization: 0
 
 Rollback:
 
-- revert PR #243 squash commit; production storage/routing rollbackは不要
+- revert PR #244 squash commit; production auth/session/permission rollback actionは不要
 
 # Next task claim template
 
-For MIG-0008 the writer records before work:
+For MIG-0009 the writer records before work:
 
 ```text
-Task: MIG-0008
-Owner: chatgpt
-State: IN_PROGRESS
-Branch: migration/mig-0008-auth-permission-baseline
+Task: MIG-0009
+Owner: claude | codex | antigravity | other
+State: READY -> IN_PROGRESS
+Branch: migration/mig-0009-background-jobs-baseline
 PR: pending
-Scope: auth/session/linking/Active X/owner/permission contracts and gated UX
+Scope: Queue/Cron/background job types, retry/DLQ/recovery/idempotency, side effects and user-visible async states
 Affected UX IDs:
 Affected FN IDs:
-Evidence sources: current code/tests + server-actions/route-handlers/static-delivery baselines
+Evidence sources: current workers/code/tests + cloudflare/TOPOLOGY.md + static-delivery/README.md
 Rollback:
 Production action required: no
 ```
 
-MIG-0009 also remains dependency-ready. MIG-0008 is the default next task.
+MIG-0009 is the default next task. MIG-0010 remains blocked until its declared dependencies are complete.
