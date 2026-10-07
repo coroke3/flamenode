@@ -214,7 +214,7 @@ These rows own legacy/deep-link URL contracts, not independent visual screens.
 | `shell:ROBOTS` | crawler indexing policy surface | UX-SYS-004 | FN-PUB-022, FN-X-011 | RA-BASE | CURRENT_MAPPED |
 | `shell:SITEMAP` | public URL discovery surface | UX-SYS-005 | FN-PUB-022 | RA-BASE | CURRENT_MAPPED |
 
-Shell ownership is additional to route-local mapping。例えば `UX-GLOBAL-020..022` は個々の86行へ複製せず `shell:ALL` から全frontendへ継承する。
+Shell ownership is additional to route-local mapping。例えば `UX-GLOBAL-020..022` は各route行へ重複展開せず `shell:ALL` から全frontendへ継承する。
 
 ## UX Surface resolution ledger
 
