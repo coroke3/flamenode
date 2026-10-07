@@ -17,12 +17,12 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 Current Phase: 0 — Baseline / Inventory
 Current Task: MIG-0011
 Current Owner: chatgpt
-Task State: IN_PROGRESS
+Task State: REVIEW
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0010
 Last Task PR: #246
-Next: MIG-0011
+Next: independent review -> MIG-0011 DONE -> MIG-0012
 ```
 
 ## State definitions
@@ -88,7 +88,7 @@ Total                           432
 ```
 
 432は現在確認済みのCURRENT frontend baseline。以後コードから新たなobservable behaviorを発見した場合は、実装前にcanonical ledgerと `FEATURE_CATALOG.md` を同時更新する。
-MIG-0011は全件disposition済みだが、独立レビュー完了まではDONEにしない。
+MIG-0011は全件disposition・統合validation済みで `REVIEW`。独立レビュー完了まではDONEにしない。
 
 Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・requirement reconciliation・optimization blocker assessmentが残る限りCLOSED。
 
@@ -125,7 +125,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0008 | Auth/session/permission baseline | DONE | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
 | MIG-0009 | Queue/Cron/background job baseline | DONE | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
 | MIG-0010 | 当時の86 CURRENT screens + cross-route shells → UX/FN mapping | DONE | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
-| MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | IN_PROGRESS | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
+| MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | REVIEW | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
 | MIG-0012 | Phase 0 Gate | BLOCKED | MIG-0006, MIG-0011 | independent review, rollback baseline, all Phase 0 invariants satisfied |
 
 ## Phase 0 Gate
@@ -177,7 +177,19 @@ Frontend / Backend の分割監査は main に統合済み。
 - `docs/design-redesign/` は存在せず、移行入力として使用しない。
 - 新UIはユーザー提供HTML mockを `UI_REFERENCE.md` へ登録するまで `PENDING_HTML`。
 - Cloudflare CURRENT production topologyはread-only再確認済み: `flamenode-web` + fast/content/sync jobs、root/www Custom Domain、`flamenode_db`、`flamenode-storage`、3 wake Queue + 3 DLQ。production mutationは0。
-- MIG-0011の残条件はPR #250の独立レビューと最終validationのみ。
+- MIG-0011の残条件はPR #250の独立レビューのみ。
+
+Validation:
+- UX canonical ledger ↔ FEATURE_CATALOG: 432/432、unique 432、missing 0、unknown 0。
+- FN canonical ledger ↔ FEATURE_CATALOG: 136/136、unique 136、missing 0、unknown 0。
+- FN final states: 131 CURRENT_VERIFIED / 2 CURRENT_DIVERGENCE / 2 MERGED_INTO_OTHER / 1 TARGET_REDESIGN_REQUIRED / DETAIL_AUDIT_REQUIRED 0。
+- source `app/**/page.tsx` ↔ CURRENT_ROUTES: 92/92、missing 0。
+- route classes: 74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 3 DEV_ONLY / 6 SYSTEM_SURFACE。
+- `docs/design-redesign` tree entries: 0。
+- Claude / Codex / Antigravity adapters: 全て `FEATURE_CATALOG.md` 参照済み。
+- `scripts/check-migration-docs.mjs`: V8 syntax parse OK。catalog exact-set検査を追加。
+- branch: current mainからbehind 0で作業、runtime/DB/Cloudflare production mutation 0。
+- `.github/workflows/migration-docs-check.yml` を追加。PR上の自動runは現時点で未取得のため、独立review時にGitHub Actions結果も確認する。
 
 ---
 
@@ -370,9 +382,9 @@ For MIG-0011 the writer records before work:
 ```text
 Task: MIG-0011
 Owner: chatgpt
-State: IN_PROGRESS
+State: REVIEW
 Branch: migration/mig-0011-inventory-consolidation-gap-scan
-PR: pending
+PR: #250
 Scope: full 86/432/136 consolidation, orphan/unknown=0 scan, requirements divergence, duplicate/obsolete processing and optimization blocker disposition
 Evidence sources: all canonical migration baselines + current code/tests + UI_REFERENCE state
 Rollback:
