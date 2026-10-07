@@ -29,7 +29,7 @@ AuthはPhase 8までproduction source of truthをCURRENT Auth.jsへ残す。Pers
 | FN-PER-001 | dashboardで必要作業/作品状態を見る | `/dashboard` | own/related data only | CURRENT_VERIFIED |
 | FN-PER-002 | 作品編集 | `/dashboard/edit/[id]`, manage-video/updateVideo | ownership/collab/event privilege | CURRENT_VERIFIED |
 | FN-PER-003 | 共同編集権限管理 | permissions page, video-collab-perms | owner/permission parity | CURRENT_VERIFIED |
-| FN-PER-004 | library閲覧 | `/dashboard/library` | authenticated data | CURRENT_DIVERGENCE |
+| FN-PER-004 | library閲覧 | `/dashboard/library` | TARGETのlike/bookmark/saveはActive X scoped、切替時に再取得 | CURRENT_DIVERGENCE |
 | FN-PER-005 | user settings | `/dashboard/settings` | profile/X/session interactions | CURRENT_VERIFIED |
 | FN-PER-006 | personal YouTube playlist確認 | `/dashboard/youtube-playlists` | quota/external state | MERGED_INTO_OTHER |
 | FN-PER-007 | X ID登録/変更/申請 | settings/xid actions | approval/link constraints | CURRENT_VERIFIED |
