@@ -363,6 +363,8 @@ Forbidden:
 - chapter/comment active/historical requirement照合
 - responsive/a11y active acceptanceと実装pattern照合
 - old redesignをTARGET evidenceから除外
+- checker構文: V8 parseで `OK`
+- cross-document機械再照合: 92/92 route分類、432/432 UX final disposition、170/170 Surface owner解決、redirect destination未解決0
 
 未実施:
 - 独立した別エージェント/別レビュアーによるレビュー
