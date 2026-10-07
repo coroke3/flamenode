@@ -51,7 +51,7 @@
 | UX-VID-025 | likeを付ける/外す | `/[id]` | FN-PUB-007 | CURRENT_DIVERGENCE |
 | UX-VID-026 | bookmark/saveを付ける/外す | `/[id]` | FN-PUB-007 | CURRENT_DIVERGENCE |
 | UX-VID-027 | interaction中のpending/active状態を見る | `/[id]` | FN-PUB-007 | CURRENT_DIVERGENCE |
-| UX-VID-028 | 未ログイン時にlike/saveからloginへ進む | `/[id]` | FN-PUB-007,FN-AUTH-001 | CURRENT_DIVERGENCE |
+| UX-VID-028 | 未ログイン時にlike/saveからloginへ進む | `/[id]` | FN-PUB-007,FN-AUTH-001 | CURRENT_VERIFIED |
 | UX-VID-029 | terms未同意時にinteractionが抑止されrulesへ進む | `/[id]` | FN-PUB-007,FN-AUTH-006 | CURRENT_VERIFIED |
 | UX-VID-030 | banned/auth unavailable時にinteraction不能理由を見る | `/[id]` | FN-PUB-007,FN-AUTH-004 | CURRENT_VERIFIED |
 | UX-VID-031 | public chapter/comment一覧を見る | `/[id]` | FN-PUB-005 | CURRENT_VERIFIED |
