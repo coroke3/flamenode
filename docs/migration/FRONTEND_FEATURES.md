@@ -5,6 +5,7 @@
 > Scope: CURRENTでユーザー/運営者/管理者/開発者が画面・操作・状態変化として認識できる機能
 > Route source: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
 > Backend/function source: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
+> Resolved screen/shell ownership: [`screen-mapping/README.md`](screen-mapping/README.md)
 
 リデザイン + framework移行で「画面はあるが機能が消えた」を防ぐための**frontend observable behaviorの正本**。
 
@@ -31,7 +32,7 @@ FN-* = backend/domain/platform側の機能・安全保証
 | [`frontend/MANAGE_ADMIN.md`](frontend/MANAGE_ADMIN.md) | `UX-MNG-*`, `UX-ADM-*` | 167 |
 | **Total baseline** |  | **432** |
 
-毎taskで全432件を読む必要はない。対象route/domainに対応するledgerのみ読み、MIG-0010/0011で全体gap scanを行う。
+毎taskで全432件を読む必要はない。対象route/domainに対応するledgerのみ読む。MIG-0010で全432 UXのSurface tokenを86 screen / cross-route shellへ解決済みで、MIG-0011が全体gap scanを行う。
 
 ## Completion invariant
 
@@ -189,7 +190,7 @@ HTML mockはvisual/information architectureの入力であり、CURRENT capabili
 - `MIG-0005/0009`: Worker/Queue/Cron → observable async behaviorへmapping
 - `MIG-0007`: static/visibility → public UXへmapping
 - `MIG-0008`: auth/session/permission → gated UXへmapping
-- `MIG-0010`: 全86 screen + cross-route shell → required UX IDsを完全mapping
+- `MIG-0010`: DONE — 全86 screen + 16 cross-route shell + 170 UX Surface tokensをrequired UX/FN・permission/state/query/RA contractへ完全mapping
 - `MIG-0011`: code/design/operations横断gap scan、orphan=0、optimization blocker判定
 
 **MIG-0011完了までは「全機能棚卸し完了」と宣言しない。**
