@@ -5,7 +5,7 @@
 > Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Index: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
 
-Platform保証は画面に現れにくいが、移行時の欠落が最も危険な領域。特にvisibility、audit、retry/idempotency、public DTO、rollbackをUI機能とは別に追跡する。MIG-0007で static/public delivery の FN-PLAT-002..008（001/009/010は別scope）および FN-X-004/FN-X-010 を `static-delivery/README.md` の証拠でCURRENT_VERIFIED化した。MIG-0008で event owner invariant と server-side authorization boundary（FN-X-001/FN-X-002）を `auth/README.md` の証拠でCURRENT_VERIFIED化した。
+Platform保証は画面に現れにくいが、移行時の欠落が最も危険な領域。特にvisibility、audit、retry/idempotency、public DTO、rollbackをUI機能とは別に追跡する。MIG-0007で static/public delivery の FN-PLAT-002..008（001/009/010は別scope）および FN-X-004/FN-X-010 を `static-delivery/README.md` の証拠でCURRENT_VERIFIED化した。MIG-0008で event owner invariant と server-side authorization boundary（FN-X-001/FN-X-002）を `auth/README.md` の証拠でCURRENT_VERIFIED化した。MIG-0009で background execution の FN-JOB-001..008、Queue retry/idempotency（FN-X-006）、content build/rebuild admin visibility（FN-PLAT-010）を `background-jobs/README.md` の証拠でCURRENT_VERIFIED化した。
 
 ## Platform / static delivery
 
@@ -20,7 +20,7 @@ Platform保証は画面に現れにくいが、移行時の欠落が最も危険
 | FN-PLAT-007 | degraded D1/public fallback policy | static delivery | fail-open禁止対象を維持 | CURRENT_VERIFIED |
 | FN-PLAT-008 | search index/shards | content-jobs/public search | bounded generation/query contract | CURRENT_VERIFIED |
 | FN-PLAT-009 | score/trending analytics | jobs/R2 analytics | scoring/order contract | DETAIL_AUDIT_REQUIRED |
-| FN-PLAT-010 | content build/rebuild admin visibility | admin static builds | state/retry visibility | DETAIL_AUDIT_REQUIRED |
+| FN-PLAT-010 | content build/rebuild admin visibility | admin static builds | state/retry visibility | CURRENT_VERIFIED |
 | FN-PLAT-011 | maintenance状態を全ユーザーへ案内 | `/maintenance` | operation modeに応じた正確な状態/次行動、admin例外 | DETAIL_AUDIT_REQUIRED |
 | FN-PLAT-012 | 既存UI surfaceを開発者が確認 | `/dev/ui-surfaces` | dev-only surface、production機能と混同しない | DETAIL_AUDIT_REQUIRED |
 
@@ -44,14 +44,14 @@ Platform保証は画面に現れにくいが、移行時の欠落が最も危険
 
 | ID | Existing function | Current owner | Critical contract | State |
 | --- | --- | --- | --- | --- |
-| FN-JOB-001 | fast job scheduling/processing | `flamenode-fast-jobs` | bounded work/retry | DETAIL_AUDIT_REQUIRED |
-| FN-JOB-002 | content/static generation | `flamenode-content-jobs` | target/coalesce/retry | DETAIL_AUDIT_REQUIRED |
-| FN-JOB-003 | sync jobs | `flamenode-sync-jobs` | external sync/quota/retry | DETAIL_AUDIT_REQUIRED |
-| FN-JOB-004 | Queue wake/DLQ/recovery | workers/queues | idempotency/redelivery/recovery | DETAIL_AUDIT_REQUIRED |
-| FN-JOB-005 | YouTube metadata/playlist sync | sync/actions | quota/dedupe/failure state | DETAIL_AUDIT_REQUIRED |
-| FN-JOB-006 | notifications/Discord | notification subsystem | delivery/retry/no duplicate | DETAIL_AUDIT_REQUIRED |
-| FN-JOB-007 | cleanup jobs | workers | bounded deletion/no data loss | DETAIL_AUDIT_REQUIRED |
-| FN-JOB-008 | static rebuild follow-up fanout | content-jobs | dependency/dedupe/no storm | DETAIL_AUDIT_REQUIRED |
+| FN-JOB-001 | fast job scheduling/processing | `flamenode-fast-jobs` | bounded work/retry | CURRENT_VERIFIED |
+| FN-JOB-002 | content/static generation | `flamenode-content-jobs` | target/coalesce/retry | CURRENT_VERIFIED |
+| FN-JOB-003 | sync jobs | `flamenode-sync-jobs` | external sync/quota/retry | CURRENT_VERIFIED |
+| FN-JOB-004 | Queue wake/DLQ/recovery | workers/queues | idempotency/redelivery/recovery | CURRENT_VERIFIED |
+| FN-JOB-005 | YouTube metadata/playlist sync | sync/actions | quota/dedupe/failure state | CURRENT_VERIFIED |
+| FN-JOB-006 | notifications/Discord | notification subsystem | delivery/retry/no duplicate | CURRENT_VERIFIED |
+| FN-JOB-007 | cleanup jobs | workers | bounded deletion/no data loss | CURRENT_VERIFIED |
+| FN-JOB-008 | static rebuild follow-up fanout | content-jobs | dependency/dedupe/no storm | CURRENT_VERIFIED |
 
 ## Cross-cutting invariants
 
@@ -62,7 +62,7 @@ Platform保証は画面に現れにくいが、移行時の欠落が最も危険
 | FN-X-003 | public APIは明示DTOのみ | publicDto/routes | DETAIL_AUDIT_REQUIRED |
 | FN-X-004 | private dataをpublic artifactへ出さない | projection/visibility | CURRENT_VERIFIED |
 | FN-X-005 | mutation auditを維持 | audit helpers/actions | DETAIL_AUDIT_REQUIRED |
-| FN-X-006 | Queue retry/idempotencyを維持 | queue consumers | DETAIL_AUDIT_REQUIRED |
+| FN-X-006 | Queue retry/idempotencyを維持 | queue consumers | CURRENT_VERIFIED |
 | FN-X-007 | existing migration SQLを改変しない | migrations | CURRENT_VERIFIED |
 | FN-X-008 | Remote D1 migrationを自動適用しない | deploy docs/scripts | CURRENT_VERIFIED |
 | FN-X-009 | legacy importを専用境界外へ広げない | admin import | DETAIL_AUDIT_REQUIRED |

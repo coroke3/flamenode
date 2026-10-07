@@ -26,6 +26,7 @@ const required = [
   "docs/migration/cloudflare/PERFORMANCE_BASELINE.md",
   "docs/migration/static-delivery/README.md",
   "docs/migration/auth/README.md",
+  "docs/migration/background-jobs/README.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
   "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
@@ -122,6 +123,7 @@ if (errors.length === 0) {
   const performanceBaseline = read("docs/migration/cloudflare/PERFORMANCE_BASELINE.md");
   const staticDeliveryBaseline = read("docs/migration/static-delivery/README.md");
   const authBaseline = read("docs/migration/auth/README.md");
+  const backgroundJobsBaseline = read("docs/migration/background-jobs/README.md");
 
   // Progress/task integrity.
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
@@ -469,6 +471,76 @@ if (errors.length === 0) {
     }
   }
 
+  // MIG-0009 Queue / Cron / background jobs baseline.
+  const wakeBudgetSource = read("src/lib/queues/wakeBudget.ts");
+  const wakeKindBlock =
+    wakeBudgetSource.match(/QUEUE_WAKE_KINDS\s*=\s*\[([\s\S]*?)\]\s*as const/)?.[1] ?? "";
+  const wakeKinds = [...wakeKindBlock.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  if (wakeKinds.length !== 4) errors.push(`Queue wake kinds: actual=${wakeKinds.length}, expected=4`);
+  for (const kind of wakeKinds) {
+    if (!backgroundJobsBaseline.includes(`\`${kind}\``)) {
+      errors.push(`background-jobs/README.md: Queue wake kind missing: ${kind}`);
+    }
+  }
+
+  for (const queueName of [
+    "flamenode-notification-wake",
+    "flamenode-notification-dlq",
+    "flamenode-static-rebuild-wake",
+    "flamenode-static-rebuild-dlq",
+    "flamenode-youtube-sync-wake",
+    "flamenode-youtube-sync-dlq",
+  ]) {
+    if (!wakeBudgetSource.includes(`"${queueName}"`)) {
+      errors.push(`wakeBudget.ts: CURRENT Queue name missing: ${queueName}`);
+    }
+    if (!backgroundJobsBaseline.includes(`\`${queueName}\``)) {
+      errors.push(`background-jobs/README.md: CURRENT Queue name missing: ${queueName}`);
+    }
+  }
+
+  for (const phrase of [
+    "Status: CURRENT_VERIFIED",
+    "D1 が業務処理の正本",
+    "doorbell",
+    "Cloudflare DLQとD1",
+    "`QUEUE_WAKE_MESSAGE_VERSION = 1`",
+    "`0 * * * *`",
+    "`15 * * * *`",
+    "`7 * * * *`",
+    "`52 * * * *`",
+    "Application retry budget: **4 attempts**",
+    "`delivery_succeeded_awaiting_sent_mark`",
+    "`rebuild_succeeded_awaiting_done_mark`",
+    "`youtube_sync_pending`",
+    "`youtube_playlist_sync`",
+    "Platform DLQ has no direct consumer",
+    "Optimization blockers requiring frontend change: **0**",
+    "Production mutation: none",
+  ]) {
+    if (!backgroundJobsBaseline.includes(phrase)) {
+      errors.push(`background-jobs/README.md: required CURRENT invariant missing: ${phrase}`);
+    }
+  }
+
+  for (const id of [
+    "FN-JOB-001",
+    "FN-JOB-002",
+    "FN-JOB-003",
+    "FN-JOB-004",
+    "FN-JOB-005",
+    "FN-JOB-006",
+    "FN-JOB-007",
+    "FN-JOB-008",
+    "FN-X-006",
+    "FN-PLAT-010",
+  ]) {
+    const row = functionRows.find((candidate) => candidate.id === id);
+    if (row?.state !== "CURRENT_VERIFIED") {
+      errors.push(`MIG-0009: ${id} must be CURRENT_VERIFIED after background-job audit`);
+    }
+  }
+
   // Design source transition.
   if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
@@ -553,12 +625,13 @@ if (errors.length === 0) {
     "docs/migration/cloudflare/PERFORMANCE_BASELINE.md",
     "docs/migration/static-delivery/README.md",
     "docs/migration/auth/README.md",
+    "docs/migration/background-jobs/README.md",
   ]) {
     if (!docMap.includes("`" + canonical + "`")) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
   // Shared protocol must force Git, requirements, quality and visual-source rules.
-  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md"]) {
+  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md", "background-jobs/README.md"]) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
@@ -575,7 +648,7 @@ if (errors.length === 0) {
   }
 
   const antigravityRule = read(".agents/rules/flamenode-project.md");
-  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md"]) {
+  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md", "background-jobs/README.md"]) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
 
@@ -595,4 +668,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, measured CPU/1102 baseline, static/visibility baseline, auth/permission baseline, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, measured CPU/1102 baseline, static/visibility baseline, auth/permission baseline, Queue/Cron/background baseline, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");

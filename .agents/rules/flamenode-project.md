@@ -19,6 +19,7 @@ Mandatory sources include:
 - `docs/migration/cloudflare/PERFORMANCE_BASELINE.md` for CPU/1102/request/PoC performance migration/audit work
 - `docs/migration/static-delivery/README.md` for static artifact/alias/visibility/fallback/repair migration/audit work
 - `docs/migration/auth/README.md` for auth/session/linking/terms/Active X/permission/owner migration/audit work
+- `docs/migration/background-jobs/README.md` for Queue/Cron/background job/retry/DLQ/recovery migration/audit work
 - `UI_REFERENCE.md` for visual work
 
 Rules:

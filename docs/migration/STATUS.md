@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0009
+Current Task: MIG-0010
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0008
-Last Task PR: #244
-Next: MIG-0009
+Last Completed Task: MIG-0009
+Last Task PR: #245
+Next: MIG-0010
 ```
 
 ## State definitions
@@ -54,17 +54,17 @@ Next: MIG-0009
 | CURRENT USER_SCREEN routes | 86 | 86 route/role/purpose baseline | 0 | all required UX/FN mapped |
 | Frontend `UX-*` capabilities | 432 | baseline evidence states only | 0 | orphan/unverified/disposition漏れ 0 |
 | CURRENT technical compatibility routes | 4 | purpose/query baseline | n/a | replacement evidence before removal |
-| Backend/domain/platform `FN-*` | 136 | 23 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
+| Backend/domain/platform `FN-*` | 136 | 33 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
 | Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
 | Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
-| CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology + CPU/request measured / job semantics pending | 0 | bindings/routes/jobs fixed |
+| CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology + CPU/request + Queue/Cron/job semantics | 0 | bindings/routes/jobs fixed |
 | New UI visual source | HTML mock pending | n/a | n/a | registered in `UI_REFERENCE.md` before Phase 2 visual work |
 
 Current FN state summary:
 
 ```text
-CURRENT_VERIFIED: 23
-DETAIL_AUDIT_REQUIRED: 113
+CURRENT_VERIFIED: 33
+DETAIL_AUDIT_REQUIRED: 103
 PARITY_VERIFIED: 0
 REMOVAL_PROPOSED: 0
 REMOVED_APPROVED: 0
@@ -117,8 +117,8 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0006 | CPU / 1102 / request baseline | DONE | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
 | MIG-0007 | static artifact / visibility baseline | DONE | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
 | MIG-0008 | Auth/session/permission baseline | DONE | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
-| MIG-0009 | Queue/Cron/background job baseline | READY | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
-| MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | BLOCKED | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
+| MIG-0009 | Queue/Cron/background job baseline | DONE | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
+| MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | READY | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
 | MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | BLOCKED | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
 | MIG-0012 | Phase 0 Gate | BLOCKED | MIG-0006, MIG-0011 | independent review, rollback baseline, all Phase 0 invariants satisfied |
 
@@ -140,7 +140,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [ ] all required FN functions CURRENT_VERIFIED or explicitly dispositioned
 - [ ] all 86 screens mapped to required UX/FN IDs
 - [ ] all required UX capabilities have route/permission/backend/state dispositions
-- [ ] all background jobs/Queues/Cron inventoried
+- [x] all background jobs/Queues/Cron inventoried
 - [x] current Cloudflare topology fixed
 - [x] CPU/1102 baseline fixed
 - [x] visibility/static guarantees fully fixed
@@ -270,79 +270,80 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0008 — Auth/session/permission baseline
+## MIG-0009 — Queue/Cron/background job baseline
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #244
+PR: #245
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- Discord/Auth.js OAuth、database session、configured-origin redirect contractを固定
-- Discord account linkingのprovider/discord_id conflict、token非永続化、CAS/idempotency、post-commit通知境界を固定
-- Auth.js sessionはAuth User ID識別、role/banned/Active X/terms/linked XはD1正本を再読するtrust hierarchyを固定
-- auth failure / DB failureをfalse logoutへ変換しない unavailable semanticsを固定
-- banned/terms/CostGuard/role/Active-X write guard順序とfail-closed behaviorを固定
-- /auth/complete のbounded retry、安全なnext、loop/open-redirect拒否を固定
-- logoutをCSRF取得 + Auth.js POST + hard-navigation成功後のみと固定
-- onboarding_completed_atを認可に使わず、slot予約と作品投稿のprerequisite差を固定
-- latest terms consentをCAS/audit付きatomic mutationとして固定
-- Auth User / linked X / approved X / Active Xを別概念として固定
-- Active X切替はlinked+approvedのみ、CAS+audit、client optimistic rollback + authoritative summary refreshを固定
-- account summary/presenceはprivate no-storeで、presence DTOを認可入力にしないことを固定
-- canonical permission keys / one-way legacy aliases / adminOnly filtering / malformed custom permission fail-closedを固定
-- event authorizationは全approved linked X IDを対象とし、Active Xは認可成立後のactor preferenceに留めることを固定
-- event owner = owner preset + approved X + owner-role account link、最後のoperable ownerをSQL/CASでも守ることを固定
-- video ownership = approved creator X または approved can_edit collaborator、submitted_by/Active Xではないことを固定
-- video privilege mode normal/event/adminの混在・自動fallbackを禁止
-- FN-AUTH-001..010、FN-X-001、FN-X-002 を CURRENT_VERIFIEDへ更新
-- FN actual count = CURRENT_VERIFIED 23 / DETAIL_AUDIT_REQUIRED 113 / total 136
-- `auth/README.md` をshared architecture / Claude / Codex / Antigravity / checkerへ接続
-- production Auth.js/D1/session/user/X/event_staff/runtime mutation 0
+- Queue wake protocolをbusiness-data-free doorbellとして固定し、D1 pending/due stateをcanonical work truthとして明示
+- Queue kinds 4種 / source 7種 / message version=1 / business field拒否を固定
+- Cloudflare実環境で 3 wake Queues + 3 DLQs、consumer retry/遅延/concurrency、Cron schedulesをread-only再確認
+- Cloudflare platform retry/DLQ、D1 application retry、Recovery Cronの3 retry layerを分離
+- fast-jobs :00 notification lease recovery / reminders / Queue wake / bounded direct fallbackを固定
+- notification D1 state、4 attempts、60/300/900s、Discord 429 defer、orphan dead-letter、sent-mark sentinel再配送抑止を固定
+- content-jobs :15 static repair/reconcile/cleanup/Queue wake/fallbackを固定
+- static rebuild 1 target/invocation、4 attempts、60/300/900s、dirty-generation requeue、done-mark sentinelを固定
+- sync-jobs :07 metadata/GA4/score/related recovery と :52 playlist recoveryを固定
+- YouTube metadata pending/synced/failed、quota_stop defer、post-commit semanticsを固定
+- playlist disabled/idle/scanning/synced/deferred/failed、one-event drain、mixed-batch isolation、quota defer、Cron fallbackを固定
+- D1 `worker_leases` をCron CAS/heartbeat正本として固定
+- notification/static/worker-monitoring/YouTube/public-reflectionのユーザー可視async stateを対応付け
+- platform DLQとapplication terminal stateを別概念として固定
+- FN-JOB-001..008、FN-X-006、FN-PLAT-010 を CURRENT_VERIFIEDへ更新
+- FN actual count = CURRENT_VERIFIED 33 / DETAIL_AUDIT_REQUIRED 103 / total 136
+- `background-jobs/README.md` をshared architecture / Claude / Codex / Antigravity / checkerへ接続
+- production Worker/Queue/Cron/D1/R2/KV/external API mutation 0
 
 Validation evidence:
 
-- auth/account-link/current-user/write-guard/redirect/logout/onboarding/terms/Active-X source
-- permission registry/resolver + event ownership + video ownership/access context source
-- auth/account/permission/owner contract & execution tests
+- current Worker/queue/recovery source + contract/execution tests
+- read-only Cloudflare Queue/consumer/DLQ/schedule API
+- Queue actual: notification/static retry delay 60s, YouTube 300s, max retries 3, max concurrency 1
 - migration checker JavaScript syntax parse: OK
-- stable auth baseline markers checked without freezing framework-internal volatile details
+- Queue kinds and Queue names are checked against `wakeBudget.ts`
+- stable background-job markers are checked without freezing volatile queue IDs/counts
 - branch behind main=0 at final review
 - GitHub status checks: none
 - author self-review only; independent approval is not represented
 
+Current gaps carried forward:
+
+- all three platform DLQs have no direct consumer; safe only while Queue remains doorbell and D1 stays canonical
+- static schema/admin expose `dead_letter` while current processor retry exhaustion uses `failed`; do not remove until MIG-0011 gap scan resolves it
+- KV Queue wake telemetry is last-failure diagnostic, not canonical/audit history
+- platform/application/recovery retry counters must not be merged into one status
+
 Optimization conclusions:
 
-- typed request-scoped AuthContext、write prerequisite policy、canonical permission resolver、request-local authz snapshotsは強化/共通化候補
-- Discord linking、auth-complete retry、terms CAS、Active X switch、owner transfer/self-removal、creator-only delegationは明示的なsecurity flowとして維持
-- session/header/account-summary/client stateをauthz sourceにしない
-- normal/event/admin privilegeを一つのrole hierarchyへ潰さない
+- versioned doorbell, Queue consumer shell, Cron envelope, normalized job counters are commonization candidates
+- notification delivery suppression, static dirty-generation, YouTube quota, playlist scan cursor, visibility release and retention cleanup remain domain-specific
 - frontend product-contract change required for optimization: 0
 
 Rollback:
 
-- revert PR #244 squash commit; production auth/session/permission rollback actionは不要
+- revert PR #245 squash commit; production Queue/Cron/Worker rollback action is unnecessary because MIG-0009 is documentation/checker-only
 
 # Next task claim template
 
-For MIG-0009 the writer records before work:
+For MIG-0010 the writer records before work:
 
 ```text
-Task: MIG-0009
+Task: MIG-0010
 Owner: claude | codex | antigravity | other
 State: READY -> IN_PROGRESS
-Branch: migration/mig-0009-background-jobs-baseline
+Branch: migration/mig-0010-screen-ux-fn-mapping
 PR: pending
-Scope: Queue/Cron/background job types, retry/DLQ/recovery/idempotency, side effects and user-visible async states
-Affected UX IDs:
-Affected FN IDs:
-Evidence sources: current workers/code/tests + cloudflare/TOPOLOGY.md + static-delivery/README.md
+Scope: all 86 CURRENT screens + cross-route shells mapped to UX/FN IDs with permission/state/query/deep-link/responsive/a11y requirements
+Evidence sources: CURRENT_ROUTES.md + frontend ledgers + function ledgers + Server Action/API/auth/static/job baselines + current code/tests
 Rollback:
 Production action required: no
 ```
 
-MIG-0009 is the default next task. MIG-0010 remains blocked until its declared dependencies are complete.
+MIG-0010 dependencies (MIG-0002/0003/0004) are complete, so it is READY. MIG-0011 remains BLOCKED until MIG-0010 completes.

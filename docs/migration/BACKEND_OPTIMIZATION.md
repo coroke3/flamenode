@@ -92,6 +92,23 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
 
+## MIG-0009 evidence
+
+Queue/Cron/background executionをcode/testsとread-only Cloudflare実環境で監査し、CURRENT execution contractを固定した。
+
+- Queueはbusiness payloadを持たないdoorbellで、D1 pending/due stateがcanonical。Cloudflare retry/DLQだけで業務状態を失わない。
+- 3 wake Queues + 3 DLQs、max consumer concurrency=1、Cloudflare retry=3を実環境で再確認。DLQにはconsumerがないためD1+Recovery Cron前提を維持する。
+- retryは Cloudflare Queue delivery / D1 application work-state / Recovery Cron の3層で目的を分離する。
+- notificationは4 attempt + 60/300/900s、Discord成功後のsent-mark失敗をsentinelで再配送抑止する。
+- static rebuildは1 target/invocation、4 attempt + 60/300/900s、dirty-generation requeueとrebuild-success sentinelで重複生成を防ぐ。
+- YouTube metadata/playlistはquota stopをQueue failureへ変換せずdeferred/skippedとして扱う。playlistはD1 due stateを正本に:52 Cronが回収する。
+- mixed YouTube Queue batchはplaylistとmetadataを同一heavy invocationで実行しない。
+- shared Cron leaseはD1 CAS/heartbeatを使い、KVをlease正本にしない。
+- async product stateは notification/static build/worker monitoring/YouTube sync/playlist health/public reflection で既に可視化されている。
+- platform DLQとapplication terminal stateを一つのstatusへ潰さない。
+
+MIG-0009でfrontend product-contract変更を必須とするoptimization blockerは0。implementationは共通化可能だがasync state/recovery semanticsは維持する。
+
 ## MIG-0008 evidence
 
 Auth/session/identity/permission coreをcode/testsで監査し、CURRENT trust boundaryを固定した。
