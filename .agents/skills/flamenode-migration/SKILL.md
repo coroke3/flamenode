@@ -22,6 +22,7 @@ Mandatory concepts:
 - `cloudflare/PERFORMANCE_BASELINE.md` = CURRENT measured CPU / 1102 / request evidence + representative TARGET budgets
 - `static-delivery/README.md` = CURRENT static artifact / alias / visibility fence / fallback / repair evidence
 - `auth/README.md` = CURRENT Auth.js / session / identity / Active X / permission / owner evidence
+- `background-jobs/README.md` = CURRENT Queue / Cron / D1 work-state / retry / DLQ / recovery / async-state evidence
 - `PRODUCT_REQUIREMENTS.md` = existing-design/current reconciliation
 - `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
 - `CODE_QUALITY.md` = professional implementation standard
