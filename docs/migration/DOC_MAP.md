@@ -18,6 +18,7 @@
 | current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
 | CURRENT user-visible routes | `docs/migration/CURRENT_ROUTES.md` |
 | frontend observable capabilities | `docs/migration/FRONTEND_FEATURES.md` + `docs/migration/frontend/*.md` |
+| CURRENT 86-screen / shell UX-FN mapping | `docs/migration/screen-mapping/README.md` |
 | backend/domain/platform function parity | `docs/migration/FUNCTION_INVENTORY.md` + `docs/migration/functions/*.md` |
 | existing design/product requirement reconciliation | `docs/migration/PRODUCT_REQUIREMENTS.md` |
 | new UI visual source / HTML mock registration | `docs/migration/UI_REFERENCE.md` |
@@ -48,6 +49,7 @@
 - Migration docs describe TARGET / transition / progress. CURRENT behavior remains code/test/config driven until cutover.
 - `CURRENT_ROUTES.md` owns the 86 USER_SCREEN route baseline.
 - `FRONTEND_FEATURES.md` + `frontend/*.md` own `UX-*` frontend observable behavior.
+- `screen-mapping/README.md` owns the resolved mapping from all 86 CURRENT screens + cross-route shells to UX/FN, permission/state/query/responsive-a11y contracts.
 - `FUNCTION_INVENTORY.md` + `functions/*.md` own `FN-*` backend/domain/platform functions.
 - `UX-*` and `FN-*` are intentionally many-to-many.
 - `PRODUCT_REQUIREMENTS.md` owns reconciliation between current implementation and existing design intent.
