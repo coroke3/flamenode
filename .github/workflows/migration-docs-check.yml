@@ -1,0 +1,28 @@
+name: Migration docs consistency
+
+on:
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - "docs/migration/**"
+      - "scripts/check-migration-docs.mjs"
+      - ".claude/**"
+      - ".codex/**"
+      - ".agents/**"
+      - ".github/workflows/migration-docs-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migration-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 移行ドキュメント整合性チェック
+        run: node scripts/check-migration-docs.mjs
