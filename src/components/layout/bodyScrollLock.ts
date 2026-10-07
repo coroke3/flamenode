@@ -127,10 +127,11 @@ acquireBodyScrollLock():
     body.style.paddingRight =
       snapshot.styles.paddingRight;
 
-    window.scrollTo(
-      snapshot.scrollX,
-      snapshot.scrollY,
-    );
+    window.scrollTo({
+      left: snapshot.scrollX,
+      top: snapshot.scrollY,
+      behavior: "instant",
+    });
   };
 }
 
