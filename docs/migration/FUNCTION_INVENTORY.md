@@ -6,6 +6,7 @@
 > Frontend UX: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
 > Requirements: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)
 > Optimization: [`BACKEND_OPTIMIZATION.md`](BACKEND_OPTIMIZATION.md)
+> Frontend/Backend全件一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
 
 `FN-*`はbackend/domain/platform側の機能・安全保証の索引。
 frontendでユーザーが認識する細かい操作/状態は`UX-*`として`FRONTEND_FEATURES.md`と`frontend/*.md`へ分離する。
