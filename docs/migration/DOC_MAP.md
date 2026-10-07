@@ -29,6 +29,7 @@
 | CURRENT measured CPU / 1102 / request baseline | `docs/migration/cloudflare/PERFORMANCE_BASELINE.md` |
 | CURRENT static artifact / alias / visibility / fallback baseline | `docs/migration/static-delivery/README.md` |
 | CURRENT auth / session / identity / permission baseline | `docs/migration/auth/README.md` |
+| CURRENT Queue / Cron / background jobs baseline | `docs/migration/background-jobs/README.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
 | DB schema | `src/lib/db/schema.ts` + `migrations/` |
@@ -55,6 +56,7 @@
 - `cloudflare/PERFORMANCE_BASELINE.md` owns measured CURRENT CPU/resource-failure/request evidence and representative migration budgets.
 - `static-delivery/README.md` owns CURRENT artifact families/commit-points, canonical alias rules, visibility fence ordering, fail-closed reads, degraded fallback and repair semantics.
 - `auth/README.md` owns CURRENT Auth.js/session/linking/terms/Active X/event-video authorization/owner-invariant semantics.
+- `background-jobs/README.md` owns CURRENT Queue doorbell/Cron/D1 work-state/retry/DLQ/recovery/idempotency/async-state semantics.
 - `CODE_QUALITY.md` owns implementation quality standards.
 - `STATUS.md` is the only progress/task-state source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`.
 - `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.
