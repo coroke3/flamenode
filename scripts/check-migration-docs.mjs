@@ -270,8 +270,11 @@ if (errors.length === 0) {
   }
 
   for (const phrase of [
-    "authentication principal = Auth User",
+    "authentication/account/security principal = Auth User",
+    "default X-scoped domain principal = Active X",
     "acting/content/interaction identity = Active X",
+    "X-scoped permission resolution = Active X first",
+    "must not silently lend its X-scoped permission",
     "CURRENT_DIVERGENCE",
     "video_interactions_auth",
     "production mutation: none",
@@ -710,6 +713,18 @@ if (errors.length === 0) {
     const row = functionRows.find((candidate) => candidate.id === id);
     if (row?.state !== "CURRENT_VERIFIED") {
       errors.push(`MIG-0008: ${id} must be CURRENT_VERIFIED after auth/permission audit`);
+    }
+  }
+
+  for (const phrase of [
+    "## TARGET identity priority",
+    "Auth User = authentication/account/security principal",
+    "Active X = default X-scoped domain principal",
+    "X-scoped permission = Active X first",
+    "inactive Xの権限をActive Xへ暗黙に貸さない",
+  ]) {
+    if (!inventory.includes(phrase)) {
+      errors.push(`FUNCTION_INVENTORY.md: TARGET identity marker missing: ${phrase}`);
     }
   }
 
