@@ -937,4 +937,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`[check:migration-docs] OK: ${currentRouteRows?.length ?? "?"} classified page routes, ${uxRows?.length ?? "?"} UX capabilities with final disposition, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, route/shell/query/Active-X/UI-reference gates and existing platform baselines are consistent.`);
+console.log("[check:migration-docs] OK: classified page routes, final UX dispositions, FN/API/action inventories, route/shell/query/Active-X/UI-reference gates and existing platform baselines are consistent.");
