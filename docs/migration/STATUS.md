@@ -22,6 +22,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0010
 Last Task PR: #246
+Active Task PR: #250
 Next: independent review -> MIG-0011 DONE -> MIG-0012
 ```
 
@@ -177,7 +178,7 @@ Frontend / Backend の分割監査は main に統合済み。
 - `docs/design-redesign/` は存在せず、移行入力として使用しない。
 - 新UIはユーザー提供HTML mockを `UI_REFERENCE.md` へ登録するまで `PENDING_HTML`。
 - Cloudflare CURRENT production topologyはread-only再確認済み: `flamenode-web` + fast/content/sync jobs、root/www Custom Domain、`flamenode_db`、`flamenode-storage`、3 wake Queue + 3 DLQ。production mutationは0。
-- MIG-0011の残条件はPR #250の独立レビューのみ。
+- MIG-0011の残条件はPR #250の独立レビューのみ。GitHub Copilot reviewは要求したがquota超過で実レビューされなかったため、独立レビュー済みとは扱わない。
 
 Validation:
 - UX canonical ledger ↔ FEATURE_CATALOG: 432/432、unique 432、missing 0、unknown 0。
@@ -189,7 +190,7 @@ Validation:
 - Claude / Codex / Antigravity adapters: 全て `FEATURE_CATALOG.md` 参照済み。
 - `scripts/check-migration-docs.mjs`: V8 syntax parse OK。catalog exact-set検査を追加。
 - branch: current mainからbehind 0で作業、runtime/DB/Cloudflare production mutation 0。
-- `.github/workflows/migration-docs-check.yml` を追加。PR上の自動runは現時点で未取得のため、独立review時にGitHub Actions結果も確認する。
+- `.github/workflows/migration-docs-check.yml` を追加。GitHub Actions `Migration docs consistency` run #3 はsuccess。
 
 ---
 
