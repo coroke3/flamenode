@@ -372,6 +372,26 @@ CURRENT code still contains permission resolvers that union all approved linked 
 8. Do not silently fall back from Active X to another approved linked X for an X-scoped mutation. Expose the eligible X as a switch candidate and require an explicit switch by default.
 9. Account-wide discovery/read models may aggregate linked X identities only when the contract names that behavior explicitly; aggregated visibility must never become mutation authority.
 
+## Product decisions still requiring explicit instruction before implementation
+
+Active-X-first is now the TARGET default. The following details should be decided explicitly before the schema/runtime cutover so implementation agents do not infer product behavior.
+
+| Decision | Recommended default | Why it matters |
+| --- | --- | --- |
+| like identity | Active X | public/social interaction naturally follows the acting X; one X should produce at most one like per video. |
+| bookmark/save identity | **explicitly confirm**. Current TARGET groups it with Active X, but Auth User ownership is also defensible for a private personal collection. | If one X is managed by multiple Auth Users, Active-X ownership makes bookmarks shared between those managers. |
+| shared X with multiple Auth Users | X-scoped interaction/ownership state is shared; retain acted_by_auth_user_id/audit provenance | otherwise “Active X is canonical” and per-account state contradict each other. |
+| permission through inactive linked X | require explicit Active X switch; no silent fallback | prevents actions being attributed to X-A while authority actually comes from X-B. |
+| deep link requiring another X | show an explicit switch-required state/action; do not silently auto-switch | avoids surprising global identity changes and makes audit intent clear. |
+| missing/rejected/stale Active X | block X-scoped mutation and request a valid approved Active X | selecting another linked X implicitly would defeat Active-X-first semantics. |
+| Active X switch racing with an in-flight mutation | bind the command to expected_active_x_id / ActorContext and reject or retry on mismatch | multi-tab or rapid switching can otherwise attribute a mutation to the wrong X. |
+| account-wide dashboard/manage discovery | may aggregate approved linked X only as an explicitly named read/discovery mode; actions still require Active X | preserves convenience without turning an aggregate read model into authorization. |
+| ambiguous historical auth-owned interactions | deterministic rows only are backfilled; ambiguous rows are preserved for reconciliation and never guessed | current active_x_user_id is not historical evidence. |
+| admin/system exception | site-admin/security/account operations may be Auth-User-only; user-like X-scoped operations still bind Active X | avoids forcing artificial X attribution onto infrastructure/security actions. |
+| cutover/rollback | expand -> reconcile -> shadow/contract test -> cutover -> rollback window -> contract | identity/schema changes are too destructive for one-step replacement. |
+
+The highest-priority product confirmation is **bookmark scope**. Everything else above has a safe recommended default that is consistent with Active-X-first.
+
 ## Canonical source / storage audit
 
 | Resource | Canonical role | Findings |
