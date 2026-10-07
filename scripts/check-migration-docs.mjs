@@ -25,6 +25,7 @@ const required = [
   "docs/migration/cloudflare/TOPOLOGY.md",
   "docs/migration/cloudflare/PERFORMANCE_BASELINE.md",
   "docs/migration/static-delivery/README.md",
+  "docs/migration/auth/README.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
   "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
@@ -120,6 +121,7 @@ if (errors.length === 0) {
   const cloudflareTopology = read("docs/migration/cloudflare/TOPOLOGY.md");
   const performanceBaseline = read("docs/migration/cloudflare/PERFORMANCE_BASELINE.md");
   const staticDeliveryBaseline = read("docs/migration/static-delivery/README.md");
+  const authBaseline = read("docs/migration/auth/README.md");
 
   // Progress/task integrity.
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
@@ -423,6 +425,51 @@ if (errors.length === 0) {
     }
   }
 
+  // MIG-0008 auth / session / identity / permission baseline.
+  for (const phrase of [
+    "Status: CURRENT_VERIFIED",
+    "session strategy: **database**",
+    "`allowDangerousEmailAccountLinking`",
+    "`access_token`",
+    "`refresh_token`",
+    "`id_token`",
+    "`CurrentUserUnavailableError",
+    "`auth_temporarily_unavailable`",
+    "`database_unavailable`",
+    "`onboarding_completed_at`",
+    "`setActiveXId`",
+    "`x_user_account_links`",
+    "`event.public_api`",
+    "`video.permissions`",
+    "R2 deny first",
+    "all approved linked X IDs",
+    "Optimization blockers requiring frontend change: **0**",
+    "Production mutation: none",
+  ]) {
+    if (!authBaseline.includes(phrase)) {
+      errors.push(`auth/README.md: required CURRENT invariant missing: ${phrase}`);
+    }
+  }
+  for (const id of [
+    "FN-AUTH-001",
+    "FN-AUTH-002",
+    "FN-AUTH-003",
+    "FN-AUTH-004",
+    "FN-AUTH-005",
+    "FN-AUTH-006",
+    "FN-AUTH-007",
+    "FN-AUTH-008",
+    "FN-AUTH-009",
+    "FN-AUTH-010",
+    "FN-X-001",
+    "FN-X-002",
+  ]) {
+    const row = functionRows.find((candidate) => candidate.id === id);
+    if (row?.state !== "CURRENT_VERIFIED") {
+      errors.push(`MIG-0008: ${id} must be CURRENT_VERIFIED after auth/permission audit`);
+    }
+  }
+
   // Design source transition.
   if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
@@ -506,12 +553,13 @@ if (errors.length === 0) {
     "docs/migration/cloudflare/TOPOLOGY.md",
     "docs/migration/cloudflare/PERFORMANCE_BASELINE.md",
     "docs/migration/static-delivery/README.md",
+    "docs/migration/auth/README.md",
   ]) {
     if (!docMap.includes("`" + canonical + "`")) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
   // Shared protocol must force Git, requirements, quality and visual-source rules.
-  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md"]) {
+  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md"]) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
@@ -528,7 +576,7 @@ if (errors.length === 0) {
   }
 
   const antigravityRule = read(".agents/rules/flamenode-project.md");
-  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md"]) {
+  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md"]) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
 
@@ -548,4 +596,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, measured CPU/1102 baseline, static/visibility baseline, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, measured CPU/1102 baseline, static/visibility baseline, auth/permission baseline, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");
