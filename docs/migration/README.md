@@ -6,6 +6,7 @@
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Git workflow: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
 > Current routes: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
+> 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
 > Frontend parity: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
 > CURRENT screen mapping: [`screen-mapping/README.md`](screen-mapping/README.md)
 > Backend parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
@@ -29,7 +30,7 @@ UIは全面的に作り直すが、visual redesignを既存機能の削除理由
 
 - public閲覧からrequest-time SSRを原則排除する
 - public→non-publicのfail-closed visibilityを維持する
-- CURRENT 86 user-visible routes/screensを追跡する
+- CURRENT `app/**/page.tsx` 92 route実装（74 visual / 9 compat redirect / 3 dev / 6 system）を分類・追跡する
 - 初期432 `UX-*` frontend observable capabilitiesを追跡し、後続監査で不足分を追加する
 - `FN-*` backend/domain/platform契約を別ledgerで追跡する
 - UX/FNをmany-to-manyで結び、画面存在=機能存在と誤認しない
@@ -76,8 +77,11 @@ CURRENT Queue / Cron / background job evidence
 CURRENT static artifact / visibility delivery contract
   static-delivery/README.md
 
-CURRENT user-visible routes
+CURRENT route implementation / classification
   CURRENT_ROUTES.md
+
+Human-readable complete capability catalog
+  FEATURE_CATALOG.md
 
 Frontend observable behavior
   FRONTEND_FEATURES.md

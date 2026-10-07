@@ -38,6 +38,7 @@ Migration work must distinguish **CURRENT** production behavior from **TARGET** 
 | migration Git/PR workflow | `docs/migration/GIT_WORKFLOW.md` |
 | migration progress | `docs/migration/STATUS.md` |
 | CURRENT user-visible routes | `docs/migration/CURRENT_ROUTES.md` |
+| 既存機能の全件カタログ | `docs/migration/FEATURE_CATALOG.md` |
 | frontend observable capabilities | `docs/migration/FRONTEND_FEATURES.md` + `docs/migration/frontend/*.md` |
 | backend/domain/platform parity | `docs/migration/FUNCTION_INVENTORY.md` + `docs/migration/functions/*.md` |
 | requirement reconciliation | `docs/migration/PRODUCT_REQUIREMENTS.md` |
@@ -108,6 +109,8 @@ One migration iteration equals exactly one dependency-ready `MIG-*` task. Update
 Migration and redesign must not silently delete functionality.
 
 Before a route/screen/domain is considered migrated:
+
+- first read `docs/migration/FEATURE_CATALOG.md` to identify the complete product capability set in scope
 
 - identify all affected `UX-*` capabilities
 - identify all affected `FN-*` backend/domain contracts

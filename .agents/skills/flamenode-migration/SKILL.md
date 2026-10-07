@@ -12,6 +12,7 @@ This is a thin reusable adapter. Canonical execution contract:
 Mandatory concepts:
 
 - `STATUS.md` = progress source of truth
+- `FEATURE_CATALOG.md` = 432 UX / 136 FN の人間向け全機能索引
 - `GIT_WORKFLOW.md` = branch/PR/merge source of truth
 - `CURRENT_ROUTES.md` = CURRENT user-visible routes
 - `screen-mapping/README.md` = CURRENT 86 screens + cross-route shells → UX/FN/permission/state/query/RA mapping
@@ -28,6 +29,8 @@ Mandatory concepts:
 - `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
 - `CODE_QUALITY.md` = professional implementation standard
 - `UI_REFERENCE.md` = future HTML visual source; stop visual redesign while `PENDING_HTML`
+
+毎回まず `docs/migration/FEATURE_CATALOG.md` で対象機能と隣接機能を確認する。
 
 Execute exactly one READY MIG task. One writer only. Use the task branch/PR required by `GIT_WORKFLOW.md`.
 
