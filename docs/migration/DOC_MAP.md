@@ -16,9 +16,10 @@
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
 | migration code quality | `docs/migration/CODE_QUALITY.md` |
 | current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
-| CURRENT user-visible routes | `docs/migration/CURRENT_ROUTES.md` |
+| CURRENT page route実装・分類 | `docs/migration/CURRENT_ROUTES.md` |
+| 既存機能の全件一覧（人間向け派生ビュー） | `docs/migration/FEATURE_CATALOG.md` |
 | frontend observable capabilities | `docs/migration/FRONTEND_FEATURES.md` + `docs/migration/frontend/*.md` |
-| CURRENT 86-screen / shell UX-FN mapping | `docs/migration/screen-mapping/README.md` |
+| CURRENT visual screen / compat / system / shell UX-FN mapping | `docs/migration/screen-mapping/README.md` |
 | backend/domain/platform function parity | `docs/migration/FUNCTION_INVENTORY.md` + `docs/migration/functions/*.md` |
 | existing design/product requirement reconciliation | `docs/migration/PRODUCT_REQUIREMENTS.md` |
 | new UI visual source / HTML mock registration | `docs/migration/UI_REFERENCE.md` |
@@ -47,9 +48,10 @@
 ## Rules
 
 - Migration docs describe TARGET / transition / progress. CURRENT behavior remains code/test/config driven until cutover.
-- `CURRENT_ROUTES.md` owns the 86 USER_SCREEN route baseline.
+- `CURRENT_ROUTES.md` owns the 92 `app/**/page.tsx` classification baseline（74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 3 DEV_ONLY / 6 SYSTEM_SURFACE）。
+- `FEATURE_CATALOG.md` is a human-readable derived view of all `UX-*` / `FN-*`; it never overrides the canonical ledgers.
 - `FRONTEND_FEATURES.md` + `frontend/*.md` own `UX-*` frontend observable behavior.
-- `screen-mapping/README.md` owns the resolved mapping from all 86 CURRENT screens + cross-route shells to UX/FN, permission/state/query/responsive-a11y contracts.
+- `screen-mapping/README.md` owns the resolved mapping from CURRENT visual/compat/dev/system surfaces + cross-route shells to UX/FN, permission/state/query/responsive-a11y contracts.
 - `FUNCTION_INVENTORY.md` + `functions/*.md` own `FN-*` backend/domain/platform functions.
 - `UX-*` and `FN-*` are intentionally many-to-many.
 - `PRODUCT_REQUIREMENTS.md` owns reconciliation between current implementation and existing design intent.
