@@ -21,7 +21,7 @@ UI機能数とbackend function数を一致させない。
 `/flamenode-migration`の全iterationでこの索引を確認する。
 
 - frontend/UI/routeを触る: `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象frontend ledger
-- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`; Route Handler/API対象なら `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job対象なら `cloudflare/TOPOLOGY.md`; CPU/1102/request performance対象なら `cloudflare/PERFORMANCE_BASELINE.md`; auth/session/identity/permission/owner対象なら `auth/README.md`; static artifact/alias/visibility/fallback/repair対象なら `static-delivery/README.md`
+- backend/action/API/domain/jobを触る: 対象function ledger + `BACKEND_OPTIMIZATION.md` + `CODE_QUALITY.md`; Server Action対象なら `server-actions/README.md`; Route Handler/API対象なら `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job対象なら `cloudflare/TOPOLOGY.md`; CPU/1102/request performance対象なら `cloudflare/PERFORMANCE_BASELINE.md`; auth/session/identity/permission/owner対象なら `auth/README.md`; Queue/Cron/background job/retry/DLQ/recovery対象なら `background-jobs/README.md`; static artifact/alias/visibility/fallback/repair対象なら `static-delivery/README.md`
 - product/design intentが関係する: `PRODUCT_REQUIREMENTS.md`
 - visual UIが関係する: `UI_REFERENCE.md`。`PENDING_HTML`中は新visual designを推測しない
 - 画面存在、UX capability、backend functionを同一視しない
@@ -121,6 +121,8 @@ unclassified methods: 0
 checkerは実コードのroute file/method pairとledgerを照合し、将来のAPI追加漏れを検出する。
 
 ### Worker / background
+
+MIG-0009でQueue/Cron/background job/retry/DLQ/recovery/idempotency/async stateをcode/tests + read-only Cloudflare実環境で検証済み。正本は [`background-jobs/README.md`](background-jobs/README.md)。
 
 MIG-0008でAuth.js/session/linking/terms/Active X/event-video permission/owner invariantをcode/testsで検証済み。正本は [`auth/README.md`](auth/README.md)。
 
