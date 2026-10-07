@@ -184,6 +184,8 @@ In `enforce` mode, a public detail/collection must not serve potentially private
 
 `PUBLIC_DEGRADED_D1_ENABLED` is an explicit kill switch. Degraded D1 is permitted only for `static_json_with_live_overlay`; it is not an unconditional fallback.
 
+Implementation anchors retained by the loader are `degraded_d1` for bounded live fallback and `requireVisibilityManifestForStale` for stale-cache paths that must prove a trustworthy visibility manifest before serving mutable public collections.
+
 Public data state vocabulary that frontend migration must preserve:
 
 - `ready`
