@@ -5,7 +5,7 @@
 > Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Index: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
 
-Platform保証は画面に現れにくいが、移行時の欠落が最も危険な領域。特にvisibility、audit、retry/idempotency、public DTO、rollbackをUI機能とは別に追跡する。MIG-0007で static/public delivery の FN-PLAT-002..008（001/009/010は別scope）および FN-X-004/FN-X-010 を `static-delivery/README.md` の証拠でCURRENT_VERIFIED化した。
+Platform保証は画面に現れにくいが、移行時の欠落が最も危険な領域。特にvisibility、audit、retry/idempotency、public DTO、rollbackをUI機能とは別に追跡する。MIG-0007で static/public delivery の FN-PLAT-002..008（001/009/010は別scope）および FN-X-004/FN-X-010 を `static-delivery/README.md` の証拠でCURRENT_VERIFIED化した。MIG-0008で event owner invariant と server-side authorization boundary（FN-X-001/FN-X-002）を `auth/README.md` の証拠でCURRENT_VERIFIED化した。
 
 ## Platform / static delivery
 
@@ -57,8 +57,8 @@ Platform保証は画面に現れにくいが、移行時の欠落が最も危険
 
 | ID | Invariant | Evidence area | State |
 | --- | --- | --- | --- |
-| FN-X-001 | event ownerを0人にしない | permission/event staff | DETAIL_AUDIT_REQUIRED |
-| FN-X-002 | UIだけで認可しない | auth/write guards | DETAIL_AUDIT_REQUIRED |
+| FN-X-001 | event ownerを0人にしない | permission/event staff | CURRENT_VERIFIED |
+| FN-X-002 | UIだけで認可しない | auth/write guards | CURRENT_VERIFIED |
 | FN-X-003 | public APIは明示DTOのみ | publicDto/routes | DETAIL_AUDIT_REQUIRED |
 | FN-X-004 | private dataをpublic artifactへ出さない | projection/visibility | CURRENT_VERIFIED |
 | FN-X-005 | mutation auditを維持 | audit helpers/actions | DETAIL_AUDIT_REQUIRED |
