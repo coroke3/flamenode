@@ -275,6 +275,9 @@ if (errors.length === 0) {
     "acting/content/interaction identity = Active X",
     "X-scoped permission resolution = Active X first",
     "must not silently lend its X-scoped permission",
+    "## Confirmed TARGET identity decisions",
+    "| bookmark/save identity | **Active X** |",
+    "No identity decision in this table remains pending for MIG-0011.",
     "CURRENT_DIVERGENCE",
     "video_interactions_auth",
     "production mutation: none",
@@ -720,6 +723,7 @@ if (errors.length === 0) {
     "## TARGET identity priority",
     "Auth User = authentication/account/security principal",
     "Active X = default X-scoped domain principal",
+    "like / bookmark / save はすべてActive X所有",
     "X-scoped permission = Active X first",
     "inactive Xの権限をActive Xへ暗黙に貸さない",
   ]) {
