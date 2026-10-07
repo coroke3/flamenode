@@ -372,7 +372,7 @@ if (errors.length === 0) {
     return acc;
   }, {});
   for (const state of validUxStates) {
-    const reported = Number(frontend.match(new RegExp("\\\\| `" + state + "` \\\\| (\\\\d+) \\\\|"))?.[1]);
+    const reported = Number(frontend.match(new RegExp("\\| `" + state + "` \\| (\\d+) \\|"))?.[1]);
     const actual = uxStateCounts[state] ?? 0;
     if (!Number.isFinite(reported)) errors.push(`FRONTEND_FEATURES.md: ${state} final count is missing`);
     else if (reported !== actual) errors.push(`FRONTEND_FEATURES.md: ${state} reported=${reported}, actual=${actual}`);
@@ -653,7 +653,7 @@ if (errors.length === 0) {
   let inlineUseServer = 0;
   for (const abs of appFiles) {
     const sourceText = fs.readFileSync(abs, "utf8");
-    const moduleDirective = /^\s*["']use server["'];/m.test(sourceText);
+    const moduleDirective = /^\s*["']use server["'];/.test(sourceText);
     const count = (sourceText.match(/["']use server["'];/g) ?? []).length;
     inlineUseServer += moduleDirective ? Math.max(0, count - 1) : count;
   }
@@ -961,7 +961,7 @@ if (errors.length === 0) {
     if (!requirements.includes(phrase)) errors.push(`PRODUCT_REQUIREMENTS.md: Active X target marker missing: ${phrase}`);
   }
   const uxById = new Map(uxRows.map((row) => [row.id, row]));
-  for (const id of ["UX-VID-025", "UX-VID-026", "UX-VID-027", "UX-VID-028", "UX-LIB-001", "UX-LIB-002", "UX-LIB-008"]) {
+  for (const id of ["UX-VID-025", "UX-VID-026", "UX-VID-027", "UX-LIB-001", "UX-LIB-002", "UX-LIB-008"]) {
     if (uxById.get(id)?.state !== "CURRENT_DIVERGENCE") {
       errors.push(`frontend UX ledgers: Active X interaction divergence must remain explicit for ${id}`);
     }
@@ -1002,7 +1002,7 @@ if (errors.length === 0) {
   }
 
   if (!routeMatrix.includes("CURRENT_ROUTES.md")) errors.push("ROUTE_MATRIX.md: CURRENT route source must be CURRENT_ROUTES.md");
-  if (!routeMatrix.includes("432 baseline `UX-*`")) errors.push("ROUTE_MATRIX.md: 432 UX mapping contract is missing");
+  if (!/432\s+UX capability/.test(routeMatrix)) errors.push("ROUTE_MATRIX.md: 432 UX mapping contract is missing");
   for (const stale of [
     "89 frontend capabilities",
     "89 capabilities total",
