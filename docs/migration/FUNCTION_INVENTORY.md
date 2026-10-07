@@ -55,6 +55,10 @@ CURRENT/BASELINE
 - `BASELINE_KNOWN`: 存在確認済み
 - `DETAIL_AUDIT_REQUIRED`: input/auth/effect/test棚卸し未完
 - `CURRENT_VERIFIED`: CURRENT contract棚卸し完了
+- `CURRENT_DIVERGENCE`: CURRENT contractは確認済みだが、明示されたTARGET requirementと不一致
+- `OBSOLETE`: CURRENT/TARGET双方で独立機能として不要。removal/互換条件を最終監査に記録
+- `MERGED_INTO_OTHER`: 独立backend責務を持たず、別FN/domainへ統合
+- `TARGET_REDESIGN_REQUIRED`: CURRENTは確認済みだがTARGET service/schema境界の再設計が必要
 - `MIGRATION_IN_PROGRESS`: target実装中
 - `BRIDGED`: legacy/new共存
 - `PARITY_VERIFIED`: target parity確認済み
