@@ -9,41 +9,46 @@
 > CURRENT resolved mapping: [`screen-mapping/README.md`](screen-mapping/README.md)
 >
 > 画面・URL単位の移行契約を管理する。
-> CURRENTの86 USER_SCREENのURL/role/purpose/primary actionは `CURRENT_ROUTES.md` を正本とし、この文書では移行先・technical compatibility route・安全境界・UX/FN mappingを管理する。
+> CURRENTの全 `app/**/page.tsx` と `VISUAL_SCREEN / COMPAT_REDIRECT / DEV_ONLY / SYSTEM_SURFACE` 分類は `CURRENT_ROUTES.md` を正本とし、この文書では移行先・URL互換・technical route・安全境界・UX/FN mappingを管理する。
 
 ## Route inventory classes
 
-CURRENT routeは以下を区別する。
+CURRENT page routeは以下を区別する。
 
-1. **USER_SCREEN** — ユーザー/運営者/管理者/開発者が直接見るCURRENT画面。86画面の正本は`CURRENT_ROUTES.md`。
-2. **TECH_COMPAT** — Next/OpenNext/Free CPU制約等を成立させる内部route。独立したユーザー機能ではないが、置換前に消してはいけない。
-3. **API_AUTH** — Route Handler/Auth endpoint。MIG-0004/0008で監査。
-4. **GLOBAL_SURFACE** — `error.tsx`, `global-error.tsx`, `not-found.tsx`, robots/sitemap等。全画面横断のUX/安全契約として扱う。
-5. **LEGACY_DEV_SURFACE** — `/dev/ui-surfaces`, `/dev/redesign/*` 等のCURRENT開発用surface。production capabilityと混同せず、新UIのvisual sourceにも使用しない。
+1. **VISUAL_SCREEN** — 独立visual UIをrenderするCURRENT画面。
+2. **COMPAT_REDIRECT** — 旧URL/deep-linkを現在のowner surfaceへ接続するcompatibility route。独立screenではない。
+3. **DEV_ONLY** — development/inspection/mock surface。production capabilityやTARGET visual authorityではない。
+4. **SYSTEM_SURFACE** — auth completion、maintenance、technical query renderer等のsystem/implementation surface。
+5. **API_AUTH** — Route Handler/Auth endpoint。MIG-0004/0008で監査。
+6. **GLOBAL_SURFACE** — `error.tsx`, `global-error.tsx`, `not-found.tsx`, robots/sitemap等。
 
-## USER_SCREEN baseline
+## CURRENT page classification
 
-2026-10-07のCURRENT route treeを基準にしたbaseline:
+2026-10-07のCURRENT route treeをMIG-0011 Frontendで全件分類した。件数はsnapshot結果であり、checkerは `app/**/page.tsx` からcoverageを導出する。
 
-| Group | Screens | Canonical source | UX baseline relationship |
-| --- | ---: | --- | --- |
-| Public | 16 | `CURRENT_ROUTES.md` | `frontend/PUBLIC.md`を中心にmapping |
-| Personal | 6 | `CURRENT_ROUTES.md` | `frontend/AUTH_PERSONAL_ENTRY.md`を中心にmapping |
-| Entry | 3 | `CURRENT_ROUTES.md` | `frontend/AUTH_PERSONAL_ENTRY.md`を中心にmapping |
-| Manage | 12 | `CURRENT_ROUTES.md` | `frontend/MANAGE_ADMIN.md`を中心にmapping |
-| Admin | 45 | `CURRENT_ROUTES.md` | `frontend/MANAGE_ADMIN.md`を中心にmapping |
-| System | 4 | `CURRENT_ROUTES.md` | cross-cutting/auth/system UXへmapping |
-| **Total** | **86** | `CURRENT_ROUTES.md` | **432 UX capabilities baselineの部分集合/組合せ** |
+| Class | Current count | Canonical source |
+| --- | ---: | --- |
+| VISUAL_SCREEN | 74 | `CURRENT_ROUTES.md` |
+| COMPAT_REDIRECT | 9 | `CURRENT_ROUTES.md` + `gap-scan/FRONTEND_REQUIREMENTS.md` |
+| DEV_ONLY | 3 | `CURRENT_ROUTES.md` |
+| SYSTEM_SURFACE | 6 | `CURRENT_ROUTES.md` |
+| **page.tsx total** | **92** | source tree |
 
-System routes:
+432 UX capabilityとは1:1ではない。visual screenだけでなくcompat/system/shellもUX ownerになりうる。
 
-- `/dev/ui-surfaces` → `FN-PLAT-012`
-- `/maintenance` → `FN-PLAT-011`
-- `/onboarding` → `FN-AUTH-005`
-- `/auth/complete` → `FN-AUTH-007`
+### Redirect compatibility contract
 
-86 screenと432 UX capabilityは1:1ではない。
-1 screenに複数UXがあり、cross-route UXは複数screenへまたがる。
+- `/groups` → `/event`
+- `/groups/[slug]` → `/event#event-group-{slug}`
+- `/admin/history` → `/admin/audit`
+- `/admin/events/[id]` → `/manage/events/[id]`
+- `/admin/events/[id]/edit` → `/manage/events/[id]/edit`
+- `/admin/events/[id]/slots` → `/manage/events/[id]/slots`
+- `/admin/events/[id]/staff` → `/manage/events/[id]/staff`
+- `/manage/events/[id]/review` → `/manage/events/[id]/videos?status=pending`
+- `/dashboard/youtube-playlists` → adminは `/admin/youtube-sync/playlists`、その他authenticated userは `/dashboard`
+
+source URLをmigrationで無断削除しない。query/hash/role分岐の詳細は `gap-scan/FRONTEND_REQUIREMENTS.md`。
 
 ## CURRENT technical compatibility routes
 
@@ -86,7 +91,7 @@ Evidence: `next.config.mjs` の `QUERY_RENDERED_PUBLIC_PAGES` と各shared view 
 | `/about` | Next/OpenNext | Astro/site | SSG | build snapshot | public | BASELINED | MIG-0501 |
 | `/rules*` | Next/OpenNext | Astro/site | SSG | build snapshot | public | BASELINED | MIG-0501 |
 | `/event/*` | Next/OpenNext | Astro/site | SSG + Islands | public R2 + live API | visibility fence | BASELINED | MIG-0502 |
-| `/groups/*` | Next/OpenNext | Astro/site | SSG | public R2 | visibility fence | BASELINED | MIG-0503 |
+| `/groups`, `/groups/[slug]` | Next redirect | compatibility alias to `/event` | redirect | none | public | COMPAT_BASELINED | MIG-0503 |
 | `/user/*` | Next/OpenNext | Astro/site | SSG + Islands | public R2 | visibility fence | BASELINED | MIG-0504 |
 | `/list*` | Next/OpenNext | Astro/site | SSG shell + Island | public R2/API | public DTO | BASELINED | MIG-0505 |
 | `/recommend*` | Next/OpenNext | Astro/site | SSG shell + Island | public R2/API | public DTO | BASELINED | MIG-0505 |
@@ -107,7 +112,7 @@ Evidence: `next.config.mjs` の `QUERY_RENDERED_PUBLIC_PAGES` と各shared view 
 
 ```text
 Route:
-Class: USER_SCREEN | TECH_COMPAT | API_AUTH | GLOBAL_SURFACE | LEGACY_DEV_SURFACE
+Class: VISUAL_SCREEN | COMPAT_REDIRECT | DEV_ONLY | SYSTEM_SURFACE | API_AUTH | GLOBAL_SURFACE
 Current file:
 Current owner:
 Required UX IDs:
@@ -149,14 +154,14 @@ State:
 
 ## CURRENT screen → UX/FN mapping
 
-MIG-0010で完了。正本は [`screen-mapping/README.md`](screen-mapping/README.md)。
+MIG-0010 baselineをMIG-0011 Frontendでroute class別にreconcileした。正本は [`screen-mapping/README.md`](screen-mapping/README.md)。
 
 固定済み:
 
-- 86 CURRENT USER_SCREEN rows;
+- all CURRENT page routes classified and owned;
 - 16 cross-route shells;
-- 432 baseline UX capabilities;
-- 170 distinct UX Surface tokens;
+- 432 UX capabilities with final disposition;
+- every distinct UX Surface token resolved without hard-coding the token count as a migration target;
 - screen-local Required UX/FN;
 - permission/state/query/history/responsive-a11y profiles;
 - technical twin routeのlogical URL contract;
