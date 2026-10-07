@@ -47,14 +47,15 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 3. `docs/migration/STATUS.md`
 4. `docs/migration/GIT_WORKFLOW.md`
 5. `docs/migration/README.md`
-6. `docs/migration/PRODUCT_REQUIREMENTS.md`
-7. `docs/migration/CODE_QUALITY.md`
-8. task scopeに応じて:
+6. `docs/migration/FEATURE_CATALOG.md` — 432 UX / 136 FN の人間向け全件索引
+7. `docs/migration/PRODUCT_REQUIREMENTS.md`
+8. `docs/migration/CODE_QUALITY.md`
+9. task scopeに応じて:
    - route/UI/frontend → `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象`frontend/*.md` + `screen-mapping/README.md`
    - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`; Route Handler/APIを触る場合は `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job topologyを触る場合は `cloudflare/TOPOLOGY.md`; CPU/1102/request hot-path/PoC performanceを触る場合は `cloudflare/PERFORMANCE_BASELINE.md`; static artifact/alias/visibility/fallback/repairを触る場合は `static-delivery/README.md`; auth/session/linking/terms/Active X/permission/owner invariantを触る場合は `auth/README.md`; Queue/Cron/background job/retry/DLQ/recoveryを触る場合は `background-jobs/README.md`
    - visual/UI design → `UI_REFERENCE.md`
-9. 必要な`ROUTE_MATRIX.md` / `API_MATRIX.md`
-10. 対象CURRENT code + tests + config
+10. 必要な`ROUTE_MATRIX.md` / `API_MATRIX.md`
+11. 対象CURRENT code + tests + config
 
 正本の所在が不明な時だけ`DOC_MAP.md`を読む。
 
@@ -136,6 +137,8 @@ Production action required: yes/no
 # Existing-function guard
 
 実装/設計前に:
+
+0. `FEATURE_CATALOG.md` で対象機能と隣接機能を確認し、一覧から漏れているCURRENT機能がないかコードと照合する。
 
 1. `CURRENT_ROUTES.md`で影響routeを確定し、`screen-mapping/README.md`でそのscreen/shellのRequired UX/FN・permission/state/query/RA profileを確認。
 2. 対象`frontend/*.md`から関連`UX-*`を列挙。
