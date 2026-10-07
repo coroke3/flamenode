@@ -6,6 +6,7 @@
 > Progress: [`STATUS.md`](STATUS.md)
 > CURRENT route source: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
 > Frontend capabilities: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
+> CURRENT resolved mapping: [`screen-mapping/README.md`](screen-mapping/README.md)
 >
 > 画面・URL単位の移行契約を管理する。
 > CURRENTの86 USER_SCREENのURL/role/purpose/primary actionは `CURRENT_ROUTES.md` を正本とし、この文書では移行先・technical compatibility route・安全境界・UX/FN mappingを管理する。
@@ -148,24 +149,18 @@ State:
 
 ## CURRENT screen → UX/FN mapping
 
-MIG-0010で `CURRENT_ROUTES.md` の86 USER_SCREENとcross-route shell/global surfacesを、関連する432 baseline `UX-*` と136 baseline `FN-*` へ完全に紐付ける。
+MIG-0010で完了。正本は [`screen-mapping/README.md`](screen-mapping/README.md)。
 
-```text
-Current route / surface
-Required UX IDs
-Required FN IDs
-Current evidence
-Permission/visibility contract
-URL/query/history contract
-Loading/error/empty/pending/degraded contract
-Responsive/a11y contract
-Target route
-Target UI reference (HTML mock受領後)
-Target layout/components
-Migration task
-State
-```
+固定済み:
+
+- 86 CURRENT USER_SCREEN rows;
+- 16 cross-route shells;
+- 432 baseline UX capabilities;
+- 170 distinct UX Surface tokens;
+- screen-local Required UX/FN;
+- permission/state/query/history/responsive-a11y profiles;
+- technical twin routeのlogical URL contract;
+- global error/404/robots/sitemap surfaces.
 
 `UI_REFERENCE.md` が `PENDING_HTML` の間はTarget layout/componentsを確定しない。
 旧`app/(redesign)`や削除済み`docs/design-redesign`を新UIの根拠にしない。
-CURRENT UX/FN mappingはHTML mock受領を待たずに完了させる。

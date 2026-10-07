@@ -92,6 +92,19 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
 
+## MIG-0010 evidence
+
+86 CURRENT screensと432 UX baselineを、route-local mapping + cross-route shell + Surface resolution ledgerで完全に解決した。
+
+- 86/86 screenにroute-local UX/FNが存在する。
+- 432 UXの170 distinct Surface tokenは全てCURRENT routeまたは16 cross-route shellへ解決される。
+- permission / dynamic state / query-history / responsive-a11y profileをscreen単位で固定した。
+- `/list`, `/user`, `/event`, `/user/[id]` のtechnical twin route削除後もlogical query/deep-link contractを維持する。
+- searchParamsを読むscreenをQ-DIRECT扱いしないdrift checkを追加した。
+- responsive/a11yはvisual mock受領前でもcontractとして固定し、visual layoutはPENDING_HTMLのまま捏造しない。
+
+MIG-0010でfrontend変更を必須とするbackend optimization blockerは0。MIG-0011ではこのmappingを用いてorphan/requirement divergence/重複機能を全体scanする。
+
 ## MIG-0009 evidence
 
 Queue/Cron/background executionをcode/testsとread-only Cloudflare実環境で監査し、CURRENT execution contractを固定した。

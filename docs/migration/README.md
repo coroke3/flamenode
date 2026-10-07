@@ -7,6 +7,7 @@
 > Git workflow: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
 > Current routes: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
 > Frontend parity: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
+> CURRENT screen mapping: [`screen-mapping/README.md`](screen-mapping/README.md)
 > Backend parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
 > Requirement reconciliation: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)
 > Code quality: [`CODE_QUALITY.md`](CODE_QUALITY.md)
@@ -80,6 +81,7 @@ CURRENT user-visible routes
 
 Frontend observable behavior
   FRONTEND_FEATURES.md
+  screen-mapping/README.md
   frontend/*.md
   UX-* IDs
 
@@ -820,6 +822,7 @@ Auth:
 | `STATUS.md` | current task/owner/progress/blockers |
 | `CURRENT_ROUTES.md` | CURRENT user-visible route/screen inventory |
 | `FRONTEND_FEATURES.md` + `frontend/*.md` | frontend observable `UX-*` capabilities |
+| `screen-mapping/README.md` | 86 CURRENT screens + cross-route shells → UX/FN/permission/state/query/RA mapping |
 | `FUNCTION_INVENTORY.md` + `functions/*.md` | backend/domain/platform `FN-*` contracts |
 | `PRODUCT_REQUIREMENTS.md` | CURRENT vs existing design/product intent reconciliation |
 | `CODE_QUALITY.md` | professional implementation standard |

@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0010
+Current Task: MIG-0011
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0009
-Last Task PR: #245
-Next: MIG-0010
+Last Completed Task: MIG-0010
+Last Task PR: #246
+Next: MIG-0011
 ```
 
 ## State definitions
@@ -51,8 +51,8 @@ Next: MIG-0010
 
 | Surface | Baseline enumerated | Detailed audited | Parity verified | Phase 0 target |
 | --- | ---: | ---: | ---: | --- |
-| CURRENT USER_SCREEN routes | 86 | 86 route/role/purpose baseline | 0 | all required UX/FN mapped |
-| Frontend `UX-*` capabilities | 432 | baseline evidence states only | 0 | orphan/unverified/disposition漏れ 0 |
+| CURRENT USER_SCREEN routes | 86 | 86 CURRENT_MAPPED UX/FN/permission/state/query/RA | 0 | all required UX/FN mapped |
+| Frontend `UX-*` capabilities | 432 | 432 Surface-resolved to 86 screens / 16 shells | 0 | orphan/unverified/disposition漏れ 0 |
 | CURRENT technical compatibility routes | 4 | purpose/query baseline | n/a | replacement evidence before removal |
 | Backend/domain/platform `FN-*` | 136 | 33 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
 | Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
@@ -118,8 +118,8 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0007 | static artifact / visibility baseline | DONE | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
 | MIG-0008 | Auth/session/permission baseline | DONE | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
 | MIG-0009 | Queue/Cron/background job baseline | DONE | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
-| MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | READY | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
-| MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | BLOCKED | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
+| MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | DONE | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
+| MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | READY | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
 | MIG-0012 | Phase 0 Gate | BLOCKED | MIG-0006, MIG-0011 | independent review, rollback baseline, all Phase 0 invariants satisfied |
 
 ## Phase 0 Gate
@@ -138,8 +138,8 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [x] all Server Action exports + inline actions inventoried (110 execution units / unclassified 0)
 - [x] all Route Handler methods inventoried (28 route files / 33 methods / unclassified 0)
 - [ ] all required FN functions CURRENT_VERIFIED or explicitly dispositioned
-- [ ] all 86 screens mapped to required UX/FN IDs
-- [ ] all required UX capabilities have route/permission/backend/state dispositions
+- [x] all 86 screens mapped to required UX/FN IDs
+- [x] all required UX capabilities have route/permission/backend/state dispositions
 - [x] all background jobs/Queues/Cron inventoried
 - [x] current Cloudflare topology fixed
 - [x] CPU/1102 baseline fixed
@@ -270,80 +270,77 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0009 — Queue/Cron/background job baseline
+## MIG-0010 — 86 CURRENT screens + cross-route shells → UX/FN mapping
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #245
+PR: #246
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- Queue wake protocolをbusiness-data-free doorbellとして固定し、D1 pending/due stateをcanonical work truthとして明示
-- Queue kinds 4種 / source 7種 / message version=1 / business field拒否を固定
-- Cloudflare実環境で 3 wake Queues + 3 DLQs、consumer retry/遅延/concurrency、Cron schedulesをread-only再確認
-- Cloudflare platform retry/DLQ、D1 application retry、Recovery Cronの3 retry layerを分離
-- fast-jobs :00 notification lease recovery / reminders / Queue wake / bounded direct fallbackを固定
-- notification D1 state、4 attempts、60/300/900s、Discord 429 defer、orphan dead-letter、sent-mark sentinel再配送抑止を固定
-- content-jobs :15 static repair/reconcile/cleanup/Queue wake/fallbackを固定
-- static rebuild 1 target/invocation、4 attempts、60/300/900s、dirty-generation requeue、done-mark sentinelを固定
-- sync-jobs :07 metadata/GA4/score/related recovery と :52 playlist recoveryを固定
-- YouTube metadata pending/synced/failed、quota_stop defer、post-commit semanticsを固定
-- playlist disabled/idle/scanning/synced/deferred/failed、one-event drain、mixed-batch isolation、quota defer、Cron fallbackを固定
-- D1 `worker_leases` をCron CAS/heartbeat正本として固定
-- notification/static/worker-monitoring/YouTube/public-reflectionのユーザー可視async stateを対応付け
-- platform DLQとapplication terminal stateを別概念として固定
-- FN-JOB-001..008、FN-X-006、FN-PLAT-010 を CURRENT_VERIFIEDへ更新
-- FN actual count = CURRENT_VERIFIED 33 / DETAIL_AUDIT_REQUIRED 103 / total 136
-- `background-jobs/README.md` をshared architecture / Claude / Codex / Antigravity / checkerへ接続
-- production Worker/Queue/Cron/D1/R2/KV/external API mutation 0
+- 86 CURRENT USER_SCREENを全件route-local UX/FNへmapping
+- 16 cross-route shellを定義
+- 432 UX capabilitiesの170 distinct Surface tokenをCURRENT routeまたはshellへ完全解決
+- screenごとに permission profile / dynamic-state profile / URL-query-history profile / responsive-a11y profile / TARGET render ownershipを固定
+- public technical twin:
+  - /list/~query -> Q-LIST(q,event,sort,page,view)
+  - /user/~query -> Q-USER(q,sort,page)
+  - /event/~query -> Q-EVENT(q,status,sort)
+  - /user/[id]/paged -> Q-USER-PAGED(worksPage,collabPage)
+  のlogical URL contractを固定
+- searchParamsを読むCURRENT pageをQ-DIRECT扱いしないdrift ruleを追加
+- error/global-error/not-found/robots/sitemapを86 screen外のglobal surfacesとしてshell mapping
+- visual sourceはUI_REFERENCE=PENDING_HTMLのまま維持し、target layout/componentは捏造しない
+- `screen-mapping/README.md` をROUTE_MATRIX / FRONTEND_FEATURES / architecture / shared protocol / Claude / Codex / Antigravity / checkerへ接続
+- production runtime/Cloudflare/D1/R2/KV/Queue mutation 0
 
 Validation evidence:
 
-- current Worker/queue/recovery source + contract/execution tests
-- read-only Cloudflare Queue/consumer/DLQ/schedule API
-- Queue actual: notification/static retry delay 60s, YouTube 300s, max retries 3, max concurrency 1
+- CURRENT routes: 86
+- screen mapping rows: 86
+- UX capabilities: 432
+- distinct UX Surface tokens: 170
+- Surface resolution rows: 170
+- cross-route shells: 16
+- screen routes with no local UX: 0
+- unresolved Surface tokens: 0
+- unknown route/shell owners: 0
+- malformed permission/state/query/RA rows: 0
+- CURRENT page searchParams vs Q profile mismatches: 0
 - migration checker JavaScript syntax parse: OK
-- Queue kinds and Queue names are checked against `wakeBudget.ts`
-- stable background-job markers are checked without freezing volatile queue IDs/counts
 - branch behind main=0 at final review
 - GitHub status checks: none
 - author self-review only; independent approval is not represented
 
-Current gaps carried forward:
-
-- all three platform DLQs have no direct consumer; safe only while Queue remains doorbell and D1 stays canonical
-- static schema/admin expose `dead_letter` while current processor retry exhaustion uses `failed`; do not remove until MIG-0011 gap scan resolves it
-- KV Queue wake telemetry is last-failure diagnostic, not canonical/audit history
-- platform/application/recovery retry counters must not be merged into one status
-
 Optimization conclusions:
 
-- versioned doorbell, Queue consumer shell, Cron envelope, normalized job counters are commonization candidates
-- notification delivery suppression, static dirty-generation, YouTube quota, playlist scan cursor, visibility release and retention cleanup remain domain-specific
-- frontend product-contract change required for optimization: 0
+- backend commonization may not erase screen-specific permission/state/query/deep-link contracts
+- responsive/a11y requirements are migration contracts independent of future visual mock
+- technical query twin routes may disappear only after logical URL replacement evidence exists
+- frontend product-contract change required for current optimization candidates: 0
 
 Rollback:
 
-- revert PR #245 squash commit; production Queue/Cron/Worker rollback action is unnecessary because MIG-0009 is documentation/checker-only
+- revert PR #246 squash commit; production rollback action is unnecessary because MIG-0010 is documentation/checker-only
 
 # Next task claim template
 
-For MIG-0010 the writer records before work:
+For MIG-0011 the writer records before work:
 
 ```text
-Task: MIG-0010
+Task: MIG-0011
 Owner: claude | codex | antigravity | other
 State: READY -> IN_PROGRESS
-Branch: migration/mig-0010-screen-ux-fn-mapping
+Branch: migration/mig-0011-inventory-consolidation-gap-scan
 PR: pending
-Scope: all 86 CURRENT screens + cross-route shells mapped to UX/FN IDs with permission/state/query/deep-link/responsive/a11y requirements
-Evidence sources: CURRENT_ROUTES.md + frontend ledgers + function ledgers + Server Action/API/auth/static/job baselines + current code/tests
+Scope: full 86/432/136 consolidation, orphan/unknown=0 scan, requirements divergence, duplicate/obsolete processing and optimization blocker disposition
+Evidence sources: all canonical migration baselines + current code/tests + UI_REFERENCE state
 Rollback:
 Production action required: no
 ```
 
-MIG-0010 dependencies (MIG-0002/0003/0004) are complete, so it is READY. MIG-0011 remains BLOCKED until MIG-0010 completes.
+MIG-0011 dependencies are complete. MIG-0012 remains BLOCKED until MIG-0011 completes and requires independent review/Phase 0 gate evidence.

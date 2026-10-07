@@ -27,6 +27,7 @@ const required = [
   "docs/migration/static-delivery/README.md",
   "docs/migration/auth/README.md",
   "docs/migration/background-jobs/README.md",
+  "docs/migration/screen-mapping/README.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
   "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
@@ -124,6 +125,7 @@ if (errors.length === 0) {
   const staticDeliveryBaseline = read("docs/migration/static-delivery/README.md");
   const authBaseline = read("docs/migration/auth/README.md");
   const backgroundJobsBaseline = read("docs/migration/background-jobs/README.md");
+  const screenMapping = read("docs/migration/screen-mapping/README.md");
 
   // Progress/task integrity.
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
@@ -212,9 +214,10 @@ if (errors.length === 0) {
       const id = line.match(/^\|\s*(UX-[A-Z]+-\d{3})\s*\|/)?.[1];
       if (!id) continue;
 
-      const cells = line.split("|").map((cell) => cell.trim()).filter(Boolean);
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
       const state = cells.at(-1);
-      uxRows.push({ id, state, ledgerPath, line });
+      const surface = (cells[2] ?? "").replaceAll("`", "").trim();
+      uxRows.push({ id, state, surface, ledgerPath, line });
       if (!validUxStates.has(state)) errors.push(`${ledgerPath}: invalid UX evidence/state ${state} for ${id}`);
 
       const fnRefs = [...line.matchAll(/FN-[A-Z]+-\d{3}/g)].map((m) => m[0]);
@@ -234,6 +237,156 @@ if (errors.length === 0) {
   if (uxRows.length !== 432) errors.push(`frontend UX ledgers: current baseline=${uxRows.length}, expected=432`);
   if (!/Frontend `UX-\*` capabilities\s*\|\s*432\s*\|/m.test(status)) errors.push("STATUS.md: frontend UX baseline must report 432");
 
+
+  // MIG-0010 86-screen / UX / FN mapping completeness.
+  const currentRouteRows = [];
+  for (const line of currentRoutes.split("\n")) {
+    const match = line.match(/^\|\s*`(\/[^\`]*)`\s*\|\s*`(app\/[^\`]+page\.tsx)`\s*\|/);
+    if (match) currentRouteRows.push({ route: match[1], filePath: match[2] });
+  }
+  if (currentRouteRows.length !== 86) {
+    errors.push(`CURRENT_ROUTES.md: parsed screen rows=${currentRouteRows.length}, expected=86`);
+  }
+  const currentRouteSet = new Set(currentRouteRows.map((row) => row.route));
+  const currentRouteDupes = duplicateIds(currentRouteRows.map((row) => row.route));
+  if (currentRouteDupes.length) errors.push(`CURRENT_ROUTES.md: duplicate route rows: ${currentRouteDupes.join(", ")}`);
+
+  const screenSectionStart = screenMapping.indexOf("## 86 USER_SCREEN mapping");
+  const shellSectionStart = screenMapping.indexOf("## Cross-route shell mapping");
+  const surfaceSectionStart = screenMapping.indexOf("## UX Surface resolution ledger");
+  const technicalSectionStart = screenMapping.indexOf("## Technical compatibility routes");
+  if ([screenSectionStart, shellSectionStart, surfaceSectionStart, technicalSectionStart].some((value) => value < 0)) {
+    errors.push("screen-mapping/README.md: required mapping sections are missing");
+  } else {
+    const screenSection = screenMapping.slice(screenSectionStart, shellSectionStart);
+    const screenRows = [];
+    for (const line of screenSection.split("\n")) {
+      if (!/^\|\s*(Public|Personal|Entry|Manage|Admin|System)\s*\|/.test(line)) continue;
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      screenRows.push({
+        group: cells[0],
+        route: (cells[1] ?? "").replaceAll("`", ""),
+        ux: cells[2] ?? "",
+        fn: cells[3] ?? "",
+        permission: cells[4] ?? "",
+        dynamicState: cells[5] ?? "",
+        query: cells[6] ?? "",
+        responsive: cells[7] ?? "",
+        target: cells[8] ?? "",
+        state: cells[9] ?? "",
+      });
+    }
+    if (screenRows.length !== 86) errors.push(`screen-mapping/README.md: screen rows=${screenRows.length}, expected=86`);
+    const mappedRouteSet = new Set(screenRows.map((row) => row.route));
+    const mappedRouteDupes = duplicateIds(screenRows.map((row) => row.route));
+    if (mappedRouteDupes.length) errors.push(`screen-mapping/README.md: duplicate screen rows: ${mappedRouteDupes.join(", ")}`);
+    for (const route of currentRouteSet) {
+      if (!mappedRouteSet.has(route)) errors.push(`screen-mapping/README.md: CURRENT route missing: ${route}`);
+    }
+    for (const route of mappedRouteSet) {
+      if (!currentRouteSet.has(route)) errors.push(`screen-mapping/README.md: non-CURRENT screen row: ${route}`);
+    }
+    for (const row of screenRows) {
+      if (!row.ux.includes("UX-")) errors.push(`screen-mapping/README.md: ${row.route} has no route-local UX mapping`);
+      if (!row.fn.includes("FN-")) errors.push(`screen-mapping/README.md: ${row.route} has no route-local FN mapping`);
+      if (!row.permission.startsWith("P-")) errors.push(`screen-mapping/README.md: ${row.route} permission profile missing`);
+      if (!row.dynamicState.startsWith("S-")) errors.push(`screen-mapping/README.md: ${row.route} dynamic-state profile missing`);
+      if (!row.query.startsWith("Q-")) errors.push(`screen-mapping/README.md: ${row.route} query/history profile missing`);
+      if (!row.responsive.includes("RA-")) errors.push(`screen-mapping/README.md: ${row.route} responsive/a11y profile missing`);
+      if (!row.target) errors.push(`screen-mapping/README.md: ${row.route} target route/render disposition missing`);
+      if (row.state !== "CURRENT_MAPPED") errors.push(`screen-mapping/README.md: ${row.route} state must be CURRENT_MAPPED`);
+    }
+
+    const screenByRoute = new Map(screenRows.map((row) => [row.route, row]));
+    for (const current of currentRouteRows) {
+      const row = screenByRoute.get(current.route);
+      if (!row) continue;
+      const pageSource = read(current.filePath);
+      if (pageSource.includes("searchParams") && row.query === "Q-DIRECT") {
+        errors.push(`screen-mapping/README.md: ${current.route} reads searchParams but is marked Q-DIRECT`);
+      }
+    }
+    for (const [route, expectedPrefix] of [
+      ["/list", "Q-LIST("],
+      ["/user", "Q-USER("],
+      ["/event", "Q-EVENT("],
+      ["/user/[id]", "Q-USER-PAGED("],
+      ["/rules", "Q-RULES("],
+    ]) {
+      if (!screenByRoute.get(route)?.query.startsWith(expectedPrefix)) {
+        errors.push(`screen-mapping/README.md: ${route} must preserve ${expectedPrefix} contract`);
+      }
+    }
+
+    const shellSection = screenMapping.slice(shellSectionStart, surfaceSectionStart);
+    const shellRows = [];
+    for (const line of shellSection.split("\n")) {
+      const match = line.match(/^\|\s*`(shell:[A-Z_]+)`\s*\|/);
+      if (!match) continue;
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      shellRows.push({
+        id: match[1],
+        ux: cells[2] ?? "",
+        fn: cells[3] ?? "",
+        responsive: cells[4] ?? "",
+        state: cells[5] ?? "",
+      });
+    }
+    if (shellRows.length !== 16) errors.push(`screen-mapping/README.md: shell rows=${shellRows.length}, expected=16`);
+    const shellSet = new Set(shellRows.map((row) => row.id));
+    for (const row of shellRows) {
+      if (!row.ux.includes("UX-")) errors.push(`screen-mapping/README.md: ${row.id} has no UX mapping`);
+      if (!row.responsive.includes("RA-")) errors.push(`screen-mapping/README.md: ${row.id} has no responsive/a11y profile`);
+      if (row.state !== "CURRENT_MAPPED") errors.push(`screen-mapping/README.md: ${row.id} state must be CURRENT_MAPPED`);
+    }
+
+    const surfaceSection = screenMapping.slice(surfaceSectionStart, technicalSectionStart);
+    const surfaceRows = new Map();
+    for (const line of surfaceSection.split("\n")) {
+      const match = line.match(/^\|\s*`([^\`]+)`\s*\|\s*(.+?)\s*\|\s*(UX-[^|]+)\|\s*$/);
+      if (!match) continue;
+      const token = match[1].replaceAll("\\|", "|").trim();
+      surfaceRows.set(token, { owners: match[2], ux: match[3] });
+    }
+    const uxSurfaceSet = new Set(uxRows.map((row) => row.surface));
+    if (uxSurfaceSet.size !== 170) errors.push(`frontend UX ledgers: distinct Surface tokens=${uxSurfaceSet.size}, expected=170`);
+    if (surfaceRows.size !== uxSurfaceSet.size) {
+      errors.push(`screen-mapping/README.md: Surface resolution rows=${surfaceRows.size}, expected=${uxSurfaceSet.size}`);
+    }
+    for (const surface of uxSurfaceSet) {
+      const resolution = surfaceRows.get(surface);
+      if (!resolution) {
+        errors.push(`screen-mapping/README.md: UX Surface token unresolved: ${surface}`);
+        continue;
+      }
+      const owners = [...resolution.owners.matchAll(/`([^\`]+)`/g)].map((m) => m[1]);
+      if (!owners.length) errors.push(`screen-mapping/README.md: Surface token has no owner: ${surface}`);
+      for (const owner of owners) {
+        if (owner.startsWith("shell:")) {
+          if (!shellSet.has(owner)) errors.push(`screen-mapping/README.md: Surface ${surface} references unknown shell ${owner}`);
+        } else if (!currentRouteSet.has(owner)) {
+          errors.push(`screen-mapping/README.md: Surface ${surface} references unknown route ${owner}`);
+        }
+      }
+    }
+
+    for (const phrase of [
+      "CURRENT USER_SCREEN routes = 86",
+      "baseline UX capabilities = 432",
+      "distinct UX Surface tokens = 170",
+      "screen routes with no UX mapping = 0",
+      "UX Surface tokens with no route/shell resolution = 0",
+      "Q-LIST(q,event,sort,page,view)",
+      "Q-USER-PAGED(worksPage,collabPage)",
+      "RA-BASE",
+      "P-MANAGE",
+      "P-ADMIN",
+      "Optimization blockers requiring frontend change: **0**",
+      "Production mutation: none",
+    ]) {
+      if (!screenMapping.includes(phrase)) errors.push(`screen-mapping/README.md: required mapping invariant missing: ${phrase}`);
+    }
+  }
 
   // MIG-0003 Server Action completeness: real code <-> ledger.
   const serverActions = read("docs/migration/server-actions/README.md");
@@ -626,12 +779,13 @@ if (errors.length === 0) {
     "docs/migration/static-delivery/README.md",
     "docs/migration/auth/README.md",
     "docs/migration/background-jobs/README.md",
+    "docs/migration/screen-mapping/README.md",
   ]) {
     if (!docMap.includes("`" + canonical + "`")) errors.push(`DOC_MAP.md: canonical source missing: ${canonical}`);
   }
 
   // Shared protocol must force Git, requirements, quality and visual-source rules.
-  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md", "background-jobs/README.md"]) {
+  for (const canonical of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "CURRENT_ROUTES.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md", "background-jobs/README.md", "screen-mapping/README.md"]) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
@@ -648,7 +802,7 @@ if (errors.length === 0) {
   }
 
   const antigravityRule = read(".agents/rules/flamenode-project.md");
-  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md", "background-jobs/README.md"]) {
+  for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md", "background-jobs/README.md", "screen-mapping/README.md"]) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
 
@@ -668,4 +822,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, measured CPU/1102 baseline, static/visibility baseline, auth/permission baseline, Queue/Cron/background baseline, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");
+console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, measured CPU/1102 baseline, static/visibility baseline, auth/permission baseline, Queue/Cron/background baseline, 86-screen UX/FN mapping, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");

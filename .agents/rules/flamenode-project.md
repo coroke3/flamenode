@@ -10,7 +10,7 @@ Mandatory sources include:
 - `docs/migration/GIT_WORKFLOW.md`
 - `docs/migration/PRODUCT_REQUIREMENTS.md`
 - `docs/migration/CODE_QUALITY.md`
-- relevant `CURRENT_ROUTES.md` / `FRONTEND_FEATURES.md` / `frontend/*.md`
+- relevant `CURRENT_ROUTES.md` / `FRONTEND_FEATURES.md` / `frontend/*.md` / `docs/migration/screen-mapping/README.md`
 - relevant `FUNCTION_INVENTORY.md` / `functions/*.md`
 - `BACKEND_OPTIMIZATION.md` for backend work
 - `docs/migration/server-actions/README.md` for Server Action migration/audit work
