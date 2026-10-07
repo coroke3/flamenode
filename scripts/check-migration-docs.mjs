@@ -514,7 +514,7 @@ if (errors.length === 0) {
     "`rebuild_succeeded_awaiting_done_mark`",
     "`youtube_sync_pending`",
     "`youtube_playlist_sync`",
-    "platform DLQ has no direct consumer",
+    "Platform DLQ has no direct consumer",
     "Optimization blockers requiring frontend change: **0**",
     "Production mutation: none",
   ]) {
