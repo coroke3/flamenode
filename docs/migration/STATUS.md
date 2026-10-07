@@ -327,14 +327,22 @@ Rollback:
 
 - revert PR #246 squash commit; production rollback action is unnecessary because MIG-0010 is documentation/checker-only
 
+
+## MIG-0011 checkpoint merged before completion
+
+- Progress saved in `gap-scan/CHECKPOINT.md`.
+- MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
+- Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
+- Last completed task remains MIG-0010 / PR #246.
+
 # Next task claim template
 
 For MIG-0011 the writer records before work:
 
 ```text
 Task: MIG-0011
-Owner: claude | codex | antigravity | other
-State: READY -> IN_PROGRESS
+Owner: chatgpt
+State: IN_PROGRESS
 Branch: migration/mig-0011-inventory-consolidation-gap-scan
 PR: pending
 Scope: full 86/432/136 consolidation, orphan/unknown=0 scan, requirements divergence, duplicate/obsolete processing and optimization blocker disposition
