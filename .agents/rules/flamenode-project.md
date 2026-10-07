@@ -17,6 +17,7 @@ Mandatory sources include:
 - `docs/migration/route-handlers/README.md` for Route Handler/API migration/audit work
 - `docs/migration/cloudflare/TOPOLOGY.md` for Cloudflare Worker/ingress/binding/build/job migration/audit work
 - `docs/migration/cloudflare/PERFORMANCE_BASELINE.md` for CPU/1102/request/PoC performance migration/audit work
+- `docs/migration/static-delivery/README.md` for static artifact/alias/visibility/fallback/repair migration/audit work
 - `UI_REFERENCE.md` for visual work
 
 Rules:
