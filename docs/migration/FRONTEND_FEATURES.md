@@ -37,8 +37,8 @@ Final disposition:
 
 | State | Count |
 | --- | ---: |
-| `CURRENT_VERIFIED` | 404 |
-| `CURRENT_DIVERGENCE` | 7 |
+| `CURRENT_VERIFIED` | 405 |
+| `CURRENT_DIVERGENCE` | 6 |
 | `MERGED_INTO_OTHER` | 17 |
 | `OBSOLETE` | 4 |
 | `REQUIREMENT_ONLY` | 0 |
