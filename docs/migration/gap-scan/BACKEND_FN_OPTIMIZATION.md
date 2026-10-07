@@ -372,15 +372,15 @@ CURRENT code still contains permission resolvers that union all approved linked 
 8. Do not silently fall back from Active X to another approved linked X for an X-scoped mutation. Expose the eligible X as a switch candidate and require an explicit switch by default.
 9. Account-wide discovery/read models may aggregate linked X identities only when the contract names that behavior explicitly; aggregated visibility must never become mutation authority.
 
-## Product decisions still requiring explicit instruction before implementation
+## Confirmed TARGET identity decisions
 
-Active-X-first is now the TARGET default. The following details should be decided explicitly before the schema/runtime cutover so implementation agents do not infer product behavior.
+The user explicitly confirmed Active-X-first including bookmark/save. These are no longer open product questions for the migration.
 
-| Decision | Recommended default | Why it matters |
+| Decision | Confirmed TARGET | Why it matters |
 | --- | --- | --- |
-| like identity | Active X | public/social interaction naturally follows the acting X; one X should produce at most one like per video. |
-| bookmark/save identity | **explicitly confirm**. Current TARGET groups it with Active X, but Auth User ownership is also defensible for a private personal collection. | If one X is managed by multiple Auth Users, Active-X ownership makes bookmarks shared between those managers. |
-| shared X with multiple Auth Users | X-scoped interaction/ownership state is shared; retain acted_by_auth_user_id/audit provenance | otherwise “Active X is canonical” and per-account state contradict each other. |
+| like identity | **Active X** | public/social interaction follows the acting X; one X produces at most one like per video. |
+| bookmark/save identity | **Active X** | bookmark is X-scoped, not Auth-User-scoped. If one X is managed by multiple Auth Users, those managers intentionally see the same bookmark state while acting as that X. |
+| shared X with multiple Auth Users | X-scoped interaction/ownership state is shared; retain acted_by_auth_user_id/audit provenance | preserves a single X canonical state while keeping authenticated provenance. |
 | permission through inactive linked X | require explicit Active X switch; no silent fallback | prevents actions being attributed to X-A while authority actually comes from X-B. |
 | deep link requiring another X | show an explicit switch-required state/action; do not silently auto-switch | avoids surprising global identity changes and makes audit intent clear. |
 | missing/rejected/stale Active X | block X-scoped mutation and request a valid approved Active X | selecting another linked X implicitly would defeat Active-X-first semantics. |
@@ -390,7 +390,7 @@ Active-X-first is now the TARGET default. The following details should be decide
 | admin/system exception | site-admin/security/account operations may be Auth-User-only; user-like X-scoped operations still bind Active X | avoids forcing artificial X attribution onto infrastructure/security actions. |
 | cutover/rollback | expand -> reconcile -> shadow/contract test -> cutover -> rollback window -> contract | identity/schema changes are too destructive for one-step replacement. |
 
-The highest-priority product confirmation is **bookmark scope**. Everything else above has a safe recommended default that is consistent with Active-X-first.
+No identity decision in this table remains pending for MIG-0011. Runtime/schema implementation still belongs to the later migration phase.
 
 ## Canonical source / storage audit
 
