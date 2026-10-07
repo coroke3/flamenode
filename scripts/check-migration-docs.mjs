@@ -234,7 +234,7 @@ if (errors.length === 0) {
     return acc;
   }, {});
   for (const state of validUxStates) {
-    const reported = Number(frontend.match(new RegExp(`\\| \\`${state}\\` \\| (\\d+) \\|`))?.[1]);
+    const reported = Number(frontend.match(new RegExp("\\\\| `" + state + "` \\\\| (\\\\d+) \\\\|"))?.[1]);
     const actual = uxStateCounts[state] ?? 0;
     if (!Number.isFinite(reported)) errors.push(`FRONTEND_FEATURES.md: ${state} final count is missing`);
     else if (reported !== actual) errors.push(`FRONTEND_FEATURES.md: ${state} reported=${reported}, actual=${actual}`);
