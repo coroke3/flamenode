@@ -14,6 +14,7 @@ Mandatory concepts:
 - `STATUS.md` = progress source of truth
 - `GIT_WORKFLOW.md` = branch/PR/merge source of truth
 - `CURRENT_ROUTES.md` = CURRENT user-visible routes
+- `screen-mapping/README.md` = CURRENT 86 screens + cross-route shells → UX/FN/permission/state/query/RA mapping
 - `FRONTEND_FEATURES.md` + `frontend/*.md` = granular `UX-*` behavior
 - `FUNCTION_INVENTORY.md` + `functions/*.md` = `FN-*` backend contracts
 - `server-actions/README.md` = CURRENT Server Action / inline action execution-unit evidence
