@@ -19,8 +19,8 @@ DEV_ONLY = 3
 SYSTEM_SURFACE = 6
 
 UX capabilities = 432
-CURRENT_VERIFIED = 404
-CURRENT_DIVERGENCE = 7
+CURRENT_VERIFIED = 405
+CURRENT_DIVERGENCE = 6
 MERGED_INTO_OTHER = 17
 OBSOLETE = 4
 REQUIREMENT_ONLY = 0
@@ -107,8 +107,8 @@ technical rendererは独立ユーザー機能ではない。論理URLのquery/re
 
 | State | Count | Meaning |
 | --- | ---: | --- |
-| `CURRENT_VERIFIED` | 404 | CURRENT code/test/route/action/APIまたはactive operational contractで確認済み |
-| `CURRENT_DIVERGENCE` | 7 | CURRENT実装は確認済みだが、今回確定したTARGET requirementと不一致 |
+| `CURRENT_VERIFIED` | 405 | CURRENT code/test/route/action/APIまたはactive operational contractで確認済み |
+| `CURRENT_DIVERGENCE` | 6 | CURRENT実装は確認済みだが、今回確定したTARGET requirementと不一致 |
 | `MERGED_INTO_OTHER` | 17 | capabilityは別owner surfaceへ統合済み。互換URLは必要に応じて維持 |
 | `OBSOLETE` | 4 | CURRENT productとして独立機能を提供しておらず、TARGETへ復活させない |
 | `REQUIREMENT_ONLY` | 0 | 今回はなし |
@@ -120,7 +120,6 @@ technical rendererは独立ユーザー機能ではない。論理URLのquery/re
 - `UX-VID-025` like toggle
 - `UX-VID-026` bookmark/save toggle
 - `UX-VID-027` interaction active/pending state
-- `UX-VID-028` login後interaction主体の成立条件
 - `UX-LIB-001` like library
 - `UX-LIB-002` bookmark library
 - `UX-LIB-008` like/bookmark playlist context
@@ -132,6 +131,8 @@ CURRENT evidence:
 - current contract testにもAuth User単位を固定するassertionがある。
 
 TARGETではこれを「CURRENTだから維持」と扱わない。migration実装時にActive X ownershipへreconcileする。production schema/code変更はこのPRでは行わない。
+
+`UX-VID-028` は未ログイン時のlogin prerequisite自体はTARGETでも維持されるため `CURRENT_VERIFIED`。login後のacting identity divergenceは `UX-VID-025..027` 側で扱う。
 
 ### MERGED_INTO_OTHER
 
@@ -358,7 +359,7 @@ Forbidden:
 
 - source tree `app/**/page.tsx`: 92 / classification rows: 92 / missing: 0 / stale: 0
 - route classes: VISUAL_SCREEN 74 / COMPAT_REDIRECT 9 / DEV_ONLY 3 / SYSTEM_SURFACE 6
-- UX: 432 unique 432 / CURRENT_VERIFIED 404 / CURRENT_DIVERGENCE 7 / MERGED_INTO_OTHER 17 / OBSOLETE 4
+- UX: 432 unique 432 / CURRENT_VERIFIED 405 / CURRENT_DIVERGENCE 6 / MERGED_INTO_OTHER 17 / OBSOLETE 4
 - `AUDIT_REQUIRED`: 0 / `CURRENT_OBSERVED`: 0
 - distinct UX Surface token: 170 / resolution rows: 170 / unresolved: 0 / unknown route/shell owner: 0
 - compat redirect destination unknown: 0
