@@ -10,27 +10,14 @@
 
 ## 2. チャプターと時間付きコメント
 
-### 正規方針
+### 正規方針（正本: チャプター連動モデル）
 
-- 正規テーブル名は `video_chapters`。
+- 正規テーブル名は `video_chapters` の単一テーブル。
 - `video_timestamps` は使わない。
-- コメントは `video_comments.chapter_id` で `video_chapters.id` に紐づける。
-- `video_chapters` はチャプター、時間付きコメント用マーカー、振り返り用マーカーをまとめて扱う。
-
-### 追加・変更が必要な定義
-
-- `video_comments.chapter_id text | null`
-- `video_comments.chapter_id` は `video_chapters.id` への FK。削除時は `ON DELETE SET NULL`。
-- `video_chapters.marker_kind text DEFAULT 'comment'`
-- `video_chapters.show_on_player_bar integer DEFAULT 0`
-- `video_chapters.order_index integer DEFAULT 0`
-
-### 既存カラムの扱い
-
-- 初期SQLの `video_chapters.chapter_time` は秒数としてそのまま使う。
-- 初期SQLの `video_chapters.chapter_label` は表示ラベルとしてそのまま使う。
-- 通常コメント由来のチャプターは `show_on_player_bar = 0`。
-- 再生バー上の点表示に使う明示的なチャプターは `marker_kind = 'chapter'`, `show_on_player_bar = 1`。
+- 独立コメント用 `video_comments` は `0021_slim_mvp_drop_unused_tables.sql` で削除済み（OBSOLETE）。新規作成・復活は行わない。
+- `video_chapters`（時間 `chapter_time`、ラベル `chapter_label`、補足メモ `note`）に、チャプターおよび時間付きコメントを集約する。
+- 投稿主体は承認済み Active X（`x_user_id`）に紐づける。
+- 初期SQLの `video_chapters.chapter_time`（秒数）、`video_chapters.chapter_label`（表示ラベル）を正本として扱う。
 
 ## 3. イベント編集許可者
 

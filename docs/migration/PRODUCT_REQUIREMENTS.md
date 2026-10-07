@@ -80,6 +80,23 @@ acting/content/interaction identity = Active X
 
 詳細なdomain別dispositionは `gap-scan/FRONTEND_REQUIREMENTS.md` を正本とする。
 
+#### Active X interaction 移行手順 (Migration Sequence)
+
+1. **Step 1: データスキーマ準備 (Schema Migration)**
+   - インタラクション（いいね・ブックマーク）の正本キーを `(video_id, x_user_id)` とし、`x_user_id` ベースのテーブル・インデックスを確立。
+   - 監査要件のため、実行元の Auth User は監査ログ（`actor_user_id`）で追跡する Dual Attribution 構造を維持。
+2. **Step 2: 既存データの引き継ぎ・バックフィル (Data Backfill)**
+   - 既存 `video_interactions_auth`（`auth_user_id` 単位）のデータを、各ユーザーの承認済みアクティブ X ID（`users.active_x_user_id`）へ紐づけてバックフィル。
+   - 承認済み X ID が未設定のユーザーのデータは退避テーブルへ保持し、X ID 連携完了時に自動反映。
+3. **Step 3: バックエンド・API 契約の切り替え (API Transition)**
+   - Hono API / アクション層において、セッションの Auth User を検証した上で、操作主体として承認された `active_x_user_id` を解決して書き込み・トグルを実行。
+   - 権限のない X ID による偽装をサーバ側で fail-closed 防御。
+4. **Step 4: フロントエンド・ライブラリ表示の更新 (UI Reconciliation)**
+   - `/dashboard/library` 等のライブラリ画面を「選択中の Active X に紐づく一覧」へ切り替え。
+   - ヘッダー等での Active X 切り替えと連動し、行動主体がどの名義であるかを視覚的に明示。
+5. **Step 5: 旧パスの段階廃止 (Deprecation & Cleanup)**
+   - 移行期間を経て、旧 `auth_user_id` 単位の書き込みパスを停止。整合性検証完了後に旧カラム/テーブルを安全に整理。
+
 ### Chapter/comment model
 CURRENTは独立した自由コメント欄ではなく、時間付きchapter/comment体験を中心にしている。MIG-0011 Frontend reconciliationではこのCURRENT modelをTARGET product behaviorとして採用し、historicalな独立free-comment requirementは`OBSOLETE`とする。
 

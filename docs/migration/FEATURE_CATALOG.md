@@ -15,10 +15,10 @@
 
 - フロントエンド `UX-*`: **432件**
 - バックエンド/domain/platform `FN-*`: **136件**
-- `app/**/page.tsx`: **92 route実装**
+- `app/**/page.tsx`: **90 route実装**
   - VISUAL_SCREEN: 74
   - COMPAT_REDIRECT: 9
-  - DEV_ONLY: 3
+  - DEV_ONLY: 1
   - SYSTEM_SURFACE: 6
 - Server Action execution units: 110
 - Route Handler HTTP methods: 33

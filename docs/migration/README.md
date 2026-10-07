@@ -30,7 +30,7 @@ UIは全面的に作り直すが、visual redesignを既存機能の削除理由
 
 - public閲覧からrequest-time SSRを原則排除する
 - public→non-publicのfail-closed visibilityを維持する
-- CURRENT `app/**/page.tsx` 92 route実装（74 visual / 9 compat redirect / 3 dev / 6 system）を分類・追跡する
+- CURRENT `app/**/page.tsx` 90 route実装（74 visual / 9 compat redirect / 1 dev / 6 system）を分類・追跡する
 - 初期432 `UX-*` frontend observable capabilitiesを追跡し、後続監査で不足分を追加する
 - `FN-*` backend/domain/platform契約を別ledgerで追跡する
 - UX/FNをmany-to-manyで結び、画面存在=機能存在と誤認しない
@@ -202,35 +202,35 @@ CURRENTは移行完了までrollback targetとして残す。
         fast-jobs       content-jobs       sync-jobs
 ```
 
-## Public
+## Public（公開閲覧画面）
 
-- Astro static output / SSG
-- React integration
-- React Islands only for runtime interactivity
-- request-time SSRは禁止をdefaultとする
-- HTML generationはbuild-time中心
+- Astro による静的アセット出力 / SSG
+- React 統合（React Islands による動的対話機能の提供）
+- クライアント対話性が必要な部分のみ React Islands で実行
+- リクエスト時 SSR は原則禁止（デフォルト不可）
+- HTML 生成はビルド時（または非同期生成時）に集中
 
-## Private UI
+## Private UI（管理・マイページ・登録画面）
 
-- React + Vite SPA
-- React Router
-- TanStack Query等は必要なserver stateに限定
-- dashboard / entry / manage / adminはSSRしない
+- React + Vite による SPA (Single Page Application)
+- React Router によるクライアントサイドルーティング
+- TanStack Query 等は必要なサーバー状態管理に限定
+- dashboard / entry / manage / admin 等の管理・編集画面は SSR しない
 
 ## API
 
 - Hono
-- shared Zod/contracts
-- bounded synchronous work
-- heavy generation/aggregation/syncはQueue/backgroundへ
+- 共有 Zod スキーマによる型安全な入出力契約
+- 同期的な HTTP レスポンス内の処理量は有界（軽量・短時間）に制限
+- 重い生成処理・集約・同期処理は Queue / バックグラウンド Worker へ委譲
 
-## Data / jobs
+## Data / jobs（データおよび非同期ジョブ）
 
-- D1 canonical
-- R2 projection/delivery
-- KV bounded cache/state where appropriate
-- Queue background processing
-- existing background Worker splitを原則維持
+- D1: 正本データベース（Canonical DB）
+- R2: 公開プロジェクション／静的アセット配信層
+- KV: 適切な範囲での一時キャッシュ／状態保持
+- Queue: バックグラウンド非同期処理
+- 既存のバックグラウンド Worker 分割（fast-jobs / content-jobs / sync-jobs）を原則維持
 
 ---
 

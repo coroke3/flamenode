@@ -178,9 +178,6 @@ These rows own legacy/deep-link URL contracts, not independent visual screens.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | System | `/dev/ui-surfaces` | UX-SYS-003 | FN-PLAT-012 | P-DEV-CURRENT | S-SYSTEM | Q-DIRECT | RA-BASE | dev-only / migration disposition | CURRENT_MAPPED |
 
-| Dev | `/dev/redesign` | N/A — fixture-only old mock | N/A | P-DEV-CURRENT | S-SYSTEM | Q-DIRECT | RA-BASE | no TARGET visual authority | DEV_ONLY_MAPPED |
-| Dev | `/dev/redesign/mock/[id]` | N/A — fixture-only old mock | N/A | P-DEV-CURRENT | S-SYSTEM | Q-DIRECT | RA-BASE | no TARGET visual authority | DEV_ONLY_MAPPED |
-
 ## SYSTEM_SURFACE page mapping
 
 | Group | Route | Required local UX | Required local FN | Permission | Dynamic state | URL/query/history | Responsive/a11y | TARGET | State |

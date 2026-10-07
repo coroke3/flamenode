@@ -53,7 +53,7 @@ Next: MIG-0012 Phase 0 Gate
 
 | Surface | Baseline enumerated | Detailed audited / final disposition | Parity verified | Phase 0 target |
 | --- | ---: | ---: | ---: | --- |
-| CURRENT `app/**/page.tsx` routes | 92 | 92 classified: 74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 3 DEV_ONLY / 6 SYSTEM_SURFACE | n/a | source route分類漏れ 0 |
+| CURRENT `app/**/page.tsx` routes | 90 | 90 classified: 74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 1 DEV_ONLY / 6 SYSTEM_SURFACE | n/a | source route分類漏れ 0 |
 | Frontend `UX-*` capabilities | 432 | 405 CURRENT_VERIFIED / 6 CURRENT_DIVERGENCE / 17 MERGED_INTO_OTHER / 4 OBSOLETE | 0 | orphan/unverified/disposition漏れ 0 |
 | UX Surface ownership | 170 distinct Surface tokens | 170 route/shell owner resolved | n/a | unresolved owner 0 |
 | Backend/domain/platform `FN-*` | 136 | 131 CURRENT_VERIFIED / 2 CURRENT_DIVERGENCE / 2 MERGED_INTO_OTHER / 1 TARGET_REDESIGN_REQUIRED | 0 | DETAIL_AUDIT_REQUIRED 0 |
@@ -131,7 +131,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 
 ## Phase 0 Gate
 
-- [x] CURRENT 92 page routesを74 visual / 9 compat redirect / 3 dev / 6 systemへ分類
+- [x] CURRENT 90 page routesを74 visual / 9 compat redirect / 1 dev / 6 systemへ分類
 - [x] initial frontend UX baseline expanded to 432 granular capabilities
 - [x] frontend `UX-*` and backend `FN-*` separated as many-to-many ledgers
 - [x] CURRENT technical compatibility routes separated from user-visible features
