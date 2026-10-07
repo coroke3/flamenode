@@ -7,6 +7,7 @@ For any platform/UI migration work, `/flamenode-migration`, or code intended for
 Mandatory sources include:
 
 - `docs/migration/STATUS.md`
+- `docs/migration/FEATURE_CATALOG.md`
 - `docs/migration/GIT_WORKFLOW.md`
 - `docs/migration/PRODUCT_REQUIREMENTS.md`
 - `docs/migration/CODE_QUALITY.md`
@@ -27,6 +28,7 @@ Rules:
 - Do not create a separate Antigravity migration process or progress ledger.
 - One migration writer per MIG task; obey branch/PR/squash workflow.
 - Preserve user-visible UX, functions, permissions, visibility, audit and side effects by default.
+- Before migration work, use `FEATURE_CATALOG.md` to identify the complete affected capability set and add any newly discovered CURRENT capability before implementation.
 - Backend implementation may be redesigned/commonized only when semantics remain correct and clearer.
 - Do not optimize for line count.
 - Code must satisfy the professional-quality standard in `CODE_QUALITY.md`.
