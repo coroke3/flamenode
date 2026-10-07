@@ -224,7 +224,7 @@ Frontend ledgersの `Surface` tokenを以下でroute/shellへ解決する。MIG-
 | --- | --- | --- |
 | `.../audience` | `/manage/events/[id]/audience` | UX-MNG-011..012 |
 | `.../edit` | `/manage/events/[id]/edit` | UX-MNG-013..019 |
-| `.../review` | `/manage/events/[id]/review` | UX-MNG-020..026 |
+| `.../review` | `/manage/events/[id]/videos`, `/manage/events/[id]/review` | UX-MNG-020..026 |
 | `.../slots` | `/manage/events/[id]/slots` | UX-MNG-027..036 |
 | `.../staff` | `/manage/events/[id]/staff` | UX-MNG-037..043 |
 | `.../videos` | `/manage/events/[id]/videos` | UX-MNG-044..045 |
@@ -247,15 +247,15 @@ Frontend ledgersの `Surface` tokenを以下でroute/shellへ解決する。MIG-
 | `/admin/event-groups/[id]/edit` | `/admin/event-groups/[id]/edit` | UX-ADM-027 |
 | `/admin/event-groups/new` | `/admin/event-groups/new` | UX-ADM-026 |
 | `/admin/events` | `/admin/events` | UX-ADM-029 |
-| `/admin/events/[id]` | `/admin/events/[id]` | UX-ADM-030 |
-| `/admin/events/[id]/edit` | `/admin/events/[id]/edit` | UX-ADM-032 |
-| `/admin/events/[id]/slots` | `/admin/events/[id]/slots` | UX-ADM-034 |
-| `/admin/events/[id]/staff` | `/admin/events/[id]/staff` | UX-ADM-035 |
+| `/admin/events/[id]` | `/manage/events/[id]`, `/admin/events/[id]` | UX-ADM-030 |
+| `/admin/events/[id]/edit` | `/manage/events/[id]/edit`, `/admin/events/[id]/edit` | UX-ADM-032 |
+| `/admin/events/[id]/slots` | `/manage/events/[id]/slots`, `/admin/events/[id]/slots` | UX-ADM-034 |
+| `/admin/events/[id]/staff` | `/manage/events/[id]/staff`, `/admin/events/[id]/staff` | UX-ADM-035 |
 | `/admin/events/new` | `/admin/events/new` | UX-ADM-031 |
 | `/admin/events/templates` | `/admin/events/templates` | UX-ADM-038 |
 | `/admin/health` | `/admin/health` | UX-ADM-041..042 |
 | `/admin/health/integrity` | `/admin/health/integrity` | UX-ADM-043 |
-| `/admin/history` | `/admin/history` | UX-ADM-019 |
+| `/admin/history` | `/admin/audit`, `/admin/history` | UX-ADM-019 |
 | `/admin/import` | `/admin/import` | UX-ADM-049..052 |
 | `/admin/moderation` | `/admin/moderation` | UX-ADM-053..056 |
 | `/admin/notifications` | `/admin/notifications` | UX-ADM-057..060 |
@@ -298,9 +298,9 @@ Frontend ledgersの `Surface` tokenを以下でroute/shellへ解決する。MIG-
 | `/event/[id]` | `/event/[id]` | UX-EVENT-006..012 |
 | `/event/[id]/release` | `/event/[id]/release` | UX-EVENT-017..019 |
 | `/event/[id]/slots` | `/event/[id]/slots` | UX-EVENT-013..016 |
-| `/groups` | `/groups` | UX-EVENT-020 |
-| `/groups*` | `/groups`, `/groups/[slug]` | UX-EVENT-024 |
-| `/groups/[slug]` | `/groups/[slug]` | UX-EVENT-021..023 |
+| `/groups` | `/event`, `/groups` | UX-EVENT-020 |
+| `/groups*` | `/event`, `/groups`, `/groups/[slug]` | UX-EVENT-024 |
+| `/groups/[slug]` | `/event`, `/groups/[slug]` | UX-EVENT-021..023 |
 | `/list` | `/list` | UX-DISC-001, UX-DISC-003..009 |
 | `/list?q=` | `/list` | UX-DISC-002 |
 | `/maintenance` | `/maintenance` | UX-SYS-001..002 |
@@ -329,7 +329,7 @@ Frontend ledgersの `Surface` tokenを以下でroute/shellへ解決する。MIG-
 | `all frontend` | `shell:ALL` | UX-GLOBAL-020..022 |
 | `announcements` | `/admin/announcements`, `/admin/announcements/[id]/edit`, `/admin/announcements/new` | UX-ADM-006..007 |
 | `audit detail` | `/admin/audit/[id]` | UX-ADM-013..014 |
-| `audit/history` | `/admin/audit`, `/admin/audit/[id]`, `/admin/history` | UX-ADM-020 |
+| `audit/history` | `/admin/audit`, `/admin/history` | UX-ADM-020 |
 | `auth complete/entry` | `/auth/complete`, `/entry` | UX-AUTH-002 |
 | `auth flow` | `shell:AUTH_FLOW` | UX-AUTH-003 |
 | `auth/private layout` | `shell:PRIVATE` | UX-GLOBAL-018 |
@@ -356,7 +356,7 @@ Frontend ledgersの `Surface` tokenを以下でroute/shellへ解決する。MIG-
 | `global/header` | `shell:ALL` | UX-GLOBAL-007 |
 | `header/private routes` | `shell:PUBLIC_HEADER`, `shell:PRIVATE` | UX-AUTH-005 |
 | `integrity` | `/admin/health/integrity` | UX-ADM-044 |
-| `manage event routes` | `/manage/events/[id]`, `/manage/events/[id]/audience`, `/manage/events/[id]/edit`, `/manage/events/[id]/review`, `/manage/events/[id]/slots`, `/manage/events/[id]/staff`, `/manage/events/[id]/videos`, `/manage/events/[id]/videos/[videoId]`, `/manage/events/[id]/youtube-playlist` | UX-MNG-010 |
+| `manage event routes` | `/manage/events/[id]`, `/manage/events/[id]/audience`, `/manage/events/[id]/edit`, `/manage/events/[id]/videos`, `/manage/events/[id]/review`, `/manage/events/[id]/slots`, `/manage/events/[id]/staff`, `/manage/events/[id]/videos/[videoId]`, `/manage/events/[id]/youtube-playlist` | UX-MNG-010 |
 | `manage layout` | `shell:MANAGE` | UX-MNG-008 |
 | `manage shell` | `shell:MANAGE` | UX-GLOBAL-031..033, UX-MNG-005..007 |
 | `not-found.tsx` | `shell:NOT_FOUND` | UX-GLOBAL-025 |
