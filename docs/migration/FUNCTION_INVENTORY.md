@@ -55,12 +55,30 @@ CURRENT/BASELINE
 - `BASELINE_KNOWN`: 存在確認済み
 - `DETAIL_AUDIT_REQUIRED`: input/auth/effect/test棚卸し未完
 - `CURRENT_VERIFIED`: CURRENT contract棚卸し完了
+- `CURRENT_DIVERGENCE`: CURRENT contractは確認済みだが、明示されたTARGET requirementと不一致
+- `OBSOLETE`: CURRENT/TARGET双方で独立機能として不要。removal/互換条件を最終監査に記録
+- `MERGED_INTO_OTHER`: 独立backend責務を持たず、別FN/domainへ統合
+- `TARGET_REDESIGN_REQUIRED`: CURRENTは確認済みだがTARGET service/schema境界の再設計が必要
 - `MIGRATION_IN_PROGRESS`: target実装中
 - `BRIDGED`: legacy/new共存
 - `PARITY_VERIFIED`: target parity確認済み
 - `REMOVAL_PROPOSED`: 削除提案中
 - `REMOVED_APPROVED`: 明示承認済み削除
 - `BLOCKED`: parity判断不能
+
+## TARGET identity priority
+
+MIG-0011以降のTARGETでは、Xに紐づくdomain identityを次の順序で扱う。
+
+- Auth User = authentication/account/security principal。
+- Active X = default X-scoped domain principal。acting/content/interaction identityもActive X。
+- like / bookmark / save はすべてActive X所有。複数Auth Userが同じXを管理する場合も、そのXのinteraction stateを共有する。
+- X-scoped permission = Active X first。D1上でActive Xが当該Auth Userのapproved linkであることを毎回server-sideで検証する。
+- approved linked X一覧 = link validation / switch candidate / 明示されたaccount-wide discovery用。inactive Xの権限をActive Xへ暗黙に貸さない。
+- 権限が別のlinked Xにしかない場合は、TARGETでは原則として明示的なActive X切替を要求する。admin/systemまたは明示されたaccount-wide flowだけを例外にする。
+- banned/terms/site role/Discord delivery/account linking等のaccount/security責務はAuth Userのまま。anonymous view telemetryもActive X化しない。
+
+`auth/README.md` はMIG-0008で検証したCURRENT正本なので、このTARGET定義のために過去事実を書き換えない。CURRENTのall-approved-linked-X permission behaviorとTARGETのActive-X-first behaviorの差は移行時に明示的に解消する。
 
 ## Domain ledgers
 
@@ -233,3 +251,7 @@ CURRENT実装を新frameworkへ機械翻訳しない。
 - unresolved documented-vs-current divergence
 
 frontend behavior変更が必要な最適化は`BACKEND_OPTIMIZATION.md`のblocker formatで具体的影響を示し、承認まではCURRENT behavior維持をdefaultとする。
+
+## MIG-0011 backend final audit
+
+Backend / domain / processing の最終監査は [gap-scan/BACKEND_FN_OPTIMIZATION.md](gap-scan/BACKEND_FN_OPTIMIZATION.md) を正本とする。MIG-0011並行作業中は `STATUS.md` をwriter lane間で更新せず、FN state/countは本ファイル配下の4 ledgerからderiveする。

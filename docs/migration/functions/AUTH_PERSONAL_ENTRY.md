@@ -26,24 +26,24 @@ AuthはPhase 8までproduction source of truthをCURRENT Auth.jsへ残す。Pers
 
 | ID | Existing function | Main surfaces | Critical contract | State |
 | --- | --- | --- | --- | --- |
-| FN-PER-001 | dashboardで必要作業/作品状態を見る | `/dashboard` | own/related data only | DETAIL_AUDIT_REQUIRED |
-| FN-PER-002 | 作品編集 | `/dashboard/edit/[id]`, manage-video/updateVideo | ownership/collab/event privilege | DETAIL_AUDIT_REQUIRED |
-| FN-PER-003 | 共同編集権限管理 | permissions page, video-collab-perms | owner/permission parity | DETAIL_AUDIT_REQUIRED |
-| FN-PER-004 | library閲覧 | `/dashboard/library` | authenticated data | DETAIL_AUDIT_REQUIRED |
-| FN-PER-005 | user settings | `/dashboard/settings` | profile/X/session interactions | DETAIL_AUDIT_REQUIRED |
-| FN-PER-006 | personal YouTube playlist確認 | `/dashboard/youtube-playlists` | quota/external state | DETAIL_AUDIT_REQUIRED |
-| FN-PER-007 | X ID登録/変更/申請 | settings/xid actions | approval/link constraints | DETAIL_AUDIT_REQUIRED |
+| FN-PER-001 | dashboardで必要作業/作品状態を見る | `/dashboard` | own/related data only | CURRENT_VERIFIED |
+| FN-PER-002 | 作品編集 | `/dashboard/edit/[id]`, manage-video/updateVideo | ownership/collab/event privilege | CURRENT_VERIFIED |
+| FN-PER-003 | 共同編集権限管理 | permissions page, video-collab-perms | owner/permission parity | CURRENT_VERIFIED |
+| FN-PER-004 | library閲覧 | `/dashboard/library` | TARGETのlike/bookmark/saveはActive X scoped、切替時に再取得 | CURRENT_DIVERGENCE |
+| FN-PER-005 | user settings | `/dashboard/settings` | profile/X/session interactions | CURRENT_VERIFIED |
+| FN-PER-006 | personal YouTube playlist確認 | `/dashboard/youtube-playlists` | quota/external state | MERGED_INTO_OTHER |
+| FN-PER-007 | X ID登録/変更/申請 | settings/xid actions | approval/link constraints | CURRENT_VERIFIED |
 
 ## Entry / submission / slot
 
 | ID | Existing function | Main surfaces | Critical contract | State |
 | --- | --- | --- | --- | --- |
-| FN-ENT-001 | entry入口で参加/投稿方法を判断 | `/entry` | auth/event/slot state | DETAIL_AUDIT_REQUIRED |
-| FN-ENT-002 | slot確保/状態管理 | slot actions | capacity/duplicate/auth | DETAIL_AUDIT_REQUIRED |
-| FN-ENT-003 | slot付き作品提出 | `/entry/slotted`, submitSlotVideo | deadline/slot ownership | DETAIL_AUDIT_REQUIRED |
-| FN-ENT-004 | 通常作品投稿 | `/entry/unslotted`, createFreeVideo | duplicate/input/visibility defaults | DETAIL_AUDIT_REQUIRED |
-| FN-ENT-005 | YouTube quick input/metadata取得 | entry/video | duplicate detection/quota | DETAIL_AUDIT_REQUIRED |
-| FN-ENT-006 | custom question回答 | entry/event | event schema/validation | DETAIL_AUDIT_REQUIRED |
+| FN-ENT-001 | entry入口で参加/投稿方法を判断 | `/entry` | auth/event/slot state | CURRENT_VERIFIED |
+| FN-ENT-002 | slot確保/状態管理 | slot actions | capacity/duplicate/auth | CURRENT_VERIFIED |
+| FN-ENT-003 | slot付き作品提出 | `/entry/slotted`, submitSlotVideo | deadline/slot ownership | CURRENT_VERIFIED |
+| FN-ENT-004 | 通常作品投稿 | `/entry/unslotted`, createFreeVideo | duplicate/input/visibility defaults | CURRENT_VERIFIED |
+| FN-ENT-005 | YouTube quick input/metadata取得 | entry/video | duplicate detection/quota | CURRENT_VERIFIED |
+| FN-ENT-006 | custom question回答 | entry/event | event schema/validation | CURRENT_VERIFIED |
 
 ## Audit expansion template
 
