@@ -332,12 +332,20 @@ This is the orphan/final-state completeness index. Every FN in the four canonica
 
 ## Active X backend migration assessment
 
-TARGET requirement for this audit overrides the older checkpoint direction for interaction ownership:
+TARGET requirement for this audit overrides the older checkpoint direction for interaction ownership and makes Active X the default X-scoped domain principal.
 
-- authentication principal = Auth User
+### TARGET identity priority (normative)
+
+- authentication/account/security principal = Auth User
+- default X-scoped domain principal = Active X
 - acting/content/interaction identity = Active X
+- X-scoped permission resolution = Active X first
 
 Auth User remains the security/account/session principal. Active X is **not** allowed to replace session, banned state, terms acceptance, admin role, or the server-side account-to-X approval/link check.
+
+The approved linked X set is authoritative for link validation, switch candidates and explicitly account-wide discovery. It is **not** the default acting identity. A non-active linked X must not silently lend its X-scoped permission to an operation attributed to Active X. If the required permission exists only through another approved linked X, TARGET should require an explicit Active X switch by default; only a separately named account-wide/admin/system flow may bypass that rule.
+
+CURRENT code still contains permission resolvers that union all approved linked X IDs. That behavior remains important CURRENT evidence, but it must not be copied into TARGET as an implicit cross-X permission fallback.
 
 | Capability | CURRENT identity key | TARGET identity key | Migration/backfill/index impact | API / permission impact |
 | --- | --- | --- | --- | --- |
@@ -346,11 +354,11 @@ Auth User remains the security/account/session principal. Active X is **not** al
 | chapter/comment | video_chapters.x_user_id; member chapter identity X | Active X / content X | already aligned; no backfill. Historical free-comment tables stay removed. | Auth User authorizes; command must bind actor Active X to chapter x_user_id. |
 | audit actor | actor_user_id required; actor_x_user_id optional; snapshot may resolve current users.active_x_user_id | Auth User + acting Active X when command has acting identity | schema largely exists; **service-boundary migration required**, historical backfill not reliable. Never rewrite old null actor X from current Active X. Snapshot builder should snapshot the explicitly supplied actor X, not a later/current user setting. | admin/security-only commands may legitimately have null actor X; acting/content commands should pass it. |
 | notifications | recipient_user_id is Auth User delivery principal; domain payload may carry content references | Auth User delivery principal + optional subject/actor X context | do not replace recipient auth ID. Add/standardize X context only where notification semantics are per-X. Backfill optional/null; dedupe keys may need subject X when the same auth user manages several X identities. | Discord/account delivery still resolves Auth User. X context must never authorize delivery. |
-| creator ownership | videos.creator_x_user_id + submitted_by_user_id Auth provenance | same split | already aligned; no backfill/index redesign required. | editing authorization resolves Auth User -> approved X + privilege mode; content owner remains X. |
-| collaboration | video_members.x_user_id + edit_granted_by_auth_user_id | same split | aligned. | delegate subject X; grant/revoke actor Auth User + acting X where applicable. |
-| event staff | event_staff.x_user_id + approved_by_auth_user_id | same split | aligned; event+x unique index already matches target. | Auth User is authorized through all approved linked X IDs; Active X can choose acting/display context but is not sole permission source. |
+| creator ownership | videos.creator_x_user_id + submitted_by_user_id Auth provenance | same storage split; Active X is the default acting owner identity | storage is aligned; authorization semantics still need Active-X-first cutover where current code accepts any approved linked X. | Auth User passes account/security checks; Active X must hold creator/collaborator/event privilege for an X-scoped edit. A non-active linked X is a switch candidate, not an implicit permission donor. |
+| collaboration | video_members.x_user_id + edit_granted_by_auth_user_id | same storage split; Active X is acting identity | subject/grantor storage is aligned; permission resolution must stop silently borrowing another linked X for Active-X-attributed mutations. | delegate subject is X; grant/revoke authenticates Auth User and uses Active X as acting X unless the flow is explicitly admin/account-wide. |
+| event staff | event_staff.x_user_id + approved_by_auth_user_id | same storage split; Active X is the default staff/acting identity | event+x unique index already matches target storage. CURRENT manage authorization unions all approved linked X IDs, so permission semantics require cutover. | Auth User authenticates; X-scoped event permission is resolved Active-X-first. Other approved linked X identities may be exposed for discovery/switching, but must not silently authorize an operation under the current Active X. Site-admin/account-wide flows are explicit exceptions. |
 | submissions | video creator X + submitted_by_user_id; slots/groups keep Auth reservation provenance + X/snapshot | same split | mostly aligned. Future cleanup may rename legacy reserved_by_user_id to explicit auth naming, but no semantic rewrite is needed. | submit/reserve requires Auth User security checks and appropriate Active X identity. |
-| Active X switch | users.active_x_user_id validated against approved account link | same | aligned; request-local identity context should invalidate/refetch Active-X-scoped reads. | current switcher emits event + router.refresh, which is sufficient foundation for like/library semantic refresh after backend migration. |
+| Active X switch | users.active_x_user_id validated against approved account link | same, promoted to the default X-scoped domain/permission principal | storage is aligned; request-local identity/authz context must invalidate/refetch Active-X-scoped reads and permissions. | current switcher emits event + router.refresh, which is a foundation only. TARGET consumers must recompute interaction state, X-scoped ownership/editability and event/manage permission after every switch. |
 
 ### Interaction migration guardrails
 
@@ -361,6 +369,8 @@ Auth User remains the security/account/session principal. Active X is **not** al
 5. Keep acted_by_auth_user_id/provenance so moderation/audit/security investigation can still identify the authenticated principal.
 6. app_like_count remains an aggregate on videos; migration must recompute/verify it from the target canonical interaction set before cutover.
 7. The visual button/tab structure does not need redesign, but state semantics after Active X switch do change and must be contract-tested.
+8. Do not silently fall back from Active X to another approved linked X for an X-scoped mutation. Expose the eligible X as a switch candidate and require an explicit switch by default.
+9. Account-wide discovery/read models may aggregate linked X identities only when the contract names that behavior explicitly; aggregated visibility must never become mutation authority.
 
 ## Canonical source / storage audit
 
@@ -371,7 +381,7 @@ Auth User remains the security/account/session principal. Active X is **not** al
 | KV | small bounded cache/diagnostic state | CostGuard mirror / wake-failure diagnostics are acceptable only as acceleration/diagnostic. D1 system/work state remains authoritative. |
 | Queue | doorbell | Current wake messages contain no recipient/video/event business payload. Keep it that way; D1 pending/due/lease state owns work. |
 | Cache API | acceleration only | May hold public projection responses but never visibility/authz/business truth. |
-| session/client | authentication hint/UI state only | Auth.js identifies the Auth User, then role/banned/terms/links/permissions are re-read/validated against D1. Client Active X state never authorizes a write by itself. |
+| session/client | authentication hint/UI state only | Auth.js identifies the Auth User; D1 revalidates role/banned/terms and the approved link for users.active_x_user_id. The D1-backed Active X becomes the default X-scoped domain/permission principal. Client state alone never authorizes a write, and inactive linked X identities do not silently lend mutation authority. |
 
 No current code path reviewed in the audited baseline requires promoting R2, KV, Queue message or client state to canonical business truth. The main identity divergence is instead **which D1 table/key is canonical for like/bookmark**.
 
@@ -379,10 +389,10 @@ No current code path reviewed in the audited baseline requires promoting R2, KV,
 
 | Optimization | Subject | Disposition | Frontend behavior change | Decision |
 | --- | --- | --- | --- | --- |
-| OPT-BE-001 | Request-local Account/Identity/Authz context | MERGE | NONE | React.cache/currentUser context already reduces reads; finish sharing linked X/approved X/management reads inside one request. Never cross-request cache authz. |
+| OPT-BE-001 | Request-local Account/Identity/Authz context | MERGE | NONE | Carry Auth User + authoritative Active X + approved-link validation + explicit account-wide discovery scope in one request-local context. Do not make the approved-X set the default permission principal and never cross-request cache authz. |
 | OPT-BE-002 | writeGuard / requireAdminWrite envelope | KEEP | NONE | Existing security boundary is useful. Share transport/auth preconditions, not domain permission flags. |
 | OPT-BE-003 | mutateWithAudit + CAS budget | KEEP | NONE | Atomic mutation+audit is a safety primitive; optimize batching/actor snapshot reads without weakening strict audit. |
-| OPT-BE-004 | ActorContext -> audit actor X | TARGET_REWRITE | NONE | Propagate Auth User + acting Active X explicitly; current optional actor_x coverage is incomplete. Historical null actor X remains null. |
+| OPT-BE-004 | ActorContext -> audit actor X | TARGET_REWRITE | NONE | Propagate Auth User + authoritative Active X explicitly for X-scoped commands; current optional actor_x coverage is incomplete. Historical null actor X remains null. Explicit admin/account-wide commands may carry no actor X. |
 | OPT-BE-005 | post-commit effect runner | KEEP | NONE | Keep explicit effect classes; visibility-critical publication is not generic best-effort. |
 | OPT-BE-006 | admin/manage video status transitions | MERGE | NONE | Share status transition domain core; role/permission/result/navigation adapters remain separate. |
 | OPT-BE-007 | event/video save/update plans | MERGE | NONE | Reuse validation/member/static plans while preserving slot transaction and section permission boundaries. |
@@ -425,7 +435,7 @@ No current code path reviewed in the audited baseline requires promoting R2, KV,
 | submitted-slot destructive release | slot/video state transition with explicit operator intent and notifications |
 | Discord account-link conflict | provider/link uniqueness and security principal ownership |
 | terms CAS/version lifecycle | acceptance/reaccept/version publication has security/legal state |
-| Active X switch | approved-link validation + account state + request refresh; acting identity switch, not permission shortcut |
+| Active X switch | approved-link validation + account state + request refresh; TARGET domain/permission scope switch, never an implicit cross-X permission shortcut |
 | last operable event owner | owner preset plus approved owner account link; SQL/CAS invariant |
 | creator-only permission delegation | video ownership/collaboration permission semantics differ from event/admin privilege |
 | visibility fence release | deny-first/release_pending/token CAS; publication safety critical |
@@ -458,7 +468,8 @@ Reason: PERFORMANCE_BASELINE has real web exceededCpu events and a web fetch p95
 **React/Vite SPA + bounded API**
 
 - no request-time React SSR for dashboard/entry/manage/admin;
-- API adapters resolve Auth User + request-local Identity/Authz context;
+- API adapters resolve Auth User + authoritative Active X + request-local Identity/Authz context;
+- Active X is the default principal for X-scoped queries/mutations; approved linked X identities are link-validation/switch/account-wide-discovery inputs, not silent mutation fallbacks;
 - domain commands/queries remain framework-neutral;
 - D1 query shape is bounded and measured; exact totals are not fetched unless product-required.
 
@@ -488,13 +499,19 @@ Public SSG, private SPA, bounded APIs, request-local auth context, D1 read-model
 
 ### Explicit TARGET identity divergence (not a performance blocker)
 
-**Active-X like/bookmark canonicalization: frontend behavior change = REQUIRED (semantic, not visual).**
+**Active-X-first domain identity: frontend behavior change = REQUIRED where the visible state/available action depends on X identity (semantic, not visual).**
 
-Affected capability IDs:
+The already-proven schema divergence is like/bookmark. In addition, CURRENT permission helpers that union all approved linked X IDs must be treated as CURRENT-only behavior for X-scoped actions. TARGET may keep account-wide discovery/listing where explicitly named, but an operation whose permission belongs to a non-active X should require an explicit switch by default rather than silently acting through that identity.
+
+**Active-X like/bookmark canonicalization remains the first mandatory data migration.**
+
+Affected capability IDs already proven by this audit:
 - FN-PUB-007
 - FN-PER-004
 - FN-AUTH-010 (switch event/refresh, already CURRENT_VERIFIED)
 - FN-X-005 (audit actor context)
+
+Authorization-bearing capabilities that must be revalidated during implementation include video edit/collaboration/chapter permissions and manage/event staff flows. Their CURRENT evidence may aggregate approved linked X identities; TARGET must resolve the acting permission against Active X or require an explicit switch. This is a migration implementation requirement, not permission to rewrite the CURRENT auth baseline document.
 
 Affected UX:
 - UX-VID-025..030
