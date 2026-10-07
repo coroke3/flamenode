@@ -14,6 +14,7 @@
 > Cloudflare CURRENT topology: [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)
 > Cloudflare CURRENT performance baseline: [`cloudflare/PERFORMANCE_BASELINE.md`](cloudflare/PERFORMANCE_BASELINE.md)
 > Auth / permission CURRENT baseline: [`auth/README.md`](auth/README.md)
+> Queue / Cron / jobs CURRENT baseline: [`background-jobs/README.md`](background-jobs/README.md)
 > Static/visibility CURRENT baseline: [`static-delivery/README.md`](static-delivery/README.md)
 
 ## Purpose
@@ -67,6 +68,9 @@ CURRENT measured CPU / 1102 / request evidence
 
 CURRENT auth/session/identity/permission evidence
   auth/README.md
+
+CURRENT Queue / Cron / background job evidence
+  background-jobs/README.md
 
 CURRENT static artifact / visibility delivery contract
   static-delivery/README.md
@@ -824,6 +828,7 @@ Auth:
 | `cloudflare/TOPOLOGY.md` | verified CURRENT Worker/ingress/binding/resource/build-deploy topology |
 | `cloudflare/PERFORMANCE_BASELINE.md` | measured CPU/resource-failure/request baseline + PoC budgets |
 | `auth/README.md` | Auth.js/session/linking/terms/Active X/permission/owner CURRENT baseline |
+| `background-jobs/README.md` | Queue/Cron/D1 work-state/retry/DLQ/recovery/idempotency CURRENT baseline |
 | `static-delivery/README.md` | artifact families/aliases/visibility fences/fallback/repair CURRENT contract |
 | `ROUTE_MATRIX.md` | route migration disposition |
 | `API_MATRIX.md` | Server Action/Route Handler/API disposition |
