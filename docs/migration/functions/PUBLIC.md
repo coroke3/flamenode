@@ -15,7 +15,7 @@ MIG-0002 / MIG-0010 で画面との対応を確定し、関連API/actionはMIG-0
 | FN-PUB-004 | 作品metadata/説明/credit/music表示 | `/[id]` | public DTO、SEO | CURRENT_VERIFIED |
 | FN-PUB-005 | 作品chapter表示 | `/[id]` | public/private境界 | CURRENT_VERIFIED |
 | FN-PUB-006 | view計測 | `/[id]` | 重複、集計、非同期副作用 | CURRENT_VERIFIED |
-| FN-PUB-007 | like等の作品interaction | `/[id]` | auth/匿名状態、idempotency | CURRENT_DIVERGENCE |
+| FN-PUB-007 | like/bookmark作品interaction | `/[id]` | TARGETはlike/bookmarkともActive X所有、auth/匿名状態、idempotency | CURRENT_DIVERGENCE |
 | FN-PUB-008 | viewer utility/private overlay | `/[id]` | private data leak禁止 | CURRENT_VERIFIED |
 | FN-PUB-009 | イベント一覧 | `/event` | public eventのみ | CURRENT_VERIFIED |
 | FN-PUB-010 | イベント詳細/作品一覧 | `/event/[id]` | visibility/stage | CURRENT_VERIFIED |
