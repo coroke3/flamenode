@@ -15,8 +15,8 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 ```text
 Current Phase: 0 — Baseline / Inventory
 Current Task: MIG-0011
-Current Owner: unassigned
-Task State: READY
+Current Owner: chatgpt
+Task State: IN_PROGRESS
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0010
@@ -119,7 +119,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0008 | Auth/session/permission baseline | DONE | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
 | MIG-0009 | Queue/Cron/background job baseline | DONE | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
 | MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | DONE | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
-| MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | READY | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
+| MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | IN_PROGRESS | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
 | MIG-0012 | Phase 0 Gate | BLOCKED | MIG-0006, MIG-0011 | independent review, rollback baseline, all Phase 0 invariants satisfied |
 
 ## Phase 0 Gate
