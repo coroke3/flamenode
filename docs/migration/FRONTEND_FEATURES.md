@@ -6,6 +6,7 @@
 > Route source: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
 > Backend/function source: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
 > Resolved screen/shell ownership: [`screen-mapping/README.md`](screen-mapping/README.md)
+> 全件を一か所で読む: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
 
 リデザイン + framework移行で「画面はあるが機能が消えた」を防ぐための**frontend observable behaviorの正本**。
 
