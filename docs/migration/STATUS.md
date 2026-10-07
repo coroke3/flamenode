@@ -5,6 +5,7 @@
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Git: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
+> 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
 > Frontend parity: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
 > Function parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
 
@@ -49,25 +50,30 @@ Next: MIG-0011
 
 # Inventory coverage
 
-| Surface | Baseline enumerated | Detailed audited | Parity verified | Phase 0 target |
+| Surface | Baseline enumerated | Detailed audited / final disposition | Parity verified | Phase 0 target |
 | --- | ---: | ---: | ---: | --- |
-| CURRENT USER_SCREEN routes | 86 | 86 CURRENT_MAPPED UX/FN/permission/state/query/RA | 0 | all required UX/FN mapped |
-| Frontend `UX-*` capabilities | 432 | 432 Surface-resolved to 86 screens / 16 shells | 0 | orphan/unverified/disposition漏れ 0 |
-| CURRENT technical compatibility routes | 4 | purpose/query baseline | n/a | replacement evidence before removal |
-| Backend/domain/platform `FN-*` | 136 | 33 CURRENT_VERIFIED | 0 | all required CURRENT contracts audited |
+| CURRENT `app/**/page.tsx` routes | 92 | 92 classified: 74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 3 DEV_ONLY / 6 SYSTEM_SURFACE | n/a | source route分類漏れ 0 |
+| Frontend `UX-*` capabilities | 432 | 405 CURRENT_VERIFIED / 6 CURRENT_DIVERGENCE / 17 MERGED_INTO_OTHER / 4 OBSOLETE | 0 | orphan/unverified/disposition漏れ 0 |
+| UX Surface ownership | 170 distinct Surface tokens | 170 route/shell owner resolved | n/a | unresolved owner 0 |
+| Backend/domain/platform `FN-*` | 136 | 131 CURRENT_VERIFIED / 2 CURRENT_DIVERGENCE / 2 MERGED_INTO_OTHER / 1 TARGET_REDESIGN_REQUIRED | 0 | DETAIL_AUDIT_REQUIRED 0 |
 | Server Actions | 34 modules / 106 exports + 4 inline = 110 | 110 CURRENT_VERIFIED | 0 | all execution units disposed |
 | Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
 | CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology + CPU/request + Queue/Cron/job semantics | 0 | bindings/routes/jobs fixed |
-| New UI visual source | HTML mock pending | n/a | n/a | registered in `UI_REFERENCE.md` before Phase 2 visual work |
+| Human-readable full feature catalog | 432 UX + 136 FN | canonical ledgersとcheckerで一致確認対象 | n/a | catalog drift 0 |
+| New UI visual source | HTML mock pending | `UI_REFERENCE.md = PENDING_HTML` | n/a | user HTML mock登録前にvisual targetを確定しない |
 
 Current FN state summary:
 
 ```text
-CURRENT_VERIFIED: 33
-DETAIL_AUDIT_REQUIRED: 103
+CURRENT_VERIFIED: 131
+CURRENT_DIVERGENCE: 2
+MERGED_INTO_OTHER: 2
+TARGET_REDESIGN_REQUIRED: 1
+DETAIL_AUDIT_REQUIRED: 0
 PARITY_VERIFIED: 0
 REMOVAL_PROPOSED: 0
 REMOVED_APPROVED: 0
+Total: 136
 ```
 
 Initial UX baseline:
@@ -81,8 +87,8 @@ frontend/MANAGE_ADMIN.md        167
 Total                           432
 ```
 
-432は最終上限ではない。MIG-0003/0004/0007/0008/0009/0010でobservable behaviorが新たに見つかれば追加する。
-MIG-0011完了までは「全機能棚卸し完了」と宣言しない。
+432は現在確認済みのCURRENT frontend baseline。以後コードから新たなobservable behaviorを発見した場合は、実装前にcanonical ledgerと `FEATURE_CATALOG.md` を同時更新する。
+MIG-0011は全件disposition済みだが、独立レビュー完了まではDONEにしない。
 
 Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・requirement reconciliation・optimization blocker assessmentが残る限りCLOSED。
 
@@ -124,7 +130,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 
 ## Phase 0 Gate
 
-- [x] CURRENT USER_SCREEN inventory fixed at 86
+- [x] CURRENT 92 page routesを74 visual / 9 compat redirect / 3 dev / 6 systemへ分類
 - [x] initial frontend UX baseline expanded to 432 granular capabilities
 - [x] frontend `UX-*` and backend `FN-*` separated as many-to-many ledgers
 - [x] CURRENT technical compatibility routes separated from user-visible features
@@ -137,19 +143,41 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [x] professional code-quality standard is mandatory
 - [x] all Server Action exports + inline actions inventoried (110 execution units / unclassified 0)
 - [x] all Route Handler methods inventoried (28 route files / 33 methods / unclassified 0)
-- [ ] all required FN functions CURRENT_VERIFIED or explicitly dispositioned
-- [x] all 86 screens mapped to required UX/FN IDs
+- [x] all 136 required FN functions CURRENT_VERIFIED or explicitly dispositioned
+- [x] all CURRENT visual/compat/dev/system surfaces and shells mapped to required UX/FN IDs
 - [x] all required UX capabilities have route/permission/backend/state dispositions
 - [x] all background jobs/Queues/Cron inventoried
 - [x] current Cloudflare topology fixed
 - [x] CPU/1102 baseline fixed
 - [x] visibility/static guarantees fully fixed
 - [x] auth/permission guarantees fully fixed
-- [ ] `REQUIREMENT_ONLY` / `CURRENT_DIVERGENCE` affecting migration resolved
-- [ ] backend optimization candidates intentionally validated/rejected
-- [ ] every optimization blocker has concrete frontend-impact disposition
-- [ ] production behavior unchanged by baseline work
-- [ ] rollback target commit/config fixed
+- [x] `REQUIREMENT_ONLY` / `CURRENT_DIVERGENCE` affecting migration explicitly dispositioned（Active X TARGETを含む）
+- [x] backend optimization candidates intentionally validated/rejected（27 OPT-BE dispositions）
+- [x] every optimization blocker has concrete frontend-impact disposition（performance/architecture UX-change blocker = 0; Active Xは別のTARGET semantic requirement）
+- [x] production behavior unchanged by baseline/inventory work
+- [x] rollback target fixed: PR #250 base `4eccae2fb95beabc2fb0055cf405df8b2da1ffd4`; docs/checker-only squash commit can be reverted
+
+---
+
+# MIG-0011 最終統合状況
+
+Frontend / Backend の分割監査は main に統合済み。
+
+- PR #248: Backend 136 FN最終監査 / optimization disposition
+- PR #249: Frontend 432 UX / 92 page route分類 / requirement reconciliation
+- PR #250: 人間向け全機能カタログ、agent protocol、STATUS、checkerの最終統合
+
+統合後の確定事項:
+
+- 432 UXは全件final disposition済み。
+- 136 FNは全件final disposition済み。DETAIL_AUDIT_REQUIRED = 0。
+- like / bookmark / save のTARGET所有主体はActive X。
+- 性能/architecture最適化のためにfrontend product behavior変更が必須となるblockerは0。
+- Active X interaction ownershipは性能都合ではなく、明示済みTARGET semantic requirement。
+- `docs/design-redesign/` は存在せず、移行入力として使用しない。
+- 新UIはユーザー提供HTML mockを `UI_REFERENCE.md` へ登録するまで `PENDING_HTML`。
+- Cloudflare CURRENT production topologyはread-only再確認済み: `flamenode-web` + fast/content/sync jobs、root/www Custom Domain、`flamenode_db`、`flamenode-storage`、3 wake Queue + 3 DLQ。production mutationは0。
+- MIG-0011の残条件はPR #250の独立レビューと最終validationのみ。
 
 ---
 
