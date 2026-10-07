@@ -160,12 +160,10 @@ app/**/page.tsx         92
 
 ## Legacy development routes — DEV_ONLY
 
-旧redesignはCURRENT treeには存在するがTARGET visual sourceではない。
+旧redesignはCURRENT treeから削除済みでありTARGET visual sourceではない。
 
 | Route | Current file | Class | Contract |
 | --- | --- | --- | --- |
-| `/dev/redesign` | `app/(redesign)/dev/redesign/page.tsx` | DEV_ONLY | fixture-only/noindex mock gallery |
-| `/dev/redesign/mock/[id]` | `app/(redesign)/dev/redesign/mock/[id]/page.tsx` | DEV_ONLY | fixture-only/noindex mock detail |
 
 ## Global surfaces
 

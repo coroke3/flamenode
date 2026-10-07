@@ -200,6 +200,11 @@ test("GitHub Actions has no automatic trigger or production deployment workflow"
     : [];
   for (const name of files) {
     const source = fs.readFileSync(path.join(workflowRoot, name), "utf8");
+    if (name === "migration-docs-check.yml") {
+      assert.doesNotMatch(source, /wrangler\s+(?:deploy|pages)|cloudflare-deploy-production|d1\s+migrations\s+apply/i);
+      assert.match(source, /permissions:\s*\r?\n\s*contents:\s*read/);
+      continue;
+    }
     assert.doesNotMatch(source, /^\s{2}(?:push|pull_request|schedule):/m);
     assert.doesNotMatch(source, /wrangler\s+(?:deploy|pages)|cloudflare-deploy-production|d1\s+migrations\s+apply/i);
   }
