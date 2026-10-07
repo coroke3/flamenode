@@ -233,3 +233,7 @@ CURRENT実装を新frameworkへ機械翻訳しない。
 - unresolved documented-vs-current divergence
 
 frontend behavior変更が必要な最適化は`BACKEND_OPTIMIZATION.md`のblocker formatで具体的影響を示し、承認まではCURRENT behavior維持をdefaultとする。
+
+## MIG-0011 backend final audit
+
+Backend / domain / processing の最終監査は [gap-scan/BACKEND_FN_OPTIMIZATION.md](gap-scan/BACKEND_FN_OPTIMIZATION.md) を正本とする。MIG-0011並行作業中は `STATUS.md` をwriter lane間で更新せず、FN state/countは本ファイル配下の4 ledgerからderiveする。
