@@ -27,6 +27,7 @@ const required = [
   "docs/migration/static-delivery/README.md",
   "docs/migration/auth/README.md",
   "docs/migration/background-jobs/README.md",
+  "docs/migration/gap-scan/BACKEND_FN_OPTIMIZATION.md",
   "docs/migration/screen-mapping/README.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
@@ -125,6 +126,7 @@ if (errors.length === 0) {
   const staticDeliveryBaseline = read("docs/migration/static-delivery/README.md");
   const authBaseline = read("docs/migration/auth/README.md");
   const backgroundJobsBaseline = read("docs/migration/background-jobs/README.md");
+  const backendFnOptimization = read("docs/migration/gap-scan/BACKEND_FN_OPTIMIZATION.md");
   const screenMapping = read("docs/migration/screen-mapping/README.md");
 
   // Progress/task integrity.
@@ -155,6 +157,10 @@ if (errors.length === 0) {
     "BASELINE_KNOWN",
     "DETAIL_AUDIT_REQUIRED",
     "CURRENT_VERIFIED",
+    "CURRENT_DIVERGENCE",
+    "OBSOLETE",
+    "MERGED_INTO_OTHER",
+    "TARGET_REDESIGN_REQUIRED",
     "MIGRATION_IN_PROGRESS",
     "BRIDGED",
     "PARITY_VERIFIED",
@@ -187,11 +193,94 @@ if (errors.length === 0) {
     acc[row.state] = (acc[row.state] ?? 0) + 1;
     return acc;
   }, {});
-  for (const state of ["CURRENT_VERIFIED", "DETAIL_AUDIT_REQUIRED", "PARITY_VERIFIED", "REMOVAL_PROPOSED", "REMOVED_APPROVED"]) {
-    const reported = Number(status.match(new RegExp(`^${state}:\\s*(\\d+)`, "m"))?.[1]);
-    const actual = stateCounts[state] ?? 0;
-    if (!Number.isFinite(reported)) errors.push(`STATUS.md: ${state} count is missing`);
-    else if (reported !== actual) errors.push(`STATUS.md: ${state} reported=${reported}, actual=${actual}`);
+
+  // MIG-0011 has parallel writer lanes. Backend/frontend lanes must not edit STATUS.md;
+  // the integration lane updates summary counts after both PRs land. Outside an active
+  // MIG-0011 checkpoint, STATUS counts still have to match the canonical ledgers.
+  const allowMig0011CheckpointStatusCounts =
+    currentTask === "MIG-0011" && taskState !== "DONE";
+  if (!allowMig0011CheckpointStatusCounts) {
+    for (const state of ["CURRENT_VERIFIED", "DETAIL_AUDIT_REQUIRED", "PARITY_VERIFIED", "REMOVAL_PROPOSED", "REMOVED_APPROVED"]) {
+      const reported = Number(status.match(new RegExp(`^${state}:\\s*(\\d+)`, "m"))?.[1]);
+      const actual = stateCounts[state] ?? 0;
+      if (!Number.isFinite(reported)) errors.push(`STATUS.md: ${state} count is missing`);
+      else if (reported !== actual) errors.push(`STATUS.md: ${state} reported=${reported}, actual=${actual}`);
+    }
+  }
+
+  const finalFunctionStates = new Set([
+    "CURRENT_VERIFIED",
+    "CURRENT_DIVERGENCE",
+    "OBSOLETE",
+    "MERGED_INTO_OTHER",
+    "TARGET_REDESIGN_REQUIRED",
+    "PARITY_VERIFIED",
+    "REMOVED_APPROVED",
+  ]);
+  if ((stateCounts.DETAIL_AUDIT_REQUIRED ?? 0) !== 0) {
+    errors.push(`function ledgers: DETAIL_AUDIT_REQUIRED=${stateCounts.DETAIL_AUDIT_REQUIRED ?? 0}, expected=0 after backend MIG-0011 audit`);
+  }
+  const nonFinalFunctions = functionRows.filter((row) => !finalFunctionStates.has(row.state));
+  if (nonFinalFunctions.length > 0) {
+    errors.push(`function ledgers: final disposition missing for ${nonFinalFunctions.map((row) => row.id).join(", ")}`);
+  }
+
+  // MIG-0011 backend final-audit completeness. Parse only the final 136 index so
+  // detailed 103-row evidence earlier in the document does not count as duplicates.
+  const finalIndexStart = backendFnOptimization.indexOf("## Final 136 FN disposition index");
+  const finalIndexEnd = backendFnOptimization.indexOf("## Active X backend migration assessment");
+  if (finalIndexStart < 0 || finalIndexEnd <= finalIndexStart) {
+    errors.push("BACKEND_FN_OPTIMIZATION.md: final 136 FN disposition index is missing");
+  } else {
+    const finalIndexText = backendFnOptimization.slice(finalIndexStart, finalIndexEnd);
+    const auditFnRows = [...finalIndexText.matchAll(/^\\|\\s*(FN-[A-Z]+-\\d{3})\\s*\\|\\s*([A-Z_]+)\\s*\\|\\s*$/gm)]
+      .map((match) => ({ id: match[1], state: match[2] }));
+    const auditFnIds = auditFnRows.map((row) => row.id);
+    const auditFnSet = new Set(auditFnIds);
+    const auditDupes = duplicateIds(auditFnIds);
+    if (auditDupes.length) errors.push(`BACKEND_FN_OPTIMIZATION.md: duplicate final-index FN IDs: ${auditDupes.join(", ")}`);
+    if (auditFnRows.length !== functionRows.length) {
+      errors.push(`BACKEND_FN_OPTIMIZATION.md: final-index rows=${auditFnRows.length}, expected=${functionRows.length}`);
+    }
+    for (const row of functionRows) {
+      if (!auditFnSet.has(row.id)) errors.push(`BACKEND_FN_OPTIMIZATION.md: orphan FN missing from final index: ${row.id}`);
+      const reported = auditFnRows.find((candidate) => candidate.id === row.id);
+      if (reported && reported.state !== row.state) {
+        errors.push(`BACKEND_FN_OPTIMIZATION.md: ${row.id} state=${reported.state}, ledger=${row.state}`);
+      }
+    }
+    for (const row of auditFnRows) {
+      if (!functionSet.has(row.id)) errors.push(`BACKEND_FN_OPTIMIZATION.md: unknown FN reference in final index: ${row.id}`);
+    }
+  }
+
+  const optimizationStart = backendFnOptimization.indexOf("## Duplicate / obsolete / commonization final scan");
+  const optimizationEnd = backendFnOptimization.indexOf("### Obsolete/meaning-thin processing conclusions");
+  if (optimizationStart < 0 || optimizationEnd <= optimizationStart) {
+    errors.push("BACKEND_FN_OPTIMIZATION.md: optimization disposition table is missing");
+  } else {
+    const optimizationText = backendFnOptimization.slice(optimizationStart, optimizationEnd);
+    const optimizationRows = [...optimizationText.matchAll(
+      /^\\|\\s*(OPT-BE-\\d{3})\\s*\\|[^|]+\\|\\s*(KEEP|MERGE|REMOVE|TARGET_REWRITE|INTENTIONAL_EXCEPTION)\\s*\\|\\s*(NONE|OPTIONAL|REQUIRED)\\s*\\|/gm,
+    )].map((match) => ({ id: match[1], disposition: match[2], frontend: match[3] }));
+    const optimizationIds = optimizationRows.map((row) => row.id);
+    const optimizationDupes = duplicateIds(optimizationIds);
+    if (optimizationRows.length === 0) errors.push("BACKEND_FN_OPTIMIZATION.md: optimization disposition rows=0");
+    if (optimizationDupes.length) errors.push(`BACKEND_FN_OPTIMIZATION.md: duplicate optimization IDs: ${optimizationDupes.join(", ")}`);
+  }
+
+  for (const phrase of [
+    "authentication principal = Auth User",
+    "acting/content/interaction identity = Active X",
+    "CURRENT_DIVERGENCE",
+    "video_interactions_auth",
+    "production mutation: none",
+    "Runtime code change: 0",
+    "Cloudflare production resource mutation: 0",
+  ]) {
+    if (!backendFnOptimization.includes(phrase)) {
+      errors.push(`BACKEND_FN_OPTIMIZATION.md: required backend audit marker missing: ${phrase}`);
+    }
   }
 
   // Frontend observable UX ledgers. UX and FN are intentionally many-to-many.
