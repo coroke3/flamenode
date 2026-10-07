@@ -384,6 +384,12 @@ if (errors.length === 0) {
       if (!row.ux.includes("UX-")) errors.push(`screen-mapping/README.md: redirect UX owner missing: ${row.source}`);
       if (!row.contract) errors.push(`screen-mapping/README.md: redirect query/hash/role contract missing: ${row.source}`);
       if (row.state !== "COMPAT_MAPPED") errors.push(`screen-mapping/README.md: redirect state must be COMPAT_MAPPED: ${row.source}`);
+      const destinationRoutes = [...row.destination.matchAll(/\/[A-Za-z0-9_~.\-\[\]]+(?:\/[A-Za-z0-9_~.\-\[\]]+)*/g)]
+        .map((match) => match[0].split(/[?#]/, 1)[0]);
+      if (!destinationRoutes.length) errors.push(`screen-mapping/README.md: redirect destination is not route-like: ${row.source}`);
+      for (const destination of new Set(destinationRoutes)) {
+        if (!currentRouteSet.has(destination)) errors.push(`screen-mapping/README.md: redirect destination unknown: ${row.source} -> ${destination}`);
+      }
     }
 
     const visualByRoute = new Map(visualRows.map((row) => [row.route, row]));
@@ -464,6 +470,7 @@ if (errors.length === 0) {
       "DEV_ONLY =",
       "SYSTEM_SURFACE =",
       "AUDIT_REQUIRED = 0",
+      "CURRENT_OBSERVED = 0",
       "UX Surface tokens with no route/shell resolution = 0",
       "Q-LIST(q,event,sort,page,view)",
       "Q-USER-PAGED(worksPage,collabPage)",
@@ -471,6 +478,7 @@ if (errors.length === 0) {
       "P-MANAGE",
       "P-ADMIN",
       "Frontend unresolved/orphan/unknown owners: **0**",
+      "Production mutation: none",
     ]) {
       if (!screenMapping.includes(phrase)) errors.push(`screen-mapping/README.md: required mapping invariant missing: ${phrase}`);
     }
@@ -800,6 +808,12 @@ if (errors.length === 0) {
     "CURRENT_DIVERGENCE",
   ]) {
     if (!requirements.includes(phrase)) errors.push(`PRODUCT_REQUIREMENTS.md: Active X target marker missing: ${phrase}`);
+  }
+  const uxById = new Map(uxRows.map((row) => [row.id, row]));
+  for (const id of ["UX-VID-025", "UX-VID-026", "UX-VID-027", "UX-VID-028", "UX-LIB-001", "UX-LIB-002", "UX-LIB-008"]) {
+    if (uxById.get(id)?.state !== "CURRENT_DIVERGENCE") {
+      errors.push(`frontend UX ledgers: Active X interaction divergence must remain explicit for ${id}`);
+    }
   }
   if (uiReference.includes("`PENDING_HTML`")) {
     for (const forbiddenClaim of [
