@@ -233,7 +233,7 @@ if (errors.length === 0) {
     errors.push("BACKEND_FN_OPTIMIZATION.md: final 136 FN disposition index is missing");
   } else {
     const finalIndexText = backendFnOptimization.slice(finalIndexStart, finalIndexEnd);
-    const auditFnRows = [...finalIndexText.matchAll(/^\\|\\s*(FN-[A-Z]+-\\d{3})\\s*\\|\\s*([A-Z_]+)\\s*\\|\\s*$/gm)]
+    const auditFnRows = [...finalIndexText.matchAll(/^\|\s*(FN-[A-Z]+-\d{3})\s*\|\s*([A-Z_]+)\s*\|\s*$/gm)]
       .map((match) => ({ id: match[1], state: match[2] }));
     const auditFnIds = auditFnRows.map((row) => row.id);
     const auditFnSet = new Set(auditFnIds);
@@ -261,7 +261,7 @@ if (errors.length === 0) {
   } else {
     const optimizationText = backendFnOptimization.slice(optimizationStart, optimizationEnd);
     const optimizationRows = [...optimizationText.matchAll(
-      /^\\|\\s*(OPT-BE-\\d{3})\\s*\\|[^|]+\\|\\s*(KEEP|MERGE|REMOVE|TARGET_REWRITE|INTENTIONAL_EXCEPTION)\\s*\\|\\s*(NONE|OPTIONAL|REQUIRED)\\s*\\|/gm,
+      /^\|\s*(OPT-BE-\d{3})\s*\|[^|]+\|\s*(KEEP|MERGE|REMOVE|TARGET_REWRITE|INTENTIONAL_EXCEPTION)\s*\|\s*(NONE|OPTIONAL|REQUIRED)\s*\|/gm,
     )].map((match) => ({ id: match[1], disposition: match[2], frontend: match[3] }));
     const optimizationIds = optimizationRows.map((row) => row.id);
     const optimizationDupes = duplicateIds(optimizationIds);
