@@ -2,7 +2,7 @@
 
 > Status: CURRENT_VERIFIED
 > Verified: 2026-10-07
-> Scope: 86 CURRENT USER_SCREEN routes + cross-route shells + all 432 baseline UX surface tokens
+> Scope: 92 CURRENT page routes classified as visual / compat / dev / system + cross-route shells + all 432 UX surface tokens
 > Route source: [`../CURRENT_ROUTES.md`](../CURRENT_ROUTES.md)
 > UX source: [`../FRONTEND_FEATURES.md`](../FRONTEND_FEATURES.md)
 > FN source: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
@@ -14,15 +14,20 @@ MIG-0010は「URLが残っている」だけでなく、各screenが必要なUX/
 ## Coverage invariants
 
 ```text
-CURRENT USER_SCREEN routes = 86
-baseline UX capabilities = 432
-distinct UX Surface tokens = 170
-screen routes with no UX mapping = 0
+CURRENT VISUAL_SCREEN = 74
+COMPAT_REDIRECT = 9
+DEV_ONLY = 3
+SYSTEM_SURFACE = 6
+page routes classified = 92
+UX capabilities = 432
+AUDIT_REQUIRED = 0
+CURRENT_OBSERVED = 0
+route classes with no mapping = 0
 UX Surface tokens with no route/shell resolution = 0
 visual source = PENDING_HTML
 ```
 
-432 UXをこの文書へ複製しない。各UXのcapability/evidence/FNは既存frontend ledgerを正本とし、その `Surface` tokenをこの文書のSurface resolution ledgerへ解決することでscreen/shell ownershipを確定する。
+432 UXをこの文書へ複製しない。各UXのcapability/final disposition/FNは既存frontend ledgerを正本とし、その `Surface` tokenをvisual/compat/system/dev routeまたはcross-route shellへ解決してownershipを確定する。Final reconciliationは `../gap-scan/FRONTEND_REQUIREMENTS.md`。
 
 ## Contract profiles
 
@@ -72,7 +77,7 @@ visual source = PENDING_HTML
 - `RA-LIST`: filter/search/sort/page controls remain reachable and URL state survives responsive layout changes。
 - `RA-STATUS`: pending/degraded/quota/failed/dead-letter meaning is text/semantic state, not color-only。
 
-## 86 USER_SCREEN mapping
+## CURRENT VISUAL_SCREEN mapping
 
 | Group | Route | Required local UX | Required local FN | Permission | Dynamic state | URL/query/history | Responsive/a11y | TARGET | State |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -83,8 +88,6 @@ visual source = PENDING_HTML
 | Public | `/event/[id]` | UX-EVENT-006..012, UX-SLOT-001, UX-SUB-016 | FN-ENT-001..002, FN-ENT-006, FN-JOB-005, FN-PLAT-004, FN-PUB-010, FN-X-010 | P-PUBLIC | S-PUBLIC | Q-DIRECT | RA-BASE | same URL / Astro-site | CURRENT_MAPPED |
 | Public | `/event/[id]/release` | UX-EVENT-017..019 | FN-PUB-011, FN-X-010 | P-PUBLIC | S-PUBLIC | Q-DIRECT | RA-BASE | same URL / Astro-site | CURRENT_MAPPED |
 | Public | `/event/[id]/slots` | UX-EVENT-013..016 | FN-PUB-012, FN-X-004 | P-PUBLIC | S-PUBLIC | Q-DIRECT | RA-BASE+RA-DENSE | same URL / Astro-site | CURRENT_MAPPED |
-| Public | `/groups` | UX-EVENT-020, UX-EVENT-024 | FN-PUB-013, FN-X-004 | P-PUBLIC | S-PUBLIC | Q-DIRECT | RA-BASE | same URL / Astro-site | CURRENT_MAPPED |
-| Public | `/groups/[slug]` | UX-EVENT-021..024 | FN-PUB-013, FN-X-004 | P-PUBLIC | S-PUBLIC | Q-DIRECT | RA-BASE | same URL / Astro-site | CURRENT_MAPPED |
 | Public | `/list` | UX-DISC-001..009, UX-DISC-016, UX-GLOBAL-005..006 | FN-PLAT-007, FN-PUB-014, FN-PUB-026, FN-X-003..004, FN-X-010..011 | P-PUBLIC | S-PUBLIC | Q-LIST(q,event,sort,page,view) | RA-BASE+RA-LIST | same URL / Astro-site | CURRENT_MAPPED |
 | Public | `/recommend` | UX-DISC-010..012, UX-DISC-016 | FN-PLAT-007, FN-PUB-015, FN-X-003..004, FN-X-010 | P-PUBLIC | S-PUBLIC | Q-DIRECT | RA-BASE | same URL / Astro-site | CURRENT_MAPPED |
 | Public | `/rules` | UX-ADM-068, UX-AUTH-013, UX-PUB-010..011 | FN-ADM-020, FN-AUTH-006, FN-PUB-021 | P-PUBLIC+TERMS | S-PUBLIC-ACTION | Q-RULES(next,error) | RA-BASE | same URL / Astro-site | CURRENT_MAPPED |
@@ -97,7 +100,6 @@ visual source = PENDING_HTML
 | Personal | `/dashboard/edit/[id]/permissions` | UX-DASH-016..019 | FN-PER-003, FN-X-001 | P-VIDEO-DELEGATE | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Personal | `/dashboard/library` | UX-LIB-001..012 | FN-AUTH-010, FN-PER-003..004, FN-PUB-005, FN-PUB-007..008, FN-X-011 | P-AUTH | S-AUTH-READ | Q-CURRENT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Personal | `/dashboard/settings` | UX-AUTH-006..007, UX-AUTH-015..019, UX-SET-001..005 | FN-AUTH-003, FN-AUTH-009..010, FN-PER-005, FN-PER-007 | P-AUTH | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
-| Personal | `/dashboard/youtube-playlists` | UX-SET-006..008 | FN-JOB-005, FN-PER-006 | P-AUTH | S-AUTH+S-JOB | Q-DIRECT | RA-BASE+RA-STATUS | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Entry | `/entry` | UX-AUTH-001..002, UX-AUTH-023, UX-ENTRY-001..007, UX-SLOT-001..007, UX-SUB-017, UX-SUB-025 | FN-AUTH-001..002, FN-AUTH-006..007, FN-AUTH-010, FN-ENT-001..004, FN-ENT-006, FN-MNG-004, FN-PER-007, FN-PLAT-004 | P-ENTRY | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Entry | `/entry/slotted` | UX-SLOT-002..003, UX-SLOT-007..009, UX-SUB-002..021, UX-SUB-023..026 | FN-API-007, FN-AUTH-010, FN-ENT-002..006, FN-JOB-005, FN-PLAT-004 | P-ENTRY | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Entry | `/entry/unslotted` | UX-SLOT-002..003, UX-SLOT-007, UX-SUB-001..015, UX-SUB-017..020, UX-SUB-022..025 | FN-API-007, FN-AUTH-010, FN-ENT-002..006, FN-JOB-005, FN-PLAT-004 | P-ENTRY | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
@@ -105,7 +107,6 @@ visual source = PENDING_HTML
 | Manage | `/manage/events/[id]` | UX-MNG-009..010 | FN-MNG-002 | P-MANAGE | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Manage | `/manage/events/[id]/audience` | UX-MNG-010..012 | FN-MNG-002..003, FN-X-002 | P-MANAGE | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Manage | `/manage/events/[id]/edit` | UX-MNG-010, UX-MNG-013..019 | FN-ENT-006, FN-MNG-002, FN-MNG-004, FN-X-002 | P-MANAGE | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
-| Manage | `/manage/events/[id]/review` | UX-MNG-010, UX-MNG-020..026 | FN-MNG-002, FN-MNG-005, FN-X-002 | P-MANAGE | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Manage | `/manage/events/[id]/slots` | UX-MNG-010, UX-MNG-027..036 | FN-JOB-006, FN-MNG-002, FN-MNG-006 | P-MANAGE | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-DENSE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Manage | `/manage/events/[id]/staff` | UX-MNG-010, UX-MNG-037..043 | FN-MNG-002, FN-MNG-007, FN-X-001..002 | P-MANAGE | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Manage | `/manage/events/[id]/videos` | UX-MNG-010, UX-MNG-044..045 | FN-MNG-002, FN-MNG-008 | P-MANAGE | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
@@ -127,15 +128,10 @@ visual source = PENDING_HTML
 | Admin | `/admin/event-groups/[id]/edit` | UX-ADM-027..028 | FN-ADM-008 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/event-groups/new` | UX-ADM-026, UX-ADM-028 | FN-ADM-008 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/events` | UX-ADM-029, UX-ADM-033, UX-ADM-036..037 | FN-ADM-009, FN-ADM-012, FN-X-001, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-LIST | same URL / React-Vite SPA | CURRENT_MAPPED |
-| Admin | `/admin/events/[id]` | UX-ADM-030, UX-ADM-033, UX-ADM-036..037 | FN-ADM-009, FN-ADM-012, FN-X-001, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
-| Admin | `/admin/events/[id]/edit` | UX-ADM-032..033, UX-ADM-036..037 | FN-ADM-009, FN-ADM-012, FN-X-001, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
-| Admin | `/admin/events/[id]/slots` | UX-ADM-033..034, UX-ADM-036..037 | FN-ADM-009, FN-ADM-012, FN-MNG-006, FN-X-001, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE+RA-DENSE | same URL / React-Vite SPA | CURRENT_MAPPED |
-| Admin | `/admin/events/[id]/staff` | UX-ADM-033, UX-ADM-035..037 | FN-ADM-009, FN-ADM-011..012, FN-X-001, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/events/new` | UX-ADM-031, UX-ADM-033, UX-ADM-036..037 | FN-ADM-009, FN-ADM-012, FN-X-001, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE+RA-FORM | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/events/templates` | UX-ADM-033, UX-ADM-036..040 | FN-ADM-009..010, FN-ADM-012, FN-X-001, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/health` | UX-ADM-041..042 | FN-ADM-013 | P-ADMIN | S-AUTH-READ | Q-CURRENT | RA-BASE+RA-STATUS | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/health/integrity` | UX-ADM-043..044 | FN-ADM-014 | P-ADMIN | S-AUTH-READ | Q-CURRENT | RA-BASE+RA-STATUS | same URL / React-Vite SPA | CURRENT_MAPPED |
-| Admin | `/admin/history` | UX-ADM-019..020 | FN-ADM-004, FN-ADM-015 | P-ADMIN | S-AUTH-READ | Q-DIRECT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/import` | UX-ADM-049..052 | FN-ADM-016 | P-ADMIN | S-AUTH+S-MUTATION | Q-DIRECT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/moderation` | UX-ADM-053..056 | FN-ADM-017, FN-X-005 | P-ADMIN | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/notifications` | UX-ADM-057..060 | FN-ADM-018, FN-JOB-006 | P-ADMIN | S-AUTH+S-JOB | Q-CURRENT | RA-BASE+RA-LIST+RA-STATUS | same URL / React-Vite SPA | CURRENT_MAPPED |
@@ -158,10 +154,44 @@ visual source = PENDING_HTML
 | Admin | `/admin/youtube-quota` | UX-ADM-100..101 | FN-ADM-030 | P-ADMIN | S-AUTH+S-JOB | Q-DIRECT | RA-BASE+RA-STATUS | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/youtube-sync` | UX-ADM-102..104 | FN-ADM-031, FN-JOB-005 | P-ADMIN | S-AUTH+S-JOB | Q-CURRENT | RA-BASE+RA-LIST+RA-STATUS | same URL / React-Vite SPA | CURRENT_MAPPED |
 | Admin | `/admin/youtube-sync/playlists` | UX-ADM-105..107 | FN-ADM-031, FN-JOB-005 | P-ADMIN | S-AUTH+S-JOB | Q-CURRENT | RA-BASE+RA-STATUS | same URL / React-Vite SPA | CURRENT_MAPPED |
-| System | `/dev/ui-surfaces` | UX-SYS-003 | FN-PLAT-012 | P-DEV-CURRENT | S-SYSTEM | Q-DIRECT | RA-BASE | dev-only / migration disposition | CURRENT_MAPPED |
-| System | `/maintenance` | UX-SYS-001..002 | FN-PLAT-011, FN-X-002 | P-OPERATION-MODE | S-SYSTEM | Q-DIRECT | RA-BASE | same URL / site-system | CURRENT_MAPPED |
 | System | `/onboarding` | UX-ADM-068, UX-AUTH-011..013 | FN-ADM-020, FN-AUTH-005..006 | P-ONBOARDING | S-AUTH+S-MUTATION | Q-CURRENT | RA-BASE | same URL / React-Vite SPA | CURRENT_MAPPED |
+
+## COMPAT_REDIRECT mapping
+
+These rows own legacy/deep-link URL contracts, not independent visual screens.
+
+| Source | Destination | UX disposition owner | Query/hash/role contract | State |
+| --- | --- | --- | --- | --- |
+| `/groups` | `/event` | UX-EVENT-020, UX-EVENT-024 | source query/hash not forwarded | COMPAT_MAPPED |
+| `/groups/[slug]` | `/event#event-group-{slug}` | UX-EVENT-021..024 | slug → event-group hash | COMPAT_MAPPED |
+| `/dashboard/youtube-playlists` | `admin: /admin/youtube-sync/playlists; other auth: /dashboard` | UX-SET-006..008 | auth guard; admin role branch | COMPAT_MAPPED |
+| `/manage/events/[id]/review` | `/manage/events/[id]/videos?status=pending` | UX-MNG-010, UX-MNG-020..026 | destination query forced to status=pending | COMPAT_MAPPED |
+| `/admin/events/[id]` | `/manage/events/[id]` | UX-ADM-030, UX-ADM-033, UX-ADM-036..037 | source query/hash not forwarded | COMPAT_MAPPED |
+| `/admin/events/[id]/edit` | `/manage/events/[id]/edit` | UX-ADM-032..033, UX-ADM-036..037 | source query/hash not forwarded | COMPAT_MAPPED |
+| `/admin/events/[id]/slots` | `/manage/events/[id]/slots` | UX-ADM-033..034, UX-ADM-036..037 | source query/hash not forwarded | COMPAT_MAPPED |
+| `/admin/events/[id]/staff` | `/manage/events/[id]/staff` | UX-ADM-033, UX-ADM-035..037 | source query/hash not forwarded | COMPAT_MAPPED |
+| `/admin/history` | `/admin/audit` | UX-ADM-019..020 | source query/hash not forwarded | COMPAT_MAPPED |
+
+## DEV_ONLY page mapping
+
+| Group | Route | Required local UX | Required local FN | Permission | Dynamic state | URL/query/history | Responsive/a11y | TARGET | State |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| System | `/dev/ui-surfaces` | UX-SYS-003 | FN-PLAT-012 | P-DEV-CURRENT | S-SYSTEM | Q-DIRECT | RA-BASE | dev-only / migration disposition | CURRENT_MAPPED |
+
+| Dev | `/dev/redesign` | N/A — fixture-only old mock | N/A | P-DEV-CURRENT | S-SYSTEM | Q-DIRECT | RA-BASE | no TARGET visual authority | DEV_ONLY_MAPPED |
+| Dev | `/dev/redesign/mock/[id]` | N/A — fixture-only old mock | N/A | P-DEV-CURRENT | S-SYSTEM | Q-DIRECT | RA-BASE | no TARGET visual authority | DEV_ONLY_MAPPED |
+
+## SYSTEM_SURFACE page mapping
+
+| Group | Route | Required local UX | Required local FN | Permission | Dynamic state | URL/query/history | Responsive/a11y | TARGET | State |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| System | `/maintenance` | UX-SYS-001..002 | FN-PLAT-011, FN-X-002 | P-OPERATION-MODE | S-SYSTEM | Q-DIRECT | RA-BASE | same URL / site-system | CURRENT_MAPPED |
 | System | `/auth/complete` | UX-AUTH-002 | FN-AUTH-001, FN-AUTH-007 | P-AUTH-CALLBACK | S-AUTH-FLOW | Q-CURRENT | RA-BASE | same URL / auth target | CURRENT_MAPPED |
+
+| System | `/event/~query` | UX-EVENT-001..005, UX-GLOBAL-019 | FN-PUB-009, FN-PUB-026, FN-X-011 | P-PUBLIC | S-PUBLIC | Q-EVENT(q,status,sort) | RA-BASE+RA-LIST | technical renderer only | SYSTEM_MAPPED |
+| System | `/list/~query` | UX-DISC-001..009, UX-GLOBAL-019 | FN-PUB-014, FN-PUB-026, FN-X-011 | P-PUBLIC | S-PUBLIC | Q-LIST(q,event,sort,page,view) | RA-BASE+RA-LIST | technical renderer only | SYSTEM_MAPPED |
+| System | `/user/~query` | UX-USER-001..005, UX-GLOBAL-019 | FN-PUB-017, FN-X-011 | P-PUBLIC | S-PUBLIC | Q-USER(q,sort,page) | RA-BASE+RA-LIST | technical renderer only | SYSTEM_MAPPED |
+| System | `/user/[id]/paged` | UX-USER-006..014, UX-GLOBAL-019 | FN-PUB-018, FN-X-011 | P-PUBLIC | S-PUBLIC | Q-USER-PAGED(worksPage,collabPage) | RA-BASE | technical renderer only | SYSTEM_MAPPED |
 
 ## Cross-route shell mapping
 
@@ -376,7 +406,7 @@ CURRENT technical twin routesは独立USER_SCREENとして数えない。
 
 TARGETでtechnical routeを削除してもlogical URL contractは削除しない。
 
-## Global surfaces not counted in 86
+## Global non-page surfaces
 
 - `app/error.tsx` / route-group error -> `shell:ERROR`
 - `app/global-error.tsx` -> `shell:GLOBAL_ERROR`
@@ -409,6 +439,6 @@ Before migrating any screen:
 6. implement against future UI_REFERENCE;
 7. parity-test direct URL, reload, back/forward, error/empty/pending states and server authorization.
 
-Optimization blockers requiring frontend change: **0**
+Frontend unresolved/orphan/unknown owners: **0**
 
-MIG-0010 changes documentation/checker evidence only. Runtime application behavior and production Cloudflare/D1/R2/KV/Queue configuration are unchanged.
+This MIG-0011 Frontend PR changes documentation/checker evidence only. Runtime application behavior and production Cloudflare/D1/R2/KV/Queue configuration are unchanged.
