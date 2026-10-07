@@ -341,7 +341,7 @@ Forbidden:
 - final disposition以外のstate残存
 - `AUDIT_REQUIRED = 0`
 - `CURRENT_OBSERVED = 0`
--全 `app/**/page.tsx` のroute classification coverage
+- 全 `app/**/page.tsx` のroute classification coverage
 - class間重複なし
 - compat redirect destination不明0
 - UX surface owner unresolved 0
@@ -352,7 +352,25 @@ Forbidden:
 
 92/74/9等の値はこの棚卸し結果としてdocumentへ記録するが、checkerは可能な箇所でsourceから導出し、将来のroute追加を「古い固定値に合わせる」目的では使わない。
 
-## 12. Self review
+## 12. Validation snapshot
+
+2026-10-07 branch上で再検証:
+
+- source tree `app/**/page.tsx`: 92 / classification rows: 92 / missing: 0 / stale: 0
+- route classes: VISUAL_SCREEN 74 / COMPAT_REDIRECT 9 / DEV_ONLY 3 / SYSTEM_SURFACE 6
+- UX: 432 unique 432 / CURRENT_VERIFIED 404 / CURRENT_DIVERGENCE 7 / MERGED_INTO_OTHER 17 / OBSOLETE 4
+- `AUDIT_REQUIRED`: 0 / `CURRENT_OBSERVED`: 0
+- distinct UX Surface token: 170 / resolution rows: 170 / unresolved: 0 / unknown route/shell owner: 0
+- compat redirect destination unknown: 0
+- Active X required divergence IDs missing: 0
+- `scripts/check-migration-docs.mjs` syntax parse: pass
+- branch vs latest main: behind 0 at validation time
+- branch diff: docs + migration checker only; runtime/production code changes 0
+
+Full Backend FN closure and MIG-0011 task closure are intentionally not performed by this PR.
+
+## 13. Self review
+
 
 実施:
 - `CHECKPOINT.md` を最初に確認
