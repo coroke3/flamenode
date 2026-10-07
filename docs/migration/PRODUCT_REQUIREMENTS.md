@@ -57,23 +57,35 @@ CURRENT behaviorの意味・背景・未実装要件を確認する入力。
 5. CURRENTを黙って設計文書へ戻さない。
 6. 設計文書を黙ってCURRENTへ書き換えない。
 7. 変更価値があれば`IMPROVEMENT_CANDIDATE`として提案する。
-8. frontend behavior変更を伴う場合はユーザー承認までCURRENT維持をdefaultにする。
+8. frontend behavior変更を伴う場合はユーザー承認までCURRENT維持をdefaultにする。ただし、この文書またはユーザー指示でTARGET requirementが明示確定した事項（例: Active X interaction ownership）はCURRENT維持defaultよりTARGET requirementを優先し、`CURRENT_DIVERGENCE`として記録する。
 
 ## Known reconciliation cautions
 
-### Interaction ownership
-古い設計にはActive X IDをinteraction主体として扱う記述がある。一方CURRENTには`videoInteractionsAuth.auth_user_id`を用いる実装がある。
+### Identity / interaction ownership
 
-- 古い文書だけを見てX ID ownershipへ戻さない。
-- MIG-0003/0004/0008でcurrent identity/permission contractを確定する。
-- UI上のActive Xとaccount-owned interactionを混同しない。
+MIG-0011 Frontend reconciliationでTARGET identity原則を次として確定する。
+
+```text
+authentication principal = Auth User
+acting/content/interaction identity = Active X
+```
+
+- Discord/Auth Userはlogin、session、account security、ban、role、security provenanceの正本として維持する。
+- Active XはFlameNode上でどのX identityとして行動・投稿・interactionするかの主体。
+- CURRENTのlike/bookmark/library interactionには `videoInteractionsAuth.auth_user_id` を使うpathがある。
+- これらを「CURRENTなので維持」と判断しない。TARGETと不一致のため `CURRENT_DIVERGENCE` とする。
+- migration実装時はinteraction ownershipをActive Xへreconcileする。MIG-0011 Frontend PRではproduction schema/codeを変更しない。
+- `approved_by_auth_user_id`、`edit_granted_by_auth_user_id`、audit `actor_user_id`、notification delivery recipient、session/security identifiers等、security/account provenanceを表すAuth User IDを機械的にActive Xへ置換しない。
+- event/video authorizationでは、Active Xを唯一のsecurity authz sourceにしない。Auth Userに紐づくapproved Xとcanonical permissionをserverで解決し、user-visible acting identityとauthorization principalを分離する。
+
+詳細なdomain別dispositionは `gap-scan/FRONTEND_REQUIREMENTS.md` を正本とする。
 
 ### Chapter/comment model
-CURRENTは独立した自由コメント欄ではなく、時間付きchapter/comment体験を中心にしている。
+CURRENTは独立した自由コメント欄ではなく、時間付きchapter/comment体験を中心にしている。MIG-0011 Frontend reconciliationではこのCURRENT modelをTARGET product behaviorとして採用し、historicalな独立free-comment requirementは`OBSOLETE`とする。
 
-- `video_chapters` / chapter UI / current codeを優先して実態確認する。
-- historical table/field名を移行先へ復活させない。
-- public/private、投稿権限、player seek、reflection delayなどobservable behaviorを維持する。
+- `video_chapters` / chapter UI / current codeを正本として扱う。
+- historical table/field名や独立free-comment UIを移行先へ復活させない。
+- public/private、approved Active X投稿主体、player seek、reflection delayなどobservable behaviorを維持する。
 
 ### UI redesign
 以前の`docs/design-redesign`は移行入力から外す。

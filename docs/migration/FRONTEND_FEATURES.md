@@ -21,8 +21,7 @@ FN-* = backend/domain/platform側の機能・安全保証
 
 ## Baseline size
 
-2026-10-07のCURRENT code/route/active operation docsから、初期baselineとして**432 UX capabilities**を列挙した。
-これは最終数ではない。MIG-0003/0004/0007/0008/0009/0010で新しいobservable behaviorが見つかれば追加する。
+2026-10-07のCURRENT code/route/active operation docsから**432 UX capabilities**を列挙し、MIG-0011 Frontend監査で全件をfinal dispositionした。今回の正本件数は432で、追加・削除する場合は同時にledger、screen mapping、checkerを更新する。
 
 | Ledger | IDs | Count |
 | --- | --- | ---: |
@@ -32,7 +31,20 @@ FN-* = backend/domain/platform側の機能・安全保証
 | [`frontend/MANAGE_ADMIN.md`](frontend/MANAGE_ADMIN.md) | `UX-MNG-*`, `UX-ADM-*` | 167 |
 | **Total baseline** |  | **432** |
 
-毎taskで全432件を読む必要はない。対象route/domainに対応するledgerのみ読む。MIG-0010で全432 UXのSurface tokenを86 screen / cross-route shellへ解決済みで、MIG-0011が全体gap scanを行う。
+毎taskで全432件を読む必要はない。対象route/domainに対応するledgerのみ読む。MIG-0011 Frontend監査ではrouteを `VISUAL_SCREEN / COMPAT_REDIRECT / DEV_ONLY / SYSTEM_SURFACE` に再分類し、全432 UXのownerをscreen / compat / system / shellへ解決した。
+
+Final disposition:
+
+| State | Count |
+| --- | ---: |
+| `CURRENT_VERIFIED` | 405 |
+| `CURRENT_DIVERGENCE` | 6 |
+| `MERGED_INTO_OTHER` | 17 |
+| `OBSOLETE` | 4 |
+| `REQUIREMENT_ONLY` | 0 |
+| **Total** | **432** |
+
+根拠と例外一覧は [`gap-scan/FRONTEND_REQUIREMENTS.md`](gap-scan/FRONTEND_REQUIREMENTS.md) を正本とする。
 
 ## Completion invariant
 
@@ -45,30 +57,23 @@ UX IDs without permission disposition = 0
 UX IDs without backend/FN disposition = 0
 UX IDs without loading/error/empty/pending disposition where applicable = 0
 UX IDs without responsive/accessibility disposition where applicable = 0
-USER_SCREEN routes without UX mapping = 0
+CURRENT route classes without mapping = 0
 Cross-route shells without UX mapping = 0
 Intentional removals without explicit approval = 0
 Visual-only DONE screens = 0
 ```
 
-## Evidence states
+## Final disposition states
 
-Detailed ledgersのbaselineは以下を使う。
+MIG-0011 Frontend完了時、詳細ledgerのEvidence列は以下の終端stateだけを使用する。
 
-- `CURRENT_OBSERVED`: current code/route/component等で存在を確認済み。ただし全input/effect/testの詳細auditは未完でもよい。
-- `AUDIT_REQUIRED`: route/active requirement/related implementationから候補として列挙。実装有無・正確なcontractを後続MIG taskで確定する。
+- `CURRENT_VERIFIED`: current code/test/route/action/APIまたはactive operational contractで確認済み。
+- `CURRENT_DIVERGENCE`: current実装は確認済みだがTARGET requirementと不一致。勝手にCURRENT維持しない。
+- `REQUIREMENT_ONLY`: TARGET requirementは確定しているがCURRENT実装なし。
+- `OBSOLETE`: CURRENT productとして独立capabilityを提供しておらずTARGETへ復活させない。
+- `MERGED_INTO_OTHER`: capabilityは別owner surfaceへ統合済み。互換URLは別contractとして維持できる。
 
-MIG-0010/0011では最終的に以下へdispositionする。
-
-- `CURRENT_VERIFIED`
-- `REQUIREMENT_ONLY`
-- `CURRENT_DIVERGENCE`
-- `PARITY_VERIFIED`
-- `REMOVAL_PROPOSED`
-- `REMOVED_APPROVED`
-- `BLOCKED`
-
-`AUDIT_REQUIRED`を「存在しない」と解釈して削除しない。
+`CURRENT_OBSERVED` と `AUDIT_REQUIRED` は途中stateであり、MIG-0011 Frontendでは残さない。
 
 ## What counts as frontend-exposed
 
@@ -96,7 +101,7 @@ backend-onlyに見えても、利用者が状態・制限・遅延・error・表
 
 ## Required detailed UX contract
 
-`CURRENT_VERIFIED`または`PARITY_VERIFIED`へ上げる際は最低限以下を記録/テストする。
+`CURRENT_VERIFIED`へ上げる際は最低限以下を記録/テストする。MIG-0011ではfrontend ledgerのSurface/Related FNと `gap-scan/FRONTEND_REQUIREMENTS.md` のevidence indexを組み合わせて根拠を追跡する。
 
 ```text
 UX ID:
@@ -190,7 +195,7 @@ HTML mockはvisual/information architectureの入力であり、CURRENT capabili
 - `MIG-0005/0009`: Worker/Queue/Cron → observable async behaviorへmapping
 - `MIG-0007`: static/visibility → public UXへmapping
 - `MIG-0008`: auth/session/permission → gated UXへmapping
-- `MIG-0010`: DONE — 全86 screen + 16 cross-route shell + 170 UX Surface tokensをrequired UX/FN・permission/state/query/RA contractへ完全mapping
-- `MIG-0011`: code/design/operations横断gap scan、orphan=0、optimization blocker判定
+- `MIG-0010`: DONE — 当時の86 route baseline + 16 cross-route shell + 170 UX Surface tokensをrequired UX/FN・permission/state/query/RA contractへmapping
+- `MIG-0011`: Frontend側は92 page route再分類 + 432 UX final disposition + requirement reconciliation。Backend側と統合してtaskを閉じる
 
 **MIG-0011完了までは「全機能棚卸し完了」と宣言しない。**

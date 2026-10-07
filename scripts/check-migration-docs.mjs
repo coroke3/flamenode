@@ -29,6 +29,7 @@ const required = [
   "docs/migration/background-jobs/README.md",
   "docs/migration/gap-scan/BACKEND_FN_OPTIMIZATION.md",
   "docs/migration/screen-mapping/README.md",
+  "docs/migration/gap-scan/FRONTEND_REQUIREMENTS.md",
   "docs/migration/frontend/CROSS_CUTTING.md",
   "docs/migration/frontend/PUBLIC.md",
   "docs/migration/frontend/AUTH_PERSONAL_ENTRY.md",
@@ -128,6 +129,7 @@ if (errors.length === 0) {
   const backgroundJobsBaseline = read("docs/migration/background-jobs/README.md");
   const backendFnOptimization = read("docs/migration/gap-scan/BACKEND_FN_OPTIMIZATION.md");
   const screenMapping = read("docs/migration/screen-mapping/README.md");
+  const frontendRequirements = read("docs/migration/gap-scan/FRONTEND_REQUIREMENTS.md");
 
   // Progress/task integrity.
   const currentTask = status.match(/Current Task:\s*(MIG-\d{4})/i)?.[1];
@@ -144,14 +146,7 @@ if (errors.length === 0) {
   if (taskDupes.length) errors.push(`STATUS.md: duplicate MIG task rows: ${taskDupes.join(", ")}`);
   if (currentTask && !taskSet.has(currentTask)) errors.push(`STATUS.md: Current Task ${currentTask} has no task-table row`);
 
-  // CURRENT route baseline must remain 86 user-visible screens.
-  const routeSectionCounts = [...currentRoutes.matchAll(/^##\s+(Public|Personal|Entry|Manage|Admin|System)\s+—\s+(\d+)\s*$/gm)]
-    .map((m) => Number(m[2]));
-  const routeBaselineTotal = routeSectionCounts.reduce((sum, count) => sum + count, 0);
-  if (routeSectionCounts.length !== 6) errors.push(`CURRENT_ROUTES.md: expected 6 USER_SCREEN section counts, found ${routeSectionCounts.length}`);
-  if (routeBaselineTotal !== 86) errors.push(`CURRENT_ROUTES.md: USER_SCREEN section total=${routeBaselineTotal}, expected=86`);
-  if (!/CURRENT USER_SCREEN routes\s*\|\s*86\s*\|/m.test(status)) errors.push("STATUS.md: CURRENT USER_SCREEN baseline must report 86");
-
+  // CURRENT page-route totals are derived from source, not frozen to the historical 86-screen baseline.
   // Backend/domain/platform FN ledgers.
   const validFunctionStates = new Set([
     "BASELINE_KNOWN",
@@ -291,15 +286,11 @@ if (errors.length === 0) {
 
   // Frontend observable UX ledgers. UX and FN are intentionally many-to-many.
   const validUxStates = new Set([
-    "CURRENT_OBSERVED",
-    "AUDIT_REQUIRED",
     "CURRENT_VERIFIED",
-    "REQUIREMENT_ONLY",
     "CURRENT_DIVERGENCE",
-    "PARITY_VERIFIED",
-    "REMOVAL_PROPOSED",
-    "REMOVED_APPROVED",
-    "BLOCKED",
+    "REQUIREMENT_ONLY",
+    "OBSOLETE",
+    "MERGED_INTO_OTHER",
   ]);
   const uxRows = [];
 
@@ -329,59 +320,128 @@ if (errors.length === 0) {
   const declaredUxTotal = Number(frontend.match(/\*\*Total baseline\*\*\s*\|\s*\|\s*\*\*(\d+)\*\*/i)?.[1]);
   if (!Number.isFinite(declaredUxTotal)) errors.push("FRONTEND_FEATURES.md: Total baseline count is missing");
   else if (declaredUxTotal !== uxRows.length) errors.push(`FRONTEND_FEATURES.md: declared total=${declaredUxTotal}, UX ledger rows=${uxRows.length}`);
-  if (uxRows.length !== 432) errors.push(`frontend UX ledgers: current baseline=${uxRows.length}, expected=432`);
-  if (!/Frontend `UX-\*` capabilities\s*\|\s*432\s*\|/m.test(status)) errors.push("STATUS.md: frontend UX baseline must report 432");
+  const statusUxTotal = Number(status.match(/Frontend `UX-\*` capabilities\s*\|\s*(\d+)\s*\|/m)?.[1]);
+  if (Number.isFinite(statusUxTotal) && statusUxTotal !== uxRows.length) {
+    errors.push(`STATUS.md: frontend UX baseline=${statusUxTotal}, ledger rows=${uxRows.length}`);
+  }
+  const uxStateCounts = uxRows.reduce((acc, row) => {
+    acc[row.state] = (acc[row.state] ?? 0) + 1;
+    return acc;
+  }, {});
+  for (const state of validUxStates) {
+    const reported = Number(frontend.match(new RegExp("\\\\| `" + state + "` \\\\| (\\\\d+) \\\\|"))?.[1]);
+    const actual = uxStateCounts[state] ?? 0;
+    if (!Number.isFinite(reported)) errors.push(`FRONTEND_FEATURES.md: ${state} final count is missing`);
+    else if (reported !== actual) errors.push(`FRONTEND_FEATURES.md: ${state} reported=${reported}, actual=${actual}`);
+  }
+  for (const forbiddenState of ["CURRENT_OBSERVED", "AUDIT_REQUIRED"]) {
+    if (uxRows.some((row) => row.state === forbiddenState)) {
+      errors.push(`frontend UX ledgers: ${forbiddenState} must be 0 after MIG-0011 frontend reconciliation`);
+    }
+  }
 
 
-  // MIG-0010 86-screen / UX / FN mapping completeness.
+  // MIG-0011 frontend route classification / UX / shell mapping completeness.
+  const appPageFiles = walkFiles(file("app"), (p) => p.endsWith(path.sep + "page.tsx"));
+  function pageFileRoute(abs) {
+    const rel = path.relative(file("app"), abs).split(path.sep).join("/");
+    const segments = rel.split("/").slice(0, -1).filter((segment) => !/^\(.+\)$/.test(segment));
+    return "/" + segments.join("/");
+  }
+  const discoveredPages = appPageFiles.map((abs) => ({
+    filePath: path.relative(root, abs).split(path.sep).join("/"),
+    route: pageFileRoute(abs),
+  }));
+  const discoveredRouteSet = new Set(discoveredPages.map((row) => row.route));
+  const discoveredRouteDupes = duplicateIds(discoveredPages.map((row) => row.route));
+  if (discoveredRouteDupes.length) errors.push(`app/**/page.tsx: duplicate logical routes: ${discoveredRouteDupes.join(", ")}`);
+
   const currentRouteRows = [];
   for (const line of currentRoutes.split("\n")) {
-    const match = line.match(/^\|\s*`(\/[^\`]*)`\s*\|\s*`(app\/[^\`]+page\.tsx)`\s*\|/);
-    if (match) currentRouteRows.push({ route: match[1], filePath: match[2] });
-  }
-  if (currentRouteRows.length !== 86) {
-    errors.push(`CURRENT_ROUTES.md: parsed screen rows=${currentRouteRows.length}, expected=86`);
+    const match = line.match(/^\|\s*`(\/[^\`]*)`\s*\|\s*`(app\/[^\`]+page\.tsx)`\s*\|\s*(VISUAL_SCREEN|COMPAT_REDIRECT|DEV_ONLY|SYSTEM_SURFACE)\s*\|/);
+    if (match) currentRouteRows.push({ route: match[1], filePath: match[2], classification: match[3] });
   }
   const currentRouteSet = new Set(currentRouteRows.map((row) => row.route));
   const currentRouteDupes = duplicateIds(currentRouteRows.map((row) => row.route));
-  if (currentRouteDupes.length) errors.push(`CURRENT_ROUTES.md: duplicate route rows: ${currentRouteDupes.join(", ")}`);
+  if (currentRouteDupes.length) errors.push(`CURRENT_ROUTES.md: duplicate classified route rows: ${currentRouteDupes.join(", ")}`);
+  if (currentRouteRows.length !== discoveredPages.length) {
+    errors.push(`CURRENT_ROUTES.md: classified rows=${currentRouteRows.length}, app page routes=${discoveredPages.length}`);
+  }
+  const currentByFile = new Map(currentRouteRows.map((row) => [row.filePath, row]));
+  for (const page of discoveredPages) {
+    const documented = currentByFile.get(page.filePath);
+    if (!documented) {
+      errors.push(`CURRENT_ROUTES.md: page file unclassified: ${page.filePath}`);
+      continue;
+    }
+    if (documented.route !== page.route) {
+      errors.push(`CURRENT_ROUTES.md: ${page.filePath} route=${documented.route}, source-derived=${page.route}`);
+    }
+  }
+  for (const row of currentRouteRows) {
+    if (!discoveredRouteSet.has(row.route)) errors.push(`CURRENT_ROUTES.md: classified non-source route: ${row.route}`);
+  }
 
-  const screenSectionStart = screenMapping.indexOf("## 86 USER_SCREEN mapping");
+  const routesByClass = new Map(
+    ["VISUAL_SCREEN", "COMPAT_REDIRECT", "DEV_ONLY", "SYSTEM_SURFACE"].map((name) => [
+      name,
+      new Set(currentRouteRows.filter((row) => row.classification === name).map((row) => row.route)),
+    ]),
+  );
+  for (const [name, routes] of routesByClass) {
+    if (routes.size === 0) errors.push(`CURRENT_ROUTES.md: route class ${name} is empty`);
+  }
+  const allClassifiedRoutes = [...routesByClass.values()].flatMap((set) => [...set]);
+  if (new Set(allClassifiedRoutes).size !== allClassifiedRoutes.length) {
+    errors.push("CURRENT_ROUTES.md: route appears in more than one classification");
+  }
+
+  const visualSectionStart = screenMapping.indexOf("## CURRENT VISUAL_SCREEN mapping");
+  const compatSectionStart = screenMapping.indexOf("## COMPAT_REDIRECT mapping");
+  const devSectionStart = screenMapping.indexOf("## DEV_ONLY page mapping");
+  const systemSectionStart = screenMapping.indexOf("## SYSTEM_SURFACE page mapping");
   const shellSectionStart = screenMapping.indexOf("## Cross-route shell mapping");
   const surfaceSectionStart = screenMapping.indexOf("## UX Surface resolution ledger");
   const technicalSectionStart = screenMapping.indexOf("## Technical compatibility routes");
-  if ([screenSectionStart, shellSectionStart, surfaceSectionStart, technicalSectionStart].some((value) => value < 0)) {
-    errors.push("screen-mapping/README.md: required mapping sections are missing");
+  if ([visualSectionStart, compatSectionStart, devSectionStart, systemSectionStart, shellSectionStart, surfaceSectionStart, technicalSectionStart].some((value) => value < 0)) {
+    errors.push("screen-mapping/README.md: required route-class mapping sections are missing");
   } else {
-    const screenSection = screenMapping.slice(screenSectionStart, shellSectionStart);
-    const screenRows = [];
-    for (const line of screenSection.split("\n")) {
-      if (!/^\|\s*(Public|Personal|Entry|Manage|Admin|System)\s*\|/.test(line)) continue;
-      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
-      screenRows.push({
-        group: cells[0],
-        route: (cells[1] ?? "").replaceAll("`", ""),
-        ux: cells[2] ?? "",
-        fn: cells[3] ?? "",
-        permission: cells[4] ?? "",
-        dynamicState: cells[5] ?? "",
-        query: cells[6] ?? "",
-        responsive: cells[7] ?? "",
-        target: cells[8] ?? "",
-        state: cells[9] ?? "",
-      });
+    const parseProfileRows = (section) => {
+      const parsed = [];
+      for (const line of section.split("\n")) {
+        if (!/^\|\s*(Public|Personal|Entry|Manage|Admin|System|Dev)\s*\|/.test(line)) continue;
+        const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+        parsed.push({
+          group: cells[0],
+          route: (cells[1] ?? "").replaceAll("`", ""),
+          ux: cells[2] ?? "",
+          fn: cells[3] ?? "",
+          permission: cells[4] ?? "",
+          dynamicState: cells[5] ?? "",
+          query: cells[6] ?? "",
+          responsive: cells[7] ?? "",
+          target: cells[8] ?? "",
+          state: cells[9] ?? "",
+        });
+      }
+      return parsed;
+    };
+    const visualRows = parseProfileRows(screenMapping.slice(visualSectionStart, compatSectionStart));
+    const devRows = parseProfileRows(screenMapping.slice(devSectionStart, systemSectionStart));
+    const systemRows = parseProfileRows(screenMapping.slice(systemSectionStart, shellSectionStart));
+    const visualMappedSet = new Set(visualRows.map((row) => row.route));
+    const devMappedSet = new Set(devRows.map((row) => row.route));
+    const systemMappedSet = new Set(systemRows.map((row) => row.route));
+    for (const [classification, mapped] of [
+      ["VISUAL_SCREEN", visualMappedSet],
+      ["DEV_ONLY", devMappedSet],
+      ["SYSTEM_SURFACE", systemMappedSet],
+    ]) {
+      const expected = routesByClass.get(classification);
+      for (const route of expected) if (!mapped.has(route)) errors.push(`screen-mapping/README.md: ${classification} route missing: ${route}`);
+      for (const route of mapped) if (!expected.has(route)) errors.push(`screen-mapping/README.md: ${classification} has non-classified route: ${route}`);
     }
-    if (screenRows.length !== 86) errors.push(`screen-mapping/README.md: screen rows=${screenRows.length}, expected=86`);
-    const mappedRouteSet = new Set(screenRows.map((row) => row.route));
-    const mappedRouteDupes = duplicateIds(screenRows.map((row) => row.route));
-    if (mappedRouteDupes.length) errors.push(`screen-mapping/README.md: duplicate screen rows: ${mappedRouteDupes.join(", ")}`);
-    for (const route of currentRouteSet) {
-      if (!mappedRouteSet.has(route)) errors.push(`screen-mapping/README.md: CURRENT route missing: ${route}`);
-    }
-    for (const route of mappedRouteSet) {
-      if (!currentRouteSet.has(route)) errors.push(`screen-mapping/README.md: non-CURRENT screen row: ${route}`);
-    }
-    for (const row of screenRows) {
+    for (const row of [...visualRows, ...systemRows]) {
       if (!row.ux.includes("UX-")) errors.push(`screen-mapping/README.md: ${row.route} has no route-local UX mapping`);
       if (!row.fn.includes("FN-")) errors.push(`screen-mapping/README.md: ${row.route} has no route-local FN mapping`);
       if (!row.permission.startsWith("P-")) errors.push(`screen-mapping/README.md: ${row.route} permission profile missing`);
@@ -389,16 +449,52 @@ if (errors.length === 0) {
       if (!row.query.startsWith("Q-")) errors.push(`screen-mapping/README.md: ${row.route} query/history profile missing`);
       if (!row.responsive.includes("RA-")) errors.push(`screen-mapping/README.md: ${row.route} responsive/a11y profile missing`);
       if (!row.target) errors.push(`screen-mapping/README.md: ${row.route} target route/render disposition missing`);
-      if (row.state !== "CURRENT_MAPPED") errors.push(`screen-mapping/README.md: ${row.route} state must be CURRENT_MAPPED`);
+    }
+    for (const row of devRows) {
+      if (!row.permission.startsWith("P-") || !row.dynamicState.startsWith("S-") || !row.query.startsWith("Q-") || !row.responsive.includes("RA-")) {
+        errors.push(`screen-mapping/README.md: DEV_ONLY ${row.route} profile incomplete`);
+      }
     }
 
-    const screenByRoute = new Map(screenRows.map((row) => [row.route, row]));
-    for (const current of currentRouteRows) {
-      const row = screenByRoute.get(current.route);
-      if (!row) continue;
+    const compatSection = screenMapping.slice(compatSectionStart, devSectionStart);
+    const compatRows = [];
+    for (const line of compatSection.split("\n")) {
+      if (!/^\|\s*`\//.test(line)) continue;
+      const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
+      compatRows.push({
+        source: (cells[0] ?? "").replaceAll("`", ""),
+        destination: cells[1] ?? "",
+        ux: cells[2] ?? "",
+        contract: cells[3] ?? "",
+        state: cells[4] ?? "",
+      });
+    }
+    const compatMappedSet = new Set(compatRows.map((row) => row.source));
+    for (const route of routesByClass.get("COMPAT_REDIRECT")) {
+      if (!compatMappedSet.has(route)) errors.push(`screen-mapping/README.md: COMPAT_REDIRECT route missing: ${route}`);
+    }
+    for (const row of compatRows) {
+      if (!routesByClass.get("COMPAT_REDIRECT").has(row.source)) errors.push(`screen-mapping/README.md: non-COMPAT redirect row: ${row.source}`);
+      if (!row.destination || /unknown|tbd/i.test(row.destination)) errors.push(`screen-mapping/README.md: redirect destination unresolved: ${row.source}`);
+      if (!row.ux.includes("UX-")) errors.push(`screen-mapping/README.md: redirect UX owner missing: ${row.source}`);
+      if (!row.contract) errors.push(`screen-mapping/README.md: redirect query/hash/role contract missing: ${row.source}`);
+      if (row.state !== "COMPAT_MAPPED") errors.push(`screen-mapping/README.md: redirect state must be COMPAT_MAPPED: ${row.source}`);
+      const destinationRoutes = [...row.destination.matchAll(/\/[A-Za-z0-9_~.\-\[\]]+(?:\/[A-Za-z0-9_~.\-\[\]]+)*/g)]
+        .map((match) => match[0].split(/[?#]/, 1)[0]);
+      if (!destinationRoutes.length) errors.push(`screen-mapping/README.md: redirect destination is not route-like: ${row.source}`);
+      for (const destination of new Set(destinationRoutes)) {
+        if (!currentRouteSet.has(destination)) errors.push(`screen-mapping/README.md: redirect destination unknown: ${row.source} -> ${destination}`);
+      }
+    }
+
+    const visualByRoute = new Map(visualRows.map((row) => [row.route, row]));
+    const currentByRoute = new Map(currentRouteRows.map((row) => [row.route, row]));
+    for (const row of visualRows) {
+      const current = currentByRoute.get(row.route);
+      if (!current) continue;
       const pageSource = read(current.filePath);
       if (pageSource.includes("searchParams") && row.query === "Q-DIRECT") {
-        errors.push(`screen-mapping/README.md: ${current.route} reads searchParams but is marked Q-DIRECT`);
+        errors.push(`screen-mapping/README.md: ${row.route} reads searchParams but is marked Q-DIRECT`);
       }
     }
     for (const [route, expectedPrefix] of [
@@ -408,7 +504,7 @@ if (errors.length === 0) {
       ["/user/[id]", "Q-USER-PAGED("],
       ["/rules", "Q-RULES("],
     ]) {
-      if (!screenByRoute.get(route)?.query.startsWith(expectedPrefix)) {
+      if (!visualByRoute.get(route)?.query.startsWith(expectedPrefix)) {
         errors.push(`screen-mapping/README.md: ${route} must preserve ${expectedPrefix} contract`);
       }
     }
@@ -427,7 +523,6 @@ if (errors.length === 0) {
         state: cells[5] ?? "",
       });
     }
-    if (shellRows.length !== 16) errors.push(`screen-mapping/README.md: shell rows=${shellRows.length}, expected=16`);
     const shellSet = new Set(shellRows.map((row) => row.id));
     for (const row of shellRows) {
       if (!row.ux.includes("UX-")) errors.push(`screen-mapping/README.md: ${row.id} has no UX mapping`);
@@ -444,7 +539,6 @@ if (errors.length === 0) {
       surfaceRows.set(token, { owners: match[2], ux: match[3] });
     }
     const uxSurfaceSet = new Set(uxRows.map((row) => row.surface));
-    if (uxSurfaceSet.size !== 170) errors.push(`frontend UX ledgers: distinct Surface tokens=${uxSurfaceSet.size}, expected=170`);
     if (surfaceRows.size !== uxSurfaceSet.size) {
       errors.push(`screen-mapping/README.md: Surface resolution rows=${surfaceRows.size}, expected=${uxSurfaceSet.size}`);
     }
@@ -466,17 +560,19 @@ if (errors.length === 0) {
     }
 
     for (const phrase of [
-      "CURRENT USER_SCREEN routes = 86",
-      "baseline UX capabilities = 432",
-      "distinct UX Surface tokens = 170",
-      "screen routes with no UX mapping = 0",
+      "CURRENT VISUAL_SCREEN =",
+      "COMPAT_REDIRECT =",
+      "DEV_ONLY =",
+      "SYSTEM_SURFACE =",
+      "AUDIT_REQUIRED = 0",
+      "CURRENT_OBSERVED = 0",
       "UX Surface tokens with no route/shell resolution = 0",
       "Q-LIST(q,event,sort,page,view)",
       "Q-USER-PAGED(worksPage,collabPage)",
       "RA-BASE",
       "P-MANAGE",
       "P-ADMIN",
-      "Optimization blockers requiring frontend change: **0**",
+      "Frontend unresolved/orphan/unknown owners: **0**",
       "Production mutation: none",
     ]) {
       if (!screenMapping.includes(phrase)) errors.push(`screen-mapping/README.md: required mapping invariant missing: ${phrase}`);
@@ -802,9 +898,42 @@ if (errors.length === 0) {
     }
   }
 
-  // Design source transition.
+  // Design source transition + MIG-0011 Active X requirement gate.
   if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
+  for (const phrase of [
+    "authentication principal = Auth User",
+    "acting/content/interaction identity = Active X",
+    "video_interactions_auth.auth_user_id",
+    "CURRENT_DIVERGENCE",
+    "TARGET layout/component hierarchyの捏造",
+  ]) {
+    if (!frontendRequirements.includes(phrase)) errors.push(`FRONTEND_REQUIREMENTS.md: required frontend reconciliation marker missing: ${phrase}`);
+  }
+  for (const phrase of [
+    "authentication principal = Auth User",
+    "acting/content/interaction identity = Active X",
+    "CURRENT_DIVERGENCE",
+  ]) {
+    if (!requirements.includes(phrase)) errors.push(`PRODUCT_REQUIREMENTS.md: Active X target marker missing: ${phrase}`);
+  }
+  const uxById = new Map(uxRows.map((row) => [row.id, row]));
+  for (const id of ["UX-VID-025", "UX-VID-026", "UX-VID-027", "UX-VID-028", "UX-LIB-001", "UX-LIB-002", "UX-LIB-008"]) {
+    if (uxById.get(id)?.state !== "CURRENT_DIVERGENCE") {
+      errors.push(`frontend UX ledgers: Active X interaction divergence must remain explicit for ${id}`);
+    }
+  }
+  if (uiReference.includes("`PENDING_HTML`")) {
+    for (const forbiddenClaim of [
+      /^TARGET layout:\s*.+$/m,
+      /^TARGET component hierarchy:\s*.+$/m,
+      /^Visual target implemented:\s*(yes|done)$/im,
+    ]) {
+      if (forbiddenClaim.test(frontendRequirements)) {
+        errors.push("FRONTEND_REQUIREMENTS.md: target visual was specified while UI_REFERENCE is PENDING_HTML");
+      }
+    }
+  }
 
   const obsoletePositiveRefs = [
     "docs/design-redesign/ROUTE_INVENTORY.md",
@@ -930,4 +1059,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log("[check:migration-docs] OK: 86 CURRENT routes, 432 UX capabilities, 136 FN contracts, 110 Server Actions, 28 API route files / 33 handlers, 4 Cloudflare Workers, measured CPU/1102 baseline, static/visibility baseline, auth/permission baseline, Queue/Cron/background baseline, 86-screen UX/FN mapping, route/UI/platform sources, quality/agent/Git rules and task references are consistent.");
+console.log("[check:migration-docs] OK: classified page routes, final UX dispositions, FN/API/action inventories, route/shell/query/Active-X/UI-reference gates and existing platform baselines are consistent.");
