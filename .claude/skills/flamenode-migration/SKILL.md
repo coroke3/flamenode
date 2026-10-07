@@ -13,8 +13,9 @@ Read:
 2. `docs/migration/AGENT_PROTOCOL.md`
 3. `docs/migration/README.md`
 4. `docs/migration/STATUS.md`
-5. `docs/migration/FUNCTION_INVENTORY.md`
-6. relevant matrix/code/tests
+5. `docs/migration/FEATURE_CATALOG.md`
+6. `docs/migration/FUNCTION_INVENTORY.md`
+7. relevant matrix/code/tests
 
 Execute exactly one READY MIG task, record `Owner: claude`, validate it, and persist progress before returning.
 
