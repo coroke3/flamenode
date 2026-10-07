@@ -92,6 +92,21 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 
 この表は実装指示ではない。各MIG taskで「共通化した方が本当に意味が明確か」を検証する。
 
+## MIG-0008 evidence
+
+Auth/session/identity/permission coreをcode/testsで監査し、CURRENT trust boundaryを固定した。
+
+- Auth.js database sessionはAuth User IDの識別に使うが、role/banned/Active X/termsはD1 user正本を再読する。auth/DB障害をfalse logoutへ変換しない。
+- Discord linkingはprovider/discrod_id conflictを拒否し、OAuth bearer/refresh/id tokenを永続化しない。二重callbackはCAS+rereadで冪等化する。
+- Active Xはacting/posting identityであり、event authorizationの唯一の主体ではない。event権限はAuth Userに紐づく全approved X IDから解決する。
+- account summary/header DTOは表示・導線用であり、認可入力にしない。
+- event ownerはowner presetだけでなく approved X + owner-role account linkを必要とし、最後のoperable ownerをSQL/CASでも保護する。
+- video privilege modeは normal / event / admin を混ぜない。normal ownership、event concrete permission、admin roleを別々に解決する。
+- permission resolverはunknown/malformed policyをfail-closedとし、adminOnly keyを非admin assignmentから除外する。
+- request-local authz snapshotによるD1 read共通化は候補だが、cross-request/global authorization cacheは禁止。
+
+MIG-0008でfrontend product-contract変更を必須とするoptimization blockerは0。transport/frameworkは変えられるが、outage/redirect/terms/identity/permission/owner behaviorは維持する。
+
 ## MIG-0007 evidence
 
 Static/public deliveryをcode/testsで追跡し、25 static rebuild targetとphysical artifact family、canonical alias、visibility fence、repair/fallbackをCURRENT_VERIFIED化した。

@@ -51,7 +51,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 7. `docs/migration/CODE_QUALITY.md`
 8. task scopeに応じて:
    - route/UI/frontend → `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象`frontend/*.md`
-   - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`; Route Handler/APIを触る場合は `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job topologyを触る場合は `cloudflare/TOPOLOGY.md`; CPU/1102/request hot-path/PoC performanceを触る場合は `cloudflare/PERFORMANCE_BASELINE.md`; static artifact/alias/visibility/fallback/repairを触る場合は `static-delivery/README.md`
+   - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`; Route Handler/APIを触る場合は `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job topologyを触る場合は `cloudflare/TOPOLOGY.md`; CPU/1102/request hot-path/PoC performanceを触る場合は `cloudflare/PERFORMANCE_BASELINE.md`; static artifact/alias/visibility/fallback/repairを触る場合は `static-delivery/README.md`; auth/session/linking/terms/Active X/permission/owner invariantを触る場合は `auth/README.md`
    - visual/UI design → `UI_REFERENCE.md`
 9. 必要な`ROUTE_MATRIX.md` / `API_MATRIX.md`
 10. 対象CURRENT code + tests + config
@@ -253,6 +253,7 @@ UX変更が必要な最適化は`UX_IMPACT_REVIEW_REQUIRED`で止める。
 - DB migrationはexpand -> migrate -> contract
 - public requestにheavy generationを戻さない
 - Cloudflare topology変更前に `cloudflare/TOPOLOGY.md` のCURRENT ingress/binding/build invariantsを確認する
+- auth/permission変更前に `auth/README.md` のCURRENT trust hierarchy・fail-closed・owner/privilege-mode invariantsを確認する
 - CPU/1102/request execution変更前に `cloudflare/PERFORMANCE_BASELINE.md` のsampling semantics・resource outcomes・TARGET budgetsを確認する
 - public/static delivery変更前に `static-delivery/README.md` のcommit-point・deny-first fence・canonical alias・fail-closed/fallback契約を確認する
 - authzをUIだけに置かない

@@ -5,22 +5,22 @@
 > Baseline commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
 > Index: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
 
-AuthはPhase 8までproduction source of truthをCURRENT Auth.jsへ残す。Personal/Entryはリデザイン時も機能・権限・副作用を維持する。
+AuthはPhase 8までproduction source of truthをCURRENT Auth.jsへ残す。Personal/Entryはリデザイン時も機能・権限・副作用を維持する。MIG-0008で FN-AUTH-001..010 を [`../auth/README.md`](../auth/README.md) のcode/test evidenceによりCURRENT_VERIFIED化した。Personal/Entry各機能の完全ライフサイクル監査は後続scope。
 
 ## Authentication / account
 
 | ID | Existing function | Main surfaces | Critical contract | State |
 | --- | --- | --- | --- | --- |
-| FN-AUTH-001 | Discord OAuth login | Auth.js/API | callback/origin/session | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-002 | session復元 | auth/current user | existing sessions compatibility | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-003 | Discord account linking | auth adapter/config | duplicate/link safety | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-004 | banned/role state反映 | auth/session | authorization safety | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-005 | onboarding | `/onboarding` | required initial steps | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-006 | terms同意 | onboarding/terms action | version/user acceptance | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-007 | auth complete redirect | `/auth/complete` | safe redirect/canonical host | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-008 | logout/session終了 | Auth.js | cookie/session invalidation | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-009 | account summary/private account API | public header/account UI, `app/api/account` | presence/details degraded state、authenticated private data、privileged link fail-closed | DETAIL_AUDIT_REQUIRED |
-| FN-AUTH-010 | Active X ID切替 | account menu / `useActiveXSwitcher` | approvedのみ切替、pending/error state、切替後summary再取得 | DETAIL_AUDIT_REQUIRED |
+| FN-AUTH-001 | Discord OAuth login | Auth.js/API | callback/origin/session | CURRENT_VERIFIED |
+| FN-AUTH-002 | session復元 | auth/current user | existing sessions compatibility | CURRENT_VERIFIED |
+| FN-AUTH-003 | Discord account linking | auth adapter/config | duplicate/link safety | CURRENT_VERIFIED |
+| FN-AUTH-004 | banned/role state反映 | auth/session | authorization safety | CURRENT_VERIFIED |
+| FN-AUTH-005 | onboarding | `/onboarding` | required initial steps | CURRENT_VERIFIED |
+| FN-AUTH-006 | terms同意 | onboarding/terms action | version/user acceptance | CURRENT_VERIFIED |
+| FN-AUTH-007 | auth complete redirect | `/auth/complete` | safe redirect/canonical host | CURRENT_VERIFIED |
+| FN-AUTH-008 | logout/session終了 | Auth.js | cookie/session invalidation | CURRENT_VERIFIED |
+| FN-AUTH-009 | account summary/private account API | public header/account UI, `app/api/account` | presence/details degraded state、authenticated private data、privileged link fail-closed | CURRENT_VERIFIED |
+| FN-AUTH-010 | Active X ID切替 | account menu / `useActiveXSwitcher` | approvedのみ切替、pending/error state、切替後summary再取得 | CURRENT_VERIFIED |
 
 ## Personal dashboard / owned videos
 
