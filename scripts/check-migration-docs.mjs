@@ -13,6 +13,7 @@ const required = [
   "docs/migration/STATUS.md",
   "docs/migration/CURRENT_ROUTES.md",
   "docs/migration/FRONTEND_FEATURES.md",
+  "docs/migration/FEATURE_CATALOG.md",
   "docs/migration/FUNCTION_INVENTORY.md",
   "docs/migration/PRODUCT_REQUIREMENTS.md",
   "docs/migration/CODE_QUALITY.md",
@@ -113,6 +114,7 @@ if (errors.length === 0) {
   const protocol = read("docs/migration/AGENT_PROTOCOL.md");
   const inventory = read("docs/migration/FUNCTION_INVENTORY.md");
   const frontend = read("docs/migration/FRONTEND_FEATURES.md");
+  const featureCatalog = read("docs/migration/FEATURE_CATALOG.md");
   const currentRoutes = read("docs/migration/CURRENT_ROUTES.md");
   const requirements = read("docs/migration/PRODUCT_REQUIREMENTS.md");
   const quality = read("docs/migration/CODE_QUALITY.md");
@@ -316,6 +318,47 @@ if (errors.length === 0) {
   const uxIds = uxRows.map((row) => row.id);
   const uxDupes = duplicateIds(uxIds);
   if (uxDupes.length) errors.push(`frontend UX ledgers: duplicate IDs: ${uxDupes.join(", ")}`);
+  const uxSet = new Set(uxIds);
+
+  // Human-readable full feature catalog must remain an exact derived view of
+  // the canonical UX/FN ledgers. This lets every migration agent inspect all
+  // existing product capabilities from one Japanese document without making
+  // that document a second source of truth.
+  const catalogUxIds = [...featureCatalog.matchAll(/^\|\s*(UX-[A-Z]+-\d{3})\s*\|/gm)].map((m) => m[1]);
+  const catalogFnIds = [...featureCatalog.matchAll(/^\|\s*(FN-[A-Z]+-\d{3})\s*\|/gm)].map((m) => m[1]);
+  const catalogUxSet = new Set(catalogUxIds);
+  const catalogFnSet = new Set(catalogFnIds);
+  const catalogUxDupes = duplicateIds(catalogUxIds);
+  const catalogFnDupes = duplicateIds(catalogFnIds);
+  if (catalogUxDupes.length) errors.push(`FEATURE_CATALOG.md: duplicate UX IDs: ${catalogUxDupes.join(", ")}`);
+  if (catalogFnDupes.length) errors.push(`FEATURE_CATALOG.md: duplicate FN IDs: ${catalogFnDupes.join(", ")}`);
+  if (catalogUxIds.length !== uxRows.length) errors.push(`FEATURE_CATALOG.md: UX rows=${catalogUxIds.length}, expected=${uxRows.length}`);
+  if (catalogFnIds.length !== functionRows.length) errors.push(`FEATURE_CATALOG.md: FN rows=${catalogFnIds.length}, expected=${functionRows.length}`);
+  for (const id of uxIds) if (!catalogUxSet.has(id)) errors.push(`FEATURE_CATALOG.md: missing UX ${id}`);
+  for (const id of functionIds) if (!catalogFnSet.has(id)) errors.push(`FEATURE_CATALOG.md: missing FN ${id}`);
+  for (const id of catalogUxIds) if (!uxSet.has(id)) errors.push(`FEATURE_CATALOG.md: unknown UX ${id}`);
+  for (const id of catalogFnIds) if (!functionSet.has(id)) errors.push(`FEATURE_CATALOG.md: unknown FN ${id}`);
+
+  for (const marker of [
+    "like / bookmark / save はActive X所有",
+    "Performance/architecture最適化のために、frontend product behavior変更を必須とするblocker: 0",
+    "UI_REFERENCE.md = PENDING_HTML",
+    "docs/design-redesign/",
+  ]) {
+    if (!featureCatalog.includes(marker)) errors.push(`FEATURE_CATALOG.md: required marker missing: ${marker}`);
+  }
+
+  for (const adapter of [
+    "docs/migration/AGENT_PROTOCOL.md",
+    ".claude/commands/flamenode-migration.md",
+    ".claude/skills/flamenode-migration/SKILL.md",
+    ".codex/skills/flamenode-migration/SKILL.md",
+    ".agents/workflows/flamenode-migration.md",
+    ".agents/skills/flamenode-migration/SKILL.md",
+    ".agents/rules/flamenode-project.md",
+  ]) {
+    if (!read(adapter).includes("FEATURE_CATALOG.md")) errors.push(`${adapter}: FEATURE_CATALOG.md reference missing`);
+  }
 
   const declaredUxTotal = Number(frontend.match(/\*\*Total baseline\*\*\s*\|\s*\|\s*\*\*(\d+)\*\*/i)?.[1]);
   if (!Number.isFinite(declaredUxTotal)) errors.push("FRONTEND_FEATURES.md: Total baseline count is missing");
