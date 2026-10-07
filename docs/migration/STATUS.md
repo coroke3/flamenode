@@ -14,14 +14,14 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0007
+Current Task: MIG-0008
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0006
-Last Task PR: #242
-Next: MIG-0007
+Last Completed Task: MIG-0007
+Last Task PR: #243
+Next: MIG-0008
 ```
 
 ## State definitions
@@ -63,8 +63,8 @@ Next: MIG-0007
 Current FN state summary:
 
 ```text
-CURRENT_VERIFIED: 2
-DETAIL_AUDIT_REQUIRED: 134
+CURRENT_VERIFIED: 11
+DETAIL_AUDIT_REQUIRED: 125
 PARITY_VERIFIED: 0
 REMOVAL_PROPOSED: 0
 REMOVED_APPROVED: 0
@@ -115,7 +115,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0004 | Route Handler / API baseline | DONE | MIG-0001 | all `route.ts` methods, contract/auth/effects/tests, affected UX/FN, duplication observations |
 | MIG-0005 | Cloudflare Worker/domain/route/binding baseline | DONE | MIG-0001 | 4 Workers, Custom Domain, Routes, bindings, build/deploy topology |
 | MIG-0006 | CPU / 1102 / request baseline | DONE | MIG-0005 | real Cloudflare metrics, hot/cold paths, representative budgets |
-| MIG-0007 | static artifact / visibility baseline | READY | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
+| MIG-0007 | static artifact / visibility baseline | DONE | MIG-0001 | artifact types, aliases, fail-closed guarantees, repair/fallback, affected UX/FN |
 | MIG-0008 | Auth/session/permission baseline | READY | MIG-0001 | login/session/linking/Active X/owner/permission contracts and gated UX |
 | MIG-0009 | Queue/Cron/background job baseline | READY | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
 | MIG-0010 | 86 CURRENT screens + cross-route shells → UX/FN mapping | BLOCKED | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
@@ -270,71 +270,74 @@ MIG-0805 requires explicit user approval before production action.
 
 # Last completed task
 
-## MIG-0006 — CPU / 1102 / request baseline
+## MIG-0007 — static artifact / visibility baseline
 
 ```text
 State: DONE
 Owner: chatgpt
-PR: #242
+PR: #243
 Production action required: no
 Runtime behavior changed: no
 ```
 
 Completed:
 
-- Workers Observabilityをread-only集計し、4 CURRENT WorkersのCPU/resource outcomeを測定
-- aggregateはABR sampling（主に `abr_level=10`, `sampleInterval ~= 10`）のためsampling-weighted estimateとして明記
-- web fetchはCPU median 15ms / p95 872ms / p99 1249msのCURRENT sampled distribution
-- web `exceededCpu` signalを確認し、個別eventでpublic video / user pathがCPU 10ms・HTTP 503で終了する実例を確認
-- content static-rebuild QueueでもCPU 50msの `exceededCpu` individual eventを確認
-- historical web versionに `exceededMemory` / HTTP 503を確認し、CPUだけでなくmemory/cancellationを別リスクとして固定
-- home/list/user/video/image proxy/account summary/entryなどのhot pathをcode/testsと実ログで照合
-- CURRENT ISR/card cap/static asset bypass/bounded degraded D1/image safety mitigationsをreplacement parityまで維持する方針を固定
-- TARGET budgetsを simple read p95<5ms / normal mutation<8ms / auth-heavy<9ms / visibility gateway p50<1.5ms p95<3ms p99<5ms / exceededCpu=0 として正本化
-- `cloudflare/PERFORMANCE_BASELINE.md` をshared protocol / Claude / Codex / Antigravity / checkerへ接続
-- account subscription APIはconnector権限上read不能だったためplan名を推測しない方針を明記
-- production Cloudflare/runtime mutation 0
+- CURRENT static rebuild target 25種類を code dispatcher/types で照合
+- home/list/video/user/events/recommend/rules/search/shared-input/internal artifact familyをcommit-point/fallback/visibility付きで台帳化
+- video internal ID / YouTube alias の canonical enqueue・canonical R2 retry・alias object互換を固定
+- x_user case-insensitive canonical visibility identityを固定
+- unsafe canonical R2 rewrite拒否を固定
+- visibility entity 4種（video/event/x_user/event_group）と blocked/release_pending/released state machineを固定
+- public→private と private→public の双方で R2 deny-first orderingを確認
+- event promotion releaseは event_base/event_slots/event_release/event_playlist freshness完了まで解除しないことを確認
+- release CAS競合時の deny block restore を確認
+- event ID rename/reuse old-ID tombstone をgeneric CRUD化しないことを固定
+- enforce mode manifest failureは unavailable/fail-closed、degraded D1も同じvisibility contextを通すことを固定
+- maintenance/static_json_only/live-overlay のfallback matrixと ready/empty/stale/reflecting/unavailable/not_found stateを固定
+- static_artifacts tracking/hash/dedupe/generation commit/GC invariantsを固定
+- dangling visibility repairは admin-only + exact token + CAS の明示例外として固定
+- FN-PLAT-002..008、FN-X-004、FN-X-010 を CURRENT_VERIFIEDへ更新
+- shared protocol / Claude / Codex / Antigravity / checkerへ `static-delivery/README.md` を接続
+- production mutation 0
 
 Validation evidence:
 
-- Workers Observability invocation logs: CPU, wall time, outcome, event type, request path, HTTP status
-- Worker settings: invocation logs / persistence / head sampling rate=1
-- individual resource-failure events used in addition to sampled aggregate
-- repo compare: branch is behind main by 0 and changes only migration docs/agent/checker files
+- `src/lib/staticRebuild/types.ts` target setと `workers/json-generator/rebuild.ts` dispatcher
+- visibility transition/compensation/release CAS implementation
+- public loader/probe/degraded policy/data state implementation
+- static delivery / visibility / rebuild contract tests
 - migration checker JavaScript syntax parse: OK
-- stable baseline markers present; volatile sampled counts are intentionally not checker constants
-- full local checker execution is not claimed because repository materialization/network is unavailable in the isolated runtime
+- FN ledger actual count: CURRENT_VERIFIED=11 / DETAIL_AUDIT_REQUIRED=125
+- branch behind main=0 at final review
 - author self-review only; independent approval is not represented
 
 Optimization conclusions:
 
-- current public SSR/RSC execution materially overlaps with `exceededCpu`; TARGET public SSG + thin visibility gateway remains evidence-backed
-- private Next SSR tails support React/Vite SPA + bounded API direction
-- stable image delivery should avoid mandatory Worker proxy hits where safety/revocation semantics permit
-- background Workers retain separate budgets and must not be merged into the web request budget without MIG-0009 evidence
-- increasing CPU limit alone is not an acceptable migration strategy because memory/cancellation and unnecessary request-time generation also exist
+- typed artifact descriptor + bounded publication protocol + visibility fence coreは共通化候補
+- event rename/reuse, dangling repair, rules no-stale, search generation completenessは明示例外のまま維持
+- generic R2 repository化はvisibility/freshness/commit semanticsを隠すため採用しない
 - frontend product-contract change required for optimization: 0
 
 Rollback:
 
-- revert PR #242 squash commit; no Cloudflare rollback is required because MIG-0006 is documentation/checker-only
+- revert PR #243 squash commit; production storage/routing rollbackは不要
 
 # Next task claim template
 
-For MIG-0007 the writer records before work:
+For MIG-0008 the writer records before work:
 
 ```text
-Task: MIG-0007
+Task: MIG-0008
 Owner: claude | codex | antigravity | other
 State: READY -> IN_PROGRESS
-Branch: migration/mig-0007-static-visibility-baseline
+Branch: migration/mig-0008-auth-permission-baseline
 PR: pending
-Scope: static artifacts / aliases / visibility fail-closed / repair/fallback baseline
+Scope: auth/session/linking/Active X/owner/permission contracts and gated UX
 Affected UX IDs:
 Affected FN IDs:
-Evidence sources: current code/tests + cloudflare/TOPOLOGY.md + cloudflare/PERFORMANCE_BASELINE.md
+Evidence sources: current code/tests + server-actions/route-handlers/static-delivery baselines
 Rollback:
 Production action required: no
 ```
 
-MIG-0008 and MIG-0009 remain dependency-ready. MIG-0007 is the default next task.
+MIG-0009 also remains dependency-ready. MIG-0008 is the default next task.

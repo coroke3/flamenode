@@ -14,7 +14,7 @@ Read and follow, in order:
 3. `docs/migration/README.md`
 4. `docs/migration/STATUS.md`
 5. `docs/migration/FUNCTION_INVENTORY.md`
-6. the relevant route/API matrix and target code/tests; for Cloudflare Worker/ingress/binding/build/job work also read `docs/migration/cloudflare/TOPOLOGY.md`; for CPU/1102/request/PoC performance work also read `docs/migration/cloudflare/PERFORMANCE_BASELINE.md`
+6. the relevant route/API matrix and target code/tests; for Cloudflare Worker/ingress/binding/build/job work also read `docs/migration/cloudflare/TOPOLOGY.md`; for CPU/1102/request/PoC performance work also read `docs/migration/cloudflare/PERFORMANCE_BASELINE.md`; for static artifact/alias/visibility/fallback/repair work also read `docs/migration/static-delivery/README.md`
 
 Execute **exactly one READY MIG task** per invocation.
 
