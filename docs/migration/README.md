@@ -19,6 +19,10 @@
 > Queue / Cron / jobs CURRENT baseline: [`background-jobs/README.md`](background-jobs/README.md)
 > Static/visibility CURRENT baseline: [`static-delivery/README.md`](static-delivery/README.md)
 > Phase 1 詳細仕様 & デザイン戦略: [`PHASE_1_SPEC.md`](PHASE_1_SPEC.md)
+> Phase 3 詳細仕様 (ドメイン抽出): [`PHASE_3_SPEC.md`](PHASE_3_SPEC.md)
+> UI コンポーネント移行ガイド: [`UI_MIGRATION_GUIDE.md`](UI_MIGRATION_GUIDE.md)
+> Active X データ移行計画: [`ACTIVE_X_MIGRATION_PLAN.md`](ACTIVE_X_MIGRATION_PLAN.md)
+> 複数 Worker ルーティング & デプロイ計画: [`ROUTING_AND_DEPLOY_PLAN.md`](ROUTING_AND_DEPLOY_PLAN.md)
 
 ## Purpose
 
