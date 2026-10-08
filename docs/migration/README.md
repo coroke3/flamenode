@@ -18,6 +18,7 @@
 > Auth / permission CURRENT baseline: [`auth/README.md`](auth/README.md)
 > Queue / Cron / jobs CURRENT baseline: [`background-jobs/README.md`](background-jobs/README.md)
 > Static/visibility CURRENT baseline: [`static-delivery/README.md`](static-delivery/README.md)
+> Phase 1 詳細仕様 & デザイン戦略: [`PHASE_1_SPEC.md`](PHASE_1_SPEC.md)
 
 ## Purpose
 
@@ -636,6 +637,8 @@ Phase 0 Gate:
 - production behavior unchanged by baseline work
 
 ## Phase 1 — Repository boundaries
+
+タスク別詳細仕様・作成ファイル・コード例: [`PHASE_1_SPEC.md`](PHASE_1_SPEC.md)
 
 Create only required boundaries:
 
