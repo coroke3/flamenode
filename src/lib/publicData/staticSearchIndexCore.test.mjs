@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { searchStaticIndexVideos } from "./staticSearchIndexCore.ts";
+import {
+  normalizeSearchVideo,
+  searchStaticIndexVideos,
+  staticSearchVideoMatchesNormalizedQuery,
+  staticSearchVideoMatchesQuery,
+} from "./staticSearchIndexCore.ts";
 import {
   buildStaticVideoSearchPostingArtifacts,
   normalizeStaticVideoSearchPostingManifest,
@@ -42,12 +47,13 @@ test("searchStaticIndexVideos matches title and creator fields", () => {
 });
 
 test("searchStaticIndexVideos can reverse for old sort", () => {
+  const sourceVideos = [
+    { id: "v1", title: "Alpha Work", creator_display_name: "A" },
+    { id: "v2", title: "Beta Work", creator_display_name: "B" },
+  ];
   const page = searchStaticIndexVideos({
     payload: {
-      videos: [
-        { id: "v1", title: "Alpha Work", creator_display_name: "A" },
-        { id: "v2", title: "Beta Work", creator_display_name: "B" },
-      ],
+      videos: sourceVideos,
     },
     q: "work",
     sort: "old",
@@ -55,6 +61,78 @@ test("searchStaticIndexVideos can reverse for old sort", () => {
     pageSize: 24,
   });
   assert.equal(page?.videos[0]?.id, "v2");
+  assert.deepEqual(sourceVideos.map((video) => video.id), ["v1", "v2"]);
+});
+
+test("legacy search checks every public video field and registered creator name", () => {
+  const payload = {
+    videos: [{
+      id: "video_unique",
+      title: "Ordinary title",
+      creator_display_name: "Display Unique",
+      creator_x_user_id: "Creator_Handle",
+      creator_x_user_name: "Embedded Alias",
+      youtube_video_id: "YTUnique",
+    }],
+    users: [{ id: "creator_handle", x_name: "Registered Alias" }],
+  };
+  for (const query of [
+    "ORDINARY",
+    "display unique",
+    "CREATOR_HANDLE",
+    "YTUNIQUE",
+    "VIDEO_UNIQUE",
+    "registered alias",
+    "EMBEDDED ALIAS",
+  ]) {
+    const page = searchStaticIndexVideos({
+      payload,
+      q: query,
+      sort: "new",
+      page: 1,
+      pageSize: 24,
+    });
+    assert.equal(page?.total, 1, `query should match: ${query}`);
+    assert.equal(page?.videos[0]?.id, "video_unique");
+  }
+});
+
+test("normalized posting matcher keeps the same field matching semantics", () => {
+  const video = normalizeSearchVideo({
+    id: "video_unique",
+    title: "Ordinary title",
+    creator_display_name: "Display Unique",
+    creator_x_user_id: "Creator_Handle",
+    creator_x_user_name: "Embedded Alias",
+    youtube_video_id: "YTUnique",
+  });
+  assert.ok(video);
+  const userNames = new Map([["creator_handle", "Registered Alias"]]);
+  for (const query of [
+    "ORDINARY",
+    "display unique",
+    "CREATOR_HANDLE",
+    "YTUNIQUE",
+    "VIDEO_UNIQUE",
+    "registered alias",
+    "EMBEDDED ALIAS",
+  ]) {
+    const expected = staticSearchVideoMatchesQuery(video, query, userNames);
+    assert.equal(
+      staticSearchVideoMatchesNormalizedQuery(
+        video,
+        query.trim().toLowerCase(),
+        userNames,
+      ),
+      expected,
+      `normalized matcher should preserve query: ${query}`,
+    );
+  }
+  assert.equal(
+    staticSearchVideoMatchesNormalizedQuery(video, "embedded alias"),
+    true,
+    "the shared default empty map still checks embedded creator aliases",
+  );
 });
 
 test("video search posting はタイトル・X ID・日本語名を候補化し、世代を固定する", () => {

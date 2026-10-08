@@ -73,72 +73,6 @@ export const VIDEO_PERMISSION_ALIASES: Record<
   "videos.primary_event": ["videos.primary_event", "video.primary_event"],
 };
 
-/**
- * privilegeMode = "admin" 時に解放される危険キー（参考用ホワイトリスト）。
- * 管理者モードでは既知キーをすべて許可する (adminPolicyAllows)。
- */
-export const DANGEROUS_ADMIN_VIDEO_EDIT_KEYS = new Set<VideoEditSectionKey>([
-  "video.identity",
-  "video.youtube_id",
-  "video.primary_event",
-  "video.status",
-  "video.chapter_admin",
-  "video.permissions",
-  "videos.youtube_id",
-  "videos.primary_event",
-]);
-
-/**
- * 一般作品権限 (所有者向け) に含められるキーのホワイトリスト。
- * ここに無いキーはイベント設定 JSON に書かれていても無視する (fail-closed)。
- * 危険キー (identity / youtube_id / primary_event / status / chapter_admin /
- * permissions) は含めない。
- */
-export const OWNER_GENERAL_POLICY_WHITELIST = new Set<string>([
-  "youtube_url",
-  "videos.title",
-  "videos.music_credit",
-  "videos.members",
-  "videos.review_data",
-  "video.basics",
-  "video.descriptions",
-  "video.credits",
-  "video.members",
-  "video.member_chapters",
-]);
-
-/** @deprecated 旧名。OWNER_GENERAL_POLICY_WHITELIST を使う。 */
-export const USER_DELEGATABLE_KEYS = OWNER_GENERAL_POLICY_WHITELIST;
-
-/**
- * primary_event が無い、または allow_user_video_edits = 0 のときの
- * デフォルト所有者ポリシー (fail-closed の明示セット)。
- */
-export const DEFAULT_OWNER_GENERAL_POLICY_KEYS = new Set<VideoEditSectionKey>([
-  "video.basics",
-  "video.descriptions",
-  "video.credits",
-  "video.members",
-  "video.member_chapters",
-  "videos.title",
-  "videos.review_data",
-  "videos.music_credit",
-  "videos.members",
-]);
-
-/**
- * 旧合作メンバー既定キー。DEFAULT_OWNER_GENERAL_POLICY_KEYS と同等の意味に統一。
- * @deprecated DEFAULT_OWNER_GENERAL_POLICY_KEYS を使う。
- */
-export const COLLABORATOR_VIDEO_EDIT_KEYS = DEFAULT_OWNER_GENERAL_POLICY_KEYS;
-
-/**
- * 旧「通常モードでスタッフが触れる safe key」。スタッフ通常モード経路は削除済み。
- * 互換のため DEFAULT と同趣旨のセットを残す。
- * @deprecated
- */
-export const NORMAL_SAFE_VIDEO_EDIT_KEYS = DEFAULT_OWNER_GENERAL_POLICY_KEYS;
-
 export function resolveVideoOwnershipSync(args: {
   approvedXUserIds: readonly string[];
   creatorXUserId: string | null | undefined;
@@ -168,24 +102,6 @@ export function adminPolicyAllows(
   );
 }
 
-export function ownerGeneralPolicyAllows(
-  policyKeys: ReadonlySet<string>,
-  requiredKey: VideoEditSectionKey,
-): boolean {
-  if (requiredKey === "video.youtube_id" || requiredKey === "videos.youtube_id") {
-    return policyKeys.has("youtube_url");
-  }
-  // 危険キーは一般作品権限では絶対に許可しない (タイトル等のエイリアス経由も不可)。
-  if (DANGEROUS_ADMIN_VIDEO_EDIT_KEYS.has(requiredKey)) return false;
-  if (!OWNER_GENERAL_POLICY_WHITELIST.has(requiredKey)) return false;
-  if (policyKeys.has(requiredKey)) return true;
-  const aliases = VIDEO_PERMISSION_ALIASES[requiredKey] ?? [requiredKey];
-  return aliases.some(
-    (alias) =>
-      OWNER_GENERAL_POLICY_WHITELIST.has(alias) && policyKeys.has(alias),
-  );
-}
-
 /**
  * 作者所有者のみ、通常モードで共同編集権限管理を常に許可する。
  * 合作所有者への無制限再委譲を防ぐ。提出主体 (video.identity) とは分離する。
@@ -197,38 +113,18 @@ export function creatorOwnerCanManagePermissions(
   return ownership.isCreatorOwner && requiredKey === "video.permissions";
 }
 
-export function decideCanEditVideo(args: {
-  privilegeMode: CanEditVideoPrivilegeMode;
-  userRole: string | null | undefined;
-  ownership: VideoOwnership;
-  requiredKey: VideoEditSectionKey;
-  ownerPolicyKeys: ReadonlySet<string>;
-  eventStaffAllows: boolean;
-}): boolean {
-  const {
-    privilegeMode,
-    userRole,
-    ownership,
-    requiredKey,
-    ownerPolicyKeys,
-    eventStaffAllows,
-  } = args;
-
-  if (privilegeMode === "admin") {
-    return adminPolicyAllows(userRole, requiredKey);
-  }
-
-  if (privilegeMode === "event") {
-    return eventStaffAllows === true;
-  }
-
-  if (privilegeMode === "normal") {
-    if (!ownership.isOwner) return false;
-    if (creatorOwnerCanManagePermissions(ownership, requiredKey)) return true;
-    return ownerGeneralPolicyAllows(ownerPolicyKeys, requiredKey);
-  }
-
-  return false;
+/**
+ * 通常モード: 所有者だけが、作者の共同編集権限管理か一般作品権限の field で許可される。
+ * DB 経路（canEditVideo）と request-local context 経路で共有する。
+ */
+export function ownerPolicyAllows(
+  ownership: VideoOwnership,
+  requiredKey: VideoEditSectionKey,
+  ownerEditableFields: ReadonlySet<GeneralEditableFieldKey>,
+): boolean {
+  if (!ownership.isOwner) return false;
+  if (creatorOwnerCanManagePermissions(ownership, requiredKey)) return true;
+  return sectionAllowedByGeneralFields(requiredKey, ownerEditableFields);
 }
 
 /** Pure section decision using a request-local context. */
@@ -239,20 +135,19 @@ export function decideCanEditVideoFromAccessContext(args: {
   privilegeMode: CanEditVideoPrivilegeMode;
 }): boolean {
   const { context, userRole, requiredKey, privilegeMode } = args;
-  if (privilegeMode === "admin") {
-    return adminPolicyAllows(userRole, requiredKey);
+  if (privilegeMode === "admin") return adminPolicyAllows(userRole, requiredKey);
+  if (privilegeMode === "event") {
+    return resolveEventPermissionFromAccessContext(context, requiredKey).allowed;
   }
   if (privilegeMode === "normal") {
-    if (!context.ownership.isOwner) return false;
-    if (creatorOwnerCanManagePermissions(context.ownership, requiredKey)) return true;
-    return sectionAllowedByGeneralFields(requiredKey, context.ownerEditableFields);
+    return ownerPolicyAllows(context.ownership, requiredKey, context.ownerEditableFields);
   }
-  return resolveEventPermissionFromAccessContext(context, requiredKey).allowed;
+  return false;
 }
 
 /**
  * event_staff が requiredKey を満たすために持つべき正規権限キー。
- * DB 経路（resolveEventStaffVideoPermissionGrant）と request-local context 経路で共有する。
+ * DB 経路（eventStaffHasExactVideoPermission）と request-local context 経路で共有する。
  */
 export function eventStaffCandidatePermissionKeys(
   requiredKey: VideoEditSectionKey,
@@ -304,24 +199,6 @@ export function canUseEventPrivilegeFromAccessContext(
   );
 }
 
-export function isSafeNormalVideoEditKey(key: VideoEditSectionKey): boolean {
-  return NORMAL_SAFE_VIDEO_EDIT_KEYS.has(key);
-}
-
-export function isDangerousAdminVideoEditKey(
-  key: VideoEditSectionKey,
-): boolean {
-  return DANGEROUS_ADMIN_VIDEO_EDIT_KEYS.has(key);
-}
-
-export function isUserDelegatableKey(key: VideoEditSectionKey | string): boolean {
-  return OWNER_GENERAL_POLICY_WHITELIST.has(key);
-}
-
-export function isOwnerGeneralPolicyKey(key: string): boolean {
-  return OWNER_GENERAL_POLICY_WHITELIST.has(key);
-}
-
 /**
  * Active X が運営権限の付与先 X と食い違うとき true（注意表示用）。
  * 運営入場判定には使わない。
@@ -334,46 +211,4 @@ export function shouldWarnManageActiveXMismatch(
   if (!activeX) return false;
   if (manageStaffXUserIds.length === 0) return false;
   return !manageStaffXUserIds.includes(activeX);
-}
-
-export function parseDelegatablePermissionKeys(
-  raw: string | null | undefined,
-): Set<string> {
-  if (!raw) return new Set();
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    const out = new Set<string>();
-    for (const v of parsed) {
-      if (typeof v === "string" && OWNER_GENERAL_POLICY_WHITELIST.has(v)) {
-        out.add(v);
-      }
-    }
-    return out;
-  } catch {
-    return new Set();
-  }
-}
-
-/**
- * primary_event の設定から所有者向け一般作品権限キーを解決する。
- * allow !== 1 またはイベント無し → デフォルトポリシー。
- * allow === 1 → JSON ホワイトリストのみ (空なら何も許可しない)。
- */
-export function resolveOwnerGeneralPolicyKeys(args: {
-  primaryEvent:
-    | {
-        allow_user_video_edits: number | null | undefined;
-        user_video_edit_permission_keys_json: string | null | undefined;
-      }
-    | null
-    | undefined;
-}): Set<string> {
-  const event = args.primaryEvent;
-  if (!event || event.allow_user_video_edits !== 1) {
-    return new Set(DEFAULT_OWNER_GENERAL_POLICY_KEYS);
-  }
-  return parseDelegatablePermissionKeys(
-    event.user_video_edit_permission_keys_json,
-  );
 }

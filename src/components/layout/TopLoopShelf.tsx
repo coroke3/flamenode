@@ -165,7 +165,6 @@ export function TopLoopShelf({
   );
   const pointerActiveRef = React.useRef(false);
   const pauseReasonsRef = React.useRef({
-    hover: false,
     focus: false,
     pointer: false,
     recentInteraction: false,
@@ -648,8 +647,6 @@ export function TopLoopShelf({
 
   const showArrows = needsLoop && sourceItems.length >= 2;
   const interactionHandlers = {
-    onMouseEnter: () => setPauseReason("hover", true),
-    onMouseLeave: () => setPauseReason("hover", false),
     onFocusCapture: () => setPauseReason("focus", true),
     onBlurCapture: (event: React.FocusEvent<HTMLDivElement>) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {

@@ -173,3 +173,42 @@ test("access context の event 判定は DB 経路と同じ正規候補キーで
   assert.equal(resolveEventPermissionFromAccessContext(membersOnly, "video.member_chapters").allowed, true);
   assert.equal(resolveEventPermissionFromAccessContext(membersOnly, "video.chapter_admin").allowed, false);
 });
+
+test("event モードで preset ごとに編集できる section を値で固定する", () => {
+  const contentSections = [
+    "video.basics",
+    "video.descriptions",
+    "video.credits",
+    "video.members",
+    "video.member_chapters",
+    "video.chapter_admin",
+  ];
+  const expected = {
+    owner: [...contentSections, "video.status", "video.permissions"],
+    manager: [...contentSections, "video.status", "video.permissions"],
+    slot_manager: [],
+    content_editor: contentSections,
+    reviewer: ["video.status"],
+    xid_reviewer: [],
+    public_staff: [],
+    custom: [],
+  };
+  const sectionKeys = Object.keys(VIDEO_PERMISSION_ALIASES).filter((key) => key.startsWith("video."));
+  for (const preset of EVENT_STAFF_PRESETS) {
+    const staffContext = context({
+      ownership: nonOwner,
+      eventPermissionKeysByEvent: new Map([[
+        "event-1",
+        resolveStaffPermissionKeys({ permission_preset: preset, custom_permission_keys_json: null }),
+      ]]),
+    });
+    const allowed = sectionKeys.filter((requiredKey) =>
+      decideCanEditVideoFromAccessContext({
+        context: staffContext,
+        userRole: null,
+        requiredKey,
+        privilegeMode: "event",
+      }));
+    assert.deepEqual(allowed.sort(), [...expected[preset]].sort(), preset);
+  }
+});

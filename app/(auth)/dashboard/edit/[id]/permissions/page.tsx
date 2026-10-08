@@ -65,7 +65,6 @@ export default async function EditVideoPermissionsPage({
     video,
   });
   const canOfferEventMode = await canUseEventPrivilegeModeForVideo({
-    db,
     user: editUser,
     video,
     accessContext,

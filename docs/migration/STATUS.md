@@ -14,16 +14,16 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 ## Overall
 
 ```text
-Current Phase: 2 — Design System / HTML mock integration
-Current Task: MIG-0200
+Current Phase: 3 — Domain extraction
+Current Task: MIG-0301
 Current Owner: unassigned
-Task State: BLOCKED
+Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0108
-Last Task PR: #262
+Last Task PR: #264
 Active Task PR: none
-Next: MIG-0200 register user-provided HTML mock in UI_REFERENCE.md
+Next: MIG-0301 extraction/DI pattern
 ```
 
 ## State definitions
@@ -101,12 +101,12 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration | BLOCKED (`PENDING_HTML`) | CLOSED |
-| 3 | Domain extraction | BLOCKED | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | BLOCKED (`PENDING_HTML`, Phase 4/5前提) | CLOSED |
+| 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC | BLOCKED | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
 | 6 | Hono API | BLOCKED | CLOSED |
-| 7 | Private SPA | BLOCKED | CLOSED |
+| 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
 | 8 | Auth | BLOCKED | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
@@ -217,6 +217,9 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 2 — Design System / HTML mock integration
 
+> ※デザイン適用戦略（案A）に基づき、本Phaseは公開画面（Phase 4/5）の前提条件となります。
+> UI/デザインに依存しない Phase 3（ドメイン抽出）は先行して着手可能です。
+
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | BLOCKED | user input |
@@ -231,7 +234,7 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0301 | extraction/DI pattern | BLOCKED | MIG-0108 |
+| MIG-0301 | extraction/DI pattern | READY | MIG-0108 |
 | MIG-0302 | low-risk read domain | BLOCKED | MIG-0301 |
 | MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0302 |
 | MIG-0304 | video domain group | BLOCKED | MIG-0303 |
@@ -278,9 +281,11 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 7 — Private SPA
 
+> ※デザイン適用戦略（案A）に基づき、管理画面・ダッシュボードは現行UI資産（`packages/ui`）を流用します。
+
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0701 | dashboard read-only | BLOCKED | MIG-0206, MIG-0601 |
+| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601 |
 | MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0701 |
 | MIG-0703 | entry | BLOCKED | MIG-0702 |
 | MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703 |

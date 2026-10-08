@@ -354,3 +354,40 @@ test("posting builderのgram集合・page分割は変更前の生成規則と一
     );
   }
 });
+
+test("複数テキスト列に重複するgramがあっても作品は一度だけ登録する", () => {
+  const items = [
+    { id: "video-a", fields: ["Alpha work", "ALPHA", "ha work", "東京作品"] },
+    { id: "video-b", fields: ["Alpha another work", "another"] },
+  ];
+  const artifacts = buildStaticSearchPostingArtifacts({
+    items,
+    generatedAt: 1,
+    generation: "multi-field-dedup",
+    keyOf: (item) => item.id,
+    textOf: (item) => item.fields,
+  });
+  const expected = new Map();
+  for (const item of items) {
+    for (const gram of new Set(item.fields.flatMap((text) => legacyGrams(text, 1)))) {
+      const ids = expected.get(gram) ?? [];
+      ids.push(item.id);
+      expected.set(gram, ids);
+    }
+  }
+  const actual = new Map();
+  for (const { page } of artifacts.pages) {
+    for (const record of page.records) {
+      const ids = actual.get(record.gram) ?? [];
+      const currentIds = record.items.map((item) => item.id);
+      assert.equal(new Set(currentIds).size, currentIds.length);
+      ids.push(...currentIds);
+      actual.set(record.gram, ids);
+      assert.equal(record.total, expected.get(record.gram)?.length);
+    }
+  }
+  assert.deepEqual(
+    [...actual.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    [...expected.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+});

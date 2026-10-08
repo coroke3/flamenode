@@ -145,22 +145,14 @@ const permissionBatchSchema = z.object({
 });
 
 async function resolvePrivilegeMode(
-  db: DB,
   rawMode: string,
   user: { id: string; role?: string | null },
-  video: Pick<
-    typeof videos.$inferSelect,
-    | "id"
-    | "primary_event_id"
-    | "creator_x_user_id"
-    | "submitted_by_user_id"
-    | "visibility_status"
-  >,
-  accessContext?: VideoEditAccessContext,
+  video: Pick<typeof videos.$inferSelect, "id">,
+  accessContext: VideoEditAccessContext,
 ): Promise<CanEditVideoPrivilegeMode> {
   if (rawMode === "admin" && user.role === "admin") return "admin";
   if (rawMode === "event") {
-    const canUseEvent = await canUseEventPrivilegeModeForVideo({ db, user, video, accessContext });
+    const canUseEvent = await canUseEventPrivilegeModeForVideo({ user, video, accessContext });
     if (canUseEvent) return "event";
   }
   return "normal";
@@ -198,7 +190,7 @@ async function loadEditableVideoForPermissions(
     video,
   });
   const requested = privilegeModeRaw.trim();
-  const requestedMode = await resolvePrivilegeMode(db, requested, actor, video, accessContext);
+  const requestedMode = await resolvePrivilegeMode(requested, actor, video, accessContext);
   const requestedAllowed = await canEditVideo({
     db,
     user: actor,
@@ -222,7 +214,7 @@ async function loadEditableVideoForPermissions(
     if (adminAllowed) return { ...video, privilegeMode: "admin" };
   }
 
-  const canUseEvent = await canUseEventPrivilegeModeForVideo({ db, user: actor, video, accessContext });
+  const canUseEvent = await canUseEventPrivilegeModeForVideo({ user: actor, video, accessContext });
   if (canUseEvent) {
     const eventAllowed = await canEditVideo({
       db,
