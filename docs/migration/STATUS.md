@@ -15,15 +15,15 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 1 — Repository boundaries
-Current Task: MIG-0107
+Current Task: MIG-0108
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0106
-Last Task PR: #260
+Last Completed Task: MIG-0107
+Last Task PR: #261
 Active Task PR: none
-Next: MIG-0107 apps/api Hono skeleton
+Next: MIG-0108 Phase 1 Gate
 ```
 
 ## State definitions
@@ -212,8 +212,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 | MIG-0104 | `packages/domain` skeleton | DONE | MIG-0101 |
 | MIG-0105 | `apps/site` Astro skeleton | DONE | MIG-0101 |
 | MIG-0106 | `apps/app` React/Vite skeleton | DONE | MIG-0101 |
-| MIG-0107 | `apps/api` Hono skeleton | READY | MIG-0101 |
-| MIG-0108 | Phase 1 Gate | BLOCKED | MIG-0102..MIG-0107 |
+| MIG-0107 | `apps/api` Hono skeleton | DONE | MIG-0101 |
+| MIG-0108 | Phase 1 Gate | READY | MIG-0102..MIG-0107 |
 
 ## Phase 2 — Design System / HTML mock integration
 
@@ -378,25 +378,26 @@ Rollback:
 - Progress saved in `gap-scan/CHECKPOINT.md`.
 - MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
 - Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task is MIG-0106 / apps/app React/Vite skeleton.
+- Last completed task is MIG-0107 / apps/api Hono skeleton.
 
 # Next task claim template
 
-For MIG-0107 the writer records before work:
+For MIG-0108 the writer records before work:
 
 ```text
-Task: MIG-0107
+Task: MIG-0108
 Owner: unassigned
 State: READY
-Branch: feat/mig-0107-apps-api
+Branch: chore/mig-0108-phase-1-gate
 PR: none
-Scope: apps/api Hono skeleton, package.json, src/index.ts, wrangler.toml
+Scope: Phase 1 Gate verification, monorepo boundaries check, open Phase 1 gate
 Evidence sources: PHASE_1_SPEC.md, README.md, CODE_QUALITY.md
 Rollback: git revert
 Production action required: no
 ```
 
-MIG-0106 is DONE. MIG-0107 is READY to proceed.
+MIG-0107 is DONE. MIG-0108 (Phase 1 Gate) is READY to proceed.
+
 
 
 
