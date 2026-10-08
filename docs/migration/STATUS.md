@@ -14,16 +14,16 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 ## Overall
 
 ```text
-Current Phase: 1 — Repository boundaries
-Current Task: MIG-0108
+Current Phase: 2 — Design System / HTML mock integration
+Current Task: MIG-0200
 Current Owner: unassigned
-Task State: READY
+Task State: BLOCKED
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0107
-Last Task PR: #261
+Last Completed Task: MIG-0108
+Last Task PR: #262
 Active Task PR: none
-Next: MIG-0108 Phase 1 Gate
+Next: MIG-0200 register user-provided HTML mock in UI_REFERENCE.md
 ```
 
 ## State definitions
@@ -100,8 +100,8 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | Phase | Name | State | Gate |
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
-| 1 | Repository boundaries | IN_PROGRESS | CLOSED |
-| 2 | Design System / HTML mock integration | BLOCKED (`PENDING_HTML` + Phase 1) | CLOSED |
+| 1 | Repository boundaries | DONE | PASSED |
+| 2 | Design System / HTML mock integration | BLOCKED (`PENDING_HTML`) | CLOSED |
 | 3 | Domain extraction | BLOCKED | CLOSED |
 | 4 | Public PoC | BLOCKED | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
@@ -213,7 +213,7 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 | MIG-0105 | `apps/site` Astro skeleton | DONE | MIG-0101 |
 | MIG-0106 | `apps/app` React/Vite skeleton | DONE | MIG-0101 |
 | MIG-0107 | `apps/api` Hono skeleton | DONE | MIG-0101 |
-| MIG-0108 | Phase 1 Gate | READY | MIG-0102..MIG-0107 |
+| MIG-0108 | Phase 1 Gate | DONE | MIG-0102..MIG-0107 |
 
 ## Phase 2 — Design System / HTML mock integration
 
@@ -378,25 +378,17 @@ Rollback:
 - Progress saved in `gap-scan/CHECKPOINT.md`.
 - MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
 - Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task is MIG-0107 / apps/api Hono skeleton.
+- Last completed task is MIG-0108 / Phase 1 Gate passed.
 
 # Next task claim template
 
-For MIG-0108 the writer records before work:
+Phase 1 (Repository boundaries) is fully complete.
+All skeleton packages (`packages/ui`, `packages/contracts`, `packages/domain`) and apps (`apps/site`, `apps/app`, `apps/api`) are established and typechecked without affecting existing Next.js logic.
 
-```text
-Task: MIG-0108
-Owner: unassigned
-State: READY
-Branch: chore/mig-0108-phase-1-gate
-PR: none
-Scope: Phase 1 Gate verification, monorepo boundaries check, open Phase 1 gate
-Evidence sources: PHASE_1_SPEC.md, README.md, CODE_QUALITY.md
-Rollback: git revert
-Production action required: no
-```
+Next tasks:
+- **Phase 2 (MIG-0200)**: Waiting for user HTML mock registration (`UI_REFERENCE.md = PENDING_HTML`).
+- **Phase 3 (MIG-0301)**: Domain extraction can proceed safely once approved.
 
-MIG-0107 is DONE. MIG-0108 (Phase 1 Gate) is READY to proceed.
 
 
 
