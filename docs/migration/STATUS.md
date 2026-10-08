@@ -15,15 +15,15 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 1 — Repository boundaries
-Current Task: MIG-0105
+Current Task: MIG-0106
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0104
-Last Task PR: #258
+Last Completed Task: MIG-0105
+Last Task PR: #259
 Active Task PR: none
-Next: MIG-0105 apps/site Astro skeleton
+Next: MIG-0106 apps/app React/Vite skeleton
 ```
 
 ## State definitions
@@ -210,8 +210,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 | MIG-0102 | `packages/ui` skeleton | DONE | MIG-0101 |
 | MIG-0103 | `packages/contracts` skeleton | DONE | MIG-0101 |
 | MIG-0104 | `packages/domain` skeleton | DONE | MIG-0101 |
-| MIG-0105 | `apps/site` Astro skeleton | READY | MIG-0101 |
-| MIG-0106 | `apps/app` React/Vite skeleton | BLOCKED | MIG-0101 |
+| MIG-0105 | `apps/site` Astro skeleton | DONE | MIG-0101 |
+| MIG-0106 | `apps/app` React/Vite skeleton | READY | MIG-0101 |
 | MIG-0107 | `apps/api` Hono skeleton | BLOCKED | MIG-0101 |
 | MIG-0108 | Phase 1 Gate | BLOCKED | MIG-0102..MIG-0107 |
 
@@ -378,25 +378,26 @@ Rollback:
 - Progress saved in `gap-scan/CHECKPOINT.md`.
 - MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
 - Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task is MIG-0104 / packages/domain skeleton.
+- Last completed task is MIG-0105 / apps/site Astro skeleton.
 
 # Next task claim template
 
-For MIG-0105 the writer records before work:
+For MIG-0106 the writer records before work:
 
 ```text
-Task: MIG-0105
+Task: MIG-0106
 Owner: unassigned
 State: READY
-Branch: feat/mig-0105-apps-site
+Branch: feat/mig-0106-apps-app
 PR: none
-Scope: apps/site Astro skeleton, package.json, astro.config.mjs, static assets config
+Scope: apps/app React/Vite skeleton, package.json, vite.config.ts, App.tsx
 Evidence sources: PHASE_1_SPEC.md, README.md, CODE_QUALITY.md
 Rollback: git revert
 Production action required: no
 ```
 
-MIG-0104 is DONE. MIG-0105 is READY to proceed.
+MIG-0105 is DONE. MIG-0106 is READY to proceed.
+
 
 
 
