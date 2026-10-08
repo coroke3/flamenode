@@ -27,6 +27,15 @@ Next.js + OpenNext中心のCURRENT productionを、Cloudflare Workers FreeのCPU
 UIは全面的に作り直すが、visual redesignを既存機能の削除理由にしない。
 新しいvisual targetは後日ユーザーが提供するHTML mockを入力とする。
 
+### デザイン適用戦略（案A正式採用）
+1. **公開画面（Phase 4/5: Astro SSG + React Islands）**: ユーザー提供の新 HTML mock を正本として適用。
+2. **管理・マイページ・登録画面（Phase 7: React SPA）**: 現行 UI/コンポーネント資産（`packages/ui` へ抽出）を流用し、移行効率を最大化。
+3. **Phase 順序の最適化**: UI/デザインに依存しない **Phase 3（ドメイン抽出: MIG-0301〜MIG-0307）** は、Phase 2 の HTML モック提供を待たずに先行して着手可能とする。
+
+### Active X 未連携ユーザーのインタラクション
+- いいね・ブックマーク等の操作主体は Active X に分離する。
+- 承認済み Active X を未所持の一般ログインユーザーが操作した場合、拒否せず「Active X 登録・連携モーダル」をオーバーレイ表示してクリエイター名義の登録を促す。
+
 ## Goals
 
 - public閲覧からrequest-time SSRを原則排除する

@@ -94,6 +94,7 @@ acting/content/interaction identity = Active X
 4. **Step 4: フロントエンド・ライブラリ表示の更新 (UI Reconciliation)**
    - `/dashboard/library` 等のライブラリ画面を「選択中の Active X に紐づく一覧」へ切り替え。
    - ヘッダー等での Active X 切り替えと連動し、行動主体がどの名義であるかを視覚的に明示。
+   - **未連携ユーザーへの登録モーダル表示**: 承認済み Active X が未設定の一般ログインユーザーがいいねやブックマークを操作した場合、拒否・サイレント無視ではなく「Active X 登録・連携モーダル」をオーバーレイ表示してクリエイター名義の登録を促す（ユーザー合意確定）。
 5. **Step 5: 旧パスの段階廃止 (Deprecation & Cleanup)**
    - 移行期間を経て、旧 `auth_user_id` 単位の書き込みパスを停止。整合性検証完了後に旧カラム/テーブルを安全に整理。
 
@@ -103,13 +104,22 @@ CURRENTは独立した自由コメント欄ではなく、時間付きchapter/co
 - `video_chapters` / chapter UI / current codeを正本として扱う。
 - historical table/field名や独立free-comment UIを移行先へ復活させない。
 - public/private、approved Active X投稿主体、player seek、reflection delayなどobservable behaviorを維持する。
+- **チャプター削除・変更時の挙動**: 親チャプターが削除された場合、紐づいていたコメントは物理削除せず論理保持（浮遊コメント化）し、動画全体のコメント一覧や「旧チャプター」としてフォールバック表示する。タイムスタンプ変更時はチャプターIDに追従して新しい秒数でシーク・連動する。
 
-### UI redesign
+### UI redesign and Migration Strategy
 以前の`docs/design-redesign`は移行入力から外す。
 
 - 旧mock/旧visual proposalを新UI正本として使わない。
-- 新visual targetは後日ユーザーから提供されるHTML mockのみ。
-- 詳細は`UI_REFERENCE.md`。
+- **デザイン適用戦略（案A正式採用）**:
+  - **公開画面（Phase 4/5）**: ユーザーから後日提供される新 HTML mock を適用。
+  - **管理画面・ダッシュボード（Phase 7）**: 現行 UI/コンポーネント資産を `packages/ui` へ抽出し流用（移行効率を最優先）。
+- **Phase 依存関係のアンブロック**:
+  - UI デザインに依存しない **Phase 3（ドメイン抽出: MIG-0301〜MIG-0307）** は、Phase 2 の HTML モック提供を待たずに先行して着手可能とする。
+
+### Astro SSG Build Trigger & Free Tier Budget
+Cloudflare Free 枠（Pages 月500回ビルド等）の制約を遵守する:
+- 投稿・更新のたびに全ページを SSG フルビルドしない。
+- 主要ページ（トップ、一覧の1ページ目等）は事前静的生成し、作品個別ページは ISR / On-Demand または Queue バッチによるデバウンス（5分バッチ）SSG ビルドトリガーとする。
 
 ## Preservation contract
 
