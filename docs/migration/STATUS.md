@@ -15,15 +15,15 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 1 — Repository boundaries
-Current Task: MIG-0102
+Current Task: MIG-0103
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0101
-Last Task PR: #255
+Last Completed Task: MIG-0102
+Last Task PR: #256
 Active Task PR: none
-Next: MIG-0102 packages/ui skeleton
+Next: MIG-0103 packages/contracts skeleton
 ```
 
 ## State definitions
@@ -207,8 +207,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0101 | workspace/boundary PoC design | DONE | MIG-0012 |
-| MIG-0102 | `packages/ui` skeleton | READY | MIG-0101 |
-| MIG-0103 | `packages/contracts` skeleton | BLOCKED | MIG-0101 |
+| MIG-0102 | `packages/ui` skeleton | DONE | MIG-0101 |
+| MIG-0103 | `packages/contracts` skeleton | READY | MIG-0101 |
 | MIG-0104 | `packages/domain` skeleton | BLOCKED | MIG-0101 |
 | MIG-0105 | `apps/site` Astro skeleton | BLOCKED | MIG-0101 |
 | MIG-0106 | `apps/app` React/Vite skeleton | BLOCKED | MIG-0101 |
@@ -378,23 +378,24 @@ Rollback:
 - Progress saved in `gap-scan/CHECKPOINT.md`.
 - MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
 - Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task is MIG-0101 / workspace/boundary PoC design.
+- Last completed task is MIG-0102 / packages/ui skeleton.
 
 # Next task claim template
 
-For MIG-0102 the writer records before work:
+For MIG-0103 the writer records before work:
 
 ```text
-Task: MIG-0102
+Task: MIG-0103
 Owner: unassigned
 State: READY
-Branch: feat/mig-0102-packages-ui
+Branch: feat/mig-0103-packages-contracts
 PR: none
-Scope: packages/ui skeleton, package.json, tsconfig.json, minimal index.ts, export contracts
+Scope: packages/contracts skeleton, package.json, tsconfig.json, Zod DTO contracts
 Evidence sources: PHASE_1_SPEC.md, README.md, CODE_QUALITY.md
 Rollback: git revert
 Production action required: no
 ```
 
-MIG-0101 is DONE. MIG-0102 is READY to proceed.
+MIG-0102 is DONE. MIG-0103 is READY to proceed.
+
 
