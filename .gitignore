@@ -19,3 +19,4 @@ coverage/
 .cache/
 .deploy/backups/
 .tmp/
+.astro/

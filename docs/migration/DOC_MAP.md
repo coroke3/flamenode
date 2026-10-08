@@ -23,6 +23,7 @@
 | backend/domain/platform function parity | `docs/migration/FUNCTION_INVENTORY.md` + `docs/migration/functions/*.md` |
 | existing design/product requirement reconciliation | `docs/migration/PRODUCT_REQUIREMENTS.md` |
 | new UI visual source / HTML mock registration | `docs/migration/UI_REFERENCE.md` |
+| UI component adapter / Next.js decoupling guide | `docs/migration/UI_MIGRATION_GUIDE.md` |
 | backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
 | route target/disposition | `docs/migration/ROUTE_MATRIX.md` |
 | Server Action disposition | `docs/migration/server-actions/README.md` |

@@ -377,6 +377,34 @@ Optimization blockers requiring frontend change: 0
 - auth/permission baseline complete
 - static/visibility baseline complete
 - Queue/Cron/jobs baseline complete
-- unknown functions = 0
+- この条件を満たすまでは、候補は候補のまま保持する。
 
-この条件を満たすまでは、候補は候補のまま保持する。
+---
+
+# 10. 退避ブランチ（`backup/*`）の最適化資産引き継ぎ方針
+
+ローカルに退避された未マージブランチの有用な最適化ロジックは、以下の通り段階的に引き継ぎ・活用する。
+
+## 10.1 移植完了（main マージ済み: PR #265）
+- **`backup/codex-top-scroll`**:
+  - トップ棚の hover 自動停止解消
+  - 検索 posting 生成の中間配列削減
+  - 検索 fallback の一時配列削減
+  - 検索候補照合の CPU 負荷削減
+- **`backup/claude-project-thread-zmvbrb`**:
+  - 作品編集権限の判定を権限源ごとの規則 1 つに集約
+  - 未使用の旧 policy-key 関連コード・テスト 1,171行を削除
+
+## 10.2 今後のフェーズでの活用対象（ブランチ保持）
+- **`backup/codex-free-tier-budget`** (Phase 3 ドメイン抽出 / Phase 6 Hono API で活用):
+  - Cloudflare Free 枠の予算ガード（D1 実行上限保護）
+  - Queue 処理の重複 delivery claim 回帰テスト
+  - users index GC の bounded 化
+  - 公開 JSON キャッシュの byte 上限と期限掃除
+- **`backup/codex-account-presence-summary`** (Phase 3 / Phase 6 で活用):
+  - R2 部分削除時の cursor 再試行
+  - middleware の KV 同時読み取り集約
+  - Queue / KV 同時失敗時の再送検証
+  - users_index_v2 のサイズ計測分割・GC 継続
+
+これらの資産は破棄せずローカルブランチに保持し、該当ドメイン・API タスクの実装時に必要なロジックを安全に取り込む。
