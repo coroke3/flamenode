@@ -246,6 +246,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 4 — Public PoC
 
+> タスク別詳細仕様書: [`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md)（Astro SSG & Islands 詳細仕様）
+
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0401 | Astro build-input PoC | BLOCKED | MIG-0105 |
@@ -257,6 +259,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 | MIG-0407 | Phase 4 Gate | BLOCKED | MIG-0406 |
 
 ## Phase 5 — Public migration
+
+> タスク別詳細仕様書: [`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md)（全公開ルート移行詳細仕様）
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
@@ -271,6 +275,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 6 — Hono API
 
+> タスク別詳細仕様書: [`PHASE_6_SPEC.md`](PHASE_6_SPEC.md)（Hono API 詳細仕様）
+
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0601 | low-risk reads | BLOCKED | MIG-0307, MIG-0107 |
@@ -283,6 +289,7 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 7 — Private SPA
 
+> タスク別詳細仕様書: [`PHASE_7_SPEC.md`](PHASE_7_SPEC.md)（Private SPA 詳細仕様）
 > ※デザイン適用戦略（案A）に基づき、管理画面・ダッシュボードは現行UI資産（`packages/ui`）を流用します。
 
 | ID | Task | State | Depends on |
@@ -296,6 +303,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 8 — Auth
 
+> タスク別詳細仕様書: [`PHASE_8_9_SPEC.md`](PHASE_8_9_SPEC.md)（Auth 移行詳細仕様）
+
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0801 | Auth baseline fixtures/tests | BLOCKED | MIG-0008 |
@@ -308,6 +317,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 MIG-0805 requires explicit user approval before production action.
 
 ## Phase 9 — Next/OpenNext retirement
+
+> タスク別詳細仕様書: [`PHASE_8_9_SPEC.md`](PHASE_8_9_SPEC.md)（Next.js 退役詳細仕様）
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |

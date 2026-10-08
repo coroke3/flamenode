@@ -26,6 +26,10 @@
 | UI component adapter / Next.js decoupling guide | `docs/migration/UI_MIGRATION_GUIDE.md` |
 | Phase 1 task specification & design strategy | `docs/migration/PHASE_1_SPEC.md` |
 | Phase 3 task specification (domain extraction) | `docs/migration/PHASE_3_SPEC.md` |
+| Phase 4 & 5 task specification (Astro SSG & Islands) | `docs/migration/PHASE_4_5_SPEC.md` |
+| Phase 6 task specification (Hono API) | `docs/migration/PHASE_6_SPEC.md` |
+| Phase 7 task specification (Private React SPA) | `docs/migration/PHASE_7_SPEC.md` |
+| Phase 8 & 9 task specification (Auth & Retirement) | `docs/migration/PHASE_8_9_SPEC.md` |
 | Active X data migration plan | `docs/migration/ACTIVE_X_MIGRATION_PLAN.md` |
 | multi-worker routing and staged deployment plan | `docs/migration/ROUTING_AND_DEPLOY_PLAN.md` |
 | backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
