@@ -202,6 +202,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 1 — Repository boundaries
 
+> タスク別詳細仕様書: [`PHASE_1_SPEC.md`](PHASE_1_SPEC.md)（Luna / Flash 等の軽量モデル向け完全仕様・コード例）
+
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0101 | workspace/boundary PoC design | BLOCKED | MIG-0012 |
