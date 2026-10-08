@@ -14,16 +14,16 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 ## Overall
 
 ```text
-Current Phase: 0 — Baseline / Inventory
-Current Task: MIG-0012
+Current Phase: 1 — Repository boundaries
+Current Task: MIG-0101
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0011
-Last Task PR: #250
+Last Completed Task: MIG-0012
+Last Task PR: #254
 Active Task PR: none
-Next: MIG-0012 Phase 0 Gate
+Next: MIG-0101 workspace/boundary PoC design
 ```
 
 ## State definitions
@@ -99,8 +99,8 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 
 | Phase | Name | State | Gate |
 | --- | --- | --- | --- |
-| 0 | Baseline / Inventory | IN_PROGRESS | CLOSED |
-| 1 | Repository boundaries | BLOCKED | CLOSED |
+| 0 | Baseline / Inventory | DONE | PASSED |
+| 1 | Repository boundaries | IN_PROGRESS | CLOSED |
 | 2 | Design System / HTML mock integration | BLOCKED (`PENDING_HTML` + Phase 1) | CLOSED |
 | 3 | Domain extraction | BLOCKED | CLOSED |
 | 4 | Public PoC | BLOCKED | CLOSED |
@@ -127,7 +127,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | MIG-0009 | Queue/Cron/background job baseline | DONE | MIG-0005 | job types, Queue/DLQ, retry/recovery/side effects, user-visible async states |
 | MIG-0010 | 当時の86 CURRENT screens + cross-route shells → UX/FN mapping | DONE | MIG-0002, MIG-0003, MIG-0004 | every screen mapped, all UX states, responsive/a11y/query/deep-link requirements |
 | MIG-0011 | inventory consolidation / gap scan / requirement + optimization assessment | DONE | MIG-0003, MIG-0004, MIG-0007, MIG-0008, MIG-0009, MIG-0010 | unknown/orphan=0, design divergence disposed, duplicates resolved, blockers reported |
-| MIG-0012 | Phase 0 Gate | READY | MIG-0006, MIG-0011 | independent review, rollback baseline, all Phase 0 invariants satisfied |
+| MIG-0012 | Phase 0 Gate | DONE | MIG-0006, MIG-0011 | independent review, rollback baseline, all Phase 0 invariants satisfied |
 
 ## Phase 0 Gate
 
@@ -206,7 +206,7 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0101 | workspace/boundary PoC design | BLOCKED | MIG-0012 |
+| MIG-0101 | workspace/boundary PoC design | READY | MIG-0012 |
 | MIG-0102 | `packages/ui` skeleton | BLOCKED | MIG-0101 |
 | MIG-0103 | `packages/contracts` skeleton | BLOCKED | MIG-0101 |
 | MIG-0104 | `packages/domain` skeleton | BLOCKED | MIG-0101 |
@@ -378,22 +378,23 @@ Rollback:
 - Progress saved in `gap-scan/CHECKPOINT.md`.
 - MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
 - Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task remains MIG-0010 / PR #246.
+- Last completed task is MIG-0012 / Phase 0 Gate passed.
 
 # Next task claim template
 
-For MIG-0011 the writer records before work:
+For MIG-0101 the writer records before work:
 
 ```text
-Task: MIG-0011
-Owner: chatgpt
-State: REVIEW
-Branch: migration/mig-0011-inventory-consolidation-gap-scan
-PR: #250
-Scope: full 86/432/136 consolidation, orphan/unknown=0 scan, requirements divergence, duplicate/obsolete processing and optimization blocker disposition
-Evidence sources: all canonical migration baselines + current code/tests + UI_REFERENCE state
-Rollback:
+Task: MIG-0101
+Owner: antigravity
+State: READY
+Branch: feat/mig-0101-workspace-boundary
+PR: none
+Scope: workspace/boundary PoC design, root package.json workspaces, tsconfig.base.json
+Evidence sources: PHASE_1_SPEC.md, README.md, CODE_QUALITY.md
+Rollback: git revert
 Production action required: no
 ```
 
-MIG-0011 dependencies are complete. MIG-0012 remains BLOCKED until MIG-0011 completes and requires independent review/Phase 0 gate evidence.
+Phase 0 dependencies are complete and verified. MIG-0101 is READY to start Phase 1.
+
