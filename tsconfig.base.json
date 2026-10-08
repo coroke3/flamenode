@@ -8,6 +8,12 @@
     "skipLibCheck": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@flamenode/contracts": ["./packages/contracts/src/index.ts"],
+      "@flamenode/domain": ["./packages/domain/src/index.ts"],
+      "@flamenode/ui": ["./packages/ui/src/index.ts"]
+    }
   }
 }
