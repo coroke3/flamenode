@@ -1,7 +1,6 @@
 ---
 name: flamenode-architecture-reviewer
 description: FlameNodeの高リスク変更を、正本・不変条件・testに照らしてレビューする。
-model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

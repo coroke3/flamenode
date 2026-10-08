@@ -20,11 +20,6 @@ import {
   boundedOrOpenEndedEventPeriodWhere,
   publicListableEventWhere,
 } from "@/lib/utils/eventStatus";
-import {
-  isPickupCreatorEligible,
-  sortPickupCreators,
-} from "@/lib/utils/pickupCreators";
-import { publicListableXApprovalWhere } from "@/lib/utils/publicXUserWhere";
 
 export const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 /**
@@ -204,61 +199,4 @@ export async function fetchEventWithEditors(db: DB, eventId: string) {
     .where(eq(eventStaff.event_id, eventId));
   const editorsWithIcons = await resolveMemberIcons(db, editors);
   return { event: ev[0], editors: editorsWithIcons };
-}
-
-/** ピックアップクリエイター候補 (個人作1件以上 or 合作参加2件以上)。作品数の多い順。 */
-export async function fetchPickupCreators(db: DB, limit = 40) {
-  // 集計: 個人作品数 + 合作参加数で絞る。
-  // Drizzle の sql 断片内で ${xUsers.id} 等を埋め込むと D1 が `id` だけに展開し
-  // 「ambiguous column name: id」になることがあるため、相関は生 SQL で明示する。
-  const personalVideoCountSql = sql<number>`(
-    SELECT COUNT(DISTINCT v.id) FROM videos AS v
-    WHERE v.creator_x_user_id = "x_users"."id"
-      AND v.visibility_status = 'public'
-      AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
-      AND NOT EXISTS (
-        SELECT 1 FROM video_events AS pvsf_summary_video_events
-        WHERE pvsf_summary_video_events.video_id = v.id
-          AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
-      )
-  )`;
-  const collabVideoCountSql = sql<number>`(
-    SELECT COUNT(DISTINCT vm.video_id) FROM video_members AS vm
-    INNER JOIN videos AS v ON v.id = vm.video_id
-    WHERE vm.x_user_id = "x_users"."id"
-      AND v.visibility_status = 'public'
-      AND COALESCE(v.primary_event_id, '') <> ${PVSF_SUMMARY_EVENT_ID}
-      AND NOT EXISTS (
-        SELECT 1 FROM video_events AS pvsf_summary_video_events
-        WHERE pvsf_summary_video_events.video_id = v.id
-          AND pvsf_summary_video_events.event_id = ${PVSF_SUMMARY_EVENT_ID}
-      )
-  )`;
-  const totalWorkCountSql = sql<number>`(${personalVideoCountSql} + ${collabVideoCountSql})`;
-
-  const candidateLimit = Math.max(limit * 6, 160);
-  const rows = await db
-    .select({
-      id: xUsers.id,
-      x_name: xUsers.x_name,
-      icon_url: xUsers.icon_url,
-      video_count: personalVideoCountSql,
-      collab_count: collabVideoCountSql,
-    })
-    .from(xUsers)
-    .where(publicListableXApprovalWhere())
-    .orderBy(desc(totalWorkCountSql), desc(personalVideoCountSql), asc(xUsers.x_name))
-    .limit(candidateLimit);
-
-  const picked = sortPickupCreators(rows)
-    .filter((row) => isPickupCreatorEligible(row))
-    .slice(0, limit);
-  const withIcons = await resolveMemberIcons(
-    db,
-    picked.map((row) => ({
-      ...row,
-      x_user_id: row.id,
-    })),
-  );
-  return withIcons.map(({ x_user_id: _xUserId, ...row }) => row);
 }

@@ -1,6 +1,5 @@
 # FlameNode project-scoped Codex defaults.
-model = "gpt-5.6-terra"
-model_reasoning_effort = "max"
+# Model and reasoning effort intentionally inherit the invoking session.
 
 [agents]
 max_threads = 6

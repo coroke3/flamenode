@@ -11,11 +11,8 @@ const commonSource = await readFile(new URL("./common.ts", import.meta.url), "ut
 const userSource = await readFile(new URL("./user.ts", import.meta.url), "utf8");
 const errorsSource = await readFile(new URL("./errors.ts", import.meta.url), "utf8");
 
-test("common.ts は日本時間・ステータス日本語化・メンション無効を持つ", () => {
+test("common.ts は日本時間・メンション無効を持つ", () => {
   assert.match(commonSource, /Asia\/Tokyo/);
-  assert.match(commonSource, /pending: "運営確認待ち"/);
-  assert.match(commonSource, /voided: "無効"/);
-  assert.match(commonSource, /public: "公開中"/);
   assert.match(commonSource, /parse: \[\]/);
   assert.match(commonSource, /escapeDiscordMention/);
   assert.match(commonSource, /buildAllowedMentions/);

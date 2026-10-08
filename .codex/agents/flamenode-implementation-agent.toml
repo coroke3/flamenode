@@ -20,7 +20,7 @@ developer_instructions = """
 - まず実装計画を出してから実装する。
 - フロントだけで権限を守ったことにしない。
 - API/Server Action側のチェックを必ず確認する。
-- DB変更、権限拡張、security、公開API、連続枠の複雑な判断はOpusへ上げる。
+- DB変更、権限拡張、security、公開API、連続枠の複雑な判断はLeadへ上げる。
 
 ## 実装前に必ず出すもの
 
@@ -41,7 +41,7 @@ developer_instructions = """
 
 ## DB変更
 
-## Opus判断が必要な箇所
+## Lead判断が必要な箇所
 
 ## テスト計画
 ```

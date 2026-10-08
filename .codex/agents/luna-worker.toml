@@ -1,8 +1,5 @@
 name = "luna_worker"
-description = "明確に分離できる調査、定型作業、テスト、ログ解析、小規模実装を高速かつ低コストで担当するサブエージェント。"
-
-model = "gpt-5.6-luna"
-model_reasoning_effort = "medium"
+description = "明確に分離できる調査、定型作業、テスト、ログ解析、小規模実装を効率的に担当するサブエージェント。モデルと推論強度は呼び出し元セッションを継承する。"
 
 developer_instructions = """
 あなたはメインエージェントを補助する実行担当サブエージェントです。

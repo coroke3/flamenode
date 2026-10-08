@@ -1,7 +1,6 @@
 ---
 name: flamenode-repo-cartographer
 description: FlameNodeの対象領域だけを調査し、変更候補とリスクを整理する。コード変更は禁止。
-model: haiku
 tools: Read, Grep, Glob, Bash
 ---
 

@@ -110,12 +110,6 @@ export function validateChapterTime(
   return { ok: true, seconds: total };
 }
 
-/** 不正な入力は null。後方互換の薄いラッパー。 */
-export function parseChapterTime(raw: string | null | undefined): number | null {
-  const result = validateChapterTime(raw);
-  return result.ok ? result.seconds : null;
-}
-
 /** 秒数を `mm:ss` 文字列に整形する (CSV 出力用)。 */
 export function formatChapterTime(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) sec = 0;

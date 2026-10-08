@@ -1,7 +1,6 @@
 ---
 name: flamenode-implementation-agent
 description: FlameNodeの境界が明確な通常実装を、既存挙動を維持して最小差分で行う。
-model: sonnet
 tools: Read, Grep, Glob, Edit, MultiEdit, Bash
 ---
 
