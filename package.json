@@ -51,6 +51,7 @@
     "check:cloudflare-config": "node scripts/check-cloudflare-config.mjs",
     "check:cloudflare-template": "node scripts/check-cloudflare-template.mjs",
     "estimate:queue-budget": "node --experimental-strip-types scripts/estimate-queue-budget.mjs",
+    "check:free-tier-budget": "node --experimental-strip-types scripts/check-free-tier-budget.mjs",
     "check:open-next-output": "node scripts/check-open-next-output.mjs",
     "check:db-schema": "node scripts/check-db-schema.mjs",
     "check:db-migration": "node scripts/check-db-canonical-migration.mjs",

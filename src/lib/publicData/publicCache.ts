@@ -3,6 +3,7 @@ import "server-only";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
   deletePublicJsonIsolateCache,
+  PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES,
   PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
   readPublicJsonIsolateCache,
   writePublicJsonIsolateCache,
@@ -90,11 +91,12 @@ async function cancelResponseBodyBestEffort(response: Response): Promise<void> {
   }
 }
 
-function utf8ByteLengthExceeds(value: string, limit: number): boolean {
+function utf8ByteLengthUpTo(value: string, limit: number): number | null {
   // A UTF-16 code unit needs at most three UTF-8 bytes (a valid surrogate
-  // pair needs four bytes for two code units). Skip the full scan when even
-  // that worst-case bound is within the Cache API limit.
-  if (value.length <= Math.floor(limit / 3)) return false;
+  // pair needs four bytes for two code units). Keep the conservative upper
+  // bound when it is already within the requested limit; otherwise scan only
+  // until the limit is exceeded.
+  if (value.length <= Math.floor(limit / 3)) return value.length * 3;
 
   let bytes = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -116,9 +118,13 @@ function utf8ByteLengthExceeds(value: string, limit: number): boolean {
       // BMP characters and lone low surrogates both encode to at most 3 bytes.
       bytes += 3;
     }
-    if (bytes > limit) return true;
+    if (bytes > limit) return null;
   }
-  return false;
+  return bytes;
+}
+
+function utf8ByteLengthExceeds(value: string, limit: number): boolean {
+  return utf8ByteLengthUpTo(value, limit) === null;
 }
 
 async function readResponseBodyBounded(
@@ -160,7 +166,9 @@ async function readResponseBodyBounded(
  * Content-Length が使える場合はstream前に拒否し、欠けていてもmax+1 byteを
  * 読んだ時点で中断するため、巨大entry全体をbufferしない。
  */
-async function readBoundedJsonResponse<T>(response: Response): Promise<T | null> {
+async function readBoundedJsonResponse<T>(
+  response: Response,
+): Promise<{ value: T; byteLength: number } | null> {
   const declaredBytes = contentLengthBytes(response);
   if (declaredBytes !== null && declaredBytes > PUBLIC_JSON_CACHE_MAX_BYTES) {
     await cancelResponseBodyBestEffort(response);
@@ -169,7 +177,9 @@ async function readBoundedJsonResponse<T>(response: Response): Promise<T | null>
   const bytes = await readResponseBodyBounded(response, PUBLIC_JSON_CACHE_MAX_BYTES);
   if (!bytes) return null;
   try {
-    return JSON.parse(new TextDecoder().decode(bytes)) as T;
+    const value = JSON.parse(new TextDecoder().decode(bytes)) as T;
+    if (value == null) return null;
+    return { value, byteLength: bytes.byteLength };
   } catch {
     return null;
   }
@@ -191,10 +201,11 @@ export async function readPublicJsonCache<T>(
     if (parsed == null) return null;
     writePublicJsonIsolateCache(
       r2Key,
-      parsed,
+      parsed.value,
       PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
+      parsed.byteLength,
     );
-    return parsed;
+    return parsed.value;
   } catch {
     return null;
   }
@@ -206,12 +217,23 @@ export function writePublicJsonCacheBestEffort(
   ttlSeconds: number,
   options?: { bypassIsolate?: boolean },
 ): void {
-  // bypassIsolate: 大きい body や、isolate 内で窓/無効化を厳密に扱いたい entry は
-  // 共有の isolate LRU（最大24件）を汚さず Cache API だけへ書く。
-  if (!options?.bypassIsolate) {
-    writePublicJsonIsolateCache(r2Key, payload, ttlSeconds);
-  }
   try {
+    const serialized = JSON.stringify(payload);
+    if (typeof serialized !== "string") return;
+    const isolateByteWeight = utf8ByteLengthUpTo(
+      serialized,
+      PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES,
+    );
+    // 大きいpayloadはCache APIには残せるが、isolateには集約保持しない。
+    if (!options?.bypassIsolate && isolateByteWeight !== null) {
+      writePublicJsonIsolateCache(
+        r2Key,
+        payload,
+        ttlSeconds,
+        isolateByteWeight,
+      );
+    }
+
     // Cloudflare requires async work that outlives the response to be awaited
     // or registered with waitUntil. Resolve the execution context before
     // starting Cache API I/O so a missing/local shim never creates a floating
@@ -220,8 +242,6 @@ export function writePublicJsonCacheBestEffort(
     if (!waitUntil) return;
 
     const safeTtl = Math.max(1, Math.floor(ttlSeconds));
-    const serialized = JSON.stringify(payload);
-    if (typeof serialized !== "string") return;
     // Cache miss/R2 hit時だけ通るbackground write。readerと同じUTF-8 byte上限を
     // allocation-freeに数え、巨大entryをCache APIへ渡さない。
     if (utf8ByteLengthExceeds(serialized, PUBLIC_JSON_CACHE_MAX_BYTES)) return;

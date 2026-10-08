@@ -6,12 +6,23 @@
  */
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { QUEUE_FREE_TIER_BUDGET } from "../src/lib/queues/wakeBudget.ts";
 
 /** 1 wake あたりの典型 operations（send + receive + ack） */
 const OPS_PER_NORMAL_WAKE = 3;
 /** retry 1回あたりの追加 ops 目安 */
 const OPS_PER_RETRY = 2;
+const MAX_BUSY_DAY_OPERATIONS = 7_000;
+
+const enqueueSource = fs.readFileSync(
+  new URL("../src/lib/staticRebuild/enqueue.ts", import.meta.url),
+  "utf8",
+);
+const MAX_MUTATION_TARGETS = Number(
+  enqueueSource.match(/MAX_STATIC_REBUILD_BATCH_TARGETS\s*=\s*(\d+)/)?.[1],
+);
+assert.ok(Number.isInteger(MAX_MUTATION_TARGETS) && MAX_MUTATION_TARGETS > 0);
 
 function estimate({
   label,
@@ -56,6 +67,15 @@ const models = [
     continuationsPerDay: 800,
     retriesPerDay: 40,
   }),
+  estimate({
+    label: `最大${MAX_MUTATION_TARGETS}-target mutation（continuation enabled）`,
+    wakesPerDay: MAX_MUTATION_TARGETS,
+  }),
+  estimate({
+    label: "failure day（通常2,000 messages + 150件が各3 retries）",
+    wakesPerDay: QUEUE_FREE_TIER_BUDGET.maxNormalMessagesPerDay,
+    retriesPerDay: 150 * 3,
+  }),
 ];
 
 let failed = false;
@@ -83,6 +103,10 @@ for (const model of models) {
         QUEUE_FREE_TIER_BUDGET.maxNormalOperationsPerDay +
           QUEUE_FREE_TIER_BUDGET.reservedOperationsPerDay,
       `${model.label}: operations ${model.operations} exceeds hard pool`,
+    );
+    assert.ok(
+      model.operations <= MAX_BUSY_DAY_OPERATIONS,
+      `${model.label}: operations ${model.operations} exceeds the internal busy-day target`,
     );
     if (model.operations > QUEUE_FREE_TIER_BUDGET.maxNormalOperationsPerDay) {
       console.warn(
