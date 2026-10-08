@@ -40,32 +40,6 @@ export function formatJstNow(unixSec = Math.floor(Date.now() / 1000)): string {
   return formatJstDateTime(unixSec);
 }
 
-const VIDEO_STATUS_LABELS: Record<string, string> = {
-  public: "公開中",
-  pending: "運営確認待ち",
-  voided: "無効",
-  private: "非公開",
-  limited: "限定公開",
-  archived: "アーカイブ",
-  draft: "下書き",
-};
-
-const SLOT_STATUS_LABELS: Record<string, string> = {
-  available: "空き",
-  reserved: "予約済み",
-  submitted: "投稿済み",
-};
-
-/** 作品の公開状態を日本語ラベルへ変換する。 */
-export function localizeVideoStatus(status: string): string {
-  return VIDEO_STATUS_LABELS[status] ?? status;
-}
-
-/** 枠の状態を日本語ラベルへ変換する。 */
-export function localizeSlotStatus(status: string): string {
-  return SLOT_STATUS_LABELS[status] ?? status;
-}
-
 /** Discordメンション誤爆を防ぐためのエスケープ。 */
 export function escapeDiscordMention(text: string): string {
   return text

@@ -84,7 +84,3 @@ export async function writeOperationModeKvMirror(
     expiresAt: Date.now() + OPERATION_MODE_KV_CACHE_TTL_MS,
   };
 }
-
-export function resetOperationModeKvMirrorCacheForTests(): void {
-  mirrorCache = { value: null, expiresAt: 0 };
-}

@@ -15,22 +15,25 @@ priority:
   - 設計 directory
 
 model_policy:
-  default: sonnet
-  simple: haiku
-  hard: opus
-  haiku_use:
+  default: inherit
+  simple: inherit
+  hard: inherit
+  selection: >-
+    モデルと推論強度は呼び出し元セッションを継承する。作業難度に応じた停止・引き上げは
+    AGENTS.md の「モデル選択と停止」に従う。
+  simple_use:
     - file discovery
     - candidate list creation
     - checklist formatting
     - command output summary
     - simple copy suggestions
-  sonnet_use:
+  normal_use:
     - normal implementation
     - UI implementation
     - server action updates
     - route handler updates
     - tests
-  opus_use:
+  high_risk_use:
     - main agent judgement
     - architecture review
     - identity and permission boundaries
@@ -40,66 +43,66 @@ model_policy:
     - final review
 
 escalation:
-  to_opus_when:
+  to_lead_when:
     - repository code conflicts with canonical spec
     - identity subjects overlap
     - permissions may broaden
     - database changes are risky
     - slot group behavior is unclear
     - public API shape changes
-    - sonnet fails twice
+    - normal implementation fails twice
     - subagents disagree
 
 phases:
   - id: 0
     name: repo-cartography
-    model: haiku_or_sonnet
+    model: inherit
     code_changes: false
     goal: find related files and map responsibilities
   - id: 1
     name: id-auth-write-guard
-    model: sonnet
-    escalate: opus_for_boundary_decisions
+    model: inherit
+    escalate: lead_for_boundary_decisions
     pr: auth/id-write-guard
   - id: 2
     name: posting-youtube-id
-    model: sonnet
+    model: inherit
     pr: posting/youtube-id-and-active-x
   - id: 3
     name: slots-and-part-numbering
-    model: sonnet
-    escalate: opus_for_complex_slot_or_migration_decisions
+    model: inherit
+    escalate: lead_for_complex_slot_or_migration_decisions
     pr:
       - slots/reservation-groups
       - slots/part-numbering
   - id: 4
     name: x-id-interactions-library
-    model: sonnet
+    model: inherit
     pr: interactions/x-id-library
   - id: 5
     name: chapter-comments-only
-    model: sonnet
+    model: inherit
     pr: comments/chapter-comments-only
   - id: 6
     name: public-api-health-security
-    model: sonnet
-    escalate: opus_for_final_review
+    model: inherit
+    escalate: lead_for_final_review
     pr:
       - api/public-whitelist
       - admin/health-security
   - id: 7
     name: ui-ux-forms-copy
-    model: sonnet
-    simple_parts_model: haiku
+    model: inherit
+    simple_parts_model: inherit
     pr: ui/navigation-entry-forms
   - id: 8
     name: db-cleanup-legacy-import
-    model: sonnet
-    escalate: opus_for_risky_database_changes
+    model: inherit
+    escalate: lead_for_risky_database_changes
     pr: db/cleanup-legacy-import
   - id: 9
     name: test-build-final-review
-    model: haiku_for_summary_sonnet_for_fixes_opus_for_final_review
+    model: inherit
     goal: run checks and review against canonical spec
 
 required_final_checks:

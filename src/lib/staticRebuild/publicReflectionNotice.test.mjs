@@ -4,7 +4,6 @@ import {
   appendPublicReflectionDelayNotice,
   markPendingPublicReflection,
   PUBLIC_REFLECTION_DELAY_MESSAGE,
-  withPublicReflectionDelayMessage,
 } from "./publicReflectionNotice.ts";
 
 test("markPendingPublicReflection は enqueue 時だけフラグを付ける", () => {
@@ -22,12 +21,11 @@ test("markPendingPublicReflection は enqueue 時だけフラグを付ける", (
   );
 });
 
-test("withPublicReflectionDelayMessage は案内文を重複付与しない", () => {
-  const once = withPublicReflectionDelayMessage("保存しました。", true);
-  assert.equal(once.pendingPublicReflection, true);
-  assert.match(once.message, new RegExp(PUBLIC_REFLECTION_DELAY_MESSAGE));
+test("appendPublicReflectionDelayNotice は案内文を重複付与しない", () => {
+  const once = appendPublicReflectionDelayNotice("保存しました。");
+  assert.match(once, new RegExp(PUBLIC_REFLECTION_DELAY_MESSAGE));
 
-  const twice = appendPublicReflectionDelayNotice(once.message);
+  const twice = appendPublicReflectionDelayNotice(once);
   assert.equal(
     (twice.match(new RegExp(PUBLIC_REFLECTION_DELAY_MESSAGE, "g")) ?? []).length,
     1,

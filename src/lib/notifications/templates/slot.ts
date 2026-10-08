@@ -67,48 +67,6 @@ export function buildSlotVideoSubmittedNotification(args: {
   });
 }
 
-/** 投稿締切リマインダー DM。 */
-export function buildSlotDeadlineReminderNotification(args: {
-  eventId: string;
-  eventTitle: string;
-  deadlineAt: number;
-  slotCount: number;
-}): ReturnType<typeof buildDiscordPayload> {
-  const slotsLabel =
-    args.slotCount > 1 ? `予約枠 ${args.slotCount} 件` : "予約枠 1 件";
-  const eventName = escapeDiscordMention(args.eventTitle);
-  const submitUrl = appUrl(`/event/${args.eventId}/slots`);
-  const content = buildNotificationBlocks([
-    {
-      heading: "【FlameNode】投稿締切が近づいています",
-      lines: [
-        `イベント「${eventName}」の ${slotsLabel} に、まだ作品が投稿されていません。`,
-        "締切を過ぎると枠が解放される場合があります。お早めに投稿を完了してください。",
-      ],
-    },
-    {
-      heading: "■ 状況",
-      lines: [
-        `締切（日本時間）: ${formatJstDateTime(args.deadlineAt)}`,
-        `未投稿の枠: ${slotsLabel}`,
-      ],
-    },
-    {
-      heading: "■ 次に行うこと",
-      lines: [
-        "枠一覧から作品を投稿するか、不要な枠は解放してください。",
-        linkLine("枠一覧・投稿画面を開く", `/event/${args.eventId}/slots`),
-        linkLine("イベントページを見る", `/event/${args.eventId}`),
-      ],
-    },
-  ]);
-  return buildDiscordPayload({
-    content,
-    event_id: args.eventId,
-    url: submitUrl,
-  });
-}
-
 /** 運営による枠強制解放 DM。 */
 export function buildSlotForceReleasedNotification(args: {
   eventId: string;

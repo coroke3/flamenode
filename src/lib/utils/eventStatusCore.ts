@@ -33,12 +33,6 @@ export function getEventVisibility(ev: EventStatusInput): EventVisibilityStatus 
   return normalizeEventVisibility(ev.visibility_status);
 }
 
-export function isPubliclyListableEventVisibility(
-  visibility: string | null | undefined,
-): boolean {
-  return visibility === "public";
-}
-
 export function isPublicEventVisible(ev: EventStatusInput): boolean {
   return getEventVisibility(ev) === "public";
 }
