@@ -15,15 +15,15 @@ Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正�
 
 ```text
 Current Phase: 1 — Repository boundaries
-Current Task: MIG-0101
+Current Task: MIG-0102
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0012
-Last Task PR: #254
+Last Completed Task: MIG-0101
+Last Task PR: #255
 Active Task PR: none
-Next: MIG-0101 workspace/boundary PoC design
+Next: MIG-0102 packages/ui skeleton
 ```
 
 ## State definitions
@@ -206,8 +206,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0101 | workspace/boundary PoC design | READY | MIG-0012 |
-| MIG-0102 | `packages/ui` skeleton | BLOCKED | MIG-0101 |
+| MIG-0101 | workspace/boundary PoC design | DONE | MIG-0012 |
+| MIG-0102 | `packages/ui` skeleton | READY | MIG-0101 |
 | MIG-0103 | `packages/contracts` skeleton | BLOCKED | MIG-0101 |
 | MIG-0104 | `packages/domain` skeleton | BLOCKED | MIG-0101 |
 | MIG-0105 | `apps/site` Astro skeleton | BLOCKED | MIG-0101 |
@@ -378,23 +378,23 @@ Rollback:
 - Progress saved in `gap-scan/CHECKPOINT.md`.
 - MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
 - Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task is MIG-0012 / Phase 0 Gate passed.
+- Last completed task is MIG-0101 / workspace/boundary PoC design.
 
 # Next task claim template
 
-For MIG-0101 the writer records before work:
+For MIG-0102 the writer records before work:
 
 ```text
-Task: MIG-0101
-Owner: antigravity
+Task: MIG-0102
+Owner: unassigned
 State: READY
-Branch: feat/mig-0101-workspace-boundary
+Branch: feat/mig-0102-packages-ui
 PR: none
-Scope: workspace/boundary PoC design, root package.json workspaces, tsconfig.base.json
+Scope: packages/ui skeleton, package.json, tsconfig.json, minimal index.ts, export contracts
 Evidence sources: PHASE_1_SPEC.md, README.md, CODE_QUALITY.md
 Rollback: git revert
 Production action required: no
 ```
 
-Phase 0 dependencies are complete and verified. MIG-0101 is READY to start Phase 1.
+MIG-0101 is DONE. MIG-0102 is READY to proceed.
 

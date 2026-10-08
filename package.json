@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "imports": {
     "#utils/delimited": "./src/lib/utils/delimited.ts",
     "#utils/next": "./src/lib/utils/next.ts",
