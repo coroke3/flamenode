@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const source = readFileSync(
   fileURLToPath(new URL("./optimizedRebuild.ts", import.meta.url)),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 test("ranking queueの滞留読取と完了更新をCloudflare向けにbounded/batch化する", () => {
   const captureStart = source.indexOf("async function capturePendingVideoProjectionRows(");
