@@ -10,7 +10,7 @@
 1. Read this file.
 2. Read the matching row in [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md).
 3. Read target code and related tests.
-4. For platform/UI migration, read [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md), then [`docs/migration/IMPLEMENTATION_RUNBOOK.md`](docs/migration/IMPLEMENTATION_RUNBOOK.md) and **one** matching `TASK_CARDS_*.md` MIG card. Follow PR/Decision Gates.
+4. For platform/UI migration, read [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md), filter [`docs/migration/FILE_MIGRATION_MATRIX.md`](docs/migration/FILE_MIGRATION_MATRIX.md) to the MIG and follow [`docs/migration/FILE_PROGRESS_PROTOCOL.md`](docs/migration/FILE_PROGRESS_PROTOCOL.md), then [`docs/migration/IMPLEMENTATION_RUNBOOK.md`](docs/migration/IMPLEMENTATION_RUNBOOK.md) and **one** matching `TASK_CARDS_*.md` MIG card. Follow PR/Decision Gates.
 5. Before coding, open CURRENT source/tests referenced by that card. `+path` denotes a planned file, not an existing file.
 
 Do not bulk-load the repository, Historical/archive material, completed migration phases, or old `.claude/flamenode/source/` documents.
