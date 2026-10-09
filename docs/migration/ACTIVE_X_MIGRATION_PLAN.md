@@ -49,7 +49,7 @@ CREATE INDEX video_interactions_video_type_idx
 ## 3. ユーザー状態ごとのマッピング方針（D-03 参照）
 
 1. **承認済み Active X を所持しているユーザー (`users.active_x_user_id != null`)**:
-   - `users.active_x_user_id` をキーとして、`video_interactions` へ移行（`INSERT OR IGNORE`）。
+   - `users.active_x_user_id` を無条件採用せず、**同一Auth Userの承認済み`x_user_account_links`に実在し、`x_users.approval_status = approved`** を照合してから採用。未承認/リンク切れ/取消中は未割当として保留（D-03）。
 2. **承認済み X を複数所持し、`active_x_user_id` が未定のユーザー**:
    - [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-03 の判断待ち。
    - 推奨: `link_role = 'owner'` の最古の承認済み X ID を優先、またはユーザーの次回明示選択まで保留。
@@ -72,7 +72,10 @@ Cloudflare D1 Free 枠制限:
 1. **チャンクサイズ**: 1 バッチ最大 40 件の INSERT（50 ステートメント制限にマージンを確保）。
 2. **安全弁**: 1 回のバッチ実行で最大 5,000 件まで処理し、日次 100,000 行上限を確実に下回る設計。
 3. **べき等性**: `INSERT OR IGNORE INTO video_interactions ...` を用い、再実行安全性を保証。
-4. **監査ログ**: バッチ実行ログおよび除外件数は標準出力・レポートへ出力。
+4. **移行チェックポイント**: 処理対象の安定したソートキーと時点を記録し、中断後の再開で新規/更新行を取りこぼさない。`last_processed_auth_user_id` だけで読取を進めず、`(auth_user_id, video_id, interaction_type)` の複合キー、実行単位のスナップショット/デルタを用いる。バッチ進捗・検証記録は処理結果と整合させる。
+5. **監査ログ**: actorと対象件数・衝突件数・未割当件数・チェックポイント・切替時刻を記録。個人を特定する情報や秘密値を標準出力へ大量に出さない。
+6. **検証**: type別の移行前後件数、(X ID,video,type)一意性、approved-link制約、未割当の残存件数、`videos.app_like_count` の再計算、R2/Queue派生データの整合性を照合。不一致ならflagを切り替えない。
+7. **並走書き込み**: dry-runの時点からcutoverまでの更新・解除をdeltaとして捕捉するか、短いwrite-freeze + final backfill/照合を設計。単純な一度きりの`INSERT OR IGNORE`では後から取消されたlikeが復活するため不可。
 
 ---
 
@@ -89,5 +92,8 @@ Cloudflare D1 Free 枠制限:
 
 ## 6. ロールバック手順
 
-- 移行期間中は `video_interactions_auth` のデータを物理削除しない。
-- 不整合発生時は、`system_settings` の feature flag を戻すことで、即座に旧 `video_interactions_auth` 参照へフェイルバック可能とする。
+- 移行期間中は `video_interactions_auth` のデータを物理削除しない。ただし**保持だけでは正しいロールバックではない**。
+- 書き込み正本をX側へ切り替えた後、X側にのみ行われた追加・解除はAuth側に自動反映されない。旧flagを戻すだけでは反映されない操作や件数が生じる。
+- **安全な切戻しの必要条件**: (1)全write経路の停止/凍結、(2)時点・actor付きdeltaジャーナルまたは安全な逆同期の検証、(3)Auth側へ表現できる変更だけを同期し、表現不能なmany-to-manyやX merge衝突は隔離/判断、(4)総件数・各ユーザー状態・派生集計の再照合、(5)旧コードからの読み書きE2E通過。
+- 上記を満たせないとき、機械的なflag巻き戻しは禁止。X経路をread-onlyとして維持したうえでforward-fixするか、ユーザー承認付きの代替復旧計画を選ぶ。
+- ロールバック演習は非本番DBで「切替後の追加・解除・X統合・多重リンク・未承認」を含めて実施する。
