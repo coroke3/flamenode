@@ -7,8 +7,10 @@
 
 ## 最初の90秒に行うこと
 
+**コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401非visual性能PoCはMIG-0301と並行READYだが、MIG-0402/0403 visualはD-08がBLOCKED。
+
 1. GitHubの最新`main` commitを読む。変更が作業ブランチ上にしか無い場合、そのbranchの`STATUS.md`を読んでowner PRを特定する。**作業中のPRがあるMIGを横取りしない**。
-2. `AGENTS.md`, `AGENT_PROTOCOL.md`, `GIT_WORKFLOW.md`と`STATUS.md`を読む。60k tokenの全台帳を一度に取り込まない。
+2. `AGENTS.md`と`AGENT_PROTOCOL.md`の関連ルール、`GIT_WORKFLOW.md`の現段階の操作手順、`STATUS.md`の該当行・依存行のみ読む。移行台帳や過去MIGを全件取り込まない。
 3. `STATUS.md`で依存がDONEの`READY`を1件だけ選ぶ。`OPEN_DECISIONS.md`にある未提供資料・PoC・人間承認と照合する。**DECIDED = 本番操作許可ではない**。
 4. 該当カードだけ開く: [Phase2/3](TASK_CARDS_2_3.md), [Phase4/5](TASK_CARDS_4_5.md), [Phase6/7](TASK_CARDS_6_7.md), [Phase8/9](TASK_CARDS_8_9.md)。フェーズSPECとカードが食い違う場合は**両方の引用箇所と衝突を記録して停止**。都合がよい方を勝手に選ばない。
 5. 該当`CURRENT_ROUTES.md` / `route-handlers/README.md` / `server-actions/README.md`の対象行とCURRENT code/testを**実際に開く**。名前だけから動作を推測しない。
