@@ -22,9 +22,16 @@ These are bytes, **not tokens**. Japanese and code/tokenizer variation make any 
 4. **New content:** two small performance documents are justified because the original baseline was observational while the change needs executable route ownership and acceptance. They are references, **not new state ledgers**.
 5. **Unchecked:** actual Luna/Haiku agent comprehension, live PoC CPU reduction, human visual review, auth/Queue end-to-end parity are not proven by documentation checks.
 
+## After-change snapshot (PR #281; before final review)
+
+- After the initial performance-first documentation change: **60 migration MD files / 866,857 bytes (~847 KiB)**, **+27,089 bytes (+3.2%)** over the 56-file baseline. This increase is primarily targeted runtime performance/acceptance detail and the context audit itself, not duplicated full capability ledgers.
+- The legacy five-document full-read set is still **88,308 bytes**. The benefit does **not** come from reducing those files' total size; it comes from stopping full-file reads and emitting a task-scoped subset instead.
+- The one-task packet is produced by `node scripts/print-migration-task-context.mjs MIG-0401`; its correctness and size (including a large Admin MIG) are CI-tested. It is a **locator**: actual source/tests/PR+approval rules remain mandatory.
+- These bytes were measured from Git blobs on this PR branch before the additional packet script documentation; validate the final live branch tree again when reviewing. This is a size audit, not measured LLM inference latency or tokens.
+
 ## Changes and concrete read budget
 
-- New **[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)** is the one-page entry; it points to existing sources without repeating tables.
+- New **[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)** is the one-page entry; it points to existing sources without repeating tables. **`scripts/print-migration-task-context.mjs MIG-XXXX`** returns a small scoped packet, with test-covered output budgets and explicit warning on large tasks.
 - A wake reads **STATUS only relevant task/dependency rows**, **one TASK_CARDS section**, **relevant decision**, **FILE_MIGRATION_MATRIX owner rows**, real source/tests and 1–2 relevant subsystem baseline sections. Full policy files are consulted for conflict/approval, never skipped when pertinent.
 - If a single task requires more than one screen/domain, use [TASK_MICRO_UNITS.md](TASK_MICRO_UNITS.md) and narrow scope rather than dumping full files into context. Keep open PR/owner and tests as resumption evidence.
 - Large ledgers are **searchable source-of-truth on disk**, not chat prompt attachments. No duplicate copy of full route/action/state tables in new documents.
