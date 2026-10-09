@@ -6,7 +6,7 @@
 
 ## 1. 概要
 
-本ドキュメントは、同一ドメイン (`flamenode.net` / `www.flamenode.net`) 配下において、現行の Next.js Worker (`flamenode-web`) を稼働させながら、新 Worker（`flamenode-site`, `flamenode-app`, `flamenode-api`）を段階的に導入・トラフィック切り替えするためのルーティング仕様とデプロイ手順を定義する。
+本ドキュメントは、同一ドメイン (`flamenode.net` / `www.flamenode.net`) 配下において、現行の Next.js Worker (`flamenode-web`) を稼働させながら、新 Worker（`flamenode-site`, `flamenode-personal`, `flamenode-ops`, `flamenode-api`）を段階的に導入・トラフィック切り替えするためのルーティング仕様とデプロイ手順を定義する。
 
 ---
 
@@ -26,15 +26,14 @@
   ├─ 1b. /api/<移行済みの明示パス> ──> flamenode-api (Hono)
   │      ・ 未移行の /api/* は flamenode-web へフォールバック
   │
-  ├─ 2. SPA 静的アセット ───────────────> flamenode-app (Vite SPA Static Assets)
-  │      ・ /_app_assets/*
-  │
-  ├─ 3. 管理・個人・登録画面 ───────────> flamenode-app (Vite SPA Client Entry)
-  │      ・ /dashboard/*
-  │      ・ /entry/*
-  │      ・ /manage/*
-  │      ・ /admin/*
-  │      ・ /onboarding
+  ├─ 2. Personal SPA アセット ────────> flamenode-personal (apps/app)
+  │      ・ /_personal_assets/*
+  ├─ 3. Ops SPA アセット ─────────────> flamenode-ops (apps/ops; Phase7で新設)
+  │      ・ /_ops_assets/*
+  ├─ 3a. Personal SPA画面 ────────────> flamenode-personal
+  │      ・ /dashboard, /dashboard/*, /entry, /entry/*, /onboarding
+  ├─ 3b. Ops SPA画面 ─────────────────> flamenode-ops
+  │      ・ /manage, /manage/*, /admin, /admin/*
   │
   ├─ 4. Astro 静的アセット ─────────────> flamenode-site (Astro Static Assets)
   │      ・ /_astro/*
@@ -52,7 +51,8 @@
 
 ### パス・アセット衝突の完全防止
 - **Astro 静的アセット**: `/_astro/*`
-- **Vite SPA 静的アセット**: `/_app_assets/*`
+- **Vite Personal SPA 静的アセット**: `/_personal_assets/*`
+- **Vite Ops SPA 静的アセット**: `/_ops_assets/*`
 - **Next.js 静的アセット**: `/_next/*`
 アセットのURLプレフィックスは分離する。ただし実配信時の優先順位・Cache-Control・SPAのdirect reload・旧Workerへのフォールバックは統合テストで検証する。プレフィックス分離だけで競合や誤ルーティングが無いとは断定しない。
 
@@ -60,8 +60,8 @@
 
 ## 3. Custom Domain と Worker Route の共存検証（D-02 参照）
 
-同一ホスト名において、Custom Domain（`flamenode-web`）を維持したまま、特定パスパターン（例: `/api/*`）の Worker Route を被せて新 Worker へルーティングできるかは、本番適用前に非本番ドメインで実証が必要です（[`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-02）。
-不整合が生じる場合は、前段に薄い Ingress Router Worker を配置して Service Bindings で振り分ける方式を代替案とします。
+Cloudflare公式文書では同一hostnameのRouteがCustom Domainより優先され、Route側の`fetch(request)`はCustom DomainのWorkerへ到達する。採用方式D-02はA。ただし特定パスパターン・root/www・静的アセット・認証フォールバックがこのrepoで正しく動くか、本番適用前に非本番ドメインで実証が必要です（[`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-02）。
+不整合時は原因と失敗例を記録し、本番切替を止める。B案への自動切替は禁止。追加Routeは実際のCloudflare globルールに従い `/ :id` のようなNext形式をそのまま登録しない。
 
 ---
 
@@ -76,7 +76,7 @@
 2. **Step B: 公開画面の段階切り替え（Phase 5 完了・依存するAPI疎通後）**:
    - `/about`, `/rules` → `/event/*` → `/user/*` → `/list` → `/` → `/:id` の順に段階的に `flamenode-site` へ向ける。
 3. **Step C: 管理画面の切り替え（Phase 7 完了・依存するHono API疎通後）**:
-   - `/dashboard/*`, `/entry/*`, `/manage/*`, `/admin/*`, `/onboarding` を `flamenode-app` へ向ける。
+   - Personal `/dashboard/*`, `/entry/*`, `/onboarding` を `flamenode-personal`へ、Ops `/manage/*`, `/admin/*` を `flamenode-ops`へ**別々**に切替。bare pathとdeep-linkも対象。受入テストと責任者はそれぞれ独立。
 4. **Step D: 認証の専用切替（Phase 8 Gate 後、要承認）**:
    - `/api/auth/*` と `/auth/complete` の処理先を、既存セッション継続・Callback・logout・CSRFのテスト後に切り替える。
 5. **Step E: 完全移行と旧 Worker 停止（Phase 9）**:
@@ -96,8 +96,13 @@
 
 ## 6. Cutover acceptance（必須）
 
+- D-02の非本番PoC: Worker Routeと既存Custom Domainの優先順および`fetch(request)`フォールバックをroot/www相当ホストで証明。ルート同居の本番適用は別途ユーザー承認。
+- D-05の2SPA: Personal/Opsに独立したStatic Assetsとアセットmanifest、prefix、deep-link、login/forbidden、cross-SPAリンクを検証。両方が未完成の間は旧Nextへフォールバック。
+- D-06の大量公開ページはSSG/R2事前HTMLを優先し、Workerに高コストなオンデマンドSSRを流さない。限定SSRはCPU/1102事前計測合格時のみ。
+
+
 - D-02の非本番 ingress PoC合格と、root/www両hostのrouter/fallback契約確認
-- 対象パスのcanonical URL・query・cookie・認可・`/_app_assets/*`・`/_astro/*`・`/_next/*` の直アクセス/更新確認
+- 対象パスのcanonical URL・query・cookie・認可・`/_personal_assets/*`、`/_ops_assets/*`・`/_astro/*`・`/_next/*` の直アクセス/更新確認
 - 本番切替前後で現行 `RH-*` / `SA-*` と `UX-*` / `FN-*` に紐づく必要E2Eを実施
 - 復帰の順序（traffic、feature flag、cache、D1 reconciliation）、責任者、測定閾値、観測期間をcutover PRに記録
 - `ROUTING_AND_DEPLOY_PLAN.md` は案であり、本番Routeを変更する許可ではない
