@@ -101,6 +101,7 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
   if(!ALLOWED_KINDS.has(row.kind))errors.push(file+" invalid file kind "+row.kind);
   if(!ALLOWED_STATES.has(row.state))errors.push(file+" invalid file state "+row.state);
   if(!migs.has(row.owner))errors.push(file+" references missing owner task "+row.owner);
+  else if(migs.get(row.owner)==="DONE"&&row.state==="NOT_STARTED")errors.push(file+" owner MIG is DONE but file still NOT_STARTED; require PARITY_VERIFIED, RETAINED or explicit BLOCKED with evidence");
   if(!actual.has(file)&&row.state!=="RETIRED")errors.push(file+" source file absent but state is "+row.state);
   if(row.state!=="NOT_STARTED"){
    if(!/PR#\d+/.test(row.evidence)||!/SHA=[0-9a-f]{40}\b/.test(row.evidence))errors.push(file+" progress evidence requires real PR# and SHA=40hex");
