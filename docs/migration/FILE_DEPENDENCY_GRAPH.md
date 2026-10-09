@@ -57,6 +57,15 @@ Cloudflare path-specific Routes (D-02): phased cutover, /api/auth/* stays legacy
 | MIG-0801..0805 | legacy /api/auth/[...nextauth], Auth.js D1 session | @auth/core compatible Hono route and adapter | old cookie in Hono and new cookie in Next, callback/logout/CSRF | nonprod OAuth/cookie/DB/session test; production cutover separate approval |
 | MIG-0901..0906 | all legacy imports/Route/Worker metrics | remove old Next adapters only when proven unused | no orphan import/route/function/Queue/binding; ability to rollback | observed traffic=0, stable operation, formal phase acceptance |
 
+## 2026-10-09 CURRENTコードで確認した実装境界
+
+- `apps/site/src/pages/index.astro` は疎通用SSGのHTML/Buttonだけで、公開画面移行は未実施。
+- `apps/app/src/App.tsx` は単純な初期画面で、Dashboard/Entryの実UI・認可・data fetchingは未実装。
+- `apps/api/src/index.ts` はHono `GET /health` スケルトンだけ。現在のNext `GET /api/health` (RH-018)等33 methodとのパス・DTO・Auth・error semanticsを検証してから移行する。
+- `packages/domain/src/permissions.ts#canEditVideo` は `isOwner || isCollabEditor || isEventStaff` の暫定実装。normal/event/admin mode-aware認可ではないため、MIG-0301で消去・誤使用防止を行う。
+- `packages/ui/src/adapters/index.tsx` は現状`setLinkComponent`/`setImageComponent`/`setNavigatorAdapter`のmodule-global mutable状態。SSRリクエスト・React Island間に状態漏洩しうるため、本格移行時はContext/Providerを検討し、独立したrequest/islandテストを行う。
+- `src/lib/actions/admin.ts`の動画状態処理はMIG-0304一次担当、`src/lib/actions/event-template-admin.ts`はMIG-0303一次担当。後続API/Manageは利用契約の確認が担当で、同じドメインロジックを重複させない。
+
 ## Integration tests that join more than one file
 
 1. **Imports:** changed file A exports actual function used by B; B's build under Node/TS/Next/Vite/Astro/Worker has resolved runtime import. Record A#export and B#import in PR.
