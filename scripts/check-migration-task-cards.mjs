@@ -43,7 +43,7 @@ export function collectTaskCards(fileContents) {
   return {cards,errors};
 }
 
-export function validateTaskCards({status, fileContents, runbook, protocol, decisions, smokeDocs}) {
+export function validateTaskCards({status, fileContents, runbook, protocol, decisions, smokeDocs, microUnits}) {
   const errors = [];
   const tasks = parseTrackedMigrationTasks(status);
   const {cards,errors:cardErrors} = collectTaskCards(fileContents);
@@ -64,6 +64,12 @@ export function validateTaskCards({status, fileContents, runbook, protocol, deci
     if (!text.includes(required)) errors.push("missing coverage for " + required);
   }
   if (!smokeDocs?.includes("EXACT FILES")) errors.push("small-agent smoke plan is missing");
+  if (microUnits !== undefined) {
+    for (const id of ["MIG-0304","MIG-0305","MIG-0306","MIG-0502","MIG-0504","MIG-0507","MIG-0604","MIG-0605","MIG-0704","MIG-0705"]) {
+      if (!microUnits.includes("## " + id) || !microUnits.includes("**U01")) errors.push(id + ": large task has no resumable micro-unit work order");
+    }
+    if (!protocol?.includes("TASK_MICRO_UNITS.md") || !runbook?.includes("TASK_MICRO_UNITS.md")) errors.push("micro-unit resumable instructions not in runbook and protocol");
+  }
   return errors;
 }
 
@@ -78,6 +84,7 @@ if(invoked){
     protocol:read("docs/migration/AGENT_PROTOCOL.md"),
     decisions:read("docs/migration/OPEN_DECISIONS.md"),
     smokeDocs:read("docs/migration/SMALL_MODEL_SMOKE_TEST.md"),
+    microUnits:read("docs/migration/TASK_MICRO_UNITS.md"),
   });
   for(const error of errors)console.error("[migration-task-cards] "+error);
   if(errors.length)process.exitCode=1;
