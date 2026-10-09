@@ -218,6 +218,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 2 — Design System / HTML mock integration
 
+> D-08はHTMLモック先行を選択済み。ただし実ファイル未受領のため BLOCKED_ON_USER。勝手にREADYへ変更しない。
+
 > ※デザイン適用戦略（案A）に基づき、本Phaseは公開画面（Phase 4/5）の前提条件となります。
 > UI/デザインに依存しない Phase 3（ドメイン抽出）は先行して着手可能です。
 
@@ -233,17 +235,18 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 3 — Domain extraction
 
-> タスク別詳細仕様書: [`PHASE_3_SPEC.md`](PHASE_3_SPEC.md)（Luna / Flash 等の軽量モデル向け完全仕様・コード例）
+> タスク別詳細仕様書: [`PHASE_3_SPEC.md`](PHASE_3_SPEC.md) / [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)（D-01=A、MIG-0308をTier2の依存に追加）
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0301 | extraction/DI pattern | READY | MIG-0108 |
 | MIG-0302 | low-risk read domain | BLOCKED | MIG-0301 |
-| MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0302 |
+| MIG-0308 | `packages/db` schema extraction (zero DDL) | BLOCKED | MIG-0302 |
+| MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0308 |
 | MIG-0304 | video domain group | BLOCKED | MIG-0303 |
 | MIG-0305 | event/slot domain group | BLOCKED | MIG-0303 |
 | MIG-0306 | user/X/admin domain group | BLOCKED | MIG-0303 |
-| MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..MIG-0306 |
+| MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..MIG-0306, MIG-0308 |
 
 ## Phase 4 — Public PoC
 
