@@ -71,4 +71,4 @@
 - **目的**: 全エンドポイントについて、Cloudflare Workers Free 枠の CPU 時間 < 10ms（単純 read < 5ms, mutation < 8ms）を自動測定・検証。
 
 ### MIG-0607: Phase 6 Gate
-- **完了条件**: 全 Route Handler (33 メソッド) の Hono 移行完了、全 API 契約テスト合格、CPU 予算クリア。
+- **完了条件**: RH-010/011（Auth.js GET/POST）はPhase 8まで現行Next側に維持し、**残り31メソッド**をHonoまたは同等の明示的な互換経路へ移行する。33メソッドすべてに移行先・HTTP method単位のルーティング・契約テスト・未移行の明示的なフォールバックを記録し、CPU予算を確認する。Phase 8前にAuth.jsをHonoへ一括移行したと誤判定しない。
