@@ -203,6 +203,20 @@ Every PoC/cutover affecting request execution must compare against this baseline
 
 A local benchmark alone is insufficient to claim production CPU success.
 
+## 2026-10-09 recent production snapshot (read-only)
+
+Scope: **2026-10-08 13:00 UTC through 2026-10-09 13:00 UTC** (Oct 8 22:00–Oct 9 22:00 JST), `flamenode-web`, Cloudflare Workers Observability / Telemetry Query API. Data obtained read-only on 2026-10-09. **Do not replace the historical 7-day baseline above**: different time window, sampled outcomes, potential deployment/traffic mix, and query filters.
+
+| Query | Result | Interpretation |
+| --- | --- | --- |
+| Invocation outcome aggregate (`$workers.outcome` grouped) | `ok=2,717`, `exceededCpu=99`, `canceled=60` | 2,876 observed sampled outcomes in this query, not necessarily every HTTP request. CPU failure share ~3.44% **of these records**, not an exact site-wide rate. No observed `exceededMemory` group in this result; absence of sampled events is not proof none happened. |
+| CPU-time distribution (`$workers.cpuTimeMs exists`, independent query) | median **24ms**, p95 **1,032ms**, p99 **1,438ms** | CPU telemetry can include runtime rollover and unusual events. **Not** a guaranteed 10ms budget; not identical denominator to outcome aggregate. |
+| Query sampling metadata | `abr_level=1` for above aggregation | Retain sampling information. Do not infer exact billing/request counts or predict improvement %. |
+
+Original query field filters: `$metadata.service == flamenode-web` with 24h timeframe; `$workers.outcome` for outcomes, numeric `$workers.cpuTimeMs` existence for percentiles. No secret/user data recorded. This snapshot is a sanity check that CPU errors remain present after the prior 2026-10-07 audit. It is **not a before/after migration benchmark**.
+
+New route-based gate: [../PERFORMANCE_IMPLEMENTATION_PLAN.md](../PERFORMANCE_IMPLEMENTATION_PLAN.md) and [../PERF_HOTPATH_MATRIX.md](../PERF_HOTPATH_MATRIX.md). Success requires Worker version + normalized route family + cache state and matched windows. `exceededMemory`, `canceled` and `exceededCpu` remain separate.
+
 ## Follow-up
 
 - MIG-0007 inventories static artifacts/visibility guarantees that make Workerless-first public delivery safe.
