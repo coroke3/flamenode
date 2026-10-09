@@ -6,6 +6,8 @@
 
 ## Common contract
 
+各MIG開始前に `FILE_MIGRATION_MATRIX.md` で所有source、テスト、依存consumerを絞り込み、実target fileと接続済みexport/importを `FILE_PROGRESS_PROTOCOL.md` に従って同じPRで更新する。タスクDONEの前に担当ファイルに `NOT_STARTED` が残っていないことを checker で確認する。
+
 Phase 2 visual cards **remain BLOCKED** until user HTML mock is registered in `UI_REFERENCE.md`. Phase 3 pure/domain cards may proceed in parallel **only where STATUS dependencies actually allow**. After D-01=A, D-01 no longer blocks design; **MIG-0308 code migration** gates DB-coupled extraction. All PRs preserve legacy Next behavior, user-facing UX and owner/security/visibility invariants. Never fabricate approved HTML or mark unexecuted tests as PASS.
 
 ### MIG-0200 — register approved HTML mock
