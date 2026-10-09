@@ -952,7 +952,9 @@ if (errors.length === 0) {
   }
 
   // Design source transition + MIG-0011 Active X requirement gate.
-  const pendingHtml = uiReference.includes("`PENDING_HTML`");
+  const visualStatus = uiReference.match(/^> Status:\s*`?([A-Z_]+)`?/m)?.[1];
+  const pendingHtml = visualStatus === "PENDING_HTML";
+  if (!visualStatus) errors.push("UI_REFERENCE.md: missing explicit Status header");
   if (!pendingHtml && !/APPROVED_HTML|REGISTERED_HTML|APPROVED/i.test(uiReference)) errors.push("UI_REFERENCE.md: visual reference has neither pending nor approved state");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
   for (const phrase of [
