@@ -2,7 +2,8 @@
 
 > Status: Active
 > Last verified: 2026-10-07
-> Source of truth: current code/test, `src/lib/db/schema.ts`, `migrations/`, Cloudflare config
+> Verified against commit: `f862c6cc7993ef30f0363d92719c938b23723bee`
+> Source of truth: `src/lib/db/schema.ts` and current code/test, `migrations/`, Cloudflare config
 
 ## Start
 
