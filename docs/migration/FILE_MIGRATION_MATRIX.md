@@ -111,7 +111,7 @@
 | `app/(public)/user/[id]/page.tsx` | PAGE | /user/[id] (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro | NOT_STARTED | — |
 | `app/(public)/user/[id]/paged/page.tsx` | PAGE | /user/[id]/paged (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro (logical profile pagination parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/user/[id]/portfolio/page.tsx` | PAGE | /user/[id]/portfolio (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/portfolio.astro | NOT_STARTED | — |
-| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/index.astro (logical /user query parity; no separate twin required) | NOT_STARTED | — |
+| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user.astro (logical /user query parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/user/page.tsx` | PAGE | /user (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user.astro | NOT_STARTED | — |
 | `app/api/account/summary/route.ts` | ROUTE_HANDLER | RH-001:GET | MIG-0605 | +apps/api/src/routes/account/summary.ts (candidate, verify router) | NOT_STARTED | — |
 | `app/api/admin/import/legacy/route.ts` | ROUTE_HANDLER | RH-002:POST | MIG-0605 | +apps/api/src/routes/admin/import/legacy.ts (candidate, verify router) | NOT_STARTED | — |
