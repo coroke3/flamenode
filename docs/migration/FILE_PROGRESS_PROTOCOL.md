@@ -7,7 +7,7 @@
 
 ## Three levels of state — never confuse them
 
-1. **Task:** STATUS.md owns MIG READY / IN_PROGRESS / REVIEW / BLOCKED / DONE and dependencies. A file being verified never advances a task automatically.
+1. **Task:** STATUS.md owns MIG READY / IN_PROGRESS / REVIEW / BLOCKED / DONE and dependencies. A file being verified never advances a task automatically. Conversely, **if a MIG is marked DONE while one of its owned files is NOT_STARTED, the checker fails**; finish per-file rows or record an explicit reviewed ownership transfer before the task is accepted.
 2. **File:** FILE_MIGRATION_MATRIX.md owns CURRENT source → exact TARGET files / adapters, first owner MIG, state, PR / tests / SHA evidence. One CURRENT source is a stable primary key even if it produces multiple targets.
 3. **Behavior:** CURRENT_ROUTES.md and screen-mapping/README.md own screen URL / UX / FN; route-handlers/README.md owns RH-001..033 (33 methods); server-actions/README.md owns SA-001..110 (110 action units); FUNCTION_INVENTORY.md owns FN. A green compile is not behavior parity.
 
