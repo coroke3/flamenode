@@ -20,6 +20,10 @@ on:
       - ".github/workflows/migration-docs-check.yml"
   workflow_dispatch:
 
+concurrency:
+  group: migration-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
