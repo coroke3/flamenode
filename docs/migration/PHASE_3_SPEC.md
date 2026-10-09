@@ -31,7 +31,7 @@ CURRENT の Next.js 側は、抽出後も同じ関数を呼ぶ**薄い互換ブ�
 
 実コードを調べた結果、抽出対象は 2 種類に分かれる。
 
-| 階層 | 条件 | 例 | D-01 の回答 |
+| 階層 | 条件 | 例 | 実行前提 |
 | --- | --- | --- | --- |
 | **Tier 1: 純粋 core** | `@/` import も DB も `server-only` も持たない | `src/lib/slots/slotReservationLimit.ts`, `src/lib/slots/limits.ts`, `src/lib/utils/softwareLabels.ts`, `src/lib/event/eventOwnershipCore.ts`, `src/lib/auth/ownershipCore.ts` | **不要**。先行して進める |
 | **Tier 2: DB/framework 結合** | `@/lib/db/schema`・`next/navigation`・`server-only` を import する | `src/lib/video/videoVisibilityTransition.ts`, `src/lib/event/eventVisibilityTransition.ts`, `src/lib/xid/xUserVisibilityTransition.ts`, `src/lib/video/computeEditSections.ts` | **A決定、MIG-0308完了が必要**（[`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)） |
@@ -127,7 +127,7 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 
 - **対象**: SA-021〜039（event / event group / staff / template / playlist）、SA-056〜068（slot）。
 - **Tier 1（先行可）**: `src/lib/event/eventOwnershipCore.ts`（`assertEventWillRetainOwner`, `validateEventStaffUniqueness`, `validateEventStaffSubject`, `assertOwnershipTransferInput`, `assertSelfChangeConfirmation`, `isEventOwner`, `planXIdMergeEventStaffOwnerProtection`）、`src/lib/slots/slotReservationLimit.ts`。
-- **Tier 2（D-01 待ち）**: `src/lib/event/eventVisibilityTransition.ts`, `src/lib/event/eventGroupVisibilityTransition.ts`。
+- **Tier 2（MIG-0308 待ち）**: `src/lib/event/eventVisibilityTransition.ts`, `src/lib/event/eventGroupVisibilityTransition.ts`。
 - **不変条件**: `FN-X-001` event は常に operable owner を 1 人以上保持する（条件付き SQL/CAS を含む。UI 検証だけにしない）。
 - **intentional exception（汎用 CRUD 化しない）**: SA-021 `renameEventId`, SA-056/057 slot の破壊的 release。
 
@@ -135,7 +135,7 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 
 - **対象**: SA-016〜020（CostGuard）、SA-043〜055（moderation / notification-admin / terms）、SA-069〜081（static-rebuild / terms / user-admin）、SA-090〜106（X ID・merge・Active X・YouTube sync）。
 - **Tier 1（先行可）**: `src/lib/xid/mergeBudget.ts`（`planXIdMergeD1Budget`）は `@/lib/audit/mutate` に依存するため audit core の分離が前提。単独では先行不可。
-- **Tier 2（D-01 待ち）**: `src/lib/xid/xUserVisibilityTransition.ts`（`server-only`）、`src/lib/xid/mergeSafety.ts`（drizzle `sql` を import）、`src/lib/xid/merge.ts`。
+- **Tier 2（MIG-0308 待ち）**: `src/lib/xid/xUserVisibilityTransition.ts`（`server-only`）、`src/lib/xid/mergeSafety.ts`（drizzle `sql` を import）、`src/lib/xid/merge.ts`。
 - **Auth User を Active X へ機械置換しない**: `approved_by_auth_user_id`, `edit_granted_by_auth_user_id`, audit `actor_user_id`, session/security 識別子は Auth User のまま（[`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)）。
 - **intentional exception**: SA-092〜097 X-ID merge/revert（安全な primitive のみ共有）、SA-011 audit restore、SA-050 public visibility repair。
 
