@@ -1082,6 +1082,13 @@ if (errors.length === 0) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
+  // Every host loop adapter must be present, claim no intrinsic scheduler, and refer to the shared execution protocol.
+  for (const adapter of [".claude/loop.md", ".codex/skills/loop/SKILL.md", ".agents/skills/loop/SKILL.md"]) {
+    const body = read(adapter);
+    if (!body.includes("AGENT_PROTOCOL.md")) errors.push(`${adapter}: missing shared protocol`);
+    if (!/one|1 MIG task|1 invocation|1 wake/i.test(body)) errors.push(`${adapter}: missing single-task contract`);
+  }
+
   // Tool adapters must delegate to the shared protocol.
   const adapters = [
     ".claude/commands/flamenode-migration.md",
