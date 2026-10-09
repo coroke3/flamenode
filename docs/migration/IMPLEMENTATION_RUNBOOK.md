@@ -38,6 +38,10 @@ END
 
 **重要：** Hostに反復機構が無い場合は1タスクで終了する。`/loop`と書いたMDはschedulerではない。レビュー/CI待ち中は同じMIGを再claimしない。
 
+## 大型MIGを複数wakeに分割する方法
+
+45画面などを1回で全部実装しようとしない。[TASK_MICRO_UNITS.md](TASK_MICRO_UNITS.md)を読み、**1 wake = 最大1 micro-unit、親MIGとopen PRは固定**。STATUSのPR branchへ各unitのDONE/BLOCKEDとテスト証拠・次unitを記録する。未完了なら`IN_PROGRESS`で同じowner PRに安全なcheckpointを残して次wakeへ引き継ぐ。すべてunit DONEになるまで`REVIEW`にしない。
+
 ## 作業カードの読み方
 
 各`### MIG-XXXX`が最小実装単位。
