@@ -13,6 +13,9 @@
 | task routing | `docs/AI_CONTEXT.md` |
 | migration architecture / invariants / phases | `docs/migration/README.md` |
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
+| small-model single-task procedures | `docs/migration/IMPLEMENTATION_RUNBOOK.md` |
+| Phase 2–9 per-MIG executable cards | `docs/migration/TASK_CARDS_2_3.md` + `docs/migration/TASK_CARDS_4_5.md` + `docs/migration/TASK_CARDS_6_7.md` + `docs/migration/TASK_CARDS_8_9.md` |
+| cross-model live smoke acceptance | `docs/migration/SMALL_MODEL_SMOKE_TEST.md` |
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
 | migration code quality | `docs/migration/CODE_QUALITY.md` |
 | current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
@@ -33,7 +36,7 @@
 | Phase 8 & 9 task specification (Auth & Retirement) | `docs/migration/PHASE_8_9_SPEC.md` |
 | Active X data migration plan | `docs/migration/ACTIVE_X_MIGRATION_PLAN.md` |
 | multi-worker routing and staged deployment plan | `docs/migration/ROUTING_AND_DEPLOY_PLAN.md` |
-| unresolved decisions requiring human judgement | `docs/migration/OPEN_DECISIONS.md` |
+| adopted architectural decisions and separate PoC/approval gates | `docs/migration/OPEN_DECISIONS.md` |
 | backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
 | route target/disposition | `docs/migration/ROUTE_MATRIX.md` |
 | Server Action disposition | `docs/migration/server-actions/README.md` |
@@ -45,7 +48,8 @@
 | CURRENT Queue / Cron / background jobs baseline | `docs/migration/background-jobs/README.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
-| DB schema | `src/lib/db/schema.ts` + `migrations/` |
+| CURRENT DB schema (until MIG-0308) | `src/lib/db/schema.ts` + `migrations/` |
+| TARGET DB schema (after MIG-0308) | `packages/db/src/schema/index.ts` + immutable `migrations/`; old schema bridge retained |
 | CURRENT Worker config implementation evidence | `wrangler.toml`, `workers/*/wrangler.toml`, deploy scripts, actual Cloudflare settings |
 | deploy procedure | `DEPLOY.md` |
 
