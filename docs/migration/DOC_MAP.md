@@ -64,7 +64,7 @@
 ## Rules
 
 - Migration docs describe TARGET / transition / progress. CURRENT behavior remains code/test/config driven until cutover.
-- `CURRENT_ROUTES.md` owns the 92 `app/**/page.tsx` classification baseline（74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 3 DEV_ONLY / 6 SYSTEM_SURFACE）。
+- `CURRENT_ROUTES.md` owns the 90 `app/**/page.tsx` classification baseline（74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 1 DEV_ONLY / 6 SYSTEM_SURFACE）。
 - `FEATURE_CATALOG.md` is a human-readable derived view of all `UX-*` / `FN-*`; it never overrides the canonical ledgers.
 - `FRONTEND_FEATURES.md` + `frontend/*.md` own `UX-*` frontend observable behavior.
 - `screen-mapping/README.md` owns the resolved mapping from CURRENT visual/compat/dev/system surfaces + cross-route shells to UX/FN, permission/state/query/responsive-a11y contracts.
