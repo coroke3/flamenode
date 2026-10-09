@@ -3,6 +3,7 @@
 > Status: Active / mandatory subdivision for broad tasks
 > Parent task state: [STATUS.md](STATUS.md)
 > Execution: [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md) + [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
+> Per-file checkpoint: [FILE_PROGRESS_PROTOCOL.md](FILE_PROGRESS_PROTOCOL.md), [FILE_MIGRATION_MATRIX.md](FILE_MIGRATION_MATRIX.md)
 > Rule: **one wake processes at most one micro-unit of one MIG**. For a task with multiple units keep its single Draft PR/branch and checkpoint on that branch. Do not mark the parent REVIEW until every unit passed.
 
 ## Required per-wake checkpoint in the task PR branch STATUS
@@ -17,8 +18,11 @@ Micro-units:
   U02: ...
 Current micro-unit: UXX
 Changed files: [exact paths]
+File rows updated: [FILE_MIGRATION_MATRIX.md exact paths and states]
+Provider/consumer wiring: [actual exports/importers and routes]
 CURRENT UX/FN/RH/SA IDs: [exact IDs or NONE + evidence]
 Tests DONE: [command + result/link]
+File progress checker: [node scripts/check-migration-file-progress.mjs result]
 Tests NOT DONE: [command + reason]
 Next wake: repeat latest PR HEAD read; continue at UXX/UYY
 Merge eligibility: NO until all micro-units DONE and independent review/CI
