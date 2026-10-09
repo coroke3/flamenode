@@ -4,6 +4,8 @@
 > Last verified: 2026-10-07
 > Progress: [`STATUS.md`](STATUS.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
+> One-MIG implementation: [`IMPLEMENTATION_RUNBOOK.md`](IMPLEMENTATION_RUNBOOK.md), [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md), [`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md), [`TASK_CARDS_6_7.md`](TASK_CARDS_6_7.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md)
+> Small-model acceptance: [`SMALL_MODEL_SMOKE_TEST.md`](SMALL_MODEL_SMOKE_TEST.md)
 > Git workflow: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
 > Current routes: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
 > 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
@@ -31,6 +33,8 @@
 
 ## Purpose
 
+**実装導線：** `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuはこの範囲を順次読み、全フェーズ文書を一括投入しない。D-08 HTML未提供のPhase2/4/5 visualはBLOCKED。
+
 Next.js + OpenNext中心のCURRENT productionを、Cloudflare Workers FreeのCPU制約に耐え、既存機能を欠落させず、長期的に読みやすく保守しやすい構成へ段階移行する。
 
 UIは全面的に作り直すが、visual redesignを既存機能の削除理由にしない。
@@ -39,7 +43,7 @@ UIは全面的に作り直すが、visual redesignを既存機能の削除理由
 ### デザイン適用戦略（案A正式採用）
 1. **公開画面（Phase 4/5: Astro SSG + React Islands）**: ユーザー提供の新 HTML mock を正本として適用。
 2. **管理・マイページ・登録画面（Phase 7: React SPA）**: 現行 UI/コンポーネント資産（`packages/ui` へ抽出）を流用し、移行効率を最大化。
-3. **Phase 順序の最適化**: UI/デザインに依存しない **Phase 3（ドメイン抽出: MIG-0301〜MIG-0307）** は、Phase 2 の HTML モック提供を待たずに先行して着手可能とする。
+3. **Phase 順序の最適化**: UI/デザインに依存しない **Phase 3（ドメイン抽出: MIG-0301〜MIG-0307 + MIG-0308 packages/db分離）** は、Phase 2 の HTML モック提供を待たずに先行して着手可能とする。
 
 ### Active X 未連携ユーザーのインタラクション
 - いいね・ブックマーク等の操作主体は Active X に分離する。
