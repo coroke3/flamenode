@@ -74,14 +74,23 @@ export function validateMigrationExecution({
 
   if (!currentTask || !tasks.has(currentTask)) errors.push("current task is not in STATUS table");
   else if (tasks.get(currentTask).state !== currentState) errors.push("current task/header state mismatch");
+  const duplicateIds = new Set();
+  const seenIds = new Set();
+  for (const m of statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)) {
+    if (seenIds.has(m[1])) duplicateIds.add(m[1]);
+    seenIds.add(m[1]);
+  }
+  for (const id of duplicateIds) errors.push("duplicate task row: " + id);
+  const dependencyGraph = new Map();
   for (const [id, row] of tasks) {
     if (!STATES.has(row.state)) errors.push(id + " invalid task state: " + row.state);
     let deps = [];
     try { deps = expandDependencies(row.dependencies); }
     catch (error) { errors.push(id + ": " + error.message); }
-    if (ACTIVE.has(row.state)) for (const dep of deps) {
+    dependencyGraph.set(id, deps);
+    for (const dep of deps) {
       if (!tasks.has(dep)) errors.push(id + " missing dependency " + dep);
-      else if (!COMPLETED.has(tasks.get(dep).state)) errors.push(id + " has unfinished dependency " + dep);
+      else if (ACTIVE.has(row.state) && !COMPLETED.has(tasks.get(dep).state)) errors.push(id + " has unfinished dependency " + dep);
     }
     for (const decision of REQUIRED_DECISIONS[id] || []) {
       if (!decisions.has(decision)) errors.push(id + " references missing decision " + decision);
@@ -90,6 +99,18 @@ export function validateMigrationExecution({
       }
     }
   }
+  // BLOCKED tasks with cyclic dependencies must fail too.
+  const visited = new Set();
+  const visiting = new Set();
+  const visitDependency = (id, chain = []) => {
+    if (visiting.has(id)) { errors.push("dependency cycle: " + [...chain, id].join(" -> ")); return; }
+    if (visited.has(id) || !dependencyGraph.has(id)) return;
+    visiting.add(id);
+    for (const dependency of dependencyGraph.get(id)) visitDependency(dependency, [...chain, id]);
+    visiting.delete(id);
+    visited.add(id);
+  };
+  for (const id of dependencyGraph.keys()) visitDependency(id);
   if (viteText && !/base:\s*["']\/["']/.test(viteText)) {
     errors.push("Private SPA must use base '/' for /dashboard, /entry, /manage, /admin routes");
   }
