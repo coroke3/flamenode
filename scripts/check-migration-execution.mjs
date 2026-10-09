@@ -100,6 +100,32 @@ export function validateMigrationExecution({
       }
     }
   }
+  // Performance-first path is a fixed DAG; a docs-only change must not silently relock 1102 PoCs behind D-08 visuals.
+  if (["MIG-0401","MIG-0402","MIG-0403","MIG-0404","MIG-0405","MIG-0406","MIG-0407"].every(id => tasks.has(id))) {
+    const expected = {
+      "MIG-0401": ["MIG-0105"],
+      "MIG-0404": ["MIG-0401"],
+      "MIG-0405": ["MIG-0404"],
+      "MIG-0406": ["MIG-0405"],
+      "MIG-0402": ["MIG-0206", "MIG-0401"],
+      "MIG-0403": ["MIG-0402", "MIG-0404"],
+      "MIG-0407": ["MIG-0403", "MIG-0406"],
+    };
+    for (const [id, deps] of Object.entries(expected)) {
+      const actual = dependencyGraph.get(id) ?? [];
+      if (actual.length !== deps.length || deps.some(dep => !actual.includes(dep))) {
+        errors.push(id + " performance/visual DAG must depend on " + deps.join(", "));
+      }
+    }
+    if (tasks.get("MIG-0105")?.state === "DONE" && tasks.get("MIG-0401")?.state === "BLOCKED") {
+      errors.push("MIG-0401 is eligible for READY after MIG-0105 DONE (nonvisual performance PoC)");
+    }
+    if (decisions.get("D-08") !== "DECIDED") {
+      for (const id of ["MIG-0402", "MIG-0403", "MIG-0407"]) {
+        if (ACTIVE.has(tasks.get(id).state)) errors.push(id + " visual Gate cannot activate before D-08 approved HTML");
+      }
+    }
+  }
   // BLOCKED tasks with cyclic dependencies must fail too.
   const visited = new Set();
   const visiting = new Set();
