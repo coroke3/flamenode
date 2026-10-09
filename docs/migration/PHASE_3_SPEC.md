@@ -6,7 +6,7 @@
 > 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md), [`CODE_QUALITY.md`](CODE_QUALITY.md), [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md), [`server-actions/README.md`](server-actions/README.md)
 
 この仕様書は、各タスクの目的・対象ソース・作成ファイル・禁止事項・検証コマンドを具体化したものである。
-**ここに書かれていない判断（特に D-01）を、エージェントが独断で確定してはいけない。**
+**D-01は A（新規packages/dbへschema移設）と決定済み。** 実装は専用 `MIG-0308` で行い、完了まではTier2を開始しない。詳細は [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)。
 
 > 表記規約: code span の repo パスは**実在するパス**でなければならない。これから作るファイルは `` `+path` `` と書く（`+` は新規作成の印）。
 > 本タスクでは関連コードの実在を各PRで照合し、存在しないチェックコマンドを検証済みとは記載しない。リンクの自動検査は後続タスクで追加する。
@@ -34,10 +34,10 @@ CURRENT の Next.js 側は、抽出後も同じ関数を呼ぶ**薄い互換ブ�
 | 階層 | 条件 | 例 | D-01 の回答 |
 | --- | --- | --- | --- |
 | **Tier 1: 純粋 core** | `@/` import も DB も `server-only` も持たない | `src/lib/slots/slotReservationLimit.ts`, `src/lib/slots/limits.ts`, `src/lib/utils/softwareLabels.ts`, `src/lib/event/eventOwnershipCore.ts`, `src/lib/auth/ownershipCore.ts` | **不要**。先行して進める |
-| **Tier 2: DB/framework 結合** | `@/lib/db/schema`・`next/navigation`・`server-only` を import する | `src/lib/video/videoVisibilityTransition.ts`, `src/lib/event/eventVisibilityTransition.ts`, `src/lib/xid/xUserVisibilityTransition.ts`, `src/lib/video/computeEditSections.ts` | **必要**（[`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-01） |
+| **Tier 2: DB/framework 結合** | `@/lib/db/schema`・`next/navigation`・`server-only` を import する | `src/lib/video/videoVisibilityTransition.ts`, `src/lib/event/eventVisibilityTransition.ts`, `src/lib/xid/xUserVisibilityTransition.ts`, `src/lib/video/computeEditSections.ts` | **A決定、MIG-0308完了が必要**（[`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)） |
 
 Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `packages/*` → `src/*` の依存になり、`src/*` → `packages/domain` のブリッジと**循環**する。
-そのため D-01 の回答（schema の置き場所）が出るまで、Tier 2 の抽出タスクは `BLOCKED(D-01)` として扱う。
+D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・互換/ゼロDDLの検証を終えるまで**、Tier2は `BLOCKED(MIG-0308)` とする。
 
 ---
 
@@ -68,7 +68,7 @@ Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `package
   3. 既存テスト（`src/lib/slots/` 配下の既存 `*.test.mjs`）が無変更で通ることを確認する。
   4. `packages/domain/src/permissions.ts` のプレースホルダーを削除し、`packages/domain/src/index.ts` の export を整理する（上記注意点）。
   5. 決定した方式を本書 §4（抽出規約）へ追記する。
-- **やらないこと**: `DomainContext` / `AppDatabase` 型の導入（D-01 回答後）。drizzle schema の相対 import。
+- **やらないこと**: MIG-0308の前にDB package移設を先走ること。新domainから旧`src/`のdrizzle schemaへ相対importすること。
 - **受け入れ条件**:
   - ブリッジ越しに `npm run test:unit`・`npm run typecheck`・Next の build 経路（`npm run cf:cloud-build` が使う経路）で解決できる。
   - `packages/domain` に禁止 import がない（MIG-0307 で自動チェックを追加するまで、grep で確認する）。
@@ -87,8 +87,15 @@ Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `package
   - `src/lib/slots/limits.ts`（`normalizeMaxSlotsPerVideo`, `MIN_SLOTS_PER_VIDEO`, `MAX_SLOTS_PER_VIDEO`）
   - 公開 read の DTO 整形のうち `@/` import を持たないもの（候補選定は `route-handlers/README.md` の RH-029 `/api/software/suggestions` を起点にする）
 - **作成**: `` `+packages/domain/src/software/labels.ts` ``, `` `+packages/domain/src/slots/limits.ts` `` と対応するテスト。ブリッジは MIG-0301 の方式。
-- **D-01 待ち**: DB を読む read（`videoDetailQueries.ts` 等）は対象外。
+- **MIG-0308 待ち**: DB を読むread（`videoDetailQueries.ts` 等）は別のTier2。
 - **検証**: MIG-0301 と同じ。
+
+### MIG-0308: packages/db schema extraction（D-01 A / MIG-0302後）
+
+- **専用PR**: [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)に従って`+packages/db`へbase/canonical/schemaを一括移設、旧schemaを再exportブリッジにする。
+- **必須**: `drizzle.config.ts` / DB checker / TS path / package-lock / Next・Hono・Workers build importを整合させる。
+- **禁止**: 既存SQL migration改変、Remote D1操作、schema変更を伴うコード整理、本番deploy。
+- **Gate**: named exportの同一性・生成SQL差分ゼロ・型/各build/test/独立reviewが証明されるまでDONEにしない。
 
 ### MIG-0303: low-risk mutation domain（低リスク更新系）
 
@@ -96,9 +103,9 @@ Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `package
   - SA-004〜006 announcements（`src/lib/actions/announcement.ts`）
   - SA-007〜008 api-endpoints（`src/lib/actions/api-endpoints.ts`）
   - SA-035〜037 event templates（`src/lib/actions/event-template-admin.ts`）
-- **前提**: これらは `mutateWithAudit` と DB を使うため **Tier 2 に該当し、D-01 の回答待ち**（`BLOCKED(D-01)`）。
+- **前提**: これらは `mutateWithAudit` と DB を使うため **Tier 2 に該当し、MIG-0308のpackages/db移設待ち**（`BLOCKED(MIG-0308)`）。
   回答前にできるのは「入力検証・正規化・error 契約」だけを純粋関数として切り出す作業である。
-- **作成**: D-01 回答後に確定。それまでは `` `+packages/domain/src/announcement/validation.ts` `` のような**検証のみ**を対象にする。
+- **作成**: MIG-0308完成後に確定。それまでは `` `+packages/domain/src/announcement/validation.ts` `` のような**検証のみ**を対象にする。
 - **不変条件**: 監査（`strict`）、expected-row CAS、public rebuild の enqueue、`revalidatePath` の意味分解（API_MATRIX.md の Side-effect parity）。
 
 ### MIG-0304: video domain group（動画ドメイン）
@@ -111,7 +118,7 @@ Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `package
   - interaction: SA-087（**Active X 移行の対象**。[`ACTIVE_X_MIGRATION_PLAN.md`](ACTIVE_X_MIGRATION_PLAN.md) を先に読むこと）
 - **Tier 1（先行可）**: `src/lib/auth/ownershipCore.ts`（`resolveVideoOwnershipSync`, `decideCanEditVideoFromAccessContext`, `adminPolicyAllows`, `ownerPolicyAllows`, `creatorOwnerCanManagePermissions`, `resolveAdminOrEventVideoPrivilegeMode`）。
   推移的 import（`src/lib/auth/videoEditSections.ts`, `src/lib/auth/permissions/aliases.ts`, `src/lib/video/generalEditPermissionsCore.ts`）も同時に移す。
-- **Tier 2（D-01 待ち）**: `src/lib/video/videoVisibilityTransition.ts`（`server-only`、`next/navigation`、`@/lib/db/*` を import）、`src/lib/video/computeEditSections.ts`（`@/lib/db/*` を import）、`src/lib/auth/ownership.ts` の `canEditVideo`（DB 経路）。
+- **Tier 2（MIG-0308 待ち）**: `src/lib/video/videoVisibilityTransition.ts`（`server-only`、`next/navigation`、`@/lib/db/*` を import）、`src/lib/video/computeEditSections.ts`（`@/lib/db/*` を import）、`src/lib/auth/ownership.ts` の `canEditVideo`（DB 経路）。
   `next/navigation` の `redirect` はドメインへ持ち込まず、結果型（`unauthenticated | forbidden | ...`）で返して adapter が redirect する。
 - **不変条件**: PR #265 で一本化した作品編集権限判定（権限源ごとの判定）、「creator owner のみが collaborator 権限を委譲できる」、dangerous key の常時 deny。
 - **チャプターコメント**: 親チャプター削除時、コメントは物理削除せず論理保持する（[`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md) Chapter/comment model）。
@@ -137,7 +144,7 @@ Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `package
 - **完了チェックリスト**:
   - [ ] `packages/domain` に `next/*` / `react` / `hono` / `astro` / `server-only` の import がない（静的チェックを `scripts/` に追加し `check:project-docs` へ接続）
   - [ ] Tier 1 の対象がすべて `packages/domain` へ移り、`src/lib/**` は同名 export のブリッジである
-  - [ ] Tier 2 のD-01を `DECIDED` とし、Honoへ移行可能なdomain/DB依存境界を実証。未移行を単に `BLOCKED/SKIPPED` と記録しただけでPhase Gateを通さない（例外はユーザー承認と代替タスクの追加が必須）
+  - [ ] MIG-0308で `packages/db` 移行が完了し、DB schema差分ゼロ、循環依存ゼロ、Next/Hono/Workersのビルド/テストを実証。Tier2を単に `BLOCKED/SKIPPED` と記録しただけでPhase Gateを通さない（例外はユーザー承認と代替タスクの追加が必須）
   - [ ] 既存テスト（`npm run test:unit`・`npm run test:integration`）が**無変更で**全件パスする（件数は固定せず、移行前後で同数であることを確認する）
   - [ ] `npm run verify:fast` が PASS
   - [ ] `STATUS.md` の Phase 3 を `DONE` に更新し、Phase 6 の MIG-0601 を `READY` にする
