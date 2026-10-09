@@ -72,7 +72,7 @@ const listChangedFromBase=base=>{
  const raw=execFileSync("git",["diff","--name-only",base+"...HEAD"],{cwd:ROOT,encoding:"utf8"});
  return raw.trim().split("\n").filter(Boolean);
 };
-function collectFiles(root=ROOT){
+export function collectFiles(root=ROOT){
  const files=[];
  function visit(dir){
   if(!fs.existsSync(dir))return;
