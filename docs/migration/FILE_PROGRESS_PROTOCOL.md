@@ -24,6 +24,8 @@
 
 ## File-state machine and evidence
 
+**SHA循環回避:** ファイル台帳に記録する`SHA=`は、実装・テストした**直前のsource commit SHA**。進捗行を更新するcommit自身の未来SHAを記入することは不可能。最終PR HEAD/CI runをGitHubで別途確認し、レビュー担当者が紐付ける。偽の未来SHAや仮のCI URLを入力しない。
+
 | State | Required meaning | Required evidence |
 | --- | --- | --- |
 | NOT_STARTED | source inventory exists, migration unstarted | source path + contract + owner MIG |
