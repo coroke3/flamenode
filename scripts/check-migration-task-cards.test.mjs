@@ -59,3 +59,7 @@ test("missing protocol references and D-08 guard fail", () => {
   assert.match(validateTaskCards({...base,protocol:"ignore runbook"}).join(" "),/IMPLEMENTATION_RUNBOOK/);
   assert.match(validateTaskCards({...base,runbook:"1 wake = 1 task"}).join(" "),/HTML mock safety gate/);
 });
+
+test("large task must have micro-unit recipe", () => {
+  assert.match(validateTaskCards({...base,microUnits:"# no packets"}).join(" "),/MIG-0705: large task/);
+});
