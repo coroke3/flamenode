@@ -104,7 +104,7 @@ Next: one explicit action and its owner
 
 本番DB書き込み・データ移行・適用済みmigrationの変更、本番Route/Custom Domain/DNS、Secrets、Discord認証cutover、権限/可視性を変えるproduct behavior、Phase Gate、採用済み仕様の再決定。これらは設計が`DECIDED`でも作業実行を自動許可しない。
 
-HTMLモックはまだ受領していない。D-08を根拠にPhase2/4/5のvisual taskを`READY`にしてはいけない。非visual調査・domain/DB抽出など独立したtaskのみ進める。
+HTMLモックはまだ受領していないため、D-08は **BLOCKED_ON_USER** を維持。D-08を根拠にPhase2/4/5のvisual taskを`READY`にしてはいけない。非visual調査・domain/DB抽出など独立したtaskのみ進める。
 
 ## 優先して読む詳細資料
 
