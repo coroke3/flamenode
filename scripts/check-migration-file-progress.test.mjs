@@ -64,3 +64,9 @@ test("a syntactically valid advanced target still must exist in source tree",()=
  const m=matrix.replace("+apps/site/src/pages/about.astro | NOT_STARTED | — |",target+" | BRIDGED | "+evidence+" |");
  assert.match(validateFileProgress({...base,matrix:m}).join("\\n"),/unverified target path/);
 });
+
+test("existing source mentioned in MIG cards requires its own ledger row",()=>{
+ const extra="src/lib/slots/slotReservationLimit.ts";
+ const errors=validateFileProgress({...base,filePaths:[...filePaths,extra],taskCardsText:"### MIG-0301 \\n- 読む: "+extra});
+ assert.match(errors.join("\\n"),/missing file progress row for source/);
+});
