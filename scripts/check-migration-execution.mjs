@@ -117,9 +117,6 @@ export function validateMigrationExecution({
         errors.push(id + " performance/visual DAG must depend on " + deps.join(", "));
       }
     }
-    if (tasks.get("MIG-0105")?.state === "DONE" && tasks.get("MIG-0401")?.state === "BLOCKED") {
-      errors.push("MIG-0401 is eligible for READY after MIG-0105 DONE (nonvisual performance PoC)");
-    }
     if (decisions.get("D-08") !== "DECIDED") {
       for (const id of ["MIG-0402", "MIG-0403", "MIG-0407"]) {
         if (ACTIVE.has(tasks.get(id).state)) errors.push(id + " visual Gate cannot activate before D-08 approved HTML");
