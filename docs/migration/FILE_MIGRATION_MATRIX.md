@@ -222,6 +222,8 @@
 | `workers/youtube-sync/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `wrangler.toml` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
 
+| `src/lib/publicData/loader.test.mjs` | TEST | legacy public data loader caching/visibility regression | MIG-0401 | SAME (CURRENT regression; future Astro loader test TBD) | NOT_STARTED | — |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
