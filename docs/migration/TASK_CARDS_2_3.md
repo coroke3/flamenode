@@ -98,21 +98,21 @@ Phase 2 visual cards **remain BLOCKED** until user HTML mock is registered in `U
 
 ### MIG-0303 — low-risk mutations
 
-- 読む: `server-actions/README.md` SA-004..008, SA-035..037、`src/lib/actions/announcement.ts`, `api-endpoints.ts`, `event-template-admin.ts`。
+- 読む: `server-actions/README.md` SA-004..008, SA-035..037、`src/lib/actions/announcement.ts`, `api-endpoints.ts`, `event-template-admin.ts`。**SA-035..037の一次抽出はMIG-0303。MIG-0305/0604は既存サービスの呼び出し・権限・監査を検証し、二重実装しない。**
 - 変更: input validation → permission result → DB transaction/mutateWithAudit → post-commit enqueueを段階的に分離。domainのpolicyはframework-neutral、D1 session/binding/redirectはadapterに残す。旧Server ActionとHonoで同一serviceを呼ぶ。
 - 試験: unauthorized/forbidden, CAS競合、失敗時no-audit/write、成功時audit + static reflection、同時操作retryの実験。
 - DONE: SAごとのbefore/afterレスポンス・監査/Queue/permission一致。対象外のadmin mutationは触らない。
 
 ### MIG-0304 — video domain
 
-- 読む: `src/lib/auth/ownershipCore.ts`, `ownership.ts`, `src/lib/video/videoVisibilityTransition.ts`, `computeEditSections.ts`, SA-001..003,012..015,040..042,082..089、`auth/README.md`。
+- 読む: `src/lib/actions/admin.ts` (SA-001..003)、`src/lib/auth/ownershipCore.ts`, `ownership.ts`, `src/lib/video/videoVisibilityTransition.ts`, `computeEditSections.ts`, SA-012..015,040..042,082..089、`auth/README.md`。**動画管理actionはMIG-0304の一次所有、MIG-0306は重複抽出しない。**
 - 変更: mode-aware permission/visibility/chapters/collab/update serviceを凝集単位で移す。イベントmodeへowner/adminを暗黙fallbackさせない。D-03 fan-outの履歴移行と**新規Active X単位操作を区別**する。
 - 試験: creator owner/staff/collab/admin/banned/mode切替/dangerous key、visibility CAS、章削除でもコメント論理保持、post-commit notification/rebuild。
 - DONE: 対象SA/UX/FNの行を全数照合、権限の許可/拒否と副作用一致。
 
 ### MIG-0305 — event/slot domain
 
-- 読む: `src/lib/event/eventOwnershipCore.ts`, `src/lib/event/eventVisibilityTransition.ts`, `src/lib/slots/slotReservationLimit.ts`, SA-021..039とSA-056..068、`background-jobs/README.md`。
+- 読む: `src/lib/event/eventOwnershipCore.ts`, `src/lib/event/eventVisibilityTransition.ts`, `src/lib/slots/slotReservationLimit.ts`, SA-021..034、SA-038..039とSA-056..068（SA-035..037はMIG-0303で抽出）、`background-jobs/README.md`。
 - 変更: event owner保護/枠制約/atomic reservation/releaseのpolicyとtransaction boundaryを抽出。破壊的rename/releaseを汎用CRUDに吸収しない。
 - 試験: 最終owner解任拒否、同時予約、連続枠上限、期限超過、再実行、DM失敗・outbox retryのaudit/Queue不変。
 - DONE: 認可とownerゼロ防止がDB transactionを含め実証され、経路別UX/FNは維持。
