@@ -50,7 +50,7 @@ export function expandDependencies(raw) {
     const range = part.match(/^(MIG-\d{4})\.\.(MIG-\d{4})$/);
     if (!range) {
       if (/^MIG-\d{4}$/.test(part)) deps.add(part);
-      else if (part !== "—" && part !== "-") throw new Error("unknown dependency syntax: " + part);
+      else if (!["—", "-", "user input"].includes(part)) throw new Error("unknown dependency syntax: " + part);
       continue;
     }
     const start = Number(range[1].slice(4));
