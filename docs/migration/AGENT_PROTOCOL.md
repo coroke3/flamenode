@@ -47,6 +47,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 3. `docs/migration/STATUS.md`
 3a. `docs/migration/OPEN_DECISIONS.md`（対象taskに紐づくDecision状態を必ず確認）
 3b. **`docs/migration/IMPLEMENTATION_RUNBOOK.md`**（Luna/Haiku含む全agent必読）
+3b1. **`docs/migration/FILE_PROGRESS_PROTOCOL.md` と `FILE_MIGRATION_MATRIX.md` の現在のMIGに属するファイル行だけ**（source→target→consumerと各ファイル状態を記録する）
 3c. **`docs/migration/TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` の該当MIG 1件だけ**。大型MIGは `docs/migration/TASK_MICRO_UNITS.md` の該当micro-unitだけ読む。全55件を一度に読み込まない
 4. `docs/migration/GIT_WORKFLOW.md`
 5. `docs/migration/README.md`
@@ -99,7 +100,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 
 ## Claim
 
-開始前:
+開始前には FILE_MIGRATION_MATRIX.md で対象sourceの現在の行と全consumer/legacy bridgeを確認し、ファイルごとの変更・テスト・rollback計画を記入する。
 
 ```text
 Task:
