@@ -137,7 +137,7 @@ Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `package
 - **完了チェックリスト**:
   - [ ] `packages/domain` に `next/*` / `react` / `hono` / `astro` / `server-only` の import がない（静的チェックを `scripts/` に追加し `check:project-docs` へ接続）
   - [ ] Tier 1 の対象がすべて `packages/domain` へ移り、`src/lib/**` は同名 export のブリッジである
-  - [ ] Tier 2 は D-01 の回答に基づき移行済み、または理由付きで `BLOCKED/SKIPPED` と記録されている
+  - [ ] Tier 2 のD-01を `DECIDED` とし、Honoへ移行可能なdomain/DB依存境界を実証。未移行を単に `BLOCKED/SKIPPED` と記録しただけでPhase Gateを通さない（例外はユーザー承認と代替タスクの追加が必須）
   - [ ] 既存テスト（`npm run test:unit`・`npm run test:integration`）が**無変更で**全件パスする（件数は固定せず、移行前後で同数であることを確認する）
   - [ ] `npm run verify:fast` が PASS
   - [ ] `STATUS.md` の Phase 3 を `DONE` に更新し、Phase 6 の MIG-0601 を `READY` にする
