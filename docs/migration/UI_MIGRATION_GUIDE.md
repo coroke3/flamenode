@@ -57,6 +57,8 @@
 
 ---
 
+**Adapter安全性**: `setLinkComponent` / `setNavigatorAdapter` のmodule-global setterは初期PoC用。SSRの複数request/React root混在やrouter外利用に対して安全ではない。Phase 4/7の本移行時はReact Provider/Context等でrootごとに注入し、画像の`fill`/`priority`/幅高さやprefetchの意味論はE2Eで比較する。単なる`next/image`→`img`の機械置換をparity合格と扱わない。
+
 ## 3. CSS Modules の移行方針
 
 - **ネイティブサポート**: Vite (`apps/app`) および Astro (`apps/site`) は、標準で `*.module.css` を追加プラグインなしでネイティブ解釈・スコープ化します。
@@ -75,9 +77,9 @@
 
 | アプリケーション | 担当領域 | 静的アセットパス | ルーティングルール |
 | --- | --- | --- | --- |
-| `flamenode-site` (Astro) | 公開閲覧画面 (SSG) | `/_astro/*` | `/`, `/:id`, `/event/*`, `/events/*`, `/users/*` 等 |
-| `flamenode-app` (Vite) | 管理・マイページ (SPA) | `/dashboard/_app_assets/*` | `/dashboard/*` |
-| `flamenode-api` (Hono) | バックエンド API | (静的アセットなし) | `/api/*` |
-| `flamenode-web` (現行Next) | 移行中暫定フォールバック | `/_next/*`, `/static/*` | 上記以外の未移行パス |
+| `flamenode-site` (Astro) | 公開閲覧画面 (SSG) | `/_astro/*` | `/`, `/:id`, `/event/*`, `/groups/*`, `/user/*`, `/list`, `/recommend`, `/trending` 等 |
+| `flamenode-app` (Vite) | 管理・マイページ (SPA) | `/_app_assets/*` | `/dashboard/*`, `/entry/*`, `/manage/*`, `/admin/*`, `/onboarding` |
+| `flamenode-api` (Hono) | バックエンド API | (静的アセットなし) | `/api/<移行済みの明示パス>` |
+| `flamenode-web` (現行Next) | 移行中暫定フォールバック | `/_next/*`, `/static/*` | `/api/auth/*` (Phase 8まで), 未移行API/画面 |
 
-- **衝突防止措置**: `apps/app/vite.config.ts` で `base: "/dashboard/"`, `build.assetsDir: "_app_assets"` を明示設定済み。これにより、アセットのパス衝突や Cloudflare Edge キャッシュ汚染は完全に排除されます。
+- **衝突防止措置**: `apps/app/vite.config.ts` で `base: "/"`, `build.assetsDir: "_app_assets"` とし、同じSPAを `/dashboard`, `/entry`, `/manage`, `/admin`, `/onboarding` で配信する。アセットルーティングとrootパスでのSPA fallbackは統合テスト必須。プレフィックス分離だけでCache-Controlやアクセス制御を証明したとは扱わない。
