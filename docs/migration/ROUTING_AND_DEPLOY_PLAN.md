@@ -67,6 +67,8 @@ Cloudflare公式文書では同一hostnameのRouteがCustom Domainより優先�
 
 ## 4. 段階的カットオーバー手順（Staged Cutover）
 
+非本番Gateway/Route-map/CPU実証（MIG-0401→0404→0405→0406）はユーザーHTMLモック非依存。ただし**本番画面切替**はMIG-0403のapproved visual/UX + MIG-0406性能証跡からなるMIG-0407 Gate、および個別path単位の本番操作承認後だけ行う。測定と停止条件は[PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md)。
+
 > **重要**: 本番の Worker Route、Custom Domain、DNS 設定変更は、`AGENTS.md` により**ユーザーの明示承認が必須**です。
 
 1. **Step A: 個別API導通（Phase 6 の各API契約検証後）**:
@@ -74,7 +76,7 @@ Cloudflare公式文書では同一hostnameのRouteがCustom Domainより優先�
    - `/api/auth/*`、未移行API、Next専用Server Actionは旧 `flamenode-web` に残す。旧Next.jsと新SPA双方の認証Cookie・CSRF・同一origin・権限・レスポンス契約をE2E確認する。
    - Phase 8の専用cutoverまで `/api/auth/*` をHono側の汎用ルートで捕捉しない。Worker RouteはHTTP method別には振り分けられないため、同一パスの一部methodだけ移す場合はrouter側の分岐またはパス全体の同時互換完了が必要。
 2. **Step B: 公開画面の段階切り替え（Phase 5 完了・依存するAPI疎通後）**:
-   - `/about`, `/rules` → `/event/*` → `/user/*` → `/list` → `/` → `/:id` の順に段階的に `flamenode-site` へ向ける。
+   - **低リスク・性能寄与の順**: `/about`, `/rules`（最初の安全確認）→ `/user/*` → `/list`, `/recommend`, `/trending` → `/event/*`, `/groups/*` → `/` → root動画 `/:id`（最後）。root slugのCloudflare globと固定path衝突・古いaliasや/redirectは明示的dispatchを実際の非本番Workerで検証する。`MIG-0504`/`0505`は`0501`DONEから始められるが、イベントMIGのUX要件や他のtask Gateを飛ばさない。
 3. **Step C: 管理画面の切り替え（Phase 7 完了・依存するHono API疎通後）**:
    - Personal `/dashboard/*`, `/entry/*`, `/onboarding` を `flamenode-personal`へ、Ops `/manage/*`, `/admin/*` を `flamenode-ops`へ**別々**に切替。bare pathとdeep-linkも対象。受入テストと責任者はそれぞれ独立。
 4. **Step D: 認証の専用切替（Phase 8 Gate 後、要承認）**:
