@@ -6,6 +6,8 @@ FlameNodeの段階移行を1回につき1タスクだけ進める。
 
 1. `AGENTS.md`
 2. `docs/migration/AGENT_PROTOCOL.md`
+2a. `docs/migration/IMPLEMENTATION_RUNBOOK.md` and exactly one matching `docs/migration/TASK_CARDS_*.md` card
+2b. `docs/migration/OPEN_DECISIONS.md`
 3. `docs/migration/README.md`
 4. `docs/migration/STATUS.md`
 5. `docs/migration/FEATURE_CATALOG.md`
