@@ -12,6 +12,10 @@
 旧`docs/design-redesign/`は廃止し、移行のvisual sourceとして使用しない。
 `app/(redesign)`や過去のmock実装も、新しいdesign targetを推測する根拠にしない。
 
+## User decision (2026-10-09)
+
+D-08=A: **新HTMLモックを先に確定し、その後にUI移行する**。提供日・ファイル・scopeは未確定のため`PENDING_HTML`を維持する。Domain/DB package/APIの非UI部分は先行可。Phase2/公開UIのvisual DoneはHTML受領と確認まで禁止。
+
 ## Before HTML mock arrives
 
 許可:
