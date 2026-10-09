@@ -36,7 +36,7 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 ## MIG-0304 — Video domain
 
 - **U01 ownership policy**: `src/lib/auth/ownershipCore.ts`, `videoEditSections.ts`, `generalEditPermissionsCore.ts` と tests。mode別allow/deny,dangerous keyでpolicy抽出/bridge。
-- **U02 video visibility**: `src/lib/video/videoVisibilityTransition.ts` と event roleのSA-001..003/040..042。publish→private即時フェンス、CAS+通知+静的Queue。
+- **U02 video visibility**: `src/lib/actions/admin.ts`のSA-001..003、`src/lib/video/videoVisibilityTransition.ts`とevent roleのSA-040..042。publish→private即時フェンス、CAS+通知+静的Queue。
 - **U03 edit/member/chapter**: `computeEditSections.ts`, SA-012..015/082..085。chapter削除でもcomment保持、collab editor権限はCreatorOwnerだけ委譲。
 - **U04 submission/interactions**: SA-086..089 と fan-out移行の契約を分離。new interactionは選択Active Xのみ、old Auth history migrationは全approved owner X。再実行性/Queue。
 - **Final audit**: SA-001..003/012..015/040..042/082..089, affected UX/FNを漏れなく列挙。
@@ -46,7 +46,7 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **U01 owner/policy**: `eventOwnershipCore.ts`, event ownership mode、operable owner>=1のDB raceテスト。
 - **U02 event transitions**: `eventVisibilityTransition.ts`, `eventGroupVisibilityTransition.ts`、admin/manage権限区別。可視性とpost-commit反映。
 - **U03 slot reservation**: SA-056..068、予約上限/CAS/重複・期限・owner/local bind条件。既存D1 transactionを保持。
-- **U04 bulk/playlist**: SA-021..039（U01/U02対象分除く）を列挙し、event-group/rename/staff/playlist/notificationの隠れた副作用を比較。
+- **U04 bulk/playlist**: SA-021..034およびSA-038..039（U01/U02対象分除く）。SA-035..037はMIG-0303で抽出したserviceのconsumer/監査互換検証のみを列挙し、event-group/rename/staff/playlist/notificationの隠れた副作用を比較。
 - **Final audit**: event/slot all SA affected FN, concurrent owner0, requeue/retry。
 
 ## MIG-0306 — User / X / Admin domain
@@ -62,7 +62,7 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **U01**: `/event` event index/list/query/SEO。
 - **U02**: `/event/[id]` metadata/status/visibility。
 - **U03**: `/event/[id]/slots` live count, overlay, pending/retry/static fences。
-- **U04**: `/event/[id]/release` release playback order, aliases, schema invalid, degrade。
+- **U04**: `/event/[id]/release` release playback order, aliases, schema invalid, degrade。`/event/~query`は内部technical twinで、同名Astroページを必ず作るのではなく、logical `/event?...`のfilter/reload/history parityを証明する。
 
 ## MIG-0504 — Public user routes
 
@@ -102,7 +102,7 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **U01 scaffold**: `+apps/ops` package/tsconfig/entry/Vite/bundle, distinct `/_ops_assets/*` + CI build. No production routing。
 - **U02 Manage index/event overview**: `/manage`, `/manage/events/[id]`, `.../edit`, `.../audience`。
 - **U03 slots/staff**: `.../slots`, `.../staff`, event0-owner CAS/privilege。
-- **U04 videos/playlist**: `.../videos`, video detail, `.../youtube-playlist`, edit permission。
+- **U04 videos/playlist**: `.../videos`, video detail, `.../youtube-playlist`, edit permission。`/manage/events/[id]/review`はCURRENT `/manage/events/[id]/videos?status=pending` への互換redirectとして扱い、同unitでdeep-linkを試験する。
 - **U05 notifications/X-link**: `/manage/notifications`, `/manage/x-link-requests` and any remaining Manage route in CURRENT_ROUTES。
 - **Final audit**: count Manage12 incl compatibility, deny wrong scope, independent Ops build/deep URL.
 
