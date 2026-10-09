@@ -36,7 +36,7 @@ Next: MIG-0301 extraction/DI pattern
 - `REVIEW`: implementation/audit済み、独立review/検証待ち
 - `BLOCKED`: dependency/approval/evidence不足
 - `DONE`: acceptance + validation + progress更新済み
-- `SKIPPED`: 理由付きで不要
+- `SKIPPED`: 例外。代替タスク・独立レビュー・ユーザー/Lead承認を明示。タスク表の外に `SKIP_APPROVAL: MIG-XXXX | PR#NNN | APPROVAL=<real reviewer/approval link> | ALTERNATIVE=<MIG-ID or rationale>` の1行を残す。CIが検証。承認無しのSKIPPEDで依存を解除しない
 
 ## Loop / handoff rules
 
