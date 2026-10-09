@@ -96,3 +96,18 @@ test("reject premature D-08 completion while HTML is not registered", () => {
 test("fan-out is explicitly checked against owner links", () => {
   assert.match(run({activeXText:"active x link_role='manager' fan-out"}).join("\n"), /approved owner X fan-out/);
 });
+
+test("BLOCKED task referencing nonexistent prerequisite is invalid immediately", () => {
+  const changed = status.replace("| MIG-0302 | read | BLOCKED | MIG-0301 |", "| MIG-0302 | read | BLOCKED | MIG-9999 |");
+  assert.match(run({statusText:changed}).join("\n"), /MIG-0302 missing dependency MIG-9999/);
+});
+
+test("cyclic future tasks cannot silently deadlock", () => {
+  const changed = status.replace("| MIG-0302 | read | BLOCKED | MIG-0301 |", "| MIG-0302 | read | BLOCKED | MIG-0303 |");
+  assert.match(run({statusText:changed}).join("\n"), /dependency cycle/);
+});
+
+test("duplicated MIG rows must be rejected instead of shadowed", () => {
+  const changed = status.replace("| MIG-0302 | read | BLOCKED | MIG-0301 |", "| MIG-0302 | read | BLOCKED | MIG-0301 |\n| MIG-0302 | duplicate | BLOCKED | MIG-0301 |");
+  assert.match(run({statusText:changed}).join("\n"), /duplicate task row/);
+});
