@@ -13,7 +13,7 @@
 
 移行:
 
-`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/STATUS.md` → `migration/OPEN_DECISIONS.md` → `migration/GIT_WORKFLOW.md` → `migration/README.md` → taskに必要なUX/FN/route/API ledger → 対象code/test
+`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/STATUS.md` → `migration/OPEN_DECISIONS.md` → `migration/IMPLEMENTATION_RUNBOOK.md` → one `migration/TASK_CARDS_*.md` → `migration/GIT_WORKFLOW.md` → `migration/README.md` → taskに必要なUX/FN/route/API ledger → 対象code/test
 
 branch / PR / merge / handoffは `migration/GIT_WORKFLOW.md`。
 正本重複判断だけ `migration/DOC_MAP.md`。
@@ -33,6 +33,9 @@ Historical/archive/完了済みphaseはCURRENT仕様の根拠にしない。
 | universal agent rules | [`../AGENTS.md`](../AGENTS.md) |
 | task routing | [`AI_CONTEXT.md`](AI_CONTEXT.md) |
 | multi-agent migration protocol | [`migration/AGENT_PROTOCOL.md`](migration/AGENT_PROTOCOL.md) |
+| small-model execution runbook | [`migration/IMPLEMENTATION_RUNBOOK.md`](migration/IMPLEMENTATION_RUNBOOK.md) |
+| executable task cards Phase2-9 | [`migration/TASK_CARDS_2_3.md`](migration/TASK_CARDS_2_3.md) / [`migration/TASK_CARDS_4_5.md`](migration/TASK_CARDS_4_5.md) / [`migration/TASK_CARDS_6_7.md`](migration/TASK_CARDS_6_7.md) / [`migration/TASK_CARDS_8_9.md`](migration/TASK_CARDS_8_9.md) |
+| Luna/Haiku real-run smoke | [`migration/SMALL_MODEL_SMOKE_TEST.md`](migration/SMALL_MODEL_SMOKE_TEST.md) |
 | migration Git policy | [`migration/GIT_WORKFLOW.md`](migration/GIT_WORKFLOW.md) |
 | target migration architecture | [`migration/README.md`](migration/README.md) |
 | progress / next READY task | [`migration/STATUS.md`](migration/STATUS.md) |
