@@ -46,21 +46,16 @@ CREATE INDEX video_interactions_video_type_idx
 
 ---
 
-## 3. ユーザー状態ごとのマッピング方針（D-03 参照）
+## 3. 移行名義 — D-03: 所有する全承認済みXへfan-out（決定済み）
 
-1. **承認済み Active X を所持しているユーザー (`users.active_x_user_id != null`)**:
-   - `users.active_x_user_id` を無条件採用せず、**同一Auth Userの承認済み`x_user_account_links`に実在し、`x_users.approval_status = approved`** を照合してから採用。未承認/リンク切れ/取消中は未割当として保留（D-03）。
-2. **承認済み X を複数所持し、`active_x_user_id` が未定のユーザー**:
-   - [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-03 の判断待ち。
-   - 推奨: `link_role = 'owner'` の最古の承認済み X ID を優先、またはユーザーの次回明示選択まで保留。
-3. **Active X を未所持・未連携の一般ユーザー**:
-   - データを削除せず、`video_interactions_auth` にそのまま保持する。
-   - ユーザーが次回ログイン時または操作時に「Active X 登録・連携モーダル」を通じて名義を登録・承認された時点で、自動的に `video_interactions` へコピーする。
-4. **重複いいね（異なる Auth User が同一 X ID に紐づいている場合）**:
-   - 主キー `(x_user_id, video_id, interaction_type)` により 1 件に集約。
-   - `videos.app_like_count` の実数ズレが発生する場合は、バッチ完了後に再集計を実行。
+旧 `video_interactions_auth` の **各1行を、そのAuth Userがownerとして持つ全承認済みX** に展開する。`users.active_x_user_id` の1件のみには限定しない。`x_user_account_links.auth_user_id` が一致し、`link_role='owner'`、`x_users.approval_status='approved'` の両方を満たすこと。manager権限だけのX、pending/rejected/imported状態は除外する。
 
----
+1. 1名義/複数名義とも同じjoinで処理し、移行時点で有効な所有リンク集合を固定して記録する。元のX IDでのinteractionも含め、`(x_user_id,video_id,interaction_type)` でdedupe。
+2. Xを所持していないAuth Userのinteractionは旧テーブルに保持する。後から承認済みownerリンクを持ったときの追補移行は監査付き・冪等・再照合必須。
+3. `videos.app_like_count` はAuth Userの件数ではなく**Xごとのdistinct like件数**として全件再計算する。1 Auth→3 Xなら最大3いいねとしてカウントされうる。差分をレポートして承認対象にする。
+4. 同一Xに複数Auth Userが紐づくときは同一video/typeが衝突する。重複行のtimestamp/削除競合・既存Xの先行操作を追跡して収束させる。既存レコードを無条件に上書きしない。
+5. **この選択は過去interactionの移行方法のみ。切替後の新規like/bookmarkは選択中Active Xに作用し、所有する全Xへ自動連動しない**（全X同期の追加仕様は別の承認対象）。
+6. fan-out件数は `old rows × owner approved links` に比例し、D1 Free枠の行数/CPU/statementを事前見積りする。数十万件なら複数実行枠に分割し、1リクエストで処理しない。
 
 ## 4. Cloudflare D1 Free 枠の制限遵守とバッチ設計
 
@@ -71,7 +66,7 @@ Cloudflare D1 Free 枠制限:
 ### バックフィルバッチ仕様 (`scripts/migrate-interactions-to-active-x.mjs`)
 1. **チャンクサイズ**: 1 バッチ最大 40 件の INSERT（50 ステートメント制限にマージンを確保）。
 2. **安全弁**: 1 回のバッチ実行で最大 5,000 件まで処理し、日次 100,000 行上限を確実に下回る設計。
-3. **べき等性**: `INSERT OR IGNORE INTO video_interactions ...` を用い、再実行安全性を保証。
+3. **べき等性**: 重複キーへの `INSERT OR IGNORE` は行重複防止に限る。削除済みデータの復活防止にはsnapshot/versionおよびwrite-freeze/差分照合が必要。
 4. **移行チェックポイント**: 処理対象の安定したソートキーと時点を記録し、中断後の再開で新規/更新行を取りこぼさない。`last_processed_auth_user_id` だけで読取を進めず、`(auth_user_id, video_id, interaction_type)` の複合キー、実行単位のスナップショット/デルタを用いる。バッチ進捗・検証記録は処理結果と整合させる。
 5. **監査ログ**: actorと対象件数・衝突件数・未割当件数・チェックポイント・切替時刻を記録。個人を特定する情報や秘密値を標準出力へ大量に出さない。
 6. **検証**: type別の移行前後件数、(X ID,video,type)一意性、approved-link制約、未割当の残存件数、`videos.app_like_count` の再計算、R2/Queue派生データの整合性を照合。不一致ならflagを切り替えない。
@@ -85,7 +80,7 @@ Cloudflare D1 Free 枠制限:
 |---|---|---|
 | **Step 1** | Phase 3 (Domain) | `packages/domain` 内で `video_interactions` を対象とする interaction サービスの型・シグネチャを設計 |
 | **Step 2** | Phase 6 (Hono API) | バックフィルスクリプトの作成・dry-run 検証、および本番バックフィル（要ユーザー承認） |
-| **Step 3** | Phase 7 (Private SPA) | `system_settings` のフラグにより、書き込み・読み込み正本を `video_interactions` へ一括切替（D-04 参照）。未連携モーダル稼働 |
+| **Step 3** | Phase 7 (Private SPA) | 全旧/新interaction書き込み経路を短時間停止 → 最終fan-outと取り消し差分照合 → `system_settings` の単一フラグで**同時に**読み書きをX正本へ切替（D-04）。旧経路は互換shimで新サービスを呼ぶ。未連携モーダル稼働 |
 | **Step 4** | Phase 9 (Retirement) | 整合性検証期間を経て、旧 `video_interactions_auth` の安全な廃止 |
 
 ---
