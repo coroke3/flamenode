@@ -1,7 +1,7 @@
 # FlameNode Migration Documentation Map
 
 > Status: Active / source-of-truth map
-> Last verified: 2026-10-07
+> Last verified: 2026-10-09
 
 移行で同じ仕様を複数Markdownへ複製しないための正本マップ。**全表を毎回読むためのリストではない**。実装時の対象MIGと参照範囲は[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)を利用する。
 
