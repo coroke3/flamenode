@@ -14,6 +14,10 @@
 5. 該当`CURRENT_ROUTES.md` / `route-handlers/README.md` / `server-actions/README.md`の対象行とCURRENT code/testを**実際に開く**。名前だけから動作を推測しない。
 6. 作業PRをclaimし、範囲内だけ編集する。1 wake = 1 task。Phase Gate/Remote D1/secret/production Route変更はユーザー承認がない限り実施しない。
 
+## ファイル進捗が必要な理由
+
+`STATUS.md` は親MIGのみの状態であり、同じMIG内の多数の既存ソースがどこまで移ったかを示せない。`FILE_MIGRATION_MATRIX.md` は1ファイル1行で `NOT_STARTED / IN_PROGRESS / BRIDGED / PARITY_VERIFIED / CUTOVER / RETIRED / RETAINED / BLOCKED` を記録。**対象ファイルすべての現物・変更先・importer・テストを確認し、他MIGの共有ソースに無断で触らない。** 差分チェックは`node scripts/check-migration-file-progress.mjs`。接続手順と失敗時は`FILE_PROGRESS_PROTOCOL.md`を読む。
+
 ## 一件を進める厳密な手順（省略不可）
 
 ```text
@@ -57,6 +61,8 @@ END
 
 ```bash
 npm ci
+node scripts/check-migration-file-progress.mjs
+node --test scripts/check-migration-file-progress.test.mjs
 node scripts/check-migration-docs.mjs
 node --test scripts/check-migration-execution.test.mjs
 node --test scripts/check-migration-task-cards.test.mjs
