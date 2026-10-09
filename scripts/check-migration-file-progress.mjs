@@ -27,9 +27,10 @@ const TECHNICAL_TWIN_CANONICAL = new Map([
 const FILE_ROW_RE = /^\|\s*\x60([^\x60]+)\x60\s*\|/;
 
 export function parseFileRows(markdown) {
-  const section=markdown.split("## Migration ledger\n")[1]?.split("\n## Future files")[0];
+  const normalized = markdown.replace(/\r\n/g, "\n");
+  const section = normalized.split("## Migration ledger\n")[1]?.split("\n## Future files")[0];
   if (!section) throw new Error("FILE_MIGRATION_MATRIX: missing migration ledger section");
-  const rows=new Map(), errors=[];
+  const rows = new Map(), errors = [];
   for (const line of section.split("\n")) {
     if(!FILE_ROW_RE.test(line))continue;
     const cells=line.split("|").slice(1,-1).map(x=>x.trim());
@@ -86,7 +87,7 @@ function trackedChangeCandidate(p){
 const listChangedFromBase=base=>{
  if(!/^[0-9a-f]{40}$/.test(base))throw new Error("MIGRATION_FILE_BASE_SHA must be 40 hex");
  const raw=execFileSync("git",["diff","--name-only",base+"...HEAD"],{cwd:ROOT,encoding:"utf8"});
- return raw.trim().split("\n").filter(Boolean);
+ return raw.trim().split(/\r?\n/).filter(Boolean);
 };
 export function collectFiles(root=ROOT){
  const files=[];
@@ -176,7 +177,7 @@ if(invoked){
   status:read("docs/migration/STATUS.md"),
   filePaths:collectFiles(),
   changedPaths,
-  taskCardsText: ["TASK_CARDS_2_3.md","TASK_CARDS_4_5.md","TASK_CARDS_6_7.md","TASK_CARDS_8_9.md"].map(p=>read("docs/migration/"+p)).join("\\n"),
+  taskCardsText: ["TASK_CARDS_2_3.md","TASK_CARDS_4_5.md","TASK_CARDS_6_7.md","TASK_CARDS_8_9.md"].map(p=>read("docs/migration/"+p)).join("\n"),
  };
  const errors=validateFileProgress(input);
  for(const e of errors)console.error("[migration-file] "+e);

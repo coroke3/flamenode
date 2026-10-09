@@ -114,3 +114,9 @@ test("technical renderer must share its canonical logical-page target",()=>{
  const errors=validateFileProgress({...base,matrix:extended,currentRoutes:urls,filePaths:[...filePaths,logical,twin]});
  assert.match(errors.join("\n"),/target must match logical user-facing route target/);
 });
+
+test("parseFileRows and validateFileProgress handle CRLF newlines", () => {
+  const crlfMatrix = matrix.replace(/\n/g, "\r\n");
+  assert.equal(parseFileRows(crlfMatrix).rows.size, 3);
+  assert.deepEqual(validateFileProgress({ ...base, matrix: crlfMatrix }), []);
+});
