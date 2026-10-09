@@ -15,7 +15,7 @@
 - If a single CURRENT file contributes to many targets, keep **one current-source row** and list all relevant target files/IDs explicitly in the `Target/bridge` cell. Do not claim file DONE while an owner route/SA contract remains unmigrated.
 - `RETIRED` requires all URL/method/SA compatibility owners migrated, tests and observability. A legacy path may continue as bridge for a long time.
 - For missing/new files, register a new row in the same PR, preserving all others, and update dependency/consumer paths (see FILE_PROGRESS_PROTOCOL.md).
-- Source inventory includes all CURRENT `app/**/page.tsx`, all `app/api/**/route.ts`, all `src/lib/actions/**/*.ts` (including helpers), D1 schema source, Worker entries, core target package/app skeleton, and selected root config. **This is the explicit migration-boundary inventory, not all 2,335 repository files**; new code touched outside it is added when it enters an MIG scope.
+- Source inventory includes all CURRENT `app/**/page.tsx`, all `app/api/**/route.ts`, all `src/lib/actions/**/*.ts` (including helpers), D1 schema source, Worker entries, core target package/app skeleton, and selected root config, plus all real helper/test source files explicitly referenced by TASK_CARDS. **This is the explicit migration-boundary inventory, not all 2,335 repository files**; new code touched outside it is added when it enters an MIG scope.
 - States: `NOT_STARTED` → `IN_PROGRESS` → `BRIDGED` → `PARITY_VERIFIED` → `CUTOVER` → `RETIRED` if applicable; or `BLOCKED`, `RETAINED`. See required evidence at FILE_PROGRESS_PROTOCOL.md.
 
 ## Migration ledger
@@ -223,6 +223,21 @@
 | `wrangler.toml` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
 
 | `src/lib/publicData/loader.test.mjs` | TEST | legacy public data loader caching/visibility regression | MIG-0401 | SAME (CURRENT regression; future Astro loader test TBD) | NOT_STARTED | — |
+
+| `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | +packages/domain/src/slots/reservationLimit.ts (with legacy bridge) | NOT_STARTED | — |
+| `src/lib/slots/slotReservationLimit.contract.test.mjs` | TEST | slot normalization contract | MIG-0301 | SAME (legacy+new parity) | NOT_STARTED | — |
+| `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` | TEST | reservation D1 atomicity | MIG-0301 | SAME (legacy DB guard proof) | NOT_STARTED | — |
+| `src/lib/slots/limits.test.mjs` | TEST | slot range and rule edgecases | MIG-0302 | SAME (pure helper parity) | NOT_STARTED | — |
+| `src/lib/slots/slotReservationLimitGuard.ts` | HELPER | reservation SQL guard/transaction | MIG-0305 | DB adapter (Tier2, not MIG-0301) | NOT_STARTED | — |
+| `src/lib/utils/softwareLabels.ts` | HELPER | software label pure policies | MIG-0302 | +packages/domain/src/software/labels.ts (legacy bridge) | NOT_STARTED | — |
+| `src/lib/slots/limits.ts` | HELPER | slot pure limits | MIG-0302 | +packages/domain/src/slots/limits.ts (legacy bridge) | NOT_STARTED | — |
+| `src/lib/auth/ownershipCore.ts` | HELPER | normal/event/admin privilege modes | MIG-0304 | packages/domain ownership policy (exact file TBD) | NOT_STARTED | — |
+| `src/lib/video/videoVisibilityTransition.ts` | HELPER | video visibility CAS audit Queue | MIG-0304 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
+| `src/lib/event/eventOwnershipCore.ts` | HELPER | event owner>=1 | MIG-0305 | packages/domain event owner policy (exact file TBD) | NOT_STARTED | — |
+| `src/lib/event/eventVisibilityTransition.ts` | HELPER | event visibility fail closed | MIG-0305 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
+| `src/lib/xid/merge.ts` | HELPER | X merge and rollback | MIG-0306 | domain + DB adapter merge (exact file TBD) | NOT_STARTED | — |
+| `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0401 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
+| `src/lib/audit/mutate.ts` | HELPER | strict audit/transaction | MIG-0303 | DB application adapter (retain atomicity) | NOT_STARTED | — |
 
 ## Future files requiring source/target registration
 
