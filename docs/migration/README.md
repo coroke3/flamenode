@@ -1,41 +1,16 @@
 # FlameNode Platform Migration
 
 > Status: Active / migration architecture source of truth
-> Last verified: 2026-10-07
-> Progress: [`STATUS.md`](STATUS.md)
-> Source-to-target file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
-> Reviewed source-level discrepancies: [`CODE_AUDIT_2026-10-09.md`](CODE_AUDIT_2026-10-09.md)
-> Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
-> One-MIG implementation: [`IMPLEMENTATION_RUNBOOK.md`](IMPLEMENTATION_RUNBOOK.md), [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md), [`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md), [`TASK_CARDS_6_7.md`](TASK_CARDS_6_7.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md)
-> Small-model acceptance: [`SMALL_MODEL_SMOKE_TEST.md`](SMALL_MODEL_SMOKE_TEST.md) / [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md)（大型MIGを複数wakeへ分割）
-> Git workflow: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
-> Current routes: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
-> 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
-> Frontend parity: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
-> CURRENT screen mapping: [`screen-mapping/README.md`](screen-mapping/README.md)
-> Backend parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
-> Requirement reconciliation: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)
-> Code quality: [`CODE_QUALITY.md`](CODE_QUALITY.md)
-> UI visual input: [`UI_REFERENCE.md`](UI_REFERENCE.md)
-> Cloudflare CURRENT topology: [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md)
-> Cloudflare CURRENT performance baseline: [`cloudflare/PERFORMANCE_BASELINE.md`](cloudflare/PERFORMANCE_BASELINE.md)
-> Auth / permission CURRENT baseline: [`auth/README.md`](auth/README.md)
-> Queue / Cron / jobs CURRENT baseline: [`background-jobs/README.md`](background-jobs/README.md)
-> Static/visibility CURRENT baseline: [`static-delivery/README.md`](static-delivery/README.md)
-> Phase 1 詳細仕様 & デザイン戦略: [`PHASE_1_SPEC.md`](PHASE_1_SPEC.md)
-> Phase 3 詳細仕様 (ドメイン抽出): [`PHASE_3_SPEC.md`](PHASE_3_SPEC.md)
-> Phase 4 & 5 詳細仕様 (Astro SSG & Islands): [`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md)
-> Phase 6 詳細仕様 (Hono API): [`PHASE_6_SPEC.md`](PHASE_6_SPEC.md)
-> Phase 7 詳細仕様 (Private React SPA): [`PHASE_7_SPEC.md`](PHASE_7_SPEC.md)
-> Phase 8 & 9 詳細仕様 (Auth & Retirement): [`PHASE_8_9_SPEC.md`](PHASE_8_9_SPEC.md)
-> UI コンポーネント移行ガイド: [`UI_MIGRATION_GUIDE.md`](UI_MIGRATION_GUIDE.md)
-> Active X データ移行計画: [`ACTIVE_X_MIGRATION_PLAN.md`](ACTIVE_X_MIGRATION_PLAN.md)
-> 複数 Worker ルーティング & デプロイ計画: [`ROUTING_AND_DEPLOY_PLAN.md`](ROUTING_AND_DEPLOY_PLAN.md)
-> 判断待ち事項正本: [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md)
+> **Agent quick entry:** [MIGRATION_START_HERE.md](MIGRATION_START_HERE.md) (do not bulk-load this full architecture or all ledgers every wake)
+> Task owner/dependency: [STATUS.md](STATUS.md) · Decisions: [OPEN_DECISIONS.md](OPEN_DECISIONS.md) · Cards: [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)
+> Per-file progress: [FILE_MIGRATION_MATRIX.md](FILE_MIGRATION_MATRIX.md) · Wiring: [FILE_PROGRESS_PROTOCOL.md](FILE_PROGRESS_PROTOCOL.md)
+> Performance-first: [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) · [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md)
+> Canonical reference index (all ledgers, Phase specs, topology, auth, jobs): [DOC_MAP.md](DOC_MAP.md)
+> Context-size/sufficiency audit: [DOC_CONTEXT_AUDIT.md](DOC_CONTEXT_AUDIT.md)
 
 ## Purpose
 
-**実装導線：** `FILE_MIGRATION_MATRIX.md`で対象ソースをフィルタし、`FILE_PROGRESS_PROTOCOL.md`の順序でprovider→consumerを接続し、PR/SHA/テスト付きでファイルごとに状態を更新する。 `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuはこの範囲を順次読み、全フェーズ文書を一括投入しない。D-08 HTML未提供のPhase2/4/5 visualはBLOCKED。
+**実装導線：** `FILE_MIGRATION_MATRIX.md`で対象ソースをフィルタし、`FILE_PROGRESS_PROTOCOL.md`の順序でprovider→consumerを接続し、PR/SHA/テスト付きでファイルごとに状態を更新する。 `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuは[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)から**対象行だけ**読む。D-08 HTML未提供のPhase2・Phase4 visual・Phase5 real UIはBLOCKED。MIG-0401/0404/0405/0406非visual性能PoCは先行可能。
 
 Next.js + OpenNext中心のCURRENT productionを、Cloudflare Workers FreeのCPU制約に耐え、既存機能を欠落させず、長期的に読みやすく保守しやすい構成へ段階移行する。
 
