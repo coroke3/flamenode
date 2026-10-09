@@ -3,6 +3,7 @@
 > Status: Active / migration architecture source of truth
 > Last verified: 2026-10-07
 > Progress: [`STATUS.md`](STATUS.md)
+> Source-to-target file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > One-MIG implementation: [`IMPLEMENTATION_RUNBOOK.md`](IMPLEMENTATION_RUNBOOK.md), [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md), [`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md), [`TASK_CARDS_6_7.md`](TASK_CARDS_6_7.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md)
 > Small-model acceptance: [`SMALL_MODEL_SMOKE_TEST.md`](SMALL_MODEL_SMOKE_TEST.md) / [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md)（大型MIGを複数wakeへ分割）
@@ -33,7 +34,7 @@
 
 ## Purpose
 
-**実装導線：** `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuはこの範囲を順次読み、全フェーズ文書を一括投入しない。D-08 HTML未提供のPhase2/4/5 visualはBLOCKED。
+**実装導線：** `FILE_MIGRATION_MATRIX.md`で対象ソースをフィルタし、`FILE_PROGRESS_PROTOCOL.md`の順序でprovider→consumerを接続し、PR/SHA/テスト付きでファイルごとに状態を更新する。 `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuはこの範囲を順次読み、全フェーズ文書を一括投入しない。D-08 HTML未提供のPhase2/4/5 visualはBLOCKED。
 
 Next.js + OpenNext中心のCURRENT productionを、Cloudflare Workers FreeのCPU制約に耐え、既存機能を欠落させず、長期的に読みやすく保守しやすい構成へ段階移行する。
 
