@@ -67,6 +67,19 @@ Phase 2 visual cards **remain BLOCKED** until user HTML mock is registered in `U
 - DONE: import解決3経路（Node/TS/Next）が実行ログで成功、`packages/domain`から`src/**`参照なし、次MIGの再利用可能なbridge例をPhase3 specへ記録。
 - 停止: Nodeがdist未生成で失敗、同名型export消失、NextにNode条件付きexportが噛み合わない場合は`REVIEW`に進めない。
 
+#### MIG-0301 concrete source snapshot (verified 2026-10-09)
+
+小型モデル向けにPoCをファイル/コード挙動まで固定する。このsnapshotと実際のmainが違えばsourceを読み直し、推測で進めない。
+
+- 元source: `src/lib/slots/slotReservationLimit.ts`。export3件: `MAX_SLOT_RESERVATIONS_PER_XID = 100`, `normalizeSlotReservationLimit(value: unknown): number`, `slotReservationLimitMessage(limit: number): string`。
+- numeric契約: `Number(value ?? 0)`。NaN/infinityは0、有限値は`Math.floor`後に0〜100 clamp。負数0、小数floor、100超100。
+- メッセージ契約: 正規化後0なら空文字。>0なら「このイベントでは、1つのX IDにつき最大{N}件まで枠を確保できます。連続枠は1件として数えます。」を一字一句維持。
+- 既存cross-module tests: `src/lib/slots/slotReservationLimit.contract.test.mjs`, `src/lib/slots/slotReservationLimitGuard.execution.test.mjs`, `src/lib/slots/limits.test.mjs`; 予約処理は `src/lib/slots/slotReservationLimitGuard.ts` と `src/lib/actions/slot.ts` に依存。
+- **移さない**: `slotReservationLimitGuard.ts`のDrizzle SQL/DB/CAS/Batchは今回の純粋moduleではない。実ファイルを開くと `server-only` と `@/lib/db/schema` をimportするのでTier2へ送る。
+- Permission危険箇所: `packages/domain/src/permissions.ts`の `return params.isOwner || params.isCollabEditor || params.isEventStaff;` は本来の`normal/event/admin`privilege-mode契約ではない。実際に参照しているcallerを検索してから無効化/削除、必要なら旧owner policyに影響しない方法へ置換。
+- 新関数のテスト例: `null -> 0`, `undefined -> 0`, `-1 -> 0`, `2.9 -> 2`, `150 -> 100`, `Infinity -> 0`, `NaN -> 0`; normalized message exact-match。
+- 循環依存/Node importを検証するために**テストがdist/sourceのどちらをimportしているか**を報告してから、package exports/bridge方針を確定する。TypeScript aliasesだけでNode解決できたと判断しない。
+
 ### MIG-0302 — pure read helpers
 
 - 読む: `src/lib/utils/softwareLabels.ts`, `src/lib/slots/limits.ts`と隣接tests・利用者、`route-handlers/README.md` RH-029。
