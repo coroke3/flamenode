@@ -6,6 +6,8 @@
 
 ## Phase 8: Auth.js compatibility
 
+認証/旧Next撤去の各MIGは`FILE_MIGRATION_MATRIX.md`の旧→新Provider/consumerと切替承認証拠を同一PRへ残す。legacy pathがまだ存在する時は`RETIRED`にせず、Session互換やCloudflare実測無しに`CUTOVER`へ進めない。
+
 ### MIG-0801 — baseline fixtures for sessions and account linking
 
 - 読む: `auth/README.md`, `src/lib/auth/`のCURRENT実装+tests、Auth.js `user`/`account`/`session`テーブル、`app/api/auth/[...nextauth]/route.ts`。
