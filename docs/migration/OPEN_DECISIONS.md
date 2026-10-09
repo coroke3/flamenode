@@ -1,114 +1,111 @@
-# FlameNode Migration Open Decisions
+# FlameNode Migration Decisions — adopted options & remaining evidence
 
-> Status: Active / 人間（ユーザー）の判断待ち事項の正本
+> Status: Active / 仕様上の採用方針と実行ゲートの正本
 > Last updated: 2026-10-09
-> 関連: [`STATUS.md`](STATUS.md), [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md), [`ROUTING_AND_DEPLOY_PLAN.md`](ROUTING_AND_DEPLOY_PLAN.md)
+> Decision owner: user (2026-10-09, this conversation)
+> Related: [STATUS.md](STATUS.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md), [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md), [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [PHASE_7_SPEC.md](PHASE_7_SPEC.md)
 
-エージェントが独断で確定してはいけない判断事項を一箇所に集める。
-各 Decision は「判断が必要になるタスク」「推奨デフォルト」を持つ。
-ユーザーが回答するまで、推奨デフォルトを**実装の前提にしてはいけない**（仕様書上の仮置きとしてのみ使う）。
-回答後は `State` を `DECIDED` にし、決定内容を該当する仕様書へ反映してから削除せず履歴として残す。
+## State semantics (agent MUST read)
 
-## 実行時の判定
+`DECIDED` = **設計方針への合意**。PoC成功、実装完了、本番反映または運用承認を表さない。
+`BLOCKED_ON_USER` = 方針は決まっていてもユーザーの成果物が未提供。
+`PROVISIONAL` = 方針未確定。根拠未検証の決定を推測しない。
+関係taskがREADYになるには **DECIDED + 必須evidence + task依存完了** が必要。status文字列だけではGateを通せない。
+本番トラフィック/Worker Route/Custom Domain/Remote D1/認証/Secretsを変更するには作業直前の明示承認を別途必要とする。
 
-- `OPEN` / `PROVISIONAL` / `BLOCKED_ON_USER` は実装上の承認ではない。対象MIGを `READY` / `IN_PROGRESS` / `REVIEW` / `DONE` にする前に `DECIDED` が必要（純粋処理の限定scopeは別task・明示exceptionに分離）。
-- `scripts/check-migration-execution.mjs` と `check:project-docs` によって最低限のtask/Decision整合を検証する。決定のowner、日時、採用方針、影響ファイル、実測/PoCの根拠をこの文書に残す。
-- Decisionが必要なMIGを変更するときはvalidatorの `REQUIRED_DECISIONS` も更新する。OPENのままD-01等を仮採用して進行しない。
+| ID | 決定内容 | State | 適用タスク | 実装/切替前の別途条件 |
+| --- | --- | --- | --- | --- |
+| D-01 | **A: schemaを`packages/db`へ独立化** | DECIDED | MIG-0303..0307 | DB package移設PoC、schema diffゼロ、旧/新build pass |
+| D-02 | **A: 既存Custom Domainの上に必要なpath Routeを重ねる** | DECIDED | MIG-0405, production route cutovers | 非本番のroot/www相当で実Ingress PoC成功 |
+| D-03 | **承認済み・ownerリンクの全Xへ既存like/bookmarkをfan-out** | DECIDED | Active X backfill, MIG-0605/0702 | 共有Xの衝突/件数/無所有の照合とdry-run |
+| D-04 | **A: feature flagで一斉cutover** | DECIDED | Active X Step 3, MIG-0702 | 全write route停止/final delta reconcile/逆戻し演習 |
+| D-05 | **Personal(/dashboard,/entry) と Ops(/manage,/admin) の2 SPA** | DECIDED | MIG-0701..0706 | 独立build/asset prefix/deep links/権限確認 |
+| D-06 | **A: 無料SSG優先。容量超過時はR2事前生成HTML優先、限定SSRは例外** | DECIDED | MIG-0406/0501..0508 | 静的出力実数・CPU・1102/visibility/SEO検証 |
+| D-07 | **A: Workers環境でもAuth.js/@auth/coreを継続利用** | DECIDED | MIG-0802..0806 | cookie/session/CSRF/OAuth非本番互換PoC |
+| D-08 | **A: HTMLモックを先に確定してからUIを移行** | BLOCKED_ON_USER | MIG-0200..0206 / Phase4/5 visual | HTMLの提供・SHA/版本・受入確認 |
 
-## 一覧
+## D-01 — DB schemaをpackages/dbへ独立（A）
 
-| ID | 判断事項 | State | 判断が必要になるタスク |
-| --- | --- | --- | --- |
-| D-01 | `packages/domain` が参照する DB schema の置き場所（循環依存の回避） | OPEN | MIG-0302 以降（DB に触るドメイン抽出すべて） |
-| D-02 | 同一ホスト名での Worker Route と Custom Domain の優先関係と、段階切替の方式 | OPEN | MIG-0405（visibility gateway）の前。本番 Route 変更はすべて |
-| D-03 | Active X 未所持・複数所持ユーザーの既存 like/bookmark の移行規則 | OPEN | Active X backfill（`ACTIVE_X_MIGRATION_PLAN.md` Step 2） |
-| D-04 | 現行 Next.js と新 Worker が並走する期間の like/bookmark 書き込み主体 | OPEN | Active X Step 3（API 契約切替） |
-| D-05 | Private SPA を 1 つにするか、プレフィックスごとに分けるか | PROVISIONAL | MIG-0701（Phase 7 開始前） |
-| D-06 | 公開作品数・ユーザー数・イベント数の実数と Free 枠 Static Assets 上限の見通し | OPEN | MIG-0406（CPU/build benchmark）の前 |
-| D-07 | Phase 8 の認証実装方針（Auth.js を Workers で継続利用するか） | PROVISIONAL | MIG-0802 |
-| D-08 | Phase 2 の HTML モックの提供時期 | BLOCKED_ON_USER | MIG-0200（公開画面 Phase 4/5 の前提） |
+現状の正本 `src/lib/db/schema.ts` は `schema.base.ts` と `schema.canonical.ts` を再export。canonicalからbaseを参照するため2ファイルだけの抜き出しは禁止。設計の唯一の正本は移設後の `packages/db/src/schema/*` とし、旧`src/lib/db/schema.ts` ほかを互換再exportに置き換える。詳しい順序・依存グラフ・ゼロDDL・検証条件は [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md) を参照。
 
-`PROVISIONAL` は、仕様書が推奨デフォルトで進める前提を置いているが、ユーザー確認がまだ済んでいないもの。
+- `packages/db` は`drizzle-orm`等必要なruntime依存を明示し、Next/Honoをimportしない。root `src/**`へのimport禁止。
+- `packages/domain` は`@flamenode/db`を参照可能。ただしSQL実行・D1 Binding取得・監査/Queue orchestrationはdomainへ安易に混ぜない。
+- `drizzle.config.ts` と`check-db-schema` 等を変更し、生成したSQL/schema diffをゼロに保つ。**この決定はDB migrationの本番実行許可ではない**。
+- 追加タスクはMIG-0302後/MIG-0303前のDB-package extraction専用MIGとして追跡し、他taskに密かに混ぜない。
 
-## D-01 DB schema の置き場所
+## D-02 — Cloudflare ingressはA
 
-- 事実: DB schema の正本は `src/lib/db/schema.ts`（`schema.base.ts` / `schema.canonical.ts` を再 export）。
-  `AGENTS.md` は schema の置き場所を正本として固定している。
-- 問題: `packages/domain` が `src/lib/db/schema` を相対 import すると、`packages/*` → `src/*` の依存になる。
-  一方、`src/lib/**` は `packages/domain` を呼ぶ互換ブリッジになるため、**循環依存**になる。
-  また `packages/domain` の `tsconfig` / `package.json` は `src/` を含まない。
-- 選択肢:
-  - A. schema を `packages/db`（新設）へ移し、`src/lib/db/schema.ts` を再 export にする。
-    drizzle の schema 正本パスが変わるため、`AGENTS.md` / `drizzle.config` / `check-db-schema` の更新が必要。
-  - B. schema は `src/` のまま。`packages/domain` は DB を触らない純粋ロジック（`*Core.ts` 相当）だけを持ち、
-    DB を触る orchestration は `src/lib/**` または `apps/api` 側に残す。
-  - C. `packages/domain` が drizzle table 型を持たず、クエリ実行を domain 定義の port（interface）へ注入する。
-- 推奨デフォルト: **B を先行**（MIG-0301〜0307 のうち DB 非依存部分は D-01 の回答なしに進められる）。
-  A への移行は D-01 の回答後に独立した `MIG-*` タスクとして追加する。
-- 影響: `PHASE_3_SPEC.md` は B を前提に、DB を触る抽出を「D-01 回答待ち」と明記している。
+Cloudflare公式仕様上、**同一hostnameのRouteがCustom Domainに優先し、Routeから`fetch(request)`でCustom DomainのWorkerへ委譲可能**。ただし実アカウントでのDNS/route命名、URLパターン衝突、根域/WWW/assetなどは非本番で証明する。
 
-## D-02 同一ホストでの Route と Custom Domain
+- 原則 path-level の明示的なWorker Routeを採用し、未移行pathは既存 `flamenode-web` Custom Domainに委譲する。
+- CloudflareのRoute patternはglobであり `/:id` を文字どおり登録しない。root動画slugと固定パスの競合は薄いroute dispatcherのPoC/段階切替で決める。
+- 非本番PoC要件: path match precedence, direct reload, assets, query/cookies, auth exclusion, fail-closed visibility, 404/403/redirect/cache, legacy fallback, root+www host parity, 1102/CPU。
+- PoC不合格なら**自動的にRouter案Bへ変更しない**。差異を記録し、切替方式を再審議する。
+- 本番Route/Custom Domain/DNS操作は別途人間承認。
 
-- 事実: [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md) のとおり、本番は
-  `flamenode.net` / `www.flamenode.net` が `flamenode-web` の **Custom Domain**、zone の Worker Route は 0 件。
-- `README.md` §7 の設計は「path ごとの Worker Route で新 Worker へ振り、未一致は現行 Custom Domain へ」。
-  しかし Cloudflare の説明では、Custom Domain は「Worker がそのホストの origin になる」もの、
-  Route は「別の origin の前段で動く」ものであり、同一ホストへ両方を置いた場合の優先関係は
-  この repo の調査では**実証されていない**。
-- 選択肢:
-  - A. PoC で「Custom Domain 上に path Route を重ねて新 Worker へ振れる」ことを実証する（非本番ホスト名で）。
-  - B. 前段の薄い router Worker（service binding で web/site/app/api へ振る）を置き、現行 Custom Domain を router へ付け替える。
-  - C. Custom Domain を外して zone Route 方式へ切り替える（DNS の proxied record が必要。切替時に短い断面リスクがある）。
-- 推奨デフォルト: **A を非本番ホスト名で先に検証**し、不成立なら B。
-  どの案でも本番の Route / Custom Domain 変更は `AGENTS.md` により**明示承認が必要**。
-- 影響: Phase 5 以降のすべての本番切替手順。`ROUTING_AND_DEPLOY_PLAN.md` はこの未確定を前提に書かれている。
+## D-03 — 所有するすべてのXへのfan-out
 
-## D-03 Active X 未所持・複数所持ユーザーの既存 interaction
+現行 `video_interactions_auth` の各 (auth_user_id, video_id, type) を、そのAuth Userが**ownerとしてリンクしているすべての承認済みX**へ複製する。これは**既存データの移行ルール**であり、新UIでの将来のlike操作を全Xへ同時適用する決定ではない。
 
-- 事実:
-  - CURRENT の like/bookmark は `video_interactions_auth`（Auth User 単位）に保存される。
-  - 旧 `video_interactions`（`x_user_id` 単位）も残っており、X ID merge の対象になっている。
-  - `users.active_x_user_id` は null になり得る。複数の approved X を持つユーザーもいる。
-- 決めること:
-  1. 複数の approved X を持ち、`active_x_user_id` が null/無効なユーザーの既存データをどの X へ移すか。
-  2. approved X を持たないユーザーのデータを、リンク完了まで `video_interactions_auth` に残してよいか（推奨: 残す。削除しない）。
-  3. 1 つの Active X に複数 Auth User の like が集まって重複した場合、件数（`videos.app_like_count`）をどう扱うか（推奨: 重複を畳み、件数を再集計する）。
-- 推奨デフォルト: 上記の括弧内。`ACTIVE_X_MIGRATION_PLAN.md` はこれを仮置きとして書いている。
+- 所有判定: `x_user_account_links.auth_user_id = Auth User`、`link_role='owner'`、`x_users.approval_status='approved'`。managerリンク、申請中、rejected、importedのみは対象外。`users.active_x_user_id`だけに限定しない。
+- 0件のAuth User: 旧テーブルのinteractionを削除しない。承認済みownerリンクが後からできた時点で、本人への可視化/移行契約を履行。
+- 同じXが複数Auth Userから届く: `(x_user_id, video_id, interaction_type)` を1行に畳む。元AuthとXの紐付け・source timestampを監査し、削除/解除の整合問題を隠さない。
+- like count: **Auth単位ではなく承認済みX単位のdistinct件数**に再集計。fan-outにより数が増えることを許容するが、動画ごとの差分・上限/不正検知を行う。
+- 元の`video_interactions`との衝突もdry-runに列挙し、timestampの採用・revocation競合を仕様化。コピーだけの`INSERT OR IGNORE`を完全移行とは扱わない。
+- 詳細は [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md)。本番データ書込・実データの閲覧許可とは別。
 
-## D-04 並走期間の書き込み主体
+## D-04 — 新旧cutoverは一気に行う（A）
 
-- Phase 6〜7 の間、Next.js の Server Action と Hono API が同じ D1 を書く。
-  like/bookmark の書き込み先を切り替える瞬間に、どちらのパスも同じテーブルを更新する必要がある。
-- 選択肢: A. feature flag（`system_settings`）で一括切替。B. 両テーブルへ書く期間を設ける（`AGENTS.md` の「uncontrolled dual write 禁止」に抵触しないよう、期間・解除条件・整合チェックを明記する）。
-- 推奨デフォルト: **A（flag で一括切替。dual write はしない）**。切替前に backfill 完了と整合チェックを必須にする。
+**同じ切替窓で全like/bookmark read/write経路を一括変更**。利用者やfeatureごとの段階的dual writeは行わない。一気に切り替える対象はinteractionのみで、サイト全体のNext→Astro/Hono切替とは別。
 
-## D-05 Private SPA の構成
+1. 旧/新Workerの全書き込み入口を列挙し、旧ランタイムも同じflagを見て新Serviceへ委譲する互換shimを準備。
+2. 非本番全ケース移行/rollback演習。初回snapshot→dry-run fan-out→(差分journal または厳密なwrite freeze)。
+3. 書き込み停止（全入口でfail-closed、Queue再試行含む）→final delta適用→件数/ownership/重複チェック→single feature flag切替→両経路E2E。
+4. 失敗時はwrite freeze維持、復元できる差分のみreconcile。**新側更新後のflag単純rollbackは禁止**。
+5. 旧テーブル廃止は後続Phase 9 Gateの別作業。本番切替・Remote D1は承認制。
 
-- 事実: `README.md` の route group 表は `/dashboard` `/entry` `/manage` `/admin` を同じ React/Vite app へ割り当てている。
-- 仮置き: **SPA は 1 つ（`apps/app`）**。Vite の `base` は `/`、アセットは `/_app_assets/*`。
-  - `apps/app/vite.config.ts` の `base: "/"` は非本番PoCをこの仮置きに合わせたものであり、D-05の決定・本番配信承認ではない。Phase 7の開始前に正式な配置方式を確定する。
-  Worker Route は `/dashboard/*`, `/entry/*`, `/manage/*`, `/admin/*`, `/onboarding` を app へ向ける。
-  （`/auth/complete` と `/api/auth/*` は Phase 8 まで現行 Auth.js 側に残す。）
-- 代替: `/admin` だけ別 bundle にする（admin 画面が 45 あり bundle が大きい）。Phase 7 開始前に bundle 実測で再判断する。
+## D-05 — 2つのPrivate SPAへ分割
 
-## D-06 公開データ規模と Free 枠
+- **Personal SPA**: `apps/app`（既存shellを継続、移行後の`flamenode-personal`）。`/dashboard`, `/dashboard/*`, `/entry`, `/entry/*`, `/onboarding`。
+- **Ops SPA**: `apps/ops`（新設予定、`flamenode-ops`）。`/manage`, `/manage/*`, `/admin`, `/admin/*`。
+- 双方`base: '/'`でブラウザの実URLを維持。互いに衝突しないアセット: `/_personal_assets/*` と `/_ops_assets/*`。各SPAの`assetsDir`に加え、公開prefix・manifest・worker/assets routingを契約検証する。
+- `packages/ui`, `packages/contracts`, `packages/domain` は共有して重複させない。ただしOps限定コードはPersonalにbundlingしない。cross-SPA移動は通常HTTP navigation、ページ再読込でもセッション継続。
+- `/dashboard/edit/*`はPersonal。roleによるOps遷移はUIだけでなくHonoでserver-side認可する。
+- **まだ`apps/ops`は実在しない**。Phase 7で新設するまで旧Manage/Adminの本番振分先は`flamenode-web`のまま。
 
-- 事実: Workers Static Assets の Free 上限は 1 version あたり 20,000 ファイル（Cloudflare 公式。移行時に最新値を再確認すること）。
-  Astro は増分ビルドをせず、デプロイは毎回サイト全体になる。
-- 不明: 本番の公開作品数・ユーザー数・イベント数。1 作品あたりの出力ファイル数（HTML + 付随ファイル）。
-- 必要な回答: 本番の件数（read-only の COUNT で足りる。実行にはユーザー承認が必要）と、Paid プランへ移る可能性。
-- 影響: MIG-0406 の benchmark 閾値、全件 SSG か「上位のみ SSG + 残りは別方式」か。
-  「残りを request-time で生成する」案は `README.md` の「SSR は原則禁止」に反するため、採用するなら README の改定判断が要る。
+## D-06 — 無料SSG優先、1102を回避する予備経路
 
-## D-07 Phase 8 の認証方針
+優先順: (1) Astro SSG + Static Assets、(2) 非同期/ビルド時にR2へ保存済みのHTMLを軽量Workerでstream/proxyして返却、(3) **実測合格した例外のみ**SSR。上限超過をSSR実行の自動許可と扱わない。
 
-- 事実: CURRENT は Auth.js の **database session**（D1 の `session` テーブル）。Cookie は不透明トークン。
-  `README.md` は「自前の auth protocol を新規実装しない」。
-- 仮置き: 新 Worker（Hono）でも **Auth.js（`@auth/core`）と既存 D1 adapter を継続利用**し、同じ session テーブルと Cookie 名を読む。
-  これならユーザーは再ログイン不要で、PKCE などを自前実装しない。
-- 確認事項: 本番の Discord redirect URI（callback の origin）を変えるか。変えない前提（`flamenode.net` のまま）で進めてよいか。
+- Free Static Assets 20,000 files/version、Free CPU 10ms/request、1102=CPU/memory等のリソース超過。本番件数は未実測。
+- `MIG-0406`にて公開URL+HTML+CSS/JS/fonts/redirect+manifest等をファイル実数で集計し、配信規模・build時間・Cloudflare quotasを測定。バッファを持たず20,000ぎりぎりで運用しない。
+- R2 HTMLはcompile/offline snapshot generationで作り、content-hash + visibility-versionに紐づく。公開/非公開の境界はgatewayで常時fail-closed、古いHTMLが残っても漏洩させない。
+- Cache miss時にCPU重いSSRへ暗黙fallbackしない。missing snapshotは安全な404/503/再生成enqueue。alias/OGP/canonical/hydrationとcache purgeは既存と同等に。
+- 限定SSRを採用する前に実CloudflareのCPU分布(p50/p95/p99)、worst-case、memory、1102=0をshadow loadで確認。既定p99 < 5ms、hard limit 10msのFreeでは動的ページごとのCPU spikeがある限り安全を保証しない。合格しなければR2 cached HTML/SSGを維持する。
+- 事前HTMLに使うR2のread課金/制限、Queue rebuild cost、stale許容度とCloudflare request quotaを別途測る。Paidへの変更は依頼なしに行わない。
 
-## D-08 HTML モック
+## D-07 — Auth.js継続（A）
 
-- `UI_REFERENCE.md = PENDING_HTML`。提供されるまで Phase 2 と、これに依存する Phase 4/5 は進めない。
-- Phase 3（UI 非依存のドメイン抽出）は先行できる。
+Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie名/属性/期限、Discord providerと従来Callbackを維持。自前OAuth/PKCEを作らず、Account link atomicity・CSRF・logout・BAN・role・Active X・session refreshを旧Nextとの並走環境でテスト。
+
+- 正規originは`https://flamenode.net`、既存Discord callback URLを原則変更しない。
+- PoC合格まで`/api/auth/*`と`/auth/complete`は旧Nextへ。既存sessionの無強制ログアウトがGate。
+- Auth cutoverは人間承認。PoC失敗時はNext Auth.js部分を保持して先に他のアプリのみ移す。
+
+## D-08 — UIモックを先に確定（A）
+
+ユーザー選択はA。**HTMLはまだ受領していないため`BLOCKED_ON_USER`を維持**し、未登録のデザインをagentが生成/既存mockから推定したことにしない。
+
+- 受領時に`UI_REFERENCE.md`へファイル、SHA、scope、受領日、画面とUX-ID対応を登録。承認されたHTMLを新UI正本とする。
+- UI移行開始前にPhase2のvisual accept。移行中もCURRENTのUX/FN/API/権限/URL副作用を保持。
+- 非UIのdomain/DBパッケージ抽出とAPI契約/計測は先行可。UIの実装/完成判定は保留。
+
+## Open evidence — separate from design decisions
+
+- D-01: packages/dbの実移設、循環依存/生成migration diffゼロ検証。
+- D-02: 非本番hostnameにおけるRoute+Custom Domain PoC。設定作成はユーザー承認後。
+- D-03/04: dry-runでの実データ件数・所有者不明/共有X衝突・write-freeze/rollback演習。
+- D-05: Apps/Workersの2SPA buildとdeep link/asset分離のE2E。
+- D-06: 本番のREAD ONLY COUNT、Static Assets files、CPU/1102負荷測定。リモートデータ取得の承認が必要なら別途取得。
+- D-07: 既存auth cookie/session/OAuth契約の非本番PoC。
+- D-08: HTMLモックの受領・acceptance。
