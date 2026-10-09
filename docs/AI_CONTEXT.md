@@ -31,7 +31,7 @@
 | タスク | 最初に読む | 次に確認する正本 |
 | --- | --- | --- |
 | 一般実装・不具合 | 対象ファイル | 関連test、`package.json` |
-| **新基盤移行 / 継続実行** | **`docs/migration/AGENT_PROTOCOL.md` → `STATUS.md`** | `GIT_WORKFLOW.md`、`README.md`、対象ledger/matrix/code/test |
+| **新基盤移行 / 継続実行** | **`docs/migration/MIGRATION_START_HERE.md` → STATUS該当行** | `AGENT_PROTOCOL.md`・該当TASK_CARD 1件・FILE_MIGRATION_MATRIX owner行・CURRENT code/test（全README/台帳を投入しない） |
 | **UI再設計 / frontend route移行** | **`CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md`** | 対象`frontend/*.md`、`FUNCTION_INVENTORY.md`、`UI_REFERENCE.md`、code/test |
 | **既存フロント機能棚卸し** | **`FRONTEND_FEATURES.md`** | `CURRENT_ROUTES.md`、対象page/component、active operations/docs |
 | **既存backend棚卸し / 共通化検討** | **`FUNCTION_INVENTORY.md` + `BACKEND_OPTIMIZATION.md`** | 対象actions/APIs/jobs/tests、`PRODUCT_REQUIREMENTS.md` |

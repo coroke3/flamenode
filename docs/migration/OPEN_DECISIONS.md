@@ -22,7 +22,7 @@
 | D-05 | **Personal(/dashboard,/entry) と Ops(/manage,/admin) の2 SPA** | DECIDED | MIG-0701..0706 | 独立build/asset prefix/deep links/権限確認 |
 | D-06 | **A: 無料SSG優先。容量超過時はR2事前生成HTML優先、限定SSRは例外** | DECIDED | MIG-0406/0501..0508 | 静的出力実数・CPU・1102/visibility/SEO検証 |
 | D-07 | **A: Workers環境でもAuth.js/@auth/coreを継続利用** | DECIDED | MIG-0802..0806 | cookie/session/CSRF/OAuth非本番互換PoC |
-| D-08 | **A: HTMLモックを先に確定してからUIを移行** | BLOCKED_ON_USER | MIG-0200..0206 / Phase4/5 visual | HTMLの提供・SHA/版本・受入確認 |
+| D-08 | **A: HTMLモックを先に確定してからUIを移行** | BLOCKED_ON_USER | MIG-0200..0206 / MIG-0402,0403 / Phase5 visual | HTMLの提供・SHA/版本・受入確認。**MIG-0401/0404/0405/0406の性能PoCは対象外** |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -74,6 +74,8 @@ Cloudflare公式仕様上、**同一hostnameのRouteがCustom Domainに優先し
 - **まだ`apps/ops`は実在しない**。Phase 7で新設するまで旧Manage/Adminの本番振分先は`flamenode-web`のまま。
 
 ## D-06 — 無料SSG優先、1102を回避する予備経路
+
+**2026-10-09追補:** 既存のD-06方針は維持。既存MIGの依存関係だけ整理し、MIG-0401→0404→0405→0406の**非visual PoC**をD-08入力なしで実行可能とする。D-08で要求した「UIを正式に移行する前のHTML確定」は変更しない。両証跡が0407 Gateの必須条件。詳細は[PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md)。
 
 優先順: (1) Astro SSG + Static Assets、(2) 非同期/ビルド時にR2へ保存済みのHTMLを軽量Workerでstream/proxyして返却、(3) **実測合格した例外のみ**SSR。上限超過をSSR実行の自動許可と扱わない。
 

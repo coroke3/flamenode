@@ -1,9 +1,9 @@
 # FlameNode Migration Documentation Map
 
 > Status: Active / source-of-truth map
-> Last verified: 2026-10-07
+> Last verified: 2026-10-09
 
-移行で同じ仕様を複数Markdownへ複製しないための正本マップ。
+移行で同じ仕様を複数Markdownへ複製しないための正本マップ。**全表を毎回読むためのリストではない**。実装時の対象MIGと参照範囲は[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)を利用する。
 
 ## Canonical sources
 
@@ -13,6 +13,10 @@
 | task routing | `docs/AI_CONTEXT.md` |
 | migration architecture / invariants / phases | `docs/migration/README.md` |
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
+| **small-context one-task entry** | `docs/migration/MIGRATION_START_HERE.md` |
+| 1102 performance work order and dual-track Gate | `docs/migration/PERFORMANCE_IMPLEMENTATION_PLAN.md` |
+| normalized route hot-path CPU evidence and migration owner | `docs/migration/PERF_HOTPATH_MATRIX.md` |
+| document volume / sufficiency audit | `docs/migration/DOC_CONTEXT_AUDIT.md` |
 | small-model single-task procedures | `docs/migration/IMPLEMENTATION_RUNBOOK.md` |
 | large task resumable micro-unit work packet and PR checkpoints | `docs/migration/TASK_MICRO_UNITS.md` |
 | per-file source/target progress and ownership | `docs/migration/FILE_MIGRATION_MATRIX.md` |
