@@ -25,8 +25,8 @@
 | new UI visual source / HTML mock registration | `docs/migration/UI_REFERENCE.md` |
 | UI component adapter / Next.js decoupling guide | `docs/migration/UI_MIGRATION_GUIDE.md` |
 | Phase 1 task specification & design strategy | `docs/migration/PHASE_1_SPEC.md` |
-| Phase 3 task specification (domain extraction) | `docs/migration/PHASE_3_SPEC.md`
-- `docs/migration/DB_PACKAGE_EXTRACTION_PLAN.md`（D-01 packages/db移設の唯一の詳細手順） |
+| Phase 3 task specification (domain extraction) | `docs/migration/PHASE_3_SPEC.md` |
+| D-01 DB schema extraction plan | `docs/migration/DB_PACKAGE_EXTRACTION_PLAN.md` |
 | Phase 4 & 5 task specification (Astro SSG & Islands) | `docs/migration/PHASE_4_5_SPEC.md` |
 | Phase 6 task specification (Hono API) | `docs/migration/PHASE_6_SPEC.md` |
 | Phase 7 task specification (Private React SPA) | `docs/migration/PHASE_7_SPEC.md` |
