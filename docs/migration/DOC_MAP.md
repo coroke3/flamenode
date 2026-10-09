@@ -15,6 +15,8 @@
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
 | small-model single-task procedures | `docs/migration/IMPLEMENTATION_RUNBOOK.md` |
 | large task resumable micro-unit work packet and PR checkpoints | `docs/migration/TASK_MICRO_UNITS.md` |
+| per-file source/target progress and ownership | `docs/migration/FILE_MIGRATION_MATRIX.md` |
+| per-file state machine and provider/consumer integration | `docs/migration/FILE_PROGRESS_PROTOCOL.md` |
 | Phase 2–9 per-MIG executable cards | `docs/migration/TASK_CARDS_2_3.md` + `docs/migration/TASK_CARDS_4_5.md` + `docs/migration/TASK_CARDS_6_7.md` + `docs/migration/TASK_CARDS_8_9.md` |
 | cross-model live smoke acceptance | `docs/migration/SMALL_MODEL_SMOKE_TEST.md` |
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
