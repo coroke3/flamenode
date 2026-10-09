@@ -11,7 +11,7 @@
 
 1. **薄いトランスポート層（Thin Adapter）**:
    - `apps/api` は HTTP 入出力（リクエストパース、Zod バリデーション、レスポンス成形、ステータスコードマッピング）のみを担当。
-   - ビジネスロジック・権限判定・D1 トランザクションはすべて `packages/domain` へ委譲（`API_MATRIX.md` Migration rule）。
+   - ビジネスロジック・権限判定方針を`packages/domain`に共通化する。**D1 binding/session/request context/SQL実行・監査commitはapplication service/DB adapter側**で管理し、transaction境界・post-commit Queueを維持。`packages/domain`から旧`src/**`へのimportは禁止し、schema型はMIG-0308後の`@flamenode/db`から参照する。
 2. **共有 Zod 契約（`packages/contracts`）**:
    - リクエストボディおよびレスポンス DTO は `packages/contracts` で型定義。
    - D1 テーブルのカラムをそのまま漏洩させず、明示的 DTO のみを返却（`check:public-api-leaks` 準拠）。
