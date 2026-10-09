@@ -20,7 +20,7 @@
 
 ## 2. プラットフォーム非依存アダプターアーキテクチャ (`@flamenode/ui`)
 
-`packages/ui` では、フレームワーク依存 API（ルーティング、画像最適化）を抽象化するアダプターを提供します（[`packages/ui/src/adapters/index.tsx`](file:///c:/Users/beeyu/Documents/GitHub/flamenode/packages/ui/src/adapters/index.tsx)）。
+`packages/ui` では、フレームワーク依存 API（ルーティング、画像最適化）を抽象化するアダプターを提供します（[`packages/ui/src/adapters/index.tsx`](../../packages/ui/src/adapters/index.tsx)）。
 
 ### 2.1 Link コンポーネント (`Link`)
 - **デフォルト挙動**: 通常の `<a href="..." {...props}>` として動作（Astro SSG や静的プレビューでそのまま機能）。
