@@ -4,6 +4,7 @@
 > Last updated: 2026-10-07
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
+> Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
 > Implementation: [`IMPLEMENTATION_RUNBOOK.md`](IMPLEMENTATION_RUNBOOK.md), [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md), [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md), [`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md), [`TASK_CARDS_6_7.md`](TASK_CARDS_6_7.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md)
 > Git: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
 > 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
@@ -43,8 +44,8 @@ Next: MIG-0301 extraction/DI pattern
 - 原則 1 task = 1 short-lived branch = 1 PR = 1 squash merge
 - `READY → IN_PROGRESS → REVIEW → DONE` または `BLOCKED`
 - 大型MIGは `TASK_MICRO_UNITS.md` に従い、同じDraft PRのbranch STATUSにowner/current unit/tests/next unitを残して `IN_PROGRESS`のまま次wakeへ継続可能。**チェックポイント無しの放置禁止**
-- claim時にOwner/branch/PR/affected UX/FNを記録する
-- finish時にvalidation/rollback/evidence/next stateを記録する
+- claim時にOwner/branch/PR/affected UX/FNと `FILE_MIGRATION_MATRIX.md` の対象ファイル/consumerを記録する
+- finish時にvalidation/rollback/evidence/next stateを記録する。ファイルごとの状態はFILE_MIGRATION_MATRIXに残し、MIG親のDONEと混同しない
 - Phase Gateをagentが自動承認しない
 - production deploy / Worker Route / Custom Domain / Remote D1 / secret変更は明示承認まで停止
 - Git詳細は `GIT_WORKFLOW.md`
