@@ -106,7 +106,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | 1 | Repository boundaries | DONE | PASSED |
 | 2 | Design System / HTML mock integration (公開画面用) | BLOCKED (`PENDING_HTML`, Phase 4/5前提) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
-| 4 | Public PoC | BLOCKED | CLOSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
 | 6 | Hono API | BLOCKED | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
@@ -252,17 +252,25 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 4 — Public PoC
 
+> **1102優先の2トラック (2026-10-09):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能、D-08 HTMLモック待ちは **MIG-0402/0403と正式UI移行** だけ。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
+>
+> **並行READY:** MIG-0301 (Domain) と MIG-0401 (Public performance PoC) は別担当・別PRで進められる。CURRENTの`Current Task`は主たる進捗であり、別のREADYタスクを自動claimする指示ではない。最初に既存open PRを確認する。
+>
+> Performance measurement/protocol: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md) / [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) 。
+
+
+
 > タスク別詳細仕様書: [`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md)（Astro SSG & Islands 詳細仕様）
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0401 | Astro build-input PoC | BLOCKED | MIG-0105 |
+| MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | READY | MIG-0105 |
 | MIG-0402 | shared React UI in Astro | BLOCKED | MIG-0206, MIG-0401 |
-| MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402 |
-| MIG-0404 | route-map generator | BLOCKED | MIG-0403 |
+| MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402, MIG-0404 |
+| MIG-0404 | route-map generator (mock-independent) | BLOCKED | MIG-0401 |
 | MIG-0405 | visibility gateway | BLOCKED | MIG-0404 |
 | MIG-0406 | CPU/build benchmark | BLOCKED | MIG-0405 |
-| MIG-0407 | Phase 4 Gate | BLOCKED | MIG-0406 |
+| MIG-0407 | Phase 4 Gate: performance + visual evidence | BLOCKED | MIG-0403, MIG-0406 |
 
 ## Phase 5 — Public migration
 
