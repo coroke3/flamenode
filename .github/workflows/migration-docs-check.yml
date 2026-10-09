@@ -1,28 +1,85 @@
-name: Migration docs consistency
+name: Migration contract and workspace verification
 
 on:
   pull_request:
     paths:
       - "AGENTS.md"
       - "docs/migration/**"
-      - "scripts/check-migration-docs.mjs"
+      - "scripts/check-migration*.mjs"
+      - "scripts/check-project-docs.mjs"
       - ".claude/**"
       - ".codex/**"
       - ".agents/**"
+      - "apps/**"
+      - "packages/**"
+      - "src/lib/**"
+      - "app/**"
+      - "workers/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/migration-docs-check.yml"
   workflow_dispatch:
+
+concurrency:
+  group: migration-verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  migration-docs:
+  migration-contract:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 移行文書・タスク依存・Decision Gate
+        run: node scripts/check-migration-docs.mjs
+      - name: 実行契約の状態遷移テスト
+        run: node --test scripts/check-migration-execution.test.mjs
+      - name: 全MIG実装カード網羅性
+        run: node scripts/check-migration-task-cards.mjs
+      - name: 実装カードchecker回帰テスト
+        run: node --test scripts/check-migration-task-cards.test.mjs
+      - name: ファイル別依存・Route/RH/SA登録とPR差分を照合
+        env:
+          MIGRATION_FILE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/check-migration-file-progress.mjs
+      - name: ファイル進捗checkerの回帰テスト
+        run: node --test scripts/check-migration-file-progress.test.mjs
+      - name: MD相互リンク検証と回帰テスト
+        run: |
+          node scripts/check-migration-links.mjs
+          node --test scripts/check-migration-links.test.mjs
+
+  migration-workspaces:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: 移行ドキュメント整合性チェック
-        run: node scripts/check-migration-docs.mjs
+          cache: npm
+      - name: 依存のロック整合性
+        run: npm ci --no-audit --no-fund
+      - name: 移行文書・DB schema関連チェック
+        run: npm run check:project-docs
+      - name: 既存Nextの型・回帰・軽量検証
+        run: |
+          npm run typecheck
+          npm run test:unit
+          npm run verify:fast
+      - name: 共有パッケージから順番にビルド
+        run: |
+          npm run build --workspace=@flamenode/contracts
+          npm run build --workspace=@flamenode/domain
+          npm run build --workspace=@flamenode/ui
+          npm run build --workspace=@flamenode/site
+          npm run build --workspace=@flamenode/app
+          npm run build --workspace=@flamenode/api

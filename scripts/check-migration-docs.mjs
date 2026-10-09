@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { validateMigrationExecution } from "./check-migration-execution.mjs";
+import { validateTaskCards, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
+import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
+import { validateLinks, listMarkdownFiles } from "./check-migration-links.mjs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -352,7 +356,6 @@ if (errors.length === 0) {
   for (const marker of [
     "like / bookmark / save はActive X所有",
     "Performance/architecture最適化のために、frontend product behavior変更を必須とするblocker: 0",
-    "UI_REFERENCE.md = PENDING_HTML",
     "docs/design-redesign/",
   ]) {
     if (!featureCatalog.includes(marker)) errors.push(`FEATURE_CATALOG.md: required marker missing: ${marker}`);
@@ -819,7 +822,7 @@ if (errors.length === 0) {
     "FN-X-010",
   ]) {
     const row = functionRows.find((candidate) => candidate.id === id);
-    if (row?.state !== "CURRENT_VERIFIED") {
+    if (!["CURRENT_VERIFIED", "PARITY_VERIFIED"].includes(row?.state)) {
       errors.push(`MIG-0007: ${id} must be CURRENT_VERIFIED after static-delivery audit`);
     }
   }
@@ -863,7 +866,7 @@ if (errors.length === 0) {
     "FN-X-002",
   ]) {
     const row = functionRows.find((candidate) => candidate.id === id);
-    if (row?.state !== "CURRENT_VERIFIED") {
+    if (!["CURRENT_VERIFIED", "PARITY_VERIFIED"].includes(row?.state)) {
       errors.push(`MIG-0008: ${id} must be CURRENT_VERIFIED after auth/permission audit`);
     }
   }
@@ -946,13 +949,16 @@ if (errors.length === 0) {
     "FN-PLAT-010",
   ]) {
     const row = functionRows.find((candidate) => candidate.id === id);
-    if (row?.state !== "CURRENT_VERIFIED") {
+    if (!["CURRENT_VERIFIED", "PARITY_VERIFIED"].includes(row?.state)) {
       errors.push(`MIG-0009: ${id} must be CURRENT_VERIFIED after background-job audit`);
     }
   }
 
   // Design source transition + MIG-0011 Active X requirement gate.
-  if (!uiReference.includes("`PENDING_HTML`")) errors.push("UI_REFERENCE.md: PENDING_HTML state is missing");
+  const visualStatus = uiReference.match(/^> Status:\s*`?([A-Z_]+)`?/m)?.[1];
+  const pendingHtml = visualStatus === "PENDING_HTML";
+  if (!visualStatus) errors.push("UI_REFERENCE.md: missing explicit Status header");
+  if (!pendingHtml && !/APPROVED_HTML|REGISTERED_HTML|APPROVED/i.test(uiReference)) errors.push("UI_REFERENCE.md: visual reference has neither pending nor approved state");
   if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
   for (const phrase of [
     "authentication principal = Auth User",
@@ -972,11 +978,11 @@ if (errors.length === 0) {
   }
   const uxById = new Map(uxRows.map((row) => [row.id, row]));
   for (const id of ["UX-VID-025", "UX-VID-026", "UX-VID-027", "UX-LIB-001", "UX-LIB-002", "UX-LIB-008"]) {
-    if (uxById.get(id)?.state !== "CURRENT_DIVERGENCE") {
-      errors.push(`frontend UX ledgers: Active X interaction divergence must remain explicit for ${id}`);
+    if (!["CURRENT_DIVERGENCE", "MIGRATION_IN_PROGRESS", "BRIDGED", "PARITY_VERIFIED"].includes(uxById.get(id)?.state)) {
+      errors.push(`frontend UX ledgers: Active X migration state missing or invalid for ${id}`);
     }
   }
-  if (uiReference.includes("`PENDING_HTML`")) {
+  if (pendingHtml) {
     for (const forbiddenClaim of [
       /^TARGET layout:\s*.+$/m,
       /^TARGET component hierarchy:\s*.+$/m,
@@ -1079,6 +1085,13 @@ if (errors.length === 0) {
     if (!protocol.includes(canonical)) errors.push(`AGENT_PROTOCOL.md: mandatory source missing: ${canonical}`);
   }
 
+  // Every host loop adapter must be present, claim no intrinsic scheduler, and refer to the shared execution protocol.
+  for (const adapter of [".claude/loop.md", ".codex/skills/loop/SKILL.md", ".agents/skills/loop/SKILL.md"]) {
+    const body = read(adapter);
+    if (!body.includes("AGENT_PROTOCOL.md")) errors.push(`${adapter}: missing shared protocol`);
+    if (!/one|1 MIG task|1 invocation|1 wake/i.test(body)) errors.push(`${adapter}: missing single-task contract`);
+  }
+
   // Tool adapters must delegate to the shared protocol.
   const adapters = [
     ".claude/commands/flamenode-migration.md",
@@ -1095,6 +1108,37 @@ if (errors.length === 0) {
   for (const phrase of ["GIT_WORKFLOW.md", "PRODUCT_REQUIREMENTS.md", "CODE_QUALITY.md", "UI_REFERENCE.md", "server-actions/README.md", "route-handlers/README.md", "cloudflare/TOPOLOGY.md", "cloudflare/PERFORMANCE_BASELINE.md", "static-delivery/README.md", "auth/README.md", "background-jobs/README.md", "screen-mapping/README.md"]) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
+
+  // Execution gates must be enforced against actual STATUS/Decisions/config, not only keyword presence.
+  errors.push(...validateMigrationExecution({
+    statusText: status,
+    decisionsText: read("docs/migration/OPEN_DECISIONS.md"),
+    routingText: read("docs/migration/ROUTING_AND_DEPLOY_PLAN.md"),
+    viteText: read("apps/app/vite.config.ts"),
+    apiSpecText: read("docs/migration/PHASE_6_SPEC.md"),
+  }));
+
+  errors.push(...validateTaskCards({
+    status,
+    fileContents: Object.fromEntries(TASK_CARD_FILES.map((p) => [p, read(p)])),
+    runbook: read("docs/migration/IMPLEMENTATION_RUNBOOK.md"),
+    protocol,
+    decisions: read("docs/migration/OPEN_DECISIONS.md"),
+    smokeDocs: read("docs/migration/SMALL_MODEL_SMOKE_TEST.md"),
+    microUnits: read("docs/migration/TASK_MICRO_UNITS.md"),
+  }));
+
+  errors.push(...validateFileProgress({
+    matrix: read("docs/migration/FILE_MIGRATION_MATRIX.md"),
+    currentRoutes: read("docs/migration/CURRENT_ROUTES.md"),
+    routeHandlers: read("docs/migration/route-handlers/README.md"),
+    serverActions: read("docs/migration/server-actions/README.md"),
+    status,
+    filePaths: collectMigrationFiles(),
+    taskCardsText: TASK_CARD_FILES.map(p=>read(p)).join("\n"),
+  }));
+
+  errors.push(...validateLinks({root,documents:listMarkdownFiles(root)}));
 
   // Git discipline remains non-negotiable.
   for (const phrase of [

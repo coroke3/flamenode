@@ -2,7 +2,7 @@
 
 > Status: Active / CURRENT route source of truth
 > Last updated: 2026-10-07
-> Scope: CURRENT `app/**/page.tsx` 92 routes。visual / compat redirect / dev / systemを区別する。
+> Scope: CURRENT `app/**/page.tsx` 90 routes。visual / compat redirect / dev / systemを区別する。
 > Evidence: `app/` current route tree + current code
 
 この文書はUIデザイン案ではない。移行・リデザインで画面/URLを落とさないためのCURRENT route棚卸しである。
@@ -141,7 +141,7 @@ COMPAT_REDIRECT         9
 DEV_ONLY                3
 SYSTEM_SURFACE          6
 --------------------------
-app/**/page.tsx         92
+app/**/page.tsx         90
 ```
 
 旧「86 USER_SCREEN」はroute tree baselineの歴史的集計であり、visual screen数としては使用しない。

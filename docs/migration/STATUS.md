@@ -4,6 +4,8 @@
 > Last updated: 2026-10-07
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
+> Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
+> Implementation: [`IMPLEMENTATION_RUNBOOK.md`](IMPLEMENTATION_RUNBOOK.md), [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md), [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md), [`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md), [`TASK_CARDS_6_7.md`](TASK_CARDS_6_7.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md)
 > Git: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
 > 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
 > Frontend parity: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
@@ -34,16 +36,16 @@ Next: MIG-0301 extraction/DI pattern
 - `REVIEW`: implementation/audit済み、独立review/検証待ち
 - `BLOCKED`: dependency/approval/evidence不足
 - `DONE`: acceptance + validation + progress更新済み
-- `SKIPPED`: 理由付きで不要
+- `SKIPPED`: 例外。代替タスク・独立レビュー・ユーザー/Lead承認を明示。タスク表の外に `SKIP_APPROVAL: MIG-XXXX | PR#NNN | APPROVAL=<real reviewer/approval link> | ALTERNATIVE=<MIG-ID or rationale>` の1行を残す。CIが検証。承認無しのSKIPPEDで依存を解除しない
 
 ## Loop / handoff rules
 
 - 1 iteration = exactly 1 MIG task
 - 原則 1 task = 1 short-lived branch = 1 PR = 1 squash merge
 - `READY → IN_PROGRESS → REVIEW → DONE` または `BLOCKED`
-- `IN_PROGRESS`のままhandoffしない
-- claim時にOwner/branch/PR/affected UX/FNを記録する
-- finish時にvalidation/rollback/evidence/next stateを記録する
+- 大型MIGは `TASK_MICRO_UNITS.md` に従い、同じDraft PRのbranch STATUSにowner/current unit/tests/next unitを残して `IN_PROGRESS`のまま次wakeへ継続可能。**チェックポイント無しの放置禁止**
+- claim時にOwner/branch/PR/affected UX/FNと `FILE_MIGRATION_MATRIX.md` の対象ファイル/consumerを記録する
+- finish時にvalidation/rollback/evidence/next stateを記録する。ファイルごとの状態はFILE_MIGRATION_MATRIXに残し、MIG親のDONEと混同しない
 - Phase Gateをagentが自動承認しない
 - production deploy / Worker Route / Custom Domain / Remote D1 / secret変更は明示承認まで停止
 - Git詳細は `GIT_WORKFLOW.md`
@@ -166,7 +168,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 Frontend / Backend の分割監査は main に統合済み。
 
 - PR #248: Backend 136 FN最終監査 / optimization disposition
-- PR #249: Frontend 432 UX / 92 page route分類 / requirement reconciliation
+- PR #249: Frontend 432 UX / route分類 / requirement reconciliation（移行資料内の92表記は最新sourceと相違し、2026-10-09に90へ訂正）
 - PR #250: 人間向け全機能カタログ、agent protocol、STATUS、checkerの最終統合
 
 統合後の確定事項:
@@ -187,8 +189,8 @@ Validation:
 - UX canonical ledger ↔ FEATURE_CATALOG: 432/432、unique 432、missing 0、unknown 0。
 - FN canonical ledger ↔ FEATURE_CATALOG: 136/136、unique 136、missing 0、unknown 0。
 - FN final states: 131 CURRENT_VERIFIED / 2 CURRENT_DIVERGENCE / 2 MERGED_INTO_OTHER / 1 TARGET_REDESIGN_REQUIRED / DETAIL_AUDIT_REQUIRED 0。
-- source `app/**/page.tsx` ↔ CURRENT_ROUTES: 92/92、missing 0。
-- route classes: 74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 3 DEV_ONLY / 6 SYSTEM_SURFACE。
+- source `app/**/page.tsx` ↔ CURRENT_ROUTES: 90/90、missing 0。
+- route classes: 74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 1 DEV_ONLY / 6 SYSTEM_SURFACE。
 - `docs/design-redesign` tree entries: 0。
 - Claude / Codex / Antigravity adapters: 全て `FEATURE_CATALOG.md` 参照済み。
 - `scripts/check-migration-docs.mjs`: V8 syntax parse OK。catalog exact-set検査を追加。
@@ -218,6 +220,8 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 2 — Design System / HTML mock integration
 
+> D-08はHTMLモック先行を選択済み。ただし実ファイル未受領のため BLOCKED_ON_USER。勝手にREADYへ変更しない。
+
 > ※デザイン適用戦略（案A）に基づき、本Phaseは公開画面（Phase 4/5）の前提条件となります。
 > UI/デザインに依存しない Phase 3（ドメイン抽出）は先行して着手可能です。
 
@@ -233,17 +237,18 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 3 — Domain extraction
 
-> タスク別詳細仕様書: [`PHASE_3_SPEC.md`](PHASE_3_SPEC.md)（Luna / Flash 等の軽量モデル向け完全仕様・コード例）
+> タスク別詳細仕様書: [`PHASE_3_SPEC.md`](PHASE_3_SPEC.md) / [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)（D-01=A、MIG-0308をTier2の依存に追加）
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0301 | extraction/DI pattern | READY | MIG-0108 |
 | MIG-0302 | low-risk read domain | BLOCKED | MIG-0301 |
-| MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0302 |
+| MIG-0308 | `packages/db` schema extraction (zero DDL) | BLOCKED | MIG-0302 |
+| MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0308 |
 | MIG-0304 | video domain group | BLOCKED | MIG-0303 |
 | MIG-0305 | event/slot domain group | BLOCKED | MIG-0303 |
 | MIG-0306 | user/X/admin domain group | BLOCKED | MIG-0303 |
-| MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..MIG-0306 |
+| MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..MIG-0306, MIG-0308 |
 
 ## Phase 4 — Public PoC
 

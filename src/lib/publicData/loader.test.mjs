@@ -135,8 +135,11 @@ test("detail/event/user/rules loaders use R2-first freshness with bounded stale 
     loaderSource.indexOf("export const loadStaticEventDetail = cache("),
     loaderSource.indexOf("export async function loadStaticEventsIndex"),
   );
-  assert.match(detailBlock, /return loadStaticEventDetailCached\(eventId\)/);
-  assert.match(detailBlock, /loadStaticEventDetailCached = cache\(/);
+  // Event detail now uses a single request-local cache around the complete R2-first read.
+  assert.match(detailBlock, /export const loadStaticEventDetail = cache\(async \(/);
+  assert.match(detailBlock, /loadPublicJson<StaticEventDetailPayload>\(options\)/);
+  assert.match(detailBlock, /staleCacheMaxAgeSec: PUBLIC_JSON_CACHE_TTL_SEC\.eventDetail \* 2/);
+  assert.match(detailBlock, /loadStaticJsonFreshStaleUnavailable<StaticEventSlotsPayload>/);
   assert.match(detailBlock, /cacheMode: "r2_first"/);
   const rulesBlock = loaderSource.slice(
     loaderSource.indexOf("export async function loadStaticRulesPage"),

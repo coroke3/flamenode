@@ -70,7 +70,7 @@ Before creating a write branch:
 6. Create the branch from the latest `main`.
 7. Open a **draft PR early** when implementation begins.
 
-The open task PR is the short-lived live lock for that task.
+The open task PR is the short-lived live lock for that task. Larger tasks may be checkpointed across multiple wakes **within the same Draft PR**, following `TASK_MICRO_UNITS.md`; each wake records status/tests/next unit on PR branch. Only the last wake moves the complete task to REVIEW. **PR作成は原子的なロックではない**ので作成直後にも同一MIGのopen PRを検索する。重複時は後発writerが停止し、実装・mergeせずLeadへowner調整を要求する。
 
 `main`'s `STATUS.md` is the last merged checkpoint; while a task PR is active, the PR branch's `STATUS.md` plus the open PR are the live state for that task.
 
@@ -87,7 +87,9 @@ branch from latest main
   ↓
 draft PR + IN_PROGRESS on branch
   ↓
-implement / inventory / validate
+implement one bounded micro-unit, checkpoint IN_PROGRESS on branch
+  ↓
+repeat next wake on the SAME PR until all units DONE
   ↓
 REVIEW on branch
   ↓
@@ -102,9 +104,13 @@ main becomes the new progress checkpoint
 
 ### Important
 
+Incomplete micro-units do **not** justify setting REVIEW early; the PR remains Draft/IN_PROGRESS with explicit owner and next unit checkpoint. The ordinary prohibition on abandoned IN_PROGRESS applies only to missing owner/handoff evidence.
+
 Do **not** create a second bookkeeping PR only to move `REVIEW → DONE` after a normal task PR.
 
 Before merge, the task branch should already contain the final state that main should inherit:
+
+- `FILE_MIGRATION_MATRIX.md` contains every changed CURRENT/NEW source path, target provider/consumer linkage, test+PR+SHA evidence, file state; validated by `node scripts/check-migration-file-progress.mjs`
 
 - current task `DONE`
 - evidence/validation recorded
@@ -145,6 +151,8 @@ Scope:
 Non-scope:
 Affected function IDs:
 Affected routes/APIs:
+FILE_MIGRATION_MATRIX.md rows before/after:
+Actual source -> target exports -> consumers:
 Changed:
 Preserved contracts:
 Validation:
@@ -243,7 +251,7 @@ Rules:
 - An agent must not be the only reviewer of its own migration PR.
 - Claude, Codex, and Antigravity may rotate Builder/Reviewer roles.
 - Review findings are written to the PR/repository, not left only in chat.
-- The reviewer checks CURRENT parity, not only code style.
+- The reviewer checks CURRENT parity, not only code style. **Review must come from a separate reviewer identity/process**; builder's self-review/CIだけで独立レビューと称しない。レビュー対象のcommit SHAを記録し、レビュー後に変更した場合は再レビューとCIを要求する。
 
 ### High-risk two/three-party rule
 
@@ -478,7 +486,7 @@ The next agent re-reads the branch state and continues from there.
 9. mark task REVIEW, request independent review
 10. address findings + rerun validation
 11. set task DONE + next task READY in same branch
-12. squash merge
+12. CI成功・別レビュアー確認・必要な人間承認を確認した場合だけsquash merge。権限/レビューが不足する場合はREVIEWで停止
 13. delete branch
 14. next loop starts from updated main
 ```

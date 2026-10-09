@@ -2,7 +2,7 @@
 
 > Status: CURRENT_VERIFIED
 > Verified: 2026-10-07
-> Scope: 92 CURRENT page routes classified as visual / compat / dev / system + cross-route shells + all 432 UX surface tokens
+> Scope: 90 CURRENT page routes classified as visual / compat / dev / system + cross-route shells + all 432 UX surface tokens
 > Route source: [`../CURRENT_ROUTES.md`](../CURRENT_ROUTES.md)
 > UX source: [`../FRONTEND_FEATURES.md`](../FRONTEND_FEATURES.md)
 > FN source: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
@@ -16,9 +16,9 @@ MIG-0010は「URLが残っている」だけでなく、各screenが必要なUX/
 ```text
 CURRENT VISUAL_SCREEN = 74
 COMPAT_REDIRECT = 9
-DEV_ONLY = 3
+DEV_ONLY = 1
 SYSTEM_SURFACE = 6
-page routes classified = 92
+page routes classified = 90
 UX capabilities = 432
 AUDIT_REQUIRED = 0
 CURRENT_OBSERVED = 0

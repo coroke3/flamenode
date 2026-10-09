@@ -45,11 +45,15 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 1. `AGENTS.md`
 2. `docs/AI_CONTEXT.md` のmigration entry
 3. `docs/migration/STATUS.md`
+3a. `docs/migration/OPEN_DECISIONS.md`（対象taskに紐づくDecision状態を必ず確認）
+3b. **`docs/migration/IMPLEMENTATION_RUNBOOK.md`**（Luna/Haiku含む全agent必読）
+3b1. **`docs/migration/FILE_PROGRESS_PROTOCOL.md` と `FILE_MIGRATION_MATRIX.md` の現在のMIGに属するファイル行だけ**（source→target→consumerと各ファイル状態を記録する）
+3c. **`docs/migration/TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` の該当MIG 1件だけ**。大型MIGは `docs/migration/TASK_MICRO_UNITS.md` の該当micro-unitだけ読む。全55件を一度に読み込まない
 4. `docs/migration/GIT_WORKFLOW.md`
 5. `docs/migration/README.md`
-6. `docs/migration/FEATURE_CATALOG.md` — 432 UX / 136 FN の人間向け全件索引
-7. `docs/migration/PRODUCT_REQUIREMENTS.md`
-8. `docs/migration/CODE_QUALITY.md`
+6. `docs/migration/FEATURE_CATALOG.md` — **対象IDの行だけ**確認（432 UX / 136 FN を一度に読む必要はない）
+7. `docs/migration/PRODUCT_REQUIREMENTS.md` の**対象要件節のみ**
+8. `docs/migration/CODE_QUALITY.md` の該当規約
 9. task scopeに応じて:
    - route/UI/frontend → `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象`frontend/*.md` + `screen-mapping/README.md`
    - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`; Route Handler/APIを触る場合は `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job topologyを触る場合は `cloudflare/TOPOLOGY.md`; CPU/1102/request hot-path/PoC performanceを触る場合は `cloudflare/PERFORMANCE_BASELINE.md`; static artifact/alias/visibility/fallback/repairを触る場合は `static-delivery/README.md`; auth/session/linking/terms/Active X/permission/owner invariantを触る場合は `auth/README.md`; Queue/Cron/background job/retry/DLQ/recoveryを触る場合は `background-jobs/README.md`
@@ -60,6 +64,10 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 正本の所在が不明な時だけ`DOC_MAP.md`を読む。
 
 ## Context minimization
+
+- Luna/Haiku等は **RUNBOOK → 該当MIGカード → 対象SPEC/ledgerの必要な数行 → CURRENT source/test** の順で読む。複数フェーズカードの一括読み込み禁止。
+- カードの`+path`は予定作成ファイルであり実在を保証しない。既存ファイル・シンボルは現物を開いて確認する。
+- 各wake最新main/PR/Decision・CI/owner/evidenceを再取得。前wakeや会話を正本にしない。
 
 - 全432 UX行を毎回読まない。
 - 全136 FN行を毎回読まない。
@@ -88,11 +96,11 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 
 # One iteration = one MIG task
 
-`STATUS.md`のdependencyを満たした1 taskだけを進める。
+`STATUS.md`のdependencyを満たした1 taskだけを進める。**該当TASK_CARDS_*.mdカードを読み、変更対象・テスト・停止条件をclaimへ書く。** 作業カードは `node scripts/check-migration-task-cards.mjs` と `node --test scripts/check-migration-task-cards.test.mjs` で整合性検証する（実コード完成の保証ではない）。
 
 ## Claim
 
-開始前:
+開始前には FILE_MIGRATION_MATRIX.md で対象sourceの現在の行と全consumer/legacy bridgeを確認し、ファイルごとの変更・テスト・rollback計画を記入する。
 
 ```text
 Task:
@@ -295,13 +303,13 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 
 `STATUS.md`が唯一のtask進捗正本。
 
-終了時は必ず:
+終了時は単一wakeの作業結果を必ずPRへ保存する。
 
-- `DONE`
-- `REVIEW`
-- `BLOCKED`
+- 1wakeで全micro-unitが完了した場合: `REVIEW`（別レビュアー/CI待ち）、合格後`DONE`。
+- 未解決障害がある場合: `BLOCKED`（再開条件とowner記載）。
+- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのbranch `STATUS.md`に `IN_PROGRESS` を維持してよい。ただし有効owner、実行済みunit、テスト、次unit、PR link、HEADを必ず記録する（`TASK_MICRO_UNITS.md`）。mainのREADYを勝手に変更しない。
 
-のいずれかへ遷移し、`IN_PROGRESS`で放置しない。
+何のチェックポイントもない`IN_PROGRESS`の放置は禁止。
 
 必要に応じて同じPRで更新:
 
@@ -360,8 +368,13 @@ LOOP:
 
 ## Mandatory stop
 
+- 対応タスクカード欠落、未実在ソースへの参照、CURRENTとの矛盾があり同一MIGで解決できない場合はBLOCKEDで再開条件を記録
+
 - Overall/Task State = BLOCKED
 - READY taskなし
+- taskに必要な `OPEN_DECISIONS.md` のDecisionが `DECIDED` ではない（対象scopeの純粋ロジック部分だけ進める場合は境界を記録）
+- 前wakeが作成したopen PRが同じMIGを所有し、resume/handoffができない
+- 必須CI失敗、または独立レビューの証拠が無い状態でのDONE/merge要求
 - Phase Gate review待ち
 - production actionの明示承認待ち
 - Remote D1 / secret / Worker Route / Custom Domain変更が必要
@@ -448,3 +461,18 @@ Progress files updated:
 Next:
 - MIG-YYYY | Phase Gate review | BLOCKED(reason)
 ```
+
+---
+
+# Resumable loop / PR lifecycle contract（2026-10-09追補）
+
+1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、branch STATUSのcheckpointから再開する。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch STATUSを優先し、新しいtask/PRを生成しない。
+2. `OPEN_DECISIONS.md`の`Needed by`相当のMIG依存を解釈し、該当タスクについて`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`を「許可済み」と解釈しない。決定の証拠（decision ID / owner / date）をPRへ記録する。
+3. task claimはGitHubの単一atomic transactionではない。draft PRを作成する前後で同一MIGのopen PRを照合し、重複したら作業せずowner調整へ止める。mainの`READY`のみで未所有とみなさない。
+4. 実装は一taskずつ、大型MIGは1wakeにつき1micro-unitずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。
+5. `REVIEW`は必ず独立したレビュアーによるレビューと、対象branchの必須CI成功を必要とする。`DONE`へ進む前にレビュー時のhead SHA、レビュー結論、run URL、rollback証拠をPRに記録。新push後はレビュー/CIを再評価する。
+6. 人間承認が必要なGate/認証/権限/visibility/DB schema/本番切替を、Loop維持のために自動承認しない。安全に進められる無関係taskがある場合も、明示的なdependencyとwriterの独立が条件。
+7. merge後に最新mainのstatus/task/lock解消を再読込するまでは次taskへ移らない。hostが反復機構を持たなければ一回で終了する。
+8. stale`IN_PROGRESS`/古いPRは自動削除しない。PRを根拠にhandoffし、claim譲渡・失敗理由・未実行チェック・次の実行者を明示する。
+
+状態機械としての契約: `READY → IN_PROGRESS → REVIEW → DONE`。例外: `IN_PROGRESS/REVIEW → BLOCKED`（復旧条件明記）。`REVIEW`は合格を意味しない。`DONE`はreview/CIと依存完了を必要とする。フェーズGateはユーザーの明示承認を別に要する。

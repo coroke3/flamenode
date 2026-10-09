@@ -15,7 +15,8 @@
    - 動的な対話要素（いいねボタン、チャプターシーク、検索フィルター等）のみ React Islands（`client:load` または `client:visible`）としてマウント。
 2. **公開反映と Free 枠予算の遵守（D-06 参照）**:
    - 変更のたびに全件同期ビルドするのではなく、Queue によるデバウンス（`content-jobs` 経由の snapshot build）で反映。
-   - Workers Static Assets の Free 枠ファイル数上限（1 version あたり 20,000 ファイル）に留意し、MIG-0406 で実測検証。
+   - Workers Static Assets Free上限は 20,000 files/version。CSS/JS/images/HTML/manifest/redirectを含め、MIG-0406で実ファイル数・上限余裕・build時間を測定する。
+   - ファイル数超過時もSSRへ無条件移行しない。静的配信優先: Astro SSG → ビルド/QueueでR2へ事前生成したHTMLを軽量Workerで配信 → 実証済み限定SSR。R2 HTMLは数・ライフサイクル・オブジェクトread費用を別途測定。
 3. **Thin Visibility Gateway**:
    - 可視性フェンス（Fail-Closed）はエッジゲートウェイ（薄い Worker）で検証し、非公開・限定公開データのキャッシュ漏洩を防止（`README.md` §8）。
 4. **前提条件（D-08 参照）**:
@@ -48,11 +49,14 @@
 ### MIG-0405: visibility gateway
 - **目的**: エッジ層で `public_visibility_fences` を参照し、非公開エンティティへのリクエストを fail-closed で遮断する薄いゲートウェイを実装。
 
-### MIG-0406: CPU/build benchmark
-- **目的**: 静的ページ生成時のビルド時間および Workers CPU 時間（< 5ms）をベンチマーク測定し、Free 枠内に収まることを証明（D-06 参照）。
+### MIG-0406: CPU/build benchmark + bounded public fallback
+- **目的**: 公開データ実数とAstroの**実出力ファイル数**、build時間、Worker CPU/1102、R2 fallbackを測定。CPU target p50<1.5ms, p95<3ms, p99<5ms; Free CPU hard limit 10msを超える経路がないことをストレス/異常系で確認する。
+- **予算試算**: route × 固定/動的HTML数、出力asset、metadata/redirect/manifest、R2 byte/PUT/GET、Cloudflare request limitを含め、20,000 files/versionの上限超過をbuild preflightで停止する。2SPAの静的assetsは各Workerの別versionだがroot site側の容量を忘れない。
+- **R2 HTML優先**: キャッシュミスをHTTP request中のrenderへフォールバックしない。非同期で事前生成したHTMLをR2から返却し、視認性ゲートを常にfail-closed、ETag/cache purge/OGP/canonical/alias/indexingを検証。R2が読めないときは安全な503等＋再生成enqueue（非公開漏洩禁止）。
+- **限定SSR例外**: 事前データだけでは成立しないページごとにリスク理由・CPU/memory・負荷試験・無1102・影響ルート・戻し方をPRで承認したときのみ採用。Free 10msは非常に厳しいためSSR採用可能とは事前断言しない。
 
 ### MIG-0407: Phase 4 Gate
-- **完了条件**: 代表 3 画面の表示・ハイドレーション・ビルド時間・可視性フェンスがすべて合格判定。
+- **完了条件**: 代表3画面の表示・ハイドレーション・ビルド時間・可視性フェンス・SSG容量preflightとR2事前HTML異常系が合格。SSR例外を採用した場合はFreeのCPU/hard-limit下で検証通過した証拠が別途必要。
 
 ---
 

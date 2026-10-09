@@ -30,9 +30,9 @@ CURRENT page routeは以下を区別する。
 | --- | ---: | --- |
 | VISUAL_SCREEN | 74 | `CURRENT_ROUTES.md` |
 | COMPAT_REDIRECT | 9 | `CURRENT_ROUTES.md` + `gap-scan/FRONTEND_REQUIREMENTS.md` |
-| DEV_ONLY | 3 | `CURRENT_ROUTES.md` |
+| DEV_ONLY | 1 | `CURRENT_ROUTES.md` |
 | SYSTEM_SURFACE | 6 | `CURRENT_ROUTES.md` |
-| **page.tsx total** | **92** | source tree |
+| **page.tsx total** | **90** | source tree |
 
 432 UX capabilityとは1:1ではない。visual screenだけでなくcompat/system/shellもUX ownerになりうる。
 

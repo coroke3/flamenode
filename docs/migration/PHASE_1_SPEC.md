@@ -4,7 +4,7 @@
 > 対象モデル: Claude / Codex / Antigravity / GPT-5.6-luna / Gemini Flash 等の全エージェント
 > 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md), [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
 
-このドキュメントは、**Luna や Flash などの軽量モデルでも一切迷わずに実装できるよう、各タスクの目的・作成ファイル・コード仕様・禁止事項・検証コマンドを完全に具体化した仕様書**である。
+**履歴注意：Phase 1は既にDONE。以下のコード例は当時のskeletonであり、次MIGの実装・最新TARGETの正本ではない。** 特に旧`base: "/dashboard/"`、`canEditVideo`の単純OR、APIのtypecheck-only skeletonは現在の設計と異なり**再適用禁止**。次タスクは`IMPLEMENTATION_RUNBOOK.md`の読込・対応MIGカード・実際のCURRENT code/testを正本とする。
 
 ---
 

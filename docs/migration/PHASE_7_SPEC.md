@@ -9,15 +9,18 @@
 
 # 1. Private SPA の基本方針
 
-1. **React + Vite による SPA (Single Page Application)**:
-   - `apps/app` は純粋なクライアントサイド SPA としてビルドされ、Cloudflare Workers Static Assets から静的配信。
+1. **React + Vite による2つの独立SPA**:
+   - Personal SPA: `apps/app`（`/dashboard`, `/entry`, `/onboarding`）、Ops SPA: `+apps/ops`（`/manage`, `/admin`）。どちらもCloudflare Workers Static Assetsから配信し、rootのHTML shell・error boundary・buildは独立。
    - ルーティングは `react-router-dom` を使用し、ブラウザ遷移で高速に動作。
 2. **デザイン適用戦略（案A）の遵守**:
    - 管理・マイページ・登録画面はデザイン全面刷新を行わず、現行の UI/コンポーネント資産（`packages/ui`）を流用して移行効率を最大化。
-   - `@flamenode/ui` のアダプター（`setLinkComponent`, `setNavigatorAdapter`）に `react-router-dom` を注入。
-3. **SPA ルーティング・ベースパス（D-05 参照）**:
-   - `apps/app` は `/dashboard/*`, `/entry/*`, `/manage/*`, `/admin/*`, `/onboarding` を担当。
-   - アセットディレクトリは `/_app_assets/*` を使用し、他 Worker との衝突を防止。
+   - `@flamenode/ui` のルーターアダプターを各SPA rootのContext/Providerで注入。module-global `setLinkComponent` / `setNavigatorAdapter` はPoC互換に限定。
+3. **2 SPAルーティング・パス分離（D-05決定済み）**:
+   - `apps/app`: `/dashboard`, `/dashboard/*`, `/entry`, `/entry/*`, `/onboarding`。既存作品編集 `/dashboard/edit/*` もPersonalに所属。
+   - `+apps/ops`: `/manage`, `/manage/*`, `/admin`, `/admin/*`。Opsはroot SPA shell/entrypoint/Worker/static assetsを独立させる。
+   - `base:'/'`を両方で使用するが、アセットprefixは `/_personal_assets/*` と `/_ops_assets/*` を分離。`assetsDir`だけでなくビルド出力とCloudflare Worker Routeの実URLを検査する。
+   - 各SPAの内部ではReact Router、両SPA間は通常のHTTPフルナビゲーション。Cookie/sessionは同一origin、権限は必ずHonoで再検証。redirect/direct reload/404/asset/cacheをE2E確認。
+   - Ops専用chunkがPersonal bundleに混在しないこと、権限がないユーザーがOpsのprivate DTOにアクセスできないことをテスト。
 
 ---
 
@@ -46,6 +49,7 @@
 - **仕様**: 作品編集権限判定（PR #265 一本化ロジック）を厳格に適用。
 
 ### MIG-0704: manage（Manage イベント運営画面群）
+- **最初に** `+apps/ops` ワークスペースを生成し、名前を `@flamenode/ops`、別Vite設定・entrypoint・`/_ops_assets/*`・`flamenode-ops` Workerとして独立build/preview/CIを設定する（Personal `apps/app` とpackage lockを共有）。
 - **対象画面** (`CURRENT_ROUTES.md` Manage 12 ルート):
   - `/manage`（担当イベント一覧）
   - `/manage/events/[id]`（イベント基本設定）
@@ -84,4 +88,4 @@
   - `/admin/youtube-quota`, `/admin/youtube-sync/*`（YouTube クォータ・同期管理）
 
 ### MIG-0706: Phase 7 Gate
-- **完了条件**: 全 Personal (6), Entry (3), Manage (12), Admin (45) 画面の SPA 移行完了、全 Server Action の Hono 移行完了、ロールバック安全性実証。
+- **完了条件**: 全 Personal (6), Entry (3), Manage (12), Admin (45) 画面を**Personal/Opsの2SPA**に移行。2つの別build成功、相互に混ざらないJS/CSS、static asset名前空間、deep links/reload/back-forward、cookie/session、cross-app navigation、アクセス拒否/権限、404、全Server ActionのHono対応とロールバック安全性を確認。

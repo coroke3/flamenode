@@ -13,6 +13,13 @@
 | task routing | `docs/AI_CONTEXT.md` |
 | migration architecture / invariants / phases | `docs/migration/README.md` |
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
+| small-model single-task procedures | `docs/migration/IMPLEMENTATION_RUNBOOK.md` |
+| large task resumable micro-unit work packet and PR checkpoints | `docs/migration/TASK_MICRO_UNITS.md` |
+| per-file source/target progress and ownership | `docs/migration/FILE_MIGRATION_MATRIX.md` |
+| per-file state machine and provider/consumer integration | `docs/migration/FILE_PROGRESS_PROTOCOL.md` |
+| cross-framework provider→consumer dependency ordering | `docs/migration/FILE_DEPENDENCY_GRAPH.md` |
+| Phase 2–9 per-MIG executable cards | `docs/migration/TASK_CARDS_2_3.md` + `docs/migration/TASK_CARDS_4_5.md` + `docs/migration/TASK_CARDS_6_7.md` + `docs/migration/TASK_CARDS_8_9.md` |
+| cross-model live smoke acceptance | `docs/migration/SMALL_MODEL_SMOKE_TEST.md` |
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
 | migration code quality | `docs/migration/CODE_QUALITY.md` |
 | current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
@@ -26,13 +33,14 @@
 | UI component adapter / Next.js decoupling guide | `docs/migration/UI_MIGRATION_GUIDE.md` |
 | Phase 1 task specification & design strategy | `docs/migration/PHASE_1_SPEC.md` |
 | Phase 3 task specification (domain extraction) | `docs/migration/PHASE_3_SPEC.md` |
+| D-01 DB schema extraction plan | `docs/migration/DB_PACKAGE_EXTRACTION_PLAN.md` |
 | Phase 4 & 5 task specification (Astro SSG & Islands) | `docs/migration/PHASE_4_5_SPEC.md` |
 | Phase 6 task specification (Hono API) | `docs/migration/PHASE_6_SPEC.md` |
 | Phase 7 task specification (Private React SPA) | `docs/migration/PHASE_7_SPEC.md` |
 | Phase 8 & 9 task specification (Auth & Retirement) | `docs/migration/PHASE_8_9_SPEC.md` |
 | Active X data migration plan | `docs/migration/ACTIVE_X_MIGRATION_PLAN.md` |
 | multi-worker routing and staged deployment plan | `docs/migration/ROUTING_AND_DEPLOY_PLAN.md` |
-| unresolved decisions requiring human judgement | `docs/migration/OPEN_DECISIONS.md` |
+| adopted architectural decisions and separate PoC/approval gates | `docs/migration/OPEN_DECISIONS.md` |
 | backend commonization / optimization / blocker assessment | `docs/migration/BACKEND_OPTIMIZATION.md` |
 | route target/disposition | `docs/migration/ROUTE_MATRIX.md` |
 | Server Action disposition | `docs/migration/server-actions/README.md` |
@@ -44,7 +52,8 @@
 | CURRENT Queue / Cron / background jobs baseline | `docs/migration/background-jobs/README.md` |
 | CURRENT public/static/visibility behavior | `docs/operations/static-delivery.md` + current code/tests |
 | CURRENT UI behavior evidence | `docs/operations/ui-acceptance.md` + current code/tests |
-| DB schema | `src/lib/db/schema.ts` + `migrations/` |
+| CURRENT DB schema (until MIG-0308) | `src/lib/db/schema.ts` + `migrations/` |
+| TARGET DB schema (after MIG-0308) | `packages/db/src/schema/index.ts` + immutable `migrations/`; old schema bridge retained |
 | CURRENT Worker config implementation evidence | `wrangler.toml`, `workers/*/wrangler.toml`, deploy scripts, actual Cloudflare settings |
 | deploy procedure | `DEPLOY.md` |
 
@@ -58,7 +67,7 @@
 ## Rules
 
 - Migration docs describe TARGET / transition / progress. CURRENT behavior remains code/test/config driven until cutover.
-- `CURRENT_ROUTES.md` owns the 92 `app/**/page.tsx` classification baseline（74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 3 DEV_ONLY / 6 SYSTEM_SURFACE）。
+- `CURRENT_ROUTES.md` owns the 90 `app/**/page.tsx` classification baseline（74 VISUAL_SCREEN / 9 COMPAT_REDIRECT / 1 DEV_ONLY / 6 SYSTEM_SURFACE）。
 - `FEATURE_CATALOG.md` is a human-readable derived view of all `UX-*` / `FN-*`; it never overrides the canonical ledgers.
 - `FRONTEND_FEATURES.md` + `frontend/*.md` own `UX-*` frontend observable behavior.
 - `screen-mapping/README.md` owns the resolved mapping from CURRENT visual/compat/dev/system surfaces + cross-route shells to UX/FN, permission/state/query/responsive-a11y contracts.
