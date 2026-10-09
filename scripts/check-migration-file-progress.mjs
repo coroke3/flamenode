@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const ALLOWED_KINDS = new Set(["PAGE","ROUTE_HANDLER","SERVER_ACTION","ACTION_HELPER","DB_SCHEMA","WORKER_ENTRY","TARGET_SKELETON","CONFIG","TEST"]);
+const ALLOWED_KINDS = new Set(["PAGE","ROUTE_HANDLER","SERVER_ACTION","ACTION_HELPER","DB_SCHEMA","WORKER_ENTRY","TARGET_SKELETON","CONFIG","HELPER","TEST"]);
 const ALLOWED_STATES = new Set(["NOT_STARTED","IN_PROGRESS","BRIDGED","PARITY_VERIFIED","CUTOVER","RETIRED","RETAINED","BLOCKED"]);
 const FILE_ROW_RE = /^\|\s*\x60([^\x60]+)\x60\s*\|/;
 
@@ -89,12 +89,13 @@ export function collectFiles(root=ROOT){
  }
  return files;
 }
-export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverActions,status,filePaths,changedPaths=[]}){
+export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverActions,status,filePaths,changedPaths=[],taskCardsText=""}){
  const errors=[];
  const {rows,errors:parseErrors}=parseFileRows(matrix);errors.push(...parseErrors);
  const pages=parsePageLedger(currentRoutes), RH=parseRouteHandlerLedger(routeHandlers),SA=parseActionLedger(serverActions),migs=parseMigs(status);
  const actual=new Set(filePaths);
  const mandatory=new Set(filePaths.filter(isTrackedSourceCandidate));
+ for(const referenced of [...taskCardsText.matchAll(/(?:src\/lib|app\/|workers\/|apps\/|packages\/)[a-zA-Z0-9_./\-\[\]]+\.(?:ts|tsx|mjs|astro)/g)].map(x=>x[0]))if(actual.has(referenced))mandatory.add(referenced);
  for(const file of mandatory)if(!rows.has(file))errors.push("missing file progress row for source: "+file);
  for(const [file,row] of rows){
   if(!ALLOWED_KINDS.has(row.kind))errors.push(file+" invalid file kind "+row.kind);
@@ -150,6 +151,7 @@ if(invoked){
   status:read("docs/migration/STATUS.md"),
   filePaths:collectFiles(),
   changedPaths,
+  taskCardsText: ["TASK_CARDS_2_3.md","TASK_CARDS_4_5.md","TASK_CARDS_6_7.md","TASK_CARDS_8_9.md"].map(p=>read("docs/migration/"+p)).join("\\n"),
  };
  const errors=validateFileProgress(input);
  for(const e of errors)console.error("[migration-file] "+e);
