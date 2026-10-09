@@ -1,6 +1,6 @@
 # Claude migration loop wake
 
-Invoke `/flamenode-migration` for **at most one** migration task per wake. Claude Code's host-provided `/loop` may invoke this instruction repeatedly while that host session supports it; this file itself is not a scheduler.
+Follow `docs/migration/AGENT_PROTOCOL.md`. Invoke `/flamenode-migration` for **at most one** migration task per wake. Claude Code's host-provided `/loop` may invoke this instruction repeatedly while that host session supports it; this file itself is not a scheduler.
 
 
 ## Loop実行時の統一契約（全エージェント共通）
