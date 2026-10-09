@@ -9,6 +9,12 @@
 ユーザーが回答するまで、推奨デフォルトを**実装の前提にしてはいけない**（仕様書上の仮置きとしてのみ使う）。
 回答後は `State` を `DECIDED` にし、決定内容を該当する仕様書へ反映してから削除せず履歴として残す。
 
+## 実行時の判定
+
+- `OPEN` / `PROVISIONAL` / `BLOCKED_ON_USER` は実装上の承認ではない。対象MIGを `READY` / `IN_PROGRESS` / `REVIEW` / `DONE` にする前に `DECIDED` が必要（純粋処理の限定scopeは別task・明示exceptionに分離）。
+- `scripts/check-migration-execution.mjs` と `check:project-docs` によって最低限のtask/Decision整合を検証する。決定のowner、日時、採用方針、影響ファイル、実測/PoCの根拠をこの文書に残す。
+- Decisionが必要なMIGを変更するときはvalidatorの `REQUIRED_DECISIONS` も更新する。OPENのままD-01等を仮採用して進行しない。
+
 ## 一覧
 
 | ID | 判断事項 | State | 判断が必要になるタスク |
