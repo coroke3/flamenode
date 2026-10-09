@@ -76,3 +76,41 @@ test("MIG marked DONE cannot leave owned files NOT_STARTED",()=>{
  const errors=validateFileProgress({...base,status:completed});
  assert.match(errors.join("\\n"),/owner MIG is DONE but file still NOT_STARTED/);
 });
+
+test("video-status SA must be owned by MIG-0304 (not user admin)",()=>{
+ const file="src/lib/actions/admin.ts";
+ const line="| `"+file+"` | SERVER_ACTION | SA-001 | MIG-0303 | domain policy | NOT_STARTED | — |";
+ const altered=matrix.replace("## Future files",line+"\n## Future files");
+ const sa=serverActions+"\n| SA-001 | `src/lib/actions/admin.ts#approveAdminVideoPublic` | video status |";
+ const errs=validateFileProgress({...base,matrix:altered,serverActions:sa,filePaths:[...filePaths,file]});
+ assert.match(errs.join("\n"),/incorrect first owner.*MIG-0304/);
+});
+test("event template SA must be owned by MIG-0303, not MIG-0305",()=>{
+ const file="src/lib/actions/event-template-admin.ts";
+ const line="| `"+file+"` | SERVER_ACTION | SA-035 | MIG-0501 | domain policy | NOT_STARTED | — |";
+ const altered=matrix.replace("## Future files",line+"\n## Future files");
+ const sa=serverActions+"\n| SA-035 | `src/lib/actions/event-template-admin.ts#saveEventAsTemplate` | save |";
+ const errs=validateFileProgress({...base,matrix:altered,serverActions:sa,filePaths:[...filePaths,file]});
+ assert.match(errs.join("\n"),/incorrect first owner.*MIG-0303/);
+});
+test("technical Next query renderer must not require duplicate Astro page",()=>{
+ const file="app/(public)/event/~query/page.tsx";
+ const line="| `"+file+"` | PAGE | /event/~query (SYSTEM_SURFACE) | MIG-0501 | +apps/site/src/pages/event/~query.astro | NOT_STARTED | — |";
+ const altered=matrix.replace("## Future files",line+"\n## Future files");
+ const routes=currentRoutes+"\n| `/event/~query` | `"+file+"` | SYSTEM_SURFACE | public |";
+ const errs=validateFileProgress({...base,matrix:altered,currentRoutes:routes,filePaths:[...filePaths,file]});
+ assert.match(errs.join("\n"),/technical Next renderer must migrate logical URL/);
+});
+
+test("technical renderer must share its canonical logical-page target",()=>{
+ const twin="app/(public)/user/~query/page.tsx";
+ const logical="app/(public)/user/page.tsx";
+ const twoRows=[
+   "| `"+logical+"` | PAGE | /user (VISUAL_SCREEN) | MIG-0501 | +apps/site/src/pages/user.astro | NOT_STARTED | — |",
+   "| `"+twin+"` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0501 | +apps/site/src/pages/user/index.astro (logical parity) | NOT_STARTED | — |",
+ ].join("\n");
+ const extended=matrix.replace("## Future files",twoRows+"\n## Future files");
+ const urls=currentRoutes+"\n| `/user` | `"+logical+"` | VISUAL_SCREEN | public |\n| `/user/~query` | `"+twin+"` | SYSTEM_SURFACE | public |";
+ const errors=validateFileProgress({...base,matrix:extended,currentRoutes:urls,filePaths:[...filePaths,logical,twin]});
+ assert.match(errors.join("\n"),/target must match logical user-facing route target/);
+});

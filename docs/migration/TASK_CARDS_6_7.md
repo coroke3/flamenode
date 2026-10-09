@@ -6,6 +6,8 @@
 
 ## Common acceptance for each RH-*/SA-* endpoint
 
+**現コードの注意:** `apps/api/src/index.ts` の `GET /health` はPoC skeleton。既存NextのRH-018は `GET /api/health`。Cloudflare入口のpath routingを決める前に、HTTP method/URL/DTO/status/auth/cacheが一致すると判断しない。実際の非本番Workerとブラウザから試験する。
+
 `FILE_MIGRATION_MATRIX.md`で各旧Route Handler/Server Actionと新Hono/SPAのファイル接続を追跡する。33 RHメソッドと110 SAは`route-handlers`/`server-actions` ledgerのIDに紐付ける。2 SPAのバンドルとroot path・assetは別行で管理し、未作成の`apps/ops`を完成扱いにしない。
 
 Before writing code, capture one row for every impacted RH/SA (actual current source method, URL+method/Action signature, viewer/owner/admin permission, input validation, success+error JSON/status, cache/headers/CORS, rate limit, D1 reads/writes, audit, queue wake, retry and tests). After migration, test the **same row with old and new handlers**. Never treat an endpoint as complete just because its handler file exists. For all 33 RH methods, keep RH-010/011 Auth.js on legacy Next until Phase 8 and route only completed Hono paths, not catch-all `/api/*`. Permissions and owner count are always enforced server-side.

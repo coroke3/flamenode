@@ -13,6 +13,7 @@
 - Route contracts use URL from `CURRENT_ROUTES.md`; RH method IDs from `route-handlers/README.md`; SA IDs from `server-actions/README.md`. These ledgers remain authoritative for permissions, UX/FN, tests, side effects.
 - Suggested target paths are **candidates**, not approvals or assertions they already exist. For each file, update target with the actual source path/exports after implementing.
 - If a single CURRENT file contributes to many targets, keep **one current-source row** and list all relevant target files/IDs explicitly in the `Target/bridge` cell. Do not claim file DONE while an owner route/SA contract remains unmigrated.
+- **First owner MIG is a single extraction stage, not the sole downstream owner.** `admin.ts` is MIG-0304 domain, MIG-0603 API and MIG-0705 Ops consumer; `event-template-admin.ts` is MIG-0303 domain and MIG-0305/0604 consumer. Later MIGs track new target files and contract parity separately. Domain stage completion never implies Hono or traffic cutover.
 - `RETIRED` requires all URL/method/SA compatibility owners migrated, tests and observability. A legacy path may continue as bridge for a long time.
 - For missing/new files, register a new row in the same PR, preserving all others, and update dependency/consumer paths (see FILE_PROGRESS_PROTOCOL.md).
 - Source inventory includes all CURRENT `app/**/page.tsx`, all `app/api/**/route.ts`, all `src/lib/actions/**/*.ts` (including helpers), D1 schema source, Worker entries, core target package/app skeleton, and selected root config, plus all real helper/test source files explicitly referenced by TASK_CARDS. **This is the explicit migration-boundary inventory, not all 2,335 repository files**; new code touched outside it is added when it enters an MIG scope.
@@ -96,11 +97,11 @@
 | `app/(public)/event/[id]/page.tsx` | PAGE | /event/[id] (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/index.astro | NOT_STARTED | — |
 | `app/(public)/event/[id]/release/page.tsx` | PAGE | /event/[id]/release (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/release.astro | NOT_STARTED | — |
 | `app/(public)/event/[id]/slots/page.tsx` | PAGE | /event/[id]/slots (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/slots.astro | NOT_STARTED | — |
-| `app/(public)/event/~query/page.tsx` | PAGE | /event/~query (SYSTEM_SURFACE) | MIG-0502 | +apps/site/src/pages/event/~query.astro | NOT_STARTED | — |
+| `app/(public)/event/~query/page.tsx` | PAGE | /event/~query (SYSTEM_SURFACE) | MIG-0502 | +apps/site/src/pages/event.astro (logical /event query parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/event/page.tsx` | PAGE | /event (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event.astro | NOT_STARTED | — |
 | `app/(public)/groups/[slug]/page.tsx` | PAGE | /groups/[slug] (COMPAT_REDIRECT) | MIG-0503 | +apps/site/src/pages/groups/[slug].astro | NOT_STARTED | — |
 | `app/(public)/groups/page.tsx` | PAGE | /groups (COMPAT_REDIRECT) | MIG-0503 | +apps/site/src/pages/groups.astro | NOT_STARTED | — |
-| `app/(public)/list/~query/page.tsx` | PAGE | /list/~query (SYSTEM_SURFACE) | MIG-0505 | +apps/site/src/pages/list/~query.astro | NOT_STARTED | — |
+| `app/(public)/list/~query/page.tsx` | PAGE | /list/~query (SYSTEM_SURFACE) | MIG-0505 | +apps/site/src/pages/list.astro (logical /list query parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/list/page.tsx` | PAGE | /list (VISUAL_SCREEN) | MIG-0505 | +apps/site/src/pages/list.astro | NOT_STARTED | — |
 | `app/(public)/maintenance/page.tsx` | PAGE | /maintenance (SYSTEM_SURFACE) | MIG-0901 | RETAIN/REVIEW in MIG-0901 | NOT_STARTED | — |
 | `app/(public)/page.tsx` | PAGE | / (VISUAL_SCREEN) | MIG-0506 | +apps/site/src/pages/index.astro | NOT_STARTED | — |
@@ -108,9 +109,9 @@
 | `app/(public)/rules/page.tsx` | PAGE | /rules (VISUAL_SCREEN) | MIG-0501 | +apps/site/src/pages/rules.astro | NOT_STARTED | — |
 | `app/(public)/trending/page.tsx` | PAGE | /trending (VISUAL_SCREEN) | MIG-0505 | +apps/site/src/pages/trending.astro | NOT_STARTED | — |
 | `app/(public)/user/[id]/page.tsx` | PAGE | /user/[id] (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro | NOT_STARTED | — |
-| `app/(public)/user/[id]/paged/page.tsx` | PAGE | /user/[id]/paged (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/[id]/paged.astro | NOT_STARTED | — |
+| `app/(public)/user/[id]/paged/page.tsx` | PAGE | /user/[id]/paged (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro (logical profile pagination parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/user/[id]/portfolio/page.tsx` | PAGE | /user/[id]/portfolio (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/portfolio.astro | NOT_STARTED | — |
-| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/~query.astro | NOT_STARTED | — |
+| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user.astro (logical /user query parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/user/page.tsx` | PAGE | /user (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user.astro | NOT_STARTED | — |
 | `app/api/account/summary/route.ts` | ROUTE_HANDLER | RH-001:GET | MIG-0605 | +apps/api/src/routes/account/summary.ts (candidate, verify router) | NOT_STARTED | — |
 | `app/api/admin/import/legacy/route.ts` | ROUTE_HANDLER | RH-002:POST | MIG-0605 | +apps/api/src/routes/admin/import/legacy.ts (candidate, verify router) | NOT_STARTED | — |
@@ -169,7 +170,7 @@
 | `packages/ui/src/components/Button.tsx` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/ui/src/index.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/ui/tsconfig.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
-| `src/lib/actions/admin.ts` | SERVER_ACTION | SA-001,SA-002,SA-003 | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
+| `src/lib/actions/admin.ts` | SERVER_ACTION | SA-001,SA-002,SA-003 | MIG-0304 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/announcement.ts` | SERVER_ACTION | SA-004,SA-005,SA-006 | MIG-0303 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/api-endpoints.ts` | SERVER_ACTION | SA-007,SA-008 | MIG-0303 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/audit-admin.ts` | SERVER_ACTION | SA-009,SA-010,SA-011 | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
@@ -180,7 +181,7 @@
 | `src/lib/actions/event-admin.ts` | SERVER_ACTION | SA-022,SA-023,SA-024 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/event-group-admin.ts` | SERVER_ACTION | SA-025,SA-026,SA-027,SA-028,SA-029,SA-030 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/event-staff-admin.ts` | SERVER_ACTION | SA-031,SA-032,SA-033,SA-034 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
-| `src/lib/actions/event-template-admin.ts` | SERVER_ACTION | SA-035,SA-036,SA-037 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
+| `src/lib/actions/event-template-admin.ts` | SERVER_ACTION | SA-035,SA-036,SA-037 | MIG-0303 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/event-youtube-playlist.ts` | SERVER_ACTION | SA-038,SA-039 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/manage-video.ts` | SERVER_ACTION | SA-040,SA-041,SA-042 | MIG-0304 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/moderation-admin.ts` | SERVER_ACTION | SA-043,SA-044 | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
