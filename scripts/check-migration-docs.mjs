@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { validateMigrationExecution } from "./check-migration-execution.mjs";
+import { validateTaskCards, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -1113,6 +1114,15 @@ if (errors.length === 0) {
     routingText: read("docs/migration/ROUTING_AND_DEPLOY_PLAN.md"),
     viteText: read("apps/app/vite.config.ts"),
     apiSpecText: read("docs/migration/PHASE_6_SPEC.md"),
+  }));
+
+  errors.push(...validateTaskCards({
+    status,
+    fileContents: Object.fromEntries(TASK_CARD_FILES.map((p) => [p, read(p)])),
+    runbook: read("docs/migration/IMPLEMENTATION_RUNBOOK.md"),
+    protocol,
+    decisions: read("docs/migration/OPEN_DECISIONS.md"),
+    smokeDocs: read("docs/migration/SMALL_MODEL_SMOKE_TEST.md"),
   }));
 
   // Git discipline remains non-negotiable.
