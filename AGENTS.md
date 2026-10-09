@@ -10,7 +10,7 @@
 1. Read this file.
 2. Read the matching row in [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md).
 3. Read target code and related tests.
-4. For platform/UI migration, read [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md), filter [`docs/migration/FILE_MIGRATION_MATRIX.md`](docs/migration/FILE_MIGRATION_MATRIX.md) to the MIG and follow [`docs/migration/FILE_PROGRESS_PROTOCOL.md`](docs/migration/FILE_PROGRESS_PROTOCOL.md), then [`docs/migration/IMPLEMENTATION_RUNBOOK.md`](docs/migration/IMPLEMENTATION_RUNBOOK.md) and **one** matching `TASK_CARDS_*.md` MIG card. Follow PR/Decision Gates.
+4. For platform/UI migration, start with [`docs/migration/MIGRATION_START_HERE.md`](docs/migration/MIGRATION_START_HERE.md), apply the relevant [`AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md) rules, filter [`STATUS.md`](docs/migration/STATUS.md) and [`FILE_MIGRATION_MATRIX.md`](docs/migration/FILE_MIGRATION_MATRIX.md) to one MIG/owner, follow [`FILE_PROGRESS_PROTOCOL.md`](docs/migration/FILE_PROGRESS_PROTOCOL.md) and [`IMPLEMENTATION_RUNBOOK.md`](docs/migration/IMPLEMENTATION_RUNBOOK.md) relevant steps and **one** matching `TASK_CARDS_*.md` MIG card. Preserve PR/Decision Gates; do not load entire ledgers/docs every iteration.
 5. Before coding, open CURRENT source/tests referenced by that card. `+path` denotes a planned file, not an existing file.
 
 Do not bulk-load the repository, Historical/archive material, completed migration phases, or old `.claude/flamenode/source/` documents.
