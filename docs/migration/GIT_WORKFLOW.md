@@ -110,6 +110,8 @@ Do **not** create a second bookkeeping PR only to move `REVIEW → DONE` after a
 
 Before merge, the task branch should already contain the final state that main should inherit:
 
+- `FILE_MIGRATION_MATRIX.md` contains every changed CURRENT/NEW source path, target provider/consumer linkage, test+PR+SHA evidence, file state; validated by `node scripts/check-migration-file-progress.mjs`
+
 - current task `DONE`
 - evidence/validation recorded
 - affected inventory/matrices updated
@@ -149,6 +151,8 @@ Scope:
 Non-scope:
 Affected function IDs:
 Affected routes/APIs:
+FILE_MIGRATION_MATRIX.md rows before/after:
+Actual source -> target exports -> consumers:
 Changed:
 Preserved contracts:
 Validation:
