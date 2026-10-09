@@ -1134,6 +1134,7 @@ if (errors.length === 0) {
     serverActions: read("docs/migration/server-actions/README.md"),
     status,
     filePaths: collectMigrationFiles(),
+    taskCardsText: TASK_CARD_FILES.map(p=>read(p)).join("\n"),
   }));
 
   // Git discipline remains non-negotiable.
