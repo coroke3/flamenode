@@ -20,9 +20,17 @@
 3. **Thin Visibility Gateway**:
    - 可視性フェンス（Fail-Closed）はエッジゲートウェイ（薄い Worker）で検証し、非公開・限定公開データのキャッシュ漏洩を防止（`README.md` §8）。
 4. **前提条件（D-08 参照）**:
-   - Phase 4/5 の公開画面は、ユーザーから提供される新 HTML モック（Phase 2: `UI_REFERENCE.md`）が正本。HTML モック受領までは BLOCKED。
+   - Phase 4/5 の**visual/UX本実装**はユーザー提供HTMLモック（`UI_REFERENCE.md`）が正本であり、受領まではBLOCKED。**MIG-0401/0404/0405/0406の非visual性能PoCはモック非依存で先行可能**。簡易fixture画面は完成UIとして扱わず、実際の公開画面切替とPhase4 Gateは承認まで停止。
 
 ---
+
+## 1102性能PoCとUI承認を分けた実装順
+
+**先行性能トラック:** MIG-0105 DONE → **MIG-0401 READY** → MIG-0404 → MIG-0405 → MIG-0406。既存スナップショットと公開/非公開fixture、簡易HTMLを用いる。実ページの可視性・URLパリティを完了したとは扱わない。
+
+**Visualトラック:** MIG-0200..0206（D-08 HTML待ち）→ MIG-0402 → MIG-0403（0404にも依存）。**MIG-0407はMIG-0403とMIG-0406の両方**に依存する。これらの依存関係の正本は[STATUS.md](STATUS.md)のみ。
+
+性能の所有・測定・異常系・本番承認境界は[PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md)、経路別のsource/targetは[PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md)に記録。SSR削減をHono/ゲートウェイ/Queueへの単なるCPU移動で置き換えない。
 
 # 2. Phase 4: Public PoC タスク別仕様書
 
@@ -43,7 +51,7 @@
   - `+apps/site/src/pages/user/[id].astro`（クリエイター代表）
   - `+apps/site/src/pages/event/[id].astro`（イベント代表）
 
-### MIG-0404: route-map generator
+### MIG-0404: route-map generator（**0401の直後、0403を待たない**）
 - **目的**: 静的ビルド対象となる全公開パス（一覧、イベント、ユーザー、動画）を生成する `getStaticPaths` ヘルパーを構築。
 
 ### MIG-0405: visibility gateway
@@ -55,7 +63,7 @@
 - **R2 HTML優先**: キャッシュミスをHTTP request中のrenderへフォールバックしない。非同期で事前生成したHTMLをR2から返却し、視認性ゲートを常にfail-closed、ETag/cache purge/OGP/canonical/alias/indexingを検証。R2が読めないときは安全な503等＋再生成enqueue（非公開漏洩禁止）。
 - **限定SSR例外**: 事前データだけでは成立しないページごとにリスク理由・CPU/memory・負荷試験・無1102・影響ルート・戻し方をPRで承認したときのみ採用。Free 10msは非常に厳しいためSSR採用可能とは事前断言しない。
 
-### MIG-0407: Phase 4 Gate
+### MIG-0407: Phase 4 Gate（**0403 + 0406 両方の証跡が必要**）
 - **完了条件**: 代表3画面の表示・ハイドレーション・ビルド時間・可視性フェンス・SSG容量preflightとR2事前HTML異常系が合格。SSR例外を採用した場合はFreeのCPU/hard-limit下で検証通過した証拠が別途必要。
 
 ---
@@ -82,6 +90,8 @@
 | `/trending` | VISUAL_SCREEN | `apps/site/src/pages/trending.astro` | 注目・ランキング |
 | `/` | VISUAL_SCREEN | `apps/site/src/pages/index.astro` | トップ棚・急上昇・お知らせ |
 | `/[id]` | VISUAL_SCREEN | `apps/site/src/pages/[id].astro` | 動画再生・詳細・チャプター（最後） |
+
+**本番移行順の性能優先案:** 最初の安全確認をMIG-0501 `/about`/`/rules`、次にMIG-0504 `/user/*`、MIG-0505 `/list`/検索、次にMIG-0502 `/event/*`とMIG-0506 `/`、最後にMIG-0507 `/:id` とする。MIG-0503互換redirectは対象URLの切替と同時に扱う。**タスク依存・ページ権限・Phase Gateを飛ばす順序変更ではない**。
 
 ### タスク分割（MIG-0501〜0508）
 
