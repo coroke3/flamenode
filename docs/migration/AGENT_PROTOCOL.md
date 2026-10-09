@@ -47,7 +47,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 3. `docs/migration/STATUS.md`
 3a. `docs/migration/OPEN_DECISIONS.md`（対象taskに紐づくDecision状態を必ず確認）
 3b. **`docs/migration/IMPLEMENTATION_RUNBOOK.md`**（Luna/Haiku含む全agent必読）
-3c. **`docs/migration/TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` の該当MIG 1件だけ**。全55件を一度に読み込まない
+3c. **`docs/migration/TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` の該当MIG 1件だけ**。大型MIGは `docs/migration/TASK_MICRO_UNITS.md` の該当micro-unitだけ読む。全55件を一度に読み込まない
 4. `docs/migration/GIT_WORKFLOW.md`
 5. `docs/migration/README.md`
 6. `docs/migration/FEATURE_CATALOG.md` — **対象IDの行だけ**確認（432 UX / 136 FN を一度に読む必要はない）
@@ -302,13 +302,13 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 
 `STATUS.md`が唯一のtask進捗正本。
 
-終了時は必ず:
+終了時は単一wakeの作業結果を必ずPRへ保存する。
 
-- `DONE`
-- `REVIEW`
-- `BLOCKED`
+- 1wakeで全micro-unitが完了した場合: `REVIEW`（別レビュアー/CI待ち）、合格後`DONE`。
+- 未解決障害がある場合: `BLOCKED`（再開条件とowner記載）。
+- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのbranch `STATUS.md`に `IN_PROGRESS` を維持してよい。ただし有効owner、実行済みunit、テスト、次unit、PR link、HEADを必ず記録する（`TASK_MICRO_UNITS.md`）。mainのREADYを勝手に変更しない。
 
-のいずれかへ遷移し、`IN_PROGRESS`で放置しない。
+何のチェックポイントもない`IN_PROGRESS`の放置は禁止。
 
 必要に応じて同じPRで更新:
 
@@ -465,10 +465,10 @@ Next:
 
 # Resumable loop / PR lifecycle contract（2026-10-09追補）
 
-1. 各wakeにおいて最新mainとopen migration PRを読み込む。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch STATUSを優先し、新しいtask/PRを生成しない。
+1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、branch STATUSのcheckpointから再開する。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch STATUSを優先し、新しいtask/PRを生成しない。
 2. `OPEN_DECISIONS.md`の`Needed by`相当のMIG依存を解釈し、該当タスクについて`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`を「許可済み」と解釈しない。決定の証拠（decision ID / owner / date）をPRへ記録する。
 3. task claimはGitHubの単一atomic transactionではない。draft PRを作成する前後で同一MIGのopen PRを照合し、重複したら作業せずowner調整へ止める。mainの`READY`のみで未所有とみなさない。
-4. 実装は一taskずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。
+4. 実装は一taskずつ、大型MIGは1wakeにつき1micro-unitずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。
 5. `REVIEW`は必ず独立したレビュアーによるレビューと、対象branchの必須CI成功を必要とする。`DONE`へ進む前にレビュー時のhead SHA、レビュー結論、run URL、rollback証拠をPRに記録。新push後はレビュー/CIを再評価する。
 6. 人間承認が必要なGate/認証/権限/visibility/DB schema/本番切替を、Loop維持のために自動承認しない。安全に進められる無関係taskがある場合も、明示的なdependencyとwriterの独立が条件。
 7. merge後に最新mainのstatus/task/lock解消を再読込するまでは次taskへ移らない。hostが反復機構を持たなければ一回で終了する。
