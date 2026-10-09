@@ -9,15 +9,15 @@
 
 # 1. Phase 8: Auth タスク別詳細仕様書
 
-### 基本方針（D-07 参照）
+### 基本方針（D-07=A 決定済み）
 `README.md` §13: 「自前 auth protocol を新規実装しない」。
-Next.js 固有のラッパーから Web Standards 準拠の Auth.js（`@auth/core` 等）と既存 D1 database session アダプターを継続利用し、既存の `user`, `account`, `session` テーブルおよび Cookie 契約を 100% 維持する。移行時に全ユーザーが強制ログアウトされる事態を防止。
+Next.js 固有のラッパーから Web Standards 準拠の Auth.js（`@auth/core` 等）と既存 D1 database session アダプターを継続利用し、既存の `user`, `account`, `session` テーブルおよび Cookie 契約を 100% 維持する。移行時に全ユーザーが強制ログアウトされる事態を防止。D-07は設計決定済みだが、`@auth/core`/Adapter/Session/Cookie互換が非本番PoCで証明されるまではPhase 8本番切替を許可しない。
 
 ### MIG-0801: Auth baseline fixtures/tests
 - **目的**: 現行の Discord ログイン、セッション復元、Active X 解決、ロール判定の挙動を固定する回帰テストフィクスチャを作成。
 
 ### MIG-0802: Web Standard/Auth integration PoC
-- **目的**: Hono 上で `@auth/core` を稼働させ、既存の D1 `session` テーブル・Cookie トークンを正しく検証・読み書きできることを検証。
+- **目的**: Hono 上で `@auth/core` を稼働させ、既存の D1 `session` テーブル・Cookie 名/属性/有効期限/署名・トークンを正しく検証・読み書きできることを検証。NextとHonoの両側から同一セッションを参照・logout/CSRF/callbackできることを試験。
 
 ### MIG-0803: Discord/account-linking parity
 - **目的**: `linkDiscordAccountAtomically`（`auth/README.md`）の不可分性・CAS 更新・重複拒否・べき等性契約を 100% 保持。
@@ -26,7 +26,7 @@ Next.js 固有のラッパーから Web Standards 準拠の Auth.js（`@auth/cor
 - **目的**: 認証リクエスト時の D1 クエリ数を最小化し、CPU 時間（auth-heavy p95 < 9ms）、CSRF 防止、安全なリダイレクト（`/auth/complete`）を検証。
 
 ### MIG-0805: production cutover proposal
-- **目的**: 本番の Discord Client ID / Secret、コールバック URL（`https://flamenode.net/api/auth/callback/discord`）を新 Worker へ移行する手順書を作成（**要ユーザー明示承認**）。
+- **目的**: 本番の Discord Client ID / Secretを保護し、**同一コールバックURL**（`https://flamenode.net/api/auth/callback/discord`）を維持したまま新 Workerへ移行する手順書を作成（**要ユーザー明示承認**）。
 
 ### MIG-0806: Phase 8 Gate
 - **完了条件**: 新認証システムでの既存セッション継続、ログイン・ログアウト・アカウント連携の合格判定。
