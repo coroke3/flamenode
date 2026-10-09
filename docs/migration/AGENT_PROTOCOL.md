@@ -1,7 +1,7 @@
 # FlameNode Migration Agent Protocol
 
 > Status: Active / mandatory execution contract
-> Last verified: 2026-10-07
+> Last verified: 2026-10-09
 > Applies to: Claude Code / OpenAI Codex / Google Antigravity / generic coding agents
 
 ツール固有command/skill/workflowは薄いadapterであり、この文書が共通実行契約。
