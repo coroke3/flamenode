@@ -111,3 +111,8 @@ test("duplicated MIG rows must be rejected instead of shadowed", () => {
   const changed = status.replace("| MIG-0302 | read | BLOCKED | MIG-0301 |", "| MIG-0302 | read | BLOCKED | MIG-0301 |\n| MIG-0302 | duplicate | BLOCKED | MIG-0301 |");
   assert.match(run({statusText:changed}).join("\n"), /duplicate task row/);
 });
+
+test("SKIPPED task cannot bypass dependent gate without independent approval", () => {
+  const changed = status.replace("| MIG-0301 | core PoC | READY | MIG-0108 |", "| MIG-0301 | core PoC | SKIPPED | MIG-0108 |");
+  assert.match(run({statusText:changed}).join("\n"),/SKIP_APPROVAL/);
+});
