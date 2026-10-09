@@ -2,6 +2,14 @@
 
 > **Read this before /flamenode-migration, /loop, Codex, Claude or Antigravity.** Rules in root [AGENTS.md](../../AGENTS.md) and [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) still apply. This page is an index, **not** a second execution policy or progress ledger.
 
+## Quick context packet (do not paste whole Markdown set)
+
+```bash
+node scripts/print-migration-task-context.mjs MIG-0401
+```
+
+The output contains **one task, its dependency states, matching decisions, one work card and assigned source-file paths**. It does not execute a task, omit permissions, or replace reading current code/test. For large MIGs select one unit from [TASK_MICRO_UNITS.md](TASK_MICRO_UNITS.md). CI tests the packet size and the MIG-0401 READY state.
+
 ## 1. Choose exactly one task, not one whole phase
 
 Read the top "Overall" and **your MIG row + dependency rows** in [STATUS.md](STATUS.md), the relevant D-xx row in [OPEN_DECISIONS.md](OPEN_DECISIONS.md) and the **one** `### MIG-XXXX` section in the matching TASK_CARDS document. If owner PR exists, resume that branch; do not fork a second writer. Use [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md) "最初の90秒" and "一件を進める厳密な手順" on a fresh wake.
