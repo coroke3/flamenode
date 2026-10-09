@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { validateMigrationExecution } from "./check-migration-execution.mjs";
 import { validateTaskCards, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
 import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
+import { validateLinks, listMarkdownFiles } from "./check-migration-links.mjs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -1136,6 +1137,8 @@ if (errors.length === 0) {
     filePaths: collectMigrationFiles(),
     taskCardsText: TASK_CARD_FILES.map(p=>read(p)).join("\n"),
   }));
+
+  errors.push(...validateLinks({root,documents:listMarkdownFiles(root)}));
 
   // Git discipline remains non-negotiable.
   for (const phrase of [
