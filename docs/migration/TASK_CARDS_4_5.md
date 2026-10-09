@@ -95,7 +95,7 @@
 
 - 読む: CURRENT3ルート、public DTO/cursor、`frontend/PUBLIC.md`の検索/ソート/filter/empty UX。
 - 変更: `+apps/site/src/pages/{list,recommend,trending}.astro`。first paint静的、client query/filter Isands、ランキング/R2 artifactをbuild snapshotで反映。
-- 試験: sort/filter/query/cache canonical, pagination, empty/broken thumbnails, dynamic refresh lag, public-only DTO。
+- 試験: sort/filter/query/cache canonical, pagination, empty/broken thumbnails, dynamic refresh lag, public-only DTO。`/list/~query`、`/user/~query`、`/user/[id]/paged`は旧Nextの技術的renderer。新Astroに同名ページを複製する前提とせず、logical URLへのquery/deep-link/back-forward parity試験で代替してから旧技術URLを退役する。
 - DONE: URL/queryと検索戻り操作がCURRENT同等、CPU budgetではrequest時D1大量集計なし。
 
 ### MIG-0506 — root/top /
