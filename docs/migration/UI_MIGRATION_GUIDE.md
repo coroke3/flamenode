@@ -11,7 +11,7 @@
 
 移行先では、以下の3つの異なるランタイム環境で UI を稼働させる必要があります：
 1. **`apps/site`**: Astro による SSG + React Islands
-2. **`apps/app`**: Vite + React Router による SPA
+2. **`apps/app` + `+apps/ops`**: Vite + React Router によるPersonal / Ops独立SPA
 3. **現行 Next.js (`src/`)**: 段階移行中の並行稼働（ロールバック対象）
 
 これらを両立しつつ、`packages/ui` を「フレームワーク非依存の純粋 React コンポーネント集」として安全に抽出するための統一設計パターンを定めます。
@@ -24,7 +24,7 @@
 
 ### 2.1 Link コンポーネント (`Link`)
 - **デフォルト挙動**: 通常の `<a href="..." {...props}>` として動作（Astro SSG や静的プレビューでそのまま機能）。
-- **SPA 向け注入**: `apps/app` では初期化時に `react-router-dom` の `Link` を `setLinkComponent` に注入。
+- **SPA 向け注入**: 各SPAでは初期化時に `react-router-dom` の `Link` を `setLinkComponent` に注入。
   ```tsx
   import { setLinkComponent } from "@flamenode/ui";
   import { Link as RouterLink } from "react-router-dom";
@@ -78,8 +78,9 @@
 | アプリケーション | 担当領域 | 静的アセットパス | ルーティングルール |
 | --- | --- | --- | --- |
 | `flamenode-site` (Astro) | 公開閲覧画面 (SSG) | `/_astro/*` | `/`, `/:id`, `/event/*`, `/groups/*`, `/user/*`, `/list`, `/recommend`, `/trending` 等 |
-| `flamenode-app` (Vite) | 管理・マイページ (SPA) | `/_app_assets/*` | `/dashboard/*`, `/entry/*`, `/manage/*`, `/admin/*`, `/onboarding` |
+| `flamenode-personal` (`apps/app`, Vite) | マイページ・投稿 (SPA) | `/_personal_assets/*` | `/dashboard`, `/dashboard/*`, `/entry`, `/entry/*`, `/onboarding` |
+| `flamenode-ops` (`+apps/ops`, Vite) | イベント運営・管理 (SPA) | `/_ops_assets/*` | `/manage`, `/manage/*`, `/admin`, `/admin/*` |
 | `flamenode-api` (Hono) | バックエンド API | (静的アセットなし) | `/api/<移行済みの明示パス>` |
 | `flamenode-web` (現行Next) | 移行中暫定フォールバック | `/_next/*`, `/static/*` | `/api/auth/*` (Phase 8まで), 未移行API/画面 |
 
-- **衝突防止措置**: `apps/app/vite.config.ts` で `base: "/"`, `build.assetsDir: "_app_assets"` とし、同じSPAを `/dashboard`, `/entry`, `/manage`, `/admin`, `/onboarding` で配信する。アセットルーティングとrootパスでのSPA fallbackは統合テスト必須。プレフィックス分離だけでCache-Controlやアクセス制御を証明したとは扱わない。
+- **衝突防止措置**: `apps/app/vite.config.ts` で `base: "/"`, `build.assetsDir: "_personal_assets"` とする。Ops側 `+apps/ops/vite.config.ts` は `base: "/"` と `build.assetsDir: "_ops_assets"`（Phase7実装予定）。Worker/Route/asset manifestは独立させる。アセットルーティングとrootパスでのSPA fallbackは統合テスト必須。プレフィックス分離だけでCache-Controlやアクセス制御を証明したとは扱わない。
