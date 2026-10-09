@@ -22,12 +22,12 @@ These are bytes, **not tokens**. Japanese and code/tokenizer variation make any 
 4. **New content:** two small performance documents are justified because the original baseline was observational while the change needs executable route ownership and acceptance. They are references, **not new state ledgers**.
 5. **Unchecked:** actual Luna/Haiku agent comprehension, live PoC CPU reduction, human visual review, auth/Queue end-to-end parity are not proven by documentation checks.
 
-## After-change snapshot (PR #281; before final review)
+## After-change snapshot (PR #281; 2026-10-09 verified branch)
 
-- After the initial performance-first documentation change: **60 migration MD files / 866,857 bytes (~847 KiB)**, **+27,089 bytes (+3.2%)** over the 56-file baseline. This increase is primarily targeted runtime performance/acceptance detail and the context audit itself, not duplicated full capability ledgers.
+- After the initial performance-first documentation change: **60 migration MD files / 868,552 bytes (~848 KiB)**, **+28,784 bytes (+3.43%)** over the 56-file baseline. This increase is primarily targeted runtime performance/acceptance detail and the context audit itself, not duplicated full capability ledgers.
 - The legacy five-document full-read set is still **88,308 bytes**. The benefit does **not** come from reducing those files' total size; it comes from stopping full-file reads and emitting a task-scoped subset instead.
-- The one-task packet is produced by `node scripts/print-migration-task-context.mjs MIG-0401`; its correctness and size (including a large Admin MIG) are CI-tested. It is a **locator**: actual source/tests/PR+approval rules remain mandatory.
-- These bytes were measured from Git blobs on this PR branch before the additional packet script documentation; validate the final live branch tree again when reviewing. This is a size audit, not measured LLM inference latency or tokens.
+- The one-task packet is produced by `node scripts/print-migration-task-context.mjs MIG-0401`; its correctness and size (including a large Admin MIG) are CI-tested. MIG-0401 was actually emitted as **2,508 characters / 5 source rows** in the contract CI; large Admin scope is asserted under **24,000 characters**. It is a **locator**: actual source/tests/PR+approval rules remain mandatory.
+- These bytes were measured from 60 Markdown Git blobs on this PR branch after the one-task packet documentation change. The final one-line audit edit adjusts the total by only its textual delta. This is a size audit, not measured LLM inference latency or tokens.
 
 ## Changes and concrete read budget
 
