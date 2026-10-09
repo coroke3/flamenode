@@ -135,7 +135,11 @@ test("performance DAG cannot be put behind unfinished visual routes", () => {
  const changed=performanceDagStatus.replace("| MIG-0404 | route manifest | BLOCKED | MIG-0401 |","| MIG-0404 | route manifest | BLOCKED | MIG-0403 |");
  assert.match(run({statusText:changed}).join("\n"),/MIG-0404 performance\/visual DAG/);
 });
-test("nonvisual PoC cannot remain BLOCKED after its only dependency is DONE", () => {
+test("real performance PoC may become BLOCKED for a discovered blocker without falsifying readiness", () => {
  const changed=performanceDagStatus.replace("| MIG-0401 | snapshot | READY | MIG-0105 |","| MIG-0401 | snapshot | BLOCKED | MIG-0105 |");
- assert.match(run({statusText:changed}).join("\n"),/eligible for READY/);
+ assert.deepEqual(run({statusText:changed}),[]);
+});
+test("0401 cannot silently acquire the visual HTML dependency",()=>{
+ const changed=performanceDagStatus.replace("| MIG-0401 | snapshot | READY | MIG-0105 |","| MIG-0401 | snapshot | BLOCKED | MIG-0206 |");
+ assert.match(run({statusText:changed}).join("\n"),/MIG-0401 performance\/visual DAG/);
 });
