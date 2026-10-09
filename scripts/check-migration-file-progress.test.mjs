@@ -57,3 +57,10 @@ test("retiring source without approval is rejected",()=>{
 test("file owner must reference an actual MIG",()=>{
  assert.match(validateFileProgress({...base,matrix:replace("MIG-0501","MIG-9999")}).join("\n"),/missing owner task/);
 });
+
+test("a syntactically valid advanced target still must exist in source tree",()=>{
+ const target="apps/site/src/pages/missing.astro";
+ const evidence="PR#278 SHA="+("a".repeat(40))+" TEST=npm-run-typecheck CI=https://github.com/example/repo/actions/runs/123";
+ const m=matrix.replace("+apps/site/src/pages/about.astro | NOT_STARTED | — |",target+" | BRIDGED | "+evidence+" |");
+ assert.match(validateFileProgress({...base,matrix:m}).join("\\n"),/unverified target path/);
+});
