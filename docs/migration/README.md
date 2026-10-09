@@ -204,7 +204,7 @@ CURRENTは移行完了までrollback targetとして残す。
              |                                 |
           Public                          Private / API
              |                                 |
-       flamenode-site                 flamenode-app / api
+       flamenode-site                 flamenode-personal / flamenode-ops / api
              |                                 |
  thin visibility gateway             React/Vite + Hono
              |                                 |
@@ -231,8 +231,9 @@ CURRENTは移行完了までrollback targetとして残す。
 
 ## Private UI（管理・マイページ・登録画面）
 
-- React + Vite による SPA (Single Page Application)
-- React Router によるクライアントサイドルーティング
+- React + Vite による**2 SPA（Personal: `apps/app`, Ops: `+apps/ops`）**
+- Personalは `/dashboard`, `/entry`, `/onboarding`、Opsは `/manage`, `/admin` を専有し、別ビルド/Worker/アセットを使用
+- React Router による各SPA内のクライアントサイドルーティング。SPA間は普通のHTTP navigation
 - TanStack Query 等は必要なサーバー状態管理に限定
 - dashboard / entry / manage / admin 等の管理・編集画面は SSR しない
 
@@ -344,12 +345,15 @@ path-specific Worker Routes
 最終ownership概念:
 
 ```text
-/api/*        -> flamenode-api
+/api/<migrated path> -> flamenode-api
+/api/auth/*   -> CURRENT Auth.js until Phase 8
+/api/others   -> CURRENT until individually migrated
 /auth/*       -> auth phaseで確定
-/dashboard/*  -> flamenode-app
-/entry/*      -> flamenode-app
-/manage/*     -> flamenode-app
-/admin/*      -> flamenode-app
+/dashboard/*  -> flamenode-personal (apps/app)
+/entry/*      -> flamenode-personal (apps/app)
+/onboarding   -> flamenode-personal (apps/app)
+/manage/*     -> flamenode-ops (+apps/ops)
+/admin/*      -> flamenode-ops (+apps/ops)
 /*            -> flamenode-site
 ```
 
@@ -369,9 +373,9 @@ Rules:
 原則:
 
 ```text
-Static first
-Dynamic by exception
-SSR never by default
+Static Asset SSG first
+R2 pre-generated HTML second when asset quota would be exceeded
+Limited SSR by exception only after measured CPU/1102 gate
 ```
 
 Public requestで避ける:
@@ -395,7 +399,7 @@ Gateway責務:
 3. blocked/unknownならfail closed
 4. allowedならStatic Asset配信
 
-HTML生成は禁止。
+リクエスト時HTML生成は禁止（R2に事前生成済みHTMLを読むことは可）。
 
 ## Route map
 
@@ -498,6 +502,8 @@ content更新でfast/sync Workerを再deployしない。
 
 # 11. Private SPA / shared UI
 
+**D-05決定：Personal/Opsの2SPAへ分割**。`apps/app`はPersonal（`/_personal_assets/*`）、Phase7で`+apps/ops`を追加してOps（`/_ops_assets/*`）を担当。Cloudflare Routeと独立Worker/static assetsを分ける。共通UIは`packages/ui`で共有し、認可はAPIで再検証。root URLは変更しない。
+
 対象:
 
 - `/dashboard`
@@ -589,6 +595,8 @@ Exact dispositionは `API_MATRIX.md`。
 ---
 
 # 13. Auth
+
+**D-07決定：Auth.jsのDBセッションをWorkers上でも継続**。互換PoC成功まで旧Auth.jsを維持する。
 
 Auth migrationは後段。
 それまではCURRENT Auth.js behaviorを維持する。
@@ -697,7 +705,7 @@ Gate:
 
 Extract framework-neutral business logic while CURRENT path still calls the same services.
 
-Gate: behavior / permission / DB / transaction / audit / Queue parity + code-quality review.
+Gate: D-01=Aに基づくMIG-0308 (`packages/db` schema extraction)を先行し、ゼロDDL/循環なし/Next+Hono互換の検証後、behavior / permission / DB / transaction / audit / Queue parity + code-quality review.
 
 ## Phase 4 — Public PoC
 
@@ -711,7 +719,7 @@ Representative:
 - route map
 - visibility gateway
 
-Gate: no request-time SSR by default, fail-closed, SEO/OGP parity, CPU/build targets, affected UX/FN parity.
+Gate: SSG files/versionの実測とQuota超過時R2事前HTMLの配信計画、no request-time SSR by default、fail-closed、SEO/OGP parity、CPU/1102/build targets、affected UX/FN parity.
 
 ## Phase 5 — Public migration
 
@@ -731,7 +739,7 @@ Order: low-risk reads → low-risk mutations → video → event/slot → user/X
 
 ## Phase 7 — Private SPA
 
-Order: dashboard reads → dashboard mutations → entry → manage → admin.
+Order: Personal SPA（dashboard reads → dashboard mutations → entry）→ Ops SPAの独立scaffold → manage → admin。2SPAのdeep-link/asset/cookie/権限をPhase7 Gateで検証。
 
 Screen DONE requires associated UX/FN parity verified.
 
