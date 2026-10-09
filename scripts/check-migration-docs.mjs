@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { validateMigrationExecution } from "./check-migration-execution.mjs";
 import { validateTaskCards, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
-import { validateFileProgress } from "./check-migration-file-progress.mjs";
+import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -1133,15 +1133,7 @@ if (errors.length === 0) {
     routeHandlers: read("docs/migration/route-handlers/README.md"),
     serverActions: read("docs/migration/server-actions/README.md"),
     status,
-    filePaths: [...new Set([
-      ...collectSourceFiles(path.join(root, "app")).map(p=>path.relative(root,p).replaceAll(path.sep,"/")),
-      ...collectSourceFiles(path.join(root, "src/lib/actions")).map(p=>path.relative(root,p).replaceAll(path.sep,"/")),
-      ...collectSourceFiles(path.join(root, "src/lib/db")).map(p=>path.relative(root,p).replaceAll(path.sep,"/")),
-      ...collectSourceFiles(path.join(root, "workers")).map(p=>path.relative(root,p).replaceAll(path.sep,"/")),
-      ...collectSourceFiles(path.join(root, "apps")).map(p=>path.relative(root,p).replaceAll(path.sep,"/")),
-      ...collectSourceFiles(path.join(root, "packages")).map(p=>path.relative(root,p).replaceAll(path.sep,"/")),
-      ...["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"].filter(p=>fs.existsSync(path.join(root,p))),
-    ])],
+    filePaths: collectMigrationFiles(),
   }));
 
   // Git discipline remains non-negotiable.
