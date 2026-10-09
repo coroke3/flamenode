@@ -18,6 +18,12 @@ const TECHNICAL_NEXT_TWINS = new Set([
  "app/(public)/user/~query/page.tsx",
  "app/(public)/user/[id]/paged/page.tsx",
 ]);
+const TECHNICAL_TWIN_CANONICAL = new Map([
+ ["app/(public)/event/~query/page.tsx", "app/(public)/event/page.tsx"],
+ ["app/(public)/list/~query/page.tsx", "app/(public)/list/page.tsx"],
+ ["app/(public)/user/~query/page.tsx", "app/(public)/user/page.tsx"],
+ ["app/(public)/user/[id]/paged/page.tsx", "app/(public)/user/[id]/page.tsx"],
+]);
 const FILE_ROW_RE = /^\|\s*\x60([^\x60]+)\x60\s*\|/;
 
 export function parseFileRows(markdown) {
@@ -112,6 +118,12 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
   if(!ALLOWED_STATES.has(row.state))errors.push(file+" invalid file state "+row.state);
   if(VERIFIED_FIRST_OWNERS.has(file) && row.owner!==VERIFIED_FIRST_OWNERS.get(file)) errors.push(file+" incorrect first owner; source-code SA contract requires "+VERIFIED_FIRST_OWNERS.get(file));
   if(TECHNICAL_NEXT_TWINS.has(file) && /(?:~query|\/paged)\.astro/.test(row.target)) errors.push(file+" technical Next renderer must migrate logical URL/query, not duplicate Astro technical page");
+  const logicalOwner = TECHNICAL_TWIN_CANONICAL.get(file);
+  if(logicalOwner && rows.has(logicalOwner)) {
+    const targetCore = (value)=>value.split(" (")[0].trim();
+    if(targetCore(row.target) !== targetCore(rows.get(logicalOwner).target))
+      errors.push(file+" technical Next renderer target must match logical user-facing route target: "+logicalOwner);
+  }
   if(!migs.has(row.owner))errors.push(file+" references missing owner task "+row.owner);
   else if(migs.get(row.owner)==="DONE"&&row.state==="NOT_STARTED")errors.push(file+" owner MIG is DONE but file still NOT_STARTED; require PARITY_VERIFIED, RETAINED or explicit BLOCKED with evidence");
   if(!actual.has(file)&&row.state!=="RETIRED")errors.push(file+" source file absent but state is "+row.state);
