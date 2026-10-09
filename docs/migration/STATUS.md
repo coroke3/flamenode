@@ -8,6 +8,7 @@
 > 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
 > Frontend parity: [`FRONTEND_FEATURES.md`](FRONTEND_FEATURES.md)
 > Function parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
+> 判断待ち事項正本: [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md)
 
 Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正本。chat historyやtool-local task listを正本にしない。
 

@@ -1,69 +1,74 @@
 # FlameNode Phase 6 タスク仕様書（Hono API Spec）
 
-> 状態: Active / Phase 6 実行向け完全仕様書
+> 状態: Active / Phase 6 実行向け仕様書
+> 最終検証: 2026-10-09（`route-handlers/README.md` の RH-001〜RH-033 および `API_MATRIX.md` に基づき改定）
 > 対象モデル: Claude / Codex / Antigravity / GPT-5.6-luna / Gemini Flash 等の全エージェント
-> 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`API_MATRIX.md`](API_MATRIX.md), [`CODE_QUALITY.md`](CODE_QUALITY.md)
-
-このドキュメントは、バックエンド HTTP API 移行（Phase 6: Hono API）を軽量モデルでも一切迷わずに実装できるよう、全タスクの目的・作成ファイル・コード仕様・禁止事項・検証コマンドを完全に具体化した仕様書である。
+> 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`API_MATRIX.md`](API_MATRIX.md), [`route-handlers/README.md`](route-handlers/README.md), [`CODE_QUALITY.md`](CODE_QUALITY.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-01, D-02)
 
 ---
 
 # 1. Hono API の基本方針
 
 1. **薄いトランスポート層（Thin Adapter）**:
-   - `apps/api` は HTTP 入出力（リクエストパース、Zod バリデーション、レスポンス成形、ステータスコード）のみを担当する。
-   - ビジネスロジック・権限判定・D1 トランザクションはすべて `packages/domain` へ委譲する。
+   - `apps/api` は HTTP 入出力（リクエストパース、Zod バリデーション、レスポンス成形、ステータスコードマッピング）のみを担当。
+   - ビジネスロジック・権限判定・D1 トランザクションはすべて `packages/domain` へ委譲（`API_MATRIX.md` Migration rule）。
 2. **共有 Zod 契約（`packages/contracts`）**:
-   - リクエストボディおよびレスポンス DTO は `packages/contracts` の Zod スキーマで型定義する。
-   - 内部テーブルのカラムをそのまま漏洩（DB Leak）させず、明示的 DTO のみを返す。
+   - リクエストボディおよびレスポンス DTO は `packages/contracts` で型定義。
+   - D1 テーブルのカラムをそのまま漏洩させず、明示的 DTO のみを返却（`check:public-api-leaks` 準拠）。
 3. **有界な CPU 時間（< 10ms）と非同期委譲**:
-   - HTTP リクエスト内で行う処理量は厳格に制限する。重い生成・同期・集約処理は即座に Queue または Durable Object へ委譲し、HTTP は 202 Accepted または軽量な結果を返す。
+   - HTTP リクエスト内で行う処理量は厳格に制限。重い処理・再生成は Queue（`fast-jobs`, `content-jobs`, `sync-jobs`）へ委譲。
+4. **URL 体系の維持**:
+   - 新規の独自プレフィックス（`/api/v1` 等）を勝手に作らず、CURRENT の `/api/*` パス構造（RH-001〜RH-033）を原則維持。
 
 ---
 
-# 2. Phase 6 タスク別詳細仕様書
+# 2. Phase 6 タスク別詳細仕様書（実 API 対応）
 
 ### MIG-0601: low-risk reads（低リスク参照系 API）
-- **エンドポイント**:
-  - `GET /api/v1/software`（ソフトウェア一覧）
-  - `GET /api/v1/software/:id`
-  - `GET /api/v1/health`（ヘルスチェック）
-- **作成ファイル**: `apps/api/src/routes/software.ts`, `apps/api/src/routes/health.ts`
-- **仕様**: `packages/domain` の `getSoftwareList` を呼び出し、明示的 DTO を返却。
+- **対象**:
+  - `GET /api/health` (RH-018)
+  - `GET /api/health/deep` (RH-017, WORKER_ADMIN_TOKEN 認証)
+  - `GET /api/public/about-stats` (RH-026, R2 静的アーティファクト参照)
+  - `GET /api/software/suggestions` (RH-029, ソフトウェア候補)
+- **仕様**: `packages/domain` または静的キャッシュから DTO を返却。
+- **検証**: 単体テスト + CPU 時間実測。
 
 ### MIG-0602: low-risk mutations（低リスク更新系 API）
-- **エンドポイント**:
-  - `POST /api/v1/notifications/read`（通知既読化）
-  - `POST /api/v1/software`（管理者用ソフトウェア追加）
+- **対象**:
+  - 単一テーブル更新、監査ログ記録、軽量な更新処理（announcements, api-endpoints, settings 等のドメイン呼び出し）。
 - **仕様**: 認証ミドルウェアで Auth User を特定し、Zod バリデーション後に `packages/domain` を実行。
 
-### MIG-0603: video APIs（動画管理・編集 API）
-- **エンドポイント**:
-  - `PATCH /api/v1/videos/:id`（作品メタデータ更新）
-  - `POST /api/v1/videos/:id/status`（公開状態遷移・承認・却下）
-  - `POST /api/v1/videos/:id/chapters`（チャプター追加・更新）
+### MIG-0603: video APIs（動画・チャプター API）
+- **対象**:
+  - `GET /api/videos` (RH-032)
+  - `GET /api/videos/:id` (RH-030)
+  - `GET /api/videos/:id/viewer-overlay` (RH-031, セッション依存オーバーレイ)
+  - 動画・チャプター更新エンドポイント（SA-012〜015, SA-087, SA-089 を受ける Hono エンドポイント）
 - **仕様**:
-  - `canEditVideo` による権限源ごとの厳格な認可。
-  - チャプター削除時は浮遊コメントとして論理保持。
-  - 更新後は静的再生成 Queue へ wake イベントを送信。
+  - `canEditVideo`（PR #265 一本化ロジック）による厳格な認可。
+  - チャプター削除時のコメント論理保持（浮遊コメント化）。
+  - 更新後の静的再生成 Queue wake 送信。
 
-### MIG-0604: event/slot APIs（イベント・枠予約 API）
-- **エンドポイント**:
-  - `POST /api/v1/events`
-  - `PATCH /api/v1/events/:id`
-  - `POST /api/v1/events/:id/slots/reserve`（枠予約）
-  - `POST /api/v1/events/:id/slots/release`（枠解放）
-- **仕様**: 連続枠上限（`validateSlotReservationLimit`）およびオーナー不変条件の厳格検証。
+### MIG-0604: event/slot APIs（イベント・枠 API）
+- **対象**:
+  - `GET /api/events` (RH-015)
+  - `GET /api/live/events/:id/slots` (RH-020)
+  - `GET /api/live/events/:id/submissions` (RH-021)
+  - `GET /api/live/events/:id/summary` (RH-022)
+  - `GET /api/events/:id/slots/viewer-overlay` (RH-014)
+  - 枠予約・解放・イベント設定変更（SA-021〜039, SA-056〜068 を受ける Hono エンドポイント）
+- **仕様**: オーナー 0 人禁止不変条件、連続枠上限の厳格検証。
 
-### MIG-0605: user/X/admin APIs（ユーザー・Active X・管理 API）
-- **エンドポイント**:
-  - `POST /api/v1/users/active-x`（Active X 申請・連携）
-  - `POST /api/v1/admin/x-users/:id/approve`（X ID 承認・却下）
-  - `POST /api/v1/admin/x-users/merge`（X ID 統合・差し戻し）
+### MIG-0605: user/X/admin APIs（ユーザー・X・管理 API）
+- **対象**:
+  - `GET /api/account/summary` (RH-001, presence / detail モード)
+  - `GET /api/internal/x-users/search` (RH-019)
+  - `GET /api/admin/spreadsheet/*` (RH-003〜009)
+  - Active X 切り替え・連携・X ID マージ・モデレーション（SA-043〜055, SA-090〜106）
 - **仕様**: `ACTIVE_X_MIGRATION_PLAN.md` に従い、未連携ユーザーへのモーダル誘導データを提供。
 
 ### MIG-0606: API CPU benchmark
-- **目的**: 全エンドポイントについて、Cloudflare Workers Free 枠の 10ms 制限を下回ることを自動ベンチマークテストで測定・検証。
+- **目的**: 全エンドポイントについて、Cloudflare Workers Free 枠の CPU 時間 < 10ms（単純 read < 5ms, mutation < 8ms）を自動測定・検証。
 
 ### MIG-0607: Phase 6 Gate
-- **完了条件**: 全 33 個の Route Handler の Hono 化完了、全 API 契約テスト合格、CPU 時間 < 10ms 証明。
+- **完了条件**: 全 Route Handler (33 メソッド) の Hono 移行完了、全 API 契約テスト合格、CPU 予算クリア。

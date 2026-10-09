@@ -1,224 +1,163 @@
 # FlameNode Phase 3 タスク仕様書（Domain Extraction Spec）
 
-> 状態: Active / Phase 3 実行向け完全仕様書
+> 状態: Active / Phase 3 実行向け仕様書
+> 最終検証: 2026-10-09（ファイルパス・export 名は実コードで確認済み。`npm run check:project-docs` が参照を機械検証する）
 > 対象モデル: Claude / Codex / Antigravity / GPT-5.6-luna / Gemini Flash 等の全エージェント
-> 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md), [`CODE_QUALITY.md`](CODE_QUALITY.md), [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
+> 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md), [`CODE_QUALITY.md`](CODE_QUALITY.md), [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md), [`server-actions/README.md`](server-actions/README.md)
 
-このドキュメントは、**Luna や Flash などの軽量モデルでも一切迷わずに実装できるよう、Phase 3 の各タスクの目的・作成ファイル・コード仕様・禁止事項・検証コマンドを完全に具体化した仕様書**である。
+この仕様書は、各タスクの目的・対象ソース・作成ファイル・禁止事項・検証コマンドを具体化したものである。
+**ここに書かれていない判断（特に D-01）を、エージェントが独断で確定してはいけない。**
+
+> 表記規約: code span の repo パスは**実在するパス**でなければならない。これから作るファイルは `` `+path` `` と書く（`+` は新規作成の印）。
+> この規約は `scripts/check-migration-spec-refs.mjs` が検証する。
 
 ---
 
 # 1. Phase 3 の目的と基本原則
 
 ### 目的
-現行の Next.js (`src/lib/`) に散らばっているビジネスロジック・権限判定・データアクセスを、**フレームワーク非依存の純粋な TypeScript パッケージ（`packages/domain`）** へ抽出し、集約する。
 
-### 基本原則（Invariant Rules）
-1. **フレームワーク非依存（Pure Domain）**:
-   - `packages/domain` 内で `next/*`, `react`, `hono`, `astro` などの Web/UI フレームワークをインポートすることを**厳格に禁止**する。
-   - すべての関数は純粋な関数、または依存性を引数（`DomainContext`）として受け取る DI（Dependency Injection）パターンで実装する。
-2. **既存契約・権限・安全保証の 100% 保持**:
-   - `owner` 不変条件（イベントオーナーをゼロにしない）、fail-closed な可視性フェンス、CAS（Compare-And-Swap）による楽観的排他制御、監査ログ記録をそのまま維持する。
-3. **薄いラッパーの禁止**:
-   - 単なる D1 クエリの 1 行ラッパーを乱立させない。ドメインルール、権限検証、トランザクション境界を含む凝集度の高い関数として設計する。
+`src/lib/` に散らばるビジネスロジック・権限判定を、フレームワーク非依存の `packages/domain` へ抽出する。
+CURRENT の Next.js 側は、抽出後も同じ関数を呼ぶ**薄い互換ブリッジ**になる（legacy/新 API が同じ domain service を呼ぶ期間を作る。[`API_MATRIX.md`](API_MATRIX.md) の Migration rule）。
 
----
+### 基本原則
 
-# 2. Phase 3 タスク別詳細仕様書（Zero-Ambiguity Spec）
+1. **フレームワーク非依存**: `packages/domain` は `next/*`, `react`, `hono`, `astro`, `server-only`, `revalidatePath`, `redirect`, `cookies()` を import しない。
+2. **既存契約の保持**: owner 不変条件、fail-closed な可視性、CAS、監査、post-commit の意味を変えない。
+3. **薄い 1 行ラッパー禁止**: ドメインルール・権限・トランザクション境界を含む凝集した単位で抽出する。
+4. **Server Action をコピーしない**: 抽出元は Server Action ではなく、その下にある core / plan / policy である（[`server-actions/README.md`](server-actions/README.md) の SA-* が正本）。
 
----
+### 抽出の 2 階層（重要）
 
-### MIG-0301: extraction/DI pattern（依存性注入パターンとドメイン基盤）
+実コードを調べた結果、抽出対象は 2 種類に分かれる。
 
-- **目的**:
-  - `packages/domain` におけるデータベース・環境変数・ロガーの注入基盤（`DomainContext`）およびトランザクション実行ヘルパーを確立する。
-- **編集・作成ファイル**:
-  1. `packages/domain/src/context.ts`:
-     ```typescript
-     import type { DrizzleD1Database } from "drizzle-orm/d1";
-     import * as schema from "../../src/lib/db/schema";
+| 階層 | 条件 | 例 | D-01 の回答 |
+| --- | --- | --- | --- |
+| **Tier 1: 純粋 core** | `@/` import も DB も `server-only` も持たない | `src/lib/slots/slotReservationLimit.ts`, `src/lib/slots/limits.ts`, `src/lib/utils/softwareLabels.ts`, `src/lib/event/eventOwnershipCore.ts`, `src/lib/auth/ownershipCore.ts` | **不要**。先行して進める |
+| **Tier 2: DB/framework 結合** | `@/lib/db/schema`・`next/navigation`・`server-only` を import する | `src/lib/video/videoVisibilityTransition.ts`, `src/lib/event/eventVisibilityTransition.ts`, `src/lib/xid/xUserVisibilityTransition.ts`, `src/lib/video/computeEditSections.ts` | **必要**（[`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-01） |
 
-     export type AppDatabase = DrizzleD1Database<typeof schema>;
-
-     export interface DomainLogger {
-       info(message: string, meta?: Record<string, unknown>): void;
-       warn(message: string, meta?: Record<string, unknown>): void;
-       error(message: string, error?: unknown, meta?: Record<string, unknown>): void;
-     }
-
-     export interface DomainContext {
-       db: AppDatabase;
-       logger?: DomainLogger;
-       now?: () => Date;
-     }
-
-     export function createDomainContext(params: {
-       db: AppDatabase;
-       logger?: DomainLogger;
-       now?: () => Date;
-     }): DomainContext {
-       return {
-         db: params.db,
-         logger: params.logger,
-         now: params.now || (() => new Date()),
-       };
-     }
-     ```
-  2. `packages/domain/src/index.ts`:
-     - `context.ts` の型とファクトリ関数を export。
-  3. `packages/domain/test/context.test.ts`:
-     - メモリ内コンテキスト生成の単体テスト。
-- **禁止事項**:
-  - Next.js 固有の `headers()`, `cookies()`, `next/cache` を持ち込まないこと。
-- **検証コマンド**:
-  ```bash
-  npm run typecheck --workspace=@flamenode/domain
-  npm run build --workspace=@flamenode/domain
-  node scripts/check-migration-docs.mjs
-  ```
+Tier 2 は `packages/domain` が `src/lib/db/schema` を参照すると `packages/*` → `src/*` の依存になり、`src/*` → `packages/domain` のブリッジと**循環**する。
+そのため D-01 の回答（schema の置き場所）が出るまで、Tier 2 の抽出タスクは `BLOCKED(D-01)` として扱う。
 
 ---
 
-### MIG-0302: low-risk read domain（低リスク参照系ドメインの抽出）
+# 2. 現状の注意点（実コードで確認済み）
 
-- **目的**:
-  - 依存が少なく副作用のない参照系ドメイン（ソフトウェア一覧・ラベル解決・メタデータ取得）を `packages/domain` へ移行する。
-- **対象ソース**:
-  - `src/lib/db/software.ts`
-  - `src/lib/utils/softwareLabels.ts`
-- **作成ファイル**:
-  1. `packages/domain/src/software/read.ts`:
-     - `getSoftwareList(ctx: DomainContext, options?: { activeOnly?: boolean })`
-     - `getSoftwareById(ctx: DomainContext, id: string)`
-     - `resolveSoftwareLabel(key: string): string`
-  2. `packages/domain/src/software/index.ts`:
-     - 参照系関数の export。
-  3. `packages/domain/test/software-read.test.ts`:
-     - 照合・ラベル解決のテスト。
-  4. `src/lib/db/software.ts`:
-     - `packages/domain` の関数を呼び出す互換ブリッジに切り替え。
-- **検証コマンド**:
-  ```bash
-  npm run typecheck
-  npm run test:unit
-  node scripts/check-migration-docs.mjs
-  ```
+- `packages/domain/src/permissions.ts` の `canEditVideo({isOwner,isCollabEditor,isEventStaff})` は Phase 1 の**プレースホルダー**で、`||` で 3 値を OR するだけである。
+  実際の `canEditVideo`（`src/lib/auth/ownership.ts`）は `normal / event / admin` の 3 モードを分離し、
+  「owner/admin 権限は event モードへ暗黙にフォールバックしない」「dangerous key は常に deny」という契約を持つ（[`auth/README.md`](auth/README.md)）。
+  プレースホルダーの OR 意味論を実装の土台にしてはいけない。MIG-0301 で削除または別名へ退避する。
+- `packages/domain/package.json` は `main: ./dist/index.js` で、`test` script を持たない。依存は `@flamenode/contracts` のみ（`drizzle-orm` なし）。
+- `npm run test:unit` は `node --test --experimental-strip-types` で `src/**` と `scripts/**` の `*.test.mjs` を実行する。
+  `@flamenode/domain` を bare specifier で import すると、`tsconfig.base.json` の `paths` は node には効かず、`main` が指す未ビルドの `dist` に当たる。
+  **ブリッジ方式は MIG-0301 の PoC で、`node --test` / `next build` / `tsc` の 3 経路すべてで解決できることを確認してから量産する。**
+- `src/lib/db/software.ts` は「動画に紐づくソフトウェアの置換プラン」を作るもの（`buildReplaceVideoSoftwarePlan`）で、一覧取得・登録 API ではない。
+  通知は `notification_outbox` の配信キューであり、「既読化」機能は存在しない。
 
 ---
 
-### MIG-0303: low-risk mutation domain（低リスク更新系ドメインの抽出）
+# 3. タスク別仕様
 
-- **目的**:
-  - 副作用が限定的で安全な更新系ドメイン（ソフトウェアの登録・更新、通知の既読化）を `packages/domain` へ移行する。
-- **対象ソース**:
-  - `src/lib/db/software.ts`（更新系）
-  - `src/lib/notifications/`（既読化）
-- **作成ファイル**:
-  1. `packages/domain/src/software/mutate.ts`:
-     - `upsertSoftware(ctx: DomainContext, input: SoftwareInput)`
-  2. `packages/domain/src/notification/mutate.ts`:
-     - `markNotificationsRead(ctx: DomainContext, params: { userId: string; notificationIds: string[] })`
-  3. 単体テスト:
-     - 入力検証（Zod 等）、重複エラー、トランザクション正常系のテスト。
-- **検証コマンド**:
-  ```bash
-  npm run typecheck
-  npm run test:unit
-  node scripts/check-migration-docs.mjs
-  ```
+### MIG-0301: extraction/DI pattern（抽出パターンの確立）
 
----
-
-### MIG-0304: video domain group（動画ドメイングループの抽出）
-
-- **目的**:
-  - 最も重要な中核ビジネスルールである動画の権限判定・編集可否・可視性状態遷移を `packages/domain` へ集約する。
-- **対象ソース**:
-  - `src/lib/auth/ownershipCore.ts`（作品編集権限判定 `canEditVideo`, `ownerPolicyAllows`）
-  - `src/lib/video/computeEditSections.ts`（許可編集セクション計算）
-  - `src/lib/video/videoVisibilityStatusAction.ts`（公開状態遷移・CAS判定）
-- **作成ファイル**:
-  1. `packages/domain/src/video/permissions.ts`:
-     - `canEditVideo(ctx: DomainContext, params: VideoEditPermissionCheckParams)`
-     - `computeAllowedVideoEditSections(params: EditSectionParams)`
-  2. `packages/domain/src/video/visibility.ts`:
-     - `transitionVideoVisibility(ctx: DomainContext, params: VideoVisibilityParams)`
-  3. `packages/domain/src/video/index.ts`
-  4. `src/lib/auth/ownershipCore.ts` は `packages/domain` を呼び出す薄い互換ブリッジへ更新。
-- **不変条件の保持**:
-  - PR #265 で一本化した「権限源ごとの判定規則」を完全に保持すること。
-- **検証コマンド**:
+- **目的**: Tier 1 の抽出方式（ファイル配置・import 規約・ブリッジ・テスト）を、1 モジュールで実証して固定する。
+- **PoC 対象**: `src/lib/slots/slotReservationLimit.ts`（`MAX_SLOT_RESERVATIONS_PER_XID`, `normalizeSlotReservationLimit`, `slotReservationLimitMessage`。import なし）
+- **作業**:
+  1. `packages/domain` に実行可能なテスト経路を作る（`test` script と、`node --test --experimental-strip-types` で `.ts` を解決できる `exports` 設計）。
+  2. `` `+packages/domain/src/slots/reservationLimit.ts` `` へ実装を移し、`src/lib/slots/slotReservationLimit.ts` を同じ export 名の再 export ブリッジにする。
+  3. 既存テスト（`src/lib/slots/` 配下の既存 `*.test.mjs`）が無変更で通ることを確認する。
+  4. `packages/domain/src/permissions.ts` のプレースホルダーを削除し、`packages/domain/src/index.ts` の export を整理する（上記注意点）。
+  5. 決定した方式を本書 §4（抽出規約）へ追記する。
+- **やらないこと**: `DomainContext` / `AppDatabase` 型の導入（D-01 回答後）。drizzle schema の相対 import。
+- **受け入れ条件**:
+  - ブリッジ越しに `npm run test:unit`・`npm run typecheck`・Next の build 経路（`npm run cf:cloud-build` が使う経路）で解決できる。
+  - `packages/domain` に禁止 import がない（MIG-0307 で自動チェックを追加するまで、grep で確認する）。
+- **検証**:
   ```bash
   npm run typecheck
   npm run test:unit
   npm run verify:fast
+  npm run check:project-docs
   ```
 
----
+### MIG-0302: low-risk read domain（低リスク参照系）
 
-### MIG-0305: event/slot domain group（イベント・枠予約ドメイングループの抽出）
+- **対象（Tier 1 のみ）**: 副作用・DB アクセスのない純粋ロジック。
+  - `src/lib/utils/softwareLabels.ts`（`normalizeSoftwareLabels`, `normalizeSoftwareKey`, `normalizeSoftwareCatalogName`, `SOFTWARE_LABEL_MAX_ITEMS`, `SOFTWARE_LABEL_MAX_LENGTH`）
+  - `src/lib/slots/limits.ts`（`normalizeMaxSlotsPerVideo`, `MIN_SLOTS_PER_VIDEO`, `MAX_SLOTS_PER_VIDEO`）
+  - 公開 read の DTO 整形のうち `@/` import を持たないもの（候補選定は `route-handlers/README.md` の RH-029 `/api/software/suggestions` を起点にする）
+- **作成**: `` `+packages/domain/src/software/labels.ts` ``, `` `+packages/domain/src/slots/limits.ts` `` と対応するテスト。ブリッジは MIG-0301 の方式。
+- **D-01 待ち**: DB を読む read（`videoDetailQueries.ts` 等）は対象外。
+- **検証**: MIG-0301 と同じ。
 
-- **目的**:
-  - イベント管理、スタッフ権限、連続枠確保制限（予約ロジック）を `packages/domain` へ集約する。
-- **対象ソース**:
-  - `src/lib/event/eventVisibilityTransition.ts`
-  - `src/lib/slots/slotReservationLimit.ts`
-  - `src/lib/event/eventGroupVisibilityTransition.ts`
-- **作成ファイル**:
-  1. `packages/domain/src/event/visibility.ts`:
-     - `transitionEventVisibility(ctx: DomainContext, params: ...)`
-  2. `packages/domain/src/slots/reservation.ts`:
-     - `validateSlotReservationLimit(ctx: DomainContext, params: ...)`
-  3. `packages/domain/src/event/index.ts`
-- **不変条件の保持**:
-  - `owner` 権限プリセットを持つスタッフが 0 人にならないこと（オーナー不変条件）。
-- **検証コマンド**:
-  ```bash
-  npm run typecheck
-  npm run test:unit
-  npm run verify:fast
-  ```
+### MIG-0303: low-risk mutation domain（低リスク更新系）
 
----
+- **対象**: [`server-actions/README.md`](server-actions/README.md) のうち、単一テーブル・admin write・監査あり・外部副作用が小さいもの。
+  - SA-004〜006 announcements（`src/lib/actions/announcement.ts`）
+  - SA-007〜008 api-endpoints（`src/lib/actions/api-endpoints.ts`）
+  - SA-035〜037 event templates（`src/lib/actions/event-template-admin.ts`）
+- **前提**: これらは `mutateWithAudit` と DB を使うため **Tier 2 に該当し、D-01 の回答待ち**（`BLOCKED(D-01)`）。
+  回答前にできるのは「入力検証・正規化・error 契約」だけを純粋関数として切り出す作業である。
+- **作成**: D-01 回答後に確定。それまでは `` `+packages/domain/src/announcement/validation.ts` `` のような**検証のみ**を対象にする。
+- **不変条件**: 監査（`strict`）、expected-row CAS、public rebuild の enqueue、`revalidatePath` の意味分解（API_MATRIX.md の Side-effect parity）。
 
-### MIG-0306: user/X/admin domain group（ユーザー・Active X・管理ドメインの抽出）
+### MIG-0304: video domain group（動画ドメイン）
 
-- **目的**:
-  - Active X の承認・却下・可視性制御、X ID 統合・差し戻しロジック、管理者権限管理を `packages/domain` へ集約する。
-- **対象ソース**:
-  - `src/lib/xid/xUserVisibilityTransition.ts`
-  - `src/lib/xid/mergeSafety.ts`
-  - `src/lib/xid/mergePreflight.ts`
-- **作成ファイル**:
-  1. `packages/domain/src/user/xid.ts`:
-     - `transitionXUserVisibility(ctx: DomainContext, params: ...)`
-     - `validateXIdMergePreflight(ctx: DomainContext, params: ...)`
-  2. `packages/domain/src/user/index.ts`
-- **要件の保持**:
-  - ユーザー合意事項である「Active X 未連携ユーザーには登録モーダルを表示して促す」フローと矛盾しないドメイン境界を維持すること。
-- **検証コマンド**:
-  ```bash
-  npm run typecheck
-  npm run test:unit
-  npm run verify:fast
-  ```
+- **対象**（[`server-actions/README.md`](server-actions/README.md) の SA-*）:
+  - 可視性遷移: SA-001〜003（admin）、SA-040〜042（manage）— 共通 core を共有し、adapter は role 別に残す
+  - chapter: SA-012〜015
+  - collab/member: SA-082〜085
+  - 提出・更新: SA-086, SA-088, SA-089
+  - interaction: SA-087（**Active X 移行の対象**。[`ACTIVE_X_MIGRATION_PLAN.md`](ACTIVE_X_MIGRATION_PLAN.md) を先に読むこと）
+- **Tier 1（先行可）**: `src/lib/auth/ownershipCore.ts`（`resolveVideoOwnershipSync`, `decideCanEditVideoFromAccessContext`, `adminPolicyAllows`, `ownerPolicyAllows`, `creatorOwnerCanManagePermissions`, `resolveAdminOrEventVideoPrivilegeMode`）。
+  推移的 import（`src/lib/auth/videoEditSections.ts`, `src/lib/auth/permissions/aliases.ts`, `src/lib/video/generalEditPermissionsCore.ts`）も同時に移す。
+- **Tier 2（D-01 待ち）**: `src/lib/video/videoVisibilityTransition.ts`（`server-only`、`next/navigation`、`@/lib/db/*` を import）、`src/lib/video/computeEditSections.ts`（`@/lib/db/*` を import）、`src/lib/auth/ownership.ts` の `canEditVideo`（DB 経路）。
+  `next/navigation` の `redirect` はドメインへ持ち込まず、結果型（`unauthenticated | forbidden | ...`）で返して adapter が redirect する。
+- **不変条件**: PR #265 で一本化した作品編集権限判定（権限源ごとの判定）、「creator owner のみが collaborator 権限を委譲できる」、dangerous key の常時 deny。
+- **チャプターコメント**: 親チャプター削除時、コメントは物理削除せず論理保持する（[`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md) Chapter/comment model）。
 
----
+### MIG-0305: event/slot domain group（イベント・枠）
+
+- **対象**: SA-021〜039（event / event group / staff / template / playlist）、SA-056〜068（slot）。
+- **Tier 1（先行可）**: `src/lib/event/eventOwnershipCore.ts`（`assertEventWillRetainOwner`, `validateEventStaffUniqueness`, `validateEventStaffSubject`, `assertOwnershipTransferInput`, `assertSelfChangeConfirmation`, `isEventOwner`, `planXIdMergeEventStaffOwnerProtection`）、`src/lib/slots/slotReservationLimit.ts`。
+- **Tier 2（D-01 待ち）**: `src/lib/event/eventVisibilityTransition.ts`, `src/lib/event/eventGroupVisibilityTransition.ts`。
+- **不変条件**: `FN-X-001` event は常に operable owner を 1 人以上保持する（条件付き SQL/CAS を含む。UI 検証だけにしない）。
+- **intentional exception（汎用 CRUD 化しない）**: SA-021 `renameEventId`, SA-056/057 slot の破壊的 release。
+
+### MIG-0306: user/X/admin domain group（ユーザー・X・管理）
+
+- **対象**: SA-016〜020（CostGuard）、SA-043〜055（moderation / notification-admin / terms）、SA-069〜081（static-rebuild / terms / user-admin）、SA-090〜106（X ID・merge・Active X・YouTube sync）。
+- **Tier 1（先行可）**: `src/lib/xid/mergeBudget.ts`（`planXIdMergeD1Budget`）は `@/lib/audit/mutate` に依存するため audit core の分離が前提。単独では先行不可。
+- **Tier 2（D-01 待ち）**: `src/lib/xid/xUserVisibilityTransition.ts`（`server-only`）、`src/lib/xid/mergeSafety.ts`（drizzle `sql` を import）、`src/lib/xid/merge.ts`。
+- **Auth User を Active X へ機械置換しない**: `approved_by_auth_user_id`, `edit_granted_by_auth_user_id`, audit `actor_user_id`, session/security 識別子は Auth User のまま（[`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)）。
+- **intentional exception**: SA-092〜097 X-ID merge/revert（安全な primitive のみ共有）、SA-011 audit restore、SA-050 public visibility repair。
 
 ### MIG-0307: Phase 3 Gate（完了判定）
 
-- **目的**:
-  - `packages/domain` にすべての主要ビジネスロジックが抽出され、フレームワークから完全に分離されたことを検証・承認する。
 - **完了チェックリスト**:
-  - [ ] `packages/domain` に Next.js / React / Hono / Astro のインポートが一切存在しない（静的解析チェック）
-  - [ ] 動画・イベント・枠・ユーザーの主要ドメイン関数がすべて `packages/domain` から export されている
-  - [ ] 現行 Next.js (`src/lib/`) は `packages/domain` を呼び出す薄い互換ブリッジとして機能し、既存テスト 2,405 件がすべてパスしている
-  - [ ] `npm run verify:fast`（全9ステップ）がすべて PASS している
-  - [ ] `STATUS.md` の Phase 3 を `DONE` に更新し、Phase 6（Hono API: `MIG-0601`）を `READY` にアンブロック
-- **検証コマンド**:
+  - [ ] `packages/domain` に `next/*` / `react` / `hono` / `astro` / `server-only` の import がない（静的チェックを `scripts/` に追加し `check:project-docs` へ接続）
+  - [ ] Tier 1 の対象がすべて `packages/domain` へ移り、`src/lib/**` は同名 export のブリッジである
+  - [ ] Tier 2 は D-01 の回答に基づき移行済み、または理由付きで `BLOCKED/SKIPPED` と記録されている
+  - [ ] 既存テスト（`npm run test:unit`・`npm run test:integration`）が**無変更で**全件パスする（件数は固定せず、移行前後で同数であることを確認する）
+  - [ ] `npm run verify:fast` が PASS
+  - [ ] `STATUS.md` の Phase 3 を `DONE` に更新し、Phase 6 の MIG-0601 を `READY` にする
+- **検証**:
   ```bash
   npm run typecheck
   npm run test:unit
+  npm run test:integration
   npm run verify:fast
-  node scripts/check-migration-docs.mjs
+  npm run check:project-docs
   ```
+
+---
+
+# 4. 抽出規約（MIG-0301 で確定後に追記）
+
+MIG-0301 完了時に、次を本節へ記録する。
+
+- 配置: `packages/domain/src/<domain>/<module>.ts`
+- 公開 export: `packages/domain/src/index.ts`（サブパス export の有無）
+- ブリッジ: `src/lib/...` の元ファイルを再 export にする書き方
+- テスト: 移動したテストの置き場所と実行コマンド
+- 3 経路（node test / next build / tsc）の解決方法
