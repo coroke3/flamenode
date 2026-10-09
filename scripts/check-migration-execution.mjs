@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 export const REQUIRED_DECISIONS = Object.freeze({
   "MIG-0200": ["D-08"],
+  "MIG-0308": ["D-01"],
   "MIG-0303": ["D-01"],
   "MIG-0304": ["D-01"],
   "MIG-0305": ["D-01"],
@@ -62,10 +63,11 @@ export function expandDependencies(raw) {
 }
 
 export function validateMigrationExecution({
-  statusText, decisionsText, routingText, viteText, apiSpecText,
+  statusText, decisionsText, routingText, viteText, apiSpecText, activeXText, domainPlanText, privateSpaText, publicPlanText, uiReferenceText,
 }) {
   const errors = [];
   const tasks = parseTaskRows(statusText);
+  if (!tasks.has("MIG-0308")) errors.push("D-01=A requires MIG-0308 packages/db task");
   const decisions = parseDecisionRows(decisionsText);
   const currentTask = statusText.match(/^Current Task:\s*(MIG-\d{4})/m)?.[1];
   const currentState = statusText.match(/^Task State:\s*(\S+)/m)?.[1];
@@ -91,14 +93,21 @@ export function validateMigrationExecution({
   if (viteText && !/base:\s*["']\/["']/.test(viteText)) {
     errors.push("Private SPA must use base '/' for /dashboard, /entry, /manage, /admin routes");
   }
+  if (viteText && !viteText.includes('assetsDir: "_personal_assets"')) errors.push("Personal SPA asset namespace must be _personal_assets");
   if (routingText) {
     if (!routingText.includes("/api/auth/*") || !routingText.includes("一括切替は禁止")) {
       errors.push("routing must explicitly exclude legacy /api/auth/* from generic API cutover");
     }
+    if (!routingText.includes("/_ops_assets/*") || !routingText.includes("/_personal_assets/*")) errors.push("2-SPA asset route namespaces are missing");
     if (/^-\s*\/api\/\*.*flamenode-api/m.test(routingText)) {
       errors.push("routing contains catch-all /api/* cutover");
     }
   }
+  if (activeXText && (!activeXText.includes("link_role='owner'") || !activeXText.includes("fan-out"))) errors.push("D-03 requires approved owner X fan-out");
+  if (domainPlanText && (!domainPlanText.includes("packages/db") || !domainPlanText.includes("ゼロDDL"))) errors.push("D-01 packages/db zero-DDL plan is missing");
+  if (privateSpaText && (!privateSpaText.includes("apps/ops") || !privateSpaText.includes("/_ops_assets/*"))) errors.push("D-05 Ops SPA spec is missing");
+  if (publicPlanText && (!publicPlanText.includes("R2") || !publicPlanText.includes("1102"))) errors.push("D-06 R2 HTML/CPU budget spec is missing");
+  if (uiReferenceText && decisions.get("D-08") === "DECIDED" && uiReferenceText.includes("`PENDING_HTML`")) errors.push("D-08 cannot be DECIDED before mock registration");
   if (apiSpecText && !apiSpecText.includes("CURRENT の `/api/*` パス構造")) {
     errors.push("Hono plan must preserve CURRENT API path contract");
   }
@@ -115,6 +124,11 @@ if (invoked) {
     routingText: read("docs/migration/ROUTING_AND_DEPLOY_PLAN.md"),
     viteText: read("apps/app/vite.config.ts"),
     apiSpecText: read("docs/migration/PHASE_6_SPEC.md"),
+    activeXText: read("docs/migration/ACTIVE_X_MIGRATION_PLAN.md"),
+    domainPlanText: read("docs/migration/DB_PACKAGE_EXTRACTION_PLAN.md"),
+    privateSpaText: read("docs/migration/PHASE_7_SPEC.md"),
+    publicPlanText: read("docs/migration/PHASE_4_5_SPEC.md"),
+    uiReferenceText: read("docs/migration/UI_REFERENCE.md"),
   });
   if (errors.length) {
     for (const error of errors) console.error("[check:migration-execution] " + error);
