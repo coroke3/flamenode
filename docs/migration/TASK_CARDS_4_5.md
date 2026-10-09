@@ -6,6 +6,8 @@
 
 ## Every Public task MUST preserve
 
+`FILE_MIGRATION_MATRIX.md` のMIG担当ページ/loader/テスト行を先に確認し、新Astroファイル作成と共にURL/UX/FNおよびvisibility gateway・R2 consumerを同じ行へ記録する。静的生成物だけではファイルの`PARITY_VERIFIED`は付けない。
+
 - CURRENT canonical URL/query/redirect/404/robots/canonical/OGP/thumbnail + pagination.
 - `public_visibility_fences`: private/hidden/voided content is fail-closed even when a stale R2/Static Assets HTML exists. No route may leak unpublished metadata.
 - Static-first request: no heavy D1, React request render, aggregate, sync, images transform, or build on public GET.
