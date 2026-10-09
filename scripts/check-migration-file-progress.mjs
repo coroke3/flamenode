@@ -103,9 +103,12 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
   if(!actual.has(file)&&row.state!=="RETIRED")errors.push(file+" source file absent but state is "+row.state);
   if(row.state!=="NOT_STARTED"){
    if(!/PR#\d+/.test(row.evidence)||!/SHA=[0-9a-f]{40}\b/.test(row.evidence))errors.push(file+" progress evidence requires real PR# and SHA=40hex");
-   if(["BRIDGED","PARITY_VERIFIED","CUTOVER","RETIRED","RETAINED"].includes(row.state)&&!/\bTEST=/.test(row.evidence))errors.push(file+" advanced state requires TEST=...");
+   if(["BRIDGED","PARITY_VERIFIED","CUTOVER","RETIRED","RETAINED"].includes(row.state)&&(!/\bTEST=/.test(row.evidence)||!/(?:\bCI=https:\/\/|\bLOG=)/.test(row.evidence)))errors.push(file+" advanced state requires TEST=... plus CI=https://... or LOG=...");
    if(["CUTOVER","RETIRED"].includes(row.state)&&!/\bAPPROVAL=/.test(row.evidence))errors.push(file+" production/destructive state requires APPROVAL=...");
-   if(["BRIDGED","PARITY_VERIFIED","CUTOVER","RETIRED"].includes(row.state)&&(/\bTBD\b|\bcandidate\b/i.test(row.target)||row.target.startsWith("+")))errors.push(file+" advanced state has unverified target path");
+   if(["BRIDGED","PARITY_VERIFIED","CUTOVER","RETIRED"].includes(row.state)){
+    const candidates=[...row.target.matchAll(/(?:apps|packages|src|workers|app)\/[a-zA-Z0-9_\-./\[\]]+\.(?:ts|tsx|astro|mjs|js)/g)].map(x=>x[0]);
+    if(/\bTBD\b|\bcandidate\b/i.test(row.target)||row.target.startsWith("+")||!candidates.length||candidates.some(x=>x.includes("..")||!actual.has(x)))errors.push(file+" advanced state has unverified target path");
+   }
   }
   const p=pages.get(file);
   if(row.kind==="PAGE"){
