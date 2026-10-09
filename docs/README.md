@@ -13,7 +13,7 @@
 
 移行:
 
-`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/STATUS.md` → `migration/OPEN_DECISIONS.md` → `migration/IMPLEMENTATION_RUNBOOK.md` → one `migration/TASK_CARDS_*.md` → `migration/GIT_WORKFLOW.md` → `migration/README.md` → taskに必要なUX/FN/route/API ledger → 対象code/test
+`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/STATUS.md` → `migration/OPEN_DECISIONS.md` → `migration/FILE_MIGRATION_MATRIX.md` (該当MIG行) → `migration/FILE_PROGRESS_PROTOCOL.md` → `migration/IMPLEMENTATION_RUNBOOK.md` → one `migration/TASK_CARDS_*.md` → `migration/GIT_WORKFLOW.md` → `migration/README.md` → taskに必要なUX/FN/route/API ledger → 対象code/test
 
 branch / PR / merge / handoffは `migration/GIT_WORKFLOW.md`。
 正本重複判断だけ `migration/DOC_MAP.md`。
@@ -39,6 +39,8 @@ Historical/archive/完了済みphaseはCURRENT仕様の根拠にしない。
 | migration Git policy | [`migration/GIT_WORKFLOW.md`](migration/GIT_WORKFLOW.md) |
 | target migration architecture | [`migration/README.md`](migration/README.md) |
 | progress / next READY task | [`migration/STATUS.md`](migration/STATUS.md) |
+| per-file code progress / MIG ownership | [`migration/FILE_MIGRATION_MATRIX.md`](migration/FILE_MIGRATION_MATRIX.md) |
+| per-file wiring and evidence rules | [`migration/FILE_PROGRESS_PROTOCOL.md`](migration/FILE_PROGRESS_PROTOCOL.md) |
 | user decisions / prerequisite gates | [`migration/OPEN_DECISIONS.md`](migration/OPEN_DECISIONS.md) |
 | documentation source map | [`migration/DOC_MAP.md`](migration/DOC_MAP.md) |
 | CURRENT user-visible routes | [`migration/CURRENT_ROUTES.md`](migration/CURRENT_ROUTES.md) |
