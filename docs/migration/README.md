@@ -5,7 +5,7 @@
 > Progress: [`STATUS.md`](STATUS.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > One-MIG implementation: [`IMPLEMENTATION_RUNBOOK.md`](IMPLEMENTATION_RUNBOOK.md), [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md), [`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md), [`TASK_CARDS_6_7.md`](TASK_CARDS_6_7.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md)
-> Small-model acceptance: [`SMALL_MODEL_SMOKE_TEST.md`](SMALL_MODEL_SMOKE_TEST.md)
+> Small-model acceptance: [`SMALL_MODEL_SMOKE_TEST.md`](SMALL_MODEL_SMOKE_TEST.md) / [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md)（大型MIGを複数wakeへ分割）
 > Git workflow: [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md)
 > Current routes: [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md)
 > 全既存機能一覧: [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md)
