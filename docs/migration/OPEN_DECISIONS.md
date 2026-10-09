@@ -86,6 +86,7 @@
 
 - 事実: `README.md` の route group 表は `/dashboard` `/entry` `/manage` `/admin` を同じ React/Vite app へ割り当てている。
 - 仮置き: **SPA は 1 つ（`apps/app`）**。Vite の `base` は `/`、アセットは `/_app_assets/*`。
+  - `apps/app/vite.config.ts` の `base: "/"` は非本番PoCをこの仮置きに合わせたものであり、D-05の決定・本番配信承認ではない。Phase 7の開始前に正式な配置方式を確定する。
   Worker Route は `/dashboard/*`, `/entry/*`, `/manage/*`, `/admin/*`, `/onboarding` を app へ向ける。
   （`/auth/complete` と `/api/auth/*` は Phase 8 まで現行 Auth.js 側に残す。）
 - 代替: `/admin` だけ別 bundle にする（admin 画面が 45 あり bundle が大きい）。Phase 7 開始前に bundle 実測で再判断する。
