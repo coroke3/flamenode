@@ -1,7 +1,8 @@
 # FlameNode 複数 Worker ルーティング・段階移行計画書（Routing & Deployment Plan）
 
-> 状態: Active / インフラ・デプロイ・ルーティング設計正本
-> 関連ドキュメント: [`README.md`](README.md), [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md), [`UI_MIGRATION_GUIDE.md`](UI_MIGRATION_GUIDE.md)
+> 状態: Active / インフラ・デプロイ・ルーティング設計書
+> 最終検証: 2026-10-09（`cloudflare/TOPOLOGY.md` の Custom Domain / Route 現況および `OPEN_DECISIONS.md` D-02 に基づき改定）
+> 関連ドキュメント: [`README.md`](README.md), [`cloudflare/TOPOLOGY.md`](cloudflare/TOPOLOGY.md), [`UI_MIGRATION_GUIDE.md`](UI_MIGRATION_GUIDE.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-02, D-05)
 
 ## 1. 概要
 
@@ -9,66 +10,77 @@
 
 ---
 
-## 2. Cloudflare Workers Routes 設計と優先順位
+## 2. Cloudflare Ingress とルーティングマッピング設計
 
-Cloudflare では、より具体的なパスパターンが一般的なパターンより優先して評価されます。
+### 現行のインフラ構成 (`cloudflare/TOPOLOGY.md`)
+- `flamenode.net` および `www.flamenode.net` は `flamenode-web` の **Custom Domain** として設定。
+- zone の Worker Route は現在 0 件。
 
-### ルーティングマッピング一覧
+### 目標ルーティングマッピング一覧
 
 ```text
 [HTTP Request: flamenode.net/*]
   │
   ├─ 1. /api/* ─────────────────────────> flamenode-api (Hono API)
   │
-  ├─ 2. /dashboard/_app_assets/* ───────> flamenode-app (Vite SPA Static Assets)
-  ├─ 3. /dashboard/* ───────────────────> flamenode-app (Vite SPA Client Entry)
+  ├─ 2. SPA 静的アセット ───────────────> flamenode-app (Vite SPA Static Assets)
+  │      ・ /_app_assets/*
   │
-  ├─ 4. /_astro/* ──────────────────────> flamenode-site (Astro Static Assets)
-  ├─ 5. 公開ルート群（段階移行）─────────> flamenode-site (Astro SSG)
+  ├─ 3. 管理・個人・登録画面 ───────────> flamenode-app (Vite SPA Client Entry)
+  │      ・ /dashboard/*
+  │      ・ /entry/*
+  │      ・ /manage/*
+  │      ・ /admin/*
+  │      ・ /onboarding
+  │
+  ├─ 4. Astro 静的アセット ─────────────> flamenode-site (Astro Static Assets)
+  │      ・ /_astro/*
+  │
+  ├─ 5. 公開閲覧画面群（段階移行）──────> flamenode-site (Astro SSG)
   │      ・ / (トップ)
-  │      ・ /event/*, /events/*
-  │      ・ /users/*
+  │      ・ /event/*, /groups/*
+  │      ・ /user/*
+  │      ・ /list, /recommend, /trending
+  │      ・ /about, /rules
   │      ・ /:id (動画詳細)
   │
   └─ 6. /* (上記以外の未移行ルート) ─────> flamenode-web (現行 Next.js / OpenNext)
 ```
 
-### パス衝突の完全防止
+### パス・アセット衝突の完全防止
 - **Astro 静的アセット**: `/_astro/*`
-- **Vite SPA 静的アセット**: `/dashboard/_app_assets/*`
+- **Vite SPA 静的アセット**: `/_app_assets/*`
 - **Next.js 静的アセット**: `/_next/*`
-- すべてのアセットプレフィックスが完全に分離されているため、キャッシュの競合や誤ルーティングは構造上発生しません。
+プレフィックスが完全に分離されているため、アセットのキャッシュ競合や誤ルーティングは発生しません。
 
 ---
 
-## 3. 段階的カットオーバー（Staged Cutover）手順
+## 3. Custom Domain と Worker Route の共存検証（D-02 参照）
 
-### フェーズ A: API 導通（Phase 6 完了時）
-- `flamenode.net/api/*` の Worker Route を `flamenode-api` へ向ける。
-- Next.js 側からも新 API をプロキシまたは直接利用可能とし、API の疎通と性能（CPU 時間 < 10ms）を確認。
-
-### フェーズ B: 公開画面の段階切り替え（Phase 5 完了時）
-- 特定の公開ルートから順に `flamenode-site` へ向ける：
-  1. `/events/*`（イベント一覧・詳細）
-  2. `/users/*`（クリエイタープロフィール）
-  3. `/`（トップページ）
-  4. `/:id`（動画詳細）
-- 各ステップで Google Analytics、SEO メタデータ、表示速度を検証。
-
-### フェーズ C: 管理画面の切り替え（Phase 7 完了時）
-- `/dashboard/*` の Worker Route を `flamenode-app` へ向ける。
-- 認証セッションの維持、動画編集・枠予約の正常系を検証。
-
-### フェーズ D: 完全移行と旧 Worker 停止（Phase 9）
-- 全ルートが新構成（Astro + Vite + Hono）へ移行完了したことを確認。
-- `flamenode-web`（Next.js / OpenNext）の Worker Route を解除し、退役（Retirement）させる。
+同一ホスト名において、Custom Domain（`flamenode-web`）を維持したまま、特定パスパターン（例: `/api/*`）の Worker Route を被せて新 Worker へルーティングできるかは、本番適用前に非本番ドメインで実証が必要です（[`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-02）。
+不整合が生じる場合は、前段に薄い Ingress Router Worker を配置して Service Bindings で振り分ける方式を代替案とします。
 
 ---
 
-## 4. ロールバック手順（Emergency Rollback）
+## 4. 段階的カットオーバー手順（Staged Cutover）
 
-不具合発生時は、Cloudflare Dashboard または Wrangler CLI より該当ルートの宛先を即座に `flamenode-web`（現行 Next.js）へ戻すことで、**数秒以内の無停止ロールバック**が可能です。
-```bash
-# 緊急ロールバック例: 公開ルートを現行Nextへ戻す
-npx wrangler routes set "flamenode.net/*" --script "flamenode-web"
-```
+> **重要**: 本番の Worker Route、Custom Domain、DNS 設定変更は、`AGENTS.md` により**ユーザーの明示承認が必須**です。
+
+1. **Step A: API 導通（Phase 6 完了時）**:
+   - `/api/*` のルーティングを `flamenode-api` へ向ける。Next.js 側からも新 API 経由での動作を確認。
+2. **Step B: 公開画面の段階切り替え（Phase 5 完了時）**:
+   - `/about`, `/rules` → `/event/*` → `/user/*` → `/list` → `/` → `/:id` の順に段階的に `flamenode-site` へ向ける。
+3. **Step C: 管理画面の切り替え（Phase 7 完了時）**:
+   - `/dashboard/*`, `/entry/*`, `/manage/*`, `/admin/*`, `/onboarding` を `flamenode-app` へ向ける。
+4. **Step D: 完全移行と旧 Worker 停止（Phase 9）**:
+   - 全トラフィックが新構成へ移行完了し、`flamenode-web` のリクエストが 0 であることを確認後、旧 Worker を退役。
+
+---
+
+## 5. ロールバック手順（Emergency Rollback）
+
+不具合発生時は、以下の手段で即座に旧環境へ復旧します：
+1. **Worker Route の解除**:
+   Cloudflare Dashboard または Cloudflare API より、対象パスの Worker Route を無効化／削除することで、直ちに Custom Domain 宛先（`flamenode-web`）へトラフィックを戻す。
+2. **Worker デプロイ自体のロールバック**:
+   新 Worker 側で不具合があった場合は、`npx wrangler rollback [deployment-id]` を実行して直前の安定バージョンへロールバック。

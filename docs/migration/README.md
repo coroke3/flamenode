@@ -27,6 +27,7 @@
 > UI コンポーネント移行ガイド: [`UI_MIGRATION_GUIDE.md`](UI_MIGRATION_GUIDE.md)
 > Active X データ移行計画: [`ACTIVE_X_MIGRATION_PLAN.md`](ACTIVE_X_MIGRATION_PLAN.md)
 > 複数 Worker ルーティング & デプロイ計画: [`ROUTING_AND_DEPLOY_PLAN.md`](ROUTING_AND_DEPLOY_PLAN.md)
+> 判断待ち事項正本: [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md)
 
 ## Purpose
 
