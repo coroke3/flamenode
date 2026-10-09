@@ -83,7 +83,7 @@ export function collectFiles(root=ROOT){
    else if(item.isFile())files.push(path.relative(root,child).replaceAll(path.sep,"/"));
   }
  }
- for(const sub of ["app","src/lib/actions","src/lib/db","workers","apps","packages"])visit(path.join(root,sub));
+ for(const sub of ["app","src/lib","workers","apps","packages"])visit(path.join(root,sub));
  for(const base of ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"]){
   if(fs.existsSync(path.join(root,base)))files.push(base);
  }
