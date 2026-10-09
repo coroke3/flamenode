@@ -2,6 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-10-07
+> Verified against commit: `f862c6cc7993ef30f0363d92719c938b23723bee`
 > Source of truth: `AGENTS.md`, CURRENT code/test, `src/lib/db/schema.ts`, `migrations/`
 
 ## AI read order
@@ -12,7 +13,7 @@
 
 移行:
 
-`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/STATUS.md` → `migration/GIT_WORKFLOW.md` → `migration/README.md` → taskに必要なUX/FN/route/API ledger → 対象code/test
+`../AGENTS.md` → `migration/AGENT_PROTOCOL.md` → `migration/STATUS.md` → `migration/OPEN_DECISIONS.md` → `migration/GIT_WORKFLOW.md` → `migration/README.md` → taskに必要なUX/FN/route/API ledger → 対象code/test
 
 branch / PR / merge / handoffは `migration/GIT_WORKFLOW.md`。
 正本重複判断だけ `migration/DOC_MAP.md`。
@@ -35,6 +36,7 @@ Historical/archive/完了済みphaseはCURRENT仕様の根拠にしない。
 | migration Git policy | [`migration/GIT_WORKFLOW.md`](migration/GIT_WORKFLOW.md) |
 | target migration architecture | [`migration/README.md`](migration/README.md) |
 | progress / next READY task | [`migration/STATUS.md`](migration/STATUS.md) |
+| user decisions / prerequisite gates | [`migration/OPEN_DECISIONS.md`](migration/OPEN_DECISIONS.md) |
 | documentation source map | [`migration/DOC_MAP.md`](migration/DOC_MAP.md) |
 | CURRENT user-visible routes | [`migration/CURRENT_ROUTES.md`](migration/CURRENT_ROUTES.md) |
 | frontend observable capabilities | [`migration/FRONTEND_FEATURES.md`](migration/FRONTEND_FEATURES.md) + [`migration/frontend/`](migration/frontend/) |
