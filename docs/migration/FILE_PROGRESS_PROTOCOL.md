@@ -35,7 +35,7 @@
 | RETAINED | intentionally stays in architecture | documented reason, owner, test proof and PR |
 | BLOCKED | safe continuation impossible | PR and SHA, exact blocker, responsible owner and resume condition |
 
-**Evidence syntax:** Every state other than NOT_STARTED must have PR#123 and SHA=<40 hex>. BRIDGED/PARITY_VERIFIED and later also require TEST=<exact command> and a CI/log link. CUTOVER/RETIRED require APPROVAL=<reference>. These strings represent actual run identifiers; never fabricate them. DONE is a MIG state, never a file state.
+**Evidence syntax:** Every state other than NOT_STARTED must have PR#123 and SHA=<40 hex>. BRIDGED/PARITY_VERIFIED and later also require TEST=<exact command> and CI=https://... or LOG=<real log reference>. For BRIDGED or later the file checker also verifies that every named target file path actually exists in this git tree. CUTOVER/RETIRED require APPROVAL=<reference>. These strings represent actual run identifiers; never fabricate them. DONE is a MIG state, never a file state.
 
 ## File mapping is a wiring contract
 
