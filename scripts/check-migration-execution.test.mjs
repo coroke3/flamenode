@@ -116,3 +116,26 @@ test("SKIPPED task cannot bypass dependent gate without independent approval", (
   const changed = status.replace("| MIG-0301 | core PoC | READY | MIG-0108 |", "| MIG-0301 | core PoC | SKIPPED | MIG-0108 |");
   assert.match(run({statusText:changed}).join("\n"),/SKIP_APPROVAL/);
 });
+
+
+const performanceDagStatus = status
+ .replace("| MIG-0402 | Astro | BLOCKED | MIG-0301 |","| MIG-0402 | Astro | BLOCKED | MIG-0206, MIG-0401 |")
+ .replace("| MIG-0405 | fence | BLOCKED | MIG-0301 |","| MIG-0405 | fence | BLOCKED | MIG-0404 |")
+ + "| MIG-0105 | Astro skeleton | DONE | MIG-0108 |\n"
+ + "| MIG-0206 | Visual Gate | BLOCKED | MIG-0108 |\n"
+ + "| MIG-0401 | snapshot | READY | MIG-0105 |\n"
+ + "| MIG-0403 | visual representatives | BLOCKED | MIG-0402, MIG-0404 |\n"
+ + "| MIG-0404 | route manifest | BLOCKED | MIG-0401 |\n"
+ + "| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |\n";
+test("1102 performance PoC can be READY while visual D-08 is BLOCKED", () => {
+ const actual=performanceDagStatus.replace("| MIG-0406 | budget | BLOCKED | MIG-0405 |","| MIG-0406 | budget | BLOCKED | MIG-0405 |");
+ assert.deepEqual(run({statusText:actual}),[]);
+});
+test("performance DAG cannot be put behind unfinished visual routes", () => {
+ const changed=performanceDagStatus.replace("| MIG-0404 | route manifest | BLOCKED | MIG-0401 |","| MIG-0404 | route manifest | BLOCKED | MIG-0403 |");
+ assert.match(run({statusText:changed}).join("\n"),/MIG-0404 performance\/visual DAG/);
+});
+test("nonvisual PoC cannot remain BLOCKED after its only dependency is DONE", () => {
+ const changed=performanceDagStatus.replace("| MIG-0401 | snapshot | READY | MIG-0105 |","| MIG-0401 | snapshot | BLOCKED | MIG-0105 |");
+ assert.match(run({statusText:changed}).join("\n"),/eligible for READY/);
+});
