@@ -70,3 +70,9 @@ test("existing source mentioned in MIG cards requires its own ledger row",()=>{
  const errors=validateFileProgress({...base,filePaths:[...filePaths,extra],taskCardsText:"### MIG-0301 \\n- 読む: "+extra});
  assert.match(errors.join("\\n"),/missing file progress row for source/);
 });
+
+test("MIG marked DONE cannot leave owned files NOT_STARTED",()=>{
+ const completed=status.replace("MIG-0501 | about | BLOCKED","MIG-0501 | about | DONE");
+ const errors=validateFileProgress({...base,status:completed});
+ assert.match(errors.join("\\n"),/owner MIG is DONE but file still NOT_STARTED/);
+});
