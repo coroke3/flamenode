@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [react()],
   base: "/",
   build: {
-    assetsDir: "_app_assets",
+    assetsDir: "_personal_assets",
   },
 });
