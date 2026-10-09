@@ -6,6 +6,9 @@ const status = `| ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0301 | extraction | READY | MIG-0108 |
 | MIG-0308 | DB schema | BLOCKED | MIG-0301 |
+| MIG-0401 | public snapshot | BLOCKED | MIG-0308 |
+| MIG-0601 | Hono health | BLOCKED | MIG-0308 |
+| MIG-0801 | Auth fixtures | BLOCKED | MIG-0601 |
 `;
 const cards = {
   "docs/migration/TASK_CARDS_2_3.md": `# Phase 2
@@ -21,9 +24,9 @@ const cards = {
 - 試験: zero diff
 - DONE: verified
 `,
-  "docs/migration/TASK_CARDS_4_5.md":"# Phase 4\n# Phase 5\n",
-  "docs/migration/TASK_CARDS_6_7.md":"# Phase 6\n# Phase 7\n",
-  "docs/migration/TASK_CARDS_8_9.md":"# Phase 8\n# Phase 9\n",
+  "docs/migration/TASK_CARDS_4_5.md":"# Phase 4\n# Phase 5\n### MIG-0401 — snapshot\n- 読む: code\n- 変更: build loader\n- 試験: output\n- DONE: verified\n",
+  "docs/migration/TASK_CARDS_6_7.md":"# Phase 6\n# Phase 7\n### MIG-0601 — health\n- 読む: RH-018\n- 変更: Hono\n- 試験: API\n- DONE: verified\n",
+  "docs/migration/TASK_CARDS_8_9.md":"# Phase 8\n# Phase 9\n### MIG-0801 — fixtures\n- 読む: auth\n- 変更: tests\n- 試験: compare\n- DONE: verified\n",
 };
 const base={
   status, fileContents: cards, runbook: "1 wake = 1 task BLOCKED_ON_USER",
@@ -33,8 +36,8 @@ const base={
 };
 
 test("status tasks and card IDs parse uniquely", () => {
-  assert.equal(parseTrackedMigrationTasks(status).size,2);
-  assert.equal(collectTaskCards(cards).cards.size,2);
+  assert.equal(parseTrackedMigrationTasks(status).size,5);
+  assert.equal(collectTaskCards(cards).cards.size,5);
 });
 
 test("small-model work card contract accepts complete fixtures", () => {
@@ -46,7 +49,7 @@ test("missing task, duplicate task, orphan task all fail", () => {
   assert.match(validateTaskCards({...base,fileContents:missing}).join(" "),/MIG-0308: STATUS task without executable/);
   const duplicate={...cards, "docs/migration/TASK_CARDS_4_5.md":cards["docs/migration/TASK_CARDS_4_5.md"] + "\n" + cards["docs/migration/TASK_CARDS_2_3.md"]};
   assert.match(validateTaskCards({...base,fileContents:duplicate}).join(" "),/duplicate card/);
-  const orphan={...cards, "docs/migration/TASK_CARDS_4_5.md":cards["docs/migration/TASK_CARDS_4_5.md"] + "\n### MIG-0401 --- test\n- 読む:\n- 変更:\n- 試験:\n- DONE:\n"};
+  const orphan={...cards, "docs/migration/TASK_CARDS_4_5.md":cards["docs/migration/TASK_CARDS_4_5.md"] + "\n### MIG-0402 --- test\n- 読む:\n- 変更:\n- 試験:\n- DONE:\n"};
   assert.match(validateTaskCards({...base,fileContents:orphan}).join(" "),/no STATUS task/);
 });
 
