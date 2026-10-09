@@ -1123,6 +1123,7 @@ if (errors.length === 0) {
     protocol,
     decisions: read("docs/migration/OPEN_DECISIONS.md"),
     smokeDocs: read("docs/migration/SMALL_MODEL_SMOKE_TEST.md"),
+    microUnits: read("docs/migration/TASK_MICRO_UNITS.md"),
   }));
 
   // Git discipline remains non-negotiable.
