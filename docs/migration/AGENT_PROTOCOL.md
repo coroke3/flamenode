@@ -38,30 +38,16 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 
 ---
 
-# Mandatory read order
+# Per-wake required read contract (targeted, not full-file bulk import)
 
-毎iteration:
+1. Read root `AGENTS.md` scope and [MIGRATION_START_HERE.md](MIGRATION_START_HERE.md). The quick entry is an **index**, not a replacement for this protocol or `GIT_WORKFLOW.md`.
+2. Read **the one relevant MIG row and its dependency rows** in `STATUS.md`, the related `OPEN_DECISIONS.md` decision, the `IMPLEMENTATION_RUNBOOK.md` current-workflow section, and **one** corresponding `TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` `### MIG-XXXX` block. Check owner PR before claiming.
+3. Filter `FILE_MIGRATION_MATRIX.md` to **owned source/target rows**, then consult relevant `FILE_PROGRESS_PROTOCOL.md` state transitions and `TASK_MICRO_UNITS.md` (large tasks only). Open CURRENT code and tests before writing.
+4. Read only the necessary **portions** of `CURRENT_ROUTES.md`, `FRONTEND_FEATURES.md`, `FUNCTION_INVENTORY.md`, `PRODUCT_REQUIREMENTS.md`, `CODE_QUALITY.md`, `ROUTE_MATRIX.md` or `API_MATRIX.md`. Use `GIT_WORKFLOW.md` for PR/merge/approval stages and `UI_REFERENCE.md` when work is visual.
+5. Subsystem baselines **only when touched**: `server-actions/README.md` (SA), `route-handlers/README.md` (RH), `cloudflare/TOPOLOGY.md` (deployment), `cloudflare/PERFORMANCE_BASELINE.md` + `PERF_HOTPATH_MATRIX.md` (1102), `static-delivery/README.md` (public), `auth/README.md` (security), `background-jobs/README.md` (Queue), `screen-mapping/README.md` (UI parity).
+6. Full `README.md`, `FEATURE_CATALOG.md` and `BACKEND_OPTIMIZATION.md` are **on-demand references**, not full-file mandatory context for every wake. Read `DOC_MAP.md` only if source-of-truth ownership is unclear.
 
-1. `AGENTS.md`
-2. `docs/AI_CONTEXT.md` のmigration entry
-3. `docs/migration/STATUS.md`
-3a. `docs/migration/OPEN_DECISIONS.md`（対象taskに紐づくDecision状態を必ず確認）
-3b. **`docs/migration/IMPLEMENTATION_RUNBOOK.md`**（Luna/Haiku含む全agent必読）
-3b1. **`docs/migration/FILE_PROGRESS_PROTOCOL.md` と `FILE_MIGRATION_MATRIX.md` の現在のMIGに属するファイル行だけ**（source→target→consumerと各ファイル状態を記録する）
-3c. **`docs/migration/TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` の該当MIG 1件だけ**。大型MIGは `docs/migration/TASK_MICRO_UNITS.md` の該当micro-unitだけ読む。全55件を一度に読み込まない
-4. `docs/migration/GIT_WORKFLOW.md`
-5. `docs/migration/README.md`
-6. `docs/migration/FEATURE_CATALOG.md` — **対象IDの行だけ**確認（432 UX / 136 FN を一度に読む必要はない）
-7. `docs/migration/PRODUCT_REQUIREMENTS.md` の**対象要件節のみ**
-8. `docs/migration/CODE_QUALITY.md` の該当規約
-9. task scopeに応じて:
-   - route/UI/frontend → `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象`frontend/*.md` + `screen-mapping/README.md`
-   - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`; Route Handler/APIを触る場合は `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job topologyを触る場合は `cloudflare/TOPOLOGY.md`; CPU/1102/request hot-path/PoC performanceを触る場合は `cloudflare/PERFORMANCE_BASELINE.md`; static artifact/alias/visibility/fallback/repairを触る場合は `static-delivery/README.md`; auth/session/linking/terms/Active X/permission/owner invariantを触る場合は `auth/README.md`; Queue/Cron/background job/retry/DLQ/recoveryを触る場合は `background-jobs/README.md`
-   - visual/UI design → `UI_REFERENCE.md`
-10. 必要な`ROUTE_MATRIX.md` / `API_MATRIX.md`
-11. 対象CURRENT code + tests + config
-
-正本の所在が不明な時だけ`DOC_MAP.md`を読む。
+**Independent tracks:** MIG-0401→0404→0405→0406 (performance PoC, no D-08 HTML) and MIG-0301 (domain extraction) can be claimed by distinct owners/PRs. MIG-0402/0403 (visual) still wait for D-08. MIG-0407 waits for 0403 **and** 0406; production is separately approved. See `PERFORMANCE_IMPLEMENTATION_PLAN.md`.
 
 ## Context minimization
 
