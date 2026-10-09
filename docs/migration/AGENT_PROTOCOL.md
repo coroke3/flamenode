@@ -45,6 +45,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 1. `AGENTS.md`
 2. `docs/AI_CONTEXT.md` のmigration entry
 3. `docs/migration/STATUS.md`
+3a. `docs/migration/OPEN_DECISIONS.md`（対象taskに紐づくDecision状態を必ず確認）
 4. `docs/migration/GIT_WORKFLOW.md`
 5. `docs/migration/README.md`
 6. `docs/migration/FEATURE_CATALOG.md` — 432 UX / 136 FN の人間向け全件索引
@@ -362,6 +363,9 @@ LOOP:
 
 - Overall/Task State = BLOCKED
 - READY taskなし
+- taskに必要な `OPEN_DECISIONS.md` のDecisionが `DECIDED` ではない（対象scopeの純粋ロジック部分だけ進める場合は境界を記録）
+- 前wakeが作成したopen PRが同じMIGを所有し、resume/handoffができない
+- 必須CI失敗、または独立レビューの証拠が無い状態でのDONE/merge要求
 - Phase Gate review待ち
 - production actionの明示承認待ち
 - Remote D1 / secret / Worker Route / Custom Domain変更が必要
@@ -448,3 +452,18 @@ Progress files updated:
 Next:
 - MIG-YYYY | Phase Gate review | BLOCKED(reason)
 ```
+
+---
+
+# Resumable loop / PR lifecycle contract（2026-10-09追補）
+
+1. 各wakeにおいて最新mainとopen migration PRを読み込む。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch STATUSを優先し、新しいtask/PRを生成しない。
+2. `OPEN_DECISIONS.md`の`Needed by`相当のMIG依存を解釈し、該当タスクについて`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`を「許可済み」と解釈しない。決定の証拠（decision ID / owner / date）をPRへ記録する。
+3. task claimはGitHubの単一atomic transactionではない。draft PRを作成する前後で同一MIGのopen PRを照合し、重複したら作業せずowner調整へ止める。mainの`READY`のみで未所有とみなさない。
+4. 実装は一taskずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。
+5. `REVIEW`は必ず独立したレビュアーによるレビューと、対象branchの必須CI成功を必要とする。`DONE`へ進む前にレビュー時のhead SHA、レビュー結論、run URL、rollback証拠をPRに記録。新push後はレビュー/CIを再評価する。
+6. 人間承認が必要なGate/認証/権限/visibility/DB schema/本番切替を、Loop維持のために自動承認しない。安全に進められる無関係taskがある場合も、明示的なdependencyとwriterの独立が条件。
+7. merge後に最新mainのstatus/task/lock解消を再読込するまでは次taskへ移らない。hostが反復機構を持たなければ一回で終了する。
+8. stale`IN_PROGRESS`/古いPRは自動削除しない。PRを根拠にhandoffし、claim譲渡・失敗理由・未実行チェック・次の実行者を明示する。
+
+状態機械としての契約: `READY → IN_PROGRESS → REVIEW → DONE`。例外: `IN_PROGRESS/REVIEW → BLOCKED`（復旧条件明記）。`REVIEW`は合格を意味しない。`DONE`はreview/CIと依存完了を必要とする。フェーズGateはユーザーの明示承認を別に要する。
