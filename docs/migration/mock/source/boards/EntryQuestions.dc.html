@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>運営からの質問</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>
+body{margin:0;background:#000}
+.qs{display:grid;gap:32px}
+.qs-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.q{display:grid;gap:10px}
+.q-l{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:15px;line-height:24px;color:var(--ink)}
+.q-req{color:var(--danger);font-size:13px}
+.q-vis{font-size:12px;line-height:16px;color:var(--ink-muted)}
+.q-help{margin:-4px 0 0;font-size:12px;line-height:16px;color:var(--ink-muted)}
+.q-in{width:100%;max-width:520px;height:40px;padding:0 12px;border:0;background:var(--surface-subtle);color:var(--ink);font:400 15px/24px var(--font-sans);outline:none;box-sizing:border-box}
+.q-in:focus{background:var(--surface-active)}
+textarea.q-in{height:auto;min-height:104px;padding:8px 12px;resize:vertical}
+.q-cnt{font-size:12px;line-height:16px;color:var(--ink-muted);text-align:right;max-width:520px}
+
+.q-opts{display:grid;gap:2px;max-width:520px}
+.q-o{display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:center;min-height:44px;padding:0 14px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 15px/22px var(--font-sans);text-align:left;cursor:pointer}
+.q-o:hover{color:var(--ink)}
+.q-o.on{background:var(--surface-active);color:var(--ink)}
+.q-o .bx{width:16px;height:16px;box-sizing:border-box;box-shadow:inset 0 0 0 1.5px var(--ink-muted);display:grid;place-items:center;font-size:10px;color:var(--bg)}
+.q-o.on .bx{box-shadow:none;background:var(--ink)}
+.q-o.radio.on .bx::after{content:"";width:6px;height:6px;background:var(--bg)}
+.q-sel{appearance:none;width:100%;max-width:520px;height:40px;padding:0 40px 0 12px;border:0;background:var(--surface-subtle) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 14px center;color:var(--ink);font:400 15px/24px var(--font-sans)}
+.q-sel.ph{color:var(--ink-muted)}
+@media (max-width:640px){.q-opts,.q-in,.q-sel,.q-cnt{max-width:none}}
+</style>
+</helmet>
+<div class="p-root qs" data-theme="{{theme}}" lang="ja" style="min-height: 0; background: transparent; padding-bottom: 0;">
+  <div class="qs-h"><h3 class="t-h3" style="margin: 0;">運営からの質問</h3><span class="t-sm muted">{{ev}}</span></div>
+  <sc-for list="{{qs}}" as="q" hint-placeholder-count="5">
+    <div class="q" role="group" aria-label="{{q.label}}">
+      <div class="q-l"><span>{{q.label}}</span><sc-if value="{{q.req}}" hint-placeholder-val="{{true}}"><span class="q-req" aria-label="必須">*</span></sc-if><span class="q-vis">{{q.vis}}</span></div>
+      <sc-if value="{{q.help}}" hint-placeholder-val="{{false}}"><p class="q-help">{{q.help}}</p></sc-if>
+      <sc-if value="{{q.isText}}" hint-placeholder-val="{{false}}"><input class="q-in" type="text" maxlength="{{q.max}}" placeholder="{{q.ph}}" value="{{q.val}}" onInput="{{q.set}}" aria-label="{{q.label}}"><div class="q-cnt t-num">{{q.count}}</div></sc-if>
+      <sc-if value="{{q.isArea}}" hint-placeholder-val="{{false}}"><textarea class="q-in" maxlength="{{q.max}}" placeholder="{{q.ph}}" onInput="{{q.set}}" aria-label="{{q.label}}">{{q.val}}</textarea><div class="q-cnt t-num">{{q.count}}</div></sc-if>
+      <sc-if value="{{q.isChoice}}" hint-placeholder-val="{{true}}">
+        <div class="q-opts" role="{{q.role}}">
+          <sc-for list="{{q.opts}}" as="o" hint-placeholder-count="3"><button type="button" role="{{o.role}}" aria-checked="{{o.on}}" class="{{o.cls}}" onClick="{{o.pick}}"><span class="bx"><i class="{{o.ck}}" aria-hidden="true"></i></span><span>{{o.label}}</span></button></sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{q.isSelect}}" hint-placeholder-val="{{false}}"><select class="{{q.selCls}}" onChange="{{q.set}}" aria-label="{{q.label}}"><option value="">選択してください</option><sc-for list="{{q.opts}}" as="o" hint-placeholder-count="4"><option value="{{o.label}}" selected="{{o.sel}}">{{o.label}}</option></sc-for></select></sc-if>
+    </div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"ev":{"editor":"text","default":"PVSF2026S"},"$preview":{"width":720,"height":900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { a: { vol: '', flags: ['大音量'], term: '', yomi: '', msg: '' } }; }
+  renderVals() {
+    // 種別: text 短文 / textarea 長文 / radio 選択(ボタン) / checkbox チェックボックス / select プルダウン(customQuestions.ts)
+    // 公開範囲: public 作品ページに公開 / review 審査用 / private 運営のみ
+    const VIS = { public: '作品ページに公開', review: '審査用', private: '運営のみ' };
+    const Q = [
+      { id: 'vol', type: 'radio', label: 'ステージで流す際の音量調整は必要ですか?', req: true, vis: 'private', opts: ['不要', '必要'] },
+      { id: 'flags', type: 'checkbox', label: '作品に含まれる表現', req: true, vis: 'review', help: 'あてはまるものをすべて選んでください', opts: ['点滅・フラッシュ', '流血表現', '大音量', '該当なし'] },
+      { id: 'term', type: 'select', label: '制作期間', req: false, vis: 'public', opts: ['1週間未満', '1か月未満', '3か月未満', '3か月以上'] },
+      { id: 'yomi', type: 'text', label: '配信で読み上げる名前の読み', req: false, vis: 'private', ph: '例: おたこ', max: 40 },
+      { id: 'msg', type: 'textarea', label: '運営へのメッセージ', req: false, vis: 'private', ph: '上映時の注意点など', max: 1000 }
+    ];
+    const A = this.state.a;
+    const set = (id, v) => this.setState({ a: { ...this.state.a, [id]: v } });
+    return {
+      theme: this.props.theme ?? 'dark', ev: this.props.ev ?? 'PVSF2026S',
+      qs: Q.map((q) => {
+        const v = A[q.id];
+        const multi = q.type === 'checkbox';
+        return { label: q.label, req: q.req, vis: VIS[q.vis], help: q.help || (multi ? '' : ''), ph: q.ph || '', max: q.max || 0,
+          isText: q.type === 'text', isArea: q.type === 'textarea', isChoice: q.type === 'radio' || multi, isSelect: q.type === 'select',
+          role: multi ? 'group' : 'radiogroup', val: typeof v === 'string' ? v : '', count: (typeof v === 'string' ? v.length : 0) + ' / ' + (q.max || 0),
+          selCls: v ? 'q-sel' : 'q-sel ph',
+          set: (e) => set(q.id, e.target.value),
+          opts: q.opts ? q.opts.map((o) => { const on = multi ? v.includes(o) : v === o; return { label: o, on: on ? 'true' : 'false', sel: on, role: multi ? 'checkbox' : 'radio', cls: 'q-o ' + (multi ? 'check' : 'radio') + (on ? ' on' : ''), ck: multi && on ? 'fa-solid fa-check' : '',
+            pick: () => { if (!multi) return set(q.id, o); const none = o === '該当なし'; const cur = v.filter((x) => none ? false : x !== '該当なし'); set(q.id, cur.includes(o) ? cur.filter((x) => x !== o) : [...cur, o]); } }; }) : [] };
+      })
+    };
+  }
+}
+</script>
+</body>
+</html>

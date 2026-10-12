@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>監査ログ設定</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="audit" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">ログ設定</h1></sc-if><p class="muted">監査ログの保持期間・ペイロードサイズ上限などを管理します。</p></div></div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="監査メニュー" style="margin-bottom: 32px;">
+      <a href="AdminAuditHub.dc.html" class="il"><i class="fa-solid fa-list" aria-hidden="true"></i>監査ログ</a>
+      <a href="AdminAuditHub.dc.html" class="il" aria-current="page"><i class="fa-solid fa-sliders" aria-hidden="true"></i>ログ設定</a>
+      <a href="AdminAuditHub.dc.html" class="il"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i>復元履歴</a>
+    </nav></sc-if>
+    <form class="stack" style="gap: 2px; max-width: 760px;" onSubmit="{{prevent}}">
+      <div class="raised row" style="gap: 16px; padding: 16px 20px;"><span class="icon-tile"><i class="fa-regular fa-file-lines" aria-hidden="true"></i></span><span class="stack" style="flex: 1;"><span>通常ログ 保持日数</span><span class="t-sm muted t-mono">normal_retention_days</span></span><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip sm">30日</button><button type="button" class="chip sm">90日</button><button type="button" class="chip sm">180日</button></span><x-import component-from-global-scope="FlameNode.TextField" aria-label="通常ログ 保持日数" type="number" default-value="30" hint="7〜365" style="width: 96px;"></x-import><span class="muted">日</span></div>
+      <div class="raised row" style="gap: 16px; padding: 16px 20px;"><span class="icon-tile"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></span><span class="stack" style="flex: 1;"><span>復元可能ログ 保持日数</span><span class="t-sm muted t-mono">restorable_retention_days</span></span><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip sm">90日</button><button type="button" class="chip sm">180日</button><button type="button" class="chip sm">365日</button></span><x-import component-from-global-scope="FlameNode.TextField" aria-label="復元可能ログ 保持日数" type="number" default-value="180" hint="14〜1095" style="width: 96px;"></x-import><span class="muted">日</span></div>
+      <div class="raised row" style="gap: 16px; padding: 16px 20px;"><span class="icon-tile"><i class="fa-solid fa-box-archive" aria-hidden="true"></i></span><span class="stack" style="flex: 1;"><span>長期監査ログ 保持日数</span><span class="t-sm muted t-mono">long_audit_retention_days</span></span><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip sm">365日</button><button type="button" class="chip sm">730日</button><button type="button" class="chip sm">1095日</button></span><x-import component-from-global-scope="FlameNode.TextField" aria-label="長期監査ログ 保持日数" type="number" default-value="365" hint="30〜3650" style="width: 96px;"></x-import><span class="muted">日</span></div>
+      <div class="raised row" style="gap: 16px; padding: 16px 20px;"><span class="icon-tile"><i class="fa-solid fa-weight-hanging" aria-hidden="true"></i></span><span class="stack" style="flex: 1;"><span>最大ペイロードサイズ</span><span class="t-sm muted t-mono">max_payload_bytes</span></span><x-import component-from-global-scope="FlameNode.TextField" aria-label="最大ペイロードサイズ" type="number" default-value="120000" hint="1000〜1000000" style="width: 120px;"></x-import><span class="muted">B</span></div>
+      <div class="raised row" style="gap: 16px; padding: 16px 20px;"><span class="icon-tile"><i class="fa-solid fa-compress" aria-hidden="true"></i></span><span class="stack" style="flex: 1;"><span>コンパクト化開始日数</span><span class="t-sm muted t-mono">compact_after_days</span></span><x-import component-from-global-scope="FlameNode.TextField" aria-label="コンパクト化開始日数" type="number" default-value="30" hint="1〜365" style="width: 96px;"></x-import><span class="muted">日</span></div>
+      <div class="notice" style="margin-top: 16px;"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true" style="color: var(--warning); padding-top: 4px;"></i><span class="t-sm">警告: 保持日数を短くすると、期限を過ぎたログは次回のクリーンアップで削除されます。</span></div>
+      <div style="margin-top: 16px;"><button type="submit" class="fn-btn fn-btn--primary">設定を保存</button></div>
+    </form>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark', prevent: (e) => e.preventDefault() }; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>利用規約</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap split" style="padding-top: 56px;">
+    <article class="main prose" style="max-width: 760px;">
+      <h1 class="t-display">利用規約</h1>
+      <p class="t-sm muted" style="margin: 12px 0 0;">v3.0 · 2026.10.01 施行</p>
+
+      <h3>第1条 適用</h3>
+      <p>[規約本文 — 管理画面で公開中のバージョンの本文がここに表示されます]</p>
+      <h3>第2条 投稿作品の取り扱い</h3>
+      <p>[規約本文]</p>
+      <h3>第3条 禁止事項</h3>
+      <p>[規約本文]</p>
+      <h3>第4条 アカウントおよび投稿の削除</h3>
+      <p>[規約本文]</p>
+    </article>
+
+    <aside class="side">
+      <div class="raised stack" style="gap: 20px; padding: 32px;">
+        <h2 class="t-h3">利用規約への同意</h2>
+        <p class="t-sm muted" style="margin: 0;">改定に伴い、投稿・枠確保を続けるには再同意が必要です。同意後、元のページへ戻ります。</p>
+        <x-import component-from-global-scope="FlameNode.Checkbox" label="利用規約 v3.0 に同意する"></x-import>
+        <x-import component-from-global-scope="FlameNode.Button" variant="primary" style="width: 100%;"><i class="fa-solid fa-check" aria-hidden="true"></i>利用規約に同意して戻る</x-import>
+      </div>
+      <dl class="kv" style="grid-template-columns: 96px 1fr; margin-top: 32px; font-size: 13px;">
+        <dt>前回同意</dt><dd class="t-num">v2.1 · 2026.03.12</dd>
+        <dt>影響度</dt><dd>重要(再同意が必要)</dd>
+      </dl>
+    </aside>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

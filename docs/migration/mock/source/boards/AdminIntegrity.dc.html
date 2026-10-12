@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>DB 整合性チェック</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="health" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head">
+      <div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">DB整合性</h1></sc-if><p class="muted">videos / video_events / video_members / slots / 派生行 / audit_logs の参照整合性を読み取り専用で確認します。初期表示では実行せず、必要なときだけ明示的に実行します。</p></div>
+      <button type="button" class="fn-btn fn-btn--primary" onClick="{{run}}"><i class="fa-solid fa-play" aria-hidden="true"></i>診断を実行</button>
+    </div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="診断メニュー" style="margin-bottom: 24px;">
+      <a href="AdminHealthHub.dc.html" class="il"><i class="ms ms-monitor_heart" aria-hidden="true"></i>ヘルスチェック</a>
+      <a href="AdminHealthHub.dc.html" class="il" aria-current="page"><i class="ms ms-account_tree" aria-hidden="true"></i>DB整合性</a>
+      <a href="AdminHealthHub.dc.html" class="il"><i class="ms ms-dns" aria-hidden="true"></i>Worker監視</a>
+    </nav></sc-if>
+    <sc-if value="{{notRun}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 12px; padding: 64px 0; align-items: flex-start;"><span class="icon-tile lg"><i class="fa-solid fa-stethoscope" aria-hidden="true"></i></span><span class="t-h3">DB整合性診断は未実行です</span></div>
+    </sc-if>
+    <sc-if value="{{ran}}" hint-placeholder-val="{{true}}">
+      <div class="metrics" style="margin-bottom: 32px;">
+        <div class="metric"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><b>3</b><span>総検出件数</span></div>
+        <div class="metric"><i class="fa-solid fa-skull-crossbones" aria-hidden="true" style="color: var(--danger);"></i><b>0</b><span>危険チェック</span></div>
+        <div class="metric"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true" style="color: var(--warning);"></i><b>1</b><span>警告チェック</span></div>
+        <div class="metric"><i class="fa-solid fa-circle-info" aria-hidden="true" style="color: var(--info);"></i><b>2</b><span>確認チェック</span></div>
+      </div>
+      <div class="dt" style="--cols: minmax(240px,1.4fr) 90px 64px minmax(220px,1.4fr); --minw: 0px;">
+        <div class="dt-h"><span>チェック</span><span>重要度</span><span class="num">件</span><span>推奨対応</span></div>
+        <div class="dt-r"><span>video_members が存在しない video を参照</span><span class="st"><span class="dot warn"></span>警告</span><span class="num">1</span><span class="t-sm">該当作品のメンバー設定を開き保存し直す</span></div>
+        <div class="dt-r"><span>submitted 枠で video_id が空</span><span class="st"><span class="dot info"></span>確認</span><span class="num">1</span><span class="t-sm">運営画面で枠の提出状態を確認</span></div>
+        <div class="dt-r"><span>video_events 派生行の欠落</span><span class="st"><span class="dot info"></span>確認</span><span class="num">1</span><span class="t-sm">静的JSON再生成で video を再投入</span></div>
+      </div>
+      <a href="AdminHealthHub.dc.html" class="il t-sm" style="margin-top: 16px; color: var(--brand-text);"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>ヘルスチェックへ</a>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { ran: true }; }
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark', ran: this.state.ran, notRun: !this.state.ran, run: () => this.setState({ ran: true }) }; }
+}
+</script>
+</body>
+</html>

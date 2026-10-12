@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>公開ヘッダー</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<header class="{{hdCls}}" lang="ja">
+  <div class="hd-bar">
+    <a href="Main.dc.html" class="hd-logo" aria-label="FlameNode トップ">
+      <img class="logo-d" src="/_blob/eee88ecd1bced2fd7ce508f977487e59" alt="FlameNode">
+      <img class="logo-l" src="/_blob/eded756c59dbc57e0b63d862e98d3177" alt="FlameNode">
+    </a>
+    <nav class="hd-nav" aria-label="メインナビゲーション">
+      <sc-for list="{{nav}}" as="n" hint-placeholder-count="3"><a href="{{n.href}}" aria-current="{{n.cur}}">{{n.label}}</a></sc-for>
+    </nav>
+    <div class="hd-right">
+      <label class="{{searchCls}}" onClick="{{openSearch}}">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input type="search" placeholder="作品・クリエイターを検索" aria-label="検索" value="{{q}}" onChange="{{noop}}">
+        <kbd class="kbd hd-kbd">/</kbd>
+      </label>
+      <button type="button" class="ib hd-search-ic" aria-label="検索" onClick="{{openSearch}}"><i class="fa-solid fa-magnifying-glass"></i></button>
+      <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
+        <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <a href="MyPage.dc.html" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
+        <button type="button" class="{{accBtnCls}}" aria-haspopup="menu" aria-expanded="{{accOpen}}" aria-label="アカウントメニューを開く(おたこ · @012345rty)" onClick="{{toggleAcc}}"><img class="hd-me" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt=""></button>
+        <button type="button" class="ib hd-me-m" aria-haspopup="menu" aria-expanded="{{navOpen}}" aria-controls="hd-menu" aria-label="メニューを開く(おたこ · @012345rty)" onClick="{{toggleNav}}"><img class="hd-me" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt=""></button>
+      </sc-if>
+      <sc-if value="{{guest}}" hint-placeholder-val="{{false}}">
+        <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <a href="EntrySignIn.dc.html" class="fn-btn fn-btn--secondary fn-btn--sm hd-login"><i class="fa-brands fa-discord" aria-hidden="true"></i>ログイン</a>
+      </sc-if>
+      <button type="button" class="{{burgerCls}}" aria-haspopup="menu" aria-expanded="{{navOpen}}" aria-controls="hd-menu" aria-label="メニュー" onClick="{{toggleNav}}"><i class="{{burgerIcon}}"></i></button>
+    </div>
+  </div>
+
+  <!-- 検索の候補 -->
+  <sc-if value="{{searchOpen}}" hint-placeholder-val="{{false}}">
+    <div class="hd-pop hd-sugg" role="listbox" aria-label="検索候補">
+      <div class="hd-sugg-g"><span class="t-label muted">最近の検索</span><div class="wrap-row" style="gap: 4px;"><span class="chip sm">空白合作</span><span class="chip sm">PVSF2026S</span><span class="chip sm">文字PV</span></div></div>
+      <div class="hd-sugg-g"><span class="t-label muted">作品</span>
+        <a href="VideoDetail.dc.html" class="hd-sugg-i"><img src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="" class="hd-th"><span class="stack" style="gap: 0; min-width: 0;"><span class="ell">崇渦に関するお知らせ 前編</span><span class="t-sm muted">おたこ · PVSF2026S</span></span></a>
+        <a href="VideoDetail.dc.html" class="hd-sugg-i"><img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" class="hd-th"><span class="stack" style="gap: 0; min-width: 0;"><span class="ell">空白合作</span><span class="t-sm muted">空白合作チーム · PVSF2026Sp</span></span></a>
+      </div>
+      <div class="hd-sugg-g"><span class="t-label muted">クリエイター</span><a href="Creator.dc.html" class="hd-sugg-i"><img src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt="" class="avatar" style="width: 28px; height: 28px;"><span>おたこ <span class="t-sm muted t-mono">@012345rty</span></span></a></div>
+      <div class="hd-sugg-g"><span class="t-label muted">イベント</span><a href="EventDetail.dc.html" class="hd-sugg-i"><img src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" class="ev-icon" style="width: 28px; height: 28px;"><span>PVSF2026S <span class="st t-sm"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>受付中</span></span></a></div>
+      <a href="Videos.dc.html" class="hd-sugg-all t-sm"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>「空白」で作品をすべて検索<kbd class="kbd">Enter</kbd></a>
+    </div>
+  </sc-if>
+
+  <!-- アカウントメニュー(スマホでは下から出るシート) -->
+  <sc-if value="{{accOpen}}" hint-placeholder-val="{{false}}">
+    <div class="hd-pop hd-acc" role="menu" aria-label="アカウント">
+      <div class="hd-acc-me"><img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt=""><span class="stack" style="gap: 0;"><b>おたこ</b><span class="t-sm muted">Discord でログイン中</span></span></div>
+      <span class="t-label muted hd-acc-h">活動名義(Active X ID)</span>
+      <sc-for list="{{xids}}" as="x" hint-placeholder-count="3">
+        <button type="button" role="menuitemradio" aria-checked="{{x.on}}" aria-label="{{x.aria}}" class="{{x.cls}}" disabled="{{x.off}}" onClick="{{x.pick}}"><img class="avatar" src="{{x.img}}" alt=""><span class="ell">{{x.name}}</span><i class="{{x.check}}" aria-hidden="true"></i></button>
+      </sc-for>
+      <a href="MyPage.dc.html" class="hd-acc-sub t-sm"><i class="fa-solid fa-plus" aria-hidden="true"></i>X ID を追加・申請状況を見る</a>
+      <div class="hd-acc-sep"></div>
+      <a href="MyPage.dc.html" class="hd-acc-l" role="menuitem"><i class="fa-solid fa-house" aria-hidden="true"></i>マイページ</a>
+      <a href="MyPage.dc.html" class="hd-acc-l" role="menuitem"><i class="fa-solid fa-bookmark" aria-hidden="true"></i>ライブラリ</a>
+      <a href="MyPage.dc.html" class="hd-acc-l" role="menuitem"><i class="fa-solid fa-gear" aria-hidden="true"></i>設定</a>
+      <div class="hd-acc-sep"></div>
+      <a href="Manage.dc.html" class="hd-acc-l" role="menuitem"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>運営<span class="t-sm muted t-num" style="margin-left: auto;">審査待ち 7</span></a>
+      <a href="Admin.dc.html" class="hd-acc-l" role="menuitem"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i>管理</a>
+      <div class="hd-acc-sep"></div>
+      <button type="button" class="hd-acc-l" role="menuitem"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>ログアウト</button>
+    </div>
+    <div class="hd-scrim" onClick="{{toggleAcc}}"></div>
+  </sc-if>
+
+  <!-- スマホ: ハンバーガーメニュー(ナビ・アカウント・テーマを統合。アバターと≡のどちらからも開く) -->
+  <sc-if value="{{navOpen}}" hint-placeholder-val="{{false}}">
+    <div id="hd-menu" class="hd-pop hd-menu" role="dialog" aria-label="メニュー">
+      <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
+        <div class="hd-acc-me"><img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt=""><span class="stack" style="gap: 0;"><b>おたこ</b><span class="t-sm muted">Discord でログイン中</span></span></div>
+        <span class="t-label muted hd-acc-h">活動名義(Active X ID)</span>
+        <sc-for list="{{xids}}" as="x" hint-placeholder-count="2">
+          <button type="button" role="menuitemradio" aria-checked="{{x.on}}" aria-label="{{x.aria}}" class="{{x.cls}}" disabled="{{x.off}}" onClick="{{x.pick}}"><img class="avatar" src="{{x.img}}" alt=""><span class="ell">{{x.name}}</span><i class="{{x.check}}" aria-hidden="true"></i></button>
+        </sc-for>
+        <div class="hd-acc-sep"></div>
+      </sc-if>
+      <nav aria-label="メインナビゲーション">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5"><a href="{{t.href}}" aria-current="{{t.cur}}"><i class="{{t.icon}}" aria-hidden="true"></i><span>{{t.label}}</span></a></sc-for>
+      </nav>
+      <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
+        <div class="hd-acc-sep"></div>
+        <a href="MyPage.dc.html"><i class="fa-solid fa-bookmark" aria-hidden="true"></i><span>ライブラリ</span></a>
+        <a href="MyPage.dc.html"><i class="fa-solid fa-gear" aria-hidden="true"></i><span>設定</span></a>
+        <a href="Manage.dc.html"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i><span>運営</span><span class="t-sm muted t-num" style="margin-left: auto;">審査待ち 7</span></a>
+        <a href="Admin.dc.html"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i><span>管理</span></a>
+      </sc-if>
+      <div class="hd-acc-sep"></div>
+      <div class="hd-menu-row"><span class="il"><i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i>テーマ</span>
+        <div class="seg" role="radiogroup" aria-label="テーマ"><sc-for list="{{themes}}" as="m" hint-placeholder-count="3"><button type="button" role="radio" aria-checked="{{m.on}}" class="{{m.cls}}" onClick="{{m.pick}}"><i class="{{m.icon}}" aria-hidden="true"></i>{{m.label}}</button></sc-for></div>
+      </div>
+      <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
+        <button type="button" class="hd-menu-out"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i><span>ログアウト</span></button>
+      </sc-if>
+    </div>
+    <div class="hd-scrim hd-menu-scrim" onClick="{{toggleNav}}"></div>
+  </sc-if>
+
+  <!-- スマホ: 親指で届く下部タブ -->
+  <nav class="hd-tabbar" aria-label="メインナビゲーション(スマホ)">
+    <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5"><a href="{{t.href}}" aria-current="{{t.cur}}" aria-label="{{t.label}}" title="{{t.label}}"><i class="{{t.icon}}" aria-hidden="true"></i><span>{{t.label}}</span></a></sc-for>
+  </nav>
+</header>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["","list","user","event","me"],"default":""},"account":{"editor":"enum","options":["user","guest"],"default":"user"},"menu":{"editor":"enum","options":["none","account","search","nav"],"default":"none"},"$preview":{"width":1440,"height":72}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { menu: null, x: '012345rty', theme: 'dark' }; }
+  renderVals() {
+    const S = this.state;
+    const a = this.props.active ?? '';
+    const acc = this.props.account ?? 'user';
+    const menu = S.menu || this.props.menu || 'none';
+    const N = [['list', '動画', 'Videos.dc.html', 'fa-solid fa-film'], ['user', 'クリエイター', 'Creators.dc.html', 'fa-solid fa-user-group'], ['event', 'イベント', 'Events.dc.html', 'fa-solid fa-calendar-days']];
+    // src/components/user/AccountMenu.tsx の状態表記
+    // Settings と同じ X ID。承認待ちは選べないので薄く表示するだけ
+    const X = [['012345rty', 'おたこ', '/_blob/fc027fe6fe3a001a22a1933270ce72b9', false], ['otako_sub', 'おたこ(サブ)', '/_blob/3d8d62bbac75243d266ec6e3de039e6d', true]];
+    const set = (m) => () => this.setState({ menu: menu === m ? 'none' : m });
+    return {
+      hdCls: 'hd2' + (menu === 'search' ? ' open-search' : menu === 'account' ? ' open-acc' : menu === 'nav' ? ' open-nav' : ''),
+      navOpen: menu === 'nav', toggleNav: set('nav'), burgerCls: 'ib hd-burger' + (menu === 'nav' ? ' on' : ''), burgerIcon: menu === 'nav' ? 'fa-solid fa-xmark' : 'fa-solid fa-bars',
+      nav: N.map(([id, label, href]) => ({ label, href, cur: a === id ? 'page' : 'false' })),
+      tabs: [...N.map(([id, label, href, icon]) => ({ id, label, href, icon })), { id: 'post', label: '投稿', href: acc === 'user' ? 'MyPage.dc.html' : 'EntrySignIn.dc.html', icon: 'fa-solid fa-paper-plane' }, { id: 'me', label: acc === 'user' ? 'マイページ' : 'ログイン', href: acc === 'user' ? 'MyPage.dc.html' : 'EntrySignIn.dc.html', icon: acc === 'user' ? 'fa-solid fa-user' : 'fa-solid fa-right-to-bracket' }].map((t) => ({ ...t, cur: a === t.id ? 'page' : 'false' })),
+      signedIn: acc === 'user', guest: acc !== 'user',
+      searchOpen: menu === 'search', accOpen: menu === 'account',
+      searchCls: 'hd-search' + (menu === 'search' ? ' on' : ''), q: menu === 'search' ? '空白' : '',
+      accBtnCls: 'ib hd-me-d' + (menu === 'account' ? ' on' : ''),
+      openSearch: () => this.setState({ menu: 'search' }), toggleAcc: set('account'), noop: () => {},
+      xids: X.map(([id, name, img, off]) => ({ id, name, img, off, aria: name + ' (@' + id + ')' + (off ? ' — 承認後に選べます' : ''), on: S.x === id ? 'true' : 'false', cls: 'hd-xid' + (S.x === id ? ' on' : ''), check: S.x === id ? 'fa-solid fa-check' : '', pick: () => this.setState({ x: id }) })),
+      themes: [['light', 'ライト', 'fa-regular fa-sun'], ['dark', 'ダーク', 'fa-regular fa-moon'], ['system', '自動', 'fa-solid fa-circle-half-stroke']].map(([v, label, icon]) => ({ label, icon, on: S.theme === v ? 'true' : 'false', cls: S.theme === v ? 'on' : '', pick: () => this.setState({ theme: v }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

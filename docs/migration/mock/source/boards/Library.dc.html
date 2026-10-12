@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ライブラリ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import></sc-if>
+
+  <div class="wrap" style="padding-top: 32px;">
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="マイページ">
+      <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-house" aria-hidden="true"></i>ダッシュボード</a>
+      <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i>参加・投稿</a>
+      <a href="MyPage.dc.html" class="il" aria-current="page"><i class="fa-solid fa-bookmark" aria-hidden="true"></i>ライブラリ</a>
+      <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-gear" aria-hidden="true"></i>設定</a>
+    </nav></sc-if>
+
+    <div class="wrap-row" style="justify-content: space-between; align-items: flex-end; gap: 24px; margin-top: 40px;">
+      <h1 class="t-display">ライブラリ</h1>
+      <div class="seg" role="tablist" aria-label="ライブラリ種別">
+        <sc-for list="{{kinds}}" as="k" hint-placeholder-count="5">
+          <button type="button" role="tab" class="{{k.cls}}" onClick="{{k.pick}}">{{k.label}}<span class="t-num muted">{{k.n}}</span></button>
+        </sc-for>
+      </div>
+    </div>
+
+    <sc-if value="{{showGrid}}" hint-placeholder-val="{{true}}">
+      <div class="grid-v" style="margin-top: 32px;">
+        <sc-for list="{{videos}}" as="v" hint-placeholder-count="8">
+          <div class="stack" style="gap: 8px;">
+            <a href="{{v.href}}" style="display: block;"><x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import></a>
+            <sc-if value="{{v.owned}}" hint-placeholder-val="{{false}}"><span class="row t-sm" style="justify-content: space-between;"><span class="st"><i class="{{v.dot}}" aria-hidden="true"></i>{{v.state}}</span><a href="VideoEdit.dc.html" class="ib sm" aria-label="編集"><i class="fa-solid fa-pen"></i></a></span></sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{showChapters}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 32px; max-width: 880px;">
+        <sc-for list="{{chapters}}" as="c" hint-placeholder-count="4">
+          <a href="VideoDetail.dc.html" class="row" style="gap: 16px; padding: 14px 0; align-items: flex-start;">
+            <img src="{{c.thumb}}" alt="" style="width: 96px; aspect-ratio: 16/9; object-fit: cover; flex: none;">
+            <span class="stack" style="gap: 4px; flex: 1; min-width: 0;"><span class="t-sm ell muted">{{c.video}}</span><span class="row" style="gap: 12px;"><span class="t-mono t-sm">{{c.at}}</span><span class="t-sm">{{c.body}}</span></span></span>
+            <span class="st t-sm"><i class="{{c.dot}}" aria-hidden="true"></i>{{c.state}}</span>
+          </a>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 16px; padding: 80px 0; align-items: flex-start;">
+        <span class="icon-tile lg"><i class="{{emptyIcon}}" aria-hidden="true"></i></span>
+        <p class="t-h3" style="margin: 0;">{{emptyText}}</p>
+        <a href="{{emptyHref}}" class="fn-btn fn-btn--secondary">{{emptyCta}}</a>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{paged}}" hint-placeholder-val="{{true}}">
+      <nav aria-label="ページ移動" class="row" style="margin-top: 48px; gap: 4px;">
+        <button type="button" class="ib sm" aria-label="前のページ" disabled="{{yes}}"><i class="fa-solid fa-chevron-left"></i></button>
+        <span class="t-sm t-num" style="padding: 0 8px;">1 / 2</span>
+        <button type="button" class="ib sm" aria-label="次のページ"><i class="fa-solid fa-chevron-right"></i></button>
+      </nav>
+    </sc-if>
+  </div>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,320px"></dc-import></sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"emptyState":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { kind: 'like' }; }
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const k = this.state.kind;
+    const forceEmpty = this.props.emptyState ?? false;
+    const v = (title, creator, event, extra) => ({ title, creator, cicon: creator === 'おたこ' ? '/_blob/fc027fe6fe3a001a22a1933270ce72b9' : '', event, href: 'VideoDetail.dc.html', owned: false, ...extra });
+    const L = {
+      like: [v('【幼虫アニメ】◯◯◯でしますか？◯でしますか？','幼虫','PVSF2026Sp'), v('空白合作','空白合作チーム','PVSF2026Sp'), v('【文字PV】スチールワンダー / はるまきごはん','スティックのり','PVSF2026Sp'), v('おゆする合作','おゆする','PVSF2026Sp'), v('模範囚','hato','PVSF2026Sp'), v('【サナドリウム/wiz_nicc】二次創作MV','lalaClione(ララクリオネ)','PVSF2026Sp'), v('未来線～ミライン～','てつどうふぁん','PVSF2026Sp'), v('個々々々々々人 / Sohbana','あいこーすふぃあ','PVSF2026Sp')],
+      save: [v('Ruling of 31 eyes','貴方','PVSF2023Sp'), v('記念碑的な負け方を','貴方','PVSF2022R'), v('模範囚','hato','PVSF2026Sp')],
+      mine: [v('魔法少女 このは・グリモワール 最終決戦編','おたこ','PVSF2026Sp',{owned:true,state:'公開',dot:'fa-solid fa-eye st-ic ok'}), v('崇渦に関するお知らせ 前編','おたこ','PVSF2026Sp',{owned:true,state:'公開',dot:'fa-solid fa-eye st-ic ok'}), v('【短編アニメ】魔法少女vs改造人間','おたこ','PVSF2025Sp',{owned:true,state:'公開',dot:'fa-solid fa-eye st-ic ok'}), v('【自主制作アニメ】めざした空の向こう側','おたこ','PVSF2025Sp',{owned:true,state:'非公開',dot:'fa-solid fa-eye-slash st-ic mute'}), v('パンダと行く！都会の歩き方','おたこ','PVSF2024GW',{owned:true,state:'公開',dot:'fa-solid fa-eye st-ic ok'})],
+      collab: [v('祟渦に関するお知らせ 後編','ホラー映画合作','PVSF2026Sp',{owned:true,state:'公開',dot:'fa-solid fa-eye st-ic ok'}), v('Mitchie Mメドレー合作','Mitchie Mメドレー合作','PVSF2025S',{owned:true,state:'公開',dot:'fa-solid fa-eye st-ic ok'}), v('ホラー映画ロケ下見.mp4','ホラー映画合作','PVSF2025S',{owned:true,state:'公開',dot:'fa-solid fa-eye st-ic ok'})],
+    };
+    Object.values(L).forEach(list => list.forEach((x, i) => { x.thumb = T[i % 8]; }));
+    const chapters = [
+      { video: '魔法少女 このは・グリモワール 最終決戦編', at: '1:42', body: 'このはの変身シーン、作画を全部描き直しました', state: '公開', dot: 'fa-solid fa-eye st-ic ok', thumb: T[4] },
+      { video: '祟渦に関するお知らせ 後編', at: '3:05', body: '後半の手紙のカットを担当', state: '公開', dot: 'fa-solid fa-eye st-ic ok', thumb: T[6] },
+      { video: 'ホラー映画ロケ下見.mp4', at: '0:18', body: 'ロケ地の下見映像を担当', state: '非公開', dot: 'fa-solid fa-eye-slash st-ic mute', thumb: T[0] },
+    ];
+    const D = { like: '自分がいいねした作品を一覧表示します。', save: '自分がセーブした作品を一覧表示します。', mine: 'Active X ID 名義で投稿した作品を表示します。', collab: '承認済み X ID で共同編集できる作品を表示します。', chapter: '承認済み X ID で投稿したチャプターコメントを表示します。' };
+    const E = { like: ['まだ「いいね」した作品がありません。','fa-regular fa-heart','作品を探す','Recommend.dc.html'], save: ['まだ「セーブ」した作品がありません。','fa-regular fa-bookmark','作品を探す','Recommend.dc.html'], mine: ['自分の作品はまだ登録されていません。','fa-solid fa-film','作品を投稿する','MyPage.dc.html'], collab: ['共同編集できる作品はまだありません。','fa-solid fa-user-group','X ID を確認','MyPage.dc.html'], chapter: ['まだ投稿したチャプターコメントはありません。','fa-solid fa-list-ol','作品を探す','Recommend.dc.html'] };
+    const N = { like: 18, save: 3, mine: 10, collab: 14, chapter: 3 };
+    const kinds = [['like','いいね','fa-solid fa-heart'],['save','セーブ','fa-solid fa-bookmark'],['mine','自分の作品','fa-solid fa-film'],['collab','共同編集','fa-solid fa-user-group'],['chapter','チャプター','fa-solid fa-list-ol']]
+      .map(([id, label, icon]) => ({ label, icon, n: forceEmpty ? 0 : N[id], cls: k === id ? 'on' : '', pick: () => this.setState({ kind: id }) }));
+    const isCh = k === 'chapter';
+    return {
+      theme: this.props.theme ?? 'dark', yes: true, kinds, desc: D[k],
+      videos: L[k] || [], chapters,
+      showGrid: !forceEmpty && !isCh, showChapters: !forceEmpty && isCh, empty: forceEmpty, paged: !forceEmpty && (k === 'like' || k === 'collab'),
+      emptyText: E[k][0], emptyIcon: E[k][1], emptyCta: E[k][2], emptyHref: E[k][3]
+    };
+  }
+}
+</script>
+</body>
+</html>

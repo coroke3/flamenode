@@ -22,7 +22,7 @@
 | D-05 | **Personal(/dashboard,/entry) と Ops(/manage,/admin) の2 SPA** | DECIDED | MIG-0701..0706 | 独立build/asset prefix/deep links/権限確認 |
 | D-06 | **A: 無料SSG優先。容量超過時はR2事前生成HTML優先、限定SSRは例外** | DECIDED | MIG-0406/0501..0508 | 静的出力実数・CPU・1102/visibility/SEO検証 |
 | D-07 | **A: Workers環境でもAuth.js/@auth/coreを継続利用** | DECIDED | MIG-0802..0806 | cookie/session/CSRF/OAuth非本番互換PoC |
-| D-08 | **A: HTMLモックを先に確定してからUIを移行** | BLOCKED_ON_USER | MIG-0200..0206 / MIG-0402,0403 / Phase5 visual | HTMLの提供・SHA/版本・受入確認。**MIG-0401/0404/0405/0406の性能PoCは対象外** |
+| D-08 | **A: HTMLモックを先に確定してからUIを移行** | DECIDED | MIG-0200..0206 / MIG-0402,0403 / Phase5 visual | デザインモック受領・登録完了（docs/migration/mock/、UI_REFERENCE.md）。Phase 2抽出アンロック。 |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -96,11 +96,11 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 
 ## D-08 — UIモックを先に確定（A）
 
-ユーザー選択はA。**HTMLはまだ受領していないため`BLOCKED_ON_USER`を維持**し、未登録のデザインをagentが生成/既存mockから推定したことにしない。
+ユーザー選択はA。**2026-10-13 確定:** ユーザーからデザインモック一式（claude.ai Design アーティファクト version 1791816999-f0e9、全96ページ・パーツ）を受領し、[`docs/migration/mock/`](mock/README.md) に配置・[`UI_REFERENCE.md`](UI_REFERENCE.md) に登録完了。D-08 は **DECIDED** となった。
 
-- 受領時に`UI_REFERENCE.md`へファイル、SHA、scope、受領日、画面とUX-ID対応を登録。承認されたHTMLを新UI正本とする。
-- UI移行開始前にPhase2のvisual accept。移行中もCURRENTのUX/FN/API/権限/URL副作用を保持。
-- 非UIのdomain/DBパッケージ抽出とAPI契約/計測は先行可。UIの実装/完成判定は保留。
+- 受領・検証したモック（`docs/migration/mock/`）を新UIの唯一のビジュアル正本とする。
+- Phase 2（MIG-0201: visual/IA抽出・tokens）がアンロックされ、Phase 4/5の公開画面UI実装およびPhase 7の非公開SPA実装へ着手可能。
+- 移行中もCURRENTのUX/FN/API/権限/URL副作用を厳格に保持する（ビジュアルの反映のみで機能を暗黙削除しない）。
 
 ## Open evidence — separate from design decisions
 
@@ -110,4 +110,4 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 - D-05: Apps/Workersの2SPA buildとdeep link/asset分離のE2E。
 - D-06: 本番のREAD ONLY COUNT、Static Assets files、CPU/1102負荷測定。リモートデータ取得の承認が必要なら別途取得。
 - D-07: 既存auth cookie/session/OAuth契約の非本番PoC。
-- D-08: HTMLモックの受領・acceptance。
+- D-08: HTMLモックの受領・UI_REFERENCE.md登録完了（MIG-0200完了）。

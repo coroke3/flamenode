@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>初期設定 2/2</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}
+.ox-res{display:flex;align-items:baseline;justify-content:space-between;gap:4px 16px;flex-wrap:wrap;margin-top:8px}
+.ox-res>span{white-space:nowrap}
+.ox-hint{font-size:11px;line-height:16px;color:var(--ink-muted)}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <div class="wrap row" style="min-height: 72px; justify-content: space-between;">
+    <img class="logo-d" src="/_blob/eee88ecd1bced2fd7ce508f977487e59" alt="FlameNode" style="height: 18px;">
+    <img class="logo-l" src="/_blob/eded756c59dbc57e0b63d862e98d3177" alt="FlameNode" style="height: 18px;">
+    <span class="il t-sm muted"><i class="fa-regular fa-clock" aria-hidden="true"></i>約1分</span>
+  </div>
+
+  <div class="wrap" style="max-width: 880px; padding-top: 48px;">
+    <div class="row" style="gap: 8px;" aria-label="初期設定 2 / 2">
+      <span style="flex: 1; height: 4px; background: var(--ink);"></span>
+      <span style="flex: 1; height: 4px; background: var(--ink);"></span>
+    </div>
+    <p class="t-label muted t-num" style="margin: 12px 0 0;">2 / 2</p>
+    <h1 class="t-display" style="margin-top: 8px;">活動名義の選択</h1>
+    <p class="muted" style="margin: 16px 0 0; max-width: 640px;">作品に表示する名義です。Discord のアカウントは公開されません。</p>
+    <div class="stack t-sm" style="gap: 8px; margin-top: 24px;">
+      <span class="il"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>利用規約への同意(完了済み)</span>
+      <span class="il"><i class="{{xIcon}}" aria-hidden="true" style="{{xStyle}}"></i>活動名義となる X ID の登録(作品投稿に必要)</span>
+    </div>
+
+    <sc-if value="{{isForm}}" hint-placeholder-val="{{true}}">
+      <form class="stack" style="gap: 8px; margin-top: 32px; max-width: 560px;" onSubmit="{{submit}}">
+        <div class="row" style="gap: 8px;">
+          <div class="field-i" style="flex: 1;">
+            <x-import component-from-global-scope="FlameNode.TextField" aria-label="X ID" placeholder="username または https://x.com/username" default-value="https://x.com/otako_sub?s=21"></x-import>
+            <i class="fa-brands fa-x-twitter" aria-hidden="true"></i>
+          </div>
+          <button type="submit" class="fn-btn fn-btn--primary">この X ID で申請する</button>
+        </div>
+        <div class="ox-res"><span class="t-sm"><b style="font-weight: 400; color: var(--ink);">@otako_sub</b> として申請します</span><span class="ox-hint">@名前・名前・x.com の URL のどれでも可</span></div>
+      </form>
+    </sc-if>
+
+    <sc-if value="{{isSent}}" hint-placeholder-val="{{false}}">
+      <div class="notice" style="margin-top: 32px;">
+        <span class="st" style="color: var(--info); padding-top: 4px;"><i class="ms ms-pending_actions st-ic warn" aria-hidden="true"></i>承認待ち</span>
+        <span class="stack" style="gap: 2px;">
+          <span>申請完了・承認待ち <span class="muted">· @012345rty</span></span>
+          <span class="t-sm muted">運営の承認後に作品を投稿できます。作品の閲覧とイベント枠の確保は今すぐ使えます。</span>
+        </span>
+      </div>
+    </sc-if>
+
+    <div class="row" style="gap: 8px; margin-top: 40px;">
+      <a href="OnboardingTerms.dc.html" class="fn-btn fn-btn--tertiary"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>戻る</a>
+      <span style="flex: 1;"></span>
+      <a href="MyPage.dc.html" class="fn-btn fn-btn--secondary">ダッシュボードへ</a>
+    </div>
+  </div>
+  <div class="foot-spacer"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sent: false }; }
+  renderVals() {
+    const sent = this.state.sent;
+    return { theme: this.props.theme ?? 'dark', isForm: !sent, isSent: sent, submit: (e) => { e.preventDefault(); this.setState({ sent: true }); },
+      xIcon: sent ? 'ms ms-pending_actions' : 'fa-regular fa-square', xStyle: sent ? 'color: var(--info);' : 'color: var(--ink-muted);' };
+  }
+}
+</script>
+</body>
+</html>

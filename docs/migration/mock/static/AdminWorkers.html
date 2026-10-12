@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[稼働状況 のタブ] Worker監視 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /admin/workers / source: source/boards/AdminWorkers.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="AdminNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">管理</span><span class="ell">ダッシュボード</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">管理</span>
+  </div>
+  <div class="row" style="gap: 2px; padding: 0 12px 8px;">
+    <a href="Manage.html" class="ib sm" style="padding: 0;" aria-label="運営へ"><i class="fa-solid fa-clipboard-list"></i></a>
+    <a href="Main.html" class="ib sm" style="padding: 0;" aria-label="公開サイトへ"><i class="fa-solid fa-globe"></i></a>
+    <span style="flex: 1;"></span>
+    <button type="button" class="ib sm" style="padding: 0;" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+  </div>
+  
+    <span class="grp">概要</span>
+    
+      <a href="Admin.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true" style="width: 16px; text-align: center;"></i>ダッシュボード</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">対応</span>
+    
+      <a href="AdminVideosHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true" style="width: 16px; text-align: center;"></i>作品</span>
+        <span class="n">12</span>
+      </a>
+    
+      <a href="AdminUsersHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-users" aria-hidden="true" style="width: 16px; text-align: center;"></i>ユーザー / X ID</span>
+        <span class="n">4</span>
+      </a>
+    
+      <a href="AdminModeration.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-flag" aria-hidden="true" style="width: 16px; text-align: center;"></i>モデレーション</span>
+        <span class="n">2</span>
+      </a>
+    
+  
+    <span class="grp">サイト</span>
+    
+      <a href="AdminEventsHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-calendar-days" aria-hidden="true" style="width: 16px; text-align: center;"></i>イベント</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAnnouncements.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bullhorn" aria-hidden="true" style="width: 16px; text-align: center;"></i>お知らせ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminRules.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-scale-balanced" aria-hidden="true" style="width: 16px; text-align: center;"></i>規約</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">運用</span>
+    
+      <a href="AdminNotifications.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true" style="width: 16px; text-align: center;"></i>通知配信</span>
+        <span class="n">1</span>
+      </a>
+    
+      <a href="AdminHealthHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-monitor_heart" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働状況</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminStaticBuilds.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-code" aria-hidden="true" style="width: 16px; text-align: center;"></i>静的JSON再生成</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminYoutubeQuota.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-chart-pie" aria-hidden="true" style="width: 16px; text-align: center;"></i>YouTube クォータ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminCostGuard.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-gauge-high" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働モード</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAuditHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true" style="width: 16px; text-align: center;"></i>監査ログ</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">高度な管理</span>
+    
+      <a href="AdminSecurity.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-shield-halved" aria-hidden="true" style="width: 16px; text-align: center;"></i>セキュリティ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminPermSim.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-key" aria-hidden="true" style="width: 16px; text-align: center;"></i>権限シミュレーター</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminApi.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-plug" aria-hidden="true" style="width: 16px; text-align: center;"></i>公開API</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminImport.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-import" aria-hidden="true" style="width: 16px; text-align: center;"></i>旧形式インポート</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminSpreadsheet.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-table" aria-hidden="true" style="width: 16px; text-align: center;"></i>DBスプレッドシート</span>
+        <span class="n"></span>
+      </a>
+    
+  
+</nav>
+</div></div>
+  <main class="c-main">
+    <div class="c-head">
+      <div><h1 class="t-display">Worker監視</h1><p class="muted">Cron Worker、通知、静的JSON、YouTube同期、スコア更新の遅延と失敗を D1 の内部記録から確認します。</p></div>
+      <button type="button" class="fn-btn fn-btn--secondary">最新状態へ更新</button>
+    </div>
+    <nav class="subnav" aria-label="診断メニュー" style="margin-bottom: 24px;">
+      <a href="AdminHealthHub.html" class="il"><i class="ms ms-monitor_heart" aria-hidden="true"></i>ヘルスチェック</a>
+      <a href="AdminHealthHub.html" class="il"><i class="ms ms-account_tree" aria-hidden="true"></i>DB整合性</a>
+      <a href="AdminHealthHub.html" class="il" aria-current="page"><i class="ms ms-dns" aria-hidden="true"></i>Worker監視</a>
+    </nav>
+    <div class="queue">
+      <a href="AdminCostGuard.html"><span class="il"><i class="fa-solid fa-gauge-high" aria-hidden="true"></i>operation_mode</span><b style="font-size: 24px;">通常</b><span class="st"><span class="dot ok"></span>正常</span></a>
+      <a href="#"><span class="il"><i class="fa-solid fa-skull" aria-hidden="true"></i>停止・失敗Worker</span><b class="muted">0</b><span class="st"><span class="dot ok"></span>正常</span></a>
+      <a href="#"><span class="il"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>注意パイプライン</span><b>1</b><span class="st"><span class="dot warn"></span>注意</span></a>
+      <a href="#"><span class="il"><i class="fa-solid fa-box-open" aria-hidden="true"></i>失敗データ</span><b>2</b><span class="st"><span class="dot err"></span>要対応</span></a>
+      <a href="AdminNotifications.html"><span class="il"><i class="fa-solid fa-bell" aria-hidden="true"></i>通知配信</span><b>1</b><span>最終失敗</span></a>
+      <a href="AdminStaticBuilds.html"><span class="il"><i class="fa-solid fa-file-code" aria-hidden="true"></i>静的JSON再生成</span><b>1</b><span>失敗</span></a>
+    </div>
+
+    <section class="c-sec" aria-labelledby="cron">
+      <h2 id="cron" class="t-h3" style="margin-bottom: 8px;">定期実行の状態</h2>
+      <div class="t-scroll"><div class="dt" style="--cols: minmax(160px,1fr) 100px 110px 110px 110px 110px minmax(120px,1fr); --minw: 940px;">
+        <div class="dt-h"><span>ジョブ</span><span>状態</span><span>最終開始</span><span>最終成功</span><span>最終失敗</span><span>次回目安</span><span>エラー</span></div>
+        <div class="dt-r"><span class="t-mono">fast-jobs</span><span class="st"><span class="dot ok"></span>正常</span><span class="t-num muted">11:20</span><span class="t-num muted">11:20</span><span class="muted">—</span><span class="t-num">11:25</span><span class="muted">—</span></div>
+        <div class="dt-r"><span class="t-mono">content-jobs</span><span class="st"><span class="dot info"></span>実行中</span><span class="t-num muted">11:00</span><span class="t-num muted">10:00</span><span class="muted">—</span><span class="t-num">12:00</span><span class="muted">—</span></div>
+        <div class="dt-r"><span class="t-mono">sync-jobs</span><span class="st"><span class="dot warn"></span>注意</span><span class="t-num muted">09:00</span><span class="t-num muted">03:00</span><span class="t-num" style="color: var(--danger);">09:01</span><span class="t-num">21:00</span><span class="t-sm ell" style="color: var(--danger);">クォータ超過</span></div>
+      </div></div>
+    </section>
+
+    <section class="c-sec" aria-labelledby="qs">
+      <h2 id="qs" class="t-h3" style="margin-bottom: 8px;">キュー状態</h2>
+      <div class="t-scroll"><div class="dt" style="--cols: minmax(160px,1fr) 80px 120px 80px 100px 80px; --minw: 680px;">
+        <div class="dt-h"><span>処理</span><span class="num">未処理</span><span>最古の未処理</span><span class="num">失敗</span><span class="num">再試行上限</span><span class="num">停滞</span></div>
+        <div class="dt-r"><span class="il"><i class="fa-solid fa-bell muted" aria-hidden="true"></i>通知</span><span class="num">3</span><span class="t-num muted">11:19</span><span class="num" style="color: var(--danger);">1</span><span class="num">0</span><span class="num">0</span></div>
+        <div class="dt-r"><span class="il"><i class="fa-solid fa-file-code muted" aria-hidden="true"></i>静的JSON</span><span class="num">12</span><span class="t-num muted">10:41</span><span class="num" style="color: var(--danger);">1</span><span class="num">0</span><span class="num">0</span></div>
+        <div class="dt-r"><span class="il"><i class="fa-brands fa-youtube muted" aria-hidden="true"></i>YouTube同期</span><span class="num">7</span><span class="t-num muted">09:01</span><span class="num">0</span><span class="num">0</span><span class="num">0</span></div>
+      </div></div>
+    </section>
+
+    <div class="split c-sec">
+      <section class="main" aria-labelledby="cap">
+        <h2 id="cap" class="t-h3" style="margin-bottom: 4px;">処理能力と滞留</h2>
+        <p class="t-sm muted" style="margin: 0 0 8px;">新規流入が止まった場合の理論解消時間です。外部API障害やCloudflare側の制限は含みません。</p>
+        <div class="dt" style="--cols: minmax(140px,1fr) 80px 100px 100px minmax(120px,1fr); --minw: 0px;">
+          <div class="dt-h"><span>処理</span><span class="num">滞留</span><span class="num">最大処理/日</span><span>解消目安</span><span>補足</span></div>
+          <div class="dt-r"><span>静的JSON</span><span class="num">12</span><span class="num">2,880</span><span>約6分</span><span class="t-sm muted">キュー起動</span></div>
+          <div class="dt-r"><span>YouTubeメタデータ同期</span><span class="num">7</span><span class="num">800</span><span>約13分</span><span class="t-sm muted">クォータ 80% 以内</span></div>
+        </div>
+      </section>
+      <aside class="side stack" style="gap: 24px;">
+        <section><h2 class="t-h3" style="margin-bottom: 8px;">グローバル静的JSONの最終生成</h2><span class="t-sm t-num">users_index · 10.04 06:00</span></section>
+        <section><h2 class="t-h3" style="margin-bottom: 8px;">無料枠の外部監視</h2><div class="stack t-sm" style="gap: 8px;"><a class="il p-link" href="https://dash.cloudflare.com/"><i class="fa-brands fa-cloudflare" aria-hidden="true"></i>Cloudflare Dashboard</a><a class="il p-link" href="https://console.cloud.google.com/"><i class="fa-brands fa-google" aria-hidden="true"></i>YouTube API Quotas</a></div></section>
+      </aside>
+    </div>
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

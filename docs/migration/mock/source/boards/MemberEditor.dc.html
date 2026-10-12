@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>合作メンバー編集</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja" style="min-height: 0; background: transparent;">
+  <div class="row" style="gap: 12px; flex-wrap: wrap;">
+    <div class="seg" role="tablist" aria-label="メンバー編集の表示モード">
+      <sc-for list="{{modes}}" as="m" hint-placeholder-count="3"><button type="button" role="tab" class="{{m.cls}}" onClick="{{m.pick}}"><i class="{{m.icon}}" aria-hidden="true"></i>{{m.label}}</button></sc-for>
+    </div>
+    <span class="t-sm muted" style="flex: 1;">{{modeHint}}</span>
+    <span class="t-sm muted t-num">{{memberCount}}人 · チャプター {{chapterCount}}</span>
+  </div>
+
+  <!-- タイムライン -->
+  <sc-if value="{{isTimeline}}" hint-placeholder-val="{{true}}">
+    <div class="tl-wrap" style="margin-top: 16px;">
+      <div class="tl-ruler"><sc-for list="{{ticks}}" as="k" hint-placeholder-count="9"><span style="left: {{k.left}};">{{k.label}}</span></sc-for></div>
+      <div class="tl-track" onClick="{{addAtCursor}}" title="クリックした位置にチャプターを追加">
+        <sc-for list="{{segments}}" as="g" hint-placeholder-count="6">
+          <div class="{{g.cls}}" style="left: {{g.left}}; width: {{g.width}};"><img src="{{g.img}}" alt=""><span>{{g.name}}</span></div>
+        </sc-for>
+        <div class="tl-cursor" style="left: {{cursor.left}};"><span class="t-num">{{cursor.label}}</span></div>
+      </div>
+      <div class="row t-sm muted" style="gap: 16px; margin-top: 8px; flex-wrap: wrap;">
+        <span>空いている位置をクリックで追加</span>
+        <span class="il"><i class="fa-solid fa-arrows-left-right" aria-hidden="true"></i>境界をドラッグで開始時刻を調整</span>
+        <span>選択中に ← → で1秒、Shift で10秒</span>
+        <span style="flex: 1;"></span>
+        <span class="il t-num"><i class="fa-brands fa-youtube" aria-hidden="true"></i>長さ 8:02(YouTube から取得)</span>
+      </div>
+    </div>
+    <sc-if value="{{adding}}" hint-placeholder-val="{{true}}">
+      <div class="raised row" style="gap: 8px; padding: 12px 16px; margin-top: 8px; flex-wrap: wrap;">
+        <span class="t-num" style="font-size: 18px;">2:31</span>
+        <span class="t-sm muted">からのチャプター</span>
+        <span class="sel-i" style="flex: 1 1 220px;"><i class="fa-solid fa-user" aria-hidden="true"></i><select class="select i" aria-label="担当メンバー"><option>Eipi(@Eipi_Rainbow)</option><option>丸い人(@Maruihito_maru)</option><option>ぴーふら(@Fura1107_)</option><option>+ 新しいメンバー</option></select></span>
+        <button type="button" class="fn-btn fn-btn--primary fn-btn--sm" onClick="{{closeAdd}}"><i class="fa-solid fa-plus" aria-hidden="true"></i>追加</button>
+        <button type="button" class="ib sm" aria-label="やめる" onClick="{{closeAdd}}"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </sc-if>
+  </sc-if>
+
+  <!-- 一覧(タイムライン・表 共通) -->
+  <sc-if value="{{showList}}" hint-placeholder-val="{{true}}">
+    <div style="margin-top: 16px;">
+      <div class="mrow2 t-label muted"><span></span><span>メンバー</span><span>役割</span><span>チャプター(開始)</span><span>編集</span><span>公開</span><span></span></div>
+      <sc-for list="{{members}}" as="m" hint-placeholder-count="4">
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="{{m.openAria}}" aria-label="{{m.name}} を個別に編集" onClick="{{m.openIt}}"><img class="avatar" src="{{m.img}}" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">{{m.name}}</span><span class="t-sm muted ell">{{m.x}}</span></span></button>
+          <input class="cell" aria-label="役割" value="{{m.role}}" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <sc-for list="{{m.chs}}" as="c" hint-placeholder-count="1"><span class="chip t-num" style="height: 26px; cursor: default;">{{c}}<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span></sc-for>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="{{m.editCls}}" aria-label="{{m.editLabel}}" onClick="{{m.toggleEdit}}"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="{{m.pubCls}}" aria-label="{{m.pubLabel}}" onClick="{{m.togglePub}}"><i class="{{m.pubIcon}}"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集" onClick="{{m.openIt}}"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        <sc-if value="{{m.isOpen}}" hint-placeholder-val="{{false}}">
+          <section class="raised stack" role="group" aria-label="{{m.name}} の編集" style="gap: 16px; padding: 16px 20px; margin: 4px 0 8px;">
+            <div class="row" style="gap: 12px;">
+              <img class="avatar" src="{{m.img}}" alt="" style="width: 40px; height: 40px;">
+              <span class="stack" style="gap: 0; min-width: 0; flex: 1;"><span class="ell" style="font-size: 16px;">{{m.name}}</span><span class="t-sm muted ell">{{m.x}}</span></span>
+              <button type="button" class="ib sm" aria-label="閉じる" onClick="{{closeOpen}}"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="field"><span>役割</span><input class="select" value="{{m.role}}" placeholder="作画 / 編集 / 音響など" style="width: 100%; padding: 0 12px; background-image: none;"></div>
+            <div class="field"><span>チャプター(開始時刻)</span>
+              <div class="row" style="gap: 8px; flex-wrap: wrap;">
+                <sc-for list="{{m.chs}}" as="c" hint-placeholder-count="2"><span class="chip t-num" style="height: 32px; cursor: default;">{{c}}<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span></sc-for>
+                <button type="button" class="chip" style="height: 32px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>追加</button>
+              </div>
+            </div>
+            <div class="field"><span>コメント</span><textarea class="select" rows="2" placeholder="このメンバーのひとこと(公開ページに表示)" style="width: 100%; height: 72px; padding: 8px 12px; background-image: none; line-height: 22px; resize: vertical;">{{m.comment}}</textarea></div>
+            <div class="row" style="gap: 8px; flex-wrap: wrap;">
+              <div class="seg" role="group" aria-label="作品編集への参加"><button type="button" class="{{m.editOnCls}}" onClick="{{m.setEditOn}}"><i class="fa-solid fa-pen" aria-hidden="true"></i>編集に参加</button><button type="button" class="{{m.editOffCls}}" onClick="{{m.setEditOff}}">編集不可</button></div>
+              <div class="seg" role="group" aria-label="公開設定"><button type="button" class="{{m.pubOnCls}}" onClick="{{m.setPubOn}}"><i class="fa-solid fa-eye" aria-hidden="true"></i>公開</button><button type="button" class="{{m.pubOffCls}}" onClick="{{m.setPubOff}}"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i>非公開</button></div>
+              <span style="flex: 1;"></span>
+              <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">外す</button>
+              <button type="button" class="fn-btn fn-btn--primary fn-btn--sm" onClick="{{closeOpen}}">完了</button>
+            </div>
+          </section>
+        </sc-if>
+      </sc-for>
+    </div>
+
+    <div style="position: relative; max-width: 420px; margin-top: 12px;">
+      <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" aria-label="メンバーを追加" placeholder="X ID または名前で追加" default-value="{{q}}"></x-import><i class="fa-solid fa-user-plus" aria-hidden="true"></i></div>
+      <sc-if value="{{suggestOpen}}" hint-placeholder-val="{{true}}">
+        <div class="raised stack" role="listbox" aria-label="候補" style="gap: 0; padding: 4px; position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 5;">
+          <sc-for list="{{suggest}}" as="s" hint-placeholder-count="3">
+            <button type="button" class="tl" role="option" style="height: 44px;" onClick="{{s.pick}}"><img class="avatar" src="{{s.img}}" alt="" style="width: 24px; height: 24px;"><span style="flex: 1;">{{s.name}} <span class="muted">@{{s.x}}</span></span><span class="t-sm muted">{{s.meta}}</span></button>
+          </sc-for>
+          <button type="button" class="tl" style="height: 40px;"><i class="fa-solid fa-user-pen" aria-hidden="true"></i>X ID なしで「{{q}}」を追加</button>
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <!-- サジェスト -->
+  <sc-if value="{{isSuggest}}" hint-placeholder-val="{{false}}">
+    <div class="stack" style="gap: 12px; margin-top: 16px;">
+      <div class="dt" style="--cols: minmax(180px,1.3fr) minmax(120px,1fr) minmax(220px,2fr) 104px 104px; --minw: 0px;">
+        <div class="dt-h"><span>メンバー・コメント</span><span>対象</span><span>提案内容(編集可)</span><span>状態</span><span>操作</span></div>
+        <sc-for list="{{sg}}" as="s" hint-placeholder-count="3">
+          <div class="dt-r">
+            <span class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="{{s.img}}" alt="" style="width: 32px; height: 32px;"><span class="stack" style="gap: 0; min-width: 0;"><span class="ell">{{s.name}} <span class="t-sm muted t-mono">{{s.x}}</span></span><span class="t-sm muted ell">{{s.comment}}</span></span></span>
+            <span class="t-sm">{{s.target}}<br><span class="muted">元: {{s.from}}</span></span>
+            <input class="select" value="{{s.to}}" onInput="{{s.setTo}}" aria-label="提案内容を編集" style="width: 100%; padding: 0 12px; background-image: none;">
+            <span class="st t-sm"><i class="{{s.stIcon}}" aria-hidden="true"></i>{{s.stLabel}}</span>
+            <span class="row" style="gap: 4px;"><button type="button" class="ib sm" aria-label="承認" onClick="{{s.approve}}"><i class="fa-solid fa-check"></i></button><button type="button" class="ib sm" aria-label="却下" onClick="{{s.reject}}"><i class="fa-solid fa-xmark"></i></button></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- 一括 -->
+  <sc-if value="{{isBulk}}" hint-placeholder-val="{{false}}">
+    <div class="stack" style="gap: 12px; margin-top: 16px;">
+      <div class="row" style="gap: 8px; flex-wrap: wrap;">
+        <span class="t-sm muted" style="flex: 1 1 320px;">1人1行・タブ区切り:ユーザー名 / X ID / チャプター(; 区切り)/ 役職 / コメント / 権限(ON・OFF)。スプレッドシートからそのまま貼り付けできます。</span>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="fa-regular fa-copy" aria-hidden="true"></i>TSVをコピー</button>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm" title="現在のメンバーと手順入りのプロンプトをコピーします。AIの出力を下に貼り付けてください">AI用プロンプトをコピー</button>
+      </div>
+      <textarea class="select t-mono" style="height: 160px; padding: 12px; background-image: none; font-size: 13px; line-height: 20px; resize: vertical;" aria-label="TSV">丸い人	Maruihito_maru	0:00	映像		ON
+ぴーふら	Fura1107_	0:24	映像
+sum1	sum1_eizou	0:48;3:10	映像	初合作でした
+Eipi	Eipi_Rainbow	1:12	映像
+Av1	Av1_mz	1;36	映像</textarea>
+      <div class="dt" style="--cols: 48px minmax(140px,1fr) minmax(140px,1fr) 120px minmax(160px,1.4fr); --minw: 0px;">
+        <div class="dt-h"><span>行</span><span>名前</span><span>X ID</span><span>チャプター</span><span>判定</span></div>
+        <div class="dt-r"><span class="num muted">1</span><span>丸い人</span><span class="t-sm">@Maruihito_maru</span><span class="t-num">0:00</span><span class="il t-sm"><i class="fa-solid fa-check" aria-hidden="true"></i>OK · 編集権限を付与</span></div>
+        <div class="dt-r"><span class="num muted">3</span><span>sum1</span><span class="t-sm">@sum1_eizou</span><span class="t-num">0:48 · 3:10</span><span class="il t-sm"><i class="fa-solid fa-check" aria-hidden="true"></i>OK</span></div>
+        <div class="dt-r"><span class="num muted">5</span><span>Av1</span><span class="t-sm">@Av1_mz</span><span class="t-num" style="color: var(--warning);">1;36</span><span class="il t-sm" style="color: var(--warning);"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>チャプターは m:ss 形式に</span></div>
+      </div>
+      <div class="row" style="gap: 8px;"><span class="t-sm muted" style="flex: 1;">5行中 4行を反映できます(変更なし 1 · 追加 3 · エラー 1)</span><button type="button" class="fn-btn fn-btn--primary fn-btn--sm">4行を反映</button></div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":960,"height":620}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { mode: 'timeline', open: null, adding: true, edit: { 0: true }, pub: { 4: false }, q: 'ei', sg: [
+      { name: 'Eipi', x: '@Eipi_Rainbow', comment: '音ズレが気になるので確認したいです', target: '1:12 のチャプター名', from: 'Eipi パート', to: 'Eipi パート(映像)', st: 'wait', img: 3 },
+      { name: 'sum1', x: '@sum1_eizou', comment: '初合作でした', target: 'コメント', from: '初合作でした', to: '初合作でした。よろしくお願いします', st: 'wait', img: 2 },
+      { name: 'ぴーふら', x: '@Fura1107_', comment: '', target: '0:24 のチャプター', from: 'ぴーふら', to: 'ぴーふら(映像)', st: 'ok', img: 1 }
+    ] }; }
+  setSg(i, patch) { const sg = this.state.sg.slice(); sg[i] = Object.assign({}, sg[i], patch); this.setState({ sg }); }
+  renderVals() {
+    const S = this.state;
+    const sgRows = S.sg.map((r, i) => ({ name: r.name, x: r.x, comment: r.comment || '—', img: ['/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/6ecfc7b6882f277d815f563e873f25ee'][r.img % 4], target: r.target, from: r.from, to: r.to, setTo: (e) => this.setSg(i, { to: e.target.value }), stIcon: r.st === 'ok' ? 'fa-solid fa-circle-check st-ic ok' : r.st === 'no' ? 'fa-solid fa-circle-xmark st-ic danger' : 'fa-solid fa-clock st-ic info', stLabel: r.st === 'ok' ? '承認済み' : r.st === 'no' ? '却下' : '待機中', approve: () => this.setSg(i, { st: 'ok' }), reject: () => this.setSg(i, { st: 'no' }) }));
+    const T = ['/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const DUR = 482;
+    const M = [['丸い人','Maruihito_maru','映像',['0:00']],['ぴーふら','Fura1107_','映像',['0:24']],['sum1','sum1_eizou','映像',['0:48','3:10'],'初合作でした'],['Eipi','Eipi_Rainbow','映像',['1:12']],['Av1','Av1_mz','映像',[]]];
+    const sec = (t) => { const [m, s] = t.split(':').map(Number); return m * 60 + s; };
+    const marks = []; M.forEach((m, i) => m[3].forEach(c => marks.push({ t: sec(c), i })));
+    marks.sort((a, b) => a.t - b.t);
+    const segments = marks.map((mk, j) => { const end = j + 1 < marks.length ? marks[j + 1].t : DUR; return { left: (mk.t / DUR * 100) + '%', width: ((end - mk.t) / DUR * 100) + '%', name: M[mk.i][0], img: T[mk.i % 6], cls: 'tl-seg s' + (mk.i % 3) }; });
+    const ticks = []; for (let t = 0; t <= DUR; t += 60) ticks.push({ left: (t / DUR * 100) + '%', label: Math.floor(t / 60) + ':00' });
+    const modes = [['timeline','タイムライン','fa-solid fa-timeline'],['table','表','fa-solid fa-table-list'],['bulk','一括(TSV・AI)','fa-solid fa-paste'],['suggest','サジェスト','fa-solid fa-comment-dots']].map(([id, label, icon]) => ({ label, icon, cls: S.mode === id ? 'on' : '', pick: () => this.setState({ mode: id }) }));
+    const hint = { timeline: '動画の長さに沿ってチャプターを置けます', table: '行をクリックして個別に編集できます', bulk: 'まとめて貼り付けて、反映前に確認できます', suggest: 'メンバーのコメントとサジェストを確認し、編集・承認・却下できます' }[S.mode];
+    const members = M.map((m, i) => { const ed = !!S.edit[i], pub = S.pub[i] !== false; const isOpen = S.open === i; return { name: m[0], x: '@' + m[1], role: m[2], chs: m[3], comment: m[4] || '', img: T[i % 6], isOpen, openAria: isOpen ? 'true' : 'false', openIt: () => this.setState({ open: isOpen ? null : i }),
+      editOnCls: ed ? 'on' : '', editOffCls: ed ? '' : 'on', setEditOn: () => this.setState({ edit: { ...S.edit, [i]: true } }), setEditOff: () => this.setState({ edit: { ...S.edit, [i]: false } }), pubOnCls: pub ? 'on' : '', pubOffCls: pub ? '' : 'on', setPubOn: () => this.setState({ pub: { ...S.pub, [i]: true } }), setPubOff: () => this.setState({ pub: { ...S.pub, [i]: false } }),
+      editCls: ed ? 'ib sm on' : 'ib sm', editLabel: ed ? '作品編集に参加(押すと外す)' : '編集不可(押すと作品編集に参加)', toggleEdit: () => this.setState({ edit: { ...S.edit, [i]: !ed } }),
+      pubCls: pub ? 'ib sm on' : 'ib sm', pubIcon: pub ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash', pubLabel: pub ? '公開(押すと非公開)' : '非公開(押すと公開)', togglePub: () => this.setState({ pub: { ...S.pub, [i]: !pub } }) }; });
+    return {
+      theme: this.props.theme ?? 'dark', closeOpen: () => this.setState({ open: null }), modes, modeHint: hint, members, memberCount: M.length, chapterCount: marks.length,
+      isTimeline: S.mode === 'timeline', isBulk: S.mode === 'bulk', showList: S.mode !== 'bulk' && S.mode !== 'suggest', isSuggest: S.mode === 'suggest', sg: sgRows,
+      segments, ticks, cursor: { left: (151 / DUR * 100) + '%', label: '2:31' },
+      adding: S.mode === 'timeline' && S.adding, addAtCursor: () => this.setState({ adding: true }), closeAdd: () => this.setState({ adding: false }),
+      q: S.q, suggestOpen: S.mode !== 'bulk' && !!S.q,
+      suggest: [['Eipi','Eipi_Rainbow','PVSF2026Sp ほか 3作品'],['eiko','eiko_mv','1作品'],['Eita','eita_anim','合作 2作品']].map(([name, x, meta], k) => ({ name, x, meta, img: T[(k + 3) % 6], pick: () => this.setState({ q: '' }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

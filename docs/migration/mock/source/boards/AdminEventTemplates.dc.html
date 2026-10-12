@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベントテンプレート</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="templates" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head">
+      <div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">テンプレート</h1></sc-if><p class="muted">イベントの枠・フォーム・権限などの設定を再利用します。開催日時や枠データはコピーしません。</p></div>
+      <a href="ManageEventNew.dc.html" class="fn-btn fn-btn--primary"><i class="fa-solid fa-plus" aria-hidden="true"></i>新規イベント</a>
+    </div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="イベント管理メニュー" style="margin-bottom: 24px;">
+      <a href="AdminEventsHub.dc.html" class="il"><i class="fa-solid fa-list" aria-hidden="true"></i>イベント一覧</a>
+      <a href="AdminEventsHub.dc.html" class="il"><i class="ms ms-account_tree" aria-hidden="true"></i>グループ</a>
+      <a href="AdminEventsHub.dc.html" class="il" aria-current="page"><i class="fa-regular fa-clone" aria-hidden="true"></i>テンプレート</a>
+    </nav></sc-if>
+    <div class="dt" style="--cols: minmax(200px,1fr) minmax(160px,1fr) 120px 112px; --minw: 0px;">
+      <div class="dt-h"><span>名前</span><span>元イベント</span><span>更新</span><span></span></div>
+      <div class="dt-r"><span class="il"><i class="fa-regular fa-clone muted" aria-hidden="true"></i>PVSF 標準</span><span>PVSF2026Sp</span><span class="t-num muted">2026.04.02</span><span class="row" style="gap: 0; justify-content: flex-end;"><a href="ManageEventNew.dc.html" class="ib sm" aria-label="このテンプレートで作成"><i class="fa-solid fa-plus"></i></a><a href="ConfirmModal.dc.html" class="ib sm" aria-label="削除"><i class="fa-regular fa-trash-can"></i></a></span></div>
+      <div class="dt-r"><span class="il"><i class="fa-regular fa-clone muted" aria-hidden="true"></i>合作イベント</span><span>夏休み創作島　創作島合作</span><span class="t-num muted">2024.12.20</span><span class="row" style="gap: 0; justify-content: flex-end;"><a href="ManageEventNew.dc.html" class="ib sm" aria-label="このテンプレートで作成"><i class="fa-solid fa-plus"></i></a><a href="ConfirmModal.dc.html" class="ib sm" aria-label="削除"><i class="fa-regular fa-trash-can"></i></a></span></div>
+    </div>
+    <p class="il t-sm muted" style="margin-top: 24px;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>テンプレートはイベント運営画面の「テンプレート化」から作成できます。</p>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

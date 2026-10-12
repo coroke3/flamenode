@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ポートフォリオ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <header class="wrap" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; min-height: 72px;">
+    <a href="Creator.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>プロフィール</a>
+    <a href="Main.dc.html" aria-label="FlameNode トップ">
+      <img class="logo-d" src="/_blob/eee88ecd1bced2fd7ce508f977487e59" alt="FlameNode" style="height: 16px;">
+      <img class="logo-l" src="/_blob/eded756c59dbc57e0b63d862e98d3177" alt="FlameNode" style="height: 16px;">
+    </a>
+  </header>
+
+  <div class="wrap" style="padding-top: 64px;">
+    <section style="display: flex; flex-wrap: wrap; gap: 32px 64px; align-items: flex-end; justify-content: space-between;">
+      <div class="stack" style="gap: 12px;">
+        <h1 class="t-display">おたこ</h1>
+      </div>
+      <div class="metrics" aria-label="Portfolio stats">
+        <div class="metric"><b>24</b><span>Works</span></div>
+              </div>
+    </section>
+
+    <section class="sec" aria-labelledby="works">
+      <h2 id="works" class="vh">Works</h2>
+      <div class="pf-works" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 48px 24px;">
+        <sc-for list="{{videos}}" as="v" hint-placeholder-count="6">
+          <a href="VideoDetail.dc.html" style="display: block;">
+            <x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" duration="{{v.dur}}"></x-import>
+          </a>
+        </sc-for>
+      </div>
+    </section>
+
+    <section class="sec" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 48px;">
+      <div class="stack" style="gap: 8px;">
+        <h2 class="vh t-h3">About</h2>
+        <p class="muted" style="margin: 0;">アニメと実写を混ぜた短編を作っています。</p>
+      </div>
+      <div class="stack" style="gap: 8px;">
+        <h2 class="vh t-h3">Contact</h2>
+        <span class="row" style="gap: 0; margin-left: -10px;"><a class="ib" href="https://x.com/" aria-label="X @012345rty"><i class="fa-brands fa-x-twitter"></i></a><a class="ib" href="https://youtube.com/" aria-label="YouTube"><i class="fa-brands fa-youtube"></i></a></span>
+      </div>
+    </section>
+  </div>
+  <div class="foot-spacer"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const V = [['魔法少女 このは・グリモワール 最終決戦編','','PVSF2026Sp'],['崇渦に関するお知らせ 前編','','PVSF2026Sp'],['祟渦に関するお知らせ 後編','','PVSF2026Sp'],['Mitchie Mメドレー合作','','PVSF2025S'],['ホラー映画ロケ下見.mp4','','PVSF2025S'],['【短編アニメ】魔法少女vs改造人間','','PVSF2025Sp'],['【自主制作アニメ】めざした空の向こう側','','PVSF2025Sp'],['パンダと行く！都会の歩き方','','PVSF2024GW'],['ハイパー.','','PVSF2023R']];
+    return { theme: this.props.theme ?? 'dark', videos: V.map((a, i) => ({ title: a[0], dur: a[1], event: a[2], thumb: T[(i + 4) % 8] })) };
+  }
+}
+</script>
+</body>
+</html>

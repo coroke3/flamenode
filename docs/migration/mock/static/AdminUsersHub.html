@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ユーザー — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /admin/users(ユーザー・X ID申請・統合) / source: source/boards/AdminUsersHub.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="AdminNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">管理</span><span class="ell">ユーザー / X ID</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">管理</span>
+  </div>
+  <div class="row" style="gap: 2px; padding: 0 12px 8px;">
+    <a href="Manage.html" class="ib sm" style="padding: 0;" aria-label="運営へ"><i class="fa-solid fa-clipboard-list"></i></a>
+    <a href="Main.html" class="ib sm" style="padding: 0;" aria-label="公開サイトへ"><i class="fa-solid fa-globe"></i></a>
+    <span style="flex: 1;"></span>
+    <button type="button" class="ib sm" style="padding: 0;" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+  </div>
+  
+    <span class="grp">概要</span>
+    
+      <a href="Admin.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true" style="width: 16px; text-align: center;"></i>ダッシュボード</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">対応</span>
+    
+      <a href="AdminVideosHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true" style="width: 16px; text-align: center;"></i>作品</span>
+        <span class="n">12</span>
+      </a>
+    
+      <a href="AdminUsersHub.dc.html" class="on" aria-current="page">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-users" aria-hidden="true" style="width: 16px; text-align: center;"></i>ユーザー / X ID</span>
+        <span class="n">4</span>
+      </a>
+    
+      <a href="AdminModeration.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-flag" aria-hidden="true" style="width: 16px; text-align: center;"></i>モデレーション</span>
+        <span class="n">2</span>
+      </a>
+    
+  
+    <span class="grp">サイト</span>
+    
+      <a href="AdminEventsHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-calendar-days" aria-hidden="true" style="width: 16px; text-align: center;"></i>イベント</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAnnouncements.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bullhorn" aria-hidden="true" style="width: 16px; text-align: center;"></i>お知らせ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminRules.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-scale-balanced" aria-hidden="true" style="width: 16px; text-align: center;"></i>規約</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">運用</span>
+    
+      <a href="AdminNotifications.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true" style="width: 16px; text-align: center;"></i>通知配信</span>
+        <span class="n">1</span>
+      </a>
+    
+      <a href="AdminHealthHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-monitor_heart" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働状況</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminStaticBuilds.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-code" aria-hidden="true" style="width: 16px; text-align: center;"></i>静的JSON再生成</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminYoutubeQuota.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-chart-pie" aria-hidden="true" style="width: 16px; text-align: center;"></i>YouTube クォータ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminCostGuard.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-gauge-high" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働モード</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAuditHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true" style="width: 16px; text-align: center;"></i>監査ログ</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">高度な管理</span>
+    
+      <a href="AdminSecurity.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-shield-halved" aria-hidden="true" style="width: 16px; text-align: center;"></i>セキュリティ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminPermSim.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-key" aria-hidden="true" style="width: 16px; text-align: center;"></i>権限シミュレーター</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminApi.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-plug" aria-hidden="true" style="width: 16px; text-align: center;"></i>公開API</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminImport.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-import" aria-hidden="true" style="width: 16px; text-align: center;"></i>旧形式インポート</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminSpreadsheet.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-table" aria-hidden="true" style="width: 16px; text-align: center;"></i>DBスプレッドシート</span>
+        <span class="n"></span>
+      </a>
+    
+  
+</nav>
+</div></div>
+  <main class="c-main">
+    <h1 class="t-display">ユーザー</h1>
+    <div class="hub-bar">
+      <nav class="subnav" aria-label="ユーザー" role="tablist"><a href="#" class="il" role="tab" aria-current="page" aria-selected="true"><i class="fa-brands fa-discord" aria-hidden="true"></i>ユーザー<span class="t-num muted"></span></a><a href="#" class="il" role="tab" aria-current="false" aria-selected="false"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID連携申請<span class="t-num muted">3</span></a><a href="#" class="il" role="tab" aria-current="false" aria-selected="false"><i class="ms ms-merge" aria-hidden="true"></i>X ID統合申請<span class="t-num muted">1</span></a></nav>
+      <div class="hub-links"></div>
+    </div>
+    <div class="hub-body">
+      <div class="dc-import" data-board="AdminUsers">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000} .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}.chip.on{background:var(--ink);color:var(--bg)}</style>
+
+<div class="p-root emb-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  
+  <main class="c-main">
+    <div class="c-head">
+      <div>
+        
+        <p class="muted">Discordログイン済みユーザーと X ID の現在の紐付けを確認・管理します。</p>
+      </div>
+    </div>
+    
+
+    
+      <div class="wrap-row" style="gap: 6px;">
+        <div class="field-i" style="width: 280px; margin-right: 8px;"><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" type="search" arialabel="検索" placeholder="Discord / X ID / 名前"></div></div></div><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div>
+        <button type="button" class="chip on">すべて</button>
+        <button type="button" class="chip"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>有効</button>
+        <button type="button" class="chip"><i class="fa-solid fa-ban" aria-hidden="true"></i>BAN</button>
+        <button type="button" class="chip"><i class="fa-solid fa-crown" aria-hidden="true"></i>admin</button>
+        <button type="button" class="chip"><i class="fa-solid fa-shield" aria-hidden="true"></i>moderator</button>
+        <button type="button" class="chip"><i class="fa-solid fa-calendar-plus" aria-hidden="true"></i>開催権限あり</button>
+        <button type="button" class="chip"><i class="fa-solid fa-scale-unbalanced" aria-hidden="true"></i>TOS未同意</button>
+        <button type="button" class="chip"><i class="fa-solid fa-user-slash" aria-hidden="true"></i>Active X ID なし</button>
+      </div>
+      <p class="t-sm muted t-num" style="margin: 16px 0 8px;">1,204 件</p>
+      <div class="t-scroll">
+        <div class="dt" style="--cols: minmax(180px, 1.4fr) minmax(160px, 1.2fr) 88px 132px 96px 92px 72px; --minw: 900px;">
+          <div class="dt-h"><span>Discord</span><span>Active X ID</span><span>ロール</span><span>状態</span><span>規約</span><span>登録</span><span></span></div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">Mochi</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>coroke3</span></span></a>
+              <span class="il ell" style="color: var(--ink);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>@coroke3</span>
+              <span class="il"><i class="fa-solid fa-crown" aria-hidden="true"></i>ADMIN</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot ok"></span>有効</span><i class="fa-solid fa-calendar-plus" title="開催権限あり" aria-label="開催権限あり"></i></span>
+              <span class="il t-sm" style="color: var(--ink-muted);"><i class="fa-solid fa-check" aria-hidden="true"></i>同意済</span>
+              <span class="t-num muted">2019.12.20</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/191c3939aefb326fc04fd3ccf6db83a9.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">あおね</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>hs_nozomizo13</span></span></a>
+              <span class="il ell" style="color: var(--ink);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>@hs_nozomizo13</span>
+              <span class="il"><i class="fa-solid fa-shield" aria-hidden="true"></i>MOD</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot ok"></span>有効</span><i class="fa-solid fa-calendar-plus" title="開催権限あり" aria-label="開催権限あり"></i></span>
+              <span class="il t-sm" style="color: var(--ink-muted);"><i class="fa-solid fa-check" aria-hidden="true"></i>同意済</span>
+              <span class="t-num muted">2021.03.02</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">おたこ</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>012345rty</span></span></a>
+              <span class="il ell" style="color: var(--ink);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>@012345rty</span>
+              <span class="il"><i class="fa-regular fa-user" aria-hidden="true"></i>USER</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot ok"></span>有効</span><i class="fa-solid fa-calendar-plus" title="開催権限あり" aria-label="開催権限あり"></i></span>
+              <span class="il t-sm" style="color: var(--ink-muted);"><i class="fa-solid fa-check" aria-hidden="true"></i>同意済</span>
+              <span class="t-num muted">2022.08.11</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">みずのひと</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>mizunohito_10</span></span></a>
+              <span class="il ell" style="color: var(--ink);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>@mizunohito_10</span>
+              <span class="il"><i class="fa-regular fa-user" aria-hidden="true"></i>USER</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot ok"></span>有効</span><i class="fa-solid fa-calendar-plus" title="開催権限あり" aria-label="開催権限あり"></i></span>
+              <span class="il t-sm" style="color: var(--ink-muted);"><i class="fa-solid fa-check" aria-hidden="true"></i>同意済</span>
+              <span class="t-num muted">2023.03.30</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">スティックのり</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>sticknori</span></span></a>
+              <span class="il ell" style="color: var(--ink);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>@Sticknorikun</span>
+              <span class="il"><i class="fa-regular fa-user" aria-hidden="true"></i>USER</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot ok"></span>有効</span><i class="" title="開催権限あり" aria-label=""></i></span>
+              <span class="il t-sm" style="color: var(--warning);"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>未同意</span>
+              <span class="t-num muted">2025.08.20</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">幼虫</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>musivirus</span></span></a>
+              <span class="il ell" style="color: var(--ink);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>@MusiVirus</span>
+              <span class="il"><i class="fa-regular fa-user" aria-hidden="true"></i>USER</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot ok"></span>有効</span><i class="" title="開催権限あり" aria-label=""></i></span>
+              <span class="il t-sm" style="color: var(--ink-muted);"><i class="fa-solid fa-check" aria-hidden="true"></i>同意済</span>
+              <span class="t-num muted">2026.03.10</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">新規ユーザー</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>newbie_2026</span></span></a>
+              <span class="il ell" style="color: var(--ink-muted);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>active Xなし</span>
+              <span class="il"><i class="fa-regular fa-user" aria-hidden="true"></i>USER</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot ok"></span>有効</span><i class="" title="開催権限あり" aria-label=""></i></span>
+              <span class="il t-sm" style="color: var(--warning);"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>未同意</span>
+              <span class="t-num muted">2026.10.03</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+            <div class="dt-r">
+              <a href="AdminUserHub.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">(停止中)</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>spam_acc</span></span></a>
+              <span class="il ell" style="color: var(--ink);"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>@spam_acc</span>
+              <span class="il"><i class="fa-regular fa-user" aria-hidden="true"></i>USER</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="dot err"></span>BAN</span><i class="" title="開催権限あり" aria-label=""></i></span>
+              <span class="il t-sm" style="color: var(--ink-muted);"><i class="fa-solid fa-check" aria-hidden="true"></i>同意済</span>
+              <span class="t-num muted">2025.11.02</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          
+        </div>
+      </div>
+    
+
+    
+  </main>
+</div>
+</div>
+</div>
+      
+      
+    </div>
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

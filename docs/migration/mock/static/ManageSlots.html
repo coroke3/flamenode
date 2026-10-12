@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>枠管理 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /manage/events/[id]/slots / source: source/boards/ManageSlots.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="ManageNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="イベント運営ナビ" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">運営</span><span class="ell">PVSF2026S · 枠</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">運営</span>
+  </div>
+  <a href="CommandPalette.html" class="cmdk" aria-label="移動・操作を検索(Ctrl+K)"><span class="il" style="gap: 10px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>移動・操作を検索</span><kbd class="kbd">⌘K</kbd></a>
+
+  <a href="Manage.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-house" aria-hidden="true"></i>運営トップ</span></a>
+  <a href="ManageNotifications.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true"></i>通知センター</span><span class="n">1</span></a>
+  <a href="ManageEventNew.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>イベントを作成</span></a>
+
+  <span class="grp">イベント</span>
+  <button type="button" class="ev-switch" aria-expanded="false" aria-label="担当イベントを切り替え">
+    <img class="ev-icon" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 28px; height: 28px;">
+    <span class="stack" style="gap: 0; flex: 1; min-width: 0; text-align: left;"><span class="ell" style="font-size: 14px;">PVSF2026S</span><span class="st t-sm"><span class="dot ok"></span>受付中</span></span>
+    <i class="fa-solid fa-chevron-down muted" aria-hidden="true"></i>
+  </button>
+  
+  
+    <a href="ManageEvent.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true"></i>概要</span><span class="n"></span></a>
+  
+    <a href="ManageInbox.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-inbox" aria-hidden="true"></i>受信箱</span><span class="n">11</span></a>
+  
+    <a href="ManageVideos.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true"></i>作品</span><span class="n">110</span></a>
+  
+    <a href="ManageSlots.dc.html" class="nsec on" aria-current="page"><span class="il" style="gap: 10px;"><i class="ms ms-view_timeline" aria-hidden="true"></i>枠</span><span class="n">128/160</span></a>
+  
+    <a href="ManageAudience.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-user-group" aria-hidden="true"></i>参加者</span><span class="n">96</span></a>
+  
+    <a href="ManagePlaylist.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-sensors" aria-hidden="true"></i>配信・公開</span><span class="n"></span></a>
+  
+    <a href="ManageEdit.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-sliders" aria-hidden="true"></i>イベント設定</span><span class="n"></span></a>
+  
+    <a href="ManageStaff.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-admin_panel_settings" aria-hidden="true"></i>スタッフと権限</span><span class="n">5</span></a>
+  
+    <a href="ManageHistory.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>履歴</span><span class="n"></span></a>
+  
+
+  <span class="grp">ほかの画面</span>
+  <a href="ManageXLink.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID 連携申請(全体)</span><span class="n">3</span></a>
+  <a href="Main.html"><span class="il" style="gap: 10px;"><i class="fa-solid fa-globe" aria-hidden="true"></i>公開サイト</span></a>
+</nav>
+</div></div>
+  <main class="c-main">
+    <div class="dc-import" data-board="ManageEventHead">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<header class="eh" lang="ja" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg); color: var(--ink); font-family: var(--font-sans);">
+  <div class="wrap-row" style="gap: 16px; justify-content: space-between; align-items: center;">
+    <nav aria-label="パンくず" class="row t-sm muted" style="gap: 8px;"><span class="eh-ev row" style="gap: 8px;"><img class="ev-icon" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 20px; height: 20px;"><a href="ManageEvent.html" class="p-link" style="color: var(--ink-muted);">PVSF2026S</a></span><span class="st"><span class="dot ok"></span>受付中</span><span class="t-num eh-date">11.03 — 11.04</span><span class="eh-left">受付終了まで 12日</span></nav>
+    <div class="row eh-acts" style="gap: 4px;">
+      <span class="t-sm muted eh-perm" style="margin-right: 8px;">あなたの権限:代表</span>
+      <a href="EventDetail.html" class="ib" aria-label="公開ページを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+      <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索(⌘K)"><i class="fa-solid fa-magnifying-glass"></i></a>
+    </div>
+  </div>
+  <div class="row" style="gap: 12px; align-items: baseline; flex-wrap: wrap;">
+    <h1 class="t-display" style="margin: 0;">枠</h1>
+    <span class="muted eh-desc">生成・確保状況・一括操作</span>
+  </div>
+</header>
+</div>
+
+    <details class="raised" style="margin-top: 32px; padding: 20px 24px;">
+      <summary class="il" style="cursor: pointer;"><i class="fa-solid fa-plus" aria-hidden="true"></i>枠を一括生成</summary>
+      <form class="stack" style="gap: 16px; margin-top: 20px;">
+        <div class="seg" role="group" aria-label="枠タイプ"><button type="button" class="on"><i class="fa-regular fa-clock" aria-hidden="true"></i>時間枠</button><button type="button" class=""><i class="fa-solid fa-list-ol" aria-hidden="true"></i>件数枠</button></div>
+        
+          <div class="stack" style="gap: 18px;">
+            <div class="field"><span>日付(開催期間から選択)</span>
+              <div class="wrap-row" style="gap: 4px;"><button type="button" class="chip daychip"><span class="t-num">11/03</span><span class="muted">火</span><span class="t-sm muted">1日目</span></button><button type="button" class="chip on daychip"><span class="t-num">11/04</span><span class="muted">水</span><span class="t-sm muted">2日目</span></button><button type="button" class="chip" style="height: 44px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>別の日</button></div>
+            </div>
+            <div class="tpick">
+              <div class="row" style="justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <span class="t-label muted">時間帯</span>
+                <span class="il t-sm" style="color: var(--ink); flex: 1;"><i class="fa-solid fa-check" aria-hidden="true"></i>18:00 – 19:30 · もう一度押すと選び直し</span>
+                <button type="button" class="ib sm" aria-label="横幅いっぱいに広げる"><i class="fa-solid fa-expand"></i></button>
+              </div>
+              <div class="tp-rows">
+                
+                  <div class="tp-row">
+                    <span class="tp-lbl t-num">0 – 15時</span>
+                    <div class="tp-track" aria-label="0 – 15時 の時間帯">
+                      <span class="tp-h" style="--p: 0%;">0</span><span class="tp-h" style="--p: 6.666666666666667%;">1</span><span class="tp-h" style="--p: 13.333333333333334%;">2</span><span class="tp-h" style="--p: 20%;">3</span><span class="tp-h" style="--p: 26.666666666666668%;">4</span><span class="tp-h" style="--p: 33.33333333333333%;">5</span><span class="tp-h" style="--p: 40%;">6</span><span class="tp-h" style="--p: 46.666666666666664%;">7</span><span class="tp-h" style="--p: 53.333333333333336%;">8</span><span class="tp-h" style="--p: 60%;">9</span><span class="tp-h" style="--p: 66.66666666666666%;">10</span><span class="tp-h" style="--p: 73.33333333333333%;">11</span><span class="tp-h" style="--p: 80%;">12</span><span class="tp-h" style="--p: 86.66666666666667%;">13</span><span class="tp-h" style="--p: 93.33333333333333%;">14</span>
+                      
+                      
+                      
+                    </div>
+                  </div>
+                
+                  <div class="tp-row">
+                    <span class="tp-lbl t-num">15 – 翌6時</span>
+                    <div class="tp-track" aria-label="15 – 翌6時 の時間帯">
+                      <span class="tp-h" style="--p: 0%;">15</span><span class="tp-h" style="--p: 6.666666666666667%;">16</span><span class="tp-h" style="--p: 13.333333333333334%;">17</span><span class="tp-h" style="--p: 20%;">18</span><span class="tp-h" style="--p: 26.666666666666668%;">19</span><span class="tp-h" style="--p: 33.33333333333333%;">20</span><span class="tp-h" style="--p: 40%;">21</span><span class="tp-h" style="--p: 46.666666666666664%;">22</span><span class="tp-h" style="--p: 53.333333333333336%;">23</span><span class="tp-h" style="--p: 60%;">24</span><span class="tp-h" style="--p: 66.66666666666666%;">25</span><span class="tp-h" style="--p: 73.33333333333333%;">26</span><span class="tp-h" style="--p: 80%;">27</span><span class="tp-h" style="--p: 86.66666666666667%;">28</span><span class="tp-h" style="--p: 93.33333333333333%;">29</span>
+                      
+                      <span class="tp-sel" style="--p: 20%; --w: 10%;"><span class="rb-len t-num">15枠 · 90分</span></span>
+                      
+                    </div>
+                  </div>
+                
+              </div>
+              <span class="t-sm muted">PC:開始と終了をクリック / スマホ:押したままなぞって離す。24時以降は「25:00(翌1:00)」で表します。縦長の画面では縦向きに切り替わります。</span>
+              <div class="row" style="gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                <input class="tinput t-num" value="18:00" aria-label="開始時刻"><span class="muted">–</span><input class="tinput t-num" value="19:30" aria-label="終了時刻">
+                <span class="t-sm muted">「1830」「18.5」「18時半」も可</span>
+                <span style="flex: 1;"></span>
+                <span class="t-label muted">枠の長さ</span>
+                <span class="wrap-row" style="gap: 2px;"><button type="button" class="chip">3分</button><button type="button" class="chip">5分</button><button type="button" class="chip on">6分</button><button type="button" class="chip">10分</button><button type="button" class="chip">15分</button></span>
+              </div>
+            </div>
+            <div class="raised stack" style="gap: 10px; padding: 16px 20px;" aria-live="polite">
+              <span class="row" style="gap: 12px; flex-wrap: wrap;"><b class="t-num" style="font-size: 18px;">15 枠</b><span class="t-sm muted">11/04(水) 18:00 – 19:30 · 6分ごと</span><span style="flex: 1;"></span></span>
+              <div class="wrap-row" style="gap: 2px;"><span class="chip" style="cursor: default;">2日目 第1部 18:00–19:30</span></div>
+              <span class="t-sm muted">連続した枠は1つの部になります。前の枠との間が「部の分割閾値」(15分)以上空くと新しい部になります。</span>
+            </div>
+            <div><button type="submit" class="fn-btn fn-btn--primary">15 枠を生成</button></div>
+          </div>
+        
+        
+      </form>
+    </details>
+
+    <div class="wrap-row" style="gap: 8px; margin: 32px 0 16px;">
+      <div class="wrap-row t-sm muted" style="gap: 20px;">
+        <span class="st"><span class="dot ok"></span>空き</span>
+        <span class="st"><span class="dot info"></span>確保済み</span>
+        <span class="st"><span class="dot"></span>提出済み</span>
+      </div>
+      <span style="flex: 1;"></span>
+      <span class="sel-i" title="枠の状態"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="枠の状態"><option>すべて</option><option>空き</option><option>確保済み</option><option>提出済み</option></select></span>
+      <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm"><i class="fa-regular fa-square-check" aria-hidden="true"></i>選択</button>
+      <button type="button" class="ib" aria-label="空き枠を全削除"><i class="fa-solid fa-broom"></i></button>
+    </div>
+    
+    <div class="parts" role="region" aria-label="枠一覧" tabindex="0">
+      
+        <section class="part">
+          <header><span class="t-num">11/03(火)</span><span class="t-sm muted t-num">13 / 24</span></header>
+          
+            
+            <div class="plabel row" style="justify-content: space-between; padding-right: 0;"><span>第1部 <span class="t-num">5 / 8</span></span><button type="button" class="ib sm" aria-label="1日目 第1部 を編集"><i class="fa-solid fa-pen"></i></button></div>
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:12</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">幼虫</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:12 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:18</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">おたこ</span>
+                <span class="dot info" title="確保済み" aria-label="確保済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:18 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+              <div class="raised stack" style="gap: 2px; padding: 8px; margin: 0 0 2px 64px;">
+                <span class="t-sm muted" style="padding: 4px 8px;">おたこ · 名義 @012345rty</span>
+                <button type="button" class="tl"><i class="fa-solid fa-lock-open" aria-hidden="true"></i>解放</button>
+              </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:24</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:24 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:30</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">新概念</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:30 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:36</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:36 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:42</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">スティックのり</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:42 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:48</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">lalaClione</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:48 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">18:54</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="18:54 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            <div class="pgap"><span>休憩 <span class="t-num">18:54 – 20:00</span></span></div>
+            
+            
+          
+            
+            <div class="plabel row" style="justify-content: space-between; padding-right: 0;"><span>第2部 <span class="t-num">5 / 8</span></span><button type="button" class="ib sm" aria-label="1日目 第2部 を編集"><i class="fa-solid fa-pen"></i></button></div>
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:00</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">あいこーすふぃあ</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:00 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:06</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">hato</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:06 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:12</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:12 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:18</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">てつどうふぁん</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:18 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:24</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:24 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:30</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">おたこ</span>
+                <span class="dot info" title="確保済み" aria-label="確保済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:30 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:36</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:36 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">20:42</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/191c3939aefb326fc04fd3ccf6db83a9.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">新概念</span>
+                <span class="dot" title="提出済み" aria-label="提出済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="20:42 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            <div class="pgap"><span>休憩 <span class="t-num">20:42 – 22:30</span></span></div>
+            
+            
+          
+            
+            <div class="plabel row" style="justify-content: space-between; padding-right: 0;"><span>第3部 <span class="t-num">3 / 8</span></span><button type="button" class="ib sm" aria-label="1日目 第3部 を編集"><i class="fa-solid fa-pen"></i></button></div>
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">22:30</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">スティックのり</span>
+                <span class="dot info" title="確保済み" aria-label="確保済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="22:30 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">22:36</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="22:36 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">22:42</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="22:42 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">22:48</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">lalaClione</span>
+                <span class="dot info" title="確保済み" aria-label="確保済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="22:48 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">22:54</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="22:54 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">23:00</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="23:00 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">23:06</span>
+              <div class="sl taken" style="padding-right: 0;">
+                <img src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="">
+                <span class="nm" style="color: var(--ink);">味付け海苔</span>
+                <span class="dot info" title="確保済み" aria-label="確保済み"></span>
+                
+                <button type="button" class="ib sm" aria-label="23:06 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+            
+            
+            
+            <div class="srow2">
+              <span class="tm">23:12</span>
+              <div class="sl" style="padding-right: 0;">
+                
+                <span class="nm" style="color: var(--ink-muted);">空き</span>
+                <span class="dot ok" title="空き" aria-label="空き"></span>
+                
+                <button type="button" class="ib sm" aria-label="23:12 の枠を操作"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            
+            
+          
+        </section>
+      
+    </div>
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

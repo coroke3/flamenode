@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品を編集</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#000}
+.etab{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border:0;background:transparent;color:var(--ink-muted);font:400 14px/20px var(--font-sans);cursor:pointer}
+.etab:hover{color:var(--ink)}
+.etab.on{color:var(--ink);background:var(--surface-subtle)}
+.ve-pa{display:grid;grid-template-columns:1fr 1fr;gap:2px}
+.ve-pa button{display:grid;gap:4px;text-align:left;padding:14px 16px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}
+.ve-pa button b{font-weight:400;font-size:14px;color:var(--ink)}
+.ve-pa button.on{background:var(--surface-active)}
+.ve-pa button.on b::before{content:"\f00c";font:900 11px/1 "Font Awesome 6 Free";margin-right:8px}
+@media (max-width:640px){.ve-pa{grid-template-columns:1fr}}
+.chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}
+.chip.on{background:var(--ink);color:var(--bg)}
+.mrow{display:grid;grid-template-columns:20px minmax(140px,1.2fr) minmax(120px,1fr) 88px 44px 72px;gap:8px;align-items:center;padding:6px 0}
+</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 40px;">
+    <a href="MyPage.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>ダッシュボード</a>
+    <div class="wrap-row" style="justify-content: space-between; gap: 16px; margin-top: 8px; align-items: flex-end;">
+      <h1 class="t-display">作品を編集</h1>
+      <div class="wrap-row" style="gap: 8px;">
+        <x-import component-from-global-scope="FlameNode.Status" status="warning" label="審査待ち"></x-import>
+        <a href="VideoDetail.dc.html" class="ib" aria-label="公開ページを見る"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+        <a href="VideoPermissions.dc.html" class="ib" aria-label="編集できる人を管理"><i class="ms ms-manage_accounts"></i></a>
+      </div>
+    </div>
+
+    <div class="split" style="margin-top: 32px;">
+      <form class="main" onSubmit="{{prevent}}" style="display: flex; flex-direction: column;">
+        <div role="tablist" aria-label="編集項目" class="wrap-row ve-tabs" style="gap: 0;">
+          <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+            <button type="button" role="tab" class="{{t.cls}}" aria-selected="{{t.sel}}" onClick="{{t.go}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}<i class="{{t.state}}" aria-label="{{t.stateLabel}}" title="{{t.stateLabel}}" style="font-size: 11px; color: {{t.stateColor}};"></i></button>
+          </sc-for>
+        </div>
+
+        <sc-if value="{{isWork}}" hint-placeholder-val="{{true}}">
+          <div class="form" style="margin-top: 32px;">
+            <x-import component-from-global-scope="FlameNode.TextField" label="作品タイトル *" default-value="崇渦に関するお知らせ 前編" placeholder="例: First Light - 春の輪" hint="12 / 120"></x-import>
+            <label class="field"><span>所属イベント</span><span class="sel-i"><i class="fa-solid fa-lock" aria-hidden="true"></i><select class="select i" disabled="{{yes}}" title="このイベントは固定です"><option>PVSF2026S(固定)</option></select></span></label>
+            <x-import component-from-global-scope="FlameNode.TextField" label="紹介コメント" multiline="{{yes}}" placeholder="作品の見どころを 1〜2 行で。" default-value="夏の終わりに残る光の残像を、ノードがつながる映像で描きました。"></x-import>
+            <details>
+              <summary class="il t-sm" style="cursor: pointer;"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i>詳細コメント(みどころ・制作エピソード・あとがき)</summary>
+              <div class="stack" style="gap: 20px; margin-top: 16px;">
+                <x-import component-from-global-scope="FlameNode.TextField" label="みどころ" multiline="{{yes}}"></x-import>
+                <x-import component-from-global-scope="FlameNode.TextField" label="制作エピソード" multiline="{{yes}}"></x-import>
+                <x-import component-from-global-scope="FlameNode.TextField" label="あとがき" multiline="{{yes}}"></x-import>
+              </div>
+            </details>
+
+            <div class="form-sec" style="margin-top: 24px;">
+              <h2 class="t-h3">使用楽曲</h2>
+              <x-import component-from-global-scope="FlameNode.TextField" label="楽曲名" placeholder="曲名" default-value="Signal"></x-import>
+              <div class="cols2">
+                <x-import component-from-global-scope="FlameNode.TextField" label="アーティスト名" placeholder="歌唱・演奏など"></x-import>
+                <x-import component-from-global-scope="FlameNode.TextField" label="作曲者" placeholder="作曲・編曲など"></x-import>
+              </div>
+              <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" label="楽曲リンク" placeholder="https://...(任意)"></x-import><i class="fa-solid fa-link" aria-hidden="true"></i></div>
+            </div>
+
+            <div class="form-sec" style="margin-top: 24px;">
+              <h2 class="t-h3">使用ソフト</h2>
+              <div class="wrap-row" style="gap: 4px;" role="group" aria-label="使用ソフトを選択">
+                <sc-for list="{{softs}}" as="s" hint-placeholder-count="8">
+                  <button type="button" class="{{s.cls}}" aria-pressed="{{s.on}}" onClick="{{s.toggle}}"><i class="{{s.icon}}" aria-hidden="true"></i>{{s.name}}</button>
+                </sc-for>
+              </div>
+              <div class="row" style="gap: 8px;">
+                <x-import component-from-global-scope="FlameNode.TextField" aria-label="リストにないソフト" placeholder="リストにない場合は入力(例: Cavalry)" style="flex: 1;"></x-import>
+                <button type="button" class="ib" aria-label="追加"><i class="fa-solid fa-plus"></i></button>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isSubmitter}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <label class="field"><span>提出主体 X ID</span><span class="sel-i"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i><select class="select i" style="background-color: #000; color: #fff;" onChange="{{pickX}}"><option value="main">@012345rty(おたこ)</option><option value="sub">@otako_sub(おたこ(サブ))</option></select></span></label>
+            <sc-if value="{{xChanged}}" hint-placeholder-val="{{false}}">
+              <div class="ve-pa" role="radiogroup" aria-label="提出者情報の扱い">
+                <button type="button" role="radio" class="{{paKeep}}" aria-checked="{{paKeepOn}}" onClick="{{setKeep}}"><b>提出者情報を維持</b><span>表示名・アイコン・概要はこのまま。X ID だけ変えます。</span></button>
+                <button type="button" role="radio" class="{{paCopy}}" aria-checked="{{paCopyOn}}" onClick="{{setCopy}}"><b>新 X ID の既定をコピー</b><span>変更先の既定プロフィールで上書きします。</span></button>
+              </div>
+            </sc-if>
+            <x-import component-from-global-scope="FlameNode.TextField" label="表示名 *" default-value="おたこ" hint="80文字まで"></x-import>
+            <dc-import name="IconPicker" ctx="video" icon="select" hint-size="100%,300px"></dc-import>
+            <x-import component-from-global-scope="FlameNode.TextField" label="自分・団体の概要" multiline="{{yes}}"></x-import>
+            <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" label="YouTube チャンネル" placeholder="https://www.youtube.com/@..."></x-import><i class="fa-brands fa-youtube" aria-hidden="true"></i></div>
+            <dc-import name="LinkEditor" hint-size="100%,180px"></dc-import>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isMembers}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px; max-width: none;">
+            <div class="seg" role="radiogroup" aria-label="作品形式"><button type="button" role="radio" aria-checked="false"><i class="fa-solid fa-user" aria-hidden="true"></i>個人作品</button><button type="button" role="radio" class="on" aria-checked="true"><i class="fa-solid fa-user-group" aria-hidden="true"></i>合作作品</button></div>
+            <dc-import name="MemberEditor" hint-size="100%,620px"></dc-import>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isQuestions}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <p class="il muted t-sm" style="margin: 0;"><img class="ev-icon" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 20px; height: 20px;">PVSF2026S の運営からの質問</p>
+            <div class="field"><span>ステージで流す際の音量調整は必要ですか? *</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="q1" checked="{{yes}}">不要</label><label class="radio"><input type="radio" name="q1">必要</label></div></div>
+            <x-import component-from-global-scope="FlameNode.TextField" label="上映時の注意点(任意)" multiline="{{yes}}" placeholder="例: 冒頭3秒は無音です"></x-import>
+            <x-import component-from-global-scope="FlameNode.Checkbox" label="楽曲・素材の権利を確認しました *" default-checked="{{yes}}"></x-import>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isYoutube}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" label="YouTube URL *" placeholder="https://www.youtube.com/watch?v=..." default-value="https://www.youtube.com/watch?v=xxxxxxxxxxx"></x-import><i class="fa-brands fa-youtube" aria-hidden="true"></i></div>
+            <div class="row" style="gap: 20px; align-items: flex-start; background: var(--surface-subtle); padding: 16px;">
+              <img src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="YouTube サムネイル" style="width: 200px; aspect-ratio: 16/9; object-fit: cover; display: block;">
+              <dl class="kv" style="grid-template-columns: 96px 1fr; font-size: 13px; flex: 1;">
+                <dt>動画ID</dt><dd class="t-mono">xxxxxxxxxxx</dd>
+                <dt>公開設定</dt><dd class="il"><i class="fa-solid fa-link" aria-hidden="true"></i>限定公開</dd>
+                <dt>長さ</dt><dd class="t-num">08:02</dd>
+                <dt>同期</dt><dd><span class="st"><i class="fa-solid fa-circle-check st-ic ok" aria-hidden="true"></i>取得済み 10.04 11:05</span></dd>
+              </dl>
+            </div>
+            <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>限定公開のままでも登録できます。公開日時は運営が設定します。</p>
+            <div class="field" style="margin-top: 16px;"><span>YouTube チャンネル</span>
+              <div class="row" style="gap: 8px; flex-wrap: wrap;">
+                <a href="https://www.youtube.com/@012345rty" class="il t-sm" target="_blank" rel="noopener noreferrer" style="min-width: 0;"><i class="fa-brands fa-youtube" aria-hidden="true"></i><span class="ell">@012345rty</span><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true" style="font-size: 11px;"></i></a>
+                <span style="flex: 1;"></span>
+                <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm"><i class="fa-solid fa-pen" aria-hidden="true"></i>変更</button>
+                <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">解除</button>
+              </div>
+            </div>
+            <section class="raised stack" role="dialog" aria-labelledby="yc-title" style="gap: 12px; padding: 20px; margin-top: 8px;">
+              <p id="yc-title" class="t-h3" style="margin: 0;">YouTube チャンネル</p>
+              <p class="t-sm muted" style="margin: 0;">候補から選ぶか、チャンネル URL を直接入力してください。</p>
+              <div class="seg sm" role="tablist" aria-label="設定方法"><button type="button" role="tab" class="on" aria-selected="true">候補から選ぶ</button><button type="button" role="tab" aria-selected="false">URLを入力</button></div>
+              <ul class="stack" style="gap: 4px; list-style: none; margin: 0; padding: 0;">
+                <li><button type="button" class="tl on" style="height: 52px;"><i class="fa-brands fa-youtube" aria-hidden="true"></i><span class="stack" style="gap: 0; min-width: 0; flex: 1; text-align: left;"><span class="ell">おたこ</span><span class="t-sm muted t-mono ell">youtube.com/@012345rty</span></span><i class="fa-solid fa-check" aria-hidden="true"></i></button></li>
+                <li><button type="button" class="tl" style="height: 52px;"><i class="fa-brands fa-youtube" aria-hidden="true"></i><span class="stack" style="gap: 0; min-width: 0; flex: 1; text-align: left;"><span class="ell">おたこ（サブ）</span><span class="t-sm muted t-mono ell">youtube.com/@otako_sub</span></span></button></li>
+                <li><button type="button" class="tl" style="height: 52px;"><i class="fa-brands fa-youtube" aria-hidden="true"></i><span class="stack" style="gap: 0; min-width: 0; flex: 1; text-align: left;"><span class="ell">空白合作チーム</span><span class="t-sm muted t-mono ell">youtube.com/@kuuhaku_collab</span></span></button></li>
+              </ul>
+              <div class="row" style="justify-content: flex-end;"><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">閉じる</button></div>
+            </section>
+          </div>
+        </sc-if>
+
+        <div class="row" style="gap: 8px; margin-top: 48px;">
+          <button type="submit" class="fn-btn fn-btn--primary">保存</button>
+          <a href="MyPage.dc.html" class="fn-btn fn-btn--tertiary">キャンセル</a>
+          <span style="flex: 1;"></span>
+          <a href="ConfirmModal.dc.html" class="fn-btn fn-btn--danger fn-btn--sm"><i class="fa-regular fa-trash-can" aria-hidden="true"></i>削除</a>
+        </div>
+      </form>
+
+      <aside class="side stack" style="gap: 32px;">
+        <section aria-label="投稿内容プレビュー">
+          <h2 class="il t-label muted" style="margin: 0 0 12px;"><i class="fa-solid fa-eye" aria-hidden="true"></i>プレビュー</h2>
+          <x-import component-from-global-scope="FlameNode.VideoCard" title="崇渦に関するお知らせ 前編" thumbnail="/_blob/3d8d62bbac75243d266ec6e3de039e6d" duration="08:02" creator="おたこ" creator-icon="/_blob/fc027fe6fe3a001a22a1933270ce72b9"></x-import>
+        </section>
+        <section>
+          <h2 class="t-label muted" style="margin: 0 0 12px;">あなたの編集権限</h2>
+          <div class="stack t-sm" style="gap: 8px;">
+            <span class="il"><i class="fa-solid fa-pen" aria-hidden="true"></i>作品情報</span>
+            <span class="il"><i class="fa-solid fa-pen" aria-hidden="true"></i>投稿者情報</span>
+            <span class="il"><i class="fa-solid fa-pen" aria-hidden="true"></i>メンバー・チャプター</span>
+            <span class="il muted"><i class="fa-solid fa-lock" aria-hidden="true"></i>YouTube URL(運営のみ)</span>
+            <span class="il muted"><i class="fa-solid fa-lock" aria-hidden="true"></i>所属イベント(固定)</span>
+          </div>
+        </section>
+        <section>
+          <h2 class="il t-label muted" style="margin: 0 0 12px;"><i class="ms ms-admin_panel_settings" aria-hidden="true"></i>編集権限モード</h2>
+          <div class="seg" role="group" aria-label="編集する立場"><sc-for list="{{_nav}}" as="t" hint-placeholder-count="2"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button></sc-for></div>
+          <p class="t-sm muted" style="margin: 8px 0 0;">運営・管理者のときだけ表示されます。</p>
+        </section>
+      </aside>
+    </div>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'work', soft: { 'After Effects': true, 'Blender': true }, x: 'main', pa: 'keep' }; }
+  renderVals() {
+    const r = this.__rv();
+    r._nav = (r.modes || []).map(x => ({ label: x.label, cur: x.id === (this.state._mode || 'owner') ? 'page' : 'false', cls: x.id === (this.state._mode || 'owner') ? 'on' : '', pick: (e) => { e && e.preventDefault && e.preventDefault(); this.setState({ _mode: x.id }); } }));
+    return r;
+  }
+  __rv() {
+    const t = this.state.tab; const soft = this.state.soft; const pa = this.state.pa;
+    const T = ['fa-solid fa-film', 'fa-solid fa-user', 'fa-solid fa-user-group', 'fa-solid fa-circle-question', 'fa-brands fa-youtube'];
+    const defs = [['work', '作品情報', 'ok'], ['submitter', '投稿者情報', 'ok'], ['members', 'メンバー・チャプター', 'ok'], ['questions', '追加質問', 'warn'], ['youtube', 'YouTube', 'ok']];
+    const softList = [['AviUtl', 'fa-solid fa-film'], ['AviUtl2', 'fa-solid fa-film'], ['After Effects', 'ms ms-view_day'], ['Premiere Pro', 'fa-solid fa-scissors'], ['DaVinci Resolve', 'fa-solid fa-palette'], ['Blender', 'fa-solid fa-cube'], ['Vegas Pro', 'fa-solid fa-scissors'], ['YMM4', 'fa-solid fa-comment-dots']];
+    const TI = ['/_blob/fc027fe6fe3a001a22a1933270ce72b9', '/_blob/525c7209e503b8327cbd5bf4a64e5fc8', '/_blob/f5c1a8af077b887c7bb1d043f3cf69c1'];
+    return {
+      pickX: (e) => this.setState({ x: e.target.value }), xChanged: this.state.x !== 'main',
+      paKeep: pa === 'keep' ? 'on' : '', paCopy: pa === 'copy' ? 'on' : '', paKeepOn: pa === 'keep' ? 'true' : 'false', paCopyOn: pa === 'copy' ? 'true' : 'false',
+      setKeep: () => this.setState({ pa: 'keep' }), setCopy: () => this.setState({ pa: 'copy' }),
+      theme: this.props.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(),
+      tabs: defs.map((d, i) => ({ label: d[1], icon: '', cls: d[0] === t ? 'etab on' : 'etab', sel: d[0] === t ? 'true' : 'false', go: () => this.setState({ tab: d[0] }), state: d[2] === 'ok' ? '' : 'fa-solid fa-circle-exclamation', stateLabel: d[2] === 'ok' ? '入力済み' : '未回答の必須項目あり', stateColor: d[2] === 'ok' ? 'var(--ink-muted)' : 'var(--warning)' })),
+      isWork: t === 'work', isSubmitter: t === 'submitter', isMembers: t === 'members', isQuestions: t === 'questions', isYoutube: t === 'youtube',
+      softs: softList.map((s) => ({ name: s[0], icon: soft[s[0]] ? 'fa-solid fa-check' : '', on: soft[s[0]] ? 'true' : 'false', cls: soft[s[0]] ? 'chip on' : 'chip', toggle: () => this.setState({ soft: { ...soft, [s[0]]: !soft[s[0]] } }) })),
+      members: [{ name: 'おたこ', x: '@012345rty', role: '映像・構成', ch: '0:00', pub: true, img: TI[0] }, { name: '幼虫', x: '@MusiVirus', role: '映像', ch: '4:10', pub: true, img: TI[1] }, { name: '新概念', x: '@metameta194', role: '3DCG', ch: '', pub: false, img: TI[2] }],
+      modes: [{ id: 'owner', label: '作者として' }, { id: 'staff', label: '運営として' }]
+    };
+  }
+}
+</script>
+</body>
+</html>

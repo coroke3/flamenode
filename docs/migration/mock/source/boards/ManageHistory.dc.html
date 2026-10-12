@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>運営の履歴</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="history" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="history" hint-size="100%,96px"></dc-import>
+
+    <div class="wrap-row" style="gap: 8px; margin: 24px 0 8px;">
+      <div class="seg" role="tablist" aria-label="対象"><sc-for list="{{targets}}" as="t" hint-placeholder-count="5"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}</button></sc-for></div>
+      <div class="seg" role="group" aria-label="期間"><button type="button">今日</button><button type="button" class="on">7日</button><button type="button">30日</button><button type="button">すべて</button></div>
+      <span style="flex: 1;"></span>
+      <span class="field-i sm-field" style="width: 220px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="作品名・実行者で絞り込み" placeholder="作品名・実行者で絞り込み"></x-import></span>
+    </div>
+    <p class="t-sm muted" style="margin: 0 0 16px;">このイベントの作品・枠・設定・スタッフへの変更だけを表示します。代表は 30 日以内の変更を元に戻せます。</p>
+
+    <sc-for list="{{days}}" as="d" hint-placeholder-count="2">
+      <section style="margin-bottom: 24px;">
+        <h2 class="t-label muted" style="margin: 0 0 8px;">{{d.label}}</h2>
+        <sc-for list="{{d.items}}" as="h" hint-placeholder-count="3">
+          <div class="hrow">
+            <button type="button" class="hrow-head" onClick="{{h.toggle}}" aria-expanded="{{h.openStr}}">
+              <span class="t-num muted t-sm" style="width: 44px; flex: none;">{{h.time}}</span>
+              <img class="avatar" src="{{h.icon}}" alt="" style="width: 24px; height: 24px; flex: none;">
+              <span class="ell" style="flex: 1; text-align: left;"><b style="font-weight: 400; color: var(--ink);">{{h.actor}}</b> <span class="muted">が</span> {{h.what}}</span>
+              <span class="il t-sm muted"><i class="{{h.kindIcon}}" aria-hidden="true"></i>{{h.kind}}</span>
+              <i class="{{h.chev}} muted" aria-hidden="true"></i>
+            </button>
+            <sc-if value="{{h.open}}" hint-placeholder-val="{{false}}">
+              <div class="hrow-body">
+                <div class="chg" role="list">
+                  <sc-for list="{{h.diff}}" as="x" hint-placeholder-count="2"><div class="chg-r" role="listitem"><span class="t-sm muted">{{x.k}}</span><span class="chg-v"><span class="diff-del">{{x.a}}</span><i class="fa-solid fa-arrow-right chg-ar" aria-label="から"></i><span class="diff-add">{{x.b}}</span></span></div></sc-for>
+                </div>
+                <div class="row" style="gap: 8px; margin-top: 12px;">
+                  <sc-if value="{{h.restorable}}" hint-placeholder-val="{{true}}"><button type="button" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i>この変更を元に戻す</button><span class="t-sm muted">元に戻す前に、現在の値との差分を確認します</span></sc-if>
+                  <sc-if value="{{h.locked}}" hint-placeholder-val="{{false}}"><span class="il t-sm muted"><i class="fa-solid fa-lock" aria-hidden="true"></i>{{h.lockReason}}</span></sc-if>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </section>
+    </sc-for>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { target: 'all', open: { 'a0': true } }; }
+  renderVals() {
+    const S = this.state;
+    const T = ['/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/191c3939aefb326fc04fd3ccf6db83a9'];
+    const KI = { video: ['作品', 'fa-solid fa-film'], slot: ['枠', 'ms ms-view_timeline'], setting: ['設定', 'fa-solid fa-sliders'], staff: ['スタッフ', 'ms ms-admin_panel_settings'] };
+    const D = [
+      ['今日 10/04', [
+        ['a0', '11:02', 'おたこ', 0, 'video', '作品「崇渦に関するお知らせ 前編」の YouTube URL を設定', [['youtube_video_id', '(未設定)', 'xxxxxxxxxxx']], true, ''],
+        ['a1', '09:40', 'おたこ', 0, 'slot', '11.03 18:18 の枠を確保', [['確保者', '(空き)', 'おたこ']], false, '枠の確保は確保者本人が解放します'],
+        ['a2', '09:12', '新概念', 2, 'setting', '受付終了日時を変更', [['受付終了', '10/12 23:59', '10/16 23:59']], true, '']
+      ]],
+      ['昨日 10/03', [
+        ['b0', '22:40', '新概念', 2, 'video', '作品「崇渦に関するお知らせ 前編」のメンバーを 2 人追加', [['メンバー', 'おたこ', 'おたこ / 新概念 / 味付け海苔'], ['チャプター', '0:00', '0:00 / 2:10']], true, ''],
+        ['b1', '20:15', 'スティックのり', 1, 'staff', 'lalaClione を「枠管理担当」で追加', [['プリセット', '—', '枠管理担当']], false, 'スタッフの追加・削除は代表権限で戻せます(代表のみ)']
+      ]]
+    ];
+    const days = D.map(([label, items]) => ({ label, items: items.filter(x => S.target === 'all' || x[4] === S.target).map(([id, time, actor, ic, kind, what, diff, rest, lock]) => {
+      const o = !!S.open[id];
+      return { time, actor, icon: T[ic], kind: KI[kind][0], kindIcon: KI[kind][1], what, open: o, openStr: o ? 'true' : 'false', chev: o ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down', toggle: () => this.setState({ open: { ...S.open, [id]: !o } }), diff: diff.map(([k, a, b]) => ({ k, a, b })), restorable: rest, locked: !rest, lockReason: lock };
+    }) })).filter(d => d.items.length);
+    return {
+      theme: this.props.theme ?? 'dark', days,
+      targets: [['all', 'すべて', 'ms ms-view_day'], ['video', '作品', 'fa-solid fa-film'], ['slot', '枠', 'ms ms-view_timeline'], ['setting', '設定', 'fa-solid fa-sliders'], ['staff', 'スタッフ', 'ms ms-admin_panel_settings']].map(([id, label, icon]) => ({ label, icon, cls: S.target === id ? 'on' : '', pick: () => this.setState({ target: id }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

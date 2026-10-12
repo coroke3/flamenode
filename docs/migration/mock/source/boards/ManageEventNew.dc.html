@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベントを作成</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="new" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+
+    <sc-if value="{{denied}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 16px; padding: 120px 0; align-items: flex-start; max-width: 560px;">
+        <span class="icon-tile lg"><i class="fa-solid fa-lock" aria-hidden="true"></i></span>
+        <h1 class="t-h2" style="margin: 0;">開催権限がありません</h1>
+        <p class="muted" style="margin: 0;">イベントを作成できるのは、管理者から「開催権限」を付与されたアカウントだけです。既存イベントの運営は、代表からスタッフに招待されると行えます。</p>
+        <div class="row" style="gap: 8px;"><a href="Manage.dc.html" class="fn-btn fn-btn--secondary">運営トップへ</a></div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{allowed}}" hint-placeholder-val="{{true}}">
+    <div class="en-grid">
+      <!-- 進み具合 -->
+      <nav class="en-outline" aria-label="入力の進み具合">
+        <span class="t-label muted" style="display: block; padding: 0 0 12px;">新しいイベント</span>
+        <sc-for list="{{outline}}" as="o" hint-placeholder-count="7">
+          <a href="{{o.href}}" class="{{o.cls}}"><span class="{{o.dot}}"></span>{{o.label}}</a>
+        </sc-for>
+        <span class="t-sm muted il" style="margin-top: 16px;"><i class="fa-solid fa-cloud" aria-hidden="true"></i>下書きを自動保存</span>
+      </nav>
+
+      <form class="en-form" onSubmit="{{prevent}}">
+        <!-- 1 はじめかた -->
+        <section id="s-start" class="en-sec" aria-labelledby="h-start">
+          <h2 id="h-start" class="en-h">どこから始めますか</h2>
+          <div class="seg en-start" role="tablist" aria-label="はじめかた"><sc-for list="{{starts}}" as="s" hint-placeholder-count="3"><button type="button" role="tab" class="{{s.cls}}" onClick="{{s.pick}}"><i class="{{s.icon}}" aria-hidden="true"></i>{{s.label}}</button></sc-for></div>
+          <sc-if value="{{showSources}}" hint-placeholder-val="{{true}}">
+            <div class="en-src" role="listbox" aria-label="{{srcLabel}}">
+              <sc-for list="{{sources}}" as="c" hint-placeholder-count="3">
+                <button type="button" role="option" aria-selected="{{c.sel}}" class="{{c.cls}}" onClick="{{c.pick}}">
+                  <img class="avatar" src="{{c.icon}}" alt="" style="width: 32px; height: 32px;">
+                  <span class="stack" style="gap: 0; min-width: 0; flex: 1; text-align: left;"><span class="ell">{{c.title}}</span><span class="t-sm muted ell">{{c.sub}}</span></span>
+                  <i class="{{c.check}}" aria-hidden="true"></i>
+                </button>
+              </sc-for>
+            </div>
+            <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>{{startNote}}</p>
+          </sc-if>
+        </section>
+
+        <!-- 2 名前と見た目 -->
+        <section id="s-name" class="en-sec" aria-labelledby="h-name">
+          <h2 id="h-name" class="en-h">名前と見た目</h2>
+          <div class="en-ident">
+            <label class="en-icon" title="アイコン画像をドロップ、貼り付け、またはクリックで選択"><img src="{{icon}}" alt=""><span class="en-icon-ov"><i class="fa-solid fa-camera" aria-hidden="true"></i></span><input type="file" accept="image/*" hidden></label>
+            <div class="stack" style="gap: 6px; flex: 1; min-width: 0;">
+              <input class="en-title" value="{{title}}" onChange="{{setTitle}}" placeholder="イベント名" aria-label="イベント名(必須)">
+              <span class="{{idCls}}"><span class="muted">flamenode.net/event/</span><span class="t-mono">{{eid}}</span><i class="{{idIcon}}" aria-hidden="true"></i><span>{{idMsg}}</span><button type="button" class="en-link" onClick="{{useSuggest}}" disabled="{{noSuggest}}">{{suggestLabel}}</button></span>
+            </div>
+          </div>
+          <textarea class="en-desc" placeholder="ひとこと説明(例: 映像連続投稿祭)" aria-label="説明" onChange="{{noop}}">{{desc}}</textarea>
+          <div class="en-row"><span class="en-k">種別</span><div class="seg" role="radiogroup" aria-label="種別"><sc-for list="{{kinds}}" as="k" hint-placeholder-count="4"><button type="button" role="radio" aria-checked="{{k.on}}" class="{{k.cls}}" onClick="{{k.pick}}">{{k.label}}</button></sc-for></div></div>
+          <div class="en-row"><span class="en-k">バナー</span><label class="drop en-banner" style="--acc: {{accent}};"><i class="fa-solid fa-panorama" aria-hidden="true"></i><span class="t-sm">画像をドロップ / 貼り付け / URLを入力(任意)</span><input type="file" accept="image/*" hidden></label></div>
+          <div class="en-row"><span class="en-k">アクセント</span>
+            <div class="row" style="gap: 6px; flex-wrap: wrap;">
+              <sc-for list="{{swatches}}" as="w" hint-placeholder-count="6"><button type="button" class="{{w.cls}}" style="background: {{w.c}};" aria-label="{{w.label}}" aria-pressed="{{w.on}}" onClick="{{w.pick}}"></button></sc-for>
+              <span class="t-sm muted" style="padding-left: 6px;">アイコンから抽出</span>
+              <input class="dinput t-mono" style="width: 104px; height: 32px; font-size: 13px;" value="{{accent}}" aria-label="カラーコード" onChange="{{noop}}">
+            </div>
+          </div>
+        </section>
+
+        <!-- 3 日程 -->
+        <section id="s-date" class="en-sec" aria-labelledby="h-date">
+          <h2 id="h-date" class="en-h">日程</h2>
+          <div class="row" style="gap: 12px; flex-wrap: wrap; justify-content: space-between;">
+            <div class="seg" role="radiogroup" aria-label="カレンダーで選ぶ期間"><sc-for list="{{calModes}}" as="m" hint-placeholder-count="2"><button type="button" role="radio" aria-checked="{{m.on}}" class="{{m.cls}}" onClick="{{m.pick}}"><span class="{{m.sw}}"></span>{{m.label}}</button></sc-for></div>
+            <span class="t-sm muted">{{calHint}}</span>
+          </div>
+          <p class="sch-sum">{{schSum}}</p>
+          <div class="cal-nav">
+            <button type="button" class="ib sm" aria-label="前の月" onClick="{{mPrev}}" disabled="{{mPrevOff}}"><i class="fa-solid fa-chevron-left"></i></button>
+            <button type="button" class="ib sm" aria-label="次の月" onClick="{{mNext}}"><i class="fa-solid fa-chevron-right"></i></button>
+            <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{mToday}}" disabled="{{mIsNow}}">今月</button>
+          </div>
+          <div class="cal-wrap">
+            <sc-for list="{{months}}" as="mo" hint-placeholder-count="2">
+              <div class="cal">
+                <span class="cal-m">{{mo.label}}</span>
+                <div class="cal-g">
+                  <sc-for list="{{mo.heads}}" as="hd" hint-placeholder-count="7"><span class="cal-hd">{{hd}}</span></sc-for>
+                  <sc-for list="{{mo.days}}" as="d" hint-placeholder-count="35"><button type="button" class="{{d.cls}}" onClick="{{d.pick}}" onPointerMove="{{d.hover}}" disabled="{{d.off}}" aria-label="{{d.aria}}">{{d.n}}</button></sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div class="stack" style="gap: 10px;">
+            <div class="prow"><span class="en-k"><span class="cal-sw e"></span>受付</span><input class="dinput t-num" value="{{entryS}}" aria-label="募集開始日時" onChange="{{noop}}"><span class="muted">→</span><input class="dinput t-num" value="{{entryE}}" aria-label="募集終了日時" onChange="{{noop}}"><span class="t-sm muted">{{entryLen}}</span></div>
+            <div class="wrap-row en-pre" style="gap: 4px;"><span class="t-xs muted" style="margin-right: 4px;">受付終了</span><sc-for list="{{entryPresets}}" as="p" hint-placeholder-count="3"><button type="button" class="{{p.cls}}" onClick="{{p.pick}}">{{p.label}}</button></sc-for></div>
+            <div class="prow"><span class="en-k"><span class="cal-sw h"></span>開催</span><input class="dinput t-num" value="{{holdS}}" aria-label="開始日時" onChange="{{noop}}"><span class="muted">→</span><input class="dinput t-num" value="{{holdE}}" aria-label="終了日時" onChange="{{noop}}"><span class="t-sm muted">{{holdLen}}</span></div>
+            <div class="tm-block" aria-labelledby="tm-h">
+              <div class="row" style="justify-content: space-between; gap: 12px; flex-wrap: wrap;"><span id="tm-h" class="t-label muted">開催時間(毎日)</span><span class="t-num">{{hsT}} – {{heT}} <span class="muted t-sm">· {{holdDur}}</span></span></div>
+              <sc-if value="{{tmIdle}}" hint-placeholder-val="{{true}}">
+                <div class="tm-bar" role="group" aria-label="開催時間をクリックで選ぶ">
+                  <sc-for list="{{tmCells}}" as="c" hint-placeholder-count="36"><button type="button" class="{{c.cls}}" aria-label="{{c.aria}}" onClick="{{c.pick}}" onPointerMove="{{c.hover}}"></button></sc-for>
+                </div>
+                <div class="tm-axis t-num"><sc-for list="{{tmAxis}}" as="x" hint-placeholder-count="7"><span style="left: {{x.left}};">{{x.label}}</span></sc-for></div>
+              </sc-if>
+              <sc-if value="{{tmAnch}}" hint-placeholder-val="{{false}}">
+                <div class="tm-anch" role="group" aria-label="終了の時刻をクリックで選ぶ">
+                  <sc-for list="{{tmRows}}" as="r" hint-placeholder-count="2">
+                    <div class="{{r.cls}}" style="--from: {{r.from}};">
+                      <div class="tm-bar tm-bar-18" style="grid-template-columns: repeat({{r.cols}}, 1fr);">
+                        <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="18"><button type="button" class="{{c.cls}}" aria-label="{{c.aria}}" onClick="{{c.pick}}" onPointerMove="{{c.hover}}"></button></sc-for>
+                      </div>
+                      <div class="tm-axis t-num"><sc-for list="{{r.axis}}" as="x" hint-placeholder-count="4"><span style="left: {{x.left}};">{{x.label}}</span></sc-for></div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <div class="row" style="gap: 12px; justify-content: space-between; flex-wrap: wrap;"><span class="t-sm muted">{{tmHint}}</span><sc-if value="{{tmCanReset}}" hint-placeholder-val="{{false}}"><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{tmReset}}">全体表示に戻す</button></sc-if></div>
+              <div class="wrap-row" style="gap: 4px;"><sc-for list="{{tmPresets}}" as="p" hint-placeholder-count="4"><button type="button" class="{{p.cls}}" onClick="{{p.pick}}">{{p.label}}</button></sc-for></div>
+            </div>
+            <div class="en-row"><span class="en-k">受付の時刻</span>
+              <span class="row" style="gap: 8px; flex-wrap: wrap;"><span class="t-sm muted">開始</span><span class="seg sm" role="radiogroup" aria-label="受付開始時刻"><sc-for list="{{esOpts}}" as="o" hint-placeholder-count="3"><button type="button" role="radio" aria-checked="{{o.on}}" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></span>
+              <span class="t-sm muted" style="margin-left: 8px;">終了</span><span class="seg sm" role="radiogroup" aria-label="受付終了時刻"><sc-for list="{{eeOpts}}" as="o" hint-placeholder-count="3"><button type="button" role="radio" aria-checked="{{o.on}}" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></span></span>
+            </div>
+            <span class="{{dateCheckCls}}"><i class="{{dateCheckIcon}}" aria-hidden="true"></i>{{dateCheck}}</span>
+            <span class="il t-sm muted"><i class="fa-solid fa-keyboard" aria-hidden="true"></i>時刻は「18時」「1830」のような短い入力でも読み取ります。</span>
+          </div>
+        </section>
+
+        <!-- 4 枠 -->
+        <section id="s-slot" class="en-sec" aria-labelledby="h-slot">
+          <h2 id="h-slot" class="en-h">枠</h2>
+          <div class="en-row"><span class="en-k">枠の種類</span>
+            <div class="stack" style="gap: 6px;">
+              <div class="seg" role="radiogroup" aria-label="枠タイプ"><sc-for list="{{slotTypes}}" as="t" hint-placeholder-count="2"><button type="button" role="radio" aria-checked="{{t.on}}" class="{{t.cls}}" onClick="{{t.pick}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}</button></sc-for></div>
+              <span class="t-sm muted">{{slotTypeNote}}</span>
+            </div>
+          </div>
+          <div class="en-row"><span class="en-k">1作品あたり</span><span class="stepper"><button type="button" aria-label="減らす" onClick="{{maxDown}}" disabled="{{maxMin}}"><i class="fa-solid fa-minus"></i></button><b>{{maxPer}} 枠まで</b><button type="button" aria-label="増やす" onClick="{{maxUp}}" disabled="{{maxMax}}"><i class="fa-solid fa-plus"></i></button></span><span class="t-sm muted en-note">連続して使える枠数(上限 3)</span></div>
+          <div class="en-row"><span class="en-k">1人あたり</span><span class="stepper"><button type="button" aria-label="減らす" onClick="{{perDown}}" disabled="{{perMin}}"><i class="fa-solid fa-minus"></i></button><b>{{perXLabel}}</b><button type="button" aria-label="増やす" onClick="{{perUp}}"><i class="fa-solid fa-plus"></i></button></span><span class="t-sm muted en-note">1 X ID が確保できる件数(連続枠は1件)</span></div>
+          <div class="en-row"><span class="en-k">確保した人の表示</span>
+            <div class="stack" style="gap: 8px;">
+              <div class="seg" role="radiogroup" aria-label="確保者表示"><sc-for list="{{holders}}" as="o" hint-placeholder-count="3"><button type="button" role="radio" aria-checked="{{o.on}}" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+              <span class="en-slotpv"><span class="t-mono t-sm muted">18:06</span><span>{{holderPv}}</span></span>
+            </div>
+          </div>
+          <div class="en-row"><span class="en-k">部</span>
+            <div class="stack" style="gap: 8px; flex: 1;">
+              <div class="wrap-row" style="gap: 4px;">
+                <sc-for list="{{parts}}" as="p" hint-placeholder-count="3"><span class="chip sel">{{p.label}}<button type="button" class="chip-x" aria-label="{{p.aria}}" onClick="{{p.del}}"><i class="fa-solid fa-xmark"></i></button></span></sc-for>
+                <button type="button" class="chip" onClick="{{addPart}}"><i class="fa-solid fa-plus" aria-hidden="true"></i>{{nextPart}}</button>
+              </div>
+              <span class="t-sm muted">開催日数から候補を出しています。枠どうしが {{gap}} 分以上空いたところで次の部に分かれます。</span>
+            </div>
+          </div>
+          <details class="en-more"><summary class="il t-sm muted"><i class="fa-solid fa-chevron-right dz-chev" aria-hidden="true"></i>細かい設定(枠の間隔・部の分割)</summary>
+            <div class="stack" style="gap: 12px; margin-top: 12px;">
+              <div class="en-row"><span class="en-k">枠どうしの間隔</span><div class="seg"><button type="button" class="on">自動判定</button><button type="button">指定する</button></div></div>
+              <div class="en-row"><span class="en-k">部を分ける空き</span><span class="stepper"><button type="button" aria-label="減らす" onClick="{{gapDown}}"><i class="fa-solid fa-minus"></i></button><b>{{gap}} 分以上</b><button type="button" aria-label="増やす" onClick="{{gapUp}}"><i class="fa-solid fa-plus"></i></button></span></div>
+            </div>
+          </details>
+        </section>
+
+        <!-- 5 参加のルール -->
+        <section id="s-rule" class="en-sec" aria-labelledby="h-rule">
+          <h2 id="h-rule" class="en-h">参加のルール</h2>
+          <p class="sentence en-sent">投稿済みの作品をこのイベントに加えるのは
+            <span class="seg"><sc-for list="{{linkOpts}}" as="o" hint-placeholder-count="2"><button type="button" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></span></p>
+          <p class="sentence en-sent">枠を取っていない作品の紐付けを
+            <span class="seg"><sc-for list="{{unslotOpts}}" as="o" hint-placeholder-count="2"><button type="button" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></span></p>
+          <p class="sentence en-sent">作品の持ち主が編集できる範囲は
+            <span class="seg"><sc-for list="{{ownOpts}}" as="o" hint-placeholder-count="2"><button type="button" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></span></p>
+          <sc-if value="{{ownCustom}}" hint-placeholder-val="{{false}}">
+            <div class="en-perm">
+              <sc-for list="{{ownKeys}}" as="k" hint-placeholder-count="6">
+                <div class="en-perm-r"><span class="t-sm">{{k.label}}</span><span class="seg"><sc-for list="{{k.opts}}" as="o" hint-placeholder-count="3"><button type="button" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></span></div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </section>
+
+        <!-- 6 投稿フォーム -->
+        <section id="s-form" class="en-sec" aria-labelledby="h-form">
+          <h2 id="h-form" class="en-h">投稿フォーム</h2>
+          <span class="t-label muted">必ず入力してもらう項目</span>
+          <div class="wrap-row" style="gap: 4px;">
+            <span class="chip sel" aria-disabled="true"><i class="fa-solid fa-lock" aria-hidden="true"></i>作品タイトル</span>
+            <span class="chip sel" aria-disabled="true"><i class="fa-solid fa-lock" aria-hidden="true"></i>YouTube URL</span>
+            <sc-for list="{{reqs}}" as="r" hint-placeholder-count="10"><button type="button" class="{{r.cls}}" aria-pressed="{{r.on}}" onClick="{{r.toggle}}"><i class="{{r.icon}}" aria-hidden="true"></i>{{r.label}}</button></sc-for>
+          </div>
+          <span class="t-label muted" style="margin-top: 8px;">追加の質問 <span class="t-num">{{qCount}} / 4</span></span>
+          <div class="stack" style="gap: 0;">
+            <sc-for list="{{qs}}" as="q" hint-placeholder-count="2">
+              <div class="en-q">
+                <span class="en-q-t"><i class="{{q.icon}}" aria-hidden="true"></i>{{q.typeLabel}}</span>
+                <input class="en-q-in" value="{{q.label}}" aria-label="質問名" onChange="{{noop}}">
+                <button type="button" class="{{q.reqCls}}" onClick="{{q.toggleReq}}">必須</button>
+                <span class="seg sm"><sc-for list="{{q.vis}}" as="v" hint-placeholder-count="3"><button type="button" class="{{v.cls}}" onClick="{{v.pick}}" title="{{v.title}}">{{v.label}}</button></sc-for></span>
+                <button type="button" class="ib sm" aria-label="質問を削除" onClick="{{q.del}}"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+            </sc-for>
+          </div>
+          <div class="wrap-row" style="gap: 4px;"><span class="t-sm muted" style="padding: 6px 4px 0 0;">追加:</span><sc-for list="{{qTypes}}" as="t" hint-placeholder-count="5"><button type="button" class="chip" onClick="{{t.add}}" disabled="{{qFull}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}</button></sc-for></div>
+          <span class="t-label muted" style="margin-top: 8px;">ステージ・権利確認 <span class="t-num">{{stCount}} / 4</span></span>
+          <div class="stack" style="gap: 0;">
+            <sc-for list="{{stage}}" as="q" hint-placeholder-count="2"><div class="en-q"><span class="en-q-t"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>確認</span><input class="en-q-in" value="{{q}}" aria-label="確認項目" onChange="{{noop}}"><button type="button" class="ib sm" aria-label="削除"><i class="fa-solid fa-xmark"></i></button></div></sc-for>
+          </div>
+          <span class="il t-sm muted"><i class="fa-solid fa-eye" aria-hidden="true"></i>右のプレビューで投稿画面の見え方を確認できます。概要欄テンプレートは作成後のイベント設定で編集します。</span>
+        </section>
+
+        <!-- 7 公開 -->
+        <section id="s-pub" class="en-sec" aria-labelledby="h-pub">
+          <h2 id="h-pub" class="en-h">公開</h2>
+          <div class="seg" role="radiogroup" aria-label="公開状態"><sc-for list="{{visOpts}}" as="o" hint-placeholder-count="2"><button type="button" role="radio" aria-checked="{{o.on}}" class="{{o.cls}}" onClick="{{o.pick}}"><i class="{{o.icon}}" aria-hidden="true"></i>{{o.label}}</button></sc-for></div>
+          <span class="t-sm muted">{{visNote}}</span>
+          <ol class="en-next">
+            <li><span class="t-num muted">1</span>枠を生成する(開催日から候補を出します)</li>
+            <li><span class="t-num muted">2</span>スタッフを招待して権限を決める</li>
+            <li><span class="t-num muted">3</span>公開して受付を始める</li>
+          </ol>
+        </section>
+      </form>
+
+      <!-- プレビュー -->
+      <aside class="en-pv" aria-label="プレビュー">
+        <div class="seg sm" role="tablist" aria-label="プレビュー"><sc-for list="{{pvTabs}}" as="t" hint-placeholder-count="2"><button type="button" role="tab" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button></sc-for></div>
+        <sc-if value="{{pvPage}}" hint-placeholder-val="{{true}}">
+          <div class="en-pv-banner" style="--acc: {{accent}};"></div>
+          <div class="row" style="gap: 12px; margin-top: -28px; padding: 0 4px; align-items: flex-end;"><img class="avatar" src="{{icon}}" alt="" style="width: 56px; height: 56px; box-shadow: 0 0 0 3px var(--bg);"><span class="st t-sm" style="padding-bottom: 4px;"><span class="{{pvDot}}"></span>{{pvState}}</span></div>
+          <span class="t-h3" style="display: block; margin-top: 10px;">{{titleOrPh}}</span>
+          <span class="t-sm muted">{{desc}}</span>
+          <dl class="kv en-kv"><dt>受付</dt><dd class="t-num">{{entryText}}</dd><dt>開催</dt><dd class="t-num">{{holdText}}</dd><dt>枠</dt><dd>{{slotText}}</dd><dt>参加</dt><dd>{{ruleText}}</dd></dl>
+        </sc-if>
+        <sc-if value="{{pvForm}}" hint-placeholder-val="{{false}}">
+          <div class="stack en-formpv" style="gap: 10px;">
+            <span class="t-sm muted">投稿画面(必須は * )</span>
+            <span class="en-fpv">作品タイトル *</span><span class="en-fpv">YouTube URL *</span>
+            <sc-for list="{{formPv}}" as="f" hint-placeholder-count="5"><span class="en-fpv">{{f}}</span></sc-for>
+          </div>
+        </sc-if>
+        <div class="en-todo">
+          <span class="t-label muted">{{todoHead}}</span>
+          <sc-for list="{{todo}}" as="t" hint-placeholder-count="2"><a href="{{t.href}}" class="il t-sm"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}</a></sc-for>
+        </div>
+        <button type="button" class="fn-btn fn-btn--primary" style="width: 100%; justify-content: center;" disabled="{{cantCreate}}"><i class="fa-solid fa-plus" aria-hidden="true"></i>イベントを作成</button>
+        <span class="t-sm muted" style="text-align: center; display: block;"><span class="kbd">Ctrl</span> + <span class="kbd">Enter</span> でも作成できます</span>
+      </aside>
+    </div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"allowed":{"editor":"boolean","default":true},"start":{"editor":"enum","options":["copy","template","blank"],"default":"copy"},"$preview":{"width":1440,"height":2600}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.state = { start: null, src: 'PVSF2026S', title: 'PVSF2026A', kind: 'normal', accent: '#d6ec8a', calMode: 'entry', entry: [9, 38], hold: [51, 52], pick: null, hover: null,
+      slotType: 'time', maxPer: 2, perX: 2, holder: 'public', parts: ['1日目第1部', '1日目第2部', '2日目第1部'], gap: 15,
+      link: 'approval', unslot: 'deny', own: 'default', ownSet: {}, req: { icon: true, profile: false, channel: false, music: true, ref: false, credit: false, intro: true, soft: true, part: true },
+      qs: [{ t: 'radio', label: '上映時の音量について', req: true, vis: 'review' }, { t: 'text', label: '使用素材の出典', req: false, vis: 'public' }], vis: 'private', pv: 'page', hs: 1080, he: 1380, tp: null, th: null, es: 0, ee: 1439, mOff: 0, anch: null };
+  }
+  renderVals() {
+    const S = this.state;
+    const P = this.props;
+    const start = S.start || P.start || 'copy';
+    const allowed = P.allowed ?? true;
+    const T = ['/_blob/6ecfc7b6882f277d815f563e873f25ee', '/_blob/3d8d62bbac75243d266ec6e3de039e6d', '/_blob/be71b2f744d470e10fb8c8ca733bbace', '/_blob/525c7209e503b8327cbd5bf4a64e5fc8'];
+    // --- はじめかた
+    const SRC = {
+      copy: [['PVSF2026S', 'PVSF2026S', '2026.08 · 128枠 · 質問2', T[0]], ['PVSF2026R', 'PVSF2026R', '2026.05 · 96枠 · 質問1', T[1]], ['NY2026', '年越し合作 2026', '2025.12 · 枠なし · 質問0', T[2]]],
+      template: [['tpl-pvsf', 'PVSF 標準', '時間枠 · 1作品2枠 · 承認制', T[3]], ['tpl-collab', '合作イベント', '件数枠 · 枠なし投稿を許可', T[2]]]
+    };
+    const sources = (SRC[start] || []).map(([id, title, sub, icon]) => ({ title, sub, icon, sel: S.src === id ? 'true' : 'false', cls: 'en-src-i' + (S.src === id ? ' on' : ''), check: S.src === id ? 'fa-solid fa-check' : '', pick: () => this.setState({ src: id }) }));
+    // --- ID
+    const taken = ['PVSF2026S', 'PVSF2026R', 'PVSF2026Sp', 'PVSF2025S'];
+    const eid = (S.title || '').normalize('NFKC').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || '—';
+    const clash = taken.includes(eid);
+    const noTitle = !(S.title || '').trim();
+    // --- 日付 (0 = 2026-10-01)
+    const base = new Date(2026, 9, 1);
+    const D = (i) => new Date(2026, 9, 1 + i);
+    const W = ['日', '月', '火', '水', '木', '金', '土'];
+    const fmt = (i) => { const d = D(i); return (d.getMonth() + 1) + '/' + String(d.getDate()).padStart(2, '0') + '(' + W[d.getDay()] + ')'; };
+    const fmtIn = (i, t) => { const d = D(i); return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0') + ' ' + t; };
+    const today = 3;
+    let entry = S.entry, hold = S.hold;
+    if (S.pick != null && S.hover != null) { const r = [Math.min(S.pick, S.hover), Math.max(S.pick, S.hover)]; if (S.calMode === 'entry') entry = r; else hold = r; }
+    const mo0 = 9 + (S.mOff || 0);
+    const months = [mo0, mo0 + 1].map((mm, k) => {
+      const first = new Date(2026, mm, 1); const m = first.getMonth(); const y = first.getFullYear(); const label = (k === 0 || m === 0 ? y + '年 ' : '') + (m + 1) + '月';
+      const n = new Date(y, m + 1, 0).getDate();
+      const off = Math.round((first - base) / 86400000);
+      const days = [];
+      for (let k = 0; k < first.getDay(); k++) days.push({ n: '', cls: 'cal-d pad', off: true, aria: '', pick: null, hover: null });
+      for (let k = 1; k <= n; k++) {
+        const i = off + k - 1;
+        const inE = i >= entry[0] && i <= entry[1], inH = i >= hold[0] && i <= hold[1];
+        const cls = ['cal-d', inE ? 'in-e' : '', inH ? 'in-h' : '', (i === entry[0] || i === hold[0]) ? 'st' : '', (i === entry[1] || i === hold[1]) ? 'en' : '', i === today ? 'today' : '', i < today ? 'past' : '', new Date(y, m, k).getDay() === 0 ? 'sun' : ''].filter(Boolean).join(' ');
+        days.push({ n: k, cls, off: i < today, aria: (m + 1) + '月' + k + '日', pick: () => {
+          if (this.state.pick == null) this.setState({ pick: i, hover: i });
+          else { const r = [Math.min(this.state.pick, i), Math.max(this.state.pick, i)]; this.setState({ [this.state.calMode]: r, pick: null, hover: null, calMode: this.state.calMode === 'entry' ? 'hold' : this.state.calMode }); }
+        }, hover: () => { if (this.state.pick != null && this.state.hover !== i) this.setState({ hover: i }); } });
+      }
+      return { label, heads: W, days };
+    });
+    const len = (r) => (r[1] - r[0] + 1) + '日間';
+    const okOrder = entry[1] < hold[0];
+    // 時刻: 分(0=0:00)。24時以降は「翌」表記
+    const tm = (m) => { const h = Math.floor(m / 60), mm = String(m % 60).padStart(2, '0'); return h >= 24 ? '翌' + (h - 24) + ':' + mm : h + ':' + mm; };
+    const tmIn = (m) => { const h = Math.floor(m / 60); return String(h).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+    let hs = S.hs, he = S.he;
+    if (S.tp != null && S.th != null) { hs = Math.min(S.tp, S.th); he = Math.max(S.tp, S.th) + 30; }
+    const dur = he - hs;
+    const tmCells = Array.from({ length: 36 }, (_, i) => { const m = 720 + i * 30; const on = m >= hs && m < he;
+      return { cls: 'tm-c' + (on ? (S.tp != null ? ' prev' : ' on') : '') + (m % 180 === 0 ? ' tick' : ''), aria: tm(m) + ' から',
+        pick: () => { if (this.state.tp == null) this.setState({ tp: m, th: m, anch: m }); else { const a = Math.min(this.state.tp, m), b = Math.max(this.state.tp, m) + 30; this.setState({ hs: a, he: b, tp: null, th: null }); } },
+        hover: () => { if (this.state.tp != null && this.state.th !== m) this.setState({ th: m }); } }; });
+    // 開始を選んだら、その時刻を左端に寄せて(アニメーション)終了の選択幅を最大にする。9時間×2段 = 開始から18時間先まで選べる
+    const anchor = S.tp != null ? S.tp : S.anch;
+    const cellOf = (m, first) => ({ cls: 'tm-c' + (m >= hs && m < he ? (S.tp != null ? ' prev' : ' on') : '') + (first ? ' first' : '') + (m % 180 === 0 ? ' tick' : ''), aria: tm(m) + (S.tp != null ? ' まで' : ''),
+      pick: () => { if (this.state.tp == null) { this.setState({ tp: m, th: m, anch: m }); return; } const a2 = Math.min(this.state.tp, m), b2 = Math.max(this.state.tp, m) + 30; this.setState({ hs: a2, he: b2, tp: null, th: null, anch: a2 }); },
+      hover: () => { if (this.state.tp != null && this.state.th !== m) this.setState({ th: m }); } });
+    let tmRows = [];
+    if (anchor != null && S.tp != null) {
+      // 選択中: 開始を左端へ。9時間×2段で終了の選択幅を最大に
+      tmRows = [0, 1].map((r) => { const st = anchor + r * 540;
+        return { cls: 'tm-row' + (r === 1 ? ' r2' : ''), cols: 18, from: r === 0 ? (-((anchor - 720) / 1080 * 100)).toFixed(1) + '%' : '40%',
+          cells: Array.from({ length: 18 }, (_, i) => cellOf(st + i * 30, st + i * 30 === anchor)),
+          axis: [0, 3, 6, 9].map((h) => ({ left: (h / 9 * 100) + '%', label: tm(st + h * 60) })) }; });
+    } else if (anchor != null) {
+      // 選択後: 選んだ範囲を中央に。前後に余白を残した1段(最低9時間)
+      const durC = (he - hs) / 30, n = Math.max(18, durC + 8), st = hs - Math.floor((n - durC) / 2) * 30, span = n * 30;
+      const step = span > 720 ? 180 : 120;
+      const ax = []; for (let m = Math.ceil(st / step) * step; m <= st + span; m += step) ax.push({ left: ((m - st) / span * 100) + '%', label: tm(m) });
+      tmRows = [{ cls: 'tm-row center', cols: n, from: '-' + Math.round((hs - st) / span * 100 * 0.6) + '%', cells: Array.from({ length: n }, (_, i) => cellOf(st + i * 30, false)), axis: ax }];
+    }
+    const tmAxis = [12, 15, 18, 21, 24, 27, 30].map((h) => ({ left: ((h - 12) / 18 * 100) + '%', label: h >= 24 ? '翌' + (h - 24) : String(h) }));
+    const tmPresets = [[1080, 1380], [1140, 1320], [1200, 1440], [1260, 1560]].map(([a, b]) => ({ label: tm(a) + '–' + tm(b), cls: S.hs === a && S.he === b ? 'chip sel sm' : 'chip sm', pick: () => this.setState({ hs: a, he: b, tp: null, th: null, anch: null }) }));
+    const esOpts = [[0, '0:00'], [720, '12:00'], [1080, '18:00']].map(([v, label]) => ({ label, on: S.es === v ? 'true' : 'false', cls: S.es === v ? 'on' : '', pick: () => this.setState({ es: v }) }));
+    const eeOpts = [[720, '12:00'], [1260, '21:00'], [1439, '23:59']].map(([v, label]) => ({ label, on: S.ee === v ? 'true' : 'false', cls: S.ee === v ? 'on' : '', pick: () => this.setState({ ee: v }) }));
+    // --- 枠
+    const holderPv = { public: 'おたこ', anonymous: '予約済み', hidden: '(何も表示しない)' }[S.holder];
+    const nDays = hold[1] - hold[0] + 1;
+    const nextPart = (() => { for (let d = 1; d <= nDays; d++) for (let p = 1; p <= 3; p++) { const l = d + '日目第' + p + '部'; if (!S.parts.includes(l)) return l; } return '部を追加'; })();
+    // --- 権限キー(src/lib/auth/permissions/keys.ts の作品キー)
+    const OK = [['video.basics', '作品基本情報'], ['video.descriptions', '作品説明'], ['video.credits', '楽曲・クレジット'], ['video.members', '作品メンバー'], ['video.member_chapters', 'メンバーチャプター'], ['video.permissions', '共同編集権限']];
+    // --- 必須項目
+    const RQ = [['icon', 'アイコン', 'fa-solid fa-image'], ['profile', '自分・団体の概要', 'fa-solid fa-id-card'], ['channel', 'YouTubeチャンネル', 'fa-brands fa-youtube'], ['part', '部', 'ms ms-view_day'], ['music', '使用楽曲', 'fa-solid fa-music'], ['ref', '楽曲参考URL', 'fa-solid fa-link'], ['credit', 'クレジット', 'fa-solid fa-list'], ['intro', '紹介コメント', 'fa-solid fa-comment'], ['soft', '使用ソフト', 'fa-solid fa-laptop']];
+    const QT = { text: ['記述式', 'ms ms-short_text'], textarea: ['段落', 'ms ms-notes'], radio: ['ラジオボタン', 'ms ms-radio_button_checked'], checkbox: ['チェックボックス', 'ms ms-check_box'], select: ['プルダウン', 'ms ms-arrow_drop_down_circle'] };
+    const VIS = [['review', '審査用', '運営だけが見られます'], ['private', '非公開', '投稿者と運営だけが見られます'], ['public', '公開', '作品ページに表示されます']];
+    const setQ = (i, o) => { const L = [...this.state.qs]; L[i] = { ...L[i], ...o }; this.setState({ qs: L }); };
+    const outlineDone = { start: true, name: !noTitle && !clash, date: okOrder, slot: S.parts.length > 0, rule: true, form: true, pub: true };
+    const OL = [['start', 'はじめかた'], ['name', '名前と見た目'], ['date', '日程'], ['slot', '枠'], ['rule', '参加のルール'], ['form', '投稿フォーム'], ['pub', '公開']];
+    const todo = [];
+    if (noTitle) todo.push({ label: 'イベント名を入力', href: '#s-name', icon: 'fa-solid fa-circle-exclamation' });
+    if (clash) todo.push({ label: 'URLが重複しています', href: '#s-name', icon: 'fa-solid fa-circle-exclamation' });
+    if (!okOrder) todo.push({ label: '受付終了を開催より前に', href: '#s-date', icon: 'fa-solid fa-circle-exclamation' });
+    const sel = (cur, list, key) => list.map(([v, label, extra]) => ({ label, icon: extra || '', on: cur === v ? 'true' : 'false', cls: cur === v ? 'on' : '', pick: () => this.setState({ [key]: v }) }));
+    return {
+      theme: P.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(), noop: () => {},
+      allowed, denied: !allowed,
+      outline: OL.map(([id, label]) => ({ label, href: '#s-' + id, cls: 'en-ol', dot: outlineDone[id] ? 'dot ok' : 'dot warn' })),
+      starts: [['copy', '過去のイベントから', 'fa-regular fa-clone'], ['template', 'テンプレートから', 'ms ms-dashboard_customize'], ['blank', '白紙から', 'fa-regular fa-file']].map(([v, label, icon]) => ({ label, icon, cls: start === v ? 'on' : '', pick: () => this.setState({ start: v, src: v === 'copy' ? 'PVSF2026S' : 'tpl-pvsf' }) })),
+      showSources: start !== 'blank', sources, srcLabel: start === 'copy' ? 'コピー元のイベント' : 'テンプレート',
+      startNote: start === 'copy' ? '設定・質問・部をコピーします。日程・枠・作品・スタッフはコピーしません。' : 'テンプレートの設定を読み込みます。開催日時は空欄から入力し、公開状態は非公開になります。',
+      icon: T[0], title: S.title, setTitle: (e) => this.setState({ title: e.target.value }), titleOrPh: noTitle ? 'イベント名' : S.title,
+      eid, idCls: 'en-id t-sm' + (clash ? ' bad' : ''), idIcon: noTitle ? '' : clash ? 'fa-solid fa-circle-xmark' : 'fa-solid fa-circle-check',
+      idMsg: noTitle ? 'イベント名から自動で決まります' : clash ? 'すでに使われています' : '使用できます',
+      suggestLabel: clash ? eid + '-2 を使う' : 'URLを変える', noSuggest: false, useSuggest: () => clash ? this.setState({ title: S.title + '-2' }) : null,
+      desc: '映像連続投稿祭',
+      kinds: sel(S.kind, [['normal', '通常イベント'], ['collab', 'コラボ'], ['typed', 'タイプ別'], ['other', 'その他']], 'kind'),
+      accent: S.accent,
+      swatches: ['#d6ec8a', '#f2c94c', '#6fcf97', '#56ccf2', '#bb6bd9', '#eb5757'].map((c) => ({ c, label: 'アクセントカラー ' + c, on: S.accent === c ? 'true' : 'false', cls: 'en-sw' + (S.accent === c ? ' on' : ''), pick: () => this.setState({ accent: c }) })),
+      calModes: [['entry', '受付期間', 'cal-sw e'], ['hold', '開催期間', 'cal-sw h']].map(([v, label, sw]) => ({ label, sw, on: S.calMode === v ? 'true' : 'false', cls: S.calMode === v ? 'on' : '', pick: () => this.setState({ calMode: v, pick: null, hover: null }) })),
+      calHint: S.pick == null ? (S.calMode === 'entry' ? '受付の初日をクリック' : '開催の初日をクリック') : '最終日をクリック(' + fmt(S.pick) + ' から)',
+      months, mPrev: () => this.setState({ mOff: (S.mOff || 0) - 1 }), mNext: () => this.setState({ mOff: (S.mOff || 0) + 1 }), mToday: () => this.setState({ mOff: 0 }), mPrevOff: (S.mOff || 0) <= 0, mIsNow: (S.mOff || 0) === 0,
+      tmIdle: anchor == null, tmAnch: anchor != null, tmRows, tmCanReset: anchor != null, tmReset: () => this.setState({ tp: null, th: null, anch: null }),
+      schSum: '受付 ' + fmt(entry[0]) + '–' + fmt(entry[1]) + '(' + len(entry) + ') → 開催 ' + fmt(hold[0]) + '–' + fmt(hold[1]) + '(' + len(hold) + ')· 毎日 ' + tm(hs) + '–' + tm(he),
+      entryPresets: [[14, '開催2週間前'], [7, '開催1週間前'], [1, '開催前日']].map(([d, label]) => { const e = hold[0] - d; return { label, cls: entry[1] === e ? 'chip sel sm' : 'chip sm', pick: () => this.setState({ entry: [Math.min(entry[0], e), e] }) }; }),
+      entryS: fmtIn(entry[0], tmIn(S.es)), entryE: fmtIn(entry[1], tmIn(S.ee)), holdS: fmtIn(hold[0], tmIn(hs)), holdE: fmtIn(hold[1], he >= 1440 ? tm(he) : tmIn(he)),
+      tmCells, tmAxis, tmPresets, esOpts, eeOpts, hsT: tm(hs), heT: tm(he), holdDur: Math.floor(dur / 60) + '時間' + (dur % 60 ? '30分' : ''),
+      tmHint: S.tp == null ? (anchor != null ? 'クリックで開始から選び直せます' : '開始の時刻をクリック(30分単位)') : '終了の時刻をクリック(' + tm(S.tp) + ' から)',
+      entryLen: len(entry), holdLen: len(hold),
+      dateCheck: okOrder ? '受付終了 ' + fmt(entry[1]) + ' は開催開始 ' + fmt(hold[0]) + ' より前です(' + (hold[0] - entry[1] - 1) + '日空き)' : '受付終了が開催開始より後になっています',
+      dateCheckCls: 'il t-sm' + (okOrder ? '' : ' bad'), dateCheckIcon: okOrder ? 'fa-solid fa-circle-check ok-ic' : 'fa-solid fa-circle-exclamation',
+      slotTypes: sel(S.slotType, [['time', '時間枠', 'fa-regular fa-clock'], ['count', '件数枠', 'fa-solid fa-hashtag']], 'slotType'),
+      slotTypeNote: S.slotType === 'time' ? '開始・終了時刻つきの枠です(例: 18:00–18:06)。' : '番号つきの枠です(例: 1番–120番)。時刻は持ちません。',
+      maxPer: S.maxPer, maxMin: S.maxPer <= 1, maxMax: S.maxPer >= 3, maxDown: () => this.setState({ maxPer: Math.max(1, S.maxPer - 1) }), maxUp: () => this.setState({ maxPer: Math.min(3, S.maxPer + 1) }),
+      perXLabel: S.perX === 0 ? '無制限' : S.perX + ' 件まで', perMin: S.perX <= 0, perDown: () => this.setState({ perX: Math.max(0, S.perX - 1) }), perUp: () => this.setState({ perX: S.perX + 1 }),
+      holders: sel(S.holder, [['public', '公開名'], ['anonymous', '匿名'], ['hidden', '表示しない']], 'holder'), holderPv,
+      parts: S.parts.map((label) => ({ label, aria: label + ' を削除', del: () => this.setState({ parts: this.state.parts.filter((x) => x !== label) }) })),
+      nextPart, addPart: () => this.setState({ parts: [...S.parts, nextPart] }),
+      gap: S.gap, gapDown: () => this.setState({ gap: Math.max(5, S.gap - 5) }), gapUp: () => this.setState({ gap: S.gap + 5 }),
+      linkOpts: sel(S.link, [['approval', '運営の承認後'], ['free', 'すぐにできる']], 'link'),
+      unslotOpts: sel(S.unslot, [['deny', '許可しない'], ['allow', '許可する']], 'unslot'),
+      ownOpts: sel(S.own, [['default', '既定のまま'], ['custom', '項目ごとに決める']], 'own'), ownCustom: S.own === 'custom',
+      ownKeys: OK.map(([k, label]) => { const cur = S.ownSet[k] || 'inherit'; return { label, opts: [['inherit', '既定'], ['allow', '許可'], ['deny', '拒否']].map(([v, l]) => ({ label: l, cls: cur === v ? 'on' : '', pick: () => this.setState({ ownSet: { ...this.state.ownSet, [k]: v } }) })) }; }),
+      reqs: RQ.map(([k, label, icon]) => ({ label, icon: S.req[k] ? 'fa-solid fa-check' : icon, on: S.req[k] ? 'true' : 'false', cls: S.req[k] ? 'chip sel' : 'chip', toggle: () => this.setState({ req: { ...this.state.req, [k]: !this.state.req[k] } }) })),
+      qs: S.qs.map((q, i) => ({ label: q.label, typeLabel: QT[q.t][0], icon: QT[q.t][1], reqCls: q.req ? 'chip sel sm' : 'chip sm', toggleReq: () => setQ(i, { req: !q.req }),
+        vis: VIS.map(([v, l, title]) => ({ label: l, title, cls: q.vis === v ? 'on' : '', pick: () => setQ(i, { vis: v }) })),
+        del: () => this.setState({ qs: this.state.qs.filter((_, j) => j !== i) }) })),
+      qCount: S.qs.length, qFull: S.qs.length >= 4,
+      qTypes: Object.entries(QT).map(([t, [label, icon]]) => ({ label, icon, add: () => this.state.qs.length < 4 && this.setState({ qs: [...this.state.qs, { t, label: '新しい質問', req: false, vis: 'review' }] }) })),
+      stage: ['ステージ上映での使用を許可する', '使用素材の権利を確認した'], stCount: 2,
+      visOpts: sel(S.vis, [['private', '非公開で作成', 'fa-solid fa-lock'], ['public', 'すぐに公開', 'fa-solid fa-globe']], 'vis'),
+      visNote: S.vis === 'private' ? '作成後も公開ページには出ません。準備が整ってから公開できます。' : '作成と同時に公開ページに表示されます。受付は受付期間に始まります。',
+      pvTabs: [['page', 'イベントページ'], ['form', '投稿画面']].map(([v, label]) => ({ label, cls: S.pv === v ? 'on' : '', pick: () => this.setState({ pv: v }) })),
+      pvPage: S.pv === 'page', pvForm: S.pv === 'form',
+      pvDot: S.vis === 'private' ? 'dot' : 'dot info', pvState: S.vis === 'private' ? '非公開の下書き' : '受付開始前',
+      entryText: fmt(entry[0]) + ' – ' + fmt(entry[1]), holdText: fmt(hold[0]) + ' ' + tm(hs) + ' – ' + fmt(hold[1]) + ' ' + tm(he),
+      slotText: (S.slotType === 'time' ? '時間枠' : '件数枠') + ' · 1作品' + S.maxPer + '枠 · 1人' + (S.perX === 0 ? '無制限' : S.perX + '件'),
+      ruleText: (S.link === 'approval' ? '追加は承認制' : '追加は自由') + ' · 枠なし' + (S.unslot === 'deny' ? '不可' : '可'),
+      formPv: [...RQ.filter(([k]) => S.req[k]).map(([, l]) => l + ' *'), ...S.qs.map((q) => q.label + (q.req ? ' *' : ''))],
+      todo, todoHead: todo.length ? 'あと ' + todo.length + ' 件' : '作成できます', cantCreate: todo.length > 0
+    };
+  }
+}
+</script>
+</body>
+</html>

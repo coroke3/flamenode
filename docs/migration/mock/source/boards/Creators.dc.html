@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>クリエイター一覧</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="user" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 56px;">
+    <div class="wrap-row" style="justify-content: space-between; gap: 16px; align-items: flex-end;">
+      <h1 class="t-display">クリエイター</h1>
+      <span class="t-sm muted t-num">318人</span>
+    </div>
+
+    <form role="search" class="wrap-row" style="gap: 8px; margin-top: 32px;" onSubmit="{{prevent}}">
+      <div class="field-i" style="flex: 1 1 260px; max-width: 360px;">
+        <x-import component-from-global-scope="FlameNode.TextField" type="search" aria-label="クリエイター検索" placeholder="名前 / X ID"></x-import>
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      </div>
+      <span style="flex: 1;"></span>
+      <span class="sel-i" title="並び替え"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i><select class="select i" aria-label="並び替え"><option>おすすめ順</option><option>作品数順</option><option>名前順</option></select></span>
+      <span class="row" role="group" aria-label="表示形式" style="gap: 0;"><sc-for list="{{views}}" as="w" hint-placeholder-count="3"><button type="button" class="{{w.cls}}" aria-label="{{w.label}}" onClick="{{w.pick}}"><i class="{{w.icon}}"></i></button></sc-for></span>
+    </form>
+
+    <sc-if value="{{isIcon}}" hint-placeholder-val="{{true}}">
+    <div class="cr-icons" style="margin-top: 48px;">
+      <sc-for list="{{creators}}" as="c" hint-placeholder-count="12">
+        <a href="Creator.dc.html" class="stack" style="gap: 12px; align-items: center; text-align: center;">
+          <img class="round" src="{{c.img}}" alt="" style="width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--surface-raised);">
+          <span class="stack" style="gap: 2px;">
+            <span class="cr-name" style="font-size: 15px;">{{c.name}}</span>
+            <span class="meta-i cr-meta" style="justify-content: center;"><span>{{c.x}}</span><span class="t-num">{{c.works}}</span></span>
+          </span>
+        </a>
+      </sc-for>
+    </div>
+    </sc-if>
+    <sc-if value="{{isList}}" hint-placeholder-val="{{false}}">
+      <div class="dt" style="--cols: minmax(220px,1.4fr) 80px 96px minmax(220px,1.6fr) 72px; --minw: 0px; margin-top: 40px;">
+        <div class="dt-h"><span>クリエイター</span><span class="num">作品</span><span class="num">参加イベント</span><span>最新作</span><span class="num">初投稿</span></div>
+        <sc-for list="{{creators}}" as="c" hint-placeholder-count="12">
+          <a href="Creator.dc.html" class="dt-r">
+            <span class="row" style="gap: 12px; min-width: 0;"><img class="avatar" src="{{c.img}}" alt="" style="width: 40px; height: 40px;"><span class="stack" style="gap: 0; min-width: 0;"><span class="ell">{{c.name}}</span><span class="sub">@{{c.x}}</span></span></span>
+            <span class="num">{{c.works}}</span>
+            <span class="num">{{c.events}}</span>
+            <span class="stack" style="gap: 0; min-width: 0;"><span class="ell t-sm">{{c.latest}}</span><span class="sub">{{c.latestEv}}</span></span>
+            <span class="num muted">{{c.since}}</span>
+          </a>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{isWorks}}" hint-placeholder-val="{{false}}">
+      <div class="cr-works" style="margin-top: 40px;">
+        <sc-for list="{{creators}}" as="c" hint-placeholder-count="6">
+          <a href="Creator.dc.html" class="raised stack" style="gap: 16px; padding: 20px;">
+            <span class="row" style="gap: 14px;"><img class="avatar" src="{{c.img}}" alt="" style="width: 56px; height: 56px;"><span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="ell" style="font-size: 15px;">{{c.name}}</span><span class="meta-i t-sm"><span>@{{c.x}}</span><span class="t-num">{{c.works}}</span><span class="t-num">{{c.events}}</span></span></span></span>
+            <span style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;">
+              <sc-for list="{{c.recent}}" as="r" hint-placeholder-count="3"><img src="{{r.thumb}}" alt="{{r.title}}" title="{{r.title}}" style="width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;"></sc-for>
+            </span>
+          </a>
+        </sc-for>
+      </div>
+    </sc-if>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"view":{"editor":"enum","options":["icon","list","works"],"default":"icon"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { view: (p && p.view) || 'icon' }; }
+  renderVals() {
+    const v = this.state.view;
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const N = [["貴方", "who_watakushi", 12, 10, ["Ruling of 31 eyes", "記念碑的な負け方を", "【PVSF2022S】旧約汎化街【AviUtl Only】"], "PVSF2023Sp", "2023"], ["てつどうふぁん", "wa0bnmhcy2", 10, 10, ["【鉄道PV・てつどうふぁんMV●第23弾】未来線～ミライン～", "【鉄道PV・二次創作MV/第22弾】未確認感情物体 / Nei. ＜#PVSF2025S＞", "【鉄道（交通系）PV/第21弾】追憶のカケラ/Wis... ＜#PVSF2025Sp＞"], "PVSF2026Sp", "2026"], ["おたこ", "012345rty", 10, 8, ["魔法少女 このは・グリモワール　最終決戦編", "崇渦に関するお知らせ　前編", "【短編アニメ】魔法少女vs改造人間"], "PVSF2026Sp", "2026"], ["tama-style", "tamaron1206", 10, 8, ["VISION 2026", "花文学", "1234"], "PVSF2026Sp", "2026"], ["RT", "RT_Chintoz", 9, 9, ["Childhood Dream", "ばぶちゃん組　血と肉", "削いで"], "PVSF2025S", "2025"], ["Mochi", "coroke3", 9, 7, ["白銀 - Eve 2022/23 Winter Ver", "白銀", "メーベル / バルーン"], "PVSF2022R", "2022"], ["けー", "kee_k_kee", 8, 7, ["アメフリ団地 (Extended)", "花弁、それにまつわる音声(full)", "⊇繧ﾚよ☆ｽ〒≠ﾅょ魔シ去❣❗⋆｡:ﾟ･*☽"], "PVSF2025S", "2025"], ["飯田二歩", "Niho_Iida", 7, 7, ["surprise", "Motion", "UNKNOWN"], "PVSF2026Sp", "2026"], ["黒衣", "c7tcz", 7, 5, ["All in Good Time", "僕鯖合作", "新大学生合作"], "PVSF2025S", "2025"], ["OS-4", "OS_N_collab", 7, 2, ["【OS-4合作】アメフリ団地", "【OS-4合作】in the gray", "懐色、虚色"], "osN", "2024"], ["シーハイル高崎＋α", "STaka_1028", 7, 3, ["【交通系PV合作】Voyager To 14022 From xxxx (feat. No.7&Kiritan)", "【交通系PV】幻想症候群", "【交通系PV】　異世界のパラドックス"], "PVSF2022R", "2022"]];
+    return {
+      theme: this.props.theme ?? 'dark', prevent: (e) => e.preventDefault(),
+      creators: N.map((a, i) => ({ name: a[0], x: a[1], works: a[2], events: a[3], latest: a[4][0], latestEv: a[5], since: a[6], recent: a[4].map((t, k) => ({ title: t, thumb: T[(i + k + 4) % 8] })), img: T[(i + 2) % 8] })),
+      views: [['icon','アイコン','fa-solid fa-grip'],['list','リスト','fa-solid fa-list'],['works','作品付き','fa-solid fa-table-cells-large']].map(([id, label, icon]) => ({ label, icon, cls: v === id ? 'ib on' : 'ib', pick: () => this.setState({ view: id }) })),
+      isIcon: v === 'icon', isList: v === 'list', isWorks: v === 'works'
+    };
+  }
+}
+</script>
+</body>
+</html>

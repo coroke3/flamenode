@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>運営サイドバー</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<nav class="{{navCls}}" aria-label="イベント運営ナビ" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="{{mLabel}}" aria-expanded="{{mOpen}}" onClick="{{mToggle}}"><i class="{{mIcon}}"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">{{mArea}}</span><span class="ell">{{mCur}}</span></span>
+    <a href="CommandPalette.dc.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="/_blob/eee88ecd1bced2fd7ce508f977487e59" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="/_blob/eded756c59dbc57e0b63d862e98d3177" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">運営</span>
+  </div>
+  <a href="CommandPalette.dc.html" class="cmdk" aria-label="移動・操作を検索(Ctrl+K)"><span class="il" style="gap: 10px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>移動・操作を検索</span><kbd class="kbd">⌘K</kbd></a>
+
+  <a href="Manage.dc.html" class="{{cTop}}"><span class="il" style="gap: 10px;"><i class="fa-solid fa-house" aria-hidden="true"></i>運営トップ</span></a>
+  <a href="ManageNotifications.dc.html" class="{{cNotif}}"><span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true"></i>通知センター</span><span class="n">1</span></a>
+  <a href="ManageEventNew.dc.html" class="{{cNew}}"><span class="il" style="gap: 10px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>イベントを作成</span></a>
+
+  <span class="grp">イベント</span>
+  <button type="button" class="ev-switch" onClick="{{toggleSwitch}}" aria-expanded="{{switchOpen}}" aria-label="担当イベントを切り替え">
+    <img class="ev-icon" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 28px; height: 28px;">
+    <span class="stack" style="gap: 0; flex: 1; min-width: 0; text-align: left;"><span class="ell" style="font-size: 14px;">PVSF2026S</span><span class="st t-sm"><span class="dot ok"></span>受付中</span></span>
+    <i class="fa-solid fa-chevron-down muted" aria-hidden="true"></i>
+  </button>
+  <sc-if value="{{switching}}" hint-placeholder-val="{{false}}">
+    <div class="stack ev-list" style="gap: 0; padding: 4px 0 8px;">
+      <sc-for list="{{events}}" as="e" hint-placeholder-count="3">
+        <a href="ManageEvent.dc.html"><span class="il" style="gap: 10px; min-width: 0;"><img class="ev-icon" src="{{e.icon}}" alt="" style="width: 20px; height: 20px;"><span class="ell">{{e.title}}</span></span><span class="{{e.dot}}" title="{{e.state}}"></span></a>
+      </sc-for>
+    </div>
+  </sc-if>
+  <sc-for list="{{sections}}" as="s" hint-placeholder-count="9">
+    <a href="{{s.href}}" class="{{s.cls}}" aria-current="{{s.cur}}"><span class="il" style="gap: 10px;"><i class="{{s.icon}}" aria-hidden="true"></i>{{s.label}}</span><span class="n">{{s.n}}</span></a>
+  </sc-for>
+
+  <span class="grp">ほかの画面</span>
+  <a href="ManageXLink.dc.html" class="{{cX}}"><span class="il" style="gap: 10px;"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID 連携申請(全体)</span><span class="n">3</span></a>
+  <a href="Main.dc.html"><span class="il" style="gap: 10px;"><i class="fa-solid fa-globe" aria-hidden="true"></i>公開サイト</span></a>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"text","default":"overview"},"$preview":{"width":264,"height":900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sw: false, m: false }; }
+  renderVals() {
+    const a = this.props.active ?? 'overview';
+    const T = ['/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9'];
+    const S = [
+      ['overview', '概要', 'ms ms-dashboard', 'ManageEvent.dc.html', ''],
+      ['inbox', '受信箱', 'fa-solid fa-inbox', 'ManageInbox.dc.html', '11'],
+      ['videos', '作品', 'fa-solid fa-film', 'ManageVideos.dc.html', '110'],
+      ['slots', '枠', 'ms ms-view_timeline', 'ManageSlots.dc.html', '128/160'],
+      ['audience', '参加者', 'fa-solid fa-user-group', 'ManageAudience.dc.html', '96'],
+      ['delivery', '配信・公開', 'ms ms-sensors', 'ManagePlaylist.dc.html', ''],
+      ['edit', 'イベント設定', 'fa-solid fa-sliders', 'ManageEdit.dc.html', ''],
+      ['staff', 'スタッフと権限', 'ms ms-admin_panel_settings', 'ManageStaff.dc.html', '5'],
+      ['history', '履歴', 'fa-solid fa-clock-rotate-left', 'ManageHistory.dc.html', '']
+    ];
+    const mOpen = !!this.state.m;
+    const mx = { navCls: 'c-nav' + (mOpen ? ' open' : ''), mOpen: mOpen ? 'true' : 'false', mLabel: mOpen ? 'メニューを閉じる' : 'メニューを開く', mIcon: mOpen ? 'fa-solid fa-xmark' : 'fa-solid fa-bars', mToggle: () => this.setState({ m: !this.state.m }), mArea: '運営', mCur: a === 'top' ? '運営トップ' : a === 'new' ? 'イベントを作成' : a === 'notifications' ? '通知センター' : a === 'xlink' ? 'X ID 連携申請' : 'PVSF2026S · ' + ((S.find(x => x[0] === a) || [0, '概要'])[1]) };
+    return { ...mx,
+      cTop: a === 'top' ? 'on' : '', cNew: a === 'new' ? 'on' : '', cNotif: a === 'notifications' ? 'on' : '', cX: a === 'xlink' ? 'on' : '',
+      switching: this.state.sw, switchOpen: this.state.sw ? 'true' : 'false', toggleSwitch: () => this.setState({ sw: !this.state.sw }),
+      events: [['年越し合作 2026', 'dot ok', '開催中'], ['PVSF2026R', 'dot', '募集開始前'], ['PVSF2026Sp', 'dot', '終了']].map((e, i) => ({ title: e[0], dot: e[1], state: e[2], icon: T[i + 1] })),
+      sections: S.map(([id, label, icon, href, n]) => ({ label, icon, href, n, cls: id === a ? 'nsec on' : 'nsec', cur: id === a ? 'page' : 'false' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1135 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "About.dc.html": {
+      "expand": "fill",
+      "h": 2400,
+      "page": "public",
+      "title": "FlameNodeについて  /about",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Admin.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "admin",
+      "title": "管理ダッシュボード  /admin",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "AdminAnnouncementEdit.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "page": "admin",
+      "title": "お知らせ作成・編集  /admin/announcements/new · [id]/edit",
+      "w": 1440,
+      "x": 0,
+      "y": 8480
+    },
+    "AdminAnnouncements.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "admin",
+      "title": "お知らせ  /admin/announcements",
+      "w": 1440,
+      "x": 4560,
+      "y": 6560
+    },
+    "AdminApi.dc.html": {
+      "expand": "fill",
+      "h": 1100,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "公開API管理  /admin/api-endpoints",
+      "w": 1440,
+      "x": 3040,
+      "y": 16160
+    },
+    "AdminAudit.dc.html": {
+      "expand": "fill",
+      "h": 1600,
+      "page": "tabs",
+      "title": "[監査ログ のタブ] 監査ログ  /admin/audit",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "AdminAuditDetail.dc.html": {
+      "expand": "fill",
+      "h": 1700,
+      "page": "admin",
+      "title": "監査ログ詳細  /admin/audit/[id]",
+      "w": 1440,
+      "x": 0,
+      "y": 12320
+    },
+    "AdminAuditHub.dc.html": {
+      "expand": "fill",
+      "h": 1360,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "監査ログ  /admin/audit(ログ・設定・復元)",
+      "w": 1440,
+      "x": 4560,
+      "y": 10400
+    },
+    "AdminAuditRestore.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "page": "tabs",
+      "title": "[監査ログ のタブ] 復元履歴  /admin/audit/restore",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "AdminAuditSettings.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "page": "tabs",
+      "title": "[監査ログ のタブ] ログ設定  /admin/audit/settings",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "AdminCostGuard.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "コストガード  /admin/cost-guard",
+      "w": 1440,
+      "x": 4560,
+      "y": 12320
+    },
+    "AdminEventGroupEdit.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "admin",
+      "title": "グループ作成・編集  /admin/event-groups/new · [id]/edit",
+      "w": 1440,
+      "x": 3040,
+      "y": 6560
+    },
+    "AdminEventGroups.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "tabs",
+      "title": "[イベント のタブ] イベントグループ  /admin/event-groups",
+      "w": 1440,
+      "x": 1520,
+      "y": 1760
+    },
+    "AdminEventTemplates.dc.html": {
+      "expand": "fill",
+      "h": 1100,
+      "page": "tabs",
+      "title": "[イベント のタブ] テンプレート  /admin/events/templates",
+      "w": 1440,
+      "x": 3040,
+      "y": 1760
+    },
+    "AdminEvents.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "page": "tabs",
+      "title": "[イベント のタブ] イベント管理  /admin/events",
+      "w": 1440,
+      "x": 0,
+      "y": 1760
+    },
+    "AdminEventsHub.dc.html": {
+      "expand": "fill",
+      "h": 1560,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "イベント  /admin/events(一覧・グループ・テンプレート)",
+      "w": 1440,
+      "x": 3040,
+      "y": 3840
+    },
+    "AdminHealth.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "page": "tabs",
+      "title": "[稼働状況 のタブ] ヘルスチェック  /admin/health",
+      "w": 1440,
+      "x": 0,
+      "y": 3320
+    },
+    "AdminHealthHub.dc.html": {
+      "expand": "fill",
+      "h": 1860,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "稼働状況  /admin/health(ヘルス・DB整合性・Worker)",
+      "w": 1440,
+      "x": 3040,
+      "y": 14240
+    },
+    "AdminImport.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "旧形式インポート  /admin/import",
+      "w": 1440,
+      "x": 4560,
+      "y": 16160
+    },
+    "AdminIntegrity.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "tabs",
+      "title": "[稼働状況 のタブ] DB整合性  /admin/health/integrity",
+      "w": 1440,
+      "x": 1520,
+      "y": 3320
+    },
+    "AdminModeration.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "admin",
+      "title": "モデレーション  /admin/moderation",
+      "w": 1440,
+      "x": 1520,
+      "y": 3840
+    },
+    "AdminNav.dc.html": {
+      "h": 1240,
+      "page": "parts",
+      "title": "管理サイドバー",
+      "w": 264,
+      "x": 0,
+      "y": 592
+    },
+    "AdminNotifications.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "通知配信  /admin/notifications",
+      "w": 1440,
+      "x": 3040,
+      "y": 10400
+    },
+    "AdminPermSim.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "権限シミュレーター  /admin/permissions/simulator",
+      "w": 1440,
+      "x": 1520,
+      "y": 16160
+    },
+    "AdminPlaylists.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "tabs",
+      "title": "[作品管理 のタブ] 再生リスト同期  /admin/youtube-sync/playlists",
+      "w": 1440,
+      "x": 3040,
+      "y": 5280
+    },
+    "AdminRuleEdit.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "admin",
+      "title": "規約作成・編集  /admin/rules/new · [id]/edit",
+      "w": 1440,
+      "x": 3040,
+      "y": 8480
+    },
+    "AdminRules.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "admin",
+      "title": "規約管理  /admin/rules",
+      "w": 1440,
+      "x": 1520,
+      "y": 8480
+    },
+    "AdminSecurity.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "page": "admin",
+      "title": "セキュリティ  /admin/security",
+      "w": 1440,
+      "x": 0,
+      "y": 16160
+    },
+    "AdminSpreadsheet.dc.html": {
+      "expand": "fill",
+      "h": 1000,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "DBスプレッドシート  /admin/spreadsheet",
+      "w": 1440,
+      "x": 0,
+      "y": 18080
+    },
+    "AdminStaticBuilds.dc.html": {
+      "expand": "fill",
+      "h": 1600,
+      "page": "admin",
+      "title": "静的JSON再生成  /admin/static-builds",
+      "w": 1440,
+      "x": 0,
+      "y": 14240
+    },
+    "AdminUser.dc.html": {
+      "expand": "fill",
+      "h": 1800,
+      "page": "tabs",
+      "title": "[ユーザー詳細 のタブ] ユーザー詳細  /admin/users/[id]",
+      "w": 1440,
+      "x": 0,
+      "y": 8900
+    },
+    "AdminUserEdit.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "tabs",
+      "title": "[ユーザー詳細 のタブ] ユーザー編集  /admin/users/[id]/edit",
+      "w": 1440,
+      "x": 1520,
+      "y": 8900
+    },
+    "AdminUserHub.dc.html": {
+      "expand": "fill",
+      "h": 1840,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "ユーザー詳細  /admin/users/[id](詳細・設定編集)",
+      "w": 1440,
+      "x": 1520,
+      "y": 1920
+    },
+    "AdminUsers.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "tabs",
+      "title": "[ユーザー のタブ] ユーザー / X ID  /admin/users",
+      "w": 1440,
+      "x": 0,
+      "y": 6940
+    },
+    "AdminUsersHub.dc.html": {
+      "expand": "fill",
+      "h": 1760,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "ユーザー  /admin/users(ユーザー・X ID申請・統合)",
+      "w": 1440,
+      "x": 0,
+      "y": 1920
+    },
+    "AdminVideo.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "tabs",
+      "title": "[作品詳細(管理) のタブ] 作品詳細  /admin/videos/[id]",
+      "w": 1440,
+      "x": 0,
+      "y": 10860
+    },
+    "AdminVideoHub.dc.html": {
+      "expand": "fill",
+      "h": 1540,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "作品詳細(管理)  /admin/videos/[id](管理・メンバー)",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "AdminVideoMembers.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "page": "tabs",
+      "title": "[作品詳細(管理) のタブ] 参加者設定  /admin/videos/[id]/members",
+      "w": 1440,
+      "x": 1520,
+      "y": 10860
+    },
+    "AdminVideos.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "tabs",
+      "title": "[作品管理 のタブ] 作品管理  /admin/videos",
+      "w": 1440,
+      "x": 0,
+      "y": 5280
+    },
+    "AdminVideosHub.dc.html": {
+      "expand": "fill",
+      "h": 1760,
+      "is_interactive": true,
+      "page": "admin",
+      "title": "作品管理  /admin/videos(一覧・同期・再生リスト)",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "AdminWorkers.dc.html": {
+      "expand": "fill",
+      "h": 1800,
+      "page": "tabs",
+      "title": "[稼働状況 のタブ] Worker監視  /admin/workers",
+      "w": 1440,
+      "x": 3040,
+      "y": 3320
+    },
+    "AdminXIdMerges.dc.html": {
+      "expand": "fill",
+      "h": 1800,
+      "is_interactive": true,
+      "page": "tabs",
+      "title": "[ユーザー のタブ] X ID統合  /admin/x-id-merges",
+      "w": 1440,
+      "x": 3040,
+      "y": 6940
+    },
+    "AdminXLink.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "tabs",
+      "title": "[ユーザー のタブ] X ID申請  /admin/x-link-requests",
+      "w": 1440,
+      "x": 1520,
+      "y": 6940
+    },
+    "AdminYoutubeQuota.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "page": "admin",
+      "title": "YouTube quota  /admin/youtube-quota",
+      "w": 1440,
+      "x": 1520,
+      "y": 10400
+    },
+    "AdminYoutubeSync.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "tabs",
+      "title": "[作品管理 のタブ] YouTube同期  /admin/youtube-sync",
+      "w": 1440,
+      "x": 1520,
+      "y": 5280
+    },
+    "CommandPalette.dc.html": {
+      "h": 640,
+      "is_interactive": true,
+      "page": "parts",
+      "title": "コマンドパレット(⌘K)",
+      "w": 960,
+      "x": 0,
+      "y": 2612
+    },
+    "ConfirmModal.dc.html": {
+      "h": 560,
+      "page": "parts",
+      "title": "確認ダイアログ",
+      "w": 880,
+      "x": 688,
+      "y": 912
+    },
+    "Creator.dc.html": {
+      "expand": "fill",
+      "h": 2100,
+      "page": "public",
+      "title": "クリエイター  /user/[id]",
+      "w": 1440,
+      "x": 4560,
+      "y": 5040
+    },
+    "Creators.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "public",
+      "title": "クリエイター一覧  /user",
+      "w": 1440,
+      "x": 3040,
+      "y": 5040
+    },
+    "Dashboard.dc.html": {
+      "expand": "fill",
+      "h": 2100,
+      "page": "tabs",
+      "title": "[マイページ のタブ] ダッシュボード  /dashboard",
+      "w": 1440,
+      "x": 0,
+      "y": 12520
+    },
+    "Entry.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "tabs",
+      "title": "[マイページ のタブ] 参加・投稿  /entry",
+      "w": 1440,
+      "x": 1520,
+      "y": 12520
+    },
+    "EntryQuestions.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "parts",
+      "title": "運営からの質問(質問種別ごとの入力)",
+      "w": 720,
+      "x": 2640,
+      "y": 1912
+    },
+    "EntrySignIn.dc.html": {
+      "expand": "fill",
+      "h": 1000,
+      "page": "user",
+      "title": "ログイン前  /entry",
+      "w": 1440,
+      "x": 3040,
+      "y": 2720
+    },
+    "EntrySlotted.dc.html": {
+      "expand": "fill",
+      "h": 1700,
+      "is_interactive": true,
+      "page": "user",
+      "title": "枠に提出  /entry/slotted",
+      "w": 1440,
+      "x": 4560,
+      "y": 2720
+    },
+    "EntrySubmitter.dc.html": {
+      "h": 900,
+      "is_interactive": true,
+      "page": "parts",
+      "title": "提出者情報(枠に提出・作品を投稿 共通)",
+      "w": 720,
+      "x": 1040,
+      "y": 1912
+    },
+    "EntryUnslotted.dc.html": {
+      "expand": "fill",
+      "h": 2000,
+      "is_interactive": true,
+      "page": "user",
+      "title": "枠なし投稿  /entry/unslotted",
+      "w": 1440,
+      "x": 0,
+      "y": 4740
+    },
+    "EventDetail.dc.html": {
+      "expand": "fill",
+      "h": 2200,
+      "page": "public",
+      "title": "イベント詳細  /event/[id]",
+      "w": 1440,
+      "x": 0,
+      "y": 2720
+    },
+    "EventRelease.dc.html": {
+      "expand": "fill",
+      "h": 1800,
+      "is_interactive": true,
+      "page": "public",
+      "title": "投稿予定  /event/[id]/release",
+      "w": 1440,
+      "x": 3040,
+      "y": 2720
+    },
+    "EventSlots.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "page": "public",
+      "title": "上映枠  /event/[id]/slots",
+      "w": 1440,
+      "x": 1520,
+      "y": 2720
+    },
+    "Events.dc.html": {
+      "expand": "fill",
+      "h": 2300,
+      "is_interactive": true,
+      "page": "public",
+      "title": "イベント一覧  /event",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "IconPicker.dc.html": {
+      "h": 520,
+      "is_interactive": true,
+      "page": "parts",
+      "title": "アイコン選択(候補/切り抜き)",
+      "w": 720,
+      "x": 1840,
+      "y": 1912
+    },
+    "Library.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "tabs",
+      "title": "[マイページ のタブ] ライブラリ  /dashboard/library",
+      "w": 1440,
+      "x": 3040,
+      "y": 12520
+    },
+    "LinkEditor.dc.html": {
+      "h": 220,
+      "is_interactive": true,
+      "page": "parts",
+      "title": "リンク編集(URL貼り付けで種類判定)",
+      "w": 640,
+      "x": 1840,
+      "y": 2512
+    },
+    "Main.dc.html": {
+      "expand": "fill",
+      "h": 2600,
+      "page": "public",
+      "title": "トップ  /",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Maintenance.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "page": "public",
+      "title": "メンテナンス  /maintenance",
+      "w": 1440,
+      "x": 3040,
+      "y": 7160
+    },
+    "Manage.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "manage",
+      "title": "運営トップ  /manage",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "ManageAudience.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "manage",
+      "title": "参加者  /manage/events/[id]/audience",
+      "w": 1440,
+      "x": 1520,
+      "y": 2020
+    },
+    "ManageEdit.dc.html": {
+      "expand": "fill",
+      "h": 2600,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "イベント設定  /manage/events/[id]/edit",
+      "w": 1440,
+      "x": 3040,
+      "y": 2020
+    },
+    "ManageEvent.dc.html": {
+      "expand": "fill",
+      "h": 1900,
+      "page": "manage",
+      "title": "イベント概要  /manage/events/[id]",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "ManageEventHead.dc.html": {
+      "h": 120,
+      "page": "parts",
+      "title": "イベント運営ヘッダー",
+      "w": 1100,
+      "x": 688,
+      "y": 592
+    },
+    "ManageEventNew.dc.html": {
+      "expand": "fill",
+      "h": 2600,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "イベントを作成  /manage/events/new",
+      "w": 1440,
+      "x": 7600,
+      "y": 0
+    },
+    "ManageHistory.dc.html": {
+      "expand": "fill",
+      "h": 1100,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "履歴  /manage/events/[id]/history",
+      "w": 1440,
+      "x": 6080,
+      "y": 2020
+    },
+    "ManageInbox.dc.html": {
+      "expand": "fill",
+      "h": 1100,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "受信箱  /manage/events/[id]/inbox",
+      "w": 1440,
+      "x": 6080,
+      "y": 0
+    },
+    "ManageNav.dc.html": {
+      "h": 900,
+      "page": "parts",
+      "title": "運営サイドバー",
+      "w": 264,
+      "x": 344,
+      "y": 592
+    },
+    "ManageNotifications.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "page": "manage",
+      "title": "通知センター  /manage/notifications",
+      "w": 1440,
+      "x": 1520,
+      "y": 4740
+    },
+    "ManagePlaylist.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "配信・公開  /manage/events/[id]/youtube-playlist ほか",
+      "w": 1440,
+      "x": 0,
+      "y": 4740
+    },
+    "ManageSlots.dc.html": {
+      "expand": "fill",
+      "h": 1700,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "枠管理  /manage/events/[id]/slots",
+      "w": 1440,
+      "x": 0,
+      "y": 2020
+    },
+    "ManageStaff.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "スタッフと権限  /manage/events/[id]/staff",
+      "w": 1440,
+      "x": 4560,
+      "y": 2020
+    },
+    "ManageVideo.dc.html": {
+      "expand": "fill",
+      "h": 1700,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "作品  /manage/events/[id]/videos/[videoId]",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "ManageVideos.dc.html": {
+      "expand": "fill",
+      "h": 1400,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "作品・審査  /manage/events/[id]/videos",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "ManageXLink.dc.html": {
+      "expand": "fill",
+      "h": 1200,
+      "is_interactive": true,
+      "page": "manage",
+      "title": "X ID申請  /manage/x-link-requests",
+      "w": 1440,
+      "x": 3040,
+      "y": 4740
+    },
+    "MemberEditor.dc.html": {
+      "h": 620,
+      "is_interactive": true,
+      "page": "parts",
+      "title": "合作メンバー編集(タイムライン/表/一括)",
+      "w": 960,
+      "x": 0,
+      "y": 1912
+    },
+    "MyPage.dc.html": {
+      "expand": "fill",
+      "h": 2600,
+      "is_interactive": true,
+      "page": "user",
+      "title": "マイページ  /dashboard ほか(ダッシュボード・投稿・ライブラリ・設定)",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "OnboardingTerms.dc.html": {
+      "expand": "fill",
+      "h": 1300,
+      "is_interactive": true,
+      "page": "user",
+      "title": "初期設定 1/2  /onboarding",
+      "w": 1440,
+      "x": 1520,
+      "y": 4740
+    },
+    "OnboardingXId.dc.html": {
+      "expand": "fill",
+      "h": 1000,
+      "is_interactive": true,
+      "page": "user",
+      "title": "初期設定 2/2  /onboarding",
+      "w": 1440,
+      "x": 3040,
+      "y": 4740
+    },
+    "Portfolio.dc.html": {
+      "expand": "fill",
+      "h": 1800,
+      "page": "public",
+      "title": "ポートフォリオ  /user/[id]/portfolio",
+      "w": 1440,
+      "x": 0,
+      "y": 7160
+    },
+    "PublicFooter.dc.html": {
+      "h": 280,
+      "page": "parts",
+      "title": "公開フッター",
+      "w": 1440,
+      "x": 0,
+      "y": 192
+    },
+    "PublicHeader.dc.html": {
+      "h": 72,
+      "page": "parts",
+      "title": "公開ヘッダー",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Recommend.dc.html": {
+      "expand": "fill",
+      "h": 2000,
+      "is_interactive": true,
+      "page": "public",
+      "title": "おすすめ  /recommend",
+      "w": 1440,
+      "x": 0,
+      "y": 5040
+    },
+    "Rules.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "public",
+      "title": "利用規約  /rules",
+      "w": 1440,
+      "x": 1520,
+      "y": 7160
+    },
+    "Settings.dc.html": {
+      "expand": "fill",
+      "h": 1700,
+      "is_interactive": true,
+      "page": "tabs",
+      "title": "[マイページ のタブ] 設定  /dashboard/settings",
+      "w": 1440,
+      "x": 4560,
+      "y": 12520
+    },
+    "SpEventSlots.dc.html": {
+      "h": 2000,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "上映枠(スマホ)",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "SpHeaderMenu.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "ヘッダー・アカウントシート(スマホ)",
+      "w": 390,
+      "x": 3290,
+      "y": 0
+    },
+    "SpMain.dc.html": {
+      "h": 2400,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "トップ(スマホ)",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "SpManageEvent.dc.html": {
+      "h": 1800,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "運営・概要(スマホ)",
+      "w": 390,
+      "x": 2350,
+      "y": 0
+    },
+    "SpManageEventNew.dc.html": {
+      "h": 2400,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "イベントを作成(スマホ)",
+      "w": 390,
+      "x": 2820,
+      "y": 0
+    },
+    "SpMyPage.dc.html": {
+      "h": 2000,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "マイページ(スマホ)",
+      "w": 390,
+      "x": 1880,
+      "y": 0
+    },
+    "SpVideoDetail.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "作品詳細(スマホ・チャプターシート)",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "SpVideoDetailScroll.dc.html": {
+      "h": 2900,
+      "is_interactive": true,
+      "page": "sp",
+      "title": "作品詳細(スマホ・全体)",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "Trending.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "page": "public",
+      "title": "急上昇  /trending",
+      "w": 1440,
+      "x": 1520,
+      "y": 5040
+    },
+    "VideoDetail.dc.html": {
+      "expand": "fill",
+      "h": 1800,
+      "is_interactive": true,
+      "page": "public",
+      "title": "作品詳細  /[id]",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "VideoEdit.dc.html": {
+      "expand": "fill",
+      "h": 1900,
+      "is_interactive": true,
+      "page": "user",
+      "title": "作品編集  /dashboard/edit/[id]",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "VideoPermissions.dc.html": {
+      "expand": "fill",
+      "h": 1500,
+      "is_interactive": true,
+      "page": "user",
+      "title": "編集権限  /dashboard/edit/[id]/permissions",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Videos.dc.html": {
+      "expand": "fill",
+      "h": 1900,
+      "is_interactive": true,
+      "page": "public",
+      "title": "作品一覧  /list",
+      "w": 1440,
+      "x": 4560,
+      "y": 2720
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-04T03:00:00Z",
+    "v": 1
+  },
+  "designSystems": [
+    {
+      "artifact": "https://claude.ai/code/artifact/b457e928-b3ef-467d-b551-5a841685e204",
+      "copiedAt": "2026-10-04T08:00:00Z",
+      "namespace": "flamenode",
+      "title": "FlameNode",
+      "version": "1791099990-37d2"
+    }
+  ],
+  "launch": {
+    "page": "public",
+    "view": "canvas"
+  },
+  "notes": {},
+  "order": [
+    "MyPage.dc.html",
+    "Dashboard.dc.html",
+    "VideoEdit.dc.html",
+    "VideoPermissions.dc.html",
+    "Library.dc.html",
+    "Settings.dc.html",
+    "Entry.dc.html",
+    "EntrySignIn.dc.html",
+    "EntrySlotted.dc.html",
+    "EntryUnslotted.dc.html",
+    "OnboardingTerms.dc.html",
+    "OnboardingXId.dc.html",
+    "Manage.dc.html",
+    "ManageEventNew.dc.html",
+    "ManageEvent.dc.html",
+    "ManageInbox.dc.html",
+    "ManageVideos.dc.html",
+    "ManageVideo.dc.html",
+    "ManageSlots.dc.html",
+    "ManageAudience.dc.html",
+    "ManageEdit.dc.html",
+    "ManageStaff.dc.html",
+    "ManagePlaylist.dc.html",
+    "ManageNotifications.dc.html",
+    "ManageXLink.dc.html",
+    "ManageHistory.dc.html",
+    "Admin.dc.html",
+    "AdminVideosHub.dc.html",
+    "AdminVideos.dc.html",
+    "AdminVideoHub.dc.html",
+    "AdminVideo.dc.html",
+    "AdminVideoMembers.dc.html",
+    "AdminUsersHub.dc.html",
+    "AdminUsers.dc.html",
+    "AdminUserHub.dc.html",
+    "AdminUser.dc.html",
+    "AdminUserEdit.dc.html",
+    "AdminXLink.dc.html",
+    "AdminXIdMerges.dc.html",
+    "AdminModeration.dc.html",
+    "AdminEventsHub.dc.html",
+    "AdminEvents.dc.html",
+    "AdminEventTemplates.dc.html",
+    "AdminEventGroups.dc.html",
+    "AdminEventGroupEdit.dc.html",
+    "AdminAnnouncements.dc.html",
+    "AdminAnnouncementEdit.dc.html",
+    "AdminRules.dc.html",
+    "AdminRuleEdit.dc.html",
+    "AdminYoutubeSync.dc.html",
+    "AdminPlaylists.dc.html",
+    "AdminYoutubeQuota.dc.html",
+    "AdminNotifications.dc.html",
+    "AdminAuditHub.dc.html",
+    "AdminAudit.dc.html",
+    "AdminAuditDetail.dc.html",
+    "AdminAuditRestore.dc.html",
+    "AdminAuditSettings.dc.html",
+    "AdminCostGuard.dc.html",
+    "AdminStaticBuilds.dc.html",
+    "AdminWorkers.dc.html",
+    "AdminHealthHub.dc.html",
+    "AdminHealth.dc.html",
+    "AdminIntegrity.dc.html",
+    "AdminSecurity.dc.html",
+    "AdminPermSim.dc.html",
+    "AdminApi.dc.html",
+    "AdminImport.dc.html",
+    "AdminSpreadsheet.dc.html",
+    "PublicHeader.dc.html",
+    "PublicFooter.dc.html",
+    "AdminNav.dc.html",
+    "ManageNav.dc.html",
+    "ManageEventHead.dc.html",
+    "ConfirmModal.dc.html",
+    "MemberEditor.dc.html",
+    "CommandPalette.dc.html",
+    "SpVideoDetail.dc.html",
+    "SpVideoDetailScroll.dc.html",
+    "SpMain.dc.html",
+    "SpEventSlots.dc.html",
+    "SpMyPage.dc.html",
+    "SpManageEvent.dc.html",
+    "SpManageEventNew.dc.html",
+    "SpHeaderMenu.dc.html",
+    "EntrySubmitter.dc.html",
+    "IconPicker.dc.html",
+    "LinkEditor.dc.html",
+    "EntryQuestions.dc.html",
+    "Main.dc.html",
+    "VideoDetail.dc.html",
+    "About.dc.html",
+    "Events.dc.html",
+    "EventDetail.dc.html",
+    "EventSlots.dc.html",
+    "EventRelease.dc.html",
+    "Videos.dc.html",
+    "Recommend.dc.html",
+    "Trending.dc.html",
+    "Creators.dc.html",
+    "Creator.dc.html",
+    "Portfolio.dc.html",
+    "Rules.dc.html",
+    "Maintenance.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "public",
+      "name": "公開"
+    },
+    {
+      "id": "user",
+      "name": "ユーザー"
+    },
+    {
+      "id": "manage",
+      "name": "運営"
+    },
+    {
+      "id": "admin",
+      "name": "管理"
+    },
+    {
+      "id": "parts",
+      "name": "共通パーツ"
+    },
+    {
+      "id": "sp",
+      "name": "スマホ"
+    },
+    {
+      "id": "tabs",
+      "name": "タブの中身"
+    }
+  ],
+  "title": "flamenode リデザイン"
+}

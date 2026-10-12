@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベント概要</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="overview" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="overview" hint-size="100%,96px"></dc-import>
+
+    <section class="c-sec" style="margin-top: 40px;" aria-labelledby="todo">
+      <h2 id="todo" class="t-h2" style="margin-bottom: 16px;">要対応</h2>
+      <div class="queue">
+        <a href="ManageVideos.dc.html"><span class="il"><i class="ms ms-pending_actions" aria-hidden="true"></i>審査キュー</span><b>6</b><span>最古 10.02 18:40</span></a>
+        <a href="ManageSlots.dc.html"><span class="il"><i class="ms ms-event_seat" aria-hidden="true"></i>未提出の確保枠</span><b>18</b><span>締切 10.07 23:59</span></a>
+        <a href="ManageNotifications.dc.html"><span class="il"><i class="fa-solid fa-bell-slash" aria-hidden="true" style="color: var(--danger);"></i>通知失敗</span><b>1</b><span>再送できます</span></a>
+        <a href="ManageEdit.dc.html"><span class="il"><i class="fa-solid fa-list-check" aria-hidden="true"></i>投稿の必須項目</span><b>4</b><span>作品フォームの必須設定</span></a>
+      </div>
+    </section>
+
+    <div class="split c-sec">
+      <div class="main stack" style="gap: 56px;">
+        <section aria-labelledby="prog">
+          <h2 id="prog" class="t-h2" style="margin-bottom: 20px;">進行状況</h2>
+          <div class="stack" style="gap: 18px;">
+            <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><span class="il"><i class="ms ms-view_timeline muted" aria-hidden="true"></i>枠の埋まり</span><span class="t-num">128 / 160</span></div><div class="bar" aria-label="枠の埋まり率 80%"><i style="width: 80%; background: var(--ink);"></i></div></div>
+            <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><span class="il"><i class="fa-solid fa-film muted" aria-hidden="true"></i>提出済み</span><span class="t-num">110 / 128</span></div><div class="bar"><i style="width: 86%; background: var(--ink);"></i></div></div>
+            <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><span class="il"><i class="fa-solid fa-check muted" aria-hidden="true"></i>承認済み</span><span class="t-num">94 / 110</span></div><div class="bar"><i style="width: 85%; background: var(--ink);"></i></div></div>
+          </div>
+        </section>
+
+        <section aria-labelledby="recent">
+          <div class="sec-head" style="margin-bottom: 8px;"><h2 id="recent" class="t-h2">直近の審査待ち</h2><a href="ManageVideos.dc.html" class="ib" aria-label="作品を管理"><i class="fa-solid fa-arrow-right"></i></a></div>
+          <sc-for list="{{pending}}" as="v" hint-placeholder-count="4">
+            <a href="ManageVideo.dc.html" class="fn-row">
+              <img class="fn-row__thumb" src="{{v.thumb}}" alt="" style="width: 112px;">
+              <span class="fn-row__body"><span class="fn-row__title">{{v.title}}</span><span class="fn-row__meta il"><img class="avatar" src="{{v.icon}}" alt="" style="width: 16px; height: 16px;">{{v.creator}} · <span class="t-num">{{v.at}}</span></span></span>
+              <span class="fn-row__trail"><button type="button" class="ib sm" aria-label="承認"><i class="fa-solid fa-check"></i></button></span>
+            </a>
+          </sc-for>
+        </section>
+
+        <section aria-labelledby="log">
+          <div class="sec-head" style="margin-bottom: 8px;">
+            <h2 id="log" class="t-h2">通知ログ</h2>
+            <span class="sel-i"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="通知カテゴリフィルタ"><option>すべて</option><option>審査</option><option>枠</option><option>リマインド</option></select></span>
+          </div>
+          <sc-for list="{{notifs}}" as="n" hint-placeholder-count="4">
+            <div class="row" style="gap: 12px; padding: 10px 0; font-size: 14px;"><span class="{{n.dot}}"></span><span style="flex: 1;">{{n.body}}</span><span class="muted t-sm">{{n.state}}</span><span class="muted t-num t-sm">{{n.at}}</span></div>
+          </sc-for>
+        </section>
+      </div>
+
+      <aside class="side stack" style="gap: 40px;">
+        <section>
+          <h2 class="t-h3" style="margin-bottom: 12px;">ショートカット</h2>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px;" aria-label="イベント運営ショートカット">
+            <a href="ManageSlots.dc.html" class="raised stack" style="gap: 8px; padding: 16px;"><i class="ms ms-view_timeline" aria-hidden="true"></i><span class="t-sm">予約枠を確認</span></a>
+            <a href="ManageVideos.dc.html" class="raised stack" style="gap: 8px; padding: 16px;"><i class="fa-solid fa-film" aria-hidden="true"></i><span class="t-sm">作品を管理</span></a>
+            <a href="ManageAudience.dc.html" class="raised stack" style="gap: 8px; padding: 16px;"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span class="t-sm">参加者を確認</span></a>
+            <button type="button" class="raised stack" style="gap: 8px; padding: 16px; border: 0; color: var(--ink); text-align: left; cursor: pointer; font: inherit;" onClick="{{toggleTpl}}" aria-expanded="{{tplStr}}"><i class="fa-regular fa-clone" aria-hidden="true"></i><span class="t-sm">この設定をテンプレート化</span></button>
+          </div>
+          <sc-if value="{{tpl}}" hint-placeholder-val="{{false}}">
+            <form class="raised stack" style="gap: 12px; padding: 16px; margin-top: 2px;" onSubmit="{{saveTpl}}">
+              <x-import component-from-global-scope="FlameNode.TextField" label="テンプレート名 *" placeholder="例: PVSF 標準セット" default-value="PVSF 標準セット(2026)"></x-import>
+              <x-import component-from-global-scope="FlameNode.TextField" label="メモ(任意)" placeholder="用途や差分のメモ"></x-import>
+              <span class="t-sm muted">保存される内容:種別・説明・アイコン/バナー・投稿フォーム・必須項目・質問・枠ルール・概要欄テンプレート。日付は含まず、適用したイベントは非公開から始まります。</span>
+              <div class="row" style="gap: 8px;"><button type="submit" class="fn-btn fn-btn--primary fn-btn--sm">テンプレートとして保存</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleTpl}}">キャンセル</button></div>
+            </form>
+          </sc-if>
+        </section>
+        <section>
+          <h2 class="t-h3" style="margin-bottom: 12px;">投稿の必須項目</h2>
+          <div class="stack t-sm" style="gap: 8px;">
+            <span class="il"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>作品タイトル・YouTube URL(常に必須)</span>
+            <span class="il"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>アイコン</span>
+            <span class="il"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>ステージ・権利確認</span>
+            <span class="il muted"><i class="fa-regular fa-circle" aria-hidden="true"></i>YouTube チャンネル</span>
+          </div>
+        </section>
+        <section>
+          <h2 class="t-h3" style="margin-bottom: 12px;">操作履歴</h2>
+          <sc-for list="{{audit}}" as="a" hint-placeholder-count="3">
+            <div class="stack" style="gap: 2px; padding: 8px 0;"><span class="t-sm">{{a.what}}</span><span class="t-label muted t-num">{{a.who}} · {{a.at}}</span></div>
+          </sc-for>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tpl: false }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    return {
+      tpl: this.state.tpl, tplStr: this.state.tpl ? 'true' : 'false', toggleTpl: () => this.setState({ tpl: !this.state.tpl }), saveTpl: (e) => { e.preventDefault(); this.setState({ tpl: false }); },
+      theme: this.props.theme ?? 'dark',
+      pending: [['崇渦に関するお知らせ 前編','おたこ','10.04 11:02'],['模範囚','hato','10.03 23:10'],['未来線～ミライン～','てつどうふぁん','10.03 19:45'],['【自主制作アニメ】めざした空の向こう側','スティックのり','10.02 18:40']].map((a, i) => ({ title: a[0], creator: a[1], at: a[2], thumb: T[(i + 4) % 8], icon: T[(i + 2) % 8] })),
+      notifs: [{ dot: 'dot err', body: '公開通知 · 崇渦に関するお知らせ 前編', state: 'failed', at: '10.04 11:03' }, { dot: 'dot ok', body: '承認通知 · 【サナドリウム/wiz_nicc】二次創作MV', state: '送信済み', at: '10.03 20:01' }, { dot: 'dot info', body: '締切リマインド', state: '配信待ち', at: '10.05 09:00' }],
+      audit: [{ what: '枠を一括作成(1日目 第2部 16枠)', who: '新概念', at: '10.01 21:00' }, { what: '投稿の必須項目を変更', who: '新概念', at: '09.28 12:12' }, { what: 'スタッフ追加: lalaClione', who: '新概念', at: '09.20 18:30' }]
+    };
+  }
+}
+</script>
+</body>
+</html>

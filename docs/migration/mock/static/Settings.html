@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[マイページ のタブ] 設定 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /dashboard/settings / source: source/boards/Settings.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+  <div class="dc-import" data-board="PublicHeader">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<header class="hd2" lang="ja">
+  <div class="hd-bar">
+    <a href="Main.html" class="hd-logo" aria-label="FlameNode トップ">
+      <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode">
+      <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode">
+    </a>
+    <nav class="hd-nav" aria-label="メインナビゲーション">
+      <a href="Videos.dc.html" aria-current="false">動画</a><a href="Creators.dc.html" aria-current="false">クリエイター</a><a href="Events.dc.html" aria-current="false">イベント</a>
+    </nav>
+    <div class="hd-right">
+      <label class="hd-search">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input type="search" placeholder="作品・クリエイターを検索" aria-label="検索" value="">
+        <kbd class="kbd hd-kbd">/</kbd>
+      </label>
+      <button type="button" class="ib hd-search-ic" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+      
+        <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <a href="MyPage.html" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
+        <button type="button" class="ib hd-me-d" aria-haspopup="menu" aria-label="アカウントメニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
+        <button type="button" class="ib hd-me-m" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
+      
+      
+      <button type="button" class="ib hd-burger" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニュー"><i class="fa-solid fa-bars"></i></button>
+    </div>
+  </div>
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  <nav class="hd-tabbar" aria-label="メインナビゲーション(スマホ)">
+    <a href="Videos.dc.html" aria-current="false" aria-label="動画" title="動画"><i class="fa-solid fa-film" aria-hidden="true"></i><span>動画</span></a><a href="Creators.dc.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.dc.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
+  </nav>
+</header>
+</div>
+
+  <div class="wrap" style="padding-top: 32px;">
+    <nav class="subnav" aria-label="マイページ">
+      <a href="MyPage.html" class="il"><i class="fa-solid fa-house" aria-hidden="true"></i>ダッシュボード</a>
+      <a href="MyPage.html" class="il"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i>参加・投稿</a>
+      <a href="MyPage.html" class="il"><i class="fa-solid fa-bookmark" aria-hidden="true"></i>ライブラリ</a>
+      <a href="MyPage.html" class="il" aria-current="page"><i class="fa-solid fa-gear" aria-hidden="true"></i>設定</a>
+    </nav>
+    <h1 class="t-display" style="margin-top: 40px;">設定</h1>
+
+    <div class="st-split" style="display: grid; grid-template-columns: 260px minmax(0,1fr); gap: 48px; margin-top: 32px; align-items: start;">
+      <nav aria-label="X ID とアカウント" role="tablist" class="stack st-nav" style="gap: 2px;">
+        
+          <button type="button" role="tab" class="tl on" style="height: auto; padding: 10px 12px; gap: 12px;">
+            <img class="avatar" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 32px; height: 32px;">
+            
+            <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="ell" style="font-size: 14px;">@012345rty</span><span class="t-sm muted ell">おたこ · アクティブ</span></span>
+          </button>
+        
+          <button type="button" role="tab" class="tl" style="height: auto; padding: 10px 12px; gap: 12px;">
+            <img class="avatar" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="" style="width: 32px; height: 32px;">
+            
+            <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="ell" style="font-size: 14px;">@otako_sub</span><span class="t-sm muted ell">承認待ち</span></span>
+          </button>
+        
+          <button type="button" role="tab" class="tl" style="height: auto; padding: 10px 12px; gap: 12px;">
+            
+            <span class="icon-tile" style="width: 32px; height: 32px; border-radius: 0;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></span>
+            <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="ell" style="font-size: 14px;">申請履歴</span><span class="t-sm muted ell">1件申請中</span></span>
+          </button>
+        
+          <button type="button" role="tab" class="tl" style="height: auto; padding: 10px 12px; gap: 12px;">
+            
+            <span class="icon-tile" style="width: 32px; height: 32px; border-radius: 0;"><i class="fa-solid fa-plus" aria-hidden="true"></i></span>
+            <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="ell" style="font-size: 14px;">X ID連携</span><span class="t-sm muted ell">X IDを連携</span></span>
+          </button>
+        
+          <button type="button" role="tab" class="tl" style="height: auto; padding: 10px 12px; gap: 12px;">
+            
+            <span class="icon-tile" style="width: 32px; height: 32px; border-radius: 0;"><i class="fa-brands fa-discord" aria-hidden="true"></i></span>
+            <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="ell" style="font-size: 14px;">Discord</span><span class="t-sm muted ell">otako</span></span>
+          </button>
+        
+      </nav>
+
+      <div>
+        
+        
+          <section aria-labelledby="xh">
+            <div class="row" style="gap: 12px; justify-content: space-between; flex-wrap: wrap;">
+              <div class="stack" style="gap: 4px;"><h2 id="xh" class="t-h2">@012345rty</h2></div>
+              <div class="row" style="gap: 4px;">
+                <span class="st t-sm" style="margin-right: 8px;"><i class="fa-solid fa-check st-ic ok" aria-hidden="true"></i>アクティブ</span>
+                
+                <a href="Creator.html" class="ib sm" aria-label="公開プロフィール"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                <button type="button" class="ib sm" aria-label="連携を解除"><i class="fa-solid fa-link-slash"></i></button>
+              </div>
+            </div>
+
+            
+            
+
+            <form class="form" style="margin-top: 32px; max-width: 640px;">
+              <div class="dc-import" data-board="IconPicker">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>
+body{margin:0;background:#000}
+.ic-field{display:grid;gap:8px}
+.ic-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ic-l{font:400 14px/20px var(--font-sans);color:var(--ink)}
+.ic-body{display:grid;grid-template-columns:96px minmax(0,1fr);gap:20px;margin-top:8px;align-items:start}
+.ic-now{display:grid;gap:6px;justify-items:center;text-align:center}
+.ic-now img,.ic-blank{width:96px;height:96px;object-fit:cover;display:grid;place-items:center;background:var(--surface-subtle);color:var(--ink-muted);font-size:28px}
+.ic-panel{display:grid;gap:12px;min-width:0}
+.ic-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:8px;max-width:520px}
+.ic-body:has(.ic-grid) .ic-now{display:none}
+.ic-c{position:relative;aspect-ratio:1/1;padding:3px;border:1px solid var(--border-subtle);border-radius:4px;background:var(--bg);cursor:pointer;display:grid;place-items:center;color:var(--ink-muted);overflow:hidden;min-width:0}
+.ic-c:hover{background:var(--surface-subtle)}
+.ic-c.on{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand);color:var(--ink)}
+.ic-c img{width:100%;height:100%;object-fit:cover;display:block;border-radius:4px}
+.ic-c .ic-tag{position:absolute;left:4px;bottom:4px;font-size:10px;line-height:14px;padding:0 4px;background:rgba(0,0,0,.72);color:#fff}
+.ic-c .ic-tag:empty{display:none}
+.ic-c .fa-check{position:absolute;top:2px;right:2px;width:16px;height:16px;display:grid;place-items:center;background:var(--brand);color:var(--on-brand,#000);border-radius:50%;font-size:9px}
+.ic-none{font-size:18px}
+.ic-none .ic-tag{background:transparent;color:inherit}
+.ic-url summary{cursor:pointer;list-style:none}
+.ic-url summary::-webkit-details-marker{display:none}
+.ic-url .input{margin-top:8px;width:100%;max-width:520px}
+.ic-drop{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:20px;background:var(--surface-subtle)}
+.ic-drop{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;padding:20px;background:var(--surface-subtle);transition:background .15s}
+.ic-drop.over{background:var(--surface-active)}
+.ic-drop-n{flex-basis:100%;font-size:11px;line-height:16px;color:var(--ink-muted)}
+.ic-vp img.fit-w{width:100%;height:auto}
+.ic-doneRow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ic-crop{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;align-items:start}
+.ic-vp{position:relative;width:280px;height:280px;overflow:hidden;background:var(--surface-subtle);cursor:grab;touch-action:none;user-select:none}
+.ic-vp:active{cursor:grabbing}
+.ic-vp img{position:absolute;left:50%;top:50%;height:100%;width:auto;max-width:none;pointer-events:none}
+.ic-ctl{display:grid;gap:16px;align-content:start}
+.ic-zoom{display:flex;align-items:center;gap:8px}
+.ic-zoom input{flex:1;min-width:80px;accent-color:var(--ink)}
+@media (max-width:640px){
+  .ic-body{grid-template-columns:64px minmax(0,1fr);gap:12px}
+  .ic-now img,.ic-blank{width:64px;height:64px;font-size:20px}
+  .ic-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .ic-crop{grid-template-columns:1fr}
+  .ic-body:has(.ic-crop){grid-template-columns:1fr}
+  .ic-body:has(.ic-crop) .ic-now{display:none}
+  .ic-vp{width:100%;max-width:280px;height:auto;aspect-ratio:1/1;justify-self:center}
+}
+</style>
+
+<div class="p-root" data-theme="dark" lang="ja" style="min-height: 0; background: transparent; padding-bottom: 0;">
+            <div class="ic-field" role="group" aria-labelledby="ic-l" aria-describedby="ic-h">
+  <div class="ic-top">
+    <span class="ic-l" id="ic-l">アイコン</span>
+    <div class="seg sm" role="tablist" aria-label="作品アイコンの設定方法">
+      <button type="button" role="tab" class="on" aria-selected="true">候補から選ぶ</button>
+      <button type="button" role="tab" class="">新規アップロード</button>
+    </div>
+  </div>
+  <p class="t-sm muted" id="ic-h" style="margin: 0;">この X ID の既定アイコンです。選ぶとすぐ保存され、新しい投稿の初期値になります。</p>
+  <div class="ic-body">
+    <div class="ic-now" aria-live="polite">
+      <img src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="選択中のアイコン">
+      
+      <span class="t-xs muted">X のアイコン</span>
+    </div>
+    <div class="ic-panel">
+      
+        <div class="ic-grid" role="radiogroup" aria-label="アイコン候補">
+          
+            <button type="button" class="ic-c on" role="radio" aria-checked="true" aria-label="X のアイコン" title="X のアイコン"><img src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""><i class="fa-solid fa-check" aria-hidden="true"></i></button>
+          
+            <button type="button" class="ic-c" role="radio" aria-checked="false" aria-label="過去の作品で使用" title="過去の作品で使用"><img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt=""><i class="" aria-hidden="true"></i></button>
+          
+            <button type="button" class="ic-c" role="radio" aria-checked="false" aria-label="過去の作品で使用" title="過去の作品で使用"><img src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt=""><i class="" aria-hidden="true"></i></button>
+          
+            <button type="button" class="ic-c" role="radio" aria-checked="false" aria-label="過去の作品で使用" title="過去の作品で使用"><img src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt=""><i class="" aria-hidden="true"></i></button>
+          
+          <button type="button" class="ic-c ic-none" role="radio" aria-checked="false" aria-label="アイコンを指定しない" title="アイコンを指定しない"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>
+        
+        <label class="field" style="max-width: 520px;"><span>アイコン URL（任意）</span><input class="select" type="url" maxlength="500" placeholder="https://" aria-label="アイコン URL" value="assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" style="width: 100%; padding: 0 12px; background-image: none;"></label>
+      
+      
+      
+    </div>
+  </div>
+</div>
+</div>
+</div>
+              <div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r0:">表示名</label><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" value="おたこ"></div></div></div>
+              <div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r1:">プロフィール</label><div class="fn-field__wrap"><textarea id=":r1:" class="fn-field__control" rows="4" placeholder="制作スタイル、得意なこと、活動紹介など">アニメと実写を混ぜた短編を作っています。</textarea></div></div></div>
+              <div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r2:">依頼・連絡先</label><div class="fn-field__wrap"><input id=":r2:" class="fn-field__control" placeholder="依頼・連絡先、メール、フォームURL、DM可否など"></div></div></div>
+
+              <div class="field"><span>YouTube チャンネル</span>
+                <div class="row" style="gap: 0; background: var(--surface-subtle); height: 40px;">
+                  <i class="fa-brands fa-youtube muted" aria-hidden="true" style="padding: 0 12px;"></i>
+                  <span class="t-sm ell" style="flex: 1;">https://www.youtube.com/@otako_anime</span>
+                  <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">変更</button>
+                </div>
+                
+              </div>
+
+              <div class="dc-import" data-board="LinkEditor">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>
+body{margin:0;background:#000}
+.sns{display:grid;gap:4px}
+.sns-row{display:grid;grid-template-columns:32px minmax(0,1fr) 32px;gap:8px;align-items:center;height:40px;padding:0 4px 0 8px;background:var(--surface-subtle)}
+.sns-row i.k{color:var(--ink-muted);text-align:center}
+.sns-row .u{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sns-add{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:8px;align-items:center;height:40px;padding:0 4px 0 8px;background:var(--surface-subtle)}
+.sns-add input{border:0;background:transparent;color:var(--ink);font:400 14px/20px var(--font-sans);outline:none;min-width:0}
+.sns-add .det{font-size:12px;color:var(--ink-muted);white-space:nowrap}
+</style>
+
+<div class="p-root" data-theme="dark" lang="ja" style="min-height: 0; background: transparent; padding-bottom: 0;">
+    <div class="field">
+      <span>その他のリンク <span class="muted t-num">2 / 8</span></span>
+      <div class="sns">
+        
+          <div class="sns-row"><i class="fa-brands fa-instagram k" aria-hidden="true"></i><span class="u">https://instagram.com/otako_anime</span><button type="button" class="ib sm" aria-label="https://instagram.com/otako_anime を削除"><i class="fa-solid fa-xmark"></i></button></div>
+        
+          <div class="sns-row"><i class="fa-solid fa-palette k" aria-hidden="true"></i><span class="u">https://www.foriio.com/otako</span><button type="button" class="ib sm" aria-label="https://www.foriio.com/otako を削除"><i class="fa-solid fa-xmark"></i></button></div>
+        
+        <label class="sns-add"><i class="fa-solid fa-plus k" aria-hidden="true" style="color: var(--ink-muted); text-align: center;"></i><input type="url" placeholder="URL を貼り付け(種類は自動で判定)" aria-label="リンクを追加" value=""><span class="det"></span></label>
+      </div>
+    </div>
+</div>
+</div>
+              <div class="row"><button type="submit" class="fn-btn fn-btn--primary">保存</button></div>
+            </form>
+          </section>
+        
+
+        
+        
+
+        
+        
+
+        
+        
+      </div>
+    </div>
+  </div>
+  <div class="foot-spacer"></div>
+  <div class="dc-import" data-board="PublicFooter">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<footer class="pub-foot" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
+  <div style="display: flex; flex-direction: column; gap: 16px; flex: 1 1 240px;">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
+    <span style="color: var(--ink-muted); font-size: 13px;">© FlameNode</span>
+  </div>
+  <nav aria-label="見る" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="Videos.html" class="il">作品一覧</a>
+    <a href="Recommend.html" class="il">おすすめ</a>
+    <a href="Creators.html" class="il">クリエイター</a>
+    <a href="Events.html" class="il">イベント一覧</a>
+  </nav>
+  <nav aria-label="参加する" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="MyPage.html" class="il">投稿する</a>
+    <a href="MyPage.html" class="il">ダッシュボード</a>
+    <a href="EntrySignIn.html" class="il">ログイン / 新規登録</a>
+    <a href="About.html" class="il">イベント開催相談</a>
+  </nav>
+  <nav aria-label="FlameNode" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="About.html" class="il">FlameNode について</a>
+    <a href="Rules.html" class="il">利用規約</a>
+  </nav>
+</footer>
+</div>
+</div>
+
+</div>
+</body></html>

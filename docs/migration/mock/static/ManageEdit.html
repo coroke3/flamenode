@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>イベント設定 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /manage/events/[id]/edit / source: source/boards/ManageEdit.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="ManageNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="イベント運営ナビ" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">運営</span><span class="ell">PVSF2026S · イベント設定</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">運営</span>
+  </div>
+  <a href="CommandPalette.html" class="cmdk" aria-label="移動・操作を検索(Ctrl+K)"><span class="il" style="gap: 10px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>移動・操作を検索</span><kbd class="kbd">⌘K</kbd></a>
+
+  <a href="Manage.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-house" aria-hidden="true"></i>運営トップ</span></a>
+  <a href="ManageNotifications.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true"></i>通知センター</span><span class="n">1</span></a>
+  <a href="ManageEventNew.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>イベントを作成</span></a>
+
+  <span class="grp">イベント</span>
+  <button type="button" class="ev-switch" aria-expanded="false" aria-label="担当イベントを切り替え">
+    <img class="ev-icon" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 28px; height: 28px;">
+    <span class="stack" style="gap: 0; flex: 1; min-width: 0; text-align: left;"><span class="ell" style="font-size: 14px;">PVSF2026S</span><span class="st t-sm"><span class="dot ok"></span>受付中</span></span>
+    <i class="fa-solid fa-chevron-down muted" aria-hidden="true"></i>
+  </button>
+  
+  
+    <a href="ManageEvent.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true"></i>概要</span><span class="n"></span></a>
+  
+    <a href="ManageInbox.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-inbox" aria-hidden="true"></i>受信箱</span><span class="n">11</span></a>
+  
+    <a href="ManageVideos.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true"></i>作品</span><span class="n">110</span></a>
+  
+    <a href="ManageSlots.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-view_timeline" aria-hidden="true"></i>枠</span><span class="n">128/160</span></a>
+  
+    <a href="ManageAudience.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-user-group" aria-hidden="true"></i>参加者</span><span class="n">96</span></a>
+  
+    <a href="ManagePlaylist.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-sensors" aria-hidden="true"></i>配信・公開</span><span class="n"></span></a>
+  
+    <a href="ManageEdit.dc.html" class="nsec on" aria-current="page"><span class="il" style="gap: 10px;"><i class="fa-solid fa-sliders" aria-hidden="true"></i>イベント設定</span><span class="n"></span></a>
+  
+    <a href="ManageStaff.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-admin_panel_settings" aria-hidden="true"></i>スタッフと権限</span><span class="n">5</span></a>
+  
+    <a href="ManageHistory.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>履歴</span><span class="n"></span></a>
+  
+
+  <span class="grp">ほかの画面</span>
+  <a href="ManageXLink.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID 連携申請(全体)</span><span class="n">3</span></a>
+  <a href="Main.html"><span class="il" style="gap: 10px;"><i class="fa-solid fa-globe" aria-hidden="true"></i>公開サイト</span></a>
+</nav>
+</div></div>
+  <main class="c-main">
+    <div class="dc-import" data-board="ManageEventHead">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<header class="eh" lang="ja" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg); color: var(--ink); font-family: var(--font-sans);">
+  <div class="wrap-row" style="gap: 16px; justify-content: space-between; align-items: center;">
+    <nav aria-label="パンくず" class="row t-sm muted" style="gap: 8px;"><span class="eh-ev row" style="gap: 8px;"><img class="ev-icon" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 20px; height: 20px;"><a href="ManageEvent.html" class="p-link" style="color: var(--ink-muted);">PVSF2026S</a></span><span class="st"><span class="dot ok"></span>受付中</span><span class="t-num eh-date">11.03 — 11.04</span><span class="eh-left">受付終了まで 12日</span></nav>
+    <div class="row eh-acts" style="gap: 4px;">
+      <span class="t-sm muted eh-perm" style="margin-right: 8px;">あなたの権限:代表</span>
+      <a href="EventDetail.html" class="ib" aria-label="公開ページを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+      <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索(⌘K)"><i class="fa-solid fa-magnifying-glass"></i></a>
+    </div>
+  </div>
+  <div class="row" style="gap: 12px; align-items: baseline; flex-wrap: wrap;">
+    <h1 class="t-display" style="margin: 0;">イベント設定</h1>
+    <span class="muted eh-desc">基本情報・受付・投稿フォーム・枠ルール</span>
+  </div>
+</header>
+</div>
+
+    <div class="split" style="margin-top: 32px;">
+      <form class="main">
+        <nav class="subnav" aria-label="設定セクション"><a href="#" aria-current="page">基本情報</a><a href="#" aria-current="false">公開・受付</a><a href="#" aria-current="false">投稿・権限</a><a href="#" aria-current="false">必須項目</a><a href="#" aria-current="false">質問</a><a href="#" aria-current="false">枠</a><a href="#" aria-current="false">概要欄</a></nav>
+
+        
+          <div class="form" style="margin-top: 32px;">
+            <label class="field"><span>種別</span><span class="sel-i"><i class="ms ms-category" aria-hidden="true"></i><select class="select i"><option>通常イベント</option><option>コラボ</option><option>タイプ別</option><option>その他</option></select></span></label>
+            <div class="field"><span>ID</span><div class="row" style="gap: 0; background: var(--surface-subtle); height: 36px;"><i class="fa-solid fa-hashtag muted" aria-hidden="true" style="padding: 0 12px;"></i><span class="t-mono t-sm" style="flex: 1;">PVSF2026S</span><span class="t-sm muted" style="padding: 0 12px;">変更は「注意が必要な操作」から</span></div></div>
+            <div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r0:">タイトル *</label><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" value="PVSF2026S"></div></div></div>
+            <div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r1:">説明</label><div class="fn-field__wrap"><textarea id=":r1:" class="fn-field__control" rows="4"></textarea></div></div></div>
+            <div class="cols2">
+              <div class="field"><span>アイコン</span><div class="row" style="gap: 12px;"><img class="ev-icon" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 48px; height: 48px;"><div style="flex: 1 1 0%; display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r2:" class="fn-field__control" arialabel="アイコンURL" placeholder="アイコンURL"></div></div></div></div></div>
+              <div class="field"><span>バナー画像</span><div class="row" style="gap: 12px;"><img src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 96px; height: 48px; object-fit: cover;"><div style="flex: 1 1 0%; display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r3:" class="fn-field__control" arialabel="バナー画像URL" placeholder="バナー画像URL"></div></div></div></div></div>
+            </div>
+            <div class="field" style="max-width: 240px;"><span>アクセントカラー</span><div class="row" style="gap: 8px;"><span style="width: 36px; height: 36px; background: #ffd400; flex: none;"></span><div style="flex: 1 1 0%; display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r4:" class="fn-field__control" arialabel="アクセントカラー" placeholder="#ffd400"></div></div></div></div></div>
+          </div>
+        
+        
+        
+        
+        
+        
+        
+
+        <div class="row" style="gap: 8px; margin-top: 48px;">
+          <button type="submit" class="fn-btn fn-btn--primary">保存</button>
+          <span class="t-sm il" style="color: var(--warning);"><span class="dot warn"></span>未保存の変更があります</span>
+          <span class="t-sm muted">· 下書きはこのブラウザに自動保存</span>
+        </div>
+      </form>
+
+      <aside class="side stack" style="gap: 32px;">
+        <section aria-labelledby="pv">
+          <h2 id="pv" class="t-h3" style="margin-bottom: 12px;">設定プレビュー</h2>
+          <div class="raised stack" style="gap: 10px; padding: 16px; font-size: 13px;">
+            <span class="il"><i class="ms ms-view_timeline muted" aria-hidden="true"></i>時間枠 · 6分間隔 · 3部</span>
+            <span class="il"><i class="ms ms-event_seat muted" aria-hidden="true"></i>1 X ID 2枠まで</span>
+            <span class="il"><i class="fa-solid fa-link muted" aria-hidden="true"></i>枠なし投稿を許可</span>
+            <span class="il"><i class="fa-solid fa-user-check muted" aria-hidden="true"></i>追加紐付けは運営承認制</span>
+          </div>
+        </section>
+        <details class="danger-zone">
+          <summary class="il t-sm muted"><i class="fa-solid fa-chevron-right dz-chev" aria-hidden="true"></i>注意が必要な操作<span class="t-num">3</span></summary>
+          <div class="stack" style="gap: 0; margin-top: 8px;">
+            <button type="button" class="dz-row"><span class="il"><i class="fa-solid fa-hashtag" aria-hidden="true"></i>イベントIDを変更</span><span class="t-sm muted">URLが変わります</span></button>
+            
+            <button type="button" class="dz-row"><span class="il"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i>イベントを非公開にする</span><span class="t-sm muted">公開ページから消えます</span></button>
+            <button type="button" class="dz-row"><span class="il"><i class="fa-solid fa-box-archive" aria-hidden="true"></i>アーカイブ</span><span class="t-sm muted">編集できなくなります</span></button>
+          </div>
+        </details>
+      </aside>
+    </div>
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

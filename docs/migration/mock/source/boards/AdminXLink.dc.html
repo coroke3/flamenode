@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>X ID 申請</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="xlink" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">X ID 申請</h1></sc-if><p class="muted">X ID連携申請を確認します。統合と差し戻しはX ID統合管理で処理します。</p></div></div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="ユーザー管理メニュー" style="margin-bottom: 24px;">
+      <a href="AdminUsersHub.dc.html" class="il"><i class="fa-brands fa-discord" aria-hidden="true"></i>Discordユーザー</a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-key" aria-hidden="true"></i>権限管理</a>
+      <a href="AdminUsersHub.dc.html" class="il" aria-current="page"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID連携申請 <span class="t-num">3</span></a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="ms ms-merge" aria-hidden="true"></i>X ID統合申請 <span class="t-num">1</span></a>
+    </nav></sc-if>
+
+    <section aria-labelledby="q">
+      <h2 id="q" class="t-h3" style="margin-bottom: 8px;">処理待ち</h2>
+      <div class="t-scroll">
+        <div class="dt" style="--cols: minmax(150px,1fr) 104px minmax(160px,1fr) 110px 260px; --minw: 900px;">
+          <div class="dt-h"><span>申請 X ID</span><span>種別</span><span>申請者</span><span>申請日時</span><span></span></div>
+          <sc-for list="{{reqs}}" as="r" hint-placeholder-count="3">
+            <div class="dt-r">
+              <span class="row" style="gap: 10px;"><img class="avatar" src="{{r.icon}}" alt="" style="width: 28px; height: 28px;"><span class="stack"><span>@{{r.x}}</span><span class="sub t-mono">{{r.id}}</span></span></span>
+              <span class="il"><i class="{{r.kindIcon}}" aria-hidden="true"></i>{{r.kind}}</span>
+              <span class="stack"><span class="il"><i class="fa-brands fa-discord muted" aria-hidden="true"></i>{{r.discord}}</span><span class="sub t-mono">{{r.uid}}</span></span>
+              <span class="t-num muted">{{r.at}}</span>
+              <span class="row" style="gap: 4px; justify-content: flex-end;">
+                <a href="https://x.com/" class="ib sm" aria-label="X で確認"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                <x-import component-from-global-scope="FlameNode.TextField" aria-label="却下理由 (任意・履歴に残る)" placeholder="却下理由(任意)" style="width: 120px;"></x-import>
+                <button type="button" class="ib sm" aria-label="却下"><i class="fa-solid fa-ban"></i></button>
+                <button type="button" class="fn-btn fn-btn--primary fn-btn--sm"><i class="fa-solid fa-check" aria-hidden="true"></i>承認</button>
+              </span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+
+    <section class="c-sec" aria-labelledby="log">
+      <h2 id="log" class="t-h3" style="margin-bottom: 8px;">監査ログ</h2>
+      <div class="dt" style="--cols: 120px 120px 100px minmax(140px,1fr) minmax(160px,1.4fr); --minw: 0px;">
+        <div class="dt-h"><span>日時</span><span>テーブル</span><span>操作</span><span>対象 ID</span><span>差分</span></div>
+        <div class="dt-r"><span class="t-num muted">10.03 22:10</span><span class="t-mono">x_link_requests</span><span>approve</span><span class="t-mono ell">xlr_31a9…</span><span class="t-sm">承認待ち → 承認済み</span></div>
+        <div class="dt-r"><span class="t-num muted">10.03 21:58</span><span class="t-mono">x_link_requests</span><span>reject</span><span class="t-mono ell">xlr_2f08…</span><span class="t-sm">承認待ち → 却下</span></div>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() {
+    const T = ['/_blob/755d245a064a6f5935c3dccd9a941048','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/6ecfc7b6882f277d815f563e873f25ee'];
+    return {
+      theme: this.props.theme ?? 'dark',
+      reqs: [
+        { x: 'otako_sub', id: 'xlr_4a1c', kind: 'X ID連携', kindIcon: 'fa-solid fa-link', discord: '012345rty', uid: 'usr_8f21c0', at: '10.02 12:10', icon: T[0] },
+        { x: 'izuna_text', id: 'xlr_4a20', kind: 'X ID連携', kindIcon: 'fa-solid fa-link', discord: 'izuna', uid: 'usr_77ab12', at: '10.03 08:40', icon: T[1] },
+        { x: 'keneizo_old', id: 'xlr_4a22', kind: '旧別名申請', kindIcon: 'fa-solid fa-clock-rotate-left', discord: 'keneizo', uid: 'usr_1c9e04', at: '10.03 21:02', icon: T[2] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

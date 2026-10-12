@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベント詳細</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="event" hint-size="100%,72px"></dc-import>
+
+  <img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="PVSF2026S メインビジュアル" style="display: block; width: 100%; aspect-ratio: 4/1; object-fit: cover; background: var(--surface-raised);">
+
+  <div class="wrap">
+    <header class="ed-head" style="display: flex; flex-wrap: wrap; gap: 24px 48px; align-items: flex-end; justify-content: space-between; margin-top: -40px;">
+      <div class="row" style="gap: 24px; align-items: flex-end;">
+        <img class="ev-icon ed-ic" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 112px; height: 112px;">
+        <div class="stack" style="gap: 8px;">
+          <span class="wrap-row t-sm" style="gap: 16px;">
+            <x-import component-from-global-scope="FlameNode.Status" status="public" label="募集期間中"></x-import>
+            <span class="muted t-num">2026.11.03 — 11.04</span>
+          </span>
+          <h1 class="t-display">PVSF2026S</h1>
+        </div>
+      </div>
+      <div class="actions">
+        <a href="EventSlots.dc.html" class="fn-btn fn-btn--primary">枠を確保</a>
+        <a href="EntryUnslotted.dc.html" class="fn-btn fn-btn--secondary">作品を提出</a>
+      </div>
+    </header>
+
+    <div class="metrics" style="margin-top: 48px;">
+      <div class="metric"><b>128</b><span>作品</span></div>
+      <div class="metric"><b>96</b><span>クリエイター</span></div>
+      <div class="metric"><b>128 / 160</b><span>埋まり枠</span></div>
+      <div class="metric"><b>あと12日</b><span>募集締切 10.16</span></div>
+    </div>
+
+    <div class="split sec ed-body" style="margin-top: 64px;">
+      <div class="main stack" style="gap: 64px;">
+        <section aria-labelledby="about" class="prose">
+          <h2 id="about" class="vh">イベント概要</h2>
+          <p>個人制作の映像作品を2日間にわたって連続上映するイベントです。1枠5分、時間枠を確保して作品を提出してください。</p>
+          <p>上映後、作品はこのイベントのアーカイブとして公開されます。</p>
+          <h3>ガイドライン</h3>
+          <p>楽曲・素材の権利を確認したうえで提出してください。提出後は運営の審査を経て公開されます。</p>
+        </section>
+
+        <section aria-labelledby="slots">
+          <div class="sec-head">
+            <h2 id="slots" class="t-h2">上映枠</h2>
+            <a href="EventSlots.dc.html" class="ib" aria-label="枠表へ"><i class="fa-solid fa-arrow-right"></i></a>
+          </div>
+          <div class="stack" style="gap: 20px;">
+            <sc-for list="{{days}}" as="d" hint-placeholder-count="2">
+              <div class="stack" style="gap: 8px;">
+                <div class="row t-sm" style="justify-content: space-between;"><span>{{d.label}}</span><span class="muted t-num">{{d.count}}</span></div>
+                <div class="bar"><i style="width: {{d.pct}}; background: var(--ink);"></i></div>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+
+        <section aria-labelledby="posts">
+          <div class="sec-head">
+            <h2 id="posts" class="t-h2">投稿</h2>
+            <a href="EventRelease.dc.html" class="ib" aria-label="投稿予定を見る"><i class="fa-regular fa-calendar-check"></i></a>
+          </div>
+          <div class="grid-v">
+            <sc-for list="{{videos}}" as="v" hint-placeholder-count="6">
+              <a href="VideoDetail.dc.html" style="display: block;">
+                <x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" duration="{{v.dur}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import>
+              </a>
+            </sc-for>
+          </div>
+        </section>
+      </div>
+
+      <aside class="side stack" style="gap: 48px;">
+        <section>
+          <h2 class="vh t-h3" style="margin-bottom: 16px;">日程</h2>
+          <dl class="kv" style="grid-template-columns: 96px 1fr;">
+            <dt>募集期間</dt><dd class="t-num">2026.09.01 — 10.16</dd>
+            <dt>投稿期間</dt><dd class="t-num">2026.10.01 — 10.30</dd>
+            <dt>開催</dt><dd class="t-num">2026.11.03 — 11.04</dd>
+          </dl>
+        </section>
+        <section>
+          <h2 class="vh t-h3" style="margin-bottom: 8px;">運営</h2>
+          <sc-for list="{{crew}}" as="m" hint-placeholder-count="3">
+            <a href="Creator.dc.html" class="fn-row fn-row--compact">
+              <img class="avatar" src="{{m.img}}" alt="" style="width: 36px; height: 36px;">
+              <span class="fn-row__body"><span class="fn-row__title">{{m.name}}</span><span class="fn-row__meta">{{m.role}}</span></span>
+            </a>
+          </sc-for>
+        </section>
+        <section>
+          <h2 class="vh t-h3" style="margin-bottom: 8px;">グループ</h2>
+          <a href="Events.dc.html" class="t-sm">PVSF シリーズ</a>
+        </section>
+      </aside>
+    </div>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":2200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const V = [['【幼虫アニメ】◯◯◯でしますか？◯でしますか？','幼虫','12:34'],['崇渦に関するお知らせ 前編','おたこ','08:02'],['【文字PV】スチールワンダー / はるまきごはん','スティックのり','06:10'],['模範囚','hato','02:58'],['【サナドリウム/wiz_nicc】二次創作MV','lalaClione','03:27'],['未来線～ミライン～','てつどうふぁん','07:15']];
+    return {
+      theme: this.props.theme ?? 'dark',
+      days: [{ label: '1日目 11.03', count: '72 / 80', pct: '90%' }, { label: '2日目 11.04', count: '56 / 80', pct: '70%' }],
+      videos: V.map((a, i) => ({ title: a[0], creator: a[1], cicon: a[1] === 'おたこ' ? '/_blob/fc027fe6fe3a001a22a1933270ce72b9' : '', dur: a[2], thumb: T[i] })),
+      crew: [{ name: '新概念', role: '代表', img: T[0] }, { name: 'スティックのり', role: '審査', img: T[5] }, { name: 'lalaClione', role: '配信', img: T[7] }]
+    };
+  }
+}
+</script>
+</body>
+</html>

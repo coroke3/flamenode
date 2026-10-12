@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>投稿予定のご案内</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>
+body{margin:0;background:#000}
+@keyframes fn-tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.rl-item{display:grid;grid-template-columns:minmax(64px,80px) 72px 40px minmax(120px,200px) minmax(0,1fr) max-content;align-items:center;gap:16px;padding:12px 16px 4px}
+.rl-wrap:hover{background:var(--surface-subtle)}
+.rl-tickbox{overflow:hidden;white-space:nowrap;margin:4px 16px 12px;padding:4px 12px;background:var(--bg);font-size:13px;line-height:20px;color:var(--ink-muted)}
+.rl-tick{display:inline-block;white-space:nowrap;animation:fn-tick linear infinite}
+.rl-wrap:hover .rl-tick{animation-play-state:paused}
+.rl-tick .sp{display:inline-block;width:100px}
+.rl-tick a{color:var(--ink)}
+.rl-team{display:grid;grid-template-columns:48px minmax(0,1fr);gap:16px;align-items:start;padding:16px 0}
+.rl-team+.rl-team{margin-top:4px}
+.rl-team-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.rl-team-n{font-size:16px;line-height:24px}
+.rl-mem{margin-top:4px;font-size:14px;line-height:22px;color:var(--ink-muted)}
+.rl-m{color:var(--ink)}
+.rl-m:hover{text-decoration:underline}
+.rl-m:not(.last)::after{content:" / ";color:var(--ink-muted);white-space:pre}
+.rl-tile{position:relative;display:block;aspect-ratio:16/9;background-size:cover;background-position:center;overflow:hidden}
+.rl-tile .ov{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:20px;background:rgba(16,18,15,.66);transition:background .3s}
+.rl-tile:hover .ov{background:rgba(16,18,15,.4)}
+.rl-tile .act{display:flex;gap:2px;opacity:0;transition:opacity .3s}
+.rl-tile:hover .act,.rl-tile:focus-within .act{opacity:1}
+@media (max-width:768px){.rl-item{grid-template-columns:52px minmax(0,1fr) auto;grid-template-areas:'t ti a' 't cr a';row-gap:2px;column-gap:12px;padding:10px 12px 4px}.rl-item>:nth-child(1){grid-area:t;text-align:left!important;font-size:16px!important}.rl-item>:nth-child(2),.rl-item>:nth-child(3){display:none}.rl-item>.c-cre{grid-area:cr;font-size:12px!important;color:var(--ink-muted)}.rl-item>:nth-child(5){grid-area:ti;font-size:15px!important}.rl-item>.c-act{grid-area:a}.rl-tickbox{margin:4px 12px 10px}}
+@media (prefers-reduced-motion:reduce){.rl-tick{animation:none}}
+</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="event" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 48px; max-width: 1280px;">
+    <a href="EventDetail.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>PVSF2026S</a>
+    <h1 class="t-display" style="margin-top: 8px;">投稿予定</h1>
+
+    <div class="row" role="group" aria-label="表示切替" style="gap: 0; margin-top: 20px;">
+      <button type="button" class="{{cList}}" aria-label="リスト表示" aria-pressed="{{isList}}" onClick="{{vList}}"><i class="fa-solid fa-bars"></i></button>
+      <button type="button" class="{{cCard}}" aria-label="カード表示" aria-pressed="{{isCard}}" onClick="{{vCard}}"><i class="fa-solid fa-image"></i></button>
+      <button type="button" class="{{cCre}}" aria-label="作者別表示" aria-pressed="{{isCre}}" onClick="{{vCre}}"><i class="fa-solid fa-user"></i></button>
+    </div>
+
+    <sc-if value="{{isList}}" hint-placeholder-val="{{true}}">
+      <div style="margin-top: 24px;">
+        <sc-for list="{{secs}}" as="d" hint-placeholder-count="3">
+          <section style="margin-bottom: 40px;">
+            <h2 class="rl-h"><span class="rl-hd t-num">{{d.date}}<span class="rl-dw">{{d.dow}}</span></span><span class="rl-pt">{{d.part}}</span><span class="t-sm muted t-num">{{d.range}} · {{d.count}}作品</span></h2>
+            <div class="rl-body">
+            <sc-for list="{{d.items}}" as="v" hint-placeholder-count="6">
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">{{v.time}}</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="{{v.kindIcon}}" aria-hidden="true"></i>{{v.kind}}</span>
+                  <img class="avatar" src="{{v.icon}}" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{v.creator}}</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{v.title}}</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.dc.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: {{v.dur}};">
+                    <span>{{v.comment}}</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>{{v.members}}</span><span class="sp"></span><span>{{v.comment}}</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>{{v.members}}</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            </sc-for>
+            </div>
+          </section>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isCard}}" hint-placeholder-val="{{false}}">
+      <sc-for list="{{secs}}" as="d" hint-placeholder-count="3">
+        <section style="margin-top: 32px;">
+          <h2 class="rl-h"><span class="rl-hd t-num">{{d.date}}<span class="rl-dw">{{d.dow}}</span></span><span class="rl-pt">{{d.part}}</span><span class="t-sm muted t-num">{{d.range}} · {{d.count}}作品</span></h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 2px;">
+            <sc-for list="{{d.items}}" as="v" hint-placeholder-count="6">
+              <div class="rl-tile" style="background-image: url({{v.thumb}});">
+                <div class="ov">
+                  <div class="row" style="justify-content: space-between; align-items: flex-start;">
+                    <span class="t-num" style="font: 400 32px/36px var(--font-sans);">{{v.time}}</span>
+                    <img class="avatar" src="{{v.icon}}" alt="" style="width: 44px; height: 44px;">
+                  </div>
+                  <div class="stack" style="gap: 2px; min-width: 0;">
+                    <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{v.title}}</span>
+                    <span class="t-sm muted">{{v.creator}}</span>
+                    <span class="act" style="margin-top: 8px;">
+                      <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                      <a href="VideoDetail.dc.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-for>
+    </sc-if>
+
+    <sc-if value="{{isCre}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 24px;">
+        <section style="margin-bottom: 40px;">
+          <h2 class="rl-h"><span class="rl-pt">個人参加</span><span class="t-sm muted t-num">{{solo.n}}組</span></h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0;">
+            <sc-for list="{{solo.people}}" as="p" hint-placeholder-count="8">
+              <a href="https://x.com/" class="stack rl-person" style="align-items: center; gap: 10px; padding: 20px 12px; text-align: center;" aria-label="{{p.name}} の X を開く">
+                <img class="avatar" src="{{p.icon}}" alt="" style="width: 64px; height: 64px;">
+                <span class="t-sm" style="max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{p.name}}</span>
+              </a>
+            </sc-for>
+          </div>
+        </section>
+        <section style="margin-bottom: 40px;">
+          <h2 class="rl-h"><span class="rl-pt">複数人(合作)</span><span class="t-sm muted t-num">{{team.n}}組</span></h2>
+          <sc-for list="{{team.list}}" as="t" hint-placeholder-count="3">
+            <div class="rl-team">
+              <img class="avatar" src="{{t.icon}}" alt="" style="width: 48px; height: 48px;">
+              <div class="rl-team-b">
+                <div class="rl-team-h"><span class="rl-team-n">{{t.name}}</span><span class="t-sm muted t-num">{{t.count}}人 · {{t.time}}</span></div>
+                <div class="rl-mem"><sc-for list="{{t.members}}" as="m" hint-placeholder-count="4"><a href="https://x.com/" class="{{m.cls}}">{{m.name}}</a></sc-for></div>
+              </div>
+            </div>
+          </sc-for>
+        </section>
+      </div>
+    </sc-if>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"view":{"editor":"enum","options":["list","card","creator"],"default":"list"},"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { view: (p && p.view) || 'list' }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const raw = [
+      ['18:12','g','1日目第1部','幼虫 ほか','【幼虫アニメ】◯◯◯でしますか？◯でしますか？','夏の終わりの記憶を6人でつなぎました。各パートの温度差も楽しんでください。','幼虫 / おたこ / 新概念 / スティックのり / lalaClione / あいこーすふぃあ'],
+      ['18:18','s','1日目第1部','おたこ','崇渦に関するお知らせ 前編','光の残像をノードで描いた作品です。','おたこ'],
+      ['18:24','s','1日目第1部','新概念','PVSF2026R','','新概念'],
+      ['18:30','g','1日目第1部','スティックのり ほか','【文字PV】スチールワンダー / はるまきごはん','合作メンバー募集から3か月、ようやく完成しました!','スティックのり / hato / てつどうふぁん'],
+      ['18:36','s','1日目第1部','lalaClione','【サナドリウム/wiz_nicc】二次創作MV','After Effects だけで作っています。','lalaClione'],
+      ['20:00','s','1日目第2部','hato','模範囚','','hato']
+    ];
+    const mk = (r, i, o) => ({ time: r[0], kind: r[1] === 'g' ? '複数人' : '個人', kindIcon: r[1] === 'g' ? 'fa-solid fa-user-group' : 'fa-solid fa-user', part: r[2], creator: r[3], title: r[4], comment: r[5] || '—', members: r[6], dur: Math.max(12, Math.round(((r[5] || '').length * 13 + r[6].length * 8 + 200) * 2 / 50)) + 's', icon: T[(i + o + 2) % 8], thumb: T[(i + o) % 8] });
+    const v = this.state.view;
+    const ib = (on) => on ? 'ib on' : 'ib';
+    const people = ['おたこ','新概念','lalaClione','hato','てつどうふぁん','あいこーすふぃあ','味付け海苔','貴方'];
+    return {
+      theme: this.props.theme ?? 'dark',
+      isList: v === 'list', isCard: v === 'card', isCre: v === 'creator',
+      cList: ib(v === 'list'), cCard: ib(v === 'card'), cCre: ib(v === 'creator'),
+      vList: () => this.setState({ view: 'list' }), vCard: () => this.setState({ view: 'card' }), vCre: () => this.setState({ view: 'creator' }),
+      secs: [
+        { date: '11/03', m: '11', dd: '03', dow: '火', day: 'DAY 1', items: raw.map((r, i) => mk(r, i, 0)) },
+        { date: '11/04', m: '11', dd: '04', dow: '水', day: 'DAY 2', items: raw.slice(0, 4).map((r, i) => mk([r[0], r[1], r[2].replace('1日目', '2日目'), r[3], r[4], r[5], r[6]], i, 3)) }
+      ].flatMap(d => [...new Set(d.items.map(x => x.part))].map(pt => { const items = d.items.filter(x => x.part === pt); return { ...d, part: pt.replace(/^\d+日目/, ''), items, count: items.length, range: items[0].time + ' – ' + items[items.length - 1].time }; })),
+      solo: { n: people.length, people: people.map((n, i) => ({ name: n, icon: T[(i + 2) % 8] })) },
+      team: { n: 3, list: [
+        { name: '幼虫アニメ合作', time: '11/03 18:12', members: ['幼虫', 'おたこ', '新概念', 'スティックのり', 'lalaClione', 'あいこーすふぃあ'] },
+        { name: 'スチールワンダー合作', time: '11/03 18:30', members: ['スティックのり', 'hato', 'てつどうふぁん'] },
+        { name: 'おゆする合作', time: '11/04 18:24', members: ['おゆする', '味付け海苔', '貴方', 'ちょこ', 'みかん'] }
+      ].map((t, i) => ({ ...t, count: t.members.length, icon: T[(i + 5) % 8], members: t.members.map((n, k) => ({ name: n, cls: 'rl-m' + (k === t.members.length - 1 ? ' last' : '') })) })) }
+    };
+  }
+}
+</script>
+</body>
+</html>

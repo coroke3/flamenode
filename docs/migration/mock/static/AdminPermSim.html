@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>権限シミュレーター — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /admin/permissions/simulator / source: source/boards/AdminPermSim.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="AdminNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">管理</span><span class="ell">権限シミュレーター</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">管理</span>
+  </div>
+  <div class="row" style="gap: 2px; padding: 0 12px 8px;">
+    <a href="Manage.html" class="ib sm" style="padding: 0;" aria-label="運営へ"><i class="fa-solid fa-clipboard-list"></i></a>
+    <a href="Main.html" class="ib sm" style="padding: 0;" aria-label="公開サイトへ"><i class="fa-solid fa-globe"></i></a>
+    <span style="flex: 1;"></span>
+    <button type="button" class="ib sm" style="padding: 0;" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+  </div>
+  
+    <span class="grp">概要</span>
+    
+      <a href="Admin.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true" style="width: 16px; text-align: center;"></i>ダッシュボード</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">対応</span>
+    
+      <a href="AdminVideosHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true" style="width: 16px; text-align: center;"></i>作品</span>
+        <span class="n">12</span>
+      </a>
+    
+      <a href="AdminUsersHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-users" aria-hidden="true" style="width: 16px; text-align: center;"></i>ユーザー / X ID</span>
+        <span class="n">4</span>
+      </a>
+    
+      <a href="AdminModeration.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-flag" aria-hidden="true" style="width: 16px; text-align: center;"></i>モデレーション</span>
+        <span class="n">2</span>
+      </a>
+    
+  
+    <span class="grp">サイト</span>
+    
+      <a href="AdminEventsHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-calendar-days" aria-hidden="true" style="width: 16px; text-align: center;"></i>イベント</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAnnouncements.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bullhorn" aria-hidden="true" style="width: 16px; text-align: center;"></i>お知らせ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminRules.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-scale-balanced" aria-hidden="true" style="width: 16px; text-align: center;"></i>規約</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">運用</span>
+    
+      <a href="AdminNotifications.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true" style="width: 16px; text-align: center;"></i>通知配信</span>
+        <span class="n">1</span>
+      </a>
+    
+      <a href="AdminHealthHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-monitor_heart" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働状況</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminStaticBuilds.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-code" aria-hidden="true" style="width: 16px; text-align: center;"></i>静的JSON再生成</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminYoutubeQuota.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-chart-pie" aria-hidden="true" style="width: 16px; text-align: center;"></i>YouTube クォータ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminCostGuard.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-gauge-high" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働モード</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAuditHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true" style="width: 16px; text-align: center;"></i>監査ログ</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">高度な管理</span>
+    
+      <a href="AdminSecurity.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-shield-halved" aria-hidden="true" style="width: 16px; text-align: center;"></i>セキュリティ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminPermSim.dc.html" class="on" aria-current="page">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-key" aria-hidden="true" style="width: 16px; text-align: center;"></i>権限シミュレーター</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminApi.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-plug" aria-hidden="true" style="width: 16px; text-align: center;"></i>公開API</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminImport.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-import" aria-hidden="true" style="width: 16px; text-align: center;"></i>旧形式インポート</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminSpreadsheet.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-table" aria-hidden="true" style="width: 16px; text-align: center;"></i>DBスプレッドシート</span>
+        <span class="n"></span>
+      </a>
+    
+  
+</nav>
+</div></div>
+  <main class="c-main">
+    <div class="c-head"><div><h1 class="t-display">権限シミュレーター</h1><p class="muted">イベントスタッフのプリセットとカスタム権限をX IDから確認します。イベントスタッフ登録の正本を参照します。</p></div></div>
+
+    <form class="row" style="gap: 8px; flex-wrap: wrap; align-items: flex-end;">
+      <span class="sel-i"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><select class="select i" aria-label="イベント ID" style="min-width: 240px;"><option>PVSF2026S</option><option>PVSF2026Sp</option><option>PVSF2025S</option><option>SummerIsland</option></select></span>
+      <span class="field-i sm-field" style="width: 240px;"><i class="fa-solid fa-at" aria-hidden="true"></i><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" arialabel="X ID" placeholder="screen_name" value="MusiVirus"></div></div></div></span>
+      <button type="submit" class="fn-btn fn-btn--primary"><i class="fa-solid fa-play" aria-hidden="true"></i>シミュレート</button>
+    </form>
+
+    
+    
+
+    
+      <div class="row" style="gap: 16px; margin-top: 40px; align-items: center;">
+        <img class="avatar round" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" width="56" height="56" style="width: 56px; height: 56px;">
+        <div class="stack" style="gap: 2px; flex: 1;">
+          <span class="t-h2">幼虫</span>
+          <span class="t-sm muted t-mono">@MusiVirus</span>
+        </div>
+        <a class="fn-btn fn-btn--secondary fn-btn--sm" href="ManageStaff.html">スタッフ管理へ</a>
+      </div>
+      <dl class="kv" style="margin-top: 24px;">
+        <dt>プリセット</dt><dd class="row" style="gap: 8px;"><b>運営</b><span class="t-mono t-sm muted">manager</span></dd>
+        <dt>説明</dt><dd class="t-sm">通常のイベント運営向けです。枠管理、投稿確認、作品情報の修正ができます。スタッフ管理や危険操作は含みません。</dd>
+        <dt>解決済み権限</dt><dd><b class="t-num">13</b><span class="muted t-sm"> / 20 キー</span></dd>
+      </dl>
+
+      <div class="row" style="justify-content: space-between; margin: 40px 0 8px;">
+        <h2 class="t-h3">権限</h2>
+        <div class="seg" role="group" aria-label="表示">
+          <button type="button" class="on">すべて</button>
+          <button type="button" class=""><i class="fa-solid fa-check" aria-hidden="true"></i>可のみ</button>
+          <button type="button" class=""><i class="fa-solid fa-star" aria-hidden="true"></i>主要</button>
+        </div>
+      </div>
+      <div class="dt" style="--cols: 28px minmax(180px,1fr) minmax(200px,1fr) 72px; --minw: 0px;">
+        <div class="dt-h"><span></span><span>権限</span><span>キー</span><span>可否</span></div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">イベント基本情報<i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></span>
+            <span class="t-mono t-sm muted">event.basic</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">受付・公開設定</span>
+            <span class="t-mono t-sm muted">event.publish</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">枠管理<i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></span>
+            <span class="t-mono t-sm muted">event.slots</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">スタッフ管理<i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></span>
+            <span class="t-mono t-sm muted">event.members</span>
+            <span class="il no-i"><i class="fa-solid fa-xmark" aria-hidden="true"></i>不可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">投稿フォーム・質問</span>
+            <span class="t-mono t-sm muted">event.questions</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">審査・承認<i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></span>
+            <span class="t-mono t-sm muted">event.review</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">通知・受信箱<i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></span>
+            <span class="t-mono t-sm muted">event.notifications</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">公開API設定</span>
+            <span class="t-mono t-sm muted">event.public_api</span>
+            <span class="il no-i"><i class="fa-solid fa-xmark" aria-hidden="true"></i>不可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">静的JSON再生成</span>
+            <span class="t-mono t-sm muted">event.static_rebuild</span>
+            <span class="il no-i"><i class="fa-solid fa-xmark" aria-hidden="true"></i>不可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-at" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">X ID連携申請</span>
+            <span class="t-mono t-sm muted">xid.link_requests</span>
+            <span class="il no-i"><i class="fa-solid fa-xmark" aria-hidden="true"></i>不可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">作品基本情報</span>
+            <span class="t-mono t-sm muted">video.basics</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">作品説明<i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></span>
+            <span class="t-mono t-sm muted">video.descriptions</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">楽曲・クレジット</span>
+            <span class="t-mono t-sm muted">video.credits</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">作品メンバー</span>
+            <span class="t-mono t-sm muted">video.members</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">メンバーチャプター</span>
+            <span class="t-mono t-sm muted">video.member_chapters</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">公開状態<i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></span>
+            <span class="t-mono t-sm muted">video.status</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">所属イベント</span>
+            <span class="t-mono t-sm muted">video.primary_event</span>
+            <span class="il no-i"><i class="fa-solid fa-xmark" aria-hidden="true"></i>不可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">YouTube ID</span>
+            <span class="t-mono t-sm muted">video.youtube_id</span>
+            <span class="il no-i"><i class="fa-solid fa-xmark" aria-hidden="true"></i>不可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">提出主体</span>
+            <span class="t-mono t-sm muted">video.identity</span>
+            <span class="il no-i"><i class="fa-solid fa-xmark" aria-hidden="true"></i>不可</span>
+          </div>
+        
+          <div class="dt-r">
+            <span class="muted"><i class="fa-solid fa-film" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">共同編集権限</span>
+            <span class="t-mono t-sm muted">video.permissions</span>
+            <span class="il ok-i"><i class="fa-solid fa-check" aria-hidden="true"></i>可</span>
+          </div>
+        
+      </div>
+    
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

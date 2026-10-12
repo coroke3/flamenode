@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>DBスプレッドシート</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{showNav}}" hint-placeholder-val="{{true}}"><div class="c-side"><dc-import name="AdminNav" active="spreadsheet" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main" style="max-width: none;">
+    <div class="c-head"><div><h1 class="t-display">DB スプレッドシート</h1><p class="muted">D1 の管理対象テーブルを表形式で閲覧します。認証・権限・システム系は読み取り専用、コンテンツ系のみ緊急時の編集ができます。変更は audit_logs に記録され、認証トークン列はマスク表示です。</p></div></div>
+
+    <sc-if value="{{disabled}}" hint-placeholder-val="{{false}}">
+      <div class="notice"><i class="fa-solid fa-toggle-off muted" aria-hidden="true" style="padding-top: 4px;"></i><div class="stack t-sm" style="gap: 6px;"><b>この機能は環境変数で有効化する必要があります。</b><span class="muted"><span class="t-mono">.dev.vars</span> に <span class="t-mono">ADMIN_SPREADSHEET_ENABLED="true"</span> を追加し <span class="t-mono">npm run dev</span> を再起動してください。1ページの行数は <span class="t-mono">ADMIN_SPREADSHEET_PAGE_SIZE</span>(既定 500、上限 5000)。</span></div></div>
+    </sc-if>
+
+    <sc-if value="{{enabled}}" hint-placeholder-val="{{true}}">
+    <div style="display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 24px; align-items: start;">
+      <nav aria-label="テーブル一覧" class="stack" style="gap: 16px;">
+        <div class="row" style="justify-content: space-between;"><span class="t-label muted">テーブル一覧</span><button type="button" class="ib sm" aria-label="DB のテーブル一覧を再取得(マイグレーション後)"><i class="fa-solid fa-rotate"></i></button></div>
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="7">
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">{{g.name}}</span>
+            <sc-for list="{{g.tables}}" as="t" hint-placeholder-count="3">
+              <button type="button" class="{{t.cls}}" onClick="{{t.pick}}">
+                <i class="{{t.icon}}" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">{{t.label}}</span>
+              </button>
+            </sc-for>
+          </div>
+        </sc-for>
+      </nav>
+
+      <section class="stack" style="gap: 8px; min-width: 0; position: relative;">
+        <div class="row" style="gap: 12px; flex-wrap: wrap;">
+          <span class="t-h3">{{cur.label}}</span><span class="t-mono t-sm muted">{{cur.key}}</span>
+          <span class="il t-sm muted"><i class="{{cur.modeIcon}}" aria-hidden="true"></i>{{cur.modeLabel}}</span>
+          <span style="flex: 1;"></span>
+          <span class="field-i sm-field" style="width: 200px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="検索" placeholder="検索"></x-import></span>
+          <span class="row" style="gap: 0;">
+            <button type="button" class="ib sm" aria-label="元に戻す"><i class="fa-solid fa-rotate-left"></i></button>
+            <button type="button" class="ib sm" aria-label="やり直す"><i class="fa-solid fa-rotate-right"></i></button>
+            <sc-if value="{{cur.editable}}" hint-placeholder-val="{{true}}"><button type="button" class="ib sm" aria-label="行を追加"><i class="fa-solid fa-plus"></i></button><button type="button" class="ib sm" aria-label="CSV / TSV を貼り付けて取り込み"><i class="fa-solid fa-paste"></i></button></sc-if>
+            <button type="button" class="ib sm" aria-label="全行を CSV でダウンロード(上限あり)"><i class="fa-solid fa-file-csv"></i></button>
+            <button type="button" class="ib sm" aria-label="全行を TSV でダウンロード(上限あり)"><i class="fa-solid fa-file-arrow-down"></i></button>
+            <button type="button" class="ib sm" aria-label="再読込"><i class="fa-solid fa-arrows-rotate"></i></button>
+            <button type="button" class="{{fsCls}}" aria-label="{{fsLabel}}" onClick="{{toggleFs}}"><i class="{{fsIcon}}"></i></button>
+          </span>
+        </div>
+
+        <div class="row" style="gap: 0; background: var(--surface-subtle); height: 32px;">
+          <span class="t-mono t-sm" style="width: 72px; padding: 0 12px; color: var(--ink-muted);" aria-label="セル参照">{{ref}}</span>
+          <span class="t-sm ell" style="flex: 1; padding: 0 12px;" aria-label="セルの値">{{val}}</span>
+          <sc-if value="{{cur.readonly}}" hint-placeholder-val="{{false}}"><span class="il t-sm muted" style="padding: 0 12px;"><i class="fa-solid fa-lock" aria-hidden="true"></i>読み取り専用</span></sc-if>
+        </div>
+
+        <div class="t-scroll">
+          <div class="dt" style="--cols: 40px 150px 110px 90px 160px minmax(220px,1.4fr) 150px 120px 110px; --minw: 1150px; font-size: 13px;">
+            <div class="dt-h"><span class="num">#</span><span>id <i class="fa-solid fa-key" aria-hidden="true" style="font-size: 9px;"></i></span><span>primary_event_id</span><span>collaboration_type</span><span>creator_display_name</span><span>title</span><span>music</span><span>credit</span><span>visibility_status</span></div>
+            <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">{{r.n}}</span>
+                <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="8">
+                  <button type="button" class="ell" onClick="{{c.pick}}" onContextMenu="{{c.ctx}}" onDoubleClick="{{c.pick}}" style="{{c.style}}">{{c.v}}</button>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <sc-if value="{{ctxOpen}}" hint-placeholder-val="{{true}}">
+          <div class="raised stack ctxmenu" role="menu" aria-label="セル操作" style="top: {{ctxTop}};">
+            <sc-for list="{{ctxItems}}" as="m" hint-placeholder-count="10">
+              <sc-if value="{{m.sep}}" hint-placeholder-val="{{false}}"><span class="ctx-sep"></span></sc-if>
+              <sc-if value="{{m.item}}" hint-placeholder-val="{{true}}"><button type="button" role="menuitem" class="tl" onClick="{{closeCtx}}" disabled="{{m.dis}}"><i class="{{m.icon}}" aria-hidden="true"></i><span style="flex: 1;">{{m.label}}</span><kbd class="kbd">{{m.key}}</kbd></button></sc-if>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div class="row t-sm muted" style="gap: 16px; justify-content: space-between;">
+          <span class="t-num">{{status}}</span>
+          <span class="row" style="gap: 4px;"><button type="button" class="ib sm" aria-label="前のページ"><i class="fa-solid fa-chevron-left"></i></button><span class="t-num">1 / 2 ページ · 500行/ページ</span><button type="button" class="ib sm" aria-label="次のページ"><i class="fa-solid fa-chevron-right"></i></button></span>
+        </div>
+      </section>
+    </div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"enabled":{"editor":"boolean","default":true},"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { table: 'videos', cell: [2, 5], fs: false, ctx: true }; }
+  renderVals() {
+    const s = this.state;
+    const reg = [
+      ['認証', [['user','ユーザー','r'],['account','OAuth アカウント','r'],['session','セッション','r'],['verificationToken','検証トークン','r']]],
+      ['X ID', [['x_users','X ID','e'],['x_user_aliases','X ID エイリアス','r'],['x_identity_requests','X ID申請','r'],['x_user_account_links','X名義・認証ユーザー紐付け','r']]],
+      ['イベント', [['event_groups','イベントグループ','e'],['events','イベント','e'],['event_staff','イベントスタッフ','r'],['slots','枠','e']]],
+      ['作品', [['videos','作品','e'],['video_youtube_metadata','YouTube メタ','e'],['video_moderation_cases','モデレーション','e'],['video_events','作品×イベント','e'],['video_members','作品メンバー','e'],['video_chapters','チャプター','e'],['video_interactions','インタラクション','e']]],
+      ['マスタ', [['software_catalog','ソフトカタログ','e'],['software_aliases','ソフト別名','e']]],
+      ['公開', [['announcements','お知らせ','e'],['terms_versions','利用規約','r'],['user_tos_consents','規約同意','r']]],
+      ['システム', [['notification_outbox','通知 outbox','r'],['audit_logs','監査ログ','r'],['system_settings','システム設定','r']]],
+    ];
+    let cur = null;
+    const groups = reg.map(([name, ts]) => ({ name, tables: ts.map(([key, label, m]) => {
+      const on = key === s.table;
+      const t = { key, label, editable: m === 'e', readonly: m === 'r', modeLabel: m === 'e' ? '編集可' : '読み取り専用', modeIcon: m === 'e' ? 'fa-solid fa-pen' : 'fa-solid fa-lock' };
+      if (on) cur = t;
+      return { label, icon: m === 'e' ? 'ms ms-view_timeline' : 'fa-solid fa-lock', cls: on ? 'tl on' : 'tl',
+        pick: () => this.setState({ table: key }) };
+    }) }));
+        const data = [
+      ['vid_7f2a01','PVSF2026Sp','individual','幼虫','【幼虫アニメ】◯◯◯でしますか？◯でしますか？','おしりでしますか？前でしますか？','◯◯','public'],
+      ['vid_7f2a02','PVSF2026Sp','collab','空白合作チーム','空白合作','ホワイトスペースにおいで','椎野乃々','public'],
+      ['vid_7f2a03','PVSF2026Sp','individual','スティックのり','【文字PV】スチールワンダー / はるまきごはん - スティックのり【#PVSF2026Sp】','スチールワンダー','はるまきごはん','public'],
+      ['vid_7f2a04','PVSF2026Sp','collab','おゆする','おゆする合作','typing','ariiol','public'],
+      ['vid_7f2a05','PVSF2026Sp','individual','hato','模範囚','模範囚','黄昏','public'],
+      ['vid_7f2a06','PVSF2026Sp','individual','lalaClione(ララクリオネ)','【サナドリウム/wiz_nicc】二次創作MV','サナドリウム','wiz_nicc','public'],
+      ['vid_7f2a07','PVSF2026Sp','individual','てつどうふぁん','【鉄道PV・てつどうふぁんMV●第23弾】未来線～ミライン～','未来線～ミライン～','Suno(AI)で生成','public'],
+      ['vid_7f2a08','PVSF2026Sp','individual','あいこーすふぃあ','個々々々々々人 / Sohbana','個々々々々々人','Sohbana','public'],
+    ];
+    const cols = 'BCDEFGHI';
+    const rows = data.map((r, i) => ({ n: i + 1, cells: r.map((v, j) => {
+      const on = s.cell[0] === i && s.cell[1] === j;
+      return { v, pick: () => this.setState({ cell: [i, j], ctx: false }), ctx: (e) => { e.preventDefault(); this.setState({ cell: [i, j], ctx: true }); },
+        style: 'height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: ' + (on ? 'var(--surface-active); outline: 1px solid var(--ink-muted); outline-offset: -1px;' : 'transparent;') + (j === 0 ? ' font-family: var(--font-mono, monospace);' : '') };
+    }) }));
+    const [ci, cj] = s.cell;
+    const colNames = ['id','primary_event_id','collaboration_type','creator_display_name','title','music','credit','visibility_status'];
+    const enabled = this.props.enabled ?? true;
+    return {
+      theme: this.props.theme ?? 'dark', groups, cur, rows,
+      ref: cols[cj] + (ci + 1), val: data[ci][cj],
+      status: '622 行 · 選択 ' + colNames[cj] + ' (text' + (cj === 0 ? ' · 必須 · PK' : cj === 4 ? ' · 必須' : '') + ')',
+      enabled, disabled: !enabled, showNav: !s.fs,
+      fsCls: s.fs ? 'ib sm on' : 'ib sm', fsLabel: s.fs ? '全画面を終了 (Esc)' : '全画面', fsIcon: s.fs ? 'fa-solid fa-compress' : 'fa-solid fa-expand',
+      toggleFs: () => this.setState({ fs: !s.fs }),
+      ctxOpen: s.ctx, closeCtx: () => this.setState({ ctx: false }), ctxTop: (176 + ci * 36) + 'px',
+      ctxItems: [['編集','F2','fa-solid fa-pen'],['コピー','Ctrl+C','fa-regular fa-copy'],['切り取り','Ctrl+X','fa-solid fa-scissors'],['貼り付け','Ctrl+V','fa-regular fa-paste'],['クリア','Delete','fa-solid fa-eraser'],['下にフィル','Ctrl+D','fa-solid fa-arrow-down'],null,['下に行を挿入…','','fa-solid fa-plus'],['行を複製して挿入…','','fa-regular fa-clone'],['行を削除','','fa-regular fa-trash-can'],null,['元に戻す','Ctrl+Z','fa-solid fa-rotate-left'],['やり直す','Ctrl+Shift+Z','fa-solid fa-rotate-right']]
+        .map((m) => m ? { item: true, sep: false, label: m[0], key: m[1], icon: m[2], dis: !(cur && cur.editable) && !['コピー','元に戻す','やり直す'].includes(m[0]) } : { item: false, sep: true })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>イベントを作成 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /manage/events/new / source: source/boards/ManageEventNew.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="ManageNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="イベント運営ナビ" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">運営</span><span class="ell">イベントを作成</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">運営</span>
+  </div>
+  <a href="CommandPalette.html" class="cmdk" aria-label="移動・操作を検索(Ctrl+K)"><span class="il" style="gap: 10px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>移動・操作を検索</span><kbd class="kbd">⌘K</kbd></a>
+
+  <a href="Manage.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-house" aria-hidden="true"></i>運営トップ</span></a>
+  <a href="ManageNotifications.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true"></i>通知センター</span><span class="n">1</span></a>
+  <a href="ManageEventNew.html" class="on"><span class="il" style="gap: 10px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>イベントを作成</span></a>
+
+  <span class="grp">イベント</span>
+  <button type="button" class="ev-switch" aria-expanded="false" aria-label="担当イベントを切り替え">
+    <img class="ev-icon" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 28px; height: 28px;">
+    <span class="stack" style="gap: 0; flex: 1; min-width: 0; text-align: left;"><span class="ell" style="font-size: 14px;">PVSF2026S</span><span class="st t-sm"><span class="dot ok"></span>受付中</span></span>
+    <i class="fa-solid fa-chevron-down muted" aria-hidden="true"></i>
+  </button>
+  
+  
+    <a href="ManageEvent.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true"></i>概要</span><span class="n"></span></a>
+  
+    <a href="ManageInbox.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-inbox" aria-hidden="true"></i>受信箱</span><span class="n">11</span></a>
+  
+    <a href="ManageVideos.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true"></i>作品</span><span class="n">110</span></a>
+  
+    <a href="ManageSlots.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-view_timeline" aria-hidden="true"></i>枠</span><span class="n">128/160</span></a>
+  
+    <a href="ManageAudience.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-user-group" aria-hidden="true"></i>参加者</span><span class="n">96</span></a>
+  
+    <a href="ManagePlaylist.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-sensors" aria-hidden="true"></i>配信・公開</span><span class="n"></span></a>
+  
+    <a href="ManageEdit.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-sliders" aria-hidden="true"></i>イベント設定</span><span class="n"></span></a>
+  
+    <a href="ManageStaff.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="ms ms-admin_panel_settings" aria-hidden="true"></i>スタッフと権限</span><span class="n">5</span></a>
+  
+    <a href="ManageHistory.dc.html" class="nsec" aria-current="false"><span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>履歴</span><span class="n"></span></a>
+  
+
+  <span class="grp">ほかの画面</span>
+  <a href="ManageXLink.html" class=""><span class="il" style="gap: 10px;"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID 連携申請(全体)</span><span class="n">3</span></a>
+  <a href="Main.html"><span class="il" style="gap: 10px;"><i class="fa-solid fa-globe" aria-hidden="true"></i>公開サイト</span></a>
+</nav>
+</div></div>
+  <main class="c-main">
+
+    
+
+    
+    <div class="en-grid">
+      
+      <nav class="en-outline" aria-label="入力の進み具合">
+        <span class="t-label muted" style="display: block; padding: 0 0 12px;">新しいイベント</span>
+        
+          <a href="#s-start" class="en-ol"><span class="dot ok"></span>はじめかた</a>
+        
+          <a href="#s-name" class="en-ol"><span class="dot ok"></span>名前と見た目</a>
+        
+          <a href="#s-date" class="en-ol"><span class="dot ok"></span>日程</a>
+        
+          <a href="#s-slot" class="en-ol"><span class="dot ok"></span>枠</a>
+        
+          <a href="#s-rule" class="en-ol"><span class="dot ok"></span>参加のルール</a>
+        
+          <a href="#s-form" class="en-ol"><span class="dot ok"></span>投稿フォーム</a>
+        
+          <a href="#s-pub" class="en-ol"><span class="dot ok"></span>公開</a>
+        
+        <span class="t-sm muted il" style="margin-top: 16px;"><i class="fa-solid fa-cloud" aria-hidden="true"></i>下書きを自動保存</span>
+      </nav>
+
+      <form class="en-form">
+        
+        <section id="s-start" class="en-sec" aria-labelledby="h-start">
+          <h2 id="h-start" class="en-h">どこから始めますか</h2>
+          <div class="seg en-start" role="tablist" aria-label="はじめかた"><button type="button" role="tab" class="on"><i class="fa-regular fa-clone" aria-hidden="true"></i>過去のイベントから</button><button type="button" role="tab" class=""><i class="ms ms-dashboard_customize" aria-hidden="true"></i>テンプレートから</button><button type="button" role="tab" class=""><i class="fa-regular fa-file" aria-hidden="true"></i>白紙から</button></div>
+          
+            <div class="en-src" role="listbox" aria-label="コピー元のイベント">
+              
+                <button type="button" role="option" aria-selected="true" class="en-src-i on">
+                  <img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 32px; height: 32px;">
+                  <span class="stack" style="gap: 0; min-width: 0; flex: 1; text-align: left;"><span class="ell">PVSF2026S</span><span class="t-sm muted ell">2026.08 · 128枠 · 質問2</span></span>
+                  <i class="fa-solid fa-check" aria-hidden="true"></i>
+                </button>
+              
+                <button type="button" role="option" aria-selected="false" class="en-src-i">
+                  <img class="avatar" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="" style="width: 32px; height: 32px;">
+                  <span class="stack" style="gap: 0; min-width: 0; flex: 1; text-align: left;"><span class="ell">PVSF2026R</span><span class="t-sm muted ell">2026.05 · 96枠 · 質問1</span></span>
+                  <i class="" aria-hidden="true"></i>
+                </button>
+              
+                <button type="button" role="option" aria-selected="false" class="en-src-i">
+                  <img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 32px; height: 32px;">
+                  <span class="stack" style="gap: 0; min-width: 0; flex: 1; text-align: left;"><span class="ell">年越し合作 2026</span><span class="t-sm muted ell">2025.12 · 枠なし · 質問0</span></span>
+                  <i class="" aria-hidden="true"></i>
+                </button>
+              
+            </div>
+            <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>設定・質問・部をコピーします。日程・枠・作品・スタッフはコピーしません。</p>
+          
+        </section>
+
+        
+        <section id="s-name" class="en-sec" aria-labelledby="h-name">
+          <h2 id="h-name" class="en-h">名前と見た目</h2>
+          <div class="en-ident">
+            <label class="en-icon" title="アイコン画像をドロップ、貼り付け、またはクリックで選択"><img src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt=""><span class="en-icon-ov"><i class="fa-solid fa-camera" aria-hidden="true"></i></span><input type="file" accept="image/*" hidden=""></label>
+            <div class="stack" style="gap: 6px; flex: 1; min-width: 0;">
+              <input class="en-title" value="PVSF2026A" placeholder="イベント名" aria-label="イベント名(必須)">
+              <span class="en-id t-sm"><span class="muted">flamenode.net/event/</span><span class="t-mono">PVSF2026A</span><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span>使用できます</span><button type="button" class="en-link">URLを変える</button></span>
+            </div>
+          </div>
+          <textarea class="en-desc" placeholder="ひとこと説明(例: 映像連続投稿祭)" aria-label="説明">映像連続投稿祭</textarea>
+          <div class="en-row"><span class="en-k">種別</span><div class="seg" role="radiogroup" aria-label="種別"><button type="button" role="radio" aria-checked="true" class="on">通常イベント</button><button type="button" role="radio" aria-checked="false" class="">コラボ</button><button type="button" role="radio" aria-checked="false" class="">タイプ別</button><button type="button" role="radio" aria-checked="false" class="">その他</button></div></div>
+          <div class="en-row"><span class="en-k">バナー</span><label class="drop en-banner" style="--acc: #d6ec8a;"><i class="fa-solid fa-panorama" aria-hidden="true"></i><span class="t-sm">画像をドロップ / 貼り付け / URLを入力(任意)</span><input type="file" accept="image/*" hidden=""></label></div>
+          <div class="en-row"><span class="en-k">アクセント</span>
+            <div class="row" style="gap: 6px; flex-wrap: wrap;">
+              <button type="button" class="en-sw on" style="background: #d6ec8a;" aria-label="アクセントカラー #d6ec8a" aria-pressed="true"></button><button type="button" class="en-sw" style="background: #f2c94c;" aria-label="アクセントカラー #f2c94c" aria-pressed="false"></button><button type="button" class="en-sw" style="background: #6fcf97;" aria-label="アクセントカラー #6fcf97" aria-pressed="false"></button><button type="button" class="en-sw" style="background: #56ccf2;" aria-label="アクセントカラー #56ccf2" aria-pressed="false"></button><button type="button" class="en-sw" style="background: #bb6bd9;" aria-label="アクセントカラー #bb6bd9" aria-pressed="false"></button><button type="button" class="en-sw" style="background: #eb5757;" aria-label="アクセントカラー #eb5757" aria-pressed="false"></button>
+              <span class="t-sm muted" style="padding-left: 6px;">アイコンから抽出</span>
+              <input class="dinput t-mono" style="width: 104px; height: 32px; font-size: 13px;" value="#d6ec8a" aria-label="カラーコード">
+            </div>
+          </div>
+        </section>
+
+        
+        <section id="s-date" class="en-sec" aria-labelledby="h-date">
+          <h2 id="h-date" class="en-h">日程</h2>
+          <div class="row" style="gap: 12px; flex-wrap: wrap; justify-content: space-between;">
+            <div class="seg" role="radiogroup" aria-label="カレンダーで選ぶ期間"><button type="button" role="radio" aria-checked="true" class="on"><span class="cal-sw e"></span>受付期間</button><button type="button" role="radio" aria-checked="false" class=""><span class="cal-sw h"></span>開催期間</button></div>
+            <span class="t-sm muted">受付の初日をクリック</span>
+          </div>
+          <p class="sch-sum">受付 10/10(土)–11/08(日)(30日間) → 開催 11/21(土)–11/22(日)(2日間)· 毎日 18:00–23:00</p>
+          <div class="cal-nav">
+            <button type="button" class="ib sm" aria-label="前の月" disabled=""><i class="fa-solid fa-chevron-left"></i></button>
+            <button type="button" class="ib sm" aria-label="次の月"><i class="fa-solid fa-chevron-right"></i></button>
+            <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" disabled="">今月</button>
+          </div>
+          <div class="cal-wrap">
+            
+              <div class="cal">
+                <span class="cal-m">2026年 10月</span>
+                <div class="cal-g">
+                  <span class="cal-hd">日</span><span class="cal-hd">月</span><span class="cal-hd">火</span><span class="cal-hd">水</span><span class="cal-hd">木</span><span class="cal-hd">金</span><span class="cal-hd">土</span>
+                  <button type="button" class="cal-d pad" disabled="" aria-label=""></button><button type="button" class="cal-d pad" disabled="" aria-label=""></button><button type="button" class="cal-d pad" disabled="" aria-label=""></button><button type="button" class="cal-d pad" disabled="" aria-label=""></button><button type="button" class="cal-d past" disabled="" aria-label="10月1日">1</button><button type="button" class="cal-d past" disabled="" aria-label="10月2日">2</button><button type="button" class="cal-d past" disabled="" aria-label="10月3日">3</button><button type="button" class="cal-d today sun" aria-label="10月4日">4</button><button type="button" class="cal-d" aria-label="10月5日">5</button><button type="button" class="cal-d" aria-label="10月6日">6</button><button type="button" class="cal-d" aria-label="10月7日">7</button><button type="button" class="cal-d" aria-label="10月8日">8</button><button type="button" class="cal-d" aria-label="10月9日">9</button><button type="button" class="cal-d in-e st" aria-label="10月10日">10</button><button type="button" class="cal-d in-e sun" aria-label="10月11日">11</button><button type="button" class="cal-d in-e" aria-label="10月12日">12</button><button type="button" class="cal-d in-e" aria-label="10月13日">13</button><button type="button" class="cal-d in-e" aria-label="10月14日">14</button><button type="button" class="cal-d in-e" aria-label="10月15日">15</button><button type="button" class="cal-d in-e" aria-label="10月16日">16</button><button type="button" class="cal-d in-e" aria-label="10月17日">17</button><button type="button" class="cal-d in-e sun" aria-label="10月18日">18</button><button type="button" class="cal-d in-e" aria-label="10月19日">19</button><button type="button" class="cal-d in-e" aria-label="10月20日">20</button><button type="button" class="cal-d in-e" aria-label="10月21日">21</button><button type="button" class="cal-d in-e" aria-label="10月22日">22</button><button type="button" class="cal-d in-e" aria-label="10月23日">23</button><button type="button" class="cal-d in-e" aria-label="10月24日">24</button><button type="button" class="cal-d in-e sun" aria-label="10月25日">25</button><button type="button" class="cal-d in-e" aria-label="10月26日">26</button><button type="button" class="cal-d in-e" aria-label="10月27日">27</button><button type="button" class="cal-d in-e" aria-label="10月28日">28</button><button type="button" class="cal-d in-e" aria-label="10月29日">29</button><button type="button" class="cal-d in-e" aria-label="10月30日">30</button><button type="button" class="cal-d in-e" aria-label="10月31日">31</button>
+                </div>
+              </div>
+            
+              <div class="cal">
+                <span class="cal-m">11月</span>
+                <div class="cal-g">
+                  <span class="cal-hd">日</span><span class="cal-hd">月</span><span class="cal-hd">火</span><span class="cal-hd">水</span><span class="cal-hd">木</span><span class="cal-hd">金</span><span class="cal-hd">土</span>
+                  <button type="button" class="cal-d in-e sun" aria-label="11月1日">1</button><button type="button" class="cal-d in-e" aria-label="11月2日">2</button><button type="button" class="cal-d in-e" aria-label="11月3日">3</button><button type="button" class="cal-d in-e" aria-label="11月4日">4</button><button type="button" class="cal-d in-e" aria-label="11月5日">5</button><button type="button" class="cal-d in-e" aria-label="11月6日">6</button><button type="button" class="cal-d in-e" aria-label="11月7日">7</button><button type="button" class="cal-d in-e en sun" aria-label="11月8日">8</button><button type="button" class="cal-d" aria-label="11月9日">9</button><button type="button" class="cal-d" aria-label="11月10日">10</button><button type="button" class="cal-d" aria-label="11月11日">11</button><button type="button" class="cal-d" aria-label="11月12日">12</button><button type="button" class="cal-d" aria-label="11月13日">13</button><button type="button" class="cal-d" aria-label="11月14日">14</button><button type="button" class="cal-d sun" aria-label="11月15日">15</button><button type="button" class="cal-d" aria-label="11月16日">16</button><button type="button" class="cal-d" aria-label="11月17日">17</button><button type="button" class="cal-d" aria-label="11月18日">18</button><button type="button" class="cal-d" aria-label="11月19日">19</button><button type="button" class="cal-d" aria-label="11月20日">20</button><button type="button" class="cal-d in-h st" aria-label="11月21日">21</button><button type="button" class="cal-d in-h en sun" aria-label="11月22日">22</button><button type="button" class="cal-d" aria-label="11月23日">23</button><button type="button" class="cal-d" aria-label="11月24日">24</button><button type="button" class="cal-d" aria-label="11月25日">25</button><button type="button" class="cal-d" aria-label="11月26日">26</button><button type="button" class="cal-d" aria-label="11月27日">27</button><button type="button" class="cal-d" aria-label="11月28日">28</button><button type="button" class="cal-d sun" aria-label="11月29日">29</button><button type="button" class="cal-d" aria-label="11月30日">30</button>
+                </div>
+              </div>
+            
+          </div>
+          <div class="stack" style="gap: 10px;">
+            <div class="prow"><span class="en-k"><span class="cal-sw e"></span>受付</span><input class="dinput t-num" value="2026/10/10 00:00" aria-label="募集開始日時"><span class="muted">→</span><input class="dinput t-num" value="2026/11/08 23:59" aria-label="募集終了日時"><span class="t-sm muted">30日間</span></div>
+            <div class="wrap-row en-pre" style="gap: 4px;"><span class="t-xs muted" style="margin-right: 4px;">受付終了</span><button type="button" class="chip sm">開催2週間前</button><button type="button" class="chip sm">開催1週間前</button><button type="button" class="chip sm">開催前日</button></div>
+            <div class="prow"><span class="en-k"><span class="cal-sw h"></span>開催</span><input class="dinput t-num" value="2026/11/21 18:00" aria-label="開始日時"><span class="muted">→</span><input class="dinput t-num" value="2026/11/22 23:00" aria-label="終了日時"><span class="t-sm muted">2日間</span></div>
+            <div class="tm-block" aria-labelledby="tm-h">
+              <div class="row" style="justify-content: space-between; gap: 12px; flex-wrap: wrap;"><span id="tm-h" class="t-label muted">開催時間(毎日)</span><span class="t-num">18:00 – 23:00 <span class="muted t-sm">· 5時間</span></span></div>
+              
+                <div class="tm-bar" role="group" aria-label="開催時間をクリックで選ぶ">
+                  <button type="button" class="tm-c tick" aria-label="12:00 から"></button><button type="button" class="tm-c" aria-label="12:30 から"></button><button type="button" class="tm-c" aria-label="13:00 から"></button><button type="button" class="tm-c" aria-label="13:30 から"></button><button type="button" class="tm-c" aria-label="14:00 から"></button><button type="button" class="tm-c" aria-label="14:30 から"></button><button type="button" class="tm-c tick" aria-label="15:00 から"></button><button type="button" class="tm-c" aria-label="15:30 から"></button><button type="button" class="tm-c" aria-label="16:00 から"></button><button type="button" class="tm-c" aria-label="16:30 から"></button><button type="button" class="tm-c" aria-label="17:00 から"></button><button type="button" class="tm-c" aria-label="17:30 から"></button><button type="button" class="tm-c on tick" aria-label="18:00 から"></button><button type="button" class="tm-c on" aria-label="18:30 から"></button><button type="button" class="tm-c on" aria-label="19:00 から"></button><button type="button" class="tm-c on" aria-label="19:30 から"></button><button type="button" class="tm-c on" aria-label="20:00 から"></button><button type="button" class="tm-c on" aria-label="20:30 から"></button><button type="button" class="tm-c on tick" aria-label="21:00 から"></button><button type="button" class="tm-c on" aria-label="21:30 から"></button><button type="button" class="tm-c on" aria-label="22:00 から"></button><button type="button" class="tm-c on" aria-label="22:30 から"></button><button type="button" class="tm-c" aria-label="23:00 から"></button><button type="button" class="tm-c" aria-label="23:30 から"></button><button type="button" class="tm-c tick" aria-label="翌0:00 から"></button><button type="button" class="tm-c" aria-label="翌0:30 から"></button><button type="button" class="tm-c" aria-label="翌1:00 から"></button><button type="button" class="tm-c" aria-label="翌1:30 から"></button><button type="button" class="tm-c" aria-label="翌2:00 から"></button><button type="button" class="tm-c" aria-label="翌2:30 から"></button><button type="button" class="tm-c tick" aria-label="翌3:00 から"></button><button type="button" class="tm-c" aria-label="翌3:30 から"></button><button type="button" class="tm-c" aria-label="翌4:00 から"></button><button type="button" class="tm-c" aria-label="翌4:30 から"></button><button type="button" class="tm-c" aria-label="翌5:00 から"></button><button type="button" class="tm-c" aria-label="翌5:30 から"></button>
+                </div>
+                <div class="tm-axis t-num"><span style="left: 0%;">12</span><span style="left: 16.666666666666664%;">15</span><span style="left: 33.33333333333333%;">18</span><span style="left: 50%;">21</span><span style="left: 66.66666666666666%;">翌0</span><span style="left: 83.33333333333334%;">翌3</span><span style="left: 100%;">翌6</span></div>
+              
+              
+              <div class="row" style="gap: 12px; justify-content: space-between; flex-wrap: wrap;"><span class="t-sm muted">開始の時刻をクリック(30分単位)</span></div>
+              <div class="wrap-row" style="gap: 4px;"><button type="button" class="chip sel sm">18:00–23:00</button><button type="button" class="chip sm">19:00–22:00</button><button type="button" class="chip sm">20:00–翌0:00</button><button type="button" class="chip sm">21:00–翌2:00</button></div>
+            </div>
+            <div class="en-row"><span class="en-k">受付の時刻</span>
+              <span class="row" style="gap: 8px; flex-wrap: wrap;"><span class="t-sm muted">開始</span><span class="seg sm" role="radiogroup" aria-label="受付開始時刻"><button type="button" role="radio" aria-checked="true" class="on">0:00</button><button type="button" role="radio" aria-checked="false" class="">12:00</button><button type="button" role="radio" aria-checked="false" class="">18:00</button></span>
+              <span class="t-sm muted" style="margin-left: 8px;">終了</span><span class="seg sm" role="radiogroup" aria-label="受付終了時刻"><button type="button" role="radio" aria-checked="false" class="">12:00</button><button type="button" role="radio" aria-checked="false" class="">21:00</button><button type="button" role="radio" aria-checked="true" class="on">23:59</button></span></span>
+            </div>
+            <span class="il t-sm"><i class="fa-solid fa-circle-check ok-ic" aria-hidden="true"></i>受付終了 11/08(日) は開催開始 11/21(土) より前です(12日空き)</span>
+            <span class="il t-sm muted"><i class="fa-solid fa-keyboard" aria-hidden="true"></i>時刻は「18時」「1830」のような短い入力でも読み取ります。</span>
+          </div>
+        </section>
+
+        
+        <section id="s-slot" class="en-sec" aria-labelledby="h-slot">
+          <h2 id="h-slot" class="en-h">枠</h2>
+          <div class="en-row"><span class="en-k">枠の種類</span>
+            <div class="stack" style="gap: 6px;">
+              <div class="seg" role="radiogroup" aria-label="枠タイプ"><button type="button" role="radio" aria-checked="true" class="on"><i class="fa-regular fa-clock" aria-hidden="true"></i>時間枠</button><button type="button" role="radio" aria-checked="false" class=""><i class="fa-solid fa-hashtag" aria-hidden="true"></i>件数枠</button></div>
+              <span class="t-sm muted">開始・終了時刻つきの枠です(例: 18:00–18:06)。</span>
+            </div>
+          </div>
+          <div class="en-row"><span class="en-k">1作品あたり</span><span class="stepper"><button type="button" aria-label="減らす"><i class="fa-solid fa-minus"></i></button><b>2 枠まで</b><button type="button" aria-label="増やす"><i class="fa-solid fa-plus"></i></button></span><span class="t-sm muted en-note">連続して使える枠数(上限 3)</span></div>
+          <div class="en-row"><span class="en-k">1人あたり</span><span class="stepper"><button type="button" aria-label="減らす"><i class="fa-solid fa-minus"></i></button><b>2 件まで</b><button type="button" aria-label="増やす"><i class="fa-solid fa-plus"></i></button></span><span class="t-sm muted en-note">1 X ID が確保できる件数(連続枠は1件)</span></div>
+          <div class="en-row"><span class="en-k">確保した人の表示</span>
+            <div class="stack" style="gap: 8px;">
+              <div class="seg" role="radiogroup" aria-label="確保者表示"><button type="button" role="radio" aria-checked="true" class="on">公開名</button><button type="button" role="radio" aria-checked="false" class="">匿名</button><button type="button" role="radio" aria-checked="false" class="">表示しない</button></div>
+              <span class="en-slotpv"><span class="t-mono t-sm muted">18:06</span><span>おたこ</span></span>
+            </div>
+          </div>
+          <div class="en-row"><span class="en-k">部</span>
+            <div class="stack" style="gap: 8px; flex: 1;">
+              <div class="wrap-row" style="gap: 4px;">
+                <span class="chip sel">1日目第1部<button type="button" class="chip-x" aria-label="1日目第1部 を削除"><i class="fa-solid fa-xmark"></i></button></span><span class="chip sel">1日目第2部<button type="button" class="chip-x" aria-label="1日目第2部 を削除"><i class="fa-solid fa-xmark"></i></button></span><span class="chip sel">2日目第1部<button type="button" class="chip-x" aria-label="2日目第1部 を削除"><i class="fa-solid fa-xmark"></i></button></span>
+                <button type="button" class="chip"><i class="fa-solid fa-plus" aria-hidden="true"></i>1日目第3部</button>
+              </div>
+              <span class="t-sm muted">開催日数から候補を出しています。枠どうしが 15 分以上空いたところで次の部に分かれます。</span>
+            </div>
+          </div>
+          <details class="en-more"><summary class="il t-sm muted"><i class="fa-solid fa-chevron-right dz-chev" aria-hidden="true"></i>細かい設定(枠の間隔・部の分割)</summary>
+            <div class="stack" style="gap: 12px; margin-top: 12px;">
+              <div class="en-row"><span class="en-k">枠どうしの間隔</span><div class="seg"><button type="button" class="on">自動判定</button><button type="button">指定する</button></div></div>
+              <div class="en-row"><span class="en-k">部を分ける空き</span><span class="stepper"><button type="button" aria-label="減らす"><i class="fa-solid fa-minus"></i></button><b>15 分以上</b><button type="button" aria-label="増やす"><i class="fa-solid fa-plus"></i></button></span></div>
+            </div>
+          </details>
+        </section>
+
+        
+        <section id="s-rule" class="en-sec" aria-labelledby="h-rule">
+          <h2 id="h-rule" class="en-h">参加のルール</h2>
+          <p class="sentence en-sent">投稿済みの作品をこのイベントに加えるのは
+            <span class="seg"><button type="button" class="on">運営の承認後</button><button type="button" class="">すぐにできる</button></span></p>
+          <p class="sentence en-sent">枠を取っていない作品の紐付けを
+            <span class="seg"><button type="button" class="on">許可しない</button><button type="button" class="">許可する</button></span></p>
+          <p class="sentence en-sent">作品の持ち主が編集できる範囲は
+            <span class="seg"><button type="button" class="on">既定のまま</button><button type="button" class="">項目ごとに決める</button></span></p>
+          
+        </section>
+
+        
+        <section id="s-form" class="en-sec" aria-labelledby="h-form">
+          <h2 id="h-form" class="en-h">投稿フォーム</h2>
+          <span class="t-label muted">必ず入力してもらう項目</span>
+          <div class="wrap-row" style="gap: 4px;">
+            <span class="chip sel" aria-disabled="true"><i class="fa-solid fa-lock" aria-hidden="true"></i>作品タイトル</span>
+            <span class="chip sel" aria-disabled="true"><i class="fa-solid fa-lock" aria-hidden="true"></i>YouTube URL</span>
+            <button type="button" class="chip sel" aria-pressed="true"><i class="fa-solid fa-check" aria-hidden="true"></i>アイコン</button><button type="button" class="chip" aria-pressed="false"><i class="fa-solid fa-id-card" aria-hidden="true"></i>自分・団体の概要</button><button type="button" class="chip" aria-pressed="false"><i class="fa-brands fa-youtube" aria-hidden="true"></i>YouTubeチャンネル</button><button type="button" class="chip sel" aria-pressed="true"><i class="fa-solid fa-check" aria-hidden="true"></i>部</button><button type="button" class="chip sel" aria-pressed="true"><i class="fa-solid fa-check" aria-hidden="true"></i>使用楽曲</button><button type="button" class="chip" aria-pressed="false"><i class="fa-solid fa-link" aria-hidden="true"></i>楽曲参考URL</button><button type="button" class="chip" aria-pressed="false"><i class="fa-solid fa-list" aria-hidden="true"></i>クレジット</button><button type="button" class="chip sel" aria-pressed="true"><i class="fa-solid fa-check" aria-hidden="true"></i>紹介コメント</button><button type="button" class="chip sel" aria-pressed="true"><i class="fa-solid fa-check" aria-hidden="true"></i>使用ソフト</button>
+          </div>
+          <span class="t-label muted" style="margin-top: 8px;">追加の質問 <span class="t-num">2 / 4</span></span>
+          <div class="stack" style="gap: 0;">
+            
+              <div class="en-q">
+                <span class="en-q-t"><i class="ms ms-radio_button_checked" aria-hidden="true"></i>ラジオボタン</span>
+                <input class="en-q-in" value="上映時の音量について" aria-label="質問名">
+                <button type="button" class="chip sel sm">必須</button>
+                <span class="seg sm"><button type="button" class="on" title="運営だけが見られます">審査用</button><button type="button" class="" title="投稿者と運営だけが見られます">非公開</button><button type="button" class="" title="作品ページに表示されます">公開</button></span>
+                <button type="button" class="ib sm" aria-label="質問を削除"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+            
+              <div class="en-q">
+                <span class="en-q-t"><i class="ms ms-short_text" aria-hidden="true"></i>記述式</span>
+                <input class="en-q-in" value="使用素材の出典" aria-label="質問名">
+                <button type="button" class="chip sm">必須</button>
+                <span class="seg sm"><button type="button" class="" title="運営だけが見られます">審査用</button><button type="button" class="" title="投稿者と運営だけが見られます">非公開</button><button type="button" class="on" title="作品ページに表示されます">公開</button></span>
+                <button type="button" class="ib sm" aria-label="質問を削除"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+            
+          </div>
+          <div class="wrap-row" style="gap: 4px;"><span class="t-sm muted" style="padding: 6px 4px 0 0;">追加:</span><button type="button" class="chip"><i class="ms ms-short_text" aria-hidden="true"></i>記述式</button><button type="button" class="chip"><i class="ms ms-notes" aria-hidden="true"></i>段落</button><button type="button" class="chip"><i class="ms ms-radio_button_checked" aria-hidden="true"></i>ラジオボタン</button><button type="button" class="chip"><i class="ms ms-check_box" aria-hidden="true"></i>チェックボックス</button><button type="button" class="chip"><i class="ms ms-arrow_drop_down_circle" aria-hidden="true"></i>プルダウン</button></div>
+          <span class="t-label muted" style="margin-top: 8px;">ステージ・権利確認 <span class="t-num">2 / 4</span></span>
+          <div class="stack" style="gap: 0;">
+            <div class="en-q"><span class="en-q-t"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>確認</span><input class="en-q-in" value="ステージ上映での使用を許可する" aria-label="確認項目"><button type="button" class="ib sm" aria-label="削除"><i class="fa-solid fa-xmark"></i></button></div><div class="en-q"><span class="en-q-t"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>確認</span><input class="en-q-in" value="使用素材の権利を確認した" aria-label="確認項目"><button type="button" class="ib sm" aria-label="削除"><i class="fa-solid fa-xmark"></i></button></div>
+          </div>
+          <span class="il t-sm muted"><i class="fa-solid fa-eye" aria-hidden="true"></i>右のプレビューで投稿画面の見え方を確認できます。概要欄テンプレートは作成後のイベント設定で編集します。</span>
+        </section>
+
+        
+        <section id="s-pub" class="en-sec" aria-labelledby="h-pub">
+          <h2 id="h-pub" class="en-h">公開</h2>
+          <div class="seg" role="radiogroup" aria-label="公開状態"><button type="button" role="radio" aria-checked="true" class="on"><i class="fa-solid fa-lock" aria-hidden="true"></i>非公開で作成</button><button type="button" role="radio" aria-checked="false" class=""><i class="fa-solid fa-globe" aria-hidden="true"></i>すぐに公開</button></div>
+          <span class="t-sm muted">作成後も公開ページには出ません。準備が整ってから公開できます。</span>
+          <ol class="en-next">
+            <li><span class="t-num muted">1</span>枠を生成する(開催日から候補を出します)</li>
+            <li><span class="t-num muted">2</span>スタッフを招待して権限を決める</li>
+            <li><span class="t-num muted">3</span>公開して受付を始める</li>
+          </ol>
+        </section>
+      </form>
+
+      
+      <aside class="en-pv" aria-label="プレビュー">
+        <div class="seg sm" role="tablist" aria-label="プレビュー"><button type="button" role="tab" class="on">イベントページ</button><button type="button" role="tab" class="">投稿画面</button></div>
+        
+          <div class="en-pv-banner" style="--acc: #d6ec8a;"></div>
+          <div class="row" style="gap: 12px; margin-top: -28px; padding: 0 4px; align-items: flex-end;"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 56px; height: 56px; box-shadow: 0 0 0 3px var(--bg);"><span class="st t-sm" style="padding-bottom: 4px;"><span class="dot"></span>非公開の下書き</span></div>
+          <span class="t-h3" style="display: block; margin-top: 10px;">PVSF2026A</span>
+          <span class="t-sm muted">映像連続投稿祭</span>
+          <dl class="kv en-kv"><dt>受付</dt><dd class="t-num">10/10(土) – 11/08(日)</dd><dt>開催</dt><dd class="t-num">11/21(土) 18:00 – 11/22(日) 23:00</dd><dt>枠</dt><dd>時間枠 · 1作品2枠 · 1人2件</dd><dt>参加</dt><dd>追加は承認制 · 枠なし不可</dd></dl>
+        
+        
+        <div class="en-todo">
+          <span class="t-label muted">作成できます</span>
+          
+        </div>
+        <button type="button" class="fn-btn fn-btn--primary" style="width: 100%; justify-content: center;"><i class="fa-solid fa-plus" aria-hidden="true"></i>イベントを作成</button>
+        <span class="t-sm muted" style="text-align: center; display: block;"><span class="kbd">Ctrl</span> + <span class="kbd">Enter</span> でも作成できます</span>
+      </aside>
+    </div>
+    
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

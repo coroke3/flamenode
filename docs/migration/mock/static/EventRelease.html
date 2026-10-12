@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>投稿予定 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /event/[id]/release / source: source/boards/EventRelease.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>
+body{margin:0;background:#000}
+@keyframes fn-tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.rl-item{display:grid;grid-template-columns:minmax(64px,80px) 72px 40px minmax(120px,200px) minmax(0,1fr) max-content;align-items:center;gap:16px;padding:12px 16px 4px}
+.rl-wrap:hover{background:var(--surface-subtle)}
+.rl-tickbox{overflow:hidden;white-space:nowrap;margin:4px 16px 12px;padding:4px 12px;background:var(--bg);font-size:13px;line-height:20px;color:var(--ink-muted)}
+.rl-tick{display:inline-block;white-space:nowrap;animation:fn-tick linear infinite}
+.rl-wrap:hover .rl-tick{animation-play-state:paused}
+.rl-tick .sp{display:inline-block;width:100px}
+.rl-tick a{color:var(--ink)}
+.rl-team{display:grid;grid-template-columns:48px minmax(0,1fr);gap:16px;align-items:start;padding:16px 0}
+.rl-team+.rl-team{margin-top:4px}
+.rl-team-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.rl-team-n{font-size:16px;line-height:24px}
+.rl-mem{margin-top:4px;font-size:14px;line-height:22px;color:var(--ink-muted)}
+.rl-m{color:var(--ink)}
+.rl-m:hover{text-decoration:underline}
+.rl-m:not(.last)::after{content:" / ";color:var(--ink-muted);white-space:pre}
+.rl-tile{position:relative;display:block;aspect-ratio:16/9;background-size:cover;background-position:center;overflow:hidden}
+.rl-tile .ov{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;padding:20px;background:rgba(16,18,15,.66);transition:background .3s}
+.rl-tile:hover .ov{background:rgba(16,18,15,.4)}
+.rl-tile .act{display:flex;gap:2px;opacity:0;transition:opacity .3s}
+.rl-tile:hover .act,.rl-tile:focus-within .act{opacity:1}
+@media (max-width:768px){.rl-item{grid-template-columns:52px minmax(0,1fr) auto;grid-template-areas:'t ti a' 't cr a';row-gap:2px;column-gap:12px;padding:10px 12px 4px}.rl-item>:nth-child(1){grid-area:t;text-align:left!important;font-size:16px!important}.rl-item>:nth-child(2),.rl-item>:nth-child(3){display:none}.rl-item>.c-cre{grid-area:cr;font-size:12px!important;color:var(--ink-muted)}.rl-item>:nth-child(5){grid-area:ti;font-size:15px!important}.rl-item>.c-act{grid-area:a}.rl-tickbox{margin:4px 12px 10px}}
+@media (prefers-reduced-motion:reduce){.rl-tick{animation:none}}
+</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+  <div class="dc-import" data-board="PublicHeader">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<header class="hd2" lang="ja">
+  <div class="hd-bar">
+    <a href="Main.html" class="hd-logo" aria-label="FlameNode トップ">
+      <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode">
+      <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode">
+    </a>
+    <nav class="hd-nav" aria-label="メインナビゲーション">
+      <a href="Videos.dc.html" aria-current="false">動画</a><a href="Creators.dc.html" aria-current="false">クリエイター</a><a href="Events.dc.html" aria-current="page">イベント</a>
+    </nav>
+    <div class="hd-right">
+      <label class="hd-search">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input type="search" placeholder="作品・クリエイターを検索" aria-label="検索" value="">
+        <kbd class="kbd hd-kbd">/</kbd>
+      </label>
+      <button type="button" class="ib hd-search-ic" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+      
+        <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <a href="MyPage.html" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
+        <button type="button" class="ib hd-me-d" aria-haspopup="menu" aria-label="アカウントメニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
+        <button type="button" class="ib hd-me-m" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
+      
+      
+      <button type="button" class="ib hd-burger" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニュー"><i class="fa-solid fa-bars"></i></button>
+    </div>
+  </div>
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  <nav class="hd-tabbar" aria-label="メインナビゲーション(スマホ)">
+    <a href="Videos.dc.html" aria-current="false" aria-label="動画" title="動画"><i class="fa-solid fa-film" aria-hidden="true"></i><span>動画</span></a><a href="Creators.dc.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.dc.html" aria-current="page" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
+  </nav>
+</header>
+</div>
+
+  <div class="wrap" style="padding-top: 48px; max-width: 1280px;">
+    <a href="EventDetail.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>PVSF2026S</a>
+    <h1 class="t-display" style="margin-top: 8px;">投稿予定</h1>
+
+    <div class="row" role="group" aria-label="表示切替" style="gap: 0; margin-top: 20px;">
+      <button type="button" class="ib on" aria-label="リスト表示" aria-pressed="true"><i class="fa-solid fa-bars"></i></button>
+      <button type="button" class="ib" aria-label="カード表示"><i class="fa-solid fa-image"></i></button>
+      <button type="button" class="ib" aria-label="作者別表示"><i class="fa-solid fa-user"></i></button>
+    </div>
+
+    
+      <div style="margin-top: 24px;">
+        
+          <section style="margin-bottom: 40px;">
+            <h2 class="rl-h"><span class="rl-hd t-num">11/03<span class="rl-dw">火</span></span><span class="rl-pt">第1部</span><span class="t-sm muted t-num">18:12 – 18:36 · 5作品</span></h2>
+            <div class="rl-body">
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:12</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user-group" aria-hidden="true"></i>複数人</span>
+                  <img class="avatar" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">幼虫 ほか</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">【幼虫アニメ】◯◯◯でしますか？◯でしますか？</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 43s;">
+                    <span>夏の終わりの記憶を6人でつなぎました。各パートの温度差も楽しんでください。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>幼虫 / おたこ / 新概念 / スティックのり / lalaClione / あいこーすふぃあ</span><span class="sp"></span><span>夏の終わりの記憶を6人でつなぎました。各パートの温度差も楽しんでください。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>幼虫 / おたこ / 新概念 / スティックのり / lalaClione / あいこーすふぃあ</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:18</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</span>
+                  <img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">おたこ</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">崇渦に関するお知らせ 前編</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 18s;">
+                    <span>光の残像をノードで描いた作品です。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>おたこ</span><span class="sp"></span><span>光の残像をノードで描いた作品です。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>おたこ</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:24</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</span>
+                  <img class="avatar" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">新概念</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">PVSF2026R</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 12s;">
+                    <span>—</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>新概念</span><span class="sp"></span><span>—</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>新概念</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:30</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user-group" aria-hidden="true"></i>複数人</span>
+                  <img class="avatar" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">スティックのり ほか</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">【文字PV】スチールワンダー / はるまきごはん</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 29s;">
+                    <span>合作メンバー募集から3か月、ようやく完成しました!</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>スティックのり / hato / てつどうふぁん</span><span class="sp"></span><span>合作メンバー募集から3か月、ようやく完成しました!</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>スティックのり / hato / てつどうふぁん</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:36</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</span>
+                  <img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">lalaClione</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">【サナドリウム/wiz_nicc】二次創作MV</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 24s;">
+                    <span>After Effects だけで作っています。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>lalaClione</span><span class="sp"></span><span>After Effects だけで作っています。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>lalaClione</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+            </div>
+          </section>
+        
+          <section style="margin-bottom: 40px;">
+            <h2 class="rl-h"><span class="rl-hd t-num">11/03<span class="rl-dw">火</span></span><span class="rl-pt">第2部</span><span class="t-sm muted t-num">20:00 – 20:00 · 1作品</span></h2>
+            <div class="rl-body">
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">20:00</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</span>
+                  <img class="avatar" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">hato</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">模範囚</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 12s;">
+                    <span>—</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>hato</span><span class="sp"></span><span>—</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>hato</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+            </div>
+          </section>
+        
+          <section style="margin-bottom: 40px;">
+            <h2 class="rl-h"><span class="rl-hd t-num">11/04<span class="rl-dw">水</span></span><span class="rl-pt">第1部</span><span class="t-sm muted t-num">18:12 – 18:30 · 4作品</span></h2>
+            <div class="rl-body">
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:12</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user-group" aria-hidden="true"></i>複数人</span>
+                  <img class="avatar" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">幼虫 ほか</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">【幼虫アニメ】◯◯◯でしますか？◯でしますか？</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 43s;">
+                    <span>夏の終わりの記憶を6人でつなぎました。各パートの温度差も楽しんでください。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>幼虫 / おたこ / 新概念 / スティックのり / lalaClione / あいこーすふぃあ</span><span class="sp"></span><span>夏の終わりの記憶を6人でつなぎました。各パートの温度差も楽しんでください。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>幼虫 / おたこ / 新概念 / スティックのり / lalaClione / あいこーすふぃあ</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:18</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</span>
+                  <img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">おたこ</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">崇渦に関するお知らせ 前編</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 18s;">
+                    <span>光の残像をノードで描いた作品です。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>おたこ</span><span class="sp"></span><span>光の残像をノードで描いた作品です。</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>おたこ</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:24</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</span>
+                  <img class="avatar" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">新概念</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">PVSF2026R</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 12s;">
+                    <span>—</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>新概念</span><span class="sp"></span><span>—</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>新概念</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+              <div class="rl-wrap" style="margin-bottom: 2px;">
+                <div class="rl-item">
+                  <span class="t-num" style="font-size: 18px; line-height: 24px; text-align: center;">18:30</span>
+                  <span class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-user-group" aria-hidden="true"></i>複数人</span>
+                  <img class="avatar" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 40px; height: 40px;">
+                  <span class="c-cre" style="font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">スティックのり ほか</span>
+                  <span style="font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">【文字PV】スチールワンダー / はるまきごはん</span>
+                  <span class="c-act row" style="gap: 2px; justify-content: flex-end;">
+                    <a href="https://www.youtube.com/" class="ib sm" aria-label="YouTube で視聴"><i class="fa-brands fa-youtube"></i></a>
+                    <a href="VideoDetail.html" class="ib sm" aria-label="作品の詳細"><i class="fa-solid fa-circle-info"></i></a>
+                  </span>
+                </div>
+                <div class="rl-tickbox">
+                  <span class="rl-tick" style="animation-duration: 29s;">
+                    <span>合作メンバー募集から3か月、ようやく完成しました!</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>スティックのり / hato / てつどうふぁん</span><span class="sp"></span><span>合作メンバー募集から3か月、ようやく完成しました!</span><span class="sp"></span><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>スティックのり / hato / てつどうふぁん</span><span class="sp"></span>
+                  </span>
+                </div>
+              </div>
+            
+            </div>
+          </section>
+        
+      </div>
+    
+
+    
+
+    
+  </div>
+  <div class="foot-spacer"></div>
+  <div class="dc-import" data-board="PublicFooter">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<footer class="pub-foot" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
+  <div style="display: flex; flex-direction: column; gap: 16px; flex: 1 1 240px;">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
+    <span style="color: var(--ink-muted); font-size: 13px;">© FlameNode</span>
+  </div>
+  <nav aria-label="見る" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="Videos.html" class="il">作品一覧</a>
+    <a href="Recommend.html" class="il">おすすめ</a>
+    <a href="Creators.html" class="il">クリエイター</a>
+    <a href="Events.html" class="il">イベント一覧</a>
+  </nav>
+  <nav aria-label="参加する" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="MyPage.html" class="il">投稿する</a>
+    <a href="MyPage.html" class="il">ダッシュボード</a>
+    <a href="EntrySignIn.html" class="il">ログイン / 新規登録</a>
+    <a href="About.html" class="il">イベント開催相談</a>
+  </nav>
+  <nav aria-label="FlameNode" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="About.html" class="il">FlameNode について</a>
+    <a href="Rules.html" class="il">利用規約</a>
+  </nav>
+</footer>
+</div>
+</div>
+
+</div>
+</body></html>

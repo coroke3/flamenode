@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>コストガード</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000} .mode{display:flex;flex-direction:column;gap:8px;padding:16px;background:var(--surface-raised);border:0;color:var(--ink-muted);text-align:left;font:inherit;cursor:pointer} .mode.on{background:var(--surface-active);color:var(--ink)} .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 12px/20px var(--font-sans);cursor:pointer} .chip.on{background:var(--ink);color:var(--bg)}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="AdminNav" active="costguard" hint-size="100%,1240px"></dc-import></div>
+  <main class="c-main">
+    <div class="c-head"><div><h1 class="t-display">コストガード</h1><p class="muted">実測collectorがないため、自動判定は行わず、手動モードと15分限定の緊急解除だけを管理します。</p></div></div>
+
+    <section aria-labelledby="mode">
+      <h2 id="mode" class="t-h3" style="margin-bottom: 12px;">手動動作モード</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 2px;" role="radiogroup" aria-label="動作モード">
+        <sc-for list="{{modes}}" as="m" hint-placeholder-count="4">
+          <button type="button" role="radio" aria-checked="{{m.checked}}" class="{{m.cls}}" onClick="{{m.pick}}"><i class="{{m.icon}}" aria-hidden="true" style="font-size: 18px;"></i><span style="color: var(--ink);">{{m.label}}</span><span class="t-sm">{{m.desc}}</span></button>
+        </sc-for>
+      </div>
+      <div class="row" style="gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+        <x-import component-from-global-scope="FlameNode.TextField" aria-label="変更理由" placeholder="変更理由(normalへの復帰時も必須)" style="flex: 1 1 320px;"></x-import>
+        <button type="button" class="fn-btn fn-btn--primary"><i class="fa-solid fa-check" aria-hidden="true"></i>モードを更新</button>
+      </div>
+      <div class="row" style="gap: 12px; margin-top: 16px; padding: 14px 16px; background: var(--surface-subtle); flex-wrap: wrap;">
+        <i class="fa-solid fa-screwdriver-wrench" aria-hidden="true" style="color: var(--danger);"></i>
+        <span class="stack" style="flex: 1;"><span>メンテナンス即時切替</span><span class="t-sm muted">全機能を停止し、メンテナンス画面に誘導します</span></span>
+        <span style="flex: 1 1 240px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="設定または解除の理由" placeholder="設定または解除の理由(必須)"></x-import></span>
+        <button type="button" class="fn-btn fn-btn--danger fn-btn--sm">メンテナンスモードをONにする</button>
+      </div>
+    </section>
+
+    <div class="split c-sec">
+      <section class="main" aria-labelledby="dis">
+        <h2 id="dis" class="t-h3" style="margin-bottom: 4px;">恒久的な無効化機能</h2>
+        <p class="t-sm muted" style="margin: 0 0 12px;">選んだ機能を無効化します(空なら全て有効)</p>
+        <div class="wrap-row" style="gap: 4px;">
+          <sc-for list="{{features}}" as="f" hint-placeholder-count="20"><button type="button" class="{{f.cls}}" aria-pressed="{{f.on}}">{{f.name}}</button></sc-for>
+        </div>
+        <div class="row" style="gap: 8px; margin-top: 12px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="変更理由" placeholder="変更理由(必須)" style="flex: 1;"></x-import><button type="button" class="fn-btn fn-btn--secondary"><i class="fa-solid fa-check" aria-hidden="true"></i>適用</button></div>
+      </section>
+      <aside class="side stack" style="gap: 12px;" aria-labelledby="ov">
+        <h2 id="ov" class="t-h3">15分限定の緊急解除</h2>
+        <label class="field"><span>対象機能(最大8件)</span><span class="sel-i"><i class="fa-solid fa-list-check" aria-hidden="true"></i><select class="select i"><option>枠の確保</option><option>作品の編集</option></select></span></label>
+        <x-import component-from-global-scope="FlameNode.TextField" aria-label="override理由" placeholder="override理由(必須)"></x-import>
+        <x-import component-from-global-scope="FlameNode.TextField" aria-label="確認" placeholder="有効化は OVERRIDE、解除は CLEAR"></x-import>
+        <div class="row" style="gap: 2px;"><button type="button" class="fn-btn fn-btn--secondary">15分有効化</button><button type="button" class="fn-btn fn-btn--tertiary"><i class="fa-solid fa-xmark" aria-hidden="true"></i>即時解除</button></div>
+      </aside>
+    </div>
+
+    <section class="c-sec" aria-labelledby="hist">
+      <h2 id="hist" class="t-h3" style="margin-bottom: 8px;">変更履歴</h2>
+      <div class="dt" style="--cols: 120px 120px minmax(200px,1fr); --minw: 0px;">
+        <div class="dt-h"><span>日時</span><span>実行者</span><span>変更キー</span></div>
+        <div class="dt-r"><span class="t-num muted">09.30 23:10</span><span>Mochi</span><span class="t-mono">mode: eco → normal</span></div>
+        <div class="dt-r"><span class="t-num muted">09.30 20:00</span><span>Mochi</span><span class="t-mono">mode: normal → eco</span></div>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { mode: 'normal' }; }
+  renderVals() {
+    const M = [['normal', '通常', '全機能をフル稼働。', 'fa-solid fa-circle-check'], ['eco', '省エネ', '重い検索や推薦の更新間隔を緩める。', 'fa-solid fa-leaf'], ['readonly', '読み取り専用', '投稿・更新・通知系を停止し、閲覧のみを許可する。', 'fa-solid fa-book-open'], ['static', '静的のみ', '静的 JSON ベースの閲覧のみ提供する。', 'fa-solid fa-file-code']];
+    const F = ['枠なし作品の投稿', '枠付き作品の投稿', '作品の編集', 'いいね・ブックマーク', 'チャプターコメント', '枠の確保', '枠の解放', 'X ID連携', '連続枠の分割', '連続枠の拡張', '連続枠の結合', 'ユーザー権限管理', 'ユーザー停止', '通知管理', 'ユーザーのイベント作成', 'イベント作成', 'Xアイコン再計算', '規約作成', '規約更新', '規約公開', '規約アーカイブ', '規約通知', 'モデレーション作成', 'モデレーション更新', 'お知らせ配信', '作品ステータス管理', 'APIエンドポイント管理', 'イベントテンプレート管理', '権限管理', 'YouTube同期', '通知管理(管理者)', '静的データ再生成', '合作編集権限', '管理スプレッドシート', 'イベント更新', 'イベントアーカイブ', '枠作成', '枠更新', '枠削除', 'イベントスタッフ管理', '作品ステータス(運営)'];
+    const m = this.state.mode;
+    return {
+      theme: this.props.theme ?? 'dark',
+      modes: M.map((x) => ({ label: x[1], desc: x[2], icon: x[3], cls: x[0] === m ? 'mode on' : 'mode', checked: x[0] === m ? 'true' : 'false', pick: () => this.setState({ mode: x[0] }) })),
+      features: F.map((n) => ({ name: n, cls: n === 'Xアイコン再計算' ? 'chip on' : 'chip', on: n === 'Xアイコン再計算' ? 'true' : 'false' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

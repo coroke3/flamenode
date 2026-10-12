@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DBスプレッドシート — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /admin/spreadsheet / source: source/boards/AdminSpreadsheet.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="AdminNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">管理</span><span class="ell">DBスプレッドシート</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">管理</span>
+  </div>
+  <div class="row" style="gap: 2px; padding: 0 12px 8px;">
+    <a href="Manage.html" class="ib sm" style="padding: 0;" aria-label="運営へ"><i class="fa-solid fa-clipboard-list"></i></a>
+    <a href="Main.html" class="ib sm" style="padding: 0;" aria-label="公開サイトへ"><i class="fa-solid fa-globe"></i></a>
+    <span style="flex: 1;"></span>
+    <button type="button" class="ib sm" style="padding: 0;" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+  </div>
+  
+    <span class="grp">概要</span>
+    
+      <a href="Admin.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true" style="width: 16px; text-align: center;"></i>ダッシュボード</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">対応</span>
+    
+      <a href="AdminVideosHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true" style="width: 16px; text-align: center;"></i>作品</span>
+        <span class="n">12</span>
+      </a>
+    
+      <a href="AdminUsersHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-users" aria-hidden="true" style="width: 16px; text-align: center;"></i>ユーザー / X ID</span>
+        <span class="n">4</span>
+      </a>
+    
+      <a href="AdminModeration.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-flag" aria-hidden="true" style="width: 16px; text-align: center;"></i>モデレーション</span>
+        <span class="n">2</span>
+      </a>
+    
+  
+    <span class="grp">サイト</span>
+    
+      <a href="AdminEventsHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-calendar-days" aria-hidden="true" style="width: 16px; text-align: center;"></i>イベント</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAnnouncements.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bullhorn" aria-hidden="true" style="width: 16px; text-align: center;"></i>お知らせ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminRules.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-scale-balanced" aria-hidden="true" style="width: 16px; text-align: center;"></i>規約</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">運用</span>
+    
+      <a href="AdminNotifications.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true" style="width: 16px; text-align: center;"></i>通知配信</span>
+        <span class="n">1</span>
+      </a>
+    
+      <a href="AdminHealthHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-monitor_heart" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働状況</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminStaticBuilds.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-code" aria-hidden="true" style="width: 16px; text-align: center;"></i>静的JSON再生成</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminYoutubeQuota.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-chart-pie" aria-hidden="true" style="width: 16px; text-align: center;"></i>YouTube クォータ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminCostGuard.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-gauge-high" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働モード</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAuditHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true" style="width: 16px; text-align: center;"></i>監査ログ</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">高度な管理</span>
+    
+      <a href="AdminSecurity.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-shield-halved" aria-hidden="true" style="width: 16px; text-align: center;"></i>セキュリティ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminPermSim.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-key" aria-hidden="true" style="width: 16px; text-align: center;"></i>権限シミュレーター</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminApi.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-plug" aria-hidden="true" style="width: 16px; text-align: center;"></i>公開API</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminImport.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-import" aria-hidden="true" style="width: 16px; text-align: center;"></i>旧形式インポート</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminSpreadsheet.dc.html" class="on" aria-current="page">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-table" aria-hidden="true" style="width: 16px; text-align: center;"></i>DBスプレッドシート</span>
+        <span class="n"></span>
+      </a>
+    
+  
+</nav>
+</div></div>
+  <main class="c-main" style="max-width: none;">
+    <div class="c-head"><div><h1 class="t-display">DB スプレッドシート</h1><p class="muted">D1 の管理対象テーブルを表形式で閲覧します。認証・権限・システム系は読み取り専用、コンテンツ系のみ緊急時の編集ができます。変更は audit_logs に記録され、認証トークン列はマスク表示です。</p></div></div>
+
+    
+
+    
+    <div style="display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 24px; align-items: start;">
+      <nav aria-label="テーブル一覧" class="stack" style="gap: 16px;">
+        <div class="row" style="justify-content: space-between;"><span class="t-label muted">テーブル一覧</span><button type="button" class="ib sm" aria-label="DB のテーブル一覧を再取得(マイグレーション後)"><i class="fa-solid fa-rotate"></i></button></div>
+        
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">認証</span>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">ユーザー</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">OAuth アカウント</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">セッション</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">検証トークン</span>
+              </button>
+            
+          </div>
+        
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">X ID</span>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">X ID</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">X ID エイリアス</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">X ID申請</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">X名義・認証ユーザー紐付け</span>
+              </button>
+            
+          </div>
+        
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">イベント</span>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">イベントグループ</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">イベント</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">イベントスタッフ</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">枠</span>
+              </button>
+            
+          </div>
+        
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">作品</span>
+            
+              <button type="button" class="tl on">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">作品</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">YouTube メタ</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">モデレーション</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">作品×イベント</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">作品メンバー</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">チャプター</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">インタラクション</span>
+              </button>
+            
+          </div>
+        
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">マスタ</span>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">ソフトカタログ</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">ソフト別名</span>
+              </button>
+            
+          </div>
+        
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">公開</span>
+            
+              <button type="button" class="tl">
+                <i class="ms ms-view_timeline" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">お知らせ</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">利用規約</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">規約同意</span>
+              </button>
+            
+          </div>
+        
+          <div class="stack" style="gap: 0;">
+            <span class="t-sm muted" style="padding: 4px 0;">システム</span>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">通知 outbox</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">監査ログ</span>
+              </button>
+            
+              <button type="button" class="tl">
+                <i class="fa-solid fa-lock" aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--ink-muted);"></i><span style="flex: 1;">システム設定</span>
+              </button>
+            
+          </div>
+        
+      </nav>
+
+      <section class="stack" style="gap: 8px; min-width: 0; position: relative;">
+        <div class="row" style="gap: 12px; flex-wrap: wrap;">
+          <span class="t-h3">作品</span><span class="t-mono t-sm muted">videos</span>
+          <span class="il t-sm muted"><i class="fa-solid fa-pen" aria-hidden="true"></i>編集可</span>
+          <span style="flex: 1;"></span>
+          <span class="field-i sm-field" style="width: 200px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" arialabel="検索" placeholder="検索"></div></div></div></span>
+          <span class="row" style="gap: 0;">
+            <button type="button" class="ib sm" aria-label="元に戻す"><i class="fa-solid fa-rotate-left"></i></button>
+            <button type="button" class="ib sm" aria-label="やり直す"><i class="fa-solid fa-rotate-right"></i></button>
+            <button type="button" class="ib sm" aria-label="行を追加"><i class="fa-solid fa-plus"></i></button><button type="button" class="ib sm" aria-label="CSV / TSV を貼り付けて取り込み"><i class="fa-solid fa-paste"></i></button>
+            <button type="button" class="ib sm" aria-label="全行を CSV でダウンロード(上限あり)"><i class="fa-solid fa-file-csv"></i></button>
+            <button type="button" class="ib sm" aria-label="全行を TSV でダウンロード(上限あり)"><i class="fa-solid fa-file-arrow-down"></i></button>
+            <button type="button" class="ib sm" aria-label="再読込"><i class="fa-solid fa-arrows-rotate"></i></button>
+            <button type="button" class="ib sm" aria-label="全画面"><i class="fa-solid fa-expand"></i></button>
+          </span>
+        </div>
+
+        <div class="row" style="gap: 0; background: var(--surface-subtle); height: 32px;">
+          <span class="t-mono t-sm" style="width: 72px; padding: 0 12px; color: var(--ink-muted);" aria-label="セル参照">G3</span>
+          <span class="t-sm ell" style="flex: 1; padding: 0 12px;" aria-label="セルの値">スチールワンダー</span>
+          
+        </div>
+
+        <div class="t-scroll">
+          <div class="dt" style="--cols: 40px 150px 110px 90px 160px minmax(220px,1.4fr) 150px 120px 110px; --minw: 1150px; font-size: 13px;">
+            <div class="dt-h"><span class="num">#</span><span>id <i class="fa-solid fa-key" aria-hidden="true" style="font-size: 9px;"></i></span><span>primary_event_id</span><span>collaboration_type</span><span>creator_display_name</span><span>title</span><span>music</span><span>credit</span><span>visibility_status</span></div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">1</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a01</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">individual</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">幼虫</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">【幼虫アニメ】◯◯◯でしますか？◯でしますか？</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">おしりでしますか？前でしますか？</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">◯◯</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">2</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a02</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">collab</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">空白合作チーム</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">空白合作</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">ホワイトスペースにおいで</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">椎野乃々</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">3</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a03</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">individual</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">スティックのり</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">【文字PV】スチールワンダー / はるまきごはん - スティックのり【#PVSF2026Sp】</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: var(--surface-active); outline: 1px solid var(--ink-muted); outline-offset: -1px;">スチールワンダー</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">はるまきごはん</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">4</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a04</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">collab</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">おゆする</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">おゆする合作</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">typing</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">ariiol</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">5</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a05</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">individual</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">hato</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">模範囚</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">模範囚</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">黄昏</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">6</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a06</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">individual</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">lalaClione(ララクリオネ)</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">【サナドリウム/wiz_nicc】二次創作MV</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">サナドリウム</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">wiz_nicc</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">7</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a07</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">individual</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">てつどうふぁん</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">【鉄道PV・てつどうふぁんMV●第23弾】未来線～ミライン～</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">未来線～ミライン～</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">Suno(AI)で生成</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+              <div class="dt-r" style="min-height: 36px; padding-top: 0; padding-bottom: 0;">
+                <span class="num muted">8</span>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent; font-family: var(--font-mono, monospace);">vid_7f2a08</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">PVSF2026Sp</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">individual</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">あいこーすふぃあ</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">個々々々々々人 / Sohbana</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">個々々々々々人</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">Sohbana</button>
+                
+                  <button type="button" class="ell" style="height: 36px; border: 0; text-align: left; font: inherit; color: inherit; cursor: cell; padding: 0 8px; margin: 0 -8px; background: transparent;">public</button>
+                
+              </div>
+            
+          </div>
+        </div>
+
+        
+          <div class="raised stack ctxmenu" role="menu" aria-label="セル操作" style="top: 248px;">
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-solid fa-pen" aria-hidden="true"></i><span style="flex: 1;">編集</span><kbd class="kbd">F2</kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-regular fa-copy" aria-hidden="true"></i><span style="flex: 1;">コピー</span><kbd class="kbd">Ctrl+C</kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-solid fa-scissors" aria-hidden="true"></i><span style="flex: 1;">切り取り</span><kbd class="kbd">Ctrl+X</kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-regular fa-paste" aria-hidden="true"></i><span style="flex: 1;">貼り付け</span><kbd class="kbd">Ctrl+V</kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-solid fa-eraser" aria-hidden="true"></i><span style="flex: 1;">クリア</span><kbd class="kbd">Delete</kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i><span style="flex: 1;">下にフィル</span><kbd class="kbd">Ctrl+D</kbd></button>
+            
+              <span class="ctx-sep"></span>
+              
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-solid fa-plus" aria-hidden="true"></i><span style="flex: 1;">下に行を挿入…</span><kbd class="kbd"></kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-regular fa-clone" aria-hidden="true"></i><span style="flex: 1;">行を複製して挿入…</span><kbd class="kbd"></kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-regular fa-trash-can" aria-hidden="true"></i><span style="flex: 1;">行を削除</span><kbd class="kbd"></kbd></button>
+            
+              <span class="ctx-sep"></span>
+              
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><span style="flex: 1;">元に戻す</span><kbd class="kbd">Ctrl+Z</kbd></button>
+            
+              
+              <button type="button" role="menuitem" class="tl"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i><span style="flex: 1;">やり直す</span><kbd class="kbd">Ctrl+Shift+Z</kbd></button>
+            
+          </div>
+        
+        <div class="row t-sm muted" style="gap: 16px; justify-content: space-between;">
+          <span class="t-num">622 行 · 選択 music (text)</span>
+          <span class="row" style="gap: 4px;"><button type="button" class="ib sm" aria-label="前のページ"><i class="fa-solid fa-chevron-left"></i></button><span class="t-num">1 / 2 ページ · 500行/ページ</span><button type="button" class="ib sm" aria-label="次のページ"><i class="fa-solid fa-chevron-right"></i></button></span>
+        </div>
+      </section>
+    </div>
+    
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>
