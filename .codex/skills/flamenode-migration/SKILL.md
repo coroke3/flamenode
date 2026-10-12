@@ -7,28 +7,16 @@ description: Continue the FlameNode Next/OpenNext migration safely. Use for plat
 
 This is a thin adapter. Do not duplicate or reinterpret the migration specification here.
 
-Read and follow, in order:
+Start with `AGENTS.md` and `docs/migration/MIGRATION_START_HERE.md`. Follow the relevant sections of `docs/migration/AGENT_PROTOCOL.md`, `GIT_WORKFLOW.md`, `IMPLEMENTATION_RUNBOOK.md`, `OPEN_DECISIONS.md`, one MIG card and CURRENT source/tests. Read only affected portions of `FEATURE_CATALOG.md`, `FUNCTION_INVENTORY.md`, route/API matrices and subsystem baselines.
 
-1. `AGENTS.md`
-2. `docs/migration/AGENT_PROTOCOL.md`
-2a. `docs/migration/IMPLEMENTATION_RUNBOOK.md` and one current `docs/migration/TASK_CARDS_*.md` card
-2b. `docs/migration/OPEN_DECISIONS.md`
-3. `docs/migration/README.md`
-4. `docs/migration/STATUS.md`
-5. `docs/migration/FEATURE_CATALOG.md`
-6. `docs/migration/FUNCTION_INVENTORY.md`
-7. the relevant route/API matrix and target code/tests; for screen/UI/route work also read `docs/migration/screen-mapping/README.md`; for Cloudflare Worker/ingress/binding/build/job work also read `docs/migration/cloudflare/TOPOLOGY.md`; for CPU/1102/request/PoC performance work also read `docs/migration/cloudflare/PERFORMANCE_BASELINE.md`; for auth/session/linking/terms/Active X/permission/owner work also read `docs/migration/auth/README.md`; for Queue/Cron/background job/retry/DLQ/recovery work also read `docs/migration/background-jobs/README.md`; for static artifact/alias/visibility/fallback/repair work also read `docs/migration/static-delivery/README.md`
+One invocation processes at most one READY MIG task or one of its bounded micro-units. Re-read latest main, open migration PRs and the owning PR checkpoint before claiming. Resume the same owner PR; never create a duplicate.
 
-Execute **exactly one READY MIG task** per invocation.
-
-Before coding, claim the task in `STATUS.md` as `IN_PROGRESS` and record `Owner: codex`.
-At the end, move it to `DONE`, `REVIEW`, or `BLOCKED`; never leave it `IN_PROGRESS`.
+Checkpoint policy: `WORK_ITEM_ONLY`.
+Record `Owner: codex`, scope, current unit, actual tests, source SHA, rollback and next unit in the owner PR's `docs/migration/work-items/MIG-XXXX.md`. Ordinary implementation wakes do not edit `STATUS.md`.
+Incomplete but healthy work remains `IN_PROGRESS` with a durable checkpoint. Mark `REVIEW` only after all units pass; record blockers and recovery conditions as `BLOCKED`. After independent review and required CI/approval, reconcile the task's DONE/next READY in `STATUS.md` against latest main immediately before squash merge.
 
 Do not auto-cross a Phase Gate or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.
 
 When UI redesign is involved, feature parity is mandatory: use `FUNCTION_INVENTORY.md` and do not treat visual completion as functional completion.
 
-For repeated autonomous execution, each iteration still equals exactly one MIG task and must persist all progress to repository Markdown before continuing.
-
-
-Open PR live state: `docs/migration/work-items/MIG-XXXX.md` is updated each wake. `STATUS.md` is the merged task/dependency summary and is updated only at merge integration. See `GIT_WORKFLOW.md`.
+For repeated execution, persist the checkpoint before returning. This skill creates no scheduler; the next external wake re-reads the merged state. Missing independent review or approval is a stop, not permission to auto-merge.
