@@ -23,7 +23,8 @@
 | cross-model live smoke acceptance | `docs/migration/SMALL_MODEL_SMOKE_TEST.md` |
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
 | migration code quality | `docs/migration/CODE_QUALITY.md` |
-| current phase / task / owner / dependency state | `docs/migration/STATUS.md` |
+| current phase / merged task / dependency state | `docs/migration/STATUS.md` |
+| active PR owner / per-wake checkpoints | `docs/migration/work-items/MIG-XXXX.md`（format: `work-items/README.md`） |
 | CURRENT page route実装・分類 | `docs/migration/CURRENT_ROUTES.md` |
 | 既存機能の全件一覧（人間向け派生ビュー） | `docs/migration/FEATURE_CATALOG.md` |
 | frontend observable capabilities | `docs/migration/FRONTEND_FEATURES.md` + `docs/migration/frontend/*.md` |
@@ -82,7 +83,7 @@
 - `auth/README.md` owns CURRENT Auth.js/session/linking/terms/Active X/event-video authorization/owner-invariant semantics.
 - `background-jobs/README.md` owns CURRENT Queue doorbell/Cron/D1 work-state/retry/DLQ/recovery/idempotency/async-state semantics.
 - `CODE_QUALITY.md` owns implementation quality standards.
-- `STATUS.md` is the only progress/task-state source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`.
+- `STATUS.md` is the only **merged** task/Phase/dependency source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`. Live per-wake ownership is isolated in the task PR's `work-items/MIG-XXXX.md` and does not substitute for the merged graph.
 - `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.
 - Do not duplicate exact schema columns, binding IDs, API fields, or long command lists across docs.
 - If migration changes CURRENT production behavior, update the relevant Active CURRENT document in the same change before task DONE.

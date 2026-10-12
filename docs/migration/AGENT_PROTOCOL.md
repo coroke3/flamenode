@@ -1,7 +1,7 @@
 # FlameNode Migration Agent Protocol
 
 > Status: Active / mandatory execution contract
-> Last verified: 2026-10-07
+> Last verified: 2026-10-12
 > Applies to: Claude Code / OpenAI Codex / Google Antigravity / generic coding agents
 
 ツール固有command/skill/workflowは薄いadapterであり、この文書が共通実行契約。
@@ -18,7 +18,7 @@
 ### OpenAI Codex
 
 `.codex/skills/flamenode-migration/SKILL.md` を利用する。
-継続実行でもrepositoryの`STATUS.md`を進捗正本にする。
+継続実行では`STATUS.md`をmainにmerge済みのtask/Phase/依存関係正本、open PR branchの`work-items/MIG-XXXX.md`を作業中のcheckpoint正本として扱う。
 
 ### Google Antigravity
 
@@ -44,7 +44,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 
 1. `AGENTS.md`
 2. `docs/AI_CONTEXT.md` のmigration entry
-3. `docs/migration/STATUS.md`
+3. `docs/migration/STATUS.md`（main） + open migration PR + 該当PR branchの`docs/migration/work-items/MIG-XXXX.md`
 3a. `docs/migration/OPEN_DECISIONS.md`（対象taskに紐づくDecision状態を必ず確認）
 3b. **`docs/migration/IMPLEMENTATION_RUNBOOK.md`**（Luna/Haiku含む全agent必読）
 3b1. **`docs/migration/FILE_PROGRESS_PROTOCOL.md` と `FILE_MIGRATION_MATRIX.md` の現在のMIGに属するファイル行だけ**（source→target→consumerと各ファイル状態を記録する）
@@ -301,19 +301,20 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 
 # Progress persistence
 
-`STATUS.md`が唯一のtask進捗正本。
+`STATUS.md`はmerge済みtask/dependency/Phaseの正本。各wakeの実行状態はtask固有`work-items/MIG-XXXX.md`とopen PRへ記録し、実装途中にSTATUSを編集しない。
 
 終了時は単一wakeの作業結果を必ずPRへ保存する。
 
 - 1wakeで全micro-unitが完了した場合: `REVIEW`（別レビュアー/CI待ち）、合格後`DONE`。
 - 未解決障害がある場合: `BLOCKED`（再開条件とowner記載）。
-- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのbranch `STATUS.md`に `IN_PROGRESS` を維持してよい。ただし有効owner、実行済みunit、テスト、次unit、PR link、HEADを必ず記録する（`TASK_MICRO_UNITS.md`）。mainのREADYを勝手に変更しない。
+- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのbranch `work-items/MIG-XXXX.md`に `IN_PROGRESS`、owner、実行済みunit、テスト、次unit、PR link、実在する直前のsource Head SHAを必ず記録する（`TASK_MICRO_UNITS.md`）。mainのREADYは変えない。
 
 何のチェックポイントもない`IN_PROGRESS`の放置は禁止。
 
 必要に応じて同じPRで更新:
 
-- `STATUS.md`
+- `work-items/MIG-XXXX.md`（毎wake）
+- `STATUS.md`（レビュー・CI後、merge直前に最新mainとの整合を確認した場合のみ）
 - `CURRENT_ROUTES.md`
 - `FRONTEND_FEATURES.md` / `frontend/*.md`
 - `FUNCTION_INVENTORY.md` / `functions/*.md`
@@ -322,7 +323,7 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
-通常taskはtask DONE + next dependency-ready task READYまで同じPRへ記録してsquash mergeする。
+通常taskは独立review後、work-itemのDONE証拠とSTATUSの当該task DONE + 依存解消した次task READYを最新mainに合わせて同じPRへ記録し、CI/必要な承認後にsquash mergeする。
 
 ---
 
@@ -333,7 +334,7 @@ repository/PRだけを共有状態の正本にする。
 - 1 task = 1 writer
 - Claude/Codex/Antigravityを同じtaskへ同時writerにしない
 - 他agentはreview/audit/test analysisへ回す
-- STATUS/同一ledger行/core permission/auth/schemaの同時編集を避ける
+- 同一work-item/台帳行/core permission/auth/schemaの同時編集を避ける。STATUSはmerge直前の統合時だけ編集する
 
 Handoffはrepoへ残す:
 
@@ -362,7 +363,7 @@ LOOP:
   implement or audit
   optimize only within preservation contract
   validate code quality + behavior
-  persist STATUS + ledgers/matrices
+  persist task-specific work-item + touched ledgers/matrices; STATUS only at integration
   evaluate stop conditions
 ```
 
@@ -466,7 +467,7 @@ Next:
 
 # Resumable loop / PR lifecycle contract（2026-10-09追補）
 
-1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、branch STATUSのcheckpointから再開する。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch STATUSを優先し、新しいtask/PRを生成しない。
+1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、branch work-item checkpointのcheckpointから再開する。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch work-item checkpointを優先し、新しいtask/PRを生成しない。
 2. `OPEN_DECISIONS.md`の`Needed by`相当のMIG依存を解釈し、該当タスクについて`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`を「許可済み」と解釈しない。決定の証拠（decision ID / owner / date）をPRへ記録する。
 3. task claimはGitHubの単一atomic transactionではない。draft PRを作成する前後で同一MIGのopen PRを照合し、重複したら作業せずowner調整へ止める。mainの`READY`のみで未所有とみなさない。
 4. 実装は一taskずつ、大型MIGは1wakeにつき1micro-unitずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。
