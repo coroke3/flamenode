@@ -45,8 +45,10 @@ const HEX_256 = /^[a-f0-9]{64}$/;
 const decode = new TextDecoder("utf-8", { fatal: true });
 
 export class SnapshotBuildError extends Error {
-  constructor(public readonly code: string, message: string) {
+  readonly code: string;
+  constructor(code: string, message: string) {
     super(message);
+    this.code = code;
     this.name = "SnapshotBuildError";
   }
 }
